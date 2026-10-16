@@ -18,6 +18,7 @@ type event =
   | Resolved
   | Summary_updated
   | Rule_created
+  | Rule_renewed
   | Rule_deleted
   | Grant_consumed
   | Gate_allowed
@@ -86,6 +87,17 @@ val record :
 val record_rule_created : base_path:string -> approval_rule -> receipt
 (** [Rule_created] row. Its actor is the rule's own [created_by]: the
     principal whose remembered approval made the rule. *)
+
+val record_rule_renewed :
+  base_path:string ->
+  ?renewed_by:string ->
+  source_approval_id:string ->
+  previous_expires_at:float option ->
+  approval_rule ->
+  receipt
+(** [Rule_renewed] row with the current approving actor and approval identity.
+    The rule retains its original creation metadata. Both expiry options are
+    recorded; [None] means permanent. *)
 
 val record_rule_deleted :
   base_path:string -> deleted_by:string -> approval_rule -> receipt

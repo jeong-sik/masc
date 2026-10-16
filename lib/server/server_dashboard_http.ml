@@ -413,13 +413,33 @@ let dashboard_gate_resolve_http_json ?workspace_config ~base_path ~created_by ~(
     let remember_rule =
       Safe_ops.json_bool_opt "remember_rule" args |> Option.value ~default:false
     in
-    let rule_expires_at = Safe_ops.json_float_opt "rule_expires_at" args in
+    let rule_expires_at =
+      if not remember_rule then Ok None
+      else
+        match Yojson.Safe.Util.member "rule_expires_at" args with
+        | `Null -> Ok None
+        | (`Int _ | `Float _) ->
+          (match Safe_ops.json_float_opt "rule_expires_at" args with
+           | Some value when Float.is_finite value -> Ok (Some value)
+           | Some _ | None ->
+             Error (Bad_request "rule_expires_at must be a finite number or null"))
+        | `Intlit raw ->
+          (match float_of_string_opt raw with
+           | Some value when Float.is_finite value -> Ok (Some value)
+           | Some _ | None ->
+             Error (Bad_request "rule_expires_at must be a finite number or null"))
+        | `Bool _ | `String _ | `Assoc _ | `List _ ->
+          Error (Bad_request "rule_expires_at must be a finite number or null")
+    in
     (* RFC-0305: a missing [decision] field must not default to approve — this
        resolves a pending HITL approval, so an omitted/malformed decision is a
        bad request, not a silent grant. Mirrors the [id]-required check above. *)
     (* Carry the canonical name alongside the decision so the success response
        echoes what was applied without re-matching [approval_decision] (whose
        [Edit] arm is never produced here). *)
+    match rule_expires_at with
+    | Error _ as error -> error
+    | Ok rule_expires_at ->
     (match approval_resolve_decision_of_json args with
      | Error _ as err -> err
      | Ok decision ->
@@ -446,6 +466,10 @@ let dashboard_gate_resolve_http_json ?workspace_config ~base_path ~created_by ~(
                   , match result.remembered_rule with
                     | Some rule -> `String rule.id
                     | None -> `Null )
+                ; ( "rule_expires_at"
+                  , match result.remembered_rule with
+                    | Some { expires_at = Some expires_at; _ } -> `Float expires_at
+                    | Some { expires_at = None; _ } | None -> `Null )
                 ; ( "audit_receipts"
                   , `List
                       (List.map

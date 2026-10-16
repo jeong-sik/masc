@@ -79,7 +79,7 @@ let outcome_word_of_tool_call = function
 let severity_of_approval_event (event : Keeper_approval.Audit.event)
     decision_kind =
   match event with
-  | Gate_allowed | Grant_consumed | Rule_created | Rule_deleted
+  | Gate_allowed | Grant_consumed | Rule_created | Rule_renewed | Rule_deleted
   | Auto_judge_operator_retry_started | Summary_updated ->
       "ok"
   | Pending | Gate_exact_rule_expired | Gate_grant_unavailable
@@ -192,6 +192,11 @@ let approval_event_timeline_event json =
             ( "approval_rule_created",
               rule_title,
               "persistent approval rule recorded",
+              None )
+        | Rule_renewed ->
+            ( "approval_rule_renewed",
+              rule_title,
+              "persistent approval rule expiry updated",
               None )
         | Rule_deleted ->
             ( "approval_rule_deleted",

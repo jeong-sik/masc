@@ -821,9 +821,10 @@ let write_pending_snapshot ~base_path json =
     output_string channel (Yojson.Safe.pretty_to_string json))
 ;;
 
-let delivery_json ~entry ~remember_rule =
+let delivery_json ~entry ~resolution_sequence ~remember_rule =
   `Assoc
     [ "entry", entry
+    ; "resolution_sequence", `Int resolution_sequence
     ; "decision", `Assoc [ "kind", `String "approve" ]
     ; "source", `String "human_operator"
     ; "remember_rule", `Bool remember_rule
@@ -855,8 +856,10 @@ let test_resolve_waits_for_domain_two_map_publication () =
          | `Assoc fields ->
            `Assoc
              (("pending", `List [])
-              :: ("deliveries", `List [ delivery_json ~entry ~remember_rule:false ])
-              :: (fields |> List.remove_assoc "pending" |> List.remove_assoc "deliveries"))
+              :: ("deliveries", `List [ delivery_json ~entry ~resolution_sequence:2 ~remember_rule:false ])
+              :: ("next_sequence", `Int 3)
+              :: (fields |> List.remove_assoc "pending" |> List.remove_assoc "deliveries"
+                  |> List.remove_assoc "next_sequence"))
          | _ -> Alcotest.fail "expected queue snapshot object"
        in
        write_pending_snapshot ~base_path replacement;
@@ -943,7 +946,7 @@ let test_install_serializes_snapshot_read_with_same_base_mutation () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-             [ "version", `Int 11
+             [ "version", `Int 12
             ; "generation", `Int 1
             ; "next_sequence", `Int 1
             ; "pending", `List []
@@ -1968,6 +1971,193 @@ let test_resolution_is_durable_and_origin_scoped () =
           | Tool_output.Invalid_normalized_artifact_ref { detail } ->
             Alcotest.fail detail);
        drop_resolution ~base_path ~keeper_name resolution)
+;;
+
+let test_expired_rule_reapproval_reaches_gate_and_http_readback () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-rule-renewal" in
+  AQ.For_testing.reset_runtime_state ();
+  Keeper_approval.Audit.For_testing.reset_store ();
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      Keeper_approval.Audit.For_testing.reset_store ();
+      cleanup_dir base_path)
+    (fun () ->
+       ignore (install_exn ~base_path);
+       ensure_keeper_exists ~base_path ~keeper_name;
+       let config = Masc.Workspace.default_config base_path in
+       (match Masc.Keeper_gate_mode.set config ~actor:"operator" Masc.Keeper_gate_mode.Manual with
+        | Ok _ -> ()
+        | Error reason -> Alcotest.fail reason);
+       let input = `Assoc [ "target", `String "renewed-document" ] in
+       let request : Gate.request =
+         { keeper_name; operation = "external-effect"; call_summary = None; input; base_path
+         ; sandbox_profile = None; causal_context = None; task_id = None
+         ; continuation_channel = None }
+       in
+       let deferred () =
+         match Gate.decide ~keeper_always_allow:false request with
+         | Gate.Deferred { approval_id; reason = Gate.Human_requested; _ } -> approval_id
+         | Gate.Deferred _ -> Alcotest.fail "Manual request used a different reason"
+         | Gate.Allow _ -> Alcotest.fail "expired or absent rule authorized the request"
+         | Gate.Unavailable reason -> Alcotest.fail (Gate.unavailable_reason_to_string reason)
+       in
+       let approve ~created_by ~id expires_at =
+         match Server_dashboard_http.dashboard_gate_resolve_http_json
+           ~base_path ~created_by
+           ~args:(`Assoc [ "id", `String id; "decision", `String "approve"
+                        ; "remember_rule", `Bool true; "rule_expires_at", `Float expires_at ]) ()
+         with
+         | Ok json -> json
+         | Error error ->
+           Alcotest.fail (Server_dashboard_http.approval_resolve_http_error_to_string error)
+       in
+       let first_id = deferred () in
+       let expired_at = Unix.gettimeofday () -. 60.0 in
+       let first = approve ~created_by:"original-author" ~id:first_id expired_at in
+       let open Yojson.Safe.Util in
+       let rule_id = first |> member "rule_id" |> to_string in
+       Alcotest.(check (float 0.0)) "creation echoes its requested expiry" expired_at
+         (first |> member "rule_expires_at" |> to_float);
+       (match AQ.consume_approved_resolution ~base_path ~id:first_id ~keeper_name
+                ~tool_name:"external-effect" ~input with
+        | Ok (Masc.Keeper_approval_queue_result.Consumption_committed _) -> ()
+        | Ok (Masc.Keeper_approval_queue_result.Consumption_already_committed
+             | Masc.Keeper_approval_queue_result.Consumption_not_matching) ->
+          Alcotest.fail "first approval did not consume its exact grant"
+        | Error error ->
+          Alcotest.fail (Masc.Keeper_approval_queue_result.grant_error_to_string error));
+       let renewed_id = deferred () in
+       Alcotest.(check bool) "expired rule produces a new approval" true
+         (not (String.equal first_id renewed_id));
+       (match Server_dashboard_http.dashboard_gate_resolve_http_json
+          ~base_path ~created_by:"renewing-operator"
+          ~args:(`Assoc [ "id", `String renewed_id; "decision", `String "approve"
+                       ; "remember_rule", `Bool true
+                       ; "rule_expires_at", `String "tomorrow" ]) () with
+        | Error (Server_dashboard_http.Bad_request _) -> ()
+        | Error _ | Ok _ -> Alcotest.fail "malformed expiry must not become permanent");
+       let renewed_until = Unix.gettimeofday () +. 600.0 in
+       let response = approve ~created_by:"renewing-operator" ~id:renewed_id renewed_until in
+       Alcotest.(check string) "HTTP keeps the rule identity" rule_id
+         (response |> member "rule_id" |> to_string);
+       Alcotest.(check (float 0.0)) "HTTP echoes committed expiry" renewed_until
+         (response |> member "rule_expires_at" |> to_float);
+       Alcotest.(check (list string)) "renewal has its own audit receipt"
+         [ "rule_renewed"; "resolved" ]
+         (response |> member "audit_receipts" |> to_list
+          |> List.map (fun receipt -> receipt |> member "event" |> to_string));
+       (match Rules.list_rules ~base_path () with
+        | Ok [ rule ] ->
+          Alcotest.(check (option (float 0.0))) "persisted renewed expiry"
+            (Some renewed_until) rule.expires_at;
+          Alcotest.(check (option string)) "creation author remains stable"
+            (Some "original-author") rule.created_by
+        | Ok _ -> Alcotest.fail "renewal duplicated or lost the exact rule"
+        | Error error -> Alcotest.fail (Rule_types.rule_store_error_to_string error));
+       let audit =
+         match Keeper_approval.Audit.read_recent ~base_path ~n:30 () with
+         | Ok rows -> rows
+         | Error error -> Alcotest.fail (Keeper_approval.Audit.read_error_to_string error)
+       in
+       let renewal = List.find (fun row -> row |> member "event" = `String "rule_renewed") audit in
+       Alcotest.(check string) "renewal names the current actor" "renewing-operator"
+         (renewal |> member "actor" |> to_string);
+       Alcotest.(check string) "renewal names the current approval" renewed_id
+         (renewal |> member "source_approval_id" |> to_string);
+       Alcotest.(check (float 0.0)) "renewal records the replaced expiry" expired_at
+         (renewal |> member "previous_expires_at" |> to_float);
+       Alcotest.(check (float 0.0)) "renewal records the committed expiry" renewed_until
+         (renewal |> member "expires_at" |> to_float);
+       match Gate.decide ~keeper_always_allow:false request with
+       | Gate.Allow { source = Gate.Exact_always_rule applied_id; _ } ->
+         Alcotest.(check string) "Gate honors the renewed exact rule" rule_id applied_id
+       | Gate.Allow _ -> Alcotest.fail "Gate used a broader authorization"
+       | Gate.Deferred _ -> Alcotest.fail "renewed exact rule still deferred"
+       | Gate.Unavailable reason -> Alcotest.fail (Gate.unavailable_reason_to_string reason))
+;;
+
+let test_retained_rule_deliveries_are_idempotent_after_restart_and_delete () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-rule-replay" in
+  AQ.For_testing.reset_runtime_state ();
+  Keeper_approval.Audit.For_testing.reset_store ();
+  Fun.protect ~finally:(fun () ->
+    AQ.For_testing.reset_runtime_state ();
+    Keeper_approval.Audit.For_testing.reset_store ();
+    cleanup_dir base_path) (fun () ->
+    ignore (install_exn ~base_path);
+    let input = `Assoc [ "target", `String "retained-rule-deliveries" ] in
+    let submit_task task_id = submit_with_context ~base_path ~keeper_name ~input ~task_id () in
+    let a = submit_task "older-A" in
+    let b = submit_task "newer-B" in
+    let c = submit_task "retry-C" in
+    let d = submit_task "retry-D" in
+    let e = submit_task "delayed-first-E" in
+    let f = submit_task "later-committed-F" in
+    let until = Unix.gettimeofday () +. 600.0 in
+    let resolve_result id expires_at =
+      Server_dashboard_http.dashboard_gate_resolve_http_json
+        ~base_path ~created_by:"same-operator"
+        ~args:(`Assoc [ "id", `String id; "decision", `String "approve"
+                     ; "remember_rule", `Bool true; "rule_expires_at", `Float expires_at ]) ()
+    in
+    let resolve id expires_at = match resolve_result id expires_at with
+      | Ok json -> json
+      | Error error -> Alcotest.fail (Server_dashboard_http.approval_resolve_http_error_to_string error)
+    in
+    let readback expected json =
+      Alcotest.(check (float 0.0)) "HTTP returns the current committed expiry" expected
+        Yojson.Safe.Util.(json |> member "rule_expires_at" |> to_float)
+    in
+    readback (until +. 100.0) (resolve b (until +. 100.0));
+    (* A is older in submission order but this is its first real resolution. *)
+    readback until (resolve a until);
+    readback (until +. 200.0) (resolve c (until +. 200.0));
+    let latest = resolve d (until +. 300.0) in
+    readback (until +. 300.0) latest;
+    readback (until +. 300.0) (resolve c (until +. 200.0));
+    let rules_path = Rules.rules_path ~base_path () in
+    let saved_rules_path = rules_path ^ ".held-by-test" in
+    Sys.rename rules_path saved_rules_path;
+    Unix.mkdir rules_path 0o700;
+    (* E's decision commits, but its first rule effect cannot reach the store. *)
+    (match resolve_result e (until +. 400.0) with
+     | Error (Server_dashboard_http.Unavailable (AQ.Persistence_failed _)) -> ()
+     | Error error -> Alcotest.fail (Server_dashboard_http.approval_resolve_http_error_to_string error)
+     | Ok _ -> Alcotest.fail "unavailable rule store unexpectedly accepted E");
+    Unix.rmdir rules_path;
+    Sys.rename saved_rules_path rules_path;
+    readback (until +. 500.0) (resolve f (until +. 500.0));
+    readback (until +. 500.0) (resolve e (until +. 400.0));
+    let rule_id = Yojson.Safe.Util.(latest |> member "rule_id" |> to_string) in
+    AQ.For_testing.reset_runtime_state ();
+    ignore (install_exn ~base_path);
+    (match Rules.list_rules ~base_path () with
+     | Ok [ rule ] -> Alcotest.(check (option (float 0.0)))
+         "boot delivery replay preserves latest expiry" (Some (until +. 500.0)) rule.expires_at
+     | Ok _ -> Alcotest.fail "boot replay duplicated or lost the rule"
+     | Error error -> Alcotest.fail (Rule_types.rule_store_error_to_string error));
+    (* Exercise retained deliveries in reverse order after reopening their owner. *)
+    readback (until +. 500.0) (resolve d (until +. 300.0));
+    readback (until +. 500.0) (resolve c (until +. 200.0));
+    (match Server_dashboard_http.dashboard_gate_rule_delete_http_json
+      ~base_path ~deleted_by:"operator-deleting-rule"
+      ~args:(`Assoc [ "id", `String rule_id ]) with
+     | Ok _ -> ()
+     | Error error -> Alcotest.fail error);
+    let replay = resolve c (until +. 200.0) in
+    Alcotest.(check yojson) "replayed deleted rule is not reported active" `Null
+      Yojson.Safe.Util.(replay |> member "rule_id");
+    Alcotest.(check yojson) "replayed deleted rule has no expiry claim" `Null
+      Yojson.Safe.Util.(replay |> member "rule_expires_at");
+    AQ.For_testing.reset_runtime_state ();
+    ignore (install_exn ~base_path);
+    match Rules.list_rules ~base_path () with
+    | Ok [] -> ()
+    | Ok _ -> Alcotest.fail "boot replay resurrected deleted permission"
+    | Error error -> Alcotest.fail (Rule_types.rule_store_error_to_string error))
 ;;
 
 let test_remembered_rule_carries_requested_expiry () =
@@ -4458,7 +4648,7 @@ let test_malformed_snapshot_fails_install_and_is_observed () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-            [ "version", `Int 11
+            [ "version", `Int 12
             ; "generation", `Int 1
             ; "next_sequence", `Int 1
             ; "pending", `String "malformed-pending-array"
@@ -4495,7 +4685,7 @@ let test_malformed_snapshot_fails_install_and_is_observed () =
          (Yojson.Safe.equal
             persisted
             (`Assoc
-               [ "version", `Int 11
+               [ "version", `Int 12
                ; "generation", `Int 1
                ; "next_sequence", `Int 1
                ; "pending", `String "malformed-pending-array"
@@ -4604,7 +4794,7 @@ let test_unsupported_version_snapshot_requires_runtime_reset () =
         | Error
             (Masc.Keeper_approval_queue_result.Install_storage_failed
               { reason =
-                  "gate_pending.version 8 is unsupported (current 11); reset \
+                  "gate_pending.version 8 is unsupported (current 12); reset \
                    runtime state before restarting MASC"
               ; _
               }) ->
@@ -4713,7 +4903,7 @@ let test_v10_store_requires_runtime_reset_before_rows_are_read () =
        | Error
            (Masc.Keeper_approval_queue_result.Install_storage_failed
              { reason =
-                 "gate_pending.version 10 is unsupported (current 11); reset \
+                 "gate_pending.version 10 is unsupported (current 12); reset \
                   runtime state before restarting MASC"
              ; _
              }) ->
@@ -5156,14 +5346,15 @@ let test_persisted_delivery_replays_before_origin_wake () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-             [ "version", `Int 11
+             [ "version", `Int 12
             ; "generation", `Int 1
-            ; "next_sequence", `Int 2
+            ; "next_sequence", `Int 3
             ; "pending", `List []
             ; ( "deliveries"
               , `List
                   [ `Assoc
                       [ "entry", pending_entry
+                      ; "resolution_sequence", `Int 2
                       ; "decision", `Assoc [ "kind", `String "approve" ]
                       ; "source", `String "human_operator"
                       ; "remember_rule", `Bool false
@@ -5478,20 +5669,23 @@ let test_one_delivery_replay_failure_does_not_stop_others () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-             [ "version", `Int 11
+             [ "version", `Int 12
             ; "generation", `Int 1
-            ; "next_sequence", `Int 4
+            ; "next_sequence", `Int 7
             ; "pending", `List []
             ; ( "deliveries"
               , `List
                   [ delivery_json
                       ~entry:(entry_at 1 first_id)
+                      ~resolution_sequence:4
                       ~remember_rule:true
                   ; delivery_json
                       ~entry:(entry_at 2 second_id)
+                      ~resolution_sequence:5
                       ~remember_rule:true
                   ; delivery_json
                       ~entry:(entry_at 3 successful_id)
+                      ~resolution_sequence:6
                       ~remember_rule:false
                   ] )
             ]);
@@ -6744,6 +6938,14 @@ let () =
             "resolved audit event carries judge evidence"
             `Quick
             test_resolved_audit_event_carries_judge_evidence
+        ; Alcotest.test_case
+            "expired rule reapproval reaches Gate and HTTP readback"
+            `Quick
+            test_expired_rule_reapproval_reaches_gate_and_http_readback
+        ; Alcotest.test_case
+            "retained rule delivery retries survive restart and deletion"
+            `Quick
+            test_retained_rule_deliveries_are_idempotent_after_restart_and_delete
         ; Alcotest.test_case
             "remembered rule carries requested expiry"
             `Quick

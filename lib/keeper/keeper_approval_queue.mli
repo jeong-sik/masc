@@ -276,6 +276,18 @@ val resolve_error_to_string : resolve_error -> string
     [Decision.Approve], then wake only the Keeper captured by the pending entry.
     [rule_expires_at] is an absolute Unix expiry applied to the remembered
     rule; it is ignored unless [remember_rule] is [true].
+    Omitting it requests a permanent rule, including when replacing an
+    existing finite expiry. Reapproval applies the requested option exactly
+    while preserving the rule's identity and original creation metadata.
+    Each approval's exact application is persisted atomically with the rule.
+    An already-applied approval only reads the current rule, so retry or boot
+    replay cannot overwrite a later renewal. If that rule was deleted, the
+    retry returns no remembered rule and cannot recreate permission.
+    Resolution order is allocated by the durable queue commit, separately
+    from request order. A delayed first application superseded by a later
+    committed resolution only reads the current rule and records no renewal.
+    Pending snapshots require format 12 and rules require the versioned
+    application store. Prior formats are refused without rewriting their data.
 
     [base_path] is the authenticated caller workspace. The pending or
     in-progress delivery entry must belong to it exactly before any resolution

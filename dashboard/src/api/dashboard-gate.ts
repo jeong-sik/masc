@@ -585,6 +585,7 @@ export interface ResolveGateApprovalResponse {
   id: string
   decision: 'approve' | 'reject'
   rule_id: string | null
+  rule_expires_at: number | null
   audit_receipts: KeeperApprovalAuditReceipt[]
 }
 
@@ -614,6 +615,7 @@ function decodeResolveGateApprovalResponse(
     'id',
     'decision',
     'rule_id',
+    'rule_expires_at',
     'audit_receipts',
   ])) return gateMutationProtocolDrift(path, 'fields must be exact')
   if (raw.ok !== true || raw.id !== requestedId || raw.decision !== requestedDecision) {
@@ -624,6 +626,14 @@ function decodeResolveGateApprovalResponse(
     : typeof raw.rule_id === 'string' && raw.rule_id.trim() !== ''
       ? raw.rule_id
       : gateMutationProtocolDrift(path, 'rule_id must be null or non-blank')
+  const ruleExpiresAt = raw.rule_expires_at === null
+    ? null
+    : typeof raw.rule_expires_at === 'number' && Number.isFinite(raw.rule_expires_at)
+      ? raw.rule_expires_at
+      : gateMutationProtocolDrift(path, 'rule_expires_at must be null or finite')
+  if (ruleId === null && ruleExpiresAt !== null) {
+    return gateMutationProtocolDrift(path, 'expiry requires a remembered rule')
+  }
   if (!Array.isArray(raw.audit_receipts)) {
     return gateMutationProtocolDrift(path, 'audit_receipts must be an array')
   }
@@ -634,11 +644,15 @@ function decodeResolveGateApprovalResponse(
   const actualEvents = (auditReceipts as KeeperApprovalAuditReceipt[])
     .map(receipt => receipt.event)
   const isResolutionOnly = actualEvents.length === 1 && actualEvents[0] === 'resolved'
-  const isRuleCreationAndResolution = ruleId !== null
+  const isRedelivery = actualEvents.length === 0
+  const isRedeliveryRuleChange = ruleId !== null
+    && actualEvents.length === 1
+    && (actualEvents[0] === 'rule_created' || actualEvents[0] === 'rule_renewed')
+  const isRuleChangeAndResolution = ruleId !== null
     && actualEvents.length === 2
-    && actualEvents[0] === 'rule_created'
+    && (actualEvents[0] === 'rule_created' || actualEvents[0] === 'rule_renewed')
     && actualEvents[1] === 'resolved'
-  if (!isResolutionOnly && !isRuleCreationAndResolution) {
+  if (!isResolutionOnly && !isRuleChangeAndResolution && !isRedelivery && !isRedeliveryRuleChange) {
     return gateMutationProtocolDrift(path, 'audit_receipts do not match the committed mutation')
   }
   return {
@@ -646,6 +660,7 @@ function decodeResolveGateApprovalResponse(
     id: requestedId,
     decision: requestedDecision,
     rule_id: ruleId,
+    rule_expires_at: ruleExpiresAt,
     audit_receipts: auditReceipts as KeeperApprovalAuditReceipt[],
   }
 }

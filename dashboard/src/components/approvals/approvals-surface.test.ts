@@ -161,6 +161,7 @@ async function loadSurface(
       id: 'appr-1',
       decision: 'approve',
       rule_id: null,
+        rule_expires_at: null,
       audit_receipts: [{ event: 'resolved', recorded: true }],
     })
   const retryGateAutoJudge = vi
@@ -1336,6 +1337,7 @@ describe('ApprovalsSurface', () => {
       id: 'appr-audit',
       decision: 'approve',
       rule_id: null,
+        rule_expires_at: null,
       audit_receipts: [{
         event: 'resolved',
         recorded: false,

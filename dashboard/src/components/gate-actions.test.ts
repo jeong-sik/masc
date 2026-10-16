@@ -71,6 +71,7 @@ describe('committed Gate mutation audit degradation', () => {
       id: 'appr-audit',
       decision: 'approve',
       rule_id: null,
+        rule_expires_at: null,
       audit_receipts: [{
         event: 'resolved',
         recorded: false,

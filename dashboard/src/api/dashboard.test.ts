@@ -3034,6 +3034,88 @@ describe('fetchDashboardGate', () => {
 })
 
 describe('Gate mutation audit receipts', () => {
+  it.each([
+    [[], 'stable-rule', 3000],
+    [[], null, null],
+    [[{ event: 'rule_created', recorded: true }], 'stable-rule', 2000],
+    [[{ event: 'rule_renewed', recorded: true }], 'stable-rule', 3000],
+  ] as const)('decodes committed redelivery receipts %j', async (receipts, ruleId, expiry) => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        ok: true, id: 'appr-retry', decision: 'approve',
+        rule_id: ruleId, rule_expires_at: expiry, audit_receipts: receipts,
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    ))
+    await expect(resolveGateApproval('appr-retry', {
+      decision: 'approve', rememberRule: true,
+    })).resolves.toMatchObject({ rule_id: ruleId, rule_expires_at: expiry, audit_receipts: receipts })
+  })
+
+  it.each([
+    ['rule_created', 2000],
+    ['rule_renewed', 3000],
+    ['rule_renewed', null],
+  ] as const)('decodes %s with committed expiry %s', async (event, expiry) => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        ok: true,
+        id: 'appr-renewal',
+        decision: 'approve',
+        rule_id: 'stable-rule',
+        rule_expires_at: expiry,
+        audit_receipts: [
+          { event, recorded: true },
+          { event: 'resolved', recorded: true },
+        ],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    ))
+    await expect(resolveGateApproval('appr-renewal', {
+      decision: 'approve', rememberRule: true,
+    })).resolves.toMatchObject({
+      rule_id: 'stable-rule', rule_expires_at: expiry,
+      audit_receipts: [{ event }, { event: 'resolved' }],
+    })
+  })
+
+  it.each([undefined, '3000', {}, []])('rejects malformed expiry readback %s', async expiry => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        ok: true, id: 'appr-renewal', decision: 'approve',
+        rule_id: 'stable-rule', rule_expires_at: expiry,
+        audit_receipts: [{ event: 'resolved', recorded: true }],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    ))
+    await expect(resolveGateApproval('appr-renewal', {
+      decision: 'approve', rememberRule: true,
+    })).rejects.toMatchObject({ errorCode: 'protocol_drift' })
+  })
+
+  it('rejects a finite expiry with no remembered rule', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        ok: true, id: 'appr-renewal', decision: 'approve',
+        rule_id: null, rule_expires_at: 3000,
+        audit_receipts: [{ event: 'resolved', recorded: true }],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    ))
+    await expect(resolveGateApproval('appr-renewal', {
+      decision: 'approve', rememberRule: true,
+    })).rejects.toMatchObject({ errorCode: 'protocol_drift' })
+  })
+
+  it('rejects a nonfinite numeric expiry readback', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response('{' +
+        '"ok":true,"id":"appr-renewal","decision":"approve",' +
+        '"rule_id":"stable-rule","rule_expires_at":1e999,' +
+        '"audit_receipts":[{"event":"resolved","recorded":true}]}',
+      { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    ))
+    await expect(resolveGateApproval('appr-renewal', {
+      decision: 'approve', rememberRule: true,
+    })).rejects.toMatchObject({ errorCode: 'protocol_drift' })
+  })
+
   it('keeps a committed resolution successful while decoding failed audit writes', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
@@ -3041,6 +3123,7 @@ describe('Gate mutation audit receipts', () => {
         id: 'appr-audit',
         decision: 'approve',
         rule_id: null,
+        rule_expires_at: null,
         audit_receipts: [{
           event: 'resolved',
           recorded: false,
@@ -3069,6 +3152,7 @@ describe('Gate mutation audit receipts', () => {
         id: 'appr-audit',
         decision: 'approve',
         rule_id: null,
+        rule_expires_at: null,
       }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -3114,6 +3198,7 @@ describe('Gate mutation audit receipts', () => {
         id: 'appr-audit',
         decision: 'approve',
         rule_id: null,
+        rule_expires_at: null,
         audit_receipts: [{ event: 'pending', recorded: true }],
       }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
     ))
@@ -3144,6 +3229,7 @@ describe('Gate mutation audit receipts', () => {
         id: 'appr-cleanup',
         decision: 'approve',
         rule_id: null,
+        rule_expires_at: null,
         audit_receipts: [{
           event: 'resolved',
           recorded: true,

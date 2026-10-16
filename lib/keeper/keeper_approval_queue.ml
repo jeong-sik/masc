@@ -611,14 +611,19 @@ let read_pending_log_unlocked
     (match applied with
      | Error reason -> Error { path; reason }
      | Ok (log_pending, log_deliveries, log_next_sequence, rows_applied) ->
-       Ok
-         { log_pending
-         ; log_deliveries
-         ; log_next_sequence
-         ; log_end = snapshot.Fs_compat.cursor
-         ; rows_applied
-         ; partial_tail
-         })
+       (match validate_snapshot_sequences ~next_sequence:log_next_sequence
+          (List.map snd (SMap.bindings log_pending))
+          (List.map snd (SMap.bindings log_deliveries)) with
+        | Error reason -> Error { path; reason }
+        | Ok () ->
+          Ok
+            { log_pending
+            ; log_deliveries
+            ; log_next_sequence
+            ; log_end = snapshot.Fs_compat.cursor
+            ; rows_applied
+            ; partial_tail
+            }))
 ;;
 
 (* What a restart would see: the snapshot plus the log rows after it. No
@@ -2194,6 +2199,17 @@ let journal_resolution ~base_path ~id ~decision ~source ~remember_rule ~rule_exp
     | Error _ as error -> error
     | Ok (Journaled_resolution delivery) -> Ok (Previously_journaled delivery)
     | Ok (Pending_resolution entry) ->
+      let ( let* ) = Result.bind in
+      let* resolution_sequence =
+        match next_sequence_lifecycle ~base_path with
+        | Ready sequence when sequence < max_int -> Ok sequence
+        | Ready _ -> Error (Persistence_failed { approval_id = id; storage_error =
+            { path = pending_store_path ~base_path
+            ; reason = "approval sequence exhausted its integer representation" } })
+        | Unavailable storage_error -> Error (Persistence_failed { approval_id = id; storage_error })
+        | Uninstalled -> Error (Persistence_failed { approval_id = id; storage_error =
+            { path = pending_store_path ~base_path; reason = "approval store is not installed" } })
+      in
       let remember_rule =
         match decision with
         | Decision.Approve -> remember_rule
@@ -2202,6 +2218,7 @@ let journal_resolution ~base_path ~id ~decision ~source ~remember_rule ~rule_exp
       let rule_expires_at = if remember_rule then rule_expires_at else None in
       let delivery =
         { entry
+        ; resolution_sequence
         ; decision
         ; source
         ; remember_rule
@@ -2214,14 +2231,17 @@ let journal_resolution ~base_path ~id ~decision ~source ~remember_rule ~rule_exp
       let updated_pending = SMap.remove id (Atomic.get pending) in
       let updated_deliveries = SMap.add id delivery (Atomic.get deliveries) in
       (match
-         persist_snapshot_unlocked
+         persist_snapshot_with_sequence_unlocked
            ~base_path
+           ~next_sequence:(resolution_sequence + 1)
            ~pending_map:updated_pending
            ~delivery_map:updated_deliveries
        with
        | Error storage_error ->
          Error (Persistence_failed { approval_id = id; storage_error })
        | Ok () ->
+         Atomic.set next_sequences
+           (SMap.add base_path (resolution_sequence + 1) (Atomic.get next_sequences));
          Atomic.set pending updated_pending;
          Atomic.set deliveries updated_deliveries;
          Ok (Newly_journaled delivery)))
@@ -2252,7 +2272,8 @@ let approval_decision_equal left right =
     false
 ;;
 
-let remember_rule_for_entry ~base_path ?created_by ?rule_expires_at (entry : pending_approval) =
+let remember_rule_for_entry ~base_path ~resolution_sequence ?created_by ?rule_expires_at
+      (entry : pending_approval) =
   try
     match
       Keeper_approval_queue_rules.upsert_rule
@@ -2262,17 +2283,27 @@ let remember_rule_for_entry ~base_path ?created_by ?rule_expires_at (entry : pen
         ~input:entry.input
         ?created_by
         ~source_approval_id:entry.id
-        ?expires_at:rule_expires_at
+        ~resolution_sequence
+        ~expires_at:rule_expires_at
         ()
     with
-    | Ok (rule, created) ->
+    | Ok (Keeper_approval_queue_rules.Already_applied rule
+         | Keeper_approval_queue_rules.Superseded rule) -> Ok (rule, [])
+    | Ok (Keeper_approval_queue_rules.Applied { rule; disposition }) ->
       let audit_receipts =
-        if created
-        then
+        match disposition with
+        | Keeper_approval_queue_rules.Created ->
           [ Keeper_approval.Audit.record_rule_created ~base_path rule ]
-        else []
+        | Keeper_approval_queue_rules.Existing -> []
+        | Keeper_approval_queue_rules.Renewed { previous_expires_at } ->
+          [ Keeper_approval.Audit.record_rule_renewed
+              ~base_path
+              ?renewed_by:created_by
+              ~source_approval_id:entry.id
+              ~previous_expires_at
+              rule ]
       in
-      Ok (rule, audit_receipts)
+      Ok (Some rule, audit_receipts)
     | Error reason -> Error reason
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -2302,11 +2333,12 @@ let remember_rule_for_delivery delivery =
     (match
        remember_rule_for_entry
          ~base_path:delivery.entry.audit_base_path
+         ~resolution_sequence:delivery.resolution_sequence
          ?created_by:delivery.created_by
          ?rule_expires_at:delivery.rule_expires_at
          delivery.entry
      with
-     | Ok (rule, audit_receipts) -> Ok (Some rule, audit_receipts)
+     | Ok (rule, audit_receipts) -> Ok (rule, audit_receipts)
      | Error rule_error ->
        Error
          { path = rule_error.path

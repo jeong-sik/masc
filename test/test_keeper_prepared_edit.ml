@@ -740,6 +740,27 @@ let test_untransferred_preparation_releases_without_effect () =
   check string "ordinary later Edit remains usable" "after" (read path)
 ;;
 
+(* Open descriptors of this process, listed from /dev/fd. The listing holds one
+   descriptor for the directory it reads, in every count alike. *)
+let open_descriptor_count () = Array.length (Sys.readdir "/dev/fd")
+
+let test_release_closes_the_pinned_directories () =
+  fixture @@ fun _env sw config meta _recovery root ->
+  let path = Filename.concat root "pinned/file" in
+  write path "before";
+  let input = args path "before" "after" in
+  (* The first preparation settles anything created lazily, so the counts
+     below compare like with like. *)
+  FS.release_prepared_edit (prepare sw config meta input);
+  let before = open_descriptor_count () in
+  let prepared = prepare sw config meta input in
+  let pinned = open_descriptor_count () in
+  FS.release_prepared_edit prepared;
+  let after = open_descriptor_count () in
+  check bool "a preparation pins directory descriptors" true (pinned > before);
+  check int "release closes every pinned descriptor" before after
+;;
+
 let () = run "prepared actual Edit resources"
   ["actual filesystem and SDK", [
     test_case "disjoint actual Edits overlap" `Quick test_disjoint_actual_edits_overlap;
@@ -749,7 +770,8 @@ let () = run "prepared actual Edit resources"
     test_case "changed owner input or parent cannot write" `Quick test_parent_swap_and_input_or_owner_change_do_not_write;
     test_case "Manual Gate retains the same containment and playground authority" `Quick test_preparation_preserves_containment_under_manual_gate;
     test_case "caller cancellation releases prepared Edit" `Quick test_cancelled_prepared_edit_releases_for_a_later_call;
-    test_case "untransferred preparation releases without an effect" `Quick test_untransferred_preparation_releases_without_effect];
+    test_case "untransferred preparation releases without an effect" `Quick test_untransferred_preparation_releases_without_effect;
+    test_case "release closes the pinned directories" `Quick test_release_closes_the_pinned_directories];
     "actual public bundle and SDK", [
       test_case "hard-link entries retain backend mutation order" `Quick
         (test_object_aliases_retain_backend_mutation_order ~spelling_alias:false);

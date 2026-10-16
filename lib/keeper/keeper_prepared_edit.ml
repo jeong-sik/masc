@@ -102,19 +102,63 @@ let stat_directory path =
   else Error "prepared Edit parent is no longer a directory"
 ;;
 
+(* A directory opened with [Eio.Path.open_dir] is closed when its switch ends.
+   eio_posix gives it no [Close] handler, so [Eio.Resource.close] raises
+   "Operation not supported" there (macOS); only eio_linux accepts it. A
+   preparation has to give its directories back before it answers [Ok None] or
+   [Error], and when the SDK drops one it never ran, long before the caller's
+   switch ends. It therefore opens them under a switch of its own, which a
+   daemon fiber of the caller's switch keeps alive until [release] ends it. *)
+module Held_switch : sig
+  type t
+
+  val create : sw:Eio.Switch.t -> t
+  val switch : t -> Eio.Switch.t
+  val release : t -> unit
+end = struct
+  type t =
+    { inner : Eio.Switch.t
+    ; finish : unit Eio.Promise.u
+    ; closed : unit Eio.Promise.t
+    }
+
+  let create ~sw =
+    let ready, resolve_ready = Eio.Promise.create () in
+    let finish_signal, finish = Eio.Promise.create () in
+    let closed, resolve_closed = Eio.Promise.create () in
+    Eio.Fiber.fork_daemon ~sw (fun () ->
+      Eio.Switch.run (fun inner ->
+        (* Registered before any directory is opened, so it runs after their
+           release hooks: [closed] means every descriptor is closed. *)
+        Eio.Switch.on_release inner (fun () -> Eio.Promise.resolve resolve_closed ());
+        Eio.Promise.resolve resolve_ready inner;
+        Eio.Promise.await finish_signal);
+      `Stop_daemon);
+    { inner = Eio.Promise.await ready; finish; closed }
+  ;;
+
+  let switch held = held.inner
+
+  (* Callers pass the single-use guard of the preparation, so [finish] is
+     resolved at most once. *)
+  let release held =
+    Eio.Promise.resolve held.finish ();
+    Eio.Promise.await held.closed
+  ;;
+end
+
 let prepare ~sw ~config ~meta ~args ~confined =
   match Fs_compat.get_fs_opt (),
         split_leaf (Keeper_alerting_path.confined_relative_components confined),
         split_leaf (Keeper_alerting_path.confined_endpoint_components confined) with
   | None, _, _ | _, None, _ | _, _, None -> Ok None
   | Some fs, Some (parent_components, leaf), Some (source_components, source_leaf) ->
-    let opened = ref [] in
+    let held = Held_switch.create ~sw in
     let released = Atomic.make false in
     let release_partial () = Eio.Cancel.protect (fun () ->
-      if not (Atomic.exchange released true) then List.iter (fun close -> close ()) !opened) in
+      if not (Atomic.exchange released true) then Held_switch.release held) in
     let open_dir path =
-      let directory = Eio.Path.open_dir ~sw path in
-      opened := (fun () -> Eio.Resource.close (fst directory)) :: !opened;
+      let directory = Eio.Path.open_dir ~sw:(Held_switch.switch held) path in
       (directory :> Eio.Fs.dir_ty Eio.Path.t)
     in
     let rec descend parent = function

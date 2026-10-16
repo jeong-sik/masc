@@ -231,7 +231,6 @@ let schema_cfg ~kind ~base_url =
     ~max_tokens:1024
     ~temperature:0.7
     ~response_format:(Types.JsonSchema output_schema_fixture)
-    ~supports_structured_output_override:true
     ~keep_alive:"-1"
     ()
 ;;

@@ -176,8 +176,6 @@ let runtime_request_config_json (rt : Runtime_instance.t) =
     ; "disable_parallel_tool_use", `Bool cfg.disable_parallel_tool_use
     ; "response_format", response_format_json cfg.response_format
     ; "cache_system_prompt", `Bool cfg.cache_system_prompt
-    ; ( "supports_structured_output_override"
-      , Json_util.bool_opt_to_json cfg.supports_structured_output_override )
     ; "has_model_capabilities_override", `Bool (Option.is_some cfg.model_capabilities_override)
     ; "keep_alive", Json_util.string_opt_to_json cfg.keep_alive
     ; "internal_model_rotation_count", Json_util.int_opt_to_json cfg.internal_model_rotation_count

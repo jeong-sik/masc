@@ -829,7 +829,6 @@ let load_resolver_snapshot
              ?max_context:capabilities.max_context_tokens
              ?enable_thinking:target.enable_thinking
              ?reasoning_effort:target.reasoning_effort
-             ~supports_structured_output_override:capabilities.supports_structured_output
              ~model_capabilities_override:capabilities
              ~reasoning_uncontrolled
              ?connect_timeout_s:target.connect_timeout_s

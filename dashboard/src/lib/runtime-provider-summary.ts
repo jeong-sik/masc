@@ -144,9 +144,6 @@ export function runtimeCatalogRequestConfig(item: DashboardRuntimeProviderSnapsh
     format ? `format:${format}` : null,
     request.has_output_schema ? 'output-schema' : null,
     request.cache_system_prompt ? 'cache-system' : null,
-    typeof request.supports_structured_output_override === 'boolean'
-      ? `schema-override:${request.supports_structured_output_override ? 'on' : 'off'}`
-      : null,
     request.has_model_capabilities_override ? 'cap-override' : null,
     typeof request.seed === 'number' ? `seed:${request.seed}` : null,
     typeof request.internal_model_rotation_count === 'number'

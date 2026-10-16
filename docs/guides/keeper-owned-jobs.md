@@ -19,9 +19,11 @@ turn and tool invocation when that context is available. Use that exact handle:
 Pass it to `keeper_job_status` to reconcile the saved backend or to
 `keeper_job_cancel` to persist a cancellation request. Cancellation and a
 confirmed exit are separate facts. Available terminal logs are published as
-durable artifact references in stdout, stderr order. Unavailable output remains
-explicit and can be collected later without running the program again. The
-backend spools both actual `docker logs` pipes and requires authoritative EOF
+durable artifact references in stdout, stderr order. A temporary log-collection
+failure can be retried under the same handle without running the program again.
+Confirmed loss of the original backend before output collection records a settled
+result with explicitly unavailable output. The backend spools both actual
+`docker logs` pipes and requires authoritative EOF
 before publishing their complete files. Bounded process previews never become
 complete output. These artifacts preserve the bytes delivered by the backend;
 Docker's configured log retention determines which program bytes remain
@@ -65,7 +67,8 @@ outcome. A stored projection without a phase reconciliation reports
 |---|---|
 | `confirmed` | This action settled or retained the canonical phase. Check `result_ready` for the result. |
 | `held` / `backend_absent` | The original backend is absent and the launch remains unresolved. Inspect the same handle or explicitly cancel it. |
-| `held` / `backend_unconfirmed`, `backend_mismatch`, `backend_error` | The backend or its authority could not confirm this action's phase. The original intent remains held. |
+| `held` / `backend_unconfirmed`, `backend_error` | Read `detail`. While `result_ready` is false, keep dependent work waiting; after the reported backend problem is resolved, reconcile the same handle with `keeper_job_status`. |
+| `held` / `backend_mismatch` | The observation differs from the original phase or handle. Inspect `detail` and resolve the mismatch before reconciling this same job again. Preserve its original intent. |
 | `held` / `cancelled_job_orphan` | A later resource was observed after cancellation. The original cancellation result remains settled. |
 
 A held job without a settled result reports `status = "unconfirmed"`, including
@@ -134,9 +137,14 @@ restart, installed runtime or whole-task preparation speedup evidence.
 
 `keeper_job_result` reads the same job's owner journal without contacting the
 backend. It is read-only and permits concurrent admission. It returns Deferred
-until a confirmed exit has both complete stdout/stderr artifacts, or until a
-before-start cancellation is committed. A nonzero program exit remains an
-observed result with its exact exit code; consumers decide how to handle it.
+until a settled result is committed: a confirmed exit with complete or explicitly
+unavailable outputs, a committed before-start or unconfirmed-launch cancellation,
+or confirmed output loss after launch. Replies carry `result_ready` and
+`reconciliation` from stored evidence; this read does not refresh the backend.
+Use `keeper_job_status` on the same handle when a backend check is needed.
+Readiness alone promises neither success nor available output. A nonzero program
+exit remains an observed result with its exact exit code; consumers decide how
+to handle it.
 An unavailable or corrupt owner journal is a refusal, not a pending result.
 
 Use this result read as a leaf of a prepared async Composition. Its dependent

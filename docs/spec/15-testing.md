@@ -206,7 +206,18 @@ CI 테스트 실행기. 다음 기능을 제공한다:
 | Heartbeat logging | `CI_TEST_HEARTBEAT_SEC` (기본 30초) 간격으로 진행 상태 출력. "silent hang" 방지. |
 | Diagnostics dump | 실패 시 프로세스 스냅샷, 로그 파일 경로, 빌드 디렉토리 정보 출력. |
 | Disk observation | 사용 가능 공간이 임계값 아래로 내려가면 상태와 진단을 기록하되 실행을 중단하지 않는다. |
-| Single attempt | 명령을 정확히 한 번 실행하고 원래 종료 코드를 보존한다. 실행 경계는 CI job이 소유한다. |
+| Single attempt | 명령을 정확히 한 번 실행한다. 명령의 실패 코드, timeout 124, 취소 130/143을 보존하며 성공 뒤 정리 확인이 불가능하면 125를 반환한다. |
+| Owned session | 루트 자식을 회수하기 전에 세션 정리를 마친다. Dune의 별도 action 그룹은 Linux pidfd 또는 Darwin audit token으로 식별해 종료한다. 숫자 PID 스냅샷으로 신호를 보내지 않는다. |
+
+기본 명령과 선택적 contract harness는 각각 독립 세션에서 실행한다. 먼저 루트 그룹에
+TERM을 보내 Dune의 정상 취소 전파를 허용하며, `CI_TEST_TIMEOUT_GRACE_SEC` 이후 KILL과
+기존 2초 관찰 구간을 사용한다. 식별자 획득·검사·신호 실패나 미정리 상태는
+`cleanup_unconfirmed`로 기록한다. 경계는 `owned_session`이며, 의도적인 `setsid` 또는
+daemon 이탈 전체를 격리하는 계약은 아니다. 이미 관찰한 자식의 세션 이탈도 불확실성으로
+보고한다. 관찰 구간 뒤에도 루트가 살아 있으면 모든 신호 전송을 끝내고 `root_unsettled`로
+보고하며, 무한 `waitpid`나 자식 회수 완료를 주장하지 않는다. macOS에서는 공개
+`proc_signal_with_audittoken` API, Linux에서는 Python의
+`os.pidfd_open`과 `signal.pidfd_send_signal`을 사용할 수 있어야 한다.
 
 ### 6.2 실행 흐름
 

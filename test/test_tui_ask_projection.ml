@@ -521,10 +521,42 @@ let test_feedback_preserves_receipt_and_canonical_winner () =
       ["ask_id"; "delivery"; "keeper"; "recording"]
       (json |> to_assoc |> List.map fst |> List.sort String.compare)) cases
 
+let test_followup_protocol_keeps_exact_identity_and_unknowns () =
+  let module Decode = Masc.Tui_decode_asks in
+  let progress = ["state",`String "observed";"answered_at",`Float 200.;
+    "stimulus_id",`String "original-source";"turn_started_at",`Float 201.;
+    "turn_finished_at",`Null;"queue_settled_at",`Null;"queue_cancelled_at",`Null;
+    "evidence_complete",`Bool false] in
+  let fields = ["workspace",`Assoc ["base_path",`String "/workspace";"masc_root",`String "/workspace/.masc"];
+    "state_ready",`Bool true;"keeper",`String "alpha";"answer_progress_for",`String "ask-original"] in
+  let decode fields progress = Decode.decode_ask_followup ~expected_base_path:"/workspace"
+    ~expected_masc_root:"/workspace/.masc" ~keeper_name:"alpha" ~ask_id:"ask-original"
+    (`Assoc (fields @ ["answer_progress",`Assoc progress])) in
+  let value = match decode fields progress with
+    | Ok value -> value | Error detail -> Alcotest.fail detail in
+  Alcotest.(check bool) "positive entry and incomplete evidence remain distinct from completion" true
+    (value.af_turn_started_at=Some 201. && value.af_turn_finished_at=None
+     && value.af_queue_settled_at=None && not value.af_evidence_complete);
+  List.iter (fun fields -> Alcotest.(check bool) "foreign ambiguous or booting response cannot enter" true
+    (Result.is_error (decode fields progress)))
+    [("keeper",`String "beta")::List.remove_assoc "keeper" fields;
+     ("answer_progress_for",`String "other")::List.remove_assoc "answer_progress_for" fields;
+     ("keeper",`String "alpha")::fields;
+     ("state_ready",`Bool false)::List.remove_assoc "state_ready" fields];
+  List.iter (fun progress -> Alcotest.(check bool) "malformed evidence cannot become an empty success" true
+    (Result.is_error (decode fields progress)))
+    [List.remove_assoc "turn_started_at" progress;
+     ("turn_started_at",`Float nan)::List.remove_assoc "turn_started_at" progress;
+     ("turn_started_at",`Null)::progress;
+     ("state",`String "unknown")::List.remove_assoc "state" progress;
+     List.remove_assoc "evidence_complete" progress]
+
 let () =
   Alcotest.run "TUI ask projection"
     [ ( "answer receipt",
-        [ Alcotest.test_case "retained feedback preserves original receipt and winner" `Quick
+        [ Alcotest.test_case "followup protocol preserves original identity and unknown evidence" `Quick
+            test_followup_protocol_keeps_exact_identity_and_unknowns
+        ; Alcotest.test_case "retained feedback preserves original receipt and winner" `Quick
             test_feedback_preserves_receipt_and_canonical_winner
         ; Alcotest.test_case "recorded answer and wake outcome" `Quick
             test_recording_and_wake_delivery_are_separate

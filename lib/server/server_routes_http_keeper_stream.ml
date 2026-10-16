@@ -4267,6 +4267,19 @@ let handle_keeper_asks_list state request reqd =
     respond_json_value_with_cors ~status:`Conflict request reqd
       (keeper_chat_stream_error_json "workspace precondition failed")
   | Ok _ ->
+  let query = Uri.query (Uri.of_string request.Httpun.Request.target) in
+  let progress_query = List.filter (fun (key,_) -> key="answer_progress_for") query in
+  let progress_request = match progress_query with
+    | [] -> Ok None
+    | [_, [ask_id]] when ask_id<>"" ->
+        (match List.filter (fun (key,_) -> key="name") query with
+         | [_, [name]] when name<>"" -> Ok (Some ask_id)
+         | _ -> Error "answer_progress_for requires one named Keeper")
+    | _ -> Error "answer_progress_for must occur once with a nonempty Ask id" in
+  match progress_request with
+  | Error detail -> respond_json_value_with_cors ~status:`Bad_request request reqd
+      (keeper_chat_stream_error_json detail)
+  | Ok answer_progress_for ->
   let paths =
     try
       let base_path = Unix.realpath config.base_path in
@@ -4311,10 +4324,21 @@ let handle_keeper_asks_list state request reqd =
           | Keeper_ask_store.Missing_log -> []
           | Stored_rows rows -> rows
         in
+        let progress_fields = match answer_progress_for with
+          | None -> []
+          | Some ask_id ->
+              let progress = match List.assoc_opt ask_id rows with
+                | None -> Error "canonical question is unavailable"
+                | Some (ask, resolution) ->
+                    Keeper_ask_answer_wake.observe_followup ~base_path ~keeper_name ~ask ~resolution in
+              let body = match progress with
+                | Ok followup -> Keeper_ask_answer_wake.followup_to_json followup
+                | Error detail -> `Assoc ["state", `String "unavailable"; "detail", `String detail] in
+              ["answer_progress_for", `String ask_id; "answer_progress", body] in
         let open_count, rows = project keeper_name rows in
         respond_json_value_with_cors ~status:`OK request reqd
           (`Assoc
-            [
+            ([
               ("scope", `String "keeper");
               ("workspace", workspace);
               ("state_ready", `Bool state_ready);
@@ -4322,7 +4346,7 @@ let handle_keeper_asks_list state request reqd =
               ("open_count", `Int open_count);
               ("returned", `Int (List.length rows));
               ("asks", `List rows);
-            ]))
+            ] @ progress_fields)))
   | None ->
       (* A durable question survives its process registration. Discover its
          canonical owner from the owned Asked records, not the live registry

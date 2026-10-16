@@ -124,6 +124,17 @@ let test_original_questions_are_bound_to_receiving_workspace () =
        | Ok (Tui_decode_asks.Ask_answer_recorded _) -> ()
        | Ok (Ask_answer_already_recorded _ | Ask_answer_written_unconfirmed _ | Ask_answer_refused _)
        | Error _ -> fail "offline original question was not durably answered");
+      let followup_path = path ^ "?name=" ^ name ^ "&answer_progress_for=" ^ ask.ask_id ^ "&" ^ query in
+      let status,body = wire_response ~router followup_path in
+      check int "one exact original answer followup is readable offline" 200 status;
+      let observed = Tui_decode_asks.decode_ask_followup ~expected_base_path:base
+          ~expected_masc_root:root ~keeper_name:name ~ask_id:ask.ask_id body |> valid Fun.id in
+      check bool "queued delivery alone cannot invent turn entry" true
+        (observed.af_turn_started_at=None && observed.af_turn_finished_at=None);
+      let status,_ = wire_response ~router (followup_path ^ "&answer_progress_for=another") in
+      check int "ambiguous question identity is rejected" 400 status;
+      let status,_ = wire_response ~router (path ^ "?answer_progress_for=" ^ ask.ask_id ^ "&" ^ query) in
+      check int "followup cannot silently switch to a fleet scan" 400 status;
       let status,body = answer ask.ask_id in
       check int "repeated offline answer retains canonical winner" 409 status;
       (match Tui_decode_asks.decode_ask_answer_receipt ~expected_ask_id:ask.ask_id ~status_code:status body with

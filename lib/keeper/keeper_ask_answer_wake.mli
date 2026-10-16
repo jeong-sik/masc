@@ -26,6 +26,24 @@ val deliver :
     queue commit rechecks under the owner lock, with the same bound, and
     honors the existing lifecycle intake fence. *)
 
+type followup = {
+  answered_at : float;
+  stimulus_id : string;
+  reactions : Keeper_reaction_ledger.event_queue_reaction_evidence_outcome;
+}
+
+val observe_followup :
+  base_path:string -> keeper_name:string -> ask:Keeper_ask.ask ->
+  resolution:Keeper_ask.resolution -> (followup, string) result
+(** Read-only evidence for the exact source of this canonical answered row.
+    No enqueue, wake hint or answer write. Turn entry/boundary and queue
+    settlement are observations; neither a queue transfer nor an ACK proves
+    answer consumption, Tool action or completion of the Keeper's work. *)
+
+val followup_to_json : followup -> Yojson.Safe.t
+(** Source identity, canonical answer time and observed reaction clocks only;
+    no question, answer text or responder identity. *)
+
 type failure = { keeper_name : string option; ask_id : string option; error : error }
 type report =
   { inspected : int

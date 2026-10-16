@@ -226,6 +226,8 @@ type async_msg =
   | Http_approvals_loaded of early_approval_observation
   | Ask_answer_receipt_observed of
       ask_submission * (Masc.Tui_decode_asks.ask_answer_receipt, string) result
+  | Ask_followup_loaded of Snapshot_read.request * ask_submission *
+      (Masc.Tui_decode_asks.ask_followup, string) result
   (** A workspace-bound roster can settle before unrelated readers. *)
   | Http_keeper_roster_loaded of early_keeper_roster_observation
   (** Diagnostic reader status; it grants no data or action authority. *)

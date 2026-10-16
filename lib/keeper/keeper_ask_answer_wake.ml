@@ -52,6 +52,36 @@ let answered_stimulus ~keeper_name (ask : Keeper_ask.ask) resolution =
                 ; arrived_at = answered_at
                 ; payload = Keeper_event_queue.Ask_answered payload })
 
+type followup = {
+  answered_at : float;
+  stimulus_id : string;
+  reactions : Keeper_reaction_ledger.event_queue_reaction_evidence_outcome;
+}
+
+let observe_followup ~base_path ~keeper_name ~ask ~resolution =
+  let ( let* ) = Result.bind in
+  let* stimulus = answered_stimulus ~keeper_name ask resolution
+      |> Result.map_error error_to_string in
+  let stimulus_id = Keeper_reaction_ledger.stimulus_id_of_event_queue stimulus in
+  let* reactions = Keeper_reaction_ledger.event_queue_reaction_evidence_result
+      ~base_path ~keeper_name ~stimulus_id
+      |> Result.map_error Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string in
+  Ok {answered_at=stimulus.arrived_at; stimulus_id; reactions}
+
+let followup_to_json followup =
+  let evidence, complete = match followup.reactions with
+    | Keeper_reaction_ledger.Evidence_complete evidence -> evidence, true
+    | Keeper_reaction_ledger.Evidence_quarantined {evidence; _} -> evidence, false in
+  let clock = function None -> `Null | Some at -> `Float at in
+  `Assoc ["state", `String "observed";
+    "answered_at", `Float followup.answered_at;
+    "stimulus_id", `String followup.stimulus_id;
+    "turn_started_at", clock evidence.turn_started_recorded_at;
+    "turn_finished_at", clock evidence.turn_finished_recorded_at;
+    "queue_settled_at", clock evidence.event_queue_ack_recorded_at;
+    "queue_cancelled_at", clock evidence.event_queue_cancelled_recorded_at;
+    "evidence_complete", `Bool complete]
+
 let deliver_row ~base_path ~keeper_name ~already_delivered ask resolution =
   let ( let* ) = Result.bind in
   let* stimulus = answered_stimulus ~keeper_name ask resolution in

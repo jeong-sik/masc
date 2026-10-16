@@ -76,6 +76,24 @@ type ask_answer_delivery =
   | Ask_wake_pending of string
       (** The answer is recorded; automatic delivery recovery remains due. *)
 
+type ask_followup = {
+  af_answered_at : float;
+  af_stimulus_id : string;
+  af_turn_started_at : float option;
+  af_turn_finished_at : float option;
+  af_queue_settled_at : float option;
+  af_queue_cancelled_at : float option;
+  af_evidence_complete : bool;
+}
+
+val decode_ask_followup :
+  expected_base_path:string -> expected_masc_root:string ->
+  keeper_name:string -> ask_id:string -> Yojson.Safe.t ->
+  (ask_followup, string) result
+(** Decode one exact answer-followup response, including matching workspace,
+    readiness, Keeper and Ask identities. Missing/malformed evidence is an
+    error; an absent reaction clock means unobserved, not a negative verdict. *)
+
 type ask_answer_receipt =
   | Ask_answer_recorded of ask_answer_delivery
   | Ask_answer_already_recorded of {

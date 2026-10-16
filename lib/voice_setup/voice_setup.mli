@@ -30,7 +30,8 @@ type change =
           Fields left [None] in the record are removed from an existing entry:
           moving an endpoint from a hosted provider to a local one has to drop
           [api_key_env], which would otherwise send an Authorization header the
-          local server never asked for. *)
+          local server never asked for. [command] and [agent_voices] are
+          file-owned and preserved rather than replaced from this record. *)
   | Remove_endpoint of section * string
   | Set_default_model of section * string
       (** Required once a section exists, and never blank: every endpoint in

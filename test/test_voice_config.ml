@@ -411,7 +411,10 @@ let test_endpoint_agent_voices_survive_provider_fallback () =
     check string "unmapped agent uses endpoint default" "alloy"
       (Vc.voice_for_agent_at_endpoint tts openai "unmapped");
     check string "unmapped endpoint uses workspace default" "workspace-default"
-      (Vc.voice_for_agent_at_endpoint tts eleven "unmapped")
+      (Vc.voice_for_agent_at_endpoint tts eleven "unmapped");
+    check (list string) "public inventory includes endpoint voices"
+      [ "workspace-default"; "workspace-agent"; "native-eleven-agent"; "alloy"; "nova" ]
+      (Vc.available_voices tts)
 ;;
 
 let test_endpoint_voice_is_absent_when_not_declared () =

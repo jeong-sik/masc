@@ -913,8 +913,10 @@ let voice_gate_always_allow_for_agent config agent_id =
 let unique_strings = Json_util.dedupe_keep_order
 
 let available_voices (tts : tts_config) =
-  tts.default_voice
-  :: List.map snd tts.agent_voices
+  (tts.default_voice :: List.map snd tts.agent_voices)
+  @ List.concat_map (fun (endpoint : endpoint) ->
+      Option.to_list endpoint.default_voice @ List.map snd endpoint.agent_voices)
+      tts.endpoints
   |> unique_strings
 
 let endpoint_public_json (endpoints : endpoint list) =

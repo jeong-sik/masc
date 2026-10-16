@@ -291,6 +291,9 @@ section's keeper mapping and default. The fallback endpoint resolves the same
 keeper against its own mapping, so an ElevenLabs id is not reused for an OpenAI
 voice when both endpoints declare their voice vocabulary.
 
+Endpoint keeper mappings are edited in the file. The setup pane preserves
+them when updating an endpoint and shows them in its configuration response.
+
 `--agent` is the check for a mapping. `say` answers a name it does not have by
 speaking in another voice and exiting 0, so the audio cannot show that a
 mapping never took. The probe looks the name up in `say -v '?'` first, ignoring

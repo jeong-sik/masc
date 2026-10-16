@@ -63,6 +63,7 @@ type endpoint = {
     does not exist there (#24068). [None] means the endpoint has none declared
     and falls back to the workspace voice selection. [agent_voices] overrides
     this default for named agents using this endpoint's voice vocabulary.
+    These mappings are edited in the file; setup edits preserve them.
 
     [model] is the model this endpoint is asked for: a provider's model name for
     an address kind, the model file for [whisper_cli]. [None] falls back to the
@@ -345,8 +346,8 @@ val voice_gate_always_allow_for_agent : t -> string -> bool
     + [config.gate.exempt_agents] contains [agent_id]. *)
 
 val available_voices : tts_config -> string list
-(** [available_voices tts] returns the [default_voice] followed
-    by all per-agent voice overrides — used by the voice-bridge
+(** [available_voices tts] returns the section and endpoint defaults and
+    per-agent voice overrides, deduplicated — used by the voice-bridge
     health endpoint to advertise the configured voice set. *)
 
 (** {1 Public JSON} *)

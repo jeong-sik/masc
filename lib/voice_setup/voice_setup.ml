@@ -76,6 +76,9 @@ let endpoint_fields (endpoint : Voice_config.endpoint) =
       ; enabled
       ; timeout_seconds
       ; default_voice
+      (* File-owned like command: upsert edits only the fields listed below,
+         so existing inline or nested mapping tables survive setup edits. *)
+      ; agent_voices = _
       ; model
       ; command = _
       }

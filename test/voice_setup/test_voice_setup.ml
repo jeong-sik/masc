@@ -562,6 +562,28 @@ let test_an_endpoint_carries_its_own_model () =
             Alcotest.(check (option string)) "with no section fallback invented" None
               stt.Voice_config.default_model)))
 
+let test_endpoint_setup_preserves_native_agent_mapping () =
+  let mappings = "\n[voice.tts.endpoints.agent_voices]\nalpha = \"native-agent-voice\"\n" in
+  with_config (fixture ^ mappings) (fun path ->
+    let updated =
+      endpoint ~id:"elevenlabs-direct" ~kind:Voice_config.Elevenlabs_direct
+        ~api_key_env:"ELEVENLABS_API_KEY" ~timeout_seconds:40.0 ()
+    in
+    (match apply path [ Voice_setup.Put_endpoint (Voice_setup.Tts, updated) ] with
+     | Ok _ -> ()
+     | Error error -> Alcotest.fail (Voice_setup.error_message error));
+    match Voice_config.parse_runtime_toml_text (read path) with
+    | Error message -> Alcotest.fail message
+    | Ok None -> Alcotest.fail "voice configuration disappeared"
+    | Ok (Some config) ->
+      match config.Voice_config.tts with
+      | None -> Alcotest.fail "TTS configuration disappeared"
+      | Some tts ->
+        let selected = List.hd tts.Voice_config.endpoints in
+        Alcotest.(check string) "setup edit preserves provider-native keeper voice"
+          "native-agent-voice"
+          (Voice_config.voice_for_agent_at_endpoint tts selected "alpha"))
+
 let () =
   Alcotest.run
     "voice_setup"
@@ -588,6 +610,8 @@ let () =
     ; ( "changes"
       , [ Alcotest.test_case "an endpoint is added and the notes survive" `Quick
             test_an_endpoint_is_added_and_the_notes_survive
+        ; Alcotest.test_case "setup preserves endpoint agent mappings" `Quick
+            test_endpoint_setup_preserves_native_agent_mapping
         ; Alcotest.test_case "dependent changes land together" `Quick
             test_changes_that_depend_on_each_other_land_together
         ; Alcotest.test_case "an endpoint carries its own model" `Quick

@@ -108,4 +108,14 @@ module For_testing : sig
     (Yojson.Safe.t list, string) result
   (** Inject a filesystem failure after the index transaction starts. The
       callback runs in the blocking worker and must not use Eio effects. *)
+
+  val empty_digest : string
+  val extend_digest : string -> string -> string
+  val digest_prefix : path:string -> from:int -> until:int -> string -> string option
+  (** The continuity witness: [extend_digest digest line] is the next link of
+      the chain, and [digest_prefix ~path ~from ~until digest] continues
+      [digest] over the complete lines of [path] from [from], answering
+      [None] unless a line ends exactly at [until]. Continuity records on disk
+      hold these values, so a change to either changes what every saved
+      record matches. *)
 end

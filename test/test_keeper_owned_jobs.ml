@@ -10,6 +10,7 @@ module Bundle = Masc.Keeper_tools_agent_core_bundle
 module Store = Masc.Keeper_owned_job_store
 module Invocation = Masc.Keeper_owned_job_invocation
 module Call_log = Masc.Keeper_tool_call_log
+module Journal = Masc.Keeper_tool_execution_journal
 
 let keeper = "owned-job-feature"
 let stdout_bytes = "original job stdout\n"
@@ -877,6 +878,7 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
       "branch_failure_policy", `String "continue_independent";
       "nodes", `List
         [node "await" "keeper_job_result" (literal (argument id)) [];
+         node "await-also" "keeper_job_result" (literal (argument id)) [];
          node "sibling" "keeper_artifact_read" (literal (`Assoc ["sha256", `String sibling.sha256])) [];
          node "consumer" "keeper_artifact_read"
            (`Assoc ["kind", `String "object"; "fields", `List
@@ -917,6 +919,24 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
    | _ -> fail "owned job wait was flattened into terminal composition failure");
   let module Async = Masc.Keeper_msg_async in
   let module Queue = Masc.Keeper_registry_event_queue in
+  let run_id = accepted |> member "composition_run_id" |> to_string in
+  let journal = Journal.load ~base_path:fixture.base_path ~keeper_name:keeper
+      ~composition_run_id:(Masc.Keeper_tool_plan.Composition_run_id.of_string run_id
+        |> require "original run UUID") |> require "original run journal" in
+  let continuation () = match Journal.waiting_continuation journal with
+    | Ok (Some continuation) -> continuation
+    | Ok None -> fail "original run is not canonically waiting"
+    | Error error -> fail (Journal.error_to_string error) in
+  let original_continuation = continuation () in
+  check (list string) "two waiting nodes capture one original job" [id]
+    (List.map Store.Job_id.to_string (Journal.continuation_job_ids original_continuation));
+  check string "continuation captures original worker" first_entry.request_id
+    (Journal.continuation_request_id original_continuation);
+  check (option string) "continuation captures original Task" (Some "task-A")
+    (Journal.continuation_source original_continuation).source_task_id;
+  (match Journal.continuation_readiness original_continuation with
+   | Ok Journal.Waiting_for_results -> ()
+   | Ok Results_ready | Error _ -> fail "running original job appeared ready");
   let terminal_path = match Async.For_testing.terminal_record_path
       ~base_path:fixture.base_path ~request_id:first_entry.request_id with
     | Some path -> path | None -> fail "original waiting request has no canonical path" in
@@ -941,6 +961,12 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
       | Error (Async.Canonical_terminal_unreadable _) -> ()
       | Error _ | Ok _ -> fail "strict wait decoder accepted missing/duplicate/invalid identity"))
     [[];[`String id;`String id];[`String "unknown-job"]];
+  Fun.protect ~finally:(fun () -> write terminal_path original_wire) (fun () ->
+    let foreign = Store.Job_id.fresh () |> Store.Job_id.to_string in
+    write terminal_path (Yojson.Safe.to_string (invalid_wait [`String foreign]));
+    match Journal.waiting_continuation journal with
+    | Error (Journal.Invalid_result _) -> ()
+    | Ok _ | Error _ -> fail "a different canonical job set authorized continuation");
   let first_job = Store.Job_id.of_string id |> require "original job identity" in
   (match Async.worker_waiting_for_owned_jobs ~job_ids:[first_job]
       (Tool_result.make_ok ~tool_name:"fixture" ~start_time:(Tool_timing.start ()) ()) with
@@ -961,7 +987,6 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
     (awaiting |> member "failure_effect_disposition");
   check bool "consumer waits for complete original output" false
     (List.exists (fun row -> row |> member "node_id" |> to_string = "consumer") first_nodes);
-  let run_id = accepted |> member "composition_run_id" |> to_string in
   let resume () = with_bundle fixture (fun bundle -> invoke fixture bundle
       ~tool_use_id:"resume-wait" ~turn:52 "keeper_composition_run"
       (`Assoc ["sha256", `String sha256; "resume_run_id", `String run_id])) in
@@ -973,6 +998,9 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
   let before_refusal = List.length (calls fixture) in
   let refused_data = Fun.protect ~finally:(fun () -> write owner_path owner_bytes) (fun () ->
       write owner_path "{temporarily-invalid-owner\n";
+      (match Journal.continuation_readiness original_continuation with
+       | Error (Journal.Invalid_result _) -> ()
+       | Ok _ | Error _ -> fail "corrupt original job owner became a ready continuation");
       let refused = resume () in
       let ok, data, _ = await_composition env fixture refused in
       check bool "unreadable original owner refuses result rechecking" false ok;
@@ -990,12 +1018,16 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
   check bool "exit without complete outputs remains waiting" false ok;
   check int "resuming a wait never collects or relaunches" before_resume (List.length (calls fixture));
   let second_nodes = composition_nodes fixture second in
+  let ready_continuation = continuation () in
   List.iter (fun field -> check_json ("same waiting occurrence " ^ field)
       (awaiting |> member field) (composition_node "await" second_nodes |> member field)) ["execution_id";"tool_use_id"];
   control fixture (`Assoc ["state", `String "exited"; "exit_code", `Int 7]);
   ignore (with_bundle fixture (fun bundle -> invoke fixture bundle
       ~tool_use_id:"collect-complete" ~turn:52 "keeper_job_status" (argument id)));
   let before_completed_resume = List.length (calls fixture) in
+  (match Journal.continuation_readiness ready_continuation with
+   | Ok Journal.Results_ready -> ()
+   | Ok Waiting_for_results | Error _ -> fail "complete original outputs are not ready");
   let resumed = resume () in
   let ok, completed, completed_entry = await_composition env fixture resumed in
   if not ok then
@@ -1007,6 +1039,9 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
   let final_wait = composition_node "await" completed_nodes in
   List.iter (fun field -> check_json ("original wait identity " ^ field)
       (awaiting |> member field) (final_wait |> member field)) ["execution_id";"tool_use_id"];
+  List.iter (fun field -> check_json ("second wait keeps its own occurrence " ^ field)
+      (composition_node "await-also" first_nodes |> member field)
+      (composition_node "await-also" completed_nodes |> member field)) ["execution_id";"tool_use_id"];
   let original_sibling = composition_node "sibling" first_nodes
   and final_sibling = composition_node "sibling" completed_nodes in
   List.iter (fun field -> check_json ("completed sibling retains " ^ field)
@@ -1022,6 +1057,27 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
     let context = match entry.Masc.Keeper_msg_async.request_context with Some fields -> `Assoc fields | None -> fail "lost source context" in
     check_json "completion belongs to original Task" (`String "task-A") (context |> member "source_task_id"))
     [first_entry;completed_entry];
+  (match Journal.waiting_continuation journal with
+   | Ok None -> () | Ok (Some _) | Error _ -> fail "completed run remained a suspended candidate");
+  (match Journal.continuation_readiness ready_continuation with
+   | Error Journal.Ownership_changed -> ()
+   | Ok _ | Error _ -> fail "stale candidate remained ready after its winner completed");
+  let stale_worker_calls = ref 0 and stale_admission_error = ref None in
+  let background_sw = Async.server_background_switch () |> require "server switch" in
+  let stale = Async.submit_worker_with_request_id ?request_context:first_entry.request_context
+      ~background_sw ~base_path:fixture.base_path ~caller:keeper ~keeper_name:keeper
+      ~on_accepted:(fun request_id ->
+        match Journal.bind_continuation ready_continuation ~request_id with
+        | Error error -> stale_admission_error := Some error; Error (Journal.error_to_string error)
+        | Ok _ -> Ok ())
+      ~f:(fun ~request_id:_ _ ->
+        incr stale_worker_calls;
+        Async.worker_finished (Tool_result.make_ok ~tool_name:"stale-continuation"
+          ~start_time:(Tool_timing.start ()) ())) () in
+  (match stale,!stale_admission_error with
+   | Error (Async.Acceptance_persistence_failed _),Some Journal.Ownership_changed -> ()
+   | _ -> fail "stale continuation rebound after the competing worker completed");
+  check int "a stale continuation never starts its worker" 0 !stale_worker_calls;
   check int "composition never recreates original program" 1 (effect_count fixture "create");
   check int "composition never restarts original program" 1 (effect_count fixture "start")
 

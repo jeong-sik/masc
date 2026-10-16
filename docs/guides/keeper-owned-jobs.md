@@ -80,6 +80,12 @@ The worker has released its scope; the prepared run is still waiting. This
 does not emit a failed composition notification. The original job completion
 notification supplies the result; resumption remains explicit as above.
 Other failures and unsupported deferrals retain their failure behavior.
+Resuming a waiting run captures its exact previous worker and saved node
+results before admission. A competing resume that advances the owner makes
+that captured candidate stale, including when the competing worker has already
+finished. One job may supply several waiting nodes; each keeps its own occurrence
+identity while the waiting job IDs form a set. These reads and admission do not
+automatically start a continuation on job completion.
 The journal retains the exact producer-owned job wait separately from the
 provider-facing body. Only this exact read-only leaf may be rechecked; it keeps
 its original execution ID and tool-use ID. Completed siblings reuse their full

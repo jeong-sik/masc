@@ -239,14 +239,31 @@ let test_empty_terminal_completion_requires_this_attempt_saved_checkpoint () =
    | Error _ -> Alcotest.fail "successful result was rejected")
 ;;
 
-let test_tool_then_empty_failure_completes_without_reexecution () =
+type tool_checkpoint_store_case = Fresh_checkpoint | Ahead_checkpoint | Failed_tool_checkpoint
+
+let run_tool_then_empty_with_checkpoint_store store_case () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let module Core = Agent_core in
   let module Attempt = Masc.Keeper_turn_driver_try_provider in
+  let module Store = Masc.Keeper_checkpoint_store in
+  let root = Filename.temp_file "tool-empty-checkpoint-" "" in
+  Sys.remove root;
+  Unix.mkdir root 0o700;
+  let rec remove_owned_tree path =
+    if Sys.is_directory path then begin
+      Array.iter (fun name -> remove_owned_tree (Filename.concat path name)) (Sys.readdir path);
+      Unix.rmdir path
+    end else Sys.remove path
+  in
+  Fun.protect ~finally:(fun () -> remove_owned_tree root) (fun () ->
+  let session_dir = Filename.concat root "sessions" in
+  let session_id = "quiet-terminal-session" in
   let progress = Atomic.make Attempt.No_checkpoint_stage in
   let before = Attempt.For_testing.tool_result_save_count progress in
   let tool_executions = ref 0 in
+  let executed_names = ref [] in
   let provider_calls = ref 0 in
   let replies = ref
       [ response ~stop_reason:Core.Types.StopToolUse
@@ -266,44 +283,109 @@ let test_tool_then_empty_failure_completes_without_reexecution () =
       ~api_key:"" ~base_url:"http://mock.local" ~request_path:"/v1/chat/completions"
       ~model_id:"mock-model" () in
   let tool = Core.Tool.create ~name:"observe" ~description:"Observe once" ~parameters:[]
-      (fun _ -> incr tool_executions;
+      (fun _ -> incr tool_executions; executed_names := "observe" :: !executed_names;
         Ok {Core.Types.content="observed"; content_blocks=None; _meta=None}) in
   let options = {Core.Agent.default_options with
       provider_config=Some provider_config; transport=Some transport} in
-  let checkpoint_sink snapshot =
-    (* The real sink owner marks only its Saved branch; a stale no-op must
-       not mark this. This fixture models that successful owner write. *)
-    Attempt.observe_checkpoint_saved progress snapshot.Core.Agent.stage;
-    Ok () in
+  let newer = { (checkpoint_with_messages [message ~role:Core.Types.User [Core.Types.Text "newer canonical"]])
+      with session_id; model="mock-model"; turn_count=100 } in
+  (match store_case with
+   | Ahead_checkpoint ->
+     (match Store.save_agent_core_classified ~session_dir ~history_retained:0 newer with
+      | Ok (Store.Saved _) -> ()
+      | Ok (Store.Stale_noop _) -> Alcotest.fail "fresh canonical fixture was stale"
+      | Error detail -> Alcotest.fail detail)
+   | Fresh_checkpoint | Failed_tool_checkpoint -> ());
+  let saves = ref 0 in
+  let stale_noops = ref 0 in
+  let failed_saves = ref 0 in
+  let checkpoint_owner (snapshot : Core.Agent.checkpoint_snapshot) =
+    (* Match the real Keeper sink's ownership contract: only its classified
+       Saved branch can witness tool progress, never a successful stale no-op. *)
+    let checkpoint = { snapshot.checkpoint with session_id } in
+    (match store_case, snapshot.stage with
+     | Failed_tool_checkpoint, Core.Agent.After_tool_results_appended ->
+       write_file (Store.agent_core_checkpoint_path ~session_dir ~session_id) "{unreadable canonical"
+     | (Fresh_checkpoint | Ahead_checkpoint | Failed_tool_checkpoint), _ -> ());
+    match Store.save_agent_core_classified ~session_dir ~history_retained:0 checkpoint with
+    | Ok (Store.Saved _) ->
+      incr saves;
+      Attempt.observe_checkpoint_saved progress snapshot.stage;
+      Ok ()
+    | Ok (Store.Stale_noop _) -> incr stale_noops; Ok ()
+    | Error detail -> incr failed_saves; Error detail
+  in
+  let checkpoint_sink = Attempt.observing_checkpoint_sink progress (Some checkpoint_owner) in
   let agent = Core.Agent.create ~net:(Eio.Stdenv.net env)
       ~config:(Core.Types.default_config ~model:"mock-model") ~options ~tools:[tool]
       ~checkpoint_sink () in
   let error = match Core.Agent.run ~sw agent "observe once" with
-    | Error (Core.Error.Provider (Llm_provider.Error.EmptyCompletion
-        {stop_reason=Core.Types.EndTurn; _}) as error) -> error
-    | Error error -> Alcotest.fail (Core.Error.to_string error)
-    | Ok _ -> Alcotest.fail "shared SDK silently accepted the empty terminal" in
-  let checkpoint = Core.Agent.checkpoint ~session_id:"quiet-terminal-session" agent in
-  let completed = match Attempt.complete_saved_tool_terminal
+    | Error error -> error
+    | Ok _ -> Alcotest.fail "shared SDK silently accepted the empty terminal or failed store" in
+  let checkpoint = Core.Agent.checkpoint ~session_id agent in
+  let result = Attempt.complete_saved_tool_terminal
       ~tool_results_saved_in_attempt:
         (Attempt.For_testing.tool_result_save_count progress > before)
-      ~checkpoint:(Some checkpoint) (Error error) with
-    | Ok completed -> completed
-    | Error error -> Alcotest.fail (Core.Error.to_string error) in
-  Alcotest.(check int) "one tool execution" 1 !tool_executions;
-  Alcotest.(check int) "tool request then empty terminal" 2 !provider_calls;
-  Alcotest.(check string) "checkpoint session retained"
-    checkpoint.session_id completed.session_id;
-  Alcotest.(check int) "checkpoint turn count retained" checkpoint.turn_count completed.turns;
-  Alcotest.(check bool) "actual checkpoint retained" true
-    (Option.fold ~none:false ~some:(fun saved -> saved == checkpoint) completed.checkpoint);
-  Alcotest.(check string) "provider id unavailable" "" completed.response.id;
-  Alcotest.(check bool) "usage is unavailable, not invented" true
-    (completed.response.usage = None);
-  Alcotest.(check (result string string)) "existing tool-backed finalization completes"
-    (Ok "")
-    (Keeper_tooling.Response.normalize_response_text
-       ~text:(Core.Types.visible_text_of_response completed.response) ~tool_names:["observe"] ())
+      ~checkpoint:(Some checkpoint) (Error error) in
+  Alcotest.(check int) "one real tool execution" 1 !tool_executions;
+  Alcotest.(check bool) "observed checkpoint boundary prevents same-run replay" false
+    (Attempt.same_run_retry_allowed progress);
+  (match store_case, error with
+   | (Fresh_checkpoint | Ahead_checkpoint),
+       Core.Error.Provider (Llm_provider.Error.EmptyCompletion {stop_reason=Core.Types.EndTurn; _}) -> ()
+   | (Fresh_checkpoint | Ahead_checkpoint), _ -> Alcotest.fail (Core.Error.to_string error)
+   | Failed_tool_checkpoint, _ -> ());
+  match store_case, result with
+  | Fresh_checkpoint, Ok completed ->
+    Alcotest.(check int) "tool request then empty terminal" 2 !provider_calls;
+    Alcotest.(check bool) "actual checkpoint owner saved" true (!saves > 0);
+    let durable = match Store.load_agent_core ~session_dir ~session_id with
+      | Ok checkpoint -> checkpoint
+      | Error error -> Alcotest.fail (Store.checkpoint_load_error_to_string error) in
+    let results = List.concat_map (fun (m : Core.Types.message) ->
+      List.filter_map (function Core.Types.ToolResult {tool_use_id; content; _} -> Some (tool_use_id, content)
+        | _ -> None) m.content) durable.messages in
+    Alcotest.(check (list (pair string string))) "reopened canonical owns exact tool result"
+      ["observed-1", "observed"] results;
+    Alcotest.(check string) "checkpoint session retained" session_id completed.session_id;
+    Alcotest.(check int) "checkpoint turn count retained" checkpoint.turn_count completed.turns;
+    Alcotest.(check bool) "actual checkpoint retained" true
+      (Option.fold ~none:false ~some:(fun saved -> saved == checkpoint) completed.checkpoint);
+    Alcotest.(check string) "provider response id is unavailable" "" completed.response.id;
+    Alcotest.(check bool) "usage is unavailable, not invented" true (completed.response.usage = None);
+    Alcotest.(check (result string string)) "actual executed tool names support finalization" (Ok "")
+      (Keeper_tooling.Response.normalize_response_text
+         ~text:(Core.Types.visible_text_of_response completed.response) ~tool_names:!executed_names ())
+  | Ahead_checkpoint, Error retained ->
+    Alcotest.(check bool) "stale owner made no new tool-save proof" true (!stale_noops > 0);
+    Alcotest.(check int) "no save advanced behind canonical" 0 !saves;
+    Alcotest.(check int) "empty terminal observed after tool" 2 !provider_calls;
+    Alcotest.(check bool) "empty failure retained without owned save" true (retained == error);
+    let durable = match Store.load_agent_core ~session_dir ~session_id with
+      | Ok checkpoint -> checkpoint
+      | Error error -> Alcotest.fail (Store.checkpoint_load_error_to_string error) in
+    Alcotest.(check int) "newer canonical did not regress" 100 durable.turn_count;
+    Alcotest.(check bool) "newer canonical messages unchanged" true (durable.messages = newer.messages)
+  | Failed_tool_checkpoint, Error retained ->
+    Alcotest.(check bool) "tool-stage store refusal was real" true (!failed_saves > 0);
+    Alcotest.(check int) "failed tool save ends before another provider call" 1 !provider_calls;
+    Alcotest.(check bool) "persistence failure remains a failure" true (retained == error);
+    (match Store.load_agent_core ~session_dir ~session_id with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "failed canonical read became an empty successful checkpoint")
+  | Fresh_checkpoint, Error error -> Alcotest.fail (Core.Error.to_string error)
+  | (Ahead_checkpoint | Failed_tool_checkpoint), Ok _ ->
+    Alcotest.fail "a tool result without its owned durable save completed")
+;;
+
+let test_tool_then_empty_failure_completes_without_reexecution =
+  run_tool_then_empty_with_checkpoint_store Fresh_checkpoint
+
+let test_tool_then_empty_stale_checkpoint_does_not_complete =
+  run_tool_then_empty_with_checkpoint_store Ahead_checkpoint
+
+let test_tool_checkpoint_failure_does_not_complete_or_repeat =
+  run_tool_then_empty_with_checkpoint_store Failed_tool_checkpoint
 ;;
 
 let test_input_required_bypasses_response_accept () =
@@ -2000,6 +2082,10 @@ let () =
             `Quick test_empty_terminal_completion_requires_this_attempt_saved_checkpoint;
           Alcotest.test_case "real tool then typed empty failure completes without reexecution"
             `Quick test_tool_then_empty_failure_completes_without_reexecution;
+          Alcotest.test_case "real stale checkpoint cannot authorize empty completion"
+            `Quick test_tool_then_empty_stale_checkpoint_does_not_complete;
+          Alcotest.test_case "real tool checkpoint refusal cannot complete or repeat"
+            `Quick test_tool_checkpoint_failure_does_not_complete_or_repeat;
           Alcotest.test_case
             "terminal tool completion bypasses empty response rejection"
             `Quick

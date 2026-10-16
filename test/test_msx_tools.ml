@@ -266,6 +266,12 @@ let test_step_until_change () =
     dispatch ~base_path "masc_msx_step_until_change" [ ("max_frames", `Int 301) ]
   in
   check bool "a budget over the cap is refused" true (rejected r);
+  (* The argument is max_frames; the refusal used to call it "frames". *)
+  check bool "the refusal names the max_frames argument" true
+    (let message = Tool_result.message r and needle = "max_frames" in
+     let n = String.length needle in
+     let rec go i = i + n <= String.length message && (String.sub message i n = needle || go (i + 1)) in
+     go 0);
   let r =
     dispatch ~base_path "masc_msx_step_until_change" [ ("max_frames", `Int 0) ]
   in

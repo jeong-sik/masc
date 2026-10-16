@@ -2,11 +2,16 @@ name = "keeper_composition_prepare"
 description = """
 Validate and inspect a task-specific composition without publishing a Skill. \
 Use canonical tool names, explicit dependencies and tagged literal/output/object/array \
-input templates, or child nodes {id, skill_reference, args, after?} with an exact \
-admitted reference copied from Skill inventory and fixed args checked against \
-that child's parameter schema. Inline children must share the parent's failure \
-policy. Read child exports with /export-name/subpath; dependencies wait for the \
-whole child. Select final fields with exports. Returns a durable draft reference \
+input templates, or child nodes with id, skill_reference, after? and exactly one \
+of args (fixed object) or input (tagged upstream template). Copy the exact admitted \
+reference and declared exports from Skill inventory; arguments must match the \
+child's parameter schema. Inline children share the parent's failure policy. \
+A child exposes only named exports, not its raw internal tool result. For child \
+alias child with declared export report, a parent output template is \
+{"kind":"output","node":"child","pointer":"/report"}; a final export is \
+{"name":"result","node":"child","pointer":"/report"}. Copy the canonical pointer from \
+available_exports in an export rejection; do not guess fields. Dependencies wait \
+for the whole child. Returns a durable draft reference \
 bound to this Keeper, execution mode, inputs and frozen tool/Skill contracts; pass \
 its sha256 to keeper_composition_run. No node executes or activates during prepare. \
 Static read-only leaves and keeper_job_start are admitted. A job launch retains \

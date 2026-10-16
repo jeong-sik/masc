@@ -41,8 +41,10 @@ type error =
   | Binding_rejected of Keeper_tool_plan.Node_id.t * Keeper_tool_composition_catalog.instantiation_error
   | Duplicate_alias of Keeper_tool_plan.Node_id.t
   | Unknown_alias of Keeper_tool_plan.Node_id.t
-  | Child_output_requires_export of Keeper_tool_plan.Node_id.t
-  | Unknown_child_export of { alias : Keeper_tool_plan.Node_id.t; name : string }
+  | Child_output_requires_export of
+      { alias : Keeper_tool_plan.Node_id.t; available_exports : string list }
+  | Unknown_child_export of
+      { alias : Keeper_tool_plan.Node_id.t; name : string; available_exports : string list }
   | Unsupported_leaf of { node_id : Keeper_tool_plan.Node_id.t; tool_name : string }
   | Inputs_rejected of Keeper_tool_plan.Node_id.t * Keeper_tool_plan.execution_error
   | Expanded_plan_rejected of Keeper_tool_plan.error
@@ -82,3 +84,5 @@ val calls_to_json : t -> Yojson.Safe.t
 (** Exact references, fixed arguments or explicit upstream templates and leaf mappings for durable
     draft/run evidence. Preparation does not constitute Skill activation. *)
 val error_to_json : error -> Yojson.Safe.t
+(** Export rejections include the exact admitted child's available export names
+    and canonical public pointers. They expose no private expanded node IDs. *)

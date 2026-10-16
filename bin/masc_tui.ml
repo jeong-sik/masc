@@ -11542,10 +11542,23 @@ let launch_approvals_summary_load state ~mailbox =
                       ~prior_contact:Masc_tui_server_lifecycle.Server_reached () in
                     snapshot)
 
+let load_http_keeper_surfaces ~server_identity ~host ~port
+    ~(needs : Masc_tui_types.surface_needs) =
+  let expected_workspace = Result.to_option server_identity in
+  let when_needed wanted load = if wanted then Some (load ()) else None in
+  Masc_tui_loader.read_pair
+    (fun () ->
+       when_needed needs.needs_asks (fun () ->
+           Masc_tui_http.fetch_keeper_asks ~host ~port ()))
+    (fun () ->
+       when_needed needs.needs_keeper_roster (fun () ->
+           match expected_workspace with
+           | None -> Error (Keeper_control.Roster_malformed "Server workspace identity is unavailable")
+           | Some expected_workspace -> load_keeper_roster ~host ~port ~expected_workspace))
+
 let load_http_scoped_surfaces ~refresh_ticket ~server_identity ~host ~port ~approval_ticket ~board_sort
     ~board_hearth ~system_log_level ~provider_history_days
     ~(needs : Masc_tui_types.surface_needs) =
-  let expected_workspace = Result.to_option server_identity in
   let when_needed wanted load = if wanted then Some (load ()) else None in
   (* Metrics draws the transport and the Overview reads its queue pressure,
      so a refresh on another surface does not spend a request on it. [None]
@@ -11579,19 +11592,8 @@ let load_http_scoped_surfaces ~refresh_ticket ~server_identity ~host ~port ~appr
   let http_fleet_safety =
     when_needed needs.needs_fleet_safety (fun () -> load_fleet_safety ~host ~port)
   in
-  (* These are independent reads even on the first Home refresh. A slow
-     roster must not postpone asking for questions, or vice versa. Both
-     remain inside the same trailing workspace-identity check below. *)
   let http_asks, http_keeper_roster =
-    Masc_tui_loader.read_pair
-      (fun () ->
-         when_needed needs.needs_asks (fun () ->
-             Masc_tui_http.fetch_keeper_asks ~host ~port ()))
-      (fun () ->
-         when_needed needs.needs_keeper_roster (fun () ->
-             match expected_workspace with
-             | None -> Error (Keeper_control.Roster_malformed "Server workspace identity is unavailable")
-             | Some expected_workspace -> load_keeper_roster ~host ~port ~expected_workspace))
+    load_http_keeper_surfaces ~server_identity ~host ~port ~needs
   in
   let http_runtime_quota =
     when_needed needs.needs_runtime_quota (fun () ->
@@ -11672,38 +11674,44 @@ let load_http_surfaces ~on_overview ~refresh_ticket ~host ~port ~approval_ticket
   if Masc_tui_types.server_is_booting http_server_identity
   then Refresh_server_booting { refresh_ticket; identity = http_server_identity; approval_ticket }
   else begin
-    (* The briefing can be drawn while confirmations and the visible surface
-       are still loading. Its own trailing identity probe verifies that
-       preview without authorizing any operation; the complete bundle still
-       revalidates identity after all branches settle. *)
-    let http_overview, (http_approvals, http_scoped) =
+    (* Keeper questions and roster reads start with the other branches, not
+       after the visible surface's transport/board/log requests. Every branch
+       still belongs to this pass's initial and final workspace probes. *)
+    let (http_overview, http_approvals),
+        ((http_asks, http_keeper_roster), http_scoped) =
       Masc_tui_loader.read_pair
         (fun () ->
-           let overview = load_overview ~host ~port in
-           (match on_overview, overview with
-            | Some publish, Ok snapshot ->
-                let identity = load_server_identity ~host ~port in
-                if Masc_tui_types.server_workspace_matches
-                     ~expected:(Result.to_option http_server_identity) identity then
-                  Option.iter (fun identity -> publish identity snapshot)
-                    (Result.to_option identity)
-            | None, (Ok _ | Error _) | Some _, Error _ -> ());
-           overview)
-        (fun () ->
            Masc_tui_loader.read_pair
+             (fun () ->
+                let overview = load_overview ~host ~port in
+                (match on_overview, overview with
+                 | Some publish, Ok snapshot ->
+                     let identity = load_server_identity ~host ~port in
+                     if Masc_tui_types.server_workspace_matches
+                          ~expected:(Result.to_option http_server_identity) identity then
+                       Option.iter (fun identity -> publish identity snapshot)
+                         (Result.to_option identity)
+                 | None, (Ok _ | Error _) | Some _, Error _ -> ());
+                overview)
              (fun () ->
                 Option.map
                   (fun ao_ticket ->
                      { ao_ticket; ao_result = load_approvals ~host ~port })
-                  approval_ticket)
+                  approval_ticket))
+        (fun () ->
+           Masc_tui_loader.read_pair
              (fun () ->
                 (* Questions are announced from every surface. *)
+                load_http_keeper_surfaces ~server_identity:http_server_identity
+                  ~host ~port ~needs:{ needs with needs_asks = true })
+             (fun () ->
                 load_http_scoped_surfaces ~refresh_ticket
                   ~server_identity:http_server_identity
                   ~host ~port ~approval_ticket:None
                   ~board_sort ~board_hearth ~system_log_level ~provider_history_days
-                  ~needs:{ needs with needs_asks = true }))
+                  ~needs:{ needs with needs_asks = false; needs_keeper_roster = false }))
     in
+    let http_scoped = { http_scoped with http_asks; http_keeper_roster } in
     let identity_after = load_server_identity ~host ~port in
     if Masc_tui_types.server_is_booting identity_after then
       Refresh_server_booting { refresh_ticket; identity = identity_after; approval_ticket }

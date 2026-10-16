@@ -12,6 +12,20 @@ let rec remove_tree path =
       Unix.rmdir path)
     else Sys.remove path
 
+(* The chat-history route separates an unknown name (404) from an unreadable
+   one (503). "editor" owns tool-call rows here, so give it retained metadata
+   like a Keeper that exists but is offline. *)
+let write_offline_meta config name =
+  let meta = Masc_test_deps.meta_of_json_fixture
+      (`Assoc [ "name", `String name; "trace_id", `String ("test-" ^ name) ])
+      |> Result.get_ok in
+  let path = Filename.concat (Workspace.keepers_runtime_dir config)
+      (Keeper_runtime_root_entry.keeper_basename ~keeper_name:name Keeper_runtime_root_entry.Metadata) in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  let oc = open_out path in
+  Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
+    output_string oc (Keeper_meta_json.meta_to_json meta |> Yojson.Safe.to_string))
+
 let with_workspace f =
   Eio_main.run (fun env ->
     Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -21,6 +35,7 @@ let with_workspace f =
       Unix.mkdir base 0o700;
       let state = Mcp_server.For_testing.create_state ~base_path:base in
       let config = Mcp_server.workspace_config state in
+      write_offline_meta config "editor";
       let location =
         Dated_jsonl.Store.(at (Workspace.dated_store_root config) Root.Tool_calls)
       in

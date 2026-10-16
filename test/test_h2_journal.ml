@@ -1024,6 +1024,8 @@ let launch_success (node : Plan.node) =
        ~data:(`Assoc
          [ "job_id", `String "00000000-0000-7777-8000-000000000001"
          ; "status", `String "running"
+         ; "result_ready", `Bool false
+         ; "reconciliation", `Assoc [ "state", `String "not_observed"; "reason", `Null ]
          ; "source", `Assoc
              [ "task_id", `Null
              ; "turn_ref", `String "launch-trace-fixture#41"

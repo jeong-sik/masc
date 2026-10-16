@@ -50,11 +50,6 @@
  (libraries agent_core_test_deps llm_provider))
 
 (test
- (name test_wire_parse_dump)
- (modules test_wire_parse_dump)
- (libraries llm_provider unix))
-
-(test
  (name test_resource_scoped_execution)
  (modules test_resource_scoped_execution)
  (libraries agent_core_test_deps agent_core alcotest))

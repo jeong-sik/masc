@@ -721,15 +721,15 @@ Preserve:
 - The production finalization path emits a missing failure event before projection/dump and publishes its terminal summary afterwards; retain this order and do not duplicate the diagnostic write.
 - Do not import coordinator configuration into Agent Core; its diagnostic sink currently reads the environment locally to preserve dependency direction.
 
-Consumers: [packages/agent_core/lib/llm_provider/complete_stream.ml](../../../packages/agent_core/lib/llm_provider/complete_stream.ml), [packages/agent_core/test/test_wire_parse_dump.ml](../../../packages/agent_core/test/test_wire_parse_dump.ml).
+Consumers: [packages/agent_core/lib/llm_provider/complete_stream.ml](../../../packages/agent_core/lib/llm_provider/complete_stream.ml), [packages/agent_core/test/test_complete_http.ml](../../../packages/agent_core/test/test_complete_http.ml).
 
-Scenarios: [packages/agent_core/test/test_wire_parse_dump.ml](../../../packages/agent_core/test/test_wire_parse_dump.ml), [packages/agent_core/lib/llm_provider/complete_stream_error.ml](../../../packages/agent_core/lib/llm_provider/complete_stream_error.ml). **Not executed in this audit.**
+Scenarios: [packages/agent_core/test/test_complete_http.ml](../../../packages/agent_core/test/test_complete_http.ml), [packages/agent_core/lib/llm_provider/complete_stream_error.ml](../../../packages/agent_core/lib/llm_provider/complete_stream_error.ml). **Not executed in this audit.**
 
 Proposed verification: Through the public streaming path, feed one malformed SSE frame and one malformed NDJSON frame; assert one diagnostic row, unchanged returned typed error and one terminal summary. Exercise an unwritable dump destination to preserve the original error. These are proposed scenarios, not executed evidence.
 
 Ordering rationale: One production caller and an existing diagnostic scenario bound the change. The new boundary makes error policy review independent of file effects while preserving operator evidence; priority is based on the hidden effect, not file length.
 
-Public-package risk: The diagnostic helper is currently exposed through a callable conversion; enumerate external package consumers before changing a public signature.
+Implementation-scope correction: `complete_stream_error` was already listed in Dune `private_modules`; it has no public facade alias. The actual production caller is the stream finalizer. Its inline assertions keep a pure error-only wrapper; the old standalone diagnostic suite moves to the public HTTP streaming scenario suite. Public `Complete` interfaces remain unchanged.
 
 ## Boundaries retained or excluded
 

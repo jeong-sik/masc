@@ -14,59 +14,37 @@ let parse_error_raw_excerpt raw =
   else String.sub redacted 0 max_parse_error_raw_excerpt ^ "...(truncated)"
 ;;
 
-(* Diagnostic sink for a frame the wire decoder refused, off unless
-   [MASC_WIRE_PARSE_DUMP] names a file.
+type refused_frame =
+  { wire_format : Http_client.provider_wire_format
+  ; reason : string
+  ; raw : string
+  }
 
-   The operator message keeps its 256-byte bound because it is read in a log
-   line, and that bound is what stalled the 2026-08-28 investigation into
-   kimi_coding: 36 of 64 calls ended in sse/malformed_payload, the excerpt
-   showed the parser stopping near the model-name string every time, and the
-   rest of the frame — the part that would say whether bytes went missing,
-   whether two frames overlapped, or whether the break sits on kimi's 8186-byte
-   chunk boundary — was already cut off. The same endpoint answered curl with
-   2,700+ clean frames, so the evidence has to come from the client that sees
-   the break.
+type projection =
+  { error : Http_client.http_error
+  ; diagnostic : refused_frame option
+  }
 
-   Redaction runs before the write, same SSOT as the excerpt — but it has to
-   answer for itself here, because [Secret_redactor] substitutes a fixed
-   "[REDACTED]" marker whose length differs from what it replaces. One match
-   shifts every offset after it, and then the "bytes 41-75" in the accompanying
-   error no longer points at the same place in this file, which is the one
-   question the sink exists to answer.
+let without_diagnostic error = { error; diagnostic = None }
 
-   So the row carries whether redaction changed anything. A stream frame is
-   model output and normally holds no credential, so [verbatim=true] is the
-   ordinary case and those rows are byte-exact against the reported offsets.
-   A [verbatim=false] row still shows the shape of the break; it just cannot be
-   measured against them. Nothing about the frame is withheld that the redactor
-   would not also withhold from the log.
-
-   Failures here are swallowed on purpose: a diagnostic sink must not turn a
-   provider error into a second, different error on the way out. *)
-(* Read here rather than through Env_config_core: agent_core depends on
-   masc.config nowhere, and a diagnostic sink is not the reason to reverse
-   that. The env-read ratchet counts this site for that reason. *)
-let dump_refused_frame ~label ~reason raw =
-  match Sys.getenv_opt "MASC_WIRE_PARSE_DUMP" with
-  | None | Some "" -> ()
-  | Some path ->
-    (try
-       let scrubbed = Secret_redactor.redact_string raw in
-       let verbatim = String.equal scrubbed raw in
-       let oc = open_out_gen [ Open_append; Open_creat ] 0o600 path in
-       Fun.protect
-         ~finally:(fun () -> close_out_noerr oc)
-         (fun () ->
-            Printf.fprintf
-              oc
-              "%s\t%s\t%d\tverbatim=%b\t%s\n"
-              label
-              reason
-              (String.length raw)
-              verbatim
-              (String.escaped scrubbed))
-     with
-     | Sys_error _ -> ())
+let malformed_projection ~wire_format ~reason ~raw =
+  let wire_label =
+    Http_client.provider_wire_format_to_string wire_format |> String.uppercase_ascii
+  in
+  { error =
+      Http_client.ProviderFailure
+        { kind =
+            Http_client.Provider_wire_error
+              { format = wire_format; kind = Http_client.Malformed_payload }
+        ; message =
+            (match raw with
+             | "" -> Printf.sprintf "%s parse failed: %s" wire_label reason
+             | raw ->
+               Printf.sprintf "%s parse failed: %s raw=%S"
+                 wire_label reason (parse_error_raw_excerpt raw))
+        }
+  ; diagnostic = Some { wire_format; reason; raw }
+  }
 ;;
 
 (* Terminal telemetry labels for stream failures. They live beside the typed
@@ -218,10 +196,10 @@ let%test "oversized payload remains a typed wire fact" =
    gets here. [raw] stays out of the body: it is the whole chunk, content
    included. Without a declared condition the envelope stays provider-owned
    diagnostic data. *)
-let http_error_of_stream_error
+let project_stream_error
       ?(wire_format = Http_client.Sse)
       (serr : Types.stream_error)
-  : Http_client.http_error
+  : projection
   =
   let wire_label =
     Http_client.provider_wire_format_to_string wire_format |> String.uppercase_ascii
@@ -234,8 +212,9 @@ let http_error_of_stream_error
       ; report = _
       ; raw = _
       } ->
-    Http_client.HttpError
-      { code = status; body = Http_client.Received error_body; retry_after_header = None }
+    without_diagnostic
+      (Http_client.HttpError
+         { code = status; body = Http_client.Received error_body; retry_after_header = None })
   | Types.Stream_provider_error
       { message
       ; error_type
@@ -243,7 +222,7 @@ let http_error_of_stream_error
       ; report = Types.Provider_stated
       ; raw
       } ->
-    Http_client.ProviderFailure
+    without_diagnostic (Http_client.ProviderFailure
       { kind = Http_client.Provider_reported_error { error_type }
       ; message =
           Printf.sprintf
@@ -251,7 +230,7 @@ let http_error_of_stream_error
             wire_label
             message
             (parse_error_raw_excerpt raw)
-      }
+      })
   (* The choice said the generation failed and no error object arrived with
      it: nothing declares a type or a status, and the answer stopped part-way
      for a reason the provider kept to itself. *)
@@ -262,7 +241,7 @@ let http_error_of_stream_error
       ; report = Types.Unstated_errored_choice
       ; raw
       } ->
-    Http_client.ProviderFailure
+    without_diagnostic (Http_client.ProviderFailure
       { kind = Http_client.Provider_interrupted
       ; message =
           Printf.sprintf
@@ -270,59 +249,32 @@ let http_error_of_stream_error
             wire_label
             message
             (parse_error_raw_excerpt raw)
-      }
+      })
   | Types.Stream_parse_failed { reason; raw } ->
-    dump_refused_frame ~label:wire_label ~reason raw;
-    Http_client.ProviderFailure
-      { kind =
-          Http_client.Provider_wire_error
-            { format = wire_format; kind = Http_client.Malformed_payload }
-      ; message =
-          (match raw with
-           | "" -> Printf.sprintf "%s parse failed: %s" wire_label reason
-           | raw ->
-             Printf.sprintf
-               "%s parse failed: %s raw=%S"
-               wire_label
-               reason
-               (parse_error_raw_excerpt raw))
-      }
+    malformed_projection ~wire_format ~reason ~raw
   | Types.Stream_ndjson_parse_failed { reason; raw } ->
-    dump_refused_frame ~label:"NDJSON" ~reason raw;
-    Http_client.ProviderFailure
-      { kind =
-          Http_client.Provider_wire_error
-            { format = Http_client.Ndjson; kind = Http_client.Malformed_payload }
-      ; message =
-          (match raw with
-           | "" -> Printf.sprintf "NDJSON parse failed: %s" reason
-           | raw ->
-             Printf.sprintf
-               "NDJSON parse failed: %s raw=%S"
-               reason
-               (parse_error_raw_excerpt raw))
-      }
+    malformed_projection ~wire_format:Http_client.Ndjson ~reason ~raw
   | Types.Stream_incomplete { reason } ->
-    Http_client.ProviderFailure
+    without_diagnostic (Http_client.ProviderFailure
       { kind =
           Http_client.Provider_wire_error
             { format = wire_format; kind = Http_client.Incomplete_stream }
       ; message = Printf.sprintf "%s stream incomplete: %s" wire_label reason
-      }
+      })
   | Types.Stream_repeating { repeated; occurrences; bytes_seen; shape } ->
-    Http_client.ProviderFailure
+    without_diagnostic (Http_client.ProviderFailure
       { kind =
           Http_client.Repeating_generation
             { shape; occurrences; unit_bytes = String.length repeated }
       ; message = Types.repeating_generation_message ~repeated ~occurrences ~bytes_seen shape
-      }
+      })
   | Types.Stream_unknown_event { event_type; _ } ->
-    Http_client.ProviderFailure
+    without_diagnostic (Http_client.ProviderFailure
       { kind =
           Http_client.Provider_wire_error
             { format = Http_client.Sse; kind = Http_client.Unknown_event }
       ; message = Printf.sprintf "SSE unknown event type: %s" event_type
-      }
+      })
   | Types.Stream_unsupported_part { provider_kind; part; raw } ->
     let capability =
       Printf.sprintf "%s.part.%s" (Provider_kind.to_string provider_kind) part
@@ -336,8 +288,8 @@ let http_error_of_stream_error
           capability
           (parse_error_raw_excerpt raw)
     in
-    Http_client.ProviderFailure
-      { kind = Http_client.Capability_mismatch { capability = Some capability }; message }
+    without_diagnostic (Http_client.ProviderFailure
+      { kind = Http_client.Capability_mismatch { capability = Some capability }; message })
   | Types.Stream_unsupported_response { provider_kind; response; raw } ->
     let capability =
       Printf.sprintf "%s.response.%s" (Provider_kind.to_string provider_kind) response
@@ -351,8 +303,12 @@ let http_error_of_stream_error
           capability
           (parse_error_raw_excerpt raw)
     in
-    Http_client.ProviderFailure
-      { kind = Http_client.Capability_mismatch { capability = Some capability }; message }
+    without_diagnostic (Http_client.ProviderFailure
+      { kind = Http_client.Capability_mismatch { capability = Some capability }; message })
+;;
+
+let http_error_of_stream_error ?wire_format serr =
+  (project_stream_error ?wire_format serr).error
 ;;
 
 (* A choice that finished with [error] and carried no error object: nothing

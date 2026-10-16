@@ -32,7 +32,8 @@ type mount = { source : string; destination : string }
     persistent slot held by a container of a dead incarnation of the same
     installation is removed before create; any other holder is refused with
     [Slot_foreign] and left alone. The default treats every incarnation as
-    live, so nothing is removed. *)
+    live, so nothing is removed. [scope] labels the container with the base
+    path of the server that made it, which is what lets {!sweep} find it. *)
 val start :
   sw:Eio.Switch.t ->
   clock:_ Eio.Time.clock ->
@@ -46,6 +47,7 @@ val start :
   ?container_command:string ->
   ?on_engine:(Lane_addon_lifecycle.engine -> (unit, string) result) ->
   ?is_live_instance:(string -> bool) ->
+  ?scope:string ->
   ?on_created:(t -> unit) ->
   ?artifact_store:Lane_addon_store.t ->
   ?sampling_handler:Lane_addon_sampling.t ->
@@ -99,6 +101,15 @@ val start_failure : error -> Lane_addon_lifecycle.failure
 val cleanup_failure : error -> Lane_addon_lifecycle.failure
 (** The typed failure the runtime records for a failed start, or a cleanup
     that cannot be confirmed. *)
+
+(** Removes the containers this base path's servers left behind. See
+    {!Lane_addon_slot.sweep}. [scope] is the label {!start} was given. *)
+val sweep :
+  clock:_ Eio.Time.clock -> control_timeout_sec:float ->
+  mgr:_ Eio.Process.mgr -> runtime:Lane_addon_types.runtime -> scope:string ->
+  is_live_instance:(string -> bool) ->
+  ?docker_command:string -> ?container_command:string -> unit ->
+  (Lane_addon_slot.sweep_item list, Lane_addon_lifecycle.failure) result
 
 (** True when the container that made [start] or a cleanup refuse with
     [Slot_foreign] is gone or no longer carries those labels. False also when

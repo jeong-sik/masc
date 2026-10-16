@@ -60,6 +60,8 @@ type fake = {
   world : Fake.t;
   home : Fake.engine;
   condition_checks : int ref;
+  sweeps : int ref;
+  swept : Lane_addon_slot.sweep_item list ref;
 }
 
 let output : Types.output = {
@@ -79,7 +81,7 @@ let make_backend () =
   let state = { events = ref []; state_owners=Hashtbl.create 4; recovered_state_owners=Hashtbl.create 4; recovered_runtimes=Hashtbl.create 4; observations = ref []; recovery_barrier = ref None;
                 startup_available = ref true; startup_barrier = ref None; cleanup_available = ref true;
                 image_available = ref true; create_refusal = ref None;
-                world = Fake.create home; home; condition_checks = ref 0 } in
+                world = Fake.create home; home; condition_checks = ref 0; sweeps = ref 0; swept = ref [] } in
   let record event = state.events := event :: !(state.events) in
   let proven ~engine work =
     Lane_addon_slot.proven (Fake.port state.world) ~expected:engine ~lift:Fun.id work in
@@ -145,7 +147,7 @@ let make_backend () =
              | Error failure -> record (Startup_failed instance_id); Error failure
              | Ok () ->
                  match Fake.add (Fake.current state.world) ~id:container_id ~name
-                         ~labels:(["masc.lane.instance", instance_id]
+                         ~labels:(["masc.lane.instance", instance_id; Lane_addon_engine.scope_label, Fake.scope_of_world]
                                   @ Option.fold ~none:[] ~some:(fun owner -> ["masc.lane.state.owner", owner]) mine) () with
                  | Error detail -> record (Startup_failed instance_id); Error (Lifecycle.Worker_failed detail)
                  | Ok _ ->
@@ -182,6 +184,11 @@ let make_backend () =
     condition_met = (fun ~runtime:_ condition ->
       incr state.condition_checks;
       Fake.condition_met state.world condition);
+    sweep = (fun ~runtime ~is_live_instance ->
+      incr state.sweeps;
+      let result = Lane_addon_slot.sweep (Fake.port state.world) ~runtime ~is_live_instance in
+      Result.iter (fun items -> state.swept := !(state.swept) @ items) result;
+      result);
   } in
   state, backend
 
@@ -1725,6 +1732,46 @@ let test_detach_of_a_retained_record_keeps_the_declaration_when_cleanup_fails ()
     check bool "after the confirmed release the declaration is removed" false (Sys.file_exists path);
     check bool "the container is released" false (Fake.holds state.home (Store.digest id)))
 
+(* After an abnormal exit nothing but the engine knows which containers the
+   dead server made. The first beat that finds the engine answering removes
+   the dead ones of this base path, once; until then the declaration is
+   reported, not retried in the log. *)
+let test_a_dead_servers_containers_are_swept_once_the_engine_answers () =
+  with_fixture (fun env _ config directory packages state ->
+    let clock = Eio.Stdenv.clock env in
+    let manifest = package packages "ready" in
+    write (Filename.concat directory "observer.toml") (declaration ~id:"observer" ~manifest ());
+    let dead_name = Lane_addon_engine.owned_name Types.Docker "dead-server-instance" in
+    ignore (Fake.add state.home ~run_state:Fake.Exited ~id:"dead-server-container" ~name:dead_name
+      ~labels:["masc.lane.instance", "dead-server-instance"; Lane_addon_engine.scope_label, Fake.scope_of_world] ());
+    ignore (Fake.add state.home ~id:"other-servers-container" ~name:"masc-lane-elsewhere"
+      ~labels:["masc.lane.instance", "elsewhere"; Lane_addon_engine.scope_label, "another base path"] ());
+    Fake.set_up state.home false;
+    let result = reconcile config directory in
+    let refused_attempt = declared_instance config "observer" |> text "instance_id" in
+    check bool "the unreachable engine is reported as an issue of this beat" true
+      (List.exists (fun issue -> String_util.contains_substring (text "message" issue) "Orphan container sweep")
+         (values "issues" result));
+    check bool "nothing was removed" true (Fake.holds state.home "dead-server-container");
+    Fake.set_up state.home true;
+    ignore (reconcile config directory);
+    check bool "the dead server's container is removed" false (Fake.holds state.home "dead-server-container");
+    check bool "another base path's container is not" true (Fake.holds state.home "other-servers-container");
+    check bool "the report names the removal" true
+      (List.exists (fun (item : Lane_addon_slot.sweep_item) ->
+         item.container_id = "dead-server-container" && item.verdict = Lane_addon_slot.Removed) !(state.swept));
+    (* The attempt made while the engine was down is retired once it answers;
+       the next beat attaches. *)
+    await clock (fun () -> List.for_all (fun v -> text "instance_id" v <> refused_attempt) (instances config));
+    ignore (reconcile config directory);
+    let id = declared_instance config "observer" |> text "instance_id" in
+    await_ready clock config id;
+    let sweeps = !(state.sweeps) in
+    ignore (reconcile config directory);
+    check int "the sweep runs once per runtime" sweeps !(state.sweeps);
+    check bool "the live worker's container is untouched" true (Fake.holds state.home (Store.digest id));
+    detach clock config id)
+
 let test_binding_inventory_issues_carry_failure_kind_tags () =
   with_fixture (fun _ _ config _directory _packages _state ->
     let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
@@ -1849,6 +1896,8 @@ let () = run "Lane Add-on TOML reconciliation" ["declarative optional extension"
     test_a_dead_predecessor_holding_the_slot_does_not_block_a_new_instance;
   test_case "a foreign holder makes the attempt wait for the holder to change" `Quick
     test_a_foreign_holder_makes_the_attempt_wait_for_the_holder_to_change;
+  test_case "a dead server's containers are swept once the engine answers" `Quick
+    test_a_dead_servers_containers_are_swept_once_the_engine_answers;
   test_case "Detach keeps the declaration when cleanup fails" `Quick
     test_detach_keeps_the_declaration_when_cleanup_fails;
   test_case "Detach of a retained record keeps the declaration when cleanup fails" `Quick

@@ -108,7 +108,11 @@ elif action == "ls":
         config = json.loads(file.read_text())
         if config.get("engine") != engine_id():
             continue
-        if (condition == "id=" + config["Id"] or
+        if condition.startswith("label="):
+            key, _, wanted = condition[len("label="):].partition("=")
+            if config["Config"]["Labels"].get(key) == wanted:
+                output(config["Id"])
+        elif (condition == "id=" + config["Id"] or
             condition == "name=^" + config["Name"] + "$"):
             output(config["Id"])
     if (root / "flip-on-ls").exists():
@@ -925,6 +929,79 @@ let test_an_apple_dead_predecessor_is_cleared_from_the_writer_slot () =
       (List.assoc_opt "masc.lane.state.owner" labels);
     ignore (unwrap (observe fresh "good"));
     unwrap (Worker.stop fresh))
+
+
+let start_scoped ?state_owner env sw dir docker ?scope instance_id =
+  Worker.start ~sw ~clock:(Eio.Stdenv.clock env) ~control_timeout_sec
+    ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id
+    ~package:{ (package dir "good") with state_storage =
+      (match state_owner with None -> Types.Ephemeral | Some _ -> Types.Persistent) }
+    ?state_owner ?scope ~docker_command:docker ()
+
+(* A server that died leaves containers no record names. The sweep finds them
+   by the base-path scope label, removes the dead ones whose labels explain
+   their names, and touches nothing of any other server. *)
+let test_a_sweep_removes_only_the_dead_containers_of_its_own_base_path () = with_fixture (fun env sw dir docker ->
+  let owner = slot_owner dir in
+  let live = unwrap (start_scoped env sw dir docker ~scope:"scope-a" "live-one") in
+  let dead_ephemeral = unwrap (start_scoped env sw dir docker ~scope:"scope-a" "dead-one") in
+  let dead_writer = unwrap (start_scoped ~state_owner:owner env sw dir docker ~scope:"scope-a" "dead-writer") in
+  let other_server = unwrap (start_scoped env sw dir docker ~scope:"scope-b" "dead-other") in
+  let unscoped = unwrap (start_scoped env sw dir docker "dead-unscoped") in
+  let tampered = unwrap (start_scoped env sw dir docker ~scope:"scope-a" "dead-tampered") in
+  let stuck = unwrap (start_scoped env sw dir docker ~scope:"scope-a" "dead-stuck") in
+  let path worker = container_path dir worker in
+  (* A container whose name its labels do not explain was not named for them. *)
+  write (path tampered) (Yojson.Safe.to_string (`Assoc (("Name", `String "/not-named-for-its-labels")
+    :: List.remove_assoc "Name" (read_container (path tampered)))));
+  write (Filename.concat dir (Worker.container_id stuck ^ ".refuse-remove")) "blocked";
+  let swept = match Worker.sweep ~clock:(Eio.Stdenv.clock env) ~control_timeout_sec
+      ~mgr:(Eio.Stdenv.process_mgr env) ~runtime:Types.Docker ~scope:"scope-a"
+      ~is_live_instance:(fun id -> String.equal id "live-one") ~docker_command:docker () with
+    | Ok items -> items
+    | Error failure -> fail (Lifecycle.failure_to_string failure) in
+  let verdict_of worker =
+    match List.find_opt (fun (item : Masc.Lane_addon_slot.sweep_item) ->
+      String.equal item.container_id (Worker.container_id worker)) swept with
+    | Some item -> Some item.verdict
+    | None -> None in
+  let module Slot = Masc.Lane_addon_slot in
+  check bool "a dead ephemeral container is removed" true (verdict_of dead_ephemeral = Some Slot.Removed);
+  check bool "a dead writer is removed" true (verdict_of dead_writer = Some Slot.Removed);
+  check bool "a live incarnation is left alone" true (verdict_of live = Some Slot.Live);
+  check bool "a name the labels do not explain is refused and named" true
+    (match verdict_of tampered with
+     | Some (Slot.Refused (Lifecycle.Slot_foreign {instance = Some "dead-tampered"; _})) -> true
+     | Some _ | None -> false);
+  check bool "a removal the engine refuses is reported with its incarnation" true
+    (match verdict_of stuck with
+     | Some (Slot.Refused (Lifecycle.Slot_predecessor_unremovable {instance_id = "dead-stuck"; _})) -> true
+     | Some _ | None -> false);
+  check bool "another server's container is never listed" true
+    (verdict_of other_server = None && verdict_of unscoped = None);
+  List.iter (fun (label, worker, expected) ->
+    check bool label expected (Sys.file_exists (path worker)))
+    [ "dead ephemeral gone", dead_ephemeral, false; "dead writer gone", dead_writer, false;
+      "live kept", live, true; "tampered kept", tampered, true; "stuck kept", stuck, true;
+      "other base path kept", other_server, true; "unscoped kept", unscoped, true ];
+  check bool "the state volume survives the sweep" true
+    (Sys.file_exists (Filename.concat dir (Slot_state.volume_name owner ^ ".volume"))))
+
+let test_a_sweep_touches_nothing_while_the_engine_does_not_answer () = with_fixture (fun env sw dir docker ->
+  let dead = unwrap (start_scoped env sw dir docker ~scope:"scope-a" "dead-one") in
+  write (Filename.concat dir "daemon-unavailable") "down";
+  (match Worker.sweep ~clock:(Eio.Stdenv.clock env) ~control_timeout_sec
+     ~mgr:(Eio.Stdenv.process_mgr env) ~runtime:Types.Docker ~scope:"scope-a"
+     ~is_live_instance:(fun _ -> false) ~docker_command:docker () with
+   | Error (Lifecycle.Engine_unreachable _) -> ()
+   | Ok _ | Error _ -> fail "an engine that does not answer must stop the sweep as Engine_unreachable");
+  Sys.remove (Filename.concat dir "daemon-unavailable");
+  check bool "nothing was removed" true (Sys.file_exists (container_path dir dead));
+  check bool "the item line names the container and its verdict" true
+    (let line = Masc.Lane_addon_slot.sweep_item_to_string
+       { container_id = "abc"; instance = Some "dead-one"; verdict = Masc.Lane_addon_slot.Removed } in
+     String_util.contains_substring line "removed container abc"
+     && String_util.contains_substring line "dead-one"))
 
 exception Owner_detached
 
@@ -2369,4 +2446,8 @@ let () = run "Lane Add-on worker" [ "lifecycle", [
     test_the_holder_condition_reads_the_container_it_was_refused_for;
   test_case "an Apple dead predecessor is cleared from the writer slot" `Quick
     test_an_apple_dead_predecessor_is_cleared_from_the_writer_slot;
+  test_case "a sweep removes only the dead containers of its own base path" `Quick
+    test_a_sweep_removes_only_the_dead_containers_of_its_own_base_path;
+  test_case "a sweep touches nothing while the engine does not answer" `Quick
+    test_a_sweep_touches_nothing_while_the_engine_does_not_answer;
 ]]

@@ -21,12 +21,14 @@ type engine = {
   containers : (string, container) Hashtbl.t;
   refusing_removal : (string, unit) Hashtbl.t;
 }
-type t = { mutable current : engine }
+(* [scope] is the base-path label the fake servers put on their containers. *)
+type t = { mutable current : engine; scope : string }
 
 let engine ?(up = true) identity =
   { identity; up; containers = Hashtbl.create 4; refusing_removal = Hashtbl.create 1 }
 let docker name = engine (Lifecycle.Docker_engine name)
-let create engine = { current = engine }
+let scope_of_world = "fixture-scope"
+let create engine = { current = engine; scope = scope_of_world }
 let point_at world engine = world.current <- engine
 let current world = world.current
 let set_up engine up = engine.up <- up
@@ -74,6 +76,10 @@ let port world : Slot.port = {
   remove = (fun id -> engine_command world (fun engine ->
     if Hashtbl.mem engine.refusing_removal id then Error ("removal refused: " ^ id)
     else (Hashtbl.remove engine.containers id; Ok ())));
+  scoped = (fun () -> engine_command world (fun engine ->
+    Ok (containers engine
+        |> List.filter (fun c -> List.assoc_opt Engine.scope_label c.labels = Some world.scope)
+        |> List.map (fun c -> c.id))));
 }
 
 (* The runtime's one cheap read of a waiting failure's condition. *)

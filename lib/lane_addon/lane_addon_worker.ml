@@ -194,7 +194,7 @@ let remove_container ~runtime ~run id =
 (* The slot procedures run over these four engine commands. Their errors are
    text for the operator; what an absence or a holder means is decided in
    [Lane_addon_slot]. *)
-let slot_port ~run runtime : Lane_addon_slot.port =
+let slot_port ?scope ~run runtime : Lane_addon_slot.port =
   let text error = error_to_string error in
   { read_engine = (fun () -> read_engine_with ~run runtime);
     find = (fun lookup ->
@@ -205,7 +205,13 @@ let slot_port ~run runtime : Lane_addon_slot.port =
       let* raw = run ~operation:"inspect container" (Engine.inspect_arguments runtime id)
         |> Result.map_error text in
       Engine.held_of_inspect runtime raw);
-    remove = (fun id -> remove_container ~runtime ~run id |> Result.map_error text) }
+    remove = (fun id -> remove_container ~runtime ~run id |> Result.map_error text);
+    scoped = (fun () -> match scope with
+      | None -> Error "no base-path scope was given"
+      | Some scope ->
+          let* raw = run ~operation:"list scoped containers" (Engine.scoped_list_arguments runtime scope)
+            |> Result.map_error text in
+          Engine.listed_scoped_ids runtime ~scope raw) }
 
 let slot_name ~runtime ~instance_id = function
   | None -> Engine.owned_name runtime instance_id
@@ -232,6 +238,15 @@ let recover_stop ~clock ~control_timeout_sec ~mgr ~instance_id ~container_id ~en
       Lane_addon_slot.release port ~lookup ~instance_id ~mine
       |> Result.map_error (fun failure -> Lifecycle failure))
 
+let sweep ~clock ~control_timeout_sec ~mgr ~runtime ~scope ~is_live_instance
+    ?(docker_command = "docker") ?(container_command = "container") () =
+  if not (Float.is_finite control_timeout_sec) || control_timeout_sec <= 0. then
+    Error (Lane_addon_lifecycle.Worker_failed "control_timeout_sec must be finite and positive")
+  else
+    let command = command_for runtime ~docker_command ~container_command in
+    let run = run_control ~clock ~timeout_sec:control_timeout_sec ~mgr ~runtime ~command in
+    Lane_addon_slot.sweep (slot_port ~scope ~run runtime) ~runtime ~is_live_instance
+
 let holder_changed ~clock ~control_timeout_sec ~mgr ~runtime
     ?(docker_command = "docker") ?(container_command = "container") holder =
   Float.is_finite control_timeout_sec && control_timeout_sec > 0.
@@ -252,7 +267,7 @@ let stop t =
     Ok ()
 
 let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package) ?state_owner ?(mounts = [])
-    ?(docker_command = "docker") ?(container_command = "container") ?(on_engine = fun _ -> Ok ()) ?(is_live_instance = fun _ -> true) ?(on_created = fun _ -> ()) ?artifact_store ?sampling_handler () =
+    ?(docker_command = "docker") ?(container_command = "container") ?(on_engine = fun _ -> Ok ()) ?(is_live_instance = fun _ -> true) ?scope ?(on_created = fun _ -> ()) ?artifact_store ?sampling_handler () =
   let* () = if String.trim instance_id = "" then Error (Invalid_package "instance_id must be non-blank")
     else Ok () in
   let* () = if Float.is_finite control_timeout_sec && control_timeout_sec > 0. then Ok ()
@@ -345,7 +360,7 @@ let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package)
     Eio.Cancel.protect (fun () ->
       match cleanup () with
       | Ok () -> ()
-      | Error error -> Eio.traceln "%s" (error_to_string error)));
+      | Error error -> Log.Misc.error "Lane Add-on worker cleanup failed: %s" (error_to_string error)));
   let fail_start error =
     match cleanup () with
     | Ok () -> Error error
@@ -370,7 +385,7 @@ let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package)
       |> Result.map_error (fun failure -> Lifecycle failure) in
     run ~operation:"create"
       (Engine.create_arguments package ~name ~instance_id ~state_owner:mine ~image:package.image
-         ~package_mount ~mounts:mounted ~state_mounts:state_mount) in
+         ~scope ~package_mount ~mounts:mounted ~state_mounts:state_mount) in
   let* created = match Lane_addon_slot.proven port ~expected:engine
       ~lift:(fun failure -> Lifecycle failure) create_on_engine with
     | Ok value -> Ok value

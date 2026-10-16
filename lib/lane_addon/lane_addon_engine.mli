@@ -4,6 +4,7 @@ type lookup = Name of string | Id of string
 
 val instance_label : string
 val state_owner_label : string
+val scope_label : string
 
 type run_state = Created | Running | Paused | Restarting | Removing | Exited | Dead
 
@@ -21,7 +22,8 @@ val owned_name : Lane_addon_types.runtime -> string -> string
 val valid_id : string -> bool
 val mount_argument : Lane_addon_types.runtime -> mount -> (string, string) result
 val create_arguments :
-  Lane_addon_types.package -> name:string -> instance_id:string -> state_owner:string option -> image:string ->
+  Lane_addon_types.package -> name:string -> instance_id:string -> state_owner:string option ->
+  scope:string option -> image:string ->
   package_mount:string -> mounts:string list -> state_mounts:string list -> string list
 val start_arguments : Lane_addon_types.runtime -> string -> string list
 val inspect_arguments : Lane_addon_types.runtime -> string -> string list
@@ -32,6 +34,9 @@ val verify_container :
   Lane_addon_types.runtime -> name:string -> resources:Lane_addon_types.resources ->
   image_digest:string option -> string -> (string, string) result
 val held_of_inspect : Lane_addon_types.runtime -> string -> (held, string) result
+val scoped_list_arguments : Lane_addon_types.runtime -> string -> string list
+val listed_scoped_ids : Lane_addon_types.runtime -> scope:string -> string -> (string list, string) result
+(** The containers that carry this scope label, from a listing. *)
 (** Refuses a container whose state word is not documented. *)
 val info_arguments : Lane_addon_types.runtime -> string list
 (** The engine identity command. Its exit status alone decides reachability. *)

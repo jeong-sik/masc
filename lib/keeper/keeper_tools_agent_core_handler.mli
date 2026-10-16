@@ -32,7 +32,9 @@
     is read once at invocation entry and passed unchanged through dispatch.
     That same snapshot supplies the turn id when available. Callers without
     source context retain [keeper_turn_id] attribution without inventing a
-    source Task. *)
+    source Task. [owned_job_replay] carries only the original job source to
+    the owned-job producer; physical metadata and ordinary call attribution
+    remain those of the current invocation. *)
 val make_keeper_tool_handler
   :  capability_surface:Keeper_capability_surface.t
   -> name:string
@@ -46,6 +48,7 @@ val make_keeper_tool_handler
   -> ctx_snapshot:Keeper_types.working_context
   -> keeper_turn_id:(unit -> int option)
   -> ?source_context:(unit -> Keeper_tool_call_log_context.turn_context option)
+  -> ?owned_job_replay:Keeper_owned_job_invocation.replay
   -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?continuation_channel:Keeper_continuation_channel.t
@@ -82,6 +85,7 @@ val make_keeper_tool_handler_from_meta
   -> ctx_snapshot:Keeper_types.working_context
   -> keeper_turn_id:(unit -> int option)
   -> ?source_context:(unit -> Keeper_tool_call_log_context.turn_context option)
+  -> ?owned_job_replay:Keeper_owned_job_invocation.replay
   -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?continuation_channel:Keeper_continuation_channel.t

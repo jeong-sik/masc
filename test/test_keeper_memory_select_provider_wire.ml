@@ -94,7 +94,7 @@ let replay ~provider_wire () =
   let context : Dispatch.context =
     {config;meta;publication_recovery={provider=Masc.Keeper_publication_recovery_availability.non_runtime_provider;keeper_name=keeper_id};
      ctx_work=Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"";
-     source_context=None;
+     source_context=None; owned_job_replay=None;
      turn_sandbox_factory=None;sw=Some sw;clock=Some clock;proc_mgr=None;net=Some net;
      mcp_session_id=None;continuation_channel=None;gate_context=None;turn_ref=Some turn_ref;
      gate_grant=None;tool_use_id=None;trace_id=None;result_projection=None;capability_authority=Compatibility_meta} in

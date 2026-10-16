@@ -988,28 +988,28 @@ let execute_keeper_with_authority
   (* TEL-OK: [handler] below is Keeper_tools_agent_core_handler, which
      already records telemetry (Otel_metric_store.inc_counter). *)
   let dispatch_admitted ?launch_replay ~tool_use_id ~(node : Keeper_tool_plan.node) ~descriptor ~schedule ~input () =
-    (* A replayed launch re-calls the owned-job runtime with the occurrence's
-       recorded invocation identity, never the resuming turn's ambient
-       context. Overriding both the ledger turn and the source snapshot makes
-       the runtime derive exactly the recorded (trace_id, turn_ref) pair, so
-       the invocation binding returns the same job. *)
-    let keeper_turn_id, source_context =
-      match (launch_replay : Keeper_tool_execution_journal.recheck_launch option) with
-      | None -> keeper_turn_id, source_context
-      | Some replay ->
-          let absolute_turn = Ids.Turn_ref.absolute_turn replay.invocation.turn_ref in
-          let apply (context : Keeper_tool_call_log_context.turn_context) =
-            { context with
-              Keeper_tool_call_log_context.trace_id = Some replay.invocation.trace_id
-            ; turn = Some absolute_turn
-            ; keeper_turn_id = Some absolute_turn } in
-          (fun () -> Some absolute_turn),
-          (match source_context with
-           | Some context -> Some (apply context)
-           | None ->
-             Some (apply { Keeper_tool_call_log_context.empty_turn_context with
-               agent_name = Some meta.Keeper_meta_contract.name }))
-    in
+    (* Replay identity comes from the admitted journal, not the current turn's
+       metadata. The owned-job producer receives it as an Existing-only call. *)
+    let replay_context =
+      match (launch_replay : Keeper_tool_execution_journal.recheck_launch option), journal with
+      | None, None | None, Some _ -> Ok None
+      | Some _, None -> Error "interrupted launch has no original journal source"
+      | Some replay, Some worker ->
+          let original = Keeper_tool_execution_journal.worker_source worker in
+          let source : Keeper_owned_job_store.source =
+            { task_id = original.source_task_id
+            ; keeper_turn_id = replay.invocation.keeper_turn_id
+            ; turn_ref = Some replay.invocation.turn_ref
+            ; trace_id = Some replay.invocation.trace_id
+            ; tool_use_id = Some replay.tool_use_id } in
+          Keeper_owned_job_invocation.replay_of_source source |> Result.map Option.some in
+    match replay_context with
+    | Error detail ->
+        dispatch_result ~failure_effect_disposition:Tool_result.Effect_outcome_unknown
+          (Tool_result.make_err ~tool_name:node.tool_name ~class_:Tool_result.Policy_rejection
+             ~effect_disposition:Tool_result.Effect_outcome_unknown
+             ~start_time:(Tool_timing.start ()) detail)
+    | Ok owned_job_replay ->
     let terminal_on_completed, terminal_on_failed =
       match descriptor.Keeper_tool_descriptor.execution with
       | Keeper_tool_descriptor.Terminal -> on_completed, on_failed
@@ -1038,6 +1038,7 @@ let execute_keeper_with_authority
         ~ctx_snapshot
         ~keeper_turn_id
         ~source_context:(fun () -> source_context)
+        ?owned_job_replay
         ?turn_sandbox_factory
         ?clock
         ?continuation_channel
@@ -1083,15 +1084,18 @@ let execute_keeper_with_authority
         ?truncated_to
         result
   in
-  (* Derive the exact invocation identity a launch leaf will pass to the
-     owned-job runtime, from the same ambient values that boundary reads:
-     the turn snapshot supplies trace_id (and the turn fallback), the keeper
-     turn supplies the absolute turn. [None] means the runtime could never
-     build a complete invocation — the executor then refuses the dispatch. *)
+  (* Mirror the actual handler's source snapshot priority for the K coordinate,
+     then its explicit TurnRef and the job producer's fallback. A mismatched
+     trace is unavailable identity, never a license to invent a binding. *)
   let launch_invocation_of () =
     let trace_id = Option.bind source_context (fun context ->
       context.Keeper_tool_call_log_context.trace_id) in
-    let turn_ref = match keeper_turn_id () with
+    let original_keeper_turn_id = Option.bind source_context (fun context ->
+      context.Keeper_tool_call_log_context.keeper_turn_id) in
+    let call_keeper_turn_id = match source_context with
+      | Some _ -> original_keeper_turn_id
+      | None -> keeper_turn_id () in
+    let turn_ref = match call_keeper_turn_id with
       | Some absolute_turn ->
         Some (Ids.Turn_ref.make
           ~trace_id:(Keeper_id.Trace_id.to_string meta.Keeper_meta_contract.runtime.trace_id)
@@ -1105,7 +1109,8 @@ let execute_keeper_with_authority
     match trace_id, turn_ref with
     | Some trace_id, Some turn_ref
       when String.equal trace_id (Ids.Turn_ref.trace_id turn_ref) ->
-      Some { Keeper_tool_execution_journal.trace_id; turn_ref }
+      Some { Keeper_tool_execution_journal.trace_id; turn_ref;
+             keeper_turn_id = original_keeper_turn_id }
     | Some _, Some _ | Some _, None | None, _ -> None
   in
   let tool_use_id_for_node ~execution_id:_ node =

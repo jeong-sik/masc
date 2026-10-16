@@ -21,6 +21,7 @@ let make_keeper_tool_handler_with_authority
       ~(ctx_snapshot : Keeper_types.working_context)
       ~(keeper_turn_id : unit -> int option)
       ?source_context
+      ?owned_job_replay
       ?turn_sandbox_factory
       ?clock
       ?continuation_channel
@@ -254,6 +255,7 @@ let make_keeper_tool_handler_with_authority
                 ~ctx_snapshot
                 ~keeper_turn_id:call_keeper_turn_id
                 ?source_context:call_source_context
+                ?owned_job_replay
                 ?turn_sandbox_factory
                 ?sw
                 ?clock

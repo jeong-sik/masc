@@ -130,7 +130,7 @@ type submission =
   ; execution : (Executor.node_result list, Executor.failure) result option ref }
 let submit ?request_context ?(caller = keeper) ?(target = keeper)
     ?(on_acceptance_probe = fun _ -> ())
-    ?(before_execute = fun _ -> ()) ?plan ?observe ?launch_invocation_of base_path sw prepared dispatch =
+    ?(before_execute = fun _ -> ()) ?plan ?observe ?launch_invocation_of ?admit_node base_path sw prepared dispatch =
   let bound = ref None and admission_error = ref None and execution = ref None in
   let terminal, resolver = Eio.Promise.create () in
   let request_context = Option.value request_context ~default:(context prepared.source) in
@@ -150,7 +150,7 @@ let submit ?request_context ?(caller = keeper) ?(target = keeper)
         let worker = match !bound with Some worker -> worker | None -> fail "unbound worker dispatched" in
         before_execute worker;
         let result = Executor.execute ~plan:(Option.value plan ~default:(Draft.plan prepared.draft))
-            ~run_id:(Plan.Run_id.fresh ()) ~journal:worker ~dispatch ?launch_invocation_of ?observe_node_result:observe () in
+            ~run_id:(Plan.Run_id.fresh ()) ~journal:worker ~dispatch ?launch_invocation_of ?admit_node ?observe_node_result:observe () in
         execution := Some result;
         let data = `Assoc ["composition_run_id", `String (Plan.Composition_run_id.to_string prepared.source.composition_run_id)] in
         match result with
@@ -622,10 +622,12 @@ let first_loss_plan ~readonly =
        ~input:(Plan.Json_template.literal input) ()]
   |> require "first-loss canonical plan"
 
-let first_loss_success (node : Plan.node) =
+let first_loss_success_result (node : Plan.node) =
   Tool_result.make_ok ~tool_name:node.tool_name ~start_time:(Tool_timing.start ())
     ~data:(`Assoc ["profile", `String "original-profile"; "lane", `Null; "endpoint", `Null;
       "probe", `Null; "last_dispatch", `Null; "operator_action", `Null]) ()
+
+let first_loss_success node = first_loss_success_result node
   |> Executor.dispatch_result
 
 let child_first_loss base_path run_id mode =
@@ -635,28 +637,65 @@ let child_first_loss base_path run_id mode =
   let prepared = reconstruct base_path run_id in
   let snapshot () = write (Filename.concat base_path "first-loss-journal")
       (read (journal_path base_path prepared.source.composition_run_id)) in
+  let record_effect () =
+    let channel = open_out_gen [Open_wronly; Open_creat; Open_append; Open_binary] 0o600
+        (Filename.concat base_path "first-loss-effect") in
+    Fun.protect ~finally:(fun () -> close_out channel)
+      (fun () -> output_string channel "one dispatch entry\n") in
+  let retain_unproven_producer worker =
+    if mode <> "readonly" then (
+      (* Author unproven producer evidence through the canonical journal API.
+         The modern Executor correctly refuses an identity-less owned launch
+         before Attempting; it must not be claimed as this evidence's author.
+         Real async acceptance still owns this worker, source and marker. *)
+      let plan = Draft.plan prepared.draft in
+      Journal.validate_plan worker ~plan |> journal_value "unproven producer plan";
+      let run_id = Plan.Run_id.fresh () in
+      let begin_node name ~readonly =
+        let node = List.find (fun node -> node_name node = name) (Plan.nodes plan) in
+        let input = Plan.resolve_input plan ~run_id ~node_id:node.id ~lookup:(fun _ -> None)
+            |> require "original literal producer input" in
+        let attempt = Journal.begin_attempt worker ~node_id:node.id ~tool_name:node.tool_name
+            ~input ~execution_id:(Ids.Execution_id.generate ())
+            ~tool_use_id:("original-first-loss-" ^ name) ~readonly ()
+            |> journal_value "original producer attempt" in
+        node, input, attempt in
+      let settle ?failure_effect_disposition attempt result =
+        Journal.settle_attempt ?failure_effect_disposition attempt ~result
+          ~result_bytes:(String.length (Tool_result.message result)) ~truncated_to:None
+        |> journal_value "original producer settlement" in
+      let sibling, _, sibling_attempt = begin_node "completed-sibling" ~readonly:true in
+      settle sibling_attempt (first_loss_success_result sibling);
+      let node, input, attempt = begin_node "interrupted" ~readonly:false in
+      record_effect ();
+      (match mode with
+       | "attempting" -> ()
+       | "unknown" | "post_effect" ->
+         let phase = if mode = "unknown" then Tool_result.Effect_outcome_unknown
+           else Tool_result.Proven_post_effect in
+         settle ~failure_effect_disposition:phase attempt
+           (Tool_result.make_err ~tool_name:node.tool_name ~class_:Tool_result.Dependency_unavailable
+             ~start_time:(Tool_timing.start ()) ~effect_disposition:phase "producer failure")
+       | "deferred" -> settle attempt
+           (Tool_result.make_deferred ~tool_name:node.tool_name ~start_time:(Tool_timing.start ()) ())
+       | _ -> fail "invalid unproven producer mode");
+      (match Journal.lookup worker ~node_id:node.id ~tool_name:node.tool_name ~input with
+       | Error (Journal.Replay_not_proven id) ->
+         check string "stored original producer is genuinely unproven" "interrupted" (Plan.Node_id.to_string id)
+       | Error error -> fail (Journal.error_to_string error)
+       | Ok _ -> fail "producer fixture did not persist the unproven occurrence");
+      snapshot ();
+      Unix._exit 0) in
   let dispatch ?launch_replay:_ ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ () =
     if node_name node = "interrupted" then (
-      (* This is an actual callback effect after Executor's Attempting append.
-         Process exit leaves the real broker/worker and journal unfinished;
-         the fixture never fabricates an owner, occurrence or Lost record. *)
-      let channel = open_out_gen [Open_wronly; Open_creat; Open_append; Open_binary] 0o600
-          (Filename.concat base_path "first-loss-effect") in
-      Fun.protect ~finally:(fun () -> close_out channel)
-        (fun () -> output_string channel "one dispatch entry\n");
-      match mode with
-      | "attempting" | "readonly" -> snapshot (); Unix._exit 0
-      | "unknown" -> failing Tool_result.Effect_outcome_unknown node
-      | "post_effect" -> failing Tool_result.Proven_post_effect node
-      | "deferred" -> Executor.dispatch_result
-          (Tool_result.make_deferred ~tool_name:node.tool_name
-            ~start_time:(Tool_timing.start ()) ())
-      | _ -> fail "invalid first-loss child mode")
+      (* The readonly control still crosses the real Executor's Attempting
+         boundary and callback. Loss does not invent a prior result wait. *)
+      check string "only the readonly control uses modern dispatch" "readonly" mode;
+      record_effect ();
+      snapshot ();
+      Unix._exit 0)
     else first_loss_success node in
-  let observe row =
-    if Plan.Node_id.to_string row.Executor.node_id = "interrupted"
-    then (snapshot (); Unix._exit 0) else Ok () in
-  let submission = submit ~observe
+  let submission = submit ~before_execute:retain_unproven_producer
       ~on_acceptance_probe:(fun request_id -> write (Filename.concat base_path "first-loss-request") request_id)
       base_path sw prepared dispatch |> accepted in
   ignore (await base_path submission);
@@ -673,6 +712,8 @@ let test_first_loss_retains_unproven_effects mode () =
        Plan.Composition_run_id.to_string prepared.source.composition_run_id; mode];
     let request_id = read (Filename.concat base_path "first-loss-request") in
     let original = read (Filename.concat base_path "first-loss-journal") in
+    check string "original producer actually entered before loss" "one dispatch entry\n"
+      (read (Filename.concat base_path "first-loss-effect"));
     let path = journal_path base_path prepared.source.composition_run_id in
     let recovered = Async.recover_lost_disk_records ~base_path () in
     check int "exclusive recovery publishes one real Lost owner" 1 recovered.lost;
@@ -975,7 +1016,8 @@ let make_launch_plan () =
   |> require "valid owned launch plan"
 let launch_invocation_fixture absolute_turn =
   { Journal.trace_id = "launch-trace-fixture"
-  ; turn_ref = Ids.Turn_ref.make ~trace_id:"launch-trace-fixture" ~absolute_turn }
+  ; turn_ref = Ids.Turn_ref.make ~trace_id:"launch-trace-fixture" ~absolute_turn
+  ; keeper_turn_id = Some absolute_turn }
 let launch_success (node : Plan.node) =
   Executor.dispatch_result
     (Tool_result.make_ok ~tool_name:node.tool_name ~start_time:(Tool_timing.start ())
@@ -1079,6 +1121,41 @@ let test_unknown_launch_effect_replays_with_recorded_identity () = with_workspac
    | Error _ -> fail "replayed unknown launch effect did not complete");
   check_completion base_path prepared second)
 
+let test_launch_replay_mode_survives_pre_effect_refusal () =
+  List.iter (fun unknown -> with_workspace (fun _env sw base_path ->
+    let prepared = prepare ~plan:(make_launch_plan ()) base_path in
+    let recorded = launch_invocation_fixture 41 in
+    let phase = if unknown then Tool_result.Effect_outcome_unknown else Tool_result.Proven_pre_effect in
+    let first_dispatch ?launch_replay:_ ~tool_use_id:_ ~(node : Plan.node) ~descriptor:_ ~schedule:_ ~input:_ () =
+      Executor.dispatch_result ~failure_effect_disposition:phase
+        (Tool_result.make_err ~tool_name:node.tool_name ~class_:Tool_result.Runtime_failure
+           ~effect_disposition:phase ~start_time:(Tool_timing.start ()) "first launch observation") in
+    let first = submit ~launch_invocation_of:(fun () -> Some recorded)
+        base_path sw prepared first_dispatch |> accepted in
+    ignore (await base_path first);
+    let calls = ref 0 in
+    let resume ?launch_replay ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ () =
+      incr calls;
+      check bool "only the original unknown effect requires Existing-only replay" unknown (Option.is_some launch_replay);
+      launch_success node in
+    let denied = submit ~launch_invocation_of:(fun () -> Some recorded)
+        ~admit_node:(fun ~node:_ -> Error Executor.{detail="explicit admission refusal";data=`Assoc []})
+        base_path sw prepared resume |> accepted in
+    ignore (await base_path denied);
+    check int "supported admission API refuses before producer dispatch" 0 !calls;
+    (match Journal.lookup denied.worker ~node_id:(node_id "launcher")
+        ~tool_name:"keeper_job_start" ~input:launch_input with
+     | Ok (Journal.Recheck_launch original) when unknown ->
+         check_recheck_identity "pre-effect refusal preserves original unknown launch" recorded original
+     | Ok Journal.Dispatch when not unknown -> ()
+     | Ok _ -> fail "pre-effect refusal changed the canonical launch mode"
+     | Error error -> fail (Journal.error_to_string error));
+    let restored = submit ~launch_invocation_of:(fun () -> Some (launch_invocation_fixture 63))
+        base_path sw prepared resume |> accepted in
+    ignore (await base_path restored);
+    ignore (executed restored |> require "restored launch admission completes");
+    check int "only restored admission reaches the producer" 1 !calls)) [true;false]
+
 let test_launch_leaf_refuses_incomplete_invocation_identity () = with_workspace (fun _env sw base_path ->
   let prepared = prepare ~plan:(make_launch_plan ()) base_path in
   let calls = ref 0 in
@@ -1130,4 +1207,5 @@ let () = match Array.to_list Sys.argv with
         test_case "exact Queued admission and matched inventory read measurements" `Quick test_exact_queued_admission;
         test_case "interrupted launch leaf replays with its recorded identity" `Quick test_interrupted_launch_replays_with_recorded_identity;
         test_case "unknown launch effect replays with its recorded identity" `Quick test_unknown_launch_effect_replays_with_recorded_identity;
+        test_case "launch replay mode survives a later pre-effect admission refusal" `Quick test_launch_replay_mode_survives_pre_effect_refusal;
         test_case "launch leaf refuses incomplete invocation identity" `Quick test_launch_leaf_refuses_incomplete_invocation_identity]]

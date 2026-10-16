@@ -50,6 +50,7 @@ type context =
   ; source_context : Keeper_tool_call_log_context.turn_context option
     (** Immutable context captured for this invocation. None means unavailable;
         job ownership never substitutes the Keeper current task. *)
+  ; owned_job_replay : Keeper_owned_job_invocation.replay option
   ; result_projection : Tool_output.model_projection option
     (* The projection this call's result crosses on its way to the model,
        resolved for the lane running the call. [None] when the caller did not
@@ -532,6 +533,7 @@ let handle_in_process ctx descriptor args =
   | Tool_keeper_job_dispatch ->
     Some (Keeper_owned_job_runtime.handle ~config:ctx.config ~meta:ctx.meta
       ~continuation_channel:ctx.continuation_channel
+      ~owned_job_replay:ctx.owned_job_replay
       ~source_context:ctx.source_context ~tool_use_id:ctx.tool_use_id
       ~turn_ref:ctx.turn_ref ~trace_id:ctx.trace_id ~name ~args)
   | Tool_keeper_spawn_dispatch ->

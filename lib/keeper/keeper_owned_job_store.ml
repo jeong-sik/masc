@@ -531,6 +531,55 @@ let retire_delivery_marker (record : record) =
       (delivery_path ~base_path:record.base_path record.job_id)
     |> Result.map_error (fun error -> Io_failed (Keeper_fs.durable_remove_error_to_string error))
 
+let load_any ~base_path job_id =
+  let* () = validate_owned_path ~base_path ~job_id ~create:false in
+  protect_io (fun () ->
+    Fs_compat.update_existing_private_file_durable_locked_result
+      (journal_path ~base_path job_id)
+      (fun bytes -> None,
+         let* () = validate_owned_path ~base_path ~job_id ~create:false in
+         let* record = decode_journal bytes in
+         if record.base_path = base_path && record.job_id = job_id
+         then Ok record else Error (Invalid_authority "different job/base"))
+    |> existing_outcome)
+
+let source_absent ~base_path ~keeper_name ~source =
+  let* base_path = canonical_base_path base_path in
+  let* _ = source_of_json (source_to_json source) in
+  if keeper_name = "" then Error (Invalid_authority "keeper_name is required") else
+  let* deliveries = pending_deliveries ~base_path in
+  match deliveries.failures with
+  | (_, error) :: _ -> Error error
+  | [] ->
+      let root = Filename.concat
+          (Filename.concat (Common.masc_dir_from_base_path ~base_path) "keeper_msg_requests")
+          "owned_jobs" in
+      let* names = protect_io (fun () ->
+        let* inspection = Fs_compat.inspect_owned_directory_chain
+            ~ownership_root:(Common.masc_dir_from_base_path ~base_path) root
+            |> Result.map_error (fun error -> Invalid_authority
+              (Fs_compat.owned_directory_chain_rejection_to_string error)) in
+        match inspection with
+        | Fs_compat.Owned_directory_missing -> Ok []
+        | Owned_directory _ -> Fs_compat.read_owned_directory ~owner_uid:(Unix.getuid ())
+            ~ownership_root:(Common.masc_dir_from_base_path ~base_path) root
+            |> Result.map_error (fun _ -> Invalid_authority "owned job directory refused")) in
+      let* directory_ids = map_result
+          (fun name -> Job_id.of_string name |> Result.map_error (fun detail -> Corrupt detail))
+          names in
+      let all_ids = List.sort_uniq
+          (fun left right -> String.compare (Job_id.to_string left) (Job_id.to_string right))
+          (directory_ids @ List.map (fun (entry : pending_delivery) -> entry.job_id) deliveries.entries) in
+      let target = source_to_json source in
+      let rec scan = function
+        | [] -> Ok true
+        | job_id :: rest ->
+            let* record = load_any ~base_path job_id in
+            if record.keeper_name = keeper_name && source_to_json record.source = target
+            then Ok false else scan rest
+      in scan all_ids
+
+
 let prepare_workspace ~base_path job_id inputs =
   let* base_path = canonical_base_path base_path in
   let* () = validate_inputs inputs in

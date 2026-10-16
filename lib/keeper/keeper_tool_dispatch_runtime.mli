@@ -34,6 +34,7 @@ val execute_keeper_tool_descriptor_for_capability_surface_with_outcome
        Keeper_publication_recovery_availability.turn_context
   -> ctx_work:working_context
   -> ?source_context:Keeper_tool_call_log_context.turn_context
+  -> ?owned_job_replay:Keeper_owned_job_invocation.replay
   -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
   -> ?sw:Eio.Switch.t
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
@@ -62,6 +63,7 @@ val execute_keeper_tool_call_for_capability_surface_with_outcome
        Keeper_publication_recovery_availability.turn_context
   -> ctx_work:working_context
   -> ?source_context:Keeper_tool_call_log_context.turn_context
+  -> ?owned_job_replay:Keeper_owned_job_invocation.replay
   -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
   -> ?sw:Eio.Switch.t
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
@@ -88,6 +90,7 @@ module Compatibility : sig
          Keeper_publication_recovery_availability.turn_context
     -> ctx_work:working_context
     -> ?source_context:Keeper_tool_call_log_context.turn_context
+    -> ?owned_job_replay:Keeper_owned_job_invocation.replay
     -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
     -> ?sw:Eio.Switch.t
     -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
@@ -113,6 +116,7 @@ module Compatibility : sig
          Keeper_publication_recovery_availability.turn_context
     -> ctx_work:working_context
     -> ?source_context:Keeper_tool_call_log_context.turn_context
+    -> ?owned_job_replay:Keeper_owned_job_invocation.replay
     -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
     -> ?sw:Eio.Switch.t
     -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
@@ -138,6 +142,7 @@ module Compatibility : sig
          Keeper_publication_recovery_availability.turn_context
     -> ctx_work:working_context
     -> ?source_context:Keeper_tool_call_log_context.turn_context
+    -> ?owned_job_replay:Keeper_owned_job_invocation.replay
     -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
     -> name:string
     -> input:Yojson.Safe.t

@@ -2,6 +2,7 @@ module Store = Keeper_owned_job_store
 let ( let* ) = Result.bind
 
 type invocation = { trace_id : string; turn_ref : Ids.Turn_ref.t; tool_use_id : string }
+type replay = { invocation : invocation; source : Store.source }
 type reservation =
   { job_id : Store.Job_id.t; base_path : string; keeper_name : string
   ; source : Store.source; request_sha256 : string }
@@ -16,6 +17,16 @@ let invocation_of_source (source : Store.source) =
       then Error "owned job invocation has contradictory or invalid identities"
       else Ok (Some {trace_id;turn_ref;tool_use_id})
   | None, _, _ | _, None, _ | _, _, None -> Ok None
+
+let replay_of_source (source : Store.source) =
+  let* _ = Store.source_of_json (Store.source_to_json source)
+      |> Result.map_error Store.error_to_string in
+  let* invocation = invocation_of_source source in
+  match invocation with
+  | Some invocation -> Ok {invocation;source}
+  | None -> Error "interrupted launch requires its complete original invocation"
+
+let replay_source (replay : replay) = replay.source
 
 let invocation_json keeper_name invocation =
   `Assoc ["keeper_name", `String keeper_name; "trace_id", `String invocation.trace_id;
@@ -134,6 +145,37 @@ let reserve ~base_path ~keeper_name ~invocation ~source ~argv ~inputs = protect 
         | Error error -> error.job_id in
       Error {job_id;cause=Store.Commit_unconfirmed (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure)}
   | Private_file_failed error -> Error (wrap (Store.Io_failed (Fs_compat.durable_append_error_to_string error)))
+  | Private_file_failed_with_cleanup_failure {error;cleanup_failure} ->
+      Error (wrap (Store.Io_failed (Fs_compat.durable_append_error_to_string error ^ "; " ^
+          Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure))))
+
+let reserve_existing ~base_path ~keeper_name (replay : replay) ~argv ~inputs = protect (fun () ->
+  let* base_path = canonical_base_path base_path in
+  let invocation = replay.invocation in
+  let location = path ~base_path ~keeper_name invocation in
+  let* () = validate_path ~base_path ~location ~create:false |> Result.map_error wrap in
+  let decide bytes =
+    let result =
+      let* () = validate_path ~base_path ~location ~create:false |> Result.map_error wrap in
+      let* prior = decode bytes |> Result.map_error wrap in
+      let* () = check_scope ~base_path ~keeper_name ~invocation prior
+          |> Result.map_error (wrap ~job_id:prior.job_id) in
+      if Store.source_to_json prior.source = Store.source_to_json replay.source
+         && prior.request_sha256 = request_sha argv inputs
+      then Ok prior
+      else Error (wrap ~job_id:prior.job_id (Store.Invalid_authority
+          "interrupted launch differs from its original invocation source or request")) in
+    None, result in
+  match Fs_compat.update_private_file_durable_locked_result ~create:false location decide with
+  | Fs_compat.Private_file_succeeded result -> result
+  | Private_file_succeeded_with_cleanup_failure {value;cleanup_failure} ->
+      let job_id = match value with
+        | Ok reservation -> Some reservation.job_id
+        | Error error -> error.job_id in
+      Error {job_id;cause=Store.Commit_unconfirmed
+          (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure)}
+  | Private_file_failed error ->
+      Error (wrap (Store.Io_failed (Fs_compat.durable_append_error_to_string error)))
   | Private_file_failed_with_cleanup_failure {error;cleanup_failure} ->
       Error (wrap (Store.Io_failed (Fs_compat.durable_append_error_to_string error ^ "; " ^
           Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure))))

@@ -263,6 +263,7 @@ module For_testing : sig
     ?on_recovery_held:(request_id:string -> reason:string -> unit) ->
     ?after_child_submission:(Tool_result.result -> unit) ->
     ?before_child_dispatch:(unit -> unit) ->
+    ?keeper_turn_id:(unit -> int option) ->
     ?before_plan_execution:(unit -> unit) ->
     ?after_node_observation:(Keeper_tool_plan_executor.node_result -> unit) ->
     ?before_child_result_publication:(unit -> unit) ->
@@ -282,7 +283,9 @@ module For_testing : sig
     unit -> Keeper_msg_async.worker_outcome
   (** The actual production worker, so a fixture can bind a real broker request
       and replace activation authority precisely after acceptance, before the
-      worker restores it. No fabricated worker/journal or global fault hook. *)
+      worker restores it. The optional keeper-turn callback tests the actual
+      handler's snapshot priority; production derives it from turn_context.
+      No fabricated worker/journal or global fault hook. *)
 
   val node_result_to_json : Keeper_tool_plan_executor.node_result -> Yojson.Safe.t
   (** The canonical settlement representation used by the production surface

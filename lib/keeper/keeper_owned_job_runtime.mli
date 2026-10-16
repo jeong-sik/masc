@@ -6,6 +6,7 @@
     manifest, with the job result available under the existing inline ceiling. *)
 val handle :
   config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta ->
+  owned_job_replay:Keeper_owned_job_invocation.replay option ->
   source_context:Keeper_tool_call_log_context.turn_context option ->
   continuation_channel:Keeper_continuation_channel.t option ->
   tool_use_id:string option -> turn_ref:Ids.Turn_ref.t option -> trace_id:string option ->

@@ -26,6 +26,7 @@ let execute_with_observers_with_authority
       ~(ctx_snapshot : Keeper_types.working_context)
       ~(keeper_turn_id : int option)
       ?source_context
+      ?owned_job_replay
       ?turn_sandbox_factory
       ?sw
       ?clock
@@ -81,6 +82,7 @@ let execute_with_observers_with_authority
             ~publication_recovery
             ~ctx_work:ctx_snapshot
             ?source_context
+            ?owned_job_replay
             ?turn_sandbox_factory
             ?sw
             ?clock
@@ -104,6 +106,7 @@ let execute_with_observers_with_authority
             ~publication_recovery
             ~ctx_work:ctx_snapshot
             ?source_context
+            ?owned_job_replay
             ?turn_sandbox_factory
             ?sw
             ?clock
@@ -126,6 +129,7 @@ let execute_with_observers_with_authority
             ~publication_recovery
             ~ctx_work:ctx_snapshot
             ?source_context
+            ?owned_job_replay
             ?turn_sandbox_factory
             ?sw
             ?clock
@@ -148,6 +152,7 @@ let execute_with_observers_with_authority
             ~publication_recovery
             ~ctx_work:ctx_snapshot
             ?source_context
+            ?owned_job_replay
             ?turn_sandbox_factory
             ?sw
             ?clock

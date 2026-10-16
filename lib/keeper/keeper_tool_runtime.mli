@@ -46,6 +46,8 @@ type context =
   ; source_context : Keeper_tool_call_log_context.turn_context option
     (** Immutable context captured for this invocation. None means unavailable;
         job ownership never substitutes the Keeper current task. *)
+  ; owned_job_replay : Keeper_owned_job_invocation.replay option
+    (** Sealed original source for Existing-only interrupted launch recovery. *)
   ; result_projection : Tool_output.model_projection option
     (** The projection this call's result crosses on its way to the model,
         resolved for the lane running the call. [None] when the caller did

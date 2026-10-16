@@ -159,30 +159,16 @@ let validate_plan ~capability_surface json =
       | Nested.Expanded_plan_rejected _ ) as error -> Nested_rejected error)
 ;;
 
+let encoding_error (Keeper_tool_plan_request.Unsubstituted_param {name}) =
+  Malformed_draft ("unbound parameter " ^ name)
+
 let node_contracts plan =
-  List.map (fun (node : Plan.node) ->
-    match Plan.descriptor plan node.id with
-    | None -> `Null
-    | Some descriptor ->
-      let output_schema = match descriptor.Keeper_tool_descriptor.composable_output with
-        | Keeper_tool_descriptor.Opaque_output -> `Null
-        | Keeper_tool_descriptor.Json_output { schema } -> schema in
-      let contract = `Assoc
-          [ "route", Keeper_tool_descriptor.route_evidence_json descriptor
-          ; "input_schema", descriptor.input_schema
-          ; "output_schema", output_schema ] in
-      (* These are definitions, not artifact-bearing execution values. A
-         schema property named [_blob] must not become a manifest reference.
-         Keep the whole immutable contract as canonical literal JSON text;
-         recipe/plan input references still use the strict manifest codec. *)
-      `Assoc [ "node_id", `String (Plan.Node_id.to_string node.id)
-             ; "contract_json", `String
-                 (Yojson.Safe.to_string (Yojson.Safe.sort contract)) ]) (Plan.nodes plan)
-;;
+  Keeper_tool_plan_request.contracts_to_yojson plan |> Result.map_error encoding_error
 
 let contracts ~capability_surface plan =
-  `Assoc [ "surface_digest", `String (Keeper_capability_surface.digest capability_surface)
-         ; "tools", `List (node_contracts plan) ]
+  let* tools = node_contracts plan in
+  Ok (`Assoc [ "surface_digest", `String (Keeper_capability_surface.digest capability_surface)
+            ; "tools", tools ])
 ;;
 
 let put_document ~base_path json =
@@ -261,13 +247,14 @@ let prepare ~base_path ~capability_surface ~keeper_name ~execution json =
   let* authored_source = match metadata with
     | None -> Ok None
     | Some json -> create_authored ~capability_surface ~execution ~plan json |> Result.map Option.some in
+  let* frozen_contracts = contracts ~capability_surface plan in
   let document = `Assoc
     [ "keeper", `String keeper_name
     ; "execution", `String (Catalog.execution_mode_to_string execution)
     ; "recipe", plan_json
     ; "plan", canonical
     ; "nested_calls", Nested.calls_to_json compiled
-    ; "contracts", contracts ~capability_surface plan
+    ; "contracts", frozen_contracts
     ; "skill", (match authored_source with None -> `Null | Some source -> source_to_json source) ] in
   let* reference = put_document ~base_path document in
   Ok { plan; compiled; execution; reference; authored_source }
@@ -334,8 +321,9 @@ let load_with ~admission_check ~base_path ~capability_surface ~keeper_name ~sha2
   let* () = match Nested.calls compiled, execution, List.assoc_opt "skill" fields with
     | [], _, _ | _ :: _, (Catalog.Inline | Catalog.Async), Some `Null -> Ok ()
     | _ :: _, (Catalog.Inline | Catalog.Async), _ -> Error Nested_publication_requires_catalog in
+  let* current_contracts = node_contracts plan in
   let* () = match List.assoc_opt "tools" contract_fields with
-    | Some recorded when same recorded (`List (node_contracts plan)) -> Ok ()
+    | Some recorded when same recorded current_contracts -> Ok ()
     | Some _ | None -> Error Capability_changed in
   let* authored_source = match List.assoc_opt "skill" fields with
     | Some `Null -> Ok None

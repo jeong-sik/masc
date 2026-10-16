@@ -1614,6 +1614,120 @@ let test_export_storage_failure_does_not_advertise_result () =
   check int "storage failure does not replay tool effects" 1 !calls
 ;;
 
+
+(* These native compiler operands are not Skill admission fixtures. Public
+   async-child syntax stays refused until the real producer/owner bridge lands. *)
+let compiled_node ~id ~tool_name input =
+  Plan.node ~id:(node_id id) ~tool_name ~input ()
+
+let compiled_child_fixture () =
+  let require label = function Ok x -> x | Error _ -> fail label in
+  let reference name revision = Skill_reference.of_yojson (`Assoc
+    ["identity",`Assoc ["source_id",`String "fixture";"package_id",`String name;"name",`String name];
+     "content_revision",`String (String.make 64 revision)]) |> require "exact child identity" in
+  let bound tool field =
+    let producer = compiled_node ~id:"producer" ~tool_name:tool (Plan.Json_template.literal (`Assoc [])) in
+    Plan.create ~descriptors:(Descriptor.all_descriptors ())
+      ~exports:[Plan.export ~name:"answer" ~node_id:producer.id ~pointer:(export_pointer field)] [producer]
+    |> require "validated bound child export" in
+  let schema = `Assoc ["type",`String "object";"properties",`Assoc
+      ["_blob",`Assoc ["type",`String "string"]];"additionalProperties",`Bool false] in
+  let make alias revision tool field =
+    let child = Plan.fixed_async_child ~alias:(node_id alias) ~reference:(reference alias revision)
+        ~tool_name:("keeper_composition_" ^ alias) ~args:(`Assoc []) ~input_schema:schema
+        ~bound_plan:(bound tool field) in
+    Plan.child_nodes ~child ~submission_id:(node_id (alias ^ "-submit"))
+      ~result_id:(node_id (alias ^ "-result")) () in
+  let text = make "text" 'a' "keeper_lane_status" "/profile" in
+  let integer = make "integer" 'b' "masc_board_stats" "/post_count" in
+  let children = [text;integer] in
+  let nodes = List.concat_map (fun (child : Plan.child_nodes) -> [child.submission;child.result]) children in
+  let plan = Plan.create_compiled ~descriptors:(Descriptor.all_descriptors ()) ~children nodes
+      |> require "native compiled parent" in
+  plan,children,nodes
+
+let test_compiled_child_node_contracts () =
+  let plan,children,_ = compiled_child_fixture () in
+  let text,integer = match children with [a;b] -> a,b | _ -> fail "two children" in
+  check string "both result nodes use the canonical result name" text.result.tool_name integer.result.tool_name;
+  let run_id = Plan.Run_id.fresh () in
+  let valid id value = match Plan.validate_output plan ~run_id ~node_id:id value with
+    | Ok _ -> () | Error _ -> fail "declared selected export was rejected" in
+  let invalid id value = match Plan.validate_output plan ~run_id ~node_id:id value with
+    | Error (Plan.Output_validation_failed _) -> () | Error _ | Ok _ -> fail "another child's export schema was borrowed" in
+  valid text.result.id (`Assoc ["answer",`String "text"]);
+  valid integer.result.id (`Assoc ["answer",`Int 7]);
+  invalid text.result.id (`Assoc ["answer",`Int 7]);
+  invalid integer.result.id (`Assoc ["answer",`String "text"]);
+  List.iter (fun (child : Plan.child_nodes) ->
+    check bool "compiled result has no fabricated descriptor" true (Plan.descriptor plan child.result.id = None);
+    check bool "effectful submission is not readonly" true
+      (Plan.readonly_for_input plan ~node_id:child.submission.id ~input:(`Assoc []) = Some false);
+    check bool "canonical result observation is readonly" true
+      (Plan.readonly_for_input plan ~node_id:child.result.id ~input:(`Assoc []) = Some true)) children;
+  List.iter (function
+    | Executor.Serial_batch scheduled ->
+      (match scheduled.contract.target with Plan.Child_submission _ -> ()
+       | Plan.Child_result _ | Plan.Descriptor_target _ -> fail "result barrier acquired Serial lifetime")
+    | Executor.Concurrent_batch scheduled -> List.iter (fun (scheduled : Executor.scheduled_node) ->
+        match scheduled.contract.target with Plan.Child_result _ -> ()
+        | Plan.Child_submission _ | Plan.Descriptor_target _ -> fail "submission was scheduled concurrently") scheduled)
+    (Executor.schedule plan)
+
+let test_compiled_child_operand_identity () =
+  let _,children,nodes = compiled_child_fixture () in
+  let original = List.hd children in
+  let changed = Plan.node ~id:original.submission.id ~tool_name:original.submission.tool_name
+      ~input:(Plan.Json_template.literal (`Assoc ["changed",`Bool true])) () in
+  let altered = List.map (fun (n : Plan.node) -> if Plan.Node_id.equal n.id changed.id then changed else n) nodes in
+  (match Plan.create_compiled ~descriptors:(Descriptor.all_descriptors ()) ~children altered with
+   | Error (Plan.Compiled_child_conflict id) -> check string "changed fixed node refused" (Plan.Node_id.to_string changed.id) (Plan.Node_id.to_string id)
+   | Error _ | Ok _ -> fail "altered child acquired original compiler authority");
+  let duplicate = Plan.child_nodes ~child:original.child ~submission_id:(node_id "duplicate-submit")
+      ~result_id:(node_id "duplicate-result") () in
+  (match Plan.create_compiled ~descriptors:(Descriptor.all_descriptors ()) ~children:(duplicate::children)
+      (duplicate.submission::duplicate.result::nodes) with
+   | Error (Plan.Compiled_child_conflict _) -> () | Error _ | Ok _ -> fail "duplicate logical child alias admitted");
+  (match Plan.create ~descriptors:(Descriptor.all_descriptors ()) nodes with
+   | Error (Plan.Unknown_tool _) -> () | Error _ | Ok _ -> fail "plain node copied a native child route by name")
+
+let test_compiled_child_owned_encoding () =
+  let module Request = Masc.Keeper_tool_plan_request in
+  let plan,_,_ = compiled_child_fixture () in
+  let encoded = Request.to_yojson plan |> function Ok json -> json | Error _ -> fail "compiled evidence encoding" in
+  (match Request.plan_of_json ~descriptors:(Descriptor.all_descriptors ()) encoded with
+   | Error _ -> () | Ok _ -> fail "model JSON reconstructed native compiler authority");
+  let encoded_nodes = Yojson.Safe.Util.(encoded |> member "nodes" |> to_list) in
+  let operands = List.map (fun n -> Yojson.Safe.Util.member "compiled_child" n) encoded_nodes in
+  check bool "compiled route evidence contains fixed child plans" true
+    (List.for_all (fun operand -> Yojson.Safe.Util.member "bound_plan" operand <> `Null) operands);
+  let contracts = Request.contracts_to_yojson plan |> function Ok json -> json | Error _ -> fail "child contract freeze" in
+  check bool "schema definitions do not create artifact references" true
+    (match Tool_output.normalized_artifact_refs_in_json_strict (`List [encoded;contracts]) with
+     | Ok [] -> true | Ok (_::_) | Error _ -> false)
+
+let test_compiled_child_requires_parent_occurrence () =
+  Eio_main.run @@ fun _ ->
+  let _,children,nodes = compiled_child_fixture () in
+  let sibling = compiled_node ~id:"independent" ~tool_name:"keeper_lane_status" (Plan.Json_template.literal (`Assoc [])) in
+  let plan = match Plan.create_compiled ~descriptors:(Descriptor.all_descriptors ()) ~children
+      ~branch_failure_policy:Plan.Continue_independent (nodes @ [sibling]) with
+    | Ok p -> p | Error _ -> fail "independent compiled sibling" in
+  let ordinary = ref [] and compiled = ref 0 in
+  let dispatch ?launch_replay:_ ~tool_use_id:_ ~(node : Plan.node) ~descriptor:_ ~schedule:_ ~input:_ () =
+    ordinary := Plan.Node_id.to_string node.id :: !ordinary;
+    Executor.dispatch_result (completed ~tool_name:node.tool_name ~data:(`Assoc
+      ["profile",`String "fixture";"lane",`Null;"endpoint",`Null;"probe",`Null;"last_dispatch",`Null;"operator_action",`Null])) in
+  let dispatch_compiled ~attempt:_ ~target:_ ~tool_use_id:_ ~node:_ ~schedule:_ ~input:_ =
+    incr compiled; fail "unowned child producer entered" in
+  let result = Executor.execute ~plan ~run_id:(Plan.Run_id.fresh ()) ~dispatch ~dispatch_compiled () in
+  (match result with
+   | Error failure -> check bool "missing occurrence is pre-effect" true
+       (failure.effect_disposition = Tool_result.Proven_pre_effect)
+   | Ok _ -> fail "compiled child executed without canonical parent occurrence");
+  check int "compiled producer is never entered without parent authority" 0 !compiled;
+  check (list string) "independent ordinary work still progresses" ["independent"] !ordinary
+
 let () =
   run ~and_exit:false
     "keeper_tool_plan_executor"
@@ -1682,6 +1796,11 @@ let () =
             `Quick
             test_serial_failure_stops_successor_continue_independent
         ] )
+    ; ( "compiled child contracts"
+      , [ test_case "child export schemas and short scheduling modes" `Quick test_compiled_child_node_contracts
+        ; test_case "fixed operand cannot be altered or copied by name" `Quick test_compiled_child_operand_identity
+        ; test_case "owned encoding does not grant model compiler authority" `Quick test_compiled_child_owned_encoding
+        ; test_case "parent occurrence required before compiled producer" `Quick test_compiled_child_requires_parent_occurrence ] )
     ; ( "node input validation"
       , [ test_case
             "a literal input violation runs no node"

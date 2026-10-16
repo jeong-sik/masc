@@ -81,10 +81,16 @@ val error_to_json : error -> Yojson.Safe.t
 val to_yojson
   :  Keeper_tool_plan.t
   -> (Yojson.Safe.t, encode_error) result
-(** Encode a validated, parameter-free plan back into the closed request
-    grammar. This is the durable recipe representation: decoding it still
-    revalidates every descriptor and dependency against the supplied frozen
-    capability surface. *)
+(** Encode a validated, parameter-free plan. Ordinary nodes round-trip through
+    the public grammar. Native compiled nodes additionally preserve their exact
+    operand and child plan; the public parser rejects this private metadata.
+    Owned drafts recompile the original recipe and compare this evidence;
+    decoding metadata never grants a compiler or execution capability. *)
+
+val contracts_to_yojson : Keeper_tool_plan.t -> (Yojson.Safe.t, encode_error) result
+(** Canonical per-node route/input/output contracts as literal JSON strings.
+    Compiled routes include all bound child contracts recursively. Schema
+    property names cannot be mistaken for execution artifact references. *)
 
 (** Canonical tool names a plan node may reference as a producer: descriptors
     that declare a composable JSON output. Used to make rejection results

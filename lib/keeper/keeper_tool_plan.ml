@@ -720,6 +720,7 @@ type error =
       ; error : Json_pointer.schema_error
       }
   | Unknown_descriptor_id of string
+  | Compiled_child_conflict of Node_id.t
   | Duplicate_node_id of Node_id.t
   | Duplicate_tool_name of string
   | Unknown_tool of
@@ -771,6 +772,7 @@ let error_to_string = function
     Printf.sprintf "export %S has invalid pointer %s for node %S"
       name (Json_pointer.to_string pointer) (Node_id.to_string node_id)
   | Unknown_descriptor_id id -> Printf.sprintf "descriptor id %S is not canonical" id
+  | Compiled_child_conflict id -> Printf.sprintf "compiled child node %S differs from its fixed operand" (Node_id.to_string id)
   | Duplicate_node_id node_id ->
     Printf.sprintf "duplicate node id %S" (Node_id.to_string node_id)
   | Duplicate_tool_name tool_name ->
@@ -904,6 +906,8 @@ let error_to_json error =
       [ "name", `String name; "node_id", node_id_to_json node_id
       ; "pointer", `String (Json_pointer.to_string pointer)
       ; "error", pointer_schema_error_to_json error ]
+  | Compiled_child_conflict node_id ->
+    tag "compiled_child_conflict" [ "node_id", node_id_to_json node_id ]
   | Unknown_descriptor_id descriptor_id ->
     tag "unknown_descriptor_id" [ "descriptor_id", `String descriptor_id ]
   | Duplicate_node_id node_id ->
@@ -983,9 +987,46 @@ type t =
   { identity : int
   ; nodes : node list
   ; descriptors : (string * Keeper_tool_descriptor.t) list
+  ; children : child_nodes list
   ; branch_failure_policy : branch_failure_policy
   ; exports : export list
   }
+and async_child =
+  { alias : Node_id.t
+  ; reference : Skill_reference.t
+  ; tool_name : string
+  ; args : Yojson.Safe.t
+  ; input_schema : Yojson.Safe.t
+  ; bound_plan : t
+  }
+and child_nodes =
+  { child : async_child
+  ; submission : node
+  ; result : node
+  ; output_schema : Yojson.Safe.t
+  }
+
+type execution_target =
+  | Descriptor_target of Keeper_tool_descriptor.t
+  | Child_submission of child_nodes
+  | Child_result of child_nodes
+
+type contract =
+  { target : execution_target
+  ; input_schema : Yojson.Safe.t
+  ; composable_output : Keeper_tool_descriptor.composable_output
+  ; execution : Keeper_tool_descriptor.execution
+  }
+
+let fixed_async_child ~alias ~reference ~tool_name ~args ~input_schema ~bound_plan =
+  {alias;reference;tool_name;args;input_schema;bound_plan}
+let child_alias child = child.alias
+let child_reference child = child.reference
+let child_tool_name child = child.tool_name
+let child_args child = child.args
+let child_input_schema (child : async_child) = child.input_schema
+let child_plan child = child.bound_plan
+let compiled_children plan = plan.children
 
 let next_plan_identity = Atomic.make 0
 
@@ -1126,10 +1167,64 @@ let node_for_id nodes id =
   List.find_opt (fun node -> Node_id.equal node.id id) nodes
 ;;
 
-let validate_known_tools descriptors off_surface nodes =
+let empty_object_schema = `Assoc
+  ["type",`String "object";"properties",`Assoc [];"required",`List [];"additionalProperties",`Bool false]
+
+let contract_for_node descriptors children (node : node) =
+  match List.find_map (fun child ->
+    if Node_id.equal child.submission.id node.id then Some (Child_submission child)
+    else if Node_id.equal child.result.id node.id then Some (Child_result child)
+    else None) children with
+  | Some (Child_submission child as target) -> Some
+      {target;input_schema=child.child.input_schema;composable_output=Keeper_tool_descriptor.Opaque_output;
+       execution=Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Serial}
+  | Some (Child_result child as target) -> Some
+      {target;input_schema=empty_object_schema;
+       composable_output=Keeper_tool_descriptor.Json_output {schema=child.output_schema};
+       execution=Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Concurrent}
+  | Some (Descriptor_target _) -> invalid_arg "compiled target cannot own an ordinary descriptor"
+  | None -> Option.map (fun (descriptor : Keeper_tool_descriptor.t) ->
+      {target=Descriptor_target descriptor;input_schema=descriptor.input_schema;
+       composable_output=descriptor.composable_output;execution=descriptor.execution})
+      (descriptor_for_name descriptors node.tool_name)
+
+let child_exports_schema plan =
+  let properties = List.map (fun (export : export) ->
+    let producer = match node_for_id plan.nodes export.node_id with
+      | Some node -> node | None -> invalid_arg "validated child export lost its producer" in
+    let schema = match contract_for_node plan.descriptors plan.children producer with
+      | Some {composable_output=Keeper_tool_descriptor.Json_output {schema};_} -> schema
+      | Some {composable_output=Keeper_tool_descriptor.Opaque_output;_} | None ->
+        invalid_arg "validated child export lost its output contract" in
+    let selected = match Json_pointer.resolve_schema export.pointer schema with
+      | Ok schema -> schema | Error _ -> invalid_arg "validated child export lost its pointer contract" in
+    export.name,selected) plan.exports in
+  `Assoc ["type",`String "object";"properties",`Assoc properties;
+    "required",`List (List.map (fun (name,_) -> `String name) properties);"additionalProperties",`Bool false]
+
+let child_nodes ~child ~submission_id ~result_id ?(after=[]) () =
+  { child
+  ; submission = node ~id:submission_id ~tool_name:child.tool_name ~after
+      ~input:(Json_template.literal child.args) ()
+  ; result = node ~id:result_id ~tool_name:Tool_schemas_composition_control.result_schema.name
+      ~after:[submission_id] ~input:(Json_template.literal (`Assoc [])) ()
+  ; output_schema = child_exports_schema child.bound_plan
+  }
+
+let contract plan node_id =
+  Option.bind (node_for_id plan.nodes node_id) (contract_for_node plan.descriptors plan.children)
+
+let readonly_for_input plan ~node_id ~input =
+  match contract plan node_id with
+  | None -> None
+  | Some {target=Descriptor_target descriptor;_} -> Keeper_tool_descriptor.readonly_for_input descriptor ~input
+  | Some {target=Child_submission _;_} -> Some false
+  | Some {target=Child_result _;_} -> Some true
+
+let validate_known_tools (resolve : node -> contract option) off_surface nodes =
   List.find_map
     (fun node ->
-       match descriptor_for_name descriptors node.tool_name with
+       match resolve node with
        | Some _ -> None
        | None ->
          (match List.assoc_opt node.tool_name off_surface with
@@ -1152,7 +1247,7 @@ let validate_dependencies nodes =
     nodes
 ;;
 
-let validate_output_references descriptors nodes =
+let validate_output_references (resolve : node -> contract option) nodes =
   List.find_map
     (fun node ->
        Json_template.references node.input
@@ -1160,13 +1255,13 @@ let validate_output_references descriptors nodes =
          match node_for_id nodes source_node_id with
          | None -> Some (Missing_dependency { node_id = node.id; dependency = source_node_id })
          | Some source_node ->
-           (match descriptor_for_name descriptors source_node.tool_name with
+           (match resolve source_node with
             | None ->
               Some
                 (Unknown_tool
                    { node_id = source_node.id; tool_name = source_node.tool_name })
             | Some source_descriptor ->
-              (match source_descriptor.Keeper_tool_descriptor.composable_output with
+              (match source_descriptor.composable_output with
                | Keeper_tool_descriptor.Json_output { schema } ->
                  (match Json_pointer.resolve_schema pointer schema with
                   | Ok _ -> None
@@ -1184,13 +1279,13 @@ let validate_output_references descriptors nodes =
     nodes
 ;;
 
-let validate_output_schemas descriptors nodes =
+let validate_output_schemas (resolve : node -> contract option) nodes =
   List.find_map
     (fun node ->
-       match descriptor_for_name descriptors node.tool_name with
+       match resolve node with
        | None -> Some (Unknown_tool { node_id = node.id; tool_name = node.tool_name })
        | Some descriptor ->
-         (match descriptor.Keeper_tool_descriptor.composable_output with
+         (match descriptor.composable_output with
           | Keeper_tool_descriptor.Opaque_output -> None
           | Keeper_tool_descriptor.Json_output { schema } ->
             (match validate_composable_schema schema with
@@ -1202,7 +1297,7 @@ let validate_output_schemas descriptors nodes =
     nodes
 ;;
 
-let validate_exports descriptors nodes exports =
+let validate_exports (resolve : node -> contract option) nodes exports =
   match first_duplicate String.equal (List.map (fun (export : export) -> export.name) exports) with
   | Some name -> Some (Duplicate_export_name name)
   | None ->
@@ -1213,10 +1308,10 @@ let validate_exports descriptors nodes exports =
            match node_for_id nodes export.node_id with
            | None -> Some (Unknown_export_node { name = export.name; node_id = export.node_id })
            | Some node ->
-             match descriptor_for_name descriptors node.tool_name with
+             match resolve node with
              | None -> Some (Unknown_tool { node_id = node.id; tool_name = node.tool_name })
              | Some descriptor ->
-               match descriptor.Keeper_tool_descriptor.composable_output with
+               match descriptor.composable_output with
                | Keeper_tool_descriptor.Opaque_output ->
                  Some (Opaque_export
                    { name = export.name; node_id = node.id; tool_name = node.tool_name })
@@ -1262,12 +1357,12 @@ let dependency_cycle nodes =
   visit_all [] nodes
 ;;
 
-let validate_terminal_dependency_boundary descriptors nodes =
+let validate_terminal_dependency_boundary (resolve : node -> contract option) nodes =
   let terminal_nodes =
     List.filter
       (fun node ->
-         match descriptor_for_name descriptors node.tool_name with
-         | Some { Keeper_tool_descriptor.execution = Keeper_tool_descriptor.Terminal; _ } ->
+         match resolve node with
+         | Some { execution = Keeper_tool_descriptor.Terminal; _ } ->
            true
          | Some
              { execution =
@@ -1304,51 +1399,69 @@ let validate_terminal_dependency_boundary descriptors nodes =
       nodes
 ;;
 
-let create ~descriptors ?(branch_failure_policy = default_branch_failure_policy) ?(exports = []) nodes =
+let create_compiled ~descriptors ~children ?(branch_failure_policy = default_branch_failure_policy) ?(exports = []) nodes =
   match nodes with
   | [] -> Error Empty_plan
   | _ ->
-    (match canonicalize_descriptors descriptors with
+    let fixed_nodes = List.concat_map (fun child -> [child.submission;child.result]) children in
+    let conflict = match first_duplicate Node_id.equal (List.map (fun child -> child.child.alias) children) with
+      | Some id -> Some id
+      | None -> match first_duplicate Node_id.equal (List.map (fun node -> node.id) fixed_nodes) with
+      | Some id -> Some id
+      | None -> List.find_map (fun expected ->
+          match node_for_id nodes expected.id with
+          | Some actual when actual = expected -> None
+          | Some _ | None -> Some expected.id) fixed_nodes in
+    (match conflict with
+     | Some id -> Error (Compiled_child_conflict id)
+     | None ->
+    match canonicalize_descriptors descriptors with
      | Error _ as error -> error
      | Ok canonical_descriptors ->
        (match first_duplicate Node_id.equal (List.map (fun node -> node.id) nodes) with
         | Some id -> Error (Duplicate_node_id id)
         | None ->
           let descriptors = descriptor_entries canonical_descriptors in
+          let resolve = contract_for_node descriptors children in
           let off_surface = off_surface_entries canonical_descriptors in
           (match first_repeated_name (List.map fst descriptors) with
            | Some name -> Error (Duplicate_tool_name name)
            | None ->
-             (match validate_known_tools descriptors off_surface nodes with
+             (match validate_known_tools resolve off_surface nodes with
               | Some error -> Error error
               | None ->
-                (match validate_output_schemas descriptors nodes with
+                (match validate_output_schemas resolve nodes with
                  | Some error -> Error error
                  | None ->
                    (match validate_dependencies nodes with
                     | Some error -> Error error
                     | None ->
-                      (match validate_output_references descriptors nodes with
+                      (match validate_output_references resolve nodes with
                        | Some error -> Error error
                        | None ->
                          (match dependency_cycle nodes with
                           | Some cycle -> Error (Dependency_cycle cycle)
                           | None ->
                             (match
-                               validate_terminal_dependency_boundary descriptors nodes
+                               validate_terminal_dependency_boundary resolve nodes
                              with
                              | Some error -> Error error
                              | None ->
-                               (match validate_exports descriptors nodes exports with
+                               (match validate_exports resolve nodes exports with
                                 | Some error -> Error error
                                 | None ->
                                   Ok
                                     { identity = Atomic.fetch_and_add next_plan_identity 1
                                     ; nodes
                                     ; descriptors
+                                    ; children
                                     ; branch_failure_policy
                                     ; exports
                                     }))))))))))
+;;
+
+let create ~descriptors ?branch_failure_policy ?exports nodes =
+  create_compiled ~descriptors ~children:[] ?branch_failure_policy ?exports nodes
 ;;
 
 let dependency_layers plan =
@@ -1371,9 +1484,9 @@ let dependency_layers plan =
 ;;
 
 let descriptor plan node_id =
-  match node_for_id plan.nodes node_id with
-  | Some node -> descriptor_for_name plan.descriptors node.tool_name
-  | None -> None
+  match contract plan node_id with
+  | Some {target=Descriptor_target descriptor;_} -> Some descriptor
+  | Some {target=(Child_submission _ | Child_result _);_} | None -> None
 ;;
 
 type output =
@@ -1411,10 +1524,10 @@ let validate_output plan ~run_id ~node_id value =
   match node_for_id plan.nodes node_id with
   | None -> Error (Unknown_node_id node_id)
   | Some node ->
-    (match descriptor_for_name plan.descriptors node.tool_name with
+    (match contract plan node.id with
      | None -> Error (Unknown_node_id node_id)
      | Some descriptor ->
-       (match descriptor.Keeper_tool_descriptor.composable_output with
+       (match descriptor.composable_output with
         | Keeper_tool_descriptor.Opaque_output ->
           Error (Output_not_composable { node_id; tool_name = node.tool_name })
         | Keeper_tool_descriptor.Json_output { schema } ->
@@ -1460,12 +1573,12 @@ let resolve_exports plan ~lookup =
 ;;
 
 let validate_node_input plan (node : node) input =
-  match descriptor_for_name plan.descriptors node.tool_name with
+  match contract plan node.id with
   | None -> Error (Unknown_node_id node.id)
   | Some descriptor ->
     (match
        Tool_input_validation.validate
-         ~schema:descriptor.Keeper_tool_descriptor.input_schema
+         ~schema:descriptor.input_schema
          ~name:node.tool_name
          ~args:input
          ()

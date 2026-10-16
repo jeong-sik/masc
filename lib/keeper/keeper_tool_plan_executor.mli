@@ -7,7 +7,7 @@
 
 type scheduled_node = private
   { node : Keeper_tool_plan.node
-  ; descriptor : Keeper_tool_descriptor.t
+  ; contract : Keeper_tool_plan.contract
   ; schedule : Agent_core.Tool_contract.schedule
   }
 
@@ -105,6 +105,16 @@ type dispatch =
     owned-job start is idempotent across interruption. Dispatchers that never
     admit launch leaves may ignore it. *)
 
+type compiled_dispatch =
+  attempt:Keeper_tool_execution_journal.attempt ->
+  target:Keeper_tool_plan.execution_target ->
+  tool_use_id:string -> node:Keeper_tool_plan.node ->
+  schedule:Agent_core.Tool_contract.schedule -> input:Yojson.Safe.t -> dispatch_result
+(** A native child producer receives the actual journal attempt, after input
+    validation and before effects. Missing parent occurrence or producer
+    authority is refused before dispatch. Ordinary [dispatch] is never used
+    as a fallback for a compiled child, regardless of its tool name. *)
+
 (** Execute a validated plan as a dynamic ready wave to completion. Before any
     node runs, every node input that reads no producer output is validated
     ({!Keeper_tool_plan.prepare_inputs}); a rejection there ends the plan with
@@ -151,6 +161,7 @@ val execute
   -> run_id:Keeper_tool_plan.Run_id.t
   -> dispatch:dispatch
   -> ?launch_invocation_of:(unit -> Keeper_tool_execution_journal.launch_invocation option)
+  -> ?dispatch_compiled:compiled_dispatch
   -> ?journal:Keeper_tool_execution_journal.worker
   -> ?observe_node_result:(node_result -> (unit, string) result)
   -> unit
@@ -193,6 +204,7 @@ val execute_keeper
   -> ?on_failed:(Keeper_tools_agent_core.terminal_effect_failure -> unit)
   -> ?admit_node:
        (node:Keeper_tool_plan.node -> (unit, admission_rejection) result)
+  -> ?dispatch_compiled:compiled_dispatch
   -> ?journal:Keeper_tool_execution_journal.worker
   -> ?observe_node_result:(node_result -> (unit, string) result)
   -> unit
@@ -224,6 +236,7 @@ module Compatibility : sig
     -> ?on_failed:(Keeper_tools_agent_core.terminal_effect_failure -> unit)
     -> ?admit_node:
          (node:Keeper_tool_plan.node -> (unit, admission_rejection) result)
+    -> ?dispatch_compiled:compiled_dispatch
     -> ?journal:Keeper_tool_execution_journal.worker
     -> ?observe_node_result:(node_result -> (unit, string) result)
     -> unit

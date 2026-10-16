@@ -274,7 +274,12 @@ val gate_coverage : source -> gate_coverage option
 val scope_room : coverage:gate_coverage -> now:float -> recorded list -> scope_room
 (** Read the windows of one complete report under [coverage]. A spent window
     whose stated reset has passed since it was seen has reset, and counts as
-    having room. Windows whose role is not {!Gates_model_calls} are not read. *)
+    having room. Windows whose role is not {!Gates_model_calls} are not read.
+
+    [now] is the moment the answer is read against. {!record} passes the
+    [observed_at] of the report it is recording, not the wall clock, so an
+    older window held beside a newer report is judged at the newer report's
+    time. A caller that reads a table later passes its own time. *)
 
 val record : scope:Runtime_quota_window.scope -> observed_at:float -> report -> unit
 (** HTTP and Antigravity reads are complete snapshots: windows omitted by a

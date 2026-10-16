@@ -186,7 +186,10 @@ val execute
     replayed launch leaf is the one exception: its dispatch re-derives the
     invocation identity recorded on the durable journal occurrence, never the
     resuming turn's ambient context, so the owned-job invocation binding
-    returns the same job. *)
+    returns the same job. [prepared_edits] binds an exact instantiated Inline
+    plan to its original node inputs and opaque directory capabilities. A
+    mismatched node/input is refused before the handler; it never falls back
+    under a claim for different resources. Its consumer retains authorization. *)
 val execute_keeper
   :  capability_surface:Keeper_capability_surface.t
   -> plan:Keeper_tool_plan.t
@@ -199,6 +202,7 @@ val execute_keeper
   -> ctx_snapshot:Keeper_types.working_context
   -> keeper_turn_id:(unit -> int option)
   -> ?source_context:Keeper_tool_call_log_context.turn_context
+  -> ?prepared_edits:Keeper_prepared_inline_edit.t
   -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?continuation_channel:Keeper_continuation_channel.t
@@ -231,6 +235,7 @@ module Compatibility : sig
     -> ctx_snapshot:Keeper_types.working_context
     -> keeper_turn_id:(unit -> int option)
     -> ?source_context:Keeper_tool_call_log_context.turn_context
+    -> ?prepared_edits:Keeper_prepared_inline_edit.t
     -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
     -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
     -> ?continuation_channel:Keeper_continuation_channel.t

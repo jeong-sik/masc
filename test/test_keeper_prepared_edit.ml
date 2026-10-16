@@ -115,12 +115,15 @@ let batch env config meta recovery inputs =
   dispatch env [tool] calls
 ;;
 
-let public_bundle ?(sourceful = true) env sw config meta recovery operation =
+let public_bundle ?snapshot ?(sourceful = true) env sw config meta recovery operation =
   Masc_test_deps.with_process_env "MASC_BASE_PATH" (Some config.Workspace.base_path) @@ fun () ->
   Config_dir_resolver.reset ();
   Eio.Switch.on_release sw Config_dir_resolver.reset;
   ignore (Workspace.init config ~agent_name:(Some "public-edit-operator") : string);
-  let task = Workspace.add_task_with_result ~created_by:"public-edit-operator" config
+  let references = match snapshot with
+    | None -> []
+    | Some snapshot -> Skill_catalog_snapshot.entries snapshot |> List.map Skill_catalog_snapshot.entry_reference in
+  let task = Workspace.add_task_with_result ~created_by:"public-edit-operator" ~skills:references config
       ~title:"Edit the original files" ~priority:1 ~description:"Keep the original Task and trace."
       |> function Ok value -> value | Error error -> fail (Workspace.add_task_error_to_string error) in
   Workspace.claim_task_r config ~agent_name:meta.Keeper_meta_contract.name ~task_id:task.task_id ()
@@ -136,15 +139,29 @@ let public_bundle ?(sourceful = true) env sw config meta recovery operation =
     ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id) ~keeper_turn_id:13 ~turn:2 ();
   let descriptor = match Keeper_tool_descriptor.find_id "agent.edit_file" with
     | Some value -> value | None -> fail "canonical public Edit descriptor is absent" in
-  let snapshot = Skill_catalog_snapshot.config_unreadable ~detail:"tool-only fixture has no shared Skill source" in
+  let snapshot = match snapshot with
+    | Some snapshot -> snapshot
+    | None -> Skill_catalog_snapshot.config_unreadable ~detail:"tool-only fixture has no shared Skill source" in
+  let catalog, diagnostics = Keeper_skill_catalog.of_snapshot ~descriptors:[descriptor] snapshot in
+  check int "published Edit Skills project without errors" 0 (List.length diagnostics);
+  let selection = Keeper_task_skill_turn.resolve_for_task ~snapshot ~task_id:task.task_id references
+      |> function Ok value -> value | Error error -> fail (Keeper_task_skill_turn.error_to_string error) in
+  let skill_activation_context = if references = [] then None else
+    Some (Keeper_skill_activation_recorder.make ~trace_id:meta.runtime.trace_id
+      ~turn_ref:(Ids.Turn_ref.make ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id) ~absolute_turn:13)
+      ~runtime_id:(fun () -> Some "fixture.resource-edit")
+      ~snapshot_revision:(Skill_catalog_snapshot.snapshot_revision snapshot) ~task_selection:selection
+      |> function Ok value -> value | Error error -> fail (Keeper_skill_activation_recorder.error_to_string error)) in
   let surface = Keeper_capability_surface.create_with_descriptors ~tool_descriptors:[descriptor]
       ~tool_deny:[] ~sandbox_profile:meta.sandbox_profile ~skill_names:None
-      ~global_skill_catalog:Keeper_skill_catalog.empty
-      ~skill_inventory:(Keeper_skill_inventory.of_snapshot ~descriptors:[descriptor] snapshot) ~task_skills:[] in
+      ~global_skill_catalog:catalog
+      ~skill_inventory:(Keeper_skill_inventory.of_snapshot ~descriptors:[descriptor] snapshot)
+      ~task_skills:(Keeper_task_skill_turn.skills selection) in
   let causal = Keeper_gate_causal_context.create ~turn_id:(Some 13)
       ~initial:(`Assoc ["task_id", `String task.task_id]) in
   let bundle = Keeper_tools_agent_core_bundle.make_tool_bundle_for_capability_surface ~config ~meta
       ~publication_recovery:recovery ~capability_surface:surface ~clock:env#clock ~gate_context:causal
+      ?skill_activation_context
       ?turn_ctx_cell:(if sourceful then Some cell else None)
       ~ctx_snapshot:(Keeper_context_runtime.create ~eio:false ~system_prompt:"public Edit feature fixture") () in
   Eio.Switch.on_release sw bundle.cleanup;
@@ -157,6 +174,135 @@ let public_args path before after =
 
 let public_calls inputs = List.mapi (fun index input -> Agent_core.Types.ToolUse
     {id = "public-edit-" ^ string_of_int index; name = "Edit"; input}) inputs
+;;
+
+let publish_edit_skills ?(two_nodes = false) sw config =
+  let source_config = "[skills]\nresource-read-max-bytes = 16384\n[[skills.sources]]\nid = \"edit-fixture\"\nanchor = \"base-path\"\npath = \"skills\"\naccess = \"read-only\"\n" in
+  let document name =
+    let first = ["file_path", "file_path"; "old_string", "old_string"; "new_string", "new_string"] in
+    let second = ["file_path", "other_path"; "old_string", "other_old"; "new_string", "other_new"] in
+    let params = List.map snd (first @ if two_nodes then second else []) in
+    let node id bindings =
+      Printf.sprintf "[[compositions.nodes]]\nid = %S\ntool = \"Edit\"\n[compositions.nodes.input]\nkind = \"object\"\n" id
+      ^ String.concat "" (List.map (fun (field, param) -> Printf.sprintf
+          "[[compositions.nodes.input.fields]]\nname = %S\n[compositions.nodes.input.fields.value]\nkind = \"param\"\nname = %S\n" field param) bindings) in
+    Printf.sprintf "---\nname: %s\ndescription: Apply the selected exact patch\n---\n```toml composition\n[[compositions]]\nname = %S\nexecution = \"inline\"\n" name name
+    ^ String.concat "" (List.map (fun name -> Printf.sprintf
+        "[[compositions.params]]\nname = %S\ntype = \"string\"\ndescription = \"Original patch input\"\n" name) params)
+    ^ node "patch" first
+    ^ (if two_nodes then node "other-patch" second else "")
+    ^ "```\n" in
+  List.iter (fun name -> write (Filename.concat config.Workspace.base_path
+      ("skills/" ^ name ^ "/SKILL.md")) (document name)) ["edit-left"; "edit-right"];
+  let workspace = Skill_catalog_snapshot_service.workspace_of_base_path ~base_path:config.base_path
+      |> function Ok value -> value | Error error -> fail (Config_dir_resolver.canonical_base_path_error_to_string error) in
+  Eio.Switch.on_release sw (fun () -> Skill_catalog_snapshot_service.retire ~workspace);
+  let snapshot = match Skill_catalog_snapshot_service.refresh ~workspace ~user_home:None
+      ~read_config:(fun () -> {path = Filename.concat config.base_path ".masc/config/runtime.toml"; source_text = source_config}) with
+    | Published value | Unchanged value -> value
+    | Workspace_retired -> fail "published Edit Skill workspace retired" in
+  check int "both exact Skill documents were published" 2 (List.length (Skill_catalog_snapshot.entries snapshot));
+  check int "published documents have no source rejection" 0 (List.length (Skill_catalog_snapshot.rejections snapshot));
+  Fs_compat.mkdir_p (Keeper_fs.keeper_session_dir config "prepared-edit-trace");
+  snapshot
+;;
+
+let inline_calls bundle inputs = List.mapi (fun index input ->
+  let name = "keeper_compose_edit-" ^ (if index = 0 then "left" else "right") in
+  check bool "published Inline tool is in the actual bundle" true
+    (List.exists (fun (tool : Agent_core.Tool.t) -> tool.schema.name = name) bundle.Keeper_tools_agent_core.tools);
+  Agent_core.Types.ToolUse {id = "inline-edit-" ^ string_of_int index; name; input}) inputs
+;;
+
+let test_published_inline_edits_overlap_and_retain_receipts () =
+  fixture @@ fun env sw config meta recovery root ->
+  let snapshot = publish_edit_skills sw config in
+  public_bundle ~snapshot env sw config meta recovery @@ fun meta task_id _cell causal bundle ->
+  let left = Filename.concat root "inline-left/file" and right = Filename.concat root "inline-right/file" in
+  write left "left-before"; write right "right-before";
+  let both, resolve_both = Eio.Promise.create () in
+  let entered = ref 0 in
+  let rows = FS.For_testing.with_before_write_authorization (fun () ->
+      incr entered; if !entered = 2 then Eio.Promise.resolve resolve_both ();
+      Eio.Promise.await both)
+      (fun () -> dispatch env bundle.tools
+        (inline_calls bundle [public_args left "left-before" "left-after"; public_args right "right-before" "right-after"])) in
+  check int "both published Inline leaves entered real authorization" 2 !entered;
+  check string "Inline left actual bytes" "left-after" (read left);
+  check string "Inline right actual bytes" "right-after" (read right);
+  List.iter (fun (row : Agent_core.Agent_tools.tool_execution_result) ->
+    check int "outer Inline wave contains both actual calls" 2
+      (Agent_core.Tool_contract.Invocation.schedule row.invocation).batch_size) rows;
+  let ledger = Keeper_tool_call_log.read_recent ~keeper_name:meta.name ()
+      |> function Ok rows -> rows | Error (Index_unavailable detail) -> fail detail in
+  let leaves = List.filter (fun row -> Yojson.Safe.Util.member "composition_node_id" row <> `Null) ledger in
+  check int "both real leaves committed physical rows" 2 (List.length leaves);
+  List.iter (fun row ->
+    check string "Inline leaf keeps original Task" task_id Yojson.Safe.Util.(member "task_id" row |> to_string);
+    check string "Inline leaf keeps original trace" (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+      Yojson.Safe.Util.(member "trace_id" row |> to_string);
+    List.iter (fun key -> check bool ("Inline leaf retains " ^ key) true
+      (match Yojson.Safe.Util.member key row with `String value -> value <> "" | _ -> false))
+      ["execution_id"; "composition_run_id"; "parent_tool_use_id"]) leaves;
+  let activations = Keeper_skill_activation_ledger.load_existing ~config ~trace_id:meta.runtime.trace_id
+      |> function
+      | Ok (Some ledger) -> Keeper_skill_activation_ledger.activations ledger
+      | Ok None -> fail "actual published Skill activation ledger is absent"
+      | Error error -> fail (Keeper_skill_activation_ledger.store_error_to_string error) in
+  check int "both exact published Skills activated" 2 (List.length activations);
+  check (list string) "original outer invocations own activations" ["inline-edit-0"; "inline-edit-1"]
+    (List.map (fun (activation : Keeper_skill_activation_ledger.activation) -> activation.skill_tool_use_id) activations
+      |> List.sort String.compare);
+  check int "both leaf results join the turn Gate aggregate" 2
+    Yojson.Safe.Util.(member "completed_tool_calls" (Keeper_gate_causal_context.snapshot causal).snapshot |> to_list |> List.length)
+;;
+
+let test_published_inline_conflicts_keep_predecessor_bytes () =
+  fixture @@ fun env sw config meta recovery root ->
+  let snapshot = publish_edit_skills sw config in
+  public_bundle ~snapshot env sw config meta recovery @@ fun _meta _task _cell _causal bundle ->
+  let path = Filename.concat root "inline-conflict/file" in
+  write path "first";
+  let rows = dispatch env bundle.tools
+      (inline_calls bundle [public_args path "first" "second"; public_args path "second" "third"]) in
+  check string "later published Skill consumes actual predecessor bytes" "third" (read path);
+  List.iter (fun (row : Agent_core.Agent_tools.tool_execution_result) ->
+    check int "conflicting outer Skills use separate waves" 1
+      (Agent_core.Tool_contract.Invocation.schedule row.invocation).batch_size) rows
+;;
+
+let test_public_and_published_inline_share_conflict_order () =
+  fixture @@ fun env sw config meta recovery root ->
+  let snapshot = publish_edit_skills sw config in
+  public_bundle ~snapshot env sw config meta recovery @@ fun _meta _task _cell _causal bundle ->
+  let path = Filename.concat root "direct-inline-conflict/file" in
+  write path "first";
+  let calls = public_calls [public_args path "first" "second"]
+      @ inline_calls bundle [public_args path "second" "third"] in
+  let rows = dispatch env bundle.tools calls in
+  check string "Inline claim conflicts with the public producer's same directory" "third" (read path);
+  List.iter (fun (row : Agent_core.Agent_tools.tool_execution_result) ->
+    check int "direct and Inline conflicting occurrences do not overlap" 1
+      (Agent_core.Tool_contract.Invocation.schedule row.invocation).batch_size) rows
+;;
+
+let test_published_inline_claims_include_later_leaves () =
+  fixture @@ fun env sw config meta recovery root ->
+  let snapshot = publish_edit_skills ~two_nodes:true sw config in
+  public_bundle ~snapshot env sw config meta recovery @@ fun _meta _task _cell _causal bundle ->
+  let left = Filename.concat root "multi-left/file" and right = Filename.concat root "multi-right/file"
+  and shared = Filename.concat root "multi-shared/file" in
+  write left "first"; write right "second"; write shared "first";
+  let input path before after = match public_args path before after with
+    | `Assoc fields -> `Assoc (fields @ ["other_path", `String shared; "other_old", `String before; "other_new", `String after])
+    | _ -> fail "public patch fixture did not construct an object" in
+  let rows = dispatch env bundle.tools (inline_calls bundle [input left "first" "second"; input right "second" "third"]) in
+  check string "left first leaf completed" "second" (read left);
+  check string "right first leaf completed" "third" (read right);
+  check string "later shared leaf consumes the previous Skill's bytes" "third" (read shared);
+  List.iter (fun (row : Agent_core.Agent_tools.tool_execution_result) ->
+    check int "a later leaf's conflict separates outer waves" 1
+      (Agent_core.Tool_contract.Invocation.schedule row.invocation).batch_size) rows
 ;;
 
 let test_public_edits_overlap_through_handler_and_bridge () =
@@ -362,6 +508,20 @@ let test_cancelled_prepared_edit_releases_for_a_later_call () =
   check string "later original call is not held by cancelled resources" "after" (read path)
 ;;
 
+let test_untransferred_preparation_releases_without_effect () =
+  fixture @@ fun _env sw config meta recovery root ->
+  let path = Filename.concat root "untransferred/file" in
+  write path "before";
+  let input = args path "before" "after" in
+  let prepared = prepare sw config meta input in
+  FS.release_prepared_edit prepared;
+  FS.release_prepared_edit prepared;
+  consume config meta recovery (Some prepared) input |> failed;
+  check string "released preparation cannot spend the old capability" "before" (read path);
+  consume config meta recovery None input |> completed;
+  check string "ordinary later Edit remains usable" "after" (read path)
+;;
+
 let () = run "prepared actual Edit resources"
   ["actual filesystem and SDK", [
     test_case "disjoint actual Edits overlap" `Quick test_disjoint_actual_edits_overlap;
@@ -370,9 +530,18 @@ let () = run "prepared actual Edit resources"
     test_case "ancestor directories retain planned order" `Quick test_ancestor_directories_retain_planned_order;
     test_case "changed owner input or parent cannot write" `Quick test_parent_swap_and_input_or_owner_change_do_not_write;
     test_case "Manual Gate retains the same containment and playground authority" `Quick test_preparation_preserves_containment_under_manual_gate;
-    test_case "caller cancellation releases prepared Edit" `Quick test_cancelled_prepared_edit_releases_for_a_later_call];
+    test_case "caller cancellation releases prepared Edit" `Quick test_cancelled_prepared_edit_releases_for_a_later_call;
+    test_case "untransferred preparation releases without an effect" `Quick test_untransferred_preparation_releases_without_effect];
     "actual public bundle and SDK", [
       test_case "public Edit keeps handler observers bridge and source while overlapping" `Quick
         test_public_edits_overlap_through_handler_and_bridge;
       test_case "public conflicting patches consume predecessor bytes" `Quick test_public_conflicting_edits_keep_current_bytes;
-      test_case "public Edit with unavailable source stays Serial" `Quick test_public_edits_without_source_stay_serial]]
+      test_case "public Edit with unavailable source stays Serial" `Quick test_public_edits_without_source_stay_serial];
+    "published Inline Skills and actual Edit", [
+      test_case "published Skills overlap and retain activation run and leaf receipts" `Quick
+        test_published_inline_edits_overlap_and_retain_receipts;
+      test_case "published conflicts consume predecessor bytes" `Quick test_published_inline_conflicts_keep_predecessor_bytes;
+      test_case "public and published Inline producers share conflict order" `Quick
+        test_public_and_published_inline_share_conflict_order;
+      test_case "outer claims include a conflict on the later leaf" `Quick
+        test_published_inline_claims_include_later_leaves]]

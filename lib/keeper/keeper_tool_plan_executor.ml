@@ -949,6 +949,7 @@ let execute_keeper_with_authority
       ~ctx_snapshot
       ~keeper_turn_id
       ?source_context
+      ?prepared_edits
       ?turn_sandbox_factory
       ?clock
       ?continuation_channel
@@ -1003,13 +1004,22 @@ let execute_keeper_with_authority
             ; trace_id = Some replay.invocation.trace_id
             ; tool_use_id = Some replay.tool_use_id } in
           Keeper_owned_job_invocation.replay_of_source source |> Result.map Option.some in
-    match replay_context with
-    | Error detail ->
+    let prepared_edit = match prepared_edits with
+      | None -> Ok None
+      | Some prepared ->
+        Keeper_prepared_inline_edit.for_node ~plan ~node ~input prepared |> Result.map Option.some in
+    match prepared_edit, replay_context with
+    | Error detail, _ ->
+        dispatch_result ~failure_effect_disposition:Tool_result.Proven_pre_effect
+          (Tool_result.make_err ~tool_name:node.tool_name ~class_:Tool_result.Policy_rejection
+             ~effect_disposition:Tool_result.Proven_pre_effect
+             ~start_time:(Tool_timing.start ()) detail)
+    | Ok _, Error detail ->
         dispatch_result ~failure_effect_disposition:Tool_result.Effect_outcome_unknown
           (Tool_result.make_err ~tool_name:node.tool_name ~class_:Tool_result.Policy_rejection
              ~effect_disposition:Tool_result.Effect_outcome_unknown
              ~start_time:(Tool_timing.start ()) detail)
-    | Ok owned_job_replay ->
+    | Ok prepared_edit, Ok owned_job_replay ->
     let terminal_on_completed, terminal_on_failed =
       match descriptor.Keeper_tool_descriptor.execution with
       | Keeper_tool_descriptor.Terminal -> on_completed, on_failed
@@ -1039,6 +1049,7 @@ let execute_keeper_with_authority
         ~keeper_turn_id
         ~source_context:(fun () -> source_context)
         ?owned_job_replay
+        ?prepared_edit
         ?turn_sandbox_factory
         ?clock
         ?continuation_channel

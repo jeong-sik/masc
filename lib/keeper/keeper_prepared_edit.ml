@@ -27,6 +27,8 @@ type t =
   ; leaf : string
   ; source : directory
   ; source_leaf : string
+  ; released : bool Atomic.t
+  ; release_resources : unit -> unit
   }
 
 let owner ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_meta) =
@@ -79,7 +81,9 @@ let prepare ~sw ~config ~meta ~args ~confined =
   | None, _, _ | _, None, _ | _, _, None -> Ok None
   | Some fs, Some (parent_components, leaf), Some (source_components, source_leaf) ->
     let opened = ref [] in
-    let release_partial () = Eio.Cancel.protect (fun () -> List.iter (fun close -> close ()) !opened) in
+    let released = Atomic.make false in
+    let release_partial () = Eio.Cancel.protect (fun () ->
+      if not (Atomic.exchange released true) then List.iter (fun close -> close ()) !opened) in
     let open_dir path =
       let directory = Eio.Path.open_dir ~sw path in
       opened := (fun () -> Eio.Resource.close (fst directory)) :: !opened;
@@ -127,7 +131,7 @@ let prepare ~sw ~config ~meta ~args ~confined =
         if stat.kind <> `Regular_file then Ok None
         else Ok (Some { owner = owner ~config ~meta; args; root
                       ; root_path = Keeper_alerting_path.confined_root confined
-                      ; target; leaf; source; source_leaf })
+                      ; target; leaf; source; source_leaf; released; release_resources = release_partial })
       | None, _ | _, None -> Ok None
     in
     match
@@ -137,7 +141,9 @@ let prepare ~sw ~config ~meta ~args ~confined =
       | Unix.Unix_error _ as error -> Error (Printexc.to_string error)
       | Sys_error detail -> Error detail
     with
-    | Ok (Some _ as prepared) -> Ok prepared
+    | Ok (Some _ as prepared) ->
+      Eio.Switch.on_release sw (fun () -> Atomic.set released true);
+      Ok prepared
     | Ok None -> release_partial (); Ok None
     | Error error -> release_partial (); Error error
     | exception error ->
@@ -147,9 +153,11 @@ let prepare ~sw ~config ~meta ~args ~confined =
 ;;
 
 let scopes prepared = [prepared.target.scope; prepared.source.scope]
+let release prepared = prepared.release_resources ()
 
 let with_parents ~config ~meta ~args ~confined prepared continue =
-  if not (equal_owner prepared.owner (owner ~config ~meta) && Yojson.Safe.equal args prepared.args)
+  if Atomic.get prepared.released then Error "prepared Edit resources were released"
+  else if not (equal_owner prepared.owner (owner ~config ~meta) && Yojson.Safe.equal args prepared.args)
   then Error "prepared Edit belongs to a different owner or input"
   else if not (String.equal prepared.root_path (Keeper_alerting_path.confined_root confined)
                && split_leaf (Keeper_alerting_path.confined_relative_components confined)

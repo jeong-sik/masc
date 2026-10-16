@@ -38,6 +38,16 @@ let is_provider_error_finish s =
   String.equal (String.lowercase_ascii s) provider_error_finish
 ;;
 
+let refusal_of_json = function
+  | `Null -> Ok false
+  | `String _ -> Ok true
+  | `Assoc _ | `List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ -> Error ()
+;;
+
+let with_refusal ~has_refusal stop_reason =
+  if has_refusal then Types.Refusal else stop_reason
+;;
+
 let of_finish (w : wire_finish) ~has_tool_blocks : Types.stop_reason =
   match w with
   | Tool_calls -> if has_tool_blocks then Types.StopToolUse else Types.UnmatchedToolCalls

@@ -7,10 +7,9 @@
 
 open Types
 
-(* agent-core boundary: a blank-content 200 must not be accepted as [Ok content=[]] (a
-   silent empty turn that storms downstream). The parser fails closed with a
-   typed [Empty_completion] carrying the response identity so a consumer can
-   attribute the empty turn to a runtime binding instead of retrying blindly. *)
+(* A normal blank-content 200 fails closed as [Empty_completion] with response
+   identity. Refusal, truncation and interruption carry their own terminal
+   meaning, independently of whether the provider produced text. *)
 type empty_completion =
   { id : string
   ; model : string
@@ -389,6 +388,10 @@ let parse_openai_response_result_json_raw
                 choice))
       else Ok ()
     in
+    let* has_refusal =
+      Stop_reason_wire.refusal_of_json (msg |> member "refusal")
+      |> Result.map_error (fun () -> unreadable_response "malformed_openai_response:refusal_not_string")
+    in
     let text_content = text_content_of_openai_content (msg |> member "content") in
     let* tool_blocks =
       parse_tool_calls_field (msg |> member "tool_calls")
@@ -428,6 +431,7 @@ let parse_openai_response_result_json_raw
       Stop_reason_wire.of_finish
         (Stop_reason_wire.wire_finish_of_string finish_reason)
         ~has_tool_blocks:(tool_blocks <> [])
+      |> Stop_reason_wire.with_refusal ~has_refusal
     in
     Ok
       { id = Cli_common_json.member_str "id" json
@@ -444,10 +448,9 @@ let parse_openai_response_result_json_raw
      | None -> Error (unreadable_response "malformed_openai_response:error_not_object_or_string"))
 ;;
 
-(* agent-core boundary fail-closed wrapper: an all-empty completion (no thinking, no text,
-   no tool_calls) becomes a typed [Empty_completion] instead of [Ok content=[]]
-   — the silent empty turn that stormed downstream. Blank text WITH tool_calls
-   has content=[ToolUse ..] (content <> []) and stays [Ok]. *)
+(* A normal all-empty completion fails closed. A typed refusal, truncation or
+   interruption remains a response even without content: replacing its reason
+   with an empty-completion failure would erase the provider's terminal state. *)
 let parse_openai_response_result_json
       ?(content_inline_reasoning = Capabilities.No_content_inline_reasoning)
       raw_json
@@ -455,7 +458,12 @@ let parse_openai_response_result_json
   match parse_openai_response_result_json_raw ~content_inline_reasoning raw_json with
   | Error _ as error -> error
   | Ok ({ content = []; id; model; stop_reason; usage; telemetry } : Types.api_response)
-    -> Error (Empty_completion { id; model; stop_reason; usage; telemetry })
+    as response ->
+    (match stop_reason with
+     | EndTurn | StopSequence ->
+       Error (Empty_completion { id; model; stop_reason; usage; telemetry })
+     | StopToolUse | MaxTokens | Refusal | ContentFilter | RepetitionTruncation
+     | ContextWindowExceeded | PauseTurn | Compaction | UnmatchedToolCalls | Unknown _ -> response)
   | Ok resp -> Ok resp
 ;;
 

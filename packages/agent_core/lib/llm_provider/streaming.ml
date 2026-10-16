@@ -385,6 +385,7 @@ type openai_chunk =
   { chunk_id : string
   ; chunk_model : string
   ; delta_content : string option
+  ; delta_refusal : bool
   ; delta_reasoning : string option
   ; delta_reasoning_details : openai_reasoning_details_delta option
   ; delta_tool_calls : openai_tool_call_delta list
@@ -731,6 +732,7 @@ let parse_openai_sse_chunk ~streaming_reasoning data_str : openai_sse_parse_resu
                       { chunk_id
                       ; chunk_model
                       ; delta_content = None
+                      ; delta_refusal = false
                       ; delta_reasoning = None
                       ; delta_reasoning_details = None
                       ; delta_tool_calls = []
@@ -743,6 +745,7 @@ let parse_openai_sse_chunk ~streaming_reasoning data_str : openai_sse_parse_resu
                | Some (`List (choice :: _)) ->
                  let delta = choice |> member "delta" in
                  let delta_content = delta |> member "content" |> to_string_option in
+                 let delta_refusal = Stop_reason_wire.refusal_of_json (delta |> member "refusal") in
                  let declared_delta_field field =
                    match delta |> member field |> to_string_option with
                    | Some "" | None -> None
@@ -814,9 +817,11 @@ let parse_openai_sse_chunk ~streaming_reasoning data_str : openai_sse_parse_resu
                     Openai_undeclared_reasoning_member
                       { declared; member; raw = data_str }
                   | Reasoning_delta_read (delta_reasoning, delta_reasoning_details) ->
-                    (match parse_openai_delta_tool_calls delta with
-                     | Error reason -> openai_parse_failed ~raw:data_str reason
-                     | Ok delta_tool_calls ->
+                    (match delta_refusal, parse_openai_delta_tool_calls delta with
+                     | Error (), _ ->
+                       openai_parse_failed ~raw:data_str "malformed_openai_sse_payload:refusal_not_string"
+                     | Ok _, Error reason -> openai_parse_failed ~raw:data_str reason
+                     | Ok delta_refusal, Ok delta_tool_calls ->
                        let finish_reason =
                          choice |> member "finish_reason" |> to_string_option
                        in
@@ -824,6 +829,7 @@ let parse_openai_sse_chunk ~streaming_reasoning data_str : openai_sse_parse_resu
                          { chunk_id
                          ; chunk_model
                          ; delta_content
+                         ; delta_refusal
                          ; delta_reasoning
                          ; delta_reasoning_details
                          ; delta_tool_calls
@@ -899,6 +905,7 @@ type openai_stream_state =
   ; mutable thinking_state : thinking_state
   ; mutable gemini_message_model : Model_id.t option
   ; mutable openai_prelude : openai_prelude
+  ; mutable refusal_seen : bool
   ; inline_reasoning : Inline_reasoning_split.state option
     (** Present only for a model whose content channel can also carry
         reasoning wrapped in tags (template-parser dialect or declared
@@ -928,6 +935,7 @@ let create_openai_stream_state
   ; thinking_state = Not_thinking
   ; gemini_message_model = None
   ; openai_prelude = Awaiting_reported_metadata
+  ; refusal_seen = false
   ; inline_reasoning =
       (if inline_reasoning then Some (Inline_reasoning_split.create ()) else None)
   ; provider
@@ -945,6 +953,7 @@ type openai_projection_scalar_snapshot =
   ; snapshot_next_block_index : int
   ; snapshot_thinking_state : thinking_state
   ; snapshot_openai_prelude : openai_prelude
+  ; snapshot_refusal_seen : bool
   }
 
 type openai_projection_undo =
@@ -971,6 +980,7 @@ let begin_openai_projection state =
       ; snapshot_next_block_index = state.next_block_index
       ; snapshot_thinking_state = state.thinking_state
       ; snapshot_openai_prelude = state.openai_prelude
+      ; snapshot_refusal_seen = state.refusal_seen
       }
   ; inline_snapshot = Option.map (fun split -> split, Inline_reasoning_split.snapshot split) state.inline_reasoning
   ; undo = []
@@ -994,6 +1004,7 @@ let rollback_openai_projection tx =
   state.next_block_index <- snapshot.snapshot_next_block_index;
   state.thinking_state <- snapshot.snapshot_thinking_state;
   state.openai_prelude <- snapshot.snapshot_openai_prelude;
+  state.refusal_seen <- snapshot.snapshot_refusal_seen;
   Option.iter (fun (split, captured) -> Inline_reasoning_split.restore split captured) tx.inline_snapshot;
   List.iter
     (function
@@ -1274,6 +1285,7 @@ let project_openai_chunk ?tx (state : openai_stream_state) (chunk : openai_chunk
   let events = ref [] in
   let emit evt = events := evt :: !events in
   let telemetry_event = ref None in
+  state.refusal_seen <- state.refusal_seen || chunk.delta_refusal;
   (* Reasoning content delta — emitted before text *)
   let emit_thinking_delta text =
     (match state.thinking_state with
@@ -1410,6 +1422,7 @@ let project_openai_chunk ?tx (state : openai_stream_state) (chunk : openai_chunk
             (Stop_reason_wire.reconcile). SSOT: the wire vocabulary lives in
             Stop_reason_wire, not in an unguarded chunk-level match. *)
          Stop_reason_wire.provisional_of_string reason
+         |> Stop_reason_wire.with_refusal ~has_refusal:state.refusal_seen
        in
        (* Close every block this message opened before the terminal MessageDelta,
           mirroring Anthropic's content_block_stop-then-message_delta ordering.
@@ -1622,6 +1635,7 @@ let%test
     { chunk_id = "c"
     ; chunk_model = "minimax-m3"
     ; delta_content = None
+    ; delta_refusal = false
     ; delta_reasoning = None
     ; delta_reasoning_details = None
     ; delta_tool_calls =
@@ -1664,6 +1678,7 @@ let[@warning "-32"] test_content_chunk ?(finish_reason = None) content =
   { chunk_id = "c"
   ; chunk_model = "minimax-m3"
   ; delta_content = Some content
+  ; delta_refusal = false
   ; delta_reasoning = None
   ; delta_reasoning_details = None
   ; delta_tool_calls = []
@@ -1756,6 +1771,7 @@ let%test "openai_chunk_to_events: id-less continuation fragment stays in its cal
     { chunk_id = "c"
     ; chunk_model = "m"
     ; delta_content = None
+    ; delta_refusal = false
     ; delta_reasoning = None
     ; delta_reasoning_details = None
     ; delta_tool_calls = []
@@ -1808,6 +1824,7 @@ let%test
     { chunk_id = "c"
     ; chunk_model = "gemma4-coder-fable5"
     ; delta_content = None
+    ; delta_refusal = false
     ; delta_reasoning = None
     ; delta_reasoning_details = None
     ; delta_tool_calls = []
@@ -1901,6 +1918,7 @@ let%test "openai_chunk_to_events: id-less continuation on ambiguous index fails 
     { chunk_id = "c"
     ; chunk_model = "minimax-m3"
     ; delta_content = None
+    ; delta_refusal = false
     ; delta_reasoning = None
     ; delta_reasoning_details = None
     ; delta_tool_calls = []
@@ -2066,6 +2084,9 @@ let responses_stop_reason_of_response response =
     ~incomplete_reason:(responses_incomplete_reason_opt response)
     ~failed_message:(responses_failed_message response)
     ~has_tool_calls:(responses_output_has_function_call response)
+  |> Option.map
+       (Stop_reason_wire.with_refusal
+          ~has_refusal:(Responses_stop_reason.has_refusal response))
 ;;
 
 let responses_error_message json =
@@ -2198,7 +2219,9 @@ let responses_sse_to_events (state : openai_stream_state) event_type data_str
       let emit_terminal response =
         emit
           (MessageDelta
-             { stop_reason = responses_stop_reason_of_response response
+             { stop_reason =
+                 responses_stop_reason_of_response response
+                 |> Option.map (Stop_reason_wire.with_refusal ~has_refusal:state.refusal_seen)
              ; usage =
                  Option.map
                    Types.delta_usage_of_api_usage
@@ -2222,6 +2245,8 @@ let responses_sse_to_events (state : openai_stream_state) event_type data_str
             let index = responses_ensure_text_block state emit ~output_index in
             emit (ContentBlockDelta { index; delta = TextDelta delta })
           | Some _ | None -> ())
+       | "response.refusal.delta" | "response.refusal.done" ->
+         state.refusal_seen <- true
        | "response.output_text.done" ->
          if not state.text_block_started
          then (
@@ -2311,8 +2336,6 @@ let responses_sse_to_events (state : openai_stream_state) event_type data_str
        | "response.function_call_arguments.done"
        | "response.reasoning_summary_part.added"
        | "response.reasoning_summary_part.done"
-       | "response.refusal.delta"
-       | "response.refusal.done"
        | "response.queued" -> ()
        | other -> emit (SSEUnknownEventType { event_type = other; raw = data_str }));
       List.rev !events, None

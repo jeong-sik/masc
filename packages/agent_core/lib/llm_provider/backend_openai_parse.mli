@@ -39,8 +39,9 @@ type empty_completion =
     that is neither an object nor a string. It is not the provider reporting
     anything.
 
-    [Empty_completion] is a fail-closed all-empty 200 that would otherwise have
-    parsed as [Ok content=[]] and stormed downstream. *)
+    [Empty_completion] is a fail-closed normal all-empty 200. Authoritative
+    refusal, truncation and interruption reasons remain typed responses even
+    without content, so the receiving consumer can distinguish those states. *)
 type parse_error =
   | Provider_error of
       { message : string
@@ -57,8 +58,9 @@ val parse_error_to_string : parse_error -> string
 (** Parse an OpenAI-compatible JSON response (from an already-parsed
     [Yojson.Safe.t]).  [Ok api_response] on success; [Error (Provider_error _)]
     when the provider reported an error; [Error (Unreadable_response _)] when
-    the body cannot be read; [Error (Empty_completion _)] when the completion has no
-    thinking/text/tool_calls (agent-core boundary). Blank text WITH tool_calls stays [Ok]
+    the body cannot be read; [Error (Empty_completion _)] when a normal completion
+    has no thinking/text/tool_calls. Typed terminal failures remain responses
+    without content. Blank text WITH tool_calls stays [Ok]
     (content is non-empty). Use when the caller already holds the parsed JSON to
     avoid re-parsing.
 

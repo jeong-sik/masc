@@ -77,6 +77,10 @@ type openai_chunk =
   { chunk_id : string
   ; chunk_model : string
   ; delta_content : string option
+  ; delta_refusal : bool
+      (** The nullable [delta.refusal] field declared a refusal. Private refusal
+          text is not emitted as answer text; the request retains the signal
+          until its actual terminal event. *)
   ; delta_reasoning : string option
   ; delta_reasoning_details : openai_reasoning_details_delta option
   ; delta_tool_calls : openai_tool_call_delta list

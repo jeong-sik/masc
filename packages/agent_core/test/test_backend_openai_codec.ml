@@ -1715,10 +1715,10 @@ let test_parse_edge_shapes_for_text_and_telemetry () =
    | EndTurn -> ()
    | _ ->
      Alcotest.fail "empty completion should preserve the stop finish_reason as EndTurn");
-  (* Malformed object content also parses to no blocks, but the fail-closed
-     [Empty_completion] payload still surfaces stop_reason and telemetry. *)
+  (* The content has no usable blocks, but the authoritative token cut and
+     its telemetry remain a typed response rather than an empty completion. *)
   let telemetry =
-    parse_empty
+    parse_ok
       (`Assoc
           [ "id", `String "chatcmpl-telemetry"
           ; "model", `String "provider-d-test"

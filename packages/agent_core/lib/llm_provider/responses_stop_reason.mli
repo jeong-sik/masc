@@ -15,3 +15,7 @@ val of_status
   -> failed_message:string option
   -> has_tool_calls:bool
   -> Types.stop_reason option
+
+(** Read the typed refusal parts of Responses output messages. Refusal prose is
+    never copied into visible answer content. Shared by sync and SSE terminals. *)
+val has_refusal : Yojson.Safe.t -> bool

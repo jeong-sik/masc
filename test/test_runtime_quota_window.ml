@@ -243,6 +243,22 @@ let test_declared_credential_is_shared_scope () =
     true
     (Option.is_some (Q.active_until ~scope:image_scope ~now:100.0))
 
+(* The narrowest honest scope for an undeclared credential is the provider row
+   itself ([scope_of_credential] answers [Provider_row provider_id] for [None]
+   and for [Inline]), so two undeclared rows never share a window: the review
+   P3 asks the window layer, not the adapter fallback, to pin that. *)
+let test_undeclared_rows_have_separate_scopes () =
+  let glm_scope = provider_scope "glm" in
+  let image_scope = provider_scope "zai-image" in
+  Alcotest.(check bool) "undeclared rows do not share a scope" false
+    (Q.scope_equal glm_scope image_scope);
+  reset ();
+  Q.note_exhausted ~scope:glm_scope ~resets_at:500.0;
+  Alcotest.(check bool) "exhausting glm does not demote zai-image" false
+    (Q.is_exhausted ~scope:image_scope ~now:100.0);
+  Alcotest.(check bool) "and glm's own window holds" true
+    (Q.is_exhausted ~scope:glm_scope ~now:100.0)
+
 let with_env_values bindings f =
   let previous =
     List.map (fun (key, _) -> key, Sys.getenv_opt key) bindings
@@ -375,6 +391,10 @@ let () =
             "declared credential shares scope"
             `Quick
             test_declared_credential_is_shared_scope
+        ; Alcotest.test_case
+            "undeclared rows have separate scopes"
+            `Quick
+            test_undeclared_rows_have_separate_scopes
         ; Alcotest.test_case
             "selected environment alias owns scope"
             `Quick

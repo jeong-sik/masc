@@ -13,6 +13,13 @@ not prove that a model is preparing a task, that a turn is stalled, or that the
 whole task became faster. The result-recovery provider experiments measure a
 different interval after a composition result has already been produced.
 
+Task Skill resolution now groups shared exact references before resolving them
+under the captured Tool descriptors, then reuses that selection when setup has
+the identical immutable inputs. The [Skill flow comparison](../SKILLS-FLOW.md#task-참조-준비의-as-is--to-be)
+records the source call-count scope and changed-input behavior. Measure setup
+time separately from first-request bytes, model roundtrips and first useful Tool
+latency; a source lookup reduction does not establish those timing results.
+
 ## Recorded queue admission
 
 `Keeper_event_queue_state.pending_selection.first_admitted_at` records the epoch

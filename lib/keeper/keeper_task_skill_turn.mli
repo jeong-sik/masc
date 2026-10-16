@@ -57,7 +57,12 @@ type t = private
   { selected : selected list
   ; unprojectable : unprojectable list
   ; descriptor_authority : Keeper_tool_descriptor.t list option
+  ; projection_snapshot : Skill_catalog_snapshot.t option
   }
+(** [projection_snapshot] identifies the immutable input used by this
+    projection. [None] means there is no single reusable input, including
+    selections merged from different snapshots or mixed bound/unbound Tool
+    projections. It grants no execution right. *)
 
 type partition = private
   { instructions : selected list
@@ -83,12 +88,16 @@ val resolve_observations :
   held_task_skills:Keeper_world_observation_inputs.held_task_skills list ->
   (t, error) result
 (** Resolve current and held Task references exactly once from one observed turn
-    state, retaining every Task identity on shared references. *)
+    state, grouping identical exact references before projection and retaining
+    every Task identity on shared references. *)
 
 val with_descriptors : descriptors:Keeper_tool_descriptor.t list ->
   snapshot:Skill_catalog_snapshot.t -> t -> (t, error) result
 (** Reproject only already selected exact references from the same frozen snapshot;
-    preserve Task provenance and bind the descriptor objects used by the turn. *)
+    preserve Task provenance and bind the descriptor objects used by the turn.
+    The exact same snapshot object and descriptor objects reuse the immutable
+    selection without resolving/projecting again. Changed or mixed inputs
+    reproject; no revision string, current Task or wall clock is a cache key. *)
 val descriptors : t -> Keeper_tool_descriptor.t list option
 (** [None] means no runtime Tool authority has been captured yet. *)
 val resolve_live_observations :

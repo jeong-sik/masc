@@ -91,6 +91,8 @@ Gothic Neo. They are not a source-only renderer preview or a physical terminal
 screenshot. The associated ANSI-derived frame journals and text captures are
 retained beside them. The frames were inspected manually; no UI text, layout or
 row-order assertions were added.
+Text frames deliberately retain their terminal-cell padding, including trailing
+spaces and blank rows.
 
 | Viewport | Baseline during wait | Candidate during wait | Baseline after wait |
 |---|---|---|---|

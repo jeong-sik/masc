@@ -11,7 +11,10 @@ scoped to their case; a Skill does not override current authoritative state or \
 later explicit instructions. Pass source_text or draft_sha256 from a prepare \
 that froze skill metadata; the latter publishes those exact bytes after owner \
 and frozen-contract revalidation. Where completion authority is relevant, distinguish \
-Task verdicts from Goal human confirmation and allow explicitly reopened work."""
+Task verdicts from Goal human confirmation and allow explicitly reopened work. \
+Inline Read/Edit Skills may overlap independent supported Keeper-owned files \
+when their inputs are already resolved. Declare data/order dependencies with \
+after and use input templates for upstream values."""
 additional_properties = false
 
 [[params]]

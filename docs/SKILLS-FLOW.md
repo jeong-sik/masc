@@ -207,9 +207,14 @@ flowchart TD
 ```
 
 - 합성 스킬은 plan이다. 같은 dependency layer에서도 `Ordinary Concurrent` descriptor
-  노드만 동시 실행되고 `Ordinary Serial`/`Terminal`은 각자 직렬 batch다. `execution =
+  노드가 일반 스케줄에서 동시 실행되고 `Ordinary Serial`/`Terminal`은 각자 직렬 batch다.
+  named inline Skill의 완전히 해석된 Read/Edit 계획은
+  `Keeper_prepared_inline_files`가 실제 자원을 준비하면 별도 자원 순서를 쓴다.
+  Read끼리의 공유는 허용하고 겹치는 Write는 앞선 소유자 뒤에서 실행한다. 명시적인
+  의존성·실패 정책은 그대로 적용된다. 지원 범위는
+  [Read/Edit 자원](guides/PREPARED-EDIT-RESOURCES.md)을 따른다. `execution =
   "async"`면 기존 durable broker로 흐르고 `keeper_composition_status`/`_cancel`로
-  조회·취소. "정적 read-only 노드만" 제약은 게이트가 아니라 effect 재실행 안전이다.
+  조회·취소한다. 접수 결과와 각 노드의 실제 실행 결과는 별도로 확인한다.
 - 모든 실행은 `tool_calls` 스토어(`lib/keeper_tool_call_log.ml`)에 노드 단위로 남고
   (`composition_tool`, `composition_run_id`, `composition_node_id`) SSE
   `keeper_tool_call_evidence_committed`로도 흐른다. 이 SSE에는 노드의 `success`,

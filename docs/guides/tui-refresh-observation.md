@@ -10,7 +10,7 @@ the refresh faster or certify that received data was admitted to the workspace.
 |---|---|---|---|
 | Refresh visibility | Connection badge and one full-refresh start clock | Pending reader, failed and interrupted reader counts | Native screen readability at normal and narrow widths |
 | Attribution | Existing endpoint and mailbox diagnostics | One terminal record with logical reader outcomes and elapsed time | Matched baseline/candidate latency distributions |
-| Partial results | Verified Dashboard preview and questions can arrive early | Existing early delivery stays in place | Independent Keeper/scoped data admission before unrelated reads finish |
+| Partial results | Verified Dashboard preview and questions can arrive early; roster waits for the full bundle | A matching workspace's roster can settle before unrelated reads, once per source request | Cold-start authority and other scoped datasets still use terminal admission |
 | Authority | Request tickets and workspace identity guard admission | Diagnostic observations use the same request and authority identities | These observations never grant data or action authority |
 | Keeper execution | Existing Task/Skill preparation and owned job recovery | No model or Tool execution change in this unit | Request byte attribution, redundant roundtrips, recipe concurrency and held-job reactivation |
 
@@ -67,6 +67,33 @@ the time an operator can act. Existing slow endpoint and mailbox records retain
 their narrower meaning. The synchronous fallback has the total refresh clock but
 does not emit individual reader events. Scoped refreshes and independent side
 reads are outside this ledger.
+
+## Early Keeper roster delivery
+
+For a workspace already confirmed by the TUI, a successful roster response may
+be applied while Dashboard, confirmations or current-view readers are still
+running. Its request carries both expected workspace paths to the authenticated
+roster endpoint. Early admission also checks the full-refresh ticket, dispatch
+workspace authority and current server identity. It does not confirm a new
+workspace or turn a cold start into an authorized reading.
+
+The roster has its own `Snapshot_read` receipt. A newer roster request supersedes
+the old one, workspace suspension retires it, and early delivery consumes it.
+The terminal bundle therefore cannot replay the same roster or its dependent
+Item refresh. Error and cold-start results retain their terminal admission path.
+No extra HTTP request is added. Other datasets keep their existing ordering.
+
+`tui_roster_early` records the admitted source request, full refresh's monotonic
+`refresh_started_ns` and `admitted_ms` after applying the roster to UI state.
+Join the same refresh clock to `tui_http_refresh`; the difference separates
+roster usability in state from the terminal refresh. This is not a first-painted
+frame measurement. Native frames must still establish what was visible.
+
+Before this delivery change, from the end of the common initial identity probe,
+the roster waited for the slowest independent reader and final identity probe.
+Afterwards its own successful workspace-bound read and UI mailbox application
+can settle it. This shortens that dependency path; the saved time remains
+unmeasured until both binaries run under the same delayed-reader conditions.
 
 ## Collect comparable before/after evidence
 

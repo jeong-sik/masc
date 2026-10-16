@@ -28,9 +28,7 @@ type http_scoped_surface_results = {
   http_fleet_safety: (Masc.Tui_decode.fleet_safety_reading, string) result option;
   (* [None] on surfaces that do not read the roster or its Candle summary;
      leaving it out keeps the observation until a relevant refresh. *)
-  http_keeper_roster:
-    (Masc_tui_keeper_control.roster * (Candle_observation.t, string) result,
-     Masc_tui_keeper_control.roster_failure) result option;
+  http_keeper_roster: keeper_roster_observation option;
   (* [None] off Dashboard and Usage. One fetch, two readings: the runtime
      rows and the provider usage windows. *)
   http_runtime_quota:
@@ -189,6 +187,7 @@ type async_msg =
   | Http_overview_loaded of overview_preview
   (** Verified questions may settle their own read before the full bundle. *)
   | Http_asks_loaded of early_asks_observation
+  | Http_keeper_roster_loaded of early_keeper_roster_observation
   | Http_progress_observed of http_progress_observation
   | Http_refresh_done of http_refresh_outcome
   | Http_refresh_failed of
@@ -790,7 +789,7 @@ let rec workspace_message_is_read = function
   | Voice_silent _
   | Voice_discarded _
   | Voice_failed _
-  | Http_progress_observed _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_refresh_done _
+  | Http_keeper_roster_loaded _ | Http_progress_observed _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_refresh_done _
   | Http_refresh_failed _
   (* Not a reply: the refresh that recovered the identity tells the loop to
      read the confirm queue again. It belongs to that refresh, which is
@@ -897,7 +896,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Voice_agent_voices_loaded _ | Voice_agent_voice_saved _
     | Voice_wizard_probed (_, _) | Voice_wizard_reread (_, _)
     | Voice_config_loaded (_, _, _) | Voice_level _ | Voice_transcribed _
-    | Voice_silent _ | Voice_discarded _ | Voice_failed _ | Http_progress_observed _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_refresh_done _
+    | Voice_silent _ | Voice_discarded _ | Voice_failed _ | Http_keeper_roster_loaded _ | Http_progress_observed _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_refresh_done _
     | Http_refresh_failed (_, _, _) | Approvals_listing_superseded
     | Approvals_summary_loaded (_, _, _, _) | Surface_composer_released
     | Http_scoped_refresh_done (_, _, _)
@@ -1034,7 +1033,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Voice_agent_voice_saved _ | Voice_wizard_probed (_, _)
   | Voice_wizard_reread (_, _) | Voice_config_loaded (_, _, _) | Voice_level _
   | Voice_transcribed _ | Voice_silent _ | Voice_discarded _ | Voice_failed _
-  | Http_progress_observed _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_refresh_done _ | Http_refresh_failed (_, _, _)
+  | Http_keeper_roster_loaded _ | Http_progress_observed _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_refresh_done _ | Http_refresh_failed (_, _, _)
   | Approvals_listing_superseded | Approvals_summary_loaded (_, _, _, _)
   | Surface_composer_released | Http_scoped_refresh_done (_, _, _)
   | Http_scoped_refresh_failed (_, _, _, _, _) | Board_post_refresh_done (_, _)

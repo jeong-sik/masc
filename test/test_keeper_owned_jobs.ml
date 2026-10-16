@@ -5163,7 +5163,11 @@ let test_terminal_cleanup_preserves_result_and_gc () = with_fixture @@ fun _env 
     |> Yojson.Safe.from_string |> member "unreferenced_candidates" |> to_list |> List.map to_string in
   let references = Tool_output.normalized_artifact_refs_in_json (Yojson.Safe.from_string
     (List.hd (String.split_on_char '\n' owner))) in
-  let references = references @ (match original.outputs with None -> [] | Some (a,b) -> [a;b]) in
+  let references = references @ (match original.outputs with
+    | Some (Store.Outputs_complete (stdout,stderr)) -> [stdout;stderr]
+    | Some (Store.Outputs_unavailable {evidence}) ->
+      failf "cleanup fixture output is unavailable: %s" evidence
+    | None -> fail "cleanup fixture has no complete original outputs") in
   List.iter (fun (reference : Tool_output.artifact_ref) -> check bool "retained owner remains a GC root" false
     (List.mem reference.sha256 candidates)) references;
   check int "one exact terminal container removal" 1 (effect_count fixture "rm");

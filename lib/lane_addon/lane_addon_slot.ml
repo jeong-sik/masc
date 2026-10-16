@@ -6,6 +6,7 @@ type port = {
   find : Engine.lookup -> (string option, string) result;
   inspect : string -> (Engine.held, string) result;
   remove : string -> (unit, string) result;
+  scoped : unit -> (string list, string) result;
 }
 
 let ( let* ) = Result.bind
@@ -98,3 +99,56 @@ let holder_changed port (holder : Lifecycle.holder) =
        | Ok held -> holder_of held <> holder
        | Error _ -> false)
   | Error _ -> false
+
+type sweep_verdict = Removed | Live | Refused of Lifecycle.failure
+type sweep_item = {
+  container_id : string;
+  instance : string option;
+  verdict : sweep_verdict;
+}
+
+(* The name this container's own labels say it should have. *)
+let explained_name ~runtime (held : Engine.held) instance =
+  match held.state_owner with
+  | Some owner -> Lane_addon_worker_state.container_name_of_identity ~runtime owner
+  | None -> Ok (Engine.owned_name runtime instance)
+
+let sweep_one port ~runtime ~is_live_instance id =
+  match port.inspect id with
+  | Error detail ->
+      { container_id = id; instance = None;
+        verdict = Refused (Lifecycle.Worker_failed ("cannot read the container: " ^ detail)) }
+  | Ok held ->
+      let item verdict = { container_id = id; instance = held.instance; verdict } in
+      (match held.instance with
+       | None -> item (Refused (Lifecycle.Slot_foreign (holder_of held)))
+       | Some instance when is_live_instance instance -> item Live
+       | Some instance ->
+           (match explained_name ~runtime held instance with
+            | Ok name when String.equal name held.name ->
+                (match port.remove id with
+                 | Ok () -> item Removed
+                 | Error detail ->
+                     item (Refused (Lifecycle.Slot_predecessor_unremovable { instance_id = instance; detail })))
+            | Ok _ | Error _ -> item (Refused (Lifecycle.Slot_foreign (holder_of held)))))
+
+let sweep port ~runtime ~is_live_instance =
+  let* () = match port.read_engine () with
+    | Ok _ -> Ok ()
+    | Error (Lifecycle.Unreachable detail) -> Error (Lifecycle.Engine_unreachable detail)
+    | Error (Lifecycle.Identity_unreadable detail) ->
+        Error (Lifecycle.Worker_failed ("the container engine cannot name itself: " ^ detail)) in
+  let* ids = port.scoped () |> Result.map_error (fun detail ->
+    Lifecycle.Worker_failed ("cannot list this server's containers: " ^ detail)) in
+  Ok (List.map (sweep_one port ~runtime ~is_live_instance) ids)
+
+let sweep_item_to_string item =
+  let instance = Option.value ~default:"none" item.instance in
+  match item.verdict with
+  | Removed ->
+      Printf.sprintf "Lane Add-on sweep removed container %s of dead incarnation %s" item.container_id instance
+  | Live ->
+      Printf.sprintf "Lane Add-on sweep kept container %s of live incarnation %s" item.container_id instance
+  | Refused failure ->
+      Printf.sprintf "Lane Add-on sweep refused container %s (incarnation %s): %s" item.container_id instance
+        (Lifecycle.failure_to_string failure)

@@ -23,6 +23,8 @@ type port = {
   remove : string -> (unit, string) result;
       (** Removes exactly this container and confirms it no longer lists.
           Persistent state volumes are untouched. *)
+  scoped : unit -> (string list, string) result;
+      (** The containers that carry this server's base-path scope label. *)
 }
 
 val proven :
@@ -67,6 +69,32 @@ val release :
     this incarnation's is left alone and nothing is owed: a name held by
     another owner means this incarnation's create never landed. By ID, a
     container that is not this incarnation's is [Slot_foreign]. *)
+
+(** What a sweep did with one container of this base path. *)
+type sweep_verdict =
+  | Removed
+  | Live  (** Its incarnation is live in this process. *)
+  | Refused of Lane_addon_lifecycle.failure
+
+type sweep_item = {
+  container_id : string;
+  instance : string option;
+  verdict : sweep_verdict;
+}
+
+val sweep :
+  port -> runtime:Lane_addon_types.runtime -> is_live_instance:(string -> bool) ->
+  (sweep_item list, Lane_addon_lifecycle.failure) result
+(** Removes the containers a dead server left behind. Only containers that
+    carry this base path's scope label are considered. A container whose
+    incarnation is live is left alone. A dead one is removed by exact ID only
+    when its labels explain its name: the writer name derived from its state
+    owner label, or the per-incarnation name derived from its instance label.
+    Anything else is refused and named. The engine must answer and name itself
+    first; otherwise nothing is touched. *)
+
+val sweep_item_to_string : sweep_item -> string
+(** One log line for a removed or refused container. *)
 
 val holder_changed : port -> Lane_addon_lifecycle.holder -> bool
 (** True when the container is gone or its labels are no longer the ones the

@@ -10,6 +10,8 @@ val identity : owner -> string
     on every container created for it. *)
 val volume_name : ?runtime:Lane_addon_types.runtime -> owner -> string
 val container_name : ?runtime:Lane_addon_types.runtime -> owner -> string
+val container_name_of_identity : ?runtime:Lane_addon_types.runtime -> string -> (string, string) result
+(** The writer name for the identity text of a [masc.lane.state.owner] label. *)
 val ensure :
   ?runtime:Lane_addon_types.runtime ->
   run:(operation:string -> string list -> (string, string) result) ->

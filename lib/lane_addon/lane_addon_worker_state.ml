@@ -28,6 +28,16 @@ let container_name ?(runtime = Lane_addon_types.Docker) owner =
   | Lane_addon_types.Docker -> volume_name owner ^ "-writer"
   | Apple_container -> Digestif.SHA256.(to_hex (digest_string ("writer:" ^ identity owner)))
 
+(* The writer name a state owner label stands for, recomputed from the label's
+   own text. A container whose name this does not explain was not named for
+   its labels. *)
+let container_name_of_identity ?(runtime = Lane_addon_types.Docker) text =
+  match Yojson.Safe.from_string text with
+  | `List [`String workspace; `String installation; `String package] ->
+      Ok (container_name ~runtime { workspace; installation; package })
+  | _ -> Error "state owner label is not an installation identity"
+  | exception Yojson.Json_error detail -> Error ("state owner label is not JSON: " ^ detail)
+
 let label = Lane_addon_engine.state_owner_label
 let ( let* ) = Result.bind
 

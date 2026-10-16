@@ -55,6 +55,9 @@ type backend = {
   condition_met : runtime:runtime -> Lifecycle.condition -> bool;
   (* A waiting failure is re-examined through this one cheap read. False also
      when the condition cannot be established. *)
+  sweep : runtime:runtime -> is_live_instance:(string -> bool) ->
+    (Lane_addon_slot.sweep_item list, Lifecycle.failure) result;
+  (* Removes the containers of this base path that no live incarnation owns. *)
 }
 type owned_connection =
   { export_owner : Lane_addon_tool_export.owner
@@ -155,7 +158,8 @@ type manager = { store : Lane_addon_store.t; entries : (string, entry) Hashtbl.t
   fleet_operations : ((string * string), unit) Hashtbl.t;
   fleet_recipients : (((string * string) * string), unit) Hashtbl.t; mutable fleet_nudge : unit -> unit; mutable configuration_status : configuration_reading option;
   mutable configuration_nudge : unit -> unit;
-  mutable configuration_visibility : (string * visibility) list }
+  mutable configuration_visibility : (string * visibility) list;
+  mutable swept : runtime list }
 let managers : (string, manager) Hashtbl.t = Hashtbl.create 4
 let override : backend option ref = ref None
 type fleet_backend = {
@@ -529,6 +533,12 @@ let release_of e container_id = match e.engine, container_id with
   | None, None -> Ok Lifecycle.Never_created
   | None, Some _ ->
       Error (Lifecycle.Persistence_failed "a container exists but no engine was recorded for it")
+(* A cleanup that does not confirm the release is an event an operator needs
+   in the server log, not only in the resource event stream. *)
+let log_cleanup_failure instance_id package_id container_id failure =
+  Log.Misc.warn "Lane Add-on cleanup was not confirmed for instance %s (package %s, container %s): %s"
+    instance_id package_id (Option.value ~default:"none" container_id) (Lifecycle.failure_to_string failure)
+
 let stop_entry ~sw ~backend m e =
   if not e.cleanup_running then
     let cleanup = match e.connection, e.engine with
@@ -561,10 +571,12 @@ let stop_entry ~sw ~backend m e =
                         container_id None
                 | Error failure ->
                     e.state <- fail_state e failure;
+                    log_cleanup_failure e.instance_id e.package.id container_id failure;
                     publish_resource Lane_addon_resource_events.Release_incomplete e
                       container_id (Some (Lifecycle.failure_detail failure)))
            | Error failure ->
                e.state <- fail_state e failure;
+               log_cleanup_failure e.instance_id e.package.id container_id failure;
                publish_resource Lane_addon_resource_events.Release_incomplete e
                  container_id (Some (Lifecycle.failure_detail failure)));
           (match persist m e with Ok () -> () | Error message ->
@@ -867,6 +879,10 @@ let backend ~store () = match !override with
        as connector sidecar housekeeping. Reuse its operator knob rather than
        adding a second timeout with the same meaning. *)
     let control_timeout_sec = Env_config_runtime.Sidecar.control_command_timeout_sec in
+    (* Names this server's base path on every container it creates. The
+       sweep lists only containers that carry it, so servers that share one
+       engine never see each other's. *)
+    let scope = Lane_addon_store.digest (Lane_addon_store.root store) in
     {
       start = (fun ~sw ~state_owner ~instance_id ~package ~binding ~on_engine ~is_live_instance ~on_created ->
         let* sampling_handler = prepare_sampling_handler
@@ -890,7 +906,7 @@ let backend ~store () = match !override with
         | None -> Error (Lifecycle.Worker_failed "Lane Add-on Docker control requires the server Eio clock")
         | Some clock ->
             Lane_addon_worker.start ~sw ~clock ~control_timeout_sec
-              ~mgr:Posix_spawn_process_mgr.mgr ~instance_id ~package ?state_owner ~on_engine ~is_live_instance
+              ~mgr:Posix_spawn_process_mgr.mgr ~instance_id ~package ?state_owner ~on_engine ~is_live_instance ~scope
               ~on_created:(fun worker -> on_created (wrap worker)) ~artifact_store:store ?sampling_handler ()
             |> Result.map wrap |> Result.map_error Lane_addon_worker.start_failure);
       acquire = Lane_addon_sources.acquire;
@@ -925,7 +941,13 @@ let backend ~store () = match !override with
                   | Error _ -> false)
              | Lifecycle.Holder_changes holder ->
                  Lane_addon_worker.holder_changed ~clock ~control_timeout_sec
-                   ~mgr:Posix_spawn_process_mgr.mgr ~runtime holder)) }
+                   ~mgr:Posix_spawn_process_mgr.mgr ~runtime holder));
+      sweep = (fun ~runtime ~is_live_instance ->
+        match clock with
+        | None -> Error (Lifecycle.Worker_failed "Lane Add-on Docker control requires the server Eio clock")
+        | Some clock ->
+            Lane_addon_worker.sweep ~clock ~control_timeout_sec
+              ~mgr:Posix_spawn_process_mgr.mgr ~runtime ~scope ~is_live_instance ()) }
 let manager config =
   let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
   match Hashtbl.find_opt managers root with
@@ -935,7 +957,8 @@ let manager config =
                      action_mutex = Eio.Mutex.create (); broadcast_mutex = Eio.Mutex.create ();
                      fleet_journals=Hashtbl.create 8;
                      fleet_operations=Hashtbl.create 8; fleet_recipients=Hashtbl.create 16; fleet_nudge=(fun () -> ());
-                     configuration_status = None; configuration_nudge = (fun () -> ()); configuration_visibility=[] } in
+                     configuration_status = None; configuration_nudge = (fun () -> ()); configuration_visibility=[];
+                     swept = [] } in
       Hashtbl.add managers root m; m
 let live_exports m access =
   entries m |> List.concat_map (fun (e : entry) ->
@@ -1303,6 +1326,10 @@ let historical_detach ~sw ?(wait = false) m fields =
             |> Result.map (fun () -> Lifecycle.Released { engine; container_id }) in
       let state = match result with
         | Ok release -> Lifecycle.Detached release | Error failure -> failed_after fields failure in
+      (match result with
+       | Ok _ -> ()
+       | Error failure ->
+           log_cleanup_failure id package_id container_id failure);
       finished := Some state;
       let terminal =
         if is_detached state && never_started ~seq ~has_container:(Option.is_some container_id)
@@ -2401,6 +2428,29 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
       if record_waiting fields then () else
       match historical_detach ~sw m fields with
       | Ok _ -> () | Error message -> add_issue ~id:owner.id owner.source_path message in
+    (* Containers a dead server left behind are found by their labels, not by
+       a record. Each engine runtime that a declaration or a retained record
+       uses is swept once, on the first beat its engine answers. An engine that
+       does not answer is an issue of this beat; nothing is logged per beat. *)
+    let runtimes_in_use =
+      let declared = List.map (fun (d : Lane_addon_config.declaration) -> d.package.runtime) snapshot.declarations in
+      let retained = List.filter_map (fun (_, fields) ->
+        Option.bind (List.assoc_opt "package" fields) (fun json ->
+          Result.to_option (let* package = object_ json in retained_runtime package))) histories in
+      List.sort_uniq Stdlib.compare (declared @ retained) in
+    if can_apply then
+      List.iter (fun runtime ->
+        if not (List.mem runtime m.swept) then
+          match engine_control.sweep ~runtime ~is_live_instance:(is_live_instance m) with
+          | Ok items ->
+              m.swept <- runtime :: m.swept;
+              List.iter (fun (item : Lane_addon_slot.sweep_item) -> match item.verdict with
+                | Lane_addon_slot.Live -> ()
+                | Lane_addon_slot.Removed -> Log.Misc.info "%s" (Lane_addon_slot.sweep_item_to_string item)
+                | Lane_addon_slot.Refused _ -> Log.Misc.warn "%s" (Lane_addon_slot.sweep_item_to_string item)) items
+          | Error failure ->
+              add_issue directory ("Orphan container sweep did not run: " ^ Lifecycle.failure_to_string failure))
+        runtimes_in_use;
     let protected owner =
       List.exists (fun (d : Lane_addon_config.declaration) -> d.id = owner.id) snapshot.declarations
       || List.exists (fun (i : Lane_addon_config.issue) ->
@@ -2635,6 +2685,8 @@ module For_testing = struct
       container_id:string option -> (unit, Lifecycle.failure) result;
     image_ready : package:package -> (unit, string) result;
     condition_met : runtime:runtime -> Lifecycle.condition -> bool;
+    sweep : runtime:runtime -> is_live_instance:(string -> bool) ->
+      (Lane_addon_slot.sweep_item list, Lifecycle.failure) result;
   }
   let with_backend backend f = let previous = !override in override := Some backend;
     Fun.protect ~finally:(fun () -> override := previous) f

@@ -110,6 +110,7 @@ let backend fixture : Lane.For_testing.backend = {
   acquire = (fun ~access:_ ~store:_ ~package:_ ~resolve_machine_output:_ ~resolve_lane_output:_ ~binding:_ -> Ok (`List []));
   recover_stop = (fun ~runtime:_ ~state_owner:_ ~instance_id:_ ~engine:_ ~container_id:_ -> Ok ());
   condition_met = (fun ~runtime:_ _ -> true);
+  sweep = (fun ~runtime:_ ~is_live_instance:_ -> Ok []);
 }
 
 let dispatch fixture operation fields =

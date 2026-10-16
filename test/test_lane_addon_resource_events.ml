@@ -91,7 +91,8 @@ let make_backend () =
           state.recovery := (instance_id, id) :: !(state.recovery); Ok ()
       | None -> Error (Masc.Lane_addon_lifecycle.Cleanup_unconfirmed "Docker recovery unavailable")
       | Some _ -> Error (Masc.Lane_addon_lifecycle.Cleanup_unconfirmed "owner mismatch"));
-    condition_met = (fun ~runtime:_ _ -> true)
+    condition_met = (fun ~runtime:_ _ -> true);
+    sweep = (fun ~runtime:_ ~is_live_instance:_ -> Ok [])
   } in state, backend
 
 let manifest dir mode =

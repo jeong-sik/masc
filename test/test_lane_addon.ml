@@ -133,7 +133,8 @@ let make_backend ?observe_step () =
           proven ~engine (fun () -> Fake.remove state.world id; Ok ())
           |> Result.map (fun () -> state.recovery := (instance_id, id) :: !(state.recovery))
       | Some _ | None -> Error (Masc.Lane_addon_lifecycle.Cleanup_unconfirmed "owner mismatch"));
-    condition_met = (fun ~runtime:_ condition -> Fake.condition_met state.world condition)
+    condition_met = (fun ~runtime:_ condition -> Fake.condition_met state.world condition);
+    sweep = (fun ~runtime:_ ~is_live_instance:_ -> Ok [])
   } in state, backend
 
 let manifest ?refresh_policy dir mode =

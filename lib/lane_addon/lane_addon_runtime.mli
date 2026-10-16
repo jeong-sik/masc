@@ -200,6 +200,10 @@ module For_testing : sig
     condition_met : runtime:Lane_addon_types.runtime -> Lane_addon_lifecycle.condition -> bool;
     (** Whether a waiting failure's condition holds now. False also when it
         cannot be established. *)
+    sweep : runtime:Lane_addon_types.runtime -> is_live_instance:(string -> bool) ->
+      (Lane_addon_slot.sweep_item list, Lane_addon_lifecycle.failure) result;
+    (** Removes the containers of this base path that no live incarnation
+        owns; run once per runtime after its engine answers. *)
   }
   val with_backend : backend -> (unit -> 'a) -> 'a
   val with_action_writer :

@@ -8,6 +8,10 @@ type lookup = Name of string | Id of string
 let instance_label = "masc.lane.instance"
 let state_owner_label = "masc.lane.state.owner"
 
+(* Names the base path of the server that made the container. Several servers
+   can share one engine, so a sweep must only ever see its own. *)
+let scope_label = "masc.lane.scope"
+
 type run_state = Created | Running | Paused | Restarting | Removing | Exited | Dead
 type held = {
   container_id : string;
@@ -38,11 +42,14 @@ let mount_argument runtime ({ source; destination } : mount) =
     | Docker -> Printf.sprintf "type=bind,src=%s,dst=%s,readonly" source destination
     | Apple_container -> Printf.sprintf "type=bind,source=%s,target=%s,readonly" source destination)
 
-let create_arguments package ~name ~instance_id ~state_owner ~image ~package_mount ~mounts ~state_mounts =
+let create_arguments package ~name ~instance_id ~state_owner ~scope ~image ~package_mount ~mounts ~state_mounts =
   let common = ["--name"; name; "--label"; instance_label ^ "=" ^ instance_id]
     @ (match state_owner with
        | None -> []
-       | Some owner -> ["--label"; state_owner_label ^ "=" ^ owner]) in
+       | Some owner -> ["--label"; state_owner_label ^ "=" ^ owner])
+    @ (match scope with
+       | None -> []
+       | Some scope -> ["--label"; scope_label ^ "=" ^ scope]) in
   let controls = match package.runtime with
     | Docker ->
         let memory = Int64.to_string package.resources.memory_bytes in
@@ -78,6 +85,12 @@ let list_arguments runtime lookup = match runtime with
   | Apple_container -> ["list"; "--all"; "--format"; "json"]
 
 let parse raw = try Ok (Yojson.Safe.from_string raw) with Yojson.Json_error detail -> Error detail
+
+let scoped_list_arguments runtime scope = match runtime with
+  | Docker ->
+      ["container"; "ls"; "--all"; "--no-trunc"; "--filter"; "label=" ^ scope_label ^ "=" ^ scope;
+       "--format"; "{{json .ID}}"]
+  | Apple_container -> ["list"; "--all"; "--format"; "json"]
 let member key = function `Assoc fields -> List.assoc_opt key fields | _ -> None
 let rec path keys value = match keys with
   | [] -> Some value
@@ -189,6 +202,32 @@ let held_of_inspect runtime raw =
            let* run_state = apple_run_state status in
            Ok { container_id = id; name = id; instance; state_owner; run_state }
        | _ -> Error "container identity, name or state is absent")
+
+(* Docker lists one JSON string per line and filters by label itself. The
+   Apple runtime lists every container, so the label is filtered here. *)
+let listed_scoped_ids runtime ~scope raw = match runtime with
+  | Docker ->
+      let lines = String.split_on_char '\n' raw |> List.filter (fun line -> String.trim line <> "") in
+      List.fold_left (fun result line ->
+        let* ids = result in
+        let* value = parse line in
+        match value with
+        | `String id when valid_id id -> Ok (id :: ids)
+        | _ -> Error "unexpected container identity") (Ok []) lines
+      |> Result.map List.rev
+  | Apple_container ->
+      let* value = parse raw in
+      (match value with
+       | `List entries ->
+           List.fold_left (fun result entry ->
+             let* ids = result in
+             match member "id" entry, path ["configuration"; "id"] entry with
+             | Some (`String id), Some (`String configured) when String.equal id configured ->
+                 let* labelled = label_value (path ["configuration"; "labels"] entry) scope_label in
+                 Ok (if labelled = Some scope then id :: ids else ids)
+             | _ -> Error "container list has an incomplete identity") (Ok []) entries
+           |> Result.map List.rev
+       | _ -> Error "expected an Apple container list")
 
 (* The identity command is the same structural probe for reachability: it
    either exits 0 with an identity or it does not. Neither outcome is read out

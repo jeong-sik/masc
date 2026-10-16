@@ -554,36 +554,44 @@ let stop_entry ~sw ~backend m e =
     | Some (container_id, stop) ->
         e.cleanup_running <- true;
         fork_isolated ~sw (fun () ->
-          let result = try stop () with
-            | Eio.Cancel.Cancelled _ as exn -> raise exn
-            | exn -> Error (Lifecycle.Cleanup_unconfirmed (Printexc.to_string exn)) in
-          (match result with
-           | Ok () ->
-               (match release_of e container_id with
-                | Ok release ->
-                    let already_detached = is_detached e.state in
-                    e.state <- Lifecycle.Detached release; wake e;
-                    Option.iter (fun cancel -> cancel ()) e.cancel_worker;
-                    (* start-hang can run stop twice; the release is announced
-                       once, at the transition into Detached. *)
-                    if not already_detached then
-                      publish_resource Lane_addon_resource_events.Release_confirmed e
-                        container_id None
-                | Error failure ->
-                    e.state <- fail_state e failure;
-                    log_cleanup_failure e.instance_id e.package.id container_id failure;
-                    publish_resource Lane_addon_resource_events.Release_incomplete e
-                      container_id (Some (Lifecycle.failure_detail failure)))
-           | Error failure ->
-               e.state <- fail_state e failure;
-               log_cleanup_failure e.instance_id e.package.id container_id failure;
-               publish_resource Lane_addon_resource_events.Release_incomplete e
-                 container_id (Some (Lifecycle.failure_detail failure)));
-          (match persist m e with Ok () -> () | Error message ->
-            e.state <- fail_state e (Lifecycle.Persistence_failed ("cleanup state persistence: " ^ message)));
-          wake_dependents m e;
-          e.cleanup_running <- false;
-          Eio.Condition.broadcast e.changed;
+          Fun.protect
+            ~finally:(fun () ->
+              (* Every way out of the cleanup passes here, a raised log call or
+                 a cancellation included, because Detach waits on this flag and
+                 [fork_isolated] swallows the exception. The finally only sets
+                 the flag and wakes the waiters. It does not yield and cannot
+                 raise, so it cannot replace the exception it follows. *)
+              e.cleanup_running <- false;
+              Eio.Condition.broadcast e.changed)
+            (fun () ->
+              let result = try stop () with
+                | Eio.Cancel.Cancelled _ as exn -> raise exn
+                | exn -> Error (Lifecycle.Cleanup_unconfirmed (Printexc.to_string exn)) in
+              (match result with
+               | Ok () ->
+                   (match release_of e container_id with
+                    | Ok release ->
+                        let already_detached = is_detached e.state in
+                        e.state <- Lifecycle.Detached release; wake e;
+                        Option.iter (fun cancel -> cancel ()) e.cancel_worker;
+                        (* start-hang can run stop twice; the release is announced
+                           once, at the transition into Detached. *)
+                        if not already_detached then
+                          publish_resource Lane_addon_resource_events.Release_confirmed e
+                            container_id None
+                    | Error failure ->
+                        e.state <- fail_state e failure;
+                        log_cleanup_failure e.instance_id e.package.id container_id failure;
+                        publish_resource Lane_addon_resource_events.Release_incomplete e
+                          container_id (Some (Lifecycle.failure_detail failure)))
+               | Error failure ->
+                   e.state <- fail_state e failure;
+                   log_cleanup_failure e.instance_id e.package.id container_id failure;
+                   publish_resource Lane_addon_resource_events.Release_incomplete e
+                     container_id (Some (Lifecycle.failure_detail failure)));
+              (match persist m e with Ok () -> () | Error message ->
+                e.state <- fail_state e (Lifecycle.Persistence_failed ("cleanup state persistence: " ^ message)));
+              wake_dependents m e);
           release_detached m e)
 let namespace e seq output =
   let prefix value = e.instance_id ^ "/" ^ string_of_int seq ^ "/" ^ value in
@@ -1326,10 +1334,6 @@ let historical_detach ~sw ?(wait = false) m fields =
             |> Result.map (fun () -> Lifecycle.Released { engine; container_id }) in
       let state = match result with
         | Ok release -> Lifecycle.Detached release | Error failure -> failed_after fields failure in
-      (match result with
-       | Ok _ -> ()
-       | Error failure ->
-           log_cleanup_failure id package_id container_id failure);
       finished := Some state;
       let terminal =
         if is_detached state && never_started ~seq ~has_container:(Option.is_some container_id)
@@ -1339,6 +1343,11 @@ let historical_detach ~sw ?(wait = false) m fields =
          preserve its storage obligation before reporting the resource event. *)
       Hashtbl.replace m.recovering id (Publishing_cleanup publication);
       (try
+         (* A log call that raises is a publication failure like the rest of
+            this block: the obligation is kept and the next beat retries it. *)
+         (match result with
+          | Ok _ -> ()
+          | Error failure -> log_cleanup_failure id package_id container_id failure);
          Lane_addon_resource_events.publish
            (match result with
             | Ok _ -> Lane_addon_resource_events.Release_confirmed

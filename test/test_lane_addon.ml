@@ -106,6 +106,7 @@ let make_backend ?observe_step () =
           let count = 1 + Option.value ~default:0 (Hashtbl.find_opt state.stops instance_id) in
           Hashtbl.replace state.stops instance_id count;
           if package.id = "stop-retry" && count = 1 then Error (Masc.Lane_addon_lifecycle.Cleanup_unconfirmed "cleanup refused")
+          else if package.id = "stop-cut-short" && count = 1 then Eio.Fiber.await_cancel ()
           else
             proven ~engine (fun () -> Fake.remove state.world (Store.digest instance_id); Ok ())
             |> Result.map (fun () ->
@@ -257,6 +258,34 @@ let test_start_and_cleanup_failures_remain_optional () = with_fixture (fun env _
   await_phase clock config retry "failed";
   detach config retry;
   await_phase clock config retry "detached")
+
+exception Cleanup_cut_short
+
+(* A cleanup fiber can end without reaching its last lines: a step in its tail
+   raises, or the switch it runs on is cancelled. Detach waits on the cleanup,
+   and the exception is swallowed where the fiber is forked, so the cleanup
+   must not stay marked as running. The test cuts the cleanup short at the one
+   point a caller can reach, the end of the switch it runs on. *)
+let test_a_cleanup_that_is_cut_short_can_run_again () =
+  with_fixture (fun env sw config dir state ->
+    let clock = Eio.Stdenv.clock env in
+    let id = attach config dir "stop-cut-short" in
+    await clock (fun () -> int "observation_seq" (instance config id) = 1);
+    let cut = try
+      Eio.Switch.run (fun owner ->
+        Eio_context.set_switch owner;
+        Eio.Fiber.fork ~sw:owner (fun () ->
+          ignore (dispatch config Runtime.Detach ["instance_id", `String id]));
+        await clock (fun () -> Hashtbl.find_opt state.stops id = Some 1);
+        Eio.Switch.fail owner Cleanup_cut_short);
+      false
+    with Cleanup_cut_short -> true in
+    Eio_context.set_switch sw;
+    check bool "the first cleanup was cut short" true cut;
+    check Alcotest.int "it had started its stop" 1 (Hashtbl.find state.stops id);
+    detach config id;
+    await_phase clock config id "detached";
+    check Alcotest.int "the second Detach ran the cleanup again" 2 (Hashtbl.find state.stops id))
 
 let test_evidence_is_optional_retained_and_delivery_is_only_acceptance () =
   with_fixture (fun env _ config dir state ->
@@ -1898,5 +1927,6 @@ let () = run "Lane Add-on runtime" ["optional extension", [
     test_request_refusals_preserve_runtime_failure_distinction;
   test_case "hung and failed observers preserve primary progress" `Quick test_hang_error_coalescing_and_primary_progress;
   test_case "startup and cleanup failures stay local" `Quick test_start_and_cleanup_failures_remain_optional;
+  test_case "a cleanup that is cut short can run again" `Quick test_a_cleanup_that_is_cut_short_can_run_again;
   test_case "evidence remains optional and durable across detach" `Quick test_evidence_is_optional_retained_and_delivery_is_only_acceptance;
 ]]

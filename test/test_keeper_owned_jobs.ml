@@ -2215,16 +2215,42 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
       (Tool_blob_store.root_dir (Tool_blob_store.create ~base_path:fixture.base_path))
       (String.sub second_draft.sha256 0 2)) second_draft.sha256 in
   let detached_draft = draft_path ^ ".fixture-detached" in
-  Unix.rename draft_path detached_draft;
-  Fun.protect ~finally:(fun () -> Unix.rename detached_draft draft_path) (fun () ->
-    let unavailable = Wake.resume ~context second_candidate in
-    (match unavailable with
-     | Ok result -> check bool "missing draft remains an unaccepted intake refusal" true (Tool_result.is_failed result)
-     | Error error -> fail (Wake.error_to_string error));
-    let unchanged = Async.load_canonical_durable_terminal ~base_path:fixture.base_path
-        ~caller:keeper second_entry.request_id |> require "missing original draft keeps canonical Waiting" in
-    check_json "missing draft never overwrites original Waiting" (Async.entry_to_json second_entry)
-      (Async.entry_to_json (Async.durable_terminal_entry unchanged)));
+  let pre_admission_intakes = ref 0 and pre_admission_hold = ref None in
+  let held_outcome,notify_held_outcome = Eio.Promise.create () in
+  let unavailable_wake = Wake.create ~context ~on_result:(fun _ outcome ->
+      incr pre_admission_intakes; Eio.Promise.resolve notify_held_outcome outcome) () in
+  let before_unavailable = active_requests () in
+  (* Discover the real canonical ready owner first, then detach only its
+     original draft at intake. Discovery itself refuses a missing artifact, so
+     removing it before pulse would never exercise this admission boundary. *)
+  let resume_without_original ~on_recovery_held ~context candidate =
+    Unix.rename draft_path detached_draft;
+    Wake.resume ~on_recovery_held:(fun ~request_id ~reason ->
+      pre_admission_hold := Some request_id; on_recovery_held ~request_id ~reason)
+      ~context candidate in
+  Fun.protect
+      ~finally:(fun () -> if Sys.file_exists detached_draft then Unix.rename detached_draft draft_path)
+      (fun () ->
+        Wake.For_testing.pulse ~resume:resume_without_original ~sw:context.sw unavailable_wake
+          |> require "canonical discovery followed by actual missing-original intake";
+        (match Eio.Promise.await held_outcome with
+         | Ok result -> check bool "missing draft remains an unaccepted intake refusal" true (Tool_result.is_failed result)
+         | Error error -> fail (Wake.error_to_string error));
+        check (option string) "pre-admission refusal holds the sealed original owner"
+          (Some second_entry.request_id) !pre_admission_hold;
+        let unchanged = Async.load_canonical_durable_terminal ~base_path:fixture.base_path
+            ~caller:keeper second_entry.request_id |> require "missing original draft keeps canonical Waiting" in
+        check_json "missing draft never overwrites original Waiting" (Async.entry_to_json second_entry)
+          (Async.entry_to_json (Async.durable_terminal_entry unchanged)));
+  (* Restoring readable evidence makes discovery ready again. The production
+     controller must keep this same owner held until explicit resume, rather
+     than accepting another worker on each ordinary maintenance pulse. *)
+  Wake.pulse ~sw:context.sw unavailable_wake |> require "first ordinary pulse after original draft repair";
+  Wake.pulse ~sw:context.sw unavailable_wake |> require "second ordinary pulse after original draft repair";
+  Eio.Fiber.yield ();
+  check int "repaired unchanged owner does not repeat automatic intake" 1 !pre_admission_intakes;
+  check (list string) "pre-admission hold never starts a physical worker" before_unavailable (active_requests ());
+  check int "pre-admission hold never calls the backend" before_refusal_calls (List.length (calls fixture));
   let denied_surface = frozen_surface_with ~tool_deny:["keeper_job_result"]
       ~tool_descriptors:(Descriptor.all_descriptors ()) ~base_path:fixture.base_path ~sandbox_profile:fixture.meta.sandbox_profile in
   let job_owner = Filename.concat (Store.paths ~base_path:fixture.base_path

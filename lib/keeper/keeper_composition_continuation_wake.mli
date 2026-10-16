@@ -22,7 +22,9 @@ val resume :
   Keeper_tool_execution_journal.continuation -> (Tool_result.result, error) result
 (** Strictly resolve current declarations (including name/duplicate ownership),
     metadata, published Skill snapshot and authorized lane descriptors, then use
-    the original typed continuation intake. No
+    the original typed continuation intake. Unavailable original activation or
+    task Skill evidence reports [on_recovery_held] for the sealed request before
+    worker admission, just as the worker's original-authority checks do. No
     provider call, current Task inference or reconstructed plan. *)
 
 type 'a t constraint 'a = [> float Eio.Time.clock_ty ]

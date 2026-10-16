@@ -42,6 +42,11 @@ let current_snapshot ~base_path =
 
 let resume ?on_recovery_held ~context continuation =
   let source = Journal.continuation_source continuation in
+  let hold_original error =
+    Option.iter (fun observe ->
+      observe ~request_id:(Journal.continuation_request_id continuation)
+        ~reason:(error_to_string error)) on_recovery_held;
+    error in
   let config = context.Keeper_types_profile.config in
   let profiles = Keeper_types_profile.read_keeper_profile_snapshot ~base_path:config.base_path in
   let* defaults = Keeper_types_profile.snapshot_profile_defaults profiles source.keeper_name
@@ -102,7 +107,7 @@ let resume ?on_recovery_held ~context continuation =
   let* () = if meta.paused then Error Keeper_paused else Ok () in
   let* snapshot = current_snapshot ~base_path:config.base_path in
   let* nested_activation = Keeper_composition_draft.load_nested_activation ~base_path:config.base_path source
-    |> Result.map_error (fun error -> Original_activation_unavailable error) in
+    |> Result.map_error (fun error -> hold_original (Original_activation_unavailable error)) in
   let addons = Keeper_lane_addon_runtime.snapshot ~config ~keeper_name:source.keeper_name in
   let descriptors = Keeper_tool_descriptor.all_descriptors ()
     @ List.map Keeper_lane_addon_descriptor.create addons.exports in
@@ -117,9 +122,9 @@ let resume ?on_recovery_held ~context continuation =
     | None -> Ok Keeper_task_skill_turn.empty
     | Some bound -> Keeper_task_skill_turn.resolve ~snapshot
         (Keeper_skill_activation_recorder.bound_task_references bound)
-        |> Result.map_error (fun error -> Original_task_skills_unavailable error) in
+        |> Result.map_error (fun error -> hold_original (Original_task_skills_unavailable error)) in
   let* task_selection = Keeper_task_skill_turn.with_descriptors ~descriptors ~snapshot task_selection
-    |> Result.map_error (fun error -> Original_task_skills_unavailable error) in
+    |> Result.map_error (fun error -> hold_original (Original_task_skills_unavailable error)) in
   let capability_surface = Keeper_capability_surface.create_with_descriptors
       ~tool_descriptors:descriptors ~tool_deny:defaults.tool_deny ~sandbox_profile:meta.sandbox_profile
       ~skill_names:defaults.skill_names ~global_skill_catalog:catalog

@@ -448,3 +448,10 @@ new controller can also retry through all original admission checks. This hold
 is a scheduling hint, not durable effect or completion authority: the physical
 request may remain Lost, and unknown effects never become a logical failure
 merely to stop automatic retries.
+
+Original authority can also become unavailable between canonical discovery and
+worker admission. The same held-owner notification applies when the original
+draft, activation receipt or original task Skill selection cannot be read.
+Repairing the evidence preserves the original Waiting request; it does not
+silently remove a controller hold or admit a new worker on the next tick.
+Explicit original-run resume still performs every current authority check.

@@ -101,7 +101,8 @@ val resume_continuation
     source Task/turn/parent and completed sibling results stay original while
     physical execution observability uses the supplied context and schedule.
     [on_recovery_held] tells the automatic controller to hold this exact
-    physical owner until explicit recovery advances it. It grants no effect
+    physical owner until explicit recovery advances it, including unavailable
+    original draft/activation evidence before worker admission. It grants no effect
     authority and does not convert an unknown outcome into failure.
     This entrypoint does not discover candidates or install a controller. *)
 

@@ -2115,6 +2115,12 @@ let resume_continuation_with ?on_recovery_held ?owner_metadata_refusal ?on_refus
   let start_time = Tool_timing.start () in
   let hold reason = Option.iter (fun observe ->
       observe ~request_id:(Journal.continuation_request_id continuation) ~reason) on_recovery_held in
+  let refuse_original_draft error =
+    let detail = Yojson.Safe.to_string (Draft.error_to_json error) in
+    hold detail;
+    Tool_result.make_err ~tool_name
+      ~class_:(Draft.failure_class error) ~effect_disposition:Tool_result.Proven_pre_effect
+      ~start_time ~data:(Draft.error_to_json error) detail in
   let refuse_journal error =
     hold (Journal.error_to_string error);
     Tool_result.make_err ~tool_name
@@ -2133,18 +2139,14 @@ let resume_continuation_with ?on_recovery_held ?owner_metadata_refusal ?on_refus
           | Composition entry -> entry.execution = Catalog.Async && String.equal (Catalog.tool_name entry) tool_name
           | Instruction -> false) in
   match Draft.load_continuation_admission ~base_path:config.base_path ~capability_surface continuation with
-  | Error error -> Tool_result.make_err ~tool_name
-      ~class_:(Draft.failure_class error) ~effect_disposition:Tool_result.Proven_pre_effect
-      ~start_time ~data:(Draft.error_to_json error) (Yojson.Safe.to_string (Draft.error_to_json error))
+  | Error error -> refuse_original_draft error
   | Ok admission ->
     let draft,refusal = match admission with
       | Draft.Admitted draft -> draft,None
       | Draft.Refused (draft,refusal) -> draft,Some (Current_leaf_denied refusal) in
     let nested_activation = Keeper_composition_draft.load_nested_activation ~base_path:config.base_path source in
     (match nested_activation with
-    | Error error -> Tool_result.make_err ~tool_name
-        ~class_:(Draft.failure_class error) ~effect_disposition:Tool_result.Proven_pre_effect
-        ~start_time ~data:(Draft.error_to_json error) (Yojson.Safe.to_string (Draft.error_to_json error))
+    | Error error -> refuse_original_draft error
     | Ok nested_activation ->
     match Journal.continuation_readiness ~read_composition_result:Keeper_composition_dependency_result.readiness continuation with
     | Error error -> refuse_journal error

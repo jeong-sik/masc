@@ -10,11 +10,11 @@ The [constitution](../../constitution.xml) and
 
 ## Scope and evidence
 
-[Inventory metadata](inventory.json) classifies every tracked OCaml source file.
+[Inventory metadata](inventory.json) classifies every tracked `.ml`/`.mli` file.
 [The census reader](inventory.py) enumerates 2,583 implementations under
 `lib/`, `bin/` and `packages/agent_core/lib/` directly from committed Git blobs.
 The metadata records a SHA-256 of sorted path/blob pairs, physical line counts
-and interface presence across 194 source directories. Reproduce it with
+and interface presence across 194 source areas (grouped by package/directory). Reproduce it with
 `python3 docs/audits/ocaml-refactoring/inventory.py aea8424926ea79f110315eec5ab429ac51043598`. Production
 also has 2,427 interfaces; tests, tooling and documentation/experiment files are
 counted separately. These measurements are reading aids, not quality scores,
@@ -578,7 +578,7 @@ Ordering rationale: The existing tests include worker survival after waiter canc
 
 **Give connector status a common typed projection before JSON aggregation**
 
-Source: [lib/gate/channel_gate_connector.ml:70](https://github.com/jeong-sik/masc/blob/aea8424926ea79f110315eec5ab429ac51043598/lib/gate/channel_gate_connector.ml#L70-L94), [lib/gate/channel_gate_connector.ml:70](https://github.com/jeong-sik/masc/blob/aea8424926ea79f110315eec5ab429ac51043598/lib/gate/channel_gate_connector.ml#L70-L94), [lib/gate/channel_gate_slack_state.ml:153](https://github.com/jeong-sik/masc/blob/aea8424926ea79f110315eec5ab429ac51043598/lib/gate/channel_gate_slack_state.ml#L153-L278), [lib/tui_decode_connectors.ml:50](https://github.com/jeong-sik/masc/blob/aea8424926ea79f110315eec5ab429ac51043598/lib/tui_decode_connectors.ml#L50-L95), [lib/tui_decode_connectors.ml:135](https://github.com/jeong-sik/masc/blob/aea8424926ea79f110315eec5ab429ac51043598/lib/tui_decode_connectors.ml#L135-L159).
+Source: [lib/gate/channel_gate_connector.ml:10](https://github.com/jeong-sik/masc/blob/aea8424926ea79f110315eec5ab429ac51043598/lib/gate/channel_gate_connector.ml#L10-L47), [lib/gate/channel_gate_connector.ml:70](https://github.com/jeong-sik/masc/blob/aea8424926ea79f110315eec5ab429ac51043598/lib/gate/channel_gate_connector.ml#L70-L94), [lib/gate/channel_gate_slack_state.ml:153](https://github.com/jeong-sik/masc/blob/aea8424926ea79f110315eec5ab429ac51043598/lib/gate/channel_gate_slack_state.ml#L153-L278), [lib/tui_decode_connectors.ml:50](https://github.com/jeong-sik/masc/blob/aea8424926ea79f110315eec5ab429ac51043598/lib/tui_decode_connectors.ml#L50-L95), [lib/tui_decode_connectors.ml:135](https://github.com/jeong-sik/masc/blob/aea8424926ea79f110315eec5ab429ac51043598/lib/tui_decode_connectors.ml#L135-L159).
 
 Problem: The connector module interface returns arbitrary JSON snapshots. connectors_json immediately reads available back out with a false default to count active connectors. Transport implementations already hold typed status internally, but the TUI stores available, connected, raw status and a separately decoded connection variant, repeating a consistency relationship across boundaries.
 
@@ -735,10 +735,11 @@ These are reasons not to perform a blanket rewrite, not whole-module correctness
 - Agent Core coverage here includes committed WAL scanning; remaining provider, runner and lifecycle boundaries still need review.
 - Remaining production directories have not been cleared by representative samples. Browser, sandbox, multimedia, process and observation paths need their own consumer/invariant analysis.
 - TypeScript/sidecar consumers are included only when tracing an OCaml contract. A full frontend or third-party-code audit is not implied.
+- Lexer/parser inputs (`lib/exec/parser/bash_lexer.mll`, `lib/exec/parser/bash_subset.mly`) are outside the `.ml`/`.mli` census and remain an explicit follow-up surface.
 - Test/tooling refactoring follows production contract understanding; no broad test rewrite or new style/count gate is planned.
 
 ## Round log
 
 - Previous work: Memory OS codecs/successor core published as three Draft PRs; current open heads were refreshed before this round. That is source progress, not merged/runtime completion.
-- Round 1: all tracked OCaml files classified at the pinned baseline; clean-checkout counts independently matched the committed-blob reader; 24 source-backed candidates recorded with boundaries, invariants, callers and suites. S1 selected for implementation.
+- Round 1: all tracked `.ml`/`.mli` files classified at the pinned baseline; clean-checkout counts independently matched the committed-blob reader; 24 source-backed candidates recorded with boundaries, invariants, callers and suites. S1 selected for implementation.
 - No local Dune build, CI polling, behavior execution, formal GitHub approval, merge or runtime proof is supplied by this inventory.

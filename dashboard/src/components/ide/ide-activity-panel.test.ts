@@ -82,6 +82,7 @@ describe('IdeActivityPanel', () => {
         requests.push(scope)
         payload = { ok: true, data: { events: [{
           type: 'tool', keeper_id: 'scoped-keeper', turn_id: `turn-${scope}`,
+          event_id: 'exec-fixture-84',
           timestamp_ms: 2, tool_name: 'read_file', outcome: 'success', typed_outcome: 'progress',
           latency_ms: 1, summary: `observed ${scope}`, file_path: 'src/shared.ml',
         }] } }
@@ -178,10 +179,12 @@ describe('IdeActivityPanel', () => {
           ok: true,
           data: {
             events: [{
-              type: 'turn',
+              type: 'tool',
+              tool_name: 'Read', outcome: 'ok', typed_outcome: 'progress',
+              latency_ms: 1, summary: 'stored tool result', file_path: null,
+              event_id: 'exec-fixture-181',
               keeper_id: 'repo-a-keeper',
               turn_id: 'turn-repo-a',
-              phase: 'completed',
               timestamp_ms: 100,
             }],
           },
@@ -232,10 +235,12 @@ describe('IdeActivityPanel', () => {
           ok: true,
           data: {
             events: [{
-              type: 'turn',
+              type: 'tool',
+              tool_name: 'Read', outcome: 'ok', typed_outcome: 'progress',
+              latency_ms: 1, summary: 'stored tool result', file_path: null,
+              event_id: 'exec-fixture-235',
               keeper_id: 'repo-a-keeper',
               turn_id: 'turn-repo-a',
-              phase: 'completed',
               timestamp_ms: 100,
             }],
           },
@@ -261,10 +266,12 @@ describe('IdeActivityPanel', () => {
       ok: true,
       data: {
         events: [{
-          type: 'turn',
+          type: 'tool',
+          tool_name: 'Read', outcome: 'ok', typed_outcome: 'progress',
+          latency_ms: 1, summary: 'stored tool result', file_path: null,
+          event_id: 'exec-fixture-264',
           keeper_id: 'repo-b-keeper',
           turn_id: 'turn-repo-b',
-          phase: 'completed',
           timestamp_ms: 200,
         }],
       },

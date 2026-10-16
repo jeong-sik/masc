@@ -256,16 +256,12 @@ async function fetchIdeBridgeRunActivityEvents(
   if (!scoped) return { events: EMPTY_ACTIVITY, ok: true }
   const settled = await Promise.allSettled(sources)
   const events: RunActivityEvent[] = []
-  const seenKeys = new Map<string, number>()
   let ok = true
   for (const result of settled) {
     if (result.status === 'fulfilled') {
       for (const event of result.value) {
         const key = bridgeEventKey(event)
-        const occurrence = seenKeys.get(key) ?? 0
-        seenKeys.set(key, occurrence + 1)
-        const id = occurrence === 0 ? key : `${key}-${occurrence}`
-        events.push(mapIdeBridgeEvent(event, workspaceId, id, scoped))
+        events.push(mapIdeBridgeEvent(event, workspaceId, key, scoped))
       }
     } else {
       ok = false
@@ -284,22 +280,12 @@ function mergeRunActivityEvents(
 }
 
 /**
- * Stored bridge rows carry no id of their own, so the server derives one
- * from their content when serving a page. It must not depend on position in the
- * page: a poll that brings one new event shifts every older one. Current
- * servers hash the stored row into an opaque event_id, including differences
- * in tool outcome or output without placing output text in a URL. The id is
- * the focus `source_id` a context jump carries and the timeline's tie-break.
- * Older servers have no id; their fallback names the public coarse fields.
- * Fully identical rows have no wire identity to tell apart, so only those
- * use an occurrence count.
+ * The canonical tool-result journal owns execution identity. Page shifts,
+ * index rebuilds and polls retain that identity without hashing output or
+ * inferring an occurrence from presentation fields.
  */
 function bridgeEventKey(event: IdeBridgeEvent): string {
-  if (event.event_id !== null) return `ide-${event.event_id}`
-  const what = event.type === 'tool'
-    ? `${event.tool_name}-${event.file_path ?? ''}`
-    : event.phase
-  return `ide-${event.type}-${event.keeper_id}-${event.turn_id}-${event.timestamp_ms}-${what}`
+  return `ide-${event.event_id}`
 }
 
 function mapIdeBridgeEvent(
@@ -324,27 +310,19 @@ function mapIdeBridgeEvent(
 }
 
 function bridgeEventTarget(event: IdeBridgeEvent): string {
-  if (event.type === 'tool') return `tool:${event.tool_name}`
-  return `turn:${event.phase}`
+  return `tool:${event.tool_name}`
 }
 
 function bridgeEventDetail(event: IdeBridgeEvent): string {
-  if (event.type === 'tool') {
-    const outcome = event.typed_outcome || event.outcome
-    return event.summary ? `${outcome}: ${event.summary}` : outcome
-  }
-  return [event.phase, event.model_used, event.stop_reason]
-    .filter((item): item is string => typeof item === 'string' && item.trim() !== '')
-    .join(' · ') || event.phase
+  const outcome = event.typed_outcome || event.outcome
+  return event.summary ? `${outcome}: ${event.summary}` : outcome
 }
 
 function bridgeEventContext(event: IdeBridgeEvent): RunActivityContext | undefined {
   const context: MutableRunActivityContext = {}
   if (event.turn_id) context.log_id = event.turn_id
-  if (event.type === 'tool') {
-    const filePath = event.file_path ? normalizeIdeContextFilePath(event.file_path) : null
-    if (filePath) context.file_path = filePath
-  }
+  const filePath = event.file_path ? normalizeIdeContextFilePath(event.file_path) : null
+  if (filePath) context.file_path = filePath
   return Object.keys(context).length === 0 ? undefined : context
 }
 

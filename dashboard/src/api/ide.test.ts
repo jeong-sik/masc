@@ -24,6 +24,29 @@ function stubFetch(response: unknown, ok = true, status?: number): void {
 }
 
 describe('ide API', () => {
+  const canonicalEvent = {
+    type: 'tool', event_id: 'exec-42-0001', tool_name: 'Edit', keeper_id: 'actual-keeper',
+    turn_id: 'actual-trace#19', outcome: 'ok', typed_outcome: 'progress', latency_ms: 1,
+    summary: 'saved', file_path: 'lib/saved.ml', timestamp_ms: 1,
+  }
+
+  it('retains actual canonical execution identity across repeated source readback', async () => {
+    stubFetch({ ok: true, data: { events: [canonicalEvent] } })
+    const before = await fetchIdeEvents()
+    const reopened = await fetchIdeEvents()
+    expect(before[0]?.event_id).toBe('exec-42-0001')
+    expect(reopened).toEqual(before)
+  })
+
+  it('rejects duplicate execution identity instead of inventing an occurrence', async () => {
+    stubFetch({ ok: true, data: { events: [canonicalEvent, canonicalEvent] } })
+    await expect(fetchIdeEvents()).rejects.toThrow('duplicate execution identities')
+  })
+
+  it.each([undefined, null, '', '  ', ' exec-42-0001 '])('rejects missing or repaired execution identity %s', async eventId => {
+    stubFetch({ ok: true, data: { events: [{ ...canonicalEvent, event_id: eventId }] } })
+    await expect(fetchIdeEvents()).rejects.toThrow('malformed event at index 0')
+  })
   it('fetchIdeEvents appends event filters and parses bridge events', async () => {
     stubFetch({
       ok: true,
@@ -83,6 +106,7 @@ describe('ide API', () => {
       data: {
         events: [{
           type: 'tool',
+          event_id: 'exec-fixture-85',
           keeper_id: 'sangsu',
           turn_id: 'turn-1',
           timestamp_ms: 1717400000000,
@@ -104,6 +128,7 @@ describe('ide API', () => {
       data: {
         events: [{
           type: 'tool',
+          event_id: 'exec-fixture-106',
           tool_name: 'execute',
           keeper_id: 'sangsu',
           turn_id: 'turn-1',
@@ -127,6 +152,7 @@ describe('ide API', () => {
       data: {
         events: [{
           type: 'tool',
+          event_id: 'exec-fixture-129',
           tool_name: 'execute',
           keeper_id: 'sangsu',
           turn_id: 'turn-1',

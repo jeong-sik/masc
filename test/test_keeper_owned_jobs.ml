@@ -3386,7 +3386,7 @@ let test_interrupted_prepared_launch_resumes_the_same_job keeper_turn_id () = wi
       | Error (Async.Canonical_terminal_absent | Async.Canonical_terminal_runtime_active _) ->
           Eio.Fiber.yield (); read ()
       | Error error -> fail (Async.canonical_terminal_error_to_string error) in read () in
-  let check_lost label entry =
+  let check_lost ?(queued = 0) label entry =
     (match entry.Async.status with
      | Async.Lost _ -> ()
      | Async.Done _ | Async.Queued | Async.Running | Async.Cancelling _ | Async.Cancelled _
@@ -3400,7 +3400,9 @@ let test_interrupted_prepared_launch_resumes_the_same_job keeper_turn_id () = wi
     check int (label ^ " emits no outbox notification") 0 !delivered;
     check int (label ^ " delivers no terminal") 0 report.delivered;
     check int (label ^ " keeps readable guarded outbox authority") 0 (List.length report.failures);
-    let original_request_notifications = pending_completions fixture |> List.filter
+    let pending = pending_completions fixture in
+    check int (label ^ " adds no queue completion") queued (List.length pending);
+    let original_request_notifications = pending |> List.filter
         (fun (selection : Keeper_event_queue_state.pending_selection) ->
           match selection.source.payload with
           | Keeper_event_queue.Composition_completed completion ->
@@ -3563,6 +3565,9 @@ let test_interrupted_prepared_launch_resumes_the_same_job keeper_turn_id () = wi
   let pre_worker = ref None in
   let pre_settled, notify_pre_settled = Eio.Promise.create () in
   let pre_trace = Keeper_id.Trace_id.to_string fixture.meta.runtime.trace_id in
+  (* Preserve the first run's queued public success without allowing this
+     interrupted launch to add another completion. Capture before submission. *)
+  let queued_before = List.length (pending_completions fixture) in
   let pre_first = Async.submit_worker_with_request_id ?request_context:pre_reserve_context
       ~background_sw:(Async.server_background_switch () |> require "pre-reserve worker switch")
       ~base_path:fixture.base_path ~caller:keeper ~keeper_name:keeper
@@ -3594,7 +3599,7 @@ let test_interrupted_prepared_launch_resumes_the_same_job keeper_turn_id () = wi
         Async.worker_interrupted ~reason:"interrupted before Invocation.reserve") ()
     |> require "pre-reserve request accepted" in
   ignore (Eio.Promise.await pre_settled);
-  check_lost "pre-reserve interrupted launch" (terminal pre_first.request_id);
+  check_lost ~queued:queued_before "pre-reserve interrupted launch" (terminal pre_first.request_id);
   Call_log.set_turn_context ~cell:fixture.cell ~agent_name:keeper ~task_id:"task-C"
     ~turn:64 ~keeper_turn_id:99
     ~trace_id:(Keeper_id.Trace_id.to_string final_meta.runtime.trace_id) ();

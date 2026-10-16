@@ -4,6 +4,88 @@ module Q = Keeper_approval_queue_rules_types
 
 let yojson = testable Yojson.Safe.pretty_print Yojson.Safe.equal
 
+module Origin = Keeper_approval_origin
+
+let origin_turn n = Ids.Turn_ref.make ~trace_id:"origin-test" ~absolute_turn:n
+
+let direct_origin id turn =
+  let operation_id = match Keeper_operation_id.of_string id with
+    | Ok id -> id | Error reason -> fail reason in
+  Origin.direct_operation ~operation_id ~turn_ref:(origin_turn turn)
+
+let admitted_origin hash revision post turn =
+  let source = match Origin.admitted_source ~snapshot_ref:(String.make 64 hash)
+      ~admitted_revision:revision ~board_post_id:post with
+    | Ok source -> source | Error reason -> fail reason in
+  match Origin.admitted_sources ~sources:[source] ~turn_ref:(origin_turn turn) with
+  | Ok origin -> origin | Error reason -> fail reason
+
+let test_origin_identity_ignores_physical_turns () =
+  let a = direct_origin "operation-a" 1 in
+  let resumed = direct_origin "operation-a" 2 in
+  check bool "same operation across turns" true (Origin.same_logical_source a resumed);
+  check bool "distinct operations on one surface" false
+    (Origin.same_logical_source a (direct_origin "operation-b" 1));
+  let board = admitted_origin 'a' 1L (Some "post-a") 1 in
+  check bool "same admitted Board request across turns" true
+    (Origin.same_logical_source board (admitted_origin 'a' 1L (Some "post-a") 2));
+  check bool "distinct admitted Board requests" false
+    (Origin.same_logical_source board (admitted_origin 'b' 1L (Some "post-b") 1));
+  check bool "readmission revision is a different intent" false
+    (Origin.same_logical_source board (admitted_origin 'a' 2L (Some "post-a") 1));
+  check bool "explicit absence is not an admitted operation" false
+    (Origin.same_logical_source Origin.unavailable a)
+;;
+
+let test_origin_source_sets_are_canonical () =
+  let source hash = match Origin.admitted_source ~snapshot_ref:(String.make 64 hash)
+      ~admitted_revision:0L ~board_post_id:None with
+    | Ok source -> source | Error reason -> fail reason in
+  let a, b = source 'a', source 'b' in
+  let make sources = match Origin.admitted_sources ~sources ~turn_ref:(origin_turn 1) with
+    | Ok value -> value | Error reason -> fail reason in
+  check yojson "source order has no identity effect"
+    (Origin.to_yojson (make [a;b])) (Origin.to_yojson (make [b;a]));
+  List.iter (fun sources -> match Origin.admitted_sources ~sources ~turn_ref:(origin_turn 1) with
+    | Error _ -> () | Ok _ -> fail "invalid source set accepted") [ []; [a;a] ];
+  List.iter (fun (snapshot_ref, admitted_revision, board_post_id) ->
+    match Origin.admitted_source ~snapshot_ref ~admitted_revision ~board_post_id with
+    | Error _ -> () | Ok _ -> fail "invalid admitted source accepted")
+    [ "invented", 0L, None; String.make 64 'a', -1L, None
+    ; String.make 64 'a', 0L, Some " post-a"; String.make 64 'G', 0L, None ]
+;;
+
+let test_origin_json_is_closed_and_retains_original_witness () =
+  List.iter (fun value ->
+    match Origin.of_yojson (Origin.to_yojson value) with
+    | Ok actual -> check yojson "origin round trip" (Origin.to_yojson value) (Origin.to_yojson actual)
+    | Error reason -> fail reason)
+    [ Origin.unavailable; direct_origin "operation-a" 1; admitted_origin 'a' 1L (Some "post-a") 1 ];
+  let replace key value = function
+    | `Assoc fields -> `Assoc ((key,value) :: List.remove_assoc key fields)
+    | _ -> fail "expected object" in
+  let direct = Origin.to_yojson (direct_origin "operation-a" 1) in
+  let board = Origin.to_yojson (admitted_origin 'a' 1L (Some "post-a") 1) in
+  let source = Yojson.Safe.Util.member "source" board in
+  let item = match Yojson.Safe.Util.member "sources" source with
+    | `List [item] -> item | _ -> fail "expected exact source" in
+  let source_item item = replace "source" (replace "sources" (`List [item]) source) board in
+  let rejects json = match Origin.of_yojson json with
+    | Error _ -> () | Ok _ -> fail "malformed origin accepted" in
+  List.iter rejects
+    [ `Assoc ["source", Yojson.Safe.Util.member "source" direct]
+    ; (match direct with `Assoc fields -> `Assoc (("turn_ref", `Null) :: fields) | _ -> fail "object")
+    ; replace "unexpected" `Null direct
+    ; replace "source" (`Assoc ["kind", `String "prompt_guess"]) direct
+    ; replace "turn_ref" `Null direct
+    ; replace "turn_ref" (`String "bad-turn") direct
+    ; replace "turn_ref" (Ids.Turn_ref.to_yojson (origin_turn 1)) (Origin.to_yojson Origin.unavailable)
+    ; source_item (replace "admitted_revision" (`String "01") item)
+    ; source_item (replace "admitted_revision" (`Int 1) item)
+    ; source_item (replace "board_post_id" (`Bool true) item)
+    ]
+;;
+
 let sample_rule =
   { Q.id = "rule-1"
   ; keeper_name = "keeper"
@@ -491,7 +573,12 @@ let test_phase_of_disposition_and_summary () =
 let () =
   run
     "Keeper_approval_queue_rules_types"
-    [ ( "judgment"
+    [ ( "approval origin"
+      , [ test_case "logical identity survives physical turns" `Quick test_origin_identity_ignores_physical_turns
+        ; test_case "admitted source sets are canonical" `Quick test_origin_source_sets_are_canonical
+        ; test_case "strict origin JSON retains witness" `Quick test_origin_json_is_closed_and_retains_original_witness
+        ] )
+    ; ( "judgment"
       , [ test_case "typed judgment round trip" `Quick test_advisory_judgment_round_trip
         ; test_case "summary has no hierarchy" `Quick test_summary_json_is_nonhierarchical
         ] )

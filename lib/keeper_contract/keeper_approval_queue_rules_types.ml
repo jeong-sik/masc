@@ -205,6 +205,7 @@ type pending_approval =
   ; sequence : int
   ; requested_at : float
   ; turn_id : int option
+  ; origin : Keeper_approval_origin.t
   ; request_context : Yojson.Safe.t option
   ; observation : observed_refusal option
   ; task_id : string option

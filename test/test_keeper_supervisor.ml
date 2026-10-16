@@ -502,7 +502,7 @@ let test_pending_hitl_approval_keeper_names_filters_persisted_pending () =
       let submit keeper_name =
         let id =
           match
-            AQ.submit_pending
+            AQ.submit_pending ~origin:Keeper_approval_origin.unavailable
               ~keeper_name
               ~tool_name:"test_pending_gate_request"
               ~call_summary:None
@@ -1595,7 +1595,7 @@ let test_sweep_reports_pending_hitl_approval () =
        | Error err -> fail err);
       let id =
         match
-          AQ.submit_pending
+          AQ.submit_pending ~origin:Keeper_approval_origin.unavailable
             ~keeper_name:name
             ~tool_name:"test_pending_gate_request"
             ~call_summary:None

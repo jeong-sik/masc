@@ -173,7 +173,7 @@ let submit_submission_with_context
   =
   ensure_keeper_exists ~base_path ~keeper_name;
   match
-    AQ.submit_pending
+    AQ.submit_pending ~origin:Keeper_approval_origin.unavailable
       ~keeper_name
       ~tool_name:"external-effect"
       ~call_summary:None
@@ -347,6 +347,41 @@ let test_dedup_never_merges_distinct_origins () =
        List.iter (reject_and_cleanup ~base_path) [ first; another_channel ])
 ;;
 
+let test_logical_origin_survives_approval_and_reopen () =
+ let base_path = temp_dir () in
+ AQ.For_testing.reset_runtime_state ();
+ Keeper_approval.Audit.For_testing.reset_store ();
+ Fun.protect ~finally:(fun () -> AQ.For_testing.reset_runtime_state (); Keeper_approval.Audit.For_testing.reset_store (); cleanup_dir base_path) (fun () ->
+  ignore (install_exn ~base_path);
+  let keeper_name = "actual-queue-origin" in
+  ensure_keeper_exists ~base_path ~keeper_name;
+  let input = `Assoc ["target", `String "document"] in
+  let origin id turn =
+   let operation_id = match Keeper_operation_id.of_string id with Ok x -> x | Error e -> Alcotest.fail e in
+   Keeper_approval_origin.direct_operation ~operation_id ~turn_ref:(Ids.Turn_ref.make ~trace_id:"origin" ~absolute_turn:turn) in
+  let submit origin = match AQ.submit_pending ~origin ~keeper_name ~tool_name:"external-effect" ~call_summary:None ~input ~base_path () with
+   | Ok x -> x.approval_id | Error e -> Alcotest.fail (Masc.Keeper_approval_queue_result.storage_error_to_string e) in
+  let a = submit (origin "operation-a" 1) in
+  let resumed = submit (origin "operation-a" 2) in
+  Alcotest.(check string) "physical retry folds" a resumed;
+  let b = submit (origin "operation-b" 1) in
+  Alcotest.(check bool) "another operation has separate approval" true (a <> b);
+  let read_original () = match AQ.observe_waiting_request ~base_path ~id:a with
+   | Ok (Some observed) -> observed.waiting_request.origin
+   | Ok None -> Alcotest.fail "origin request disappeared"
+   | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.storage_error_to_string error) in
+  Alcotest.(check string) "original witness retained" "origin#1"
+   (match (read_original ()).turn_ref with Some x -> Ids.Turn_ref.to_string x | None -> Alcotest.fail "no witness");
+  (match AQ.resolve_with_policy ~base_path ~id:a ~decision:Rule_types.Decision.Approve ~source:Rule_types.Human_operator () with
+   | Ok _ -> () | Error e -> Alcotest.fail (AQ.resolve_error_to_string e));
+  Alcotest.(check string) "approved unconsumed effect folds" a (submit (origin "operation-a" 3));
+  AQ.For_testing.reset_runtime_state ();
+  ignore (install_exn ~base_path);
+  Alcotest.(check string) "reopen preserves logical grant identity" a (submit (origin "operation-a" 4));
+  Alcotest.(check string) "reopen retains original witness" "origin#1"
+   (match (read_original ()).turn_ref with Some x -> Ids.Turn_ref.to_string x | None -> Alcotest.fail "no witness"))
+;;
+
 (* The producer's line arrives with the submission and is written on the
    request row; every later row of the approval copies it from there. A
    producer that states nothing leaves every row without one, whatever the
@@ -361,7 +396,7 @@ let test_call_summary_is_stated_once_and_copied () =
        ensure_keeper_exists ~base_path ~keeper_name;
        let submit_exn ~call_summary ~input =
          match
-           AQ.submit_pending
+           AQ.submit_pending ~origin:Keeper_approval_origin.unavailable
              ~keeper_name
              ~tool_name:"tool_execute"
              ~input
@@ -950,7 +985,7 @@ let test_install_serializes_snapshot_read_with_same_base_mutation () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-             [ "version", `Int 12
+             [ "version", `Int 13
             ; "generation", `Int 1
             ; "next_sequence", `Int 1
             ; "pending", `List []
@@ -1577,7 +1612,7 @@ let test_an_observation_survives_the_row_round_trip () =
        in
        let id =
          match
-           AQ.submit_pending
+           AQ.submit_pending ~origin:Keeper_approval_origin.unavailable
              ~keeper_name
              ~tool_name:"external-effect"
              ~call_summary:None
@@ -3666,7 +3701,7 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
             Alcotest.fail
               "runtime write failure did not latch workspace unavailable");
          (match
-            AQ.submit_pending
+            AQ.submit_pending ~origin:Keeper_approval_origin.unavailable
               ~base_path
               ~keeper_name:"queue-exact-staged-before-rename"
               ~tool_name:"fs_write"
@@ -4652,7 +4687,7 @@ let test_malformed_snapshot_fails_install_and_is_observed () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-            [ "version", `Int 12
+            [ "version", `Int 13
             ; "generation", `Int 1
             ; "next_sequence", `Int 1
             ; "pending", `String "malformed-pending-array"
@@ -4674,7 +4709,7 @@ let test_malformed_snapshot_fails_install_and_is_observed () =
          (Result.is_error
             (AQ.list_pending_entries_for_workspace ~base_path));
        (match
-          AQ.submit_pending
+          AQ.submit_pending ~origin:Keeper_approval_origin.unavailable
             ~keeper_name:"queue-invalid-store"
             ~tool_name:"external-effect"
             ~call_summary:None
@@ -4689,7 +4724,7 @@ let test_malformed_snapshot_fails_install_and_is_observed () =
          (Yojson.Safe.equal
             persisted
             (`Assoc
-               [ "version", `Int 12
+               [ "version", `Int 13
                ; "generation", `Int 1
                ; "next_sequence", `Int 1
                ; "pending", `String "malformed-pending-array"
@@ -4754,7 +4789,7 @@ let test_partial_pending_snapshot_preserves_readable_entries () =
          1
          (List.length read_errors);
        (match
-          AQ.submit_pending
+          AQ.submit_pending ~origin:Keeper_approval_origin.unavailable
             ~keeper_name:"queue-partial-read"
             ~tool_name:"external-effect"
             ~call_summary:None
@@ -4798,7 +4833,7 @@ let test_unsupported_version_snapshot_requires_runtime_reset () =
         | Error
             (Masc.Keeper_approval_queue_result.Install_storage_failed
               { reason =
-                  "gate_pending.version 8 is unsupported (current 12); reset \
+                  "gate_pending.version 8 is unsupported (current 13); reset \
                    runtime state before restarting MASC"
               ; _
               }) ->
@@ -4828,7 +4863,7 @@ let snapshot_with_one_observed_entry ~base_path =
     }
   in
   (match
-     AQ.submit_pending
+     AQ.submit_pending ~origin:Keeper_approval_origin.unavailable
        ~keeper_name:"queue-v10"
        ~tool_name:"external-effect"
        ~call_summary:None
@@ -4907,7 +4942,7 @@ let test_v10_store_requires_runtime_reset_before_rows_are_read () =
        | Error
            (Masc.Keeper_approval_queue_result.Install_storage_failed
              { reason =
-                 "gate_pending.version 10 is unsupported (current 12); reset \
+                 "gate_pending.version 10 is unsupported (current 13); reset \
                   runtime state before restarting MASC"
              ; _
              }) ->
@@ -5350,7 +5385,7 @@ let test_persisted_delivery_replays_before_origin_wake () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-             [ "version", `Int 12
+             [ "version", `Int 13
             ; "generation", `Int 1
             ; "next_sequence", `Int 3
             ; "pending", `List []
@@ -5673,7 +5708,7 @@ let test_one_delivery_replay_failure_does_not_stop_others () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-             [ "version", `Int 12
+             [ "version", `Int 13
             ; "generation", `Int 1
             ; "next_sequence", `Int 7
             ; "pending", `List []
@@ -5731,7 +5766,7 @@ let test_submit_surfaces_storage_failure () =
     (fun () ->
        AQ.For_testing.reset_runtime_state ();
        match
-         AQ.submit_pending
+         AQ.submit_pending ~origin:Keeper_approval_origin.unavailable
            ~keeper_name:"queue-storage-error"
            ~tool_name:"external-effect"
            ~call_summary:None
@@ -6930,6 +6965,8 @@ let () =
             "dedup keeps distinct origins"
             `Quick
             test_dedup_never_merges_distinct_origins
+        ; Alcotest.test_case "logical origin survives approval and reopen" `Quick
+            test_logical_origin_survives_approval_and_reopen
         ; Alcotest.test_case
             "retry folds onto unconsumed grant until consumed"
             `Quick

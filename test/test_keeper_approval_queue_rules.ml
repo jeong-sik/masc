@@ -577,7 +577,7 @@ let test_resolution_order_wire_refuses_unproven_order () =
     let entry : Rule_types.pending_approval =
       { id; sequence = request_sequence; keeper_name = "keeper"; tool_name = "external-effect"
       ; input; input_hash = Masc.Keeper_approval_request_fingerprint.request_fingerprint input
-      ; requested_at = 1.0; turn_id = None; request_context = None; observation = None
+      ; requested_at = 1.0; turn_id = None; origin = Keeper_approval_origin.unavailable; request_context = None; observation = None
       ; task_id = None; goal_id = None
       ; continuation_channel
       ; audit_base_path = base_path; summary_status = Rule_types.Summary_not_requested
@@ -623,6 +623,99 @@ let test_resolution_order_wire_refuses_unproven_order () =
   match Queue_codec.log_row_of_yojson ~base_path log with
   | Error _ -> ()
   | Ok _ -> fail "log accepted a resolution order beyond its committed cursor"
+;;
+
+let test_origin_dedup_and_retained_delivery_wire () =
+  let module Origin = Keeper_approval_origin in
+  let module State = Masc.Keeper_approval_queue_state in
+  let module SMap = Set_util.StringMap in
+  let base_path = "/workspace" in
+  let turn n = Ids.Turn_ref.make ~trace_id:"approval-origin" ~absolute_turn:n in
+  let origin id n =
+    let operation_id = match Keeper_operation_id.of_string id with
+      | Ok value -> value | Error reason -> fail reason in
+    Origin.direct_operation ~operation_id ~turn_ref:(turn n) in
+  let channel id = match Keeper_continuation_channel.dashboard ~thread_id:id with
+    | Ok value -> value | Error reason -> fail reason in
+  let input = `Assoc ["target", `String "same-effect"] in
+  let original_origin = origin "operation-a" 1 in
+  let entry : Rule_types.pending_approval =
+    { id = "approval-a"; sequence = 1; keeper_name = "keeper"; tool_name = "external-effect"
+    ; input; input_hash = Masc.Keeper_approval_request_fingerprint.request_fingerprint input
+    ; requested_at = 1.0; turn_id = Some 1; origin = original_origin
+    ; request_context = Some (`Assoc ["private", `String "summary input"]); observation = None
+    ; task_id = None; goal_id = None; continuation_channel = channel "surface-a"
+    ; audit_base_path = base_path; summary_status = Rule_types.Summary_not_requested
+    ; exact_attempt = Rule_types.Exact_unbound
+    ; summary_attempt_disposition = Rule_types.Summary_attempt_ready } in
+  let pending = SMap.singleton entry.id entry in
+  let lookup ?(continuation_channel=entry.continuation_channel) origin =
+    State.find_pending_id_in_map pending ~base_path ~keeper_name:entry.keeper_name
+      ~tool_name:entry.tool_name ~input_hash:entry.input_hash ~origin
+      ~task_id:None ~goal_id:None ~continuation_channel in
+  check (option string) "same logical request resumes without new approval" (Some entry.id)
+    (lookup (origin "operation-a" 2));
+  check (option string) "another direct request stays separate" None
+    (lookup (origin "operation-b" 1));
+  check (option string) "another reply surface stays separate" None
+    (lookup ~continuation_channel:(channel "surface-b") original_origin);
+  check string "pending entry keeps its original physical witness"
+    (Ids.Turn_ref.to_string (turn 1))
+    (match (SMap.find entry.id pending).origin.turn_ref with
+     | Some value -> Ids.Turn_ref.to_string value | None -> fail "lost original turn");
+  let board_origin hash post n =
+    let source = match Origin.admitted_source ~snapshot_ref:(String.make 64 hash)
+        ~admitted_revision:1L ~board_post_id:(Some post) with
+      | Ok value -> value | Error reason -> fail reason in
+    match Origin.admitted_sources ~sources:[source] ~turn_ref:(turn n) with
+    | Ok value -> value | Error reason -> fail reason in
+  let board_entry = {entry with origin = board_origin 'a' "post-a" 1} in
+  let find_board origin = State.find_pending_id_in_map (SMap.singleton entry.id board_entry)
+      ~base_path ~keeper_name:entry.keeper_name ~tool_name:entry.tool_name
+      ~input_hash:entry.input_hash ~origin ~task_id:None ~goal_id:None
+      ~continuation_channel:entry.continuation_channel in
+  check (option string) "Board resume folds" (Some entry.id) (find_board (board_origin 'a' "post-a" 2));
+  check (option string) "distinct Board request does not fold" None (find_board (board_origin 'b' "post-b" 1));
+  let delivery : Queue_codec.persisted_delivery =
+    { entry; resolution_sequence = 2; decision = Rule_types.Decision.Approve
+    ; source = Rule_types.Human_operator; remember_rule = false; rule_expires_at = None
+    ; created_by = None; grant_consumed = false; replay_outcome = None } in
+  let encoded = Queue_codec.persisted_delivery_to_yojson delivery in
+  let entry_json = Yojson.Safe.Util.member "entry" encoded in
+  check bool "resolved delivery omits private request context" true
+    (Yojson.Safe.Util.member "request_context" entry_json = `Null);
+  let log = Queue_codec.log_row_to_yojson ~generation:1 ~next_sequence:3
+      (Queue_codec.Delivery_upsert delivery) in
+  let restored = match Queue_codec.log_row_of_yojson ~base_path log with
+    | Ok {row = Queue_codec.Delivery_upsert value;_} -> value
+    | Ok {row = (Queue_codec.Pending_upsert _ | Queue_codec.Pending_remove _ | Queue_codec.Delivery_remove _);_} -> fail "wrong log row"
+    | Error reason -> fail reason in
+  check (testable Yojson.Safe.pp Yojson.Safe.equal) "retained delivery keeps exact origin"
+    (Origin.to_yojson original_origin) (Origin.to_yojson restored.entry.origin);
+  let grant_lookup delivery origin =
+    State.find_unconsumed_grant_id_in_deliveries (SMap.singleton entry.id delivery)
+      ~base_path ~keeper_name:entry.keeper_name ~tool_name:entry.tool_name
+      ~input_hash:entry.input_hash ~origin ~task_id:None ~goal_id:None
+      ~continuation_channel:entry.continuation_channel in
+  check (option string) "approved effect reuses unconsumed grant" (Some entry.id)
+    (grant_lookup restored (origin "operation-a" 2));
+  check (option string) "another operation cannot fold onto grant" None
+    (grant_lookup restored (origin "operation-b" 2));
+  check (option string) "consumed grant never folds" None
+    (grant_lookup {restored with grant_consumed = true} original_origin);
+  let snapshot = Queue_codec.snapshot_to_yojson ~base_path ~next_sequence:2 ~generation:1
+      ~pending_map:pending ~delivery_map:SMap.empty in
+  let replace key value = function
+    | `Assoc fields -> `Assoc ((key,value) :: List.remove_assoc key fields)
+    | _ -> fail "expected object" in
+  let entry_json = Queue_codec.pending_entry_to_yojson entry in
+  let malformed = match entry_json with
+    | `Assoc fields -> `Assoc (List.remove_assoc "origin" fields)
+    | _ -> fail "expected entry" in
+  (match Queue_codec.pending_entry_of_yojson ~base_path malformed with
+   | Error _ -> () | Ok _ -> fail "missing origin was accepted");
+  (match Queue_codec.validate_pending_snapshot ~base_path (replace "version" (`Int 12) snapshot) with
+   | Error _ -> () | Ok () -> fail "previous format silently invented provenance")
 ;;
 
 let test_unknown_persisted_shape_is_reported_and_rejected () =
@@ -768,7 +861,7 @@ let approval_entry_exn id =
 
 let submit_eligibility_entry ~base_path ~keeper_name label =
   match
-    AQ.submit_pending
+    AQ.submit_pending ~origin:Keeper_approval_origin.unavailable
       ~keeper_name
       ~tool_name:"external-effect"
       ~call_summary:None
@@ -1219,6 +1312,8 @@ let () =
             test_application_envelope_rejects_missing_or_conflicting_provenance
         ; test_case "resolution order wire refuses missing or conflicting authority" `Quick
             test_resolution_order_wire_refuses_unproven_order
+        ; test_case "logical origin dedup and retained delivery wire" `Quick
+            test_origin_dedup_and_retained_delivery_wire
         ; test_case
             "Gate consumes exact persisted rule"
             `Quick

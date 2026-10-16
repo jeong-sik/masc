@@ -3371,7 +3371,7 @@ let test_durable_connector_replay_settles_terminal_turn () =
        in
        let approval_id =
          match
-           Masc.Keeper_approval_queue.submit_pending
+           Masc.Keeper_approval_queue.submit_pending ~origin:Keeper_approval_origin.unavailable
              ~keeper_name:meta.name
              ~tool_name:"connector_post"
              ~call_summary:None

@@ -4326,7 +4326,7 @@ let install_pending_summary ~base_path ~keeper_name ~bind_exact =
    | Error error -> fail (Masc.Keeper_approval_queue_result.install_error_to_string error));
   let id =
     match
-      Approval_queue.submit_pending
+      Approval_queue.submit_pending ~origin:Keeper_approval_origin.unavailable
         ~keeper_name
         ~tool_name:"shutdown-fixture"
         ~call_summary:None

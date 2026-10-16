@@ -2162,16 +2162,43 @@ let resolve_store_readiness_error ~base_path ~approval_id =
     Error (Persistence_failed { approval_id; storage_error })
 ;;
 
-type journal_error =
-  | Journal_not_found
-  | Journal_storage of storage_error
+type resolution_target =
+  | Pending_resolution of pending_approval
+  | Journaled_resolution of persisted_delivery
 
-let journal_resolution ~id ~decision ~source ~remember_rule ~rule_expires_at ~created_by =
+(* Both maps and store readiness are one observation. Callers hold the queue
+   authority lock; no callback, audit append or delivery runs in this region. *)
+let resolution_target_unlocked ~base_path ~id =
+  match resolve_store_readiness_error ~base_path ~approval_id:id with
+  | Error _ as error -> error
+  | Ok () ->
+    (match SMap.find_opt id (Atomic.get pending) with
+     | Some entry when String.equal entry.audit_base_path base_path ->
+       Ok (Pending_resolution entry)
+     | Some _ -> Error (Not_found id)
+     | None ->
+       (match SMap.find_opt id (Atomic.get deliveries) with
+        | Some delivery when String.equal delivery.entry.audit_base_path base_path ->
+          Ok (Journaled_resolution delivery)
+        | Some _ | None -> Error (Not_found id)))
+;;
+
+type prepared_resolution =
+  | Newly_journaled of persisted_delivery
+  | Previously_journaled of persisted_delivery
+
+let journal_resolution ~base_path ~id ~decision ~source ~remember_rule ~rule_expires_at ~created_by =
   with_pending_store_lock (fun () ->
-    let pending_map = Atomic.get pending in
-    match SMap.find_opt id pending_map with
-    | None -> Error Journal_not_found
-    | Some entry ->
+    match resolution_target_unlocked ~base_path ~id with
+    | Error _ as error -> error
+    | Ok (Journaled_resolution delivery) -> Ok (Previously_journaled delivery)
+    | Ok (Pending_resolution entry) ->
+      let remember_rule =
+        match decision with
+        | Decision.Approve -> remember_rule
+        | Decision.Reject _ -> false
+      in
+      let rule_expires_at = if remember_rule then rule_expires_at else None in
       let delivery =
         { entry
         ; decision
@@ -2183,19 +2210,20 @@ let journal_resolution ~id ~decision ~source ~remember_rule ~rule_expires_at ~cr
         ; replay_outcome = None
         }
       in
-      let updated_pending = SMap.remove id pending_map in
+      let updated_pending = SMap.remove id (Atomic.get pending) in
       let updated_deliveries = SMap.add id delivery (Atomic.get deliveries) in
       (match
          persist_snapshot_unlocked
-           ~base_path:entry.audit_base_path
+           ~base_path
            ~pending_map:updated_pending
            ~delivery_map:updated_deliveries
        with
-       | Error storage_error -> Error (Journal_storage storage_error)
+       | Error storage_error ->
+         Error (Persistence_failed { approval_id = id; storage_error })
        | Ok () ->
          Atomic.set pending updated_pending;
          Atomic.set deliveries updated_deliveries;
-         Ok delivery))
+         Ok (Newly_journaled delivery)))
 ;;
 
 let remove_delivery_from_store delivery =
@@ -2631,7 +2659,7 @@ let retire_spent_deliveries ~base_path ids =
               Ok (List.length retired)))))
 ;;
 
-let install_persistence_internal ~after_load ~base_path =
+let install_persistence_internal ~after_load ~after_pending_publish ~base_path =
   (* Snapshot read and installation are one transition. The hybrid pending
      store lock serializes Eio and non-Eio callers, cooperatively gates Eio
      waiters, and protects cancellation across the durable transition. Keeping
@@ -2743,6 +2771,7 @@ let install_persistence_internal ~after_load ~base_path =
                      error
                      (Atomic.get replay_projection_errors));
               Atomic.set pending pending_map;
+              after_pending_publish ();
               Atomic.set deliveries delivery_map;
               Atomic.set
                 next_sequences
@@ -2803,7 +2832,8 @@ let install_persistence_internal ~after_load ~base_path =
 ;;
 
 let install_persistence ~base_path =
-  install_persistence_internal ~after_load:(fun () -> ()) ~base_path
+  install_persistence_internal
+    ~after_load:(fun () -> ()) ~after_pending_publish:(fun () -> ()) ~base_path
 ;;
 
 module For_testing = struct
@@ -2839,7 +2869,11 @@ module For_testing = struct
   ;;
 
   let install_persistence_with_after_load_hook ~base_path ~after_load =
-    install_persistence_internal ~after_load ~base_path
+    install_persistence_internal ~after_load ~after_pending_publish:(fun () -> ()) ~base_path
+  ;;
+
+  let install_persistence_with_after_pending_publish_hook ~base_path ~after_pending_publish =
+    install_persistence_internal ~after_load:(fun () -> ()) ~after_pending_publish ~base_path
   ;;
 
   let pending_store_path = pending_store_path
@@ -2892,73 +2926,42 @@ let resolve_with_policy
       ()
   : (resolution_result, resolve_error) result
   =
-  match resolve_store_readiness_error ~base_path ~approval_id:id with
+  let claim =
+    with_pending_store_lock (fun () ->
+      match resolution_target_unlocked ~base_path ~id with
+      | Error _ as error -> error
+      | Ok (Pending_resolution _ | Journaled_resolution _) ->
+        if claim_resolution id then Ok () else Error (Already_resolved id))
+  in
+  match claim with
   | Error _ as error -> error
   | Ok () ->
-    let belongs_to_workspace () =
-      match SMap.find_opt id (Atomic.get pending) with
-      | Some entry -> String.equal entry.audit_base_path base_path
-      | None ->
-        (match SMap.find_opt id (Atomic.get deliveries) with
-         | Some delivery -> String.equal delivery.entry.audit_base_path base_path
-         | None -> false)
-    in
-    if not (belongs_to_workspace ())
-    then Error (Not_found id)
-    else if not (claim_resolution id)
-    then Error (Already_resolved id)
-    else
-      Fun.protect
-        ~finally:(fun () -> release_resolution_claim id)
-        (fun () ->
-           if not (belongs_to_workspace ())
-           then Error (Not_found id)
-           else match SMap.find_opt id (Atomic.get pending) with
-           | Some _ ->
-             let remember_rule =
-               match decision with
-               | Decision.Approve -> remember_rule
-               | Decision.Reject _ -> false
-             in
-             let rule_expires_at =
-               if remember_rule then rule_expires_at else None
-             in
-             (match
-                journal_resolution
-                  ~id
-                  ~decision
-                  ~source
-                  ~remember_rule
-                  ~rule_expires_at
-                  ~created_by
-              with
-              | Error Journal_not_found -> Error (Not_found id)
-              | Error (Journal_storage storage_error) ->
-                Error (Persistence_failed { approval_id = id; storage_error })
-              | Ok delivery ->
-                let resolution_receipt = record_journaled_resolution delivery in
-                (match complete_delivery ~occasion:First_commit delivery with
-                 | Error _ as error -> error
-                 | Ok result ->
-                   Ok
-                     { result with
-                       audit_receipts =
-                         result.audit_receipts @ [ resolution_receipt ]
-                     }))
-           | None ->
-             (match SMap.find_opt id (Atomic.get deliveries) with
-              | None -> Error (Not_found id)
-              | Some delivery ->
-                let same_request =
-                  approval_decision_equal decision delivery.decision
-                  && source = delivery.source
-                  && remember_rule = delivery.remember_rule
-                  && rule_expires_at = delivery.rule_expires_at
-                  && created_by = delivery.created_by
-                in
-                if same_request
-                then complete_delivery ~occasion:Same_request_resubmitted delivery
-                else Error (Already_resolved id)))
+    Fun.protect
+      ~finally:(fun () -> release_resolution_claim id)
+      (fun () ->
+         match journal_resolution ~base_path ~id ~decision ~source ~remember_rule
+                 ~rule_expires_at ~created_by with
+         | Error _ as error -> error
+         | Ok (Newly_journaled delivery) ->
+           let resolution_receipt = record_journaled_resolution delivery in
+           (match complete_delivery ~occasion:First_commit delivery with
+            | Error _ as error -> error
+            | Ok result ->
+              Ok
+                { result with
+                  audit_receipts = result.audit_receipts @ [ resolution_receipt ]
+                })
+         | Ok (Previously_journaled delivery) ->
+           let same_request =
+             approval_decision_equal decision delivery.decision
+             && source = delivery.source
+             && remember_rule = delivery.remember_rule
+             && rule_expires_at = delivery.rule_expires_at
+             && created_by = delivery.created_by
+           in
+           if same_request
+           then complete_delivery ~occasion:Same_request_resubmitted delivery
+           else Error (Already_resolved id))
 ;;
 
 (* ── Query ────────────────────────────────────────────────── *)

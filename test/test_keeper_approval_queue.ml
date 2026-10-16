@@ -833,6 +833,105 @@ let delivery_json ~entry ~remember_rule =
     ]
 ;;
 
+let test_resolve_waits_for_domain_two_map_publication () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       let id = submit ~base_path ~keeper_name:"queue-generation-race"
+           ~input:(`Assoc [ "target", `String "publication" ]) in
+       let snapshot =
+         match AQ.For_testing.durable_snapshot_json ~base_path with
+         | Ok snapshot -> snapshot
+         | Error detail -> Alcotest.fail detail
+       in
+       let open Yojson.Safe.Util in
+       let entry = snapshot |> member "pending" |> to_list |> List.hd in
+       let replacement =
+         match snapshot with
+         | `Assoc fields ->
+           `Assoc
+             (("pending", `List [])
+              :: ("deliveries", `List [ delivery_json ~entry ~remember_rule:false ])
+              :: (fields |> List.remove_assoc "pending" |> List.remove_assoc "deliveries"))
+         | _ -> Alcotest.fail "expected queue snapshot object"
+       in
+       write_pending_snapshot ~base_path replacement;
+       let midpoint_published = Atomic.make false in
+       let release_publication = Atomic.make false in
+       let install_completed = Atomic.make None in
+       let installer =
+         Domain.spawn (fun () ->
+           let outcome =
+             try
+               `Installed
+                 (AQ.For_testing.install_persistence_with_after_pending_publish_hook
+                    ~base_path
+                    ~after_pending_publish:(fun () ->
+                      Atomic.set midpoint_published true;
+                      while not (Atomic.get release_publication) do
+                        Domain.cpu_relax ()
+                      done))
+             with exn -> `Raised exn
+           in
+           Atomic.set install_completed (Some outcome))
+       in
+       Fun.protect
+         ~finally:(fun () ->
+           Atomic.set release_publication true;
+           Domain.join installer)
+         (fun () ->
+            Eio_main.run @@ fun _environment ->
+            Eio.Switch.run @@ fun sw ->
+            let rec await_midpoint () =
+              if Atomic.get midpoint_published
+              then ()
+              else
+                match Atomic.get install_completed with
+                | Some _ -> Alcotest.fail "install ended before the publication barrier"
+                | None -> Eio.Fiber.yield (); await_midpoint ()
+            in
+            await_midpoint ();
+            let attempted, signal_attempted = Eio.Promise.create () in
+            let resolved, signal_resolved = Eio.Promise.create () in
+            Eio.Fiber.fork ~sw (fun () ->
+              Eio.Promise.resolve signal_attempted ();
+              let result =
+                aq_resolve ~base_path ~id
+                  ~decision:(Rule_types.Decision.Reject "different decision")
+              in
+              Eio.Promise.resolve signal_resolved result);
+            Eio.Promise.await attempted;
+            (* The resolving fiber proceeds until it either reaches the queue
+               lock or returns the old lockless Not_found. No clock ordering
+               participates in this cross-Domain publication scenario. *)
+            Eio.Fiber.yield ();
+            Alcotest.(check bool)
+              "resolve cannot answer from the half-published generation"
+              false (Option.is_some (Eio.Promise.peek resolved));
+            Atomic.set release_publication true;
+            (match Eio.Promise.await resolved with
+             | Error (AQ.Already_resolved actual) ->
+               Alcotest.(check string) "complete delivery generation wins" id actual
+             | Error error ->
+               Alcotest.fail (AQ.resolve_error_to_string error)
+             | Ok () -> Alcotest.fail "resolve replaced the already journaled decision"));
+       (match Atomic.get install_completed with
+        | Some (`Installed (Ok _)) -> ()
+        | Some (`Installed (Error error)) ->
+          Alcotest.fail (Masc.Keeper_approval_queue_result.install_error_to_string error)
+        | Some (`Raised exn) -> raise exn
+        | None -> Alcotest.fail "installer domain did not finish");
+       (match AQ.approved_resolution_state ~base_path ~id with
+        | Ok Masc.Keeper_approval_queue_result.Resolution_unconsumed -> ()
+        | Ok Masc.Keeper_approval_queue_result.Resolution_consumed -> Alcotest.fail "resolve consumed the existing grant"
+        | Error error ->
+          Alcotest.fail (Masc.Keeper_approval_queue_result.grant_error_to_string error)))
+;;
+
 let test_install_serializes_snapshot_read_with_same_base_mutation () =
   let base_path = temp_dir () in
   Fun.protect
@@ -6588,6 +6687,8 @@ let () =
             "durable lock serializes Eio fibers"
             `Quick
             test_pending_store_lock_serializes_eio_fibers
+        ; Alcotest.test_case "resolve waits for Domain two-map publication" `Quick
+            test_resolve_waits_for_domain_two_map_publication
         ; Alcotest.test_case
             "install serializes snapshot read with mutation"
             `Quick

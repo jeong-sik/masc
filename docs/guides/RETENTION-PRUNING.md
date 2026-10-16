@@ -15,7 +15,7 @@ without following it. It never calls `realpath` on a runtime descendant to
 authorize pruning. Every subsequent directory component is opened relative to
 its held parent with `openat(O_DIRECTORY | O_NOFOLLOW)`; names are read from
 that descriptor. A linked child is skipped. A linked runtime root is refused.
-Other inspection and deletion failures propagate to the maintenance caller.
+Other file inspection and deletion failures propagate to the maintenance caller.
 
 Date-split, keeper-scoped and generation-scoped locations follow the existing
 closed store geometry through those handles. Location strings remain lock keys

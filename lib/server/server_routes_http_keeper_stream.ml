@@ -4306,7 +4306,7 @@ let handle_keeper_asks_list state request reqd =
        | Ok Keeper_ask_store.Missing_log when not (Keeper_registry.is_registered ~base_path keeper_name) ->
          respond_json_value_with_cors ~status:`Not_found request reqd
            (keeper_chat_stream_error_json "keeper has no recorded questions")
-       | Ok snapshot ->
+       | Ok ((Keeper_ask_store.Missing_log | Stored_rows _) as snapshot) ->
         let rows = match snapshot with
           | Keeper_ask_store.Missing_log -> []
           | Stored_rows rows -> rows

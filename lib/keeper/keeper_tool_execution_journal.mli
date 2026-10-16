@@ -82,6 +82,13 @@ type error =
   | Missing_journal
   | Unreadable_journal of string
   | Corrupt_journal of string
+      (** Journal updates are in-place durable appends with an ftruncate
+          rollback, not atomic temp-file renames: a crash mid-append can
+          leave a torn tail that decodes as corrupt. A corrupt journal is
+          therefore not in itself proof of a permanent failure: when
+          continuation intake meets one it holds original authority and
+          reports failure without settling the run, so the file can be
+          repaired out-of-band and explicitly resumed. *)
   | Source_conflict
   | Queued_request_rejected of string
   | Prior_owner_not_terminal of { request_id : string; reason : string }

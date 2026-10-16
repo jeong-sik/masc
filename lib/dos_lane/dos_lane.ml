@@ -1440,11 +1440,21 @@ let checkpoints ~dir =
 
 (* ---------- introspection ---------- *)
 
+(* An address the machine has: 0 to [last_address]. The only way to make one
+   is [address_of_int], so [peek] cannot be handed a sentinel. *)
+type address = int
+
+let address_of_int n =
+  if n < 0 || n > last_address then
+    Error (Invalid_request (Printf.sprintf "address must be 0..0x%X, got %d" last_address n))
+  else Ok n
+;;
+
+let address_to_int address = address
+
 let peek ~address ~length =
   with_machine (fun st ->
-    if address < 0 || address > last_address then
-      Error (Invalid_request (Printf.sprintf "address must be 0..0x%X, got %d" last_address address))
-    else if length < 1 || length > peek_max_bytes then
+    if length < 1 || length > peek_max_bytes then
       Error
         (Invalid_request
            (Printf.sprintf "length must be 1..%d, got %d" peek_max_bytes length))

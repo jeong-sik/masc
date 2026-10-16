@@ -453,10 +453,17 @@ val type_text :
     keys. With [until_ready=false], only its first character is injected.
     For a name a program is asking for, not for menu navigation. *)
 
-val peek : address:int -> length:int -> (string, error) result
-(** Reads [length] (1..{!peek_max_bytes}) bytes at a physical address
-    (0x00000-0xFFFFF) as hex pairs. Read-only: writing is the cheat the lane
-    refuses. *)
+type address
+(** A physical address the machine has: 0x00000 to 0xFFFFF. *)
+
+val address_of_int : int -> (address, error) result
+(** [Invalid_request] outside the range. *)
+
+val address_to_int : address -> int
+
+val peek : address:address -> length:int -> (string, error) result
+(** Reads [length] (1..{!peek_max_bytes}) bytes from a physical address as hex
+    pairs. Read-only: writing is the cheat the lane refuses. *)
 
 val peek_max_bytes : int
 

@@ -1050,42 +1050,58 @@ let handle_type ~tool_name ~start_time ~base_path ~who args =
        ~until_ready:(get_bool args "until_ready" true))
 ;;
 
-(* Addresses arrive as hex strings ("b8000", "0xB8000") because that is how
-   memory is talked about; decimal parses too. *)
-let parse_address s =
-  let s = String.lowercase_ascii (String.trim s) in
-  let s =
-    if String.starts_with ~prefix:"0x" s then String.sub s 2 (String.length s - 2) else s
+(* Addresses arrive as hex strings ("b8000", "0xB8000"), as the schema says
+   and as memory is talked about. A number is read as hex too: "255" is 0x255.
+   Anything that is not hex digits, or is too long to be an address, is
+   refused by what the caller wrote, not by a stand-in number. *)
+let max_address_digits = 8
+
+let parse_address text =
+  let lowered = String.lowercase_ascii (String.trim text) in
+  let digits =
+    if String.starts_with ~prefix:"0x" lowered then
+      String.sub lowered 2 (String.length lowered - 2)
+    else lowered
   in
-  int_of_string_opt ("0x" ^ s)
+  let is_hex_digit = function '0' .. '9' | 'a' .. 'f' -> true | _ -> false in
+  if digits = "" || String.length digits > max_address_digits
+     || not (String.for_all is_hex_digit digits)
+  then
+    Error
+      (Printf.sprintf
+         "address %S is not hex: write the physical address as hex digits, such as b8000 or 0xB8000"
+         text)
+  else
+    Dos_lane.address_of_int (int_of_string ("0x" ^ digits))
+    |> Result.map_error Dos_lane.error_to_string
 ;;
 
 let handle_peek ~tool_name ~start_time ~base_path args =
-  let address =
-    match parse_address (get_string args "address" "") with
-    | Some a -> a
-    | None -> -1
-  in
-  match off_domain (fun () -> Dos_lane.peek ~address ~length:(get_int args "length" 16)) with
-  | Ok hex ->
-    Tool_result.make_ok ~tool_name ~start_time
-      ~data:
-        (`Assoc
-          [ ("address", `String (Printf.sprintf "%05x" address)); ("hex", `String hex) ])
-      ()
-  | Error Dos_lane.No_machine -> no_machine ~base_path ~tool_name ~start_time
-  | Error
-      (( Dos_lane.Activity_disabled
-       | Dos_lane.Activity_unobserved
-       | Dos_lane.Invalid_request _
-       | Dos_lane.Unreadable _
-       | Dos_lane.Held_by _
-       | Dos_lane.Guest_fault _
-       | Dos_lane.Unsaveable _
-       | Dos_lane.Checkpoint_refused _
-       | Dos_lane.Other_program _
-       | Dos_lane.Autosave_exists _ ) as e) ->
-    reject ~tool_name ~start_time (Dos_lane.error_to_string e)
+  match parse_address (get_string args "address" "") with
+  | Error message -> reject ~tool_name ~start_time message
+  | Ok address ->
+    (match off_domain (fun () -> Dos_lane.peek ~address ~length:(get_int args "length" 16)) with
+     | Ok hex ->
+       Tool_result.make_ok ~tool_name ~start_time
+         ~data:
+           (`Assoc
+             [ ("address", `String (Printf.sprintf "%05x" (Dos_lane.address_to_int address)))
+             ; ("hex", `String hex)
+             ])
+         ()
+     | Error Dos_lane.No_machine -> no_machine ~base_path ~tool_name ~start_time
+     | Error
+         (( Dos_lane.Activity_disabled
+          | Dos_lane.Activity_unobserved
+          | Dos_lane.Invalid_request _
+          | Dos_lane.Unreadable _
+          | Dos_lane.Held_by _
+          | Dos_lane.Guest_fault _
+          | Dos_lane.Unsaveable _
+          | Dos_lane.Checkpoint_refused _
+          | Dos_lane.Other_program _
+          | Dos_lane.Autosave_exists _ ) as e) ->
+       reject ~tool_name ~start_time (Dos_lane.error_to_string e))
 ;;
 
 (* ---------- checkpoints ---------- *)

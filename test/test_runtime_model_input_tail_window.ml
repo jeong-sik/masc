@@ -1016,6 +1016,32 @@ let test_saved_summary_controls_only_empty_suffix_preamble () =
     (List.exists is_preamble (project ~announced:true ~first_atom:0 [extra_context]))
 ;;
 
+(* The front fixes the cut before any size is read, so an atom the cut
+   leaves out is never measured: a production measure encodes the message,
+   and a carried range opens near the newest atom of a long history. *)
+let test_from_atom_view_measures_only_what_it_sends () =
+  let history = extra_context :: atoms 40 in
+  List.iter
+    (fun (allow_empty_history, first_atom) ->
+       let measured = ref [] in
+       let counting_measure (m : Types.message) =
+         measured := m :: !measured;
+         measure_message_bytes m
+       in
+       let projection, bytes =
+         Window.project_from_atom ~allow_empty_history
+           ~measure_message_bytes:counting_measure ~first_atom history
+       in
+       let sent = projection.Window.messages in
+       Alcotest.(check int) "bytes are the sent messages' bytes" (total_bytes sent) bytes;
+       List.iter
+         (fun (m : Types.message) ->
+            if not (List.exists (fun (s : Types.message) -> s == m) sent)
+            then Alcotest.failf "front %d measured a message it does not send" first_atom)
+         !measured)
+    [ false, 0; false, 1; false, 20; false, 39; false, 40; true, 40 ]
+;;
+
 (* A position is the atom index plus the message that opens the atom. The
    opener is the first message [annotate] gives the index: pinned context is
    no atom and shifts nothing, and a tool result joins the assistant's atom
@@ -1159,6 +1185,8 @@ let () =
             test_from_atom_view_past_the_newest_atom_keeps_it
         ; Alcotest.test_case "saved summary controls empty suffix preamble" `Quick
             test_saved_summary_controls_only_empty_suffix_preamble
+        ; Alcotest.test_case "from-atom view measures only what it sends" `Quick
+            test_from_atom_view_measures_only_what_it_sends
         ; Alcotest.test_case "deterministic" `Quick test_deterministic
         ] )
     ]

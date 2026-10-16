@@ -571,6 +571,22 @@ let project_target ~measure_message_bytes ~target_bytes ~reserved_bytes messages
     })
 ;;
 
+(* The measured size of atoms [drop .. atom_count - 1], the value
+   [suffix.(drop)] of [atom_suffix_bytes] holds, without measuring the atoms
+   before [drop]. Every lane's measure encodes the message it is given, and a
+   carried range usually opens near the newest atom of a long history, so
+   measuring the whole history would encode it all for a sum that leaves
+   that part out. *)
+let kept_atom_bytes ~measure_message_bytes ~drop labelled =
+  List.fold_left
+    (fun acc (msg, label) ->
+       match label with
+       | Atom index when index >= drop -> acc + measure_message_bytes msg
+       | Atom _ | Pinned -> acc)
+    0
+    labelled
+;;
+
 let project_from_atom ?(allow_empty_history = false)
     ?(history_already_announced = false) ~measure_message_bytes ~first_atom messages =
   let labelled, atom_count = annotate messages in
@@ -580,13 +596,12 @@ let project_from_atom ?(allow_empty_history = false)
   else (
     let last = if allow_empty_history then atom_count else atom_count - 1 in
     let drop = max 0 (min first_atom last) in
-    let _, suffix = atom_suffix_bytes ~measure_message_bytes ~atom_count labelled in
     let assembled, preamble_prepended =
       assemble_with_preamble ~history_already_announced ~allow_empty_history ~atom_count ~drop ~messages labelled
     in
     let transmitted_bytes =
       pinned_bytes
-      + suffix.(drop)
+      + kept_atom_bytes ~measure_message_bytes ~drop labelled
       + if preamble_prepended then measure_message_bytes preamble_message else 0
     in
     { messages = assembled; dropped_atoms = drop; atom_count }, transmitted_bytes)

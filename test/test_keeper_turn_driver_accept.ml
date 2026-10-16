@@ -174,6 +174,127 @@ let test_accept_keeps_result () =
     Alcotest.failf "accepted response should pass through: %s"
       (Agent_core.Error.to_string err)
 
+let empty_terminal_error stop_reason =
+  Agent_core.Error.Provider
+    (Llm_provider.Error.EmptyCompletion
+       { provider = "test"; stop_reason; detail = "empty assistant turn" })
+
+let test_empty_terminal_completion_requires_this_attempt_saved_checkpoint () =
+  let module Attempt = Masc.Keeper_turn_driver_try_provider in
+  let progress = Atomic.make Attempt.No_checkpoint_stage in
+  let saved_count () = Attempt.For_testing.tool_result_save_count progress in
+  let checkpoint = checkpoint_with_messages [] in
+  let decide ~before ?(checkpoint = Some checkpoint)
+      ?(stop_reason = Agent_core.Types.EndTurn) () =
+    Attempt.complete_saved_tool_terminal
+      ~tool_results_saved_in_attempt:(saved_count () > before)
+      ~checkpoint (Error (empty_terminal_error stop_reason))
+  in
+  let check_decision label expected decision =
+    Alcotest.(check bool) label expected (Result.is_ok decision)
+  in
+  let before = saved_count () in
+  check_decision "tool-free terminal retains its failure" false (decide ~before ());
+  Attempt.observe_checkpoint_saved progress Agent_core.Agent.After_context_injection;
+  check_decision "context-only save does not complete" false (decide ~before ());
+  Attempt.observe_checkpoint_stage progress Agent_core.Agent.After_tool_results_appended;
+  check_decision "reaching the tool-save stage does not complete" false (decide ~before ());
+  Attempt.observe_checkpoint_saved progress Agent_core.Agent.After_tool_results_appended;
+  check_decision "this attempt's saved tool result completes" true (decide ~before ());
+  check_decision "checkpoint must be available" false
+    (decide ~before ~checkpoint:None ());
+  List.iter (fun stop_reason ->
+    check_decision "non-EndTurn failure remains a failure" false
+      (decide ~before ~stop_reason ()))
+    [Agent_core.Types.MaxTokens; Agent_core.Types.StopSequence];
+  let next_attempt = saved_count () in
+  check_decision "an earlier attempt cannot authorize completion" false
+    (decide ~before:next_attempt ());
+  Attempt.observe_checkpoint_saved progress Agent_core.Agent.After_context_injection;
+  check_decision "context injection cannot reuse earlier tool proof" false
+    (decide ~before:next_attempt ());
+  let unrelated = Agent_core.Error.Internal "unrelated" in
+  let unchanged = Attempt.complete_saved_tool_terminal
+      ~tool_results_saved_in_attempt:true ~checkpoint:(Some checkpoint)
+      (Error unrelated) in
+  (match unchanged with
+   | Error actual -> Alcotest.(check bool) "unrelated failure retained" true (actual == unrelated)
+   | Ok _ -> Alcotest.fail "unrelated failure was completed");
+  let original = run_result () in
+  let unchanged = Attempt.complete_saved_tool_terminal
+      ~tool_results_saved_in_attempt:true ~checkpoint:(Some checkpoint) (Ok original) in
+  (match unchanged with
+   | Ok actual -> Alcotest.(check bool) "successful result unchanged" true (actual == original)
+   | Error _ -> Alcotest.fail "successful result was rejected")
+;;
+
+let test_tool_then_empty_failure_completes_without_reexecution () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let module Core = Agent_core in
+  let module Attempt = Masc.Keeper_turn_driver_try_provider in
+  let progress = Atomic.make Attempt.No_checkpoint_stage in
+  let before = Attempt.For_testing.tool_result_save_count progress in
+  let tool_executions = ref 0 in
+  let provider_calls = ref 0 in
+  let replies = ref
+      [ response ~stop_reason:Core.Types.StopToolUse
+          ~content:[Core.Types.ToolUse {id="observed-1"; name="observe"; input=`Assoc []}] ()
+      ; response ~content:[] () ] in
+  let next () =
+    incr provider_calls;
+    match !replies with
+    | reply :: rest -> replies := rest; reply
+    | [] -> Alcotest.fail "completed tool was retried after terminal response"
+  in
+  let transport : Llm_provider.Llm_transport.t =
+    { complete_sync = (fun _ -> {response=Ok (next ()); latency_ms=None})
+    ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ _ -> Ok (next ())) } in
+  let provider_config = Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.OpenAI_compat ~provider_id:"test"
+      ~api_key:"" ~base_url:"http://mock.local" ~request_path:"/v1/chat/completions"
+      ~model_id:"mock-model" () in
+  let tool = Core.Tool.create ~name:"observe" ~description:"Observe once" ~parameters:[]
+      (fun _ -> incr tool_executions;
+        Ok {Core.Types.content="observed"; content_blocks=None; _meta=None}) in
+  let options = {Core.Agent.default_options with
+      provider_config=Some provider_config; transport=Some transport} in
+  let checkpoint_sink snapshot =
+    (* The real sink owner marks only its Saved branch; a stale no-op must
+       not mark this. This fixture models that successful owner write. *)
+    Attempt.observe_checkpoint_saved progress snapshot.Core.Agent.stage;
+    Ok () in
+  let agent = Core.Agent.create ~net:(Eio.Stdenv.net env)
+      ~config:(Core.Types.default_config ~model:"mock-model") ~options ~tools:[tool]
+      ~checkpoint_sink () in
+  let error = match Core.Agent.run ~sw agent "observe once" with
+    | Error (Core.Error.Provider (Llm_provider.Error.EmptyCompletion
+        {stop_reason=Core.Types.EndTurn; _}) as error) -> error
+    | Error error -> Alcotest.fail (Core.Error.to_string error)
+    | Ok _ -> Alcotest.fail "shared SDK silently accepted the empty terminal" in
+  let checkpoint = Core.Agent.checkpoint ~session_id:"quiet-terminal-session" agent in
+  let completed = match Attempt.complete_saved_tool_terminal
+      ~tool_results_saved_in_attempt:
+        (Attempt.For_testing.tool_result_save_count progress > before)
+      ~checkpoint:(Some checkpoint) (Error error) with
+    | Ok completed -> completed
+    | Error error -> Alcotest.fail (Core.Error.to_string error) in
+  Alcotest.(check int) "one tool execution" 1 !tool_executions;
+  Alcotest.(check int) "tool request then empty terminal" 2 !provider_calls;
+  Alcotest.(check string) "checkpoint session retained"
+    checkpoint.session_id completed.session_id;
+  Alcotest.(check int) "checkpoint turn count retained" checkpoint.turn_count completed.turns;
+  Alcotest.(check bool) "actual checkpoint retained" true
+    (Option.fold ~none:false ~some:(fun saved -> saved == checkpoint) completed.checkpoint);
+  Alcotest.(check string) "provider id unavailable" "" completed.response.id;
+  Alcotest.(check bool) "usage is unavailable, not invented" true
+    (completed.response.usage = None);
+  Alcotest.(check (result string string)) "existing tool-backed finalization completes"
+    (Ok "")
+    (Keeper_tooling.Response.normalize_response_text
+       ~text:(Core.Types.visible_text_of_response completed.response) ~tool_names:["observe"] ())
+;;
+
 let test_input_required_bypasses_response_accept () =
   let accept_calls = ref 0 in
   let reject (_ : Agent_core.Types.api_response) =
@@ -1864,6 +1985,10 @@ let () =
             "InputRequired bypasses response acceptance"
             `Quick
             test_input_required_bypasses_response_accept;
+          Alcotest.test_case "typed empty terminal requires this attempt's saved checkpoint"
+            `Quick test_empty_terminal_completion_requires_this_attempt_saved_checkpoint;
+          Alcotest.test_case "real tool then typed empty failure completes without reexecution"
+            `Quick test_tool_then_empty_failure_completes_without_reexecution;
           Alcotest.test_case
             "terminal tool completion bypasses empty response rejection"
             `Quick

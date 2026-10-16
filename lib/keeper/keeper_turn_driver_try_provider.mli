@@ -35,7 +35,9 @@ type provider_progress_sample =
 type checkpoint_progress =
   | No_checkpoint_stage
   | Checkpoint_stage_reached
-  | Tool_results_saved
+  | Tool_results_saved of { tool_result_saves : int }
+      (** Number of actual [After_tool_results_appended] saves. Context-only
+          saves establish retry continuity but do not advance this count. *)
 
 type continuity
 (** A snapshot verified against the dispatch's original checkpoint. *)
@@ -433,6 +435,16 @@ val apply_accept :
   Runtime_agent.run_result ->
   (Runtime_agent.run_result, Agent_core.Error.t) result
 
+val complete_saved_tool_terminal :
+  tool_results_saved_in_attempt:bool ->
+  checkpoint:Agent_core.Checkpoint.t option ->
+  (Runtime_agent.run_result, Agent_core.Error.t) result ->
+  (Runtime_agent.run_result, Agent_core.Error.t) result
+(** Keeper-owned normalization of a typed empty [EndTurn] failure after this
+    attempt saved tool results. A checkpoint is required; all other outcomes
+    retain their original classification. The synthetic terminal has no
+    provider response identity, usage, telemetry or cooperative-yield witness. *)
+
 val observe_checkpoint_stage :
   checkpoint_progress Atomic.t -> Agent_core.Agent.checkpoint_stage -> unit
 (** Marks that a stage was reached. Called before the stage is saved. *)
@@ -818,6 +830,8 @@ module For_testing : sig
     accept:(Agent_core.Types.api_response -> bool) ->
     Runtime_agent.run_result ->
     (Runtime_agent.run_result, Agent_core.Error.t) result
+
+  val tool_result_save_count : checkpoint_progress Atomic.t -> int
 
   val memoize_message_measurement :
     (Agent_core.Types.message -> int) -> Agent_core.Types.message -> int

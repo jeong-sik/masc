@@ -5746,7 +5746,7 @@ let progress_snapshot stage =
 let progress_label = function
   | Try_provider.No_checkpoint_stage -> "no checkpoint stage"
   | Try_provider.Checkpoint_stage_reached -> "checkpoint stage reached"
-  | Try_provider.Tool_results_saved -> "tool results saved"
+  | Try_provider.Tool_results_saved _ -> "tool results saved"
 ;;
 
 (* RFC last-path-resumes-after-progress §3.2: reaching a stage ends same-run
@@ -5799,7 +5799,7 @@ let test_the_sink_owner_marks_written_tool_results () =
        Alcotest.(check string)
          (Agent_core.Agent.checkpoint_stage_to_string stage)
          (progress_label
-            (if counts then Try_provider.Tool_results_saved else Try_provider.No_checkpoint_stage))
+            (if counts then Try_provider.Tool_results_saved { tool_result_saves = 0 } else Try_provider.No_checkpoint_stage))
          (progress_label (Atomic.get progress)))
     [ Agent_core.Agent.After_tool_results_appended, true
     ; Agent_core.Agent.After_context_injection, true
@@ -5815,7 +5815,7 @@ let test_the_sink_owner_marks_written_tool_results () =
       (progress_snapshot Agent_core.Agent.After_assistant_collected)
   in
   Alcotest.(check string) "a later answer stage keeps the written tool results"
-    (progress_label Try_provider.Tool_results_saved)
+    (progress_label (Try_provider.Tool_results_saved { tool_result_saves = 1 }))
     (progress_label (Atomic.get progress))
 ;;
 

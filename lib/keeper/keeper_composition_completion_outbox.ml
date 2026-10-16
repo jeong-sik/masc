@@ -91,7 +91,7 @@ let prepare ~base_path ~keeper_name ~request_id ~composition_tool:tool =
       ({ status =
            ( Async.Queued | Async.Running | Async.Cancelling _ | Async.Lost _
            | Async.Cancelled _ | Async.Persistence_failed _ | Async.Done _
-           | Async.Waiting_for_owned_jobs _ )
+           | Async.Waiting_for_dependencies _ )
        ; _
        } as entry) ->
     Error (Request_unavailable (Async.Found entry))
@@ -136,7 +136,7 @@ let acknowledge_waiting_with ~after_waiting_read ~base_path ~keeper_name ~reques
         if not (String.equal entry.keeper_name keeper_name && String.equal producer tool)
         then Error (Invalid_obligation "canonical waiting request changed its producer")
         else match entry.status with
-          | Async.Waiting_for_owned_jobs _ ->
+          | Async.Waiting_for_dependencies _ ->
             after_waiting_read ();
             acknowledge ~base_path:entry.base_path ~keeper_name ~request_id
           | Queued | Running | Cancelling _ | Lost _ | Cancelled _
@@ -156,7 +156,7 @@ let prepare_terminal ~proof =
   let entry = Async.durable_terminal_entry proof in
   let request_id = entry.request_id and keeper_name = entry.keeper_name in
   match entry.status with
-  | Async.Waiting_for_owned_jobs _ | Async.Done { ok = false; _ } ->
+  | Async.Waiting_for_dependencies _ | Async.Done { ok = false; _ } ->
     let base_path = entry.base_path in
     (match read ~base_path (filename request_id) with
      | Ok (Some obligation)
@@ -212,7 +212,7 @@ let flush ~base_path ~deliver =
           else
             let* tool = composition_tool entry in
             match entry.status with
-            | Async.Waiting_for_owned_jobs _ ->
+            | Async.Waiting_for_dependencies _ ->
               let* () = acknowledge_waiting ~base_path ~keeper_name:obligation.keeper_name
                   ~request_id:entry.request_id ~composition_tool:tool in
               Ok Retired

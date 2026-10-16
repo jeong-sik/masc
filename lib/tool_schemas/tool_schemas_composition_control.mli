@@ -14,3 +14,4 @@ val status_schema : Masc_domain.tool_schema
 val cancel_schema : Masc_domain.tool_schema
 val prepare_schema : Masc_domain.tool_schema
 val run_schema : Masc_domain.tool_schema
+val result_schema : Masc_domain.tool_schema

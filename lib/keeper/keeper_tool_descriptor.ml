@@ -147,6 +147,7 @@ type runtime_handler =
   | Tool_masc_schedule_dispatch
   | Tool_keeper_spawn_dispatch
   | Tool_keeper_job_dispatch
+  | Tool_keeper_composition_result_dispatch
   | Tool_keeper_code_query_dispatch
   | Tool_keeper_webmcp_dispatch
   | Tool_masc_keeper_dispatch
@@ -282,6 +283,7 @@ let runtime_handler_to_string = function
   | Tool_masc_schedule_dispatch -> "tool_masc_schedule_dispatch"
   | Tool_keeper_spawn_dispatch -> "tool_keeper_spawn_dispatch"
   | Tool_keeper_job_dispatch -> "tool_keeper_job_dispatch"
+  | Tool_keeper_composition_result_dispatch -> "tool_keeper_composition_result_dispatch"
   | Tool_keeper_code_query_dispatch -> "tool_keeper_code_query_dispatch"
   | Tool_keeper_webmcp_dispatch -> "tool_keeper_webmcp_dispatch"
   | Tool_masc_keeper_dispatch -> "tool_masc_keeper_dispatch"
@@ -493,6 +495,7 @@ let descriptor
       | Tool_constitution_write
       | Tool_constitution_read
       | Tool_constitution_remove
+      | Tool_keeper_composition_result_dispatch
       | Tool_keeper_code_query_dispatch
       | Tool_keeper_webmcp_dispatch
       | Tool_search_files
@@ -2342,6 +2345,28 @@ let keeper_owned_job_descriptor (definition : Tool_schemas_owned_job.definition)
   |> with_composable_output (Json_output { schema = owned_job_output_schema })
 ;;
 
+let keeper_composition_result_descriptor () =
+  let schema : Masc_domain.tool_schema = Tool_schemas_composition_control.result_schema in
+  cluster_descriptor_with_schema_source
+    ~capability_identity:Internal_name_identity
+    ~keeper_model_projection:Internal_name
+    ~input_schema_source:Canonical_registry
+    ~input_schema:schema.input_schema
+    ~id:"masc.composition_result"
+    ~name:schema.name
+    ~description:schema.description
+    ~handler:Tool_keeper_composition_result_dispatch
+    ~ordinary_execution_mode:Concurrent
+    ~readonly:true
+    ()
+  |> with_composable_output (Json_output { schema =
+       object_output_schema
+         ~properties:["binding", opaque_object_schema;
+                      "result", opaque_object_schema;
+                      "result_artifact", normalized_artifact_ref_schema]
+         ~required:["binding"; "result"; "result_artifact"] })
+;;
+
 let keeper_code_query_descriptor () =
   let schema : Masc_domain.tool_schema = Tool_schemas_code_query.schema in
   cluster_descriptor_with_schema_source
@@ -3188,6 +3213,7 @@ let internal_descriptors : t list =
   @ List.map masc_schedule_descriptor Tool_schemas_schedule.definitions
   @ List.map keeper_spawn_descriptor Tool_schemas_spawn.definitions
   @ List.map keeper_owned_job_descriptor Tool_schemas_owned_job.definitions
+  @ [ keeper_composition_result_descriptor () ]
   (* ── RFC a-language-server-the-keeper-can-ask (1 entry) ───────── *)
   @ [ keeper_code_query_descriptor () ]
   (* ── RFC-webmcp-keeper-consumption Lane B (2 entries) ─────────── *)
@@ -3417,6 +3443,7 @@ let prepared_leaf_admission descriptor =
         | Tool_masc_agent_timeline_dispatch
         | Tool_masc_schedule_dispatch
         | Tool_keeper_spawn_dispatch
+        | Tool_keeper_composition_result_dispatch
         | Tool_keeper_code_query_dispatch
         | Tool_keeper_webmcp_dispatch
         | Tool_masc_keeper_dispatch

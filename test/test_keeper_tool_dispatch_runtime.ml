@@ -8343,7 +8343,7 @@ let test_async_composition_binds_params_into_durable_status () =
        (match Agent_core.Tool.execution_mode status_tool ~input:`Null with
         | Agent_core.Tool_contract.Concurrent -> ()
         | Agent_core.Tool_contract.Serial -> fail "status tool lost read-only concurrency");
-       let request_id, composition_run_id =
+       let request_id, composition_run_id, result_wait =
          match
            Agent_core.Tool.execute
              ~invocation:
@@ -8360,7 +8360,8 @@ let test_async_composition_binds_params_into_durable_status () =
              "async"
              Yojson.Safe.Util.(member "execution" payload |> to_string);
            ( Yojson.Safe.Util.(member "request_id" payload |> to_string)
-           , Yojson.Safe.Util.(member "composition_run_id" payload |> to_string) )
+           , Yojson.Safe.Util.(member "composition_run_id" payload |> to_string)
+           , Yojson.Safe.Util.member "result_wait" payload )
        in
        check bool "async acceptance exposes run identity" true
          (String.trim composition_run_id <> "");
@@ -8388,7 +8389,7 @@ let test_async_composition_binds_params_into_durable_status () =
                  ( Masc.Keeper_msg_async.Lost _
                  | Masc.Keeper_msg_async.Cancelled _
                  | Masc.Keeper_msg_async.Persistence_failed _
-                 | Masc.Keeper_msg_async.Waiting_for_owned_jobs _ )
+                 | Masc.Keeper_msg_async.Waiting_for_dependencies _ )
              ; _
              } ->
            fail "async read-only composition did not complete"
@@ -8404,6 +8405,19 @@ let test_async_composition_binds_params_into_durable_status () =
        ignore
          (Eio.Time.with_timeout_exn clock 5.0 await_terminal
            : Masc.Keeper_msg_async.entry);
+       let result_tool = match find_tool_by_name tools "keeper_composition_result" with
+         | Some tool -> tool | None -> fail "public canonical result reader was not materialized" in
+       (match Agent_core.Tool.execute
+           ~invocation:(composition_invocation ~completion:Agent_core.Tool_contract.Continue_after_success)
+           result_tool (`Assoc ["binding",result_wait]) with
+        | Error error -> fail error.Agent_core.Types.message
+        | Ok output ->
+          let read = structured_tool_output_exn ~base_path:config.base_path output.content in
+          check bool "canonical result preserves exact original named binding" true
+            (Yojson.Safe.equal (Yojson.Safe.Util.member "binding" read) result_wait);
+          check string "public reader consumes the original named Tool result"
+            "keeper_compose_memory-background"
+            Yojson.Safe.Util.(member "result" read |> member "composition_tool" |> to_string));
        match
          Agent_core.Tool.execute
            ~invocation:
@@ -9387,6 +9401,7 @@ let test_direct_gate_current_history_resume ?(failed_producer=false) ?(source_un
       let approval_id = match deferred.deferred_kind with
         | Some (Masc.Keeper_tool_execution.External_effect_deferred {approval_id=Some id}) -> id
         | None | Some Masc.Keeper_tool_execution.Generic_deferred
+        | Some (Masc.Keeper_tool_execution.Composition_result_wait _)
         | Some (Masc.Keeper_tool_execution.Owned_job_result_wait _)
         | Some (Masc.Keeper_tool_execution.External_effect_deferred {approval_id=None}) -> fail "producer lost typed Gate identity" in
       let native_settlement = ref None in

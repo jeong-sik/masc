@@ -75,7 +75,9 @@ notification or `keeper_job_status` confirms complete outputs, pass the same dra
 `composition_run_id` as `resume_run_id` to `keeper_composition_run`. The previous
 worker must have canonically settled before another worker owns that run.
 When a prepared async attempt has only producer-owned job waits, its status is
-`waiting_for_owned_jobs`, with the original `job_ids` and execution artifact.
+`waiting_for_dependencies`, with tagged `dependencies` and the execution artifact.
+Owned job entries have `{kind:"owned_job",job_id}`; named Composition result
+entries have `{kind:"composition_result",binding}`.
 The worker has released its scope; the prepared run is still waiting. This
 does not emit a failed composition notification. The original job completion
 notification supplies the result; resumption remains explicit as above.
@@ -96,7 +98,11 @@ its retained stable sibling lock. Publishing and retirement share that lock;
 a physical replacement or same-inode content change during proof reads is
 refused and retained. This is the owned-directory transaction protocol, not an
 atomic POSIX compare-unlink against a writer bypassing its lock.
-Unavailable original authority remains reported and retained. Discovery
+Unavailable original authority remains reported and retained. Permanent
+`Invalid_result` failures also remain visible on later maintenance passes;
+there is no automatic expiry or typed operator resolution yet. The owner-bound
+resolution follow-up is tracked in [#42799](https://github.com/jeong-sik/masc/issues/42799#issuecomment-6175534613).
+Discovery
 excludes retained lock siblings from pending marker counts; a lock whose
 marker data file was already retired is skipped by an existence-only check
 and is never re-acquired or validated, so each pass stays proportional to
@@ -145,7 +151,7 @@ cancel remain direct effects. These component intervals do not measure model
 preparation or whole-task improvement.
 If a resumed request durably owns the journal but its worker is canonically
 `Lost`, recovery follows the journal's exact predecessor bindings to the
-original `waiting_for_owned_jobs` record. Its saved node snapshot must match
+original `waiting_for_dependencies` record. Its saved node snapshot must match
 that original job set. Completed nodes are retained; unfinished nodes must
 prove read-only replay. Repeated Lost successors retain this lineage. The
 sealed candidate pins the current terminal entry, full node snapshot and each
@@ -218,3 +224,34 @@ the id is unknown) and then deletes that job's directories under
 `owned_job_data`. Keep the owner journal while its artifact references must
 stay discoverable. Automated cleanup and retention are tracked in
 [issue #42799](https://github.com/jeong-sik/masc/issues/42799).
+
+
+### Waiting for an already submitted named async Composition
+
+The named submission returns `result_wait`, bound to its exact accepted request,
+run, Skill revision, original invocation, source turn and explicitly present or
+absent Task. Pass it unchanged as `binding` to `keeper_composition_result`. This
+read verifies durable producer membership as well as the canonical request source.
+A generic worker that copied the context has no named-run membership.
+
+Pending reads return a typed dependency. An enclosing prepared async DAG releases
+its worker, retains completed independent nodes, and rechecks the same occurrences
+after canonical completion. The result includes the full original structured
+`result` and `result_artifact`; connect the statically declared
+`/result_artifact/_blob/sha256` to `keeper_artifact_read` to consume its complete
+manifest. A generic reader does not declare every child-specific export name.
+Failure stays failed and retains canonical diagnostics, partial outputs and
+artifact references. A missing or changed original source refuses the read.
+
+This is explicit submit-then-read composition. Exact async Skill child nodes in
+`keeper_composition_prepare` still require compiler support; their syntax is not
+admitted by this layer. A binding identifies one accepted named request, not a
+logical chain of suspended child successors. The current request codec is v5
+and the prepared journal codec is v2; unknown versions are refused.
+
+`test_keeper_owned_jobs` exercises the actual named Tool, holds the original owner transaction during its read, prepares a waiting parent with independent work, and resumes in a new
+turn. Success reads the original full result artifact and stdout; original-owner read failure keeps its diagnostic. Both scenarios reject changed bindings and a copied
+generic request, preserve occurrence IDs, and measure zero extra child backend
+calls during parent resume. Authored scenarios are not execution evidence until
+the selected head's run completes, and their component intervals do not measure
+whole-task preparation improvement or installed runtime/UI behavior.

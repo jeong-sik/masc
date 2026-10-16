@@ -379,10 +379,10 @@ let execute_one
            dispatch_result ~result_bytes:stored.result_bytes
              ?truncated_to:stored.truncated_to stored.result, None
          | Ok ((Keeper_tool_execution_journal.Dispatch
-              | Keeper_tool_execution_journal.Recheck_job_result _
+              | Keeper_tool_execution_journal.Recheck_result _
               | Keeper_tool_execution_journal.Recheck_launch _) as replay) ->
            let execution_id, tool_use_id = match replay with
-             | Keeper_tool_execution_journal.Recheck_job_result stored ->
+             | Keeper_tool_execution_journal.Recheck_result stored ->
                  stored.execution_id, stored.tool_use_id
              | Keeper_tool_execution_journal.Recheck_launch stored ->
                  stored.execution_id, stored.tool_use_id
@@ -395,7 +395,7 @@ let execute_one
              | Keeper_tool_execution_journal.Recheck_launch stored ->
                  Some stored.invocation, Some stored
              | Keeper_tool_execution_journal.Dispatch
-             | Keeper_tool_execution_journal.Recheck_job_result _
+             | Keeper_tool_execution_journal.Recheck_result _
              | Keeper_tool_execution_journal.Reuse_completed _ ->
                  if launch_leaf then
                    (match launch_invocation_of with

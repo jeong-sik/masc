@@ -152,6 +152,7 @@ let handle_filesystem ctx descriptor args =
   | Tool_masc_schedule_dispatch
   | Tool_keeper_spawn_dispatch
   | Tool_keeper_job_dispatch
+  | Tool_keeper_composition_result_dispatch
   | Tool_keeper_code_query_dispatch
   | Tool_keeper_webmcp_dispatch
   | Tool_masc_keeper_dispatch
@@ -241,6 +242,7 @@ let handle_shell_ir ctx ~(dispatch : Keeper_shell_tool_command.dispatch) descrip
   | Tool_masc_schedule_dispatch
   | Tool_keeper_spawn_dispatch
   | Tool_keeper_job_dispatch
+  | Tool_keeper_composition_result_dispatch
   | Tool_keeper_code_query_dispatch
   | Tool_keeper_webmcp_dispatch
   | Tool_masc_keeper_dispatch
@@ -540,6 +542,8 @@ let handle_in_process ctx descriptor args =
          ~turn_sandbox_factory:ctx.turn_sandbox_factory
          ~name
          ~args)
+  | Tool_keeper_composition_result_dispatch ->
+    Some (Keeper_composition_dependency_result.handle ~config:ctx.config ~meta:ctx.meta ~args)
   | Tool_keeper_code_query_dispatch ->
     Some
       (Keeper_tool_in_process_runtime.handle_keeper_code_query_with_outcome

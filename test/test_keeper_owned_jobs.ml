@@ -11,6 +11,11 @@ module Store = Masc.Keeper_owned_job_store
 module Invocation = Masc.Keeper_owned_job_invocation
 module Call_log = Masc.Keeper_tool_call_log
 module Journal = Masc.Keeper_tool_execution_journal
+module Dependency = Masc.Keeper_composition_dependency
+let dependency_job_id = function
+  | Dependency.Owned_job job_id -> Store.Job_id.to_string job_id
+  | Dependency.Composition_result _ -> fail "expected an owned job dependency"
+let owned_dependency job_id = Dependency.Owned_job job_id
 
 let keeper = "owned-job-feature"
 let stdout_bytes = "original job stdout\n"
@@ -892,10 +897,10 @@ let await_composition env fixture accepted =
           let entry = Async.durable_terminal_entry proof in
           (match entry.status with
            | Async.Done {ok;data=Some data;_} -> ok, data, entry
-           | Async.Waiting_for_owned_jobs {data=Some data;_} -> false, data, entry
+           | Async.Waiting_for_dependencies {data=Some data;_} -> false, data, entry
            | Queued | Running | Cancelling _ | Lost _ | Cancelled _
            | Persistence_failed _ | Done {data=None;_}
-           | Waiting_for_owned_jobs {data=None;_} -> fail "composition did not settle a result")
+           | Waiting_for_dependencies {data=None;_} -> fail "composition did not settle a result")
       | Error (Async.Canonical_terminal_absent | Canonical_terminal_runtime_active _) ->
           Eio.Fiber.yield (); read_terminal ()
       | Error error -> fail (Async.canonical_terminal_error_to_string error)
@@ -917,6 +922,237 @@ let composition_nodes fixture data =
   result_document ~base_path:fixture.base_path bytes |> member "nodes" |> to_list
 
 let composition_node name nodes = List.find (fun row -> row |> member "node_id" |> to_string = name) nodes
+
+let test_named_async_result_parent ~child_fails () = with_fixture @@ fun env initialize fixture ->
+  let module Async = Masc.Keeper_msg_async in
+  let module Surface = Masc.Keeper_capability_surface in
+  let module Recorder = Masc.Keeper_skill_activation_recorder in
+  with_environment ["MASC_CONFIG_DIR",None] @@ fun () ->
+  set_source fixture ~task_id:"task-A" ~turn:41;
+  Call_log.init ~base_path:fixture.base_path ();
+  let id = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) |> job_id in
+  control fixture (`Assoc ["state",`String "exited"]);
+  ignore (with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"collect-child-input"
+    ~turn:41 "keeper_job_status" (argument id)));
+  let owned_id = Store.Job_id.of_string id |> require "original child job" in
+  let owner = Filename.concat (Store.paths ~base_path:fixture.base_path owned_id).job_dir "owner.jsonl" in
+  let owner_bytes = read owner in
+  Fun.protect ~finally:(fun () -> write owner owner_bytes) @@ fun () ->
+  let config = Workspace.default_config fixture.base_path in
+  let skill_dir = Filename.concat fixture.base_path ".agents/skills/named-result-child" in
+  Fs_compat.mkdir_p skill_dir;
+  write (Filename.concat skill_dir "SKILL.md") (Printf.sprintf {|---
+name: named-result-child
+description: Observe the original owned job and select its complete stdout.
+---
+
+```toml composition
+[[compositions]]
+name = "named-result-child"
+execution = "async"
+[[compositions.nodes]]
+id = "observe"
+tool = "keeper_job_result"
+[compositions.nodes.input]
+kind = "literal"
+value = { job_id = %S }
+[[compositions.exports]]
+name = "stdout"
+node = "observe"
+pointer = "/artifacts/0/_blob/sha256"
+```
+|} id);
+  let runtime_path = Config_dir_resolver.runtime_toml_path_for_base_path ~base_path:fixture.base_path in
+  write runtime_path "[skills]\nresource-read-max-bytes = 16384\n[[skills.sources]]\nid = \"fixture\"\nanchor = \"base-path\"\npath = \".agents/skills\"\naccess = \"read-write\"\n";
+  let workspace = Skill_catalog_snapshot_service.workspace_of_base_path ~base_path:fixture.base_path
+    |> require "named child workspace" in
+  Fun.protect ~finally:(fun () -> Skill_catalog_snapshot_service.retire ~workspace) @@ fun () ->
+  (match Skill_catalog_snapshot_service.refresh ~workspace ~user_home:None
+      ~read_config:(fun () -> {path=runtime_path;source_text=read runtime_path}) with
+   | Published _ | Unchanged _ -> () | Workspace_retired -> fail "named child publication retired");
+  let snapshot = Skill_catalog_snapshot_service.current ~workspace
+    |> function Some value -> value | None -> fail "named child snapshot missing" in
+  let reference = match Skill_catalog_snapshot.entries snapshot with
+    | [entry] -> Skill_catalog_snapshot.entry_reference entry | _ -> fail "one named child required" in
+  let descriptors = Descriptor.all_descriptors () in
+  let selection = Masc.Keeper_task_skill_turn.resolve_for_task ~snapshot ~task_id:"task-A" [reference]
+    |> require "named child original Task selection" in
+  let catalog,diagnostics = Masc.Keeper_skill_catalog.of_snapshot ~descriptors snapshot in
+  check int "named async child is publicly composable" 0 (List.length diagnostics);
+  let surface = Surface.create_with_descriptors ~tool_descriptors:descriptors ~tool_deny:[]
+      ~sandbox_profile:fixture.meta.sandbox_profile ~skill_names:None ~global_skill_catalog:catalog
+      ~skill_inventory:(Masc.Keeper_skill_inventory.of_snapshot ~descriptors snapshot)
+      ~task_skills:(Masc.Keeper_task_skill_turn.skills selection) in
+  let recorder = Recorder.make ~trace_id:fixture.meta.runtime.trace_id
+      ~turn_ref:(Ids.Turn_ref.make ~trace_id:(Keeper_id.Trace_id.to_string fixture.meta.runtime.trace_id) ~absolute_turn:41)
+      ~runtime_id:(fun () -> Some "original.runtime")
+      ~snapshot_revision:(Surface.skill_snapshot_revision surface) ~task_selection:selection
+    |> require "named child original activation" in
+  let publication_recovery : Masc.Keeper_publication_recovery_availability.turn_context =
+    {provider=Masc.Keeper_publication_recovery_availability.non_runtime_provider;keeper_name=keeper} in
+  let make_bundle () = Bundle.make_tool_bundle_for_capability_surface ~config ~meta:fixture.meta
+      ~publication_recovery ~capability_surface:surface ~skill_activation_context:recorder
+      ~ctx_snapshot:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"canonical child result fixture")
+      ~clock:(Eio.Stdenv.clock env) ~turn_ctx_cell:fixture.cell () in
+  let fixture = {fixture with make_bundle} in
+  let entered,notify_entered = Eio.Promise.create () in
+  let released,notify_released = Eio.Promise.create () in
+  let latch_mutex = Stdlib.Mutex.create () and latch_condition = Condition.create () in
+  let release_requested = ref false in
+  let release () =
+    Stdlib.Mutex.lock latch_mutex;
+    release_requested := true;
+    Condition.broadcast latch_condition;
+    Stdlib.Mutex.unlock latch_mutex in
+  Fun.protect ~finally:release @@ fun () ->
+  Eio.Fiber.fork ~sw:(Async.server_background_switch () |> require "original child lock holder scope") (fun () ->
+    let outcome = Eio_unix.run_in_systhread (fun () ->
+      Fs_compat.update_existing_private_file_durable_locked_result owner (fun _bytes ->
+        Eio.Promise.resolve notify_entered ();
+        Stdlib.Mutex.lock latch_mutex;
+        while not !release_requested do Condition.wait latch_condition latch_mutex done;
+        Stdlib.Mutex.unlock latch_mutex;
+        None, ())) in
+    Eio.Promise.resolve notify_released outcome);
+  Eio.Promise.await entered;
+  let child = with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"named-child-start"
+      ~turn:41 "keeper_compose_named-result-child" (`Assoc [])) in
+  let binding_json = child |> member "result_wait" in
+  let binding = Dependency.composition_of_json binding_json |> require "producer-owned result binding" in
+  check string "result binding retains actual accepted child" (child |> member "request_id" |> to_string) binding.request_id;
+  check bool "result binding retains exact admitted revision" true (Skill_reference.equal reference binding.skill_reference);
+  let child_backend_calls = List.length (calls fixture) in
+  let assert_wrong_binding () = List.iter (fun (field,value) ->
+      let changed = match binding_json with `Assoc fields -> `Assoc ((field,value)::List.remove_assoc field fields)
+        | _ -> fail "named binding is not an object" in
+      with_bundle fixture (fun bundle ->
+        match invoke_raw bundle ~tool_use_id:("wrong-child-" ^ field) ~turn:52
+            "keeper_composition_result" (`Assoc ["binding",changed]) with
+        | Error _ -> () | Ok _ -> failf "changed original %s supplied a child result" field))
+    ["composition_run_id",`String (Masc.Keeper_tool_plan.Composition_run_id.to_string (Masc.Keeper_tool_plan.Composition_run_id.fresh ()));
+     "source_task_id",`String "task-B";"source_turn",`Int 52;
+     "parent_tool_use_id",`String "different-original-call";
+     "skill_reference",Skill_reference.to_yojson (Skill_reference.make ~identity:reference.identity
+       ~content_revision:(Skill_reference.content_revision_of_source_text "different revision"))] in
+  assert_wrong_binding ();
+  with_bundle fixture (fun bundle ->
+    ignore (invoke fixture bundle ~tool_use_id:"direct-child-pending" ~turn:41
+      "keeper_composition_result" (`Assoc ["binding",binding_json]));
+    check bool "direct pending child read leaves the Keeper able to act" true
+      (bundle.terminal_effect_state () = Masc.Keeper_tools_agent_core.Terminal_effect_open));
+  check int "pending result reads never inspect the child backend" child_backend_calls (List.length (calls fixture));
+  let sibling = Tool_blob_store.put_durable (Tool_blob_store.create ~base_path:fixture.base_path)
+      ~bytes:"independent branch\n" ~mime:"text/plain" in
+  let literal value = `Assoc ["kind",`String "literal";"value",value] in
+  let await_node name = `Assoc ["id",`String name;"tool",`String "keeper_composition_result";
+    "input",literal (`Assoc ["binding",binding_json])] in
+  let recipe = `Assoc ["execution",`String "async";"branch_failure_policy",`String "continue_independent";
+    "nodes",`List [await_node "await";await_node "await-also";
+      `Assoc ["id",`String "sibling";"tool",`String "keeper_artifact_read";
+        "input",literal (`Assoc ["sha256",`String sibling.sha256])];
+      `Assoc ["id",`String "consume";"tool",`String "keeper_artifact_read";"after",`List [`String "await"];
+        "input",`Assoc ["kind",`String "object";"fields",`List
+          [`Assoc ["name",`String "sha256";"value",`Assoc ["kind",`String "output";
+            "node",`String "await";"pointer",`String "/result_artifact/_blob/sha256"]]]]]];
+    "exports",`List [`Assoc ["name",`String "child_result";"node",`String "consume";"pointer",`String "/content"]]] in
+  let started = Mtime_clock.counter () in
+  let draft = with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"prepare-child-parent"
+      ~turn:41 "keeper_composition_prepare" recipe) in
+  let sha256 = draft |> member "draft" |> composition_reference "child parent draft" |> fun ref -> ref.sha256 in
+  let accepted = with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"run-child-parent"
+      ~turn:41 "keeper_composition_run" (`Assoc ["sha256",`String sha256])) in
+  let ok,first,entry = await_composition env fixture accepted in
+  check bool "pending child parks its prepared parent" false ok;
+  (match entry.status with
+   | Async.Waiting_for_dependencies {dependencies;_} ->
+     check bool "two reads retain one original child dependency" true
+       (dependencies = [Dependency.Composition_result binding])
+   | _ -> fail "pending child result became a terminal parent failure");
+  let prepare_to_wait_ms = Mtime.Span.to_float_ns (Mtime_clock.count started) /. 1_000_000. in
+  let original_nodes = composition_nodes fixture first in
+  let run_id = accepted |> member "composition_run_id" |> to_string in
+  let journal = Journal.load ~base_path:fixture.base_path ~keeper_name:keeper
+      ~composition_run_id:(Masc.Keeper_tool_plan.Composition_run_id.of_string run_id |> require "parent identity")
+    |> require "parent durable journal" in
+  let continuation = Journal.waiting_continuation journal |> require "suspended child parent"
+    |> function Some value -> value | None -> fail "child parent wait missing" in
+  (match Journal.continuation_readiness continuation with
+   | Ok Journal.Waiting_for_results -> () | Ok Results_ready | Error _ -> fail "active child result appeared ready");
+  set_source fixture ~task_id:"task-B" ~turn:52;
+  if child_fails then write owner "corrupt-original-child-owner\n";
+  release ();
+  (match Eio.Promise.await released with
+   | Fs_compat.Private_file_succeeded (Some ()) -> ()
+   | _ -> fail "original owner read-lock fixture did not settle");
+  let child_ok,child_result,child_entry = await_composition env fixture child in
+  check bool "canonical named child preserves its actual success or failure" (not child_fails) child_ok;
+  write owner owner_bytes;
+  Process_eio.reset_for_testing (); initialize ();
+  assert_wrong_binding ();
+  if child_fails then with_bundle fixture (fun bundle ->
+    let tool_use_id = "failed-child-reader" in
+    let invocation = Agent_core.Tool_contract.Invocation.create ~tool_use_id ~turn:52
+      ~schedule:{planned_index=0;batch_index=0;batch_size=1;execution_mode=Concurrent}
+      ~completion:Agent_core.Tool_contract.Continue_after_success in
+    let tool = List.find (fun (tool : Agent_core.Tool.t) -> tool.schema.name = "keeper_composition_result") bundle.tools in
+    (match Agent_core.Tool.execute ~invocation tool (`Assoc ["binding",binding_json]) with
+     | Error _ -> () | Ok _ -> fail "failed child read became success");
+    let retained = Call_log.peek_retained_artifacts ~invocation () in
+    let child_artifact = child_result |> member "execution_artifact" |> composition_reference "failed child execution" in
+    check bool "actual failed public read keeps original artifact in per-call carrier" true
+      (List.exists (fun (ref : Tool_output.artifact_ref) -> ref.sha256=child_artifact.sha256) retained));
+  (match Journal.continuation_readiness continuation with
+   | Ok Journal.Results_ready -> () | Ok Waiting_for_results | Error _ -> fail "canonical child completion did not ready its original parent");
+  let copied = Async.submit_worker_with_request_id ?request_context:child_entry.request_context
+      ~background_sw:(Async.server_background_switch () |> require "copied worker scope")
+      ~base_path:fixture.base_path ~caller:keeper ~keeper_name:keeper
+      ~f:(fun ~request_id:_ _ -> Async.worker_finished (Tool_result.make_ok ~tool_name:"copied-child-context"
+        ~start_time:(Tool_timing.start ()) ~data:child_result ())) () |> require "real copied context worker" in
+  ignore (await_composition env fixture (`Assoc ["request_id",`String copied.request_id]));
+  let copied_binding = match binding_json with `Assoc fields -> `Assoc
+      (("request_id",`String copied.request_id)::List.remove_assoc "request_id" fields) | _ -> fail "binding shape" in
+  with_bundle fixture (fun bundle -> match invoke_raw bundle ~tool_use_id:"copied-child-read" ~turn:52
+      "keeper_composition_result" (`Assoc ["binding",copied_binding]) with
+    | Error _ -> () | Ok _ -> fail "generic copied source borrowed named child admission");
+  let backend_before_resume = List.length (calls fixture) in
+  let resumed_started = Mtime_clock.counter () in
+  let resumed = with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"resume-child-parent"
+      ~turn:52 "keeper_composition_run" (`Assoc ["sha256",`String sha256;"resume_run_id",`String run_id])) in
+  let parent_ok,completed,completed_entry = await_composition env fixture resumed in
+  check bool "parent preserves original child outcome" (not child_fails) parent_ok;
+  check int "parent resumption never re-executes the original child backend" backend_before_resume (List.length (calls fixture));
+  let completed_nodes = composition_nodes fixture completed in
+  List.iter (fun name -> List.iter (fun field -> check_json (name ^ " retains original " ^ field)
+      (composition_node name original_nodes |> member field) (composition_node name completed_nodes |> member field))
+      ["execution_id";"tool_use_id"]) ["await";"await-also";"sibling"];
+  check_json "independent completed branch is reused" (`String "retained_completion")
+    (composition_node "sibling" completed_nodes |> member "execution_origin");
+  if child_fails then (
+    let failure = composition_node "await" completed_nodes |> member "result" in
+    check_json "failed child keeps its canonical structured diagnostic" child_result
+      (failure |> member "data" |> member "request" |> member "result");
+    check bool "child failure supplies no successful downstream stdout" true
+      (completed |> member "exports" |> member "child_result" |> member "available" = `Bool false))
+  else (
+    let manifest = completed |> member "exports" |> member "child_result" |> member "value" |> to_string |> Yojson.Safe.from_string in
+    let selected = match Tool_output.artifact_manifest_of_json manifest with
+      | Tool_output.Decoded_artifact_manifest manifest -> manifest.structured_content
+      | Tool_output.Not_artifact_manifest | Tool_output.Invalid_artifact_manifest _ -> fail "dependent read lost full original child manifest" in
+    check_json "dependent read consumes the full original canonical child result" child_result (selected |> member "result");
+    check_json "dependent artifact read retains the original named result binding" binding_json (selected |> member "binding");
+    let stdout_sha = selected |> member "result" |> member "exports" |> member "stdout" |> member "value" |> to_string in
+    let stdout = with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"read-original-child-stdout" ~turn:52
+      "keeper_artifact_read" (`Assoc ["sha256",`String stdout_sha])) in
+    check_json "selected child export still names complete original stdout" (`String stdout_bytes) (stdout |> member "content"));
+  let source = match completed_entry.request_context with Some fields -> `Assoc fields | None -> fail "original parent source missing" in
+  check_json "fresh turn retains original parent Task" (`String "task-A") (source |> member "source_task_id");
+  check int "named child never recreates the original program" 1 (effect_count fixture "create");
+  check int "named child never restarts the original program" 1 (effect_count fixture "start");
+  Printf.printf "composition_named_result_measurement=%s\n%!" (Yojson.Safe.to_string
+    (`Assoc ["scope",`String "public named readonly producer held by original owner transaction; fresh-turn parent resume; synthetic CLI";
+      "child_failed",`Bool child_fails;"prepare_to_wait_ms",`Float prepare_to_wait_ms;
+      "resume_to_terminal_ms",`Float (Mtime.Span.to_float_ns (Mtime_clock.count resumed_started) /. 1_000_000.);
+      "resume_backend_calls",`Int (List.length (calls fixture)-backend_before_resume)]))
 
 let test_public_composition_wait_and_resume () = with_fixture @@ fun env initialize fixture ->
   with_environment ["MASC_CONFIG_DIR",None] @@ fun () ->
@@ -976,9 +1212,9 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
   let ok, first, first_entry = await_composition env fixture accepted in
   check bool "pending job suspends this worker attempt" false ok;
   (match first_entry.status with
-   | Masc.Keeper_msg_async.Waiting_for_owned_jobs {job_ids;_} ->
+   | Masc.Keeper_msg_async.Waiting_for_dependencies {dependencies;_} ->
      check (list string) "broker retains typed original job identities" [id]
-       (List.map Store.Job_id.to_string job_ids)
+       (List.map dependency_job_id dependencies)
    | _ -> fail "owned job wait was flattened into terminal composition failure");
   let module Async = Masc.Keeper_msg_async in
   let module Queue = Masc.Keeper_registry_event_queue in
@@ -1018,7 +1254,7 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
   check int "running job never dispatches from discovery" 0 (List.length discovery.ready);
   check int "saved wait has valid original authority" 0 (List.length discovery.failures);
   check (list string) "two waiting nodes capture one original job" [id]
-    (List.map Store.Job_id.to_string (Journal.continuation_job_ids original_continuation));
+    (List.map dependency_job_id (Journal.continuation_dependencies original_continuation));
   check string "continuation captures original worker" first_entry.request_id
     (Journal.continuation_request_id original_continuation);
   check (option string) "continuation captures original Task" (Some "task-A")
@@ -1033,14 +1269,14 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
   let wire = Yojson.Safe.from_string original_wire in
   (match Async.For_testing.load_record ~base_path:fixture.base_path
       ~request_id:first_entry.request_id with
-   | Found {status=Async.Waiting_for_owned_jobs {job_ids;_};_} ->
+   | Found {status=Async.Waiting_for_dependencies {dependencies;_};_} ->
      check (list string) "strict record roundtrip keeps the original wait" [id]
-       (List.map Store.Job_id.to_string job_ids)
+       (List.map dependency_job_id dependencies)
    | Found _ | Absent | Unreadable _ | Rejected _ ->
      fail "durable waiting outcome cannot roundtrip");
   let invalid_wait ids = match wire with
     | `Assoc fields -> `Assoc (List.map (fun (key,value) ->
-        key, if key="job_ids" then `List ids else value) fields)
+        key, if key="dependencies" then `List (List.map (fun id -> `Assoc ["kind",`String "owned_job";"job_id",id]) ids) else value) fields)
     | _ -> fail "waiting record is not an object" in
   List.iter (fun ids ->
     Fun.protect ~finally:(fun () -> write terminal_path original_wire) (fun () ->
@@ -1057,7 +1293,7 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
     | Error (Journal.Invalid_result _) -> ()
     | Ok _ | Error _ -> fail "a different canonical job set authorized continuation");
   let first_job = Store.Job_id.of_string id |> require "original job identity" in
-  (match Async.worker_waiting_for_owned_jobs ~job_ids:[first_job]
+  (match Async.worker_waiting_for_dependencies ~dependencies:[owned_dependency first_job]
       (Tool_result.make_ok ~tool_name:"fixture" ~start_time:(Tool_timing.start ()) ()) with
    | Error _ -> () | Ok _ -> fail "a completed result claimed owned-job suspension");
   let reconcile = Masc.Keeper_composition_completion_wake.reconcile
@@ -1233,7 +1469,7 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
         ~on_accepted:(fun request_id -> Journal.bind_continuation candidate ~request_id
           |> Result.map (fun _ -> ()) |> Result.map_error Journal.error_to_string)
         ~f:(fun ~request_id:_ _ ->
-          Async.worker_waiting_for_owned_jobs ~job_ids:(Journal.continuation_job_ids candidate)
+          Async.worker_waiting_for_dependencies ~dependencies:(Journal.continuation_dependencies candidate)
             (Tool_result.make_deferred ~tool_name:"original-child-activation-unavailable"
               ~start_time:(Tool_timing.start ()) ~data:(`Assoc ["dispatch_started",`Bool false]) ())
           |> require "original wait before node dispatch") ()
@@ -1244,7 +1480,7 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
     check string "canonical waiting successor owns its inherited wait" entry.request_id
       (Journal.continuation_request_id preserved);
     check (list string) "inherited wait retains exact original jobs" [id]
-      (List.map Store.Job_id.to_string (Journal.continuation_job_ids preserved));
+      (List.map dependency_job_id (Journal.continuation_dependencies preserved));
     check int "inherited wait never queries or relaunches backend" before_completed_resume (List.length (calls fixture));
     (match Journal.continuation_readiness candidate with
      | Error Journal.Ownership_changed -> ()
@@ -1621,7 +1857,7 @@ let test_historical_output_contract_refuses_current_resume () = with_fixture @@ 
           | Some (Masc.Keeper_tool_execution.Owned_job_result_wait job_id) -> job_id
           | Some _ | None -> fail "actual original producer did not bind its job wait" in
         check string "historical wait uses the original actual job" id (Store.Job_id.to_string job_id);
-        Async.worker_waiting_for_owned_jobs ~job_ids:[job_id] node.result |> require "historical worker wait") ()
+        Async.worker_waiting_for_dependencies ~dependencies:[owned_dependency job_id] node.result |> require "historical worker wait") ()
       |> require "historical original worker acceptance" in
   ignore (await_composition env fixture (`Assoc ["request_id",`String accepted.request_id]));
   let capture () = match Journal.waiting_continuation journal with
@@ -1731,7 +1967,7 @@ let test_cancelled_continuation_cannot_restart () =
             | Some _ | None -> fail "actual producer did not own the deferred job identity" in
           Eio.Promise.resolve notify_entered ();
           Eio.Promise.await release;
-          Async.worker_waiting_for_owned_jobs ~job_ids:[job_id] node.result
+          Async.worker_waiting_for_dependencies ~dependencies:[owned_dependency job_id] node.result
             |> require "actual cancelled worker wait") () in
     let request_id = match mode,submission with
       | (`Fork | `Startup), Error (Background_fork_failed {request_id;_} as error) ->
@@ -2112,8 +2348,8 @@ let test_completion_hint_resumes_original_dag () = with_fixture @@ fun env _init
   let ok,waiting,waiting_entry = await_composition env fixture accepted in
   check bool "original DAG is suspended before completion" false ok;
   (match waiting_entry.status with
-   | Async.Waiting_for_owned_jobs {job_ids;_} ->
-     check (list string) "completion hint has the original job wait" [id] (List.map Store.Job_id.to_string job_ids)
+   | Async.Waiting_for_dependencies {dependencies;_} ->
+     check (list string) "completion hint has the original job wait" [id] (List.map dependency_job_id dependencies)
    | _ -> fail "original DAG was not canonically waiting for the job");
   let config = Workspace.default_config fixture.base_path in
   let declaration = Config_dir_resolver.keeper_toml_path_for_base_path ~base_path:fixture.base_path keeper in
@@ -2229,7 +2465,7 @@ let test_prepared_job_launch_and_continuation () = with_fixture @@ fun env _init
   let prepare_to_wait_ms = Mtime.Span.to_float_ns (Mtime_clock.count prepare_started) /. 1_000_000. in
   check bool "original DAG is suspended before completion" false ok;
   let id = match waiting_entry.status with
-    | Async.Waiting_for_owned_jobs {job_ids=[id];_} -> Store.Job_id.to_string id
+    | Async.Waiting_for_dependencies {dependencies=[id];_} -> dependency_job_id id
     | _ -> fail "prepared launch did not produce one canonical original job wait" in
   let waiting_nodes = waiting |> member "settled" |> to_list in
   let original_launch = composition_node "launch" waiting_nodes in
@@ -2615,7 +2851,7 @@ pointer = "/content"
   let prepare_to_wait_ms = Mtime.Span.to_float_ns (Mtime_clock.count prepare_started) /. 1_000_000. in
   check bool "nested owned job suspends its original parent" false ok;
   let id = match waiting_entry.status with
-    | Async.Waiting_for_owned_jobs {job_ids=[id];_} -> Store.Job_id.to_string id
+    | Async.Waiting_for_dependencies {dependencies=[id];_} -> dependency_job_id id
     | _ -> fail "nested child did not produce one exact owned-job wait" in
   let run_id = accepted |> member "composition_run_id" |> to_string in
   let journal = Journal.load ~base_path:fixture.base_path ~keeper_name:keeper
@@ -2711,8 +2947,8 @@ pointer = "/content"
       let ok,data,entry = await_composition env fixture (`Assoc ["request_id",`String successor.request_id]) in
       check bool "accepted worker stops with the original wait" false ok;
       (match entry.status with
-       | Async.Waiting_for_owned_jobs {job_ids;_} -> check (list string) "accepted fault retains exact original job" [id]
-           (List.map Store.Job_id.to_string job_ids)
+       | Async.Waiting_for_dependencies {dependencies;_} -> check (list string) "accepted fault retains exact original job" [id]
+           (List.map dependency_job_id dependencies)
        | _ -> fail "accepted activation fault retired original job work");
       check bool "accepted authority fault returns no original child exports" true (member "exports" data = `Null);
       check int "production worker actually rechecks original authority" 1 !accepted_worker_calls;
@@ -3382,6 +3618,10 @@ let () =
       ; test_case "corrupt invocation authority cannot launch" `Quick test_corrupt_invocation_binding_cannot_launch
       ; test_case "malformed whole source cannot publish a binding" `Quick test_malformed_source_cannot_publish_binding
       ; test_case "public Composition waits and resumes the original job result" `Quick test_public_composition_wait_and_resume
+      ; test_case "public named async result parks and resumes its original parent" `Quick
+          (test_named_async_result_parent ~child_fails:false)
+      ; test_case "canonical named child failure remains failed on fresh parent resume" `Quick
+          (test_named_async_result_parent ~child_fails:true)
       ; test_case "historical output contract refuses current canonical resume" `Quick test_historical_output_contract_refuses_current_resume
       ; test_case "cancelled continuation preserves intent at fork, startup and signal failure" `Quick test_cancelled_continuation_cannot_restart
       ; test_case "job result rejects unavailable owner authority" `Quick test_job_result_rejects_unavailable_authority

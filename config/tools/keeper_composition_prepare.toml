@@ -14,8 +14,10 @@ durable isolated ownership and Serial execution. Feed its /job_id output into \
 keeper_job_result, then use the complete original artifacts in dependent nodes. \
 Child definitions require inline mode; the enclosing draft may be inline or async. \
 Nested drafts omit publication metadata. Choose async \
-for independent work or an original job-result wait while the Keeper continues \
-other work. Optional skill metadata freezes the \
+for independent work or an original result wait while the Keeper continues \
+other work. A named async submission returns result_wait: copy that binding into \
+a keeper_composition_result leaf, then read its /result_artifact/_blob/sha256 \
+with keeper_artifact_read after completion. Optional skill metadata freezes the \
 reusable SKILL.md in this same draft. Validate and publish it by draft_sha256 \
 after checking execution evidence; omit skill for a task-only composition."""
 additional_properties = false

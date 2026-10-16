@@ -7,6 +7,7 @@ type deferred_kind =
   | Generic_deferred
   | External_effect_deferred of { approval_id : string option }
   | Owned_job_result_wait of Keeper_owned_job_store.Job_id.t
+  | Composition_result_wait of Keeper_composition_dependency.composition
 
 val deferred_kind_to_string : deferred_kind -> string
 (** Stable producer-owned wire label for deferred settlement evidence. *)
@@ -58,6 +59,11 @@ val deferred_data :
 val deferred_owned_job_result :
   job_id:Keeper_owned_job_store.Job_id.t -> Yojson.Safe.t -> t
 
+val deferred_composition_result :
+  binding:Keeper_composition_dependency.composition -> Yojson.Safe.t -> t
+(** Read the same original request again after its canonical result is ready;
+    this does not authorize submission, cancellation or a replacement child. *)
+
 (** Typed deferral for an external effect whose durable resolution resumes the
     Keeper later. *)
 val deferred_external_effect_data :
@@ -95,6 +101,11 @@ val with_surface_post_receipt : Keeper_surface_post.post_target -> t -> t
 
 val with_file_change_evidence : Keeper_file_change_evidence.t -> t -> t
 (** Attach producer-recorded line evidence only to a completed execution. *)
+
+val with_retained_artifacts : Tool_output.artifact_ref list -> t -> t
+(** Preserve producer-validated artifact roots in the execution carrier,
+    including failed results whose Tool_result payload has no retention field.
+    This changes no result data, disposition or effect evidence. *)
 
 (** Preserve the authoritative {!Tool_result.disposition} from a normal MASC
     handler. [failure_effect_disposition] lets a producer preserve a phase it

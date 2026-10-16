@@ -4,6 +4,8 @@ module Journal = Keeper_tool_execution_journal
 module Activation_ledger = Keeper_skill_activation_ledger
 open Keeper_tool_composition_projection
 
+let ( let* ) = Result.bind
+
 let composition_run_summary_tool_name = "keeper_composition_run_summary"
 
 let request_id_of_validated_input = function
@@ -376,7 +378,7 @@ let observe_async_run_settlement
       | Keeper_msg_async.Queued
       | Keeper_msg_async.Running
       | Keeper_msg_async.Cancelling _ -> None
-      | Keeper_msg_async.Waiting_for_owned_jobs _ -> None
+      | Keeper_msg_async.Waiting_for_dependencies _ -> None
     in
     Option.iter
       (fun (success, output_text) ->
@@ -616,8 +618,8 @@ let async_worker_result
   | Error rejection,Some continuation ->
     let result = Tool_result.make_deferred ~tool_name ~start_time
         ~data:(`Assoc ["kind",`String "waiting_for_original_child_activation";"cause",rejection.data]) () in
-    (match Keeper_msg_async.worker_waiting_for_owned_jobs
-      ~job_ids:(Journal.continuation_job_ids continuation) result with
+    (match Keeper_msg_async.worker_waiting_for_dependencies
+      ~dependencies:(Journal.continuation_dependencies continuation) result with
      | Ok outcome -> outcome
      | Error _ -> Keeper_msg_async.worker_finished (Tool_result.make_err ~tool_name ~start_time
          ~class_:Tool_result.Runtime_failure ~effect_disposition:Tool_result.Proven_pre_effect rejection.detail))
@@ -688,8 +690,8 @@ let async_worker_result
          ~execution
          ~result)
     skill_reference;
-  let waiting_job_ids =
-    let collect_waiting_jobs settled =
+  let waiting_dependencies =
+    let collect_waiting_dependencies settled =
       let rec collect reversed = function
         | [] -> Some (List.rev reversed)
         | (node : Executor.node_result) :: rest ->
@@ -702,7 +704,9 @@ let async_worker_result
               | Tool_result.Deferred _ ->
                 (match node.deferred_kind with
                  | Some (Keeper_tool_execution.Owned_job_result_wait id) ->
-                   collect (id :: reversed) rest
+                   collect (Keeper_composition_dependency.Owned_job id :: reversed) rest
+                 | Some (Keeper_tool_execution.Composition_result_wait binding) ->
+                   collect (Keeper_composition_dependency.Composition_result binding :: reversed) rest
                  | None | Some (Keeper_tool_execution.Generic_deferred
                                | External_effect_deferred _) -> None))) in
       collect [] settled
@@ -713,17 +717,17 @@ let async_worker_result
       (match failure.Executor.cause with
        | Executor.Tool_did_not_complete node ->
          (match node.deferred_kind with
-          | Some (Keeper_tool_execution.Owned_job_result_wait _) ->
-            collect_waiting_jobs failure.settled
+          | Some (Keeper_tool_execution.Owned_job_result_wait _ | Composition_result_wait _) ->
+            collect_waiting_dependencies failure.settled
           | None | Some (Keeper_tool_execution.Generic_deferred
                         | External_effect_deferred _) -> None)
        | Executor.Run_journal_rejected _ | Plan_execution_failed _
        | Node_observation_failed _ | Outer_completion_mismatch _ -> None)
   in
-  match waiting_job_ids with
+  match waiting_dependencies with
   | None -> Keeper_msg_async.worker_finished result
-  | Some job_ids ->
-    (match Keeper_msg_async.worker_waiting_for_owned_jobs ~job_ids result with
+  | Some dependencies ->
+    (match Keeper_msg_async.worker_waiting_for_dependencies ~dependencies result with
      | Ok outcome -> outcome
      | Error _ -> Keeper_msg_async.worker_finished result)
 ;;
@@ -813,7 +817,15 @@ let async_submission_result
              (Keeper_composition_completion_outbox.prepare ~base_path:config.base_path
                 ~keeper_name:meta.name ~request_id ~composition_tool:tool_name
               |> Result.map_error Keeper_composition_completion_outbox.error_to_string)
-             (fun () -> match journal with
+             (fun () ->
+                let* () = match skill_reference with
+                  | None -> Ok ()
+                  | Some _ ->
+                    let* binding = Keeper_composition_dependency.composition_of_request_context
+                        ~request_id request_context_fields in
+                    Keeper_composition_named_run.admit ~base_path:config.base_path
+                      ~keeper_name:meta.name binding in
+                match journal with
                 | None -> Ok ()
                 | Some journal ->
                   let binding = match continuation with
@@ -917,12 +929,23 @@ let async_submission_result
               ; "submission", Keeper_msg_async.submit_outcome_to_json outcome
               ])
        in
-       result_from_json
-         ~tool_name
-         ~start_time
-         ~class_:Tool_result.Runtime_failure
-         ~ok:true
-         data
+       let binding = match skill_reference with
+         | None -> Ok None
+         | Some _ ->
+           Keeper_composition_dependency.composition_of_request_context
+             ~request_id request_context_fields |> Result.map Option.some in
+       (match binding with
+        | Ok binding ->
+          let data = match data, binding with
+            | `Assoc fields, Some binding -> `Assoc (fields @
+                ["result_wait", Keeper_composition_dependency.composition_to_json binding])
+            | _, None -> data
+            | _, Some _ -> data in
+          result_from_json ~tool_name ~start_time ~class_:Tool_result.Runtime_failure ~ok:true data
+        | Error detail ->
+          Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Runtime_failure
+            ~effect_disposition:Tool_result.Proven_post_effect ~data
+            ("async request accepted but its result binding could not be encoded: " ^ detail))
      | Ok
          ({ Keeper_msg_async.acceptance =
               Keeper_msg_async.Reconciliation_required _
@@ -1658,10 +1681,10 @@ let resume_continuation ~capability_surface ~continuation ~(config : Workspace.c
     | Error error -> refuse_journal error
     | Ok Journal.Waiting_for_results ->
       Tool_result.make_deferred ~tool_name:Draft.run_tool_name ~start_time
-        ~data:(`Assoc ["kind",`String "waiting_for_original_job_results";
+        ~data:(`Assoc ["kind",`String "waiting_for_original_results";
           "composition_run_id",`String (Keeper_tool_plan.Composition_run_id.to_string source.composition_run_id);
-          "job_ids",`List (List.map (fun id -> `String (Keeper_owned_job_identity.Job_id.to_string id))
-            (Journal.continuation_job_ids continuation))]) ()
+          "dependencies",`List (List.map Keeper_composition_dependency.to_json
+            (Journal.continuation_dependencies continuation))]) ()
     | Ok Journal.Results_ready ->
       match Journal.load ~base_path:config.base_path ~keeper_name:source.keeper_name
           ~composition_run_id:source.composition_run_id with

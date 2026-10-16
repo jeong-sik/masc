@@ -315,8 +315,9 @@ val server_background_switch : unit -> (Eio.Switch.t, submit_error) result
     intent as exact [Cancelled], including its reason and actor, instead of
     making it a resumable [Lost] request.
     A worker that returns after cancellation signalling failed also settles
-    that exact intent as [Cancelled], instead of replacing it with Done or
-    Waiting. Failure to persist the settlement remains explicit.
+    that exact intent as [Cancelled] (meaning the committed cancellation intent
+    wins over Done or Waiting, not that worker side effects did not run;
+    completed node outputs remain in the execution journal). Failure to persist the settlement remains explicit.
 
     [on_worker_aborted], when supplied, is invoked exactly once whenever [f]
     is cut off by cancellation before it completes on its own —

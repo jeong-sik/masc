@@ -132,7 +132,9 @@ scheduling or establish a real process-restart measurement.
 Worker-fork failure and exclusive startup recovery preserve a durable
 `Cancelling` intent as exact `Cancelled`, including its original reason and
 actor. If signalling the live worker fails and it returns Done or an original
-job wait, settlement still preserves that exact cancellation. Persistence
+job wait, settlement still preserves that exact cancellation intent as
+`Cancelled` (cancellation intent wins; completed node outputs produced before
+the worker returned remain recorded in the execution journal). Persistence
 failure remains explicit. These boundaries cannot restore continuation permission.
 The journal retains the exact producer-owned job wait separately from the
 provider-facing body. Only this exact read-only leaf may be rechecked; it keeps

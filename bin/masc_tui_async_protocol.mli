@@ -193,6 +193,8 @@ type async_msg =
   | Http_overview_loaded of overview_preview
   (** Verified questions may settle their own read before the full bundle. *)
   | Http_asks_loaded of early_asks_observation
+  (** Diagnostic reader status; it grants no data or action authority. *)
+  | Http_progress_observed of http_progress_observation
   | Http_refresh_done of http_refresh_outcome
   | Http_refresh_failed of
       string * Masc_tui_operator_projection.Listing_order.ticket option * Http_refresh_order.ticket

@@ -1442,15 +1442,33 @@ let connection_status_badge (status : Masc_tui_types.connection_status) =
    carries the two paths when the row has space for them; this is the part
    that has to survive a full row of key hints, because the surfaces it
    explains are the ones drawing nothing. *)
+let refresh_progress_badge (state : state) =
+  match state.http_refresh_progress with
+  | Some (authority, progress) when authority = state.workspace_authority ->
+      let _, _, failed, interrupted = Http_refresh_progress.counts progress in
+      let failures =
+        (if failed = 0 then "" else Printf.sprintf " · %d read failed" failed)
+        ^ (if interrupted = 0 then "" else Printf.sprintf " · %d interrupted" interrupted) in
+      (match progress.Http_refresh_progress.phase with
+       | Http_refresh_progress.Finished _ -> failures
+       | Http_refresh_progress.In_flight ->
+           let pending = match Http_refresh_progress.pending_sources progress with
+             | [] -> "finishing refresh"
+             | source :: rest -> "reading " ^ Http_refresh_progress.source_name source
+                 ^ (match rest with [] -> "" | _ -> Printf.sprintf " +%d" (List.length rest)) in
+           failures ^ " · " ^ pending)
+  | Some _ | None -> ""
+
 let connection_badge (state : state) =
   let connection = connection_status_badge state.connection_status in
-  match state.workspace_identity with
+  let connection = match state.workspace_identity with
   | Masc_tui_types.Workspace_identity_mismatch _ ->
       connection ^ " " ^ (Theme.bad ()) ^ "[workspace mismatch]" ^ Ansi.reset
   | Masc_tui_types.Workspace_identity_match_unconfirmed _ ->
       connection ^ " " ^ (Theme.warn ()) ^ "[workspace unconfirmed]" ^ Ansi.reset
   | Masc_tui_types.Workspace_identity_unread
-  | Masc_tui_types.Workspace_identity_match -> connection
+  | Masc_tui_types.Workspace_identity_match -> connection in
+  connection ^ refresh_progress_badge state
 
 (* What the headings laid out by [detail_heading] draw before the id: a lane
    run, a measurement artifact named by its sha256, a Fusion run (whose list

@@ -124,6 +124,7 @@ module Http_refresh_progress = struct
       `Assoc ["source", `String (source_name reading.source);
         "status", `String status; "elapsed_ms", elapsed] in
     `Assoc ["scope", `String "logical full-refresh readers";
+      "started_ns", `String (Int64.to_string state.started_ns);
       "elapsed_ms", (match state.phase with
         | In_flight -> `Null
         | Finished finished_ns -> `Float (elapsed_ms state.started_ns finished_ns));

@@ -2,7 +2,7 @@
 
 `Keeper_tool_filesystem_runtime.prepare_edit` resolves already-translated local
 Patch arguments and pins existing target/source parent directory capabilities
-on the caller's switch. Preparation neither reads source bytes nor writes,
+on a preparation-owned child switch. Preparation neither reads source bytes nor writes,
 authorizes an effect or supplies safe replay evidence. Missing resources,
 endpoint-owned trees and other modes stay on their ordinary Serial path.
 
@@ -67,7 +67,10 @@ its result to the original invocation and turn aggregates.
 
 The producer releases earlier file preparations if it cannot transfer the
 complete aggregate, including on cancellation. Released file preparations
-cannot execute; their owning switch remains responsible for final cleanup.
+cannot execute. Release ends the child switch and waits for its directory
+cleanup; the caller's switch also owns that lifecycle when a preparation is
+never executed. Directory release uses switch cleanup on every platform,
+including macOS where directory capabilities do not expose a direct close operation.
 Output-dependent paths, other effect mixtures, compiled children, Async and Terminal keep
 their ordinary admission. Published-snapshot fixture scenarios cover two Inline
 Skills' actual effects, overlap and conflict waves, physical leaf/run receipts,
@@ -100,7 +103,11 @@ Mixed feature scenarios in `test_keeper_prepared_edit` cover two published
 Skills sharing a real Read while their independent write boundaries overlap,
 a Read after a same-file Edit, a Read after symlink-entry replacement, and
 prepared Read owner/input/release and line-window behavior. These scenarios
-are authored source until executed for the reported head.
+also cover missing and nonregular Read resources retaining ordinary admission,
+and streaming past a line larger than the Read byte bound or reaching EOF
+before a large offset. These scenarios are authored source until executed for
+the reported head. The fallback scenario observes ordinary handler selection
+without launching its sandbox process; file preparation and cleanup remain real.
 
 No general Bash,
 endpoint write, Async admission, cross-process exclusion or measured model

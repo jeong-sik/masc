@@ -210,7 +210,10 @@ val delete_post :
     and reaction snapshots without them.  Refused with
     [Io_error], before anything changes, while any of those
     four stores did not load fully: the rewrite would delete
-    the rows memory never held (#38595). *)
+    the rows memory never held (#38595). A rewrite failure also returns
+    [Io_error]; the in-memory deletion remains applied and failed snapshots
+    stay scheduled for [flush_dirty]. [Ok ()] means all four rewrites
+    succeeded. *)
 
 (** {1 Global store + lifecycle} *)
 

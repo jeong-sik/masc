@@ -1,4 +1,4 @@
-(** Delete rewrite re-queue — the delete_post half of #26168.
+(** Delete durability and rewrite retry (#26169).
 
     [Board.delete_post] is authoritative in memory: it removes the post and
     its comments, clears the dirty flags, then rewrites the four jsonl
@@ -7,9 +7,8 @@
     the deleted post resurfaced from disk on restart. [flush_dirty] had
     received the same fix in #26168; this suite pins the delete half:
 
-    - a delete whose snapshot rewrite fails still reports [Ok ()] (memory is
-      the authority) but leaves the store dirty, so the next flush repeats
-      the rewrite;
+    - a delete whose snapshot rewrite fails reports [Io_error] and leaves
+      the store dirty, so the next flush repeats the rewrite;
     - after the disk is healthy again, that flush writes the post file
       without the deleted post — no resurrection. *)
 
@@ -96,10 +95,9 @@ let test_delete_rewrite_failure_keeps_resurrection_scheduled () =
   in
   ignore (block_board_masc_dir_with_file ());
   (match Board_dispatch.delete_post ~post_id:doomed_id with
-   | Ok () -> ()
-   | Error e ->
-     Alcotest.failf "delete must stay Ok (memory is authority), got %s"
-       (Board.show_board_error e));
+   | Error (Board.Io_error _) -> ()
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok () -> Alcotest.fail "failed snapshot rewrites must not report durable deletion");
   Alcotest.(check bool)
     "failed rewrite re-marked the store dirty" true (store ()).Board.dirty_posts;
   Alcotest.(check bool)
@@ -121,6 +119,46 @@ let test_delete_rewrite_failure_keeps_resurrection_scheduled () =
     "comments are clean after the successful rewrite" false
     (store ()).Board.dirty_comments
 
+let require_ok = function
+  | Ok value -> value
+  | Error error -> Alcotest.fail (Board.show_board_error error)
+
+let test_individual_snapshot_failure path () =
+  let doomed = create_post_exn ~content:"delete the final post and all dependent rows" in
+  let post_id = Board.Post_id.to_string doomed.id in
+  ignore
+    (require_ok
+       (Board_dispatch.add_comment ~post_id ~author:"comment-author"
+          ~content:"dependent reply" ()));
+  ignore (require_ok (Board_dispatch.vote ~post_id ~voter:"voter" ~direction:Board.Up));
+  ignore
+    (require_ok
+       (Board_dispatch.toggle_reaction ~target_type:Board.Reaction_post
+          ~target_id:post_id ~user_id:"reactor" ~emoji:"👍"));
+  flush ();
+  let path = path () in
+  let backup = path ^ ".before-delete" in
+  Unix.rename path backup;
+  Unix.mkdir path 0o700;
+  Fun.protect
+    ~finally:(fun () -> Unix.rmdir path; Unix.rename backup path)
+    (fun () ->
+      (match Board_dispatch.delete_post ~post_id with
+       | Error (Board.Io_error _) -> ()
+       | Error error -> Alcotest.fail (Board.show_board_error error)
+       | Ok () -> Alcotest.fail "one failed snapshot must refuse durable deletion");
+      Alcotest.(check bool) "failed final snapshot stays scheduled" true
+        ((store ()).Board.dirty_posts || (store ()).Board.dirty_comments));
+  flush ();
+  Board.reset_global_for_test ();
+  Board_dispatch.reset_for_test ();
+  Board_dispatch.init_jsonl ();
+  let restored = store () in
+  Alcotest.(check int) "restart has no deleted posts" 0 (Hashtbl.length restored.posts);
+  Alcotest.(check int) "restart has no deleted replies" 0 (Hashtbl.length restored.comments);
+  Alcotest.(check int) "restart has no deleted votes" 0 (Hashtbl.length restored.vote_log);
+  Alcotest.(check int) "restart has no deleted reactions" 0 (Hashtbl.length restored.reactions)
+
 let () =
   Alcotest.run "board_delete_rewrite_requeue"
     [ ( "delete_post",
@@ -128,5 +166,13 @@ let () =
             "a failed delete rewrite keeps the resurrection scheduled"
             `Quick
             (with_eio test_delete_rewrite_failure_keeps_resurrection_scheduled)
+        ; Alcotest.test_case "posts rewrite failure returns Io_error and retries" `Quick
+            (with_eio (test_individual_snapshot_failure Board.persist_path))
+        ; Alcotest.test_case "comments rewrite failure returns Io_error and retries" `Quick
+            (with_eio (test_individual_snapshot_failure Board.comments_path))
+        ; Alcotest.test_case "votes rewrite failure returns Io_error and retries" `Quick
+            (with_eio (test_individual_snapshot_failure Board.vote_log_path))
+        ; Alcotest.test_case "reactions rewrite failure returns Io_error and retries" `Quick
+            (with_eio (test_individual_snapshot_failure Board.reactions_path))
         ] )
     ]

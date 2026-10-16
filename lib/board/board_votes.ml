@@ -783,9 +783,6 @@ let save_jsonl_snapshot_result ~where ~path content =
     Error msg
 ;;
 
-let save_jsonl_snapshot ~where ~path content =
-  ignore (save_jsonl_snapshot_result ~where ~path content)
-
 (* Re-mark everything dirty after a failed snapshot write, so the next flush
    rewrites the file instead of skipping an empty queue — the missing half of
    a log-and-continue failure (#26168). Callers hold the store lock. *)
@@ -877,26 +874,31 @@ let delete_post store ~post_id : (unit, board_error) Result.t =
     (match snapshot with
      | Error _ as e -> e
      | Ok (posts_jsonl, comments_jsonl, votes_jsonl, reactions_jsonl) ->
-       let posts_result, comments_result, votes_result =
+       let posts_result, comments_result, votes_result, reactions_result =
            let posts_result = save_posts_snapshot store posts_jsonl in
            let comments_result = save_comments_snapshot store comments_jsonl in
            let votes_result = save_vote_log_jsonl votes_jsonl in
-           (* Reactions have no dirty cycle of their own; this path records
-              rewrite errors through the existing persistence observer. *)
-           save_jsonl_snapshot ~where:"rewrite_reactions" ~path:(reactions_path ())
-             reactions_jsonl;
-           (posts_result, comments_result, votes_result)
+           let reactions_result =
+             save_jsonl_snapshot_result ~where:"rewrite_reactions"
+               ~path:(reactions_path ()) reactions_jsonl
+             |> Result.map_error (fun detail -> Io_error ("rewrite_reactions: " ^ detail))
+           in
+           (posts_result, comments_result, votes_result, reactions_result)
        in
        (* The snapshot cleared dirty flags while holding the state lock.
           Preserve failed writes for a later flush. *)
        with_lock store (fun () ->
-         (match posts_result, votes_result with
-          | Ok (), Ok () -> ()
-          | Error _, _ | _, Error _ -> remark_all_posts_dirty store);
+         (match posts_result, votes_result, reactions_result with
+          | Ok (), Ok (), Ok () -> ()
+          | Error _, _, _ | _, Error _, _ | _, _, Error _ ->
+            remark_all_posts_dirty store);
          match comments_result with
          | Ok () -> ()
          | Error _ -> remark_all_comments_dirty store);
-       Ok ()))
+       let* () = posts_result in
+       let* () = comments_result in
+       let* () = votes_result in
+       reactions_result))
 
 (** {1 Global Store}
 
@@ -943,7 +945,7 @@ let reset_global_for_test () =
 (** Flush any dirty state to disk. Call on shutdown to prevent data loss.
 
     RFC-0091 (board persistence path unification): mutation/vote flushes
-    write a full snapshot via [save_jsonl_snapshot] instead of replaying
+    write a full snapshot instead of replaying
     the dirty list through [append_post]/[append_comment]. The previous
     [List.iter append_post posts] grew [board_posts.jsonl] by one line per
     vote/mutation per post, sharing the same .id, producing the dup vector

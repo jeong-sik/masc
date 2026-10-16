@@ -1075,10 +1075,78 @@ let test_question_read_supersession_and_workspace_suspension () =
   Alcotest.(check bool) "workspace suspension retires the current question listing" true
     (take_asks_observation state current = None)
 
+let test_refresh_progress_tracks_independent_sources_and_interruption () =
+  let open Masc_tui_types in
+  let module Progress = Http_refresh_progress in
+  let state = create_state ~workspace:"progress" ~local_base_path:"/workspace/progress"
+      ~port:0 ~refresh_interval:0. () in
+  let ticket = Http_refresh_order.dispatch state.http_refresh_order in
+  let authority = state.workspace_authority in
+  let original_identity = state.workspace_identity in
+  begin_http_refresh_state state ~ticket ~started_ns:10_000_000L;
+  let deliver hp_event = accept_http_progress state
+    { hp_ticket = ticket; hp_authority = authority; hp_event } in
+  let progress () = match state.http_refresh_progress with
+    | Some (_, progress) -> progress
+    | None -> Alcotest.fail "refresh lost its observation" in
+  deliver (Progress.Started (Progress.Questions, 20_000_000L));
+  deliver (Progress.Started (Progress.Keepers, 30_000_000L));
+  deliver (Progress.Started (Progress.Surface_data, 40_000_000L));
+  deliver (Progress.Completed (Progress.Questions, 60_000_000L, Progress.Received));
+  deliver (Progress.Completed (Progress.Keepers, 70_000_000L, Progress.Failed));
+  Alcotest.(check bool) "one slow source does not hide a received or failed sibling" true
+    (Progress.counts (progress ()) = (1, 1, 1, 0)
+     && Progress.pending_sources (progress ()) = [Progress.Surface_data]);
+  let settled = state.http_refresh_progress in
+  deliver (Progress.Completed (Progress.Questions, 80_000_000L, Progress.Failed));
+  deliver (Progress.Completed (Progress.Overview, 80_000_000L, Progress.Received));
+  Alcotest.(check bool) "duplicate and undispatched settlements preserve the actual observation" true
+    (state.http_refresh_progress = settled);
+  Alcotest.(check bool) "diagnostics never confirm workspace identity or publish data" true
+    (state.workspace_identity = original_identity && state.workspace_authority = authority
+     && state.overview = None && state.asks_snapshot = None);
+  finish_http_refresh_state ~finished_ns:100_000_000L state;
+  Alcotest.(check bool) "a stopped refresh records its remaining read as interrupted" true
+    (Progress.counts (progress ()) = (0, 1, 1, 1));
+  Alcotest.(check (float 0.)) "total duration uses the same monotonic interval" 90.
+    Yojson.Safe.Util.(Progress.to_json (progress ()) |> member "elapsed_ms" |> to_number);
+  let finished = state.http_refresh_progress in
+  deliver (Progress.Started (Progress.Identity_after, 110_000_000L));
+  Alcotest.(check bool) "late diagnostics cannot reopen a completed refresh" true
+    (state.http_refresh_progress = finished)
+
+let test_refresh_progress_rejects_old_request_and_workspace () =
+  let open Masc_tui_types in
+  let module Progress = Http_refresh_progress in
+  let state = create_state ~workspace:"progress" ~local_base_path:"/workspace/progress"
+      ~port:0 ~refresh_interval:0. () in
+  let old_ticket = Http_refresh_order.dispatch state.http_refresh_order in
+  let authority = state.workspace_authority in
+  begin_http_refresh_state state ~ticket:old_ticket ~started_ns:0L;
+  let ticket = Http_refresh_order.dispatch old_ticket in
+  begin_http_refresh_state state ~ticket ~started_ns:10L;
+  let untouched = state.http_refresh_progress in
+  accept_http_progress state { hp_ticket = old_ticket; hp_authority = authority;
+    hp_event = Progress.Started (Progress.Questions, 20L) };
+  Alcotest.(check bool) "superseded request cannot add a source" true
+    (state.http_refresh_progress = untouched);
+  let Workspace_authority generation = authority in
+  state.workspace_authority <- Workspace_authority (generation + 1);
+  accept_http_progress state { hp_ticket = ticket; hp_authority = authority;
+    hp_event = Progress.Started (Progress.Questions, 30L) };
+  accept_http_progress state { hp_ticket = ticket; hp_authority = state.workspace_authority;
+    hp_event = Progress.Started (Progress.Questions, 40L) };
+  Alcotest.(check bool) "neither retired nor replacement authority can spend the old read" true
+    (state.http_refresh_progress = untouched)
+
 let () =
   Alcotest.run "tui_server_identity_refresh"
     [ ( "server-identity-refresh"
-      , [ Alcotest.test_case "early questions settle once without granting authority" `Quick
+      , [ Alcotest.test_case "refresh observations retain independent source outcomes" `Quick
+            test_refresh_progress_tracks_independent_sources_and_interruption
+        ; Alcotest.test_case "refresh observations reject superseded source authority" `Quick
+            test_refresh_progress_rejects_old_request_and_workspace
+        ; Alcotest.test_case "early questions settle once without granting authority" `Quick
             test_early_asks_apply_once_without_granting_authority
         ; Alcotest.test_case "cold-start questions remain owned by the terminal bundle" `Quick
             test_early_asks_cold_start_defers_without_consuming_the_read

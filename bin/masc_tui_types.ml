@@ -47,6 +47,89 @@ end = struct
   let in_flight state = Option.is_some state.pending
 end
 
+(** Logical full-refresh readers, not individual HTTP calls. Diagnostic
+    observations never publish a dataset or grant workspace authority. *)
+module Http_refresh_progress = struct
+  type source =
+    | Identity_before | Overview | Approvals | Questions | Keepers
+    | Surface_data | Identity_after
+  type outcome = Received | Failed | Interrupted
+  type status = Pending | Settled of { finished_ns : int64; outcome : outcome }
+  type reading = { source : source; started_ns : int64; status : status }
+  type phase = In_flight | Finished of int64
+  type t = { started_ns : int64; phase : phase; readings : reading list }
+  type event =
+    | Started of source * int64
+    | Completed of source * int64 * outcome
+
+  let source_name = function
+    | Identity_before -> "workspace"
+    | Overview -> "dashboard"
+    | Approvals -> "confirmations"
+    | Questions -> "questions"
+    | Keepers -> "keepers"
+    | Surface_data -> "view data"
+    | Identity_after -> "workspace verification"
+
+  let start ~started_ns = { started_ns; phase = In_flight; readings = [] }
+
+  let observe state event =
+    match state.phase, event with
+    | Finished _, (Started _ | Completed _) -> state
+    | In_flight, Started (source, started_ns) ->
+        if List.exists (fun reading -> reading.source = source) state.readings
+        then state
+        else { state with readings =
+          state.readings @ [{ source; started_ns; status = Pending }] }
+    | In_flight, Completed (source, finished_ns, outcome) ->
+        { state with readings = List.map (fun reading ->
+            if reading.source = source then match reading.status with
+              | Pending -> { reading with status = Settled { finished_ns; outcome } }
+              | Settled _ -> reading
+            else reading) state.readings }
+
+  let finish ~finished_ns state =
+    match state.phase with
+    | Finished _ -> state
+    | In_flight ->
+        { state with phase = Finished finished_ns;
+          readings = List.map (fun reading -> match reading.status with
+            | Pending -> { reading with status = Settled { finished_ns; outcome = Interrupted } }
+            | Settled _ -> reading) state.readings }
+
+  let counts state =
+    List.fold_left (fun (pending, received, failed, interrupted) reading ->
+      match reading.status with
+      | Pending -> pending + 1, received, failed, interrupted
+      | Settled { outcome = Received; _ } -> pending, received + 1, failed, interrupted
+      | Settled { outcome = Failed; _ } -> pending, received, failed + 1, interrupted
+      | Settled { outcome = Interrupted; _ } -> pending, received, failed, interrupted + 1)
+      (0, 0, 0, 0) state.readings
+
+  let pending_sources state =
+    List.filter_map (fun reading -> match reading.status with
+      | Pending -> Some reading.source
+      | Settled _ -> None) state.readings
+
+  let to_json state =
+    let elapsed_ms start finish =
+      Int64.to_float (Int64.max 0L (Int64.sub finish start)) /. 1_000_000. in
+    let reading_to_json reading =
+      let status, elapsed = match reading.status with
+        | Pending -> "pending", `Null
+        | Settled { finished_ns; outcome } ->
+            (match outcome with
+             | Received -> "received" | Failed -> "failed" | Interrupted -> "interrupted"),
+            `Float (elapsed_ms reading.started_ns finished_ns) in
+      `Assoc ["source", `String (source_name reading.source);
+        "status", `String status; "elapsed_ms", elapsed] in
+    `Assoc ["scope", `String "logical full-refresh readers";
+      "elapsed_ms", (match state.phase with
+        | In_flight -> `Null
+        | Finished finished_ns -> `Float (elapsed_ms state.started_ns finished_ns));
+      "sources", `List (List.map reading_to_json state.readings)]
+end
+
 (** TUI shared types — split from masc_tui.ml (#3808) *)
 
 (** Agent type with status (from Tui_decode) *)
@@ -3500,6 +3583,12 @@ type early_asks_observation = {
   ea_authority: workspace_authority;
   ea_identity: Tui_decode.server_identity;
   ea_observation: asks_observation;
+}
+
+type http_progress_observation = {
+  hp_ticket: Http_refresh_order.ticket;
+  hp_authority: workspace_authority;
+  hp_event: Http_refresh_progress.event;
 }
 
 type scoped_refresh_followup =
@@ -7036,6 +7125,7 @@ type state = {
   mutable fleet_safety_error: string option;
   mutable connection_status: connection_status;
   mutable http_refresh_started_ns: int64 option;
+  mutable http_refresh_progress: (workspace_authority * Http_refresh_progress.t) option;
   mutable http_refresh_order: Http_refresh_order.ticket;
   mutable local_workspace: local_workspace_reading;
   mutable view: surface;
@@ -7964,7 +8054,19 @@ type state = {
 let begin_http_refresh_state (state : state) ~ticket ~started_ns =
   state.http_refresh_order <- ticket;
   state.overview_preview <- None;
-  state.http_refresh_started_ns <- Some started_ns
+  state.http_refresh_started_ns <- Some started_ns;
+  state.http_refresh_progress <- Some
+    (state.workspace_authority, Http_refresh_progress.start ~started_ns)
+
+let accept_http_progress (state : state) observation =
+  if Option.is_some state.http_refresh_started_ns
+     && Http_refresh_order.is_current state.http_refresh_order observation.hp_ticket
+     && observation.hp_authority = state.workspace_authority then
+    match state.http_refresh_progress with
+    | Some (authority, progress) when authority = state.workspace_authority ->
+        state.http_refresh_progress <- Some
+          (authority, Http_refresh_progress.observe progress observation.hp_event)
+    | Some _ | None -> ()
 
 let accept_overview_preview (state : state) preview =
   if Option.is_some state.http_refresh_started_ns
@@ -7983,7 +8085,12 @@ let overview_refresh_reading (state : state) =
       None, Some preview.op_snapshot
   | Some _ | None -> state.overview_error, state.overview
 
-let finish_http_refresh_state (state : state) =
+let finish_http_refresh_state ?finished_ns (state : state) =
+  let finished_ns = match finished_ns with
+    | Some at -> at | None -> Mtime_clock.elapsed_ns () in
+  state.http_refresh_progress <- Option.map
+    (fun (authority, progress) -> authority,
+      Http_refresh_progress.finish ~finished_ns progress) state.http_refresh_progress;
   state.http_refresh_started_ns <- None;
   state.overview_preview <- None
 
@@ -11199,6 +11306,7 @@ let create_state
   fleet_safety_error = None;
   connection_status = Disconnected;
   http_refresh_started_ns = None;
+  http_refresh_progress = None;
   http_refresh_order = Http_refresh_order.initial;
   local_workspace = Local_workspace_unread;
   view = Overview;

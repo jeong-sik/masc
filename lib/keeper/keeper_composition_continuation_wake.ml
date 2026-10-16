@@ -63,14 +63,13 @@ let resume ?on_recovery_held ~context continuation =
       let refusal = match persisted with
         | None -> Keeper_tool_composition_surface.Owner_metadata_missing
         | Some _ -> Keeper_tool_composition_surface.Owner_metadata_mismatch in
-      let trace_id =
+      let* trace_id =
         match source.producer with
         | Journal.Named {activation=Some bound;_} ->
-          Keeper_skill_activation_recorder.bound_trace_id bound
+          Ok (Keeper_skill_activation_recorder.bound_trace_id bound)
         | Journal.Prepared | Journal.Named {activation=None;_} ->
-          (match Keeper_id.Trace_id.of_string ("refusal-" ^ source.keeper_name) with
-           | Ok tid -> tid
-           | Error _ -> Keeper_id.Trace_id.generate ()) in
+          Keeper_id.Trace_id.of_string ("refusal-" ^ source.keeper_name)
+          |> Result.map_error (fun detail -> Runtime_failed ("refusal trace identity rejected: " ^ detail)) in
       let placeholder : Keeper_meta_contract.keeper_meta =
         { id = None; name = source.keeper_name; instructions = ""
         ; sandbox_profile = Keeper_types_profile.Docker; sandbox_image = None

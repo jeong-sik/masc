@@ -1568,13 +1568,13 @@ let test_named_producer_switched_to_inline_settles_run_and_ends_parent () =
   (* Also verify deleted Keeper metadata settles the parent via Wake.resume *)
   let declaration = Config_dir_resolver.keeper_toml_path_for_base_path ~base_path:fixture.base_path keeper in
   Fs_compat.mkdir_p (Filename.dirname declaration);
-  write declaration "[keeper]
+  write declaration {|[keeper]
 activation_mode = "manual"
 sandbox_profile = "docker"
 sandbox_image = "base"
 network_mode = "inherit"
 instructions = "Refusal fixture"
-";
+|};
   let runtime_path = Config_dir_resolver.runtime_toml_path_for_base_path ~base_path:fixture.base_path in
   let workspace = Skill_catalog_snapshot_service.workspace_of_base_path ~base_path:fixture.base_path
       |> require "refusal fixture workspace" in

@@ -137,7 +137,7 @@ let exact_reference_valid_proven inventory (reference : Skill_reference.t) =
   | Config_rejected _ | Config_unreadable _ -> false
   | Configured _ ->
     let same_source source_id =
-      Skill_source_config.equal_source_id source_id reference.identity.source_id in
+      source_id = reference.identity.source_id in
     let complete = List.exists (fun (scan : Skill_catalog_snapshot.source_scan) ->
       same_source scan.source.source.id &&
       match scan.observation with

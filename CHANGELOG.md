@@ -17,7 +17,7 @@
 
 ### Experimental
 
-The user-facing features under Added below have no recorded execution evidence in their fragments, so they are Experimental until a dated run log naming the head promotes them. Guide status: `/features`, attachment opening and the MIDI soundfont setting have a guide in `docs/TUI-GUIDE.md`. Guide: none found for `/listen`, the MIDI metadata reader, Candle pricing, exact-lane admission and the shared workspace memory log.
+The user-facing features under Added below have no recorded execution evidence in their fragments, so they are Experimental until a dated run log naming the head promotes them. Guide status: `/features`, attachment opening and the MIDI soundfont setting have a guide in `docs/TUI-GUIDE.md`. Guide: none found in `docs/TUI-GUIDE.md` (read by the product owner at the cut) for `/listen`, the MIDI metadata reader, Candle pricing, exact-lane admission and the shared workspace memory log.
 
 ### Added
 

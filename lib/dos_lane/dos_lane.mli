@@ -71,6 +71,33 @@ type observation = {
 
 type entry = { at_step : int; who : string; key_name : string }
 
+type autosave_status = { program : string; steps : int; saved_by : string; saved_at : float }
+
+type autosave_lookup =
+  | No_autosave
+  | Autosave of autosave_status
+  | Autosave_unreadable of string
+      (** a file is there but this server will not read it, with the reason:
+          another checkpoint format, a damaged file, a meta that does not
+          parse. Not the same as {!No_autosave}: the next call that runs the
+          guest replaces it. *)
+
+(** An autosave file a load would move aside. *)
+type held_autosave =
+  | Held of autosave_status
+  | Held_unreadable of string
+
+(** What a caller of {!load} agrees to about the autosave slot. A load starts
+    a new machine, whose first autosave moves the file in [autosave_slot] to
+    [autosave_prev_slot] and replaces what that slot held. *)
+type autosave_consent =
+  | Keep_autosave
+      (** Refuse with {!error.Autosave_exists} when an autosave file is on
+          disk, readable or not. *)
+  | Replace_autosave
+      (** The caller was told what is there. It moves to [autosave_prev_slot],
+          replacing what that slot held. *)
+
 type error =
   | Activity_disabled
   | Activity_unobserved
@@ -95,6 +122,9 @@ type error =
   | Other_program of { expected : string; loaded : string }
       (** {!press_into} was asked for the program kept under [expected], and
           the one loaded is kept under [loaded]; nothing was pressed. *)
+  | Autosave_exists of held_autosave
+      (** {!load} was called with {!Keep_autosave} and [autosave_slot] holds a
+          file. Nothing was loaded and the file is as it was. *)
 
 val error_to_string : error -> string
 
@@ -190,6 +220,7 @@ type prepared_load
     preparations are reclaimed normally. An admitted commit attempt consumes the guest. *)
 val prepare_load :
   ledger_dir:string -> saves_dir:string -> checkpoint_dir:string ->
+  autosave:autosave_consent ->
   program_name:string -> program_bytes:string -> files:(string * string) list ->
   (prepared_load, error) result
 val commit_load :
@@ -203,12 +234,17 @@ val load :
   ledger_dir:string ->
   saves_dir:string ->
   checkpoint_dir:string ->
+  autosave:autosave_consent ->
   program_name:string ->
   program_bytes:string ->
   files:(string * string) list ->
   announce:(unit -> unit) ->
   (observation * ran, error) result
-(** Creates the workspace machine, replacing any previous one. The loader is
+(** Creates the workspace machine, replacing any previous one. An autosave
+    file in [checkpoint_dir] is never moved or overwritten unless [autosave]
+    is {!Replace_autosave}; otherwise the load is {!Autosave_exists} and
+    nothing changes. The check happens in {!prepare_load}, before the machine
+    is built. The loader is
     chosen by the image's own bytes — an MZ signature is an EXE, anything
     else is a COM — not by the file name, so a misnamed image still boots the
     way DOS would boot it.
@@ -469,17 +505,6 @@ val autosave_prev_slot : Machine_checkpoint.slot
     first autosave must not erase it silently. Listed and restorable like any
     other slot ({!checkpoints}, {!restore}); nothing offers it back on its
     own the way {!lookup_autosave} offers {!autosave_slot}. *)
-
-type autosave_status = { program : string; steps : int; saved_by : string; saved_at : float }
-
-type autosave_lookup =
-  | No_autosave
-  | Autosave of autosave_status
-  | Autosave_unreadable of string
-      (** a file is there but this server will not read it, with the reason:
-          another checkpoint format, a damaged file, a meta that does not
-          parse. Not the same as {!No_autosave}: the next call that runs the
-          guest replaces it. *)
 
 val lookup_autosave : dir:string -> autosave_lookup
 (** What the autosave slot holds, read through {!Machine_checkpoint}'s header

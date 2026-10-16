@@ -43,7 +43,7 @@ let with_workspace f =
     let state = Masc.Mcp_server.For_testing.create_state ~base_path in
     let _screen = dos_ok (Dos_lane.load ~who:"operator"
       ~ledger_dir:(Filename.concat base_path "ledger") ~saves_dir:(Filename.concat base_path "saves")
-      ~checkpoint_dir:(Filename.concat base_path "checkpoints") ~program_name:"spin.com"
+      ~checkpoint_dir:(Filename.concat base_path "checkpoints") ~autosave:Dos_lane.Keep_autosave ~program_name:"spin.com"
       ~program_bytes:"\xeb\xfe" ~files:[] ~announce:ignore) in
     (* #42001: machine actions on the HTTP surface go through an attached
        worker. Attach one for the success paths; the pre-attach 503 refusal

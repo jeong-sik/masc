@@ -341,7 +341,7 @@ let test_dos_capture_retains_the_machines_history () = with_store (fun dir store
   let ledger_dir = Filename.concat dir "dos" in
   let load () = ignore (dos (Dos_lane.load ~who:"keeper-A" ~ledger_dir
     ~saves_dir:(Filename.concat dir "saves") ~checkpoint_dir:(Filename.concat dir "checkpoints")
-    ~program_name:"HELLO.COM" ~program_bytes:hello
+    ~autosave:Dos_lane.Replace_autosave ~program_name:"HELLO.COM" ~program_bytes:hello
     ~files:[] ~announce:ignore)) in
   Fun.protect ~finally:(fun () ->
     Dos_lane.install_activity_observer None;

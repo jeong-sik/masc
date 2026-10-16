@@ -161,7 +161,7 @@ let test_the_screen_png () =
           (match
              Dos_lane.load ~who:"operator" ~ledger_dir:(Filename.concat dir "ledger")
                ~saves_dir:(Filename.concat dir "saves") ~checkpoint_dir:(Filename.concat dir "checkpoints")
-               ~program_name:"game.com" ~program_bytes:hello_com ~files:[] ~announce:ignore
+               ~autosave:Dos_lane.Keep_autosave ~program_name:"game.com" ~program_bytes:hello_com ~files:[] ~announce:ignore
            with
            | Ok _ -> ()
            | Error e -> fail ("load: " ^ Dos_lane.error_to_string e));

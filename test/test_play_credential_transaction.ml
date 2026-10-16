@@ -52,7 +52,7 @@ let with_machine f =
         ~ledger_dir:(Filename.concat base_path "ledger")
         ~saves_dir:(Filename.concat base_path "saves")
         ~checkpoint_dir:(Filename.concat base_path "checkpoints")
-        ~program_name:"spin.com" ~program_bytes:"\xeb\xfe" ~files:[] ~announce:ignore));
+        ~autosave:Dos_lane.Keep_autosave ~program_name:"spin.com" ~program_bytes:"\xeb\xfe" ~files:[] ~announce:ignore));
       let runtime_path = Filename.concat base_path "runtime.toml" in
       Out_channel.with_open_bin runtime_path (fun channel -> output_string channel {|[providers.local]
 protocol = "openai-compatible-http"

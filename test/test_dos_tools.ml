@@ -134,13 +134,20 @@ let install_program_file ~base_path program name contents =
   write_file (Filename.concat dir name) contents
 ;;
 
-let load ~base_path name = dispatch ~base_path "masc_dos_load" [ ("program", `String name) ]
+(* These two consent to replacing an autosave: most tests load more than once
+   into one workspace and are about something other than the guard. The
+   refusal over an autosave is pinned by [test_load_over_an_autosave_is_refused]
+   and test_dos_lane_autosave. *)
+let load ~base_path name =
+  dispatch ~base_path "masc_dos_load"
+    [ ("program", `String name); ("replace_autosave", `Bool true) ]
 
 (* Setup for the tests that are about what happens after a load. The load's
    own result has its own test. *)
 let boot ?(agent = "dos-test") ~base_path name =
   ignore
-    (dispatch ~base_path ~agent "masc_dos_load" [ ("program", `String name) ]
+    (dispatch ~base_path ~agent "masc_dos_load"
+       [ ("program", `String name); ("replace_autosave", `Bool true) ]
       : Tool_result.result)
 
 let test_no_machine () =
@@ -794,7 +801,7 @@ let test_two_names_that_differ_only_in_case_are_refused () =
         ~ledger_dir:(Filename.concat (Common.masc_dir_from_base_path ~base_path) "dos")
         ~saves_dir:(Filename.concat base_path "saves")
         ~checkpoint_dir:(Filename.concat base_path "checkpoints")
-        ~program_name:"game.com" ~program_bytes:hello_com
+        ~autosave:Dos_lane.Keep_autosave ~program_name:"game.com" ~program_bytes:hello_com
         ~files:[ ("GAME.COM", hello_com); ("DATA.DAT", "upper"); ("data.dat", "lower") ]
         ~announce:(fun () -> incr announced)
     in
@@ -1438,7 +1445,7 @@ let test_attached_input_can_run_past_a_settling_observation () =
       in
       let number key data = Yojson.Safe.Util.(data |> member key |> to_int) in
       let screen data = Yojson.Safe.Util.(data |> member "screen_text" |> to_string) in
-      let load () = call "masc_dos_load" ["program", `String "delayed.com"] in
+      let load () = call "masc_dos_load" ["program", `String "delayed.com"; "replace_autosave", `Bool true] in
       ignore (load ());
       let ordinary = call "masc_dos_press" ["keys", `List [`String "a"]] in
       check bool "default keeps the existing settling observation" true
@@ -1824,10 +1831,10 @@ let steps_in_slot ~base_path slot_name =
 
 (* A restart looks like a fresh [masc_dos_load]: a new incarnation in memory,
    [autosaved_once] starting false again, and the previous incarnation's
-   autosave still on disk at the one slot everything writes to. Its first
-   write must not silently replace that file -- it belongs to a machine this
-   incarnation never touched. *)
-let test_a_fresh_load_preserves_the_previous_incarnations_autosave () =
+   autosave still on disk at the one slot everything writes to. A load that
+   consents to replacing it has the new machine's first write move that file
+   to autosave-prev rather than overwrite it. *)
+let test_a_consented_load_moves_the_previous_incarnations_autosave () =
   with_workspace (fun base_path ->
     install_program ~base_path "echo.com" echo_com;
     boot ~base_path "echo.com";
@@ -1847,6 +1854,78 @@ let test_a_fresh_load_preserves_the_previous_incarnations_autosave () =
     ignore (dispatch ~base_path "masc_dos_step" [ ("steps", `Int 1_000) ] : Tool_result.result);
     check int "and a later autosave by the same incarnation leaves it alone"
       steps_before_restart (steps_in_slot ~base_path "autosave-prev"))
+;;
+
+let refused_before_any_effect name result =
+  match result with
+  | Tool_result.Failed
+      { Tool_result.class_ = Tool_result.Workflow_rejection
+      ; effect_disposition = Tool_result.Proven_pre_effect
+      ; _
+      } -> ()
+  | Tool_result.Failed _ | Tool_result.Completed _ | Tool_result.Deferred _ ->
+    fail (name ^ " is not a refusal that declares no effect")
+;;
+
+(* [masc_dos_load] over an autosave: the second load of a campaign used to
+   displace it into autosave-prev and the third overwrite that, so the
+   campaign was gone without anyone having asked for that. *)
+let test_load_over_an_autosave_is_refused () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "echo.com" echo_com;
+    boot ~base_path "echo.com";
+    let stepped = dispatch ~base_path "masc_dos_step" [ ("steps", `Int 1_000) ] in
+    let campaign_steps = int_field "steps" stepped in
+    let before = Digest.file (autosave_file ~base_path) in
+    let machine = (mark ()).Dos_lane.incarnation in
+    let prev_file = Filename.concat (checkpoints_dir ~base_path) "autosave-prev.ckpt" in
+    let check_untouched name =
+      check string (name ^ ": the autosave is byte for byte as it was") before
+        (Digest.file (autosave_file ~base_path));
+      check bool (name ^ ": nothing moved to autosave-prev") false (Sys.file_exists prev_file);
+      check string (name ^ ": the running machine is the same one") machine
+        (mark ()).Dos_lane.incarnation
+    in
+    let program = ("program", `String "echo.com") in
+    let default_refusal = dispatch ~base_path "masc_dos_load" [ program ] in
+    refused_before_any_effect "a load with no consent" default_refusal;
+    let waiting = autosave_field default_refusal in
+    check bool "the refusal names the program" true
+      (member "program" waiting = Some (`String "echo.com"));
+    check bool "and the step count it would displace" true
+      (member "steps" waiting = Some (`Int campaign_steps));
+    check_untouched "no consent";
+    let explicit_refusal =
+      dispatch ~base_path "masc_dos_load" [ program; ("replace_autosave", `Bool false) ]
+    in
+    refused_before_any_effect "a load that declines to replace" explicit_refusal;
+    check_untouched "declined";
+    check bool "listing the inventory is not a load" true
+      (is_completed (dispatch ~base_path "masc_dos_load" []));
+    let consented =
+      dispatch ~base_path "masc_dos_load" [ program; ("replace_autosave", `Bool true) ]
+    in
+    check bool "with consent the load goes through" true (is_completed consented);
+    check int "and the campaign is in autosave-prev" campaign_steps
+      (steps_in_slot ~base_path "autosave-prev"))
+;;
+
+let test_an_unreadable_autosave_refuses_a_load () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "echo.com" echo_com;
+    mkdir_p (checkpoints_dir ~base_path);
+    write_file (autosave_file ~base_path) "not a checkpoint";
+    let refused = dispatch ~base_path "masc_dos_load" [ ("program", `String "echo.com") ] in
+    refused_before_any_effect "a load over a file it cannot read" refused;
+    check bool "the refusal carries the reason" true
+      (member "unreadable" (autosave_field refused) <> None);
+    check string "and the file is as it was" "not a checkpoint"
+      (In_channel.with_open_bin (autosave_file ~base_path) In_channel.input_all);
+    let consented =
+      dispatch ~base_path "masc_dos_load"
+        [ ("program", `String "echo.com"); ("replace_autosave", `Bool true) ]
+    in
+    check bool "with consent it loads" true (is_completed consented))
 ;;
 
 (* A call refused before anything ran leaves the previous autosave as it was.
@@ -2013,7 +2092,7 @@ let test_prepared_load_rejects_changed_save_snapshot () =
         ~ledger_dir:(Dos_tools.dos_dir ~base_path)
         ~saves_dir:(Dos_tools.saves_dir ~base_path "echo.com")
         ~checkpoint_dir:(checkpoints_dir ~base_path)
-        ~program_name:"echo.com" ~program_bytes:echo_com ~files:[] with
+        ~autosave:Dos_lane.Replace_autosave ~program_name:"echo.com" ~program_bytes:echo_com ~files:[] with
       | Ok value -> value | Error error -> fail (Dos_lane.error_to_string error) in
     ignore (dispatch ~base_path "masc_dos_step" ["steps", `Int 1; "until_ready", `Bool false]);
     let before = mark () in
@@ -2213,8 +2292,12 @@ let () =
         ; test_case "autosave after a step" `Quick test_autosave_written_after_a_successful_step
         ; test_case "every tool that moves the guest autosaves" `Quick
             test_every_tool_that_moves_the_guest_autosaves
-        ; test_case "a fresh load preserves the previous incarnation's autosave" `Quick
-            test_a_fresh_load_preserves_the_previous_incarnations_autosave
+        ; test_case "a consented load moves the previous incarnation's autosave" `Quick
+            test_a_consented_load_moves_the_previous_incarnations_autosave
+        ; test_case "a load over an autosave is refused" `Quick
+            test_load_over_an_autosave_is_refused
+        ; test_case "an unreadable autosave refuses a load" `Quick
+            test_an_unreadable_autosave_refuses_a_load
         ; test_case "autosave skips a refusal" `Quick test_a_refused_call_writes_no_autosave
         ; test_case "a fault keeps the last good autosave" `Quick
             test_a_fault_leaves_the_last_good_autosave

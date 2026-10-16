@@ -1,11 +1,17 @@
 name = "keeper_composition_prepare"
 description = """
-Validate and inspect a task-specific composition without publishing a Skill. \
-Use canonical tool names, explicit dependencies and tagged literal/output/object/array \
-input templates, or child nodes with id, skill_reference, after? and exactly one \
+Inspect a composition before execution. For immediate execution, use \
+keeper_composition_run.recipe with this same input instead. \
+Ordinary Tool nodes use tool and tagged input, not args: \
+{"id":"lane","tool":"keeper_lane_status","input":{"kind":"literal","value":{}}}. \
+Use literal/output/object/array input templates. Omit optional after or provide \
+an array of node ids (including []); null is invalid. Child nodes use id, \
+skill_reference, after? and exactly one \
 of args (fixed object) or input (tagged upstream template). Copy the exact admitted \
 reference and declared exports from Skill inventory; arguments must match the \
-child's parameter schema. Inline children share the parent's failure policy. \
+child's parameter object schema. A Skill's callable tool name is not an ordinary \
+node tool; use skill_reference. Resolved child input must be an object. \
+Inline children share the parent's failure policy. \
 A child exposes only named exports, not its raw internal tool result. For child \
 alias child with declared export report, a parent output template is \
 {"kind":"output","node":"child","pointer":"/report"}; a final export is \

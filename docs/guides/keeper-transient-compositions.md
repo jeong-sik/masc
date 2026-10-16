@@ -4,6 +4,15 @@ Use `keeper_composition_prepare` to check a task-specific plan before executing 
 The draft is local to the preparing Keeper; it does not publish a shared Skill.
 The tools are discoverable through the Keeper tool search surface.
 
+An ordinary Tool node places its arguments in a tagged `input` template:
+`{"id":"lane","tool":"keeper_lane_status","input":{"kind":"literal","value":{}}}`.
+`args` belongs to fixed Skill child arguments, not ordinary Tool nodes.
+Represent a Skill child with its exact `skill_reference`; its callable Tool
+name does not make it an ordinary node Tool. Both fixed `args` and a resolved
+tagged child `input` must match the Skill's parameter object schema.
+Leave optional `after` out or supply an array of node IDs (`[]` means no
+explicit dependencies). `after: null` is invalid.
+
 When the plan is ready to execute, submit the same prepare input as
 `keeper_composition_run.recipe` in one call:
 

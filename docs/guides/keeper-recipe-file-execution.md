@@ -96,7 +96,8 @@ For a quantitative task comparison, freeze the same task/provider/Tool semantics
 and retain preparation time, actual model POSTs and request bytes, useful effect,
 completion and failed/unfinished samples separately. One outer recipe call can
 replace multiple model-visible leaf calls without necessarily removing a model
-POST: independent direct calls may already share one model response. Other producer/effect combinations, durable async file-effect recovery and a
-real-model paired cohort remain separate work. Dynamic Read/Edit input and nested argument scenarios
-are authored alongside the original fixed-input scenarios; their execution status
-must be read from the exact candidate's focused run.
+POST: independent direct calls may already share one model response. Other
+producer/effect combinations, durable async file-effect recovery and a real-model
+paired cohort remain separate work. Dynamic Read/Edit input and nested argument
+scenarios are authored alongside the original fixed-input scenarios; their
+execution status must be read from the exact candidate's focused run.

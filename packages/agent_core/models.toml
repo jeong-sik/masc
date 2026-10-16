@@ -2483,6 +2483,65 @@ auth = "api-key"
 capabilities_base = "openai_chat_extended"
 default_model = "gpt-4o-mini-tts"
 
+# Explicit Chat binding. Keep this after image/speech so adding Chat does not
+# change the existing base-URL-only identity winner; endpoint-aware consumers
+# and explicit provider_id select this row by its own request path. Host or
+# model text alone never grants these capabilities to an anonymous proxy.
+[[providers]]
+id = "openai"
+kind = "openai_compat"
+base_url = "https://api.openai.com/v1"
+request_path = "/chat/completions"
+auth = "api-key"
+# No provider-wide capability preset: an unknown model must not inherit
+# structured output from GPT-4o, or reasoning controls from GPT-5.5.
+
+# Chat-specific exact identities, verified against the official model pages
+# and Chat/Structured Outputs references on 2026-10-16:
+# https://developers.openai.com/api/docs/models/gpt-5.5
+# https://developers.openai.com/api/docs/models/gpt-5.4
+# https://developers.openai.com/api/docs/models/gpt-4o
+# https://developers.openai.com/api/docs/models/gpt-4o-mini
+# https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create
+# https://developers.openai.com/api/docs/guides/structured-outputs
+# These rows do not import Responses or subscription model families. Snapshot
+# ids require their own declaration; no model-name prefix inheritance applies.
+[[models]]
+id_prefix = "gpt-5.5"
+provider_name = "openai"
+base = "openai_chat"
+max_context_tokens = 1050000
+max_output_tokens = 128000
+chat_output_budget_field = "max_completion_tokens"
+supports_reasoning = true
+thinking_control_format = "reasoning_effort"
+accepted_reasoning_efforts = ["none", "low", "medium", "high", "xhigh"]
+
+[[models]]
+id_prefix = "gpt-5.4"
+provider_name = "openai"
+base = "openai_chat"
+max_context_tokens = 1050000
+max_output_tokens = 128000
+chat_output_budget_field = "max_completion_tokens"
+supports_reasoning = true
+thinking_control_format = "reasoning_effort"
+accepted_reasoning_efforts = ["none", "low", "medium", "high", "xhigh"]
+
+[[models]]
+id_prefix = "gpt-4o"
+provider_name = "openai"
+base = "openai_chat"
+max_context_tokens = 128000
+max_output_tokens = 16384
+
+[[models]]
+id_prefix = "gpt-4o-mini"
+provider_name = "openai"
+base = "openai_chat"
+max_context_tokens = 128000
+max_output_tokens = 16384
+
 [[providers]]
 id = "gemini-speech"
 kind = "gemini"

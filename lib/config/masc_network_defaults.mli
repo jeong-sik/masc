@@ -143,7 +143,20 @@ val vite_dev_default_origins : string list
 
 (** {1 SearXNG & OpenTelemetry} *)
 
+val searxng_default_port : int
+(** The port {!searxng_default_url} names, for a caller that publishes a
+    container on it. *)
+
 val searxng_default_url : string
+
+val searxng_published_host : string
+(** The host address the SearXNG container is published on: [127.0.0.1], so
+    nothing outside this computer reaches it. *)
+
+val searxng_published_url : string
+(** [searxng_published_host] and {!searxng_default_port} as a URL. It names
+    the address and not [localhost], which may resolve to [::1] where another
+    program listens on the same port. *)
 
 val otel_default_enabled : bool
 (** Whether OpenTelemetry span collection is on when nothing says otherwise.

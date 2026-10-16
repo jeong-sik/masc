@@ -16,6 +16,12 @@ let dependency ~base_path = function
   | "whisper" -> Some Prerequisites.Whisper_cli
   | "geckodriver" -> Some Prerequisites.Geckodriver
   | "firefox" -> Some Prerequisites.Firefox
+  | "searxng" ->
+    (* A directory of this workspace, next to the browser lane's: the file in
+       it is mounted into the container and holds its generated key. *)
+    let base_path = Env_config.normalize_masc_base_path_input (base_path ()) in
+    Some (Prerequisites.Searxng
+            { config_dir = Filename.concat (Common.masc_dir_from_base_path ~base_path) Common.searxng_dirname })
   | name -> Option.map (fun backend -> Prerequisites.Sandbox backend) (Sandbox.backend_of_id name)
 
 (* Where a downloaded model lands. A cache directory rather than anywhere under
@@ -52,7 +58,8 @@ let apple_builder host dependency =
     ( Prerequisites.Sandbox (Docker | Apple_container | Nerdctl_kata | Microsandbox | Remote_ssh)
     | Prerequisites.Codex_cli | Prerequisites.Claude_cli | Prerequisites.Antigravity_cli
     | Prerequisites.Muse_cli | Prerequisites.Pdf_tools | Prerequisites.Presentation_tools _
-    | Prerequisites.Whisper_cli | Prerequisites.Geckodriver | Prerequisites.Firefox )
+    | Prerequisites.Whisper_cli | Prerequisites.Geckodriver | Prerequisites.Firefox
+    | Prerequisites.Searxng _ )
     -> Prerequisites.Builder_unchecked
 let rec wait pid =
   match Unix.waitpid [] pid with
@@ -83,14 +90,23 @@ let id = function Standard action -> action.Prerequisites.id
   | Verified_apple_install -> "apple_container_verified_install"
   | Verified_docker_install -> "docker_desktop_verified_install"
   | Verified_docker_launch -> "docker_desktop_verified_launch"
-let actions host dependency =
+let actions ?searxng_container host dependency =
   let distribution = try
     In_channel.with_open_text "/etc/os-release" In_channel.input_all
     |> Prerequisites.distribution_of_os_release
     with Sys_error _ -> Prerequisites.Other in
   let apple_builder = apple_builder host dependency in
+  (* Docker is asked only for the dependency that is a container, and not
+     again when the caller already looked. *)
+  let searxng_container = match dependency, searxng_container with
+    | Prerequisites.Searxng _, Some container -> container
+    | Prerequisites.Searxng _, None -> Masc.Searxng_runtime_dependency.container ()
+    | (Prerequisites.Sandbox _ | Prerequisites.Codex_cli | Prerequisites.Claude_cli
+      | Prerequisites.Antigravity_cli | Prerequisites.Muse_cli | Prerequisites.Pdf_tools
+      | Prerequisites.Presentation_tools _ | Prerequisites.Whisper_cli | Prerequisites.Geckodriver
+      | Prerequisites.Firefox), _ -> Prerequisites.Searxng_absent in
   let standard =
-    Prerequisites.catalog ?model_dir:(model_dir ()) ~apple_builder ~host ~distribution dependency
+    Prerequisites.catalog ?model_dir:(model_dir ()) ~apple_builder ~searxng_container ~host ~distribution dependency
     |> List.map (fun action -> Standard action)
   in
   match host, dependency with
@@ -105,6 +121,7 @@ let actions host dependency =
   | (Sandbox.Macos { architecture = Sandbox.X64; major = _ }, Prerequisites.Sandbox (Sandbox.Apple_container | (Sandbox.Nerdctl_kata | (Sandbox.Microsandbox | Sandbox.Remote_ssh))))
   | (Sandbox.Macos { architecture = Sandbox.X64; major = _ }, (Prerequisites.Codex_cli | (Prerequisites.Claude_cli | (Prerequisites.Antigravity_cli | (Prerequisites.Muse_cli | (Prerequisites.Pdf_tools | (Prerequisites.Whisper_cli | Prerequisites.Presentation_tools _ | Prerequisites.Geckodriver | Prerequisites.Firefox)))))))
   | ((Sandbox.Unsupported | Sandbox.Linux _), _)
+  | (Sandbox.Macos _, Prerequisites.Searxng _)
   | (Macos {architecture=Arm64; _ }, Sandbox Apple_container) -> standard
 let to_json actions =
   let standard = List.filter_map (function Standard action -> Some action
@@ -186,12 +203,42 @@ let browser_receipt program receipt =
   `Assoc (("readiness",`String (if ready then "tools_available" else "unavailable")) ::
     ("dependency_readiness",Masc.Browser_runtime_dependencies.to_json program check) :: fields),
   (if ready then 0 else 1)
+(* A container that was started and does not answer JSON is not a prerequisite
+   that is met: the receipt waits for it to listen, and says which of Docker,
+   the container and the endpoint is the one that is not there. *)
+let searxng_receipt receipt =
+  let check = Masc.Searxng_runtime_dependency.wait_until_available () in
+  let ready = Masc.Searxng_runtime_dependency.available check in
+  let fields = match receipt with `Assoc fields -> fields
+    | _ -> invalid_arg "prerequisite outcome encoder must return an object" in
+  let fields = List.remove_assoc "readiness" fields in
+  let fields = if ready then
+    ("status",`String "commands_completed") :: List.remove_assoc "status" fields
+  else
+    ("status",`String "failed") ::
+    ("reason",`String (Printf.sprintf "The steps finished, but SearXNG did not answer a JSON search at %s. Inspect dependency_readiness and `docker logs %s`, then refresh detection."
+       Masc.Searxng_runtime_dependency.default_url Prerequisites.searxng_container_name)) ::
+    List.remove_assoc "status" fields in
+  `Assoc (("readiness",`String (if ready then "tools_available" else "unavailable")) ::
+    ("dependency_readiness",Masc.Searxng_runtime_dependency.to_json check) :: fields),
+  (if ready then 0 else 1)
 let run ~base_path ~dependency:name ~action =
   match dependency ~base_path name with
   | None -> prerr_endline "Unknown prerequisite. Choose a dependency from the setup catalog."; 1
   | Some dependency ->
     let host = Sandbox.detect_host ~run:Sandbox.system_runner in
-    let actions = actions host dependency in
+    (* Printing the catalog looks at Docker once, for the plan and for the
+       readiness it carries. Executing an action asks only for the plan: its
+       receipt looks again after the steps. *)
+    let searxng_check = match dependency, action with
+      | Prerequisites.Searxng _, None -> Some (Masc.Searxng_runtime_dependency.observe ())
+      | (Prerequisites.Searxng _ | Prerequisites.Sandbox _ | Prerequisites.Codex_cli
+        | Prerequisites.Claude_cli | Prerequisites.Antigravity_cli | Prerequisites.Muse_cli
+        | Prerequisites.Pdf_tools | Prerequisites.Presentation_tools _ | Prerequisites.Whisper_cli
+        | Prerequisites.Geckodriver | Prerequisites.Firefox), _ -> None in
+    let actions =
+      actions ?searxng_container:(Option.map (fun (check : Masc.Searxng_runtime_dependency.check) -> check.container) searxng_check)
+        host dependency in
     match action with
     | None ->
       let catalog = to_json actions in
@@ -206,8 +253,13 @@ let run ~base_path ~dependency:name ~action =
         | Prerequisites.Firefox, `Assoc fields ->
           `Assoc (("dependency_readiness",
                    browser_readiness Masc.Browser_runtime_dependencies.Firefox) :: fields)
+        | Prerequisites.Searxng _, `Assoc fields ->
+          let check = match searxng_check with
+            | Some check -> check
+            | None -> Masc.Searxng_runtime_dependency.observe () in
+          `Assoc (("dependency_readiness", Masc.Searxng_runtime_dependency.to_json check) :: fields)
         | (Sandbox _ | Codex_cli | Claude_cli | Antigravity_cli | Muse_cli | Whisper_cli), _ -> catalog
-        | (Pdf_tools | Presentation_tools _ | Geckodriver | Firefox), _ ->
+        | (Pdf_tools | Presentation_tools _ | Geckodriver | Firefox | Searxng _), _ ->
           invalid_arg "prerequisite catalog encoder must return an object" in
       print_endline (Yojson.Safe.to_string catalog); 0
     | Some requested ->
@@ -262,6 +314,8 @@ let run ~base_path ~dependency:name ~action =
              browser_receipt Masc.Browser_runtime_dependencies.Geckodriver receipt
            | Prerequisites.Firefox, Prerequisites.Commands_completed_recheck_required ->
              browser_receipt Masc.Browser_runtime_dependencies.Firefox receipt
+           | Prerequisites.Searxng _, Prerequisites.Commands_completed_recheck_required ->
+             searxng_receipt receipt
            | (Prerequisites.Sandbox _, Prerequisites.Failed _)
            | (Prerequisites.Codex_cli, Prerequisites.Failed _)
            | (Prerequisites.Claude_cli, Prerequisites.Failed _)
@@ -270,7 +324,8 @@ let run ~base_path ~dependency:name ~action =
            | (Prerequisites.Pdf_tools, Prerequisites.Failed _)
            | (Prerequisites.Whisper_cli, Prerequisites.Failed _)
            | (Prerequisites.Geckodriver, Prerequisites.Failed _)
-           | (Prerequisites.Firefox, Prerequisites.Failed _) -> receipt, 1
+           | (Prerequisites.Firefox, Prerequisites.Failed _)
+           | (Prerequisites.Searxng _, Prerequisites.Failed _) -> receipt, 1
            | (Prerequisites.Sandbox _, (External_step_pending | Commands_completed_recheck_required))
            | (Prerequisites.Codex_cli, (External_step_pending | Commands_completed_recheck_required))
            | (Prerequisites.Claude_cli, (External_step_pending | Commands_completed_recheck_required))
@@ -279,6 +334,7 @@ let run ~base_path ~dependency:name ~action =
            | (Prerequisites.Pdf_tools, External_step_pending)
            | (Prerequisites.Whisper_cli, (External_step_pending | Commands_completed_recheck_required))
            | (Prerequisites.Geckodriver, External_step_pending)
-           | (Prerequisites.Firefox, External_step_pending) -> receipt, 0 in
+           | (Prerequisites.Firefox, External_step_pending)
+           | (Prerequisites.Searxng _, External_step_pending) -> receipt, 0 in
          print_endline (Yojson.Safe.to_string receipt);
          code)

@@ -437,7 +437,7 @@ let test_whisper_offers_a_package_and_a_model () =
       ; "/somewhere/cache/whisper/ggml-large-v3-turbo.bin"
       ]
       publish
-  | P.Run_commands _ | P.Open_official_installer _ | P.Install_official_cli _ | P.Build_without_rosetta _ ->
+  | P.Run_commands _ | P.Open_official_installer _ | P.Install_official_cli _ | P.Build_without_rosetta _ | P.Run_searxng _ | P.Start_existing_searxng ->
     fail "the model step must fetch beside the path and then publish"
 
 (* Offering a download with nowhere to write would produce a command that
@@ -446,7 +446,7 @@ let test_without_a_directory_the_model_is_a_page_not_a_command () =
   let actions = whisper (mac S.Arm64 26) P.Other in
   match (find "whisper_model_page" actions).action_effect with
   | P.Open_official_installer _ -> ()
-  | P.Run_commands _ | P.Install_official_cli _ | P.Build_without_rosetta _ ->
+  | P.Run_commands _ | P.Install_official_cli _ | P.Build_without_rosetta _ | P.Run_searxng _ | P.Start_existing_searxng ->
     fail "with no directory there is no download command to offer"
 
 (* Homebrew is the only route this catalog can name a command for. Naming an
@@ -464,7 +464,7 @@ let test_linux_gets_instructions_rather_than_a_guessed_package () =
         (fun id ->
           match (find id actions).action_effect with
           | P.Open_official_installer _ -> ()
-          | P.Run_commands _ | P.Install_official_cli _ | P.Build_without_rosetta _ ->
+          | P.Run_commands _ | P.Install_official_cli _ | P.Build_without_rosetta _ | P.Run_searxng _ | P.Start_existing_searxng ->
             fail "no package name is guessed for whisper.cpp on Linux")
         [ "whisper_cli_build_instructions"; "whisper_model_page" ])
     [ P.Debian; P.Ubuntu; P.Other ]
@@ -480,12 +480,12 @@ let test_the_recorder_is_named_where_the_package_manager_is_known () =
       | P.Run_commands steps ->
         check (list (list string)) "the package, installed"
           [ [ "apt-get"; "install"; "-y"; "sox" ] ] steps
-      | P.Open_official_installer _ | P.Install_official_cli _ | P.Build_without_rosetta _ ->
+      | P.Open_official_installer _ | P.Install_official_cli _ | P.Build_without_rosetta _ | P.Run_searxng _ | P.Start_existing_searxng ->
         fail "a known package manager can name the package")
     [ P.Debian; P.Ubuntu ];
   match (find "sox_project_page" (whisper (S.Linux S.X64) P.Other)).action_effect with
   | P.Open_official_installer _ -> ()
-  | P.Run_commands _ | P.Install_official_cli _ | P.Build_without_rosetta _ ->
+  | P.Run_commands _ | P.Install_official_cli _ | P.Build_without_rosetta _ | P.Run_searxng _ | P.Start_existing_searxng ->
     fail "an unknown distribution gets a link, not a guessed package"
 
 (* Transcribing a file and making one are different halves, and only the first
@@ -498,7 +498,7 @@ let test_hearing_names_the_recorder_not_only_the_transcriber () =
   | P.Run_commands steps ->
     check (list (list string)) "the formula that carries rec and play"
       [ [ "brew"; "install"; "sox" ] ] steps
-  | P.Open_official_installer _ | P.Install_official_cli _ | P.Build_without_rosetta _ ->
+  | P.Open_official_installer _ | P.Install_official_cli _ | P.Build_without_rosetta _ | P.Run_searxng _ | P.Start_existing_searxng ->
     fail "Homebrew can name this one"
 
 
@@ -526,7 +526,7 @@ let test_linux_with_a_cache_gets_the_same_download () =
       ; "/var/cache/whisper/ggml-large-v3-turbo.bin"
       ]
       publish
-  | P.Run_commands _ | P.Open_official_installer _ | P.Install_official_cli _ | P.Build_without_rosetta _ ->
+  | P.Run_commands _ | P.Open_official_installer _ | P.Install_official_cli _ | P.Build_without_rosetta _ | P.Run_searxng _ | P.Start_existing_searxng ->
     fail "linux with a cache directory must get the download too"
 
 let apple_catalog apple_builder =
@@ -551,7 +551,7 @@ let test_a_builder_without_rosetta_offers_the_two_ways_past_it () =
    | P.Run_commands steps ->
      check (list (list string)) "Apple's installer, which shows its license to the operator"
        [["softwareupdate";"--install-rosetta"]] steps
-   | P.Open_official_installer _ | P.Install_official_cli _ | P.Build_without_rosetta _ ->
+   | P.Open_official_installer _ | P.Install_official_cli _ | P.Build_without_rosetta _ | P.Run_searxng _ | P.Start_existing_searxng ->
      fail "installing Rosetta is not the installer page");
   let without = find "apple_container_build_without_rosetta"
       (apple_catalog (needs_rosetta (Some "/Users/u/.config/container/config.toml"))) in
@@ -571,7 +571,7 @@ let test_a_builder_without_a_default_kernel_offers_to_install_it () =
    | P.Run_commands steps ->
      check (list (list string)) "Apple's recommended kernel, set as the default"
        [["container";"system";"kernel";"set";"--recommended"]] steps
-   | P.Open_official_installer _ | P.Install_official_cli _ | P.Build_without_rosetta _ ->
+   | P.Open_official_installer _ | P.Install_official_cli _ | P.Build_without_rosetta _ | P.Run_searxng _ | P.Start_existing_searxng ->
      fail "the kernel action is not a command")
 
 let rec remove_tree path =
@@ -645,6 +645,266 @@ let test_building_without_rosetta_writes_one_line_then_restarts () =
   | P.Failed _ | P.External_step_pending | P.Commands_completed_recheck_required ->
     fail "a stop that did not finish is the step after the write"
 
+(* SearXNG: one key-free search provider, run in a container the operator's
+   Docker provides. The plan depends on what Docker says about the container,
+   and the settings file is the operator's once it exists. *)
+module R = Masc.Searxng_runtime_dependency
+
+let searxng ~config_dir = P.Searxng {config_dir}
+let searxng_actions ?(container = P.Searxng_absent) host config_dir =
+  P.catalog ~searxng_container:container ~host ~distribution:P.Other (searxng ~config_dir)
+
+let test_searxng_plan_follows_the_container () =
+  List.iter (fun host ->
+    let absent = searxng_actions host "/work/.masc/searxng" in
+    (match absent with
+     | [action] ->
+       check string "id" "searxng_docker_run" action.id;
+       check (option string) "the file it leaves" (Some "/work/.masc/searxng/settings.yml") action.writes;
+       check bool "no privilege" false action.requires_admin;
+       (match action.action_effect with
+        | P.Run_searxng {config_dir} -> check string "dir" "/work/.masc/searxng" config_dir
+        | _ -> fail "expected the run effect for an absent container");
+       let json = Yojson.Safe.to_string (P.to_json absent) in
+       check bool "pinned image" true (String_util.contains_substring json P.searxng_image);
+       check bool "image is a dated tag, not latest" false (String_util.contains_substring P.searxng_image ":latest");
+       check bool "the tag is held by the digest it resolved to" true
+         (String_util.contains_substring P.searxng_image "@sha256:");
+       check bool "the restart policy is said where the reader decides" true
+         (String_util.contains_substring action.detail "--restart unless-stopped");
+       check bool "the anonymous cache volume is said" true
+         (String_util.contains_substring action.detail "anonymously");
+       check bool "published on loopback only" true (String_util.contains_substring json "127.0.0.1:8888:8080");
+       check bool "settings mounted read-only" true
+         (String_util.contains_substring json "/work/.masc/searxng:/etc/searxng:ro")
+     | _ -> fail "one action for an absent container");
+    (match searxng_actions ~container:P.Searxng_stopped host "/work/.masc/searxng" with
+     | [action] ->
+       check string "id" "searxng_docker_start_existing" action.id;
+       check bool "starts the container by name" true
+         (String_util.contains_substring (Yojson.Safe.to_string (P.to_json [action])) "\"docker\",\"start\",\"masc-searxng\"");
+       (* The container keeps what it was created with, so the plan names no
+          file it will not write and no address it did not choose. *)
+       check (option string) "a stopped container's start writes nothing" None action.writes;
+       check bool "no settings file in the effect" true
+         (Yojson.Safe.Util.member "settings_file"
+            (Yojson.Safe.Util.member "effect" (List.hd (Yojson.Safe.Util.to_list
+               (Yojson.Safe.Util.member "actions" (P.to_json [action]))))) = `Null);
+       check bool "does not claim the address it did not set" false
+         (String_util.contains_substring action.detail "127.0.0.1")
+     | _ -> fail "one action for a stopped container");
+    List.iter (fun (what, container) ->
+      check int (what ^ " has no action to offer") 0
+        (List.length (searxng_actions ~container host "/work/.masc/searxng")))
+      [ "a running container", P.Searxng_running; "a paused container", P.Searxng_paused
+      ; "a restarting container", P.Searxng_restarting
+      ; "a dead container", P.Searxng_unusable "dead" ])
+    [mac S.Arm64 26; mac S.X64 14; S.Linux S.X64];
+  check int "an unsupported host is offered nothing" 0
+    (List.length (searxng_actions S.Unsupported "/work/.masc/searxng"))
+
+let test_searxng_settings_turn_json_on_and_hold_the_key () =
+  let text = P.searxng_settings ~secret_key:"k-123" in
+  check bool "JSON format on" true (String_util.contains_substring text "    - json");
+  check bool "html stays" true (String_util.contains_substring text "    - html");
+  check bool "limiter off" true (String_util.contains_substring text "limiter: false");
+  check bool "the key is the one given" true (String_util.contains_substring text "secret_key: \"k-123\"");
+  check bool "the container's own port" true (String_util.contains_substring text "port: 8080")
+
+let test_searxng_writes_the_settings_once_and_keeps_an_edit () =
+  let dir = Filename.temp_dir "masc-searxng-" "" in
+  Fun.protect ~finally:(fun () -> remove_tree dir) @@ fun () ->
+  let config_dir = Filename.concat (Filename.concat dir ".masc") "searxng" in
+  let action = List.hd (searxng_actions (mac S.Arm64 26) config_dir) in
+  let calls = ref [] in
+  let recording argv = calls := argv :: !calls; Ok () in
+  check bool "commands finished needs a recheck" true
+    (P.execute ~run:recording action = P.Commands_completed_recheck_required);
+  let path = Filename.concat config_dir "settings.yml" in
+  let first = read path in
+  check bool "JSON on" true (String_util.contains_substring first "    - json");
+  check int "owner-only: the file holds the key" 0o600 ((Unix.stat path).Unix.st_perm land 0o777);
+  check (list (list string)) "pull, then run"
+    [ ["docker";"pull";P.searxng_image]
+    ; ["docker";"run";"--detach";"--name";"masc-searxng";"--restart";"unless-stopped";
+       "--publish";"127.0.0.1:8888:8080";"--volume";config_dir ^ ":/etc/searxng:ro";P.searxng_image] ]
+    (List.rev !calls);
+  (* An operator's edit survives the next run, and the key does not change. *)
+  write path (first ^ "# turned an engine off by hand\n");
+  calls := [];
+  ignore (P.execute ~run:recording action);
+  check string "the file is kept as the operator left it" (first ^ "# turned an engine off by hand\n") (read path);
+  (* Another install does not share the key. *)
+  let other_dir = Filename.concat dir "other" in
+  ignore (P.execute ~run:recording (List.hd (searxng_actions (mac S.Arm64 26) other_dir)));
+  check bool "keys differ between installs" false
+    (String.equal (read (Filename.concat other_dir "settings.yml")) first)
+
+let test_searxng_stops_at_the_first_failing_step () =
+  let dir = Filename.temp_dir "masc-searxng-" "" in
+  Fun.protect ~finally:(fun () -> remove_tree dir) @@ fun () ->
+  let action = List.hd (searxng_actions (S.Linux S.X64) (Filename.concat dir "s")) in
+  let calls = ref [] in
+  let failing argv = calls := argv :: !calls; Error P.Did_not_finish in
+  (match P.execute ~run:failing action with
+   | P.Failed {step; _} -> check int "the pull is step 2: the file was step 1" 2 step
+   | _ -> fail "expected a failure at the pull");
+  check int "the run is not tried" 1 (List.length !calls);
+  (* A directory that cannot be created is the first step's failure. *)
+  let blocker = Filename.concat dir "blocker" in
+  write blocker "a file where a directory has to be";
+  let under_file = List.hd (searxng_actions (S.Linux S.X64) (Filename.concat blocker "s")) in
+  calls := [];
+  (match P.execute ~run:(fun argv -> calls := argv :: !calls; Ok ()) under_file with
+   | P.Failed {step; _} -> check int "file step" 1 step
+   | _ -> fail "expected the write to fail");
+  check int "no docker step ran" 0 (List.length !calls)
+
+let test_searxng_readiness_reads_docker_container_and_endpoint () =
+  let run_up status = fun argv ->
+    match argv with
+    | "docker" :: "info" :: _ -> Ok "29.4.3"
+    | "docker" :: "inspect" :: _ -> (match status with Some s -> Ok (s ^ "\n") | None -> Error ())
+    | _ -> Error () in
+  let answers = fun _ -> Ok (Some 200, {|{"query":"masc","results":[]}|}) in
+  let check_of ?(run = run_up (Some "running")) ?(get = answers) () = R.observe ~run ~get () in
+  let c = check_of () in
+  check bool "docker" true c.docker;
+  check bool "running" true (c.container = P.Searxng_running);
+  check bool "an empty result list still answers" true (c.endpoint = R.Answers);
+  check bool "available" true (R.available c);
+  check bool "an exited container is stopped" true
+    ((check_of ~run:(run_up (Some "exited")) ()).container = P.Searxng_stopped);
+  check bool "a created container is stopped: docker start runs it" true
+    ((check_of ~run:(run_up (Some "created")) ()).container = P.Searxng_stopped);
+  check bool "a paused container is not one that start can run" true
+    ((check_of ~run:(run_up (Some "paused")) ()).container = P.Searxng_paused);
+  check bool "a restarting container is its own state" true
+    ((check_of ~run:(run_up (Some "restarting")) ()).container = P.Searxng_restarting);
+  check bool "a dead container is unusable and keeps Docker's word" true
+    ((check_of ~run:(run_up (Some "dead")) ()).container = P.Searxng_unusable "dead");
+  check bool "a status word nobody here knows is not read as stopped" true
+    ((check_of ~run:(run_up (Some "reconfiguring")) ()).container = P.Searxng_unusable "reconfiguring");
+  check bool "no such container is absent" true
+    ((check_of ~run:(run_up None) ()).container = P.Searxng_absent);
+  let down = check_of ~run:(fun _ -> Error ()) () in
+  check bool "docker down" false down.docker;
+  check bool "an instance run another way still counts" true (R.available down);
+  check bool "403 means JSON is off" true
+    ((check_of ~get:(fun _ -> Ok (Some 403, "")) ()).endpoint = R.Refuses_json);
+  check bool "an HTML page is not a result object" true
+    ((check_of ~get:(fun _ -> Ok (Some 200, "<html></html>")) ()).endpoint = R.Refuses_json);
+  check bool "a JSON object without results is not an answer" true
+    ((check_of ~get:(fun _ -> Ok (Some 200, {|{"error":"nope"}|})) ()).endpoint = R.Refuses_json);
+  check bool "another status is unreachable" true
+    ((check_of ~get:(fun _ -> Ok (Some 500, "")) ()).endpoint = R.Unreachable);
+  check bool "a transport failure is unreachable" true
+    ((check_of ~get:(fun _ -> Error "curl exit 7") ()).endpoint = R.Unreachable);
+  let asked = ref "" in
+  ignore (R.observe ~run:(run_up (Some "running")) ~get:(fun url -> asked := url; Ok (Some 200, "{}")) ());
+  check string "asks the address the container is published on, for JSON"
+    "http://127.0.0.1:8888/search?q=masc&format=json" !asked;
+  check string "the address is the published one" "http://127.0.0.1:8888" R.default_url;
+  let unusable = R.to_json (check_of ~run:(run_up (Some "dead")) ()) in
+  check bool "the container word is a closed one" true
+    (Yojson.Safe.Util.member "container" unusable = `String "unusable");
+  check bool "Docker's own word is kept beside it" true
+    (Yojson.Safe.Util.member "docker_status" unusable = `String "dead");
+  check bool "no Docker word for a state with a name" true
+    (Yojson.Safe.Util.member "docker_status" (R.to_json (check_of ())) = `Null);
+  let json = R.to_json down in
+  check bool "status words are the shared ones" true
+    (Yojson.Safe.Util.member "status" json = `String "ready");
+  check bool "unavailable is spelled out" true
+    (Yojson.Safe.Util.member "status" (R.to_json (check_of ~get:(fun _ -> Error "x") ())) = `String "unavailable")
+
+let test_searxng_starts_a_stopped_container_and_writes_nothing () =
+  let dir = Filename.temp_dir "masc-searxng-" "" in
+  Fun.protect ~finally:(fun () -> remove_tree dir) @@ fun () ->
+  let config_dir = Filename.concat dir "searxng" in
+  let action = List.hd (searxng_actions ~container:P.Searxng_stopped (mac S.Arm64 26) config_dir) in
+  let calls = ref [] in
+  check bool "commands finished needs a recheck" true
+    (P.execute ~run:(fun argv -> calls := argv :: !calls; Ok ()) action = P.Commands_completed_recheck_required);
+  check (list (list string)) "docker start and nothing else" [["docker";"start";"masc-searxng"]] (List.rev !calls);
+  check bool "no settings directory was made for a mount it may not have" false (Sys.file_exists config_dir);
+  match P.execute ~run:(fun _ -> Error P.Did_not_finish) action with
+  | P.Failed {step; _} -> check int "the start is step 1: no file was step 1" 1 step
+  | _ -> fail "expected the start to fail"
+
+let test_searxng_refuses_a_settings_path_that_is_not_a_file () =
+  let dir = Filename.temp_dir "masc-searxng-" "" in
+  Fun.protect ~finally:(fun () -> remove_tree dir) @@ fun () ->
+  let calls = ref [] in
+  let run argv = calls := argv :: !calls; Ok () in
+  let refused config_dir =
+    calls := [];
+    match P.execute ~run (List.hd (searxng_actions (S.Linux S.X64) config_dir)) with
+    | P.Failed {step = 1; reason} -> check int "no docker step ran" 0 (List.length !calls); reason
+    | _ -> fail "expected the settings path to be refused" in
+  (* A directory named settings.yml is not a settings file: kept, the
+     container exits on it. *)
+  let with_directory = Filename.concat dir "dir" in
+  Unix.mkdir with_directory 0o700;
+  Unix.mkdir (Filename.concat with_directory "settings.yml") 0o700;
+  check bool "a directory is named" true
+    (String_util.contains_substring (refused with_directory) "is not a regular file");
+  (* A link that leads nowhere is the operator's: it is neither kept nor replaced. *)
+  let with_link = Filename.concat dir "link" in
+  Unix.mkdir with_link 0o700;
+  let link = Filename.concat with_link "settings.yml" in
+  Unix.symlink (Filename.concat dir "nowhere") link;
+  check bool "a dangling link is named" true
+    (String_util.contains_substring (refused with_link) "leads nowhere");
+  check string "the link is still the operator's" (Filename.concat dir "nowhere") (Unix.readlink link);
+  (* A link to a real file is a settings file, and is kept. *)
+  let target = Filename.concat dir "real.yml" in
+  write target "use_default_settings: true\n";
+  let kept = Filename.concat dir "kept" in
+  Unix.mkdir kept 0o700;
+  Unix.symlink target (Filename.concat kept "settings.yml");
+  calls := [];
+  check bool "a link to a file is kept and the run goes on" true
+    (P.execute ~run (List.hd (searxng_actions (S.Linux S.X64) kept)) = P.Commands_completed_recheck_required);
+  check string "its target is untouched" "use_default_settings: true\n" (read target)
+
+let test_searxng_docker_probes_are_bounded () =
+  (* A Docker that does not answer must not hold the catalog print: the probe
+     carries the same read-bucket bound Sandbox_readiness puts on its own
+     docker info. The stand-in sleeps far longer than the bound. *)
+  let dir = Filename.temp_dir "masc-searxng-" "" in
+  Fun.protect ~finally:(fun () -> remove_tree dir) @@ fun () ->
+  let docker = Filename.concat dir "docker" in
+  write docker "#!/bin/sh\nexec sleep 60\n";
+  Unix.chmod docker 0o755;
+  let variable = "MASC_KEEPER_SHELL_TIMEOUT_READ_SEC" in
+  let old_path = Sys.getenv_opt "PATH" and old_bound = Sys.getenv_opt variable in
+  let restore name = function Some v -> Unix.putenv name v | None -> Unix.putenv name "" in
+  Fun.protect ~finally:(fun () -> restore "PATH" old_path; restore variable old_bound) @@ fun () ->
+  Unix.putenv "PATH" (dir ^ ":/usr/bin:/bin");
+  Unix.putenv variable "1";
+  let started = Unix.gettimeofday () in
+  let container = R.container () in
+  let elapsed = Unix.gettimeofday () -. started in
+  check bool "a Docker that never answers is a Docker that is down" true (container = P.Searxng_absent);
+  check bool (Printf.sprintf "answered within the bound, not after sixty seconds (%.1fs)" elapsed) true (elapsed < 20.0)
+
+let test_searxng_waits_for_a_container_that_is_still_starting () =
+  let looks = ref 0 and sleeps = ref 0 in
+  let run = fun _ -> Error () in
+  let get = fun _ -> incr looks;
+    if !looks < 3 then Error "curl exit 7" else Ok (Some 200, {|{"results":[]}|}) in
+  let c = R.wait_until_available ~attempts:10 ~pause_sec:0.0 ~sleep:(fun _ -> incr sleeps) ~run ~get () in
+  check bool "answered" true (R.available c);
+  check int "three looks" 3 !looks;
+  check int "slept between looks only" 2 !sleeps;
+  looks := 0; sleeps := 0;
+  let never = R.wait_until_available ~attempts:4 ~pause_sec:0.0 ~sleep:(fun _ -> incr sleeps) ~run
+      ~get:(fun _ -> incr looks; Error "curl exit 7") () in
+  check bool "gave up" false (R.available never);
+  check int "bounded looks" 4 !looks;
+  check int "no sleep after the last look" 3 !sleeps
+
 let () = run "prerequisite actions" ["user-selected plans",[
   test_case "distribution data is never shell" `Quick test_distribution_boundary;
   test_case "OS and architecture eligibility" `Quick test_platform_choices;
@@ -698,4 +958,23 @@ let () = run "prerequisite actions" ["user-selected plans",[
   test_case "hearing names the recorder, not only the transcriber" `Quick
     test_hearing_names_the_recorder_not_only_the_transcriber;
   test_case "the recorder is named where the package manager is known" `Quick
-    test_the_recorder_is_named_where_the_package_manager_is_known]]
+    test_the_recorder_is_named_where_the_package_manager_is_known];
+  "searxng",[
+  test_case "the plan follows what Docker says about the container" `Quick
+    test_searxng_plan_follows_the_container;
+  test_case "the settings turn JSON on and hold the key" `Quick
+    test_searxng_settings_turn_json_on_and_hold_the_key;
+  test_case "the settings are written once and an edit is kept" `Quick
+    test_searxng_writes_the_settings_once_and_keeps_an_edit;
+  test_case "a failing step stops the rest" `Quick
+    test_searxng_stops_at_the_first_failing_step;
+  test_case "readiness reads docker, container and endpoint" `Quick
+    test_searxng_readiness_reads_docker_container_and_endpoint;
+  test_case "a container that is starting is waited for, within a bound" `Quick
+    test_searxng_waits_for_a_container_that_is_still_starting;
+  test_case "a stopped container is started and nothing is written" `Quick
+    test_searxng_starts_a_stopped_container_and_writes_nothing;
+  test_case "a settings path that is not a file is refused" `Quick
+    test_searxng_refuses_a_settings_path_that_is_not_a_file;
+  test_case "the docker probes are bounded" `Quick
+    test_searxng_docker_probes_are_bounded]]

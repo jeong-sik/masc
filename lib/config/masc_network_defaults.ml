@@ -232,6 +232,14 @@ let searxng_default_port = 8888
 let searxng_default_url =
   Printf.sprintf "http://localhost:%d" searxng_default_port
 
+(** The host address the SearXNG container is published on. An address and
+    not [localhost], which can name [::1] first: a program listening on
+    [::1:8888] answers [localhost:8888] while the container does not. *)
+let searxng_published_host = "127.0.0.1"
+
+let searxng_published_url =
+  Printf.sprintf "http://%s:%d" searxng_published_host searxng_default_port
+
 (** Default port for OpenTelemetry OTLP HTTP exporter. *)
 let otel_default_port = 4318
 

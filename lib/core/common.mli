@@ -31,6 +31,10 @@ val browser_lane_dirname : string
     [masc browser-lane-setup] writes the token and the launcher under the same
     name in every mode, so the two change together. *)
 
+val searxng_dirname : string
+(** The directory under [.masc] that is mounted into the SearXNG container as
+    [/etc/searxng]. *)
+
 val browser_lane_token_name : string
 (** The lane token's file name in {!browser_lane_dirname}. Value is
     ["token"]. [masc browser-lane-setup] writes it under the same name. *)

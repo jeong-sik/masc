@@ -1,0 +1,6 @@
+(include_subdirs no)
+(library
+ (name msx_wire)
+ (public_name masc.msx_wire)
+ (libraries yojson)
+ (preprocess (pps ppx_enumerate)))

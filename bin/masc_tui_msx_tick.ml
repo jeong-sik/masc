@@ -134,19 +134,25 @@ let decode_frame previous json =
        | _ -> Error "MSX tick: invalid frame response")
   | _ -> Error "MSX tick: expected an object"
 
+(* A 409 is a refusal before execution. The server encodes it with
+   [Msx_wire]; this reads it with the same codec, so a field the server adds
+   beside [ok], [code] and [message] cannot turn a known refusal into an
+   unknown outcome. A code that is not an activity or workspace refusal on a
+   409 stays unconfirmed. *)
+let decode_refusal previous json =
+  match Msx_wire.decode json with
+  | Ok { code = Some Msx_wire.Activity_disabled; _ } -> Ok (Not_started Off, previous)
+  | Ok { code = Some Msx_wire.Activity_unobserved; _ } ->
+      Ok (Not_started Activity_unobserved, previous)
+  | Ok { code = Some Msx_wire.Workspace_precondition_failed; _ } ->
+      Ok (Not_started Workspace_changed, previous)
+  | Ok { code = Some (Msx_wire.Worker_unavailable | Msx_wire.Outcome_unknown); _ }
+  | Ok { code = None; _ } | Error _ -> Error "MSX tick: unknown refusal"
+
 let decode previous (status,json) =
-  match status,json with
-  | 409, `Assoc fields ->
-      (match List.sort (fun (a, _) (b, _) -> String.compare a b) fields with
-       | ["code", `String "activity_disabled"; "ok", `Bool false] ->
-           Ok (Not_started Off, previous)
-       | ["code", `String "activity_unobserved"; "ok", `Bool false] ->
-           Ok (Not_started Activity_unobserved, previous)
-       | ["code", `String "workspace_precondition_failed";
-          "message", `String _; "ok", `Bool false] ->
-           Ok (Not_started Workspace_changed, previous)
-       | _ -> Error "MSX tick: unknown refusal")
-  | 200, _ -> Result.map (fun (frame,pixels,mark) -> Advanced (frame,mark),pixels) (decode_frame previous json)
+  match status with
+  | 409 -> decode_refusal previous json
+  | 200 -> Result.map (fun (frame,pixels,mark) -> Advanced (frame,mark),pixels) (decode_frame previous json)
   | _ -> Error "MSX tick: unexpected response status"
 
 let fetch ?(body_fields = []) t ~host ~port ~headers ~request =

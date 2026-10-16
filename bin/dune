@@ -1899,7 +1899,7 @@
  (name masc_tui_msx_tick)
  (wrapped false)
  (modules masc_tui_msx_tick)
- (libraries masc_tui_types masc_tui_machine_live yojson base64 threads))
+ (libraries masc.msx_wire masc_tui_types masc_tui_machine_live yojson base64 threads))
 
 ;; The spectator's typed read of GET /api/v1/lane-addons/live: one route for
 ;; every machine with a screen (MSX and DOS). Pure decoding, no I/O.

@@ -459,10 +459,57 @@ let test_recovery_listing_superseded_by_action () =
   check bool "recovery read dispatched before action is rejected after action commits"
     false admitted
 
+let test_workspace_bound_approval_listing () =
+  let base = "/workspace/approval-reader" in
+  let root = Filename.concat base ".masc" in
+  let decode = Projection.decode_workspace_snapshot
+    ~expected_base_path:base ~expected_masc_root:root in
+  let identity ?(base_path = base) ?(masc_root = root) ?(ready = `Bool true) () =
+    `Assoc ["base_path", `String base_path; "masc_root", `String masc_root;
+      "state_ready", ready] in
+  let fields = match snapshot_json () with
+    | `Assoc fields -> fields
+    | _ -> fail "fixture snapshot must be an object" in
+  let response identity = `Assoc (("workspace_identity", identity) :: fields) in
+  let expect_refusal json =
+    match decode json with
+    | Error _ -> ()
+    | Ok _ -> fail "unconfirmed response must not publish approvals" in
+  let snapshot = match decode (response (identity ())) with
+    | Ok snapshot -> snapshot
+    | Error detail -> fail detail in
+  check (list string) "response preserves original confirmation tokens"
+    ["token-pause"; "token-probe"] (List.map (fun item -> item.Projection.ap_token) snapshot.aps_items);
+  let flow = Projection.Flow.initial in
+  let order, ticket = Projection.Listing_order.dispatch Projection.Listing_order.initial flow in
+  let order, early = Projection.Listing_order.admit order flow ticket in
+  let _, terminal = Projection.Listing_order.admit order flow ticket in
+  check bool "early original receipt can publish" true early;
+  check bool "terminal duplicate cannot publish again" false terminal;
+  List.iter expect_refusal
+    [ `Assoc fields
+    ; response (identity ~base_path:"/other-workspace" ())
+    ; response (identity ~masc_root:"/other-workspace/.masc" ())
+    ; response (identity ~ready:(`Bool false) ())
+    ; response (identity ~ready:(`String "true") ())
+    ; response (`Assoc ["base_path", `String base; "state_ready", `Bool true])
+    ; `Assoc (("workspace_identity", identity ()) :: ("workspace_identity", identity ()) :: fields)
+    ];
+  let empty_fields = match snapshot_json ~items:[] ~visible_count:0 ~total_count:0
+      ~hidden_count:0 ~hidden_actors:(Some []) () with
+    | `Assoc fields -> fields
+    | _ -> fail "empty fixture must be an object" in
+  expect_refusal (`Assoc empty_fields);
+  match decode (`Assoc (("workspace_identity", identity ()) :: empty_fields)) with
+  | Ok empty -> check int "attested empty listing clears the old count" 0 empty.aps_visible_count
+  | Error detail -> fail detail
+
 let () =
   run "tui_operator_projection"
     [ ( "operator approvals"
       , [ test_case "current contract" `Quick test_current_contract
+        ; test_case "workspace-bound approval listing settles once" `Quick
+            test_workspace_bound_approval_listing
         ; test_case "payload terminal projection" `Quick
             test_payload_terminal_projection
         ; test_case "fails closed" `Quick test_fails_closed

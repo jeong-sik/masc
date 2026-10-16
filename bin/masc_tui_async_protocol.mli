@@ -9,6 +9,13 @@ type approval_observation = {
   ao_result: (approval_snapshot, string) result;
 }
 
+type early_approval_observation = {
+  eap_ticket: Http_refresh_order.ticket;
+  eap_authority: workspace_authority;
+  eap_identity: Masc.Tui_decode.server_identity;
+  eap_observation: approval_observation;
+}
+
 (* Collection has no identity authority of its own. The enclosing full or
    scoped request owns the before/after probes and binds the final identity
    only after its entire read interval has settled. [unit] readings cannot
@@ -198,6 +205,7 @@ type async_msg =
   | Http_overview_loaded of overview_preview
   (** Verified questions may settle their own read before the full bundle. *)
   | Http_asks_loaded of early_asks_observation
+  | Http_approvals_loaded of early_approval_observation
   (** A workspace-bound roster can settle before unrelated readers. *)
   | Http_keeper_roster_loaded of early_keeper_roster_observation
   (** Diagnostic reader status; it grants no data or action authority. *)

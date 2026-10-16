@@ -939,6 +939,15 @@ let load_approvals ~(host : string) ~(port : int) :
   | Error err -> Error ("approvals load failed: " ^ err)
   | Ok json -> Masc_tui_operator_projection.decode_snapshot json
 
+let load_workspace_approvals ~(expected_workspace : Tui_decode.server_identity)
+    ~(host : string) ~(port : int) : (approval_snapshot, string) result =
+  let ( let* ) = Result.bind in
+  let* json = fetch_operator_snapshot ~host ~port in
+  Masc_tui_operator_projection.decode_workspace_snapshot
+    ~expected_base_path:(Masc_tui_types.canonical_path expected_workspace.sid_base_path)
+    ~expected_masc_root:(Masc_tui_types.canonical_path expected_workspace.sid_masc_root)
+    json
+
 (** Load the runtime catalogue, lanes, and keeper assignments for the picker. *)
 let load_runtime_resolved ~(host : string) ~(port : int) :
     ( Tui_decode.runtime_option list

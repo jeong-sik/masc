@@ -1767,6 +1767,24 @@ let test_operator_snapshot_http_rejects_stale_success_after_store_error () =
   check bool "HTTP drops pending rows" true
     (json |> member "pending_confirm_envelope" = `Null)
 
+let test_operator_parameterized_snapshot_attests_workspace () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  ignore (Workspace.init config ~agent_name:None);
+  let state = Lib.Mcp_server_eio.For_testing.create_state ~base_path:config.base_path () in
+  let json = Server_dashboard_http_core.operator_snapshot_http_json
+    ~state ~sw ~clock:(Eio.Stdenv.clock env) ~broadcast_snapshot:(fun _ -> ())
+    (request "/api/v1/operator?view=summary&include_messages=0&include_keepers=0") in
+  let open Yojson.Safe.Util in
+  let identity = json |> member "workspace_identity" in
+  check string "fresh response names its canonical base" (Unix.realpath config.base_path)
+    (identity |> member "base_path" |> to_string);
+  check string "fresh response names its canonical MASC root"
+    (Unix.realpath (Workspace.masc_dir config))
+    (identity |> member "masc_root" |> to_string);
+  check bool "readiness is sampled from this server"
+    (Lib.Server_startup_state.snapshot ()).state_ready
+    (identity |> member "state_ready" |> to_bool)
+
 let test_dashboard_query_cache_segment_normalizes_missing_values () =
   check string "missing none" "missing"
     (Server_dashboard_http_core_cache.dashboard_query_cache_segment None);
@@ -8224,6 +8242,8 @@ let () =
             "operator snapshot HTTP rejects stale success after store error"
             `Quick
             test_operator_snapshot_http_rejects_stale_success_after_store_error;
+          test_case "parameterized operator snapshot attests its workspace" `Quick
+            test_operator_parameterized_snapshot_attests_workspace;
           test_case "proof payload exposes submission index" `Quick
             test_dashboard_proof_http_json_surfaces_submission_index;
           test_case "scheduled-automation reads its cache key" `Quick

@@ -172,7 +172,11 @@ type turn_result =
   ; model : string option
     (** The model the session started on, as the host reported it, or the
         model [session/setModel] selected on a resumed session. *)
-  ; text : string option  (** Last completed agent message; [None] means no message completed, [Some ""] an explicit blank. *)
+  ; text : string option
+    (** Last completed agent message; [Some ""] is an explicit blank. [None]
+        means the model wrote no message: a turn whose message MASC may have
+        missed (a view gap during the turn, or a message still open at the
+        terminal) is a [Protocol_error], never [Ok] with [None]. *)
   ; usage : Runtime_muse_msp.token_usage option
     (** Terminal aggregate, enriched with counted-once counts when the
         observed completions agree; otherwise the sum of this turn's unique

@@ -71,19 +71,37 @@ let response_has_text_or_tool_progress (response : Agent_core.Types.api_response
 
 type completion_policy = Require_progress | Allow_quiet_final
 
-let is_quiet_final ~policy (response : Agent_core.Types.api_response) =
+type quiet_final_shape =
+  | Quiet_blank_text
+  | Quiet_no_content
+
+(* [Thinking_only] stays out: Anthropic replays a thinking block, so that
+   assistant message would reach the next request. An [Empty] one never does,
+   because every backend's history projection drops an assistant message
+   whose content is empty. *)
+let quiet_final_shape ~policy (response : Agent_core.Types.api_response) =
   match policy, response.stop_reason with
   | Allow_quiet_final, Agent_core.Types.EndTurn ->
     (match Agent_core.Response_shape.content_shape response
         (Agent_core.Response_shape.summarize response) with
-     | Blank_text_only -> true
-     | Empty | Thinking_only | Tool_result_only | Media_only
-     | Mixed_without_deliverable_content | Has_deliverable_content -> false)
-  | Require_progress, _ -> false
+     | Blank_text_only -> Some Quiet_blank_text
+     | Empty -> Some Quiet_no_content
+     | Thinking_only | Tool_result_only | Media_only
+     | Mixed_without_deliverable_content | Has_deliverable_content -> None)
+  | Require_progress, _ -> None
   | Allow_quiet_final,
     (StopToolUse | MaxTokens | StopSequence | Refusal | ContentFilter
     | RepetitionTruncation | PauseTurn | Compaction | ContextWindowExceeded
-    | UnmatchedToolCalls | Unknown _) -> false
+    | UnmatchedToolCalls | Unknown _) -> None
+;;
+
+let quiet_final_shape_label = function
+  | Quiet_blank_text -> "blank_text"
+  | Quiet_no_content -> "no_content"
+;;
+
+let is_quiet_final ~policy response =
+  Option.is_some (quiet_final_shape ~policy response)
 ;;
 
 let accepts_response ~policy response =

@@ -68,9 +68,10 @@ let response_policy_for_turn ~turn_kind ~input_speaker
 
 (* Accept lets a quiet final through; finalization must agree or the turn
    settles a typed no-progress error after the runtime already accepted the
-   response. The quiet fallback below is the one place a blank final becomes
-   the settlement, and it is also where the quiet-final gauge fires, so the
-   metric counts accepted-and-settled quiet turns exactly once. *)
+   response. The quiet fallback below is the one place a quiet final becomes
+   the settlement, and it is also where the quiet-final counter fires, so the
+   metric counts accepted-and-settled quiet turns exactly once. Its [shape]
+   label keeps a blank text block apart from a turn that carried no content. *)
 let normalize_final_response_text ~response_policy ~keeper_name ~runtime_id
     ~(run_result : Runtime_agent.run_result) ~text ~tool_names () =
   match
@@ -78,20 +79,28 @@ let normalize_final_response_text ~response_policy ~keeper_name ~runtime_id
       ~runtime_id ~run_result ~text ~tool_names ()
   with
   | Ok response_text -> Ok response_text
-  | Error _ when
-      (match run_result.stop_reason with
-       | Runtime_agent.Completed ->
-         Keeper_tooling.Response.is_quiet_final
-           ~policy:response_policy run_result.response
-       | InputRequired _ | Yielded_to_operation_queued _
-       | Yielded_to_durable_stimulus _ | Yielded_after_repeated_tool_call _
-       | Yielded_after_repeated_assistant_text _ -> false) ->
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string QuietFinals)
-      ~labels:[ "keeper", keeper_name; "runtime", runtime_id ]
-      ();
-    Ok ""
-  | Error error -> Error error
+  | Error _ as error ->
+    let quiet_shape =
+      match run_result.stop_reason with
+      | Runtime_agent.Completed ->
+        Keeper_tooling.Response.quiet_final_shape
+          ~policy:response_policy run_result.response
+      | InputRequired _ | Yielded_to_operation_queued _
+      | Yielded_to_durable_stimulus _ | Yielded_after_repeated_tool_call _
+      | Yielded_after_repeated_assistant_text _ -> None
+    in
+    (match quiet_shape with
+     | None -> error
+     | Some shape ->
+       Otel_metric_store.inc_counter
+         Keeper_metrics.(to_string QuietFinals)
+         ~labels:
+           [ "keeper", keeper_name
+           ; "runtime", runtime_id
+           ; "shape", Keeper_tooling.Response.quiet_final_shape_label shape
+           ]
+         ();
+       Ok "")
 ;;
 
 (* AGENT_CORE raw-trace sink for keeper turns: parsed Run_started / Assistant_block /

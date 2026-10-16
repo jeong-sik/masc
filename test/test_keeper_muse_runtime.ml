@@ -762,6 +762,23 @@ if SCENARIO == "text_only":
                             "revision": 1, "status": "completed", "text": "TEXT_ONLY_OK"})
     notify("turn/completed", {"sessionId": SESSION, "turnId": turn_id, "terminal": "completed"})
     drain()
+if SCENARIO == "no_message":
+    # The model reasoned and ended without writing a message.
+    notify("turn/completed", {"sessionId": SESSION, "turnId": turn_id, "terminal": "completed"})
+    drain()
+if SCENARIO in ["gap_no_message", "gap_then_message"]:
+    notify("view/gap", {"sessionId": SESSION, "after": "v:0", "next": "v:9"})
+    if SCENARIO == "gap_then_message":
+        item("item/completed", {"itemId": "m-1", "kind": "agentMessage", "turnId": turn_id,
+                                "revision": 1, "status": "completed", "text": "AFTER_GAP_OK"})
+    notify("turn/completed", {"sessionId": SESSION, "turnId": turn_id, "terminal": "completed"})
+    drain()
+if SCENARIO == "open_message":
+    item("item/started", {"itemId": "m-1", "kind": "agentMessage", "turnId": turn_id,
+                          "revision": 1, "status": "inProgress", "text": ""})
+    notify("item/delta", {"sessionId": SESSION, "itemId": "m-1", "field": "text", "delta": "partial"})
+    notify("turn/completed", {"sessionId": SESSION, "turnId": turn_id, "terminal": "completed"})
+    drain()
 assert SCENARIO == "complete", SCENARIO
 item("item/started", {"itemId": "m-1", "kind": "agentMessage", "turnId": turn_id,
                       "revision": 1, "status": "inProgress", "text": ""})
@@ -2244,6 +2261,49 @@ let test_hook_tool_surface_controls_session_binding () =
     | _ -> fail "four bindings expected")
 ;;
 
+(* Muse spells a chosen silence as a completed turn with no message item.
+   The runtime settles it with no content block, the shape a wake that allows
+   silence accepts. *)
+let test_a_turn_without_a_message_settles_with_no_content () =
+  with_scripted_host ~fixture:(scenario "no_message") (fun ~base_path ->
+    let run = run_turn ~base_path ~tool:(masc_probe_tool (ref `Null)) in
+    match run.outcome.result with
+    | Error error -> fail (Agent_core.Error.to_string error)
+    | Ok result ->
+      check int "no content block" 0 (List.length result.response.content);
+      check bool "a quiet final when the wake allows silence" true
+        (Keeper_tooling.Response.quiet_final_shape
+           ~policy:Keeper_tooling.Response.Allow_quiet_final result.response
+         = Some Keeper_tooling.Response.Quiet_no_content);
+      check bool "still no progress when the wake requires it" false
+        (Keeper_tooling.Response.accepts_response
+           ~policy:Keeper_tooling.Response.Require_progress result.response))
+;;
+
+(* A turn whose final message MASC may have missed must not read as the
+   model's silence: the reply could exist on the host. *)
+let test_an_unobserved_final_message_is_not_silence () =
+  List.iter (fun name ->
+    with_scripted_host ~fixture:(scenario name) (fun ~base_path ->
+      let run = run_turn ~base_path ~tool:(masc_probe_tool (ref `Null)) in
+      (match run.outcome.result with
+       | Error _ -> ()
+       | Ok result ->
+         failf "%s settled with %d content blocks instead of failing" name
+           (List.length result.response.content));
+      check_effect (name ^ ": effects unknown")
+        Keeper_provider_attempt_effect.Observation_unavailable run.outcome))
+    [ "gap_no_message"; "open_message" ]
+;;
+
+let test_a_message_completed_after_a_gap_is_kept () =
+  with_scripted_host ~fixture:(scenario "gap_then_message") (fun ~base_path ->
+    let run = run_turn ~base_path ~tool:(masc_probe_tool (ref `Null)) in
+    match run.outcome.result with
+    | Ok result -> check string "reply after the gap" "AFTER_GAP_OK" (response_text result)
+    | Error error -> fail (Agent_core.Error.to_string error))
+;;
+
 let test_later_unstreamed_message_reaches_live_consumers () =
   with_scripted_host ~fixture:(scenario "later_unstreamed") (fun ~base_path ->
     let run = run_turn ~base_path ~tool:(masc_probe_tool (ref `Null)) in
@@ -2675,6 +2735,12 @@ let () =
             test_failed_muse_turn_reads_typed_usage_without_replay
         ; test_case "prepared hook tool surface controls session binding" `Quick test_hook_tool_surface_controls_session_binding
         ; test_case "completed message suffix is forwarded once" `Quick test_completed_message_suffix_is_forwarded_once
+        ; test_case "a turn without a message settles with no content" `Quick
+            test_a_turn_without_a_message_settles_with_no_content
+        ; test_case "an unobserved final message is not silence" `Quick
+            test_an_unobserved_final_message_is_not_silence
+        ; test_case "a message completed after a gap is kept" `Quick
+            test_a_message_completed_after_a_gap_is_kept
         ; test_case "later unstreamed message reaches live consumers" `Quick test_later_unstreamed_message_reaches_live_consumers
         ; test_case "text-only host needs no session MCP" `Quick test_text_only_session_does_not_require_session_mcp
         ] )

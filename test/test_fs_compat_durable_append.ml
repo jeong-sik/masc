@@ -448,6 +448,109 @@ let test_private_jsonl_rows_read_allocates_about_twice_the_store () =
   if times > 2.5 then failf "one read put %.1f times the store on the major heap" times
 ;;
 
+(* The window reader against the whole-store reader. Every answer it gives is
+   derived from the complete rows here, the same bytes the rows reader
+   returns, so a window is the part of the store a whole read would have
+   seen. Stores carry blank rows, rows longer than the reader's chunk, and
+   torn tails. *)
+let window_previous_row_wanted line = not (String.equal (String.trim line) "")
+
+let expected_window ~rows ~rows_end ~end_offset ~from ~max_rows =
+  let from_starts_row =
+    from = 0 || (from <= rows_end && Char.equal rows.[from - 1] '\n')
+  in
+  if from > rows_end || not from_starts_row
+  then None, from_starts_row, "", from, rows_end, end_offset
+  else (
+    let rec previous row_end =
+      if row_end <= 0
+      then None
+      else (
+        let row_start =
+          match String.rindex_from_opt rows (row_end - 2) '\n' with
+          | Some newline when row_end >= 2 -> newline + 1
+          | Some _ | None -> 0
+        in
+        let line = String.sub rows row_start (row_end - 1 - row_start) in
+        if window_previous_row_wanted line then Some (row_start, line) else previous row_start)
+    in
+    let rec forward offset count =
+      if count >= max_rows || offset >= rows_end
+      then offset
+      else forward (String.index_from rows offset '\n' + 1) (count + 1)
+    in
+    let window_end = forward from 0 in
+    ( previous from
+    , from_starts_row
+    , String.sub rows from (window_end - from)
+    , window_end
+    , rows_end
+    , end_offset ))
+;;
+
+let window_row_choices = [| ""; " "; "{\"r\":1}"; String.make 300 'a'; String.make 70_000 'b' |]
+
+let random_window_store state =
+  let rows =
+    List.init (Random.State.int state 9) (fun _ ->
+      window_row_choices.(Random.State.int state (Array.length window_row_choices)) ^ "\n")
+  in
+  let tail = if Random.State.bool state then "" else "{\"torn\":" in
+  String.concat "" rows ^ tail
+;;
+
+let compare_window_with_rows store =
+  with_temp_jsonl store @@ fun path ->
+  let rows, rows_end, end_offset =
+    match Fs_compat.read_private_jsonl_rows_locked_result path with
+    | Fs_compat.Private_file_succeeded
+        (Fs_compat.Private_jsonl_rows.Rows_present { rows; rows_end; end_offset }) ->
+      rows, rows_end, end_offset
+    | _ -> fail "the store did not read as rows"
+  in
+  let starts =
+    List.concat_map (fun at -> [ at - 1; at; at + 1 ])
+      (0 :: end_offset :: List.filter_map (fun at -> at)
+         (List.init (String.length rows) (fun index ->
+            if Char.equal rows.[index] '\n' then Some (index + 1) else None)))
+    |> List.filter (fun at -> at >= 0)
+    |> List.sort_uniq compare
+  in
+  List.iter (fun from ->
+    List.iter (fun max_rows ->
+      let expected = expected_window ~rows ~rows_end ~end_offset ~from ~max_rows in
+      match
+        Fs_compat.read_private_jsonl_window_locked_result path ~from ~max_rows
+          ~previous_row_wanted:window_previous_row_wanted
+      with
+      | Fs_compat.Private_file_succeeded
+          (Fs_compat.Private_jsonl_window.Window_present
+             { previous_row; from_starts_row; rows; window_end; rows_end; end_offset }) ->
+        if (previous_row, from_starts_row, rows, window_end, rows_end, end_offset) <> expected
+        then failf "window from %d with %d rows differs from the whole read of %d bytes"
+            from max_rows (String.length store)
+      | _ -> failf "window from %d did not read as a window" from)
+      [ 1; 2; 5; 50 ])
+    starts
+;;
+
+let test_private_jsonl_window_matches_the_whole_read () =
+  List.iter compare_window_with_rows
+    [ ""; "\n"; "{\"torn\":"; "a\n\n \nb\n"; String.make 70_000 'c' ^ "\n" ^ "d\n" ];
+  let state = Random.State.make [| 43_413 |] in
+  for _ = 1 to 40 do
+    compare_window_with_rows (random_window_store state)
+  done;
+  let missing = Filename.temp_file "masc_private_jsonl_window_missing_" ".jsonl" in
+  Sys.remove missing;
+  match
+    Fs_compat.read_private_jsonl_window_locked_result missing ~from:0 ~max_rows:1
+      ~previous_row_wanted:window_previous_row_wanted
+  with
+  | Fs_compat.Private_file_succeeded Fs_compat.Private_jsonl_window.Window_missing -> ()
+  | _ -> fail "a missing store must read as Window_missing"
+;;
+
 let test_private_jsonl_slice_rejects_incomplete_tail () =
   with_temp_jsonl "{\"row\":1}" @@ fun path ->
   match Fs_compat.read_private_jsonl_slice_locked_result path ~from:0 with
@@ -1549,6 +1652,10 @@ let () =
             "private JSONL rows read allocates about twice the store"
             `Quick
             test_private_jsonl_rows_read_allocates_about_twice_the_store
+        ; test_case
+            "private JSONL window matches the whole read"
+            `Quick
+            test_private_jsonl_window_matches_the_whole_read
         ; test_case
             "private JSONL tail returns bounded complete rows with omission"
             `Quick

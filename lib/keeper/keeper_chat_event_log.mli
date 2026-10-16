@@ -322,3 +322,22 @@ val page_of_rows :
     reaches it, not every page. Blank rows are skipped. A [limit] below one is
     [Page_limit_not_positive]. Pure and total: it touches no file and raises
     for no constructible argument, so a caller can run it on a pool domain. *)
+
+val read_page_path :
+  path:string ->
+  since_seq:replay_position ->
+  start:page_start ->
+  limit:int ->
+  ((page, page_failure) result, read_failure) result
+(** One page of the journal at [path]: the answer {!page_of_rows} gives over
+    {!read_journal_rows_path}, read from the file without the whole journal.
+    From a held offset, or from the first row without a held seq, it reads
+    the nearest non-blank row before the offset and [limit + 1] rows from it,
+    and more only when blank rows or rows at or before [since_seq] used part
+    of them; paging through a journal reads it about once. A page from the
+    first row with a held seq reads the whole journal, which {!page_of_rows}
+    bisects to find where the page starts. Each window is read under the
+    journal's lock on its own, so a journal pruned between two windows of one
+    page fails that page with [Journal_missing]. Reads take the lock in a
+    systhread when called from an Eio fiber, so a caller may run it on a pool
+    domain. Never raises except [Eio.Cancel.Cancelled]. *)

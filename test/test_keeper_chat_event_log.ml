@@ -488,6 +488,174 @@ let test_journal_torn_tail_reads_complete_rows () =
           Alcotest.fail ("corrupt read as unreadable: " ^ detail)
         | Ok _ -> Alcotest.fail "a bad complete row decoded"))
 
+(* [read_page_path] reads windows of the file and [page_of_rows] the whole
+   journal. Every cursor, seq and limit must get the same answer from both,
+   errors included: the windows change what is read, never what a page says.
+   The journals carry blank rows, rows long enough to cross the reader's
+   chunk, a bad complete row, and torn tails. *)
+let window_journals = 12
+
+(* Zero and the largest int are limits no request can send; both functions
+   must still answer them, and the same way. *)
+let window_limits = [ 0; 1; 2; 7; L.page_max_limit; max_int ]
+
+let test_read_page_path_matches_page_of_rows () =
+  let base_dir = temp_base_path "keeper-chat-event-log-window" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+       let state = Random.State.make [| 43_416 |] in
+       for case = 1 to window_journals do
+         let keeper_name = "window-keeper" in
+         let operation_id = Printf.sprintf "op-window-%d" case in
+         let journal = L.open_journal ~base_dir ~keeper_name ~operation_id () in
+         let path = L.journal_path ~base_dir ~keeper_name ~operation_id in
+         let append_raw bytes =
+           let oc =
+             open_out_gen [ Open_append; Open_wronly; Open_binary; Open_creat ] 0o600 path
+           in
+           output_string oc bytes;
+           close_out oc
+         in
+         let events = Random.State.int state 24 in
+         for seq = 0 to events - 1 do
+           (match Random.State.int state 8 with
+            | 0 -> append_raw "\n"
+            | 1 -> append_raw "  \t\n"
+            | _ -> ());
+           let text =
+             String.make (if Random.State.int state 6 = 0 then 70_000 else 40) 'x'
+           in
+           L.append journal ~seq ~ts:(1_762_300_000.0 +. float_of_int seq)
+             (E.Text_delta { text; response = Unobserved_scope None })
+         done;
+         if Random.State.int state 5 = 0 then append_raw "this complete line is not an envelope\n";
+         if Random.State.bool state then append_raw "{\"v\":1,\"seq\":999,\"ts\":1";
+         let whole = L.read_journal_rows_path path in
+         let row_ends =
+           match whole with
+           | Ok rows ->
+             List.filter_map
+               (fun index -> if Char.equal rows.[index] '\n' then Some (index + 1) else None)
+               (List.init (String.length rows) Fun.id)
+           | Error _ -> []
+         in
+         let starts =
+           L.first_row
+           :: List.filter_map
+                (fun at -> L.page_start_of_wire (Some at))
+                (List.concat_map (fun at -> [ at - 1; at; at + 1 ]) (0 :: row_ends)
+                 |> List.filter (fun at -> at >= 0)
+                 |> List.sort_uniq compare)
+         in
+         let seqs =
+           L.Whole_turn
+           :: List.filter_map
+                (fun seq -> L.replay_position_of_wire (Some seq))
+                [ 0; events / 2; events + 5 ]
+         in
+         List.iter (fun start ->
+           List.iter (fun since_seq ->
+             List.iter (fun limit ->
+               let expected =
+                 Result.map (L.page_of_rows ~path ~since_seq ~start ~limit) whole
+               in
+               let actual = L.read_page_path ~path ~since_seq ~start ~limit in
+               if expected <> actual
+               then
+                 Alcotest.failf
+                   "journal %d: start %d, since_seq %s, limit %d read differently"
+                   case (L.page_start_offset start) (L.replay_position_to_string since_seq)
+                   limit)
+               window_limits)
+             seqs)
+           starts
+       done)
+
+(* The events routes read a page inside a pool job, and a pool worker is
+   another domain with its own Eio loop, so the read takes its lock and file
+   transaction from there. Walking a journal a page at a time in pool jobs
+   must serve what the same walk on the calling fiber serves. The guard is
+   enabled as the server enables it, so a guarded lock taken from the wrong
+   context raises here as it would there. The blank rows make pages read a
+   second window. *)
+let pool_walk_events = 9
+
+let test_read_page_path_in_a_pool_job () =
+  let base_dir = temp_base_path "keeper-chat-event-log-pool" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+       let keeper_name = "pool-keeper" in
+       let operation_id = "op-pool" in
+       let journal = L.open_journal ~base_dir ~keeper_name ~operation_id () in
+       let path = L.journal_path ~base_dir ~keeper_name ~operation_id in
+       let append_raw bytes =
+         let oc = open_out_gen [ Open_append; Open_wronly; Open_binary ] 0o600 path in
+         output_string oc bytes;
+         close_out oc
+       in
+       for seq = 0 to pool_walk_events - 1 do
+         L.append journal ~seq ~ts:(1_762_300_000.0 +. float_of_int seq)
+           (E.Text_delta { text = "row"; response = Unobserved_scope None });
+         if seq mod 3 = 0 then append_raw "\n"
+       done;
+       append_raw "{\"v\":1,\"seq\":999,\"ts\":1";
+       (* Every answer of a walk from the first row that follows the cursors
+          each page hands back. *)
+       let walk read =
+         let rec go ~since_seq ~start answers =
+           if List.length answers > pool_walk_events
+           then Alcotest.fail "the walk did not end"
+           else (
+             let answer = read ~since_seq ~start in
+             let answers = answer :: answers in
+             match answer with
+             | Ok (Ok { L.has_more = true; events; next_offset }) ->
+               let held =
+                 match List.rev events with
+                 | (last : L.journaled_event) :: _ -> L.replay_position_of_wire (Some last.seq)
+                 | [] -> None
+               in
+               (match held, L.page_start_of_wire (Some next_offset) with
+                | Some since_seq, Some start -> go ~since_seq ~start answers
+                | None, _ | _, None -> Alcotest.fail "a page handed back no cursor")
+             | Ok (Ok { L.has_more = false; _ }) | Ok (Error _) | Error _ ->
+               List.rev answers)
+         in
+         go ~since_seq:L.Whole_turn ~start:L.first_row []
+       in
+       let read_page ~since_seq ~start = L.read_page_path ~path ~since_seq ~start ~limit:2 in
+       Eio_main.run @@ fun env ->
+       Eio_guard.enable ();
+       Fun.protect ~finally:Eio_guard.disable @@ fun () ->
+       let inline = walk read_page in
+       Alcotest.(check (list int))
+         "the walk on the fiber serves every row once, in order"
+         (List.init pool_walk_events Fun.id)
+         (List.concat_map
+            (function
+              | Ok (Ok (page : L.page)) ->
+                List.map (fun (entry : L.journaled_event) -> entry.seq) page.events
+              | Ok (Error failure) -> Alcotest.fail (L.page_failure_to_string failure)
+              | Error _ -> Alcotest.fail "the journal did not read")
+            inline);
+       Eio.Switch.run @@ fun sw ->
+       Domain_pool_ref.set
+         (Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env));
+       Fun.protect ~finally:Domain_pool_ref.clear_for_tests @@ fun () ->
+       let caller = (Domain.self () :> int) in
+       let pooled =
+         walk (fun ~since_seq ~start ->
+           let worker, answer =
+             Domain_pool_ref.submit_cpu_or_inline (fun () ->
+               (Domain.self () :> int), read_page ~since_seq ~start)
+           in
+           if worker = caller then Alcotest.fail "the page was read on the calling domain";
+           answer)
+       in
+       Alcotest.(check bool) "pool jobs serve the pages the fiber serves" true (pooled = inline))
+
 let test_journal_path_sanitizes_segments () =
   let path =
     L.journal_path ~base_dir:"/tmp/base" ~keeper_name:"keeper/x" ~operation_id:"op/../../escape"
@@ -1360,6 +1528,14 @@ let () =
             "torn tail reads the complete rows"
             `Quick
             test_journal_torn_tail_reads_complete_rows
+        ; Alcotest.test_case
+            "a page read from windows matches the whole journal"
+            `Quick
+            test_read_page_path_matches_page_of_rows
+        ; Alcotest.test_case
+            "a pool job reads the pages the calling fiber reads"
+            `Quick
+            test_read_page_path_in_a_pool_job
         ; Alcotest.test_case
             "path sanitizes both segments"
             `Quick

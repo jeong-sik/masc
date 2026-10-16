@@ -1194,6 +1194,45 @@ val read_private_jsonl_rows_locked_result :
   , Private_jsonl_rows.error )
   private_file_transaction_outcome
 
+module Private_jsonl_window : sig
+  type t =
+    | Window_missing  (** No file at the path. *)
+    | Window_present of
+        { previous_row : (int * string) option
+              (** When [from] starts a row after the first: the nearest row
+                  before [from] that [previous_row_wanted] accepts, as its
+                  start offset and its bytes without the ['\n']. *)
+        ; from_starts_row : bool
+              (** [from] is [0], or lies at or before [rows_end] right after a
+                  ['\n']. *)
+        ; rows : string
+              (** Bytes [[from, window_end)]: at most [max_rows] complete rows,
+                  each ending in ['\n']. Empty when [from] lies past
+                  [rows_end] or inside a row. *)
+        ; window_end : int
+        ; rows_end : int  (** As {!Private_jsonl_rows}: just past the last ['\n']. *)
+        ; end_offset : int  (** File length under the lock. *)
+        }
+end
+
+(** Part of a private JSONL store under the lock and framing of
+    {!read_private_jsonl_rows_locked_result}: where the complete rows end,
+    the row before [from], and at most [max_rows] complete rows from [from].
+    It reads the rows it returns, the rows before [from] back to the one
+    [previous_row_wanted] accepts, and the bytes from the end of the store
+    back to its last ['\n'], not the whole store. [previous_row_wanted] runs
+    in the blocking worker under the lock: it must not raise or use Eio
+    effects.
+    Raises [Invalid_argument] for a negative [from] or a [max_rows] below one. *)
+val read_private_jsonl_window_locked_result :
+  string ->
+  from:int ->
+  max_rows:int ->
+  previous_row_wanted:(string -> bool) ->
+  ( Private_jsonl_window.t
+  , Private_jsonl_rows.error )
+  private_file_transaction_outcome
+
 module Private_jsonl_tail : sig
   type t =
     | Tail_missing

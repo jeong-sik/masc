@@ -1,5 +1,14 @@
 (** TUI data loading functions — split from masc_tui.ml (#3808) *)
 
+(* Independent reads share the current Eio cancellation scope. Keep the
+   synchronous entry point usable when no TUI runtime has been installed. *)
+let read_pair left right =
+  match Eio_context.get_switch_opt () with
+  | Some _ -> Eio.Fiber.pair left right
+  | None ->
+      let left = left () in
+      left, right ()
+
 module Keeper_declared_roster = Masc.Keeper_declared_roster
 module Keeper_meta_store = Masc.Keeper_meta_store
 module Keeper_status_runtime = Masc.Keeper_status_runtime

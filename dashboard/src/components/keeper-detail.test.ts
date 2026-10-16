@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/preact'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact'
 import { html } from 'htm/preact'
 
 import type { Keeper } from '../types'
@@ -365,8 +365,10 @@ describe('KeeperDetailPage', () => {
     fireEvent.click(detailCommand)
     const statusTab = await screen.findByRole('tab', { name: '상태' })
     fireEvent.click(statusTab)
-    expect(statusTab.getAttribute('aria-selected')).toBe('true')
-    expect(screen.getByText('운영 상태 개요')).toBeTruthy()
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: '상태' }).getAttribute('aria-selected')).toBe('true')
+      expect(screen.getByText('운영 상태 개요')).toBeTruthy()
+    })
   })
 
   it('opens target keeper config as an overlay from the roster row menu after a keeper route change', async () => {

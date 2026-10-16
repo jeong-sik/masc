@@ -136,9 +136,22 @@ export function fetchTaskEvents(taskId: string, limit = 50): Promise<unknown[]> 
 
 // --- Dashboard delete actions ---
 
-export async function deleteBoardPost(postId: string): Promise<boolean> {
-  const resp = await post<{ ok: boolean }>('/api/v1/dashboard/board/delete', { post_id: postId })
-  return resp.ok
+export type BoardDeleteOutcome =
+  | { status: 'deleted'; postId: string }
+  | { status: 'persistence_pending'; postId: string; detail: string }
+
+export async function deleteBoardPost(postId: string): Promise<BoardDeleteOutcome> {
+  const value = await post<unknown>('/api/v1/dashboard/board/delete', { post_id: postId })
+  if (value === null || typeof value !== 'object') throw new Error('Invalid Board deletion receipt')
+  const receipt = value as Record<string, unknown>
+  if (receipt.ok !== true || receipt.applied !== true || receipt.post_id !== postId) {
+    throw new Error('Invalid Board deletion receipt')
+  }
+  if (receipt.persistence === 'durable') return { status: 'deleted', postId }
+  if (receipt.persistence === 'pending' && typeof receipt.detail === 'string' && receipt.detail.trim()) {
+    return { status: 'persistence_pending', postId, detail: receipt.detail }
+  }
+  throw new Error('Invalid Board deletion receipt')
 }
 
 export async function setBoardPostPinned(postId: string, pinned: boolean): Promise<boolean> {

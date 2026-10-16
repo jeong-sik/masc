@@ -136,7 +136,8 @@ val set_board_write_hook : (unit -> unit) -> unit
 (** Replace the in-process hook invoked after a board write that raises no
     {!board_sse_event}: {!update_post}, {!set_thread_id}, {!set_pinned},
     {!set_closed}, {!reopen} and {!delete_post}. A write the store refuses does
-    not invoke it. The server drops its cached projections of the store here,
+    not invoke it. An applied deletion invokes it even when snapshot
+    persistence remains pending. The server drops its cached projections here,
     so a read after the write is not answered from the page it changed. *)
 
 (** {1 Backend lifecycle} *)
@@ -252,7 +253,8 @@ val current_post_cursor : unit -> float * string option
 (** Current Board cursor head without sorting or materializing the full post
     history. *)
 
-val delete_post : post_id:string -> (unit, Board.board_error) Result.t
+val delete_post :
+  post_id:string -> (Board.deletion_outcome, Board.board_error) Result.t
 
 val set_thread_id :
   post_id:string ->

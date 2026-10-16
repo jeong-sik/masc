@@ -17,7 +17,7 @@ vi.mock('./core', async importOriginal => ({
   post: vi.fn(() => Promise.resolve({ ok: true })),
 }))
 
-import { claimTask, deleteTask, sendBroadcast } from './actions'
+import { claimTask, deleteBoardPost, deleteTask, sendBroadcast } from './actions'
 import { post } from './core'
 
 describe('claimTask', () => {
@@ -37,6 +37,28 @@ describe('claimTask', () => {
   it('propagates a transition failure so the caller can roll back the optimistic flag', async () => {
     mcpMocks.callMcpTool.mockRejectedValueOnce(new Error('todo -> claimed rejected'))
     await expect(claimTask('task-err')).rejects.toThrow('todo -> claimed rejected')
+  })
+})
+
+describe('Board deletion persistence', () => {
+  it('accepts a durable deletion receipt bound to the requested post', async () => {
+    vi.mocked(post).mockResolvedValueOnce({ ok: true, post_id: 'post-9', applied: true, persistence: 'durable' })
+    expect(await deleteBoardPost('post-9')).toEqual({ status: 'deleted', postId: 'post-9' })
+  })
+
+  it('preserves an applied deletion with pending persistence', async () => {
+    vi.mocked(post).mockResolvedValueOnce({ ok: true, post_id: 'post-9', applied: true, persistence: 'pending', detail: 'snapshot write failed' })
+    expect(await deleteBoardPost('post-9')).toEqual({ status: 'persistence_pending', postId: 'post-9', detail: 'snapshot write failed' })
+  })
+
+  it.each([
+    { ok: true },
+    { ok: true, post_id: 'different-post', applied: true, persistence: 'durable' },
+    { ok: true, post_id: 'post-9', applied: false, persistence: 'pending', detail: 'not applied' },
+    { ok: true, post_id: 'post-9', applied: true, persistence: 'pending', detail: '' },
+  ])('rejects an unbound or contradictory receipt: %j', async value => {
+    vi.mocked(post).mockResolvedValueOnce(value)
+    await expect(deleteBoardPost('post-9')).rejects.toThrow('receipt')
   })
 })
 

@@ -1155,9 +1155,30 @@ let add_delete_action_routes router =
                  respond_error ~request:req reqd (invalid_request "post_id")
              | Some post_id ->
              match Board_dispatch.delete_post ~post_id with
-             | Ok () -> respond_ok ~request:req reqd
+             | Ok outcome ->
+                 let status, persistence, details =
+                   match outcome with
+                   | Board.Durable_deletion -> `OK, "durable", []
+                   | Board.Deletion_persistence_pending detail ->
+                     `Accepted, "pending", ["detail", `String detail]
+                 in
+                 Http.Response.json_value ~status ~request:req
+                   (`Assoc
+                     ([ "ok", `Bool true
+                      ; "post_id", `String post_id
+                      ; "applied", `Bool true
+                      ; "persistence", `String persistence
+                      ] @ details)) reqd
              | Error err ->
-                 respond_error ~status:`Not_found ~request:req reqd
+                 let status =
+                   match err with
+                   | Board.Invalid_id _ | Board.Validation_error _ -> `Bad_request
+                   | Board.Post_not_found _ | Board.Comment_not_found _ -> `Not_found
+                   | Board.Io_error _ -> `Service_unavailable
+                   | Board.Already_voted _ | Board.Already_exists _ -> `Conflict
+                   | Board.Unauthorized _ -> `Forbidden
+                 in
+                 respond_error ~status ~request:req reqd
                    (Board_tool.board_error_to_string err)
            with Yojson.Json_error _ ->
              respond_error ~request:req reqd (invalid_request "post_id")

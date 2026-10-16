@@ -798,7 +798,11 @@ let remark_all_comments_dirty store =
     store.comments
 ;;
 
-let delete_post store ~post_id : (unit, board_error) Result.t =
+type deletion_outcome =
+  | Durable_deletion
+  | Deletion_persistence_pending of string
+
+let delete_post store ~post_id : (deletion_outcome, board_error) Result.t =
   (* Deleting rewrites every snapshot below after the post has left memory, so
      each file it rewrites must have loaded fully first (#38595). *)
   let* () = require_persisted_snapshot_readable store.posts_load_result in
@@ -895,10 +899,16 @@ let delete_post store ~post_id : (unit, board_error) Result.t =
          match comments_result with
          | Ok () -> ()
          | Error _ -> remark_all_comments_dirty store);
-       let* () = posts_result in
-       let* () = comments_result in
-       let* () = votes_result in
-       reactions_result))
+       let failures =
+         List.filter_map
+           (function
+             | Ok () -> None
+             | Error error -> Some (show_board_error error))
+           [posts_result; comments_result; votes_result; reactions_result]
+       in
+       match failures with
+       | [] -> Ok Durable_deletion
+       | _ :: _ -> Ok (Deletion_persistence_pending (String.concat "; " failures))))
 
 (** {1 Global Store}
 

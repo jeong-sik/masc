@@ -345,8 +345,12 @@ function PostCard({ post, reactions, supportedEmojis, reactionsArriving = false 
     if (!confirmed) return
     deletingPostId.value = post.id
     try {
-      await deleteBoardPost(post.id)
-      showToast('게시글을 삭제했습니다', 'success')
+      const outcome = await deleteBoardPost(post.id)
+      if (outcome.status === 'persistence_pending') {
+        showToast('게시글 삭제를 적용했습니다. 저장이 아직 완료되지 않았습니다.', 'warning')
+      } else {
+        showToast('게시글을 삭제했습니다', 'success')
+      }
       refreshBoard()
     } catch (err) {
       console.warn('[board] post delete failed', err instanceof Error ? err.message : err)

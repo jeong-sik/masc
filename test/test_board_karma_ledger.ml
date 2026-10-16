@@ -286,7 +286,8 @@ let test_delete_post_rewrites_persisted_snapshots () =
    | Ok _ -> ()
    | Error e -> Alcotest.fail (Board.show_board_error e));
   (match Board_dispatch.delete_post ~post_id:pid with
-   | Ok () -> ()
+   | Ok Board.Durable_deletion -> ()
+   | Ok (Board.Deletion_persistence_pending detail) -> Alcotest.fail detail
    | Error e -> Alcotest.fail (Board.show_board_error e));
   (match Board_dispatch.get_post ~post_id:pid with
    | Ok _ -> Alcotest.fail "deleted post remained readable"

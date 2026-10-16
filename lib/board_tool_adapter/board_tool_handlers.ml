@@ -525,11 +525,22 @@ let handle_delete ~tool_name ~start_time args : Tool_result.result =
     | Error e -> Board_tool_format.error_of_board_error ~tool_name ~start_time e
     | Ok () ->
     match Board_dispatch.delete_post ~post_id with
-    | Ok () ->
+    | Ok Board.Durable_deletion ->
       Tool_result.make_ok
         ~tool_name
         ~start_time
         ~data:(`String (Printf.sprintf "Deleted post %s" post_id))
+        ()
+    | Ok (Board.Deletion_persistence_pending detail) ->
+      Tool_result.make_deferred
+        ~tool_name ~start_time
+        ~data:(`Assoc
+          [ "post_id", `String post_id
+          ; "applied", `Bool true
+          ; "persistence", `String "pending"
+          ; "message", `String "Post deleted in memory; snapshot persistence is pending. Do not repeat the deletion."
+          ; "detail", `String detail
+          ])
         ()
     | Error e ->
       Tool_result.make_err
@@ -714,13 +725,18 @@ let handle_board_cleanup ~tool_name ~start_time args : Tool_result.result =
         ()))
   else (
     let deleted = ref 0 in
+    let persistence_pending = ref [] in
     let failed = ref 0 in
     List.iter
       (fun (p : Board.post) ->
          let pid = Board.Post_id.to_string p.id in
          try
            match Board_dispatch.delete_post ~post_id:pid with
-           | Ok () -> Stdlib.incr deleted
+           | Ok Board.Durable_deletion -> Stdlib.incr deleted
+           | Ok (Board.Deletion_persistence_pending detail) ->
+             persistence_pending :=
+               (`Assoc ["post_id", `String pid; "detail", `String detail])
+               :: !persistence_pending
            | Error _ -> Stdlib.incr failed
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
@@ -728,11 +744,20 @@ let handle_board_cleanup ~tool_name ~start_time args : Tool_result.result =
       targets;
     let message =
       Printf.sprintf
-        "Cleanup done: %d deleted, %d failed (scanned %d, age>%dh)"
+        "Cleanup done: %d durable deletions, %d persistence pending, %d failed (scanned %d, age>%dh)"
         !deleted
+        (List.length !persistence_pending)
         !failed
         (List.length all_posts)
         max_age_hours
+    in
+    let data =
+      `Assoc
+        [ "message", `String message
+        ; "durable_deletions", `Int !deleted
+        ; "persistence_pending", `List (List.rev !persistence_pending)
+        ; "failed", `Int !failed
+        ]
     in
     if !failed > 0
     then
@@ -740,6 +765,9 @@ let handle_board_cleanup ~tool_name ~start_time args : Tool_result.result =
         ~tool_name
         ~class_:Tool_result.Runtime_failure
         ~start_time
+        ~data
         message
-    else Tool_result.make_ok ~tool_name ~start_time ~data:(`String message) ())
+    else if !persistence_pending <> [] then
+      Tool_result.make_deferred ~tool_name ~start_time ~data ()
+    else Tool_result.make_ok ~tool_name ~start_time ~data ())
 ;;

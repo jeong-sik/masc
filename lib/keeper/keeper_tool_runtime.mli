@@ -62,6 +62,7 @@ type context =
 val descriptor_for_internal : string -> Keeper_tool_descriptor.t option
 
 val handle :
+  ?prepared_edit:Keeper_tool_filesystem_runtime.prepared_edit ->
   context ->
   descriptor:Keeper_tool_descriptor.t ->
   args:Yojson.Safe.t ->

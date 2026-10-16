@@ -405,7 +405,10 @@ let make_tool_bundle_for_descriptors_with_policy
          in
          Keeper_tool_descriptor.keeper_model_names descriptor
          |> List.map (fun model_name ->
-             let h =
+             let make_h ?prepared_edit
+                 ?(call_source_context = source_context)
+                 ?(call_gate_context = gate_context_provider)
+                 ?(call_record_gate_result = record_gate_result) () =
                match capability_surface with
                | Some capability_surface ->
                  Keeper_tools_agent_core_handler.make_keeper_tool_handler
@@ -419,13 +422,14 @@ let make_tool_bundle_for_descriptors_with_policy
                    ~publication_recovery
                    ~ctx_snapshot
                    ~keeper_turn_id
-                   ~source_context
+                   ~source_context:call_source_context
+                   ?prepared_edit
                    ?turn_sandbox_factory
                    ?clock
                    ?continuation_channel
-                   ?gate_context:gate_context_provider
+                   ?gate_context:call_gate_context
                    ?gate_grant
-                   ?record_gate_result
+                   ?record_gate_result:call_record_gate_result
                    ?on_completed
                    ~on_deferred:mark_deferred_tool_result
                    ~on_external_effect_deferred:mark_external_effect_deferred
@@ -440,13 +444,14 @@ let make_tool_bundle_for_descriptors_with_policy
                    ~publication_recovery
                    ~ctx_snapshot
                    ~keeper_turn_id
-                   ~source_context
+                   ~source_context:call_source_context
+                   ?prepared_edit
                    ?turn_sandbox_factory
                    ?clock
                    ?continuation_channel
-                   ?gate_context:gate_context_provider
+                   ?gate_context:call_gate_context
                    ?gate_grant
-                   ?record_gate_result
+                   ?record_gate_result:call_record_gate_result
                    ?on_completed
                    ~on_deferred:mark_deferred_tool_result
                    ~on_external_effect_deferred:mark_external_effect_deferred
@@ -458,8 +463,7 @@ let make_tool_bundle_for_descriptors_with_policy
                        ~input)
                    ()
              in
-             ( Tool_bridge.agent_core_tool_of_masc_with_execution_env
-               ?descriptor:agent_core_descriptor
+             let bridge h = Tool_bridge.agent_core_tool_of_masc_with_execution_env
                ~base_path:config.base_path
                ~answer_reader:(fun output_text ->
                  Keeper_tool_answer.answer ~tool_name:model_name ~output_text)
@@ -475,8 +479,56 @@ let make_tool_bundle_for_descriptors_with_policy
                  h
                    ?agent_core_invocation:
                      (Agent_core.Tool.Execution_env.invocation execution_env)
-                   ~result_projection:(model_projection_for_call descriptor ())
+                   ?result_projection:(Some (model_projection_for_call descriptor ()))
                    input)
+             in
+             let ordinary = bridge (make_h ()) in
+             let agent_core_descriptor =
+               if Option.is_some capability_surface
+                  && descriptor.runtime_handler = Keeper_tool_descriptor.Tool_edit_file then
+                 let prepare ~sw input =
+                   let original_source = source_context () in
+                   let source_matches = match original_source with
+                     | None -> false
+                     | Some source ->
+                       source.agent_name = Some meta.name
+                       && source.trace_id = Some (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+                       && source.task_id = Option.map Keeper_id.Task_id.to_string meta.current_task_id
+                       && Option.is_some source.keeper_turn_id in
+                   if not source_matches then Ok None
+                   else
+                     match Keeper_tool_descriptor_resolution.prepare_model_input_for_descriptor
+                         ~tool_name:model_name descriptor ~input with
+                     | Error _ -> Ok None
+                     | Ok args ->
+                       (match Keeper_tool_filesystem_runtime.prepare_edit ~sw ~config ~meta ~args with
+                        (* The ordinary Serial path retains real validation/path
+                           failure telemetry and load receipt consumption. *)
+                        | Error _ | Ok None -> Ok None
+                        | Ok (Some prepared_edit) ->
+                          let handler execution input =
+                            let causal = Option.map Keeper_gate_causal_context.fork gate_context in
+                            let call_gate_context = Option.map
+                                (fun context () -> Keeper_gate_causal_context.snapshot context) causal in
+                            let call_record_gate_result = Option.map (fun context ~operation ~input result ->
+                              Keeper_gate_causal_context.record_tool_result context ~operation ~input result;
+                              Option.iter (fun record -> record ~operation ~input result) record_gate_result) causal in
+                            let h = make_h ~prepared_edit
+                                ~call_source_context:(fun () -> original_source)
+                                ~call_gate_context ~call_record_gate_result () in
+                            let adapted = bridge h in
+                            adapted.Agent_core.Tool.handler execution input
+                          in
+                          match Keeper_tool_filesystem_runtime.prepared_edit_scopes prepared_edit with
+                          | scope :: additional_scopes ->
+                            Ok (Some (Agent_core.Tool.scoped_call ~scope ~additional_scopes handler))
+                          | [] -> invalid_arg "prepared Edit producer returned no directory footprint")
+                 in
+                 Some (Agent_core.Tool.ordinary_descriptor_scoped ~prepare)
+               else agent_core_descriptor
+             in
+             ( Agent_core.Tool.of_schema ?descriptor:agent_core_descriptor
+                 ordinary.schema ordinary.handler
              (* A descriptor's [defer_loading] lives in the TOML named for its
                 internal name, while the model may know the tool by a public
                 name ([BrowserRead] for [masc_browser_read]). Taken here, where

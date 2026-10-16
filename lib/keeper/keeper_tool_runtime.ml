@@ -74,7 +74,7 @@ let descriptor_for_internal internal_name =
   | [] -> None
 ;;
 
-let handle_filesystem ctx descriptor args =
+let handle_filesystem ?prepared_edit ctx descriptor args =
   match descriptor.Keeper_tool_descriptor.runtime_handler with
   | Tool_read_file ->
     Some
@@ -93,6 +93,7 @@ let handle_filesystem ctx descriptor args =
          ?continuation_channel:ctx.continuation_channel
          ?gate_context:ctx.gate_context
          ?gate_grant:ctx.gate_grant
+         ?prepared_edit
          ~args
          ())
   | Tool_ide_annotate ->
@@ -665,9 +666,9 @@ let handle_in_process ctx descriptor args =
 (* [handle] hands itself to the shell-ir owner as a value: a masc stage
    found inside a shell line dispatches through the same routing as a
    direct call, without a forward reference or a module cycle. *)
-let rec handle ctx ~descriptor ~args =
+let rec handle ?prepared_edit ctx ~descriptor ~args =
   match descriptor.Keeper_tool_descriptor.executor with
-  | Filesystem -> handle_filesystem ctx descriptor args
+  | Filesystem -> handle_filesystem ?prepared_edit ctx descriptor args
   | Shell_ir -> handle_shell_ir ctx ~dispatch:(handle ctx) descriptor args
   | In_process -> handle_in_process ctx descriptor args
 ;;

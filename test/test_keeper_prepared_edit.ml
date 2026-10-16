@@ -71,6 +71,23 @@ let failed result =
   | Tool_result.Completed () | Tool_result.Deferred () -> fail "changed prepared authority performed an Edit"
 ;;
 
+let dispatch ?(hooks = Agent_core.Hooks.empty) env tools calls =
+  let agent = Agent_core.Agent.create ~tools ~net:env#net
+      ~config:(Agent_core.Types.default_config ~model:"fixture") () in
+  let options = Agent_core.Agent.options agent in
+  match Agent_core.Agent_tools.execute_tools ~context:(Agent_core.Agent.context agent)
+      ~tools ~hooks ~event_bus:options.event_bus ~tracer:options.tracer
+      ~agent_name:(Agent_core.Agent.state agent).config.name ~turn_count:2
+      ~usage:(Agent_core.Agent.state agent).usage calls with
+  | Ok report ->
+    List.iter (fun (row : Agent_core.Agent_tools.tool_execution_result) ->
+      match row.outcome with
+      | Agent_core.Types.Tool_succeeded -> ()
+      | Tool_failed _ -> fail row.content) report.completed_results;
+    report.completed_results
+  | Error _ -> fail "Edit batch failed outside its tool results"
+;;
+
 let batch env config meta recovery inputs =
   let to_sdk result = match result.Keeper_tool_execution.disposition with
     | Tool_result.Completed () ->
@@ -93,22 +110,118 @@ let batch env config meta recovery inputs =
       ~input_schema:(`Assoc ["type", `String "object"]) () |> get in
   let tool = Agent_core.Tool.of_schema ~descriptor schema
       (fun _ input -> consume config meta recovery None input |> to_sdk) in
-  let agent = Agent_core.Agent.create ~tools:[tool] ~net:env#net
-      ~config:(Agent_core.Types.default_config ~model:"fixture") () in
-  let options = Agent_core.Agent.options agent in
   let calls = List.mapi (fun index input -> Agent_core.Types.ToolUse
       {id = "edit-" ^ string_of_int index; name = "fixture_edit"; input}) inputs in
-  match Agent_core.Agent_tools.execute_tools ~context:(Agent_core.Agent.context agent)
-      ~tools:[tool] ~hooks:Agent_core.Hooks.empty ~event_bus:options.event_bus ~tracer:options.tracer
-      ~agent_name:(Agent_core.Agent.state agent).config.name ~turn_count:2
-      ~usage:(Agent_core.Agent.state agent).usage calls with
-  | Ok report ->
-    List.iter (fun (row : Agent_core.Agent_tools.tool_execution_result) ->
-      match row.outcome with
-      | Agent_core.Types.Tool_succeeded -> ()
-      | Tool_failed _ -> fail row.content) report.completed_results;
-    report.completed_results
-  | Error _ -> fail "Edit batch failed outside its tool results"
+  dispatch env [tool] calls
+;;
+
+let public_bundle ?(sourceful = true) env sw config meta recovery operation =
+  Masc_test_deps.with_process_env "MASC_BASE_PATH" (Some config.Workspace.base_path) @@ fun () ->
+  Config_dir_resolver.reset ();
+  Eio.Switch.on_release sw Config_dir_resolver.reset;
+  ignore (Workspace.init config ~agent_name:(Some "public-edit-operator") : string);
+  let task = Workspace.add_task_with_result ~created_by:"public-edit-operator" config
+      ~title:"Edit the original files" ~priority:1 ~description:"Keep the original Task and trace."
+      |> function Ok value -> value | Error error -> fail (Workspace.add_task_error_to_string error) in
+  Workspace.claim_task_r config ~agent_name:meta.Keeper_meta_contract.name ~task_id:task.task_id ()
+    |> (function Ok _ -> () | Error error -> fail (Masc_domain.masc_error_to_string error));
+  let meta = {meta with current_task_id = Some (Keeper_id.Task_id.of_string task.task_id |> get)
+                     ; sandbox_image = Some "base"} in
+  Masc_test_deps.write_sandbox_image_catalog ~base_path:config.base_path
+    ["base", "masc-sandbox-base:fixture-prepared-edit"];
+  Masc_test_deps.init_unified_tool_registry ();
+  Keeper_tool_call_log.init ~base_path:config.base_path ();
+  let cell = Keeper_tool_call_log.create_turn_ctx_cell () in
+  Keeper_tool_call_log.set_turn_context ~cell ~agent_name:meta.name ~task_id:task.task_id
+    ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id) ~keeper_turn_id:13 ~turn:2 ();
+  let descriptor = match Keeper_tool_descriptor.find_id "agent.edit_file" with
+    | Some value -> value | None -> fail "canonical public Edit descriptor is absent" in
+  let snapshot = Skill_catalog_snapshot.config_unreadable ~detail:"tool-only fixture has no shared Skill source" in
+  let surface = Keeper_capability_surface.create_with_descriptors ~tool_descriptors:[descriptor]
+      ~tool_deny:[] ~sandbox_profile:meta.sandbox_profile ~skill_names:None
+      ~global_skill_catalog:Keeper_skill_catalog.empty
+      ~skill_inventory:(Keeper_skill_inventory.of_snapshot ~descriptors:[descriptor] snapshot) ~task_skills:[] in
+  let causal = Keeper_gate_causal_context.create ~turn_id:(Some 13)
+      ~initial:(`Assoc ["task_id", `String task.task_id]) in
+  let bundle = Keeper_tools_agent_core_bundle.make_tool_bundle_for_capability_surface ~config ~meta
+      ~publication_recovery:recovery ~capability_surface:surface ~clock:env#clock ~gate_context:causal
+      ?turn_ctx_cell:(if sourceful then Some cell else None)
+      ~ctx_snapshot:(Keeper_context_runtime.create ~eio:false ~system_prompt:"public Edit feature fixture") () in
+  Eio.Switch.on_release sw bundle.cleanup;
+  operation meta task.task_id cell causal bundle
+;;
+
+let public_args path before after =
+  `Assoc ["file_path", `String path; "old_string", `String before; "new_string", `String after]
+;;
+
+let public_calls inputs = List.mapi (fun index input -> Agent_core.Types.ToolUse
+    {id = "public-edit-" ^ string_of_int index; name = "Edit"; input}) inputs
+;;
+
+let test_public_edits_overlap_through_handler_and_bridge () =
+  fixture @@ fun env sw config meta recovery root ->
+  public_bundle env sw config meta recovery @@ fun meta task_id cell causal bundle ->
+  let hooks = Keeper_hooks_agent_core.make_hooks ~config ~meta_ref:(ref meta)
+      ~turn_ctx_cell:cell ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+      ~keeper_turn_id:13 ~on_after_turn_ordinal:(fun _ -> ())
+      ~tool_result_commit_required:(fun () -> true) () in
+  let left = Filename.concat root "public-left/file" and right = Filename.concat root "public-right/file" in
+  write left "left-before"; write right "right-before";
+  let both, resolve_both = Eio.Promise.create () in
+  let entered = ref 0 in
+  let rows = FS.For_testing.with_before_write_authorization (fun () ->
+      incr entered; if !entered = 2 then Eio.Promise.resolve resolve_both ();
+      Eio.Promise.await both)
+      (fun () -> dispatch ~hooks env bundle.Keeper_tools_agent_core.tools
+        (public_calls [public_args left "left-before" "left-after"; public_args right "right-before" "right-after"])) in
+  check int "two public Edit handlers entered the real authorization boundary" 2 !entered;
+  check string "public left bytes" "left-after" (read left);
+  check string "public right bytes" "right-after" (read right);
+  List.iter (fun (row : Agent_core.Agent_tools.tool_execution_result) ->
+    check int "public effect wave has both occurrences" 2
+      (Agent_core.Tool_contract.Invocation.schedule row.invocation).batch_size) rows;
+  let ledger = Keeper_tool_call_log.read_recent ~keeper_name:meta.name ()
+      |> function Ok rows -> rows | Error (Index_unavailable detail) -> fail detail in
+  let rows = List.filter (fun row -> match Yojson.Safe.Util.member "tool_use_id" row with
+      | `String "public-edit-0" | `String "public-edit-1" -> true | _ -> false) ledger in
+  check int "both actual public handlers recorded physical execution rows" 2 (List.length rows);
+  List.iter (fun row ->
+    check string "public handler keeps original Task" task_id
+      Yojson.Safe.Util.(member "task_id" row |> to_string);
+    check string "public handler keeps original trace" (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+      Yojson.Safe.Util.(member "trace_id" row |> to_string);
+    check bool "actual execution identity is present" true
+      (match Yojson.Safe.Util.member "execution_id" row with `String id -> id <> "" | _ -> false)) rows;
+  let snapshot = (Keeper_gate_causal_context.snapshot causal).snapshot in
+  check int "both public results reached the turn Gate aggregate" 2
+    Yojson.Safe.Util.(member "completed_tool_calls" snapshot |> to_list |> List.length)
+;;
+
+let test_public_conflicting_edits_keep_current_bytes () =
+  fixture @@ fun env sw config meta recovery root ->
+  public_bundle env sw config meta recovery @@ fun _meta _task _cell _causal bundle ->
+  let path = Filename.concat root "public-conflict/file" in
+  write path "first";
+  let rows = dispatch env bundle.Keeper_tools_agent_core.tools
+      (public_calls [public_args path "first" "second"; public_args path "second" "third"]) in
+  check string "public second patch consumes the predecessor's actual bytes" "third" (read path);
+  List.iter (fun (row : Agent_core.Agent_tools.tool_execution_result) ->
+    check int "conflicting public edits have separate waves" 1
+      (Agent_core.Tool_contract.Invocation.schedule row.invocation).batch_size) rows
+;;
+
+let test_public_edits_without_source_stay_serial () =
+  fixture @@ fun env sw config meta recovery root ->
+  public_bundle ~sourceful:false env sw config meta recovery @@ fun _meta _task _cell _causal bundle ->
+  let path = Filename.concat root "public-no-source/file" in
+  write path "before";
+  let rows = dispatch env bundle.Keeper_tools_agent_core.tools
+      (public_calls [public_args path "before" "after"]) in
+  check string "ordinary public Edit still executes" "after" (read path);
+  List.iter (fun (row : Agent_core.Agent_tools.tool_execution_result) ->
+    check bool "missing source authority retains Serial admission" true
+      ((Agent_core.Tool_contract.Invocation.schedule row.invocation).execution_mode = Agent_core.Tool_contract.Serial)) rows
 ;;
 
 let test_disjoint_actual_edits_overlap () =
@@ -257,4 +370,9 @@ let () = run "prepared actual Edit resources"
     test_case "ancestor directories retain planned order" `Quick test_ancestor_directories_retain_planned_order;
     test_case "changed owner input or parent cannot write" `Quick test_parent_swap_and_input_or_owner_change_do_not_write;
     test_case "Manual Gate retains the same containment and playground authority" `Quick test_preparation_preserves_containment_under_manual_gate;
-    test_case "caller cancellation releases prepared Edit" `Quick test_cancelled_prepared_edit_releases_for_a_later_call]]
+    test_case "caller cancellation releases prepared Edit" `Quick test_cancelled_prepared_edit_releases_for_a_later_call];
+    "actual public bundle and SDK", [
+      test_case "public Edit keeps handler observers bridge and source while overlapping" `Quick
+        test_public_edits_overlap_through_handler_and_bridge;
+      test_case "public conflicting patches consume predecessor bytes" `Quick test_public_conflicting_edits_keep_current_bytes;
+      test_case "public Edit with unavailable source stays Serial" `Quick test_public_edits_without_source_stay_serial]]

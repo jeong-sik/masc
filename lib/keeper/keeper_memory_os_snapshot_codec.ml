@@ -423,4 +423,3 @@ let of_json json =
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
     wire (wire_here Expected_object)
 ;;
-

@@ -495,7 +495,6 @@
   test_task_tool_toml_parity
   test_operator_surface_toml_parity
   test_ide_bridge
-  test_ide_ingest_queue
   test_server_ide_lsp_proxy
   test_server_ide_http
   test_server_activity_http
@@ -852,7 +851,6 @@
   test_task_tool_toml_parity
   test_operator_surface_toml_parity
   test_ide_bridge
-  test_ide_ingest_queue
   test_server_ide_lsp_proxy
   test_server_ide_http
   test_server_activity_http

@@ -8,18 +8,10 @@
  (flags
   (:standard -w +4 -w +33 -w +37))
  (modules
-  ide_bridge
-  ide_event_types
-  ide_ingest_queue
-  ide_paths)
+  ide_bridge)
  (libraries
-  unix
-  eio
   yojson
-  digestif
-  fs_compat
-  masc.dated_jsonl
   masc.agent_observation
-  masc.otel_metric_store
-  masc_core
-  masc_log))
+  masc.masc_types
+  masc_string_util
+ ))

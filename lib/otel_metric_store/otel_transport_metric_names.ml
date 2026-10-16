@@ -5,10 +5,6 @@
     [Otel_metric_store.metric_*] bindings unchanged. *)
 
 let metric_sse_sessions = Otel_metric_store_core.declare_gauge "masc_sse_sessions_total"
-let metric_ide_ingest_capacity_refused =
-  Otel_metric_store_core.declare_counter "masc_ide_ingest_capacity_refused_total"
-let metric_ide_ingest_last_capacity_refusal =
-  "masc_ide_ingest_last_capacity_refusal_unixtime"
 let metric_sse_broadcast_duration =
   Otel_metric_store_core.declare_histogram "masc_sse_broadcast_duration_seconds"
 ;;

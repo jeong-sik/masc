@@ -259,6 +259,14 @@ feature 왕복만 테스트한다 (원칙 20). 경로 헬퍼 단위 테스트는
 
 리뷰 snapshot 에서 구현하며 확인된 차이는 설계로 되돌려 기록한다:
 
+- **2026-10-17 tool fact authority** — #23469 OBS-6의 실제 남은 손실 경계는
+  포화된 비동기 IDE 큐의 새 관측 거절이었다. 현재 Keeper tool fact는 기존
+  `tool_calls` 행이 실행 ID·물리 turn ref·불변 typed 귀속을 함께 동기 커밋하고,
+  IDE는 같은 원장과 재생성 가능한 read index를 직접 조회한다. 별도 tool_events
+  사본·큐·거절 카운터는 폐기한다. 읽을 때 Git을 재해석하지 않으며 손상된 새
+  귀속은 빈 성공 응답이 아니다. 과거 귀속을 추측하거나 runtime 데이터를
+  삭제/이관하지 않는다. 상세 계약은 `docs/guides/IDE-TOOL-FACTS.md`에 있다.
+
 - **A2 path containment** — 초안의 `fpath` 정규화 대신 lexical segment stack 을
   사용한다. 선행 `..` 을 보존하는 `Fpath.normalize` 로는 repo-root escape 를 reject 할
   수 없기 때문이다. 구현은 escape 를 수선하지 않고 거부한다 (§5.1).

@@ -644,11 +644,15 @@ function decodeResolveGateApprovalResponse(
   const actualEvents = (auditReceipts as KeeperApprovalAuditReceipt[])
     .map(receipt => receipt.event)
   const isResolutionOnly = actualEvents.length === 1 && actualEvents[0] === 'resolved'
+  const isRedelivery = actualEvents.length === 0
+  const isRedeliveryRuleChange = ruleId !== null
+    && actualEvents.length === 1
+    && (actualEvents[0] === 'rule_created' || actualEvents[0] === 'rule_renewed')
   const isRuleChangeAndResolution = ruleId !== null
     && actualEvents.length === 2
     && (actualEvents[0] === 'rule_created' || actualEvents[0] === 'rule_renewed')
     && actualEvents[1] === 'resolved'
-  if (!isResolutionOnly && !isRuleChangeAndResolution) {
+  if (!isResolutionOnly && !isRuleChangeAndResolution && !isRedelivery && !isRedeliveryRuleChange) {
     return gateMutationProtocolDrift(path, 'audit_receipts do not match the committed mutation')
   }
   return {

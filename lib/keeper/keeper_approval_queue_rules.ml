@@ -1,6 +1,6 @@
 (** Durable, nonblocking HITL queue state and exact Always Allowed rules.
 
-    This module does not classify an effect, interpret an operation name, or
+    This module does not classify an settlement, interpret an operation name, or
     own a Keeper lane. *)
 
 (** Types, conversions, and JSON serialization extracted to
@@ -89,7 +89,7 @@ let load_rule_store_unlocked ~base_path () =
     else
       match Safe_ops.read_json_file_safe path with
       | Ok json ->
-        (match Application_store.decode_current_or_migrate_legacy json with
+        (match Application_store.of_yojson json with
          | Ok store -> Ok store
          | Error reason -> rejected reason)
       | Error reason ->
@@ -143,17 +143,18 @@ type rule_upsert_disposition =
 type rule_upsert_result =
   | Applied of { rule : approval_rule; disposition : rule_upsert_disposition }
   | Already_applied of approval_rule option
+  | Superseded of approval_rule option
 
 (* Both expiry and approval identity are deliberate inputs. New approvals
    record a witness even at equal expiry; an exact retry never writes again. *)
 let upsert_rule_with_save
       ~save
       ~base_path ~keeper_name ~tool_name ~input ?created_by
-      ~source_approval_id ~expires_at ()
+      ~source_approval_id ~resolution_sequence ~expires_at ()
   =
   with_rules_write_lock (fun () ->
     let application : Application_store.application =
-      { approval_id = source_approval_id; keeper_name; tool_name
+      { approval_id = source_approval_id; resolution_sequence; keeper_name; tool_name
       ; request_fingerprint = Keeper_approval_request_fingerprint.request_fingerprint input
       ; expires_at; actor = created_by }
     in
@@ -164,13 +165,39 @@ let upsert_rule_with_save
     match Application_store.find_application store ~approval_id:source_approval_id with
     | Some receipt ->
       if Application_store.same_application application receipt.application then
-        Ok (Already_applied
-          (List.find_opt (fun (rule : approval_rule) -> String.equal rule.id receipt.rule_id)
-             store.rules))
+        let rule = List.find_opt
+          (fun (rule : approval_rule) -> String.equal rule.id receipt.rule_id) store.rules in
+        Ok (match receipt.settlement with
+          | Application_store.Rule_applied -> Already_applied rule
+          | Application_store.Superseded -> Superseded rule)
       else Error
         { path = rules_path ~base_path ()
         ; reason = "remembered approval application identity conflicts with its durable receipt" }
     | None ->
+      if List.exists (fun (receipt : Application_store.receipt) ->
+          Int.equal receipt.application.resolution_sequence resolution_sequence)
+          store.applications
+      then Error { path = rules_path ~base_path (); reason = "resolution sequence belongs to another approval" }
+      else
+      let persist ~rule_id ~settlement outcome rules =
+        let receipt : Application_store.receipt = { application; rule_id; settlement } in
+        let next = { Application_store.rules; applications = receipt :: store.applications } in
+        match save ~base_path next with
+        | Ok () -> Ok outcome
+        | Error error ->
+          Otel_metric_store.inc_counter Keeper_metrics.(to_string ApprovalQueueFailures)
+            ~labels:[ "keeper", keeper_name
+                    ; "site", Keeper_approval_queue_failure_site.(to_label Upsert_rule_save) ] ();
+          Log.Keeper.warn "upsert_rule: save failed: %s" (rule_store_error_to_string error);
+          Error error
+      in
+      match Application_store.latest_application store application with
+      | Some latest when latest.application.resolution_sequence > resolution_sequence ->
+        let rule = List.find_opt
+          (fun (rule : approval_rule) -> String.equal rule.id latest.rule_id) store.rules in
+        persist ~rule_id:latest.rule_id ~settlement:Application_store.Superseded
+          (Superseded rule) store.rules
+      | Some _ | None ->
       let candidate =
         { id = make_generated_id "rule"; keeper_name; tool_name
         ; request_fingerprint = application.request_fingerprint
@@ -178,16 +205,8 @@ let upsert_rule_with_save
         ; source_approval_id = Some source_approval_id; expires_at }
       in
       let persist rule disposition rules =
-        let receipt : Application_store.receipt = { application; rule_id = rule.id } in
-        let next = { Application_store.rules; applications = receipt :: store.applications } in
-        match save ~base_path next with
-        | Ok () -> Ok (Applied { rule; disposition })
-        | Error error ->
-          Otel_metric_store.inc_counter Keeper_metrics.(to_string ApprovalQueueFailures)
-            ~labels:[ "keeper", keeper_name
-                    ; "site", Keeper_approval_queue_failure_site.(to_label Upsert_rule_save) ] ();
-          Log.Keeper.warn "upsert_rule: save failed: %s" (rule_store_error_to_string error);
-          Error error
+        persist ~rule_id:rule.id ~settlement:Application_store.Rule_applied
+          (Applied { rule; disposition }) rules
       in
       match List.find_opt (fun rule -> rule_identity_matches rule candidate) store.rules with
       | Some existing when Option.equal Float.equal existing.expires_at expires_at ->
@@ -203,11 +222,11 @@ let upsert_rule_with_save
 
 let upsert_rule
       ~base_path ~keeper_name ~tool_name ~input ?created_by
-      ~source_approval_id ~expires_at ()
+      ~source_approval_id ~resolution_sequence ~expires_at ()
   =
   upsert_rule_with_save ~save:save_rule_store_unlocked
     ~base_path ~keeper_name ~tool_name ~input ?created_by
-    ~source_approval_id ~expires_at ()
+    ~source_approval_id ~resolution_sequence ~expires_at ()
 ;;
 
 module For_testing = struct

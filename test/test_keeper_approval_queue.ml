@@ -821,9 +821,10 @@ let write_pending_snapshot ~base_path json =
     output_string channel (Yojson.Safe.pretty_to_string json))
 ;;
 
-let delivery_json ~entry ~remember_rule =
+let delivery_json ~entry ~resolution_sequence ~remember_rule =
   `Assoc
     [ "entry", entry
+    ; "resolution_sequence", `Int resolution_sequence
     ; "decision", `Assoc [ "kind", `String "approve" ]
     ; "source", `String "human_operator"
     ; "remember_rule", `Bool remember_rule
@@ -855,8 +856,10 @@ let test_resolve_waits_for_domain_two_map_publication () =
          | `Assoc fields ->
            `Assoc
              (("pending", `List [])
-              :: ("deliveries", `List [ delivery_json ~entry ~remember_rule:false ])
-              :: (fields |> List.remove_assoc "pending" |> List.remove_assoc "deliveries"))
+              :: ("deliveries", `List [ delivery_json ~entry ~resolution_sequence:2 ~remember_rule:false ])
+              :: ("next_sequence", `Int 3)
+              :: (fields |> List.remove_assoc "pending" |> List.remove_assoc "deliveries"
+                  |> List.remove_assoc "next_sequence"))
          | _ -> Alcotest.fail "expected queue snapshot object"
        in
        write_pending_snapshot ~base_path replacement;
@@ -943,7 +946,7 @@ let test_install_serializes_snapshot_read_with_same_base_mutation () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-             [ "version", `Int 11
+             [ "version", `Int 12
             ; "generation", `Int 1
             ; "next_sequence", `Int 1
             ; "pending", `List []
@@ -2091,12 +2094,16 @@ let test_retained_rule_deliveries_are_idempotent_after_restart_and_delete () =
     let b = submit_task "newer-B" in
     let c = submit_task "retry-C" in
     let d = submit_task "retry-D" in
+    let e = submit_task "delayed-first-E" in
+    let f = submit_task "later-committed-F" in
     let until = Unix.gettimeofday () +. 600.0 in
-    let resolve id expires_at =
-      match Server_dashboard_http.dashboard_gate_resolve_http_json
+    let resolve_result id expires_at =
+      Server_dashboard_http.dashboard_gate_resolve_http_json
         ~base_path ~created_by:"same-operator"
         ~args:(`Assoc [ "id", `String id; "decision", `String "approve"
-                     ; "remember_rule", `Bool true; "rule_expires_at", `Float expires_at ]) () with
+                     ; "remember_rule", `Bool true; "rule_expires_at", `Float expires_at ]) ()
+    in
+    let resolve id expires_at = match resolve_result id expires_at with
       | Ok json -> json
       | Error error -> Alcotest.fail (Server_dashboard_http.approval_resolve_http_error_to_string error)
     in
@@ -2111,17 +2118,30 @@ let test_retained_rule_deliveries_are_idempotent_after_restart_and_delete () =
     let latest = resolve d (until +. 300.0) in
     readback (until +. 300.0) latest;
     readback (until +. 300.0) (resolve c (until +. 200.0));
+    let rules_path = Rules.rules_path ~base_path () in
+    let saved_rules_path = rules_path ^ ".held-by-test" in
+    Sys.rename rules_path saved_rules_path;
+    Unix.mkdir rules_path 0o700;
+    (* E's decision commits, but its first rule effect cannot reach the store. *)
+    (match resolve_result e (until +. 400.0) with
+     | Error (Server_dashboard_http.Unavailable (AQ.Persistence_failed _)) -> ()
+     | Error error -> Alcotest.fail (Server_dashboard_http.approval_resolve_http_error_to_string error)
+     | Ok _ -> Alcotest.fail "unavailable rule store unexpectedly accepted E");
+    Unix.rmdir rules_path;
+    Sys.rename saved_rules_path rules_path;
+    readback (until +. 500.0) (resolve f (until +. 500.0));
+    readback (until +. 500.0) (resolve e (until +. 400.0));
     let rule_id = Yojson.Safe.Util.(latest |> member "rule_id" |> to_string) in
     AQ.For_testing.reset_runtime_state ();
     ignore (install_exn ~base_path);
     (match Rules.list_rules ~base_path () with
      | Ok [ rule ] -> Alcotest.(check (option (float 0.0)))
-         "boot delivery replay preserves latest expiry" (Some (until +. 300.0)) rule.expires_at
+         "boot delivery replay preserves latest expiry" (Some (until +. 500.0)) rule.expires_at
      | Ok _ -> Alcotest.fail "boot replay duplicated or lost the rule"
      | Error error -> Alcotest.fail (Rule_types.rule_store_error_to_string error));
     (* Exercise retained deliveries in reverse order after reopening their owner. *)
-    readback (until +. 300.0) (resolve d (until +. 300.0));
-    readback (until +. 300.0) (resolve c (until +. 200.0));
+    readback (until +. 500.0) (resolve d (until +. 300.0));
+    readback (until +. 500.0) (resolve c (until +. 200.0));
     (match Server_dashboard_http.dashboard_gate_rule_delete_http_json
       ~base_path ~deleted_by:"operator-deleting-rule"
       ~args:(`Assoc [ "id", `String rule_id ]) with
@@ -4628,7 +4648,7 @@ let test_malformed_snapshot_fails_install_and_is_observed () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-            [ "version", `Int 11
+            [ "version", `Int 12
             ; "generation", `Int 1
             ; "next_sequence", `Int 1
             ; "pending", `String "malformed-pending-array"
@@ -4665,7 +4685,7 @@ let test_malformed_snapshot_fails_install_and_is_observed () =
          (Yojson.Safe.equal
             persisted
             (`Assoc
-               [ "version", `Int 11
+               [ "version", `Int 12
                ; "generation", `Int 1
                ; "next_sequence", `Int 1
                ; "pending", `String "malformed-pending-array"
@@ -4774,7 +4794,7 @@ let test_unsupported_version_snapshot_requires_runtime_reset () =
         | Error
             (Masc.Keeper_approval_queue_result.Install_storage_failed
               { reason =
-                  "gate_pending.version 8 is unsupported (current 11); reset \
+                  "gate_pending.version 8 is unsupported (current 12); reset \
                    runtime state before restarting MASC"
               ; _
               }) ->
@@ -4883,7 +4903,7 @@ let test_v10_store_requires_runtime_reset_before_rows_are_read () =
        | Error
            (Masc.Keeper_approval_queue_result.Install_storage_failed
              { reason =
-                 "gate_pending.version 10 is unsupported (current 11); reset \
+                 "gate_pending.version 10 is unsupported (current 12); reset \
                   runtime state before restarting MASC"
              ; _
              }) ->
@@ -5326,7 +5346,7 @@ let test_persisted_delivery_replays_before_origin_wake () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-             [ "version", `Int 11
+             [ "version", `Int 12
             ; "generation", `Int 1
             ; "next_sequence", `Int 2
             ; "pending", `List []
@@ -5648,20 +5668,23 @@ let test_one_delivery_replay_failure_does_not_stop_others () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-             [ "version", `Int 11
+             [ "version", `Int 12
             ; "generation", `Int 1
-            ; "next_sequence", `Int 4
+            ; "next_sequence", `Int 7
             ; "pending", `List []
             ; ( "deliveries"
               , `List
                   [ delivery_json
                       ~entry:(entry_at 1 first_id)
+                      ~resolution_sequence:4
                       ~remember_rule:true
                   ; delivery_json
                       ~entry:(entry_at 2 second_id)
+                      ~resolution_sequence:5
                       ~remember_rule:true
                   ; delivery_json
                       ~entry:(entry_at 3 successful_id)
+                      ~resolution_sequence:6
                       ~remember_rule:false
                   ] )
             ]);

@@ -3,6 +3,7 @@ open Keeper_approval_queue_rules_types
 (** Exact remembered-approval identity within one workspace's rule store. *)
 type application =
   { approval_id : string
+  ; resolution_sequence : int
   ; keeper_name : string
   ; tool_name : string
   ; request_fingerprint : string
@@ -10,9 +11,12 @@ type application =
   ; actor : string option
   }
 
+type application_effect = Rule_applied | Superseded
+
 type receipt =
   { application : application
   ; rule_id : string
+  ; settlement : application_effect
   }
 
 (** Rules and application receipts share one atomic persisted value. Receipts
@@ -27,11 +31,11 @@ val rule_identity_matches : approval_rule -> approval_rule -> bool
 val same_application : application -> application -> bool
 val validate_application : application -> (unit, string) result
 val find_application : t -> approval_id:string -> receipt option
+val latest_application : t -> application -> receipt option
 
-(** The only legacy decode boundary. An old bare rule list is explicitly
-    migrated by seeding each creation approval's exact application receipt.
-    Unknown versions, duplicate identities and conflicting receipts fail. *)
-val decode_current_or_migrate_legacy : Yojson.Safe.t -> (t, string) result
+(** Requires the canonical versioned store. Missing or unsupported formats,
+    duplicate identities/orders and conflicting receipts fail. *)
+val of_yojson : Yojson.Safe.t -> (t, string) result
 
 (** Always emits the canonical versioned envelope, never the legacy list. *)
 val to_yojson : t -> Yojson.Safe.t

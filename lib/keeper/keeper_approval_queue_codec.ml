@@ -3,11 +3,12 @@ open Keeper_approval_queue_result
 
 module SMap = Set_util.StringMap
 
-let pending_store_version = 11
+let pending_store_version = 12
 let replay_results_store_version = 1
 
 type persisted_delivery =
   { entry : pending_approval
+  ; resolution_sequence : int
   ; decision : decision
   ; source : decision_source
   ; remember_rule : bool
@@ -101,6 +102,7 @@ let resolution_replay_outcome_to_yojson = function
 let persisted_delivery_to_yojson delivery =
   `Assoc
     [ "entry", pending_entry_to_yojson ~include_request_context:false delivery.entry
+    ; "resolution_sequence", `Int delivery.resolution_sequence
     ; "decision", approval_decision_to_yojson delivery.decision
     ; "source", `String (decision_source_to_string delivery.source)
     ; "remember_rule", `Bool delivery.remember_rule
@@ -580,6 +582,7 @@ let persisted_delivery_of_yojson ~base_path json =
         ~surface
         ~allowed:
           [ "entry"
+          ; "resolution_sequence"
           ; "decision"
           ; "source"
           ; "remember_rule"
@@ -591,6 +594,11 @@ let persisted_delivery_of_yojson ~base_path json =
     in
     let* entry_json = required_member ~surface "entry" fields in
     let* entry = pending_entry_of_yojson ~base_path entry_json in
+    let* resolution_sequence = required_positive_int ~surface "resolution_sequence" fields in
+    let* () =
+      if resolution_sequence > entry.sequence then Ok ()
+      else Error (surface ^ ".resolution_sequence must follow the request sequence")
+    in
     let* decision_json = required_member ~surface "decision" fields in
     let* decision = approval_decision_of_yojson decision_json in
     let* source_raw = required_string ~surface "source" fields in
@@ -622,6 +630,7 @@ let persisted_delivery_of_yojson ~base_path json =
     in
     Ok
       { entry
+      ; resolution_sequence
       ; decision
       ; source
       ; remember_rule
@@ -756,6 +765,8 @@ let validate_snapshot_sequences ~next_sequence pending_entries delivery_entries 
     List.map (fun (entry : pending_approval) -> entry.sequence) pending_entries
     @ List.map
         (fun (delivery : persisted_delivery) -> delivery.entry.sequence)
+        delivery_entries
+    @ List.map (fun (delivery : persisted_delivery) -> delivery.resolution_sequence)
         delivery_entries
     |> List.sort Int.compare
   in
@@ -894,6 +905,13 @@ let log_row_of_yojson ~base_path json =
           (persisted_delivery_of_yojson ~base_path json)
       | "delivery_remove" -> Result.map (fun id -> Delivery_remove id) (id ())
       | other -> Error (Printf.sprintf "%s.kind %S is unknown" surface other)
+    in
+    let* () = match row with
+      | Delivery_upsert delivery when delivery.resolution_sequence >= row_next_sequence ->
+        Error (surface ^ ".delivery resolution sequence must precede next_sequence")
+      | Pending_upsert entry when entry.sequence >= row_next_sequence ->
+        Error (surface ^ ".entry sequence must precede next_sequence")
+      | Delivery_upsert _ | Pending_upsert _ | Pending_remove _ | Delivery_remove _ -> Ok ()
     in
     Ok { row; row_generation; row_next_sequence }
   | _ -> Error (surface ^ " row must be a JSON object")

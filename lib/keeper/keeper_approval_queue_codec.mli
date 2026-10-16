@@ -8,6 +8,7 @@ open Keeper_approval_queue_result
 
 type persisted_delivery =
   { entry : pending_approval
+  ; resolution_sequence : int
   ; decision : decision
   ; source : decision_source
   ; remember_rule : bool
@@ -38,6 +39,10 @@ val map_values_for_base :
 val first_shared_id :
   'a Set_util.StringMap.t -> 'b Set_util.StringMap.t -> string option
 (** The first shared key in map order, or [None] when the states are disjoint. *)
+
+val validate_snapshot_sequences :
+  next_sequence:int -> pending_approval list -> persisted_delivery list -> (unit, string) result
+(** Validate request and resolution identities after snapshot or append-log replay. *)
 
 val snapshot_to_yojson :
   base_path:string -> next_sequence:int -> generation:int ->

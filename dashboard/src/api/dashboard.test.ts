@@ -3035,6 +3035,23 @@ describe('fetchDashboardGate', () => {
 
 describe('Gate mutation audit receipts', () => {
   it.each([
+    [[], 'stable-rule', 3000],
+    [[], null, null],
+    [[{ event: 'rule_created', recorded: true }], 'stable-rule', 2000],
+    [[{ event: 'rule_renewed', recorded: true }], 'stable-rule', 3000],
+  ] as const)('decodes committed redelivery receipts %j', async (receipts, ruleId, expiry) => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        ok: true, id: 'appr-retry', decision: 'approve',
+        rule_id: ruleId, rule_expires_at: expiry, audit_receipts: receipts,
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    ))
+    await expect(resolveGateApproval('appr-retry', {
+      decision: 'approve', rememberRule: true,
+    })).resolves.toMatchObject({ rule_id: ruleId, rule_expires_at: expiry, audit_receipts: receipts })
+  })
+
+  it.each([
     ['rule_created', 2000],
     ['rule_renewed', 3000],
     ['rule_renewed', null],

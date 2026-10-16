@@ -131,7 +131,9 @@ let exact_absence_proven inventory (reference : Skill_reference.t) =
       | Invalid invalid -> same_source invalid.source_id) inventory.items)
 ;;
 
-let identity_valid_proven inventory (reference : Skill_reference.t) =
+(* The source scan is complete and clean, so [found] over the valid items sees
+   everything this source publishes. *)
+let reference_proven inventory (reference : Skill_reference.t) ~found =
   let snapshot = inventory.snapshot in
   match Skill_catalog_snapshot.config_state snapshot with
   | Config_rejected _ | Config_unreadable _ -> false
@@ -153,8 +155,14 @@ let identity_valid_proven inventory (reference : Skill_reference.t) =
       | Valid valid -> same_source valid.reference.identity.source_id && valid.diagnostics <> []
       | Invalid invalid -> same_source invalid.source_id) inventory.items)
     && List.exists (function
-      | Valid valid -> valid.diagnostics = [] && Skill_reference.equal_identity reference.identity valid.reference.identity
+      | Valid valid -> valid.diagnostics = [] && found valid.reference
       | Invalid _ -> false) inventory.items
+;;
+
+let changed_reference_proven inventory (reference : Skill_reference.t) =
+  reference_proven inventory reference ~found:(fun (published : Skill_reference.t) ->
+    Skill_reference.equal_identity reference.identity published.identity
+    && not (Skill_reference.equal reference published))
 ;;
 
 let snapshot_rejection_to_yojson = function

@@ -2180,10 +2180,10 @@ let resume_continuation_with ?on_recovery_held ?owner_metadata_refusal ?on_refus
                Some (Original_owner_metadata_refused metadata_refusal)
              | (None | Some _),Some refusal,(None | Some _) -> Some refusal
              | None,None,Some reference when not producer_admitted && Draft.nested_calls draft = [] ->
-               if Keeper_capability_surface.exact_skill_absence_proven capability_surface reference then
-                 Some (Original_producer_absent reference)
-               else if Keeper_capability_surface.exact_skill_present_proven capability_surface reference then
+               if Keeper_capability_surface.changed_skill_proven capability_surface reference then
                  Some (Original_producer_changed reference)
+               else if Keeper_capability_surface.exact_skill_absence_proven capability_surface reference then
+                 Some (Original_producer_absent reference)
                else None
              | (None | Some _),None,(None | Some _) -> None in
            if (Option.is_some owner_metadata_refusal || not producer_admitted) && Option.is_none refusal then

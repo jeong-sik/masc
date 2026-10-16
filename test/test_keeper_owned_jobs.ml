@@ -1569,8 +1569,8 @@ let test_named_producer_switched_to_inline_settles_run_and_ends_parent () =
       ~skill_inventory:(Masc.Keeper_skill_inventory.of_snapshot ~descriptors snapshot) ~task_skills:[] in
   check bool "a new producer revision does not prove producer absence" false
     (Masc.Keeper_capability_surface.exact_skill_absence_proven inline_surface parked.reference);
-  check bool "changed producer identity remains proven present" true
-    (Masc.Keeper_capability_surface.exact_skill_present_proven inline_surface parked.reference);
+  check bool "changed producer revision is proven from the published identity" true
+    (Masc.Keeper_capability_surface.changed_skill_proven inline_surface parked.reference);
   let settled = resume_parked_continuation env fixture inline_surface parked.child_continuation in
   check bool "present-but-changed producer accepts a refusal successor" true (Tool_result.is_success settled);
   let refused_ok,refusal_data,refusal_entry = await_composition env fixture (Tool_result.data settled) in

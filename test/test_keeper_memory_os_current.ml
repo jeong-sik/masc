@@ -2698,6 +2698,65 @@ let test_successor_recall_rejects_phantom_target_added_later () =
       item.reason=Current.Invalid_transition 2) view.unresolved)
 ;;
 
+let test_successor_recall_distinguishes_replayed_and_conflicting_rewrites () =
+  List.iter (fun conflicting -> with_temp_keepers @@ fun keepers_dir ->
+    let original = fact ~claim:"original replay policy" () in
+    let successor = fact ~claim:"corrected replay policy" () in
+    let binding = recall_binding 1 (fact ~claim:"replay source observation" ()) original in
+    ignore (commit_recall ~keepers_dir binding [original] |> require_ok);
+    let revised = revise_into ~keepers_dir original [successor] in
+    let expected = successor_recall ~keepers_dir in
+    let journal = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+    let rows = Fs_compat.load_jsonl journal |> List.concat_map (fun json ->
+      if Yojson.Safe.Util.member "revision" json = `Int revised.revision then
+        let replay = if conflicting then
+          map_field "recorded_at" (fun _ -> `Float (revised.updated_at +. 1.)) json
+          else json in
+        [json; replay]
+      else [json]) in
+    Fs_compat.invalidate_cached_writer journal;
+    Fs_compat.save_file journal (String.concat "\n" (List.map Yojson.Safe.to_string rows) ^ "\n");
+    let observed = successor_recall ~keepers_dir in
+    check bool "duplicate evidence leaves current snapshot intact" true
+      (observed.snapshot=Some revised);
+    if conflicting then (
+      check int "conflicting evidence yields no successor authority" 0
+        (List.length observed.successor_candidates);
+      check bool "conflicting rewrite names its exact revision and binding" true
+        (observed.unresolved=[{Current.binding; reason=Current.Invalid_transition revised.revision}]))
+    else check bool "identical replay preserves the exact successor path once" true
+      (observed=expected)) [false; true]
+;;
+
+let test_successor_recall_keeps_binding_outcomes_separate () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let revised = fact ~claim:"policy to be revised" () in
+  let retired = fact ~claim:"policy to be retired" () in
+  let direct = fact ~claim:"continuing direct policy" () in
+  let successor = fact ~claim:"revised policy successor" () in
+  let revised_binding = recall_binding 1 (fact ~claim:"revision observation" ()) revised in
+  let retired_binding = recall_binding 2 (fact ~claim:"retirement observation" ()) retired in
+  let direct_binding = recall_binding 3 (fact ~claim:"continuing observation" ()) direct in
+  ignore (commit_recall ~keepers_dir revised_binding [revised; retired; direct] |> require_ok);
+  ignore (commit_recall ~keepers_dir retired_binding [] |> require_ok);
+  ignore (commit_recall ~keepers_dir direct_binding [] |> require_ok);
+  ignore (revise_into ~keepers_dir revised [successor]);
+  let current = apply_disposition ~keepers_dir
+    ~dropped_statements:[{Types.memory_id=Types.memory_id retired; reason="policy withdrawn"}] ()
+    |> require_ok in
+  let observed = successor_recall ~keepers_dir in
+  check bool "continuing binding stays direct beside retired and revised bindings" true
+    (observed.direct_bindings=[direct_binding]);
+  check bool "only the revised binding carries a successor path" true
+    (List.map (fun (candidate : Current.successor_recall_candidate) ->
+       candidate.binding, candidate.original_target, candidate.target,
+       List.map (fun (row : Current.revision_evidence) -> row.snapshot_revision) candidate.path)
+       observed.successor_candidates = [revised_binding, revised, successor, [2]]);
+  check bool "retirement is local to its binding" true
+    (observed.unresolved=[{Current.binding=retired_binding;
+      reason=Current.Retired_without_successor current.revision}])
+;;
+
 let test_prepared_receipt_before_revision_links_recovers_with_no_lineage () =
   with_temp_keepers @@ fun keepers_dir ->
   (* A receipt written before the [revision_links] field existed must decode:
@@ -4398,6 +4457,10 @@ let () =
             test_successor_recall_preserves_current_on_missing_history
         ; test_case "successor recall rejects phantom target added in a later revision" `Quick
             test_successor_recall_rejects_phantom_target_added_later
+        ; test_case "successor recall distinguishes equal replay from conflicting rewrite evidence" `Quick
+            test_successor_recall_distinguishes_replayed_and_conflicting_rewrites
+        ; test_case "successor recall keeps direct, revised and retired bindings separate" `Quick
+            test_successor_recall_keeps_binding_outcomes_separate
         ; test_case "prepared receipt before revision links recovers with no lineage" `Quick
             test_prepared_receipt_before_revision_links_recovers_with_no_lineage
         ; test_case "legacy removal line clears its legacy receipt once" `Quick

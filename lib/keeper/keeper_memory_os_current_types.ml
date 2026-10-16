@@ -125,3 +125,54 @@ type journal_entry =
       ; rejection : string
       ; rejected_path : string
       }
+
+type explicit_candidate_id =
+  { queue_generation : string
+  ; request_id : string
+  ; sequence : int
+  ; input_sha256 : string
+  }
+
+type admission_recall_binding =
+  { candidate_id : explicit_candidate_id
+  ; source_fact : fact
+  ; target_memory_id : string
+  }
+
+type revision_evidence =
+  { snapshot_revision : int
+  ; recorded_at : float
+  ; source : source
+  ; commit_effect : commit_effect option
+  ; revision_links : revision list option
+  ; removed_memory_ids : string list
+  ; added_memory_ids : string list
+  }
+
+type recall_unresolved_reason =
+  | History_unavailable of string
+  | Missing_transition of int
+  | Invalid_transition of int
+  | Unrecorded_lineage of int
+  | Retired_without_successor of int
+
+type recall_unresolved =
+  { binding : admission_recall_binding
+  ; reason : recall_unresolved_reason
+  }
+
+type successor_recall_candidate =
+  { binding : admission_recall_binding
+  ; born_revision : int
+  ; original_target : fact
+  ; target : fact
+  ; path : revision_evidence list
+  }
+
+type successor_recall =
+  { receipt_verification : (unit, string) result
+  ; snapshot : t option
+  ; direct_bindings : admission_recall_binding list
+  ; successor_candidates : successor_recall_candidate list
+  ; unresolved : recall_unresolved list
+  }

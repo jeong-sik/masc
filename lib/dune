@@ -18,6 +18,7 @@
   keeper_memory_os_support_core
   keeper_memory_os_snapshot_codec
   keeper_memory_os_journal_codec
+  keeper_memory_os_successor_recall
   keeper_gate_types
   keeper_gate_projection
   keeper_skill_activation_types

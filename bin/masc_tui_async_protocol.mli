@@ -9,6 +9,24 @@ type approval_observation = {
   ao_result: (approval_snapshot, string) result;
 }
 
+type http_read_requests = {
+  hrr_authority: workspace_authority;
+  hrr_approval: Masc_tui_operator_projection.Listing_order.ticket option;
+  hrr_asks: Snapshot_read.request option;
+  hrr_roster: Snapshot_read.request option;
+}
+
+type http_initial_identity_read = {
+  hir_ticket: Http_refresh_order.ticket;
+  hir_authority: workspace_authority;
+  hir_identity: Masc.Tui_decode.server_identity;
+  hir_needs_roster: bool;
+  hir_acknowledge: http_read_requests option Eio.Promise.u;
+}
+(** The UI may admit a cold matching probe before collection, then issue fresh
+    source requests under the successor workspace authority. [None] retains
+    terminal admission; it grants no new authority to the worker. *)
+
 type early_approval_observation = {
   eap_ticket: Http_refresh_order.ticket;
   eap_authority: workspace_authority;
@@ -212,6 +230,7 @@ type async_msg =
   | Http_keeper_roster_loaded of early_keeper_roster_observation
   (** Diagnostic reader status; it grants no data or action authority. *)
   | Http_progress_observed of http_progress_observation
+  | Http_initial_identity_read of http_initial_identity_read
   | Http_refresh_done of http_refresh_outcome
   | Http_refresh_failed of
       string * Masc_tui_operator_projection.Listing_order.ticket option * Http_refresh_order.ticket

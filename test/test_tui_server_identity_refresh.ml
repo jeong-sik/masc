@@ -999,6 +999,57 @@ let early_asks_fixture () =
     ; ea_identity = identity state.local_base_path
     ; ea_observation = { asks_request = request; asks_result = Ok snapshot } }
 
+let test_initial_probe_requires_current_cold_workspace () =
+  let open Masc_tui_types in
+  let state, early = early_asks_fixture () in
+  state.workspace_identity <- Workspace_identity_unread;
+  state.server_identity <- None;
+  let admitted identity = can_admit_initial_http_identity state
+      ~ticket:early.ea_ticket ~authority:early.ea_authority identity in
+  Alcotest.(check bool) "ready current matching cold probe can hand off" true
+    (admitted early.ea_identity);
+  Alcotest.(check bool) "offering a probe does not grant workspace authority" true
+    (state.workspace_identity = Workspace_identity_unread
+     && state.server_identity = None
+     && state.workspace_authority = early.ea_authority
+     && Snapshot_read.in_flight state.asks_read);
+  List.iter (fun candidate ->
+    Alcotest.(check bool) "foreign incomplete or booting probes cannot hand off" false
+      (admitted candidate))
+    [ identity "/workspace/foreign"
+    ; {early.ea_identity with sid_masc_root = "/workspace/foreign/.masc"}
+    ; {early.ea_identity with sid_masc_root = ""}
+    ; {early.ea_identity with sid_base_path = ""}
+    ; {early.ea_identity with sid_state_ready = Some false}
+    ; {early.ea_identity with sid_state_ready = None} ];
+  List.iter (fun workspace ->
+    state.workspace_identity <- workspace;
+    Alcotest.(check bool) "warm suspended and foreign states retain their existing path" false
+      (admitted early.ea_identity))
+    [Workspace_identity_match; Workspace_identity_match_unconfirmed "unavailable";
+     Workspace_identity_mismatch
+       {local_base_path=state.local_base_path; server_base_path="/workspace/foreign"}];
+  state.workspace_identity <- Workspace_identity_unread;
+  let Workspace_authority generation = state.workspace_authority in
+  state.workspace_authority <- Workspace_authority (generation + 1);
+  Alcotest.(check bool) "old authority cannot confirm a replacement workspace" false
+    (admitted early.ea_identity)
+
+let test_initial_probe_rejects_retired_refresh () =
+  let open Masc_tui_types in
+  let state, early = early_asks_fixture () in
+  state.workspace_identity <- Workspace_identity_unread;
+  let current = Http_refresh_order.dispatch state.http_refresh_order in
+  begin_http_refresh_state state ~ticket:current ~started_ns:10L;
+  let admitted ticket = can_admit_initial_http_identity state
+      ~ticket ~authority:state.workspace_authority early.ea_identity in
+  Alcotest.(check bool) "superseded pass cannot hand off" false
+    (admitted early.ea_ticket);
+  Alcotest.(check bool) "current cold pass remains eligible" true (admitted current);
+  finish_http_refresh_state ~finished_ns:20L state;
+  Alcotest.(check bool) "finished pass cannot reopen through a delayed probe" false
+    (admitted current)
+
 let test_early_asks_apply_once_without_granting_authority () =
   let open Masc_tui_types in
   let state, early = early_asks_fixture () in
@@ -1012,7 +1063,7 @@ let test_early_asks_apply_once_without_granting_authority () =
      && state.workspace_identity = Workspace_identity_match
      && state.http_refresh_started_ns = Some 0L)
 
-let test_early_asks_cold_start_defers_without_consuming_the_read () =
+let test_unadmitted_cold_asks_defer_without_consuming_the_read () =
   let open Masc_tui_types in
   let state, early = early_asks_fixture () in
   state.workspace_identity <- Workspace_identity_unread;
@@ -1254,7 +1305,11 @@ let test_answer_receipt_has_one_original_submission_owner () =
 let () =
   Alcotest.run "tui_server_identity_refresh"
     [ ( "server-identity-refresh"
-      , [ Alcotest.test_case "roster arrives before unrelated readers and settles once" `Quick
+      , [ Alcotest.test_case "initial probe requires current cold workspace" `Quick
+            test_initial_probe_requires_current_cold_workspace
+        ; Alcotest.test_case "initial probe cannot revive a retired refresh" `Quick
+            test_initial_probe_rejects_retired_refresh
+        ; Alcotest.test_case "roster arrives before unrelated readers and settles once" `Quick
             test_early_roster_settles_before_slow_siblings_once
         ; Alcotest.test_case "answer receipt has one original submission owner" `Quick
             test_answer_receipt_has_one_original_submission_owner
@@ -1266,8 +1321,8 @@ let () =
             test_refresh_progress_rejects_old_request_and_workspace
         ; Alcotest.test_case "early questions settle once without granting authority" `Quick
             test_early_asks_apply_once_without_granting_authority
-        ; Alcotest.test_case "cold-start questions remain owned by the terminal bundle" `Quick
-            test_early_asks_cold_start_defers_without_consuming_the_read
+        ; Alcotest.test_case "unadmitted cold questions retain their source owner" `Quick
+            test_unadmitted_cold_asks_defer_without_consuming_the_read
         ; Alcotest.test_case "early questions reject foreign stale and retired readings" `Quick
             test_early_asks_reject_foreign_stale_and_retired_authority
         ; Alcotest.test_case "answer submission retires pre-answer listings" `Quick

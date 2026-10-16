@@ -369,9 +369,172 @@ let test_first_judge_web_tools_absent_stays_off () =
   check bool "neither side asks -> no web tools" false
     (Fusion_orchestrator_judge_wave.first_judge_web_tools ~judge_web_tools:false j)
 
+let conditional_first_usage : Fusion_types.usage =
+  { input_tokens = 42; output_tokens = 7 }
+
+let conditional_refine_usage : Fusion_types.usage =
+  { input_tokens = 19; output_tokens = 5 }
+
+let with_conditional_compute ~first ~refinement check_evidence =
+  let panel_rows =
+    [ Fusion_types.Answered
+        { model = "p.one"
+        ; answer = "Panel evidence"
+        ; usage = { input_tokens = 17; output_tokens = 3 }
+        }
+    ]
+  in
+  let calls = ref [] in
+  let panel_t = testable Fusion_types.pp_panel_outcome Fusion_types.equal_panel_outcome in
+  let synthesis_t =
+    testable Fusion_types.pp_judge_synthesis Fusion_types.equal_judge_synthesis
+  in
+  let module Panel = struct
+    let run ~base_dir:_ ~sw:_ ~net:_ ~groups ~prompt
+        ?on_tool_trace:_ ?on_seat_routes:_ () =
+      calls := "panel" :: !calls;
+      check string "panel receives admitted question" "Conditional question" prompt;
+      check int "effective preset reaches panel execution" 1 (List.length groups);
+      panel_rows
+  end in
+  let module Judge = struct
+    let run ~base_dir:_ ~sw:_ ~net:_ ?max_tokens:_ ?timeout_s:_
+        ~judge_system_prompt:_ ~judge_model ~question ~panel ~web_tools:_
+        ?tool_trace:_ ?seat_route:_ () =
+      calls := "single" :: !calls;
+      check string "first judge receives preset model" "p.meta" judge_model;
+      check string "judge receives admitted question" "Conditional question" question;
+      check (list panel_t) "panel evidence reaches first judge" panel_rows panel;
+      Ok (first, conditional_first_usage)
+
+    let run_refine ~base_dir:_ ~sw:_ ~net:_ ?max_tokens:_ ?timeout_s:_
+        ~judge_system_prompt:_ ~judge_model:_ ~question ~panel ~prior ~web_tools:_
+        ?tool_trace:_ ?seat_route:_ () =
+      calls := "refine" :: !calls;
+      check string "refine receives admitted question" "Conditional question" question;
+      check (list panel_t) "panel evidence reaches refinement" panel_rows panel;
+      check synthesis_t "actual first synthesis is the refine prior" first prior;
+      refinement
+
+    let run_meta ~base_dir:_ ~sw:_ ~net:_ ?max_tokens:_ ?timeout_s:_
+        ~judge_system_prompt:_ ~judge_model:_ ~question:_ ~panel:_ ~priors:_
+        ~web_tools:_ ?tool_trace:_ ?seat_route:_ () =
+      fail "Conditional computation entered a meta judge"
+  end in
+  let module Orchestrator = Fusion_orchestrator.For_testing.Make (Panel) (Judge) in
+  let preset = preset_with [] in
+  let validated =
+    match Fusion_policy.Validated_preset.of_preset preset with
+    | Ok validated -> validated
+    | Error _ -> fail "conditional preset fixture did not validate"
+  in
+  let policy : Fusion_policy.t =
+    { enabled = true
+    ; default_preset = preset.name
+    ; staged_judge_group_size = Fusion_policy.default_staged_judge_group_size
+    ; presets = [ validated ]
+    }
+  in
+  let request : Fusion_types.fusion_request =
+    { run_id = "conditional-assembly"
+    ; keeper = "conditional-keeper"
+    ; prompt = "Conditional question"
+    ; preset = preset.name
+    ; web_tools = false
+    ; roster = Fusion_types.preset_roster
+    ; depth = Fusion_depth.Top
+    ; trigger = Fusion_types.Explicit_tool_call
+    }
+  in
+  let progress = ref [] in
+  Eio_main.run @@ fun environment ->
+  Eio.Switch.run @@ fun sw ->
+  match Orchestrator.compute
+          ~base_dir:"." ~sw ~net:environment#net ~policy
+          ~topology:Fusion_types.Conditional ~request
+          ~on_progress:(fun stage -> progress := stage :: !progress) () with
+  | Fusion_orchestrator.Compute_denied reason ->
+    fail (Fusion_types.show_deny_reason reason)
+  | Fusion_orchestrator.Computed evidence ->
+    check string "evidence retains the request question" request.prompt evidence.question;
+    check (list panel_t) "evidence preserves panel usage independently" panel_rows evidence.panel;
+    (match List.rev !progress with
+     | [ Fusion_run_registry.Progress_panel_running { expected = 1 }
+       ; Fusion_run_registry.Progress_judge_running { expected = 1; answered = 1; failed = 0 }
+       ; Fusion_run_registry.Progress_computed { expected = 1; answered = 1; failed = 0 }
+       ] -> ()
+     | _ -> fail "Conditional execution did not publish its actual computation stages");
+    check_evidence (List.rev !calls) evidence
+
+let insufficient_synthesis =
+  { sample_synthesis with
+    Fusion_types.resolved_answer = "Need additional evidence"
+  ; decision = Fusion_types.Insufficient { missing_for_decision = [ "counterexample" ] }
+  }
+
+let test_conditional_escalates_and_assembles_usage () =
+  let refined = { sample_synthesis with Fusion_types.resolved_answer = "Refined answer" } in
+  with_conditional_compute ~first:insufficient_synthesis
+    ~refinement:(Ok (refined, conditional_refine_usage))
+    (fun calls evidence ->
+       check (list string) "insufficient decision invokes actual refine pass"
+         [ "panel"; "single"; "refine" ] calls;
+       check usage_t "judge usage contains both executed passes"
+         { input_tokens = 61; output_tokens = 12 } evidence.Fusion_types.judge_usage;
+       (match evidence.judge, evidence.judges with
+        | Ok synthesis,
+          [ Fusion_types.Synthesized { role = Single; usage = first_usage; _ }
+          ; Fusion_types.Synthesized { role = Refine_pass; usage = refined_usage; _ }
+          ] ->
+          check string "refinement is the final synthesis" refined.resolved_answer synthesis.resolved_answer;
+          check usage_t "first node retains its usage" conditional_first_usage first_usage;
+          check usage_t "refine node retains its usage" conditional_refine_usage refined_usage
+        | _ -> fail "Conditional evidence omitted an executed judge pass"))
+
+let test_conditional_answer_skips_refinement () =
+  with_conditional_compute ~first:sample_synthesis
+    ~refinement:(Error (Fusion_types.Parse_error "must not run", conditional_refine_usage))
+    (fun calls evidence ->
+       check (list string) "sufficient first answer skips refinement"
+         [ "panel"; "single" ] calls;
+       check usage_t "skipped refinement contributes no usage"
+         conditional_first_usage evidence.Fusion_types.judge_usage;
+       match evidence.judge, evidence.judges with
+       | Ok synthesis, [ Fusion_types.Synthesized { role = Single; usage; _ } ] ->
+         check string "first answer is retained" sample_synthesis.resolved_answer synthesis.resolved_answer;
+         check usage_t "single judge node usage survives" conditional_first_usage usage
+       | _ -> fail "skip path fabricated a refinement node")
+
+let test_conditional_failed_refinement_preserves_consumed_usage () =
+  with_conditional_compute ~first:insufficient_synthesis
+    ~refinement:(Error (Fusion_types.Parse_error "malformed refinement", conditional_refine_usage))
+    (fun calls evidence ->
+       check (list string) "failed refine still executed"
+         [ "panel"; "single"; "refine" ] calls;
+       check usage_t "failed refinement usage is counted"
+         { input_tokens = 61; output_tokens = 12 } evidence.Fusion_types.judge_usage;
+       match evidence.judge, evidence.judges with
+       | Ok synthesis,
+         [ Fusion_types.Synthesized { role = Single; _ }
+         ; Fusion_types.Judge_failed { failed_role = Refine_pass; failure = Parse_error detail; usage; _ }
+         ] ->
+         check string "first synthesis survives refinement failure"
+           insufficient_synthesis.resolved_answer synthesis.resolved_answer;
+         check string "typed refinement failure survives" "malformed refinement" detail;
+         check usage_t "failed refine node retains consumed usage" conditional_refine_usage usage
+       | _ -> fail "failed refine lost its typed outcome or first synthesis")
+
 let () =
   run "fusion_judge_usage"
-    [ ( "output_contract"
+    [ ( "conditional_orchestrator"
+      , [ test_case "insufficient decision refines and sums usage" `Quick
+            test_conditional_escalates_and_assembles_usage
+        ; test_case "sufficient answer skips refinement" `Quick
+            test_conditional_answer_skips_refinement
+        ; test_case "failed refinement preserves consumed usage" `Quick
+            test_conditional_failed_refinement_preserves_consumed_usage
+        ] )
+    ; ( "output_contract"
       , [ test_case
             "clears wire response format"
             `Quick

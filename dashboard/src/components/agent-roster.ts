@@ -832,8 +832,13 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
   const agentList = agents.value
   const keeperList = keepers.value
   const runtimeKeeperList = useMemo(
-    () => rosterDetailKeepers(keeperList, agentList),
-    [keeperList, agentList],
+    // Cause drilldowns inspect the current server Keeper observations, including
+    // a crashed/unregistered Keeper with no live worker left to back its row.
+    // The ordinary directory still excludes inactive detail rows.
+    () => fleetFilter === null
+      ? rosterDetailKeepers(keeperList, agentList)
+      : keeperList.filter(FLEET_KEEPER_FILTERS[fleetFilter].matches),
+    [keeperList, agentList, fleetFilter],
   )
 
   // Memoize roster and lookup Maps — these iterate full keeper/agent arrays.

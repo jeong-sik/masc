@@ -52,10 +52,6 @@ describe('AttentionIndicatorV2 backend health', () => {
   beforeEach(() => {
     container = document.createElement('div')
     document.body.appendChild(container)
-    keepers.value = []
-    agents.value = []
-    executionLoaded.value = true
-    navigate('overview')
     gateResource.reset(readyGate)
     dashboardFullHealthResource.reset()
     keepers.value = []
@@ -164,12 +160,13 @@ describe('AttentionIndicatorV2 backend health', () => {
 
   it('opens the matching Keeper roster from each attention cause and lets the operator clear it', async () => {
     keepers.value = [
-      { name: 'needs-input', status: 'running', needs_attention: true },
-      { name: 'failed-keeper', status: 'offline', lifecycle_phase: 'Crashed' },
+      { name: 'needs-input', status: 'offline', needs_attention: true, registered: false, keepalive_running: false },
+      { name: 'failed-keeper', status: 'offline', lifecycle_phase: 'Crashed', registered: false, keepalive_running: false },
+      { name: 'inactive-keeper', status: 'offline', registered: false, keepalive_running: false },
       { name: 'healthy-keeper', status: 'running' },
     ]
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(
-      JSON.stringify(healthResponse(false, 'healthy')),
+      JSON.stringify(healthResponse(false, 'ok')),
       { status: 200, headers: { 'Content-Type': 'application/json' } },
     )))
     await act(async () => {
@@ -184,6 +181,7 @@ describe('AttentionIndicatorV2 backend health', () => {
     }
     const rosterNames = () => Array.from(container.querySelectorAll('.fl-roster .fl-name b')).map(node => node.textContent)
 
+    expect(rosterNames()).toEqual(['healthy-keeper'])
     await chooseCause('주의')
     expect(route.value.params).toMatchObject({ section: 'agents', view: 'keepers', filter: 'attention' })
     expect(rosterNames()).toEqual(['needs-input'])
@@ -193,7 +191,7 @@ describe('AttentionIndicatorV2 backend health', () => {
     expect(rosterNames()).toEqual(['failed-keeper'])
     await act(async () => { container.querySelector<HTMLButtonElement>('.fl-route-filter button')?.click() })
     expect(route.value.params.filter).toBeUndefined()
-    expect(rosterNames()).toHaveLength(3)
+    expect(rosterNames()).toEqual(['healthy-keeper'])
   })
 
   it('opens attention causes from the keyboard and restores focus on dismissal', async () => {
@@ -202,7 +200,7 @@ describe('AttentionIndicatorV2 backend health', () => {
       { name: 'failed-keeper', status: 'offline', lifecycle_phase: 'Crashed' },
     ]
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(
-      JSON.stringify(healthResponse(false, 'healthy')),
+      JSON.stringify(healthResponse(false, 'ok')),
       { status: 200, headers: { 'Content-Type': 'application/json' } },
     )))
     await act(async () => { render(html`<${AttentionIndicatorV2} />`, container) })

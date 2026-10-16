@@ -17,7 +17,7 @@ type http_scoped_surface_results = {
   (* [None] on surfaces that do not draw them. Each is read by one surface, and
      leaving it out keeps whatever that surface last observed rather than
      dropping it. *)
-  http_asks: (Masc.Tui_decode_asks.asks_snapshot, string) result option;
+  http_asks: asks_observation option;
   http_board: (board_post list, string) result option;
   (* The board's hearth census rides with its listing: the two are read for
      one surface and a cycle keyed on a census the listing has outgrown walks
@@ -191,6 +191,8 @@ type async_msg =
   (** A verified read-only preview. It does not finish the full refresh or
       grant workspace authority; the terminal bundle still owns both. *)
   | Http_overview_loaded of overview_preview
+  (** Verified questions may settle their own read before the full bundle. *)
+  | Http_asks_loaded of early_asks_observation
   | Http_refresh_done of http_refresh_outcome
   | Http_refresh_failed of
       string * Masc_tui_operator_projection.Listing_order.ticket option * Http_refresh_order.ticket

@@ -3490,6 +3490,18 @@ type overview_preview = {
   op_snapshot: overview_snapshot;
 }
 
+type asks_observation = {
+  asks_request: Snapshot_read.request;
+  asks_result: (Masc.Tui_decode_asks.asks_snapshot, string) result;
+}
+
+type early_asks_observation = {
+  ea_ticket: Http_refresh_order.ticket;
+  ea_authority: workspace_authority;
+  ea_identity: Tui_decode.server_identity;
+  ea_observation: asks_observation;
+}
+
 type scoped_refresh_followup =
   | No_scoped_followup
   | Revalidate_after_scoped
@@ -7111,6 +7123,9 @@ type state = {
      no open questions. *)
   mutable asks_snapshot: Masc.Tui_decode_asks.asks_snapshot option;
   mutable asks_error: string option;
+  (* The early reply and terminal bundle share one request. Settling it once
+     prevents that bundle from reviving a question answered in between. *)
+  mutable asks_read: Snapshot_read.t;
   (* Answering happens in its own mode. The surface's own keys are spoken for
      -- arrows walk the approval queue, y and n decide it -- and a question
      needs a key per choice, so entering the mode is what frees them up. *)
@@ -7972,6 +7987,38 @@ let finish_http_refresh_state (state : state) =
   state.http_refresh_started_ns <- None;
   state.overview_preview <- None
 
+let retire_asks_read (state : state) =
+  state.asks_read <- Snapshot_read.invalidate state.asks_read
+
+let begin_ask_submission_state (state : state) =
+  state.ask_submit_inflight <- true;
+  retire_asks_read state
+
+let begin_asks_read (state : state) =
+  if state.ask_submit_inflight then None
+  else
+    let reading, request = Snapshot_read.start ~intent:Snapshot_read.Refresh state.asks_read in
+    state.asks_read <- reading;
+    request
+
+let take_asks_observation (state : state) observation =
+  match Snapshot_read.settle state.asks_read observation.asks_request with
+  | None -> None
+  | Some reading ->
+      state.asks_read <- reading;
+      Some observation.asks_result
+
+let take_early_asks_observation (state : state) early =
+  if Option.is_some state.http_refresh_started_ns
+     && Http_refresh_order.is_current state.http_refresh_order early.ea_ticket
+     && early.ea_authority = state.workspace_authority
+     && state.workspace_identity = Workspace_identity_match
+     && server_workspace_matches ~expected:state.server_identity (Ok early.ea_identity)
+     && workspace_identity_of_refresh ~local_base_path:state.local_base_path
+          (Ok early.ea_identity) = Workspace_identity_match
+  then take_asks_observation state early.ea_observation
+  else None
+
 (* Pending reads and post-action offers belong to the workspace that admitted
    them. A successful health response with missing paths is still unread;
    only comparable paths can confirm that an origin has been replaced. *)
@@ -8200,6 +8247,7 @@ let suspend_workspace_readings state =
   state.lane_addons <- Option.map suspend_application state.lane_addons;
   state.lane_addons_cached <- suspend_application state.lane_addons_cached;
   state.keeper_tool_approvals_read <- Snapshot_read.invalidate state.keeper_tool_approvals_read;
+  retire_asks_read state;
   state.gate_snapshot_read <- Snapshot_read.invalidate state.gate_snapshot_read;
   state.schedules_read <- Snapshot_read.invalidate state.schedules_read;
   state.keeper_sandbox_logs_inflight <- None;
@@ -11201,6 +11249,7 @@ let create_state
   approvals_summary_read = Snapshot_read.idle;
   asks_snapshot = None;
   asks_error = None;
+  asks_read = Snapshot_read.idle;
   ask_answer_mode = Ask_browsing;
   ask_cursor = 0;
   ask_question_cursor = 0;

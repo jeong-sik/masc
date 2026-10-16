@@ -973,10 +973,122 @@ let test_overview_preview_refuses_foreign_or_retired_authority () =
   Alcotest.(check bool) "current ticket cannot spend retired workspace authority" true
     (state.overview_preview = None)
 
+let early_asks_fixture () =
+  let open Masc_tui_types in
+  let state = create_state ~workspace:"asks" ~local_base_path:"/workspace/asks"
+      ~port:0 ~refresh_interval:0. () in
+  state.server_identity <- Some (identity state.local_base_path);
+  state.workspace_identity <- Workspace_identity_match;
+  let ticket = Http_refresh_order.dispatch state.http_refresh_order in
+  begin_http_refresh_state state ~ticket ~started_ns:0L;
+  let request = match begin_asks_read state with
+    | Some request -> request
+    | None -> Alcotest.fail "initial question read was refused" in
+  let snapshot : Masc.Tui_decode_asks.asks_snapshot =
+    { asn_keeper = None; asn_open_count = 1
+    ; asn_rows =
+        [{ ar_keeper = "alpha"; ar_id = "ask-1"; ar_asked_at = 1.; ar_context = None
+         ; ar_questions =
+             [{ aq_id = "q1"; aq_header = "Choice"; aq_prompt = "Continue?"
+              ; aq_mode = Masc.Tui_decode_asks.Ask_single
+              ; aq_free_text = Masc.Tui_decode_asks.Ask_choices_only
+              ; aq_choices = [{ac_id = "yes"; ac_label = "Yes"; ac_description = None}] }]
+         ; ar_resolution = Masc.Tui_decode_asks.Ask_open }] } in
+  state,
+    { ea_ticket = ticket; ea_authority = state.workspace_authority
+    ; ea_identity = identity state.local_base_path
+    ; ea_observation = { asks_request = request; asks_result = Ok snapshot } }
+
+let test_early_asks_apply_once_without_granting_authority () =
+  let open Masc_tui_types in
+  let state, early = early_asks_fixture () in
+  let authority = state.workspace_authority and server = state.server_identity in
+  Alcotest.(check bool) "matching early read is admitted before the refresh completes" true
+    (take_early_asks_observation state early = Some early.ea_observation.asks_result);
+  Alcotest.(check bool) "terminal copy cannot be applied a second time" true
+    (take_asks_observation state early.ea_observation = None);
+  Alcotest.(check bool) "question read grants no new workspace authority" true
+    (state.workspace_authority = authority && state.server_identity = server
+     && state.workspace_identity = Workspace_identity_match
+     && state.http_refresh_started_ns = Some 0L)
+
+let test_early_asks_cold_start_defers_without_consuming_the_read () =
+  let open Masc_tui_types in
+  let state, early = early_asks_fixture () in
+  state.workspace_identity <- Workspace_identity_unread;
+  state.server_identity <- None;
+  Alcotest.(check bool) "cold start cannot admit early questions" true
+    (take_early_asks_observation state early = None);
+  finish_http_refresh_state state;
+  Alcotest.(check bool) "terminal bundle still owns the unconsumed question read" true
+    (take_asks_observation state early.ea_observation = Some early.ea_observation.asks_result)
+
+let test_early_asks_reject_foreign_stale_and_retired_authority () =
+  let open Masc_tui_types in
+  let state, early = early_asks_fixture () in
+  let wrong_root = { early.ea_identity with sid_masc_root = "/workspace/foreign/.masc" } in
+  Alcotest.(check bool) "same endpoint with a foreign root is refused" true
+    (take_early_asks_observation state {early with ea_identity = wrong_root} = None);
+  let ticket = Http_refresh_order.dispatch state.http_refresh_order in
+  state.http_refresh_order <- ticket;
+  Alcotest.(check bool) "superseded full response cannot admit questions" true
+    (take_early_asks_observation state early = None);
+  let Workspace_authority generation = state.workspace_authority in
+  state.workspace_authority <- Workspace_authority (generation + 1);
+  Alcotest.(check bool) "current ticket cannot spend retired workspace authority" true
+    (take_early_asks_observation state {early with ea_ticket = ticket} = None);
+  let current = {early with ea_ticket = ticket; ea_authority = state.workspace_authority} in
+  finish_http_refresh_state state;
+  Alcotest.(check bool) "completed full refresh cannot admit late questions" true
+    (take_early_asks_observation state current = None)
+
+let test_question_answer_retires_pre_answer_reads () =
+  let open Masc_tui_types in
+  let state, early = early_asks_fixture () in
+  begin_ask_submission_state state;
+  Alcotest.(check bool) "a pending answer does not start another listing" true
+    (begin_asks_read state = None);
+  state.ask_submit_inflight <- false;
+  let answered : Masc.Tui_decode_asks.asks_snapshot =
+    { asn_keeper = None; asn_open_count = 0; asn_rows = [] } in
+  state.asks_snapshot <- Some answered;
+  Alcotest.(check bool) "delayed early read cannot reopen the answered question" true
+    (take_early_asks_observation state early = None);
+  Alcotest.(check bool) "terminal bundle cannot replay the pre-answer snapshot" true
+    (take_asks_observation state early.ea_observation = None
+     && state.asks_snapshot = Some answered);
+  let request = match begin_asks_read state with
+    | Some request -> request | None -> Alcotest.fail "post-answer read did not resume" in
+  Alcotest.(check bool) "a newly dispatched post-answer listing is admitted" true
+    (take_asks_observation state {asks_request = request; asks_result = Ok answered}
+     = Some (Ok answered))
+
+let test_question_read_supersession_and_workspace_suspension () =
+  let open Masc_tui_types in
+  let state, early = early_asks_fixture () in
+  let request = match begin_asks_read state with
+    | Some request -> request | None -> Alcotest.fail "successor listing did not start" in
+  Alcotest.(check bool) "newer scoped listing supersedes the full listing" true
+    (take_asks_observation state early.ea_observation = None);
+  let current = {early.ea_observation with asks_request = request} in
+  suspend_workspace_readings state;
+  Alcotest.(check bool) "workspace suspension retires the current question listing" true
+    (take_asks_observation state current = None)
+
 let () =
   Alcotest.run "tui_server_identity_refresh"
     [ ( "server-identity-refresh"
-      , [ Alcotest.test_case "overview rejects superseded refresh observations" `Quick
+      , [ Alcotest.test_case "early questions settle once without granting authority" `Quick
+            test_early_asks_apply_once_without_granting_authority
+        ; Alcotest.test_case "cold-start questions remain owned by the terminal bundle" `Quick
+            test_early_asks_cold_start_defers_without_consuming_the_read
+        ; Alcotest.test_case "early questions reject foreign stale and retired readings" `Quick
+            test_early_asks_reject_foreign_stale_and_retired_authority
+        ; Alcotest.test_case "answer submission retires pre-answer listings" `Quick
+            test_question_answer_retires_pre_answer_reads
+        ; Alcotest.test_case "question listings respect supersession and workspace suspension" `Quick
+            test_question_read_supersession_and_workspace_suspension
+        ; Alcotest.test_case "overview rejects superseded refresh observations" `Quick
             test_overview_preview_rejects_superseded_reading
         ; Alcotest.test_case "overview preview preserves confirmed state and authority" `Quick
             test_overview_preview_preserves_confirmed_state_and_authority

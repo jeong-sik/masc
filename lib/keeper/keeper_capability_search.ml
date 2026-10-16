@@ -16,6 +16,8 @@ type error =
   | Index_unavailable of string
   | Invalid_query of string
 
+type query = Literal of string | Fts5 of string
+
 let ( let* ) = Result.bind
 
 let error_to_yojson = function
@@ -186,7 +188,13 @@ let query db documents text =
          rows [])
 ;;
 
-let search ~query:text documents =
+let search ~query:requested documents =
+  let text,expression = match requested with
+    | Literal text ->
+      (* FTS5 quoted strings escape an embedded quote by doubling it. The
+         SQLite tokenizer still owns punctuation and word boundaries. *)
+      text,"\"" ^ String.concat "\"\"" (String.split_on_char '"' text) ^ "\""
+    | Fts5 text -> text,text in
   if String.equal (String.trim text) ""
   then Error Empty_query
   else
@@ -205,7 +213,7 @@ let search ~query:text documents =
              | Ok () ->
                (match populate db documents with
                 | Error _ as error -> error
-                | Ok () -> query db documents text))
+                | Ok () -> query db documents expression))
     with
     | Sqlite3.Error detail -> Error (Index_unavailable detail)
 ;;

@@ -199,7 +199,8 @@ val keeper_tools_list_json_for_surface
 
 val keeper_capability_search_json_for_surface
   :  capability_surface:Keeper_capability_surface.t
-  -> query:string
+  -> query:Keeper_capability_search.query
   -> (Yojson.Safe.t, Keeper_capability_search.error) result
 (** Search the complete typed Tool and Skill inventory frozen for one turn.
-    SQLite FTS5 chooses candidates only; it does not invoke them. *)
+    Literal phrases and explicit FTS5 expressions share the same SQLite
+    tokenizer and ranking. Search does not load or invoke candidates. *)

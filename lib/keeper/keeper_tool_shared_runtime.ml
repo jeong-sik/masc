@@ -473,6 +473,9 @@ let keeper_tools_list_json_for_surface ~capability_surface =
 ;;
 
 let keeper_capability_search_json_for_surface ~capability_surface ~query =
+  let text,syntax = match query with
+    | Keeper_capability_search.Literal text -> text,"literal"
+    | Keeper_capability_search.Fts5 text -> text,"fts5" in
   let documents =
     Keeper_capability_surface.candidates capability_surface
     |> List.map (fun candidate ->
@@ -507,7 +510,8 @@ let keeper_capability_search_json_for_surface ~capability_surface ~query =
     Ok
       (`Assoc
          [ "schema", `String "masc.keeper.capability_search.v1"
-         ; "query", `String query
+         ; "query", `String text
+         ; "syntax", `String syntax
          ; "search_scope", `String "frozen_capability_surface"
          ; "surface_digest", `String (Keeper_capability_surface.digest capability_surface)
          ; "match_count", `Int (List.length matches)

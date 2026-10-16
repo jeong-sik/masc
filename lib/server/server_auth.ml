@@ -768,7 +768,14 @@ let http_status_of_auth_error = function
       | Masc_domain.Task_error.InvalidId _) -> `Bad_request
   | Masc_domain.Task (Masc_domain.Task_error.VerificationSuperseded _) -> `Conflict
   | Masc_domain.Agent (Masc_domain.Agent_error.InvalidName _) -> `Bad_request
-  | Masc_domain.System _ -> `Bad_request
+  (* A system I/O failure is the server's, not the request's: 503 tells the
+     client to retry. A credential the server could not read answers this
+     way, not 401 (the token is fine) and not 400 (the request is fine). *)
+  | Masc_domain.System (Masc_domain.System_error.IoError _) -> `Service_unavailable
+  | Masc_domain.System
+      (Masc_domain.System_error.ValidationError _
+      | Masc_domain.System_error.NotInitialized
+      | Masc_domain.System_error.LockContention _) -> `Bad_request
 
 (** Server state - initialized at startup.  The published handle is replaced
     atomically so request domains never race a plain ref read with startup or

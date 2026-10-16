@@ -285,6 +285,52 @@ let test_time_step_never_outlasts_the_ttl () =
   check (float 0.0) "no agents directory: the TTL"
     (stamped_at +. Expiry.ttl_sec) (expires_at None)
 
+(* A credential file the server cannot read, for a moment or for good, says
+   nothing about whether that credential exists. The index must not record it
+   as absent: the lookup answers a read failure, the failed rebuild stores
+   nothing, and the next lookup finds the token as soon as the file reads
+   again, not a TTL later. A mode-0 file stands in for a failed open (ENFILE
+   in production), which changes neither the directory's times nor its
+   listing, so the stamp cannot save a cached index. *)
+let test_unreadable_credential_is_not_cached_as_absent () =
+  (* root opens a mode-0 file, so there is nothing to make unreadable *)
+  if Unix.geteuid () = 0 then skip ();
+  let dir = setup_test_workspace () in
+  let beta_file = Auth.credential_file dir "beta" in
+  Fun.protect
+    ~finally:(fun () ->
+      (try Unix.chmod beta_file 0o600 with Unix.Unix_error _ -> ());
+      cleanup_test_workspace dir)
+    (fun () ->
+      with_eio_runtime (fun () ->
+        let alpha = create_token_for dir ~agent_name:"alpha" ~role:Masc_domain.Worker in
+        let beta = create_token_for dir ~agent_name:"beta" ~role:Masc_domain.Worker in
+        let is_read_failure = function
+          | Error (Masc_domain.System (Masc_domain.System_error.IoError _)) -> true
+          | Ok _
+          | Error
+              (Masc_domain.System
+                 (Masc_domain.System_error.NotInitialized
+                 | Masc_domain.System_error.ValidationError _
+                 | Masc_domain.System_error.LockContention _)
+              | Masc_domain.Task _
+              | Masc_domain.Agent _
+              | Masc_domain.Auth _) -> false
+        in
+        Unix.chmod beta_file 0o000;
+        check bool "the unreadable credential's token is a read failure, not a mismatch"
+          true (is_read_failure (Auth.find_credential_by_token dir ~token:beta));
+        check bool "no token is answered from an index that missed a credential"
+          true (is_read_failure (Auth.find_credential_by_token dir ~token:alpha));
+        Unix.chmod beta_file 0o600;
+        match Auth.find_credential_by_token dir ~token:beta with
+        | Ok cred ->
+          check string "beta resolves as soon as its file reads again" "beta"
+            cred.agent_name
+        | Error e ->
+          fail ("a token stayed refused after its file read again: "
+                ^ Masc_domain.masc_error_to_string e)))
+
 let () =
   match Array.to_list Sys.argv with
   | [ _; flag; dir; agent_name; token_out ] when String.equal flag mint_child_flag ->
@@ -315,5 +361,7 @@ let () =
           `Slow test_index_listed_inside_a_time_step_is_rebuilt_once_the_step_ends
         ; test_case "a time step never outlasts the TTL"
           `Quick test_time_step_never_outlasts_the_ttl
+        ; test_case "an unreadable credential is not cached as absent"
+          `Quick test_unreadable_credential_is_not_cached_as_absent
         ] )
     ]

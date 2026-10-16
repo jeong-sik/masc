@@ -291,14 +291,40 @@ let credential_of_json agent_name json : agent_credential option =
     None
 ;;
 
-(* One credential file at [path]: [None] when it is absent, cannot be read,
-   or does not decode. *)
-let load_credential_from_path_raw _config agent_name path : agent_credential option =
+(* The text of the file at [path]. [Ok None] when there is no such file, or
+   when the path is not a regular file, which is no credential either.
+   [Error] when a file is there and could not be read.
+   [read_regular_auth_file] reports a missing file and a failed open alike as
+   [IoError], so a failed read is checked against the path before it counts
+   as absent. *)
+let read_credential_text path : (string option, masc_error) result =
   match read_regular_auth_file path with
-  | Error _ -> None
-  | Ok content ->
-    (try credential_of_json agent_name (Yojson.Safe.from_string content) with
-     | Yojson.Json_error _ -> None)
+  | Ok content -> Ok (Some content)
+  | Error (System (System_error.ValidationError _)) -> Ok None
+  | Error
+      (( System
+           (System_error.IoError _
+           | System_error.NotInitialized
+           | System_error.LockContention _)
+       | Task _
+       | Agent _
+       | Auth _ ) as error) ->
+    (match credential_path_exists path with
+     | Ok false -> Ok None
+     | Ok true | Error _ -> Error error)
+;;
+
+(* One credential file at [path]: [Ok None] when it is absent or does not
+   decode, [Error] when it is there and could not be read. *)
+let load_credential_from_path_checked agent_name path
+  : (agent_credential option, masc_error) result
+  =
+  match read_credential_text path with
+  | Error _ as error -> error
+  | Ok None -> Ok None
+  | Ok (Some content) ->
+    (try Ok (credential_of_json agent_name (Yojson.Safe.from_string content)) with
+     | Yojson.Json_error _ -> Ok None)
 ;;
 
 let credential_uuid_file config cid =
@@ -334,11 +360,19 @@ let remove_file_if_exists path =
    to. A name that signs in with another name's token (a generated nickname,
    a Keeper transport alias) has no file of its own; the token check maps it
    to the owner ([Auth_credential_token.verify_token_owner_alias]), not this
-   lookup. *)
-let load_credential config agent_name : agent_credential option =
-  match read_regular_auth_file (credential_file config agent_name) with
-  | Error _ -> None
-  | Ok content ->
+   lookup.
+
+   [Ok None] only when no file answers or the file does not decode; [Error]
+   when a file is there and could not be read. The token index needs the two
+   apart: a credential it records as absent stays absent until the index is
+   rebuilt. *)
+let load_credential_checked config agent_name
+  : (agent_credential option, masc_error) result
+  =
+  match read_credential_text (credential_file config agent_name) with
+  | Error _ as error -> error
+  | Ok None -> Ok None
+  | Ok (Some content) ->
     (try
        let json = Yojson.Safe.from_string content in
        match json with
@@ -347,13 +381,18 @@ let load_credential config agent_name : agent_credential option =
           | Some (`String target) ->
             (match redirect_target_file config target with
              | Some redirect_path ->
-               load_credential_from_path_raw config agent_name redirect_path
-             | None -> None)
-          | Some _ -> None
-          | None -> credential_of_json agent_name json)
-       | _ -> credential_of_json agent_name json
+               load_credential_from_path_checked agent_name redirect_path
+             | None -> Ok None)
+          | Some _ -> Ok None
+          | None -> Ok (credential_of_json agent_name json))
+       | _ -> Ok (credential_of_json agent_name json)
      with
-     | Yojson.Json_error _ -> None)
+     | Yojson.Json_error _ -> Ok None)
+;;
+
+(* [load_credential_checked] with a failed read answered as no credential. *)
+let load_credential config agent_name : agent_credential option =
+  Result.value (load_credential_checked config agent_name) ~default:None
 ;;
 
 type load_credential_error =
@@ -720,6 +759,38 @@ let list_credentials config : agent_credential list =
          []
     |> List.rev
   else []
+;;
+
+(* [list_credentials] with a directory or a credential file that could not be
+   read kept apart from one that is not there. The token index builds from
+   this listing, and a credential it leaves out stays out of the index until
+   the next rebuild. [list_credentials] keeps answering [[]] for a failed read
+   because its other callers cannot act on the difference. *)
+let list_credentials_checked config : (agent_credential list, masc_error) result =
+  let ( let* ) = Result.bind in
+  let dir = agents_dir config in
+  let* dir_exists = credential_path_exists dir in
+  if not dir_exists
+  then Ok []
+  else
+    let* entries = credential_read_result (fun () -> read_dir dir) in
+    let* listed =
+      Array.to_list entries
+      |> List.filter (fun f -> Filename.check_suffix f ".json")
+      |> List.fold_left
+           (fun acc f ->
+              let* acc = acc in
+              let name = Filename.chop_suffix f ".json" in
+              let* loaded = load_credential_checked config name in
+              match loaded with
+              | Some credential
+                when String.equal name (Common.safe_filename credential.agent_name)
+                     && not (List.exists (fun c -> c.agent_name = credential.agent_name) acc) ->
+                Ok (credential :: acc)
+              | Some _ | None -> Ok acc)
+           (Ok [])
+    in
+    Ok (List.rev listed)
 ;;
 
 
@@ -1479,23 +1550,40 @@ let credential_token_index config
             UUID payload must neither resurrect its bearer nor hide a replacement
             because it happened to be listed before the named file. *)
          let creds =
-           list_credentials config
+           let* listed = list_credentials_checked config in
+           listed
            |> List.map (fun (credential : agent_credential) -> credential.agent_name)
            |> List.sort_uniq String.compare
-           |> List.filter_map (fun name ->
-             match load_credential config name with
-             | Some credential when String.equal credential.agent_name name -> Some credential
-             | Some _ | None -> None)
+           |> List.fold_left
+                (fun acc name ->
+                   let* acc = acc in
+                   let* loaded = load_credential_checked config name in
+                   match loaded with
+                   | Some credential when String.equal credential.agent_name name ->
+                     Ok (credential :: acc)
+                   | Some _ | None -> Ok acc)
+                (Ok [])
+           |> Result.map List.rev
          in
-         let by_token = build_token_index creds in
-         with_credential_index_cache_lock (fun () ->
-           Hashtbl.replace credential_index_cache key
-             { expires_at =
-                 credential_index_expires_at ~stamped_at
-                   ~dir_changed_at:(Option.map agents_dir_last_change stamp)
-             ; stamp
-             ; by_token });
-         Ok by_token)
+         (match creds with
+          | Error error ->
+            (* Nothing is stored. An index that left out a credential it could
+               not read would answer "Token mismatch" for that credential's
+               bearer until it expired, though the credential is fine. The
+               lookup fails instead, and the next one reads again. *)
+            Log.Auth.warn "[credential_index] not rebuilt, a credential could not be read: %s"
+              (masc_error_to_string error);
+            Error error
+          | Ok creds ->
+            let by_token = build_token_index creds in
+            with_credential_index_cache_lock (fun () ->
+              Hashtbl.replace credential_index_cache key
+                { expires_at =
+                    credential_index_expires_at ~stamped_at
+                      ~dir_changed_at:(Option.map agents_dir_last_change stamp)
+                ; stamp
+                ; by_token });
+            Ok by_token))
     |> Result.join
 ;;
 

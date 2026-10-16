@@ -214,13 +214,14 @@ val http_status_of_auth_error :
   | `Conflict
   | `Forbidden
   | `Not_found
+  | `Service_unavailable
   | `Unauthorized
   ]
 (** HTTP status to return for a given [Masc_domain.masc_error]. The .ml
     matches every constructor (mirroring [Masc_error.code]). The signature
     stays row-polymorphic so callers can narrow to [Httpun.Status.t] or
-    [H2.Status.t] at the use site — both protocols include these five
-    tags. *)
+    [H2.Status.t] at the use site — both protocols include these six
+    tags. A system I/O failure answers [`Service_unavailable]. *)
 
 val current_server_state : unit -> Mcp_server.server_state option
 (** Return the currently published process-wide server state snapshot. *)
@@ -304,6 +305,7 @@ val auth_refusal_response :
   | `Forbidden
   | `Internal_server_error
   | `Not_found
+  | `Service_unavailable
   | `Too_many_requests
   | `Unauthorized ]
   * string

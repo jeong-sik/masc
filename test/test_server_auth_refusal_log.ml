@@ -87,9 +87,25 @@ let test_respond_auth_error_emits_line () =
   check bool "respond_auth_error left a refusal line" true
     (has_refusal_line (auth_lines_since baseline))
 
+(* A credential the server could not read is the server's failure, not the
+   client's request. It answers 503, so the client retries and does not
+   conclude that its token is wrong (401) or its request malformed (400). *)
+let test_a_read_failure_is_unavailable () =
+  let status error = Server_auth.http_status_of_auth_error error in
+  check bool "an I/O failure answers 503" true
+    (status (Masc_domain.System (Masc_domain.System_error.IoError "open: too many open files"))
+     = `Service_unavailable);
+  check bool "a validation failure still answers 400" true
+    (status (Masc_domain.System (Masc_domain.System_error.ValidationError "not a regular file"))
+     = `Bad_request)
+
 let () =
   run "server_auth_refusal_log"
-    [ ( "refusal_line"
+    [ ( "status"
+      , [ test_case "a read failure is unavailable, not a bad request" `Quick
+            test_a_read_failure_is_unavailable
+        ] )
+    ; ( "refusal_line"
       , [ test_case "details carry protocol, path and status" `Quick
             test_details_carry_path_and_status
         ; test_case "message names the path and the status" `Quick

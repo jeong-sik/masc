@@ -3,7 +3,9 @@
 A current Task's exact Composition Skill already names the work's callable and
 ordinary node Tools. The bundle supplies those schemas on the first request when
 the same full Skill identity and content revision are executable on the frozen
-turn surface. A declaration permitting deferred loading does not require another
+turn surface. Its public `keeper_composition_run` control is supplied too, so a
+task-specific upstream recipe can run without discovering that control first.
+A declaration permitting deferred loading does not require another
 model exchange to rediscover that existing selection.
 
 | Case | As-Is | To-Be implementation |
@@ -34,6 +36,29 @@ schemas can increase the first request's bytes while eliminating a separate
 loader exchange. Several Tool loads may already share one exchange, so a lower
 Tool-call count alone does not establish fewer model POSTs or lower latency.
 Synthetic protocol evidence and real-model cohort measurements remain distinct.
+
+For an input artifact whose address is already known, put its physical read in
+the recipe and connect the child parameter to that producer's output. Export the
+selected input and required result together. This keeps the real output
+dependency while allowing the model to submit one recipe. The successful
+upstream scenario exercises this path; its expected IDs/digests validate actual
+model-visible exports and never supply the answer.
+
+The first useful action uses the `durable_tool_call_commit` boundary. The scoped
+observer retains original physical execution, Task/trace/turn, native node and
+parent identities after the durable append. Keeper owner handoffs explicitly
+capture that observer, including its absence. Metadata-only sidecar records join
+one-to-one to the actual Tool ledger; missing/ambiguous identity or failed sink
+delivery makes coverage incomplete and the useful clock unknown. Native leaves
+join the original SDK reply and canonical execution artifact rather than being
+treated as SDK trajectory entries. When several successful input reads exist,
+the earliest actual committed occurrence is retained.
+
+This opt-in observer forces synchronous commits in its scope; ordinary callers
+keep their existing append behavior. Compare both arms with the same observer.
+Earlier SDK-callback clocks use a different boundary and cannot be pooled into
+this timing distribution. The observation marks durable completion evidence,
+not Tool start time.
 
 The native preparation driver writes `<receipt>.stages.jsonl` and emits
 `PREPARATION_STAGE` metadata before and after workspace/snapshot/owner setup,

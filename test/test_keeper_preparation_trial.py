@@ -68,7 +68,46 @@ def received_components(raw):
             "framing_bytes": len(raw) - sum(member["wire_bytes"] for member in members)}
 
 
+def check_tool_commit_observation(directory, receipt):
+    metrics = receipt["tool_commit_observation"]
+    path = directory / "tool-commit-events.jsonl"
+    events = [json.loads(line) for line in path.read_text().splitlines()]
+    calls = [row for row in read(directory / "tool-calls.json") if row["record_kind"] == "tool_call"]
+    identity = ("keeper", "tool", "execution_id", "tool_use_id", "trace_id", "task_id",
+                "keeper_turn_id", "composition_node_id", "parent_tool_use_id")
+
+    def matches(event, row):
+        return all(event.get(key) == row.get(key) for key in identity)
+
+    require(metrics["boundary"] == "durable_tool_call_commit" and
+            metrics["mode"] == "scoped_synchronous_commit" and
+            metrics["coverage"] == "complete" and metrics["delivery_failures"] == 0 and
+            metrics["events"] == len(events) == len(calls) and
+            metrics["events_sha256"] == hashlib.sha256(path.read_bytes()).hexdigest(),
+            "committed Tool observation has a coverage or journal gap")
+    require(all(set(event) == set(identity) | {"schema_version", "boundary", "observed"} and
+                event["schema_version"] == 1 and event["boundary"] == metrics["boundary"] and
+                event["execution_id"] and sum(matches(event, row) for row in calls) == 1
+                for event in events) and
+            all(sum(matches(event, row) for event in events) == 1 for row in calls),
+            "commit metadata lost exact physical identity or copied Tool payload")
+    useful = receipt["timing"]["first_useful_leaf"]
+    if useful["state"] == "observed":
+        joined = [event for event in events if event["execution_id"] == useful["execution_id"]]
+        require(len(joined) == 1 and useful["boundary"] == metrics["boundary"] and
+                joined[0]["observed"] == useful["observed"] and
+                all(joined[0][key] == useful[key] for key in identity if key not in {"keeper", "tool"}),
+                "useful clock was substituted from a parent completion or another execution")
+        selection = [event for event in events if any(matches(event, row) and
+                     row["tool"] == "keeper_artifact_read" and
+                     row["input"].get("sha256") == receipt["input"]["_blob"]["sha256"] and
+                     row.get("task_id") == useful["task_id"] for row in calls)]
+        require(selection and joined[0] == selection[0],
+                "first useful action skipped an earlier committed original input read")
+
+
 def check_http_observation(directory, receipt, received, *, refused=False):
+    check_tool_commit_observation(directory, receipt)
     metrics = receipt["http_metrics"]
     path = directory / "http-events.jsonl"
     events = [json.loads(line) for line in path.read_text().splitlines()]
@@ -449,7 +488,6 @@ def main():
         require(receipt["remaining_queue"] == 0 and receipt["backend_calls_after_ready"] == 0,
                 "setup source or backend work contaminated measured turn")
         require(useful["state"] == "observed", "successful first useful leaf needs real physical join")
-        require(useful["execution_id"] in turn["execution_ids"], "leaf execution is outside actual turn")
         require(useful["trace_id"] == turn["trace_id"] and useful["keeper_turn_id"] == turn["absolute_turn"],
                 "leaf trace/turn identity differs from canonical turn")
         require(useful["task_id"] == read(output / f"pair-{entry['pair']:04d}" / "base" /
@@ -469,6 +507,11 @@ def main():
         require(len(activations) == (0 if entry["strategy"] == "direct" else 1),
                 "actual exact Skill admission differs from assigned arm")
         calls = read(directory / "tool-calls.json")
+        useful_rows = [row for row in calls if row.get("execution_id") == useful["execution_id"]]
+        require(len(useful_rows) == 1 and useful_rows[0]["tool"] == "keeper_artifact_read",
+                "successful useful action was fabricated from an outer completion")
+        require(useful_rows[0]["input"]["sha256"] == receipt["input"]["_blob"]["sha256"],
+                "first useful leaf read a different immutable input")
         stdout_ids = receipt["verified_stdout_read_execution_ids"]
         require(stdout_ids, "the final digest needs an actual complete stdout read")
         stdout_rows = [row for row in calls if row.get("execution_id") in stdout_ids]
@@ -477,9 +520,10 @@ def main():
                     row["keeper_turn_id"] == turn["absolute_turn"] for row in stdout_rows),
                 "copied result metadata must not stand in for physical stdout reading")
         if entry["strategy"] == "direct":
-            require(set(stdout_ids) <= set(turn["execution_ids"]) and
-                    all(row.get("composition_node_id") is None for row in stdout_rows),
-                    "direct stdout read escaped the exact SDK turn")
+            require(set(stdout_ids + [useful["execution_id"]]) <= set(turn["execution_ids"]) and
+                    all(row.get("composition_node_id") is None and row.get("parent_tool_use_id") is None
+                        for row in stdout_rows + useful_rows),
+                    "direct physical read escaped the exact SDK turn")
         else:
             parents = [row for row in calls if row["tool"] == "keeper_composition_run" and
                        row.get("execution_id") in turn["execution_ids"]]
@@ -489,24 +533,28 @@ def main():
                         any(node["node_id"] == row["composition_node_id"] and
                             node["execution_id"] == row["execution_id"] and
                             node["tool_name"] == row["tool"] and node["input"] == row["input"]
-                            for node in nodes) for row in stdout_rows),
-                    "nested physical stdout lost its canonical execution/SDK parent join")
-            require(not (set(stdout_ids) & set(turn["execution_ids"])),
+                            for node in nodes) for row in stdout_rows + useful_rows),
+                    "nested physical read lost its canonical execution/SDK parent join")
+            require(not (set(stdout_ids + [useful["execution_id"]]) & set(turn["execution_ids"])),
                     "this fixture must exercise child IDs outside the outer SDK trajectory")
+            require(set(parents[0]["input"]) == {"recipe"} and
+                    [row["tool"] for row in calls if row.get("execution_id") in turn["execution_ids"]] ==
+                    ["keeper_composition_run"],
+                    "one-call recipe still used a preliminary read, loader or prepare exchange")
+            selection_reads = [row for row in calls if row["tool"] == "keeper_artifact_read" and
+                               row["input"].get("sha256") == receipt["input"]["_blob"]["sha256"]]
+            require(selection_reads == useful_rows, "upstream recipe physically reread its immutable selection")
         raw_records = read(directory / "exact-run-records.json")
         require(raw_records and all(record["worker_run_id"] == turn["raw_trace_run_ref"]["worker_run_id"]
                                     for record in raw_records), "tool evidence escaped the exact SDK run")
-        useful_rows = [row for row in calls if row.get("execution_id") == useful["execution_id"]]
-        require(len(useful_rows) == 1 and useful_rows[0]["tool"] == "keeper_artifact_read",
-                "successful useful action was fabricated from an outer completion")
-        require(useful_rows[0]["input"]["sha256"] == receipt["input"]["_blob"]["sha256"],
-                "first useful leaf read a different immutable input")
         bodies = sorted(directory.glob("provider-request-*.json"))
         require(len(bodies) == receipt["provider_requests"] and len(bodies) > 1,
                 "actual streaming provider loop was not crossed")
         first_tools = {tool["function"]["name"] for tool in read(bodies[0]).get("tools", [])}
         require("keeper_job_result" in first_tools,
                 "the current Task's exact declared result Tool was absent from the first actual POST")
+        require("keeper_composition_run" in first_tools,
+                "the current Task's one-call recipe control was absent from the first actual POST")
         redundant_loads = [row for row in calls if row["tool"] == "keeper_tool_search" and
                            "keeper_job_result" in row["input"].get("names", [])]
         require(not redundant_loads,

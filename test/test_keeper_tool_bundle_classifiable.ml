@@ -736,6 +736,9 @@ let test_task_selected_composition_is_callable_without_loading () =
         | Some tool -> tool | None -> fail "exact Task composition was absent from the first callable surface" in
       check bool "the exact Task plan's ordinary result Tool is callable without a load" true
         (List.exists (fun (tool : Agent_core.Tool.t) -> tool.schema.name = "keeper_job_result") tools);
+      check bool "one-call upstream recipe control needs no preliminary loader" true
+        (List.exists (fun (tool : Agent_core.Tool.t) ->
+          tool.schema.name = Keeper_composition_draft.run_tool_name) tools);
       check bool "another deferred composition remains behind the loader" false
         (List.exists (fun (tool : Agent_core.Tool.t) -> tool.schema.name = "keeper_compose_gate-async") tools);
       let before = match Keeper_skill_activation_ledger.load_existing ~config ~trace_id:meta.runtime.trace_id with

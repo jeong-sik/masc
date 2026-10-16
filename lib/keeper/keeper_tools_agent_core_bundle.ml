@@ -559,6 +559,7 @@ let make_tool_bundle_for_descriptors_with_policy
     let task_required_tool_names = List.concat_map
         (fun (skill : Keeper_tool_composition_surface.composition_skill) ->
           if List.exists (Skill_reference.equal skill.reference) task_references then
+            Keeper_composition_draft.run_tool_name ::
             Keeper_tool_composition_catalog.tool_name skill.entry ::
               List.filter_map (fun (node : Keeper_tool_plan.node) ->
                 match Keeper_tool_plan.descriptor skill.entry.plan node.id with

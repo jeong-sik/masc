@@ -2465,6 +2465,31 @@ let test_commit_observers_keep_durable_occurrences_and_fiber_scopes env =
       (Keeper_tool_call_log.queued_count_for_testing ())))
 ;;
 
+let test_commit_observer_capture_retains_scope_and_absence () =
+  with_tmp_log (fun () ->
+    let left = ref [] and right = ref [] in
+    let first = Keeper_tool_call_log.make_commit_observer (fun event -> left := event :: !left) in
+    let second = Keeper_tool_call_log.make_commit_observer (fun event -> right := event :: !right) in
+    let append execution_id =
+      Keeper_tool_call_log.log_call ~keeper_name:"actor-observed-k" ~tool_name:"Read"
+        ~input:(`Assoc []) ~output_text:"original bytes" ~duration_ms:1.0 ~wire_outcome:Tool_result.Ok
+        ~execution_id ~on_committed:(fun () -> ()) () in
+    let captured_id = Ids.Execution_id.generate () in
+    let captured = Keeper_tool_call_log.with_commit_observer first (fun () ->
+      Keeper_tool_call_log.capture_commit_observer (fun () -> append captured_id)) in
+    let absent = Keeper_tool_call_log.capture_commit_observer (fun () -> append (Ids.Execution_id.generate ())) in
+    Keeper_tool_call_log.with_commit_observer second (fun () ->
+      captured (); absent (); append (Ids.Execution_id.generate ()));
+    Alcotest.(check int) "actor handoff retains exactly the original observer" 1 (List.length !left);
+    Alcotest.(check bool) "handoff preserves the physical identity" true
+      (match !left with
+       | [{Keeper_tool_call_log.execution_id=Some id;_}] -> Ids.Execution_id.equal id captured_id
+       | [] | [{execution_id=None;_}] | _ :: _ :: _ -> false);
+    Alcotest.(check int) "absent captured scope never borrows actor ambient observation" 1 (List.length !right);
+    Alcotest.(check int) "all original durable calls remain" 3
+      (List.length (read_recent ~keeper_name:"actor-observed-k" ())))
+;;
+
 let test_commit_observer_failure_preserves_commit_and_callback () =
   with_tmp_log (fun () ->
     let observer = Keeper_tool_call_log.make_commit_observer (fun _ -> failwith "fixture observer delivery failure") in
@@ -3367,6 +3392,8 @@ let () =
             (test_commit_callback_bypasses_async_queue ~success:false)
         ; eio_env_test "durable commit observations retain original identities and fiber scopes"
             test_commit_observers_keep_durable_occurrences_and_fiber_scopes
+        ; eio_test "actor handoff retains original observer scope and explicit absence"
+            test_commit_observer_capture_retains_scope_and_absence
         ; eio_test "observer delivery failure preserves commit and original callback"
             test_commit_observer_failure_preserves_commit_and_callback
         ; eio_test "failed append emits no committed observation"

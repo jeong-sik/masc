@@ -123,11 +123,17 @@ when necessary. It never executes a tool. Both arms use the SDK's normal schedul
 and actual descriptor execution modes; there is no forced serial control policy.
 This one case has data dependencies and makes no concurrency-overlap claim.
 
-Both arms first read the original selection artifact. The direct arm then reads
-the selected original job result and its stdout. In `upstream_inline`, the Skill arm authors a transient
-prepare/run whose explicit output template binds the child argument from another
-actual selection read. That extra read and prepare/run cost remain inside its
-clock. The child uses the exact published Inline Skill. Publication outside the
+Both arms physically read the original selection artifact. The direct arm uses
+ordinary calls to read that selection, the selected original job result and its
+stdout. The successful `upstream_inline` Skill arm submits one
+`keeper_composition_run.recipe`. Its first producer reads the selection once;
+the exact published Inline Skill consumes that actual output through its tagged
+input template. Outer exports return the selected `job_id` and child `stdout`.
+The scripted peer derives its answer from those actual model-visible exports;
+fixture expectations and sealed audit manifests only validate the execution.
+The current Task's selected schemas include the public run control, so this
+path requires neither a preliminary read nor loader/prepare exchanges. Real
+model adoption still requires a configured cohort. Publication outside the
 clock is the declared starting condition, not hidden authoring work.
 
 In `named_inline`, the Skill arm instead calls the existing named Tool with the
@@ -188,11 +194,23 @@ attempts stay failed with their available metrics; absent observations stay
 unknown. Backend call counts come from the actual synthetic peer's saved calls.
 
 Admission records canonical source ID, snapshot reference, revision and
-`first_admitted_at`, plus separate enqueue entry/return observations. A synchronous
-actual tool observation is joined to a unique committed physical execution row
-for the first successful selection leaf, including SDK coordinates and schedule.
-An absent/ambiguous join stays `unknown`. Its observer time follows the actual
-result/log commit; it is not an execution-start timestamp. The cycle call entry
+`first_admitted_at`, plus separate enqueue entry/return observations. The scoped
+`durable_tool_call_commit` observer records original identities and a local clock
+in `tool-commit-events.jsonl`, including native composition leaves. The receipt's
+`tool_commit_observation` reports its mode, delivery failures, event count and
+journal hash. Every observed occurrence must join one-to-one with its actual
+physical ledger row; incomplete coverage leaves the useful clock `unknown`.
+Owner handoffs capture this scope explicitly, including an absent observer.
+The earliest successful original selection leaf retains its physical execution,
+SDK coordinates and schedule. A native leaf also joins the exact SDK parent
+reply and canonical execution artifact. No parent-return clock substitutes for
+the leaf's own durable commit observation.
+
+This opt-in scope requires synchronous appends and sidecar writes. Use the same
+observer on both arms and report its I/O cost; ordinary product callers retain
+their existing append mode. Earlier SDK-callback clocks are a different boundary
+and cannot be combined with these timings. This observes durable completion
+evidence, not execution start. The cycle call entry
 and return are separate monotonic observations. Board signals currently do not
 receive the source-bound reaction ledger `Turn_started` written for
 Schedule/HITL/Ask. Generic runtime/SDK turn-start records are a different
@@ -282,8 +300,10 @@ attempts remain explicit failures in the denominator.
 That case submits the fresh recipe through `keeper_composition_run` without a
 separate prepare. Its original SDK input is joined to the returned sealed draft,
 run artifact, invocation turn and exact child mappings before accepting physical
-stdout evidence. The normal pair retains separate prepare/run, exercising both
-sources without inventing a latency comparison between these synthetic cases.
+stdout evidence. The malformed-final case keeps its preliminary selection read
+and exercises repeated successful reads while retaining the earliest committed
+occurrence. The normal pair exports the selection and stdout in one recipe call.
+These different synthetic cases do not establish a latency comparison.
 Both recipes pass the selection reader's fixed arguments through ordinary
 `args`, while the child keeps its tagged upstream input. The same public
 compiler normalizes the ordinary object and revalidates the frozen draft.

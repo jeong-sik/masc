@@ -69,12 +69,12 @@ runtime gates. Source-review completion alone leaves a Draft item in review.
 
 ## Current queue
 
-The queue now contains **26 concrete candidates**: 24 from the first semantic pass, A1 from the Agent Core follow-up and T1 from the integrated TUI investigation. Five are implemented as PRs; their source-review evidence is recorded on each PR: `S1` in [#43367](https://github.com/jeong-sik/masc/pull/43367) isolates provider usage acceptance; `K1` in [#43370](https://github.com/jeong-sik/masc/pull/43370) preserves separate Librarian failure-policy axes; `D2` in [#43374](https://github.com/jeong-sik/masc/pull/43374) returns an explicit Goal commit result; `A1` in [#43386](https://github.com/jeong-sik/masc/pull/43386) separates stream error projection from diagnostic file I/O; `D1` in [#43399](https://github.com/jeong-sik/masc/pull/43399) returns the committed Task verification obligation together with its public result. Other `next` items remain queued; this ordering does not waive their coverage.
+The queue now contains **26 concrete candidates**: 24 from the first semantic pass, A1 from the Agent Core follow-up and T1 from the integrated TUI investigation. Six are implemented as PRs; their source-review evidence is recorded on each PR: `S1` in [#43367](https://github.com/jeong-sik/masc/pull/43367) isolates provider usage acceptance; `K1` in [#43370](https://github.com/jeong-sik/masc/pull/43370) preserves separate Librarian failure-policy axes; `D2` in [#43374](https://github.com/jeong-sik/masc/pull/43374) returns an explicit Goal commit result; `A1` in [#43386](https://github.com/jeong-sik/masc/pull/43386) separates stream error projection from diagnostic file I/O; `D1` in [#43399](https://github.com/jeong-sik/masc/pull/43399) returns the committed Task verification obligation together with its public result. `K2` in [#43411](https://github.com/jeong-sik/masc/pull/43411) isolates canonical child export selection. Other `next` items remain queued; this ordering does not waive their coverage.
 
 | ID | Priority | Status | Refactoring point |
 | --- | --- | --- | --- |
 | [K1](#k1) | next | in review | Compute librarian failure evidence once with explicit independent policy axes |
-| [K2](#k2) | next | candidate | Give canonical child export selection a typed pure boundary |
+| [K2](#k2) | next | in review | Give canonical child export selection a typed pure boundary |
 | [K3](#k3) | next | candidate | Represent Board contention rearm tickets with one explicit phase |
 | [K4](#k4) | later | candidate | Make request-evidence reset and projection ownership explicit per attempt |
 | [K5](#k5) | later | candidate | Separate approval restart replay decisions from recovery effects |
@@ -135,6 +135,8 @@ Implementation: [#43370](https://github.com/jeong-sik/masc/pull/43370) adds a pr
 
 **Give canonical child export selection a typed pure boundary**
 
+Implemented in [#43411](https://github.com/jeong-sik/masc/pull/43411) with private `Keeper_composition_child_exports`: ordered values or a closed selection error. Canonical authority, disposition, publication and retained-artifact effects stay in their existing owners.
+
 Source: [lib/keeper/keeper_tool_composition_surface.ml:1445](https://github.com/jeong-sik/masc/blob/aea8424926ea79f110315eec5ab429ac51043598/lib/keeper/keeper_tool_composition_surface.ml#L1445-L1498), [lib/keeper/keeper_composition_dependency_result.ml:91](https://github.com/jeong-sik/masc/blob/aea8424926ea79f110315eec5ab429ac51043598/lib/keeper/keeper_composition_dependency_result.ml#L91-L126).
 
 Problem: The async worker dispatches a child-result read, preserves typed Deferred/Failed/Completed status, then decodes the canonical result/exports/available/value JSON envelope inline inside the effectful dispatch closure. Changes to export schema or selection must be reviewed alongside original activation authority, artifact publication, unavailable-result tracking, and sibling execution in a 3,026-line surface module. The storage reader exposes a generic execution result, so the canonical envelope contract is reconstructed at the consumer.
@@ -152,9 +154,9 @@ Preserve:
 
 Consumers: [lib/keeper/keeper_tool_composition_surface.ml](../../../lib/keeper/keeper_tool_composition_surface.ml), [lib/keeper/keeper_composition_continuation_wake.ml](../../../lib/keeper/keeper_composition_continuation_wake.ml), [lib/keeper/keeper_tools_agent_core_bundle.ml](../../../lib/keeper/keeper_tools_agent_core_bundle.ml).
 
-Scenarios: [test/test_keeper_composition_nested.ml](../../../test/test_keeper_composition_nested.ml), [test/test_keeper_composition_async_broker.ml](../../../test/test_keeper_composition_async_broker.ml), [test/test_keeper_tool_plan_executor.ml](../../../test/test_keeper_tool_plan_executor.ml). **Not executed in this audit.**
+Scenarios: [test/test_keeper_owned_jobs.ml](../../../test/test_keeper_owned_jobs.ml) exercises the actual native async child-result branch, original child/parent continuations, whole-child failure and publication recovery. Added cases preserve ordered escaped export names and typed values through a dependent artifact read, and release a dependency after a child with no exports completes. [test/test_keeper_composition_nested.ml](../../../test/test_keeper_composition_nested.ml), [test/test_keeper_composition_async_broker.ml](../../../test/test_keeper_composition_async_broker.ml) and [test/test_keeper_tool_plan_executor.ml](../../../test/test_keeper_tool_plan_executor.ml) remain related suites. **Not executed in this audit.**
 
-Ordering rationale: A narrow protocol boundary in a large effect owner; it improves reviewability without replacing the already typed execution and authority machinery. Existing nested-composition tests cover selected exports, child failure, and dependent dispatch.
+Ordering rationale: A narrow protocol boundary in a large effect owner; it improves reviewability without replacing the already typed execution and authority machinery. Implementation tracing identified `test_keeper_owned_jobs` as the real native barrier scenario; the general nested-composition suite also contains inline-only child cases.
 
 ### K3
 
@@ -837,4 +839,5 @@ These are reasons not to perform a blanket rewrite, not whole-module correctness
 - Round 5 implementation: A1 was rechecked against main `857c8647ce7cc7305d6aa081d1aa24ac5b93f05e`, implemented and independently source-reviewed in [#43386](https://github.com/jeong-sik/masc/pull/43386). The focused read corrected a tentative public-API concern: the projection owner was already private.
 - Round 5 implementation continued: D1 implemented in [#43399](https://github.com/jeong-sik/masc/pull/43399), preserving committed verification obligations across ordinary projection errors without changing cancellation or lock ownership. The existing compensation comment was corrected to distinguish returned cleanup errors from raised exceptions.
 - Round 5 coverage: 39 scoped reading records across TUI and Browser added 34 unique paths in [#43400](https://github.com/jeong-sik/masc/pull/43400), bringing the consulted-source set to 157. Added T1 as investigate and retained eight existing ownership boundaries. The queue has 26 candidates; the complete initial file census remains pinned and semantic coverage remains selective.
+- Round 6 implementation: K2 implemented in [#43411](https://github.com/jeong-sik/masc/pull/43411), preserving native child authority and publication while extracting the pure selected-export contract. The whole stack was rebased onto main `da50197434e17182ca30348afd92a541eea3b155`; S1 now retains the upstream quota-rest effect using the same accepted immutable snapshot, before the observer. Empty complete reports revoke usage observations but do not clear an existing quota rest. Independent source reviews checked the changed S1 integration and the other layers' rebased context.
 - No local Dune build, CI polling, behavior execution, formal GitHub approval, merge or runtime proof is supplied by this inventory.

@@ -108,14 +108,25 @@ type config_error =
 
 type structured_failure =
   | Empty_response
+  | Multiple_text_blocks
   | Invalid_json
   | Expected_object
   | Schema_rejected
   | Schema_type_mismatch
 
+type structured_refusal = Policy_refusal | Content_filtered
+type structured_truncation = Token_limit | Repetition_limit | Context_limit
+type structured_interruption = Paused_turn | Compacted_turn | Missing_tool_calls | Unknown_stop
+type structured_response_state =
+  | Awaiting_tool_results
+  | Refused_response of structured_refusal
+  | Truncated_response of structured_truncation
+  | Interrupted_response of structured_interruption
+
 (** Serialization / deserialization errors. *)
 type serialization_error =
   | JsonParseError of { detail : string }
+  | StructuredOutputStateError of structured_response_state
   | StructuredOutputParseError of
       { reason : structured_failure
       ; detail : string
@@ -297,14 +308,30 @@ let config_error_to_string = function
 
 let structured_failure_label = function
   | Empty_response -> "empty_response"
+  | Multiple_text_blocks -> "multiple_text_blocks"
   | Invalid_json -> "invalid_json"
   | Expected_object -> "expected_object"
   | Schema_rejected -> "schema_rejected"
   | Schema_type_mismatch -> "schema_type_mismatch"
 ;;
 
+let structured_response_state_label = function
+  | Awaiting_tool_results -> "awaiting_tool_results"
+  | Refused_response Policy_refusal -> "provider_refusal"
+  | Refused_response Content_filtered -> "content_filtered"
+  | Truncated_response Token_limit -> "token_limit"
+  | Truncated_response Repetition_limit -> "repetition_limit"
+  | Truncated_response Context_limit -> "context_limit"
+  | Interrupted_response Paused_turn -> "paused_turn"
+  | Interrupted_response Compacted_turn -> "compacted_turn"
+  | Interrupted_response Missing_tool_calls -> "missing_tool_calls"
+  | Interrupted_response Unknown_stop -> "unknown_stop"
+;;
+
 let serialization_error_to_string = function
   | JsonParseError r -> Printf.sprintf "JSON parse error: %s" r.detail
+  | StructuredOutputStateError state ->
+    "Structured output response state: " ^ structured_response_state_label state
   | StructuredOutputParseError r ->
     Printf.sprintf "Structured output parse error: %s (response bytes: %d)"
       (structured_failure_label r.reason) r.raw_len

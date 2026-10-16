@@ -41,8 +41,24 @@ type response_json_shape =
   | Any_json
   | Object_json
 
-(** Extract the response text as JSON using the same provider-native
-    structured-output response boundary as {!schema_extractor}. *)
+type 'a response_outcome =
+  | Ready of 'a
+  | Awaiting_tool_results
+  | Refused of Error.structured_refusal
+  | Truncated of Error.structured_truncation
+  | Interrupted of Error.structured_interruption
+  | Invalid of Error.t
+
+(** Inspect the authoritative stop reason before parsing. Actual tool calls
+    are intermediate turns, even with text present. Refusal and truncation
+    cannot be accepted as JSON success. A terminal payload requires exactly
+    one [Text] block, including when an extra block contains only whitespace;
+    thinking and tool-result blocks are excluded. No tool is executed here. *)
+val inspect_response_json :
+  ?shape:response_json_shape -> api_response -> Yojson.Safe.t response_outcome
+
+(** Result projection of {!inspect_response_json}. Nonterminal/refused/truncated
+    states become {!Error.StructuredOutputStateError}, not parse errors. *)
 val extract_response_json
   :  ?shape:response_json_shape
   -> api_response

@@ -721,6 +721,31 @@ let test_structured_error_projection_omits_private_model_output () =
     (Agent_core_strings.contains_substring
        ~haystack:(Yojson.Safe.to_string projection.error_detail) ~needle:raw)
 
+let test_structured_state_projection_preserves_closed_reason () =
+  List.iter
+    (fun state ->
+       let error = Agent_core.Error.Serialization (StructuredOutputStateError state) in
+       let projection = Error_json.agent_failed_error_projection error in
+       check string "state projection contains only kind and closed reason"
+         (Yojson.Safe.to_string
+            (`Assoc
+               [ "variant", `String "structured_output_state_error"
+               ; "reason", `String (Agent_core.Error.structured_response_state_label state)
+               ]))
+         (Yojson.Safe.to_string projection.error_detail))
+    Agent_core.Error.
+      [ Awaiting_tool_results
+      ; Refused_response Policy_refusal
+      ; Refused_response Content_filtered
+      ; Truncated_response Token_limit
+      ; Truncated_response Repetition_limit
+      ; Truncated_response Context_limit
+      ; Interrupted_response Paused_turn
+      ; Interrupted_response Compacted_turn
+      ; Interrupted_response Missing_tool_calls
+      ; Interrupted_response Unknown_stop
+      ]
+
 let () =
   run "keeper_execution_join"
     [ ( "join_table"
@@ -738,6 +763,8 @@ let () =
     ; ( "bridge_stamping"
       , [ test_case "structured failures omit private model evidence" `Quick
             test_structured_error_projection_omits_private_model_output
+        ; test_case "structured states preserve closed public reason" `Quick
+            test_structured_state_projection_preserves_closed_reason
         ; test_case "tool_called carries tool_use_id" `Quick
             test_tool_called_carries_tool_use_id
         ; test_case "tool_completed stamps execution_id" `Quick

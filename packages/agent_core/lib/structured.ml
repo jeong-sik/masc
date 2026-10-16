@@ -49,6 +49,14 @@ type response_json_shape =
   | Any_json
   | Object_json
 
+type 'a response_outcome =
+  | Ready of 'a
+  | Awaiting_tool_results
+  | Refused of Error.structured_refusal
+  | Truncated of Error.structured_truncation
+  | Interrupted of Error.structured_interruption
+  | Invalid of Error.t
+
 let parse_response_json ?(shape = Any_json) ~raw ()
   : (Yojson.Safe.t, Error.t) result
   =
@@ -77,16 +85,88 @@ let parse_response_json ?(shape = Any_json) ~raw ()
            ~raw)
 ;;
 
-let extract_response_json ?shape (response : api_response) =
-  parse_response_json ?shape ~raw:(Types.visible_text_of_response response) ()
+let response_has_tool_calls (response : api_response) =
+  List.exists
+    (function
+      | ToolUse _ -> true
+      | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _
+      | Image _ | Document _ | Audio _ | ToolResult _ -> false)
+    response.content
+;;
+
+let inspect_terminal_json ?shape (response : api_response) =
+  let raw = Types.visible_text_of_response response in
+  match List.filter_map text_block response.content with
+  | [] | [ _ ] ->
+    (match parse_response_json ?shape ~raw () with
+     | Ok json -> Ready (json, raw)
+     | Error error -> Invalid error)
+  | _ :: _ :: _ ->
+    Invalid
+      (Error.structured_output_parse_error
+         ~reason:Error.Multiple_text_blocks
+         ~detail:"structured output requires exactly one text block"
+         ~raw)
+;;
+
+let inspect_response_json_with_raw ?shape (response : api_response) =
+  match response.stop_reason with
+  | Refusal -> Refused Error.Policy_refusal
+  | ContentFilter -> Refused Error.Content_filtered
+  | MaxTokens -> Truncated Error.Token_limit
+  | RepetitionTruncation -> Truncated Error.Repetition_limit
+  | ContextWindowExceeded -> Truncated Error.Context_limit
+  | PauseTurn -> Interrupted Error.Paused_turn
+  | Compaction -> Interrupted Error.Compacted_turn
+  | UnmatchedToolCalls -> Interrupted Error.Missing_tool_calls
+  | Unknown _ -> Interrupted Error.Unknown_stop
+  | StopToolUse ->
+    if response_has_tool_calls response
+    then Awaiting_tool_results
+    else Interrupted Error.Missing_tool_calls
+  | EndTurn | StopSequence ->
+    if response_has_tool_calls response
+    then Awaiting_tool_results
+    else inspect_terminal_json ?shape response
+;;
+
+let map_response_outcome f = function
+  | Ready value -> Ready (f value)
+  | Awaiting_tool_results -> Awaiting_tool_results
+  | Refused reason -> Refused reason
+  | Truncated reason -> Truncated reason
+  | Interrupted reason -> Interrupted reason
+  | Invalid error -> Invalid error
+;;
+
+let inspect_response_json ?shape response =
+  inspect_response_json_with_raw ?shape response |> map_response_outcome fst
+;;
+
+let result_of_response_outcome = function
+  | Ready value -> Ok value
+  | Invalid error -> Error error
+  | Awaiting_tool_results ->
+    Error (Error.Serialization (StructuredOutputStateError Awaiting_tool_results))
+  | Refused reason ->
+    Error (Error.Serialization (StructuredOutputStateError (Refused_response reason)))
+  | Truncated reason ->
+    Error (Error.Serialization (StructuredOutputStateError (Truncated_response reason)))
+  | Interrupted reason ->
+    Error (Error.Serialization (StructuredOutputStateError (Interrupted_response reason)))
+;;
+
+let extract_response_json ?shape response =
+  inspect_response_json ?shape response |> result_of_response_outcome
 ;;
 
 (** Extract structured output from the response text JSON. *)
 let extract_response ~(schema : _ schema) (response : api_response)
   : ('a, Error.t) result
   =
-  let raw = Types.visible_text_of_response response in
-  let* json = parse_response_json ~raw () in
+  let* json, raw =
+    inspect_response_json_with_raw response |> result_of_response_outcome
+  in
   parse_schema_text_json ~raw schema json
 ;;
 

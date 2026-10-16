@@ -12,34 +12,13 @@ type complete_fn = Keeper_provider_subcall.complete_fn
    clean; on /v1 the model's reasoning lands in a separate response field and
    never enters the JSON content. The budget must cover the answer PLUS any
    reasoning the model spends first, since that phase can no longer be
-   suppressed; truncated_of_stop_reason still flags a MaxTokens cut. The value
+   suppressed; structured response inspection still flags a MaxTokens cut. The value
    is the [Env_config_keeper.KeeperVision.max_output_tokens] knob — one /v1 pool
    shared by reasoning and answer, defaulting generous so reasoning cannot
    truncate the reply the way the former 4096 did (2026-08-27 MiniMax M3). *)
 let vision_default_max_tokens () = Env_config_keeper.KeeperVision.max_output_tokens ()
 
 let max_image_bytes () = Env_config_keeper.KeeperVision.max_image_bytes ()
-
-let truncated_of_stop_reason : Agent_core.Types.stop_reason -> bool = function
-  | Agent_core.Types.MaxTokens -> true
-  (* ContentFilter is a policy terminal like Refusal, not a length cut.
-     RepetitionTruncation is a provider repetition guard, not token-budget
-     exhaustion; classifying it as truncated would prescribe the wrong
-     larger-budget remediation.
-     UnmatchedToolCalls is AGENT_CORE's internal fail-closed tool-turn shape;
-     vision runs with tool_choice = None so it cannot legitimately occur,
-     and it carries no partial-extraction signal either way. *)
-  | Agent_core.Types.EndTurn
-  | Agent_core.Types.StopToolUse
-  | Agent_core.Types.StopSequence
-  | Agent_core.Types.Refusal
-  | Agent_core.Types.ContentFilter
-  | Agent_core.Types.RepetitionTruncation
-  | Agent_core.Types.PauseTurn
-  | Agent_core.Types.Compaction
-  | Agent_core.Types.ContextWindowExceeded
-  | Agent_core.Types.UnmatchedToolCalls
-  | Agent_core.Types.Unknown _ -> false
 
 let provider_for_vision (provider_cfg : Llm_provider.Provider_config.t) =
   { provider_cfg with
@@ -450,29 +429,43 @@ let vision_text_of_json = function
   | _ -> Error "vision response must be a JSON object"
 ;;
 
-let vision_text_of_response (response : Agent_core.Types.api_response) =
-  match
-    (Agent_core.Structured.response_json_extractor ()) response
-  with
-  | Ok json -> vision_text_of_json json
-  | Error msg -> Error ("vision response is not valid structured JSON: " ^ msg)
+let provider_state_outcome ~failure_class state =
+  Vo_provider
+    { failure_class
+    ; detail = Agent_core.Error.to_string
+        (Agent_core.Error.Serialization (StructuredOutputStateError state))
+    }
 ;;
 
 let outcome_of_response
     ~runtime_id ~requested_model (response : Agent_core.Types.api_response) =
-  (* A length stop is authoritative even when the prefix happens to form
-     valid, nonempty JSON. Accepting that prefix would publish a partial
-     extraction as success and prevent the next candidate from finishing it. *)
-  if truncated_of_stop_reason response.stop_reason then Vo_truncated
-  else
-  match vision_text_of_response response with
-  | Error detail -> Vo_invalid_structured_response detail
-  | Ok text ->
-    (match Va.classify ~truncated:false ~content:text with
+  match Agent_core.Structured.inspect_response_json response with
+  | Awaiting_tool_results ->
+    provider_state_outcome ~failure_class:Tool_result.Runtime_failure
+      Agent_core.Error.Awaiting_tool_results
+  | Refused reason ->
+    provider_state_outcome ~failure_class:Tool_result.Policy_rejection
+      (Agent_core.Error.Refused_response reason)
+  | Truncated Token_limit -> Vo_truncated
+  | Truncated (Repetition_limit | Context_limit as reason) ->
+    (* Only a token-budget cut uses the existing larger-budget candidate
+       path. A repetition guard or context cut has a different cause. *)
+    provider_state_outcome ~failure_class:Tool_result.Runtime_failure
+      (Agent_core.Error.Truncated_response reason)
+  | Interrupted reason ->
+    provider_state_outcome ~failure_class:Tool_result.Runtime_failure
+      (Agent_core.Error.Interrupted_response reason)
+  | Invalid error -> Vo_invalid_structured_response (Agent_core.Error.to_string error)
+  | Ready json ->
+    (match vision_text_of_json json with
+     | Error detail -> Vo_invalid_structured_response detail
      | Ok text ->
-       Vo_ok { text; runtime_id; requested_model; response_model = response.model }
-     | Error Va.Empty_extraction -> Vo_empty
-     | Error Va.Truncated_extraction -> Vo_truncated)
+       (match Va.classify ~truncated:false ~content:text with
+        | Ok text ->
+          Vo_ok { text; runtime_id; requested_model; response_model = response.model }
+        | Error Va.Empty_extraction -> Vo_empty
+        | Error Va.Truncated_extraction -> Vo_truncated))
+;;
 
 let bounded_exponential_backoff ~base ~max_backoff ~attempt_index =
   let rec loop remaining delay =
@@ -815,12 +808,7 @@ let run_candidates_outcome
                  ~last_error:(Some Candidate_output_limit)
                  ~attempt_index:(attempt_index + 1)
                  rest
-             | Vo_invalid_structured_response detail
-               when (match response.Agent_core.Types.stop_reason with
-                     | EndTurn | StopSequence | Unknown _ -> true
-                     | StopToolUse | MaxTokens | Refusal | ContentFilter
-                     | RepetitionTruncation | PauseTurn | Compaction
-                     | ContextWindowExceeded | UnmatchedToolCalls -> false) ->
+             | Vo_invalid_structured_response detail ->
                record_vision_candidate_attempt
                  ?tool_use_id ?trace_id ~runtime_id ~result:"error"
                  ~reason:"invalid_structured_output" ~duration_ms:0.0
@@ -830,20 +818,13 @@ let run_candidates_outcome
                   escaping differs per model, exactly as token ceilings do
                   (2026-09-12, msx-retro-mania: one broken reply ended the
                   whole vision call and the terminal composition killed the
-                  turn). A Refusal or ContentFilter stop is the model
-                  answering "no" -- the branch below returns that as the
-                  walk's final outcome instead of re-rolling the same
-                  pixels elsewhere. The detail names the runtime so an
-                  exhausted walk reports who answered. *)
+                  turn). The SDK classifies refusal and other nonterminal
+                  response states before parsing; those return the terminal
+                  provider-failure arm below. The detail names the runtime so
+                  an exhausted walk reports who answered. *)
                continue_with
                  (Candidate_invalid_output
                     (Printf.sprintf "%s: %s" runtime_id detail))
-             | Vo_invalid_structured_response _ as final ->
-               record_vision_candidate_attempt
-                 ?tool_use_id ?trace_id ~runtime_id ~result:"error"
-                 ~reason:"invalid_structured_response" ~duration_ms:0.0
-                 ~success:false ();
-               final
              | Vo_empty ->
                record_vision_candidate_attempt
                  ?tool_use_id ?trace_id ~runtime_id ~result:"error"
@@ -852,7 +833,13 @@ let run_candidates_outcome
                continue_with
                  (Candidate_invalid_output
                     (Printf.sprintf "%s: empty extraction" runtime_id))
-             | (Vo_timeout | Vo_ok _ | Vo_invalid_request _ | Vo_no_runtime _ | Vo_provider _ | Vo_official_failure _) as outcome -> record_vision_candidate_attempt
+             | (Vo_timeout | Vo_invalid_request _ | Vo_no_runtime _ | Vo_provider _ | Vo_official_failure _) as outcome ->
+               record_vision_candidate_attempt
+                 ?tool_use_id ?trace_id ~runtime_id ~result:"error"
+                 ~reason:"structured_response_state" ~duration_ms:0.0
+                 ~success:false ();
+               outcome
+             | Vo_ok _ as outcome -> record_vision_candidate_attempt
                  ?tool_use_id ?trace_id ~runtime_id ~result:"ok"
                  ~reason:"provider_response" ~duration_ms:0.0
                  ~success:true ();

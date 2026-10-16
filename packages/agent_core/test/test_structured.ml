@@ -178,10 +178,10 @@ let test_schema_mixed_required () =
 
 (* --- Extractors --- *)
 
-let make_response content : Types.api_response =
+let make_response ?(stop_reason = EndTurn) content : Types.api_response =
   { id = "m"
   ; model = "m"
-  ; stop_reason = EndTurn
+  ; stop_reason
   ; content
   ; usage = None
   ; telemetry = None
@@ -344,7 +344,7 @@ let check_private_evidence ~reason ~raw = function
       (Error.to_string error);
     Alcotest.(check bool) "parse failure remains nonretryable" false (Error.is_retryable error)
   | Error ((Api _ | Provider _ | Agent _ | Mcp _ | Config _
-           | Serialization (JsonParseError _ | VersionMismatch _ | UnknownVariant _)
+           | Serialization (JsonParseError _ | StructuredOutputStateError _ | VersionMismatch _ | UnknownVariant _)
            | Io _ | Orchestration _ | Internal _ | Internal_carried _) as error) ->
     Alcotest.failf "expected structured evidence, got %s" (Error.to_string error)
   | Ok _ -> Alcotest.fail "invalid response was accepted"
@@ -407,7 +407,7 @@ let test_long_response_evidence_keeps_utf8_boundary () =
     Alcotest.(check bool) "valid UTF-8 preview" true (String.is_valid_utf_8 evidence.raw_preview);
     Alcotest.(check bool) "private diagnostic is also bounded" true (String.length evidence.detail <= 4096)
   | Api _ | Provider _ | Agent _ | Mcp _ | Config _
-  | Serialization (JsonParseError _ | VersionMismatch _ | UnknownVariant _)
+  | Serialization (JsonParseError _ | StructuredOutputStateError _ | VersionMismatch _ | UnknownVariant _)
   | Io _ | Orchestration _ | Internal _ | Internal_carried _ ->
     Alcotest.fail "wrong evidence constructor"
 ;;
@@ -438,10 +438,94 @@ let test_public_extractors_keep_safe_failure_class () =
   |> check_public "schema_type_mismatch" raw
 ;;
 
+let check_response_state expected response =
+  let state =
+    match Structured.inspect_response_json response with
+    | Awaiting_tool_results -> Error.Awaiting_tool_results
+    | Refused reason -> Error.Refused_response reason
+    | Truncated reason -> Error.Truncated_response reason
+    | Interrupted reason -> Error.Interrupted_response reason
+    | Ready _ -> Alcotest.fail "nonterminal response was accepted as JSON"
+    | Invalid error -> Alcotest.failf "response state became parse failure: %s"
+        (Error.to_string error)
+  in
+  Alcotest.(check bool) "closed response state" true (state = expected);
+  let check_result = function
+    | Error (Error.Serialization (StructuredOutputStateError actual)) ->
+      Alcotest.(check bool) "Result wrapper preserves state" true (actual = expected)
+    | Error ((Api _ | Provider _ | Agent _ | Mcp _ | Config _
+             | Serialization (JsonParseError _ | StructuredOutputParseError _
+                 | VersionMismatch _ | UnknownVariant _)
+             | Io _ | Orchestration _ | Internal _ | Internal_carried _) as error) ->
+      Alcotest.failf "wrong error family: %s" (Error.to_string error)
+    | Ok _ -> Alcotest.fail "Result wrapper accepted a nonterminal response"
+  in
+  check_result (Structured.extract_response_json response);
+  let parse_calls = ref 0 in
+  let schema : unit Structured.schema =
+    {params=[]; parse=(fun _ -> incr parse_calls; Ok ())} in
+  check_result (Structured.extract_response ~schema response);
+  Alcotest.(check int) "schema parser was not invoked" 0 !parse_calls;
+  Alcotest.(check string) "public state has no provider fragments"
+    ("Structured output response state: " ^ Error.structured_response_state_label expected)
+    (Error.to_string (Error.Serialization (StructuredOutputStateError state)))
+;;
+
+let test_authoritative_stop_states_precede_valid_json () =
+  List.iter (fun (stop_reason, expected) ->
+    check_response_state expected
+      (make_response ~stop_reason [Text {|{"value":"private-provider-text"}|}]))
+    [ Refusal, Error.Refused_response Policy_refusal
+    ; ContentFilter, Error.Refused_response Content_filtered
+    ; MaxTokens, Error.Truncated_response Token_limit
+    ; RepetitionTruncation, Error.Truncated_response Repetition_limit
+    ; ContextWindowExceeded, Error.Truncated_response Context_limit
+    ; PauseTurn, Error.Interrupted_response Paused_turn
+    ; Compaction, Error.Interrupted_response Compacted_turn
+    ; UnmatchedToolCalls, Error.Interrupted_response Missing_tool_calls
+    ; StopToolUse, Error.Interrupted_response Missing_tool_calls
+    ; Unknown "private-provider-text", Error.Interrupted_response Unknown_stop
+    ]
+;;
+
+let test_tool_call_turn_requires_tool_results_before_json () =
+  let tool = ToolUse {id="call";name="lookup";input=`Assoc []} in
+  List.iter (fun stop_reason ->
+    List.iter (fun content ->
+      check_response_state Error.Awaiting_tool_results
+        (make_response ~stop_reason content))
+      [[tool]; [Text {|{"value":42}|}; tool]])
+    [StopToolUse; EndTurn; StopSequence];
+  let terminal = make_response
+      [Thinking {content="private thought";signature=None}
+      ;ToolResult {tool_use_id="call";content="not-json";outcome=Tool_succeeded;
+          json=None;content_blocks=None}
+      ;Text " \n{\"value\":42} \n"] in
+  match Structured.inspect_response_json terminal with
+  | Ready json -> Alcotest.(check string) "terminal JSON after tool results"
+      {|{"value":42}|} (Yojson.Safe.to_string json)
+  | Awaiting_tool_results | Refused _ | Truncated _ | Interrupted _ | Invalid _ ->
+    Alcotest.fail "terminal single Text payload was not accepted"
+;;
+
+let test_multiple_text_blocks_are_ambiguous_even_at_whitespace_boundaries () =
+  List.iter (fun texts ->
+    let content = List.map (fun text -> Text text) texts in
+    let raw = String.concat "\n" texts in
+    Structured.extract_response_json (make_response content)
+    |> check_private_evidence ~reason:Error.Multiple_text_blocks ~raw)
+    [["{}";"{}"]; ["{";"}"]; [" \n";"{}"]; ["{}";"\t "]]
+;;
+
 let () =
   Alcotest.run
     "structured"
-    [ ( "private failure evidence"
+    [ ( "response states"
+      , [ Alcotest.test_case "authoritative stops precede JSON" `Quick test_authoritative_stop_states_precede_valid_json
+        ; Alcotest.test_case "tool turn then terminal JSON" `Quick test_tool_call_turn_requires_tool_results_before_json
+        ; Alcotest.test_case "multiple Text whitespace boundaries" `Quick test_multiple_text_blocks_are_ambiguous_even_at_whitespace_boundaries
+        ] )
+    ; ( "private failure evidence"
       , [ Alcotest.test_case "malformed response" `Quick test_malformed_response_retains_original_evidence
         ; Alcotest.test_case "empty response failure class" `Quick test_empty_response_has_public_failure_class
         ; Alcotest.test_case "schema refusal" `Quick test_schema_refusal_retains_response_without_public_detail

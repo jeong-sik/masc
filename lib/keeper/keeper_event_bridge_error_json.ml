@@ -298,6 +298,10 @@ let core_config_error_fields = function
 ;;
 
 let core_serialization_error_fields = function
+  | Agent_core.Error.StructuredOutputStateError state ->
+    [ "variant", `String "structured_output_state_error"
+    ; "reason", `String (Agent_core.Error.structured_response_state_label state)
+    ]
   | Agent_core.Error.JsonParseError { detail } ->
     [ "variant", `String "json_parse_error"; "detail", `String detail ]
   | Agent_core.Error.StructuredOutputParseError { reason; detail = _; raw_preview = _; raw_len } ->

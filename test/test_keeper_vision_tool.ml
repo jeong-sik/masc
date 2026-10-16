@@ -169,23 +169,28 @@ let assert_metric_increment label before after =
          after)
 ;;
 
-(* Only MaxTokens -> true. Exhaustive over all 12 agent-core variants so a new one
-   forces a decision rather than silently bucketing to false. *)
-let test_truncated_of_stop_reason () =
-  assert (Vt.truncated_of_stop_reason Agent_core.Types.MaxTokens = true);
+let test_structured_response_states_never_accept_valid_vision_json () =
   List.iter
-    (fun r -> assert (Vt.truncated_of_stop_reason r = false))
-    [ Agent_core.Types.EndTurn
-    ; Agent_core.Types.StopToolUse
-    ; Agent_core.Types.StopSequence
-    ; Agent_core.Types.Refusal
-    ; Agent_core.Types.ContentFilter
-    ; Agent_core.Types.RepetitionTruncation
-    ; Agent_core.Types.PauseTurn
-    ; Agent_core.Types.Compaction
-    ; Agent_core.Types.ContextWindowExceeded
-    ; Agent_core.Types.UnmatchedToolCalls
-    ; Agent_core.Types.Unknown "some_novel_reason"
+    (fun (stop_reason, expected_class) ->
+       let response = { (ok_response "must not be accepted") with stop_reason } in
+       match Vt.outcome_of_response ~runtime_id:"test.vision" ~requested_model:"vision-test"
+               response with
+       | Vt.Vo_provider { failure_class; _ } ->
+         Alcotest.(check bool) "terminal response state retains failure class"
+           true (failure_class = expected_class)
+       | Vt.Vo_ok _ | Vt.Vo_invalid_request _ | Vt.Vo_no_runtime _ | Vt.Vo_timeout
+       | Vt.Vo_invalid_structured_response _ | Vt.Vo_official_failure _
+       | Vt.Vo_empty | Vt.Vo_truncated ->
+         Alcotest.fail "response state became successful JSON or parse/budget failure")
+    [ Agent_core.Types.Refusal, Tool_result.Policy_rejection
+    ; ContentFilter, Policy_rejection
+    ; RepetitionTruncation, Runtime_failure
+    ; ContextWindowExceeded, Runtime_failure
+    ; PauseTurn, Runtime_failure
+    ; Compaction, Runtime_failure
+    ; UnmatchedToolCalls, Runtime_failure
+    ; StopToolUse, Runtime_failure
+    ; Unknown "private-stop-description", Runtime_failure
     ]
 
 (* One User message [text query; image]; image data is base64 of the raw bytes
@@ -2040,7 +2045,7 @@ let test_non_length_response_does_not_trigger_vision_failover () =
         let calls = ref 0 in
         let complete ~sw:_ ~net:_ ~clock:_ ~config:_ ~messages:_ ?tools:_ () =
           incr calls;
-          Ok (truncated_json_response ~stop_reason)
+          Ok { (ok_response "must not be accepted after refusal") with stop_reason }
         in
         let outcome =
           Eio_main.run (fun env ->
@@ -2051,8 +2056,8 @@ let test_non_length_response_does_not_trigger_vision_failover () =
         in
         assert (!calls = 1);
         match outcome with
-        | Vt.Vo_invalid_structured_response _ -> ()
-        | _ -> failwith "non-length terminal response must retain its original classification"))
+        | Vt.Vo_provider { failure_class = Tool_result.Policy_rejection; _ } -> ()
+        | _ -> failwith "provider refusal must retain its terminal policy classification"))
     [ Agent_core.Types.Refusal; Agent_core.Types.ContentFilter ]
 
 (* A finished reply (EndTurn) whose JSON broke mid-string is the json_object
@@ -2397,6 +2402,7 @@ let test_generated_sandbox_image_reaches_vision () =
       ))))))))
 
 let () =
+  test_structured_response_states_never_accept_valid_vision_json ();
   test_generated_sandbox_image_reaches_vision ();
   test_artifact_failures_are_classified ();
   test_browser_screenshot_rejects_invalid_client ();
@@ -2410,7 +2416,6 @@ let () =
   test_max_tokens_exhaustion_remains_visible_tool_failure ();
   test_non_length_response_does_not_trigger_vision_failover ();
   test_length_failover_preserves_candidate_http_recovery ();
-  test_truncated_of_stop_reason ();
   test_message_of_request ();
   test_first_vision_runtime_id_total ();
   test_provider_for_vision_preserves_configured_max_tokens ();

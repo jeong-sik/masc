@@ -147,17 +147,18 @@ let test_an_empty_refresh_keeps_the_transcript () =
     (ats (Tui_types.merge_paged_history ~paged ~fresh:[]))
 ;;
 
-let test_oldest_at_reports_the_cursor () =
-  check
-    (option (float 0.001))
-    "oldest of the held rows"
-    (Some 100.)
-    (Tui_types.oldest_at [ entry_at 300.; entry_at 100.; entry_at 200. ]);
-  check
-    (option (float 0.001))
-    "nothing to page back from"
-    None
-    (Tui_types.oldest_at [])
+let test_older_pages_preserve_retained_identity_and_overlap () =
+  let earlier = {(entry_at ~id:"earlier" 100.) with me_text = "earlier append"} in
+  let later = {(entry_at ~id:"later" 100.) with me_text = "later held append"} in
+  let overlap = {(entry_at ~id:"overlap" 100.) with me_text = "held enriched observation"} in
+  let older = [earlier; {overlap with me_text = "older page observation"}] in
+  let loaded = Tui_types.prepend_older_history_page ~older ~held:[later; overlap] in
+  check bool "the retained state owns every page identity once" true
+    (List.map (fun row -> row.Tui_types.me_identity) loaded
+     = List.map (fun row -> row.Tui_types.me_identity) [earlier; later; overlap]);
+  check bool "the held overlap observation remains authoritative" true
+    (List.find (fun row -> row.Tui_types.me_identity = overlap.me_identity) loaded
+     = overlap)
 ;;
 
 let test_visible_clock_stays_monotonic_inside_one_causal_turn () =
@@ -6228,8 +6229,8 @@ let () =
             test_a_row_the_window_evicted_stays_visible
         ; test_case "an empty refresh keeps the transcript" `Quick
             test_an_empty_refresh_keeps_the_transcript
-        ; test_case "oldest_at reports the cursor" `Quick
-            test_oldest_at_reports_the_cursor
+        ; test_case "older pages preserve retained identities and held observations" `Quick
+            test_older_pages_preserve_retained_identity_and_overlap
         ; test_case "visible clock stays monotonic inside one turn" `Quick
             test_visible_clock_stays_monotonic_inside_one_causal_turn
         ; test_case "Journal interleaves one request by displayed time" `Quick

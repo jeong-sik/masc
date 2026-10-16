@@ -2501,6 +2501,29 @@ let load_all_result ~base_dir ~keeper_name : (chat_message list, string) result 
   | Private_file_failed_with_cleanup_failure { error; cleanup_failure = _ } ->
     Error (Fs_compat.Private_jsonl_rows.error_to_string error)
 
+type history_page =
+  { history_messages : chat_message list
+  ; next_cursor : Keeper_chat_history_page.cursor option
+  }
+
+let load_history_page_result ~base_dir ~keeper_name ?cursor
+      ?(max_total = max_total_lines) () =
+  let ( let* ) = Result.bind in
+  let path = chat_path ~base_dir ~keeper_name in
+  let* page = Keeper_chat_history_page.read ~path ~owner:keeper_name ?cursor
+    ~max_rows:(max 1 (min max_total max_total_lines)) () in
+  let redaction = redaction_for ~base_dir ~keeper_name in
+  let* messages_rev =
+    List.fold_left (fun state (row : Keeper_chat_history_page.row) ->
+      let* messages = state in
+      match parse_transcript_row_strict ~path ~redaction ~line_no:1 row.line with
+      | `Blank -> Ok messages
+      | `Message message -> Ok (message :: messages)
+      | `Unreadable detail -> Error (Keeper_chat_history_page.Invalid_row { offset = row.offset; detail }))
+      (Ok []) page.rows
+  in
+  Ok { history_messages = List.rev messages_rev; next_cursor = page.next_cursor }
+
 (* Content equality for the [Already_present] branch of the append-once
    paths: does the row that already holds this approval's slot say the same
    thing as the row we were about to write? Only durable facts take part:

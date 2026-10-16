@@ -84,7 +84,7 @@ import {
   trackedKeeperChatOperationsForKeeper,
   upsertTrackedKeeperChatOperation,
 } from './keeper-chat-operations-local'
-import { clearStoredToken, setStoredToken } from './api/core'
+import { ApiRequestError, clearStoredToken, setStoredToken } from './api/core'
 import {
   lookupToolCallOutput,
   resetToolCallOutputs,
@@ -1187,15 +1187,15 @@ describe('loadFullKeeperHistory', () => {
       .mockResolvedValueOnce({
         messages: Array.from({ length: THREAD_ENTRY_CAP + 1 }, (_, i) => row(`new-${i}`, 1000 + i)),
         hasMore: true,
-        nextBefore: 1000,
+        nextCursor: 'position-1000',
       })
-      .mockResolvedValueOnce({ messages: [row('old', 500)], hasMore: false, nextBefore: 500 })
+      .mockResolvedValueOnce({ messages: [row('old', 500)], hasMore: false, nextCursor: null })
 
     await loadFullKeeperHistory(' echo ')
     await loadFullKeeperHistory('echo')
     await loadFullKeeperHistory('echo')
 
-    expect(fetchKeeperChatHistoryPage.mock.calls).toEqual([['echo', undefined], ['echo', 1000]])
+    expect(fetchKeeperChatHistoryPage.mock.calls).toEqual([['echo', undefined], ['echo', 'position-1000']])
     expect(keeperThreads.value.echo?.[0]?.id).toBe('old')
     expect(keeperThreads.value.echo).toHaveLength(THREAD_ENTRY_CAP + 2)
     fetchKeeperChatHistory.mockResolvedValueOnce([row('new-200', 1200)])
@@ -1214,7 +1214,7 @@ describe('loadFullKeeperHistory', () => {
     }] }
     fetchKeeperChatHistoryPage.mockResolvedValueOnce({
       messages: [{ id: 'server-row', role: 'assistant', content: 'canonical content', ts: 500 }],
-      hasMore: false, nextBefore: 500,
+      hasMore: false, nextCursor: null,
     })
     await loadFullKeeperHistory('echo')
     expect(keeperThreads.value.echo).toHaveLength(1)
@@ -1224,18 +1224,72 @@ describe('loadFullKeeperHistory', () => {
 
   it('keeps the cursor retryable after malformed-page rejection without losing loaded rows', async () => {
     fetchKeeperChatHistoryPage
-      .mockResolvedValueOnce({ messages: [row('new', 1000)], hasMore: true, nextBefore: 1000 })
+      .mockResolvedValueOnce({ messages: [row('new', 1000)], hasMore: true, nextCursor: 'position-1000' })
       .mockRejectedValueOnce(new Error('fetchKeeperChatHistoryPage: invalid history page row'))
-      .mockResolvedValueOnce({ messages: [row('old', 500)], hasMore: false, nextBefore: 500 })
+      .mockResolvedValueOnce({ messages: [row('old', 500)], hasMore: false, nextCursor: null })
     await loadFullKeeperHistory('echo')
     await loadFullKeeperHistory('echo')
     expect(keeperThreads.value.echo?.map(entry => entry.id)).toEqual(['new'])
     expect(keeperChatHistoryErrors.value.echo).toBe('fetchKeeperChatHistoryPage: invalid history page row')
-    expect(keeperChatHistoryPages.value.echo?.nextBefore).toBe(1000)
+    expect(keeperChatHistoryPages.value.echo?.nextCursor).toBe('position-1000')
     expect(keeperHydrating.value.echo).toBe(false)
     await loadFullKeeperHistory('echo')
-    expect(fetchKeeperChatHistoryPage.mock.calls.at(-1)).toEqual(['echo', 1000])
+    expect(fetchKeeperChatHistoryPage.mock.calls.at(-1)).toEqual(['echo', 'position-1000'])
     expect(keeperChatHistoryErrors.value.echo).toBeNull()
+  })
+
+  it('retires a replaced-file cursor, reloads the transcript, and starts the next walk anew', async () => {
+    fetchKeeperChatHistoryPage
+      .mockResolvedValueOnce({ messages: [row('old-file-row', 100)], hasMore: true, nextCursor: 'old-file-position' })
+      .mockRejectedValueOnce(new ApiRequestError({ method: 'GET', path: '/chat/history/page', status: 409, detail: 'Conversation changed' }))
+      .mockResolvedValueOnce({ messages: [row('new-file-row', 200)], hasMore: false, nextCursor: null })
+    fetchKeeperChatHistory.mockResolvedValueOnce([row('new-file-row', 200)])
+    await loadFullKeeperHistory('echo')
+    await loadFullKeeperHistory('echo')
+    expect(keeperChatHistoryPages.value.echo).toBeUndefined()
+    expect(keeperThreads.value.echo?.map(entry => entry.id)).toEqual(['new-file-row'])
+    expect(keeperChatHistoryErrors.value.echo).toContain('Conversation changed')
+    await loadFullKeeperHistory('echo')
+    expect(fetchKeeperChatHistoryPage.mock.calls).toEqual([
+      ['echo', undefined], ['echo', 'old-file-position'], ['echo', undefined],
+    ])
+  })
+
+  it('retires old-file rows when the replacement tail and next page are empty while keeping independent live state', async () => {
+    fetchKeeperChatHistoryPage
+      .mockResolvedValueOnce({
+        messages: [row('old-file-row', 100), { id: 'old-file-failure', role: 'request_failure', content: 'failed request', ts: 101 }],
+        hasMore: true, nextCursor: 'old-file-position',
+      })
+      .mockRejectedValueOnce(new ApiRequestError({ method: 'GET', path: '/chat/history/page', status: 409, detail: 'Conversation changed' }))
+      .mockResolvedValueOnce({ messages: [], hasMore: false, nextCursor: null })
+    fetchKeeperChatHistory.mockResolvedValueOnce([])
+    await loadFullKeeperHistory('echo')
+    appendThreadEntry('echo', { id: 'queued-local', role: 'user', source: 'direct_user', label: '나', text: 'queued input', delivery: 'queued' })
+    appendThreadEntry('echo', { id: 'streaming-local', role: 'assistant', source: 'direct_assistant', label: 'echo', text: 'live output', delivery: 'streaming' })
+    appendThreadEntry('echo', { id: 'autonomous-record', role: 'assistant', source: 'autonomous_turn', label: 'echo', text: 'independent checkpoint', delivery: 'history' })
+
+    await loadFullKeeperHistory('echo')
+
+    expect(keeperChatHistoryPages.value.echo).toBeUndefined()
+    expect(keeperThreads.value.echo?.map(entry => entry.id).sort()).toEqual(['autonomous-record', 'queued-local', 'streaming-local'])
+    expect(keeperChatHistoryErrors.value.echo).toContain('Conversation changed')
+    await loadFullKeeperHistory('echo')
+    expect(keeperThreads.value.echo?.map(entry => entry.id).sort()).toEqual(['autonomous-record', 'queued-local', 'streaming-local'])
+    expect(keeperThreads.value.echo?.find(entry => entry.id === 'queued-local')?.delivery).toBe('queued')
+    expect(keeperThreads.value.echo?.find(entry => entry.id === 'streaming-local')?.delivery).toBe('streaming')
+    expect(fetchKeeperChatHistoryPage.mock.calls.at(-1)).toEqual(['echo', undefined])
+  })
+
+  it('keeps independent in-flight rows exactly once when a nonempty older page arrives', async () => {
+    appendThreadEntry('echo', { id: 'queued-local', role: 'user', source: 'direct_user', label: '나', text: 'queued input', delivery: 'queued' })
+    appendThreadEntry('echo', { id: 'streaming-local', role: 'assistant', source: 'direct_assistant', label: 'echo', text: 'live output', delivery: 'streaming' })
+    fetchKeeperChatHistoryPage.mockResolvedValueOnce({ messages: [row('older-canonical', 100)], hasMore: false, nextCursor: null })
+
+    await loadFullKeeperHistory('echo')
+
+    expect(keeperThreads.value.echo?.map(entry => entry.id)).toEqual(['older-canonical', 'queued-local', 'streaming-local'])
+    expect(keeperThreads.value.echo?.map(entry => entry.delivery)).toEqual(['history', 'queued', 'streaming'])
   })
 
   it('ignores an empty name and shares one pending request per keeper', async () => {
@@ -1245,7 +1299,7 @@ describe('loadFullKeeperHistory', () => {
     const loading = loadFullKeeperHistory('echo')
     await loadFullKeeperHistory('echo')
     expect(fetchKeeperChatHistoryPage).toHaveBeenCalledTimes(1)
-    resolve({ messages: [], hasMore: false, nextBefore: null })
+    resolve({ messages: [], hasMore: false, nextCursor: null })
     await loading
     expect(keeperHydrating.value.echo).toBe(false)
   })

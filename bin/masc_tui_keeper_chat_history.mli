@@ -186,7 +186,7 @@ type attachment_note =
 
 type row =
   { at : float
-      (** Producer wall clock for display, pagination, and placement of the
+      (** Producer wall clock for display and placement of the
           row itself on the shared chat timeline. *)
   ; structural_id : string option
       (** Stable producer identity plus a projection discriminator when one
@@ -238,7 +238,7 @@ val addressed_label_parts : speaker -> Surface.t option -> string * string optio
     loses the name; whoever knows the column decides which to draw. *)
 
 (** One page of rows older than a cursor, from
-    [GET /keepers/<name>/chat/history/page?before=<ts>].
+    [GET /keepers/<name>/chat/history/page?cursor=<opaque>].
 
     The envelope differs from the transcript's; the rows inside are the same
     shape, so they decode through the same reader and a page is folded and
@@ -248,16 +248,19 @@ type page =
   ; has_more : bool
         (** Whether older rows exist beyond this page. False is the top of the
             conversation. *)
-  ; next_before : float option
-        (** Cursor for the page before this one. [None] on an empty page —
+  ; next_cursor : string option
+        (** Cursor for the page before this one. [None] when the prefix is exhausted —
             the server computes it rather than leaving each client to derive
             the rule. *)
   }
 
+type page_error = Page_stale | Page_read_failed of string
+val page_error_to_string : page_error -> string
+
 val page_of_json : Yojson.Safe.t -> (page, string) result
-(** Decode a [/chat/history/page] response. Fails when the envelope is not an
-    object or carries no [messages] array; a single unreadable row inside is
-    dropped and counted, as in {!rows_of_json}. *)
+(** Decode a v2 [/chat/history/page] response. Unknown envelopes, inconsistent
+    cursor/has-more fields and any unreadable row fail the whole page, preserving
+    its cursor for retry. *)
 
 (** The row's text with one line per file under it. A file posted with no
     caption arrives with empty text, and joining on it anyway puts a blank line

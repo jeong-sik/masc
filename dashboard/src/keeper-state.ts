@@ -49,7 +49,7 @@ export const keeperHydrating = signal<Record<string, boolean>>({})
 // Pages the operator explicitly requested survive tail refreshes and live appends.
 export const keeperChatHistoryPages = signal<Record<string, {
   entries: KeeperConversationEntry[]
-  nextBefore: number | null
+  nextCursor: string | null
   hasMore: boolean
 }>>({})
 // First chat-history hydration outcome per keeper. Absent means the first
@@ -1721,6 +1721,21 @@ export function mergeServerHistoryEntries(
   entries: KeeperConversationEntry[],
 ): void {
   replaceThread(name, entries)
+}
+
+/** Retire observations from a refused direct-conversation file before trying
+ * its replacement. Live operation state and autonomous checkpoint observations
+ * have independent owners and remain valid even if the replacement is empty. */
+export function retireKeeperChatHistory(name: string): void {
+  const pages = { ...keeperChatHistoryPages.value }
+  delete pages[name]
+  keeperChatHistoryPages.value = pages
+  keeperThreads.value = {
+    ...keeperThreads.value,
+    [name]: (keeperThreads.value[name] ?? []).filter(entry =>
+      isAutonomousTurnEntry(entry)
+      || (entry.delivery !== 'history' && entry.delivery !== 'request_failure')),
+  }
 }
 
 interface RestChatHistoryMessage {

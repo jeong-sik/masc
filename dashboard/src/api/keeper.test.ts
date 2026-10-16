@@ -1343,35 +1343,35 @@ describe('purgeKeeper', () => {
 
 
 describe('fetchKeeperChatHistoryPage', () => {
-  const page = (nextBefore: number | null, hasMore = true) => ({
-    schema: 'masc.keeper_chat_history.page.v1',
+  const page = (nextCursor: string | null, hasMore = true) => ({
+    schema: 'masc.keeper_chat_history.page.v2',
     messages: [{ id: 'server-row', role: 'user', content: 'earlier', ts: 5 }],
     has_more: hasMore,
-    next_before: nextBefore,
+    next_cursor: nextCursor,
   })
 
   it('passes the issued cursor unchanged and preserves server row ids', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(page(5))))
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(page('opaque-five'))))
     vi.stubGlobal('fetch', fetchMock)
-    expect(await fetchKeeperChatHistoryPage('a/b', 10.123456789)).toMatchObject({
-      messages: [{ id: 'server-row' }], hasMore: true, nextBefore: 5,
+    expect(await fetchKeeperChatHistoryPage('a/b', 'opaque/ten+position')).toMatchObject({
+      messages: [{ id: 'server-row' }], hasMore: true, nextCursor: 'opaque-five',
     })
-    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/keepers/a%2Fb/chat/history/page?before=10.123456789')
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/keepers/a%2Fb/chat/history/page?cursor=opaque%2Ften%2Bposition')
   })
 
   it('rejects the whole cursor page when a valid row is followed by a malformed row', async () => {
-    const body = page(5)
+    const body = page('opaque-five')
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
       ...body,
       messages: [...body.messages, { role: 'user', content: 'missing server id', ts: 4 }],
     }))))
-    await expect(fetchKeeperChatHistoryPage('echo', 10)).rejects.toThrow('invalid history page row')
+    await expect(fetchKeeperChatHistoryPage('echo', 'opaque-ten')).rejects.toThrow('invalid history page row')
   })
 
-  it.each([page(null), page(10), page(11), { ...page(5), schema: 'unknown' }])(
+  it.each([page(null), page('opaque-ten'), page(''), page('orphan-cursor', false), { ...page('opaque-five'), schema: 'unknown' }])(
     'rejects an unusable cursor or an unknown envelope', async body => {
       vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(body))))
-      await expect(fetchKeeperChatHistoryPage('echo', 10)).rejects.toThrow('invalid history page or cursor')
+      await expect(fetchKeeperChatHistoryPage('echo', 'opaque-ten')).rejects.toThrow('invalid history page or cursor')
     },
   )
 })

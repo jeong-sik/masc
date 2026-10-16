@@ -122,12 +122,18 @@ lost to a refactor that predated the required-id contract.
 
 The transcript tail and older direct conversation are separate reads.
 `GET /api/v1/keepers/:name/chat/history/page` returns the
-`masc.keeper_chat_history.page.v1` envelope with `messages`, `has_more` and
-`next_before`. The dashboard sends that cursor unchanged as `before` on the
-next user request and stops when `has_more` is false. Page rows retain their
-server-issued IDs; explicitly loaded pages survive subsequent tail refreshes
-and live appends. A failed page preserves the last successful cursor for retry. A malformed row
-rejects its entire page, so advancing a cursor cannot silently skip that row.
+`masc.keeper_chat_history.page.v2` envelope with `messages`, `has_more` and
+`next_cursor`. Both clients send the server's opaque string unchanged as
+`cursor` on the next user request. Cursors bind the Keeper, physical file,
+byte offset and anchor row; timestamps are display observations. Replacement
+or a changed anchor refuses the old cursor. Pages are consecutive append rows,
+so equal clocks, regressing clocks and tool-heavy turns do not create gaps.
+Each raw file slice retains the existing 4 MiB resource window; a row larger than that window
+is an explicit error and is never silently skipped. A malformed row rejects its
+whole page. The dashboard retains loaded pages through tail refresh and live
+appends. Transient or malformed-page failures preserve its last successful
+cursor for retry. A stale cursor retires the retained pages and reloads the
+current tail; the next explicit request starts from the newest file prefix.
 
 ## Non-goals
 

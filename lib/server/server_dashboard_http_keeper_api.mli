@@ -96,22 +96,14 @@ val keeper_chat_history_json : Workspace.config -> string -> Yojson.Safe.t
     the dashboard history schema silently drops rows without one. *)
 
 val keeper_chat_history_page_json :
-  ?max_total:int -> Workspace.config -> string -> before:float option ->
-  Yojson.Safe.t
-(** Body for [GET /chat/history/page]: direct-conversation rows older than
-    [before], newest window when [before] is [None].
-
-    Autonomous turns are not included. They are bounded by
-    {!Masc.Keeper_raw_trace_retention.history_limit} rather than by this window,
-    so [GET /chat/history] already carried every one that exists; repeating them
-    per page would duplicate rows the caller holds.
-
-    Rows carry no [stream_contract]: the only client is the TUI, which never
-    reads it (#42200). The transcript route keeps it for the dashboard.
-
-    [next_before] is the cursor for the following page — the oldest [ts] among
-    the returned rows, or [`Null] for an empty page. A caller must stop on a
-    null cursor rather than resend the previous one. *)
+  ?max_total:int -> Workspace.config -> string ->
+  cursor:Keeper_chat_history_page.cursor option ->
+  (Yojson.Safe.t, Keeper_chat_history_page.error) result
+(** Exact direct-conversation pages in append order. The v2 envelope's
+    [next_cursor] is an opaque descriptor/offset/anchor identity, or null when
+    exhausted. Row timestamps remain display observations and never control
+    paging. Autonomous rows remain on the transcript route. A stale file or
+    malformed row refuses the entire page rather than advancing its cursor. *)
 
 (** {1 Checkpoint inventory} *)
 

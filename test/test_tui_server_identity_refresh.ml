@@ -653,7 +653,7 @@ let test_pending_nested_reader_intents_survive_repeated_suspension () =
   let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a"
       ~port:0 ~refresh_interval:0. () in
   state.msg_target_keeper_name <- Some "alpha";
-  state.msg_older_cursor <- Some 42.;
+  state.msg_older_cursor <- Some "server-cursor-42";
   state.msg_older_loading <- true;
   let loading, _ = match Masc_tui_fetched.start ~equal:String.equal state.code_file ~key:"src/a.ml" with
     | Started (reading, request) -> reading, request
@@ -665,7 +665,7 @@ let test_pending_nested_reader_intents_survive_repeated_suspension () =
   state.lane_addons_reading <- Some 7;
   suspend_workspace_readings state;
   suspend_workspace_readings state;
-  Alcotest.(check (option (pair string (float 0.)))) "older page cursor survives" (Some ("alpha",42.)) state.msg_older_resume;
+  Alcotest.(check (option (pair string (option string)))) "older page cursor survives" (Some ("alpha",Some "server-cursor-42")) state.msg_older_resume;
   Alcotest.(check (option string)) "pending file key survives" (Some "src/a.ml") (Masc_tui_fetched.current_key state.code_file);
   Alcotest.(check bool) "package catalog parameters survive" true
     (state.lane_installer_read_resume = Some (7, Masc_tui_lane_installer.Read_catalog (Some "packages")))

@@ -1,10 +1,8 @@
 (* Body contract for GET /chat/history/page.
 
-   The store-level walk is already pinned by test_keeper_chat_store.ml
-   ("load_page walks backward"). What is asserted here is the layer this route
-   adds on top: the schema tag, the cursor the caller is told to use next, and
-   the two ways paging ends -- exhausted history, and history that exists but
-   no cursor can reach. *)
+   Exact physical cursors must preserve append order across clock collisions
+   and regression, bound consecutive rows, and refuse changed or unreadable
+   transcripts before publishing any continuation. *)
 
 open Masc
 module Keeper_api = Server_dashboard_http_keeper_api
@@ -42,9 +40,6 @@ let chat_path ~base_dir ~keeper_name =
     (keeper_name ^ ".jsonl")
 ;;
 
-(* [ts] omitted entirely for [`Untimed]: that is the legacy row shape the
-   cursor cannot order, and constructing it is the whole point of one case.
-   [id] is required -- the store drops rows without one. *)
 let row ~content stamp =
   let base = [ "id", `String content; "role", `String "user"; "content", `String content ] in
   match stamp with
@@ -105,180 +100,141 @@ let with_lane prefix rows f =
       f (Workspace.default_config base_dir) keeper_name)
 ;;
 
-let test_tag_and_cursor () =
-  with_lane "chat-page-cursor" (numbered ~total:300) (fun config name ->
-    let body = Keeper_api.keeper_chat_history_page_json config name ~before:None in
-    Alcotest.(check (option string))
-      "schema tag"
-      (Some "masc.keeper_chat_history.page.v1")
-      (match field "schema" body with Some (`String s) -> Some s | _ -> None);
-    let rows = messages_of body in
-    Alcotest.(check int) "newest window size" 100 (List.length rows);
-    Alcotest.(check string)
-      "newest row last"
-      "msg-0300"
-      (content_of (List.hd (List.rev rows)));
-    Alcotest.(check bool) "older rows remain" true (bool_field "has_more" body);
-    (* The cursor is the oldest ts in the window, so the next page starts
-       exactly where this one stopped -- no row served twice, none skipped. *)
-    Alcotest.(check (option (float 0.001)))
-      "next cursor is the oldest returned ts"
-      (Some 201.0)
-      (match field "next_before" body with Some (`Float f) -> Some f | _ -> None))
-;;
+let cursor_of body =
+  match field "next_cursor" body with
+  | Some (`String encoded) ->
+    (match Keeper_chat_history_page.cursor_of_string encoded with
+     | Ok cursor -> Some cursor
+     | Error error -> Alcotest.fail (Keeper_chat_history_page.error_to_string error))
+  | Some `Null -> None
+  | _ -> Alcotest.fail "missing next_cursor"
 
-let test_limit_makes_a_smaller_window_with_the_same_cursor_rule () =
-  with_lane "chat-page-limit" (numbered ~total:300) (fun config name ->
-    let body =
-      Keeper_api.keeper_chat_history_page_json ~max_total:100 config name ~before:None
+let page ?max_total config name cursor =
+  match Keeper_api.keeper_chat_history_page_json ?max_total config name ~cursor with
+  | Ok page -> page
+  | Error error -> Alcotest.fail (Keeper_chat_history_page.error_to_string error)
+
+let test_exact_walk_with_colliding_and_regressing_clocks () =
+  let original = List.init 907 (fun i ->
+    let stamp = if i < 300 then 1000. else if i < 600 then 500. else 1000. in
+    row ~content:(Printf.sprintf "row-%04d" i) (`At stamp)) in
+  with_lane "chat-exact-clock" original (fun config name ->
+    let rec walk cursor collected =
+      let body = page ~max_total:100 config name cursor in
+      let rows = messages_of body in
+      let collected = rows @ collected in
+      match cursor_of body with
+      | None -> collected
+      | Some next -> walk (Some next) collected
     in
+    let all = walk None [] |> List.map content_of in
+    Alcotest.(check (list string)) "every append row, exactly once, despite equal/backward clocks"
+      (List.map content_of original) all)
+;;
+
+let test_schema_and_opaque_cursor () =
+  with_lane "chat-exact-schema" (numbered ~total:500) (fun config name ->
+    let body = page config name None in
+    Alcotest.(check (option string)) "v2 contract"
+      (Some "masc.keeper_chat_history.page.v2")
+      (match field "schema" body with Some (`String tag) -> Some tag | _ -> None);
+    Alcotest.(check int) "bounded contiguous page" 400 (List.length (messages_of body));
+    Alcotest.(check bool) "physical cursor issued" true (Option.is_some (cursor_of body));
+    let oldest = page config name (cursor_of body) in
+    Alcotest.(check int) "remaining exact prefix" 100 (List.length (messages_of oldest));
+    Alcotest.(check bool) "prefix exhausted" false (bool_field "has_more" oldest))
+;;
+
+let test_atomic_replacement_refuses_old_cursor () =
+  with_lane "chat-exact-replace" (numbered ~total:500) (fun config name ->
+    let cursor = cursor_of (page config name None) in
+    let base_dir = (config : Workspace.config).base_path in
+    let path = chat_path ~base_dir ~keeper_name:name in
+    let replacement = path ^ ".replacement" in
+    let oc = open_out replacement in
+    output_string oc (Yojson.Safe.to_string (row ~content:"replacement" (`At 0.)) ^ "\n");
+    close_out oc;
+    Unix.rename replacement path;
+    match Keeper_api.keeper_chat_history_page_json config name ~cursor with
+    | Error Keeper_chat_history_page.Stale_cursor -> ()
+    | Error error -> Alcotest.fail (Keeper_chat_history_page.error_to_string error)
+    | Ok _ -> Alcotest.fail "a replaced transcript accepted its old cursor")
+;;
+
+let test_malformed_row_fails_the_whole_page () =
+  with_lane "chat-exact-malformed"
+    [ row ~content:"valid" (`At 1.); `Assoc ["id", `String "invalid"; "role", `String "invented"] ]
+    (fun config name ->
+      match Keeper_api.keeper_chat_history_page_json config name ~cursor:None with
+      | Error (Keeper_chat_history_page.Invalid_row _) -> ()
+      | Error error -> Alcotest.fail (Keeper_chat_history_page.error_to_string error)
+      | Ok _ -> Alcotest.fail "partial decode advanced an exact page")
+;;
+
+let test_page_limit_is_a_contiguous_slice () =
+  with_lane "chat-exact-limit" (numbered ~total:300) (fun config name ->
+    let body = page ~max_total:100 config name None in
     let rows = messages_of body in
-    Alcotest.(check int) "a quarter of the 100-row budget is conversation" 25
-      (List.length rows);
-    Alcotest.(check string) "newest row last" "msg-0300"
-      (content_of (List.hd (List.rev rows)));
-    Alcotest.(check bool) "older rows remain" true (bool_field "has_more" body);
-    Alcotest.(check (option (float 0.001)))
-      "the cursor is the oldest returned ts, as for the full window"
-      (Some 276.0)
-      (match field "next_before" body with Some (`Float f) -> Some f | _ -> None);
-    let default_body = Keeper_api.keeper_chat_history_page_json config name ~before:None in
-    Alcotest.(check int) "no limit is the full window" 100
-      (List.length (messages_of default_body)))
+    Alcotest.(check int) "requested rows" 100 (List.length rows);
+    Alcotest.(check string) "oldest exact row" "msg-0201" (content_of (List.hd rows));
+    Alcotest.(check string) "newest exact row" "msg-0300" (content_of (List.hd (List.rev rows))))
 ;;
 
-let test_cursor_walks_without_gap_or_repeat () =
-  with_lane "chat-page-walk" (numbered ~total:300) (fun config name ->
-    let page before = Keeper_api.keeper_chat_history_page_json config name ~before in
-    let first = page None in
-    let cursor body =
-      match field "next_before" body with Some (`Float f) -> Some f | _ -> None
+let test_cursor_binding_and_later_incomplete_append () =
+  with_lane "chat-exact-binding" (numbered ~total:500) (fun config name ->
+    let cursor = cursor_of (page config name None) |> Option.get in
+    let path = chat_path ~base_dir:config.Workspace.base_path ~keeper_name:name in
+    (match Keeper_chat_history_page.read ~path ~owner:"another-keeper" ~cursor ~max_rows:100 () with
+     | Error Keeper_chat_history_page.Stale_cursor -> ()
+     | _ -> Alcotest.fail "a cursor crossed its Keeper boundary");
+    let oc = open_out_gen [Open_wronly; Open_append] 0o600 path in
+    output_string oc "{incomplete later append";
+    close_out oc;
+    let earlier = page config name (Some cursor) in
+    Alcotest.(check int) "later append does not change the issued prefix"
+      100 (List.length (messages_of earlier)))
+;;
+
+let test_changed_anchor_and_truncation_refuse_cursor () =
+  with_lane "chat-exact-anchor" (numbered ~total:500) (fun config name ->
+    let cursor = cursor_of (page config name None) in
+    let path = chat_path ~base_dir:config.Workspace.base_path ~keeper_name:name in
+    let expect_stale () =
+      match Keeper_api.keeper_chat_history_page_json config name ~cursor with
+      | Error Keeper_chat_history_page.Stale_cursor -> ()
+      | _ -> Alcotest.fail "changed physical prefix accepted its old cursor"
     in
-    let second = page (cursor first) in
-    let rows = messages_of second in
-    Alcotest.(check string) "page 2 first" "msg-0101" (content_of (List.hd rows));
-    Alcotest.(check string)
-      "page 2 last is one below page 1's first"
-      "msg-0200"
-      (content_of (List.hd (List.rev rows)));
-    let third = page (cursor second) in
-    let third_rows = messages_of third in
-    Alcotest.(check string)
-      "page 3 first"
-      "msg-0001"
-      (content_of (List.hd third_rows));
-    Alcotest.(check bool)
-      "history exhausted"
-      false
-      (bool_field "has_more" third))
+    (* Rewrite the same inode with equal-length rows: inode and byte count alone
+       cannot certify that the cursor still names its original boundary. *)
+    write_lane ~base_dir:config.base_path ~keeper_name:name
+      (List.init 500 (fun i -> row ~content:(Printf.sprintf "new-%04d" (i + 1)) (`At (float_of_int (i + 1)))));
+    expect_stale ();
+    let oc = open_out path in
+    close_out oc;
+    expect_stale ())
 ;;
 
-let test_exhausted_history_reports_null_cursor () =
-  with_lane "chat-page-short" (numbered ~total:3) (fun config name ->
-    let body = Keeper_api.keeper_chat_history_page_json config name ~before:(Some 1.0) in
-    Alcotest.(check int) "no rows older than the first" 0 (List.length (messages_of body));
-    Alcotest.(check bool) "nothing older" false (bool_field "has_more" body);
-    Alcotest.(check bool)
-      "empty page carries no cursor"
-      true
-      (match field "next_before" body with Some `Null -> true | _ -> false))
-;;
-
-let test_cursor_is_monotonic_so_the_walk_terminates () =
-  (* Whatever the rows carry, each page's cursor must be strictly older than
-     the one that produced it. That is the property the caller's loop relies on
-     to end; asserting it directly means a future change to how the store
-     stamps rows cannot turn "load more" into a spin. *)
-  with_lane "chat-page-monotonic" (numbered ~total:300) (fun config name ->
-    let cursor body =
-      match field "next_before" body with Some (`Float f) -> Some f | _ -> None
-    in
-    let rec walk before seen steps =
-      if steps > 10 then Alcotest.fail "cursor did not terminate within 10 pages"
-      else
-        let body = Keeper_api.keeper_chat_history_page_json config name ~before in
-        match cursor body with
-        | None -> List.rev seen
-        | Some c ->
-          (match before with
-           | Some prev when c >= prev ->
-             Alcotest.failf "cursor %f did not move below previous %f" c prev
-           | Some _ | None -> ());
-          walk (Some c) (c :: seen) (steps + 1)
-    in
-    let cursors = walk None [] 0 in
-    Alcotest.(check bool) "the walk produced pages" true (cursors <> []))
-;;
-
-let test_autonomous_turns_are_not_repeated_per_page () =
-  (* /chat/history carries every autonomous turn retention still holds; a page
-     that re-sent them would duplicate rows the caller already has. With no
-     autonomous source written at all, the assertion is simply that the page
-     body is exactly the chat rows. *)
-  with_lane "chat-page-direct-only" (numbered ~total:5) (fun config name ->
-    let body = Keeper_api.keeper_chat_history_page_json config name ~before:None in
-    let rows = messages_of body in
-    Alcotest.(check int) "chat rows only" 5 (List.length rows);
-    List.iter
-      (fun r ->
-        Alcotest.(check bool)
-          "no autonomous_turn marker on a paged row"
-          false
-          (match r with
-           | `Assoc fields -> List.mem_assoc "autonomous_turn" fields
-           | _ -> false))
-      rows)
-;;
-
-let test_page_rows_carry_no_stream_contract () =
-  (* The page route's only client is the TUI, which never reads
-     [stream_contract]; the object is about a quarter of the page's bytes,
-     so the route leaves it out (#42200). The transcript route keeps it for
-     the dashboard. *)
-  with_lane "chat-page-slim" (numbered ~total:5) (fun config name ->
-    let body = Keeper_api.keeper_chat_history_page_json config name ~before:None in
-    let rows = messages_of body in
-    Alcotest.(check int) "five rows in the slim window" 5 (List.length rows);
-    List.iter
-      (fun r ->
-        Alcotest.(check bool)
-          "no stream_contract on a paged row"
-          false
-          (match r with
-           | `Assoc fields -> List.mem_assoc "stream_contract" fields
-           | _ -> false))
-      rows)
+let test_oversize_row_is_an_error_instead_of_exhaustion () =
+  with_lane "chat-exact-oversize" [] (fun config name ->
+    let path = chat_path ~base_dir:config.Workspace.base_path ~keeper_name:name in
+    let oc = open_out path in
+    output_string oc (String.make (4 * 1024 * 1024 + 1) 'x');
+    output_char oc '\n';
+    close_out oc;
+    match Keeper_api.keeper_chat_history_page_json config name ~cursor:None with
+    | Error Keeper_chat_history_page.Row_exceeds_window -> ()
+    | _ -> Alcotest.fail "oversize row was skipped or reported as exhaustion")
 ;;
 
 let () =
-  Alcotest.run
-    "server_dashboard_http_keeper_chat_page"
-    [ ( "GET /chat/history/page"
-      , [ Alcotest.test_case "schema tag and next cursor" `Quick test_tag_and_cursor
-        ; Alcotest.test_case
-            "a limit makes a smaller window with the same cursor rule"
-            `Quick
-            test_limit_makes_a_smaller_window_with_the_same_cursor_rule
-        ; Alcotest.test_case
-            "walking the cursor repeats no row and skips none"
-            `Quick
-            test_cursor_walks_without_gap_or_repeat
-        ; Alcotest.test_case
-            "exhausted history reports a null cursor"
-            `Quick
-            test_exhausted_history_reports_null_cursor
-        ; Alcotest.test_case
-            "the cursor moves strictly older so the walk terminates"
-            `Quick
-            test_cursor_is_monotonic_so_the_walk_terminates
-        ; Alcotest.test_case
-            "autonomous turns are not repeated per page"
-            `Quick
-            test_autonomous_turns_are_not_repeated_per_page
-        ; Alcotest.test_case
-            "page rows carry no stream_contract"
-            `Quick
-            test_page_rows_carry_no_stream_contract
-        ] )
-    ]
-;;
+  Alcotest.run "server_dashboard_http_keeper_chat_page"
+    [ "exact history paging",
+      [ Alcotest.test_case "equal and regressing clocks preserve every row" `Quick test_exact_walk_with_colliding_and_regressing_clocks
+      ; Alcotest.test_case "schema and opaque physical cursor" `Quick test_schema_and_opaque_cursor
+      ; Alcotest.test_case "atomic replacement refuses old cursor" `Quick test_atomic_replacement_refuses_old_cursor
+      ; Alcotest.test_case "one malformed row refuses entire page" `Quick test_malformed_row_fails_the_whole_page
+      ; Alcotest.test_case "page hint is a contiguous slice" `Quick test_page_limit_is_a_contiguous_slice
+      ; Alcotest.test_case "cursor owner and issued prefix remain bound" `Quick test_cursor_binding_and_later_incomplete_append
+      ; Alcotest.test_case "anchor rewrite and truncation refuse cursor" `Quick test_changed_anchor_and_truncation_refuse_cursor
+      ; Alcotest.test_case "oversize row fails without skipping" `Quick test_oversize_row_is_an_error_instead_of_exhaustion
+      ] ]

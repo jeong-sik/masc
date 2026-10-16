@@ -563,6 +563,20 @@ val load_page :
   base_dir:string -> keeper_name:string -> ?before:float -> ?max_total:int ->
   unit -> page
 
+type history_page =
+  { history_messages : chat_message list
+  ; next_cursor : Keeper_chat_history_page.cursor option
+  }
+
+val load_history_page_result :
+  base_dir:string -> keeper_name:string ->
+  ?cursor:Keeper_chat_history_page.cursor -> ?max_total:int -> unit ->
+  (history_page, Keeper_chat_history_page.error) result
+(** Exact direct-conversation paging in file append order. Unlike the role-based
+    memory/tail window, this returns a consecutive prefix slice and never filters
+    by timestamp. Every returned row is strictly decoded before its next cursor
+    can be published; malformed rows fail the whole page. *)
+
 (** {1 Serialisation} *)
 
 (** JSON array of messages. Every entry carries [ts];
@@ -574,7 +588,7 @@ val load_page :
     typed delivery identity object. When [base_dir] is supplied, the history
     endpoint marks audio clips as [expired] when the underlying MP3 file is
     gone. [omit_stream_contract] drops the per-row [stream_contract] object
-    the page route's only client never reads (#42200). *)
+    compact page readers do not require. *)
 val to_json_array :
   ?base_dir:string ->
   ?trace_block_by_turn_ref:(Ids.Turn_ref.t -> chat_block option) ->

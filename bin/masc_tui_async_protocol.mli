@@ -265,7 +265,7 @@ type async_msg =
   | Context_inspector_loaded of
       int * string * Masc_tui_context_inspector.reading
   | Keeper_chat_older_loaded of
-      int * string * float * (Masc_tui_keeper_chat_history.page, string) result
+      int * string * string option * (Masc_tui_keeper_chat_history.page, Masc_tui_keeper_chat_history.page_error) result
   | Local_workspace_read of string * Masc_tui_loader.local_reading
   | Lanes_loaded of
       unit ref * ( Masc.Tui_decode.keeper_lanes_snapshot

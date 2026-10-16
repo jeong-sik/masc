@@ -17,8 +17,10 @@ file entry by that physical parent and its leaf name:
 Distinct entries may overlap in the same directory or nested directories. Their
 shared directory is ancestry, not an occupied write resource. Each entry retains
 its parent and complete physical ancestry, so a producer that explicitly claims
-a whole directory still conflicts with its entries. Directory aliases of the
-same entry have the same physical identity.
+a whole directory still conflicts with its entries. No producer does so today:
+`Tool.ordinary_descriptor_scoped` is called only by direct Edit and by Edit-only
+Inline Skills, and both claim entries. Directory aliases of the same entry have
+the same physical identity.
 
 Each call also declares the lexical target object as Write and the source
 object as Read, identified by physical device/inode. These additional claims

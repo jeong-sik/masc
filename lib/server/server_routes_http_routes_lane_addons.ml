@@ -113,8 +113,21 @@ let read_context state request =
          ; _
          }) ->
       Error Credential_store_unreadable
+  (* The complement names every remaining error constructor, mirroring
+     [Server_auth.request_credential_standing]: a wildcard over [err]
+     here would silently adopt future errors (warning 4). *)
   | Rejected_credential
-      (Auth_error_kind.Outcome_none | Auth_error_kind.Outcome_error _) ->
+      (Auth_error_kind.Outcome_none
+      | Auth_error_kind.Outcome_error
+          { err =
+              Masc_domain.System
+                (Masc_domain.System_error.NotInitialized
+                | Masc_domain.System_error.ValidationError _)
+              | Masc_domain.Task _
+              | Masc_domain.Agent _
+              | Masc_domain.Auth _
+          ; _
+          }) ->
       Error (Bad_request_detail "Lane read credential is unavailable")
 
 let query_fields request =

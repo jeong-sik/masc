@@ -375,6 +375,22 @@ let test_missing_path_falls_back_to_base_path () =
   check (option string) "pathless call names no document" None (observed_path_opt [])
 ;;
 
+let rec mkdir_partition_path path =
+  if not (Sys.file_exists path) then (
+    mkdir_partition_path (Filename.dirname path);
+    Unix.mkdir path 0o755)
+;;
+
+let init_partition_checkout ~origin root =
+  mkdir_partition_path (Filename.concat root "lib");
+  let run args =
+    let cmd = String.concat " " (List.map Filename.quote ("git" :: "-C" :: root :: args)) in
+    if Sys.command (cmd ^ " >/dev/null 2>&1") <> 0 then fail ("Git fixture failed: " ^ cmd)
+  in
+  run [ "init"; "-b"; "main" ];
+  run [ "remote"; "add"; "origin"; origin ]
+;;
+
 let with_partition_fixture ?sandbox_profile f =
   with_temp_base_path (fun base_path ->
     (match Repo_store.save_all ~base_path [ sample_repo ] with
@@ -386,6 +402,11 @@ let with_partition_fixture ?sandbox_profile f =
       | Some sandbox_profile -> make_meta ~sandbox_profile "tester"
       | None -> make_meta "tester"
     in
+    let root = Masc.Keeper_tool_shared_runtime.keeper_observation_sandbox_root ~config ~meta in
+    init_partition_checkout ~origin:sample_repo.url (Filename.concat root "repos/masc");
+    init_partition_checkout ~origin:"https://example.invalid/unregistered/repo.git"
+      (Filename.concat root "repos/ghost");
+    mkdir_partition_path (Filename.concat root "notes");
     f ~config ~meta)
 ;;
 
@@ -405,11 +426,6 @@ let addressed_or_fail = function
   | Agent_observation.Pathless -> fail "expected an addressed fact, got Pathless"
 ;;
 
-(* The keeper's playground clone of a registered repo resolves to the
-   repo's address via the structural playground parse — the #23469
-   regression this case pins: before the sandbox anchor, this input
-   re-anchored at the server base path and only matched because the
-   same repo happened to be registered at [repos/masc] there. *)
 (* A coordination tool names no file: the observation is a keeper-timeline
    fact with no document. The helper used to answer the project root here,
    which the consumer then stored as the edited file — a broadcast claiming
@@ -443,24 +459,23 @@ let test_partition_resolution_uses_project_root_for_masc_base_path () =
       (Agent_observation.Code_address.path address))
 ;;
 
-let test_partition_unregistered_playground_repo_fails_with_repo_id () =
+let test_partition_unregistered_playground_origin_stays_unaddressed () =
   with_partition_fixture (fun ~config ~meta ->
     match
       resolve_attribution ~config ~meta [ "path", `String "repos/ghost/lib/foo.ml" ]
     with
     | Agent_observation.File
         (Agent_observation.Unaddressed
-           { reason = Agent_observation.Unattributed.Unregistered_repo_id repo_id
+           { reason = Agent_observation.Unattributed.Unregistered_origin
            ; attempted_path
            }) ->
-      check string "repo id" "ghost" repo_id;
       check
         bool
         "attempted path preserved for forensics"
         true
         (String.length attempted_path > 0)
     | _ ->
-      fail "expected Unaddressed Unregistered_repo_id for unregistered playground repo")
+      fail "expected Unaddressed Unregistered_origin for unregistered checkout")
 ;;
 
 let test_partition_docker_visible_path_maps_to_playground_repo () =
@@ -488,18 +503,16 @@ let test_partition_docker_visible_path_maps_to_playground_repo () =
          (Agent_observation.Code_address.path address))
 ;;
 
-(* A bare relative path outside the [repos/<id>/] lane is a real
-   playground-local file, not a repo file — it must fail attribution with
-   the typed reason instead of borrowing whichever repository overlaps
-   the server base path. *)
-let test_partition_bare_relative_outside_repos_is_unregistered_path () =
+(* A playground-local file outside any Git checkout remains unaddressed,
+   rather than borrowing a repository that overlaps the server base path. *)
+let test_partition_bare_relative_outside_checkout_stays_unaddressed () =
   with_partition_fixture (fun ~config ~meta ->
     match resolve_attribution ~config ~meta [ "path", `String "notes/todo.md" ] with
     | Agent_observation.File
         (Agent_observation.Unaddressed
-           { reason = Agent_observation.Unattributed.Unregistered_path; _ }) ->
+           { reason = Agent_observation.Unattributed.Checkout_unavailable; _ }) ->
       ()
-    | _ -> fail "expected Unaddressed Unregistered_path for playground-local file")
+    | _ -> fail "expected Unaddressed Checkout_unavailable for playground-local file")
 ;;
 
 (* --- gate history slice ------------------------------------------------- *)
@@ -2313,17 +2326,17 @@ let () =
             `Quick
             test_partition_resolution_uses_project_root_for_masc_base_path
         ; test_case
-            "unregistered playground repo fails with its repo id"
+            "unregistered checkout origin stays unaddressed"
             `Quick
-            test_partition_unregistered_playground_repo_fails_with_repo_id
+            test_partition_unregistered_playground_origin_stays_unaddressed
         ; test_case
             "Docker visible absolute path maps to playground repo"
             `Quick
             test_partition_docker_visible_path_maps_to_playground_repo
         ; test_case
-            "bare relative outside repos lane is an unregistered path"
+            "bare relative outside checkout stays unaddressed"
             `Quick
-            test_partition_bare_relative_outside_repos_is_unregistered_path
+            test_partition_bare_relative_outside_checkout_stays_unaddressed
         ] )
     ; ( "concurrent_tool_observer"
       , [ test_case

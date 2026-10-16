@@ -52,10 +52,8 @@ val parse_bundle_relative_repo_path : string -> (string * string) option
 (** [parse_bundle_relative_repo_path rel] parses [repos/<repo_id>/<rel>], a
     path relative to one keeper's bundle root, into [(repo_id, rel)].
 
-    This is the anchor {!parse_playground_repo_path} looks for once it has
-    stripped the playground prefix, exposed for callers that already hold the
-    bundle-relative form and know whose bundle it is — a tool call's
-    [action_radius.target_path] is written that way. Docker keepers and the
+    Callers already hold the bundle-relative form and know whose bundle it is;
+    a tool call's [action_radius.target_path] is written that way. Docker keepers and the
     endpoint-owned ones (microvm, remote_ssh) differ in where the bundle sits,
     not in the path inside it, so a caller
     reaching this needs no sandbox knowledge and should not manufacture an
@@ -80,21 +78,3 @@ val bundle_relative_repo_path : repo_id:string -> string -> string
     [rel] inside [repo_id]'s clone — the inverse of
     {!parse_bundle_relative_repo_path}. Building it here keeps the [repos]
     segment spelled in one place. *)
-
-val parse_playground_repo_path
-  :  base_path:string
-  -> abs_path:string
-  -> (string * string) option
-(** RFC-0128 §4.5. Parse a sandbox playground absolute file path back
-    into [(repo_id, rel_path)].
-
-    Layouts accepted (relative to [base_path]):
-    - [.masc/playground/<keeper>/repos/<repo_id>/<rel>]          (microvm, remote_ssh)
-    - [.masc/playground/docker/<keeper>/repos/<repo_id>/<rel>]   (Docker)
-
-    Used by the keeper write path so files keepers edit inside their
-    per-keeper repo clones map to the same canonical-URL bucket as
-    files in the user's working tree. Returns [None] when [abs_path]
-    is not absolute, not under [base_path], not anchored at the
-    base-relative [.masc/playground/] root, or does not match one of
-    the accepted structural layouts. *)

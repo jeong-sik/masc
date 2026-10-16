@@ -13,20 +13,10 @@ val resolve_write_attribution
     Exposed for testing so the sandbox/working-tree join invariant
     can be verified directly.
 
-    [Addressed] carries the parsed address when the file lives under a
-    registered repository (sandbox playground parse or [local_path]
-    prefix) whose [url] normalises via
-    {!Agent_observation.canonical_url_of_remote}; the repo-relative
-    path is lexically dot-collapsed before minting. A path inside a
-    linked git worktree of the matched repository folds to the {e same}
-    address as the main-tree path — decided by git itself
-    ({!Repo_git.checkout_identity}: the file's [--git-common-dir]
-    equals the matched root's [.git]), never by a path convention —
-    with the measured checkout root carried as the [checkout]
-    projection metadata (#28968, RFC-0378 §5.1/§9,
-    RFC-keeper-workspace-root-only §3.2).
-    [Unaddressed] carries the typed reason and the path exactly as the
-    resolver saw it. Total — never raises. *)
+    Git supplies the actual checkout root and origin, joined against the
+    registered catalog without any clone-directory naming convention.
+    See {!Keeper_write_attribution.resolve} for local-origin, projection and
+    typed failure semantics. Eio cancellation propagates. *)
 
 val resolve_read_file_cwd :
   config:Workspace.config ->

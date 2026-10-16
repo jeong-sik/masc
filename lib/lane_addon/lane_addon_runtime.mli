@@ -182,13 +182,19 @@ module For_testing : sig
   }
   type backend = {
     start : sw:Eio.Switch.t -> state_owner:Lane_addon_worker_state.owner option -> instance_id:string -> package:Lane_addon_types.package -> binding:Yojson.Safe.t ->
+      on_engine:(Lane_addon_lifecycle.engine -> (unit, string) result) ->
       on_created:(connection -> unit) -> (connection, Lane_addon_lifecycle.failure) result;
+    (** [on_engine] receives the engine identity before the first create and
+        returns once it is persisted. A start that creates without calling it
+        leaves the container with no engine on record. *)
     acquire : access:Lane_addon_sources.access -> store:Lane_addon_store.t -> package:Lane_addon_types.package ->
       resolve_machine_output:(Machine_lane.t -> (Lane_addon_sources.machine_output, string) result) ->
     resolve_lane_output:(installation_id:string -> (Lane_addon_sources.lane_output, string) result) ->
       binding:Yojson.Safe.t -> (Yojson.Safe.t, string) result;
-    recover_stop : runtime:Lane_addon_types.runtime -> state_owner:Lane_addon_worker_state.owner option -> instance_id:string -> container_id:string option ->
-      (unit, Lane_addon_lifecycle.failure) result;
+    recover_stop : runtime:Lane_addon_types.runtime -> state_owner:Lane_addon_worker_state.owner option -> instance_id:string -> engine:Lane_addon_lifecycle.engine ->
+      container_id:string option -> (unit, Lane_addon_lifecycle.failure) result;
+    (** [Ok] only when [engine], the one recorded at create, answered that the
+        container is gone or removed. *)
     image_ready : package:Lane_addon_types.package -> (unit, string) result;
     condition_met : runtime:Lane_addon_types.runtime -> Lane_addon_lifecycle.condition -> bool;
     (** Whether a waiting failure's condition holds now. False also when it

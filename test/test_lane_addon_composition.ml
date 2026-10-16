@@ -63,7 +63,7 @@ let with_fixture ?(acquire=Lane_addon_sources.acquire) ?produce_package ?(produc
                 directory (Runtime.configuration_directory config);
               let received = Hashtbl.create 4 and stopped = ref [] in
               let backend : Runtime.For_testing.backend = {
-                start=(fun ~sw:_ ~state_owner:_ ~instance_id ~package ~binding:_ ~on_created ->
+                start=(fun ~sw:_ ~state_owner:_ ~instance_id ~package ~binding:_ ~on_engine ~on_created ->
                   let connection : Runtime.For_testing.connection = {
                     container_id=Store.digest instance_id;
                     exported_tools = (fun () -> []);
@@ -79,10 +79,11 @@ let with_fixture ?(acquire=Lane_addon_sources.acquire) ?produce_package ?(produc
                       stop_attempts := instance_id :: !stop_attempts;
                       if not !allow_stop then Error (Masc.Lane_addon_lifecycle.Cleanup_unconfirmed "fixture cleanup unavailable")
                       else (stopped := instance_id :: !stopped; Ok ()))} in
+                  ignore (on_engine (Masc.Lane_addon_lifecycle.Docker_engine "fixture-engine"));
                   on_created connection; Ok connection);
                 image_ready=(fun ~package:_ -> Ok ());
                 acquire;
-                recover_stop=(fun ~runtime:_ ~state_owner:_ ~instance_id:_ ~container_id:_ -> Ok ());
+                recover_stop=(fun ~runtime:_ ~state_owner:_ ~instance_id:_ ~engine:_ ~container_id:_ -> Ok ());
                 condition_met = (fun ~runtime:_ _ -> true)} in
               Runtime.For_testing.with_backend backend (fun () ->
                 (* Exceptional exits cancel the Eio switch before the outer

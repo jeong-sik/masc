@@ -35,14 +35,16 @@ if argv[:1] == ["volume"]:
         print(json.dumps([json.loads((root / (args[-1] + ".volume")).read_text())]))
     else: raise SystemExit(2)
     raise SystemExit(0)
+def engine_id():
+    identity = root / "engine-id"
+    return identity.read_text().strip() if identity.exists() else "fixture-engine-a"
 if argv[:1] == ["info"]:
     if (root / "daemon-unavailable").exists() or (root / "info-unavailable").exists():
         print("fixture daemon unavailable", file=sys.stderr)
         raise SystemExit(7)
     if argv != ["info", "--format", "{{.ID}}"]:
         raise SystemExit(2)
-    identity = root / "engine-id"
-    print(identity.read_text().strip() if identity.exists() else "fixture-engine-a")
+    print(engine_id())
     raise SystemExit(0)
 if not argv or argv[0] != "container":
     raise SystemExit(2)
@@ -61,14 +63,18 @@ def load(cid):
     return json.loads(path(cid).read_text())
 def output(value):
     print(json.dumps(value), flush=True)
+def on_this_engine(cid):
+    # A container belongs to the engine it was created on; another engine
+    # answers "no such container" for it, as a different Docker daemon would.
+    return path(cid).exists() and load(cid).get("engine") == engine_id()
 if action == "create":
     name = value("--name")
-    cid = hashlib.sha256(name.encode()).hexdigest()
+    cid = hashlib.sha256((engine_id() + name).encode()).hexdigest()
     if path(cid).exists():
         print("container name already exists", file=sys.stderr)
         raise SystemExit(1)
     mode = args[-1]
-    config = {"Id": cid, "Name": "/" + name,
+    config = {"Id": cid, "Name": "/" + name, "engine": engine_id(),
         "Config": {"Labels": dict([value("--label").split("=", 1)])},
         "HostConfig": {"NanoCpus": round(float(value("--cpus")) * 1000000000),
             "Memory": int(value("--memory")),
@@ -83,6 +89,9 @@ if action == "create":
     print(cid, flush=True)
 elif action == "inspect":
     cid = args[-1]
+    if not on_this_engine(cid):
+        print("Error: No such container: " + cid, file=sys.stderr)
+        raise SystemExit(1)
     if load(cid)["mode"] == "hang_inspect":
         (root / (cid + ".blocked")).write_text(action)
         while True: signal.pause()
@@ -91,11 +100,19 @@ elif action == "ls":
     condition = value("--filter")
     for file in root.glob("*.json"):
         config = json.loads(file.read_text())
+        if config.get("engine") != engine_id():
+            continue
         if (condition == "id=" + config["Id"] or
             condition == "name=^" + config["Name"] + "$"):
             output(config["Id"])
+    if (root / "flip-on-ls").exists():
+        # The ambient context changes while this command is answering.
+        (root / "engine-id").write_text("fixture-engine-b")
 elif action == "rm":
     cid = args[-1]
+    if path(cid).exists() and not on_this_engine(cid):
+        print("Error response from daemon: No such container: " + cid, file=sys.stderr)
+        raise SystemExit(1)
     if (root / (cid + ".refuse-remove")).exists():
         print("fixture removal refused", file=sys.stderr)
         raise SystemExit(7)
@@ -297,6 +314,9 @@ let package directory mode : Types.package = {
 }
 
 let unwrap = function Ok value -> value | Error error -> fail (Worker.error_to_string error)
+(* The identities the two fixtures report until a test changes them. *)
+let docker_engine_a = Masc.Lane_addon_lifecycle.Docker_engine "fixture-engine-a"
+let apple_engine_a = Masc.Lane_addon_lifecycle.Apple_app_root "/fixture/app-root-a"
 let sources mode = `Assoc [ "mode", `String mode ]
 let observe worker mode = Worker.observe worker ~binding:(`Assoc []) ~sources:(sources mode)
 let control_timeout_sec = 1.
@@ -339,7 +359,7 @@ let test_apple_state_has_one_writer_and_survives_detach () =
     unwrap (Worker.stop first);
     check bool "detach retains named Apple volume" true (Sys.file_exists volume);
     let next = unwrap (start_apple ~state_owner:owner ~instance_id:"replacement" env sw dir command "good") in
-    unwrap (Worker.recover_stop ~clock:(Eio.Stdenv.clock env) ~control_timeout_sec
+    unwrap (Worker.recover_stop ~engine:apple_engine_a ~clock:(Eio.Stdenv.clock env) ~control_timeout_sec
       ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id:"replacement" ~container_id:None
       ~runtime ~state_owner:owner ~container_command:command ());
     check bool "receiptless recovery removes only the writer" false
@@ -349,7 +369,7 @@ let test_apple_state_has_one_writer_and_survives_detach () =
 let test_apple_control_refuses_unknown_state_and_recovers_exact_owner () =
   with_apple_fixture (fun env sw dir command ->
     let first = unwrap (start_apple ~instance_id:"apple-owner" env sw dir command "good") in
-    let recover instance_id = Worker.recover_stop ~clock:(Eio.Stdenv.clock env)
+    let recover instance_id = Worker.recover_stop ~engine:apple_engine_a ~clock:(Eio.Stdenv.clock env)
       ~control_timeout_sec ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id
       ~container_id:(Some (Worker.container_id first)) ~runtime:Types.Apple_container
       ~container_command:command () in
@@ -425,7 +445,7 @@ let test_persistent_state_has_one_writer_and_survives_detach () =
     unwrap (Worker.stop first);
     check bool "detach retains named state" true (Sys.file_exists volume);
     let replacement = unwrap (start ~state_owner ~instance_id:"replacement" env sw dir docker "good") in
-    let recovery = Worker.recover_stop ~clock:(Eio.Stdenv.clock env) ~control_timeout_sec
+    let recovery = Worker.recover_stop ~engine:docker_engine_a ~clock:(Eio.Stdenv.clock env) ~control_timeout_sec
       ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id:"replacement" ~container_id:None
       ~state_owner ~docker_command:docker () in
     unwrap recovery;
@@ -503,7 +523,7 @@ let test_cleanup_failure_can_be_retried () = with_fixture (fun env sw dir docker
 
 let test_restart_cleanup_requires_exact_owner () = with_fixture (fun env sw dir docker ->
   let worker = unwrap (start ~instance_id:"worker-test" env sw dir docker "good") in
-  let recover instance_id = Worker.recover_stop ~clock:(Eio.Stdenv.clock env)
+  let recover instance_id = Worker.recover_stop ~engine:docker_engine_a ~clock:(Eio.Stdenv.clock env)
       ~control_timeout_sec ~mgr:(Eio.Stdenv.process_mgr env)
       ~instance_id ~container_id:(Some (Worker.container_id worker))
       ~docker_command:docker () in
@@ -518,7 +538,7 @@ let test_restart_without_create_receipt () = with_fixture (fun env sw dir docker
   let instance_id = "lost-create-receipt" in
   let worker = unwrap (start ~instance_id env sw dir docker "good") in
   let other = unwrap (start env sw dir docker "good") in
-  let recover () = Worker.recover_stop ~clock:(Eio.Stdenv.clock env)
+  let recover () = Worker.recover_stop ~engine:docker_engine_a ~clock:(Eio.Stdenv.clock env)
       ~control_timeout_sec ~mgr:(Eio.Stdenv.process_mgr env)
       ~instance_id ~container_id:None ~docker_command:docker () in
   unwrap (recover ());
@@ -540,7 +560,7 @@ let test_name_collision_preserves_foreign_owner () = with_fixture (fun env sw di
         :: List.remove_assoc "Config" fields)
     | _ -> fail "expected fixture container object" in
   write path (Yojson.Safe.to_string changed);
-  let recover () = Worker.recover_stop ~clock:(Eio.Stdenv.clock env)
+  let recover () = Worker.recover_stop ~engine:docker_engine_a ~clock:(Eio.Stdenv.clock env)
       ~control_timeout_sec ~mgr:(Eio.Stdenv.process_mgr env)
       ~instance_id ~container_id:None ~docker_command:docker () in
   check bool "matching name is not sufficient authority" true (Result.is_error (recover ()));
@@ -553,7 +573,7 @@ let test_name_collision_preserves_foreign_owner () = with_fixture (fun env sw di
   unwrap (Worker.stop worker))
 
 let test_absence_requires_available_daemon () = with_fixture (fun env _sw dir docker ->
-  let recover container_id = Worker.recover_stop ~clock:(Eio.Stdenv.clock env)
+  let recover container_id = Worker.recover_stop ~engine:docker_engine_a ~clock:(Eio.Stdenv.clock env)
       ~control_timeout_sec ~mgr:(Eio.Stdenv.process_mgr env)
       ~instance_id:"not-created" ~container_id ~docker_command:docker () in
   unwrap (recover None);
@@ -571,7 +591,7 @@ let test_recovery_control_command_times_out () = with_fixture (fun env _sw dir d
   write marker "hang";
   let clock = Eio.Stdenv.clock env in
   let started_at = Eio.Time.now clock in
-  let result = Worker.recover_stop ~clock ~control_timeout_sec:0.05
+  let result = Worker.recover_stop ~engine:docker_engine_a ~clock ~control_timeout_sec:0.05
       ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id:"not-created"
       ~container_id:None ~docker_command:docker () in
   check bool "hung control command is reported" true (Result.is_error result);
@@ -590,7 +610,7 @@ let test_recovery_control_command_times_out () = with_fixture (fun env _sw dir d
      in busy windows, so the second call keeps the suite's own
      control_timeout_sec ceiling instead of inheriting the deliberately
      starved 0.05 one. The hung-command assertions above stay unchanged. *)
-  unwrap (Worker.recover_stop ~clock ~control_timeout_sec:1.
+  unwrap (Worker.recover_stop ~engine:docker_engine_a ~clock ~control_timeout_sec:1.
     ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id:"not-created"
     ~container_id:None ~docker_command:docker ()))
 
@@ -609,8 +629,6 @@ let test_failed_create_receipt_cleans_only_owned_container () = with_fixture (fu
   ignore (unwrap (observe other "good"));
   unwrap (Worker.stop other))
 
-
-let docker_engine_a = Masc.Lane_addon_lifecycle.Docker_engine "fixture-engine-a"
 
 let test_engine_identity_comes_from_the_info_command () = with_fixture (fun env _sw dir docker ->
   let read () = Worker.read_engine ~clock:(Eio.Stdenv.clock env) ~control_timeout_sec
@@ -671,6 +689,77 @@ let test_start_is_refused_before_create_when_the_engine_is_unreachable () =
     check int "no container was created" 0
       (Array.fold_left (fun count name ->
         if Filename.check_suffix name ".json" then count + 1 else count) 0 (Sys.readdir dir)))
+
+
+let docker_engine_b = Masc.Lane_addon_lifecycle.Docker_engine "fixture-engine-b"
+let container_files dir =
+  Array.fold_left (fun count name ->
+    if Filename.check_suffix name ".json" then count + 1 else count) 0 (Sys.readdir dir)
+let switch_engine dir id = write (Filename.concat dir "engine-id") id
+
+let recover_on env dir docker ~engine ~instance_id container_id =
+  Worker.recover_stop ~clock:(Eio.Stdenv.clock env) ~control_timeout_sec
+    ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id ~container_id ~engine
+    ~docker_command:docker ()
+
+let is_mismatch ~recorded ~observed = function
+  | Error (Worker.Lifecycle (Masc.Lane_addon_lifecycle.Engine_mismatch {recorded = r; observed = o})) ->
+      r = recorded && o = Masc.Lane_addon_lifecycle.Other_engine observed
+  | Ok _ | Error _ -> false
+
+(* The incident: the CLI is pointed at another daemon, which has no such
+   container and says so with exit 0 for a listing. That answer is not a
+   release, and the container is still on the first daemon. *)
+let test_a_different_engine_cannot_confirm_a_release () = with_fixture (fun env sw dir docker ->
+  let worker = unwrap (start ~instance_id:"engine-test" env sw dir docker "good") in
+  let id = Worker.container_id worker in
+  let container = Filename.concat dir (id ^ ".json") in
+  switch_engine dir "fixture-engine-b";
+  check bool "recovery by exact ID is refused on another engine" true
+    (is_mismatch ~recorded:docker_engine_a ~observed:docker_engine_b
+       (recover_on env dir docker ~engine:docker_engine_a ~instance_id:"engine-test" (Some id)));
+  check bool "recovery by name is refused on another engine" true
+    (is_mismatch ~recorded:docker_engine_a ~observed:docker_engine_b
+       (recover_on env dir docker ~engine:docker_engine_a ~instance_id:"engine-test" None));
+  check bool "stopping the live worker is refused on another engine" true
+    (is_mismatch ~recorded:docker_engine_a ~observed:docker_engine_b (Worker.stop worker));
+  check bool "the container is still there after every refused release" true (Sys.file_exists container);
+  switch_engine dir "fixture-engine-a";
+  unwrap (Worker.stop worker);
+  check bool "the recorded engine releases it" false (Sys.file_exists container))
+
+let test_an_engine_that_changes_during_a_query_does_not_confirm_absence () =
+  with_fixture (fun env _sw dir docker ->
+    (* The listing answers "none" and the context changes while it does. *)
+    write (Filename.concat dir "flip-on-ls") "flip";
+    check bool "an absence read while the engine changed is refused" true
+      (is_mismatch ~recorded:docker_engine_a ~observed:docker_engine_b
+         (recover_on env dir docker ~engine:docker_engine_a ~instance_id:"nothing-created"
+            (Some (String.make 64 'a')))))
+
+let test_an_unreadable_engine_identity_is_not_the_recorded_one () =
+  with_fixture (fun env _sw dir docker ->
+    write (Filename.concat dir "engine-id") "two words";
+    match recover_on env dir docker ~engine:docker_engine_a ~instance_id:"nothing-created" None with
+    | Error (Worker.Lifecycle (Masc.Lane_addon_lifecycle.Engine_mismatch
+        {observed = Masc.Lane_addon_lifecycle.Unreadable_engine _; _})) -> ()
+    | Ok _ | Error _ -> fail "an engine that cannot name itself must not confirm absence")
+
+let test_the_engine_is_recorded_before_the_first_create () = with_fixture (fun env sw dir docker ->
+  let seen = ref None in
+  let worker = unwrap (Worker.start ~sw ~clock:(Eio.Stdenv.clock env) ~control_timeout_sec
+    ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id:"record-first" ~package:(package dir "good")
+    ~docker_command:docker
+    ~on_engine:(fun engine -> seen := Some (engine, container_files dir); Ok ()) ()) in
+  check bool "the recorded engine is the one that answered, with no container yet" true
+    (!seen = Some (docker_engine_a, 0));
+  unwrap (Worker.stop worker);
+  check int "a start whose engine cannot be recorded creates nothing" 0
+    (match Worker.start ~sw ~clock:(Eio.Stdenv.clock env) ~control_timeout_sec
+       ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id:"record-fails" ~package:(package dir "good")
+       ~docker_command:docker ~on_engine:(fun _ -> Error "disk full") () with
+     | Error (Worker.Lifecycle (Masc.Lane_addon_lifecycle.Persistence_failed _)) -> container_files dir
+     | Ok _ | Error _ -> fail "an unrecorded engine must stop the start before create"))
 
 exception Owner_detached
 
@@ -2095,4 +2184,12 @@ let () = run "Lane Add-on worker" [ "lifecycle", [
   test_case "engine identity parsing has no default" `Quick test_engine_identity_parsing_has_no_default;
   test_case "start is refused before create when the engine is unreachable" `Quick
     test_start_is_refused_before_create_when_the_engine_is_unreachable;
+  test_case "a different engine cannot confirm a release" `Quick
+    test_a_different_engine_cannot_confirm_a_release;
+  test_case "an engine that changes during a query does not confirm absence" `Quick
+    test_an_engine_that_changes_during_a_query_does_not_confirm_absence;
+  test_case "an unreadable engine identity is not the recorded one" `Quick
+    test_an_unreadable_engine_identity_is_not_the_recorded_one;
+  test_case "the engine is recorded before the first create" `Quick
+    test_the_engine_is_recorded_before_the_first_create;
 ]]

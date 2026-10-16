@@ -8,6 +8,7 @@ type error =
   | Docker_failed of { operation : string; detail : string }
   | Engine_failed of { runtime : Lane_addon_types.runtime; operation : string; detail : string }
   | Engine_fault of { runtime : Lane_addon_types.runtime; fault : Lane_addon_lifecycle.engine_fault }
+  | Lifecycle of Lane_addon_lifecycle.failure
   | Protocol_failed of string
   | Host_refusal of Lane_addon_call_context.host_refusal
   | Invalid_observation of string
@@ -35,6 +36,7 @@ val start :
   ?mounts:mount list ->
   ?docker_command:string ->
   ?container_command:string ->
+  ?on_engine:(Lane_addon_lifecycle.engine -> (unit, string) result) ->
   ?on_created:(t -> unit) ->
   ?artifact_store:Lane_addon_store.t ->
   ?sampling_handler:Lane_addon_sampling.t ->
@@ -53,13 +55,16 @@ val stop : t -> (unit, error) result
     container's ownership label before removal. [None] recovers a lost create
     receipt using this instance's deterministic container name, then verifies
     both the name and ownership label before removing the resolved exact ID.
-    In either case, absence requires a successful query to the retained runtime.
-    Each query is bounded by [control_timeout_sec]. [runtime] defaults to Docker
+    In either case, absence requires a successful query to the retained runtime,
+    and counts only when the engine that answered is [engine], the one recorded
+    when the container was created (see {!Lane_addon_slot.proven}). Each query
+    is bounded by [control_timeout_sec]. [runtime] defaults to Docker
     for callers that predate runtime selection. *)
 val recover_stop :
   clock:_ Eio.Time.clock -> control_timeout_sec:float ->
   mgr:_ Eio.Process.mgr ->
   instance_id:string -> container_id:string option ->
+  engine:Lane_addon_lifecycle.engine ->
   ?runtime:Lane_addon_types.runtime ->
   ?state_owner:Lane_addon_worker_state.owner ->
   ?docker_command:string -> ?container_command:string -> unit -> (unit, error) result

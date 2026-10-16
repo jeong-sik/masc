@@ -6,6 +6,7 @@ type error =
   | Docker_failed of { operation : string; detail : string }
   | Engine_failed of { runtime : runtime; operation : string; detail : string }
   | Engine_fault of { runtime : runtime; fault : Lane_addon_lifecycle.engine_fault }
+  | Lifecycle of Lane_addon_lifecycle.failure
   | Protocol_failed of string
   | Host_refusal of Lane_addon_call_context.host_refusal
   | Invalid_observation of string
@@ -40,6 +41,7 @@ let error_to_string = function
       Printf.sprintf "Add-on %s engine is unreachable: %s" (runtime_to_string runtime) detail
   | Engine_fault { runtime; fault = Lane_addon_lifecycle.Identity_unreadable detail } ->
       Printf.sprintf "Add-on %s engine identity is unreadable: %s" (runtime_to_string runtime) detail
+  | Lifecycle failure -> "Add-on " ^ Lane_addon_lifecycle.failure_to_string failure
   | Host_refusal (Lane_addon_call_context.Rejected detail | Unavailable detail | Activity_disabled detail | Activity_unobserved detail) -> detail
   | Protocol_failed detail -> "Add-on MCP failure: " ^ detail
   | Invalid_observation detail -> "invalid Add-on observation: " ^ detail
@@ -49,6 +51,7 @@ let error_to_string = function
    error into one lists every error. An engine that does not answer is a wait;
    everything else is the worker's own failure, or an unconfirmed cleanup. *)
 let start_failure = function
+  | Lifecycle failure -> failure
   | Engine_fault { fault = Lane_addon_lifecycle.Unreachable detail; _ } ->
       Lane_addon_lifecycle.Engine_unreachable detail
   | (Invalid_package _ | Docker_failed _ | Engine_failed _
@@ -57,6 +60,7 @@ let start_failure = function
       Lane_addon_lifecycle.Worker_failed (error_to_string error)
 
 let cleanup_failure = function
+  | Lifecycle failure -> failure
   | Engine_fault { fault = Lane_addon_lifecycle.Unreachable detail; _ } ->
       Lane_addon_lifecycle.Engine_unreachable detail
   | (Invalid_package _ | Docker_failed _ | Engine_failed _
@@ -138,6 +142,9 @@ let read_engine_with ~run runtime =
   | Error error -> Error (Lane_addon_lifecycle.Unreachable (error_to_string error))
   | Ok raw -> Engine.engine_of_info runtime raw
 
+let port_of_run ~run runtime =
+  { Lane_addon_slot.read_engine = (fun () -> read_engine_with ~run runtime) }
+
 let read_engine ~clock ~control_timeout_sec ~mgr ~runtime
     ?(docker_command="docker") ?(container_command="container") () =
   if not (Float.is_finite control_timeout_sec) || control_timeout_sec <= 0. then
@@ -197,7 +204,7 @@ let inspect_owned_container ~runtime ~run ~instance_id ~name id =
   Engine.verify_owner runtime ~instance_id ~name ~id raw
   |> Result.map_error (engine_error runtime ~operation:"recover ownership")
 
-let recover_stop ~clock ~control_timeout_sec ~mgr ~instance_id ~container_id ?(runtime = Docker) ?state_owner
+let recover_stop ~clock ~control_timeout_sec ~mgr ~instance_id ~container_id ~engine ?(runtime = Docker) ?state_owner
     ?(docker_command = "docker") ?(container_command = "container") () =
   if not (Float.is_finite control_timeout_sec) || control_timeout_sec <= 0. then
     Error (Invalid_package "control_timeout_sec must be finite and positive")
@@ -207,6 +214,10 @@ let recover_stop ~clock ~control_timeout_sec ~mgr ~instance_id ~container_id ?(r
   else
     let command = command_for runtime ~docker_command ~container_command in
     let run = run_control ~clock ~timeout_sec:control_timeout_sec ~mgr ~runtime ~command in
+    (* "No such container" says nothing unless the engine that answered is the
+       one that holds the container. *)
+    Lane_addon_slot.proven (port_of_run ~run runtime) ~expected:engine
+      ~lift:(fun failure -> Lifecycle failure) (fun () ->
     let* found, name = match container_id with
       | None ->
           let name = match state_owner with
@@ -224,7 +235,7 @@ let recover_stop ~clock ~control_timeout_sec ~mgr ~instance_id ~container_id ?(r
     | None -> Ok ()
     | Some id ->
         let* () = inspect_owned_container ~runtime ~run ~instance_id ~name id in
-        remove_container ~runtime ~run id
+        remove_container ~runtime ~run id)
 
 let stop t =
   (* Never take the observation mutex: an unresponsive observation is a
@@ -239,7 +250,7 @@ let stop t =
     Ok ()
 
 let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package) ?state_owner ?(mounts = [])
-    ?(docker_command = "docker") ?(container_command = "container") ?(on_created = fun _ -> ()) ?artifact_store ?sampling_handler () =
+    ?(docker_command = "docker") ?(container_command = "container") ?(on_engine = fun _ -> Ok ()) ?(on_created = fun _ -> ()) ?artifact_store ?sampling_handler () =
   let* () = if String.trim instance_id = "" then Error (Invalid_package "instance_id must be non-blank")
     else Ok () in
   let* () = if Float.is_finite control_timeout_sec && control_timeout_sec > 0. then Ok ()
@@ -281,7 +292,7 @@ let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package)
             | Some owner -> Lane_addon_worker_state.container_name ~runtime owner in
   let run = run_control ~clock ~timeout_sec:control_timeout_sec ~mgr ~runtime ~command in
   (* No create is attempted against an engine that cannot name itself. *)
-  let* (_ : Lane_addon_lifecycle.engine) = read_engine_with ~run runtime
+  let* engine = read_engine_with ~run runtime
     |> Result.map_error (fun fault -> Engine_fault { runtime; fault }) in
   (* Apple resolves local tags during create. Record the descriptor first and
      verify the created configuration before starting any package process. *)
@@ -291,16 +302,17 @@ let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package)
         let* raw = run ~operation:"image inspect" (Engine.image_arguments runtime package.image) in
         Engine.image_digest runtime raw |> Result.map Option.some
         |> Result.map_error (engine_error runtime ~operation:"image inspect") in
-  let* state_mount = match state_owner with
-    | None -> Ok []
+  let* () = match state_owner with
     | Some owner when not (Lane_addon_worker_state.belongs_to owner ~package_id:package.id) ->
         Error (Invalid_package "persistent state owner names a different package")
-    | Some owner ->
-        Lane_addon_worker_state.ensure ~runtime owner
-          ~run:(fun ~operation args -> run ~operation args |> Result.map_error error_to_string)
-        |> Result.map (fun mount -> ["--mount"; mount])
-        |> Result.map_error (engine_error runtime ~operation:"persistent state")
-  in
+    | Some _ | None -> Ok () in
+  (* The engine is recorded before the first create. A create that lands but
+     whose answer is lost can then only be on this engine, and a record that
+     names no engine has never issued one. *)
+  let* () = on_engine engine
+    |> Result.map_error (fun detail ->
+      Lifecycle (Lane_addon_lifecycle.Persistence_failed ("engine identity persistence: " ^ detail))) in
+  let port = port_of_run ~run runtime in
   let identity = ref None in
   let cleanup_finished = ref false in
   let cleanup () =
@@ -310,18 +322,20 @@ let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package)
           (* create can take effect before its stdout is received. Verify the
              binding's deterministic name and label instead of removing an
              unverified name collision. *)
-          let* () = recover_stop ~clock ~control_timeout_sec ~mgr ~instance_id ~container_id:None ~runtime ?state_owner
+          let* () = recover_stop ~clock ~control_timeout_sec ~mgr ~instance_id ~container_id:None ~engine ~runtime ?state_owner
               ~docker_command ~container_command () in
           cleanup_finished := true;
           Ok ()
       | Some id ->
           let* () = match runtime with
-            | Docker -> remove_container ~runtime ~run id
+            | Docker ->
+                Lane_addon_slot.proven port ~expected:engine
+                  ~lift:(fun failure -> Lifecycle failure) (fun () -> remove_container ~runtime ~run id)
             | Apple_container ->
                 (* Apple IDs are reusable names. An old handle cannot delete
                    the new incarnation now occupying its persistent slot. *)
                 recover_stop ~clock ~control_timeout_sec ~mgr ~instance_id
-                  ~container_id:(Some id) ~runtime ?state_owner
+                  ~container_id:(Some id) ~engine ~runtime ?state_owner
                   ~docker_command ~container_command () in
           cleanup_finished := true;
           Ok ()
@@ -338,8 +352,20 @@ let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package)
         Error (engine_error runtime ~operation:"failed attach cleanup"
           (error_to_string error ^ "; " ^ error_to_string cleanup_error))
   in
-  let* created = match run ~operation:"create"
-      (Engine.create_arguments package ~name ~instance_id ~image:package.image ~package_mount ~mounts:mounted ~state_mounts:state_mount) with
+  (* Volume, create and the answer to it all come from the recorded engine,
+     or the attempt is refused. *)
+  let create_on_engine () =
+    let* state_mount = match state_owner with
+      | None -> Ok []
+      | Some owner ->
+          Lane_addon_worker_state.ensure ~runtime owner
+            ~run:(fun ~operation args -> run ~operation args |> Result.map_error error_to_string)
+          |> Result.map (fun mount -> ["--mount"; mount])
+          |> Result.map_error (engine_error runtime ~operation:"persistent state") in
+    run ~operation:"create"
+      (Engine.create_arguments package ~name ~instance_id ~image:package.image ~package_mount ~mounts:mounted ~state_mounts:state_mount) in
+  let* created = match Lane_addon_slot.proven port ~expected:engine
+      ~lift:(fun failure -> Lifecycle failure) create_on_engine with
     | Ok value -> Ok value
     | Error error -> fail_start error
   in

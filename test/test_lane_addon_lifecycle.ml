@@ -4,8 +4,14 @@ open Alcotest
 module L = Masc.Lane_addon_lifecycle
 module Types = Masc.Lane_addon_types
 
+let engine_a = L.Docker_engine "engine-a"
+let engine_b = L.Docker_engine "engine-b"
+let apple = L.Apple_app_root "/Users/example/Library/Application Support/com.apple.container/"
+
 let failures = [
   L.Engine_unreachable "daemon down";
+  L.Engine_mismatch { recorded = engine_a; observed = L.Other_engine engine_b };
+  L.Engine_mismatch { recorded = apple; observed = L.Unreadable_engine "blank ID" };
   L.Worker_failed "start refused";
   L.Cleanup_unconfirmed "remove refused";
   L.Persistence_failed "disk full";
@@ -13,11 +19,18 @@ let failures = [
   L.Effect_outcome_unknown "call cancelled";
 ]
 
+let releases = [
+  L.Never_created;
+  L.Released { engine = engine_a; container_id = Some (String.make 64 'a') };
+  L.Released { engine = apple; container_id = None };
+]
+
 let states =
-  [L.Attached; L.Observing; L.Detached; L.Detaching None;
+  [L.Attached; L.Observing; L.Detaching None;
    L.Detaching (Some { L.cause = L.Worker_failed "start refused"; first = None });
    L.Failed (L.failed L.Previous_process);
    L.Failed { L.cause = L.Cleanup_unconfirmed "remove refused"; first = Some (L.Worker_failed "start refused") }]
+  @ List.map (fun release -> L.Detached release) releases
   @ List.map (fun failure -> L.Failed (L.failed failure)) failures
 
 let test_every_state_round_trips () =
@@ -29,6 +42,14 @@ let test_every_state_round_trips () =
 let test_older_and_malformed_shapes_are_errors () =
   let rejected label json =
     check bool label true (Result.is_error (L.state_of_json json)) in
+  rejected "a detached state with no release evidence is the older shape"
+    (`Assoc ["kind", `String "detached"]);
+  rejected "release evidence without an engine"
+    (`Assoc ["kind", `String "detached"; "release", `Assoc ["kind", `String "released"; "container_id", `Null]]);
+  rejected "release evidence with a blank container"
+    (`Assoc ["kind", `String "detached";
+             "release", `Assoc ["kind", `String "released"; "engine", L.engine_to_json engine_a;
+                                "container_id", `String " "]]);
   rejected "a failed phase with only a message is the older shape"
     (`Assoc ["kind", `String "failed"; "message", `String "cleanup incomplete"]);
   rejected "a failed state needs both causes" (`Assoc ["kind", `String "failed"]);
@@ -44,6 +65,7 @@ let test_older_and_malformed_shapes_are_errors () =
 let test_retry_is_decided_per_failure () =
   let expected = function
     | L.Engine_unreachable _ -> L.Wait_until L.Engine_reachable
+    | L.Engine_mismatch { recorded; _ } -> L.Wait_until (L.Engine_is recorded)
     | L.Worker_failed _ | L.Cleanup_unconfirmed _ | L.Persistence_failed _
     | L.Previous_process | L.Effect_outcome_unknown _ -> L.Retry in
   List.iter (fun failure ->
@@ -69,6 +91,25 @@ let test_display_phase_names_every_cause () =
       check bool "first cause shown" true (String_util.contains_substring message "start refused")
   | Types.Attached | Types.Observing | Types.Detaching | Types.Detached -> fail "a failed state projects to a failed phase"
 
+let test_engines_are_equal_only_by_identity () =
+  check bool "same Docker ID" true (L.engine_equal engine_a (L.Docker_engine "engine-a"));
+  check bool "different Docker ID" false (L.engine_equal engine_a engine_b);
+  check bool "an Apple root never equals a Docker ID of the same text" false
+    (L.engine_equal (L.Docker_engine "x") (L.Apple_app_root "x"));
+  List.iter (fun engine ->
+    check bool "engine survives its JSON" true (L.engine_of_json (L.engine_to_json engine) = Ok engine))
+    [engine_a; apple];
+  check bool "blank Docker ID is not an engine" true
+    (Result.is_error (L.engine_of_json (`Assoc ["kind", `String "docker"; "id", `String " "])));
+  check bool "unknown engine kind is not an engine" true
+    (Result.is_error (L.engine_of_json (`Assoc ["kind", `String "podman"; "id", `String "x"])))
+
+let test_a_mismatch_names_both_engines_in_its_message () =
+  let message = L.failure_to_string
+    (L.Engine_mismatch { recorded = engine_a; observed = L.Other_engine engine_b }) in
+  check bool "recorded engine named" true (String_util.contains_substring message "engine-a");
+  check bool "reached engine named" true (String_util.contains_substring message "engine-b")
+
 let () =
   run "lane_addon_lifecycle" [
     "lifecycle", [
@@ -77,4 +118,6 @@ let () =
       test_case "retry is decided per failure" `Quick test_retry_is_decided_per_failure;
       test_case "a later failure keeps the first different cause" `Quick test_a_later_failure_keeps_the_first_different_cause;
       test_case "the display phase names every cause" `Quick test_display_phase_names_every_cause;
+      test_case "engines are equal only by identity" `Quick test_engines_are_equal_only_by_identity;
+      test_case "a mismatch names both engines" `Quick test_a_mismatch_names_both_engines_in_its_message;
     ]]

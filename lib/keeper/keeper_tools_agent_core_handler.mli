@@ -39,7 +39,9 @@
     [prepared_edit] is the opaque
     existing-file preparation for this canonical Edit descriptor and exact
     translated input. Its consumer still checks current confinement and owner;
-    it supplies no authorization or replay evidence. Omission uses ordinary
+    it supplies no authorization or replay evidence. [prepared_write] binds
+    the original Overwrite/Append producer and exact input to pinned physical
+    parents; a missing target file is supported. Omission uses ordinary
     dispatch. A prepared call supplies its original [source_context] snapshot. *)
 val make_keeper_tool_handler
   :  capability_surface:Keeper_capability_surface.t
@@ -57,6 +59,7 @@ val make_keeper_tool_handler
   -> ?owned_job_replay:Keeper_owned_job_invocation.replay
   -> ?prepared_read:Keeper_tool_filesystem_runtime.prepared_read
   -> ?prepared_edit:Keeper_tool_filesystem_runtime.prepared_edit
+  -> ?prepared_write:Keeper_tool_filesystem_runtime.prepared_write
   -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?continuation_channel:Keeper_continuation_channel.t
@@ -96,6 +99,7 @@ val make_keeper_tool_handler_from_meta
   -> ?owned_job_replay:Keeper_owned_job_invocation.replay
   -> ?prepared_read:Keeper_tool_filesystem_runtime.prepared_read
   -> ?prepared_edit:Keeper_tool_filesystem_runtime.prepared_edit
+  -> ?prepared_write:Keeper_tool_filesystem_runtime.prepared_write
   -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?continuation_channel:Keeper_continuation_channel.t

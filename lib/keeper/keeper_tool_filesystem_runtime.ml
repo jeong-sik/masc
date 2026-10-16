@@ -15,6 +15,7 @@ type fs_write_mode = Keeper_tool_write_mode.t =
 
 type prepared_edit = Keeper_prepared_file.t
 type prepared_read = Keeper_prepared_file.t
+type prepared_write = Keeper_prepared_file.Write.t
 
 type edit_preparation_error =
   | Edit_path_refused of Keeper_alerting_path.path_refusal
@@ -2253,6 +2254,7 @@ let handle_file_write_content_with_outcome
       ?gate_context
       ?gate_grant
       ?prepared_edit
+      ?prepared_write
       ~(args : Yojson.Safe.t)
       ()
   =
@@ -2517,6 +2519,13 @@ let handle_file_write_content_with_outcome
       ~created_directory_permissions
     |> Result.map_error Keeper_alerting_path.path_effect_projection_error_to_string
   in
+  let with_write_parents ~operation confined consume =
+    match prepared_write with
+    | Some prepared ->
+        Keeper_prepared_file.Write.with_parents ~operation ~config ~meta ~args
+          ~confined prepared consume
+    | None -> with_confined_write_parent confined consume
+  in
   let handle_atomic_content_write ~mode ~make_effect =
     match
       resolve_keeper_confined_write_path
@@ -2533,7 +2542,7 @@ let handle_file_write_content_with_outcome
         let* () =
           check_invariant_sandbox_isolation ~turn_sandbox_factory ~confined
         in
-        with_confined_write_parent confined
+        with_write_parents ~operation:mode confined
         @@ fun ~root_dir:_ ~parent_dir ~parent_components ~missing_parents ~leaf ->
         let* parent =
           parent_effect_scope ~parent_dir ~parent_components ~missing_parents
@@ -2610,7 +2619,7 @@ let handle_file_write_content_with_outcome
         let* () =
           check_invariant_sandbox_isolation ~turn_sandbox_factory ~confined
         in
-        with_confined_write_parent confined
+        with_write_parents ~operation:Append confined
         @@ fun ~root_dir ~parent_dir ~parent_components ~missing_parents ~leaf ->
         let create_missing_entry () =
           let* parent =
@@ -3117,6 +3126,23 @@ end
 let prepared_edit_scopes = Keeper_prepared_file.scopes
 let release_prepared_edit = Keeper_prepared_file.release
 
+let prepared_write_scopes = Keeper_prepared_file.Write.scopes
+let release_prepared_write = Keeper_prepared_file.Write.release
+
+let prepare_write ~sw ~config ~(meta : Keeper_meta_contract.keeper_meta) ~args =
+  let selected = match Keeper_types_profile_sandbox.tree_location_of_profile meta.sandbox_profile,
+                       Keeper_tool_write_mode.of_args args with
+    | Shared_mount, Ok Overwrite -> Some (Overwrite, Keeper_alerting_path.Lexical_entry)
+    | Shared_mount, Ok Append -> Some (Append, Keeper_alerting_path.Follow_referent)
+    | Endpoint_owned, _ | Shared_mount, (Ok Patch | Error _) -> None in
+  match selected with
+  | None -> Ok None
+  | Some (operation, endpoint) ->
+      let path = Safe_ops.json_string ~default:"" "path" args in
+      (match resolve_keeper_confined_write_path ~config ~meta ~endpoint ~raw_path:path with
+       | Error (refusal : Keeper_alerting_path.path_refusal) -> Error refusal.message
+       | Ok confined -> Keeper_prepared_file.Write.prepare ~sw ~operation ~config ~meta ~args ~confined)
+
 let edit_preparation_error_to_execution = function
   | Edit_path_refused refusal ->
     Keeper_tool_execution.failure ~class_:refusal.failure_class (error_json refusal.message)
@@ -3140,12 +3166,19 @@ let prepare_edit ~sw ~config ~(meta : Keeper_meta_contract.keeper_meta) ~args =
 ;;
 
 let handle_file_write_with_outcome ~turn_sandbox_factory ~config ~(meta : Keeper_meta_contract.keeper_meta)
-    ~publication_recovery ?continuation_channel ?gate_context ?gate_grant ?prepared_edit ~args () =
+    ~publication_recovery ?continuation_channel ?gate_context ?gate_grant ?prepared_edit ?prepared_write ~args () =
   let tree = Keeper_types_profile_sandbox.tree_location_of_profile meta.sandbox_profile in
   let prepared_supported = match tree, Keeper_tool_write_mode.of_args args with
     | Shared_mount, Ok Patch -> true
     | Endpoint_owned, _ | Shared_mount, (Ok (Overwrite | Append) | Error _) -> false in
-  if Option.is_some prepared_edit && not prepared_supported then
+  let prepared_write_supported = match tree, Keeper_tool_write_mode.of_args args with
+    | Shared_mount, Ok (Overwrite | Append) -> true
+    | Endpoint_owned, _ | Shared_mount, (Ok Patch | Error _) -> false in
+  if Option.is_some prepared_write
+     && (Option.is_some prepared_edit || not prepared_write_supported) then
+    Keeper_tool_execution.failure ~class_:Tool_result.Runtime_failure
+      (error_json "prepared Write cannot execute with another resource, tree or write mode")
+  else if Option.is_some prepared_edit && not prepared_supported then
     Keeper_tool_execution.failure ~class_:Tool_result.Runtime_failure
       (error_json "prepared Edit cannot execute with another tree or write mode")
   else
@@ -3164,4 +3197,4 @@ let handle_file_write_with_outcome ~turn_sandbox_factory ~config ~(meta : Keeper
      | Error error -> Keeper_write_content.failure error
      | Ok content -> handle_file_write_content_with_outcome ~content_source ~content
          ~turn_sandbox_factory ~config ~meta ~publication_recovery
-         ?continuation_channel ?gate_context ?gate_grant ?prepared_edit ~args ())
+         ?continuation_channel ?gate_context ?gate_grant ?prepared_edit ?prepared_write ~args ())

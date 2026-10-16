@@ -152,6 +152,19 @@ val prepared_edit_scopes : prepared_edit -> Agent_core.Tool_contract.Resource_sc
 val release_prepared_edit : prepared_edit -> unit
 (** Release an untransferred preparation; repeated release is harmless. *)
 
+type prepared_write
+
+val prepare_write :
+  sw:Eio.Switch.t -> config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta -> args:Yojson.Safe.t ->
+  (prepared_write option, string) result
+(** Prepare Shared_mount Overwrite/Append against existing physical parents.
+    New target files are supported; missing parents and endpoint trees retain
+    ordinary execution. No Gate decision, creation or write is performed. *)
+
+val prepared_write_scopes : prepared_write -> Agent_core.Tool_contract.Resource_scope.t list
+val release_prepared_write : prepared_write -> unit
+
 val handle_file_write_with_outcome :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->
   config:Workspace.config ->
@@ -162,6 +175,7 @@ val handle_file_write_with_outcome :
   ?gate_context:(unit -> Keeper_gate.causal_context) ->
   ?gate_grant:Keeper_gate.cycle_grant ->
   ?prepared_edit:prepared_edit ->
+  ?prepared_write:prepared_write ->
   args:Yojson.Safe.t ->
   unit ->
   Keeper_tool_execution.t

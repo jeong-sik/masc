@@ -29,6 +29,7 @@ let execute_with_observers_with_authority
       ?owned_job_replay
       ?prepared_read
       ?prepared_edit
+      ?prepared_write
       ?turn_sandbox_factory
       ?sw
       ?clock
@@ -87,6 +88,7 @@ let execute_with_observers_with_authority
             ?owned_job_replay
             ?prepared_read
             ?prepared_edit
+            ?prepared_write
             ?turn_sandbox_factory
             ?sw
             ?clock
@@ -113,6 +115,7 @@ let execute_with_observers_with_authority
             ?owned_job_replay
             ?prepared_read
             ?prepared_edit
+            ?prepared_write
             ?turn_sandbox_factory
             ?sw
             ?clock
@@ -138,6 +141,7 @@ let execute_with_observers_with_authority
             ?owned_job_replay
             ?prepared_read
             ?prepared_edit
+            ?prepared_write
             ?turn_sandbox_factory
             ?sw
             ?clock
@@ -163,6 +167,7 @@ let execute_with_observers_with_authority
             ?owned_job_replay
             ?prepared_read
             ?prepared_edit
+            ?prepared_write
             ?turn_sandbox_factory
             ?sw
             ?clock

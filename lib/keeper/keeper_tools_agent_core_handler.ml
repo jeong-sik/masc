@@ -24,6 +24,7 @@ let make_keeper_tool_handler_with_authority
       ?owned_job_replay
       ?prepared_read
       ?prepared_edit
+      ?prepared_write
       ?turn_sandbox_factory
       ?clock
       ?continuation_channel
@@ -54,6 +55,12 @@ let make_keeper_tool_handler_with_authority
      when descriptor.Keeper_tool_descriptor.runtime_handler = Keeper_tool_descriptor.Tool_edit_file -> ()
    | Some _, Some _ | Some _, None ->
      invalid_arg "prepared Edit requires its canonical Edit descriptor");
+  (match prepared_write, prepared_read, prepared_edit, descriptor with
+   | None, _, _, _ -> ()
+   | Some _, None, None, Some descriptor
+     when descriptor.Keeper_tool_descriptor.runtime_handler = Keeper_tool_descriptor.Tool_write_file -> ()
+   | Some _, _, _, _ ->
+     invalid_arg "prepared Write requires its canonical Write descriptor and no other file resource");
   let input_schema =
     match descriptor with
     | None -> input_schema
@@ -272,6 +279,7 @@ let make_keeper_tool_handler_with_authority
                 ?owned_job_replay
                 ?prepared_read
                 ?prepared_edit
+                ?prepared_write
                 ?turn_sandbox_factory
                 ?sw
                 ?clock

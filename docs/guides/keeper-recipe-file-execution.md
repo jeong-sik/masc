@@ -45,12 +45,49 @@ earlier input targets a different file. Once identities are known, only actual
 conflicts await predecessor settlement. A failed or skipped conflicting owner
 prevents its successors from dispatching; independent branches follow the plan's
 existing failure policy. Pure child argument validation has no file footprint.
-Read/Edit/Write plans retain supported Read/Edit capabilities while Write binds
-its original ordinary handler as an exclusive file barrier. Write admission
-grants no resource claim or extra concurrency. Plans containing other tools or
+Read/Edit/Write plans retain supported file capabilities. Overwrite/Append Write
+can bind existing physical parents, including a missing target file; unsupported
+paths retain the original exclusive handler. Plans containing other tools or
 async child submission/result targets retain ordinary scheduling. Named calls
 without whole-plan scoped admission and transient
 run calls retain their outer descriptor; only their inner ready file leaves overlap.
+
+## Bind original Write resources when inputs become ready
+
+The original Shared_mount Write producer now prepares opaque Overwrite/Append
+resources as well as Read/Edit. It pins the selected allowed root and existing
+target/resolved-source parents without creating a file, reading content or asking
+the Gate. The same ordinary Write handler revalidates the exact input, owner,
+operation, current confinement and physical directory bindings before consuming
+those capabilities. Overwrite retains its atomic publication/recovery path;
+Append retains its existing pinned-file/exclusive-create semantics. Result and
+Gate observers keep the original Task, parent invocation and physical leaf.
+
+| Ready leaf | Previous scheduling | Source implementation |
+|---|---|---|
+| Disjoint existing Write targets | Exclusive barrier against every file leaf | Entry/object resource conflicts only; independent authorizations may overlap |
+| New files under different existing parents | Exclusive barrier | Each actual parent owns its creation; independent parents may overlap |
+| Missing files in one physical parent | Exclusive barrier | Parent creation claims preserve order; no guessed case or Unicode normalization |
+| Append through hard links or directory aliases | Exclusive barrier | Actual inode/entry claims preserve backend conflict order |
+| Write content/path from upstream outputs | Exclusive barrier after input resolution | The original producer binds resources after exact input validation |
+| Missing parent directories, endpoint trees or unsupported resources | Ordinary handler | Original exclusive handler, including authorized parent creation |
+| Async file effects | Refused without replay authority | Same refusal; resource claims grant no replay permission |
+
+An absent file has no object identity to unify filesystem spelling aliases, so
+its physical parent carries the write claim. This also conflicts with reads or
+mutations of other entries under that parent. Existing targets keep their actual
+entry and object identities. A changed root, parent, owner or translated input
+cannot fall back to an ordinary write after a preparation was accepted.
+
+Four added feature scenarios cover actual public recipe authorization overlap
+for existing targets and new targets under independent parents, upstream content
+with original Task/parent receipts, plus real consumer ownership/input/parent
+refusal, hard-link append semantics, missing-entry conflicts and release. They
+are authored but not executed. The authorization rendezvous is a concurrency
+observation, not a latency threshold. Source parser checks do not prove these
+scenarios or a runtime speedup. For a matched Before/After, retain the same
+original plan, inputs, outputs, authorization and physical-leaf counts, then
+compare the actual useful effect/completion clocks including failed attempts.
 
 Supply the existing one-call grammar when the plan is ready:
 

@@ -68,7 +68,7 @@ let completed result =
 let failed result =
   match result.Keeper_tool_execution.disposition with
   | Tool_result.Failed _ -> ()
-  | Tool_result.Completed () | Tool_result.Deferred () -> fail "changed prepared authority performed an Edit"
+  | Tool_result.Completed () | Tool_result.Deferred () -> fail "changed prepared authority performed a file effect"
 ;;
 
 let execute ?(hooks = Agent_core.Hooks.empty) env tools calls =
@@ -330,6 +330,101 @@ let test_inline_recipe_writes_original_upstream_bytes () =
       "write_authorization_calls", `Int !authorized;
       "preserved_output_bytes", `Int (String.length (read target));
       "original_task_and_parent_retained", `Bool true]))
+;;
+
+let test_recipe_writes_overlap ~create ~dynamic () =
+  fixture @@ fun env sw config meta recovery root ->
+  public_bundle ~with_read:dynamic ~with_write:true env sw config meta recovery
+  @@ fun meta task_id _cell causal bundle ->
+  let left = Filename.concat root (if create then "writes/left/result" else "writes/left")
+  and right = Filename.concat root (if create then "writes/right/result" else "writes/right") in
+  List.iter (fun path -> Fs_compat.mkdir_p (Filename.dirname path);
+    if not create then write path "before") [left;right];
+  let source = Filename.concat root "source" in
+  write source "  원래 결과\n\n";
+  let bytes = read source in
+  let node id path =
+    if dynamic then
+      let literal value = `Assoc ["kind", `String "literal"; "value", value] in
+      `Assoc ["id", `String id; "tool", `String "Write";
+        "input", `Assoc ["kind", `String "object"; "fields", `List
+          [`Assoc ["name", `String "file_path"; "value", literal (`String path)];
+           `Assoc ["name", `String "content"; "value", `Assoc
+             ["kind", `String "output"; "node", `String "source"; "pointer", `String "/content"]]]]]
+    else `Assoc ["id", `String id; "tool", `String "Write";
+      "args", `Assoc ["file_path", `String path; "content", `String bytes]] in
+  let nodes = [node "left" left;node "right" right] in
+  let nodes = if dynamic then recipe_read "source" source :: nodes else nodes in
+  let both, resolve_both = Eio.Promise.create () in
+  let entered = ref 0 in
+  let rows = FS.For_testing.with_before_write_authorization (fun () ->
+      if create then List.iter (fun path ->
+        check bool "preparation and authorization create no target" false (Sys.file_exists path)) [left;right];
+      incr entered;
+      if !entered = 2 then Eio.Promise.resolve resolve_both ();
+      Eio.Promise.await both)
+    (fun () -> dispatch env bundle.tools [recipe_call ~id:"parallel-writes" nodes]) in
+  check int "one original recipe invocation" 1 (List.length rows);
+  check int "independent canonical Write authorizations overlap" 2 !entered;
+  List.iter (fun path -> check string "canonical Write preserves exact input bytes" bytes (read path)) [left;right];
+  let leaves = physical_leaves meta in
+  check int "one physical receipt per original leaf" (if dynamic then 3 else 2) (List.length leaves);
+  List.iter (fun row ->
+    check string "original Task survives prepared Write" task_id
+      Yojson.Safe.Util.(member "task_id" row |> to_string);
+    check string "original parent survives prepared Write" "parallel-writes"
+      Yojson.Safe.Util.(member "parent_tool_use_id" row |> to_string)) leaves;
+  check int "original result observers retain every leaf" (if dynamic then 3 else 2)
+    Yojson.Safe.Util.(member "completed_tool_calls" (Keeper_gate_causal_context.snapshot causal).snapshot
+      |> to_list |> List.length)
+;;
+
+let test_prepared_write_retains_owner_and_creation_conflicts () =
+  fixture @@ fun _env sw config meta recovery root ->
+  let first = Filename.concat root "first" and second = Filename.concat root "second" in
+  let input path content mode = `Assoc ["path",`String path;"content",`String content;"mode",`String mode] in
+  let first_input = input first "first bytes" "overwrite" in
+  let prepare input = match FS.prepare_write ~sw ~config ~meta ~args:input with
+    | Ok (Some prepared) -> prepared
+    | Ok None -> fail "Write with existing parent was not prepared"
+    | Error detail -> fail detail in
+  let consume meta prepared input = FS.handle_file_write_with_outcome
+      ~turn_sandbox_factory:None ~config ~meta ~publication_recovery:recovery
+      ~prepared_write:prepared ~args:input () in
+  let first_prepared = prepare first_input and second_prepared = prepare (input second "second bytes" "overwrite") in
+  let conflicts left right = List.exists (fun scope ->
+    List.exists (Agent_core.Tool_contract.Resource_scope.conflicts scope)
+      (FS.prepared_write_scopes right)) (FS.prepared_write_scopes left) in
+  check bool "missing entries share the real parent creation claim" true
+    (conflicts first_prepared second_prepared);
+  check bool "preparing creation performs no file effect" false (Sys.file_exists first);
+  consume {meta with name="other-owner"} first_prepared first_input |> failed;
+  consume meta first_prepared (input first "changed input" "overwrite") |> failed;
+  check bool "rejected owners and inputs create no target" false (Sys.file_exists first);
+  consume meta first_prepared first_input |> completed;
+  check string "original consumer creates original bytes" "first bytes" (read first);
+  let alias = Filename.concat root "hard-link" in
+  Unix.link first alias;
+  let append = prepare (input first "!" "append")
+  and alias_append = prepare (input alias "?" "append") in
+  check bool "append hard links retain backend object ordering" true (conflicts append alias_append);
+  consume meta append (input first "!" "append") |> completed;
+  check string "append uses the original pinned file semantics" "first bytes!" (read alias);
+  FS.release_prepared_write alias_append;
+  FS.release_prepared_write alias_append;
+  consume meta alias_append (input alias "?" "append") |> failed;
+  check string "released authority performs no later effect" "first bytes!" (read first);
+  let parent = Filename.concat root "pinned-parent" in
+  let target = Filename.concat parent "result" in
+  write target "original parent";
+  let original_input = input target "must not land" "overwrite" in
+  let prepared = prepare original_input in
+  Unix.rename parent (parent ^ "-held");
+  write target "replacement parent";
+  consume meta prepared original_input |> failed;
+  check string "changed physical parent cannot consume the old resource" "replacement parent" (read target);
+  check string "retired parent receives no effect" "original parent"
+    (read (Filename.concat (parent ^ "-held") "result"))
 ;;
 
 let test_recipe_edits_overlap_with_original_source ?(dynamic = false) ~nested () =
@@ -1156,7 +1251,16 @@ let test_prepared_read_skips_a_long_line_and_stops_at_eof () =
 ;;
 
 let () = run "prepared actual file resources"
-  ["actual filesystem and SDK", [
+  ["prepared Write and actual recipes", [
+    test_case "existing disjoint Writes overlap original authorization" `Quick
+      (test_recipe_writes_overlap ~create:false ~dynamic:false);
+    test_case "new targets under disjoint existing parents overlap" `Quick
+      (test_recipe_writes_overlap ~create:true ~dynamic:false);
+    test_case "upstream content binds original Write resources when ready" `Quick
+      (test_recipe_writes_overlap ~create:true ~dynamic:true);
+    test_case "Write ownership creation claims hard links and release remain original" `Quick
+      test_prepared_write_retains_owner_and_creation_conflicts];
+    "actual filesystem and SDK", [
     test_case "disjoint actual Edits overlap" `Quick test_disjoint_actual_edits_overlap;
     test_case "conflicting patches read current predecessor bytes" `Quick test_successive_patches_use_current_source;
     test_case "directory aliases retain planned order" `Quick test_directory_alias_keeps_patch_order;

@@ -1,9 +1,10 @@
-(** Producer-owned resource binding for an exact instantiated Read/Edit plan.
+(** Producer-owned resource binding for exact instantiated file plans.
     These entry claims authorize neither effects nor replay. *)
 type t
 type operation =
   | Read of Keeper_tool_filesystem_runtime.prepared_read
   | Edit of Keeper_tool_filesystem_runtime.prepared_edit
+  | Write of Keeper_tool_filesystem_runtime.prepared_write
 
 val eligible : Keeper_tool_plan.t -> bool
 (** At least one leaf is Edit; every leaf is a canonical ordinary Read or Edit.
@@ -62,8 +63,8 @@ module Ready : sig
   (** Original source-bound inline Read/Edit/Write plans, including pure
       compiled child argument validation. Inputs may depend on upstream
       results. No file is opened until its node has a resolved, validated
-      input. Write always binds its original exclusive ordinary handler;
-      supported Read/Edit siblings retain their own prepared capabilities.
+      input. Write can bind existing physical parents, including a missing
+      target; unprepared paths retain their original exclusive handler.
       Other effects and async child submission/result targets are ineligible. *)
 
   val plan : t -> Keeper_tool_plan.t

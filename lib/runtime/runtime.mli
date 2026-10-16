@@ -1132,7 +1132,7 @@ val move_exact_output_lane_slot :
     {!drop_exact_output_lane_slot}. The two lists do not mix: a slot never moves
     into the other one. Refused when the lane declares no such slot, and when
     a neighbour move would pass the end. Promoting an already first candidate
-    keeps the order unchanged. *)
+    is also refused, leaving the order unchanged. *)
 
 val replace_exact_output_lane_slot :
   ?runtime_config_path:string ->

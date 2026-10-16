@@ -15,6 +15,8 @@ open Runtime_config_validation
 open Runtime_config_text
 open Result.Syntax
 
+module Lane_edit = Runtime_lane_edit
+
 (* runtime.toml tables this module reads or edits, spelled once (#39539). *)
 let runtime_table = Runtime_toml_namespace.(key Runtime)
 let fusion_table = Runtime_toml_namespace.(key Fusion)
@@ -3055,46 +3057,8 @@ let set_runtime_default ?runtime_config_path ~runtime_id () =
   set_runtime_scalar ?runtime_config_path ~key:"default" ~runtime_id:(Some runtime_id) ()
 ;;
 
-(* The two declared lists of an exact lane. An official client answers
-   through its own CLI, so it can only be a CLI slot; every other id -- an
-   Agent Core runtime, a catalog id, or a binding whose provider is not
-   declared -- is a slot the registry admits or reports when it publishes the
-   lane. *)
-type exact_slot_list =
-  | Catalog_slots
-  | Cli_slots
-
-let exact_slot_list_key = function
-  | Catalog_slots -> "slots"
-  | Cli_slots -> "cli_slots"
-;;
-
-let exact_slot_list_of_api_format = function
-  | Runtime_schema.Codex_app_server_runtime
-  | Runtime_schema.Antigravity_cli_runtime
-  | Runtime_schema.Claude_code_runtime
-  | Runtime_schema.Muse_serve_runtime -> Cli_slots
-  | Runtime_schema.Messages_api
-  | Runtime_schema.Chat_completions_api
-  | Runtime_schema.Ollama_api
-  | Runtime_schema.Gemini_api
-  | Runtime_schema.Vertex_gemini_api -> Catalog_slots
-;;
-
-(* The list of an exact lane a runtime of this format may be written into,
-   if any. Every exact-output call hands the client an output schema, so a
-   format without the channel for one goes into neither list
-   ({!Runtime_schema.api_format_output_schema_channel}). The lane writers and
-   first-run setup read this; the load check of [cli_slots] reads the same
-   channel ([exact_lane_cli_slot_gaps]). *)
-let exact_slot_list_admitting api_format =
-  match Runtime_schema.api_format_output_schema_channel api_format with
-  | Runtime_schema.No_output_schema_channel -> None
-  | Runtime_schema.Holds_output_schema -> Some (exact_slot_list_of_api_format api_format)
-;;
-
 let exact_slot_list_key_of_api_format api_format =
-  Option.map exact_slot_list_key (exact_slot_list_admitting api_format)
+  Option.map Lane_edit.exact_slot_list_key (Lane_edit.exact_slot_list_admitting api_format)
 ;;
 
 let set_first_run_runtime ?runtime_config_path ?(fallback_runtime_ids = []) ?(bind_imp = false) ~runtime_id () =
@@ -3131,9 +3095,9 @@ let set_first_run_runtime ?runtime_config_path ?(fallback_runtime_ids = []) ?(bi
             (Ok ()) candidate_ids
         in
         let slots, cli_slots =
-          match exact_slot_list_admitting runtime.provider.api_format with
-          | Some Catalog_slots -> [ runtime_id ], []
-          | Some Cli_slots -> [], [ runtime_id ]
+          match Lane_edit.exact_slot_list_admitting runtime.provider.api_format with
+          | Some Lane_edit.Catalog_slots -> [ runtime_id ], []
+          | Some Lane_edit.Cli_slots -> [], [ runtime_id ]
           (* A client with no output-schema channel (Muse Code) becomes the
              default and its lane without being written into any slot. *)
           | None -> [], []
@@ -3264,10 +3228,11 @@ let set_runtime_media_failover ?runtime_config_path ~runtime_ids () =
   set_runtime_string_array ?runtime_config_path ~key:"media_failover" ~runtime_ids ()
 ;;
 
-(* One lane edit under the runtime.toml write lock: [decide] reads the parsed
-   file and either refuses or returns the edited text, which the commit
-   validates as a whole before anything is written. *)
-let edit_runtime_lanes ?runtime_config_path decide =
+(* Input preparation precedes path/lock effects. Declaration decisions use the
+   same fresh text and parsed config under the writer lock, and the commit
+   validates the whole edited file before writing it. *)
+let edit_runtime_lanes ?runtime_config_path prepared =
+  let* edit = prepared |> Result.map_error Lane_edit.error_to_string in
   let* path = runtime_config_path_result ?runtime_config_path () in
   let* locked =
     with_runtime_config_write_lock path (fun () ->
@@ -3276,7 +3241,7 @@ let edit_runtime_lanes ?runtime_config_path decide =
         Runtime_toml.parse_string content
         |> Result.map_error runtime_parse_errors_to_string
       in
-      let* next = decide ~content config in
+      let* next = Lane_edit.plan ~content config edit |> Result.map_error Lane_edit.error_to_string in
       commit_runtime_config_text ~path next)
   in
   let* receipt = locked.value in
@@ -3328,405 +3293,41 @@ let set_runtime_lane_candidates ?runtime_config_path ?expected_source_revision ~
   Ok (attach_lock_warnings locked.warnings receipt)
 ;;
 
-(* A lane shadows the runtime of the same id: [resolve_assignment] reads lanes
-   first, so every keeper assigned to that runtime -- and, when it is
-   [\[runtime\].default], every keeper without an assignment -- walks the lane's
-   candidates instead of the bare runtime. That is what the shape is for, and
-   it is the shape the install path writes: [set_first_run_runtime] sets
-   [\[runtime\].default] to a runtime id and declares a lane of that same id
-   holding it and its fallbacks. This entry point used to refuse it, so the
-   one configuration setup produces was the one an operator could not
-   reproduce, while [set_runtime_lane_candidates] -- the [e]/[x]/[J]/[K]
-   writer -- created it without a word. The three agree now. The Runtime
-   surface marks which lanes a table declares so the shadowing is read
-   rather than guessed. *)
 let create_runtime_lane ?runtime_config_path ~lane_id ~runtime_ids () =
-  let* lane_id = validated_lane_id lane_id in
-  let* runtime_ids = validated_lane_candidates runtime_ids in
-  edit_runtime_lanes ?runtime_config_path (fun ~content config ->
-    if lane_is_declared config lane_id
-    then Error (Printf.sprintf "lane %S already exists" lane_id)
-    else Ok (write_lane_candidates ~content ~lane_id ~runtime_ids))
+  edit_runtime_lanes ?runtime_config_path (Lane_edit.create ~lane_id ~runtime_ids)
 ;;
 
-(* A lane's name is its routing key: [\[runtime.assignments\]] entries,
-   [\[runtime\].default] and Fusion seats name it as a string, and
-   {!resolve_assignment} reads those before it reads a runtime of the same id.
-   So a rename is not a rename of one table -- it is that header and every reference to it, and any file
-   written with some of them changed routes the keepers whose reference was
-   missed to a lane that is no longer there. All of it goes in the one
-   validated write {!edit_runtime_lanes} already commits, which is why this is
-   a writer of its own rather than a remove followed by a create: between
-   those two the file declares no such lane, and the keepers pointing at it
-   would not load. *)
 let rename_runtime_lane ?runtime_config_path ~lane_id ~new_lane_id () =
-  let* lane_id = validated_lane_id lane_id in
-  let* new_lane_id = validated_lane_id new_lane_id in
-  if String.equal lane_id new_lane_id
-  then Error (Printf.sprintf "lane %S already has that name" lane_id)
-  else
-    edit_runtime_lanes ?runtime_config_path (fun ~content config ->
-      if not (lane_is_declared config lane_id)
-      then Error (Printf.sprintf "lane %S is not declared in [runtime.lanes]" lane_id)
-      else if lane_is_declared config new_lane_id
-      then Error (Printf.sprintf "lane %S already exists" new_lane_id)
-      else
-        match
-          Toml_line_editor.rename_table
-            content
-            ~path:(lane_table_path lane_id)
-            ~to_path:(lane_table_path new_lane_id)
-        with
-        | Toml_line_editor.Table_rename_conflict ->
-          (* [lane_is_declared] read the parsed config; this reads the text.
-             A file that declares the name some other way -- inline, or
-             through dotted keys -- reaches here. *)
-          Error
-            (Printf.sprintf
-               "the file already declares %S; renaming onto it would declare the lane \
-                twice"
-               new_lane_id)
-        | Toml_line_editor.Table_rename_absent ->
-          Error
-            (Printf.sprintf
-               "lane %S is not written as its own [runtime.lanes] table, so it cannot be \
-                renamed here"
-               lane_id)
-        | Toml_line_editor.Table_renamed renamed ->
-          let* toml = lane_edit_toml content in
-          let* seats = lane_fusion_seats toml ~lane_id in
-          let references = lane_references config seats ~lane_id in
-          rename_fusion_seats
-            ~lane_id
-            ~new_lane_id
-            (List.fold_left
-               (fun text reference ->
-                  match reference with
-                  | Keeper_assignment keeper_name ->
-                    update_runtime_assignment_text
-                      text
-                      ~keeper_name
-                      ~runtime_id:new_lane_id
-                  | Default_runtime ->
-                    (* [\[runtime\].default] holds a route, so it takes the new
-                       name like an assignment does. It could not before: the
-                       entry resolved against runtimes alone, which is why a
-                       lane the default reached had to be named after that
-                       runtime and could not be renamed at all. *)
-                    update_runtime_scalar_text
-                      text
-                      ~key:"default"
-                      ~runtime_id:(Some new_lane_id)
-                  | Fusion_seat _ -> text)
-               renamed
-               references)
-            toml
-            references)
+  edit_runtime_lanes ?runtime_config_path (Lane_edit.rename ~lane_id ~new_lane_id)
 ;;
 
 let remove_runtime_lane ?runtime_config_path ~lane_id () =
-  let* lane_id = validated_lane_id lane_id in
-  edit_runtime_lanes ?runtime_config_path (fun ~content config ->
-    if not (lane_is_declared config lane_id)
-    then Error (Printf.sprintf "lane %S is not declared in [runtime.lanes]" lane_id)
-    else
-      let* toml = lane_edit_toml content in
-      let* seats = lane_fusion_seats toml ~lane_id in
-      match lane_references config seats ~lane_id with
-      | _ :: _ as references ->
-        Error
-          (Printf.sprintf
-             "lane %S is in use by %s"
-             lane_id
-             (String.concat ", " (List.map route_reference_to_string references)))
-      | [] ->
-        (match Toml_line_editor.remove_table content ~path:(lane_table_path lane_id) with
-         | Toml_line_editor.Table_removed next -> Ok next
-         | Toml_line_editor.Table_absent ->
-           Error
-             (Printf.sprintf
-                "lane %S is not written as its own [runtime.lanes] table, so it cannot be \
-                 removed here"
-                lane_id)))
-;;
-
-(* Exact-output lanes name their walk order in [slots] and in [cli_slots]
-   after them; the routing API edits them the same way conversation lanes edit
-   [candidates]. Every exact lane id is a bare key. *)
-let exact_lane_table_path lane = runtime_table ^ ".exact_output_lanes." ^ Standalone_lane.to_id lane
-
-let exact_lane_decl (config : Runtime_schema.config) lane =
-  List.find_opt
-    (fun (decl : Runtime_schema.exact_output_lane_decl) ->
-       String.equal decl.id (Standalone_lane.to_id lane))
-    config.exact_output_lane_decls
-;;
-
-(* The line editor writes an exact lane as its own
-   [runtime.exact_output_lanes.<id>] table. A lane the file declares any other
-   way -- inline under [runtime.exact_output_lanes], or through dotted keys --
-   has no such header, and the editor would add one, which declares the lane a
-   second time and fails the whole file. A lane the file does not declare yet
-   gets its table. *)
-let exact_lane_editable ~content (config : Runtime_schema.config) lane =
-  let path = exact_lane_table_path lane in
-  let lines, _trailing_newline = Toml_line_editor.split_lines content in
-  match exact_lane_decl config lane with
-  | None -> Ok ()
-  | Some _ when List.exists (Toml_line_editor.is_table ~path) lines -> Ok ()
-  | Some _ ->
-    Error
-      (Printf.sprintf
-         "exact-output lane %s is not written as its own [%s] table, so it cannot be \
-          edited here"
-         (Standalone_lane.to_id lane)
-         path)
-;;
-
-(* [None] when the id's client has no output-schema channel, so no list of
-   an exact lane may name it ([exact_slot_list_admitting]). *)
-let exact_slot_list_of_new_slot (config : Runtime_schema.config) slot =
-  match
-    List.find_opt (fun (binding : binding) -> String.equal (id_of_binding binding) slot)
-      config.bindings
-  with
-  | None -> Some Catalog_slots
-  | Some binding ->
-    (match Runtime_schema.provider_of_id config binding.provider_id with
-     | None -> Some Catalog_slots
-     | Some provider -> exact_slot_list_admitting provider.api_format)
-;;
-
-let no_output_schema_channel_refusal ~slot ~lane_id =
-  Printf.sprintf
-    "%s has no output-schema channel, and every exact-output call hands its client \
-     a JSON Schema to answer to, so %s cannot list it"
-    slot
-    lane_id
+  edit_runtime_lanes ?runtime_config_path (Lane_edit.remove ~lane_id)
 ;;
 
 let set_exact_output_lane_slots ?runtime_config_path ~lane ~slots () =
-  let slots = List.map String.trim slots in
-  if slots = []
-  then
-    (* This writer names the whole catalog order, and an order of nothing is
-       not the edit an operator is making. Taking the last catalog slot off a
-       lane that keeps a CLI slot is [drop_exact_output_lane_slot]. *)
-    Error "an exact-output lane needs at least one slot"
-  else if List.exists (String.equal "") slots
-  then Error "slots must not contain empty entries"
-  else if List.exists contains_newline slots
-  then Error "slots must not contain newlines"
-  else
-    edit_runtime_lanes ?runtime_config_path (fun ~content config ->
-      let* () = exact_lane_editable ~content config lane in
-      let cli_slots =
-        match exact_lane_decl config lane with
-        | Some decl -> decl.cli_slot_ids
-        | None -> []
-      in
-      (* Checked here, not left to the registry: before the registry is
-         published the commit writes the file without it, and the next
-         publication then fails for every lane. *)
-      match List.find_opt (fun slot -> List.mem slot cli_slots) slots with
-      | Some slot ->
-        Error (Printf.sprintf "%s is already a CLI slot of %s" slot (Standalone_lane.to_id lane))
-      | None ->
-        let lane_id = Standalone_lane.to_id lane in
-        (match
-           List.find_map
-             (fun slot ->
-                match exact_slot_list_of_new_slot config slot with
-                | Some Catalog_slots -> None
-                | Some Cli_slots ->
-                  Some
-                    (Printf.sprintf
-                       "%s is an official client, so it can only be a CLI slot of %s"
-                       slot
-                       lane_id)
-                | None -> Some (no_output_schema_channel_refusal ~slot ~lane_id))
-             slots
-         with
-         | Some refusal -> Error refusal
-         | None ->
-           Ok
-             (Toml_line_editor.edit_table_multiline_array
-                content
-                ~path:(exact_lane_table_path lane)
-                ~key:"slots"
-                ~values:slots)))
+  edit_runtime_lanes ?runtime_config_path (Lane_edit.set_exact_slots ~lane ~slots)
 ;;
 
-(* The order an operator extends is the one the file declares. The standalone
-   lane projection shows the slots the registry admitted, which leaves out a
-   declared slot the catalog rejected; a whole order rebuilt from that view and
-   written with [set_exact_output_lane_slots] deleted every such slot. Reading
-   the declaration under the write lock keeps it, and a second writer's slot
-   written in between is read too. An id the lane already declares, as a slot
-   or as a CLI slot, is refused by name: the registry would refuse the
-   duplicate too, but only as a lane it cannot publish. *)
 let append_exact_output_lane_slot ?runtime_config_path ~lane ~slot () =
-  let slot = String.trim slot in
-  let lane_id = Standalone_lane.to_id lane in
-  if String.equal slot ""
-  then Error "slot must not be empty"
-  else if contains_newline slot
-  then Error "slot must not contain newlines"
-  else
-    edit_runtime_lanes ?runtime_config_path (fun ~content config ->
-      let* () = exact_lane_editable ~content config lane in
-      let slots, cli_slots =
-        match exact_lane_decl config lane with
-        | Some decl -> decl.slot_ids, decl.cli_slot_ids
-        | None -> [], []
-      in
-      if List.exists (String.equal slot) slots
-      then Error (Printf.sprintf "%s is already a slot of %s" slot lane_id)
-      else if List.exists (String.equal slot) cli_slots
-      then Error (Printf.sprintf "%s is already a CLI slot of %s" slot lane_id)
-      else
-        let path = exact_lane_table_path lane in
-        match exact_slot_list_of_new_slot config slot with
-        | None -> Error (no_output_schema_channel_refusal ~slot ~lane_id)
-        | Some Catalog_slots ->
-          Ok
-            (Toml_line_editor.edit_table_multiline_array
-               content ~path ~key:"slots" ~values:(slots @ [ slot ]))
-        | Some Cli_slots ->
-          Ok
-            (Toml_line_editor.edit_table_multiline_array
-               content ~path ~key:"cli_slots" ~values:(cli_slots @ [ slot ])))
+  edit_runtime_lanes ?runtime_config_path (Lane_edit.append_exact_slot ~lane ~slot)
 ;;
 
-(* Which way [move_exact_output_lane_slot] walks a slot through the declared
-   order. A lane's walk is that order, so one step is the whole edit; naming
-   the direction keeps the caller from sending an order rebuilt from what it
-   can see, which is the mistake {!append_exact_output_lane_slot} exists to
-   avoid. *)
-type exact_slot_move =
+type exact_slot_move = Lane_edit.exact_slot_move =
   | Move_slot_up
   | Move_slot_down
   | Move_slot_first
 
-(* Both edits below read the declaration under the write lock for the reason
-   the append does: the standalone-lane projection shows the slots the
-   registry admitted, so an order rebuilt from that view drops every declared
-   slot the catalog rejected. The caller names one slot, and the file's own
-   order decides the rest. *)
-let with_declared_exact_slots ~lane ~slot decide =
-  let slot = String.trim slot in
-  let lane_id = Standalone_lane.to_id lane in
-  if String.equal slot ""
-  then Error "slot must not be empty"
-  else if contains_newline slot
-  then Error "slot must not contain newlines"
-  else
-    Ok
-      (fun ~content config ->
-         let* () = exact_lane_editable ~content config lane in
-         let slots, cli_slots =
-           match exact_lane_decl config lane with
-           | Some decl -> decl.slot_ids, decl.cli_slot_ids
-           | None -> [], []
-         in
-         let located =
-           match List.find_index (String.equal slot) slots with
-           | Some position -> Some (Catalog_slots, slots, cli_slots, position)
-           | None ->
-             Option.map
-               (fun position -> Cli_slots, cli_slots, slots, position)
-               (List.find_index (String.equal slot) cli_slots)
-         in
-         match located with
-         | None ->
-           Error
-             (Printf.sprintf
-                "%s is not a slot of %s; the lane declares %s"
-                slot
-                lane_id
-                (match slots @ cli_slots with
-                 | [] -> "none"
-                 | declared -> String.concat ", " declared))
-         | Some (list, declared, other, position) ->
-           let* values = decide ~lane_id ~slot ~slots:declared ~other ~position in
-           Ok
-             (Toml_line_editor.edit_table_multiline_array
-                content
-                ~path:(exact_lane_table_path lane)
-                ~key:(exact_slot_list_key list)
-                ~values))
-;;
-
 let drop_exact_output_lane_slot ?runtime_config_path ~lane ~slot () =
-  let* edit =
-    with_declared_exact_slots ~lane ~slot (fun ~lane_id ~slot ~slots ~other ~position ->
-      match List.filteri (fun index _ -> index <> position) slots, other with
-      | [], [] ->
-        (* The floor the parser holds: a lane needs one slot across its two
-           lists, and a mandatory lane with none fails the boot fail-closed.
-           Emptying a lane is not the edit dropping its last slot means.
-           Remove the lane's table instead. *)
-        Error
-          (Printf.sprintf
-             "%s is the last slot of %s; an exact-output lane needs at least one"
-             slot
-             lane_id)
-      | remaining, _ -> Ok remaining)
-  in
-  edit_runtime_lanes ?runtime_config_path edit
+  edit_runtime_lanes ?runtime_config_path (Lane_edit.drop_exact_slot ~lane ~slot)
 ;;
 
 let move_exact_output_lane_slot ?runtime_config_path ~lane ~slot ~move () =
-  let* edit =
-    with_declared_exact_slots ~lane ~slot (fun ~lane_id ~slot ~slots ~other:_ ~position ->
-      let count = List.length slots in
-      let target = match move with Move_slot_up -> position - 1 | Move_slot_down -> position + 1 | Move_slot_first -> 0 in
-      if target < 0 || target >= count || (move = Move_slot_first && position = 0)
-      then
-        Error
-          (Printf.sprintf
-             "%s is already %s in %s"
-             slot
-             (match move with Move_slot_up | Move_slot_first -> "first" | Move_slot_down -> "last")
-             lane_id)
-      else if move = Move_slot_first then
-        Ok (slot :: List.filteri (fun index _ -> index <> position) slots)
-      else
-        let at_position = List.nth slots position
-        and at_target = List.nth slots target in
-        Ok
-          (List.mapi
-             (fun index declared ->
-                if index = position
-                then at_target
-                else if index = target
-                then at_position
-                else declared)
-             slots))
-  in
-  edit_runtime_lanes ?runtime_config_path edit
+  edit_runtime_lanes ?runtime_config_path (Lane_edit.move_exact_slot ~lane ~slot ~move)
 ;;
 
 let replace_exact_output_lane_slot ?runtime_config_path ~lane ~slot ~replacement () =
-  let slot = String.trim slot in
-  let replacement = String.trim replacement in
-  if String.equal replacement "" || contains_newline replacement
-  then Error "replacement must be a non-empty runtime id without newlines"
-  else
-    let* edit = with_declared_exact_slots ~lane ~slot
-      (fun ~lane_id:_ ~slot:_ ~slots ~other ~position ->
-        if List.mem replacement (slots @ other)
-        then Error (replacement ^ " is already declared in this lane")
-        else Ok (List.mapi (fun index current ->
-          if index = position then replacement else current) slots)) in
-    edit_runtime_lanes ?runtime_config_path (fun ~content config ->
-      let current = Option.bind (exact_lane_decl config lane) (fun decl ->
-        if List.mem slot decl.slot_ids then Some Catalog_slots
-        else if List.mem slot decl.cli_slot_ids then Some Cli_slots else None) in
-      match current, exact_slot_list_of_new_slot config replacement with
-      | Some current, Some next when current = next -> edit ~content config
-      | _, None -> Error (no_output_schema_channel_refusal ~slot:replacement ~lane_id:(Standalone_lane.to_id lane))
-      | _ -> Error "Replace a candidate within its HTTP or CLI group; add a candidate to change groups")
+  edit_runtime_lanes ?runtime_config_path (Lane_edit.replace_exact_slot ~lane ~slot ~replacement)
 ;;
 
 type window_requirement =

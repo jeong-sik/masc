@@ -248,7 +248,18 @@ let set t ~base_path ~actor ~keeper_name mode =
      | Sys_error detail ->
        Ok
          (Applied_audit_failed
-            (Printf.sprintf "tool approval mode audit failed: %s" detail)))
+            (Printf.sprintf "tool approval mode audit failed: %s" detail))
+     | Unix.Unix_error (code, operation, argument) ->
+       (* The audit append creates its dated directory with [Unix.mkdir]
+          ([Fs_compat.mkdir_p_unix]), which raises [Unix_error] rather than
+          [Sys_error] when the store path is blocked (ENOTDIR) or unwritable. *)
+       Ok
+         (Applied_audit_failed
+            (Printf.sprintf
+               "tool approval mode audit failed: %s(%s): %s"
+               operation
+               argument
+               (Unix.error_message code))))
 ;;
 
 let bind ~base_path t =

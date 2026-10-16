@@ -88,6 +88,12 @@ if action == "create":
             "PidsLimit": int(value("--pids-limit"))},
         "mode": mode, "argv": args}
     if mode == "unlimited": config["HostConfig"]["PidsLimit"] = 0
+    if mode == "late_create":
+        # The daemon accepts the request after the client gave up: the
+        # container becomes visible only after the next listing is answered.
+        (root / (cid + ".late")).write_text(json.dumps(config))
+        print("context deadline exceeded", file=sys.stderr)
+        raise SystemExit(1)
     path(cid).write_text(json.dumps(config))
     if mode == "lost_create_response":
         print("create receipt lost", flush=True)
@@ -115,6 +121,8 @@ elif action == "ls":
         elif (condition == "id=" + config["Id"] or
             condition == "name=^" + config["Name"] + "$"):
             output(config["Id"])
+    for late in root.glob("*.late"):
+        late.rename(late.with_suffix(".json"))
     if (root / "flip-on-ls").exists():
         # The ambient context changes while this command is answering.
         (root / "engine-id").write_text("fixture-engine-b")
@@ -643,6 +651,17 @@ let test_failed_create_receipt_cleans_only_owned_container () = with_fixture (fu
   ignore (unwrap (observe other "good"));
   unwrap (Worker.stop other))
 
+
+let test_a_create_that_lands_late_is_removed_when_the_switch_is_released () = with_fixture (fun env _sw dir docker ->
+  let containers () = Array.to_list (Sys.readdir dir)
+    |> List.filter (fun name -> Filename.check_suffix name ".json") in
+  Eio.Switch.run (fun sw ->
+    check bool "a create that timed out is reported" true
+      (Result.is_error (start env sw dir docker "late_create"));
+    (* The failed start already looked for the container by name and found
+       nothing; the daemon creates it only after that look. *)
+    check int "the container landed after the first absence check" 1 (List.length (containers ())));
+  check int "releasing the switch looks again and removes it" 0 (List.length (containers ())))
 
 let test_engine_identity_comes_from_the_info_command () = with_fixture (fun env _sw dir docker ->
   let read () = Worker.read_engine ~clock:(Eio.Stdenv.clock env) ~control_timeout_sec
@@ -2420,6 +2439,8 @@ let () = run "Lane Add-on worker" [ "lifecycle", [
   test_case "absence requires a successful Docker query" `Quick test_absence_requires_available_daemon;
   test_case "recovery bounds an unresponsive Docker control command" `Quick test_recovery_control_command_times_out;
   test_case "lost create response preserves unrelated containers" `Quick test_failed_create_receipt_cleans_only_owned_container;
+  test_case "a create that lands late is removed when the switch is released" `Quick
+    test_a_create_that_lands_late_is_removed_when_the_switch_is_released;
   test_case "created identity precedes blocked inspect" `Quick test_created_identity_precedes_blocked_inspection;
   test_case "engine identity comes from the info command" `Quick test_engine_identity_comes_from_the_info_command;
   test_case "Apple engine identity is the service root" `Quick test_apple_engine_identity_is_the_service_app_root;

@@ -337,11 +337,12 @@ let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package)
       | None ->
           (* create can take effect before its stdout is received. Verify the
              binding's deterministic name and label instead of removing an
-             unverified name collision. *)
-          let* () = recover_stop ~clock ~control_timeout_sec ~mgr ~instance_id ~container_id:None ~engine ~runtime ?state_owner
-              ~docker_command ~container_command () in
-          cleanup_finished := true;
-          Ok ()
+             unverified name collision. An absence seen here is not final: a
+             create whose outcome is unknown can still land after this check,
+             so the cleanup stays open for the check made when the switch is
+             released. *)
+          recover_stop ~clock ~control_timeout_sec ~mgr ~instance_id ~container_id:None ~engine ~runtime ?state_owner
+            ~docker_command ~container_command ()
       | Some id ->
           let* () = match runtime with
             | Docker ->

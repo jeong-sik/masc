@@ -316,7 +316,7 @@ let turn_events_page ~turn_ref ~since_seq ~redact_text page =
 ;;
 
 (* Everything the events route reads off the query, parsed once. The handler
-   passes the whole record to {!events_page_of_rows}, so a cursor cannot be
+   reads and renders the page from the whole record, so a cursor cannot be
    read and then dropped on the way to the page. *)
 type events_request =
   { er_operation_id : Operation_id.t
@@ -334,16 +334,10 @@ let parse_events_request request =
   Ok { er_operation_id; er_since_seq; er_start; er_limit }
 ;;
 
-(* The page the request asks for, as the body to send and how many events it
-   served, or the error the request earns. Pure over the rows: the caller runs
-   it in a pool job. *)
-let events_page_of_rows ~path ~redact_text query rows =
-  Keeper_chat_event_log.page_of_rows
-    ~path
-    ~since_seq:query.er_since_seq
-    ~start:query.er_start
-    ~limit:query.er_limit
-    rows
+(* The page the request asked for, as the body to send and how many events it
+   served, or the error the page earned. *)
+let events_page_of_page ~redact_text query page =
+  page
   |> Result.map (fun (page : Keeper_chat_event_log.page) ->
     ( List.length page.events
     , chat_events_page
@@ -352,6 +346,17 @@ let events_page_of_rows ~path ~redact_text query rows =
         ~redact_text
         page ))
   |> Result.map_error page_failure_error
+;;
+
+(* The same over rows already read. Pure: the caller runs it in a pool job. *)
+let events_page_of_rows ~path ~redact_text query rows =
+  Keeper_chat_event_log.page_of_rows
+    ~path
+    ~since_seq:query.er_since_seq
+    ~start:query.er_start
+    ~limit:query.er_limit
+    rows
+  |> events_page_of_page ~redact_text query
 ;;
 
 let handle_get state request reqd = function
@@ -371,28 +376,35 @@ let handle_get state request reqd = function
      | Ok (turn_ref, since_seq, start, limit) ->
        let base_path = base_path state in
        let path = Keeper_chat_event_log.turn_journal_path ~base_dir:base_path ~keeper_name ~turn_ref in
-       let rows = match Keeper_chat_event_log.read_journal_rows_path path with
-         | Ok rows -> Ok rows
+       let redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
+       let render page =
+         page
+         |> Result.map (turn_events_page ~turn_ref ~since_seq
+              ~redact_text:(Keeper_secret_redaction.redact_text redaction))
+         |> Result.map_error page_failure_error
+       in
+       (* Reading the page's rows, decoding them and building the JSON are one
+          job off the serving fiber; the read covers the page, not the
+          journal. *)
+       let page =
+         match
+           Domain_pool_ref.submit_cpu_or_inline (fun () ->
+             Keeper_chat_event_log.read_page_path ~path ~since_seq ~start ~limit
+             |> Result.map render)
+         with
+         | Ok rendered -> rendered
          | Error Keeper_chat_event_log.Journal_missing ->
              (match Keeper_autonomous_stream.current ~base_path ~keeper_name with
-              | Some current when Ids.Turn_ref.equal current turn_ref -> Ok ""
+              | Some current when Ids.Turn_ref.equal current turn_ref ->
+                render (Keeper_chat_event_log.page_of_rows ~path ~since_seq ~start ~limit "")
               | Some _ | None -> Error {status=`Not_found; code="journal_missing";
                   message="No autonomous event journal exists for this turn"})
          | Error (Journal_unreadable detail) -> Error (unavailable "journal_unreadable" detail)
          | Error (Journal_corrupt detail) -> Error (unavailable "journal_corrupt" detail)
        in
-       (match rows with
-        | Error error -> respond_error request reqd error
-        | Ok rows ->
-          let redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
-          let page = Domain_pool_ref.submit_cpu_or_inline (fun () ->
-            Keeper_chat_event_log.page_of_rows ~path ~since_seq ~start ~limit rows
-            |> Result.map (turn_events_page ~turn_ref ~since_seq
-                 ~redact_text:(Keeper_secret_redaction.redact_text redaction))
-            |> Result.map_error page_failure_error) in
-          (match page with
-           | Ok body -> Server_auth.respond_json_value_with_cors request reqd body
-           | Error error -> respond_error request reqd error)))
+       (match page with
+        | Ok body -> Server_auth.respond_json_value_with_cors request reqd body
+        | Error error -> respond_error request reqd error))
   | Chat_events { keeper_name } ->
     (match parse_events_request request with
      | Error error -> respond_error request reqd error
@@ -421,28 +433,31 @@ let handle_get state request reqd = function
          | Ok (served, body) -> respond_page ~served body
          | Error error -> respond_error request reqd error
        in
-       (match Keeper_chat_event_log.read_journal_rows_path path with
-        | Ok rows ->
-          (* Same typed content redaction layer the SSE projection and reconnect
-             replay apply: preserve envelope identities and protocol fields.
-             The journal is redacted at publish; this also covers
-             lines written before that held. The snapshot is taken here, where
-             its secret files are statted; its compiled patterns guard their
-             own automaton with a mutex (Re 1.14), and the chat store already
-             redacts with a caller's snapshot inside a pool job. Decoding the
-             page, redacting it and building its JSON are one CPU job off the
-             serving fiber. *)
-          let redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
-          (match
-             Domain_pool_ref.submit_cpu_or_inline (fun () ->
-               events_page_of_rows
-                 ~path
-                 ~redact_text:(Keeper_secret_redaction.redact_text redaction)
-                 query
-                 rows)
-           with
-           | Ok (served, body) -> respond_page ~served body
-           | Error error -> respond_error request reqd error)
+       (* Same typed content redaction layer the SSE projection and reconnect
+          replay apply: preserve envelope identities and protocol fields.
+          The journal is redacted at publish; this also covers
+          lines written before that held. The snapshot is taken here, where
+          its secret files are statted; its compiled patterns guard their
+          own automaton with a mutex (Re 1.14), and the chat store already
+          redacts with a caller's snapshot inside a pool job. Reading the
+          page's rows, decoding them, redacting them and building the JSON
+          are one job off the serving fiber; the read covers the page, not
+          the journal. *)
+       let redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
+       (match
+          Domain_pool_ref.submit_cpu_or_inline (fun () ->
+            Keeper_chat_event_log.read_page_path
+              ~path
+              ~since_seq:query.er_since_seq
+              ~start:query.er_start
+              ~limit:query.er_limit
+            |> Result.map
+                 (events_page_of_page
+                    ~redact_text:(Keeper_secret_redaction.redact_text redaction)
+                    query))
+        with
+        | Ok (Ok (served, body)) -> respond_page ~served body
+        | Ok (Error error) -> respond_error request reqd error
         | Error Keeper_chat_event_log.Journal_missing ->
           (match
              Registry.exact_operation ~base_path ~keeper_name query.er_operation_id

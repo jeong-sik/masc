@@ -488,6 +488,87 @@ let test_journal_torn_tail_reads_complete_rows () =
           Alcotest.fail ("corrupt read as unreadable: " ^ detail)
         | Ok _ -> Alcotest.fail "a bad complete row decoded"))
 
+(* [read_page_path] reads windows of the file and [page_of_rows] the whole
+   journal. Every cursor, seq and limit must get the same answer from both,
+   errors included: the windows change what is read, never what a page says.
+   The journals carry blank rows, rows long enough to cross the reader's
+   chunk, a bad complete row, and torn tails. *)
+let window_journals = 12
+let window_limits = [ 1; 2; 7; L.page_max_limit ]
+
+let test_read_page_path_matches_page_of_rows () =
+  let base_dir = temp_base_path "keeper-chat-event-log-window" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+       let state = Random.State.make [| 43_416 |] in
+       for case = 1 to window_journals do
+         let keeper_name = "window-keeper" in
+         let operation_id = Printf.sprintf "op-window-%d" case in
+         let journal = L.open_journal ~base_dir ~keeper_name ~operation_id () in
+         let path = L.journal_path ~base_dir ~keeper_name ~operation_id in
+         let append_raw bytes =
+           let oc =
+             open_out_gen [ Open_append; Open_wronly; Open_binary; Open_creat ] 0o600 path
+           in
+           output_string oc bytes;
+           close_out oc
+         in
+         let events = Random.State.int state 24 in
+         for seq = 0 to events - 1 do
+           (match Random.State.int state 8 with
+            | 0 -> append_raw "\n"
+            | 1 -> append_raw "  \t\n"
+            | _ -> ());
+           let text =
+             String.make (if Random.State.int state 6 = 0 then 70_000 else 40) 'x'
+           in
+           L.append journal ~seq ~ts:(1_762_300_000.0 +. float_of_int seq)
+             (E.Text_delta { text; response = Unobserved_scope None })
+         done;
+         if Random.State.int state 5 = 0 then append_raw "this complete line is not an envelope\n";
+         if Random.State.bool state then append_raw "{\"v\":1,\"seq\":999,\"ts\":1";
+         let whole = L.read_journal_rows_path path in
+         let row_ends =
+           match whole with
+           | Ok rows ->
+             List.filter_map
+               (fun index -> if Char.equal rows.[index] '\n' then Some (index + 1) else None)
+               (List.init (String.length rows) Fun.id)
+           | Error _ -> []
+         in
+         let starts =
+           L.first_row
+           :: List.filter_map
+                (fun at -> L.page_start_of_wire (Some at))
+                (List.concat_map (fun at -> [ at - 1; at; at + 1 ]) (0 :: row_ends)
+                 |> List.filter (fun at -> at >= 0)
+                 |> List.sort_uniq compare)
+         in
+         let seqs =
+           L.Whole_turn
+           :: List.filter_map
+                (fun seq -> L.replay_position_of_wire (Some seq))
+                [ 0; events / 2; events + 5 ]
+         in
+         List.iter (fun start ->
+           List.iter (fun since_seq ->
+             List.iter (fun limit ->
+               let expected =
+                 Result.map (L.page_of_rows ~path ~since_seq ~start ~limit) whole
+               in
+               let actual = L.read_page_path ~path ~since_seq ~start ~limit in
+               if expected <> actual
+               then
+                 Alcotest.failf
+                   "journal %d: start %d, since_seq %s, limit %d read differently"
+                   case (L.page_start_offset start) (L.replay_position_to_string since_seq)
+                   limit)
+               window_limits)
+             seqs)
+           starts
+       done)
+
 let test_journal_path_sanitizes_segments () =
   let path =
     L.journal_path ~base_dir:"/tmp/base" ~keeper_name:"keeper/x" ~operation_id:"op/../../escape"
@@ -1360,6 +1441,10 @@ let () =
             "torn tail reads the complete rows"
             `Quick
             test_journal_torn_tail_reads_complete_rows
+        ; Alcotest.test_case
+            "a page read from windows matches the whole journal"
+            `Quick
+            test_read_page_path_matches_page_of_rows
         ; Alcotest.test_case
             "path sanitizes both segments"
             `Quick

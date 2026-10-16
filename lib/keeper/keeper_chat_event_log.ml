@@ -1041,6 +1041,16 @@ let log_settlement_failure ~path cleanup_failure =
    failure shapes stay apart: a missing journal is the normal state of a
    queued operation, an unreadable one is an operator problem, a corrupt one
    is a codec problem. *)
+let log_torn_tail ~path ~rows_end ~end_offset =
+  if rows_end < end_offset
+  then
+    Log.Keeper.warn
+      "keeper_chat_event_log: journal has a torn tail path=%s rows_end=%d end_offset=%d: bytes after the last row are an append that never completed; serving the complete rows"
+      path
+      rows_end
+      end_offset
+;;
+
 let read_complete_rows ~allow_torn_tail path =
   let of_rows = function
     | Fs_compat.Private_jsonl_rows.Rows_missing -> Error Journal_missing
@@ -1048,13 +1058,7 @@ let read_complete_rows ~allow_torn_tail path =
       when rows_end < end_offset && not allow_torn_tail ->
       Error (Journal_corrupt "cannot resume a journal with an incomplete final row")
     | Fs_compat.Private_jsonl_rows.Rows_present { rows; rows_end; end_offset } ->
-      if rows_end < end_offset
-      then
-        Log.Keeper.warn
-          "keeper_chat_event_log: journal has a torn tail path=%s rows_end=%d end_offset=%d: bytes after the last row are an append that never completed; serving the complete rows"
-          path
-          rows_end
-          end_offset;
+      log_torn_tail ~path ~rows_end ~end_offset;
       Ok rows
   in
   match Fs_compat.read_private_jsonl_rows_locked_result path with
@@ -1496,8 +1500,9 @@ let corrupt_row ~path ~offset detail =
    increase down the journal, so the row before the offset is at or before the
    held seq and the row at the offset is past it. An offset ahead of its seq
    would silently skip the rows between them, which is why both ends are
-   checked. Offset zero is the first row, which places no pair. *)
-let cursor_pair_failure ~path ~since_seq ~start rows =
+   checked. Offset zero is the first row, which places no pair. [row_before]
+   is the nearest non-blank row before the offset, as its start and bytes. *)
+let cursor_pair_failure ~path ~since_seq ~start ~row_before =
   match start with
   | From_first_row -> None
   | From_offset offset when offset <= 0 -> None
@@ -1505,7 +1510,7 @@ let cursor_pair_failure ~path ~since_seq ~start rows =
     (match since_seq with
      | Whole_turn -> Some (Page_cursor_mismatch (Offset_without_held_seq offset))
      | After_seq held ->
-       (match row_ending_at rows ~row_end:offset with
+       (match row_before () with
         | None -> None
         | Some (row_start, line) ->
           (match journaled_event_of_string line with
@@ -1617,7 +1622,10 @@ let page_of_rows ~path ~since_seq ~start ~limit rows =
   else if offset > 0 && not (Char.equal rows.[offset - 1] '\n')
   then Error (Page_offset_inside_row offset)
   else (
-    match cursor_pair_failure ~path ~since_seq ~start rows with
+    match
+      cursor_pair_failure ~path ~since_seq ~start ~row_before:(fun () ->
+        row_ending_at rows ~row_end:offset)
+    with
     | Some failure -> Error failure
     | None ->
       let finish ~served ~has_more ~next_offset =
@@ -1668,4 +1676,140 @@ let page_of_rows ~path ~since_seq ~start ~limit rows =
          loop ~row_start ~first:false ~served:[] ~count:0 ~next_offset:row_start
        | (After_seq _ | Whole_turn), _ ->
          loop ~row_start:offset ~first:true ~served:[] ~count:0 ~next_offset:offset))
+;;
+
+(* A row that holds something: pages skip blank rows, and the row before an
+   offset is the nearest one that is not blank. *)
+let row_holds_content line = not (String.equal (String.trim line) "")
+
+(* Part of a journal's complete rows, read under its lock: [rows] covers
+   [[window_end - String.length rows, window_end)] and every row in it ends in
+   '\n'; [rows_end] is where the complete rows ended at that read. *)
+type row_window =
+  { previous_row : (int * string) option
+  ; from_starts_row : bool
+  ; rows : string
+  ; window_end : int
+  ; rows_end : int
+  }
+
+let read_row_window ~path ~from ~max_rows =
+  let of_window = function
+    | Fs_compat.Private_jsonl_window.Window_missing -> Error Journal_missing
+    | Fs_compat.Private_jsonl_window.Window_present
+        { previous_row; from_starts_row; rows; window_end; rows_end; end_offset } ->
+      log_torn_tail ~path ~rows_end ~end_offset;
+      Ok { previous_row; from_starts_row; rows; window_end; rows_end }
+  in
+  match
+    Fs_compat.read_private_jsonl_window_locked_result
+      path
+      ~from
+      ~max_rows
+      ~previous_row_wanted:row_holds_content
+  with
+  | Fs_compat.Private_file_succeeded window -> of_window window
+  | Fs_compat.Private_file_succeeded_with_cleanup_failure { value; cleanup_failure } ->
+    log_settlement_failure ~path cleanup_failure;
+    of_window value
+  | Fs_compat.Private_file_failed error ->
+    Error (Journal_unreadable (Fs_compat.Private_jsonl_rows.error_to_string error))
+  | Fs_compat.Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
+    log_settlement_failure ~path cleanup_failure;
+    Error (Journal_unreadable (Fs_compat.Private_jsonl_rows.error_to_string error))
+;;
+
+(* [page_of_rows] for a page that does not need the whole journal. The page
+   reads [limit + 1] rows from its offset, and the row before the offset for
+   the cursor check, and reads on only when blank rows or rows at or before
+   [since_seq] used part of that window. The checks, their order and the rows
+   decoded are those of [page_of_rows]; only the bytes read differ, so paging
+   through a journal reads it once instead of once a page. A window read
+   after the first sees the journal as it is then, which has only gained rows
+   at its end. *)
+let page_of_windows ~path ~since_seq ~start ~limit =
+  let offset = page_start_offset start in
+  let window_rows = Int.max 1 limit + 1 in
+  let read ~from = read_row_window ~path ~from ~max_rows:window_rows in
+  match read ~from:offset with
+  | Error _ as error -> error
+  | Ok window ->
+    let page_failed failure = Ok (Error failure) in
+    let finish ~served ~has_more ~next_offset =
+      Ok (Ok { events = List.rev served; has_more; next_offset })
+    in
+    if limit < 1
+    then page_failed (Page_limit_not_positive limit)
+    else if offset > window.rows_end
+    then page_failed (Page_offset_past_rows { offset; rows_end = window.rows_end })
+    else if offset > 0 && not window.from_starts_row
+    then page_failed (Page_offset_inside_row offset)
+    else (
+      match
+        cursor_pair_failure ~path ~since_seq ~start ~row_before:(fun () ->
+          window.previous_row)
+      with
+      | Some failure -> page_failed failure
+      | None ->
+        let rec loop window ~row_start ~first ~served ~count ~next_offset =
+          let base = window.window_end - String.length window.rows in
+          if row_start >= window.window_end
+          then
+            if window.window_end >= window.rows_end
+            then finish ~served ~has_more:false ~next_offset
+            else (
+              match read ~from:window.window_end with
+              | Error _ as error -> error
+              | Ok next when String.equal next.rows "" ->
+                finish ~served ~has_more:false ~next_offset
+              | Ok next -> loop next ~row_start ~first ~served ~count ~next_offset)
+          else (
+            let local = row_start - base in
+            let line_end, row_end =
+              match String.index_from_opt window.rows local '\n' with
+              | Some newline -> base + newline, base + newline + 1
+              | None -> window.window_end, window.window_end
+            in
+            let line = String.sub window.rows local (line_end - row_start) in
+            if not (row_holds_content line)
+            then loop window ~row_start:row_end ~first ~served ~count ~next_offset
+            else (
+              match journaled_event_of_string line with
+              | Error detail -> page_failed (corrupt_row ~path ~offset:row_start detail)
+              | Ok journaled ->
+                (match
+                   if first then first_row_failure ~since_seq ~start journaled else None
+                 with
+                 | Some failure -> page_failed failure
+                 | None ->
+                   if not (seq_is_after since_seq journaled.seq)
+                   then
+                     loop
+                       window
+                       ~row_start:row_end
+                       ~first:false
+                       ~served
+                       ~count
+                       ~next_offset:row_end
+                   else if count >= limit
+                   then finish ~served ~has_more:true ~next_offset
+                   else
+                     loop
+                       window
+                       ~row_start:row_end
+                       ~first:false
+                       ~served:(journaled :: served)
+                       ~count:(count + 1)
+                       ~next_offset:row_end)))
+        in
+        loop window ~row_start:offset ~first:true ~served:[] ~count:0 ~next_offset:offset)
+;;
+
+(* From the first row with a held seq, [page_of_rows] bisects the whole
+   journal to find where the page starts; every other page reads windows. *)
+let read_page_path ~path ~since_seq ~start ~limit =
+  match since_seq, page_start_offset start with
+  | After_seq _, 0 ->
+    Result.map (page_of_rows ~path ~since_seq ~start ~limit) (read_journal_rows_path path)
+  | (After_seq _ | Whole_turn), _ -> page_of_windows ~path ~since_seq ~start ~limit
 ;;

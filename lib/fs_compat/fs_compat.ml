@@ -4031,6 +4031,144 @@ let read_private_jsonl_rows_locked_with_io_for_testing ~io path =
   read_private_jsonl_rows_locked_with_io ~io path
 ;;
 
+module Private_jsonl_window = struct
+  type t =
+    | Window_missing
+    | Window_present of
+        { previous_row : (int * string) option
+        ; from_starts_row : bool
+        ; rows : string
+        ; window_end : int
+        ; rows_end : int
+        ; end_offset : int
+        }
+end
+
+let private_jsonl_window_chunk_bytes = 65536
+
+(* The rows framing of [read_private_jsonl_rows_locked_with_io], under the same
+   lock, for a reader that needs only some rows: where the complete rows end,
+   the row before [from], and at most [max_rows] rows from [from]. The ends are
+   found by scanning back a chunk at a time, so a read costs the rows it
+   returns and the ones it looks at, not the whole store. *)
+let read_private_jsonl_window_locked_with_io
+      ~io
+      path
+      ~from
+      ~max_rows
+      ~previous_row_wanted
+  =
+  if from < 0 then invalid_arg "read_private_jsonl_window_locked: negative offset";
+  if max_rows < 1 then invalid_arg "read_private_jsonl_window_locked: max_rows below one";
+  let open Private_jsonl_window in
+  read_private_jsonl_locked_with_io ~io ~missing:Window_missing path (fun fd ->
+    let chunk = Bytes.create private_jsonl_window_chunk_bytes in
+    let read_at ~offset buffer ~length =
+      (* See Unix.lseek: only the file-position side effect is required. *)
+      ignore (Unix.lseek fd offset Unix.SEEK_SET : int);
+      let rec fill filled =
+        if filled < length
+        then (
+          match Unix.read fd buffer filled (length - filled) with
+          | 0 -> raise End_of_file
+          | count -> fill (filled + count)
+          | exception Unix.Unix_error (Unix.EINTR, _, _) -> fill filled)
+      in
+      fill 0
+    in
+    (* The last '\n' in [[floor, until)]. *)
+    let rec newline_before ~until ~floor =
+      if until <= floor
+      then None
+      else (
+        let start = Int.max floor (until - Bytes.length chunk) in
+        let length = until - start in
+        read_at ~offset:start chunk ~length;
+        match Bytes.rindex_from_opt chunk (length - 1) '\n' with
+        | Some index -> Some (start + index)
+        | None -> newline_before ~until:start ~floor)
+    in
+    let end_offset = Unix.lseek fd 0 Unix.SEEK_END in
+    let rows_end =
+      match newline_before ~until:end_offset ~floor:0 with
+      | Some newline -> newline + 1
+      | None -> 0
+    in
+    let from_starts_row =
+      from = 0
+      || (from <= rows_end
+          && (read_at ~offset:(from - 1) chunk ~length:1;
+              Char.equal (Bytes.get chunk 0) '\n'))
+    in
+    if from > rows_end || not from_starts_row
+    then
+      Window_present
+        { previous_row = None
+        ; from_starts_row
+        ; rows = ""
+        ; window_end = from
+        ; rows_end
+        ; end_offset
+        }
+    else (
+      (* The nearest row before [row_end] the caller wants, as its start and
+         its bytes without the '\n'. *)
+      let rec previous ~row_end =
+        if row_end <= 0
+        then None
+        else (
+          let row_start =
+            match newline_before ~until:(row_end - 1) ~floor:0 with
+            | Some newline -> newline + 1
+            | None -> 0
+          in
+          let line = Bytes.create (row_end - 1 - row_start) in
+          read_at ~offset:row_start line ~length:(Bytes.length line);
+          let line = Bytes.unsafe_to_string line in
+          if previous_row_wanted line
+          then Some (row_start, line)
+          else previous ~row_end:row_start)
+      in
+      let previous_row = previous ~row_end:from in
+      let buffer = Buffer.create (Int.min (rows_end - from + 1) (Bytes.length chunk)) in
+      let rec forward ~offset ~rows =
+        if rows >= max_rows || offset >= rows_end
+        then offset
+        else (
+          let length = Int.min (Bytes.length chunk) (rows_end - offset) in
+          read_at ~offset chunk ~length;
+          let rec take index rows =
+            if rows >= max_rows || index >= length
+            then index, rows
+            else (
+              match Bytes.index_from_opt chunk index '\n' with
+              | Some newline when newline < length -> take (newline + 1) (rows + 1)
+              | Some _ | None -> length, rows)
+          in
+          let used, rows = take 0 rows in
+          Buffer.add_subbytes buffer chunk 0 used;
+          forward ~offset:(offset + used) ~rows)
+      in
+      let window_end = forward ~offset:from ~rows:0 in
+      Window_present
+        { previous_row
+        ; from_starts_row
+        ; rows = Buffer.contents buffer
+        ; window_end
+        ; rows_end
+        ; end_offset
+        }))
+;;
+
+let read_private_jsonl_window_locked_result path ~from ~max_rows ~previous_row_wanted =
+  read_private_jsonl_window_locked_with_io
+    ~io:private_jsonl_transaction_unix_io
+    path
+    ~from
+    ~max_rows
+    ~previous_row_wanted
+;;
+
 module Private_jsonl_tail = struct
   type t =
     | Tail_missing

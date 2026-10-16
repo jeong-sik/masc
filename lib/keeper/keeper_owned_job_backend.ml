@@ -734,7 +734,8 @@ let logs ~container_id prepared =
       (command prepared @ ["container"; "logs"; container_id]))) in
   let* status, stdout, stderr = result in
   let* () = match status with Unix.WEXITED 0 -> Ok ()
-    | status -> Error (Command_failed {operation; status; stdout; stderr}) in
+    | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status ->
+        Error (Command_failed {operation; status; stdout; stderr}) in
   let* stdout_file = complete_log_file ~stream:Process_output_capture.Stdout files.stdout in
   let* stderr_file = complete_log_file ~stream:Process_output_capture.Stderr files.stderr in
   let* () = log_container_authority ~container_id prepared in

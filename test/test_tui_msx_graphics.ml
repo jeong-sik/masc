@@ -268,7 +268,7 @@ let test_unicode_title_fits_cells () =
 let test_failed_menu_output_cannot_authorize_a_choice () =
   List.iter (fun mode ->
     let state = Types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
-    state.msx_carts <- ["game.rom"; "disk.dsk"];
+    state.msx_carts <- Masc_tui_types.Carts ["game.rom"; "disk.dsk"];
     Msx.open_menu ~write:ignore ~mode state;
     (try Msx.render_menu ~write:(fun _ -> raise Exit) state with Exit -> ());
     check bool "an unsuccessful menu frame cannot load or swap a hidden choice" true

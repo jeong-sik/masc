@@ -5,11 +5,19 @@ type refusal = Off | Activity_unobserved | Workspace_changed
 type activity = Enabled | Refused of refusal
 type response = Advanced of Masc_tui_types.msx_frame option * Masc_tui_machine_live.mark option
   | Not_started of refusal
+  | Worker_unavailable of string option
 type poll_policy = Advancing | Observing of refusal | Outcome_unknown
+(* A worker the server could not reach was never sent the tick, so asking again
+   at the next poll is safe and the retained screen stays. Only a lost answer
+   after dispatch leaves the outcome unknown. *)
 let policy_after_tick = function
   | Ok (Advanced _) -> Advancing
   | Ok (Not_started refusal) -> Observing refusal
+  | Ok (Worker_unavailable _) -> Advancing
   | Error _ -> Outcome_unknown
+let worker_unavailable_notice = function
+  | Some detail -> "MSX worker unavailable; trying again at the next refresh: " ^ detail
+  | None -> "MSX worker unavailable; trying again at the next refresh."
 let policy_after_activity policy result = match policy,result with
   | Observing Workspace_changed, _ -> policy
   | Observing (Off | Activity_unobserved), Ok Enabled -> Advancing
@@ -149,9 +157,24 @@ let decode_refusal previous json =
   | Ok { code = Some (Msx_wire.Worker_unavailable | Msx_wire.Outcome_unknown); _ }
   | Ok { code = None; _ } | Error _ -> Error "MSX tick: unknown refusal"
 
+(* A 503 names which of two different things happened. [worker_unavailable]:
+   the server had no worker to send the tick to, so nothing ran.
+   [outcome_unknown]: the tick was sent and its answer was lost, so it may have
+   run. Any other 503 body, such as a proxy's, proves neither. *)
+let decode_unavailable previous json =
+  match Msx_wire.decode json with
+  | Ok { code = Some Msx_wire.Worker_unavailable; message } ->
+      Ok (Worker_unavailable message, previous)
+  | Ok { code = Some Msx_wire.Outcome_unknown; message } ->
+      Error ("MSX tick: outcome unknown" ^ (match message with Some m -> ": " ^ m | None -> ""))
+  | Ok { code = Some (Msx_wire.Activity_disabled | Msx_wire.Activity_unobserved
+                     | Msx_wire.Workspace_precondition_failed); _ }
+  | Ok { code = None; _ } | Error _ -> Error "MSX tick: unexpected 503 answer"
+
 let decode previous (status,json) =
   match status with
   | 409 -> decode_refusal previous json
+  | 503 -> decode_unavailable previous json
   | 200 -> Result.map (fun (frame,pixels,mark) -> Advanced (frame,mark),pixels) (decode_frame previous json)
   | _ -> Error "MSX tick: unexpected response status"
 

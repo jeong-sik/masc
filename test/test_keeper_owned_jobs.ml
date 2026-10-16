@@ -1166,26 +1166,6 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
   check bool "current denial refuses before async acceptance" true (Tool_result.is_failed denied);
   check string "current denial keeps original owner" (Journal.continuation_request_id discovered)
     (Journal.continuation_request_id (continuation ()));
-  let changed_descriptors = List.map (fun (descriptor : Descriptor.t) ->
-    if not (List.mem "keeper_job_result" (Descriptor.keeper_model_names descriptor)) then descriptor
-    else
-      let schema = match descriptor.composable_output with
-        | Descriptor.Json_output {schema=`Assoc fields} ->
-          let properties = match List.assoc_opt "properties" fields with
-            | Some (`Assoc properties) -> properties
-            | Some _ | None -> fail "actual result schema has no object properties" in
-          `Assoc (("properties",`Assoc (("new_optional_field",`Assoc ["type",`String "string"]) :: properties))
-            :: List.remove_assoc "properties" fields)
-        | Descriptor.Opaque_output | Json_output _ -> fail "actual owned result schema is not an object" in
-      {descriptor with composable_output=Descriptor.Json_output {schema}})
-      (Descriptor.all_descriptors ()) in
-  let changed_contract = resume_candidate (current_surface ~tool_descriptors:changed_descriptors ()) discovered in
-  check bool "changed original output contract refuses before async acceptance" true (Tool_result.is_failed changed_contract);
-  check_json "schema drift retains typed contract rejection" (`String "capability_changed")
-    (Tool_result.data changed_contract |> member "kind");
-  check string "schema drift never recaptures original owner" (Journal.continuation_request_id discovered)
-    (Journal.continuation_request_id (continuation ()));
-  check int "contract refusal has no backend operation" before_completed_resume (List.length (calls fixture));
   let lost_worker_calls = ref 0 in
   let lose_after_binding candidate =
     (* A closed target switch makes the real broker fail after durable Queued
@@ -1314,6 +1294,121 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
   check int "retirement leaves no pending marker work" 0 stable.inspected;
   check int "composition never recreates original program" 1 (effect_count fixture "create");
   check int "composition never restarts original program" 1 (effect_count fixture "start")
+
+let test_historical_output_contract_refuses_current_resume () = with_fixture @@ fun env _initialize fixture ->
+  let module Draft = Masc.Keeper_composition_draft in
+  let module Plan = Masc.Keeper_tool_plan in
+  let module Executor = Masc.Keeper_tool_plan_executor in
+  let module Async = Masc.Keeper_msg_async in
+  set_source fixture ~task_id:"task-A" ~turn:41;
+  Call_log.init ~base_path:fixture.base_path ();
+  let id = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) |> job_id in
+  let recipe = `Assoc ["execution",`String "async";"nodes",`List
+    [`Assoc ["id",`String "await";"tool",`String "keeper_job_result";
+      "input",`Assoc ["kind",`String "literal";"value",argument id]]]] in
+  let prepared = with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"prepare-history"
+      ~turn:41 "keeper_composition_prepare" recipe) in
+  let current_reference = prepared |> member "draft" |> composition_reference "current canonical draft" in
+  let surface = frozen_surface ~base_path:fixture.base_path ~sandbox_profile:fixture.meta.sandbox_profile in
+  let current_draft = Draft.load ~base_path:fixture.base_path ~capability_surface:surface
+      ~keeper_name:keeper ~sha256:current_reference.sha256 |> require "canonical current draft plan" in
+  let store = Tool_blob_store.create ~base_path:fixture.base_path in
+  let bytes = Tool_blob_store.fetch store ~sha256:current_reference.sha256
+      |> require "canonical prepared manifest" |> function Some bytes -> bytes | None -> fail "draft missing" in
+  let content,document = match Tool_output.artifact_manifest_of_json (Yojson.Safe.from_string bytes) with
+    | Tool_output.Decoded_artifact_manifest {content;structured_content;_} -> content,structured_content
+    | Tool_output.Not_artifact_manifest | Tool_output.Invalid_artifact_manifest _ -> fail "invalid draft manifest" in
+  let replace name value = function
+    | `Assoc fields -> `Assoc ((name,value) :: List.remove_assoc name fields)
+    | _ -> fail "historical fixture expected an object" in
+  (* Authored historical evidence, not an old-binary execution claim. The
+     current descriptor remains registry-owned. Only the previous frozen
+     output definition differs, under a fresh durable artifact address. *)
+  let rows = document |> member "contracts" |> member "tools" |> to_list in
+  let rows = List.map (fun row ->
+    let contract = row |> member "contract_json" |> to_string |> Yojson.Safe.from_string in
+    let schema = contract |> member "output_schema" in
+    let properties = schema |> member "properties" |> to_assoc in
+    let schema = replace "properties"
+        (`Assoc (("previous_optional_field",`Assoc ["type",`String "string"]) :: properties)) schema in
+    let contract = replace "output_schema" schema contract in
+    replace "contract_json" (`String (Yojson.Safe.to_string (Yojson.Safe.sort contract))) row) rows in
+  let document = replace "contracts" (replace "tools" (`List rows) (document |> member "contracts")) document in
+  let persist json = Tool_blob_store.put_durable store
+      ~bytes:(Yojson.Safe.to_string (Tool_output.artifact_manifest_to_json ~content ~structured_content:json))
+      ~mime:Tool_output.artifact_manifest_mime |> fun reference -> Tool_output.with_preview reference "" in
+  let historical_reference = persist document in
+  check bool "historical contract owns a different immutable artifact" true
+    (historical_reference.sha256 <> current_reference.sha256);
+  let composition_run_id = Plan.Composition_run_id.fresh () in
+  let invocation = Agent_core.Tool_contract.Invocation.create ~tool_use_id:"original-historical-run" ~turn:41
+      ~schedule:{planned_index=0;batch_index=0;batch_size=1;execution_mode=Concurrent}
+      ~completion:Agent_core.Tool_contract.Continue_after_success in
+  let run_reference = persist (`Assoc
+    ["draft",Tool_output.normalized_artifact_ref_to_json historical_reference;
+     "nested_calls",document |> member "nested_calls";
+     "composition_run_id",`String (Plan.Composition_run_id.to_string composition_run_id);
+     "tool_use_id",`String (Agent_core.Tool_contract.Invocation.tool_use_id invocation);
+     "source_turn",`Int (Agent_core.Tool_contract.Invocation.turn invocation)]) in
+  let source : Journal.source = {keeper_name=keeper;composition_run_id;
+    draft_reference=historical_reference;run_reference;parent_tool_use_id="original-historical-run";
+    source_turn=41;source_task_id=Some "task-A"} in
+  let journal = Journal.prepare ~base_path:fixture.base_path source |> require "historical source journal" in
+  let admitted = ref None in
+  let publication_recovery : Masc.Keeper_publication_recovery_availability.turn_context =
+    {provider=Masc.Keeper_publication_recovery_availability.non_runtime_provider;keeper_name=keeper} in
+  let request_context =
+    ["composition_run_id",`String (Plan.Composition_run_id.to_string source.composition_run_id);
+     "draft_reference",Tool_output.normalized_artifact_ref_to_json source.draft_reference;
+     "run_artifact",Tool_output.normalized_artifact_ref_to_json source.run_reference;
+     "parent_tool_use_id",`String source.parent_tool_use_id;
+     "source_turn",`Int source.source_turn;
+     "source_task_id",`String "task-A"] in
+  let accepted = Async.submit_worker_with_request_id ~request_context
+      ~background_sw:(Async.server_background_switch () |> require "historical worker switch")
+      ~base_path:fixture.base_path ~caller:keeper ~keeper_name:keeper
+      ~on_accepted:(fun request_id -> match Journal.bind_request journal ~request_id with
+        | Ok worker -> admitted := Some worker; Ok ()
+        | Error error -> Error (Journal.error_to_string error))
+      ~f:(fun ~request_id:_ request_sw ->
+        let worker = match !admitted with Some worker -> worker | None -> fail "historical worker unbound" in
+        let actual = Eio_context.with_turn_switch request_sw (fun () ->
+          Executor.execute_keeper ~capability_surface:surface ~plan:(Draft.plan current_draft)
+            ~run_id:(Plan.Run_id.fresh ()) ~composition_run_id ~parent_invocation:invocation
+            ~config:(Workspace.default_config fixture.base_path) ~meta:fixture.meta ~publication_recovery
+            ~ctx_snapshot:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"historical contract fixture")
+            ~keeper_turn_id:(fun () -> Some 41)
+            ~source_context:(Masc.Keeper_tool_call_log_context.get_turn_context_record ~cell:fixture.cell ())
+            ~clock:(Eio.Stdenv.clock env) ~journal:worker ()) in
+        let node = match actual with
+          | Error {cause=Executor.Tool_did_not_complete node;_} -> node
+          | Ok _ | Error _ -> fail "actual original producer did not wait" in
+        let job_id = match node.deferred_kind with
+          | Some (Masc.Keeper_tool_execution.Owned_job_result_wait job_id) -> job_id
+          | Some _ | None -> fail "actual original producer did not bind its job wait" in
+        check string "historical wait uses the original actual job" id (Store.Job_id.to_string job_id);
+        Async.worker_waiting_for_owned_jobs ~job_ids:[job_id] node.result |> require "historical worker wait") ()
+      |> require "historical original worker acceptance" in
+  ignore (await_composition env fixture (`Assoc ["request_id",`String accepted.request_id]));
+  let capture () = match Journal.waiting_continuation journal with
+    | Ok (Some candidate) -> candidate
+    | Ok None | Error _ -> fail "historical original wait unavailable" in
+  let continuation = capture () in
+  let before = List.length (calls fixture) in
+  let refused = Masc.Keeper_tool_composition_surface.resume_continuation ~capability_surface:surface
+      ~continuation ~config:(Workspace.default_config fixture.base_path) ~meta:fixture.meta ~publication_recovery
+      ~ctx_snapshot:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"current canonical intake")
+      ~turn_context:(Masc.Keeper_tool_call_log_context.get_turn_context_record ~cell:fixture.cell ())
+      ~invocation ~clock:(Eio.Stdenv.clock env) () in
+  check bool "changed original output contract refuses before async acceptance" true (Tool_result.is_failed refused);
+  check_json "schema drift retains typed contract rejection" (`String "capability_changed")
+    (Tool_result.data refused |> member "kind");
+  check string "schema drift never recaptures original owner" accepted.request_id
+    (Journal.continuation_request_id (capture ()));
+  check string "schema drift preserves the historical draft identity" historical_reference.sha256
+    (Journal.continuation_source (capture ())).draft_reference.sha256;
+  check int "contract refusal has no backend operation" before (List.length (calls fixture));
+  check int "contract refusal never relaunches original program" 1 (effect_count fixture "start")
 
 let test_cancelled_continuation_cannot_restart () =
   List.iter (fun mode -> with_fixture @@ fun env _initialize fixture ->
@@ -1860,6 +1955,7 @@ let () =
       ; test_case "corrupt invocation authority cannot launch" `Quick test_corrupt_invocation_binding_cannot_launch
       ; test_case "malformed whole source cannot publish a binding" `Quick test_malformed_source_cannot_publish_binding
       ; test_case "public Composition waits and resumes the original job result" `Quick test_public_composition_wait_and_resume
+      ; test_case "historical output contract refuses current canonical resume" `Quick test_historical_output_contract_refuses_current_resume
       ; test_case "cancelled continuation preserves intent at fork, startup and signal failure" `Quick test_cancelled_continuation_cannot_restart
       ; test_case "job result rejects unavailable owner authority" `Quick test_job_result_rejects_unavailable_authority
       ; test_case "completion enqueue failure recovers original result after restart" `Quick test_completion_delivery_failure_and_restart

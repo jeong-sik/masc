@@ -83,4 +83,7 @@ type listed = {
 
 val list : dir:string -> (listed list, string) result
 (** Every [*.ckpt] under [dir] whose name is a slot, by slot name. A missing
-    [dir] is an empty list. *)
+    [dir] is an empty list. Each file is read from its front only, as far as
+    the header: the machine bytes behind it are not read, so listing a
+    directory of large checkpoints costs a few dozen bytes a file, not their
+    size. *)

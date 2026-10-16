@@ -186,6 +186,11 @@ and does not establish that a Keeper acted on an answer.
 
 ## Collect comparable before/after evidence
 
+The [native Ask comparison](../evidence/2026-10-17-native-asks/README.md)
+contains exact binary/source identities, retained failures, source clocks and
+manually inspected 120×36/80×24 frames. It separates early question usability
+from full refresh settlement under explicit delayed-reader conditions.
+
 Build or obtain binaries identified by their exact source SHAs. Use the same
 isolated workspace, fixture state, endpoint behavior, terminal viewport and
 refresh action for both. Record cold start separately from a warm refresh. Do not

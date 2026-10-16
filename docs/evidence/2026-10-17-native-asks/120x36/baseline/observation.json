@@ -1,0 +1,56 @@
+{
+  "protocol_status": "captured",
+  "fixture_sha256": "2878ed0f0609ff6e3a38ac71a3b4ce1acc809e50861ba0df07c14b5340dd8ca5",
+  "captures": {
+    "cold": {
+      "since_arm_started_ms": 5541.665624943562,
+      "native_ansi_bytes": 19104,
+      "since_warm_action_ms": null
+    },
+    "warm-0.1": {
+      "since_arm_started_ms": 6144.853291916661,
+      "native_ansi_bytes": 19668,
+      "since_warm_action_ms": 126.18908297736198
+    },
+    "warm-0.5": {
+      "since_arm_started_ms": 6528.379749972373,
+      "native_ansi_bytes": 19668,
+      "since_warm_action_ms": 509.7149999346584
+    },
+    "warm-1": {
+      "since_arm_started_ms": 7053.067624918185,
+      "native_ansi_bytes": 19668,
+      "since_warm_action_ms": 1034.402082907036
+    },
+    "warm-2.5": {
+      "since_arm_started_ms": 8540.57345900219,
+      "native_ansi_bytes": 21787,
+      "since_warm_action_ms": 2521.906166919507
+    },
+    "draft-3.5": {
+      "since_arm_started_ms": 9535.748291993514,
+      "native_ansi_bytes": 27305,
+      "since_warm_action_ms": 3517.082916921936
+    },
+    "warm-9.5": {
+      "since_arm_started_ms": 15539.372333907522,
+      "native_ansi_bytes": 27305,
+      "since_warm_action_ms": 9520.70716698654
+    }
+  },
+  "questions_reader_elapsed_ms": 2007.584166,
+  "warm_refresh_started_ns": "5992753541",
+  "full_refresh_elapsed_ms": 6033.811834,
+  "accepted_question_state_ms": null,
+  "original_open_questions": 1,
+  "http_request_outcomes": {
+    "returned": 78,
+    "failed": 1,
+    "pending": 0
+  },
+  "http_unfinished_at_capture_stop": 0,
+  "manual_observation": {
+    "warm-1": "original question not yet visible",
+    "warm-2.5": "original question visible"
+  }
+}

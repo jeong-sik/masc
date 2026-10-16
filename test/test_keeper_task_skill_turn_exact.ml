@@ -657,14 +657,34 @@ let test_task_binding_reuses_only_exact_frozen_inputs () =
   let bound = bind ~snapshot:first descriptors selection in
   check int "the shared exact Skill remains one executable composition" 1
     (List.length (Selection.partition bound).compositions);
+  let prepared = Selection.prepare_surface ~snapshot:first ~descriptors bound in
+  let interleaved = snapshot skill_config
+      [["other",document ~name:"other" ~description:"another workspace preparation" "OTHER"]] in
+  ignore (Masc.Keeper_skill_catalog.of_snapshot ~descriptors interleaved);
   let reused = bind ~snapshot:first (List.map Fun.id descriptors) bound in
   check bool "the prompt and execution keep one immutable binding without reprojecting" true (bound == reused);
+  let after_interleaving = Selection.prepare_surface ~snapshot:first ~descriptors reused in
+  check bool "another preparation cannot evict the original turn's catalog and inventory" true
+    (prepared == after_interleaving);
+  check bool "the retained inventory still names the exact original Skill" true
+    (List.exists (function
+       | Masc.Keeper_skill_inventory.Valid valid -> Reference.equal reference valid.reference
+       | Invalid _ -> false) (Masc.Keeper_skill_inventory.items after_interleaving.inventory));
   check (list string) "reuse keeps all exact Task provenance" ["task-a";"task-b"] (one_selected reused).task_ids;
   let surfaces = Selection.exact_task_surfaces ~snapshot:first ~tool_deny:[]
       ~sandbox_profile:Masc.Keeper_types_profile.Docker ~skill_names:None ~selection:reused
       ~current_task:Inputs.No_current_task ~held_task_skills in
   check (list string) "both original Task prompt surfaces survive reuse" ["task-a";"task-b"]
     (List.map fst surfaces);
+  let independently_prepared = match Selection.resolve_for_task ~snapshot:first ~descriptors
+      ~task_id:"task-c" [reference] with
+    | Ok selection -> selection | Error error -> fail (Selection.error_to_string error) in
+  let mixed_preparations = Selection.merge [bound;independently_prepared] in
+  check bool "independently prepared plans do not borrow the first plan's preparation" true
+    (Option.is_none mixed_preparations.preparation);
+  let rebound_preparations = bind ~snapshot:first descriptors mixed_preparations in
+  check (list string) "reprojection keeps every original Task while unifying the preparation"
+    ["task-a";"task-b";"task-c"] (one_selected rebound_preparations).task_ids;
   let without_lane = List.filter (fun (descriptor : Masc.Keeper_tool_descriptor.t) ->
     not (List.mem "keeper_lane_status" (Masc.Keeper_tool_descriptor.keeper_model_names descriptor))) descriptors in
   check bool "the fixture really changes Tool authority" true (List.length without_lane < List.length descriptors);
@@ -675,7 +695,7 @@ let test_task_binding_reuses_only_exact_frozen_inputs () =
     (Option.is_some (one_selected changed_tools).diagnostic);
   let mixed_binding = Selection.merge [selection;changed_tools] in
   check bool "bound and unbound projections cannot share a reuse proof" true
-    (Option.is_none mixed_binding.projection_snapshot);
+    (Option.is_none mixed_binding.preparation);
   let rebound_mixed = bind ~snapshot:first without_lane mixed_binding in
   check int "unbound selection cannot smuggle a missing Tool through merged authority" 0
     (List.length (Selection.partition rebound_mixed).compositions);
@@ -688,9 +708,14 @@ let test_task_binding_reuses_only_exact_frozen_inputs () =
   let later_reference = exact_reference later ~source_id ~package_id:"lane" ~name:"lane" in
   let later_selection = match Selection.resolve_for_task ~snapshot:later ~task_id:"task-later" [later_reference] with
     | Ok selection -> selection | Error error -> fail (Selection.error_to_string error) in
+  let later_preparation = Selection.prepare_surface ~snapshot:later ~descriptors later_selection in
+  check bool "observing another frozen source derives another preparation" false
+    (prepared == later_preparation);
+  check bool "a new observation does not overwrite the original turn preparation" true
+    (prepared == Selection.prepare_surface ~snapshot:first ~descriptors bound);
   let mixed = Selection.merge [bound;later_selection] in
   check bool "mixed source selections have no single reusable projection input" true
-    (Option.is_none mixed.projection_snapshot);
+    (Option.is_none mixed.preparation);
   let restored = bind ~snapshot:first descriptors mixed in
   check int "mixed sources reproject instead of borrowing the first binding" 1 (List.length restored.selected);
   check int "the later revision cannot be offered from the original snapshot" 1 (List.length restored.unprojectable);

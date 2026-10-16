@@ -38,35 +38,25 @@ type t =
   ; items : skill_inventory_item list
   }
 
-let catalog_status_of_entry snapshot (entry : Skill_catalog_snapshot.entry) =
-  if
-    Skill_catalog_snapshot.effective_entries snapshot
-    |> List.exists (fun (effective : Skill_catalog_snapshot.entry) ->
-      Skill_reference.equal_identity effective.identity entry.identity)
-  then Effective
-  else Shadowed
-;;
-
 let kind_of_surface = function
   | Keeper_skill_catalog.Instruction -> Instruction
   | Keeper_skill_catalog.Composition entry -> Composition entry
 ;;
 
-let valid_of_projection snapshot entry skill diagnostics =
+let valid_of_projection ~effective entry skill diagnostics =
   Valid
     { reference = Skill_catalog_snapshot.entry_reference entry
     ; description = skill.Keeper_skill_catalog.description
     ; kind = kind_of_surface skill.surface
-    ; catalog_status = catalog_status_of_entry snapshot entry
+    ; catalog_status = if effective then Effective else Shadowed
     ; diagnostics
     }
 ;;
 
-let item_of_entry ~descriptors snapshot (entry : Skill_catalog_snapshot.entry) =
-  match Keeper_skill_catalog.project_entry_or_fallback ~descriptors snapshot entry with
-  | Projected skill -> valid_of_projection snapshot entry skill []
+let item_of_entry ~effective (entry : Skill_catalog_snapshot.entry) = function
+  | Keeper_skill_catalog.Projected skill -> valid_of_projection ~effective entry skill []
   | Frozen_instruction { skill; diagnostic } ->
-    valid_of_projection snapshot entry skill [ diagnostic ]
+    valid_of_projection ~effective entry skill [ diagnostic ]
   | Entry_unavailable error ->
     Invalid
       { source_index = entry.source_index
@@ -91,9 +81,13 @@ let item_of_rejection (rejection : Skill_catalog_snapshot.rejection) =
     }
 ;;
 
-let of_snapshot ?(descriptors = Keeper_tool_descriptor.all_descriptors ()) snapshot =
+let of_prepared preparation =
+  let snapshot = Keeper_skill_catalog.prepared_snapshot preparation in
   let projected =
-    Skill_catalog_snapshot.entries snapshot |> List.map (item_of_entry ~descriptors snapshot)
+    Keeper_skill_catalog.fold_prepared_entries preparation ~init:[]
+      ~f:(fun items entry projection ~effective ->
+        item_of_entry ~effective entry projection :: items)
+    |> List.rev
   in
   let rejected =
     Skill_catalog_snapshot.rejections snapshot |> List.map item_of_rejection
@@ -102,6 +96,10 @@ let of_snapshot ?(descriptors = Keeper_tool_descriptor.all_descriptors ()) snaps
   ; snapshot_revision = Skill_catalog_snapshot.snapshot_revision snapshot
   ; items = projected @ rejected
   }
+;;
+
+let of_snapshot ?(descriptors = Keeper_tool_descriptor.all_descriptors ()) snapshot =
+  of_prepared (Keeper_skill_catalog.prepare_snapshot ~descriptors snapshot)
 ;;
 
 let snapshot_revision inventory = inventory.snapshot_revision

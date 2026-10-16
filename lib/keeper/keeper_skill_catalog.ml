@@ -402,43 +402,68 @@ let projected_entry_of ~descriptors snapshot (entry : Skill_catalog_snapshot.ent
    must never reuse a plan bound to different descriptor objects.
    Keeper turns, the skill inventory and the skills route project the
    current snapshot several times between two publications, so its entries
-   are projected once and kept with the snapshot they came from. One
-   snapshot is kept: asking about another one (a second workspace, a turn
-   still on the previous publication) projects that one and replaces it.
+   are projected once and kept with the snapshot they came from. The global
+   cache retains one preparation; turns retain their own immutable handle,
+   so another workspace replacing the global entry cannot evict a turn's
+   already prepared entries.
    Composition plans are then shared by those callers; a plan's outputs are
    bound to the run that produced them as well as to the plan, so sharing one
    keeps runs apart. *)
-type projected_snapshot =
+type prepared =
   { snapshot : Skill_catalog_snapshot.t
   ; descriptors : Keeper_tool_descriptor.t list
   ; entries : projected_entry list
   }
 
-let last_projected_snapshot : projected_snapshot option Atomic.t = Atomic.make None
+let last_projected_snapshot : prepared option Atomic.t = Atomic.make None
 
-let projected_entries ~descriptors snapshot =
+let prepared_matches prepared ~descriptors snapshot =
+  prepared.snapshot == snapshot
+  && (prepared.descriptors == descriptors
+      || (List.length prepared.descriptors = List.length descriptors
+          && List.for_all2 ( == ) prepared.descriptors descriptors))
+;;
+
+let prepared_snapshot prepared = prepared.snapshot
+
+let prepare_snapshot ~descriptors snapshot =
   match Atomic.get last_projected_snapshot with
-  | Some projected when projected.snapshot == snapshot
-      && List.length projected.descriptors = List.length descriptors
-      && List.for_all2 ( == ) projected.descriptors descriptors -> projected.entries
+  | Some projected when prepared_matches projected ~descriptors snapshot -> projected
   | Some _ | None ->
     let entries =
       List.map (projected_entry_of ~descriptors snapshot) (Skill_catalog_snapshot.entries snapshot)
     in
-    Atomic.set last_projected_snapshot (Some { snapshot; descriptors; entries });
-    entries
+    let prepared = { snapshot; descriptors; entries } in
+    Atomic.set last_projected_snapshot (Some prepared);
+    prepared
 ;;
 
 (* An entry resolved from [snapshot] is one of its entries, so its kept
    projection answers. An entry from elsewhere is projected on the spot. *)
-let project_entry_or_fallback ?(descriptors = Keeper_tool_descriptor.all_descriptors ()) snapshot (entry : Skill_catalog_snapshot.entry) =
+let project_prepared_entry prepared (entry : Skill_catalog_snapshot.entry) =
   match
     List.find_opt
       (fun (projected : projected_entry) -> projected.snapshot_entry == entry)
-      (projected_entries ~descriptors snapshot)
+      prepared.entries
   with
   | Some projected -> projected.projection
-  | None -> entry_projection_of ~descriptors snapshot entry
+  | None -> entry_projection_of ~descriptors:prepared.descriptors prepared.snapshot entry
+;;
+
+let project_entry_or_fallback
+      ?(descriptors = Keeper_tool_descriptor.all_descriptors ())
+      snapshot
+      entry
+  =
+  project_prepared_entry (prepare_snapshot ~descriptors snapshot) entry
+;;
+
+let fold_prepared_entries prepared ~init ~f =
+  List.fold_left
+    (fun acc (entry : projected_entry) ->
+       f acc entry.snapshot_entry entry.projection ~effective:entry.effective)
+    init
+    prepared.entries
 ;;
 
 let catalog_of_projected_entries projected_entries =
@@ -457,14 +482,19 @@ let catalog_of_projected_entries projected_entries =
   |> fun (catalog, diagnostics) -> List.rev catalog, List.rev diagnostics
 ;;
 
-let of_snapshot ?(descriptors = Keeper_tool_descriptor.all_descriptors ()) snapshot =
-  projected_entries ~descriptors snapshot
+let prepared_catalog prepared =
+  prepared.entries
   |> List.filter (fun (projected : projected_entry) -> projected.effective)
   |> catalog_of_projected_entries
 ;;
 
+let of_snapshot ?(descriptors = Keeper_tool_descriptor.all_descriptors ()) snapshot =
+  prepared_catalog (prepare_snapshot ~descriptors snapshot)
+;;
+
 let all_entries_of_snapshot ?(descriptors = Keeper_tool_descriptor.all_descriptors ()) snapshot =
-  catalog_of_projected_entries (projected_entries ~descriptors snapshot)
+  let preparation = prepare_snapshot ~descriptors snapshot in
+  catalog_of_projected_entries preparation.entries
 ;;
 
 let same_exact_reference (left : skill) (right : skill) =

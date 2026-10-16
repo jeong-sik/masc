@@ -1903,6 +1903,33 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
   let active_requests () = Async.list_for_keeper ~base_path:fixture.base_path ~caller:keeper
       ~keeper_name:keeper () |> require "active requests at maintenance profile admission"
       |> List.map (fun (entry : Async.entry) -> entry.request_id) |> List.sort String.compare in
+  (* The real discovery returns a sealed original ready owner. Inject only
+     the intake refusal to exercise the controller's held-owner scheduling;
+     canonical requests, journal and backend remain untouched. *)
+  let held_intakes = ref 0 in
+  let held,notify_held = Eio.Promise.create () in
+  let held_wake = Wake.create ~context ~on_result:(fun _ _ -> Eio.Promise.resolve notify_held ()) () in
+  let held_owner = Journal.continuation_request_id recovery_candidate in
+  let held_resume ~on_recovery_held ~context:_ candidate =
+    incr held_intakes;
+    on_recovery_held ~request_id:(Journal.continuation_request_id candidate)
+      ~reason:"original child authority requires repair";
+    Ok (Tool_result.make_err ~tool_name:"keeper_composition_run" ~start_time:(Tool_timing.start ())
+      ~class_:Tool_result.Runtime_failure ~effect_disposition:Tool_result.Proven_pre_effect
+      "original child authority requires repair") in
+  let before_hold = active_requests () in
+  Wake.For_testing.pulse ~resume:held_resume ~sw:context.sw held_wake
+    |> require "automatic intake reports an exact held owner";
+  Eio.Promise.await held;
+  Wake.For_testing.pulse ~resume:held_resume ~sw:context.sw held_wake
+    |> require "second pulse retains held owner";
+  Wake.For_testing.pulse ~resume:held_resume ~sw:context.sw held_wake
+    |> require "third pulse retains held owner";
+  Eio.Fiber.yield ();
+  check int "unchanged held owner never repeats automatic intake" 1 !held_intakes;
+  check string "held intake never replaces the original request" held_owner
+    (Journal.continuation_request_id (continuation ()));
+  check (list string) "held intake starts no physical worker" before_hold (active_requests ());
   let profile_owner_refusals = ref 0 in
   let assert_profile_owner_refused label =
     let requests_before = active_requests () in
@@ -3459,6 +3486,34 @@ let lose_native_parent_after_child_acceptance base_path draft_sha run_id =
   ignore (await_composition env fixture (`Assoc ["request_id",`String accepted.request_id]));
   fail "physical accepted-child fault did not stop its process"
 
+let test_typed_continuation_recovery () =
+  let module Recovery = Masc.Keeper_tool_composition_surface.For_testing in
+  let failed class_ = Tool_result.make_err ~tool_name:"fixture-child" ~start_time:(Tool_timing.start ())
+      ~class_ "original child refused" in
+  let decision class_ effect_disposition =
+    Recovery.continuation_recovery_of_result ~effect_disposition (failed class_) in
+  let is_held = function
+    | Recovery.Hold_original_authority _ -> true
+    | Recovery.Complete_original_result -> false in
+  List.iter (fun class_ ->
+    check bool "proven pre-effect policy/workflow refusal terminates" false
+      (is_held (decision class_ (Some Tool_result.Proven_pre_effect)));
+    List.iter (fun disposition ->
+      check bool "policy wording never terminates unknown or possible effects" true
+        (is_held (decision class_ disposition)))
+      [None; Some Tool_result.Effect_outcome_unknown; Some Tool_result.Proven_post_effect])
+    [Tool_result.Policy_rejection; Tool_result.Workflow_rejection];
+  List.iter (fun class_ ->
+    check bool "runtime/dependency/cancellation cause holds original authority" true
+      (is_held (decision class_ (Some Tool_result.Proven_pre_effect))))
+    [Tool_result.Runtime_failure; Tool_result.Dependency_unavailable; Tool_result.Operator_cancelled];
+  let permanent = decision Tool_result.Policy_rejection (Some Tool_result.Proven_pre_effect)
+  and uncertain = decision Tool_result.Workflow_rejection (Some Tool_result.Effect_outcome_unknown) in
+  check bool "uncertain parallel cause dominates an earlier permanent refusal" true
+    (is_held (Recovery.combine_recovery permanent uncertain));
+  check bool "uncertain parallel cause dominates a later permanent refusal" true
+    (is_held (Recovery.combine_recovery uncertain permanent))
+
 let test_native_child_acceptance_survives_physical_parent_loss () =
   with_nested_job_skill ~wait_only:true ~execution:Masc.Keeper_tool_composition_catalog.Async
     ~branch_failure_policy:Masc.Keeper_tool_plan.Continue_independent
@@ -3555,7 +3610,7 @@ let test_native_child_acceptance_survives_physical_parent_loss () =
         Sys.rename original_root blob_root);
       faulted := true;
       write blob_root "temporarily unavailable artifact directory\n" in
-    let refused_result = ref false in
+    let refused_result = ref false and held_request = ref None in
     let fault_request = Fun.protect ~finally:(fun () -> !restore ()) (fun () ->
       let worker = Atomic.make None in
       let settled,notify_settled = Eio.Promise.create () in
@@ -3580,6 +3635,7 @@ let test_native_child_acceptance_survives_physical_parent_loss () =
             Masc.Keeper_tool_composition_surface.For_testing.async_worker_result
               ~composition_execution:Masc.Keeper_tool_composition_catalog.Async ~tool_kind:Descriptor.Async_composition_tool
               ~nested_calls:(Draft.nested_calls draft) ~nested_activation:bound ~continuation
+              ~on_recovery_held:(fun ~request_id ~reason:_ -> held_request := Some request_id)
               ?before_child_dispatch:(if fault = `Before_native then Some (fun () -> corrupt events) else None)
               ?before_plan_execution:(if fault = `Before_plan then Some (fun () -> corrupt draft_file) else None)
               ?after_child_submission:(if fault = `Before_submission_settle
@@ -3612,6 +3668,8 @@ let test_native_child_acceptance_survives_physical_parent_loss () =
         | Error error -> fail (Async.canonical_terminal_error_to_string error) in
       read_loss ();
       Eio.Promise.await settled;
+      check (option string) "held recovery reports the actual accepted physical owner"
+        (Some accepted.request_id) !held_request;
       check bool "the actual accepted worker reaches the selected fault boundary" true !faulted;
       if fault = `Before_result_lookup then
         check bool "actual native result lookup is refused by its unreadable journal" true !refused_result;
@@ -4526,6 +4584,7 @@ let () = match Array.to_list Sys.argv with
       ; test_case "interrupted prepared launch resumes the same job without recreating it" `Quick test_interrupted_prepared_launch_resumes_the_same_job
       ; test_case "fixed async Skill child submits once and resumes its canonical whole result" `Quick (test_fixed_async_skill_child ~child_failure:false)
       ; test_case "fixed async Skill child preserves an actual canonical whole-child failure" `Quick (test_fixed_async_skill_child ~child_failure:true)
+      ; test_case "typed recovery terminates proven refusal and holds uncertain effects" `Quick test_typed_continuation_recovery
       ; test_case "real parent process loss after child acceptance resumes its original child" `Quick test_native_child_acceptance_survives_physical_parent_loss
       ; test_case "fresh supervisor retains nested child authority through owned-job waits" `Quick
           (test_nested_skill_job_continuation ~fault_after_acceptance:false)

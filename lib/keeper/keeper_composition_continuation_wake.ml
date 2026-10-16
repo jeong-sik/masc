@@ -40,7 +40,7 @@ let current_snapshot ~base_path =
   | Configured _ -> Ok snapshot
   | (Config_rejected _ | Config_unreadable _) as state -> Error (Snapshot_rejected state)
 
-let resume ~context continuation =
+let resume ?on_recovery_held ~context continuation =
   let source = Journal.continuation_source continuation in
   let config = context.Keeper_types_profile.config in
   let profiles = Keeper_types_profile.read_keeper_profile_snapshot ~base_path:config.base_path in
@@ -93,24 +93,28 @@ let resume ~context continuation =
       ~completion:Agent_core.Tool_contract.Continue_after_success in
   let publication_recovery : Keeper_publication_recovery_availability.turn_context =
     {provider=context.publication_recovery_provider;keeper_name=source.keeper_name} in
-  Ok (Keeper_tool_composition_surface.resume_continuation ~capability_surface ~continuation
+  Ok (Keeper_tool_composition_surface.resume_continuation ?on_recovery_held ~capability_surface ~continuation
       ~config ~meta ~publication_recovery
       ~ctx_snapshot:(Keeper_context_runtime.create ~eio:true ~system_prompt:meta.instructions)
       ~turn_context ~invocation
       ~clock:(context.clock :> float Eio.Time.clock_ty Eio.Resource.t) ())
 
-module Run_set = Set.Make (struct
+module Run_key = struct
   type t = string * Keeper_tool_plan.Composition_run_id.t
   let compare (left_keeper,left_run) (right_keeper,right_run) =
     let keeper = String.compare left_keeper right_keeper in
     if keeper <> 0 then keeper else String.compare
       (Keeper_tool_plan.Composition_run_id.to_string left_run)
       (Keeper_tool_plan.Composition_run_id.to_string right_run)
-end)
+end
+module Run_set = Set.Make (Run_key)
+module Run_map = Map.Make (Run_key)
+
 type 'a t =
   { context : 'a Keeper_types_profile.context
   ; on_result : Journal.continuation -> (Tool_result.result,error) result -> unit
-  ; mutable active : Run_set.t }
+  ; mutable active : Run_set.t
+  ; mutable held : string Run_map.t }
 
 (** A refusal that cannot heal by retrying: the sealed run's tool contract was
     rejected by current authority ([Policy_rejection], e.g. the capability
@@ -189,26 +193,36 @@ let log_result candidate outcome =
       | Failed _ -> "refused" in
     Log.Keeper.info ~keeper_name:source.keeper_name "prepared continuation intake run=%s state=%s" run_id state
 
-let create ~context ?(on_result=log_result) () = {context;on_result;active=Run_set.empty}
+let create ~context ?(on_result=log_result) () = {context;on_result;active=Run_set.empty;held=Run_map.empty}
 
-let pulse ~sw supervisor =
+let pulse_with_resume ~resume ~sw supervisor =
   let* pending = Journal.pending_continuations ~read_composition_result:Keeper_composition_dependency_result.readiness ~base_path:supervisor.context.config.base_path in
   List.iter (fun (identity,error) -> Log.Server.warn "prepared continuation discovery retained request=%s error=%s"
       identity (Journal.error_to_string error)) pending.failures;
   List.iter (fun candidate ->
     let source = Journal.continuation_source candidate in
     let key = source.keeper_name,source.composition_run_id in
-    if not (Run_set.mem key supervisor.active) then (
+    let held = match Run_map.find_opt key supervisor.held with
+      | Some request_id when String.equal request_id (Journal.continuation_request_id candidate) -> true
+      | None -> false
+      | Some _ -> supervisor.held <- Run_map.remove key supervisor.held; false in
+    if not held && not (Run_set.mem key supervisor.active) then (
       (* Single-domain reservation is a scheduling hint, never effect authority. *)
       supervisor.active <- Run_set.add key supervisor.active;
       try Eio.Fiber.fork ~sw (fun () ->
         let outcome = Fun.protect
             ~finally:(fun () -> supervisor.active <- Run_set.remove key supervisor.active)
             (fun () ->
-              try resume ~context:supervisor.context candidate with
+              let on_recovery_held ~request_id ~reason =
+                supervisor.held <- Run_map.add key request_id supervisor.held;
+                Log.Keeper.warn ~keeper_name:source.keeper_name
+                  "prepared continuation held run=%s request=%s reason=%s; repair original authority and explicitly resume"
+                  (Keeper_tool_plan.Composition_run_id.to_string source.composition_run_id) request_id reason in
+              try resume ~on_recovery_held ~context:supervisor.context candidate with
               | Eio.Cancel.Cancelled _ as exn -> raise exn
               | exn -> Error (Runtime_failed (Printexc.to_string exn))) in
-        (match permanent_refusal_of_outcome outcome with
+        (match (if Run_map.mem key supervisor.held then None
+                else permanent_refusal_of_outcome outcome) with
          | Some refusal ->
            (try settle_permanent_refusal supervisor candidate refusal with
             | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -221,3 +235,11 @@ let pulse ~sw supervisor =
         supervisor.active <- Run_set.remove key supervisor.active;
         raise exn)) pending.ready;
   Ok ()
+
+let pulse ~sw supervisor =
+  pulse_with_resume ~resume:(fun ~on_recovery_held ~context candidate ->
+    resume ~on_recovery_held ~context candidate) ~sw supervisor
+
+module For_testing = struct
+  let pulse = pulse_with_resume
+end

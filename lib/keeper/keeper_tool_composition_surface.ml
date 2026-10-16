@@ -1276,21 +1276,28 @@ type continuation_recovery =
   | Complete_original_result
   | Hold_original_authority of string
 
-let node_continuation_recovery (node : Executor.node_result) =
-  let hold () = Hold_original_authority (Tool_result.message node.result) in
-  match node.result with
+let continuation_recovery_of_result ~effect_disposition result =
+  let hold () = Hold_original_authority (Tool_result.message result) in
+  match result with
   | Tool_result.Completed _ -> Complete_original_result
   | Tool_result.Deferred _ -> hold ()
   | Tool_result.Failed failure ->
     match failure.class_ with
     | Tool_result.Policy_rejection | Tool_result.Workflow_rejection ->
-      (match node.failure_effect_disposition with
+      (match effect_disposition with
        | Some Tool_result.Proven_pre_effect -> Complete_original_result
        | Some (Tool_result.Proven_post_effect | Tool_result.Effect_outcome_unknown)
        | None -> hold ())
     | Tool_result.Dependency_unavailable | Tool_result.Runtime_failure
     | Tool_result.Operator_cancelled -> hold ()
 ;;
+
+let node_continuation_recovery (node : Executor.node_result) =
+  continuation_recovery_of_result ~effect_disposition:node.failure_effect_disposition node.result
+
+let combine_recovery left right = match left,right with
+  | Hold_original_authority _,(Complete_original_result | Hold_original_authority _) -> left
+  | Complete_original_result,(Complete_original_result | Hold_original_authority _) -> right
 
 let rec async_worker_result
       ~composition_execution
@@ -1299,6 +1306,7 @@ let rec async_worker_result
       ?(nested_calls=[])
       ?nested_activation
       ?continuation
+      ?(on_recovery_held=(fun ~request_id:_ ~reason:_ -> ()))
       ?after_child_submission
       ?before_child_dispatch
       ?before_plan_execution
@@ -1342,8 +1350,10 @@ let rec async_worker_result
         | None -> Error Journal.Missing_journal) in
   match admission,continuation with
   | Keeper_composition_nested_run.Original_authority_held rejection,Some continuation when Journal.continuation_dependencies continuation = [] ->
+    on_recovery_held ~request_id ~reason:rejection.detail;
     Keeper_msg_async.worker_interrupted ~reason:rejection.detail
   | Keeper_composition_nested_run.Original_authority_held rejection,Some continuation ->
+    on_recovery_held ~request_id ~reason:rejection.detail;
     let result = Tool_result.make_deferred ~tool_name ~start_time
         ~data:(`Assoc ["kind",`String "waiting_for_original_child_activation";"cause",rejection.data]) () in
     (match Keeper_msg_async.worker_waiting_for_dependencies
@@ -1569,13 +1579,12 @@ let rec async_worker_result
         | Executor.Node_observation_failed {detail;_} -> Hold_original_authority detail
         | Executor.Plan_execution_failed _ | Executor.Outer_completion_mismatch _ ->
           Complete_original_result in
-      List.fold_left (fun recovery cause ->
-        match recovery with
-        | Hold_original_authority _ -> recovery
-        | Complete_original_result -> cause_recovery cause)
+      List.fold_left (fun recovery cause -> combine_recovery recovery (cause_recovery cause))
         Complete_original_result (Executor.failure_causes failure) in
   match recovery,waiting_dependencies with
-  | Hold_original_authority reason,_ -> Keeper_msg_async.worker_interrupted ~reason
+  | Hold_original_authority reason,_ ->
+    on_recovery_held ~request_id ~reason;
+    Keeper_msg_async.worker_interrupted ~reason
   | Complete_original_result,None -> Keeper_msg_async.worker_finished result
   | Complete_original_result,Some dependencies ->
     (match Keeper_msg_async.worker_waiting_for_dependencies ~dependencies result with
@@ -1592,6 +1601,7 @@ and async_submission_result
       ?composition_run_id
       ?journal
       ?continuation
+      ?on_recovery_held
       ?refusal
       ?before_submit
       ?observe_submission
@@ -1723,6 +1733,7 @@ and async_submission_result
                   ~data:(Journal.error_to_json error) (Journal.error_to_string error))
            | None ->
            async_worker_result
+             ?on_recovery_held
              ~composition_execution:Catalog.Async
              ~tool_kind
              ?skill_reference
@@ -2031,6 +2042,11 @@ and named_async_submission_result ~skill_reference ~plan ~tool_name ~tool_kind
 ;;
 
 module For_testing = struct
+  type nonrec recovery_decision = continuation_recovery =
+    | Complete_original_result
+    | Hold_original_authority of string
+  let continuation_recovery_of_result = continuation_recovery_of_result
+  let combine_recovery = combine_recovery
   let async_worker_result = async_worker_result
   let node_result_to_json = node_result_to_json
   let project_execution_result = project_execution_result
@@ -2043,7 +2059,7 @@ module For_testing = struct
   let cancel_result = cancel_result
 end
 
-let resume_continuation ~capability_surface ~continuation ~(config : Workspace.config)
+let resume_continuation ?on_recovery_held ~capability_surface ~continuation ~(config : Workspace.config)
     ~(meta : Keeper_meta_contract.keeper_meta) ~publication_recovery ~ctx_snapshot
     ~(turn_context : Keeper_tool_call_log_context.turn_context) ~invocation ?clock () =
   let module Draft = Keeper_composition_draft in
@@ -2052,7 +2068,11 @@ let resume_continuation ~capability_surface ~continuation ~(config : Workspace.c
     | Journal.Prepared -> Draft.run_tool_name,None
     | Journal.Named {tool_name;skill_reference;activation=_;origin=_} -> tool_name,Some skill_reference in
   let start_time = Tool_timing.start () in
-  let refuse_journal error = Tool_result.make_err ~tool_name
+  let hold reason = Option.iter (fun observe ->
+      observe ~request_id:(Journal.continuation_request_id continuation) ~reason) on_recovery_held in
+  let refuse_journal error =
+    hold (Journal.error_to_string error);
+    Tool_result.make_err ~tool_name
       ~class_:(Journal.failure_class error) ~effect_disposition:Tool_result.Proven_pre_effect
       ~start_time ~data:(Journal.error_to_json error) (Journal.error_to_string error) in
   if meta.name <> source.keeper_name
@@ -2087,7 +2107,7 @@ let resume_continuation ~capability_surface ~continuation ~(config : Workspace.c
              ~schedule:(Agent_core.Tool_contract.Invocation.schedule invocation)
              ~completion:Agent_core.Tool_contract.Continue_after_success in
          let turn_context = Some {turn_context with task_id=source.source_task_id} in
-         async_submission_result ?skill_reference ~journal ~continuation
+         async_submission_result ?on_recovery_held ?skill_reference ~journal ~continuation
            ~refusal:Journal.Source_conflict
            ~draft_reference:source.draft_reference ~run_reference:source.run_reference
            ~composition_run_id:source.composition_run_id ~plan:(Draft.plan draft)
@@ -2136,10 +2156,12 @@ let resume_continuation ~capability_surface ~continuation ~(config : Workspace.c
             Keeper_skill_activation_recorder.find_bound_nested ~config bound ~invocation ~tool_name ~scope ~reference)) nested_activation;
         (match Keeper_composition_nested_run.check_original_admissions original_nested
           ~child_history:(fun ~node_ids -> Ok (Journal.continuation_child_admission continuation ~node_ids)) with
-         | Keeper_composition_nested_run.Original_authority_held rejection -> Tool_result.make_err ~tool_name ~start_time
+         | Keeper_composition_nested_run.Original_authority_held rejection ->
+             hold rejection.detail;
+             Tool_result.make_err ~tool_name ~start_time
              ~class_:Tool_result.Runtime_failure ~effect_disposition:Tool_result.Proven_pre_effect
              ~data:rejection.data rejection.detail
-         | Keeper_composition_nested_run.Original_admitted -> async_submission_result ?skill_reference ~journal ~continuation
+         | Keeper_composition_nested_run.Original_admitted -> async_submission_result ?on_recovery_held ?skill_reference ~journal ~continuation
           ~nested_calls:(Draft.nested_calls draft) ?nested_activation
           ~draft_reference:source.draft_reference ~run_reference:source.run_reference
           ~composition_run_id:source.composition_run_id ~plan:(Draft.plan draft)

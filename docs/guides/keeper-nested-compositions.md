@@ -383,3 +383,13 @@ new Lost attempt. All parallel failure causes participate; one unavailable
 accepted child or uncertain authority still holds the run. Original child
 source reads remain runtime failures when the immutable evidence cannot be
 read, rather than being relabeled as permanent policy decisions.
+
+The automatic continuation controller retains a process-local hold for the
+exact physical owner that reports unavailable original authority. Later pulses
+still discover canonical state but do not submit another attempt for that same
+owner. Repair the original evidence and explicitly resume the run with its
+existing `resume_run_id`; a successor owner is eligible for normal intake. A
+new controller can also retry through all original admission checks. This hold
+is a scheduling hint, not durable effect or completion authority: the physical
+request may remain Lost, and unknown effects never become a logical failure
+merely to stop automatic retries.

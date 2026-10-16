@@ -55,6 +55,24 @@ Once start was requested, reconciliation observes that same job and does not
 retry start. Directory identity, owner and permissions are rechecked before
 backend operations; unreadable or replaced authority is a refusal.
 
+Job replies separate the original `phase`, `result_ready`, and `reconciliation`.
+`result_ready` marks a settled result, including cancellation and explicitly
+unavailable outputs. The `status`, phase and artifact references describe that
+outcome. A stored projection without a phase reconciliation reports
+`reconciliation.state = "not_observed"`.
+
+| Reconciliation | Meaning |
+|---|---|
+| `confirmed` | This action settled or retained the canonical phase. Check `result_ready` for the result. |
+| `held` / `backend_absent` | The original backend is absent and the launch remains unresolved. Inspect the same handle or explicitly cancel it. |
+| `held` / `backend_unconfirmed`, `backend_mismatch`, `backend_error` | The backend or its authority could not confirm this action's phase. The original intent remains held. |
+| `held` / `cancelled_job_orphan` | A later resource was observed after cancellation. The original cancellation result remains settled. |
+
+A held job without a settled result reports `status = "unconfirmed"`, including
+a saved `created` phase whose container is now absent. Its phase and exact
+handle remain intact. These observations accompany the current reply; they add
+no journal fields or authority to repeat create/start.
+
 Canonical owner journals live beneath
 `<base-path>/.masc/keeper_msg_requests/owned_jobs`. Writable program and CLI
 data live beneath `<base-path>/.masc/owned_job_data`, outside blob-maintenance

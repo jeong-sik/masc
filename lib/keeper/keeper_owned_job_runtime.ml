@@ -13,11 +13,17 @@ let note (record : Store.record) detail =
   save record ~phase:record.phase ~cancel_requested:record.cancel_requested
     ~outputs:record.outputs ~detail:(Some detail)
 
-type settlement = Confirmed of Store.record | Unconfirmed of Store.record
-let record_of_settlement = function Confirmed record | Unconfirmed record -> record
+type settlement =
+  | Confirmed of Store.record
+  | Unconfirmed of Store.record * Store.reconciliation_hold
+let record_of_settlement = function Confirmed record | Unconfirmed (record, _) -> record
+let reconciliation_of_settlement = function
+  | Confirmed _ -> Store.Phase_confirmed
+  | Unconfirmed (_, reason) -> Store.Phase_held reason
 
 let observe (record : Store.record) observation =
-  let preserve detail = Result.map (fun record -> Unconfirmed record) (note record detail) in
+  let preserve reason detail =
+    Result.map (fun record -> Unconfirmed (record, reason)) (note record detail) in
   let settle phase = save record ~phase ~cancel_requested:record.cancel_requested
       ~outputs:record.outputs ~detail:None |> Result.map (fun record -> Confirmed record) in
   let absent_outputs_evidence container_id =
@@ -40,11 +46,12 @@ let observe (record : Store.record) observation =
       settle Store.Cancelled_unconfirmed_launch
   | Store.Cancelled_unconfirmed_launch, Backend.Absent -> Ok (Confirmed record)
   | Store.Cancelled_unconfirmed_launch, (Backend.Created _ | Backend.Running _ | Backend.Stopped _) ->
-      preserve "same-label container after a cancelled launch is an orphan; cancellation evidence is retained"
+      preserve Store.Cancelled_job_orphan
+        "same-label container after a cancelled launch is an orphan; cancellation evidence is retained"
   | (Store.Running container_id | Store.Exited {container_id; _}), Backend.Absent ->
       (match record.outputs with
        | Some _ ->
-           preserve "saved backend job is absent; launch intent is retained, no relaunch"
+           preserve Store.Backend_absent "saved backend job is absent; launch intent is retained, no relaunch"
        | None ->
            (* Exact inventory absence after a confirmed Running or Exited phase:
               the original container is gone, so its outputs (and, for Running,
@@ -57,7 +64,8 @@ let observe (record : Store.record) observation =
                 ~detail:(Some evidence)))
   | (Store.Prepared | Store.Create_requested | Store.Created _ | Store.Start_requested _
       | Store.Running _ | Store.Exited _ | Store.Cancelled_before_start _
-      | Store.Cancelled_unconfirmed_launch), Backend.Unconfirmed detail -> preserve detail
+      | Store.Cancelled_unconfirmed_launch), Backend.Unconfirmed detail ->
+      preserve Store.Backend_unconfirmed detail
   | (Store.Prepared | Store.Create_requested | Store.Created _ | Store.Start_requested _
       | Store.Cancelled_before_start _), Backend.Absent ->
       (* Termination policy for Absent without a cancel request (tracked in
@@ -65,22 +73,22 @@ let observe (record : Store.record) observation =
          Chosen: (a) surface, not (b) time bound.
          - No relaunch: a same-label container may still appear late, so closing
            or retrying on a clock could run the job twice.
-         - The record has no timestamp field, so a time bound would need a
-           durable schema change; (a) needs none: [note] stores the reason in
-           [detail] and [Store.result_json] reports it, so the owner can see the
-           launch is unconfirmed and call keeper_job_cancel, which closes via
+         - Return a typed Backend_absent hold with the exact current action.
+           Public status retains it alongside the original phase, so a saved
+           Created phase cannot appear ready after this refusal. No journal
+           schema change is needed. Explicit cancellation closes via
            Cancelled_unconfirmed_launch above.
          Known residual: until someone cancels, the marker stays and each pulse
          re-inspects. *)
-      preserve "saved backend job is absent; launch intent is retained, no relaunch"
+      preserve Store.Backend_absent "saved backend job is absent; launch intent is retained, no relaunch"
   | (Store.Prepared | Store.Create_requested | Store.Created _ | Store.Start_requested _
     | Store.Running _ | Store.Exited _ | Store.Cancelled_before_start _),
     (Backend.Created _ | Backend.Running _ | Backend.Stopped _) ->
-      preserve "backend observation differs from durable job phase or handle"
+      preserve Store.Backend_mismatch "backend observation differs from durable job phase or handle"
 
 let backend_result record = function
   | Ok observation -> observe record observation
-  | Error error -> Result.map (fun record -> Unconfirmed record)
+  | Error error -> Result.map (fun record -> Unconfirmed (record, Store.Backend_error))
       (note record (Backend.error_to_string error))
 
 let collect (record : Store.record) =
@@ -95,38 +103,41 @@ let collect (record : Store.record) =
     | Store.Running _ | Store.Cancelled_before_start _ | Store.Cancelled_unconfirmed_launch), _
   | Store.Exited _, Some _ -> Ok record
 
+let collect_settlement = function
+  | Unconfirmed _ as held -> Ok held
+  | Confirmed record -> Result.map (fun record -> Confirmed record) (collect record)
+
 let launch_created (record : Store.record) =
   match record.phase with
   | Store.Created id ->
       if record.cancel_requested then
         save record ~phase:(Store.Cancelled_before_start (Some id))
           ~cancel_requested:true ~outputs:None ~detail:None
+        |> Result.map (fun record -> Confirmed record)
       else
         let* intent = save record ~phase:(Store.Start_requested id)
             ~cancel_requested:false ~outputs:None ~detail:None in
         let* settled = backend_result intent (Backend.start ~container_id:id intent.preparation) in
-        (match settled with Confirmed observed -> collect observed
-         | Unconfirmed observed -> Ok observed)
+        collect_settlement settled
   | Store.Prepared | Store.Create_requested | Store.Start_requested _ | Store.Running _
   | Store.Exited _ | Store.Cancelled_before_start _ | Store.Cancelled_unconfirmed_launch ->
-      Ok record
+      Ok (Confirmed record)
 
-let reconcile (record : Store.record) =
+let reconcile_settlement (record : Store.record) =
   match record.phase with
   | Store.Prepared ->
       if record.cancel_requested then
         save record ~phase:(Store.Cancelled_before_start None) ~cancel_requested:true
           ~outputs:None ~detail:None
-      else Ok record
-  | Store.Cancelled_before_start _ -> Ok record
+        |> Result.map (fun record -> Confirmed record)
+      else Ok (Confirmed record)
+  | Store.Cancelled_before_start _ -> Ok (Confirmed record)
   | Store.Cancelled_unconfirmed_launch ->
-      if record.cleanup <> Store.Resources_retained then Ok record else
-      (match observe record (Backend.inspect record.preparation) with
-       | Ok observed -> Ok (record_of_settlement observed)
-       | Error error -> Error error)
+      if record.cleanup <> Store.Resources_retained then Ok (Confirmed record)
+      else observe record (Backend.inspect record.preparation)
   | Store.Create_requested | Store.Created _ | Store.Start_requested _
   | Store.Running _ | Store.Exited _ ->
-      if Store.result_ready record then Ok record else
+      if Store.result_ready record then Ok (Confirmed record) else
       let* observed =
         if record.cancel_requested then match record.phase with
           | Store.Start_requested container_id | Store.Running container_id ->
@@ -137,8 +148,11 @@ let reconcile (record : Store.record) =
           | Store.Cancelled_unconfirmed_launch -> Ok (Confirmed record)
         else observe record (Backend.inspect record.preparation) in
       (match observed with
-       | Unconfirmed record -> Ok record
-       | Confirmed record -> let* started = launch_created record in collect started)
+       | Unconfirmed _ -> Ok observed
+       | Confirmed record -> let* started = launch_created record in collect_settlement started)
+
+let reconcile record =
+  Result.map record_of_settlement (reconcile_settlement record)
 
 let rec cleanup (record : Store.record) =
   let next state = let* record = Store.advance_cleanup record state in cleanup record in
@@ -170,8 +184,9 @@ let launch (record : Store.record) =
   let* intent = save record ~phase:Store.Create_requested ~cancel_requested:false
       ~outputs:None ~detail:None in
   let* settled = backend_result intent (Backend.create intent.preparation) in
-  match settled with Confirmed record -> launch_created record
-  | Unconfirmed _ -> Ok (record_of_settlement settled)
+  match settled with
+  | Confirmed record -> launch_created record
+  | Unconfirmed _ -> Ok settled
 
 let inputs_of_json = function
   | None -> Ok []
@@ -215,12 +230,13 @@ let failure ?job_id ~effect_disposition class_ message =
       ~message (`Assoc ["job_id", `String (Store.Job_id.to_string job_id)])
 
 let finish ~tool_name ~start_time ~job_id = function
-  | Ok (record : Store.record) ->
+  | Ok settled ->
+      let record = record_of_settlement settled in
       let retained_artifacts = match record.outputs with
         | Some (Store.Outputs_complete (stdout, stderr)) -> [stdout; stderr]
         | Some (Store.Outputs_unavailable _) | None -> [] in
       let result = Tool_result.make_ok ~tool_name ~start_time
-          ~data:(Store.result_json record) ()
+          ~data:(Store.result_json ~reconciliation:(reconciliation_of_settlement settled) record) ()
         |> Tool_result.with_retained_artifacts retained_artifacts in
       (match Tool_bridge.attach_artifact_manifest
           ~projection:Tool_output.Inline_with_structured_diagnostic
@@ -320,7 +336,7 @@ let handle ~config ~meta ~owned_job_replay ~source_context ~continuation_channel
                   | Store.Prepared when not record.cancel_requested -> launch record
                   | Store.Prepared | Store.Create_requested | Store.Created _ | Store.Start_requested _
                   | Store.Running _ | Store.Exited _ | Store.Cancelled_before_start _
-                  | Store.Cancelled_unconfirmed_launch -> reconcile record in
+                  | Store.Cancelled_unconfirmed_launch -> reconcile_settlement record in
               finish ~tool_name:name ~start_time ~job_id result)))
   | Some {action=Tool_schemas_owned_job.Read_result;_} ->
       (match job_argument args with
@@ -331,7 +347,7 @@ let handle ~config ~meta ~owned_job_replay ~source_context ~continuation_channel
                 Tool_result.Policy_rejection (Store.error_to_string error)
             | Ok record ->
                 if Store.result_ready record then
-                  finish ~tool_name:name ~start_time ~job_id (Ok record)
+                  finish ~tool_name:name ~start_time ~job_id (Ok (Confirmed record))
                 else
                   Keeper_tool_execution.deferred_owned_job_result ~job_id (Store.result_json record)))
   | Some {action=(Tool_schemas_owned_job.Status | Tool_schemas_owned_job.Cancel) as action;_} ->
@@ -349,4 +365,4 @@ let handle ~config ~meta ~owned_job_replay ~source_context ~continuation_channel
                     | Tool_schemas_owned_job.Status -> Ok record
                     | Tool_schemas_owned_job.Start | Tool_schemas_owned_job.Read_result ->
                         Error (Store.Invalid_authority "action is not reconciliation") in
-                  reconcile record in finish ~tool_name:name ~start_time ~job_id result))
+                  reconcile_settlement record in finish ~tool_name:name ~start_time ~job_id result))

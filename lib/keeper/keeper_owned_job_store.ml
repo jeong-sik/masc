@@ -20,6 +20,16 @@ type phase =
   | Exited of { container_id : string; exit_code : int }
   | Cancelled_before_start of string option
   | Cancelled_unconfirmed_launch
+type reconciliation_hold =
+  | Backend_absent
+  | Backend_unconfirmed
+  | Backend_mismatch
+  | Cancelled_job_orphan
+  | Backend_error
+type reconciliation =
+  | Phase_not_observed
+  | Phase_confirmed
+  | Phase_held of reconciliation_hold
 type input = { path : string; artifact : Tool_output.artifact_ref }
 type cleanup = Cleanup.t = Resources_retained | Container_removal_requested | Container_removed
   | Data_removal_requested | Resources_removed
@@ -632,7 +642,21 @@ let prepare_workspace ~base_path job_id inputs =
           copy rest
     in copy inputs)
 
-let result_json record =
+let reconciliation_to_json = function
+  | Phase_not_observed ->
+      `Assoc ["state", `String "not_observed"; "reason", `Null]
+  | Phase_confirmed ->
+      `Assoc ["state", `String "confirmed"; "reason", `Null]
+  | Phase_held reason ->
+      let reason = match reason with
+        | Backend_absent -> "backend_absent"
+        | Backend_unconfirmed -> "backend_unconfirmed"
+        | Backend_mismatch -> "backend_mismatch"
+        | Cancelled_job_orphan -> "cancelled_job_orphan"
+        | Backend_error -> "backend_error" in
+      `Assoc ["state", `String "held"; "reason", `String reason]
+
+let result_json ?(reconciliation=Phase_not_observed) record =
   let status, exit_code = match record.phase, record.outputs with
     | Prepared, _ -> "waiting", None
     | (Create_requested | Start_requested _), _ -> "unconfirmed", None
@@ -641,10 +665,15 @@ let result_json record =
     | Running _, (None | Some (Outputs_complete _)) -> "running", None
     | Exited {exit_code;_}, _ -> "exited", Some exit_code
     | (Cancelled_before_start _ | Cancelled_unconfirmed_launch), _ -> "cancelled", None in
+  let status = match reconciliation with
+    | Phase_held _ when not (result_ready record) -> "unconfirmed"
+    | Phase_not_observed | Phase_confirmed | Phase_held _ -> status in
   let artifacts = match record.outputs with
     | Some (Outputs_complete (stdout, stderr)) -> [stdout; stderr]
     | Some (Outputs_unavailable _) | None -> [] in
   `Assoc ["job_id", `String (Job_id.to_string record.job_id); "status", `String status;
+      "result_ready", `Bool (result_ready record);
+      "reconciliation", reconciliation_to_json reconciliation;
       "source", source_to_json record.source; "phase", `String (phase_to_string record.phase);
       "cancel_requested", `Bool record.cancel_requested;
       "cleanup", `String (Cleanup.to_string record.cleanup);

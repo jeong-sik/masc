@@ -2311,10 +2311,19 @@ let owned_job_output_schema =
         ]
       ~required:[ "task_id"; "turn_ref"; "tool_use_id"; "trace_id"; "keeper_turn_id" ]
   in
+  let reconciliation_schema =
+    object_output_schema
+      ~properties:
+        [ "state", `Assoc [ "type", `String "string" ]
+        ; "reason", nullable_string ]
+      ~required:[ "state"; "reason" ]
+  in
   object_output_schema
     ~properties:
       [ "job_id", `Assoc [ "type", `String "string" ]
       ; "status", `Assoc [ "type", `String "string" ]
+      ; "result_ready", `Assoc [ "type", `String "boolean" ]
+      ; "reconciliation", reconciliation_schema
       ; "source", source_schema
       ; "phase", `Assoc [ "type", `String "string" ]
       ; "cancel_requested", `Assoc [ "type", `String "boolean" ]
@@ -2325,7 +2334,8 @@ let owned_job_output_schema =
       ; "container_id", nullable_string
       ; "exit_code", nullable_integer
       ]
-    ~required:[ "job_id"; "status"; "source"; "phase"; "cancel_requested"; "cleanup";
+    ~required:[ "job_id"; "status"; "result_ready"; "reconciliation";
+                "source"; "phase"; "cancel_requested"; "cleanup";
                 "artifacts"; "detail"; "container_id"; "exit_code" ]
 ;;
 

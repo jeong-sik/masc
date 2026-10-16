@@ -453,7 +453,10 @@ let test_unknown_create_absence_never_replays () = with_fixture @@ fun _env _ini
   List.iter (fun turn -> with_bundle fixture (fun bundle ->
       let status = invoke fixture bundle ~tool_use_id:("inspect-create-" ^ string_of_int turn) ~turn
           "keeper_job_status" (argument id) in
-      check string "absence does not authorize a create" "create_requested" (status |> member "phase" |> to_string))) [42;43];
+      check string "absence does not authorize a create" "create_requested" (status |> member "phase" |> to_string);
+      check string "absent create is an explicit typed hold" "backend_absent"
+        (status |> member "reconciliation" |> member "reason" |> to_string);
+      check bool "absent create has no usable result" false (status |> member "result_ready" |> to_bool))) [42;43];
   check int "unknown create has one effectful command" 1 (effect_count fixture "create");
   check int "unknown create never starts" 0 (effect_count fixture "start");
   check bool "canonical create intent survives" true ((load fixture id).phase = Store.Create_requested)
@@ -466,11 +469,49 @@ let test_unknown_start_absence_never_replays () = with_fixture @@ fun _env _init
   check string "start uncertainty preserves durable intent" "start_requested" (started |> member "phase" |> to_string);
   let repeated = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) in
   check string "original source recovers the unknown start handle" id (job_id repeated);
-  ignore (with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"inspect-start" ~turn:42
-      "keeper_job_status" (argument id)));
+  let status = with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"inspect-start" ~turn:42
+      "keeper_job_status" (argument id)) in
+  check string "absent start is an explicit typed hold" "backend_absent"
+    (status |> member "reconciliation" |> member "reason" |> to_string);
+  check bool "unconfirmed start has no usable result" false (status |> member "result_ready" |> to_bool);
   check int "unknown start never recreates" 1 (effect_count fixture "create");
   check int "unknown start never restarts" 1 (effect_count fixture "start");
   (match (load fixture id).phase with Store.Start_requested _ -> () | _ -> fail "original start intent replaced")
+
+let test_created_absence_reports_hold_instead_of_ready () = with_fixture @@ fun _env _initialize fixture ->
+  set_source fixture ~task_id:"task-A" ~turn:41;
+  control fixture (`Assoc ["mode", `String "create_unknown_created"]);
+  let id = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) |> job_id in
+  let original = load fixture id in
+  let container_id = daemon fixture |> member "container" |> member "Id" |> to_string in
+  (* Preserve the real create's exact handle at the acknowledged-created
+     journal boundary, then lose that backend before any start intent. *)
+  let created = Store.transition original ~phase:(Store.Created container_id)
+      ~cancel_requested:false ~outputs:None ~detail:None |> store_value "created journal boundary" in
+  let recorded_calls = daemon fixture |> member "calls" in
+  write fixture.daemon_path (Yojson.Safe.to_string (`Assoc ["calls", recorded_calls; "container", `Null]));
+  control fixture (`Assoc []);
+  let status = with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"status-created-absent" ~turn:42
+      "keeper_job_status" (argument id)) in
+  check string "original durable phase is retained" "created" (status |> member "phase" |> to_string);
+  check string "a missing created backend cannot look ready" "unconfirmed" (status |> member "status" |> to_string);
+  check string "the action reports held reconciliation" "held"
+    (status |> member "reconciliation" |> member "state" |> to_string);
+  check string "the action reports typed absence" "backend_absent"
+    (status |> member "reconciliation" |> member "reason" |> to_string);
+  check bool "no final result is invented" false (status |> member "result_ready" |> to_bool);
+  check_json "original source remains bound" (Store.source_to_json created.source) (status |> member "source");
+  check bool "same original created handle remains durable" true
+    ((load fixture id).phase = Store.Created container_id);
+  check int "status creates no replacement" 1 (effect_count fixture "create");
+  check int "status starts no absent program" 0 (effect_count fixture "start");
+  let cancelled = with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"cancel-created-absent" ~turn:43
+      "keeper_job_cancel" (argument id)) in
+  check string "explicit cancellation resolves the same original job" "cancelled_unconfirmed_launch"
+    (cancelled |> member "phase" |> to_string);
+  check bool "confirmed cancellation makes the result ready" true (cancelled |> member "result_ready" |> to_bool);
+  check int "resolution creates no replacement" 1 (effect_count fixture "create");
+  check int "resolution starts no program" 0 (effect_count fixture "start")
 
 let test_cancelled_unconfirmed_launch_closes_absent_create () = with_fixture @@ fun _env _initialize fixture ->
   set_source fixture ~task_id:"task-A" ~turn:41;
@@ -526,6 +567,11 @@ let test_cancelled_unconfirmed_launch_treats_late_container_as_orphan () = with_
       "keeper_job_status" (argument id)) in
   check string "late same-label container stays orphan" "cancelled_unconfirmed_launch"
       (orphan_seen |> member "phase" |> to_string);
+  check string "orphan observation cannot undo the cancellation outcome" "cancelled"
+      (orphan_seen |> member "status" |> to_string);
+  check bool "the original cancelled result remains ready" true (orphan_seen |> member "result_ready" |> to_bool);
+  check string "the fresh orphan is a separate typed hold" "cancelled_job_orphan"
+      (orphan_seen |> member "reconciliation" |> member "reason" |> to_string);
   check bool "orphan observation leaves cancellation evidence" true
       ((orphan_seen |> member "detail")
        = `String "same-label container after a cancelled launch is an orphan; cancellation evidence is retained");
@@ -5424,6 +5470,8 @@ let () = match Array.to_list Sys.argv with
       ; test_case "cancelled-before-start job cleans its exact created resources" `Quick test_cleanup_cancelled_before_start
       ; test_case "unknown create absence cannot relaunch" `Quick test_unknown_create_absence_never_replays
       ; test_case "unknown start absence cannot restart" `Quick test_unknown_start_absence_never_replays
+      ; test_case "created backend absence reports a typed hold instead of ready" `Quick
+          test_created_absence_reports_hold_instead_of_ready
       ; test_case "cancelled absent create closes terminally" `Quick test_cancelled_unconfirmed_launch_closes_absent_create
       ; test_case "late same-label container stays an orphan" `Quick test_cancelled_unconfirmed_launch_treats_late_container_as_orphan
       ; test_case "interrupted cancellation retains exact intent" `Quick test_cancel_in_flight_retains_exact_intent

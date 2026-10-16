@@ -46,8 +46,9 @@ conflicts await predecessor settlement. A failed or skipped conflicting owner
 prevents its successors from dispatching; independent branches follow the plan's
 existing failure policy. Pure child argument validation has no file footprint.
 Read/Edit/Write plans retain supported file capabilities. Overwrite/Append Write
-can bind existing physical parents, including a missing target file; unsupported
-paths retain the original exclusive handler. Plans containing other tools or
+can bind existing physical parents or the deepest existing ancestor when child
+directories are missing; unsupported paths retain the original exclusive handler.
+Plans containing other tools or
 async child submission/result targets retain ordinary scheduling. Named calls
 without whole-plan scoped admission and transient
 run calls retain their outer descriptor; only their inner ready file leaves overlap.
@@ -56,7 +57,7 @@ run calls retain their outer descriptor; only their inner ready file leaves over
 
 The original Shared_mount Write producer now prepares opaque Overwrite/Append
 resources as well as Read/Edit. It pins the selected allowed root and existing
-target/resolved-source parents without creating a file, reading content or asking
+target/resolved-source parents or ancestors without creating directories or files, reading content or asking
 the Gate. The same ordinary Write handler revalidates the exact input, owner,
 operation, current confinement and physical directory bindings before consuming
 those capabilities. Overwrite retains its atomic publication/recovery path;
@@ -70,7 +71,9 @@ Gate observers keep the original Task, parent invocation and physical leaf.
 | Missing files in one physical parent | Exclusive barrier | Parent creation claims preserve order; no guessed case or Unicode normalization |
 | Append through hard links or directory aliases | Exclusive barrier | Actual inode/entry claims preserve backend conflict order |
 | Write content/path from upstream outputs | Exclusive barrier after input resolution | The original producer binds resources after exact input validation |
-| Missing parent directories, endpoint trees or unsupported resources | Ordinary handler | Original exclusive handler, including authorized parent creation |
+| Missing directories under disjoint existing ancestors | Original exclusive handler | Each existing ancestor owns its subtree; independent authorizations may overlap |
+| Missing directories under one physical ancestor | Original exclusive handler | The shared ancestor claim preserves order, including spelling and directory aliases |
+| Endpoint trees or unsupported resources | Ordinary handler | Original exclusive handler, including authorized parent creation |
 | Async file effects | Refused without replay authority | Same refusal; resource claims grant no replay permission |
 
 An absent file has no object identity to unify filesystem spelling aliases, so
@@ -79,10 +82,31 @@ mutations of other entries under that parent. Existing targets keep their actual
 entry and object identities. A changed root, parent, owner or translated input
 cannot fall back to an ordinary write after a preparation was accepted.
 
-Four added feature scenarios cover actual public recipe authorization overlap
+For missing parent directories, preparation only opens the deepest existing
+ancestor. Before the original Gate, the consumer resolves the current target and
+recomputes the remaining missing directories. A predecessor can create those
+directories and the file: a preprepared Append then appends the predecessor's
+bytes instead of attempting exclusive creation. The pinned ancestor must retain
+its physical binding, and the resolved target and source must stay inside its
+claimed subtree. A redirect outside that ancestor is refused even when its
+destination is inside the allowed root. Directory creation and its commit
+observations still belong to the original authorized consumer.
+
+The immediate comparison baseline for missing-parent support is prepared Write
+PR #43455 (`8fc42fc5b832fdd454b785ce347b1f103a65930a`). Before, such nodes
+retained an exclusive barrier; after, they carry physical ancestor claims. A
+shared existing ancestor still orders those writes. This changes scheduling
+eligibility, not measured latency, the Serial outer invocation, async replay
+authority or the original Gate/publication protocol.
+
+Feature scenarios cover actual public recipe authorization overlap
 for existing targets and new targets under independent parents, upstream content
 with original Task/parent receipts, plus real consumer ownership/input/parent
-refusal, hard-link append semantics, missing-entry conflicts and release. They
+refusal, hard-link append semantics, missing-entry conflicts and release. Added
+missing-directory scenarios cover static and upstream-content recipes, no
+preauthorization creation, predecessor Overwrite then preprepared Append,
+ancestor aliases, disjoint/shared creation claims, released authority, ancestor
+replacement and redirects within/outside the claimed subtree. They
 are authored but not executed. The authorization rendezvous is a concurrency
 observation, not a latency threshold. Source parser checks do not prove these
 scenarios or a runtime speedup. For a matched Before/After, retain the same

@@ -9,8 +9,10 @@ SDK errored and native started are distinct facts; native start carries no
 completion verdict. Original and receiving turns/runtimes remain visible.
 This display implementation needs installed runtime/UI verification separately.
 
-Inline Read/Edit recipes and exact inline children can bind producer-owned file
+Inline Read/Edit/Write recipes and exact inline children can bind producer-owned file
 resources after upstream inputs resolve, including pure child argument validation.
+Shared-mount Overwrite/Append can retain an existing ancestor when parent
+directories are missing; creation stays at the original authorized Write boundary.
 See [recipe file execution](keeper-recipe-file-execution.md) for independent leaf
 execution, conflict order and call-owned cleanup. Async file effects require their
 own durable replay contract.

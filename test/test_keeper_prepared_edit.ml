@@ -332,13 +332,19 @@ let test_inline_recipe_writes_original_upstream_bytes () =
       "original_task_and_parent_retained", `Bool true]))
 ;;
 
-let test_recipe_writes_overlap ~create ~dynamic () =
+let test_recipe_writes_overlap ?(missing_parents = false) ~create ~dynamic () =
   fixture @@ fun env sw config meta recovery root ->
   public_bundle ~with_read:dynamic ~with_write:true env sw config meta recovery
   @@ fun meta task_id _cell causal bundle ->
-  let left = Filename.concat root (if create then "writes/left/result" else "writes/left")
-  and right = Filename.concat root (if create then "writes/right/result" else "writes/right") in
-  List.iter (fun path -> Fs_compat.mkdir_p (Filename.dirname path);
+  let target name = Filename.concat root
+      (if missing_parents then "writes/" ^ name ^ "/new/deep/result"
+       else if create then "writes/" ^ name ^ "/result"
+       else "writes/" ^ name) in
+  let left = target "left" and right = target "right" in
+  List.iter (fun path ->
+    let parent = if missing_parents then Filename.dirname (Filename.dirname (Filename.dirname path))
+      else Filename.dirname path in
+    Fs_compat.mkdir_p parent;
     if not create then write path "before") [left;right];
   let source = Filename.concat root "source" in
   write source "  원래 결과\n\n";
@@ -360,6 +366,9 @@ let test_recipe_writes_overlap ~create ~dynamic () =
   let rows = FS.For_testing.with_before_write_authorization (fun () ->
       if create then List.iter (fun path ->
         check bool "preparation and authorization create no target" false (Sys.file_exists path)) [left;right];
+      if missing_parents then List.iter (fun path ->
+        check bool "original authorization precedes missing parent creation" false
+          (Sys.file_exists (Filename.dirname path))) [left;right];
       incr entered;
       if !entered = 2 then Eio.Promise.resolve resolve_both ();
       Eio.Promise.await both)
@@ -425,6 +434,99 @@ let test_prepared_write_retains_owner_and_creation_conflicts () =
   check string "changed physical parent cannot consume the old resource" "replacement parent" (read target);
   check string "retired parent receives no effect" "original parent"
     (read (Filename.concat (parent ^ "-held") "result"))
+;;
+
+let test_prepared_missing_parent_writes_recompute_after_predecessor () =
+  fixture @@ fun _env sw config meta recovery root ->
+  let left = Filename.concat root "creation-left" in
+  let right = Filename.concat root "creation-right" in
+  List.iter Fs_compat.mkdir_p [left; right];
+  let target = Filename.concat left "new/deep/result" in
+  let input path content mode = `Assoc ["path", `String path;
+      "content", `String content; "mode", `String mode] in
+  let prepare input = match FS.prepare_write ~sw ~config ~meta ~args:input with
+    | Ok (Some prepared) -> prepared
+    | Ok None -> fail "missing parent Write lost its prepared resources"
+    | Error detail -> fail detail in
+  let consume meta prepared input = FS.handle_file_write_with_outcome
+      ~turn_sandbox_factory:None ~config ~meta ~publication_recovery:recovery
+      ~prepared_write:prepared ~args:input () in
+  let conflicts a b = List.exists (fun scope ->
+    List.exists (Agent_core.Tool_contract.Resource_scope.conflicts scope)
+      (FS.prepared_write_scopes b)) (FS.prepared_write_scopes a) in
+  let first_input = input target "  first\n" "overwrite" in
+  let append_input = input target "두 번째\n" "append" in
+  let first = prepare first_input and append = prepare append_input in
+  let sibling = prepare (input (Filename.concat left "other/result") "sibling" "overwrite") in
+  let independent = prepare (input (Filename.concat right "new/result") "other" "overwrite") in
+  let alias = Filename.concat root "creation-left-alias" in
+  Unix.symlink left alias;
+  let aliased = prepare (input (Filename.concat alias "aliased/result") "alias" "overwrite") in
+  check bool "future writes in one physical ancestor retain order" true (conflicts first append);
+  check bool "missing sibling directories share their physical ancestor" true (conflicts first sibling);
+  check bool "ancestor aliases retain the same creation claim" true (conflicts first aliased);
+  check bool "disjoint existing ancestors admit independent creation" false (conflicts first independent);
+  check bool "preparing every future write creates no directory" false
+    (Sys.file_exists (Filename.concat left "new"));
+  consume {meta with name="other-owner"} first first_input |> failed;
+  consume meta first (input target "changed bytes" "overwrite") |> failed;
+  check bool "rejected inputs create no directory" false (Sys.file_exists (Filename.dirname target));
+  let authorized = ref 0 in
+  FS.For_testing.with_before_write_authorization (fun () ->
+      incr authorized;
+      check bool "each Gate sees current predecessor directory state" (!authorized > 1)
+        (Sys.file_exists (Filename.dirname target)))
+    (fun () ->
+      consume meta first first_input |> completed;
+      consume meta append append_input |> completed);
+  check int "each original operation reaches its own authorization" 2 !authorized;
+  check string "preprepared Append consumes the predecessor's actual file" "  first\n두 번째\n" (read target);
+  FS.release_prepared_write independent;
+  consume meta independent (input (Filename.concat right "new/result") "other" "overwrite") |> failed;
+  check bool "released missing-parent authority creates no directory" false
+    (Sys.file_exists (Filename.concat right "new"));
+  List.iter FS.release_prepared_write [first; append; sibling; aliased]
+;;
+
+let test_prepared_missing_parent_write_retains_physical_ancestor () =
+  fixture @@ fun _env sw config meta recovery root ->
+  let input path = `Assoc ["path", `String path; "content", `String "original bytes"] in
+  let prepare input = match FS.prepare_write ~sw ~config ~meta ~args:input with
+    | Ok (Some prepared) -> prepared
+    | Ok None -> fail "missing parent Write was not prepared"
+    | Error detail -> fail detail in
+  let consume prepared input = FS.handle_file_write_with_outcome
+      ~turn_sandbox_factory:None ~config ~meta ~publication_recovery:recovery
+      ~prepared_write:prepared ~args:input () in
+  let retained = Filename.concat root "retained" in
+  Fs_compat.mkdir_p retained;
+  let target = Filename.concat retained "new/deep/result" in
+  let original_input = input target in
+  let prepared = prepare original_input in
+  Unix.rename retained (retained ^ "-held");
+  Fs_compat.mkdir_p retained;
+  consume prepared original_input |> failed;
+  List.iter (fun path -> check bool "rebound ancestors receive no effect" false (Sys.file_exists path))
+    [Filename.concat retained "new"; Filename.concat (retained ^ "-held") "new"];
+  let owned = Filename.concat root "owned" and other = Filename.concat root "other" in
+  List.iter Fs_compat.mkdir_p [owned; other];
+  let redirected = Filename.concat owned "new/deep/result" in
+  let redirected_input = input redirected in
+  let redirect_prepared = prepare redirected_input in
+  Unix.symlink other (Filename.concat owned "new");
+  consume redirect_prepared redirected_input |> failed;
+  check bool "a redirect outside the claimed ancestor creates nothing" false
+    (Sys.file_exists (Filename.concat other "deep"));
+  let materialized = Filename.concat owned "materialized" in
+  Fs_compat.mkdir_p materialized;
+  let internal_target = Filename.concat owned "later/deep/result" in
+  let internal_input = input internal_target in
+  let internal_prepared = prepare internal_input in
+  Unix.symlink materialized (Filename.concat owned "later");
+  consume internal_prepared internal_input |> completed;
+  check string "resolution inside the original claimed ancestor remains usable" "original bytes"
+    (read (Filename.concat materialized "deep/result"));
+  List.iter FS.release_prepared_write [prepared; redirect_prepared; internal_prepared]
 ;;
 
 let test_recipe_edits_overlap_with_original_source ?(dynamic = false) ~nested () =
@@ -1258,6 +1360,14 @@ let () = run "prepared actual file resources"
       (test_recipe_writes_overlap ~create:true ~dynamic:false);
     test_case "upstream content binds original Write resources when ready" `Quick
       (test_recipe_writes_overlap ~create:true ~dynamic:true);
+    test_case "missing directories under disjoint ancestors overlap original authorization" `Quick
+      (test_recipe_writes_overlap ~missing_parents:true ~create:true ~dynamic:false);
+    test_case "upstream writes create missing directories with original receipts" `Quick
+      (test_recipe_writes_overlap ~missing_parents:true ~create:true ~dynamic:true);
+    test_case "prepared future writes consume current predecessor state" `Quick
+      test_prepared_missing_parent_writes_recompute_after_predecessor;
+    test_case "missing parent writes retain their claimed physical ancestor" `Quick
+      test_prepared_missing_parent_write_retains_physical_ancestor;
     test_case "Write ownership creation claims hard links and release remain original" `Quick
       test_prepared_write_retains_owner_and_creation_conflicts];
     "actual filesystem and SDK", [

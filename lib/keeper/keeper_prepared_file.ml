@@ -156,10 +156,8 @@ end = struct
   ;;
 end
 
-let inspect_directory ~sw ~fs ~access ~leaf root components =
-  let capability = List.fold_left (fun parent component ->
-    let directory = Eio.Path.open_dir ~sw Eio.Path.(parent / component) in
-    (directory :> Eio.Fs.dir_ty Eio.Path.t)) root components in
+let inspect_directory_capability ~fs ~access ~leaf ~components
+    (capability : Eio.Fs.dir_ty Eio.Path.t) =
   match Eio.Path.native capability with
   | None -> Ok None
   | Some native ->
@@ -182,6 +180,13 @@ let inspect_directory ~sw ~fs ~access ~leaf root components =
            Ok (resource :: tail)) native_chain (Ok []) in
          Ok (Some { capability; components; identity = actual; native_chain
                   ; scope = Scope.create ~access ~occupied ~ancestors:ancestry }))
+;;
+
+let inspect_directory ~sw ~fs ~access ~leaf root components =
+  let capability = List.fold_left (fun parent component ->
+    let directory = Eio.Path.open_dir ~sw Eio.Path.(parent / component) in
+    (directory :> Eio.Fs.dir_ty Eio.Path.t)) root components in
+  inspect_directory_capability ~fs ~access ~leaf ~components capability
 ;;
 
 let validate_directory ~root directory =
@@ -304,13 +309,41 @@ module Write = struct
     ; root : Eio.Fs.dir_ty Eio.Path.t
     ; root_path : string
     ; target : directory
+    ; target_missing_parents : string list
     ; leaf : string
     ; source : directory
+    ; source_missing_parents : string list
     ; source_leaf : string
     ; resources : Scope.t list
     ; released : bool Atomic.t
     ; release_resources : unit -> unit
     }
+
+  (* Both preparation and consumption only open existing directories here.
+     The caller owns every opened capability's switch. Creation stays in the
+     original post-Gate consumer, with its directory commit observations. *)
+  let inspect_parent ~sw ~fs ~leaf root components =
+    let rec existing parent traversed_rev remaining =
+      match remaining with
+      | [] -> parent, List.rev traversed_rev, []
+      | component :: rest ->
+          (match Eio.Path.open_dir ~sw Eio.Path.(parent / component) with
+           | child -> existing (child :> Eio.Fs.dir_ty Eio.Path.t)
+               (component :: traversed_rev) rest
+           | exception Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) ->
+               parent, List.rev traversed_rev, remaining)
+    in
+    let capability, components, missing = existing root [] components in
+    let occupied_leaf = match missing with [] -> leaf | component :: _ -> component in
+    inspect_directory_capability ~fs ~access:Scope.Write ~leaf:occupied_leaf
+      ~components capability
+    |> Result.map (Option.map (fun directory -> directory, missing))
+
+  let within_ancestor ~ancestor directory =
+    if List.exists (fun (_, identity) -> equal_identity ancestor.identity identity)
+         directory.native_chain
+    then Ok ()
+    else Error "prepared Write resolved outside its claimed physical ancestor"
 
   let prepare ~sw ~operation ~config ~meta ~args ~confined =
     match operation, Fs_compat.get_fs_opt (),
@@ -327,12 +360,15 @@ module Write = struct
       let open_dir path =
         let directory = Eio.Path.open_dir ~sw:(Held_switch.switch held) path in
         (directory :> Eio.Fs.dir_ty Eio.Path.t) in
-      let object_claim ~follow directory leaf =
-        match Eio.Path.stat ~follow Eio.Path.(directory.capability / leaf) with
-        | stat when stat.kind = `Regular_file || stat.kind = `Symbolic_link ->
-            object_scope ~access:Scope.Write directory stat |> Result.map Option.some
-        | _ -> Error "prepared Write target must be a regular file, symbolic link or missing entry"
-        | exception Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) -> Ok None in
+      let object_claim ~follow directory ~missing leaf =
+        match missing with
+        | _ :: _ -> Ok None
+        | [] ->
+            (match Eio.Path.stat ~follow Eio.Path.(directory.capability / leaf) with
+             | stat when stat.kind = `Regular_file || stat.kind = `Symbolic_link ->
+                 object_scope ~access:Scope.Write directory stat |> Result.map Option.some
+             | _ -> Error "prepared Write target must be a regular file, symbolic link or missing entry"
+             | exception Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) -> Ok None) in
       let missing_entry_claim directory =
         (* An absent entry has no inode to unify filesystem spelling aliases.
            Its actual parent owns creation; do not guess case/Unicode folding. *)
@@ -351,22 +387,24 @@ module Write = struct
         let relative = Keeper_alerting_path.confined_root_relative_path confined in
         let root = if String.equal relative "." then anchor else open_dir Eio.Path.(anchor / relative) in
         let* () = Keeper_alerting_path.verify_confined_root_capability confined root in
-        let* target = inspect_directory ~sw:(Held_switch.switch held) ~fs
-            ~access:Scope.Write ~leaf root parents in
-        let* source = inspect_directory ~sw:(Held_switch.switch held) ~fs
-            ~access:Scope.Write ~leaf:source_leaf root source_parents in
+        let* target = inspect_parent ~sw:(Held_switch.switch held) ~fs ~leaf root parents in
+        let* source = inspect_parent ~sw:(Held_switch.switch held) ~fs
+            ~leaf:source_leaf root source_parents in
         match target, source with
-        | Some target, Some source ->
-            let* target_object = object_claim ~follow:false target leaf in
+        | Some (target, target_missing_parents), Some (source, source_missing_parents) ->
+            let* target_object = object_claim ~follow:false target
+                ~missing:target_missing_parents leaf in
             let* source_object = object_claim
-                ~follow:(operation = Keeper_tool_write_mode.Append) source source_leaf in
+                ~follow:(operation = Keeper_tool_write_mode.Append) source
+                ~missing:source_missing_parents source_leaf in
             let* target_object = claim target target_object in
             let* source_object = claim source source_object in
             let resources = target.scope :: source.scope
                 :: [target_object; source_object] in
             Ok (Some {operation; owner=owner ~config ~meta; args; root;
               root_path=Keeper_alerting_path.confined_root confined;
-              target; leaf; source; source_leaf; resources; released; release_resources})
+              target; target_missing_parents; leaf; source; source_missing_parents;
+              source_leaf; resources; released; release_resources})
         | None, _ | _, None -> Ok None in
       match (try inspect () with
         | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) -> Ok None
@@ -392,22 +430,55 @@ module Write = struct
     else if not (equal_owner prepared.owner (owner ~config ~meta)
                  && Yojson.Safe.equal prepared.args args) then
       Error "prepared Write belongs to a different owner or input"
-    else if not (String.equal prepared.root_path (Keeper_alerting_path.confined_root confined)
-        && split_leaf (Keeper_alerting_path.confined_relative_components confined)
-           = Some (prepared.target.components, prepared.leaf)) then
-      Error "prepared Write confined target changed"
+    else if not (String.equal prepared.root_path (Keeper_alerting_path.confined_root confined)) then
+      Error "prepared Write confined root changed"
     else
-      let endpoint = split_leaf (Keeper_alerting_path.confined_endpoint_components confined) in
-      let* source =
-        if endpoint = Some (prepared.source.components, prepared.source_leaf) then Ok prepared.source
-        else if operation = Keeper_tool_write_mode.Append
-            && endpoint = Some (prepared.target.components, prepared.leaf) then Ok prepared.target
-        else Error "prepared Write confined source changed" in
-      let* () = try
+      Eio.Switch.run @@ fun sw ->
+      let* target, missing_parents, leaf = try
+        let* fs = match Fs_compat.get_fs_opt () with
+          | Some fs -> Ok fs | None -> Error "prepared Write filesystem is unavailable" in
+        let target = split_leaf (Keeper_alerting_path.confined_relative_components confined) in
+        let endpoint = split_leaf (Keeper_alerting_path.confined_endpoint_components confined) in
+        let* target_parents, leaf = match target with
+          | Some target -> Ok target | None -> Error "prepared Write target has no leaf" in
+        let* source_parents, source_leaf = match endpoint with
+          | Some source -> Ok source | None -> Error "prepared Write source has no leaf" in
+        let* () =
           let* () = Keeper_alerting_path.verify_confined_root_capability confined prepared.root in
-          let* () = validate_directory ~root:prepared.root prepared.target in
-          validate_directory ~root:prepared.root source
-        with Eio.Io _ as error -> Error (Printexc.to_string error) in
-      consume ~root_dir:prepared.root ~parent_dir:prepared.target.capability
-        ~parent_components:prepared.target.components ~missing_parents:[] ~leaf:prepared.leaf
+          validate_directory ~root:prepared.root prepared.target in
+        let* target, missing_parents = match prepared.target_missing_parents with
+          | [] ->
+              if target = Some (prepared.target.components, prepared.leaf)
+              then Ok (prepared.target, [])
+              else Error "prepared Write confined target changed"
+          | _ :: _ ->
+              let* current = inspect_parent ~sw ~fs ~leaf prepared.root target_parents in
+              (match current with
+               | None -> Error "prepared Write target parent has no native identity"
+               | Some (current, missing) ->
+                   let* () = within_ancestor ~ancestor:prepared.target current in
+                   Ok (current, missing)) in
+        let* () = match prepared.source_missing_parents with
+          | [] ->
+              let* source =
+                if endpoint = Some (prepared.source.components, prepared.source_leaf) then Ok prepared.source
+                else if operation = Keeper_tool_write_mode.Append
+                    && endpoint = Some (target_parents, leaf) then Ok prepared.target
+                else Error "prepared Write confined source changed" in
+              validate_directory ~root:prepared.root source
+          | _ :: _ ->
+              let* () = validate_directory ~root:prepared.root prepared.source in
+              let* current = inspect_parent ~sw ~fs ~leaf:source_leaf prepared.root source_parents in
+              (match current with
+               | None -> Error "prepared Write source parent has no native identity"
+               | Some (current, _) -> within_ancestor ~ancestor:prepared.source current) in
+        Ok (target, missing_parents, leaf)
+      with
+      | Eio.Cancel.Cancelled _ as error -> raise error
+      | Eio.Io _ as error -> Error (Printexc.to_string error)
+      | Unix.Unix_error _ as error -> Error (Printexc.to_string error)
+      | Sys_error detail -> Error detail
+      in
+      consume ~root_dir:prepared.root ~parent_dir:target.capability
+        ~parent_components:target.components ~missing_parents ~leaf
 end

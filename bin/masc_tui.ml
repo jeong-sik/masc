@@ -12632,8 +12632,8 @@ let apply_http_surfaces state ~mailbox results =
       Option.iter (apply_approval_observation state) results.http_approvals;
     apply_http_scoped_data state results.http_scoped
   end else false in
-  refresh_changed_keeper_items state ~mailbox
-    ~roster_refreshed previous_items;
+  if roster_refreshed || Option.is_none results.http_scoped.http_keeper_roster then
+    refresh_changed_keeper_items state ~mailbox ~roster_refreshed previous_items;
   let reached result =
     Result.map (fun _ -> ()) result |> Result.map_error (fun _ -> ())
   in
@@ -13769,8 +13769,8 @@ let apply_http_scoped_refresh_success state ~currency_authority ~base_path ~mail
   let previous_items = visible_item_revision state in
   let authority = read_authority state in
   let roster_refreshed = apply_http_scoped_surfaces state ~currency_authority results in
-  refresh_changed_keeper_items state ~mailbox
-    ~roster_refreshed previous_items;
+  if roster_refreshed || Option.is_none results.http_keeper_roster then
+    refresh_changed_keeper_items state ~mailbox ~roster_refreshed previous_items;
   resume_reads_after_authority_change state ~mailbox ~refresh_inflight
     ~scoped_refresh_inflight ~scoped_refresh_followup ~before:authority;
   resume_authorized_input_after_refresh state ~was_unavailable ~base_path ~mailbox

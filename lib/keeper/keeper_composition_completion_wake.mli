@@ -18,15 +18,24 @@
 
     The result body is not carried. It is already durable in the async
     request record and [keeper_composition_status] reads it by request id;
-    copying it here would put the same bytes in two durable stores. *)
+    copying it here would put the same bytes in two durable stores.
+    A composition records its completion-delivery obligation before starting
+    the worker. Failed delivery is reconciled from exact canonical terminal
+    proof on startup and the existing maintenance pulse, without replay. *)
 
 val deliver
-  :  base_path:string
+  :  not_before:float
+  -> base_path:string
   -> keeper_name:string
   -> request_id:string
   -> composition_tool:string
   -> terminal:Keeper_event_queue.composition_terminal
   -> (unit, string) result
+(** [not_before] is the request's submission time as a Unix timestamp; it is
+    forwarded as the floor of the negative-delivery-evidence scan so a torn
+    write in an older, unrelated ledger partition cannot reject this
+    delivery. Both production callers pass the canonical request's
+    [submitted_at]; [0.] means no floor and scans the whole ledger. *)
 
 val on_worker_settled
   :  base_path:string
@@ -39,3 +48,8 @@ val on_worker_settled
     its work succeeded on evidence the store does not hold would be worse than
     leaving it to read the record itself. A non-terminal status is not a
     settlement to announce and is ignored. *)
+
+val reconcile : base_path:string -> (Keeper_composition_completion_outbox.report,
+                                     Keeper_composition_completion_outbox.error) result
+(** Recover pending completion deliveries from canonical request records on
+    startup and the existing maintenance pulse. Does not replay worker effects. *)

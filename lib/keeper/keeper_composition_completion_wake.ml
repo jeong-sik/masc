@@ -1,5 +1,5 @@
-(* The result is committed before it is announced. [enqueue_durable_result]
-   writes the pending snapshot first and only then updates the live queue, so
+(* The result is committed before it is announced. The one-shot queue writer
+   confirms strict snapshot durability before updating the live queue, so
    an [Error] here means the submitter has not been told and the caller can
    report the delivery as failed instead of acknowledging one that never
    landed.
@@ -15,7 +15,7 @@ let outcome_label : Keeper_event_queue.composition_terminal -> string = function
   | Keeper_event_queue.Composition_cancelled _ -> "cancelled"
 ;;
 
-let deliver ~base_path ~keeper_name ~request_id ~composition_tool ~terminal =
+let deliver ~not_before ~base_path ~keeper_name ~request_id ~composition_tool ~terminal =
   let completion =
     { Keeper_event_queue.cc_request_id = request_id
     ; cc_tool = composition_tool
@@ -46,7 +46,10 @@ let deliver ~base_path ~keeper_name ~request_id ~composition_tool ~terminal =
   in
   match
     try
-      Keeper_registry_event_queue.enqueue_durable_result ~base_path keeper_name stimulus
+      match Keeper_registry_event_queue.enqueue_stimulus_once_durable_result ~not_before ~base_path keeper_name stimulus with
+      | Keeper_registry_event_queue.Stimulus_enqueued
+      | Keeper_registry_event_queue.Stimulus_already_present -> Ok ()
+      | Keeper_registry_event_queue.Stimulus_storage_error detail -> Error detail
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | exn -> Error (Printexc.to_string exn)
@@ -147,15 +150,22 @@ let on_worker_settled ~base_path ~composition_tool settlement =
        (match
           deliver
             ~base_path
+            ~not_before:entry.Keeper_msg_async.submitted_at
             ~keeper_name:entry.Keeper_msg_async.submitted_by
             ~request_id:entry.Keeper_msg_async.request_id
             ~composition_tool
             ~terminal
         with
-        | Ok () -> ()
-        (* [deliver] already logged the reason. The result itself stays durable
-           in the async request record, so the Keeper can still read it with
-           keeper_composition_status; what was lost is being told. *)
+        | Ok () ->
+          (match Keeper_composition_completion_outbox.acknowledge
+                   ~base_path ~keeper_name:entry.submitted_by ~request_id:entry.Keeper_msg_async.request_id with
+           | Ok () -> ()
+           | Error error -> Log.Keeper.error ~keeper_name:entry.submitted_by
+               "composition delivery acknowledged by queue but outbox retirement failed request_id=%s: %s"
+               entry.request_id (Keeper_composition_completion_outbox.error_to_string error))
+        (* [deliver] already logged the reason. The pre-dispatch obligation
+           remains for canonical-result reconciliation; only delivery is
+           retried, while the result remains in the original request record. *)
         | Error _ -> ()))
   (* The store does not hold this settlement as canonical truth. Telling the
      Keeper its work succeeded on evidence that may not survive would be worse
@@ -175,4 +185,14 @@ let on_worker_settled ~base_path ~composition_tool settlement =
        request truth request_id=%s tool=%s"
       attempted_entry.Keeper_msg_async.request_id
       composition_tool
+;;
+
+let reconcile ~base_path =
+  Keeper_composition_completion_outbox.flush ~base_path
+    ~deliver:(fun ~composition_tool (entry : Keeper_msg_async.entry) ->
+      match terminal_of_status entry.status with
+      | None -> Error "canonical composition completion has a nonterminal status"
+      | Some terminal -> deliver ~base_path ~not_before:entry.submitted_at
+          ~keeper_name:entry.submitted_by
+          ~request_id:entry.request_id ~composition_tool ~terminal)
 ;;

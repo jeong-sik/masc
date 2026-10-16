@@ -683,7 +683,10 @@ let async_submission_result
     | Some identity -> identity
     | None -> Keeper_tool_plan.Composition_run_id.fresh () in
   let request_context_fields =
-    [ ( "composition_run_id"
+    [ "composition_tool", `String tool_name
+    ; "parent_tool_use_id", `String (Agent_core.Tool_contract.Invocation.tool_use_id parent_invocation)
+    ; "source_turn", `Int (Agent_core.Tool_contract.Invocation.turn parent_invocation)
+    ; ( "composition_run_id"
       , `String
           (Keeper_tool_plan.Composition_run_id.to_string composition_run_id) ) ]
     @ Option.to_list
@@ -692,6 +695,9 @@ let async_submission_result
            skill_reference)
     @ Option.to_list (Option.map (fun reference -> "draft_reference", Tool_output.normalized_artifact_ref_to_json reference) draft_reference)
     @ Option.to_list (Option.map (fun reference -> "run_artifact", Tool_output.normalized_artifact_ref_to_json reference) run_reference)
+    @ Option.to_list (Option.bind turn_context (fun context ->
+        Option.map (fun task_id -> "source_task_id", `String task_id)
+          context.Keeper_tool_call_log_context.task_id))
   in
   let request_context =
     match request_context_fields with
@@ -713,6 +719,10 @@ let async_submission_result
     (match
        Keeper_msg_async.submit_with_request_id
          ?request_context
+         ~on_accepted:(fun request_id ->
+           Keeper_composition_completion_outbox.prepare ~base_path:config.base_path
+             ~keeper_name:meta.name ~request_id ~composition_tool:tool_name
+           |> Result.map_error Keeper_composition_completion_outbox.error_to_string)
          ~background_sw
          ~base_path:config.base_path
          ~caller:meta.name

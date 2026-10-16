@@ -96,6 +96,7 @@ let queued_results ~base_path ~keeper_name =
 let deliver_or_fail config ~terminal =
   match
     Wake.deliver
+      ~not_before:0.
       ~base_path:config.Workspace.base_path
       ~keeper_name:submitter
       ~request_id
@@ -167,6 +168,65 @@ let the_same_result_arrives_once () =
       1
       (List.length
          (queued_results ~base_path:config.Workspace.base_path ~keeper_name:submitter)))
+;;
+
+let conflicting_results_leave_the_original_delivery () =
+  with_workspace (fun config ->
+    ensure_keeper config ~keeper_name:submitter;
+    deliver_or_fail config ~terminal:Event_queue.Composition_succeeded;
+    let assert_rejected ~tool ~terminal =
+      match Wake.deliver ~not_before:0. ~base_path:config.Workspace.base_path
+          ~keeper_name:submitter ~request_id ~composition_tool:tool ~terminal with
+      | Error _ -> ()
+      | Ok () -> fail "same request with conflicting completion payload was accepted" in
+    assert_rejected ~tool:composition_tool ~terminal:(Event_queue.Composition_failed "x");
+    assert_rejected ~tool:"another-composition" ~terminal:Event_queue.Composition_succeeded;
+    match queued_results ~base_path:config.Workspace.base_path ~keeper_name:submitter with
+    | [ _, completion ] ->
+      check string "original tool remains authoritative" composition_tool completion.cc_tool;
+      check bool "original terminal remains authoritative" true
+        (completion.cc_terminal = Event_queue.Composition_succeeded)
+    | _ -> fail "conflicting settlement changed or duplicated the original delivery")
+;;
+
+let uncertain_queue_durability_does_not_acknowledge_delivery () =
+  with_workspace (fun config ->
+    ensure_keeper config ~keeper_name:submitter;
+    let base_path = config.Workspace.base_path in
+    let completion = { Event_queue.cc_request_id = request_id
+                     ; cc_tool = composition_tool
+                     ; cc_terminal = Event_queue.Composition_succeeded } in
+    let stimulus : Event_queue.stimulus =
+      { post_id = Event_queue.composition_completion_post_id completion
+      ; urgency = Event_queue.Immediate
+      ; arrived_at = Time_compat.now ()
+      ; payload = Event_queue.Composition_completed completion } in
+    let parent_syncs = Atomic.make 0 in
+    let fail_parent_sync path state =
+      Fs_compat.mkdir_p (Filename.dirname path);
+      let content = Keeper_event_queue_snapshot_codec.encode_state state in
+      Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
+        ~sync_parent:(fun _ ->
+          ignore (Atomic.fetch_and_add parent_syncs 1);
+          raise (Unix.Unix_error (Unix.EIO, "fsync", "completion queue parent")))
+        path content
+      |> Result.map_error Fs_compat.atomic_replace_failure_to_string in
+    let attempt () =
+      match Keeper_event_queue_persistence.For_testing.enqueue_stimulus_once_with_confirmation
+          ~confirm_snapshot:fail_parent_sync ~already_delivered:(fun () -> Ok false)
+          ~base_path ~keeper_name:submitter stimulus with
+      | Error _ -> ()
+      | Ok () -> fail "queue parent fsync failure acknowledged a one-shot delivery" in
+    attempt ();
+    check int "renamed but unconfirmed source remains visible" 1
+      (List.length (queued_results ~base_path ~keeper_name:submitter));
+    attempt ();
+    check int "same-source retry crosses parent fsync again" 2 (Atomic.get parent_syncs);
+    check int "uncertain durability retry does not duplicate source" 1
+      (List.length (queued_results ~base_path ~keeper_name:submitter));
+    deliver_or_fail config ~terminal:Event_queue.Composition_succeeded;
+    check int "confirmed retry preserves one original result" 1
+      (List.length (queued_results ~base_path ~keeper_name:submitter)))
 ;;
 
 (* The wake is only worth anything if the turn can read what arrived. The
@@ -458,14 +518,168 @@ let a_non_durable_settlement_is_not_announced () =
       (List.length (queued_results ~base_path ~keeper_name:submitter)))
 ;;
 
+let completion_delivery_recovers_without_replaying_or_reconsuming () =
+  with_workspace (fun config ->
+    ensure_keeper config ~keeper_name:submitter;
+    let module Outbox = Masc.Keeper_composition_completion_outbox in
+    let module Queue = Masc.Keeper_registry_event_queue in
+    let base_path = config.Workspace.base_path in
+    Eio.Switch.run @@ fun background_sw ->
+    let release_worker, release = Eio.Promise.create () in
+    let worker_settled, settled = Eio.Promise.create () in
+    let dispatched = Atomic.make 0 in
+    let accepted = Async.submit_with_request_id
+        ~request_context:[ "composition_tool", `String composition_tool
+                         ; "composition_run_id", `String "outbox-run"
+                         ; "parent_tool_use_id", `String "original-invocation" ]
+        ~on_accepted:(fun request_id ->
+          Outbox.prepare ~base_path ~keeper_name:submitter ~request_id ~composition_tool
+          |> Result.map_error Outbox.error_to_string)
+        ~on_worker_settled:(fun settlement ->
+          Wake.on_worker_settled ~base_path ~composition_tool settlement;
+          Eio.Promise.resolve settled ())
+        ~background_sw ~base_path ~caller:submitter ~keeper_name:submitter
+        ~f:(fun ~request_id:_ _request_sw ->
+          ignore (Atomic.fetch_and_add dispatched 1);
+          Eio.Promise.await release_worker;
+          Tool_result.make_ok ~tool_name:composition_tool ~start_time:(Tool_timing.start ())
+            ~data:(`Assoc [ "exports", `Assoc [ "answer", `String "original result" ] ]) ()) ()
+      |> Result.get_ok in
+    check bool "completion obligation precedes worker acceptance" true
+      (accepted.acceptance = Async.Durably_accepted);
+    let waiting = Wake.reconcile ~base_path |> Result.get_ok in
+    check int "active request keeps one delivery obligation" 1 waiting.waiting;
+    let queue_path = Filename.concat
+        (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) submitter)
+        Keeper_event_queue_persistence.snapshot_filename in
+    Fs_compat.mkdir_p (Filename.dirname queue_path);
+    Fs_compat.save_file queue_path "broken queue snapshot";
+    Eio.Promise.resolve release ();
+    Eio.Promise.await worker_settled;
+    let failed = Wake.reconcile ~base_path |> Result.get_ok in
+    check int "actual queue storage failure retains delivery" 1 (List.length failed.failures);
+    check int "failed delivery does not claim success" 0 failed.delivered;
+    check int "worker executed once" 1 (Atomic.get dispatched);
+    (match Async.load_canonical_durable_terminal ~base_path ~caller:submitter accepted.request_id with
+     | Ok proof ->
+       (match (Async.durable_terminal_entry proof).status with
+        | Async.Done { ok = true; data = Some data; _ } ->
+          check string "original result survives notification failure" "original result"
+            Yojson.Safe.Util.(data |> member "exports" |> member "answer" |> to_string)
+        | _ -> fail "canonical worker result was lost")
+     | Error error -> fail (Async.canonical_terminal_error_to_string error));
+    Sys.remove queue_path;
+    Async.For_testing.clear ();
+    let queued_but_unacknowledged = Outbox.flush ~base_path
+        ~deliver:(fun ~composition_tool entry ->
+          match Wake.deliver ~base_path ~not_before:entry.Async.submitted_at
+              ~keeper_name:entry.Async.submitted_by
+              ~request_id:entry.request_id ~composition_tool ~terminal:Event_queue.Composition_succeeded with
+          | Error _ as error -> error
+          | Ok () -> Error "injected interruption after durable enqueue, before producer acknowledgement")
+      |> Result.get_ok in
+    check int "enqueue-ack gap leaves the same obligation" 1 (List.length queued_but_unacknowledged.failures);
+    let source = match queued_results ~base_path ~keeper_name:submitter with
+      | [ source, completion ] ->
+        check string "recovery delivers the original request" accepted.request_id completion.cc_request_id;
+        source
+      | _ -> fail "recovery lost or duplicated completion" in
+    let selection = match Queue.select_when_result ~base_path submitter ~now:(Time_compat.now ()) ~ready:(fun _ -> true) with
+      | Ok (Some selection) -> selection
+      | _ -> fail "recovered completion was not admitted" in
+    Masc.Keeper_reaction_ledger.record_event_queue_turn_started ~base_path ~keeper_name:submitter source;
+    (match Queue.terminalize_pending_turn_completed_result ~base_path submitter
+        ~applied_at:(Time_compat.now ()) ~selection with
+     | Ok (Queue.Turn_source_acked _) -> ()
+     | Ok Queue.Turn_selection_withdrawn -> fail "completion disappeared before consumption"
+     | Error detail -> fail detail);
+    let ledger_store =
+      Dated_jsonl.open_store
+        (Masc.Keeper_reaction_ledger.location ~base_path ~keeper_name:submitter)
+    in
+    let ledger_paths = Dated_jsonl.range_day_file_paths_result ledger_store
+        ~since:"1970-01-01" ~until:"9999-12-31" |> Result.get_ok in
+    check bool "consumption has physical ledger evidence" true (ledger_paths <> []);
+    let originals = List.map (fun path -> path, Fs_compat.load_file path) ledger_paths in
+    List.iter (fun (path, _) -> Fs_compat.save_file path "{broken consumption evidence}\n") originals;
+    let unreadable = Wake.reconcile ~base_path |> Result.get_ok in
+    check int "corrupted consumption evidence retains the original obligation" 1
+      (List.length unreadable.failures);
+    check int "unproven absence does not retire delivery" 0 unreadable.delivered;
+    check int "corrupted evidence cannot re-enqueue consumed source" 0
+      (List.length (queued_results ~base_path ~keeper_name:submitter));
+    List.iter (fun (path, contents) -> Fs_compat.save_file path contents) originals;
+    let recovered = Wake.reconcile ~base_path |> Result.get_ok in
+    check int "consumed completion retires its pending obligation" 1 recovered.delivered;
+    check int "recovered completion is not consumed again" 0 (List.length (queued_results ~base_path ~keeper_name:submitter));
+    check int "delivery recovery never replays the worker" 1 (Atomic.get dispatched);
+    let empty = Wake.reconcile ~base_path |> Result.get_ok in
+    check int "retired obligations leave the pending partition" 0 empty.inspected;
+    Printf.printf "composition_completion_trial dispatches=%d initial_queue_failure=true restart_memory_cleared=true recovered_deliveries=%d duplicate_pending=0\n%!"
+      (Atomic.get dispatched) recovered.delivered)
+;;
+
+let rec mkdir_p path =
+  if path = "" || path = "." || path = "/"
+  then ()
+  else if Sys.file_exists path
+  then ()
+  else (
+    mkdir_p (Filename.dirname path);
+    Unix.mkdir path 0o755)
+;;
+
+(* The completion path the P2 was reported on: a torn row in a partition older
+   than the request must not reject the delivery of a brand-new completion.
+   Before the floor existed, the strict absence scan read every partition and
+   turned that unrelated damage into [Stimulus_storage_error]. *)
+let an_older_torn_row_does_not_block_a_new_completion () =
+  with_workspace (fun config ->
+    ensure_keeper config ~keeper_name:submitter;
+    let base_path = config.Workspace.base_path in
+    let dir =
+      Filename.concat
+        (Masc.Keeper_reaction_ledger.store_dir ~base_path ~keeper_name:submitter)
+        "2020-01"
+    in
+    mkdir_p dir;
+    Out_channel.with_open_bin
+      (Filename.concat dir "01.jsonl")
+      (fun oc -> output_string oc "not-json\n");
+    (match
+       Wake.deliver
+         ~not_before:(Unix.gettimeofday ())
+         ~base_path
+         ~keeper_name:submitter
+         ~request_id
+         ~composition_tool
+         ~terminal:Event_queue.Composition_succeeded
+     with
+     | Ok () -> ()
+     | Error detail ->
+       fail ("an older partition's torn row rejected a new completion: " ^ detail));
+    match queued_results ~base_path ~keeper_name:submitter with
+    | [ _, completion ] ->
+      check string "the new completion is delivered" request_id completion.cc_request_id
+    | _ -> fail "older ledger damage lost or duplicated the completion")
+;;
+
 let () =
   run
     "keeper composition completion wake"
     [ ( "delivery"
       , [ test_case "the result reaches the submitter" `Quick
             the_result_reaches_the_submitter
+        ; test_case "delivery recovers without replay or repeated consumption" `Quick
+            completion_delivery_recovers_without_replaying_or_reconsuming
         ; test_case "a failure carries its detail" `Quick a_failure_carries_its_detail
         ; test_case "the same result arrives once" `Quick the_same_result_arrives_once
+        ; test_case "conflicting results preserve the original" `Quick
+            conflicting_results_leave_the_original_delivery
+        ; test_case "uncertain queue durability cannot acknowledge delivery" `Quick
+            uncertain_queue_durability_does_not_acknowledge_delivery
+        ; test_case "an older torn ledger row does not block a new completion" `Quick
+            an_older_torn_row_does_not_block_a_new_completion
         ] )
     ; ( "the turn"
       , [ test_case "can read the result" `Quick the_turn_can_read_the_result

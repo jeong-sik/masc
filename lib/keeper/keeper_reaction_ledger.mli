@@ -84,6 +84,9 @@ val stimulus_id_of_event_queue : Keeper_event_queue.stimulus -> string
 (** Stable id derived from the event queue stimulus payload. Scheduled wakes
     preserve the enclosing schedule occurrence [post_id] exactly. *)
 
+val stimulus_kind_of_event_queue : Keeper_event_queue.stimulus -> stimulus_kind
+(** Canonical typed source kind for exact one-shot delivery evidence. *)
+
 val record_event_queue_stimulus :
   base_path:string -> keeper_name:string -> Keeper_event_queue.stimulus -> unit
 (** Append a [record_kind="stimulus"] row for an enqueued stimulus. *)
@@ -214,6 +217,38 @@ val event_queue_delivery_seen_for_source_result :
     cancelled or transferred source must not be recreated on startup. Invalid
     matching rows do not become positive evidence; read failures remain
     explicit so callers can conservatively replay. *)
+
+type strict_delivery_evidence_error =
+  | Delivery_evidence_unavailable of event_queue_reaction_evidence_error
+  | Evidence_incomplete of
+      { malformed_row_count : int
+      ; semantic_invalid_row_count : int
+      ; first_reason : row_quarantine_reason
+      }
+
+val strict_delivery_evidence_error_to_string : strict_delivery_evidence_error -> string
+
+val event_queue_delivery_seen_for_source_strict_result :
+  not_before:float ->
+  base_path:string ->
+  keeper_name:string ->
+  post_id:string ->
+  stimulus_kind:stimulus_kind ->
+  (bool, strict_delivery_evidence_error) result
+(** Scan owned current-generation rows through the canonical decoder. Exact
+    valid turn-entry or accepted-terminal evidence returns [Ok true], even
+    when unrelated rows are malformed or semantically invalid. Without
+    positive evidence, any invalid row produces {!Evidence_incomplete}; only
+    a complete valid scan can return [Ok false]. Empty identities and owned
+    storage failures remain typed {!Delivery_evidence_unavailable} errors.
+    This strict absence authority is for one-shot recovery; the permissive
+    reader above and its existing callers retain their prior semantics.
+
+    [not_before] is the request's submission time as a Unix timestamp. Only
+    day partitions at or after its UTC calendar day are opened: a source's
+    evidence cannot predate the request that produced it, so an older
+    partition's torn write is not this source's evidence and must not turn its
+    absence into an error. [0.] means no floor and scans the whole ledger. *)
 
 val summary_for_keeper :
   base_path:string -> keeper_name:string -> limit:int -> Yojson.Safe.t

@@ -466,6 +466,27 @@ let enqueue_stimulus_durable_result
   | Error error -> Stimulus_storage_error (durable_intake_error_to_string error)
 ;;
 
+let enqueue_stimulus_once_durable_result ?not_before ~base_path name stimulus =
+  let not_before = Option.value not_before ~default:0. in
+  let already_delivered () =
+    Keeper_reaction_ledger.event_queue_delivery_seen_for_source_strict_result
+      ~not_before
+      ~base_path ~keeper_name:name ~post_id:stimulus.Keeper_event_queue.post_id
+      ~stimulus_kind:(Keeper_reaction_ledger.stimulus_kind_of_event_queue stimulus)
+    |> Result.map_error Keeper_reaction_ledger.strict_delivery_evidence_error_to_string
+  in
+  match with_durable_intake ~base_path ~keeper_name:name
+      (fun () ->
+        match Keeper_event_queue_persistence.enqueue_stimulus_once_result
+            ~already_delivered ~base_path ~keeper_name:name
+            ~after_commit:(publish_pending ~base_path name) stimulus with
+        | Ok Keeper_event_queue_persistence.Enqueued -> Stimulus_enqueued
+        | Ok Keeper_event_queue_persistence.Already_present -> Stimulus_already_present
+        | Error detail -> Stimulus_storage_error detail) with
+  | Ok result -> result
+  | Error error -> Stimulus_storage_error (durable_intake_error_to_string error)
+;;
+
 let project_accepted_transfer_durable_result
       ?intake_token
       ~base_path

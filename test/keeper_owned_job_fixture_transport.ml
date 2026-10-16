@@ -61,6 +61,19 @@ elif args[:1] == ["info"]:
 elif args[:2] == ["image", "inspect"]:
     emit([{"Id": image_id, "Os": "linux", "Config": {"Env": [], "Volumes": {"/tmp/keeper-creds": {}}}}])
 elif args[:2] == ["container", "ls"]:
+    projection = option("--format", args)
+    shared = projection != "{{json .ID}}"
+    if shared:
+        cli = pathlib.Path(option("--config", argv))
+        assert cli.is_dir() and not list(cli.iterdir())
+        assert cli.stat().st_mode & 0o777 == 0o700
+        if control.get("presence_blocked"):
+            (root / "presence-entered").write_text(str(cli))
+            while not (root / "presence-release").exists():
+                time.sleep(0.01)
+    if shared and control.get("presence_unavailable"):
+        print("synthetic shared presence transport failure", file=sys.stderr)
+        sys.exit(26)
     container = state["container"]
     if container:
         filters = many("--filter", args)
@@ -69,7 +82,30 @@ elif args[:2] == ["container", "ls"]:
         exact_ids = [value[len("id="):] for value in filters if value.startswith("id=")]
         visible = not (wanted and control.get("mode") == "hide_owner_inventory")
         if visible and all(container["Config"]["Labels"].get(key) == value for key, value in wanted.items()) and all(value == container["Id"] for value in exact_ids):
-            emit(container["Id"])
+            if not shared:
+                emit(container["Id"])
+            else:
+                labels = container["Config"]["Labels"]
+                projected = {"container_id": container["Id"],
+                    "component": labels["masc.mcp.component"],
+                    "kind": labels["masc.mcp.kind"],
+                    "base_path_hash": labels["masc.mcp.base_path_hash"],
+                    "keeper_name": labels["masc.mcp.keeper"],
+                    "job_id": labels["masc.mcp.owned_job"]}
+                if control.get("presence_wrong_scope"):
+                    projected["base_path_hash"] = "other-workspace"
+                padding = None
+                padding_rows = 0
+                if control.get("presence_padding_bytes"):
+                    padding = dict(projected, keeper_name="unrelated-owner", job_id="unrelated-original-job")
+                    row_bytes = len(json.dumps(padding).encode()) + 1
+                    padding_rows = (control["presence_padding_bytes"] + row_bytes - 1) // row_bytes
+                    for _ in range(padding_rows):
+                        emit(padding)
+                emit(projected)
+                if padding:
+                    for _ in range(padding_rows):
+                        emit(padding)
 elif args[:2] == ["container", "create"]:
     labels = dict(value.split("=", 1) for value in many("--label", args))
     require_intent(labels["masc.mcp.owned_job"], "create_requested")

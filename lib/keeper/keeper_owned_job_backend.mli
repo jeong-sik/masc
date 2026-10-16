@@ -69,13 +69,25 @@ type presence_hint =
   | Owned_container_seen
   | Presence_unavailable of error
 
-val presence_hint : preparation -> presence_hint
+type presence_round
+val create_presence_round : unit -> presence_round
+(** Empty, process-local read scope for one maintenance pulse. Single-domain
+    Eio callers may share it across recovery fibers; it performs no I/O until
+    an unchanged held owner asks for a hint. Never retain it across pulses. *)
+
+val presence_hint : ?round:presence_round -> preparation -> presence_hint
 (** Non-authoritative reactivation hint for a previously held absent job.
     Check the original private-directory/CLI authority and exact owner-label
     inventory, without observing daemon identity or accepting a container.
     Absence cannot settle a phase, authorize cleanup or permit another launch.
     A positive hint must go through full [inspect] before any state change or
-    effect. Errors remain explicit; cancellation propagates. *)
+    effect. With [round], equivalent frozen backend routes share one in-flight
+    inventory through a fresh empty CLI directory, never another job's CLI.
+    Shared rows come from complete owned pipe captures, never bounded process
+    previews; incomplete capture cannot establish absence.
+    Each caller validates its own directories before and after the shared read.
+    Changed routes do not share; cancellation may restart this read-only fetch
+    for a remaining caller. Errors remain explicit; cancellation propagates. *)
 
 val create : preparation -> (observation, error) result
 val start : container_id:string -> preparation -> (observation, error) result

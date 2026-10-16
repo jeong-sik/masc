@@ -14,6 +14,10 @@ val pulse : sw:Eio.Switch.t -> t -> (unit, Keeper_owned_job_store.error) result
     Unchanged previously absent owners use an exact-label presence hint until
     a positive observation requires full reconciliation. A changed owner or a
     new supervisor cannot reuse that process-local held evidence.
+    A pulse shares one inventory per equivalent frozen backend route among
+    unchanged held owners; each owner checks its own private directory/CLI
+    authority. The batch uses a separate empty CLI scope and never advances a
+    job phase. Full inspection and new jobs remain independent of this read.
     Single-domain Eio caller; reservations and hints are not effect authority. *)
 
 type report =

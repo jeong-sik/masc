@@ -6,6 +6,7 @@
  (wrapped false)
  (modules
   process_eio
+  process_memory
   eio_process_capture
   unix_foreground_process
   process_output_capture
@@ -39,4 +40,4 @@
   threads)
  (foreign_stubs
   (language c)
-  (names posix_spawn_stubs)))
+  (names posix_spawn_stubs process_memory_stubs)))

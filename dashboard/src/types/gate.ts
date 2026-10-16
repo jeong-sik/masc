@@ -164,7 +164,30 @@ export interface KeeperAutoJudgeRearmExpectation {
 
 export type ApprovalQueuePhase = 'queued' | 'judging' | 'human_required' | 'blocked'
 
+export type KeeperApprovalOrigin =
+  | { source: { kind: 'no_admitted_source' }; turn_ref: null }
+  | {
+      source:
+        | { kind: 'direct_operation'; operation_id: string }
+        | {
+            kind: 'admitted_sources'
+            sources: Array<{ snapshot_ref: string; admitted_revision: string; board_post_id: string | null }>
+          }
+      turn_ref: string
+    }
+
+/** Exact reply authority from Keeper_continuation_channel, not a display SurfaceRef. */
+export type KeeperApprovalContinuationChannel =
+  | { kind: 'dashboard'; thread_id: string }
+  | { kind: 'discord'; channel_id: string; user_id: string; guild_id?: string; parent_channel_id?: string; thread_id?: string; reply_to_message_id?: string }
+  | { kind: 'slack'; channel_id: string; user_id: string; team_id?: string; thread_ts?: string }
+  | { kind: 'imessage'; chat_identifier: string; user_id: string; chat_guid?: string }
+  | { kind: 'keeper'; keeper_name: string }
+  | { kind: 'unrouted'; reason: string }
+
 export interface KeeperApprovalQueueItem {
+  origin: KeeperApprovalOrigin
+  continuation_channel: KeeperApprovalContinuationChannel
   id: string
   keeper_name: string
   tool_name: string

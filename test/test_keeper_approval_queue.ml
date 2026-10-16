@@ -382,6 +382,78 @@ let test_logical_origin_survives_approval_and_reopen () =
    (match (read_original ()).turn_ref with Some x -> Ids.Turn_ref.to_string x | None -> Alcotest.fail "no witness"))
 ;;
 
+let test_pending_origin_projection_and_audit_keep_actual_witness () =
+  let module Origin = Keeper_approval_origin in
+  let base_path = temp_dir () in
+  let keeper_name = "projected-origin" in
+  AQ.For_testing.reset_runtime_state ();
+  Keeper_approval.Audit.For_testing.reset_store ();
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      Keeper_approval.Audit.For_testing.reset_store ();
+      cleanup_dir base_path)
+    (fun () ->
+      ignore (install_exn ~base_path);
+      ensure_keeper_exists ~base_path ~keeper_name;
+      let board : Keeper_event_queue.stimulus =
+        { post_id = "board-actual-source"; urgency = Normal; arrived_at = 1.0
+        ; payload = Board_signal
+            { kind = Post_created; author = "author"; title = "request"
+            ; content = "admitted request"; hearth = None; updated_at = None } }
+      in
+      let selections =
+        Keeper_event_queue.enqueue Keeper_event_queue.empty board
+        |> fun queue -> Keeper_event_queue_state.with_pending queue
+            (Keeper_event_queue_state.with_revision 7L Keeper_event_queue_state.empty)
+        |> Keeper_event_queue_state.pending_selections
+      in
+      let origin = Origin.from_admission (Origin.Admitted selections)
+          ~turn_ref:(Ids.Turn_ref.make ~trace_id:"actual-origin-trace" ~absolute_turn:12)
+        |> Result.get_ok
+      in
+      let channel = Keeper_continuation_channel.slack ~team_id:(Some "actual-team")
+          ~channel_id:"actual-channel" ~thread_ts:(Some "123.456") ~user_id:"actual-user"
+        |> Result.get_ok
+      in
+      let input = `Assoc [ "post_id", `String "invented-from-input" ] in
+      let id = match AQ.submit_pending ~origin ~keeper_name ~tool_name:"external-effect"
+          ~call_summary:None ~input ~base_path ~continuation_channel:channel
+          ~request_context:(`Assoc [ "private_context", `String "must-stay-private" ]) () with
+        | Ok submission -> submission.approval_id
+        | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.storage_error_to_string error)
+      in
+      let row = match AQ.list_pending_dashboard_json_for_workspace ~base_path with
+        | Ok [ row ] -> row
+        | Ok _ -> Alcotest.fail "expected one projected approval"
+        | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.storage_error_to_string error)
+      in
+      let open Yojson.Safe.Util in
+      let check_provenance row =
+        Alcotest.(check yojson) "original admitted source" (Origin.to_yojson origin) (row |> member "origin");
+        Alcotest.(check yojson) "actual reply route" (Keeper_continuation_channel.to_yojson channel)
+          (row |> member "continuation_channel");
+        Alcotest.(check yojson) "private request context excluded" `Null (row |> member "request_context")
+      in
+      check_provenance row;
+      (match AQ.mark_summary_pending ~id with
+       | Ok true -> ()
+       | Ok false -> Alcotest.fail "summary transition was not saved"
+       | Error _ -> Alcotest.fail "summary transition failed");
+      (match AQ.resolve_with_policy ~base_path ~id ~decision:Rule_types.Decision.Approve
+          ~source:Rule_types.Human_operator () with
+       | Ok _ -> () | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
+      let rows = match Keeper_approval.Audit.read_recent ~base_path ~n:20 () with
+        | Ok rows -> rows | Error _ -> Alcotest.fail "origin audit rows unreadable"
+      in
+      List.iter (fun event ->
+        match List.find_opt (fun row -> member "id" row = `String id
+            && member "event" row = `String event) rows with
+        | Some row -> check_provenance row
+        | None -> Alcotest.fail ("missing origin audit event " ^ event))
+        [ "pending"; "summary_updated"; "resolved" ])
+;;
+
 let test_mixed_hitl_board_origin_keeps_exact_grant_separate () =
   let module Origin = Keeper_approval_origin in
   let module Causal = Masc.Keeper_gate_causal_context in
@@ -7062,6 +7134,8 @@ let () =
             test_logical_origin_survives_approval_and_reopen
         ; Alcotest.test_case "mixed HITL and Board origins preserve exact grant" `Quick
             test_mixed_hitl_board_origin_keeps_exact_grant_separate
+        ; Alcotest.test_case "pending projection and audit preserve actual origin" `Quick
+            test_pending_origin_projection_and_audit_keep_actual_witness
         ; Alcotest.test_case
             "retry folds onto unconsumed grant until consumed"
             `Quick

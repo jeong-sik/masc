@@ -21,6 +21,8 @@ function deferred<T>() {
 function queueItem(id: string): KeeperApprovalQueueItem {
   return {
     id,
+    origin: { source: { kind: 'no_admitted_source' }, turn_ref: null },
+    continuation_channel: { kind: 'keeper', keeper_name: 'keeper-x' },
     keeper_name: 'keeper-x',
     tool_name: 'fs_write',
     waiting_s: 10,

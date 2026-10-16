@@ -3,6 +3,7 @@ import { currentDashboardActor, get, post, del, put, runRequest, defaultBoardVot
 import { isRecord, asNullableString, asString, asNumber, asInt, asStringList } from '../components/common/normalize'
 import { normalizePendingConfirmation } from '../pending-confirm'
 import { timeBoardRequest } from '../board-metrics'
+import { normalizeKeeperApprovalOrigin, normalizeKeeperApprovalContinuationChannel } from '../lib/keeper-approval-origin'
 import type { KeeperChatOperationState } from './keeper'
 import type {
   BoardActorIdentity, BoardPost, BoardPostOrigin, BoardPostCloseState, BoardComment, BoardReactionSummary,
@@ -297,6 +298,8 @@ export function normalizeKeeperApprovalQueueItem(raw: unknown): KeeperApprovalQu
     'requested_at',
     'waiting_s',
     'turn_id',
+    'origin',
+    'continuation_channel',
     'task_id',
     'goal_id',
     'phase',
@@ -313,6 +316,9 @@ export function normalizeKeeperApprovalQueueItem(raw: unknown): KeeperApprovalQu
       hasInput ? [...canonicalKeys, 'input', 'input_preview'] : canonicalKeys,
     )
   ) return null
+  const origin = normalizeKeeperApprovalOrigin(raw.origin)
+  const continuationChannel = normalizeKeeperApprovalContinuationChannel(raw.continuation_channel)
+  if (origin === null || continuationChannel === null) return null
   const id = asString(raw.id, '').trim()
   const keeperName = asString(raw.keeper_name, '').trim()
   const toolName = asString(raw.tool_name, '').trim()
@@ -404,6 +410,8 @@ export function normalizeKeeperApprovalQueueItem(raw: unknown): KeeperApprovalQu
   })()
   if (!validPair) return null
   return {
+    origin,
+    continuation_channel: continuationChannel,
     id,
     keeper_name: keeperName,
     tool_name: toolName,

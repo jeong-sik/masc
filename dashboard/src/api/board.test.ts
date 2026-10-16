@@ -222,6 +222,8 @@ describe('normalizeKeeperApprovalQueueItem', () => {
   // input (Keeper_approval_queue.pending_entry_json_fields). A stale member
   // left in the allowed list made every live row a violation.
   const serverPendingRow = {
+    origin: { source: { kind: 'no_admitted_source' }, turn_ref: null },
+    continuation_channel: { kind: 'keeper', keeper_name: 'fixture-origin-recipient' },
     id: 'q-live',
     keeper_name: 'janitor',
     tool_name: 'shell_exec',
@@ -242,12 +244,30 @@ describe('normalizeKeeperApprovalQueueItem', () => {
     expect(normalizeKeeperApprovalQueueItem(serverPendingRow)?.id).toBe('q-live')
   })
 
+  it('retains the actual origin and continuation instead of inferring them from the input', () => {
+    const origin = { source: { kind: 'direct_operation', operation_id: 'actual-operation' }, turn_ref: 'actual-trace#3' }
+    const continuation_channel = { kind: 'slack', channel_id: 'actual-channel', user_id: 'actor', thread_ts: '123.456' }
+    const parsed = normalizeKeeperApprovalQueueItem({ ...serverPendingRow, origin, continuation_channel, input: { post_id: 'invented' }, input_preview: 'Board invented#9' })
+    expect(parsed?.origin).toEqual(origin)
+    expect(parsed?.continuation_channel).toEqual(continuation_channel)
+  })
+
+  it('refuses missing or malformed provenance instead of accepting a partial request', () => {
+    for (const key of ['origin', 'continuation_channel']) {
+      const missing = Object.fromEntries(Object.entries(serverPendingRow).filter(([field]) => field !== key))
+      expect(normalizeKeeperApprovalQueueItem(missing)).toBeNull()
+      expect(normalizeKeeperApprovalQueueItem({ ...serverPendingRow, [key]: { kind: 'unknown' } })).toBeNull()
+    }
+  })
+
   it('refuses a pending row with a member the server does not write', () => {
     expect(normalizeKeeperApprovalQueueItem({ ...serverPendingRow, goal_ids: [] })).toBeNull()
   })
 
   it('extracts all fields', () => {
     const result = normalizeKeeperApprovalQueueItem({
+      origin: { source: { kind: 'no_admitted_source' }, turn_ref: null },
+      continuation_channel: { kind: 'keeper', keeper_name: 'fixture-origin-recipient' },
       id: 'q-1',
       keeper_name: 'janitor',
       tool_name: 'shell_exec',
@@ -277,6 +297,8 @@ describe('normalizeKeeperApprovalQueueItem', () => {
 
   it('requires phase to be one of the closed queue progression phases', () => {
     const base = {
+      origin: { source: { kind: 'no_admitted_source' }, turn_ref: null },
+      continuation_channel: { kind: 'keeper', keeper_name: 'fixture-origin-recipient' },
       id: 'q-p',
       keeper_name: 'janitor',
       tool_name: 'shell_exec',
@@ -301,6 +323,8 @@ describe('normalizeKeeperApprovalQueueItem', () => {
   })
 
   const baseItem = {
+    origin: { source: { kind: 'no_admitted_source' }, turn_ref: null },
+    continuation_channel: { kind: 'keeper', keeper_name: 'fixture-origin-recipient' },
     id: 'q-summary',
     keeper_name: 'janitor',
     tool_name: 'shell_exec',

@@ -1508,10 +1508,10 @@ let test_peek_and_ram_diff () =
     (match member "hex" (Tool_result.data r) with
      | Some (`String h) -> String.length h = 16
      | _ -> false);
-  check int "the address is echoed" 0xe000
+  check string "the address is echoed as four hex digits" "e000"
     (match member "address" (Tool_result.data r) with
-     | Some (`Int a) -> a
-     | _ -> 0);
+     | Some (`String a) -> a
+     | _ -> "");
   let r = dispatch ~base_path "masc_msx_ram_diff" [] in
   check bool "a diff right after the peek sees no change" true
     (match member "changed_bytes" (Tool_result.data r) with
@@ -1565,7 +1565,20 @@ let test_address_grammar () =
     ; "3fffffffffffffff"
     ; "4611686018427387903"
     ; "99999999999999999999999999"
-    ]
+    ];
+  (* to_hex is the spelling parse reads back, for every address, at one fixed
+     width of lowercase digits. *)
+  for n = 0 to 0xffff do
+    match Msx_lane.Address.parse (Printf.sprintf "%x" n) with
+    | Error message -> fail message
+    | Ok address ->
+      let hex = Msx_lane.Address.to_hex address in
+      if String.length hex <> 4 || hex <> String.lowercase_ascii hex then
+        fail (Printf.sprintf "0x%x spelled %S" n hex);
+      (match Msx_lane.Address.parse hex with
+       | Ok again when Msx_lane.Address.to_int again = n -> ()
+       | Ok _ | Error _ -> fail (Printf.sprintf "0x%x does not come back from %S" n hex))
+  done
 ;;
 
 let test_peek_address_bounds () =
@@ -1587,14 +1600,100 @@ let test_peek_address_bounds () =
   check int "refusals leave the machine at its frame" before
     (frame_of (dispatch ~base_path "masc_msx_screen" []));
   let address_of r =
-    match member "address" (Tool_result.data r) with Some (`Int a) -> a | _ -> -1
+    match member "address" (Tool_result.data r) with Some (`String a) -> a | _ -> ""
   in
-  check int "bare digits are hex, as in the DOS lane" 0x4096
+  check string "bare digits are hex, as in the DOS lane" "4096"
     (address_of (dispatch ~base_path "masc_msx_peek" [ ("address", `String "4096"); ("length", `Int 4) ]));
-  check int "a 0x prefix is optional" 0x4096
+  check string "a 0x prefix is optional" "4096"
     (address_of (dispatch ~base_path "masc_msx_peek" [ ("address", `String "0x4096"); ("length", `Int 4) ]));
   check bool "bare digits that read above 0xFFFF are refused: 65535" true
     (rejected (dispatch ~base_path "masc_msx_peek" [ ("address", `String "65535"); ("length", `Int 1) ]))
+;;
+
+(* An address in a result goes back into peek unchanged. The synthetic
+   firmware below selects the RAM mapper for page 3 and adds one to a byte at
+   0xE123 on every VBlank, so a few frames after a peek exactly that byte
+   differs. The test reads the run's address from ram_diff, parses it, and
+   peeks it: the bytes peek returns are the bytes the run said it ended with. *)
+let test_ram_diff_address_goes_back_into_peek () =
+  with_workspace @@ fun base_path ->
+  let ledger_dir = Filename.concat base_path "ledger" in
+  let roms_dir = Filename.concat base_path "counter-bios" in
+  Sys.mkdir roms_dir 0o755;
+  let write_code bytes offset code =
+    List.iteri (fun i n -> Bytes.set bytes (offset + i) (Char.chr n)) code in
+  let main = Bytes.make 32768 '\000' in
+  write_code main 0 [ 0xc3; 0x10; 0x40 ]; (* JP 4010 *)
+  Out_channel.with_open_bin (Filename.concat roms_dir "cbios_main_msx2.rom")
+    (fun oc -> output_bytes oc main);
+  List.iter (fun name ->
+    Out_channel.with_open_bin (Filename.concat roms_dir name)
+      (fun oc -> output_bytes oc (Bytes.make 16384 '\000')))
+    [ "cbios_logo_msx2.rom"; "cbios_sub.rom" ];
+  let cart = Bytes.make 16384 '\000' in
+  write_code cart 0 [ 0x41; 0x42; 0x10; 0x40 ];
+  write_code cart 0x10 [
+    0xf3;                                   (* DI *)
+    0x3e; 0xc8; 0xd3; 0xa8;                 (* page 3 to slot 3, page 1 stays slot 2 *)
+    0x3e; 0x80; 0x32; 0xff; 0xff;           (* slot 3 page 3 to the RAM mapper *)
+    0xaf; 0x32; 0x23; 0xe1;                 (* counter at E123 := 0 *)
+    0x3e; 0x50; 0xd3; 0x99;                 (* text mode, display enabled *)
+    0x3e; 0x81; 0xd3; 0x99;                 (* write VDP register 1 *)
+    0xdb; 0x99; 0xe6; 0x80; 0x28; 0xfa;     (* wait for VBlank *)
+    0x3a; 0x23; 0xe1; 0x3c; 0x32; 0x23; 0xe1; (* counter := counter + 1 *)
+    0x18; 0xf1 ];                           (* back to the wait *)
+  let cart_path = Filename.concat base_path "counter.rom" in
+  Out_channel.with_open_bin cart_path (fun oc -> output_bytes oc cart);
+  (match load_image ~ledger_dir ~roms_dir (Msx_lane.Cartridge_file cart_path) with
+   | Ok _ -> ()
+   | Error e -> fail (Msx_lane.error_to_string e));
+  let peek address =
+    dispatch ~base_path "masc_msx_peek" [ ("address", `String address); ("length", `Int 1) ] in
+  let string_field name result =
+    match member name (Tool_result.data result) with
+    | Some (`String s) -> s
+    | _ -> fail ("no string " ^ name ^ " in " ^ Tool_result.message result) in
+  let counter_before = string_field "hex" (peek "e123") in
+  check bool "the guest has counted VBlanks since the boot" true (counter_before <> "00");
+  check bool "stepping completes" true
+    (is_completed (dispatch ~base_path "masc_msx_step" [ ("frames", `Int 3) ]));
+  let diff = dispatch ~base_path "masc_msx_ram_diff" [] in
+  check bool "the diff completes" true (is_completed diff);
+  let run =
+    match member "changes" (Tool_result.data diff) with
+    | Some (`List [ run ]) -> run
+    | _ -> fail "expected exactly one changed run" in
+  let run_string name =
+    match member name run with Some (`String s) -> s | _ -> fail ("run has no " ^ name) in
+  let address = run_string "address" in
+  check string "the run starts at the counter, spelled as four hex digits" "e123" address;
+  check string "the run was the counter byte before" counter_before (run_string "from");
+  check bool "and the counter moved" true (run_string "to" <> counter_before);
+  (match Msx_lane.Address.parse address with
+   | Error message -> fail message
+   | Ok parsed -> check int "the reported address parses to the changed byte" 0xe123
+       (Msx_lane.Address.to_int parsed));
+  let again = peek address in
+  check string "peek at the reported address answers with its spelling" address
+    (string_field "address" again);
+  check string "and with the bytes the run ended with" (run_string "to")
+    (string_field "hex" again)
+;;
+
+(* The address peek answers is the one it was asked for, at one width. *)
+let test_peek_address_answer_is_four_hex_digits () =
+  with_workspace @@ fun base_path ->
+  ignore (boot_machine base_path : Tool_result.result);
+  List.iter
+    (fun (asked, expected) ->
+      let r =
+        dispatch ~base_path "masc_msx_peek" [ ("address", `String asked); ("length", `Int 1) ] in
+      check string ("peek " ^ asked) expected
+        (match member "address" (Tool_result.data r) with
+         | Some (`String a) -> a
+         | _ -> "no address"))
+    [ "0", "0000"; "0x0", "0000"; "1000", "1000"; "0x1000", "1000"; "e0", "00e0"
+    ; "  0XFFFF ", "ffff"; "ffff", "ffff" ]
 ;;
 
 (* Files the lane reads or creates can fail at the open. Each failure is a
@@ -1818,6 +1917,10 @@ let () =
         ; test_case "peek and ram_diff" `Quick test_peek_and_ram_diff
         ; test_case "address grammar is bounded and explicit" `Quick test_address_grammar
         ; test_case "peek address bounds" `Quick test_peek_address_bounds
+        ; test_case "ram_diff address goes back into peek" `Quick
+            test_ram_diff_address_goes_back_into_peek
+        ; test_case "peek answers four hex digits" `Quick
+            test_peek_address_answer_is_four_hex_digits
         ; test_case "load file failures are typed" `Quick test_load_file_failures_are_typed
         ; test_case "inventory with hostile entries" `Quick test_inventory_with_hostile_entries
         ; test_case "core identity matches the pin" `Quick test_core_identity_matches_pin

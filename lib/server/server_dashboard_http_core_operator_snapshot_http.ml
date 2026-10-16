@@ -133,7 +133,6 @@ let operator_snapshot_http_json ~state ~sw ~clock ~broadcast_snapshot request =
         ~lightweight_summary
         ~default_summary_request
     in
-    let mode = if lightweight_summary then Inline_shared else Offloaded_readonly in
     let compute () =
       (* A snapshot that finished as its window closed is the snapshot. *)
       match
@@ -144,7 +143,11 @@ let operator_snapshot_http_json ~state ~sw ~clock ~broadcast_snapshot request =
           (fun () ->
           Ok
             (Core_runtime.run_dashboard_compute
-               ~mode
+               (* The TUI asks for a summary without Keeper/message rows,
+                  but workspace and pending-confirm reads still touch disk.
+                  Keep those reads off the HTTP domain just like the default
+                  summary, without returning an earlier approval snapshot. *)
+               ~mode:Offloaded_readonly
                ?net
                ?mono_clock
                ~sw

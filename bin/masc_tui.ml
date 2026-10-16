@@ -11546,7 +11546,35 @@ let launch_approvals_summary_load state ~mailbox =
                       ~prior_contact:Masc_tui_server_lifecycle.Server_reached () in
                     snapshot)
 
-let load_http_keeper_surfaces ~on_asks ~ask_request ~server_identity ~host ~port
+let observe_http_reader ~on_progress source ~received read =
+  match on_progress with
+  | None -> read ()
+  | Some publish ->
+      publish (Http_refresh_progress.Started (source, Mtime_clock.elapsed_ns ()));
+      let settle outcome = publish
+        (Http_refresh_progress.Completed (source, Mtime_clock.elapsed_ns (), outcome)) in
+      match read () with
+      | result ->
+          settle (if received result then Http_refresh_progress.Received else Http_refresh_progress.Failed);
+          result
+      | exception (Eio.Cancel.Cancelled _ as exn) ->
+          settle Http_refresh_progress.Interrupted;
+          raise exn
+      | exception exn ->
+          settle Http_refresh_progress.Failed;
+          raise exn
+
+let finish_observed_http_refresh state ~ticket =
+  if Http_refresh_order.is_current state.http_refresh_order ticket then begin
+    let was_running = Option.is_some state.http_refresh_started_ns in
+    Masc_tui_types.finish_http_refresh_state state;
+    if was_running then Option.iter (fun (_, progress) ->
+      Log.Transport.info "tui_http_refresh=%s"
+        (Yojson.Safe.to_string (Http_refresh_progress.to_json progress)))
+      state.http_refresh_progress
+  end
+
+let load_http_keeper_surfaces ~on_progress ~on_asks ~ask_request ~server_identity ~host ~port
     ~(needs : Masc_tui_types.surface_needs) =
   let expected_workspace = Result.to_option server_identity in
   let when_needed wanted load = if wanted then Some (load ()) else None in
@@ -11554,6 +11582,8 @@ let load_http_keeper_surfaces ~on_asks ~ask_request ~server_identity ~host ~port
     (fun () ->
        if not needs.needs_asks then None
        else Option.map (fun asks_request ->
+         observe_http_reader ~on_progress Http_refresh_progress.Questions
+           ~received:(fun observation -> Result.is_ok observation.asks_result) (fun () ->
          let asks_result = Masc_tui_http.fetch_keeper_asks ~host ~port () in
          let observation = { asks_request; asks_result } in
          (match on_asks with
@@ -11563,12 +11593,15 @@ let load_http_keeper_surfaces ~on_asks ~ask_request ~server_identity ~host ~port
               if Masc_tui_types.server_workspace_matches ~expected:expected_workspace identity then
                 Option.iter (fun identity -> publish identity observation)
                   (Result.to_option identity));
-         observation) ask_request)
+         observation)) ask_request)
     (fun () ->
        when_needed needs.needs_keeper_roster (fun () ->
+         observe_http_reader ~on_progress Http_refresh_progress.Keepers
+           ~received:(function Ok (_, Ok _) -> true | Ok (_, Error _) | Error _ -> false)
+           (fun () ->
            match expected_workspace with
            | None -> Error (Keeper_control.Roster_malformed "Server workspace identity is unavailable")
-           | Some expected_workspace -> load_keeper_roster ~host ~port ~expected_workspace))
+           | Some expected_workspace -> load_keeper_roster ~host ~port ~expected_workspace)))
 
 let load_http_scoped_surfaces ~ask_request ~refresh_ticket ~server_identity ~host ~port ~approval_ticket ~board_sort
     ~board_hearth ~system_log_level ~provider_history_days
@@ -11607,7 +11640,7 @@ let load_http_scoped_surfaces ~ask_request ~refresh_ticket ~server_identity ~hos
     when_needed needs.needs_fleet_safety (fun () -> load_fleet_safety ~host ~port)
   in
   let read_keeper_surfaces () =
-    load_http_keeper_surfaces ~on_asks:None ~ask_request ~server_identity ~host ~port ~needs
+    load_http_keeper_surfaces ~on_progress:None ~on_asks:None ~ask_request ~server_identity ~host ~port ~needs
   in
   let read_runtime_quota () =
     when_needed needs.needs_runtime_quota (fun () ->
@@ -11704,7 +11737,24 @@ let load_http_scoped_surfaces ~ask_request ~refresh_ticket ~server_identity ~hos
   ; http_account_emails
   }
 
-let load_http_surfaces ~on_overview ~on_asks ~ask_request ~refresh_ticket ~host ~port ~approval_ticket ~board_sort
+let scoped_http_reads_received (reading : http_scoped_surface_results) =
+  let optional_ok = function None -> true | Some result -> Result.is_ok result in
+  Result.is_ok reading.http_scoped_server_identity
+  && optional_ok reading.http_transport
+  && (match reading.http_approvals with None -> true | Some value -> Result.is_ok value.ao_result)
+  && (match reading.http_asks with None -> true | Some value -> Result.is_ok value.asks_result)
+  && optional_ok reading.http_board && optional_ok reading.http_board_hearths
+  && optional_ok reading.http_planning && optional_ok reading.http_system_logs
+  && optional_ok reading.http_fleet_safety
+  && (match reading.http_keeper_roster with
+      | None | Some (Ok (_, Ok _)) -> true | Some (Ok (_, Error _) | Error _) -> false)
+  && (match reading.http_runtime_quota with
+      | None -> true | Some (runtimes, quota) -> Result.is_ok runtimes && Result.is_ok quota)
+  && optional_ok reading.http_keeper_usage
+  && (match reading.http_provider_history with None -> true | Some (_, value) -> Result.is_ok value)
+  && optional_ok reading.http_overview_goals && optional_ok reading.http_account_emails
+
+let load_http_surfaces ~on_progress ~on_overview ~on_asks ~ask_request ~refresh_ticket ~host ~port ~approval_ticket ~board_sort
     ~board_hearth ~system_log_level ~provider_history_days
     ~(needs : Masc_tui_types.surface_needs) =
   (* A process can disappear and another bind the same endpoint between two
@@ -11712,7 +11762,9 @@ let load_http_surfaces ~on_overview ~on_asks ~ask_request ~refresh_ticket ~host 
      on every refresh rather than inferred from connection failure. It goes
      first: a server still booting behind an open port says so here, and every
      surface asked of it would only wait out its timeout. *)
-  let http_server_identity = load_server_identity ~host ~port in
+  let http_server_identity = observe_http_reader ~on_progress
+    Http_refresh_progress.Identity_before ~received:Result.is_ok
+    (fun () -> load_server_identity ~host ~port) in
   if Masc_tui_types.server_is_booting http_server_identity
   then Refresh_server_booting { refresh_ticket; identity = http_server_identity; approval_ticket }
   else begin
@@ -11725,6 +11777,8 @@ let load_http_surfaces ~on_overview ~on_asks ~ask_request ~refresh_ticket ~host 
         (fun () ->
            Masc_tui_loader.read_pair
              (fun () ->
+                observe_http_reader ~on_progress Http_refresh_progress.Overview
+                  ~received:Result.is_ok (fun () ->
                 let overview = load_overview ~host ~port in
                 (match on_overview, overview with
                  | Some publish, Ok snapshot ->
@@ -11734,27 +11788,34 @@ let load_http_surfaces ~on_overview ~on_asks ~ask_request ~refresh_ticket ~host 
                        Option.iter (fun identity -> publish identity snapshot)
                          (Result.to_option identity)
                  | None, (Ok _ | Error _) | Some _, Error _ -> ());
-                overview)
+                overview))
              (fun () ->
                 Option.map
                   (fun ao_ticket ->
-                     { ao_ticket; ao_result = load_approvals ~host ~port })
+                     let ao_result = observe_http_reader ~on_progress
+                       Http_refresh_progress.Approvals ~received:Result.is_ok
+                       (fun () -> load_approvals ~host ~port) in
+                     { ao_ticket; ao_result })
                   approval_ticket))
         (fun () ->
            Masc_tui_loader.read_pair
              (fun () ->
                 (* Questions are announced from every surface. *)
-                load_http_keeper_surfaces ~on_asks ~ask_request ~server_identity:http_server_identity
+                load_http_keeper_surfaces ~on_progress ~on_asks ~ask_request ~server_identity:http_server_identity
                   ~host ~port ~needs:{ needs with needs_asks = true })
              (fun () ->
+                observe_http_reader ~on_progress Http_refresh_progress.Surface_data
+                  ~received:scoped_http_reads_received (fun () ->
                 load_http_scoped_surfaces ~ask_request:None ~refresh_ticket
                   ~server_identity:http_server_identity
                   ~host ~port ~approval_ticket:None
                   ~board_sort ~board_hearth ~system_log_level ~provider_history_days
-                  ~needs:{ needs with needs_asks = false; needs_keeper_roster = false }))
+                  ~needs:{ needs with needs_asks = false; needs_keeper_roster = false })))
     in
     let http_scoped = { http_scoped with http_asks; http_keeper_roster } in
-    let identity_after = load_server_identity ~host ~port in
+    let identity_after = observe_http_reader ~on_progress
+      Http_refresh_progress.Identity_after ~received:Result.is_ok
+      (fun () -> load_server_identity ~host ~port) in
     if Masc_tui_types.server_is_booting identity_after then
       Refresh_server_booting { refresh_ticket; identity = identity_after; approval_ticket }
     else if Masc_tui_types.server_workspace_matches
@@ -13249,6 +13310,9 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
     if not was_booting then launch_tick_side_reads state ~mailbox ~needs;
 
     let overview_authority = state.workspace_authority in
+    let on_progress = Some (fun hp_event ->
+      enqueue_async mailbox (Http_progress_observed
+        { hp_ticket = refresh_ticket; hp_authority = overview_authority; hp_event })) in
     let on_asks =
       if state.workspace_identity = Workspace_identity_match then
         Some (fun ea_identity ea_observation ->
@@ -13269,7 +13333,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
       try
         enqueue_async mailbox
           (Http_refresh_done
-             (load_http_surfaces ~on_overview ~on_asks ~ask_request
+             (load_http_surfaces ~on_progress ~on_overview ~on_asks ~ask_request
                 ~refresh_ticket ~host ~port ~approval_ticket
                 ~board_sort:state.board_sort
                 ~board_hearth:state.board_hearth
@@ -13293,10 +13357,10 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
         Fun.protect
           ~finally:(fun () ->
             refresh_inflight := false;
-            Masc_tui_types.finish_http_refresh_state state)
+            finish_observed_http_refresh state ~ticket:refresh_ticket)
           (fun () ->
              apply_http_refresh_outcome state ~mailbox
-               (load_http_surfaces ~on_overview:None ~on_asks:None ~ask_request
+               (load_http_surfaces ~on_progress:None ~on_overview:None ~on_asks:None ~ask_request
                   ~refresh_ticket ~host ~port ~approval_ticket
                   ~board_sort:state.board_sort
                 ~board_hearth:state.board_hearth
@@ -15681,7 +15745,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         | Voice_wizard_saved (_, _) | Voice_agent_voices_loaded _ | Voice_agent_voice_saved _
         | Voice_wizard_probed (_, _) | Voice_wizard_reread (_, _) | Voice_config_loaded (_, _, _)
         | Voice_level _ | Voice_transcribed _ | Voice_silent _ | Voice_discarded _ | Voice_failed _
-        | (Http_overview_loaded _ | Http_asks_loaded _ | Http_refresh_done _) | Http_refresh_failed (_, _, _)
+        | (Http_progress_observed _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_refresh_done _) | Http_refresh_failed (_, _, _)
         | Approvals_summary_loaded (_, _, _, _) | Http_scoped_refresh_done (_, _, _)
         | Http_scoped_refresh_failed (_, _, _, _, _) | Board_post_refresh_done (_, _)
         | Approval_decision_done (_, _, _, _, _) | Ask_answer_done (_, _, _)
@@ -16143,6 +16207,8 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
           ("voice failed: " ^ error))
   | Http_overview_loaded preview ->
       Masc_tui_types.accept_overview_preview state preview
+  | Http_progress_observed observation ->
+      Masc_tui_types.accept_http_progress state observation
   | Http_asks_loaded early ->
       Option.iter (apply_asks_load state)
         (Masc_tui_types.take_early_asks_observation state early)
@@ -16150,7 +16216,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       (Refresh_workspace_unconfirmed
          { refresh_ticket; detail; unreachable; approval_ticket; latest_identity }) ->
       http_refresh_inflight := false;
-      Masc_tui_types.finish_http_refresh_state state;
+      finish_observed_http_refresh state ~ticket:refresh_ticket;
       if Http_refresh_order.is_current state.http_refresh_order refresh_ticket then begin
         let authority = read_authority state in
         apply_workspace_unconfirmed state ~detail ~unreachable ~approval_ticket ~latest_identity;
@@ -16168,7 +16234,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         ~scoped_refresh_followup ~mailbox
   | Http_refresh_done (Refresh_server_booting { refresh_ticket; identity; approval_ticket }) ->
       http_refresh_inflight := false;
-      Masc_tui_types.finish_http_refresh_state state;
+      finish_observed_http_refresh state ~ticket:refresh_ticket;
       (* Nothing else was asked of a booting server, so nothing else follows:
          no held-call listing, no observer. The scoped follow-up is left
          queued on purpose -- draining it now would send surface loads to the
@@ -16181,7 +16247,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         ~scoped_refresh_followup ~mailbox
   | Http_refresh_done (Refresh_surfaces results) ->
       http_refresh_inflight := false;
-      Masc_tui_types.finish_http_refresh_state state;
+      finish_observed_http_refresh state ~ticket:results.http_scoped.http_refresh_ticket;
       if Http_refresh_order.is_current state.http_refresh_order
            results.http_scoped.http_refresh_ticket then begin
       let dispatch_was_unavailable =
@@ -16548,7 +16614,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       add_event state "observer" ("runtime event feed closed: " ^ reason)
   | Http_refresh_failed (err, approval_ticket, refresh_ticket) ->
       http_refresh_inflight := false;
-      Masc_tui_types.finish_http_refresh_state state;
+      finish_observed_http_refresh state ~ticket:refresh_ticket;
       if Http_refresh_order.is_current state.http_refresh_order refresh_ticket then begin
       Option.iter
         (fun ao_ticket ->
@@ -16715,7 +16781,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
        | Goal_confirmation_submitted _, Goal_confirmation.Submitting (_, read) ->
            state.goal_confirmation <- Goal_confirmation.Inspecting read
        | (Goal_confirmation_submitted _, Goal_confirmation.Inspecting _)
-       | ((Approvals_listing_superseded | (Surface_composer_released | (Chat_search_finished (_, _, _, _) | (Workspace_scoped (_, _, _) | (Workspace_operation _ | (Chat_command_read_completed (_, _) | (Workspace_identity_unconfirmed _ | (Schedule_form_authority_refused _ | (Lane_package_catalog_loaded (_, _, _) | (Lane_package_preview_loaded (_, _, _) | (Keeper_queue_resume_confirmed (_, _, _) | (Keeper_queue_loaded (_, _, _, _) | (Lane_addons_loaded (_, _, _) | (Lane_application_loaded (_, _) | (Lane_subscriptions_loaded (_, _) | (Lane_declaration_loaded (_, _, _, _, _) | (Keeper_deletions_loaded (_, _) | (Msx_tick_withdrawn (_, _) | (Keeper_deletion_retry_done (_, _) | (Msx_frame_loaded (_, _) | (Msx_activity_loaded (_, _) | (Msx_live_loaded (_, _) | ( Dos_live_loaded (_, _) | ( Voice_wizard_saved (_, _) | ( Voice_agent_voices_loaded _ | ( Voice_agent_voice_saved _ | ( Voice_wizard_probed (_, _) | ( Voice_wizard_reread (_, _) | ( Voice_config_loaded (_, _, _) | ( Voice_level _ | ( Voice_transcribed _ | ( Voice_silent _ | ( Voice_discarded _ | ( Voice_failed _ | ( (Http_overview_loaded _ | Http_asks_loaded _ | Http_refresh_done _) | ( Http_refresh_failed (_, _, _) | ( Approvals_summary_loaded (_, _, _, _) | ( Http_scoped_refresh_done (_, _, _) | ( Http_scoped_refresh_failed (_, _, _, _, _) | ( Board_post_refresh_done (_, _) | ( Approval_decision_done (_, _, _, _, _) | ( Ask_answer_done (_, _, _) | ( Keeper_chat_dispatch_started (_, _, _) | ( Keeper_chat_done (_, _, _, _) | ( Keeper_chat_stream_deltas (_, _) | ( Keeper_chat_stream_unavailable (_, _) | ( Keeper_run_next_done (_, _) | ( Keeper_observed_interrupt_done (_, _, _, _) | ( Keeper_chat_interrupt_done (_, _, _) | ( Keeper_chat_history_loaded (_, _, _, _) | ( Keeper_chat_copy_loaded (_, _, _) | ( Keeper_chat_operation_loaded _ | ( Keeper_chat_journal_loaded _ | ( Keeper_native_tasks_loaded (_, _) | ( Keeper_child_content_loaded (_, _) | ( Context_inspector_loaded (_, _, _) | ( Keeper_chat_older_loaded (_, _, _, _) | ( Local_workspace_read (_, _) | ( Lanes_loaded (_, _) | ( Lane_inventory_loaded (_, _) | ( Clients_loaded (_, _) | ( Lane_runs_loaded (_, _, _, _) | ( Lane_run_detail_loaded (_, _, _) | ( Measurement_artifact_loaded (_, _, _) | ( Verification_loaded _ | ( Harness_loaded _ | ( Fusion_runs_loaded (_, _) | ( Fusion_detail_loaded (_, _, _) | ( Fusion_historical_detail_loaded (_, _, _) | ( Fusion_launch_options_loaded (_, _) | ( Fusion_launched (_, _) | ( Repositories_loaded _ | ( Workspace_activity_loaded (_, _) | ( Memory_loaded _ | ( Memory_input_loaded (_, _) | ( Memory_facts_loaded (_, _) | ( Repository_changes_loaded (_, _) | ( Repository_changes_diff_loaded (_, _) | ( File_changes_loaded (_, _) | ( Keeper_chat_file_changes_loaded (_, _, _) | ( Git_diff_loaded (_, _) | ( Browser_history_list_loaded (_, _) | ( Browser_history_page_loaded (_, _) | ( Browser_lane_clients_loaded (_, _) | ( Browser_lane_loaded (_, _) | ( Browser_lane_action_done (_, _) | ( Browser_lane_scene_loaded (_, _) | ( Browser_lane_follow_loaded (_, _) | ( Browser_lane_screenshot_ready _ | ( Connectors_loaded (_, _) | ( Connector_unbind_all_done _ | ( Runtime_surface_loaded (_, _) | ( Tools_loaded (_, _, _) | ( Skills_catalog_loaded (_, _) | ( Skill_evidence_loaded (_, _, _) | ( Tools_async_observation_loaded (_, _) | ( Runtime_lane_slots_written (_, _, _) | ( Runtime_catalog_loaded (_, _) | ( Runtime_assignment_set (_, _, _) | ( Keeper_chat_approval_answered (_, _, _, _) | ( Keeper_tool_approvals_loaded (_, _, _) | ( Sent_image_ready _ | ( Image_render_ready _ | ( Keeper_turns_loaded (_, _) | ( Keeper_chat_control_received (_, _, _) | ( Gate_snapshot_loaded (_, _, _) | ( Gate_approval_resolved (_, _, _, _, _) | ( Gate_auto_judge_retried (_, _, _, _) | ( Gate_mode_set (_, _, _) | ( Surface_tool_approval_answered (_, _, _, _, _) | ( Keeper_gate_settings_loaded _ | ( Keeper_tool_modes_loaded (_, _) | ( Keeper_tool_mode_set (_, _, _, _) | ( Keeper_chat_dispatch_blocked (_, _) | ( Keeper_action_done (_, _, _, _) | ( Board_new_post_done _ | ( Board_vote_done _ | ( Goal_transition_done _ | ( Goal_confirmation_loaded (_, _) | ( Schedules_loaded (_, _) | ( Schedule_wake_history_loaded (_, _) | ( Keeper_schedules_loaded (_, _) | ( System_logs_loaded _ | ( Schedule_cancel_done (_, _) | ( Verification_verdict_done _ | ( Harness_label_done _ | ( Keeper_calls_loaded (_, _, _) | ( Goal_timeline_loaded (_, _) | ( Task_history_loaded (_, _) | ( Task_cancel_done (_, _, _) | ( Verification_evidence_loaded (_, _) | ( Keeper_config_view_loaded (_, _) | ( Keeper_items_loaded (_, _) | ( Keeper_sandbox_view_loaded (_, _) | ( Keeper_sandbox_logs_loaded (_, _, _) | ( Exact_activity_read (_, _) | ( Exact_activity_saved (_, _) | ( Browser_activity_read (_, _) | ( Browser_activity_saved (_, _) | ( Machine_activity_read (_, _) | ( Machine_activity_saved (_, _) | ( Runtime_config_view_loaded (_, _, _) | ( Runtime_params_loaded _ | ( Runtime_param_written (_, _) | ( Prompts_loaded (_, _) | ( Keeper_board_quarantines_loaded (_, _) | ( Board_quarantine_requeued (_, _, _) | ( Board_quarantines_bulk_progress (_, _, _, _, _, _) | ( Board_quarantines_bulk_requeued (_, _) | ( Presets_listed (_, _) | ( Preset_detail_loaded (_, _) | ( Preset_contents_shown (_, _) | ( Preset_saved (_, _) | ( Preset_restored (_, _) | ( Preset_deleted (_, _) | ( Play_room_received (_, _) | ( Play_invites_listed (_, _) | ( Play_invite_issued (_, _, _) | ( Play_invite_revoked (_, _, _, _) | ( Librarian_input_loaded (_, _) | ( Resources_listed _ | ( Code_entries_loaded (_, _) | ( Code_file_loaded (_, _, _) | ( Code_history_loaded (_, _) | ( Code_diff_loaded (_, _) | ( Acting_pane_changes_loaded (_, _) | ( Code_blame_loaded (_, _) | ( Code_lsp_answered (_, _) | ( Resource_read (_, _) | ( Github_identity_view_loaded (_, _) | ( Identity_providers_loaded (_, _, _) | ( Identity_switch_set (_, _, _, _) | ( Identity_login_started (_, _) | ( Identity_refreshed (_, _) | ( Identity_app_saved (_, _, _) | ( Account_login_event (_, _, _) | ( Account_login_json (_, _, _, _) | ( Account_login_removal (_, _, _, _, _) | ( Github_login_lines (_, _) | ( Github_login_finished (_, _) | ( Github_token_saved (_, _) | ( Observer_opened _ | ( Observer_received (_, _) | ( Observer_closed _ | ( Task_dispatched _ | Task_dispatch_failed _))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))), _) -> ());
+       | ((Approvals_listing_superseded | (Surface_composer_released | (Chat_search_finished (_, _, _, _) | (Workspace_scoped (_, _, _) | (Workspace_operation _ | (Chat_command_read_completed (_, _) | (Workspace_identity_unconfirmed _ | (Schedule_form_authority_refused _ | (Lane_package_catalog_loaded (_, _, _) | (Lane_package_preview_loaded (_, _, _) | (Keeper_queue_resume_confirmed (_, _, _) | (Keeper_queue_loaded (_, _, _, _) | (Lane_addons_loaded (_, _, _) | (Lane_application_loaded (_, _) | (Lane_subscriptions_loaded (_, _) | (Lane_declaration_loaded (_, _, _, _, _) | (Keeper_deletions_loaded (_, _) | (Msx_tick_withdrawn (_, _) | (Keeper_deletion_retry_done (_, _) | (Msx_frame_loaded (_, _) | (Msx_activity_loaded (_, _) | (Msx_live_loaded (_, _) | ( Dos_live_loaded (_, _) | ( Voice_wizard_saved (_, _) | ( Voice_agent_voices_loaded _ | ( Voice_agent_voice_saved _ | ( Voice_wizard_probed (_, _) | ( Voice_wizard_reread (_, _) | ( Voice_config_loaded (_, _, _) | ( Voice_level _ | ( Voice_transcribed _ | ( Voice_silent _ | ( Voice_discarded _ | ( Voice_failed _ | ( (Http_progress_observed _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_refresh_done _) | ( Http_refresh_failed (_, _, _) | ( Approvals_summary_loaded (_, _, _, _) | ( Http_scoped_refresh_done (_, _, _) | ( Http_scoped_refresh_failed (_, _, _, _, _) | ( Board_post_refresh_done (_, _) | ( Approval_decision_done (_, _, _, _, _) | ( Ask_answer_done (_, _, _) | ( Keeper_chat_dispatch_started (_, _, _) | ( Keeper_chat_done (_, _, _, _) | ( Keeper_chat_stream_deltas (_, _) | ( Keeper_chat_stream_unavailable (_, _) | ( Keeper_run_next_done (_, _) | ( Keeper_observed_interrupt_done (_, _, _, _) | ( Keeper_chat_interrupt_done (_, _, _) | ( Keeper_chat_history_loaded (_, _, _, _) | ( Keeper_chat_copy_loaded (_, _, _) | ( Keeper_chat_operation_loaded _ | ( Keeper_chat_journal_loaded _ | ( Keeper_native_tasks_loaded (_, _) | ( Keeper_child_content_loaded (_, _) | ( Context_inspector_loaded (_, _, _) | ( Keeper_chat_older_loaded (_, _, _, _) | ( Local_workspace_read (_, _) | ( Lanes_loaded (_, _) | ( Lane_inventory_loaded (_, _) | ( Clients_loaded (_, _) | ( Lane_runs_loaded (_, _, _, _) | ( Lane_run_detail_loaded (_, _, _) | ( Measurement_artifact_loaded (_, _, _) | ( Verification_loaded _ | ( Harness_loaded _ | ( Fusion_runs_loaded (_, _) | ( Fusion_detail_loaded (_, _, _) | ( Fusion_historical_detail_loaded (_, _, _) | ( Fusion_launch_options_loaded (_, _) | ( Fusion_launched (_, _) | ( Repositories_loaded _ | ( Workspace_activity_loaded (_, _) | ( Memory_loaded _ | ( Memory_input_loaded (_, _) | ( Memory_facts_loaded (_, _) | ( Repository_changes_loaded (_, _) | ( Repository_changes_diff_loaded (_, _) | ( File_changes_loaded (_, _) | ( Keeper_chat_file_changes_loaded (_, _, _) | ( Git_diff_loaded (_, _) | ( Browser_history_list_loaded (_, _) | ( Browser_history_page_loaded (_, _) | ( Browser_lane_clients_loaded (_, _) | ( Browser_lane_loaded (_, _) | ( Browser_lane_action_done (_, _) | ( Browser_lane_scene_loaded (_, _) | ( Browser_lane_follow_loaded (_, _) | ( Browser_lane_screenshot_ready _ | ( Connectors_loaded (_, _) | ( Connector_unbind_all_done _ | ( Runtime_surface_loaded (_, _) | ( Tools_loaded (_, _, _) | ( Skills_catalog_loaded (_, _) | ( Skill_evidence_loaded (_, _, _) | ( Tools_async_observation_loaded (_, _) | ( Runtime_lane_slots_written (_, _, _) | ( Runtime_catalog_loaded (_, _) | ( Runtime_assignment_set (_, _, _) | ( Keeper_chat_approval_answered (_, _, _, _) | ( Keeper_tool_approvals_loaded (_, _, _) | ( Sent_image_ready _ | ( Image_render_ready _ | ( Keeper_turns_loaded (_, _) | ( Keeper_chat_control_received (_, _, _) | ( Gate_snapshot_loaded (_, _, _) | ( Gate_approval_resolved (_, _, _, _, _) | ( Gate_auto_judge_retried (_, _, _, _) | ( Gate_mode_set (_, _, _) | ( Surface_tool_approval_answered (_, _, _, _, _) | ( Keeper_gate_settings_loaded _ | ( Keeper_tool_modes_loaded (_, _) | ( Keeper_tool_mode_set (_, _, _, _) | ( Keeper_chat_dispatch_blocked (_, _) | ( Keeper_action_done (_, _, _, _) | ( Board_new_post_done _ | ( Board_vote_done _ | ( Goal_transition_done _ | ( Goal_confirmation_loaded (_, _) | ( Schedules_loaded (_, _) | ( Schedule_wake_history_loaded (_, _) | ( Keeper_schedules_loaded (_, _) | ( System_logs_loaded _ | ( Schedule_cancel_done (_, _) | ( Verification_verdict_done _ | ( Harness_label_done _ | ( Keeper_calls_loaded (_, _, _) | ( Goal_timeline_loaded (_, _) | ( Task_history_loaded (_, _) | ( Task_cancel_done (_, _, _) | ( Verification_evidence_loaded (_, _) | ( Keeper_config_view_loaded (_, _) | ( Keeper_items_loaded (_, _) | ( Keeper_sandbox_view_loaded (_, _) | ( Keeper_sandbox_logs_loaded (_, _, _) | ( Exact_activity_read (_, _) | ( Exact_activity_saved (_, _) | ( Browser_activity_read (_, _) | ( Browser_activity_saved (_, _) | ( Machine_activity_read (_, _) | ( Machine_activity_saved (_, _) | ( Runtime_config_view_loaded (_, _, _) | ( Runtime_params_loaded _ | ( Runtime_param_written (_, _) | ( Prompts_loaded (_, _) | ( Keeper_board_quarantines_loaded (_, _) | ( Board_quarantine_requeued (_, _, _) | ( Board_quarantines_bulk_progress (_, _, _, _, _, _) | ( Board_quarantines_bulk_requeued (_, _) | ( Presets_listed (_, _) | ( Preset_detail_loaded (_, _) | ( Preset_contents_shown (_, _) | ( Preset_saved (_, _) | ( Preset_restored (_, _) | ( Preset_deleted (_, _) | ( Play_room_received (_, _) | ( Play_invites_listed (_, _) | ( Play_invite_issued (_, _, _) | ( Play_invite_revoked (_, _, _, _) | ( Librarian_input_loaded (_, _) | ( Resources_listed _ | ( Code_entries_loaded (_, _) | ( Code_file_loaded (_, _, _) | ( Code_history_loaded (_, _) | ( Code_diff_loaded (_, _) | ( Acting_pane_changes_loaded (_, _) | ( Code_blame_loaded (_, _) | ( Code_lsp_answered (_, _) | ( Resource_read (_, _) | ( Github_identity_view_loaded (_, _) | ( Identity_providers_loaded (_, _, _) | ( Identity_switch_set (_, _, _, _) | ( Identity_login_started (_, _) | ( Identity_refreshed (_, _) | ( Identity_app_saved (_, _, _) | ( Account_login_event (_, _, _) | ( Account_login_json (_, _, _, _) | ( Account_login_removal (_, _, _, _, _) | ( Github_login_lines (_, _) | ( Github_login_finished (_, _) | ( Github_token_saved (_, _) | ( Observer_opened _ | ( Observer_received (_, _) | ( Observer_closed _ | ( Task_dispatched _ | Task_dispatch_failed _))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))), _) -> ());
       match result with
       | Ok message ->
           state.goal_action_pending <- None;

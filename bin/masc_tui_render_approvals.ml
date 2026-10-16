@@ -966,12 +966,12 @@ let render_question_reader (state : state) =
      | None -> "  No questions waiting"
      | Some row ->
          let draft = Ask_projection.draft_for state.ask_draft ~row in
-         let answered = List.filter (fun question ->
+         let drafted = List.filter (fun question ->
              Option.is_some (Ask_projection.response_for draft ~question)) row.ar_questions |> List.length in
-         Printf.sprintf "  %s%s · Ask %d/%d · Question %d/%d · %d answered%s"
+         Printf.sprintf "  %s%s · Ask %d/%d · Question %d/%d · %d drafted%s"
            (Theme.warn ()) (Terminal_text.single_line row.ar_keeper)
            (state.ask_cursor + 1) (List.length asks) (state.ask_question_cursor + 1)
-           (List.length row.ar_questions) answered Ansi.reset);
+           (List.length row.ar_questions) drafted Ansi.reset);
   box_line buf cols
     (match state.asks_error with
      | Some error -> "  Question source unavailable · " ^ Terminal_text.single_line error

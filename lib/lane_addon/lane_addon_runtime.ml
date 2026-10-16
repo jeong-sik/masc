@@ -1638,6 +1638,11 @@ let terminal_fault_records ~id ~source_path faults =
     then Some (`Assoc fault.fault_fields) else None) faults
 
 let attach_entry ~sw m ~run_id ~package ~binding ~configuration ~source_access ~visibility =
+  (* An image that is not on the host is not a worker that failed. Creating one
+     would fail the same way on every attempt and leave an instance behind each
+     time (#37897). Every caller looks first, so a declaration and a direct
+     Attach both stop before an instance exists. *)
+  let* () = (backend ~store:m.store ()).image_ready ~package in
   let* () = match configuration, package.state_storage with
     | None, _ | Some _, Ephemeral -> Ok ()
     | Some owner, Persistent ->
@@ -2555,24 +2560,18 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
                let pending = List.filter (fun (owner, fields) -> owner.id = d.id && not (record_is_detached fields)) histories in
                if pending <> [] then List.iter (retire_past sw) pending
                else (
-                 (* An image that is not on the host is not a worker that failed.
-                    Creating one would fail the same way on every beat and leave
-                    an instance behind each time (#37897). Look first, report the
-                    missing image as this declaration's issue, and look again on
-                    the next beat, so an image built later attaches without a
-                    TOML edit. *)
-                 match (backend ~store:m.store ()).image_ready ~package:d.package with
-                 | Error message -> add_issue ~id:d.id d.source_path message
-                 | Ok () ->
-                     let owner = Some {id=d.id; source_path=d.source_path; revision=d.revision} in
-                     let attached =
-                       let source_access = match visibility with
-                         | Keeper_only keeper -> Lane_addon_sources.Keeper keeper
-                         | Shared | Operator_only -> Lane_addon_sources.Operator_configuration in
-                       attach_entry ~sw m ~run_id:d.run_id ~package:d.package ~binding:d.binding ~configuration:owner
-                         ~source_access ~visibility in
-                     match attached with
-                     | Ok _ -> () | Error message -> add_issue ~id:d.id d.source_path message)
+                 (* A missing image is reported by [attach_entry] as this
+                    declaration's issue, and looked for again on the next beat,
+                    so an image built later attaches without a TOML edit. *)
+                 let owner = Some {id=d.id; source_path=d.source_path; revision=d.revision} in
+                 let attached =
+                   let source_access = match visibility with
+                     | Keeper_only keeper -> Lane_addon_sources.Keeper keeper
+                     | Shared | Operator_only -> Lane_addon_sources.Operator_configuration in
+                   attach_entry ~sw m ~run_id:d.run_id ~package:d.package ~binding:d.binding ~configuration:owner
+                     ~source_access ~visibility in
+                 match attached with
+                 | Ok _ -> () | Error message -> add_issue ~id:d.id d.source_path message)
            | _ -> add_issue ~id:d.id d.source_path "multiple workers claim this configuration identity") snapshot.declarations
      | Ok _ -> ());
     let exports = entries m |> List.filter_map (fun e ->

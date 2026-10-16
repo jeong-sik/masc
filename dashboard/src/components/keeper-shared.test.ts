@@ -53,6 +53,7 @@ vi.mock('../keeper-state', async () => {
   return {
     keeperActionErrors: signal({}),
     keeperChatHistoryErrors: signal({}),
+    keeperChatHistoryPages: signal({}),
     keeperHydrating: signal({}),
     // keeper-actions is mocked here, so no history hydration ever settles:
     // treat the first hydration as settled to exercise the rendered thread.

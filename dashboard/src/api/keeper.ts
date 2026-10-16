@@ -1035,6 +1035,48 @@ export async function fetchKeeperChatHistory(
     .filter((m): m is KeeperChatHistoryMessage => m !== null)
 }
 
+export interface KeeperChatHistoryPage {
+  messages: KeeperChatHistoryMessage[]
+  hasMore: boolean
+  nextBefore: number | null
+}
+
+/** Walk direct conversation using the server-issued cursor. */
+export async function fetchKeeperChatHistoryPage(
+  name: string,
+  before?: number,
+): Promise<KeeperChatHistoryPage> {
+  const query = before === undefined ? '' : `?before=${encodeURIComponent(String(before))}`
+  const { response, data } = await fetchJsonWithTimeout(
+    `/api/v1/keepers/${encodeURIComponent(name)}/chat/history/page${query}`,
+    { headers: jsonHeaders() },
+    DEFAULT_GET_TIMEOUT_MS,
+  )
+  if (!response.ok) {
+    throw new Error(`fetchKeeperChatHistoryPage: HTTP ${response.status} ${response.statusText}`)
+  }
+  if (!isRecord(data)
+    || data.schema !== 'masc.keeper_chat_history.page.v1'
+    || !Array.isArray(data.messages)
+    || typeof data.has_more !== 'boolean'
+    || !(data.next_before === null
+      || (typeof data.next_before === 'number' && Number.isFinite(data.next_before)))
+    || (data.has_more && data.next_before === null)
+    || (before !== undefined && data.next_before !== null && data.next_before >= before)) {
+    throw new Error('fetchKeeperChatHistoryPage: invalid history page or cursor')
+  }
+  const { safeParseKeeperChatHistoryMessage } = await import('./schemas/keeper-chat-history')
+  const messages: KeeperChatHistoryMessage[] = []
+  for (const rawMessage of data.messages) {
+    const message = safeParseKeeperChatHistoryMessage(rawMessage)
+    // A cursor page is one read obligation. Dropping a row while advancing its
+    // cursor would make that row unreachable on retry, so reject the page.
+    if (message === null) throw new Error('fetchKeeperChatHistoryPage: invalid history page row')
+    messages.push(message)
+  }
+  return { messages, hasMore: data.has_more, nextBefore: data.next_before }
+}
+
 // --- Keeper observability API ---
 
 export interface KeeperStateDiagramResponse {

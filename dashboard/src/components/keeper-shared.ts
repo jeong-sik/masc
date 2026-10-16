@@ -31,6 +31,7 @@ import {
 import {
   keeperActionErrors,
   keeperChatHistoryErrors,
+  keeperChatHistoryPages,
   keeperHydrating,
   keeperProbing,
   keeperRecovering,
@@ -585,7 +586,7 @@ export function KeeperConversationPanel({
   const showInternal = chatShowInternal.value
   const showAutonomous = chatShowAutonomous.value
 
-  const [historyExpanded, setHistoryExpanded] = useState(false)
+  const hasOlderHistory = keeperChatHistoryPages.value[keeperName]?.hasMore ?? true
   const [searchQuery, setSearchQuery] = useState('')
   const [queueControlOpen, setQueueControlOpen] = useState(false)
   // The conversation and Lane share one keeper-scoped projection. Typed queue
@@ -738,7 +739,6 @@ export function KeeperConversationPanel({
     sending && lastSignalAt !== null && Date.now() - lastSignalAt >= STREAM_STALL_THRESHOLD_S * 1000
 
   const expandHistory = async () => {
-    setHistoryExpanded(true)
     await loadFullKeeperHistory(keeperName)
   }
 
@@ -836,14 +836,14 @@ export function KeeperConversationPanel({
                     </span>`
                   : null}
                 <span class="spacer"></span>
-                ${!historyExpanded
+                ${hasOlderHistory
                   ? html`
                       <${GhostButton} disabled=${hydrating} onClick=${() => { void expandHistory() }}>
                         ${hydrating
                           ? '불러오는 중...'
                           : rawThread.length === 0
                             ? '이력 불러오기'
-                            : `전체 이력 (${thread.length})`}
+                            : '이전 대화 불러오기'}
                       <//>
                     `
                   : null}
@@ -955,14 +955,14 @@ export function KeeperConversationPanel({
                   ${transcriptEntries.length} / ${visibleThread.length}
                 </span>`
               : null}
-            ${!historyExpanded
+            ${hasOlderHistory
               ? html`
                   <${GhostButton} disabled=${hydrating} onClick=${() => { void expandHistory() }}>
                     ${hydrating
                       ? '불러오는 중...'
                       : rawThread.length === 0
                         ? '이력 불러오기'
-                        : `전체 이력 (${thread.length})`}
+                        : '이전 대화 불러오기'}
                   </button>
                 `
               : null}
@@ -1063,14 +1063,14 @@ export function KeeperConversationPanel({
                   ${transcriptEntries.length} / ${visibleThread.length}
                 </span>`
               : null}
-            ${!historyExpanded
+            ${hasOlderHistory
               ? html`
                   <${GhostButton} disabled=${hydrating} onClick=${() => { void expandHistory() }}>
                     ${hydrating
                       ? '불러오는 중...'
                       : rawThread.length === 0
                         ? '대화 이력 불러오기'
-                        : `전체 이력 불러오기 (직접 대화 ${thread.length}건 표시 중)`}
+                        : '이전 대화 불러오기'}
                   </button>
                 `
               : null}

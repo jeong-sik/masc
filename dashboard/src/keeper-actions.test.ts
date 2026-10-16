@@ -14,11 +14,13 @@ const {
   cancelKeeperChatOperation,
   fetchKeeperChatOperation,
   fetchKeeperChatHistory,
+  fetchKeeperChatHistoryPage,
   streamKeeperMessage,
 } = vi.hoisted(() => ({
   cancelKeeperChatOperation: vi.fn(),
   fetchKeeperChatOperation: vi.fn(),
   fetchKeeperChatHistory: vi.fn(),
+  fetchKeeperChatHistoryPage: vi.fn(),
   streamKeeperMessage: vi.fn(),
 }))
 const { fetchKeeperToolCalls } = vi.hoisted(() => ({
@@ -34,6 +36,7 @@ vi.mock('./api/keeper', () => ({
   cancelKeeperChatOperation,
   fetchKeeperChatOperation,
   fetchKeeperChatHistory,
+  fetchKeeperChatHistoryPage,
   streamKeeperMessage,
 }))
 vi.mock('./api/dashboard', () => ({ fetchKeeperToolCalls }))
@@ -46,6 +49,7 @@ import {
   keeperActionErrors,
   keeperChatHistoryErrors,
   keeperChatHistoryHydration,
+  keeperChatHistoryPages,
   keeperHydrating,
   keeperProbing,
   keeperRecovering,
@@ -53,6 +57,8 @@ import {
   keeperStreamLastEventAt,
   keeperThreads,
   liveSendOwnsRequest,
+  appendThreadEntry,
+  THREAD_ENTRY_CAP,
 } from './keeper-state'
 import {
   _resetCancelledKeeperThreadRequestsForTests,
@@ -78,7 +84,6 @@ import {
   trackedKeeperChatOperationsForKeeper,
   upsertTrackedKeeperChatOperation,
 } from './keeper-chat-operations-local'
-import { KEEPER_HISTORY_TAIL_MESSAGES } from './config/constants'
 import { clearStoredToken, setStoredToken } from './api/core'
 import {
   lookupToolCallOutput,
@@ -1169,45 +1174,80 @@ describe('hydrateKeeperStatus', () => {
 
 describe('loadFullKeeperHistory', () => {
   beforeEach(() => {
-    keeperStatusDetails.value = {}
+    _resetChatHydrationForTests()
+    keeperThreads.value = {}
     keeperHydrating.value = {}
-    callMcpTool.mockReset()
+    fetchKeeperChatHistoryPage.mockReset()
   })
 
-  it('returns early for an empty name', async () => {
-    await loadFullKeeperHistory('  ')
-    expect(callMcpTool).not.toHaveBeenCalled()
-  })
+  const row = (id: string, ts: number) => ({ id, role: 'user', content: id, ts })
 
-  it('requests only the history tail (heavy sections stay disabled)', async () => {
-    callMcpTool.mockResolvedValue('{"name":"echo"}')
+  it('uses each server cursor and retains earlier rows through refresh and live append', async () => {
+    fetchKeeperChatHistoryPage
+      .mockResolvedValueOnce({
+        messages: Array.from({ length: THREAD_ENTRY_CAP + 1 }, (_, i) => row(`new-${i}`, 1000 + i)),
+        hasMore: true,
+        nextBefore: 1000,
+      })
+      .mockResolvedValueOnce({ messages: [row('old', 500)], hasMore: false, nextBefore: 500 })
 
+    await loadFullKeeperHistory(' echo ')
+    await loadFullKeeperHistory('echo')
     await loadFullKeeperHistory('echo')
 
-    expect(callMcpTool).toHaveBeenCalledWith('masc_keeper_status', {
-      name: 'echo',
-      fast: false,
-      include_context: false,
-      include_metrics_overview: false,
-      include_history_tail: true,
-      tail_turns: 0,
-      tail_messages: KEEPER_HISTORY_TAIL_MESSAGES,
+    expect(fetchKeeperChatHistoryPage.mock.calls).toEqual([['echo', undefined], ['echo', 1000]])
+    expect(keeperThreads.value.echo?.[0]?.id).toBe('old')
+    expect(keeperThreads.value.echo).toHaveLength(THREAD_ENTRY_CAP + 2)
+    fetchKeeperChatHistory.mockResolvedValueOnce([row('new-200', 1200)])
+    await hydrateKeeperChatHistory('echo', { force: true })
+    appendThreadEntry('echo', { id: 'live', role: 'user', source: 'direct_user', label: '나', text: 'live', delivery: 'sending' })
+    expect(keeperThreads.value.echo?.map(entry => entry.id)).toContain('old')
+    expect(keeperThreads.value.echo?.filter(entry => entry.id === 'new-200')).toHaveLength(1)
+    expect(keeperChatHistoryPages.value.echo?.hasMore).toBe(false)
+  })
+
+  it('accepts canonical page content while preserving exact existing stream observations', async () => {
+    const streamContract = { source: 'sse_event' as const, status: 'backend_terminal_event' as const, eventName: 'RUN_FINISHED' }
+    keeperThreads.value = { echo: [{
+      id: 'server-row', role: 'assistant', source: 'direct_assistant', label: 'echo',
+      text: 'stale content', delivery: 'history', streamContract,
+    }] }
+    fetchKeeperChatHistoryPage.mockResolvedValueOnce({
+      messages: [{ id: 'server-row', role: 'assistant', content: 'canonical content', ts: 500 }],
+      hasMore: false, nextBefore: 500,
     })
-    expect(keeperStatusDetails.value.echo).toBeDefined()
+    await loadFullKeeperHistory('echo')
+    expect(keeperThreads.value.echo).toHaveLength(1)
+    expect(keeperThreads.value.echo?.[0]?.text).toBe('canonical content')
+    expect(keeperThreads.value.echo?.[0]?.streamContract).toEqual(streamContract)
   })
 
-  it('swallows MCP failures and clears the hydrating flag', async () => {
-    callMcpTool.mockRejectedValue(new Error('history fetch failed'))
-
-    await expect(loadFullKeeperHistory('echo')).resolves.toBeUndefined()
+  it('keeps the cursor retryable after malformed-page rejection without losing loaded rows', async () => {
+    fetchKeeperChatHistoryPage
+      .mockResolvedValueOnce({ messages: [row('new', 1000)], hasMore: true, nextBefore: 1000 })
+      .mockRejectedValueOnce(new Error('fetchKeeperChatHistoryPage: invalid history page row'))
+      .mockResolvedValueOnce({ messages: [row('old', 500)], hasMore: false, nextBefore: 500 })
+    await loadFullKeeperHistory('echo')
+    await loadFullKeeperHistory('echo')
+    expect(keeperThreads.value.echo?.map(entry => entry.id)).toEqual(['new'])
+    expect(keeperChatHistoryErrors.value.echo).toBe('fetchKeeperChatHistoryPage: invalid history page row')
+    expect(keeperChatHistoryPages.value.echo?.nextBefore).toBe(1000)
     expect(keeperHydrating.value.echo).toBe(false)
+    await loadFullKeeperHistory('echo')
+    expect(fetchKeeperChatHistoryPage.mock.calls.at(-1)).toEqual(['echo', 1000])
+    expect(keeperChatHistoryErrors.value.echo).toBeNull()
   })
 
-  it('degrades gracefully on a malformed JSON response', async () => {
-    callMcpTool.mockResolvedValue('{{{ bad json }')
-
-    await expect(loadFullKeeperHistory('echo')).resolves.toBeUndefined()
-    expect(keeperStatusDetails.value.echo?.rawText).toBe('{{{ bad json }')
+  it('ignores an empty name and shares one pending request per keeper', async () => {
+    let resolve!: (value: unknown) => void
+    fetchKeeperChatHistoryPage.mockReturnValueOnce(new Promise(done => { resolve = done }))
+    await loadFullKeeperHistory(' ')
+    const loading = loadFullKeeperHistory('echo')
+    await loadFullKeeperHistory('echo')
+    expect(fetchKeeperChatHistoryPage).toHaveBeenCalledTimes(1)
+    resolve({ messages: [], hasMore: false, nextBefore: null })
+    await loading
+    expect(keeperHydrating.value.echo).toBe(false)
   })
 })
 

@@ -22,6 +22,7 @@ import {
   fetchKeeperChatOperation,
   editQueuedKeeperChatOperation,
   fetchKeeperChatHistory,
+  fetchKeeperChatHistoryPage,
   fetchKeeperCheckpoints,
   fetchKeeperRuntimeTrace,
   KeeperEventQueueOperationError,
@@ -1338,4 +1339,39 @@ describe('purgeKeeper', () => {
       'canary-10t-agy3 제거 실패 (HTTP 500)',
     )
   })
+})
+
+
+describe('fetchKeeperChatHistoryPage', () => {
+  const page = (nextBefore: number | null, hasMore = true) => ({
+    schema: 'masc.keeper_chat_history.page.v1',
+    messages: [{ id: 'server-row', role: 'user', content: 'earlier', ts: 5 }],
+    has_more: hasMore,
+    next_before: nextBefore,
+  })
+
+  it('passes the issued cursor unchanged and preserves server row ids', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(page(5))))
+    vi.stubGlobal('fetch', fetchMock)
+    expect(await fetchKeeperChatHistoryPage('a/b', 10.123456789)).toMatchObject({
+      messages: [{ id: 'server-row' }], hasMore: true, nextBefore: 5,
+    })
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/keepers/a%2Fb/chat/history/page?before=10.123456789')
+  })
+
+  it('rejects the whole cursor page when a valid row is followed by a malformed row', async () => {
+    const body = page(5)
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      ...body,
+      messages: [...body.messages, { role: 'user', content: 'missing server id', ts: 4 }],
+    }))))
+    await expect(fetchKeeperChatHistoryPage('echo', 10)).rejects.toThrow('invalid history page row')
+  })
+
+  it.each([page(null), page(10), page(11), { ...page(5), schema: 'unknown' }])(
+    'rejects an unusable cursor or an unknown envelope', async body => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(body))))
+      await expect(fetchKeeperChatHistoryPage('echo', 10)).rejects.toThrow('invalid history page or cursor')
+    },
+  )
 })

@@ -805,3 +805,12 @@ P4v 는 앞의 것들과 종류가 다르다. 옮긴 게 아니라 **필요 없�
 - 이슈 #33719 — 히스토리 지문을 턴마다 처음부터 다시 계산한다. pool 로 옮겼을 뿐 제곱은 그대로다.
 - `event-queue-v19.json` 쓰기(501 KB 직렬화)는 fiber 에 남아 있다. 읽기만 고쳤다.
 - `fs-compat-load-file masc-tui.json` 12~18회 — 242 바이트 파일이라 파싱이 아니다. HTTP 요청이 인증을 마친 지점을 표시할 뿐, 그 뒤 계산의 정체는 아직 모른다.
+
+#### systhread 가 main 도메인 락을 잡는다 — 도구 호출 원장 인덱스 (2026-10-16, #43407)
+
+- 표본: 23:23:24 KST, `/health` 가 0.25초를 넘긴 순간부터 `sample` 2초. main 스레드는 1,142 샘플 중 452 샘플을 `caml_thread_leave_blocking_section` → `__psynch_cvwait` 에서 보냈다. blocking section 을 나와 도메인 락을 다시 기다린 시간이다.
+- 같은 창에서 바쁜 스레드는 둘이었다(잎만 셌다). 도구 호출 원장 인덱스의 앞부분 해시(`sha256_do_chunk`·`caml_input_scan_line`, 570 중 510)와 JSON 파싱(1,142 중 434).
+- `Keeper_tool_call_index.blocking` 은 `Eio_unix.run_in_systhread` 로 부른 쪽 도메인의 systhread 를 썼다. keeper 턴이 부르면 main 도메인이다. 바뀐 원장 하루(77.6 MB)를 검증하는 해시는 #43372 뒤에도 약 320 ms 다.
+- 고친 것: systhread 를 CPU pool 도메인에서 띄운다(`Domain_pool_ref.submit_cpu_or_inline` 안의 `run_in_systhread`). systhread 안이므로 `Fs_compat` 동기 경로와 store mutex 규칙은 그대로다.
+- 벤치: 같은 원장 사본을 한 번 검증하는 동안 main fiber 가 5 ms 씩 잔다(3회). 깨어나는 지연은 최악 8.7–16.0 ms → 1.1–1.8 ms, 평균 1.2–2.3 ms → 0.5–0.6 ms 다. 다른 일이 없는 프로세스라 live 보다 작게 나온다.
+- 남은 같은 종류: `Fs_compat.read_private_jsonl_*` 의 `Thread.create` 스레드도 부른 도메인 소속이다. 채팅 이벤트 기록(최대 36 MB)을 요청마다 통째로 읽고 줄을 나눈다. 같은 날 memprof 25분 창에서 `read_private_jsonl_rows_locked_with_io` 아래 메이저 힙 할당이 약 15 GB 였다.

@@ -1180,7 +1180,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     ~(load_older : cursor:string option -> unit) ~(paste_image : unit -> unit)
     ~(open_named_image : unit -> unit) ~(inspect_context : unit -> unit)
     ~(inspect_queue : unit -> unit)
-    ~(load_tool_changes : unit -> unit) ~(drain_queue : unit -> unit)
+    ~(load_tool_changes : unit -> unit) ~(load_preparation : unit -> unit) ~(drain_queue : unit -> unit)
     ~(start_voice : unit -> unit) ~(toggle_voice_continuous : unit -> unit)
     ~(interrupt_turn : unit -> bool) (key : string) : bool =
   (* y and n answer a held call, and only while one is held -- otherwise they
@@ -1408,6 +1408,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
          rows the block below the conversation takes, and a reader who does
          not see a row appear has no other way to tell the key landed. *)
       state.msg_turn_folded <- not state.msg_turn_folded;
+      if not state.msg_turn_folded then load_preparation ();
       state.last_action <-
         Some
           ( (if state.msg_turn_folded then "turn folded" else "turn expanded")
@@ -7037,8 +7038,7 @@ let apply_keeper_chat_operation_state state ~journal_id log = function
            (Keeper_chat.terminal_safe_text detail))
 ;;
 
-let launch_unavailable_journal_operations state ~mailbox ~keeper_name =
-  let targets = unavailable_journal_operation_targets state keeper_name in
+let launch_keeper_chat_operation_reads state ~mailbox ~keeper_name targets =
   match targets, Eio_context.get_switch_opt () with
   | [], (Some _ | None) | _ :: _, None -> ()
   | _ :: _, Some sw ->
@@ -7053,6 +7053,20 @@ let launch_unavailable_journal_operations state ~mailbox ~keeper_name =
             ~keeper_name ~operation_id in
           enqueue_async mailbox
             (Keeper_chat_operation_loaded {keeper_name; operation_id; operation_state})) targets)
+;;
+
+let launch_unavailable_journal_operations state ~mailbox ~keeper_name =
+  launch_keeper_chat_operation_reads state ~mailbox ~keeper_name
+    (unavailable_journal_operation_targets state keeper_name)
+;;
+
+let launch_selected_preparation_operation_read state ~mailbox =
+  if server_authority_ready state then
+    match state.msg_target_keeper_name with
+    | None -> ()
+    | Some keeper_name ->
+      launch_keeper_chat_operation_reads state ~mailbox ~keeper_name
+        (keeper_message_preparation_operation_targets state ~keeper_name)
 ;;
 
 (* One fiber per load, reading the journals one after another in the order
@@ -15562,6 +15576,7 @@ let handle_composer_key state ~base_path ~mailbox key =
                          launch_keeper_queue state ~mailbox ~keeper_name
                            Masc_tui_queue_inspection.Inspect
                      | None -> ())
+          ~load_preparation:(fun () -> launch_selected_preparation_operation_read state ~mailbox)
           ~load_tool_changes:(fun () ->
             match state.msg_target_keeper_name with
             | Some keeper_name ->
@@ -18344,7 +18359,8 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
            state.keeper_turns_error <- None;
            (match state.view, state.msg_target_keeper_name with
             | Keepers Keeper_message, Some keeper_name ->
-                launch_current_autonomous_journals state ~mailbox ~keeper_name
+                launch_current_autonomous_journals state ~mailbox ~keeper_name;
+                launch_selected_preparation_operation_read state ~mailbox
             | (Keepers (Keeper_message), None)
             | (Keepers (Keeper_list | (Keeper_detail | (Keeper_logs | (Keeper_calls | Keeper_runtime_pick)))), _)
             | ((Overview | (Acting | (Metrics | (Memory | (Lanes | (Clients | (Board | (Approvals | (Planning | (Schedules | (Verification | (Harness | (Fusion | (Repositories | (Code | (Changes | (Connectors | (Runtime | (Config | (Resources | (Tools | System_logs))))))))))))))))))))), _) -> ());
@@ -26943,6 +26959,7 @@ and is loaded on demand through keeper_skill.
                          launch_keeper_queue state ~mailbox:async_messages
                            ~keeper_name Masc_tui_queue_inspection.Inspect
                      | None -> ())
+                   ~load_preparation:(fun () -> launch_selected_preparation_operation_read state ~mailbox:async_messages)
                    ~load_tool_changes:(fun () ->
                      match state.msg_target_keeper_name with
                      | Some keeper_name ->

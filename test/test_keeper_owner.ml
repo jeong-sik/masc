@@ -860,6 +860,7 @@ let test_stopping_cancels_and_joins_active_child () =
   let child_released, resolve_child_released = Eio.Promise.create () in
   let never, _resolve_never = Eio.Promise.create () in
   let settled = ref None in
+  let original_turn = Ids.Turn_ref.make ~trace_id:"stopping-active-original" ~absolute_turn:1 in
   let record_settled ~keeper_name ~claimed_operation_id ~execution =
     settled := Some (keeper_name, claimed_operation_id, execution)
   in
@@ -868,6 +869,7 @@ let test_stopping_cancels_and_joins_active_child () =
     | Error error -> fail (Owner.error_to_string error)
     | Ok None -> fail "active-child test did not claim its operation"
     | Ok (Some _) ->
+      Keeper_turn_preview_owner.note_turn_ref original_turn;
       Eio.Switch.on_release child_sw (fun () ->
         Eio.Promise.resolve resolve_child_released ());
       Eio.Promise.resolve resolve_child_started ();
@@ -898,7 +900,9 @@ let test_stopping_cancels_and_joins_active_child () =
   Eio.Promise.await child_released;
   let operation = Option.get (owner_ok (Owner.exact_operation owner operation_id)) in
   (match operation.state with
-   | Chat_operation.Failed { failure = { kind; _ }; _ } ->
+   | Chat_operation.Failed { failure = { kind; outcome_ref; _ }; _ } ->
+     check (option string) "cancelled operation retains the original producer turn"
+       (Some (Ids.Turn_ref.to_string original_turn)) outcome_ref;
      check string
        "stopped active child is terminal"
        "Turn_cancelled"

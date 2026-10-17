@@ -78,8 +78,11 @@ description: "MASC TUI 채팅의 대화·상세·저널·입력·진행 정보, 
   펼친 대화 상세의 Keeper만 이력을 요청한다. 미요청 `null`은 확인한 빈 이력과
   구분하고, 전체 Keeper 상태 조회에 이력을 일괄 첨부하지 않는다.
 - 선택된 종료 작업의 상세를 펼치면 기존 runtime trace에서 저장된 준비 보고서를
-  읽는다. 자율 journal의 원래 turn reference, 직접 요청의 기록된 reply turn reference와
-  실제 batch execution ID로 연결한다. 연결이 없으면 추정하지 않고 진단에 남긴다.
+  읽는다. 자율 journal의 원래 turn reference, 직접 요청의 기록된 reply 또는 정확한
+  종단 operation의 outcome reference와 실제 batch execution ID로 연결한다. reply와
+  operation의 연결이 다르면 어느 쪽도 고르지 않는다. 실패 알림이 저장보다 먼저 오면
+  펼친 선택 작업의 operation만 기존 turns 관측 주기에 다시 확인한다. 종단 metadata를
+  확인한 뒤에는 연결이 없는 경우에도 이 추가 조회를 끝낸다. 연결을 추정하지 않는다.
   보고서 UUID마다 scope 번호를 별도로 읽으며, 저장 당시 active는 `기록 당시 미완료`다.
   부분 조회·지원하지 않는 기록·중복 보고서·조회 실패를 빈 이력이나 성공으로 바꾸지 않는다.
   이 정보는 상세 진단이며 현재 진행줄을 바꾸지 않는다. 선택·저널 revision·workspace가

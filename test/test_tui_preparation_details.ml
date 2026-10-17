@@ -163,7 +163,125 @@ let selected_read_ownership () = with_source (fun _ keeper_name turn_ref log sel
   let _, refresh = Details.select (Some revised) cached in
   check bool "new journal evidence invalidates the completed read" true (Option.is_some refresh))
 
+let original_identity_observations_are_owned () =
+  Eio_main.run (fun _ ->
+    let module Context = Keeper_turn_preview_owner in
+    let first = Context.create_turn_observation () and second = Context.create_turn_observation () in
+    let original = Ids.Turn_ref.make ~trace_id:"owned-original" ~absolute_turn:1 in
+    let other = Ids.Turn_ref.make ~trace_id:"owned-other" ~absolute_turn:1 in
+    Context.with_owner ~interrupt_token:(Keeper_interrupt_token.fresh ()) ~observation:first (fun () ->
+      Context.note_turn_ref original;
+      Context.note_turn_ref original;
+      Context.with_owner ~interrupt_token:(Keeper_interrupt_token.fresh ()) ~observation:second (fun () ->
+        Context.note_turn_ref other);
+      check bool "nested Owner identity does not overwrite its parent" true
+        (Context.observed_turn_ref first=Some original && Context.observed_turn_ref second=Some other));
+    Context.note_turn_ref other;
+    check bool "outside context cannot write a previous Owner" true (Context.observed_turn_ref first=Some original);
+    Context.with_owner ~interrupt_token:(Keeper_interrupt_token.fresh ()) ~observation:first (fun () ->
+      Context.note_turn_ref other;
+      Context.note_turn_ref original);
+    check bool "conflicting observations never pick first or last" true (Context.observed_turn_ref first=None))
+
+type observed_failure = Returned_failure | Raised_failure | Cancelled_failure | Unobserved_failure
+
+let failed_owner_to_saved_preparation () =
+  List.iter (fun mode -> with_source (fun config keeper_name _ _ _ _ -> Eio.Switch.run (fun sw ->
+    let original = Ids.Turn_ref.make ~trace_id:"original-owner-failure" ~absolute_turn:9 in
+    let operation_id = Keeper_operation_id.of_string "original-owner-operation" |> ok in
+    let entered, enter = Eio.Promise.create () in
+    let settled, settle = Eio.Promise.create () in
+    let never, _ = Eio.Promise.create () in
+    let execute ~sw:_ ~keeper_name:_ ~claim =
+      let operation = match claim () with
+        | Ok (Some operation) -> operation
+        | Ok None -> fail "actual Owner did not claim its queued operation"
+        | Error error -> fail (Keeper_owner.error_to_string error) in
+      check bool "the producer runs the claimed operation" true
+        (Keeper_operation_id.equal operation.Keeper_chat_operation.operation_id operation_id);
+      match mode with
+      | Unobserved_failure ->
+        Eio.Promise.resolve enter ();
+        Keeper_owner.Operation_failed {kind=Keeper_chat_operation.Turn_exception;
+          detail="failure before an original turn exists"; outcome_ref=None}
+      | Returned_failure | Raised_failure | Cancelled_failure ->
+        Keeper_turn_preview_owner.note_turn_ref original;
+        let preview = Preview.reset ~keeper_name ~turn_ref:(Some original)
+            ~execution_scope:(Some (Keeper_execution_scope_id.direct_operation operation.Keeper_chat_operation.operation_id))
+            ~now:3. ~redaction:Keeper_secret_redaction.empty in
+        (* A newer displayed writer cannot replace the invocation's actual identity. *)
+        ignore (Preview.reset ~keeper_name ~turn_ref:(Some (Ids.Turn_ref.make
+          ~trace_id:"unrelated-display" ~absolute_turn:1)) ~execution_scope:None
+          ~now:4. ~redaction:Keeper_secret_redaction.empty);
+        ignore (Observation.with_turn ~config ~keeper_name ~preview (fun () ->
+          Preview.with_preparation_result ~writer:(Some preview) ~turn_ref:(Some original)
+            ~phase:Preview.Prompt_preparation (fun () ->
+              Eio.Promise.resolve enter ();
+              match mode with
+              | Raised_failure -> raise (Failure "original preparation exception")
+              | Cancelled_failure -> Eio.Promise.await never; Ok ()
+              | Returned_failure | Unobserved_failure -> Error "original preparation refusal")));
+        Keeper_owner.Operation_failed {kind=Keeper_chat_operation.Turn_exception;
+          detail="original preparation refusal"; outcome_ref=None} in
+    let meta = Masc_test_deps.meta_of_json_fixture (`Assoc ["name",`String keeper_name;
+        "trace_id",`String "owner-meta-trace";"activation_mode",`String "manual"]) |> ok in
+    let owner = Keeper_owner.start ~sw
+        ~store:{replace=(fun _ -> Ok ()); remove=(fun _ -> Ok ())}
+        ~operation_store_path:(Filename.concat config.Workspace.base_path "failure-owner.sqlite3")
+        ~now:(fun () -> 10.) ~on_turn_slot_released:None ~keeper_name ~initial_meta:(Some meta)
+        ~operation_runner:(Some {ready=(fun ~keeper_name:_ -> true); execute;
+          on_execution_settled=(fun ~keeper_name:_ ~claimed_operation_id:_ ~execution -> Eio.Promise.resolve settle execution)})
+      |> Result.map_error Keeper_owner.error_to_string |> ok in
+    ignore (Keeper_owner.submit_operation owner ~operation_id
+      ~source:(`Assoc ["kind",`String "dashboard"])
+      ~input:(`Assoc ["message",`String "fail before reply"])
+      |> Result.map_error Keeper_owner.error_to_string |> ok);
+    Eio.Promise.await entered;
+    (match mode with
+     | Cancelled_failure -> ()
+     | Returned_failure | Raised_failure | Unobserved_failure -> ignore (Eio.Promise.await settled));
+    ignore (Keeper_owner.begin_stopping owner |> Result.map_error Keeper_owner.error_to_string |> ok);
+    ignore (Eio.Promise.await settled);
+    let operation = Keeper_owner.exact_operation owner operation_id
+        |> Result.map_error Keeper_owner.error_to_string |> ok |> Option.get in
+    let expected_ref = match mode with Unobserved_failure -> None
+      | Returned_failure | Raised_failure | Cancelled_failure -> Some (Ids.Turn_ref.to_string original) in
+    (match operation.state with
+     | Keeper_chat_operation.Failed {failure;_} ->
+       check (option string) "canonical failure preserves only its producer-supplied turn" expected_ref failure.outcome_ref;
+       check bool "cancellation keeps its original failure class" true
+         (failure.kind=(match mode with Cancelled_failure -> Keeper_chat_operation.Turn_cancelled
+           | Returned_failure | Raised_failure | Unobserved_failure -> Turn_exception))
+     | Queued | Running _ | Succeeded _ | Cancelled _ -> fail "Owner did not persist a failed operation");
+    let log = Log.create ~keeper_name ~request_id:(Keeper_operation_id.to_string operation_id) ~started_at:0. in
+    ignore (Log.add ~at:1. log ~seq:(Some 0) Live.Run_started);
+    ignore (Log.add ~at:2. log ~seq:(Some 1) (Live.Run_failed {message="original failure"}));
+    let canonical = Log.decode_operation_state ~operation_id:(Keeper_operation_id.to_string operation_id)
+        (Keeper_chat_operation.to_json operation) |> ok in
+    Log.observe_operation_state log (Some canonical);
+    let linked = Details.target ~journal:log ~execution_id:(Keeper_operation_id.to_string operation_id) ~reply_turn_ref:None in
+    match mode with
+    | Unobserved_failure ->
+      check bool "an early failure does not borrow another stored turn" true (Result.is_error linked)
+    | Returned_failure | Raised_failure | Cancelled_failure ->
+      let selected = ok linked in
+      let _, response = Server_dashboard_http_keeper_api.keeper_runtime_trace_json config keeper_name
+          ~trace_id:(Ids.Turn_ref.trace_id original) ~turn_id:9 () in
+      let snapshot = Details.decode ~target:selected response |> ok in
+      check int "failed original operation finds its actual saved preparation" 1 (List.length snapshot.reports);
+      let report = List.hd snapshot.reports in
+      check bool "saved report keeps the actual failure boundary" true
+        (report.boundary=(match mode with Returned_failure | Unobserved_failure -> Observation.Returned
+          | Raised_failure -> Raised | Cancelled_failure -> Cancelled));
+      let different = Ids.Turn_ref.make ~trace_id:"different-reply" ~absolute_turn:9 in
+      check bool "a conflicting reply cannot replace canonical failure identity" true
+        (Result.is_error (Details.target ~journal:log ~execution_id:(Keeper_operation_id.to_string operation_id)
+          ~reply_turn_ref:(Some (Ids.Turn_ref.to_string different)))))))
+    [Returned_failure; Raised_failure; Cancelled_failure; Unobserved_failure]
+
 let () = run "selected-preparation-details"
   ["source and protocol", [test_case "original writer through actual runtime API" `Quick actual_source_to_selected_read;
     test_case "partial, missing and ambiguous evidence" `Quick protocol_gaps_are_not_absence];
-   "read ownership", [test_case "selected revision and retired requests" `Quick selected_read_ownership]]
+   "read ownership", [test_case "selected revision and retired requests" `Quick selected_read_ownership;
+     test_case "original Owner identity remains exact" `Quick original_identity_observations_are_owned];
+   "failed original work", [test_case "Owner failure through canonical wire and saved preparation" `Quick failed_owner_to_saved_preparation]]

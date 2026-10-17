@@ -188,6 +188,9 @@ type operation_execution =
       { kind : Chat_operation.failure_kind
       ; detail : string
       ; outcome_ref : string option
+          (** An existing producer reference is retained. When absent, Owner
+              preserves the unambiguous original turn observed by this actual
+              invocation, including exception/cancellation settlement. *)
       }
 
 type operation_executor =

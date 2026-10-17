@@ -206,3 +206,43 @@ telemetry gate나 lenient repair를 추가하지 말고, `Text` → `ToolUse` �
 - **RFC-AC-018** (catalog externalization) — S1.2/S9.1의 catalog-as-SSOT 기반.
 - **RFC-AC-025** (forced-tool-use enforcement boundary) — S5의 기반.
 - **CLAUDE.md 워크어라운드 거부 기준** — S10.2/§4.4의 enforcement 원천.
+
+## 8. Responses phase replay contract and evidence refresh (2026-10-17)
+
+A canonical assistant message may contain several native Responses output
+items. Its `Response_replay` witness partitions the existing content by item;
+each native message owns its own phase. The canonical aggregate has no phase.
+The witness contains item kinds, counts and phases, without another copy of
+text, tool arguments or the raw response. Cache telemetry and assistant-message
+metadata carry the same typed witness. A stale partition or unknown phase
+refuses replay. Intentional reasoning/tool filtering must update the partition
+from the positions that the filter retained.
+
+| Source and replay path | Required behavior |
+| --- | --- |
+| Chat response → Chat history | Preserve the existing canonical assistant shape; invent no Responses phase. |
+| Responses sync → Responses history | Preserve each native message and all its text parts under its original phase. |
+| Responses stream → Responses history | Use actual output-item/part coordinates and terminal/item-done evidence; preserve native item order independently of chunk arrival. |
+| Response cache → Responses history | Preserve the witness; malformed/stale grouping is a miss. |
+| Missing, null and known phase | Preserve their distinct wire forms; unsupported values refuse replay. |
+| Partial tools or dropped reasoning | Keep the existing terminal/reasoning policy; remove only the corresponding content partition. |
+| Keeper visible-answer normalization | Keep native grouped history intact; a collapsed display string cannot replace differently phased items. |
+
+The [current OpenAI Responses reference](https://developers.openai.com/api/reference/resources/responses/methods/create)
+declares assistant phase as optional `commentary`, `final_answer`, or null.
+The [reasoning guide](https://developers.openai.com/api/docs/guides/reasoning#phase-parameter)
+requires manual replay to preserve each original assistant phase. This is an
+item-level wire fact, independent of wording or model-name heuristics. These
+fixtures establish local codec/history behavior; they do not establish a live
+provider request or account/model access.
+
+MiniMax remains a separate evidence question. The accessible official
+[M3 tool/interleaved-thinking guide](https://platform.minimax.io/docs/guides/text-m3-function-call)
+requires preserving the complete assistant response, including tool calls and,
+when split, reasoning details. The current
+[model-invocation guide](https://platform.minimax.io/docs/guides/text-generation)
+distinguishes M3.1-Flash-Preview: thinking cannot be disabled, and effort uses
+different fields across Chat, Responses and Anthropic protocols. That rule
+must not be generalized to every M3/M2 model. These pages do not establish
+MiniMax `tool_choice` parity or all Responses replay semantics. No MiniMax
+capability change follows from that gap, and it is not a confirmed defect.

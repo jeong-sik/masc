@@ -7264,6 +7264,9 @@ type state = {
      It belongs to its dispatch workspace and never proves Keeper action. *)
   mutable ask_answer_feedback:
     (ask_submission * Masc_tui_ask_projection.answer_feedback) option;
+  mutable ask_followup_read: Snapshot_read.t;
+  mutable ask_followup: (ask_submission * Masc.Tui_decode_asks.ask_followup) option;
+  mutable ask_followup_error: string option;
   (* The tool calls keepers are holding, drawn above the operator actions on
      the same surface. Live registry state on the server; refreshed with the
      surface. *)
@@ -8160,7 +8163,68 @@ let retain_ask_answer_feedback (state : state) submission result =
     Some feedback
   end else None
 
+let begin_ask_followup_read (state : state) =
+  match state.ask_answer_feedback with
+  | Some (submission, feedback) when submission.as_authority = state.workspace_authority
+      && state.workspace_identity = Workspace_identity_match
+      && Option.exists (fun current -> current.as_request == submission.as_request)
+           state.ask_submission_current ->
+      (match feedback.Masc_tui_ask_projection.af_receipt with
+       | Ok (Masc.Tui_decode_asks.Ask_answer_recorded _ | Ask_answer_already_recorded _) ->
+           let reading, request = Snapshot_read.start ~intent:Snapshot_read.Poll state.ask_followup_read in
+           state.ask_followup_read <- reading;
+           Option.map (fun request -> request, submission) request
+       | Ok (Ask_answer_written_unconfirmed _ | Ask_answer_refused _) | Error _ -> None)
+  | Some _ | None -> None
+
+let current_ask_followup (state : state) =
+  match state.ask_followup, state.ask_answer_feedback with
+  | Some (owner, observed), Some (current, _)
+    when owner.as_request == current.as_request
+      && owner.as_authority = state.workspace_authority
+      && state.workspace_identity = Workspace_identity_match -> Some observed
+  | _, _ -> None
+
+let take_ask_followup (state : state) request submission
+    (result : (Masc.Tui_decode_asks.ask_followup, string) result) =
+  match Snapshot_read.settle state.ask_followup_read request with
+  | None -> None
+  | Some reading ->
+      state.ask_followup_read <- reading;
+      let current = match state.ask_answer_feedback, state.ask_submission_current with
+        | Some (owner, _), Some current -> owner.as_request == submission.as_request
+            && current.as_request == submission.as_request
+        | None, _ | Some _, None -> false in
+      if not (current && submission.as_authority = state.workspace_authority
+              && state.workspace_identity = Workspace_identity_match) then None
+      else begin
+        let result = match result with
+          | Error _ as error -> error
+          | Ok observed ->
+              let observed = match state.ask_followup with
+                | Some (owner, prior) when owner.as_request == submission.as_request
+                    && prior.Masc.Tui_decode_asks.af_stimulus_id = observed.af_stimulus_id
+                    && prior.af_answered_at = observed.af_answered_at ->
+                    (* Missing observations cannot undo an already observed
+                       positive fact from the same immutable answer source. *)
+                    let retain fresh old = match fresh with Some _ -> fresh | None -> old in
+                    {observed with
+                      af_turn_started_at=retain observed.af_turn_started_at prior.af_turn_started_at;
+                      af_turn_finished_at=retain observed.af_turn_finished_at prior.af_turn_finished_at;
+                      af_queue_settled_at=retain observed.af_queue_settled_at prior.af_queue_settled_at;
+                      af_queue_cancelled_at=retain observed.af_queue_cancelled_at prior.af_queue_cancelled_at}
+                | Some _ | None -> observed in
+              Ok observed in
+        (match result with
+         | Ok observed -> state.ask_followup <- Some (submission, observed); state.ask_followup_error <- None
+         | Error detail -> state.ask_followup_error <- Some detail);
+        Some result
+      end
+
 let begin_ask_submission_state ?submission (state : state) =
+  state.ask_followup_read <- Snapshot_read.invalidate state.ask_followup_read;
+  state.ask_followup <- None;
+  state.ask_followup_error <- None;
   state.ask_submission_current <- submission;
   state.ask_submit_inflight <- true;
   retire_asks_read state
@@ -8446,6 +8510,7 @@ let suspend_workspace_readings state =
   state.lane_addons_cached <- suspend_application state.lane_addons_cached;
   state.keeper_tool_approvals_read <- Snapshot_read.invalidate state.keeper_tool_approvals_read;
   retire_asks_read state;
+  state.ask_followup_read <- Snapshot_read.invalidate state.ask_followup_read;
   state.keeper_roster_read <- Snapshot_read.invalidate state.keeper_roster_read;
   state.gate_snapshot_read <- Snapshot_read.invalidate state.gate_snapshot_read;
   state.schedules_read <- Snapshot_read.invalidate state.schedules_read;
@@ -11462,6 +11527,9 @@ let create_state
   ask_submit_inflight = false;
   ask_submission_current = None;
   ask_answer_feedback = None;
+  ask_followup_read = Snapshot_read.idle;
+  ask_followup = None;
+  ask_followup_error = None;
   keeper_tool_approvals = [];
   keeper_tool_approvals_error = None;
   keeper_tool_approvals_observed = false;

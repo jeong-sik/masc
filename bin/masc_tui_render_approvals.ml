@@ -245,14 +245,15 @@ let ask_summary_line ~now ~(row : Masc.Tui_decode_asks.ask_row) =
 let draw_ask_answer_feedback buf cols (state : state) =
   let module Decode = Masc.Tui_decode_asks in
   Option.iter (fun feedback ->
+    let followup = Masc_tui_types.current_ask_followup state in
     let delivered ~already = function
       | Decode.Ask_wake_stored ->
-          (if already then "Last answer: existing answer retained · delivery queued"
-           else "Last answer: saved · delivery queued"), Theme.info (),
-          Some "Keeper activity shows whether work has resumed."
+          (if already then "Answer receipt: existing answer retained · wake recorded"
+           else "Answer receipt: saved · wake recorded"), Theme.info (),
+          (match followup with None -> Some "Keeper activity shows whether work has resumed." | Some _ -> None)
       | Decode.Ask_wake_pending detail ->
-          (if already then "Last answer: existing answer retained · delivery pending"
-           else "Last answer: saved · delivery pending"), Theme.warn (), Some detail in
+          (if already then "Answer receipt: existing answer retained · initial delivery pending"
+           else "Answer receipt: saved · initial delivery pending"), Theme.warn (), Some detail in
     let status, style, detail = match feedback.Ask_projection.af_receipt with
       | Ok (Decode.Ask_answer_recorded delivery) -> delivered ~already:false delivery
       | Ok (Decode.Ask_answer_already_recorded { aar_delivery; _ }) ->
@@ -270,6 +271,22 @@ let draw_ask_answer_feedback buf cols (state : state) =
     let subject = match feedback.af_submitted_label with
       | Some label -> label | None -> feedback.af_keeper_name in
     box_line buf cols ("  " ^ Ansi.dim ^ Terminal_text.single_line subject ^ Ansi.reset);
+    Option.iter (fun (observed : Decode.ask_followup) ->
+      let facts = List.filter_map Fun.id
+        [Option.map (fun _ -> "turn entry observed") observed.af_turn_started_at;
+         Option.map (fun _ -> "turn boundary observed") observed.af_turn_finished_at;
+         Option.map (fun _ -> "wake settled or transferred (consumption unproven)") observed.af_queue_settled_at;
+         Option.map (fun _ -> "wake cancelled") observed.af_queue_cancelled_at] in
+      let facts = if facts=[] then ["no matching turn observed"] else facts in
+      let facts = if observed.af_evidence_complete then facts else facts @ ["evidence incomplete"] in
+      box_wrapped_field buf cols ~head:"  "
+        ~style:(if observed.af_evidence_complete then Theme.info () else Theme.warn ())
+        ("Keeper follow-up: " ^ String.concat " · " facts))
+      followup;
+    (match state.ask_followup_error with
+     | None -> ()
+     | Some _ -> box_wrapped_field buf cols ~head:"  " ~style:(Theme.warn ())
+         "Keeper follow-up: observation unavailable");
     Option.iter (fun detail ->
       box_line buf cols ("  " ^ Ansi.dim ^ Terminal_text.single_line detail ^ Ansi.reset)) detail)
     (Masc_tui_types.current_ask_answer_feedback state)

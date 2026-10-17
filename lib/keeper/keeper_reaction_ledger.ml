@@ -856,6 +856,9 @@ let event_queue_reaction_evidence_batch_result
       let store = store_for_base_path ~base_path ~keeper_name in
       let base_dir = Dated_jsonl.base_dir store in
       let until = Jsonl_writer.day_key ~ts:(Time_compat.now ()) in
+      (* The incremental reader uses native channels/stat. Keep that I/O and
+         waiting for the native cache mutex off the caller's Eio domain. *)
+      Eio_guard.run_in_systhread ~label:"keeper-reaction-evidence" (fun () ->
       Stdlib.Mutex.protect event_queue_reaction_evidence_cache_mu (fun () ->
         let cache =
           match Hashtbl.find_opt event_queue_reaction_evidence_caches base_dir with
@@ -930,7 +933,7 @@ let event_queue_reaction_evidence_batch_result
                       ~keeper_name
                       ~stimulus_id
                       (Hashtbl.find cache.tracked stimulus_id) ))
-               stimulus_ids))
+               stimulus_ids)))
 
 ;;
 

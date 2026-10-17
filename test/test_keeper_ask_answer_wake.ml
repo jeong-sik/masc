@@ -543,10 +543,96 @@ let test_already_answered_receipt_keeps_the_conflict () =
     check bool "no requesting losing actor is called winner" true (member "actor" body = `Null)) [ true; false ]
 ;;
 
+let test_followup_reads_exact_source_without_waking () =
+  with_persistence @@ fun config ensure_keeper ->
+  let base_path = config.Workspace.base_path and keeper_name = "alpha" in
+  ensure_keeper keeper_name;
+  let ask = persist_answer ~base_path ~keeper_name ~ask_id:"followup-original" () in
+  let resolution = match Keeper_ask_store.rows_result ~base_path ~keeper_name with
+    | Ok (Keeper_ask_store.Stored_rows rows) -> snd (List.assoc ask.ask_id rows)
+    | Ok Missing_log -> fail "canonical answer disappeared"
+    | Error error -> fail (Keeper_ask_store.read_error_to_string error) in
+  let observe () = Wake.observe_followup ~base_path ~keeper_name ~ask ~resolution
+      |> function Ok value -> value | Error detail -> fail detail in
+  let before = observe () |> Wake.followup_to_json in
+  check bool "no turn is invented from recording the answer" true
+    (Yojson.Safe.Util.member "turn_started_at" before = `Null);
+  check int "observing never enqueues a wake" 0 (List.length (pending_asks ~base_path ~keeper_name));
+  (match Wake.deliver ~base_path ~keeper_name ~ask_id:ask.ask_id with
+   | Ok _ -> () | Error error -> fail (Wake.error_to_string error));
+  let source = match pending_asks ~base_path ~keeper_name with
+    | [source, _] -> source | _ -> fail "original wake did not persist exactly once" in
+  Keeper_reaction_ledger.record_event_queue_turn_started ~base_path ~keeper_name source;
+  let entered = observe () |> Wake.followup_to_json in
+  check bool "original source turn entry is observed" true
+    (Yojson.Safe.Util.member "turn_started_at" entered <> `Null);
+  let left, right = Eio.Fiber.pair observe observe in
+  check string "concurrent native reader results retain the same exact source"
+    left.stimulus_id right.stimulus_id;
+  let other_payload = {Keeper_event_queue.ask_id="other-question"; channel=ask.continuation} in
+  let other = {source with post_id=Keeper_event_queue.ask_answered_post_id other_payload;
+      payload=Keeper_event_queue.Ask_answered other_payload} in
+  Keeper_reaction_ledger.record_event_queue_turn_finished ~base_path ~keeper_name
+    ~disposition:"test-boundary" other;
+  let unrelated = observe () |> Wake.followup_to_json in
+  check bool "another question cannot supply a turn boundary" true
+    (Yojson.Safe.Util.member "turn_finished_at" unrelated = `Null);
+  Keeper_reaction_ledger.record_event_queue_turn_finished ~base_path ~keeper_name
+    ~disposition:"test-boundary" source;
+  let finished = observe () |> Wake.followup_to_json in
+  check bool "the original turn boundary is observed" true
+    (Yojson.Safe.Util.member "turn_finished_at" finished <> `Null);
+  check int "repeated observation never duplicates the pending source" 1
+    (List.length (pending_asks ~base_path ~keeper_name));
+  check bool "another Keeper cannot inherit this question's source" true
+    (Result.is_error (Wake.observe_followup ~base_path ~keeper_name:"beta" ~ask ~resolution));
+  List.iter (fun field -> check bool "followup metadata carries no human content or invented action" true
+    (Yojson.Safe.Util.member field finished = `Null)) ["answers";"questions";"responder";"tool_action";"quarantine_reason"];
+  Dated_jsonl.append (Dated_jsonl.open_store (Keeper_reaction_ledger.location ~base_path ~keeper_name))
+    (`Assoc ["stimulus_id", `String left.stimulus_id; "record_kind", `String "reaction"]);
+  let quarantined = observe () |> Wake.followup_to_json in
+  check bool "quarantined matching row marks evidence incomplete" false
+    (Yojson.Safe.Util.member "evidence_complete" quarantined |> Yojson.Safe.Util.to_bool);
+  check bool "quarantined matching row exposes its quarantine reason code" true
+    (match Yojson.Safe.Util.member "quarantine_reason" quarantined with
+     | `String reason -> String.length reason > 0
+     | _ -> false)
+;;
+
+let test_followup_queue_settlement_does_not_invent_a_turn () =
+  with_persistence @@ fun config ensure_keeper ->
+  let base_path = config.Workspace.base_path and keeper_name = "alpha" in
+  ensure_keeper keeper_name;
+  let ask = persist_answer ~base_path ~keeper_name ~ask_id:"queue-only" () in
+  let resolution = match Keeper_ask_store.rows_result ~base_path ~keeper_name with
+    | Ok (Keeper_ask_store.Stored_rows rows) -> snd (List.assoc ask.ask_id rows)
+    | Ok Missing_log -> fail "answer disappeared"
+    | Error error -> fail (Keeper_ask_store.read_error_to_string error) in
+  (match Wake.deliver ~base_path ~keeper_name ~ask_id:ask.ask_id with
+   | Ok _ -> () | Error error -> fail (Wake.error_to_string error));
+  let selection = match Queue.select_when_result ~base_path keeper_name ~now:300. ~ready:(fun _ -> true) with
+    | Ok (Some selection) -> selection
+    | Ok None -> fail "original wake not selected" | Error detail -> fail detail in
+  (match Queue.terminalize_pending_turn_completed_result ~base_path keeper_name ~applied_at:301. ~selection with
+   | Ok (Queue.Turn_source_acked _) -> ()
+   | Ok Queue.Turn_selection_withdrawn -> fail "original selection withdrawn" | Error detail -> fail detail);
+  let observed = match Wake.observe_followup ~base_path ~keeper_name ~ask ~resolution with
+    | Ok observed -> Wake.followup_to_json observed | Error detail -> fail detail in
+  check bool "queue settlement is an independent positive fact" true
+    (Yojson.Safe.Util.member "queue_settled_at" observed <> `Null);
+  check bool "queue settlement supplies neither turn entry nor boundary" true
+    (Yojson.Safe.Util.member "turn_started_at" observed = `Null
+     && Yojson.Safe.Util.member "turn_finished_at" observed = `Null)
+;;
+
 let () =
   run "keeper_ask_answer_wake"
     [ ( "wake"
-      , [ test_case "the wake survives the queue" `Quick test_the_wake_survives_the_queue
+      , [ test_case "queue settlement does not invent a turn" `Quick
+            test_followup_queue_settlement_does_not_invent_a_turn
+        ; test_case "followup reads exact source without waking" `Quick
+            test_followup_reads_exact_source_without_waking
+        ; test_case "the wake survives the queue" `Quick test_the_wake_survives_the_queue
         ; test_case "the wake is keyed by the question" `Quick
             test_the_wake_is_keyed_by_the_question
         ; test_case "an undelivered answer is not reported as success" `Quick

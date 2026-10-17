@@ -158,8 +158,7 @@ let decode_ask_row json =
       ar_resolution;
     }
 
-let decode_asks_snapshot ~expected_base_path ~expected_masc_root json =
-  let* () =
+let validate_asks_workspace ~expected_base_path ~expected_masc_root json =
     match json with
     | `Assoc fields ->
       let* () = match List.filter (fun (name,_) -> String.equal name "state_ready") fields with
@@ -175,12 +174,69 @@ let decode_asks_snapshot ~expected_base_path ~expected_masc_root json =
               String.equal base expected_base_path && String.equal root expected_masc_root -> Ok ()
           | _ -> Error "asks: response workspace does not match this request")
        | _ -> Error "asks: one complete response workspace is required")
-    | _ -> Error "asks: response must be an object" in
+    | _ -> Error "asks: response must be an object"
+
+let decode_asks_snapshot ~expected_base_path ~expected_masc_root json =
+  let* () = validate_asks_workspace ~expected_base_path ~expected_masc_root json in
   let asn_keeper = ask_string_opt json "keeper" in
   let* asn_open_count = ask_int json "open_count" in
   let* row_items = ask_list json "asks" in
   let* asn_rows = ask_map_results decode_ask_row row_items in
   Ok { asn_keeper; asn_open_count; asn_rows }
+
+type ask_followup = {
+  af_answered_at : float;
+  af_stimulus_id : string;
+  af_turn_started_at : float option;
+  af_turn_finished_at : float option;
+  af_queue_settled_at : float option;
+  af_queue_cancelled_at : float option;
+  af_evidence_complete : bool;
+}
+
+let decode_ask_followup ~expected_base_path ~expected_masc_root ~keeper_name ~ask_id json =
+  let* () = validate_asks_workspace ~expected_base_path ~expected_masc_root json in
+  let single json name = match json with
+    | `Assoc fields ->
+        (match List.filter (fun (key,_) -> String.equal key name) fields with
+         | [_, value] -> Ok value
+         | _ -> Error ("answer follow-up field is missing or duplicated: " ^ name))
+    | _ -> Error "answer follow-up must be an object" in
+  let string json name = let* value = single json name in match value with
+    | `String value -> Ok value
+    | _ -> Error ("answer follow-up field is not a string: " ^ name) in
+  let finite = function
+    | `Float value when Float.is_finite value -> Ok value
+    | `Int value -> Ok (float_of_int value)
+    | _ -> Error "answer follow-up clock is not finite" in
+  let* keeper = string json "keeper" in
+  let* answer_id = string json "answer_progress_for" in
+  if not (String.equal keeper keeper_name && String.equal answer_id ask_id) then
+    Error "answer follow-up belongs to a different Keeper or question"
+  else
+    let* progress = single json "answer_progress" in
+    let* state = string progress "state" in
+    match state with
+    | "unavailable" -> Error "answer follow-up evidence is unavailable"
+    | "observed" ->
+        let clock name = let* value = single progress name in match value with
+          | `Null -> Ok None
+          | value -> finite value |> Result.map Option.some in
+        let* answered_at = single progress "answered_at" in
+        let* af_answered_at = finite answered_at in
+        let* af_stimulus_id = string progress "stimulus_id" in
+        if String.equal af_stimulus_id "" then Error "answer follow-up source identity is empty" else
+        let* af_turn_started_at = clock "turn_started_at" in
+        let* af_turn_finished_at = clock "turn_finished_at" in
+        let* af_queue_settled_at = clock "queue_settled_at" in
+        let* af_queue_cancelled_at = clock "queue_cancelled_at" in
+        let* complete = single progress "evidence_complete" in
+        let* af_evidence_complete = match complete with
+          | `Bool value -> Ok value
+          | _ -> Error "answer follow-up evidence completeness is invalid" in
+        Ok {af_answered_at;af_stimulus_id;af_turn_started_at;af_turn_finished_at;
+            af_queue_settled_at;af_queue_cancelled_at;af_evidence_complete}
+    | _ -> Error "unknown answer follow-up state"
 
 type ask_answer_delivery =
   | Ask_wake_stored

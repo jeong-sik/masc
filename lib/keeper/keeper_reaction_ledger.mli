@@ -204,7 +204,10 @@ val event_queue_reaction_evidence_batch_result :
     What is kept is one accumulator per identity the caller has asked about,
     never the ledger and never every identity in it. A read failure drops that
     Keeper's cache and returns {!Evidence_read_error}; callback exceptions
-    also discard the partially updated cache and propagate unchanged. *)
+    also discard the partially updated cache and propagate unchanged.
+    Native file reads and the cache mutex run in a system thread for Eio
+    callers; non-Eio callers retain direct execution. The worker path uses
+    the native incremental reader, without Eio filesystem operations. *)
 
 val event_queue_delivery_seen_for_source_result :
   base_path:string ->

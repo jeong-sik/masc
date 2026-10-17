@@ -157,9 +157,65 @@ not a durable history or a current Keeper execution status.
 |---|---|---|
 | First answer feedback dependency | Answer POST, then question reload, then UI delivery | Original POST result is offered to the UI before the reload starts |
 | Result after transient notice expires | Empty question list can hide the accepted result | Last admitted receipt remains on Approvals |
-| HTTP requests | Original POST and workspace-bound question reload | Same original POST and reload; no additional request |
+| Receipt-delivery HTTP requests | Original POST and workspace-bound question reload | Same original POST and reload; follow-up observation reads below are counted separately |
 | Duplicate answer | Newly submitted labels cannot describe the canonical winner | Same rule applies to retained feedback |
 | Keeper progress | A stored wake does not prove resumed work | Delivery receipt remains distinct from Keeper activity |
+
+## Observe the original answer's follow-up
+
+Approvals now reads reaction evidence for its latest confirmed answer receipt.
+`GET /api/v1/keepers/asks?name=<keeper>&answer_progress_for=<ask-id>` reuses the
+named canonical question fold and adds one `answer_progress` observation. Both
+workspace preconditions and ready response identity apply. The query requires
+one named Keeper and one nonempty Ask id; duplicate identities are refused.
+Ordinary question lists do not read reaction evidence.
+
+The read-only observer derives the same source identity as the actual delivery
+producer from the canonical first answer, then uses the existing incremental
+exact-source ledger reader. It performs no answer append, enqueue, wake hint or
+registry repair. The wire includes canonical answer time, source identity,
+positive turn-entry/turn-boundary/queue-settlement/cancellation clocks and
+evidence completeness. Question text, answers and responder data are excluded.
+The shared exact-source reader previously held a native mutex while scanning
+native files in the calling Eio fiber. Its native file scan and mutex wait now
+run through the existing context-aware system-thread guard; non-Eio callers
+keep direct execution. This affects every consumer of that exact-source reader,
+including the existing scheduler/native-task observations. It changes neither
+cache ownership nor evidence semantics, and has no measured latency result yet.
+
+| Fact | Receipt alone | Source implementation |
+|---|---|---|
+| Answer recording and initial wake result | Retained historical POST receipt | Same receipt, explicitly separate from follow-up evidence |
+| Exact source enters a Keeper turn | Inspect activity separately | Observe its matching durable turn-entry clock |
+| Exact source's turn reaches a boundary | No linked observation | Observe its matching boundary clock; this is not Task completion |
+| Queue source settles or is transferred | Delivery receipt cannot distinguish later handling | Observe settlement separately; ACK includes transfer and proves no Tool action |
+| Read fails or evidence becomes incomplete | No current observation | Retain positive facts for the same immutable answer source, and show observation failure/incompleteness |
+| A newer answer or workspace replaces the owner | No source observation to retire | Retire the old reader and reject its late reply |
+
+Only Approvals reads the latest confirmed receipt. The existing refresh cadence
+owns subsequent reads, with one inflight source request shared by polls. Initial
+POST receipt admission can start the first read before the question reread ends;
+terminal receipt delivery avoids duplicating an already observed initial read.
+This adds an independent named observation GET while the receipt is visible,
+not a new timer or a per-question fleet poll. It does not delay the full refresh
+or release answer submission/draft gates. The actual drawn feedback block still
+determines the remaining row budgets.
+
+`tui_ask_followup` logs admitted Keeper/Ask/source identities, canonical answer and
+reaction Unix clocks, completeness and a monotonic UI admission clock. Compare
+Unix source clocks to each other; the process monotonic clock measures UI
+admission separately. A failed read logs only its
+unavailable state, not server detail. These are repeated state observations,
+not counts of turns, Tool calls, paints or physical deliveries.
+
+No entry clock means unobserved, not that work did not happen. A turn boundary
+does not identify a Tool action. Direct Ask-to-Tool attribution remains absent
+until the original execution supplies a causal binding; unrelated activity and
+nearby timestamps are never substituted for it. The new source path has no
+native After or measured performance result. For a matched Before/After, keep
+the same original question/answer/workspace/viewport, record actual source
+entry/boundary/settlement and failed reads, and inspect the rendered receipt
+against those exact records. Queue acceptance alone cannot satisfy this check.
 
 The early observation changes no submission/draft gate and settles no workspace
 operation. The original operation continues through its canonical list reload
@@ -251,35 +307,6 @@ took 2046.113 ms and 2109.435 ms. Its scheduled 0.1s frames showed the new healt
 the baseline still showed the previous health at the scheduled 0.5s frames.
 The experiment demonstrates removal of the imposed sibling wait. It does not
 measure a general or production speedup, or the baseline's exact admission clock.
-
-## Workspace-bound question reads
-
-The TUI sends both canonical `expected_base_path` and `expected_masc_root` on
-each question read. The server checks the pair against its receiving config
-before Keeper lookup or question scanning. Partial/duplicate fields return 400;
-another workspace returns 409. Named and fleet responses carry the actual
-canonical roots in `workspace` and the server's observed `state_ready`.
-
-The decoder requires one complete matching workspace and exactly one true
-readiness field, including for an empty list. Missing, foreign, ambiguous or
-booting responses remain failed reads and retain the previous questions. A
-matching response can therefore enter the existing early-delivery path without
-another health request. Its refresh ticket, workspace authority and question
-read receipt still govern admission; cold-start reads retain terminal admission.
-
-| Ask-specific request path | Before | To-Be implementation |
-|---|---|---|
-| Warm question read before early delivery | Question GET, then health GET | One workspace-bound question GET |
-| Question reload after an answer | Health GET, question GET, health GET | One workspace-bound question GET |
-
-These are source-level request counts, excluding the full refresh's shared
-identity probes and the answer write's existing admission check. They do not
-establish elapsed-time savings. The actual question/choice IDs and answer
-recording/delivery receipts retain their meanings. For Before/After, freeze the
-same original question, workspace, viewport and delayed endpoint behavior;
-record actual requests, question state admission, full-refresh completion and
-manually inspected native frames. Keep foreign-workspace, booting, failed and
-unfinished attempts alongside valid reads.
 
 ## Workspace-bound question reads
 

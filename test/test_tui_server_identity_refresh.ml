@@ -1302,10 +1302,63 @@ let test_answer_receipt_has_one_original_submission_owner () =
   Alcotest.(check bool) "unconfirmed workspace grants no receipt admission" true
     (Option.is_none (retain_ask_answer_feedback state unread receipt))
 
+let test_answer_followup_retains_current_source_observations () =
+  let open Masc_tui_types in
+  let module Decode = Masc.Tui_decode_asks in
+  let state = create_state ~workspace:"followup" ~local_base_path:"/workspace/followup"
+      ~port:0 ~refresh_interval:0. () in
+  state.workspace_identity <- Workspace_identity_match;
+  state.server_identity <- Some (identity state.local_base_path);
+  let submission name : ask_submission = {as_request=ref ();as_authority=state.workspace_authority;
+      as_keeper_name="alpha";as_ask_id=name;as_answered_label="choice"} in
+  let first = submission "original" in
+  begin_ask_submission_state ~submission:first state;
+  ignore (retain_ask_answer_feedback state first (Ok (Decode.Ask_answer_recorded Decode.Ask_wake_stored)));
+  let begin_read () = match begin_ask_followup_read state with
+    | Some value -> value | None -> Alcotest.fail "confirmed original answer did not own a read" in
+  let request, owner = begin_read () in
+  Alcotest.(check bool) "cadence shares one inflight observation" true
+    (Option.is_none (begin_ask_followup_read state));
+  let observed : Decode.ask_followup = {af_answered_at=200.;af_stimulus_id="original-source";
+    af_turn_started_at=Some 201.;af_turn_finished_at=None;af_queue_settled_at=None;
+    af_queue_cancelled_at=None;af_evidence_complete=true} in
+  ignore (take_ask_followup state request owner (Ok observed));
+  Alcotest.(check bool) "original observation survives without releasing the POST gate" true
+    (current_ask_followup state=Some observed && state.ask_submit_inflight);
+  Alcotest.(check bool) "duplicate observation cannot replace accepted facts" true
+    (Option.is_none (take_ask_followup state request owner (Error "duplicate")));
+  let request, owner = begin_read () in
+  ignore (take_ask_followup state request owner (Error "read unavailable"));
+  Alcotest.(check bool) "failed reread retains prior source facts and explicit error" true
+    (current_ask_followup state=Some observed && Option.is_some state.ask_followup_error);
+  let request, owner = begin_read () in
+  ignore (take_ask_followup state request owner
+    (Ok {observed with af_turn_started_at=None;af_evidence_complete=false}));
+  Alcotest.(check bool) "missing observations cannot undo a positive fact" true
+    (Option.exists (fun value -> value.Decode.af_turn_started_at=Some 201.
+       && not value.af_evidence_complete) (current_ask_followup state));
+  let retired, old_owner = begin_read () in
+  let second = submission "new-answer" in
+  begin_ask_submission_state ~submission:second state;
+  Alcotest.(check bool) "pending newer submission cannot read the older feedback" true
+    (Option.is_none (begin_ask_followup_read state));
+  ignore (retain_ask_answer_feedback state second (Ok (Decode.Ask_answer_recorded Decode.Ask_wake_stored)));
+  let current, owner = begin_read () in
+  Alcotest.(check bool) "old reply cannot settle the successor's read" true
+    (Option.is_none (take_ask_followup state retired old_owner (Ok observed))
+     && Snapshot_read.in_flight state.ask_followup_read);
+  state.workspace_identity <- Workspace_identity_match_unconfirmed "probe unavailable";
+  Alcotest.(check bool) "uncertainty rejects publication and settles its original reader" true
+    (Option.is_none (take_ask_followup state current owner (Ok observed))
+     && not (Snapshot_read.in_flight state.ask_followup_read)
+     && Option.is_none (current_ask_followup state))
+
 let () =
   Alcotest.run "tui_server_identity_refresh"
     [ ( "server-identity-refresh"
-      , [ Alcotest.test_case "initial probe requires current cold workspace" `Quick
+      , [ Alcotest.test_case "answer followup retains exact current source observations" `Quick
+            test_answer_followup_retains_current_source_observations
+        ; Alcotest.test_case "initial probe requires current cold workspace" `Quick
             test_initial_probe_requires_current_cold_workspace
         ; Alcotest.test_case "initial probe cannot revive a retired refresh" `Quick
             test_initial_probe_rejects_retired_refresh

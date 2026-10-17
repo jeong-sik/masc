@@ -667,6 +667,17 @@ let git_credential_config_path ~config_dir =
   Filename.concat config_dir git_credential_config_file_name
 ;;
 
+let git_credential_config_env ~has_git_wiring ~config_dir =
+  if has_git_wiring
+  then [ git_config_global_env_name, git_credential_config_path ~config_dir ]
+  else []
+;;
+
+let git_credential_docker_args ~has_git_wiring ~config_dir =
+  git_credential_config_env ~has_git_wiring ~config_dir
+  |> List.concat_map (fun (name, value) -> [ "--env"; name ^ "=" ^ value ])
+;;
+
 (* The hostnames this identity is logged into. hosts.yml is gh-owned and
    stable in shape: a top-level key is a line that starts at column zero and
    ends with ':'. Nothing else in the file has that shape. *)
@@ -681,6 +692,25 @@ let hostnames_of_hosts_yml contents =
       if String.equal host "" || String.contains host ' ' || String.contains host '"'
       then None
       else Some host))
+;;
+
+let has_git_credential_wiring ~config ~keeper_name =
+  match existing_config_dir ~config ~keeper_name with
+  | Error _ | Ok None -> false
+  | Ok (Some host_dir) ->
+    (match
+       Fs_compat.load_owned_regular_file
+         ~ownership_root:host_dir
+         (Filename.concat host_dir "hosts.yml")
+     with
+     | Error _ | Ok None -> false
+     | Ok (Some contents) -> hostnames_of_hosts_yml contents <> [])
+;;
+
+let microvm_git_credential_env ~config ~keeper_name ~container_config_dir =
+  git_credential_config_env
+    ~has_git_wiring:(has_git_credential_wiring ~config ~keeper_name)
+    ~config_dir:container_config_dir
 ;;
 
 (* git never consults gh's hosts.yml on its own: an https push without a
@@ -748,9 +778,8 @@ let git_author_docker_args ~keeper_name =
    a host login reaches a running container through the mount. The git wiring
    is the same pure function of hosts.yml the snapshot lane writes; the
    stable dir's validator inspects only hosts.yml and config.yml, so the
-   added gitconfig does not break it. GIT_CONFIG_GLOBAL always points at
-   that file: a missing file reads as an empty config to git, so the env
-   stays correct across identity changes without recreating the container.
+   added gitconfig does not break it. GIT_CONFIG_GLOBAL points at that file
+   whenever the identity has git wiring.
 
    An unconfigured keeper (no stable dir yet) gets no identity args at all
    rather than a provisioned empty one: starting a container must not create
@@ -765,7 +794,7 @@ let docker_args_persistent ~config ~keeper_name ~container_masc_dir =
   | Ok (Some host_dir) ->
     (match write_git_credential_config ~dir_mode_after:0o700 ~snapshot:host_dir with
      | Error _ as error -> error
-     | Ok _has_git_wiring ->
+     | Ok has_git_wiring ->
        let container_dir = container_config_dir ~container_masc_dir ~keeper_name in
        Ok
          (author_args
@@ -773,11 +802,8 @@ let docker_args_persistent ~config ~keeper_name ~container_masc_dir =
             ; "GH_CONFIG_DIR=" ^ container_dir
             ; "-v"
             ; host_dir ^ ":" ^ container_dir ^ ":ro"
-            ; "--env"
-            ; git_config_global_env_name
-              ^ "="
-              ^ git_credential_config_path ~config_dir:container_dir
-            ]))
+            ]
+          @ git_credential_docker_args ~has_git_wiring ~config_dir:container_dir))
 ;;
 
 (* Refresh of the derived gitconfig for the persistent mount, called when a
@@ -828,14 +854,7 @@ let docker_args_for_tool ~config ~keeper_name ~container_masc_dir =
                container_config_dir ~container_masc_dir ~keeper_name
              in
              let git_wiring_args =
-               if has_git_wiring
-               then
-                 [ "--env"
-                 ; git_config_global_env_name
-                   ^ "="
-                   ^ git_credential_config_path ~config_dir:container_dir
-                 ]
-               else []
+               git_credential_docker_args ~has_git_wiring ~config_dir:container_dir
              in
              Ok
                { args =

@@ -315,6 +315,14 @@ let test_tool_projection_is_nonblocking_without_identity () =
       ^ ":/tmp/masc-runtime/.masc/keepers/missing-identity/github-cli:ro"
     ]
     docker_projection.args;
+  Alcotest.(check (list (pair string string)))
+    "an unconfigured microvm keeper gets no GIT_CONFIG_GLOBAL"
+    []
+    (Github.microvm_git_credential_env
+       ~config
+       ~keeper_name
+       ~container_config_dir:
+         "/tmp/masc-runtime/.masc/keepers/missing-identity/github-cli");
   let host_dir =
     match Github.ensure_config_dir ~config ~keeper_name with
     | Error message -> Alcotest.fail message
@@ -345,6 +353,15 @@ let test_tool_projection_is_nonblocking_without_identity () =
   Alcotest.(check string) "next snapshot contains the login state"
     "github.com:\n  user: first-login\n  oauth_token: first-token\n"
     (read_file (Filename.concat after_login_snapshot "hosts.yml"));
+  Alcotest.(check (list (pair string string)))
+    "a configured microvm keeper gets GIT_CONFIG_GLOBAL pointing at its mounted gitconfig"
+    [ ( "GIT_CONFIG_GLOBAL"
+      , "/tmp/masc-runtime/.masc/keepers/missing-identity/github-cli/gitconfig" ) ]
+    (Github.microvm_git_credential_env
+       ~config
+       ~keeper_name
+       ~container_config_dir:
+         "/tmp/masc-runtime/.masc/keepers/missing-identity/github-cli");
   docker_projection.cleanup ();
   after_login_projection.cleanup ();
   Alcotest.(check bool) "empty Docker snapshot is cleaned" false

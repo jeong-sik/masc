@@ -1280,6 +1280,174 @@ let test_reset_during_wake_error_suppresses_old_generation_rearm () =
     (List.length !tasks)
 ;;
 
+let rearm_contention partition_id : W.contention =
+  { keeper_name = "alpha"; partition_id; generation = P.Generation.initial }
+;;
+
+let take_rearm_task tasks =
+  match !tasks with
+  | task :: rest -> tasks := rest; task
+  | [] -> Alcotest.fail "expected a queued contention rearm"
+;;
+
+let check_rearm_scheduled label expected = function
+  | W.Rearm_scheduled { delay_s } ->
+    Alcotest.(check (float 0.0001)) label expected delay_s
+  | W.Rearm_deduplicated _ -> Alcotest.fail (label ^ ": unexpectedly deduplicated")
+;;
+
+let check_rearm_deduplicated label expected = function
+  | W.Rearm_deduplicated { delay_s } ->
+    Alcotest.(check (float 0.0001)) label expected delay_s
+  | W.Rearm_scheduled _ -> Alcotest.fail (label ^ ": forked a duplicate")
+;;
+
+let test_reset_and_recreate_during_wake_preserves_new_ticket () =
+  List.iter
+    (fun old_result ->
+      let contention = rearm_contention "partition-recreated-during-wake" in
+      let tasks = ref [] in
+      let requests = ref 0 in
+      let during_request = ref (fun () -> ()) in
+      let scheduler =
+        W.For_testing.make_contention_rearm_scheduler
+          ~fork:(fun task -> tasks := !tasks @ [task])
+          ~sleep:(fun _ -> ())
+          ~request:(fun () ->
+            incr requests;
+            if !requests = 1 then (!during_request (); old_result)
+            else Ok Wake.Signaled)
+          ()
+      in
+      let schedule () = W.For_testing.schedule_contention_rearm scheduler contention in
+      during_request := (fun () ->
+        W.For_testing.reset_contention_rearms scheduler ~keep:None;
+        schedule () |> check_rearm_scheduled "same key starts fresh after reset" 0.05);
+      schedule () |> check_rearm_scheduled "initial wake" 0.05;
+      take_rearm_task tasks ();
+      Alcotest.(check int) "old completion adds no retry" 1 (List.length !tasks);
+      schedule () |> check_rearm_deduplicated "replacement remains pending" 0.05;
+      take_rearm_task tasks ();
+      Alcotest.(check int) "only the replacement makes the next request" 2 !requests;
+      Alcotest.(check int) "replacement completes without extra task" 0 (List.length !tasks);
+      schedule () |> check_rearm_scheduled "replacement retains its own history" 0.1)
+    [Error "old request failed after reset"; Ok Wake.Signaled]
+;;
+
+let test_contention_fork_failure_retains_history_and_rejects_old_callback () =
+  let contention = rearm_contention "partition-fork-failure" in
+  let tasks = ref [] in
+  let fail_fork = ref true in
+  let requests = ref 0 in
+  let failure = Failure "injected fork failure" in
+  let scheduler =
+    W.For_testing.make_contention_rearm_scheduler
+      ~fork:(fun task ->
+        (* Retain the callback to exercise a late invocation after fork failed. *)
+        tasks := !tasks @ [task];
+        if !fail_fork then (fail_fork := false; raise failure))
+      ~sleep:(fun _ -> ())
+      ~request:(fun () -> incr requests; Ok Wake.Signaled)
+      ()
+  in
+  let schedule () = W.For_testing.schedule_contention_rearm scheduler contention in
+  Alcotest.check_raises "fork exception propagates" failure
+    (fun () -> ignore (schedule () : W.rearm_schedule));
+  Alcotest.(check int) "failed fork sent no wake" 0 !requests;
+  schedule () |> check_rearm_scheduled "fork failure retains delay history" 0.1;
+  take_rearm_task tasks ();
+  Alcotest.(check int) "failed fork's old callback cannot deliver" 0 !requests;
+  schedule () |> check_rearm_deduplicated "old callback leaves replacement alone" 0.1;
+  take_rearm_task tasks ();
+  Alcotest.(check int) "new reservation delivers once" 1 !requests;
+  Alcotest.(check int) "no unowned retry" 0 (List.length !tasks)
+;;
+
+let test_contention_sleep_failure_preserves_history_and_new_reservation () =
+  let contention = rearm_contention "partition-sleep-failure" in
+  let tasks = ref [] in
+  let requests = ref 0 in
+  (* This is an injected exception, not evidence of native switch cancellation. *)
+  let cancellation = Eio.Cancel.Cancelled (Failure "injected rearm sleep cancellation") in
+  let sleep_failure = ref (Some cancellation) in
+  let scheduler =
+    W.For_testing.make_contention_rearm_scheduler
+      ~fork:(fun task -> tasks := !tasks @ [task])
+      ~sleep:(fun _ ->
+        match !sleep_failure with
+        | Some exn -> sleep_failure := None; raise exn
+        | None -> ())
+      ~request:(fun () -> incr requests; Ok Wake.Signaled)
+      ()
+  in
+  let schedule () = W.For_testing.schedule_contention_rearm scheduler contention in
+  schedule () |> check_rearm_scheduled "initial sleep" 0.05;
+  let cancelled_task = take_rearm_task tasks in
+  Alcotest.check_raises "sleep cancellation propagates" cancellation cancelled_task;
+  Alcotest.(check int) "cancelled sleep sent no wake" 0 !requests;
+  schedule () |> check_rearm_scheduled "sleep cancellation retains history" 0.1;
+  W.For_testing.reset_contention_rearms scheduler ~keep:None;
+  schedule () |> check_rearm_scheduled "reset starts the replacement history" 0.05;
+  let stale_failure = Failure "injected stale sleep failure" in
+  sleep_failure := Some stale_failure;
+  (* Revisit the first callback: a counter rewound by reset would let its
+     cancellation clear the new key's first reservation. *)
+  Alcotest.check_raises "old sleep failure propagates" stale_failure cancelled_task;
+  schedule () |> check_rearm_deduplicated "old cancellation cannot clear a new ticket" 0.05;
+  Alcotest.(check int) "stale cancellation sent no wake" 0 !requests;
+  take_rearm_task tasks ();
+  Alcotest.(check int) "reset also invalidates the later queued callback" 0 !requests;
+  take_rearm_task tasks ();
+  Alcotest.(check int) "new ticket survives stale cancellation" 1 !requests;
+  Alcotest.(check int) "no extra task after recovery" 0 (List.length !tasks)
+;;
+
+let test_contention_successful_wake_outcomes_release_ticket () =
+  List.iter
+    (fun wake ->
+      let contention = rearm_contention "partition-successful-wake" in
+      let tasks = ref [] in
+      let requests = ref 0 in
+      let scheduler =
+        W.For_testing.make_contention_rearm_scheduler
+          ~fork:(fun task -> tasks := !tasks @ [task])
+          ~sleep:(fun _ -> ())
+          ~request:(fun () -> incr requests; Ok wake)
+          ()
+      in
+      let schedule () = W.For_testing.schedule_contention_rearm scheduler contention in
+      schedule () |> check_rearm_scheduled "initial successful wake" 0.05;
+      take_rearm_task tasks ();
+      Alcotest.(check int) "successful wake has no automatic retry" 0 (List.length !tasks);
+      schedule () |> check_rearm_scheduled "success releases ticket and retains history" 0.1;
+      take_rearm_task tasks ();
+      Alcotest.(check int) "explicit schedules each request once" 2 !requests;
+      Alcotest.(check int) "second success also has no retry" 0 (List.length !tasks))
+    [Wake.Coalesced; Wake.Not_registered]
+;;
+
+let test_contention_raised_request_keeps_inflight_until_reset () =
+  let contention = rearm_contention "partition-raised-request" in
+  let requests = ref 0 in
+  let failure = Failure "injected raised request" in
+  let scheduler =
+    W.For_testing.make_contention_rearm_scheduler
+      ~fork:(fun task -> task ())
+      ~sleep:(fun _ -> ())
+      ~request:(fun () -> incr requests; raise failure)
+      ()
+  in
+  let schedule () = W.For_testing.schedule_contention_rearm scheduler contention in
+  Alcotest.check_raises "eager fork propagates request exception" failure
+    (fun () -> ignore (schedule () : W.rearm_schedule));
+  schedule () |> check_rearm_deduplicated "fork cleanup does not clear Inflight" 0.05;
+  Alcotest.(check int) "raised request is not retried" 1 !requests;
+  W.For_testing.reset_contention_rearms scheduler ~keep:None;
+  Alcotest.check_raises "reset admits a fresh request" failure
+    (fun () -> ignore (schedule () : W.rearm_schedule));
+  Alcotest.(check int) "reset is the explicit release of the failed request" 2 !requests
+;;
+
 (* #41422: the drain entry prunes consumed candidate rows the replay gate
    cannot re-mint, before roots are ensured. A prune failure must never stop
    judgment work, so an injected failure would only be logged and the wake
@@ -4443,6 +4611,26 @@ let () =
             "reset during wake error suppresses old generation rearm"
             `Quick
             test_reset_during_wake_error_suppresses_old_generation_rearm
+        ; Alcotest.test_case
+            "same-key replacement survives an old wake completion"
+            `Quick
+            test_reset_and_recreate_during_wake_preserves_new_ticket
+        ; Alcotest.test_case
+            "fork failure retains history and rejects an old callback"
+            `Quick
+            test_contention_fork_failure_retains_history_and_rejects_old_callback
+        ; Alcotest.test_case
+            "sleep failure preserves history and a new reservation"
+            `Quick
+            test_contention_sleep_failure_preserves_history_and_new_reservation
+        ; Alcotest.test_case
+            "successful wake outcomes release the contention ticket"
+            `Quick
+            test_contention_successful_wake_outcomes_release_ticket
+        ; Alcotest.test_case
+            "raised request stays inflight until reset"
+            `Quick
+            test_contention_raised_request_keeps_inflight_until_reset
         ; Alcotest.test_case
             "execution error preserves bound progress"
             `Quick

@@ -927,6 +927,8 @@ let test_a_snapshot_is_projected_once () =
     List.length left = List.length right && List.for_all2 ( == ) left right
   in
   let snapshot = snapshot_of_document ~directory:"once" (document "once") in
+  let preparation = Skill_catalog.prepare_snapshot
+      ~descriptors:(Masc.Keeper_tool_descriptor.all_descriptors ()) snapshot in
   let first = skills (Skill_catalog.of_snapshot snapshot) in
   check bool "the same snapshot gives back its projected skills" true
     (same_skills first (skills (Skill_catalog.of_snapshot snapshot)));
@@ -949,7 +951,22 @@ let test_a_snapshot_is_projected_once () =
   check (list string) "another snapshot gets its own skills" [ "other" ]
     (names (Skill_catalog.of_snapshot other));
   check (list string) "and the first one its own again" [ "once" ]
-    (names (Skill_catalog.of_snapshot rebuilt))
+    (names (Skill_catalog.of_snapshot rebuilt));
+  let changed = snapshot_of_document ~directory:"once"
+      "---\nname: once\ndescription: Changed source.\n---\nCHANGED_BODY\n" in
+  (match Snapshot.entries changed with
+   | [entry] ->
+     (match Skill_catalog.project_prepared_entry preparation entry with
+      | Skill_catalog.Projected skill ->
+        check string "foreign same-identity entry keeps its changed content" "Changed source." skill.description;
+        check bool "foreign same-identity entry keeps its own revision" true
+          (match skill.reference with
+           | Some reference -> Skill_reference.equal reference (Snapshot.entry_reference entry)
+           | None -> false)
+      | Frozen_instruction _ | Entry_unavailable _ -> fail "changed instruction did not project")
+   | _ -> fail "changed source fixture did not retain its entry");
+  check bool "foreign fallback does not mutate the original retained catalog" true
+    (same_skills first (skills (Skill_catalog.prepared_catalog preparation)))
 ;;
 
 (* Each entry resolved on its own gets its own projection, a shadowed one

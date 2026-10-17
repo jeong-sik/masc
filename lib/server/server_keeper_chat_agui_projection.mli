@@ -9,7 +9,9 @@ val initial : t
     events and returns the corresponding AG-UI event, when the source event is
     visible on the Dashboard surface. Connector-only rich blocks project to
     [None]. Protocol keys, enums and correlation identities are preserved;
-    only human content leaves are passed to [redact_text]. *)
+    human content leaves are passed to [redact_text]. Terminal diagnostics
+    project to the fixed public message/code; the actual run identity joins
+    operator diagnostics. *)
 val project :
   timestamp:float ->
   redact_text:(string -> string) ->

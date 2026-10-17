@@ -73,6 +73,50 @@ their narrower meaning. The synchronous fallback has the total refresh clock but
 does not emit individual reader events. Scoped refreshes and independent side
 reads are outside this ledger.
 
+## Admit the first matching workspace before the collection joins
+
+On an initial unread workspace, the existing initial health response is now
+acknowledged by the UI before the worker starts parallel surface collection.
+Only a ready response with both matching workspace paths, the current full
+refresh ticket and the dispatch workspace authority can take this path. Warm,
+foreign, incomplete, booting and retired observations retain their existing
+handling. The synchronous fallback does not wait for a mailbox acknowledgement.
+
+Identity admission invokes the same canonical workspace transition as terminal
+admission. That transition retires old source requests, so the UI issues fresh
+question, approval and requested roster receipts under its successor authority.
+The worker uses only this acknowledged binding for subsequent progress, early
+observations, final results and failure settlement. It does not take a later
+workspace authority from mutable UI state. Rejection and handler exit resolve the
+acknowledgement; cancellation still propagates through the worker's switch.
+
+| Boundary | Before | Source implementation |
+|---|---|---|
+| First matching identity enters UI state | After all readers and final health | After initial health and its UI acknowledgement |
+| First cold questions, roster or approvals | Terminal bundle; original source receipts can already be retired | Each response settles its fresh source owner as soon as its own verified read is available |
+| Saved Keeper chat opening | Whole refresh completion | Owned roster application; history then loads independently |
+| Whole bundle completion and final identity check | Wait for every requested reader | Same enclosing interval contract |
+
+Opening still yields to operator navigation. A missing Keeper or failed roster
+keeps its existing unavailable outcome. An early receipt settles once, so the
+terminal bundle cannot apply it again. A later failed or foreign final probe
+still withdraws or suspends workspace authority through the existing outcome
+handler. Admission does not imply that other readers succeeded.
+
+`tui_initial_identity refresh_started_ns=... admitted_ms=...` records the UI
+admission boundary. Join the unchanged refresh clock to `tui_roster_early`,
+`tui_asks_early`, `tui_approvals_early` and `tui_http_refresh`; these are source
+state clocks, not first paint or Keeper action. A cold native Before/After and
+candidate runtime behavior have not been measured for this change.
+
+For a paired cold run, keep the same binary/backend identities, workspace,
+viewport and saved opening choice. Delay an unrelated reader, retain both source
+outcomes and the final frame, and compare initial workspace admission, first
+usable question/roster/chat and full refresh separately. Preserve failed and
+unfinished attempts. Existing warm native pairs (~6.03 seconds full refresh on
+both arms despite one fewer health call) are a different cohort and establish no
+cold-start latency gain.
+
 ## One enclosing workspace verification
 
 Full refreshes and scoped refreshes each own one initial identity probe and one
@@ -189,7 +233,7 @@ workspace or turn a cold start into an authorized reading.
 The roster has its own `Snapshot_read` receipt. A newer roster request supersedes
 the old one, workspace suspension retires it, and early delivery consumes it.
 The terminal bundle therefore cannot replay the same roster or its dependent
-Item refresh. Error and cold-start results retain their terminal admission path.
+Item refresh. Error and unadmitted results retain their terminal admission path.
 No extra HTTP request is added. Other datasets keep their existing ordering.
 
 `tui_roster_early` records the admitted source request, full refresh's monotonic
@@ -250,7 +294,8 @@ readiness field, including for an empty list. Missing, foreign, ambiguous or
 booting responses remain failed reads and retain the previous questions. A
 matching response can therefore enter the existing early-delivery path without
 another health request. Its refresh ticket, workspace authority and question
-read receipt still govern admission; cold-start reads retain terminal admission.
+read receipt still govern admission. An unadmitted cold read cannot authorize
+itself; the initial matching probe must first be acknowledged by the UI.
 
 | Ask-specific request path | Before | To-Be implementation |
 |---|---|---|
@@ -281,7 +326,7 @@ question samples are not early-Ask latency evidence.
 `tui_asks_early` records the original question request ID, the full refresh's
 monotonic `refresh_started_ns` and `admitted_ms` after the successful question
 snapshot has entered UI state. It is emitted only when the existing early read
-receipt is accepted and consumed. Stale, foreign, cold-start or replayed messages
+receipt is accepted and consumed. Stale, foreign, unadmitted or replayed messages
 do not produce an admission. Question text, answers and workspace paths are not
 copied into this record. Join the same refresh clock to `tui_http_refresh` to
 compare question state usability with terminal refresh completion. A painted or

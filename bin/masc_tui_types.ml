@@ -8090,6 +8090,15 @@ let begin_http_refresh_state (state : state) ~ticket ~started_ns =
   state.http_refresh_progress <- Some
     (state.workspace_authority, Http_refresh_progress.start ~started_ns)
 
+let can_admit_initial_http_identity (state : state) ~ticket ~authority identity =
+  state.workspace_identity = Workspace_identity_unread
+  && Option.is_some state.http_refresh_started_ns
+  && Http_refresh_order.is_current state.http_refresh_order ticket
+  && state.workspace_authority = authority
+  && identity.Tui_decode.sid_state_ready = Some true
+  && workspace_identity_of_refresh ~local_base_path:state.local_base_path
+       (Ok identity) = Workspace_identity_match
+
 let accept_http_progress (state : state) observation =
   if Option.is_some state.http_refresh_started_ns
      && Http_refresh_order.is_current state.http_refresh_order observation.hp_ticket

@@ -9,6 +9,21 @@ type approval_observation = {
   ao_result: (approval_snapshot, string) result;
 }
 
+type http_read_requests = {
+  hrr_authority: workspace_authority;
+  hrr_approval: Masc_tui_operator_projection.Listing_order.ticket option;
+  hrr_asks: Snapshot_read.request option;
+  hrr_roster: Snapshot_read.request option;
+}
+
+type http_initial_identity_read = {
+  hir_ticket: Http_refresh_order.ticket;
+  hir_authority: workspace_authority;
+  hir_identity: Masc.Tui_decode.server_identity;
+  hir_needs_roster: bool;
+  hir_acknowledge: http_read_requests option Eio.Promise.u;
+}
+
 type early_approval_observation = {
   eap_ticket: Http_refresh_order.ticket;
   eap_authority: workspace_authority;
@@ -206,6 +221,7 @@ type async_msg =
       ask_submission * (Masc.Tui_decode_asks.ask_answer_receipt, string) result
   | Http_keeper_roster_loaded of early_keeper_roster_observation
   | Http_progress_observed of http_progress_observation
+  | Http_initial_identity_read of http_initial_identity_read
   | Http_refresh_done of http_refresh_outcome
   | Http_refresh_failed of
       string * Masc_tui_operator_projection.Listing_order.ticket option * Http_refresh_order.ticket
@@ -808,7 +824,7 @@ let rec workspace_message_is_read = function
   | Voice_silent _
   | Voice_discarded _
   | Voice_failed _
-  | Http_keeper_roster_loaded _ | Http_progress_observed _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_observed _ | Http_refresh_done _
+  | Http_keeper_roster_loaded _ | Http_progress_observed _ | Http_initial_identity_read _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_observed _ | Http_refresh_done _
   | Http_refresh_failed _
   (* Not a reply: the refresh that recovered the identity tells the loop to
      read the confirm queue again. It belongs to that refresh, which is
@@ -915,7 +931,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Voice_agent_voices_loaded _ | Voice_agent_voice_saved _
     | Voice_wizard_probed (_, _) | Voice_wizard_reread (_, _)
     | Voice_config_loaded (_, _, _) | Voice_level _ | Voice_transcribed _
-    | Voice_silent _ | Voice_discarded _ | Voice_failed _ | Http_keeper_roster_loaded _ | Http_progress_observed _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_observed _ | Http_refresh_done _
+    | Voice_silent _ | Voice_discarded _ | Voice_failed _ | Http_keeper_roster_loaded _ | Http_progress_observed _ | Http_initial_identity_read _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_observed _ | Http_refresh_done _
     | Http_refresh_failed (_, _, _) | Approvals_listing_superseded
     | Approvals_summary_loaded (_, _, _, _) | Surface_composer_released
     | Http_scoped_refresh_done (_, _, _)
@@ -1052,7 +1068,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Voice_agent_voice_saved _ | Voice_wizard_probed (_, _)
   | Voice_wizard_reread (_, _) | Voice_config_loaded (_, _, _) | Voice_level _
   | Voice_transcribed _ | Voice_silent _ | Voice_discarded _ | Voice_failed _
-  | Http_keeper_roster_loaded _ | Http_progress_observed _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_observed _ | Http_refresh_done _ | Http_refresh_failed (_, _, _)
+  | Http_keeper_roster_loaded _ | Http_progress_observed _ | Http_initial_identity_read _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_observed _ | Http_refresh_done _ | Http_refresh_failed (_, _, _)
   | Approvals_listing_superseded | Approvals_summary_loaded (_, _, _, _)
   | Surface_composer_released | Http_scoped_refresh_done (_, _, _)
   | Http_scoped_refresh_failed (_, _, _, _, _) | Board_post_refresh_done (_, _)

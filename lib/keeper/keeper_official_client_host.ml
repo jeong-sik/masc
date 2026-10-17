@@ -1886,11 +1886,13 @@ let dynamic_tools ?base_path ~content_transport ~accepts_image_input ~tool_appro
    checkpoint means no replay exists to correct — skipped, not an
    error. Rejects are recorded newest-first; the append restores call
    order. *)
-let persist_pre_tool_rejects ~session_dir ~session_id rejects =
+let persist_pre_tool_rejects ~keeper_name ~session_dir ~session_id rejects =
   match rejects with
   | [] -> Ok 0
   | rejects ->
-    (match Keeper_checkpoint_store.load_agent_core ~session_dir ~session_id with
+    (match
+       Keeper_checkpoint_store.load_agent_core_for_save ~keeper_name ~session_dir ~session_id
+     with
      | Error Keeper_checkpoint_store.Not_found -> Ok 0
      | Error
          (( Keeper_checkpoint_store.Store_error _
@@ -1950,7 +1952,7 @@ let persist_pre_tool_rejects ~session_dir ~session_id rejects =
          }
        in
        (match
-          Keeper_checkpoint_store.save_agent_core_classified ~session_dir
+          Keeper_checkpoint_store.save_agent_core_for_keeper ~keeper_name ~session_dir
             ~history_retained:
               (Runtime_params.get Runtime_settings.keeper_checkpoint_history_retained)
             checkpoint

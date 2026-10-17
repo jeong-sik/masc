@@ -97,6 +97,7 @@ let prepare_run_context
           (Keeper_context_runtime.context_of_agent_core_checkpoint checkpoint) )
     | None ->
       Keeper_context_runtime.load_context_from_checkpoint_classified
+        ~keeper_name:meta.name
         ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
         ~base_dir
   in

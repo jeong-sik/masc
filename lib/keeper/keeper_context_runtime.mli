@@ -100,7 +100,8 @@ type checkpoint_load = Keeper_context_core.checkpoint_load =
   | Checkpoint_unread of Keeper_checkpoint_store.checkpoint_load_error
 
 val load_context_from_checkpoint_classified
-  :  trace_id:string
+  :  keeper_name:string
+  -> trace_id:string
   -> base_dir:string
   -> session_context * checkpoint_load
 

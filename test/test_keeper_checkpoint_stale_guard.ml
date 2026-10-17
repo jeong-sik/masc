@@ -218,8 +218,8 @@ let test_unencodable_payload_is_recovered_at_the_sink () =
        fail ("the stored recovery copy must decode: " ^ Agent_core.Error.to_string error))
 ;;
 
-(* 한 턴의 단계별 저장과 finalize 는 encoding memo 하나를 같이 쓴다. 저장마다 같은
-   레코드 뒤에 메시지가 붙고, 마지막 저장은 복구가 필요한 payload 를 붙인다. 매번
+(* 한 파일의 저장은 저장소가 그 파일에 둔 encoding memo 하나를 같이 쓴다. 저장마다
+   같은 레코드 뒤에 메시지가 붙고, 마지막 저장은 복구가 필요한 payload 를 붙인다. 매번
    canonical 파일은 memo 없이 인코딩한 바이트와 같아야 한다. *)
 let test_stage_saves_sharing_one_memo_write_canonical_bytes () =
   Eio_main.run @@ fun env ->
@@ -229,7 +229,6 @@ let test_stage_saves_sharing_one_memo_write_canonical_bytes () =
   Fun.protect ~finally:(fun () -> cleanup_dir session_dir) @@ fun () ->
   let sid = "stage-saves-memo" in
   let path = Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id:sid in
-  let encoding_memo = Agent_core.Checkpoint.create_encoding_memo () in
   let append (cp : Agent_core.Checkpoint.t) ~turn_count messages =
     { cp with Agent_core.Checkpoint.turn_count; messages = cp.messages @ messages }
   in
@@ -247,10 +246,9 @@ let test_stage_saves_sharing_one_memo_write_canonical_bytes () =
   in
   let save label (cp : Agent_core.Checkpoint.t) expected =
     match
-      Keeper_checkpoint_store.save_agent_core_classified_with_encoding_memo
+      Keeper_checkpoint_store.save_agent_core_classified
         ~history_retained:(history_retained ())
         ~session_dir
-        ~encoding_memo
         cp
     with
     | Error message -> fail (label ^ ": " ^ message)
@@ -1159,9 +1157,9 @@ let with_exact_source_fixture ~session_id f =
    replaces allocated 26 GB in fifty minutes on a live server, over files of
    13-109 MB, and a save repeats it every turn.
 
-   The budget is measured here rather than guessed: a full load of the same
-   file parses it, so the save is compared against what that parse cost in this
-   process. If the save parsed too, the two would be the same order. *)
+   The budget is measured here rather than guessed: the save is compared
+   against what decoding the same file costs in this process. If the save
+   parsed too, the two would be the same order. *)
 let parse_share_of_a_save = 4.0
 
 let chatty_checkpoint ~session_id ~turn_count ~marker ~messages =
@@ -1201,14 +1199,14 @@ let test_a_summarised_source_is_hashed_and_not_parsed () =
       | Ok (_, reference) -> reference
       | Error _ -> fail "hash-only source load failed"
     in
-    let source_bytes =
-      (Unix.stat (Filename.concat session_dir (session_id ^ ".json"))).Unix.st_size
-    in
+    let source_path = Filename.concat session_dir (session_id ^ ".json") in
+    let source_bytes = (Unix.stat source_path).Unix.st_size in
+    let source = Fs_compat.load_file source_path in
     let parse_words =
       allocated_minor_words (fun () ->
-        match Keeper_checkpoint_store.load_agent_core ~session_dir ~session_id with
+        match Agent_core.Checkpoint.of_string source with
         | Ok _ -> ()
-        | Error _ -> fail "the source could not be loaded")
+        | Error _ -> fail "the source could not be decoded")
     in
     (* A parse of this file has to cost enough for the comparison below to mean
        something: the fixture is 8,000 short messages, whose parse allocates
@@ -1907,6 +1905,497 @@ let test_checkpoint_read_refuses_a_symlinked_canonical_file () =
       (Keeper_checkpoint_store.checkpoint_load_error_to_string error)
   | Ok _ -> fail "symlinked canonical file was followed"
 
+(* RFC main-domain-scheduler-latency §8 P4b step 2. After a save, a load
+   answers from the decode of the bytes that save wrote and does not read the
+   file. The answer is the file's decode, not the value that was saved: the
+   wire does not carry [ToolResult.json]. *)
+let checkpoint_with_parsed_tool_result ~session_id ~turn_count =
+  let open Agent_core.Types in
+  let message role content = { role; content; name = None; tool_call_id = None; metadata = [] } in
+  { (make_checkpoint ~session_id ~turn_count ~marker:"done") with
+    Agent_core.Checkpoint.messages =
+      [ message User [ Text "count the rows" ]
+      ; message Assistant [ ToolUse { id = "t1"; name = "search"; input = `Assoc [] } ]
+      ; message
+          Tool
+          [ ToolResult
+              { tool_use_id = "t1"
+              ; content = "{\"rows\":3}"
+              ; outcome = Tool_succeeded
+              ; json = Some (`Assoc [ "rows", `Int 3 ])
+              ; content_blocks = None
+              }
+          ]
+      ; message Assistant [ Text "three rows" ]
+      ]
+  }
+;;
+
+let parsed_tool_result_json (cp : Agent_core.Checkpoint.t) =
+  List.find_map
+    (fun (m : Agent_core.Types.message) ->
+       List.find_map
+         (function
+           | Agent_core.Types.ToolResult { json; _ } -> Some json
+           | Agent_core.Types.Text _ | Agent_core.Types.Thinking _
+           | Agent_core.Types.RedactedThinking _ | Agent_core.Types.ToolUse _
+           | Agent_core.Types.Image _ | Agent_core.Types.Document _
+           | Agent_core.Types.Audio _ | Agent_core.Types.ReasoningDetails _ -> None)
+         m.content)
+    cp.messages
+;;
+
+(* A Keeper turn's checkpoint names the runtime the turn ran on, and Keepers on
+   one runtime share that name. The store learns the Keeper from the save. *)
+let shared_runtime_agent_name = "agent_core-test-runtime"
+let kept_keeper = "lineage-test-keeper"
+
+let save_kept_ok ~keeper_name ~session_dir (ckpt : Agent_core.Checkpoint.t) label =
+  match
+    Keeper_checkpoint_store.save_agent_core_for_keeper ~keeper_name
+      ~history_retained:(history_retained ()) ~session_dir
+      { ckpt with agent_name = shared_runtime_agent_name }
+  with
+  | Ok _ -> ()
+  | Error e -> fail (label ^ " unexpectedly failed: " ^ e)
+;;
+
+let load_or_fail ~session_dir ~session_id label =
+  match Keeper_checkpoint_store.load_agent_core ~session_dir ~session_id with
+  | Ok checkpoint -> checkpoint
+  | Error error ->
+    failf "%s: %s" label (Keeper_checkpoint_store.checkpoint_load_error_to_string error)
+;;
+
+let test_load_after_a_save_answers_from_the_written_bytes () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun _sw ->
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) @@ fun () ->
+  let sid = "written-value" in
+  let saved = checkpoint_with_parsed_tool_result ~session_id:sid ~turn_count:1 in
+  save_kept_ok ~keeper_name:kept_keeper ~session_dir saved "save turn 1";
+  let path = Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id:sid in
+  let decoded_file =
+    match Agent_core.Checkpoint.of_string (Fs_compat.load_file path) with
+    | Ok checkpoint -> checkpoint
+    | Error error -> fail (Agent_core.Error.to_string error)
+  in
+  Unix.chmod path 0o000;
+  let first, second =
+    Fun.protect ~finally:(fun () -> Unix.chmod path 0o644) @@ fun () ->
+    ( load_or_fail ~session_dir ~session_id:sid "first load of an unreadable file"
+    , load_or_fail ~session_dir ~session_id:sid "second load of an unreadable file" )
+  in
+  check bool "the saved value carried the parsed json" true
+    (parsed_tool_result_json saved = Some (Some (`Assoc [ "rows", `Int 3 ])));
+  check bool "the load gives the file's decode, json dropped" true
+    (parsed_tool_result_json first = Some None);
+  check bool "its messages equal the file's decode" true
+    (first.messages = decoded_file.messages);
+  check string "it encodes to the file's bytes" (Fs_compat.load_file path)
+    (Agent_core.Checkpoint.to_string first);
+  check bool "both loads hand out the same records" true (first.messages == second.messages);
+  check bool "each load gets its own context" true (first.context != second.context)
+;;
+
+(* Another writer replaces the file with the same bytes: a new inode. The kept
+   value no longer names the file, so the load reads it again. *)
+let test_load_reads_a_file_replaced_behind_the_written_value () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun _sw ->
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) @@ fun () ->
+  let sid = "written-value-replaced" in
+  save_kept_ok ~keeper_name:kept_keeper ~session_dir (checkpoint_with_parsed_tool_result ~session_id:sid ~turn_count:1)
+    "save turn 1";
+  let path = Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id:sid in
+  let kept = load_or_fail ~session_dir ~session_id:sid "load the kept value" in
+  (match Fs_compat.save_file_atomic path (Fs_compat.load_file path) with
+   | Ok () -> ()
+   | Error detail -> fail ("replace the file: " ^ detail));
+  let reread = load_or_fail ~session_dir ~session_id:sid "load the replaced file" in
+  check bool "the replaced file was decoded again" true (reread.messages != kept.messages);
+  check bool "to the same value" true (reread.messages = kept.messages);
+  Unix.chmod path 0o000;
+  Fun.protect ~finally:(fun () -> Unix.chmod path 0o644) @@ fun () ->
+  match Keeper_checkpoint_store.load_agent_core ~session_dir ~session_id:sid with
+  | Ok _ -> fail "a value was kept for a file this process did not write"
+  | Error _ -> ()
+;;
+
+(* A workspace keeps every trace under one session root, as
+   [<root>/<trace>/<trace>.json]; [temp_dir] gives [<root>/session]. *)
+let sibling_session_dir session_dir name =
+  let dir = Filename.concat (Filename.dirname session_dir) name in
+  Unix.mkdir dir 0o755;
+  dir
+;;
+
+(* A keeper that moves to a new trace saves a new canonical file. Its value
+   for the old file is dropped, so one agent holds one history in memory. *)
+let test_a_save_under_a_new_trace_drops_the_older_written_value () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun _sw ->
+  let old_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir old_dir) @@ fun () ->
+  let new_dir = sibling_session_dir old_dir "new-session" in
+  save_kept_ok ~keeper_name:kept_keeper ~session_dir:old_dir
+    (make_checkpoint ~session_id:"old-trace" ~turn_count:1 ~marker:"old") "save old trace";
+  let kept = load_or_fail ~session_dir:old_dir ~session_id:"old-trace" "load old trace" in
+  save_kept_ok ~keeper_name:kept_keeper ~session_dir:new_dir
+    (make_checkpoint ~session_id:"new-trace" ~turn_count:1 ~marker:"new") "save new trace";
+  let reread = load_or_fail ~session_dir:old_dir ~session_id:"old-trace" "load old trace again" in
+  check bool "the old trace is read from disk again" true (reread.messages != kept.messages);
+  check bool "the new trace answers from its written value" true
+    (let first = load_or_fail ~session_dir:new_dir ~session_id:"new-trace" "load new trace" in
+     let second = load_or_fail ~session_dir:new_dir ~session_id:"new-trace" "load new trace again" in
+     first.messages == second.messages)
+;;
+
+(* The next turn starts from the loaded value and appends. Its records are the
+   ones the store's memo already encoded, so the save encodes only the new
+   message: no second document of allocation. *)
+let messages_in_the_reuse_fixture = 200
+let bytes_per_reuse_fixture_message = 20_000
+let document_bytes_per_byte_a_reusing_save_may_allocate = 4.0
+
+let test_a_save_after_a_load_encodes_only_the_new_messages () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun _sw ->
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) @@ fun () ->
+  let sid = "written-value-reuse" in
+  let text role body : Agent_core.Types.message =
+    { role; content = [ Agent_core.Types.Text body ]; name = None; tool_call_id = None; metadata = [] }
+  in
+  let history =
+    List.init messages_in_the_reuse_fixture (fun index ->
+      text
+        (if index mod 2 = 0 then Agent_core.Types.User else Agent_core.Types.Assistant)
+        (String.make bytes_per_reuse_fixture_message 'x' ^ string_of_int index))
+  in
+  save_kept_ok ~keeper_name:kept_keeper ~session_dir
+    { (make_checkpoint ~session_id:sid ~turn_count:1 ~marker:"m") with
+      Agent_core.Checkpoint.messages = history }
+    "save turn 1";
+  let path = Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id:sid in
+  let document_bytes = (Unix.stat path).Unix.st_size in
+  let loaded = load_or_fail ~session_dir ~session_id:sid "load turn 1" in
+  let next =
+    { loaded with
+      Agent_core.Checkpoint.turn_count = 2
+    ; messages = loaded.messages @ [ text Agent_core.Types.User "turn two" ]
+    }
+  in
+  let before = Gc.allocated_bytes () in
+  save_kept_ok ~keeper_name:kept_keeper ~session_dir next "save turn 2";
+  let allocated = Gc.allocated_bytes () -. before in
+  check string "the save wrote the bytes of to_string" (Agent_core.Checkpoint.to_string next)
+    (Fs_compat.load_file path);
+  check bool
+    (Printf.sprintf "the save allocated %.0f bytes for a %d byte document" allocated document_bytes)
+    true
+    (allocated *. document_bytes_per_byte_a_reusing_save_may_allocate
+     < float_of_int document_bytes)
+;;
+
+(* Two Keepers of one workspace each keep their own value: a save of one does
+   not drop the other's. *)
+let test_two_keepers_keep_their_written_values_side_by_side () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun _sw ->
+  let first_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir first_dir) @@ fun () ->
+  let second_dir = sibling_session_dir first_dir "second-keeper" in
+  save_kept_ok ~keeper_name:"first-keeper" ~session_dir:first_dir
+    (make_checkpoint ~session_id:"first-trace" ~turn_count:1 ~marker:"first") "save first keeper";
+  let kept = load_or_fail ~session_dir:first_dir ~session_id:"first-trace" "load first keeper" in
+  save_kept_ok ~keeper_name:"second-keeper" ~session_dir:second_dir
+    (make_checkpoint ~session_id:"second-trace" ~turn_count:1 ~marker:"second")
+    "save second keeper";
+  let again = load_or_fail ~session_dir:first_dir ~session_id:"first-trace" "load first keeper again" in
+  check bool "the first keeper still answers from its value" true (again.messages == kept.messages)
+;;
+
+(* A writer that rewrites the file in place keeps its inode, and here its
+   size; the mtime it leaves is what names the change. *)
+let test_a_file_rewritten_in_place_is_read_again () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun _sw ->
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) @@ fun () ->
+  let sid = "rewritten-in-place" in
+  save_kept_ok ~keeper_name:kept_keeper ~session_dir (make_checkpoint ~session_id:sid ~turn_count:1 ~marker:"in place") "save";
+  let path = Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id:sid in
+  let kept = load_or_fail ~session_dir ~session_id:sid "load the kept value" in
+  let before = Unix.stat path in
+  let bytes = Fs_compat.load_file path in
+  let fd = Unix.openfile path [ Unix.O_WRONLY ] 0 in
+  Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
+    let rec write_from offset =
+      if offset < String.length bytes
+      then write_from (offset + Unix.write_substring fd bytes offset (String.length bytes - offset))
+    in
+    write_from 0);
+  Unix.utimes path before.Unix.st_atime (before.Unix.st_mtime +. 2.0);
+  let after = Unix.stat path in
+  check bool "the rewrite kept the inode and the size" true
+    (after.Unix.st_ino = before.Unix.st_ino && after.Unix.st_size = before.Unix.st_size);
+  let reread = load_or_fail ~session_dir ~session_id:sid "load the rewritten file" in
+  check bool "the rewritten file was decoded again" true (reread.messages != kept.messages)
+;;
+
+(* Another writer renames its own checkpoint over the canonical right after
+   this save's rename, before the save has finished. The save keeps its value
+   under the identity of the file it wrote, so the next load does not match
+   the other writer's file and reads it. *)
+let test_a_file_renamed_over_a_save_right_after_its_rename_is_read () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun _sw ->
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) @@ fun () ->
+  let sid = "renamed-over-a-save" in
+  let path = Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id:sid in
+  let foreign_bytes =
+    Agent_core.Checkpoint.to_string
+      { (make_checkpoint ~session_id:sid ~turn_count:1 ~marker:"the other writer") with
+        agent_name = shared_runtime_agent_name }
+  in
+  let replaced = ref false in
+  let replace_the_path () =
+    let foreign = path ^ ".foreign" in
+    Out_channel.with_open_bin foreign (fun oc -> output_string oc foreign_bytes);
+    Unix.rename foreign path;
+    replaced := true
+  in
+  (match
+     Keeper_checkpoint_store.For_testing.save_agent_core_for_keeper_with_before_stage
+       ~before_stage:(function
+         | Keeper_fs.Parent_directory_fsync_after_rename when not !replaced -> replace_the_path ()
+         | _ -> ())
+       ~keeper_name:kept_keeper ~history_retained:(history_retained ()) ~session_dir
+       { (make_checkpoint ~session_id:sid ~turn_count:1 ~marker:"this save") with
+         agent_name = shared_runtime_agent_name }
+   with
+   | Ok _ -> ()
+   | Error e -> fail ("save: " ^ e));
+  check bool "the other writer replaced the path during the save" true !replaced;
+  let loaded = load_or_fail ~session_dir ~session_id:sid "load after the replacement" in
+  check (list string) "the load holds the other writer's file"
+    [ "hello"; "the other writer" ]
+    (List.map Agent_core.Types.text_of_message loaded.messages)
+;;
+
+(* The saving side keeps changing its context after the save. A load must give
+   what the file holds, not that table. *)
+let test_a_load_does_not_see_context_changes_made_after_the_save () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun _sw ->
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) @@ fun () ->
+  let sid = "context-after-save" in
+  let saved = make_checkpoint ~session_id:sid ~turn_count:1 ~marker:"context" in
+  Agent_core.Context.set saved.context "turn_note" (`String "at save");
+  save_kept_ok ~keeper_name:kept_keeper ~session_dir saved "save";
+  Agent_core.Context.set saved.context "turn_note" (`String "after save");
+  let loaded = load_or_fail ~session_dir ~session_id:sid "load" in
+  check bool "the load holds the context as saved" true
+    (Agent_core.Context.get loaded.context "turn_note" = Some (`String "at save"))
+;;
+
+let unreadable_load_refused ~session_dir ~session_id ~path label =
+  Unix.chmod path 0o000;
+  Fun.protect ~finally:(fun () -> Unix.chmod path 0o644) @@ fun () ->
+  match Keeper_checkpoint_store.load_agent_core ~session_dir ~session_id with
+  | Ok _ -> fail label
+  | Error _ -> ()
+;;
+
+(* After a restart the turn reads the file. Its load keeps what it read, so
+   the next load answers without a read and the turn's save encodes only the
+   new message. A read-only load keeps nothing. [forget_written_lineages]
+   stands in for the restart. *)
+let test_a_load_for_save_keeps_what_it_read () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun _sw ->
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) @@ fun () ->
+  let sid = "read-for-save" in
+  let text role body : Agent_core.Types.message =
+    { role; content = [ Agent_core.Types.Text body ]; name = None; tool_call_id = None; metadata = [] }
+  in
+  let history =
+    List.init messages_in_the_reuse_fixture (fun index ->
+      text
+        (if index mod 2 = 0 then Agent_core.Types.User else Agent_core.Types.Assistant)
+        (String.make bytes_per_reuse_fixture_message 'x' ^ string_of_int index))
+  in
+  save_kept_ok ~keeper_name:kept_keeper ~session_dir
+    { (make_checkpoint ~session_id:sid ~turn_count:1 ~marker:"m") with
+      Agent_core.Checkpoint.messages = history }
+    "save turn 1";
+  Keeper_checkpoint_store.forget_written_lineages
+    ~session_root:(Filename.dirname session_dir) ~keeper_name:kept_keeper;
+  let path = Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id:sid in
+  ignore (load_or_fail ~session_dir ~session_id:sid "read-only load" : Agent_core.Checkpoint.t);
+  unreadable_load_refused ~session_dir ~session_id:sid ~path
+    "a read-only load kept what it read";
+  let read =
+    match Keeper_checkpoint_store.load_agent_core_for_save ~keeper_name:kept_keeper ~session_dir ~session_id:sid with
+    | Ok checkpoint -> checkpoint
+    | Error error -> fail (Keeper_checkpoint_store.checkpoint_load_error_to_string error)
+  in
+  Unix.chmod path 0o000;
+  let again =
+    Fun.protect ~finally:(fun () -> Unix.chmod path 0o644) @@ fun () ->
+    load_or_fail ~session_dir ~session_id:sid "load of an unreadable file after a load for save"
+  in
+  check bool "the next load answers from what was read" true (again.messages == read.messages);
+  let document_bytes = (Unix.stat path).Unix.st_size in
+  let next =
+    { read with
+      Agent_core.Checkpoint.turn_count = 2
+    ; messages = read.messages @ [ text Agent_core.Types.User "turn two" ]
+    }
+  in
+  let before = Gc.allocated_bytes () in
+  save_kept_ok ~keeper_name:kept_keeper ~session_dir next "save turn 2";
+  let allocated = Gc.allocated_bytes () -. before in
+  check string "the save wrote the bytes of to_string" (Agent_core.Checkpoint.to_string next)
+    (Fs_compat.load_file path);
+  check bool
+    (Printf.sprintf "the save allocated %.0f bytes for a %d byte document" allocated document_bytes)
+    true
+    (allocated *. document_bytes_per_byte_a_reusing_save_may_allocate
+     < float_of_int document_bytes)
+;;
+
+let keeper_meta_fixture keeper_name =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc [ "name", `String keeper_name; "activation_mode", `String "manual" ])
+  with
+  | Ok meta -> meta
+  | Error detail -> fail ("keeper meta fixture failed: " ^ detail)
+;;
+
+(* The registry's unregistration drops the Keeper's kept value. *)
+let test_unregistering_a_keeper_drops_its_written_value () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun _sw ->
+  let scratch = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir scratch) @@ fun () ->
+  let base_path = Unix.realpath scratch in
+  let name = "lineage-keeper" in
+  let trace = "lineage-trace" in
+  let session_dir =
+    Filename.concat (Keeper_fs.session_store_path_for_base_path base_path) trace
+  in
+  save_kept_ok ~keeper_name:name ~session_dir
+    (make_checkpoint ~session_id:trace ~turn_count:1 ~marker:"registered")
+    "save";
+  let entry =
+    match Keeper_registry.register_offline_if_admitted ~base_path name (keeper_meta_fixture name) with
+    | Ok entry -> entry
+    | Error (_ : Keeper_registry.registration_error) -> fail "registration refused"
+  in
+  let path = Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id:trace in
+  Unix.chmod path 0o000;
+  let registered =
+    Fun.protect ~finally:(fun () -> Unix.chmod path 0o644) @@ fun () ->
+    Keeper_checkpoint_store.load_agent_core ~session_dir ~session_id:trace
+  in
+  check bool "a registered keeper's value answers without a read" true (Result.is_ok registered);
+  (match Keeper_registry.unregister_exact entry with
+   | Keeper_registry.Exact_unregistered -> ()
+   | Keeper_registry.Exact_entry_missing | Keeper_registry.Exact_entry_replaced
+   | Keeper_registry.Exact_unregister_lifecycle_reserved _ -> fail "unregistration refused");
+  unreadable_load_refused ~session_dir ~session_id:trace ~path
+    "the unregistered keeper's value was still kept"
+;;
+
+(* A session store that does not resolve at the unregistration still loses the
+   Keeper's kept value. The store is moved away for the unregistration and
+   back after it; a rename keeps the file's identity, so a value left behind
+   would answer the load. *)
+let test_unregistering_a_keeper_whose_session_store_moved_drops_its_written_value () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun _sw ->
+  let scratch = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir scratch) @@ fun () ->
+  let base_path = Unix.realpath scratch in
+  let name = "moved-store-keeper" in
+  let trace = "moved-store-trace" in
+  let session_store = Keeper_fs.session_store_path_for_base_path base_path in
+  let session_dir = Filename.concat session_store trace in
+  save_kept_ok ~keeper_name:name ~session_dir
+    (make_checkpoint ~session_id:trace ~turn_count:1 ~marker:"registered")
+    "save";
+  let entry =
+    match Keeper_registry.register_offline_if_admitted ~base_path name (keeper_meta_fixture name) with
+    | Ok entry -> entry
+    | Error (_ : Keeper_registry.registration_error) -> fail "registration refused"
+  in
+  let moved = session_store ^ ".moved" in
+  Unix.rename session_store moved;
+  (match Keeper_registry.unregister_exact entry with
+   | Keeper_registry.Exact_unregistered -> ()
+   | Keeper_registry.Exact_entry_missing | Keeper_registry.Exact_entry_replaced
+   | Keeper_registry.Exact_unregister_lifecycle_reserved _ -> fail "unregistration refused");
+  Unix.rename moved session_store;
+  let path = Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id:trace in
+  unreadable_load_refused ~session_dir ~session_id:trace ~path
+    "the unregistered keeper's value was still kept"
+;;
+
+(* A save by a tool or a test keeps nothing: the next load reads the file. *)
+let test_a_plain_save_keeps_no_written_value () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun _sw ->
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) @@ fun () ->
+  let sid = "plain-save" in
+  save_ok ~session_dir (make_checkpoint ~session_id:sid ~turn_count:1 ~marker:"plain") "save";
+  let path = Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id:sid in
+  unreadable_load_refused ~session_dir ~session_id:sid ~path "a plain save kept its value"
+;;
+
+(* One Keeper name in two workspaces is two Keepers. *)
+let test_one_keeper_name_in_two_workspaces_keeps_both_values () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun _sw ->
+  let first_dir = temp_dir () in
+  let second_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir first_dir; cleanup_dir second_dir) @@ fun () ->
+  save_kept_ok ~keeper_name:kept_keeper ~session_dir:first_dir
+    (make_checkpoint ~session_id:"first-workspace-trace" ~turn_count:1 ~marker:"first") "save first";
+  let kept =
+    load_or_fail ~session_dir:first_dir ~session_id:"first-workspace-trace" "load first"
+  in
+  save_kept_ok ~keeper_name:kept_keeper ~session_dir:second_dir
+    (make_checkpoint ~session_id:"second-workspace-trace" ~turn_count:1 ~marker:"second")
+    "save second";
+  let again =
+    load_or_fail ~session_dir:first_dir ~session_id:"first-workspace-trace" "load first again"
+  in
+  check bool "the first workspace's keeper still answers from its value" true
+    (again.messages == kept.messages)
+;;
+
 let test_summary_follows_a_checkpoint_replaced_behind_it () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -2261,7 +2750,7 @@ let () =
             test_structurally_invalid_checkpoint_is_refused_at_the_store;
           test_case "a valid checkpoint still saves" `Quick
             test_valid_checkpoint_still_saves;
-          test_case "stage saves sharing one encoding memo write canonical bytes" `Quick
+          test_case "stage saves sharing the store's encoding memo write canonical bytes" `Quick
             test_stage_saves_sharing_one_memo_write_canonical_bytes;
           test_case "an unencodable payload is recovered at the sink" `Quick
             test_unencodable_payload_is_recovered_at_the_sink;
@@ -2275,5 +2764,31 @@ let () =
             test_summary_follows_a_checkpoint_replaced_behind_it;
           test_case "canonical read refuses a symlinked file" `Quick
             test_checkpoint_read_refuses_a_symlinked_canonical_file;
+          test_case "a load after a save answers from the written bytes" `Quick
+            test_load_after_a_save_answers_from_the_written_bytes;
+          test_case "a load reads a file replaced behind the written value" `Quick
+            test_load_reads_a_file_replaced_behind_the_written_value;
+          test_case "a save under a new trace drops the older written value" `Quick
+            test_a_save_under_a_new_trace_drops_the_older_written_value;
+          test_case "a save after a load encodes only the new messages" `Quick
+            test_a_save_after_a_load_encodes_only_the_new_messages;
+          test_case "two keepers keep their written values side by side" `Quick
+            test_two_keepers_keep_their_written_values_side_by_side;
+          test_case "a file rewritten in place is read again" `Quick
+            test_a_file_rewritten_in_place_is_read_again;
+          test_case "a file renamed over a save right after its rename is read" `Quick
+            test_a_file_renamed_over_a_save_right_after_its_rename_is_read;
+          test_case "a load does not see context changes made after the save" `Quick
+            test_a_load_does_not_see_context_changes_made_after_the_save;
+          test_case "a load for save keeps what it read" `Quick
+            test_a_load_for_save_keeps_what_it_read;
+          test_case "unregistering a keeper drops its written value" `Quick
+            test_unregistering_a_keeper_drops_its_written_value;
+          test_case "unregistering after its session store moved drops its value" `Quick
+            test_unregistering_a_keeper_whose_session_store_moved_drops_its_written_value;
+          test_case "a plain save keeps no written value" `Quick
+            test_a_plain_save_keeps_no_written_value;
+          test_case "one keeper name in two workspaces keeps both values" `Quick
+            test_one_keeper_name_in_two_workspaces_keeps_both_values;
         ] );
     ]

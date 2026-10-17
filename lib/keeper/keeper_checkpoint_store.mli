@@ -53,15 +53,15 @@ type save_agent_core_outcome =
   | Saved of
       { relation : save_agent_core_relation
       ; turn_count : int
-      ; canonical_bytes : int option
+      ; canonical_bytes : int
       }
   | Stale_noop of { incoming_turn_count : int; known_turn_count : int }
 
 (** Save [ckpt] in one locked disk-SSOT transaction. A missing [session_dir]
     is created by the durable writer, retaining the public create-first contract.
     [Saved] means payload, rename, and parent-directory fsync succeeded; history
-    is observed best effort. [canonical_bytes] comes from the file identity
-    already observed after the write; [None] means that observation failed.
+    is observed best effort. [canonical_bytes] is the size of the file the save
+    wrote, from that file's descriptor.
 
     [history_retained] is how many past checkpoints to leave beside the
     canonical one; zero writes no history at all. The caller reads it from
@@ -74,21 +74,27 @@ type save_agent_core_outcome =
     A stale writer must not clobber a conversation the newer writer already
     persisted, but this is not a keeper lifecycle failure. Equal turn_count
     re-saves pass. A corrupt or unreadable existing checkpoint fails closed and
-    is never treated as a cold store. *)
+    is never treated as a cold store.
+
+    This save keeps nothing for the next one: it encodes the whole checkpoint.
+    A Keeper's own saves use {!save_agent_core_for_keeper}. *)
 val save_agent_core_classified :
   session_dir:string ->
   history_retained:int ->
   Agent_core.Checkpoint.t ->
   (save_agent_core_outcome, string) result
 
-(** [save_agent_core_classified] for a sequence of saves of one checkpoint
-    lineage, such as the stages of one keeper turn. [encoding_memo] carries the
-    encoded messages of the previous successful save, so a save encodes only the
-    messages that save did not write ({!Agent_core.Checkpoint.to_pieces_with_encoding_memo}).
-    The written bytes are the same as without the memo. *)
-val save_agent_core_classified_with_encoding_memo :
+(** {!save_agent_core_classified} for a save of [keeper_name]'s own
+    checkpoint. Saves of one canonical file share the store's encoding memo for
+    it, so a save encodes only the messages that no earlier save in this
+    process wrote and no {!load_agent_core_for_save} read
+    ({!Agent_core.Checkpoint.to_pieces_with_encoding_memo}). After the save, a
+    load answers from the decode of the written bytes while the file keeps the
+    identity sampled after the write. The Keeper is named here because a
+    checkpoint's [agent_name] names the runtime its turn ran on. *)
+val save_agent_core_for_keeper :
+  keeper_name:string ->
   session_dir:string ->
-  encoding_memo:Agent_core.Checkpoint.encoding_memo ->
   history_retained:int ->
   Agent_core.Checkpoint.t ->
   (save_agent_core_outcome, string) result
@@ -160,16 +166,42 @@ val load_agent_core_history_file :
   snapshot_id:string ->
   (Agent_core.Checkpoint.t, checkpoint_load_error) result
 
-(** Load the canonical AGENT_CORE checkpoint for [session_id]. One read path
-    for Eio and non-Eio contexts: the owned-file read distinguishes an absent
-    file from a read failure. The read and JSON decode run off the calling
-    fiber when the Eio capability is installed.
-    A [session_id] that is not one real path segment is refused
-    as [Store_error] (the same rejection agent core store applied). *)
+(** Load the canonical AGENT_CORE checkpoint for [session_id]. While the file
+    has the (device, inode, size, mtime) it had when {!save_agent_core_for_keeper}
+    in this process wrote it, or when {!load_agent_core_for_save} read it, the
+    answer is the value kept then and the file is not read; the [context] is a
+    fresh copy. Such an answer
+    also skips the owner and mode checks of the read: a chmod, chown or hard
+    link leaves the identity as it was, and the value is what this process
+    wrote or read, not what the file holds now. Otherwise one read path for Eio
+    and non-Eio contexts: the owned-file read distinguishes an absent file from
+    a read failure, and the read and JSON decode run off the calling fiber when
+    the Eio capability is installed. A [session_id] that is not one real path
+    segment is refused as [Store_error] (the same rejection agent core store
+    applied). *)
 val load_agent_core :
   session_dir:string ->
   session_id:string ->
   (Agent_core.Checkpoint.t, checkpoint_load_error) result
+
+(** {!load_agent_core} for [keeper_name]'s turn, which saves this lineage next
+    with {!save_agent_core_for_keeper}. When it reads the file it also keeps
+    what it read, with an encoding memo the read filled
+    ({!Agent_core.Checkpoint.of_string_with_encoding_memo}), so that save writes
+    only the new messages and the next load answers without a read. A read
+    during which the file changed keeps nothing. *)
+val load_agent_core_for_save :
+  keeper_name:string ->
+  session_dir:string ->
+  session_id:string ->
+  (Agent_core.Checkpoint.t, checkpoint_load_error) result
+
+(** Drops what the store keeps for [keeper_name]'s checkpoints under
+    [session_root], or for every Keeper of that name when [session_root] no
+    longer resolves. A save still running keeps its value again afterwards:
+    the decode of the bytes it wrote, handed out only while the file keeps
+    that identity (#43575). *)
+val forget_written_lineages : session_root:string -> keeper_name:string -> unit
 
 (** Message count of the canonical checkpoint for [session_id]. Answered
     without reading the file while the file on disk is the one the store's
@@ -481,4 +513,14 @@ module For_testing : sig
     expected_source_ref:Keeper_checkpoint_ref.t ->
     Agent_core.Checkpoint.t ->
     checkpoint_installation
+
+  val save_agent_core_for_keeper_with_before_stage :
+    before_stage:(Keeper_fs.durable_write_stage -> unit) ->
+    keeper_name:string ->
+    session_dir:string ->
+    history_retained:int ->
+    Agent_core.Checkpoint.t ->
+    (save_agent_core_outcome, string) result
+  (** {!save_agent_core_for_keeper} with [before_stage] run just before each
+      filesystem step of the canonical write. *)
 end

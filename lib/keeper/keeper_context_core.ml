@@ -102,7 +102,8 @@ let save_agent_core_checkpoint_classified
   | Error error -> Error (Tool_history_invalid error)
   | Ok checkpoint ->
     (match
-       Keeper_checkpoint_store.save_agent_core_classified
+       Keeper_checkpoint_store.save_agent_core_for_keeper
+         ~keeper_name
          ~session_dir:session.session_dir
          ~history_retained:
            (Runtime_params.get Runtime_settings.keeper_checkpoint_history_retained)
@@ -143,12 +144,16 @@ type checkpoint_load =
   | Checkpoint_absent
   | Checkpoint_unread of Keeper_checkpoint_store.checkpoint_load_error
 
-let load_context_from_checkpoint_classified ~trace_id ~base_dir =
+let classified_load
+    ~(load :
+       session_dir:string ->
+       session_id:string ->
+       (Agent_core.Checkpoint.t, Keeper_checkpoint_store.checkpoint_load_error) result)
+    ~trace_id
+    ~base_dir
+  =
   let session = create_session ~session_id:trace_id ~base_dir in
-  let agent_core_result =
-    Keeper_checkpoint_store.load_agent_core ~session_dir:session.session_dir
-      ~session_id:trace_id
-  in
+  let agent_core_result = load ~session_dir:session.session_dir ~session_id:trace_id in
   (match agent_core_result with
    | Error (Superseded_version { expected; got }) ->
        (* Not an error the operator has to act on: the version cut is
@@ -216,8 +221,17 @@ let load_context_from_checkpoint_classified ~trace_id ~base_dir =
       trace_id;
     session, Checkpoint_unread error
 
+(* A turn saves this lineage next, so its load keeps what it reads. *)
+let load_context_from_checkpoint_classified ~keeper_name ~trace_id ~base_dir =
+  classified_load
+    ~load:(Keeper_checkpoint_store.load_agent_core_for_save ~keeper_name)
+    ~trace_id
+    ~base_dir
+
 let load_context_from_checkpoint ~trace_id ~base_dir =
-  let session, load = load_context_from_checkpoint_classified ~trace_id ~base_dir in
+  let session, load =
+    classified_load ~load:Keeper_checkpoint_store.load_agent_core ~trace_id ~base_dir
+  in
   match load with
   | Checkpoint_loaded ctx -> session, Some ctx
   | Checkpoint_absent | Checkpoint_unread _ -> session, None

@@ -1240,6 +1240,46 @@ let respond_not_initialized request reqd =
     ~extra_headers:not_initialized_headers
     (not_initialized_response (Http_server_eio.Request.path request)) reqd
 
+type read_workspace_precondition = Workspace_read_unbound | Workspace_read_matched
+
+let validate_read_workspace_precondition ~config request =
+  match request.Httpun.Request.meth with
+  | `GET | `HEAD ->
+    let expected = Uri.query (Uri.of_string request.target)
+      |> List.filter (fun (key, _) ->
+        key = "expected_base_path" || key = "expected_masc_root") in
+    (match expected with
+     | [] -> Ok Workspace_read_unbound
+     | fields when List.length fields = 2 ->
+       (match List.assoc_opt "expected_base_path" fields,
+              List.assoc_opt "expected_masc_root" fields with
+        | Some [base], Some [root] ->
+          Workspace.validate_expected_workspace ~config
+            (`Assoc ["expected_workspace", `Assoc
+              ["base_path", `String base; "masc_root", `String root]])
+          |> Result.map (fun _ -> Workspace_read_matched)
+        | Some _, Some _ | Some _, None | None, Some _ | None, None ->
+          Error Workspace.Invalid_workspace_precondition)
+     | _ -> Error Workspace.Invalid_workspace_precondition)
+  | _ -> Ok Workspace_read_unbound
+
+let with_read_workspace_precondition state handler request reqd =
+  match validate_read_workspace_precondition
+      ~config:(Mcp_server.workspace_config state) request with
+  | Ok Workspace_read_unbound -> handler state request reqd
+  | Ok Workspace_read_matched ->
+    Http_server_eio.Response.with_scoped_headers [Workspace.read_precondition_admission_header]
+      (fun () -> handler state request reqd)
+  | Error error ->
+    let status, code, message = match error with
+      | Workspace.Invalid_workspace_precondition ->
+        `Bad_request, "invalid_workspace_precondition",
+        "expected_base_path and expected_masc_root must each occur once"
+      | Workspace.Workspace_precondition_failed ->
+        `Conflict, "workspace_precondition_failed", "workspace precondition failed" in
+    Http_server_eio.Response.json_value ~status ~request
+      (`Assoc ["error_code", `String code; "error", `String message]) reqd
+
 let rec with_public_read handler request reqd =
   match ready_server_state () with
   | None -> respond_not_initialized request reqd
@@ -1249,7 +1289,7 @@ let rec with_public_read handler request reqd =
       if strict && not (is_public_read_path path) then
         with_read_auth handler request reqd
       else
-        handler state request reqd
+        with_read_workspace_precondition state handler request reqd
 
 and with_read_auth handler request reqd =
   match current_server_state () with
@@ -1261,7 +1301,7 @@ and with_read_auth handler request reqd =
           (match check_agent_rate_limit
                    ~quota:(read_request_quota request.Httpun.Request.meth)
                    request reqd with
-          | Ok () -> handler state request reqd
+          | Ok () -> with_read_workspace_precondition state handler request reqd
           | Error () -> ())
       | Error err -> respond_auth_error request reqd err)
 
@@ -1279,7 +1319,7 @@ and with_permission_auth ~permission handler request reqd =
           (match check_agent_rate_limit
                    ~quota:(read_request_quota request.Httpun.Request.meth)
                    request reqd with
-          | Ok () -> handler state request reqd
+          | Ok () -> with_read_workspace_precondition state handler request reqd
           | Error () -> ())
       | Error err -> respond_auth_error request reqd err)
 
@@ -1340,7 +1380,8 @@ and with_token_permission_auth ~permission handler request reqd =
           (match check_agent_rate_limit
                    ~quota:(read_request_quota request.Httpun.Request.meth)
                    request reqd with
-          | Ok () -> handler state agent_name request reqd
+          | Ok () -> with_read_workspace_precondition state
+              (fun state request reqd -> handler state agent_name request reqd) request reqd
           | Error () -> ())
       | Error err -> respond_auth_error request reqd err)
 

@@ -7,6 +7,8 @@ type expected_workspace_error =
   | Invalid_workspace_precondition
   | Workspace_precondition_failed
 
+let read_precondition_admission_header = "x-masc-workspace-read", "matched-v1"
+
 (* The same admission check is used by HTTP operator writes and the TUI's
    MCP task cancellation. Compare canonical roots against the config captured
    by the receiving request, before any durable operation is dispatched. *)

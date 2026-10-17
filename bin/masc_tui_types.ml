@@ -3593,6 +3593,9 @@ module Surface_read_order : sig
   val initial : t
   val dispatch : kind:kind -> needs:surface_needs -> started_ns:int64 -> t -> t * request
   val take : t -> request -> t * source list
+  val take_source : t -> request -> source -> t * bool
+  (** Admit one owned dataset once without settling its sibling readers or
+      the enclosing collector. A superseded source leaves the state intact. *)
   val finish : t -> request -> t
   val invalidate : t -> t
   val pending : needs:surface_needs -> t -> source list
@@ -3648,6 +3651,10 @@ end = struct
   (* Taking data is distinct from settling its collector. Result application
      can schedule followups before the owning mailbox item finishes. *)
   let take current request = release_sources current request, owned current request
+  let take_source current request source =
+    if List.mem source (owned current request) then
+      {current with owners=List.filter (fun (candidate, _) -> candidate <> source) current.owners}, true
+    else current, false
   (* Withdrawal retires publication and identity authority. Actual collectors
      remain tracked until their own completion; they block no navigation. *)
   let invalidate current = {current with owners=[]; latest_navigation=None}
@@ -8366,14 +8373,24 @@ let take_asks_observation (state : state) observation =
       state.asks_read <- reading;
       Some observation.asks_result
 
-let can_admit_early_http_read (state : state) ~ticket ~authority identity =
-  Option.is_some state.http_refresh_started_ns
-  && Http_refresh_order.is_current state.http_refresh_order ticket
+let can_admit_http_read (state : state) ~ticket ~authority identity =
+  Http_refresh_order.is_current state.http_refresh_order ticket
   && authority = state.workspace_authority
   && state.workspace_identity = Workspace_identity_match
   && server_workspace_matches ~expected:state.server_identity (Ok identity)
   && workspace_identity_of_refresh ~local_base_path:state.local_base_path
        (Ok identity) = Workspace_identity_match
+
+let can_admit_early_http_read (state : state) ~ticket ~authority identity =
+  Option.is_some state.http_refresh_started_ns
+  && can_admit_http_read state ~ticket ~authority identity
+
+let take_early_surface_read (state : state) ~ticket ~authority ~identity ~request ~source =
+  if can_admit_http_read state ~ticket ~authority identity then
+    let readings, accepted = Surface_read_order.take_source state.http_surface_reads request source in
+    state.http_surface_reads <- readings;
+    accepted
+  else false
 
 let take_early_asks_observation (state : state) early =
   if can_admit_early_http_read state ~ticket:early.ea_ticket

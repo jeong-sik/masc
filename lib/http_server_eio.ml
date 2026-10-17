@@ -107,6 +107,16 @@ let safe_respond_with_string reqd response body =
 
 (** Simple response helpers *)
 module Response = struct
+  let scoped_headers_key : (string * string) list Eio.Fiber.key = Eio.Fiber.create_key ()
+
+  let with_scoped_headers headers send =
+    Eio.Fiber.with_binding scoped_headers_key headers send
+
+  let scoped_headers () =
+    (* Offline response preparation has no request fiber or admitted headers. *)
+    try match Eio.Fiber.get scoped_headers_key with Some headers -> headers | None -> []
+    with Effect.Unhandled _ -> []
+
   let html_cache_control = "no-store, max-age=0, must-revalidate"
 
   let text_plain_content_type = "text/plain; charset=utf-8"
@@ -332,13 +342,14 @@ module Response = struct
       Httpun.Response.create ~headers `Not_modified, ""
 
   let json ?status ?compress ?extra_headers ?request ?etag body reqd =
+    let extra_headers = scoped_headers () @ Option.value ~default:[] extra_headers in
     let request =
       match request with
       | Some request -> request
       | None -> Httpun.Reqd.request reqd
     in
     let response, final_body =
-      prepare_json ?status ?compress ?extra_headers ~request ?etag body
+      prepare_json ?status ?compress ~extra_headers ~request ?etag body
     in
     safe_respond_with_string reqd response final_body
 
@@ -355,6 +366,7 @@ module Response = struct
       let status = timeout_envelope_status_override_string ~status body in
       json ~status ~compress ~extra_headers ~request ~etag body reqd
     else
+      let extra_headers = scoped_headers () @ extra_headers in
       let if_none_match =
         Httpun.Headers.get request.Httpun.Request.headers "if-none-match"
       in
@@ -392,10 +404,11 @@ module Response = struct
 
   let json_value_on_cpu ?status ?compress ?extra_headers ?request value reqd =
     let status = timeout_envelope_status_override ?status value in
+    let extra_headers = scoped_headers () @ Option.value ~default:[] extra_headers in
     let request = match request with Some request -> request | None -> Httpun.Reqd.request reqd in
     let response, body =
       Executor_pool_ref.submit_or_inline (fun () ->
-        prepare_json ~status ?compress ?extra_headers ~request
+        prepare_json ~status ?compress ~extra_headers ~request
           (Yojson.Safe.to_string value))
     in
     safe_respond_with_string reqd response body

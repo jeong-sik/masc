@@ -35,6 +35,35 @@ type early_approval_observation = {
   eap_observation: approval_observation;
 }
 
+(* Each value settles one dataset. Board and runtime pairs keep their shared
+   source ownership; no sibling reader or collector is settled by delivery. *)
+type http_dataset =
+  | Dataset_transport of (Masc.Tui_decode.transport_health, string) result
+  | Dataset_board of
+      (board_post list, string) result * ((string * int) list, string) result
+  | Dataset_planning of (planning_snapshot, string) result
+  | Dataset_system_logs of (system_log_snapshot, string) result
+  | Dataset_fleet_safety of (Masc.Tui_decode.fleet_safety_reading, string) result
+  | Dataset_runtime_quota of
+      (Masc.Tui_decode.runtime_option list, string) result
+      * (Masc.Tui_decode_usage.provider_usage_windows, string) result
+  | Dataset_keeper_usage of (Masc.Tui_decode_usage.keeper_usage_window, string) result
+  | Dataset_provider_history of
+      int * (Masc.Tui_decode_usage.provider_usage_history, string) result
+  | Dataset_overview_goals of (Masc.Tui_decode.overview_goal list, string) result
+  | Dataset_account_emails of ((string * string) list * int, string) result
+
+type early_http_dataset = {
+  ed_ticket: Http_refresh_order.ticket;
+  ed_authority: workspace_authority;
+  ed_request: Surface_read_order.request;
+  ed_identity: Masc.Tui_decode.server_identity;
+  ed_dataset: http_dataset;
+}
+
+val http_dataset_source : http_dataset -> Surface_read_order.source
+val http_dataset_received : http_dataset -> bool
+
 (* Collection has no identity authority of its own. The enclosing full or
    scoped request owns the before/after probes and binds the final identity
    only after its entire read interval has settled. [unit] readings cannot
@@ -232,6 +261,7 @@ type async_msg =
       (Masc.Tui_decode_asks.ask_followup, string) result
   (** A workspace-bound roster can settle before unrelated readers. *)
   | Http_keeper_roster_loaded of early_keeper_roster_observation
+  | Http_dataset_loaded of early_http_dataset
   (** Diagnostic reader status; it grants no data or action authority. *)
   | Http_progress_observed of http_progress_observation
   | Http_surface_read_completed of Surface_read_order.request * async_msg

@@ -378,6 +378,39 @@ let test_unreadable_credential_standing_is_not_no_credential () =
         (Server_auth.request_credential_standing ~base_path request
          = Server_auth.Unreadable_credential))
 
+let test_workspace_bound_read_preconditions () =
+  with_temp_base_path @@ fun base_path ->
+  Unix.mkdir (Filename.concat base_path ".masc") 0o700;
+  let config = Workspace.default_config base_path in
+  let base = Unix.realpath base_path in
+  let root = Unix.realpath (Filename.concat base_path ".masc") in
+  let fields = ["expected_base_path",[base];"expected_masc_root",[root]] in
+  let read ?(meth=`GET) path fields =
+    let target = Uri.with_query (Uri.of_string path) fields |> Uri.to_string in
+    Server_auth.validate_read_workspace_precondition ~config
+      (Httpun.Request.create meth target) in
+  List.iter (fun path ->
+    check bool "the same bound workspace admits each read shape" true
+      (read path fields=Ok Server_auth.Workspace_read_matched);
+    check bool "a foreign workspace cannot answer under the old identity" true
+      (read path ["expected_base_path",[base ^ "/foreign"];"expected_masc_root",[root]]
+       =Error Workspace.Workspace_precondition_failed))
+    ["/api/v1/dashboard/planning";"/api/v1/board";"/api/v1/setup/account-emails"];
+  List.iter (fun malformed ->
+    check bool "partial, duplicate and empty workspace values are refused" true
+      (read "/api/v1/dashboard/planning" malformed
+       =Error Workspace.Invalid_workspace_precondition))
+    [["expected_base_path",[base]];
+     ["expected_base_path",[base;base];"expected_masc_root",[root]];
+     ["expected_base_path",[base];"expected_masc_root",[root;root]];
+     ["expected_base_path",[""];"expected_masc_root",[root]]];
+  check bool "unbound reads retain ordinary query semantics" true
+    (read "/api/v1/board" ["hearth",["research & design"]]=Ok Server_auth.Workspace_read_unbound);
+  check bool "HEAD uses the same workspace precondition" true
+    (read ~meth:`HEAD "/api/v1/board" fields=Ok Server_auth.Workspace_read_matched);
+  check bool "POST retains its operation-owned precondition" true
+    (read ~meth:`POST "/api/v1/board" ["expected_base_path",[base]]=Ok Server_auth.Workspace_read_unbound)
+
 let () =
   Eio_main.run @@ fun _env ->
   Server_request_authority.with_current
@@ -385,7 +418,9 @@ let () =
     (fun () ->
        run "server_auth_dashboard_actor_resolution"
          [ ( "resolution"
-           , [ test_case "anonymous public hint is preserved" `Quick
+           , [ test_case "workspace-bound reads preserve exact query authority" `Quick
+                 test_workspace_bound_read_preconditions
+             ; test_case "anonymous public hint is preserved" `Quick
                  test_anonymous_public_read_preserves_hint
              ; test_case "rejected credential fails closed" `Quick
                  test_rejected_credential_cannot_supply_actor_hint

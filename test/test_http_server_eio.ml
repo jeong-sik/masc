@@ -1180,6 +1180,35 @@ let test_json_worker_wire_parity () =
          (serve_json_over_wire ~worker_pool:true ~respond changed))) responders
 ;;
 
+let test_workspace_read_receipt_reaches_json_and_conditional_wire () =
+  let header_name, header_value = Workspace.read_precondition_admission_header in
+  let responders =
+    [ (fun ~request body reqd -> Response.json ~request body reqd)
+    ; (fun ~request body reqd ->
+        Response.json_lazy ~request ~etag:(Response.weak_etag_value body)
+          (fun () -> body) reqd)
+    ; (fun ~request body reqd ->
+        Response.json_value_on_cpu ~request (Yojson.Safe.from_string body) reqd)
+    ] in
+  List.iter (fun respond ->
+    let attested ~request body reqd =
+      Response.with_scoped_headers [header_name,header_value]
+        (fun () -> respond ~request body reqd) in
+    let response = serve_json_over_wire ~worker_pool:true ~respond:attested worker_json_body in
+    Alcotest.(check (option string)) "the admitted request puts its receipt on the wire"
+      (Some header_value) (response_header response header_name);
+    let unchanged = serve_json_over_wire ~worker_pool:true ~respond:attested
+        ~if_none_match:(Response.weak_etag_value worker_json_body) worker_json_body in
+    Alcotest.(check string) "the conditional request remains a bodyless 304"
+      "HTTP/1.1 304 Not Modified" (response_status_line unchanged);
+    Alcotest.(check (option string)) "304 carries its own current admission receipt"
+      (Some header_value) (response_header unchanged header_name);
+    let unbound = serve_json_over_wire ~worker_pool:true ~respond
+        ~headers:[header_name,header_value] worker_json_body in
+    Alcotest.(check (option string)) "another request cannot inherit or forge the response receipt"
+      None (response_header unbound header_name)) responders
+;;
+
 let worker_bypass_responders =
   [ "tiny body", (fun reqd -> Response.json "{}" reqd)
   ; "compression disabled", (fun reqd -> Response.json ~compress:false worker_json_body reqd)
@@ -1212,7 +1241,9 @@ let response_tests =
   @ List.map (fun (name, respond) ->
       name ^ " bypasses occupied worker", `Quick,
       test_json_worker_yields_to_caller ~queued:false respond) worker_bypass_responders
-  @ [ "worker JSON wire parity", `Quick, test_json_worker_wire_parity
+  @ [ "workspace read receipt reaches JSON and conditional wire", `Quick,
+      test_workspace_read_receipt_reaches_json_and_conditional_wire
+  ; "worker JSON wire parity", `Quick, test_json_worker_wire_parity
   ; ( "content_headers preserve all header segments"
     , `Quick
     , test_response_content_headers_preserve_all_segments )

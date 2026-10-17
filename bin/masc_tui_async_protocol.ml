@@ -32,6 +32,56 @@ type early_approval_observation = {
   eap_observation: approval_observation;
 }
 
+(* Each value settles one dataset. Board and runtime pairs keep their shared
+   source ownership; no sibling reader or collector is settled by delivery. *)
+type http_dataset =
+  | Dataset_transport of (Masc.Tui_decode.transport_health, string) result
+  | Dataset_board of
+      (board_post list, string) result * ((string * int) list, string) result
+  | Dataset_planning of (planning_snapshot, string) result
+  | Dataset_system_logs of (system_log_snapshot, string) result
+  | Dataset_fleet_safety of (Masc.Tui_decode.fleet_safety_reading, string) result
+  | Dataset_runtime_quota of
+      (Masc.Tui_decode.runtime_option list, string) result
+      * (Masc.Tui_decode_usage.provider_usage_windows, string) result
+  | Dataset_keeper_usage of (Masc.Tui_decode_usage.keeper_usage_window, string) result
+  | Dataset_provider_history of
+      int * (Masc.Tui_decode_usage.provider_usage_history, string) result
+  | Dataset_overview_goals of (Masc.Tui_decode.overview_goal list, string) result
+  | Dataset_account_emails of ((string * string) list * int, string) result
+
+type early_http_dataset = {
+  ed_ticket: Http_refresh_order.ticket;
+  ed_authority: workspace_authority;
+  ed_request: Surface_read_order.request;
+  ed_identity: Masc.Tui_decode.server_identity;
+  ed_dataset: http_dataset;
+}
+
+let http_dataset_source = function
+  | Dataset_transport _ -> Surface_read_order.Transport
+  | Dataset_board _ -> Surface_read_order.Board
+  | Dataset_planning _ -> Surface_read_order.Planning
+  | Dataset_system_logs _ -> Surface_read_order.System_logs
+  | Dataset_fleet_safety _ -> Surface_read_order.Fleet_safety
+  | Dataset_runtime_quota _ -> Surface_read_order.Runtime_quota
+  | Dataset_keeper_usage _ -> Surface_read_order.Keeper_usage
+  | Dataset_provider_history _ -> Surface_read_order.Provider_history
+  | Dataset_overview_goals _ -> Surface_read_order.Overview_goals
+  | Dataset_account_emails _ -> Surface_read_order.Account_emails
+
+let http_dataset_received = function
+  | Dataset_transport result -> Result.is_ok result
+  | Dataset_board (board, hearths) -> Result.is_ok board && Result.is_ok hearths
+  | Dataset_planning result -> Result.is_ok result
+  | Dataset_system_logs result -> Result.is_ok result
+  | Dataset_fleet_safety result -> Result.is_ok result
+  | Dataset_runtime_quota (runtimes, quota) -> Result.is_ok runtimes && Result.is_ok quota
+  | Dataset_keeper_usage result -> Result.is_ok result
+  | Dataset_provider_history (_, result) -> Result.is_ok result
+  | Dataset_overview_goals result -> Result.is_ok result
+  | Dataset_account_emails result -> Result.is_ok result
+
 (* Collection has no identity authority of its own. The enclosing full or
    scoped request owns the before/after probes and binds the final identity
    only after its entire read interval has settled. [unit] readings cannot
@@ -224,6 +274,7 @@ type async_msg =
   | Ask_followup_loaded of Snapshot_read.request * ask_submission *
       (Masc.Tui_decode_asks.ask_followup, string) result
   | Http_keeper_roster_loaded of early_keeper_roster_observation
+  | Http_dataset_loaded of early_http_dataset
   | Http_progress_observed of http_progress_observation
   | Http_surface_read_completed of Surface_read_order.request * async_msg
   | Http_initial_identity_read of http_initial_identity_read
@@ -830,7 +881,7 @@ let rec workspace_message_is_read = function
   | Voice_silent _
   | Voice_discarded _
   | Voice_failed _
-  | Http_keeper_roster_loaded _ | Http_progress_observed _ | Http_surface_read_completed _ | Http_initial_identity_read _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_observed _ | Ask_followup_loaded _ | Http_refresh_done _
+  | Http_keeper_roster_loaded _ | Http_dataset_loaded _ | Http_progress_observed _ | Http_surface_read_completed _ | Http_initial_identity_read _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_observed _ | Ask_followup_loaded _ | Http_refresh_done _
   | Http_refresh_failed _
   (* Not a reply: the refresh that recovered the identity tells the loop to
      read the confirm queue again. It belongs to that refresh, which is
@@ -937,7 +988,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Voice_agent_voices_loaded _ | Voice_agent_voice_saved _
     | Voice_wizard_probed (_, _) | Voice_wizard_reread (_, _)
     | Voice_config_loaded (_, _, _) | Voice_level _ | Voice_transcribed _
-    | Voice_silent _ | Voice_discarded _ | Voice_failed _ | Http_keeper_roster_loaded _ | Http_progress_observed _ | Http_surface_read_completed _ | Http_initial_identity_read _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_observed _ | Ask_followup_loaded _ | Http_refresh_done _
+    | Voice_silent _ | Voice_discarded _ | Voice_failed _ | Http_keeper_roster_loaded _ | Http_dataset_loaded _ | Http_progress_observed _ | Http_surface_read_completed _ | Http_initial_identity_read _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_observed _ | Ask_followup_loaded _ | Http_refresh_done _
     | Http_refresh_failed (_, _, _) | Approvals_listing_superseded
     | Approvals_summary_loaded (_, _, _, _) | Surface_composer_released
     | Http_scoped_refresh_done (_, _, _)
@@ -1074,7 +1125,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Voice_agent_voice_saved _ | Voice_wizard_probed (_, _)
   | Voice_wizard_reread (_, _) | Voice_config_loaded (_, _, _) | Voice_level _
   | Voice_transcribed _ | Voice_silent _ | Voice_discarded _ | Voice_failed _
-  | Http_keeper_roster_loaded _ | Http_progress_observed _ | Http_surface_read_completed _ | Http_initial_identity_read _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_observed _ | Ask_followup_loaded _ | Http_refresh_done _ | Http_refresh_failed (_, _, _)
+  | Http_keeper_roster_loaded _ | Http_dataset_loaded _ | Http_progress_observed _ | Http_surface_read_completed _ | Http_initial_identity_read _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_observed _ | Ask_followup_loaded _ | Http_refresh_done _ | Http_refresh_failed (_, _, _)
   | Approvals_listing_superseded | Approvals_summary_loaded (_, _, _, _)
   | Surface_composer_released | Http_scoped_refresh_done (_, _, _)
   | Http_scoped_refresh_failed (_, _, _, _, _, _) | Board_post_refresh_done (_, _)

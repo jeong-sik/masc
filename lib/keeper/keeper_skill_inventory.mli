@@ -50,6 +50,10 @@ type skill_inventory_item =
 
 type t
 
+val of_prepared : Keeper_skill_catalog.prepared -> t
+(** Build directly from one frozen projection fold, including exact shadowed
+    entries and independent snapshot rejections. No per-entry catalog lookup. *)
+
 val of_snapshot : ?descriptors:Keeper_tool_descriptor.t list -> Skill_catalog_snapshot.t -> t
 (** Build one inventory without rereading files or introducing another Skill
     parser. Each valid exact entry is [Effective] or [Shadowed] under global

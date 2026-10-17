@@ -29,11 +29,18 @@ type unprojectable =
   ; task_ids : string list
   }
 
+type preparation =
+  { projection : Keeper_skill_catalog.prepared
+  ; catalog : Keeper_skill_catalog.t
+  ; diagnostics : Keeper_skill_catalog.projection_diagnostic list
+  ; inventory : Keeper_skill_inventory.t
+  }
+
 type t =
   { selected : selected list
   ; unprojectable : unprojectable list
   ; descriptor_authority : Keeper_tool_descriptor.t list option
-  ; projection_snapshot : Skill_catalog_snapshot.t option
+  ; preparation : preparation option
   }
 
 type partition =
@@ -118,6 +125,12 @@ let unreadable_pin_error ~snapshot ~reference = function
           Some (Skill_source_unreadable { source_id; observation })))
 ;;
 
+let preparation_of_projection projection =
+  let catalog, diagnostics = Keeper_skill_catalog.prepared_catalog projection in
+  let inventory = Keeper_skill_inventory.of_prepared projection in
+  { projection; catalog; diagnostics; inventory }
+;;
+
 (* Against a configured snapshot, a pinned reference it cannot give back is a
    Skill that is unavailable this turn rather than a setup failure
    (docs/SKILLS-FLOW.md section 2a): the snapshot holds the identity but the
@@ -128,35 +141,44 @@ let unreadable_pin_error ~snapshot ~reference = function
    turns about other Tasks, until that Task is released: no path re-pins a
    Task. The downgrade holds only for successfully scanned sources; a pin
    into an unreadable source or entry stops setup above instead. *)
-let resolve_with_task_ids ?descriptors ~snapshot ~task_ids references =
-  let rec loop resolved unprojectable = function
-    | [] -> Ok { selected = List.rev resolved; unprojectable = List.rev unprojectable;
-        descriptor_authority = descriptors; projection_snapshot = Some snapshot }
-    | reference :: rest ->
+let resolve_requests ?descriptors ~snapshot requests =
+  let tool_descriptors = match descriptors with
+    | Some descriptors -> descriptors
+    | None -> Keeper_tool_descriptor.all_descriptors () in
+  let prepare = function
+    | Some projection -> projection
+    | None -> Keeper_skill_catalog.prepare_snapshot ~descriptors:tool_descriptors snapshot in
+  let rec loop projection resolved unprojectable = function
+    | [] ->
+      let preparation = preparation_of_projection (prepare projection) in
+      Ok { selected = List.rev resolved; unprojectable = List.rev unprojectable;
+        descriptor_authority = descriptors; preparation = Some preparation }
+    | (reference, task_ids) :: rest ->
       (match Skill_catalog_snapshot.resolve_reference snapshot reference with
        | Error resolution ->
          (match unreadable_pin_error ~snapshot ~reference resolution with
           | Some error -> Error error
           | None ->
-            loop
+            loop projection
               resolved
               ({ reference; reason = Pin_unresolved resolution; task_ids }
                :: unprojectable)
               rest)
        | Ok entry ->
-         (match Keeper_skill_catalog.project_entry_or_fallback ?descriptors snapshot entry with
+         let projection = prepare projection in
+         (match Keeper_skill_catalog.project_prepared_entry projection entry with
           | Keeper_skill_catalog.Projected skill ->
-            loop
+            loop (Some projection)
               ({ reference; skill; diagnostic = None; task_ids } :: resolved)
               unprojectable
               rest
           | Keeper_skill_catalog.Frozen_instruction { skill; diagnostic } ->
-            loop
+            loop (Some projection)
               ({ reference; skill; diagnostic = Some diagnostic; task_ids } :: resolved)
               unprojectable
               rest
           | Keeper_skill_catalog.Entry_unavailable error ->
-            loop
+            loop (Some projection)
               resolved
               ({ reference
                ; reason = Catalog_entry_unprojectable error
@@ -165,19 +187,24 @@ let resolve_with_task_ids ?descriptors ~snapshot ~task_ids references =
                :: unprojectable)
               rest))
   in
-  Result.bind (require_configured snapshot references) (fun () ->
-    loop [] [] references)
+  Result.bind (require_configured snapshot (List.map fst requests)) (fun () ->
+    loop None [] [] requests)
 ;;
 
-let resolve ~snapshot references =
-  resolve_with_task_ids ~snapshot ~task_ids:[] references
+let resolve_with_task_ids ?descriptors ~snapshot ~task_ids references =
+  resolve_requests ?descriptors ~snapshot
+    (List.map (fun reference -> reference, task_ids) references)
 ;;
 
-let resolve_for_task ~snapshot ~task_id references =
-  resolve_with_task_ids ~snapshot ~task_ids:[ task_id ] references
+let resolve ?descriptors ~snapshot references =
+  resolve_with_task_ids ?descriptors ~snapshot ~task_ids:[] references
 ;;
 
-let empty = { selected = []; unprojectable = []; descriptor_authority = None; projection_snapshot = None }
+let resolve_for_task ?descriptors ~snapshot ~task_id references =
+  resolve_with_task_ids ?descriptors ~snapshot ~task_ids:[ task_id ] references
+;;
+
+let empty = { selected = []; unprojectable = []; descriptor_authority = None; preparation = None }
 
 (* One row per exact reference, carrying every Task id that pinned it. *)
 let merge_rows ~reference ~task_ids ~with_task_ids rows =
@@ -216,15 +243,15 @@ let merge selections =
     | None, other | other, None -> other
     | Some first, Some next when same_descriptors first next -> authority
     | Some _, Some _ -> invalid_arg "Task selections have different frozen Tool authority") None selections in
-  let projection_snapshot = match selections with
-    | ({projection_snapshot=Some first;_} as original) :: rest
+  let preparation = match selections with
+    | ({preparation=Some first;_} as original) :: rest
       when List.for_all (fun selection ->
         same_descriptor_binding original.descriptor_authority selection.descriptor_authority
-        && match selection.projection_snapshot with
-           | Some next -> first == next | None -> false) rest -> Some first
+        && match selection.preparation with
+           | Some next -> first.projection == next.projection | None -> false) rest -> Some first
     | [] | _ :: _ -> None in
   { descriptor_authority
-  ; projection_snapshot
+  ; preparation
   ; selected =
       merge_rows
         ~reference:(fun (row : selected) -> row.reference)
@@ -260,14 +287,7 @@ let resolve_observations_with_authority ~descriptor_authority ~snapshot ~current
         List.map (fun reference -> reference,[task_id]) references)
     |> merge_rows ~reference:fst ~task_ids:snd
         ~with_task_ids:(fun (reference,_) task_ids -> reference,task_ids) in
-  let rec loop selections = function
-    | [] -> Ok {(merge (List.rev selections)) with descriptor_authority;projection_snapshot=Some snapshot}
-    | (reference, task_ids) :: rest ->
-      (match resolve_with_task_ids ?descriptors:descriptor_authority ~snapshot ~task_ids [reference] with
-       | Error _ as error -> error
-       | Ok selection -> loop (selection :: selections) rest)
-  in
-  loop [] requests
+  resolve_requests ?descriptors:descriptor_authority ~snapshot requests
 ;;
 
 let resolve_observations ~snapshot ~current_task ~held_task_skills =
@@ -277,19 +297,24 @@ let resolve_observations ~snapshot ~current_task ~held_task_skills =
 let descriptors selection = selection.descriptor_authority
 
 let with_descriptors ~descriptors ~snapshot selection =
-  match selection.projection_snapshot, selection.descriptor_authority with
-  | Some original, Some bound when original == snapshot && same_descriptors bound descriptors ->
+  match selection.preparation, selection.descriptor_authority with
+  | Some original, Some bound when same_descriptors bound descriptors
+      && Keeper_skill_catalog.prepared_matches original.projection ~descriptors snapshot ->
       Ok selection
   | None, _ | _, None | Some _, Some _ ->
     let requests = List.map (fun (row : selected) -> row.reference,row.task_ids) selection.selected
-      @ List.map (fun (row : unprojectable) -> row.reference,row.task_ids) selection.unprojectable in
-    let rec loop selections = function
-      | [] -> Ok { (merge (List.rev selections)) with descriptor_authority = Some descriptors;
-          projection_snapshot = Some snapshot }
-      | (reference, task_ids) :: rest ->
-          Result.bind (resolve_with_task_ids ~descriptors ~snapshot ~task_ids [reference])
-            (fun selected -> loop (selected :: selections) rest) in
-    loop [] requests
+      @ List.map (fun (row : unprojectable) -> row.reference,row.task_ids) selection.unprojectable
+      |> merge_rows ~reference:fst ~task_ids:snd
+          ~with_task_ids:(fun (reference,_) task_ids -> reference,task_ids) in
+    resolve_requests ~descriptors ~snapshot requests
+
+let prepare_surface ~snapshot ~descriptors selection =
+  match selection.preparation with
+  | Some preparation when Keeper_skill_catalog.prepared_matches preparation.projection ~descriptors snapshot ->
+    preparation
+  | Some _ | None ->
+    Keeper_skill_catalog.prepare_snapshot ~descriptors snapshot |> preparation_of_projection
+;;
 
 let resolve_live_observations ~config ~keeper_name ~snapshot ~current_task ~held_task_skills =
   let exports = (Keeper_lane_addon_runtime.snapshot ~config ~keeper_name).exports in
@@ -479,15 +504,15 @@ let exact_task_surfaces
   let descriptors = match selection.descriptor_authority with
     | Some descriptors -> descriptors
     | None -> Keeper_tool_descriptor.all_descriptors () in
-  let global, _ = Keeper_skill_catalog.of_snapshot ~descriptors snapshot in
+  let preparation = prepare_surface ~snapshot ~descriptors selection in
   let projection =
     Keeper_capability_surface.create_with_descriptors
       ~tool_descriptors:descriptors
       ~tool_deny
       ~sandbox_profile
       ~skill_names
-      ~global_skill_catalog:global
-      ~skill_inventory:(Keeper_skill_inventory.of_snapshot ~descriptors snapshot)
+      ~global_skill_catalog:preparation.catalog
+      ~skill_inventory:preparation.inventory
       ~task_skills:(skills selection)
     |> Keeper_capability_surface.skill_projection
   in

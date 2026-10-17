@@ -570,8 +570,9 @@ let prepare_agent_setup
   let* task_skill_selection = Keeper_task_skill_turn.with_descriptors
       ~descriptors:tool_descriptors ~snapshot:skill_snapshot task_skill_selection
     |> Result.map_error Keeper_task_skill_turn.core_error in
-  let global_skill_catalog, skill_projection_diagnostics =
-    Keeper_skill_catalog.of_snapshot ~descriptors:tool_descriptors skill_snapshot
+  let preparation =
+    Keeper_task_skill_turn.prepare_surface ~descriptors:tool_descriptors
+      ~snapshot:skill_snapshot task_skill_selection
   in
   let snapshot_rev =
     Skill_catalog_snapshot.snapshot_revision_to_string
@@ -586,7 +587,7 @@ let prepare_agent_setup
          (Yojson.Safe.to_string
             (Skill_catalog_snapshot.identity_to_yojson diagnostic.identity))
          (Keeper_skill_catalog.error_to_string diagnostic.error))
-    skill_projection_diagnostics;
+    preparation.diagnostics;
   List.iter
     (fun (selected : Keeper_task_skill_turn.selected) ->
        Option.iter
@@ -616,8 +617,8 @@ let prepare_agent_setup
       ~tool_deny:profile_defaults.Keeper_types_profile.tool_deny
       ~sandbox_profile:meta.sandbox_profile
       ~skill_names
-      ~global_skill_catalog
-      ~skill_inventory:(Keeper_skill_inventory.of_snapshot ~descriptors:tool_descriptors skill_snapshot)
+      ~global_skill_catalog:preparation.catalog
+      ~skill_inventory:preparation.inventory
       ~task_skills:(Keeper_task_skill_turn.skills task_skill_selection)
   in
   (* A deny entry that names nothing is refused where the profile is loaded
@@ -1153,5 +1154,5 @@ let prepare_agent_setup
     ~runtime_id_string
     ~config_root ~runtime_config_path
     ~trajectory_acc
-    ~skill_projection_diagnostics
+    ~skill_projection_diagnostics:preparation.diagnostics
     ?runtime_manifest_context ?runtime_manifest_append ()

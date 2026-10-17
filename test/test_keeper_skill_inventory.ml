@@ -619,7 +619,28 @@ let test_shadowed_and_invalid_skills_keep_typed_availability () =
       ; [ candidate ~directory:"review" second ]
       ]
   in
-  let inventory = Inventory.of_snapshot frozen in
+  ignore (Masc_test_deps.init_unified_tool_registry ());
+  let descriptors = Tool_descriptor.all_descriptors () in
+  let preparation = Masc.Keeper_skill_catalog.prepare_snapshot ~descriptors frozen in
+  let other = snapshot config [ []; [] ] in
+  ignore (Masc.Keeper_skill_catalog.of_snapshot ~descriptors other);
+  let inventory = Inventory.of_prepared preparation in
+  let catalog, diagnostics = Masc.Keeper_skill_catalog.prepared_catalog preparation in
+  check int "the retained catalog still has its effective Skill" 1
+    (List.length (Masc.Keeper_skill_catalog.skills catalog));
+  check int "valid catalog projection keeps no fabricated diagnostic" 0 (List.length diagnostics);
+  check int "retained inventory keeps both exact source entries" 2 (List.length (valid_items inventory));
+  (match invalid_items inventory with
+   | [invalid] ->
+     check string "rejected sibling remains in the original inventory" "broken" invalid.directory;
+     check bool "rejected sibling keeps its original source digest" true
+       (invalid.content_revision = Some (Skill_reference.content_revision_of_source_text malformed))
+   | _ -> fail "retained inventory lost its rejected sibling");
+  let surface ?(skill_names = None) () =
+    Masc.Keeper_capability_surface.create_with_descriptors
+      ~tool_descriptors:descriptors ~tool_deny:[]
+      ~sandbox_profile:Masc.Keeper_types_profile.Docker ~skill_names
+      ~global_skill_catalog:catalog ~skill_inventory:inventory ~task_skills:[] in
   let shadow =
     match
       valid_items inventory
@@ -630,7 +651,7 @@ let test_shadowed_and_invalid_skills_keep_typed_availability () =
     | None -> fail "shadowed Skill is absent"
   in
   let shadow_capability =
-    capability_surface frozen
+    surface ()
     |> fun surface -> exact_capability_by_reference surface shadow.reference
   in
   check bool "shadow is not model invocable" true
@@ -638,7 +659,7 @@ let test_shadowed_and_invalid_skills_keep_typed_availability () =
      = Masc.Keeper_capability_surface.Not_model_invocable);
   let broken_capabilities =
     Masc.Keeper_capability_surface.skill_capabilities
-      (capability_surface ~skill_names:(Some [ "broken" ]) frozen)
+      (surface ~skill_names:(Some [ "broken" ]) ())
   in
   let invalid_capabilities =
     broken_capabilities

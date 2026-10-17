@@ -735,4 +735,5 @@
 (test
  (name test_response_phase_replay)
  (modules test_response_phase_replay)
- (libraries llm_provider alcotest))
+ (libraries llm_provider alcotest yojson))
+

@@ -156,7 +156,85 @@ let legacy_openrouter_label ~old_kind ~current_kind ~report ~unit ~value ~extra 
       = Usage.source_to_string Codex_account_rate_limits_updated) rows in
   check string "other source's same label is not renamed" old_kind (kind other))
 
+let damaged_journal_keeps_readable_history () = fixture (fun config scope day ->
+  let cap = decode Usage.decode_openrouter_key
+    {|{"data":{"limit":20,"limit_remaining":5}}|} in
+  Usage.record ~scope ~observed_at:(day -. 1.) cap;
+  Usage.record ~scope ~observed_at:(day +. 5.) cap;
+  let scope_id = History.scope_id scope in
+  let point ~limit_id ~observed_at value =
+    [ "scope_id", `String scope_id
+    ; "source", `String (Usage.source_to_string Codex_account_rate_limits_updated)
+    ; "kind", `String "five_hour"
+    ; "limit_id", `String limit_id
+    ; "observed_at", `Float observed_at
+    ; "resets_at", `Null
+    ; "unit", `String "percent"
+    ; "value", `Int value
+    ]
+  in
+  let journal = usage_journal config in
+  let outside = day -. 7. *. 86400. in
+  (* A bad item does not discard its valid neighbors. Its timestamp is outside
+     the query, but full decoding still reports the missing nullable field. *)
+  Dated_jsonl.append journal (`List [
+    `Assoc (point ~limit_id:"before" ~observed_at:(day +. 10.) 10);
+    `Assoc (List.remove_assoc "limit_id"
+      (point ~limit_id:"invalid" ~observed_at:outside 99));
+    `Assoc (point ~limit_id:"after" ~observed_at:(day +. 20.) 20);
+    `Assoc (point ~limit_id:"too-old" ~observed_at:outside 30);
+    `Assoc (point ~limit_id:"future" ~observed_at:(day +. 100.) 40)]);
+  let location = Dated_jsonl.Store.at
+    (Workspace_utils.dated_store_root config) Provider_usage_history in
+  let dated = Dated_jsonl.Store.dated_path location ~ts:day in
+  Fs_compat.append_file dated.path "{broken-json\n";
+  Dated_jsonl.append journal (`Int 42);
+  (* A later real complete report still replaces only its own current day;
+     the other source's neighbors and the prior UTC day's cap survive. *)
+  Usage.record ~scope ~observed_at:(day +. 40.)
+    (decode Usage.decode_openrouter_key {|{"data":{"limit":null,"usage":21.5}}|});
+  let json = match History.read config ~now:(day +. 50.) ~window:History.Seven_days with
+    | Ok json -> json | Error detail -> fail detail in
+  let reading = match Tui_decode_usage.decode_provider_usage_history json with
+    | Ok reading -> reading | Error detail -> fail detail in
+  check int "item, syntax and non-list failures reach the consumer" 3
+    reading.puh_unreadable_reports;
+  check int "valid neighbors, prior day and later report survive" 4
+    (List.length reading.puh_points);
+  check int "corruption is not a successful empty report" 0
+    (List.length reading.puh_reported_no_windows);
+  check bool "every point retains the opaque scope" true
+    (List.for_all (fun (point : Tui_decode_usage.provider_usage_history_point) ->
+      point.puhp_scope_id = scope_id) reading.puh_points);
+  let by_limit limit_id = List.find
+    (fun (point : Tui_decode_usage.provider_usage_history_point) ->
+      point.puhp_limit_id = Some limit_id) reading.puh_points in
+  List.iter (fun (limit_id, at, expected) ->
+    let point = by_limit limit_id in
+    check (float 0.) "neighbor observation time survives" at point.puhp_observed_at;
+    match point.puhp_unit with
+    | Tui_decode_usage.Utilization_percent value ->
+        check int "neighbor utilization survives" expected value
+    | Utilization_fraction _ | Utilization_usd _ -> fail "neighbor unit changed")
+    ["before", day +. 10., 10; "after", day +. 20., 20];
+  let prior = List.find
+    (fun (point : Tui_decode_usage.provider_usage_history_point) ->
+      point.puhp_observed_at < day) reading.puh_points in
+  check (float 0.) "append day does not replace observation day" (day -. 1.)
+    prior.puhp_observed_at;
+  check string "prior day's cap remains" "provider:API key credit limit" prior.puhp_kind;
+  let current = List.find
+    (fun (point : Tui_decode_usage.provider_usage_history_point) ->
+      point.puhp_observed_at = day +. 40.) reading.puh_points in
+  match current.puhp_unit with
+  | Tui_decode_usage.Utilization_usd { used; limit = None } ->
+      check (float 0.) "later uncapped report survives malformed rows" 21.5 used
+  | Utilization_usd { limit = Some _; _ } | Utilization_fraction _
+  | Utilization_percent _ -> fail "later report lost its uncapped USD amount")
+
 let () = run "provider usage durable snapshots" ["history", [
+  test_case "damaged journal retains readable history through the typed decoder" `Quick
+    damaged_journal_keeps_readable_history;
   test_case "legacy OpenRouter credit label retains history identity" `Quick
     (legacy_openrouter_label ~old_kind:"provider:credit limit"
       ~current_kind:"provider:API key credit limit"

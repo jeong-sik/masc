@@ -69,7 +69,7 @@ runtime gates. Source-review completion alone leaves a Draft item in review.
 
 ## Current queue
 
-The first semantic pass produced **24 concrete candidates**. Three are implemented as Draft PRs with independent source review: `S1` in [#43367](https://github.com/jeong-sik/masc/pull/43367) isolates provider usage acceptance; `K1` in [#43370](https://github.com/jeong-sik/masc/pull/43370) preserves separate Librarian failure-policy axes; `D2` in [#43374](https://github.com/jeong-sik/masc/pull/43374) returns an explicit Goal commit result. Other `next` items remain queued; this ordering does not waive their coverage.
+The queue now contains **25 concrete candidates**: 24 from the first semantic pass and A1 from a focused Agent Core follow-up. Three are implemented as Draft PRs with independent source review: `S1` in [#43367](https://github.com/jeong-sik/masc/pull/43367) isolates provider usage acceptance; `K1` in [#43370](https://github.com/jeong-sik/masc/pull/43370) preserves separate Librarian failure-policy axes; `D2` in [#43374](https://github.com/jeong-sik/masc/pull/43374) returns an explicit Goal commit result. Other `next` items remain queued; this ordering does not waive their coverage.
 
 | ID | Priority | Status | Refactoring point |
 | --- | --- | --- | --- |
@@ -97,6 +97,7 @@ The first semantic pass produced **24 concrete candidates**. Three are implement
 | [S8](#s8) | next | candidate | Separate durable provider-history decoding and daily projection from journal IO |
 | [R1](#r1) | later | candidate | Credential batch ownership projection |
 | [R2](#r2) | later | candidate | Fusion decision event ownership |
+| [A1](#a1) | next | candidate | Separate stream error projection from optional diagnostic file I/O |
 
 ## Candidate evidence
 
@@ -701,6 +702,35 @@ Scenarios: [test/test_fusion_decision.ml](../../../test/test_fusion_decision.ml)
 
 Ordering rationale: Repeated JSON reinspection crosses an authority boundary; a typed event would concentrate contract maintenance without changing its security policy.
 
+### A1
+
+**Separate stream error projection from optional refused-frame diagnostic I/O**
+
+Source: [packages/agent_core/lib/llm_provider/complete_stream_error.ml:8](https://github.com/jeong-sik/masc/blob/aea8424926ea79f110315eec5ab429ac51043598/packages/agent_core/lib/llm_provider/complete_stream_error.ml#L8-L70), [packages/agent_core/lib/llm_provider/complete_stream_error.ml:221](https://github.com/jeong-sik/masc/blob/aea8424926ea79f110315eec5ab429ac51043598/packages/agent_core/lib/llm_provider/complete_stream_error.ml#L221-L356), [packages/agent_core/lib/llm_provider/complete_stream_error.mli:31](https://github.com/jeong-sik/masc/blob/aea8424926ea79f110315eec5ab429ac51043598/packages/agent_core/lib/llm_provider/complete_stream_error.mli#L31-L40), [packages/agent_core/lib/llm_provider/complete_stream.ml:1145](https://github.com/jeong-sik/masc/blob/aea8424926ea79f110315eec5ab429ac51043598/packages/agent_core/lib/llm_provider/complete_stream.ml#L1145-L1191).
+
+Problem: http_error_of_stream_error appears as a typed conversion in its signature, but the two malformed-frame arms call dump_refused_frame, which reads MASC_WIRE_PARSE_DUMP and opens/appends/closes a file. Reviewing or reusing error policy therefore also requires knowing process environment and diagnostic ownership. Inline projection assertions can reach this effect when the variable is set. This is a maintainability/effect-boundary candidate, not evidence of an observed runtime bug or a security defect.
+
+Change: Make the error projection return its typed HTTP failure together with an optional narrowly typed refused-frame diagnostic description. Keep redaction/formatting shared, and execute the optional dump explicitly at the existing stream finalization effect edge exactly once. Keep the diagnostic carrier private where possible. Update the direct diagnostic test to exercise the explicit sink boundary. Do not add another environment knob, provider-specific retry policy or generic effect abstraction.
+
+Preserve:
+
+- Keep every current HTTP error constructor, wire format, diagnostic message and provider-status distinction: only declared 429/5xx provider conditions become HttpError; unstated errored choices remain Provider_interrupted.
+- Keep MASC_WIRE_PARSE_DUMP optional and disabled for absent/empty values; preserve full-frame diagnostic payload rather than truncating it to the log excerpt.
+- Redact before writing the full dump and before bounding the 256-byte message excerpt; retain original byte count and verbatim=true/false so offset evidence stays honest.
+- Preserve 0600 creation mode, append behavior, escaped row layout and Sys_error noninterference. Preserve the existing exception policy rather than widening swallowed failures.
+- The production finalization path emits a missing failure event before projection/dump and publishes its terminal summary afterwards; retain this order and do not duplicate the diagnostic write.
+- Do not import coordinator configuration into Agent Core; its diagnostic sink currently reads the environment locally to preserve dependency direction.
+
+Consumers: [packages/agent_core/lib/llm_provider/complete_stream.ml](../../../packages/agent_core/lib/llm_provider/complete_stream.ml), [packages/agent_core/test/test_wire_parse_dump.ml](../../../packages/agent_core/test/test_wire_parse_dump.ml).
+
+Scenarios: [packages/agent_core/test/test_wire_parse_dump.ml](../../../packages/agent_core/test/test_wire_parse_dump.ml), [packages/agent_core/lib/llm_provider/complete_stream_error.ml](../../../packages/agent_core/lib/llm_provider/complete_stream_error.ml). **Not executed in this audit.**
+
+Proposed verification: Through the public streaming path, feed one malformed SSE frame and one malformed NDJSON frame; assert one diagnostic row, unchanged returned typed error and one terminal summary. Exercise an unwritable dump destination to preserve the original error. These are proposed scenarios, not executed evidence.
+
+Ordering rationale: One production caller and an existing diagnostic scenario bound the change. The new boundary makes error policy review independent of file effects while preserving operator evidence; priority is based on the hidden effect, not file length.
+
+Public-package risk: The diagnostic helper is currently exposed through a callable conversion; enumerate external package consumers before changing a public signature.
+
 ## Boundaries retained or excluded
 
 These are reasons not to perform a blanket rewrite, not whole-module correctness claims.
@@ -726,17 +756,21 @@ These are reasons not to perform a blanket rewrite, not whole-module correctness
 - [bin/masc_tui_lane_application.ml](../../../bin/masc_tui_lane_application.ml): Application tracking is typed and immutable. The unit ref inside ticket is an intentional unforgeable physical identity, never mutated; replacing it merely because rg reports ref would not improve ownership.
 - [bin/masc_tui_lane_subscriptions.ml](../../../bin/masc_tui_lane_subscriptions.ml): Already has typed requests and phases, immutable edits and revision-bound saves with current keeper/output revalidation. No substantive defect established by this representative audit.
 - [lib/gate/channel_gate_connector.ml:registry](../../../lib/gate/channel_gate_connector.ml): Startup registration and lookup are short, mutex-protected operations over an owned table. Registry mutability itself is not a refactor target; S6 concerns the descriptor contract, not synchronization removal.
-- [bin/masc_tui.ml](../../../bin/masc_tui.ml), [bin/masc_tui_http.ml](../../../bin/masc_tui_http.ml), `bin/masc_tui_io_domain.ml`, [bin/masc_tui_board_upload.ml](../../../bin/masc_tui_board_upload.ml): Excluded from proposed work because active PR 43355 owns HTTP/TUI transport performance changes. Exact changed-file list was read from GitHub; no local implementation was audited or altered for that scope.
+- [bin/masc_tui.ml](../../../bin/masc_tui.ml), [bin/masc_tui_http.ml](../../../bin/masc_tui_http.ml), `bin/masc_tui_io_domain.ml`, [bin/masc_tui_board_upload.ml](../../../bin/masc_tui_board_upload.ml): Excluded at the initial inventory because PR #43355 then owned HTTP/TUI transport changes. The follow-up REST read confirms it merged on 2026-10-16 at 13:11:50 UTC (reported PR head c736c2325a85231741f41a5f63b82cb6e353b34f). This removes the active-PR exclusion; the merged implementation still needs a fresh semantic audit. Its changed-file list was read, but implementation behavior was not audited here.
 - [lib/keeper/keeper_autonomous_turn_source.ml](../../../lib/keeper/keeper_autonomous_turn_source.ml), [lib/keeper/keeper_checkpoint_store.ml](../../../lib/keeper/keeper_checkpoint_store.ml), [lib/keeper/keeper_event_bridge_error_json.ml](../../../lib/keeper/keeper_event_bridge_error_json.ml), [packages/agent_core/lib/base/error.ml](../../../packages/agent_core/lib/base/error.ml), [packages/agent_core/lib/structured.ml](../../../packages/agent_core/lib/structured.ml): Excluded because active PR 43352 owns structured-evidence changes. Exact changed-file list was read from GitHub; no overlap proposed.
 - [lib/schedule/schedule_domain.mli](../../../lib/schedule/schedule_domain.mli): Already has a pure typed domain, closed status/recurrence alternatives and explicit time interpretation; no specific defect established by this inspection.
 - [lib/backend/backend.ml](../../../lib/backend/backend.ml): Key-index tables and lock-duration refs belong to a concrete concurrent IO owner. Mutation alone is not a reason to replace them; observer-after-unlock and exception cleanup are real lifecycle requirements.
 
+- [packages/agent_core/lib/llm_provider/provider_admission.ml](../../../packages/agent_core/lib/llm_provider/provider_admission.ml): Retain the existing functional transition module and effect owner. Registry state is immutable; a short Stdlib.Mutex section publishes it together with scheduler reconfiguration, while waiting/diagnostics remain outside. Atomically installed observer removal uses installation identity so an old remover cannot erase a replacement. Replacing these owner-local cells solely to eliminate mutation would obscure publication ordering.
+- [packages/agent_core/lib/agent/agent_execution_runner.ml](../../../packages/agent_core/lib/agent/agent_execution_runner.ml): Retain this effect owner rather than turning the captured terminal disposition into an unnecessary global/pure state layer. The per-run ref captures at most one disposition until the writer exits; the actual sink is delivered after that boundary under cancellation protection. Caller switch lifetime remains distinct from the protected writer lifetime, and original reserved exceptions/backtraces survive cleanup failures. Fresh/resume branches differ in readiness and resume authority, so their visual duplication alone is insufficient justification to merge them.
+- [packages/agent_core/lib/agent/agent_lifecycle.ml](../../../packages/agent_core/lib/agent/agent_lifecycle.ml): Retain the pure lifecycle transition/snapshot helper and separate event publication wrapper. Transition errors are closed variants; build_snapshot takes prior snapshot and explicit observations. The wrapper owns clock, fresh IDs, event publication and exception rethrow. This is an existing functional/effect separation, not an unreviewed blanket endorsement of all lifecycle behavior.
+
 ## Coverage still open
 
-[Consulted sources](consulted-sources.json) records 106 files used for named boundaries, callers and scenarios. This is selective semantic inspection of the complete file census.
+[Consulted sources](consulted-sources.json) records 123 files used for named boundaries, callers and scenarios. Agent Core follow-up entries additionally record whether the read covered the whole source or selected spans; symbol-search-only paths are not counted. This is selective semantic inspection of the complete file census.
 
-- TUI orchestration, rendering and broad payload decoding remain a large semantic-review area; active HTTP-domain work in #43355 is separate.
-- Agent Core coverage here includes committed WAL scanning; remaining provider, runner and lifecycle boundaries still need review.
+- TUI orchestration, rendering and broad payload decoding remain a large semantic-review area. HTTP-domain PR #43355 has merged; refresh the integrated source before reviewing that boundary.
+- Agent Core coverage now includes committed WAL scanning and selected provider-admission, stream-error, runner and lifecycle boundaries. The full stream assembler, backend codecs, scheduler internals, exact-output admission, standard/advanced run-loop differences and lifecycle consumer integrations remain open.
 - Remaining production directories have not been cleared by representative samples. Browser, sandbox, multimedia, process and observation paths need their own consumer/invariant analysis.
 - TypeScript/sidecar consumers are included only when tracing an OCaml contract. A full frontend or third-party-code audit is not implied.
 - Lexer/parser inputs (`lib/exec/parser/bash_lexer.mll`, `lib/exec/parser/bash_subset.mly`) are outside the `.ml`/`.mli` census and remain an explicit follow-up surface.
@@ -748,4 +782,5 @@ These are reasons not to perform a blanket rewrite, not whole-module correctness
 - Round 1: all tracked `.ml`/`.mli` files classified at the pinned baseline; clean-checkout counts independently matched the committed-blob reader; 24 source-backed candidates recorded with boundaries, invariants, callers and suites. S1 implemented with a private immutable observation core, retained lock/observer effects and two additional public-store scenarios; published as [#43367](https://github.com/jeong-sik/masc/pull/43367). OCaml syntax checks passed; behavior suites remain unexecuted.
 - Round 2: K1 implemented as a private failure-evidence classifier in [#43370](https://github.com/jeong-sik/masc/pull/43370). Historical range sizing, named input refusal, invalid-output veto, size-independent failure and current CLI capacity remain separate facts. Syntax parsing passed; existing callback/admission scenarios were extended but not executed.
 - Round 3: D2 implemented in [#43374](https://github.com/jeong-sik/masc/pull/43374). Focused source review corrected the initial no-op proposal: every accepted existing upsert commits even when fields are unchanged. Rejection and commit results are explicit; current RFC implementation references were updated. Syntax parsing passed and two public-store scenarios were added but not executed.
+- Round 4: expanded Agent Core inspection across 17 explicitly scoped source/test reads in [#43377](https://github.com/jeong-sik/masc/pull/43377). Added A1 for the hidden diagnostic file effect in stream-error conversion and retained three existing ownership boundaries. This expands the queue to 25 candidates; it does not complete Agent Core coverage.
 - No local Dune build, CI polling, behavior execution, formal GitHub approval, merge or runtime proof is supplied by this inventory.

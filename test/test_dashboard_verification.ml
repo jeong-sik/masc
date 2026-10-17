@@ -471,6 +471,72 @@ let test_requests_json_surfaces_evidence_projection_error () =
        ^ "\"trace://must-not-be-partially-projected\"")
       (member "evidence_projection_error" row |> Yojson.Safe.Util.to_string))
 
+(* Both consumers must reject the whole saved snapshot and keep the first
+   canonical item error. Replacing that item exposes the next error on the
+   same request, including through the dashboard's cached listing. *)
+let test_persisted_snapshot_errors_agree_across_consumers () =
+  let module Store = Workspace_verification_store in
+  with_temp_base_path (fun base_path ->
+    let request_id = "vrf-snapshot-first-error" in
+    let task_id = "task-snapshot-first-error" in
+    let worker = "keeper-alpha" in
+    let valid_artifact = evidence_snapshot_item "artifact:leading.txt" in
+    let artifact_without_bytes =
+      `Assoc [
+        ("kind", `String "artifact");
+        ("reference", `String "artifact:missing-bytes.txt");
+        ("content", `String "captured body");
+        ("truncated", `Bool false);
+      ]
+    in
+    let save note =
+      let output =
+        `Assoc [
+          ("required_artifacts", `List []);
+          ("submitted_evidence",
+           `List [valid_artifact; note; artifact_without_bytes]);
+        ]
+      in
+      match V.create_request ~base_path ~task_id ~output ~criteria:[]
+              ~worker ~request_id () with
+      | Ok _ -> ()
+      | Error detail -> Alcotest.fail ("create_request failed: " ^ detail)
+    in
+    let check_consumers expected_detail =
+      (match Store.inspect_submitted_evidence_for_authority
+         ~base_path ~request_id ~task_id ~task_worker:worker
+         ~authority:(Masc_domain.Human_operator { operator_id = "test-operator" }) with
+       | Store.Evidence_unavailable
+           { request_id = actual_id; reason = Store.Evidence_snapshot_invalid detail } ->
+         Alcotest.(check string) "authority reports the saved request" request_id actual_id;
+         Alcotest.(check string) "authority keeps the first canonical item error"
+           expected_detail detail
+       | Store.Evidence_unavailable { reason; _ } ->
+         Alcotest.fail (Store.evidence_access_failure_to_string ~request_id reason)
+       | Store.Evidence_available _ ->
+         Alcotest.fail "authority exposed a partial malformed snapshot");
+      let row =
+        match member "requests" (D.requests_json ~base_path ()) with
+        | `List [row] -> row
+        | _ -> Alcotest.fail "expected one saved request in the dashboard"
+      in
+      Alcotest.(check string) "dashboard reports the same request" request_id
+        (member "request_id" row |> Yojson.Safe.Util.to_string);
+      Alcotest.(check (list string)) "valid required artifacts stay empty" []
+        (member "required_artifacts" row |> Yojson.Safe.Util.to_list
+         |> List.map Yojson.Safe.Util.to_string);
+      Alcotest.(check (list string)) "dashboard exposes no valid prefix" []
+        (member "submitted_evidence" row |> Yojson.Safe.Util.to_list
+         |> List.map Yojson.Safe.Util.to_string);
+      Alcotest.(check string) "dashboard wraps the same canonical item error"
+        ("malformed current-schema field \"submitted_evidence\": " ^ expected_detail)
+        (member "evidence_projection_error" row |> Yojson.Safe.Util.to_string)
+    in
+    save (`Assoc [("kind", `String "note"); ("content", `Int 7)]);
+    check_consumers "submitted evidence snapshot field content must be a string, got 7";
+    save (`Assoc [("kind", `String "note"); ("content", `String "repaired note")]);
+    check_consumers "submitted evidence snapshot is missing bytes")
+
 (* The live store holds 47 artifact, 231 note and 6 unreadable items written by
    the current serializer. Each kind must reach the operator as an identity
    line; an unreadable item must name its failure instead of vanishing. *)
@@ -1165,6 +1231,8 @@ let () =
         test_requests_json_carries_the_task_title;
       Alcotest.test_case "evidence projection errors" `Quick
         test_requests_json_surfaces_evidence_projection_error;
+      Alcotest.test_case "persisted first error agrees across consumers" `Quick
+        test_persisted_snapshot_errors_agree_across_consumers;
       Alcotest.test_case "projects every snapshot item kind" `Quick
         test_requests_json_projects_every_snapshot_item_kind;
       Alcotest.test_case "snapshot projection edges" `Quick

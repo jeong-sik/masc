@@ -1,8 +1,9 @@
 (** Screen dispatch and shared rendering projections.
-    Board, Code, MCP resource, Approval and Fusion screens are owned by
-    {!Masc_tui_render_board}, {!Masc_tui_render_code},
-    {!Masc_tui_render_resources}, {!Masc_tui_render_approvals} and
-    {!Masc_tui_render_fusion}. *)
+    Board, Code, MCP resource, Approval, Fusion, Verification, Repository and
+    Work screens are owned by {!Masc_tui_render_board}, {!Masc_tui_render_code},
+    {!Masc_tui_render_resources}, {!Masc_tui_render_approvals},
+    {!Masc_tui_render_fusion}, {!Masc_tui_render_verification},
+    {!Masc_tui_render_repositories} and {!Masc_tui_render_work}. *)
 
 module Frame_presenter = Masc_tui_frame_presenter
 module Ask_projection = Masc_tui_ask_projection

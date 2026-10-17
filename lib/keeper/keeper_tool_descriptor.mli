@@ -69,11 +69,12 @@ type tool_kind =
 type prepared_leaf_admission =
   | Read_only_ordinary_leaf
   | Owned_job_launch_leaf
+  | Owned_ask_leaf
   | Owned_file_mutation_leaf
   | Direct_only
 (** Prepared leaves retain their original producer's ownership. File Edit and
-    Write are available to inline drafts; durable async plans still require
-    read-only leaves or the owned-job producer's replayable launch contract.
+    Write are available to inline drafts; durable async plans require read-only
+    leaves, the owned-job producer's replayable launch contract, or [masc_ask].
     File mutations and job launch retain their Serial effectful descriptor
     contracts. A file mutation admission is not a prepared resource claim. *)
 

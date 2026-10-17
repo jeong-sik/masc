@@ -100,10 +100,12 @@ meaning and are never overwritten by execution ownership.
 
 The question log, creation response, operator HTTP projection and durable
 answered input preserve this typed `Ids.Turn_ref`. The source is JSON `null`
-when unobserved. External MCP callers have no new argument requirement and
-cannot establish host provenance by adding a JSON field. A malformed recorded
-reference is rejected by the canonical decoder. This field provides attribution;
-it does not grant a Task claim, Gate approval or permission to replay an effect.
+when unobserved. Legacy Ask records that carried only an unattributed integer
+`turn_id` load with `source_turn_ref = None`, while malformed `turn_id` or
+`source_turn_ref` values are rejected by the canonical decoder. External MCP
+callers have no new argument requirement and cannot establish host provenance by
+adding a JSON field. This field provides attribution; it does not grant a Task
+claim, Gate approval or permission to replay an effect.
 
 Resumed Composition leaves use the original journal's source observation.
 Missing trace, session or absolute Keeper turn stays absent instead of borrowing

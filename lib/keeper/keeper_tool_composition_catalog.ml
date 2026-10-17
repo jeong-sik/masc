@@ -744,7 +744,7 @@ let parse_composition ~descriptors ~index value =
          match Plan.descriptor plan node.id with
          | Some descriptor ->
            (match Keeper_tool_descriptor.prepared_leaf_admission descriptor with
-            | Read_only_ordinary_leaf | Owned_job_launch_leaf -> None
+            | Read_only_ordinary_leaf | Owned_job_launch_leaf | Owned_ask_leaf -> None
             | Owned_file_mutation_leaf | Direct_only -> Some node)
          | None -> Some node) with
        | None -> Ok ()

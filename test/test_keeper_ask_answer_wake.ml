@@ -380,7 +380,33 @@ let test_ask_producer_keeps_frozen_source_through_answer () =
         | field -> field) fields)
     | _ -> fail "canonical Asked event" in
   check bool "malformed stored source is refused" true
-    (Result.is_error (Keeper_ask.event_of_json malformed))
+    (Result.is_error (Keeper_ask.event_of_json malformed));
+  let legacy_turn_event turn_value =
+    match event with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (function
+             | "ask", `Assoc ask_fields ->
+               ( "ask"
+               , `Assoc
+                   (("turn_id", turn_value)
+                    :: List.filter
+                         (fun (key, _) -> not (String.equal key "source_turn_ref"))
+                         ask_fields) )
+             | field -> field)
+           fields)
+    | _ -> fail "canonical Asked event"
+  in
+  (match Keeper_ask.event_of_json (legacy_turn_event (`Int 17)) with
+   | Ok (Keeper_ask.Asked decoded) ->
+     check (option string) "legacy turn_id without trace decodes as unobserved source" None
+       (Option.map Ids.Turn_ref.to_string decoded.source_turn_ref)
+   | Ok (Keeper_ask.Answered _ | Keeper_ask.Withdrawn _) -> fail "expected Asked event"
+   | Error detail -> fail ("valid legacy turn_id rejected: " ^ detail));
+  check bool "malformed legacy turn_id is refused" true
+    (Result.is_error (Keeper_ask.event_of_json (legacy_turn_event (`Int 0)))
+     && Result.is_error (Keeper_ask.event_of_json (legacy_turn_event (`String "bad"))))
 ;;
 
 let persist_answer ~base_path ~keeper_name ~ask_id ?task_id ?(answered_at = 200.) () =

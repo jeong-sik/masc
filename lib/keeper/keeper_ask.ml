@@ -344,7 +344,15 @@ let string_option_field key json =
   | Some (`String s) -> Ok (Some s)
   | Some _ -> Error (key ^ ": expected string or null")
 
+let legacy_turn_id_option_field json =
+  match member "turn_id" json with
+  | None | Some `Null -> Ok ()
+  | Some (`Int i) when i > 0 -> Ok ()
+  | Some (`Int _) -> Error "turn_id: expected positive int or null"
+  | Some _ -> Error "turn_id: expected int or null"
+
 let source_turn_ref_option_field json =
+  let* () = legacy_turn_id_option_field json in
   match member "source_turn_ref" json with
   | None | Some `Null -> Ok None
   | Some value -> Ids.Turn_ref.of_yojson value |> Result.map Option.some

@@ -50,6 +50,7 @@ type tool_kind =
 type prepared_leaf_admission =
   | Read_only_ordinary_leaf
   | Owned_job_launch_leaf
+  | Owned_ask_leaf
   | Owned_file_mutation_leaf
   | Direct_only
 
@@ -3407,6 +3408,9 @@ let prepared_leaf_admission descriptor =
            | Some {action=Tool_schemas_owned_job.Start;_} -> Owned_job_launch_leaf
            | Some {action=(Tool_schemas_owned_job.Status | Cancel | Read_result);_}
            | None -> Direct_only)
+        | Tool_masc_misc_dispatch
+          when String.equal descriptor.internal_name "masc_ask" ->
+          Owned_ask_leaf
         | Tool_lane_addon _
         | Tool_execute
         | Tool_search_files

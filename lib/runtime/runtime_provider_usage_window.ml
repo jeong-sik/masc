@@ -1,44 +1,7 @@
 (** Provider-reported usage windows.  See the [.mli] for the contract. *)
 
-type window_kind =
-  | Five_hour
-  | Seven_day
-  | Duration_minutes of int
-  | Provider_label of string
-
-type utilization =
-  | Fraction of float
-  | Percent of int
-  | Usd of { used : float; limit : float option }
-
-type source =
-  | Claude_code_rate_limit_event
-  | Codex_account_rate_limits_updated
-  | Codex_account_rate_limits_read
-  | Openrouter_key_read
-  | Zai_quota_limit_read
-  | Kimi_coding_usages_read
-  | Ollama_balance_read
-  | Antigravity_usage_read
-  | Muse_subscription_usage
-
-type window_role =
-  | Gates_model_calls
-  | Counts_other_use
-  | Unclassified_limit
-
-type window =
-  { limit_id : string option
-  ; kind : window_kind
-  ; role : window_role
-  ; utilization : utilization
-  ; resets_at : int option
-  }
-
-type report =
-  { source : source
-  ; windows : window list
-  }
+include Runtime_provider_usage_types
+module Observations = Runtime_provider_usage_observations
 
 type decode_error =
   | Expected_object of { path : string }
@@ -387,8 +350,8 @@ let equal_window_kind left right =
 ;;
 
 (* {!record} keeps one row per (limit_id, kind), so a report that states the
-   same key twice would keep whichever came last.  Such a report is refused
-   instead. *)
+   same key twice would retain only the first equal-time observation. Such a
+   report is refused instead. *)
 let distinct_windows ~path (report : report) =
   let same (a : window) (b : window) =
     Option.equal String.equal a.limit_id b.limit_id && equal_window_kind a.kind b.kind
@@ -855,28 +818,11 @@ let decode_antigravity_usage json =
   distinct_windows ~path { source = Antigravity_usage_read; windows = List.concat windows }
 ;;
 
-type recorded =
-  { window : window
-  ; source : source
-  ; observed_at : float
-  }
-
-type scope_state =
-  | Not_reported_since_start
-  | Reported_no_windows of { source : source; observed_at : float }
-  | Reported of recorded * recorded list
-
 let recording_since = Time_compat.now ()
 
-(* scope -> (limit_id, kind) -> latest recorded.  Guarded by a
-   [Stdlib.Mutex] like {!Runtime_quota_window}: nothing inside the lock
-   suspends. *)
-type scope_observations =
-  { windows : (string option * window_kind, recorded) Hashtbl.t
-  ; snapshots : (source, float) Hashtbl.t
-  }
-
-let table : (Runtime_quota_window.scope, scope_observations) Hashtbl.t =
+(* The mutex owns publication of immutable per-scope observations. Like
+   {!Runtime_quota_window}, nothing inside the lock suspends. *)
+let table : (Runtime_quota_window.scope, Observations.t) Hashtbl.t =
   Hashtbl.create 4
 ;;
 
@@ -904,14 +850,7 @@ let rec mark_record_observer_failure at =
      && not (Atomic.compare_and_set record_observer_failure held later)
   then mark_record_observer_failure at
 
-type report_shape = Complete_snapshot | Sparse_update
-
-let report_shape = function
-  | Openrouter_key_read | Zai_quota_limit_read | Kimi_coding_usages_read
-  | Ollama_balance_read | Antigravity_usage_read
-  | Muse_subscription_usage -> Complete_snapshot
-  | Claude_code_rate_limit_event | Codex_account_rate_limits_updated
-  | Codex_account_rate_limits_read -> Sparse_update
+let report_shape = Observations.report_shape
 
 (* [used] reached its limit. Count windows are decoded as [used / limit]
    ([fraction_of_counts]), which is exactly 1.0 when the two are equal. *)
@@ -1022,51 +961,23 @@ let record ~scope ~observed_at (report : report) =
   let shape = report_shape report.source in
   match shape, report.windows with
   | Sparse_update, [] -> ()
-  | (Complete_snapshot | Sparse_update), windows ->
+  | (Complete_snapshot | Sparse_update), _ ->
     let accepted = Stdlib.Mutex.protect mu (fun () ->
       let observations =
         match Hashtbl.find_opt table scope with
         | Some observations -> observations
-        | None ->
-          let observations = { windows = Hashtbl.create 4; snapshots = Hashtbl.create 2 } in
-          Hashtbl.replace table scope observations;
-          observations
+        | None -> Observations.empty
       in
-      match Hashtbl.find_opt observations.snapshots report.source with
-      | Some at when at >= observed_at -> None
-      | Some _ | None ->
-      let by_window = observations.windows in
-      (match shape with
-       | Sparse_update -> ()
-       | Complete_snapshot ->
-           Hashtbl.replace observations.snapshots report.source observed_at;
-           Hashtbl.filter_map_inplace (fun (limit_id, kind) held ->
-             if held.source = report.source && held.observed_at < observed_at
-                && not (List.exists (fun (window : window) ->
-                    Option.equal String.equal limit_id window.limit_id
-                    && equal_window_kind kind window.kind) windows)
-             then None else Some held) by_window);
-      let accepted_windows = List.filter
-        (fun (window : window) ->
-           let key = window.limit_id, window.kind in
-           match Hashtbl.find_opt by_window key with
-           | Some held when Float.compare held.observed_at observed_at >= 0 -> false
-           | Some _ | None ->
-             Hashtbl.replace by_window key { window; source = report.source; observed_at };
-             true)
-        windows in
-      match shape, accepted_windows with
-      | Sparse_update, [] -> None
-      | (Complete_snapshot | Sparse_update), windows ->
-        Some
-          ( { report with windows }
-          , Hashtbl.fold (fun _ held rest -> held :: rest) by_window [] ))
+      let next, accepted = Observations.apply_report ~observed_at report observations in
+      Hashtbl.replace table scope next;
+      Option.map (fun accepted -> accepted, next) accepted)
     in
-    Option.iter (fun (accepted, held) ->
+    Option.iter (fun (accepted, observations) ->
       Option.iter
         (fun coverage ->
            rest_scope ~scope ~coverage ~now:observed_at
-             (List.filter (fun (r : recorded) -> r.source = report.source) held))
+             (List.filter (fun (r : recorded) -> r.source = report.source)
+                (Observations.recorded_windows observations)))
         (gate_coverage report.source);
       try (Atomic.get record_observer) ~scope ~observed_at accepted
        with Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -1076,44 +987,14 @@ let record ~scope ~observed_at (report : report) =
                 (Printexc.to_string exn)) accepted
 ;;
 
-let kind_rank = function
-  | Five_hour -> 0
-  | Seven_day -> 1
-  | Duration_minutes _ -> 2
-  | Provider_label _ -> 3
-;;
-
-let compare_kind left right =
-  match left, right with
-  | Duration_minutes a, Duration_minutes b -> Int.compare a b
-  | Provider_label a, Provider_label b -> String.compare a b
-  | (Five_hour | Seven_day | Duration_minutes _ | Provider_label _), _ ->
-    Int.compare (kind_rank left) (kind_rank right)
-;;
-
-let compare_recorded (left : recorded) (right : recorded) =
-  match Option.compare String.compare left.window.limit_id right.window.limit_id with
-  | 0 -> compare_kind left.window.kind right.window.kind
-  | order -> order
-;;
-
 let state ~scope =
-  let held, latest_snapshot =
+  let observations =
     Stdlib.Mutex.protect mu (fun () ->
       match Hashtbl.find_opt table scope with
-      | None -> [], None
-      | Some observations ->
-          let latest = Hashtbl.fold (fun source observed_at latest ->
-            match latest with
-            | Some (_, at) when at >= observed_at -> latest
-            | Some _ | None -> Some (source, observed_at)) observations.snapshots None in
-          Hashtbl.fold (fun _ recorded acc -> recorded :: acc) observations.windows [], latest)
+      | None -> Observations.empty
+      | Some observations -> observations)
   in
-  match List.sort compare_recorded held with
-  | [] -> (match latest_snapshot with
-      | None -> Not_reported_since_start
-      | Some (source, observed_at) -> Reported_no_windows { source; observed_at })
-  | first :: rest -> Reported (first, rest)
+  Observations.state observations
 ;;
 
 let recorded_scopes () =

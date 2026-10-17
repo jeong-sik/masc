@@ -357,7 +357,7 @@ let test_category_rail_keeps_click_targets_and_frame_width () =
   check bool "Category counts visible" true
     (List.exists (contains "preference (1)") wide);
   check bool "frame width preserved" true
-    (List.for_all (fun line -> Layout.display_width line <= 140) wide);
+    (List.for_all (fun line -> Layout.display_width line <= Masc_tui_frame.inner_width ~cols:140) wide);
   check bool "selected Category has clickable rail target" true
     (List.exists (fun (_, first, _, target) ->
       first <= Masc_tui_roster_pane.pane_cols &&
@@ -399,7 +399,7 @@ let test_category_rail_bounds_large_label_preview () =
   check bool "bounded preview exposes truncation and count in the visible rail" true
     (List.exists (contains "… (1)") rail);
   check bool "rendered rows fit the same terminal width" true
-    (List.for_all (fun line -> Layout.display_width line <= 140) lines);
+    (List.for_all (fun line -> Layout.display_width line <= Masc_tui_frame.inner_width ~cols:140) lines);
   check string "the category retained for detail is complete" name
     (Types.memory_category_filter_label state.memory_facts_category)
 

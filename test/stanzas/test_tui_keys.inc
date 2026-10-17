@@ -15,4 +15,5 @@
   masc_tui_render_schedule
   masc_tui_file_icon
   masc_tui_message_layout
-   masc_tui_fetched masc_tui_keeper_chat_transcript))
+  masc_tui_roster_pane
+  masc_tui_fetched masc_tui_keeper_chat_transcript))

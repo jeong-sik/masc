@@ -762,7 +762,8 @@
   masc_tui_file_icon
   masc_tui_memory_mark
   masc_tui_planning_proof_mark
-  masc_tui_keeper_chat_transcript))
+  masc_tui_keeper_chat_transcript
+  masc_tui_roster_pane))
 
 (library
  (name masc_tui_keys_doc)

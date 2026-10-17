@@ -2266,9 +2266,12 @@ let fetch_keeper_tool_approvals ~(host : string) ~(port : int) :
 (** GET /api/v1/keepers/turns — which keepers are mid-turn right now. The
     running-turn slot lives in the server's Keeper Owner, not in the durable
     meta the local keeper list is read from, so the badge has to ask. *)
-let fetch_keeper_turns ~(host : string) ~(port : int) :
+let fetch_keeper_turns ~(host : string) ~(port : int) ~preparation_details_for :
     (Yojson.Safe.t, string) result =
-  get_json ~host ~port ~path:"/api/v1/keepers/turns"
+  let path = "/api/v1/keepers/turns" ^ (match preparation_details_for with
+    | None -> ""
+    | Some keeper -> "?preparation_details_for=" ^ percent_encode_query_value keeper) in
+  get_json ~host ~port ~path
 
 (** POST /api/v1/keepers/<name>/identity-switch — turn one attached service
     on or off for this keeper without touching the consent. *)

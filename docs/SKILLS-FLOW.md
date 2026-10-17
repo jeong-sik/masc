@@ -605,7 +605,7 @@ writer가 각 실제 준비 scope의 시작 순서 ID·부모 ID·원래 turn re
 | 병렬 형제 scope | 부모 관계 관측 없음 | Eio fiber가 상속한 같은 활성 부모로 연결; 형제를 부모로 추측하지 않음 |
 | provider 관측 뒤 준비 종료 | 최신 준비 표시를 덮어쓰지 않으며 기록은 유실 | provider 표시·활동 시각을 유지하고 해당 scope의 결과만 완성 |
 | 새 writer | 준비 표시 초기화 | 빈 단계 기록으로 시작; 이전 writer의 늦은 종료도 새 기록에 들어오지 않음 |
-| TUI 상세 | 현재 단계만 볼 수 있음 | 정확히 같은 operation 또는 자율 turn의 scope별 결과·소요 시간 표시 |
+| TUI 상세 | 현재 단계만 볼 수 있음 | 펼친 Keeper의 이력만 요청하고 정확히 같은 operation 또는 자율 turn의 scope별 결과·소요 시간 표시 |
 | 원래 결과·오류·취소 | 실행으로 그대로 전달 | 같은 결과·예외·취소 유지, 관측에는 결과 종류만 기록 |
 
 scope 번호는 해당 writer 안에서 실제 시작 시 할당하며 행동 제한이나 admission
@@ -618,14 +618,21 @@ TUI는 원래 실행 ID 또는 정확한 자율 turn reference가 일치하는 �
 기존 실제 활동을 유지한다. 기본 접기와 행 수 계산은 기존 공통 projection을
 사용한다. 이름·시각으로 다른 실행을 연결하거나 journal을 새로 만들지 않는다.
 
-추가한 `preparation_timeline` wire field는 scope ID 중복·역순·누락된 부모·잘못된
-단계/clock 데이터를 엄격히 거절한다. 종료된 scope의 업데이트는 Map에서
-O(log N), 전체 직렬화·상세 투영은 N개 scope에 비례한다. 임의 이력 상한이나
-timeout은 추가하지 않았다. 추가 메모리·조회 payload·렌더 비용은 미측정이다.
+추가한 `preparation_timeline` wire field는 미요청이면 `null`이며, 요청해 확인한
+빈 이력 `[]`과 구분한다. TUI는 실제 대화 상세를 펼쳤을 때만
+`preparation_details_for=<name>`을 다음 상태 조회에 전달한다. 서버는 선택된
+Keeper의 실제 Owner만 읽고 나머지 preview의 이력을 순회·직렬화하지 않는다.
+이름은 전송량 선택일 뿐 소유권 증명이 아니다. 기존 Owner token 검증과 TUI의
+정확한 실행 결속은 그대로 필요하다.
+
+이력 decoder는 scope ID 중복·역순·누락된 부모·잘못된 단계/clock 데이터를
+엄격히 거절한다. 종료 scope의 Map 업데이트는 O(log N), 선택된 이력의 직렬화·
+상세 투영은 N개 scope에 비례한다. 임의 이력 상한이나 timeout은 추가하지
+않았다. 추가 메모리·선택된 payload·렌더 비용은 미측정이다.
 
 현재 기록은 해당 writer의 수명 동안만 유지된다. idle·다음 writer·서버 재시작을
-넘는 내구 기록, 전체 queue/provider/continuation 인과 연결, 상세에 필요한 이력만
-전달하는 조회 최적화는 남아 있다. 중첩·병렬·취소·실제 turns decoder 시나리오는
+넘는 내구 기록과 전체 queue/provider/continuation 인과 연결은 남아 있다.
+중첩·병렬·취소·선택된 실제 turns decoder 시나리오는
 작성했으며 실행하지 않았다. 타입·현재 통합 경로·실제 화면·성능은 미확인이다.
 
 ### 2b. 프롬프트 — 지명된 스킬 안내

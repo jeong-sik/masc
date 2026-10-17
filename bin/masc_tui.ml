@@ -24658,19 +24658,20 @@ and is loaded on demand through keeper_skill.
                    ; provider_input
                    ; _
                    } ) -> (
-                 (* The map is a per-component table, so it needs the
-                    attributed record; the render side shows its own "no
-                    exact composition" line when the page holds none. *)
-                 match selection.Masc_tui_context_inspector.attributed with
+                 (* The rows the proof tab draws: the same record, so a
+                    stepped-back turn's keys walk that turn's components. *)
+                 match
+                   Masc_tui_context_inspector.viewing_record selection
+                     ~turn_back:state.context_inspector_turn_back
+                 with
                  | None -> []
-                 | Some attributed ->
+                 | Some record ->
                      let provider_input =
                        match provider_input with
                        | Ok value -> Some value
                        | Error _ -> None
                      in
-                     Masc_tui_context_inspector.input_map_rows
-                       attributed.Masc_tui_context_inspector.record
+                     Masc_tui_context_inspector.input_map_rows record
                        provider_input)
              | Some
                  ( _

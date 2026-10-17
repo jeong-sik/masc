@@ -247,6 +247,11 @@ let decode_turn_records = function
        | None -> Error "turn-records response is missing entries")
   | _ -> Error "turn-records response is not an object"
 
+let viewing_record selection ~turn_back =
+  if turn_back <= 0 then
+    Option.map (fun attributed -> attributed.record) selection.attributed
+  else List.nth_opt selection.rows turn_back
+
 let exact_fields expected fields =
   List.length expected = List.length fields
   && List.for_all

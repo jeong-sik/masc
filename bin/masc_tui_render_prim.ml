@@ -3639,11 +3639,6 @@ let context_branch ~index ~last =
    separators. Taken from the row below so the two move together. *)
 let context_flow_row_chrome_cells = 2 + 4 + 1 + 1 + 1 + 6 + 2 + 11
 
-(* The longest component name the record can carry ("Keeper instructions",
-   "Redacted thinking") sits inside this, so the column is as wide as the
-   names rather than as wide as the terminal. *)
-let context_flow_label_cells = 24
-
 let pad_cells ~width text =
   text
   ^ String.make
@@ -4045,11 +4040,22 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
                 (String.length (Inspector.input_source_label source)))
             0 by_source
         in
-        (* Wide enough for the longest component name and no wider: the share
-           and the byte count belong beside the name they describe, not at the
-           far edge of a 140-column overlay. *)
+        (* Wide enough for the longest component name on screen and no wider:
+           the share and the byte count belong beside the name they describe,
+           not at the far edge of a 140-column overlay. *)
+        let label_cells =
+          List.fold_left
+            (fun widest (_, grouped) ->
+              List.fold_left
+                (fun widest (component : Turn_record.input_component) ->
+                  max widest
+                    (Message_layout.display_width
+                       (Inspector.input_component_label component.component)))
+                widest grouped)
+            0 by_source
+        in
         let label_width =
-          min context_flow_label_cells
+          min label_cells
             (max 10 (width - source_width - context_flow_row_chrome_cells))
         in
         (* The rows describe [attributed], which is not always the record the
@@ -4095,8 +4101,9 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
                     ; style
                     ; context_source_glyph source
                     ; " "
-                    ; pad_cells ~width:label_width
+                    ; fit_width
                         (Inspector.input_component_label component.component)
+                        label_width
                     ; Ansi.reset
                     ; Printf.sprintf " %6s  " share_text
                     ; Ansi.dim
@@ -4836,7 +4843,16 @@ let context_input_map_lines ~cols ~scale state (record : Turn_record.t)
         | Some _ | None ->
             Ansi.bold ^ Theme.warn () ^ "[ NO EXACT INPUT JOIN ]" ^ Ansi.reset
       in
+      (* One name column for every row, sized by the widest badge on the
+         page, so the token figures line up whatever each row's badge says. *)
+      let badge_cells =
+        List.fold_left
+          (fun widest (row : Inspector.input_map_row) ->
+             max widest (Inspector.input_evidence_badge_cells row.evidence))
+          0 rows
+      in
       let mapped width =
+        let label_width = max 4 (width - 19 - badge_cells) in
         List.mapi
           (fun index (row : Inspector.input_map_row) ->
              let selected = index = state.context_inspector_cursor in
@@ -4844,8 +4860,6 @@ let context_input_map_lines ~cols ~scale state (record : Turn_record.t)
                if selected then ">", Theme.selection else " ", Ansi.reset
              in
              let branch = if index = List.length rows - 1 then "└─" else "├─" in
-             let badge_cells = Inspector.input_evidence_badge_cells row.evidence in
-             let label_width = max 4 (width - 19 - badge_cells) in
              Printf.sprintf "%s %s %s %s%s%s \xe2\x89\x88%6s tok %s%s"
                selection marker branch
                (context_component_style row.component)
@@ -5041,29 +5055,13 @@ let context_inspector_content_lines ~cols state : context_pane_body =
                   , None ))
        | Masc_tui_context_inspector.Input_map ->
            (
-                (* The newest reading keeps the attributed row -- it is the
-                   row the exact provider input was fetched for, so the join
-                   on this tab stays honest. A stepped-back turn names its
-                   own row, snapshot or not. *)
-                let viewing =
-                  if state.context_inspector_turn_back = 0 then
-                    Option.map
-                      (fun (a : Masc_tui_context_inspector.attributed_turn) ->
-                         a.record)
-                      selection.Masc_tui_context_inspector.attributed
-                  else
-                    match
-                      List.nth_opt selection.Masc_tui_context_inspector.rows
-                        state.context_inspector_turn_back
-                    with
-                    | Some record -> Some record
-                    | None ->
-                        Option.map
-                          (fun (a : Masc_tui_context_inspector.attributed_turn) ->
-                             a.record)
-                          selection.Masc_tui_context_inspector.attributed
-                in
-                match viewing with
+                (* The row the exact provider input was fetched for, so the
+                   join on this tab stays honest; the keys walk the same
+                   row's components. *)
+                match
+                  Masc_tui_context_inspector.viewing_record selection
+                    ~turn_back:state.context_inspector_turn_back
+                with
                 | None ->
                     (* The map is a per-component table; with no attribution
                        there are no rows to draw, and inventing them from the

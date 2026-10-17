@@ -151,6 +151,35 @@ let test_page_without_attribution_still_reads () =
       check bool "with no attribution to show" true
         (Option.is_none decoded.Inspector.attributed)
 
+(* The provider-input fetch, the proof tab's drawing and its j/k and Enter
+   keys read one row, so a stepped-back turn's keys walk that turn's
+   components. *)
+let test_viewing_record_names_one_row () =
+  let attributed =
+    record ~trace:"trace-a" ~turn:3
+      ~input_components:[ { component = Tool_schemas; bytes = 80 } ]
+      ()
+  in
+  let middle = record ~trace:"trace-a" ~turn:4 () in
+  let newest = record ~trace:"trace-a" ~turn:5 () in
+  match
+    Inspector.decode_turn_records (envelope [ attributed; middle; newest ])
+  with
+  | Error detail -> fail detail
+  | Ok decoded ->
+      let viewed turn_back =
+        Option.map
+          (fun (row : Turn_record.t) -> row.absolute_turn)
+          (Inspector.viewing_record decoded ~turn_back)
+      in
+      check (option int) "the newest reading views the attributed row"
+        (Some 3) (viewed 0);
+      check (option int) "a stepped-back turn views its own row" (Some 4)
+        (viewed 1);
+      check (option int) "the oldest step views that row" (Some 3) (viewed 2);
+      check (option int) "a step past the page borrows no other row" None
+        (viewed 3)
+
 let test_empty_page_is_an_error () =
   check bool "an empty page has no latest row to report" true
     (Result.is_error (Inspector.decode_turn_records (envelope [])))
@@ -360,6 +389,8 @@ let () =
             test_page_without_attribution_still_reads
         ; test_case "recent turns carry the provider counts" `Quick
             test_recent_turns_carry_the_provider_counts
+        ; test_case "fetch, drawing and keys read one row" `Quick
+            test_viewing_record_names_one_row
         ; test_case "an empty page is an error" `Quick
             test_empty_page_is_an_error
         ; test_case "rejects malformed rows" `Quick

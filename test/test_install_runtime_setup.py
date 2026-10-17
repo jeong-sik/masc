@@ -2335,5 +2335,64 @@ base_url = "https://voice.fixture.invalid/v1"
             self.assertEqual(runtime.read_bytes(), before)
 
 
+class WorkspaceChildEnvironment(unittest.TestCase):
+    TERMINAL = {'MASC_BASE_PATH': '/terminal/base', 'MASC_CONFIG_DIR': '/terminal/config',
+                'PATH': '/usr/bin', 'HOME': '/home/op'}
+
+    def test_the_boundary_removes_the_terminal_workspace_overrides(self):
+        with patch.dict(os.environ, self.TERMINAL, clear=True):
+            env = SETUP.workspace_child_env()
+        self.assertNotIn('MASC_BASE_PATH', env)
+        self.assertNotIn('MASC_CONFIG_DIR', env)
+        self.assertEqual(env, {'PATH': '/usr/bin', 'HOME': '/home/op'})
+
+    def test_a_workspace_prerequisite_catalog_runs_without_the_overrides(self):
+        catalog = {'schema': 'masc.prerequisite_actions.v1', 'actions': []}
+        completed = subprocess.CompletedProcess([], 0, json.dumps(catalog), '')
+        with patch.dict(os.environ, self.TERMINAL, clear=True), \
+                patch('subprocess.run', return_value=completed) as run:
+            SETUP.prerequisite_catalog('/bin/masc', 'presentation-tools',
+                                       workspace_args=('--base-path', '/workspace'))
+        env = run.call_args.kwargs['env']
+        self.assertNotIn('MASC_BASE_PATH', env)
+        self.assertNotIn('MASC_CONFIG_DIR', env)
+        self.assertEqual(env['PATH'], '/usr/bin')
+
+    def test_a_non_workspace_prerequisite_keeps_the_inherited_environment(self):
+        catalog = {'schema': 'masc.prerequisite_actions.v1', 'actions': []}
+        completed = subprocess.CompletedProcess([], 0, json.dumps(catalog), '')
+        with patch.dict(os.environ, self.TERMINAL, clear=True), \
+                patch('subprocess.run', return_value=completed) as run:
+            SETUP.prerequisite_catalog('/bin/masc', 'pdf-tools')
+        self.assertIsNone(run.call_args.kwargs['env'])
+
+    def test_native_setup_command_strips_only_with_a_workspace(self):
+        rendered = subprocess.CompletedProcess([], 0, '{"toml": "x"}', '')
+        with patch.dict(os.environ, self.TERMINAL, clear=True), \
+                patch('subprocess.run', return_value=rendered) as run:
+            SETUP.native_setup_command('/bin/masc', 'runtime-setup-render',
+                                       arguments=('--base-path', '/workspace'))
+        env = run.call_args.kwargs['env']
+        self.assertNotIn('MASC_BASE_PATH', env)
+        self.assertNotIn('MASC_CONFIG_DIR', env)
+        with patch.dict(os.environ, self.TERMINAL, clear=True), \
+                patch('subprocess.run', return_value=rendered) as run:
+            SETUP.native_setup_command('/bin/masc', 'runtime-setup-render')
+        self.assertIsNone(run.call_args.kwargs['env'])
+
+    def test_onboarding_status_strips_only_with_a_workspace(self):
+        state = {'schema': 'masc.onboarding_status.v1', 'scope': 'configuration_observation',
+                 'opening': 'needs_journey', 'checks': []}
+        completed = subprocess.CompletedProcess([], 0, json.dumps(state), '')
+        with patch.dict(os.environ, self.TERMINAL, clear=True), \
+                patch('subprocess.run', return_value=completed) as run:
+            SETUP.onboarding_status('/bin/masc', base_path='/workspace')
+        self.assertNotIn('MASC_BASE_PATH', run.call_args.kwargs['env'])
+        with patch.dict(os.environ, self.TERMINAL, clear=True), \
+                patch('subprocess.run', return_value=completed) as run:
+            SETUP.onboarding_status('/bin/masc')
+        self.assertIsNone(run.call_args.kwargs['env'])
+
+
 if __name__ == '__main__':
     unittest.main()

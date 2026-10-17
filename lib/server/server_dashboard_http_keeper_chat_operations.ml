@@ -3,6 +3,7 @@ module Operation = Keeper_owner.Chat_operation
 module Operation_id = Operation.Operation_id
 module Owner = Keeper_owner
 module Registry = Keeper_owner_registry
+module Public_error = Server_keeper_chat_public_error
 
 let mutation_permission = Masc_domain.CanBroadcast
 
@@ -35,11 +36,7 @@ type mutation_route =
   ; mutation : mutation
   }
 
-type api_error =
-  { status : Httpun.Status.t
-  ; code : string
-  ; message : string
-  }
+type api_error = Public_error.t
 
 let path_segments path =
   path
@@ -80,15 +77,9 @@ let mutation_route path =
   | _ -> None
 ;;
 
-let error_json error =
-  `Assoc
-    [ "schema", `String "masc.keeper_chat_operation.error.v1"
-    ; "error", `String error.code
-    ; "message", `String error.message
-    ]
-;;
+let error_json = Public_error.to_json
 
-let respond_error request reqd error =
+let respond_error request reqd (error : api_error) =
   Log.Dashboard.warn "keeper_chat_operation_api error=%s" error.code;
   Server_auth.respond_json_value_with_cors
     ~status:error.status
@@ -97,43 +88,46 @@ let respond_error request reqd error =
     (error_json error)
 ;;
 
-let invalid_input message = { status = `Bad_request; code = "invalid_input"; message }
-let unknown_operation message = { status = `Not_found; code = "unknown_operation"; message }
-
-let conflict code message =
-  { status = `Conflict; code; message }
+let public_error kind detail =
+  let error = Public_error.make ~incident_id:(Random_id.uuid_v7 ()) kind in
+  Log.Dashboard.warn "keeper_chat_error incident_id=%s code=%s detail=%s"
+    error.incident_id error.code detail;
+  error
 ;;
 
-let unavailable code message =
-  { status = `Service_unavailable; code; message }
-;;
-
-let gone code message = { status = `Gone; code; message }
+let invalid_input message = public_error Public_error.Invalid_input message
+let unknown_operation message = public_error Public_error.Unknown_operation message
+let unavailable kind message = public_error kind message
+let gone kind message = public_error kind message
 
 let api_error_of_command_error error =
-  let message = Registry.command_error_to_string error in
-  match error with
-  | Registry.Command_lookup_failed
-      (Owner_not_found _ | Owner_unavailable _ | Inventory_not_installed _) ->
-    unknown_operation message
-  | Command_lookup_failed (Owner_initialization_failed _ | Inventory_stopping) ->
-    unavailable "store_unavailable" message
-  | Command_lifecycle_reserved _ -> unavailable "owner_stopping" message
-  | Command_rejected (Owner.Operation_rejected operation_error) ->
-    (match Owner.operation_error_kind operation_error with
-     | Invalid_operation_input -> invalid_input message
-     | Unknown_operation -> unknown_operation message
-     | Operation_not_queued -> conflict "not_queued" message
-     | Operation_idempotency_conflict -> conflict "idempotency_conflict" message
-     | Operation_native_call_unsettled -> conflict "native_call_unsettled" message
-     | Operation_store_unavailable ->
-       unavailable "store_unavailable" message)
-  | Command_rejected (Owner.Store_unavailable _) ->
-    unavailable "store_unavailable" message
-  | Command_rejected (Owner.Owner_stopping | Owner.Owner_closed) ->
-    unavailable "owner_stopping" message
-  | Command_rejected (Owner.Reducer_rejected _) ->
-    unavailable "store_unavailable" message
+  let kind = match error with
+    | Registry.Command_lookup_failed
+        (Owner_not_found _ | Owner_unavailable _ | Inventory_not_installed _) ->
+      Public_error.Unknown_operation
+    | Command_lookup_failed (Owner_initialization_failed _ | Inventory_stopping) ->
+      Public_error.Store_unavailable
+    | Command_lifecycle_reserved _ -> Public_error.Owner_stopping
+    | Command_rejected (Owner.Operation_rejected operation_error) ->
+      (match Owner.operation_error_kind operation_error with
+       | Invalid_operation_input -> Public_error.Invalid_input
+       | Unknown_operation -> Public_error.Unknown_operation
+       | Operation_not_queued -> Public_error.Not_queued
+       | Operation_idempotency_conflict -> Public_error.Idempotency_conflict
+       | Operation_native_call_unsettled -> Public_error.Native_call_unsettled
+       | Operation_store_unavailable -> Public_error.Store_unavailable)
+    | Command_rejected (Owner.Store_unavailable _ | Owner.Reducer_rejected _) ->
+      Public_error.Store_unavailable
+    | Command_rejected (Owner.Owner_stopping | Owner.Owner_closed) -> Public_error.Owner_stopping
+  in
+  public_error kind (Registry.command_error_to_string error)
+;;
+
+let public_operation_json ~redaction (operation : Operation.t) =
+  let redact_json = Keeper_secret_redaction.redact_json redaction in
+  Operation.to_public_json
+    { operation with source = redact_json operation.source
+    ; input = Option.map redact_json operation.input }
 ;;
 
 let operation_id raw =
@@ -161,7 +155,7 @@ let parse_after_sequence request =
 (* The wire's absence rule lives in [Keeper_chat_event_log.replay_position_of_wire]:
    no [since_seq] is the whole journal, [n >= 0] is the last seq already held. *)
 let parse_since_seq request =
-  let rejected =
+  let rejected () =
     Error
       (invalid_input
          "since_seq must be an integer >= 0, the last seq already held; omit it for \
@@ -173,21 +167,21 @@ let parse_since_seq request =
     | Some raw ->
       (match int_of_string_opt (String.trim raw) with
        | Some value -> Ok (Some value)
-       | None -> rejected)
+       | None -> rejected ())
   in
   match raw with
   | Error _ as error -> error
   | Ok raw ->
     (match Keeper_chat_event_log.replay_position_of_wire raw with
      | Some position -> Ok position
-     | None -> rejected)
+     | None -> rejected ())
 ;;
 
 (* The byte-offset cursor beside [since_seq]: absent reads from the first row,
    [n >= 0] is the [next_since_offset] of the page before
    ([Keeper_chat_event_log.page_start_of_wire]). *)
 let parse_since_offset request =
-  let rejected =
+  let rejected () =
     Error
       (invalid_input
          "since_offset must be an integer >= 0, the next_since_offset of the page \
@@ -199,14 +193,14 @@ let parse_since_offset request =
     | Some raw ->
       (match int_of_string_opt (String.trim raw) with
        | Some value -> Ok (Some value)
-       | None -> rejected)
+       | None -> rejected ())
   in
   match raw with
   | Error _ as error -> error
   | Ok raw ->
     (match Keeper_chat_event_log.page_start_of_wire raw with
      | Some start -> Ok start
-     | None -> rejected)
+     | None -> rejected ())
 ;;
 
 (* A cursor the journal cannot place is the client's request, 400 under the
@@ -216,11 +210,7 @@ let parse_since_offset request =
    decoder cannot drift. *)
 let page_failure_error failure =
   let message = Keeper_chat_event_log.page_failure_to_string failure in
-  let cursor refusal =
-    { status = `Bad_request
-    ; code = Keeper_chat_event_log.cursor_refusal_to_wire refusal
-    ; message
-    }
+  let cursor refusal = public_error (Public_error.Cursor_refusal refusal) message
   in
   match failure with
   | Keeper_chat_event_log.Page_offset_past_rows _ ->
@@ -228,7 +218,7 @@ let page_failure_error failure =
   | Page_offset_inside_row _ -> cursor Keeper_chat_event_log.Offset_inside_row
   | Page_cursor_mismatch _ -> cursor Keeper_chat_event_log.Cursor_pair_mismatch
   | Page_limit_not_positive _ -> invalid_input message
-  | Page_corrupt _ -> unavailable "journal_corrupt" message
+  | Page_corrupt _ -> unavailable Public_error.Journal_corrupt message
 ;;
 
 let parse_limit request =
@@ -296,7 +286,7 @@ let journal_events_page ~schema ~identity ~since_seq ~redact_text (page : Keeper
       , `List
           (List.map
              (fun (entry : Keeper_chat_event_log.journaled_event) ->
-               let event = Keeper_chat_events.redact_content ~redact_text entry.event in
+               let event = Keeper_chat_events.public_content ~redact_text entry.event in
                Keeper_chat_event_log.journaled_event_to_json {entry with event})
              page.events) )
     ; "has_more", `Bool page.has_more
@@ -398,10 +388,9 @@ let handle_get state request reqd = function
              (match Keeper_autonomous_stream.current ~base_path ~keeper_name with
               | Some current when Ids.Turn_ref.equal current turn_ref ->
                 render (Keeper_chat_event_log.page_of_rows ~path ~since_seq ~start ~limit "")
-              | Some _ | None -> Error {status=`Not_found; code="journal_missing";
-                  message="No autonomous event journal exists for this turn"})
-         | Error (Journal_unreadable detail) -> Error (unavailable "journal_unreadable" detail)
-         | Error (Journal_corrupt detail) -> Error (unavailable "journal_corrupt" detail)
+              | Some _ | None -> Error (public_error Public_error.Journal_missing "No autonomous event journal exists for this turn"))
+         | Error (Journal_unreadable detail) -> Error (unavailable Public_error.Journal_unreadable detail)
+         | Error (Journal_corrupt detail) -> Error (unavailable Public_error.Journal_corrupt detail)
        in
        (match page with
         | Ok body -> Server_auth.respond_json_value_with_cors request reqd body
@@ -481,7 +470,7 @@ let handle_get state request reqd = function
                   request
                   reqd
                   (gone
-                     "journal_pruned"
+                     Public_error.Journal_pruned
                      (no_journal_for_settled_operation_message
                         ~operation_id:operation_id_text))
               | Unknown_operation ->
@@ -494,9 +483,9 @@ let handle_get state request reqd = function
         | Error (Journal_unreadable detail) ->
           (* This endpoint exists to serve the log, so the log's failure is
              the response (RFC-0412 §3.5: loud from day one on v2). *)
-          respond_error request reqd (unavailable "journal_unreadable" detail)
+          respond_error request reqd (unavailable Public_error.Journal_unreadable detail)
         | Error (Journal_corrupt detail) ->
-          respond_error request reqd (unavailable "journal_corrupt" detail)))
+          respond_error request reqd (unavailable Public_error.Journal_corrupt detail)))
   | Operation_exact { keeper_name; raw_operation_id } ->
     (match operation_id raw_operation_id with
      | Error error -> respond_error request reqd error
@@ -518,7 +507,9 @@ let handle_get state request reqd = function
           Server_auth.respond_json_value_with_cors
             request
             reqd
-            (Operation.to_json operation)))
+            (public_operation_json
+               ~redaction:(Keeper_secret_redaction.snapshot
+                 ~base_path:(base_path state) ~keeper_name) operation)))
   | Operation_list { keeper_name } ->
     let state_filter = Server_utils.query_param request "state" in
     (match parse_after_sequence request with
@@ -545,7 +536,9 @@ let handle_get state request reqd = function
             (`Assoc
                [ "schema", `String "masc.keeper_chat_operations.list.v1"
                ; "state", `String "Queued"
-               ; "operations", `List (List.map Operation.to_json operations)
+               ; "operations", `List (List.map
+                   (public_operation_json ~redaction:(Keeper_secret_redaction.snapshot
+                     ~base_path:(base_path state) ~keeper_name)) operations)
                ]))
         | Some _ | None ->
           respond_error request reqd (invalid_input "state=queued is required")))
@@ -634,10 +627,27 @@ let handle_mutation state request reqd route body =
        Server_auth.respond_json_value_with_cors
          request
          reqd
-       (Operation.to_json operation))
+       (public_operation_json
+         ~redaction:(Keeper_secret_redaction.snapshot
+           ~base_path:(base_path state) ~keeper_name:route.keeper_name) operation))
 ;;
 
 module For_testing = struct
+  let invalid_input_response detail =
+    let error = invalid_input detail in
+    error.status, error_json error
+  ;;
+
+  let command_error_response cause =
+    let error = api_error_of_command_error cause in
+    error.status, error_json error
+  ;;
+
+  let page_failure_response cause =
+    let error = page_failure_error cause in
+    error.status, error_json error
+  ;;
+
   let events_page_of_request ~path request rows =
     match parse_events_request request with
     | Error error -> Error (error.status, error.code)

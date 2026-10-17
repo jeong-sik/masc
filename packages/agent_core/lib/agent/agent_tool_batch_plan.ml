@@ -1,8 +1,23 @@
 (** Immutable admission and scheduling plan for one tool-use turn. *)
 
+module Index_map = Map.Make (Int)
+
+type 'a scoped_node =
+  { local_index : int
+  ; value : 'a
+  ; predecessors : int list
+  ; batch_offset : int
+  }
+
+type 'a scoped_group =
+  { nodes : 'a scoped_node list
+  ; batch_sizes : int Index_map.t
+  }
+
 type 'a execution_batch =
   | Concurrent_batch of 'a list
   | Serial_batch of 'a
+  | Scoped_batch of 'a scoped_group
 
 type 'a t =
   | Admitted of 'a execution_batch list
@@ -14,29 +29,36 @@ let scopes_conflict left right =
     left
 ;;
 
-(* Every conflict with an earlier pending call is an ordering edge. Removing
-   a whole ready wave preserves transitive edges too: C cannot overtake B
-   just because B itself is waiting for A. *)
-let scoped_batches calls =
-  let rec waves acc = function
-    | [] -> List.rev acc
-    | pending ->
-      let rec select earlier ready blocked = function
-        | [] -> List.rev ready, List.rev blocked
-        | ((value, scopes) as call) :: rest ->
-          let is_blocked =
-            List.exists (fun (_, prior) -> scopes_conflict prior scopes) earlier
-          in
-          select
-            (call :: earlier)
-            (if is_blocked then ready else value :: ready)
-            (if is_blocked then call :: blocked else blocked)
-            rest
-      in
-      let ready, blocked = select [] [] [] pending in
-      waves (Concurrent_batch ready :: acc) blocked
+(* Keep every earlier resource conflict as an explicit edge. Static wave
+   coordinates remain useful invocation metadata, but are not a barrier for
+   disjoint nodes: a successor waits for its own predecessors, including a
+   predecessor that is itself blocked, rather than an unrelated slow peer. *)
+let scoped_group calls =
+  let nodes =
+    calls
+    |> List.mapi (fun local_index (value, scopes) -> local_index, value, scopes)
+    |> List.fold_left
+      (fun earlier (local_index, value, scopes) ->
+         let predecessors =
+           List.rev earlier
+           |> List.filter_map (fun (node, prior_scopes) ->
+             if scopes_conflict prior_scopes scopes then Some node else None)
+         in
+         let batch_offset = List.fold_left
+             (fun offset node -> max offset (node.batch_offset + 1)) 0 predecessors in
+         let node =
+           { local_index; value; batch_offset
+           ; predecessors = List.map (fun node -> node.local_index) predecessors
+           } in
+         (node, scopes) :: earlier)
+      []
+    |> List.rev_map fst
   in
-  waves [] calls
+  let batch_sizes = List.fold_left (fun counts node ->
+      Index_map.update node.batch_offset
+        (function None -> Some 1 | Some count -> Some (count + 1)) counts)
+      Index_map.empty nodes in
+  { nodes; batch_sizes }
 ;;
 
 let execution_batches ~execution_mode ~resource_scopes tool_uses =
@@ -61,7 +83,7 @@ let execution_batches ~execution_mode ~resource_scopes tool_uses =
       (match resource_scopes value, execution_mode value with
        | Some _, (Tool_contract.Concurrent | Tool_contract.Serial) ->
          let scoped, rest = take_scoped [] (value :: rest) in
-         build (List.rev_append (scoped_batches scoped) acc) rest
+         build (Scoped_batch (scoped_group scoped) :: acc) rest
        | None, Tool_contract.Concurrent ->
          let concurrent, rest = take_concurrent [] (value :: rest) in
          build (Concurrent_batch concurrent :: acc) rest

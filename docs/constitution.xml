@@ -286,7 +286,8 @@
     <group name="io">Connector, Dashboard, Broadcast, Discord, Slack, File System</group>
     <group name="autonomy">Autonomous, Proactive, Schedule Job, Drain Queue</group>
     <group name="tools">Multitools, AsyncTools, Batch Tools,
-          Parallel Tool [parity B4: disable_parallel_tool_use 억제 플래그만 존재 — 구현 예정],
+          Parallel Tool [parity B4: 선언된 Concurrent 호출과 producer 가 자원을 확정한 호출을
+          병렬 실행한다. 자원 충돌 선행 호출의 settlement 를 기다리고 Serial 경계는 유지한다],
           Sandbox</group>
     <group name="runtime">Multi Runtime, Model Free, Provider Free
           (코드 명칭: lib/runtime_model/ 의 provider-runtime 해소), Multi Lane, 병렬 레인</group>

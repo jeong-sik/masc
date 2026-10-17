@@ -665,10 +665,145 @@ let test_scoped_effect_contracts_follow_defaulted_execution_input () =
      "conditional", Tool.ordinary_descriptor_concurrent_when reads_only]
 ;;
 
+let test_ready_successor_chain_does_not_wait_for_unrelated_root () =
+  Eio_main.run @@ fun env ->
+  let slow_started, start_slow = Eio.Promise.create () in
+  let tail_finished, finish_tail = Eio.Promise.create () in
+  let slow_finished = ref false and chain = ref 0 and finished = ref [] and released = ref [] in
+  let make name occupied ?(additional_scopes=[]) handler =
+    prepared_tool ~name (fun ~sw _ ->
+      Eio.Switch.on_release sw (fun () -> released := name :: !released);
+      Ok (Some (Tool.scoped_call ~scope:occupied ~additional_scopes (fun _ _ ->
+        handler (); output name)))) (fun _ -> fail "unprepared effect dispatched") in
+  let slow = make "slow" (scope "slow") (fun () ->
+    Eio.Promise.resolve start_slow ();
+    Eio.Promise.await tail_finished;
+    slow_finished := true) in
+  let quick = make "quick" (scope "chain-a") (fun () ->
+    Eio.Promise.await slow_started;
+    chain := 1) in
+  let middle = make "middle" (scope "chain-a") ~additional_scopes:[scope "chain-b"] (fun () ->
+    check bool "unrelated root is still open when its peer's successor starts" false !slow_finished;
+    check bool "the real predecessor's observers have settled" true (List.mem "quick" !finished);
+    check int "the predecessor's effect is available" 1 !chain;
+    chain := 2) in
+  let tail = make "tail" (scope "chain-b") (fun () ->
+    check bool "the next successor also does not wait for the slow root" false !slow_finished;
+    check bool "the multi-resource predecessor has settled" true (List.mem "middle" !finished);
+    check int "the transitive effect is available" 2 !chain;
+    chain := 3;
+    Eio.Promise.resolve finish_tail ()) in
+  let barrier = Tool.create ~name:"barrier" ~description:"opaque serial boundary" ~parameters:[]
+      (fun _ ->
+        check bool "opaque Serial still waits for the whole scoped region" true !slow_finished;
+        check int "all predecessor effects settled before the barrier" 3 !chain;
+        output "barrier") in
+  let on_tool_execution_finished ~invocation:_ ~tool_name ~content:_ ~is_error:_ =
+    finished := tool_name :: !finished in
+  let rows = execute env ~on_tool_execution_finished [slow;quick;middle;tail;barrier]
+      (List.map call ["slow";"quick";"middle";"tail";"barrier"]) |> results in
+  check (list string) "results keep original order despite early successors"
+    ["slow";"quick";"middle";"tail";"barrier"] (contents rows);
+  check (list int) "static wave coordinates and following barrier are preserved" [0;0;1;2;3]
+    (List.map (fun (row : Agent_tools.tool_execution_result) ->
+      (Tool_contract.Invocation.schedule row.invocation).batch_index) rows);
+  check (list int) "static cohort sizes do not become dynamic queue counts" [2;2;1;1;1]
+    (List.map (fun (row : Agent_tools.tool_execution_result) ->
+      (Tool_contract.Invocation.schedule row.invocation).batch_size) rows);
+  check (list string) "all pinned resources close after the region"
+    ["middle";"quick";"slow";"tail"] (List.sort String.compare !released)
+;;
+
+let test_known_peer_failure_prevents_new_resource_successor () =
+  Eio_main.run @@ fun env ->
+  let survivor_started, start_survivor = Eio.Promise.create () in
+  let failure_seen, see_failure = Eio.Promise.create () in
+  let later_effects = ref 0 and released = ref 0 in
+  let make name occupied handler = prepared_tool ~name (fun ~sw _ ->
+    Eio.Switch.on_release sw (fun () -> incr released);
+    Ok (Some (Tool.scoped_call ~scope:occupied (fun _ _ -> handler (); output name))))
+      (fun _ -> fail "unprepared effect dispatched") in
+  let fatal = make "fatal" (scope "fatal") (fun () -> Eio.Promise.await survivor_started) in
+  let survivor = make "survivor" (scope "survivor") (fun () ->
+    Eio.Promise.resolve start_survivor ();
+    Eio.Promise.await failure_seen) in
+  let later = make "later" (scope "survivor") (fun () -> incr later_effects) in
+  let on_tool_execution_finished ~invocation:_ ~tool_name ~content:_ ~is_error:_ =
+    if String.equal tool_name "fatal" then (Eio.Promise.resolve see_failure (); raise Exit) in
+  (match execute env ~on_tool_execution_finished [fatal;survivor;later]
+      (List.map call ["fatal";"survivor";"later"]) with
+   | Error {Agent_tools.completed_results;cause=Agent_tools.Observer_failure {exception_=Exit;_};_} ->
+     check (list string) "the admitted root cohort still settles" ["fatal";"survivor"] (contents completed_results)
+   | Ok _ | Error _ -> fail "the known observer failure was lost");
+  check int "a successful predecessor cannot admit a successor after a peer failure" 0 !later_effects;
+  check int "unstarted prepared resources are released too" 3 !released
+;;
+
+let test_started_successor_settles_after_later_peer_failure () =
+  Eio_main.run @@ fun env ->
+  let child_started, start_child = Eio.Promise.create () in
+  let failure_seen, see_failure = Eio.Promise.create () in
+  let child_effects = ref 0 and later_effects = ref 0 and barrier_effects = ref 0 and released = ref 0 in
+  let make name occupied handler = prepared_tool ~name (fun ~sw _ ->
+    Eio.Switch.on_release sw (fun () -> incr released);
+    Ok (Some (Tool.scoped_call ~scope:occupied (fun _ _ -> handler (); output name))))
+      (fun _ -> fail "unprepared effect dispatched") in
+  let fatal = make "fatal" (scope "fatal") (fun () -> Eio.Promise.await child_started) in
+  let quick = make "quick" (scope "chain") (fun () -> ()) in
+  let child = make "child" (scope "chain") (fun () ->
+    Eio.Promise.resolve start_child ();
+    Eio.Promise.await failure_seen;
+    incr child_effects) in
+  let later = make "later" (scope "chain") (fun () -> incr later_effects) in
+  let barrier = Tool.create ~name:"barrier" ~description:"opaque boundary" ~parameters:[]
+      (fun _ -> incr barrier_effects; output "barrier") in
+  let on_tool_execution_finished ~invocation:_ ~tool_name ~content:_ ~is_error:_ =
+    if String.equal tool_name "fatal" then (Eio.Promise.resolve see_failure (); raise Exit) in
+  (match execute env ~on_tool_execution_finished [fatal;quick;child;later;barrier]
+      (List.map call ["fatal";"quick";"child";"later";"barrier"]) with
+   | Error {Agent_tools.completed_results;cause=Agent_tools.Observer_failure {exception_=Exit;_};_} ->
+     check (list string) "all actual completed effects survive in original order"
+       ["fatal";"quick";"child"] (contents completed_results)
+   | Ok _ | Error _ -> fail "the peer failure or completed successor was lost");
+  check int "the already-started successor completes its real effect" 1 !child_effects;
+  check int "a later resource successor is not started after the failure" 0 !later_effects;
+  check int "the following opaque boundary is not started" 0 !barrier_effects;
+  check int "all four prepared resource owners close" 4 !released
+;;
+
+let test_cancellation_closes_resource_predecessor_waiters () =
+  Eio_main.run @@ fun env ->
+  let entered, enter = Eio.Promise.create () in
+  let never, _ = Eio.Promise.create () in
+  let released = ref [] and child_effects = ref 0 in
+  let make name handler = prepared_tool ~name (fun ~sw _ ->
+    Eio.Switch.on_release sw (fun () -> released := name :: !released);
+    Ok (Some (Tool.scoped_call ~scope:(scope "shared") (fun _ _ -> handler (); output name))))
+      (fun _ -> fail "unprepared effect dispatched") in
+  let parent = make "parent" (fun () -> Eio.Promise.resolve enter (); Eio.Promise.await never) in
+  let child = make "child" (fun () -> incr child_effects) in
+  Eio.Fiber.first
+    (fun () ->
+      ignore (execute env [parent;child] (List.map call ["parent";"child"]));
+      fail "cancelled scoped execution returned normally")
+    (fun () -> Eio.Promise.await entered);
+  check int "a waiting successor has no fabricated effect" 0 !child_effects;
+  check (list string) "caller cancellation releases the running and waiting owners"
+    ["child";"parent"] (List.sort String.compare !released)
+;;
+
 let () =
   run "resource-scoped execution"
     [ "actual batch execution",
-      [ test_case "disjoint effects consume exact prepared calls" `Quick test_disjoint_effects_consume_frozen_calls
+      [ test_case "ready successor chain does not wait for unrelated root" `Quick
+          test_ready_successor_chain_does_not_wait_for_unrelated_root
+      ; test_case "known peer failure prevents new resource successor" `Quick
+          test_known_peer_failure_prevents_new_resource_successor
+      ; test_case "started successor settles after later peer failure" `Quick
+          test_started_successor_settles_after_later_peer_failure
+      ; test_case "cancellation closes resource predecessor waiters" `Quick
+          test_cancellation_closes_resource_predecessor_waiters
+      ; test_case "disjoint effects consume exact prepared calls" `Quick test_disjoint_effects_consume_frozen_calls
       ; test_case "shared reads and private writes preserve writer order" `Quick test_shared_reads_and_private_writes_keep_writer_order
       ; test_case "scoped effects and scheduling use executed defaults" `Quick test_scoped_effect_contracts_follow_defaulted_execution_input
       ; test_case "conflicts preserve transitive planned order" `Quick test_conflicting_predecessors_keep_transitive_order

@@ -4,6 +4,19 @@
 
 type activity = Preparing | Awaiting_response | Receiving_response | Tool_observed | Failed
 
+type preparation_phase = Context_preparation | Tool_preparation | Skill_preparation
+type preparation_outcome = Prepared | Rejected | Raised | Cancelled
+type preparation_state =
+  | Preparation_active
+  | Preparation_finished of
+      { outcome : preparation_outcome; elapsed_ns : int64; finished_at : float }
+type preparation =
+  { phase : preparation_phase
+  ; turn_ref : Ids.Turn_ref.t option
+  ; started_at : float
+  ; state : preparation_state
+  }
+
 type source_position = { generation : int; start_byte : int }
 
 type t =
@@ -14,6 +27,7 @@ type t =
   ; runtime_id : string option
   ; activity : activity
   ; last_failure : string option
+  ; preparation : preparation option
   }
 
 (* Enough to recognize the work ("ah, it is writing the PR body"), small
@@ -34,6 +48,7 @@ type entry =
   ; text_intake : text_intake
   ; released_bytes : int
   ; tools : string Tool_indexes.t
+  ; preparations : (unit ref * preparation) list
   }
 type writer = entry ref
 
@@ -49,7 +64,7 @@ let with_lock f =
 
 let empty now =
   { text_position = {generation=0; start_byte=0}; text_tail = ""; last_tool = None; updated_at = now
-  ; runtime_id = None; activity = Preparing; last_failure = None }
+  ; runtime_id = None; activity = Preparing; last_failure = None; preparation = None }
 
 let current ~keeper_name =
   with_lock (fun () ->
@@ -67,13 +82,47 @@ let change_entry ~writer ~now f =
 
 let update ~writer ~now f =
   change_entry ~writer ~now (fun entry ->
-    Some { entry with preview = f entry.preview })
+    Some { entry with preparations = [];
+      preview = { (f entry.preview) with preparation = None } })
+
+let with_preparation_result ~writer ~turn_ref ~phase operation =
+  match writer with
+  | None -> operation ()
+  | Some _ ->
+    let token = ref () in
+    let started = Mtime_clock.now () in
+    let started_at = Time_compat.now () in
+    let preparation = {phase;turn_ref;started_at;state=Preparation_active} in
+    change_entry ~writer ~now:started_at (fun entry ->
+      Some {entry with preparations=(token,preparation)::entry.preparations;
+        preview={entry.preview with preparation=Some preparation;activity=Preparing}});
+    let finish outcome =
+      let elapsed_ns = Mtime.Span.to_uint64_ns (Mtime.span started (Mtime_clock.now ())) in
+      let finished_at = Time_compat.now () in
+      change_entry ~writer ~now:finished_at (fun entry ->
+        if not (List.exists (fun (owner,_) -> owner == token) entry.preparations) then None
+        else
+          let preparations = List.filter (fun (owner,_) -> owner != token) entry.preparations in
+          let preparation = match preparations with
+            | (_,parent)::_ -> parent
+            | [] -> {preparation with state=Preparation_finished {outcome;elapsed_ns;finished_at}} in
+          Some {entry with preparations;
+            preview={entry.preview with preparation=Some preparation}})
+    in
+    match operation () with
+    | result -> finish (match result with Ok _ -> Prepared | Error _ -> Rejected); result
+    | exception error ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      finish (match error with Eio.Cancel.Cancelled _ -> Cancelled | _ -> Raised);
+      Printexc.raise_with_backtrace error backtrace
+;;
 
 let redacting redaction =
   { redaction; stream = Keeper_stream_text_redaction.create redaction }
 
 let reset ~keeper_name ~now ~redaction =
-  let writer = ref { preview = empty now; text_intake = redacting redaction; released_bytes = 0; tools = Tool_indexes.empty } in
+  let writer = ref { preview = empty now; text_intake = redacting redaction;
+    released_bytes = 0; tools = Tool_indexes.empty; preparations = [] } in
   with_lock (fun () -> Hashtbl.replace table keeper_name writer);
   writer
 
@@ -82,11 +131,12 @@ let note_attempt ~writer ~now ~runtime_id =
     Some
       { preview =
           { preview with runtime_id = Some runtime_id; activity = Awaiting_response
-          ; last_tool = None; text_tail = ""
+          ; last_tool = None; text_tail = ""; preparation = None
           ; text_position = {generation=preview.text_position.generation + 1; start_byte=0} }
         (* A new attempt is a new provider stream. Text the previous stream
            still held belongs to the tail this clears. *)
       ; tools = Tool_indexes.empty
+      ; preparations = []
       ; released_bytes = 0
       ; text_intake =
           redacting text_intake.redaction
@@ -110,7 +160,8 @@ let note_text ~writer ~now text =
       let text_position = {generation=preview.text_position.generation + 1;
         start_byte=released_bytes - String.length text_tail} in
       Some { entry with released_bytes; text_intake=redacting text_intake.redaction;
-        preview={preview with text_tail; text_position; activity=Receiving_response} })
+        preparations=[];
+        preview={preview with text_tail; text_position; activity=Receiving_response;preparation=None} })
 
 
 let note_tool ~writer ~now tool_name =
@@ -205,18 +256,45 @@ let note_stream ~writer ~now event =
     let entry = { released_entry with tools } in
     match activity, text_changed with
     | None, false -> None
-    | Some activity_preview, _ -> Some {entry with preview={activity_preview with
-        text_tail=entry.preview.text_tail; text_position=entry.preview.text_position}}
-    | None, true -> Some entry)
+    | Some activity_preview, _ -> Some {entry with preparations=[];preview={activity_preview with
+        text_tail=entry.preview.text_tail; text_position=entry.preview.text_position;preparation=None}}
+    | None, true -> Some {entry with preparations=[];preview={entry.preview with preparation=None}})
+
+let preparation_phase_name = function
+  | Context_preparation -> "context"
+  | Tool_preparation -> "tools"
+  | Skill_preparation -> "skills"
+;;
+
+let preparation_outcome_name = function
+  | Prepared -> "prepared" | Rejected -> "rejected" | Raised -> "raised" | Cancelled -> "cancelled"
+;;
+
+let preparation_to_json preparation =
+  let state,finished_at,elapsed_ns = match preparation.state with
+    | Preparation_active -> "active",`Null,`Null
+    | Preparation_finished {outcome;finished_at;elapsed_ns} ->
+      preparation_outcome_name outcome,`Float finished_at,`String (Int64.to_string elapsed_ns) in
+  `Assoc ["phase",`String (preparation_phase_name preparation.phase);
+    "turn_ref",Option.fold ~none:`Null ~some:Ids.Turn_ref.to_yojson preparation.turn_ref;
+    "started_at_unix",`Float preparation.started_at;"state",`String state;
+    "finished_at_unix",finished_at;"elapsed_ns",elapsed_ns]
+;;
 
 let status_text preview =
   let activity =
-    match preview.activity with
-    | Preparing -> "preparing turn"
-    | Awaiting_response -> "waiting for provider response"
-    | Receiving_response -> "receiving response"
-    | Tool_observed -> "tool activity observed"
-    | Failed -> "provider attempt failed"
+    match preview.preparation, preview.activity with
+    | Some preparation, _ ->
+      let phase = preparation_phase_name preparation.phase in
+      (match preparation.state with
+       | Preparation_active -> "preparing " ^ phase
+       | Preparation_finished {outcome=Prepared;_} -> phase ^ " prepared; next activity unobserved"
+       | Preparation_finished {outcome=(Rejected | Raised | Cancelled) as outcome;_} -> phase ^ " preparation " ^ preparation_outcome_name outcome)
+    | None, Preparing -> "preparing turn"
+    | None, Awaiting_response -> "waiting for provider response"
+    | None, Receiving_response -> "receiving response"
+    | None, Tool_observed -> "tool activity observed"
+    | None, Failed -> "provider attempt failed"
   in
   String.concat " · "
     (List.filter_map Fun.id
@@ -230,4 +308,5 @@ let to_json preview =
     "text_position", `Assoc ["generation", `Int preview.text_position.generation;
       "start_byte", `Int preview.text_position.start_byte];
     "last_tool", (match preview.last_tool with None -> `Null | Some name -> `String name);
-    "updated_at_unix", `Float preview.updated_at]
+    "updated_at_unix", `Float preview.updated_at;
+    "preparation",Option.fold ~none:`Null ~some:preparation_to_json preview.preparation]

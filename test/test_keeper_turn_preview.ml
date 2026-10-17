@@ -331,10 +331,93 @@ let test_released_source_position_through_turns_decoder () =
       (contains (current ()).text_tail "exact-secret"))
 ;;
 
+let test_preparation_scopes_are_visible_owned_and_do_not_dispatch () =
+  Eio_main.run (fun _ ->
+    let module Preview = Keeper_turn_preview in
+    let name = "preparation-owner" in
+    let writer = Some (reset name ~now:0.) in
+    let turn_ref = Ids.Turn_ref.make ~trace_id:"preparation-trace" ~absolute_turn:7 in
+    let current () = Option.get (Preview.current ~keeper_name:name) in
+    let payload () = Yojson.Safe.Util.member "preparation" (Preview.to_json (current ())) in
+    let state () = Yojson.Safe.Util.(payload () |> member "state" |> to_string) in
+    let scoped phase operation = Preview.with_preparation_result
+        ~writer ~turn_ref:(Some turn_ref) ~phase operation in
+    let result = scoped Preview.Tool_preparation (fun () ->
+      Alcotest.(check string) "the actual running scope is published before it returns" "active" (state ());
+      Alcotest.(check bool) "wire identity is the owner-supplied turn" true
+        (Yojson.Safe.Util.member "turn_ref" (payload ()) = Ids.Turn_ref.to_yojson turn_ref);
+      let result = scoped Preview.Skill_preparation (fun () ->
+        Alcotest.(check bool) "nested Skill preparation owns the live phase" true
+          (Option.exists (fun (preparation : Preview.preparation) ->
+             preparation.phase = Preview.Skill_preparation
+             && preparation.state = Preview.Preparation_active) (current ()).preparation);
+        Ok "prepared") in
+      Alcotest.(check bool) "completed child restores the active parent" true
+        (Option.exists (fun (preparation : Preview.preparation) ->
+           preparation.phase = Preview.Tool_preparation
+           && preparation.state = Preview.Preparation_active) (current ()).preparation);
+      result) in
+    Alcotest.(check (result string string)) "observation preserves the result" (Ok "prepared") result;
+    Alcotest.(check string) "completion is recorded without implying dispatch" "prepared" (state ());
+    Alcotest.(check bool) "no model attempt was invented" true ((current ()).runtime_id = None);
+    Alcotest.(check bool) "the settled scope carries its own measured span" true
+      (match Yojson.Safe.Util.member "elapsed_ns" (payload ()) with `String _ -> true | _ -> false);
+    ignore (scoped Preview.Tool_preparation (fun () ->
+      Preview.note_attempt ~writer ~now:4. ~runtime_id:"actual-runtime";
+      Ok ()));
+    Alcotest.(check bool) "late preparation completion cannot replace actual provider activity" true
+      ((current ()).preparation = None && (current ()).activity = Preview.Awaiting_response);
+    ignore (scoped Preview.Tool_preparation (fun () ->
+      let successor = Some (reset name ~now:5.) in
+      Preview.note_tool ~writer:successor ~now:6. "actual-tool";
+      Ok ()));
+    Alcotest.(check (option string)) "old writer cannot replace the successor" (Some "actual-tool")
+      (current ()).last_tool;
+    Alcotest.(check bool) "successor does not inherit old preparation" true ((current ()).preparation = None))
+;;
+
+let test_preparation_error_exception_and_cancellation_keep_their_outcomes () =
+  Eio_main.run (fun _ ->
+    let module Preview = Keeper_turn_preview in
+    let name = "preparation-outcomes" in
+    let writer = Some (reset name ~now:0.) in
+    let scoped operation = Preview.with_preparation_result
+        ~writer ~turn_ref:None ~phase:Preview.Context_preparation operation in
+    let state () = Yojson.Safe.Util.(Preview.to_json
+        (Option.get (Preview.current ~keeper_name:name)) |> member "preparation" |> member "state" |> to_string) in
+    let rejected : (unit,string) result = scoped (fun () -> Error "original refusal") in
+    Alcotest.(check (result unit string)) "typed error is unchanged" (Error "original refusal") rejected;
+    Alcotest.(check string) "refused preparation is no longer active" "rejected" (state ());
+    let expected = Failure "private preparation failure" in
+    (match scoped (fun () -> raise expected) with
+     | _ -> Alcotest.fail "preparation exception was swallowed"
+     | exception error -> Alcotest.(check bool) "original exception is preserved" true (error == expected));
+    Alcotest.(check string) "raised scope is distinguished from rejection" "raised" (state ());
+    let entered,enter = Eio.Promise.create () in
+    let never,_ = Eio.Promise.create () in
+    Eio.Fiber.first
+      (fun () -> ignore (scoped (fun () ->
+        Eio.Promise.resolve enter ();
+        Eio.Promise.await never;
+        Ok ())))
+      (fun () -> Eio.Promise.await entered);
+    Alcotest.(check string) "cancelled operation leaves a settled cancellation" "cancelled" (state ());
+    let json = Preview.to_json (Option.get (Preview.current ~keeper_name:name)) in
+    Alcotest.(check bool) "pre-context identity stays unknown" true
+      (Yojson.Safe.Util.(json |> member "preparation" |> member "turn_ref") = `Null);
+    Alcotest.(check bool) "exception and refusal text are not emitted as preparation metadata" false
+      (contains (Yojson.Safe.to_string json) "private preparation failure"
+       || contains (Yojson.Safe.to_string json) "original refusal"))
+;;
+
 let () =
   Alcotest.run "keeper_turn_preview"
     [ ( "keeper-turn-preview"
-      , [ Alcotest.test_case "actual released position through turns decoder" `Quick
+      , [ Alcotest.test_case "preparation scopes are visible and keep their actual owner" `Quick
+            test_preparation_scopes_are_visible_owned_and_do_not_dispatch
+        ; Alcotest.test_case "preparation errors, exceptions and cancellation retain their outcomes" `Quick
+            test_preparation_error_exception_and_cancellation_keep_their_outcomes
+        ; Alcotest.test_case "actual released position through turns decoder" `Quick
             test_released_source_position_through_turns_decoder
         ; Alcotest.test_case "late execution preserves successor preview and redactor" `Quick
             test_late_execution_keeps_successor_preview_and_redactor

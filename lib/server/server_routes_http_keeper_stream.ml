@@ -4200,7 +4200,36 @@ let handle_keeper_ask_answer ~actor state request reqd =
    back come from the rows it was given, so no surface ever matches on label
    text and rewording a choice cannot orphan an answer. *)
 let handle_keeper_asks_list state request reqd =
-  let base_path = (Mcp_server.workspace_config state).base_path in
+  let config = Mcp_server.workspace_config state in
+  let expected = Uri.query (Uri.of_string request.Httpun.Request.target)
+    |> List.filter (fun (name,_) -> name="expected_base_path" || name="expected_masc_root") in
+  let precondition = match expected with
+    | [] -> Workspace.validate_expected_workspace ~config (`Assoc [])
+    | _ ->
+      (match List.assoc_opt "expected_base_path" expected, List.assoc_opt "expected_masc_root" expected with
+       | Some [base], Some [root] when List.length expected=2 ->
+         Workspace.validate_expected_workspace ~config (`Assoc ["expected_workspace",
+           `Assoc ["base_path",`String base;"masc_root",`String root]])
+       | _ -> Error Workspace.Invalid_workspace_precondition) in
+  match precondition with
+  | Error Workspace.Invalid_workspace_precondition ->
+    respond_json_value_with_cors ~status:`Bad_request request reqd
+      (keeper_chat_stream_error_json "expected_base_path and expected_masc_root must each occur once")
+  | Error Workspace.Workspace_precondition_failed ->
+    respond_json_value_with_cors ~status:`Conflict request reqd
+      (keeper_chat_stream_error_json "workspace precondition failed")
+  | Ok _ ->
+  let paths =
+    try
+      let base_path = Unix.realpath config.base_path in
+      Ok (base_path, `Assoc ["base_path",`String base_path;
+        "masc_root",`String (Unix.realpath (Workspace.masc_dir config))]) with
+    | Unix.Unix_error _ -> Error "workspace paths are unavailable" in
+  match paths with
+  | Error detail -> respond_json_value_with_cors ~status:`Service_unavailable request reqd
+      (keeper_chat_stream_error_json detail)
+  | Ok (base_path, workspace) ->
+  let state_ready = (Server_startup_state.snapshot ()).state_ready in
   let include_resolved =
     Server_utils.bool_query_param request "include_resolved" ~default:false
   in
@@ -4221,6 +4250,8 @@ let handle_keeper_asks_list state request reqd =
           (`Assoc
             [
               ("scope", `String "keeper");
+              ("workspace", workspace);
+              ("state_ready", `Bool state_ready);
               ("keeper", `String keeper_name);
               ("open_count", `Int (Keeper_ask_store.open_ask_count ~base_path ~keeper_name));
               ("returned", `Int (List.length rows));
@@ -4246,6 +4277,8 @@ let handle_keeper_asks_list state request reqd =
         (`Assoc
           [
             ("scope", `String "fleet");
+            ("workspace", workspace);
+            ("state_ready", `Bool state_ready);
             ("keeper", `Null);
             ("keeper_count", `Int (List.length keepers));
             ("open_count", `Int open_total);

@@ -40,7 +40,7 @@ Each requested source starts once and settles once. The sources are:
 | workspace | Initial server identity/readiness probe |
 | dashboard | Dashboard snapshot and its preview identity verification |
 | confirmations | Requested approval listing |
-| questions | Questions listing and its early-delivery identity verification |
+| questions | Questions listing and its response-bound workspace/readiness verification |
 | keepers | Requested roster, its identity verification and Candle reading |
 | view data | Other reads required by the current surface, grouped together |
 | workspace verification | Final identity probe after the independent reads join |
@@ -103,6 +103,35 @@ took 2046.113 ms and 2109.435 ms. Its scheduled 0.1s frames showed the new healt
 the baseline still showed the previous health at the scheduled 0.5s frames.
 The experiment demonstrates removal of the imposed sibling wait. It does not
 measure a general or production speedup, or the baseline's exact admission clock.
+
+## Workspace-bound question reads
+
+The TUI sends both canonical `expected_base_path` and `expected_masc_root` on
+each question read. The server checks the pair against its receiving config
+before Keeper lookup or question scanning. Partial/duplicate fields return 400;
+another workspace returns 409. Named and fleet responses carry the actual
+canonical roots in `workspace` and the server's observed `state_ready`.
+
+The decoder requires one complete matching workspace and exactly one true
+readiness field, including for an empty list. Missing, foreign, ambiguous or
+booting responses remain failed reads and retain the previous questions. A
+matching response can therefore enter the existing early-delivery path without
+another health request. Its refresh ticket, workspace authority and question
+read receipt still govern admission; cold-start reads retain terminal admission.
+
+| Ask-specific request path | Before | To-Be implementation |
+|---|---|---|
+| Warm question read before early delivery | Question GET, then health GET | One workspace-bound question GET |
+| Question reload after an answer | Health GET, question GET, health GET | One workspace-bound question GET |
+
+These are source-level request counts, excluding the full refresh's shared
+identity probes and the answer write's existing admission check. They do not
+establish elapsed-time savings. The actual question/choice IDs and answer
+recording/delivery receipts retain their meanings. For Before/After, freeze the
+same original question, workspace, viewport and delayed endpoint behavior;
+record actual requests, question state admission, full-refresh completion and
+manually inspected native frames. Keep foreign-workspace, booting, failed and
+unfinished attempts alongside valid reads.
 
 ## Collect comparable before/after evidence
 

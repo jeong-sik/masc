@@ -3531,16 +3531,18 @@ let fetch_git_diff ?repo ~(host : string) ~(port : int)
     Open questions only. The rows carry choice ids next to labels and
     {!post_keeper_ask_answer} takes ids back, so nothing on this side ever
     matches a choice by its wording. *)
-let fetch_keeper_asks ?keeper_name ~(host : string) ~(port : int) () :
+let fetch_keeper_asks ?keeper_name ~(expected_workspace : Masc.Tui_decode.server_identity)
+    ~(host : string) ~(port : int) () :
     (Masc.Tui_decode_asks.asks_snapshot, string) result =
   (* No keeper named means the whole fleet. An operator opening this surface
      does not know which Keeper is stuck yet, and asking them to pick a name
      first is asking them to guess. *)
   let path =
     match keeper_name with
-    | None -> "/api/v1/keepers/asks"
+    | None -> "/api/v1/keepers/asks?" ^ expected_workspace_query expected_workspace
     | Some name ->
-        Printf.sprintf "/api/v1/keepers/asks?name=%s" (percent_encode_query_value name)
+        Printf.sprintf "/api/v1/keepers/asks?name=%s&%s" (percent_encode_query_value name)
+          (expected_workspace_query expected_workspace)
   in
   match http_get ~host ~port ~path with
   | Error detail -> Error detail
@@ -3555,7 +3557,9 @@ let fetch_keeper_asks ?keeper_name ~(host : string) ~(port : int) () :
       Error (refusal ~status_code:status ~body)
   | Ok (_, body) -> (
       match Yojson.Safe.from_string body with
-      | json -> Masc.Tui_decode_asks.decode_asks_snapshot json
+      | json -> Masc.Tui_decode_asks.decode_asks_snapshot
+          ~expected_base_path:(Masc_tui_types.canonical_path expected_workspace.sid_base_path)
+          ~expected_masc_root:(Masc_tui_types.canonical_path expected_workspace.sid_masc_root) json
       | exception Yojson.Json_error detail -> Error ("asks were not JSON: " ^ detail))
 
 (** Browser Lane shares the authenticated TUI transport. Reads are POST because

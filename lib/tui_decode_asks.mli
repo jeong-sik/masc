@@ -56,10 +56,18 @@ type asks_snapshot = {
   asn_rows : ask_row list;
 }
 
-val decode_asks_snapshot : Yojson.Safe.t -> (asks_snapshot, string) result
+val decode_asks_snapshot :
+  expected_base_path:string ->
+  expected_masc_root:string ->
+  Yojson.Safe.t ->
+  (asks_snapshot, string) result
 (** A row whose mode or free-text shape is unknown fails the decode rather
     than defaulting: a surface that guessed would offer the operator a control
-    the server will refuse. *)
+    the server will refuse. Both expected paths are canonical absolute paths.
+    The response must carry exactly one matching [workspace] object with one
+    [base_path] and one [masc_root]; missing, duplicate or foreign identity is
+    an error even when the question list is empty. Exactly one [state_ready]
+    field must be [true]; a booting or unverified response cannot clear questions. *)
 
 type ask_answer_delivery =
   | Ask_wake_stored

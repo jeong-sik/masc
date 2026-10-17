@@ -4858,6 +4858,7 @@
 (include stanzas/test_masc_ask_tool_surface.inc)
 
 (include stanzas/test_tui_ask_projection.inc)
+(include stanzas/test_keeper_asks_http.inc)
 
 (include stanzas/test_tui_ask_context_block.inc)
 

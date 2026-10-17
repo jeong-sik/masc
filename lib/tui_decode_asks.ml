@@ -158,7 +158,24 @@ let decode_ask_row json =
       ar_resolution;
     }
 
-let decode_asks_snapshot json =
+let decode_asks_snapshot ~expected_base_path ~expected_masc_root json =
+  let* () =
+    match json with
+    | `Assoc fields ->
+      let* () = match List.filter (fun (name,_) -> String.equal name "state_ready") fields with
+        | [_, `Bool true] -> Ok ()
+        | _ -> Error "asks: response workspace readiness is unconfirmed" in
+      (match List.filter (fun (name,_) -> String.equal name "workspace") fields with
+       | [_, `Assoc workspace] when List.length workspace=2 ->
+         (match List.assoc_opt "base_path" workspace, List.assoc_opt "masc_root" workspace with
+          | Some (`String base), Some (`String root)
+            when expected_base_path<>"" && expected_masc_root<>"" &&
+              not (Filename.is_relative expected_base_path) &&
+              not (Filename.is_relative expected_masc_root) &&
+              String.equal base expected_base_path && String.equal root expected_masc_root -> Ok ()
+          | _ -> Error "asks: response workspace does not match this request")
+       | _ -> Error "asks: one complete response workspace is required")
+    | _ -> Error "asks: response must be an object" in
   let asn_keeper = ask_string_opt json "keeper" in
   let* asn_open_count = ask_int json "open_count" in
   let* row_items = ask_list json "asks" in

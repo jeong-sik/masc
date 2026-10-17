@@ -566,7 +566,7 @@ let test_followup_reads_exact_source_without_waking () =
   let entered = observe () |> Wake.followup_to_json in
   check bool "original source turn entry is observed" true
     (Yojson.Safe.Util.member "turn_started_at" entered <> `Null);
-  let left, right = Eio.Fiber.both observe observe in
+  let left, right = Eio.Fiber.pair observe observe in
   check string "concurrent native reader results retain the same exact source"
     left.stimulus_id right.stimulus_id;
   let other_payload = {Keeper_event_queue.ask_id="other-question"; channel=ask.continuation} in

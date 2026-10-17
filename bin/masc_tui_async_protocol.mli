@@ -251,6 +251,7 @@ type async_msg =
       workspace_authority * string * Masc_tui_operator_projection.Listing_order.ticket option * Http_refresh_order.ticket
       * (Masc.Tui_decode.server_identity, string) result option
         (* The last identity its probes read, if any. *)
+      * Surface_read_order.request
   | Board_post_refresh_done of
       Masc_tui_board_detail.request * (board_post * board_comment list * string option, string) result
   | Approval_decision_done of
@@ -536,7 +537,7 @@ type async_msg =
      load is in flight, and an answer that did not say whose it was would be
      filed under whoever is selected when it lands. *)
   | Keeper_schedules_loaded of detail_read_request * (schedule_snapshot, string) result
-  | System_logs_loaded of (system_log_snapshot, string) result
+  | System_logs_loaded of Surface_read_order.request * (system_log_snapshot, string) result
   | Schedule_cancel_done of string * (string, string) result
   (* (message, noop): [noop = true] says the verdict already stood. *)
   | Verification_verdict_done of (string * bool, string) result

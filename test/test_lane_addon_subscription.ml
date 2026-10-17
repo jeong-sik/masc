@@ -479,7 +479,14 @@ let shared_turn_inputs_keep_private_sources_and_original_owner () =
         ["masc_wiki_list",`Assoc [];
          "masc_wiki_read",`Assoc ["topic",`String "retained-page"];
          "masc_wiki_search",`Assoc ["query",`String "Reference"];
-         "masc_wiki_lint",`Assoc []]);
+         "masc_wiki_lint",`Assoc []];
+      Sys.remove wiki_root;
+      let missing_wiki = read ~preview () in
+      check_sources [P.Lane_inputs_preparation,P.Prepared;
+        P.Workspace_memory_preparation,P.Prepared;P.Wiki_preparation,P.Prepared];
+      check bool "a truly missing Wiki root remains an observed empty source" true
+        (match missing_wiki.wiki_contents with Keeper_wiki_contents.Listed [] -> true
+         | Off | Listed (_::_) | Unlisted _ -> false));
     check bool "later source repair never erases the original memory failure observation" true
       (List.exists (fun (span : P.preparation_span) ->
         span.preparation.phase=P.Workspace_memory_preparation

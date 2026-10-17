@@ -76,7 +76,7 @@ val entry_json : entry -> Yojson.Safe.t
     failures before replacement are refusable; [Effect_unknown] means a
     checkpoint/ledger replacement occurred but its durability is unconfirmed.
     It must never be reported as proven pre-effect or retried automatically.
-    An exception may also follow an effect, such as a mid-press ledger append. *)
+    A press whose ledger write fails after it began is also [Effect_unknown]. *)
 type error =
   | Activity_disabled
   | Activity_unobserved
@@ -87,6 +87,10 @@ type error =
       (** a file that is there and will not read: a ROM, a cartridge, a
           checkpoint. A path that does not exist is [Invalid_request] --
           the caller named it. *)
+  | Dependency_unavailable of string
+      (** something the request needs is not installed, such as the C-BIOS a
+          cartridge or disk boots from. Nothing was started; the message names
+          what is missing. *)
 
 val error_to_string : error -> string
 
@@ -125,7 +129,7 @@ type transition = {
 (** The medium a load replaced and the one it installed, both read inside
     the critical section the load commits under. A medium is the disk when
     one is in the drive (the slot is empty then), else the cartridge; [None]
-    with no machine or a BIOS-only boot. Two loads that serialise on the lane
+    with no machine or a bare machine. Two loads that serialise on the lane
     see distinct transitions: the second one's [before] is the first one's
     [after]. *)
 
@@ -134,27 +138,43 @@ type loaded = {
   transition : transition;
 }
 
-val load :
-  ledger_dir:string ->
-  roms_dir:string option ->
-  cart_path:string option ->
-  disk_path:string option ->
-  (loaded, error) result
-(** Creates the workspace machine, replacing any previous one. [Some roms_dir]
-    holds the C-BIOS triple (cbios_main_msx2 / cbios_logo_msx2 / cbios_sub),
-    all three required -- a directory missing one is [Unreadable] naming that
-    file, never a machine with an empty ROM in it. [None] means no BIOS and
-    the bus reads 0xFF. The ledger is
-    [ledger_dir/ledger.jsonl], truncated: a new machine starts a new ledger.
+type bios_triple = { main : string; logo : string; sub : string }
+(** The three C-BIOS ROM images, as bytes: main, logo and sub, in the order
+    the core wants them. *)
 
-    [disk_path] plugs a raw .dsk floppy image into drive A and boots it
-    through the warm-up replay: {!disk_boot_frames} of C-BIOS, then
-    [Msx.boot_disk] re-enters the image's boot sector with the loader
-    running — the path a game's loader reaches its title screen on (the
-    cart-INIT path the core also wires reboots mid-boot). A disk therefore
-    wins over [cart_path] — the slot is one, and the replay wants it empty.
-    A rejected disk boot preserves the previous machine and ledger. Successful
-    loading alone is not evidence that a game reaches an interactive screen. *)
+(** Whether the C-BIOS is there to boot from. *)
+type bios =
+  | Present of bios_triple
+  | Absent  (** none was found in any source *)
+
+type image =
+  | Cartridge_file of string  (** a cartridge image, into the slot *)
+  | Disk_file of string
+      (** a raw .dsk floppy image, into drive A: and booted through the
+          warm-up replay *)
+
+val read_bios : dir:string -> (bios_triple, error) result
+(** Reads [cbios_main_msx2.rom], [cbios_logo_msx2.rom] and [cbios_sub.rom] from
+    [dir]. All three are required: a directory missing one is [Unreadable]
+    naming the first that is absent, never a machine with an empty ROM in it. *)
+
+val load : ledger_dir:string -> bios:bios -> image:image -> (loaded, error) result
+(** Creates the workspace machine from [image], replacing any previous one. The
+    ledger is [ledger_dir/ledger.jsonl], truncated: a new machine starts a new
+    ledger. An image needs a C-BIOS to run: with [Absent] the load is refused as
+    {!Dependency_unavailable} naming the ROMs it lacks, rather than starting a
+    machine that runs blind.
+
+    A [Disk_file] boots through the warm-up replay: {!disk_boot_frames} of
+    C-BIOS, then [Msx.boot_disk] re-enters the image's boot sector with the
+    loader running -- the path a game's loader reaches its title screen on (the
+    cart-INIT path the core also wires reboots mid-boot). A rejected disk boot
+    preserves the previous machine and ledger. Successful loading alone is not
+    evidence that a game reaches an interactive screen.
+
+    A media file or the ledger that cannot be read or created (a directory in
+    place of a file, a permission) is [Unreadable]; the previous machine and
+    ledger are untouched. *)
 
 val eject : unit -> (unit, error) result
 
@@ -195,12 +215,13 @@ val press :
     has no place for is refused before anything is pressed.
 
     A press puts keys down only inside its own call. If recording an edge
-    raises -- the ledger file will not open or will not take the write -- the
-    keys the call put down are released before the exception leaves, and the
-    edge that was not written is not in {!ledger}. Frames the call already ran
-    stay run, and edges it wrote before the failure stay written: the ledger
-    can then hold a key-down with no key-up after it while the machine has
-    that key up, so replaying that ledger no longer reproduces the machine. *)
+    fails -- the ledger file will not open or will not take the write -- the
+    keys the call put down are released and the result is
+    [Error (Effect_unknown _)]; the edge that was not written is not in
+    {!ledger}. Frames the call already ran stay run, and edges it wrote before
+    the failure stay written: the ledger can then hold a key-down with no
+    key-up after it while the machine has that key up, so replaying that
+    ledger no longer reproduces the machine. *)
 
 val ledger : unit -> entry list
 (** Oldest first. Empty when no machine is loaded. *)
@@ -298,8 +319,26 @@ val step_frame : frames:int -> (frame * entry list * change_mark, error) result
     detour a human eye needs; the game's truth is in memory, and the core
     already holds all of it. *)
 
+(** A logical address: 0x0000-0xFFFF and nothing else. *)
+module Address : sig
+  type t
+
+  val to_int : t -> int
+
+  val to_hex : t -> string
+  (** Four lowercase hex digits (["e000"], ["0000"]): the spelling a keeper
+      writes into [masc_msx_peek], so an address read from {!peek} or
+      {!ram_diff} output can be handed back unchanged. *)
+
+  val parse : string -> (t, string) result
+  (** Hex digits with an optional ["0x"] prefix ([e000], [0xE000]); digits
+      alone are hex too, so [4096] is 0x4096. Case and surrounding blanks are
+      ignored. A character that is not a hex digit, an empty digit string, or
+      a value above 0xFFFF is [Error] naming the input. *)
+end
+
 type ram_change = {
-  address : int;  (** logical address of the first changed byte *)
+  address : Address.t;  (** logical address of the first changed byte *)
   length : int;  (** consecutive changed bytes *)
   from_hex : string;  (** snapshot bytes, hex pairs *)
   to_hex : string;  (** current bytes, hex pairs *)
@@ -314,11 +353,11 @@ type ram_diff = {
 val peek_max_bytes : int
 val ram_diff_max_runs : int
 
-val peek : address:int -> length:int -> (string, error) result
-(** Reads [length] (1..{!peek_max_bytes}) bytes at a logical address
-    (0x0000-0xFFFF) as hex pairs, and takes a full 64K snapshot of the
-    machine for the next {!ram_diff}. Read-only: writing is the cheat the
-    lane refuses (RFC-0439). *)
+val peek : address:Address.t -> length:int -> (string, error) result
+(** Reads [length] (1..{!peek_max_bytes}) bytes starting at [address] as hex
+    pairs, and takes a full 64K snapshot of the machine for the next
+    {!ram_diff}. The range must end inside the address space. Read-only:
+    writing is the cheat the lane refuses (RFC-0439). *)
 
 val ram_diff : unit -> (ram_diff, error) result
 (** Changes since the last {!peek}: consecutive differing bytes as runs with
@@ -387,10 +426,6 @@ type checkpoint_info = {
           answered by reaching this record at all. This field makes the
           answer explicit for a caller comparing surfaces. *)
   version : int;  (** the checkpoint format version, currently 1 *)
-  frame : int option;
-      (** the saved frame counter. Checkpoint version 1 does not record it —
-          reading it would mean decoding the machine — so [None] until a
-          format that carries it. *)
   saved_at_unix : float option;
       (** the checkpoint file's modification time: the moment the slot was
           written. Absent when the file cannot be stat'ed. *)
@@ -454,8 +489,10 @@ type disk_export = {
 
 val export_disk : catalog_dir:string -> filename:string -> (disk_export, error) result
 (** Export the currently mounted floppy, including guest writes, to a new .dsk
-    in an existing catalog. The name is a simple ASCII stem (letters, digits,
-    underscore, hyphen; 1..64 characters) plus lowercase [.dsk].
+    in the catalog. A catalog directory that does not exist yet, as on a fresh
+    volume, is created by the export that needs it. The name is a simple ASCII
+    stem (letters, digits, underscore, hyphen; 1..64 characters) plus lowercase
+    [.dsk].
     Existing destinations, including symlinks, are refused. Machine state,
     input ledger and original media files remain unchanged; no time advances.
     The absolute [catalog_dir] and its ancestors must be real directories,
@@ -466,3 +503,11 @@ val export_disk : catalog_dir:string -> filename:string -> (disk_export, error) 
     destination is visible. This is process-restart persistence, not a promise
     of directory-entry durability across power loss. Filesystem exceptions
     after publication remain exceptions, never pre-effect [error] refusals. *)
+
+module For_testing : sig
+  val load_bare_machine : ledger_dir:string -> (loaded, error) result
+  (** Like {!load} with no C-BIOS and no image: the bus reads 0xFF. A machine
+      to exercise the lane's own calls on. Nothing in the server asks for it;
+      production boots go through {!load}, which refuses an image without a
+      BIOS. *)
+end

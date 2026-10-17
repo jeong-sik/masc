@@ -1899,7 +1899,7 @@
  (name masc_tui_msx_tick)
  (wrapped false)
  (modules masc_tui_msx_tick)
- (libraries masc_tui_types masc_tui_machine_live yojson base64 threads))
+ (libraries masc.msx_wire masc_tui_types masc_tui_machine_live yojson base64 threads))
 
 ;; The spectator's typed read of GET /api/v1/lane-addons/live: one route for
 ;; every machine with a screen (MSX and DOS). Pure decoding, no I/O.
@@ -2581,7 +2581,8 @@
   masc_tui_interactive
   masc_tui_ansi
   masc_tui_graphics
-  masc_tui_image_mosaic))
+  masc_tui_image_mosaic
+  yojson))
 
 ;; RFC-0429 §3.0: the same HTTP client the TUI uses, with no TUI around it.
 ;; A request the server answers in milliseconds is logged by the live TUI as

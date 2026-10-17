@@ -29,13 +29,14 @@ type error =
   | Invalid_request of string
   | Effect_unknown of string
   | Unreadable of string
+  | Dependency_unavailable of string
 
 let error_to_string = function
   | Activity_disabled -> "machines.msx is off; enable it before new machine work"
   | Activity_unobserved -> "Machine activity configuration is unavailable"
   | No_machine -> "no MSX machine is loaded: call masc_msx_load first"
   | Invalid_request message -> message
-  | Unreadable message | Effect_unknown message -> message
+  | Unreadable message | Effect_unknown message | Dependency_unavailable message -> message
 ;;
 
 let ( let* ) = Result.bind
@@ -339,6 +340,14 @@ let append_entry st e =
 
 let read_file path = In_channel.with_open_bin path In_channel.input_all
 
+(* A file that is there and will not read (a directory, a permission, a short
+   read) is a typed refusal. It happens before the machine is replaced, so the
+   previous machine and its ledger are untouched. *)
+let read_file_result path =
+  try Ok (read_file path)
+  with Sys_error message -> Error (Unreadable message)
+;;
+
 let rec mkdir_p dir =
   if not (Sys.file_exists dir) then begin
     mkdir_p (Filename.dirname dir);
@@ -346,30 +355,46 @@ let rec mkdir_p dir =
   end
 ;;
 
-(* No directory means no BIOS: the bus reads 0xFF. A directory must hold the
-   whole C-BIOS triple -- a missing logo or sub ROM used to board as an empty
-   string and the machine booted with a hole in it, which is no evidence of
-   anything. The first file that is not there names the refusal. *)
-let load_roms (roms_dir : string option) =
-  match roms_dir with
-  | None -> Ok []
-  | Some dir -> (
-    match List.find_opt (fun f -> not (Sys.file_exists (Filename.concat dir f))) bios_files with
-    | Some missing -> Error (Unreadable (Printf.sprintf "no %s in %s" missing dir))
-    | None -> Ok (List.map (fun f -> read_file (Filename.concat dir f)) bios_files))
+type bios_triple = { main : string; logo : string; sub : string }
+
+type bios =
+  | Present of bios_triple
+  | Absent
+
+type image =
+  | Cartridge_file of string
+  | Disk_file of string
+
+(* A directory must hold the whole C-BIOS triple -- a missing logo or sub ROM
+   used to board as an empty string and the machine booted with a hole in it,
+   which is no evidence of anything. The first file that is not there names
+   the refusal. *)
+let read_bios ~dir =
+  match List.find_opt (fun f -> not (Sys.file_exists (Filename.concat dir f))) bios_files with
+  | Some missing -> Error (Unreadable (Printf.sprintf "no %s in %s" missing dir))
+  | None ->
+    let read f = read_file_result (Filename.concat dir f) in
+    let* main = read "cbios_main_msx2.rom" in
+    let* logo = read "cbios_logo_msx2.rom" in
+    let* sub = read "cbios_sub.rom" in
+    Ok { main; logo; sub }
 ;;
 
 let load_cart = function
   | None -> Ok None
   | Some path ->
-    if Sys.file_exists path then Ok (Some (path, read_file path))
+    if Sys.file_exists path then
+      let* bytes = read_file_result path in
+      Ok (Some (path, bytes))
     else Error (Unreadable (Printf.sprintf "cartridge not found: %s" path))
 ;;
 
 let load_disk = function
   | None -> Ok None
   | Some path ->
-    if Sys.file_exists path then Ok (Some (path, read_file path))
+    if Sys.file_exists path then
+      let* bytes = read_file_result path in
+      Ok (Some (path, bytes))
     else Error (Unreadable (Printf.sprintf "disk not found: %s" path))
 ;;
 
@@ -407,16 +432,30 @@ let medium_of (st : machine option) =
      | None, None -> None)
 ;;
 
-let load ~ledger_dir ~(roms_dir : string option) ~cart_path ~disk_path =
-  let* () = require_activity () in
+(* A new machine starts a new ledger: create its directory and truncate the
+   file. Both fail at the open, before the ledger changes, and the previous
+   machine is still installed, so a failure here is a refusal. *)
+let fresh_ledger ledger_dir =
+  let ledger_path = Filename.concat ledger_dir "ledger.jsonl" in
+  try
+    mkdir_p ledger_dir;
+    Out_channel.with_open_bin ledger_path (fun _ -> ());
+    Ok ledger_path
+  with Sys_error message -> Error (Unreadable message)
+;;
+
+(* The machine installs from a BIOS (three ROMs, or none for a bare machine)
+   and at most one image. A disk wins over a cartridge in the old call shape;
+   the image type carries only one, so that rule is gone. *)
+let install ~ledger_dir ~roms ~cart_path ~disk_path =
   locked (fun () ->
     (* Read under the lock the load commits under: two loads that serialise
        here see the machine each one replaced, not the one both started
        from. *)
     let before = medium_of !state in
-    match load_roms roms_dir, load_cart cart_path, load_disk disk_path with
-    | Error e, _, _ | _, Error e, _ | _, _, Error e -> Error e
-    | Ok roms, Ok cart, Ok disk ->
+    match load_cart cart_path, load_disk disk_path with
+    | Error e, _ | _, Error e -> Error e
+    | Ok cart, Ok disk ->
       let m = Msx.create ~machine:{ Msx.ram_kb = 512; vram_kb = 128; roms } in
       (* A disk wins over a cartridge: the image boots through the warm-up
          replay, which wants the cartridge slot empty -- a C-BIOS boot that
@@ -437,10 +476,9 @@ let load ~ledger_dir ~(roms_dir : string option) ~cart_path ~disk_path =
       | Error e -> Error e
       | Ok pre_frames ->
         Msx.step m ~frames:boot_frames;
-        mkdir_p ledger_dir;
-        let ledger_path = Filename.concat ledger_dir "ledger.jsonl" in
-        (* A new machine starts a new ledger: truncate. *)
-        Out_channel.with_open_bin ledger_path (fun _ -> ());
+        match fresh_ledger ledger_dir with
+        | Error e -> Error e
+        | Ok ledger_path ->
         let st =
           { m
           ; incarnation = fresh_incarnation ()
@@ -462,6 +500,31 @@ let load ~ledger_dir ~(roms_dir : string option) ~cart_path ~disk_path =
         Ok { observation = observe st
            ; transition = { before; after = medium_of (Some st) } })
 ;;
+
+let bios_missing_message image =
+  let name = match image with Cartridge_file path | Disk_file path -> Filename.basename path in
+  Printf.sprintf
+    "no C-BIOS is available, so %s cannot boot: it needs %s"
+    name (String.concat ", " bios_files)
+;;
+
+let load ~ledger_dir ~bios ~image =
+  let* () = require_activity () in
+  match bios with
+  | Absent -> Error (Dependency_unavailable (bios_missing_message image))
+  | Present { main; logo; sub } ->
+    let roms = [ main; logo; sub ] in
+    (match image with
+     | Cartridge_file path -> install ~ledger_dir ~roms ~cart_path:(Some path) ~disk_path:None
+     | Disk_file path -> install ~ledger_dir ~roms ~cart_path:None ~disk_path:(Some path))
+;;
+
+module For_testing = struct
+  let load_bare_machine ~ledger_dir =
+    let* () = require_activity () in
+    install ~ledger_dir ~roms:[] ~cart_path:None ~disk_path:None
+  ;;
+end
 
 let eject () =
   locked (fun () ->
@@ -521,7 +584,7 @@ type until_change = {
 let step_until_change ~max_frames =
   let* () = require_activity () in
   with_machine (fun st ->
-    match check_frames ~what:"frames" max_frames with
+    match check_frames ~what:"max_frames" max_frames with
     | Error e -> Error e
     | Ok () ->
       let cfg = Screen_change.default in
@@ -592,6 +655,21 @@ let releasing_on_raise st keys body =
     Printexc.raise_with_backtrace exn backtrace
 ;;
 
+(* An edge the ledger file would not take (ENOSPC, EIO, a replaced path). The
+   call may already have run frames and written earlier edges, so the effect
+   is unknown rather than refused: the ledger can then hold a key-down with no
+   key-up. The keys are already released when this runs. *)
+let ledger_write_failed detail =
+  Error (Effect_unknown ("input ledger write failed after the press began: " ^ detail))
+;;
+
+let recording_ledger body =
+  try body () with
+  | Sys_error message -> ledger_write_failed message
+  | Unix.Unix_error (error, fn, arg) ->
+    ledger_write_failed (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message error))
+;;
+
 let press ~who ~keys ~hold_frames ~step_frames ~sequence =
   let* () = require_activity () in
   with_machine (fun st ->
@@ -614,26 +692,28 @@ let press ~who ~keys ~hold_frames ~step_frames ~sequence =
              a chord held together. *)
           (* See Msx.set_key: press_all just checked every key, so these cannot miss. *)
           List.iter (fun k -> ignore (Msx.set_key st.m k ~pressed:false : bool)) keys;
-          releasing_on_raise st keys (fun () ->
-            List.iter (tap_one st ~who ~hold_frames ~step_frames) keys;
-            Ok (observe st))
+          recording_ledger (fun () ->
+            releasing_on_raise st keys (fun () ->
+              List.iter (tap_one st ~who ~hold_frames ~step_frames) keys;
+              Ok (observe st)))
         | Ok () ->
-          releasing_on_raise st keys (fun () ->
-            List.iter
-              (fun k ->
-                append_entry st
-                  { at_frame = st.frame; who; key_name = key_to_string k; down = true })
-              keys;
-            advance st hold_frames;
-            List.iter
-              (fun k ->
-                (* See Msx.set_key: the key went down a moment ago, so its release cannot miss. *)
-                ignore (Msx.set_key st.m k ~pressed:false : bool);
-                append_entry st
-                  { at_frame = st.frame; who; key_name = key_to_string k; down = false })
-              keys;
-            advance st (step_frames - hold_frames);
-            Ok (observe st))))
+          recording_ledger (fun () ->
+            releasing_on_raise st keys (fun () ->
+              List.iter
+                (fun k ->
+                  append_entry st
+                    { at_frame = st.frame; who; key_name = key_to_string k; down = true })
+                keys;
+              advance st hold_frames;
+              List.iter
+                (fun k ->
+                  (* See Msx.set_key: the key went down a moment ago, so its release cannot miss. *)
+                  ignore (Msx.set_key st.m k ~pressed:false : bool);
+                  append_entry st
+                    { at_frame = st.frame; who; key_name = key_to_string k; down = false })
+                keys;
+              advance st (step_frames - hold_frames);
+              Ok (observe st)))))
 ;;
 
 let ledger () =
@@ -732,11 +812,60 @@ let peek_max_bytes = 256
 let ram_diff_max_runs = 64
 let address_space = 0x10000
 
+(* A logical address is 16 bits. The type holds only values in that range, so
+   [address + length] cannot wrap and the 64K snapshot cannot be indexed out
+   of bounds. *)
+module Address = struct
+  type t = int
+
+  let max_value = address_space - 1
+  let to_int address = address
+
+  (* Four lowercase hex digits, the spelling [parse] reads back. *)
+  let to_hex address = Printf.sprintf "%04x" address
+
+  let hex_digit_value = function
+    | '0' .. '9' as c -> Some (Char.code c - Char.code '0')
+    | 'a' .. 'f' as c -> Some (Char.code c - Char.code 'a' + 10)
+    | _ -> None
+  ;;
+
+  (* Hex only, as memory is talked about and as the DOS lane reads it: an
+     optional "0x", then hex digits, so "4096" is 0x4096. The value is bounded
+     while it is read, so no spelling can wrap an int. *)
+  let parse input =
+    let text = String.lowercase_ascii (String.trim input) in
+    let digits =
+      if String.starts_with ~prefix:"0x" text then String.sub text 2 (String.length text - 2)
+      else text
+    in
+    let not_hex () =
+      Error
+        (Printf.sprintf
+           "address %S is not hex: write hex digits with or without 0x (e000, 0xE000); \
+            digits alone are hex too, so 4096 is 0x4096"
+           input)
+    in
+    let rec accumulate value i =
+      if i = String.length digits then Ok value
+      else
+        match hex_digit_value digits.[i] with
+        | None -> not_hex ()
+        | Some digit ->
+          let value = (value * 16) + digit in
+          if value > max_value then
+            Error (Printf.sprintf "address %S is outside 0x0000-0xFFFF" input)
+          else accumulate value (i + 1)
+    in
+    if digits = "" then not_hex () else accumulate 0 0
+  ;;
+end
+
 (* 스냅샷은 머신이 아니라 레인이 든다: peek을 부른 시점의 세계 그 자체가
    기준이고, 머신 교체(load/restore) 후의 diff도 "달라졌다"로 옳다. *)
 let last_peek : Bytes.t option ref = ref None
 
-type ram_change = { address : int; length : int; from_hex : string; to_hex : string }
+type ram_change = { address : Address.t; length : int; from_hex : string; to_hex : string }
 
 let hex_pairs bytes lo hi =
   String.concat ""
@@ -744,12 +873,12 @@ let hex_pairs bytes lo hi =
 ;;
 
 let peek ~address ~length =
-  if address < 0 || length < 1 || length > peek_max_bytes
-     || address + length > address_space then
+  let address = Address.to_int address in
+  if length < 1 || length > peek_max_bytes || address + length > address_space then
     Error
       (Invalid_request
-         (Printf.sprintf "peek needs 1..%d bytes inside 0x0000-0xFFFF, got %d..%d"
-            peek_max_bytes address (address + length)))
+         (Printf.sprintf "peek needs 1..%d bytes inside 0x0000-0xFFFF, got %d bytes at %d"
+            peek_max_bytes length address))
   else
     with_machine (fun st ->
       let snap = Bytes.create address_space in
@@ -1039,7 +1168,6 @@ let core =
 type checkpoint_info = {
   exists : bool;
   version : int;
-  frame : int option;
   saved_at_unix : float option;
   mtime_utc : string option;
   core_sha : string option;
@@ -1105,11 +1233,6 @@ let checkpoint_info ~path =
              frame >= 0 && who <> "" && key <> ""
            | _ -> false)
         | _ -> false in
-      let optional_int name =
-        match find name with
-        | None | Some `Null -> Ok None
-        | Some (`Int value) -> Ok (Some value)
-        | Some _ -> invalid (name ^ " must be an integer or null") in
       let optional_string name =
         match find name with
         | None | Some `Null -> Ok None
@@ -1130,7 +1253,6 @@ let checkpoint_info ~path =
       else if version <> 1
       then invalid (Printf.sprintf "unsupported version %d" version)
       else
-        let* frame = optional_int "frame" in
         let* core_sha = optional_string "core_sha" in
         let* cartridge = optional_string "cartridge" in
         let* disk = optional_string "disk" in
@@ -1147,7 +1269,6 @@ let checkpoint_info ~path =
         Ok
           { exists = true
           ; version
-          ; frame
           ; saved_at_unix
           ; mtime_utc
           ; core_sha
@@ -1198,6 +1319,10 @@ let export_disk ~catalog_dir ~filename =
            claim that the operation left no effect. *)
         let prepared =
           try
+            (* A fresh volume has no carts/ yet, and this export is what fills
+               it. The directory is made here, before the ancestor check, so
+               that check still sees every component as a real directory. *)
+            if not (Sys.file_exists catalog_dir) then mkdir_checkpoint_directory catalog_dir;
             match real_directories catalog_dir with
             | Error _ as e -> e
             | Ok () -> Ok (Filename.open_temp_file ~temp_dir:catalog_dir ".msx-export-" ".tmp")

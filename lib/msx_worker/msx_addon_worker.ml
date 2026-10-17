@@ -20,6 +20,48 @@ let response ?(extra_content = []) result : S.tool_result =
         | Some (Tool_result.Operator_cancelled) -> ["io.github.jeong-sik/masc.machine.failure", `String "failed"] in
       Some (`Assoc (failure @ fields)) }
 
+(* What an exception that reached this edge leaves behind for the operator: the
+   exception and where it was raised. The result carries only the exception's
+   text, so without this line the raise site is lost. A log call can itself
+   raise (a terminal that hung up), and that must not replace the typed result
+   the caller is waiting for. *)
+let report_contained ~what exn backtrace =
+  try
+    Log.MsxLog.error "%s raised an unexpected exception: %s\n%s" what
+      (Printexc.to_string exn) (Printexc.raw_backtrace_to_string backtrace)
+  with
+  | Eio.Cancel.Cancelled _ as cancelled -> raise cancelled
+  | _ -> ()
+
+(* The one place an escaping exception becomes a result. This process owns the
+   only machine and RAM-only state: an exception that leaves a handler ends the
+   process and the machine with it, and container logs are not readable. The
+   machine operations return typed results for the failures they know (a file
+   that will not read, a ledger that will not write); what reaches this edge
+   is a defect, reported as a runtime failure whose effect is unknown because
+   the exception may follow one, and logged with its backtrace. Cancellation is
+   not a failure and passes. *)
+let contain ~tool_name ~start_time run =
+  match run () with
+  | result -> result
+  | exception (Eio.Cancel.Cancelled _ as cancelled) -> raise cancelled
+  | exception exn ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      report_contained ~what:tool_name exn backtrace;
+      response (Tool_result.make_err ~tool_name ~start_time
+        ~class_:Tool_result.Runtime_failure
+        ~effect_disposition:Tool_result.Effect_outcome_unknown
+        ("MSX worker raised an unexpected exception: " ^ Printexc.to_string exn))
+
+let contain_message ~what run =
+  match run () with
+  | result -> result
+  | exception (Eio.Cancel.Cancelled _ as cancelled) -> raise cancelled
+  | exception exn ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      report_contained ~what exn backtrace;
+      Error (what ^ " raised an unexpected exception: " ^ Printexc.to_string exn)
+
 let screen ~tool_name ~start_time ~arguments =
   match Msx_lane.capture () with
   | Error error -> response (Machine.of_lane ~tool_name ~start_time (Error error))
@@ -34,7 +76,7 @@ let screen ~tool_name ~start_time ~arguments =
             "width", `Int frame.width; "height", `Int frame.height;
             "media_type", `String "image/png"] (Ok observation))
 
-let invoke ~base_path ~principal ~(tool : Msx_tool.t) ~arguments =
+let invoke_unguarded ~base_path ~principal ~(tool : Msx_tool.t) ~arguments =
   let actor = match principal with
     | Lane_addon_call_context.Keeper name | Authenticated_agent name | Host_actor name -> name
     | Operator | Anonymous -> Lane_addon_call_context.actor_label principal in
@@ -64,6 +106,10 @@ let invoke ~base_path ~principal ~(tool : Msx_tool.t) ~arguments =
           Tool_result.with_metadata (`Assoc (("io.github.jeong-sik/masc.machine.events", `List (List.rev events)) :: metadata)) result in
     response result
 
+let invoke ~base_path ~principal ~tool ~arguments =
+  contain ~tool_name:(Msx_tool.name tool) ~start_time:(Tool_timing.start ())
+    (fun () -> invoke_unguarded ~base_path ~principal ~tool ~arguments)
+
 let live_snapshot () =
   match Msx_lane.live ~since:None with
   | Msx_lane.Nothing_loaded -> `Assoc ["source_kind", `String "msx_capture"; "state", `String "no_machine"]
@@ -85,7 +131,8 @@ let observation history () =
       "coverage", `List []])
   | Error
       (( Msx_lane.Activity_disabled | Msx_lane.Activity_unobserved
-       | Msx_lane.Invalid_request _ | Msx_lane.Effect_unknown _ | Msx_lane.Unreadable _ ) as error) ->
+       | Msx_lane.Invalid_request _ | Msx_lane.Effect_unknown _ | Msx_lane.Unreadable _
+       | Msx_lane.Dependency_unavailable _ ) as error) ->
     Error (Msx_lane.error_to_string error)
   | Ok capture ->
       let o = capture.Msx_lane.observation in
@@ -136,6 +183,7 @@ let create ~base_path () =
     ~description:"Invoke a declared tool with caller context from the owning host."
     ~input_schema:Lane_addon_call_context.input_schema
     (fun _context _name arguments ->
+      contain_message ~what:"Machine call" (fun () ->
       match Lane_addon_call_context.of_json (Option.value ~default:`Null arguments) with
       | Error message -> Error message
       | Ok call ->
@@ -147,20 +195,22 @@ let create ~base_path () =
                   ~name:schema.name ~args:call.arguments with
               | Error error -> Ok (response (Tool_input_contract.rejection_result error))
               | Ok (arguments, _) -> Ok (invoke ~base_path ~principal:call.principal
-                  ~tool ~arguments)) server in
+                  ~tool ~arguments))) server in
   let server = Server.tool Machine_input_history.tool_name
     ~description:"Read a page of the last observed immutable input history."
     ~input_schema:Machine_input_history.input_schema
     (fun _context _name arguments ->
-      Machine_input_history.read history ~arguments:(Option.value ~default:`Null arguments)
-      |> Result.map (fun data -> {S.content=[];is_error=Some false;structured_content=Some data;_meta=None})) server in
+      contain_message ~what:"Input history read" (fun () ->
+        Machine_input_history.read history ~arguments:(Option.value ~default:`Null arguments)
+        |> Result.map (fun data -> {S.content=[];is_error=Some false;structured_content=Some data;_meta=None}))) server in
   Server.tool "lane_observe" ~description:"Read this worker's MSX screen without advancing the machine."
     ~input_schema:(`Assoc ["type", `String "object"; "properties", `Assoc [
       "binding", `Assoc ["type", `String "object"];
       "sources", `Assoc ["type", `String "array"]]])
     (fun _context _name _arguments ->
-      match Result.bind (observation history ()) Machine_observation_packet.encode with
-      | Error message -> Error message
-      | Ok data ->
-          Ok {S.content=[S.TextContent {type_="text";text=Yojson.Safe.to_string data;annotations=None}];
-              is_error=Some false;structured_content=Some data;_meta=None}) server
+      contain_message ~what:"Screen observation" (fun () ->
+        match Result.bind (observation history ()) Machine_observation_packet.encode with
+        | Error message -> Error message
+        | Ok data ->
+            Ok {S.content=[S.TextContent {type_="text";text=Yojson.Safe.to_string data;annotations=None}];
+                is_error=Some false;structured_content=Some data;_meta=None})) server

@@ -476,14 +476,53 @@ type menu_action =
   | Swap_disk of string
   | Load of string    (* plug this cartridge in *)
 
+let image_names (state : Masc_tui_types.state) = match state.msx_carts with
+  | Masc_tui_types.Carts names -> names
+  | No_carts | Carts_unavailable _ -> []
+
+let is_disk_image name = String.ends_with ~suffix:".dsk" (String.lowercase_ascii name)
+
+(* What the server's inventory answer means for the menu: [Carts] with names, an
+   empty inventory, or a read that failed. A failed read is never an empty
+   list: the menu would then send the operator to fill a volume that may
+   already be full while the real fault is the server or its worker. *)
+let carts_of_inventory (answer : (Yojson.Safe.t, string) result) : Masc_tui_types.msx_carts =
+  match answer with
+  | Error reason -> Masc_tui_types.Carts_unavailable reason
+  | Ok json -> (
+      match Yojson.Safe.Util.member "carts" json with
+      | `List items ->
+          let names = List.filter_map (function `String name -> Some name | _ -> None) items in
+          if List.length names <> List.length items
+          then Masc_tui_types.Carts_unavailable "the cartridge list holds an entry that is not a name"
+          else Masc_tui_types.msx_carts_of_names names
+      | _ -> Masc_tui_types.Carts_unavailable "the server's answer has no cartridge list"
+      | exception Yojson.Safe.Util.Type_error _ ->
+          Masc_tui_types.Carts_unavailable "the server's answer is not an inventory")
+
+(* Why the menu has no image to pick, when it has none. *)
+type media_gap =
+  | Volume_has_no_images
+  | Volume_has_no_disk_images
+  | Inventory_unavailable of string
+
+let media_gap (state : Masc_tui_types.state) =
+  match state.msx_carts, state.msx_menu_mode with
+  | Masc_tui_types.Carts_unavailable reason, (Masc_tui_types.Boot_game | Change_disk) ->
+      Some (Inventory_unavailable reason)
+  | No_carts, (Boot_game | Change_disk) -> Some Volume_has_no_images
+  | Carts _, Boot_game -> None
+  | Carts names, Change_disk ->
+      if List.exists is_disk_image names then None else Some Volume_has_no_disk_images
+
 (* The rows in order: a "watch current" row first when a machine is loaded,
    then one row per cartridge. *)
 let menu_entries (state : Masc_tui_types.state) : Masc_tui_types.msx_menu_entry list =
   let watch = if Option.is_some state.msx_frame then [ Masc_tui_types.Menu_watch Machine_lane.Msx ] else [] in
   let media = match state.msx_menu_mode with
-    | Masc_tui_types.Boot_game -> List.map (fun c -> Masc_tui_types.Menu_load c) state.msx_carts
-    | Change_disk -> state.msx_carts
-        |> List.filter (fun c -> String.ends_with ~suffix:".dsk" (String.lowercase_ascii c))
+    | Masc_tui_types.Boot_game -> List.map (fun c -> Masc_tui_types.Menu_load c) (image_names state)
+    | Change_disk -> image_names state
+        |> List.filter is_disk_image
         |> List.map (fun c -> Masc_tui_types.Menu_swap_disk c) in
   (* The DOS machine is watched from here too, the one door to a machine's
      screen; a disk change is MSX's alone. *)
@@ -578,6 +617,13 @@ let render_menu ~(write : string -> unit) ?status (state : Masc_tui_types.state)
   let rows = max 1 rows and cols = max 1 cols in
   let entries = menu_entries state in
   settle_selection state entries;
+  (* A failed inventory read is shown above the list even when a watch row
+     keeps the list from being empty. *)
+  let status = match status, media_gap state with
+    | Some _, _ -> status
+    | None, Some (Inventory_unavailable reason) ->
+        Some ("cartridge list unavailable: " ^ reason)
+    | None, (Some (Volume_has_no_images | Volume_has_no_disk_images) | None) -> None in
   let buf = Buffer.create 1024 in
   if !image_may_exist then Buffer.add_string buf delete_image;
   Buffer.add_string buf "\027[2J\027[H";
@@ -604,8 +650,13 @@ let render_menu ~(write : string -> unit) ?status (state : Masc_tui_types.state)
   (match entries, entry_rows with
    | _, 0 -> ()
    | [], _ ->
-       line (fit_line cols
-         " no cartridges yet \xe2\x80\x94 an operator fills .masc/msx/carts/ with ROM or .dsk images")
+       line (fit_line cols (match media_gap state with
+         | Some Volume_has_no_images | None ->
+             " no cartridges yet \xe2\x80\x94 an operator places ROM or .dsk images in the MSX Add-on's volume"
+         | Some Volume_has_no_disk_images ->
+             " no .dsk images in the MSX Add-on's volume \xe2\x80\x94 an operator places them there"
+         | Some (Inventory_unavailable _) ->
+             " the cartridge list could not be read; the reason is above"))
    | _, _ ->
        let selected = match state.msx_menu_selected with
          | Some entry -> Option.value (index_in entries entry 0) ~default:0

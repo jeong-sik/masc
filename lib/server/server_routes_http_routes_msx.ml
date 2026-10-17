@@ -15,14 +15,10 @@
 open Server_auth
 module Http = Http_server_eio
 
-(* The body of a refused MSX write: [{ok:false, message}], with [code] first
-   when the caller names one. The caller names it, not the HTTP status: 409 is
-   also the activity gate's answer, under its own codes. *)
-let write_error_json ?code message : Yojson.Safe.t =
-  let fields = ["ok", `Bool false; "message", `String message] in
-  `Assoc (match code with
-    | Some code -> ("code", `String code) :: fields
-    | None -> fields)
+(* The body of a refused MSX write, from the codec the terminal decodes with.
+   The caller names the code, not the HTTP status: 409 is also the activity
+   gate's answer, under its own codes. *)
+let write_error_json ?code message : Yojson.Safe.t = Msx_wire.encode ?code message
 ;;
 
 (* Request-owned workspace admission precedes every MSX effect. The shared
@@ -41,7 +37,7 @@ let decode_write_body ~config ~body =
           Error (`Bad_request, write_error_json "invalid expected_workspace precondition")
       | Error Workspace.Workspace_precondition_failed ->
           Error (`Conflict,
-                 write_error_json ~code:"workspace_precondition_failed"
+                 write_error_json ~code:Msx_wire.Workspace_precondition_failed
                    "workspace precondition failed")
 ;;
 
@@ -58,41 +54,79 @@ let press_result_json ~ok ?message (obs : Yojson.Safe.t option) =
   `Assoc (fields @ observation)
 ;;
 
+(* What a worker call proves about the effect it was asked for. A refusal the
+   host or the worker raised before the effect began is [Proven_pre_effect]; a
+   transport loss after dispatch, or a worker that cannot say, is
+   [Effect_outcome_unknown]. The receipt settles from this, never from the
+   message text. *)
+type outcome =
+  | Succeeded
+  | Failed of Tool_result.failure_effect_disposition
+
 type worker_response = {
   status : [ `OK | `Conflict | `Bad_request | `Service_unavailable | `Internal_server_error ];
-  ok : bool;
+  outcome : outcome;
   message : string;
   data : Yojson.Safe.t;
-  code : string option;
+  code : Msx_wire.code option;
   machine_absent : bool;
       (** The worker answered that no machine is loaded. Typed: read from the
           worker's [errorCode] metadata, never from the message text. *)
 }
 
+let succeeded (response : worker_response) =
+  match response.outcome with Succeeded -> true | Failed _ -> false
+
+(* A worker call that returned no result. [Unavailable] and a host refusal
+   precede the dispatch, so nothing ran and the caller may ask again;
+   [Outcome_unknown] follows it, so the effect may have happened. Both are HTTP
+   503, told apart by their code: a client that retries or stops reads the
+   code, never the status or the message. *)
+let call_error_response (error : Lane_addon_runtime.tool_call_error) : worker_response =
+  let refused code status message =
+    {status;outcome=Failed Tool_result.Proven_pre_effect;message;data=`Null;code;machine_absent=false} in
+  match error with
+  | Lane_addon_runtime.Unavailable message
+  | Lane_addon_runtime.Host_refusal (Lane_addon_call_context.Unavailable message) ->
+      refused (Some Msx_wire.Worker_unavailable) `Service_unavailable message
+  | Lane_addon_runtime.Host_refusal (Lane_addon_call_context.Rejected message) ->
+      refused None `Bad_request message
+  | Lane_addon_runtime.Host_refusal (Lane_addon_call_context.Activity_disabled message) ->
+      refused (Some Msx_wire.Activity_disabled) `Conflict message
+  | Lane_addon_runtime.Host_refusal (Lane_addon_call_context.Activity_unobserved message) ->
+      refused (Some Msx_wire.Activity_unobserved) `Conflict message
+  | Lane_addon_runtime.Outcome_unknown message ->
+      {(refused (Some Msx_wire.Outcome_unknown) `Service_unavailable
+          (message ^ "; inspect the current machine before retrying"))
+       with outcome=Failed Tool_result.Effect_outcome_unknown}
+
+(* The body of a worker call that did not succeed: the shared refusal body with
+   the call's typed code. *)
+let failure_json (response : worker_response) =
+  Msx_wire.encode ?code:response.code response.message
+
+let call_error_answer error =
+  let response = call_error_response error in
+  response.status, failure_json response
+
 let worker_response ~config ~principal ~(schema : Masc_domain.tool_schema) ~arguments =
-  let failed status message =
-    {status;ok=false;message;data=`Null;code=None;machine_absent=false} in
   match Tool_input_validation.validate_args ~schema:schema.input_schema ~name:schema.name ~args:arguments () with
-  | Error refusal -> failed `Bad_request (Tool_result.message refusal)
+  | Error refusal ->
+      {status=`Bad_request;outcome=Failed Tool_result.Proven_pre_effect;
+       message=Tool_result.message refusal;data=`Null;code=None;machine_absent=false}
   | Ok arguments ->
       match Machine_addon_host.call_shared ~config ~principal ~name:schema.name ~arguments with
-      | Error (Lane_addon_runtime.Unavailable message
-          | Lane_addon_runtime.Host_refusal (Lane_addon_call_context.Unavailable message)) ->
-          failed `Service_unavailable message
-      | Error (Lane_addon_runtime.Host_refusal (Lane_addon_call_context.Rejected message)) ->
-          failed `Bad_request message
-      | Error (Lane_addon_runtime.Host_refusal (Lane_addon_call_context.Activity_disabled message)) ->
-          {(failed `Conflict message) with code=Some "activity_disabled"}
-      | Error (Lane_addon_runtime.Host_refusal (Lane_addon_call_context.Activity_unobserved message)) ->
-          {(failed `Conflict message) with code=Some "activity_unobserved"}
-      | Error (Lane_addon_runtime.Outcome_unknown message) ->
-          failed `Service_unavailable (message ^ "; inspect the current machine before retrying")
+      | Error error -> call_error_response error
       | Ok result ->
           let field name = match result.Mcp_protocol.Mcp_types._meta with
             | Some (`Assoc fields) -> List.assoc_opt name fields | _ -> None in
           let ok = result.is_error <> Some true in
+          let outcome =
+            if ok then Succeeded
+            else Failed (snd (Lane_addon_tool_result.failure result)) in
           let code = match field "io.github.jeong-sik/masc.machine.errorCode" with
-            | Some (`String ("activity_disabled" | "activity_unobserved" as code)) -> Some code
+            | Some (`String "activity_disabled") -> Some Msx_wire.Activity_disabled
+            | Some (`String "activity_unobserved") -> Some Msx_wire.Activity_unobserved
             | _ -> None in
           let machine_absent =
             (not ok) && field "io.github.jeong-sik/masc.machine.errorCode" = Some (`String "no_machine") in
@@ -101,7 +135,7 @@ let worker_response ~config ~principal ~(schema : Masc_domain.tool_schema) ~argu
             | None -> match field "io.github.jeong-sik/masc.machine.failure" with
               | Some (`String "rejected") -> `Bad_request
               | _ -> `Internal_server_error in
-          {status;ok;code;machine_absent;message=Agent_core.Mcp.text_of_tool_result result;
+          {status;outcome;code;machine_absent;message=Agent_core.Mcp.text_of_tool_result result;
            data=Option.value ~default:`Null result.structured_content}
 
 let press_response ~config ~who ~body =
@@ -118,9 +152,11 @@ let press_response ~config ~who ~body =
         else ("hold_frames", `Int press_default_hold_frames) :: fields in
       let result = worker_response ~config ~principal:(Lane_addon_call_context.Host_actor who)
         ~schema:(Tool_schemas_misc_toml.msx_schema Msx_tool.Press) ~arguments:(`Assoc fields) in
-      let fields = ["ok", `Bool result.ok; "message", `String result.message] in
-      let fields = match result.code with None -> fields | Some code -> ("code", `String code)::fields in
-      let observation = if result.ok then match result.data with
+      let fields = ["ok", `Bool (succeeded result); "message", `String result.message] in
+      let fields = match result.code with
+        | None -> fields
+        | Some code -> ("code", `String (Msx_wire.code_to_wire code))::fields in
+      let observation = if succeeded result then match result.data with
         | `Assoc data -> List.filter (fun (name,_) -> List.mem name ["frame";"mode";"cartridge";"disk"]) data
         | _ -> [] else [] in
       result.status, `Assoc (fields @ observation)
@@ -137,7 +173,7 @@ let handle_press ~state ~who request reqd =
 let carts_response ~config =
   let result = worker_response ~config ~principal:Lane_addon_call_context.Anonymous
     ~schema:(Tool_schemas_misc_toml.msx_schema Msx_tool.Meta) ~arguments:(`Assoc ["include_inventory", `Bool true]) in
-  if not result.ok then result.status, `Assoc ["ok", `Bool false; "message", `String result.message]
+  if not (succeeded result) then result.status, failure_json result
   else match result.data with
     | `Assoc fields -> (match List.assoc_opt "inventory" fields with
         | Some (`Assoc _ as inventory) -> `OK, inventory
@@ -151,6 +187,14 @@ let load_result_json ~ok ~message : Yojson.Safe.t =
   `Assoc [ ("ok", `Bool ok); ("message", `String message) ]
 ;;
 
+(* The answer to a load, disk change or unbound checkpoint: [{ok, message}] on
+   success, and on failure the shared refusal body, which carries the call's
+   typed code. *)
+let answer_json (result : worker_response) =
+  if succeeded result then load_result_json ~ok:true ~message:result.message
+  else failure_json result
+;;
+
 (* The worker resolves inventory names against its persistent storage. *)
 let load_response ~(config : Workspace.config) ~agent_name ~body =
   match decode_write_body ~config ~body with
@@ -158,7 +202,7 @@ let load_response ~(config : Workspace.config) ~agent_name ~body =
   | Ok arguments ->
       let result = worker_response ~config ~principal:(Lane_addon_call_context.Host_actor agent_name)
         ~schema:(Tool_schemas_misc_toml.msx_schema Msx_tool.Load) ~arguments in
-      result.status, load_result_json ~ok:result.ok ~message:result.message
+      result.status, answer_json result
 ;;
 
 let handle_load ~state ~agent_name request reqd =
@@ -178,41 +222,15 @@ let clamp_tick_frames requested =
   let maximum = Yojson.Safe.Util.(schema |> member "properties" |> member "frames" |> member "maximum" |> to_int) in
   max 1 (min maximum requested)
 
-type pixel_reference = { revision : string; width : int; height : int }
-type pixel_response = Full_frame | Retained_pixels of pixel_reference option
-
-let decode_pixel_reference = function
-  | `Assoc fields when List.length fields = 3 ->
-      (match List.assoc_opt "revision" fields, List.assoc_opt "width" fields,
-             List.assoc_opt "height" fields with
-       | Some (`String revision), Some (`Int width), Some (`Int height)
-         when String.length revision = 64 && width > 0 && height > 0
-              && String.for_all (function '0'..'9' | 'a'..'f' -> true | _ -> false) revision ->
-           Ok { revision; width; height }
-       | _ -> Error "known_pixels requires a SHA256 revision and positive width/height")
-  | _ -> Error "known_pixels requires exactly revision, width and height"
-
+(* The terminal's frame count is bounded here, not refused: a tick that asks
+   for more than a call may run advances by the most it may. *)
 let decode_tick json =
-  match json with
-  | `Assoc fields ->
-      let ( let* ) = Result.bind in
-      let names = List.map fst fields in
-      let* () =
-        if List.length names <> List.length (List.sort_uniq String.compare names)
-           || List.exists (fun name -> not (List.mem name ["frames"; "pixel_response"; "known_pixels"])) names
-        then Error "tick has duplicate or unknown fields" else Ok () in
-      let* frames = match List.assoc_opt "frames" fields with
-        | None -> Ok msx_tick_default_frames
-        | Some (`Int n) -> Ok (clamp_tick_frames n)
-        | Some _ -> Error "frames must be an integer" in
-      let* pixels = match List.assoc_opt "pixel_response" fields, List.assoc_opt "known_pixels" fields with
-        | None, None -> Ok Full_frame
-        | Some (`String "retained"), None -> Ok (Retained_pixels None)
-        | Some (`String "retained"), Some value ->
-            Result.map (fun reference -> Retained_pixels (Some reference)) (decode_pixel_reference value)
-        | _ -> Error "known_pixels requires pixel_response=retained" in
-      Ok (frames, pixels)
-  | _ -> Error "tick body must be an object"
+  Result.map (fun (tick : Msx_wire.tick) ->
+    (match tick.frames with
+     | None -> msx_tick_default_frames
+     | Some requested -> clamp_tick_frames requested),
+    tick.pixel_response)
+    (Msx_wire.decode_tick json)
 ;;
 
 let tick_response ~config ~body =
@@ -223,20 +241,21 @@ let tick_response ~config ~body =
   | Error message -> `Bad_request, `Assoc ["ok", `Bool false; "message", `String message]
   | Ok (frames, pixel_response) ->
       let pixels = match pixel_response with
-        | Full_frame -> []
-        | Retained_pixels known -> ["pixel_response", `String "retained"] @
-            (match known with None -> [] | Some p -> ["known_pixels", `Assoc [
-              "revision", `String p.revision; "width", `Int p.width; "height", `Int p.height]]) in
+        | Msx_wire.Full_frame -> []
+        | Msx_wire.Retained_pixels known -> ["pixel_response", `String "retained"] @
+            (match known with
+             | None -> []
+             | Some (p : Msx_wire.pixel_reference) -> ["known_pixels", `Assoc [
+                 "revision", `String p.revision; "width", `Int p.width; "height", `Int p.height]]) in
       let result = worker_response ~config ~principal:Lane_addon_call_context.Operator
         ~schema:(Tool_schemas_misc_toml.msx_schema Msx_tool.Step)
         ~arguments:(`Assoc (["frames", `Int frames; "include_frame", `Bool true] @ pixels)) in
-      if result.ok then result.status, result.data
+      if succeeded result then result.status, result.data
       else if result.machine_absent then
         (* The spectator polls before anything is loaded: an absent machine is
            an empty observation the poller can draw, not a failed request. *)
         `OK, `Assoc ["loaded", `Bool false]
-      else result.status, `Assoc (["ok", `Bool false; "message", `String result.message]
-        @ match result.code with None -> [] | Some code -> ["code", `String code])
+      else result.status, Msx_wire.encode ?code:result.code result.message
 ;;
 
 (* The realtime driver (RFC-0439 §2, poll-cadence tick). The spectating TUI
@@ -269,7 +288,7 @@ let checkpoint_legacy_response ~(config : Workspace.config) ~restore ~body =
   | Ok arguments ->
       let schema = Tool_schemas_misc_toml.msx_schema (if restore then Msx_tool.Restore else Msx_tool.Save) in
       let result = worker_response ~config ~principal:Lane_addon_call_context.Operator ~schema ~arguments in
-      result.status, load_result_json ~ok:result.ok ~message:result.message
+      result.status, answer_json result
 ;;
 ;;
 
@@ -282,21 +301,8 @@ let checkpoint_receipt_path (config : Workspace.config) =
 
 (* Slot validation the receipt binds on: pure, no machine. *)
 let checkpoint_slot args =
-  let slot = match args with
-    | `Assoc fields when List.for_all (fun (name, _) -> name = "slot") fields -> (
-      match List.filter (fun (name, _) -> name = "slot") fields with
-      | [] -> Ok "quick"
-      | [(_, `String value)] -> Ok value
-      | _ -> Error "slot must be one string")
-    | _ -> Error "checkpoint arguments must be an object" in
-  match slot with
-  | Error _ as e -> e
-  | Ok slot ->
-    if String.length slot < 1 || String.length slot > 64
-       || not (String.for_all (function
-          | 'a'..'z' | 'A'..'Z' | '0'..'9' | '_' | '-' -> true | _ -> false) slot)
-    then Error "slot must be 1..64 letters, digits, underscores or hyphens"
-    else Ok slot
+  Result.map Machine_checkpoint.slot_to_string
+    (Machine_checkpoint.slot_of_arguments ~default:Msx_tool.default_checkpoint_slot args)
 
 let checkpoint_binding ~restore args =
   match args with
@@ -325,6 +331,22 @@ let worker_completion (result : worker_response) : Checkpoint_receipt.completion
            Some {Checkpoint_receipt.mark = {incarnation; count}; checkpoint_sha256}
        | _ -> None)
   | _ -> None
+
+(* What a finished worker call lets the receipt claim. Only a failure proven to
+   precede the effect is a refusal: the operator may then act again, since the
+   slot and the machine are as they were. A failure the worker reports as
+   having happened leaves no completion mark to record, and one it cannot
+   classify is unknown, so neither frees the operator to retry blind. *)
+let worker_settlement (result : worker_response) : Checkpoint_receipt.state =
+  match result.outcome with
+  | Succeeded ->
+      (match worker_completion result with
+       | Some completion -> Checkpoint_receipt.Committed completion
+       | None -> Checkpoint_receipt.Unknown "MSX worker omitted its checkpoint completion")
+  | Failed Tool_result.Proven_pre_effect -> Checkpoint_receipt.Refused result.message
+  | Failed Tool_result.Proven_post_effect ->
+      Checkpoint_receipt.Unknown ("MSX worker reported a failure after the checkpoint took effect: " ^ result.message)
+  | Failed Tool_result.Effect_outcome_unknown -> Checkpoint_receipt.Unknown result.message
 
 let receipt_json ~(config : Workspace.config) (receipt : Checkpoint_receipt.receipt) =
   let binding = receipt.binding in
@@ -406,10 +428,7 @@ let checkpoint_operation_response ~(config : Workspace.config) ~restore ~body =
                           | other -> other in
                         let result = worker_response ~config ~principal:Lane_addon_call_context.Operator
                           ~schema ~arguments in
-                        if not result.ok then Checkpoint_receipt.Unknown result.message
-                        else match worker_completion result with
-                          | Some completion -> Checkpoint_receipt.Committed completion
-                          | None -> Checkpoint_receipt.Unknown "MSX worker omitted its checkpoint completion"
+                        worker_settlement result
                       with
                       | Eio.Cancel.Cancelled _ as exn -> Checkpoint_receipt.Unknown (Printexc.to_string exn)
                       | exn -> Checkpoint_receipt.Unknown (Printexc.to_string exn) in
@@ -482,7 +501,7 @@ let change_disk_response ~(config : Workspace.config) ~body =
   | Ok arguments ->
       let result = worker_response ~config ~principal:Lane_addon_call_context.Operator
         ~schema:(Tool_schemas_misc_toml.msx_schema Msx_tool.Change_disk) ~arguments in
-      result.status, load_result_json ~ok:result.ok ~message:result.message
+      result.status, answer_json result
 ;;
 
 let handle_change_disk ~state request reqd =

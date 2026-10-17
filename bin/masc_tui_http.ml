@@ -612,6 +612,25 @@ let decode_json ~allow_empty ~status_code ~body =
     Masc.Tui_decode.decode_json_response_body ~allow_empty ~status_code ~body
   else Error (refusal ~status_code ~body)
 
+(* The MSX routes refuse in [Msx_wire]'s body, which has no ["error"] field for
+   [refusal] to read, so the plain path pastes the JSON into the terminal. A
+   refusal body of that shape becomes its sentence here; a credential refusal
+   and any other body keep [refusal]. *)
+let msx_refusal ~status_code ~body =
+  match status_code with
+  | 401 | 403 -> refusal ~status_code ~body
+  | _ ->
+      (match Masc_tui_msx_tick.refusal_sentence body with
+       | Some sentence ->
+           Printf.sprintf "HTTP %d: %s" status_code
+             (Masc.Tui_terminal_text.sanitize_terminal_text sentence)
+       | None -> refusal ~status_code ~body)
+
+let decode_msx_json ~allow_empty ~status_code ~body =
+  if Masc.Tui_decode.is_success_http_status status_code then
+    Masc.Tui_decode.decode_json_response_body ~allow_empty ~status_code ~body
+  else Error (msx_refusal ~status_code ~body)
+
 (* A refused read that does not go through [decode_json], named so the
    operator knows which one it was: "tool calls: HTTP 503: <the server's
    sentence>". These reads used to write "<name> returned <status>: <body>"
@@ -658,7 +677,8 @@ let http_get_response ~(host : string) ~(port : int) ~(path : string) ~headers :
 (** GET a JSON response from a dashboard endpoint. The answer kept from the
     last read of the same address goes out as [If-None-Match], and a 304
     answers with the value decoded from it. *)
-let get_json ~(host : string) ~(port : int) ~(path : string) : (Yojson.Safe.t, string) result =
+let get_json_decoded ~decode ~(host : string) ~(port : int) ~(path : string) :
+    (Yojson.Safe.t, string) result =
   Masc_tui_kept_reads.read kept_reads
     ~address:(url_of ~host ~port ~path)
     ~send:(fun headers ->
@@ -666,7 +686,10 @@ let get_json ~(host : string) ~(port : int) ~(path : string) : (Yojson.Safe.t, s
       |> Result.map (fun { Masc_http_client.status; headers; body } ->
              { Masc_tui_kept_reads.status; headers; body }))
     ~decode:(fun { Masc_tui_kept_reads.status; body; _ } ->
-      decode_json ~allow_empty:false ~status_code:status ~body)
+      decode ~allow_empty:false ~status_code:status ~body)
+
+let get_json ~host ~port ~path = get_json_decoded ~decode:decode_json ~host ~port ~path
+let get_msx_json ~host ~port ~path = get_json_decoded ~decode:decode_msx_json ~host ~port ~path
 
 (* One live read of a workspace machine's screen (RFC machine-spectating-
    goes-through-lanes §2.1). A transport error, a refusal and a body that does
@@ -731,16 +754,19 @@ type post_outcome =
   | Post_refused of string
   | Post_unanswered of string
 
-let mutation_outcome = function
+let mutation_outcome_decoded ~decode = function
   | Error detail -> Post_unanswered detail
   | Ok (status_code, response) when status_code >= 400 && status_code < 500 ->
-    (match decode_json ~allow_empty:true ~status_code ~body:response with
+    (match decode ~allow_empty:true ~status_code ~body:response with
      | Error message -> Post_refused message
      | Ok _ -> Post_refused (Printf.sprintf "HTTP %d" status_code))
   | Ok (status_code, response) ->
-    (match decode_json ~allow_empty:false ~status_code ~body:response with
+    (match decode ~allow_empty:false ~status_code ~body:response with
      | Ok json -> Post_answered json
      | Error message -> Post_unanswered message)
+
+let mutation_outcome result = mutation_outcome_decoded ~decode:decode_json result
+let msx_mutation_outcome result = mutation_outcome_decoded ~decode:decode_msx_json result
 
 let post_json_outcome ~(host : string) ~(port : int) ~(path : string) ~(body : string) =
   http_post ~headers:(auth_headers ()) ~host ~port ~path ~body
@@ -809,6 +835,13 @@ let post_json ~(host : string) ~(port : int) ~(path : string) ~(body : string) :
   | Error e -> Error e
   | Ok (status_code, body) -> decode_json ~allow_empty:true ~status_code ~body
 
+(* [post_json] for the MSX routes, whose refusals are [Msx_wire] bodies. *)
+let post_msx_json ~(host : string) ~(port : int) ~(path : string) ~(body : string) :
+    (Yojson.Safe.t, string) result =
+  match http_post ~headers:(auth_headers ()) ~host ~port ~path ~body with
+  | Error e -> Error e
+  | Ok (status_code, body) -> decode_msx_json ~allow_empty:true ~status_code ~body
+
 (* A Broadcast keeps one captured bearer for principal proof and the write.
    A refused bearer is not silently refreshed into another actor's authority. *)
 type bound_credential = { bound_headers : (string * string) list }
@@ -866,7 +899,7 @@ let post_msx_press ~expected_workspace ~(host : string) ~(port : int) ~(keys : s
   let body =
     msx_write_body ~expected_workspace ["keys", `List (List.map (fun k -> `String k) keys)]
   in
-  match post_json ~host ~port ~path:msx_press_path ~body with
+  match post_msx_json ~host ~port ~path:msx_press_path ~body with
   | Error e -> Error e
   | Ok json -> (
     let open Yojson.Safe.Util in
@@ -876,17 +909,13 @@ let post_msx_press ~expected_workspace ~(host : string) ~(port : int) ~(keys : s
       match member "message" json with `String m -> Error m | _ -> Error "press refused"))
 ;;
 
-(* The cartridge inventory for the load menu (RFC-0439 §3.7). The empty list on
-   any transport or shape error is the honest answer for the menu: "nothing to
-   pick right now", the same way the frame poll treats a missing frame. *)
-let fetch_msx_carts ~(host : string) ~(port : int) : string list =
-  match get_json ~host ~port ~path:msx_carts_path with
-  | Error _ -> []
-  | Ok json -> (
-    let open Yojson.Safe.Util in
-    match member "carts" json with
-    | `List items -> List.filter_map (function `String s -> Some s | _ -> None) items
-    | _ -> [])
+(* The cartridge inventory for the load menu (RFC-0439 §3.7). An unreachable
+   worker, a refusal and an answer that is not an inventory are
+   [Carts_unavailable] with the reason; only an inventory that is really empty
+   is [No_carts], so the menu never tells the operator to fill a volume when the
+   fault is the server. *)
+let fetch_msx_carts ~(host : string) ~(port : int) : Masc_tui_types.msx_carts =
+  Masc_tui_msx.carts_of_inventory (get_msx_json ~host ~port ~path:msx_carts_path)
 
 (* Plug a cartridge into the shared machine on the human's behalf (RFC-0439
    §3.7). The server runs the same loader masc_msx_load does; on success the
@@ -895,7 +924,7 @@ let fetch_msx_carts ~(host : string) ~(port : int) : string list =
 let post_msx_load ~expected_workspace ~(host : string) ~(port : int) ~(cart : string) :
     (unit, string) result =
   let body = msx_write_body ~expected_workspace ["cart", `String cart] in
-  match post_json ~host ~port ~path:msx_load_path ~body with
+  match post_msx_json ~host ~port ~path:msx_load_path ~body with
   | Error e -> Error e
   | Ok json -> (
     let open Yojson.Safe.Util in
@@ -907,7 +936,7 @@ let post_msx_load ~expected_workspace ~(host : string) ~(port : int) ~(cart : st
 
 let post_msx_change_disk ~expected_workspace ~host ~port ~disk =
   let body = msx_write_body ~expected_workspace ["disk", `String disk] in
-  match post_json ~host ~port ~path:"/api/v1/msx/disk" ~body with
+  match post_msx_json ~host ~port ~path:"/api/v1/msx/disk" ~body with
   | Error e -> Error e
   | Ok json ->
     let open Yojson.Safe.Util in
@@ -933,7 +962,7 @@ let post_msx_checkpoint ~expected_workspace ~operation_id ~host ~port ~restore ~
   match result with
   | Error detail -> Error (Checkpoint_outcome_unknown detail)
   | Ok (status_code, _) when status_code >= 400 && status_code < 500 ->
-      (match mutation_outcome result with
+      (match msx_mutation_outcome result with
        | Post_refused detail -> Error (Checkpoint_refused detail)
        | Post_answered _ | Post_unanswered _ ->
            Error (Checkpoint_outcome_unknown "checkpoint admission response is unreadable"))
@@ -956,7 +985,7 @@ let inspect_msx_checkpoint ~expected_workspace ~operation_id ~host ~port ~restor
     ["slot",`String slot;"operation_id",`String operation_id;
      "checkpoint",`String (if restore then "restore" else "save")] in
   let ( let* ) = Result.bind in
-  let* json = post_json ~host ~port ~path:"/api/v1/msx/checkpoint-operation" ~body in
+  let* json = post_msx_json ~host ~port ~path:"/api/v1/msx/checkpoint-operation" ~body in
   decode_checkpoint_receipt ~expected_workspace ~operation_id ~restore ~slot json
 
 ;;
@@ -984,15 +1013,18 @@ let tick_msx ~(expected_workspace : Masc.Tui_decode.server_identity)
         ~host ~port ~path:msx_tick_path ~body with
     | Error _ as error -> error
     | Ok (status_code, body) ->
-        (* Only the tick decoder may interpret a typed activity refusal. *)
+        (* Only the tick decoder may interpret a typed refusal: 409 for the
+           activity and workspace gates, 503 for a worker that is unavailable
+           or whose result was lost. *)
+        let typed_refusal = status_code = 409 || status_code = 503 in
         Result.map (fun json -> status_code,json)
-          (decode_json ~allow_empty:false ~status_code:(if status_code=409 then 200 else status_code) ~body)
+          (decode_msx_json ~allow_empty:false ~status_code:(if typed_refusal then 200 else status_code) ~body)
   in
   Masc_tui_msx_tick.fetch ~body_fields msx_tick_cache ~host ~port ~headers ~request
 ;;
 
 let fetch_msx_activity ~host ~port =
-  Result.bind (get_json ~host ~port ~path:"/api/v1/msx/activity") Masc_tui_msx_tick.decode_activity
+  Result.bind (get_msx_json ~host ~port ~path:"/api/v1/msx/activity") Masc_tui_msx_tick.decode_activity
 
 
 let keeper_chat_body ?expected_workspace ~admission_intent ~since_seq request =

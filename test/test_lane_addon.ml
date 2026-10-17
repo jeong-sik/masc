@@ -725,7 +725,35 @@ let await_machine_publication clock config =
     | Ok (Some reading) -> not reading.refreshing
     | Ok None | Error _ -> false)
 
+(* The load route boots an image, and an image needs a C-BIOS. These tests
+   stock the attached worker's volume with one blank cartridge and a zero-filled
+   BIOS in its bios/ inventory. A host that exports MSX_ROMS would hand the load
+   its own C-BIOS instead, and a host without it would have none, so the variable
+   is emptied for the run: the inventory is the only source. *)
+let stage_fixture_cart config =
+  let rec mkdir_p dir =
+    if not (Sys.file_exists dir) then begin
+      mkdir_p (Filename.dirname dir);
+      Sys.mkdir dir 0o755
+    end in
+  let msx = Filename.concat (Workspace.masc_dir config) "msx" in
+  let write dir name size =
+    mkdir_p dir;
+    Out_channel.with_open_bin (Filename.concat dir name) (fun channel ->
+      output_string channel (String.make size '\000')) in
+  write (Filename.concat msx "carts") "fixture.rom" 0x4000;
+  let bios = Filename.concat msx "bios" in
+  write bios "cbios_main_msx2.rom" 32768;
+  write bios "cbios_logo_msx2.rom" 16384;
+  write bios "cbios_sub.rom" 16384
+
+let with_no_host_msx_roms f =
+  let host_roms = Sys.getenv_opt "MSX_ROMS" in
+  Unix.putenv "MSX_ROMS" "";
+  Fun.protect ~finally:(fun () -> Unix.putenv "MSX_ROMS" (Option.value host_roms ~default:"")) f
+
 let test_human_press_wakes_machine_watchers_once () =
+  with_no_host_msx_roms @@ fun () ->
   with_held_machine_observation (fun env _sw config dir _state ~entered ~hold_next ~release ->
     let clock = Eio.Stdenv.clock env in
     let msx = function Ok value -> value | Error error -> fail (Msx_lane.error_to_string error) in
@@ -733,9 +761,10 @@ let test_human_press_wakes_machine_watchers_once () =
       Msx_lane.install_activity_observer None;
       ignore (Msx_lane.eject ())) (fun () ->
       Msx_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
+      stage_fixture_cart config;
       check bool "attached worker loads the fixture machine" true
         (fst (Server_routes_http_routes_msx.load_response ~config
-          ~agent_name:"operator" ~body:{|{"roms_dir":""}|}) = `OK);
+          ~agent_name:"operator" ~body:{|{"roms_dir":"","cart":"fixture.rom"}|}) = `OK);
       await_machine_publication clock config;
       let id = attach_machine_watcher config dir in
       let sequence () = int "observation_seq" (instance config id) in
@@ -765,6 +794,7 @@ let test_human_press_wakes_machine_watchers_once () =
       await_phase clock config id "detached"))
 
 let test_human_load_wakes_machine_watchers_once () =
+  with_no_host_msx_roms @@ fun () ->
   with_held_machine_observation (fun env _sw config dir _state ~entered ~hold_next ~release ->
     let clock = Eio.Stdenv.clock env in
     ignore (Msx_lane.eject ());
@@ -789,8 +819,9 @@ let test_human_load_wakes_machine_watchers_once () =
       await_machine_publication clock config;
       let baseline = sequence () in
       hold_next ();
-      check bool "a human BIOS-only load is accepted" true
-        (load {|{"roms_dir":""}|} = `OK);
+      stage_fixture_cart config;
+      check bool "a human load is accepted" true
+        (load {|{"roms_dir":"","cart":"fixture.rom"}|} = `OK);
       Eio.Promise.await entered;
       check_no_extra_machine_wake config id;
       release ();

@@ -76,7 +76,8 @@ let of_lane ?(extra = []) ?sprites ?metadata ~tool_name ~start_time
     let code = match e with
       | Msx_lane.Activity_disabled -> "activity_disabled"
       | Msx_lane.Activity_unobserved | Msx_lane.No_machine | Msx_lane.Invalid_request _
-      | Msx_lane.Effect_unknown _ | Msx_lane.Unreadable _ -> "activity_unobserved" in
+      | Msx_lane.Effect_unknown _ | Msx_lane.Unreadable _
+      | Msx_lane.Dependency_unavailable _ -> "activity_unobserved" in
     reject ~tool_name ~start_time (Msx_lane.error_to_string e)
     |> Tool_result.with_metadata (`Assoc ["io.github.jeong-sik/masc.machine.errorCode", `String code])
   | Error (Msx_lane.No_machine as e) ->
@@ -92,6 +93,9 @@ let of_lane ?(extra = []) ?sprites ?metadata ~tool_name ~start_time
   | Error (Msx_lane.Unreadable _ as e) ->
     refuse ~class_:Tool_result.Runtime_failure ~tool_name ~start_time
       (Msx_lane.error_to_string e)
+  | Error (Msx_lane.Dependency_unavailable _ as e) ->
+    refuse ~class_:Tool_result.Dependency_unavailable ~tool_name ~start_time
+      (Msx_lane.error_to_string e)
 ;;
 
 (* The lane's files live under <.masc>/msx: the ledger, and the two
@@ -102,16 +106,27 @@ let msx_dir ~base_path = Filename.concat (Common.masc_dir_from_base_path ~base_p
 let carts_dir ~base_path = Filename.concat (msx_dir ~base_path) "carts"
 let bios_dir ~base_path = Filename.concat (msx_dir ~base_path) "bios"
 
+(* The names of the regular files in carts/. A missing directory is an empty
+   inventory (a fresh volume has none); a directory that exists and will not
+   list is an error, so a caller never reads "unreadable" as "nothing there".
+   An entry that cannot be inspected, such as a dangling symlink, is not a
+   cartridge and is skipped. *)
 let carts_available ~base_path =
   let dir = carts_dir ~base_path in
-  if Sys.file_exists dir && Sys.is_directory dir then
-    Sys.readdir dir
-    |> Array.to_list
-    |> List.filter (fun f ->
-         (not (String.starts_with ~prefix:"." f))
-         && not (Sys.is_directory (Filename.concat dir f)))
-    |> List.sort String.compare
-  else []
+  let is_regular name =
+    match Unix.stat (Filename.concat dir name) with
+    | stats -> stats.Unix.st_kind = Unix.S_REG
+    | exception Unix.Unix_error _ -> false
+  in
+  if not (Sys.file_exists dir) then Ok []
+  else
+    match Sys.readdir dir with
+    | exception Sys_error message -> Error message
+    | entries ->
+      Ok
+        (Array.to_list entries
+         |> List.filter (fun name -> (not (String.starts_with ~prefix:"." name)) && is_regular name)
+         |> List.sort String.compare)
 ;;
 
 (* Where the C-BIOS directory came from, so the load and the report both
@@ -120,10 +135,10 @@ type bios_source =
   | Argument of string (* the caller's roms_dir *)
   | Env of string (* MSX_ROMS through the config floor *)
   | Inventory of string (* .masc/msx/bios/ holding the main ROM *)
-  | None_available (* the machine boots without a BIOS; the bus reads 0xFF *)
+  | None_available (* no source names a BIOS; a load that needs one is refused *)
 
 (* roms_dir argument, then MSX_ROMS, then the bios/ inventory when it holds
-   the main ROM, else no BIOS at all. *)
+   the main ROM, else no source at all. *)
 let resolve_roms_dir ~base_path args =
   match String.trim (get_string args "roms_dir" "") with
   | "" -> (
@@ -139,44 +154,59 @@ let resolve_roms_dir ~base_path args =
   | dir -> Argument dir
 ;;
 
-let roms_dir_of_source = function
-  | Argument dir | Env dir | Inventory dir -> Some dir
-  | None_available -> None
-;;
-
+(* The BIOS the source names, read whole: [Absent] only when no source names
+   one. A source that names a directory missing a ROM is an error naming the
+   file, never a downgrade to no BIOS. *)
 let bios_of_source = function
-  | Argument _ | Env _ | Inventory _ -> true
-  | None_available -> false
+  | Argument dir | Env dir | Inventory dir ->
+    Result.map (fun triple -> Msx_lane.Present triple) (Msx_lane.read_bios ~dir)
+  | None_available -> Ok Msx_lane.Absent
 ;;
 
-(* A cart is a path that exists, or a name (with or without .rom/.dsk) in
-   carts/. A .dsk image resolves the same way and loads into the drive — the
-   inventory holds game media, whatever the medium is. *)
+(* A cart is a name in carts/, with or without .rom/.dsk. It is never a path:
+   the worker's filesystem holds more than game media, and a name that cannot
+   leave carts/ leaves no traversal to reason about. Only a regular file is a
+   cartridge; a directory, or a link that points nowhere, is not. *)
+let is_inventory_name name =
+  name <> ""
+  && (not (String.starts_with ~prefix:"." name))
+  && not (String.exists (function '/' | '\000' -> true | _ -> false) name)
+;;
+
 let resolve_cart ~base_path name =
   let trimmed = String.trim name in
-  if Sys.file_exists trimmed && not (Sys.is_directory trimmed) then Ok trimmed
+  if not (is_inventory_name trimmed) then
+    Error
+      (Printf.sprintf
+         "cart %S is not an inventory name: pass a file name from masc_msx_meta \
+          include_inventory=true, not a path"
+         trimmed)
   else begin
     let dir = carts_dir ~base_path in
     let candidates =
       [ trimmed; trimmed ^ ".rom"; trimmed ^ ".ROM"; trimmed ^ ".dsk"; trimmed ^ ".DSK" ]
     in
-    match
-      List.find_opt
-        (fun c -> Sys.file_exists (Filename.concat dir c))
-        candidates
-    with
+    let is_file candidate =
+      match Unix.stat (Filename.concat dir candidate) with
+      | stats -> stats.Unix.st_kind = Unix.S_REG
+      | exception Unix.Unix_error _ -> false
+    in
+    match List.find_opt is_file candidates with
     | Some c -> Ok (Filename.concat dir c)
     | None ->
       Error
         (match carts_available ~base_path with
-         | [] ->
+         | Ok [] ->
            Printf.sprintf
-             "unknown cartridge %S and the inventory %s is empty: put ROM or .dsk images \
-              there or pass a path"
+             "unknown cartridge %S and the inventory %s is empty: an operator puts ROM or \
+              .dsk images in the Add-on volume"
              trimmed dir
-         | names ->
+         | Ok names ->
            Printf.sprintf "unknown cartridge %S; available: %s" trimmed
-             (String.concat ", " names))
+             (String.concat ", " names)
+         | Error message ->
+           Printf.sprintf "unknown cartridge %S and the inventory %s cannot be listed: %s"
+             trimmed dir message)
   end
 ;;
 
@@ -192,7 +222,7 @@ let is_dsk_path path =
    reloads the disk already in the drive says nothing, and every post is a
    board_signal to the whole fleet. The decision reads only the transition
    the lane captured under its lock, so two loads that serialised there
-   announce the medium once between them. A BIOS-only boot announces
+   announce the medium once between them. A bare machine announces
    nothing. *)
 let arcade_announcement ~agent_name
     ({ Msx_lane.before; after } : Msx_lane.transition) =
@@ -214,8 +244,6 @@ let arcade_announcement ~agent_name
 
 let handle_load ?(after_load = fun () -> ()) ~relay ~tool_name
     ~start_time ~base_path ~agent_name args =
-  let bios_source = resolve_roms_dir ~base_path args in
-  let roms_dir = roms_dir_of_source bios_source in
   let media =
     match get_string_opt args "cart" with
     | Some n when String.trim n <> "" -> Some (resolve_cart ~base_path n)
@@ -234,29 +262,36 @@ let handle_load ?(after_load = fun () -> ()) ~relay ~tool_name
      | Error _ -> ());
     Result.map (fun (l : Msx_lane.loaded) -> l.Msx_lane.observation) loaded
   in
+  (* The lane names the ROMs it lacks; this adds where an operator puts them. *)
+  let explain_missing_bios = function
+    | Error (Msx_lane.Dependency_unavailable message) ->
+      Error (Msx_lane.Dependency_unavailable
+        (Printf.sprintf "%s. Pass roms_dir, set MSX_ROMS, or put them in %s" message
+           (bios_dir ~base_path)))
+    | Ok _ | Error ( Msx_lane.Activity_disabled | Msx_lane.Activity_unobserved
+                   | Msx_lane.No_machine | Msx_lane.Invalid_request _
+                   | Msx_lane.Effect_unknown _ | Msx_lane.Unreadable _ ) as other -> other
+  in
+  let boot image =
+    match resolve_roms_dir ~base_path args |> bios_of_source with
+    | Error e -> of_lane ~tool_name ~start_time (Error e)
+    | Ok bios ->
+      of_lane ~tool_name ~start_time
+        (relayed
+           (explain_missing_bios
+              (Msx_lane.load ~ledger_dir:(msx_dir ~base_path) ~bios ~image)))
+  in
   match media with
   | Some (Error message) -> reject ~tool_name ~start_time message
-  | Some (Ok path) when is_dsk_path path ->
-    of_lane ~tool_name ~start_time
-      (relayed
-         (Msx_lane.load ~ledger_dir:(msx_dir ~base_path) ~roms_dir
-            ~cart_path:None ~disk_path:(Some path)))
-  | Some (Ok path) ->
-    of_lane ~tool_name ~start_time
-      (relayed
-         (Msx_lane.load ~ledger_dir:(msx_dir ~base_path) ~roms_dir
-            ~cart_path:(Some path) ~disk_path:None))
+  | Some (Ok path) when is_dsk_path path -> boot (Msx_lane.Disk_file path)
+  | Some (Ok path) -> boot (Msx_lane.Cartridge_file path)
   | None ->
-    (* BIOS only, and the inventory so the next call can name a game. *)
-    of_lane ~tool_name ~start_time
-      ~extra:
-        [ ( "carts_available"
-          , `List (List.map (fun n -> `String n) (carts_available ~base_path)) )
-        ; ("bios", `Bool (bios_of_source bios_source))
-        ]
-      (relayed
-         (Msx_lane.load ~ledger_dir:(msx_dir ~base_path) ~roms_dir
-            ~cart_path:None ~disk_path:None))
+    (* A load replaces the running machine and truncates its input ledger, so
+       it never runs without something to load. The inventory is read through
+       masc_msx_meta, which changes nothing. *)
+    reject ~tool_name ~start_time
+      "cart is required: loading replaces the running machine. List the inventory with \
+       masc_msx_meta include_inventory=true and pass one of those names."
 ;;
 
 let handle_eject ~relay ~tool_name ~start_time ~agent_name _args =
@@ -271,26 +306,21 @@ let handle_eject ~relay ~tool_name ~start_time ~agent_name _args =
 (* RAM introspection handlers. Read-only, so no board relay and no agent
    identity: anyone may look, nobody may write (RFC-0439's cheat line).
    Addresses arrive as hex strings ("e000", "0xE000") because that is how
-   memory is talked about; decimal parses too. *)
-let parse_address s =
-  let s = String.lowercase_ascii (String.trim s) in
-  let s =
-    if String.starts_with ~prefix:"0x" s then String.sub s 2 (String.length s - 2) else s
-  in
-  int_of_string_opt ("0x" ^ s)
-;;
-
+   memory is talked about; digits alone are hex too ({!Msx_lane.Address}).
+   They leave in the same notation, four hex digits, so an address read from
+   a result goes back into peek unchanged. *)
 let handle_peek ~tool_name ~start_time args =
-  let address =
-    match parse_address (get_string args "address" "") with
-    | Some a -> a
-    | None -> -1
-  in
-  match Msx_lane.peek ~address ~length:(get_int args "length" 16) with
-  | Ok hex ->
-    Tool_result.make_ok ~tool_name ~start_time
-      ~data:(`Assoc [ ("address", `Int address); ("hex", `String hex) ]) ()
-  | Error e -> reject ~tool_name ~start_time (Msx_lane.error_to_string e)
+  match Msx_lane.Address.parse (get_string args "address" "") with
+  | Error message -> reject ~tool_name ~start_time message
+  | Ok address ->
+    (match Msx_lane.peek ~address ~length:(get_int args "length" 16) with
+     | Ok hex ->
+       Tool_result.make_ok ~tool_name ~start_time
+         ~data:
+           (`Assoc
+             [ ("address", `String (Msx_lane.Address.to_hex address)); ("hex", `String hex) ])
+         ()
+     | Error e -> reject ~tool_name ~start_time (Msx_lane.error_to_string e))
 ;;
 
 let handle_ram_diff ~tool_name ~start_time () =
@@ -303,7 +333,7 @@ let handle_ram_diff ~tool_name ~start_time () =
               (List.map
                  (fun (c : Msx_lane.ram_change) ->
                    `Assoc
-                     [ ("address", `Int c.address)
+                     [ ("address", `String (Msx_lane.Address.to_hex c.address))
                      ; ("length", `Int c.length)
                      ; ("from", `String c.from_hex)
                      ; ("to", `String c.to_hex)
@@ -321,9 +351,12 @@ let handle_screen ~tool_name ~start_time args =
     (Msx_lane.screen ())
 ;;
 
+(* Frames a step runs when the caller names none: one second of machine time. *)
+let default_step_frames = Msx_lane.frames_per_second
+
 let handle_step ~tool_name ~start_time args =
   of_lane ~tool_name ~start_time ~metadata:moved_the_machine
-    (Msx_lane.step ~frames:(get_int args "frames" 60))
+    (Msx_lane.step ~frames:(get_int args "frames" default_step_frames))
 ;;
 
 (* 화면이 안착할 때까지 한 번에 논다 — 키퍼가 step+screen 을 반복하며
@@ -370,21 +403,8 @@ let handle_press ~tool_name ~start_time ~who args =
 
 (* Checkpoints use names within saves/, never caller-provided host paths. *)
 let checkpoint_slot args =
-  let slot = match args with
-    | `Assoc fields when List.for_all (fun (name, _) -> name = "slot") fields -> (
-      match List.filter (fun (name, _) -> name = "slot") fields with
-      | [] -> Ok "quick"
-      | [(_, `String value)] -> Ok value
-      | _ -> Error "slot must be one string")
-    | _ -> Error "checkpoint arguments must be an object" in
-  match slot with
-  | Error _ as e -> e
-  | Ok slot ->
-    if String.length slot < 1 || String.length slot > 64
-       || not (String.for_all (function
-          | 'a'..'z' | 'A'..'Z' | '0'..'9' | '_' | '-' -> true | _ -> false) slot)
-    then Error "slot must be 1..64 letters, digits, underscores or hyphens"
-    else Ok slot
+  Result.map Machine_checkpoint.slot_to_string
+    (Machine_checkpoint.slot_of_arguments ~default:Msx_tool.default_checkpoint_slot args)
 ;;
 
 let run_checkpoint ~restore ~base_path ~slot =
@@ -416,19 +436,26 @@ let handle_checkpoint ~restore ~tool_name ~start_time ~base_path args =
    it. Read-only: reads one module constant, moves nothing. *)
 let handle_meta ?inventory_base_path ~tool_name ~start_time () =
   let inventory = match inventory_base_path with
-    | None -> []
+    | None -> Ok []
     | Some base_path ->
-        let loaded, cartridge, disk = match Msx_lane.frame () with
-          | None -> false, `Null, `Null
-          | Some frame -> true,
-              (match frame.Msx_lane.cartridge with None -> `Null | Some name -> `String name),
-              (match frame.disk with None -> `Null | Some name -> `String name) in
-        ["inventory", `Assoc [
-          "carts", `List (List.map (fun name -> `String name) (carts_available ~base_path));
-          "loaded", `Bool loaded; "cartridge", cartridge; "disk", disk]] in
-  Tool_result.make_ok ~tool_name ~start_time
-    ~data:(`Assoc (["core", Msx_lane.core_to_yojson Msx_lane.core] @ inventory))
-    ()
+        Result.map (fun carts ->
+          let loaded, cartridge, disk = match Msx_lane.frame () with
+            | None -> false, `Null, `Null
+            | Some frame -> true,
+                (match frame.Msx_lane.cartridge with None -> `Null | Some name -> `String name),
+                (match frame.disk with None -> `Null | Some name -> `String name) in
+          ["inventory", `Assoc [
+            "carts", `List (List.map (fun name -> `String name) carts);
+            "loaded", `Bool loaded; "cartridge", cartridge; "disk", disk]])
+          (carts_available ~base_path) in
+  match inventory with
+  | Error message ->
+      refuse ~class_:Tool_result.Runtime_failure ~tool_name ~start_time
+        ("cartridge inventory cannot be listed: " ^ message)
+  | Ok inventory ->
+      Tool_result.make_ok ~tool_name ~start_time
+        ~data:(`Assoc (["core", Msx_lane.core_to_yojson Msx_lane.core] @ inventory))
+        ()
 ;;
 
 (* masc_msx_checkpoint_info — what a saved slot holds, without restoring it.
@@ -448,7 +475,6 @@ let handle_checkpoint_info ~tool_name ~start_time ~base_path args =
             ([ ("slot", `String slot)
              ; ("exists", `Bool info.exists)
              ; ("version", `Int info.version)
-             ; ("frame", match info.frame with Some f -> `Int f | None -> `Null)
              ; ( "saved_at_unix"
                , match info.saved_at_unix with Some t -> `Float t | None -> `Null )
              ; ( "mtime_utc"
@@ -466,7 +492,8 @@ let handle_checkpoint_info ~tool_name ~start_time ~base_path args =
              ; ("sha256", `String info.sha256)
              ]))
         ()
-    | Error ((Msx_lane.Invalid_request _ | Msx_lane.No_machine | Msx_lane.Activity_disabled | Msx_lane.Activity_unobserved) as e) ->
+    | Error ((Msx_lane.Invalid_request _ | Msx_lane.No_machine | Msx_lane.Activity_disabled | Msx_lane.Activity_unobserved
+             | Msx_lane.Dependency_unavailable _) as e) ->
       reject ~tool_name ~start_time (Msx_lane.error_to_string e)
     | Error (Msx_lane.Effect_unknown message) ->
       Tool_result.make_err ~tool_name ~class_:Tool_result.Runtime_failure ~start_time message

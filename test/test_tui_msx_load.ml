@@ -91,7 +91,7 @@ let is_load name = function Masc_tui_msx.Load n -> String.equal n name | _ -> fa
 let test_menu_lists_inventory () =
   let state = a_state () in
   state.msx_frame <- None;
-  state.msx_carts <- [ "dig-dug.rom"; "pac-man.rom" ];
+  state.msx_carts <- Carts [ "dig-dug.rom"; "pac-man.rom" ];
   let out = captured (fun write -> Masc_tui_msx.open_menu ~write state) in
   check bool "opening sets the screen flag" true state.msx_open;
   check bool "and the menu flag" true state.msx_menu_open;
@@ -105,7 +105,7 @@ let test_menu_lists_inventory () =
 let test_menu_watch_row_when_loaded () =
   let state = a_state () in
   state.msx_frame <- Some (a_frame ());
-  state.msx_carts <- [ "dig-dug.rom" ];
+  state.msx_carts <- Carts [ "dig-dug.rom" ];
   let write _ = () in
   Masc_tui_msx.open_menu ~write state;
   (* A machine is loaded, so row 0 is "watch" and enter spectates it. *)
@@ -121,7 +121,7 @@ let test_menu_watch_row_when_loaded () =
 let test_menu_navigation_and_select () =
   let state = a_state () in
   state.msx_frame <- None;
-  state.msx_carts <- [ "a.rom"; "b.rom"; "c.rom" ];
+  state.msx_carts <- Carts [ "a.rom"; "b.rom"; "c.rom" ];
   let write _ = () in
   Masc_tui_msx.open_menu ~write state;
   let selected () = state.msx_menu_selected in
@@ -139,7 +139,7 @@ let test_menu_navigation_and_select () =
 let test_menu_esc_closes () =
   let state = a_state () in
   state.msx_frame <- None;
-  state.msx_carts <- [ "a.rom" ];
+  state.msx_carts <- Carts [ "a.rom" ];
   let write _ = () in
   Masc_tui_msx.open_menu ~write state;
   check bool "esc reports Closed" true
@@ -150,10 +150,10 @@ let test_menu_esc_closes () =
 let test_menu_empty_inventory () =
   let state = a_state () in
   state.msx_frame <- None;
-  state.msx_carts <- [];
+  state.msx_carts <- No_carts;
   let out = captured (fun write -> Masc_tui_msx.open_menu ~write state) in
-  check bool "an empty inventory tells the operator where to put ROMs" true
-    (contains out "carts");
+  check bool "an empty inventory is an empty Add-on volume" true
+    (Masc_tui_msx.media_gap state = Some Masc_tui_msx.Volume_has_no_images);
   check bool "and offers only the way out" true
     (contains (after_last_newline out) "Esc:back"
      && not (contains (after_last_newline out) "Enter:load"));
@@ -163,10 +163,56 @@ let test_menu_empty_inventory () =
      | Masc_tui_msx.Stay -> true
      | _ -> false)
 
+(* An unreachable worker is not an empty volume. The menu model keeps the two
+   apart, so it never tells the operator to fill a volume that may be full while
+   the real fault is the server. *)
+let test_inventory_states () =
+  let inventory carts : Yojson.Safe.t = `Assoc ["carts", carts; "loaded", `Bool false] in
+  let read = Masc_tui_msx.carts_of_inventory in
+  check bool "names are a list of carts" true
+    (read (Ok (inventory (`List [`String "a.rom"; `String "B.dsk"])))
+     = Carts ["a.rom"; "B.dsk"]);
+  check bool "an empty list is no carts" true (read (Ok (inventory (`List []))) = No_carts);
+  check bool "a failed read is unavailable with its reason" true
+    (read (Error "HTTP 503: no attached worker") = Carts_unavailable "HTTP 503: no attached worker");
+  List.iter (fun (label, answer) ->
+    check bool label true
+      (match read (Ok answer) with Carts_unavailable _ -> true | Carts _ | No_carts -> false))
+    ["an answer without a list", `Assoc ["loaded", `Bool false];
+     "a list that is not names", inventory (`List [`String "a.rom"; `Int 1]);
+     "a list that is not a list", inventory (`String "a.rom");
+     "an answer that is not an object", `List []]
+
+let test_inventory_state_drives_the_menu () =
+  let state = a_state () in
+  state.msx_frame <- None;
+  let gap () = Masc_tui_msx.media_gap state in
+  state.msx_carts <- No_carts;
+  check bool "empty volume" true (gap () = Some Masc_tui_msx.Volume_has_no_images);
+  state.msx_carts <- Carts_unavailable "worker down";
+  check bool "unavailable keeps its reason" true
+    (gap () = Some (Masc_tui_msx.Inventory_unavailable "worker down"));
+  state.msx_carts <- Carts ["a.rom"];
+  check bool "images to pick" true (gap () = None);
+  state.msx_menu_mode <- Change_disk;
+  check bool "images but no disk" true (gap () = Some Masc_tui_msx.Volume_has_no_disk_images);
+  state.msx_carts <- Carts ["a.rom"; "b.DSK"];
+  check bool "a disk to swap" true (gap () = None);
+  (* A failed read must not leave a pickable row behind, even if the previous
+     read had listed cartridges. *)
+  state.msx_menu_mode <- Boot_game;
+  state.msx_carts <- Carts_unavailable "worker down";
+  let write _ = () in
+  Masc_tui_msx.open_menu ~write state;
+  check bool "enter picks nothing from an unavailable inventory" true
+    (match Masc_tui_msx.menu_consume ~write state "\r" with
+     | Masc_tui_msx.Stay -> true
+     | Masc_tui_msx.Closed | Watch _ | Swap_disk _ | Load _ -> false)
+
 let test_change_disk_menu () =
   let state = a_state () in
   state.msx_frame <- Some (a_frame ~cartridge:None ~disk:(Some "A.dsk") ());
-  state.msx_carts <- ["cart.rom"; "A.dsk"; "B.DSK"];
+  state.msx_carts <- Carts ["cart.rom"; "A.dsk"; "B.DSK"];
   let out = captured (fun write -> Masc_tui_msx.open_menu ~write ~mode:Masc_tui_types.Change_disk state) in
   check bool "menu identifies disk replacement" true (contains out "change disk");
   check bool "and names its own keys on the bottom row" true
@@ -190,7 +236,7 @@ let a_dos_picture : Masc_tui_machine_live.picture =
 
 let test_dos_watch_row () =
   let state = a_state () in
-  state.msx_carts <- [ "dig-dug.rom" ];
+  state.msx_carts <- Carts [ "dig-dug.rom" ];
   let write _ = () in
   Masc_tui_msx.open_menu ~write state;
   check bool "no DOS row before a DOS machine is read as loaded" true
@@ -216,7 +262,7 @@ let test_dos_watch_row () =
    cartridge load that replaces the running MSX game. *)
 let test_dos_row_leaving_does_not_retarget_enter () =
   let state = a_state () in
-  state.msx_carts <- [ "cart a" ];
+  state.msx_carts <- Carts [ "cart a" ];
   state.dos_live <- Masc_tui_machine_live.Showing a_dos_picture;
   let write _ = () in
   Masc_tui_msx.open_menu ~write state;
@@ -238,7 +284,7 @@ let test_dos_row_leaving_does_not_retarget_enter () =
 
 let test_dos_row_arriving_keeps_the_highlight () =
   let state = a_state () in
-  state.msx_carts <- [ "cart a"; "cart b" ];
+  state.msx_carts <- Carts [ "cart a"; "cart b" ];
   let write _ = () in
   Masc_tui_msx.open_menu ~write state;
   ignore (Masc_tui_msx.menu_consume ~write state "down");
@@ -275,6 +321,8 @@ let () =
         ; test_case "navigation and select" `Quick test_menu_navigation_and_select
         ; test_case "esc closes" `Quick test_menu_esc_closes
         ; test_case "empty inventory" `Quick test_menu_empty_inventory
+        ; test_case "inventory answers map to three states" `Quick test_inventory_states
+        ; test_case "inventory state drives the menu" `Quick test_inventory_state_drives_the_menu
         ; test_case "DOS watch row" `Quick test_dos_watch_row
         ; test_case "a DOS row leaving does not retarget Enter" `Quick
             test_dos_row_leaving_does_not_retarget_enter

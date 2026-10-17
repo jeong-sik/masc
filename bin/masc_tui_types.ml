@@ -6275,6 +6275,20 @@ type msx_menu_entry =
   | Menu_load of string
   | Menu_swap_disk of string
 
+(* The cartridge inventory the load menu lists, as the server last answered.
+   An empty inventory and an inventory that could not be read are different
+   facts with different remedies: the first needs files placed in the Add-on's
+   volume, the second needs the server or its worker looked at. [Carts] holds
+   at least one name; build it with [msx_carts_of_names]. *)
+type msx_carts =
+  | Carts of string list
+  | No_carts
+  | Carts_unavailable of string
+
+let msx_carts_of_names = function
+  | [] -> No_carts
+  | names -> Carts names
+
 (* A DOS live read belongs to the view and server port that asked for it.
    A reopened screen may start a fresh read while an old one is still ending. *)
 type machine_live_request = { live_view : unit ref; live_port : int }
@@ -6842,8 +6856,12 @@ type state = {
      rather than the row that moved into its place. *)
   mutable msx_menu_open: bool;
   mutable msx_notice: string option;
+  (* The notice the tick wrote when no worker answered, kept so the first tick
+     that advances can retire it: [msx_notice] is that very value until something
+     else replaces it. *)
+  mutable msx_worker_down_notice: string option;
   mutable msx_menu_mode: msx_menu_mode;
-  mutable msx_carts: string list;
+  mutable msx_carts: msx_carts;
   mutable msx_menu_selected: msx_menu_entry option;
   (* The [:] command palette: a typed filter over jump targets. Query and
      cursor live only while it is open. *)
@@ -11212,8 +11230,9 @@ let create_state
   play_changes = [];
   msx_menu_open = false;
   msx_notice = None;
+  msx_worker_down_notice = None;
   msx_menu_mode = Boot_game;
-  msx_carts = [];
+  msx_carts = No_carts;
   msx_menu_selected = None;
   palette_open = false;
   palette_query = "";

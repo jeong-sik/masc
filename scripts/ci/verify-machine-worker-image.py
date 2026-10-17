@@ -3,6 +3,14 @@
 import argparse, base64, hashlib, json, os, selectors, subprocess, time, uuid
 from pathlib import Path
 
+MSX_FIXTURE_CART = 'fixture.rom'
+MSX_FIXTURE_FILES = (
+    ('/state/.masc/msx/bios/cbios_main_msx2.rom', 32768),
+    ('/state/.masc/msx/bios/cbios_logo_msx2.rom', 16384),
+    ('/state/.masc/msx/bios/cbios_sub.rom', 16384),
+    ('/state/.masc/msx/carts/' + MSX_FIXTURE_CART, 16384),
+)
+
 def run(*args):
     return subprocess.check_output(args, text=True, timeout=60).strip()
 
@@ -89,6 +97,13 @@ def main():
             subprocess.run(['docker','run','--rm','-i','--name',name+'-seed','--network','none','--mount',
                 'type=volume,source='+volume+',target=/state',image,'sh','-c',
                 'mkdir -p /state/.masc/dos/programs && cat > /state/.masc/dos/programs/hello.com'],input=program,check=True,timeout=60)
+        if machine=='msx':
+            # Zero-filled stand-ins for the three C-BIOS ROMs and one cartridge, written only
+            # into this fresh volume. masc_msx_load requires a cart, and a boot needs the BIOS.
+            for path,size in MSX_FIXTURE_FILES:
+                subprocess.run(['docker','run','--rm','-i','--name',name+'-seed','--network','none','--mount',
+                    'type=volume,source='+volume+',target=/state',image,'sh','-c',
+                    'mkdir -p "$(dirname "$1")" && cat > "$1"','sh',path],input=bytes(size),check=True,timeout=60)
         def success(value):
             assert value.get('isError') is not True, value
             return value.get('structuredContent')
@@ -99,7 +114,7 @@ def main():
             empty=worker.call(machine,'screen');assert empty.get('isError') is True
             direct=worker.rpc('tools/call',{'name':'masc_'+machine+'_load','arguments':{}})
             assert direct.get('isError') is True
-            success(worker.call(machine,'load',{'program':'hello.com'} if machine=='dos' else {'roms_dir':''},controlled=machine=='dos'))
+            success(worker.call(machine,'load',{'program':'hello.com'} if machine=='dos' else {'cart':MSX_FIXTURE_CART},controlled=machine=='dos'))
             screen=worker.call(machine,'screen');before=success(screen)
             png=next(c for c in screen['content'] if c['type']=='image')
             assert base64.b64decode(png['data']).startswith(bytes.fromhex('89504e470d0a1a0a'))

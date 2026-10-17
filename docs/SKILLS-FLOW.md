@@ -189,6 +189,37 @@ lookup까지 선형으로 바꾼 것은 아니다. 이 단위의 복합 시나�
 않았다. 실제 준비 시간·첫 요청 크기·모델 왕복·TUI 전체 갱신 지연은 이 소스 비교로
 판정하지 않는다.
 
+#### 최초 준비와 exact 조회의 인덱스
+
+이 비교의 기준은 `c7c2194c116f165114f872e68cdef8cd01a53f6b`다. 스냅샷이 exact identity
+인덱스와 이름별 첫 source의 유효 항목 인덱스를 불변 값으로 보유한다. exact identity의
+기준은 `source_id`, `package_id`, `name`이며 `Skill_reference.Identity_map`이 동일한
+canonical 필드로 키를 비교한다. Task exact lookup은 이 인덱스를 사용하고, 카탈로그도
+스냅샷의 `is_effective_identity`로 유효 여부를 판정한다. 카탈로그의 준비된 projection은
+동일한 identity 타입의 인덱스를 사용하되, 원래 entry 객체일 때만 기존 결과를 재사용한다.
+다른 스냅샷에서 온 같은 identity의 entry는 독립적으로 투영하며 원래 값을 바꾸지 않는다.
+
+`E`는 exact entry 수, `F`는 유효 항목 수다. 아래는 조회 부분의 소스 복잡도 비교이며,
+문서 읽기·파싱·해시·Composition 컴파일·모델 요청을 포함한 시간 실측이 아니다.
+
+| 단계 | As-Is | To-Be 소스 경로 |
+| --- | --- | --- |
+| snapshot exact 참조 한 건 조회 | 최대 `E` 항목 순회 | exact identity Map 조회, `O(log E)` |
+| 최초 projection의 유효 여부 판정 | 항목마다 유효 목록 순회, 최대 `O(E·F)` | 항목마다 유효 이름 인덱스와 exact identity 비교, `O(E log F)` |
+| 준비된 projection 한 건 조회 | 최대 `E` 항목 순회 | exact Map 조회 후 원래 entry 객체 확인, `O(log E)` |
+| 인덱스 구성·보유 | 별도 인덱스 없음 | 준비 시 `O(E log E)` 구성 작업과 선형 크기의 인덱스 메모리 |
+
+목록의 source·entry·shadow·rejection 순서, 첫 source 우선순위, content revision 검사,
+public projection과 revision 해시 입력은 기존 목록을 사용한다. 인덱스는 그 목록의 원래
+entry 객체를 가리키며 wire에 추가되지 않는다. 같은 이름이더라도 다른 source/package의
+exact 참조를 대신하지 않고, 거절된 중복 문서는 원래 winner를 교체하지 않는다.
+
+복합 시나리오는 decoded identity의 shadow 조회, 다른 package와 같은 이름의 구분,
+새 스냅샷의 revision 변경과 원래 스냅샷 유지, 거절된 중복의 digest, 다른 스냅샷 entry의
+projection 분리를 다룬다. 이 단위에서는 작성만 했고 실행하지 않았다. 인덱스 구성 비용,
+실제 메모리·첫 요청 준비 시간·모델 왕복·TUI 지연 개선은 미측정이다. lookup 부분의
+복잡도 감소를 전체 준비 경로의 선형화나 실측 속도 향상으로 부르지 않는다.
+
 ### 2b. 프롬프트 — 지명된 스킬 안내
 
 `task.skills`(`masc_add_task`가 지정, `lib/task/tool_task_handlers.ml`의

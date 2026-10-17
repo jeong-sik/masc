@@ -200,6 +200,9 @@ val prepared_matches :
 val prepared_snapshot : prepared -> Skill_catalog_snapshot.t
 val prepared_catalog : prepared -> t * projection_diagnostic list
 val project_prepared_entry : prepared -> Skill_catalog_snapshot.entry -> entry_projection
+(** Look up a retained projection by exact identity and reuse it only for the
+    original entry object. A foreign snapshot entry is projected independently
+    with the preparation's frozen descriptor authority. *)
 val fold_prepared_entries :
   prepared ->
   init:'a ->

@@ -139,6 +139,7 @@ let lane_policies =
 let event_lane = function
   | Keeper_runtime_manifest.Turn_started
   | Keeper_runtime_manifest.Phase_gate_decided
+  | Keeper_runtime_manifest.Skill_preparation_observed
   | Keeper_runtime_manifest.Pre_dispatch_blocked
   | Keeper_runtime_manifest.Receipt_appended
   | Keeper_runtime_manifest.Turn_finished ->

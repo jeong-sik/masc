@@ -145,6 +145,9 @@ let preparations : preparation_slot Preparations.t = Preparations.create 0
 let preparations_mutex = Stdlib.Mutex.create ()
 
 let preparation_of_projection projection =
+  let snapshot = Keeper_skill_catalog.prepared_snapshot projection in
+  Keeper_skill_preparation_observation.cache_access Keeper_skill_preparation_observation.Task_product ~snapshot
+    ~descriptor_count:(fun () -> Keeper_skill_catalog.prepared_descriptor_count projection) @@ fun observation ->
   let slot = Stdlib.Mutex.protect preparations_mutex (fun () ->
     match Preparations.find_opt preparations projection with
     | Some slot -> slot
@@ -154,14 +157,19 @@ let preparation_of_projection projection =
       Preparations.add preparations projection slot;
       slot)
   in
+  Keeper_skill_preparation_observation.lookup_finished observation;
   Cross_context_mutex.with_lock slot.construction_lock (fun () ->
+    Keeper_skill_preparation_observation.lock_acquired observation;
     match slot.value with
-    | Some preparation -> preparation
+    | Some preparation ->
+      Keeper_skill_preparation_observation.decided observation Keeper_skill_preparation_observation.Reused;
+      preparation
     | None ->
       let catalog, diagnostics = Keeper_skill_catalog.prepared_catalog projection in
       let inventory = Keeper_skill_inventory.of_prepared projection in
       let preparation = { projection; catalog; diagnostics; inventory } in
       slot.value <- Some preparation;
+      Keeper_skill_preparation_observation.decided observation Keeper_skill_preparation_observation.Constructed;
       preparation)
 ;;
 
@@ -345,7 +353,10 @@ let with_descriptors ~descriptors ~snapshot selection =
 let prepare_surface ~snapshot ~descriptors selection =
   match selection.preparation with
   | Some preparation when Keeper_skill_catalog.prepared_matches preparation.projection ~descriptors snapshot ->
-    preparation
+    Keeper_skill_preparation_observation.cache_access Keeper_skill_preparation_observation.Retained_turn_surface ~snapshot
+      ~descriptor_count:(fun () -> List.length descriptors) (fun observation ->
+        Keeper_skill_preparation_observation.decided observation Keeper_skill_preparation_observation.Reused;
+        preparation)
   | Some _ | None ->
     Keeper_skill_catalog.prepare_snapshot ~descriptors snapshot |> preparation_of_projection
 ;;

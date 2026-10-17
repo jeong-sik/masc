@@ -1,5 +1,5 @@
-(* A1 parser facade — wraps Menhir grammar + lexer with error
-   translation to Parsed.t arms.  Never raises. *)
+(* Bash subset parser — wraps Menhir grammar + lexer with explicit
+   failure translation to Parsed.t arms. *)
 
 open Masc_exec
 
@@ -200,31 +200,29 @@ let to_shell_ir
    redirect was reported as the redirect. RFC execute-subset-dispositions §6
    recorded the same shape from the other end -- a tag naming the first trip
    rather than the construct -- and this is where that is closed. *)
-let parse_source (source : string) : Shell_ir.t Parsed.t =
-  let lexbuf = Lexing.from_string source in
-  try
-    let raw = Bash_subset.command Bash_lexer.token lexbuf in
-    to_shell_ir raw
-  with
-  | Bash_lexer.Token_limit_exceeded -> Parsed.Parse_aborted `Token_limit_50k
-  | Bash_lexer.Excluded_construct reason -> Parsed.Too_complex reason
-  | Bash_lexer.Subst_inner_refusal refusal ->
-    (* An inner [$( )] body refused for its own reason; the refusal rides
-       up unchanged — the same rules, the same reasons (RFC
-       shell-ir-typed-command-substitution §2.2). *)
-    refusal
-  | Bash_subset.Error -> Parsed.Parse_error (make_parse_error lexbuf)
-  (* [int_of_string] on a descriptor the rule matched but no machine has, as
-     in [99999999999999999999>out]. The token is well formed and unusable,
-     which is what a parse error says. *)
-  | Failure _ -> Parsed.Parse_error (make_parse_error lexbuf)
-
 let parse_string (source : string) : Shell_ir.t Parsed.t =
-  Bash_lexer.reset_tokens ();
-  (* The lexer's recursive parse of a [$( )] body re-enters here through
-     this hook — a direct call would close a module cycle.  Parsing is
-     synchronous with no Eio yield point, so the global ref cannot be
-     observed mid-swap, and installing it is idempotent under recursion:
-     an inner parse sets the same value it was called through. *)
-  Bash_lexer.subst_parse_hook := parse_source;
+  (* One invocation owns the counter. Recursive source parses capture the
+     same counter, so substitutions spend their parent's remaining budget. *)
+  let token_count = ref 0 in
+  let rec parse_source (source : string) : Shell_ir.t Parsed.t =
+    let lexbuf = Lexing.from_string source in
+    try
+      let raw =
+        Bash_subset.command (Bash_lexer.token token_count parse_source) lexbuf
+      in
+      to_shell_ir raw
+    with
+    | Bash_lexer.Token_limit_exceeded -> Parsed.Parse_aborted `Token_limit_50k
+    | Bash_lexer.Excluded_construct reason -> Parsed.Too_complex reason
+    | Bash_lexer.Subst_inner_refusal refusal ->
+      (* An inner [$( )] body refused for its own reason; the refusal rides
+         up unchanged — the same rules, the same reasons (RFC
+         shell-ir-typed-command-substitution §2.2). *)
+      refusal
+    | Bash_subset.Error -> Parsed.Parse_error (make_parse_error lexbuf)
+    (* [int_of_string] on a descriptor the rule matched but no machine has, as
+       in [99999999999999999999>out]. The token is well formed and unusable,
+       which is what a parse error says. *)
+    | Failure _ -> Parsed.Parse_error (make_parse_error lexbuf)
+  in
   parse_source source

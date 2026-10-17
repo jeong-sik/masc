@@ -10,10 +10,9 @@
   open Bash_subset
   open Masc_exec
 
-  (* Token budget — each emitted simple lexeme and each adjacent word piece
-     materialized by [word_tail] increments the same counter. The 50k ceiling
-     is enforced before Menhir or the lexer can build an oversized list. *)
-  let token_count = ref 0
+  (* Each public parse supplies one counter, shared with its recursive child
+     parser. Every emitted simple lexeme and adjacent word piece materialized
+     by [word_tail] spends it before an oversized list can be built. *)
   let token_limit = 50_000
   exception Token_limit_exceeded
 
@@ -31,23 +30,9 @@
   exception Excluded_construct of Parsed.reason_too_complex
 
   let excluded reason = raise (Excluded_construct reason)
-  let reset_tokens () = token_count := 0
-  let incr_tokens () =
+  let incr_tokens token_count =
     incr token_count;
     if !token_count > token_limit then raise Token_limit_exceeded
-  ;;
-  let get_tokens () = !token_count
-  ;;
-
-  (* The recursive parse of a $( ) body.  A direct call to
-     [Bash.parse_string] would close a module cycle (bash.ml drives this
-     lexer) and add an unclassified caller to the shell-ir-consumption
-     audit; the entry point installs this hook instead.  The hook shares
-     this process's token budget — it must not reset the counter (RFC
-     shell-ir-typed-command-substitution §2.4: source size is the only
-     bound on nesting). *)
-  let subst_parse_hook : (string -> Shell_ir.t Parsed.t) ref =
-    ref (fun _ -> raise (Failure "subst_parse_hook unset"))
   ;;
 
   (* Carries an inner refusal out of [subst_piece] unchanged: the same
@@ -136,41 +121,41 @@ let sq_body = [^ '\'' '\n']*
 let dq_char = [^ '"' '\n' '\\' '$' '`'] | "\\|"
 let dq_body = dq_char*
 
-rule token = parse
-  | [' ' '\t']+    { token lexbuf }
+rule token token_count parse_subst = parse
+  | [' ' '\t']+    { token token_count parse_subst lexbuf }
   (* A newline separates commands the way [;] does (bash's own reading).
      Swallowing it as whitespace glued the next line's words into the
      previous command's argv — silent wrong argv, not a refusal.  The
      grammar owns where a NEWLINE may sit (after separators and [&&],
      [||], [|] it reads as continuation). *)
-  | '\n'           { incr_tokens (); Lexing.new_line lexbuf; NEWLINE }
+  | '\n'           { incr_tokens token_count; Lexing.new_line lexbuf; NEWLINE }
   (* Before [PIPE] and the fd-redirect rules so the two-character
      operators win their own lexemes. A lone [&] stays out of the subset
      and is named `Background by its own rule below. *)
-  | "&&"           { incr_tokens (); AND_IF }
-  | "||"           { incr_tokens (); OR_IF }
-  | ';'            { incr_tokens (); SEMICOLON }
-  | '|'            { incr_tokens (); PIPE }
+  | "&&"           { incr_tokens token_count; AND_IF }
+  | "||"           { incr_tokens token_count; OR_IF }
+  | ';'            { incr_tokens token_count; SEMICOLON }
+  | '|'            { incr_tokens token_count; PIPE }
   | (fd as src) ">&" (fd as dst)
-                    { incr_tokens (); FD_REDIRECT (int_of_string src, int_of_string dst) }
+                    { incr_tokens token_count; FD_REDIRECT (int_of_string src, int_of_string dst) }
   | ">&" (fd as dst)
-                    { incr_tokens (); FD_REDIRECT (1, int_of_string dst) }
+                    { incr_tokens token_count; FD_REDIRECT (1, int_of_string dst) }
   | (fd as src) "<&" (fd as dst)
-                    { incr_tokens (); FD_REDIRECT (int_of_string src, int_of_string dst) }
+                    { incr_tokens token_count; FD_REDIRECT (int_of_string src, int_of_string dst) }
   | "<&" (fd as dst)
-                    { incr_tokens (); FD_REDIRECT (0, int_of_string dst) }
+                    { incr_tokens token_count; FD_REDIRECT (0, int_of_string dst) }
   | (fd as fd) ">>"
-                    { incr_tokens (); FILE_REDIRECT_OP (int_of_string fd, Masc_exec.Redirect_scope.Append) }
+                    { incr_tokens token_count; FILE_REDIRECT_OP (int_of_string fd, Masc_exec.Redirect_scope.Append) }
   | ">>"
-                    { incr_tokens (); FILE_REDIRECT_OP (1, Masc_exec.Redirect_scope.Append) }
+                    { incr_tokens token_count; FILE_REDIRECT_OP (1, Masc_exec.Redirect_scope.Append) }
   | (fd as fd) ">"
-                    { incr_tokens (); FILE_REDIRECT_OP (int_of_string fd, Masc_exec.Redirect_scope.Write) }
+                    { incr_tokens token_count; FILE_REDIRECT_OP (int_of_string fd, Masc_exec.Redirect_scope.Write) }
   | ">"
-                    { incr_tokens (); FILE_REDIRECT_OP (1, Masc_exec.Redirect_scope.Write) }
+                    { incr_tokens token_count; FILE_REDIRECT_OP (1, Masc_exec.Redirect_scope.Write) }
   | (fd as fd) "<"
-                    { incr_tokens (); FILE_REDIRECT_OP (int_of_string fd, Masc_exec.Redirect_scope.Read) }
+                    { incr_tokens token_count; FILE_REDIRECT_OP (int_of_string fd, Masc_exec.Redirect_scope.Read) }
   | "<"
-                    { incr_tokens (); FILE_REDIRECT_OP (0, Masc_exec.Redirect_scope.Read) }
+                    { incr_tokens token_count; FILE_REDIRECT_OP (0, Masc_exec.Redirect_scope.Read) }
 
   (* Constructs outside the subset, each named by the rule that matches it.
      Longest match orders these against the operators above: [<<<] beats [<<]
@@ -178,7 +163,7 @@ rule token = parse
      none of them is not given the name of a neighbouring character; it
      reaches the catch-all at the bottom and becomes a parse error. *)
   | "$(("           { excluded `Arith_expansion }
-  | "$("            { word_tail (subst_piece lexbuf) [] lexbuf }
+  | "$("            { word_tail token_count parse_subst (subst_piece token_count parse_subst lexbuf) [] lexbuf }
   (* Simple parameter expansion — [$NAME] and [${NAME}] open a word
      whose adjacent pieces [word_tail] collects into one token.  Both
      forms come before the bare ['\$'] exclusion so a name that does
@@ -186,12 +171,12 @@ rule token = parse
      still falls through to it and is refused as Param_expansion,
      keeping the excluded vocabulary closed. *)
   | '$' (param_name as name) {
-      incr_tokens ();
-      word_tail (Shell_ir.Var (name, meta_of_string name)) [] lexbuf
+      incr_tokens token_count;
+      word_tail token_count parse_subst (Shell_ir.Var (name, meta_of_string name)) [] lexbuf
     }
   | "${" (param_name as name) "}" {
-      incr_tokens ();
-      word_tail
+      incr_tokens token_count;
+      word_tail token_count parse_subst
         (Shell_ir.Var
            (name, { Shell_ir.quoted = false; glob = false; escaped = false }))
         []
@@ -207,14 +192,14 @@ rule token = parse
      [heredoc_body] and lands as Redirect_scope.Literal, which dispatch
      already feeds to the child's stdin. *)
   | "<<" '\'' (heredoc_tag as tag) '\'' [' ' '\t']* '\n' {
-      incr_tokens ();
+      incr_tokens token_count;
       Lexing.new_line lexbuf;
-      heredoc_body tag (Buffer.create 256) lexbuf
+      heredoc_body token_count tag (Buffer.create 256) lexbuf
     }
   | "<<" '"' (heredoc_tag as tag) '"' [' ' '\t']* '\n' {
-      incr_tokens ();
+      incr_tokens token_count;
       Lexing.new_line lexbuf;
-      heredoc_body tag (Buffer.create 256) lexbuf
+      heredoc_body token_count tag (Buffer.create 256) lexbuf
     }
   | "<<"            { excluded `Heredoc }
   | "<("            { excluded `Proc_subst }
@@ -233,19 +218,19 @@ rule token = parse
   | ')'             { excluded `Subshell }
   | '{'             { excluded `Glob_brace }
   | '}'             { excluded `Glob_brace }
-  | "/dev/null"    { incr_tokens (); DEV_NULL }
-  | '\'' "/dev/null" '\'' { incr_tokens (); DEV_NULL }
-  | '"' "/dev/null" '"' { incr_tokens (); DEV_NULL }
-  | (word_prefix as prefix) '\'' (sq_body as s) '\'' { incr_tokens (); word_tail (Shell_ir.Lit (prefix ^ s, { Shell_ir.quoted = true; glob = false; escaped = false })) [] lexbuf }
-  | (word_prefix as prefix) '"' (dq_body as s) '"' { incr_tokens (); word_tail (Shell_ir.Lit (prefix ^ s, { Shell_ir.quoted = true; glob = false; escaped = false })) [] lexbuf }
-  | '\'' (sq_body as s) '\'' { incr_tokens (); word_tail (Shell_ir.Lit (s, { Shell_ir.quoted = true; glob = false; escaped = false })) [] lexbuf }
-  | '"' (dq_body as s) '"' { incr_tokens (); word_tail (Shell_ir.Lit (s, { Shell_ir.quoted = true; glob = false; escaped = false })) [] lexbuf }
+  | "/dev/null"    { incr_tokens token_count; DEV_NULL }
+  | '\'' "/dev/null" '\'' { incr_tokens token_count; DEV_NULL }
+  | '"' "/dev/null" '"' { incr_tokens token_count; DEV_NULL }
+  | (word_prefix as prefix) '\'' (sq_body as s) '\'' { incr_tokens token_count; word_tail token_count parse_subst (Shell_ir.Lit (prefix ^ s, { Shell_ir.quoted = true; glob = false; escaped = false })) [] lexbuf }
+  | (word_prefix as prefix) '"' (dq_body as s) '"' { incr_tokens token_count; word_tail token_count parse_subst (Shell_ir.Lit (prefix ^ s, { Shell_ir.quoted = true; glob = false; escaped = false })) [] lexbuf }
+  | '\'' (sq_body as s) '\'' { incr_tokens token_count; word_tail token_count parse_subst (Shell_ir.Lit (s, { Shell_ir.quoted = true; glob = false; escaped = false })) [] lexbuf }
+  | '"' (dq_body as s) '"' { incr_tokens token_count; word_tail token_count parse_subst (Shell_ir.Lit (s, { Shell_ir.quoted = true; glob = false; escaped = false })) [] lexbuf }
   (* A double-quoted body the rule above could not close in one piece —
      it holds a [$] or a backtick.  [dq_pieces] reads it piece by piece:
      simple expansions become quoted [Var]s, and the constructs bash
      would run in there keep their named refusals. *)
-  | '"' { dq_pieces None [] lexbuf }
-  | word as w      { incr_tokens (); word_tail (Shell_ir.Lit (w, meta_of_string w)) [] lexbuf }
+  | '"' { dq_pieces token_count parse_subst None [] lexbuf }
+  | word as w      { incr_tokens token_count; word_tail token_count parse_subst (Shell_ir.Lit (w, meta_of_string w)) [] lexbuf }
   | eof            { EOF }
   (* No rule matched. This is not [`Unknown_construct]: the rules above each
      name a shell feature the tool does not implement, and what arrives here
@@ -262,18 +247,18 @@ rule token = parse
    word whose pieces include the [Subst], as bash reads it.  An excluded
    construct glued to a word ([foo`bar`]) still reaches its own rule and
    is refused by name. *)
-and word_tail first rev_rest = parse
+and word_tail token_count parse_subst first rev_rest = parse
   | "$((" { excluded `Arith_expansion }
   | "$(" {
-      word_tail first (subst_piece lexbuf :: rev_rest) lexbuf
+      word_tail token_count parse_subst first (subst_piece token_count parse_subst lexbuf :: rev_rest) lexbuf
     }
   | '$' (param_name as name) {
-      incr_tokens ();
-      word_tail first (Shell_ir.Var (name, meta_of_string name) :: rev_rest) lexbuf
+      incr_tokens token_count;
+      word_tail token_count parse_subst first (Shell_ir.Var (name, meta_of_string name) :: rev_rest) lexbuf
     }
   | "${" (param_name as name) "}" {
-      incr_tokens ();
-      word_tail
+      incr_tokens token_count;
+      word_tail token_count parse_subst
         first
         (Shell_ir.Var
            (name, { Shell_ir.quoted = false; glob = false; escaped = false })
@@ -281,26 +266,26 @@ and word_tail first rev_rest = parse
         lexbuf
     }
   | '\'' (sq_body as s) '\'' {
-      incr_tokens ();
-      word_tail
+      incr_tokens token_count;
+      word_tail token_count parse_subst
         first
         (Shell_ir.Lit (s, { Shell_ir.quoted = true; glob = false; escaped = false })
          :: rev_rest)
         lexbuf
     }
   | '"' (dq_body as s) '"' {
-      incr_tokens ();
-      word_tail
+      incr_tokens token_count;
+      word_tail token_count parse_subst
         first
         (Shell_ir.Lit (s, { Shell_ir.quoted = true; glob = false; escaped = false })
          :: rev_rest)
         lexbuf
     }
   | word as w {
-      incr_tokens ();
-      word_tail first (Shell_ir.Lit (w, meta_of_string w) :: rev_rest) lexbuf
+      incr_tokens token_count;
+      word_tail token_count parse_subst first (Shell_ir.Lit (w, meta_of_string w) :: rev_rest) lexbuf
     }
-  | '"' { dq_pieces (Some first) rev_rest lexbuf }
+  | '"' { dq_pieces token_count parse_subst (Some first) rev_rest lexbuf }
   | "" { assemble_word first rev_rest }
 
 (* Inside a double-quoted body, read pieces instead of requiring one
@@ -315,48 +300,48 @@ and word_tail first rev_rest = parse
    followed by /sub.  [first_opt] is [None] only while the quote opened the
    word and no piece has been read yet; an empty pair of quotes that closes
    in that state is bash's empty argument, one empty Lit. *)
-and dq_pieces first_opt rev_rest = parse
+and dq_pieces token_count parse_subst first_opt rev_rest = parse
   | dq_char+ as s {
-      incr_tokens ();
+      incr_tokens token_count;
       let piece =
         Shell_ir.Lit (s, { Shell_ir.quoted = true; glob = false; escaped = false })
       in
       (match first_opt with
-       | None -> dq_pieces (Some piece) rev_rest lexbuf
-       | Some first -> dq_pieces (Some first) (piece :: rev_rest) lexbuf)
+       | None -> dq_pieces token_count parse_subst (Some piece) rev_rest lexbuf
+       | Some first -> dq_pieces token_count parse_subst (Some first) (piece :: rev_rest) lexbuf)
     }
   | '$' (param_name as name) {
-      incr_tokens ();
+      incr_tokens token_count;
       let piece =
         Shell_ir.Var (name, { Shell_ir.quoted = true; glob = false; escaped = false })
       in
       (match first_opt with
-       | None -> dq_pieces (Some piece) rev_rest lexbuf
-       | Some first -> dq_pieces (Some first) (piece :: rev_rest) lexbuf)
+       | None -> dq_pieces token_count parse_subst (Some piece) rev_rest lexbuf
+       | Some first -> dq_pieces token_count parse_subst (Some first) (piece :: rev_rest) lexbuf)
     }
   | "${" (param_name as name) "}" {
-      incr_tokens ();
+      incr_tokens token_count;
       let piece =
         Shell_ir.Var (name, { Shell_ir.quoted = true; glob = false; escaped = false })
       in
       (match first_opt with
-       | None -> dq_pieces (Some piece) rev_rest lexbuf
-       | Some first -> dq_pieces (Some first) (piece :: rev_rest) lexbuf)
+       | None -> dq_pieces token_count parse_subst (Some piece) rev_rest lexbuf
+       | Some first -> dq_pieces token_count parse_subst (Some first) (piece :: rev_rest) lexbuf)
     }
   | "$((" { excluded `Arith_expansion }
   | "$(" {
-      let piece = subst_piece lexbuf in
+      let piece = subst_piece token_count parse_subst lexbuf in
       (match first_opt with
-       | None -> dq_pieces (Some piece) rev_rest lexbuf
-       | Some first -> dq_pieces (Some first) (piece :: rev_rest) lexbuf)
+       | None -> dq_pieces token_count parse_subst (Some piece) rev_rest lexbuf
+       | Some first -> dq_pieces token_count parse_subst (Some first) (piece :: rev_rest) lexbuf)
     }
   | '`'   { excluded `Cmd_subst }
   | '$'   { excluded `Param_expansion }
   | '"' {
       match first_opt with
-      | Some first -> word_tail first rev_rest lexbuf
+      | Some first -> word_tail token_count parse_subst first rev_rest lexbuf
       | None ->
-        word_tail
+        word_tail token_count parse_subst
           (Shell_ir.Lit
              ("", { Shell_ir.quoted = true; glob = false; escaped = false }))
           rev_rest
@@ -365,17 +350,17 @@ and dq_pieces first_opt rev_rest = parse
   | eof  { raise (Failure "unterminated double quote") }
   | _ as c { raise (Failure (Printf.sprintf "unexpected char %c in double quotes" c)) }
 
-(* One [$( )] piece: balanced-scan the body, re-parse it through the hook
+(* One [$( )] piece: balanced-scan the body, re-parse it through the callback
    (which shares the token budget and never resets it), and hand the child
    IR up as a [Subst].  An inner refusal rides out unchanged — the same
    rules, the same reasons (RFC shell-ir-typed-command-substitution §2.2).
    The re-parse target is the source the user wrote, never execution
    output. *)
-and subst_piece = parse
+and subst_piece token_count parse_subst = parse
   | "" {
-      incr_tokens ();
+      incr_tokens token_count;
       let body = subst_body 1 (Buffer.create 256) lexbuf in
-      match !subst_parse_hook body with
+      match parse_subst body with
       | Parsed.Parsed ir -> Shell_ir.Subst ir
       | (Parsed.Parse_error _ | Parsed.Parse_aborted _ | Parsed.Too_complex _)
         as refusal -> raise (Subst_inner_refusal refusal)
@@ -473,20 +458,20 @@ and subst_backtick buf = parse
    that closes the whole command surfaces as an ordinary NEWLINE token
    and the next line starts a fresh command instead of joining this
    argv. *)
-and heredoc_body tag buf = parse
+and heredoc_body token_count tag buf = parse
   | [^ '\n']* as line {
-      incr_tokens ();
+      incr_tokens token_count;
       if String.equal line tag then HEREDOC_LITERAL (Buffer.contents buf)
       else begin
         Buffer.add_string buf line;
-        heredoc_line_end tag buf lexbuf
+        heredoc_line_end token_count tag buf lexbuf
       end
     }
 
-and heredoc_line_end tag buf = parse
+and heredoc_line_end token_count tag buf = parse
   | '\n' {
       Lexing.new_line lexbuf;
       Buffer.add_char buf '\n';
-      heredoc_body tag buf lexbuf
+      heredoc_body token_count tag buf lexbuf
     }
   | eof { raise (Failure "unterminated heredoc") }

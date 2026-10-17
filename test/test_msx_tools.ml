@@ -1726,31 +1726,47 @@ let test_load_file_failures_are_typed () =
   check bool "its ledger is unchanged" true (ledger_before = Msx_lane.ledger ())
 ;;
 
+let inventory_meta ~base_path =
+  dispatch ~base_path "masc_msx_meta" [ ("include_inventory", `Bool true) ]
+;;
+
+let inventory_names r =
+  match member "inventory" (Tool_result.data r) with
+  | Some inventory ->
+    (match member "carts" inventory with
+     | Some (`List l) -> List.filter_map (function `String s -> Some s | _ -> None) l
+     | _ -> fail "inventory has no carts")
+  | None -> fail "no inventory"
+;;
+
 (* The inventory lists regular files only. An entry that cannot be inspected
    is not a cartridge, and a directory that will not list is an error the
    caller can tell from an empty one; neither raises. *)
 let test_inventory_with_hostile_entries () =
   with_workspace @@ fun base_path ->
   let carts = Filename.concat (Filename.concat (Filename.concat base_path ".masc") "msx") "carts" in
-  let meta () = dispatch ~base_path "masc_msx_meta" [ ("include_inventory", `Bool true) ] in
-  let names r =
-    match member "inventory" (Tool_result.data r) with
-    | Some inventory ->
-      (match member "carts" inventory with
-       | Some (`List l) -> List.filter_map (function `String s -> Some s | _ -> None) l
-       | _ -> fail "inventory has no carts")
-    | None -> fail "no inventory"
-  in
+  let meta () = inventory_meta ~base_path in
+  let names = inventory_names in
   check (list string) "a volume with no carts directory has an empty inventory" []
     (names (meta ()));
   Fs_compat.mkdir_p carts;
   write_cart carts "good.rom" "x";
   Unix.symlink "/nonexistent-target" (Filename.concat carts "dangling.rom");
   Sys.mkdir (Filename.concat carts "sub.rom") 0o755;
-  check (list string) "only the regular file is a cartridge" [ "good.rom" ] (names (meta ()));
+  check (list string) "only the regular file is a cartridge" [ "good.rom" ] (names (meta ()))
+;;
+
+(* A directory with mode 000 refuses to list for an ordinary user only; root
+   reads it anyway, so the case cannot be made there. *)
+let test_inventory_that_will_not_list () =
+  if Unix.geteuid () = 0 then Alcotest.skip ();
+  with_workspace @@ fun base_path ->
+  let carts = Filename.concat (Filename.concat (Filename.concat base_path ".masc") "msx") "carts" in
+  Fs_compat.mkdir_p carts;
+  write_cart carts "good.rom" "x";
   Unix.chmod carts 0o000;
   Fun.protect ~finally:(fun () -> Unix.chmod carts 0o755) (fun () ->
-    let r = meta () in
+    let r = inventory_meta ~base_path in
     check bool "an inventory that will not list is a failure, not an empty list" true
       (not (is_completed r));
     check bool "the failure is a runtime failure" true
@@ -1923,6 +1939,7 @@ let () =
             test_peek_address_answer_is_four_hex_digits
         ; test_case "load file failures are typed" `Quick test_load_file_failures_are_typed
         ; test_case "inventory with hostile entries" `Quick test_inventory_with_hostile_entries
+        ; test_case "inventory that will not list" `Quick test_inventory_that_will_not_list
         ; test_case "core identity matches the pin" `Quick test_core_identity_matches_pin
         ; test_case "pin table names the same core commit" `Quick test_pin_table_names_the_same_core
         ; test_case "checkpoint info reads without restoring" `Quick

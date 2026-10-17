@@ -106,8 +106,14 @@ let template_placeholder =
     ]
 ;;
 
+let is_template_ref fields =
+  match List.assoc_opt "$ref" fields with
+  | Some (`String "#/$defs/template") -> true
+  | Some _ | None -> false
+;;
+
 let rec without_recursive_refs = function
-  | `Assoc [ ("$ref", `String "#/$defs/template") ] -> template_placeholder
+  | `Assoc fields when is_template_ref fields -> template_placeholder
   | `Assoc fields ->
     `Assoc
       (List.filter_map

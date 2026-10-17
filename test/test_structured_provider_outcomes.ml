@@ -188,6 +188,74 @@ let check_token_limit response =
 let test_chat_empty_token_cut () =
   check_token_limit (parse_chat (chat_json ~refusal:`Null ~finish:"length" ()))
 
+let through_complete ~stream response =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let transport : Llm_provider.Llm_transport.t =
+    { complete_sync = (fun _ -> { response = Ok response; latency_ms = None })
+    ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ _ -> Ok response) }
+  in
+  let config = Llm_provider.Provider_config.make
+      ~kind:OpenAI_compat ~model_id:"fixture"
+      ~base_url:"http://127.0.0.1:1" () in
+  let result =
+    if stream then
+      Llm_provider.Complete.complete_stream ~sw ~net:env#net ~transport ~config
+        ~messages:[ Types.user_msg "controlled terminal response" ]
+        ~on_event:(fun _ -> ()) ()
+    else
+      Llm_provider.Complete.complete ~sw ~net:env#net ~transport ~config
+        ~messages:[ Types.user_msg "controlled terminal response" ] ()
+  in
+  match result with
+  | Ok response -> response
+  | Error _ -> Alcotest.fail "public completion erased authoritative terminal state"
+
+let check_policy_or_truncation expected response =
+  match expected with
+  | Types.Refusal -> check_refusal response
+  | MaxTokens -> check_token_limit response
+  | ContentFilter | RepetitionTruncation ->
+    let expected_structured =
+      match expected with
+      | Types.ContentFilter -> Structured.Refused Error.Content_filtered
+      | RepetitionTruncation -> Structured.Truncated Error.Repetition_limit
+      | EndTurn | StopToolUse | MaxTokens | StopSequence | Refusal
+      | PauseTurn | Compaction | ContextWindowExceeded | UnmatchedToolCalls | Unknown _ ->
+        Alcotest.fail "invalid policy/truncation fixture"
+    in
+    Alcotest.(check bool) "structured terminal reason reaches consumer" true
+      (Structured.inspect_response_json response = expected_structured);
+    (match Vt.outcome_of_response ~runtime_id:"fixture.vision" ~requested_model:"fixture"
+             response with
+     | Vt.Vo_provider failure ->
+       let expected_class = if expected = ContentFilter then
+           Tool_result.Policy_rejection else Tool_result.Runtime_failure in
+       Alcotest.(check bool) "vision keeps policy versus repetition failure" true
+         (failure.failure_class = expected_class)
+     | Vo_ok _ | Vo_invalid_request _ | Vo_no_runtime _ | Vo_timeout
+     | Vo_invalid_structured_response _ | Vo_official_failure _ | Vo_empty | Vo_truncated ->
+       Alcotest.fail "vision lost policy/truncation failure")
+  | EndTurn | StopToolUse | StopSequence | PauseTurn | Compaction
+  | ContextWindowExceeded | UnmatchedToolCalls | Unknown _ ->
+    Alcotest.fail "invalid terminal fixture"
+
+let test_complete_sync_terminal_reaches_consumers () =
+  List.iter (fun (finish, expected) ->
+    parse_chat (chat_json ~refusal:`Null ~finish ())
+    |> through_complete ~stream:false
+    |> check_policy_or_truncation expected)
+    [ "refusal", Types.Refusal; "length", MaxTokens
+    ; "content_filter", ContentFilter; "repetition_truncation", RepetitionTruncation ]
+
+let test_complete_stream_terminal_reaches_consumers () =
+  List.iter (fun (finish, expected) ->
+    chat_stream [[], `String finish]
+    |> through_complete ~stream:true
+    |> check_policy_or_truncation expected)
+    [ "refusal", Types.Refusal; "length", MaxTokens
+    ; "content_filter", ContentFilter; "repetition_truncation", RepetitionTruncation ]
+
 let test_refusal_is_not_output_limit_failover () =
   check_refusal (parse_chat (chat_json ~finish:"length" ~content:(`String answer) ()))
 
@@ -374,6 +442,10 @@ let () = Alcotest.run "provider structured outcomes"
     ; Alcotest.test_case "ordinary empty control" `Quick test_normal_empty_stays_empty_failure
     ; Alcotest.test_case "ordinary JSON control" `Quick test_normal_json_stays_ready
     ; Alcotest.test_case "empty token cut" `Quick test_chat_empty_token_cut
+    ; Alcotest.test_case "public sync terminal reaches consumers" `Quick
+        test_complete_sync_terminal_reaches_consumers
+    ; Alcotest.test_case "public stream terminal reaches consumers" `Quick
+        test_complete_stream_terminal_reaches_consumers
     ; Alcotest.test_case "refusal over token cut" `Quick test_refusal_is_not_output_limit_failover
     ; Alcotest.test_case "Responses stream token cut" `Quick test_responses_stream_token_cut
     ; Alcotest.test_case "tool then final schema" `Quick test_tool_turn_then_final_schema

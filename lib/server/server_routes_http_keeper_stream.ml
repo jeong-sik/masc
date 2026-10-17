@@ -3536,7 +3536,9 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
    this hook; no successor can claim until the hook returns. A prior segment's
    Run_finished is a continuation boundary, not evidence of this failure. *)
 let record_settled_error ~base_path ~keeper_name ~operation_id ~message =
-  Log.Keeper.warn ~keeper_name "keeper_chat_error incident_id=%s detail=%s" operation_id message;
+  let redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
+  Log.Keeper.warn ~keeper_name "keeper_chat_error incident_id=%s detail=%s"
+    operation_id (Keeper_secret_redaction.redact_text redaction message);
   let journal =
     Keeper_chat_event_log.open_journal ~base_dir:base_path ~keeper_name ~operation_id ()
   in

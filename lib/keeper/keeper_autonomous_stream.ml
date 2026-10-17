@@ -202,7 +202,7 @@ let finish t ending =
         | Failed message ->
           Log.Keeper.warn ~keeper_name:t.keeper_name
             "keeper_turn_error incident_id=%s detail=%s"
-            (Ids.Turn_ref.to_string t.turn_ref) message;
+            (Ids.Turn_ref.to_string t.turn_ref) (t.redact_text message);
           Events.Event_error {message = t.redact_text message}
         | Cancelled -> Events.Event_error {message = "Autonomous turn cancelled"}))))
 

@@ -1,4 +1,6 @@
-(** Serial external execution. Worker annotations do not grant authority. *)
+(** Serial external execution. Worker annotations do not grant authority.
+    The exact frozen export shares one descriptor across observations/turns.
+    The weak cache does not pin an unowned export or its retired generation. *)
 val create : Lane_addon_tool_export.t -> Keeper_tool_descriptor.t
 
 val is_canonical : Keeper_tool_descriptor.t -> bool

@@ -334,12 +334,12 @@ val load_file_opt : string -> string option
     one writer. *)
 val save_file : string -> string -> unit
 
-(** The writer behind {!save_file} and every atomic writer, on an open
-    descriptor: writes, flushes, closes, and raises the first error. The
-    descriptor is closed whether or not it raises. Exposed so a test can hand
-    it a descriptor that cannot be written (opened read-only), which needs no
-    full disk and behaves the same on macOS and Linux. *)
-val write_all_and_close_for_testing : Unix.file_descr -> string -> unit
+(** The descriptor-level writer behind {!save_file} and every atomic writer:
+    writes the string through the open descriptor, flushes, closes, and raises
+    the first write, flush or close error. The descriptor is closed whether or
+    not it raises. A caller that holds the descriptor gets the same error
+    reporting as {!save_file}; nothing is swallowed. *)
+val write_all_and_close : Unix.file_descr -> string -> unit
 
 (** Write content to path via temp file + rename.
     Returns [Error msg] on I/O failure instead of raising. *)

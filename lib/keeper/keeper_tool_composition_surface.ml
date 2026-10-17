@@ -612,22 +612,19 @@ let original_source_context ~(source : Journal.source)
     ~(observation : Journal.source_observation option) turn_context =
   let context = match turn_context with
     | Some context -> context | None -> Keeper_tool_call_log_context.empty_turn_context in
-  let context = {context with task_id=source.source_task_id;turn=Some source.source_turn;
-      answer_source_ids=[]} in
-  match observation with
-  | None -> Some context
-  | Some observation ->
-      let retain_known original current = match original with Some _ -> original | None -> current in
-      (* Partial/absent observation leaves the existing operational frame alone.
-         It cannot attach a current answer to the original invocation. *)
-      let answer_source_ids = match observation.trace_id, observation.keeper_turn_id with
-        | Some _, Some _ -> observation.answer_source_ids
-        | None, _ | _, None -> [] in
-      Some {context with trace_id=retain_known
-          (Option.map Keeper_id.Trace_id.to_string observation.trace_id) context.trace_id;
-        session_id=observation.session_id;
-        keeper_turn_id=retain_known observation.keeper_turn_id context.keeper_turn_id;
-        answer_source_ids}
+  let trace_id, session_id, keeper_turn_id, answer_source_ids = match observation with
+    | None -> None, None, None, []
+    | Some observation ->
+        let answer_source_ids = match observation.trace_id, observation.keeper_turn_id with
+          | Some _, Some _ -> observation.answer_source_ids
+          | None, _ | _, None -> [] in
+        Option.map Keeper_id.Trace_id.to_string observation.trace_id,
+        observation.session_id, observation.keeper_turn_id, answer_source_ids in
+  (* The resumed run owns the operational environment, not missing producer
+     coordinates. Mixing a current trace with an original turn would fabricate
+     provenance for Ask and any nested composition that captures this context. *)
+  Some {context with task_id=source.source_task_id;turn=Some source.source_turn;
+    trace_id;session_id;keeper_turn_id;answer_source_ids}
 ;;
 
 let execute_keeper_plan ~capability_authority =

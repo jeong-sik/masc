@@ -74,6 +74,11 @@ val empty_turn_context : turn_context
     substitute one missing field of an absent context build on this instead
     of minting a partial record by hand. *)
 
+val source_turn_ref : turn_context -> Ids.Turn_ref.t option
+(** Original execution observed in one frozen context. Both the trace and
+    absolute Keeper turn must be present; logical SDK turn is not a substitute.
+    [None] means unobserved and grants no authority. *)
+
 val get_turn_context :
   cell:cell ->
   unit ->

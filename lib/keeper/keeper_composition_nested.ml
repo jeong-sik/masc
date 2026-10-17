@@ -369,7 +369,7 @@ let rec validate_leaves ~execution ?(parameterized=false) plan =
       let* () = acc in
       match Plan.contract plan node.id with
       | Some {target=Plan.Descriptor_target descriptor;_} -> (match Keeper_tool_descriptor.prepared_leaf_admission descriptor with
-          | Read_only_ordinary_leaf | Owned_job_launch_leaf -> Ok ()
+          | Read_only_ordinary_leaf | Owned_job_launch_leaf | Owned_ask_leaf -> Ok ()
           | Owned_file_mutation_leaf ->
             (match execution with
              | Catalog.Inline -> Ok ()

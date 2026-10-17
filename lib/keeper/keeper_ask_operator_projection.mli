@@ -7,4 +7,5 @@ val ask_row_json :
   keeper_name:string ->
   string * (Keeper_ask.ask * Keeper_ask.resolution) -> Yojson.Safe.t
 (** Encode the published question and its resolution. Choice identities are
-    retained; every question offers the operator a free-text alternative. *)
+    retained; every question offers the operator a free-text alternative.
+    Original host execution is a canonical Turn_ref string or explicit null. *)

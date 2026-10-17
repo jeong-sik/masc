@@ -60,6 +60,8 @@ let ask_row_json ~keeper_name (ask_id, ((a : Keeper_ask.ask), resolution)) =
       ("keeper", `String keeper_name);
       ("ask_id", `String ask_id);
       ("asked_at", `Float a.asked_at);
+      ("source_turn_ref", match a.source_turn_ref with
+        | None -> `Null | Some reference -> Ids.Turn_ref.to_yojson reference);
       ("context", match a.context with None -> `Null | Some text -> `String text);
       ("questions", `List (List.map ask_question_json a.questions));
       ("resolution", ask_resolution_json resolution);

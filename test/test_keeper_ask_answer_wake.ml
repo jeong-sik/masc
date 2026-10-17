@@ -302,6 +302,113 @@ let with_persistence f =
     (fun () -> f config ensure_keeper)
 ;;
 
+(* Run the real SDK handler: input preparation changes the run carrier after
+   handler entry, then storage and answered input must retain the first owner. *)
+let test_ask_producer_keeps_frozen_source_through_answer () =
+  with_persistence @@ fun config ensure_keeper ->
+  ensure_keeper "alpha";
+  ignore (Masc_test_deps.init_unified_tool_registry ());
+  let base_path = config.Workspace.base_path in
+  let cell = Keeper_tool_call_log.create_turn_ctx_cell () in
+  let set_source trace turn =
+    Keeper_tool_call_log.set_turn_context ~cell ~agent_name:"alpha"
+      ~trace_id:trace ~keeper_turn_id:turn ~turn:999 ~task_id:"current-execution-task" () in
+  set_source "producer-trace" 17;
+  let publication_recovery : Keeper_publication_recovery_availability.turn_context =
+    {provider=Keeper_publication_recovery_availability.non_runtime_provider;keeper_name="alpha"} in
+  let handler = Keeper_tools_agent_core_handler.make_keeper_tool_handler_from_meta
+      ~name:"masc_ask" ~input_schema:Tool_schemas_operator_surface.ask.Masc_domain.input_schema
+      ~config ~meta ~publication_recovery
+      ~ctx_snapshot:(Keeper_context_runtime.create ~eio:false ~system_prompt:"Ask source fixture")
+      ~keeper_turn_id:(fun () -> Some 900)
+      ~source_context:(fun () -> Some (Keeper_tool_call_log_context.get_turn_context_record ~cell ()))
+      ~prepare_input:(fun input -> set_source "later-same-keeper-run" 900; Ok input) () in
+  let arguments = `Assoc
+      ["questions",`List [`Assoc ["header",`String "decision";"prompt",`String "Which original action?";
+        "mode",`String "single";"free_text",`Bool true]];
+       "task_id",`String "explicit-related-task";"goal_id",`String "explicit-related-goal"] in
+  let result = handler arguments in
+  check bool "real SDK handler records question" true (Tool_result.is_success result);
+  let ask_id = Tool_result.message result |> Yojson.Safe.from_string
+      |> Yojson.Safe.Util.member "ask_id" |> Yojson.Safe.Util.to_string in
+  let read_original () = match Keeper_ask_store.rows_result ~base_path ~keeper_name:"alpha" with
+    | Ok (Keeper_ask_store.Stored_rows rows) -> List.assoc ask_id rows
+    | Ok Missing_log -> fail "real handler did not persist its Ask"
+    | Error error -> fail (Keeper_ask_store.read_error_to_string error) in
+  let ask,_ = read_original () in
+  check (option string) "related Task is never replaced by execution Task"
+    (Some "explicit-related-task") ask.task_id;
+  check (option string) "original source includes trace and absolute Keeper turn"
+    (Some "producer-trace#17") (Option.map Ids.Turn_ref.to_string ask.source_turn_ref);
+  Keeper_ask_store.answer ~base_path ~keeper_name:"alpha" ~ask_id
+    ~submissions:["q1",Keeper_ask.Wrote "keep original action"] ~responder ~now:200.
+    |> Result.get_ok |> ignore;
+  (match read_original () with
+   | original_ask,Keeper_ask.Answered_by {answers;responder;answered_at} ->
+       let row = Keeper_world_observation.pending_board_event_of_ask_answer
+           ~meta ~ask:original_ask ~answers ~responder ~answered_at in
+       let origin = Keeper_unified_prompt.For_testing.board_event_fields row
+           |> List.assoc "ask_origin" |> Yojson.Safe.from_string in
+       check string "canonical answer keeps the producer identity after other work"
+         "producer-trace#17" Yojson.Safe.Util.(origin |> member "source_turn_ref" |> to_string)
+   | _,(Keeper_ask.Open | Keeper_ask.Withdrawn_because _) -> fail "answer not stored");
+  let call_unobserved ?source_turn_ref arguments =
+    let ctx : Mcp_tool_runtime_ask.context = {config;agent_name="alpha";arguments} in
+    let result = Mcp_tool_runtime_ask.handle_ask ?source_turn_ref
+        ~tool_name:"masc_ask" ~start_time:(Tool_timing.start ()) ctx |> Option.get in
+    check bool "unobserved callers can still ask" true (Tool_result.is_success result);
+    let id = Tool_result.message result |> Yojson.Safe.from_string
+        |> Yojson.Safe.Util.member "ask_id" |> Yojson.Safe.Util.to_string in
+    Keeper_ask_store.open_asks ~base_path ~keeper_name:"alpha"
+      |> List.find (fun (ask : Keeper_ask.ask) -> ask.ask_id=id) in
+  let forged = match arguments with
+    | `Assoc fields -> `Assoc (("source_turn_ref",`String "forged-source#123")::fields)
+    | _ -> fail "fixture arguments" in
+  let external_ask = call_unobserved forged in
+  check bool "a client argument cannot supply host provenance" true (external_ask.source_turn_ref=None);
+  Keeper_tool_call_log.set_turn_context ~cell ~agent_name:"alpha" ~turn:123 ~keeper_turn_id:123 ();
+  let partial = Keeper_tool_call_log_context.get_turn_context_record ~cell () in
+  let partial_ask = call_unobserved ?source_turn_ref:(Keeper_tool_call_log_context.source_turn_ref partial) arguments in
+  check bool "a turn number without its trace cannot acquire provenance" true
+    (partial_ask.source_turn_ref=None);
+  let event = Keeper_ask.event_to_json (Keeper_ask.Asked ask) in
+  let malformed = match event with
+    | `Assoc fields -> `Assoc (List.map (function
+        | "ask",`Assoc fields -> "ask",`Assoc (List.map (function
+            | "source_turn_ref",_ -> "source_turn_ref",`String "missing-turn-coordinate"
+            | field -> field) fields)
+        | field -> field) fields)
+    | _ -> fail "canonical Asked event" in
+  check bool "malformed stored source is refused" true
+    (Result.is_error (Keeper_ask.event_of_json malformed));
+  let legacy_turn_event turn_value =
+    match event with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (function
+             | "ask", `Assoc ask_fields ->
+               ( "ask"
+               , `Assoc
+                   (("turn_id", turn_value)
+                    :: List.filter
+                         (fun (key, _) -> not (String.equal key "source_turn_ref"))
+                         ask_fields) )
+             | field -> field)
+           fields)
+    | _ -> fail "canonical Asked event"
+  in
+  (match Keeper_ask.event_of_json (legacy_turn_event (`Int 17)) with
+   | Ok (Keeper_ask.Asked decoded) ->
+     check (option string) "legacy turn_id without trace decodes as unobserved source" None
+       (Option.map Ids.Turn_ref.to_string decoded.source_turn_ref)
+   | Ok (Keeper_ask.Answered _ | Keeper_ask.Withdrawn _) -> fail "expected Asked event"
+   | Error detail -> fail ("valid legacy turn_id rejected: " ^ detail));
+  check bool "malformed legacy turn_id is refused" true
+    (Result.is_error (Keeper_ask.event_of_json (legacy_turn_event (`Int 0)))
+     && Result.is_error (Keeper_ask.event_of_json (legacy_turn_event (`String "bad"))))
+;;
+
 let persist_answer ~base_path ~keeper_name ~ask_id ?task_id ?(answered_at = 200.) () =
   let continuation = Keeper_continuation_channel.dashboard ~thread_id:"original-ask-thread" |> Result.get_ok in
   let ask = Keeper_ask.ask ~ask_id ~keeper_name
@@ -374,7 +481,7 @@ let test_original_question_input_uses_canonical_store_and_keeps_unlinked_state (
       ~choices:[choice ~id:"unused" ~label:"not selected"] in
   let ask = Keeper_ask.ask ~ask_id:"canonical-original-context" ~keeper_name
       ~questions:[multi;written;skipped] ~context:"ORIGINAL_ASK_PURPOSE\n원래 이유 전체"
-      ~task_id:"task-101" ~goal_id:"goal-original" ~turn_id:17
+      ~task_id:"task-101" ~goal_id:"goal-original" ~source_turn_ref:(Ids.Turn_ref.make ~trace_id:"original-asking-trace" ~absolute_turn:17)
       ~continuation:(Keeper_continuation_channel.unrouted "original context fixture")
       ~asked_at:100. () |> Result.get_ok in
   Keeper_ask_store.record_ask ~base_path ask |> Result.get_ok;
@@ -404,7 +511,8 @@ let test_original_question_input_uses_canonical_store_and_keeps_unlinked_state (
   let open Yojson.Safe.Util in
   check string "original Task is not current Task" "task-101" (origin |> member "task_id" |> to_string);
   check string "original Goal" "goal-original" (origin |> member "goal_id" |> to_string);
-  check int "original asking turn" 17 (origin |> member "turn_id" |> to_int);
+  check string "original asking execution" "original-asking-trace#17"
+    (origin |> member "source_turn_ref" |> to_string);
   check string "original purpose remains complete" (Option.get ask.context) (origin |> member "context" |> to_string);
   check (float 0.) "canonical first answer time" 200. (origin |> member "answered_at" |> to_float);
   check string "canonical exact input identity"
@@ -432,7 +540,7 @@ let test_original_question_input_uses_canonical_store_and_keeps_unlinked_state (
   let unlinked = Keeper_unified_prompt.For_testing.board_event_fields unlinked
       |> List.assoc "ask_origin" |> Yojson.Safe.from_string in
   List.iter (fun key -> check bool "absent original binding stays explicit and unobserved" true
-    (member key unlinked = `Null)) ["task_id";"goal_id";"turn_id"];
+    (member key unlinked = `Null)) ["task_id";"goal_id";"source_turn_ref"];
   check int "input projection did not enqueue a wake" 0 (List.length (pending_asks ~base_path ~keeper_name))
 ;;
 
@@ -891,7 +999,9 @@ let test_followup_matches_committed_answer_input_tool_rows () =
 let () =
   run "keeper_ask_answer_wake"
     [ ( "wake"
-      , [ test_case "original question input uses canonical store and preserves absent bindings" `Quick
+      , [ test_case "real Ask producer preserves frozen source through storage and answer" `Quick
+            test_ask_producer_keeps_frozen_source_through_answer
+        ; test_case "original question input uses canonical store and preserves absent bindings" `Quick
             test_original_question_input_uses_canonical_store_and_keeps_unlinked_state
         ; test_case "original linked Task survives archive and read failure" `Quick
             test_followup_keeps_original_task_through_archive_and_read_failure

@@ -1112,13 +1112,13 @@ let test_autonomous_continuation_is_an_ordinary_user_turn () =
     Masc.Keeper_unified_prompt.autonomous_wake_marker
     user_message
 
-let ask_input_fixture ?context ?task_id ?goal_id ?turn_id ~id ~prompt ~answer () : WO.answered_ask_input =
+let ask_input_fixture ?context ?task_id ?goal_id ?source_turn_ref ~id ~prompt ~answer () : WO.answered_ask_input =
   let module Ask = Masc.Keeper_ask in
   let question = Ask.question ~question_id:"q-original" ~header:"short label" ~prompt
       ~choices:[] ~mode:Ask.Single ~free_text:(Ask.Free_text_allowed {hint=None}) |> Result.get_ok in
   let original_ask = Ask.ask ~ask_id:id ~keeper_name:minimal_meta.name ~questions:[question]
-      ?context ?task_id ?goal_id ?turn_id
-      ~continuation:(Masc.Keeper_continuation_channel.unrouted "original fixture")
+      ?context ?task_id ?goal_id ?source_turn_ref
+      ~continuation:(Keeper_continuation_channel.unrouted "original fixture")
       ~asked_at:100. () |> Result.get_ok in
   let answers = Ask.parse_answers ~ask:original_ask
       ~submissions:[question.question_id,Ask.Wrote answer] |> Result.get_ok in
@@ -1129,7 +1129,7 @@ let test_answered_ask_survives_later_turns_and_checkpoint_reload () = Eio_main.r
   let input = ask_input_fixture ~id:"schedule"
       ~prompt:"ORIGINAL_QUESTION_BODY: 어느 전시의 일정과 입장료를 확정할까요?"
       ~context:"ORIGINAL_PURPOSE: 첫 번째 전시 준비 작업의 결정입니다.\n현재 작업과 별개입니다."
-      ~task_id:"task-101" ~goal_id:"goal-original" ~turn_id:17 ~answer () in
+      ~task_id:"task-101" ~goal_id:"goal-original" ~source_turn_ref:(Ids.Turn_ref.make ~trace_id:"original-asking-trace" ~absolute_turn:17) ~answer () in
   let answered = WO.pending_board_event_of_ask_answer ~meta:minimal_meta
       ~ask:input.original_ask ~answers:input.answers ~answered_at:input.answered_at
       ~responder:{Masc.Keeper_ask.surface=Masc.Surface_ref.Dashboard {session_id=None};
@@ -1156,8 +1156,8 @@ let test_answered_ask_survives_later_turns_and_checkpoint_reload () = Eio_main.r
     Yojson.Safe.Util.(origin |> member "task_id" |> to_string);
   check string "original Goal retained" "goal-original"
     Yojson.Safe.Util.(origin |> member "goal_id" |> to_string);
-  check int "original asking turn retained" 17
-    Yojson.Safe.Util.(origin |> member "turn_id" |> to_int);
+  check string "original asking execution retained" "original-asking-trace#17"
+    Yojson.Safe.Util.(origin |> member "source_turn_ref" |> to_string);
   check string "question purpose retained in full" (Option.get input.original_ask.context)
     Yojson.Safe.Util.(origin |> member "context" |> to_string);
   let answers = List.assoc "answers" fields |> Yojson.Safe.from_string |> Yojson.Safe.Util.to_list in

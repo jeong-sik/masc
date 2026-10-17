@@ -49,6 +49,7 @@ val with_web_fetch_http_get_for_test :
 
 (** The context carries the exact schema projection visible to the caller. *)
 val dispatch :
+  ?ask_source_turn_ref:Ids.Turn_ref.t ->
   ?dos_admission:((unit -> Tool_result.result) -> Tool_result.result) ->
   ?lane_access:Lane_addon_sources.access -> context -> name:string ->
   args:Yojson.Safe.t -> Tool_result.result option
@@ -56,7 +57,9 @@ val dispatch :
     value is unauthenticated. Keeper access supplies the canonical Lane caller;
     [context.agent_name] remains attribution for unrelated tools.
     [dos_admission] wraps only prepared load/restore effects; callers enforcing
-    participation must pass their final credential admission through it. *)
+    participation must pass their final credential admission through it.
+    [ask_source_turn_ref] is frozen host provenance, never a Tool argument;
+    omission records an unobserved source. It grants no effect authority. *)
 
 val tool_inventory_json :
   context -> include_hidden:bool -> Yojson.Safe.t

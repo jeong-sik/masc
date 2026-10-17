@@ -3202,6 +3202,17 @@ let test_prepared_job_launch_and_continuation ~launch_after_result () = with_fix
            [`Assoc ["name",`String "sha256";"value",`Assoc
              ["kind",`String "output";"node",`String "await";
               "pointer",`String "/artifacts/0/_blob/sha256"]]]]]]] in
+  let ask_next = `Assoc ["id",`String "ask-next";"tool",`String "masc_ask";
+      "after",`List [`String "consume"];"input",`Assoc ["kind",`String "literal";
+        "value",`Assoc ["task_id",`String "explicit-decision-task";
+          "questions",`List [`Assoc ["header",`String "Next action";
+            "prompt",`String "Which action follows the original result?";
+            "mode",`String "single";"free_text",`Bool true]]]]] in
+  let recipe = match recipe with
+    | `Assoc fields -> `Assoc (List.map (function
+        | "nodes",`List nodes -> "nodes",`List (nodes@[ask_next])
+        | field -> field) fields)
+    | _ -> fail "prepared job recipe is not an object" in
   let recipe = if not launch_after_result then recipe else
     let next = `Assoc ["id",`String "launch-next";"tool",`String "keeper_job_start";
       "after",`List [`String "consume"];"input",`Assoc ["kind",`String "literal";
@@ -3288,6 +3299,11 @@ let test_prepared_job_launch_and_continuation ~launch_after_result () = with_fix
   let completion_ms = Mtime.Span.to_float_ns (Mtime_clock.count completion_started) /. 1_000_000. in
   check bool "durable completion hint finishes the original DAG" true ok;
   check int "durable completion hint accepts one original worker" 1 !accepted_intakes;
+  let continued_ask = Masc.Keeper_ask_store.open_asks ~base_path:fixture.base_path ~keeper_name:keeper
+      |> List.find (fun (ask : Masc.Keeper_ask.ask) -> ask.task_id=Some "explicit-decision-task") in
+  check (option string) "fresh post-wait Ask belongs to original execution, not current Task B"
+    (Some (original_trace ^ "#41"))
+    (Option.map Ids.Turn_ref.to_string continued_ask.source_turn_ref);
   let record,ready,queued,backend_at_ready = match !hints with
     | [hint] -> hint | _ -> fail "expected exactly one original durable result hint" in
   check bool "hint follows full durable output" true ready;

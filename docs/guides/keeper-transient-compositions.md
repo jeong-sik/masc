@@ -146,7 +146,8 @@ fields. Missing evidence is rejected rather than inferred or rewritten into
 fresh work. Inline task recipes can also use canonical Edit leaves through their
 original file producer; this does not give those effects durable async replay.
 
-Async prepared plans admit static read-only ordinary nodes and the isolated owned-job
+Async prepared plans admit static read-only ordinary nodes, owned Ask questions
+(`masc_ask`), and the isolated owned-job
 launch action. The descriptor and canonical action classify admission; a job
 launch keeps its existing Serial effectful contract. Other writes, builds,
 status/cancel effects and terminal actions use their direct tools until their

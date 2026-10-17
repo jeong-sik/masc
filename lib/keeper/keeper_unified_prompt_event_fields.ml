@@ -88,7 +88,6 @@ let board_vote_fields (vote : Board_dispatch.board_vote_change) =
 let answered_ask_fields ~answer_source_id (input : Keeper_world_observation.answered_ask_input) =
   let ask = input.original_ask in
   let optional_string = function None -> `Null | Some value -> `String value in
-  let optional_int = function None -> `Null | Some value -> `Int value in
   let clock value = if Float.is_finite value then `Float value else `Null in
   [ "ask_origin", Yojson.Safe.to_string (`Assoc
       [ "ask_id", `String ask.ask_id
@@ -96,7 +95,8 @@ let answered_ask_fields ~answer_source_id (input : Keeper_world_observation.answ
       ; "asked_at", clock ask.asked_at
       ; "answered_at", clock input.answered_at
       ; "answer_source_id", optional_string answer_source_id
-      ; "turn_id", optional_int ask.turn_id
+      ; "source_turn_ref", (match ask.source_turn_ref with
+          | None -> `Null | Some reference -> Ids.Turn_ref.to_yojson reference)
       ; "task_id", optional_string ask.task_id
       ; "goal_id", optional_string ask.goal_id
       ; "context", optional_string ask.context ])

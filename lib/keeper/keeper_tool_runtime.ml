@@ -480,6 +480,7 @@ let handle_in_process ctx descriptor args =
   | Tool_masc_misc_dispatch ->
     Some
       (Keeper_tool_in_process_runtime.handle_masc_misc_with_outcome
+         ~source_context:ctx.source_context
          ~config:ctx.config
          ~meta:ctx.meta
          ~name

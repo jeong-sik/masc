@@ -146,7 +146,7 @@ let ask_context (ctx : context) arguments : Mcp_tool_runtime_ask.context =
 (* The wire name is parsed once and the operations are matched, so an operation
    added to [Tool_schemas_misc.misc_operation] is a compile error here. [None]
    means the name is not this facade's -- the tag dispatcher owns that case. *)
-let dispatch ?dos_admission ?(lane_access = Lane_addon_sources.Unauthenticated) ctx ~name ~args : Tool_result.result option =
+let dispatch ?ask_source_turn_ref ?dos_admission ?(lane_access = Lane_addon_sources.Unauthenticated) ctx ~name ~args : Tool_result.result option =
   let start = Tool_timing.start () in
   (* Lane ownership uses the verified Keeper principal. The session name is
      still the attribution for unrelated tools and operator calls. *)
@@ -266,7 +266,7 @@ let dispatch ?dos_admission ?(lane_access = Lane_addon_sources.Unauthenticated) 
   | Some Tool_schemas_misc.Misc_tool_help ->
       Some (handle_tool_help ~schemas:ctx.help_schemas ~tool_name:name ~start_time:start ctx args)
   | Some Tool_schemas_misc.Misc_ask ->
-      Mcp_tool_runtime_ask.handle_ask ~tool_name:name ~start_time:start
+      Mcp_tool_runtime_ask.handle_ask ?source_turn_ref:ask_source_turn_ref ~tool_name:name ~start_time:start
         (ask_context ctx args)
   | Some Tool_schemas_misc.Misc_ask_status ->
       Mcp_tool_runtime_ask.handle_ask_status ~tool_name:name ~start_time:start

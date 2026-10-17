@@ -10,6 +10,7 @@ type event_kind =
   | Context_injected
   | History_projection_observed
   | Skill_preparation_observed
+  | Preparation_observed
   | Event_bus_correlated
   | Checkpoint_loaded
   | Checkpoint_saved

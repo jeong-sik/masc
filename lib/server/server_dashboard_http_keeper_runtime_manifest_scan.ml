@@ -309,7 +309,7 @@ let update_runtime_manifest_scan scan (row : Keeper_runtime_manifest.t) =
   | Keeper_runtime_manifest_types.Runtime_execution_built
   | Keeper_runtime_manifest_types.Runtime_completed | Keeper_runtime_manifest_types.Runtime_failed
   | Keeper_runtime_manifest_types.History_projection_observed
-  | Keeper_runtime_manifest_types.Skill_preparation_observed
+  | Keeper_runtime_manifest_types.Skill_preparation_observed | Keeper_runtime_manifest_types.Preparation_observed
   | Keeper_runtime_manifest_types.Checkpoint_loaded | Keeper_runtime_manifest_types.Checkpoint_saved
   | Keeper_runtime_manifest_types.Receipt_appended -> scan
 

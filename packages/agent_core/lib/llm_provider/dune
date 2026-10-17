@@ -7,6 +7,7 @@
   tool_schema_contract
   tcp_address_race
   complete_stream_error
+  complete_stream_diagnostic
   complete_stream_state
   openai_error_envelope
   model_catalog_embedded

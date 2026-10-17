@@ -69,7 +69,7 @@ runtime gates. Source-review completion alone leaves a Draft item in review.
 
 ## Current queue
 
-The queue now contains **25 concrete candidates**: 24 from the first semantic pass and A1 from a focused Agent Core follow-up. Three are implemented as Draft PRs with independent source review: `S1` in [#43367](https://github.com/jeong-sik/masc/pull/43367) isolates provider usage acceptance; `K1` in [#43370](https://github.com/jeong-sik/masc/pull/43370) preserves separate Librarian failure-policy axes; `D2` in [#43374](https://github.com/jeong-sik/masc/pull/43374) returns an explicit Goal commit result. Other `next` items remain queued; this ordering does not waive their coverage.
+The queue now contains **25 concrete candidates**: 24 from the first semantic pass and A1 from a focused Agent Core follow-up. Four are implemented as PRs with independent source review: `S1` in [#43367](https://github.com/jeong-sik/masc/pull/43367) isolates provider usage acceptance; `K1` in [#43370](https://github.com/jeong-sik/masc/pull/43370) preserves separate Librarian failure-policy axes; `D2` in [#43374](https://github.com/jeong-sik/masc/pull/43374) returns an explicit Goal commit result; `A1` in [#43386](https://github.com/jeong-sik/masc/pull/43386) separates stream error projection from diagnostic file I/O. Other `next` items remain queued; this ordering does not waive their coverage.
 
 | ID | Priority | Status | Refactoring point |
 | --- | --- | --- | --- |
@@ -97,7 +97,7 @@ The queue now contains **25 concrete candidates**: 24 from the first semantic pa
 | [S8](#s8) | next | candidate | Separate durable provider-history decoding and daily projection from journal IO |
 | [R1](#r1) | later | candidate | Credential batch ownership projection |
 | [R2](#r2) | later | candidate | Fusion decision event ownership |
-| [A1](#a1) | next | candidate | Separate stream error projection from optional diagnostic file I/O |
+| [A1](#a1) | next | in review | Separate stream error projection from optional diagnostic file I/O |
 
 ## Candidate evidence
 
@@ -721,15 +721,15 @@ Preserve:
 - The production finalization path emits a missing failure event before projection/dump and publishes its terminal summary afterwards; retain this order and do not duplicate the diagnostic write.
 - Do not import coordinator configuration into Agent Core; its diagnostic sink currently reads the environment locally to preserve dependency direction.
 
-Consumers: [packages/agent_core/lib/llm_provider/complete_stream.ml](../../../packages/agent_core/lib/llm_provider/complete_stream.ml), [packages/agent_core/test/test_wire_parse_dump.ml](../../../packages/agent_core/test/test_wire_parse_dump.ml).
+Consumers: [packages/agent_core/lib/llm_provider/complete_stream.ml](../../../packages/agent_core/lib/llm_provider/complete_stream.ml), [packages/agent_core/test/test_complete_http.ml](../../../packages/agent_core/test/test_complete_http.ml).
 
-Scenarios: [packages/agent_core/test/test_wire_parse_dump.ml](../../../packages/agent_core/test/test_wire_parse_dump.ml), [packages/agent_core/lib/llm_provider/complete_stream_error.ml](../../../packages/agent_core/lib/llm_provider/complete_stream_error.ml). **Not executed in this audit.**
+Scenarios: [packages/agent_core/test/test_complete_http.ml](../../../packages/agent_core/test/test_complete_http.ml), [packages/agent_core/lib/llm_provider/complete_stream_error.ml](../../../packages/agent_core/lib/llm_provider/complete_stream_error.ml). **Not executed in this audit.**
 
-Proposed verification: Through the public streaming path, feed one malformed SSE frame and one malformed NDJSON frame; assert one diagnostic row, unchanged returned typed error and one terminal summary. Exercise an unwritable dump destination to preserve the original error. These are proposed scenarios, not executed evidence.
+Implementation: [#43386](https://github.com/jeong-sik/masc/pull/43386) adds a pure typed projection and a separate private diagnostic sink. The existing HTTP streaming suite now covers malformed SSE/NDJSON with absent/empty settings, full-frame append, redaction, restrictive creation permissions and directory destination failure. It asserts the typed result and failure-event/append/terminal-summary order. The obsolete direct-converter diagnostic suite is removed. Six changed OCaml files passed syntax parsing; scenarios remain unexecuted.
 
 Ordering rationale: One production caller and an existing diagnostic scenario bound the change. The new boundary makes error policy review independent of file effects while preserving operator evidence; priority is based on the hidden effect, not file length.
 
-Public-package risk: The diagnostic helper is currently exposed through a callable conversion; enumerate external package consumers before changing a public signature.
+Implementation-scope correction: `complete_stream_error` was already listed in Dune `private_modules`; it has no public facade alias. The actual production caller is the stream finalizer. Its inline assertions keep a pure error-only wrapper; the old standalone diagnostic suite moves to the public HTTP streaming scenario suite. Public `Complete` interfaces remain unchanged.
 
 ## Boundaries retained or excluded
 
@@ -783,4 +783,5 @@ These are reasons not to perform a blanket rewrite, not whole-module correctness
 - Round 2: K1 implemented as a private failure-evidence classifier in [#43370](https://github.com/jeong-sik/masc/pull/43370). Historical range sizing, named input refusal, invalid-output veto, size-independent failure and current CLI capacity remain separate facts. Syntax parsing passed; existing callback/admission scenarios were extended but not executed.
 - Round 3: D2 implemented in [#43374](https://github.com/jeong-sik/masc/pull/43374). Focused source review corrected the initial no-op proposal: every accepted existing upsert commits even when fields are unchanged. Rejection and commit results are explicit; current RFC implementation references were updated. Syntax parsing passed and two public-store scenarios were added but not executed.
 - Round 4: expanded Agent Core inspection across 17 explicitly scoped source/test reads in [#43377](https://github.com/jeong-sik/masc/pull/43377). Added A1 for the hidden diagnostic file effect in stream-error conversion and retained three existing ownership boundaries. This expands the queue to 25 candidates; it does not complete Agent Core coverage.
+- Round 5 implementation: A1 was rechecked against main `857c8647ce7cc7305d6aa081d1aa24ac5b93f05e`, implemented and independently source-reviewed in [#43386](https://github.com/jeong-sik/masc/pull/43386). The focused read corrected a tentative public-API concern: the projection owner was already private.
 - No local Dune build, CI polling, behavior execution, formal GitHub approval, merge or runtime proof is supplied by this inventory.

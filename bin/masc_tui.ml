@@ -14323,13 +14323,14 @@ let apply_ask_answer_completion state answered_label result asks =
     | Masc.Tui_decode_asks.Ask_wake_stored ->
         report_action state "system"
           (if already then "Question already answered; keeper wake stored"
-           else Printf.sprintf "Answer recorded for %s; keeper wake stored" answered_label)
+           else Printf.sprintf "Answer recorded; keeper wake stored: %s" answered_label)
     | Masc.Tui_decode_asks.Ask_wake_pending detail ->
         report_action state "error"
-          (Printf.sprintf "%s; keeper delivery pending, automatic recovery will retry: %s"
-             (if already then "Question already answered"
-              else Printf.sprintf "Answer recorded for %s" answered_label)
-             detail)
+          (if already then
+             Printf.sprintf "Question already answered; delivery pending, automatic recovery will retry: %s" detail
+           else
+             Printf.sprintf "Answer recorded; delivery pending: %s; automatic recovery will retry: %s"
+               answered_label detail)
   in
   (match result with
    | Ok (Masc.Tui_decode_asks.Ask_answer_recorded delivery) ->

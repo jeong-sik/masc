@@ -219,6 +219,15 @@ contains exact binary/source identities, retained failures, source clocks and
 manually inspected 120×36/80×24 frames. It separates early question usability
 from full refresh settlement under explicit delayed-reader conditions.
 
+The separate [native answer observation](../evidence/2026-10-17-native-ask-answer/README.md)
+records actual selection and Enter confirmation, the original answer POST,
+canonical answer and durable pending wake at both widths. It also retains the
+narrow receipt that hid wake status after a long chosen label. Revised notices
+put recording and delivery status first; choice rows spend their width on human
+labels while original IDs remain in the draft and request. The published frames
+precede those readability edits, whose native confirmation remains pending.
+Queue admission does not establish Keeper consumption or a resumed next action.
+
 Build or obtain binaries identified by their exact source SHAs. Use the same
 isolated workspace, fixture state, endpoint behavior, terminal viewport and
 refresh action for both. Record cold start separately from a warm refresh. Do not

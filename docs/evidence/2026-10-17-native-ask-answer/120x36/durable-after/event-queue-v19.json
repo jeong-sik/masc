@@ -1,0 +1,28 @@
+{
+  "schema": "keeper.event_queue.state.v19",
+  "revision": 1,
+  "pending": [
+    {
+      "source": {
+        "post_id": "keeper-ask:native-ask-choice",
+        "urgency": "normal",
+        "arrived_at_unix": 1792177714.928972,
+        "payload": {
+          "kind": "ask_answered",
+          "ask_id": "native-ask-choice",
+          "channel": {
+            "kind": "unrouted",
+            "reason": "isolated native Ask read observation"
+          }
+        }
+      },
+      "admitted_revision": 0,
+      "checkpoint_retentions": 0,
+      "first_admitted_at": 1792177714.929649
+    }
+  ],
+  "last_transition": null,
+  "projected_dispositions": [],
+  "transition_outbox": [],
+  "accepted_transfer_projections": []
+}

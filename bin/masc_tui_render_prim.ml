@@ -1965,11 +1965,10 @@ let draw_ask_question buf cols (state : state) ~(row : Masc.Tui_decode_asks.ask_
         else " "
       in
       box_wrapped_field buf cols
-        ~head:
-          (Printf.sprintf "    %s %s %s%s%s  " position mark
-             (if picked then Ansi.bold else Ansi.dim)
-             (Terminal_text.single_line choice.Masc.Tui_decode_asks.ac_id)
-             Ansi.reset)
+        (* Choice ids bind the draft and POST. The operator selects by the
+           displayed position and reads the label; an opaque id spends the
+           narrow pane's label width without adding another action. *)
+        ~head:(Printf.sprintf "    %s %s " position mark)
         ~style:(if picked then Ansi.bold ^ Theme.ok () else Theme.info ())
         choice.Masc.Tui_decode_asks.ac_label;
       (* What picking this commits to. The wire carries it, the dashboard

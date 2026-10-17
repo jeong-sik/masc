@@ -35,6 +35,8 @@ module Execution = struct
   let direct_operation operation_id =
     { scope = Id.direct_operation operation_id; current = None }
 
+  let scope execution = execution.scope
+
   let install = Keeper_repetition_context.install
 
   let prepare execution ~source ~target =

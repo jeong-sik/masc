@@ -1,5 +1,5 @@
-(** Ephemeral activity for the running Keeper turn. Reset at turn entry;
-    the turns route also rejects observations older than its running turn.
+(** Ephemeral activity for the running Keeper turn. Reset at agent entry;
+    the turns route reads only the writer bound to its actual Owner slot.
     Provider attempts, stream events, and tool hooks write this projection. *)
 
 type activity = Preparing | Awaiting_response | Receiving_response | Tool_observed | Failed
@@ -35,6 +35,7 @@ type t =
   ; activity : activity
   ; last_failure : string option
   ; preparation : preparation option
+  ; execution_scope : Keeper_execution_scope_id.t option
   }
 
 val tail_bytes : int
@@ -44,6 +45,10 @@ val tail_bytes : int
 type writer
 
 val current : keeper_name:string -> t option
+(** Last installed snapshot for diagnostics; not proof of a running owner. *)
+val current_for_turn : keeper_name:string -> interrupt_token:Keeper_interrupt_token.t -> t option
+(** Only the exact Owner slot can read its preview. Before its writer is
+    installed, an older writer remains unreadable regardless of update time. *)
 
 val note_text : writer:writer option -> now:float -> string -> unit
 (** Record the newest response text's tail, redacted with the snapshot
@@ -61,7 +66,8 @@ val with_preparation_result :
     older scopes, so their late completion cannot replace newer activity.
     This is ephemeral observation, not a dispatch or completion decision. *)
 
-val reset : keeper_name:string -> now:float -> redaction:Keeper_secret_redaction.t -> writer
+val reset : keeper_name:string -> execution_scope:Keeper_execution_scope_id.t option ->
+  now:float -> redaction:Keeper_secret_redaction.t -> writer
 (** Install a new displayed preview and return its writer. Every response text the turn records passes
     through [redaction] first; streamed deltas pass through one
     {!Keeper_stream_text_redaction} per provider attempt, so the tail grows a
@@ -74,3 +80,7 @@ val status_text : t -> string
 
 val to_json : t -> Yojson.Safe.t
 (** The actual turns-route preview payload, including released-source position. *)
+
+val preparation_of_json : Yojson.Safe.t -> (preparation, string) result
+(** Strict inverse for the preparation object in [to_json]. Unknown states,
+    duplicate/extra fields and incomplete or invalid clock data are errors. *)

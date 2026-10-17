@@ -592,6 +592,25 @@ type inference_timings =
   }
 [@@deriving show, yojson]
 
+(** Payload-free native Responses output-item partition. A message phase
+    applies only to its own group, never to the flattened assistant message. *)
+module Response_replay : sig
+  type phase = Absent | Null | Commentary | Final_answer
+  [@@deriving show, yojson]
+  type kind = Message of phase | Reasoning | Function_call
+  [@@deriving show, yojson]
+  type group = { kind : kind; content_count : int }
+  [@@deriving show, yojson]
+  type t = group list [@@deriving show, yojson]
+
+  val metadata_key : string
+  val partition : content:content_block list -> t -> ((kind * content_block list) list, string) result
+  val make : content:content_block list -> group list -> (t, string) result
+  val metadata : t -> string * Yojson.Safe.t
+  val of_metadata : content:content_block list -> (string * Yojson.Safe.t) list -> (t option, string) result
+  val retain : content:content_block list -> retained_indices:int list -> t -> (t, string) result
+end
+
 type inference_telemetry =
   { system_fingerprint : string option
   ; timings : inference_timings option
@@ -613,6 +632,8 @@ type inference_telemetry =
     (** Creation-prefix identity for the response's reasoning, when the wire
         binds signatures to the prefix. [None] on wires without a binding,
         and on responses whose request predates the digest. *)
+  ; response_replay : Response_replay.t option
+    (** Native output grouping retained through cache and assistant history. *)
   ; effective_context_window : int option
     (** Context window in tokens the request was sized against, as
         [Provider_config.context_window] reports it for the request config. *)
@@ -721,6 +742,7 @@ type api_response =
 type assistant_message_error =
   | Reasoning_source_telemetry_missing
   | Reasoning_source_missing
+  | Invalid_response_replay of string
 [@@deriving show]
 
 (** Whether any block is a reasoning artifact a replay boundary must justify. *)

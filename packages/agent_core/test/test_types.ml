@@ -553,6 +553,7 @@ let test_usage_and_inference_telemetry_yojson_roundtrip () =
     ; canonical_model_id = Some "gpt"
     ; reasoning_source = None
     ; reasoning_prefix = None
+    ; response_replay = None
     ; effective_context_window = Some 8192
     ; provider_internal_action_count = Some 2
     ; ttfrc_ms = Some 10.0

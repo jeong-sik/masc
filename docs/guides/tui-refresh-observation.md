@@ -162,6 +162,18 @@ record actual requests, question state admission, full-refresh completion and
 manually inspected native frames. Keep foreign-workspace, booting, failed and
 unfinished attempts alongside valid reads.
 
+Question inventory comes from canonical durable Ask logs, including offline or
+unregistered Keepers. Process registration is not the owner of a recorded
+question. Named reads retain the same original owner; answer admission validates
+the original stored ask and preserves its first winning answer. A durable wake
+can remain pending until the Keeper runs, which is separate from answer
+recording. Missing/unreadable inventory is not projected as a successful empty
+fleet. Counts and rows use the same loaded fold.
+
+The [offline native counterexample](../evidence/2026-10-17-asks-offline-inventory/README.md)
+retains the failed observation that exposed registry-only inventory. Its failed
+question samples are not early-Ask latency evidence.
+
 `tui_asks_early` records the original question request ID, the full refresh's
 monotonic `refresh_started_ns` and `admitted_ms` after the successful question
 snapshot has entered UI state. It is emitted only when the existing early read

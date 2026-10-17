@@ -1,0 +1,25 @@
+{
+  "scope": "Selected fields from the preserved native responses; not complete response bytes or a latency measurement",
+  "server_source": "9e7c5d4f13cc551afb9fe9536bca785b69fead46",
+  "fixture_sha256": "3cf46a20027444a951545d94a0f870e4f6ee2a56dd38bf27161fb665a2f1b51a",
+  "viewport": { "columns": 120, "rows": 36 },
+  "persisted_original_questions": 1,
+  "sample_counts": { "collector_attempts": 2, "failed_setup_attempts": 1, "native_arms_started": 2, "invalid_question_arms": 2, "valid_question_latency_arms": 0 },
+  "arms": [
+    {
+      "arm": "baseline",
+      "tui_source": "f7632e71601da3ce6c7b5a5e8a6b528bcf42fa4c",
+      "collector_status": "fixture_unverified",
+      "response_fields": { "scope": "fleet", "state_ready": true, "keeper_count": 0, "open_count": 0, "returned": 0, "asks": [] }
+    },
+    {
+      "arm": "candidate",
+      "tui_source": "9e7c5d4f13cc551afb9fe9536bca785b69fead46",
+      "collector_status": "fixture_unverified",
+      "response_fields": { "scope": "fleet", "state_ready": true, "keeper_count": 0, "open_count": 0, "returned": 0, "asks": [] }
+    }
+  ],
+  "latency_comparison": "not established",
+  "live_installation_or_restart": false,
+  "real_model_evidence": false
+}

@@ -219,12 +219,9 @@ let stage_collect ?raw_trace_run ?clock ~turn ~provider_config ~context_message 
          | None | Some { response_replay = None; _ } -> Ok { response with content }
          | Some ({ response_replay = Some replay; _ } as telemetry) ->
            let* replay =
-             match Types.Response_replay.make ~content:response.content replay with
-             | Ok replay ->
-               Types.Response_replay.retain ~content
-                 ~retained_indices:admission.Agent_tools.retained_content_indices replay
-               |> Result.map_error (fun detail -> Error.Internal detail)
-             | Error detail -> Error (Error.Internal detail)
+             Types.Response_replay.retain ~original_content:response.content ~content
+               ~retained_indices:admission.Agent_tools.retained_content_indices replay
+             |> Result.map_error (fun detail -> Error.Internal detail)
            in
            Ok { response with content;
                 telemetry = Some {telemetry with response_replay = Some replay} }

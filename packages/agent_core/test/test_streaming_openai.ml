@@ -1396,6 +1396,12 @@ let test_responses_stream_reasoning_tool_and_terminal () =
   match events5 with
   | [ ContentBlockDelta
         { index = 0; delta = RedactedThinkingSnapshot raw_reasoning }
+    ; ContentBlockDelta
+        { index = 1; delta = InputJsonSnapshot "{\"q\":\"weather\"}" }
+    ; ResponsesOutputItems
+        [ (Response_replay.Reasoning, [ 0 ])
+        ; (Response_replay.Function_call, [ 1 ])
+        ]
     ; MessageDelta { stop_reason = Some StopToolUse; usage = Some usage }
     ; MessageStop
     ] ->
@@ -1411,7 +1417,7 @@ let test_responses_stream_reasoning_tool_and_terminal () =
     Alcotest.(check (option int)) "input tokens" (Some 12) usage.input_tokens;
     Alcotest.(check (option int)) "output tokens" (Some 8) usage.output_tokens;
     Alcotest.(check (option int)) "cache read" (Some 2) usage.cache_read_input_tokens
-  | _ -> Alcotest.fail "expected redacted reasoning carrier and terminal StopToolUse"
+  | _ -> Alcotest.fail "expected redacted reasoning carrier, output groups, and terminal StopToolUse"
 ;;
 
 let test_responses_stream_idless_tool_identity_matches_final_response () =
@@ -1511,8 +1517,8 @@ let test_responses_stream_hidden_reasoning_before_tool () =
       {|{"type":"response.output_item.added","output_index":1,"item":{"id":"fc_1","type":"function_call","call_id":"call_lookup","name":"lookup","arguments":""}}|}
   in
   (match events1 with
-   | [ ContentBlockStart { index = 1; content_type = "tool_use"; _ } ] -> ()
-   | _ -> Alcotest.fail "expected tool block to keep Responses output_index");
+   | [ ContentBlockStart { index = 0; content_type = "tool_use"; _ } ] -> ()
+   | _ -> Alcotest.fail "expected tool block to allocate next available block index 0");
   let events2, _ =
     S.responses_sse_to_events
       state
@@ -1520,33 +1526,47 @@ let test_responses_stream_hidden_reasoning_before_tool () =
       {|{"type":"response.function_call_arguments.delta","output_index":1,"item_id":"fc_1","delta":"{\"q\":\"weather\"}"}|}
   in
   (match events2 with
-   | [ ContentBlockDelta { index = 1; delta = InputJsonDelta "{\"q\":\"weather\"}" } ] ->
+   | [ ContentBlockDelta { index = 0; delta = InputJsonDelta "{\"q\":\"weather\"}" } ] ->
      ()
-   | _ -> Alcotest.fail "expected function arguments delta at output index 1");
+   | _ -> Alcotest.fail "expected function arguments delta at allocated block index 0");
   let events3, _ =
     S.responses_sse_to_events
       state
       (Some "response.completed")
       {|{"type":"response.completed","response":{"id":"resp_1","model":"gpt-5.5","status":"completed","output":[{"id":"rs_1","type":"reasoning","encrypted_content":"enc_hidden_1"},{"id":"fc_1","type":"function_call","call_id":"call_lookup","name":"lookup","arguments":"{\"q\":\"weather\"}"}],"usage":{"input_tokens":12,"output_tokens":8}}}|}
   in
-  match events3 with
-  | [ ContentBlockStart
-        { index = 0
-        ; content_type = "redacted_thinking"
-        ; tool_id = Some raw_reasoning
-        ; tool_name = None
-        }
-    ; MessageDelta { stop_reason = Some StopToolUse; usage = Some usage }
-    ; MessageStop
-    ] ->
-    let reasoning = Yojson.Safe.from_string raw_reasoning in
-    Alcotest.(check string)
-      "encrypted reasoning"
-      "enc_hidden_1"
-      (Yojson.Safe.Util.member "encrypted_content" reasoning |> Yojson.Safe.Util.to_string);
-    Alcotest.(check (option int)) "input tokens" (Some 12) usage.input_tokens;
-    Alcotest.(check (option int)) "output tokens" (Some 8) usage.output_tokens
-  | _ -> Alcotest.fail "expected hidden reasoning carrier before terminal"
+  (match events3 with
+   | [ ContentBlockStart
+         { index = 1
+         ; content_type = "redacted_thinking"
+         ; tool_id = Some raw_reasoning
+         ; tool_name = None
+         }
+     ; ContentBlockDelta
+         { index = 0; delta = InputJsonSnapshot "{\"q\":\"weather\"}" }
+     ; ResponsesOutputItems
+         [ (Response_replay.Reasoning, [ 1 ])
+         ; (Response_replay.Function_call, [ 0 ])
+         ]
+     ; MessageDelta { stop_reason = Some StopToolUse; usage = Some usage }
+     ; MessageStop
+     ] ->
+     let reasoning = Yojson.Safe.from_string raw_reasoning in
+     Alcotest.(check string)
+       "encrypted reasoning"
+       "enc_hidden_1"
+       (Yojson.Safe.Util.member "encrypted_content" reasoning |> Yojson.Safe.Util.to_string);
+     Alcotest.(check (option int)) "input tokens" (Some 12) usage.input_tokens;
+     Alcotest.(check (option int)) "output tokens" (Some 8) usage.output_tokens
+   | _ -> Alcotest.fail "expected hidden reasoning carrier and output group ordering before terminal");
+  let acc = Acc.create_stream_acc () in
+  Acc.accumulate_event acc (MessageStart { id = "resp_1"; model = "gpt-5.5"; usage = None });
+  List.iter (Acc.accumulate_event acc) (events1 @ events2 @ events3);
+  match Acc.finalize_stream_acc acc with
+  | Ok { content = [ RedactedThinking _; ToolUse { id = "call_lookup"; name = "lookup"; _ } ]; _ } ->
+    ()
+  | Ok _ | Error _ ->
+    Alcotest.fail "expected ResponsesOutputItems to restore native output_index order"
 ;;
 
 let test_responses_stream_interleaved_reasoning_tool_text_finalizes () =
@@ -1699,6 +1719,189 @@ let test_responses_stream_incomplete_content_filter_drops_tool () =
            | ToolUse _ -> true
            | _ -> false)
          response.content)
+;;
+
+let test_responses_stream_output_item_done_and_content_index_blocks () =
+  let module Acc = Llm_provider.Complete_stream_acc in
+  let state =
+    S.create_openai_stream_state ~provider:"openai_compat" ~model:"gpt-5.5" ()
+  in
+  let acc = Acc.create_stream_acc () in
+  let feed evt_type data =
+    let events, _ = S.responses_sse_to_events state (Some evt_type) data in
+    List.iter (Acc.accumulate_event acc) events;
+    events
+  in
+  ignore
+    (feed
+       "response.created"
+       {|{"type":"response.created","response":{"id":"resp_phase","model":"gpt-5.5","status":"in_progress"}}|});
+  let delta0 =
+    feed
+      "response.output_text.delta"
+      {|{"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":"checking"}|}
+  in
+  let delta1 =
+    feed
+      "response.output_text.delta"
+      {|{"type":"response.output_text.delta","output_index":1,"content_index":0,"delta":"one"}|}
+  in
+  let delta2 =
+    feed
+      "response.output_text.delta"
+      {|{"type":"response.output_text.delta","output_index":1,"content_index":1,"delta":"two"}|}
+  in
+  (match delta0, delta1, delta2 with
+   | ( [ ContentBlockStart { index = 0; content_type = "text"; _ }
+       ; ContentBlockDelta { index = 0; delta = TextDelta "checking" }
+       ]
+     , [ ContentBlockStart { index = 1; content_type = "text"; _ }
+       ; ContentBlockDelta { index = 1; delta = TextDelta "one" }
+       ]
+     , [ ContentBlockStart { index = 2; content_type = "text"; _ }
+       ; ContentBlockDelta { index = 2; delta = TextDelta "two" }
+       ] ) -> ()
+   | _ -> Alcotest.fail "expected distinct text blocks per (output_index, content_index)");
+  ignore
+    (feed
+       "response.output_item.done"
+       {|{"type":"response.output_item.done","output_index":0,"item":{"id":"msg_0","type":"message","role":"assistant","phase":"commentary","content":[{"type":"output_text","text":"checking"}]}}|});
+  ignore
+    (feed
+       "response.output_item.done"
+       {|{"type":"response.output_item.done","output_index":1,"item":{"id":"msg_1","type":"message","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"one"},{"type":"output_text","text":"two"}]}}|});
+  let completed =
+    feed
+      "response.completed"
+      {|{"type":"response.completed","response":{"id":"resp_phase","model":"gpt-5.5","status":"completed"}}|}
+  in
+  (match completed with
+   | [ ResponsesOutputItems
+         [ (Response_replay.Message Response_replay.Commentary, [ 0 ])
+         ; (Response_replay.Message Response_replay.Final_answer, [ 1; 2 ])
+         ]
+     ; MessageDelta { stop_reason = Some EndTurn; _ }
+     ; MessageStop
+     ] -> ()
+   | _ -> Alcotest.fail "expected output_item.done groups to be published on response.completed");
+  match Acc.finalize_stream_acc acc with
+  | Error _ -> Alcotest.fail "expected output_item.done stream to finalize"
+  | Ok response ->
+    Alcotest.(check bool)
+      "multipart text content preserved"
+      true
+      (response.content = [ Text "checking"; Text "one"; Text "two" ]);
+    let expected_replay =
+      Some
+        [ { Response_replay.kind = Response_replay.Message Response_replay.Commentary
+          ; content_count = 1
+          }
+        ; { Response_replay.kind = Response_replay.Message Response_replay.Final_answer
+          ; content_count = 2
+          }
+        ]
+    in
+    Alcotest.(check bool)
+      "response_replay telemetry retained"
+      true
+      (Option.bind response.telemetry (fun t -> t.response_replay) = expected_replay)
+;;
+
+let test_responses_stream_incomplete_item_status_drops_function_call () =
+  let module Acc = Llm_provider.Complete_stream_acc in
+  let state =
+    S.create_openai_stream_state ~provider:"openai_compat" ~model:"gpt-5.5" ()
+  in
+  let acc = Acc.create_stream_acc () in
+  let feed evt_type data =
+    let events, _ = S.responses_sse_to_events state (Some evt_type) data in
+    List.iter (Acc.accumulate_event acc) events
+  in
+  feed
+    "response.created"
+    {|{"type":"response.created","response":{"id":"resp_inc_item","model":"gpt-5.5","status":"in_progress"}}|};
+  feed
+    "response.completed"
+    {|{"type":"response.completed","response":{"id":"resp_inc_item","model":"gpt-5.5","status":"completed","output":[{"id":"msg_0","type":"message","role":"assistant","phase":"commentary","content":[{"type":"output_text","text":"partial"}]},{"id":"fc_inc","type":"function_call","status":"incomplete","call_id":"call_inc","name":"lookup","arguments":"{\"q\":"}]}}|};
+  match Acc.finalize_stream_acc acc with
+  | Error _ -> Alcotest.fail "expected incomplete function_call item to be dropped without failing stream"
+  | Ok response ->
+    Alcotest.(check bool)
+      "only completed message survives"
+      true
+      (response.content = [ Text "partial" ])
+;;
+
+let test_responses_stream_conflicting_reasoning_and_phase_fail_closed () =
+  let state_phase =
+    S.create_openai_stream_state ~provider:"openai_compat" ~model:"gpt-5.5" ()
+  in
+  ignore
+    (S.responses_sse_to_events
+       state_phase
+       (Some "response.output_item.done")
+       {|{"type":"response.output_item.done","output_index":0,"item":{"id":"msg_0","type":"message","role":"assistant","phase":"commentary","content":[{"type":"output_text","text":"same"}]}}|});
+  let phase_events, _ =
+    S.responses_sse_to_events
+      state_phase
+      (Some "response.completed")
+      {|{"type":"response.completed","response":{"id":"resp_1","model":"gpt-5.5","status":"completed","output":[{"id":"msg_0","type":"message","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"same"}]}]}}|}
+  in
+  Alcotest.(check bool)
+    "conflicting message phase emits SSEParseFailed"
+    true
+    (List.exists
+       (function
+         | SSEParseFailed { reason = "responses_replay:conflicting_item_kind_or_phase"; _ } ->
+           true
+         | _ -> false)
+       phase_events);
+  let state_reasoning =
+    S.create_openai_stream_state ~provider:"openai_compat" ~model:"gpt-5.5" ()
+  in
+  ignore
+    (S.responses_sse_to_events
+       state_reasoning
+       (Some "response.output_item.done")
+       {|{"type":"response.output_item.done","output_index":0,"item":{"id":"rs_0","type":"reasoning","encrypted_content":"enc_a","summary":[]}}|});
+  let reasoning_events, _ =
+    S.responses_sse_to_events
+      state_reasoning
+      (Some "response.completed")
+      {|{"type":"response.completed","response":{"id":"resp_2","model":"gpt-5.5","status":"completed","output":[{"id":"rs_0","type":"reasoning","encrypted_content":"enc_b","summary":[]}]}}|}
+  in
+  Alcotest.(check bool)
+    "conflicting encrypted reasoning emits SSEParseFailed"
+    true
+    (List.exists
+       (function
+         | SSEParseFailed { reason = "responses_replay:conflicting_reasoning_item"; _ } ->
+           true
+         | _ -> false)
+       reasoning_events)
+;;
+
+let test_responses_stream_uncovered_content_fails_closed () =
+  let module Acc = Llm_provider.Complete_stream_acc in
+  let acc = Acc.create_stream_acc () in
+  List.iter
+    (Acc.accumulate_event acc)
+    [ MessageStart { id = "resp_uncovered"; model = "gpt-5.5"; usage = None }
+    ; ContentBlockStart
+        { index = 0; content_type = "text"; tool_id = None; tool_name = None }
+    ; ContentBlockDelta { index = 0; delta = TextDelta "covered" }
+    ; ContentBlockStart
+        { index = 1; content_type = "text"; tool_id = None; tool_name = None }
+    ; ContentBlockDelta { index = 1; delta = TextDelta "uncovered" }
+    ; ResponsesOutputItems
+        [ (Response_replay.Message Response_replay.Final_answer, [ 0 ]) ]
+    ; MessageDelta { stop_reason = Some EndTurn; usage = None }
+    ; MessageStop
+    ];
+  match Acc.finalize_stream_acc acc with
+  | Error (Stream_parse_failed { reason = "responses_replay:uncovered_content"; _ }) -> ()
+  | Error _ | Ok _ ->
+    Alcotest.fail "expected uncovered streamed block to fail closed with responses_replay:uncovered_content"
 ;;
 
 (* ── tool-argument fail-closed (canonical accumulator) ───────────────────────
@@ -2187,6 +2390,22 @@ let () =
             "incomplete content_filter drops tool (#2073)"
             `Quick
             test_responses_stream_incomplete_content_filter_drops_tool
+        ; test_case
+            "output_item.done and per-content_index text blocks"
+            `Quick
+            test_responses_stream_output_item_done_and_content_index_blocks
+        ; test_case
+            "incomplete item status drops function_call"
+            `Quick
+            test_responses_stream_incomplete_item_status_drops_function_call
+        ; test_case
+            "conflicting reasoning and phase fail closed"
+            `Quick
+            test_responses_stream_conflicting_reasoning_and_phase_fail_closed
+        ; test_case
+            "uncovered content fails closed"
+            `Quick
+            test_responses_stream_uncovered_content_fails_closed
         ] )
     ; ( "tool_args_failclosed"
       , [ test_case

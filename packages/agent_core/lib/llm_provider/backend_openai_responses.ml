@@ -619,32 +619,9 @@ let content_blocks_of_reasoning_item item =
      | None -> [])
 ;;
 
-let function_call_required_string ~field item =
-  match opt_bind (json_assoc_opt field item) json_string_opt with
-  | Some s when not (Api_common.string_is_blank s) -> Ok s
-  | Some _ | None ->
-    Error (Printf.sprintf "malformed_responses_function_call:missing_%s" field)
-;;
-
-let function_call_arguments ~call_id item =
-  let* arguments = function_call_required_string ~field:"arguments" item in
-  match Tool_call_input.parse_object arguments with
-  | Ok (input, _dropped) -> Ok input
-  | Error Tool_call_input.Not_object ->
-    Error
-      (Printf.sprintf "malformed_responses_function_call:%s:arguments:not_object" call_id)
-  | Error (Tool_call_input.Invalid_json message) ->
-    Error
-      (Printf.sprintf
-         "malformed_responses_function_call:%s:arguments:json_parse_error:%s"
-         call_id
-         message)
-;;
-
 let content_block_of_function_call item =
-  let* call_id = function_call_required_string ~field:"call_id" item in
-  let* name = function_call_required_string ~field:"name" item in
-  let* input = function_call_arguments ~call_id item in
+  let* {Responses_function_call.call_id;name;input;arguments=_} =
+    Responses_function_call.decode item in
   Ok (ToolUse { id = call_id; name; input })
 ;;
 

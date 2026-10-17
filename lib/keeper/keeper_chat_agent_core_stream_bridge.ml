@@ -758,6 +758,7 @@ let content_event_allowed state (evt : Agent_core.Types.sse_event) =
   | (Agent_core.Types.MessageStart _
     | Agent_core.Types.MessageDelta _
     | Agent_core.Types.MessageStop
+    | Agent_core.Types.ResponsesOutputItems _
     | Agent_core.Types.Ping
     | Agent_core.Types.SSEError _
     | Agent_core.Types.NDJSONError _
@@ -784,6 +785,7 @@ let reject_quarantined_content_event ~stream_scope state
     | MessageStart _
     | MessageDelta _
     | MessageStop
+    | ResponsesOutputItems _
     | Ping
     | SSEError _
     | NDJSONError _
@@ -851,6 +853,7 @@ let event_channel_conflicts state = function
   | Agent_core.Types.MessageStart _
   | Agent_core.Types.MessageDelta _
   | Agent_core.Types.MessageStop
+  | Agent_core.Types.ResponsesOutputItems _
   | Agent_core.Types.Ping
   | Agent_core.Types.SSEError _
   | Agent_core.Types.NDJSONError _
@@ -1025,6 +1028,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
              }
          ; chat_events = closed.chat_events @ [ Agent_core_stream_message_stop (Some { response_generation = bridge_state.content_generation; response_scope = stream_scope }) ]
          })
+  | ResponsesOutputItems _ -> {bridge_state;chat_events=[]}
   | Ping ->
       { bridge_state; chat_events = [ Agent_core_stream_ping ] }
   | Timeout reason ->

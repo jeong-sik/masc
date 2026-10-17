@@ -942,7 +942,7 @@ module Response_replay = struct
 
   (* Admission owns these source positions, so normalization does not need to
      recover identity from provider names, text or structurally equal blocks. *)
-  let retain ~content ~retained_indices groups =
+  let retain ~original_content ~content ~retained_indices groups =
     let rec counts offset positions acc = function
       | [] -> if positions = [] then make ~content (List.rev acc)
         else Error "responses_replay:retained_index_out_of_range"
@@ -965,7 +965,9 @@ module Response_replay = struct
             in
             counts boundary remaining acc rest
     in
-    counts 0 retained_indices [] groups
+    match make ~content:original_content groups with
+    | Error _ as error -> error
+    | Ok groups -> counts 0 retained_indices [] groups
   ;;
 
   let retain_metadata ~original_content ~content ~retained_indices metadata =
@@ -976,7 +978,7 @@ module Response_replay = struct
       Result.map (fun replay ->
         List.map (fun (key, value) -> if String.equal key metadata_key
           then key, to_yojson replay else key, value) metadata)
-        (retain ~content ~retained_indices replay)
+        (retain ~original_content ~content ~retained_indices replay)
   ;;
 end
 
@@ -1189,6 +1191,9 @@ type sse_event =
       { stop_reason : stop_reason option
       ; usage : delta_usage option
       }
+  | ResponsesOutputItems of (Response_replay.kind * int list) list
+  (** Terminal native item grouping, referencing canonical stream block indices.
+      This carries no text, tool arguments or provider response payload. *)
   | MessageStop
   | Ping
   | SSEError of

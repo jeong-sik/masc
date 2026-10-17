@@ -83,6 +83,7 @@ type t =
   ; disposition : disposition
   ; failure : Types.stream_error option
   ; blocks : block Blocks.t
+  ; response_output_items : (Types.Response_replay.kind * int list) list option
   }
 
 type receipt =
@@ -104,6 +105,7 @@ let empty =
   ; disposition = Natural
   ; failure = None
   ; blocks = Blocks.empty
+  ; response_output_items = None
   }
 ;;
 
@@ -692,6 +694,7 @@ let normalize_event state event =
       }
   | Types.ContentBlockStop _
   | Types.MessageDelta _
+  | Types.ResponsesOutputItems _
   | Types.MessageStop
   | Types.Ping
   | Types.SSEError _
@@ -949,6 +952,13 @@ let transition_open state = function
        { state with
          blocks = Blocks.add index { block with lifecycle = Closed } state.blocks
        })
+  | Types.ResponsesOutputItems groups ->
+    if state.message_lifecycle <> Accepting_content then
+      terminal_event_failure "responses_output_items_after_terminal" state
+    else (match state.response_output_items with
+      | None -> {state with response_output_items=Some groups}
+      | Some previous when previous=groups -> state
+      | Some _ -> terminal_event_failure "conflicting_responses_output_items" state)
   | Types.MessageDelta { stop_reason; usage } ->
     if state.message_lifecycle = Message_stopped
     then terminal_event_failure "message_delta_after_message_stop" state
@@ -1317,11 +1327,51 @@ let content_of_block ~disposition ~stop_reason (index, block) =
 let collect_content state stop_reason =
   let rec loop content = function
     | [] -> Ok (List.rev content)
-    | block :: rest ->
+    | ((index, _) as block) :: rest ->
       let* item = content_of_block ~disposition:state.disposition ~stop_reason block in
-      loop (Option.fold ~none:content ~some:(fun item -> item :: content) item) rest
+      loop (Option.fold ~none:content ~some:(fun item -> (index,item) :: content) item) rest
   in
   loop [] (Blocks.bindings state.blocks)
+;;
+
+let group_content state indexed_content =
+  match state.response_output_items with
+  | None -> Ok (List.map snd indexed_content, None)
+  | Some groups ->
+    let available=List.fold_left (fun acc (index,block)->Blocks.add index block acc) Blocks.empty indexed_content in
+    let rec loop covered content_rev replay_rev = function
+      | [] ->
+        if not (Blocks.for_all (fun index _ -> Blocks.mem index covered) available) then
+          stream_parse_failed ~reason:"responses_replay:uncovered_content" ()
+        else
+          let content=List.rev content_rev in
+          (match Types.Response_replay.make ~content (List.rev replay_rev) with
+           | Ok replay -> Ok(content,Some replay)
+           | Error reason -> stream_parse_failed ~reason ())
+      | (kind,indices)::rest ->
+        let rec collect covered items = function
+          | [] -> Ok(covered,List.rev items)
+          | index::tail ->
+            if Blocks.mem index covered || not(Blocks.mem index state.blocks) then
+              stream_parse_failed ~reason:"responses_replay:invalid_block_identity" ()
+            else
+              let covered=Blocks.add index () covered in
+              match Blocks.find_opt index available with
+              | None -> collect covered items tail
+              | Some block -> collect covered (block::items) tail
+        in
+        let* covered,items=collect covered [] indices in
+        let content_count=List.length items in
+        let replay_rev=match kind,items with
+          | Types.Response_replay.Message _, _ | (Reasoning|Function_call),(_::_) ->
+            {Types.Response_replay.kind;content_count}::replay_rev
+          | (Reasoning|Function_call),[] -> replay_rev in
+        loop covered (List.rev_append items content_rev) replay_rev rest
+    in
+    (* Coverage includes indices of dropped empty/partial blocks; compare only
+       retained content rather than requiring a dropped tool to survive. *)
+    let* content,replay = loop Blocks.empty [] [] groups in
+    Ok(content,replay)
 ;;
 
 let has_tool_block =
@@ -1338,7 +1388,8 @@ let has_tool_block =
 ;;
 
 let finalize_completed state stop_reason =
-  let* content = collect_content state stop_reason in
+  let* indexed_content = collect_content state stop_reason in
+  let* content, response_replay = group_content state indexed_content in
   let stop_reason =
     Stop_reason_wire.reconcile stop_reason ~has_tool_blocks:(has_tool_block content)
   in
@@ -1355,7 +1406,8 @@ let finalize_completed state stop_reason =
           ; cache_read_input_tokens = state.usage.cache_read
           ; cost_usd = state.usage.cost_usd
           }
-    ; telemetry = None
+    ; telemetry = Option.map (fun response_replay ->
+        {Types.default_inference_telemetry with response_replay=Some response_replay}) response_replay
     }
 ;;
 

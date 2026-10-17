@@ -610,7 +610,7 @@ module Response_replay : sig
   val make : content:content_block list -> group list -> (t, string) result
   val metadata : t -> string * Yojson.Safe.t
   val of_metadata : content:content_block list -> (string * Yojson.Safe.t) list -> (t option, string) result
-  val retain : content:content_block list -> retained_indices:int list -> t -> (t, string) result
+  val retain : original_content:content_block list -> content:content_block list -> retained_indices:int list -> t -> (t, string) result
   val retain_metadata : original_content:content_block list -> content:content_block list -> retained_indices:int list -> (string * Yojson.Safe.t) list -> ((string * Yojson.Safe.t) list, string) result
 end
 
@@ -866,6 +866,9 @@ type sse_event =
       { stop_reason : stop_reason option
       ; usage : delta_usage option
       }
+  | ResponsesOutputItems of (Response_replay.kind * int list) list
+  (** Terminal native item grouping, referencing canonical stream block indices.
+      This carries no text, tool arguments or provider response payload. *)
   | MessageStop
   | Ping
   | SSEError of

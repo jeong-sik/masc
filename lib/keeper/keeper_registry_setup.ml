@@ -437,13 +437,17 @@ let register_with_state_result
     (Keeper_state_machine.phase_to_string phase);
   let done_p, done_r = Eio.Promise.create () in
   let key = registry_key ~base_path name in
+  (* The Keeper's queue cell, filled under the queue owner lock: a commit
+     after this read publishes to the cell the installed entry holds, so
+     none lands between the read and the install unseen (#43494). *)
   match
-    Keeper_event_queue_persistence.load_pending_result
+    Keeper_event_queue_persistence.with_pending_locked_result
       ~base_path
       ~keeper_name:name
+      (Keeper_event_queue_cells.set ~base_path name)
   with
   | Error detail -> Error (Registration_event_queue_unavailable { keeper_name = name; detail })
-  | Ok initial_event_queue ->
+  | Ok event_queue ->
   match Turn_failure_streak_store.load ~base_path ~keeper_name:name with
   | Error error ->
     Error
@@ -469,7 +473,7 @@ let register_with_state_result
     ; fiber_stop = Atomic.make false
     ; fiber_wakeup = Atomic.make false
     ; cadence_sleeping = Atomic.make false
-    ; event_queue = Atomic.make initial_event_queue
+    ; event_queue
     ; started_at = Time_compat.now ()
     ; grpc_close = Atomic.make None
     ; egress_proxy_port = Atomic.make None
@@ -739,13 +743,17 @@ let register_restarting_internal ?lifecycle_token ?intake_token ~base_path name 
      re-allocating. Pending Event Layer stimuli are restored from the durable
      queue snapshot instead of being reset across restart. *)
   let done_p, done_r = Eio.Promise.create () in
+  (* The Keeper's queue cell, filled under the queue owner lock: a commit
+     after this read publishes to the cell the installed entry holds, so
+     none lands between the read and the install unseen (#43494). *)
   match
-    Keeper_event_queue_persistence.load_pending_result
+    Keeper_event_queue_persistence.with_pending_locked_result
       ~base_path
       ~keeper_name:name
+      (Keeper_event_queue_cells.set ~base_path name)
   with
   | Error detail -> Error (Restart_event_queue_unavailable { keeper_name = name; detail })
-  | Ok initial_event_queue ->
+  | Ok event_queue ->
   match Turn_failure_streak_store.load ~base_path ~keeper_name:name with
   | Error error ->
     Error
@@ -771,7 +779,7 @@ let register_restarting_internal ?lifecycle_token ?intake_token ~base_path name 
     ; fiber_stop = Atomic.make false
     ; fiber_wakeup = Atomic.make false
     ; cadence_sleeping = Atomic.make false
-    ; event_queue = Atomic.make initial_event_queue
+    ; event_queue
     ; started_at = Time_compat.now ()
     ; grpc_close = Atomic.make None
     ; egress_proxy_port = Atomic.make None

@@ -15,7 +15,11 @@ without following it. It never calls `realpath` on a runtime descendant to
 authorize pruning. Every subsequent directory component is opened relative to
 its held parent with `openat(O_DIRECTORY | O_NOFOLLOW)`; names are read from
 that descriptor. A linked child is skipped. A linked runtime root is refused.
-Other file inspection and deletion failures propagate to the maintenance caller.
+Directory opening and enumeration failures propagate to the maintenance caller.
+A single leaf's inspection or deletion failure instead reports its path and
+errno, leaves the entry for a later pass, and does not count it as removed.
+Later entries and stores continue applying their retention policies. Diagnostic
+paths describe the admitted spelling and never authorize a filesystem operation.
 
 Date-split, keeper-scoped and generation-scoped locations follow the existing
 closed store geometry through those handles. Location strings remain lock keys

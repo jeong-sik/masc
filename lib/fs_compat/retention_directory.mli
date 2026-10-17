@@ -26,8 +26,10 @@ val descend : t -> string list -> (t -> int) -> int
 
 val remove_regular_file : ?older_than:float -> t -> string -> bool
 (** Inspect without following links and unlink relative to the held parent.
-    [true] counts an actual unlink. Missing/non-regular entries are skipped;
-    other errors propagate. POSIX has no atomic inode/mtime-conditional
+    [true] counts an actual unlink. Missing/non-regular entries are skipped.
+    Leaf inspection/removal [Unix_error] is reported with its diagnostic path
+    and errno, then skipped without counting; other entries/stores continue.
+    Directory opening/enumeration errors still propagate. POSIX has no atomic inode/mtime-conditional
     unlink: a concurrent leaf replacement can remove that replacement entry
     inside the owned parent, but never a symlink's target. *)
 

@@ -115,6 +115,60 @@ let test_missing_and_invalid_components () =
         (fun () -> ignore (Directory.with_child held component (fun _ -> ()))))
       [".."; "."; "a/b"; ""])
 
+let test_unremovable_file_keeps_later_stores () =
+  let root = fresh () in
+  let first = Filename.concat root "first" and later = Filename.concat root "later" in
+  List.iter (fun path -> Unix.mkdir path 0o700) [first; later];
+  let first_file = Filename.concat first "old.jsonl" in
+  let later_file = Filename.concat later "old.jsonl" in
+  List.iter write [first_file; later_file];
+  (* Root can bypass directory modes. In root-run CI only, use the existing
+     operation runner to inject the same leaf error. Ordinary users exercise
+     the real unlinkat permission failure; the later store always uses real IO. *)
+  let inject = ref false in
+  let io : Directory.io = { run = (fun f ->
+    if !inject then raise (Unix.Unix_error (Unix.EACCES, "retention_unlinkat", "old.jsonl"))
+    else f ()) } in
+  let prune directory =
+    if Directory.remove_regular_file directory "old.jsonl" then 1 else 0 in
+  let count = match Directory.with_root ~io root (fun held ->
+    List.fold_left (fun count name ->
+      count + Directory.descend held [name] (fun directory ->
+        if name = "first" then begin
+          Unix.chmod first 0o500;
+          inject := Unix.geteuid () = 0;
+          Fun.protect
+            ~finally:(fun () -> inject := false; Unix.chmod first 0o700)
+            (fun () -> prune directory)
+        end else prune directory)) 0 ["first"; "later"]) with
+    | Some count -> count | None -> Alcotest.fail "fixture root disappeared" in
+  Alcotest.(check int) "only the later store's removal is counted" 1 count;
+  check_exists "rejected leaf retained" true first_file;
+  check_exists "later store still pruned" false later_file;
+  Alcotest.(check int) "next pass retries the retained leaf" 1 (bound first prune)
+
+let test_inspection_failure_keeps_later_entries () =
+  let root = fresh () in
+  let later_file = Filename.concat root "old.jsonl" in
+  write later_file;
+  bound root (fun held ->
+    Alcotest.(check bool) "kernel rejects an overlong leaf without aborting pass" false
+      (Directory.remove_regular_file held (String.make 65536 'x'));
+    Alcotest.(check bool) "later entry uses real descriptor unlink" true
+      (Directory.remove_regular_file held "old.jsonl"));
+  check_exists "later entry removed" false later_file
+
+let test_directory_failure_still_propagates () =
+  let root = fresh () in
+  let inject = ref false in
+  let failure = Unix.Unix_error (Unix.EACCES, "directory_names", root) in
+  let io : Directory.io = { run = (fun f -> if !inject then raise failure else f ()) } in
+  match Directory.with_root ~io root (fun held ->
+    inject := true;
+    Alcotest.check_raises "unreadable inventory does not become an empty pass" failure
+      (fun () -> ignore (Directory.names held : string list))) with
+  | Some () -> () | None -> Alcotest.fail "fixture root disappeared"
+
 let () = Alcotest.run "physical retention containment"
   ["owned pruning", [
     Alcotest.test_case "mtime, links and FIFO" `Quick test_regular_mtime_and_special_entries;
@@ -124,4 +178,7 @@ let () = Alcotest.run "physical retention containment"
     Alcotest.test_case "bound root ancestor swap" `Quick test_bound_root_survives_ancestor_swap;
     Alcotest.test_case "root and ancestor links refused" `Quick test_root_and_ancestor_links_refused;
     Alcotest.test_case "exception expires handles" `Quick test_exception_expires_handles;
-    Alcotest.test_case "absence and child validation" `Quick test_missing_and_invalid_components ]]
+    Alcotest.test_case "absence and child validation" `Quick test_missing_and_invalid_components;
+    Alcotest.test_case "rejected unlink preserves later stores" `Quick test_unremovable_file_keeps_later_stores;
+    Alcotest.test_case "rejected inspection preserves later entries" `Quick test_inspection_failure_keeps_later_entries;
+    Alcotest.test_case "directory failure stays explicit" `Quick test_directory_failure_still_propagates ]]

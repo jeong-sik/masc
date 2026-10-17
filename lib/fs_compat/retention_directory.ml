@@ -1,6 +1,6 @@
 type io = { run : 'a. (unit -> 'a) -> 'a }
 let inline = { run = (fun f -> f ()) }
-type t = { fd : Unix.file_descr; mutable active : bool; io : io }
+type t = { fd : Unix.file_descr; mutable active : bool; io : io; path : string }
 
 external open_root : string -> Unix.file_descr = "caml_masc_owned_directory_root"
 external open_child : Unix.file_descr -> string -> Unix.file_descr
@@ -21,8 +21,8 @@ let leaf name =
      || String.contains name '/' || String.contains name '\000'
   then invalid_arg "retention directory requires one child name"
 
-let scope io fd f =
-  let directory = { fd; active = true; io } in
+let scope io path fd f =
+  let directory = { fd; active = true; io; path } in
   Fun.protect
     ~finally:(fun () -> directory.active <- false; Unix.close fd)
     (fun () -> f directory)
@@ -30,7 +30,7 @@ let scope io fd f =
 let with_child directory name f =
   leaf name;
   match directory.io.run (fun () -> open_child (descriptor directory) name) with
-  | fd -> Some (scope directory.io fd f)
+  | fd -> Some (scope directory.io (Filename.concat directory.path name) fd f)
   | exception Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR | Unix.ELOOP), _, _) -> None
 
 let with_root ?(io = inline) path f =
@@ -42,10 +42,12 @@ let with_root ?(io = inline) path f =
     | [] -> Some (f directory)
     | name :: rest ->
       (match directory.io.run (fun () -> open_child (descriptor directory) name) with
-       | fd -> scope directory.io fd (fun child -> walk child rest)
+       | fd -> scope directory.io (Filename.concat directory.path name) fd
+           (fun child -> walk child rest)
        | exception Unix.Unix_error (Unix.ENOENT, _, _) -> None)
   in
-  scope io (io.run (fun () -> open_root "/")) (fun directory -> walk directory components)
+  scope io "/" (io.run (fun () -> open_root "/"))
+    (fun directory -> walk directory components)
 
 let names directory =
   directory.io.run (fun () -> directory_names (descriptor directory))
@@ -67,7 +69,16 @@ let rec descend directory components f =
 
 let remove_regular_file ?older_than directory name =
   leaf name;
-  directory.io.run (fun () -> remove_regular (descriptor directory) name older_than)
+  match directory.io.run (fun () -> remove_regular (descriptor directory) name older_than) with
+  | removed -> removed
+  | exception Unix.Unix_error (error, operation, _) ->
+    (* A rejected leaf stays for the next pass. Its failure must not prevent
+       unrelated stores from applying their own retention policy. This path
+       is a diagnostic label only; authority remains the held descriptor. *)
+    (try Stdlib.Printf.eprintf "[retention] %s(%S): %s; keeping entry for next pass\n%!"
+           operation (Filename.concat directory.path name) (Unix.error_message error)
+     with Sys_error _ | Unix.Unix_error _ -> ());
+    false
 
 let remove_empty_child directory name =
   leaf name;

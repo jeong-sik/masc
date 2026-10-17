@@ -2194,7 +2194,7 @@
 (test
  (name test_server_auth_dashboard_actor_resolution)
  (modules test_server_auth_dashboard_actor_resolution)
- (libraries alcotest masc masc.auth masc.masc_types masc_server eio_main httpun unix))
+ (libraries alcotest masc masc.auth masc.masc_types masc_server eio_main httpun unix uri))
 
 ; RFC-0301 item 6: the turn-local generated-media accumulator turns stream media
 ; into reload chat blocks (image / voice / attach) via the content-addressed store.

@@ -435,6 +435,18 @@ val not_initialized_headers : (string * string) list
 val not_initialized_response : string -> string
 (** JSON body returned with {!not_initialized_status} while the server warms up. *)
 
+type read_workspace_precondition = Workspace_read_unbound | Workspace_read_matched
+
+val validate_read_workspace_precondition :
+  config:Workspace.config ->
+  Httpun.Request.t ->
+  (read_workspace_precondition, Workspace.expected_workspace_error) result
+(** GET/HEAD readers may bind their response to the canonical workspace with
+    exactly one [expected_base_path] and [expected_masc_root] query value.
+    An absent pair leaves an ordinary read unchanged; partial, repeated or
+    foreign values fail before the handler runs. Other methods retain their
+    own operation preconditions. *)
+
 val with_public_read :
   (Mcp_server.server_state ->
    Httpun.Request.t -> Httpun.Reqd.t -> unit) ->

@@ -105,8 +105,8 @@ reader could remain labeled as reading Work while the bundle waited for Goals.
 
 `Surface_read_source.t` is shared by read ownership and progress. The existing
 `Surface_read_order.source` re-exports that same type; presentation names are
-defined once and are not parsed to select behavior. Full-refresh publication
-owners remain until their existing final identity admission. They do not override
+defined once and are not parsed to select behavior. At this progress-only stage, full-refresh publication
+owners remained until their existing final identity admission. They do not override
 the full refresh's actual pending-reader display. Navigation and independent
 filter reads retain their separate pending-ownership display and are not added
 to the full-refresh ledger.
@@ -120,13 +120,86 @@ Reader clocks end at worker completion; publication, first usable state, painted
 frames and full-refresh completion remain distinct boundaries.
 
 The source change preserves requested data, existing parallel calls, result
-assembly, cancellation, workspace probes and source admission. It does not make
-Work or another dataset independently actionable before final admission.
+assembly, cancellation, workspace probes and source admission. At that stage it did not make
+Work or another dataset independently actionable before final admission; the
+following dataset-publication unit extends that path.
 Extended state scenarios cover an independent Work failure and pending Goal
 read, duplicate settlement, interruption, unchanged data ownership and concurrent
 navigation/filter ownership. They are authored, not executed. Native normal and
 narrow frames, types, behavior and matched Before/After remain unverified; no
 wording/layout/row-order assertion test is introduced.
+
+## Publish a verified dataset before unrelated readers finish
+
+The source baseline for this follow-up is
+`c7458c89e9a651b55034292cb694a597144a21a7`. The preceding progress-only layer
+identified completed readers, but Board, Work and other scoped datasets still
+waited for the entire collector and its final workspace probe before publication.
+
+| Boundary | Before | Source implementation |
+|---|---|---|
+| One requested dataset returns | Wait for all independent readers and final probe | Admit that owned dataset after its request-bound workspace proof |
+| An unrelated reader is slow | Delays publication of otherwise ready scoped data | Remains pending without holding the ready dataset |
+| Owned dataset fails | Error policy runs with the terminal bundle | Same dataset-specific error policy can run immediately |
+| Board and provider windows | Each is one paired dataset | Preserve the pair and settle its shared owner once |
+| Navigation supersedes one source | Source ownership orders terminal bundles | Same ownership also rejects the old early result |
+| Final bundle arrives | Applies every still-owned dataset | Applies only sources not already settled or superseded |
+| HTTP requests | Existing dataset calls and workspace probes | Same source request count; no per-dataset health probe added |
+
+Each early dataset carries its original refresh ticket, immutable workspace
+authority, dataset request and complete typed value. Admission consumes only that
+source's ownership. Duplicate replies cannot overwrite a settled source, and an
+older collector cannot consume a newer navigation/filter owner. Sibling sources
+and actual collector lifetimes remain pending until they finish. The same path
+covers full and navigation refreshes. Non-Eio synchronous collection retains
+terminal bundle admission.
+
+The HTTP/1 TUI dataset reader binds each existing JSON GET to the confirmed
+canonical base path and MASC root. Public-read, read-auth, permission-auth and
+token-permission-auth combinators validate the optional query pair before their
+handler executes. Missing pairs preserve ordinary unbound reads; partial,
+duplicate, empty or foreign values fail. Authentication and operation-owned
+POST preconditions retain their own paths.
+
+A matched read emits the shared `x-masc-workspace-read: matched-v1` response
+receipt. The request fiber owns its headers, including cached/conditional 304
+responses and JSON prepared on CPU workers. Client-supplied headers cannot create
+that receipt. The TUI requires exactly one matching receipt on successful or 304
+responses before using the body/cache value; a missing, duplicate or unsupported
+receipt is a failed read. Kept JSON addresses include the workspace query pair,
+so a response for another binding is not a cache hit. This path requires the
+matching server-side read contract; simply sending a query is not proof that a
+server enforced it. Fleet health instead validates the workspace/readiness
+identity already present in its existing response.
+
+The final collector still joins its readers and verifies identity. That terminal
+observation can suspend or retire workspace authority. Early data does not
+establish a current workspace for a stale request, complete the refresh, resume a
+Keeper, or prove a Tool effect. Existing Work snapshot/cursor/draft retention on
+failure remains the data application's policy.
+
+`tui_dataset_early` records the admitted dataset source, original request ID,
+collector kind, monotonic `started_ns` and `admitted_ns`, and
+`outcome=received|failed`. A full collector also records its own
+`full_refresh_started_ns`, which joins the terminal `tui_http_refresh` clock,
+including cold-start acknowledgement. Navigation/independent readers record
+`unrecorded` for that full-refresh field; an overlapping full pass is not their
+dispatch origin. Its scope
+is UI-state admission; failed samples are not usable-data latency. No dataset
+body, question, answer or workspace path is copied to this log. Join the request
+with `tui_surface_read_finished`; full-refresh source execution and terminal
+refresh clocks remain separate. Native painted/actionable frames require their
+own observation.
+
+The source expectation changes a ready dataset's admission dependency from the
+slowest collector branch plus final probe to that dataset's own verified reply
+plus mailbox delivery. Overall refresh time need not decrease. Extra query and
+receipt bytes, cache partitioning, health decoding and internal dataset delivery
+have unmeasured runtime cost. No latency percentage or current-candidate native
+Before/After is claimed. Compound source scenarios for concurrent ownership,
+workspace/refresh retirement, malformed query authority and actual JSON/304 wire
+receipts are authored but unexecuted; type checks and feature execution remain
+unverified.
 
 ## Retain Work navigation after a failed planning refresh
 

@@ -5649,7 +5649,7 @@
 (test
  (name test_lane_addon_subscription)
  (modules test_lane_addon_subscription)
- (libraries alcotest yojson unix masc masc.fs_compat))
+ (libraries alcotest yojson unix eio eio_main masc masc.fs_compat))
 
 (test
  (name test_tui_lane_broadcast_pending)

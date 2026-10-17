@@ -733,21 +733,8 @@ let run_keeper_invocation_turn_admitted_inner
             let world_observation =
               direct_turn_observation ~config:ctx.config meta
             in
-            let lane_updates = Domain_pool_ref.submit_io_or_inline (fun () ->
-              Lane_addon_subscription.observe ~config:ctx.config ~keeper_name:meta.name) in
-            let workspace_memory = Domain_pool_ref.submit_io_or_inline (fun () ->
-              Workspace_memory_ledger.observe ~base_path:ctx.config.base_path) in
-            (match workspace_memory with
-             | Workspace_memory_ledger.Unavailable detail ->
-               Log.Keeper.warn "workspace memory discovery unavailable keeper=%s: %s" meta.name detail
-             | Missing | Available _ -> ());
-            Keeper_workspace_memory_observation_metrics.record workspace_memory;
-            let wiki_contents = Domain_pool_ref.submit_io_or_inline (fun () ->
-              Keeper_wiki_contents.observe ~base_path:ctx.config.base_path) in
-            (match wiki_contents with
-             | Keeper_wiki_contents.Unlisted detail ->
-               Log.Keeper.warn "wiki listing unavailable keeper=%s: %s" meta.name detail
-             | Off | Listed _ -> ());
+            let {Keeper_turn_shared_inputs.lane_updates;workspace_memory;wiki_contents} =
+              Keeper_turn_shared_inputs.observe ~preview ~config:ctx.config ~keeper_name:meta.name () in
             let build_turn_prompt ~base_system_prompt:_ ~messages:_
                 : Keeper_agent_run.turn_prompt =
               (* === SOFT CONTEXT (injected via extra_system_context) === *)

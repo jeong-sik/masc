@@ -2233,13 +2233,13 @@ let test_durable_enqueue_replays_write_and_signal_nothing () =
                      (Persistence.load_state_result ~base_path ~keeper_name
                       |> require_ok "read")))))))
 
-(* #43494. Registration reads the durable queue, then takes the lifecycle
-   key lock to install the entry. The test holds that lock, waits until
-   registration has started its read (the snapshot read counter moves), and
-   commits a source. The commit waits for that read to release the owner
-   lock, so the read cannot see it, and nothing is registered to publish to.
-   Released, registration installs an entry built from the earlier read; only
-   the read after the install brings the source in. *)
+(* #43494. Registration reads the durable queue into the Keeper's queue
+   cell, then takes the lifecycle key lock to install the entry. The test
+   holds that lock, waits until registration has read its queue (the snapshot
+   read counter moves), and commits a source the way producers do, with a
+   publish. The commit waits for the read to release the owner lock, so the
+   read cannot see it, and the entry is not installed yet. The commit
+   publishes to the cell, which the entry installed afterwards holds. *)
 let registration_meta keeper_name =
   match
     Masc_test_deps.meta_of_json_fixture
@@ -2282,14 +2282,6 @@ type registration_outcome =
   | Registered
   | Refused_queue_unavailable
   | Refused_otherwise
-  | Registration_cancelled
-
-let outcome_name = function
-  | Registered -> "registered"
-  | Refused_queue_unavailable -> "refused: queue unavailable"
-  | Refused_otherwise -> "refused for another reason"
-  | Registration_cancelled -> "cancelled"
-;;
 
 let register_offline ~base_path name meta =
   match Masc.Keeper_registry.register_offline_if_admitted ~base_path name meta with
@@ -2305,28 +2297,33 @@ let register_restart ~base_path name meta =
   | Error (_ : Masc.Keeper_registry.register_restarting_error) -> Refused_otherwise
 ;;
 
-let check_registration_sees_a_commit_before_its_install ~label register =
+let check_registration_sees_a_commit_before_its_install ~label ~with_prior register =
   Eio_main.run @@ fun env ->
   with_temp_dir ("keeper-registration-race-" ^ label) (fun base_path ->
     let base_path = Unix.realpath base_path in
     let keeper_name = "registration-race" in
     let meta = registration_meta keeper_name in
+    (if with_prior
+     then
+       match Masc.Keeper_registry.register_offline_if_admitted ~base_path keeper_name meta with
+       | Ok (_ : Masc.Keeper_registry.registry_entry) -> ()
+       | Error (_ : Masc.Keeper_registry.registration_error) ->
+         Alcotest.fail (label ^ ": the prior registration was refused"));
     let outcome =
       register_around_its_first_read ~clock:(Eio.Stdenv.clock env) ~base_path ~keeper_name
         ~register:(fun () -> register ~base_path keeper_name meta)
         ~between:(fun () ->
           match
-            Persistence.enqueue_stimulus_if_absent_result ~base_path ~keeper_name
+            Registry_event_queue.enqueue_durable_result ~base_path keeper_name
               (stimulus "committed-before-install" 1.0)
           with
-          | Ok Persistence.Enqueued -> ()
-          | Ok Persistence.Already_present -> Alcotest.fail "the source was already queued"
+          | Ok () -> ()
           | Error detail -> Alcotest.fail detail)
     in
     (match outcome with
      | Registered -> ()
-     | (Refused_queue_unavailable | Refused_otherwise | Registration_cancelled) as outcome ->
-       Alcotest.failf "%s: %s" label (outcome_name outcome));
+     | Refused_queue_unavailable | Refused_otherwise ->
+       Alcotest.fail (label ^ ": registration refused"));
     match Registry_event_queue.snapshot_result ~base_path keeper_name with
     | Error detail -> Alcotest.fail detail
     | Ok queue ->
@@ -2336,333 +2333,16 @@ let check_registration_sees_a_commit_before_its_install ~label register =
         (post_ids queue))
 ;;
 
+(* Nothing is registered when the commit lands. *)
 let test_registration_sees_a_commit_before_its_install () =
-  check_registration_sees_a_commit_before_its_install ~label:"register" register_offline
-;;
-
-let test_restart_registration_sees_a_commit_before_its_install () =
-  check_registration_sees_a_commit_before_its_install ~label:"restart" register_restart
-;;
-
-(* The snapshot becomes unreadable between the registration's first read and
-   its install, so the re-read under the owner lock fails. The registration is
-   refused as a failed first read refuses it, and the registry holds what it
-   held before. *)
-let replace_snapshot_with_an_unreadable_one ~base_path ~keeper_name =
-  let dir = Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name in
-  let replacement = Filename.concat dir "replacement" in
-  Out_channel.with_open_bin replacement (fun oc ->
-    output_string oc {|{"schema":"unsupported-replacement","pending":["retain"]}|});
-  Unix.rename replacement (Filename.concat dir Persistence.snapshot_filename)
-;;
-
-let check_a_failed_reread_withdraws_the_entry ~label ~with_prior register =
-  Eio_main.run @@ fun env ->
-  with_temp_dir ("keeper-registration-reread-" ^ label) (fun base_path ->
-    let base_path = Unix.realpath base_path in
-    let keeper_name = "registration-reread" in
-    let meta = registration_meta keeper_name in
-    (match
-       Persistence.enqueue_stimulus_if_absent_result ~base_path ~keeper_name
-         (stimulus "on-disk" 1.0)
-     with
-     | Ok Persistence.Enqueued -> ()
-     | Ok Persistence.Already_present -> Alcotest.fail "the source was already queued"
-     | Error detail -> Alcotest.fail detail);
-    let prior_lane =
-      if with_prior
-      then (
-        match Masc.Keeper_registry.register_offline_if_admitted ~base_path keeper_name meta with
-        | Ok entry -> Some (Masc.Keeper_lane.id entry.Masc.Keeper_registry.lane)
-        | Error (_ : Masc.Keeper_registry.registration_error) ->
-          Alcotest.fail (label ^ ": the prior registration was refused"))
-      else None
-    in
-    let outcome =
-      register_around_its_first_read ~clock:(Eio.Stdenv.clock env) ~base_path ~keeper_name
-        ~register:(fun () -> register ~base_path keeper_name meta)
-        ~between:(fun () -> replace_snapshot_with_an_unreadable_one ~base_path ~keeper_name)
-    in
-    (match outcome with
-     | Refused_queue_unavailable -> ()
-     | (Registered | Refused_otherwise | Registration_cancelled) as outcome ->
-       Alcotest.failf "%s: %s over an unreadable re-read" label (outcome_name outcome));
-    match prior_lane, Masc.Keeper_registry.get ~base_path keeper_name with
-    | None, None -> ()
-    | Some lane, Some entry
-      when Masc.Keeper_lane.Id.equal lane (Masc.Keeper_lane.id entry.Masc.Keeper_registry.lane) -> ()
-    | None, Some _ -> Alcotest.fail (label ^ ": the withdrawn entry stayed registered")
-    | Some _, (Some _ | None) -> Alcotest.fail (label ^ ": the replaced entry was not put back"))
-;;
-
-let test_a_failed_reread_withdraws_a_registration () =
-  check_a_failed_reread_withdraws_the_entry ~label:"register" ~with_prior:false register_offline
-;;
-
-let test_a_failed_reread_puts_back_the_replaced_entry () =
-  check_a_failed_reread_withdraws_the_entry ~label:"restart" ~with_prior:true register_restart
-;;
-
-(* The tests below stop the registration after its install, while its read
-   again waits for the queue owner lock. A commit holds that lock from before
-   the install until the test lets it go. *)
-type held_commit =
-  | Commit_nothing
-  | Commit_and_publish of
-      { extra : Queue.stimulus list
-      ; after_publish : unit -> unit
-      }
-
-let hold_the_queue_owner_lock ~sw ~base_path ~keeper_name ~released held =
-  let holding, set_holding = Eio.Promise.create () in
-  let committed = ref None in
-  Eio.Fiber.fork ~sw (fun () ->
-    let result =
-      Persistence.update_checked_result
-        ~base_path
-        ~keeper_name
-        ~after_commit:(fun () ->
-          match held, !committed with
-          | Commit_and_publish { after_publish; _ }, Some pending ->
-            (* Every commit publishes its pending queue to the entry registered
-               at that moment, as [Keeper_registry_event_queue] does. *)
-            Option.iter
-              (fun (entry : Masc.Keeper_registry.registry_entry) ->
-                 Atomic.set entry.event_queue pending)
-              (Masc.Keeper_registry.get ~base_path keeper_name);
-            after_publish ()
-          | Commit_and_publish _, None | Commit_nothing, (Some _ | None) -> ())
-        (fun current ->
-           Eio.Promise.resolve set_holding ();
-           Eio.Promise.await released;
-           match held with
-           | Commit_nothing -> Error "the commit only held the lock"
-           | Commit_and_publish { extra; _ } ->
-             let pending = List.fold_left Queue.enqueue current extra in
-             committed := Some pending;
-             Ok pending)
-    in
-    match held, result with
-    | Commit_nothing, Error _ | Commit_and_publish _, Ok () -> ()
-    | Commit_nothing, Ok () | Commit_and_publish _, Error _ ->
-      Alcotest.fail "the commit holding the queue owner lock did not end as planned");
-  Eio.Promise.await holding
-;;
-
-let wait_for_the_install ~clock ~base_path ~keeper_name ~replacing =
-  let deadline = Eio.Time.now clock +. queue_read_deadline_s in
-  let rec wait () =
-    match Masc.Keeper_registry.get ~base_path keeper_name, replacing with
-    | Some _, None -> ()
-    | Some entry, Some prior when entry != prior -> ()
-    | Some _, Some _ | None, (Some _ | None) ->
-      if Eio.Time.now clock > deadline
-      then Alcotest.fail "registration never installed its entry"
-      else (
-        Eio.Time.sleep clock queue_read_poll_interval_s;
-        wait ())
-  in
-  wait ()
-;;
-
-let enqueue_on_disk ~base_path ~keeper_name post_id =
-  match
-    Persistence.enqueue_stimulus_if_absent_result ~base_path ~keeper_name
-      (stimulus post_id 1.0)
-  with
-  | Ok Persistence.Enqueued -> ()
-  | Ok Persistence.Already_present -> Alcotest.fail "the source was already queued"
-  | Error detail -> Alcotest.fail detail
-;;
-
-let register_prior ~base_path keeper_name meta =
-  match Masc.Keeper_registry.register_offline_if_admitted ~base_path keeper_name meta with
-  | Ok entry -> entry
-  | Error (_ : Masc.Keeper_registry.registration_error) ->
-    Alcotest.fail "the prior registration was refused"
-;;
-
-let expect_refused_queue_unavailable ~label outcome =
-  match outcome with
-  | Refused_queue_unavailable -> ()
-  | (Registered | Refused_otherwise | Registration_cancelled) as outcome ->
-    Alcotest.failf "%s: %s over an unreadable re-read" label (outcome_name outcome)
-;;
-
-(* A lifecycle owner that asks for the Keeper after the install waits for the
-   key lock. The registration withdraws its entry first, so the reserved
-   Keeper is left with nothing registered. *)
-let check_a_reservation_after_the_install_waits_for_the_withdrawal ~label register =
-  Eio_main.run @@ fun env ->
-  with_temp_dir ("keeper-registration-reservation-" ^ label) (fun base_path ->
-    let base_path = Unix.realpath base_path in
-    let clock = Eio.Stdenv.clock env in
-    let keeper_name = "registration-reservation" in
-    let meta = registration_meta keeper_name in
-    enqueue_on_disk ~base_path ~keeper_name "on-disk";
-    Eio.Switch.run @@ fun sw ->
-    let released, release = Eio.Promise.create () in
-    let reservation, set_reservation = Eio.Promise.create () in
-    let outcome =
-      register_around_its_first_read ~clock ~base_path ~keeper_name
-        ~register:(fun () -> register ~base_path keeper_name meta)
-        ~between:(fun () ->
-          hold_the_queue_owner_lock ~sw ~base_path ~keeper_name ~released
-            (Commit_and_publish
-               { extra = [ stimulus "committed-while-held" 2.0 ]
-               ; after_publish =
-                   (fun () -> replace_snapshot_with_an_unreadable_one ~base_path ~keeper_name)
-               });
-          Eio.Fiber.fork ~sw (fun () ->
-            wait_for_the_install ~clock ~base_path ~keeper_name ~replacing:None;
-            Eio.Promise.resolve release ();
-            let acquired =
-              Masc.Keeper_lifecycle_reservation.acquire ~base_path ~keeper_name
-                ~purpose:Masc.Keeper_lifecycle_reservation.Configuration_removal
-            in
-            Eio.Promise.resolve set_reservation
-              (acquired, Masc.Keeper_registry.get ~base_path keeper_name)))
-    in
-    expect_refused_queue_unavailable ~label outcome;
-    (match Masc.Keeper_registry.get ~base_path keeper_name with
-     | None -> ()
-     | Some _ -> Alcotest.fail (label ^ ": the refused registration left its entry under the reservation"));
-    let acquired, registered_when_reserved = Eio.Promise.await reservation in
-    (match registered_when_reserved with
-     | None -> ()
-     | Some _ -> Alcotest.fail (label ^ ": the Keeper was reserved while the refused entry was installed"));
-    match acquired with
-    | Ok token ->
-      (match Masc.Keeper_lifecycle_reservation.release token with
-       | Masc.Keeper_lifecycle_reservation.Released -> ()
-       | ( Masc.Keeper_lifecycle_reservation.Release_missing
-         | Masc.Keeper_lifecycle_reservation.Release_not_owner _ ) as outcome ->
-         Alcotest.fail (Masc.Keeper_lifecycle_reservation.release_outcome_to_string outcome))
-    | Error (Masc.Keeper_lifecycle_reservation.Already_reserved owner) ->
-      Alcotest.fail (Masc.Keeper_lifecycle_reservation.snapshot_to_string owner))
-;;
-
-let test_a_reservation_after_the_install_waits_for_the_withdrawal () =
-  check_a_reservation_after_the_install_waits_for_the_withdrawal ~label:"register"
+  check_registration_sees_a_commit_before_its_install ~label:"register" ~with_prior:false
     register_offline
 ;;
 
-let test_a_reservation_after_a_restart_install_waits_for_the_withdrawal () =
-  check_a_reservation_after_the_install_waits_for_the_withdrawal ~label:"restart"
+(* The entry the restart replaces is still registered when the commit lands. *)
+let test_restart_registration_sees_a_commit_before_its_install () =
+  check_registration_sees_a_commit_before_its_install ~label:"restart" ~with_prior:true
     register_restart
-;;
-
-(* A commit after the install published to the installed entry. When the read
-   again fails, the entry put back takes that queue. *)
-let test_the_entry_put_back_takes_what_was_published_while_it_was_out () =
-  Eio_main.run @@ fun env ->
-  with_temp_dir "keeper-registration-carry" (fun base_path ->
-    let base_path = Unix.realpath base_path in
-    let clock = Eio.Stdenv.clock env in
-    let keeper_name = "registration-carry" in
-    let meta = registration_meta keeper_name in
-    enqueue_on_disk ~base_path ~keeper_name "on-disk";
-    let prior = register_prior ~base_path keeper_name meta in
-    Eio.Switch.run @@ fun sw ->
-    let released, release = Eio.Promise.create () in
-    let outcome =
-      register_around_its_first_read ~clock ~base_path ~keeper_name
-        ~register:(fun () -> register_restart ~base_path keeper_name meta)
-        ~between:(fun () ->
-          hold_the_queue_owner_lock ~sw ~base_path ~keeper_name ~released
-            (Commit_and_publish
-               { extra = [ stimulus "published-while-out" 2.0 ]
-               ; after_publish =
-                   (fun () -> replace_snapshot_with_an_unreadable_one ~base_path ~keeper_name)
-               });
-          Eio.Fiber.fork ~sw (fun () ->
-            wait_for_the_install ~clock ~base_path ~keeper_name ~replacing:(Some prior);
-            Eio.Promise.resolve release ()))
-    in
-    expect_refused_queue_unavailable ~label:"restart" outcome;
-    (match Masc.Keeper_registry.get ~base_path keeper_name with
-     | Some entry when entry == prior -> ()
-     | Some _ | None -> Alcotest.fail "the replaced entry was not put back");
-    Alcotest.(check (list string))
-      "the entry put back holds the source published while it was out"
-      [ "on-disk"; "published-while-out" ]
-      (post_ids (Atomic.get prior.event_queue)))
-;;
-
-(* No commit after the install: the entry put back keeps the source it got
-   before the install, which the registration's first read did not see. *)
-let test_the_entry_put_back_keeps_what_it_got_before_the_install () =
-  Eio_main.run @@ fun env ->
-  with_temp_dir "keeper-registration-keep" (fun base_path ->
-    let base_path = Unix.realpath base_path in
-    let keeper_name = "registration-keep" in
-    let meta = registration_meta keeper_name in
-    enqueue_on_disk ~base_path ~keeper_name "on-disk";
-    let prior = register_prior ~base_path keeper_name meta in
-    let outcome =
-      register_around_its_first_read ~clock:(Eio.Stdenv.clock env) ~base_path ~keeper_name
-        ~register:(fun () -> register_restart ~base_path keeper_name meta)
-        ~between:(fun () ->
-          (match
-             Registry_event_queue.enqueue_durable_result ~base_path keeper_name
-               (stimulus "published-before-install" 2.0)
-           with
-           | Ok () -> ()
-           | Error detail -> Alcotest.fail detail);
-          replace_snapshot_with_an_unreadable_one ~base_path ~keeper_name)
-    in
-    expect_refused_queue_unavailable ~label:"restart" outcome;
-    (match Masc.Keeper_registry.get ~base_path keeper_name with
-     | Some entry when entry == prior -> ()
-     | Some _ | None -> Alcotest.fail "the replaced entry was not put back");
-    Alcotest.(check (list string))
-      "the entry put back keeps the source published to it before the install"
-      [ "on-disk"; "published-before-install" ]
-      (post_ids (Atomic.get prior.event_queue)))
-;;
-
-(* The registration is cancelled after its install, while its read again
-   waits for the queue owner lock. It still reads, so the entry holds the
-   source committed between its first read and the install. *)
-let test_a_registration_cancelled_after_its_install_still_reads_again () =
-  Eio_main.run @@ fun env ->
-  with_temp_dir "keeper-registration-cancel" (fun base_path ->
-    let base_path = Unix.realpath base_path in
-    let clock = Eio.Stdenv.clock env in
-    let keeper_name = "registration-cancel" in
-    let meta = registration_meta keeper_name in
-    Eio.Switch.run @@ fun sw ->
-    let context, set_context = Eio.Promise.create () in
-    let released, release = Eio.Promise.create () in
-    let outcome =
-      register_around_its_first_read ~clock ~base_path ~keeper_name
-        ~register:(fun () ->
-          match
-            Eio.Cancel.sub (fun cancel ->
-              Eio.Promise.resolve set_context cancel;
-              register_offline ~base_path keeper_name meta)
-          with
-          | outcome -> outcome
-          | exception Eio.Cancel.Cancelled _ -> Registration_cancelled)
-        ~between:(fun () ->
-          enqueue_on_disk ~base_path ~keeper_name "committed-before-install";
-          hold_the_queue_owner_lock ~sw ~base_path ~keeper_name ~released Commit_nothing;
-          Eio.Fiber.fork ~sw (fun () ->
-            wait_for_the_install ~clock ~base_path ~keeper_name ~replacing:None;
-            Eio.Cancel.cancel (Eio.Promise.await context) (Failure "cancelled by the test");
-            Eio.Promise.resolve release ()))
-    in
-    (match outcome with
-     | Registered -> ()
-     | (Refused_queue_unavailable | Refused_otherwise | Registration_cancelled) as outcome ->
-       Alcotest.fail (outcome_name outcome));
-    match Masc.Keeper_registry.get ~base_path keeper_name with
-    | None -> Alcotest.fail "the cancelled registration left nothing registered"
-    | Some entry ->
-      Alcotest.(check (list string))
-        "the entry holds the source committed before its install"
-        [ "committed-before-install" ]
-        (post_ids (Atomic.get entry.event_queue)))
 ;;
 
 let () =
@@ -2673,20 +2353,6 @@ let () =
             test_registration_sees_a_commit_before_its_install
         ; Alcotest.test_case "a commit before a restart install reaches the entry" `Quick
             test_restart_registration_sees_a_commit_before_its_install
-        ; Alcotest.test_case "a failed re-read withdraws the registration" `Quick
-            test_a_failed_reread_withdraws_a_registration
-        ; Alcotest.test_case "a failed re-read puts back the replaced entry" `Quick
-            test_a_failed_reread_puts_back_the_replaced_entry
-        ; Alcotest.test_case "a reservation after the install waits for the withdrawal" `Quick
-            test_a_reservation_after_the_install_waits_for_the_withdrawal
-        ; Alcotest.test_case "a reservation after a restart install waits for the withdrawal"
-            `Quick test_a_reservation_after_a_restart_install_waits_for_the_withdrawal
-        ; Alcotest.test_case "the entry put back takes what was published while it was out"
-            `Quick test_the_entry_put_back_takes_what_was_published_while_it_was_out
-        ; Alcotest.test_case "the entry put back keeps what it got before the install" `Quick
-            test_the_entry_put_back_keeps_what_it_got_before_the_install
-        ; Alcotest.test_case "a registration cancelled after its install still reads again"
-            `Quick test_a_registration_cancelled_after_its_install_still_reads_again
         ] )
     ; ( "scope binding"
       , [ Alcotest.test_case "atomic batch and idempotent replay" `Quick test_scope_batch_atomic_and_idempotent

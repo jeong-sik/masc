@@ -129,17 +129,16 @@ val load_pending_result :
   base_path:string -> keeper_name:string -> (Keeper_event_queue.t, string) result
 (** Strict pending projection. Durable read failures remain explicit. *)
 
-val with_pending_read_locked :
+val with_pending_locked_result :
   base_path:string ->
   keeper_name:string ->
-  ((Keeper_event_queue.t, string) result -> 'a) ->
+  (Keeper_event_queue.t -> 'a) ->
   ('a, string) result
-(** [f] applied, while the owner lock is held, to the read of the durable
-    pending queue, whether the read succeeded or not. Every commit runs
-    [after_commit] under that lock, so no commit lands between the read and
-    [f]: a commit is either in the queue [f] sees or runs after [f] returns.
-    [Error] means the owner did not resolve and [f] did not run. [f] must not
-    block or touch event queue state. *)
+(** [f] applied to the durable pending queue while the owner lock is held.
+    Every commit runs [after_commit] under that lock, so no commit lands
+    between the read and [f]: a commit is either in the queue [f] sees or runs
+    after [f] returns. A failed read is [Error] and [f] does not run. [f] must
+    not block or commit to this queue. *)
 
 val peek_when_result :
   base_path:string ->

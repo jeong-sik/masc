@@ -409,96 +409,6 @@ type registration_error =
       ; detail : string
       }
 
-(* Registration reads the durable pending queue before it installs the
-   entry, so a commit between that read and the install publishes to no
-   entry, or to the one being replaced (#43494). Every commit publishes from
-   [after_commit] under the queue owner lock, so one more read under that
-   lock after the install leaves no gap: a commit is either in this read or
-   publishes to the installed entry.
-
-   The registration reads again before it lets go of the lifecycle key lock.
-   Every registry write but [clear] and the test-only [unsafe_put_entry], and
-   every reservation, takes that lock, so nothing else can replace the entry
-   or reserve the Keeper until the read is done, and a failed read can always
-   take the entry out again. No code takes the key lock while it holds the
-   queue owner lock: a commit's [after_commit] only publishes. *)
-type installed_queue_read =
-  | Queue_read
-  | Read_failed of
-      { detail : string
-      ; withdrawn : bool
-          (** [false] only when one of those two writes took the entry out *)
-      }
-
-(* Takes the installed entry out and puts back the one it replaced, under the
-   queue owner lock when it could be taken. A commit since the install
-   published its whole pending queue to [installed]; the entry put back takes
-   that queue. The queue is checked against the first read by identity, and
-   an empty queue is one shared value: when the first read was empty and the
-   last commit emptied the queue again, the entry put back keeps its own
-   queue until the next commit publishes to it. *)
-let withdraw_installed_entry ~base_path name ~installed ~replaced ~first_read =
-  (match replaced with
-   | Some (prior : registry_entry) ->
-     let published = Atomic.get installed.event_queue in
-     if published != first_read then Atomic.set prior.event_queue published
-   | None -> ());
-  let key = registry_key ~base_path name in
-  let rec loop () =
-    let current = Atomic.get registry in
-    match StringMap.find_opt key current with
-    | Some entry when entry == installed ->
-      let updated =
-        match replaced with
-        | Some prior -> StringMap.add key prior current
-        | None -> StringMap.remove key current
-      in
-      if Atomic.compare_and_set registry current updated then true else loop ()
-    | Some _ | None -> false
-  in
-  loop ()
-;;
-
-(* Once the entry is installed the read runs to its end: a registration
-   cancelled while it waits for the owner lock would otherwise leave an entry
-   whose queue it never read again. *)
-let without_cancellation f =
-  match Eio_guard.execution_context () with
-  | Eio_guard.Non_eio -> f ()
-  | Eio_guard.Eio_fiber -> Eio.Cancel.protect f
-;;
-
-(* Runs with the lifecycle key lock held, after the install. *)
-let reread_installed_event_queue ~base_path name ~installed ~replaced ~first_read =
-  without_cancellation (fun () ->
-    let withdraw () =
-      withdraw_installed_entry ~base_path name ~installed ~replaced ~first_read
-    in
-    match
-      Keeper_event_queue_persistence.with_pending_read_locked
-        ~base_path
-        ~keeper_name:name
-        (function
-          | Ok pending ->
-            Atomic.set installed.event_queue pending;
-            Queue_read
-          | Error detail -> Read_failed { detail; withdrawn = withdraw () })
-    with
-    | Ok read -> read
-    (* The owner did not resolve, so no commit for this Keeper can publish. *)
-    | Error detail -> Read_failed { detail; withdrawn = withdraw () })
-;;
-
-let log_failed_reread ~withdrawn name detail =
-  Log.Keeper.warn
-    "registry: event queue re-read after install failed name=%s (%s): %s"
-    name
-    (if withdrawn
-     then "entry withdrawn"
-     else "the registry no longer held the entry")
-    detail
-;;
-
 let register_with_state_result
       ?lifecycle_token
       ?intake_token
@@ -527,13 +437,17 @@ let register_with_state_result
     (Keeper_state_machine.phase_to_string phase);
   let done_p, done_r = Eio.Promise.create () in
   let key = registry_key ~base_path name in
+  (* The Keeper's queue cell, filled under the queue owner lock: a commit
+     after this read publishes to the cell the installed entry holds, so
+     none lands between the read and the install unseen (#43494). *)
   match
-    Keeper_event_queue_persistence.load_pending_result
+    Keeper_event_queue_persistence.with_pending_locked_result
       ~base_path
       ~keeper_name:name
+      (Keeper_event_queue_cells.set ~base_path name)
   with
   | Error detail -> Error (Registration_event_queue_unavailable { keeper_name = name; detail })
-  | Ok initial_event_queue ->
+  | Ok event_queue ->
   match Turn_failure_streak_store.load ~base_path ~keeper_name:name with
   | Error error ->
     Error
@@ -559,7 +473,7 @@ let register_with_state_result
     ; fiber_stop = Atomic.make false
     ; fiber_wakeup = Atomic.make false
     ; cadence_sleeping = Atomic.make false
-    ; event_queue = Atomic.make initial_event_queue
+    ; event_queue
     ; started_at = Time_compat.now ()
     ; grpc_close = Atomic.make None
     ; egress_proxy_port = Atomic.make None
@@ -585,11 +499,9 @@ let register_with_state_result
     ; last_skip_observation = None
     }
   in
-  let replaced = ref None in
   (* Runs with the lifecycle key lock already held, so it never suspends. *)
   let commit_key_locked () =
-    let prior = StringMap.find_opt key (Atomic.get registry) in
-    (match prior with
+    (match StringMap.find_opt key (Atomic.get registry) with
      | Some prior when prior.phase = Running ->
        Otel_metric_store.inc_counter
          Keeper_metrics.(to_string LifecycleDispatchRejections)
@@ -598,119 +510,93 @@ let register_with_state_result
        Log.Keeper.warn "registry: overwriting running keeper during register name=%s" name;
        decr_running_count_clamped ()
      | Some _ | None -> ());
-    let put = put_entry_key_locked ?lifecycle_token ~base_path name entry in
-    if Result.is_ok put then replaced := prior;
-    put
+    put_entry_key_locked ?lifecycle_token ~base_path name entry
   in
   (* Ordinary registration takes the key lock before the non-yielding
      [commit_registration_if_open] state check. A caller-supplied intake token
      already owns the fiber-aware per-Keeper intake mutex, so it validates that
      exact transaction and commits without trying to reacquire the same gate.
      In both paths the registry install remains ordered with shutdown. *)
-  let install_key_locked () =
-    if Option.is_some intake_token
-    then (
-      match intake_token with
-      | Some token
-        when Keeper_shutdown_intake_fence.intake_token_matches
-               token
-               ~base_path
-               ~keeper_name:name ->
-        (match commit_key_locked () with
-         | Ok () -> Ok ()
-         | Error (Lifecycle_transaction_reserved owner) ->
-           Error (Registration_lifecycle_reserved owner)
-         | Error
-          (( Healthy
-           | Meta_validation_failed _
-           | Required_field_missing _
-           | Base_path_mismatch _
-           | Name_mismatch _ ) as validation_error) ->
-          Error (Registration_invalid validation_error))
-      | Some _ | None -> Error Registration_intake_token_not_live)
-    else if respect_shutdown_fence
-    then (
-      match
-        Keeper_shutdown_intake_fence.commit_registration_if_open
-          ~base_path
-          ~keeper_name:name
-          commit_key_locked
-      with
-      | Keeper_shutdown_intake_fence.Registration_shutdown_reserved operation_id ->
-        (* Observed, not obeyed. The reservation records that a shutdown
-           began; one that never finalises never clears it, and refusing on
-           it stopped every registration for as long as the process lived —
-           15h32m on 2026-08-20 (#29566). Register and name what stood. *)
-        Log.Keeper.warn
-          "keeper registered while a shutdown reservation stood: keeper=%s \
-           operation=%s"
-          name
-          (Keeper_shutdown_types.Operation_id.to_string operation_id);
-        (match commit_key_locked () with
-         | Ok () -> Ok ()
-         | Error (Lifecycle_transaction_reserved owner) ->
-           Error (Registration_lifecycle_reserved owner)
-         | Error
-          (( Healthy
-           | Meta_validation_failed _
-           | Required_field_missing _
-           | Base_path_mismatch _
-           | Name_mismatch _ ) as validation_error) ->
-          Error (Registration_invalid validation_error))
-      | Keeper_shutdown_intake_fence.Registration_committed
-          (Error (Lifecycle_transaction_reserved owner)) ->
-        Error (Registration_lifecycle_reserved owner)
-      | Keeper_shutdown_intake_fence.Registration_committed
-          (Error
+  let commit_result =
+    Keeper_lifecycle_reservation.with_key_lock ~base_path ~keeper_name:name (fun () ->
+      if Option.is_some intake_token
+      then (
+        match intake_token with
+        | Some token
+          when Keeper_shutdown_intake_fence.intake_token_matches
+                 token
+                 ~base_path
+                 ~keeper_name:name ->
+          (match commit_key_locked () with
+           | Ok () -> Ok ()
+           | Error (Lifecycle_transaction_reserved owner) ->
+             Error (Registration_lifecycle_reserved owner)
+           | Error
             (( Healthy
              | Meta_validation_failed _
              | Required_field_missing _
              | Base_path_mismatch _
-             | Name_mismatch _ ) as validation_error)) ->
-        Error (Registration_invalid validation_error)
-      | Keeper_shutdown_intake_fence.Registration_committed (Ok ()) -> Ok ())
-    else (
-      match commit_key_locked () with
-      | Ok () -> Ok ()
-      | Error (Lifecycle_transaction_reserved owner) ->
-        Error (Registration_lifecycle_reserved owner)
-      | Error
-          (( Healthy
-           | Meta_validation_failed _
-           | Required_field_missing _
-           | Base_path_mismatch _
-           | Name_mismatch _ ) as validation_error) ->
-          Error (Registration_invalid validation_error))
-  in
-  let commit_result =
-    Keeper_lifecycle_reservation.with_key_lock ~base_path ~keeper_name:name (fun () ->
-      match install_key_locked () with
-      | Error _ as error -> error
-      | Ok () ->
-        (match
-           reread_installed_event_queue
-             ~base_path
-             name
-             ~installed:entry
-             ~replaced:!replaced
-             ~first_read:initial_event_queue
-         with
-         | Queue_read ->
-           if phase = Running then Atomic.incr running_count_atomic;
-           Ok ()
-         | Read_failed { detail; withdrawn } ->
-           (* The install took a Running entry it replaced out of the count. *)
-           (if withdrawn
-            then
-              match !replaced with
-              | Some prior when prior.phase = Running -> Atomic.incr running_count_atomic
-              | Some _ | None -> ());
-           log_failed_reread ~withdrawn name detail;
-           Error (Registration_event_queue_unavailable { keeper_name = name; detail })))
+             | Name_mismatch _ ) as validation_error) ->
+            Error (Registration_invalid validation_error))
+        | Some _ | None -> Error Registration_intake_token_not_live)
+      else if respect_shutdown_fence
+      then (
+        match
+          Keeper_shutdown_intake_fence.commit_registration_if_open
+            ~base_path
+            ~keeper_name:name
+            commit_key_locked
+        with
+        | Keeper_shutdown_intake_fence.Registration_shutdown_reserved operation_id ->
+          (* Observed, not obeyed. The reservation records that a shutdown
+             began; one that never finalises never clears it, and refusing on
+             it stopped every registration for as long as the process lived —
+             15h32m on 2026-08-20 (#29566). Register and name what stood. *)
+          Log.Keeper.warn
+            "keeper registered while a shutdown reservation stood: keeper=%s \
+             operation=%s"
+            name
+            (Keeper_shutdown_types.Operation_id.to_string operation_id);
+          (match commit_key_locked () with
+           | Ok () -> Ok ()
+           | Error (Lifecycle_transaction_reserved owner) ->
+             Error (Registration_lifecycle_reserved owner)
+           | Error
+            (( Healthy
+             | Meta_validation_failed _
+             | Required_field_missing _
+             | Base_path_mismatch _
+             | Name_mismatch _ ) as validation_error) ->
+            Error (Registration_invalid validation_error))
+        | Keeper_shutdown_intake_fence.Registration_committed
+            (Error (Lifecycle_transaction_reserved owner)) ->
+          Error (Registration_lifecycle_reserved owner)
+        | Keeper_shutdown_intake_fence.Registration_committed
+            (Error
+              (( Healthy
+               | Meta_validation_failed _
+               | Required_field_missing _
+               | Base_path_mismatch _
+               | Name_mismatch _ ) as validation_error)) ->
+          Error (Registration_invalid validation_error)
+        | Keeper_shutdown_intake_fence.Registration_committed (Ok ()) -> Ok ())
+      else (
+        match commit_key_locked () with
+        | Ok () -> Ok ()
+        | Error (Lifecycle_transaction_reserved owner) ->
+          Error (Registration_lifecycle_reserved owner)
+        | Error
+            (( Healthy
+             | Meta_validation_failed _
+             | Required_field_missing _
+             | Base_path_mismatch _
+             | Name_mismatch _ ) as validation_error) ->
+            Error (Registration_invalid validation_error)))
   in
   match commit_result with
   | Error _ as error -> error
   | Ok () ->
+    if phase = Running then Atomic.incr running_count_atomic;
     Log.Keeper.debug
       "registry: keeper registered name=%s running_count=%d"
       name
@@ -857,13 +743,17 @@ let register_restarting_internal ?lifecycle_token ?intake_token ~base_path name 
      re-allocating. Pending Event Layer stimuli are restored from the durable
      queue snapshot instead of being reset across restart. *)
   let done_p, done_r = Eio.Promise.create () in
+  (* The Keeper's queue cell, filled under the queue owner lock: a commit
+     after this read publishes to the cell the installed entry holds, so
+     none lands between the read and the install unseen (#43494). *)
   match
-    Keeper_event_queue_persistence.load_pending_result
+    Keeper_event_queue_persistence.with_pending_locked_result
       ~base_path
       ~keeper_name:name
+      (Keeper_event_queue_cells.set ~base_path name)
   with
   | Error detail -> Error (Restart_event_queue_unavailable { keeper_name = name; detail })
-  | Ok initial_event_queue ->
+  | Ok event_queue ->
   match Turn_failure_streak_store.load ~base_path ~keeper_name:name with
   | Error error ->
     Error
@@ -889,7 +779,7 @@ let register_restarting_internal ?lifecycle_token ?intake_token ~base_path name 
     ; fiber_stop = Atomic.make false
     ; fiber_wakeup = Atomic.make false
     ; cadence_sleeping = Atomic.make false
-    ; event_queue = Atomic.make initial_event_queue
+    ; event_queue
     ; started_at = Time_compat.now ()
     ; grpc_close = Atomic.make None
     ; egress_proxy_port = Atomic.make None
@@ -915,14 +805,11 @@ let register_restarting_internal ?lifecycle_token ?intake_token ~base_path name 
     ; last_skip_observation = None
     }
   in
-  let replaced = ref None in
   let rec loop () =
     let current = Atomic.get registry in
     let updated = StringMap.add key new_entry current in
     if Atomic.compare_and_set registry current updated
-    then (
-      replaced := StringMap.find_opt key current;
-      Ok new_entry)
+    then Ok new_entry
     else loop ()
   in
   (* Runs with the lifecycle key lock already held, so it never suspends. *)
@@ -940,43 +827,26 @@ let register_restarting_internal ?lifecycle_token ?intake_token ~base_path name 
   (* The launch transaction already owns the durable-intake epoch when it
      supplies [intake_token]. Validate that exact ownership instead of
      reacquiring/checking the shutdown slot midway through the transaction. *)
-  let install_key_locked () =
-    match intake_token with
-    | Some token
-      when Keeper_shutdown_intake_fence.intake_token_matches
-             token
-             ~base_path
-             ~keeper_name:name ->
-      guarded_loop_key_locked ()
-    | Some _ -> Error Restart_intake_token_not_live
-    | None ->
-      (match
-         Keeper_shutdown_intake_fence.commit_registration_if_open
-           ~base_path
-           ~keeper_name:name
-           guarded_loop_key_locked
-       with
-       | Keeper_shutdown_intake_fence.Registration_shutdown_reserved operation_id ->
-         Error (Restart_shutdown_reserved operation_id)
-       | Keeper_shutdown_intake_fence.Registration_committed result -> result)
-  in
   let commit_result =
     Keeper_lifecycle_reservation.with_key_lock ~base_path ~keeper_name:name (fun () ->
-      match install_key_locked () with
-      | Error _ as error -> error
-      | Ok registered ->
+      match intake_token with
+      | Some token
+        when Keeper_shutdown_intake_fence.intake_token_matches
+               token
+               ~base_path
+               ~keeper_name:name ->
+        guarded_loop_key_locked ()
+      | Some _ -> Error Restart_intake_token_not_live
+      | None ->
         (match
-           reread_installed_event_queue
+           Keeper_shutdown_intake_fence.commit_registration_if_open
              ~base_path
-             name
-             ~installed:registered
-             ~replaced:!replaced
-             ~first_read:initial_event_queue
+             ~keeper_name:name
+             guarded_loop_key_locked
          with
-         | Queue_read -> Ok registered
-         | Read_failed { detail; withdrawn } ->
-           log_failed_reread ~withdrawn name detail;
-           Error (Restart_event_queue_unavailable { keeper_name = name; detail })))
+         | Keeper_shutdown_intake_fence.Registration_shutdown_reserved operation_id ->
+           Error (Restart_shutdown_reserved operation_id)
+         | Keeper_shutdown_intake_fence.Registration_committed result -> result))
   in
   match commit_result with
   | Error _ as error -> error

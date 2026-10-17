@@ -1,16 +1,14 @@
 (** Per-keeper event-queue access.
 
     Extracted from keeper_registry.ml (lines 1854-1900) as part of the
-    godfile decomp campaign. Each [registry_entry] carries its own
-    [event_queue : Keeper_event_queue.t Atomic.t].  The durable v2 envelope is
-    the mutation authority; these wrappers publish its pending projection to
-    that per-entry Atomic only after commit.  No coupling to the central
-    registry Atomic state primitive. *)
+    godfile decomp campaign. Each [registry_entry] holds its Keeper's
+    [event_queue] cell ({!Keeper_event_queue_cells}). The durable v2 envelope
+    is the mutation authority; these wrappers publish its pending projection
+    to that cell only after commit, under the queue owner lock. No coupling to
+    the central registry Atomic state primitive. *)
 
 let publish_pending ~base_path name pending =
-  (match Keeper_registry.get ~base_path name with
-   | None -> ()
-   | Some entry -> Atomic.set entry.event_queue pending);
+  Keeper_event_queue_cells.publish ~base_path name pending;
   Keeper_waiting_inventory_broadcast.changed
     ~keeper_name:name
     ~source:Event_queue;

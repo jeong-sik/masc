@@ -1440,11 +1440,13 @@ let start
           && Option.is_none inventory.running_operation_id
         then (
           t.child_active := true;
+          let interrupt_token = Keeper_interrupt_token.fresh () in
           publish_turn_in_flight
             t
             (Some { lane = Chat_operation; started_at = t.now ()
-                  ; interrupt_token = Keeper_interrupt_token.fresh () });
+                  ; interrupt_token });
           Eio.Fiber.fork ~sw (fun () ->
+            Keeper_turn_preview_owner.with_owner ~interrupt_token @@ fun () ->
             let claimed_operation_id = ref None in
             let claim () =
               match request t Claim_next_operation with
@@ -2161,11 +2163,13 @@ let start
                         chat starts after a settled tool boundary yields this
                         turn or the turn completes. *)
                      t.child_active := true;
+                     let interrupt_token = Keeper_interrupt_token.fresh () in
                      publish_turn_in_flight
                        t
                        (Some { lane; started_at = t.now ()
-                             ; interrupt_token = Keeper_interrupt_token.fresh () });
+                             ; interrupt_token });
                      Eio.Fiber.fork ~sw (fun () ->
+                       Keeper_turn_preview_owner.with_owner ~interrupt_token @@ fun () ->
                        let outcome =
                          try
                            Ok

@@ -379,6 +379,10 @@ val keeper_name : t -> string
 val request_id : t -> string
 val execution_id : t -> string
 (** Shared batch execution owner, or the singleton request identity. *)
+val source : t -> Masc_tui_keeper_chat_log.journal_source
+val can_observe_preparation : t -> bool
+(** Initial running segment before any provider/Tool activity was observed.
+    A poll cannot replace a later stream observation or a resumed segment. *)
 val note_rejection : now:float -> t -> string -> unit
 (** Ends the turn as failed with the detail of a verified pre-execution
     refusal. An interrupted or unverified transport is never a rejection. *)
@@ -748,6 +752,7 @@ val awaiting_approval : t -> awaiting_approval option
     a second call while it is waiting on this one. *)
 
 val status_rows :
+  ?preparation:Masc.Keeper_turn_preview.preparation ->
   ?compact:bool -> ?show_timing:bool -> now:float -> t -> (status_kind * string) list
 (** The status rows the chat pane draws for this turn.
 

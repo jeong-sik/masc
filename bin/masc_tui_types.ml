@@ -15149,8 +15149,34 @@ let keeper_message_timing_visible (state : state) =
   | Masc_tui_message_layout.Origin_bare -> false
   | Origin_inline | Origin_row -> true
 
+let keeper_message_preparation (state : state) transcript =
+  let module Transcript = Masc_tui_keeper_chat_transcript in
+  if Option.is_some state.keeper_turns_error || not (Transcript.can_observe_preparation transcript)
+  then None
+  else
+    let candidates = List.filter_map (fun (row : Tui_decode.keeper_turn_row) ->
+      if row.ktr_keeper_name <> Transcript.keeper_name transcript then None
+      else match row.ktr_state with
+        | Keeper_turn_running {lane;turn_ref;preview=Some preview;_} ->
+          Option.bind preview.ktp_preparation (fun preparation ->
+            let same_execution = match Transcript.source transcript,lane with
+              | Masc_tui_keeper_chat_log.Operation _, Tui_decode.Turn_lane_chat_operation ->
+                Option.exists (fun scope ->
+                  Option.exists (fun id -> Masc.Keeper_operation_id.to_string id = Transcript.execution_id transcript)
+                    (Masc.Keeper_execution_scope_id.direct_operation_id scope)) preview.ktp_execution_scope
+              | Autonomous_turn original, (Turn_lane_autonomous | Turn_lane_maintenance) ->
+                  turn_ref = Some original && preparation.Masc.Keeper_turn_preview.turn_ref = Some original
+              | Operation _, (Turn_lane_autonomous | Turn_lane_maintenance)
+              | Autonomous_turn _, Turn_lane_chat_operation -> false in
+            if same_execution then Some preparation else None)
+        | Keeper_turn_running {preview=None;_} | Keeper_turn_idle | Keeper_turn_unavailable _ -> None)
+      state.keeper_turns in
+    match candidates with [preparation] -> Some preparation | [] | _::_::_ -> None
+;;
+
 let keeper_message_unfolded_status_rows (state : state) live ~now =
   Masc_tui_keeper_chat_transcript.status_rows
+    ?preparation:(keeper_message_preparation state live)
     ~compact:(state.msg_origin_display = Masc_tui_message_layout.Origin_bare)
     ~show_timing:(keeper_message_timing_visible state) ~now live
 

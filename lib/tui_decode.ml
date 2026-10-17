@@ -4373,6 +4373,8 @@ type keeper_turn_preview = {
   ktp_updated_at_unix : float;
   ktp_text_tail : string;
   ktp_last_tool : string option;
+  ktp_preparation : Keeper_turn_preview.preparation option;
+  ktp_execution_scope : Keeper_execution_scope_id.t option;
 }
 
 type keeper_turn_state =
@@ -4473,7 +4475,16 @@ let decode_keeper_turn_row json =
                   | Some (`Int value) -> Ok (Float.of_int value)
                   | _ -> Error "turn preview updated_at_unix must be a finite number"
                 in
-                Ok (Some { ktp_text_position; ktp_text_tail; ktp_last_tool; ktp_status_text; ktp_updated_at_unix })
+                let unique_nullable key decode = match preview_json with
+                  | `Assoc fields -> (match List.filter (fun (name,_) -> name=key) fields with
+                      | [_,`Null] -> Ok None
+                      | [_,json] -> Result.map Option.some (decode json)
+                      | _ -> Error ("turn preview requires one " ^ key ^ " field"))
+                  | _ -> Error "turn preview must be an object" in
+                let* ktp_preparation = unique_nullable "preparation" Keeper_turn_preview.preparation_of_json in
+                let* ktp_execution_scope = unique_nullable "execution_scope" Keeper_execution_scope_id.of_json in
+                Ok (Some { ktp_text_position; ktp_text_tail; ktp_last_tool; ktp_status_text; ktp_updated_at_unix;
+                  ktp_preparation;ktp_execution_scope })
             | Some other ->
                 Error
                   (Printf.sprintf

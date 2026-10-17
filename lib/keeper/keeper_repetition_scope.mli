@@ -22,6 +22,8 @@ module Execution : sig
   (** Allocate once from the claimed operation, outside provider retry loops.
       Direct operations interrupted by process restart remain terminal under
       the owner store contract; this does not resurrect their execution. *)
+  val scope : t -> Keeper_execution_scope_id.t
+  (** Original producer-supplied identity; never derived from a checkpoint. *)
   val prepare : t -> source:Agent_core.Context.t -> target:Agent_core.Context.t ->
     (Keeper_agent_result.tool_call_detail list, Keeper_repetition_snapshot.error) result
   (** First attempt loads and admits the direct scope. Later attempts reuse

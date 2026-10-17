@@ -7,6 +7,9 @@ let () =
   let base_path = match !base_path with
     | Some path when not (Filename.is_relative path) -> path
     | _ -> raise (Arg.Bad "--base-path must name an absolute worker-owned directory") in
+  (* The boundary logs the raise site of an escaped exception; without this the
+     backtrace is empty. *)
+  Printexc.record_backtrace true;
   Eio_main.run (fun env ->
     Msx_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
     Fun.protect ~finally:(fun () -> Msx_lane.install_activity_observer None) (fun () ->

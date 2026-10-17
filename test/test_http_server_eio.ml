@@ -1181,7 +1181,7 @@ let test_json_worker_wire_parity () =
 ;;
 
 let test_workspace_read_receipt_reaches_json_and_conditional_wire () =
-  let header_name, header_value = Workspace.read_precondition_admission_header in
+  let header_name, header_value = Masc.Workspace.read_precondition_admission_header in
   let responders =
     [ (fun ~request body reqd -> Response.json ~request body reqd)
     ; (fun ~request body reqd ->

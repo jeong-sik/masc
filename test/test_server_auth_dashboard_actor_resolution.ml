@@ -381,7 +381,7 @@ let test_unreadable_credential_standing_is_not_no_credential () =
 let test_workspace_bound_read_preconditions () =
   with_temp_base_path @@ fun base_path ->
   Unix.mkdir (Filename.concat base_path ".masc") 0o700;
-  let config = Workspace.default_config base_path in
+  let config = Masc.Workspace.default_config base_path in
   let base = Unix.realpath base_path in
   let root = Unix.realpath (Filename.concat base_path ".masc") in
   let fields = ["expected_base_path",[base];"expected_masc_root",[root]] in
@@ -394,12 +394,12 @@ let test_workspace_bound_read_preconditions () =
       (read path fields=Ok Server_auth.Workspace_read_matched);
     check bool "a foreign workspace cannot answer under the old identity" true
       (read path ["expected_base_path",[base ^ "/foreign"];"expected_masc_root",[root]]
-       =Error Workspace.Workspace_precondition_failed))
+       =Error Masc.Workspace.Workspace_precondition_failed))
     ["/api/v1/dashboard/planning";"/api/v1/board";"/api/v1/setup/account-emails"];
   List.iter (fun malformed ->
     check bool "partial, duplicate and empty workspace values are refused" true
       (read "/api/v1/dashboard/planning" malformed
-       =Error Workspace.Invalid_workspace_precondition))
+       =Error Masc.Workspace.Invalid_workspace_precondition))
     [["expected_base_path",[base]];
      ["expected_base_path",[base;base];"expected_masc_root",[root]];
      ["expected_base_path",[base];"expected_masc_root",[root;root]];

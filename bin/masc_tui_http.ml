@@ -710,7 +710,7 @@ let validate_workspace_read_response (response : Masc_http_client.response) =
   | None | Some {wr_proof=Health_identity;_} -> Ok response
   | Some {wr_proof=Request_precondition;_} ->
     if response.status = 304 || (response.status >= 200 && response.status < 300) then
-      let name, expected = Workspace.read_precondition_admission_header in
+      let name, expected = Masc.Workspace.read_precondition_admission_header in
       let receipts = List.filter_map (fun (key, value) ->
         if String.equal (String.lowercase_ascii key) name then Some value else None) response.headers in
       (match receipts with

@@ -296,15 +296,25 @@ let test_fifo_authority_refuses_without_blocking () =
      calls refuse a FIFO with no writer; an older blocking open fails finitely. *)
   match Unix.fork () with
   | 0 ->
-      Sys.set_signal Sys.sigalrm Sys.Signal_default;
-      (* One attempt owns one 5 s alarm. A single alarm over both attempts also
-         covered workspace setup and Ensure for the second one, so a slow runner
-         died by SIGALRM without any FIFO open having blocked. *)
-      let attempt_alarm_seconds = 5 in
+      (* Only the three calls that meet the FIFO are bounded. Workspace setup,
+         seeding and the follow-up Ensure do real fsyncs; on a loaded runner
+         they once ate the whole 5 s budget and the child died by SIGALRM
+         without any FIFO open having blocked (#43463 narrowed the alarm to one
+         attempt but still covered that setup). The handler names the call that
+         was running so a genuine blocking open is distinguishable from a slow
+         runner in the log. *)
+      let current = ref "setup" in
+      Sys.set_signal Sys.sigalrm (Sys.Signal_handle (fun _ ->
+        prerr_endline ("FIFO refusal exceeded 5 s inside: " ^ !current); exit 3));
+      let bounded label f =
+        current := label;
+        let _previous_alarm_seconds = Unix.alarm 5 in
+        let result = f () in
+        let _disarmed_alarm_seconds = Unix.alarm 0 in
+        current := "setup";
+        result in
       (try
-         List.iter (fun raw_fifo ->
-           let _previous_alarm_seconds = Unix.alarm attempt_alarm_seconds in
-           with_workspace @@ fun base_path ->
+         List.iter (fun raw_fifo -> with_workspace @@ fun base_path ->
            let _old = seed_keeper base_path in
            let named = Auth.credential_file base_path "keeper" in
            let raw_path = Auth.raw_token_file base_path "keeper" in
@@ -313,14 +323,15 @@ let test_fifo_authority_refuses_without_blocking () =
            let before = read other, read (Auth.auth_config_file base_path) in
            Unix.unlink occupied;
            Unix.mkfifo occupied 0o600;
-           rejected (ensure base_path); rejected (set_admin base_path); rejected (login base_path);
+           bounded "Ensure" (fun () -> rejected (ensure base_path));
+           bounded "set_admin" (fun () -> rejected (set_admin base_path));
+           bounded "login" (fun () -> rejected (login base_path));
            check bool "FIFO refusal preserves pair counterpart and config" true
              ((read other, read (Auth.auth_config_file base_path)) = before);
            check bool "occupied FIFO is preserved" true ((Unix.lstat occupied).Unix.st_kind = Unix.S_FIFO);
            Unix.unlink occupied;
            let _issued_pair = auth_ok (ensure base_path) in
-           check_pair base_path "keeper";
-           let _disarmed_alarm_seconds = Unix.alarm 0 in ()) [ false; true ];
+           check_pair base_path "keeper") [ false; true ];
          exit 0
        with
        | Eio.Cancel.Cancelled _ as exn -> raise exn

@@ -69,18 +69,21 @@ let observe_followup ~base_path ~keeper_name ~ask ~resolution =
   Ok {answered_at=stimulus.arrived_at; stimulus_id; reactions}
 
 let followup_to_json followup =
-  let evidence, complete = match followup.reactions with
-    | Keeper_reaction_ledger.Evidence_complete evidence -> evidence, true
-    | Keeper_reaction_ledger.Evidence_quarantined {evidence; _} -> evidence, false in
+  let evidence, complete, quarantine_fields = match followup.reactions with
+    | Keeper_reaction_ledger.Evidence_complete evidence -> evidence, true, []
+    | Keeper_reaction_ledger.Evidence_quarantined {evidence; first_reason} ->
+        evidence, false,
+        ["quarantine_reason",
+         `String (Keeper_reaction_ledger.row_quarantine_reason_to_string first_reason)] in
   let clock = function None -> `Null | Some at -> `Float at in
-  `Assoc ["state", `String "observed";
+  `Assoc (["state", `String "observed";
     "answered_at", `Float followup.answered_at;
     "stimulus_id", `String followup.stimulus_id;
     "turn_started_at", clock evidence.turn_started_recorded_at;
     "turn_finished_at", clock evidence.turn_finished_recorded_at;
     "queue_settled_at", clock evidence.event_queue_ack_recorded_at;
     "queue_cancelled_at", clock evidence.event_queue_cancelled_recorded_at;
-    "evidence_complete", `Bool complete]
+    "evidence_complete", `Bool complete] @ quarantine_fields)
 
 let deliver_row ~base_path ~keeper_name ~already_delivered ask resolution =
   let ( let* ) = Result.bind in

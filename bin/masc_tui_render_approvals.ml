@@ -275,7 +275,7 @@ let draw_ask_answer_feedback buf cols (state : state) =
       let facts = List.filter_map Fun.id
         [Option.map (fun _ -> "turn entry observed") observed.af_turn_started_at;
          Option.map (fun _ -> "turn boundary observed") observed.af_turn_finished_at;
-         Option.map (fun _ -> "wake settled or transferred") observed.af_queue_settled_at;
+         Option.map (fun _ -> "wake settled or transferred (consumption unproven)") observed.af_queue_settled_at;
          Option.map (fun _ -> "wake cancelled") observed.af_queue_cancelled_at] in
       let facts = if facts=[] then ["no matching turn observed"] else facts in
       let facts = if observed.af_evidence_complete then facts else facts @ ["evidence incomplete"] in

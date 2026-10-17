@@ -41,8 +41,9 @@ val observe_followup :
     answer consumption, Tool action or completion of the Keeper's work. *)
 
 val followup_to_json : followup -> Yojson.Safe.t
-(** Source identity, canonical answer time and observed reaction clocks only;
-    no question, answer text or responder identity. *)
+(** Source identity, canonical answer time, observed reaction clocks, evidence
+    completeness and any first quarantine reason code only; no question, answer
+    text or responder identity. *)
 
 type failure = { keeper_name : string option; ask_id : string option; error : error }
 type report =

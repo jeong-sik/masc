@@ -587,7 +587,16 @@ let test_followup_reads_exact_source_without_waking () =
   check bool "another Keeper cannot inherit this question's source" true
     (Result.is_error (Wake.observe_followup ~base_path ~keeper_name:"beta" ~ask ~resolution));
   List.iter (fun field -> check bool "followup metadata carries no human content or invented action" true
-    (Yojson.Safe.Util.member field finished = `Null)) ["answers";"questions";"responder";"tool_action"]
+    (Yojson.Safe.Util.member field finished = `Null)) ["answers";"questions";"responder";"tool_action";"quarantine_reason"];
+  Dated_jsonl.append (Dated_jsonl.open_store (Keeper_reaction_ledger.location ~base_path ~keeper_name))
+    (`Assoc ["stimulus_id", `String left.stimulus_id; "record_kind", `String "reaction"]);
+  let quarantined = observe () |> Wake.followup_to_json in
+  check bool "quarantined matching row marks evidence incomplete" false
+    (Yojson.Safe.Util.member "evidence_complete" quarantined |> Yojson.Safe.Util.to_bool);
+  check bool "quarantined matching row exposes its quarantine reason code" true
+    (match Yojson.Safe.Util.member "quarantine_reason" quarantined with
+     | `String reason -> String.length reason > 0
+     | _ -> false)
 ;;
 
 let test_followup_queue_settlement_does_not_invent_a_turn () =

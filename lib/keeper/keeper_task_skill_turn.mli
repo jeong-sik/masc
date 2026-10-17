@@ -60,7 +60,10 @@ type preparation = private
   ; inventory : Keeper_skill_inventory.t
   }
 (** One immutable preparation shared by Task prompt, inventory and executable
-    setup for its original frozen source and Tool descriptor objects. *)
+    setup for its original frozen source and Tool descriptor objects. Derived
+    catalog, diagnostics and inventory are constructed once per retained
+    projection, including across turns; the cache does not keep that projection
+    alive independently of its actual owners. *)
 
 type t = private
   { selected : selected list

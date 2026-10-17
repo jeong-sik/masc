@@ -680,8 +680,14 @@ let test_task_binding_reuses_only_exact_frozen_inputs () =
       ~task_id:"task-c" [reference] with
     | Ok selection -> selection | Error error -> fail (Selection.error_to_string error) in
   let mixed_preparations = Selection.merge [bound;independently_prepared] in
-  check bool "independently prepared plans do not borrow the first plan's preparation" true
-    (Option.is_none mixed_preparations.preparation);
+  check bool "a later Task reuses the same owned source and actual Tool preparation" true
+    (match independently_prepared.preparation with
+     | Some next -> next == prepared
+     | None -> false);
+  check bool "merging Tasks with the same binding retains its shared preparation" true
+    (match mixed_preparations.preparation with
+     | Some next -> next == prepared
+     | None -> false);
   let rebound_preparations = bind ~snapshot:first descriptors mixed_preparations in
   check (list string) "reprojection keeps every original Task while unifying the preparation"
     ["task-a";"task-b";"task-c"] (one_selected rebound_preparations).task_ids;
@@ -1521,6 +1527,95 @@ let test_jev_advice_reaches_the_model_without_selecting_or_authorizing () =
   check bool "cancelled advice does not publish a successful tool result" true (Option.is_none !captured)
 ;;
 
+let preparation_for_cache_scenario ~snapshot ~descriptors =
+  match Selection.resolve ~descriptors ~snapshot [] with
+  | Error error -> fail (Selection.error_to_string error)
+  | Ok selection -> Selection.prepare_surface ~snapshot ~descriptors selection
+;;
+
+let cache_scenario_snapshot name =
+  snapshot (config (source_row ~id:"only" ~path:"skills"))
+    [[name, document ~name ~description:"owned preparation" "BODY"]]
+;;
+
+let test_interleaved_preparation_keeps_each_exact_tool_binding () =
+  let frozen = cache_scenario_snapshot "interleaved" in
+  let descriptors = Masc.Keeper_tool_descriptor.all_descriptors () in
+  let original = preparation_for_cache_scenario ~snapshot:frozen ~descriptors in
+  let first, rest = match descriptors with
+    | first :: rest -> first, rest
+    | [] -> fail "the canonical Tool fixture is empty" in
+  let replacement = { first with description = first.description ^ " replacement object" } in
+  let replaced = preparation_for_cache_scenario ~snapshot:frozen ~descriptors:(replacement :: rest) in
+  check bool "equal Tool names and ids do not reuse a replaced authority object" false
+    (original == replaced);
+  let reordered = preparation_for_cache_scenario ~snapshot:frozen ~descriptors:(List.rev descriptors) in
+  check bool "descriptor ordering is part of the frozen binding" false (original == reordered);
+  let other = cache_scenario_snapshot "other" in
+  ignore (preparation_for_cache_scenario ~snapshot:other ~descriptors);
+  Gc.full_major ();
+  let restored = preparation_for_cache_scenario ~snapshot:frozen ~descriptors:(List.map Fun.id descriptors) in
+  check bool "a fresh list of the same owned Tools reuses the original full preparation" true
+    (restored == original);
+  check bool "the inventory and catalog share that exact preparation" true
+    (restored.inventory == original.inventory && restored.catalog == original.catalog);
+  check bool "the replacement binding survives independent interleaving too" true
+    (replaced == preparation_for_cache_scenario ~snapshot:frozen ~descriptors:(replacement :: rest))
+;;
+
+let test_simultaneous_cold_preparation_is_shared () =
+  let frozen = cache_scenario_snapshot "parallel-cold" in
+  let descriptors = Masc.Keeper_tool_descriptor.all_descriptors () in
+  let ready = Semaphore.Counting.make 0 and start = Semaphore.Counting.make 0 in
+  let prepare () =
+    Semaphore.Counting.release ready;
+    Semaphore.Counting.acquire start;
+    preparation_for_cache_scenario ~snapshot:frozen ~descriptors in
+  let left = Domain.spawn prepare and right = Domain.spawn prepare in
+  Semaphore.Counting.acquire ready;
+  Semaphore.Counting.acquire ready;
+  Semaphore.Counting.release start;
+  Semaphore.Counting.release start;
+  let left = Domain.join left and right = Domain.join right in
+  check bool "both callers receive one complete immutable product" true (left == right);
+  check bool "the shared inventory belongs to the original frozen source" true
+    (Snapshot.snapshot_revision frozen = Masc.Keeper_skill_inventory.snapshot_revision left.inventory)
+;;
+
+let[@inline never] unowned_preparation_snapshot () =
+  let frozen = cache_scenario_snapshot "unowned-source" in
+  let descriptors = Masc.Keeper_tool_descriptor.all_descriptors () in
+  let preparation = preparation_for_cache_scenario ~snapshot:frozen ~descriptors in
+  let source = Weak.create 1 and product = Weak.create 1 in
+  Weak.set source 0 (Some frozen);
+  Weak.set product 0 (Some preparation);
+  source, product
+;;
+
+let[@inline never] unowned_preparation_descriptor frozen =
+  let canonical = match Masc.Keeper_tool_descriptor.all_descriptors () with
+    | first :: _ -> first
+    | [] -> fail "the canonical Tool fixture is empty" in
+  let descriptor = { canonical with description = canonical.description ^ " unowned object" } in
+  let preparation = preparation_for_cache_scenario ~snapshot:frozen ~descriptors:[descriptor] in
+  let authority = Weak.create 1 and product = Weak.create 1 in
+  Weak.set authority 0 (Some descriptor);
+  Weak.set product 0 (Some preparation);
+  authority, product
+;;
+
+let test_preparation_cache_does_not_own_retired_inputs () =
+  let source, source_product = unowned_preparation_snapshot () in
+  let active_source = cache_scenario_snapshot "active-source" in
+  let descriptor, descriptor_product = unowned_preparation_descriptor active_source in
+  Gc.full_major ();
+  check bool "canonical Tools do not keep an unowned source alive" false (Weak.check source 0);
+  check bool "the derived product does not retain its own dead source key" false (Weak.check source_product 0);
+  check bool "an owned source does not keep an unowned Tool object alive" false (Weak.check descriptor 0);
+  check bool "the derived product does not retain its own dead Tool key" false (Weak.check descriptor_product 0);
+  check int "the independently owned source remains usable" 1 (List.length (Snapshot.entries active_source))
+;;
+
 let () =
   run
     "Keeper Task Skill frozen exact selection"
@@ -1543,6 +1638,12 @@ let () =
             test_shared_exact_reference_retains_every_task_id
         ; test_case "Task binding reuses only exact frozen source and Tool authority" `Quick
             test_task_binding_reuses_only_exact_frozen_inputs
+        ; test_case "interleaved preparation keeps each exact Tool binding" `Quick
+            test_interleaved_preparation_keeps_each_exact_tool_binding
+        ; test_case "simultaneous cold preparation is shared" `Quick
+            test_simultaneous_cold_preparation_is_shared
+        ; test_case "preparation cache does not own retired inputs" `Quick
+            test_preparation_cache_does_not_own_retired_inputs
         ; test_case "exact ref consumer rejects name fallback" `Quick
             test_exact_reference_consumer_rejects_name_fallback
         ; test_case "resolved body remains frozen" `Quick

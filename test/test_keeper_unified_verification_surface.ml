@@ -1118,7 +1118,7 @@ let ask_input_fixture ?context ?task_id ?goal_id ?turn_id ~id ~prompt ~answer ()
       ~choices:[] ~mode:Ask.Single ~free_text:(Ask.Free_text_allowed {hint=None}) |> Result.get_ok in
   let original_ask = Ask.ask ~ask_id:id ~keeper_name:minimal_meta.name ~questions:[question]
       ?context ?task_id ?goal_id ?turn_id
-      ~continuation:(Masc.Keeper_continuation_channel.unrouted "original fixture")
+      ~continuation:(Keeper_continuation_channel.unrouted "original fixture")
       ~asked_at:100. () |> Result.get_ok in
   let answers = Ask.parse_answers ~ask:original_ask
       ~submissions:[question.question_id,Ask.Wrote answer] |> Result.get_ok in

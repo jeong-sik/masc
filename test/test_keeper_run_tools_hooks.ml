@@ -1782,6 +1782,76 @@ let test_production_post_tool_hook_cancellation_releases_next_completion () =
    must not read as "this round follows tool execution" — that misread
    suppressed the world state on the first round of ordinary turns
    (one keeper's turn 15, 2026-08-24). *)
+let test_canonical_fact_precedes_stalled_observer () =
+  with_temp_base_path (fun base_path ->
+    Fun.protect
+      ~finally:(fun () ->
+        Masc.Keeper_execution_join.For_testing.clear ();
+        Masc.Keeper_tool_call_log.reset_for_testing ())
+      (fun () ->
+        Eio_main.run (fun _ -> Eio.Switch.run (fun sw ->
+          Masc.Keeper_tool_call_log.init ~base_path ();
+          let config = Masc.Workspace.default_config base_path in
+          let address = Agent_observation.Code_address.v
+              ~codebase:"github.com_original_repo" ~path:"lib/saved.ml"
+            |> Result.get_ok in
+          let captured = Agent_observation.File (Addressed { address; checkout = None }) in
+          let current_attribution = ref captured in
+          let attributions = ref 0 in
+          let entered, entered_resolver = Eio.Promise.create () in
+          let release, release_resolver = Eio.Promise.create () in
+          let finished, finished_resolver = Eio.Promise.create () in
+          let hooks ~keeper_name ~stall =
+            Masc.Keeper_hooks_agent_core.make_hooks ~config
+              ~meta_ref:(ref (make_meta keeper_name))
+              ~turn_ctx_cell:(Masc.Keeper_tool_call_log.create_turn_ctx_cell ())
+              ~trace_id:(keeper_name ^ "-trace") ~keeper_turn_id:19
+              ~on_after_turn_ordinal:ignore
+              ~attribute_tool_input:(fun _ -> incr attributions; !current_attribution)
+              ~on_tool_executed:(fun ~tool_name:_ ~input:_ ~output_text:_
+                  ~execution_evidence:_ ~observation ~success:_ ~duration_ms:_
+                  ~provider:_ ~typed_outcome:_ ->
+                check bool "observer receives captured attribution" true
+                  (Option.exists (fun (value : Tool_observation.t) -> value.attribution = captured) observation);
+                if stall then (
+                  (* Mutable state changes after capture must never redirect
+                     the already committed work fact on a later read. *)
+                  current_attribution := Agent_observation.Pathless;
+                  Eio.Promise.resolve entered_resolver ();
+                  Eio.Promise.await release)) ()
+          in
+          let first = hooks ~keeper_name:"stalled-observer" ~stall:true in
+          let second = hooks ~keeper_name:"unrelated-producer" ~stall:false in
+          let event id =
+            let invocation = Agent_core.Tool_contract.Invocation.create
+                ~tool_use_id:id ~turn:1
+                ~completion:Agent_core.Tool_contract.Continue_after_success
+                ~schedule:{planned_index=0;batch_index=0;batch_size=1;
+                  execution_mode=Agent_core.Tool_contract.Serial} in
+            Agent_core.Hooks.PostToolUse
+              { invocation; tool_name="Edit"; input=`Assoc ["path",`String "lib/saved.ml"];
+                output=Ok Agent_core.Types.{content="saved";content_blocks=None;_meta=None};
+                result_bytes=5;duration_ms=1. }
+          in
+          let post hooks event = match hooks.Agent_core.Hooks.post_tool_use with
+            | Some post -> ignore (post event)
+            | None -> fail "actual production post-tool owner absent" in
+          Eio.Fiber.fork ~sw (fun () -> post first (event "first"); Eio.Promise.resolve finished_resolver ());
+          Eio.Promise.await entered;
+          current_attribution := captured;
+          post second (event "second");
+          check int "one attribution per physical execution" 2 !attributions;
+          let rows = Masc.Keeper_tool_call_log.read_addressed ~base_path ~codebase:"github.com_original_repo"
+              ~limit:10 ~offset:0 () |> Result.get_ok in
+          let events = Ide_bridge.events_of_rows rows |> Result.get_ok in
+          check int "both facts readable while first observer remains suspended" 2 (List.length events);
+          check int "each fact has its own actual canonical execution" 2
+            (List.map (fun row -> Yojson.Safe.Util.(row |> member "event_id" |> to_string)) events
+             |> List.sort_uniq String.compare |> List.length);
+          Eio.Promise.resolve release_resolver ();
+          Eio.Promise.await finished))))
+;;
+
 let message role content : Agent_core.Types.message =
   { role; content = [ Agent_core.Types.Text content ]; name = None
   ; tool_call_id = None; metadata = []
@@ -2351,6 +2421,8 @@ let () =
             "production hook cancellation releases the next completion"
             `Quick
             test_production_post_tool_hook_cancellation_releases_next_completion
+        ; test_case "canonical fact precedes a stalled observer" `Quick
+            test_canonical_fact_precedes_stalled_observer
         ] )
     ; ( "retained browser observation"
       , [ test_case "production hook retains roots until durable commit" `Quick

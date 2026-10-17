@@ -257,7 +257,7 @@ let event_kind_param uri =
      | kind ->
        (match Ide_bridge.event_kind_of_string kind with
         | Some parsed -> Ok (Some parsed)
-        | None -> Error "kind must be one of tool, turn, pr, all"))
+        | None -> Error "kind must be tool or all"))
 ;;
 
 let keeper_id_param uri =
@@ -434,7 +434,6 @@ let ide_ask_description { file_path; line; context; _ } =
 ;;
 
 let add_routes router =
-  Ide_bridge.install_agent_observation_sinks ();
   router
   |> Http.Router.get "/api/v1/agents" (fun request reqd ->
     with_public_read
@@ -581,15 +580,22 @@ let add_routes router =
                  (let keeper_id = keeper_id_param uri in
                     let codebase = codebase_of_ide_scope scope in
                     let events =
-                      Ide_bridge.list_events
+                      Keeper_tool_call_log.read_addressed
                         ~base_path:base
                         ~codebase
-                        ?kind
-                        ?keeper_id
+                        ?keeper_name:keeper_id
                         ~limit
                         ~offset
                         ()
+                      |> Result.map_error (fun _ -> "Canonical tool activity is unavailable")
+                      |> (fun result -> Result.bind result Ide_bridge.events_of_rows)
                     in
+                    match events with
+                    | Error _ ->
+                      Http.Response.json_value ~status:`Service_unavailable ~request
+                        (json_error ~code:"tool_activity_unavailable"
+                           "Canonical tool activity is unavailable") reqd
+                    | Ok events ->
                     let kind_json =
                       match kind with
                       | Some k -> `String (Ide_bridge.event_kind_to_string k)

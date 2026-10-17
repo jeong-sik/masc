@@ -539,15 +539,6 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     ~on_error:(log_server_fiber_crash "metrics_flush")
     (fun () -> Metrics_store_eio.start_flush_fiber ~clock);
   Shutdown.register ~name:"metrics_flush" ~priority:30 Metrics_store_eio.flush_pending;
-  (* IDE observation ingestion writer: drains accepted addressed tool facts
-     from the bounded FIFO on a separate fiber in the main Eio domain. A full
-     queue refuses new observations with metrics instead of blocking Keeper
-     turns or evicting accepted jobs. Shutdown drains queued jobs before exit. *)
-  fork_logged_fiber
-    ~sw
-    ~on_error:(log_server_fiber_crash "ide_ingest_writer")
-    (fun () -> Ide_ingest_queue.run_writer ());
-  Shutdown.register ~name:"ide_ingest_drain" ~priority:26 Ide_ingest_queue.drain_pending;
   (* Host FD observation poller. It records sysmon WARN/CRIT signals through
      [Keeper_fd_pressure.engage_external] for health telemetry and never changes
      Keeper scheduling. Disable the observer via

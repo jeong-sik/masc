@@ -6,13 +6,6 @@
 
 val metric_sse_sessions : string
 
-(** Addressed IDE observations refused before admission because the writer's
-    bounded queue is full. No accepted job is evicted. No labels. *)
-val metric_ide_ingest_capacity_refused : string
-
-(** Unix time of the most recent actual IDE capacity refusal. Absent before
-    the first refusal, rather than inventing a timestamp. No labels. *)
-val metric_ide_ingest_last_capacity_refusal : string
 val metric_sse_broadcast_duration : string
 val metric_sse_broadcast_duration_count : string
 val metric_sse_broadcast_events : string

@@ -87,8 +87,17 @@ let repository_fixture ~id ~url ~local_path : Repo_manager_types.repository =
 
 let masc_remote = "https://github.com/jeong-sik/masc.git"
 
+let git_fixture path arguments =
+  let status, _, detail = Process_eio.run_argv_with_status_split
+      ("git" :: "-C" :: path :: arguments) in
+  match status with
+  | Unix.WEXITED 0 -> ()
+  | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
+    failf "local Git fixture failed: %s" detail
+;;
+
 let masc_codebase () =
-  match Ide_paths.canonical_url_of_remote masc_remote with
+  match Agent_observation.canonical_url_of_remote masc_remote with
   | Some slug -> slug
   | None -> fail "test remote must produce a canonical IDE codebase slug"
 ;;
@@ -390,6 +399,79 @@ let test_read_events_accepts_unknown_codebase_as_empty () =
     check_status "GET events with an unknown codebase returns 200" 200 response)
 ;;
 
+let test_events_read_committed_canonical_fact_after_reopen () =
+  with_ide_server (fun ~base_path ~state:_ ~router ->
+    Masc.Keeper_tool_call_log.reset_for_testing ();
+    Fun.protect ~finally:Masc.Keeper_tool_call_log.reset_for_testing (fun () ->
+      Masc.Keeper_tool_call_log.init ~base_path ();
+      let checkout = Filename.concat base_path "arbitrarily-named-checkout" in
+      Unix.mkdir checkout 0o700;
+      git_fixture checkout ["init"; "--quiet"];
+      git_fixture checkout ["remote"; "add"; "origin"; "https://github.com/actual/repo.git"];
+      let library = Filename.concat checkout "lib" in
+      Unix.mkdir library 0o700;
+      let saved_path = Filename.concat library "saved.ml" in
+      let channel = open_out saved_path in output_string channel "let saved = true\n"; close_out channel;
+      Repo_store.save_all ~base_path
+        [repository_fixture ~id:"catalog-authority" ~url:"https://github.com/actual/repo.git"
+          ~local_path:checkout] |> Result.get_ok;
+      let attribution = Agent_observation.File
+          (Masc.Keeper_write_attribution.resolve ~base_dir:base_path ~file_path:saved_path) in
+      (match attribution with
+       | File (Addressed addressed) ->
+         check string "actual Git observation uses catalog identity" "github.com_actual_repo"
+           (Agent_observation.Code_address.codebase addressed.address)
+       | File (Unaddressed _) | Pathless -> fail "actual Git fixture was not attributed");
+      let observation = Tool_observation.
+        { attribution;
+          turn_ref = Ids.Turn_ref.make ~trace_id:"canonical-http" ~absolute_turn:23;
+          declared_progress = Some Progress } in
+      let execution = Ids.Execution_id.generate () in
+      (* An unusable retired store must have no bearing on current work facts. *)
+      let channel = open_out (Filename.concat base_path ".masc-ide") in close_out channel;
+      Masc.Keeper_tool_call_log.log_call ~keeper_name:"actual-http-keeper" ~tool_name:"Edit"
+        ~input:(`Assoc []) ~output_text:"persisted" ~duration_ms:1.
+        ~wire_outcome:Tool_result.Ok ~execution_id:execution ~tool_observation:observation ();
+      git_fixture checkout ["remote"; "set-url"; "origin"; "https://github.com/foreign/repo.git"];
+      (match Masc.Keeper_write_attribution.resolve ~base_dir:base_path ~file_path:saved_path with
+       | Unaddressed {reason;_} ->
+         check bool "fresh Git observation sees the unregistered origin" true
+           (reason = Agent_observation.Unattributed.Unregistered_origin)
+       | Addressed _ -> fail "changed origin must change a fresh Git observation");
+      let read () =
+        let response = dispatch router (http_request ~meth:`GET
+            ~path:"/api/v1/ide/events?codebase=github.com_actual_repo&limit=1" ()) in
+        check_status "canonical event HTTP query succeeds" 200 response;
+        response_body response |> Yojson.Safe.from_string |> Json.member "data"
+        |> Json.member "events" |> Json.to_list in
+      let before = read () in
+      check (list string) "HTTP preserves actual execution identity"
+        [Ids.Execution_id.to_string execution]
+        (List.map (fun row -> Json.(row |> member "event_id" |> to_string)) before);
+      Masc.Keeper_tool_call_log.reset_for_testing ();
+      Masc.Keeper_tool_call_log.init ~base_path ();
+      check string "reopen returns the identical canonical event"
+        (Yojson.Safe.to_string (`List before)) (Yojson.Safe.to_string (`List (read ())))))
+;;
+
+let test_events_invalid_observation_is_explicit_and_private () =
+  with_ide_server (fun ~base_path ~state:_ ~router ->
+    Masc.Keeper_tool_call_log.reset_for_testing ();
+    Fun.protect ~finally:Masc.Keeper_tool_call_log.reset_for_testing (fun () ->
+      Masc.Keeper_tool_call_log.init ~base_path ();
+      let store = Masc.Keeper_tool_call_log.store () |> Option.get in
+      Dated_jsonl.append store (`Assoc
+        ["keeper",`String "corrupt-keeper";"tool",`String "Edit";
+         "ts",`Float (Unix.gettimeofday ());"execution_id",`String "corrupt-execution";
+         "tool_observation",`Assoc ["private_raw_error",`String "secret-fixture-value"]]);
+      let response = dispatch router (http_request ~meth:`GET
+          ~path:"/api/v1/ide/events?codebase=github.com_actual_repo" ()) in
+      check_status "invalid source does not become empty successful activity" 503 response;
+      check string "stable failure class" "tool_activity_unavailable" (error_code_of_response response);
+      check bool "private source detail is not projected" false
+        (String_util.contains_substring (response_body response) "secret-fixture-value")))
+;;
+
 let test_get_events_rejects_invalid_canonical_scope () =
   with_ide_server (fun ~base_path:_ ~state:_ ~router ->
     let request =
@@ -530,7 +612,7 @@ let test_repository_activity_needs_no_canonical_remote () =
   with_ide_server (fun ~base_path ~state:_ ~router ->
     let local_remote = "/srv/git/local-masc" in
     check bool "precondition: a filesystem remote has no canonical codebase" true
-      (Option.is_none (Ide_paths.canonical_url_of_remote local_remote));
+      (Option.is_none (Agent_observation.canonical_url_of_remote local_remote));
     let repository = repository_fixture ~id:"local" ~url:local_remote ~local_path:base_path in
     (match Repo_store.save_all ~base_path [repository] with Ok () -> () | Error e -> fail e);
     Masc.Keeper_tool_call_log.init ~base_path ();
@@ -734,6 +816,10 @@ let () =
             "GET events accepts an unknown codebase as empty"
             `Quick
             test_read_events_accepts_unknown_codebase_as_empty
+        ; test_case "canonical events survive source reopen without duplicate writer" `Quick
+            test_events_read_committed_canonical_fact_after_reopen
+        ; test_case "invalid canonical observation is explicit and private" `Quick
+            test_events_invalid_observation_is_explicit_and_private
         ; test_case
             "GET events rejects an invalid codebase scope"
             `Quick

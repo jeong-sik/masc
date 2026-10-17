@@ -1,12 +1,12 @@
-(** Tests for [Ide_paths] — slug and store-path unit tests.
+(** Repository remote wire parsing at its current neutral owner.
 
-    Verifies that {!Ide_paths.canonical_url_of_remote} is total,
+    Verifies that {!Agent_observation.canonical_url_of_remote} is total,
     deterministic, and produces the same slug regardless of which
     transport the remote was registered with. *)
 
 open Alcotest
 
-module Paths = Ide_paths
+module Paths = Agent_observation
 
 let check_some_slug ~expected ~input () =
   match Paths.canonical_url_of_remote input with
@@ -108,20 +108,6 @@ let test_segment_with_colon () =
   check_none ~input:"https://example.com/foo:bar/baz" ()
 ;;
 
-(* Store path constructors. *)
-
-let test_code_store_dir () =
-  let p =
-    Paths.code_store_dir
-      ~base_dir:"/tmp/base"
-      ~codebase:"github.com_jeong-sik_masc"
-  in
-  check string
-    "by-url path layout"
-    "/tmp/base/.masc-ide/by-url/github.com_jeong-sik_masc"
-    p
-;;
-
 let () =
   run
     "ide_paths"
@@ -145,7 +131,5 @@ let () =
         ; test_case "path traversal" `Quick test_path_traversal
         ; test_case "segment with colon" `Quick test_segment_with_colon
         ] )
-    ; ( "store path constructors"
-      , [ test_case "code_store_dir" `Quick test_code_store_dir ] )
     ]
 ;;

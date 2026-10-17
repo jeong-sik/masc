@@ -15235,10 +15235,10 @@ let keeper_message_preparation_timeline (state : state) transcript =
             | Autonomous_turn original, (Turn_lane_autonomous | Turn_lane_maintenance) ->
               turn_ref = Some original && List.for_all (fun (span : Masc.Keeper_turn_preview.preparation_span) ->
                 span.preparation.turn_ref = Some original)
-                (Masc.Keeper_turn_preview.preparation_spans preview.ktp_preparation_timeline)
+                (Option.fold ~none:[] ~some:Masc.Keeper_turn_preview.preparation_spans preview.ktp_preparation_timeline)
             | Operation _, (Turn_lane_autonomous | Turn_lane_maintenance)
             | Autonomous_turn _, Turn_lane_chat_operation -> false in
-          if same_execution then Some preview.ktp_preparation_timeline else None
+          if same_execution then preview.ktp_preparation_timeline else None
         | Keeper_turn_running {preview=None;_} | Keeper_turn_idle | Keeper_turn_unavailable _ -> None)
       state.keeper_turns in
     match candidates with [timeline] -> Some timeline | [] | _::_::_ -> None

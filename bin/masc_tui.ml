@@ -2954,12 +2954,15 @@ let launch_keeper_turns_load state ~mailbox =
     let generation = state.keeper_chat_control_generations in
     let host = server_peer_host in
     let port = state.port in
+    let preparation_details_for =
+      if state.view = Keepers Keeper_message && not state.msg_turn_folded
+      then state.msg_target_keeper_name else None in
     Masc_tui_async_read.launch
       ~source:Masc_tui_async_read.Keeper_turns
       ~on_not_run:(fun () -> state.keeper_turns_inflight <- false)
       ~deliver:(fun result ->
         enqueue_async mailbox (Keeper_turns_loaded (generation, result)))
-      (fun () -> Masc_tui_loader.load_keeper_turns ~host ~port)
+      (fun () -> Masc_tui_loader.load_keeper_turns ~host ~port ~preparation_details_for)
   end
   end
 

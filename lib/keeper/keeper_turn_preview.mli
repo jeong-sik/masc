@@ -115,8 +115,10 @@ val note_failure : writer:writer option -> now:float -> runtime_id:string -> str
 val note_stream : writer:writer option -> now:float -> Agent_core.Types.sse_event -> unit
 val status_text : t -> string
 
-val to_json : t -> Yojson.Safe.t
-(** The actual turns-route preview payload, including released-source position. *)
+val to_json : ?include_preparation_timeline:bool -> t -> Yojson.Safe.t
+(** The actual turns-route preview payload, including released-source position.
+    The default sends [null] for the unrequested timeline without traversing it;
+    explicit detail selection includes the actual start-ordered records. *)
 
 val preparation_of_json : Yojson.Safe.t -> (preparation, string) result
 (** Strict inverse for the preparation object in [to_json]. Unknown states,

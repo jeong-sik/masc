@@ -373,7 +373,7 @@ let load_agent_core_history_file ~(session_dir : string) ~(snapshot_id : string)
    a stale history, not one integer. A save therefore takes the identity from
    the file it wrote, never from the path afterwards. A writer that rewrites
    the file in place and keeps its size and mtime (touch -r, rsync -t) would
-   still fool the rule. *)
+   still fool the rule (#43575). *)
 type canonical_identity =
   { device : int
   ; inode : int

@@ -14,7 +14,7 @@ export type IdeScope = { readonly kind: 'codebase'; readonly codebase: string }
 
 export type IdeScopeOptions = Pick<IdeApiOptions, 'scope' | 'codebase'>
 
-export type IdeEventKind = 'tool' | 'turn'
+export type IdeEventKind = 'tool'
 
 export interface IdeEventsOptions extends IdeApiOptions {
   readonly kind?: IdeEventKind | 'all'
@@ -28,8 +28,8 @@ interface IdeBridgeEventBase {
   readonly keeper_id: string
   readonly turn_id: string
   readonly timestamp_ms: number
-  /** Stable opaque id supplied by current servers; absent on older servers. */
-  readonly event_id: string | null
+  /** Canonical identity minted for this actual tool execution. */
+  readonly event_id: string
 }
 
 export interface IdeToolEvent extends IdeBridgeEventBase {
@@ -43,16 +43,7 @@ export interface IdeToolEvent extends IdeBridgeEventBase {
   readonly file_path: string | null
 }
 
-export interface IdeTurnEvent extends IdeBridgeEventBase {
-  readonly type: 'turn'
-  readonly phase: string
-  readonly model_used: string | null
-  readonly tools_used: ReadonlyArray<string>
-  readonly stop_reason: string | null
-  readonly duration_ms: number | null
-}
-
-export type IdeBridgeEvent = IdeToolEvent | IdeTurnEvent
+export type IdeBridgeEvent = IdeToolEvent
 
 function trimmedNonEmpty(value: string | null | undefined): string | null {
   const trimmed = value?.trim()
@@ -135,7 +126,11 @@ export async function fetchIdeEvents(
   if (invalidIndex >= 0) {
     throw new Error(`fetchIdeEvents returned malformed event at index ${invalidIndex}`)
   }
-  return parsed.filter(isIdeBridgeEvent)
+  const valid = parsed.filter(isIdeBridgeEvent)
+  if (new Set(valid.map(event => event.event_id)).size !== valid.length) {
+    throw new Error('fetchIdeEvents returned duplicate execution identities')
+  }
+  return valid
 }
 
 function parseIdeBridgeEvent(raw: unknown): IdeBridgeEvent | null {
@@ -146,8 +141,7 @@ function parseIdeBridgeEvent(raw: unknown): IdeBridgeEvent | null {
   const timestampMs = numberField(raw, 'timestamp_ms')
   if (!isIdeEventKind(type) || !keeperId || !turnId || timestampMs === null) return null
   const eventId = raw.event_id
-  if (eventId !== undefined && (typeof eventId !== 'string' || !/^[0-9a-f]{64}$/.test(eventId))) return null
-  const stableEventId = typeof eventId === 'string' ? eventId : null
+  if (typeof eventId !== 'string' || eventId.trim() === '' || eventId.trim() !== eventId) return null
 
   if (type === 'tool') {
     const toolName = stringField(raw, 'tool_name')
@@ -165,7 +159,7 @@ function parseIdeBridgeEvent(raw: unknown): IdeBridgeEvent | null {
       keeper_id: keeperId,
       turn_id: turnId,
       timestamp_ms: timestampMs,
-      event_id: stableEventId,
+      event_id: eventId,
       tool_name: toolName,
       outcome,
       typed_outcome: typedOutcome,
@@ -175,20 +169,7 @@ function parseIdeBridgeEvent(raw: unknown): IdeBridgeEvent | null {
     }
   }
 
-  const phase = stringField(raw, 'phase')
-  if (!phase) return null
-  return {
-    type,
-    keeper_id: keeperId,
-    turn_id: turnId,
-    timestamp_ms: timestampMs,
-    event_id: stableEventId,
-    phase,
-    model_used: stringField(raw, 'model_used'),
-    tools_used: stringArrayField(raw, 'tools_used'),
-    stop_reason: stringField(raw, 'stop_reason'),
-    duration_ms: numberField(raw, 'duration_ms'),
-  }
+  return null
 }
 
 function isIdeBridgeEvent(value: IdeBridgeEvent | null): value is IdeBridgeEvent {
@@ -196,7 +177,7 @@ function isIdeBridgeEvent(value: IdeBridgeEvent | null): value is IdeBridgeEvent
 }
 
 function isIdeEventKind(value: string | null): value is IdeEventKind {
-  return value === 'tool' || value === 'turn'
+  return value === 'tool'
 }
 
 function stringField(record: Record<string, unknown>, key: string): string | null {
@@ -212,9 +193,4 @@ function numberField(record: Record<string, unknown>, key: string): number | nul
     return Number.isFinite(parsed) ? parsed : null
   }
   return null
-}
-
-function stringArrayField(record: Record<string, unknown>, key: string): ReadonlyArray<string> {
-  const value = record[key]
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
 }

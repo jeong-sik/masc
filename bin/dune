@@ -2126,6 +2126,9 @@
   masc_tui_render_verification
   masc_tui_render_repositories
   masc_tui_render_work
+  masc_tui_render_lanes
+  masc_tui_render_activity
+  masc_tui_render_config
   masc_tui_loader
   masc_tui_http)
  (public_name masc-tui)

@@ -6020,11 +6020,11 @@ let test_preparation_requires_actual_turn_owner_and_exact_execution () =
           ~now:1. ~redaction:Masc.Keeper_secret_redaction.empty)
         (fun () -> ()))) in
     let state = Tui_types.create_state ~workspace:"test" ~port:0 ~refresh_interval:2. () in
-    let turn_ref = Masc.Ids.Turn_ref.make ~trace_id:"preparation-wire" ~absolute_turn:8 in
+    let turn_ref = Ids.Turn_ref.make ~trace_id:"preparation-wire" ~absolute_turn:8 in
     let wire ~lane ~turn_ref preview = `Assoc ["schema",`String "masc.keeper_turns.v1";
       "keepers",`List [`Assoc ["keeper_name",`String "alpha";"status",`String "ok";
         "turn",`Assoc ["lane",`String lane;"interrupt_token",`String (Token.to_string current);
-          "turn_ref",Option.fold ~none:`Null ~some:Masc.Ids.Turn_ref.to_yojson turn_ref;
+          "turn_ref",Option.fold ~none:`Null ~some:Ids.Turn_ref.to_yojson turn_ref;
           "started_at_unix",`Float 0.;"preview",preview]]]] in
     let decode payload = match Tui_decode.decode_keeper_turns payload with
       | Ok rows -> rows | Error detail -> fail detail in
@@ -6109,7 +6109,7 @@ let test_task_preparation_precedes_journal_and_keeps_original_writer () =
   Eio_main.run (fun _ ->
     let module Preview = Masc.Keeper_turn_preview in
     let token = Masc.Keeper_interrupt_token.fresh () in
-    let original = Masc.Ids.Turn_ref.make ~trace_id:"early-task-source" ~absolute_turn:4 in
+    let original = Ids.Turn_ref.make ~trace_id:"early-task-source" ~absolute_turn:4 in
     let writer = Masc.Keeper_turn_preview_owner.with_owner ~interrupt_token:token ~observation:(Masc.Keeper_turn_preview_owner.create_turn_observation ()) (fun () ->
       Preview.reset ~keeper_name:"alpha" ~execution_scope:None ~turn_ref:(Some original)
         ~now:0. ~redaction:Masc.Keeper_secret_redaction.empty) in
@@ -6218,6 +6218,100 @@ let test_failed_preparation_refreshes_only_selected_unsettled_operation () =
     (Tui_types.keeper_message_preparation_operation_targets working ~keeper_name:"alpha")
 ;;
 
+let test_persisted_execution_source_and_narrow_delivery_labels () =
+  let module Layout = Masc_tui_message_layout in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+  state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
+  state.msg_target_keeper_name <- Some "alpha";
+  let request_id = "unowned-req-9" in
+  let source = Log.Operation "persisted-exec-9" in
+  let source_key = Log.source_key source in
+  let input =
+    { (chat_entry ~request_id
+         ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator {surface=None}))
+         ~text:"persisted batched turn" ~at:100. ())
+      with
+      Tui_types.me_execution_source = Some source
+    ; me_identity = Persisted_row request_id
+    }
+  in
+  state.msg_history <- [ input ];
+  state.msg_settled_logs <- [];
+  let entries =
+    Masc_tui_render_chat.keeper_message_layout_entries state
+      ~keeper_name:"alpha" ~chat_cols:120
+  in
+  check (list string) "unowned persisted row uses me_execution_source key as request_label"
+    [ source_key ]
+    (List.map (fun (e : Layout.entry) -> e.request_label) entries);
+  check bool "search finds persisted row by its me_execution_source key" true
+    (Option.is_some
+       (Masc_tui_render_chat.keeper_message_find_scroll state
+          ~keeper_name:"alpha" ~needle:source_key ~older_than:None).match_result);
+  let req1 = Keeper_chat.create_request ~keeper_name:"alpha" ~message:"first pending" () in
+  let req2 = Keeper_chat.create_request ~keeper_name:"alpha" ~message:"second pending" () in
+  (match Masc_tui_keeper_chat_queue.push state.msg_queued ~submitted_at:200. req1 with
+   | Error detail -> fail detail
+   | Ok (q1, _) ->
+       match Masc_tui_keeper_chat_queue.push q1 ~submitted_at:200. req2 with
+       | Error detail -> fail detail
+       | Ok (q2, _) -> state.msg_queued <- q2);
+  state.msg_origin_display <- Layout.Origin_bare;
+  let tail =
+    Masc_tui_render_chat.chat_tail_entries state ~keeper_name:"alpha"
+      ~role_label_column:(Layout.chat_role_label_width ~pane_cells:80)
+  in
+  let local_pending =
+    List.filter (fun (e : Layout.entry) -> e.style = Layout.Local) tail
+  in
+  (match local_pending with
+   | [ first; second ] ->
+       check bool "first pending carries delivery_state" true
+         (Option.is_some first.delivery_state);
+       check bool "second pending carries delivery_state" true
+         (Option.is_some second.delivery_state);
+       let bare_rows =
+         Layout.visible_rows ~origin:Layout.Origin_bare ~inner_width:80 ~height:20
+           [ first; second ]
+       in
+       let body_rows =
+         List.filter
+           (fun (r : Layout.row) -> r.kind = Layout.Body)
+           bare_rows
+       in
+       check (list string)
+         "both same-second pending inputs keep their delivery_state in Origin_bare gutter"
+         [ Layout.speaker_mark Layout.Local ^ " " ^ Option.get first.delivery_state
+         ; Layout.speaker_mark Layout.Local ^ " " ^ Option.get second.delivery_state
+         ]
+         (List.map (fun (r : Layout.row) -> r.gutter) body_rows)
+   | other ->
+       fail (Printf.sprintf "expected 2 local pending entries, got %d" (List.length other)));
+  state.msg_queued <- Masc_tui_keeper_chat_queue.empty;
+  state.msg_origin_display <- Layout.Origin_inline;
+  let inflight =
+    inflight_with_log ~keeper_name:"alpha" ~started_at:210. []
+  in
+  inflight.phase <- Tui_types.Turn_reconciling;
+  state.msg_inflight <- [ inflight ];
+  let tail_80 =
+    Masc_tui_render_chat.chat_tail_entries state ~keeper_name:"alpha"
+      ~role_label_column:(Layout.chat_role_label_width ~pane_cells:80)
+  in
+  let role_labels =
+    List.filter_map
+      (fun (e : Layout.entry) ->
+        if e.style = Layout.Local then
+          Some (String.trim e.role_label, e.role_label_mark_cells)
+        else None)
+      tail_80
+  in
+  check (list (pair string int))
+    "80-col Origin_inline gutter keeps 전송 확인 중 untruncated with mark_cells=0"
+    [ ("전송 확인 중", 0) ] role_labels
+;;
+
 let () =
   run
     "tui_chat_queue_wiring"
@@ -6229,7 +6323,9 @@ let () =
         test_failed_preparation_refreshes_only_selected_unsettled_operation]);
      ("native progress density", [test_case "interrupted native output remains in Results" `Quick test_interrupted_native_progress_survives_results_projection]); ( "expanded diagnostics",
         [ test_case "search finds a batched request by its own id" `Quick
-            test_search_finds_a_batched_request_by_its_own_id ] )
+            test_search_finds_a_batched_request_by_its_own_id
+        ; test_case "persisted execution source and narrow delivery labels" `Quick
+            test_persisted_execution_source_and_narrow_delivery_labels ] )
     ; ( "attachment captions", [test_case "journal replacement retains source-owned media" `Quick
           test_journal_replacement_retains_history_media] )
     ; ( "visible delivery",

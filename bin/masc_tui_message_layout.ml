@@ -1287,7 +1287,9 @@ let continues_previous ~(previous : entry option) (entry : entry) =
   match entry.heading_boundary, previous with
   | Start_heading, _ | Inherit_heading, None -> false
   | Inherit_heading, Some previous ->
-      previous.style = entry.style
+      Option.is_none previous.delivery_state
+      && Option.is_none entry.delivery_state
+      && previous.style = entry.style
       (* [role_label] is [speaker] cut to the gutter column, so two long names
          can share it. Only the whole name says it is the same speaker. *)
       && String.equal previous.speaker entry.speaker
@@ -1576,8 +1578,9 @@ let origin_gutter ~origin ~previous ~inner_width entry =
              source after it. Reusing the old boundary after [fit_middle]
              would colour an ellipsis or source byte as though it were a mark. *)
           let source =
-            drop_cells entry.role_label
-              (Int.min role_cells (Int.max 0 entry.role_label_mark_cells))
+            String.trim
+              (drop_cells entry.role_label
+                 (Int.min role_cells (Int.max 0 entry.role_label_mark_cells)))
           in
           fit_middle ceiling source, 0
       in

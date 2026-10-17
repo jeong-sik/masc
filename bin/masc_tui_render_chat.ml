@@ -1678,8 +1678,13 @@ let turn_rail_of ~siding ~(edge : Masc_tui_types.turn_edge)
 
 module Request_owners = Map.Make (String)
 
-let request_owner owners request_id =
-  Option.value (Request_owners.find_opt request_id owners) ~default:request_id
+let message_execution_id owners (message : Masc_tui_types.msg_entry) =
+  match Request_owners.find_opt message.me_request_id owners with
+  | Some execution_id -> execution_id
+  | None -> (
+      match message.me_execution_source with
+      | Some source -> Masc_tui_keeper_chat_log.source_key source
+      | None -> message.me_request_id)
 
 let request_diagnostics ~tools ~request_id ~execution_id =
   match tools with
@@ -1923,13 +1928,13 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name ~request_
              timeline_bucket = Option.map bucket_of_local_time local_time;
              diagnostics = committed_request_diagnostics
                ~tools:state.msg_tool_visibility ~request_id:message.me_request_id
-               ~execution_id:(request_owner request_owners message.me_request_id) ~edge;
+               ~execution_id:(message_execution_id request_owners message) ~edge;
              speaker;
              role_label;
              role_label_mark_cells =
                Message_layout.role_label_mark_cells
                  ~column:role_label_column ~style ();
-             request_label = request_owner request_owners message.me_request_id;
+             request_label = message_execution_id request_owners message;
              body;
              journal =
                (match message.me_role, state.msg_memory_visibility with
@@ -1995,6 +2000,16 @@ let chat_tail_entries (state : state) ~keeper_name ~role_label_column =
     | Keeper_queued -> "처리 대기"
     | Rechecking_delivery -> "전송 확인 중"
   in
+  let align_state_label ~style label =
+    let mark_cells =
+      Message_layout.role_label_mark_cells ~column:role_label_column ~style ()
+    in
+    if Message_layout.display_width label <= role_label_column - mark_cells then
+      ( Message_layout.align_role_label ~column:role_label_column ~style label
+      , mark_cells )
+    else
+      ( Message_layout.fit_middle role_label_column label, 0 )
+  in
   (* Pending and committed speech use the same column. A narrow gutter fits
      the state label; Origin_row keeps the complete label in its heading. *)
   let entry ~at ~request_id ~label ~body =
@@ -2002,6 +2017,7 @@ let chat_tail_entries (state : state) ~keeper_name ~role_label_column =
        local mark, not the arrow that means a submitted conversation row. *)
     let style = Message_layout.Local in
     let local_time = Unix.localtime at in
+    let role_label, role_label_mark_cells = align_state_label ~style label in
     ({ delivery_state = Some label; style
      ; heading_boundary = Message_layout.Inherit_heading
      ; body_presentation = Message_layout.Source_body
@@ -2013,10 +2029,8 @@ let chat_tail_entries (state : state) ~keeper_name ~role_label_column =
          request_diagnostics ~tools:state.msg_tool_visibility ~request_id
            ~execution_id:request_id
      ; speaker = label
-     ; role_label =
-         Message_layout.align_role_label ~column:role_label_column ~style label
-     ; role_label_mark_cells =
-         Message_layout.role_label_mark_cells ~column:role_label_column ~style ()
+     ; role_label
+     ; role_label_mark_cells
      ; request_label = request_id
      ; body = Keeper_chat.terminal_safe_text ~preserve_newlines:true body
      ; journal = []
@@ -2047,14 +2061,15 @@ let chat_tail_entries (state : state) ~keeper_name ~role_label_column =
   | [] -> []
   | first :: _ ->
       let style = Message_layout.Status in
+      let role_label, role_label_mark_cells =
+        align_state_label ~style "대기 입력"
+      in
       (* The heading is not the input it was copied from. *)
       { first with delivery_state = None; style; timestamp = ""; timeline_bucket = None;
           diagnostics = [];
           speaker = "대기 입력";
-          role_label = Message_layout.align_role_label
-            ~column:role_label_column ~style "대기 입력";
-          role_label_mark_cells = Message_layout.role_label_mark_cells
-            ~column:role_label_column ~style ();
+          role_label;
+          role_label_mark_cells;
           request_label = "";
           body = Printf.sprintf "대기 입력 %d건" (List.length requests)
       } :: entries
@@ -2418,7 +2433,7 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
       let visible_entries = keeper_message_visible_entries visible_timeline in
       let owner_changed = ref false in
       let refresh_owner message edge (entry : Message_layout.entry) =
-        let execution_id = request_owner request_owners message.me_request_id in
+        let execution_id = message_execution_id request_owners message in
         if String.equal entry.request_label execution_id then entry
         else (
           owner_changed := true;
@@ -3266,7 +3281,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
     List.map (fun (tag, (entry : Message_layout.entry)) ->
       let request_id, execution_id = match tag with
         | Tagged_row message -> message.me_request_id,
-            request_owner request_owners message.me_request_id
+            message_execution_id request_owners message
         | Tagged_child _ -> "", ""
         | Tagged_block (log, _, _) -> Masc_tui_types.turn_log_request_id log,
             Masc_tui_types.turn_log_execution_id log in
@@ -4081,9 +4096,19 @@ let plan_keeper_message_search ?(preview_lookup=Masc_tui_link_preview.get_previe
                 let before = match repeat with
                   | Some (at, position) when at = index -> Some position
                   | Some _ | None -> None in
-                let requests = entry.Message_layout.request_label :: (match tag with
-                  | Tagged_row message -> [message.me_request_id]
-                  | Tagged_child _ | Tagged_block _ -> []) in
+                let requests =
+                  entry.Message_layout.request_label
+                  :: (match tag with
+                    | Tagged_row message ->
+                        message.me_request_id
+                        :: Option.to_list
+                             (Option.map Masc_tui_keeper_chat_log.source_key
+                                message.me_execution_source)
+                    | Tagged_block (log, _, _) ->
+                        [ Masc_tui_types.turn_log_request_id log
+                        ; Masc_tui_types.turn_log_execution_id log ]
+                    | Tagged_child _ -> [])
+                in
                 let source_requests = List.sort_uniq String.compare
                     (List.filter (fun request -> request <> "") requests) in
                 Anchored_source {source_index=index;source_anchor=anchor;source_before=before;

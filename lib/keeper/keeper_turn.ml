@@ -67,60 +67,6 @@ let direct_turn_observation ~(config : Workspace.config) (meta : keeper_meta) :
     ~config
     ~meta
 
-let direct_turn_task_context
-      ~(current_task : Keeper_world_observation_inputs.current_task_observation)
-      ~(held_task_skills : Keeper_world_observation_inputs.held_task_skills list)
-      ~(task_skill_surfaces : (string * Keeper_skill_catalog.exact_surface list) list)
-  : string
-  =
-  let current =
-    let skill_surfaces =
-      match current_task with
-      | Keeper_world_observation_inputs.Current_task task
-      | Recovered_current_task { task; _ } -> List.assoc_opt task.id task_skill_surfaces
-      | No_current_task | Current_task_missing _ | Current_task_unavailable _ -> None
-    in
-    match Keeper_unified_prompt.format_current_task_observation ?skill_surfaces current_task with
-    | Some rendered -> rendered
-    | None -> ""
-  in
-  let held =
-    match Keeper_unified_prompt.format_held_task_skills ~skill_surfaces_by_task:task_skill_surfaces held_task_skills with
-    | Some rendered -> rendered
-    | None -> ""
-  in
-  current ^ held
-
-let direct_turn_dynamic_context
-      ~(current_task : Keeper_world_observation_inputs.current_task_observation)
-      ~(held_task_skills : Keeper_world_observation_inputs.held_task_skills list)
-      ~(task_skill_surfaces : (string * Keeper_skill_catalog.exact_surface list) list)
-      ~(workspace_memory : Workspace_memory_ledger.observation)
-      ~(workspace_memory_access : Keeper_request_tool_access.t option)
-      ~(wiki_contents : Keeper_wiki_contents.t)
-      ~(lane_updates : (Yojson.Safe.t,string) result)
-      ~(approval_authority_text : string)
-      ~(recent_direct_conversation_text : string)
-      ~(worktree_text : string)
-      ~(telemetry_feedback_text : string)
-      ~(turn_instructions_text : string)
-  : string
-  =
-  ([ direct_turn_task_context ~current_task ~held_task_skills ~task_skill_surfaces ]
-   @ Option.to_list
-       (Keeper_unified_prompt.format_workspace_memory_observation ?access:workspace_memory_access workspace_memory)
-   @ Option.to_list
-       (Keeper_unified_prompt.format_wiki_observation ?access:workspace_memory_access wiki_contents)
-   @ Option.to_list (Lane_addon_subscription.render lane_updates)
-   @ [ approval_authority_text
-  ; recent_direct_conversation_text
-  ; worktree_text
-  ; telemetry_feedback_text
-  ; turn_instructions_text
-  ])
-  |> List.filter (fun text -> String.trim text <> "")
-  |> String.concat "\n\n"
-
 let direct_owner_conversation_context
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
@@ -243,7 +189,6 @@ let resolve_direct_turn_runtime_id ~meta ~resume_lane ~gate_resume =
 module For_testing = struct
   let resolve_direct_turn_runtime_id = resolve_direct_turn_runtime_id
   let direct_owner_conversation_context = direct_owner_conversation_context
-  let direct_turn_dynamic_context = direct_turn_dynamic_context
   let surface_context_to_instructions = surface_context_to_instructions
 end
 
@@ -793,13 +738,12 @@ let run_keeper_invocation_turn_admitted_inner
                           ""))
                 | Some false | None -> ""
               in
-              let render_dynamic_context workspace_memory_access =
-                direct_turn_dynamic_context
+              let prepared_context =
+                Keeper_direct_turn_context.prepare
                   ~current_task
                   ~held_task_skills
                   ~task_skill_surfaces
                   ~workspace_memory
-                  ~workspace_memory_access
                   ~wiki_contents
                   ~lane_updates
                   ~approval_authority_text:
@@ -808,14 +752,17 @@ let run_keeper_invocation_turn_admitted_inner
                   ~recent_direct_conversation_text
                   ~worktree_text
                   ~telemetry_feedback_text
-                  ~turn_instructions_text
+                  ~turn_instructions_text ()
               in
               (* The system prompt is the base prompt [Keeper_run_context]
                  built, shared with autonomous turns. Channel-specific input
                  stays in [dynamic_context] and the persisted user message. *)
-              { dynamic_context = render_dynamic_context None;
+              { dynamic_context = Keeper_direct_turn_context.project prepared_context
+                    ~workspace_memory_access:None;
                 dynamic_context_for_tools = Some (fun access ->
-                  Keeper_context_layers.unattributed Direct_turn (render_dynamic_context (Some access))) }
+                  Keeper_context_layers.unattributed Direct_turn
+                    (Keeper_direct_turn_context.project prepared_context
+                       ~workspace_memory_access:(Some access))) }
             in
             Progress.Tracker.step turn_tracker
               ~message:(Printf.sprintf "Executing Agent.run for %s" name) ();

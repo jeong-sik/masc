@@ -989,13 +989,13 @@ let run_cmd ?(record_default = false) host port cli_base_path accept_store_quara
      let pending =
        match Atomic.get pending_shutdown_signal with
        | None -> None
-       | Some Sigterm -> Some Server_scheduler_eintr.Sigterm
-       | Some Sigint -> Some Server_scheduler_eintr.Sigint
+       | Some Sigterm -> Some Masc.Server_scheduler_eintr.Sigterm
+       | Some Sigint -> Some Masc.Server_scheduler_eintr.Sigint
      in
-     let ctx : Server_scheduler_eintr.context =
+     let ctx : Masc.Server_scheduler_eintr.context =
        {
-         Server_scheduler_eintr.pending_shutdown = pending;
-         uptime_s = Server_startup_state.elapsed_since_start ();
+         Masc.Server_scheduler_eintr.pending_shutdown = pending;
+         uptime_s = Masc.Server_startup_state.elapsed_since_start ();
          mcp_sessions = Server_mcp_transport_http_conn.active_session_count ();
          ws_sessions = Server_mcp_transport_ws.try_session_count ();
          ocaml_version = Sys.ocaml_version;
@@ -1006,7 +1006,7 @@ let run_cmd ?(record_default = false) host port cli_base_path accept_store_quara
      in
      Log.Server.error
        "%s"
-       (Server_scheduler_eintr.describe
+       (Masc.Server_scheduler_eintr.describe
           ctx
           ~syscall:func
           ~backtrace:(Printexc.get_backtrace ()));

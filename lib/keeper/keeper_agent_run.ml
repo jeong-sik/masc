@@ -1259,6 +1259,16 @@ let run_turn
       ~phase:Keeper_turn_preview.Tool_preparation (fun () ->
       Keeper_run_tools.prepare_agent_setup
       ~approval_admission
+      ~answer_source_ids:(match world_observation with
+        | None -> []
+        | Some observation -> List.filter_map (fun (event : Keeper_world_observation.pending_board_event) ->
+            match event.event_kind with
+            | Keeper_world_observation.Ask_answered_row { answer_source_id; _ } -> answer_source_id
+            | Board_post_created | Board_post_updated | Board_comment_added _
+            | Board_reaction_changed _ | Board_vote_cast _ | Fusion_completed
+            | Delegate_completed _ | Composition_completed | Owned_job_completed _
+            | Schedule_due _ | External_attention _ | Completion_authority_rejected _
+            | Task_outcome _ | Task_cancelled _ -> None) observation.pending_board_events)
       ?preview
       ?observation_token
       ?dynamic_context_for_tools:prompt_ctx.dynamic_context_for_tools

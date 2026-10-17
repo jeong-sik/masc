@@ -277,11 +277,21 @@ let draw_ask_answer_feedback buf cols (state : state) =
          Option.map (fun _ -> "turn boundary observed") observed.af_turn_finished_at;
          Option.map (fun _ -> "wake settled or transferred (consumption unproven)") observed.af_queue_settled_at;
          Option.map (fun _ -> "wake cancelled") observed.af_queue_cancelled_at] in
-      let facts = if facts=[] then ["no matching turn observed"] else facts in
+      let facts = if facts=[] then ["no turn entry observed"] else facts in
       let facts = if observed.af_evidence_complete then facts else facts @ ["evidence incomplete"] in
       box_wrapped_field buf cols ~head:"  "
         ~style:(if observed.af_evidence_complete then Theme.info () else Theme.warn ())
-        ("Keeper follow-up: " ^ String.concat " · " facts))
+        ("Keeper follow-up: " ^ String.concat " · " facts);
+      let action_text, action_style = match observed.af_tool_actions with
+        | Decode.Ask_tools_unavailable -> "Tool results: observation unavailable", Theme.warn ()
+        | Decode.Ask_tools_observed {at_count;at_latest;at_evidence_current;_} ->
+            let text = match at_latest with
+             | None -> "Tool results: none observed", Theme.info ()
+             | Some latest -> Printf.sprintf "Tool results: %d observed · latest %s · turn #%d"
+                 at_count latest.ata_tool latest.ata_keeper_turn_id, Theme.info () in
+            if at_evidence_current then text
+            else fst text ^ " · retained earlier evidence", Theme.warn () in
+      box_wrapped_field buf cols ~head:"  " ~style:action_style action_text)
       followup;
     (match state.ask_followup_error with
      | None -> ()

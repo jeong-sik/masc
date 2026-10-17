@@ -56,3 +56,60 @@ intake followed by repair. Projection checks inspect receipt decisions and
 identities; they do not test screen wording or row order. Parser checks alone do
 not establish execution. A fresh running TUI screen remains separate evidence
 from these source and API contracts.
+
+## Follow the original answer into Tool result records
+
+The opt-in named read
+`GET /api/v1/keepers/asks?name=<keeper>&answer_progress_for=<ask-id>`
+retains the canonical answer and source reaction clocks. Its `tool_actions`
+observation now also projects committed physical Tool result rows whose original
+turn input contains that exact answer. The source identity comes from the
+canonical question ID and first-answer timestamp when the answer observation is
+created. It passes through the per-run context and original post-Tool hooks;
+concurrent runs do not share a Keeper-name context or infer membership from time.
+
+| Surface | Before | Source implementation |
+| --- | --- | --- |
+| Answer follow-up | Turn entry/boundary and queue clocks | Those facts plus known committed Tool result count, first result clock and latest physical execution/trace/turn identity |
+| Original source lookup | Tool association unavailable | Exact source index over authoritative Tool rows, independent of recent tails and time windows |
+| Interleaved Keeper runs | No exact answer-to-Tool association | Each run retains its original answer input IDs; another answer timestamp or Keeper cannot supply a row |
+| Failed observation after a positive result | Reaction clocks retained | Tool result facts also remain, with the latest read marked unavailable |
+
+`tool_actions.state` is `observed` or `unavailable`. An observed summary has
+`observed_count`, `first_recorded_at` and nullable `latest`; the latest record
+names `execution_id`, `trace_id`, `keeper_turn_id`, `tool` and `recorded_at`.
+The TUI shows the result count/latest Tool and turn alongside the retained
+answer receipt. `tui_ask_followup` logs keep the same identity and observation
+clocks without question text, answers or Tool input/output bodies. The existing
+drawn feedback block determines the remaining viewport space.
+
+These are positive result observations, including errors. They prove input
+membership, not that the answer caused an action, the model used its content,
+an effect succeeded or the Task finished. No result is invented from a queue
+ACK, turn entry, clock overlap, or an unfinished Tool start. Uninstrumented
+native actions, older rows and fresh continuations without the original answer
+context remain unobserved. A zero count is no proof that no action happened.
+Ambiguous duplicate physical execution IDs or an unavailable/different Tool
+ledger workspace leave action evidence unavailable while retaining reaction
+facts. Reads neither flush pending Tool appends nor enqueue another answer.
+
+The source index is derived: its schema rebuilds from the canonical Tool ledger
+on first read after this change, and source rows follow file replacement/shrink
+through the same generation checks. Row bodies are revalidated and folded in a
+blocking worker; the response retains only metadata. Cold rebuild latency is
+not measured here.
+
+The comparison baseline is #43459 at
+`c5f7105b3390c38c66d06e44774fa228aa920b20`. Authored scenarios exercise real
+isolated Ask/Tool stores and SQLite reads, interleaved per-run contexts, canonical
+answer timestamps, other Keepers, failed results, duplicate execution evidence,
+ledger shrink/rebuild, workspace mismatch, strict protocol decoding and retention
+of positive state after failed reads. They are not executed in this unit.
+Parser checks establish syntax only. A source-SQL storage probe passed exact
+source/Keeper lookup,
+primary-index use and deletion/replacement cascade checks; this verifies the SQL
+structure, not the OCaml feature. A matched Before/After must retain the same
+answer source, request, runtime and original Tool/Task identities and compare
+answer recording, turn entry, first Tool result recording and TUI admission
+separately, including failed/unfinished samples. No new native or model latency
+result is claimed.

@@ -26,10 +26,28 @@ val deliver :
     queue commit rechecks under the owner lock, with the same bound, and
     honors the existing lifecycle intake fence. *)
 
+type tool_action = {
+  execution_id : string;
+  trace_id : string;
+  keeper_turn_id : int;
+  tool_name : string;
+  recorded_at : float;
+}
+
+type tool_actions = {
+  observed_count : int;
+  first_recorded_at : float option;
+  latest : tool_action option;
+}
+(** Committed Tool result observations in turns whose input contains this exact
+    canonical answer. Includes failed results; proves neither effect success nor
+    that the answer caused the action. No start/unfinished/native action claim. *)
+
 type followup = {
   answered_at : float;
   stimulus_id : string;
   reactions : Keeper_reaction_ledger.event_queue_reaction_evidence_outcome;
+  tool_actions : (tool_actions, string) result;
 }
 
 val observe_followup :
@@ -41,9 +59,9 @@ val observe_followup :
     answer consumption, Tool action or completion of the Keeper's work. *)
 
 val followup_to_json : followup -> Yojson.Safe.t
-(** Source identity, canonical answer time, observed reaction clocks, evidence
-    completeness and any first quarantine reason code only; no question, answer
-    text or responder identity. *)
+(** Source identity, canonical answer time, reaction clocks, any first
+    quarantine reason code and known physical Tool result metadata; no question,
+    answer text or responder identity. *)
 
 type failure = { keeper_name : string option; ask_id : string option; error : error }
 type report =

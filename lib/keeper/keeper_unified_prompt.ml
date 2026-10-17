@@ -616,7 +616,7 @@ let answered_ask_inputs (observation : Keeper_world_observation.world_observatio
   observation.pending_board_events
   |> List.filter_map (fun (event : Keeper_world_observation.pending_board_event) ->
     match event.event_kind with
-    | Keeper_world_observation.Ask_answered_row { answered_by } ->
+    | Keeper_world_observation.Ask_answered_row { answered_by; answer_source_id = _ } ->
       Some (event.post_id, format_board_event_text event, answered_by)
     | Keeper_world_observation.Board_post_created | Keeper_world_observation.Board_post_updated
     | Keeper_world_observation.Fusion_completed | Keeper_world_observation.Composition_completed

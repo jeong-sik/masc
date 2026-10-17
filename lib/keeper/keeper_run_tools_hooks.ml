@@ -101,6 +101,7 @@ type ctx =
   ; turn_ctx_cell : Keeper_tool_call_log.turn_ctx_cell
     (* RFC-0225 §3.3: per-run carrier; written by the pre-request hook
        below, read by the post-tool hooks in Keeper_hooks_agent_core. *)
+  ; answer_source_ids : string list
   ; final_agent_core_turn_ordinal_ref : int option ref
   ; receipt_agent_core_turn_count_ref : int option ref
   ; receipt_model_used_ref : string option ref
@@ -494,6 +495,7 @@ let assemble_hooks
   let meta = ctx.meta in
   let profile_defaults = ctx.profile_defaults in
   let turn_ctx_cell = ctx.turn_ctx_cell in
+  let answer_source_ids = ctx.answer_source_ids in
   let final_agent_core_turn_ordinal_ref = ctx.final_agent_core_turn_ordinal_ref in
   let receipt_agent_core_turn_count_ref = ctx.receipt_agent_core_turn_count_ref in
   let receipt_model_used_ref = ctx.receipt_model_used_ref in
@@ -1232,6 +1234,7 @@ let assemble_hooks
                 in
                 Keeper_tool_call_log.set_turn_context
                   ~cell:turn_ctx_cell
+                  ~answer_source_ids
                   ~agent_name:meta.name
                   ~turn_kind
                   ~lane:

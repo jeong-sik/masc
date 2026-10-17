@@ -526,7 +526,8 @@ let test_followup_protocol_keeps_exact_identity_and_unknowns () =
   let progress = ["state",`String "observed";"answered_at",`Float 200.;
     "stimulus_id",`String "original-source";"turn_started_at",`Float 201.;
     "turn_finished_at",`Null;"queue_settled_at",`Null;"queue_cancelled_at",`Null;
-    "evidence_complete",`Bool false] in
+    "evidence_complete",`Bool false;
+    "tool_actions", `Assoc ["state", `String "unavailable"]] in
   let fields = ["workspace",`Assoc ["base_path",`String "/workspace";"masc_root",`String "/workspace/.masc"];
     "state_ready",`Bool true;"keeper",`String "alpha";"answer_progress_for",`String "ask-original"] in
   let decode fields progress = Decode.decode_ask_followup ~expected_base_path:"/workspace"
@@ -549,7 +550,23 @@ let test_followup_protocol_keeps_exact_identity_and_unknowns () =
      ("turn_started_at",`Float nan)::List.remove_assoc "turn_started_at" progress;
      ("turn_started_at",`Null)::progress;
      ("state",`String "unknown")::List.remove_assoc "state" progress;
-     List.remove_assoc "evidence_complete" progress]
+     List.remove_assoc "evidence_complete" progress];
+  let actions = `Assoc ["state", `String "observed"; "observed_count", `Int 1;
+    "first_recorded_at", `Float 202.; "latest", `Assoc ["execution_id", `String "physical-one";
+      "trace_id", `String "original-trace"; "keeper_turn_id", `Int 17;
+      "tool", `String "Read"; "recorded_at", `Float 202.]] in
+  let with_actions value = ("tool_actions", value)::List.remove_assoc "tool_actions" progress in
+  let observed = match decode fields (with_actions actions) with
+    | Ok value -> value | Error detail -> Alcotest.fail detail in
+  Alcotest.(check bool) "Tool evidence retains the exact physical invocation and input turn" true
+    (match observed.af_tool_actions with
+     | Decode.Ask_tools_observed {at_count=1;at_latest=Some action;_} ->
+         action.ata_execution_id="physical-one" && action.ata_trace_id="original-trace"
+         && action.ata_keeper_turn_id=17
+     | Decode.Ask_tools_observed _ | Decode.Ask_tools_unavailable -> false);
+  Alcotest.(check bool) "a count without matching Tool identities cannot be accepted" true
+    (Result.is_error (decode fields (with_actions (`Assoc ["state",`String "observed";
+       "observed_count",`Int 1; "first_recorded_at",`Null; "latest",`Null]))))
 
 let () =
   Alcotest.run "TUI ask projection"

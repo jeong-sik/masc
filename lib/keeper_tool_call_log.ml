@@ -298,6 +298,13 @@ let record_kind_to_string = function
   | Lifecycle_event -> "lifecycle_event"
 ;;
 
+let record_kind_of_string = function
+  | "tool_call" -> Some Tool_call
+  | "composition_run" -> Some Composition_run
+  | "lifecycle_event" -> Some Lifecycle_event
+  | _ -> None
+;;
+
 type append_entry =
   { store : Dated_jsonl.t
   ; keeper_name : string
@@ -788,6 +795,7 @@ let log_call
       ?sandbox_roots
       ?network_mode
       ?runtime_profile
+      ?(answer_source_ids = [])
       ?result_bytes
       ?truncated_to
       ?input_fingerprint
@@ -1173,6 +1181,10 @@ let log_call
            @ composition_execution_field
            @ composition_tool_kind_field
            @ trace_id_field
+           @ (match record_kind, List.sort_uniq String.compare answer_source_ids with
+              | Tool_call, (_ :: _ as sources) ->
+                  ["answer_source_ids", `List (List.map (fun id -> `String id) sources)]
+              | Tool_call, [] | (Composition_run | Lifecycle_event), _ -> [])
            @ session_id_field
            @ turn_field
            @ keeper_turn_id_field

@@ -105,6 +105,15 @@ val addressed_rows :
     Invalid observation metadata or ambiguous execution identity is an error.
     The disposable index rebuilds these filters from canonical rows. *)
 
+val fold_by_answer_source :
+  store:Dated_jsonl.t -> keeper_name:string -> source_id:string ->
+  init:'a -> f:('a -> Yojson.Safe.t -> ('a, string) result) -> ('a, string) result
+(** Fold every authoritative Tool row carrying this exact answer input identity,
+    independently of time windows or recent tails. The derived source index is
+    rebuilt with the ledger and selected rows are revalidated. The callback runs
+    in the blocking worker and must perform no Eio effects. No Tool bodies are
+    retained between callback calls. This proves input membership, not causation. *)
+
 val forget_for_ledger : ledger_dir:string -> unit
 (** Drop the open handle for this ledger. The file stays; the next read
     reopens it. For a caller that has just removed or replaced the ledger

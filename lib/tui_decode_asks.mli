@@ -43,6 +43,9 @@ type ask_row = {
   ar_keeper : string;
   ar_id : string;
   ar_asked_at : float;
+  ar_source_turn_ref : Ids.Turn_ref.t option;
+      (** Original asking execution from the question row, never the answer
+          reaction or the Keeper's current turn. [None] is explicit null. *)
   ar_context : string option;
       (** why the Keeper is asking, in its own words. A row that hides this
           reads as a decision with no stakes. *)

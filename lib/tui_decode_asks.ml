@@ -41,6 +41,7 @@ type ask_row = {
   ar_keeper : string;
   ar_id : string;
   ar_asked_at : float;
+  ar_source_turn_ref : Ids.Turn_ref.t option;
   ar_context : string option;
   ar_questions : ask_question list;
   ar_resolution : ask_resolution;
@@ -145,6 +146,13 @@ let decode_ask_row json =
   let* ar_keeper = ask_string json "keeper" in
   let* ar_id = ask_string json "ask_id" in
   let* ar_asked_at = ask_float json "asked_at" in
+  let* ar_source_turn_ref = match json with
+    | `Assoc fields ->
+        (match List.filter (fun (key,_) -> String.equal key "source_turn_ref") fields with
+         | [_,`Null] -> Ok None
+         | [_,value] -> Ids.Turn_ref.of_yojson value |> Result.map Option.some
+         | [] | _::_ -> Error "asks: exactly one source_turn_ref is required")
+    | _ -> Error "asks: a question row must be an object" in
   let* question_items = ask_list json "questions" in
   let* ar_questions = ask_map_results decode_ask_question question_items in
   let* ar_resolution = decode_ask_resolution (member "resolution" json) in
@@ -153,6 +161,7 @@ let decode_ask_row json =
       ar_keeper;
       ar_id;
       ar_asked_at;
+      ar_source_turn_ref;
       ar_context = ask_string_opt json "context";
       ar_questions;
       ar_resolution;

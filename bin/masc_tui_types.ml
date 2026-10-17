@@ -2765,6 +2765,7 @@ type ask_submission = {
   as_keeper_name: string;
   as_ask_id: string;
   as_answered_label: string;
+  as_source_turn_ref: Ids.Turn_ref.t option;
 }
 
 (* An answer being typed, for the questions a choice cannot answer. The slot
@@ -7357,6 +7358,7 @@ type state = {
      means nothing has been read yet, which is not the same as a fleet with
      no open questions. *)
   mutable asks_snapshot: Masc.Tui_decode_asks.asks_snapshot option;
+  mutable ask_origin: (workspace_authority * Masc_tui_ask_projection.origin) option;
   mutable asks_error: string option;
   (* The early reply and terminal bundle share one request. Settling it once
      prevents that bundle from reviving a question answered in between. *)
@@ -8269,6 +8271,18 @@ let current_ask_answer_feedback (state : state) =
       && state.workspace_identity = Workspace_identity_match -> Some feedback
   | Some _ | None -> None
 
+let current_ask_origin (state : state) =
+  match state.ask_origin with
+  | Some (authority,origin) when authority=state.workspace_authority
+      && state.workspace_identity=Workspace_identity_match -> Some origin
+  | Some _ | None -> None
+
+let toggle_ask_origin (state : state) origin =
+  if state.workspace_identity=Workspace_identity_match then
+    match current_ask_origin state with
+    | Some current when Masc_tui_ask_projection.same_origin current origin -> state.ask_origin <- None
+    | Some _ | None -> state.ask_origin <- Some (state.workspace_authority,origin)
+
 let retain_ask_answer_feedback (state : state) submission result =
   let current = Option.exists (fun current -> current.as_request == submission.as_request)
       state.ask_submission_current in
@@ -8278,6 +8292,7 @@ let retain_ask_answer_feedback (state : state) submission result =
   if current && not already_observed && submission.as_authority = state.workspace_authority
      && state.workspace_identity = Workspace_identity_match then begin
     let feedback = Masc_tui_ask_projection.answer_feedback
+      ?source_turn_ref:submission.as_source_turn_ref
       ~keeper_name:submission.as_keeper_name ~ask_id:submission.as_ask_id
       ~submitted_label:submission.as_answered_label result in
     state.ask_answer_feedback <- Some (submission, feedback);
@@ -11678,6 +11693,7 @@ let create_state
   approvals_error = None;
   approvals_summary_read = Snapshot_read.idle;
   asks_snapshot = None;
+  ask_origin = None;
   asks_error = None;
   asks_read = Snapshot_read.idle;
   ask_answer_mode = Ask_browsing;

@@ -21,6 +21,7 @@ type draft
 type answer_feedback = private {
   af_keeper_name : string;
   af_ask_id : string;
+  af_source_turn_ref : Ids.Turn_ref.t option;
   af_receipt : (Masc.Tui_decode_asks.ask_answer_receipt, string) result;
   af_submitted_label : string option;
 }
@@ -29,12 +30,26 @@ type answer_feedback = private {
     An existing winner or uncertain/refused write never inherits that label. *)
 
 val answer_feedback :
+  ?source_turn_ref:Ids.Turn_ref.t ->
   keeper_name:string -> ask_id:string -> submitted_label:string ->
   (Masc.Tui_decode_asks.ask_answer_receipt, string) result -> answer_feedback
 
 val answer_feedback_to_json : answer_feedback -> Yojson.Safe.t
 (** Original request identities and typed recording/delivery facts only.
     Choice/free-text bodies and server error details are not logged. *)
+
+type origin = private {
+  ao_keeper_name : string;
+  ao_ask_id : string;
+  ao_source_turn_ref : Ids.Turn_ref.t option;
+}
+(** Recorded question origin, independent of current selection and live work.
+    Opening it requires no read or action on the Keeper. *)
+
+val origin_of_row : Masc.Tui_decode_asks.ask_row -> origin
+val origin_of_feedback : answer_feedback -> origin
+val same_origin : origin -> origin -> bool
+val origin_to_json : origin -> Yojson.Safe.t
 
 val empty_draft : ask_id:string -> draft
 val draft_ask_id : draft -> string

@@ -729,7 +729,7 @@ let test_the_question_count_counts_questions () =
     { Masc.Tui_decode_asks.ar_keeper = "jazz-developer"
     ; ar_id = id
     ; ar_asked_at = 0.0
-    ; ar_context = None
+    ; ar_source_turn_ref = None; ar_context = None
     ; ar_questions =
         List.init questions (fun index ->
             { Masc.Tui_decode_asks.aq_id = Printf.sprintf "%s-q%d" id index

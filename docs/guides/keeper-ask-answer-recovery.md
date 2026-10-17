@@ -121,7 +121,7 @@ that effect executable. Asking itself remains available without provenance.
 | Resumed Ask | No saved Ask execution; partial source restoration could borrow current coordinates | Original captured pair, or explicit unobserved source |
 | External caller | No host source | Still unobserved; raw arguments cannot supply proof |
 | Related Task/Goal | Explicit decision references | Preserved independently of execution source |
-| Operator observation | No original execution in question HTTP row | `source_turn_ref` string or `null`; TUI decoding/display is a separate follow-up |
+| Operator observation | No original execution in question HTTP row | `source_turn_ref` string or `null`; TUI preserves it in question and answer state |
 
 Authored, unexecuted scenarios exercise the real SDK handler with a carrier
 change during preparation, actual persistence and answer projection, forged
@@ -132,6 +132,56 @@ new question after resuming under another Task and trace. No model, backend
 Docker process, TUI frame, installed binary, latency or token improvement is
 proved by this source change. Parser-only checks do not establish typing or
 behavior.
+
+## Inspect the original question source in TUI
+
+The TUI decodes the operator row's canonical `source_turn_ref` into a typed
+optional reference. A string identifies the original trace and absolute Keeper
+turn; explicit `null` means unobserved. A missing, duplicated or malformed field
+refuses the read rather than silently assigning current Keeper activity or
+converting an ambiguous response into an unobserved source. The existing failed
+read handling retains previous question state and reports the read error.
+
+In Questions, `o` opens or closes the selected question's recorded source. With
+no open question, it can inspect the last answer's original source. This is an
+explicit diagnostic: Keeper, question ID and original Turn_ref are shown there,
+with normal terminal escaping and wrapping. It performs no HTTP request, opens
+no latest-turn inspector and grants no work/effect authority. A missing source
+is readable and does not prevent answering. The regular question/choice body
+and the free-text editor keep their existing meaning; `o` remains text while
+typing an answer. Moving the question selection or leaving answer mode closes
+the source detail. Workspace authority owns visible diagnostics so a previous
+workspace cannot supply them after a switch.
+
+A source detail is an immutable observation of its named question, not the
+current roster or selected Keeper's work. A background reread cannot silently
+rename an already opened source. The answer submission freezes the same source
+reference before the POST; later list changes and reread failures cannot change
+it in retained receipt state. The receipt display distinguishes the original
+asking turn from the later answer-reaction and Tool evidence.
+
+`tui_ask_source` records the opened source and monotonic opening time;
+`tui_ask_answer_receipt` retains the question source in its receipt metadata;
+`tui_ask_followup` names it as `question_source_turn_ref`, separate from actual
+reaction/Tool observations. Question/choice/answer text and server error details
+are excluded from these source fields. This supports joining original and later
+observations; it is not proof that a model used the answer or completed the work.
+
+| Path | Before | After in source |
+| --- | --- | --- |
+| Operator HTTP to TUI | Original source dropped by row decoder | Typed original source or explicit unobserved value |
+| Selected question | No original-turn diagnostic | `o` shows the named recorded question source without a read |
+| Answer submission/receipt | Source unavailable to retained answer state | Original reference frozen at submission and retained after reread failure |
+| Observation | Receipt/follow-up lacked asking-turn coordinate | Original source accompanies recording/delivery and later independent work facts |
+| Workspace change | Existing request ownership | Same ownership also covers source diagnostics |
+
+HTTP-to-decoder, canonical producer-to-draft/receipt, malformed/ambiguous source,
+and source retention across a later question, failed reread and workspace change
+scenarios are authored but unexecuted. No TUI wording/layout/row-order/PTY test
+was added. Parser checks do not prove typing, painted frames, input latency,
+installed behavior or performance. Exact original-turn inspection/navigation is
+not implemented here; the existing latest-turn Context Inspector is not labeled
+as the original question source.
 
 ## Keep the original question in conversation input
 

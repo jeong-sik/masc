@@ -84,6 +84,8 @@ let test_original_questions_are_bound_to_receiving_workspace () =
           |> valid Fun.id in
         match snapshot.asn_rows with
         | [row] ->
+            check (option string) "TUI decodes original source without current Keeper state"
+              (Some "original-ask-trace#17") (Option.map Ids.Turn_ref.to_string row.ar_source_turn_ref);
           check string "original ask survives the wire" ask.ask_id row.ar_id;
           check string "original Keeper survives the wire" name row.ar_keeper;
           (match row.ar_questions with

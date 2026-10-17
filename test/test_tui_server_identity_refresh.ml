@@ -987,7 +987,7 @@ let early_asks_fixture () =
   let snapshot : Masc.Tui_decode_asks.asks_snapshot =
     { asn_keeper = None; asn_open_count = 1
     ; asn_rows =
-        [{ ar_keeper = "alpha"; ar_id = "ask-1"; ar_asked_at = 1.; ar_context = None
+        [{ ar_keeper = "alpha"; ar_id = "ask-1"; ar_asked_at = 1.; ar_source_turn_ref = None; ar_context = None
          ; ar_questions =
              [{ aq_id = "q1"; aq_header = "Choice"; aq_prompt = "Continue?"
               ; aq_mode = Masc.Tui_decode_asks.Ask_single
@@ -1294,6 +1294,54 @@ let test_early_roster_preserves_read_ownership () =
   Alcotest.(check bool) "retired workspace cannot publish a roster" true
     (take_early_keeper_roster_observation state early=None)
 
+let test_question_origin_survives_answer_and_workspace_change () =
+  let open Masc_tui_types in
+  let module Ask = Masc_tui_ask_projection in
+  let state,early = early_asks_fixture () in
+  let original_ref = Ids.Turn_ref.make ~trace_id:"original-question-source" ~absolute_turn:17 in
+  let snapshot = match early.ea_observation.asks_result with
+    | Ok snapshot -> snapshot | Error error -> Alcotest.fail error in
+  let original = match snapshot.asn_rows with
+    | [row] -> {row with ar_source_turn_ref=Some original_ref}
+    | _ -> Alcotest.fail "one original question" in
+  let origin = Ask.origin_of_row original in
+  toggle_ask_origin state origin;
+  let submission : ask_submission =
+    {as_request=ref ();as_authority=state.workspace_authority;
+     as_keeper_name=original.ar_keeper;as_ask_id=original.ar_id;as_answered_label="private choice";
+     as_source_turn_ref=original.ar_source_turn_ref} in
+  begin_ask_submission_state ~submission state;
+  let later = {original with ar_id="later-question";
+      ar_source_turn_ref=Some (Ids.Turn_ref.make ~trace_id:"later-source" ~absolute_turn:900)} in
+  state.asks_snapshot <- Some {snapshot with asn_rows=[later]};
+  state.asks_error <- Some "reread unavailable";
+  let feedback = retain_ask_answer_feedback state submission
+      (Ok (Masc.Tui_decode_asks.Ask_answer_recorded Masc.Tui_decode_asks.Ask_wake_stored))
+      |> Option.get in
+  Alcotest.(check (option string)) "receipt preserves the transmitted question's source"
+    (Some "original-question-source#17") (Option.map Ids.Turn_ref.to_string feedback.af_source_turn_ref);
+  Alcotest.(check bool) "a later selected question does not replace opened original diagnostics" true
+    (Option.exists (Ask.same_origin origin) (current_ask_origin state));
+  let json = Ask.origin_to_json (Ask.origin_of_feedback feedback) in
+  Alcotest.(check string) "source telemetry belongs to the original question"
+    original.ar_id Yojson.Safe.Util.(json |> member "ask_id" |> to_string);
+  let Workspace_authority generation = state.workspace_authority in
+  state.workspace_authority <- Workspace_authority (generation+1);
+  Alcotest.(check bool) "previous workspace cannot retain visible source diagnostics" true
+    (current_ask_origin state=None);
+  Alcotest.(check bool) "previous receipt cannot supply a new workspace source" true
+    (current_ask_answer_feedback state=None);
+  let unknown = Ask.origin_of_row {later with ar_source_turn_ref=None} in
+  state.workspace_identity <- Workspace_identity_unread;
+  toggle_ask_origin state unknown;
+  Alcotest.(check bool) "unconfirmed workspace cannot open source from an old row" true
+    (current_ask_origin state=None);
+  state.workspace_identity <- Workspace_identity_match;
+  toggle_ask_origin state unknown;
+  let unknown = current_ask_origin state |> Option.get |> Ask.origin_to_json in
+  Alcotest.(check bool) "unknown source is never filled from earlier diagnostics" true
+    Yojson.Safe.Util.((unknown |> member "source_turn_ref") = `Null)
+
 let test_answer_receipt_has_one_original_submission_owner () =
   let open Masc_tui_types in
   let module Decode = Masc.Tui_decode_asks in
@@ -1303,7 +1351,7 @@ let test_answer_receipt_has_one_original_submission_owner () =
   state.server_identity <- Some (identity "/workspace/a");
   let submission ask_id : ask_submission =
     { as_request = ref (); as_authority = state.workspace_authority;
-      as_keeper_name = "reader"; as_ask_id = ask_id; as_answered_label = "reader: choice" } in
+      as_keeper_name = "reader"; as_ask_id = ask_id; as_source_turn_ref = None; as_answered_label = "reader: choice" } in
   let first = submission "first" in
   begin_ask_submission_state ~submission:first state;
   let receipt = Ok (Decode.Ask_answer_recorded Decode.Ask_wake_stored) in
@@ -1345,7 +1393,7 @@ let test_answer_followup_retains_current_source_observations () =
   state.workspace_identity <- Workspace_identity_match;
   state.server_identity <- Some (identity state.local_base_path);
   let submission name : ask_submission = {as_request=ref ();as_authority=state.workspace_authority;
-      as_keeper_name="alpha";as_ask_id=name;as_answered_label="choice"} in
+      as_keeper_name="alpha";as_ask_id=name;as_source_turn_ref=None;as_answered_label="choice"} in
   let first = submission "original" in
   begin_ask_submission_state ~submission:first state;
   ignore (retain_ask_answer_feedback state first (Ok (Decode.Ask_answer_recorded Decode.Ask_wake_stored)));
@@ -1650,6 +1698,8 @@ let () =
             test_initial_probe_rejects_retired_refresh
         ; Alcotest.test_case "roster arrives before unrelated readers and settles once" `Quick
             test_early_roster_settles_before_slow_siblings_once
+        ; Alcotest.test_case "question origin survives answer and workspace change" `Quick
+            test_question_origin_survives_answer_and_workspace_change
         ; Alcotest.test_case "answer receipt has one original submission owner" `Quick
             test_answer_receipt_has_one_original_submission_owner
         ; Alcotest.test_case "early roster preserves source and workspace ownership" `Quick

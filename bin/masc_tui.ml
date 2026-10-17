@@ -12290,6 +12290,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.approvals_summary_read <- Snapshot_read.invalidate state.approvals_summary_read;
   state.approval_detail_open <- false;
   state.asks_snapshot <- None;
+  state.ask_origin <- None;
   state.asks_error <- None;
   state.ask_answer_mode <- Ask_browsing;
   state.ask_cursor <- 0;
@@ -14369,6 +14370,24 @@ let selected_ask_row state =
       List.find_opt (fun (row : Masc.Tui_decode_asks.ask_row) -> row.ar_id = aam_ask_id)
         (open_ask_rows state)
 
+let toggle_selected_ask_origin state =
+  match current_ask_origin state with
+  | Some _ -> state.ask_origin <- None
+  | None ->
+      let origin = match selected_ask_row state with
+        | Some row -> Some (Ask.origin_of_row row)
+        | None -> Option.map Ask.origin_of_feedback (current_ask_answer_feedback state) in
+      (match origin with
+       | None -> report_action state "system" "No question source is available"
+       | Some origin ->
+           Masc_tui_types.toggle_ask_origin state origin;
+           Option.iter (fun origin ->
+             Log.Transport.info "tui_ask_source=%s"
+               (Yojson.Safe.to_string (`Assoc
+                 ["opened_ns",`String (Int64.to_string (Mtime_clock.elapsed_ns ()));
+                  "origin",Ask.origin_to_json origin]))) (current_ask_origin state))
+
+
 let selected_ask_question state =
   match selected_ask_row state with
   | None -> None
@@ -14407,6 +14426,7 @@ let move_ask_cursor state delta =
     let next = max 0 (min (count - 1) (state.ask_cursor + delta)) in
     if next <> state.ask_cursor then begin
       state.ask_cursor <- next;
+      state.ask_origin <- None;
       state.ask_question_cursor <- 0;
       state.ask_question_scroll <- 0;
       state.pending_ask_submit <- None;
@@ -14575,13 +14595,13 @@ let apply_ask_answer_completion state submission result asks =
 
 (* TEL-OK: the TUI-local submit gate emits user-visible events here; the
    ask-answer endpoint owns the durable answer telemetry. *)
-let start_ask_answer state ~keeper_name ~ask_id ~answered_label ~answers ~mailbox =
+let start_ask_answer state ~keeper_name ~ask_id ~source_turn_ref ~answered_label ~answers ~mailbox =
   let enqueue_receipt = enqueue_async in
   let enqueue_async = workspace_enqueue state in
   let authority = state.workspace_authority in
   let identity = state.server_identity in
   let submission = { as_request = ref (); as_authority = authority; as_keeper_name = keeper_name;
-    as_ask_id = ask_id; as_answered_label = answered_label } in
+    as_ask_id = ask_id; as_source_turn_ref = source_turn_ref; as_answered_label = answered_label } in
   if state.workspace_identity <> Workspace_identity_match then
     report_action state "error" "Cannot answer: workspace identity is unverified; draft retained"
   else begin
@@ -14670,7 +14690,9 @@ let handle_ask_submit state ~mailbox =
                 | chosen -> Printf.sprintf "%s: %s" row.Masc.Tui_decode_asks.ar_keeper chosen
               in
               start_ask_answer state ~keeper_name:row.Masc.Tui_decode_asks.ar_keeper
-                ~ask_id:row.Masc.Tui_decode_asks.ar_id ~answered_label ~answers ~mailbox))
+                ~ask_id:row.Masc.Tui_decode_asks.ar_id
+                ~source_turn_ref:row.Masc.Tui_decode_asks.ar_source_turn_ref
+                ~answered_label ~answers ~mailbox))
 
 (* Run one lifecycle action's steps against the server.
 
@@ -18126,6 +18148,8 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                      "linked_task_evidence_current", `Bool task.akt_evidence_current]) in
         Log.Transport.info "tui_ask_followup=%s" (Yojson.Safe.to_string (`Assoc
           (["keeper", `String submission.as_keeper_name; "ask_id", `String submission.as_ask_id;
+            "question_source_turn_ref",(match submission.as_source_turn_ref with
+              | None -> `Null | Some reference -> Ids.Turn_ref.to_yojson reference);
             "admitted_ns", `String (Int64.to_string (Mtime_clock.elapsed_ns ()))] @ facts))))
         (Masc_tui_types.take_ask_followup state request submission result)
   | Ask_answer_receipt_observed (submission, result) ->
@@ -24546,6 +24570,7 @@ and is loaded on demand through keeper_skill.
                   Masc_tui_render_approvals.ask_question_scroll_limit state
             | "[" -> state.home_opened_request <- None; move_ask_cursor state (-1)
             | "]" -> state.home_opened_request <- None; move_ask_cursor state 1
+            | "o" -> toggle_selected_ask_origin state
             | "s" | "S" -> skip_ask_question state
             | "c" | "C" -> clear_ask_question state
             (* Ahead of the digit arm below, which takes every one-character
@@ -24570,6 +24595,14 @@ and is loaded on demand through keeper_skill.
                      | Some _ | None -> toggle_ask_choice state (position - 1))
                 | Some _ | None -> ())
             | _ -> ());
+           Render_schedule.request render_schedule Render_schedule.Force
+       | Some "o"
+         when state.view = Approvals
+              && not state.context_inspector_open
+              && Option.is_none (text_input_target state ~compact_viewport)
+              && (not state.approval_detail_open)
+              && not (modal_owns_keys state) ->
+           toggle_selected_ask_origin state;
            Render_schedule.request render_schedule Render_schedule.Force
        (* The same two keys the answering mode uses, so the walk does not
           change shape when the operator commits. j/k cannot serve here: the

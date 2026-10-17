@@ -367,6 +367,9 @@ let approval_read =
 let approval_answer =
   b Act "a" "answer a question"
     ~help:"open the selected Keeper question in its own mode; Esc leaves it"
+let approval_origin =
+  b Act "o" "question source"
+    ~help:"show or hide the selected question's recorded calling turn; with no open question, inspect the last answer's source; this does not open the Keeper's latest turn"
 let approval_walk =
   b Navigate "[ / ]" "ask"
     ~help:"while browsing or answering a question, move to the previous or next ask; \
@@ -709,6 +712,7 @@ let for_surface = function
            owns this surface's arrows and its y/n, which is why answering
            opens as its own mode rather than as a key on the row. *)
       ; approval_answer
+      ; approval_origin
       ; approval_walk
       ; approval_workspace
       ; approval_outside
@@ -1093,7 +1097,7 @@ let footer_hints_approvals mode =
   | Approval_browsing ->
       row
         [ hint approval_move; hint approval_decide; hint approval_workspace
-        ; hint approval_outside; hint approval_walk; hint approval_answer
+        ; hint approval_outside; hint approval_walk; hint approval_answer; hint approval_origin
         ; hint listing_refresh; hint listing_next
         ]
   | Approval_writing ->
@@ -1103,7 +1107,7 @@ let footer_hints_approvals mode =
       ^ row [ hint approval_skip; hint approval_clear; hint approval_back ]
   | Approval_answering { has_choices; takes_text } ->
       row
-        ([ hint approval_question; hint row_list_page; hint approval_walk ]
+        ([ hint approval_question; hint row_list_page; hint approval_walk; hint approval_origin ]
         @ (if has_choices then [ hint approval_pick ] else [])
         @ (if takes_text then [ hint approval_write ] else [])
         @ [ hint approval_skip; hint approval_clear

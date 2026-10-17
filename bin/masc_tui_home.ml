@@ -107,6 +107,7 @@ let home_decision_rows (state : state) =
 
 let clear_ask_answering state =
   state.ask_answer_mode <- Ask_browsing;
+  state.ask_origin <- None;
   state.ask_draft <- None;
   state.ask_text_entry <- None;
   state.pending_ask_submit <- None

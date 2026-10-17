@@ -239,8 +239,28 @@ let unsupported_arg_names schema = function
 type one_of_branch = {
   required : string list;
   consts : (string * Yojson.Safe.t) list;
-  forbidden_required : string list;
+  (* Each group is a conjunction: [not: {required: [a;b]}] forbids both
+     together, whereas [not: {anyOf: [{required:[a]};{required:[b]}]}]
+     forbids either field. Flattening these forms loses that distinction. *)
+  forbidden_required_groups : string list list;
 }
+
+let negated_required_groups branch =
+  let required_group = function
+    | `Assoc ["required", `List items] as schema
+      when List.for_all (function `String _ -> true | _ -> false) items ->
+        Some (required_names schema)
+    | _ -> None in
+  match Json_util.assoc_member_opt "not" branch with
+  | Some (`Assoc ["anyOf", `List alternatives]) ->
+      let groups = List.filter_map required_group alternatives in
+      if List.length groups = List.length alternatives then groups else []
+  | Some schema ->
+      (match required_group schema with Some group -> [group] | None -> [])
+  | None -> []
+(* This presence checker covers the exact forms emitted by [[one_of]] and
+   composition node schemas. Other JSON Schema predicates remain outside
+   its existing partial-validation contract; they are not parsed as prose. *)
 
 let one_of_branch_constraints schema =
   match Json_util.assoc_member_opt "oneOf" schema with
@@ -266,12 +286,8 @@ let one_of_branch_constraints schema =
                    props
                | _ -> []
              in
-             let forbidden_required =
-               match Json_util.assoc_member_opt "not" branch with
-               | Some (`Assoc _ as not_schema) -> required_names not_schema
-               | _ -> []
-             in
-             Some { required; consts; forbidden_required })
+             let forbidden_required_groups = negated_required_groups branch in
+             Some { required; consts; forbidden_required_groups })
         branches
     in
     if List.length constraints = List.length branches then constraints else []
@@ -307,7 +323,7 @@ let one_of_required_shape_error schema = function
       in
       let branch_matches branch =
         List.for_all key_is_present branch.required
-        && not (List.exists key_is_present branch.forbidden_required)
+        && not (List.exists (List.for_all key_is_present) branch.forbidden_required_groups)
         && List.for_all
              (fun (name, expected) -> const_field_matches name expected)
              branch.consts

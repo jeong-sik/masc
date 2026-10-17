@@ -1464,11 +1464,41 @@ let test_autonomous_turn_recovers_task_free_work_from_history () =
 
 let test_prepared_prompt_keeps_turn_inputs_and_request_authority () =
   Eio_main.run (fun _ ->
+    let module Ask = Masc.Keeper_ask in
     let held id = Inputs.Current_task
       {(make_task ~task_status:(Masc_domain.InProgress {assignee=meta.name;started_at="2026-10-17T00:00:00Z"}) ())
        with id} in
+    let question =
+      Ask.question
+        ~question_id:"q-original"
+        ~header:"original"
+        ~prompt:"keep the original work?"
+        ~choices:[]
+        ~mode:Ask.Single
+        ~free_text:(Ask.Free_text_allowed { hint = None })
+      |> Result.get_ok
+    in
+    let original_ask =
+      Ask.ask
+        ~ask_id:"original-common-owner"
+        ~keeper_name:meta.name
+        ~questions:[ question ]
+        ~context:"original answer"
+        ~continuation:(Masc.Keeper_continuation_channel.unrouted "wake turn context fixture")
+        ~asked_at:1.
+        ()
+      |> Result.get_ok
+    in
+    let answers =
+      Ask.parse_answers
+        ~ask:original_ask
+        ~submissions:[ "q-original", Ask.Wrote "ORIGINAL_ASK_REPLY\nkeep the original work" ]
+      |> Result.get_ok
+    in
     let answer : WO.pending_board_event =
-      {event_kind=WO.Ask_answered_row {answered_by=Masc.Keeper_input_speaker.Owner};
+      {event_kind=WO.Ask_answered_row {answered_by=Masc.Keeper_input_speaker.Owner;
+        answer_source_id=Some "keeper-ask:original-common-owner";
+        input={original_ask; answers; answered_at=1.}};
        post_id="keeper-ask:original-common-owner";author="operator";title="original answer";
        preview="ORIGINAL_ASK_REPLY\nkeep the original work";hearth=None;post_kind=Masc.Board.System_post;
        updated_at=1.;explicit_mention=false;matched_targets=[];replies_after_own_comment=None;

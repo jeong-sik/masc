@@ -490,7 +490,8 @@ let test_prepared_missing_parent_writes_recompute_after_predecessor () =
 
 let test_prepared_missing_parent_write_retains_physical_ancestor () =
   fixture @@ fun _env sw config meta recovery root ->
-  let input path = `Assoc ["path", `String path; "content", `String "original bytes"] in
+  let input path = `Assoc ["path", `String path; "content", `String "original bytes";
+                           "mode", `String "overwrite"] in
   let prepare input = match FS.prepare_write ~sw ~config ~meta ~args:input with
     | Ok (Some prepared) -> prepared
     | Ok None -> fail "missing parent Write was not prepared"

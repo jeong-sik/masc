@@ -29,7 +29,8 @@
 # lane are not found; run that command for them.
 #
 # Before anything is replaced, the new build judges the runtime.toml of the
-# workspace its server runs on (#39311). A refusal leaves every binary and
+# workspace its server runs on (#39311) and reads every durable store there,
+# as the deploy preflight does (#43483). A refusal leaves every binary and
 # process as it was. Until #39431 makes the check required, an install that
 # cannot run it (no workspace found, no helper in --build-dir) says so on one
 # WARN line and installs as before.
@@ -179,6 +180,18 @@ else
           "$repo/scripts/check-runtime-deployment-preflight.sh" \
           --base-path "$workspace_root" \
           --runtime-config-only
+        # Boot reads only the stores it refuses on; a Preflight_only store is
+        # read before a start by the deploy preflight alone (RFC
+        # every-durable-store-has-one-boot-policy). This install read
+        # runtime.toml alone, so the Memory admission queues #42020 hard-cut
+        # stayed unreadable from 2026-10-10 to 10-17 while every server ran
+        # (#43483). The scan reads with this build's decoders and writes
+        # nothing, so the running server is left as it is.
+        echo "install-local-build: checking stored state of $workspace_root"
+        if ! "$preflight_helper" validate-stores --base-path "$workspace_root"; then
+          echo "install-local-build: this build cannot read the stored state listed above; nothing installed. Stop every server on $workspace_root, fix each listed store as its \"Fresh state required\" entry says (CHANGELOG.md, or changelog.d/ before a release), run this install again, then start the server." >&2
+          exit 1
+        fi
       else
         echo "install-local-build: runtime.toml not checked: workspace $workspace_root (from $workspace_source) does not exist yet"
       fi

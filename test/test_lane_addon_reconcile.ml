@@ -42,6 +42,9 @@ type worker_event = Started of string | Startup_failed of string
   | Recovery_requested of string * string option
   | Recovery_completed of string * string option
 
+module Fake = Lane_addon_fake_engine
+module Lifecycle = Lane_addon_lifecycle
+
 type fake = {
   events : worker_event list ref;
   state_owners : (string, string option) Hashtbl.t;
@@ -53,6 +56,13 @@ type fake = {
   startup_barrier : unit Eio.Promise.t option ref;
   cleanup_available : bool ref;
   image_available : bool ref;
+  create_refusal : string option ref;
+  world : Fake.t;
+  home : Fake.engine;
+  condition_checks : int ref;
+  sweeps : int ref;
+  swept : Lane_addon_slot.sweep_item list ref;
+  liveness : (string -> bool) option ref;
 }
 
 let output : Types.output = {
@@ -63,19 +73,36 @@ let output : Types.output = {
     cursor = Some "1"; complete = true; detail = None }];
 }
 
+let container_name instance_id = "masc-lane-" ^ Store.digest instance_id
+
+(* The engine the fixture starts on. Tests point the world at another engine,
+   or switch an engine off, the way an operator's Docker context changes. *)
 let make_backend () =
+  let home = Fake.docker "engine-a" in
   let state = { events = ref []; state_owners=Hashtbl.create 4; recovered_state_owners=Hashtbl.create 4; recovered_runtimes=Hashtbl.create 4; observations = ref []; recovery_barrier = ref None;
                 startup_available = ref true; startup_barrier = ref None; cleanup_available = ref true;
-                image_available = ref true } in
+                image_available = ref true; create_refusal = ref None;
+                world = Fake.create home; home; condition_checks = ref 0; sweeps = ref 0; swept = ref []; liveness = ref None } in
   let record event = state.events := event :: !(state.events) in
+  let proven ~engine work =
+    Lane_addon_slot.proven (Fake.port state.world) ~expected:engine ~lift:Fun.id work in
   let backend : Runtime.For_testing.backend = {
-    start = (fun ~sw:_ ~state_owner ~instance_id ~(package : Types.package) ~binding:_ ~on_created ->
+    start = (fun ~sw:_ ~state_owner ~instance_id ~(package : Types.package) ~binding:_ ~on_engine ~is_live_instance ~on_created ->
       Hashtbl.replace state.state_owners instance_id
         (Option.map (Lane_addon_worker_state.volume_name ~runtime:package.runtime) state_owner);
       let stopped, release_stop = Eio.Promise.create () in
       let stop_sent = ref false in
+      let container_id = Store.digest instance_id in
+      match (Fake.port state.world).read_engine () with
+      | Error (Lifecycle.Unreachable detail) ->
+          record (Startup_failed instance_id);
+          Error (Lifecycle.Engine_unreachable detail)
+      | Error (Lifecycle.Identity_unreadable detail) ->
+          record (Startup_failed instance_id);
+          Error (Lifecycle.Worker_failed detail)
+      | Ok engine ->
       let connection : Runtime.For_testing.connection = {
-        container_id = Store.digest instance_id;
+        container_id;
         exported_tools = (fun () -> []);
         call_exported_tool = (fun ~on_result:_ ~authorize:_ ~principal:_ ~name:_ ~arguments:_ -> Error (Lane_addon_call_context.Transport_error "no exported tools"));
         action_schema = (fun () -> None);
@@ -87,43 +114,83 @@ let make_backend () =
           | _ -> Ok output);
         stop = (fun () ->
           record (Stop_requested instance_id);
-          if not !(state.cleanup_available) then Error "cleanup dependency unavailable"
-          else begin
-          if not !stop_sent then begin
-            stop_sent := true;
-            record (Stopped instance_id);
-            Eio.Promise.resolve release_stop ()
-          end;
-          Ok ()
-          end);
+          if not !(state.cleanup_available) then Error (Lifecycle.Cleanup_unconfirmed "cleanup dependency unavailable")
+          else
+            let removed = proven ~engine (fun () ->
+              Fake.remove state.world container_id;
+              if Fake.exists state.world container_id
+              then Error (Lifecycle.Cleanup_unconfirmed "container remains visible")
+              else Ok ()) in
+            Result.map (fun () ->
+              if not !stop_sent then begin
+                stop_sent := true;
+                record (Stopped instance_id);
+                Eio.Promise.resolve release_stop ()
+              end) removed);
       } in
       if not !(state.startup_available) then begin
         record (Startup_failed instance_id);
-        Error "worker dependency unavailable"
+        Error (Lifecycle.Worker_failed "worker dependency unavailable")
       end else begin
-        record (Started instance_id);
-        on_created connection;
-        Option.iter Eio.Promise.await !(state.startup_barrier);
-        Ok connection
+        match on_engine engine with
+        | Error detail -> Error (Lifecycle.Persistence_failed detail)
+        | Ok () when !(state.create_refusal) <> None ->
+            (* The engine is on record; the create itself is refused. *)
+            record (Startup_failed instance_id);
+            Error (Lifecycle.Worker_failed (Option.value ~default:"" !(state.create_refusal)))
+        | Ok () ->
+            let name, mine = match state_owner with
+              | Some owner ->
+                  Lane_addon_worker_state.container_name ~runtime:package.runtime owner,
+                  Some (Lane_addon_worker_state.identity owner)
+              | None -> container_name instance_id, None in
+            (match Lane_addon_slot.claim (Fake.port state.world) ~name ~instance_id ~mine ~is_live_instance with
+             | Error failure -> record (Startup_failed instance_id); Error failure
+             | Ok () ->
+                 match Fake.add (Fake.current state.world) ~id:container_id ~name
+                         ~labels:(["masc.lane.instance", instance_id; Lane_addon_engine.scope_label, Fake.scope_of_world]
+                                  @ Option.fold ~none:[] ~some:(fun owner -> ["masc.lane.state.owner", owner]) mine) () with
+                 | Error detail -> record (Startup_failed instance_id); Error (Lifecycle.Worker_failed detail)
+                 | Ok _ ->
+                     record (Started instance_id);
+                     on_created connection;
+                     Option.iter Eio.Promise.await !(state.startup_barrier);
+                     Ok connection)
       end);
     acquire = (fun ~access:_ ~store:_ ~package:_ ~resolve_machine_output:_ ~resolve_lane_output:_ ~binding:_ -> Ok (`List []));
     image_ready = (fun ~package:_ ->
       if !(state.image_available) then Ok () else Error "image is not on the host");
-    recover_stop = (fun ~runtime ~state_owner ~instance_id ~container_id ->
+    recover_stop = (fun ~runtime ~state_owner ~instance_id ~engine ~container_id ->
       Hashtbl.replace state.recovered_runtimes instance_id runtime;
       Hashtbl.replace state.recovered_state_owners instance_id
         (Option.map (Lane_addon_worker_state.volume_name ~runtime) state_owner);
       if Option.exists (fun id -> id <> Store.digest instance_id) container_id
-      then Error "persisted container does not belong to instance"
+      then Error (Lifecycle.Cleanup_unconfirmed "persisted container does not belong to instance")
       else begin
         record (Recovery_requested (instance_id, container_id));
-        if not !(state.cleanup_available) then Error "historical cleanup dependency unavailable"
+        if not !(state.cleanup_available) then Error (Lifecycle.Cleanup_unconfirmed "historical cleanup dependency unavailable")
         else begin
           Option.iter Eio.Promise.await !(state.recovery_barrier);
-          record (Recovery_completed (instance_id, container_id));
-          Ok ()
+          let lookup, mine = match container_id, state_owner with
+            | Some id, _ -> Lane_addon_engine.Id id, Option.map Lane_addon_worker_state.identity state_owner
+            | None, Some owner ->
+                Lane_addon_engine.Name (Lane_addon_worker_state.container_name ~runtime owner),
+                Some (Lane_addon_worker_state.identity owner)
+            | None, None -> Lane_addon_engine.Name (container_name instance_id), None in
+          let removed = proven ~engine (fun () ->
+            Lane_addon_slot.release (Fake.port state.world) ~lookup ~instance_id ~mine) in
+          Result.map (fun () -> record (Recovery_completed (instance_id, container_id))) removed
         end
       end);
+    condition_met = (fun ~runtime:_ condition ->
+      incr state.condition_checks;
+      Fake.condition_met state.world condition);
+    sweep = (fun ~runtime ~is_live_instance ->
+      incr state.sweeps;
+      state.liveness := Some is_live_instance;
+      let result = Lane_addon_slot.sweep (Fake.port state.world) ~runtime ~is_live_instance in
+      Result.iter (fun items -> state.swept := !(state.swept) @ items) result;
+      result);
   } in
   state, backend
 
@@ -187,6 +254,13 @@ let check_application config id expected =
   if actual <> expected then
     failf "observed declaration application: expected %S, got %S (application: %s)"
       expected actual (Yojson.Safe.to_string observed)
+let lifecycle value = member "lifecycle" value
+let failed_record value = lifecycle value |> member "failed"
+let attempts state =
+  List.length (List.filter (function Started _ | Startup_failed _ -> true | _ -> false) !(state.events))
+let recovery_requests state =
+  List.length (List.filter (function Recovery_requested _ -> true | _ -> false) !(state.events))
+
 let await clock predicate =
   let rec loop () =
     if predicate () then () else (Eio.Time.sleep clock 0.001; loop ())
@@ -719,9 +793,10 @@ let test_historical_never_started_leaves_no_binding () =
     in
     write path bytes;
     ignore (reconcile config directory);
-    await_yield (fun () -> List.mem (Recovery_completed (old_id, None)) !(state.events));
     await_yield (fun () -> not (has_binding ()));
     check bool "a never-started binding is gone after restart recovery" false (has_binding ());
+    check int "a record that names no engine never issued a create, so no engine is asked" 0
+      (recovery_requests state);
     (* Recovery nudges configuration, but this test runs no configuration
        service, so the declaration attaches again only on the next reconcile. *)
     ignore (reconcile config directory);
@@ -1057,7 +1132,9 @@ let test_historical_publication_is_not_completion ~never_started ~cold_recovery 
         release ();
         await clock (fun () -> text "kind" (application config "observer") = "failed");
         let requests () = List.filter (function Recovery_requested _ -> true | _ -> false) !(state.events) |> List.length in
-        check int "resource cleanup happened once" 1 (requests ());
+        (* A worker that never reached its engine has none on record, so its
+           cleanup asks no engine; any other cleanup asks the recorded one once. *)
+        check int "resource cleanup happened once" (if never_started then 0 else 1) (requests ());
         let root = Store.root store in
         let unreadable = Store.For_testing.binding_inventory ~root
           ~sync_parent:(fun _ -> raise (Unix.Unix_error (Unix.EIO,"fsync","cold read parent"))) in
@@ -1072,7 +1149,8 @@ let test_historical_publication_is_not_completion ~never_started ~cold_recovery 
           check bool "cold read establishes publication durability" true (!synced && confirmed.complete));
         ignore (reconcile config directory);
         await clock (fun () -> text "kind" (application config "observer") = "inactive");
-        check int "publication retry never repeats successful cleanup" 1 (requests ());
+        check int "publication retry never repeats successful cleanup"
+          (if never_started then 0 else 1) (requests ());
         check string "publication does not alter desired bytes" off (In_channel.with_open_bin path In_channel.input_all))))
 
 (* Three real retained records that carry neither visibility nor
@@ -1091,7 +1169,9 @@ let bindings_directory config =
 let replace_field key value = function
   | `Assoc fields -> `Assoc ((key, value) :: List.remove_assoc key fields)
   | _ -> fail "a retained record is an object"
-let still_attached = replace_field "phase" (Types.phase_to_json Types.Attached)
+let still_attached json =
+  replace_field "lifecycle" (Lane_addon_lifecycle.state_to_json Lane_addon_lifecycle.Attached)
+    (replace_field "phase" (Types.phase_to_json Types.Attached) json)
 let fixture_records ?(transform = Fun.id) () =
   List.map (fun name -> transform (fixture_record name)) retained_without_read_authority
 let seed_records config records =
@@ -1349,6 +1429,473 @@ let test_unparsable_file_holds_every_declaration_but_not_inspect () =
    non-regular) without opening the store (task-2382). The production path is
    exercised: a corrupt record and a replaced file land in one issues list and
    the two details differ by their bracketed tag. *)
+(* A start that fails and a cleanup that then fails are two different causes.
+   The second must not erase the first: the operator reads why the worker
+   never started, not only that its cleanup was refused. *)
+let test_a_failed_start_keeps_its_first_cause_through_a_failed_cleanup () =
+  with_fixture (fun env _ config directory packages state ->
+    let clock = Eio.Stdenv.clock env in
+    let manifest = package packages "ready" in
+    write (Filename.concat directory "observer.toml") (declaration ~id:"observer" ~manifest ());
+    state.create_refusal := Some "container name is already in use";
+    ignore (reconcile config directory);
+    let first_id = declared_instance config "observer" |> text "instance_id" in
+    await clock (fun () -> phase (instance config first_id) = "failed");
+    state.cleanup_available := false;
+    ignore (reconcile config directory);
+    await clock (fun () ->
+      text "kind" (failed_record (instance config first_id) |> member "cause") = "cleanup_unconfirmed");
+    let record = failed_record (instance config first_id) in
+    check string "the cleanup failure is the current cause" "cleanup_unconfirmed"
+      (member "cause" record |> text "kind");
+    check string "the start failure is kept as the first cause" "worker_failed"
+      (member "first" record |> text "kind");
+    check string "the first cause names why the worker did not start"
+      "container name is already in use" (member "first" record |> text "detail");
+    state.cleanup_available := true;
+    state.create_refusal := None;
+    ignore (reconcile config directory);
+    await clock (fun () -> List.for_all (fun v -> text "instance_id" v <> first_id) (instances config));
+    ignore (reconcile config directory);
+    let id = declared_instance config "observer" |> text "instance_id" in
+    await_ready clock config id;
+    detach clock config id)
+
+(* An unreachable engine is a cause that only the engine can remove. Beats
+   read the one condition and do nothing else: no new start, no cleanup, no
+   event. When the engine answers, the same beat retires the failed attempt
+   and the next one attaches. *)
+let test_a_waiting_failure_is_probed_and_not_retried () =
+  with_fixture (fun env _ config directory packages state ->
+    let clock = Eio.Stdenv.clock env in
+    let manifest = package packages "ready" in
+    write (Filename.concat directory "observer.toml") (declaration ~id:"observer" ~manifest ());
+    Fake.set_up state.home false;
+    ignore (reconcile config directory);
+    let failed_id = declared_instance config "observer" |> text "instance_id" in
+    await clock (fun () -> phase (instance config failed_id) = "failed");
+    check string "the failure says the engine is unreachable" "engine_unreachable"
+      (failed_record (instance config failed_id) |> member "cause" |> text "kind");
+    check int "one attempt so far" 1 (attempts state);
+    let probes_before = !(state.condition_checks) in
+    for _ = 1 to 5 do ignore (reconcile config directory) done;
+    check int "five beats start nothing" 1 (attempts state);
+    check int "five beats clean up nothing" 0 (recovery_requests state);
+    check int "each beat read the condition once" (probes_before + 5) !(state.condition_checks);
+    check string "the failed attempt is still the one on record" failed_id
+      (declared_instance config "observer" |> text "instance_id");
+    Fake.set_up state.home true;
+    ignore (reconcile config directory);
+    await clock (fun () -> List.for_all (fun v -> text "instance_id" v <> failed_id) (instances config));
+    check int "no engine was recorded, so no create was issued and nothing is asked of any engine" 0
+      (recovery_requests state);
+    ignore (reconcile config directory);
+    let id = declared_instance config "observer" |> text "instance_id" in
+    await_ready clock config id;
+    check int "the next attempt is the second start" 2 (attempts state);
+    detach clock config id)
+
+(* A record written by an earlier shape carries a phase but no lifecycle. It
+   is not read as detached, so it cannot be mistaken for a confirmed release:
+   it is an unreadable record that holds the declaration it names. *)
+let test_a_record_without_the_current_lifecycle_is_unreadable () =
+  with_fixture (fun env _ config directory packages state ->
+    let clock = Eio.Stdenv.clock env in
+    let manifest = package packages "ready" in
+    (* Readable authority is present, so the only fault is the lifecycle. *)
+    let readable_without_lifecycle json =
+      match json
+        |> replace_field "visibility" (`Assoc ["kind", `String "shared"])
+        |> replace_field "source_access" (Lane_addon_sources.access_to_json Lane_addon_sources.Operator_configuration) with
+      | `Assoc fields -> `Assoc (List.remove_assoc "lifecycle" fields)
+      | _ -> fail "a retained record is an object" in
+    let records = fixture_records ~transform:readable_without_lifecycle () in
+    ignore (seed_records config records);
+    write (Filename.concat directory "dos-counter.toml") (declaration ~id:"dos-counter" ~manifest ());
+    let result = reconcile config directory in
+    check (list string) "a record that is only a bare detached phase holds the declaration" [] (starts state);
+    check bool "the declaration is refused beside its unreadable records" true
+      (issues_of "dos-counter" result <> []);
+    check_unchanged config records;
+    remove_seeded_files config;
+    ignore (reconcile config directory);
+    let id = declared_instance config "dos-counter" |> text "instance_id" in
+    await_ready clock config id;
+    detach clock config id)
+
+(* The incident: the CLI is pointed at another engine, which holds none of this
+   worker's containers. Its "nothing here" is not a release. The record stays
+   failed, with the recorded engine as the condition for the next attempt,
+   and the container is released once that engine answers again. *)
+let test_another_engine_does_not_release_a_worker () =
+  with_fixture (fun env _ config directory packages state ->
+    let clock = Eio.Stdenv.clock env in
+    let manifest = package packages "ready" in
+    let path = Filename.concat directory "observer.toml" in
+    write path (declaration ~id:"observer" ~manifest ());
+    ignore (reconcile config directory);
+    let id = declared_instance config "observer" |> text "instance_id" in
+    await_ready clock config id;
+    let container = Store.digest id in
+    check bool "the container is on the first engine" true (Fake.holds state.home container);
+    check string "the first engine is on record" "engine-a"
+      (instance config id |> member "engine" |> text "id");
+    Fake.point_at state.world (Fake.docker "engine-b");
+    write path (declaration ~enabled:false ~id:"observer" ~manifest ());
+    ignore (reconcile config directory);
+    await clock (fun () -> phase (instance config id) = "failed");
+    let cause = failed_record (instance config id) |> member "cause" in
+    check string "the refusal is a mismatch" "engine_mismatch" (text "kind" cause);
+    check string "it names the recorded engine" "engine-a" (member "recorded" cause |> text "id");
+    check string "and the engine that answered" "engine-b"
+      (member "observed" cause |> member "engine" |> text "id");
+    check bool "the container was not released" true (Fake.holds state.home container);
+    let probes = !(state.condition_checks) in
+    for _ = 1 to 4 do ignore (reconcile config directory) done;
+    check int "four more beats stop nothing" 1 (List.length (stop_requests state));
+    check int "each beat reads the condition once" (probes + 4) !(state.condition_checks);
+    Fake.point_at state.world state.home;
+    ignore (reconcile config directory);
+    await_detached clock config id;
+    check bool "the recorded engine released the container" false (Fake.holds state.home container);
+    let release = lifecycle (instance config id) |> member "release" in
+    check string "the release names the engine" "engine-a" (member "engine" release |> text "id");
+    check string "the release names the container" container (text "container_id" release))
+
+let test_an_unreachable_engine_waits_and_then_releases () =
+  with_fixture (fun env _ config directory packages state ->
+    let clock = Eio.Stdenv.clock env in
+    let manifest = package packages "ready" in
+    let path = Filename.concat directory "observer.toml" in
+    write path (declaration ~id:"observer" ~manifest ());
+    ignore (reconcile config directory);
+    let id = declared_instance config "observer" |> text "instance_id" in
+    await_ready clock config id;
+    Fake.set_up state.home false;
+    write path (declaration ~enabled:false ~id:"observer" ~manifest ());
+    ignore (reconcile config directory);
+    await clock (fun () -> phase (instance config id) = "failed");
+    check string "an engine that does not answer is its own cause" "engine_unreachable"
+      (failed_record (instance config id) |> member "cause" |> text "kind");
+    check bool "the container is kept" true (Fake.holds state.home (Store.digest id));
+    for _ = 1 to 3 do ignore (reconcile config directory) done;
+    check int "waiting beats stop nothing" 1 (List.length (stop_requests state));
+    Fake.set_up state.home true;
+    ignore (reconcile config directory);
+    await_detached clock config id;
+    check bool "released once the engine answers" false (Fake.holds state.home (Store.digest id)))
+
+let persistent_package packages id =
+  let manifest = package packages id in
+  write manifest (In_channel.with_open_bin manifest In_channel.input_all ^ "\n[world.state]\nmode = \"persistent\"\n");
+  manifest
+
+(* Install and release one persistent worker, and return the shared writer
+   container it held: its name and labels are the slot every later incarnation
+   of the installation needs. *)
+let released_writer_slot env config directory packages state =
+  let clock = Eio.Stdenv.clock env in
+  let manifest = persistent_package packages "ready" in
+  let path = Filename.concat directory "observer.toml" in
+  write path (declaration ~id:"observer" ~manifest ());
+  ignore (reconcile config directory);
+  let first = declared_instance config "observer" |> text "instance_id" in
+  await_ready clock config first;
+  let slot = match Fake.find state.home (Store.digest first) with
+    | Some container -> container | None -> fail "the worker's container is on its engine" in
+  write path (declaration ~enabled:false ~id:"observer" ~manifest ());
+  ignore (reconcile config directory);
+  await_detached clock config first;
+  check bool "the first incarnation's container is released" false (Fake.holds state.home slot.id);
+  manifest, path, first, slot
+
+let other_instance (slot : Fake.container) instance =
+  ("masc.lane.instance", instance) :: List.remove_assoc "masc.lane.instance" slot.labels
+
+(* The incident: a server died and left an exited container holding the
+   installation's writer name, while its record already says released. A new
+   incarnation must not trust that record. It reads the slot, clears the dead
+   predecessor and starts. *)
+let test_a_dead_predecessor_holding_the_slot_does_not_block_a_new_instance () =
+  with_fixture (fun env _ config directory packages state ->
+    let clock = Eio.Stdenv.clock env in
+    let manifest, path, first, slot = released_writer_slot env config directory packages state in
+    check bool "the released record carries its evidence" true
+      (member "release" (lifecycle (instance config first)) <> `Null);
+    ignore (Fake.add state.home ~id:"dead-writer-container" ~name:slot.name
+      ~labels:(other_instance slot "dead-writer") ());
+    write path (declaration ~id:"observer" ~manifest ());
+    ignore (reconcile config directory);
+    let second = declared_instance config "observer" |> text "instance_id" in
+    await_ready clock config second;
+    check bool "the dead predecessor was removed" false (Fake.holds state.home "dead-writer-container");
+    check bool "the new incarnation holds the slot" true (Fake.holds state.home (Store.digest second));
+    check int "two incarnations were started" 2 (List.length (starts state));
+    detach clock config second)
+
+(* A container under the slot's name that is not a dead predecessor is never
+   removed. The attempt says who holds the slot and then waits for that
+   container to change; beats read it and do nothing else. *)
+let test_a_foreign_holder_makes_the_attempt_wait_for_the_holder_to_change () =
+  with_fixture (fun env _ config directory packages state ->
+    let clock = Eio.Stdenv.clock env in
+    let manifest, path, _first, slot = released_writer_slot env config directory packages state in
+    ignore (Fake.add state.home ~id:"foreign-container" ~name:slot.name
+      ~labels:["masc.lane.instance", "someone"] ());
+    write path (declaration ~id:"observer" ~manifest ());
+    ignore (reconcile config directory);
+    let failed_id = declared_instance config "observer" |> text "instance_id" in
+    await clock (fun () -> phase (instance config failed_id) = "failed");
+    let cause = failed_record (instance config failed_id) |> member "cause" in
+    check string "the cause is a foreign slot holder" "slot_foreign" (text "kind" cause);
+    check string "it names the container" "foreign-container"
+      (member "holder" cause |> text "container_id");
+    check bool "it names the holder's labels" true
+      (member "holder" cause |> member "instance" = `String "someone"
+       && member "holder" cause |> member "state_owner" = `Null);
+    check bool "the foreign container was not touched" true (Fake.holds state.home "foreign-container");
+    let attempts_before = attempts state and probes = !(state.condition_checks) in
+    for _ = 1 to 4 do ignore (reconcile config directory) done;
+    check int "four beats start nothing" attempts_before (attempts state);
+    check int "four beats clean up nothing" 0 (recovery_requests state);
+    check int "each beat reads the holder once" (probes + 4) !(state.condition_checks);
+    Fake.remove state.world "foreign-container";
+    ignore (reconcile config directory);
+    await clock (fun () -> List.for_all (fun v -> text "instance_id" v <> failed_id) (instances config));
+    ignore (reconcile config directory);
+    let id = declared_instance config "observer" |> text "instance_id" in
+    await_ready clock config id;
+    check bool "the new incarnation holds the freed slot" true (Fake.holds state.home (Store.digest id));
+    detach clock config id)
+
+(* Removing the declaration is what stops the observer from being applied
+   again. If it were removed before the worker's container was confirmed gone,
+   a cleanup that failed would leave a running container that nothing desires
+   and nothing retries. The declaration goes only after the release. *)
+let test_detach_keeps_the_declaration_when_cleanup_fails () =
+  with_fixture (fun env _ config directory packages state ->
+    let clock = Eio.Stdenv.clock env in
+    let manifest = package packages "ready" in
+    let path = Filename.concat directory "observer.toml" in
+    write path (declaration ~id:"observer" ~manifest ());
+    ignore (reconcile config directory);
+    let id = declared_instance config "observer" |> text "instance_id" in
+    await_ready clock config id;
+    state.cleanup_available := false;
+    let refused = Runtime.dispatch ~config ~operation:Runtime.Detach (`Assoc ["instance_id", `String id]) in
+    (match refused with
+     | Error _ -> ()
+     | Ok _ -> fail "a Detach whose cleanup failed must not report success");
+    check bool "the declaration is still there" true (Sys.file_exists path);
+    check string "the worker is failed with its cleanup cause" "cleanup_unconfirmed"
+      (failed_record (instance config id) |> member "cause" |> text "kind");
+    state.cleanup_available := true;
+    detach clock config id;
+    check bool "once the container is confirmed gone the declaration is removed" false (Sys.file_exists path);
+    check bool "the container is released" false (Fake.holds state.home (Store.digest id)))
+
+let test_detach_of_a_retained_record_keeps_the_declaration_when_cleanup_fails () =
+  with_fixture (fun env _ config directory packages state ->
+    let clock = Eio.Stdenv.clock env in
+    let manifest = package packages "ready" in
+    let path = Filename.concat directory "observer.toml" in
+    write path (declaration ~id:"observer" ~manifest ());
+    ignore (reconcile config directory);
+    let id = declared_instance config "observer" |> text "instance_id" in
+    await_ready clock config id;
+    let captured = instance config id in
+    (* A host restart: the record says running and no live worker exists. The
+       container the first worker made is still on its engine. *)
+    write path (declaration ~enabled:false ~id:"observer" ~manifest ());
+    ignore (reconcile config directory);
+    await_detached clock config id;
+    ignore (Fake.add state.home ~id:(Store.digest id) ~name:(container_name id)
+      ~labels:["masc.lane.instance", id] ());
+    Runtime.For_testing.reset ();
+    let store = Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+    unwrap (Store.save_binding store ~instance_id:id (still_attached captured));
+    write path (declaration ~id:"observer" ~manifest ());
+    state.cleanup_available := false;
+    check bool "a failed historical cleanup is reported" true
+      (Result.is_error (Runtime.dispatch ~config ~operation:Runtime.Detach (`Assoc ["instance_id", `String id])));
+    check bool "the declaration is still there" true (Sys.file_exists path);
+    check bool "the container is still there" true (Fake.holds state.home (Store.digest id));
+    state.cleanup_available := true;
+    ignore (dispatch config Runtime.Detach ["instance_id", `String id]);
+    check bool "after the confirmed release the declaration is removed" false (Sys.file_exists path);
+    check bool "the container is released" false (Fake.holds state.home (Store.digest id)))
+
+(* After an abnormal exit nothing but the engine knows which containers the
+   dead server made. The first beat that finds the engine answering removes
+   the dead ones of this base path, once; until then the declaration is
+   reported, not retried in the log. *)
+let test_a_dead_servers_containers_are_swept_once_the_engine_answers () =
+  with_fixture (fun env _ config directory packages state ->
+    let clock = Eio.Stdenv.clock env in
+    let manifest = package packages "ready" in
+    write (Filename.concat directory "observer.toml") (declaration ~id:"observer" ~manifest ());
+    let dead_name = Lane_addon_engine.owned_name Types.Docker "dead-server-instance" in
+    ignore (Fake.add state.home ~id:"dead-server-container" ~name:dead_name
+      ~labels:["masc.lane.instance", "dead-server-instance"; Lane_addon_engine.scope_label, Fake.scope_of_world] ());
+    ignore (Fake.add state.home ~id:"other-servers-container" ~name:"masc-lane-elsewhere"
+      ~labels:["masc.lane.instance", "elsewhere"; Lane_addon_engine.scope_label, "another base path"] ());
+    Fake.set_up state.home false;
+    let result = reconcile config directory in
+    let refused_attempt = declared_instance config "observer" |> text "instance_id" in
+    check int "the sweep was asked once, while the engine was down" 1 !(state.sweeps);
+    check bool "the unreachable engine is reported as an issue of this beat" true
+      (values "issues" result <> []);
+    check bool "nothing was removed" true (Fake.holds state.home "dead-server-container");
+    Fake.set_up state.home true;
+    ignore (reconcile config directory);
+    check bool "the dead server's container is removed" false (Fake.holds state.home "dead-server-container");
+    check bool "another base path's container is not" true (Fake.holds state.home "other-servers-container");
+    check bool "the report names the removal" true
+      (List.exists (fun (item : Lane_addon_slot.sweep_item) ->
+         item.container_id = "dead-server-container" && item.verdict = Lane_addon_slot.Removed) !(state.swept));
+    (* The attempt made while the engine was down is retired once it answers;
+       the next beat attaches. *)
+    await clock (fun () -> List.for_all (fun v -> text "instance_id" v <> refused_attempt) (instances config));
+    ignore (reconcile config directory);
+    let id = declared_instance config "observer" |> text "instance_id" in
+    await_ready clock config id;
+    let sweeps = !(state.sweeps) in
+    ignore (reconcile config directory);
+    check int "the sweep runs once per runtime" sweeps !(state.sweeps);
+    check bool "the live worker's container is untouched" true (Fake.holds state.home (Store.digest id));
+    detach clock config id)
+
+(* Whether a refused container is looked at again is [Lifecycle.heal]'s call
+   on the refusal. A removal the engine refused can succeed later; a holder
+   that is not this server's predecessor stays what it is. *)
+let test_a_sweep_that_could_not_remove_is_run_again () =
+  with_fixture (fun env _ config directory packages state ->
+    let clock = Eio.Stdenv.clock env in
+    let manifest = package packages "ready" in
+    write (Filename.concat directory "observer.toml") (declaration ~id:"observer" ~manifest ());
+    let dead_name = Lane_addon_engine.owned_name Types.Docker "dead-server-instance" in
+    ignore (Fake.add state.home ~id:"dead-server-container" ~name:dead_name
+      ~labels:["masc.lane.instance", "dead-server-instance"; Lane_addon_engine.scope_label, Fake.scope_of_world] ());
+    Fake.refuse_removal state.home "dead-server-container";
+    ignore (reconcile config directory);
+    check int "the first beat sweeps" 1 !(state.sweeps);
+    check bool "the refused container is still there" true (Fake.holds state.home "dead-server-container");
+    ignore (reconcile config directory);
+    check int "a removal that failed is swept again on the next beat" 2 !(state.sweeps);
+    Fake.allow_removal state.home "dead-server-container";
+    ignore (reconcile config directory);
+    check int "and again once more" 3 !(state.sweeps);
+    check bool "the container is removed when the engine allows it" false
+      (Fake.holds state.home "dead-server-container");
+    ignore (reconcile config directory);
+    ignore (reconcile config directory);
+    check int "a sweep with nothing left to retry is not repeated" 3 !(state.sweeps);
+    let id = declared_instance config "observer" |> text "instance_id" in
+    await_ready clock config id;
+    detach clock config id)
+
+let test_a_sweep_that_refused_a_foreign_container_is_not_repeated () =
+  with_fixture (fun env _ config directory packages state ->
+    let clock = Eio.Stdenv.clock env in
+    let manifest = package packages "ready" in
+    write (Filename.concat directory "observer.toml") (declaration ~id:"observer" ~manifest ());
+    (* In this server's scope but not named for any incarnation of its own. *)
+    ignore (Fake.add state.home ~id:"foreign-container" ~name:"someone-elses-name"
+      ~labels:[Lane_addon_engine.scope_label, Fake.scope_of_world] ());
+    ignore (reconcile config directory);
+    check int "the first beat sweeps" 1 !(state.sweeps);
+    for _ = 1 to 4 do ignore (reconcile config directory) done;
+    check int "four more beats do not sweep again" 1 !(state.sweeps);
+    check bool "the foreign container is untouched" true (Fake.holds state.home "foreign-container");
+    check bool "the refusal was a foreign holder" true
+      (List.exists (fun (item : Lane_addon_slot.sweep_item) -> match item.verdict with
+         | Lane_addon_slot.Refused (Lifecycle.Slot_foreign _) -> item.container_id = "foreign-container"
+         | Lane_addon_slot.Refused _ | Lane_addon_slot.Removed | Lane_addon_slot.Live -> false) !(state.swept));
+    let id = declared_instance config "observer" |> text "instance_id" in
+    await_ready clock config id;
+    detach clock config id)
+
+(* The runtime hands the backend one question, whether an incarnation is still
+   alive in this process. A worker answers it, and so does a cleanup that is
+   still running for a record of an earlier process; a container of such an
+   incarnation must not be taken for a dead server's. *)
+let test_an_incarnation_is_live_while_it_has_a_worker_or_a_cleanup () =
+  with_fixture (fun env _ config directory packages state ->
+    let clock = Eio.Stdenv.clock env in
+    let manifest = package packages "ready" in
+    let path = Filename.concat directory "observer.toml" in
+    let bytes = declaration ~id:"observer" ~manifest () in
+    write path bytes;
+    ignore (reconcile config directory);
+    let old_id = declared_instance config "observer" |> text "instance_id" in
+    await_ready clock config old_id;
+    let live id = match !(state.liveness) with
+      | Some is_live -> is_live id
+      | None -> fail "the sweep has not asked yet" in
+    check bool "an incarnation with a worker is live" true (live old_id);
+    check bool "an incarnation nothing holds is not live" false (live "nobody");
+    let captured = instance config old_id in
+    let container_id = text "container_id" captured in
+    detach clock config old_id;
+    Runtime.For_testing.reset ();
+    let store = Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+    unwrap (Store.save_binding store ~instance_id:old_id captured);
+    write path bytes;
+    let recovered, release_recovery = Eio.Promise.create () in
+    state.recovery_barrier := Some recovered;
+    ignore (reconcile config directory);
+    await clock (fun () -> List.mem (Recovery_requested (old_id, Some container_id)) !(state.events));
+    check bool "an incarnation whose cleanup is running is live, with no worker" true (live old_id);
+    Eio.Promise.resolve release_recovery ();
+    await clock (fun () -> not (live old_id));
+    ignore (reconcile config directory);
+    let replacement = declared_instance config "observer" |> text "instance_id" in
+    await_ready clock config replacement;
+    detach clock config replacement)
+
+(* The slot procedures are exercised over a port that answers a name lookup
+   with a container of another name, as an engine's pattern filter could. The
+   containers carry labels that would make them removable if the name were not
+   checked. *)
+let test_a_container_under_another_name_is_never_the_slot () =
+  let world = Fake.create (Fake.docker "engine-a") in
+  let owner = "owner-label" in
+  ignore (Fake.add (Fake.current world) ~id:"dead-predecessor" ~name:"somewhere-else"
+    ~labels:[Lane_addon_engine.instance_label, "dead"; Lane_addon_engine.state_owner_label, owner] ());
+  ignore (Fake.add (Fake.current world) ~id:"own-leftover" ~name:"also-elsewhere"
+    ~labels:[Lane_addon_engine.instance_label, "new"; Lane_addon_engine.state_owner_label, owner] ());
+  let answering id = { (Fake.port world) with Lane_addon_slot.find = (fun _ -> Ok (Some id)) } in
+  (match Lane_addon_slot.claim (answering "dead-predecessor") ~name:"the-slot" ~instance_id:"new"
+           ~mine:(Some owner) ~is_live_instance:(fun _ -> false) with
+   | Error (Lifecycle.Worker_failed _) -> ()
+   | Ok () | Error _ -> fail "a container under another name must stop the claim as unreadable");
+  check bool "the would-be predecessor survives the claim" true (Fake.holds (Fake.current world) "dead-predecessor");
+  (match Lane_addon_slot.release (answering "own-leftover") ~lookup:(Lane_addon_engine.Name "the-slot")
+           ~instance_id:"new" ~mine:(Some owner) with
+   | Error (Lifecycle.Cleanup_unconfirmed _) -> ()
+   | Ok () | Error _ -> fail "a release by name must not be confirmed by a container of another name");
+  check bool "the would-be own container survives the release" true (Fake.holds (Fake.current world) "own-leftover")
+
+(* A container left under the slot by this very incarnation is its own,
+   whatever the process thinks of the incarnation: it is removed, and a failed
+   removal is a cleanup the caller must see, not a predecessor it can ignore. *)
+let test_a_worker_clears_its_own_leftover_from_the_slot () =
+  let world = Fake.create (Fake.docker "engine-a") in
+  let owner = "owner-label" in
+  let labels = [Lane_addon_engine.instance_label, "new"; Lane_addon_engine.state_owner_label, owner] in
+  ignore (Fake.add (Fake.current world) ~id:"own-leftover" ~name:"the-slot" ~labels ());
+  let claim () = Lane_addon_slot.claim (Fake.port world) ~name:"the-slot" ~instance_id:"new"
+    ~mine:(Some owner) ~is_live_instance:(fun _ -> true) in
+  Fake.refuse_removal (Fake.current world) "own-leftover";
+  (match claim () with
+   | Error (Lifecycle.Cleanup_unconfirmed _) -> ()
+   | Ok () | Error _ -> fail "a leftover of this incarnation that cannot be removed is an unconfirmed cleanup");
+  Fake.allow_removal (Fake.current world) "own-leftover";
+  (match claim () with
+   | Ok () -> ()
+   | Error _ -> fail "a leftover of this incarnation is removed even though the incarnation is live");
+  check bool "the leftover is gone" false (Fake.holds (Fake.current world) "own-leftover")
+
 let test_binding_inventory_issues_carry_failure_kind_tags () =
   with_fixture (fun _ _ config _directory _packages _state ->
     let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
@@ -1459,4 +2006,34 @@ let () = run "Lane Add-on TOML reconciliation" ["declarative optional extension"
     test_unlistable_binding_store_stops_reconciliation;
   test_case "binding inventory issues carry failure-kind tags" `Quick
     test_binding_inventory_issues_carry_failure_kind_tags;
+  test_case "a failed start keeps its first cause through a failed cleanup" `Quick
+    test_a_failed_start_keeps_its_first_cause_through_a_failed_cleanup;
+  test_case "a waiting failure is probed and not retried" `Quick
+    test_a_waiting_failure_is_probed_and_not_retried;
+  test_case "a record without the current lifecycle is unreadable" `Quick
+    test_a_record_without_the_current_lifecycle_is_unreadable;
+  test_case "another engine does not release a worker" `Quick
+    test_another_engine_does_not_release_a_worker;
+  test_case "an unreachable engine waits and then releases" `Quick
+    test_an_unreachable_engine_waits_and_then_releases;
+  test_case "a dead predecessor holding the slot does not block a new instance" `Quick
+    test_a_dead_predecessor_holding_the_slot_does_not_block_a_new_instance;
+  test_case "a foreign holder makes the attempt wait for the holder to change" `Quick
+    test_a_foreign_holder_makes_the_attempt_wait_for_the_holder_to_change;
+  test_case "a dead server's containers are swept once the engine answers" `Quick
+    test_a_dead_servers_containers_are_swept_once_the_engine_answers;
+  test_case "a sweep that could not remove is run again" `Quick
+    test_a_sweep_that_could_not_remove_is_run_again;
+  test_case "a sweep that refused a foreign container is not repeated" `Quick
+    test_a_sweep_that_refused_a_foreign_container_is_not_repeated;
+  test_case "an incarnation is live while it has a worker or a cleanup" `Quick
+    test_an_incarnation_is_live_while_it_has_a_worker_or_a_cleanup;
+  test_case "a container under another name is never the slot" `Quick
+    test_a_container_under_another_name_is_never_the_slot;
+  test_case "a worker clears its own leftover from the slot" `Quick
+    test_a_worker_clears_its_own_leftover_from_the_slot;
+  test_case "Detach keeps the declaration when cleanup fails" `Quick
+    test_detach_keeps_the_declaration_when_cleanup_fails;
+  test_case "Detach of a retained record keeps the declaration when cleanup fails" `Quick
+    test_detach_of_a_retained_record_keeps_the_declaration_when_cleanup_fails;
 ]]

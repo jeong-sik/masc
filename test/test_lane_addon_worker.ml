@@ -35,6 +35,17 @@ if argv[:1] == ["volume"]:
         print(json.dumps([json.loads((root / (args[-1] + ".volume")).read_text())]))
     else: raise SystemExit(2)
     raise SystemExit(0)
+def engine_id():
+    identity = root / "engine-id"
+    return identity.read_text().strip() if identity.exists() else "fixture-engine-a"
+if argv[:1] == ["info"]:
+    if (root / "daemon-unavailable").exists() or (root / "info-unavailable").exists():
+        print("fixture daemon unavailable", file=sys.stderr)
+        raise SystemExit(7)
+    if argv != ["info", "--format", "{{.ID}}"]:
+        raise SystemExit(2)
+    print(engine_id())
+    raise SystemExit(0)
 if not argv or argv[0] != "container":
     raise SystemExit(2)
 action, args = argv[1], argv[2:]
@@ -52,21 +63,37 @@ def load(cid):
     return json.loads(path(cid).read_text())
 def output(value):
     print(json.dumps(value), flush=True)
+def labels():
+    return dict(item.split("=", 1) for flag, item in zip(args, args[1:]) if flag == "--label")
+def on_this_engine(cid):
+    # A container belongs to the engine it was created on; another engine
+    # answers "no such container" for it, as a different Docker daemon would.
+    return path(cid).exists() and load(cid).get("engine") == engine_id()
 if action == "create":
     name = value("--name")
-    cid = hashlib.sha256(name.encode()).hexdigest()
-    if path(cid).exists():
+    cid = hashlib.sha256((engine_id() + name + labels().get("masc.lane.instance", "")).encode()).hexdigest()
+    taken = [file for file in root.glob("*.json")
+        if json.loads(file.read_text()).get("Name") == "/" + name
+        and json.loads(file.read_text()).get("engine") == engine_id()]
+    if path(cid).exists() or taken:
         print("container name already exists", file=sys.stderr)
         raise SystemExit(1)
     mode = args[-1]
-    config = {"Id": cid, "Name": "/" + name,
-        "Config": {"Labels": dict([value("--label").split("=", 1)])},
+    config = {"Id": cid, "Name": "/" + name, "engine": engine_id(),
+        "State": {"Status": "running"},
+        "Config": {"Labels": labels()},
         "HostConfig": {"NanoCpus": round(float(value("--cpus")) * 1000000000),
             "Memory": int(value("--memory")),
             "MemorySwap": int(value("--memory-swap")),
             "PidsLimit": int(value("--pids-limit"))},
         "mode": mode, "argv": args}
     if mode == "unlimited": config["HostConfig"]["PidsLimit"] = 0
+    if mode == "late_create":
+        # The daemon accepts the request after the client gave up: the
+        # container becomes visible only after the next listing is answered.
+        (root / (cid + ".late")).write_text(json.dumps(config))
+        print("context deadline exceeded", file=sys.stderr)
+        raise SystemExit(1)
     path(cid).write_text(json.dumps(config))
     if mode == "lost_create_response":
         print("create receipt lost", flush=True)
@@ -74,6 +101,9 @@ if action == "create":
     print(cid, flush=True)
 elif action == "inspect":
     cid = args[-1]
+    if not on_this_engine(cid):
+        print("Error: No such container: " + cid, file=sys.stderr)
+        raise SystemExit(1)
     if load(cid)["mode"] == "hang_inspect":
         (root / (cid + ".blocked")).write_text(action)
         while True: signal.pause()
@@ -82,11 +112,25 @@ elif action == "ls":
     condition = value("--filter")
     for file in root.glob("*.json"):
         config = json.loads(file.read_text())
-        if (condition == "id=" + config["Id"] or
+        if config.get("engine") != engine_id():
+            continue
+        if condition.startswith("label="):
+            key, _, wanted = condition[len("label="):].partition("=")
+            if config["Config"]["Labels"].get(key) == wanted:
+                output(config["Id"])
+        elif (condition == "id=" + config["Id"] or
             condition == "name=^" + config["Name"] + "$"):
             output(config["Id"])
+    for late in root.glob("*.late"):
+        late.rename(late.with_suffix(".json"))
+    if (root / "flip-on-ls").exists():
+        # The ambient context changes while this command is answering.
+        (root / "engine-id").write_text("fixture-engine-b")
 elif action == "rm":
     cid = args[-1]
+    if path(cid).exists() and not on_this_engine(cid):
+        print("Error response from daemon: No such container: " + cid, file=sys.stderr)
+        raise SystemExit(1)
     if (root / (cid + ".refuse-remove")).exists():
         print("fixture removal refused", file=sys.stderr)
         raise SystemExit(7)
@@ -200,6 +244,11 @@ if (root / 'daemon-unavailable').exists(): raise SystemExit(7)
 if argv[:2] == ['image', 'inspect']:
     assert argv == ['image', 'inspect', 'fixture/image'], argv
     emit([{'configuration': {'descriptor': {'digest': digest}}}])
+elif argv[:2] == ['system', 'status']:
+    assert argv == ['system', 'status', '--format', 'json'], argv
+    if (root / 'info-unavailable').exists(): raise SystemExit(7)
+    identity = root / 'engine-id'
+    emit({'status': 'running', 'appRoot': identity.read_text().strip() if identity.exists() else '/fixture/app-root-a'})
 elif argv[:1] == ['volume']:
     action = argv[1]
     if action == 'list':
@@ -221,8 +270,8 @@ elif argv[:1] == ['create']:
     cid = value('--name')
     assert len(cid) == 64, cid
     mode = argv[-1]
-    config = {'id': cid, 'Id': cid, 'mode': mode, 'argv': argv,
-        'configuration': {'id': cid, 'labels': dict([value('--label').split('=', 1)]),
+    config = {'id': cid, 'Id': cid, 'mode': mode, 'argv': argv, 'status': 'running',
+        'configuration': {'id': cid, 'labels': dict(item.split('=', 1) for flag, item in zip(argv, argv[1:]) if flag == '--label'),
             'resources': {'cpus': int(value('--cpus')), 'memoryInBytes': int(value('--memory')[:-1]) * 1048576},
             'image': {'descriptor': {'digest': digest}}, 'networks': [], 'readOnly': True,
             'capAdd': [], 'capDrop': ['ALL'], 'publishedPorts': [], 'publishedSockets': []}}
@@ -283,6 +332,9 @@ let package directory mode : Types.package = {
 }
 
 let unwrap = function Ok value -> value | Error error -> fail (Worker.error_to_string error)
+(* The identities the two fixtures report until a test changes them. *)
+let docker_engine_a = Masc.Lane_addon_lifecycle.Docker_engine "fixture-engine-a"
+let apple_engine_a = Masc.Lane_addon_lifecycle.Apple_app_root "/fixture/app-root-a"
 let sources mode = `Assoc [ "mode", `String mode ]
 let observe worker mode = Worker.observe worker ~binding:(`Assoc []) ~sources:(sources mode)
 let control_timeout_sec = 1.
@@ -325,7 +377,7 @@ let test_apple_state_has_one_writer_and_survives_detach () =
     unwrap (Worker.stop first);
     check bool "detach retains named Apple volume" true (Sys.file_exists volume);
     let next = unwrap (start_apple ~state_owner:owner ~instance_id:"replacement" env sw dir command "good") in
-    unwrap (Worker.recover_stop ~clock:(Eio.Stdenv.clock env) ~control_timeout_sec
+    unwrap (Worker.recover_stop ~engine:apple_engine_a ~clock:(Eio.Stdenv.clock env) ~control_timeout_sec
       ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id:"replacement" ~container_id:None
       ~runtime ~state_owner:owner ~container_command:command ());
     check bool "receiptless recovery removes only the writer" false
@@ -335,7 +387,7 @@ let test_apple_state_has_one_writer_and_survives_detach () =
 let test_apple_control_refuses_unknown_state_and_recovers_exact_owner () =
   with_apple_fixture (fun env sw dir command ->
     let first = unwrap (start_apple ~instance_id:"apple-owner" env sw dir command "good") in
-    let recover instance_id = Worker.recover_stop ~clock:(Eio.Stdenv.clock env)
+    let recover instance_id = Worker.recover_stop ~engine:apple_engine_a ~clock:(Eio.Stdenv.clock env)
       ~control_timeout_sec ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id
       ~container_id:(Some (Worker.container_id first)) ~runtime:Types.Apple_container
       ~container_command:command () in
@@ -411,7 +463,7 @@ let test_persistent_state_has_one_writer_and_survives_detach () =
     unwrap (Worker.stop first);
     check bool "detach retains named state" true (Sys.file_exists volume);
     let replacement = unwrap (start ~state_owner ~instance_id:"replacement" env sw dir docker "good") in
-    let recovery = Worker.recover_stop ~clock:(Eio.Stdenv.clock env) ~control_timeout_sec
+    let recovery = Worker.recover_stop ~engine:docker_engine_a ~clock:(Eio.Stdenv.clock env) ~control_timeout_sec
       ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id:"replacement" ~container_id:None
       ~state_owner ~docker_command:docker () in
     unwrap recovery;
@@ -489,7 +541,7 @@ let test_cleanup_failure_can_be_retried () = with_fixture (fun env sw dir docker
 
 let test_restart_cleanup_requires_exact_owner () = with_fixture (fun env sw dir docker ->
   let worker = unwrap (start ~instance_id:"worker-test" env sw dir docker "good") in
-  let recover instance_id = Worker.recover_stop ~clock:(Eio.Stdenv.clock env)
+  let recover instance_id = Worker.recover_stop ~engine:docker_engine_a ~clock:(Eio.Stdenv.clock env)
       ~control_timeout_sec ~mgr:(Eio.Stdenv.process_mgr env)
       ~instance_id ~container_id:(Some (Worker.container_id worker))
       ~docker_command:docker () in
@@ -504,7 +556,7 @@ let test_restart_without_create_receipt () = with_fixture (fun env sw dir docker
   let instance_id = "lost-create-receipt" in
   let worker = unwrap (start ~instance_id env sw dir docker "good") in
   let other = unwrap (start env sw dir docker "good") in
-  let recover () = Worker.recover_stop ~clock:(Eio.Stdenv.clock env)
+  let recover () = Worker.recover_stop ~engine:docker_engine_a ~clock:(Eio.Stdenv.clock env)
       ~control_timeout_sec ~mgr:(Eio.Stdenv.process_mgr env)
       ~instance_id ~container_id:None ~docker_command:docker () in
   unwrap (recover ());
@@ -526,20 +578,24 @@ let test_name_collision_preserves_foreign_owner () = with_fixture (fun env sw di
         :: List.remove_assoc "Config" fields)
     | _ -> fail "expected fixture container object" in
   write path (Yojson.Safe.to_string changed);
-  let recover () = Worker.recover_stop ~clock:(Eio.Stdenv.clock env)
+  let recover () = Worker.recover_stop ~engine:docker_engine_a ~clock:(Eio.Stdenv.clock env)
       ~control_timeout_sec ~mgr:(Eio.Stdenv.process_mgr env)
       ~instance_id ~container_id:None ~docker_command:docker () in
-  check bool "matching name is not sufficient authority" true (Result.is_error (recover ()));
-  check bool "foreign owner survives recovery refusal" true (Sys.file_exists path);
-  check bool "failed creation does not clean up a foreign name collision" true
-    (Result.is_error (start ~instance_id env sw dir docker "good"));
+  (* A name held by another owner means this binding's create never landed, so
+     recovery has nothing to remove and owes nothing; it must not touch the
+     foreign container. *)
+  unwrap (recover ());
+  check bool "foreign owner survives recovery" true (Sys.file_exists path);
+  (match start ~instance_id env sw dir docker "good" with
+   | Error (Worker.Lifecycle (Masc.Lane_addon_lifecycle.Slot_foreign {instance = Some "foreign-owner"; _})) -> ()
+   | Ok _ | Error _ -> fail "a foreign holder of the name must be refused as Slot_foreign");
   check bool "foreign container remains after failed start cleanup" true (Sys.file_exists path);
   ignore (unwrap (observe worker "good"));
   write path (Yojson.Safe.to_string original);
   unwrap (Worker.stop worker))
 
 let test_absence_requires_available_daemon () = with_fixture (fun env _sw dir docker ->
-  let recover container_id = Worker.recover_stop ~clock:(Eio.Stdenv.clock env)
+  let recover container_id = Worker.recover_stop ~engine:docker_engine_a ~clock:(Eio.Stdenv.clock env)
       ~control_timeout_sec ~mgr:(Eio.Stdenv.process_mgr env)
       ~instance_id:"not-created" ~container_id ~docker_command:docker () in
   unwrap (recover None);
@@ -557,7 +613,7 @@ let test_recovery_control_command_times_out () = with_fixture (fun env _sw dir d
   write marker "hang";
   let clock = Eio.Stdenv.clock env in
   let started_at = Eio.Time.now clock in
-  let result = Worker.recover_stop ~clock ~control_timeout_sec:0.05
+  let result = Worker.recover_stop ~engine:docker_engine_a ~clock ~control_timeout_sec:0.05
       ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id:"not-created"
       ~container_id:None ~docker_command:docker () in
   check bool "hung control command is reported" true (Result.is_error result);
@@ -576,7 +632,7 @@ let test_recovery_control_command_times_out () = with_fixture (fun env _sw dir d
      in busy windows, so the second call keeps the suite's own
      control_timeout_sec ceiling instead of inheriting the deliberately
      starved 0.05 one. The hung-command assertions above stay unchanged. *)
-  unwrap (Worker.recover_stop ~clock ~control_timeout_sec:1.
+  unwrap (Worker.recover_stop ~engine:docker_engine_a ~clock ~control_timeout_sec:1.
     ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id:"not-created"
     ~container_id:None ~docker_command:docker ()))
 
@@ -594,6 +650,407 @@ let test_failed_create_receipt_cleans_only_owned_container () = with_fixture (fu
       if Filename.check_suffix name ".json" then count + 1 else count) 0 (Sys.readdir dir));
   ignore (unwrap (observe other "good"));
   unwrap (Worker.stop other))
+
+
+let test_a_create_that_lands_late_is_removed_when_the_switch_is_released () = with_fixture (fun env _sw dir docker ->
+  let containers () = Array.to_list (Sys.readdir dir)
+    |> List.filter (fun name -> Filename.check_suffix name ".json") in
+  Eio.Switch.run (fun sw ->
+    check bool "a create that timed out is reported" true
+      (Result.is_error (start env sw dir docker "late_create"));
+    (* The failed start already looked for the container by name and found
+       nothing; the daemon creates it only after that look. *)
+    check int "the container landed after the first absence check" 1 (List.length (containers ())));
+  check int "releasing the switch looks again and removes it" 0 (List.length (containers ())))
+
+let test_engine_identity_comes_from_the_info_command () = with_fixture (fun env _sw dir docker ->
+  let read () = Worker.read_engine ~clock:(Eio.Stdenv.clock env) ~control_timeout_sec
+    ~mgr:(Eio.Stdenv.process_mgr env) ~runtime:Types.Docker ~docker_command:docker () in
+  check bool "default fixture engine is read" true (read () = Ok docker_engine_a);
+  write (Filename.concat dir "engine-id") "fixture-engine-b\n";
+  check bool "a different engine answers with its own identity" true
+    (read () = Ok (Masc.Lane_addon_lifecycle.Docker_engine "fixture-engine-b"));
+  let marker = Filename.concat dir "daemon-unavailable" in
+  write marker "down";
+  (match read () with
+   | Error (Worker.Engine_fault {runtime = Types.Docker; fault = Masc.Lane_addon_lifecycle.Unreachable _}) -> ()
+   | Ok _ | Error _ -> fail "a daemon that exits non-zero must be Unreachable, not an identity");
+  Sys.remove marker)
+
+let test_apple_engine_identity_is_the_service_app_root () = with_apple_fixture (fun env _sw dir command ->
+  let read () = Worker.read_engine ~clock:(Eio.Stdenv.clock env) ~control_timeout_sec
+    ~mgr:(Eio.Stdenv.process_mgr env) ~runtime:Types.Apple_container ~container_command:command () in
+  check bool "service root identifies the Apple engine" true
+    (read () = Ok (Masc.Lane_addon_lifecycle.Apple_app_root "/fixture/app-root-a"));
+  write (Filename.concat dir "info-unavailable") "down";
+  (match read () with
+   | Error (Worker.Engine_fault {runtime = Types.Apple_container; fault = Masc.Lane_addon_lifecycle.Unreachable _}) -> ()
+   | Ok _ | Error _ -> fail "an Apple service that exits non-zero must be Unreachable"))
+
+let test_engine_identity_parsing_has_no_default () =
+  let module Engine = Masc.Lane_addon_engine in
+  let module Lifecycle = Masc.Lane_addon_lifecycle in
+  let unreadable = function Error (Lifecycle.Identity_unreadable _) -> true | Ok _ | Error (Lifecycle.Unreachable _) -> false in
+  let unreachable = function Error (Lifecycle.Unreachable _) -> true | Ok _ | Error (Lifecycle.Identity_unreadable _) -> false in
+  check bool "blank Docker ID is unreadable" true (unreadable (Engine.engine_of_info Types.Docker "  \n"));
+  check bool "Docker ID with embedded whitespace is unreadable" true
+    (unreadable (Engine.engine_of_info Types.Docker "two words"));
+  check bool "oversized Docker ID is unreadable" true
+    (unreadable (Engine.engine_of_info Types.Docker (String.make 300 'a')));
+  check bool "Docker ID is trimmed" true
+    (Engine.engine_of_info Types.Docker "abc-123\n" = Ok (Lifecycle.Docker_engine "abc-123"));
+  check bool "Apple malformed status is unreadable" true
+    (unreadable (Engine.engine_of_info Types.Apple_container "not json"));
+  check bool "Apple status without a root is unreadable" true
+    (unreadable (Engine.engine_of_info Types.Apple_container {|{"status":"running"}|}));
+  check bool "Apple relative root is unreadable" true
+    (unreadable (Engine.engine_of_info Types.Apple_container {|{"status":"running","appRoot":"relative"}|}));
+  check bool "Apple stopped service is unreachable" true
+    (unreachable (Engine.engine_of_info Types.Apple_container {|{"status":"stopped","appRoot":"/root"}|}));
+  check bool "Apple running service is its root" true
+    (Engine.engine_of_info Types.Apple_container {|{"status":"running","appRoot":"/root"}|}
+     = Ok (Lifecycle.Apple_app_root "/root"))
+
+(* A container with a blank label would otherwise reach the Slot_foreign record
+   as [Some ""], which the record's own decoder refuses: the failure could be
+   written and then not read back. *)
+let test_a_blank_label_reads_as_no_label () =
+  let module Engine = Masc.Lane_addon_engine in
+  let module Lifecycle = Masc.Lane_addon_lifecycle in
+  let module Slot = Masc.Lane_addon_slot in
+  let id = String.make 64 'a' in
+  let docker labels = Printf.sprintf
+    {|[{"Id":"%s","Name":"/slot","State":{"Status":"exited"},"Config":{"Labels":%s}}]|} id labels in
+  let apple labels = Printf.sprintf
+    {|[{"id":"slot","status":"stopped","configuration":{"id":"slot","labels":%s}}]|} labels in
+  let held runtime raw = match Engine.held_of_inspect runtime raw with
+    | Ok held -> held
+    | Error detail -> failf "inspection did not read: %s" detail in
+  let blank = {|{"masc.lane.instance":"","masc.lane.state.owner":"  "}|} in
+  let named = {|{"masc.lane.instance":"incarnation","masc.lane.state.owner":"owner"}|} in
+  List.iter (fun (label, held) ->
+    check bool (label ^ ": blank labels read as absent") true
+      (held.Engine.instance = None && held.Engine.state_owner = None))
+    [ "docker", held Types.Docker (docker blank); "apple", held Types.Apple_container (apple blank) ];
+  List.iter (fun (label, held) ->
+    check bool (label ^ ": real labels are kept") true
+      (held.Engine.instance = Some "incarnation" && held.Engine.state_owner = Some "owner"))
+    [ "docker", held Types.Docker (docker named); "apple", held Types.Apple_container (apple named) ];
+  check bool "a label that is not text is still refused" true
+    (Result.is_error (Engine.held_of_inspect Types.Docker (docker {|{"masc.lane.instance":7}|})));
+  (match Slot.classify ~instance_id:"new" ~mine:(Some "owner") ~is_live_instance:(fun _ -> false)
+           (held Types.Docker (docker blank)) with
+   | Slot.Foreign holder ->
+       check bool "the holder's record reads back" true
+         (Lifecycle.failure_of_json (Lifecycle.failure_to_json (Lifecycle.Slot_foreign holder))
+          = Ok (Lifecycle.Slot_foreign holder))
+   | Slot.Mine | Slot.Predecessor _ -> fail "a container with blank labels belongs to nobody")
+
+let test_start_is_refused_before_create_when_the_engine_is_unreachable () =
+  with_fixture (fun env sw dir docker ->
+    (* Only the identity command fails. Every other control command would
+       succeed, so a create that is attempted anyway would leave a container. *)
+    write (Filename.concat dir "info-unavailable") "down";
+    (match start env sw dir docker "good" with
+     | Error (Worker.Engine_fault {fault = Masc.Lane_addon_lifecycle.Unreachable _; _}) -> ()
+     | Ok _ | Error _ -> fail "start must report the typed engine fault");
+    check int "no container was created" 0
+      (Array.fold_left (fun count name ->
+        if Filename.check_suffix name ".json" then count + 1 else count) 0 (Sys.readdir dir)))
+
+
+let docker_engine_b = Masc.Lane_addon_lifecycle.Docker_engine "fixture-engine-b"
+let container_files dir =
+  Array.fold_left (fun count name ->
+    if Filename.check_suffix name ".json" then count + 1 else count) 0 (Sys.readdir dir)
+let switch_engine dir id = write (Filename.concat dir "engine-id") id
+
+let recover_on env dir docker ~engine ~instance_id container_id =
+  Worker.recover_stop ~clock:(Eio.Stdenv.clock env) ~control_timeout_sec
+    ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id ~container_id ~engine
+    ~docker_command:docker ()
+
+let is_mismatch ~recorded ~observed = function
+  | Error (Worker.Lifecycle (Masc.Lane_addon_lifecycle.Engine_mismatch {recorded = r; observed = o})) ->
+      r = recorded && o = Masc.Lane_addon_lifecycle.Other_engine observed
+  | Ok _ | Error _ -> false
+
+(* The incident: the CLI is pointed at another daemon, which has no such
+   container and says so with exit 0 for a listing. That answer is not a
+   release, and the container is still on the first daemon. *)
+let test_a_different_engine_cannot_confirm_a_release () = with_fixture (fun env sw dir docker ->
+  let worker = unwrap (start ~instance_id:"engine-test" env sw dir docker "good") in
+  let id = Worker.container_id worker in
+  let container = Filename.concat dir (id ^ ".json") in
+  switch_engine dir "fixture-engine-b";
+  check bool "recovery by exact ID is refused on another engine" true
+    (is_mismatch ~recorded:docker_engine_a ~observed:docker_engine_b
+       (recover_on env dir docker ~engine:docker_engine_a ~instance_id:"engine-test" (Some id)));
+  check bool "recovery by name is refused on another engine" true
+    (is_mismatch ~recorded:docker_engine_a ~observed:docker_engine_b
+       (recover_on env dir docker ~engine:docker_engine_a ~instance_id:"engine-test" None));
+  check bool "stopping the live worker is refused on another engine" true
+    (is_mismatch ~recorded:docker_engine_a ~observed:docker_engine_b (Worker.stop worker));
+  check bool "the container is still there after every refused release" true (Sys.file_exists container);
+  switch_engine dir "fixture-engine-a";
+  unwrap (Worker.stop worker);
+  check bool "the recorded engine releases it" false (Sys.file_exists container))
+
+let test_an_engine_that_changes_during_a_query_does_not_confirm_absence () =
+  with_fixture (fun env _sw dir docker ->
+    (* The listing answers "none" and the context changes while it does. *)
+    write (Filename.concat dir "flip-on-ls") "flip";
+    check bool "an absence read while the engine changed is refused" true
+      (is_mismatch ~recorded:docker_engine_a ~observed:docker_engine_b
+         (recover_on env dir docker ~engine:docker_engine_a ~instance_id:"nothing-created"
+            (Some (String.make 64 'a')))))
+
+let test_an_unreadable_engine_identity_is_not_the_recorded_one () =
+  with_fixture (fun env _sw dir docker ->
+    write (Filename.concat dir "engine-id") "two words";
+    match recover_on env dir docker ~engine:docker_engine_a ~instance_id:"nothing-created" None with
+    | Error (Worker.Lifecycle (Masc.Lane_addon_lifecycle.Engine_mismatch
+        {observed = Masc.Lane_addon_lifecycle.Unreadable_engine _; _})) -> ()
+    | Ok _ | Error _ -> fail "an engine that cannot name itself must not confirm absence")
+
+let test_the_engine_is_recorded_before_the_first_create () = with_fixture (fun env sw dir docker ->
+  let seen = ref None in
+  let worker = unwrap (Worker.start ~sw ~clock:(Eio.Stdenv.clock env) ~control_timeout_sec
+    ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id:"record-first" ~package:(package dir "good")
+    ~docker_command:docker
+    ~on_engine:(fun engine -> seen := Some (engine, container_files dir); Ok ()) ()) in
+  check bool "the recorded engine is the one that answered, with no container yet" true
+    (!seen = Some (docker_engine_a, 0));
+  unwrap (Worker.stop worker);
+  check int "a start whose engine cannot be recorded creates nothing" 0
+    (match Worker.start ~sw ~clock:(Eio.Stdenv.clock env) ~control_timeout_sec
+       ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id:"record-fails" ~package:(package dir "good")
+       ~docker_command:docker ~on_engine:(fun _ -> Error "disk full") () with
+     | Error (Worker.Lifecycle (Masc.Lane_addon_lifecycle.Persistence_failed _)) -> container_files dir
+     | Ok _ | Error _ -> fail "an unrecorded engine must stop the start before create"))
+
+
+module Lifecycle = Masc.Lane_addon_lifecycle
+module Slot_state = Masc.Lane_addon_worker_state
+
+let slot_owner dir =
+  match Slot_state.create_owner ~workspace_root:dir ~installation_id:"slot-installation"
+      ~package_id:(package dir "good").id with
+  | Ok owner -> owner | Error message -> fail message
+
+let container_path dir worker = Filename.concat dir (Worker.container_id worker ^ ".json")
+let read_container path = match Yojson.Safe.from_file path with
+  | `Assoc fields -> fields | _ -> fail "expected a fixture container"
+let labels_of path = match List.assoc "Config" (read_container path) with
+  | `Assoc config -> (match List.assoc "Labels" config with
+      | `Assoc labels -> List.map (fun (key, value) -> key, Yojson.Safe.Util.to_string value) labels
+      | _ -> fail "labels")
+  | _ -> fail "config"
+(* What a server that died abruptly leaves behind: its container, stopped. *)
+let leave_exited path =
+  write path (Yojson.Safe.to_string (`Assoc (("State", `Assoc ["Status", `String "exited"])
+    :: List.remove_assoc "State" (read_container path))))
+let relabel path labels =
+  let config = match List.assoc "Config" (read_container path) with
+    | `Assoc config -> config | _ -> fail "config" in
+  write path (Yojson.Safe.to_string (`Assoc (("Config", `Assoc (("Labels",
+    `Assoc (List.map (fun (key, value) -> key, `String value) labels)) :: List.remove_assoc "Labels" config))
+    :: List.remove_assoc "Config" (read_container path))))
+
+let start_writer ?is_live_instance env sw dir docker ~owner instance_id =
+  Worker.start ~sw ~clock:(Eio.Stdenv.clock env) ~control_timeout_sec
+    ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id
+    ~package:{ (package dir "good") with state_storage = Types.Persistent }
+    ~state_owner:owner ~docker_command:docker ?is_live_instance ()
+
+(* The incident: the server died and left an exited container holding the
+   shared writer name. A new incarnation clears it by exact ID and starts. *)
+let test_a_dead_predecessor_is_cleared_from_the_writer_slot () = with_fixture (fun env sw dir docker ->
+  let owner = slot_owner dir in
+  let dead = unwrap (start_writer env sw dir docker ~owner "dead-writer") in
+  let dead_path = container_path dir dead in
+  leave_exited dead_path;
+  let fresh = unwrap (start_writer env sw dir docker ~owner
+    ~is_live_instance:(fun id -> String.equal id "new-writer") "new-writer") in
+  check bool "the dead predecessor was removed" false (Sys.file_exists dead_path);
+  check bool "the new incarnation holds the slot" true (Sys.file_exists (container_path dir fresh));
+  let labels = labels_of (container_path dir fresh) in
+  check (option string) "the new container names its incarnation" (Some "new-writer")
+    (List.assoc_opt "masc.lane.instance" labels);
+  check (option string) "the new container names its state owner" (Some (Slot_state.identity owner))
+    (List.assoc_opt "masc.lane.state.owner" labels);
+  check bool "the persistent state volume was not touched" true
+    (Sys.file_exists (Filename.concat dir (Slot_state.volume_name owner ^ ".volume")));
+  ignore (unwrap (observe fresh "good"));
+  unwrap (Worker.stop fresh))
+
+let slot_foreign_instance = function
+  | Error (Worker.Lifecycle (Lifecycle.Slot_foreign holder)) -> Some holder
+  | Ok _ | Error _ -> None
+
+let test_a_live_sibling_is_never_removed_from_the_writer_slot () = with_fixture (fun env sw dir docker ->
+  let owner = slot_owner dir in
+  let live = unwrap (start_writer env sw dir docker ~owner "live-writer") in
+  let refused = start_writer env sw dir docker ~owner
+    ~is_live_instance:(fun id -> List.mem id ["live-writer"; "new-writer"]) "new-writer" in
+  check (option string) "the refusal names the live sibling" (Some "live-writer")
+    (Option.bind (slot_foreign_instance refused) (fun (holder : Lifecycle.holder) -> holder.instance));
+  check bool "the live sibling's container is untouched" true (Sys.file_exists (container_path dir live));
+  ignore (unwrap (observe live "good"));
+  unwrap (Worker.stop live))
+
+let test_a_foreign_holder_of_the_writer_slot_is_refused_and_named () = with_fixture (fun env sw dir docker ->
+  let owner = slot_owner dir in
+  let first = unwrap (start_writer env sw dir docker ~owner "someone") in
+  let path = container_path dir first in
+  (* A container under the slot's name that does not carry this installation's
+     state owner label is not a predecessor, however dead it looks. *)
+  leave_exited path;
+  relabel path ["masc.lane.instance", "someone"];
+  let refused = start_writer env sw dir docker ~owner
+    ~is_live_instance:(fun _ -> false) "new-writer" in
+  (match slot_foreign_instance refused with
+   | Some { Lifecycle.container_id; instance = Some "someone"; state_owner = None } ->
+       check string "the refusal names the container" (Worker.container_id first) container_id
+   | Some _ | None -> fail "the refusal must name the holder and its labels");
+  check bool "the foreign container is untouched" true (Sys.file_exists path);
+  (* Another installation's owner label, with a dead-looking incarnation, is just as foreign. *)
+  relabel path ["masc.lane.instance", "someone"; "masc.lane.state.owner", "another installation"];
+  (match slot_foreign_instance (start_writer env sw dir docker ~owner
+     ~is_live_instance:(fun _ -> false) "new-writer") with
+   | Some { Lifecycle.state_owner = Some "another installation"; _ } -> ()
+   | Some _ | None -> fail "a container of another state owner must be refused");
+  check bool "the other owner's container is untouched" true (Sys.file_exists path);
+  relabel path ["masc.lane.instance", "someone"; "masc.lane.state.owner", Slot_state.identity owner];
+  ignore (unwrap (observe first "good"));
+  unwrap (Worker.stop first))
+
+let test_an_unremovable_predecessor_is_reported_with_its_incarnation () = with_fixture (fun env sw dir docker ->
+  let owner = slot_owner dir in
+  let dead = unwrap (start_writer env sw dir docker ~owner "dead-writer") in
+  let path = container_path dir dead in
+  leave_exited path;
+  let marker = Filename.concat dir (Worker.container_id dead ^ ".refuse-remove") in
+  write marker "blocked";
+  (match start_writer env sw dir docker ~owner ~is_live_instance:(fun _ -> false) "new-writer" with
+   | Error (Worker.Lifecycle (Lifecycle.Slot_predecessor_unremovable {instance_id = "dead-writer"; _})) -> ()
+   | Ok _ | Error _ -> fail "a predecessor whose removal is refused must be reported as unremovable");
+  check bool "the predecessor survives the refused removal" true (Sys.file_exists path);
+  Sys.remove marker;
+  let fresh = unwrap (start_writer env sw dir docker ~owner ~is_live_instance:(fun _ -> false) "new-writer") in
+  check bool "once removal works the next start clears it" false (Sys.file_exists path);
+  unwrap (Worker.stop fresh))
+
+let test_the_holder_condition_reads_the_container_it_was_refused_for () = with_fixture (fun env sw dir docker ->
+  let owner = slot_owner dir in
+  let live = unwrap (start_writer env sw dir docker ~owner "live-writer") in
+  let holder = match slot_foreign_instance (start_writer env sw dir docker ~owner "new-writer") with
+    | Some holder -> holder | None -> fail "the second start must be refused" in
+  let changed () = Worker.holder_changed ~clock:(Eio.Stdenv.clock env) ~control_timeout_sec
+    ~mgr:(Eio.Stdenv.process_mgr env) ~runtime:Types.Docker ~docker_command:docker holder in
+  check bool "the same container with the same labels is not a change" false (changed ());
+  relabel (container_path dir live) ["masc.lane.instance", "live-writer"];
+  check bool "different labels are a change" true (changed ());
+  unwrap (Worker.stop live);
+  check bool "a removed container is a change" true (changed ()))
+
+let test_an_apple_dead_predecessor_is_cleared_from_the_writer_slot () =
+  with_apple_fixture (fun env sw dir command ->
+    let owner = match Slot_state.create_owner ~workspace_root:dir ~installation_id:"apple-slot"
+        ~package_id:"worker-test" with Ok value -> value | Error message -> fail message in
+    let dead = unwrap (start_apple ~state_owner:owner ~instance_id:"dead-writer" env sw dir command "good") in
+    let path = Filename.concat dir (Worker.container_id dead ^ ".json") in
+    (* Apple reports a stopped container as stopped. *)
+    let stopped = match Yojson.Safe.from_file path with
+      | `Assoc fields -> `Assoc (("status", `String "stopped") :: List.remove_assoc "status" fields)
+      | _ -> fail "expected a fixture container" in
+    write path (Yojson.Safe.to_string stopped);
+    let base = package dir "good" in
+    let fresh = unwrap (Worker.start ~sw ~clock:(Eio.Stdenv.clock env) ~control_timeout_sec
+      ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id:"new-writer"
+      ~package:{base with runtime = Types.Apple_container; state_storage = Types.Persistent;
+                resources = {base.resources with cpus = 1.; pids = None}}
+      ~state_owner:owner ~is_live_instance:(fun id -> String.equal id "new-writer")
+      ~container_command:command ()) in
+    let labels = match List.assoc "configuration" (read_container path) with
+      | `Assoc configuration -> (match List.assoc "labels" configuration with
+          | `Assoc labels -> List.map (fun (key, value) -> key, Yojson.Safe.Util.to_string value) labels
+          | _ -> fail "labels")
+      | _ -> fail "configuration" in
+    check (option string) "the Apple slot now belongs to the new incarnation" (Some "new-writer")
+      (List.assoc_opt "masc.lane.instance" labels);
+    check (option string) "and names its state owner" (Some (Slot_state.identity owner))
+      (List.assoc_opt "masc.lane.state.owner" labels);
+    ignore (unwrap (observe fresh "good"));
+    unwrap (Worker.stop fresh))
+
+
+let start_scoped ?state_owner env sw dir docker ?scope instance_id =
+  Worker.start ~sw ~clock:(Eio.Stdenv.clock env) ~control_timeout_sec
+    ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id
+    ~package:{ (package dir "good") with state_storage =
+      (match state_owner with None -> Types.Ephemeral | Some _ -> Types.Persistent) }
+    ?state_owner ?scope ~docker_command:docker ()
+
+(* A server that died leaves containers no record names. The sweep finds them
+   by the base-path scope label, removes the dead ones whose labels explain
+   their names, and touches nothing of any other server. *)
+let test_a_sweep_removes_only_the_dead_containers_of_its_own_base_path () = with_fixture (fun env sw dir docker ->
+  let owner = slot_owner dir in
+  let live = unwrap (start_scoped env sw dir docker ~scope:"scope-a" "live-one") in
+  let dead_ephemeral = unwrap (start_scoped env sw dir docker ~scope:"scope-a" "dead-one") in
+  let dead_writer = unwrap (start_scoped ~state_owner:owner env sw dir docker ~scope:"scope-a" "dead-writer") in
+  let other_server = unwrap (start_scoped env sw dir docker ~scope:"scope-b" "dead-other") in
+  let unscoped = unwrap (start_scoped env sw dir docker "dead-unscoped") in
+  let tampered = unwrap (start_scoped env sw dir docker ~scope:"scope-a" "dead-tampered") in
+  let stuck = unwrap (start_scoped env sw dir docker ~scope:"scope-a" "dead-stuck") in
+  let path worker = container_path dir worker in
+  (* A container whose name its labels do not explain was not named for them. *)
+  write (path tampered) (Yojson.Safe.to_string (`Assoc (("Name", `String "/not-named-for-its-labels")
+    :: List.remove_assoc "Name" (read_container (path tampered)))));
+  write (Filename.concat dir (Worker.container_id stuck ^ ".refuse-remove")) "blocked";
+  let swept = match Worker.sweep ~clock:(Eio.Stdenv.clock env) ~control_timeout_sec
+      ~mgr:(Eio.Stdenv.process_mgr env) ~runtime:Types.Docker ~scope:"scope-a"
+      ~is_live_instance:(fun id -> String.equal id "live-one") ~docker_command:docker () with
+    | Ok items -> items
+    | Error failure -> fail (Lifecycle.failure_to_string failure) in
+  let verdict_of worker =
+    match List.find_opt (fun (item : Masc.Lane_addon_slot.sweep_item) ->
+      String.equal item.container_id (Worker.container_id worker)) swept with
+    | Some item -> Some item.verdict
+    | None -> None in
+  let module Slot = Masc.Lane_addon_slot in
+  check bool "a dead ephemeral container is removed" true (verdict_of dead_ephemeral = Some Slot.Removed);
+  check bool "a dead writer is removed" true (verdict_of dead_writer = Some Slot.Removed);
+  check bool "a live incarnation is left alone" true (verdict_of live = Some Slot.Live);
+  check bool "a name the labels do not explain is refused and named" true
+    (match verdict_of tampered with
+     | Some (Slot.Refused (Lifecycle.Slot_foreign {instance = Some "dead-tampered"; _})) -> true
+     | Some _ | None -> false);
+  check bool "a removal the engine refuses is reported with its incarnation" true
+    (match verdict_of stuck with
+     | Some (Slot.Refused (Lifecycle.Slot_predecessor_unremovable {instance_id = "dead-stuck"; _})) -> true
+     | Some _ | None -> false);
+  check bool "another server's container is never listed" true
+    (verdict_of other_server = None && verdict_of unscoped = None);
+  List.iter (fun (label, worker, expected) ->
+    check bool label expected (Sys.file_exists (path worker)))
+    [ "dead ephemeral gone", dead_ephemeral, false; "dead writer gone", dead_writer, false;
+      "live kept", live, true; "tampered kept", tampered, true; "stuck kept", stuck, true;
+      "other base path kept", other_server, true; "unscoped kept", unscoped, true ];
+  check bool "the state volume survives the sweep" true
+    (Sys.file_exists (Filename.concat dir (Slot_state.volume_name owner ^ ".volume"))))
+
+let test_a_sweep_touches_nothing_while_the_engine_does_not_answer () = with_fixture (fun env sw dir docker ->
+  let dead = unwrap (start_scoped env sw dir docker ~scope:"scope-a" "dead-one") in
+  write (Filename.concat dir "daemon-unavailable") "down";
+  (match Worker.sweep ~clock:(Eio.Stdenv.clock env) ~control_timeout_sec
+     ~mgr:(Eio.Stdenv.process_mgr env) ~runtime:Types.Docker ~scope:"scope-a"
+     ~is_live_instance:(fun _ -> false) ~docker_command:docker () with
+   | Error (Lifecycle.Engine_unreachable _) -> ()
+   | Ok _ | Error _ -> fail "an engine that does not answer must stop the sweep as Engine_unreachable");
+  Sys.remove (Filename.concat dir "daemon-unavailable");
+  check bool "nothing was removed" true (Sys.file_exists (container_path dir dead)))
 
 exception Owner_detached
 
@@ -2012,5 +2469,37 @@ let () = run "Lane Add-on worker" [ "lifecycle", [
   test_case "absence requires a successful Docker query" `Quick test_absence_requires_available_daemon;
   test_case "recovery bounds an unresponsive Docker control command" `Quick test_recovery_control_command_times_out;
   test_case "lost create response preserves unrelated containers" `Quick test_failed_create_receipt_cleans_only_owned_container;
+  test_case "a create that lands late is removed when the switch is released" `Quick
+    test_a_create_that_lands_late_is_removed_when_the_switch_is_released;
   test_case "created identity precedes blocked inspect" `Quick test_created_identity_precedes_blocked_inspection;
+  test_case "engine identity comes from the info command" `Quick test_engine_identity_comes_from_the_info_command;
+  test_case "Apple engine identity is the service root" `Quick test_apple_engine_identity_is_the_service_app_root;
+  test_case "engine identity parsing has no default" `Quick test_engine_identity_parsing_has_no_default;
+  test_case "a blank label reads as no label" `Quick test_a_blank_label_reads_as_no_label;
+  test_case "start is refused before create when the engine is unreachable" `Quick
+    test_start_is_refused_before_create_when_the_engine_is_unreachable;
+  test_case "a different engine cannot confirm a release" `Quick
+    test_a_different_engine_cannot_confirm_a_release;
+  test_case "an engine that changes during a query does not confirm absence" `Quick
+    test_an_engine_that_changes_during_a_query_does_not_confirm_absence;
+  test_case "an unreadable engine identity is not the recorded one" `Quick
+    test_an_unreadable_engine_identity_is_not_the_recorded_one;
+  test_case "the engine is recorded before the first create" `Quick
+    test_the_engine_is_recorded_before_the_first_create;
+  test_case "a dead predecessor is cleared from the writer slot" `Quick
+    test_a_dead_predecessor_is_cleared_from_the_writer_slot;
+  test_case "a live sibling is never removed from the writer slot" `Quick
+    test_a_live_sibling_is_never_removed_from_the_writer_slot;
+  test_case "a foreign holder of the writer slot is refused and named" `Quick
+    test_a_foreign_holder_of_the_writer_slot_is_refused_and_named;
+  test_case "an unremovable predecessor is reported with its incarnation" `Quick
+    test_an_unremovable_predecessor_is_reported_with_its_incarnation;
+  test_case "the holder condition reads the container it was refused for" `Quick
+    test_the_holder_condition_reads_the_container_it_was_refused_for;
+  test_case "an Apple dead predecessor is cleared from the writer slot" `Quick
+    test_an_apple_dead_predecessor_is_cleared_from_the_writer_slot;
+  test_case "a sweep removes only the dead containers of its own base path" `Quick
+    test_a_sweep_removes_only_the_dead_containers_of_its_own_base_path;
+  test_case "a sweep touches nothing while the engine does not answer" `Quick
+    test_a_sweep_touches_nothing_while_the_engine_does_not_answer;
 ]]

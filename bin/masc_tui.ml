@@ -9323,6 +9323,7 @@ let open_msx_spectator (state : Masc_tui_types.state) ~mailbox =
   state.msx_frame <- None;
   msx_surface_frame := None;
   state.msx_notice <- None;
+  state.msx_worker_down_notice <- None;
   state.msx_last_poll_ns <- 0L;
   render_spectator state;
   launch_msx_live_read state ~mailbox
@@ -18195,11 +18196,17 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                    && state.msx_open && not state.msx_menu_open
                    && state.machine_source = Masc.Machine_lane.Msx then begin
                   state.msx_notice <- Some (Masc_tui_msx_tick.worker_unavailable_notice detail);
+                  state.msx_worker_down_notice <- state.msx_notice;
                   render_spectator state
                 end
             | Ok (Advanced (frame, mark)) ->
                 if request.poll_view == !msx_poll_view && request.poll_port = state.port
                    && state.msx_open && not state.msx_menu_open then begin
+                  (* The worker answers again: retire the notice the tick left
+                     while it did not. *)
+                  state.msx_notice <- Masc_tui_msx_tick.notice_after_advance
+                    ~notice:state.msx_notice ~worker_down_notice:state.msx_worker_down_notice;
+                  state.msx_worker_down_notice <- None;
                   state.msx_frame <- frame;
                   state.msx_live <-
                     (match frame, mark with

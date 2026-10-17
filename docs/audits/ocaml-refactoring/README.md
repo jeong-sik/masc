@@ -453,7 +453,7 @@ Ordering rationale: The important duplication is the durable retry protocol and 
 
 **Preserve evidence transport decisions in the complete review request, then isolate snapshot projections**
 
-Round 13 refinement: source inspection at `0bef45a0ae2179fb1ea2036dbab05c1ca208b948`, independently checked at `7f4a2fb602a0f4bad140eb0673324f2b4844d5ad`. These D7 sources are unchanged by the intervening E1 parser work. The consumer finding below is source-derived; no reproduction, provider request or deployed incident was observed. D7 remains unimplemented and does not increase the implemented-candidate count.
+Round 13 refinement in [#43538](https://github.com/jeong-sik/masc/pull/43538): source inspection at `0bef45a0ae2179fb1ea2036dbab05c1ca208b948`, independently checked at `7f4a2fb602a0f4bad140eb0673324f2b4844d5ad`. These D7 sources are unchanged by the intervening E1 parser work. The consumer finding below is source-derived; no reproduction, provider request or deployed incident was observed. D7 remains unimplemented and does not increase the implemented-candidate count.
 
 Source: [lib/workspace/workspace_verification_store.ml:3](https://github.com/jeong-sik/masc/blob/aea8424926ea79f110315eec5ab429ac51043598/lib/workspace/workspace_verification_store.ml#L3-L78), [lib/workspace/workspace_verification_store.ml:81](https://github.com/jeong-sik/masc/blob/aea8424926ea79f110315eec5ab429ac51043598/lib/workspace/workspace_verification_store.ml#L81-L627), [lib/workspace/workspace_verification_store.ml:811](https://github.com/jeong-sik/masc/blob/aea8424926ea79f110315eec5ab429ac51043598/lib/workspace/workspace_verification_store.ml#L811-L829).
 
@@ -465,7 +465,7 @@ Next change: Reproduce the complete stored-request-to-reviewer-input path before
 
 Preserve:
 
-- Invalid references remain payload-free and must not echo rejected paths.
+- Invalid-reference items remain payload-free and must not echo rejected paths; this does not claim that the existing separately rendered raw reference list hides every input reference.
 - Stored evidence preserves submission-time bytes/digests; metadata and judge projections do not substitute for the stored snapshot.
 - Truncated/aggregate-withheld content remains visibly unavailable with the existing tools/read instructions.
 - Binary body bytes stay outside JSON. Preserve the actual existing checks: collaboration decoding verifies its content digest; binary decoding accepts a digest string, while body reading checks the filed path shape and actual delivery size without recomputing that digest. Do not claim a binary hash-validation guarantee or silently add one in this extraction.

@@ -110,7 +110,7 @@ let native_tool_to_json ?progress ?completion (tool : Keeper_chat_events.native_
 
 let project ~timestamp ~redact_text state event =
   let open Keeper_chat_events in
-  match redact_content ~redact_text event with
+  match public_content ~redact_text event with
   | Run_started { run_id; thread_id } ->
       let state = { state with thread_id; run_id = Some run_id } in
       ( state
@@ -334,6 +334,7 @@ let project ~timestamp ~redact_text state event =
       , Some
           (Ag_ui.make_event ~timestamp ~thread_id:state.thread_id
              ~run_id:state.run_id ~message:(Some message)
+             ~code:(Some public_error_code)
              Ag_ui.Run_error) )
   | Run_finished { run_id } ->
       let state = { state with run_id = Some run_id } in

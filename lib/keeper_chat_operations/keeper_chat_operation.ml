@@ -91,7 +91,7 @@ let is_terminal = function
   | Queued | Running _ -> false
 ;;
 
-let to_json operation =
+let to_json_with_failure ~failure_fields operation =
   let state_fields =
     match operation.state with
     | Queued -> [ "state", `String "Queued" ]
@@ -102,16 +102,9 @@ let to_json operation =
       ; "completed_at", `Float completed_at
       ; "outcome_ref", `String outcome_ref
       ]
-    | Failed { completed_at; failure = { kind; detail; outcome_ref } } ->
-      [ "state", `String "Failed"
-      ; "completed_at", `Float completed_at
-      ; "failure_kind", `String (failure_kind_to_string kind)
-      ; "failure_detail", `String detail
-      ; ( "outcome_ref"
-        , match outcome_ref with
-          | None -> `Null
-          | Some value -> `String value )
-      ]
+    | Failed { completed_at; failure } ->
+      [ "state", `String "Failed"; "completed_at", `Float completed_at ]
+      @ failure_fields operation.operation_id failure
     | Cancelled { completed_at } ->
       [ "state", `String "Cancelled"; "completed_at", `Float completed_at ]
   in
@@ -133,6 +126,36 @@ let to_json operation =
         | Some member -> ["batch_execution_id", `String (Operation_id.to_string member.execution_id);
             "batch_input_digest", `String member.input_digest])
      @ state_fields)
+;;
+
+let to_json operation =
+  to_json_with_failure operation
+    ~failure_fields:(fun _operation_id { kind; detail; outcome_ref } ->
+      [ "failure_kind", `String (failure_kind_to_string kind)
+      ; "failure_detail", `String detail
+      ; ( "outcome_ref"
+        , match outcome_ref with None -> `Null | Some value -> `String value )
+      ])
+;;
+
+let public_failure_message = function
+  | Interrupted_by_restart -> "The operation was interrupted by a runtime restart."
+  | Turn_cancelled -> "The operation was cancelled."
+  | Turn_exception -> "The operation could not complete."
+  | Store_unavailable -> "The operation store is unavailable."
+  | No_queued_operation -> "The operation is no longer queued."
+  | Invalid_input -> "The operation input was rejected."
+  | Turn_invariant -> "The operation requires operator attention."
+  | Delivery_failed -> "The operation result could not be delivered."
+;;
+
+let to_public_json operation =
+  to_json_with_failure operation
+    ~failure_fields:(fun operation_id { kind; detail = _; outcome_ref = _ } ->
+      [ "failure_kind", `String (failure_kind_to_string kind)
+      ; "failure_detail", `String (public_failure_message kind)
+      ; "incident_id", `String (Operation_id.to_string operation_id)
+      ])
 ;;
 
 let validate_timestamp ~field value =

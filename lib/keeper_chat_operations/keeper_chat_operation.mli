@@ -57,6 +57,19 @@ type t =
 val state_to_string : state -> string
 val is_terminal : state -> bool
 val to_json : t -> Yojson.Safe.t
+(** Internal operation facts, including the original diagnostic. *)
+
+val public_failure_message : failure_kind -> string
+(** Fixed public message selected only by the closed failure kind. It never
+    accepts a diagnostic, filesystem path or provider error payload. *)
+
+val to_public_json : t -> Yojson.Safe.t
+(** Public operation state. Failed operations expose the typed failure code,
+    fixed safe message and their operation identity as [incident_id]. Private
+    failure diagnostics and diagnostic outcome references are omitted; the
+    original immutable operation remains available to internal consumers.
+    Queued/running/success/cancel state and caller-owned source/input are
+    unchanged. Keeper-scoped content redaction remains an outer MASC boundary. *)
 
 type canonical_json_error =
   | Duplicate_object_key of string

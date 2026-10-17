@@ -203,9 +203,14 @@ type keeper_chat_event =
       ; result_summary : string option
       }
 
-let redact_content ~redact_text = function
+let public_error_code = "event_error"
+let public_error_message = "The Keeper turn failed."
+let public_protocol_error_message = "The stream event could not be used."
+
+let map_content ~public_errors ~redact_text = function
   | Text_delta delta -> Text_delta {delta with text = redact_text delta.text}
-  | Event_error event -> Event_error {message=redact_text event.message}
+  | Event_error event ->
+      Event_error {message = if public_errors then public_error_message else redact_text event.message}
   | Reply_details event -> Reply_details {event with reply=redact_text event.reply}
   | Continuation_checkpoint event ->
       Continuation_checkpoint {event with message=redact_text event.message}
@@ -214,8 +219,10 @@ let redact_content ~redact_text = function
   | Agent_core_media_delta event ->
       Agent_core_media_delta {event with media_ref=redact_text event.media_ref}
   | Agent_core_stream_protocol_error event ->
-      Agent_core_stream_protocol_error {event with reason=Option.map redact_text event.reason;
-        event_type=Option.map redact_text event.event_type}
+      Agent_core_stream_protocol_error {event with
+        reason = if public_errors then Some public_protocol_error_message
+          else Option.map redact_text event.reason;
+        event_type = if public_errors then None else Option.map redact_text event.event_type}
   | Tool_call_args event -> Tool_call_args {event with delta=redact_text event.delta}
   | Tool_call_args_snapshot event ->
       Tool_call_args_snapshot {event with snapshot=redact_text event.snapshot}
@@ -241,6 +248,14 @@ let redact_content ~redact_text = function
     | Agent_core_content_block_stop _ | Model_content_activity _
     | Agent_core_thinking_signature_delta _ | Tool_call_start _ | Tool_call_end _
     | Native_tool_start _ | Tool_approval_settled _ | Tool_result_ready _ | Tool_transcript_committed _ | Status_block _) as event -> event
+;;
+
+let redact_content ~redact_text event =
+  map_content ~public_errors:false ~redact_text event
+;;
+
+let public_content ~redact_text event =
+  map_content ~public_errors:true ~redact_text event
 ;;
 
 type published =

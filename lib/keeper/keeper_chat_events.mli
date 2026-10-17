@@ -299,6 +299,18 @@ val redact_content :
     journal HTTP serialization. Arbitrary argument JSON has its separate
     recursive key/value redaction boundary before becoming event content. *)
 
+val public_error_code : string
+val public_error_message : string
+val public_protocol_error_message : string
+val public_content :
+  redact_text:(string -> string) -> keeper_chat_event -> keeper_chat_event
+(** The public copy redacts content with the captured Keeper exact-secret
+    policy and replaces terminal diagnostic messages with one fixed safe
+    message. Stream protocol diagnostics retain their closed kind and safe
+    message, while provider diagnostic text stays internal.
+    Event/correlation identities stay intact. The original event and
+    {!redact_content} retain their internal diagnostic behavior. *)
+
 type published =
   { seq : int
   ; ts : float

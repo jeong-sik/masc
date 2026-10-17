@@ -266,6 +266,106 @@ let forget_snapshot path =
   Stdlib.Mutex.protect snapshot_cache_mutex (fun () -> Hashtbl.remove snapshot_cache path)
 ;;
 
+(* What a strict commit left on disk once it crossed the durability barrier
+   and published its pending queue: the revision, and the identities of the
+   snapshot and the transition WAL. They are sampled right after the barrier
+   and the WAL compaction, under the owner lock, and kept only once
+   [after_commit] has returned, so a publication that raised is published by
+   the next replay.
+
+   The maintenance tick delivers answered Asks, finished compositions and
+   owned job results through [enqueue_stimulus_once_result], and its Ask pass
+   replays every answered Ask whose Keeper is not running, on every tick. A
+   replay that finds its source queued changes nothing, but the strict path
+   could not tell bytes this process confirmed from bytes that followed a
+   failed parent fsync. So it rewrote the snapshot with both fsyncs and
+   published the pending queue to the SSE clients and the Librarian once per
+   source per tick: 94 sources of twelve stopped Keepers on 2026-10-16, 940
+   publications and 779 pairs of Librarian warnings in ten minutes (#43350).
+
+   Every write that reaches the snapshot is a rename, so it changes the
+   snapshot's identity, and a transition WAL that gained or lost rows changes
+   its size or mtime. While both still match and the loaded state carries the
+   recorded revision, the snapshot holds the bytes this process confirmed and
+   announced and the WAL has not changed since, so a replay has nothing left
+   to do. A write that reached either file, another writer and a restart all
+   leave a mismatch, and the replay crosses the barrier again as before. A
+   write that failed before its rename left the confirmed snapshot in place.
+   This rests on what [snapshot_cache] rests on: under the owner lock no other
+   writer replaces these files.
+
+   Keyed by snapshot path like [snapshot_cache]. *)
+type durable_confirmation =
+  { dc_revision : int64
+  ; dc_snapshot : Unix.stats
+  ; dc_wal : Unix.stats option
+  }
+
+let durable_confirmations : (string, durable_confirmation) Hashtbl.t = Hashtbl.create 32
+let durable_confirmations_mutex = Stdlib.Mutex.create ()
+
+(* [Ok None] is an absent file. A path that cannot be inspected, or is not a
+   regular file, says nothing about what was confirmed. *)
+let regular_file_identity path =
+  match Unix.lstat path with
+  | { Unix.st_kind = Unix.S_REG; _ } as stat -> Ok (Some stat)
+  | { Unix.st_kind =
+        Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK
+    ; _
+    } -> Error ()
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+  | exception (Unix.Unix_error _ | Sys_error _) -> Error ()
+;;
+
+let durable_identity owner =
+  match
+    ( regular_file_identity (snapshot_path_of_owner owner)
+    , regular_file_identity (transition_wal_path_of_owner owner) )
+  with
+  | Ok (Some snapshot), Ok wal -> Some (snapshot, wal)
+  | (Ok None | Error ()), (Ok _ | Error ()) | Ok (Some _), Error () -> None
+;;
+
+let same_wal_identity recorded current =
+  match recorded, current with
+  | None, None -> true
+  | Some recorded, Some current -> same_snapshot_file recorded current
+  | None, Some _ | Some _, None -> false
+;;
+
+let sample_durable_confirmation owner state =
+  Option.map
+    (fun (snapshot, wal) ->
+       { dc_revision = State.revision state; dc_snapshot = snapshot; dc_wal = wal })
+    (durable_identity owner)
+;;
+
+(* [None] is a sample that could not be taken: the files just changed, so an
+   earlier record no longer describes them either. *)
+let keep_durable_confirmation owner confirmation =
+  let path = snapshot_path_of_owner owner in
+  Stdlib.Mutex.protect durable_confirmations_mutex (fun () ->
+    match confirmation with
+    | Some confirmation -> Hashtbl.replace durable_confirmations path confirmation
+    | None -> Hashtbl.remove durable_confirmations path)
+;;
+
+let durably_confirmed owner state =
+  match
+    Stdlib.Mutex.protect durable_confirmations_mutex (fun () ->
+      Hashtbl.find_opt durable_confirmations (snapshot_path_of_owner owner))
+  with
+  | None -> false
+  | Some confirmation ->
+    Int64.equal confirmation.dc_revision (State.revision state)
+    &&
+    (match durable_identity owner with
+     | None -> false
+     | Some (snapshot, wal) ->
+       same_snapshot_file confirmation.dc_snapshot snapshot
+       && same_wal_identity confirmation.dc_wal wal)
+;;
+
 let save_state_unlocked_with ~save_snapshot owner state =
   let keeper_name = keeper_name_of_owner owner in
   let path = snapshot_path_of_owner owner in
@@ -1078,13 +1178,19 @@ let commit_transform_unlocked
     (match transform current with
      | Error _ as error -> error
      | Ok (next, value) when next == current ->
-       if not strict_snapshot_durability then Ok value
+       if not strict_snapshot_durability || durably_confirmed owner current then Ok value
        else
-         (* Visible bytes can follow a failed parent fsync. A same-binding
-            retry must cross the durability barrier again before admission.
-            Re-publish the authoritative state without a logical mutation. *)
+         (* Visible bytes can follow a failed parent fsync, and these are not
+            bytes this process confirmed ([durable_confirmation]). A
+            same-binding retry must cross the durability barrier again before
+            admission. Re-publish the authoritative state without a logical
+            mutation. *)
          save_state_unlocked_with ~save_snapshot:confirm_snapshot owner current
-         |> Result.map (fun () -> after_commit (State.pending current); value)
+         |> Result.map (fun () ->
+           let confirmation = sample_durable_confirmation owner current in
+           after_commit (State.pending current);
+           keep_durable_confirmation owner confirmation;
+           value)
      | Ok (next, value) ->
        (match bump_revision next with
         | Error _ as error -> error
@@ -1108,6 +1214,11 @@ let commit_transform_unlocked
                 projector itself starts with [load_state_unlocked] (#26074). *)
              (match compact_transition_wals_unlocked owner with
               | Error _ as error -> error
+              | Ok () when strict_snapshot_durability ->
+                let confirmation = sample_durable_confirmation owner next in
+                after_commit (State.pending next);
+                keep_durable_confirmation owner confirmation;
+                Ok value
               | Ok () ->
                 after_commit (State.pending next);
                 Ok value))))

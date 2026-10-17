@@ -184,7 +184,10 @@ val bind_pending_repetition_scope_result :
 (** Bind under the owner lock with strict snapshot durability. The producer
     supplies identity once; this function never invents identity or infers a
     parent from event payloads. Success returns fresh selection authority only
-    after the durable commit. This is not a complete continuation contract. *)
+    after the durable commit. A replay of a binding this process already
+    confirmed writes nothing and does not run [after_commit] again (see
+    {!enqueue_stimulus_once_result}). This is not a complete continuation
+    contract. *)
 
 val note_checkpoint_retention_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->
@@ -262,7 +265,9 @@ module For_testing : sig
     base_path:string -> keeper_name:string -> Keeper_event_queue.stimulus ->
     (unit, string) result
   (** Call-scoped fault seam through the production one-shot transaction.
-      The writer is used for both first publication and same-source retries. *)
+      The writer is used for the first publication and for same-source
+      retries until one of its writes is confirmed; a retry after that writes
+      nothing. *)
 
   val bind_pending_repetition_scope_with_confirmation :
     confirm_snapshot:(string -> Keeper_event_queue_state.t -> (unit, string) result) ->
@@ -526,7 +531,10 @@ val enqueue_stimulus_once_result :
   (enqueue_stimulus_result, string) result
 (** One-shot completion delivery under the owner lock. A same-source payload
     conflict is rejected. Exact pending/outbox replays and consumed sources
-    return [Already_present] only after strict snapshot durability is confirmed.
+    return [Already_present] only after strict snapshot durability is
+    confirmed: by this call, or by an earlier strict commit in this process
+    whose snapshot and transition WAL are still the files on disk. That replay
+    writes nothing and does not run [after_commit] again.
     [already_delivered] must return an error when absence is unproven; it runs
     only when the source is absent from the full state. *)
 

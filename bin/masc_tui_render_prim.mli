@@ -428,10 +428,36 @@ val planning_rollup_row : cols:int -> Masc_tui_types.planning_rollup -> string
 (** The goal count; with any goals, also the completed share and a counter per
     phase. *)
 
+val planning_rollup_rows :
+  cols:int -> Masc_tui_types.planning_rollup -> string list
+(** {!planning_rollup_row} packed into frame-bounded rows so narrow terminals
+    keep each phase counter intact and retain the 2-cell left margin on
+    wrapped continuation lines. *)
+
 val planning_backlog_counts :
   Masc_tui_types.planning_backlog -> (string * int * string) list
 (** The Backlog counts as [(key, count, label)], each label led by the progress
     mark its Task rows wear. *)
+
+val planning_backlog_clauses :
+  Masc_tui_types.planning_backlog -> string list
+(** The Backlog summary clauses ([Backlog: ○ todo=N], [◉ claimed=N], ...),
+    each styled by magnitude band and kept atomic across clause packing. *)
+
+val planning_change_clauses :
+  baseline:Masc_tui_types.planning_snapshot option ->
+  Masc_tui_types.planning_snapshot ->
+  string list
+(** The baseline-delta clauses for the Planning summary block. *)
+
+val pack_planning_summary_rows : cols:int -> string list -> string list
+(** Packs summary clauses within [framed_inner_width cols - 2] and prefixes
+    each physical row with the 2-cell left margin. *)
+
+val work_tasks_room : budget:int -> header_rows:int -> count:int -> int
+(** Visible task rows for [Work / Tasks] given [budget] body rows and
+    [header_rows] summary/divider rows, reserving one row for [[tasks a-b/n]]
+    when overflowing and at least 2 rows remain below the header. *)
 
 val planning_goal_history_summary : unlisted:int -> ended:int -> string
 (** The retained-history count row: how many goals are no longer listed, and

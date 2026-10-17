@@ -4170,7 +4170,7 @@
 (test
  (name test_tui_planning_order)
  (modules test_tui_planning_order)
- (libraries alcotest masc.masc_goal masc_tui_types masc_tui_render_prim))
+ (libraries alcotest masc.masc_goal masc_tui_types masc_tui_render_prim masc_tui_message_layout masc_tui_scroll masc_tui_theme))
 
 ; The named lanes below are the same suite sliced by scenario family. They
 ; existed only as local commands, so every assertion in them was dead in CI:

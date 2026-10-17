@@ -1401,8 +1401,9 @@ let test_autonomous_turn_recovers_task_free_work_from_history () =
     let evidence = read_evidence recent_work in
     let decision = WO.keeper_cycle_decision
         ~event_queue_triggers:[WO.Bootstrap_stimulus] ~meta base_observation in
-    let prompt = Prompt.build_prompt ~turn_decision:decision
-        ~current_task:Inputs.No_current_task ~recent_work ~observation:base_observation () in
+    let prepared = Prompt.prepare_prompt ~turn_decision:decision
+        ~current_task:Inputs.No_current_task ~observation:base_observation () in
+    let prompt = Prompt.project_prompt prepared ~recent_work () in
     List.iter (fun text -> check bool ("history recovered: " ^ text) true
         (contains ~needle:text evidence))
       ["Review PR-ongoing through verdict"; "Read producer; consumer remains";
@@ -1430,6 +1431,16 @@ let test_autonomous_turn_recovers_task_free_work_from_history () =
        check bool "reference is smaller than original" true (String.length text < String.length large_text)
      | _ -> fail "large request did not produce a reference");
     (match project ~tools:[] large with Unavailable _ -> () | _ -> fail "missing reader admitted large pinned text");
+    let unavailable_request = Prompt.project_prompt prepared ~recent_work:(project ~tools:[] large) () in
+    let restored_request = Prompt.project_prompt prepared ~recent_work:transmitted () in
+    check bool "a reused common product never inlines work without the actual artifact reader" false
+      (contains ~needle:large_text unavailable_request.world_state);
+    (match transmitted with Evidence reference ->
+      check bool "restoring the actual reader reprojects its current retrievable work" true
+        (contains ~needle:reference restored_request.world_state)
+     | Absent | Preview _ | Unavailable _ -> fail "actual artifact publication was not preserved");
+    check string "request capability changes do not replace the original user input"
+      prompt.user_message restored_request.user_message;
     let blocked = Filename.concat base_path "blocked-blob-root" in
     Out_channel.with_open_bin blocked (fun out -> output_string out "not a directory");
     match project ~base_path:blocked large with
@@ -1438,11 +1449,96 @@ let test_autonomous_turn_recovers_task_free_work_from_history () =
 
 ;;
 
+let test_prepared_prompt_keeps_turn_inputs_and_request_authority () =
+  Eio_main.run (fun _ ->
+    let held id = Inputs.Current_task
+      {(make_task ~task_status:(Masc_domain.InProgress {assignee=meta.name;started_at="2026-10-17T00:00:00Z"}) ())
+       with id} in
+    let answer : WO.pending_board_event =
+      {event_kind=WO.Ask_answered_row {answered_by=Masc.Keeper_input_speaker.Owner};
+       post_id="keeper-ask:original-common-owner";author="operator";title="original answer";
+       preview="ORIGINAL_ASK_REPLY\nkeep the original work";hearth=None;post_kind=Masc.Board.System_post;
+       updated_at=1.;explicit_mention=false;matched_targets=[];replies_after_own_comment=None;
+       latest_external_author=None;latest_external_preview=None} in
+    let observation = {base_observation with pending_board_events=[answer];
+      own_recent_actions=Ok [action_turn 6 [call ~source_position:0 ~tool:"keeper_task_done"
+        ~input:"ORIGINAL_ACTION_INPUT" ~outcome:(Masc.Keeper_own_recent_actions.Failed_call (Some "unverified"))]]} in
+    let decision = WO.keeper_cycle_decision ~meta observation in
+    let fresh_decision = WO.keeper_cycle_decision ~meta base_observation in
+    let memory = Masc.Workspace_memory_ledger.Available
+      {ledger_sha256="original-ledger";claim_count=1;conflict_count=0;classified_count=1;
+       briefing=Ok (Masc.Workspace_memory_briefing.Current {source_ids=["c1"];text="UNSELECTED_PRIVATE_BODY"})} in
+    let prepared = Prompt.prepare_prompt ~turn_decision:decision ~current_task:(held "task-original-owner")
+        ~workspace_memory:memory ~wiki_contents:one_wiki_page ~observation () in
+    let foreign = Prompt.prepare_prompt ~turn_decision:fresh_decision ~current_task:(held "task-other-owner")
+        ~observation:base_observation () in
+    ignore (Prompt.project_prompt foreign ());
+    let layer parts name =
+      let open Yojson.Safe.Util in
+      Masc.Keeper_context_layers.receipt_to_json parts.Prompt.world_partition
+      |> member "spans" |> to_list |> List.find_opt (fun span ->
+        member "layer" (member "source" span) = `String name) in
+    let check_spans (parts : Prompt.turn_prompt_parts) =
+      let open Yojson.Safe.Util in
+      let receipt = Masc.Keeper_context_layers.receipt_to_json parts.world_partition in
+      check int "receipt belongs to these exact request bytes" (String.length parts.world_state)
+        (receipt |> member "bytes" |> to_int);
+      receipt |> member "spans" |> to_list |> List.iter (fun span ->
+        let offset = span |> member "offset" |> to_int in
+        let bytes = span |> member "bytes" |> to_int in
+        let actual = String.sub parts.world_state offset bytes in
+        check string "each reassembled span names its actual UTF8 content"
+          (span |> member "sha256" |> to_string)
+          Digestif.SHA256.(digest_string actual |> to_hex)) in
+    let access offered deferred loader_alive = shared_reader_access ~offered ~deferred ~loader_alive in
+    let project access = Prompt.project_prompt prepared ~workspace_memory_access:access
+        ~recent_work:(Masc.Keeper_recent_work.Evidence "최근 작업 근거: 🐾 원래 목표 계속") () in
+    let unavailable = access [] [] false in
+    let direct = access ["keeper_workspace_memory_read";"keeper_wiki_read"] [] false in
+    let discoverable = access ["keeper_tool_search"] ["keeper_workspace_memory_read";"keeper_wiki_read"] true in
+    let original = project unavailable in
+    let direct_request,deferred_request = Eio.Fiber.pair
+        (fun () -> project direct) (fun () -> project discoverable) in
+    List.iter (fun (access,parts) ->
+      check_spans parts;
+      check bool "interleaved preparation retains the original Task" true
+        (contains ~needle:"task-original-owner" parts.Prompt.world_state);
+      check bool "another preparation's Task is never adopted" false
+        (contains ~needle:"task-other-owner" parts.world_state);
+      check string "the original answered Ask remains the durable input" original.user_message parts.user_message;
+      check bool "answer source identity remains present" true
+        (contains ~needle:answer.post_id parts.user_message);
+      List.iter (fun expected -> check bool "current request access reaches its own dynamic layers" true
+        (contains ~needle:expected parts.world_state))
+        [Option.get (Prompt.format_workspace_memory_observation ~access memory);
+         Option.get (Prompt.format_wiki_observation ~access one_wiki_page)];
+      check bool "memory body is not promoted into unsolicited context" false
+        (contains ~needle:"UNSELECTED_PRIVATE_BODY" parts.world_state);
+      check bool "shared common Task span remains identical across request routes" true
+        (layer original "current_task" = layer parts "current_task"))
+      [unavailable,original;direct,direct_request;discoverable,deferred_request];
+    let failed = Prompt.project_prompt prepared
+        ~own_recent_actions:(Error (Masc.Keeper_tool_call_log.Index_unavailable "CURRENT_HISTORY_UNAVAILABLE")) () in
+    check bool "per-request history failure remains visible" true
+      (contains ~needle:"CURRENT_HISTORY_UNAVAILABLE" failed.world_state);
+    let restored = project direct in
+    check bool "an unavailable source does not replace the immutable original action source" true
+      (contains ~needle:"ORIGINAL_ACTION_INPUT" restored.world_state);
+    check bool "a later request does not borrow the previous route" true
+      (original.world_state = (project unavailable).world_state);
+    let fresh = Prompt.prepare_prompt ~turn_decision:fresh_decision ~current_task:Inputs.No_current_task
+        ~observation:base_observation () |> fun prepared -> Prompt.project_prompt prepared () in
+    check bool "a fresh consumed wake does not reinsert an earlier answer" false
+      (contains ~needle:answer.post_id fresh.user_message))
+;;
+
 let () =
   init_prompt_config_for_tests ();
   init_runtime_default_for_tests ();
   run "keeper_wake_turn_context"
     [
+      ("prepared prompt ownership", [test_case "common turn input survives request-specific access and source failure" `Quick
+          test_prepared_prompt_keeps_turn_inputs_and_request_authority]);
       ( "current task layer",
         [
           test_case "renders id, status, and handoff" `Quick

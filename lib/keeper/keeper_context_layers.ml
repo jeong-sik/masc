@@ -86,30 +86,38 @@ type unattributed = World_frame | Host_workspace_recall | Direct_turn | Unprojec
 type source = Layer of layer_id | Unattributed of unattributed
 type span = { source : source; offset : int; bytes : int; sha256 : string }
 type rendered = { text : string; spans : span list }
+type prepared_content = { content_text : string; content_sha256 : string }
 
 let hash text = Digestif.SHA256.(digest_string text |> to_hex)
+let prepare_content text = {content_text=text;content_sha256=hash text}
 let text rendered = rendered.text
+let prepared_span source offset content =
+  {source;offset;bytes=String.length content.content_text;sha256=content.content_sha256}
 let make_span source offset text =
-  { source; offset; bytes = String.length text; sha256 = hash text }
+  prepared_span source offset (prepare_content text)
 let unattributed reason text =
   { text; spans = [make_span (Unattributed reason) 0 text] }
 let append_unattributed rendered reason suffix =
   { text = rendered.text ^ suffix;
     spans = rendered.spans @ [make_span (Unattributed reason) (String.length rendered.text) suffix] }
+let prepend_prepared_unattributed reason prefix rendered =
+  { text = prefix.content_text ^ rendered.text;
+    spans = prepared_span (Unattributed reason) 0 prefix ::
+      List.map (fun span -> {span with offset = span.offset + String.length prefix.content_text}) rendered.spans }
 let prepend_unattributed reason prefix rendered =
-  { text = prefix ^ rendered.text;
-    spans = make_span (Unattributed reason) 0 prefix ::
-      List.map (fun span -> {span with offset = span.offset + String.length prefix}) rendered.spans }
-let assemble ~content_of =
+  prepend_prepared_unattributed reason (prepare_content prefix) rendered
+let assemble_prepared ~content_of =
   let buffer = Buffer.create 256 in
   let spans = List.filter_map (fun layer ->
     match content_of layer with
     | None -> None
-    | Some text ->
-      let span = make_span (Layer layer) (Buffer.length buffer) text in
-      Buffer.add_string buffer text;
+    | Some content ->
+      let span = prepared_span (Layer layer) (Buffer.length buffer) content in
+      Buffer.add_string buffer content.content_text;
       Some span) ordered in
   { text = Buffer.contents buffer; spans }
+let assemble ~content_of =
+  assemble_prepared ~content_of:(fun layer -> Option.map prepare_content (content_of layer))
 
 let layer_name = function
   | Active_goals -> "active_goals"

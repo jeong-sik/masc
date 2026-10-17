@@ -677,6 +677,15 @@ let run_keeper_invocation_turn_admitted_inner
                could not see its own in-progress work or handoff. Keep this
                as fresh per-turn context, exactly like the unified wake lane;
                it is deliberately not written to conversation history. *)
+            let preview = Keeper_turn_preview.reset ~keeper_name:meta.name
+              ~execution_scope:(Some (Keeper_repetition_scope.Execution.scope repetition_execution))
+              ~turn_ref:(Some turn_ref)
+              ~now:(Time_compat.now ())
+              ~redaction:(Keeper_secret_redaction.snapshot ~base_path:ctx.config.base_path
+                ~keeper_name:meta.name) in
+            let current_task,held_task_skills,skill_snapshot =
+              Keeper_turn_preview.with_preparation ~writer:(Some preview) ~turn_ref:(Some turn_ref)
+                ~phase:Keeper_turn_preview.Task_preparation (fun () ->
             let current_task =
               Keeper_world_observation_inputs.read_current_task
                 ~config:ctx.config
@@ -691,8 +700,11 @@ let run_keeper_invocation_turn_admitted_inner
               Keeper_agent_run.capture_skill_snapshot
                 ~base_path:ctx.config.base_path
             in
+            current_task,held_task_skills,skill_snapshot)
+            in
             let task_skill_selection =
               Keeper_skill_preparation_runtime_observation.with_turn_result
+                ~preview
                 ~config:ctx.config ~keeper_name:meta.name ~turn_ref
                 ~phase:Keeper_skill_preparation_runtime_observation.Direct_task_resolution @@ fun () ->
               Keeper_task_skill_turn.resolve_live_observations
@@ -703,6 +715,8 @@ let run_keeper_invocation_turn_admitted_inner
               match task_skill_selection with
               | Error _ -> []
               | Ok selection ->
+                Keeper_turn_preview.with_preparation ~writer:(Some preview) ~turn_ref:(Some turn_ref)
+                  ~phase:Keeper_turn_preview.Skill_preparation (fun () ->
                 Keeper_task_skill_turn.exact_task_surfaces
                   ~snapshot:skill_snapshot
                   ~tool_deny:profile_defaults.tool_deny
@@ -710,7 +724,7 @@ let run_keeper_invocation_turn_admitted_inner
                   ~skill_names:profile_defaults.skill_names
                   ~selection
                   ~current_task
-                  ~held_task_skills
+                  ~held_task_skills)
             in
             (* Direct owner turns need the same fresh Gate authority as
                autonomous turns. Build it before the prompt callback so the
@@ -841,6 +855,7 @@ let run_keeper_invocation_turn_admitted_inner
                     (fun () ->
                       Keeper_agent_run.run_turn
                                       ~approval_admission:(Keeper_approval_origin.Direct_request operation_id)
+                                      ~preview
                                       ~observation_token
                                       ?direct_resume
                                       ~native_continuation:{ binding = native_binding; resumed = native_resume }

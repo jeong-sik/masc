@@ -745,7 +745,7 @@ let parse_composition ~descriptors ~index value =
          | Some descriptor ->
            (match Keeper_tool_descriptor.prepared_leaf_admission descriptor with
             | Read_only_ordinary_leaf | Owned_job_launch_leaf -> None
-            | Direct_only -> Some node)
+            | Owned_file_edit_leaf | Direct_only -> Some node)
          | None -> Some node) with
        | None -> Ok ()
        | Some node -> Error (Async_leaf_not_admitted

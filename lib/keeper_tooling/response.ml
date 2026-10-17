@@ -74,11 +74,13 @@ type completion_policy = Require_progress | Allow_quiet_final
 type quiet_final_shape =
   | Quiet_blank_text
   | Quiet_no_content
+  | Quiet_thinking_only
 
-(* [Thinking_only] stays out: Anthropic replays a thinking block, so that
-   assistant message would reach the next request. An [Empty] one never does,
-   because every backend's history projection drops an assistant message
-   whose content is empty. *)
+(* A thinking lane's silence carries the model's reasoning and no text. Only
+   an autonomous wake allows silence, and an autonomous turn is internal
+   (RFC-0385): its replay persistence drops the turn's trailing assistant
+   messages with their retained context, so a thinking-only final never
+   reaches the next request (#41925). *)
 let quiet_final_shape ~policy (response : Agent_core.Types.api_response) =
   match policy, response.stop_reason with
   | Allow_quiet_final, Agent_core.Types.EndTurn ->
@@ -86,7 +88,8 @@ let quiet_final_shape ~policy (response : Agent_core.Types.api_response) =
         (Agent_core.Response_shape.summarize response) with
      | Blank_text_only -> Some Quiet_blank_text
      | Empty -> Some Quiet_no_content
-     | Thinking_only | Tool_result_only | Media_only
+     | Thinking_only -> Some Quiet_thinking_only
+     | Tool_result_only | Media_only
      | Mixed_without_deliverable_content | Has_deliverable_content -> None)
   | Require_progress, _ -> None
   | Allow_quiet_final,
@@ -98,6 +101,7 @@ let quiet_final_shape ~policy (response : Agent_core.Types.api_response) =
 let quiet_final_shape_label = function
   | Quiet_blank_text -> "blank_text"
   | Quiet_no_content -> "no_content"
+  | Quiet_thinking_only -> "thinking_only"
 ;;
 
 let is_quiet_final ~policy response =

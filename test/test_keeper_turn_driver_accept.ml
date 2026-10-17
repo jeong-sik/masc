@@ -1404,43 +1404,65 @@ let test_no_content_final_rejected_when_policy_requires_progress () =
     true
     (reason_kind = Some Keeper_internal_error.Accept_no_usable_progress)
 
-let test_thinking_only_final_is_not_quiet () =
-  let result =
+(* A lane with thinking on says nothing as reasoning blocks and no text, with
+   or without an empty text block beside them (#41925). The replay half of
+   why this is safe is in test_keeper_replay_checkpoint. *)
+let test_thinking_only_final_follows_the_quiet_policy () =
+  let thinking = Agent_core.Types.Thinking { signature = Some "sig"; content = "hidden" } in
+  let accept ~policy content =
     Masc.Keeper_turn_driver.For_testing.apply_accept
       ~runtime_id:"runtime.quiet-thinking-only"
-      ~accept:
-        (Keeper_tooling.Response.accepts_response
-           ~policy:Keeper_tooling.Response.Allow_quiet_final)
-      (run_result
-         ~content:[ Agent_core.Types.Thinking { signature = None; content = "hidden" } ]
-         ())
+      ~accept:(Keeper_tooling.Response.accepts_response ~policy)
+      (run_result ~content ())
   in
-  let _err, reason_kind, _reason = expect_accept_rejected result in
-  Alcotest.(check bool)
-    "a thinking-only final is not a quiet final"
-    true
-    (reason_kind = Some Keeper_internal_error.Accept_no_usable_progress)
+  List.iter
+    (fun (label, content) ->
+       (match accept ~policy:Keeper_tooling.Response.Allow_quiet_final content with
+        | Ok _ -> ()
+        | Error err ->
+          Alcotest.failf
+            "%s should pass when the policy allows silence: %s"
+            label
+            (Agent_core.Error.to_string err));
+       let _err, reason_kind, _reason =
+         expect_accept_rejected
+           (accept ~policy:Keeper_tooling.Response.Require_progress content)
+       in
+       Alcotest.(check bool)
+         (label ^ " without a quiet policy stays no-progress")
+         true
+         (reason_kind = Some Keeper_internal_error.Accept_no_usable_progress))
+    [ "thinking alone", [ thinking ]
+    ; "thinking with an empty text block", [ thinking; Agent_core.Types.Text "" ]
+    ; "redacted thinking", [ Agent_core.Types.RedactedThinking "opaque" ]
+    ]
 
 let test_finalization_settles_no_content_quiet_final () =
-  let finalize ~policy =
+  let finalize ~policy content =
     Masc.Keeper_agent_run.For_testing.normalize_final_response_text
       ~response_policy:policy
       ~keeper_name:"keeper-test"
       ~runtime_id:"runtime.quiet-no-content"
-      ~run_result:(run_result ~content:[] ())
+      ~run_result:(run_result ~content ())
       ~text:""
       ~tool_names:[]
       ()
   in
-  (match finalize ~policy:Keeper_tooling.Response.Allow_quiet_final with
-   | Ok text -> Alcotest.(check string) "settles as an empty reply" "" text
-   | Error err ->
-     Alcotest.failf
-       "an accepted no-content final must also settle: %s"
-       (Agent_core.Error.to_string err));
-  match finalize ~policy:Keeper_tooling.Response.Require_progress with
-  | Ok _ -> Alcotest.fail "no content under Require_progress must not settle"
-  | Error _ -> ()
+  List.iter
+    (fun (label, content) ->
+       (match finalize ~policy:Keeper_tooling.Response.Allow_quiet_final content with
+        | Ok text -> Alcotest.(check string) (label ^ " settles as an empty reply") "" text
+        | Error err ->
+          Alcotest.failf
+            "an accepted %s final must also settle: %s"
+            label
+            (Agent_core.Error.to_string err));
+       match finalize ~policy:Keeper_tooling.Response.Require_progress content with
+       | Ok _ -> Alcotest.failf "%s under Require_progress must not settle" label
+       | Error _ -> ())
+    [ "no content", []
+    ; "reasoning-only", [ Agent_core.Types.Thinking { signature = None; content = "hidden" } ]
+    ]
 
 let test_quiet_final_shape_names_the_settled_form () =
   let shape ?stop_reason content =
@@ -1456,6 +1478,11 @@ let test_quiet_final_shape_names_the_settled_form () =
     "no content"
     true
     (shape [] = Some Keeper_tooling.Response.Quiet_no_content);
+  Alcotest.(check bool)
+    "reasoning alone"
+    true
+    (shape [ Agent_core.Types.Thinking { signature = None; content = "hidden" } ]
+     = Some Keeper_tooling.Response.Quiet_thinking_only);
   Alcotest.(check bool)
     "no content cut by max tokens"
     true
@@ -2354,11 +2381,11 @@ let () =
             `Quick
             test_no_content_final_rejected_when_policy_requires_progress;
           Alcotest.test_case
-            "thinking-only final is not a quiet final"
+            "thinking-only final follows the quiet policy"
             `Quick
-            test_thinking_only_final_is_not_quiet;
+            test_thinking_only_final_follows_the_quiet_policy;
           Alcotest.test_case
-            "finalization settles an accepted no-content final"
+            "finalization settles an accepted no-content or reasoning-only final"
             `Quick
             test_finalization_settles_no_content_quiet_final;
           Alcotest.test_case

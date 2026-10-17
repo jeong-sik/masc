@@ -69,10 +69,10 @@ let response_policy_for_turn ~turn_kind ~input_speaker
 (* The wake text cannot tell whether this turn may end in silence: the policy
    above decides that from pending inputs, answered Asks and a HITL
    resolution. The line it selects is appended to the wake input, so the model
-   reads the decision the accept check applies. Silence still has to arrive as
-   a blank text block or no content: a thinking-only reply on a thinking HTTP
-   lane is not a quiet final (#41925). A render failure is placed in the line
-   rather than dropped, because a missing line reads as an absent condition. *)
+   reads the decision the accept check applies. Silence arrives as a blank
+   text block, no content, or reasoning with no text on a thinking lane
+   (#41925). A render failure is placed in the line rather than dropped,
+   because a missing line reads as an absent condition. *)
 let with_completion_clause ~input_speaker ~response_policy user_message =
   match (input_speaker : Keeper_input_speaker.t) with
   | Host_prompt (Autonomous_wake _) ->
@@ -95,7 +95,8 @@ let with_completion_clause ~input_speaker ~response_policy user_message =
    response. The quiet fallback below is the one place a quiet final becomes
    the settlement, and it is also where the quiet-final counter fires, so the
    metric counts accepted-and-settled quiet turns exactly once. Its [shape]
-   label keeps a blank text block apart from a turn that carried no content. *)
+   label keeps a blank text block, a turn that carried no content and a
+   reasoning-only turn apart. *)
 let normalize_final_response_text ~response_policy ~keeper_name ~runtime_id
     ~(run_result : Runtime_agent.run_result) ~text ~tool_names () =
   match

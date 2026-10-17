@@ -39,19 +39,21 @@ type completion_policy = Require_progress | Allow_quiet_final
 
 (** How a model's chosen silence reaches MASC. Some hosts send a blank text
     block. Muse completes the turn with no content block at all: a turn whose
-    model wrote no message settles with [content = []]. *)
+    model wrote no message settles with [content = []]. A lane with thinking
+    on sends its reasoning blocks and no text. *)
 type quiet_final_shape =
   | Quiet_blank_text
   | Quiet_no_content
+  | Quiet_thinking_only
 
 val quiet_final_shape
   :  policy:completion_policy
   -> Agent_core.Types.api_response
   -> quiet_final_shape option
 (** [Some] when [policy] allows silence, the provider ended with [EndTurn], and
-    the response is a blank text final or carries no content block. Hidden
-    reasoning, interrupted output and provider failures are not this choice.
-    No prose is interpreted. *)
+    the response carries no text, tool use, tool result or media: a blank text
+    final, no content block, or reasoning blocks alone. Interrupted output and
+    provider failures are not this choice. No prose is interpreted. *)
 
 val quiet_final_shape_label : quiet_final_shape -> string
 (** The metric label value for a quiet final's shape. *)

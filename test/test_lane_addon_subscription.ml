@@ -348,7 +348,67 @@ let cursor_publication_requires_durable_visibility () = with_workspace (fun conf
   check bool "an older receipt cannot move the acknowledged cursor backwards" true
     (Result.is_error (ack config first_receipt)))
 
+let shared_turn_inputs_keep_private_sources_and_original_owner () = with_workspace (fun config ->
+  ignore (save config);
+  let retained = store config in
+  let visibility = `Assoc ["kind",`String "keeper";"keeper",`String "researcher"] in
+  producer ~visibility retained "private-turn-input" 1;
+  append retained "private-turn-input" 1;
+  let first_receipt = receipt (call config "researcher" (args "read") |> ok) in
+  let wiki = {Tool_wiki.base_path=config.base_path;agent_name="fixture"} in
+  ignore (Tool_wiki.dispatch wiki ~name:"masc_wiki_create"
+    ~args:(`Assoc ["page",`String "retained-page";"title",`String "Retained page";
+      "summary",`String "Reference only";"source",`String "research";
+      "body",`String "PRIVATE_PAGE_BODY"]));
+  check bool "the real wiki fixture was created" true
+    (Sys.file_exists (Tool_wiki.page_path ~base_path:config.base_path "retained-page"));
+  let ledger = Filename.concat (Workspace_memory_ledger.directory ~base_path:config.base_path) "ledger.json" in
+  Fs_compat.mkdir_p (Filename.dirname ledger);
+  Out_channel.with_open_text ledger (fun channel -> Out_channel.output_string channel "{invalid ledger");
+  let read ?preview () = Keeper_turn_shared_inputs.observe ?preview ~config ~keeper_name:"researcher" () in
+  let reference = read () in
+  check bool "an unavailable ledger does not erase independent private references or wiki entries" true
+    (match reference with
+     | {lane_updates=Ok (`List [_]);workspace_memory=Unavailable _;wiki_contents=Listed [_]} -> true
+     | {lane_updates=_;workspace_memory=_;wiki_contents=_} -> false);
+  let previous = Domain_pool_ref.get () in
+  Fun.protect ~finally:(fun () -> match previous with
+    | Some pool -> Domain_pool_ref.set pool | None -> Domain_pool_ref.clear_for_tests ()) (fun () ->
+  Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+    Domain_pool_ref.clear_for_tests ();
+    check bool "Eio without a process pool preserves all three source results" true (read () = reference);
+    let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+    Domain_pool_ref.set pool;
+    let owner = Keeper_interrupt_token.fresh () in
+    let original = Ids.Turn_ref.make ~trace_id:"shared-input-owner" ~absolute_turn:5 in
+    let preview = Keeper_turn_preview_owner.with_owner ~interrupt_token:owner (fun () ->
+      Keeper_turn_preview.reset ~keeper_name:"researcher" ~execution_scope:None ~turn_ref:(Some original)
+        ~now:0. ~redaction:Keeper_secret_redaction.empty) in
+    check bool "pool-backed input preparation preserves the original source products" true
+      (read ~preview () = reference);
+    check bool "actual world preparation retains its original Owner and turn reference" true
+      (match Keeper_turn_preview.current_for_turn ~keeper_name:"researcher" ~interrupt_token:owner with
+       | Some {preparation=Some {phase=World_preparation;turn_ref=Some actual;
+           state=Preparation_finished {outcome=Prepared;_};_};_} -> Ids.Turn_ref.equal actual original
+       | Some _ | None -> false);
+    check bool "shared-input preparation remains usable inside a single existing worker" true
+      (Domain_pool.submit_io pool (fun () -> read ()) = reference);
+    let foreign = Keeper_turn_shared_inputs.observe ~config ~keeper_name:"foreign" () in
+    check bool "parallel discovery never adopts another Keeper's private subscription" true
+      (foreign.lane_updates = Ok (`List []));
+    check bool "discovery does not acknowledge the pending original receipt" true
+      (receipt (call config "researcher" (args "read") |> ok) = first_receipt);
+    let decoded = match Keeper_turn_preview.current_for_turn ~keeper_name:"researcher" ~interrupt_token:owner with
+      | Some preview -> Keeper_turn_preview.preparation_of_json
+          (member "preparation" (Keeper_turn_preview.to_json preview))
+      | None -> fail "world preparation observation missing" in
+    check bool "world preparation passes the shared strict protocol decoder" true
+      (match decoded with Ok {phase=World_preparation;turn_ref=Some actual;_} ->
+        Ids.Turn_ref.equal actual original | Ok _ | Error _ -> false)))))
+
 let () = run "Lane subscription use" ["operator scenarios",[
+  test_case "shared turn inputs retain source authority and original preparation ownership" `Quick
+    shared_turn_inputs_keep_private_sources_and_original_owner;
   test_case "shared subscription requires verified cursor owner" `Quick
     shared_producer_requires_subscription_owner_for_read_and_ack;
   test_case "hidden and absent producers share one notice" `Quick hidden_and_absent_producers_have_identical_notices;

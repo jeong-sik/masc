@@ -1177,6 +1177,7 @@ let preparation_status preparation =
   let open Masc.Keeper_turn_preview in
   let phase = match preparation.phase with
     | Task_preparation -> "Task 준비"
+    | World_preparation -> "작업 맥락 조회"
     | Context_preparation -> "문맥 준비"
     | Prompt_preparation -> "프롬프트 준비"
     | Tool_preparation -> "Tool 준비"

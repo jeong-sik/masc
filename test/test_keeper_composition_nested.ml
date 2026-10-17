@@ -960,7 +960,7 @@ let test_shared_node_schema_preserves_call_shapes () =
     "value", `Assoc ["query", `String "exact evidence"]] in
   let check_shape expected fields =
     let args = `Assoc (base @ fields) in
-    let checked = Masc.Tool_input_validation.check_arguments
+    let checked = Tool_input_contract.check_arguments
       ~schema:(Some schema) ~name:"composition node" ~args in
     check bool "shared definitions retain exact node alternatives"
       expected (Result.is_ok checked) in

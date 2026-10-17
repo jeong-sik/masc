@@ -3380,6 +3380,7 @@
   masc.fusion_core
   masc_tui_fetched
   alcotest
+  eio_main
   astring
   masc
   masc.masc_types
@@ -4340,7 +4341,7 @@
  (name test_keeper_turn_preview)
  (modules test_keeper_turn_preview)
  (libraries alcotest astring agent_core masc masc.runtime masc.server masc.masc_types
-  masc.keeper_operation_identity masc.keeper_execution_scope eio eio_main))
+  masc.keeper_operation_identity masc.keeper_execution_scope eio eio_main yojson))
 
 (test
  (name test_tui_planning_detail)
@@ -4689,6 +4690,7 @@
   fs_compat
   masc
   masc.agent_core
+  masc.server
   masc.skill_config
   masc.skill_reference
   masc.skill_snapshot
@@ -5657,7 +5659,7 @@
 (test
  (name test_lane_addon_subscription)
  (modules test_lane_addon_subscription)
- (libraries alcotest yojson unix eio eio_main masc masc.fs_compat))
+ (libraries alcotest yojson unix eio eio_main masc masc.config masc.masc_core masc.masc_types masc.tool_types masc.fs_compat))
 
 (test
  (name test_tui_lane_broadcast_pending)

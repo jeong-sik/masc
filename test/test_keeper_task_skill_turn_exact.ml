@@ -1754,7 +1754,7 @@ let test_preparation_manifest_retains_original_turn_and_private_boundaries () =
       (Ids.Turn_ref.to_string turn_ref)
       Yojson.Safe.Util.(public |> member "decision" |> member "skill_preparation" |> member "turn_ref" |> to_string)) rows;
   check bool "observations do not prove turn completion" false (M.is_finished_turn rows);
-  let module Scan = Masc.Server_dashboard_http_keeper_runtime_manifest_scan in
+  let module Scan = Server_dashboard_http_keeper_runtime_manifest_scan in
   let scan = List.fold_left Scan.update_runtime_manifest_scan
       (Scan.make_runtime_manifest_scan ~path ~limit:(List.length rows)
         ~scan_line_limit:(List.length rows) ~scan_scope:"test") rows in

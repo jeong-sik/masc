@@ -2327,11 +2327,7 @@ let planning_phase_color = function
    marks the Backlog row under them wears for running, done and cancelled.
    Verifying and awaiting confirmation are stages only a Goal has, so their
    diamonds are theirs. *)
-let planning_rollup_row ~cols (rollup : planning_rollup) =
-  (* One list names every phase once: the counters draw from it and the
-     denominator sums it, so a phase on the row cannot be left out of the
-     total. A second, hand-written sum once left Paused and Blocked out and
-     overstated the share done. *)
+let planning_rollup_clauses ~cols (rollup : planning_rollup) =
   let phases =
     [ (Goal_phase.Executing, Masc_tui_theme.Glyph.progress_active, "Exec", rollup.pr_active)
     ; (Goal_phase.Verifying, "◆", "Ver", rollup.pr_verifying)
@@ -2343,8 +2339,8 @@ let planning_rollup_row ~cols (rollup : planning_rollup) =
     ]
   in
   let total_goals = List.fold_left (fun total (_, _, _, value) -> total + value) 0 phases in
-  let count = Printf.sprintf "  Goals: %s%d%s" Ansi.bold total_goals Ansi.reset in
-  if total_goals = 0 then count
+  let count = Printf.sprintf "Goals: %s%d%s" Ansi.bold total_goals Ansi.reset in
+  if total_goals = 0 then (count, [])
   else
     let bar_width = if cols < 90 then 8 else 12 in
     let progress_bar =
@@ -2357,11 +2353,29 @@ let planning_rollup_row ~cols (rollup : planning_rollup) =
       Printf.sprintf "%s%s %s: %d%s" (planning_phase_color phase) glyph name value
         Ansi.reset
     in
-    Printf.sprintf "%s %s  %s│%s  %s" count progress_bar (Theme.recede ()) Ansi.reset
-      (phases
-       |> List.filter_map (fun (phase, glyph, name, value) ->
-              if value = 0 then None else Some (counter phase glyph name value))
-       |> String.concat "  ")
+    let counters =
+      phases
+      |> List.filter_map (fun (phase, glyph, name, value) ->
+             if value = 0 then None else Some (counter phase glyph name value))
+    in
+    (Printf.sprintf "%s %s" count progress_bar, counters)
+
+let planning_rollup_row ~cols (rollup : planning_rollup) =
+  match planning_rollup_clauses ~cols rollup with
+  | head, [] -> "  " ^ head
+  | head, counters ->
+      Printf.sprintf "  %s  %s│%s  %s" head (Theme.recede ()) Ansi.reset
+        (String.concat "  " counters)
+
+let planning_rollup_rows ~cols (rollup : planning_rollup) =
+  let single = planning_rollup_row ~cols rollup in
+  if Message_layout.display_width single <= framed_inner_width cols then
+    [ single ]
+  else
+    let head, counters = planning_rollup_clauses ~cols rollup in
+    let max_cells = max 1 (framed_inner_width cols - 2) in
+    Message_layout.pack_clauses ~max_cells (head :: counters)
+    |> List.map (fun row -> "  " ^ row)
 
 (* The transport's own readings are on Usage. The Dashboard keeps one item
    while the outbound queue is under pressure, since that delays what every
@@ -2415,6 +2429,46 @@ let planning_backlog_counts (backlog : planning_backlog) =
   ; ("done", backlog.pb_done, progress_done ^ " done")
   ; ("cancelled", backlog.pb_cancelled, progress_ended ^ " cancelled")
   ]
+
+let planning_backlog_clauses (backlog : planning_backlog) =
+  let items = planning_backlog_counts backlog in
+  let counts = List.map (fun (k, v, _) -> k, v) items in
+  let bands = Magnitude.of_counts counts in
+  List.mapi
+    (fun i ((_, _, label), (_, value, band)) ->
+       let item =
+         Printf.sprintf "%s%s=%d%s" (magnitude_tone band) label value
+           Ansi.reset
+       in
+       if i = 0 then
+         Printf.sprintf "%sBacklog:%s %s" Ansi.dim Ansi.reset item
+       else item)
+    (List.combine items bands)
+
+let planning_change_clauses ~(baseline : planning_snapshot option)
+    (current : planning_snapshot) =
+  match baseline with
+  | None -> [ "Change: waiting for the first successful snapshot" ]
+  | Some first ->
+      [ Printf.sprintf "Change from baseline: Goals done %+d"
+          (current.pl_rollup.pr_done - first.pl_rollup.pr_done)
+      ; Printf.sprintf "Tasks done %+d"
+          (current.pl_backlog.pb_done - first.pl_backlog.pb_done)
+      ; Printf.sprintf "Goal reviews pending %+d"
+          (current.pl_rollup.pr_verifying - first.pl_rollup.pr_verifying)
+      ]
+
+let pack_planning_summary_rows ~cols (clauses : string list) =
+  let summary_inner = max 1 (framed_inner_width cols - 2) in
+  Message_layout.pack_clauses ~max_cells:summary_inner clauses
+  |> List.map (fun row -> "  " ^ row)
+
+let work_tasks_room ~budget ~header_rows ~count =
+  if budget <= header_rows then 0
+  else if budget - header_rows = 1 then 1
+  else
+    Masc_tui_scroll.content_height ~rows:budget ~chrome:header_rows
+      ~count ~preview_keep:None ~overflow_takes_row:true
 
 (* The retained-history count above the Goal list. The row carried two numbers
    joined by the same separator the Backlog counts use for disjoint parts, but

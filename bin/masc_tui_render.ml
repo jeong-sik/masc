@@ -210,7 +210,7 @@ let task_line ~cols ~ordinal ~task_ids ~use_ordinals (task : task) =
   (* Preserve the Task number before spending cells on its owner and title.
      The canonical prefix may yield on narrow screens, but its digits do not
      share a truncation budget with unrelated fields. *)
-  let available = max 0 (framed_inner_width cols - 1) in
+  let available = max 0 (framed_inner_width cols - 2) in
   let id = Terminal_text.single_line task.id in
   let short_id =
     if String.starts_with ~prefix:"task-" id then
@@ -672,20 +672,20 @@ let render_work_tasks (state : state) =
     ~body:(fun ~budget c ->
       (match state.local_workspace, state.task_flow with
        | Local_workspace_unread, _ ->
-           c.push " Active tasks · not observed"
+           c.push "  Active tasks · not observed"
        | Local_workspace_read, None ->
-           c.push " Active tasks · unavailable"
+           c.push "  Active tasks · unavailable"
        | Local_workspace_read, Some _ ->
            c.push (Printf.sprintf
-             " Open tasks · %d in progress, awaiting verification, claimed, or todo"
+             "  Open tasks · %d in progress, awaiting verification, claimed, or todo"
              (List.length rows)));
       (match state.task_flow with
-       | None -> c.push " Task history · not observed"
+       | None -> c.push "  Task history · not observed"
        | Some flow ->
            let completed =
              List.map (fun (day : Masc_tui_task_flow.day) ->
                day.d_completed) flow.daily in
-           c.push (Printf.sprintf " Currently done by UTC day (%d days): %s"
+           c.push (Printf.sprintf "  Currently done by UTC day (%d days): %s"
                      (List.length flow.daily) (Chart.sparkline ~min:0 completed)));
       let link_error = match state.goal_task_links with
         | Goal_links_read_failed reason -> Some reason
@@ -697,15 +697,19 @@ let render_work_tasks (state : state) =
         |> List.filter_map Fun.id in
       (match reasons with
        | [] -> ()
-       | reasons -> c.push (" Coverage: " ^ String.concat " · " reasons));
-      c.push "";
-      let room = max 0 (budget - 4) in
-      if rows = [] && Option.is_some state.task_flow then
-        c.push " No open tasks";
+       | reasons -> c.push ("  Coverage: " ^ String.concat " · " reasons));
+      c.push_divider ();
+      let header_rows = 3 + (if reasons = [] then 0 else 1) in
+      let count = List.length rows in
+      let room = work_tasks_room ~budget ~header_rows ~count in
+      if budget > header_rows && rows = [] && Option.is_some state.task_flow then
+        c.push "  No open tasks";
       let first =
         match selected with
         | None -> 0
-        | Some index -> max 0 (index - room + 1)
+        | Some index ->
+            if room <= 0 then 0
+            else max 0 (index - room + 1)
       in
       (* [task_line] is the one row a task draws: its status icon and word in
          one colour, id, title, assignee, priority and Goal, each through the
@@ -713,11 +717,15 @@ let render_work_tasks (state : state) =
       List.iteri
         (fun index (task : Tui_decode.task) ->
            if index >= first && index < first + room then
-             let line = " " ^ task_line ~cols ~ordinal:(index + 1) ~task_ids ~use_ordinals task in
+             let line = "  " ^ task_line ~cols ~ordinal:(index + 1) ~task_ids ~use_ordinals task in
              if Some index = selected then
                c.push_selected (Masc_tui_theme.strip_sgr line)
              else c.push line)
-        rows)
+        rows;
+      if budget - header_rows > 1 && count > room then
+        c.push_styled ~style:(Theme.recede ())
+          (Printf.sprintf "  [tasks %s]"
+             (Masc_tui_scroll.window_text ~scroll:first ~height:room count)))
 
 (* The lifecycle as a rail, not a single word. The phase says where the goal
    is; it never said what the stages are or which way they run, so "what does
@@ -1005,22 +1013,10 @@ let render_planning_list (state : state) =
          box_empty buf cols
        done
    | Some p ->
-       let rollup = planning_rollup_row ~cols p.pl_rollup in
-       (* The backlog counts are a list. [▸] joined them -- the mark the tab
-          strip puts on the surface you are on -- so "todo ▸ claimed" read as a
-          path. *)
-       let backlog_sep = Printf.sprintf " %s·%s " (Theme.recede ()) Ansi.reset in
-       let backlog =
-         let items = planning_backlog_counts p.pl_backlog in
-         let counts = List.map (fun (k, v, _) -> k, v) items in
-         let bands = Magnitude.of_counts counts in
-         List.map2
-           (fun (_, _, label) (_, value, band) ->
-              Printf.sprintf "%s%s=%d%s" (magnitude_tone band) label value
-                Ansi.reset)
-           items bands
-         |> String.concat backlog_sep
-       in
+       (* The backlog counts are a list of atomic clauses: each [glyph state=N]
+          stays together when wrapped, and continuation rows keep the 2-cell
+          left margin instead of splitting between the icon and its label. *)
+       let backlog_clauses = planning_backlog_clauses p.pl_backlog in
        (* Budget summary chrome against the actual header and divider rows.
           Retained history and wrapped modes already occupy [buf]; preserve
           a goal (or empty note), its selected detail and the footer before
@@ -1047,41 +1043,42 @@ let render_planning_list (state : state) =
          then (Buffer.add_buffer buf summary; true)
          else false
        in
-       let summary_width = framed_inner_width cols in
-       let wrap_summary summary ~style text =
-         Message_layout.wrap_styled_words ~max_cells:(max 1 summary_width) text
+       let pack_summary summary ~style clauses =
+         pack_planning_summary_rows ~cols clauses
          |> List.iter (box_line_styled summary cols ~style)
        in
        (* Counts are supporting text at every width. A wide terminal gives
           goal titles room; it does not turn the same readings into cards. *)
        let rollup_summary = Buffer.create 256 in
-       wrap_summary rollup_summary ~style:"" rollup;
+       planning_rollup_rows ~cols p.pl_rollup
+       |> List.iter (box_line_styled rollup_summary cols ~style:"");
        ignore (add_summary_if_fits rollup_summary);
        let backlog_summary = Buffer.create 256 in
-       wrap_summary backlog_summary ~style:""
-         (Printf.sprintf "  %sBacklog:%s %s" Ansi.dim Ansi.reset backlog);
+       pack_summary backlog_summary ~style:"" backlog_clauses;
        (* Preserve the current counts before spending optional rows on change
           since the baseline. Wrapped physical rows share the list budget. *)
        let backlog_visible = add_summary_if_fits backlog_summary in
-       let trend = Buffer.create 256 in
+       let stamps_summary = Buffer.create 256 in
+       let change_summary = Buffer.create 256 in
        (match state.planning_baseline with
-        | None ->
-            wrap_summary trend ~style:(Theme.info ())
-              "  Change: waiting for the first successful snapshot"
+        | None -> ()
         | Some first ->
             (* Baseline and current are server snapshot generation times,
                not the time this TUI received them or the process age. *)
-            wrap_summary trend ~style:(Theme.recede ())
-              ("  Baseline snapshot: " ^ Terminal_text.single_line first.pl_generated_at);
-            wrap_summary trend ~style:(Theme.recede ())
-              ("  Current snapshot: " ^ Terminal_text.single_line p.pl_generated_at);
-            wrap_summary trend ~style:(Theme.info ())
-              (Printf.sprintf
-                 "  Change from baseline: Goals done %+d · Tasks done %+d · Goal reviews pending %+d"
-                 (p.pl_rollup.pr_done - first.pl_rollup.pr_done)
-                 (p.pl_backlog.pb_done - first.pl_backlog.pb_done)
-                 (p.pl_rollup.pr_verifying - first.pl_rollup.pr_verifying)));
-       if backlog_visible then ignore (add_summary_if_fits trend);
+            pack_summary stamps_summary ~style:(Theme.recede ())
+              [ "Baseline snapshot: " ^ Terminal_text.single_line first.pl_generated_at
+              ; "Current snapshot: " ^ Terminal_text.single_line p.pl_generated_at
+              ]);
+       pack_summary change_summary ~style:(Theme.info ())
+         (planning_change_clauses ~baseline:state.planning_baseline p);
+       if backlog_visible then begin
+         let stamps_rows = count_frame_lines stamps_summary in
+         let change_rows = count_frame_lines change_summary in
+         if stamps_rows > 0
+            && count_frame_lines buf + stamps_rows + change_rows + reserved_rows <= rows
+         then Buffer.add_buffer buf stamps_summary;
+         ignore (add_summary_if_fits change_summary)
+       end;
        Buffer.add_buffer buf divider;
        (* The list drew rows and never said what they were. *)
        Buffer.add_buffer buf list_header;

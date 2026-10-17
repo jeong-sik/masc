@@ -158,12 +158,88 @@ let test_suspension_visibility_and_keys () =
     ["p", Goal_phase.Public_action.Pause; "R", Goal_phase.Public_action.Resume;
      "b", Goal_phase.Public_action.Block; "U", Goal_phase.Public_action.Unblock]
 
+let test_narrow_planning_rollup_and_clause_packing () =
+  let cols = 80 in
+  let inner = cols - 4 in
+  let rollup =
+    { pr_active = 5
+    ; pr_verifying = 2
+    ; pr_awaiting_confirmation = 0
+    ; pr_done = 12
+    ; pr_dropped = 3
+    ; pr_paused = 1
+    ; pr_blocked = 0
+    }
+  in
+  let backlog =
+    { pb_todo = 8
+    ; pb_claimed = 2
+    ; pb_running = 4
+    ; pb_awaiting_verification = 14
+    ; pb_done = 42
+    ; pb_cancelled = 3
+    }
+  in
+  let snapshot =
+    { pl_goals = []
+    ; pl_rollup = rollup
+    ; pl_backlog = backlog
+    ; pl_goal_history = []
+    ; pl_generated_at = "2026-10-17T00:00:00Z"
+    }
+  in
+  let rollup_rows = Masc_tui_render_prim.planning_rollup_rows ~cols rollup in
+  let backlog_rows =
+    Masc_tui_render_prim.pack_planning_summary_rows ~cols
+      (Masc_tui_render_prim.planning_backlog_clauses backlog)
+  in
+  let change_rows =
+    Masc_tui_render_prim.pack_planning_summary_rows ~cols
+      (Masc_tui_render_prim.planning_change_clauses ~baseline:(Some snapshot) snapshot)
+  in
+  let assert_packed_rows label rows =
+    check bool (label ^ " produces multiple wrapped rows at 80 cols") true
+      (List.length rows >= 2);
+    List.iter
+      (fun row ->
+        let plain = Masc_tui_theme.strip_sgr row in
+        let trimmed = String.trim plain in
+        check bool (label ^ " fits framed_inner_width 80") true
+          (Masc_tui_message_layout.display_width row <= inner);
+        check bool (label ^ " keeps 2-cell left margin") true
+          (String.starts_with ~prefix:"  " plain);
+        check bool (label ^ " never strands a trailing bullet glyph") false
+          (String.ends_with ~suffix:"●" trimmed);
+        check bool (label ^ " never starts a continuation with bare +0") false
+          (String.starts_with ~prefix:"+0" trimmed))
+      rows
+  in
+  assert_packed_rows "planning_rollup_rows" rollup_rows;
+  assert_packed_rows "backlog_rows" backlog_rows;
+  assert_packed_rows "change_rows" change_rows
+
+let test_work_tasks_budget_and_window_bounds () =
+  check int "budget at or below header_rows leaves 0 task rows" 0
+    (Masc_tui_render_prim.work_tasks_room ~budget:3 ~header_rows:3 ~count:6);
+  check int "one row above header_rows draws 1 task row without overflow line" 1
+    (Masc_tui_render_prim.work_tasks_room ~budget:4 ~header_rows:3 ~count:6);
+  let room =
+    Masc_tui_render_prim.work_tasks_room ~budget:7 ~header_rows:3 ~count:6
+  in
+  check int "four rows above header_rows reserves 1 row for [tasks a-b/n] when overflowing" 3 room;
+  check string "overflow window text reports visible slice" "1-3/6"
+    (Masc_tui_scroll.window_text ~scroll:0 ~height:room 6)
+
 let () =
   run "tui_planning_order"
     [ ( "planning"
       , [ test_case "phase, priority, stable recency" `Quick
             test_lifecycle_then_priority_then_server_recency
         ; test_case "suspension visibility and restore keys" `Quick test_suspension_visibility_and_keys
+        ; test_case "narrow 80-col rollup and clause packing" `Quick
+            test_narrow_planning_rollup_and_clause_packing
+        ; test_case "work_tasks budget and window bounds" `Quick
+            test_work_tasks_budget_and_window_bounds
         ; test_case "default filter is Active" `Quick
             test_default_filter_is_active
         ; test_case "filter cycles all/active/completed/dropped" `Quick

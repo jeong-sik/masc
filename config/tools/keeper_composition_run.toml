@@ -11,6 +11,8 @@ Ordinary Tool nodes use tool with fixed args as an object, for example \
 {"id":"lane","tool":"keeper_lane_status","args":{}}, or tagged input \
 for output-dependent arguments. Supply only one of args or input. \
 Omit optional after or pass an array such as []; never null. \
+Inline recipes may use original file Write through its Serial handler, Gate and \
+publication recovery. Write has no resource-scoped admission or durable async replay. \
 Skill nodes use exact skill_reference, not the Skill's callable tool name in tool. \
 Their args or resolved tagged input must match the child's parameter object schema. \
 The server records the frozen draft and original invocation before effects; \

@@ -405,7 +405,7 @@ let test_inline_edit_recipe_preserves_effect_and_durable_admission () =
       |> function Some descriptor -> descriptor | None -> fail "Edit descriptor absent" in
   check bool "Edit retains its effectful serial producer" true
     (descriptor.execution = Masc.Keeper_tool_descriptor.Ordinary Serial
-     && Masc.Keeper_tool_descriptor.prepared_leaf_admission descriptor = Owned_file_edit_leaf
+     && Masc.Keeper_tool_descriptor.prepared_leaf_admission descriptor = Owned_file_mutation_leaf
      && Masc.Keeper_tool_descriptor.readonly_static_hint descriptor = Some false);
   (match Nested.compile ~execution:Masc.Keeper_tool_composition_catalog.Async
       ~capability_surface:surface recipe with
@@ -442,6 +442,54 @@ value = { file_path = "document.txt", old_string = "before", new_string = "after
   | Error (Nested.Unsupported_leaf _) -> ()
   | Error _ -> fail "durable parent refused for an unrelated reason"
   | Ok _ -> fail "inline child smuggled file effects into durable async admission"
+;;
+
+let test_inline_write_keeps_original_effect_and_durable_refusal () =
+  let surface, _ = fixture () in
+  let recipe = request [`Assoc ["id", `String "save"; "tool", `String "Write";
+    "args", `Assoc ["file_path", `String "report.txt"; "content", `String "original bytes\n"]]] in
+  let compiled = compile surface recipe in
+  let node = match Plan.nodes (Nested.plan compiled) with
+    | [node] -> node | _ -> fail "one original Write leaf" in
+  let descriptor = Plan.descriptor (Nested.plan compiled) node.id
+    |> function Some descriptor -> descriptor | None -> fail "original Write descriptor absent" in
+  check bool "Write stays effectful and Serial" true
+    (descriptor.execution = Masc.Keeper_tool_descriptor.Ordinary Serial
+     && Masc.Keeper_tool_descriptor.readonly_static_hint descriptor = Some false);
+  (match Nested.compile ~execution:Masc.Keeper_tool_composition_catalog.Async
+      ~capability_surface:surface recipe with
+   | Error (Nested.Unsupported_leaf {node_id;tool_name}) ->
+       check string "async refusal names the original Write node" "save" (Plan.Node_id.to_string node_id);
+       check string "async refusal names the original Write capability" "Write" tool_name
+   | Error _ -> fail "async Write refused for an unrelated reason"
+   | Ok _ -> fail "ordinary Write acquired durable replay authority");
+  let declaration execution = Printf.sprintf {|[[compositions]]
+name = "nested-read"
+execution = %S
+branch_failure_policy = "continue_independent"
+[[compositions.nodes]]
+id = "save"
+tool = "Write"
+[compositions.nodes.input]
+kind = "literal"
+value = { file_path = "report.txt", content = "original bytes\n" }
+|} execution in
+  (match Masc.Keeper_tool_composition_catalog.parse (declaration "async") with
+   | Error (Async_leaf_not_admitted {tool_name;_}) ->
+       check string "durable catalog keeps the same original refusal" "Write" tool_name
+   | Error _ -> fail "async Write catalog refused for an unrelated reason"
+   | Ok _ -> fail "async catalog admitted an ordinary file write");
+  let source = "---\nname: nested-read\ndescription: Save the original file bytes.\n---\n```toml composition\n"
+      ^ declaration "inline" ^ "```\n" in
+  let surface, reference = fixture ~source () in
+  let parent = request [nested ~args:(`Assoc []) "child" reference] in
+  let compiled = compile surface parent in
+  check int "exact inline Write child retains one activation scope" 1 (List.length (Nested.calls compiled));
+  match Nested.compile ~execution:Masc.Keeper_tool_composition_catalog.Async
+      ~capability_surface:surface parent with
+  | Error (Nested.Unsupported_leaf _) -> ()
+  | Error _ -> fail "async Write child refused for an unrelated reason"
+  | Ok _ -> fail "inline Write child acquired durable async replay authority"
 ;;
 
 let test_nested_draft_freezes_and_revalidates_recipe () =
@@ -844,6 +892,14 @@ let test_public_nested_prepare_run_records_only_admitted_children ?(execution=Ma
      let original_request = accepted |> member "request_id" |> to_string in
      let original_terminal = Async.load_canonical_durable_terminal ~base_path ~caller:"fixture" original_request
        |> require "original completed request before authority fault" |> Async.durable_terminal_entry in
+     (* Canonical publication precedes the worker wrapper's switch cleanup.
+        Let the original worker finish before faulting its ledger and comparing
+        worker counts; its normal departure must not masquerade as a resume
+        admission change. This isolated scenario owns the async workers. *)
+     let rec await_worker_cleanup () =
+       if Async.For_testing.active_switch_count () = 0 then ()
+       else (Eio.Fiber.yield (); await_worker_cleanup ()) in
+     await_worker_cleanup ();
      let resume_input = `Assoc ["sha256",`String draft_reference.sha256;"resume_run_id",`String run_id] in
      List.iter (fun corrupt ->
        Unix.rename events saved;
@@ -898,6 +954,8 @@ let () = run "exact inline composition compiler"
         ; test_case "authority, arguments, cycles and semantic refusals" `Quick test_refusals_preserve_frozen_authority_and_contracts
         ; test_case "inline Edit recipes and exact children retain effect and durable admission" `Quick
             test_inline_edit_recipe_preserves_effect_and_durable_admission
+        ; test_case "inline Write and exact children retain effect and durable refusal" `Quick
+            test_inline_write_keeps_original_effect_and_durable_refusal
         ; test_case "frozen nested draft recipe and exact provenance" `Quick test_nested_draft_freezes_and_revalidates_recipe
         ; test_case "public prepare/run admits exact children once and delivers through parent" `Quick
             (test_public_nested_prepare_run_records_only_admitted_children ~reject_child:false)

@@ -49,6 +49,9 @@ let source_matches (meta : Keeper_meta_contract.keeper_meta)
 ;;
 
 let prepare_operation ~sw ~config ~meta ~tool_name descriptor ~input =
+  if descriptor.Keeper_tool_descriptor.runtime_handler <> Keeper_tool_descriptor.Tool_read_file
+     && descriptor.runtime_handler <> Keeper_tool_descriptor.Tool_edit_file then None
+  else
   match Keeper_tool_descriptor_resolution.prepare_model_input_for_descriptor
       ~tool_name descriptor ~input with
   | Error _ -> None
@@ -141,21 +144,24 @@ module Ready = struct
 
   let create ~sw ~config ~meta ~source plan =
     let nodes = Plan.nodes plan in
-    let has_edit = List.exists (fun (node : Plan.node) ->
+    let has_mutation = List.exists (fun (node : Plan.node) ->
       match Plan.descriptor plan node.id with
-      | Some descriptor -> descriptor.Keeper_tool_descriptor.runtime_handler = Keeper_tool_descriptor.Tool_edit_file
+      | Some descriptor ->
+        descriptor.Keeper_tool_descriptor.runtime_handler = Keeper_tool_descriptor.Tool_edit_file
+        || descriptor.runtime_handler = Keeper_tool_descriptor.Tool_write_file
       | None -> false) nodes in
     let supported = List.for_all (fun (node : Plan.node) ->
       match Plan.contract plan node.id with
       | Some {target = Plan.Child_arguments _; _} -> true
       | Some {target = Plan.Descriptor_target descriptor; _} ->
-        (descriptor.runtime_handler = Keeper_tool_descriptor.Tool_edit_file
+        ((descriptor.runtime_handler = Keeper_tool_descriptor.Tool_edit_file
+          || descriptor.runtime_handler = Keeper_tool_descriptor.Tool_write_file)
          && descriptor.execution = Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Serial)
         || (descriptor.runtime_handler = Keeper_tool_descriptor.Tool_read_file
             && descriptor.execution = Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Concurrent)
       | Some {target = (Plan.Child_submission _ | Plan.Child_result _); _} | None -> false) nodes in
     match source with
-    | Some source when source_matches meta source && has_edit && supported ->
+    | Some source when source_matches meta source && has_mutation && supported ->
       Some {plan; sw; config; meta}
     | Some _ | None -> None
   ;;

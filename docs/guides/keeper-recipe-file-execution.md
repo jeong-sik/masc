@@ -1,8 +1,10 @@
 # File execution in task recipes
 
-An inline task recipe can use the canonical `Edit` Tool and exact inline Skill
-children that contain it. The draft keeps the original effectful descriptor;
-it does not classify an Edit as a read or give it a new filesystem authority.
+An inline task recipe can use the canonical `Edit` and `Write` Tools and exact
+inline Skill children that contain them. The draft keeps each original
+effectful descriptor and its filesystem authority. A Read output can supply
+the original content to Write in the same run; Write uses its ordinary Serial
+handler, Gate and publication recovery, including safe parent creation.
 
 Once a source-bound run is recorded, an eligible Read/Edit plan can prepare its
 real file capabilities for that invocation. An output-dependent node binds its
@@ -16,6 +18,7 @@ alongside the plan's explicit `after` and input dependencies. The transient
 | Case | Previous behavior | Implemented behavior |
 |---|---|---|
 | Ordinary Edit in an inline recipe | Rejected as an unsupported prepared leaf | Uses its original effectful Serial producer and ordinary Gate checks |
+| Ordinary Write or an exact inline child containing it | Rejected before executing the inline task recipe | Runs its original effectful Serial producer; upstream content can be written and read back in one run |
 | Exact inline child containing Edit | Rejected by the enclosing draft | Keeps exact Skill identity, activation scope, original Task/turn and physical leaf receipts |
 | Fully resolved inline Read/Edit recipe | No resource-owned execution path | Uses the same prepared file capabilities and conflict ordering as an existing named inline Skill |
 | Fixed-input child flattened to Read/Edit leaves | No resource-owned execution path | Eligible for the same file preparation as ordinary recipe leaves |
@@ -26,6 +29,7 @@ alongside the plan's explicit `after` and input dependencies. The transient
 | A resource cannot be prepared | Ordinary execution | Runs its original file handler alone, ordered against earlier file operations |
 | Missing source or an unisolatable Gate callback | Ordinary execution | Retains ordinary node scheduling |
 | Edit in an async scope | Rejected | Still rejected: an ordinary file Edit has no durable replayable launch identity |
+| Write in an async scope | Rejected | Rejected through both catalog and nested admission; ordinary Write has no durable replayable launch identity |
 
 Preparation uses the original Keeper, trace, Task and absolute Keeper turn.
 Paths are derived by the existing filesystem producer from workspace and Keeper
@@ -41,8 +45,11 @@ earlier input targets a different file. Once identities are known, only actual
 conflicts await predecessor settlement. A failed or skipped conflicting owner
 prevents its successors from dispatching; independent branches follow the plan's
 existing failure policy. Pure child argument validation has no file footprint.
-Plans containing other tools or async child submission/result targets retain
-ordinary scheduling. Named calls without whole-plan scoped admission and transient
+Read/Edit/Write plans retain supported Read/Edit capabilities while Write binds
+its original ordinary handler as an exclusive file barrier. Write admission
+grants no resource claim or extra concurrency. Plans containing other tools or
+async child submission/result targets retain ordinary scheduling. Named calls
+without whole-plan scoped admission and transient
 run calls retain their outer descriptor; only their inner ready file leaves overlap.
 
 Supply the existing one-call grammar when the plan is ready:

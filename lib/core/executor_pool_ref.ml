@@ -8,9 +8,9 @@
     memory barrier between [set] on the main domain and [get] on a
     worker domain.  [Atomic.get]/[set] give cross-domain visibility.
 
-    [submit_or_inline] provides graceful fallback for non-durable compute.
-    Durable I/O must use [submit_strict], which never runs inline or replays
-    a closure after a failed submission. *)
+    [submit_or_inline] provides inline execution outside a usable pool
+    context. Accepted work is never replayed. Durable I/O uses
+    [submit_strict], which reports a missing pool as a typed error. *)
 
 let pool : Eio.Executor_pool.t option Atomic.t = Atomic.make None
 
@@ -75,7 +75,7 @@ let submit_strict ?(weight = 1.0) f =
   | Some _, Eio_guard.Non_eio -> Error Caller_not_in_eio
   | Some p, Eio_guard.Eio_fiber ->
     (try
-       Eio.Executor_pool.submit_exn p ~weight (fun () ->
+       Executor_pool_submission.submit p ~weight (fun () ->
          with_worker_context (fun () ->
            Eio.Switch.run (fun _sw ->
              try Ok (f ()) with
@@ -101,24 +101,7 @@ let submit_or_inline ?(weight = 1.0) f =
   match Atomic.get pool, Eio_guard.execution_context () with
   | Some _, _ when in_worker_context () -> f ()
   | Some p, Eio_guard.Eio_fiber ->
-      let cancelled, cancel_worker = Eio.Promise.create () in
-      (try Eio.Executor_pool.submit_exn p ~weight (fun () ->
-         with_worker_context (fun () ->
-           Eio.Switch.run (fun _sw ->
-             (* Executor_pool awaits its result on the caller but owns the
-                job's context on another domain. Signal that domain instead
-                of only cancelling the caller's result wait. *)
-             Eio.Fiber.first
-               (fun () -> raise (Eio.Promise.await cancelled))
-               f)))
-       with
-       | Eio.Cancel.Cancelled _ as exn ->
-           let backtrace = Printexc.get_raw_backtrace () in
-           Eio.Promise.resolve cancel_worker exn;
-           Printexc.raise_with_backtrace exn backtrace
-       | exn ->
-           Log.Misc.warn "executor_pool submit failed, running inline: %s"
-             (Printexc.to_string exn);
-           f ())
+      Executor_pool_submission.submit p ~weight (fun () ->
+        with_worker_context (fun () -> Eio.Switch.run (fun _sw -> f ())))
   | (Some _ | None), Eio_guard.Non_eio
   | None, Eio_guard.Eio_fiber -> f ()

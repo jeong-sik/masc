@@ -17,6 +17,7 @@ val observe :
     A supplied writer observes the enclosing world-input preparation using
     its producer-supplied original turn reference. Logging and workspace
     gauges run once after the reads join, on the caller's fiber. This is not
-    an atomic cross-store snapshot or permission cache. Executor jobs keep
-    the existing pool lifetime; cancelling their caller's wait does not
-    establish that a blocking worker has stopped. *)
+    an atomic cross-store snapshot or permission cache. Pool submissions
+    relay cancellation to their own invocation and join entered worker
+    cleanup before returning cancellation; blocking IO or protected cleanup
+    can therefore delay settlement. *)

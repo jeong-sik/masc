@@ -1,6 +1,6 @@
 ---
 name: ocaml-coding
-description: "masc 저장소에서 OCaml 5.5 + Eio 코드를 쓰기 전에 보는 점검표다. 오류를 Result 와 닫힌 합타입으로 다루는 법, 예외 잡기와 Eio 취소, Mutex·Lazy 선택, 자원 정리(Switch.on_release 와 Fun.protect), 막히는 I/O, .mli 먼저 고치기, 결정론 게이트와 CI lint 가 새 줄에서 잡는 모양을 다룬다. lib/·bin/·test/ 의 .ml/.mli 를 새로 쓰거나 고칠 때 쓴다."
+description: "masc 저장소에서 OCaml 5.5 + Eio 코드를 쓰기 전에 보는 점검표다. 오류를 Result 와 닫힌 합타입으로 다루는 법, 예외 잡기와 Eio 취소, executor의 실제 worker 정리와 실패 재실행 금지, Mutex·Lazy 선택, 자원 정리(Switch.on_release 와 Fun.protect), 막히는 I/O, .mli 먼저 고치기, 결정론 게이트와 CI lint 가 새 줄에서 잡는 모양을 다룬다. lib/·bin/·test/ 의 .ml/.mli 를 새로 쓰거나 고칠 때 쓴다."
 ---
 
 # masc OCaml 점검표
@@ -120,7 +120,14 @@ Eio 는 협력형 스케줄러다. 취소와 시간 초과는 fiber 가 멈추�
   시간 초과를 넣기 전에 그 대기가 끝나지 않는 경우가 실제로 무엇인지부터 적는다.
 - 막히는 표준 라이브러리 호출: `Eio_unix.run_in_systhread (fun () -> ...)`
 - 파일: `Eio.Path` (Eio 로 양보한다)
-- 무거운 순수 계산: `Eio.Executor_pool.submit_exn pool ~weight (fun () -> ...)`
+- 무거운 순수 계산: `Domain_pool_ref.submit_cpu_or_inline (fun () -> ...)`
+- MASC의 실제 pool 제출은 `Domain_pool.submit_io`·`submit_cpu` 또는
+  `Executor_pool_ref.submit_*`를 사용한다. 공통 제출 구현은 caller 취소를 실제
+  worker에 전달하고 진입한 작업의 정리를 기다린다. raw `Eio.Executor_pool`의
+  결과 대기 취소만으로 worker가 끝났다고 판단하지 않는다.
+- worker가 effect 이후 예외를 던졌으면 그 함수를 caller에서 다시 실행하지
+  않는다. inline 실행은 pool 부재·Eio 밖·기존 worker 정책이 정하는 진입 경로다.
+  비동기 제출의 소유 Switch 취소와 그 promise를 관측하던 fiber의 취소도 구분한다.
 - HTTP 핸들러 안에서 무거운 계산을 직접 하지 않는다. 핸들러가 멈추면 같은 도메인의 다른 요청도 멈춘다.
   대시보드 스냅샷처럼 뒤에서 미리 계산해 두고 핸들러는 마지막 값만 읽게 한다. 계산 실패는 삼키지
   않고 알린 뒤 마지막 값을 유지한다.

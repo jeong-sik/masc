@@ -64,22 +64,20 @@ let create ~sw ?domain_count dm =
 
 let domain_count t = t.domain_count
 
-let submit_io t f =
-  Eio.Executor_pool.submit_exn t.pool ~weight:weight_io (fun () ->
-    with_tuned_minor_heap f)
+let submit ~weight t f =
+  Executor_pool_submission.submit t.pool ~weight (fun () -> with_tuned_minor_heap f)
 ;;
 
-let submit_cpu t f =
-  Eio.Executor_pool.submit_exn t.pool ~weight:weight_cpu (fun () ->
-    with_tuned_minor_heap f)
+let submit_io t f = submit ~weight:weight_io t f
+;;
+
+let submit_cpu t f = submit ~weight:weight_cpu t f
 ;;
 
 let submit_io_async ~sw t f =
-  Eio.Executor_pool.submit_fork ~sw t.pool ~weight:weight_io (fun () ->
-    with_tuned_minor_heap f)
+  Eio.Fiber.fork_promise ~sw (fun () -> submit_io t f)
 
 let submit_cpu_async ~sw t f =
-  Eio.Executor_pool.submit_fork ~sw t.pool ~weight:weight_cpu (fun () ->
-    with_tuned_minor_heap f)
+  Eio.Fiber.fork_promise ~sw (fun () -> submit_cpu t f)
 
 let executor_pool t = t.pool

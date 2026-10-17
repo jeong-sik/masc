@@ -25,6 +25,21 @@ type turn_prompt_parts = {
   user_message : string;
 }
 
+module Layer_map = Map.Make (struct
+  type t = Keeper_context_layers.layer_id
+  let compare = Stdlib.compare
+end)
+
+type prepared_prompt =
+  { common_layers : Keeper_context_layers.prepared_content option Layer_map.t
+  ; frame : Keeper_context_layers.prepared_content
+  ; user_message : string
+  ; current_task_id : string option
+  ; own_recent_actions : (Keeper_own_recent_actions.turn list, Keeper_tool_call_log.index_error) result
+  ; workspace_memory : Workspace_memory_ledger.observation
+  ; wiki_contents : Keeper_wiki_contents.t
+  }
+
 (* Ordinary user input for an autonomous continuation. The durable checkpoint
    carries this cue and the assistant/tool suffix in normal conversation order;
    the fresh observation frame alone rides [world_state] and stays ephemeral.
@@ -1206,7 +1221,98 @@ let format_recent_work = function
             [ "evidence", Yojson.Safe.to_string (`Assoc ["unavailable", `String detail]) ] ^ "\n\n")
 ;;
 
-let build_prompt_internal
+(* A row is a whole turn, and the heading counts turns. *)
+let format_recent_actions_section ~current_task_id own_recent_actions : string option =
+  match own_recent_actions with
+  | Ok [] -> None
+  | Error (Keeper_tool_call_log.Index_unavailable detail) ->
+    (* The history could not be read. Saying so is the whole section: a
+       silent absence reads as "no calls made", which is exactly the
+       repeat-a-finished-task failure this layer exists to prevent. *)
+    Some
+      (render_fragment
+         Prompt_names.keeper_world_own_recent_actions_unavailable
+         [ "detail", detail ]
+       ^ "\n\n")
+  | Ok turns ->
+    let failures = Keeper_own_recent_actions.digest_failures turns in
+    let rows = List.map (format_own_recent_actions_turn ~current_task_id) turns in
+    let ubuf = Buffer.create 1024 in
+    Buffer.add_string ubuf
+      (render_fragment
+         Prompt_names.keeper_world_own_recent_actions_heading
+         [ "count", string_of_int (List.length rows) ]
+       ^ "\n");
+    Buffer.add_string ubuf
+      (render_fragment Prompt_names.keeper_world_own_recent_actions_intro [] ^ "\n");
+    (* The digest is the section's reason to exist: refusals buried in a
+       hundred one-line rows below are the calls the keeper repeats
+       (2026-08-28: same nonexistent paths re-read every turn while the
+       refusals sat inside this very window). Rendered ahead of the rows. *)
+    (match failures with
+     | [] -> ()
+     | failures ->
+       (* Both lines are model-facing prose, so they live in
+          config/prompts assets (RFC prompts-and-tool-definitions-
+          outside-ocaml); a registry failure degrades to the bare data,
+          mirroring the held-task skills render above. *)
+       let render key vars ~fallback =
+         match Prompt_registry.render_prompt_template key vars with
+         | Ok text -> String.trim text
+         | Error detail ->
+           Log.Misc.error
+             "keeper rejected-call digest prompt %s did not render, falling back to \
+              the bare data: %s"
+             key
+             detail;
+           fallback
+       in
+       let heading =
+         render Prompt_names.keeper_observation_rejected_digest_heading [] ~fallback:""
+       in
+       if not (String.equal heading "")
+       then Buffer.add_string ubuf (heading ^ "\n");
+       List.iter
+         (fun (digest : Keeper_own_recent_actions.failure_digest) ->
+           let detail_suffix =
+             match digest.failure_detail with
+             | None -> ""
+             | Some detail -> " — " ^ detail
+           in
+           let provenance = Keeper_own_recent_actions.provenance_to_json
+             ~current_task_id digest.failure_provenance |> Yojson.Safe.to_string in
+           let count = string_of_int digest.failure_count in
+           let last_turn = string_of_int digest.failure_last_turn in
+           let input = rejected_digest_input digest.failure_input in
+           let row =
+             render
+               Prompt_names.keeper_observation_rejected_digest_row
+               [ "provenance", provenance
+               ; "tool", digest.failure_tool
+               ; "input", input
+               ; "count", count
+               ; "last_turn", last_turn
+               ; "detail_suffix", detail_suffix
+               ]
+               ~fallback:
+                 (String.concat
+                    " "
+                    [ "-"
+                    ; digest.failure_tool
+                    ; input
+                    ; "×" ^ count
+                    ; "@" ^ last_turn ^ detail_suffix
+                    ; provenance
+                    ])
+           in
+           Buffer.add_string ubuf (row ^ "\n"))
+         failures);
+    Buffer.add_string ubuf (String.concat "\n" rows);
+    Buffer.add_string ubuf "\n\n";
+    Some (Buffer.contents ubuf)
+;;
+
+let prepare_prompt_internal
     ~(turn_decision : Keeper_world_observation.keeper_cycle_decision option)
     ?(previous_turn_stop : Keeper_turn_checkpoint_reason.t option)
     ~(current_task : Keeper_world_observation_inputs.current_task_observation)
@@ -1215,12 +1321,10 @@ let build_prompt_internal
     ?(active_goal_summaries : (goal_summary list, Goal_store.unavailable) result option)
     ?(lane_updates = Ok (`List []))
     ?(workspace_memory = Workspace_memory_ledger.Missing)
-    ?workspace_memory_access
     ?(wiki_contents = Keeper_wiki_contents.Off)
     ?(repository_freshness : Keeper_sandbox_control.freshness_row list = [])
-    ?(recent_work = Keeper_recent_work.Absent)
     ~(observation : Keeper_world_observation.world_observation)
-    () : turn_prompt_parts
+    () : prepared_prompt
   =
   (* No system prompt here. The turn sends the one
      [Keeper_run_context.prepare_run_context] built, so a second read of the
@@ -1260,96 +1364,6 @@ let build_prompt_internal
     | Current_task task | Recovered_current_task {task; _} -> Some task.Masc_domain.id
     | Current_task_missing {task_id; _} | Current_task_unavailable {task_id; _} ->
       Some (Keeper_id.Task_id.to_string task_id)
-  in
-  (* A row is a whole turn, and the heading counts turns. *)
-  let own_recent_actions_section : string option =
-    match observation.own_recent_actions with
-    | Ok [] -> None
-    | Error (Keeper_tool_call_log.Index_unavailable detail) ->
-      (* The history could not be read. Saying so is the whole section: a
-         silent absence reads as "no calls made", which is exactly the
-         repeat-a-finished-task failure this layer exists to prevent. *)
-      Some
-        (render_fragment
-           Prompt_names.keeper_world_own_recent_actions_unavailable
-           [ "detail", detail ]
-         ^ "\n\n")
-    | Ok turns ->
-      let failures = Keeper_own_recent_actions.digest_failures turns in
-      let rows = List.map (format_own_recent_actions_turn ~current_task_id) turns in
-      let ubuf = Buffer.create 1024 in
-      Buffer.add_string ubuf
-        (render_fragment
-           Prompt_names.keeper_world_own_recent_actions_heading
-           [ "count", string_of_int (List.length rows) ]
-         ^ "\n");
-      Buffer.add_string ubuf
-        (render_fragment Prompt_names.keeper_world_own_recent_actions_intro [] ^ "\n");
-      (* The digest is the section's reason to exist: refusals buried in a
-         hundred one-line rows below are the calls the keeper repeats
-         (2026-08-28: same nonexistent paths re-read every turn while the
-         refusals sat inside this very window). Rendered ahead of the rows. *)
-      (match failures with
-       | [] -> ()
-       | failures ->
-         (* Both lines are model-facing prose, so they live in
-            config/prompts assets (RFC prompts-and-tool-definitions-
-            outside-ocaml); a registry failure degrades to the bare data,
-            mirroring the held-task skills render above. *)
-         let render key vars ~fallback =
-           match Prompt_registry.render_prompt_template key vars with
-           | Ok text -> String.trim text
-           | Error detail ->
-             Log.Misc.error
-               "keeper rejected-call digest prompt %s did not render, falling back to \
-                the bare data: %s"
-               key
-               detail;
-             fallback
-         in
-         let heading =
-           render Prompt_names.keeper_observation_rejected_digest_heading [] ~fallback:""
-         in
-         if not (String.equal heading "")
-         then Buffer.add_string ubuf (heading ^ "\n");
-         List.iter
-           (fun (digest : Keeper_own_recent_actions.failure_digest) ->
-             let detail_suffix =
-               match digest.failure_detail with
-               | None -> ""
-               | Some detail -> " — " ^ detail
-             in
-             let provenance = Keeper_own_recent_actions.provenance_to_json
-               ~current_task_id digest.failure_provenance |> Yojson.Safe.to_string in
-             let count = string_of_int digest.failure_count in
-             let last_turn = string_of_int digest.failure_last_turn in
-             let input = rejected_digest_input digest.failure_input in
-             let row =
-               render
-                 Prompt_names.keeper_observation_rejected_digest_row
-                 [ "provenance", provenance
-                 ; "tool", digest.failure_tool
-                 ; "input", input
-                 ; "count", count
-                 ; "last_turn", last_turn
-                 ; "detail_suffix", detail_suffix
-                 ]
-                 ~fallback:
-                   (String.concat
-                      " "
-                      [ "-"
-                      ; digest.failure_tool
-                      ; input
-                      ; "×" ^ count
-                      ; "@" ^ last_turn ^ detail_suffix
-                      ; provenance
-                      ])
-             in
-             Buffer.add_string ubuf (row ^ "\n"))
-           failures);
-      Buffer.add_string ubuf (String.concat "\n" rows);
-      Buffer.add_string ubuf "\n\n";
-      Some (Buffer.contents ubuf)
   in
   let content_of : Keeper_context_layers.layer_id -> string option = function
     (* 1. Active goals — stable turn context. Titles render when the caller
@@ -1606,10 +1620,8 @@ let build_prompt_internal
        it states where each checkout stands so the keeper can choose to
        fetch/rebase; nothing here schedules or forces that work. *)
     | Keeper_context_layers.Lane_updates -> Lane_addon_subscription.render lane_updates
-    | Keeper_context_layers.Workspace_memory ->
-      format_workspace_memory_observation ?access:workspace_memory_access workspace_memory
-    | Keeper_context_layers.Wiki ->
-      format_wiki_observation ?access:workspace_memory_access wiki_contents
+    (* These four layers are assembled from the actual request projection. *)
+    | Keeper_context_layers.Workspace_memory | Wiki | Own_recent_actions | Recent_work -> None
     | Keeper_context_layers.Repository_freshness ->
       (match repository_freshness with
        | [] -> None
@@ -1830,8 +1842,6 @@ let build_prompt_internal
        briefing describes the world and never the keeper's own history. Both
        outcomes are shown: the rejections are what the keeper must not repeat,
        the successes are what it must not redo. *)
-    | Keeper_context_layers.Own_recent_actions -> own_recent_actions_section
-    | Keeper_context_layers.Recent_work -> format_recent_work recent_work
     | Keeper_context_layers.Fleet_messages ->
       if observation.fleet_messages <> [] then (
         let ubuf = Buffer.create 256 in
@@ -1857,11 +1867,11 @@ let build_prompt_internal
      then reports "I checked the board" is misreading its own frame rather than
      inventing a tool call. Stating where the frame came from is what makes
      that distinction available to the model. *)
-  let world_partition =
-    Keeper_context_layers.assemble ~content_of
-    |> Keeper_context_layers.prepend_unattributed World_frame
-         (render_fragment Prompt_names.keeper_world_frame_frame [] ^ "\n\n") in
-  let world_state = Keeper_context_layers.text world_partition in
+  let common_layers = List.fold_left (fun layers layer ->
+    Layer_map.add layer (Option.map Keeper_context_layers.prepare_content (content_of layer)) layers)
+      Layer_map.empty Keeper_context_layers.ordered in
+  let frame = Keeper_context_layers.prepare_content
+      (render_fragment Prompt_names.keeper_world_frame_frame [] ^ "\n\n") in
   (* An answered Ask is new conversation input, not just a world observation.
      Dynamic context is transient across tool rounds and is not checkpointed.
      Keep the attributed, quoted answer in the ordinary durable user turn;
@@ -1871,7 +1881,34 @@ let build_prompt_internal
     String.concat "\n\n"
       (Env_config_keeper.KeeperAutonomous.wake_prompt () :: answered_asks)
   in
-  { world_state; world_partition; user_message }
+  { common_layers; frame; user_message; current_task_id
+  ; own_recent_actions=observation.own_recent_actions; workspace_memory; wiki_contents }
+;;
+
+let project_prompt prepared ?workspace_memory_access ?own_recent_actions
+    ?(recent_work = Keeper_recent_work.Absent) () =
+  let own_recent_actions = match own_recent_actions with
+    | Some actions -> actions | None -> prepared.own_recent_actions in
+  let own_recent_actions_section =
+    format_recent_actions_section ~current_task_id:prepared.current_task_id own_recent_actions in
+  let content_of layer = match layer with
+    | Keeper_context_layers.Workspace_memory ->
+      format_workspace_memory_observation ?access:workspace_memory_access prepared.workspace_memory
+      |> Option.map Keeper_context_layers.prepare_content
+    | Wiki -> format_wiki_observation ?access:workspace_memory_access prepared.wiki_contents
+      |> Option.map Keeper_context_layers.prepare_content
+    | Own_recent_actions -> Option.map Keeper_context_layers.prepare_content own_recent_actions_section
+    | Recent_work -> Option.map Keeper_context_layers.prepare_content (format_recent_work recent_work)
+    | Active_goals | Current_task | Approval_authority | Connected_surfaces | Namespace_state
+    | Lane_updates | Repository_freshness | Autonomous_trigger | Scheduled_automation
+    | Completion_authority | Task_cancellations | Pending_mentions | Scope_messages
+    | Own_board_posts | Board_activity | Fleet_messages ->
+      (* Captured and assembled through the same immutable [ordered] keys. *)
+      Layer_map.find layer prepared.common_layers
+  in
+  let world_partition = Keeper_context_layers.assemble_prepared ~content_of
+    |> Keeper_context_layers.prepend_prepared_unattributed World_frame prepared.frame in
+  {world_state=Keeper_context_layers.text world_partition;world_partition;user_message=prepared.user_message}
 ;;
 
 let emit_prompt_metrics
@@ -1918,35 +1955,40 @@ let emit_prompt_metrics
     prompt_hash
 ;;
 
-let build_prompt
+let prepare_prompt
       ~turn_decision
       ?previous_turn_stop
       ~current_task
       ?task_skill_surfaces
       ?active_goal_summaries
       ?workspace_memory
-      ?workspace_memory_access
       ?wiki_contents
       ?lane_updates
       ?repository_freshness
-      ?recent_work
       ~observation
       ()
   =
-  build_prompt_internal
+  prepare_prompt_internal
     ~turn_decision:(Some turn_decision)
     ?previous_turn_stop
     ~current_task
     ?task_skill_surfaces
     ?active_goal_summaries
     ?workspace_memory
-    ?workspace_memory_access
     ?wiki_contents
     ?lane_updates
     ?repository_freshness
-    ?recent_work
     ~observation
     ()
+;;
+
+let build_prompt ~turn_decision ?previous_turn_stop ~current_task ?task_skill_surfaces
+    ?active_goal_summaries ?workspace_memory ?workspace_memory_access ?wiki_contents
+    ?lane_updates ?repository_freshness ?recent_work ~observation () =
+  let prepared = prepare_prompt ~turn_decision ?previous_turn_stop ~current_task
+    ?task_skill_surfaces ?active_goal_summaries ?workspace_memory ?wiki_contents
+    ?lane_updates ?repository_freshness ~observation () in
+  project_prompt prepared ?workspace_memory_access ?recent_work ()
 ;;
 
 let build_prompt_preview
@@ -1962,17 +2004,16 @@ let build_prompt_preview
       ~observation
       ()
   =
-  build_prompt_internal
+  let prepared = prepare_prompt_internal
     ~turn_decision:None
     ~current_task
     ?task_skill_surfaces
     ?active_goal_summaries
     ?workspace_memory
-    ?workspace_memory_access
     ?wiki_contents
     ?lane_updates
     ?repository_freshness
-    ?recent_work
     ~observation
-    ()
+    () in
+  project_prompt prepared ?workspace_memory_access ?recent_work ()
 ;;

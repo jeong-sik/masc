@@ -1492,7 +1492,7 @@ let test_maintenance_truncated_normalized_blob_fails_closed () =
         ("{\"output\":" ^ complete_reference);
       (match M.run ~base_path ~board_posts_file ~mode:M.Delete_previous_candidates with
        | Error
-           (M.Malformed_structured_artifact_reference
+           (M.Durable_source_parse_failed
              { path; line; _ }) ->
          Alcotest.(check string) "exact truncated tool-call log" tool_call_log path;
          Alcotest.(check int) "exact truncated tool-call line" 1 line
@@ -1506,6 +1506,56 @@ let test_maintenance_truncated_normalized_blob_fails_closed () =
         "truncated normalized reference retains every blob"
         (Some "survive truncated normalized ref")
         (fetch_ok store ~sha256:reference.sha256))
+
+let test_maintenance_undecodable_rows_preserve_candidate_and_blob () =
+  List.iter
+    (fun shape ->
+      with_temp_dir (fun base_path ->
+        let store = B.create ~base_path in
+        let payload = "retain this candidate until every source is readable" in
+        let reference = B.put_durable store ~bytes:payload ~mime:"text/plain" in
+        ignore (maintenance_ok ~base_path ~mode:M.Observe_only);
+        let snapshot_path = M.candidate_snapshot_path ~base_path in
+        let snapshot () = In_channel.with_open_bin snapshot_path In_channel.input_all in
+        let before = snapshot () in
+        let marker = O.encode_for_agent_core (O.Stored reference) in
+        let incomplete = match shape with
+          | `Marker -> "{\"output_ref\":" ^ Yojson.Safe.to_string (`String marker)
+          | `Normalized -> "{\"output_artifact\":" ^
+              Yojson.Safe.to_string (O.normalized_artifact_ref_to_json reference)
+          | `No_reference -> "{\"other\":" in
+        let source = Filename.concat (Common.masc_dir_from_base_path ~base_path)
+            "tool_calls/2026-10/17.jsonl" in
+        Fs_compat.mkdir_p (Filename.dirname source);
+        Fs_compat.save_file source ("{\"complete_prior_row\":true}\n" ^ incomplete ^ "\n");
+        (match M.run ~base_path ~board_posts_file ~mode:M.Delete_previous_candidates with
+         | Error (M.Durable_source_parse_failed { path; line; _ }) ->
+           Alcotest.(check string) "exact unreadable source" source path;
+           Alcotest.(check int) "exact unreadable row" 2 line
+         | Error error -> Alcotest.fail (M.error_to_string error)
+         | Ok _ -> Alcotest.fail "unreadable source authorized deletion");
+        Alcotest.(check string) "failed scan preserves previous candidates" before (snapshot ());
+        Alcotest.(check (option string)) "failed scan preserves candidate bytes"
+          (Some payload) (fetch_ok store ~sha256:reference.sha256);
+        Fs_compat.save_file source (Yojson.Safe.to_string
+          (`Assoc ["output_ref", `String marker]) ^ "\n");
+        let repaired = maintenance_ok ~base_path ~mode:M.Delete_previous_candidates in
+        Alcotest.(check int) "readable source roots the exact reference" 1 repaired.live_references;
+        Alcotest.(check int) "repair does not delete the referenced candidate" 0 repaired.deleted))
+    [ `Marker; `Normalized; `No_reference ]
+
+let test_maintenance_accepts_canonical_marker_and_blank_rows () =
+  with_temp_dir (fun base_path ->
+    let store = B.create ~base_path in
+    let reference = B.put_durable store ~bytes:"canonical raw marker row" ~mime:"text/plain" in
+    let source = Filename.concat (Common.masc_dir_from_base_path ~base_path)
+        "gate/reference.jsonl" in
+    Fs_compat.mkdir_p (Filename.dirname source);
+    Fs_compat.save_file source
+      ("\n\t\n" ^ O.encode_for_agent_core (O.Stored reference) ^ "\n\n{\"other\":true}\n");
+    let report = maintenance_ok ~base_path ~mode:M.Delete_previous_candidates in
+    Alcotest.(check int) "canonical marker remains an authoritative reference" 1 report.live_references;
+    Alcotest.(check int) "blank rows do not authorize deletion" 0 report.deleted)
 
 let test_maintenance_unlink_failure_is_typed () =
   with_temp_dir (fun base_path ->
@@ -1875,6 +1925,14 @@ let () =
             "maintenance truncated normalized blob fails closed"
             `Quick
             test_maintenance_truncated_normalized_blob_fails_closed;
+          Alcotest.test_case
+            "maintenance undecodable rows preserve candidates and blobs"
+            `Quick
+            test_maintenance_undecodable_rows_preserve_candidate_and_blob;
+          Alcotest.test_case
+            "maintenance accepts canonical marker and blank rows"
+            `Quick
+            test_maintenance_accepts_canonical_marker_and_blank_rows;
           Alcotest.test_case
             "maintenance unlink failure is typed"
             `Quick

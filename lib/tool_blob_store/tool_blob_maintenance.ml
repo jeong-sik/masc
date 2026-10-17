@@ -22,6 +22,11 @@ type error =
       { path : string
       ; reason : string
       }
+  | Durable_source_parse_failed of
+      { path : string
+      ; line : int
+      ; detail : string
+      }
   | Malformed_artifact_reference of
       { path : string
       ; line : int
@@ -68,6 +73,12 @@ let error_to_string = function
     Printf.sprintf "durable source stat failed path=%s: %s" path reason
   | Durable_source_read_failed { path; reason } ->
     Printf.sprintf "durable source read failed path=%s: %s" path reason
+  | Durable_source_parse_failed { path; line; detail } ->
+    Printf.sprintf
+      "durable source parse failed path=%s line=%d: %s"
+      path
+      line
+      detail
   | Malformed_artifact_reference { path; line; offset; detail } ->
     Printf.sprintf
       "malformed artifact reference path=%s line=%d offset=%d: %s"
@@ -234,7 +245,8 @@ let references_in_file ~ownership_root path =
            (fun (line_number, result) line ->
               let next =
                 Result.bind result (fun references ->
-                  try
+                  if String.equal (String.trim line) "" then Ok references
+                  else try
                     references_in_json
                       ~path
                       ~line:line_number
@@ -242,22 +254,23 @@ let references_in_file ~ownership_root path =
                       (Yojson.Safe.from_string line)
                   with
                   | Yojson.Json_error detail ->
-                    if String_util.contains_substring line "\"_blob\""
-                    then
+                    (* The registered durable sources admit JSON documents,
+                       JSONL rows, or an exact canonical marker row. A row we
+                       cannot decode is not evidence of an empty reference set. *)
+                    (match Tool_output.decode_from_agent_core line with
+                     | Tool_output.Not_marker ->
                       Error
-                        (Malformed_structured_artifact_reference
+                        (Durable_source_parse_failed
                            { path
                            ; line = line_number
-                           ; detail =
-                               "unparseable durable row contains a _blob key: "
-                               ^ detail
+                           ; detail
                            })
-                    else
+                     | Tool_output.Decoded _ | Tool_output.Invalid_marker _ ->
                       add_references
                         ~path
                         ~line:line_number
                         references
-                        line)
+                        line))
               in
               line_number + 1, next)
            (1, Ok Artifact_reference_set.empty)

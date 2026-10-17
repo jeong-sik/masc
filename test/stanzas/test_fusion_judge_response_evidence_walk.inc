@@ -1,0 +1,5 @@
+(test
+ (name test_fusion_judge_response_evidence_walk)
+ (modules test_fusion_judge_response_evidence_walk)
+ (deps (source_tree %{workspace_root}/config/prompts))
+ (libraries masc_test_deps masc))

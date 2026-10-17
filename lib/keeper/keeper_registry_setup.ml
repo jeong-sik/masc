@@ -411,8 +411,7 @@ type registration_error =
 
 (* Registration reads the durable pending queue before it installs the
    entry, so a commit between that read and the install publishes to no
-   entry, or to the one being replaced, and the new entry misses the source
-   until the Keeper's next commit (#43494). Every commit publishes from
+   entry, or to the one being replaced (#43494). Every commit publishes from
    [after_commit] under the queue owner lock, so one more read under that
    lock after the install leaves no gap: a commit is either in this read or
    publishes to the installed entry. *)

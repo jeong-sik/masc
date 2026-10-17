@@ -31,12 +31,11 @@ val dispatch_simple :
     including host commands that receive typed stdin. Guest and SSH runner
     targets receive the same callback contract.
 
-    [?started] is the epoch the timeout budget is debited against. An
-    enclosing pipeline or sequence passes its own [started] so every
-    substitution child and every stage spends one shared deadline rather
-    than a fresh copy of the remaining timeout (RFC
-    shell-ir-typed-command-substitution §2.3 item 4); omitted, it defaults
-    to now.
+    [?timeout_sec] is the original invocation budget; omission is unlimited.
+    [?started] is its wall-clock epoch, defaulting to now. Every substitution
+    child and every stage retains that same budget and epoch; elapsed time is
+    subtracted once when deriving a process duration, not from an already
+    reduced child budget (RFC shell-ir-typed-command-substitution §2.3 item 4).
 
     A [Shell_ir.Subst] in the stage's args or env is evaluated first, by
     dispatching the child IR under the stage's own sandbox target and,
@@ -59,9 +58,9 @@ val dispatch :
     to [dispatch_simple]; [Pipeline] routes to internal pipeline
     logic.  [?stdin_content] reaches a substitution child — in bash the
     child and the parent share one stdin descriptor and race for it; the
-    deterministic reading hands each the same bytes.  [?started]
-    propagates one shared timeout deadline through every stage and
-    substitution child, exactly as in {!dispatch_simple}.  Callers are
+    deterministic reading hands each the same bytes. The original
+    [?timeout_sec] and [?started] stay together through every stage and
+    substitution child, exactly as in {!dispatch_simple}. Callers are
     responsible for structural and path validation at their boundary;
     this module only executes the supplied typed IR.
 

@@ -3857,7 +3857,7 @@ let approved_grant_fixture ~base_path ~keeper_name ~input =
    | Error error -> fail (Masc.Keeper_approval_queue_result.install_error_to_string error));
   let approval_id =
     match
-      Keeper_approval_queue.submit_pending
+      Keeper_approval_queue.submit_pending ~origin:Keeper_approval_origin.unavailable
         ~keeper_name
         ~tool_name:"external-effect"
         ~call_summary:None
@@ -4115,7 +4115,7 @@ let test_rejected_resolution_projection_precedes_turn_intake () =
    | Error error -> fail (Masc.Keeper_approval_queue_result.install_error_to_string error));
   let approval_id =
     match
-      Keeper_approval_queue.submit_pending
+      Keeper_approval_queue.submit_pending ~origin:Keeper_approval_origin.unavailable
         ~keeper_name
         ~tool_name:"external-effect"
         ~call_summary:None

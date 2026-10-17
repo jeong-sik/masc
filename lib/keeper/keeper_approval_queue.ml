@@ -1128,6 +1128,7 @@ let create_entry
       ~tool_name
       ~input
       ?turn_id
+      ~origin
       ?request_context
       ?observation
       ?task_id
@@ -1145,6 +1146,7 @@ let create_entry
   ; sequence
   ; requested_at = Unix.gettimeofday ()
   ; turn_id
+  ; origin
   ; request_context
   ; observation
   ; task_id
@@ -2001,6 +2003,7 @@ let submit_pending
       ~call_summary
       ~base_path
       ?turn_id
+      ~origin
       ?request_context
       ?observation
       ?task_id
@@ -2032,6 +2035,7 @@ let submit_pending
              ~keeper_name
              ~tool_name
              ~input_hash
+             ~origin
              ~task_id
              ~goal_id
              ~continuation_channel
@@ -2045,6 +2049,7 @@ let submit_pending
                 ~keeper_name
                 ~tool_name
                 ~input_hash
+                ~origin
                 ~task_id
                 ~goal_id
                 ~continuation_channel
@@ -2067,13 +2072,14 @@ let submit_pending
                  ~tool_name
                  ~input
                  ?turn_id
-              ?request_context
-              ?observation
-              ?task_id
-              ?goal_id
-              ~continuation_channel
-              ~audit_base_path:base_path
-              ()
+                 ~origin
+                 ?request_context
+                 ?observation
+                 ?task_id
+                 ?goal_id
+                 ~continuation_channel
+                 ~audit_base_path:base_path
+                 ()
           in
           let updated = SMap.add id entry map in
           let following_sequence = sequence + 1 in

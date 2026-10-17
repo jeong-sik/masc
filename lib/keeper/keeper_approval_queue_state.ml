@@ -184,6 +184,7 @@ let pending_entry_matches
       ~keeper_name
       ~tool_name
       ~input_hash
+      ~origin
       ~task_id
       ~goal_id
       ~continuation_channel
@@ -192,6 +193,7 @@ let pending_entry_matches
   && String.equal entry.keeper_name keeper_name
   && String.equal entry.tool_name tool_name
   && String.equal entry.input_hash input_hash
+  && Keeper_approval_origin.same_logical_source entry.origin origin
   && entry.task_id = task_id
   && entry.goal_id = goal_id
   && Yojson.Safe.equal
@@ -205,6 +207,7 @@ let find_pending_id_in_map
       ~keeper_name
       ~tool_name
       ~input_hash
+      ~origin
       ~task_id
       ~goal_id
       ~continuation_channel
@@ -221,6 +224,7 @@ let find_pending_id_in_map
              ~keeper_name
              ~tool_name
              ~input_hash
+             ~origin
              ~task_id
              ~goal_id
              ~continuation_channel
@@ -243,6 +247,7 @@ let find_unconsumed_grant_id_in_deliveries
       ~keeper_name
       ~tool_name
       ~input_hash
+      ~origin
       ~task_id
       ~goal_id
       ~continuation_channel
@@ -263,6 +268,7 @@ let find_unconsumed_grant_id_in_deliveries
                    ~keeper_name
                    ~tool_name
                    ~input_hash
+                   ~origin
                    ~task_id
                    ~goal_id
                    ~continuation_channel

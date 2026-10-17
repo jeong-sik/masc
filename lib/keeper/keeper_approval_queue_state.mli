@@ -31,11 +31,13 @@ val classify_restarted_deliveries :
 val find_pending_id_in_map :
   pending_approval Set_util.StringMap.t ->
   base_path:string -> keeper_name:string -> tool_name:string -> input_hash:string ->
+  origin:Keeper_approval_origin.t ->
   task_id:string option -> goal_id:string option ->
   continuation_channel:Keeper_continuation_channel.t -> string option
 val find_unconsumed_grant_id_in_deliveries :
   persisted_delivery Set_util.StringMap.t ->
   base_path:string -> keeper_name:string -> tool_name:string -> input_hash:string ->
+  origin:Keeper_approval_origin.t ->
   task_id:string option -> goal_id:string option ->
   continuation_channel:Keeper_continuation_channel.t -> string option
 (** First matching key in map order, or [None] when no matching request exists. *)

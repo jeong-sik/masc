@@ -3,7 +3,7 @@ open Keeper_approval_queue_result
 
 module SMap = Set_util.StringMap
 
-let pending_store_version = 12
+let pending_store_version = 13
 let replay_results_store_version = 1
 
 type persisted_delivery =
@@ -35,6 +35,7 @@ let pending_entry_to_yojson
     ; "sequence", `Int entry.sequence
     ; "requested_at", `Float entry.requested_at
     ; "turn_id", Json_util.int_opt_to_json entry.turn_id
+    ; "origin", Keeper_approval_origin.to_yojson entry.origin
     ; ( "request_context"
       , match request_context with
         | Some context -> context
@@ -317,6 +318,7 @@ let pending_entry_of_yojson ~base_path json =
           ; "sequence"
           ; "requested_at"
           ; "turn_id"
+          ; "origin"
           ; "request_context"
           ; "request_context_version"
           ; "observation"
@@ -345,6 +347,8 @@ let pending_entry_of_yojson ~base_path json =
     let* sequence = required_positive_int ~surface "sequence" fields in
     let* requested_at = required_float ~surface "requested_at" fields in
     let* turn_id = optional_nonnegative_int ~surface "turn_id" fields in
+    let* origin_json = required_member ~surface "origin" fields in
+    let* origin = Keeper_approval_origin.of_yojson origin_json in
     let* request_context =
       match
         List.assoc_opt "request_context" fields,
@@ -415,6 +419,7 @@ let pending_entry_of_yojson ~base_path json =
       ; sequence
       ; requested_at
       ; turn_id
+      ; origin
       ; request_context
       ; observation
       ; task_id

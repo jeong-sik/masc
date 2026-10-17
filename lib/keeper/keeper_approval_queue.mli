@@ -250,6 +250,7 @@ val submit_pending :
   call_summary:string option ->
   base_path:string ->
   ?turn_id:int ->
+  origin:Keeper_approval_origin.t ->
   ?request_context:Yojson.Safe.t ->
   ?observation:Keeper_approval_queue_rules_types.observed_refusal ->
   ?task_id:string ->
@@ -286,7 +287,7 @@ val resolve_error_to_string : resolve_error -> string
     Resolution order is allocated by the durable queue commit, separately
     from request order. A delayed first application superseded by a later
     committed resolution only reads the current rule and records no renewal.
-    Pending snapshots require format 12 and rules require the versioned
+    Pending snapshots require format 13 and rules require the versioned
     application store. Prior formats are refused without rewriting their data.
 
     [base_path] is the authenticated caller workspace. The pending or

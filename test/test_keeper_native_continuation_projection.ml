@@ -36,7 +36,7 @@ let test_native_receipt_preserves_unspent_grant () =
   Masc.Keeper_meta_store.replace_snapshot (Masc.Workspace.default_config base_path) meta
   |> unwrap Fun.id;
   let submission =
-    AQ.submit_pending ~base_path ~keeper_name ~tool_name:"external-effect"
+    AQ.submit_pending ~origin:Keeper_approval_origin.unavailable ~base_path ~keeper_name ~tool_name:"external-effect"
       ~input:(`Assoc ["target", `String "native-receipt"])
       ~call_summary:None ()
     |> unwrap Result_types.storage_error_to_string

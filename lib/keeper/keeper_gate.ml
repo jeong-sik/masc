@@ -184,6 +184,7 @@ let audit_allow request ?rule_match ?source_approval_id ?decision_source source 
 
 let submit ?observation request =
   Keeper_approval_queue.submit_pending
+    ~origin:Keeper_approval_origin.unavailable
     ~keeper_name:request.keeper_name
     ~tool_name:request.operation
     ~input:request.input

@@ -246,7 +246,7 @@ let scheduled_wake_stimulus ~occurrence ~arrived_at : Q.stimulus =
 let approve_grant_exn ~base_path ~keeper_name ~request =
   let approval_id =
     match
-      Keeper_approval_queue.submit_pending
+      Keeper_approval_queue.submit_pending ~origin:Keeper_approval_origin.unavailable
         ~keeper_name ~tool_name:"external-effect"
         ~input:(`Assoc [ "request", `String request ])
         ~call_summary:None ~base_path ()
@@ -825,7 +825,7 @@ let test_proactive_yields_only_to_ready_intake () =
      | Ok _ -> ()
      | Error error -> fail (Masc.Keeper_approval_queue_result.install_error_to_string error));
     let approval_id =
-      match Keeper_approval_queue.submit_pending ~keeper_name
+      match Keeper_approval_queue.submit_pending ~origin:Keeper_approval_origin.unavailable ~keeper_name
           ~tool_name:"external-effect" ~input:(`Assoc []) ~call_summary:None ~base_path () with
       | Ok submission -> submission.approval_id
       | Error error -> fail (Masc.Keeper_approval_queue_result.storage_error_to_string error)

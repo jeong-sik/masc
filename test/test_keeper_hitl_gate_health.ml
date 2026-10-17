@@ -49,6 +49,7 @@ let entry ~id ~requested_at ~summary_status ~exact_attempt ~disposition =
   ; sequence = 1
   ; requested_at
   ; turn_id = None
+  ; origin = Keeper_approval_origin.unavailable
   ; request_context = None
   ; observation = None
   ; task_id = None

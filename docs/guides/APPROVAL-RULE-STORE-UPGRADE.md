@@ -1,8 +1,11 @@
 # Approval rule store format cut
 
-PR #43361 changes the approval queue to pending format **12** and remembered
-rules to the canonical `{schema_version: 1, rules, applications}` object.
-Pending format 11 and bare rule lists are refused. The new server preserves
+The approval-origin contract changes the approval queue to pending format
+**13** (following format 12 in PR #43361). Remembered rules retain the canonical
+`{schema_version: 1, rules, applications}` object.
+Pending formats 12 and earlier and bare rule lists are refused. Format 13
+requires explicit origin provenance on every pending or retained delivery entry;
+old source attribution is never guessed. The new server preserves
 unsupported files and reports a storage error; it does not migrate or reset them.
 Existing workspaces cannot load their old pending approvals or apply, remember,
 or renew their old standing rules until the operator chooses a reset. Postpone

@@ -90,7 +90,7 @@ let pending_entry
   in
   let id =
     match
-      Q.submit_pending
+      Q.submit_pending ~origin:Keeper_approval_origin.unavailable
         ~keeper_name
         ~tool_name:"external-effect"
         ~call_summary:None

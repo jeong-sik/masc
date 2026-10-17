@@ -133,6 +133,45 @@ record actual requests, question state admission, full-refresh completion and
 manually inspected native frames. Keep foreign-workspace, booting, failed and
 unfinished attempts alongside valid reads.
 
+## Workspace-bound question reads
+
+The TUI sends both canonical `expected_base_path` and `expected_masc_root` on
+each question read. The server checks the pair against its receiving config
+before Keeper lookup or question scanning. Partial/duplicate fields return 400;
+another workspace returns 409. Named and fleet responses carry the actual
+canonical roots in `workspace` and the server's observed `state_ready`.
+
+The decoder requires one complete matching workspace and exactly one true
+readiness field, including for an empty list. Missing, foreign, ambiguous or
+booting responses remain failed reads and retain the previous questions. A
+matching response can therefore enter the existing early-delivery path without
+another health request. Its refresh ticket, workspace authority and question
+read receipt still govern admission; cold-start reads retain terminal admission.
+
+| Ask-specific request path | Before | To-Be implementation |
+|---|---|---|
+| Warm question read before early delivery | Question GET, then health GET | One workspace-bound question GET |
+| Question reload after an answer | Health GET, question GET, health GET | One workspace-bound question GET |
+
+These are source-level request counts, excluding the full refresh's shared
+identity probes and the answer write's existing admission check. They do not
+establish elapsed-time savings. The actual question/choice IDs and answer
+recording/delivery receipts retain their meanings. For Before/After, freeze the
+same original question, workspace, viewport and delayed endpoint behavior;
+record actual requests, question state admission, full-refresh completion and
+manually inspected native frames. Keep foreign-workspace, booting, failed and
+unfinished attempts alongside valid reads.
+
+`tui_asks_early` records the original question request ID, the full refresh's
+monotonic `refresh_started_ns` and `admitted_ms` after the successful question
+snapshot has entered UI state. It is emitted only when the existing early read
+receipt is accepted and consumed. Stale, foreign, cold-start or replayed messages
+do not produce an admission. Question text, answers and workspace paths are not
+copied into this record. Join the same refresh clock to `tui_http_refresh` to
+compare question state usability with terminal refresh completion. A painted or
+actionable native frame remains separate evidence; the log grants no authority
+and does not establish that a Keeper acted on an answer.
+
 ## Collect comparable before/after evidence
 
 Build or obtain binaries identified by their exact source SHAs. Use the same

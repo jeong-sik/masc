@@ -16240,7 +16240,14 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
   | Http_progress_observed observation ->
       Masc_tui_types.accept_http_progress state observation
   | Http_asks_loaded early ->
-      Option.iter (apply_asks_load state)
+      Option.iter (fun result ->
+        apply_asks_load state result;
+        if Result.is_ok result then
+          Option.iter (fun started_ns ->
+            Log.Transport.info "tui_asks_early request=%d refresh_started_ns=%Ld admitted_ms=%.3f"
+              (Snapshot_read.request_id early.ea_observation.asks_request) started_ns
+              (Int64.to_float (Int64.sub (Mtime_clock.elapsed_ns ()) started_ns) /. 1_000_000.))
+            state.http_refresh_started_ns)
         (Masc_tui_types.take_early_asks_observation state early)
   | Http_keeper_roster_loaded early ->
       Option.iter (fun result ->

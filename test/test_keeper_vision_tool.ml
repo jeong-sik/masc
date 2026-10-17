@@ -729,6 +729,47 @@ let test_run_vision_invalid_structured_response_is_typed () =
       assert (String_util.contains_substring detail "Structured output parse error")
     | _ -> failwith "expected Vo_invalid_structured_response")
 
+let test_failed_vision_candidates_keep_private_response_evidence () =
+  with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
+    with_temp_base (fun base_path ->
+      let replies = ["~private-first-response~"; {|{"text":42,"private":"~second-response~"}|}] in
+      let calls = ref 0 in
+      let complete ~sw:_ ~net:_ ~clock:_ ~config:_ ~messages:_ ?tools:_ () =
+        let raw = List.nth replies !calls in
+        incr calls;
+        Ok (text_response raw)
+      in
+      let outcome = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+        Vt.run_vision ~base_path ~complete ~tool_use_id:"original-image-call"
+          ~trace_id:"original-image-trace" ~sw ~clock:env#clock ~net:env#net
+          ~query:"describe" ~media_type:"image/png"
+          ~bytes:"\x89PNG\r\n\x1a\nraw" ())) in
+      let detail = match outcome with
+        | Vt.Vo_invalid_structured_response detail -> detail
+        | _ -> failwith "both invalid candidate responses must remain failures" in
+      assert (!calls=2);
+      assert (not (String.contains detail '~'));
+      let directory = Masc.Structured_response_evidence.record_path ~base_path
+          (Masc.Structured_response_evidence.invocation_id ()) |> Filename.dirname in
+      let rows = Sys.readdir directory |> Array.to_list
+        |> List.filter (fun name -> Filename.check_suffix name ".jsonl")
+        |> List.map (fun name -> Fs_compat.load_file (Filename.concat directory name)
+          |> Yojson.Safe.from_string) in
+      assert (List.length rows=2);
+      let rows = List.sort (fun a b ->
+        Int.compare Yojson.Safe.Util.(member "attempt_index" a |> to_int)
+          Yojson.Safe.Util.(member "attempt_index" b |> to_int)) rows in
+      let first_invocation = assoc_string "invocation_id" (List.hd rows) in
+      List.iteri (fun index row ->
+        assert (assoc_string "raw_preview" row = List.nth replies index);
+        assert (assoc_string "invocation_id" row = first_invocation);
+        assert (assoc_string "runtime_id" row = List.nth ["p1.vision-a";"p2.vision-b"] index);
+        assert (assoc_string "tool_use_id" row = "original-image-call");
+        assert (assoc_string "trace_id" row = "original-image-trace")) rows;
+      assert (String_util.contains_substring detail
+        (assoc_string "evidence_id" (List.nth rows 1)))))
+;;
+
 let test_explicit_vision_runtime_selection () =
   with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
     with_temp_base (fun _ ->
@@ -2434,6 +2475,7 @@ let () =
   test_uncapped_vision_fallback_reaches_provider ();
   test_invalid_structured_vision_response_is_runtime_failure ();
   test_run_vision_invalid_structured_response_is_typed ();
+  test_failed_vision_candidates_keep_private_response_evidence ();
   test_explicit_vision_runtime_selection ();
   test_retryable_provider_error_tries_next_runtime ();
   test_invalid_structured_response_tries_next_runtime ();

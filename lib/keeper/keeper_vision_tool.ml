@@ -437,8 +437,24 @@ let provider_state_outcome ~failure_class state =
     }
 ;;
 
-let outcome_of_response
-    ~runtime_id ~requested_model (response : Agent_core.Types.api_response) =
+let invalid_vision_text ~raw detail =
+  Agent_core.Error.structured_output_parse_error
+    ~reason:Agent_core.Error.Schema_rejected ~detail ~raw
+;;
+
+let official_vision_text raw =
+  match Yojson.Safe.from_string raw with
+  | json ->
+    vision_text_of_json json
+    |> Result.map_error (invalid_vision_text ~raw)
+  | exception Yojson.Json_error detail ->
+    Error (Agent_core.Error.structured_output_parse_error
+      ~reason:Agent_core.Error.Invalid_json ~detail ~raw)
+;;
+
+let outcome_of_response_with_failure
+    ~invalid_response ~runtime_id ~requested_model
+    (response : Agent_core.Types.api_response) =
   match Agent_core.Structured.inspect_response_json response with
   | Awaiting_tool_results ->
     provider_state_outcome ~failure_class:Tool_result.Runtime_failure
@@ -455,16 +471,23 @@ let outcome_of_response
   | Interrupted reason ->
     provider_state_outcome ~failure_class:Tool_result.Runtime_failure
       (Agent_core.Error.Interrupted_response reason)
-  | Invalid error -> Vo_invalid_structured_response (Agent_core.Error.to_string error)
+  | Invalid error -> Vo_invalid_structured_response (invalid_response error)
   | Ready json ->
     (match vision_text_of_json json with
-     | Error detail -> Vo_invalid_structured_response detail
+     | Error detail ->
+       Vo_invalid_structured_response (invalid_response
+         (invalid_vision_text ~raw:(Agent_core.Types.visible_text_of_response response) detail))
      | Ok text ->
        (match Va.classify ~truncated:false ~content:text with
         | Ok text ->
           Vo_ok { text; runtime_id; requested_model; response_model = response.model }
         | Error Va.Empty_extraction -> Vo_empty
         | Error Va.Truncated_extraction -> Vo_truncated))
+;;
+
+let outcome_of_response ~runtime_id ~requested_model response =
+  outcome_of_response_with_failure ~invalid_response:Agent_core.Error.to_string
+    ~runtime_id ~requested_model response
 ;;
 
 let bounded_exponential_backoff ~base ~max_backoff ~attempt_index =
@@ -629,6 +652,12 @@ let run_candidates_outcome
     ~attempt_index
     candidates
   =
+  let invocation_id = Structured_response_evidence.invocation_id () in
+  let record_invalid ~runtime_id ~attempt_index error =
+    Structured_response_evidence.record_failure ~base_path
+      ~attempt:{source=Vision; invocation_id; runtime_id; attempt_index;
+        tool_use_id; trace_id} error
+  in
   let candidate_count = List.length candidates in
   let rec loop ~last_error ~attempt_index = function
     | [] ->
@@ -682,9 +711,7 @@ let run_candidates_outcome
              ~attempt_index:(attempt_index + 1) rest
          else outcome_of_official_failure ~runtime_id failure
        | Ok response ->
-         let parsed =
-           try vision_text_of_json (Yojson.Safe.from_string response.text)
-           with Yojson.Json_error detail -> Error detail in
+         let parsed = official_vision_text response.text in
          (match parsed with
           | Ok text when String.trim text <> "" ->
             record_vision_candidate_attempt
@@ -693,9 +720,10 @@ let run_candidates_outcome
             Vo_ok { text; runtime_id; requested_model = rt.model.api_name;
                     response_model = response.model }
           | (Ok _ | Error _) as parsed ->
-            let detail = match parsed with
-              | Error detail -> detail
-              | Ok _ -> "empty extraction" in
+            let error = match parsed with
+              | Error error -> error
+              | Ok _ -> invalid_vision_text ~raw:response.text "empty extraction" in
+            let detail = record_invalid ~runtime_id ~attempt_index error in
             record_vision_candidate_attempt
               ?tool_use_id ?trace_id ~runtime_id ~result:"error"
               ~reason:"invalid_structured_output" ~duration_ms:0.0
@@ -793,7 +821,9 @@ let run_candidates_outcome
             Runtime_quota_window.note_succeeded
               ~scope:(Runtime_instance.quota_scope_of_runtime rt);
             (match
-               outcome_of_response ~runtime_id ~requested_model:config.model_id response
+               outcome_of_response_with_failure
+                 ~invalid_response:(record_invalid ~runtime_id ~attempt_index)
+                 ~runtime_id ~requested_model:config.model_id response
              with
              | Vo_truncated ->
                record_vision_candidate_attempt
@@ -826,13 +856,17 @@ let run_candidates_outcome
                  (Candidate_invalid_output
                     (Printf.sprintf "%s: %s" runtime_id detail))
              | Vo_empty ->
+               let detail = record_invalid ~runtime_id ~attempt_index
+                 (invalid_vision_text
+                   ~raw:(Agent_core.Types.visible_text_of_response response)
+                   "empty extraction") in
                record_vision_candidate_attempt
                  ?tool_use_id ?trace_id ~runtime_id ~result:"error"
                  ~reason:"empty_extraction" ~duration_ms:0.0
                  ~success:false ();
                continue_with
                  (Candidate_invalid_output
-                    (Printf.sprintf "%s: empty extraction" runtime_id))
+                    (Printf.sprintf "%s: %s" runtime_id detail))
              | (Vo_timeout | Vo_invalid_request _ | Vo_no_runtime _ | Vo_provider _ | Vo_official_failure _) as outcome ->
                record_vision_candidate_attempt
                  ?tool_use_id ?trace_id ~runtime_id ~result:"error"

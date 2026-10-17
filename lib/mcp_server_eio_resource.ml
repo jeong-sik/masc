@@ -138,7 +138,15 @@ let page_resource path : Mcp_server.mcp_resource option =
 let wiki_resources ~base_path : Mcp_server.mcp_resource list =
   run_blocking_resource_io (fun () ->
     let uri_of_topic topic = "masc://" ^ wiki_topic_prefix ^ topic in
-    let pages = Tool_wiki.list_pages ~base_path |> List.filter_map page_resource in
+    (* [list_pages] raises [Sys_error] when the wiki root cannot be listed
+       (a regular file in its place, or a stat failure other than ENOENT).
+       The listing keeps every other resource and lists no wiki pages; the
+       wiki tools report the failure itself. *)
+    let pages =
+      match Tool_wiki.list_pages ~base_path with
+      | paths -> List.filter_map page_resource paths
+      | exception Sys_error _ -> []
+    in
     let log_path =
       Filename.concat (Tool_wiki.wiki_root ~base_path) Wiki_journal.log_file
     in
@@ -323,7 +331,11 @@ let handle_read_resource_eio state id params =
             when s = wiki_index_id
                  || s = wiki_index_json_id
                  || String.starts_with s ~prefix:wiki_topic_prefix ->
-              run_blocking_resource_io (fun () ->
+              (* [Tool_wiki.list_pages] raises [Sys_error] when the wiki root
+                 cannot be listed. The index and topic reads below call it,
+                 so the failure answers the error envelope instead of
+                 escaping the handler (the [.mli] promises [Never raises]). *)
+              (match run_blocking_resource_io (fun () ->
                 let base_path = config.base_path in
                 let wiki_dir = Tool_wiki.wiki_root ~base_path in
                 (* Trimmed here, not in the parser. The three readers this
@@ -470,7 +482,9 @@ let handle_read_resource_eio state id params =
                         | exception Sys_error _ -> ("text/markdown", None)))
                   | None -> ("text/markdown", None)
                 end
-              end)
+              end) with
+               | read -> read
+               | exception Sys_error _ -> ("text/plain", None))
           | _ -> ("text/plain", None)
         in
 

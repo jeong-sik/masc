@@ -153,25 +153,17 @@ type image =
       (** a raw .dsk floppy image, into drive A: and booted through the
           warm-up replay *)
 
-(** What a load starts. *)
-type boot =
-  | Boot_image of { bios : bios; image : image }
-      (** a game: needs a C-BIOS to run. With [Absent] the load is refused as
-          {!Dependency_unavailable} naming the ROMs it lacks, rather than
-          starting a machine that runs blind. *)
-  | Bare_machine
-      (** no C-BIOS and no image: the bus reads 0xFF. A machine to exercise
-          the lane's own calls on. Nothing in the server asks for it; it is a
-          constructor for tests, so a BIOS-less boot is always written out. *)
-
 val read_bios : dir:string -> (bios_triple, error) result
 (** Reads [cbios_main_msx2.rom], [cbios_logo_msx2.rom] and [cbios_sub.rom] from
     [dir]. All three are required: a directory missing one is [Unreadable]
     naming the first that is absent, never a machine with an empty ROM in it. *)
 
-val load : ledger_dir:string -> boot:boot -> (loaded, error) result
-(** Creates the workspace machine, replacing any previous one. The ledger is
-    [ledger_dir/ledger.jsonl], truncated: a new machine starts a new ledger.
+val load : ledger_dir:string -> bios:bios -> image:image -> (loaded, error) result
+(** Creates the workspace machine from [image], replacing any previous one. The
+    ledger is [ledger_dir/ledger.jsonl], truncated: a new machine starts a new
+    ledger. An image needs a C-BIOS to run: with [Absent] the load is refused as
+    {!Dependency_unavailable} naming the ROMs it lacks, rather than starting a
+    machine that runs blind.
 
     A [Disk_file] boots through the warm-up replay: {!disk_boot_frames} of
     C-BIOS, then [Msx.boot_disk] re-enters the image's boot sector with the
@@ -511,3 +503,11 @@ val export_disk : catalog_dir:string -> filename:string -> (disk_export, error) 
     destination is visible. This is process-restart persistence, not a promise
     of directory-entry durability across power loss. Filesystem exceptions
     after publication remain exceptions, never pre-effect [error] refusals. *)
+
+module For_testing : sig
+  val load_bare_machine : ledger_dir:string -> (loaded, error) result
+  (** Like {!load} with no C-BIOS and no image: the bus reads 0xFF. A machine
+      to exercise the lane's own calls on. Nothing in the server asks for it;
+      production boots go through {!load}, which refuses an image without a
+      BIOS. *)
+end

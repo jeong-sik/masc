@@ -279,8 +279,7 @@ let handle_load ?(after_load = fun () -> ()) ~relay ~tool_name
       of_lane ~tool_name ~start_time
         (relayed
            (explain_missing_bios
-              (Msx_lane.load ~ledger_dir:(msx_dir ~base_path)
-                 ~boot:(Msx_lane.Boot_image { bios; image }))))
+              (Msx_lane.load ~ledger_dir:(msx_dir ~base_path) ~bios ~image)))
   in
   match media with
   | Some (Error message) -> reject ~tool_name ~start_time message

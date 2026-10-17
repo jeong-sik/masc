@@ -94,9 +94,8 @@ let test_worker_capture () =
               check bool "unloaded worker screen fails explicitly" true ((screen ()).is_error = Some true);
               (* The load tool boots an image. This test is about the screen, so it
                  boots the shared lane the worker serves with no image. *)
-              let boot () = match Msx_lane.load
-                  ~ledger_dir:(Filename.concat (Filename.concat base_path ".masc") "msx")
-                  ~boot:Msx_lane.Bare_machine with
+              let boot () = match Msx_lane.For_testing.load_bare_machine
+                  ~ledger_dir:(Filename.concat (Filename.concat base_path ".masc") "msx") with
                 | Ok _ -> () | Error error -> fail (Msx_lane.error_to_string error) in
               boot ();
               let before,frame = match Msx_lane.capture () with

@@ -365,10 +365,6 @@ type image =
   | Cartridge_file of string
   | Disk_file of string
 
-type boot =
-  | Boot_image of { bios : bios; image : image }
-  | Bare_machine
-
 (* A directory must hold the whole C-BIOS triple -- a missing logo or sub ROM
    used to board as an empty string and the machine booted with a hole in it,
    which is no evidence of anything. The first file that is not there names
@@ -512,17 +508,23 @@ let bios_missing_message image =
     name (String.concat ", " bios_files)
 ;;
 
-let load ~ledger_dir ~boot =
+let load ~ledger_dir ~bios ~image =
   let* () = require_activity () in
-  match boot with
-  | Bare_machine -> install ~ledger_dir ~roms:[] ~cart_path:None ~disk_path:None
-  | Boot_image { bios = Absent; image } -> Error (Dependency_unavailable (bios_missing_message image))
-  | Boot_image { bios = Present { main; logo; sub }; image } ->
+  match bios with
+  | Absent -> Error (Dependency_unavailable (bios_missing_message image))
+  | Present { main; logo; sub } ->
     let roms = [ main; logo; sub ] in
     (match image with
      | Cartridge_file path -> install ~ledger_dir ~roms ~cart_path:(Some path) ~disk_path:None
      | Disk_file path -> install ~ledger_dir ~roms ~cart_path:None ~disk_path:(Some path))
 ;;
+
+module For_testing = struct
+  let load_bare_machine ~ledger_dir =
+    let* () = require_activity () in
+    install ~ledger_dir ~roms:[] ~cart_path:None ~disk_path:None
+  ;;
+end
 
 let eject () =
   locked (fun () ->

@@ -73,7 +73,7 @@ let blank_bios_dir base_path =
 ;;
 
 let load_blank_bios_image ~ledger_dir image =
-  Msx_lane.load ~ledger_dir ~boot:(Msx_lane.Boot_image { bios = blank_bios; image })
+  Msx_lane.load ~ledger_dir ~bios:blank_bios ~image
 ;;
 
 (* Boot an image with the BIOS that [roms_dir] holds. *)
@@ -81,7 +81,7 @@ let load_image ~ledger_dir ~roms_dir image =
   match Msx_lane.read_bios ~dir:roms_dir with
   | Error e -> Error e
   | Ok triple ->
-    Msx_lane.load ~ledger_dir ~boot:(Msx_lane.Boot_image { bios = Msx_lane.Present triple; image })
+    Msx_lane.load ~ledger_dir ~bios:(Msx_lane.Present triple) ~image
 ;;
 
 (* A machine for the tests that exercise something other than load. The load
@@ -89,7 +89,7 @@ let load_image ~ledger_dir ~roms_dir image =
    no image and no BIOS, and report it the way a load does. *)
 let boot_machine base_path =
   let ledger_dir = Filename.concat (Filename.concat base_path ".masc") "msx" in
-  match Msx_lane.load ~ledger_dir ~boot:Msx_lane.Bare_machine with
+  match Msx_lane.For_testing.load_bare_machine ~ledger_dir with
   | Ok loaded ->
     Msx_machine_tools.of_lane ~tool_name:"masc_msx_load" ~start_time:(Tool_timing.start ())
       (Ok loaded.Msx_lane.observation)
@@ -550,14 +550,14 @@ let test_image_without_bios_is_refused () =
   check bool "the inventory BIOS lets the same load boot" true (is_completed (load ()))
 
 (* At the lane, the BIOS is a value. Absent refuses an image; the only way to
-   start a machine without one is the Bare_machine constructor. *)
+   start a machine without one is Msx_lane.For_testing. *)
 let test_lane_boot_needs_a_bios_value () =
   with_workspace @@ fun base_path ->
   let ledger_dir = Filename.concat base_path "ledger" in
   let cart = Filename.concat base_path "hero.rom" in
   Out_channel.with_open_bin cart (fun oc -> output_string oc (String.make 0x4000 '\000'));
   List.iter (fun (label, image) ->
-    match Msx_lane.load ~ledger_dir ~boot:(Msx_lane.Boot_image { bios = Msx_lane.Absent; image }) with
+    match Msx_lane.load ~ledger_dir ~bios:Msx_lane.Absent ~image with
     | Error (Msx_lane.Dependency_unavailable message) ->
       check bool (label ^ " names the main ROM") true
         (let needle = "cbios_main_msx2.rom" in
@@ -568,7 +568,7 @@ let test_lane_boot_needs_a_bios_value () =
     | Ok _ -> fail (label ^ ": an image must not boot without a BIOS"))
     [ "a cartridge", Msx_lane.Cartridge_file cart; "a disk", Msx_lane.Disk_file cart ];
   check bool "the refusals started no machine" true (Option.is_none (Msx_lane.frame ()));
-  (match Msx_lane.load ~ledger_dir ~boot:Msx_lane.Bare_machine with
+  (match Msx_lane.For_testing.load_bare_machine ~ledger_dir with
    | Ok _ -> ()
    | Error e -> fail (Msx_lane.error_to_string e));
   check bool "a bare machine is started by naming it" true (Option.is_some (Msx_lane.frame ()))
@@ -1054,7 +1054,7 @@ let test_disk_export_survives_fresh_boot () =
   check bool "fresh boot loads exported catalog disk" true
     (is_completed (call "masc_msx_change_disk" ["disk", `String "campaign-data.dsk"]));
   read_guest_disk '!';
-  ignore (Msx_lane.load ~ledger_dir ~boot:Msx_lane.Bare_machine
+  ignore (Msx_lane.For_testing.load_bare_machine ~ledger_dir
     |> lane_observation "BIOS-only boot");
   check bool "no disk refused" true (rejected (export "no-disk.dsk"))
 ;;
@@ -1702,9 +1702,9 @@ let test_peek_address_answer_is_four_hex_digits () =
 let test_load_file_failures_are_typed () =
   with_workspace @@ fun base_path ->
   let ledger_dir = Filename.concat base_path "ledger" in
-  let load ?(ledger_dir = ledger_dir) boot = Msx_lane.load ~ledger_dir ~boot in
-  let image image = Msx_lane.Boot_image { bios = blank_bios; image } in
-  (match load Msx_lane.Bare_machine with
+  let load ?(ledger_dir = ledger_dir) image =
+    Msx_lane.load ~ledger_dir ~bios:blank_bios ~image in
+  (match Msx_lane.For_testing.load_bare_machine ~ledger_dir with
    | Ok _ -> ()
    | Error e -> fail (Msx_lane.error_to_string e));
   let loaded = incarnation () in
@@ -1716,12 +1716,12 @@ let test_load_file_failures_are_typed () =
   in
   let directory = Filename.concat base_path "a-directory" in
   Sys.mkdir directory 0o755;
-  unreadable "a directory as the cartridge" (load (image (Msx_lane.Cartridge_file directory)));
-  unreadable "a directory as the disk" (load (image (Msx_lane.Disk_file directory)));
+  unreadable "a directory as the cartridge" (load (Msx_lane.Cartridge_file directory));
+  unreadable "a directory as the disk" (load (Msx_lane.Disk_file directory));
   let blocked = Filename.concat base_path "ledger-is-a-file" in
   Out_channel.with_open_bin blocked (fun oc -> output_string oc "not a directory");
   unreadable "a ledger directory that is a file"
-    (load ~ledger_dir:blocked Msx_lane.Bare_machine);
+    (Msx_lane.For_testing.load_bare_machine ~ledger_dir:blocked);
   check string "the loaded machine is still installed" loaded (incarnation ());
   check bool "its ledger is unchanged" true (ledger_before = Msx_lane.ledger ())
 ;;

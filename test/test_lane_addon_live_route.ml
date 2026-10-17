@@ -47,7 +47,7 @@ let with_machine f =
       Msx_lane.install_activity_observer None;
       eject_if_loaded ()) (fun () ->
       Msx_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
-      ok "load" (Lane.load ~ledger_dir ~boot:Lane.Bare_machine);
+      ok "load" (Lane.For_testing.load_bare_machine ~ledger_dir);
       f ~dir ~ledger_dir))
 
 let mark () =
@@ -126,7 +126,7 @@ let test_counter_moves_on_every_change () =
       (match Lane.live ~since:(Some { before_eject with Lane.count = c }) with
        | Lane.Nothing_loaded -> true
        | Lane.Unchanged _ | Lane.Changed _ -> false);
-    ok "reload" (Lane.load ~ledger_dir ~boot:Lane.Bare_machine);
+    ok "reload" (Lane.For_testing.load_bare_machine ~ledger_dir);
     let c = rises "eject and a new load (the count is never reused)" c in
     (* A press whose ledger write fails: the ledger file is now a directory, so
        recording the first edge fails before any frame runs, and the keys go

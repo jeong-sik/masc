@@ -4868,6 +4868,9 @@ let render_keeper_message (state : state) =
                       ("  " ^ running_mark ^ " " ^ Ansi.bold ^ progress_heading
                        ^ Ansi.reset ^ (Masc_tui_theme.tone Masc_tui_theme.Accent)
                        ^ " · " ^ text ^ queue_hint ^ fold_suffix)
+              | Keeper_chat_transcript.Diagnostic ->
+                  box_line_styled chat_buf chat_cols ~style:(Theme.recede ())
+                    ("  " ^ text)
               (* The gate and this row describe the same held call, so the
                  note rides the row that asks -- which is this one by its
                  kind now, rather than by being first among the Attention

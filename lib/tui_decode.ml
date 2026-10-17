@@ -4374,6 +4374,7 @@ type keeper_turn_preview = {
   ktp_text_tail : string;
   ktp_last_tool : string option;
   ktp_preparation : Keeper_turn_preview.preparation option;
+  ktp_preparation_timeline : Keeper_turn_preview.preparation_timeline;
   ktp_execution_scope : Keeper_execution_scope_id.t option;
 }
 
@@ -4482,9 +4483,14 @@ let decode_keeper_turn_row json =
                       | _ -> Error ("turn preview requires one " ^ key ^ " field"))
                   | _ -> Error "turn preview must be an object" in
                 let* ktp_preparation = unique_nullable "preparation" Keeper_turn_preview.preparation_of_json in
+                let* ktp_preparation_timeline = match preview_json with
+                  | `Assoc fields -> (match List.filter (fun (name,_) -> name="preparation_timeline") fields with
+                      | [_,value] -> Keeper_turn_preview.preparation_timeline_of_json value
+                      | _ -> Error "turn preview requires one preparation_timeline field")
+                  | _ -> Error "turn preview must be an object" in
                 let* ktp_execution_scope = unique_nullable "execution_scope" Keeper_execution_scope_id.of_json in
                 Ok (Some { ktp_text_position; ktp_text_tail; ktp_last_tool; ktp_status_text; ktp_updated_at_unix;
-                  ktp_preparation;ktp_execution_scope })
+                  ktp_preparation;ktp_preparation_timeline;ktp_execution_scope })
             | Some other ->
                 Error
                   (Printf.sprintf

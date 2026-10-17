@@ -1190,6 +1190,7 @@ type keeper_turn_preview = {
   ktp_last_tool : string option;
       (** Most recently observed tool request or return; not execution status. *)
   ktp_preparation : Keeper_turn_preview.preparation option;
+  ktp_preparation_timeline : Keeper_turn_preview.preparation_timeline;
   ktp_execution_scope : Keeper_execution_scope_id.t option;
 }
 

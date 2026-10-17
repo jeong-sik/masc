@@ -20,6 +20,29 @@ type preparation =
   ; state : preparation_state
   }
 
+type preparation_scope_id = private int
+type preparation_span =
+  { scope_id : preparation_scope_id
+  ; parent_scope_id : preparation_scope_id option
+  ; preparation : preparation
+  }
+(** IDs identify actual scopes within this writer, in start order. A parent
+    identifies a proven active enclosing scope in the inherited Eio fiber
+    binding, not a dependency or an ownership decision. Without that binding
+    (including non-Eio calls), no parent is asserted. IDs are meaningful only
+    with the original writer's execution scope/turn identity. *)
+
+type preparation_timeline
+val empty_preparation_timeline : preparation_timeline
+val preparation_spans : preparation_timeline -> preparation_span list
+(** Immutable start-ordered snapshot. Active scopes and completed outcomes stay
+    available after provider activity while this writer is retained. A new
+    writer starts empty; this is neither durable history nor execution authority.
+    Nested elapsed times overlap and must not be added into total latency. *)
+val preparation_timeline_of_json : Yojson.Safe.t -> (preparation_timeline, string) result
+(** Strict scope list decoder: unique increasing IDs, earlier existing parents
+    and valid preparation observations. *)
+
 type source_position = { generation : int; start_byte : int }
 (** Byte offsets in the text this writer's redactor actually released.
     Attempts and full-text replacements create a new generation. *)
@@ -37,6 +60,7 @@ type t =
   ; activity : activity
   ; last_failure : string option
   ; preparation : preparation option
+  ; preparation_timeline : preparation_timeline
   ; execution_scope : Keeper_execution_scope_id.t option
   }
 

@@ -1302,6 +1302,71 @@ let test_prepare_schema_has_no_recursive_references () =
     alternatives
 ;;
 
+let test_without_recursive_refs_matches_ref_string_not_key_order () =
+  (* Generator output that attaches sibling keywords (description, title) in
+     either key order alongside [$ref = "#/$defs/template"] must still be
+     replaced by the non-recursive placeholder, while unrelated fields and
+     non-template refs remain intact. *)
+  let schema = `Assoc
+    [ "$defs", `Assoc [ "template", `String "recursive" ]
+    ; "properties", `Assoc
+        [ "value", `Assoc
+            [ "description", `String "nested template before $ref"
+            ; "$ref", `String "#/$defs/template"
+            ]
+        ; "second", `Assoc
+            [ "$ref", `String "#/$defs/template"
+            ; "title", `String "nested template after $ref"
+            ]
+        ; "other_ref", `Assoc [ "$ref", `String "#/$defs/other" ]
+        ; "label", `String "plain string, not a ref" ]
+    ; "required", `List [ `String "value" ] ] in
+  let projected = Masc.Keeper_composition_draft.without_recursive_refs schema in
+  let member key = function
+    | `Assoc fields -> List.assoc_opt key fields
+    | _ -> None in
+  let check_placeholder name = function
+    | Some (`Assoc inner) ->
+      Alcotest.(check (option string))
+        (name ^ " $ref removed")
+        None
+        (match List.assoc_opt "$ref" inner with
+         | Some (`String s) -> Some s
+         | _ -> None);
+      Alcotest.(check (option string))
+        (name ^ " replaced by object placeholder")
+        (Some "object")
+        (match List.assoc_opt "type" inner with
+         | Some (`String s) -> Some s
+         | _ -> None)
+    | _ -> Alcotest.fail (name ^ " is not an object")
+  in
+  Alcotest.(check bool)
+    "$defs dropped from the projected schema"
+    true
+    (match member "$defs" projected with None -> true | Some _ -> false);
+  (match member "properties" projected with
+   | Some (`Assoc fields) ->
+     check_placeholder "value" (List.assoc_opt "value" fields);
+     check_placeholder "second" (List.assoc_opt "second" fields);
+     Alcotest.(check (option string))
+       "non-template $ref preserved"
+       (Some "#/$defs/other")
+       (match List.assoc_opt "other_ref" fields with
+        | Some (`Assoc inner) ->
+          (match List.assoc_opt "$ref" inner with
+           | Some (`String s) -> Some s
+           | _ -> None)
+        | _ -> None);
+     Alcotest.(check (option string))
+       "plain label field preserved"
+       (Some "plain string, not a ref")
+       (match List.assoc_opt "label" fields with
+        | Some (`String s) -> Some s
+        | _ -> None)
+   | _ -> Alcotest.fail "projected schema has no properties")
+;;
+
 let test_frozen_plan_json_preserves_values_and_rejects_mixed_forms () =
   let descriptors = Masc.Keeper_tool_descriptor.all_descriptors () in
   (* Compile fidelity, not an assertion that these fixture values are valid
@@ -1434,6 +1499,10 @@ let () =
             "prepare schema advertises no recursive references"
             `Quick
             test_prepare_schema_has_no_recursive_references
+        ; test_case
+            "without_recursive_refs matches the $ref string, not key order"
+            `Quick
+            test_without_recursive_refs_matches_ref_string_not_key_order
         ] )
     ]
 ;;

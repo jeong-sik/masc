@@ -94,8 +94,6 @@ let error_to_json = function
    Nothing is enforced by that schema -- [Tool_input_validation] reads [oneOf]
    off the top level only, and [Keeper_tool_plan_request.plan_of_json] below
    remains the one validator of the template grammar. *)
-let template_ref = `Assoc [ "$ref", `String "#/$defs/template" ]
-
 let template_placeholder =
   `Assoc
     [ "type", `String "object"
@@ -108,8 +106,14 @@ let template_placeholder =
     ]
 ;;
 
+let is_template_ref fields =
+  match List.assoc_opt "$ref" fields with
+  | Some (`String "#/$defs/template") -> true
+  | Some _ | None -> false
+;;
+
 let rec without_recursive_refs = function
-  | `Assoc _ as json when json = template_ref -> template_placeholder
+  | `Assoc fields when is_template_ref fields -> template_placeholder
   | `Assoc fields ->
     `Assoc
       (List.filter_map

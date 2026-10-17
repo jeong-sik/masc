@@ -30,6 +30,11 @@ val failure_class : error -> Tool_result.tool_failure_class
 val prepare_schema : Masc_domain.tool_schema
 val run_schema : Masc_domain.tool_schema
 
+val without_recursive_refs : Yojson.Safe.t -> Yojson.Safe.t
+(** Replace any JSON object whose ["$ref"] field is ["#/$defs/template"] with
+    the non-recursive placeholder object, regardless of sibling keywords or
+    field order, and drop ["$defs"]. *)
+
 val prepare
   :  base_path:string
   -> capability_surface:Keeper_capability_surface.t

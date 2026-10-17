@@ -806,6 +806,7 @@ let trail t =
 
 type status_kind =
   | Progress
+  | Diagnostic
   | Answer_needed
   | Attention
   | Approval of approval_outcome
@@ -822,7 +823,7 @@ type status_kind =
    operator can ask for. *)
 let status_row_survives_folding = function
   | Progress | Answer_needed -> true
-  | Attention | Approval _ -> false
+  | Diagnostic | Attention | Approval _ -> false
 
 let approval_outcome_of_string = function
   | "approve" | "approved" -> Approved
@@ -1173,15 +1174,20 @@ let awaiting_text t =
       | because -> Printf.sprintf "%s\n  because %s" base because)
     t.awaiting
 
-let preparation_status preparation =
+let preparation_phase_label phase =
   let open Masc.Keeper_turn_preview in
-  let phase = match preparation.phase with
+  match phase with
     | Task_preparation -> "Task 준비"
     | World_preparation -> "작업 맥락 조회"
     | Context_preparation -> "문맥 준비"
     | Prompt_preparation -> "프롬프트 준비"
     | Tool_preparation -> "Tool 준비"
-    | Skill_preparation -> "Skill 준비" in
+    | Skill_preparation -> "Skill 준비"
+;;
+
+let preparation_status preparation =
+  let open Masc.Keeper_turn_preview in
+  let phase = preparation_phase_label preparation.phase in
   match preparation.state with
   | Preparation_active -> Progress, "최근 확인 · " ^ phase ^ " 중"
   | Preparation_finished {outcome=Prepared;_} ->
@@ -1191,6 +1197,21 @@ let preparation_status preparation =
       | Rejected -> "거절됨" | Raised -> "실패" | Cancelled -> "취소됨"
       | Prepared -> "완료됨" in
     Attention, "최근 확인 · " ^ phase ^ " " ^ outcome
+;;
+
+let preparation_timeline_rows timeline =
+  let open Masc.Keeper_turn_preview in
+  preparation_spans timeline |> List.map (fun (span : preparation_span) ->
+    let parent = match span.parent_scope_id with
+      | None -> "" | Some id -> Printf.sprintf " ← #%d" (id :> int) in
+    let outcome = match span.preparation.state with
+      | Preparation_active -> "진행 관측"
+      | Preparation_finished {outcome;elapsed_ns;_} ->
+        let label = match outcome with
+          | Prepared -> "완료" | Rejected -> "거절" | Raised -> "실패" | Cancelled -> "취소" in
+        Printf.sprintf "%s · %.2f ms" label (Int64.to_float elapsed_ns /. 1_000_000.) in
+    Diagnostic, Printf.sprintf "준비 #%d%s · %s · %s" (span.scope_id :> int) parent
+      (preparation_phase_label span.preparation.phase) outcome)
 ;;
 
 let status_rows ?preparation ?(compact = false) ?(show_timing = true) ~now t =

@@ -591,6 +591,43 @@ Lane 참조, 세 reader 경로와 preview, 다른 준비의 개입, 새 출처 �
 실행하지 않았으며 타입·모델·TUI 화면·실제 성능 및 원래 Ask 작업 재개의 종단
 동작을 증명하지 않는다.
 
+#### 실행에 결속된 준비 단계 기록
+
+비교 기준은 `0b52ed14c0e1dbbb6c9cc5c065bda2729c475d4d`다. 기존 preview는
+현재 준비 단계 하나만 보관했다. 중첩된 자식이 끝나면 부모 표시로 복원됐고,
+provider·Tool 관측이 들어오면 준비 기록은 현재 표시에서 사라졌다. 이제 같은
+writer가 각 실제 준비 scope의 시작 순서 ID·부모 ID·원래 turn reference·상태·
+시작/종료 관측 시각·단조 시계 elapsed를 불변 Map으로 보관한다.
+
+| 조건 | As-Is | To-Be 소스 경로 |
+| --- | --- | --- |
+| 중첩 두 scope가 완료됨 | 최근 부모 하나만 남음 | 두 scope의 원래 결과·시간을 시작 순서로 보관 |
+| 병렬 형제 scope | 부모 관계 관측 없음 | Eio fiber가 상속한 같은 활성 부모로 연결; 형제를 부모로 추측하지 않음 |
+| provider 관측 뒤 준비 종료 | 최신 준비 표시를 덮어쓰지 않으며 기록은 유실 | provider 표시·활동 시각을 유지하고 해당 scope의 결과만 완성 |
+| 새 writer | 준비 표시 초기화 | 빈 단계 기록으로 시작; 이전 writer의 늦은 종료도 새 기록에 들어오지 않음 |
+| TUI 상세 | 현재 단계만 볼 수 있음 | 정확히 같은 operation 또는 자율 turn의 scope별 결과·소요 시간 표시 |
+| 원래 결과·오류·취소 | 실행으로 그대로 전달 | 같은 결과·예외·취소 유지, 관측에는 결과 종류만 기록 |
+
+scope 번호는 해당 writer 안에서 실제 시작 시 할당하며 행동 제한이나 admission
+조건이 아니다. 부모는 같은 writer의 현재 활성 Eio fiber binding으로 증명될 때만
+기록한다. non-Eio나 끝난 부모의 binding에는 부모를 주장하지 않는다. 중첩 시간은
+겹치므로 합산한 전체 latency가 아니다. 실패·취소를 성공 표본에서 제외하지 않는다.
+
+TUI는 원래 실행 ID 또는 정확한 자율 turn reference가 일치하는 현재 슬롯의
+기록만 상세 행에 연결한다. provider 이후에도 상세 기록을 읽되, 현재 진행줄은
+기존 실제 활동을 유지한다. 기본 접기와 행 수 계산은 기존 공통 projection을
+사용한다. 이름·시각으로 다른 실행을 연결하거나 journal을 새로 만들지 않는다.
+
+추가한 `preparation_timeline` wire field는 scope ID 중복·역순·누락된 부모·잘못된
+단계/clock 데이터를 엄격히 거절한다. 종료된 scope의 업데이트는 Map에서
+O(log N), 전체 직렬화·상세 투영은 N개 scope에 비례한다. 임의 이력 상한이나
+timeout은 추가하지 않았다. 추가 메모리·조회 payload·렌더 비용은 미측정이다.
+
+현재 기록은 해당 writer의 수명 동안만 유지된다. idle·다음 writer·서버 재시작을
+넘는 내구 기록, 전체 queue/provider/continuation 인과 연결, 상세에 필요한 이력만
+전달하는 조회 최적화는 남아 있다. 중첩·병렬·취소·실제 turns decoder 시나리오는
+작성했으며 실행하지 않았다. 타입·현재 통합 경로·실제 화면·성능은 미확인이다.
+
 ### 2b. 프롬프트 — 지명된 스킬 안내
 
 `task.skills`(`masc_add_task`가 지정, `lib/task/tool_task_handlers.ml`의

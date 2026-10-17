@@ -360,6 +360,14 @@ let test_preparation_scopes_are_visible_owned_and_do_not_dispatch () =
     Alcotest.(check (result string string)) "observation preserves the result" (Ok "prepared") result;
     Alcotest.(check string) "completion is recorded without implying dispatch" "prepared" (state ());
     Alcotest.(check bool) "no model attempt was invented" true ((current ()).runtime_id = None);
+    let spans = Preview.preparation_spans (current ()).preparation_timeline in
+    (match spans with
+     | [outer;inner] ->
+       Alcotest.(check bool) "nested completion keeps both original observations" true
+         (outer.preparation.phase=Preview.Tool_preparation
+          && inner.preparation.phase=Preview.Skill_preparation
+          && inner.parent_scope_id=Some outer.scope_id)
+     | _ -> Alcotest.fail "completed nested scope was lost");
     Alcotest.(check bool) "the settled scope carries its own measured span" true
       (match Yojson.Safe.Util.member "elapsed_ns" (payload ()) with `String _ -> true | _ -> false);
     ignore (scoped Preview.Tool_preparation (fun () ->
@@ -367,13 +375,18 @@ let test_preparation_scopes_are_visible_owned_and_do_not_dispatch () =
       Ok ()));
     Alcotest.(check bool) "late preparation completion cannot replace actual provider activity" true
       ((current ()).preparation = None && (current ()).activity = Preview.Awaiting_response);
+    Alcotest.(check (float 0.)) "late finish does not advance the provider activity clock" 4. (current ()).updated_at;
+    Alcotest.(check int) "provider activity retains completed preparation observations" 3
+      (List.length (Preview.preparation_spans (current ()).preparation_timeline));
     ignore (scoped Preview.Tool_preparation (fun () ->
       let successor = Some (reset name ~now:5.) in
       Preview.note_tool ~writer:successor ~now:6. "actual-tool";
       Ok ()));
     Alcotest.(check (option string)) "old writer cannot replace the successor" (Some "actual-tool")
       (current ()).last_tool;
-    Alcotest.(check bool) "successor does not inherit old preparation" true ((current ()).preparation = None))
+    Alcotest.(check bool) "successor does not inherit old preparation" true
+      ((current ()).preparation = None
+       && Preview.preparation_spans (current ()).preparation_timeline = []))
 ;;
 
 let test_preparation_error_exception_and_cancellation_keep_their_outcomes () =
@@ -403,6 +416,12 @@ let test_preparation_error_exception_and_cancellation_keep_their_outcomes () =
       (fun () -> Eio.Promise.await entered);
     Alcotest.(check string) "cancelled operation leaves a settled cancellation" "cancelled" (state ());
     let json = Preview.to_json (Option.get (Preview.current ~keeper_name:name)) in
+    let outcomes = Preview.preparation_spans
+        (Option.get (Preview.current ~keeper_name:name)).preparation_timeline
+      |> List.map (fun (span : Preview.preparation_span) -> match span.preparation.state with
+          | Preparation_active -> None | Preparation_finished {outcome;_} -> Some outcome) in
+    Alcotest.(check bool) "history retains rejection, exception and cancellation separately" true
+      (outcomes=[Some Preview.Rejected;Some Preview.Raised;Some Preview.Cancelled]);
     Alcotest.(check bool) "pre-context identity stays unknown" true
       (Yojson.Safe.Util.(json |> member "preparation" |> member "turn_ref") = `Null);
     Alcotest.(check bool) "exception and refusal text are not emitted as preparation metadata" false
@@ -410,11 +429,66 @@ let test_preparation_error_exception_and_cancellation_keep_their_outcomes () =
        || contains (Yojson.Safe.to_string json) "original refusal"))
 ;;
 
+let test_parallel_preparation_lineage_and_actual_wire () =
+  Eio_main.run (fun _ ->
+    let module Preview = Keeper_turn_preview in
+    let keeper_name = "preparation-parallel-lineage" in
+    let original = Ids.Turn_ref.make ~trace_id:"parallel-original" ~absolute_turn:3 in
+    let owned = Preview.reset ~keeper_name ~execution_scope:None ~turn_ref:(Some original)
+        ~now:0. ~redaction:Keeper_secret_redaction.empty in
+    let writer = Some owned in
+    let scoped phase operation = Preview.with_preparation ~writer ~turn_ref:(Some original) ~phase operation in
+    let a_ready,a_enter = Eio.Promise.create () in
+    let b_ready,b_enter = Eio.Promise.create () in
+    scoped Preview.World_preparation (fun () ->
+      Eio.Fiber.pair
+        (fun () -> scoped Preview.Context_preparation (fun () ->
+          Eio.Promise.resolve a_enter (); Eio.Promise.await b_ready))
+        (fun () -> scoped Preview.Skill_preparation (fun () ->
+          Eio.Promise.resolve b_enter (); Eio.Promise.await a_ready))) |> ignore;
+    let current = Option.get (Preview.current ~keeper_name) in
+    (match Preview.preparation_spans current.preparation_timeline with
+     | [parent;a;b] ->
+       Alcotest.(check bool) "parallel siblings retain the same proven fiber parent" true
+         (a.parent_scope_id=Some parent.scope_id && b.parent_scope_id=Some parent.scope_id);
+       Alcotest.(check bool) "the original turn reaches every completed observation" true
+         (List.for_all (fun (span : Preview.preparation_span) ->
+           span.preparation.turn_ref=Some original
+           && match span.preparation.state with Preparation_finished _ -> true | Preparation_active -> false)
+           [parent;a;b])
+     | _ -> Alcotest.fail "parallel scope history is incomplete");
+    let payload = Preview.to_json current in
+    let wire = `Assoc ["schema",`String "masc.keeper_turns.v1";
+      "keepers",`List [`Assoc ["keeper_name",`String keeper_name;"status",`String "ok";
+        "turn",`Assoc ["lane",`String "maintenance";"interrupt_token",`String "original-slot";
+          "started_at_unix",`Float 0.;"turn_ref",Ids.Turn_ref.to_yojson original;"preview",payload]]]] in
+    (match Tui_decode.decode_keeper_turns wire with
+     | Ok [{ktr_state=Keeper_turn_running {preview=Some decoded;_};_}] ->
+       Alcotest.(check bool) "actual turns wire retains all exact observation records" true
+         (Preview.preparation_spans decoded.ktp_preparation_timeline
+          = Preview.preparation_spans current.preparation_timeline)
+     | Ok _ -> Alcotest.fail "actual turns decoder lost the prepared scope history"
+     | Error detail -> Alcotest.fail detail);
+    let raw = Yojson.Safe.Util.member "preparation_timeline" payload in
+    let spans = Yojson.Safe.Util.to_list raw in
+    let replace field value = function
+      | `Assoc fields -> `Assoc (List.map (fun (key,old) -> key,if key=field then value else old) fields)
+      | _ -> Alcotest.fail "span was not encoded as an object" in
+    let first = List.hd spans in
+    List.iter (fun invalid -> match Preview.preparation_timeline_of_json invalid with
+      | Error _ -> () | Ok _ -> Alcotest.fail "invalid scope identity/ancestry was accepted")
+      [`Null; `List [first;first]; `List [replace "parent_scope_id" (`Int 42) first];
+       `List [replace "scope_id" (`Int (-1)) first];
+       `List [match first with `Assoc fields -> `Assoc (("scope_id",`Int 0)::fields) | _ -> first]])
+;;
+
 let () =
   Alcotest.run "keeper_turn_preview"
     [ ( "keeper-turn-preview"
       , [ Alcotest.test_case "preparation scopes are visible and keep their actual owner" `Quick
             test_preparation_scopes_are_visible_owned_and_do_not_dispatch
+        ; Alcotest.test_case "parallel scopes retain original lineage through the actual turns protocol" `Quick
+            test_parallel_preparation_lineage_and_actual_wire
         ; Alcotest.test_case "preparation errors, exceptions and cancellation retain their outcomes" `Quick
             test_preparation_error_exception_and_cancellation_keep_their_outcomes
         ; Alcotest.test_case "actual released position through turns decoder" `Quick

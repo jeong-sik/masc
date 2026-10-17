@@ -1286,7 +1286,7 @@ let test_identical_audited_upsert_still_commits () =
   List.iter (fun attempt ->
     let before = available config in
     let previous = List.hd before.goals in
-    let goal, events = match attempt () with
+    let (goal, events : Goal_store.goal * Goal_store.pending_event list) = match attempt () with
       | Ok (goal, `updated actual_previous, events) ->
           check bool "action carries the exact authoritative previous row" true
             (actual_previous = previous);

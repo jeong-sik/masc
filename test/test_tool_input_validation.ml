@@ -2545,7 +2545,7 @@ let test_composition_run_exclusive_inputs () =
   let recipe = "recipe", recipe in
   let check label expected fields =
     let args = `Assoc fields in
-    match Tool_input_validation.check_arguments ~schema:(Some schema)
+    match Tool_input_contract.check_arguments ~schema:(Some schema)
         ~name:Keeper_composition_draft.run_tool_name ~args with
     | Ok (forwarded, _) ->
         Alcotest.(check bool) label true expected;
@@ -2569,7 +2569,7 @@ let test_negated_required_group_is_a_conjunction () =
         "not", `Assoc ["required", `List [`String "a"; `String "b"]]]]] in
   List.iter (fun (names, expected) ->
     let args = `Assoc (List.map (fun name -> name, `String "present") names) in
-    let result = Tool_input_validation.check_arguments ~schema:(Some schema)
+    let result = Tool_input_contract.check_arguments ~schema:(Some schema)
         ~name:"negated-field-group" ~args in
     Alcotest.(check bool) "not(required a,b) forbids their conjunction"
       expected (Result.is_ok result))

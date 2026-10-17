@@ -1459,13 +1459,13 @@ let test_tool_exports_bind_live_incarnations () = with_fixture (fun env sw confi
     (descriptor == Keeper_lane_addon_descriptor.create unrelated);
   let before = List.length !(state.principals) in
   check bool "an unowned generation cannot invoke a visible installation" true (Result.is_error (call unrelated));
-  check int "generation refusal happens before worker dispatch" before (List.length !(state.principals));
+  check Alcotest.int "generation refusal happens before worker dispatch" before (List.length !(state.principals));
   let changed_tool = {handle.tool with input_schema=`Assoc ["type",`String "string"]} in
   let changed = Lane_addon_tool_export.create ~owner:handle.owner ~tool:changed_tool in
   check bool "a different frozen Tool object does not reuse the descriptor" false
     (descriptor == Keeper_lane_addon_descriptor.create changed);
   check bool "same generation cannot bypass current live schema validation" true (Result.is_error (call changed));
-  check int "schema refusal happens before worker dispatch" before (List.length !(state.principals));
+  check Alcotest.int "schema refusal happens before worker dispatch" before (List.length !(state.principals));
   check bool "live installation is callable" true (Result.is_ok (call handle));
   ignore (unwrap (Runtime.call_exported_tool ~config ~access ~reserved:[] ~export:handle
     ~arguments:(`Assoc ["caller", `Assoc ["kind", `String "keeper"; "name", `String "forged"]])

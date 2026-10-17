@@ -1198,14 +1198,14 @@ let test_identical_audited_upsert_still_commits () =
       | Error error -> fail (write_error_msg error) in
     let after = available config in
     check int "identical update advances the store version" (before.version + 1) after.version;
-    check string "criterion identity stays bound" completed.criterion_revision goal.criterion_revision;
+    check string "criterion identity stays bound" completed.criterion_revision goal.Goal_store.criterion_revision;
     check bool "completed phase is retained" true (goal.phase = Goal_phase.Completed);
     check (option string) "review note is retained" completed.last_review_note goal.last_review_note;
     check (option string) "review time is retained" completed.last_review_at goal.last_review_at;
     check bool "returned goal is the persisted row" true (after.goals = [goal]);
     (match events with
      | [event] ->
-         check bool "identical edit emits Updated only" true (event.kind = Goal_store.Updated);
+         check bool "identical edit emits Updated only" true (event.Goal_store.kind = Goal_store.Updated);
          check int "event witnesses this commit" after.version event.store_revision;
          check int "snapshot witnesses the same commit" after.version
            Yojson.Safe.Util.(event.payload |> member "store_version" |> to_int)

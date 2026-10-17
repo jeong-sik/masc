@@ -1216,6 +1216,7 @@ let test_the_whole_reasoning_trail_is_kept () =
 
 let kind_to_string : Transcript.status_kind -> string = function
   | Transcript.Progress -> "progress"
+  | Transcript.Diagnostic -> "diagnostic"
   | Transcript.Answer_needed -> "answer_needed"
   | Transcript.Attention -> "attention"
   | Transcript.Approval outcome ->

@@ -1754,14 +1754,14 @@ let test_preparation_manifest_retains_original_turn_and_private_boundaries () =
       (Ids.Turn_ref.to_string turn_ref)
       Yojson.Safe.Util.(public |> member "decision" |> member "skill_preparation" |> member "turn_ref" |> to_string)) rows;
   check bool "observations do not prove turn completion" false (M.is_finished_turn rows);
-  let module Scan = Masc.Server_dashboard_http_keeper_runtime_manifest_scan in
+  let module Scan = Server_dashboard_http_keeper_runtime_manifest_scan in
   let scan = List.fold_left Scan.update_runtime_manifest_scan
       (Scan.make_runtime_manifest_scan ~path ~limit:(List.length rows)
         ~scan_line_limit:(List.length rows) ~scan_scope:"test") rows in
   check int "preparation records do not count as context injection" 0 scan.context_injected_count;
   check int "the direct consumer retains actual preparation records" 2
     (Hashtbl.find scan.event_counts "skill_preparation_observed");
-  let edges = Masc.Server_dashboard_http_keeper_runtime_lens_clock_edges.clock_edge_jsons scan in
+  let edges = Server_dashboard_http_keeper_runtime_lens_clock_edges.clock_edge_jsons scan in
   check int "actual preparation clock edges survive the API projection" 2 (List.length edges);
   List.iter (fun edge -> check bool "wall-clock row timestamps do not become measured edges" true
     Yojson.Safe.Util.(member "started_at" edge = `Null && member "finished_at" edge = `Null)) edges;

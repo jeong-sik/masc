@@ -50,17 +50,22 @@ val submit_strict :
     [f]. A [Work_failed] result means [f] ran exactly once and raised;
     [Submission_failed] is reserved for executor infrastructure failure. The
     closure is never replayed inline. Cancellation is re-raised with its
-    original backtrace at both layers. *)
+    original backtrace at both layers. Entered worker cleanup is joined
+    before caller cancellation returns; blocking or protected work can
+    delay it. Pending entry is retired when cancellation wins its entry race. *)
 
 val submit_or_inline : ?weight:float -> (unit -> 'a) -> 'a
 (** Run [f] on an Executor_pool worker (a real Eio fiber under
     [Eio.Switch.run], so effect-based ops keep their handlers), or inline
-    in the current fiber when no pool is installed (tests, pre-init).
+    in the current fiber when no pool is installed (tests, pre-init), when
+    outside Eio, or when already running on the shared worker. A worker or
+    submission failure propagates without replaying [f] on the caller.
 
     Cancelling the caller also cancels a running worker's Eio context.
     Cancellation is cooperative: blocking Eio operations are interrupted,
     while CPU loops and blocking system calls must yield before stopping.
     Work still waiting for pool capacity is withdrawn without invoking [f].
+    The caller joins entered worker cleanup before returning cancellation.
 
     A nested call already running on this shared pool also runs inline. Its
     worker has a live Eio context, while submitting back to a saturated pool

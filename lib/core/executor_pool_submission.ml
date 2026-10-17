@@ -1,0 +1,29 @@
+type worker_entry = Awaiting_worker | Entered_worker | Cancelled_before_entry
+
+(* The raw executor moves work to a pool-owned cancellation context. These
+   capabilities belong to one submission, across the caller/worker domains.
+   The entry CAS decides whether there is user work whose cleanup to join. *)
+let submit pool ~weight f =
+  let entry = Atomic.make Awaiting_worker in
+  let cancelled,cancel_worker = Eio.Promise.create () in
+  let settled,settle_worker = Eio.Promise.create () in
+  let await_cancellation () =
+    let error,backtrace = Eio.Promise.await cancelled in
+    Printexc.raise_with_backtrace error backtrace
+  in
+  let invoke () =
+    Fun.protect ~finally:(fun () -> Eio.Promise.resolve settle_worker ()) (fun () ->
+      if Atomic.compare_and_set entry Awaiting_worker Entered_worker then
+        match Eio.Promise.peek cancelled with
+        | Some (error,backtrace) -> Printexc.raise_with_backtrace error backtrace
+        | None -> Eio.Fiber.first await_cancellation f
+      else await_cancellation ())
+  in
+  match Eio.Executor_pool.submit_exn pool ~weight invoke with
+  | value -> value
+  | exception (Eio.Cancel.Cancelled _ as error) ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    Eio.Promise.resolve cancel_worker (error,backtrace);
+    if not (Atomic.compare_and_set entry Awaiting_worker Cancelled_before_entry) then
+      Eio.Cancel.protect (fun () -> Eio.Promise.await settled);
+    Printexc.raise_with_backtrace error backtrace

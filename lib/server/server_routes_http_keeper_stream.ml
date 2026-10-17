@@ -3781,6 +3781,9 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
       Eio.Switch.on_release stream_sw close_stream;
       let handoff = Server_keeper_stream_handoff.create () in
       let base_path = (Mcp_server.workspace_config state).base_path in
+      let interrupt_redaction =
+        Keeper_secret_redaction.snapshot ~base_path ~keeper_name:payload.name
+      in
       (* Seqs the reconnect replay wrote to this stream. Filled by the handler
          before accepting the handoff. Its state mutex publishes this immutable
          set to the sole live sender; producers buffer throughout replay. *)
@@ -3841,7 +3844,8 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
                        ~incident_id:operation_id Interrupt_failed in
                    Log.Keeper.warn ~keeper_name:payload.name
                      "keeper_chat_interrupt incident_id=%s code=%s detail=%s"
-                     public.incident_id public.code detail;
+                     public.incident_id public.code
+                     (Keeper_secret_redaction.redact_text interrupt_redaction detail);
                    public) receipt.interrupt_error in
                  ["interactive", `Assoc [
                    "outcome", `String (match receipt.outcome with Applied -> "applied" | Stale_control -> "stale_control" | Paused -> "paused" | Replayed -> "replayed");

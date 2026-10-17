@@ -5,6 +5,7 @@ module L = Masc.Keeper_chat_event_log
 module R = Masc.Keeper_secret_redaction
 module Projection = Server_keeper_chat_agui_projection
 module Replay = Server_keeper_chat_replay
+module Autonomous = Masc.Keeper_autonomous_stream
 
 let private_secret = "orchid river seventy nine"
 let private_path = "/private/example/.masc/keepers/alpha/events"
@@ -134,10 +135,88 @@ let test_public_protocol_error_keeps_kind_without_diagnostic () =
     (E.redact_content ~redact_text:Fun.id original = original)
 ;;
 
+let rec ensure_dir path =
+  if not (Sys.file_exists path) then begin
+    ensure_dir (Filename.dirname path);
+    Unix.mkdir path 0o700
+  end
+;;
+
+let write_secret path value =
+  ensure_dir (Filename.dirname path);
+  let channel = open_out_bin path in
+  Fun.protect ~finally:(fun () -> close_out channel)
+    (fun () -> output_string channel (value ^ "\n"))
+;;
+
+let turn_error_logs since =
+  Log.Ring.recent ~since_seq:since ()
+  |> List.filter (fun (entry : Log.Ring.entry) ->
+      Astring.String.is_infix ~affix:"keeper_turn_error incident_id=" entry.message)
+;;
+
+let test_autonomous_failure_redacts_log_with_captured_snapshot () =
+  Eio_main.run @@ fun _ ->
+  with_base @@ fun base_path ->
+  let keeper_name = "autonomous-public" in
+  let turn_ref = Ids.Turn_ref.make ~trace_id:"public-autonomous-trace" ~absolute_turn:3 in
+  let secret_file = R.ssh_remote_token_file ~base_path ~keeper_name in
+  write_secret secret_file private_secret;
+  let stream = Autonomous.create ~base_path ~keeper_name ~turn_ref in
+  (* Rotation after admission cannot remove a secret from this turn's snapshot. *)
+  write_secret secret_file "replacement credential thirty seven";
+  let before = (Log.Ring.bounds ()).total - 1 in
+  Autonomous.finish stream (Autonomous.Failed ("provider rejected " ^ private_secret));
+  let logs = turn_error_logs before in
+  check int "one real autonomous diagnostic" 1 (List.length logs);
+  let diagnostic = (List.hd logs).Log.Ring.message in
+  check bool "captured exact secret stays out of operator log" false
+    (Astring.String.is_infix ~affix:private_secret diagnostic);
+  check bool "useful diagnostic survives" true
+    (Astring.String.is_infix ~affix:"provider rejected [REDACTED]" diagnostic);
+  check bool "actual turn correlates the diagnostic" true
+    (Astring.String.is_infix ~affix:(Ids.Turn_ref.to_string turn_ref) diagnostic);
+  let persisted = read_journal
+      (L.turn_journal_path ~base_dir:base_path ~keeper_name ~turn_ref) in
+  check bool "actual journal retains the safe terminal" true
+    (List.exists (fun (row : L.journaled_event) -> match row.event with
+      | E.Event_error {message} -> String.equal message E.public_error_message
+      | _ -> false) persisted);
+  List.iter (fun row -> assert_private_absent
+    (Yojson.Safe.to_string (L.journaled_event_to_json row))) persisted;
+  check bool "finished autonomous identity released" true
+    (Option.is_none (Autonomous.current ~base_path ~keeper_name));
+  Autonomous.finish stream (Autonomous.Failed "late duplicate");
+  check int "closed producer cannot log a second failure" 1
+    (List.length (turn_error_logs before))
+;;
+
+let test_autonomous_cancel_has_no_failure_diagnostic () =
+  Eio_main.run @@ fun _ ->
+  with_base @@ fun base_path ->
+  let keeper_name = "autonomous-cancel" in
+  let turn_ref = Ids.Turn_ref.make ~trace_id:"public-autonomous-cancel" ~absolute_turn:4 in
+  let stream = Autonomous.create ~base_path ~keeper_name ~turn_ref in
+  let before = (Log.Ring.bounds ()).total - 1 in
+  Autonomous.finish stream Autonomous.Cancelled;
+  check int "cancellation invents no failed-turn diagnostic" 0
+    (List.length (turn_error_logs before));
+  check bool "cancelled autonomous identity released" true
+    (Option.is_none (Autonomous.current ~base_path ~keeper_name));
+  let persisted = read_journal
+      (L.turn_journal_path ~base_dir:base_path ~keeper_name ~turn_ref) in
+  check bool "cancelled producer retains its terminal fact" true
+    (List.exists (fun (row : L.journaled_event) -> match row.event with
+      | E.Event_error _ -> true
+      | _ -> false) persisted)
+;;
+
 let () =
   run "Keeper public error boundaries"
     ["public copies",[
       test_case "terminal live/replay bytes are safe and identical" `Quick test_public_terminal_is_safe_and_matches_replay;
       test_case "real journal captures exact-secret public copies" `Quick test_public_journal_copy_redacts_captured_exact_secret;
       test_case "legacy empty error preserves a safe terminal fact" `Quick test_legacy_empty_error_has_safe_public_terminal;
-      test_case "protocol error retains typed kind and safe message" `Quick test_public_protocol_error_keeps_kind_without_diagnostic]]
+      test_case "protocol error retains typed kind and safe message" `Quick test_public_protocol_error_keeps_kind_without_diagnostic;
+      test_case "autonomous failure log keeps captured exact secrets private" `Quick test_autonomous_failure_redacts_log_with_captured_snapshot;
+      test_case "autonomous cancellation has no failed-turn diagnostic" `Quick test_autonomous_cancel_has_no_failure_diagnostic]]

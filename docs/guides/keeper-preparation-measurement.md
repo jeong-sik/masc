@@ -155,8 +155,17 @@ Publication uses the existing best-effort runtime manifest store and retention.
 There is no per-scope write or history scan added to the default turns poll.
 Report publication cost is additional and unmeasured. Saved reports can outlive
 their live writer, but append failure and process exit before publication remain
-coverage gaps. Completed-turn TUI selection and standalone entry identity are
-not connected by this change. Source scenarios were authored, not executed.
+coverage gaps. The expanded TUI now reads the selected completed journal's
+existing runtime trace using its original turn reference and, for direct/batched
+operations, its actual execution ID. Autonomous failure/cancellation needs no
+reply receipt. A direct failure without its reply turn reference stays explicitly
+unlinked. Partial scans, omitted rows, unknown records and duplicate report IDs
+remain observation gaps. Saved active scopes describe the capture, not a current
+running task. Same-journal revision reuse and request capabilities prevent repeated
+frame reads and late selection responses; workspace retirement/explicit refresh
+discard that state. JSON and report decoding run outside the render domain.
+Standalone identity, complete paging and matched performance remain follow-ups.
+Source scenarios were authored, not executed.
 
 The isolated preparation trial's stage journal is experiment evidence, not a
 runtime cache observation. Runtime Skill preparation now emits

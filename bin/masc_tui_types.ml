@@ -7265,6 +7265,7 @@ type state = {
   mutable keeper_turns: Tui_decode.keeper_turn_row list;
   mutable keeper_turns_error: string option;
   mutable keeper_turns_inflight: bool;
+  mutable msg_preparation_details: Masc_tui_preparation_details.t;
   mutable keeper_observed_interrupts: observed_interrupt list;
   mutable keeper_run_next_inflight: Masc_tui_keeper_chat_projection.request list;
   mutable keeper_run_next_retired: Masc_tui_keeper_chat_projection.request list;
@@ -8432,6 +8433,7 @@ let suspend_workspace_readings state =
   state.lane_runs_loading <- false;
   state.schedule_wake_history_inflight <- None;
   state.keeper_turns_inflight <- false;
+  state.msg_preparation_details <- Masc_tui_preparation_details.empty;
   state.keeper_calls_loading <- false;
   state.keeper_calls_refresh_pending <- false;
   state.msg_file_changes_loading <- false;
@@ -11418,6 +11420,7 @@ let create_state
   keeper_turns = [];
   keeper_turns_error = None;
   keeper_turns_inflight = false;
+  msg_preparation_details = Masc_tui_preparation_details.empty;
   keeper_observed_interrupts = [];
   keeper_run_next_inflight = [];
   keeper_run_next_retired = [];
@@ -15219,7 +15222,7 @@ let keeper_message_uncovered_preparation state ~keeper_name transcript =
 
 (* History is tied to the same actual slot as live preparation. Provider
    activity supersedes the live phase, but does not hide completed diagnostics. *)
-let keeper_message_preparation_timeline (state : state) transcript =
+let keeper_message_preparation_owner (state : state) transcript =
   let module Transcript = Masc_tui_keeper_chat_transcript in
   if Option.is_some state.keeper_turns_error then None
   else
@@ -15238,20 +15241,16 @@ let keeper_message_preparation_timeline (state : state) transcript =
                 (Option.fold ~none:[] ~some:Masc.Keeper_turn_preview.preparation_spans preview.ktp_preparation_timeline)
             | Operation _, (Turn_lane_autonomous | Turn_lane_maintenance)
             | Autonomous_turn _, Turn_lane_chat_operation -> false in
-          if same_execution then preview.ktp_preparation_timeline else None
+          if same_execution then Some preview else None
         | Keeper_turn_running {preview=None;_} | Keeper_turn_idle | Keeper_turn_unavailable _ -> None)
       state.keeper_turns in
     match candidates with [timeline] -> Some timeline | [] | _::_::_ -> None
 ;;
 
-let keeper_message_unfolded_status_rows (state : state) live ~now =
-  Masc_tui_keeper_chat_transcript.status_rows
-    ?preparation:(keeper_message_preparation state live)
-    ~compact:(state.msg_origin_display = Masc_tui_message_layout.Origin_bare)
-    ~show_timing:(keeper_message_timing_visible state) ~now live
-  @ (match keeper_message_preparation_timeline state live with
-     | Some timeline -> Masc_tui_keeper_chat_transcript.preparation_timeline_rows timeline
-     | None -> [])
+let keeper_message_preparation_timeline state transcript =
+  Option.bind (keeper_message_preparation_owner state transcript)
+    (fun preview -> preview.Tui_decode.ktp_preparation_timeline)
+;;
 
 (* The most recently submitted input can be queued behind the execution that
    is streaming. Status follows the selected execution, including a journal
@@ -15296,6 +15295,65 @@ let keeper_message_status_log (state : state) =
                List.find_opt (fun log ->
                  Masc_tui_keeper_chat_transcript.awaiting_continuation log.tl_transcript
                  && not (observed_log_is_unavailable state log)) logs)
+
+let keeper_message_preparation_selection (state : state) =
+  let module Transcript = Masc_tui_keeper_chat_transcript in
+  if state.view <> Keepers Keeper_message || state.msg_turn_folded then None
+  else match keeper_message_status_log state with
+    | None -> None
+    | Some log ->
+      let transcript = log.tl_transcript in
+      match Transcript.phase transcript with
+      | Waiting | Working -> None
+      | Stream_ended | Stream_failed _ ->
+        if Option.is_some (keeper_message_preparation_owner state transcript) then None
+        else Some (transcript, Masc_tui_preparation_details.target ~journal:log.tl_log
+          ~execution_id:(Transcript.execution_id transcript)
+          ~reply_turn_ref:(Option.map (fun reply -> reply.Transcript.reply_turn_ref) (Transcript.reply transcript)))
+;;
+
+let keeper_message_saved_preparation_rows state live =
+  let module Details = Masc_tui_preparation_details in
+  let module Transcript = Masc_tui_keeper_chat_transcript in
+  let row text = Transcript.Diagnostic, text in
+  let issue = function
+    | Details.Partial_scan -> "조회한 저널 범위가 일부임"
+    | Partial_return -> "반환된 기록이 일부임"
+    | Missing_manifest -> "저장 저널이 확인되지 않음"
+    | Unsupported_rows count -> Printf.sprintf "지원하지 않는 기록 %d개" count
+    | Invalid_rows count -> Printf.sprintf "읽을 수 없는 기록 %d개" count
+    | Invalid_report _ -> "읽을 수 없는 준비 보고서"
+    | Duplicate_report id -> "중복된 준비 보고서 · " ^ id
+    | Unlinked_report -> "실행 연결이 없는 준비 보고서" in
+  match keeper_message_preparation_selection state with
+  | Some (selected, result) when selected == live ->
+    (match result with
+     | Error detail -> [row ("준비 기록 연결 불가 · " ^ detail)]
+     | Ok target ->
+       match Details.view target state.msg_preparation_details with
+       | Details.Not_loaded -> [row "저장된 준비 기록 조회 대기"]
+       | Loading -> [row "저장된 준비 기록 조회 중"]
+       | Failed detail -> [row ("준비 기록 조회 실패 · " ^ detail)]
+       | Loaded snapshot ->
+         List.map (fun value -> row ("준비 관측 범위 · " ^ issue value)) snapshot.issues
+         @ (if snapshot.reports=[] then [row "이 작업의 저장된 준비 기록이 확인되지 않음"]
+            else List.concat_map (fun (report : Masc.Keeper_preparation_runtime_observation.report) ->
+              let boundary = match report.boundary with
+                | Returned -> "반환 시점" | Raised -> "예외 시점" | Cancelled -> "취소 시점" in
+              row ("저장된 준비 · " ^ boundary ^ " · " ^ report.report_id)
+              :: Transcript.preparation_timeline_rows ~archived:true report.timeline) snapshot.reports))
+  | Some _ | None -> []
+;;
+
+let keeper_message_unfolded_status_rows (state : state) live ~now =
+  Masc_tui_keeper_chat_transcript.status_rows
+    ?preparation:(keeper_message_preparation state live)
+    ~compact:(state.msg_origin_display = Masc_tui_message_layout.Origin_bare)
+    ~show_timing:(keeper_message_timing_visible state) ~now live
+  @ (match keeper_message_preparation_timeline state live with
+     | Some timeline -> Masc_tui_keeper_chat_transcript.preparation_timeline_rows timeline
+     | None -> [])
+  @ keeper_message_saved_preparation_rows state live
 
 let keeper_message_visible_status_rows (state : state) live ~now =
   let rows = keeper_message_unfolded_status_rows state live ~now in

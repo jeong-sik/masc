@@ -6057,6 +6057,12 @@
  (modules test_tui_keeper_call_evidence)
  (libraries alcotest masc masc.tool_types masc_tui_keeper_call_evidence masc_tui_keeper_chat_transcript yojson))
 
+(test
+ (name test_tui_preparation_details)
+ (modules test_tui_preparation_details)
+ (libraries alcotest masc masc.server eio_main masc_tui_preparation_details
+  masc_tui_keeper_chat_log masc_tui_keeper_chat_live masc_tui_keeper_chat_transcript uri yojson))
+
 ; Shared synthetic CLI bytes; no Alcotest top-level is imported by the driver.
 (test
  (name test_keeper_prepared_edit)

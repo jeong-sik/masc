@@ -1,5 +1,11 @@
-let source = {|import atexit, csv, hashlib, json, pathlib, sys, time
+let source = {|import atexit, csv, fcntl, hashlib, json, os, pathlib, sys, time
 root = pathlib.Path(__file__).parent
+# Concurrent invocations (worker fibers run docker peers in parallel) read,
+# modify and write one shared state file. Serialize that critical section with
+# a lock held until exit, except while an invocation deliberately blocks
+# waiting for a release file, and publish the state file atomically.
+lock_fd = os.open(str(root / "daemon.lock"), os.O_CREAT | os.O_RDWR, 0o600)
+fcntl.flock(lock_fd, fcntl.LOCK_EX)
 def transport_event(kind):
     with (root / "transport-events.jsonl").open("a") as output:
         output.write(json.dumps({"event": kind, "argv": sys.argv[1:]}) + "\n")
@@ -12,7 +18,9 @@ control = json.loads(control_path.read_text()) if control_path.exists() else {}
 argv = sys.argv[1:]
 state["calls"].append(argv)
 def save():
-    state_path.write_text(json.dumps(state))
+    scratch = state_path.with_name("daemon.json.%d" % os.getpid())
+    scratch.write_text(json.dumps(state))
+    os.replace(scratch, state_path)
 save()
 args = list(argv)
 while args and args[0] in ("--config", "--host"):
@@ -69,8 +77,10 @@ elif args[:2] == ["container", "ls"]:
         assert cli.stat().st_mode & 0o777 == 0o700
         if control.get("presence_blocked"):
             (root / "presence-entered").write_text(str(cli))
+            fcntl.flock(lock_fd, fcntl.LOCK_UN)
             while not (root / "presence-release").exists():
                 time.sleep(0.01)
+            fcntl.flock(lock_fd, fcntl.LOCK_EX)
     if shared and control.get("presence_unavailable"):
         print("synthetic shared presence transport failure", file=sys.stderr)
         sys.exit(26)
@@ -148,8 +158,10 @@ elif args[:2] == ["container", "inspect"]:
     if (control.get("mode") == "inspect_blocked"
             and container["Config"]["Labels"]["masc.mcp.owned_job"] == control.get("blocked_job_id")):
         (root / "inspect-entered").write_text(args[2])
+        fcntl.flock(lock_fd, fcntl.LOCK_UN)
         while not (root / "inspect-release").exists():
             time.sleep(0.01)
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
     if control.get("corrupt") == "mount":
         container["Mounts"][0]["Source"] = "/different/unowned/workspace"
     elif control.get("corrupt") == "label":
@@ -167,6 +179,7 @@ elif args[:2] == ["container", "start"]:
     save()
     if control.get("mode") == "start_blocked":
         (root / "start-entered").write_text(args[2])
+        fcntl.flock(lock_fd, fcntl.LOCK_UN)
         while True:
             time.sleep(1)
     print(container_id)
@@ -188,6 +201,7 @@ elif args[:2] == ["container", "kill"]:
     assert state["container"] is not None and args[2] == state["container"]["Id"]
     if control.get("mode") == "kill_blocked":
         (root / "kill-entered").write_text(args[2])
+        fcntl.flock(lock_fd, fcntl.LOCK_UN)
         while True:
             time.sleep(1)
     state["container"]["State"].update(Status="exited", Running=False, ExitCode=137)

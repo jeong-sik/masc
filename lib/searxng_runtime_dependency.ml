@@ -15,6 +15,7 @@ let default_url = Masc_network_defaults.searxng_published_url
    search accepts. *)
 let probe_query = "masc"
 let probe_timeout_sec = 5
+let probe_max_response_bytes = 262144
 
 (* The same bound [Sandbox_readiness] puts on its own [docker info]: a Docker
    that is wedged answers late or never, and a catalog print asks it up to four
@@ -27,7 +28,11 @@ let capture argv =
   | Ok (Unix.WEXITED 0, stdout, _) -> Ok stdout
   | Ok ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _, _) | Error _ -> Error ()
 
-let get url = Tool_local_runtime_http.http_get_text_with_status ~timeout_sec:probe_timeout_sec url
+let get url =
+  Tool_local_runtime_http.http_get_text_with_status
+    ~timeout_sec:probe_timeout_sec
+    ~max_response_bytes:probe_max_response_bytes
+    url
 
 let docker_up ~run =
   match run [ "docker"; "info"; "--format"; "{{.ServerVersion}}" ] with
@@ -66,7 +71,10 @@ let endpoint_of ~get url =
   match get search with
   | Ok (Some 200, body) ->
     (match Yojson.Safe.from_string body with
-     | `Assoc fields when List.mem_assoc "results" fields -> Answers
+     | `Assoc fields
+       when List.mem_assoc "results" fields
+            && List.mem_assoc "query" fields
+            && List.mem_assoc "unresponsive_engines" fields -> Answers
      | _ | (exception Yojson.Json_error _) -> Refuses_json)
   | Ok (Some 403, _) -> Refuses_json
   | Ok _ | Error _ -> Unreachable

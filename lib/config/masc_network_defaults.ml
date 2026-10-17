@@ -228,9 +228,12 @@ let vite_dev_default_origins =
 (** Default port for SearXNG local search. *)
 let searxng_default_port = 8888
 
-(** Default URL for SearXNG. *)
+(* The default names what masc itself publishes ([searxng_published_host]):
+   [localhost] may resolve to [::1] first, where a different program can
+   answer on the same port (#43181 item 7). An instance that only listens on
+   [::1] needs an explicit URL. *)
 let searxng_default_url =
-  Printf.sprintf "http://localhost:%d" searxng_default_port
+  Printf.sprintf "http://127.0.0.1:%d" searxng_default_port
 
 (** The host address the SearXNG container is published on. An address and
     not [localhost], which can name [::1] first: a program listening on

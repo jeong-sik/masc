@@ -26,8 +26,12 @@ Commands:
   stop           Stop the container without removing it.
 
 Environment:
-  MASC_SEARXNG_URL          URL MASC should use. Defaults to http://localhost:8888.
-  MASC_SEARXNG_CONFIG_DIR   Config directory. Defaults to $MASC_BASE_PATH/.local/share/masc-searxng.
+  MASC_SEARXNG_URL          URL MASC should use. Defaults to http://127.0.0.1:8888.
+  MASC_SEARXNG_CONFIG_DIR   Config directory. Defaults to $XDG_DATA_HOME/masc-searxng,
+                            else $HOME/.local/share/masc-searxng. Host-global on
+                            purpose: the container name and published port are
+                            global, so a per-workspace directory would leave a
+                            second workspace starting the first one's container.
   MASC_SEARXNG_PORT         Host port. Defaults to 8888.
   MASC_SEARXNG_CONTAINER    Container name. Defaults to masc-searxng.
   MASC_SEARXNG_IMAGE        Docker image. Defaults to searxng/searxng:latest.
@@ -39,17 +43,21 @@ die() {
   exit 1
 }
 
-# Only `start` reads the config directory, so the other commands run
-# without MASC_BASE_PATH.
+# Only `start` reads the config directory. It is host-global (XDG data
+# home): the container name and published port are global, so a
+# per-workspace directory would leave a second workspace starting the first
+# one's container (#43181 item 6).
 config_dir() {
-  local named="${MASC_SEARXNG_CONFIG_DIR:-}" base="${MASC_BASE_PATH:-}"
+  local named="${MASC_SEARXNG_CONFIG_DIR:-}" xdg="${XDG_DATA_HOME:-}" home="${HOME:-}"
   # A value of only spaces names nothing.
   if [ -n "${named//[[:space:]]/}" ]; then
     printf '%s\n' "$named"
-  elif [ -n "${base//[[:space:]]/}" ]; then
-    printf '%s\n' "$base/.local/share/masc-searxng"
+  elif [ -n "${xdg//[[:space:]]/}" ]; then
+    printf '%s\n' "$xdg/masc-searxng"
+  elif [ -n "${home//[[:space:]]/}" ]; then
+    printf '%s\n' "$home/.local/share/masc-searxng"
   else
-    die "MASC_SEARXNG_CONFIG_DIR or MASC_BASE_PATH is required"
+    die "MASC_SEARXNG_CONFIG_DIR is required (no XDG_DATA_HOME or HOME to default from)"
   fi
 }
 
@@ -58,7 +66,9 @@ require_docker() {
 }
 
 searxng_url() {
-  printf '%s\n' "${MASC_SEARXNG_URL:-http://localhost:$PORT}"
+  # 127.0.0.1 and not localhost: localhost may resolve to ::1 first, where a
+  # different program can answer on the same port (#43181 item 7).
+  printf '%s\n' "${MASC_SEARXNG_URL:-http://127.0.0.1:$PORT}"
 }
 
 generate_secret() {
@@ -82,6 +92,10 @@ ensure_settings() {
   mkdir -p "$CONFIG_DIR"
   local secret
   secret="$(generate_secret)"
+  # This body must stay byte-equal to Sandbox_prerequisites.searxng_settings
+  # for the same key (a test pins it). No server.bind_address/port: the image
+  # execs granian, which binds from GRANIAN_HOST/GRANIAN_PORT, and those two
+  # settings only apply to a direct `python searx/webapp.py` run (#43181).
   cat >"$settings" <<EOF
 use_default_settings: true
 
@@ -91,8 +105,6 @@ search:
     - json
 
 server:
-  bind_address: "0.0.0.0"
-  port: $CONTAINER_PORT
   limiter: false
   secret_key: "$secret"
 EOF
@@ -120,10 +132,15 @@ cmd_start() {
       echo "[searxng-local] started existing container: $CONTAINER"
     fi
   else
+    # Hardening measured 2026-10-17 on the pinned image: boots, /healthz
+    # 200, /search answers, with both flags. The entrypoint chowns its mounts
+    # (ignored noise on this read-only one) and execs granian as the same uid.
     docker run \
       --name "$CONTAINER" \
       -d \
       --restart unless-stopped \
+      --cap-drop ALL \
+      --security-opt no-new-privileges:true \
       -p "$HOST:$PORT:$CONTAINER_PORT" \
       -v "$CONFIG_DIR:/etc/searxng:ro" \
       "$IMAGE" >/dev/null

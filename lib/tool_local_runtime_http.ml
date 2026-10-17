@@ -246,8 +246,8 @@ let http_get_text_with_status_with_headers ?timeout_sec ?headers ?follow_redirec
   | Error failure -> Error (transport_failure_to_string ~url failure)
   | Ok response -> Ok (response.http_status, response.body)
 
-let http_get_text_with_status ?timeout_sec url =
-  http_get_text_with_status_with_headers ?timeout_sec url
+let http_get_text_with_status ?timeout_sec ?max_response_bytes url =
+  http_get_text_with_status_with_headers ?timeout_sec ?max_response_bytes url
 
 let http_get_json_with_status ?(timeout_sec = default_timeout_sec) url =
   match http_get_text_with_status ~timeout_sec url with

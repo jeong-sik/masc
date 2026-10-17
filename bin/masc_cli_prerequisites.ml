@@ -4,6 +4,28 @@ module Apple = Masc.Apple_container_install
 module Docker = Masc.Docker_desktop_install
 type action = Standard of Prerequisites.action | Verified_apple_install
   | Verified_docker_install | Verified_docker_launch
+(* The SearXNG settings directory is host-global: the container name and the
+   published port are global, so a per-workspace directory would leave a
+   second workspace starting the first one's container, with the first one's
+   key (#43181 item 6). The chain matches scripts/searxng-local.sh: an
+   explicit directory, the XDG data home, $HOME/.local/share, and finally
+   this workspace's directory when the host names no home at all. *)
+let searxng_config_dir ~base_path () =
+  let nonempty = function
+    | Some value when String.trim value <> "" -> Some (String.trim value)
+    | _ -> None in
+  let explicit = nonempty (Sys.getenv_opt "MASC_SEARXNG_CONFIG_DIR") in
+  let under_data_home data_home = Filename.concat data_home "masc-searxng" in
+  let xdg = Option.map under_data_home (nonempty (Sys.getenv_opt "XDG_DATA_HOME")) in
+  let home =
+    Option.map
+      (fun home -> under_data_home (Filename.concat home ".local/share"))
+      (nonempty (Sys.getenv_opt "HOME")) in
+  match explicit, xdg, home with
+  | Some dir, _, _ | None, Some dir, _ | None, None, Some dir -> dir
+  | None, None, None ->
+    let base_path = Env_config.normalize_masc_base_path_input (base_path ()) in
+    Filename.concat (Common.masc_dir_from_base_path ~base_path) Common.searxng_dirname
 let dependency ~base_path = function
   | "codex" -> Some Prerequisites.Codex_cli
   | "claude-code" -> Some Prerequisites.Claude_cli
@@ -17,11 +39,7 @@ let dependency ~base_path = function
   | "geckodriver" -> Some Prerequisites.Geckodriver
   | "firefox" -> Some Prerequisites.Firefox
   | "searxng" ->
-    (* A directory of this workspace, next to the browser lane's: the file in
-       it is mounted into the container and holds its generated key. *)
-    let base_path = Env_config.normalize_masc_base_path_input (base_path ()) in
-    Some (Prerequisites.Searxng
-            { config_dir = Filename.concat (Common.masc_dir_from_base_path ~base_path) Common.searxng_dirname })
+    Some (Prerequisites.Searxng { config_dir = searxng_config_dir ~base_path () })
   | name -> Option.map (fun backend -> Prerequisites.Sandbox backend) (Sandbox.backend_of_id name)
 
 (* Where a downloaded model lands. A cache directory rather than anywhere under

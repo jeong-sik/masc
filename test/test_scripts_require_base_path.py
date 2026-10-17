@@ -379,16 +379,21 @@ class SearxngLocal(Workdir):
         docker.chmod(0o755)
 
     def test_start_stops_when_no_config_folder_is_named(self):
-        result = self.run_shell(self.SCRIPT, "start")
+        result = self.run_shell(self.SCRIPT, "start", XDG_DATA_HOME="", HOME="")
         self.assertEqual(result.returncode, 1, result.stderr)
-        self.assertIn("MASC_SEARXNG_CONFIG_DIR or MASC_BASE_PATH is required", result.stderr)
+        self.assertIn("MASC_SEARXNG_CONFIG_DIR is required", result.stderr)
         self.assertEqual(list(self.home.iterdir()), [])
 
-    def test_start_writes_settings_under_the_named_base(self):
-        base = self.root / "base"
-        result = self.run_shell(self.SCRIPT, "start", base=base)
+    def test_start_defaults_to_the_host_global_data_home(self):
+        xdg = self.root / "xdg"
+        result = self.run_shell(self.SCRIPT, "start", XDG_DATA_HOME=str(xdg))
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertTrue((base / ".local/share/masc-searxng/settings.yml").is_file())
+        self.assertTrue((xdg / "masc-searxng/settings.yml").is_file())
+
+    def test_start_falls_back_to_home_local_share(self):
+        result = self.run_shell(self.SCRIPT, "start", XDG_DATA_HOME="")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((self.home / ".local/share/masc-searxng/settings.yml").is_file())
 
     def test_a_named_config_folder_needs_no_base(self):
         config = self.root / "searxng"
@@ -396,17 +401,19 @@ class SearxngLocal(Workdir):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue((config / "settings.yml").is_file())
 
-    def test_a_named_config_folder_wins_over_the_base(self):
-        base, config = self.root / "base", self.root / "searxng"
-        result = self.run_shell(self.SCRIPT, "start", base=base, MASC_SEARXNG_CONFIG_DIR=str(config))
+    def test_a_named_config_folder_wins_over_the_defaults(self):
+        xdg, config = self.root / "xdg", self.root / "searxng"
+        result = self.run_shell(
+            self.SCRIPT, "start", XDG_DATA_HOME=str(xdg), MASC_SEARXNG_CONFIG_DIR=str(config))
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue((config / "settings.yml").is_file())
-        self.assertFalse(base.exists())
+        self.assertFalse(xdg.exists())
+        self.assertEqual(list(self.home.iterdir()), [])
 
-    def test_a_base_of_only_spaces_names_nothing(self):
-        result = self.run_shell(self.SCRIPT, "start", base="  ")
+    def test_a_default_of_only_spaces_names_nothing(self):
+        result = self.run_shell(self.SCRIPT, "start", XDG_DATA_HOME="  ", HOME="")
         self.assertEqual(result.returncode, 1, result.stderr)
-        self.assertIn("MASC_SEARXNG_CONFIG_DIR or MASC_BASE_PATH is required", result.stderr)
+        self.assertIn("MASC_SEARXNG_CONFIG_DIR is required", result.stderr)
         self.assertEqual([p.name for p in self.root.iterdir() if p.name not in ("home", "stubs", "bin")], [])
 
     def test_the_other_commands_need_no_base(self):

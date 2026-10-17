@@ -129,10 +129,12 @@ val curl_get_argv_for_test :
 
 val http_get_text_with_status :
   ?timeout_sec:int ->
+  ?max_response_bytes:int ->
   string ->
   ((int option * string), string) Result.t
 (** [http_get_text_with_status] is
-    {!http_get_text_with_status_with_headers} with no extra headers. *)
+    {!http_get_text_with_status_with_headers} with no extra headers.
+    [max_response_bytes], when set, asks curl to cap the response. *)
 
 val http_get_json_with_status :
   ?timeout_sec:int ->

@@ -4,13 +4,17 @@
 
 type endpoint =
   | Answers
-      (** [GET /search?q=...&format=json] answered 200 with a JSON object that
-          has [results]. The list may be empty: engines that fail make a
-          search find nothing without making the endpoint unavailable. *)
+      (** [GET /search?q=...&format=json] answered 200 with a SearXNG search
+          envelope: a JSON object carrying [results], [query] and
+          [unresponsive_engines]. The list may be empty, and engines may be
+          listed unresponsive: engines that fail make a search find nothing
+          without making the endpoint unavailable. A body with none of that
+          shape is another program answering on the same address. *)
   | Refuses_json
-      (** The endpoint answered and does not serve JSON: a 403 (the format is
-          not enabled in settings.yml) or a body that is not a result object.
-          masc asks for JSON, so this instance is of no use to it. *)
+      (** The endpoint answered and does not serve SearXNG JSON: a 403 (the
+          format is not enabled in settings.yml) or a body without the
+          search envelope. masc asks for JSON, so this instance is of no
+          use to it. *)
   | Unreachable  (** Nothing answered, or the answer was not HTTP 200. *)
 
 type check = {
@@ -26,6 +30,12 @@ val default_url : string
     [localhost]: a program listening on [::1] at the same port answers
     [localhost] and the container does not. A caller that points masc at the
     instance names this address. *)
+
+val probe_max_response_bytes : int
+(** Response cap for one endpoint look: 256 KiB, against a measured full
+    first page of about 18 KiB (2026-10-17, 21 results). A squatter
+    answering megabytes on the probed address must not fill memory per
+    look. *)
 
 val container :
   ?run:(string list -> (string, unit) result) ->
@@ -44,7 +54,10 @@ val observe :
     a command that did not exit 0 or did not start; [get] is an HTTP GET with
     the status. Both default to the real ones, so a test answers them. [url]
     defaults to {!default_url}. The endpoint is probed whether or not Docker
-    answers: an instance run some other way counts. *)
+    answers: an instance run some other way counts. Each look costs one real
+    upstream search against the endpoint, capped at
+    {!probe_max_response_bytes} bytes; a catalog print pays it once and a
+    post-start receipt pays it per look. *)
 
 val available : check -> bool
 (** [endpoint = Answers]. *)

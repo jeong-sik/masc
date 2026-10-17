@@ -709,7 +709,10 @@ let test_searxng_settings_turn_json_on_and_hold_the_key () =
   check bool "html stays" true (String_util.contains_substring text "    - html");
   check bool "limiter off" true (String_util.contains_substring text "limiter: false");
   check bool "the key is the one given" true (String_util.contains_substring text "secret_key: \"k-123\"");
-  check bool "the container's own port" true (String_util.contains_substring text "port: 8080")
+  (* granian binds from its own environment; these two settings only apply to
+     a direct `python searx/webapp.py` run, so they are not written. *)
+  check bool "no bind_address: granian binds from GRANIAN_HOST" false (String_util.contains_substring text "bind_address");
+  check bool "no port line: granian binds from GRANIAN_PORT" false (String_util.contains_substring text "port:")
 
 let test_searxng_writes_the_settings_once_and_keeps_an_edit () =
   let dir = Filename.temp_dir "masc-searxng-" "" in
@@ -727,6 +730,7 @@ let test_searxng_writes_the_settings_once_and_keeps_an_edit () =
   check (list (list string)) "pull, then run"
     [ ["docker";"pull";P.searxng_image]
     ; ["docker";"run";"--detach";"--name";"masc-searxng";"--restart";"unless-stopped";
+       "--cap-drop";"ALL";"--security-opt";"no-new-privileges:true";
        "--publish";"127.0.0.1:8888:8080";"--volume";config_dir ^ ":/etc/searxng:ro";P.searxng_image] ]
     (List.rev !calls);
   (* An operator's edit survives the next run, and the key does not change. *)
@@ -766,7 +770,7 @@ let test_searxng_readiness_reads_docker_container_and_endpoint () =
     | "docker" :: "info" :: _ -> Ok "29.4.3"
     | "docker" :: "inspect" :: _ -> (match status with Some s -> Ok (s ^ "\n") | None -> Error ())
     | _ -> Error () in
-  let answers = fun _ -> Ok (Some 200, {|{"query":"masc","results":[]}|}) in
+  let answers = fun _ -> Ok (Some 200, {|{"query":"masc","results":[],"unresponsive_engines":[]}|}) in
   let check_of ?(run = run_up (Some "running")) ?(get = answers) () = R.observe ~run ~get () in
   let c = check_of () in
   check bool "docker" true c.docker;
@@ -796,6 +800,12 @@ let test_searxng_readiness_reads_docker_container_and_endpoint () =
     ((check_of ~get:(fun _ -> Ok (Some 200, "<html></html>")) ()).endpoint = R.Refuses_json);
   check bool "a JSON object without results is not an answer" true
     ((check_of ~get:(fun _ -> Ok (Some 200, {|{"error":"nope"}|})) ()).endpoint = R.Refuses_json);
+  check bool "results without the envelope is another program answering" true
+    ((check_of ~get:(fun _ -> Ok (Some 200, {|{"results":[]}|})) ()).endpoint = R.Refuses_json);
+  check bool "dead engines still answer: the endpoint serves" true
+    ((check_of ~get:(fun _ -> Ok (Some 200, {|{"query":"masc","results":[],"unresponsive_engines":[["brave","suspended"]]}|})) ())
+       .endpoint
+     = R.Answers);
   check bool "another status is unreachable" true
     ((check_of ~get:(fun _ -> Ok (Some 500, "")) ()).endpoint = R.Unreachable);
   check bool "a transport failure is unreachable" true
@@ -805,6 +815,8 @@ let test_searxng_readiness_reads_docker_container_and_endpoint () =
   check string "asks the address the container is published on, for JSON"
     "http://127.0.0.1:8888/search?q=masc&format=json" !asked;
   check string "the address is the published one" "http://127.0.0.1:8888" R.default_url;
+  check string "the default URL names the published address, not localhost"
+    "http://127.0.0.1:8888" Masc_network_defaults.searxng_default_url;
   let unusable = R.to_json (check_of ~run:(run_up (Some "dead")) ()) in
   check bool "the container word is a closed one" true
     (Yojson.Safe.Util.member "container" unusable = `String "unusable");
@@ -893,7 +905,8 @@ let test_searxng_waits_for_a_container_that_is_still_starting () =
   let looks = ref 0 and sleeps = ref 0 in
   let run = fun _ -> Error () in
   let get = fun _ -> incr looks;
-    if !looks < 3 then Error "curl exit 7" else Ok (Some 200, {|{"results":[]}|}) in
+    if !looks < 3 then Error "curl exit 7"
+    else Ok (Some 200, {|{"query":"masc","results":[],"unresponsive_engines":[]}|}) in
   let c = R.wait_until_available ~attempts:10 ~pause_sec:0.0 ~sleep:(fun _ -> incr sleeps) ~run ~get () in
   check bool "answered" true (R.available c);
   check int "three looks" 3 !looks;
@@ -904,6 +917,46 @@ let test_searxng_waits_for_a_container_that_is_still_starting () =
   check bool "gave up" false (R.available never);
   check int "bounded looks" 4 !looks;
   check int "no sleep after the last look" 3 !sleeps
+
+let test_searxng_settings_match_the_helper_script () =
+  (* scripts/searxng-local.sh predates the catalog and writes its own copy of
+     the settings body (#43181 item 1). The two spellings must stay
+     byte-equal for the same key; this test reads the script's heredoc and
+     compares it against the catalog text. *)
+  let script =
+    Filename.concat (Masc_test_deps.find_project_root ()) "scripts/searxng-local.sh" in
+  let lines = String.split_on_char '\n' (read script) in
+  let rec heredoc = function
+    | line :: rest when String.trim line = "cat >\"$settings\" <<EOF" ->
+      let rec take acc = function
+        | [] -> fail "searxng-local.sh: unterminated settings heredoc"
+        | "EOF" :: _ -> List.rev acc
+        | line :: rest -> take (line :: acc) rest in
+      take [] rest
+    | _ :: rest -> heredoc rest
+    | [] -> fail "searxng-local.sh: settings heredoc not found" in
+  let replace_secret line =
+    let needle = "$secret" in
+    let nlen = String.length needle and llen = String.length line in
+    let buf = Buffer.create llen in
+    let rec go i =
+      if i + nlen <= llen && String.equal (String.sub line i nlen) needle then (
+        Buffer.add_string buf "k-123"; go (i + nlen))
+      else if i < llen then (Buffer.add_char buf line.[i]; go (i + 1)) in
+    go 0;
+    Buffer.contents buf in
+  let body_lines = List.map replace_secret (heredoc lines) in
+  List.iter
+    (fun line ->
+      check bool ("no unexpanded variable left in: " ^ line) false
+        (String.contains line '$'))
+    body_lines;
+  check string "the script and the catalog write the same settings"
+    (P.searxng_settings ~secret_key:"k-123")
+    (String.concat "\n" body_lines ^ "\n")
+
+let test_searxng_probe_response_is_capped () =
+  check int "one look reads at most 256 KiB" 262144 R.probe_max_response_bytes
 
 let () = run "prerequisite actions" ["user-selected plans",[
   test_case "distribution data is never shell" `Quick test_distribution_boundary;
@@ -977,4 +1030,8 @@ let () = run "prerequisite actions" ["user-selected plans",[
   test_case "a settings path that is not a file is refused" `Quick
     test_searxng_refuses_a_settings_path_that_is_not_a_file;
   test_case "the docker probes are bounded" `Quick
-    test_searxng_docker_probes_are_bounded]]
+    test_searxng_docker_probes_are_bounded;
+  test_case "the settings match the helper script" `Quick
+    test_searxng_settings_match_the_helper_script;
+  test_case "the probe response is capped" `Quick
+    test_searxng_probe_response_is_capped]]

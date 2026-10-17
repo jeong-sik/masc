@@ -492,10 +492,41 @@ let test_refusal_and_missing_recording_evidence_are_distinct () =
    | Error _ -> ()
    | Ok _ -> Alcotest.fail "a generic server error leaves recording unconfirmed")
 
+let test_feedback_preserves_receipt_and_canonical_winner () =
+  let module Decode = Masc.Tui_decode_asks in
+  let label = "reader: submitted private choice" in
+  let cases =
+    [ Ok (Decode.Ask_answer_recorded Decode.Ask_wake_stored), Some label, "recorded", `String "stored"
+    ; Ok (Decode.Ask_answer_recorded (Decode.Ask_wake_pending "private server detail")),
+        Some label, "recorded", `String "pending"
+    ; Ok (Decode.Ask_answer_already_recorded { aar_delivery = Decode.Ask_wake_stored; aar_answered_at = 123. }),
+        None, "already_recorded", `String "stored"
+    ; Ok (Decode.Ask_answer_written_unconfirmed "private append detail"), None, "winner_unconfirmed", `Null
+    ; Ok (Decode.Ask_answer_refused "private refusal detail"), None, "refused", `Null
+    ; Error "private transport detail", None, "unconfirmed", `Null ] in
+  List.iter (fun (receipt, expected_label, recording, delivery) ->
+    let feedback = Ask.answer_feedback ~keeper_name:"reader" ~ask_id:"wire-ask"
+      ~submitted_label:label receipt in
+    Alcotest.(check (option string)) "only a new canonical answer owns its submitted labels"
+      expected_label feedback.af_submitted_label;
+    Alcotest.(check bool) "original typed receipt is preserved" true
+      (feedback.af_receipt = receipt);
+    let json = Ask.answer_feedback_to_json feedback in
+    let open Yojson.Safe.Util in
+    Alcotest.(check string) "exact Keeper" "reader" (json |> member "keeper" |> to_string);
+    Alcotest.(check string) "exact Ask" "wire-ask" (json |> member "ask_id" |> to_string);
+    Alcotest.(check string) "recording fact" recording (json |> member "recording" |> to_string);
+    Alcotest.(check bool) "delivery is not Keeper action" true ((json |> member "delivery") = delivery);
+    Alcotest.(check (list string)) "receipt log contains metadata, no submitted/error bodies"
+      ["ask_id"; "delivery"; "keeper"; "recording"]
+      (json |> to_assoc |> List.map fst |> List.sort String.compare)) cases
+
 let () =
   Alcotest.run "TUI ask projection"
     [ ( "answer receipt",
-        [ Alcotest.test_case "recorded answer and wake outcome" `Quick
+        [ Alcotest.test_case "retained feedback preserves original receipt and winner" `Quick
+            test_feedback_preserves_receipt_and_canonical_winner
+        ; Alcotest.test_case "recorded answer and wake outcome" `Quick
             test_recording_and_wake_delivery_are_separate
         ; Alcotest.test_case "canonical conflict and wake outcome" `Quick
             test_conflict_keeps_the_canonical_winner

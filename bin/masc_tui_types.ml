@@ -2740,6 +2740,14 @@ type ask_answer_mode =
   | Ask_browsing
   | Ask_answering of { aam_ask_id: string }
 
+type ask_submission = {
+  as_request: unit ref;
+  as_authority: workspace_authority;
+  as_keeper_name: string;
+  as_ask_id: string;
+  as_answered_label: string;
+}
+
 (* An answer being typed, for the questions a choice cannot answer. The slot
    is what the domain accepts a write through, and it names its own question,
    so an editor left open while the snapshot moves underneath still lands on
@@ -7249,6 +7257,13 @@ type state = {
   mutable ask_text_entry: ask_text_entry option;
   mutable pending_ask_submit: string option;
   mutable ask_submit_inflight: bool;
+  (* Owns receipt observations only; it does not settle the original POST or
+     release its draft/action gate before the canonical reread returns. *)
+  mutable ask_submission_current: ask_submission option;
+  (* A response receipt survives ordinary refreshes and transient notices.
+     It belongs to its dispatch workspace and never proves Keeper action. *)
+  mutable ask_answer_feedback:
+    (ask_submission * Masc_tui_ask_projection.answer_feedback) option;
   (* The tool calls keepers are holding, drawn above the operator actions on
      the same surface. Live registry state on the server; refreshed with the
      surface. *)
@@ -8114,7 +8129,30 @@ let finish_http_refresh_state ?finished_ns (state : state) =
 let retire_asks_read (state : state) =
   state.asks_read <- Snapshot_read.invalidate state.asks_read
 
-let begin_ask_submission_state (state : state) =
+let current_ask_answer_feedback (state : state) =
+  match state.ask_answer_feedback with
+  | Some (submission, feedback)
+    when submission.as_authority = state.workspace_authority
+      && state.workspace_identity = Workspace_identity_match -> Some feedback
+  | Some _ | None -> None
+
+let retain_ask_answer_feedback (state : state) submission result =
+  let current = Option.exists (fun current -> current.as_request == submission.as_request)
+      state.ask_submission_current in
+  let already_observed = match state.ask_answer_feedback with
+    | Some (previous, _) -> previous.as_request == submission.as_request
+    | None -> false in
+  if current && not already_observed && submission.as_authority = state.workspace_authority
+     && state.workspace_identity = Workspace_identity_match then begin
+    let feedback = Masc_tui_ask_projection.answer_feedback
+      ~keeper_name:submission.as_keeper_name ~ask_id:submission.as_ask_id
+      ~submitted_label:submission.as_answered_label result in
+    state.ask_answer_feedback <- Some (submission, feedback);
+    Some feedback
+  end else None
+
+let begin_ask_submission_state ?submission (state : state) =
+  state.ask_submission_current <- submission;
   state.ask_submit_inflight <- true;
   retire_asks_read state
 
@@ -11413,6 +11451,8 @@ let create_state
   ask_text_entry = None;
   pending_ask_submit = None;
   ask_submit_inflight = false;
+  ask_submission_current = None;
+  ask_answer_feedback = None;
   keeper_tool_approvals = [];
   keeper_tool_approvals_error = None;
   keeper_tool_approvals_observed = false;

@@ -202,6 +202,8 @@ type async_msg =
   (** Verified questions may settle their own read before the full bundle. *)
   | Http_asks_loaded of early_asks_observation
   | Http_approvals_loaded of early_approval_observation
+  | Ask_answer_receipt_observed of
+      ask_submission * (Masc.Tui_decode_asks.ask_answer_receipt, string) result
   | Http_keeper_roster_loaded of early_keeper_roster_observation
   | Http_progress_observed of http_progress_observation
   | Http_refresh_done of http_refresh_outcome
@@ -234,11 +236,10 @@ type async_msg =
       * (approval_snapshot, string) result
   (* The answer that came back, and the list re-read behind it. The store
      settles on first write, so the response says what was actually recorded
-     -- which may be someone else's answer. The first field is the human
-     confirmation label (the Keeper and what was chosen), built at submit time
-     from the labels the operator saw rather than the ask's opaque id. *)
+     -- which may be someone else's answer. The submission carries the original
+     workspace, Keeper, Ask and human label; none is recovered from prose. *)
   | Ask_answer_done of
-      string
+      ask_submission
       * (Masc.Tui_decode_asks.ask_answer_receipt, string) result
       * (Masc.Tui_decode_asks.asks_snapshot, string) result
   | Keeper_chat_dispatch_started of
@@ -807,7 +808,7 @@ let rec workspace_message_is_read = function
   | Voice_silent _
   | Voice_discarded _
   | Voice_failed _
-  | Http_keeper_roster_loaded _ | Http_progress_observed _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Http_refresh_done _
+  | Http_keeper_roster_loaded _ | Http_progress_observed _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_observed _ | Http_refresh_done _
   | Http_refresh_failed _
   (* Not a reply: the refresh that recovered the identity tells the loop to
      read the confirm queue again. It belongs to that refresh, which is
@@ -914,7 +915,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Voice_agent_voices_loaded _ | Voice_agent_voice_saved _
     | Voice_wizard_probed (_, _) | Voice_wizard_reread (_, _)
     | Voice_config_loaded (_, _, _) | Voice_level _ | Voice_transcribed _
-    | Voice_silent _ | Voice_discarded _ | Voice_failed _ | Http_keeper_roster_loaded _ | Http_progress_observed _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Http_refresh_done _
+    | Voice_silent _ | Voice_discarded _ | Voice_failed _ | Http_keeper_roster_loaded _ | Http_progress_observed _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_observed _ | Http_refresh_done _
     | Http_refresh_failed (_, _, _) | Approvals_listing_superseded
     | Approvals_summary_loaded (_, _, _, _) | Surface_composer_released
     | Http_scoped_refresh_done (_, _, _)
@@ -1007,9 +1008,9 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Approval_decision_done (approval, decision, receipt, generation, observation) ->
       let receipt, observation = project receipt observation in
       Approval_decision_done (approval, decision, receipt, generation, observation)
-  | Ask_answer_done (label, receipt, observation) ->
+  | Ask_answer_done (submission, receipt, observation) ->
       let receipt, observation = project receipt observation in
-      Ask_answer_done (label, receipt, observation)
+      Ask_answer_done (submission, receipt, observation)
   | Keeper_queue_loaded (keeper, control, action, Ok reply) ->
       Keeper_queue_loaded (keeper, control, action,
         Ok (workspace_operation_reply state ~authority ~reading reply))
@@ -1051,7 +1052,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Voice_agent_voice_saved _ | Voice_wizard_probed (_, _)
   | Voice_wizard_reread (_, _) | Voice_config_loaded (_, _, _) | Voice_level _
   | Voice_transcribed _ | Voice_silent _ | Voice_discarded _ | Voice_failed _
-  | Http_keeper_roster_loaded _ | Http_progress_observed _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Http_refresh_done _ | Http_refresh_failed (_, _, _)
+  | Http_keeper_roster_loaded _ | Http_progress_observed _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_observed _ | Http_refresh_done _ | Http_refresh_failed (_, _, _)
   | Approvals_listing_superseded | Approvals_summary_loaded (_, _, _, _)
   | Surface_composer_released | Http_scoped_refresh_done (_, _, _)
   | Http_scoped_refresh_failed (_, _, _, _, _) | Board_post_refresh_done (_, _)

@@ -1,0 +1,24 @@
+ Dashboard  ▸Work  Keepers  Usage  Board  Workspace  System                     
+                                                                                
+   MASC Approvals (0)  04:32:38  HTTP [connected]                               
+    [w] Workspace: Let Auto Judge decide  |  [e] Outside services: Ask me for…  
+    Always-allow rules: none                                                    
+ ────────────────────────────────────────────────────────────────────────────── 
+    (no pending approvals)                                                      
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+ ────────────────────────────────────────────────────────────────────────────── 
+    [?] Questions waiting on you (0) · a:open answers                           
+    none -- no Keeper is waiting on a decision                                  
+  TUI 3a8dff0 ≠ server 1b5479e (server is older — redeploy)  …  y / n:decide  …?
+ › to imp   (i to write)                                                        

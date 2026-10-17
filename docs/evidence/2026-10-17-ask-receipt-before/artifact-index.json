@@ -1,0 +1,57 @@
+{
+  "scope": "native Before diagnostic; no new implementation After",
+  "files": {
+    "README.md": {
+      "bytes": 3383,
+      "sha256": "cf8a71b8da732aa4020696fdc38a0d63ba9903c83b0f0ec18a6ff5fbf0fd3c20"
+    },
+    "durable-after/event-queue-v19.json": {
+      "bytes": 716,
+      "sha256": "fd68b8737071c98f36169d427a881640f1644638ef211d342c74027674f7cf41"
+    },
+    "durable-after/probe-one.jsonl": {
+      "bytes": 1144,
+      "sha256": "20728d3ae7967518bcdaefa9ac65a3641a4500ea57c8957cc26abf6b143c36d3"
+    },
+    "frame-renderer.py": {
+      "bytes": 2521,
+      "sha256": "0bf219522ddcae4ce30e565a41e2987644f8f385bde8c0fb2bab9c99ba19a2da"
+    },
+    "frames.jsonl": {
+      "bytes": 63504,
+      "sha256": "99c5ab89c70f4d21e59632a1bf2b0efc0cad49a5a201ce52437e654eac5d02ca"
+    },
+    "http-observations.json": {
+      "bytes": 32772,
+      "sha256": "27aed617ea15cae70ae2c141705ba515b85756d2b78989eb954960bbb573b796"
+    },
+    "manifest.json": {
+      "bytes": 2692,
+      "sha256": "fc5257ba9b224f2f3da8bbaf7a24e2ffc028ae82c94a0c6e2a432a8d1c18d0cf"
+    },
+    "native.ansi": {
+      "bytes": 18236,
+      "sha256": "cf4236eba7369dcef06df86ad4cba2bcc00cecce2e55e24383aac445a8df27b5"
+    },
+    "observation.json": {
+      "bytes": 4309,
+      "sha256": "2ca07515590db869f2ac1cf508e3b20caa1a454a4a68330b76e9b49df68b9697"
+    },
+    "observed.json": {
+      "bytes": 917,
+      "sha256": "7f5f1f5923015bae67b1a1d30aefd2466329335d94f14115e71d777a3a0a3ab3"
+    },
+    "observer.py": {
+      "bytes": 25685,
+      "sha256": "9150ac335730c6785e25f4213a8d8ff9f5ce23f71690b6e8efbbef4aa459dfb0"
+    },
+    "warm-9.5.png": {
+      "bytes": 31758,
+      "sha256": "b37d27f72daba44a56405362305695a7e5eb72ff049aa362375a9a97bc6f959c"
+    },
+    "warm-9.5.txt": {
+      "bytes": 2271,
+      "sha256": "93b8c5d7c07b3a69b7ec923a12ccd1eccd16d66223b39723a7c0c3abd6cbcbbb"
+    }
+  }
+}

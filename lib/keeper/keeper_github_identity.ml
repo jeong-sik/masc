@@ -778,8 +778,9 @@ let git_author_docker_args ~keeper_name =
    a host login reaches a running container through the mount. The git wiring
    is the same pure function of hosts.yml the snapshot lane writes; the
    stable dir's validator inspects only hosts.yml and config.yml, so the
-   added gitconfig does not break it. GIT_CONFIG_GLOBAL points at that file
-   whenever the identity has git wiring.
+   added gitconfig does not break it. GIT_CONFIG_GLOBAL always points at
+   that file: a missing file reads as an empty config to git, so the env
+   stays correct across identity changes without recreating the container.
 
    An unconfigured keeper (no stable dir yet) gets no identity args at all
    rather than a provisioned empty one: starting a container must not create
@@ -794,7 +795,7 @@ let docker_args_persistent ~config ~keeper_name ~container_masc_dir =
   | Ok (Some host_dir) ->
     (match write_git_credential_config ~dir_mode_after:0o700 ~snapshot:host_dir with
      | Error _ as error -> error
-     | Ok has_git_wiring ->
+     | Ok _has_git_wiring ->
        let container_dir = container_config_dir ~container_masc_dir ~keeper_name in
        Ok
          (author_args
@@ -802,8 +803,11 @@ let docker_args_persistent ~config ~keeper_name ~container_masc_dir =
             ; "GH_CONFIG_DIR=" ^ container_dir
             ; "-v"
             ; host_dir ^ ":" ^ container_dir ^ ":ro"
-            ]
-          @ git_credential_docker_args ~has_git_wiring ~config_dir:container_dir))
+            ; "--env"
+            ; git_config_global_env_name
+              ^ "="
+              ^ git_credential_config_path ~config_dir:container_dir
+            ]))
 ;;
 
 (* Refresh of the derived gitconfig for the persistent mount, called when a

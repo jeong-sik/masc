@@ -103,20 +103,17 @@ val git_credential_config_path : config_dir:string -> string
 (** [<config_dir>/gitconfig]: the derived credential-helper config file
     inside [config_dir]. *)
 
-val git_credential_config_env :
-  has_git_wiring:bool -> config_dir:string -> (string * string) list
-(** [[git_config_global_env_name, git_credential_config_path ~config_dir]]
-    when [has_git_wiring] holds, and [[]] when the directory carries no
-    derived credential config. *)
-
 val microvm_git_credential_env :
   config:Workspace.config ->
   keeper_name:string ->
   container_config_dir:string ->
   (string * string) list
-(** {!git_credential_config_env} for a running microVM guest's mounted
-    [container_config_dir], gated by the same configured-host condition that
-    writes [gitconfig] into the guest's boot snapshot. *)
+(** [[git_config_global_env_name,
+    git_credential_config_path ~config_dir:container_config_dir]] for a running
+    microVM guest's mounted [container_config_dir] when the keeper has a
+    configured GitHub host, and [[]] otherwise, gated by the same
+    configured-host condition that writes [gitconfig] into the guest's boot
+    snapshot. *)
 
 val default_hostname : string
 (** The GitHub host a login, a status read and a token read address when the

@@ -4340,7 +4340,7 @@
  (name test_keeper_turn_preview)
  (modules test_keeper_turn_preview)
  (libraries alcotest astring agent_core masc masc.runtime masc.server masc.masc_types
-  masc.keeper_operation_identity masc.keeper_execution_scope eio eio_main))
+  masc.keeper_operation_identity masc.keeper_execution_scope eio eio_main yojson))
 
 (test
  (name test_tui_planning_detail)

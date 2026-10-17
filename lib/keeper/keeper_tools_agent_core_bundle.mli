@@ -29,6 +29,12 @@ val make_tool_bundle_for_capability_surface
     turn caller. Named compositions receive its exact descriptor list, so they
     cannot widen the configured Tool Group surface.
 
+    Exact executable compositions selected by the current Task, and their
+    ordinary node Tools, carry schemas on the first request even when their
+    declaration permits deferred loading. Selection comes from the frozen activation frame and must match
+    the executable surface's full Skill identity and content revision. This
+    records no activation; other deferrable tools retain the normal loader.
+
     [checkpoint_owner] is asked on each tool call, not when the bundle is
     built: the turn resolves its runtime afterwards, and a heterogeneous lane
     fallback can change the answer between attempts. The result-ceiling

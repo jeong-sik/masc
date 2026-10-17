@@ -736,9 +736,11 @@ let assemble_hooks
         ~tool_result_commit_required:ctx.tool_result_commit_required
         ?on_tool_result_ready:ctx.on_tool_result_ready
         ?trajectory_acc
+        ~attribute_tool_input:(fun input ->
+          observation_attribution_for_tool_input ~config ~meta:!meta_ref input)
         ~on_tool_executed:
           (fun
-            ~tool_name ~input ~output_text ~execution_evidence ~success ~duration_ms
+            ~tool_name ~input ~output_text ~execution_evidence ~observation ~success ~duration_ms
             ~provider ~typed_outcome ->
             serialize_tool_observer (fun () ->
               let route_evidence =
@@ -805,34 +807,21 @@ let assemble_hooks
                  | Some (Keeper_tool_outcome.Error _) -> "error"
                  | None -> Tool_result.string_of_tool_call_outcome execution_outcome
                in
-               let turn_id =
-                 match acc.meta.Keeper_meta_contract.current_task_id with
-                 | Some t -> Keeper_id.Task_id.to_string t
-                 | None -> "turn-" ^ string_of_int (List.length acc.tool_calls)
-               in
-               (* task-1733: attribute from the tool's actual edited file
-                  (input.path / input.file_path, with explicit cwd honoured
-                  for relative paths), not from the [.masc] runtime root.
-                  #23469: relative shapes anchor at this keeper's playground
-                  sandbox root, matching the file tools' own resolution. *)
-               let attribution =
-                 observation_attribution_for_tool_input
-                   ~config
-                   ~meta:acc.meta
-                   input
-               in
+               (* Forward the same immutable attribution already committed in
+                  the canonical execution row; never resolve Git again here. *)
+               Option.iter (fun (observation : Tool_observation.t) ->
                Agent_observation.emit_tool_event
                  { base_path = config.base_path
-                 ; attribution
+                 ; attribution = observation.attribution
                  ; tool_name
                  ; keeper_id = acc.meta.name
-                 ; turn_id
+                 ; turn_id = Ids.Turn_ref.to_string observation.turn_ref
                  ; outcome = Tool_result.string_of_tool_call_outcome execution_outcome
                  ; typed_outcome = typed_outcome_str
                  ; duration_ms
                  ; output_text
                  ; input
-                 };
+                 }) observation;
                (* #23540: keeper in-turn tool executions never reached the
                   activity log ([tool.called] is emitted only by the external MCP
                   path), so the agent timeline reported tool_calls = 0 for any

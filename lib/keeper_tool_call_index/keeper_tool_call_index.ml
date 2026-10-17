@@ -10,7 +10,7 @@ let ( let* ) = Result.bind
 (* Bumped when the schema below changes. A file that does not carry this
    number is deleted and rebuilt: the index is derived, so there is nothing
    to migrate. *)
-let schema_version = 5
+let schema_version = 7
 
 let database_path ~ledger_dir = Filename.concat ledger_dir "read-index.sqlite3"
 
@@ -23,12 +23,40 @@ CREATE TABLE IF NOT EXISTS rows (
   ts REAL NOT NULL,
   keeper_name TEXT NOT NULL,
   execution_id TEXT,
+  codebase TEXT,
+  file_path TEXT,
+  observation_invalid INTEGER NOT NULL,
   PRIMARY KEY (ledger_path, ledger_offset)
 ) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS rows_keeper_ts ON rows(keeper_name, ts);
 CREATE INDEX IF NOT EXISTS rows_keeper_append ON rows(keeper_name, ledger_path, ledger_offset);
 CREATE INDEX IF NOT EXISTS rows_ts ON rows(ts);
 CREATE INDEX IF NOT EXISTS rows_keeper_execution ON rows(keeper_name, execution_id);
+CREATE INDEX IF NOT EXISTS rows_codebase_ts ON rows(codebase, ts, ledger_path, ledger_offset);
+CREATE INDEX IF NOT EXISTS rows_observation_invalid ON rows(observation_invalid);
+CREATE TABLE IF NOT EXISTS execution_identities (
+  keeper_name TEXT NOT NULL,
+  execution_id TEXT NOT NULL,
+  row_count INTEGER NOT NULL CHECK (row_count >= 0),
+  PRIMARY KEY (keeper_name, execution_id)
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS execution_ambiguities
+  ON execution_identities(row_count) WHERE row_count > 1;
+CREATE TRIGGER IF NOT EXISTS rows_execution_insert AFTER INSERT ON rows
+WHEN NEW.execution_id IS NOT NULL
+BEGIN
+  INSERT INTO execution_identities(keeper_name, execution_id, row_count)
+    VALUES(NEW.keeper_name, NEW.execution_id, 1)
+    ON CONFLICT(keeper_name, execution_id) DO UPDATE SET row_count = row_count + 1;
+END;
+CREATE TRIGGER IF NOT EXISTS rows_execution_delete AFTER DELETE ON rows
+WHEN OLD.execution_id IS NOT NULL
+BEGIN
+  UPDATE execution_identities SET row_count = row_count - 1
+    WHERE keeper_name = OLD.keeper_name AND execution_id = OLD.execution_id;
+  DELETE FROM execution_identities
+    WHERE keeper_name = OLD.keeper_name AND execution_id = OLD.execution_id AND row_count = 0;
+END;
 CREATE TABLE IF NOT EXISTS cursors (
   ledger_path TEXT PRIMARY KEY NOT NULL,
   boundary INTEGER NOT NULL CHECK (boundary >= 0),
@@ -217,6 +245,9 @@ let configure db =
   in
   let* () = exec db ~operation:"set NORMAL synchronous" "PRAGMA synchronous=NORMAL" in
   let* () = exec db ~operation:"set busy timeout" "PRAGMA busy_timeout=5000" in
+  (* INSERT OR REPLACE deletes a prior indexed row. Its delete trigger must
+     run too, so the derived identity witness counts retained rows exactly. *)
+  let* () = exec db ~operation:"enable identity replacement triggers" "PRAGMA recursive_triggers=ON" in
   let* () = exec db ~operation:"create index schema" schema_sql in
   exec
     db
@@ -351,16 +382,47 @@ let ts_of_row json =
    not indexed. It stays in the ledger, which is where it is authoritative. *)
 let indexable line =
   match Yojson.Safe.from_string line with
-  | exception Yojson.Json_error _ -> None
+  | exception Yojson.Json_error _ -> Ok None
   | json ->
+    let observation = Tool_observation.of_row json in
+    let observed = match observation with Ok None -> false | Ok (Some _) | Error _ -> true in
+    let valid_identity = match json with
+      | `Assoc fields ->
+        List.for_all (fun name ->
+          List.length (List.filter (fun (key, _) -> String.equal key name) fields) = 1)
+          ["keeper"; "ts"; "execution_id"]
+        && (match keeper_of_row json, ts_of_row json, execution_id_of_row json with
+            | Some keeper, Some ts, Some execution ->
+              String.trim keeper <> "" && Float.is_finite ts
+              && String.trim execution <> "" && String.trim execution = execution
+            | _ -> false)
+      | _ -> false in
+    if observed && not valid_identity then Error "canonical tool observation has invalid row identity"
+    else
     (match keeper_of_row json, ts_of_row json with
-     | Some keeper, Some ts -> Some (keeper, ts, execution_id_of_row json)
-     | _ -> None)
+     | Some keeper, Some ts ->
+       let codebase, file_path, observation_invalid =
+         match observation with
+         | Ok None -> None, None, false
+         | Error _ -> None, None, true
+         | Ok (Some observation) ->
+           (match Tool_observation.addressed observation with
+            | None -> None, None, false
+            | Some addressed ->
+              let invalid = match execution_id_of_row json with
+                | Some id -> String.trim id = ""
+                | None -> true in
+              Some (Agent_observation.Code_address.codebase addressed.address),
+              Some (Agent_observation.Code_address.path addressed.address), invalid)
+       in
+       Ok (Some (keeper, ts, execution_id_of_row json, codebase, file_path, observation_invalid))
+     | _ -> Ok None)
 ;;
 
 let insert_sql =
   "INSERT OR REPLACE INTO rows (ledger_path, ledger_offset, ledger_length, ts, \
-   keeper_name, execution_id) VALUES (?, ?, ?, ?, ?, ?)"
+   keeper_name, execution_id, codebase, file_path, observation_invalid) \
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
 ;;
 
 let cursor_sql =
@@ -586,9 +648,10 @@ let advance_one store ~before_scan ~path ~(cursor : cursor option) =
                 let* () = acc in
                 scan_digest := extend_digest !scan_digest line;
                 if next = held.boundary then captured_prefix := Some !scan_digest;
-                match indexable line with
+                let* row = indexable line in
+                match row with
                 | None -> Ok ()
-                | Some (keeper, ts, execution_id) ->
+                | Some (keeper, ts, execution_id, codebase, file_path, observation_invalid) ->
                   ignore (Sqlite3.reset insert : Sqlite3.Rc.t);
                   let* () = bind_all store.db ~operation:"bind row" insert
                       [ Sqlite3.Data.TEXT path
@@ -598,7 +661,10 @@ let advance_one store ~before_scan ~path ~(cursor : cursor option) =
                       ; Sqlite3.Data.TEXT keeper
                       ; (match execution_id with
                          | Some value -> Sqlite3.Data.TEXT value
-                         | None -> Sqlite3.Data.NULL) ] in
+                         | None -> Sqlite3.Data.NULL)
+                      ; (match codebase with Some value -> Sqlite3.Data.TEXT value | None -> Sqlite3.Data.NULL)
+                      ; (match file_path with Some value -> Sqlite3.Data.TEXT value | None -> Sqlite3.Data.NULL)
+                      ; Sqlite3.Data.INT (if observation_invalid then 1L else 0L) ] in
                   step_done store.db ~operation:"insert row" insert)
           in
           let* () = pending in
@@ -876,6 +942,49 @@ let by_execution_ids ~store ~keeper_name ~execution_ids =
     with_index ~before_scan:(fun ~path:_ -> ()) ~store ~read:(fun index ->
       let* locations = select_execution_locations index ~keeper_name ~execution_ids in
       rows_of_locations locations)
+;;
+
+let addressed_rows ~store ~codebase ?keeper_name ~limit ~offset () =
+  if limit <= 0 || offset < 0 then Error "invalid addressed-row pagination"
+  else with_index ~before_scan:(fun ~path:_ -> ()) ~store ~read:(fun index ->
+    let* invalid = single_int index.db ~operation:"check observation integrity"
+        "SELECT EXISTS(SELECT 1 FROM rows WHERE observation_invalid = 1)" in
+    let* ambiguous = single_int index.db ~operation:"check observation execution identity"
+        "SELECT EXISTS(SELECT 1 FROM execution_identities WHERE row_count > 1)" in
+    if invalid <> 0 then Error "canonical tool observation metadata is invalid"
+    else if ambiguous <> 0 then Error "canonical tool observation execution identity is ambiguous"
+    else
+      let sql =
+        "SELECT ledger_path, ledger_offset, ledger_length, keeper_name, ts, execution_id \
+         FROM rows WHERE codebase = ?"
+        ^ (match keeper_name with None -> "" | Some _ -> " AND keeper_name = ?")
+        ^ " ORDER BY ts DESC, ledger_path DESC, ledger_offset DESC LIMIT ? OFFSET ?" in
+      let* locations = with_stmt index.db ~operation:"select addressed observations" sql (fun stmt ->
+        let bindings = [ Sqlite3.Data.TEXT codebase ]
+          @ (match keeper_name with None -> [] | Some name -> [ Sqlite3.Data.TEXT name ])
+          @ [ Sqlite3.Data.INT (Int64.of_int limit); Sqlite3.Data.INT (Int64.of_int offset) ] in
+        let* () = bind_all index.db ~operation:"bind observation query" stmt bindings in
+        let rc, locations = Sqlite3.fold stmt ~init:(Ok []) ~f:(fun acc cells ->
+          let* acc = acc in
+          match Array.to_list cells with
+          | [ c_path; c_offset; c_length; c_keeper; c_ts; c_execution ] ->
+            (match text_cell c_path, int_cell c_offset, int_cell c_length,
+                   text_cell c_keeper, float_cell c_ts, text_cell c_execution with
+             | Some path, Some offset, Some length, Some keeper, Some ts, Some execution ->
+               Ok ((path, Int64.to_int offset, Int64.to_int length, keeper, ts, Some execution) :: acc)
+             | _ -> Error "addressed observation query has invalid columns")
+          | _ -> Error "addressed observation query has invalid columns") in
+        if Sqlite3.Rc.is_success rc then Result.map List.rev locations
+        else Error (sqlite_error index.db "select addressed observations" rc)) in
+      let* rows = rows_of_locations locations in
+      let* () = List.fold_left (fun acc row ->
+        let* () = acc in
+        let* observation = Tool_observation.of_row row in
+        match Option.bind observation Tool_observation.addressed with
+        | Some addressed when String.equal codebase
+            (Agent_observation.Code_address.codebase addressed.address) -> Ok ()
+        | Some _ | None -> Error "indexed observation no longer matches its codebase") (Ok ()) rows in
+      Ok rows)
 ;;
 
 let select_frontier store ~keeper_name =

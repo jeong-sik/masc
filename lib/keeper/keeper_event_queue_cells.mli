@@ -7,7 +7,11 @@
     releases it before it takes the lifecycle key lock, so the two are never
     held together. A caller that holds the Keeper's intake mutex takes both
     inside it. The table's own mutex is taken inside the owner lock and takes
-    nothing. *)
+    nothing.
+
+    A cell is never removed. A deleted Keeper's cell stays until the process
+    ends; a later registration of that name refills it with its own read, so
+    nothing of the deleted Keeper is handed out. *)
 
 val set : base_path:string -> string -> Keeper_event_queue.t -> Keeper_event_queue.t Atomic.t
 (** [set ~base_path name pending] puts [pending] in the Keeper's cell, making

@@ -6020,11 +6020,11 @@ let test_preparation_requires_actual_turn_owner_and_exact_execution () =
           ~now:1. ~redaction:Masc.Keeper_secret_redaction.empty)
         (fun () -> ()))) in
     let state = Tui_types.create_state ~workspace:"test" ~port:0 ~refresh_interval:2. () in
-    let turn_ref = Masc.Ids.Turn_ref.make ~trace_id:"preparation-wire" ~absolute_turn:8 in
+    let turn_ref = Ids.Turn_ref.make ~trace_id:"preparation-wire" ~absolute_turn:8 in
     let wire ~lane ~turn_ref preview = `Assoc ["schema",`String "masc.keeper_turns.v1";
       "keepers",`List [`Assoc ["keeper_name",`String "alpha";"status",`String "ok";
         "turn",`Assoc ["lane",`String lane;"interrupt_token",`String (Token.to_string current);
-          "turn_ref",Option.fold ~none:`Null ~some:Masc.Ids.Turn_ref.to_yojson turn_ref;
+          "turn_ref",Option.fold ~none:`Null ~some:Ids.Turn_ref.to_yojson turn_ref;
           "started_at_unix",`Float 0.;"preview",preview]]]] in
     let decode payload = match Tui_decode.decode_keeper_turns payload with
       | Ok rows -> rows | Error detail -> fail detail in
@@ -6109,7 +6109,7 @@ let test_task_preparation_precedes_journal_and_keeps_original_writer () =
   Eio_main.run (fun _ ->
     let module Preview = Masc.Keeper_turn_preview in
     let token = Masc.Keeper_interrupt_token.fresh () in
-    let original = Masc.Ids.Turn_ref.make ~trace_id:"early-task-source" ~absolute_turn:4 in
+    let original = Ids.Turn_ref.make ~trace_id:"early-task-source" ~absolute_turn:4 in
     let writer = Masc.Keeper_turn_preview_owner.with_owner ~interrupt_token:token ~observation:(Masc.Keeper_turn_preview_owner.create_turn_observation ()) (fun () ->
       Preview.reset ~keeper_name:"alpha" ~execution_scope:None ~turn_ref:(Some original)
         ~now:0. ~redaction:Masc.Keeper_secret_redaction.empty) in

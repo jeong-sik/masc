@@ -295,9 +295,10 @@ type 'a next =
 val redact_content :
   redact_text:(string -> string) -> keeper_chat_event -> keeper_chat_event
 (** Redact human content leaves while preserving protocol keys, discriminants,
-    typed states and correlation identities. Shared by live AG-UI and durable
-    journal HTTP serialization. Arbitrary argument JSON has its separate
-    recursive key/value redaction boundary before becoming event content. *)
+    typed states, correlation identities and diagnostic messages. Internal
+    consumers retain this behavior; live AG-UI and the public replay journal
+    use {!public_content}. Arbitrary argument JSON has its separate recursive
+    key/value redaction boundary before becoming event content. *)
 
 val public_error_code : string
 val public_error_message : string
@@ -308,8 +309,10 @@ val public_content :
     policy and replaces terminal diagnostic messages with one fixed safe
     message. Stream protocol diagnostics retain their closed kind and safe
     message, while provider diagnostic text stays internal.
-    Event/correlation identities stay intact. The original event and
-    {!redact_content} retain their internal diagnostic behavior. *)
+    Event/correlation identities stay intact. The public replay journal stores
+    this safe copy, so reconnects reproduce the public live event. This pure
+    projection leaves the original in-process event and private operation
+    failure intact for diagnostics; {!redact_content} keeps its behavior. *)
 
 type published =
   { seq : int

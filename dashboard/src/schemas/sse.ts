@@ -763,11 +763,15 @@ function validateKeeperCustomPayload(
       if (!count.success || value.interactive === undefined) return count
       const receipt = exactCustomObject(value.interactive, 'interactive', [
         'outcome', 'chat_control_token', 'signalled', 'resumed', 'interrupt_error',
+        'interrupt_error_code', 'interrupt_incident_id',
       ])
       if (!receipt.success) return receipt
       const token = requiredString(receipt.data, 'chat_control_token')
       if (!token.success) return token
-      const { outcome, signalled, resumed, interrupt_error } = receipt.data
+      const {
+        outcome, signalled, resumed, interrupt_error,
+        interrupt_error_code, interrupt_incident_id,
+      } = receipt.data
       if (outcome !== 'applied' && outcome !== 'stale_control' && outcome !== 'paused' && outcome !== 'replayed') {
         return fail('ag_ui_event.value.interactive.outcome', 'Unknown interactive admission outcome')
       }
@@ -777,6 +781,14 @@ function validateKeeperCustomPayload(
       }
       if (outcome !== 'applied' && (signalled || resumed || interrupt_error !== null)) {
         return fail('ag_ui_event.value.interactive', 'Inactive admission cannot report control effects')
+      }
+      if (interrupt_error === null) {
+        if (interrupt_error_code !== null || interrupt_incident_id !== null) {
+          return fail('ag_ui_event.value.interactive', 'Successful control cannot report an error incident')
+        }
+      } else if (interrupt_error_code !== 'interrupt_failed'
+          || interrupt_incident_id !== value.operation_id) {
+        return fail('ag_ui_event.value.interactive', 'Interrupt failure requires its code and incident identity')
       }
       return ok(true)
     }

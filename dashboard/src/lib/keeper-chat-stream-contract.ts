@@ -42,6 +42,8 @@ export interface KeeperInteractiveReceipt {
   signalled: boolean
   resumed: boolean
   interrupt_error: string | null
+  interrupt_error_code: 'interrupt_failed' | null
+  interrupt_incident_id: string | null
 }
 
 export type KeeperChatCustomEventName = typeof KEEPER_CHAT_CUSTOM_EVENT_NAMES[number]

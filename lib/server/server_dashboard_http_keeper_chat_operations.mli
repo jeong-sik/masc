@@ -56,7 +56,7 @@ val chat_events_page :
     {!Keeper_chat_event_log.page_of_rows} served. [events] are the page's
     journal lines in journal order (which is seq order: one publisher fiber
     writes them). Each typed event first passes through
-    {!Keeper_chat_events.redact_content} with [redact_text], then is encoded
+    {!Keeper_chat_events.public_content} with [redact_text], then is encoded
     by {!Keeper_chat_event_log.journaled_event_to_json}. Protocol keys, enum
     values, correlation identities, sequence and timestamp remain unchanged;
     content leaves receive the same second layer as live SSE projection.

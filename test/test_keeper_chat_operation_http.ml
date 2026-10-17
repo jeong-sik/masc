@@ -869,6 +869,93 @@ let test_mutation_bodies_are_closed () =
     [ Api.Move_to_end; Api.Cancel ]
 ;;
 
+
+let error_contains text needle =
+  let n = String.length needle in
+  let rec loop i = i+n <= String.length text &&
+    (String.sub text i n = needle || loop (i+1)) in
+  loop 0
+;;
+
+let assert_private_error_absent body =
+  let wire = Yojson.Safe.to_string body in
+  List.iter (fun value -> check bool "private error value stays internal" false
+    (error_contains wire value))
+    ["orchid river seventy nine";"/private/example/.masc/keepers/alpha"];
+  let incident = Yojson.Safe.Util.(body |> member "incident_id" |> to_string) in
+  check bool "server incident joins operator diagnostics" true (String.length incident > 0)
+;;
+
+let test_owner_error_has_safe_public_response () =
+  let detail = "orchid river seventy nine at /private/example/.masc/keepers/alpha" in
+  let cause = Keeper_owner_registry.Command_rejected (Keeper_owner.Store_unavailable detail) in
+  let status,body = Api.For_testing.command_error_response cause in
+  check bool "store refusal keeps its HTTP status" true (status=`Service_unavailable);
+  check string "typed store code" "store_unavailable"
+    Yojson.Safe.Util.(body |> member "error" |> to_string);
+  assert_private_error_absent body;
+  check bool "the original typed diagnostic still renders internally" true
+    (error_contains (Keeper_owner_registry.command_error_to_string cause) detail)
+;;
+
+let test_journal_error_has_safe_public_response () =
+  let cause = L.Page_corrupt
+    "orchid river seventy nine at /private/example/.masc/keepers/alpha/events" in
+  let status,body = Api.For_testing.page_failure_response cause in
+  check bool "corruption keeps its HTTP status" true (status=`Service_unavailable);
+  check string "typed journal code" "journal_corrupt"
+    Yojson.Safe.Util.(body |> member "error" |> to_string);
+  assert_private_error_absent body;
+  check bool "operator retains the private journal diagnostic" true
+    (error_contains (L.page_failure_to_string cause) "orchid river seventy nine")
+;;
+
+
+let test_parser_error_has_safe_public_response () =
+  let status,body = Api.For_testing.invalid_input_response
+    "invalid json: orchid river seventy nine at /private/example/.masc/keepers/alpha" in
+  check bool "parser rejection keeps HTTP status" true (status=`Bad_request);
+  check string "typed invalid input code" "invalid_input"
+    Yojson.Safe.Util.(body |> member "error" |> to_string);
+  assert_private_error_absent body
+;;
+
+let test_cursor_error_keeps_its_owned_code () =
+  let status,body = Api.For_testing.page_failure_response (L.Page_offset_inside_row 3) in
+  check bool "cursor refusal stays a bad request" true (status=`Bad_request);
+  check string "journal owns the cursor wire spelling"
+    (L.cursor_refusal_to_wire L.Offset_inside_row)
+    Yojson.Safe.Util.(body |> member "error" |> to_string)
+;;
+
+let test_valid_event_cursors_do_not_log_errors () =
+  List.iter
+    (fun query ->
+      let request = Httpun.Request.create `GET
+          ("/api/v1/keepers/alpha/chat/events?operation_id=kmsg-cursor&" ^ query) in
+      let before = (Log.Ring.bounds ()).total in
+      (match Api.For_testing.events_page_of_request ~path:"unused-empty-journal" request "" with
+       | Ok _ -> ()
+       | Error (_, code) -> failf "healthy cursor was rejected: %s" code);
+      check int "healthy query emits no error incident" before (Log.Ring.bounds ()).total)
+    [""; "since_seq=0"; "since_offset=0"]
+;;
+
+let test_invalid_event_cursor_logs_only_its_actual_error () =
+  List.iter
+    (fun query ->
+      let request = Httpun.Request.create `GET
+          ("/api/v1/keepers/alpha/chat/events?operation_id=kmsg-cursor&" ^ query) in
+      let before = (Log.Ring.bounds ()).total in
+      (match Api.For_testing.events_page_of_request ~path:"unused-empty-journal" request "" with
+       | Error (`Bad_request, "invalid_input") -> ()
+       | Error (_, code) -> failf "wrong cursor error: %s" code
+       | Ok _ -> fail "invalid cursor was accepted");
+      check int "only the rejected cursor emits an incident" (before + 1)
+        (Log.Ring.bounds ()).total)
+    ["since_seq=bad"; "since_offset=bad"; "since_seq=-1"; "since_offset=-1"]
+;;
+
 let () =
   run
     "keeper chat operation http"
@@ -880,6 +967,12 @@ let () =
         ; test_case "exact operation routes" `Quick test_exact_routes
         ; test_case "unknown routes do not match" `Quick test_unknown_routes_do_not_match
         ; test_case "mutation bodies are closed" `Quick test_mutation_bodies_are_closed
+        ; test_case "owner errors preserve only public facts" `Quick test_owner_error_has_safe_public_response
+        ; test_case "journal errors preserve only public facts" `Quick test_journal_error_has_safe_public_response
+        ; test_case "parser errors preserve only public facts" `Quick test_parser_error_has_safe_public_response
+        ; test_case "cursor errors preserve their owned code" `Quick test_cursor_error_keeps_its_owned_code
+        ; test_case "healthy event cursors produce no error incidents" `Quick test_valid_event_cursors_do_not_log_errors
+        ; test_case "invalid event cursor produces only its actual incident" `Quick test_invalid_event_cursor_logs_only_its_actual_error
         ] )
     ; ( "chat events"
       , [ test_case "page walks by seq" `Quick test_chat_events_page_walks_by_seq

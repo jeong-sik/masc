@@ -323,6 +323,10 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
                 ; body_bytes = 0
                 }))
     | Keeper_chat_events.Next event ->
+    (* The bus retains operator diagnostics; channel readers receive the same
+       fixed error projection as public journal/SSE consumers. Ordinary text
+       has already passed the Keeper's captured-secret redactor upstream. *)
+    let event = Keeper_chat_events.public_content ~redact_text:Fun.id event in
     (* This adapter keeps tool activity off the channel as messages; the trail
        collects the same events so the delivered reply can still name the work.
        See keeper_chat_tool_trail.mli. *)

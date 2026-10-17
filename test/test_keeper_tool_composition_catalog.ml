@@ -901,29 +901,39 @@ let test_draft_prepare_and_exact_run_binding () =
   | Ok None | Error _ -> fail "pre-dispatch run binding is not durable"
 ;;
 
+let draft_single_node_request ?input tool =
+  let literal value = [ "input", `Assoc [ "kind", `String "literal"; "value", value ] ] in
+  `Assoc [ "nodes", `List [ `Assoc ([ "id", `String "n"; "tool", `String tool ]
+    @ Option.fold ~none:[] ~some:literal input) ] ]
+;;
+
+let draft_write_input = `Assoc [ "file_path", `String "a.txt"; "content", `String "x" ]
+
+(* #43445: an inline draft may mutate an owned file, so Write is admitted at the
+   leaf and only its inputs are checked. The refusal test below keeps the
+   effects that stay refused. *)
+let test_draft_admits_inline_owned_file_write () =
+  Eio_main.run @@ fun _env ->
+  with_draft_base @@ fun base_path ->
+  let capability_surface = draft_surface () in
+  let prepare json = Draft.prepare ~base_path ~capability_surface ~keeper_name:"fixture" ~execution:Catalog.Inline json in
+  (match prepare (draft_single_node_request "Write") with
+   | Error (Draft.Inputs_rejected _) -> ()
+   | Error _ | Ok _ -> fail "inline Write without inputs was not rejected for its inputs");
+  match prepare (draft_single_node_request ~input:draft_write_input "Write") with
+  | Ok _ -> ()
+  | Error error -> fail (Yojson.Safe.to_string (Draft.error_to_json error))
+;;
+
 let test_draft_rejects_effects_and_bad_fixed_inputs () =
   Eio_main.run @@ fun _env ->
   with_draft_base @@ fun base_path ->
   let capability_surface = draft_surface () in
   let prepare ?(execution = Catalog.Inline) json = Draft.prepare ~base_path ~capability_surface ~keeper_name:"fixture" ~execution json in
-  let single ?input tool =
-    let literal value = [ "input", `Assoc [ "kind", `String "literal"; "value", value ] ] in
-    `Assoc [ "nodes", `List [ `Assoc ([ "id", `String "n"; "tool", `String tool ]
-      @ Option.fold ~none:[] ~some:literal input) ] ] in
-  let write_input = `Assoc [ "file_path", `String "a.txt"; "content", `String "x" ] in
-  (* #43445: an inline draft may mutate an owned file, so Write is admitted at
-     the leaf and only its inputs are checked. A truly unsupported effect
-     (Execute) is still refused, and Write is still refused when async. *)
-  (match prepare (single "Write") with
-   | Error (Draft.Inputs_rejected _) -> ()
-   | Error _ | Ok _ -> fail "inline Write without inputs was not rejected for its inputs");
-  (match prepare (single ~input:write_input "Write") with
-   | Ok _ -> ()
-   | Error error -> fail (Yojson.Safe.to_string (Draft.error_to_json error)));
-  (match prepare ~execution:Catalog.Async (single ~input:write_input "Write") with
+  (match prepare ~execution:Catalog.Async (draft_single_node_request ~input:draft_write_input "Write") with
    | Error (Draft.Unsupported_node { tool_name = "Write"; _ }) -> ()
    | Error _ | Ok _ -> fail "async draft admitted an owned file mutation");
-  (match prepare (single ~input:(`Assoc [ "command", `String "true" ]) "Execute") with
+  (match prepare (draft_single_node_request ~input:(`Assoc [ "command", `String "true" ]) "Execute") with
    | Error (Draft.Unsupported_node { tool_name = "Execute"; _ }) -> ()
    | Error _ | Ok _ -> fail "transient draft admitted an effectful node");
   let invalid_read = `Assoc [ "nodes", `List [ `Assoc [ "id", `String "read"; "tool", `String "Read"
@@ -1332,6 +1342,7 @@ let () =
             (test_public_draft_run_preserves_one_execution_identity ~observe:true)
         ; test_case "public draft run records its summary without optional turn context" `Quick
             (test_public_draft_run_preserves_one_execution_identity ~observe:false ~single_call:true)
+        ; test_case "draft admits inline owned file write" `Quick test_draft_admits_inline_owned_file_write
         ; test_case "draft rejects effects and bad fixed inputs" `Quick test_draft_rejects_effects_and_bad_fixed_inputs
         ; test_case "export contract survives binding and durable encoding" `Quick test_export_contract_survives_public_authoring_and_binding
         ; test_case

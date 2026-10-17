@@ -2122,10 +2122,69 @@ let test_declared_bounds_match_the_handler () =
     [ Tool_schemas_schedule.Create_request; Tool_schemas_schedule.Update_request ]
 ;;
 
+
+let test_note_tool_distinguishes_missing_schedule_from_unreadable_ledger () =
+  with_config @@ fun config ->
+  let schedule_id = "note-tool-corruption" in
+  ignore (create_service_exn config ~schedule_id ~due_at:future_due_at
+            ~payload:(keeper_wake_payload "wake") ());
+  let primary = Filename.concat (Workspace_utils.masc_dir config) "schedules.json" in
+  let mirror = primary ^ ".last-good" in
+  let note schedule_id =
+    dispatch_exn config Tool_schemas_schedule.Add_note
+      (`Assoc [ "schedule_id", `String schedule_id; "body", `String "reviewed" ])
+  in
+  let primary_before = Workspace_core.read_text config primary in
+  let mirror_before = Workspace_core.read_text config mirror in
+  (match Tool_result.failure_class (note "missing-schedule") with
+   | Some Tool_result.Workflow_rejection -> ()
+   | Some _ | None -> fail "a readable missing schedule must be a workflow refusal");
+  check string "absence does not change primary" primary_before (Workspace_core.read_text config primary);
+  check string "absence does not change mirror" mirror_before (Workspace_core.read_text config mirror);
+  Workspace_core.write_text config primary "{not json";
+  Workspace_core.write_text config mirror "}also not json";
+  let corrupt_primary = Workspace_core.read_text config primary in
+  let corrupt_mirror = Workspace_core.read_text config mirror in
+  (match Tool_result.failure_class (note schedule_id) with
+   | Some Tool_result.Runtime_failure -> ()
+   | Some _ | None -> fail "an unreadable note ledger must be a runtime failure");
+  check string "corrupt primary is preserved" corrupt_primary (Workspace_core.read_text config primary);
+  check string "corrupt mirror is preserved" corrupt_mirror (Workspace_core.read_text config mirror)
+;;
+
+let test_note_tool_reports_actual_primary_write_failure () =
+  with_config @@ fun config ->
+  let schedule_id = "note-tool-write-failure" in
+  ignore (create_service_exn config ~schedule_id ~due_at:future_due_at
+            ~payload:(keeper_wake_payload "wake") ());
+  let primary = Filename.concat (Workspace_utils.masc_dir config) "schedules.json" in
+  let mirror = primary ^ ".last-good" in
+  let primary_before = Workspace_core.read_text config primary in
+  let mirror_before = Workspace_core.read_text config mirror in
+  (* Backend.FileSystem.set opens this sibling for output after the valid
+     ledger read. A directory there refuses that write even as root. *)
+  let staging = primary ^ ".tmp-atomic" in
+  Unix.mkdir staging 0o755;
+  Fun.protect ~finally:(fun () -> Unix.rmdir staging) @@ fun () ->
+  let result =
+    dispatch_exn config Tool_schemas_schedule.Add_note
+      (`Assoc [ "schedule_id", `String schedule_id; "body", `String "reviewed" ])
+  in
+  (match Tool_result.failure_class result with
+   | Some Tool_result.Runtime_failure -> ()
+   | Some _ | None -> fail "note persistence failure must be a runtime failure");
+  check string "failed primary write preserves primary" primary_before (Workspace_core.read_text config primary);
+  check string "failed primary write preserves mirror" mirror_before (Workspace_core.read_text config mirror)
+;;
+
 let () =
   run "Schedule_tool_wiring"
     [ ( "wiring"
-      , [ test_case "flat tool surface" `Quick test_flat_tool_surface
+      , [ test_case "note distinguishes absent schedule from unreadable ledger" `Quick
+            test_note_tool_distinguishes_missing_schedule_from_unreadable_ledger
+        ; test_case "note reports actual primary write failure" `Quick
+            test_note_tool_reports_actual_primary_write_failure
+        ; test_case "flat tool surface" `Quick test_flat_tool_surface
         ; test_case "create list get cancel" `Quick test_create_list_get_cancel
         ; test_case "update keeps public id and replaces instance" `Quick
             test_update_keeps_public_id_and_replaces_instance

@@ -139,6 +139,7 @@ def instruction_skill_names() -> list[str]:
 RUNTIME_HEADER_TOML = """\
 [runtime]
 default = "{default_route}"
+media_failover = [{media_candidates}]
 
 [providers.{provider}]
 display-name = "Bench provider"
@@ -170,7 +171,7 @@ tools-support = true
 # its catalog row and takes only the output ceiling and the thinking-control
 # dialect from here.
 [models."{binding_id}".capabilities]
-{max_output_lines}{thinking_control}
+{media_capabilities}{max_output_lines}{thinking_control}
 
 [{provider}."{binding_id}"]
 max-concurrent = {max_concurrent}
@@ -600,6 +601,31 @@ def _toml_string(value: str) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
+def model_media_capabilities(provider: str, alias: str) -> dict[str, bool]:
+    """Keep the selected model's explicit shipped media declarations.
+
+    Runtime media admission fails closed when these fields are omitted. The
+    provider catalog alone does not grant a concrete model image access.
+    Only bindings already selected for this experiment may be media routes.
+    """
+    seed = tomllib.loads((REPO_ROOT / "config" / "runtime.toml").read_text())
+    fields = ("supports-image-input", "supports-multimodal-inputs",
+              "supports-audio-input", "supports-video-input")
+    matches = [
+        {key: model.get("capabilities", {})[key]
+         for key in fields if key in model.get("capabilities", {})}
+        for binding, model in seed.get("models", {}).items()
+        if model.get("api-name", binding) == alias and binding in seed.get(provider, {})
+    ]
+    if not matches:
+        return {}
+    if any(m != matches[0] for m in matches[1:]):
+        raise ValueError(f"conflicting media declarations for {provider}.{alias}")
+    if any(not isinstance(value, bool) for value in matches[0].values()):
+        raise ValueError(f"invalid media declaration for {provider}.{alias}")
+    return matches[0]
+
+
 def skills_block_with_task_source(*, include_seed_sources: bool) -> str:
     """Render a complete section; never edit already-rendered TOML."""
     seed = tomllib.loads((REPO_ROOT / "config" / "runtime.toml").read_text())["skills"]
@@ -699,6 +725,7 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
     openrouter = {alias: (openrouter_limits(alias)
                           if pcfg.get("context_from_openrouter") else None)
                   for alias in aliases}
+    media = {alias: model_media_capabilities(runtime_provider, alias) for alias in aliases}
 
     if out_root is not None:
         root = out_root / arm
@@ -781,11 +808,16 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
             max_output_lines=(
                 f"max-output-tokens = {max_output}\n" if max_output is not None else ""),
             thinking_control=thinking_control_block,
+            media_capabilities="".join(
+                f"{key} = {str(value).lower()}\n" for key, value in media[alias].items()),
             disable_parallel=str(not spec["parallel"]).lower())
 
     candidate_ids = [f"{runtime_provider}.{model_binding_id(a)}" for a in aliases]
     runtime_toml = RUNTIME_HEADER_TOML.format(
         default_route=keeper_route(arm, candidates[0], candidates[1:]),
+        media_candidates=", ".join(
+            _toml_string(candidate) for alias, candidate in zip(aliases, candidate_ids)
+            if media[alias].get("supports-image-input") is True),
         provider=runtime_provider, **pcfg)
     runtime_toml += "\n".join(model_toml(alias) for alias in aliases)
     if spec["failover"]:

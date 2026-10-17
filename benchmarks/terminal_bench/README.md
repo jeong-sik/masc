@@ -145,6 +145,11 @@ stream-json`으로 실행한다. JSON 메시지와 마지막 assistant 응답이
 처리한다. 실제 도구 호출·결과 수는 `agent_result.metadata.execution_evidence`에 기록한다.
 명령 로그는 `agent/kimi-code.jsonl`, stderr는 `agent/kimi-code.stderr.log`에 남는다.
 
+MASC arm의 이미지 입력은 선택한 provider/model의 저장소 `config/runtime.toml` 선언을
+그대로 렌더한다. 이미지가 허용된 실험 후보만 `[runtime].media_failover`에 넣어
+`keeper_analyze_image`가 같은 모델을 사용하게 한다. 별도 모델·자격증명을 추가하지 않으며,
+선언이 없는 모델에는 이미지 지원을 부여하지 않는다.
+
 설치 및 비대화형 실행 계약: [공식 설치 안내](https://www.kimi.com/code/docs/en/kimi-code-cli/guides/getting-started),
 [CLI 옵션](https://www.kimi.com/code/docs/en/kimi-code-cli/reference/kimi-command).
 

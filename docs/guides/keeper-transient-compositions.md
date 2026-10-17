@@ -31,6 +31,14 @@ one of `recipe` or `sha256`; a fresh recipe cannot include `resume_run_id`.
 To continue an async run created from a recipe, use its returned draft digest
 and original run ID in the ordinary continuation form below.
 
+When an immutable input artifact's address is already known, add its
+`keeper_artifact_read` as an ordinary recipe node. Bind the exact Skill child's
+tagged `input` to that node's `/content` output, and export both the selected
+input and required child result. This preserves the physical upstream read
+inside one execution. The model receives the selected values from the exports.
+See [current Task schema readiness](keeper-task-schema-readiness.md)
+for the initial callable surface and measurement boundaries.
+
 ```json
 {
   "execution": "inline",

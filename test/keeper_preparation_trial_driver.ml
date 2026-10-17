@@ -455,10 +455,10 @@ let objective_validation_json = function
   | Wrong_stdout_digest -> `String "wrong_stdout_digest"
   | Scripted_wire_mismatch -> `String "scripted_wire_mismatch"
 
-type step = Select | Direct_result | Direct_stdout | Prepare | Run | Named_skill | Finish | Finished
+type step = Select | Direct_result | Direct_stdout | Run | Named_skill | Finish | Finished
 let step_name = function
   | Select -> "select" | Direct_result -> "direct-result" | Direct_stdout -> "direct-stdout"
-  | Prepare -> "prepare" | Run -> "run" | Named_skill -> "named-skill"
+  | Run -> "run" | Named_skill -> "named-skill"
   | Finish -> "finish" | Finished -> "finished"
 
 type composition_projection = Selected_stdout | Full_actions
@@ -477,7 +477,9 @@ let recipe ~projection ~arguments fixture =
       "input",`Assoc ["kind",`String "object";"fields",`List
         [`Assoc ["name",`String "job_id";"value",selected]]]]]);
     "exports",`List (match projection with
-      | Selected_stdout -> [`Assoc ["name",`String "stdout";"node",`String "resolved_stdout";"pointer",`String "/stdout"]]
+      | Selected_stdout ->
+        [`Assoc ["name",`String "job_id";"node",`String "arguments";"pointer",`String "/content"];
+         `Assoc ["name",`String "stdout";"node",`String "resolved_stdout";"pointer",`String "/stdout"]]
       | Full_actions -> [])]
 
 let reference value = match Tool_output.normalized_artifact_ref_of_json value with
@@ -488,6 +490,20 @@ let reference value = match Tool_output.normalized_artifact_ref_of_json value wi
 let row_document ~base row = match field "output" row with
   | `String bytes -> document ~base bytes
   | value -> document ~base (blob_bytes base (reference value))
+
+let commit_identity (event : Calls.committed_call) =
+  let text value = match value with None -> `Null | Some value -> `String value in
+  ["keeper",`String event.keeper_name;"tool",`String event.tool_name;
+   "execution_id",text (Option.map Ids.Execution_id.to_string event.execution_id);
+   "tool_use_id",text event.tool_use_id;"trace_id",text event.trace_id;
+   "task_id",text event.task_id;
+   "keeper_turn_id",(match event.keeper_turn_id with None -> `Null | Some value -> `Int value);
+   "composition_node_id",text event.composition_node_id;
+   "parent_tool_use_id",text event.parent_tool_use_id]
+
+let commit_matches row (event : Calls.committed_call) =
+  Option.is_some event.execution_id &&
+  List.for_all (fun (name,value) -> Yojson.Safe.equal (field name row) value) (commit_identity event)
 
 let decode_evidence f =
   try Some (f ()) with
@@ -548,7 +564,7 @@ let execution_run_id ~fixture ~turn ~parent ~reply rows =
       |> get (fun _ -> "invalid original composition run identity") in
   `String (Keeper_tool_plan.Composition_run_id.to_string id)
 
-let stdout_execution_owned ~base ~fixture ~turn ~raw_records rows row =
+let physical_execution_owned ~base ~fixture ~turn ~raw_records rows row =
   if field "composition_node_id" row=`Null then
     sdk_member ~fixture ~turn row && field "parent_tool_use_id" row=`Null
   else
@@ -558,7 +574,7 @@ let stdout_execution_owned ~base ~fixture ~turn ~raw_records rows row =
     | [parent] -> decode_evidence (fun () ->
       let reply = exact_sdk_reply ~base ~raw_records parent in
       require (execution_run_id ~fixture ~turn ~parent ~reply rows=field "composition_run_id" row)
-        "physical stdout belongs to a different composition";
+        "physical Tool belongs to a different composition";
       List.exists (fun node ->
         field "node_id" node=field "composition_node_id" row &&
         field "execution_id" node=field "execution_id" row &&
@@ -575,7 +591,7 @@ let full_stdout_reads ~base ~fixture ~turn ~raw_records rows =
       let page = row_document ~base row in
       field "offset" page=`Int 0 && field "eof" page=`Bool true &&
       sha (string "content" page)=string "expected_stdout_sha256" fixture) = Some true &&
-    stdout_execution_owned ~base ~fixture ~turn ~raw_records rows row) rows
+    physical_execution_owned ~base ~fixture ~turn ~raw_records rows row) rows
 
 let named_execution_proven ~base ~fixture ~turn ~raw_records rows stdout_rows
     ~(activation : Keeper_skill_activation_ledger.activation) ~tool_name =
@@ -713,12 +729,13 @@ let start_provider ~sw ~env ~base ~attempt_dir ~counter ~experiment ~fixture ~st
   let arguments = match outcome with
     | Fixed_child -> Selected_literal
     | Successful | Provider_refusal | Malformed_final -> Selection_output in
-  let next_step = ref Select in
+  let next_step = ref (match strategy,preparation_case experiment,projection with
+    | Exact_skill,Upstream_inline,Selected_stdout -> Run
+    | Direct,_,_ | Exact_skill,Named_inline,_ | Exact_skill,Upstream_inline,Full_actions -> Select) in
   let awaiting = ref None in
   let loading = ref None in
   let selected = ref None and stdout = ref None and draft_sha = ref None in
   let final_answer = ref None in
-  let prepared_reply = ref None in
   let observed_requests = ref [] in
   let serial = ref 0 in
   let add_event kind fields =
@@ -760,8 +777,7 @@ let start_provider ~sw ~env ~base ~attempt_dir ~counter ~experiment ~fixture ~st
             next_step := (match strategy,preparation_case experiment,projection with
               | Direct,_,_ -> Direct_result
               | Exact_skill,Named_inline,_ -> Named_skill
-              | Exact_skill,Upstream_inline,Selected_stdout -> Prepare
-              | Exact_skill,Upstream_inline,Full_actions -> Run)
+              | Exact_skill,Upstream_inline,_ -> Run)
           | Direct_result ->
             let artifacts = field "artifacts" value |> to_list in
             let value = match artifacts with first :: _ -> first | [] -> failwith "result has no stdout artifact" in
@@ -772,12 +788,6 @@ let start_provider ~sw ~env ~base ~attempt_dir ~counter ~experiment ~fixture ~st
             require (field "eof" value = `Bool true) "stdout read did not reach EOF";
             stdout := Some (string "content" value);
             next_step := Finish
-          | Prepare ->
-            json (Filename.concat attempt_dir "actual-prepared.json") value;
-            prepared_reply := Some value;
-            let reference = reference (field "draft" value) in
-            draft_sha := Some reference.sha256;
-            next_step := Run
           | Named_skill ->
             let nodes = execution_nodes ~base value in
             json (Filename.concat attempt_dir "actual-composition-execution.json")
@@ -790,9 +800,7 @@ let start_provider ~sw ~env ~base ~attempt_dir ~counter ~experiment ~fixture ~st
             let nodes = execution_nodes ~base value in
             json (Filename.concat attempt_dir "actual-composition-execution.json")
               (`Assoc ["nodes",`List nodes;"source_result",value]);
-            let prepared = match !prepared_reply with
-              | Some prepared -> prepared
-              | None -> document ~base (blob_bytes base (reference (field "draft" value))) in
+            let prepared = document ~base (blob_bytes base (reference (field "draft" value))) in
             let argument_node = match field "nested_calls" prepared |> to_list with
               | [call] -> call |> field "scope" |> string "argument_node"
               | [] | _ :: _ -> failwith "one actual nested call was required" in
@@ -804,7 +812,14 @@ let start_provider ~sw ~env ~base ~attempt_dir ~counter ~experiment ~fixture ~st
                  "actual child barrier did not preserve resolved upstream input"
              | [] | _ :: _ -> failwith "actual argument barrier was not uniquely executed");
             let exports = match projection with
-              | Selected_stdout -> field "exports" value
+              | Selected_stdout ->
+                let exports = field "exports" value in
+                let job = field "job_id" exports in
+                require (field "available" job=`Bool true) "selection export is unavailable";
+                let id = string "value" job in
+                require (id=string "selected_job_id" fixture) "recipe selected the wrong original job";
+                selected := Some id;
+                exports
               | Full_actions ->
                 (match field "nested_scopes" value |> to_list with
                  | [scope] -> field "exports" scope
@@ -835,16 +850,13 @@ let start_provider ~sw ~env ~base ~attempt_dir ~counter ~experiment ~fixture ~st
           next_step := Finished;
           sse ~model ~finish:"stop" ~delta:(`Assoc ["role",`String "assistant";"content",`String answer])
         | Finished -> failwith "unexpected provider call after scripted final answer"
-        | (Select | Direct_result | Direct_stdout | Prepare | Run | Named_skill) as step ->
+        | (Select | Direct_result | Direct_stdout | Run | Named_skill) as step ->
           let name,args = match step with
             | Select -> "keeper_artifact_read",`Assoc ["sha256",field "selection_sha256" fixture]
             | Direct_result -> "keeper_job_result",`Assoc ["job_id",`String (needed !selected)]
             | Direct_stdout -> "keeper_artifact_read",`Assoc ["sha256",`String (needed !draft_sha)]
-            | Prepare -> Keeper_composition_draft.prepare_tool_name,recipe ~projection ~arguments fixture
             | Named_skill -> string "skill_tool_name" fixture,`Assoc ["job_id",`String (needed !selected)]
-            | Run -> Keeper_composition_draft.run_tool_name,(match projection with
-                | Selected_stdout -> `Assoc ["sha256",`String (needed !draft_sha)]
-                | Full_actions -> `Assoc ["recipe",recipe ~projection ~arguments fixture])
+            | Run -> Keeper_composition_draft.run_tool_name,`Assoc ["recipe",recipe ~projection ~arguments fixture]
             | Finish | Finished -> failwith "final step cannot dispatch a tool" in
           let id = Printf.sprintf "call-%d-%s" request_number (step_name step) in
           if List.mem name actual_tools then (
@@ -918,7 +930,7 @@ let run_trial ~base ~experiment ~strategy ~prompt_root ~counter ~receipt ~sw ~en
     "Complete this read-only task using the completed original artifacts. Read the selection artifact first and the complete selected stdout. Return exactly one JSON object with only job_id and stdout_sha256; no prose or Markdown. The artifact address is its SHA-256 and the harness independently checks the returned full bytes. Do not execute new programs, declare the Task complete, or modify any source." in
   let assignment = match strategy,preparation_case experiment with
     | Direct,_ -> "Assigned strategy: direct. Use ordinary keeper_job_result and keeper_artifact_read for the selected original job."
-    | Exact_skill,Upstream_inline -> "Assigned strategy: exact_skill. Prepare and run the exact Inline Skill through an explicit upstream input template; use the offered exact reference."
+    | Exact_skill,Upstream_inline -> "Assigned strategy: exact_skill. Call keeper_composition_run once with a recipe whose first producer reads the selection artifact, whose exact Inline Skill consumes that producer's output through an explicit input template, and whose exports return job_id and stdout. Use the offered exact reference."
     | Exact_skill,Named_inline -> "Assigned strategy: exact_skill. Reuse the offered named Inline Skill directly with the selected original job_id; use the offered exact reference." in
   configure_keeper ~base ~instructions:(common_instruction ^ "\n" ^ assignment);
   Prompt_registry.clear ();
@@ -970,16 +982,15 @@ let run_trial ~base ~experiment ~strategy ~prompt_root ~counter ~receipt ~sw ~en
    | Intake_lifecycle_blocked denial -> failwith (Keeper_lifecycle_admission.autonomous_denial_to_wire denial));
   let frontier = Calls.current_frontier ~keeper_name:keeper |> get index_error in
   let observations = ref [] in
-  Agent_observation.reset_for_testing ();
-  Agent_observation.register_tool_event_sink (fun (event : Agent_observation.tool_event) ->
-    if event.base_path = base && event.keeper_id = keeper then
+  let commit_path = Filename.concat attempt_dir "tool-commit-events.jsonl" in
+  write commit_path "";
+  let commit_observer = Calls.make_commit_observer (fun (event : Calls.committed_call) ->
+    if event.keeper_name=keeper && event.record_kind=Calls.Tool_call then
       let observed = now counter in
-      append_event (Filename.concat attempt_dir "events.jsonl") (`Assoc
-        ["kind",`String "actual_tool_observed";"tool",`String event.tool_name;
-         "observed",observed;"turn_ref",`String event.turn_id;
-         "input_sha256",`String (sha (Yojson.Safe.to_string event.input))]);
-      observations := (event,observed) :: !observations);
-  Eio.Switch.on_release sw Agent_observation.reset_for_testing;
+      append_event commit_path (`Assoc
+        (["schema_version",`Int 1;"boundary",`String "durable_tool_call_commit";
+          "observed",observed] @ commit_identity event));
+      observations := (event,observed) :: !observations) in
   (* This fixture invokes the real cycle on its current Eio fiber instead of
      launching the perpetual keepalive loop. Production registration starts
      Offline; mark this actual fiber entry before asking the cycle to run. *)
@@ -989,6 +1000,7 @@ let run_trial ~base ~experiment ~strategy ~prompt_root ~counter ~receipt ~sw ~en
       ~path:(Filename.concat attempt_dir "http-events.jsonl") ~now:(fun () -> now counter) in
   let cycle_entered = now counter in
   let outcome = stage Run_cycle (fun () ->
+    Calls.with_commit_observer commit_observer @@ fun () ->
     Keeper_preparation_http_observation.within http_observation @@ fun () ->
     Keeper_heartbeat_loop.run_keepalive_unified_turn
       ~wake:Keeper_world_observation.Attention_wake ~ctx ~registry_entry ~meta_after_triage:meta
@@ -1001,14 +1013,25 @@ let run_trial ~base ~experiment ~strategy ~prompt_root ~counter ~receipt ~sw ~en
   let first_offered_tools_sha256 = match field "first_dispatched_tools" http_metrics with
     | `Assoc fields -> (match List.assoc_opt "json_sha256" fields with Some (`String _ as hash) -> hash | _ -> `Null)
     | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> `Null in
+  let batch = Calls.read_after ~keeper_name:keeper ~after:frontier ~project:Option.some |> get index_error in
+  let rows = List.map (fun (row : Yojson.Safe.t Keeper_tool_call_index.positioned) -> row.value) batch.rows in
+  let committed_rows = List.filter (fun row -> field "record_kind" row=`String "tool_call") rows in
+  let commit_coverage_complete = Calls.failed_commit_deliveries commit_observer=0 &&
+    List.for_all (fun row ->
+      List.length (List.filter (fun (event,_) -> commit_matches row event) !observations)=1) committed_rows &&
+    List.for_all (fun (event,_) ->
+      List.length (List.filter (fun row -> commit_matches row event) committed_rows)=1) !observations in
+  let commit_metrics = `Assoc ["boundary",`String "durable_tool_call_commit";
+    "mode",`String "scoped_synchronous_commit";
+    "coverage",`String (if commit_coverage_complete then "complete" else "incomplete");
+    "delivery_failures",`Int (Calls.failed_commit_deliveries commit_observer);
+    "events",`Int (List.length !observations);"events_sha256",`String (sha (read commit_path))] in
   let previous = load receipt |> to_assoc |> List.remove_assoc "timing" in
   json receipt (`Assoc (("timing",`Assoc ["admission",admission;
     "cycle_entered",cycle_entered;"cycle_returned",cycle_returned])::
-    ("http_metrics",http_metrics)::
+    ("http_metrics",http_metrics)::("tool_commit_observation",commit_metrics)::
     ("first_offered_tools_sha256",first_offered_tools_sha256)::
     ("common_instruction_sha256",`String (sha common_instruction))::previous));
-  let batch = Calls.read_after ~keeper_name:keeper ~after:frontier ~project:Option.some |> get index_error in
-  let rows = List.map (fun (row : Yojson.Safe.t Keeper_tool_call_index.positioned) -> row.value) batch.rows in
   json (Filename.concat attempt_dir "tool-calls.json") (`List rows);
   json (Filename.concat attempt_dir "provider-events.json") (`List (List.rev !events));
   let store = Keeper_types_support.keeper_turn_record_store config keeper in
@@ -1056,38 +1079,30 @@ let run_trial ~base ~experiment ~strategy ~prompt_root ~counter ~receipt ~sw ~en
     | [_] -> unknown "exact turn-entry manifest did not retain this intake selection"
     | [] | _ :: _ -> unknown "no unique exact-turn entry manifest" in
   let useful =
-    let candidates = List.filter (fun ((event : Agent_observation.tool_event),_) ->
-      event.tool_name="keeper_artifact_read" &&
-      event.turn_id=Ids.Turn_ref.to_string (Ids.Turn_ref.make
-        ~trace_id:(string "trace_id" fixture) ~absolute_turn:(integer "absolute_turn" turn_json)) &&
-      field "sha256" event.input=field "selection_sha256" fixture)
-      !observations in
-    match candidates with
-    | [event,observed] ->
-      let matches = List.filter (fun row ->
-        field "tool" row=`String event.tool_name && Yojson.Safe.equal (field "input" row) event.input &&
-        field "composition_node_id" row=`Null && field "task_id" row=field "task_id" fixture &&
-        field "trace_id" row=field "trace_id" fixture) rows in
-      (match matches with
-       | [row] ->
-         let value = document ~base event.output_text in
-         (match Tool_result.recorded_call_outcome row with
-          | Recorded_succeeded ->
-            require (string "content" value = string "selected_job_id" fixture && field "eof" value=`Bool true)
-              "successful useful leaf returned wrong original selection";
-            let execution = string "execution_id" row in
-            require (List.exists (fun id -> Ids.Execution_id.to_string id=execution) turn.execution_ids)
-              "useful leaf did not belong to this actual TurnRecord";
-            `Assoc ["state",`String "observed";"observed",observed;"execution_id",`String execution;
-              "tool_use_id",field "tool_use_id" row;"sdk_turn",field "turn" row;
-              "planned_index",field "planned_index" row;"batch_index",field "batch_index" row;
-              "batch_size",field "batch_size" row;"execution_mode",field "execution_mode" row;
-              "ledger_completed_at",field "ts" row;"task_id",field "task_id" row;
-              "trace_id",field "trace_id" row;"keeper_turn_id",field "keeper_turn_id" row]
-          | Recorded_deferred | Recorded_failed | Recorded_unsettled | Recorded_malformed ->
-            unknown "exact useful call did not carry canonical successful disposition")
-       | [] | _ :: _ -> unknown "useful event has no unique physical execution join")
-    | [] | _ :: _ -> unknown "no unique successful selection-read observation" in
+    let candidates = List.filter (fun row -> original_turn_source ~fixture ~turn row &&
+      field "tool" row=`String "keeper_artifact_read" &&
+      field "sha256" (field "input" row)=field "selection_sha256" fixture) committed_rows in
+    if not commit_coverage_complete then unknown "durable Tool commit observation coverage is incomplete"
+    else if not (List.for_all (physical_execution_owned ~base ~fixture ~turn ~raw_records rows) candidates)
+      then unknown "selection-read ownership is incomplete"
+    else
+      let first = List.find_map (fun (event,observed) ->
+        Option.map (fun row -> row,observed) (List.find_opt (fun row -> commit_matches row event) candidates))
+          (List.rev !observations) in
+      match first with
+      | None -> unknown "no committed successful original selection read"
+      | Some (row,observed) ->
+        let value = row_document ~base row in
+        require (string "content" value=string "selected_job_id" fixture && field "eof" value=`Bool true &&
+          field "offset" value=`Int 0) "successful useful leaf returned wrong or incomplete original selection";
+        `Assoc ["state",`String "observed";"boundary",`String "durable_tool_call_commit";
+          "observed",observed;"execution_id",field "execution_id" row;
+          "composition_node_id",field "composition_node_id" row;"parent_tool_use_id",field "parent_tool_use_id" row;
+          "tool_use_id",field "tool_use_id" row;"sdk_turn",field "turn" row;
+          "planned_index",field "planned_index" row;"batch_index",field "batch_index" row;
+          "batch_size",field "batch_size" row;"execution_mode",field "execution_mode" row;
+          "ledger_completed_at",field "ts" row;"task_id",field "task_id" row;
+          "trace_id",field "trace_id" row;"keeper_turn_id",field "keeper_turn_id" row] in
   let _,checkpoint = Keeper_context_runtime.load_context_from_checkpoint_classified
       ~trace_id:(string "trace_id" fixture) ~base_dir:(Keeper_types_support.session_base_dir_ config) in
   let checkpoint_last_assistant = match checkpoint with
@@ -1182,7 +1197,7 @@ let run_trial ~base ~experiment ~strategy ~prompt_root ~counter ~receipt ~sw ~en
     "provider_requests",(if synthetic then `Int (List.length !requests) else `Null);
     "configured_runtime_sha256",(match runtime_mode runtime with
       | Synthetic_streaming -> `Null | Configured_http configuration -> `String (sha configuration));
-    "http_metrics",http_metrics;
+    "http_metrics",http_metrics;"tool_commit_observation",commit_metrics;
     "verified_stdout_read_execution_ids",`List (List.map (field "execution_id") stdout_rows);
     "provider_metrics",`Assoc ["selected_model",field "selected_model" turn_json;
       "reported_usage",`Assoc (List.map (fun name -> name,field name turn_json)

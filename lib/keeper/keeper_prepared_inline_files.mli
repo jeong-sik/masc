@@ -47,3 +47,31 @@ val for_node
 (** The exact immutable plan, member node and model input must match. A
     mismatch is a pre-effect rejection, never an unprepared fallback under
     the old claims. Each file consumer rechecks owner and confinement. *)
+
+module Ready : sig
+  type t
+  type binding
+
+  val create
+    : sw:Eio.Switch.t
+    -> config:Workspace.config
+    -> meta:Keeper_meta_contract.keeper_meta
+    -> source:Keeper_tool_call_log_context.turn_context option
+    -> Keeper_tool_plan.t
+    -> t option
+  (** Original source-bound inline Read/Edit plans, including pure compiled
+      child argument validation. Inputs may depend on upstream results. No
+      file is opened until its node has a resolved, validated input. Other
+      effects and async child submission/result targets are ineligible. *)
+
+  val plan : t -> Keeper_tool_plan.t
+  val bind : t -> node:Keeper_tool_plan.node -> input:Yojson.Safe.t -> binding
+  (** Opens capabilities owned by the call switch through the original file
+      producer. Unsupported preparation retains the ordinary handler and
+      conflicts conservatively with every other file operation. *)
+  val operation : binding -> operation option
+  val conflicts : binding -> binding -> bool
+  val exclusive : binding -> bool
+  (** Only a file operation without prepared resource identity runs alone.
+      Pure argument validation has no file footprint. *)
+end

@@ -261,23 +261,50 @@ let recipe_call ?(id = "recipe-edit") nodes =
      input = `Assoc ["recipe", `Assoc ["execution", `String "inline"; "nodes", `List nodes]]}
 ;;
 
-let test_recipe_edits_overlap_with_original_source ~nested () =
+let recipe_read id path =
+  `Assoc ["id", `String id; "tool", `String "Read";
+          "args", `Assoc ["file_path", `String path]]
+;;
+
+let recipe_patch_input source before after =
+  let literal value = `Assoc ["kind", `String "literal"; "value", value] in
+  let field name value = `Assoc ["name", `String name; "value", value] in
+  `Assoc ["kind", `String "object"; "fields", `List
+    [field "file_path" (`Assoc ["kind", `String "output"; "node", `String source; "pointer", `String "/path"]);
+     field "old_string" (literal (`String before)); field "new_string" (literal (`String after))]]
+;;
+
+let recipe_dynamic_edit id source before after =
+  `Assoc ["id", `String id; "tool", `String "Edit";
+          "input", recipe_patch_input source before after]
+;;
+
+let test_recipe_edits_overlap_with_original_source ?(dynamic = false) ~nested () =
   fixture @@ fun env sw config meta recovery root ->
   let snapshot = if nested then Some (publish_edit_skills sw config) else None in
-  public_bundle ?snapshot env sw config meta recovery @@ fun meta task_id _cell causal bundle ->
+  public_bundle ?snapshot ~with_read:dynamic env sw config meta recovery @@ fun meta task_id _cell causal bundle ->
   let left = Filename.concat root "recipe/left" and right = Filename.concat root "recipe/right" in
   write left "left-before"; write right "right-before";
   let inputs = [public_args left "left-before" "left-after";
                 public_args right "right-before" "right-after"] in
+  let make_input index input =
+    if dynamic then
+      let before = Yojson.Safe.Util.(member "old_string" input |> to_string) in
+      let after = Yojson.Safe.Util.(member "new_string" input |> to_string) in
+      "input", recipe_patch_input ("read-" ^ string_of_int index) before after
+    else "args", input in
   let nodes = match snapshot with
-    | None -> List.mapi (fun index input -> recipe_edit ("patch-" ^ string_of_int index) input) inputs
+    | None -> List.mapi (fun index input ->
+        `Assoc ["id", `String ("patch-" ^ string_of_int index); "tool", `String "Edit";
+                make_input index input]) inputs
     | Some snapshot ->
         let references = Skill_catalog_snapshot.entries snapshot
             |> List.map Skill_catalog_snapshot.entry_reference in
         List.mapi (fun index (reference, input) ->
           `Assoc ["id", `String ("child-" ^ string_of_int index);
-                  "skill_reference", Skill_reference.to_yojson reference; "args", input])
+                  "skill_reference", Skill_reference.to_yojson reference; make_input index input])
           (List.combine references inputs) in
+  let nodes = if dynamic then [recipe_read "read-0" left; recipe_read "read-1" right] @ nodes else nodes in
   let both, resolve_both = Eio.Promise.create () in
   let entered = ref 0 in
   let rows = FS.For_testing.with_before_write_authorization (fun () ->
@@ -290,7 +317,8 @@ let test_recipe_edits_overlap_with_original_source ~nested () =
   check string "recipe left committed bytes" "left-after" (read left);
   check string "recipe right committed bytes" "right-after" (read right);
   let leaves = physical_leaves meta in
-  check int "two original file producers retain physical receipts" 2 (List.length leaves);
+  check int "original node receipts survive resolved resource binding"
+    (if dynamic then (if nested then 6 else 4) else 2) (List.length leaves);
   List.iter (fun row ->
     check string "recipe retains original Task" task_id
       Yojson.Safe.Util.(member "task_id" row |> to_string);
@@ -298,7 +326,7 @@ let test_recipe_edits_overlap_with_original_source ~nested () =
       Yojson.Safe.Util.(member "trace_id" row |> to_string);
     check string "recipe retains original parent Tool invocation" "recipe-edit"
       Yojson.Safe.Util.(member "parent_tool_use_id" row |> to_string)) leaves;
-  check int "both recipe results reach the original Gate aggregate" 2
+  check int "file results reach the original Gate aggregate" (if dynamic then 4 else 2)
     Yojson.Safe.Util.(member "completed_tool_calls"
       (Keeper_gate_causal_context.snapshot causal).snapshot |> to_list |> List.length);
   if nested then begin
@@ -312,25 +340,33 @@ let test_recipe_edits_overlap_with_original_source ~nested () =
   end
 ;;
 
-let test_recipe_conflicts_consume_predecessor_bytes () =
+let test_recipe_conflicts_consume_predecessor_bytes ?(dynamic = false) () =
   fixture @@ fun env sw config meta recovery root ->
-  public_bundle env sw config meta recovery @@ fun meta _task _cell _causal bundle ->
+  public_bundle ~with_read:dynamic env sw config meta recovery @@ fun meta _task _cell _causal bundle ->
   let path = Filename.concat root "recipe-conflict/file" in
   write path "first";
-  ignore (dispatch env bundle.tools [recipe_call
-    [recipe_edit "first" (public_args path "first" "second");
-     recipe_edit "second" (public_args path "second" "third")]]);
+  let nodes = if dynamic then
+      [recipe_read "source" path;
+       recipe_dynamic_edit "first" "source" "first" "second";
+       recipe_dynamic_edit "second" "source" "second" "third"]
+    else [recipe_edit "first" (public_args path "first" "second");
+          recipe_edit "second" (public_args path "second" "third")] in
+  ignore (dispatch env bundle.tools [recipe_call nodes]);
   check string "conflicting recipe patches consume committed predecessor bytes" "third" (read path);
-  check int "both conflict-ordered handlers retain receipts" 2 (List.length (physical_leaves meta))
+  check int "conflict-ordered handlers retain receipts" (if dynamic then 3 else 2) (List.length (physical_leaves meta))
 ;;
 
-let test_cancelled_recipe_releases_file_capabilities () =
+let test_cancelled_recipe_releases_file_capabilities ?(dynamic = false) () =
   fixture @@ fun env sw config meta recovery root ->
-  public_bundle env sw config meta recovery @@ fun _meta _task _cell _causal bundle ->
+  public_bundle ~with_read:dynamic env sw config meta recovery @@ fun _meta _task _cell _causal bundle ->
   let left = Filename.concat root "recipe-cancel/left" and right = Filename.concat root "recipe-cancel/right" in
   write left "before"; write right "before";
-  let nodes = [recipe_edit "left" (public_args left "before" "after");
-               recipe_edit "right" (public_args right "before" "after")] in
+  let nodes = if dynamic then
+      [recipe_read "source-left" left; recipe_read "source-right" right;
+       recipe_dynamic_edit "left" "source-left" "before" "after";
+       recipe_dynamic_edit "right" "source-right" "before" "after"]
+    else [recipe_edit "left" (public_args left "before" "after");
+          recipe_edit "right" (public_args right "before" "after")] in
   let both, resolve_both = Eio.Promise.create () in
   let entered = ref 0 in
   (match Eio.Switch.run (fun child ->
@@ -348,6 +384,31 @@ let test_cancelled_recipe_releases_file_capabilities () =
   ignore (dispatch env bundle.tools [recipe_call ~id:"recipe-after-cancel" nodes]);
   check string "successor invocation reacquires left" "after" (read left);
   check string "successor invocation reacquires right" "after" (read right)
+;;
+
+let test_dynamic_failed_conflict_keeps_independent_branch () =
+  fixture @@ fun env sw config meta recovery root ->
+  public_bundle ~with_read:true env sw config meta recovery @@ fun meta _task _cell _causal bundle ->
+  let shared = Filename.concat root "dynamic-failure/shared" in
+  let other = Filename.concat root "dynamic-failure/other" in
+  write shared "before"; write other "before";
+  let nodes = [recipe_read "shared-source" shared; recipe_read "other-source" other;
+    recipe_dynamic_edit "failed" "shared-source" "absent" "after";
+    recipe_dynamic_edit "blocked" "shared-source" "before" "must-not-run";
+    recipe_dynamic_edit "independent" "other-source" "before" "after"] in
+  let call = Agent_core.Types.ToolUse {id = "failed-dynamic"; name = Keeper_composition_draft.run_tool_name;
+    input = `Assoc ["recipe", `Assoc ["execution", `String "inline";
+      "branch_failure_policy", `String "continue_independent"; "nodes", `List nodes]]} in
+  let rows = execute env bundle.tools [call] in
+  (match rows with
+   | [(row : Agent_core.Agent_tools.tool_execution_result)] ->
+     (match row.outcome with
+      | Agent_core.Types.Tool_failed _ -> ()
+      | Agent_core.Types.Tool_succeeded -> fail "dynamic failed patch became a successful outer result")
+   | [] | _ :: _ -> fail "dynamic recipe did not retain exactly one outer result");
+  check string "failed conflict prevents the later write" "before" (read shared);
+  check string "independent resolved resource still completes" "after" (read other);
+  check int "only reads, failed patch and independent patch dispatch" 4 (List.length (physical_leaves meta))
 ;;
 
 let test_one_inline_overlaps_its_disjoint_edits () =
@@ -1067,13 +1128,23 @@ let () = run "prepared actual file resources"
       test_case "public Edit with unavailable source stays Serial" `Quick test_public_edits_without_source_stay_serial];
     "task recipes and original file producers", [
       test_case "one recipe overlaps independent Edits with original Task and Gate receipts" `Quick
-        (test_recipe_edits_overlap_with_original_source ~nested:false);
+        (test_recipe_edits_overlap_with_original_source ~dynamic:false ~nested:false);
       test_case "fixed exact child Skills overlap through the original recipe" `Quick
-        (test_recipe_edits_overlap_with_original_source ~nested:true);
+        (test_recipe_edits_overlap_with_original_source ~dynamic:false ~nested:true);
+      test_case "upstream file outputs bind independent recipe resources" `Quick
+        (test_recipe_edits_overlap_with_original_source ~dynamic:true ~nested:false);
+      test_case "upstream arguments preserve exact nested Skill overlap and activations" `Quick
+        (test_recipe_edits_overlap_with_original_source ~dynamic:true ~nested:true);
+      test_case "resolved dynamic conflicts consume committed predecessor bytes" `Quick
+        (test_recipe_conflicts_consume_predecessor_bytes ~dynamic:true);
+      test_case "cancelled dynamic recipe releases capabilities for its successor" `Quick
+        (test_cancelled_recipe_releases_file_capabilities ~dynamic:true);
+      test_case "dynamic failed conflict preserves independent completed effects" `Quick
+        test_dynamic_failed_conflict_keeps_independent_branch;
       test_case "recipe conflicts consume committed predecessor bytes" `Quick
-        test_recipe_conflicts_consume_predecessor_bytes;
+        (test_recipe_conflicts_consume_predecessor_bytes ~dynamic:false);
       test_case "cancelled recipe releases capabilities for its successor" `Quick
-        test_cancelled_recipe_releases_file_capabilities];
+        (test_cancelled_recipe_releases_file_capabilities ~dynamic:false)];
     "published Inline Skills and actual Edit", [
       test_case "one published Skill overlaps Edits sharing the resolved source" `Quick
         (test_shared_source_edits_overlap ~in_skill:true);

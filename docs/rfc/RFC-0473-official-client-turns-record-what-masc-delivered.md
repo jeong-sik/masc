@@ -7,7 +7,7 @@ updated: 2026-10-17
 author: vincent + claude
 supersedes: []
 superseded_by: null
-related: ["#37752", "#43561", "#43564", "#43583", "RFC-0390", "RFC-0460"]
+related: ["#37752", "#43561", "#43564", "#43583", "#43597", "RFC-0390", "RFC-0460"]
 implementation_prs: []
 ---
 
@@ -121,7 +121,7 @@ type delivery =
 
 - Codex 는 이미 쓰기가 끝난 메시지마다 `context_submission` 을 남긴다. 칸마다 바이트 수와 sha256 이다(`runtime_codex_app_server.mli:469`). keeper 쪽 `Keeper_context_submission_link` 가 이것을 masc 가 만든 조각과 맞춰 `verified`·`partial`·`unavailable` 로 판정한다.
 - 나머지 세 runtime 은 쓰기 끝을 내용 없이 알린다. Muse·Antigravity 는 `on_prompt_sent : unit -> unit` 이고, Claude Code 는 `Runtime_claude_input_attribution` 의 `Written`·`Write_unknown` 단계만 있다.
-- **세 runtime 도 쓰기가 끝난 바이트의 칸·바이트 수·sha256 을 같은 타입으로 알린다.** Codex 의 `context_submission` 을 공통 모듈로 옮기고, `on_prompt_sent` 를 그 값을 받는 콜백으로 바꾼다. Claude Code 는 system prompt 파일과 stdin 프레임 두 칸이다.
+- **세 runtime 도 쓰기가 끝난 바이트의 칸·바이트 수·sha256 을 같은 타입으로 알린다.** Codex 의 기록 타입과 칸 찾기를 공통 모듈 `Runtime_official_client_write` 로 옮기고, 세 runtime 도 Codex 처럼 `on_context_submission` 콜백으로 알린다. `on_prompt_sent` 는 디스패치 표시로 그대로 둔다. 그래야 기록이 실패해도 턴이 실패하지 않는다. Claude Code 는 system prompt 파일과 stdin 의 user message 두 번 쓴다.
 - keeper 쪽은 네 lane 모두 `Keeper_context_submission_link` 로 5.1 의 조각과 쓴 바이트를 맞춘다. 판정 결과를 기록에 같이 남긴다.
 
 "기록 = 쓴 것"을 약속하지 않는다. 기록은 masc 가 만든 조각과, 그중 얼마가 실제로 쓴 바이트와 맞는지를 함께 말한다. Claude Code 처럼 쓰기 결과를 모르는 경우(`Write_unknown`)도 그대로 남는다.
@@ -217,7 +217,7 @@ turn record 와 provider-input JSON 을 읽는 곳은 모르는 키가 있으면
 MASC Native Stack 하나로 올리고, 맨 위 PR 로 한 번에 병합한다.
 
 1. provider-input 목록 응답과 조각 받기(5.5). Agent Core 기록으로 먼저 바꾸고, TUI·대시보드도 같이 바꾼다. #37752 가 닫힌다. #43583(스택 #43584, #43561 위)이다.
-2. 쓰기 기록: Codex 의 `context_submission` 을 공통 모듈로 옮기고, Claude Code·Muse·Antigravity 가 같은 값을 남긴다(5.2).
+2. 쓰기 기록: Codex 의 `context_submission` 을 공통 모듈로 옮기고, Claude Code·Muse·Antigravity 가 같은 값을 남긴다(5.2). #43597 이다.
 3. 타입: `delivery`, `Host.resume_prompt` 의 맥락별 텍스트, provider-input `origin`, turn record `client_delivery`, `write_best_effort` 의 결과, JSON 읽기·쓰기. 5.7 의 소비처를 같이 고친다.
 4. lane 네 곳: `delivery` 를 만들고 쓰기 기록과 맞춰 provider-input 과 turn record 를 쓴다.
 5. TUI: 행마다 기록 종류로 고르기, 세 탭 그리기, `attributed` 지우기.

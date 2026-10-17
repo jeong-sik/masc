@@ -16,6 +16,9 @@ let input_preview_of_json (json : Yojson.Safe.t) =
   Observability_redact.redact_preview ~max_len:200 raw
 ;;
 
+(* One serializer for the audit witness and the dashboard row. The full stored
+   route, [user_id] included, is kept so both carry the same exact receipt; the
+   dashboard checks it strictly but does not display [user_id]. *)
 let origin_json_fields (entry : pending_approval) =
   [ "origin", Keeper_approval_origin.to_yojson entry.origin
   ; "continuation_channel", Keeper_continuation_channel.to_yojson entry.continuation_channel

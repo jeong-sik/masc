@@ -2433,6 +2433,69 @@ let test_commit_callback_bypasses_async_queue ~success env =
         1
         (List.length (read_recent ~n:1 ()))))
 
+let test_commit_observers_keep_durable_occurrences_and_fiber_scopes env =
+  with_tmp_log (fun () -> Eio.Switch.run (fun sw ->
+    Keeper_tool_call_log.start_flush_fiber ~sw ~clock:(Eio.Stdenv.clock env);
+    let first = Ids.Execution_id.generate () and second = Ids.Execution_id.generate () in
+    let observe expected node target (receipt : Keeper_tool_call_log.committed_call) =
+      let id = match receipt.execution_id with Some id -> id | None -> Alcotest.fail "committed source execution is missing" in
+      Alcotest.(check bool) "original physical execution identity" true (Ids.Execution_id.equal expected id);
+      Alcotest.(check (option string)) "original native node identity" node receipt.composition_node_id;
+      let rows = read_recent ~keeper_name:"observed-k" () in
+      Alcotest.(check bool) "observation follows readable durable append" true
+        (List.exists (fun row -> Yojson.Safe.Util.member "execution_id" row = `String (Ids.Execution_id.to_string id)) rows);
+      target := receipt :: !target in
+    let left = ref [] and right = ref [] in
+    let first_observer = Keeper_tool_call_log.make_commit_observer (observe first None left) in
+    let second_observer = Keeper_tool_call_log.make_commit_observer (observe second (Some "original-child") right) in
+    let append ?composition_node_id ?on_committed execution_id =
+      Keeper_tool_call_log.log_call ~keeper_name:"observed-k" ~tool_name:"Read"
+        ~input:(`Assoc []) ~output_text:"original bytes" ~duration_ms:1.0 ~wire_outcome:Tool_result.Ok
+        ~execution_id ~tool_use_id:"" ?composition_node_id ?on_committed () in
+    Eio.Fiber.both
+      (fun () -> Keeper_tool_call_log.with_commit_observer first_observer (fun () ->
+        Eio.Fiber.yield (); append first))
+      (fun () -> Keeper_tool_call_log.with_commit_observer second_observer (fun () ->
+        Eio.Fiber.yield (); append ~composition_node_id:"original-child" second));
+    append ~on_committed:(fun () -> ()) (Ids.Execution_id.generate ());
+    Alcotest.(check int) "first scope sees only its own source" 1 (List.length !left);
+    Alcotest.(check int) "second scope sees only its own source" 1 (List.length !right);
+    Alcotest.(check int) "physical calls are not duplicated" 3 (List.length (read_recent ~keeper_name:"observed-k" ()));
+    Alcotest.(check int) "durable observations bypass the asynchronous queue" 0
+      (Keeper_tool_call_log.queued_count_for_testing ())))
+;;
+
+let test_commit_observer_failure_preserves_commit_and_callback () =
+  with_tmp_log (fun () ->
+    let observer = Keeper_tool_call_log.make_commit_observer (fun _ -> failwith "fixture observer delivery failure") in
+    let notified = ref false in
+    Keeper_tool_call_log.with_commit_observer observer (fun () ->
+      Keeper_tool_call_log.log_call ~keeper_name:"observer-failure" ~tool_name:"Read"
+        ~input:(`Assoc []) ~output_text:"committed bytes" ~duration_ms:1.0 ~wire_outcome:Tool_result.Ok
+        ~execution_id:(Ids.Execution_id.generate ()) ~on_committed:(fun () -> notified := true) ());
+    Alcotest.(check int) "coverage gap is explicit" 1 (Keeper_tool_call_log.failed_commit_deliveries observer);
+    Alcotest.(check bool) "original completion callback still runs" true !notified;
+    Alcotest.(check int) "committed physical effect evidence is retained" 1
+      (List.length (read_recent ~keeper_name:"observer-failure" ())))
+;;
+
+let test_commit_observer_never_invents_failed_append_evidence () =
+  with_tmp_corrupt_tool_call_store (fun ~dir:_ ~masc_root:_ ->
+    let observed = ref 0 in
+    let observer = Keeper_tool_call_log.make_commit_observer (fun _ -> incr observed) in
+    let result =
+      try
+        Keeper_tool_call_log.with_commit_observer observer (fun () ->
+          Keeper_tool_call_log.log_call ~keeper_name:"uncommitted-k" ~tool_name:"Read"
+            ~input:(`Assoc []) ~output_text:"not committed" ~duration_ms:1.0 ~wire_outcome:Tool_result.Ok ());
+        Ok ()
+      with
+      | Eio.Cancel.Cancelled _ as error -> raise error
+      | error -> Error error in
+    (match result with Error _ -> () | Ok () -> Alcotest.fail "required observation used an unavailable store");
+    Alcotest.(check int) "no physical commit was invented" 0 !observed)
+;;
+
 let test_commit_callback_fails_closed_without_store () =
   Keeper_tool_call_log.reset_for_testing ();
   let raised =
@@ -3302,6 +3365,12 @@ let () =
             (test_commit_callback_bypasses_async_queue ~success:true)
         ; eio_env_test "failed tool row commits before publication"
             (test_commit_callback_bypasses_async_queue ~success:false)
+        ; eio_env_test "durable commit observations retain original identities and fiber scopes"
+            test_commit_observers_keep_durable_occurrences_and_fiber_scopes
+        ; eio_test "observer delivery failure preserves commit and original callback"
+            test_commit_observer_failure_preserves_commit_and_callback
+        ; eio_test "failed append emits no committed observation"
+            test_commit_observer_never_invents_failed_append_evidence
         ; eio_test "commit callback fails closed without store"
             test_commit_callback_fails_closed_without_store
         ; eio_env_test "a keeper's revision moves with its own appends only"

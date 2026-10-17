@@ -3373,7 +3373,7 @@
 (test
  (name test_tui_chat_queue_wiring)
  (modules test_tui_chat_queue_wiring)
- (libraries masc.keeper_execution_scope masc.masc_core masc_tui_chat_media masc.keeper_chat_delivery_identity masc.runtime masc.keeper_chat_operations masc.server masc.ag_ui masc_tui_message_input masc_tui_link_preview masc_tui_image_preview
+ (libraries eio eio_main masc.keeper_execution_scope masc.masc_core masc_tui_chat_media masc.keeper_chat_delivery_identity masc.runtime masc.keeper_chat_operations masc.server masc.ag_ui masc_tui_message_input masc_tui_link_preview masc_tui_image_preview
   masc_tui_answering
   masc_tui_keys
   masc_tui_fusion_model

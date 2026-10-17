@@ -663,3 +663,9 @@ val models_account_reading : provider:string -> overview_account_emails_reading 
 
 val models_source_account_reading : provider:string -> runtime_config_reading option -> string option * string list
 (** Models labels come only from the account reading published with its source. *)
+
+val studio_panel : width:int -> title:string -> lines:string list -> string list
+(** Framed sub-panel box with a middle-truncated title header and cell-fitted rows. *)
+
+val lane_run_clock : float -> string
+(** Local [MM-DD HH:MM:SS] timestamp for lane run and harness verdict sidebars. *)

@@ -230,6 +230,34 @@ let test_work_tasks_budget_and_window_bounds () =
   check string "overflow window text reports visible slice" "1-3/6"
     (Masc_tui_scroll.window_text ~scroll:0 ~height:room 6)
 
+let test_studio_panel_top_border_and_lane_run_clock () =
+  let rows =
+    Masc_tui_render_prim.studio_panel ~width:24 ~title:"Workspace Studio"
+      ~lines:[ "row one"; "row two" ]
+  in
+  check int "studio_panel emits top heading border, 2 body rows, and bottom border"
+    4 (List.length rows);
+  (match rows with
+   | top :: _ ->
+     let plain_top = Masc_tui_theme.strip_sgr top in
+     check string "top border embeds title and restores horizontal rule to top-right corner"
+       "┌ Workspace Studio ────┐" plain_top;
+     check int "top border matches exact panel width" 24
+       (Masc_tui_message_layout.display_width top)
+   | [] -> fail "expected studio_panel rows");
+  List.iter
+    (fun row ->
+      check int "every studio_panel row matches panel width" 24
+        (Masc_tui_message_layout.display_width row))
+    rows;
+  let formatted = Masc_tui_render_prim.lane_run_clock 1_700_000_000.0 in
+  check int "lane_run_clock formats as MM-DD HH:MM:SS (14 chars)" 14
+    (String.length formatted);
+  check char "month-day separator is hyphen" '-' formatted.[2];
+  check char "date-time separator is space" ' ' formatted.[5];
+  check char "hour-minute separator is colon" ':' formatted.[8];
+  check char "minute-second separator is colon" ':' formatted.[11]
+
 let () =
   run "tui_planning_order"
     [ ( "planning"
@@ -240,6 +268,8 @@ let () =
             test_narrow_planning_rollup_and_clause_packing
         ; test_case "work_tasks budget and window bounds" `Quick
             test_work_tasks_budget_and_window_bounds
+        ; test_case "studio_panel top border and lane_run_clock" `Quick
+            test_studio_panel_top_border_and_lane_run_clock
         ; test_case "default filter is Active" `Quick
             test_default_filter_is_active
         ; test_case "filter cycles all/active/completed/dropped" `Quick

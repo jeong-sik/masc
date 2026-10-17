@@ -5224,3 +5224,22 @@ let models_source_account_reading ~provider reading =
           | Some (Not_read Environment_credential) -> Some "Account email: environment credential"
           | Some (Email _ | Unrecognized) | None -> None in
         email, (match gap with Some note -> note :: notes | None -> notes)
+
+let studio_panel ~width ~title ~lines =
+  let inner = max 1 (width - 4) in
+  let heading = Message_layout.truncate_middle inner title in
+  let border left right =
+    Theme.recede () ^ left ^ draw_hline (max 0 (width - 2)) ^ right ^ Ansi.reset
+  in
+  [ Theme.info () ^ "┌ " ^ heading ^ " "
+    ^ draw_hline (max 0 (width - Message_layout.display_width heading - 4))
+    ^ "┐" ^ Ansi.reset ]
+  @ List.map (fun line ->
+      Theme.recede () ^ "│ " ^ Ansi.reset ^ fit_width line inner
+      ^ Theme.recede () ^ " │" ^ Ansi.reset) lines
+  @ [ border "└" "┘" ]
+
+let lane_run_clock started_at =
+  let tm = Unix.localtime started_at in
+  Printf.sprintf "%02d-%02d %02d:%02d:%02d" (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+    tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec

@@ -11654,8 +11654,7 @@ let load_http_keeper_surfaces ~on_progress ~on_asks ~on_roster ~ask_request ~ros
          (match on_asks with
           | None -> ()
           | Some publish ->
-              if Result.is_ok asks_result then
-                Option.iter (fun identity -> publish identity observation) expected_workspace);
+              Option.iter (fun identity -> publish identity observation) expected_workspace);
          observation)) ask_request)
     (fun () ->
        if not needs.needs_keeper_roster then None
@@ -11668,9 +11667,9 @@ let load_http_keeper_surfaces ~on_progress ~on_asks ~on_roster ~ask_request ~ros
                | None -> Error (Keeper_control.Roster_malformed "Server workspace identity is unavailable")
                | Some expected_workspace -> load_keeper_roster ~host ~port ~expected_workspace in
              let observation = {roster_request;roster_result} in
-             (* The roster endpoint enforces both expected workspace paths;
-                an error is left for the final identity-checked bundle. *)
-             if Result.is_ok roster_result then Option.iter (fun publish ->
+             (* Success and failure settle the same request. A failed read
+                withdraws stale actions without waiting for sibling readers. *)
+             Option.iter (fun publish ->
                Option.iter (fun identity -> publish identity observation) expected_workspace) on_roster;
              observation)) roster_request)
 
@@ -11880,11 +11879,10 @@ let load_http_surfaces ~surface_request ~on_initial_identity ~on_progress ~on_ov
                                 Masc_tui_loader.load_workspace_approvals ~expected_workspace ~host ~port
                             | Error detail -> Error detail in
                           let observation = { ao_ticket; ao_result } in
-                          (match on_approvals, http_server_identity, ao_result with
-                           | Some publish, Ok identity, Ok _ -> publish identity observation
-                           | None, (Ok _ | Error _), (Ok _ | Error _)
-                           | Some _, Error _, (Ok _ | Error _)
-                           | Some _, Ok _, Error _ -> ());
+                          (match on_approvals, http_server_identity with
+                           | Some publish, Ok identity -> publish identity observation
+                           | None, (Ok _ | Error _)
+                           | Some _, Error _ -> ());
                           observation))
                   approval_ticket))
         (fun () ->
@@ -16513,44 +16511,42 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
               ~scoped_refresh_followup ~before
           end)
   | Http_approvals_loaded early ->
-      if Option.is_some state.http_refresh_started_ns
-         && Http_refresh_order.is_current state.http_refresh_order early.eap_ticket
-         && early.eap_authority = state.workspace_authority
-         && state.workspace_identity = Workspace_identity_match
-         && Masc_tui_types.server_workspace_matches ~expected:state.server_identity
-              (Ok early.eap_identity)
-         && Masc_tui_types.workspace_identity_of_refresh ~local_base_path:state.local_base_path
-              (Ok early.eap_identity) = Workspace_identity_match
-         && Result.is_ok early.eap_observation.ao_result
+      if Masc_tui_types.can_admit_early_http_read state ~ticket:early.eap_ticket
+          ~authority:early.eap_authority early.eap_identity
       then Option.iter (fun result ->
         apply_approvals_load state result;
         Option.iter (fun started_ns ->
-          Log.Transport.info "tui_approvals_early request=%d refresh_started_ns=%Ld admitted_ms=%.3f"
+          Log.Transport.info "tui_approvals_early request=%d refresh_started_ns=%Ld admitted_ms=%.3f outcome=%s"
             (Approval.Listing_order.request_id early.eap_observation.ao_ticket) started_ns
-            (Int64.to_float (Int64.sub (Mtime_clock.elapsed_ns ()) started_ns) /. 1_000_000.))
+            (Int64.to_float (Int64.sub (Mtime_clock.elapsed_ns ()) started_ns) /. 1_000_000.)
+            (match result with Ok _ -> "received" | Error _ -> "failed"))
           state.http_refresh_started_ns)
         (take_approval_observation state early.eap_observation)
   | Http_asks_loaded early ->
       Option.iter (fun result ->
         apply_asks_load state result;
-        if Result.is_ok result then
-          Option.iter (fun started_ns ->
-            Log.Transport.info "tui_asks_early request=%d refresh_started_ns=%Ld admitted_ms=%.3f"
-              (Snapshot_read.request_id early.ea_observation.asks_request) started_ns
-              (Int64.to_float (Int64.sub (Mtime_clock.elapsed_ns ()) started_ns) /. 1_000_000.))
-            state.http_refresh_started_ns)
+        Option.iter (fun started_ns ->
+          Log.Transport.info "tui_asks_early request=%d refresh_started_ns=%Ld admitted_ms=%.3f outcome=%s"
+            (Snapshot_read.request_id early.ea_observation.asks_request) started_ns
+            (Int64.to_float (Int64.sub (Mtime_clock.elapsed_ns ()) started_ns) /. 1_000_000.)
+            (match result with Ok _ -> "received" | Error _ -> "failed"))
+          state.http_refresh_started_ns)
         (Masc_tui_types.take_early_asks_observation state early)
   | Http_keeper_roster_loaded early ->
       Option.iter (fun result ->
         let previous_items = visible_item_revision state in
         apply_keeper_roster_load state result;
         Option.iter (fun started_ns ->
-          Log.Transport.info "tui_roster_early request=%d refresh_started_ns=%Ld admitted_ms=%.3f"
+          Log.Transport.info "tui_roster_early request=%d refresh_started_ns=%Ld admitted_ms=%.3f outcome=%s"
             (Snapshot_read.request_id early.er_observation.roster_request) started_ns
-            (Int64.to_float (Int64.sub (Mtime_clock.elapsed_ns ()) started_ns) /. 1_000_000.))
+            (Int64.to_float (Int64.sub (Mtime_clock.elapsed_ns ()) started_ns) /. 1_000_000.)
+            (match result with Ok _ -> "received" | Error _ -> "failed"))
           state.http_refresh_started_ns;
-        refresh_changed_keeper_items state ~mailbox ~roster_refreshed:true previous_items;
-        resolve_opening_chat state ~base_path ~mailbox)
+        (match result with
+         | Error _ -> ()
+         | Ok _ ->
+             refresh_changed_keeper_items state ~mailbox ~roster_refreshed:true previous_items;
+             resolve_opening_chat state ~base_path ~mailbox))
         (Masc_tui_types.take_early_keeper_roster_observation state early)
   | Http_refresh_done
       (Refresh_workspace_unconfirmed

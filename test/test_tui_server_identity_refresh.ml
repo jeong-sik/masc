@@ -1052,16 +1052,23 @@ let test_initial_probe_rejects_retired_refresh () =
 
 let test_early_asks_apply_once_without_granting_authority () =
   let open Masc_tui_types in
-  let state, early = early_asks_fixture () in
-  let authority = state.workspace_authority and server = state.server_identity in
-  Alcotest.(check bool) "matching early read is admitted before the refresh completes" true
-    (take_early_asks_observation state early = Some early.ea_observation.asks_result);
-  Alcotest.(check bool) "terminal copy cannot be applied a second time" true
-    (take_asks_observation state early.ea_observation = None);
-  Alcotest.(check bool) "question read grants no new workspace authority" true
-    (state.workspace_authority = authority && state.server_identity = server
-     && state.workspace_identity = Workspace_identity_match
-     && state.http_refresh_started_ns = Some 0L)
+  List.iter (fun result ->
+    let state, early = early_asks_fixture () in
+    let early = {early with ea_observation =
+      {early.ea_observation with asks_result = result early.ea_observation.asks_result}} in
+    let authority = state.workspace_authority and server = state.server_identity in
+    accept_http_progress state {hp_ticket=early.ea_ticket;hp_authority=authority;
+      hp_event=Http_refresh_progress.Started (Surface_data,1L)};
+    Alcotest.(check bool) "matching early result settles while unrelated data is pending" true
+      (take_early_asks_observation state early = Some early.ea_observation.asks_result);
+    Alcotest.(check bool) "terminal copy cannot be applied a second time" true
+      (take_asks_observation state early.ea_observation = None);
+    Alcotest.(check bool) "question result grants no authority and ends only its own request" true
+      (state.workspace_authority = authority && state.server_identity = server
+       && state.workspace_identity = Workspace_identity_match
+       && not (Snapshot_read.in_flight state.asks_read)
+       && state.http_refresh_started_ns = Some 0L))
+    [Fun.id; (fun _ -> Error "question store unavailable")]
 
 let test_unadmitted_cold_asks_defer_without_consuming_the_read () =
   let open Masc_tui_types in
@@ -1105,6 +1112,10 @@ let test_question_answer_retires_pre_answer_reads () =
   state.asks_snapshot <- Some answered;
   Alcotest.(check bool) "delayed early read cannot reopen the answered question" true
     (take_early_asks_observation state early = None);
+  let failed = {early with ea_observation =
+    {early.ea_observation with asks_result=Error "pre-answer request failed late"}} in
+  Alcotest.(check bool) "delayed pre-answer failure cannot settle the post-answer state" true
+    (take_early_asks_observation state failed = None);
   Alcotest.(check bool) "terminal bundle cannot replay the pre-answer snapshot" true
     (take_asks_observation state early.ea_observation = None
      && state.asks_snapshot = Some answered);
@@ -1237,14 +1248,24 @@ let test_early_roster_preserves_read_ownership () =
     (take_early_keeper_roster_observation state {early with er_identity=foreign}=None);
   let failure={early.er_observation with
     roster_result=Error (Masc_tui_keeper_control.Roster_unreachable "unreachable")} in
-  Alcotest.(check bool) "failed early read retains terminal ownership" true
-    (take_early_keeper_roster_observation state {early with er_observation=failure}=None
+  Alcotest.(check bool) "a foreign failure cannot retire the current roster" true
+    (take_early_keeper_roster_observation state
+       {early with er_identity=foreign;er_observation=failure}=None
      && Snapshot_read.in_flight state.keeper_roster_read);
+  Alcotest.(check bool) "owned failure settles without waiting for the full refresh" true
+    (take_early_keeper_roster_observation state {early with er_observation=failure}
+       =Some failure.roster_result
+     && not (Snapshot_read.in_flight state.keeper_roster_read)
+     && state.http_refresh_started_ns=Some 0L);
+  Alcotest.(check bool) "terminal failure no longer owns a roster reading" true
+    (take_keeper_roster_observation state failure=None);
   let successor=match begin_keeper_roster_read state with
     | Some request -> request | None -> Alcotest.fail "successor roster did not start" in
   Alcotest.(check bool) "newer scoped roster supersedes the old full copy" true
     (take_early_keeper_roster_observation state early=None
-     && take_keeper_roster_observation state early.er_observation=None);
+     && take_early_keeper_roster_observation state {early with er_observation=failure}=None
+     && take_keeper_roster_observation state early.er_observation=None
+     && Snapshot_read.in_flight state.keeper_roster_read);
   let newer={early.er_observation with roster_request=successor} in
   suspend_workspace_readings state;
   Alcotest.(check bool) "workspace suspension retires the successor too" true

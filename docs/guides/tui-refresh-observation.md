@@ -11,7 +11,7 @@ dataset. Status alone does not certify workspace admission or faster completion.
 |---|---|---|---|
 | Refresh visibility | Connection badge and one full-refresh start clock | Pending reader, failed and interrupted reader counts; native captures at 120 x 36 and 80 x 24 | Broader live-use readability |
 | Attribution | Existing endpoint and mailbox diagnostics | One terminal record with logical reader outcomes and elapsed time; controlled native comparison | Production latency distributions |
-| Partial results | Verified Dashboard preview and questions can arrive early; roster waits for the full bundle | A matching workspace's roster can settle before unrelated reads, once per source request | Cold-start authority and other scoped datasets still use terminal admission |
+| Partial results | Verified Dashboard preview and questions can arrive early; roster waits for the full bundle | A matching workspace's roster and owned source failures can settle before unrelated reads, once per source request | Unadmitted cold-start authority and other scoped datasets still use terminal admission |
 | Authority | Request tickets and workspace identity guard admission | Diagnostic observations use the same request and authority identities | These observations never grant data or action authority |
 | Keeper execution | Existing Task/Skill preparation and owned job recovery | No model or Tool execution change in this unit | Request byte attribution, redundant roundtrips, recipe concurrency and held-job reactivation |
 
@@ -409,6 +409,52 @@ frames at both normal and narrow widths. Native latency and visible After for
 this new source remain unmeasured; prior answer frames establish the transient
 feedback problem, not the result of this implementation.
 
+## Settle source failures before unrelated readers finish
+
+The source baseline for this follow-up is
+`a2a86baf066d3e9d7d4452ff02f06cbf0823a0fa`. Early Ask, Keeper roster and operator
+confirmation publication admitted successful results, but held declared errors
+until all independent readers and the final identity probe finished. A source
+could have failed already while its pane still appeared unread or showed older
+observations without the new failure.
+
+These three producers now offer both results to the original UI request. The
+same refresh ticket, dispatch workspace authority, current matching identity and
+dataset receipt decide whether the result can settle. A failed read publishes no
+successful data or authority; it applies that dataset's existing failure policy.
+Unconfirmed, replaced, superseded, answered or already consumed requests cannot
+use this path. Unadmitted cold and scoped reads keep their existing ordering.
+The full refresh still waits for its remaining readers and final verification.
+
+| Case | Before | Source implementation |
+|---|---|---|
+| Ask read fails before a slow sibling finishes | New failure waits for the full bundle | Original request settles its failure; prior questions and answer draft remain under the existing stale-reading policy |
+| Keeper roster read fails | Stale live observations remain until the full bundle | Roster becomes unobserved and lifecycle/Item authority is withdrawn by the existing failure handler; no success-dependent Item refresh or opening navigation starts |
+| Operator confirmation read fails | Previous confirmation rows remain until the full bundle | Existing failure handler clears its snapshot and pending action after original listing/press admission |
+| Question reader has no row and no reliable inventory | Could say no questions were waiting | Canonical reading distinguishes unread, unavailable and observed empty inventory |
+| Failed result belongs to an old request or workspace | Existing ownership rules | Same rules; the current reading remains pending for its own result |
+
+After the shared identity admission, the source dependency for showing a failure
+changes from the slowest requested reader plus final probe to that source's own
+failure plus UI mailbox application. This is a dependency change, not a measured
+latency improvement. No request, polling loop, timeout or retry limit is added.
+
+The existing `tui_asks_early`, `tui_roster_early` and `tui_approvals_early` records
+now include `outcome=received|failed` for the consumed dataset result. The same
+request and `refresh_started_ns` join source application to full-refresh
+settlement. Use only `received` rows when measuring usable-result latency; retain
+failed and unfinished samples separately. An `Ok` roster with a failed Candle
+component remains a received roster result while the grouped reader ledger can
+still report failure. No error body, question text or answer is copied to these
+records.
+
+Ownership scenarios for early failure, terminal duplicate, pre-answer stale
+failure, foreign workspace and superseding roster reads are authored but not
+executed in this unit. Types, current-candidate native frames, source-error
+application latency and matched Before/After remain unverified. The empty
+question presentation was inspected in source; no wording/layout assertion test
+is introduced.
+
 ## Early operator confirmation delivery
 
 A warm full refresh can apply its operator confirmations while unrelated
@@ -423,9 +469,9 @@ operator publications are not relabeled with the current workspace.
 The UI also checks the current full-refresh ticket, dispatch authority, local
 workspace and original `Listing_order` receipt. A newer admitted listing or an operator
 action supersedes that receipt. Applying it early consumes the same receipt that
-the terminal bundle carries, so the final bundle cannot apply it again. Cold
-start and scoped reads retain their existing terminal admission path. The final
-workspace probe and confirmation-time checks remain in place.
+the terminal bundle carries, so the final bundle cannot apply it again. An
+unadmitted cold workspace and scoped reads retain their terminal admission path.
+The final workspace probe and confirmation-time checks remain in place.
 
 | Aspect | As-Is | To-Be source change |
 |---|---|---|
@@ -434,9 +480,9 @@ workspace probe and confirmation-time checks remain in place.
 | Stale/duplicate completion | Original listing/press ordering | Same ordering, shared by early and terminal delivery |
 | Observability | Terminal full-refresh ledger | Original listing request and matching refresh clock at early state admission |
 
-`tui_approvals_early` records `request`, `refresh_started_ns`, and `admitted_ms`
-after the original listing has been admitted and applied. Join its refresh clock
-to `tui_http_refresh` to distinguish confirmation availability in state from the
+`tui_approvals_early` records `request`, `refresh_started_ns`, `admitted_ms` and
+`outcome` after the original listing result has been admitted and applied. Join
+its refresh clock to `tui_http_refresh` to distinguish confirmation availability in state from the
 time the full refresh settles. It does not measure first paint or an operator
 decision. Native latency and visible Before/After for this change remain
 unmeasured; the source changes a dependency, not an established time percentile.
@@ -453,11 +499,12 @@ workspace or turn a cold start into an authorized reading.
 The roster has its own `Snapshot_read` receipt. A newer roster request supersedes
 the old one, workspace suspension retires it, and early delivery consumes it.
 The terminal bundle therefore cannot replay the same roster or its dependent
-Item refresh. Error and unadmitted results retain their terminal admission path.
-No extra HTTP request is added. Other datasets keep their existing ordering.
+Item refresh. An owned failure can settle early and withdraw those observations;
+unadmitted results retain their terminal path. No extra HTTP request is added.
+Other datasets keep their existing ordering.
 
 `tui_roster_early` records the admitted source request, full refresh's monotonic
-`refresh_started_ns` and `admitted_ms` after applying the roster to UI state.
+`refresh_started_ns`, `admitted_ms` and `outcome` after applying its result to UI state.
 Join the same refresh clock to `tui_http_refresh`; the difference separates
 roster usability in state from the terminal refresh. This is not a first-painted
 frame measurement. Native frames must still establish what was visible.
@@ -515,8 +562,8 @@ retains the failed observation that exposed registry-only inventory. Its failed
 question samples are not early-Ask latency evidence.
 
 `tui_asks_early` records the original question request ID, the full refresh's
-monotonic `refresh_started_ns` and `admitted_ms` after the successful question
-snapshot has entered UI state. It is emitted only when the existing early read
+monotonic `refresh_started_ns`, `admitted_ms` and `outcome` after its result has
+entered UI state. It is emitted only when the existing early read
 receipt is accepted and consumed. Stale, foreign, unadmitted or replayed messages
 do not produce an admission. Question text, answers and workspace paths are not
 copied into this record. Join the same refresh clock to `tui_http_refresh` to

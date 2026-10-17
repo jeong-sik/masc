@@ -1023,7 +1023,12 @@ let render_question_reader (state : state) =
      ^ Masc_tui_approvals_model.approval_list_note ~name:"questions" (Masc_tui_approvals_model.approvals_questions_reading state)));
   box_line buf cols
     (match selected with
-     | None -> "  No questions waiting"
+     | None ->
+         (match Masc_tui_approvals_model.approvals_questions_reading state with
+          | Masc_tui_approvals_model.List_read -> "  No questions waiting"
+          | List_not_read Approval_unread -> "  Questions not loaded"
+          | List_not_read (Approval_failed _ | Approval_stale _ | Approval_unavailable _) ->
+              "  Question source unavailable")
      | Some row ->
          let draft = Ask_projection.draft_for state.ask_draft ~row in
          let drafted = List.filter (fun question ->

@@ -1,4 +1,7 @@
-(** Operator-snapshot dashboard HTTP handler. *)
+(** Operator-snapshot dashboard HTTP handler. Parameterized responses compute
+    their own rows and carry canonical
+    [workspace_identity] paths with [state_ready]. Default cached publications
+    retain their own identity and are not relabeled with the current workspace. *)
 
 val operator_snapshot_http_json :
   state:Mcp_server.server_state ->

@@ -101,6 +101,38 @@ publication authority. Removing one request is a source-level result; matched
 native request counts, full refresh timing and final workspace-refusal behavior
 must be recorded separately before claiming an observed latency improvement.
 
+## Early operator confirmation delivery
+
+A warm full refresh can apply its operator confirmations while unrelated
+Dashboard or surface readers are still running. The parameterized operator
+summary computes its own rows and includes `workspace_identity` with canonical
+`base_path`, `masc_root`, and boolean `state_ready`. The TUI checks both paths
+against the original identity probe and requires readiness before offering the
+result to the UI. A missing, duplicate, malformed, foreign or booting attestation
+is a failed read, including when the confirmation list is empty. Default cached
+operator publications are not relabeled with the current workspace.
+
+The UI also checks the current full-refresh ticket, dispatch authority, local
+workspace and original `Listing_order` receipt. A newer admitted listing or an operator
+action supersedes that receipt. Applying it early consumes the same receipt that
+the terminal bundle carries, so the final bundle cannot apply it again. Cold
+start and scoped reads retain their existing terminal admission path. The final
+workspace probe and confirmation-time checks remain in place.
+
+| Aspect | As-Is | To-Be source change |
+|---|---|---|
+| Warm confirmation availability | After all readers join and final identity returns | After its own attested response reaches the current UI request |
+| Additional HTTP requests for early delivery | None | None |
+| Stale/duplicate completion | Original listing/press ordering | Same ordering, shared by early and terminal delivery |
+| Observability | Terminal full-refresh ledger | Original listing request and matching refresh clock at early state admission |
+
+`tui_approvals_early` records `request`, `refresh_started_ns`, and `admitted_ms`
+after the original listing has been admitted and applied. Join its refresh clock
+to `tui_http_refresh` to distinguish confirmation availability in state from the
+time the full refresh settles. It does not measure first paint or an operator
+decision. Native latency and visible Before/After for this change remain
+unmeasured; the source changes a dependency, not an established time percentile.
+
 ## Early Keeper roster delivery
 
 For a workspace already confirmed by the TUI, a successful roster response may

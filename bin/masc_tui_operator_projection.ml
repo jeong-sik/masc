@@ -114,6 +114,8 @@ module Listing_order = struct
     if Flow.is_current flow ticket.press && ticket.seq > order.applied_seq then
       { order with applied_seq = ticket.seq }, true
     else order, false
+
+  let request_id ticket = ticket.seq
 end
 
 let ( let* ) = Result.bind
@@ -299,6 +301,27 @@ let decode_snapshot json =
             aps_total_count;
             aps_hidden_count;
           }
+
+let decode_workspace_snapshot ~expected_base_path ~expected_masc_root json =
+  let* () =
+    match json with
+    | `Assoc fields ->
+      (match List.filter (fun (name, _) -> String.equal name "workspace_identity") fields with
+       | [_, `Assoc identity] when List.length identity = 3 ->
+         (match List.assoc_opt "base_path" identity,
+                List.assoc_opt "masc_root" identity,
+                List.assoc_opt "state_ready" identity with
+          | Some (`String base), Some (`String root), Some (`Bool true)
+            when expected_base_path <> "" && expected_masc_root <> ""
+              && not (Filename.is_relative expected_base_path)
+              && not (Filename.is_relative expected_masc_root)
+              && String.equal base expected_base_path
+              && String.equal root expected_masc_root -> Ok ()
+          | _ -> Error "approval response workspace or readiness does not match this request")
+       | _ -> Error "approval response requires one complete workspace identity")
+    | _ -> Error "approval response must be an object"
+  in
+  decode_snapshot json
 
 let bounded_json json =
   let rendered = Yojson.Safe.to_string json in

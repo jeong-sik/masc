@@ -76,9 +76,17 @@ module Listing_order : sig
       fetch of the same listing has already been admitted. An admitted
       answer becomes the newest; a refused one changes nothing. *)
   val admit : t -> Flow.t -> ticket -> t * bool
+  val request_id : ticket -> int
 end
 
 val decode_snapshot : Yojson.Safe.t -> (approval_snapshot, string) result
+val decode_workspace_snapshot :
+  expected_base_path:string ->
+  expected_masc_root:string ->
+  Yojson.Safe.t -> (approval_snapshot, string) result
+(** Decode a freshly computed operator snapshot only when its response binds
+    both canonical workspace paths and confirms server readiness. Empty
+    approval lists require the same attestation as nonempty lists. *)
 val approval_decision_wire : approval_decision -> string
 val approval_payload_for_terminal : Yojson.Safe.t -> string
 (** Serialize the raw typed payload, then escape terminal control code points.

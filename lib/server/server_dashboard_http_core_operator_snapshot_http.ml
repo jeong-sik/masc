@@ -19,6 +19,23 @@ module Core_operator_query = Server_dashboard_http_core_operator_query
    loop siblings (#17358/#17384) and the digest handler sibling (#17389). *)
 open Server_dashboard_http_runtime_support
 
+(* Only the parameterized path computes this request's rows directly. Never
+   attach the current workspace to a cached default publication: that would
+   turn an unrelated old publication into apparent response authority. *)
+let with_workspace_attestation ~(config : Workspace.config) json =
+  match json with
+  | `Assoc fields ->
+    (try
+       let identity = `Assoc
+         [ "base_path", `String (Unix.realpath config.base_path)
+         ; "masc_root", `String (Unix.realpath (Workspace.masc_dir config))
+         ; "state_ready", `Bool (Server_startup_state.snapshot ()).state_ready ] in
+       `Assoc (("workspace_identity", identity)
+         :: List.remove_assoc "workspace_identity" fields)
+     with Unix.Unix_error _ ->
+       `Assoc ["error", `String "Operator snapshot workspace paths are unavailable"])
+  | other -> other
+
 let operator_snapshot_http_json ~state ~sw ~clock ~broadcast_snapshot request =
   let workspace_scope = Mcp_server.workspace_scope state in
   let config = workspace_scope.config in
@@ -189,5 +206,6 @@ let operator_snapshot_http_json ~state ~sw ~clock ~broadcast_snapshot request =
          ]
     in
     compute ()
-    |> Core_operator_query.with_operator_snapshot_metadata ~config ~query)
+    |> Core_operator_query.with_operator_snapshot_metadata ~config ~query
+    |> with_workspace_attestation ~config)
 ;;

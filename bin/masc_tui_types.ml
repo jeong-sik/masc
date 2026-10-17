@@ -15230,8 +15230,8 @@ let keeper_message_preparation_timeline (state : state) transcript =
           let same_execution = match Transcript.source transcript,lane with
             | Masc_tui_keeper_chat_log.Operation _, Tui_decode.Turn_lane_chat_operation ->
               Option.exists (fun scope ->
-                Option.exists (fun id -> Masc.Keeper_operation_id.to_string id = Transcript.execution_id transcript)
-                  (Masc.Keeper_execution_scope_id.direct_operation_id scope)) preview.ktp_execution_scope
+                Option.exists (fun id -> Keeper_operation_id.to_string id = Transcript.execution_id transcript)
+                  (Keeper_execution_scope_id.direct_operation_id scope)) preview.ktp_execution_scope
             | Autonomous_turn original, (Turn_lane_autonomous | Turn_lane_maintenance) ->
               turn_ref = Some original && List.for_all (fun (span : Masc.Keeper_turn_preview.preparation_span) ->
                 span.preparation.turn_ref = Some original)

@@ -22,6 +22,9 @@ FALLBACK_MODELS="${BENCH_FALLBACK_MODELS:-}"
 ENVIRONMENT="${BENCH_ENV:-docker}"
 CONCURRENCY="${CONCURRENCY:-2}"
 TS="$(date +%Y%m%d-%H%M%S)"
+RUN_DIR="results/jobs/matrix-${TS}"
+mkdir -p "$RUN_DIR"
+echo "matrix jobs: $RUN_DIR"
 
 # Before the dataset download and any arm, so a missing list does not stop
 # the job after hours of earlier arms.
@@ -83,7 +86,7 @@ for arm in ${ARMS_CSV//,/ }; do
   # bootstrap's package installs, which harbor's 360s default does not fit.
   common=( -d "${DATASET}" --env "${ENVIRONMENT}"
            -k "$K" -n "${CONCURRENCY}" --agent-setup-timeout-multiplier 5
-           -o results/jobs --job-name "$job" )
+           -o "$RUN_DIR" --job-name "$job" )
   if [[ "$arm" == "a" ]]; then
     if [[ -z "${BASELINE_AGENT}" ]]; then
       echo "no same-model harbor agent known for ${MODEL}; skipping arm a" >&2
@@ -104,5 +107,5 @@ for arm in ${ARMS_CSV//,/ }; do
       ${EXCLUDE_ARGS[@]+"${EXCLUDE_ARGS[@]}"}
   fi
 done
-uv run python aggregate.py "results/jobs" > "results/summary-${TS}.csv"
+uv run python aggregate.py "$RUN_DIR" > "results/summary-${TS}.csv"
 echo "wrote results/summary-${TS}.csv"

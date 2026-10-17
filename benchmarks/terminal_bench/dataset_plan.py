@@ -46,6 +46,7 @@ class TaskNeeds:
     cpus: int
     memory_mb: int
     gpus: int
+    requires_network_isolation: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,12 +54,14 @@ class Capacity:
     cpus: int
     memory_mb: int
     gpus: bool
+    network_isolation: bool = False
 
 
 @dataclass(frozen=True, slots=True)
 class Plan:
     excluded_for_gpu: tuple[str, ...]
     over_capacity: tuple[str, ...]
+    excluded_for_network: tuple[str, ...] = ()
 
 
 class IncompleteDataset(Exception):
@@ -91,6 +94,8 @@ def read_needs(tasks_dir: Path) -> list[TaskNeeds]:
             cpus=max(agent[0], verifier[0]),
             memory_mb=max(agent[1], verifier[1]),
             gpus=max(agent[2], verifier[2]),
+            requires_network_isolation=any(
+                table.get("allow_internet") is False for table in (agent_env, verifier_env)),
         ))
     return needs
 
@@ -123,23 +128,31 @@ def concurrent_shortfall(included: list[TaskNeeds], capacity: Capacity,
 
 def plan(needs: list[TaskNeeds], capacity: Capacity, concurrency: int) -> Plan:
     excluded = tuple(t.name for t in needs if t.gpus > 0 and not capacity.gpus)
-    included = [t for t in needs if t.name not in excluded]
+    no_network = tuple(t.name for t in needs
+                       if t.requires_network_isolation and not capacity.network_isolation)
+    included = [t for t in needs if t.name not in excluded and t.name not in no_network]
     over = [line for t in included if (line := shortfall(t, capacity)) is not None]
     if not over:
         together = concurrent_shortfall(included, capacity, concurrency)
         if together is not None:
             over.append(together)
-    return Plan(excluded_for_gpu=excluded, over_capacity=tuple(over))
+    return Plan(excluded_for_gpu=excluded, over_capacity=tuple(over),
+                excluded_for_network=no_network)
 
 
 def docker_capacity() -> Capacity:
+    from harbor.environments.docker.docker import DockerEnvironment
+
     info = json.loads(subprocess.run(
         ["docker", "info", "--format", "{{json .}}"],
         check=True, capture_output=True, text=True).stdout)
     # harbor's docker environment reports no GPU support (docker.py
     # capabilities), whatever the daemon has.
     return Capacity(cpus=int(info["NCPU"]), memory_mb=int(info["MemTotal"]) // MIB,
-                    gpus=False)
+                    gpus=False,
+                    # Use the pinned runner's own daemon-kernel probe, exactly
+                    # as its per-trial network policy admission does.
+                    network_isolation=DockerEnvironment._egress_control_kernel_support())
 
 
 def main(argv: list[str]) -> int:
@@ -166,6 +179,14 @@ def main(argv: list[str]) -> int:
         print(f"{len(result.excluded_for_gpu)} of {len(needs)} tasks need a GPU, "
               f"which the {args.env} environment cannot give; this run is not "
               f"the full set: {', '.join(result.excluded_for_gpu)}", file=sys.stderr)
+    for name in result.excluded_for_network:
+        if name not in result.excluded_for_gpu:
+            print(name)
+    if result.excluded_for_network:
+        print(f"{len(result.excluded_for_network)} of {len(needs)} tasks require "
+              "network isolation in the agent or verifier, which this Docker kernel "
+              "cannot enforce; task policy is preserved and these tasks are excluded: "
+              + ", ".join(result.excluded_for_network), file=sys.stderr)
     if result.over_capacity:
         print(f"the {args.env} environment has {capacity.cpus} CPUs and "
               f"{capacity.memory_mb} MiB, and the run at concurrency "

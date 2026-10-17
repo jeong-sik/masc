@@ -41,7 +41,7 @@ MASC 하네스 자체를 Terminal-Bench 4.0.0 전체로 잰다.
 
     ./run_matrix.sh                  # arms a,b,c,e,f,h × 4.0.0 전체 × k=5, BENCH_ENV=docker
     BENCH_ENV=modal ./run_matrix.sh  # 샌드박스를 태스크마다 맞춰 만드는 환경
-    python aggregate.py results/jobs # → CSV
+    python aggregate.py results/jobs/matrix-<timestamp> # → 이번 실행의 CSV
 
 `run_matrix.sh` 는 데이터셋을 받기 전에 `preflight_arms.py` 로 MASC arm 마다 컨테이너에서
 서버를 띄워 본다. `bootstrap.sh` 가 서버를 켜고, arm 이 선언한 keeper 를 전부(`bench-1`부터
@@ -76,6 +76,13 @@ CPU 16개 이상, `docker info` 의 `MemTotal` 이 16384 MiB 이상이 되게 �
 Docker Desktop 에 16 GiB 를 줘도 `MemTotal` 은 15972 MiB 로 보고된다(2026-09-17 실측).
 기본값 `CONCURRENCY=2` 에서는 가장 큰 두 태스크(16 CPU, 8 CPU)가 같이 돌 수 있어서
 CPU 24개가 필요하다. CPU 가 16개인 Mac 에서는 로컬 docker 로 동시 실행 1 만 된다.
+
+에이전트나 별도 verifier가 `allow_internet = false`를 요구하는 과제는 Harbor의
+Docker 커널 검사로 네트워크 격리를 지원하는지도 확인한다. 지원하지 않으면 과제 정책을
+유지한 채 실행 전 제외하고 이름·사유를 출력한다. 현재 호스트에서는 GPU 과제 3개와
+네트워크 격리 과제 2개가 제외되어 61개 과제가 실행 가능하다. 이 범위는 전체 66개와
+구분해 보고한다. 각 매트릭스의 결과는 `results/jobs/matrix-<timestamp>/`에 격리하며
+요약 CSV에 이전 실행이나 smoke 결과를 섞지 않는다.
 
 ### 타임아웃
 
@@ -177,7 +184,7 @@ Anthropic 요청에서는 `tool_choice.disable_parallel_tool_use`, OpenAI 요청
 |---|---|---|
 | `anthropic` | `ANTHROPIC_API_KEY` | 이 호스트는 `ANTHROPIC_API_KEY` 가 무효라 `ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY_MASC"` 로 넘긴다 |
 | `openrouter` | `OPENROUTER_API_KEY` | 와이어 id 의 슬래시는 runtime.toml model id 로 못 쓴다. 렌더러가 바인딩을 슬러그로 만든다(`openrouter/z-ai/glm-4.7-flash` → `openrouter.z-ai-glm-4.7-flash`) |
-| `kimi_coding` | `KIMI_API_KEY` | arm A 의 kimi-cli 에는 `kimi/<model>` 로 넘어간다 |
+| `kimi_coding` | `KIMI_API_KEY` | arm A 의 Kimi Code adapter에는 `kimi/<model>` 로 넘어간다 |
 | `ollama_cloud` | `OLLAMA_CLOUD_API_KEY` | OpenAI-compatible wire(`https://ollama.com/v1`). arm A 스킵(같은 모델 harbor 에이전트 없음), b·c·d 거절(suppression 계약 없음) — `./run_matrix.sh e,f,h` 로 돌린다. 예: `-m ollama_cloud/deepseek-v4-pro`. `deepseek-v4.1-flash` 는 uncontrolled 대신 effort low 로 렌더한다(기본값은 reasoning 반복 붕괴 6/6, low 는 통과 실측) |
 | `openai` | `OPENAI_API_KEY` | 2026-09-10 기준 키에 크레딧이 없어 요청 생성 이후는 확인하지 못했다 |
 | `claude_code` | `CLAUDE_CODE_OAUTH_TOKEN` | 아래 구독 레인 |

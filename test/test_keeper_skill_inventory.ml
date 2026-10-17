@@ -427,7 +427,8 @@ let test_lane_addon_surface_binds_incarnation_and_deny () =
       "name", `String "machine_screen"; "description", `String "Read machine screen";
       "inputSchema", `Assoc ["type", `String "object"; "properties", `Assoc []]]) with
     | Ok tool -> tool | Error detail -> fail detail in
-  let export instance_id = Masc.Lane_addon_tool_export.create ~instance_id ~tool in
+  let export instance_id = Masc.Lane_addon_tool_export.create
+      ~owner:(Masc.Lane_addon_tool_export.create_owner ~instance_id) ~tool in
   let first = export "first" in
   let surface = capability_surface ~lane_addon_exports:[first] frozen in
   let descriptor = match Surface.find_descriptor_by_name surface "machine_screen" with
@@ -479,7 +480,8 @@ value = {}
     | Ok tool -> tool | Error detail -> fail detail in
   let descriptors instance = Tool_descriptor.all_descriptors () @
     List.map (fun instance_id -> Masc.Keeper_lane_addon_descriptor.create
-      (Masc.Lane_addon_tool_export.create ~instance_id ~tool)) instance in
+      (Masc.Lane_addon_tool_export.create
+        ~owner:(Masc.Lane_addon_tool_export.create_owner ~instance_id) ~tool)) instance in
   let unwrap = function Ok value -> value | Error error -> fail (Selection.error_to_string error) in
   let selected = unwrap (Selection.resolve_for_task ~snapshot:frozen ~task_id:"task-1" [reference]) in
   let project tool_descriptors tool_deny =
@@ -508,6 +510,36 @@ value = {}
   let cached,_ = Catalog.of_snapshot ~descriptors:first_descriptors frozen in
   let repeated = List.hd (Catalog.composition_entries cached) in
   check bool "same frozen authority reuses its cached plan" true (repeated.plan == first_plan);
+  let module Export = Masc.Lane_addon_tool_export in
+  let module Observation = Masc.Keeper_skill_preparation_observation in
+  let owner = Export.create_owner ~instance_id:"first" in
+  let owned_descriptors () = Tool_descriptor.all_descriptors () @
+      [Masc.Keeper_lane_addon_descriptor.create (Export.create ~owner ~tool)] in
+  Eio_main.run (fun _ ->
+  let reports = ref [] in
+  let prepare task_id = Observation.capture_result
+      ~on_report:(fun report -> reports := report :: !reports) (fun () ->
+    let tool_descriptors = owned_descriptors () in
+    let selection = unwrap (Selection.resolve_for_task ~snapshot:frozen ~descriptors:tool_descriptors
+      ~task_id [reference]) in
+    Ok (selection,Selection.prepare_surface ~snapshot:frozen ~descriptors:tool_descriptors selection)) in
+  let before,prepared = match prepare "owned-a" with Ok value -> value | Error _ -> fail "owned preparation failed" in
+  ignore (project (descriptors ["interleaved"]) []);
+  let after,reused = match prepare "owned-b" with Ok value -> value | Error _ -> fail "owned preparation reuse failed" in
+  check bool "owned dynamic export keeps the full preparation across observations" true (prepared == reused);
+  check (list string) "first Task keeps its original provenance" ["owned-a"]
+    (Selection.task_ids_for_reference before reference);
+  check (list string) "new Task does not borrow earlier Task provenance" ["owned-b"]
+    (Selection.task_ids_for_reference after reference);
+  check bool "same public id cannot retain a different worker generation's descriptor" false
+    (List.hd (List.rev (owned_descriptors ())) == first_descriptor);
+  (match !reports with
+   | [warm;cold] ->
+     let has decision report = List.exists (fun (sample : Observation.sample) ->
+       sample.component = Observation.Projection && sample.decision = Some decision) report.Observation.samples in
+     check bool "first owned generation actually constructs its projection" true (has Observation.Constructed cold);
+     check bool "second observation actually reuses its projection" true (has Observation.Reused warm)
+   | _ -> fail "expected cold and warm preparation observations"));
   let _,denied = project first_descriptors ["addon:machine_screen"] in
   check int "denied node withholds composition" 0
     (List.length (Catalog.composition_entries (Surface.skill_catalog denied)));

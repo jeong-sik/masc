@@ -116,6 +116,7 @@ module For_testing : sig
     -> input_speaker:Keeper_input_speaker.t
     -> world_observation:Keeper_world_observation.world_observation option
     -> hitl_resolution:Keeper_event_queue.hitl_resolution option
+    -> history_assistant_source:string
     -> Keeper_tooling.Response.completion_policy
 
   val with_completion_clause

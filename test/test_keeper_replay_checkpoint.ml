@@ -866,6 +866,69 @@ let test_autonomous_turn_with_tool_keeps_the_tool_record () =
     (prune_reason_to_string reason)
 ;;
 
+(* #41925: an autonomous wake that allows silence accepts a thinking lane's
+   reasoning-only final. Collection stores the context its signed reasoning
+   needed just before it. Neither reaches the next request: a toolless turn
+   leaves replay as it found it, and a turn that called a tool keeps its call
+   and result and loses the reasoning-only final with its context. *)
+let test_autonomous_reasoning_only_final_is_not_replayed () =
+  let open Agent_core.Types in
+  let context =
+    make_message ~role:User ~metadata:Extra_system_context_provenance.historical_metadata
+      [ Text "context for the signed reasoning" ]
+  in
+  let reasoning_only =
+    message Assistant
+      [ Thinking { signature = Some "sig"; content = "nothing new" }; Text "" ]
+  in
+  let toolless, toolless_reason =
+    wake_persistence
+      ~history_messages:history_seed
+      ~response_text:""
+      (history_seed @ [ message User [ Text wake_marker_text ]; context; reasoning_only ])
+    |> expect_ok
+  in
+  Alcotest.(check bool)
+    "a toolless reasoning-only turn adds nothing"
+    true
+    (toolless.messages = history_seed);
+  Alcotest.(check (option string))
+    "toolless drop reason"
+    (Some "internal_turn_not_replayed")
+    (prune_reason_to_string toolless_reason);
+  let tool_use =
+    message Assistant
+      [ ToolUse { id = "tool-9"; name = "keeper_tasks_list"; input = `Assoc [] } ]
+  in
+  let tool_result =
+    message Tool
+      [ ToolResult
+          { tool_use_id = "tool-9"
+          ; content = "3 open"
+          ; outcome = Tool_succeeded
+          ; json = None
+          ; content_blocks = None
+          }
+      ]
+  in
+  let suffix = [ message User [ Text wake_marker_text ]; tool_use; tool_result ] in
+  let after_tools, after_tools_reason =
+    wake_persistence
+      ~history_messages:history_seed
+      ~response_text:""
+      (history_seed @ suffix @ [ context; reasoning_only ])
+    |> expect_ok
+  in
+  Alcotest.(check bool)
+    "the call and its result stay, the reasoning-only final and its context go"
+    true
+    (after_tools.messages = history_seed @ suffix);
+  Alcotest.(check (option string))
+    "after-tools drop reason"
+    (Some "internal_thought_not_replayed")
+    (prune_reason_to_string after_tools_reason)
+;;
+
 let test_two_autonomous_cycles_do_not_grow_the_conversation () =
   let open Agent_core.Types in
   let first_response = "I will inspect the queue next." in
@@ -1041,6 +1104,10 @@ let () =
             "autonomous turn with a tool keeps the tool record"
             `Quick
             test_autonomous_turn_with_tool_keeps_the_tool_record
+        ; Alcotest.test_case
+            "autonomous reasoning-only final is not replayed"
+            `Quick
+            test_autonomous_reasoning_only_final_is_not_replayed
         ; Alcotest.test_case
             "two autonomous cycles do not grow the conversation"
             `Quick

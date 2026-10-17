@@ -149,9 +149,11 @@ let sse_event_progress_kind (event : Agent_core.Types.sse_event) =
    tool block opening. Whether what the model produced is deliverable is the
    accept gate's question, asked once the stream has ended: a thinking-only
    response is rejected there as [Thinking_only_no_progress] and the lane
-   rotates, so counting reasoning here does not admit a model that only
-   thinks. Carrier frames (empty deltas, signatures, block stops, message
-   frames, pings) are not production and still refresh nothing.
+   rotates, except on a wake that allows silence, where an [EndTurn] one is
+   the model's quiet final. Counting reasoning here keeps a reasoning stream
+   from being cut as stalled; it settles nothing. Carrier frames (empty
+   deltas, signatures, block stops, message frames, pings) are not
+   production and still refresh nothing.
 
    Measured 2026-09-14 (system log): 14 attempt terminals on reasoning
    models read "provider call made no progress for 900s" while the 120 s

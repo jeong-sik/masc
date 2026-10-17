@@ -1124,7 +1124,8 @@ let addon_descriptor name =
     | Ok tool -> tool
     | Error detail -> fail detail in
   Keeper_lane_addon_descriptor.create
-    (Lane_addon_tool_export.create ~instance_id:"composition-worker" ~tool)
+    (Lane_addon_tool_export.create
+      ~owner:(Lane_addon_tool_export.create_owner ~instance_id:"composition-worker") ~tool)
 ;;
 
 let test_addon_plan_preserves_factory_authority () =
@@ -1155,6 +1156,43 @@ let test_addon_plan_preserves_factory_authority () =
   | Error (Plan.Duplicate_tool_name "keeper_lane_status") -> ()
   | Error error -> fail (Plan.error_to_string error)
   | Ok _ -> fail "Add-on shadowed a static name absent from the supplied subset"
+;;
+
+let[@inline never] unowned_addon_generation tool =
+  let owner = Lane_addon_tool_export.create_owner ~instance_id:"same-fixture-id" in
+  let export = Lane_addon_tool_export.create ~owner ~tool in
+  let descriptor = Keeper_lane_addon_descriptor.create export in
+  let owner_weak = Weak.create 1 and export_weak = Weak.create 1 and descriptor_weak = Weak.create 1 in
+  Weak.set owner_weak 0 (Some owner);
+  Weak.set export_weak 0 (Some export);
+  Weak.set descriptor_weak 0 (Some descriptor);
+  owner_weak,export_weak,descriptor_weak
+;;
+
+let test_addon_factory_ownership_survives_concurrency_and_releases_retired_inputs () =
+  let tool = match Mcp_protocol.Mcp_types.tool_of_yojson
+      (`Assoc ["name",`String "fixture_owned_machine";"inputSchema",`Assoc ["type",`String "object"]]) with
+    | Ok tool -> tool | Error detail -> fail detail in
+  let owner = Lane_addon_tool_export.create_owner ~instance_id:"same-fixture-id" in
+  let ready = Semaphore.Counting.make 0 and start = Semaphore.Counting.make 0 in
+  let build () =
+    Semaphore.Counting.release ready;
+    Semaphore.Counting.acquire start;
+    Keeper_lane_addon_descriptor.create (Lane_addon_tool_export.create ~owner ~tool) in
+  let left = Domain.spawn build and right = Domain.spawn build in
+  Semaphore.Counting.acquire ready;
+  Semaphore.Counting.acquire ready;
+  Semaphore.Counting.release start;
+  Semaphore.Counting.release start;
+  let left = Domain.join left and right = Domain.join right in
+  check bool "concurrent observations publish one canonical descriptor" true (left == right);
+  let dead_owner,dead_export,dead_descriptor = unowned_addon_generation tool in
+  Gc.full_major ();
+  check bool "owned inputs survive collection of temporary key containers" true
+    (left == Keeper_lane_addon_descriptor.create (Lane_addon_tool_export.create ~owner ~tool));
+  check bool "unowned generation is not kept by its cached export" false (Weak.check dead_owner 0);
+  check bool "unowned export is not kept by its cached descriptor" false (Weak.check dead_export 0);
+  check bool "factory issuance does not retain a retired descriptor" false (Weak.check dead_descriptor 0)
 ;;
 
 let test_addon_composition_diagnostics_follow_frozen_authority () =
@@ -1217,6 +1255,8 @@ let () =
     [ ( "projection"
       , [ test_case "Add-on plans preserve factory authority" `Quick
             test_addon_plan_preserves_factory_authority
+        ; test_case "Add-on factory ownership survives concurrency and releases retired inputs" `Quick
+            test_addon_factory_ownership_survives_concurrency_and_releases_retired_inputs
         ; test_case "Add-on composition diagnostics follow frozen authority" `Quick
             test_addon_composition_diagnostics_follow_frozen_authority
         ; test_case "names equal turn setup authority" `Quick

@@ -250,7 +250,8 @@ cooperative하며, 다른 binding의 조립은 공유 lock으로 직렬화하지
 
 Task의 reference·출처·현재/보유 Task 선택·capability 판정은 각 호출에서 해석한다.
 공유하는 것은 불변 문서와 Tool 입력의 준비 결과이며 실행 결과나 권한이 아니다.
-동적 Tool이 매번 새 descriptor 객체를 발급하면 여전히 별도 입력으로 준비한다.
+동적 Tool은 아래의 worker 소유에 결속된 export·descriptor를 사용한다.
+별도 객체로 전달되는 다른 descriptor는 여전히 새 입력으로 준비한다.
 
 입력 A와 B가 소유된 상태에서 A → B → A → B를 준비하면, 소스 경로상 projection
 조립은 `4회 → 2회`, Task 표면의 카탈로그·inventory 조립도 `4회 → 2회`가 된다.
@@ -263,6 +264,47 @@ Task의 reference·출처·현재/보유 Task 선택·capability 판정은 각 �
 두 Domain의 최초 준비 공유, 소유하지 않는 snapshot·descriptor와 순환 참조의 회수를
 다룬다. 이 단위에서는 실행하지 않았다. 전체 준비 시간, 첫 유효 작업까지의 시간,
 모델 왕복, TUI 지연 개선은 별도의 같은 조건 비교가 필요하다.
+
+#### 동적 Tool의 export·descriptor 재사용
+
+비교 기준은 `a0166ab0de8037d034121d687b32dc1b3d98a946`다. 실제 worker는
+프로토콜 초기화에서 읽은 Tool 객체들을 보유하지만, 종전 관측 경로는 매번 새
+export와 descriptor를 만들어 위 준비 cache에 서로 다른 입력을 전달했다.
+
+| 조건 | As-Is | To-Be 소스 경로 |
+| --- | --- | --- |
+| 같은 worker 시작·같은 Tool 객체를 반복 관측 | export·descriptor를 다시 생성 | 같은 export·canonical descriptor 재사용 |
+| created 콜백과 준비 완료의 connection wrapper | instance 문자열로 export 식별 | 한 backend 시작이 만든 같은 owner token 사용 |
+| 같은 instance 문자열로 다른 worker 시작 | 문자열과 live schema로 호출 대상 확인 | 다른 owner이므로 별도 준비·이전 대상 호출 거절 |
+| 같은 owner의 Tool 객체 교체 | 새 descriptor | 새 export·descriptor; 호출 시 live schema도 다시 확인 |
+| detach·접근 권한 변경·이름 충돌 | live 상태에 따라 거절 | 매번 같은 live 검사를 수행 |
+| 실제 소유가 사라진 export·descriptor | 준비 cache에서 별도 입력으로 취급 | 약한 키의 순환 참조도 GC 회수 가능 |
+
+`Lane_addon_runtime.run`의 backend 시작 1회마다 새 owner token을 만들고,
+created와 ready connection wrapper가 이를 공유한다. token은 worker 자원이나
+호출 closure를 보유하지 않는다. `Ephemeron.K2`는 실제 owner와 Tool 객체를
+키로 export를, `Ephemeron.K1`은 그 export를 키로 canonical descriptor를
+재사용한다. 조회·생성·게시만 짧은 Stdlib mutex로 보호한다. 단순 이름·schema
+동등성·일시적인 pair wrapper를 재사용 권한으로 삼지 않는다.
+
+동결한 plan은 원래 export를 그대로 호출 경계로 전달한다. runtime은 현재
+가시성·phase·stopping·충돌·schema를 다시 읽고, 동결한 owner와 현재 connection의
+owner가 같은지도 확인한다. 같은 owner 안의 기존 live schema 검사는 구조적
+동등성 의미를 유지한다. factory의 재사용 조건은 더 보수적인 Tool 객체 identity다.
+권한이나 실행 결과를 cache하지 않으며, 동적 descriptor는 계속 `Ordinary Serial`이다.
+worker의 종료·정리 소유와 절차도 기존 runtime이 담당한다.
+
+같은 입력을 `R`번 관측하고 Tool이 `T`개라면, 소스 경로의 export·descriptor
+생성은 각각 `R × T → T`다. live inventory·권한·충돌 검사는 여전히 `R`번이다.
+같은 snapshot과 descriptor 순서도 유지될 때만 상위 준비 cache의 projection과
+Task 표면 조립을 재사용한다. 새 hash 조회·lock·약한 table 비용을 포함한 시간과
+메모리 절감량은 측정하지 않았다.
+
+작성한 시나리오는 실제 attach/list/call/detach 경로의 export 재사용,
+다른 owner·변경 schema의 dispatch 전 거절, Task 출처를 보존한 준비 재사용과
+관측, 두 Domain의 동시 factory 호출, 소유가 사라진 입력의 회수를 다룬다.
+이 단위에서는 실행하지 않았다. parser 검사는 타입·기능·실제 Docker·모델·TUI
+동작을 증명하지 않으며, 설치나 서버 재시작도 수행하지 않는다.
 
 ### 2b. 프롬프트 — 지명된 스킬 안내
 

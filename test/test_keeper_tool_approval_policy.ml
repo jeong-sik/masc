@@ -239,7 +239,8 @@ let test_addon_approval_uses_frozen_turn_descriptor () =
       "annotations", `Assoc ["readOnlyHint", `Bool true]]) with
     | Ok tool -> tool | Error detail -> fail detail in
   let descriptor = Masc.Keeper_lane_addon_descriptor.create
-    (Masc.Lane_addon_tool_export.create ~instance_id:"first" ~tool) in
+    (Masc.Lane_addon_tool_export.create
+      ~owner:(Masc.Lane_addon_tool_export.create_owner ~instance_id:"first") ~tool) in
   Index.bind_descriptors index [descriptor];
   check bool "export is classified by its frozen descriptor" true
     (Policy.classifies ~identity_tool_index:Masc.Keeper_identity_tool_index.empty

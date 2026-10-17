@@ -18,6 +18,12 @@ type board_reaction_event =
   ; reacted : bool
   }
 
+type answered_ask_input = {
+  original_ask : Keeper_ask.ask;
+  answers : Keeper_ask.answer list;
+  answered_at : float;
+}
+
 type pending_board_event_kind =
   | Board_post_created
   | Board_post_updated
@@ -29,6 +35,7 @@ type pending_board_event_kind =
   | Ask_answered_row of {
       answered_by : Keeper_input_speaker.person;
       answer_source_id : string option;
+      input : answered_ask_input;
     }
       (** A human answered a question this Keeper asked. Like
           {!Composition_completed} the row carries the answer itself: the
@@ -70,6 +77,8 @@ let same_board_event_identity (left : pending_board_event) (right : pending_boar
          (Board.Comment_id.to_string left_comment.Board_dispatch.comment_id)
          (Board.Comment_id.to_string right_comment.Board_dispatch.comment_id)
      | Board_post_updated, Board_post_updated -> Float.equal left.updated_at right.updated_at
+     | Ask_answered_row left, Ask_answered_row right ->
+       left.answered_by = right.answered_by && left.answer_source_id = right.answer_source_id
      | ( ( Board_post_created | Board_post_updated | Board_comment_added _
          | Board_reaction_changed _ | Board_vote_cast _ | Fusion_completed
          | Delegate_completed _ | Ask_answered_row _ | Composition_completed
@@ -103,8 +112,8 @@ let is_board_activity_event (event : pending_board_event) =
      empty pending-events list. *)
   | Composition_completed
   | Owned_job_completed _
-  (* Same again: this block renders the row's title and preview, and the
-     answer is the whole point of the wake. *)
+  (* Ask stays reactive activity for intake/decision classification. Its typed
+     payload is rendered once as ordinary user input rather than Board context. *)
   | Ask_answered_row _
   | External_attention _ -> true
   (* Neither carries a Board post, so routing either here would count a
@@ -112,6 +121,20 @@ let is_board_activity_event (event : pending_board_event) =
      as does the Task_outcome approval twin of the rejection. *)
   | Completion_authority_rejected _ | Task_outcome _ | Task_cancelled _ ->
     false
+;;
+
+let is_answered_ask_event (event : pending_board_event) =
+  match event.event_kind with
+  | Ask_answered_row _ -> true
+  | Board_post_created | Board_post_updated | Board_comment_added _
+  | Board_reaction_changed _ | Board_vote_cast _ | Fusion_completed
+  | Delegate_completed _ | Composition_completed | Owned_job_completed _
+  | Schedule_due _ | External_attention _ | Completion_authority_rejected _
+  | Task_outcome _ | Task_cancelled _ -> false
+;;
+
+let is_board_context_event event =
+  is_board_activity_event event && not (is_answered_ask_event event)
 ;;
 
 let is_scheduled_automation_event (event : pending_board_event) =
@@ -1017,7 +1040,8 @@ let pending_board_event_of_ask_answer
   { event_kind =
       Ask_answered_row
         { answered_by = Keeper_input_speaker.of_ask_responder responder
-        ; answer_source_id = Keeper_ask.answer_source_id ~ask_id:ask.ask_id ~answered_at }
+        ; answer_source_id = Keeper_ask.answer_source_id ~ask_id:ask.ask_id ~answered_at
+        ; input = { original_ask = ask; answers; answered_at } }
   ; post_id = "keeper-ask:" ^ ask.Keeper_ask.ask_id
   ; author = who
   ; title =
@@ -1027,8 +1051,8 @@ let pending_board_event_of_ask_answer
         ; "surface", Surface_ref.lane_label responder.Keeper_ask.surface
         ]
         ~fallback:ask.Keeper_ask.ask_id
-  (* This is the only model-facing copy of the operator's answers, not a
-     preview of a fetchable Board post. Keep every question's complete answer. *)
+  (* A display preview only. The model consumes the typed original questions
+     and answers, not this joined display text or its short excerpt. *)
   ; preview = body
   ; hearth = None
     (* Not a Board post: masc wrote this row, nobody posted it. Marked

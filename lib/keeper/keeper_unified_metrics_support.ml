@@ -378,7 +378,7 @@ let observed_affordances_of_observation
     (observation : Keeper_world_observation.world_observation) : string list =
   let affordances = ref [] in
   let add affordance = affordances := affordance :: !affordances in
-  if Keeper_world_observation.has_pending_board_activity observation
+  if List.exists Keeper_world_observation.is_board_context_event observation.pending_board_events
   then (
     add "board_post_or_comment";
     add "board_curation");

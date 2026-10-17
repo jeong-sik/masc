@@ -201,6 +201,12 @@ val answer_source_id : ask_id:string -> answered_at:float -> string option
 
 (** {1 Labels and codecs} *)
 
+val question_to_json : question -> Yojson.Safe.t
+val answer_to_json : answer -> Yojson.Safe.t
+(** Read-only canonical projections, also used inside the durable event codec.
+    Model-facing original-question input reuses these instead of maintaining a
+    second choice, response or question schema. *)
+
 val event_to_json : event -> Yojson.Safe.t
 val event_of_json : Yojson.Safe.t -> (event, string) result
 

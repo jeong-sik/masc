@@ -31,7 +31,7 @@ type person =
 type host_prompt =
   | Autonomous_wake of { answered_asks : person list }
       (** The autonomous-turn cue. An answered Ask is quoted in the same
-          message as a board row; [answered_asks] names who answered each
+          message as an Ask input row; [answered_asks] names who answered each
           quoted row, in the order the rows appear. The rows stay in the one
           message so the provider request keeps its shape. *)
   | Official_client_resume

@@ -88,6 +88,53 @@ stays pending. It is excluded from admitted sources, turn-entry delivery proof
 and acknowledgement. Other readable sources may proceed in the same turn. A
 source-read retry does not count as a crashed Keeper cycle.
 
+## Keep the original question in conversation input
+
+The admitted answer row retains the canonical original `Keeper_ask.ask`, exact
+per-question answers and first-answer time as typed data. The question already
+owns its prompt, complete choices/descriptions, response mode, writing hint,
+purpose and optional original Task/Goal/turn IDs. Intake reuses the strict Ask
+snapshot it already read; it performs no extra Task, Goal, Ask-status or model
+request. An absent original binding stays JSON `null`, even if the Keeper's
+current Task changed. Non-finite historical clocks are also `null` rather than a
+fabricated timestamp; the remaining question and answer data stay available.
+
+The durable user input contains `ask_origin`, `questions` and `answers` quoted
+data fields. Questions and answers use the same read-only codecs as the Ask
+event log, preserving stable question/choice IDs, full text, free-text answers
+and skipped answers. These fields replace the joined display preview and its
+short excerpt in model input. Display surfaces retain their existing previews.
+Source identity and speaker attribution remain independent of display text.
+Original Task/Goal IDs are historical context; current ownership, Gate and
+Composition authority continue to decide what can run.
+
+Ask rows remain reactive activity for intake/decision classification, while the
+prompt partition renders their content only in the ordinary durable user turn.
+They are excluded from transient Board context, which retains actual Board and
+other existing world observations. Board affordance observations use the same
+partition, so an Ask answer alone supplies no Board post/comment/curation marker.
+Later wakes do not reinsert consumed answers;
+normal context/checkpoint persistence carries the original question with its
+answer. Existing checkpoint history is not rewritten or backfilled. Reading
+answer speakers selects typed metadata without rendering the full answer again.
+
+| Surface | Before this source change | After |
+| --- | --- | --- |
+| Original question | Short header and joined answer labels/text | Complete questions, choices/descriptions, writing hints and exact per-question answers |
+| Original work context | Original purpose and Task/Goal/turn missing from model input | Recorded context and original bindings; absent stays `null` |
+| Answer placement | Full answer in transient Board context and durable user input | Canonical answer data only in durable user input |
+| Speaker extraction | Renders complete input before discarding its text | Selects typed speaker metadata |
+| Display identity | Exact original answer source | Same source; preview changes do not create another input |
+
+Authored scenarios cover a real canonical Ask log with a refused later answer,
+duplicate short question headers, multi-choice order and descriptions, long
+prompt tails, written/skipped answers, changed current Task, unlinked questions,
+and actual prompt/context/checkpoint serialization across later wakes. They are
+unexecuted under the code-only work scope. Parser checks do not establish types,
+runtime continuation, model use, installed inclusion or performance. Richer
+original-question data and JSON quoting add input bytes; removal of duplicate
+copies does not establish a net byte, token or latency saving for every Ask.
+
 Direct verification targets are the Ask store, Ask answer wake, reaction ledger,
 heartbeat source intake and TUI answer projection suites. Scenarios use actual
 isolated persistence for failed wake writes, recovery, duplicate/consumed

@@ -17,6 +17,15 @@ type board_reaction_event = {
   reacted : bool;
 }
 
+type answered_ask_input = {
+  original_ask : Keeper_ask.ask;
+  answers : Keeper_ask.answer list;
+  answered_at : float;
+}
+(** The question and answer already read from the canonical Ask log. Original
+    Task/Goal/turn identities are historical context, not current ownership or
+    permission to claim, resume, reassign or execute. No current-Task fallback. *)
+
 type pending_board_event_kind =
   | Board_post_created
   | Board_post_updated
@@ -42,13 +51,16 @@ type pending_board_event_kind =
   | Ask_answered_row of {
       answered_by : Keeper_input_speaker.person;
       answer_source_id : string option;
+      input : answered_ask_input;
     }
       (** A human answered a question this Keeper asked. [answered_by] is
           fixed from the answer's responder when the row is made, so the
           conversation can say who answered without reading the row text. Like
           {!Composition_completed} the row carries the answer itself: the
           asker has nowhere else to read it mid-cycle, and a wake with no
-          content is a wake it cannot act on. *)
+          content is a wake it cannot act on. [input] preserves the complete
+          original question context and exact per-question answers for the
+          ordinary durable user turn, independently of the display preview. *)
   | Composition_completed
   | Owned_job_completed of Keeper_event_queue.owned_job_completion
       (** A turn this Keeper asked another Keeper to run has ended. Like
@@ -137,6 +149,14 @@ val same_board_event_identity : pending_board_event -> pending_board_event -> bo
 (** Compare the underlying event, retaining distinct comments and edits on one post. *)
 
 val is_board_activity_event : pending_board_event -> bool
+
+val is_answered_ask_event : pending_board_event -> bool
+(** Conversation input is rendered in the ordinary user turn, not duplicated
+    in the transient Board context. Activity classification remains unchanged. *)
+
+val is_board_context_event : pending_board_event -> bool
+(** The shared partition for transient Board rendering and Board affordance
+    observations. Answered Ask input alone supplies neither. *)
 
 val is_scheduled_automation_event : pending_board_event -> bool
 

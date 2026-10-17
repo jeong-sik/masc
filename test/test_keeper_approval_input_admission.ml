@@ -250,6 +250,120 @@ let speaker_stamp_resumes_pre_speaker_admission () =
   | Ok (Admission.Admission_new _) -> Alcotest.fail "the stamped input was admitted again"
   | Error error -> Alcotest.fail (Admission.error_to_string error)
 
+let answered_ask_prompt_upgrade () =
+  let base_text =
+    "event=ask_answered post_id=\"keeper-ask:schedule\" author=\"operator\" title=\"schedule\" preview=\"2026-10-17 / 전시실\""
+  in
+  let module Ask = Masc.Keeper_ask in
+  let question =
+    Ask.question
+      ~question_id:"q-schedule"
+      ~header:"schedule"
+      ~prompt:"어느 전시의 일정과 입장료를 확정할까요?"
+      ~choices:[]
+      ~mode:Ask.Single
+      ~free_text:(Ask.Free_text_allowed { hint = None })
+    |> unwrap
+  in
+  let original_ask =
+    Ask.ask
+      ~ask_id:"schedule"
+      ~keeper_name:"alpha"
+      ~questions:[ question ]
+      ~context:"전시 준비 결정"
+      ~task_id:"task-101"
+      ~goal_id:"goal-original"
+      ~asked_at:100.0
+      ()
+    |> unwrap
+  in
+  let answers =
+    Ask.parse_answers
+      ~ask:original_ask
+      ~submissions:[ "q-schedule", Ask.Wrote "2026-10-17 / 전시실" ]
+    |> unwrap
+  in
+  let ask_input : Masc.Keeper_world_observation.answered_ask_input =
+    { original_ask; answers; answered_at = 200.0 }
+  in
+  let canonical_fp =
+    Masc.Keeper_unified_prompt.answered_ask_evidence_fingerprint ask_input
+  in
+  let canonical_id =
+    Admission.answered_ask_identity
+      ~ask_id:"keeper-ask:schedule"
+      ~evidence_fingerprint:canonical_fp
+    |> unwrap
+  in
+  let initial_msg = Agent_core.Types.user_msg base_text in
+  let initial_cp =
+    match
+      Admission.prepare ~identity:canonical_id ~message:initial_msg (checkpoint [])
+      |> unwrap
+    with
+    | Admission.Admission_new cp -> cp
+    | Admission.Admission_resume _ ->
+      Alcotest.fail "expected initial canonical answer admission"
+  in
+  let expanded_msg =
+    Agent_core.Types.user_msg
+      (base_text
+       ^ " ask_origin=\"{\\\"task_id\\\":\\\"task-101\\\"}\" questions=\"[...]\"")
+  in
+  let upgraded_cp =
+    match
+      Admission.prepare ~identity:canonical_id ~message:expanded_msg initial_cp |> unwrap
+    with
+    | Admission.Admission_new cp -> cp
+    | Admission.Admission_resume _ ->
+      Alcotest.fail "expected prompt-rendering change to revoke old marker and admit expanded row"
+  in
+  Alcotest.(check int)
+    "initial message preserved without marker plus upgraded message"
+    2
+    (List.length upgraded_cp.messages);
+  (match
+     Admission.prepare ~identity:canonical_id ~message:expanded_msg upgraded_cp |> unwrap
+   with
+   | Admission.Admission_resume resumed_cp ->
+     Alcotest.(check int)
+       "subsequent wake resumes without duplicating upgraded message"
+       2
+       (List.length resumed_cp.messages)
+   | Admission.Admission_new _ ->
+     Alcotest.fail "upgraded canonical answer should resume on subsequent wake");
+  let reworded_msg =
+    Agent_core.Types.user_msg (base_text ^ " questions=\"[updated-rendering]\"")
+  in
+  (match
+     Admission.prepare ~identity:canonical_id ~message:reworded_msg upgraded_cp |> unwrap
+   with
+   | Admission.Admission_new cp ->
+     Alcotest.(check bool)
+       "prompt-rendering change for same canonical answer revokes old marker and admits new copy"
+       true
+       (Admission.contains ~identity:canonical_id ~message:reworded_msg cp.messages)
+   | Admission.Admission_resume _ ->
+     Alcotest.fail "expected updated prompt text to replace marker");
+  let other_answers =
+    Ask.parse_answers
+      ~ask:original_ask
+      ~submissions:[ "q-schedule", Ask.Wrote "다른 답변" ]
+    |> unwrap
+  in
+  let conflicting_fp =
+    Masc.Keeper_unified_prompt.answered_ask_evidence_fingerprint
+      { ask_input with answers = other_answers }
+  in
+  let conflicting_id =
+    Admission.answered_ask_identity
+      ~ask_id:"keeper-ask:schedule"
+      ~evidence_fingerprint:conflicting_fp
+    |> unwrap
+  in
+  expect_conflict
+    (Admission.prepare ~identity:conflicting_id ~message:reworded_msg upgraded_cp)
+
 let () = Alcotest.run "approval input admission"
   [ "durable conversation", List.map (fun (name, test) -> Alcotest.test_case name `Quick test)
       [ "Gate and answered Ask atomic admission", gate_and_answer_co_admission
@@ -260,4 +374,5 @@ let () = Alcotest.run "approval input admission"
       ; "cold creation race", cold_creation_race
       ; "interrupted tool before approval", interrupted_tool_then_approval
       ; "stable replay identity and wire projection", stable_replay_identity
-      ; "speaker stamp resumes a pre-speaker admission", speaker_stamp_resumes_pre_speaker_admission ] ]
+      ; "speaker stamp resumes a pre-speaker admission", speaker_stamp_resumes_pre_speaker_admission
+      ; "answered Ask prompt upgrade", answered_ask_prompt_upgrade ] ]

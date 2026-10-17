@@ -4,7 +4,7 @@ open Alcotest
 
 module WO = Masc.Keeper_world_observation
 module Prompt = Masc.Keeper_unified_prompt
-module Turn = Masc.Keeper_turn
+module Direct_context = Masc.Keeper_direct_turn_context
 module Inputs = Masc.Keeper_world_observation_inputs
 
 let skill_reference name revision =
@@ -727,6 +727,19 @@ let test_recovered_current_task_is_non_authoritative () =
   check bool "primary parser error is not prompt content" false
     (contains ~needle:"decode failed" world_state)
 
+
+(* One-shot fixtures use the same public preparation product as the real direct
+   producer. The request-reprojection scenario below retains one product. *)
+let render_direct_context ~current_task ~held_task_skills ~task_skill_surfaces
+    ~workspace_memory ~workspace_memory_access ~wiki_contents ~lane_updates
+    ~approval_authority_text ~recent_direct_conversation_text ~worktree_text
+    ~telemetry_feedback_text ~turn_instructions_text =
+  let prepared = Direct_context.prepare ~current_task ~held_task_skills
+      ~task_skill_surfaces ~workspace_memory ~wiki_contents ~lane_updates
+      ~approval_authority_text ~recent_direct_conversation_text ~worktree_text
+      ~telemetry_feedback_text ~turn_instructions_text () in
+  Direct_context.project prepared ~workspace_memory_access
+
 let test_direct_turn_reuses_current_task_context () =
   let task =
     make_task
@@ -748,7 +761,7 @@ let test_direct_turn_reuses_current_task_context () =
       ()
   in
   let context =
-    Turn.For_testing.direct_turn_dynamic_context
+    render_direct_context
       ~workspace_memory_access:None
       ~wiki_contents:Masc.Keeper_wiki_contents.Off
       ~lane_updates:(Ok (`List []))
@@ -780,7 +793,7 @@ let test_direct_turn_reuses_current_task_context () =
    claimed gets the same skill lines the scheduled lane renders. *)
 let test_direct_turn_carries_held_task_skills () =
   let context =
-    Turn.For_testing.direct_turn_dynamic_context
+    render_direct_context
       ~workspace_memory_access:None
       ~wiki_contents:Masc.Keeper_wiki_contents.Off
       ~lane_updates:(Ok (`List []))
@@ -810,7 +823,7 @@ let test_direct_turn_carries_held_task_skills () =
 
 let test_direct_turn_has_no_synthetic_task_context () =
   let context =
-    Turn.For_testing.direct_turn_dynamic_context
+    render_direct_context
       ~workspace_memory_access:None
       ~wiki_contents:Masc.Keeper_wiki_contents.Off
       ~lane_updates:(Ok (`List []))
@@ -846,7 +859,7 @@ let test_direct_turn_discovers_published_workspace_memory () =
     let ledger_sha256 = match Ledger.observe ~base_path with
       | Ledger.Available row -> row.ledger_sha256
       | _ -> fail "saved ledger is unavailable" in
-    let render () = Turn.For_testing.direct_turn_dynamic_context
+    let render () = render_direct_context
       ~workspace_memory_access:(Some (direct_shared_reader ()))
       ~wiki_contents:Masc.Keeper_wiki_contents.Off
       ~lane_updates:(Ok (`List []))
@@ -975,7 +988,7 @@ let test_wiki_contents_come_from_the_pages_not_index_md () =
       | Unlisted detail -> fail detail
       | Off -> fail "the wiki contents switch is on by default" in
     check int "one entry per file, broken file included" 3 (List.length entries);
-    let direct = Turn.For_testing.direct_turn_dynamic_context
+    let direct = render_direct_context
       ~workspace_memory_access:(Some (direct_wiki_reader ()))
       ~wiki_contents
       ~lane_updates:(Ok (`List []))
@@ -1190,7 +1203,7 @@ let lane_notice =
       "replaced", `Bool false ]
 
 let direct_context ~lane_updates =
-  Turn.For_testing.direct_turn_dynamic_context
+  render_direct_context
       ~workspace_memory_access:None
       ~wiki_contents:Masc.Keeper_wiki_contents.Off
     ~lane_updates
@@ -1532,13 +1545,89 @@ let test_prepared_prompt_keeps_turn_inputs_and_request_authority () =
       (contains ~needle:answer.post_id fresh.user_message))
 ;;
 
+let test_prepared_direct_context_keeps_original_work_and_request_routes () =
+  Eio_main.run (fun _ ->
+    let memory = Masc.Workspace_memory_ledger.Available
+      { ledger_sha256 = "direct-original-ledger"; claim_count = 1;
+        conflict_count = 0; classified_count = 1;
+        briefing = Error "PRIVATE_BRIEFING_READ_FAILURE" } in
+    let prepare ~task_id ~conversation ~workspace_memory ~wiki_contents =
+      let task =
+        { (make_task ~task_status:(Masc_domain.InProgress
+             { assignee = meta.name; started_at = "2026-10-17T00:00:00Z" }) ())
+          with id = task_id } in
+      Direct_context.prepare ~current_task:(Inputs.Current_task task)
+        ~held_task_skills:
+          [{ Inputs.held_task_id = "direct-held-task";
+             held_skills = [skill_reference "direct-held-skill" 'a'] }]
+        ~task_skill_surfaces:[] ~workspace_memory ~wiki_contents
+        ~lane_updates:(Ok (`List [lane_notice]))
+        ~approval_authority_text:"ORIGINAL_APPROVAL_OBSERVATION\n"
+        ~recent_direct_conversation_text:conversation
+        ~worktree_text:"ORIGINAL_WORKTREE\n"
+        ~telemetry_feedback_text:"ORIGINAL_TELEMETRY\n"
+        ~turn_instructions_text:"  ORIGINAL_INSTRUCTIONS  " () in
+    let conversation = "  원래 질문의 답변 🐾\n원래 작업을 계속  " in
+    let prepared = prepare ~task_id:"direct-original-task" ~conversation
+        ~workspace_memory:memory ~wiki_contents:one_wiki_page in
+    let no_tools = shared_reader_access ~offered:[] ~deferred:[] ~loader_alive:false in
+    let direct = shared_reader_access
+        ~offered:["keeper_workspace_memory_read"; "keeper_wiki_read"]
+        ~deferred:[] ~loader_alive:false in
+    let discoverable = shared_reader_access ~offered:["keeper_tool_search"]
+        ~deferred:["keeper_workspace_memory_read"; "keeper_wiki_read"] ~loader_alive:true in
+    let project access = Direct_context.project prepared ~workspace_memory_access:access in
+    let initial = project None in
+    let foreign = prepare ~task_id:"direct-foreign-task" ~conversation:"FOREIGN_CONVERSATION"
+        ~workspace_memory:Masc.Workspace_memory_ledger.Missing
+        ~wiki_contents:Masc.Keeper_wiki_contents.Off in
+    ignore (Direct_context.project foreign ~workspace_memory_access:(Some direct));
+    let direct_request, discoverable_request = Eio.Fiber.pair
+        (fun () -> project (Some direct)) (fun () -> project (Some discoverable)) in
+    List.iter (fun (access, context) ->
+      List.iter (fun needle -> check bool "the request retains original work bytes" true
+        (contains ~needle context))
+        ["direct-original-task"; "direct-held-task"; "direct-held-skill";
+         conversation; "ORIGINAL_APPROVAL_OBSERVATION\n"; "ORIGINAL_WORKTREE\n";
+         "ORIGINAL_TELEMETRY\n"; "  ORIGINAL_INSTRUCTIONS  "];
+      check_lane_notice_rendered ~lane:"prepared direct request" context;
+      List.iter (fun needle -> check bool "foreign work and private read failure stay out" false
+        (contains ~needle context))
+        ["direct-foreign-task"; "FOREIGN_CONVERSATION"; "PRIVATE_BRIEFING_READ_FAILURE"];
+      List.iter (fun fragment -> check bool "reader guidance belongs to this exact request" true
+        (contains ~needle:(Option.get fragment) context))
+        [Prompt.format_workspace_memory_observation ?access memory;
+         Prompt.format_wiki_observation ?access one_wiki_page])
+      [None, initial; Some no_tools, project (Some no_tools);
+       Some direct, direct_request; Some discoverable, discoverable_request];
+    let unavailable_memory = Masc.Workspace_memory_ledger.Unavailable "PRIVATE_LEDGER_FAILURE" in
+    let unavailable_wiki = Masc.Keeper_wiki_contents.Unlisted "PRIVATE_WIKI_FAILURE" in
+    let failed = prepare ~task_id:"direct-failed-source-task" ~conversation:"CURRENT_CONVERSATION"
+        ~workspace_memory:unavailable_memory ~wiki_contents:unavailable_wiki
+      |> fun prepared -> Direct_context.project prepared ~workspace_memory_access:(Some direct) in
+    List.iter (fun needle -> check bool "a new preparation carries its own current work" true
+      (contains ~needle failed)) ["direct-failed-source-task"; "CURRENT_CONVERSATION"];
+    List.iter (fun fragment -> check bool "unavailable source stays unavailable" true
+      (contains ~needle:(Option.get fragment) failed))
+      [Prompt.format_workspace_memory_observation ~access:direct unavailable_memory;
+       Prompt.format_wiki_observation ~access:direct unavailable_wiki];
+    List.iter (fun needle -> check bool "fresh failed sources borrow no old targets or private causes" false
+      (contains ~needle failed))
+      ["direct-original-ledger"; "pm-setlist.md"; "PRIVATE_LEDGER_FAILURE";
+       "PRIVATE_WIKI_FAILURE"; conversation];
+    check string "interleaved and failed preparations never mutate the original projection"
+      initial (project None))
+;;
+
 let () =
   init_prompt_config_for_tests ();
   init_runtime_default_for_tests ();
   run "keeper_wake_turn_context"
     [
       ("prepared prompt ownership", [test_case "common turn input survives request-specific access and source failure" `Quick
-          test_prepared_prompt_keeps_turn_inputs_and_request_authority]);
+          test_prepared_prompt_keeps_turn_inputs_and_request_authority;
+        test_case "direct work survives interleaved preparation and changing request routes" `Quick
+          test_prepared_direct_context_keeps_original_work_and_request_routes]);
       ( "current task layer",
         [
           test_case "renders id, status, and handoff" `Quick

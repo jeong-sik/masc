@@ -1,0 +1,64 @@
+type t =
+  { task_context : string option
+  ; remaining_context : string option
+  ; workspace_memory : Workspace_memory_ledger.observation
+  ; wiki_contents : Keeper_wiki_contents.t
+  }
+
+let nonempty fragments =
+  List.filter (fun text -> String.trim text <> "") fragments
+
+let prepare_common fragments =
+  match nonempty fragments with
+  | [] -> None
+  | fragments -> Some (String.concat "\n\n" fragments)
+
+let direct_turn_task_context
+      ~(current_task : Keeper_world_observation_inputs.current_task_observation)
+      ~(held_task_skills : Keeper_world_observation_inputs.held_task_skills list)
+      ~(task_skill_surfaces : (string * Keeper_skill_catalog.exact_surface list) list)
+  : string
+  =
+  let current =
+    let skill_surfaces =
+      match current_task with
+      | Keeper_world_observation_inputs.Current_task task
+      | Recovered_current_task { task; _ } -> List.assoc_opt task.id task_skill_surfaces
+      | No_current_task | Current_task_missing _ | Current_task_unavailable _ -> None
+    in
+    match Keeper_unified_prompt.format_current_task_observation ?skill_surfaces current_task with
+    | Some rendered -> rendered
+    | None -> ""
+  in
+  let held =
+    match Keeper_unified_prompt.format_held_task_skills ~skill_surfaces_by_task:task_skill_surfaces held_task_skills with
+    | Some rendered -> rendered
+    | None -> ""
+  in
+  current ^ held
+
+let prepare ~current_task ~held_task_skills ~task_skill_surfaces
+    ~workspace_memory ~wiki_contents ~lane_updates ~approval_authority_text
+    ~recent_direct_conversation_text ~worktree_text ~telemetry_feedback_text
+    ~turn_instructions_text () =
+  let task_context = prepare_common
+      [direct_turn_task_context ~current_task ~held_task_skills ~task_skill_surfaces] in
+  let remaining_context = prepare_common
+      (Option.to_list (Lane_addon_subscription.render lane_updates)
+       @ [approval_authority_text; recent_direct_conversation_text; worktree_text;
+          telemetry_feedback_text; turn_instructions_text]) in
+  { task_context; remaining_context; workspace_memory; wiki_contents }
+
+let project prepared ~workspace_memory_access =
+  let dynamic =
+    Option.to_list (Keeper_unified_prompt.format_workspace_memory_observation
+      ?access:workspace_memory_access prepared.workspace_memory)
+    @ Option.to_list (Keeper_unified_prompt.format_wiki_observation
+      ?access:workspace_memory_access prepared.wiki_contents)
+    |> nonempty in
+  (* Common fragments have already been filtered and coalesced. Do not scan
+     their text again for each request; concatenation retains the original
+     Task / memory / wiki / Lane-and-conversation order and exact separators. *)
+  String.concat "\n\n"
+    (Option.to_list prepared.task_context @ dynamic
+     @ Option.to_list prepared.remaining_context)

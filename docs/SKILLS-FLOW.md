@@ -553,8 +553,43 @@ native/model 지연은 아직 측정하지 않았다.
 조회 실패 뒤 원래 source 복원, 원래 Ask가 소비된 fresh wake, 실제 history/artifact
 reader의 제거·복구, 각 실제 UTF8 span과 digest도 다룬다. 실행하지 않았다.
 타입·실제 concurrent worker·화면·현재 통합 경로와 성능 개선은 미확인이다.
-직접 요청의 공통 문맥 조립, 준비 전반의 전체 timeline·continuation segment 연결,
-Composition·held job 및 원래 작업 재개의 최신 조합 증거도 계속 남아 있다.
+준비 전반의 전체 timeline·continuation segment 연결, Composition·held job 및
+원래 작업 재개의 최신 조합 증거도 계속 남아 있다.
+
+#### 직접 요청의 공통 문맥 재사용
+
+비교 기준은 `3c5ee890f1e465823530206d4b41f7825852cfdd`다. 직접 요청의
+`build_turn_prompt`는 이제 `Keeper_direct_turn_context.prepare`로 원래 문맥을
+한 번 준비한다. 같은 불변 결과를 초기 preview와 실제 Tools별 `project`에
+전달한다. Task·held Skills·Lane 안내를 다시 렌더하거나 공통 문자열의 빈 값
+검사를 반복하지 않는다. 대화·approval 관측·worktree·telemetry·instructions도
+해당 준비의 원래 bytes를 보존한다.
+
+| 조건 | As-Is | To-Be 소스 경로 |
+| --- | --- | --- |
+| Task·held Skills·Lane 안내 | 초기와 요청 callback마다 다시 렌더 | 직접 prompt 준비마다 한 번 렌더 |
+| approval 관측의 포맷 | 요청 callback에서 다시 포맷 | 공통 준비에서 한 번 포맷 |
+| 공통 문맥 필터·조립 | 매 요청에 전체 fragment 검사·조립 | Task prefix와 Lane·대화 suffix를 한 번 조립 |
+| memory·wiki 안내 | 실제 access로 포맷 | 동일한 실제 access로 요청마다 새 포맷 |
+| 다른 직접 요청·읽기 실패 | 해당 호출의 입력 사용 | 별도의 준비 결과 사용; 이전 Task·대화·출처를 빌리지 않음 |
+
+직접 prompt 준비 한 번에 실제 Tools callback이 `R`회라면, 위 공통 렌더·필터
+작업은 초기 조립을 포함한 `1+R`회에서 한 번으로 옮겨진다. `R=1`은 2→1이라는
+소스 작업량 비교다. 전체 문자열 연결과 직접 요청 receipt는 실제 bytes에서
+계속 생성하며 모델 왕복·요청 크기·지연 감소를 측정한 값은 아니다. 불변 record와
+prefix·suffix의 보관·추가 할당 비용도 미측정이다.
+
+메모리·위키는 준비 시 읽은 관측을 보관한다. 실제 request access가 바뀌면 그
+관측의 direct·discoverable·unavailable 경로를 다시 투영한다. 새 관측·공통 prompt
+변경·새 직접 요청은 새 준비가 필요하다. 이 prompt 관측은 Tool effect 권한이나
+durable conversation이 아니다. 초기 조립은 기존 writer의 Prompt scope 안에
+있고, 후속 투영이 준비 상태를 다시 열지 않는다.
+
+공개 준비·투영 API를 사용하는 복합 시나리오는 원래 Task·held Skill·대화 bytes,
+Lane 참조, 세 reader 경로와 preview, 다른 준비의 개입, 새 출처 조회 실패를
+다룬다. 기존 실제 memory reader 전달 시나리오도 이 API로 옮겼다. 작성했지만
+실행하지 않았으며 타입·모델·TUI 화면·실제 성능 및 원래 Ask 작업 재개의 종단
+동작을 증명하지 않는다.
 
 ### 2b. 프롬프트 — 지명된 스킬 안내
 

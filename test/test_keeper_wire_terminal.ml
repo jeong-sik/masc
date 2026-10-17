@@ -88,11 +88,11 @@ let test_same_request_id_keeps_keeper_wire_audiences_separate () =
   List.iter (fun (keeper_name, observed) ->
     match !observed, error_entries (read_journal ~base_path ~keeper_name ~operation_id) with
     | [event], [{ Journal.seq = 0; event = Events.Event_error { message }; _ }] ->
-      check string "durable failure belongs to this Keeper" (keeper_name ^ " stopped") message;
+      check string "each Keeper journal carries a safe terminal" Events.public_error_message message;
       let expected = Ag_ui.make_event ~timestamp:event.Ag_ui.timestamp
         ~thread_id:("keeper:" ^ keeper_name)
         ~run_id:(Some ("keeper-operation-run-" ^ operation_id))
-        ~message:(Some message) ~code:(Some "Turn_cancelled") Ag_ui.Run_error in
+        ~message:(Some message) ~code:(Some Events.public_error_code) Ag_ui.Run_error in
       check string "wire carries only its Keeper's payload"
         (Ag_ui.event_to_sse expected) (Ag_ui.event_to_sse event)
     | _ -> fail "each Keeper must own one independent terminal and seq-zero journal")
@@ -158,16 +158,16 @@ let test_same_keeper_and_request_id_keep_runtime_roots_separate () =
   settle root_beta "beta root stopped";
   check int "alpha release cannot unregister beta's audience" 1 (List.length !beta);
   check int "beta's terminal cannot affect alpha's audience" 1 (List.length !alpha);
-  List.iter (fun (base_path, message, observed) ->
+  List.iter (fun (base_path, observed) ->
     (match !observed with
      | [event] -> check (option string) "wire belongs to this runtime root"
-         (Some message) event.Ag_ui.message
+         (Some Events.public_error_message) event.Ag_ui.message
      | _ -> fail "each runtime root must receive one terminal");
     match error_entries (read_journal ~base_path ~keeper_name ~operation_id) with
     | [{Journal.seq=0; event=Events.Event_error {message=actual}; _}] ->
-        check string "each root has its own seq-zero durable failure" message actual
+        check string "each root has its own safe seq-zero terminal" Events.public_error_message actual
     | _ -> fail "runtime roots shared a journal or cursor")
-    [root_alpha, "alpha root stopped", alpha; root_beta, "beta root stopped", beta]
+    [root_alpha, alpha; root_beta, beta]
 
 let test_settle_synthesizes_run_error_for_open_stream () =
   with_workspace @@ fun base_path ->
@@ -194,11 +194,11 @@ let test_settle_synthesizes_run_error_for_open_stream () =
       | Ag_ui.Run_error -> ()
       | _ -> fail "synthesized event is not RUN_ERROR");
      let sse = Ag_ui.event_to_sse event in
-     check bool "reason travels on the wire" true
+     check bool "fixed safe message travels on the wire" true
        (Astring.String.is_infix
-          ~affix:"Keeper owner stopped the active turn" sse);
-     check bool "failure kind travels as code" true
-       (Astring.String.is_infix ~affix:"Turn_cancelled" sse)
+          ~affix:Events.public_error_message sse);
+     check bool "stable public event code travels on the wire" true
+       (Astring.String.is_infix ~affix:Events.public_error_code sse)
    | events ->
      fail
        (Printf.sprintf "expected exactly one synthesized event, got %d"

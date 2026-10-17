@@ -445,11 +445,47 @@ let test_error_reply_callback_once () =
         fail "error reply should not PATCH")
       ~send_message:(fun ~content ->
         incr sends;
-        check string "error reply" "Keeper error: provider failed" content;
+        check string "error reply" "Keeper error: The Keeper turn failed." content;
         Error (Discord_rest_client.Network "error post failed"))
   in
   check int "one error POST" 1 !sends;
   check_single_network_error "error POST failure" "error post failed" outcomes
+
+let test_private_errors_never_reach_channel () =
+  let secret = "orchid river seventy nine" in
+  let base_path = "/private/keeper-runtime" in
+  let diagnostic = secret ^ " at " ^ base_path ^ "/provider.trace" in
+  let protocol_error : Masc.Keeper_chat_events.stream_protocol_error =
+    { kind = Masc.Keeper_chat_events.Media_persist_failed
+    ; quarantined_occurrence = None
+    ; index = Some 7
+    ; tool_call_id = Some "actual-tool-call"
+    ; event_type = Some diagnostic
+    ; reason = Some diagnostic
+    ; raw_bytes = Some 19
+    }
+  in
+  let sends = ref [] in
+  let outcomes =
+    run_adapter
+      [ Masc.Keeper_chat_events.Agent_core_stream_protocol_error protocol_error
+      ; Masc.Keeper_chat_events.Event_error { message = diagnostic }
+      ]
+      ~post_message:(fun ~content:_ -> fail "diagnostics must use final sender")
+      ~edit_message:(fun ~message_id:_ ~content:_ -> fail "no message to edit")
+      ~send_message:(fun ~content -> sends := content :: !sends; Ok ())
+  in
+  check_single_ok "terminal error delivery settles once" outcomes;
+  check (list string) "typed public diagnostic and fixed terminal message"
+    [ "Keeper stream protocol: media_persist_failed | index=7 | tool_call_id=actual-tool-call | The stream event could not be used. | raw_bytes=19"
+    ; "Keeper error: The Keeper turn failed."
+    ] (List.rev !sends);
+  List.iter (fun content ->
+    check bool "non-prefix secret absent" false (contains content secret);
+    check bool "private base path absent" false (contains content base_path))
+    !sends;
+  check (option string) "internal diagnostic remains intact"
+    (Some diagnostic) protocol_error.reason
 
 let test_external_effect_status_replaces_assistant_preface () =
   let posts = ref [] in
@@ -657,6 +693,8 @@ let () =
             test_terminal_callback_reports_overflow_failure
         ; test_case "error reply callback exactly once" `Quick
             test_error_reply_callback_once
+        ; test_case "private errors never reach channel" `Quick
+            test_private_errors_never_reach_channel
         ; test_case "typed status replaces assistant preface" `Quick
             test_external_effect_status_replaces_assistant_preface
         ; test_case "tool activity uses native surface" `Quick

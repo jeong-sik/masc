@@ -836,9 +836,45 @@ describe('SSEMessageSchema', () => {
 
   it('retains interactive acceptance facts without inventing effects', () => {
     const accepted = { operation_id: 'member-1', state: 'Queued', queued_count: 2 }
-    const interactive = { outcome: 'stale_control', chat_control_token: 'fresh-control', signalled: false, resumed: false, interrupt_error: null }
+    const interactive = {
+      outcome: 'stale_control', chat_control_token: 'fresh-control',
+      signalled: false, resumed: false, interrupt_error: null,
+      interrupt_error_code: null, interrupt_incident_id: null,
+    }
     expect(SSEMessageSchema.safeParse(customEvent('KEEPER_CHAT_OPERATION_ACCEPTED', { ...accepted, interactive })).success).toBe(true)
     expect(SSEMessageSchema.safeParse(customEvent('KEEPER_CHAT_OPERATION_ACCEPTED', { ...accepted, interactive: { ...interactive, resumed: true } })).success).toBe(false)
+  })
+
+  it('accepts a public interrupt failure with its actual operation correlation', () => {
+    const interactive = {
+      outcome: 'applied', chat_control_token: 'actual-control-token',
+      signalled: false, resumed: false,
+      interrupt_error: 'The active turn could not be interrupted.',
+      interrupt_error_code: 'interrupt_failed', interrupt_incident_id: 'actual-operation-7',
+    }
+    const wire = customEvent('KEEPER_CHAT_OPERATION_ACCEPTED', {
+      operation_id: 'actual-operation-7', state: 'Queued', queued_count: 1, interactive,
+    })
+    const result = SSEMessageSchema.safeParse(wire)
+    expect(result.success).toBe(true)
+    if (result.success) expect(result.data).toEqual(wire)
+  })
+
+  it.each([
+    { interrupt_error: null, interrupt_error_code: 'interrupt_failed', interrupt_incident_id: 'actual-operation-7' },
+    { interrupt_error: 'The active turn could not be interrupted.', interrupt_error_code: null, interrupt_incident_id: 'actual-operation-7' },
+    { interrupt_error: 'The active turn could not be interrupted.', interrupt_error_code: 'guessed', interrupt_incident_id: 'actual-operation-7' },
+    { interrupt_error: 'The active turn could not be interrupted.', interrupt_error_code: 'interrupt_failed', interrupt_incident_id: '' },
+    { interrupt_error: 'The active turn could not be interrupted.', interrupt_error_code: 'interrupt_failed', interrupt_incident_id: null },
+    { interrupt_error: 'The active turn could not be interrupted.', interrupt_error_code: 'interrupt_failed', interrupt_incident_id: 'another-operation' },
+  ])('rejects incomplete or contradictory interrupt error facts: %j', errorFields => {
+    const interactive = {
+      outcome: 'applied', chat_control_token: 'actual-control-token',
+      signalled: false, resumed: false, ...errorFields,
+    }
+    expect(SSEMessageSchema.safeParse(customEvent('KEEPER_CHAT_OPERATION_ACCEPTED', {
+      operation_id: 'actual-operation-7', state: 'Queued', queued_count: 1, interactive,
+    })).success).toBe(false)
   })
 
   it('accepts a durable chat operation acceptance', () => {

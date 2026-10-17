@@ -448,10 +448,8 @@ let test_handler_replay_degrades_to_nothing () =
       "corrupt journal replays nothing rather than a prefix"
       0
       (List.length (replay_frames ())));
-  (* A journaled run_error with an empty message is refused by
-     Ag_ui.make_event with Invalid_argument. On the live path fork_adapter
-     absorbed that; the reconnect must absorb it too instead of raising into
-     the server switch. *)
+  (* An empty internal diagnostic is still an actual error fact. The public
+     projection supplies its fixed safe message and keeps the terminal. *)
   with_base "keeper-chat-replay-refused" (fun base_dir ->
     ignore
       (write_journal
@@ -468,7 +466,7 @@ let test_handler_replay_degrades_to_nothing () =
         ~since_seq:L.Whole_turn
     with
     | frames ->
-      Alcotest.(check int) "a refused event empties the replay" 0 (List.length frames)
+      Alcotest.(check int) "a safe terminal remains replayable" 2 (List.length frames)
     | exception exn ->
       Alcotest.fail ("replay raised into the caller: " ^ Printexc.to_string exn))
 

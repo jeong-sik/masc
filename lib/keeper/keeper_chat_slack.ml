@@ -590,6 +590,9 @@ let adapter_loop_with_transport
           (Error (Other "Keeper turn closed its event bus without a terminal event"));
         clear_activity ()
     | Keeper_chat_events.Next event ->
+    (* The internal bus retains private diagnostics. Project errors before
+       formatting anything that can reach a channel or an accepted reply. *)
+    let event = Keeper_chat_events.public_content ~redact_text:Fun.id event in
     (* Tool activity shows here as a transient "사용 중" line that the next one
        overwrites; the trail keeps the same events so the delivered reply can
        still name the work. See keeper_chat_tool_trail.mli. *)

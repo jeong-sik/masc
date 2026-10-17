@@ -329,7 +329,7 @@ let test_adapter_stream_error_edits_accepted_reply () =
   in
   check bool "error callback succeeds" true (outcomes = [ Ok () ]);
   check (list (pair string string)) "same reply becomes terminal error"
-    [ "slack-message-error", "Keeper error: tool failed" ]
+    [ "slack-message-error", "Keeper error: The Keeper turn failed." ]
     (List.rev !error_edits)
 ;;
 
@@ -410,6 +410,41 @@ let test_protocol_diagnostic_cannot_mask_final_failure () =
   | [ Error (Masc.Keeper_chat_slack.Other message) ] ->
     check string "final error wins" "final send failed" message
   | _ -> fail "only the terminal final-send failure settles the callback"
+
+let test_private_errors_never_reach_channel () =
+  let secret = "orchid river seventy nine" in
+  let base_path = "/private/keeper-runtime" in
+  let diagnostic = secret ^ " at " ^ base_path ^ "/provider.trace" in
+  let protocol_error : Masc.Keeper_chat_events.stream_protocol_error =
+    { kind = Masc.Keeper_chat_events.Media_persist_failed
+    ; quarantined_occurrence = None
+    ; index = Some 7
+    ; tool_call_id = Some "actual-tool-call"
+    ; event_type = Some diagnostic
+    ; reason = Some diagnostic
+    ; raw_bytes = Some 19
+    }
+  in
+  let sends = ref [] in
+  let outcomes =
+    run_adapter
+      [ Masc.Keeper_chat_events.Agent_core_stream_protocol_error protocol_error
+      ; Masc.Keeper_chat_events.Event_error { message = diagnostic }
+      ]
+      ~send_plain:(fun ~content -> sends := content :: !sends; Ok ())
+      ~send_blocks:(fun ~content:_ ~blocks:_ -> fail "diagnostics need no blocks")
+  in
+  check bool "terminal error delivery settles once" true (outcomes = [ Ok () ]);
+  check (list string) "typed public diagnostic and fixed terminal message"
+    [ "Keeper stream protocol: media_persist_failed | index=7 | tool_call_id=actual-tool-call | The stream event could not be used. | raw_bytes=19"
+    ; "Keeper error: The Keeper turn failed."
+    ] (List.rev !sends);
+  List.iter (fun content ->
+    check bool "non-prefix secret absent" false (contains content secret);
+    check bool "private base path absent" false (contains content base_path))
+    !sends;
+  check (option string) "internal diagnostic remains intact"
+    (Some diagnostic) protocol_error.reason
 
 let test_a_settled_adapter_delivers_nothing_the_turn_publishes_after_it () =
   let sends = ref [] in
@@ -923,6 +958,8 @@ let () =
             test_adapter_stream_error_edits_accepted_reply
         ; test_case "protocol diagnostic cannot mask final failure" `Quick
             test_protocol_diagnostic_cannot_mask_final_failure
+        ; test_case "private errors never reach channel" `Quick
+            test_private_errors_never_reach_channel
         ; test_case "empty terminal is explicit failure" `Quick
             test_adapter_empty_terminal_is_error
         ; test_case "completed effect sends no duplicate reply" `Quick

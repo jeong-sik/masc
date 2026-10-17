@@ -21,10 +21,11 @@ val record_failure :
   base_path:string option -> attempt:attempt -> Agent_core.Error.t -> string
 (** Called only after the actual candidate returned invalid structured output.
     A canonical parse error keeps its original bounded preview and byte count.
-    Other errors are rendered safely without fabricating response evidence.
+    Other errors retain the existing [Agent_core.Error.to_string] rendering
+    and do not create response evidence.
 
-    The return value is a public-safe detail. A reference is included only
-    after the private 0600 JSONL append commits. Missing workspace or failed
+    Canonical structured parse errors return a public-safe detail. A reference
+    is included only after the private 0600 JSONL append commits. Missing workspace or failed
     storage is explicitly unavailable; the original parse failure remains a
     failure. Cancellation propagates. No provider request or retry is made. *)
 

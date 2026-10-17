@@ -393,13 +393,70 @@ let test_cmd_subst_in_bin_position_refused () =
   | _ -> assert false
 
 let test_cmd_subst_shares_token_budget () =
-  (* The inner parse rides the same token counter — nesting is bounded by
-     source size, not by a depth limit of our own (RFC §2.4). *)
-  let many_words = List.init 50_001 (fun _ -> "x") in
-  match
-    Bash.parse_string ("echo $(" ^ String.concat " " many_words ^ ")")
-  with
-  | Parsed.Parse_aborted `Token_limit_50k -> ()
+  (* Both sources fit separately. Together, ordinary words and the single
+     Subst piece use exactly 50,000 charges; one extra child word must fail.
+     A child-local reset would wrongly accept the larger combined input. *)
+  let parent_words = 20_000 in
+  let child_words = 29_999 in
+  let source bin arg words =
+    String.concat " " (bin :: List.init (words - 1) (fun _ -> arg))
+  in
+  let check_simple ~bin ~arg ~words source =
+    match Bash.parse_string source with
+    | Parsed.Parsed (Shell_ir.Simple command) ->
+      assert (Exec_program.to_string command.bin = bin);
+      assert (List.length command.args = words - 1);
+      assert
+        (List.for_all
+           (function
+             | Shell_ir.Lit (value, meta) ->
+               value = arg && meta = Shell_ir.default_meta
+             | _ -> false)
+           command.args);
+      assert (command.env = []);
+      assert (command.redirects = []);
+      command
+    | _ -> assert false
+  in
+  let parent_source = source "echo" "p" parent_words in
+  let child_source = source "printf" "c" child_words in
+  let larger_child_source = child_source ^ " c" in
+  let parent =
+    check_simple ~bin:"echo" ~arg:"p" ~words:parent_words parent_source
+  in
+  let child =
+    check_simple ~bin:"printf" ~arg:"c" ~words:child_words child_source
+  in
+  ignore
+    (check_simple ~bin:"printf" ~arg:"c" ~words:(child_words + 1) larger_child_source);
+  let combine child = parent_source ^ " $(" ^ child ^ ")" in
+  (match Bash.parse_string (combine child_source) with
+   | Parsed.Parsed (Shell_ir.Simple outer) ->
+     assert (Exec_program.equal outer.bin parent.bin);
+     assert (outer.env = []);
+     assert (outer.redirects = []);
+     (match List.rev outer.args with
+      | Shell_ir.Subst (Shell_ir.Simple inner) :: reversed_parent_args ->
+        assert (List.rev reversed_parent_args = parent.args);
+        assert (Exec_program.equal inner.bin child.bin);
+        assert (inner.args = child.args);
+        assert (inner.env = []);
+        assert (inner.redirects = [])
+      | _ -> assert false)
+   | _ -> assert false);
+  (match Bash.parse_string (combine larger_child_source) with
+   | Parsed.Parse_aborted `Token_limit_50k -> ()
+   | _ -> assert false);
+  (* The refusal belongs to that invocation; a fresh nested parse still
+     returns the exact child AST through the public entry point. *)
+  match Bash.parse_string "echo $(printf fresh)" with
+  | Parsed.Parsed (Shell_ir.Simple outer) ->
+    assert (Exec_program.to_string outer.bin = "echo");
+    (match outer.args with
+     | [ Shell_ir.Subst (Shell_ir.Simple inner) ] ->
+       assert (Exec_program.to_string inner.bin = "printf");
+       assert (inner.args = [ Shell_ir.Lit ("fresh", Shell_ir.default_meta) ])
+     | _ -> assert false)
   | _ -> assert false
 
 let test_pp_prints_subst () =

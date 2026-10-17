@@ -1921,11 +1921,121 @@ let test_a_schedule_expired_past_the_retention_is_forgotten_in_that_tick () =
     (schedule_ids (read_state config))
 ;;
 
+
+(* A full worker fixes the old append's first suspension at encoding. The
+   filesystem backend remains real; only the Fs_compat directory checks use
+   their existing synchronous fallback during the two forks. *)
+let test_concurrent_notes_keep_both_accepted_appends () =
+  Eio_main.run @@ fun env ->
+  let previous_fs = Fs_compat.get_fs_opt () in
+  let restore_fs () =
+    match previous_fs with
+    | None -> Fs_compat.clear_fs ()
+    | Some fs -> Fs_compat.set_fs fs
+  in
+  Fun.protect ~finally:restore_fs @@ fun () ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  let dir = Filename.temp_dir "schedule_note_overlap" "" in
+  Eio.Switch.on_release sw (fun () -> Masc_test_deps.cleanup_test_workspace dir);
+  Eio_context.with_test_env
+    ~net:(Eio.Stdenv.net env) ~clock:(Eio.Stdenv.clock env)
+    ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw
+  @@ fun () ->
+  let config = Workspace_core.default_config dir in
+  (match config.Workspace_utils.backend with
+   | Workspace_utils.FileSystem _ -> ()
+   | Workspace_utils.Memory _ -> fail "expected the actual filesystem backend");
+  ignore (Workspace_core.init config ~agent_name:(Some "test"));
+  let request = make_request ~schedule_id:"note-overlap" () in
+  ignore (insert_ok config request);
+  let append body now =
+    append_note config ~schedule_id:request.schedule_id
+      ~author_id:"operator" ~author_kind:Human_operator ~body ~now
+  in
+  ignore (store_ok "seed note" (append "seed" 101.0));
+  let before = read_state config in
+  check bool "the exact ledger is warm" true (read_state config == before);
+  let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+  let previous_pool = Domain_pool_ref.get () in
+  Fun.protect
+    ~finally:(fun () ->
+      match previous_pool with
+      | None -> Domain_pool_ref.clear_for_tests ()
+      | Some previous -> Domain_pool_ref.set previous)
+  @@ fun () ->
+  Domain_pool_ref.set pool;
+  Eio.Switch.run @@ fun jobs_sw ->
+  let occupied, occupied_u = Eio.Promise.create () in
+  let release, release_u = Eio.Promise.create () in
+  let release_worker () =
+    match Eio.Promise.peek release with
+    | None -> Eio.Promise.resolve release_u ()
+    | Some () -> ()
+  in
+  let blocker =
+    Domain_pool.submit_cpu_async ~sw:jobs_sw pool (fun () ->
+      Eio.Promise.resolve occupied_u ();
+      Eio.Promise.await release)
+  in
+  Fun.protect ~finally:release_worker @@ fun () ->
+  Eio.Promise.await occupied;
+  let first, second =
+    Fun.protect
+      ~finally:(fun () -> Fs_compat.set_fs (Eio.Stdenv.fs env))
+      (fun () ->
+        Fs_compat.clear_fs ();
+        let first = Eio.Fiber.fork_promise ~sw:jobs_sw (fun () -> append "first" 102.0) in
+        let second = Eio.Fiber.fork_promise ~sw:jobs_sw (fun () -> append "second" 103.0) in
+        first, second)
+  in
+  check bool "first cannot publish while encode is blocked" true
+    (Option.is_none (Eio.Promise.peek first));
+  check bool "second cannot publish while encode is blocked" true
+    (Option.is_none (Eio.Promise.peek second));
+  release_worker ();
+  Eio.Promise.await_exn blocker;
+  let first_note, first_count = store_ok "first append" (Eio.Promise.await_exn first) in
+  let second_note, second_count = store_ok "second append" (Eio.Promise.await_exn second) in
+  let after = read_state config in
+  check (list string) "both accepted notes survive with the earlier note"
+    [ "seed"; "first"; "second" ]
+    (List.map (fun (note : schedule_note) -> note.body)
+       (notes_for_schedule after ~schedule_id:request.schedule_id));
+  check bool "accepted appends receive distinct identities" false
+    (String.equal first_note.note_id second_note.note_id);
+  check (list int) "counts describe successive committed appends" [ 2; 3 ]
+    (List.sort Int.compare [ first_count; second_count ]);
+  check int "both accepted appends advance the ledger" (before.version + 2) after.version
+;;
+
+let test_note_read_failure_is_not_schedule_absence () =
+  with_workspace @@ fun config ->
+  let request = make_request ~schedule_id:"note-corruption" () in
+  ignore (insert_ok config request);
+  corrupt_both config;
+  let primary_before = Workspace_core.read_text config (schedules_path config) in
+  let mirror_before = Workspace_core.read_text config (schedules_recovery_path config) in
+  (match append_note config ~schedule_id:request.schedule_id
+           ~author_id:"operator" ~author_kind:Human_operator ~body:"keep evidence" ~now:102.0 with
+   | Error (Corrupt_ledger _) -> ()
+   | Error err -> fail ("expected Corrupt_ledger, got: " ^ store_error_to_string err)
+   | Ok _ -> fail "note append accepted an unreadable ledger");
+  check string "primary evidence stays" primary_before
+    (Workspace_core.read_text config (schedules_path config));
+  check string "mirror evidence stays" mirror_before
+    (Workspace_core.read_text config (schedules_recovery_path config))
+;;
+
 let () =
   run "Schedule_store"
     [
       ( "state",
         [
+          test_case "concurrent notes retain accepted appends" `Quick
+            test_concurrent_notes_keep_both_accepted_appends;
+          test_case "note read failure differs from absence" `Quick
+            test_note_read_failure_is_not_schedule_absence;
           test_case "insert persists and bumps version" `Quick
             test_insert_persists_and_bumps_version;
           test_case "duplicate insert rejected without bump" `Quick

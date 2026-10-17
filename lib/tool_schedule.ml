@@ -1318,30 +1318,44 @@ let handle_note_add ~tool_name ~start_time ctx args =
         ~instead:"call with an agent name or a credential that names one"
     in
     let* () = refuse_other_actor ~actor:author ~prefix:"author" args in
+    Ok (schedule_id, body, author)
+  with
+  | Error refusal -> refusal_result ~tool_name ~start_time refusal
+  | Ok (schedule_id, body, author) ->
     let author_id = author.Schedule_domain.id in
     let author_kind = author.kind in
     let now = Time_compat.now () in
-    let* note, note_count =
-      Schedule_store.append_note
-        ctx.config
-        ~schedule_id
-        ~author_id
-        ~author_kind
-        ~body
-        ~now
-      |> Result.map_error Schedule_store.store_error_to_string
-      |> plain
-    in
-    Ok (note, note_count)
-  with
-  | Error refusal -> refusal_result ~tool_name ~start_time refusal
-  | Ok (note, note_count) ->
-    ok ~tool_name ~start_time
-      (`Assoc
-        [ "status", `String "ok"
-        ; "note", Schedule_domain.schedule_note_to_yojson note
-        ; "note_count", `Int note_count
-        ])
+    (match
+       Schedule_store.append_note
+         ctx.config
+         ~schedule_id
+         ~author_id
+         ~author_kind
+         ~body
+         ~now
+     with
+     | Error
+         ((Schedule_store.Corrupt_ledger _ | Schedule_store.Persistence_failed _) as err) ->
+       runtime_error ~tool_name ~start_time (Schedule_store.store_error_to_string err)
+     | Error
+         ((Schedule_store.Schedule_already_exists
+          | Schedule_store.Schedule_not_found
+          | Schedule_store.Invalid_initial_status _
+          | Schedule_store.Transition_refused _
+          | Schedule_store.Changed_due_already_past _
+          | Schedule_store.Interval_below_runner_tick _
+          | Schedule_store.Running_wake_absent _
+          | Schedule_store.Running_wake_settled _
+          | Schedule_store.Schedule_not_due_candidate
+          | Schedule_store.Schedule_not_running) as err) ->
+       workflow_error ~tool_name ~start_time (Schedule_store.store_error_to_string err)
+     | Ok (note, note_count) ->
+       ok ~tool_name ~start_time
+         (`Assoc
+           [ "status", `String "ok"
+           ; "note", Schedule_domain.schedule_note_to_yojson note
+           ; "note_count", `Int note_count
+           ]))
 ;;
 
 let handle_notes_list ~tool_name ~start_time ctx args =

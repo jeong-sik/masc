@@ -337,7 +337,12 @@ val append_note :
   now:float ->
   (Schedule_domain.schedule_note * int, store_error) result
 (** Appends a note to one schedule's note history and returns it with the new
-    note count for that schedule_id. Notes are keyed by the stable
+    note count for that schedule_id. The ledger load, note identity/count
+    derivation and publication run under the schedule-file lock. An unreadable
+    ledger returns [Corrupt_ledger]; an absent schedule returns
+    [Schedule_not_found].
+
+    Notes are keyed by the stable
     [schedule_id], not the per-instance id, so a definition replacement
     (masc_schedule_update) does not orphan the prose that explains it. Notes
     are append-only: no edit, no removal. *)

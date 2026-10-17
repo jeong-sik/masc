@@ -75,6 +75,11 @@ discoverable without repeated daemon probes for unchanged absent jobs. Private
 CLI authority is never borrowed from another job. Manual status and structured
 one-round recovery keep their full-inspection behavior.
 
+The hint skips the daemon identity check. A changed daemon with an empty
+inventory therefore stays `Backend_absent` in maintenance, where full inspection
+holds `Backend_unconfirmed`; a seen container and `keeper_job_status` still run
+full reconciliation.
+
 | Boundary | Before | After |
 |---|---|---|
 | Unchanged previously absent owner | Daemon identity plus exact inventory every round | One exact inventory hint, retaining the held owner |

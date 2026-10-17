@@ -292,9 +292,7 @@ let forget_snapshot path =
    leave a mismatch, and the replay crosses the barrier again as before. A
    write that failed before its rename left the confirmed snapshot in place.
    This rests on what [snapshot_cache] rests on: under the owner lock no other
-   writer replaces these files. An inode number freed by a rename can be
-   reused; a new file on it whose size, mtime and ctime also matched would be
-   taken for the confirmed one, as [snapshot_cache] would take it.
+   writer replaces these files.
 
    Keyed by snapshot path like [snapshot_cache]. *)
 type durable_confirmation =

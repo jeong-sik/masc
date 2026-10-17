@@ -414,20 +414,53 @@ type registration_error =
    entry, or to the one being replaced (#43494). Every commit publishes from
    [after_commit] under the queue owner lock, so one more read under that
    lock after the install leaves no gap: a commit is either in this read or
-   publishes to the installed entry. *)
+   publishes to the installed entry. When that read fails, the registration
+   withdraws its entry and fails as a failed first read does. *)
 let reconcile_installed_event_queue ~base_path name (entry : registry_entry) =
-  match
-    Keeper_event_queue_persistence.with_pending_locked_result
-      ~base_path
-      ~keeper_name:name
-      (fun pending -> Atomic.set entry.event_queue pending)
-  with
-  | Ok () -> ()
-  | Error detail ->
-    Log.Keeper.warn
-      "registry: event queue re-read after install failed name=%s: %s"
-      name
-      detail
+  Keeper_event_queue_persistence.with_pending_locked_result
+    ~base_path
+    ~keeper_name:name
+    (fun pending -> Atomic.set entry.event_queue pending)
+;;
+
+(* A registration whose re-read failed has installed an entry that may miss a
+   committed source. It takes that entry out and puts back the one it
+   replaced, so the registry is as a registration refused at its first read
+   leaves it. An entry another registration has installed since stays, and so
+   does ours while another lifecycle owner holds the Keeper. *)
+let withdraw_installed_entry ?lifecycle_token ~base_path name ~installed ~replaced =
+  Keeper_lifecycle_reservation.with_key_lock ~base_path ~keeper_name:name (fun () ->
+    match
+      Keeper_lifecycle_reservation.authorize
+        ?token:lifecycle_token
+        ~base_path
+        ~keeper_name:name
+        ()
+    with
+    | Error _ -> false
+    | Ok () ->
+      let key = registry_key ~base_path name in
+      let rec loop () =
+        let current = Atomic.get registry in
+        match StringMap.find_opt key current with
+        | Some entry when entry == installed ->
+          let updated =
+            match replaced with
+            | Some prior -> StringMap.add key prior current
+            | None -> StringMap.remove key current
+          in
+          if Atomic.compare_and_set registry current updated then true else loop ()
+        | Some _ | None -> false
+      in
+      loop ())
+;;
+
+let log_withdrawn_registration ~withdrawn name detail =
+  Log.Keeper.warn
+    "registry: event queue re-read after install failed name=%s withdrawn=%b: %s"
+    name
+    withdrawn
+    detail
 ;;
 
 let register_with_state_result
@@ -516,9 +549,11 @@ let register_with_state_result
     ; last_skip_observation = None
     }
   in
+  let replaced = ref None in
   (* Runs with the lifecycle key lock already held, so it never suspends. *)
   let commit_key_locked () =
-    (match StringMap.find_opt key (Atomic.get registry) with
+    let prior = StringMap.find_opt key (Atomic.get registry) in
+    (match prior with
      | Some prior when prior.phase = Running ->
        Otel_metric_store.inc_counter
          Keeper_metrics.(to_string LifecycleDispatchRejections)
@@ -527,7 +562,9 @@ let register_with_state_result
        Log.Keeper.warn "registry: overwriting running keeper during register name=%s" name;
        decr_running_count_clamped ()
      | Some _ | None -> ());
-    put_entry_key_locked ?lifecycle_token ~base_path name entry
+    let put = put_entry_key_locked ?lifecycle_token ~base_path name entry in
+    if Result.is_ok put then replaced := prior;
+    put
   in
   (* Ordinary registration takes the key lock before the non-yielding
      [commit_registration_if_open] state check. A caller-supplied intake token
@@ -614,12 +651,30 @@ let register_with_state_result
   | Error _ as error -> error
   | Ok () ->
     if phase = Running then Atomic.incr running_count_atomic;
-    reconcile_installed_event_queue ~base_path name entry;
-    Log.Keeper.debug
-      "registry: keeper registered name=%s running_count=%d"
-      name
-      (Atomic.get running_count_atomic);
-    Ok entry
+    (match reconcile_installed_event_queue ~base_path name entry with
+     | Ok () ->
+       Log.Keeper.debug
+         "registry: keeper registered name=%s running_count=%d"
+         name
+         (Atomic.get running_count_atomic);
+       Ok entry
+     | Error detail ->
+       let withdrawn =
+         withdraw_installed_entry
+           ?lifecycle_token
+           ~base_path
+           name
+           ~installed:entry
+           ~replaced:!replaced
+       in
+       if withdrawn
+       then (
+         if phase = Running then decr_running_count_clamped ();
+         match !replaced with
+         | Some prior when prior.phase = Running -> Atomic.incr running_count_atomic
+         | Some _ | None -> ());
+       log_withdrawn_registration ~withdrawn name detail;
+       Error (Registration_event_queue_unavailable { keeper_name = name; detail }))
 ;;
 
 let register_with_state ~base_path name meta ~phase ~conditions =
@@ -819,11 +874,14 @@ let register_restarting_internal ?lifecycle_token ?intake_token ~base_path name 
     ; last_skip_observation = None
     }
   in
+  let replaced = ref None in
   let rec loop () =
     let current = Atomic.get registry in
     let updated = StringMap.add key new_entry current in
     if Atomic.compare_and_set registry current updated
-    then Ok new_entry
+    then (
+      replaced := StringMap.find_opt key current;
+      Ok new_entry)
     else loop ()
   in
   (* Runs with the lifecycle key lock already held, so it never suspends. *)
@@ -865,13 +923,25 @@ let register_restarting_internal ?lifecycle_token ?intake_token ~base_path name 
   match commit_result with
   | Error _ as error -> error
   | Ok registered ->
-    reconcile_installed_event_queue ~base_path name registered;
-    Log.Keeper.info
-      "registry: registering keeper name=%s base_path=%s phase=%s"
-      name
-      base_path
-      (Keeper_state_machine.phase_to_string phase);
-    Ok registered
+    (match reconcile_installed_event_queue ~base_path name registered with
+     | Ok () ->
+       Log.Keeper.info
+         "registry: registering keeper name=%s base_path=%s phase=%s"
+         name
+         base_path
+         (Keeper_state_machine.phase_to_string phase);
+       Ok registered
+     | Error detail ->
+       let withdrawn =
+         withdraw_installed_entry
+           ?lifecycle_token
+           ~base_path
+           name
+           ~installed:registered
+           ~replaced:!replaced
+       in
+       log_withdrawn_registration ~withdrawn name detail;
+       Error (Restart_event_queue_unavailable { keeper_name = name; detail }))
 ;;
 
 let register_restarting ~base_path name meta =

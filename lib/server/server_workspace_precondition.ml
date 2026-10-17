@@ -1,27 +1,38 @@
 module Precondition = Request_workspace_precondition
 
-let served_workspace : Precondition.identity option Atomic.t = Atomic.make None
-
-let publish_served_workspace ~base_path ~masc_root =
-  Atomic.set served_workspace (Some { Precondition.base_path; masc_root })
+let served_workspace () =
+  match Server_auth.current_server_state () with
+  | None -> None
+  | Some state ->
+    let config = Mcp_server.workspace_config state in
+    let base_path, masc_root =
+      Server_base_path_diagnostics.served_paths
+        ~cwd:(Config_dir_resolver.current_working_dir ())
+        ~effective_base_path:config.base_path
+        ~effective_masc_root:(Workspace.masc_dir config)
+    in
+    Some { Precondition.base_path; masc_root }
 ;;
 
-let check_request ~identity ~ready ~path (request : Httpun.Request.t) =
+let check_request ~served ~ready ~path (request : Httpun.Request.t) =
   if String.equal path Server_health_paths.health
   then Precondition.No_precondition
-  else
-    Precondition.decide
-      ~identity
-      ~ready
-      ~expected_base_path:
-        (Httpun.Headers.get_multi request.headers Precondition.expected_base_path_header)
-      ~expected_masc_root:
-        (Httpun.Headers.get_multi request.headers Precondition.expected_masc_root_header)
+  else (
+    match
+      Precondition.parse
+        ~expected_base_path:
+          (Httpun.Headers.get_multi request.headers Precondition.expected_base_path_header)
+        ~expected_masc_root:
+          (Httpun.Headers.get_multi request.headers Precondition.expected_masc_root_header)
+    with
+    | Error refusal -> Precondition.Refused refusal
+    | Ok None -> Precondition.No_precondition
+    | Ok (Some expected) -> Precondition.decide expected ~served:(served ()) ~ready)
 ;;
 
 let check_current_request ~path request =
   check_request
-    ~identity:(Atomic.get served_workspace)
+    ~served:served_workspace
     ~ready:(Server_startup_state.snapshot ()).state_ready
     ~path
     request

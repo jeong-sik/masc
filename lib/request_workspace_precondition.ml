@@ -1,7 +1,7 @@
 let expected_base_path_header = "x-masc-expected-base-path"
 let expected_masc_root_header = "x-masc-expected-masc-root"
 
-type identity =
+type workspace =
   { base_path : string
   ; masc_root : string
   }
@@ -24,34 +24,36 @@ let check_path ~header value =
   else Ok value
 ;;
 
-let decide ~identity ~ready ~expected_base_path ~expected_masc_root =
+let parse ~expected_base_path ~expected_masc_root =
   match expected_base_path, expected_masc_root with
-  | [], [] -> No_precondition
+  | [], [] -> Ok None
   | [ base_path ], [ masc_root ] ->
     (match
        ( check_path ~header:expected_base_path_header base_path
        , check_path ~header:expected_masc_root_header masc_root )
      with
-     | Error why, (Ok _ | Error _) | Ok _, Error why ->
-       Refused (Invalid_precondition why)
-     | Ok base_path, Ok masc_root ->
-       (match identity with
-        | None -> Refused Server_booting
-        | Some served ->
-          if not
-               (String.equal base_path served.base_path
-                && String.equal masc_root served.masc_root)
-          then Refused Workspace_mismatch
-          else if ready
-          then Precondition_met
-          else Refused Server_booting))
+     | Error why, (Ok _ | Error _) | Ok _, Error why -> Error (Invalid_precondition why)
+     | Ok base_path, Ok masc_root -> Ok (Some { base_path; masc_root }))
   | [], _ :: _ | _ :: _, [] ->
-    Refused
+    Error
       (Invalid_precondition
          (Printf.sprintf "%s and %s go together" expected_base_path_header
             expected_masc_root_header))
   | _ :: _ :: _, _ :: _ | _ :: _, _ :: _ :: _ ->
-    Refused (Invalid_precondition "a workspace precondition header is given more than once")
+    Error (Invalid_precondition "a workspace precondition header is given more than once")
+;;
+
+let decide expected ~served ~ready =
+  match served with
+  | None -> Refused Server_booting
+  | Some served ->
+    if not
+         (String.equal expected.base_path served.base_path
+          && String.equal expected.masc_root served.masc_root)
+    then Refused Workspace_mismatch
+    else if ready
+    then Precondition_met
+    else Refused Server_booting
 ;;
 
 let refusal_code = function

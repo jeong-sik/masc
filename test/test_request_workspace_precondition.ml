@@ -8,6 +8,15 @@ let served = { Precondition.base_path = "/srv/work"; masc_root = "/srv/work/.mas
 let other_base_path = "/srv/other"
 let routed_path = "/workspace-precondition-probe"
 
+let rec remove_tree path =
+  match Unix.lstat path with
+  | { Unix.st_kind = Unix.S_DIR; _ } ->
+    Array.iter (fun name -> remove_tree (Filename.concat path name)) (Sys.readdir path);
+    Unix.rmdir path
+  | _ -> Unix.unlink path
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()
+;;
+
 (* A decision as a client tells it apart: the refusal code, or whether the
    request goes on. *)
 let label = function
@@ -16,8 +25,15 @@ let label = function
   | Precondition.Refused refusal -> Precondition.refusal_code refusal
 ;;
 
-let decide ?(identity = Some served) ?(ready = true) expected_base_path expected_masc_root =
-  label (Precondition.decide ~identity ~ready ~expected_base_path ~expected_masc_root)
+let parse expected_base_path expected_masc_root =
+  match Precondition.parse ~expected_base_path ~expected_masc_root with
+  | Ok None -> "no_precondition"
+  | Ok (Some _) -> "parsed"
+  | Error refusal -> Precondition.refusal_code refusal
+;;
+
+let decide ?(served = Some served) ?(ready = true) expected =
+  label (Precondition.decide expected ~served ~ready)
 ;;
 
 let precondition_headers ?(base_path = served.base_path) ?(masc_root = served.masc_root) () =
@@ -26,52 +42,26 @@ let precondition_headers ?(base_path = served.base_path) ?(masc_root = served.ma
   ]
 ;;
 
+let headers_for (workspace : Precondition.workspace) =
+  precondition_headers ~base_path:workspace.base_path ~masc_root:workspace.masc_root ()
+;;
+
 let test_absent_precondition_is_not_checked () =
-  check string "ready server" "no_precondition" (decide [] []);
-  check string "booting server" "no_precondition" (decide ~identity:None ~ready:false [] [])
+  check string "no header" "no_precondition" (parse [] [])
 ;;
 
-let test_served_workspace_meets_the_precondition () =
-  check string "both paths" "precondition_met" (decide [ served.base_path ] [ served.masc_root ])
-;;
-
-let test_another_workspace_is_refused () =
-  List.iter
-    (fun (name, base_path, masc_root) ->
-      check string name "workspace_precondition_failed" (decide [ base_path ] [ masc_root ]))
-    [ "another base path", other_base_path, served.masc_root
-    ; "another masc root", served.base_path, Filename.concat other_base_path ".masc"
-    ; "a trailing slash is another spelling", served.base_path ^ "/", served.masc_root
-    ];
-  check
-    string
-    "a mismatch is refused before readiness"
-    "workspace_precondition_failed"
-    (decide ~ready:false [ other_base_path ] [ served.masc_root ])
-;;
-
-let test_booting_server_refuses_a_precondition () =
-  check
-    string
-    "no workspace published"
-    "server_booting"
-    (decide ~identity:None [ served.base_path ] [ served.masc_root ]);
-  check
-    string
-    "published but not ready"
-    "server_booting"
-    (decide ~ready:false [ served.base_path ] [ served.masc_root ])
+let test_both_headers_parse_to_the_expected_workspace () =
+  match Precondition.parse ~expected_base_path:[ served.base_path ] ~expected_masc_root:[ served.masc_root ] with
+  | Ok (Some expected) ->
+    check string "base path" served.base_path expected.base_path;
+    check string "masc root" served.masc_root expected.masc_root
+  | Ok None | Error _ -> fail "a well-formed pair did not parse"
 ;;
 
 let test_malformed_precondition_is_refused () =
-  (* Booting and unpublished, so nothing but the headers decides. *)
   List.iter
     (fun (name, base_paths, masc_roots) ->
-      check
-        string
-        name
-        "invalid_workspace_precondition"
-        (decide ~identity:None ~ready:false base_paths masc_roots))
+      check string name "invalid_workspace_precondition" (parse base_paths masc_roots))
     [ "base path alone", [ served.base_path ], []
     ; "masc root alone", [], [ served.masc_root ]
     ; "base path twice", [ served.base_path; served.base_path ], [ served.masc_root ]
@@ -81,13 +71,35 @@ let test_malformed_precondition_is_refused () =
     ]
 ;;
 
-let check_request ~path headers =
-  label
-    (Guard.check_request
-       ~identity:(Some served)
-       ~ready:true
-       ~path
-       (Httpun.Request.create ~headers:(Httpun.Headers.of_list headers) `GET path))
+let test_served_workspace_meets_the_precondition () =
+  check string "same paths" "precondition_met" (decide served)
+;;
+
+let test_another_workspace_is_refused () =
+  List.iter
+    (fun (name, expected) -> check string name "workspace_precondition_failed" (decide expected))
+    [ "another base path", { served with Precondition.base_path = other_base_path }
+    ; "another masc root", { served with masc_root = Filename.concat other_base_path ".masc" }
+    ; "a trailing slash is another spelling", { served with base_path = served.base_path ^ "/" }
+    ];
+  check
+    string
+    "a mismatch is refused before readiness"
+    "workspace_precondition_failed"
+    (decide ~ready:false { served with base_path = other_base_path })
+;;
+
+let test_booting_server_refuses_a_precondition () =
+  check string "no server state" "server_booting" (decide ~served:None served);
+  check string "not ready" "server_booting" (decide ~ready:false served)
+;;
+
+let request ?(target = routed_path) headers =
+  Httpun.Request.create ~headers:(Httpun.Headers.of_list headers) `GET target
+;;
+
+let check_request ?(path = routed_path) headers =
+  label (Guard.check_request ~served:(fun () -> Some served) ~ready:true ~path (request ~target:path headers))
 ;;
 
 let test_header_names_are_case_insensitive () =
@@ -96,7 +108,6 @@ let test_header_names_are_case_insensitive () =
     "mixed-case names"
     "precondition_met"
     (check_request
-       ~path:routed_path
        [ String.uppercase_ascii Precondition.expected_base_path_header, served.base_path
        ; String.capitalize_ascii Precondition.expected_masc_root_header, served.masc_root
        ])
@@ -107,9 +118,7 @@ let test_repeated_header_field_is_refused () =
     string
     "two base path fields"
     "invalid_workspace_precondition"
-    (check_request
-       ~path:routed_path
-       ((Precondition.expected_base_path_header, served.base_path) :: precondition_headers ()))
+    (check_request ((Precondition.expected_base_path_header, served.base_path) :: precondition_headers ()))
 ;;
 
 let test_only_health_skips_the_check () =
@@ -118,6 +127,30 @@ let test_only_health_skips_the_check () =
   List.iter
     (fun path -> check string path "workspace_precondition_failed" (check_request ~path another))
     [ Server_health_paths.liveness; Server_health_paths.readiness; routed_path ]
+;;
+
+(* The server's paths are resolved only for a request that names a
+   workspace. *)
+let test_served_workspace_is_read_only_for_a_wellformed_precondition () =
+  let reads = ref 0 in
+  let counted_served () =
+    incr reads;
+    Some served
+  in
+  List.iter
+    (fun (name, headers, reads_expected) ->
+      reads := 0;
+      ignore
+        (Guard.check_request ~served:counted_served ~ready:true ~path:routed_path (request headers)
+          : Precondition.decision);
+      check int name reads_expected !reads)
+    [ "no header", [], 0
+    ; "base path alone", [ Precondition.expected_base_path_header, served.base_path ], 0
+    ; ( "repeated field"
+      , (Precondition.expected_base_path_header, served.base_path) :: precondition_headers ()
+      , 0 )
+    ; "well-formed pair", precondition_headers (), 1
+    ]
 ;;
 
 let body_code body =
@@ -141,12 +174,66 @@ let test_refusal_responses () =
     ]
 ;;
 
-(* The entries read the published workspace and the startup readiness. *)
-let with_served_workspace ~ready f =
-  Guard.publish_served_workspace ~base_path:served.base_path ~masc_root:served.masc_root;
-  let previous = Server_startup_state.snapshot () in
-  Server_startup_state.For_testing.restore { previous with state_ready = ready };
-  Fun.protect ~finally:(fun () -> Server_startup_state.For_testing.restore previous) f
+(* The entries read the server state and the startup readiness. *)
+let with_server_state ~base_path f =
+  let previous_state = Server_auth.For_testing.snapshot_server_state () in
+  let previous_startup = Server_startup_state.snapshot () in
+  Fun.protect
+    ~finally:(fun () ->
+      Server_auth.For_testing.restore_server_state previous_state;
+      Server_startup_state.For_testing.restore previous_startup)
+    (fun () ->
+      Server_auth.For_testing.restore_server_state
+        (Some (Mcp_server.For_testing.create_state ~base_path));
+      f ())
+;;
+
+let set_ready ready =
+  Server_startup_state.For_testing.restore
+    { (Server_startup_state.snapshot ()) with state_ready = ready }
+;;
+
+(* What [/health] tells a client this server serves. *)
+let health_workspace () =
+  let paths = Server_routes_http_runtime.health_path_diagnostics () in
+  { Precondition.base_path = paths.Server_base_path_diagnostics.effective_base_path
+  ; masc_root = paths.effective_masc_root
+  }
+;;
+
+let workspace = testable (fun ppf (w : Precondition.workspace) ->
+  Format.fprintf ppf "%s %s" w.base_path w.masc_root) ( = )
+
+(* A workspace directory replaced by a symlink after boot: /health and the
+   check both resolve it again, so a client that follows /health is admitted
+   and the path it had before is another workspace. *)
+let test_health_and_the_check_name_the_same_workspace_after_a_retarget () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let root = Filename.temp_dir "workspace-retarget" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.clear_fs (); remove_tree root) @@ fun () ->
+  let first = Filename.concat root "first" and second = Filename.concat root "second" in
+  List.iter
+    (fun dir ->
+      Unix.mkdir dir 0o755;
+      Unix.mkdir (Filename.concat dir ".masc") 0o755)
+    [ first; second ];
+  with_server_state ~base_path:first @@ fun () ->
+  set_ready true;
+  let decision (expected : Precondition.workspace) =
+    label (Guard.check_current_request ~path:routed_path (request (headers_for expected)))
+  in
+  let before = health_workspace () in
+  check (option workspace) "the check serves what /health reports" (Some before) (Guard.served_workspace ());
+  check string "the reported workspace is admitted" "precondition_met" (decision before);
+  Unix.rename first (first ^ ".moved");
+  Unix.symlink second first;
+  let after = health_workspace () in
+  check bool "/health follows the new target" true (before <> after);
+  check (option workspace) "the check follows it too" (Some after) (Guard.served_workspace ());
+  check string "the workspace /health reports now is admitted" "precondition_met" (decision after);
+  check string "the one it reported before is another workspace" "workspace_precondition_failed"
+    (decision before)
 ;;
 
 type reply =
@@ -188,7 +275,7 @@ let http1_reply raw =
 
 (* The HTTP/1.1 entry runs [guard_http1] in front of routing; a route here
    answers 404, as the HTTP/2 gateway's fallback does. *)
-let http1_exchange headers =
+let http1_exchange ~env:_ headers =
   let output = Buffer.create 512 in
   let connection =
     Httpun.Server_connection.create (fun reqd ->
@@ -225,9 +312,7 @@ let http1_exchange headers =
 
 (* The real HTTP/2 gateway handler, driven through in-memory client and
    server connections. *)
-let h2_exchange headers =
-  Eio_main.run
-  @@ fun env ->
+let h2_exchange ~env headers =
   Eio.Switch.run
   @@ fun sw ->
   let trust_policy =
@@ -331,55 +416,75 @@ let h2_exchange headers =
 
 let routed_status = 404
 
-let entry_cases =
-  [ "no precondition reaches routing", true, [], routed_status, None
-  ; "the served workspace reaches routing", true, precondition_headers (), routed_status, None
-  ; ( "another workspace"
-    , true
-    , precondition_headers ~base_path:other_base_path ()
-    , 409
-    , Some "workspace_precondition_failed" )
-  ; ( "base path alone"
-    , true
-    , [ Precondition.expected_base_path_header, served.base_path ]
-    , 400
-    , Some "invalid_workspace_precondition" )
-  ; "not ready", false, precondition_headers (), 503, Some "server_booting"
-  ]
+let check_reply name ~status ~code reply =
+  check int (name ^ " status") status reply.status;
+  match code with
+  | None -> ()
+  | Some code ->
+    check (option string) (name ^ " code") (Some code) (body_code reply.body);
+    check
+      (option string)
+      (name ^ " retry-after")
+      (if String.equal code "server_booting" then Some "1" else None)
+      (List.assoc_opt "retry-after" reply.headers)
 ;;
 
 let check_entry exchange () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = Filename.temp_dir "workspace-precondition" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.clear_fs (); remove_tree base_path) @@ fun () ->
+  with_server_state ~base_path @@ fun () ->
+  let reported = health_workspace () in
   List.iter
     (fun (name, ready, headers, status, code) ->
-      let reply = with_served_workspace ~ready (fun () -> exchange headers) in
-      check int (name ^ " status") status reply.status;
-      match code with
-      | None -> ()
-      | Some code ->
-        check (option string) (name ^ " code") (Some code) (body_code reply.body);
-        check
-          (option string)
-          (name ^ " retry-after")
-          (if String.equal code "server_booting" then Some "1" else None)
-          (List.assoc_opt "retry-after" reply.headers))
-    entry_cases
+      set_ready ready;
+      check_reply name ~status ~code (exchange ~env headers))
+    [ "no precondition reaches routing", true, [], routed_status, None
+    ; "the workspace /health reports reaches routing", true, headers_for reported, routed_status, None
+    ; ( "another workspace"
+      , true
+      , headers_for { reported with base_path = other_base_path }
+      , 409
+      , Some "workspace_precondition_failed" )
+    ; ( "base path alone"
+      , true
+      , [ Precondition.expected_base_path_header, reported.base_path ]
+      , 400
+      , Some "invalid_workspace_precondition" )
+    ; "not ready", false, headers_for reported, 503, Some "server_booting"
+    ];
+  (* The same request, refused while booting, goes through once ready. *)
+  set_ready false;
+  check_reply "booting" ~status:503 ~code:(Some "server_booting") (exchange ~env (headers_for reported));
+  set_ready true;
+  check_reply "ready" ~status:routed_status ~code:None (exchange ~env (headers_for reported))
 ;;
 
 let () =
   run
     "request workspace precondition"
-    [ ( "decision"
+    [ ( "parse"
       , [ test_case "absent precondition" `Quick test_absent_precondition_is_not_checked
-        ; test_case "served workspace" `Quick test_served_workspace_meets_the_precondition
+        ; test_case "well-formed pair" `Quick test_both_headers_parse_to_the_expected_workspace
+        ; test_case "malformed precondition" `Quick test_malformed_precondition_is_refused
+        ] )
+    ; ( "decision"
+      , [ test_case "served workspace" `Quick test_served_workspace_meets_the_precondition
         ; test_case "another workspace" `Quick test_another_workspace_is_refused
         ; test_case "booting server" `Quick test_booting_server_refuses_a_precondition
-        ; test_case "malformed precondition" `Quick test_malformed_precondition_is_refused
         ] )
     ; ( "request"
       , [ test_case "case-insensitive names" `Quick test_header_names_are_case_insensitive
         ; test_case "repeated field" `Quick test_repeated_header_field_is_refused
         ; test_case "health is not checked" `Quick test_only_health_skips_the_check
+        ; test_case "paths read only when asked" `Quick
+            test_served_workspace_is_read_only_for_a_wellformed_precondition
         ; test_case "refusal responses" `Quick test_refusal_responses
+        ] )
+    ; ( "served workspace"
+      , [ test_case "retargeted after boot" `Quick
+            test_health_and_the_check_name_the_same_workspace_after_a_retarget
         ] )
     ; ( "entries"
       , [ test_case "HTTP/1.1" `Quick (check_entry http1_exchange)

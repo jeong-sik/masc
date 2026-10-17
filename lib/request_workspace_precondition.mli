@@ -7,9 +7,10 @@
     A client that addresses one workspace sends both headers, each holding the
     absolute, canonical path it expects -- the [paths.effective_base_path] and
     [paths.effective_masc_root] that [/health] reports. The server compares
-    them as strings with its own canonical paths and resolves nothing: a path
-    spelled another way (a trailing slash, a symlink) is a different
-    workspace. A request without either header is not checked. *)
+    them as strings with the paths it serves, resolved for that request the
+    way [/health] resolves them. A path spelled another way (a trailing slash,
+    a symlink) is a different workspace. A request without either header is
+    not checked. *)
 
 val expected_base_path_header : string
 (** ["x-masc-expected-base-path"]. *)
@@ -17,8 +18,8 @@ val expected_base_path_header : string
 val expected_masc_root_header : string
 (** ["x-masc-expected-masc-root"]. *)
 
-(** The canonical paths of the workspace a server serves. *)
-type identity =
+(** The canonical paths of one workspace. *)
+type workspace =
   { base_path : string
   ; masc_root : string
   }
@@ -29,7 +30,7 @@ type refusal =
           empty value, or a relative path. The string says which. *)
   | Workspace_mismatch  (** The server serves another workspace. *)
   | Server_booting
-      (** The server has not published its workspace yet, or has but is not
+      (** The server has no workspace state yet, or has one but is not
           ready. *)
 
 type decision =
@@ -37,15 +38,18 @@ type decision =
   | Precondition_met
   | Refused of refusal
 
-val decide :
-  identity:identity option ->
-  ready:bool ->
+val parse :
   expected_base_path:string list ->
   expected_masc_root:string list ->
-  decision
-(** [expected_base_path] and [expected_masc_root] are every value of each
-    header, in order. A malformed precondition is refused before anything is
-    compared; a mismatch is refused before readiness is looked at. *)
+  (workspace option, refusal) result
+(** Every value of each header, in order. [Ok None] when neither header is
+    given; [Error (Invalid_precondition _)] for a malformed pair, before
+    anything about the server is read. *)
+
+val decide : workspace -> served:workspace option -> ready:bool -> decision
+(** The expected workspace against the one served, [None] while the server
+    has no workspace state. A mismatch is refused before readiness is looked
+    at. *)
 
 val refusal_code : refusal -> string
 (** The [code] a refusal carries in its [Server_refusal] body:

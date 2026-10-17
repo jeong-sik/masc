@@ -4,26 +4,25 @@
     routing, so a request whose expected workspace is not this server's never
     reaches its handler, and no route keeps a check of its own. *)
 
-val publish_served_workspace : base_path:string -> masc_root:string -> unit
-(** Record the canonical paths this server serves, once at boot, from the same
-    [Server_base_path_diagnostics.detect] whose result [/health] reports. A
-    request compares against them without resolving any path. [/health]
-    resolves its paths again on each read, so after a symlink in the workspace
-    path is retargeted the two differ, and a request that expects the new
-    resolution is refused as another workspace until the server restarts. *)
+val served_workspace : unit -> Request_workspace_precondition.workspace option
+(** The workspace this server serves, resolved now from the server state with
+    {!Server_base_path_diagnostics.served_paths} -- the pair [/health]
+    reports -- or [None] before the server state exists. A request that
+    carries no precondition never resolves it. *)
 
 val check_request :
-  identity:Request_workspace_precondition.identity option ->
+  served:(unit -> Request_workspace_precondition.workspace option) ->
   ready:bool ->
   path:string ->
   Httpun.Request.t ->
   Request_workspace_precondition.decision
-(** The decision for [request] at [path]. [/health], the probe a client reads
-    after a refusal, is never checked. *)
+(** The decision for [request] at [path]. [served] is called only for a
+    well-formed precondition. [/health], the probe a client reads after a
+    refusal, is never checked. *)
 
 val check_current_request :
   path:string -> Httpun.Request.t -> Request_workspace_precondition.decision
-(** {!check_request} against the published workspace and the startup
+(** {!check_request} against {!served_workspace} and the startup
     readiness. *)
 
 val refusal_status :

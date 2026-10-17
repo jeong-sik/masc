@@ -44,6 +44,15 @@ val wire_finish_of_string : string -> wire_finish
     decoder. *)
 val is_provider_error_finish : string -> bool
 
+(** Decode the nullable refusal field of a Chat message or delta. A string is
+    an explicit refusal signal; its private text is not projected into content.
+    Other JSON shapes are malformed and must not become a successful answer. *)
+val refusal_of_json : Yojson.Safe.t -> (bool, unit) result
+
+(** A provider-declared refusal is terminal even when text or tool calls are
+    also present. Without that declaration, retain the exact existing reason. *)
+val with_refusal : has_refusal:bool -> Types.stop_reason -> Types.stop_reason
+
 (** Canonical parse-time mapping for backends that know the assembled tool-block
     set at parse time (the non-streaming OpenAI parser). [Tool_calls] without a
     tool block fails closed to [UnmatchedToolCalls]. [Other] re-decodes through

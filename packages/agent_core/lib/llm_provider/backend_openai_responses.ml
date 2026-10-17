@@ -709,7 +709,9 @@ let stop_reason_of_response_json ~has_tool_calls json =
       ~failed_message:(response_failed_message json)
       ~has_tool_calls
   with
-  | Some stop_reason -> Ok stop_reason
+  | Some stop_reason ->
+    Ok (Stop_reason_wire.with_refusal
+          ~has_refusal:(Responses_stop_reason.has_refusal json) stop_reason)
   | None -> Error "malformed_openai_responses:missing_status"
 ;;
 

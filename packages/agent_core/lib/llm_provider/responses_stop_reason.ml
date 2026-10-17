@@ -1,5 +1,22 @@
 (** OpenAI Responses terminal status -> stop_reason SSOT. *)
 
+let has_refusal response =
+  let field name = function
+    | `Assoc fields -> List.assoc_opt name fields
+    | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> None
+  in
+  let is_refusal part = field "type" part = Some (`String "refusal") in
+  let message_has_refusal item =
+    match field "type" item, field "content" item with
+    | Some (`String "message"), Some (`List parts) -> List.exists is_refusal parts
+    | _, _ -> false
+  in
+  match field "output" response with
+  | Some (`List items) -> List.exists message_has_refusal items
+  | Some (`Assoc _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null)
+  | None -> false
+;;
+
 let incomplete_stop_reason incomplete_reason =
   match incomplete_reason with
   | Some "max_output_tokens" -> Types.MaxTokens

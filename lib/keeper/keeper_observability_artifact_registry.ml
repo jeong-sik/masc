@@ -9,12 +9,14 @@ type artifact =
   | Activity_event
   | Metrics_snapshot
   | Raw_trace
+  | Structured_response_failure
 [@@deriving enumerate]
 
 type retention =
   | Dated_jsonl_operator_window
   | Startup_flat_file_mtime
   | Raw_trace_reachability_window
+  | Operator_owned_evidence
 
 type entry =
   { producer : string
@@ -31,6 +33,7 @@ let artifact_label = function
   | Activity_event -> "activity_event"
   | Metrics_snapshot -> "metrics_snapshot"
   | Raw_trace -> "raw_trace"
+  | Structured_response_failure -> "structured_response_failure"
 ;;
 
 let truth_role_label = function
@@ -42,6 +45,7 @@ let retention_owner = function
   | Dated_jsonl_operator_window -> "Dated_jsonl.Store"
   | Startup_flat_file_mtime -> "Server_runtime_startup_maintenance"
   | Raw_trace_reachability_window -> "Keeper_raw_trace_retention"
+  | Operator_owned_evidence -> "workspace operator"
 ;;
 
 let retention_policy = function
@@ -50,6 +54,8 @@ let retention_policy = function
   | Startup_flat_file_mtime -> "MASC_JSONL_RETENTION_DAYS flat-file mtime pruning"
   | Raw_trace_reachability_window ->
     "TurnRecord reachability window, plus MASC_JSONL_RETENTION_DAYS mtime fallback"
+  | Operator_owned_evidence ->
+    "Exact referenced failure evidence is retained until explicit operator cleanup"
 ;;
 
 let entry = function
@@ -109,6 +115,16 @@ let entry = function
     ; truth_role = Execution_evidence
     ; consumers = [ "Turn_record.raw_trace_run_ref"; "Keeper_raw_trace_reader" ]
     ; retention = Raw_trace_reachability_window
+    }
+  | Structured_response_failure ->
+    { producer = "Structured_response_evidence.record_failure"
+    ; authority_source = "actual Vision candidate or Fusion judge parser failure"
+    ; truth_role = Execution_evidence
+    ; consumers =
+        [ "Structured_response_evidence.record_path"
+        ; "operator: docs/guides/STRUCTURED-RESPONSE-EVIDENCE.md"
+        ]
+    ; retention = Operator_owned_evidence
     }
 ;;
 

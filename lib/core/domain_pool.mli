@@ -76,28 +76,39 @@ val submit_io : t -> (unit -> 'a) -> 'a
     syscalls).
 
     Uses [~weight:0.05], so each worker domain admits ~20
-    concurrently-running IO-bound jobs before queueing.  Re-raises
-    exceptions thrown by [f]. *)
+    concurrently-running IO-bound jobs before queueing. Re-raises exceptions
+    thrown by [f], without retrying or running [f] on the caller.
+
+    Cancellation of this call is relayed to its worker invocation. If it
+    wins before worker entry, [f] is not invoked. Once the worker has entered,
+    the caller waits for that invocation's cancellation/cleanup to settle
+    before re-raising its original cancellation. This is cooperative: CPU
+    work, blocking system calls and protected cleanup may delay settlement.
+    Other submissions and the pool remain independent. *)
 
 val submit_cpu : t -> (unit -> 'a) -> 'a
 (** Blocking submit for CPU-bound work (JSON encode/decode, hashing,
     text similarity, embedding compute).
 
     Uses [~weight:1.0], so each worker domain admits one CPU-bound
-    job at a time.  Re-raises exceptions thrown by [f]. *)
+    job at a time. Same cancellation and no-retry contract as {!submit_io}.
+    A CPU loop must reach an Eio cancellation point to stop early. *)
 
 val submit_io_async :
   sw:Eio.Switch.t -> t -> (unit -> 'a) -> 'a Eio.Promise.or_exn
-(** Async variant of {!submit_io}.  Returns immediately with a
-    promise the caller awaits via [Eio.Promise.await_exn].  Cancelling
-    [sw] cancels the in-flight job. *)
+(** Async variant of {!submit_io}. Returns immediately with a promise.
+    [sw] owns the submitting fiber: cancelling [sw] relays cancellation to
+    accepted work and waits for entered worker cleanup under the same
+    contract as {!submit_io}. Cancelling a separate fiber that merely
+    awaits this promise does not cancel the submission owned by [sw]. *)
 
 val submit_cpu_async :
   sw:Eio.Switch.t -> t -> (unit -> 'a) -> 'a Eio.Promise.or_exn
 (** Async variant of {!submit_cpu}. *)
 
 val executor_pool : t -> Eio.Executor_pool.t
-(** Escape hatch for callers that need a non-default [~weight] (e.g.
+(** Raw escape hatch for callers that need a non-default [~weight] (e.g.
     a job that occupies half a core, [~weight:0.5]).  Prefer
-    {!submit_io} / {!submit_cpu} so the weight policy stays
-    centralised here. *)
+    {!submit_io} / {!submit_cpu} so weight and per-submission cancellation
+    stay centralised here. Raw Eio submissions do not use this module's
+    worker cancellation/settlement bridge. *)

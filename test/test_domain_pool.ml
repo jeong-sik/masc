@@ -302,10 +302,185 @@ let test_ref_inline_from_raw_domain_with_pool () =
       check int "raw-domain caller runs inline in its own domain" self observed;
       R.clear_for_tests ()))
 
+exception Stop_pool_submission
+
+type submission_shape = Blocking_io | Blocking_cpu | Async_io | Async_cpu
+  | Shared_executor | Strict_executor
+
+let submission_shapes = [Blocking_io;Blocking_cpu;Async_io;Async_cpu;Shared_executor;Strict_executor]
+
+let submission_name = function
+  | Blocking_io -> "blocking IO" | Blocking_cpu -> "blocking CPU"
+  | Async_io -> "async IO" | Async_cpu -> "async CPU"
+  | Shared_executor -> "shared executor" | Strict_executor -> "strict executor"
+
+let run_unit_submission shape ~sw pool operation = match shape with
+  | Blocking_io -> D.submit_io pool operation
+  | Blocking_cpu -> D.submit_cpu pool operation
+  | Async_io -> Eio.Promise.await_exn (D.submit_io_async ~sw pool operation)
+  | Async_cpu -> Eio.Promise.await_exn (D.submit_cpu_async ~sw pool operation)
+  | Shared_executor -> Executor_pool_ref.submit_or_inline operation
+  | Strict_executor ->
+    (match Executor_pool_ref.submit_strict operation with
+     | Ok () -> ()
+     | Error (Executor_pool_ref.Work_failed (error,backtrace)) ->
+       Printexc.raise_with_backtrace error backtrace
+     | Error (Executor_pool_ref.Pool_unavailable | Caller_not_in_eio | Submission_failed _) ->
+       fail "strict executor did not preserve the submission boundary")
+
+let with_submission_pool f =
+  Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+    let pool = D.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+    Executor_pool_ref.For_testing.with_pool (D.executor_pool pool) (fun () -> f ~sw pool)))
+
+let test_cancelled_submission_joins_worker_cleanup shape () =
+  with_submission_pool (fun ~sw pool ->
+    let sibling_started,sibling_started_u = Eio.Promise.create () in
+    let sibling_release,sibling_release_u = Eio.Promise.create () in
+    let worker_started,worker_started_u = Eio.Promise.create () in
+    let cleanup_started,cleanup_started_u = Eio.Promise.create () in
+    let cleanup_release,cleanup_release_u = Eio.Promise.create () in
+    let owner_switch,owner_switch_u = Eio.Promise.create () in
+    let entered = Atomic.make 0 in
+    let cleaned = Atomic.make false in
+    Fun.protect ~finally:(fun () ->
+      ignore (Eio.Promise.try_resolve sibling_release_u ());
+      ignore (Eio.Promise.try_resolve cleanup_release_u ())) (fun () ->
+      (* Admit the sibling before a full-weight CPU invocation. It must keep
+         running even while the other invocation's cleanup is held. *)
+      let sibling = D.submit_io_async ~sw pool (fun () ->
+        Eio.Promise.resolve sibling_started_u ();
+        Eio.Promise.await sibling_release;
+        "independent sibling") in
+      Eio.Promise.await sibling_started;
+      let owner = Eio.Fiber.fork_promise ~sw (fun () ->
+        match Eio.Switch.run (fun owner_sw ->
+          Eio.Promise.resolve owner_switch_u owner_sw;
+          run_unit_submission shape ~sw:owner_sw pool (fun () ->
+            ignore (Atomic.fetch_and_add entered 1);
+            Eio.Switch.run (fun worker_sw ->
+              Eio.Switch.on_release worker_sw (fun () ->
+                Eio.Promise.resolve cleanup_started_u ();
+                Eio.Promise.await cleanup_release;
+                Atomic.set cleaned true);
+              Eio.Promise.resolve worker_started_u ();
+              Eio.Fiber.await_cancel ()))) with
+        | () -> fail "a cancelled invocation returned normally"
+        | exception Stop_pool_submission -> ()) in
+      let owner_sw = Eio.Promise.await owner_switch in
+      Eio.Promise.await worker_started;
+      Eio.Switch.fail owner_sw Stop_pool_submission;
+      let first = Eio.Fiber.first
+          (fun () -> Eio.Promise.await cleanup_started; `Worker_cleanup)
+          (fun () -> Eio.Promise.await_exn owner; `Owner_returned) in
+      check bool "actual worker cleanup starts before the owner can return" true
+        (first = `Worker_cleanup);
+      check bool "the cancelled owner still owns the held cleanup" false
+        (Eio.Promise.is_resolved owner);
+      Eio.Promise.resolve sibling_release_u ();
+      check string "another admitted submission survives cancellation" "independent sibling"
+        (Eio.Promise.await_exn sibling);
+      Eio.Promise.resolve cleanup_release_u ();
+      Eio.Promise.await_exn owner;
+      check bool "worker cleanup finished before cancellation settled" true (Atomic.get cleaned);
+      check int "user work was invoked once" 1 (Atomic.get entered);
+      check int "the same pool accepts later work" 42 (D.submit_cpu pool (fun () -> 42))))
+
+let test_cancellation_before_admission_does_not_run_user_work shape () =
+  with_submission_pool (fun ~sw pool ->
+    let occupied,occupied_u = Eio.Promise.create () in
+    let release,release_u = Eio.Promise.create () in
+    let attempted,attempted_u = Eio.Promise.create () in
+    let owner_switch,owner_switch_u = Eio.Promise.create () in
+    let entered = Atomic.make 0 in
+    Fun.protect ~finally:(fun () -> ignore (Eio.Promise.try_resolve release_u ())) (fun () ->
+      let occupant = D.submit_cpu_async ~sw pool (fun () ->
+        Eio.Promise.resolve occupied_u ();
+        Eio.Promise.await release) in
+      Eio.Promise.await occupied;
+      let owner = Eio.Fiber.fork_promise ~sw (fun () ->
+        match Eio.Switch.run (fun owner_sw ->
+          Eio.Promise.resolve owner_switch_u owner_sw;
+          Eio.Promise.resolve attempted_u ();
+          run_unit_submission shape ~sw:owner_sw pool (fun () ->
+            ignore (Atomic.fetch_and_add entered 1))) with
+        | () -> fail "a submission waiting behind occupied capacity returned normally"
+        | exception Stop_pool_submission -> ()) in
+      let owner_sw = Eio.Promise.await owner_switch in
+      Eio.Promise.await attempted;
+      Eio.Switch.fail owner_sw Stop_pool_submission;
+      Eio.Promise.await_exn owner;
+      Eio.Promise.resolve release_u ();
+      Eio.Promise.await_exn occupant;
+      ignore (D.submit_cpu pool (fun () -> ()));
+      check int "cancelled work never enters after pool capacity becomes free" 0 (Atomic.get entered)))
+
+let test_worker_failure_preserves_exception_and_does_not_replay shape () =
+  with_submission_pool (fun ~sw pool ->
+    let applied = Atomic.make 0 in
+    let original = Failure "user work already applied its effect" in
+    (match run_unit_submission shape ~sw pool (fun () ->
+      ignore (Atomic.fetch_and_add applied 1);
+      raise original) with
+     | () -> fail "worker failure disappeared"
+     | exception actual -> check bool "the original worker exception is preserved" true (actual == original));
+    check int "failed effectful work is never retried inline" 1 (Atomic.get applied);
+    check string "failure does not close the pool" "next invocation"
+      (D.submit_io pool (fun () -> "next invocation")))
+
+let test_async_observer_does_not_cancel_owned_submission submit () =
+  with_submission_pool (fun ~sw pool ->
+    let started,started_u = Eio.Promise.create () in
+    let release,release_u = Eio.Promise.create () in
+    let product = ref "original worker product" in
+    Fun.protect ~finally:(fun () -> ignore (Eio.Promise.try_resolve release_u ())) (fun () ->
+      let job = submit ~sw pool (fun () ->
+        Eio.Promise.resolve started_u ();
+        Eio.Promise.await release;
+        product) in
+      Eio.Fiber.first
+        (fun () -> Eio.Promise.await started)
+        (fun () -> ignore (Eio.Promise.await_exn job));
+      check bool "cancelling a result observer does not settle the owned submission" false
+        (Eio.Promise.is_resolved job);
+      Eio.Promise.resolve release_u ();
+      check bool "the original submission still returns its actual product" true
+        (Eio.Promise.await_exn job == product)))
+
+let test_invalid_executor_weight_never_invokes_user_work () =
+  with_submission_pool (fun ~sw:_ _pool ->
+    let applied = ref 0 in
+    let operation () = incr applied in
+    (match Executor_pool_ref.submit_or_inline ~weight:Float.nan operation with
+     | () -> fail "invalid executor admission ran user work inline"
+     | exception Invalid_argument _ -> ());
+    check int "invalid admission did not run the effect" 0 !applied;
+    (match Executor_pool_ref.submit_strict ~weight:Float.nan operation with
+     | Error (Executor_pool_ref.Submission_failed (Invalid_argument _,_)) -> ()
+     | Error (Pool_unavailable | Caller_not_in_eio | Work_failed _ | Submission_failed _)
+     | Ok () -> fail "strict executor lost the infrastructure failure boundary");
+    check int "strict invalid admission also left user work untouched" 0 !applied)
+
 (* ── Suite ──────────────────────────────────────────────── *)
 
 let () =
   Alcotest.run "Domain_pool" [
+    "submission ownership", [
+      test_case "async IO observer does not own worker cancellation" `Quick
+        (test_async_observer_does_not_cancel_owned_submission D.submit_io_async);
+      test_case "async CPU observer does not own worker cancellation" `Quick
+        (test_async_observer_does_not_cancel_owned_submission D.submit_cpu_async);
+      test_case "invalid executor admission never runs user work" `Quick
+        test_invalid_executor_weight_never_invokes_user_work;
+    ];
+    "owned cancellation", List.concat_map (fun shape ->
+      let name = submission_name shape in
+      [test_case (name ^ " joins worker cleanup and preserves siblings") `Quick
+         (test_cancelled_submission_joins_worker_cleanup shape);
+       test_case (name ^ " does not enter cancelled queued work") `Quick
+         (test_cancellation_before_admission_does_not_run_user_work shape);
+       test_case (name ^ " preserves failed effects without replay") `Quick
+         (test_worker_failure_preserves_exception_and_does_not_replay shape)]) submission_shapes;
     "recommended", [
       test_case "positive floor" `Quick test_recommended_domain_count_floor;
       test_case "reserves scheduler headroom" `Quick

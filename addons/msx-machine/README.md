@@ -12,7 +12,7 @@ new execution; HTTP tick and input routes invoke the worker. Lane spectators
 consume retained worker observations rather than a host emulator.
 
 The Dockerfile expects a Linux `masc-msx-addon-worker` executable at the root of
-its build context, produced from `bin/masc_msx_addon_worker.exe`. The image uses
+its build context, produced from `bin/masc_msx_addon_worker_main.exe`. The image uses
 `/state` as its persistent workspace and `/addon` as its read-only package.
 See [state and media provisioning](../../docs/guides/machine-addon-state.md) for
 installation, BIOS/media paths, checkpoint restore and state identity.

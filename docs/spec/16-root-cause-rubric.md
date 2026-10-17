@@ -4,20 +4,19 @@ status: reference
 
 # Root-Cause Rubric
 
-> Supersedes the ad-hoc 5-category list in `PRODUCT-OPERATING-PLAN.md` (Model-Agnostic MASC Epic, #6715) and the 4-category grouping in `memory/2026-04-09-masc-tool-failure-root-causes.md`.
-> Status: Living — markers are refined when detection signal drops on the BookShelf benchmark (`~/me/lab/keeper-benchmark/`).
-> Last Updated: 2026-04-19
+> Supersedes the ad-hoc 5-category list in `PRODUCT-OPERATING-PLAN.md` (Model-Agnostic MASC Epic, #6715) and the 4-category grouping in historical 2026-04-09 tool-failure notes.
+> Status: Living — markers are refined when detection signal drops on the external BookShelf benchmark suite.
+> Last Updated: 2026-10-17
 
 ## Purpose
 
-Every open issue in `masc` and `agent core` should be classifiable into one or more of eight categories, each defined by a **structural marker** — a pattern a `rg` grep or an LLM pass can detect without prose interpretation. Prose interpretation has been empirically shown to produce false pairings (see `~/me/memory/handoff-2026-04-19-issue-close-sweep.md` for the 0/17 triage hallucination incident).
+Every open issue in `masc` and `agent core` should be classifiable into one or more of eight categories, each defined by a **structural marker** — a pattern a `rg` grep or an LLM pass can detect without prose interpretation. Prose interpretation has been empirically shown to produce false pairings (0/17 valid matches in the 2026-04-19 issue-close sweep incident).
 
 The rubric is applied two ways:
 
-1. The issue body declares `root: <value>[, <value>]` in its `masc-triage` block for each marker that matches;
-   the `Issue Taxonomy` workflow projects those onto `root/*` labels. The vocabulary and the
-   label colors live in `.github/issue-taxonomy.json`.
-2. Benchmark: `~/me/lab/keeper-benchmark/bookshelf/` seeds one bug per category and measures whether the Keeper agent detects, fixes, and self-classifies them.
+1. The issue body declares `root: <value>[, <value>]` in its `masc-triage` block for each marker that matches.
+   The vocabulary and label colors live in `.github/issue-taxonomy.json` (the hourly `Issue Taxonomy` reconciliation workflow was retired in `v0.50.0`, `#41275`).
+2. Benchmark: the external BookShelf benchmark harness seeds one bug per category and measures whether the Keeper agent detects, fixes, and self-classifies them.
 
 ## The 8 Categories
 
@@ -45,7 +44,7 @@ The rubric is applied two ways:
 |-------|---------|
 | Label | `root/boundary` |
 | Marker | MASC-side code reimplements something agent core already provides: lifecycle, budget, retry, approval hook, context injector |
-| Example | `context_agent_core_sync` manually tracking token counts duplicates agent core context_injector |
+| Example | MASC-side context wrapper manually tracking token counts or checkpoint state that duplicates `Agent_core.Checkpoint` / context reduction |
 | Issue body triggers | "agent core 재구현", "lifecycle", "budget", "retry", "approval hook", "MASC-side reimplement" |
 
 ### SIL — Silent Failure
@@ -117,13 +116,12 @@ For a new or existing issue:
 
 1. Read title + body first 800 chars.
 2. For each of the 8 triggers above, check marker match.
-3. Put the matching value in the issue body's `masc-triage` block under `root:`. Do not add the label by hand;
-   the workflow reconciles labels from the block and will remove one that the block does not declare.
+3. Put the matching value in the issue body's `masc-triage` block under `root:` and apply the corresponding `root/*` label from `.github/issue-taxonomy.json` (the automatic hourly `Issue Taxonomy` workflow was retired in `v0.50.0`, `#41275`).
 4. If no marker matches, do not apply a default label — either the rubric is underspecified for this case (data for next iteration) or the issue is a pure feature request, not a root-cause fix.
 
 ## Benchmark Linkage
 
-The `~/me/lab/keeper-benchmark/bookshelf/` synthetic project seeds one bug per category. When Keeper processes the benchmark, its Detection rate against the 8 bugs directly measures whether this rubric's markers are concrete enough for an LLM agent to apply.
+The external BookShelf synthetic project seeds one bug per category. When Keeper processes the benchmark, its Detection rate against the 8 bugs directly measures whether this rubric's markers are concrete enough for an LLM agent to apply.
 
 If Detection drops below 6/8, the markers are too abstract and need to be tightened — this document gets updated, not the Keeper prompt.
 

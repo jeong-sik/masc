@@ -17,8 +17,12 @@ Keeper가 실제로 호출할 수 있는 이름과 인자는 매 turn에 제공�
 | Schedule 생성/수정/조회/취소 | `masc_schedule_create`, `masc_schedule_update`, `masc_schedule_list`, `masc_schedule_get`, `masc_schedule_cancel` | `lib/tool_schemas/tool_schemas_schedule.ml` |
 | Conversation 읽기/게시 | `keeper_surface_read`, `keeper_surface_post` | `lib/keeper/keeper_tool_descriptor.ml` |
 | Repository/file 탐색 및 실행 | 현재 schema가 제공하는 search, read, write, edit, execute capability | `lib/keeper/keeper_tool_descriptor.ml`, `lib/tool_surface/` |
-| Memory | `keeper_memory_search`, `keeper_memory_write` | `lib/tool_surface/tool_shard_types_schemas_base.ml` |
-| Shared references | `keeper_wiki_search`, `keeper_wiki_read` | `lib/tool_surface/tool_shard_types_schemas_wiki.ml` |
+| Memory | `keeper_memory_search`, `keeper_memory_select`, `keeper_memory_write` | `lib/tool_surface/tool_shard_types_schemas_base.ml` |
+| Shared references (Wiki) | `keeper_wiki_search`, `keeper_wiki_read`, `keeper_wiki_list`, `keeper_wiki_create`, `keeper_wiki_update` | `lib/tool_surface/tool_shard_types_schemas_wiki.ml` |
+| Skill 조회 | `keeper_skill` | `lib/keeper/keeper_tool_descriptor.ml` |
+| 비동기 Keeper 메시지 | `keeper_msg`, `keeper_msg_result`, `keeper_msg_cancel`, `keeper_msg_list` | `lib/keeper/keeper_tool_descriptor.ml` |
+| 격리 Docker 백그라운드 Job | `keeper_job_start`, `keeper_job_status`, `keeper_job_result`, `keeper_job_cancel` | `lib/keeper/keeper_tool_descriptor.ml` |
+| 다중 Keeper Composition | `keeper_composition_prepare`, `keeper_composition_run`, `keeper_composition_status`, `keeper_composition_result`, `keeper_composition_cancel` | `lib/keeper/keeper_tool_descriptor.ml` |
 | 다중 판단 합성 | `masc_fusion`, `masc_fusion_status` | `lib/keeper/keeper_tool_descriptor.ml` |
 | 사용 가능한 capability 검색 | `keeper_tools_list`, `keeper_tool_search` | `lib/tool_surface/tool_shard_types_schemas_base.ml`, `lib/keeper/keeper_tool_descriptor.ml` |
 

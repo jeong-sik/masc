@@ -68,17 +68,35 @@ reaches the next turn and never splits one.
 
 What `base` carries is `sandbox-images/base/Dockerfile`. The binary embeds it
 and pipes it to `docker build -` with no build context, so it builds the same
-on a host that never had a checkout. `masc sandbox-image --print` writes the
+on a host that never had a checkout.
+
+**A microVM Keeper does not read the Docker store.** Each microVM runtime has its
+own image store, so an image built with the default Docker command is invisible to
+the microVM gate. Target the microVM runtime store explicitly:
+
+```bash
+masc sandbox-image --base-path ~/masc --runtime apple_container --image base
+```
+
+Because `container build` does not accept `-` on stdin and expects a context
+directory, `apple_container` writes the embedded recipe to a temporary directory
+and passes `-f`. `nerdctl` uses Docker syntax and reads the recipe from stdin.
+`microsandbox` (`msb`) has no `build` subcommand (`pull`, `load`, and `save`
+only), so build the image elsewhere, `msb load` its OCI archive, and then promote
+that tag with `--runtime microsandbox`. `masc sandbox-image --print` writes the
 Dockerfile to stdout instead of building.
 
 ## Configuration
 
 `masc keeper-create` writes these fields for you (`--sandbox-profile` and the
-required `--network-mode`). The resulting `<base-path>/.masc/config/keepers/<name>.toml`
-looks like:
+required `--network-mode`). Only `"docker"`, `"microvm"`, and `"remote_ssh"` are
+valid `sandbox_profile` values (there is no `"local"` profile). The resulting
+`<base-path>/.masc/config/keepers/<name>.toml` looks like:
 
 ```toml
+[keeper]
 sandbox_profile = "docker"   # "docker" | "microvm" | "remote_ssh"
+sandbox_image = "base"       # "base" | "ocaml"
 network_mode = "none"        # "none" | "inherit" | "policy"
 
 # only for sandbox_profile = "remote_ssh":
@@ -92,6 +110,15 @@ proxy this server owns and nothing else (today only the `apple_container`
 microVM backend carries this mode). The default for `docker` and `microvm`
 is `none`, which is why `masc keeper-create` refuses to proceed without the
 flag rather than choosing for you.
+
+For microVM Keepers that need custom guest DNS resolvers, set `microvm_dns` under
+`[sandbox]` in `<base-path>/.masc/config/runtime.toml` (or via
+`MASC_KEEPER_MICROVM_DNS`):
+
+```toml
+[sandbox]
+microvm_dns = ["1.1.1.1", "8.8.8.8"]
+```
 
 ---
 

@@ -1531,7 +1531,7 @@ status: reference
   → [Provider_config.reasoning_effort_request_rejection](../../packages/agent_core/lib/llm_provider/provider_config.mli)
 
 **DOS Lane**
-: 서버 안에 사는 DOS 기계 하나. Keeper 는 `masc_dos_*` 도구로 같은 기계에 키를
+: 연결된 `dos-machine` Add-on worker(`masc-dos-addon-worker`) 안에 사는 공유 DOS 기계 하나(서버 프로세스 내부 상태는 worker 연결과 게시 상태만 추적하며, 실제 8086 에뮬레이터 상태는 worker 프로세스가 소유한다). Keeper 는 `masc_dos_*` 도구로 같은 기계에 키를
   넣고 화면을 읽는다. 시간은 8086 명령 수로 흐르고, 도구를 불러야만 간다.
   `settled` 는 "프로그램이 키를 물었고 화면이 멈췄다" 이다. 게임 파일은
   `<.masc>/dos/programs/` 에 두고, 게임이 쓴 세이브는 `<.masc>/dos/saves/` 에
@@ -1676,11 +1676,11 @@ status: reference
   결과 안에 `autosave: {"saved": false, "reason": ...}` 로만 남는다.
   기계를 움직이는 다음 호출이 `autosave` 슬롯을 덮어쓴다. 다만 새 기계(incarnation)의
   첫 자동 저장만은 먼저 그 자리에 있던 파일을 `autosave-prev` 슬롯으로 옮기고 나서 쓴다
-  — 그 파일은 이 기계가 아니라 이전 기계(이전 `load`·`restore`)의 것이라서다. 서버를
+  — 그 파일은 이 기계가 아니라 이전 기계(이전 `load`·`restore`)의 것이라서다. 서버나 worker를
   다시 켠 뒤 프로그램 이름을 넣은 `masc_dos_load` 를 첫 호출로 부르면, 재시작 전 마지막
   자동 저장은 `autosave-prev` 로 남아 `masc_dos_restore slot=autosave-prev` 로 되살릴 수
   있다. 같은 기계가 그 뒤 또 자동 저장할 때는 옮기지 않고 `autosave` 를 그대로 갈아 쓴다.
-  기계가 없을 때 — 기계가 필요한 호출의 거절(`masc_dos_screen`·`masc_dos_peek` 등)과
+  연결된 `dos-machine` worker에 기계가 올라와 있지 않을 때 — 기계가 필요한 호출의 거절(`masc_dos_screen`·`masc_dos_peek` 등)과
   프로그램 이름 없이 부른 `masc_dos_load` 의 인벤토리 응답 — 는 이 자동 저장이 있는지,
   무엇인지(프로그램, 실행한 명령어 수, 저장한 사람, 시각), 어떻게 되살리는지
   (`masc_dos_restore slot=autosave`)를 `autosave` 필드로 알려 준다. 파일이 있는데 읽히지
@@ -1690,7 +1690,7 @@ status: reference
   [Machine_checkpoint.read_meta](../../lib/machine_checkpoint/machine_checkpoint.mli)
 
 **MSX Lane**
-: 서버 안에 사는 MSX 기계 하나. Keeper 는 `masc_msx_*` 도구로 같은 기계에 키를
+: 연결된 `msx-machine` Add-on worker(`masc-msx-addon-worker`) 안에 사는 공유 MSX 기계 하나. Keeper 는 `masc_msx_*` 도구로 같은 기계에 키를
   넣고 화면을 읽는다. DOS Lane과 같은 축의 공유 머신으로, Lane Add-on의
   `msx_capture` 원천이 이 머신을 관측한다.
   → [Msx_lane](../../lib/msx_lane/msx_lane.mli)
@@ -1819,8 +1819,8 @@ status: reference
   → [Hooks_agent_core](../../packages/agent_core/lib/base/hooks.mli)
 
 **Lane Add-on**
-: 기존 MASC 원장과 실행 환경 위에 붙는 선택적 관측·관계 레이어. MSX Lane의 머신,
-  DOS Lane의 머신, Browser Lane의 세션, Keeper의 도구와 턴 소유권을 재사용한다. 패키지 하나가 여러
+: 기존 MASC 원장과 실행 환경 위에 붙는 선택적 관측·관계·머신 호스팅 레이어. `msx-machine`·`dos-machine` Add-on worker가 호스팅하는 MSX·DOS 머신,
+  Browser Lane의 세션, Keeper의 도구와 턴 소유권을 결합·재사용한다. 패키지 하나가 여러
   Lane 행을 제공할 수 있다. 패키지는 `lane.toml`의 `contributions`로 observe·derive·act
   기여를 선언하며, act 기여 패키지(예: `dos-world`·`quiz-grader`)는 `masc_lane_act` 도구로
   조치를 출하한다 — 즉 이 레이어는 관측뿐 아니라 조치(act)까지 포함한다. 패키지 worker는
@@ -2000,8 +2000,15 @@ status: reference
 
 **Composition**
 : Tool 노드의 실행 선후 관계와 결과 참조 등 구조를 검사한 실행 계획. 합성 Skill은
-  허용된 계획을 Tool로 노출한다. → [선언 문법](../../lib/keeper/keeper_tool_composition_catalog.mli),
-  [실행 계획](../../lib/keeper/keeper_tool_plan.mli)
+  허용된 계획을 `keeper_compose_<name>` Tool로 노출하며, 즉석(ad-hoc) 계획은
+  `keeper_composition_prepare`로 검증·저장(`prepared_id`)한 뒤 `keeper_composition_run`으로
+  실행하거나 `keeper_compose_<name>`의 `async=true`로 비동기 실행(`run_id`)하고
+  `keeper_composition_status`·`keeper_composition_result`·`keeper_composition_cancel`로
+  추적·취소한다. 노드 중 `keeper_job_start`가 시작한 소유 격리 작업(`job_id`)은 같은
+  합성 실행 안에서 `keeper_job_status`·`keeper_job_result`가 완료까지 기다릴 수 있다.
+  → [선언 문법](../../lib/keeper/keeper_tool_composition_catalog.mli),
+  [실행 계획](../../lib/keeper/keeper_tool_plan.mli),
+  [비동기 실행 레지스트리](../../lib/keeper/keeper_composition_run_registry.mli)
 
 **Parallel Tool Calls**
 : 모델 응답 하나에 여러 도구 호출이 들어오는 것. 모델의 지원 여부는 카탈로그의
@@ -2094,9 +2101,9 @@ status: reference
   [Tool_blob_store](../../lib/tool_blob_store/tool_blob_store.mli)
 
 **alphaTex 펜스 (alphaTex Fence)**
-: Board 글이나 chat 본문에 ` ```alphatex ` 로 여는 코드 펜스 하나. 안에 기타 악보를
-  글자(alphaTex 문법)로 적으면 TUI가 탭 악보로 그린다. 읽는 범위는 `\title`·`\tempo`·
-  `\ts`·`\tuning` 지시어, 길이 `:1`~`:16`, 음·화음·쉼표, 마디선, 반복 기호(`\ro`·`\rc N`·
+: Board 글이나 chat 본문에 ` ```alphatex ` 또는 ` ```atex ` 로 여는 코드 펜스 하나. 안에 기타 악보를
+  글자(alphaTex 문법)로 적으면 TUI와 대시보드가 탭 악보로 그린다(#43241·#43419). 읽는 범위는 `\title`·`\artist`·`\tempo`·
+  `\ts`·`\ks`·`\tuning`(괄호형 조현 포함)·`\track`·`\staff`·`\section` 지시어, 길이 `:1`~`:16`과 리듬 스템 표기, 음·화음·쉼표, 마디선, 반복 기호(`\ro`·`\rc N`·
   `\ae`)다. 범위 밖이거나 마디보다 넓으면 그리지 않고 이유 한 줄과 원문을 보여 준다.
   - 이름 경계: Board Attachment의 `score` 종류와 다르다. `score` 첨부는 파일이 악보라는
     표시일 뿐이고 TUI는 번호 키로 로컬 캐시에 저장할 뿐 그리지도 열지도 않는다. 탭으로 그려지는 것은
@@ -2104,7 +2111,6 @@ status: reference
   - 길이를 바꾸지 않는 주법 표기는 그리지 않고 그 음 뒤에 `*`만 붙인다.
   - `\tempo`·`\ts`·`\title`은 악보 위 한 줄 헤더(`♩=96 · 4/4 · "Riff"`, 있는 것만)로 그리고,
     줄 묶음마다 맨 위에 마디 번호 줄을 둔다(#43163).
-  - 아직 없는 것: 대시보드의 악보 렌더러(후속, #42782).
   → [사용 가이드](../guides/alphatex-tab.md), [Masc_tui_alphatex](../../bin/masc_tui_alphatex.mli),
   [Masc_tui_alphatex_score](../../bin/masc_tui_alphatex_score.mli)
 
@@ -2451,7 +2457,9 @@ status: reference
   **다른 것**: 채팅 창에서 도구 호출 하나를 두고 운영자에게 묻는 도구 승인
   (`Keeper_tool_approval_mode`: `Auto`·`Yolo`)은 Gate가 아니다. 그 대기는 턴을 멈추고
   답을 기다리며, `Yolo`로 꺼도 Gate로 가는 바깥 작업은 Gate가 따로 판정한다.
-  도구 승인의 `Auto`와 Gate의 `Auto_judge`도 다른 값이다.
+  Keeper별 `Auto`/`Yolo` 모드는 `<.masc>/gate/` 아래 영속화되어 서버 재시작 뒤에도
+  유지되며(#43187), 기억된 Keeper 승인 규칙(v12)을 다시 승인하면 요청된 만료 기간으로
+  갱신되어 저장된다(#43361). 도구 승인의 `Auto`와 Gate의 `Auto_judge`도 다른 값이다.
   → [Keeper_tool_approval_mode](../../lib/keeper/keeper_tool_approval_mode.mli)
 
 **Prompt Block (프롬프트 블록)**
@@ -2604,7 +2612,8 @@ status: reference
     방지한다. 키퍼가 실제로 재시도하지 않은 호출은 자동 실행되지 않으며, 유효 시간 경과 시 안전하게 폐기된다.
   - **판정 결과 상태**: `remember_outcome`은 `Remembered of { tool_name : string }` 또는 `No_matching_ask`로
     나뉜다.
-  - **Yolo 모드 안전 불변식**: 키퍼가 `Yolo` 스탠스로 전환된 동안에는 승인 게이트를 묻지도 소비하지도 않아
+  - **Yolo 모드 안전 불변식**: 키퍼별 승인 모드(`Auto`/`Yolo`)는 `.masc/gate/`에 영속화되며(#43187),
+    `Yolo` 스탠스로 전환된 동안에는 승인 게이트를 묻지도 소비하지도 않아
     항목이 쌓일 수 있으나, TTL 검사 덕분에 이전 결정이 스탠스 복귀 후 임의로 발화하지 않고 만료 폐기된다.
   → [Keeper_late_approval](../../lib/keeper/keeper_late_approval.mli)
 
@@ -2784,13 +2793,13 @@ status: reference
   → [Server_skill_editor](../../lib/server/server_skill_editor.mli)
 
 **Instruction Skill**
-: Keeper가 `keeper_skill`로 본문과 참조 파일을 읽고 적용할 방법을 판단하는 Skill.
+: Keeper가 `keeper_skill`(또는 Claude Code 호환 `Skill` 레시피)로 본문과 참조 파일을 읽고 적용할 방법을 판단하는 Skill. `Skill` 도구는 마크다운 본문을 인라인으로 반환하며 `Read`와 동시 실행 안전(`Concurrent`)으로 분류된다(#43389).
   본문을 읽었다는 사실은 그 절차를 실행했거나 성공했다는 증거가 아니다.
   선택적으로 제공되는 JEV 적용 가능성 의견도 권한·실행·성공의 증거가 아니다.
 
 **Composition Skill**
 : 본문의 `toml composition` fence가 도구 노드와 입력 연결을 선언하는 Skill.
-  검증된 계획이 `keeper_compose_<name>` 도구가 된다. 실행기는 선언된 입력과
+  검증된 계획이 `keeper_compose_<name>` 도구가 되며, `async=true`로 호출하면 비동기 실행 핸들(`run_id`)을 반환하여 `keeper_composition_status`·`keeper_composition_result`·`keeper_composition_cancel`로 관리한다. 즉석(ad-hoc) 계획도 `keeper_composition_prepare`와 `keeper_composition_run`으로 실행할 수 있다. 실행기는 선언된 입력과
   의존 관계를 따르며, 노드 사이의 새 모델 판단을 대신하지 않는다. 필요한 노드
   도구가 Keeper의 현재 표면에 없으면 합성 도구도 그 턴에 제공하지 않는다.
 
@@ -3838,6 +3847,10 @@ status: reference
   `masc_wiki_list`·`masc_wiki_read`·`masc_wiki_create`·`masc_wiki_update`·`masc_wiki_search`.
   Keeper는 `masc_wiki_list`·`masc_wiki_create`·`masc_wiki_update`를 그 이름 그대로 부르고,
   읽기와 검색은 `keeper_wiki_read`·`keeper_wiki_search`라는 이름으로 부른다.
+  `masc_wiki_search`와 `keeper_wiki_search`는 다중 단어 질의를 공백 기준 토큰으로 나누고,
+  3자 이하 짧은 토큰에는 단어 경계 매칭을 적용해 우연한 부분 문자열 오탐을 줄인다(#43462).
+  MCP 리소스 `masc://wiki/log`는 `log.md` 전체를 메모리에 올리지 않고 끝 64 KiB를 줄 경계에
+  맞춰 읽는다(#42950).
   페이지를 읽기만 하는 점검 도구 `masc_wiki_lint`는 이 다섯과 따로 적는다(→ Wiki lint).
   → [Tool_wiki](../../lib/tool_wiki.mli)
 
@@ -3857,7 +3870,8 @@ status: reference
   (`log.md`가 그 페이지에 기록한 가장 높은 `r<N>` 아래에서 어떤 `r<N>`을 건너뛴다. `missing`이
   건너뛴 수다. 한 페이지의 줄은 `r1`, `r2`, … 로 건너뜀이 없으므로, 빠진 값은 페이지에는 닿고
   log 에는 닿지 못한 줄, 곧 `append_log`가 실패해 남긴 자국이다. 쓰는 중인 상태는 열의 끝만
-  비우므로 구멍과 구별된다. 다만 log 에 파서가 버린 줄이 하나라도 있으면 구멍을 확정하지 않고,
+  비우므로 구멍과 구별된다. 다만 log 에 파서가 버린 줄이 하나라도 있으면 구멍을 확정하지 않고
+  최상위 `revision_log_hole_suppressed: true`로 억제 사실을 드러내며(#43442),
   열의 시작은 그 페이지 log 줄의 최저값으로 둔다). `log.md`는 같은
   파서로 읽고, 모르는 동작 단어 줄과 읽지 못한 줄의 수를 `log_unknown_action`과
   `log_unreadable_line`으로 함께 낸다. 코드 펜스·코드 스팬·이미지 안의 링크는 세지 않는다.

@@ -3,7 +3,7 @@ title: Constitution Invariants
 description: The six invariants and seven forbidden patterns the MASC runtime and its agents follow.
 ---
 
-The MASC runtime and every agent under it follow the constitution defined in `docs/constitution.xml`. This page summarizes that file; the XML is the source of truth.
+`docs/constitution.xml` is MASC's product and development contract (including the coding-agent `<execution_protocol>`), not the Keeper runtime system prompt (`config/prompts/keeper.md` and per-Keeper `keepers/<name>.toml`). This page summarizes the domain invariants and forbidden patterns in that file; the XML is the source of truth.
 
 ---
 
@@ -20,12 +20,14 @@ flowchart TD
     ROOT --> P6["6. Failure keeps evidence<br/>(failure_keeps_evidence)"]
 ```
 
-1. **`no_wall_clock_death`** — The passage of time does not kill state. Neither Tasks nor Board attention Pending entries expire; the Board's default TTL is 0, meaning permanent. If an expiry seems needed, a state transition is usually missing.
+1. **`no_wall_clock_death`** — The passage of time does not kill state. Neither Tasks nor Board attention Pending entries expire; the Board's default TTL is 0, meaning permanent. If an expiry seems needed, a state transition is usually missing. **Exception**: Candle balance (`Candle 잔액` decays with an exponential half-life as a currency holding rule, without expiring any Task, Goal, or Board state or erasing ledger facts).
 2. **`closed_sum_over_string`** — State and verdicts are expressed as closed sum types. task_status, Goal_phase, attempt result, board_error, and delivery are all variants; no branching on wire-string comparison.
 3. **`strict_parse_no_default`** — Parsers return `None` on unknown input. No unknown value is coerced into a convenient default. A Goal decode fails if a `status` field arrives.
 4. **`persist_before_model_call`** — The subject of a judgment is persisted before the model is called. The Board attention candidate is this shape.
 5. **`authoritative_read_only`** — A change is not approved when the authoritative store cannot be read. A recovery snapshot does not authorize a mutation.
 6. **`failure_keeps_evidence`** — A delivery failure leaves evidence and does not consume its target. A failure never quietly advances state.
+
+MASC encodes these invariants in OCaml types and transition checks so invalid transitions are rejected by the server.
 
 ---
 

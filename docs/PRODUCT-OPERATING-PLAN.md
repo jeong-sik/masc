@@ -6,8 +6,8 @@ status: live
 
 > Current package version: v0.58.0
 > Latest changelog entry: v0.58.0 (2026-10-16)
-> Latest published GitHub release: v0.57.0 (2026-10-16)
-> Updated: 2026-10-16
+> Latest published GitHub release: v0.58.0 (2026-10-16)
+> Updated: 2026-10-17
 > Release line: pre-1.0 (`0.y.z`)
 
 ## Product Scope
@@ -39,7 +39,7 @@ The front-door promise is level 1. Levels 2-3 are supported surfaces.
 | Remote-safe operator | Working | Supporting | `docs/spec/09-server-transport.md`, `docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md` | auth and release posture still need tightening | keep surface reduced and explicit |
 | Multi-transport matrix | Working but not front-door | Experimental | implementation status appendix, live transport issues | reachable state and reported state can diverge | fix health truth before promotion |
 | Auth and API contract posture | Not done for product promise | Advanced / supporting | `docs/PRODUCT-REVIEW.md` | non-local default is still too weak, REST contract is not crisp | design + narrow hardening slices |
-| Config introspection | Working but split | Supporting | `masc_config`, `/api/v1/dashboard/config`, open issues `#3364`, `#3365`, `#3363` | read contract is duplicated and not yet centralized enough to promise as SSOT | centralize config and expose one canonical read-only snapshot |
+| Config introspection | Working | Supporting | `masc_config`, `/api/v1/runtime/resolved`, `/api/v1/runtime/config/raw` | dashboard and MCP config read surfaces coexist | keep runtime config read/write contracts consistent |
 | Release evidence and local proof | Working | Front door | `docs/RELEASE-EVIDENCE.md`, `scripts/release-evidence.sh`, release workflow artifact | deployment-specific proof is still env-gated | keep release/main evidence bundle attached to artifacts |
 | Release and doc truth | Working | Front door | doc truth lane + version truth + agent core pin doc sync | release/doc changes previously bypassed runtime gates | keep build/lint/health tied to release/doc/version changes |
 
@@ -73,8 +73,8 @@ repository labels and the SSOT.
 
 | Axis | Cardinality | Values |
 |------|-------------|--------|
-| `kind` | exactly one | `defect` `gap` `capability` `erosion` `inquiry` |
-| `area` | exactly one | `turn` `continuity` `collab` `goal-task` `verification` `tools` `runtime` `transport` `dashboard` `connector` `observability` `persistence` `ci` |
+| `kind` | exactly one | `defect` `gap` `capability` `erosion` `inquiry` `refactor` `test` `docs` |
+| `area` | exactly one | `turn` `continuity` `collab` `goal-task` `verification` `tools` `runtime` `transport` `dashboard` `connector` `observability` `persistence` `ci` `keeper` |
 | `impact` | exactly one | `breaks-continuity` `breaks-collab` `blinds-operator` `degrades` `internal` |
 | `root` | zero or more | `ssot` `silent` `string` `variant` `boundary` `telemetry` `det` `ndt` |
 | `must-do` | flag | `true` when the product promise is broken right now |
@@ -102,31 +102,19 @@ a label decides *what is at stake*.
 
 `root` is optional and follows `docs/spec/16-root-cause-rubric.md`. A missing `root` is not a triage
 violation; the rubric only applies when a structural marker actually matches. Multiple values are allowed,
-and overlap is real - a boundary violation that also swallows errors takes both - but it is rare in the
-intake we actually have: on 2026-08-22, 48 of the 820 open issues that declare `root` name two or more,
-and 401 declare none. This paragraph used to quote 60% from the 2026-04-19 sweep; that number stopped
-describing the repository.
+and overlap is real - a boundary violation that also swallows errors takes both.
 
 ### Issue intake
 
 Humans file through the issue form; keepers file with `gh issue create`. Both produce the same fenced
 `masc-triage` block, so there is one format and one parser. An issue filed without the block gets a comment
 naming the expected shape, and no labels. Do not pass `--label` to `gh issue create`: labels set that way
-have no declaration behind them, and the sweep takes them off again.
-
-The workflow also sweeps every open issue once an hour, because the `issues` events do not all arrive - 62
-issues were filed on 2026-08-21 against 16 workflow runs. The sweep, not the event, is what keeps labels
-and bodies in agreement. It touches only the issues where the two disagree, so a quiet repository produces
-no comments and no notifications.
+have no declaration behind them.
 
 ### PR status labels
 
 The `Issue Taxonomy` workflow skips pull requests outright: `kind`/`area`/`impact` describe a problem and a
-PR is an answer. Practice disagrees - on 2026-08-22, 15 of 29 open PRs and 13 of the last 30 merged ones
-carried taxonomy labels, applied by hand at `gh pr create --label` time. Nothing declares those and nothing
-reconciles them, so they are the one place in this model where a label asserts a classification with no
-source behind it. Either the hand-labelling stops or PRs get a declaration of their own; today it is
-neither.
+PR is an answer.
 
 The former `pr/*` status-label projection was retired with automatic PR
 workflows. GitHub's native mergeability, review decision, and unresolved-thread
@@ -202,16 +190,3 @@ Keep visible, but defer:
 
 - package extraction and large library breakup
 - broad Eio architecture cleanup
-- cluster mode and other speculative scaling stories
-
-## GLM Role
-
-GLM is part of the operating model, not the core product promise.
-
-Use direct `sb glm-text` for:
-
-- cross-model PR review
-- skeptical review of product docs and roadmap text
-- release-note and spec ambiguity checks
-
-Do not describe `sb glm-cascade --simple` results as proof that direct GLM itself worked. That path is a multi-model chain, not a pure GLM call.

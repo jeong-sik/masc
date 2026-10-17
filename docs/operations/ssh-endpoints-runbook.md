@@ -1,8 +1,8 @@
 # SSH remote execution endpoints
 
 This is the operator runbook for RFC-0395 and `sandbox_profile = "remote_ssh"`.
-The lane is fail-closed: do not recover an SSH failure by changing a keeper to
-`local` or silently routing it to Docker.
+The lane is fail-closed: do not recover an SSH failure by silently switching
+`sandbox_profile` to `docker` or `microvm`.
 
 ## Prerequisites
 
@@ -274,7 +274,7 @@ sentence saying so is not.
 | `remote_ssh_version_error` | A request or result frame has an unsupported protocol version. | Align MASC and shim revisions. |
 | `remote_ssh_shim_config_error` | `/etc/masc-exec-shim.conf` is missing, invalid, owned by neither root nor the shim's account, or may be written by its group or every user; or the `env_file=` it names is not a regular file, cannot be read, has a malformed line, or fails the same owner and mode rule. | A detail that names the env file's path (`cannot read env_file <path>`, `env_file <path> is not a regular file`, `env_file <path> line N: ...`, `env_file <path> is owned by uid N`, `env_file <path> is writable by ...`): fix that file and do not rerun bootstrap, which rewrites the config without `env_file=`. `config file <path> is owned by uid N` or `config file <path> is writable by ...`: make the config root-owned `0644` with `sudo chown root:root` and `sudo chmod 0644`; rerunning bootstrap resets the mode but keeps the owner of an existing file. Any other detail is about the config file, including `env_file must not be empty` and `env_file must be an absolute path` (the `env_file=` line itself is wrong): rerun bootstrap and inspect the strict config keys, then add `path=`/`env_file=` again (masc#36918). |
 | `remote_ssh_shim_error` | The shim failed before producing a payload result. | Inspect the named shim detail and remote system state. |
-| `remote_ssh_dispatch_unavailable` | An SSH profile reached an inert Docker/legacy dispatch arm. | Treat as a wiring regression; capture the exact source head and file an issue. |
+| `remote_ssh_dispatch_unavailable` | An SSH profile reached a non-SSH dispatch arm. | Treat as a wiring regression; capture the exact source head and file an issue. |
 | `remote_ssh_read_failed` | A remote read command exited nonzero. | Inspect the returned exit/stderr and remote path. |
 | `remote_ssh_read_signaled` | A remote read command died by signal. | Inspect remote resource/kill evidence. |
 | `remote_ssh_read_stopped` | A remote read command reported a stopped status. | Treat as an execution anomaly and inspect the endpoint. |

@@ -62,8 +62,8 @@ these capabilities when no model catalog row matches that model prefix.
 
 ## Schema Reference
 
-See [`docs/schemas/capability-manifest-v1.json`](schemas/capability-manifest-v1.json)
-for the full JSON Schema (draft-07).
+See [`docs/example-capability-manifest.json`](example-capability-manifest.json)
+and `lib/llm_provider/capability_manifest.mli` for the authoritative schema contract.
 
 ### Top-level
 
@@ -86,8 +86,9 @@ for the full JSON Schema (draft-07).
 | `supports_named_tool_choice` | bool | from base | Named forced tool selection. |
 | `supports_parallel_tool_calls` | bool | from base | Multiple tool calls per turn. |
 | `assistant_tool_content_format` | string | from base | Wire shape for assistant messages with tool calls and no visible text. Accepted values: `null`, `empty_string`. |
+| `supports_assistant_prefill` | bool | from base | Whether Anthropic Messages wire accepts a final assistant continuation prefill (e.g. `false` for Haiku 5.5). |
 | `supports_reasoning` | bool | from base | Any reasoning capability (union). |
-| `accepted_reasoning_efforts` | string[] | from base | Optional model-specific subset of canonical reasoning effort values. Accepted values: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. Omit unless verified for that model. |
+| `accepted_reasoning_efforts` | string[] | from base | Optional model-specific subset of canonical reasoning effort values. Accepted values: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra`. Omit unless verified for that model. |
 | `supports_response_format_json` | bool | from base | JSON mode (valid JSON, no schema). |
 | `supports_structured_output` | bool | from base | Provider-native schema output. |
 | `supports_multimodal_inputs` | bool | from base | Any non-text input (union). |
@@ -106,6 +107,7 @@ for the full JSON Schema (draft-07).
 | `thinking_control_token` | string | absent | Exact chat-template token used when `thinking_control_format = "chat_template_token"`; blank values and leading/trailing whitespace are rejected. |
 | `preserve_thinking_control_format` | string | from base | Historical reasoning replay/preserve wire control. Accepted values: `none`, `thinking_object_keep_all`, `chat_template_kwargs_preserve_thinking`, `always_preserved`, `thinking_object_clear_thinking`. |
 | `reasoning_output_format` | string | from base | Request-side reasoning output split control. Accepted values: `none`, `split_reasoning_fields`. |
+| `reasoning_streaming_format` | string | from base | Streaming reasoning parser format (`default`, `none`, `template_parser`, `delta:<field>`, `delta_details:<field>`). |
 | `reasoning_replay` | string | `default` | Optional multi-turn reasoning replay override. Accepted values: `default`, `no_replay`, `drop_without_tool`, `latest_user_turn_tool_calls`, `preserve_always`. |
 | `emits_usage_tokens` | bool | from base | Whether the standard response carries usage tokens (`input_tokens`/`output_tokens`). |
 | `supported_models` | string[] | from base | Exact client-side model allow-list. Must be non-empty; blank, padded, or duplicate ids are rejected. |

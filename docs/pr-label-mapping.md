@@ -1,8 +1,8 @@
 # PR 라벨 매핑 가이드
 
-PR 을 분류할 때 세 축 라벨(kind / area / impact)을 각각 하나씩 붙이고, 검토가 진행되면 `pr/*` 상태 라벨을 더하거나 갱신합니다.
+PR 을 분류할 때 세 축 라벨(kind / area / impact)을 각각 하나씩 붙입니다.
 
-라벨 어휘의 정본은 `.github/issue-taxonomy.json`입니다. 이 문서는 정본 어휘로 PR 분류를 안내하며, 정본이 은퇴한 라벨(`area/tui`, `area/gates`, `area/typed`, `impact/no-op`)은 쓰지 않습니다.
+라벨 어휘의 정본은 `.github/issue-taxonomy.json`입니다. 이 문서는 정본 어휘로 PR 분류를 안내하며, 정본이 은퇴한 라벨(`area/tui`, `area/gates`, `area/typed`, `impact/no-op`, `pr/*`)은 쓰지 않습니다.
 
 ## kind — PR 이 무엇을 하는가
 
@@ -36,18 +36,7 @@ area/keeper, area/dashboard, area/ci, area/collab, area/connector, area/continui
 | impact/breaks-collab | 협업 흐름을 깰 수 있음 |
 | impact/blinds-operator | 운영자 가시성을 가림 |
 
-## 상태 라벨(진행 중 갱신)
-
-| 라벨 | 의미 |
-|---|---|
-| pr/review-approved | 현 head 에 결속된 approve-guard footer 승인이 존재 |
-| pr/review-changes | 열린 변경 요청 또는 FAIL 판정이 존재 |
-| pr/unresolved | 미해결 리뷰 스레드가 존재 |
-| pr/conflict | main 과 충돌 |
-
-해당하지 않는 상태 라벨은 붙이지 않습니다.
-
 ## 규칙
 
 - 축 라벨은 PR 당 각 하나입니다.
-- 라벨만으로 승인·병합을 판정하지 않습니다. 판정 근거는 리뷰 본문의 `verdict: PASS head: <40자>` 첫 줄과 `approve-guard: head <40자>` footer 로만 셉니다.
+- 리뷰·충돌·병합 상태는 `pr/*` 라벨이 아니라 GitHub 기본 필드와 리뷰 본문(`verdict: PASS head: <40자>` 첫 줄, `approve-guard: head <40자>` footer)으로 판정합니다.

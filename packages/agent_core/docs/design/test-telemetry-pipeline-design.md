@@ -15,10 +15,9 @@ without involving a real network or MASC consumer.
 
 ### 2.1 Principle: Mock at the provider boundary
 
-We mock the provider *backend*, not the HTTP layer.  The test wires a
-`Custom_registered` provider config pointing to a module that implements the
-`Provider.Backend.S` interface (or the subset used by `Complete.complete_*`).
-The mock returns a fixed stream of SSE chunks including:
+We mock the provider *backend*, not the HTTP layer. The test uses
+`Provider_mock` / `Llm_provider` mock wiring instead of a real network
+transport. The mock returns a fixed sequence of chunks/responses including:
 
 - `role=assistant` delta
 - First content chunk (`first_chunk` flag or delta content)
@@ -52,32 +51,24 @@ After `Pipeline.run_turn` returns, we:
 
 ```
 test_telemetry_pipeline.ml
-  ├── Agent_sdk
+  ├── Agent_core
   ├── Llm_provider.Telemetry_event
   ├── Telemetry_bus
   ├── Pipeline
   ├── Types
-  ├── Provider
+  ├── Llm_provider
   └── Alcotest
 ```
 
-The test links against `agent_sdk`, `llm_provider`, and `alcotest`.
+The test links against `agent_core`, `llm_provider`, and `alcotest`.
 
 ## 4. Mock Provider Specification
 
 ```ocaml
-module Mock_backend : Provider.Backend.S = struct
-  type config = unit
-
-  let complete_streaming ~sw:_ ~config:_ ~prompt:_ ~params:_ ~handler:_ =
-    (* Emit synthetic chunks through handler *)
-    ...
-  ;;
-
-  let complete_sync ~config:_ ~prompt:_ ~params:_ =
-    Error (`Msg "mock: sync not implemented")
-  ;;
-end
+(* Uses Provider_mock / Llm_provider synthetic streaming handler *)
+let complete_streaming ~sw:_ ~config:_ ~prompt:_ ~params:_ ~handler:_ =
+  (* Emit synthetic chunks through handler *)
+  ...
 ```
 
 Chunk sequence:
@@ -122,7 +113,7 @@ Chunk sequence:
 (test
  (name test_telemetry_pipeline)
  (modules test_telemetry_pipeline)
- (libraries agent_sdk llm_provider alcotest eio_main))
+ (libraries agent_core llm_provider alcotest eio_main))
 ```
 
 No `(deps)` or `(action)` needed — the test is hermetic.

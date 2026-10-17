@@ -7,9 +7,7 @@ runbook is the standard procedure.
 
 ## Background
 
-The five reports under `~/Downloads/Kimi_Agent_샌드박스 설정 문제/`
-identified three independent defects whose composition produced a
-silent host-fallback bypass:
+Three independent defects previously combined to produce a host-fallback bypass:
 
 | ID | Defect | Closed by |
 |----|--------|-----------|
@@ -37,10 +35,10 @@ done
 Pass criteria:
 - Every keeper JSON declares both `sandbox_profile` and `network_mode`
   explicitly (no `<missing>`).
-- Profiles are one of `docker`, `microvm` or `remote_ssh`.
+- Profiles are one of `docker` (or `docker_hardened` / `docker_with_git` in Keeper TOML), `microvm` or `remote_ssh`.
 - `(profile, network)` pairs are ones the profile accepts
   (`Keeper_types_profile_sandbox.network_mode_rejection`): `docker` takes
-  `none` or `inherit`, `microvm` takes `none`, `inherit` or `policy`, and
+  `none` or `inherit`, `microvm` takes `none`, `inherit` or `policy` (and when `network_mode = "inherit"` is used on a host whose `/etc/resolv.conf` only lists loopback/link-local/unspecified resolvers, `[sandbox] microvm_dns` or `MASC_KEEPER_MICROVM_DNS` must provide reachable upstream DNS servers), and
   `remote_ssh` takes `inherit` only.
 
 If any keeper reports `<missing>`, run
@@ -51,10 +49,7 @@ keeper before continuing.
 
 For each `sandbox_profile=docker` keeper:
 
-1. Restart the keeper so the new factory wiring takes effect:
-   ```bash
-   sb keeper restart <keeper-name>
-   ```
+1. Restart the keeper (`masc_keeper_down` then `masc_keeper_up`) so the new factory wiring takes effect.
 2. From the masc client, dispatch `Execute` with the
    container hostname probe:
    ```text
@@ -62,7 +57,7 @@ For each `sandbox_profile=docker` keeper:
    ```
 3. Pass criteria — the response body must contain a hostname
    matching `masc-keeper-turn-<name>-*` (the convention from
-   `Keeper_turn_sandbox_runtime.container_name_of`).
+   `Keeper_sandbox_read_backend.container_name_of`).
 4. Fail criteria — the response contains the host machine's
    hostname (e.g. the result of `hostname` on the developer's mac).
    This means the dispatch path bypassed the sandbox; check the
@@ -74,8 +69,8 @@ A second probe pins the cwd mapping:
 Execute { "argv": ["pwd"] }
 ```
 The response should report a path under
-`Keeper_turn_sandbox_runtime.container_root` (e.g.
-`/keeper/<name>`), not the host playground root.
+`Keeper_sandbox.container_root` (e.g.
+`/home/keeper/playground/<name>`), not the host playground root.
 
 ## Performance check (PR-3b)
 
@@ -83,12 +78,8 @@ PR-3b memoizes per `(in_playground, cwd)`.  Two consecutive
 `Execute` calls with the same cwd should reuse the same
 container:
 
-```bash
-sb keeper logs <docker-keeper-name> --tail 100 | rg 'Created container'
-```
-
-Pass criteria — exactly one `Created container` line per turn.
-Multiple lines mean the factory cache is missing.
+Pass criteria — at most one `Created container` log entry per turn.
+Multiple entries mean the factory cache is missing.
 
 ## When to escalate
 
@@ -101,5 +92,4 @@ four are closed) when:
 
 Reference threads:
 - Sandbox root-fix family — #11594, #11610, #11627, #11679
-- Plan SSOT — `planning/claude-plans/30m-users-dancer-downloads-provider-c-agent-greedy-pebble.md`
 - TLA spec — `specs/boundary/SandboxDispatch.tla` (#11638)

@@ -48,7 +48,7 @@ reader 는 `error` 문자열을 substring 매칭하여 `fd_exhaustion` 인지 �
 
 | Reader | 위치 | v1 처리 | v2 처리 (PR-3 이후) | PR-4 이후 |
 |--------|------|--------|---------------------|-----------|
-| `lib/telemetry_coverage_gap.ml` (writer) | backend | v1 emit | v2 emit (`error_class` present) | v2 only |
+| `lib/telemetry_coverage_gap/telemetry_coverage_gap.ml` (writer) | backend | v1 emit | v2 emit (`error_class` present) | v2 only |
 | `dashboard/src/components/common/coverage-gap-block.ts` | dashboard UI | `classifyCoverageError` substring | `errorClassFromBackend` lookup + substring fallback | lookup only |
 | `dashboard/src/components/tool-quality-panel.ts` | dashboard UI | `classifyCoverageError` 재노출 | 동일 (alias) | export 제거 |
 | `dashboard/src/components/fleet-health-panel.ts` | dashboard UI | `CoverageGapBlock` 사용 | 동일 (block 내부에서 lookup) | 동일 |
@@ -64,7 +64,7 @@ repo 외부 consumer 는 §6 의 grep 결과로는 잡히지 않는다. 외부 r
 
 ### Step 1 — PR-1: `System_error_class.t` typed SSOT (선행)
 
-- 변경: `lib/system_error_class.ml` 신규 + `lib/system_error_class.mli` + tests.
+- 변경: `lib/core/system_error_class.ml` 신규 + `lib/core/system_error_class.mli` + tests.
 - wire 영향: 없음 (모듈 dead code 로 추가).
 - rollback: PR revert. dead code 만 사라지므로 안전.
 
@@ -138,7 +138,7 @@ rg -n "Telemetry_coverage_gap\.record" lib/ --type-add 'ocaml:*.ml' -t ocaml
 rg -n "too many open files|enospc|disk full" lib/ --type-add 'ocaml:*.ml' -t ocaml
 ```
 
-PR-2 머지 후 기대값: `lib/system_error_class.ml` 단 1 파일. 그 외 사이트는 0 (RFC-0154 §1.1 의 4 사이트 dedup 완료).
+PR-2 머지 후 기대값: `lib/core/system_error_class.ml` 단 1 파일. 그 외 사이트는 0 (RFC-0154 §1.1 의 4 사이트 dedup 완료).
 
 ### 6.3 Dashboard schema 참조 인벤토리
 
@@ -179,4 +179,4 @@ PR-4 머지 후, v1 reader path (`classifyCoverageError` 및 dashboard substring
 - §6.4 외부 reader 인벤토리에서 v1-strict consumer 0.
 - dashboard `*.test.ts` fixture 가 v2 로 마이그레이션 완료 (v1 fixture 0).
 
-세 조건 모두 만족 시 RFC-0154 closeout PR 에서 `lib/system_error_class.ml` 의 `classify_string` 의 backward compat 주석을 정리하고, dashboard `coverage-gap-block.ts` 의 substring fallback 코드 경로를 삭제한다. 잔존 v1 fixture 가 있을 경우 sunset 보류 — v1 reader path 는 fixture 가 0 될 때까지 유지.
+세 조건 모두 만족 시 RFC-0154 closeout PR 에서 `lib/core/system_error_class.ml` 의 `classify_string` 의 backward compat 주석을 정리하고, dashboard `coverage-gap-block.ts` 의 substring fallback 코드 경로를 삭제한다. 잔존 v1 fixture 가 있을 경우 sunset 보류 — v1 reader path 는 fixture 가 0 될 때까지 유지.

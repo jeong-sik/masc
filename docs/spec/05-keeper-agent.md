@@ -23,7 +23,7 @@ Keeper는 MASC의 자율 에이전트 하네스(harness)다. agent core `Agent.r
 
 Keeper 하나는 다음을 소유한다:
 - **identity**: `keeper_meta` 레코드 (이름, keeper, instructions, typed goal/task links)
-- **context**: `working_context` (system prompt + messages + token count + agent core context)
+- **context**: `working_context` (`Agent_core.Checkpoint.t` 래퍼 — 세션 대화, 메시지, 체크포인트 상태를 보관)
 - **memory**: Memory OS fact/episode store (legacy memory bank 제거 — RFC keeper-memory-consolidation Stage 4)
 - **lifecycle**: heartbeat fiber + supervisor + checkpoint store
 
@@ -45,8 +45,8 @@ graph LR
     KMO[memory_os_current] --> KMR[memory_os_recall]
   end
   subgraph Turn
-    KUT[unified_turn] --> KAR[agent_run] --> KTO[tools_oas]
-    KAR --> KHO[hooks_oas]
+    KUT[unified_turn] --> KAR[agent_run] --> KTO[keeper_tools_agent_core]
+    KAR --> KHO[keeper_hooks_agent_core]
   end
   subgraph Completion Authority
     CA[system LLM agent] --> CV[typed verdict]
@@ -59,19 +59,19 @@ graph LR
   KAR -.-> agent core["agent core Agent.run()"]
 ```
 
-### 2.1 모듈 분류 (12 범주)
+### 2.1 모듈 분류
 
-| 범주 | 대표 파일 | 파일 수 |
-|------|----------|--------|
-| Types | `keeper_types.ml`, `keeper_types_profile.ml`, `keeper_types_support.ml` | 3 |
-| Config | `keeper_config.ml`, `keeper_toml_loader.ml` | 2 |
-| Context | `keeper_context_core.ml`, `keeper_context_runtime.ml`, `keeper_checkpoint_store.ml` | 3 |
-| Memory | `keeper_memory*.ml` (bank, policy, recall) | 4 |
-| Prompt | `keeper_prompt.ml`, `keeper_unified_prompt.ml` | 2 |
-| Turn Execution | `keeper_agent_run.ml`, `keeper_unified_turn.ml`, `keeper_tools_agent_core.ml`, `keeper_hooks_agent_core.ml` | 4 |
-| Supervision | `keeper_supervisor.ml`, `keeper_keepalive.ml`, `keeper_world_observation.ml` | 3 |
-| MCP Surface | `keeper_turn.ml`, `keeper_status.ml`, `keeper_keeper.ml`, `keeper_schema.ml` | 4 |
-| Alerting / Metrics | `keeper_alerting*.ml`, `keeper_status_runtime*.ml`, `keeper_status_detail.ml` | 6+ |
+| 범주 | 대표 파일 |
+|------|----------|
+| Types | `keeper_types.ml`, `keeper_types_profile.ml`, `keeper_types_support.ml` |
+| Config | `keeper_config.ml`, `keeper_toml_loader.ml` |
+| Context | `keeper_context_core.ml`, `keeper_context_runtime.ml`, `keeper_checkpoint_store.ml` |
+| Memory | `keeper_memory*.ml` (Memory OS current, librarian, recall) |
+| Prompt | `keeper_prompt.ml`, `keeper_unified_prompt.ml`, `keeper_run_context.ml` |
+| Turn Execution | `keeper_agent_run.ml`, `keeper_unified_turn.ml`, `keeper_tools_agent_core.ml`, `keeper_hooks_agent_core.ml` |
+| Supervision | `keeper_supervisor.ml`, `keeper_keepalive.ml`, `keeper_world_observation.ml` |
+| MCP Surface | `keeper_turn.ml`, `keeper_status.ml`, `keeper_keeper.ml`, `keeper_schema.ml` |
+| Alerting / Metrics | `keeper_alerting*.ml`, `keeper_status_runtime*.ml`, `keeper_status_detail.ml` |
 
 ---
 
@@ -98,7 +98,7 @@ Keeper의 전체 상태를 담는 레코드. `lib/keeper/keeper_meta_contract.ml
 - **Activation**: `activation_mode` (`manual` | `on_demand` | `autonomous`)
 - **Metrics**: `total_turns`, `total_tokens`, `total_cost_usd`, `last_turn_ts` 등
 
-직렬화: `meta_to_json` / `meta_of_json`로 JSON 왕복. `validate_name`이 역직렬화 시점에 이름/trace_id를 검증한다.
+직렬화: `meta_to_json` / `meta_of_json`로 JSON 왕복. `validate_name`이 역직렬화 시점에 이름/trace_id를 검증하며, `.masc/keepers/<name>.json`에서 은퇴한 레거시 필드(`trace_history`, `last_handoff_ts` 등)가 발견되면 조용히 무시하지 않고 역직렬화를 엄격히 거부한다.
 
 ### 3.2 working_context
  
@@ -166,7 +166,7 @@ stateDiagram-v2
 단계 설명:
 
 1. **Observe**: `keeper_world_observation.observe`로 workspace 상태, 멘션, board 이벤트, idle 시간, 경제 압력 등을 수집
-2. **BuildPrompt**: `keeper_unified_prompt.build_prompt`로 keeper identity + observation을 단일 (system_prompt, user_message) 쌍으로 조립
+2. **BuildPrompt**: `Keeper_run_context.prepare_run_context`와 `keeper_unified_prompt.build_prompt`가 keeper identity (`config/prompts/keeper.md` + `<base-path>/.masc/config/keepers/<name>.toml` `keeper.instructions`), world observation, dynamic context layers를 조립
 3. **AgentRun**: `keeper_agent_run.run_turn`이 agent core `Agent.run`에 위임. tools + hooks + context_reducer를 전달하며 memory object는 전달하지 않는다
 4. **ToolExecution**: Agent가 tool을 호출하면 `keeper_tools_agent_core`가 `agent_tool_dispatch_runtime.execute_keeper_tool_call`로 디스패치
 5. **UpdateMetrics**: `keeper_unified_turn.update_metrics_from_result`가 turn count, token 사용량, cost 등을 keeper_meta에 반영하고 `observation.idle_seconds`를 `masc_keeper_idle_seconds{keeper_name}` OTel metric-store gauge로 노출
@@ -177,7 +177,7 @@ stateDiagram-v2
 
 turn 끝에서 쓰는 것은 typed checkpoint metadata 하나다. `keeper_post_turn.ml`이
 keeper meta에 쓰며, 계약은 keeper post-turn contract가 정한다.
-| Memory OS current snapshot | `keeper_memory_os_current.ml` + `keeper_librarian.ml` | `.masc/keepers/<name>.memory-current.json` | revision-CAS librarian contract |
+| Memory OS current snapshot | `keeper_memory_os_current.ml` + `keeper_librarian.ml` | `<resolved-config-root>/keepers/<name>.memory-current.json` (기본 `.masc/config/keepers/<name>.memory-current.json`) | revision-CAS librarian contract |
 | collaboration activity signal | `workspace_task.ml` + `workspace.ml` | `.masc/activity-events/YYYY-MM/YYYY-MM-DD.jsonl` | task lifecycle + activity graph event contract |
 
 ### 4.2 Keeper Supervisor Lifecycle
@@ -200,11 +200,9 @@ stateDiagram-v2
 - 재시작에는 fleet-wide 정지나 exponential backoff admission을 두지 않는다.
 - 최근 5건의 crash log 유지
 
-### 4.3 Deliberation Pipeline
+### 4.3 Turn Action Authority (레거시 Deliberation 제거됨)
 
-Triage -> BudgetCheck -> (ModelDeliberation | DeterministicBaseline) -> Execute -> RecordDecision
-
-9가지 triage 트리거: `DirectMention`, `NewUnclaimedTask`, `FailedTask`, `AgentJoinedOrLeft`, `GoalDeadline`, `BoardActivity(string)`, `IdleTimeout`, `MetricsAnomaly(string)`, `StrategicReview`. 트리거가 없으면 Skip.
+별도 `keeper_deliberation*.ml` 파이프라인과 로컬 트리거 분류기(`DirectMention`, `IdleTimeout` 등 고정 분기)는 제거되었다. 모든 턴은 `keeper_world_observation`이 수집한 typed observation과 큐에 적재된 자극을 바탕으로 configured LLM이 `keeper_unified_turn`에서 직접 다음 행동을 결정한다.
 
 ---
 
@@ -321,9 +319,22 @@ agent core Agent.run의 hook lifecycle에 keeper 동작을 주입:
 ### 8.2 Tool surface projection
 
 `Keeper_tool_descriptor.model_visible_descriptors`가 선언한 모델 이름과 schema는
-매 turn 실제 agent core `Tool.t`로 전부 materialize된다. Keeper, runtime, provider,
-credential 상태는 이 목록을 줄이지 않으며 per-turn ranking, Top-K, allow/deny
-list, affinity, discovery overlay를 적용하지 않는다.
+매 turn 실제 agent core `Tool.t`로 materialize된다. 기본 카탈로그 외에도 다음 도구
+계층이 함께 투영된다:
+
+- **Deferred tool loading (`keeper_tool_search`)**: 지연 로드 대상 도구를 검색해
+  현재 턴/세션의 모델 가시 도구 표면에 추가.
+- **Transient composition tools (`keeper_composition_prepare`,
+  `keeper_composition_run`, `keeper_composition_status`,
+  `keeper_composition_cancel`)**: 여러 도구를 DAG/파이프라인으로 묶는 prepared 및
+  named composition 실행 및 상태 조회.
+- **Keeper-owned isolated job tools (`keeper_job_start`, `keeper_job_status`,
+  `keeper_job_output`, `keeper_job_cancel`, `keeper_job_list`)**: Keeper 소유의
+  장기 실행 격리 Docker 잡 제어.
+
+Keeper, runtime, provider, credential 상태는 기본 카탈로그를 임의로 줄이지 않으며
+per-turn ranking, Top-K, allow/deny list, affinity, discovery overlay를 적용하지
+않는다.
 
 비노출은 동일 capability를 이미 가리키는 exact transport alias와 유효한 canonical
 schema가 없는 descriptor에만 허용된다. transport alias는 자신을 대신해 노출되는
@@ -428,7 +439,7 @@ Fusion은 exact-output registry가 아니라 preset이 model topology를 직접 
 모든 환경변수는 `MASC_KEEPER_` 접두사를 사용한다. 전체 목록은 `lib/keeper/keeper_config.ml` 참조.
 
 
-**Proactive**: `PROACTIVE_TEMP_LOW/MID/HIGH`(0.55/0.75/0.9), `PROACTIVE_SIMILARITY`(0.72), `PROACTIVE_MAX_TOKENS`(1024)
+**Proactive**: `PROACTIVE_TEMP_LOW/MID/HIGH`(0.55/0.75/0.9), `PROACTIVE_MAX_TOKENS`(1024)
 
 **Cost Gates**: `TOOL_COST_MAX_USD`(disabled by default; set a positive USD value to enable the live unified-turn accumulated cost ceiling, `0` keeps it disabled), `COST_GATE_USD`(0.10, legacy compatibility knob; not used by the unified turn cost guard)
 
@@ -437,7 +448,7 @@ token intent. agent core `max_turns = 0` and Keeper `max_idle_turns = 0` are the
 unbounded sentinels; MASC observes turn/token/cost usage but does not impose a
 Keeper work budget.
 
-**Execution**: `MAX_TOOL_ROUNDS`(3), `AUTONOMOUS_MAX_TOKENS`(4000), `DELIBERATION_MAX_TOKENS`(1024), `DELIBERATION_DAILY_BUDGET_USD`
+**Execution**: `MAX_TOOL_ROUNDS`(3), `AUTONOMOUS_MAX_TOKENS`(4000)
 
 **Other**: `DEBUG`(0), `SKILL_SELECTION`(agent), `BOOTSTRAP_PROACTIVE_WARMUP_SEC`(60)
 
@@ -445,9 +456,11 @@ Keeper work budget.
 
 **Context capacity**: handoff decisions are typed capacity signals. They do not classify model text or infer goals; semantic decisions remain at the model boundary.
 
-### 9.2 TOML Configuration
+### 9.2 TOML Configuration & Sandbox Profiles
 
-`config/keepers/*.toml`로 keeper를 선언적으로 정의. 파일명이 keeper 이름. 지원 타입: string, int, float, bool, string array. 테이블은 dotted key로 평탄화. 예시: `config/keepers/code-reviewer.toml`.
+`<basepath>/.masc/config/keepers/*.toml`로 keeper를 선언적으로 정의. 파일명이 keeper 이름. 지원 타입: string, int, float, bool, string array. 테이블은 dotted key로 평탄화. 예시: `config/keepers/code-reviewer.toml`.
+
+- **Sandbox profile (`sandbox_profile`)**: `docker`, `microvm`, `remote_ssh` 세 가지만 허용한다 (과거 host/unconfined 프로필은 제거됨). `docker`와 `microvm` 프로필은 비어 있지 않은 `sandbox_image` 선언을 필수로 요구하며, microVM DNS 설정은 `[sandbox] microvm_dns` 키로 지정한다.
 
 ### 9.3 Keeper Runtime Spec
 
@@ -541,15 +554,7 @@ RFC-0205를 통해 `keeper_types.ml`의 레거시 include facade(`Keeper_meta_co
 
 `keeper_memory.ml` -> `keeper_memory_recall.ml` 단층 facade만 남았다 (bank/policy 계층은 제거됨).
 
-### 15.4 Proactive similarity의 Jaccard 한계
-
-현재 `proactive_similarity_score`는 단어 수준 Jaccard 유사도를 사용한다. 의미적 유사성(semantic similarity)은 감지하지 못하므로, 동일 의미를 다른 단어로 표현하면 통과한다.
-
-### 15.5 Token estimation 정밀도
-
-`msg_tokens = (String.length text / 4) + 4`는 영어 기준 근사치이며, 한국어/CJK 문자에서는 과소 추정한다. BPE 기반 정밀 추정으로의 전환이 필요하다.
-
-### 15.6 Memory Boundary
+### 15.4 Memory Boundary
 
 External memory projection은 제거됐다. 남은 경계 이슈는 keeper context/checkpoint nativeization과 raw marker leakage이며, memory storage 자체는 Memory OS fact store가 소유한다.
 
@@ -572,4 +577,3 @@ External memory projection은 제거됐다. 남은 경계 이슈는 keeper conte
 | Supervisor | `lib/keeper/keeper_supervisor.ml` |
 | Config | `lib/keeper/keeper_config.ml` |
 | TOML Example | `config/keepers/code-reviewer.toml` |
-| Memory: keeper 재설계 | `memory/project_dashboard-keeper-detail-redesign.md` |

@@ -1,11 +1,11 @@
 # MASC Cockpit Design System — Agent Skill
 
-You are an agent working inside the MASC Cockpit design system. MASC is a single-pane-of-glass ops cockpit for a fleet of AI "keeper" agents. Information density is intentionally extreme.
+You are an agent working inside the MASC Cockpit design system. MASC is a unified ops cockpit for a fleet of AI "keeper" agents. Information density is high.
 
 ## Before you build anything
 
 1. Read `README.md` at the project root — it has the full content, voice, and visual foundations.
-2. Read `tokens/source.ts` — the complete token SSOT (raw + semantic + themes). Hand-written `tokens.css` / `colors_and_type.css` were removed in Wave 2.
+2. Read `tokens/source.ts` — the design-system token SSOT (raw + semantic + themes). Preview-local `tokens.css` / `colors_and_type.css` were replaced by `source_styles/tokens.generated.css` in Wave 2 (note: `dashboard/src/styles/tokens.css` and `dashboard/src/styles/keeper-v2/colors_and_type.css` still exist in the live Preact app).
 3. Skim `source_styles/tokens.generated.css` + `primitives.css` if you need exact resolved values.
 4. Open `preview/*.html` for visual reference (colors, type, spacing, components, brand).
 5. Use `ui_kits/cockpit/` as the canonical product recreation — copy its patterns.

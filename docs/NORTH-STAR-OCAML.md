@@ -119,34 +119,34 @@ agent core 2건 (`execution_codec_executor`, `execution_journal`). 2026-08-25 �
 
 **근거**: "Make illegal states unrepresentable" — GADT의 핵심 가치. TLA+ 검증의 타입 수준 버전.
 
-#### F. Labelled Tuples (OCaml 5.4)
+#### F. Labelled Tuples (OCaml 5.4+)
 **문제**: 현재 `type t = string * int * bool` 형태의 unnamed tuple이 다수.
 
-**OCaml 5.4 기능**: `type t = ~name:string * ~age:int * ~active:bool`
+**OCaml 5.4+ 기능**: `type t = ~name:string * ~age:int * ~active:bool`
 - tuple 필드에 이름 부여
 - 패턴 매칭 시 `~name:n` 형태로 명시적 바인딩
 - 기존 tuple과 호환
 
-**실행**: dune-project에 `(lang dune 3.22)` + `(ocaml 5.4)` 이미 설정됨. 새 타입 정의부터 labelled tuple 사용.
+**실행**: 현재 타겟 스택은 OCaml 5.5 + Eio (`.agents/skills/ocaml-coding/SKILL.md` 참조). 새 타입 정의부터 labelled tuple을 사용할 수 있다.
 
 ---
 
 ### Tier 3: 장기 개선 (ROI 보통)
 
 #### G. Immutable Arrays (`'a iarray`)
-OCaml 5.4 추가. `Array` 대신 불변 배열로 성능+안전성.
+OCaml 5.4+ 추가. `Array` 대신 불변 배열로 성능+안전성.
 
 #### H. `[@atomic]` Record Fields
-OCaml 5.4의 `Atomic.Loc` 기반. 현재 `Atomic.make`/`Atomic.get`/`Atomic.set` 패턴을 record field 수준에서 통합.
+OCaml 5.4+의 `Atomic.Loc` 기반. 현재 `Atomic.make`/`Atomic.get`/`Atomic.set` 패턴을 record field 수준에서 통합.
 
 #### I. `Result.Syntax` (let* + let+)
-OCaml 5.4 공식 바인딩. 현재 커스텀 `let*!` 패턴을 표준으로 통일.
+OCaml 5.4+ 공식 바인딩. 현재 커스텀 `let*!` 패턴을 표준으로 통일.
 
 #### J. Polymorphic Variants
 현재 거의 사용 안 함. closed variant가 대부분인데, 확장 가능한 variant가 필요한 곳(이벤트 타입, 툴 타입)에 검토.
 
 #### K. `Stdlib.Pqueue` (우선순위 큐)
-OCaml 5.4 추가. 현재 keeper 우선순위 관리를 `List.sort`로 구현한 곳에 적용.
+OCaml 5.4+ 추가. 현재 keeper 우선순위 관리를 `List.sort`로 구현한 곳에 적용.
 
 ---
 
@@ -277,22 +277,19 @@ JSON 구조가 `Assoc`이 아니면 무시하는 것이 올바른 동작. **합�
 | `Obj.magic` (실사용) | 0 (2026-05-12) | 0 | `rg 'Obj\.magic' lib/` 후 문자열 리터럴 제외 |
 | Effect handler 사용 | 0 (2026-05-12) | 1-2 pilot | `rg 'Effect\.(perform\|Deep\|Shallow)' lib/` |
 | GADT 타입 | (2026-04) ~2+ | 12+ | 수동 (`type _ t = ... : ... -> _ t` 구문) |
-| Labelled tuple (5.4) | (2026-04) 0 | 신규 타입에 적용 | 수동 |
+| Labelled tuple (5.4+) | (2026-04) 0 | 신규 타입에 적용 | 수동 |
 
 ---
 
 ## 6. 참고 자료
 
-- OCaml 5.4 Changelog: https://ocaml.org/releases/5.4.0
-- OCaml Manual 5.4: https://ocaml.org/manual/5.4/
+- OCaml 5.5 / 5.4 Manual: https://ocaml.org/manual/
 - Alexis King "Parse, Don't Validate": https://lexi-lambda.github.io/blog/2019/11/05/parse-don-t-validate/
-- Eio Mutex 선택 가이드: ~/me/memory/feedback_ocaml5-mutex-selection.md
-- AI 코드 안티패턴: ~/me/instructions/software-development.md
+- MASC OCaml 5.5 + Eio 코딩 점검표: `.agents/skills/ocaml-coding/SKILL.md`
 - Flambda 2 (ICFP 2023): 추상화 비용 감소 — functor/고차함수 신뢰, 작은 closure 유지, `[@inline]` 힌트 활용
 - Retrofitting Effect Handlers (arXiv 2411.19397): OCaml 5.x effect 설계 논문
-- Tail Modulo Cons (POPL 2025): OCaml 5.4의 자동 tail-recursion 변환. 리스트 빌딩 함수의 수동 최적화 불필요
+- Tail Modulo Cons (POPL 2025): OCaml 5.4+의 자동 tail-recursion 변환. 리스트 빌딩 함수의 수동 최적화 불필요
 - OCaml Memory Model — Local DRF (PLDI 2018, Dolan et al.): data race의 공간적/시간적 제한. `Gc.ramp_up` + `[@atomic]` 근거
-- Flambda 2 (ICFP 2023,.chaudhuri et al.): inline 중심 최적화. functor/고차함수 추상화 비용 감소
 
 ---
 
@@ -300,7 +297,7 @@ JSON 구조가 `Assoc`이 아니면 무시하는 것이 올바른 동작. **합�
 
 ### Flambda 2 인사이트 (ICFP 2023 + OCaml Workshop 2023)
 
-**핵심**: Flambda 2는 추상화 비용을 획기적으로 감소시킴. "깔끔한 코드 vs 빠른 코드" 딜레마가 완화.
+**핵심**: Flambda 2는 추상화 비용을 감소시킨다.
 
 | 원칙 | 실천 |
 |------|------|
@@ -320,7 +317,7 @@ JSON 구조가 `Assoc`이 아니면 무시하는 것이 올바른 동작. **합�
 
 ### Tail Modulo Cons (TMC) 인사이트 (POPL 2025)
 
-**핵심**: OCaml 5.4의 TMC는 컴파일러가 재귀적 리스트 빌딩 함수(`map`, `filter`, `rev_append`)를
+**핵심**: OCaml 5.4+의 TMC는 컴파일러가 재귀적 리스트 빌딩 함수(`map`, `filter`, `rev_append`)를
 자동으로 tail-recursion으로 변환. 개발자가 수동 accumulator를 도입할 필요 없음.
 
 **실천**:
@@ -329,7 +326,7 @@ JSON 구조가 `Assoc`이 아니면 무시하는 것이 올바른 동작. **합�
 3. **과도한 최적화 제거**: 기존 수동 tail-recursion 코드를 간결한 재귀로 되돌릴 수 있음 (가독성↑)
 4. **주의**: TMC는 `let rec` + cons(`::`) 또는 `List.rev_append` 패턴에만 동작. 다른 패턴은 기존 방식 유지.
 
-**근거**: "Tail Modulo Cons for Everyone" (Guillemette et al., POPL 2025) — OCaml 5.4에 통합된
+**근거**: "Tail Modulo Cons for Everyone" (Guillemette et al., POPL 2025) — OCaml 5.4+에 통합된
 컴파일러 패스. 리스트 처리 코드의 stack overflow 위험을 컴파일러가 자동 제거.
 
 ### OCaml Memory Model — Local DRF (PLDI 2018)
@@ -340,7 +337,7 @@ data race가 없으면 sequential consistency 보장. data race가 있어도 효
 **실천 (masc + agent core에 직접 적용)**:
 1. **`Atomic` 사용 규칙**: cross-domain 공유 변수는 반드시 `Atomic.t`로 감싸거나 `Stdlib.Mutex`로 보호.
    현재 코드의 `Atomic.make`/`Atomic.get`/`Atomic.set` 패턴은 올바름.
-2. **`Eio.Mutex`는 same-domain용**: cross-domain 공유에는 `Stdlib.Mutex` 필요 (feedback memory 참조).
+2. **`Eio.Mutex`는 same-domain용**: cross-domain 공유에는 `Stdlib.Mutex` 필요 (`.agents/skills/ocaml-coding/SKILL.md` 참조).
 3. **Non-atomic ref의 domain 격리**: `ref`가 단일 domain에서만 접근되면 안전. multi-domain 접근 시 `Atomic` 필수.
 4. **`Gc.ramp_up ()` 호출**: 서버 시작 시 `Gc.ramp_up ()`를 호출하여 GC가 모든 domain의 allocation budget을
    사전 할당. domain 간 GC 병목 감소. 서버 진입점은 `bin/main_eio.ml` 이다.
@@ -349,7 +346,7 @@ data race가 없으면 sequential consistency 보장. data race가 있어도 효
 **근거**: "Retrofitting Parallelism onto OCaml" (Dolan et al., PLDI 2018) —
 OCaml 5.x의 메모리 모델 설계 논문. semantic race의 효과를 공간적으로 1개 값, 시간적으로 1회로 제한.
 
-### OCaml 5.4 실전 기능 우선순위 (학문적 근거)
+### OCaml 5.4+ 실전 기능 우선순위 (학문적 근거)
 
 **즉시 적용 (1-2줄 수정)**:
 
@@ -368,7 +365,7 @@ type keeper_stats = {
   mutable last_active : float;
 }
 
-(* After — OCaml 5.4 *)
+(* After — OCaml 5.4+ *)
 type keeper_stats = {
   [@atomic] total_turns : int;
   [@atomic] total_errors : int;
@@ -377,7 +374,7 @@ type keeper_stats = {
 ```
 
 **적용 순서**: `keeper_stats` → `workspace_state` → `agent_state`. 현재 `Atomic.make`/`Atomic.get`/`Atomic.set`
-패턴을 `[@atomic]` record field로 점진 전환. 단, OCaml 5.4 컴파일 필요.
+패턴을 `[@atomic]` record field로 점진 전환.
 
 **`Iarray` (불변 배열) 적용 대상**:
 
@@ -385,7 +382,7 @@ type keeper_stats = {
 (* Before — config array that never mutates *)
 let tool_access_profiles = [| "read"; "write"; "execute" |]
 
-(* After — OCaml 5.4 *)
+(* After — OCaml 5.4+ *)
 let tool_access_profiles : string Iarray.t =
   Iarray.of_array [| "read"; "write"; "execute" |]
 ```

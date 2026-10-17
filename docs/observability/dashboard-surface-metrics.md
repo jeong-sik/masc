@@ -23,11 +23,11 @@ Counters are registered at module load (`let () = Otel_metric_store.register_cou
 
 ## Consumers
 
-- **OTel query/report**: query the configured OTel backend for `dashboard_surface_open_total` and `dashboard_section_open_total`. Drives RFC-0048 PR-C deletion threshold decisions.
+- **OTel query/report**: query the configured OTel backend for `dashboard_surface_open_total` and `dashboard_section_open_total` to evaluate section usage and deletion thresholds.
 
 ## Key derived metric: "direct opens"
 
-The `redirected_from="none"` filter is the deletion-threshold metric per RFC-0048 §4.4. A section with high `Total` but low `Direct` is alive **only because of legacy bookmarks** — the redirect entry can stay in `CROSS_SURFACE_SECTION_REDIRECTS`/`SECTION_REDIRECTS`, but the section component itself can be deleted.
+The `redirected_from="none"` filter is the deletion-threshold metric. A section with high `Total` but low `Direct` is reached primarily through old bookmarks — the redirect entry can stay in `CROSS_SURFACE_SECTION_REDIRECTS`/`SECTION_REDIRECTS`, while the section component itself can be retired.
 
 Windowed consumers should compute the direct-open increase by `(surface, section)`
 from `dashboard_section_open_total{redirected_from="none"}` in the chosen
@@ -65,4 +65,3 @@ redirect sources, neither of which is in flight.
 - RFC-0049 — `docs/rfc/RFC-0049-surface-telemetry-foundation.md`
 - PR-1 #14245 — telemetry foundation
 - PR-1.1 #14251 — ocamlformat follow-up
-- RFC-0217 — single OTel backend; local scrape reports removed

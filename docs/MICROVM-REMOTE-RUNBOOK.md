@@ -21,16 +21,15 @@ microvm_backend = "apple_container"   # | "microsandbox" | "nerdctl_kata"
 생략하면 macOS 는 `apple_container` 를 쓰고, **그 밖의 호스트는 부팅을 거절한다**
 (`microvm_backend_unresolved`). 선언한 것과 다른 격리를 조용히 주지 않는다.
 
-### 지금 실제로 뜨는 건 `apple_container` 하나다 (#32837)
+### 백엔드별 부팅과 작업 볼륨 계약
 
-세 값 다 TOML 에서 통과하지만, 부팅까지 가는 건 `apple_container` 뿐이다.
-나머지 둘은 아래 이유로 부팅 자체를 거절한다. 거절 문구가 이유를 그대로 말한다.
+세 값 다 TOML 에서 통과하지만, 백엔드마다 작업 볼륨과 격리 플래그 지원이 다르다.
 
-| 값 | 부팅 결과 | 이유 |
+| 값 | 부팅 결과 | 작업 볼륨·격리 동작 |
 |---|---|---|
-| `apple_container` | 뜬다 | — |
-| `microsandbox` | `microvm_constraint_unexpressible` | `msb 0.6.16` 에 `--cap-drop` 과 `--read-only` 가 없다. 프로필이 약속한 격리를 못 주면서 뜨느니 안 뜬다 |
-| `nerdctl_kata` | `microvm_work_volume_unsupported` | `nerdctl volume create` 에 크기 플래그가 없어서 keeper 작업 볼륨(RFC-0400)을 만들 방법이 없다 |
+| `apple_container` | 뜬다 | 게스트 전용 sparse ext4 디스크(`masc-keeper-work-<keeper>`)와 부팅마다 새로 만드는 빌드 볼륨(`masc-keeper-build-<keeper>`)을 붙인다. Keeper 해산(dissolve) 시 두 볼륨을 함께 삭제한다 |
+| `nerdctl_kata` | 뜬다 (`network_mode = "none"` 또는 `"inherit"`) | `nerdctl volume create` + `inspect` 로 호스트 관리형 디렉터리 볼륨을 확인해 붙인다 (`capacity_enforced=false; host filesystem capacity applies`). `network_mode = "policy"` 는 지원하지 않는다 |
+| `microsandbox` | `microvm_constraint_unexpressible` | 작업 볼륨(`msb volume create --kind dir`)은 준비되지만, `msb 0.6.16` 에 `--cap-drop` 과 `--read-only` 가 없어 프로필이 요구하는 격리 플래그를 줄 수 없으므로 부팅을 거절한다 |
 
 이 표는 **이미지가 그 런타임 저장소에 있을 때** 나오는 답이다. 부팅은
 이미지 확인 → 작업 볼륨 → 부팅 argv 순서로 가기 때문에, 이미지가 없으면 위
@@ -39,14 +38,16 @@ microvm_backend = "apple_container"   # | "microsandbox" | "nerdctl_kata"
 런타임마다 이미지 저장소가 따로라서, Docker 로 빌드해 둔 이미지는 셋 중
 어디에도 보이지 않는다.
 
-전에는 셋 다 뜨는 것처럼 보였는데, 그건 셋 다 Apple `container` 로 떴기 때문이다.
-그래서 `microsandbox` 라고 적은 keeper 의 게스트를 `msb stop` 으로 내리려 하면
-`sandbox not found` 가 났고, 실제로 떠 있는 게스트는 아무도 못 치웠다.
-지금은 부팅이 런타임을 따라가고, 못 따라가면 부팅을 안 한다.
+`network_mode = "inherit"` 인 게스트에서 호스트 `/etc/resolv.conf` 가 루프백(`127.0.0.1`, `::1`), 링크 로컬, 미지정 주소만 담고 있으면 게스트 안에서 DNS 해석이 실패하므로 부팅을 거절한다. 이 경우 `runtime.toml` 의 `[sandbox] microvm_dns` 또는 환경변수 `MASC_KEEPER_MICROVM_DNS` 에 게스트에서 도달 가능한 업스트림 DNS 서버 목록을 지정한다 (#43254).
+
+전에는 셋 다 Apple `container` 로 떴기 때문에 `microsandbox` 라고 적은 keeper 의
+게스트를 `msb stop` 으로 내리려 하면 `sandbox not found` 가 났고, 실제로 떠 있는
+게스트는 아무도 못 치웠다. 지금은 부팅이 선언된 런타임을 그대로 따라가고, 조건을
+만족하지 못하면 부팅을 거절한다.
 
 이 문서의 나머지는 `apple_container` 기준이다 — `container` 자리에 그 백엔드의
 CLI 를 놓고 읽으면 된다. 아래 계약 표의 항목 1·2 는 백엔드마다 다르고, 3·4(shim
-과 작업 볼륨)는 셋 다 같다.
+과 작업 볼륨)는 공통이다.
 
 ---
 

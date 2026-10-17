@@ -3,9 +3,9 @@
 ## Layer overview
 
 ```
-│  lib/  (agent_sdk)                          │
+│  lib/  (agent_core)                         │
 │  Layer 1: Agent Runtime                     │
-│  Agent, Pipeline, Provider, Error, Tools    │
+│  Agent, Pipeline, Llm_provider, Error, Tool │
 ├─────────────────────────────────────────────┤
 │  OCaml 5.x + Eio                            │
 │  Structured concurrency, effect handlers    │
@@ -20,8 +20,8 @@ Single-agent execution engine.
 |--------|---------------|
 | `Agent` | Lifecycle: create, run, resume |
 | `Pipeline` | Turn preparation, provider routing, extraction, tools, and state update |
-| `Provider` | Multi-provider API dispatch (Anthropic, OpenAI, Ollama) |
-| `Error` | 8-domain structured ADT errors |
+| `Llm_provider` | Multi-provider API dispatch (Anthropic, OpenAI, Gemini, Ollama, OpenAI-compat) |
+| `Error` | 9-domain structured ADT errors (`Error.t`) |
 | `Hooks` | BeforeTurn, AfterTurn, PreToolUse, PostToolUse hooks |
 | `Tracing` | TRACER module type, Null/Fmt/OTel implementations |
 | `Metrics` | Counter + histogram collection, OTLP JSON export |
@@ -56,7 +56,7 @@ Eio structured concurrency: every fiber runs within a `Switch.t`.
   - `Async_agent.all` is all-settled; per-agent timeouts and ordinary
     exceptions are returned in that agent's result while sibling agents finish.
   - `Guardrails_async` keeps validator failures local to that validator result.
-- No resource leaks by construction
+- Switch release hooks run on scope exit to clean up HTTP connections and child processes
 
 ```
 Switch.run @@ fun sw ->

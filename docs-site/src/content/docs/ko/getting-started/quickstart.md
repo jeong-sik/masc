@@ -37,8 +37,8 @@ export PATH="$HOME/.local/bin:$PATH"
    응답하는지 확인합니다. API 방식은 마법사에서 지정한 인증 환경변수를 이
    터미널에서 export합니다. 로컬 모델은 서버를 시작하고 도구 호출을 지원하는
    모델을 로드합니다. MASC는 모델 런타임을 설치하거나 대신 로그인하지 않습니다.
-3. macOS에서는 Docker Desktop, Linux에서는 Docker Engine을 설치하고 시작합니다.
-   현재 사용자로 `docker info`가 성공하면 다음을 실행합니다.
+3. **Bootstrap (부트스트랩)**: macOS에서는 Docker Desktop(또는 macOS 26+ Apple Container), Linux에서는 Docker Engine을 설치하고 시작합니다(현재 사용자로 `docker info`가 성공해야 합니다). `masc setup`의 **Bootstrap** 단계는 샌드박스 런타임을 확인하고 기본 `base` 샌드박스 이미지를 빌드·승격(promote)한 뒤, 작업 공간 서버 시작·연결, `local-admin` 로그인, `imp` 준비를 수행합니다.
+4. **Tools (도구 연결)**: `masc setup`의 **Tools** 단계에서는 `imp`가 쓸 선택적 호스트 도구들을 점검하고 연결합니다 — 자동화 브라우저(`geckodriver` + Firefox), 라이브 Firefox BiDi 또는 MASC Firefox/Zen 부가 기능(add-on), GitHub CLI(`gh`) 로그인, PDF 검사(`poppler`), 그리고 웹 검색(`ZAI_API_KEY` 등 검색 API 키 또는 로컬 Docker 기반 `masc-searxng` 컨테이너).
 
 모델 번호를 고르거나 정확한 모델 ID를 입력하세요. 마법사는 context 한도의
 출처를 표시하며, Codex에서 관측한 클라이언트 한도를 카탈로그보다 우선합니다.
@@ -49,11 +49,10 @@ export PATH="$HOME/.local/bin:$PATH"
 masc setup --base-path "$HOME/masc-workspace"
 ```
 
-`setup`은 누락된 설정을 시드하고 Docker 확인, 기본 샌드박스 이미지 빌드,
-같은 작업 공간의 서버 시작·연결, `local-admin` 로그인, 기존 `imp` 시작을 거쳐
+`setup`은 누락된 설정을 시드하고 **Bootstrap** 및 **Tools** 단계를 거쳐 기존 `imp`를 시작하고
 TUI를 엽니다. Keeper 설정 파일은 보존합니다. 기본 `imp` 설정은
 `activation_mode = "manual"`, `sandbox_profile = "docker"`,
-`network_mode = "inherit"`입니다. 다른 작업 공간이 포트를 쓰고 있으면
+`sandbox_image = "base"`, `network_mode = "inherit"`입니다. 다른 작업 공간이 포트를 쓰고 있으면
 `--port 8936`처럼 빈 포트를 지정하세요. 종료할 때 setup이 직접 시작한 서버도
 종료합니다. 서버를 계속 실행하려면 `--no-tui`를 사용하고 별도로 접속하세요.
 

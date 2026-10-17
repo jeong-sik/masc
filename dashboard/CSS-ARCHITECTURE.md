@@ -6,87 +6,67 @@ The MASC Dashboard CSS has been refactored from a single 2199-line `global.css` 
 
 ## File Structure
 
-### Foundation Files (Load Order)
+### Foundation & Theme Files (Load Order in `main.ts`)
 
-1. **tokens.generated.css** (generated SSOT)
-   - Tailwind v4 `@theme` design tokens
-   - Source: `dashboard/design-system/tokens/source.ts` → `pnpm tokens:build`
+1. **`ds-theme-tokens.css` & `tokens.generated.css`** (generated SSOT)
+   - `ds-theme-tokens.css` imports `tokens.generated.css` (Tailwind v4 `@theme` design tokens generated from `dashboard/design-system/tokens/source.ts` via `pnpm tokens:build`)
    - Colors, typography scale, spacing, radii
-   - Consumed by Tailwind utility classes and the 14 atom components
-     (`chip`, `band`, `bar`, `btn`, `elev`, `focusable`, `kv-row`,
-     `motion`, `section-head`, `sep`, `spark`, `surf`, `tk`)
 
-2. **variables.css** (156 lines)
-   - CSS custom properties (`:root`)
-   - Legacy variable names for backward compatibility
-   - Opacity variants, color utilities, z-index layers
+2. **Zone & primitive stylesheets** (`primitives.css`, `layout.css`, `layers.css`, `kpi.css`, `rail.css`, `deck.css`, `drawer.css`, `swimlanes.css`, `code.css`)
+   - Core cockpit primitives and layout grids
 
-3. **base.css** (40 lines)
-   - Base HTML element styles
-   - `html`, `body`, `#app` foundations
-   - Global typography (links)
+3. **Opt-in StyleSeed light layer** (`styleseed-theme.css`, `styleseed-base.css`)
+   - Scoped to `[data-theme="styleseed"]`
 
-4. **keyframes.css** (114 lines)
-   - All `@keyframes` animation definitions
-   - Avatar animations, state transitions, component effects
+4. **`global.css`**
+   - Imports `variables.css`, `base.css`, `keyframes.css`, and legacy utility/component styles (`ui.css`, `board.css`, `chat.css`, `dashboard.css`, `ops.css`, `tools.css`, etc.)
 
-5. **global.css** (1844 lines)
-   - Reusable `@utility` blocks
-   - Component-specific styles
-   - Raw CSS for pseudo-elements and state selectors
+5. **`tokens.css`** (Dark Brass canon)
+   - Loaded immediately after `global.css` so dashboard-specific root variables retain override priority over generated/legacy foundations
 
-### Component-Specific Files
-
-- `ui.css` - Base UI components
-- `agent-monitor.css` - Agent monitoring views
-- `board.css` - Board/posts interface
-- `chat.css` - Chat interface
-- `dashboard.css` - Dashboard layouts
-- `governance.css` - Governance interfaces
-- `governance-agent.css` - Agent governance
-- `governance-keeper.css` - Keeper governance
-- `ops.css` - Operations tab
-- `roster.css` - Roster views
-- `tools.css` - Tool interfaces
+6. **Surface & theme bridge stylesheets**
+   - `paper-theme.css` (`[data-theme="paper"]`), `keeper-workspace.css`, `copilot-dock.css`, `states.css`, `ss-keeper-v2-bridge.css`
+   - Auto-imported `*-v2.css` surface sheets via `import.meta.glob('./styles/*-v2.css', { eager: true })`
+   - Vendored keeper-v2 prototype stylesheets (`keeper-v2/colors_and_type.css`, `keeper-v2/v2.css`, `keeper-v2/surfaces.css`, …, `keeper-v2/tempered.css`) and `mobile-operator-targets.css`
 
 ## Import Order (main.ts)
 
 ```typescript
-// Foundation tokens (load first — see "Four-tier palette governance" below)
-import './styles/tokens.generated.css'  // SSOT-1 (codegen, muted)
-import './styles/tokens.css'            // SSOT-4 (Dark Brass canon)
-import './styles/variables.css'         // SSOT-2 (live-surface bright)
-
-// Layout primitives + zone shells
+// 1. Design-system token foundation + cockpit primitives
+import './styles/ds-theme-tokens.css'   // imports tokens.generated.css (SSOT-1)
 import './styles/primitives.css'
 import './styles/layout.css'
 import './styles/layers.css'
 import './styles/kpi.css'
-import './styles/lifeline.css'
-import './styles/ticker.css'
-import './styles/sidebar.css'
 import './styles/rail.css'
 import './styles/deck.css'
 import './styles/drawer.css'
 import './styles/swimlanes.css'
 import './styles/code.css'
-import './styles/center.css'
-import './styles/base.css'
-import './styles/keyframes.css'
 
-// Global utilities and component-specific styles
+// 2. Opt-in StyleSeed light layer
+import './styles/styleseed-theme.css'
+import './styles/styleseed-base.css'
+
+// 3. Global bundle (imports variables.css SSOT-2) + Dark Brass tokens (SSOT-4)
 import './styles/global.css'
-import './styles/ui.css'
-import './styles/board.css'
-// ... (see main.ts for full list)
+import './styles/tokens.css'
 
-// Theme variant — activated on [data-theme="paper"]
+// 4. Theme variants + workspace surfaces + *-v2.css glob
 import './styles/paper-theme.css'       // SSOT-3 (paper inversion)
+import './styles/keeper-workspace.css'
+import './styles/copilot-dock.css'
+import './styles/states.css'
+import './styles/ss-keeper-v2-bridge.css'
+import.meta.glob('./styles/*-v2.css', { eager: true })
+
+// 5. Vendored keeper-v2 prototype SSOT skin (loaded last)
+import './styles/keeper-v2/colors_and_type.css'
+import './styles/keeper-v2/v2.css'
+// ... (see main.ts for full keeper-v2 list + tempered.css + mobile-operator-targets.css)
 ```
 
-The exact list evolves; treat `main.ts` as authoritative. The fixed
-contract is **the first three lines** — token SSOTs must load before any
-consumer.
+Treat `dashboard/src/main.ts` as authoritative for the exact import sequence.
 
 ## Design Patterns
 
@@ -205,14 +185,14 @@ load positions. Actual runtime order in `main.ts`:
 
 | Position | File | SSOT label |
 |----------|------|------------|
-| 1 | `tokens.generated.css` (first import) | SSOT-1 |
-| 2 | `tokens.css` (second import) | SSOT-4 |
-| 3 | `variables.css` (third import) | SSOT-2 |
-| 4..N | component CSS files | — |
-| last CSS import | `paper-theme.css` (after all component CSS) | SSOT-3 |
+| 1 | `ds-theme-tokens.css` (imports `tokens.generated.css`) | SSOT-1 |
+| 2 | `global.css` (imports `variables.css` and legacy sheets) | SSOT-2 |
+| 3 | `tokens.css` (Dark Brass overrides) | SSOT-4 |
+| 4 | `paper-theme.css` (`[data-theme="paper"]` scoped) | SSOT-3 |
+| 5..N | surface CSS, `*-v2.css` glob, and `keeper-v2/*.css` | — |
 
-Later positions runtime over earlier ones for any shared selector. SSOT-3
-is `[data-theme="paper"]` scoped, so it only activates on attribute set.
+Later positions override earlier ones for any shared selector. SSOT-3
+is `[data-theme="paper"]` scoped, so it only activates when that attribute is set.
 
 ### Phase 2 work classification matrix
 

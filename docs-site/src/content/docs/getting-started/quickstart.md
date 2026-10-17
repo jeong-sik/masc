@@ -39,8 +39,8 @@ availability on [GitHub Releases](https://github.com/jeong-sik/masc/releases) be
    named by the wizard in this terminal. For a local model, start its server
    and load a model that supports tool calls. MASC does not install or log in
    to these model runtimes.
-3. Install and start Docker Desktop on macOS, or Docker Engine on Linux.
-   `docker info` must succeed as your current user. Then run:
+3. **Bootstrap**: Install and start Docker Desktop on macOS (or Apple Container on macOS 26+), or Docker Engine on Linux (`docker info` must succeed as your current user). In `masc setup`, the **Bootstrap** step checks your sandbox runtime, builds and promotes the default `base` sandbox image, starts or connects to the workspace server, logs in as `local-admin`, and prepares `imp`.
+4. **Tools**: In `masc setup`, the **Tools** step lets you inspect and wire optional host capabilities for `imp` — the automation browser (`geckodriver` + Firefox), live Firefox BiDi or the MASC Firefox/Zen add-on, GitHub CLI (`gh`) login, PDF inspection (`poppler`), and web search (via `ZAI_API_KEY`, another search API key, or the local Docker-backed `masc-searxng` container).
 
 Choose a numbered model or enter an exact model ID. The wizard shows the source
 of its context limit; Codex's observed client limit takes precedence over the
@@ -51,11 +51,10 @@ enable tools and streaming automatically. Z.AI credentials use `ZAI_API_KEY`.
 masc setup --base-path "$HOME/masc-workspace"
 ```
 
-`setup` seeds missing configuration, checks Docker, builds the default sandbox
-image, starts or connects to the server for this workspace, logs in as
-`local-admin`, starts the existing `imp`, and opens the TUI. It preserves the
+`setup` seeds missing configuration, runs the **Bootstrap** and **Tools** steps,
+starts the existing `imp`, and opens the TUI. It preserves the
 Keeper manifest. The default `imp` has `activation_mode = "manual"`,
-`sandbox_profile = "docker"`, and `network_mode = "inherit"`.
+`sandbox_profile = "docker"`, `sandbox_image = "base"`, and `network_mode = "inherit"`.
 If another workspace occupies the port, choose a free one with `--port 8936`.
 On exit, setup stops a server it started itself. Use `--no-tui` to leave that
 server running and connect to it separately.

@@ -5,7 +5,7 @@ status: reference
 # MASC Specification Index
 
 > Status: Living draft
-> Last Updated: 2026-09-06
+> Last Updated: 2026-10-17
 > Snapshot baseline: `dune-project` version `0.58.0`
 
 MASC (Multi-Agent Shared Context)는 OCaml 5.x / Eio 기반 MCP 서버로, 여러 Keeper/MCP client가 동일 workspace에서 Goal, Task, Board, Schedule을 통해 작업하고 현재 실행 상태를 관찰·조정할 수 있게 한다. Keeper turn과 dashboard/operator visibility를 제공하며 MCP JSON-RPC 프로토콜을 통해 주요 AI IDE/CLI와 통합된다.
@@ -13,7 +13,7 @@ MASC (Multi-Agent Shared Context)는 OCaml 5.x / Eio 기반 MCP 서버로, 여�
 ## Snapshot Metadata
 
 The version line above is current as of the last doc touch. The size/count rows
-below are an older inventory snapshot and should be recalculated before being
+below are an inventory snapshot and should be recalculated before being
 used as evidence.
 
 | 항목 | 값 |
@@ -22,13 +22,13 @@ used as evidence.
 | Language | OCaml 5.x (Eio-native, effect-based concurrency) |
 | LOC (lib, `.ml` + `.mli`) | 597,241 |
 | LOC (test, `.ml` + `.mli`) | 505,874 |
-| OCaml modules under `lib/` (`.ml`) | 1,461 |
-| `.mli` interfaces under `lib/` | 1,401 |
+| OCaml modules under `lib/` (`.ml`) | 2,085 |
+| `.mli` interfaces under `lib/` | 2,006 |
 | MCP tool modules (`lib/**/tool_*.ml`) | 117 |
-| Test files (`test/*.ml`, top level) | 1,171 |
-| Executables | 15 public (`masc`, `masc-stdio`, `masc-cost`, `masc-trace`, `masc-tui`, `masc-fusion-run`, `masc-checkpoint-purge`, `masc-exec-shim`, `masc-exec-ssh-bootstrap`, `masc-keeper-capability-probe`, `masc-lane-cli-probe`, `masc-deployment-preflight-helper`, `masc-browser-host`, `masc-reliable-change-g1-check`, `masc-http-probe`) + 3 internal (`public_tool_manifest`, `keeper_store_layout_manifest`, `gen_board_tool_registry`) |
+| Test files (`test/*.ml`, top level) | 1,744 |
+| Executables | 20 public (`masc`, `masc-stdio`, `masc-cost`, `masc-trace`, `masc-tui`, `masc-fusion-run`, `masc-checkpoint-purge`, `masc-exec-shim`, `masc-exec-ssh-bootstrap`, `masc-keeper-capability-probe`, `masc-lane-cli-probe`, `masc-deployment-preflight-helper`, `masc-browser-host`, `masc-reliable-change-g1-check`, `masc-http-probe`, `masc-librarian-replay`, `masc-librarian-continuity`, `masc-librarian-preflight-eval`, `masc-msx-addon-worker`, `masc-dos-addon-worker`) + 5 internal (`public_tool_manifest`, `keeper_store_layout_manifest`, `gen_board_tool_registry`, `stagehand_model_probe`, `masc_tui_keys_doc_cli`) |
 
-숫자는 2026-09-04 (v0.31.0) 기준. `git ls-files` 로 추적 파일만 세고 `wc -l` 로 합산했으며, 실행 파일은 `bin/dune` 의 `(executable ...)` stanza 에서 `public_name` 유무로 나눴다. 표의 baseline 행은 `scripts/bump-version.sh` 가 릴리스마다 고쳐 쓰므로, 나머지 행이 그 baseline 보다 오래되면 표가 재보지 않은 숫자를 그 버전의 것이라고 말하게 된다.
+숫자는 2026-10-17 (v0.58.0) 기준. `git ls-files` 로 추적 파일만 세고, 실행 파일은 `bin/dune` 의 `(executable ...)` stanza 에서 `public_name` 유무로 나눴다. 표의 baseline 행은 `scripts/bump-version.sh` 가 릴리스마다 고쳐 쓰므로, 나머지 행이 그 baseline 보다 오래되면 표가 재보지 않은 숫자를 그 버전의 것이라고 말하게 된다.
 
 ## Layer Diagram
 
@@ -57,18 +57,19 @@ graph TB
 | `00-glossary.md` | Glossary | 용어 정의, 약어 목록 | Draft |
 | `01-system-overview.md` | System Overview | 문제 정의, 배포 모델, 기술 스택, sub-library 의존성 | Draft |
 | `02-types-and-invariants.md` | Types and Invariants | 핵심 타입 정의, 상태 전이, 불변식 | Draft |
-| `03-workspace-state.md` | Workspace State | Workspace 생명주기, session 관리, agent join/leave | Draft |
+| `03-workspace-state.md` | Workspace State | Workspace 경계, 상태 소유권, 원자적 변경 계약, Goal/Task 생명주기, 관측·은퇴 계약 | Draft |
 | `04-turn-lifecycle.md` | Turn Lifecycle | Keeper turn 시작/종료, heartbeat/polling/waiting, direct msg, FSM, receipt | Draft |
 | `05-keeper-agent.md` | Keeper Engine | 자율 에이전트 루프, succession, context 관리 | Draft |
 | `09-server-transport.md` | Server and Transport | HTTP transport, SSE, JSON-RPC dispatch, routing | Draft |
 | `10-dashboard.md` | Dashboard | Web UI, API endpoints, SSE real-time updates | Draft |
 | `11-board.md` | Board System | Posts, comments, votes, filesystem/JSONL backend | Draft |
-| `12-memory-systems.md` | Memory Systems | Memory OS fact store, context budget | Draft |
-| `13-agent-core.md` | agent core Integration | agent core Agent SDK bridge, runtime config, completion authority/evaluator, event bus, boundary rules | Draft |
+| `12-memory-systems.md` | Memory Systems | Memory OS fact store, Shared Wiki, Workspace Memory ledger/briefing, context budget | Draft |
+| `13-agent-core.md` | agent core Integration | agent core Agent SDK bridge, runtime config, completion authority/evaluator, event bus, boundary rules | Active |
 | `14-configuration.md` | Configuration | env, profile, prompt, runtime 설정 | Draft |
 | `15-testing.md` | Testing | 검증 계층, contract suites, fixture/manual 분리 | Draft |
 | `16-root-cause-rubric.md` | Root-Cause Rubric | Markers behind the `root/*` values declared in a `masc-triage` block | Reference |
-| `18-log-severity-taxonomy.md` | Log Severity Taxonomy | 4-level contract for `Log.{debug,info,warn,error}` callsites + anti-pattern catalog + lint rules | Reference |
+| `18-log-severity-taxonomy.md` | Log Severity Taxonomy | 4-level contract for `Log.{debug,info,warn,error}` callsites | Reference |
+| `lane-application-observation.md` | Lane Application Observation | Lane Add-on 선언 저장과 worker 실행 적용 관찰의 분리 | Reference |
 
 ## Active Design Documents
 
@@ -83,7 +84,7 @@ graph TB
 
 ### Document Structure
 
-각 spec 파일은 아래 섹션을 따른다:
+기본 서브시스템 spec 파일은 아래 섹션을 따른다 (`03-workspace-state.md`, `16-root-cause-rubric.md`, `18-log-severity-taxonomy.md`, `lane-application-observation.md` 등 경계·레퍼런스 문서는 도메인 계약에 맞춘 절 구성을 사용한다):
 1. Problem Statement
 2. Non-Goals
 3. Module Inventory (table)
@@ -128,4 +129,4 @@ graph TB
 
 ### SSOT
 
-이 spec suite가 최종 진실 원본이다.
+제품·개발 정책의 권위 있는 계약은 `docs/constitution.xml`이며, 구현 계약의 진실 원본은 소스 트리(`lib/`, `packages/agent_core/`, `bin/`)다. 이 spec suite는 그 아키텍처와 계약을 정리한 참조 문서다.

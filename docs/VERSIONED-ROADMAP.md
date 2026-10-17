@@ -4,7 +4,7 @@ status: reference
 
 # MASC release planning
 
-Updated: 2026-09-09.
+Updated: 2026-10-17.
 
 ## Product direction
 
@@ -69,17 +69,16 @@ Issue intake continues to use `.github/issue-taxonomy.json` and the repository's
 typed issue forms. Work is decomposed into independently reviewable tasks and
 PRs; the linked product Goal provides the acceptance context.
 
-## Deferred Figma Studio and next development scope
+## Deferred Figma Studio and release status
 
 Operator decision, 2026-10-13: withdraw the unreleased Figma Studio Addon and
 MASC-aware Figma relay. Preserve generic Lane Addons, the Apple microVM backend,
 Identity support and the existing Figma MCP tools.
 
-The v0.53.0 candidate (`22395227d5addda383a80e8d549e7d366b7a03ee`) does not contain
-the experiment. Following product review, propose the cleanup for the v0.54.0
-development scope without reopening v0.53.0 or announcing a removed shipped
-feature. The release owner retains version assignment; this document publishes
-or bumps nothing.
+Releases through `v0.58.0` (2026-10-17) have shipped with the unreleased Figma Studio
+experiment removed and generic Lane Addons (`msx-machine`, `dos-machine`,
+`fusion-compute`), Workspace Wiki (`.masc/wiki`), Keeper-owned jobs (`keeper_job_*`),
+and turn preparation observability in place.
 
 Keep the full [Studio design](design/figma-studio-lane-addon.md) as a deferred
 idea tracked by [#42735](https://github.com/jeong-sik/masc/issues/42735), with no

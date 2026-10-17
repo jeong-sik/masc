@@ -20,7 +20,7 @@ caller-owned.
 An OpenAI-compatible vLLM endpoint needs no provider-specific SDK registration:
 
 ```ocaml
-open Agent_sdk
+open Agent_core
 
 let provider_config =
   Llm_provider.Provider_config.make
@@ -91,19 +91,19 @@ Load the file explicitly during bootstrap. Parse failure, unknown provider,
 missing model, and missing credential are all errors:
 
 ```ocaml
-open Agent_sdk
+open Agent_core
 
 let ( let* ) = Result.bind
 
-let credential_for_binding (binding : Provider_runtime_binding.t) =
+let credential_for_binding ~env_name (binding : Provider_runtime_binding.t) =
   match binding.auth with
   | No_auth -> Ok ""
-  | Api_key_env name | Setup_token_env name ->
-      (match Sys.getenv_opt name with
+  | Api_key | Setup_token ->
+      (match Sys.getenv_opt env_name with
        | Some value when value <> "" -> Ok value
-       | None | Some "" -> Error (Printf.sprintf "%s is required" name))
+       | None | Some "" -> Error (Printf.sprintf "%s is required" env_name))
 
-let resolve_catalog_provider ~path ~provider_id ~model =
+let resolve_catalog_provider ~path ~provider_id ~model ~env_name =
   let* catalog = Llm_provider.Provider_catalog.load_file path in
   Llm_provider.Provider_catalog.set_global catalog;
   let* binding =
@@ -115,7 +115,7 @@ let resolve_catalog_provider ~path ~provider_id ~model =
     Provider_runtime_binding.to_provider_config ~model binding
     |> Result.map_error Error.to_string
   in
-  let* api_key = credential_for_binding binding in
+  let* api_key = credential_for_binding ~env_name binding in
   Ok
     { provider_config with
       api_key = Llm_provider.Secret.of_string api_key

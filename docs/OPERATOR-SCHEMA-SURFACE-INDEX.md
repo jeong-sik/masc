@@ -13,12 +13,13 @@ Machine-readable catalog: `docs/schema-surfaces/operator-output-surfaces.v1.json
 | --- | --- | --- | --- |
 | `masc.keeper_composite.http.v1` | `/api/v1/keepers/:name/composite` | `lib/keeper/keeper_composite_observer.mli`, `dashboard/src/api/schemas/keeper-composite.ts` | Dashboard schema and composite observer tests |
 | `masc.dashboard_sse.v1` | Dashboard SSE event envelope | `dashboard/src/schemas/sse.ts`, `dashboard/src/types/sse.ts`, event inventory doc | SSE parser tests |
-| `masc.keeper_runtime_manifest.jsonl.v1` | Per-turn runtime manifest JSONL | `lib/keeper/keeper_runtime_manifest.mli` | Manifest JSON roundtrip tests |
+| `masc.keeper_runtime_manifest.jsonl.v1` | Per-turn runtime manifest JSONL (including `Preparation_observed`) | `lib/keeper/keeper_runtime_manifest.mli` | Manifest JSON roundtrip tests |
 | `masc.keeper_execution_receipt.jsonl.v1` | Terminal keeper execution receipt JSONL | `lib/keeper/keeper_execution_receipt.mli` | Receipt invariant tests |
 | `masc.keeper_tool_call_log.jsonl.v1` | Keeper tool-call I/O JSONL | `lib/keeper_tool_call_log.mli` | Tool-call log tests |
 | `masc.runtime_contract_projection.v1` | Runtime contract JSON projection | `lib/keeper/keeper_runtime_contract.mli` | Tool-call/runtime contract tests |
 | `masc.mcp_openapi_tool_schema.v1` | MCP tool schemas and generated OpenAPI | `lib/keeper/keeper_schema.mli` | Tool matrix and OpenAPI smoke tests |
 | `masc.agent_core_bridge_events.v1` | agent core custom events bridged into MASC | `lib/keeper/keeper_event_bridge.mli`, event inventory doc | agent core integration tests |
+| `masc.skill-snapshot/v1` | Skill snapshot and activation ledger projection | `lib/skill_snapshot/skill_catalog_snapshot.mli`, `lib/skill_snapshot_service/skill_catalog_snapshot_service.mli` | Skill snapshot tests |
 
 ## Boundary Rules
 

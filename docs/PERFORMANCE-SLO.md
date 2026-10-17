@@ -30,9 +30,8 @@
 현재 MASC는 agent core provider의 **TTFRC**(Time To First Response Chunk)만 측정한다.
 agent core `Streaming_summary.ttft_ms`(Time To First Token)는 MASC가 직접 소비하지 않는다.
 
-- `keeper_telemetry_consumer.ml`은 agent core telemetry event를 counter-only로 관찰하며,
-  provider model-bearing payload는 역직렬화하지 않는다.
-- `llm_metric_bridge.ml`의 `on_streaming_first_chunk` 콜백은 response chunk가
+- `lib/runtime/runtime_observation.ml`은 agent core 스트리밍 관측 이벤트를 수집하며,
+  `lib/llm_metric_bridge.ml`의 `on_streaming_first_chunk` 콜백은 response chunk가
   도착한 시점(`ttfrc_ms`)만 기록한다.
 
 노출 메트릭:

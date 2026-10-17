@@ -5,7 +5,7 @@ Edit the generator, not this file. Re-run: scripts/gen-tla-index.sh > specs/INDE
 
 # TLA+ Spec Index
 
-Generated: 2026-10-13T16:59:18Z (HEAD: a2f6f78cf9)
+Generated: 2026-10-17T11:04:53Z (HEAD: 071a86c94e2)
 
 Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to refresh.
 
@@ -17,8 +17,8 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | Manual specs | 43 |
 | TTrace (auto-generated) | 0 |
 | Directories | 11 |
-| Total .cfg files | 118 |
-| Buggy .cfg (bug-model pair) | 71 |
+| Total .cfg files | 120 |
+| Buggy .cfg (bug-model pair) | 73 |
 
 `kind` column: **manual** = hand-authored spec; **ttrace** = TLC counterexample export (`*TTrace*` or trace marker in header). `cfg`/`buggy` columns count companion `.cfg` files. `invariants/properties` lists names per cfg label (`clean=...`, `buggy=...`). `source hash` is the tracked `.tla` blob fingerprint.
 
@@ -77,7 +77,7 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | KeeperDwellMonotone.tla | KeeperDwellMonotone | manual | 2 | 1 | clean={inv:Safety} buggy={inv:DwellNonNegative} | af7ab0cf000b |
 | KeeperEventQueue.tla | KeeperEventQueue | manual | 2 | 1 | clean={inv:TypeOK, inv:SafetyInvariant} buggy={inv:TypeOK, inv:SafetyInvariant} | cf9b1da37ed0 |
 | KeeperHeartbeat.tla | KeeperHeartbeat | manual | 2 | 1 | clean={inv:TypeOK, inv:SafetyInvariant} buggy={inv:TypeOK, inv:SafetyInvariant} | 587e017926b7 |
-| KeeperHitlDeferred.tla | KeeperHitlDeferred | manual | 4 | 3 | clean={inv:Safety, prop:UnrelatedLaneKeepsProgressing, prop:ResolutionEventuallyConsumed} blocking-buggy={inv:DeferredImmediately} consume-buggy={inv:ResolutionConsumedAtMostOnce} wake-buggy={inv:ResolutionWakesOriginOnly} | b5b3c09a5b2e |
+| KeeperHitlDeferred.tla | KeeperHitlDeferred | manual | 6 | 5 | clean={inv:Safety, prop:UnrelatedLaneKeepsProgressing, prop:ResolutionEventuallyConsumed} blocking-buggy={inv:DeferredImmediately} consume-buggy={inv:ResolutionConsumedAtMostOnce} early-signal-buggy={inv:WakeAfterDurableEnqueue} restart-buggy={prop:ResolutionEventuallyConsumed} wake-buggy={inv:ResolutionWakesOriginOnly} | bfceede02283 |
 | KeeperOutcomesConservation.tla | KeeperOutcomesConservation | manual | 2 | 1 | clean={inv:Safety} buggy={inv:ConservationLaw} | 25e5f4d6ce1a |
 | KeeperStateMachine.tla | KeeperStateMachine | manual | 2 | 1 | clean={inv:TypeOK, inv:PausedRequiresOperator, inv:StoppedRequiresOperatorStop, inv:RestartingRequiresTypedIntent, prop:StoppedIsForever} buggy={inv:TypeOK, inv:StoppedRequiresOperatorStop} | 73e938ddae8d |
 | KeeperTurnCycle.tla | KeeperTurnCycle | manual | 2 | 1 | clean={inv:TypeOK, inv:Safety, prop:Liveness} buggy={inv:SelectingRequiresToolPolicyMustHold} | 0aa903a7e690 |

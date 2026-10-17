@@ -1,4 +1,10 @@
+---
+status: reference
+---
+
 # Declaration application observations
+
+> Part of: [SPEC-INDEX](./SPEC-INDEX.md)
 
 The operator Lane Add-ons response keeps file persistence separate from worker
 application. Each parsed declaration now has `source_revision` (SHA-256 of the
@@ -56,6 +62,11 @@ pending state still overrides disk state until the publication call settles.
 The new application detail is operator-only. Existing visibility-filtered
 configuration remains available to other callers, but its application state is
 `unknown` with a fixed explanation rather than another owner's worker/error data.
+Retained binding records validate `visibility` and `source_access` strictly on
+decode, and cleanup/reconciliation holds back per-owner state when a retained
+binding's visibility or source-access metadata is invalid or unreadable so one
+corrupted owner record cannot leak across visibility boundaries or prematurely
+confirm cleanup (`#42868`).
 
 ## Delivery boundary and next consumers
 

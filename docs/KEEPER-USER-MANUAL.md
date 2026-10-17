@@ -130,7 +130,10 @@ by that name exists before assuming the id you wrote is the one that runs.
 The seed includes an opt-in `reviewer-failover` lane with Codex, Z.AI and
 Antigravity candidates on separate providers. Existing workspaces retain their
 own configuration: adding the lane to the seed does not change a running
-Keeper's assignment. See [reviewer quota recovery](operations/reviewer-quota-recovery.md)
+Keeper's assignment. Any keyed HTTP provider declared in `runtime.toml` must
+include an explicit `[providers.<id>.credentials]` block (`type = "env", key = "..."`);
+omitting it fails runtime config load at startup. See
+[reviewer quota recovery](operations/reviewer-quota-recovery.md)
 for safe application and verification.
 
 ### Give a lane more than one candidate
@@ -201,7 +204,7 @@ A task moves through `todo`, `in_progress`, `awaiting_verification`, and then
 1. Someone creates a task — you, through the TUI composer's `/task <title>`,
    or a Keeper through `masc_add_task`.
 2. A Keeper claims it and starts taking turns.
-3. Work lands as file edits, commands, and board posts.
+3. Work lands as file edits, commands, and board posts (plus optional isolated Docker background jobs via `keeper_job_*` or multi-Keeper compositions via `keeper_composition_*`).
 4. Verification decides whether it is finished. On the runtime measured here
    that was a separate actor, not the Keeper that did the work: the two most
    frequent board authors were `system` and `verifier_exact`.
@@ -212,7 +215,7 @@ it is why the board has sub-boards and search rather than one feed.
 
 ## The Gate
 
-Three layers decide whether a tool call waits for a human. They are checked
+Four layers decide whether a tool call waits for a human. They are checked
 from most general to most specific, and any of them can be the reason nothing
 is asking you for approval:
 
@@ -220,9 +223,10 @@ is asking you for approval:
 |---|---|---|
 | Mode | `gate/mode.json` | The whole runtime |
 | Keeper flag | `always_allow` in the Keeper TOML | One Keeper |
+| Keeper approval stance | `.masc/gate/` (`yolo` / `auto`, toggled with `g` in TUI) | One Keeper, persisted across restarts |
 | Standing rule | `gate/always-allowed.json` | One Keeper, one tool, one request shape |
 
-A standing rule records the approval it came from, so a rule that surprises you
+A standing rule records the approval it came from (including rule renewal and expiry updates in the v12 approval store), so a rule that surprises you
 can be traced back to the moment somebody granted it.
 
 Gate is an authorization workflow. It is not a sandbox and not a credential

@@ -19,7 +19,7 @@
 
 ## 자리는 셋뿐이다
 
-모델 호출 하나는 **system prompt · user message · tool result** 로 나뉜다. 파일 10개는 이 셋 중 어디에 붙느냐로 갈린다.
+모델 호출 하나는 **system prompt · user message · tool result** 로 나뉜다. `config/prompts` 의 파일 23개(22 `.md` + 1 `.txt`)는 이 셋 중 어디에 붙느냐(또는 비모델 프로토콜 안내인지)로 갈린다.
 
 ## Keeper 한 턴
 
@@ -69,18 +69,25 @@ keeper.md ### world.frame.frame
 | `tool_failure.md` 5슬롯 | 도구가 실패했을 때 등급별 다음 수 (의존성 없음 / 정책 거부 / 런타임 실패 / 워크플로 거부 / 운영자 취소) |
 | `keeper.md ### gate_replay.*` | 승인된 조작을 호스트가 대신 실행한 뒤 "다시 요청하지 마라" |
 
-## 나머지 아홉 파일
+## 나머지 프롬프트 파일
 
-각각 다른 모델 호출이다.
+각각 다른 모델 호출이거나 프로토콜·도구 안내 본문이다.
 
 | 파일 | 호출하는 곳 | 자리 |
 |---|---|---|
 | `librarian.md` | `keeper_librarian_runtime.ml` — 턴 끝 기억 선별 | user (system 은 빈 문자열) |
+| `workspace_memory_curator.md` | `workspace_curator.ml` — 공유 작업 공간 기억 합성 | system / user |
+| `workspace_memory_briefing.md` | 공유 기억 브리핑 서식 | 조립용 슬롯 |
 | `verification.md` | `task/anti_rationalization.ml` — Task 완료 검증 | system. 계약·증거·조회도구 슬롯이 본문에 끼워짐 |
 | `judge.md ### effect` | `keeper/hitl_summary_worker.ml` — 외부 효과 승인 판정 | system. `effect.output_contract` 가 JSON 계약 |
 | `judge.md ### board` | `keeper/keeper_board_attention_exact_flow.ml` | system |
 | `goal_verification.md` | `goal_verification_agent.ml` — metric 이 target 에 닿았나 | system. `lookup` 이 `proof` 안에 끼워짐 |
 | `fusion.judge.md` | `fusion/fusion_judge.ml` — 1차·재심·메타 3위상 | system. 셋이 같은 `output` 슬롯을 공유 |
+| `candle_appraiser_grade.md`, `candle_appraiser_relation.md`, `candle_appraiser_weights.md` | Candle 기여 평가 레인 | system / user |
+| `exec_policy.md`, `subset_rewrite.md` | Shell IR 정책 판정 및 재작성 | system |
+| `agent_core.md` | agent core 기본 프롬프트 슬롯 | system |
+| `tool_guidance.md`, `tool_help.md`, `mcp.tool_help.md` | 도구 사용 안내 및 도움말 텍스트 | 도구 설명 / 결과 보조 |
+| `keeper.autonomous.wake.txt` | 자율 깨우기 기본 입력 문구 | user |
 | `mcp.md` | `mcp_server_eio_tool_profile.ml` | MCP 프로토콜의 instructions 필드 (모델 호출 아님) |
 | `play.agent_guide.md` | `server/server_routes_http_routes_play_guide.ml` | `GET /play/agent.md` 응답 본문. 초대 링크를 받은 외부 에이전트가 읽는다 (모델 호출 아님) |
 | `lane_cli_probe.md` | `bin/masc_lane_cli_probe.ml` | system+user 픽스처 쌍 |
@@ -122,7 +129,7 @@ keeper.md ### world.frame.frame
 
 ## 등급의 기준
 
-**운영자가 고쳤을 때 제품 동작이 바뀌면 `primary`, 아니면 조각이다.** 라벨(`CURRENT GOAL:`), 진단 CLI 픽스처, 내부 템플릿은 config 에 남되 목록에는 안 나온다. 이 기준으로 운영자 목록은 19행이다.
+**운영자가 고쳤을 때 제품 동작이 바뀌면 `primary`, 아니면 조각이다.** 라벨(`CURRENT GOAL:`), 진단 CLI 픽스처, 내부 템플릿은 config 에 남되 목록에는 안 나온다.
 
 | 파일 | 운영자용 키 |
 |---|---|
@@ -135,18 +142,8 @@ keeper.md ### world.frame.frame
 | `fusion.judge.md` | `fusion.judge`, `.refine`, `.meta`, `.output` |
 | `mcp.md` | `mcp.full`, `.managed_agent`, `.operator_remote`, `.seat` |
 | `play.agent_guide.md` | `play.agent_guide` |
-| `tool_failure.md` `lane_cli_probe.md` `eval.calibration.few_shot.md` | 없음 |
+| `tool_failure.md` `lane_cli_probe.md` `eval.calibration.few_shot.md` 외 보조 파일 | 없음 |
 
 슬롯은 기본이 조각이고, 운영자가 따로 손대는 것만 마커 끝에 `[primary: 설명]` 을 단다. 설명을 적지 않으면 그룹 파일의 설명을 쓰는데, 그러면 목록의 모든 행이 같은 문장을 말한다. 파일을 읽는 사람 기준으로 접었더니 한 파일 안에 운영자용 프롬프트와 조립용 조각이 같이 살게 됐고, 등급이 파일 단위면 그 둘을 구분할 수 없다.
 
 서식도 config 에 남는다. 운영자가 바꿀 일이 드물 뿐 바꿀 수 있어야 한다. 다만 재정의 목록에서 문장과 서식이 같은 무게로 보이면 목록이 읽히지 않으므로, 표시 등급은 따로 다룬다 (#32890).
-
-## 파일 수의 내력
-
-| 시점 | md |
-|---|---|
-| 2026-09-03 아침 | 58 |
-| 조각 통합 (#32780, #32789, #32818) | 14 |
-| `keeper.world.*` 유입 (#32848) | 32 |
-| world 접기 (#32889) | 17 |
-| 읽는 사람별 접기 (#32899) | 10 |

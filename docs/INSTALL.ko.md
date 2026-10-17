@@ -259,7 +259,7 @@ exact-output target 을 하나씩 만들어 줍니다. 교체 파일을 쓰면 �
 소스 트리의 `packages/agent_core/models.toml` 에는 그 행이 없습니다 — provider 와 model 쪽만 담은 파일이라,
 그대로 복사해서 쓰면 교체 파일로는 모자랍니다.
 
-**설치된 바이너리**는 `activation_mode = "manual"`인 `imp` 하나와 `browser-lanes` skill을 준비합니다.
+**설치된 바이너리**는 `activation_mode = "manual"`인 `imp` 하나와 내장 스킬(`browser-lanes` 포함)을 준비합니다.
 `imp`의 기본 sandbox는 Docker이며, 모델과 실행 환경을 준비한 뒤 직접 시작합니다.
 설치기는 설정을 바이너리에서 가져옵니다. 지침은 시작점이라 그대로 고쳐 쓰면 됩니다. 모델 가중치, 모델 CLI, API 키, Docker,
 Apple Container, SSH 서버, 브라우저/확장, Slack/Discord 계정, 자동 시작 서비스는
@@ -275,6 +275,8 @@ Codex 캐시가 없는 첫 설치에서는 설치된 CLI의 내장 모델 목록
 **Add another server URL**에서는 llama.cpp, vLLM, OpenAI-compatible 서버나
 다른 컴퓨터의 Ollama를 연결할 수 있습니다. 기존 Antigravity 연결도 표시되지만
 실제 검증 어댑터가 없는 런타임은 대화형 준비 검사를 통과할 수 없습니다.
+AWS Bedrock과 GCP/Vertex 연결은 추후 릴리스 대상(TODO)이며 현재 설치·검증 범위에
+포함되지 않습니다.
 
 컨텍스트 크기는 모델 메타데이터나 동일한 연결의 기존 설정에서 읽습니다.
 Ollama는 선택한 모델만 필요에 따라 로드하고 실제 설정·실행 중인 컨텍스트를
@@ -335,9 +337,9 @@ masc runtime-client-path --client claude-code   # 공식 클라이언트를 어�
 
 준비 단계는 선택한 백엔드를 사용하고, 선택을 저장하기 전에 검증한 뒤 이 작업
 공간의 서버를 시작하거나 연결합니다. 로컬 운영자 자격증명을 만들고 `imp`를
-시작합니다. 이후 `masc`만 실행하면 모델 선택을 반복하지 않고 저장된 imp 기록을
-엽니다. UI는 현재 서버·실행 상태를 별도로 관찰합니다. 기록이 남아 있다고 해서
-현재 계정이나 샌드박스를 쓸 수 있다는 뜻은 아닙니다.
+시작합니다. 이후 `masc`만 실행하면(`imp`나 다른 Keeper에 저장된 대화 기록이 있을 때)
+모델 선택을 반복하지 않고 바로 저장된 대화를 엽니다. UI는 현재 서버·실행 상태를
+별도로 관찰합니다. 기록이 남아 있다고 해서 현재 계정이나 샌드박스를 쓸 수 있다는 뜻은 아닙니다.
 
 자동화에서는 작업 공간과 선택을 명시적으로 지정합니다. 예를 들어:
 
@@ -386,7 +388,7 @@ masc voice-verify --base-path "$HOME/masc-workspace" --agent imp --audio utteran
 `voice-verify`는 문장 하나를 합성하고 오디오 파일을 받아써서, 엔드포인트마다
 `answered`나 `refused`와 그 이유를 알려 줍니다.
 
-TUI에서 imp 채팅을 여세요. 입력이 비어 있으면 `(^Y to speak, ^A to keep listening)`이 보입니다.
+TUI에서 imp 채팅을 여세요. 음성 단축키는 채팅 도움말 시트(`…?`)에 표시됩니다.
 
 | 키 | 하는 일 |
 |---|---|
@@ -558,6 +560,7 @@ Linux nerdctl/Kata는 해당 runtime의 영속 named volume을 생성하고 insp
 공간은 호스트 filesystem을 따릅니다. 이 차이는 부팅 로그에 표시합니다.
 Apple에서 측정한 host descriptor 특성이 Linux에서도 같다고 보장하지 않습니다.
 `network_mode=none` 또는 `inherit`를 사용하며 Linux의 `policy`는 지원하지 않습니다.
+호스트의 `/etc/resolv.conf`에 루프백, 링크 로컬, 미지정 주소만 있는 상태에서 `network_mode=inherit`를 쓰면 게스트가 DNS를 해석할 수 없으므로, `runtime.toml`의 `[sandbox] microvm_dns`나 `MASC_KEEPER_MICROVM_DNS`에 도달 가능한 업스트림 DNS 서버를 지정하세요.
 `scripts/smoke-nerdctl-kata-volume.sh`는 Kata의 볼륨·격리를 검사합니다.
 설치된 Keeper까지 검증하려면 `Kata volume smoke` workflow의 `release_run`에
 Linux x64 작업이 성공한 Release 실행 번호를 지정합니다. 이 경로는 해당 바이너리와
@@ -578,7 +581,16 @@ Keeper의 `sandbox_image`로 지정합니다.
 ## 초기 프롬프트·skills·Keeper
 
 기본 설치는 **자동 시작하지 않는 Keeper `imp` 1명**과 내장 스킬
-`browser-lanes`를 준비합니다. 모델과 샌드박스를 설정한 뒤 Keeper를 시작하세요.
+`browser-lanes`, `browser-live-follow-read`, `browser-navigate-read`,
+`diagram-in-chat`, `evidence-review`, `frontend-change`, `lane-addon-author`,
+`observe-act-verify`, `prior-art`, `root-cause-first`, `run-and-read`,
+`skill-authoring`, `verify-before-claiming-done`, `work-intake`를 준비합니다.
+모델과 샌드박스를 설정한 뒤 Keeper를 시작하세요.
+
+Task와 Goal 검증 에이전트도 `keeper_skill`을 통해 작업 공간에 공개된 지침 Skill을
+읽을 수 있습니다. 기본 제공되는 `evidence-review`는 계약, 실행 로그, 리비전을
+대조하는 절차를 안내합니다. Skill은 확인 절차를 제공할 뿐 새로운 도구나 실행 권한을
+부여하지 않으며, Skill이 없어도 기존 증거 조회로 검증을 진행합니다.
 
 프롬프트는 다음 세 곳만 구분하면 됩니다.
 
@@ -656,6 +668,12 @@ Keeper 파일을 보존합니다. 필수 runtime 설정이 이미 있는 작업 
 workspace의 guest shim과 명시적으로 초기화한 설정은 이 prefix transaction에
 포함되지 않습니다. 프로세스가 강제 종료되어 `.masc-install-transaction`이 남으면
 [배포 transaction 안내](design/installed-dashboard-distribution.md)를 확인합니다.
+
+일부 릴리스는 이전 상태 파일을 변환하는 대신 파일 계약을 바로 변경합니다.
+`CHANGELOG.md`의 `Fresh state required` 항목에 해당 파일이 나열됩니다. 새 서버를
+시작하기 전에 해당 파일을 삭제하거나 새 형식으로 다시 작성하세요. 그렇지 않으면
+부팅 로그에서 디코딩 불가 오류를 보고하고, 그 파일을 읽는 화면(Keeper 프로필,
+Goal 등)은 정리할 때까지 비어 있거나 오류를 반환합니다.
 
 실행 중인 서버는 설치만으로 교체되지 않습니다. 진행 중인 작업을 정리한 뒤 서버를
 재시작하고 `masc --version`, `/health?full=1`, 대시보드를 다시 확인합니다.

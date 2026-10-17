@@ -105,10 +105,9 @@ Optional:
 | `type = "file"`, `path = <abs>` | read a raw key from a file |
 | `type = "inline"`, `value = <key>` | the key itself; avoid for real secrets |
 
-Resolution (`lib/runtime/runtime_adapter.ml`):
+Resolution (`lib/runtime/runtime_adapter.ml` and `lib/runtime/runtime_toml.ml`):
 
-- Omitted credentials fall back to the catalog row's `api_key_env`; a catalog
-  row with an **empty** `api_key_env` declares a provider that takes no key.
+- Keyed providers (whose catalog row declares a non-empty `api_key_env`) **must** declare an explicit `[providers.<id>.credentials]` block (`type = "env", key = "..."`, `file`, or `inline`); omitting `[providers.<id>.credentials]` on a keyed provider fails at load (#42927, #42933). A catalog row with an **empty** `api_key_env` declares a provider that takes no key.
   An uncatalogued provider with no credentials still loads — with an empty
   key, which is what a keyless local endpoint needs. The refusal for a
   credential-less uncatalogued provider happens at model discovery
@@ -288,6 +287,7 @@ An uncatalogued Anthropic-dialect endpoint instead states `kind =
 | `kind` on a CLI protocol | an official client speaks no HTTP dialect |
 | provider id naming a reserved namespace | reserved top-level namespace (#39539) |
 | unknown key in provider/model/binding tables | only declared fields are accepted |
+| missing `[providers.<id>.credentials]` on a keyed catalogued provider | keyed providers must declare their credential source explicitly (#42927, #42933) |
 | credential file relative / not owner-private / JSON | file credentials must be a raw, private, owned key |
 | credentials on `claude-code`/`codex-app-server`/`muse-serve` | the official client owns subscription login |
 | missing `is-non-interactive = true` on an official-client protocol | the runtime does not materialize without it |

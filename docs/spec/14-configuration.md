@@ -46,16 +46,37 @@ operator choice. Configurability is not added speculatively.
 
 ## 3. Keeper runtime selection
 
+`.masc/config/runtime.toml` uses a five-table schema:
+
+1. `[providers.<id>]` — transport protocol (`openai`, `anthropic`, `gemini`, `codex-app-server`, `claude-code`, `antigravity-cli`, `muse-serve`, etc.), endpoint/command, and account or credential reference;
+2. `[models.<id>]` — `api-name`, `max-context`, and model capability declarations;
+3. `[<provider>.<model>]` — concrete runtime binding combining a provider and model (with optional binding-level overrides such as `max-context`);
+4. `[runtime.lanes]` and `[runtime.exact_output_lanes]` — ordered candidate lists of `<provider>.<model>` bindings for general turns and structured exact-output system tasks;
+5. `[runtime.assignments]` — maps a Keeper name (or `default`) to a declared lane id or single `<provider>.<model>` binding.
+
+The six exact-output lanes are:
+- **Required when active**: `hitl_auto_judge`, `board_attention_exact`, `librarian_exact`, `workspace_curator_exact`, `verifier_exact`;
+- **Optional**: `skill_router_exact` (used only when model-routed skill selection is enabled).
+
 A Keeper assignment (`[runtime.assignments]`, or a lane id in
 `[runtime.lanes]`) names a routing id, not a binding. `resolve_assignment`
 takes a declared lane first; an id naming a bare runtime resolves to a lane
 holding that runtime alone. A lane walks exactly the candidates it declares,
 in declaration order — an explicit ordered membership, not a health tier,
 score, or vendor-specific branch. A candidate that failed on timeout, 5xx,
-or network is demoted until it answers (#36935). An assignment pointing at a
-slot the lane does not list falls back to declaration order (#39037).
-Provider outcomes are recorded and returned to the Keeper/LLM; MASC does not
-turn them into cooldown or admission policy.
+network, or quota exhaustion is deprioritized behind remaining healthy
+candidates until it answers (`#36935`, `#43375`). Keyed HTTP providers must
+declare `[providers.<id>.credentials]` explicitly (`#42927`, `#42933`). An
+assignment pointing at a slot the lane does not list falls back to declaration
+order (`#39037`). Provider outcomes are recorded and returned to the
+Keeper/LLM; MASC does not turn them into cooldown or admission policy.
+
+Per-Keeper deployment files live at `<base-path>/.masc/config/keepers/<name>.toml`
+and declare `[keeper]` (`instructions`, `mention_targets`, `board_interests`,
+`activation_mode`, `sandbox_profile`, `sandbox_image`), `[sandbox]`
+(`microvm_dns` `#43254`, resource/mount settings), and `[keeper.tools]` (such as
+Muse `native = "read" | "full"` posture). Additional workspace capability setup
+is provided by `masc web-search-setup` and `masc browser-lane-setup`.
 
 Runtime declarations describe capabilities reported by agent core, including text,
 tool use, reasoning/thinking, multi-turn, image/audio/voice, streaming, and
@@ -146,7 +167,7 @@ separate machine does not select that account.
 |---|---|---|
 | Claude Code | `claude-code` | `account-home` selects `CLAUDE_CONFIG_DIR` |
 | Codex | `codex-app-server` | `account-home` selects `CODEX_HOME` |
-| Antigravity | `antigravity-cli` | A file credential selects the OAuth source; MASC seeds a separate managed HOME |
+| Antigravity | `antigravity-cli` | A file credential selects the OAuth source; MASC seeds a separate managed HOME for persistent sessions and uses a disposable per-call HOME for one-shot exact/panel calls (`#43401`, `#43404`) |
 | Muse Code | `muse-serve` | Required `account-home` selects the process HOME and native session/data roots; MASC supplies a managed configuration directory |
 
 `masc setup` and the web model picker offer all four official clients. Declared
@@ -282,17 +303,22 @@ result; a model list or a fabricated result cannot satisfy the measurement.
 
 ## 4. Gate modes
 
-Gate configuration is deliberately small:
+Gate configuration (`.masc/gate/`) is deliberately small:
 
 ```text
-mode = Always_allow | Auto_judge | Manual
+mode = Always_allow | Auto_judge | Manual | Yolo
 judge_runtime = <runtime-id>   # required only for Auto_judge
 ```
 
 - `Always_allow` dispatches after the owning domain's objective invariants.
 - `Auto_judge` calls the configured LLM and persists verdict, rationale,
   provenance, and correlation.
-- `Manual` persists nonblocking HITL and returns `Deferred`.
+- `Manual` persists nonblocking HITL and returns `Deferred` (with v12 rule
+  renewal expiry `renewed_expires_at` recorded when an operator renews an
+  approval rule).
+- `Yolo` is an operator-persisted bypass mode that dispatches registered tool
+  effects immediately while recording explicit `yolo` mode provenance in the
+  durable receipt.
 
 Configuration contains no risk hierarchy, risk score, privileged actor,
 product-specific credential/repository case, tool-name allowlist, or automatic

@@ -29,6 +29,9 @@ description: MASC가 읽는 환경 변수의 범위와 적용 시점.
 | `MASC_LOG_LEVEL` | 로그 레벨(`debug`, `info`, `warn`, `error`) |
 | `MASC_GRPC_PORT` · `MASC_GRPC_ENABLED` · `MASC_WS_ENABLED` | gRPC·WebSocket 전송 on/off |
 | `MASC_STARTUP_WATCHDOG_SEC` | 부팅 와치독 |
+| `MASC_JSONL_RETENTION_DAYS` | 날짜별 JSONL 보관 기간(일 단위, 기본값 `30`; `[maintenance] jsonl_retention_days` 덮어씀) |
+| `MASC_KEEPER_WIKI_CONTENTS_ENABLED` | Keeper 시스템 프롬프트에 `<wiki_contents>` 주입 여부(`[wiki_contents] enabled` 덮어씀) |
+| `MASC_KEEPER_MICROVM_DNS` | microVM 게스트에 전달할 DNS 서버 목록(쉼표로 구분된 IPv4/IPv6 주소; `[sandbox] microvm_dns` 덮어씀) |
 
 ### 웹 검색 (요청 시 읽기)
 
@@ -36,14 +39,14 @@ description: MASC가 읽는 환경 변수의 범위와 적용 시점.
 
 | 변수 | 기본값 | 효과 |
 |---|---|---|
-| `MASC_SEARXNG_URL` | `http://localhost:8888` | 셀프호스팅 SearXNG 제공자 활성화·최우선 |
+| `MASC_SEARXNG_URL` | `http://127.0.0.1:8888` | 셀프호스팅 SearXNG 제공자 활성화·최우선 |
 | `MASC_WEB_SEARCH_PROVIDER` | `auto` | 제공자 하나를 고정 |
 | `MASC_WEB_SEARCH_TIMEOUT_SEC` | `15` | 제공자별 요청 타임아웃 |
-| `BRAVE_SEARCH_API_KEY` · `TAVILY_API_KEY` · `EXA_API_KEY` · `BING_SEARCH_API_KEY` | (없음) | 해당 검색 제공자 입장 허용 |
+| `ZAI_API_KEY` · `BRAVE_SEARCH_API_KEY` · `TAVILY_API_KEY` · `EXA_API_KEY` · `BING_SEARCH_API_KEY` · `AZURE_BING_SEARCH_API_KEY` · `OLLAMA_API_KEY` | (없음) | 해당 검색 제공자 입장 허용 |
 
 ### 프로바이더 API 키
 
-프로바이더 키는 고정 목록이 아니라 `runtime.toml`의 `[providers.<id>.credentials]` (`type = "env"`, `key = "<변수명>"`)이 이름을 정하고, 서버는 자기가 시작된 환경에서 그 값을 읽습니다. 소스 체크아웃에서는 `quickstart.sh`가 `.env.local`(권한 600)에 쓰고 `start-masc.sh`가 읽습니다. 바이너리 설치에는 둘 다 없으니 직접 export 하세요.
+프로바이더 키는 고정 목록이 아니라 `runtime.toml`의 `[providers.<id>.credentials]` (`type = "env"`, `key = "<변수명>"`)이 이름을 정하고, 서버는 자기가 시작된 환경에서 그 값을 읽습니다. 인증이 필요한 모든 HTTP 프로바이더는 `runtime.toml`에 `[providers.<id>.credentials]` 블록을 반드시 선언해야 하며, 누락 시 `credential_undeclared`로 거부됩니다. 소스 체크아웃에서는 `quickstart.sh`가 `.env.local`(권한 600)에 쓰고 `start-masc.sh`가 읽습니다. 바이너리 설치에는 둘 다 없으니 직접 export 하세요.
 
 ## 새 환경 변수 규칙
 

@@ -14,16 +14,11 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="MIT license"></a>
 </p>
 
-MASC (**Multi-Agent Shared Context**) is a project for assembling a team of agents
-with their own roles and personalities, and watching them work toward a goal.
-These **Keepers** carry context forward, divide tasks, discuss their decisions,
-and verify results. You set the overall direction and guide the team, stepping
-in from time to time.
-
-Inspired by Bullfrog’s *Dungeon Keeper*, MASC aims to capture the fun of giving
-work to a varied cast of characters and watching unexpected things unfold.
-
-Follow their progress in the terminal UI, and connect other agents through MCP.
+MASC (**Multi-Agent Shared Context**) runs persistent agents (**Keepers**) and
+external MCP clients against a shared workspace. Keepers retain turn history and
+working memory, coordinate through Goals, Tasks, and the Board, and submit
+completed work for verification. You configure models and sandboxes, follow
+turns in the terminal UI, and approve gated actions when needed.
 
 > **Pre-1.0.** Built for local, trusted workspaces. APIs and configuration can
 > change. See [Limits](#limits) before running unattended or exposing a server.
@@ -31,9 +26,8 @@ Follow their progress in the terminal UI, and connect other agents through MCP.
 
 ## Why MASC?
 
-Many of MASC’s features help agents understand the goal and what has happened
-so far. Rather than prescribing each action, they provide context so agents
-can assess the situation and decide what to do.
+MASC provides shared workspace state so agents can inspect current goals, prior
+turns, and active tasks before deciding what to do.
 
 - **Keep the work between conversations.** Keeper records, memory, tasks and
   decisions live in the workspace, with tools to inspect what went into a turn.
@@ -61,7 +55,7 @@ and [release assets](https://github.com/jeong-sik/masc/releases/tag/v0.58.0).
 Model access is separate: bring a supported CLI login, an API credential, or a
 reachable local model server. For the default Keeper sandbox, install Docker.
 
-> Installation target: v0.58.0 (check tag availability on GitHub Releases).
+> Installation target: v0.58.0.
 
 ```bash
 TAG=v0.58.0
@@ -195,8 +189,8 @@ See [the TUI guide](docs/TUI-GUIDE.md#troubleshooting) for the exit log details.
 | **Keeper** | A persistent agent with instructions, a model assignment, a sandbox and working records |
 | **Goal** | A shared outcome with a metric and target; verification precedes human confirmation |
 | **Task** | A unit of work with a claim, execution state and verification evidence; it can stand alone or belong to a Goal |
-| **Board** | Posts, comments and mentions that let agents and people discuss work |
-| **Memory** | Keeper context and stored knowledge that you can inspect while following its work |
+| **Board** | Posts, comments, attachments and mentions that let agents and people discuss work |
+| **Memory & Wiki** | Keeper turn context, stored memory, and the shared workspace wiki (`.masc/wiki/`) |
 | **Tool approvals** | Decide whether a call requiring approval, such as a change to an external service, may run |
 
 Start with a concrete outcome: what should exist when the work is finished, and
@@ -224,9 +218,11 @@ Run `masc` on an interactive terminal. The top strip has seven destinations:
 
 Use `Tab` / `Shift-Tab` to move, `?` for help and `:` for the command palette.
 The composer sends messages to the selected Keeper. `/task <title>` creates a
-Task and sends its ID in the same message. Chat controls let you unfold tool
-results, reasoning and context when you need them. `/features` lists what the
-TUI can do — one line per feature with the command, key or name that opens it
+Task and sends its ID in the same message; `/queue clear` clears queued messages
+for a busy Keeper; `/listen` plays the newest audio or MIDI attachment in chat.
+Chat controls let you unfold tool results, reasoning, turn preparation and
+context when you need them. `/features` lists what the TUI can do — one line per
+feature with the command, key or name that opens it
 ([the guide's first section](docs/TUI-GUIDE.md#what-can-i-do-here)).
 
 The [TUI guide](docs/TUI-GUIDE.md) covers every view, key, theme, browser lane,
@@ -286,6 +282,7 @@ explicit mentions and replies in threads the Keeper has joined.
 | `config/sandbox-image-builds.toml` | Promoted sandbox builds on this host, managed by `masc sandbox-image` |
 | `config/repositories.toml` | Repositories shown in Workspace |
 | `skills/<name>/SKILL.md` | Procedures a Keeper can use by name |
+| `wiki/` | Shared workspace wiki pages (`index.md`, `log.md`, and topic pages) |
 
 These are the default locations. `MASC_CONFIG_DIR` can select another root for
 runtime and Keeper configuration. Image names are shipped with the binary;
@@ -324,6 +321,8 @@ Use MASC's tools to change tasks, records and approval state.
 | `masc start --base-path <dir>` | Run the server explicitly |
 | `masc-tui --base-path <dir>` | Open the TUI explicitly |
 | `masc doctor --base-path <dir>` | Check workspace and `imp` readiness without starting them |
+| `masc browser-lane-setup` | Configure Firefox browser-lane integration (`extension`, `bidi`, `host`, or `automation`) |
+| `masc web-search-setup --base-path <dir>` | Inspect or configure workspace web search (`searxng`, `zai`, etc.) |
 | `masc --help` | List commands; use `<command> --help` for details |
 
 The TUI starts a background server when nothing answers the port. Closing the

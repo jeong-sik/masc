@@ -59,7 +59,7 @@ Why:
 What still blocks stronger promises:
 
 - transport health can disagree with real reachability
-- config introspection exists, but the read contract is split and not yet strong enough to treat as a clean SSOT
+- runtime config read/write is unified under `/api/v1/runtime/resolved` and `/api/v1/runtime/config/raw`, while general server config surfaces still span multiple endpoints
 - some read paths still need stronger truth guarantees
 
 ### 4. Remote-safe or ops-grade posture
@@ -92,11 +92,6 @@ These matter after the repo-workspace collaboration front door is clean.
 - richer config and runtime visibility for operators
 
 ## Security Posture
-
-Historical security audit (SECURITY-AUDIT.md, 2025-02-02, verified 2026-02-17) identified:
-- 2 Critical severity issues: **RESOLVED** (cryptographically unsafe token generation, command injection)
-- 4 High severity issues (fail-open authorization, disabled auth defaults, shell command injection)
-- Multiple Medium/Low severity issues
 
 Current security-sensitive areas requiring attention:
 - Auth defaults for non-loopback binds

@@ -4,13 +4,16 @@ This benchmark measures whether a Keeper escapes stale recalled context when a
 live repository contradicts it.  It reuses the coding-outcome runner so the
 verdict remains a real workspace artifact, never a model judge or CI result.
 
-The three cases mirror the STALE benchmark's dimensions:
+The benchmark ships four cases — three default cases mirroring the STALE
+benchmark's dimensions plus one `source-bound` refresh case:
 
 - `l1-context-state-resolution`: select the live value over recalled state.
 - `l1-context-premise-resistance`: reject a false premise repeated by memory
   and the task message.
 - `l2-context-policy-adaptation`: make a downstream code decision from the
   live state without being told that the memory is wrong.
+- `l1-context-source-bound-refresh`: replace a source-bound fact whose digest
+  was invalidated by a workspace file change (`--memory-mode source-bound`).
 
 Each case has a `memory.json`.  The runner converts it into the production
 `memory-current.json` wire shape and verifies through `/last-prompt` that the

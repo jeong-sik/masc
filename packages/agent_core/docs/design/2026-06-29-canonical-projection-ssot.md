@@ -1,7 +1,7 @@
 # Canonical Projection SSOT — agent_core should own the serialization of its own ADTs
 
 - Date: 2026-06-29
-- Status: in progress (F1 landed; F2–F14 are follow-ups)
+- Status: in progress (F1–F3 landed; F4–F14 are follow-ups)
 - Motivating PR: `refactor(stop-reason): single SSOT for stop_reason wire serialization`
 
 ## Problem
@@ -51,7 +51,7 @@ downstream consumer that *also* re-implements these projections
 (`keeper_hooks_oas_types.stop_reason_to_label`,
 `keeper_event_bridge_error_json.stop_reason_to_wire`, `inference_utils.zero_usage`,
 `summarize_thinking_blocks`, …). Every projection agent_core exposes lets a MASC copy be
-deleted in favor of `Agent_sdk.*` — the dependency direction stays MASC→agent_core.
+deleted in favor of `Agent_core.*` — the dependency direction stays MASC→agent_core.
 What stays in MASC is policy: identity redaction, Otel label keys, per-keeper
 routing headers, cost-ledger and operator-alert routing.
 
@@ -73,8 +73,8 @@ routing headers, cost-ledger and operator-alert routing.
 
 | # | ADT / concern | Add to agent_core | Drops these duplicates |
 |---|---|---|---|
-| F2 | `content_block` thinking summary | `Response_shape.summarize_blocks : content_block list -> t` | MASC `summarize_thinking_blocks` |
-| F3 | `content_block`/`message` UTF-8 sanitize | `Utf8_sanitize.sanitize_message(s)` | MASC `inference_utils.sanitize_*_utf8` |
+| F2 (landed) | `content_block` thinking summary | `Response_shape.summarize_blocks : content_block list -> t` | MASC `summarize_thinking_blocks` |
+| F3 (landed) | `content_block`/`message` UTF-8 sanitize | `Utf8_sanitize.sanitize_message(s)` | MASC `inference_utils.sanitize_*_utf8` |
 | F4 | `api_usage` zero | use existing `Types.zero_api_usage` | MASC `zero_usage` ×2 |
 | F5 | `Capabilities.capabilities` ↔ `Provider.capabilities` | transparent alias or `to_provider_capabilities` | MASC `agent_capabilities_of_llm_capabilities` 35-field copy |
 | F6 | `provider_kind -> request_kind` | `Provider_config.request_kind_of_provider_kind` | MASC `request_kind_of_provider_cfg` |

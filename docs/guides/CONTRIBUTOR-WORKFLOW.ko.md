@@ -29,18 +29,17 @@ flowchart LR
 
 ## 기본 저장소 전략
 
-- Stacked PR로 작업합니다. 맨 아래 PR은 `main`을, 이후 PR은 직전 브랜치를 대상으로 합니다.
-  PR 하나에는 구체적인 결과 하나를 담습니다.
+- `gh stack`으로 만들고 유지하는 Stacked PR로 작업합니다. 맨 아래 PR은 `main`을, 이후 PR은 직전 브랜치를 대상으로 합니다.
+  스택 브랜치에 다른 PR이나 `main`을 merge로 끌어들이지 않습니다. PR 하나에는 구체적인 결과 하나를 담습니다.
 - **Native Stack은 맨 위 PR 하나로 스택 전체를 한 번에 병합합니다. 아래부터 한 층씩 병합하지 않습니다.**
   아래쪽 PR로 `merge-async`를 부르는 것도 같습니다. 한 층씩 넣으면 `main`이 움직일 때마다
   남은 층과 다른 스택이 다시 충돌합니다.
 - 스택이 `main`과 충돌하면 `gh stack rebase`로 스택 전체를 다시 올리고 모든 층을 한 번에 push합니다.
   아래층만 고쳐 따로 push하지 않습니다. 충돌은 맨 아래 PR이 아니라 스택 단위로 보고합니다.
-- GitHub Native Stack은 REST `stack`을 먼저 읽고 [전용 절차](NATIVE-GITHUB-STACKS.md)를 따릅니다.
-  스택의 모든 PR을 검토합니다. non-main base만으로
-  부모 선행 병합이나 수동 retarget을 요구하지 않습니다.
 - 동시 작업은 별도 worktree로 격리합니다. Task claim은 담당을 조율하며 파일을 잠그거나
   다른 체크아웃을 수정할 권한을 주지는 않습니다.
+- GitHub Native Stack은 REST `stack`을 먼저 읽고 [전용 절차](NATIVE-GITHUB-STACKS.md)를 따릅니다.
+  맨 위 PR을 병합하여 스택 전체를 한 번에 반영하며, non-main 직접 base만으로 부모 선행 병합이나 수동 retarget을 요구하지 않습니다. 스택의 모든 PR을 검토합니다.
 - README는 제품 소개, CONTRIBUTING은 개발 시작, 매뉴얼은 사용법, 명세는 인터페이스,
   RFC는 설계 제안을 담습니다. 사실 주장은 소스와 측정한 동작으로 뒷받침합니다.
 - 지침은 기준이 되는 곳에 둡니다. `AGENTS.md`는 진입 안내, 헌법은 코딩 에이전트 규칙을
@@ -272,7 +271,7 @@ scripts/review/approve-guard.sh --repo "$repo" --pr "$pr" --head "$head" \
 아래부터 한 층씩 넣지 않습니다. base와 head의 변경을 검토한 뒤 진행합니다.
 Native Stack이 아님이 확인된 일반 브랜치 체인만 부모부터 처리합니다.
 통합 조건은 [merge-guard](../../scripts/review/merge-guard.sh)와 현재
-[CI·리뷰 안내](../CI-REVIEW-WORKFLOW.md)를 따릅니다. 일반 스택은 소스 리뷰,
+[CI·리뷰 안내](../CI-REVIEW-WORKFLOW.md)를 따릅니다. 일반 스택은 소스 리뷰와 정확한 병합 대상 head에 대한 merge-compile 권고 기록(최신 base 기준 뒤처짐 없음 + 성공 상태; 거절 강제는 규약 채택 전까지 보류)을 확인하고,
 Release head는 완료된 전체 CI가 필요합니다. Fork 기여자는 maintainer에게 통합을 맡깁니다.
 소스 승인을 관측하지 않은 빌드·런타임 동작의 성공으로 기록하지 않습니다.
 

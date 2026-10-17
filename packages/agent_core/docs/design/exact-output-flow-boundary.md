@@ -5,7 +5,7 @@ Effective: 2026-07-30
 
 ## Ownership
 
-`Agent_sdk.Exact_output` is the single public surface for exact structured
+`Agent_core.Exact_output` is the single public surface for exact structured
 output. agent_core owns:
 
 - immutable resolver snapshots and catalog-admitted opaque target handles;

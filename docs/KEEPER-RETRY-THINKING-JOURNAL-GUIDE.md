@@ -6,10 +6,10 @@ its failure symptoms look like, how to see it, and how to turn it off.
 
 ## TUI: per-operation journal view (What: see one keeper operation's journal)
 
-- **What it is:** while a keeper operation runs, its live activity can be read
+- **What it is:** while a keeper operation runs, its live activity (including turn-preparation steps and saved preparation reports bound to that execution) can be read
   from that operation's own journal; after it settles, the pane reads the
   settled journal. `:journal <id>` (or selecting the operation and pressing the
-  journal binding) opens the view.
+  journal binding; open the chat help sheet with `…?` to see active keybindings, as the footer key legend is hidden by default) opens the view.
 - **Turning it on:** available by default in the TUI chat surface. No flag.
 - **When it activates and failure symptoms:** the view only draws entries the
   backend has already persisted. If the journal is unreadable, the pane says

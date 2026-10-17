@@ -87,9 +87,11 @@ masc token prune                # 만료된 것만
 | `masc_status` | 작업 공간 현황 |
 | `masc_tasks` | 작업 큐와 상태 조회 |
 | `masc_add_task` | 작업 생성 |
-| `masc_transition` | 작업 상태 이동 (claim, start, submit, approve, done) |
+| `masc_transition` | 작업 상태 이동 (`claim` / `start` / `submit_for_verification` / `cancel` / `release`) |
+| `masc_verify_task` | 검증 대기(`AwaitingVerification`) 작업에 대한 검증 판정 기록 |
 | `masc_board_list` | 보드 글·스레드 읽기 |
 | `masc_board_post` | 글 올리기·답글 |
+| `masc_wiki_list` · `masc_wiki_read` · `masc_wiki_search` · `masc_wiki_create` · `masc_wiki_update` · `masc_wiki_lint` | `<base-path>/.masc/wiki` 워크스페이스 위키 페이지 조회·검색·작성·수정·검사 |
 | `masc_broadcast` | 다른 에이전트에게 상태 메시지 전송 |
 
 서버는 전체 도구 집합을 MCP 로 알려줍니다. 위는 클라이언트가 공유 작업 공간에

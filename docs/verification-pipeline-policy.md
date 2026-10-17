@@ -37,7 +37,8 @@ Before it emits a verdict, the application-owned system LLM agent receives:
 2. the persisted `required_artifacts` requirements; and
 3. the typed `submitted_evidence` snapshot captured at submission time.
 
-It may emit only the structured `report_review_verdict` result. It does not
+It may read instruction Skills (such as `evidence-review`) via `keeper_skill`
+and emit only the structured `report_review_verdict` result. It does not
 enter Keeper registration, Keeper claims, Keeper lanes, or Keeper task
 actions. `Workspace.commit_verdict_r` is the only task mutation boundary.
 
@@ -53,10 +54,11 @@ logged with the typed boundary outcome; it cannot rewrite the task verdict.
 ## 3. HITL and producer routing
 
 The authenticated operator route uses `Human_operator` and is independent of
-the system LLM lane. A rejected verdict wakes or durably queues only the
-producer Keeper. The rejection payload retains the typed authority,
-`task_id`, `verification_id`, and reason. No other Keeper is assigned the
-verification obligation.
+the system LLM lane. A rejected verdict records a durable delivery obligation
+and wakes or queues only the producer Keeper, retrying pending deliveries
+across server restarts until delivered or superseded. The rejection payload
+retains the typed authority, `task_id`, `verification_id`, and reason. No
+other Keeper is assigned the verification obligation.
 
 If the system LLM runtime is unavailable or produces no structured verdict,
 the task remains `awaiting_verification` and the reason is observable. The
@@ -65,6 +67,8 @@ string classifier.
 
 ## Revision History
 
+- 2026-10-17: noted instruction Skill access (`keeper_skill`) for verification
+  agents and durable rejection delivery across restarts.
 - 2026-08-02: aligned the policy with the system-LLM authority and typed
   immutable evidence snapshot contract.
 - 2026-07-08: Initial policy (task-1880, base)

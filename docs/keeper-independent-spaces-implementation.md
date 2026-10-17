@@ -23,7 +23,6 @@ B's dashboard projection, and checks normal and duplicate B cleanup.
 
 This change protects observation lifetime and tool counts only. It does not
 introduce simultaneous execution, and does not claim to fix all stuck states.
-Validation so far: OCaml parsing and diff checks; runtime tests not run.
 
 ## Second change: registry callback attribution
 
@@ -42,7 +41,7 @@ This protects `current_turn_observation`, not every Keeper-scoped projection.
 Pending measurement production belongs to the Keeper lifecycle and requires
 space attribution before concurrent execution. Preview callback ownership is
 addressed in the next slice below. Session/checkpoint and external-effect
-ownership are also unchanged. Source review and parsing are not runtime proof.
+ownership are also unchanged.
 
 ## Third change: preview writer ownership
 
@@ -70,11 +69,6 @@ Measurement production, event-bus FSM emission and durable sessions remain
 separate shared boundaries. In particular, the event bus emits FSM records before
 its token-protected registry count callback; those are not the Registry FSM.
 
-Validation is source review and parsing, not executed tests or deployed UI proof.
-The consulted Keeper lane also reports no OCaml/Dune/Opam toolchain; it cannot
-supply runtime evidence. Native GitHub stack membership was observed for #40524
-and #40530 after initial PR creation; direct base alone is not merge scope.
-
 ## Fourth change: execution-scoped event intake
 
 The Agent Core bus now supports an exact typed caller-scope filter at subscription
@@ -96,7 +90,7 @@ This fixes intake ownership. FSM audit rows and dwell metrics still use Keeper
 name/display counter, so full execution identity in the emitted audit/read model
 remains follow-up. The tracker still matches tools within one execution using its
 existing semantics. Scope is an in-process event boundary, not durable recovery
-ownership. No Owner concurrency, session-store cutover or runtime proof is claimed.
+ownership.
 
 ## Remaining stack order
 

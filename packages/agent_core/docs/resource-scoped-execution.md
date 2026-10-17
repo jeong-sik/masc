@@ -50,16 +50,18 @@ Restoring an open sibling preserves its original wave even after another sibling
 has settled, without converting that open identity into effect permission.
 
 Within a contiguous scoped region, every earlier conflicting call is an order
-dependency. Ready waves run concurrently and preserve transitive ordering;
-results are returned in original planned order. Their invocation schedules
-record the actual Concurrent wave. Readonly concurrent regions, ordinary Serial
-calls, unknown tools, and Terminal admission retain barriers. Ordinary tool
-failure results permit later batches, while hook, observer, and durability
-failures stop them after preserving already completed siblings.
+dependency. Non-conflicting calls start immediately and each waiting call is
+released as soon as its specific conflicting predecessors settle, rather than
+waiting on a batch-wide wave barrier; results are returned in original planned
+order. Their invocation schedules record the actual Concurrent wave. Readonly
+concurrent regions, ordinary Serial calls, unknown tools, and Terminal admission
+retain barriers. Ordinary tool failure results permit later batches, while hook,
+observer, and durability failures stop them after preserving already completed
+siblings.
 
-This SDK mechanism does not yet enable MASC Edit concurrency. That integration
-must supply translated-path and pinned-capability claims, preserve the Gate,
-and prove actual filesystem behavior separately. Async admission, durable
-effect replay, and cross-process resource exclusion are unchanged. Scope
-scheduling belongs to one tool-use batch; it does not replace a producer's
-lease between separate concurrent batches.
+MASC `Read`, `Edit`, `Write`, and inline `Skill` recipes integrate with this
+mechanism by supplying translated-path and pinned-capability resource claims
+while preserving Gate authorization and exact filesystem validation. Async
+admission, durable effect replay, and cross-process resource exclusion remain
+unchanged. Scope scheduling belongs to one tool-use batch; it does not replace
+a producer's lease between separate concurrent batches.

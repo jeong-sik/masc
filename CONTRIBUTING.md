@@ -249,10 +249,13 @@ scope changes during admission. If the change differs, review it again and captu
 new evidence; do not refresh the digest merely to approve unreviewed changes.
 Release verdicts additionally cite `run: <full-CI-run-id>` for completed full
 verification of that head. Read current reviews and comments before integration;
-blocking reviews and later FAIL/HOLD decisions take precedence. Land stacks bottom
-first and re-review changes to base and head. See [the workflow](docs/CI-REVIEW-WORKFLOW.md)
-for admission through the review and merge scripts. A source approval does not
-claim that a build or runtime check ran.
+blocking reviews and later FAIL/HOLD decisions take precedence. Native GitHub
+stacks land whole through their top PR via `merge-async`; non-native branch
+chains land parent first and re-verify child scope after retargeting. See
+[the workflow](docs/CI-REVIEW-WORKFLOW.md) and
+[native GitHub stacks](docs/guides/NATIVE-GITHUB-STACKS.md) for admission
+through the review and merge scripts. A source approval does not claim that a
+build or runtime check ran.
 
 ## Issues
 

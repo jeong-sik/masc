@@ -13,7 +13,7 @@ TOML `description` with the parameter descriptions. Capability search matches
 and returns the frontmatter `description`, so it holds the same text. The follow
 semantics and recovery rules a Keeper needs therefore live in that description.
 The automation counterpart is `browser-navigate-read`; the broader navigation
-guidance is in `browser-lanes/references/composition.md`.
+guidance is in `browser-lanes/SKILL.md`.
 
 ```toml composition
 [[compositions]]

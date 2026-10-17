@@ -16,7 +16,7 @@ Keeper의 특성:
 
 ## 작업 라이프사이클 (Task Lifecycle)
 
-Keeper가 수행하는 작업은 5단계를 거쳐 안전하게 완료됩니다:
+Keeper가 수행하는 작업은 6가지 상태(`Todo`, `Claimed`, `InProgress`, `AwaitingVerification`, `Done`, `Cancelled`)를 거칩니다. 작업을 맡은 Keeper는 검증 제출(`AwaitingVerification`) 중이더라도 사유와 함께 자기 작업을 직접 취소(`Cancelled`)할 수 있습니다:
 
 ```mermaid
 stateDiagram-v2
@@ -26,15 +26,18 @@ stateDiagram-v2
     InProgress --> AwaitingVerification: 검증 요청 제출 (증거 첨부)
     AwaitingVerification --> InProgress: 검증 실패 (Reject 및 재시도)
     AwaitingVerification --> Done: 정량/정성 검증 합격 (Verified)
-    InProgress --> Cancelled: 오퍼레이터 또는 시스템 취소
+    Claimed --> Cancelled: 담당 Keeper 또는 오퍼레이터 취소 (사유 포함)
+    InProgress --> Cancelled: 담당 Keeper 또는 오퍼레이터 취소 (사유 포함)
+    AwaitingVerification --> Cancelled: 담당 Keeper 또는 오퍼레이터 취소 (사유 포함)
     Done --> [*]
 ```
 
 - **Todo**: 할 일 대기열에 등록된 상태
-- **Claimed**: 특정 Keeper가 선점하여 다른 에이전트의 접근이 잠긴 상태
+- **Claimed**: 특정 Keeper의 작업 담당 소유권이 원장에 기록되어 다른 에이전트가 같은 작업을 중복 선점하지 못하는 상태 (저장소 파일을 잠그지는 않음)
 - **InProgress**: Keeper가 도구를 호출하며 실제 작업을 수행 중인 상태
 - **AwaitingVerification**: 작업을 마치고 검증자(Verifier)에게 증거와 함께 검수를 제출한 상태
 - **Done**: 정량적/정성적 검증을 통과하여 최종 완료된 상태
+- **Cancelled**: 담당 Keeper 또는 오퍼레이터가 사유와 함께 취소한 상태
 
 ---
 
@@ -48,10 +51,10 @@ Keeper별 설정은 `<base-path>/.masc/config/keepers/<name>.toml`에 정의됩�
 ```toml
 # .masc/config/keepers/reviewer.toml 예시
 [keeper]
-autoboot_enabled = true
-proactive_enabled = true
-sandbox_profile = "docker"   # "docker" | "microvm" | "remote_ssh" (host 는 거부됨)
-network_mode = "inherit"     # "none" | "inherit" | "policy"
+activation_mode = "autonomous"  # "manual" | "reactive" | "scheduled" | "autonomous"
+sandbox_profile = "docker"      # "docker" | "microvm" | "remote_ssh" ("local"이나 호스트 프로필은 없음)
+sandbox_image = "base"          # "base" | "ocaml" (sandbox-image-builds.toml에 승격된 이미지)
+network_mode = "inherit"        # "none" | "inherit" | "policy"
 instructions = """
 당신은 코드 리뷰 Keeper입니다. 현재 변경사항을 검사하고 구체적인 파일 경로와
 실행 증거를 보고하십시오.
@@ -61,7 +64,7 @@ instructions = """
 native = "read"              # "none" | "read" | "full"
 ```
 
-Keeper 의 턴이 어떤 모델을 쓰는지는 `runtime.toml` 에서 옵니다 — `[runtime].default`,
+유효한 `sandbox_profile` 값은 `"docker"`, `"microvm"`, `"remote_ssh"` 세 가지뿐입니다(`"local"` 프로필은 존재하지 않습니다). Keeper 의 턴이 어떤 모델을 쓰는지는 `runtime.toml` 에서 옵니다 — `[runtime].default`,
 또는 그 Keeper 의 작업이 매핑되는 lane 입니다. 모델 바인딩과 lane 선언 방법은
 [설정 파일](/ko/reference/config/#runtimetoml)을 보세요.
 

@@ -34,8 +34,7 @@ opam install ./masc.opam --deps-only --locked
 
 ## 2. 작업 공간 서버 켜기
 
-`quickstart.sh` 는 `~/masc-quickstart` 아래에 `.masc/` 작업 공간을 만들고 서버를
-띄웁니다.
+`./quickstart.sh`는 `~/masc-quickstart` 아래에 `.masc/` 작업 공간을 초기화하고 MCP bearer 토큰을 `.masc/config/mcp-client.env`에 기록한 뒤 서버를 띄웁니다. 기본적으로 Keeper는 시작하지 않으며, `--team classic`을 넘기지 않는 한 API 키가 필요하지 않습니다.
 
 ```bash
 ./quickstart.sh
@@ -44,15 +43,15 @@ opam install ./masc.opam --deps-only --locked
 켜지면 다음 주소가 열립니다.
 
 - **MCP 엔드포인트**: `http://127.0.0.1:8935/mcp`
-- **대시보드**: `http://127.0.0.1:8935/dashboard/`
+- **대시보드 (실험 기능)**: `http://127.0.0.1:8935/dashboard/`
 - **헬스 체크**: `curl http://127.0.0.1:8935/health`
 
-## 3. 터미널 UI 열기
+## 3. 서버 및 터미널 UI 직접 빌드·열기
 
-체크아웃한 소스에서 TUI 를 빌드해 실행합니다.
+체크아웃한 소스에서 서버(`bin/main_eio.exe`)와 TUI(`bin/masc_tui.exe`)를 함께 빌드해 실행합니다.
 
 ```bash
-dune build bin/masc_tui.exe
+dune build bin/main_eio.exe bin/masc_tui.exe
 ./_build/default/bin/masc_tui.exe --base-path ~/masc-quickstart
 ```
 
@@ -61,12 +60,13 @@ dune build bin/masc_tui.exe
 
 ## 4. 자율 Keeper 켜기 (선택)
 
-미리 빌드된 설치와 마찬가지로, Keeper 는 모델 소스와 명령 격리가 필요합니다.
-프로바이더 키를 넣거나(또는 로컬 모델을 연결하고) 서버를 띄웁니다. `--base-path`는 필수입니다.
+미리 빌드된 설치와 마찬가지로, Keeper는 모델 런타임과 명령 격리가 필요합니다.
+`masc setup`으로 모델 런타임과 기본 샌드박스 이미지를 준비하고 시작하거나, 설정이 끝난 작업 공간에서 `masc start`로 서버를 바로 띄웁니다.
 
 ```bash
-export ANTHROPIC_API_KEY="sk-ant-..."
-./start-masc.sh --http --base-path ~/masc
+masc setup --base-path ~/masc
+# 또는 설정이 완료된 뒤 서버만 바로 시작:
+masc start --base-path ~/masc
 ```
 
 키 없이 쓰는 방법은 [로컬 AI 모델 연결](/ko/runbooks/llama-server/)을, 격리

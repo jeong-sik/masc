@@ -1,32 +1,31 @@
 # Sidecar Lifecycle API — RFC
 
-Status: **Draft** — design baseline for the next implementation PR.
+Status: **Implemented** (`lib/server/server_routes_http_routes_sidecar.ml`).
 Scope: backend HTTP endpoints + dashboard wiring so the operator can
-start/stop/inspect a sidecar from the connectors surface instead of
+start/stop/inspect/configure a sidecar from the connectors surface instead of
 copy-pasting `./run.sh` snippets into a terminal.
 
-Related work shipped in this Phase 7 sweep:
-- `feature/sidecar-run-sh` — every bridge now ships `./run.sh
-  [start|stop|tail|status]`. The RFC depends on this wrapper as the
-  shell-out target.
-- `feature/dash-connectors-toplevel` — UI surface and copyable command
-  cards already in place; this RFC turns those copy buttons into native
-  POSTs.
+Related work:
+- `feature/sidecar-run-sh` — every bridge ships `./run.sh
+  [start|stop|tail|status]`.
+- `feature/dash-connectors-toplevel` — UI surface and native lifecycle controls.
 
 ## Endpoints
 
 ```
-POST  /api/v1/sidecar/:id/start    →  202 Accepted, fire-and-forget
-POST  /api/v1/sidecar/:id/stop     →  200 OK, sync (run.sh stop is fast)
-GET   /api/v1/sidecar/:id/status   →  200 OK, returns status.json
-GET   /api/v1/sidecar/:id/logs     →  200 OK, last N lines (?lines=N, default 200)
+POST  /api/v1/sidecar/start?name=<id>    →  202 Accepted, fire-and-forget
+POST  /api/v1/sidecar/stop?name=<id>     →  200 OK, sync (run.sh stop is fast)
+GET   /api/v1/sidecar/status?name=<id>   →  200 OK, returns status.json + diagnostics
+GET   /api/v1/sidecar/logs?name=<id>     →  200 OK, last N lines (?lines=N, default 200)
+GET   /api/v1/sidecar/schema?name=<id>   →  200 OK, JSON Schema for sidecar config
+GET   /api/v1/sidecar/config?name=<id>   →  200 OK, current sidecar config values
+POST  /api/v1/sidecar/config?name=<id>   →  200 OK, atomically writes config.toml (0600)
 ```
 
-`:id` ∈ `{telegram}` — the one connector left that runs as an external
-sidecar process. Discord (`Server_discord_in_process_gateway`), Slack
+`?name=<id>` ∈ `{telegram}` for external sidecar lifecycle control (`known_ids = ["telegram"]`). Discord (`Server_discord_in_process_gateway`), Slack
 (`Server_slack_in_process_gateway`) and iMessage
-(`Server_imessage_in_process_gateway`) run in-process and are not sidecar ids;
-`?name=imessage` has returned 404 since #30531. Anything else returns
+(`Server_imessage_in_process_gateway`) run in-process and are not external sidecar process ids;
+`?name=imessage` returns 404 (#30531). Unknown ids return
 `400 Bad Request {"ok":false,"error":"unknown sidecar id"}`.
 
 Auth model (mirroring `Server_routes_http_routes_channel_gate`):
@@ -34,7 +33,10 @@ Auth model (mirroring `Server_routes_http_routes_channel_gate`):
 | Verb       | Helper                               | Why                          |
 |------------|--------------------------------------|------------------------------|
 | GET status | `with_public_read`                   | read-only, dashboard polls   |
+| GET schema | `with_public_read`                   | read-only schema descriptor  |
 | GET logs   | `with_tool_auth ~tool_name:"sidecar"`| log content can be sensitive |
+| GET config | `with_tool_auth ~tool_name:"sidecar"`| config values                |
+| POST config| `with_tool_auth ~tool_name:"sidecar"`| writes sidecar config.toml   |
 | POST start | `with_tool_auth ~tool_name:"sidecar"`| spawns a process             |
 | POST stop  | `with_tool_auth ~tool_name:"sidecar"`| signals processes            |
 
@@ -64,86 +66,23 @@ Auth model (mirroring `Server_routes_http_routes_channel_gate`):
 { "ok": true, "log_path": "...", "lines": [ "2026-... starting...", ... ] }
 ```
 
-## Implementation skeleton (OCaml, lib/server/)
+## Implementation (`lib/server/server_routes_http_routes_sidecar.ml`)
 
-New module `lib/server/server_routes_http_routes_sidecar.ml`:
+Routes are registered on `Http.Router` using `?name=<id>` query parameters:
 
 ```ocaml
-open Server_auth
-open Server_utils
-module Http = Http_server_eio
-
-(* Discord, Slack and iMessage run in-process; not sidecar ids. *)
-let known_ids = ["telegram"]
-
-let parse_id_from_path req =
-  (* expect path /api/v1/sidecar/<id>/<action> *)
-  ...
-
-let script_path id =
-  let base = Sys.getenv_opt "MASC_BASE_PATH" |> Option.value ~default:"." in
-  Filename.concat base (Printf.sprintf "sidecars/%s-bot/run.sh" id)
-
-let respond_json ~status reqd json = ...
-
-let handle_status state request reqd =
-  let id = parse_id_from_path request in
-  if not (List.mem id known_ids) then
-    respond_json ~status:`Bad_request reqd
-      (`Assoc [("ok", `Bool false); ("error", `String "unknown sidecar id")])
-  else
-    let status_file = ... (* MASC_BASE_PATH/.gate/runtime/<id>/status.json *) in
-    if Sys.file_exists status_file then
-      let body = In_channel.with_open_text status_file In_channel.input_all in
-      let parsed = try Some (Yojson.Safe.from_string body) with _ -> None in
-      respond_json ~status:`OK reqd
-        (`Assoc [("ok", `Bool true); ("available", `Bool true);
-                 ("status", Option.value parsed ~default:`Null)])
-    else
-      respond_json ~status:`OK reqd
-        (`Assoc [("ok", `Bool true); ("available", `Bool false)])
-
-let handle_stop state request reqd =
-  let id = parse_id_from_path request in
-  ... whitelist check ...
-  let (status, stdout) = Process_eio.run_argv_with_status
-    ~timeout_sec:5.0
-    [script_path id; "stop"]
-  in
-  let signaled = String.(equal (trim stdout |> trim_newlines)
-                          (Printf.sprintf "Sent SIGTERM to %s-bot processes." id)) in
-  respond_json ~status:`OK reqd
-    (`Assoc [("ok", `Bool true); ("signaled", `Bool signaled);
-             ("note", `String stdout)])
-
-let handle_start state request reqd =
-  let id = parse_id_from_path request in
-  ... whitelist check ...
-  (* Detach: run via setsid + nohup so the sidecar survives backend restart.
-     The wrapper already tees to a dated log file, so we just fork+exit. *)
-  let cmd = Printf.sprintf
-    "setsid nohup %s start </dev/null >/dev/null 2>&1 &"
-    (Filename.quote (script_path id))
-  in
-  let _ = Sys.command cmd in
-  respond_json ~status:`Accepted reqd
-    (`Assoc [("ok", `Bool true);
-             ("log_path", `String (log_path_for id));
-             ("status_path", `String (status_path_for id))])
-
-let add_routes ~sw:_ ~clock:_ router =
+let add_routes ~sw ~clock router =
   router
-  |> Http.Router.get "/api/v1/sidecar/:id/status" (fun req reqd ->
-       with_public_read (fun s _r r -> handle_status s req r) req reqd)
-  |> Http.Router.get "/api/v1/sidecar/:id/logs" (fun req reqd ->
-       with_tool_auth ~tool_name:"sidecar" (fun s _r r -> handle_logs s req r) req reqd)
-  |> Http.Router.post "/api/v1/sidecar/:id/start" (fun req reqd ->
-       with_tool_auth ~tool_name:"sidecar" (fun s _r r -> handle_start s req r) req reqd)
-  |> Http.Router.post "/api/v1/sidecar/:id/stop" (fun req reqd ->
-       with_tool_auth ~tool_name:"sidecar" (fun s _r r -> handle_stop s req r) req reqd)
+  |> Http.Router.get "/api/v1/sidecar/status" ...
+  |> Http.Router.get "/api/v1/sidecar/logs" ...
+  |> Http.Router.get "/api/v1/sidecar/schema" ...
+  |> Http.Router.post "/api/v1/sidecar/start" ...
+  |> Http.Router.post "/api/v1/sidecar/stop" ...
+  |> Http.Router.get "/api/v1/sidecar/config" ...
+  |> Http.Router.post "/api/v1/sidecar/config" ...
 ```
 
-Wire it in `lib/server/server_routes_http.ml`:
+Wired in `lib/server/server_routes_http.ml`:
 
 ```ocaml
 |> Server_routes_http_routes_channel_gate.add_routes ~sw ~clock
@@ -152,15 +91,15 @@ Wire it in `lib/server/server_routes_http.ml`:
 
 ## Security checklist
 
-1. **Path injection**: `:id` whitelisted against `known_ids` before
+1. **Path injection**: `id` is validated against `known_ids` before
    any filesystem path is built. No string interpolation into a shell.
 2. **Shell injection**: stop/status use `Process_eio.run_argv_with_status`
    (argv-based, no shell). start uses `Sys.command` only because `setsid
    nohup … &` requires a shell, and the only interpolated value is
    `Filename.quote (script_path id)` where `script_path` derives from the
    already-whitelisted `id`.
-3. **Auth scope**: spawn/signal verbs require `with_tool_auth` (Bearer
-   token); read-only status is `with_public_read` to keep the dashboard
+3. **Auth scope**: spawn/signal/config verbs require `with_tool_auth` (Bearer
+   token); read-only status/schema use `with_public_read` to keep the dashboard
    fetch loop simple. Logs go through `with_tool_auth` because a tail
    may include user message bodies.
 4. **Timeout**: `~timeout_sec:5.0` on stop+status — the wrapper itself
@@ -171,22 +110,9 @@ Wire it in `lib/server/server_routes_http.ml`:
 ## Production note
 
 `Sys.command "setsid nohup … &"` makes the sidecar survive the backend
-process, but it's still spawned by an interactive operator. For real
-production deployments this RFC recommends launchd plists (macOS) or
-systemd units (Linux) — backend can register/unregister those instead
-of forking. That's out of scope for the v1 endpoint; v1 targets dev
-boxes and lab environments.
-
-## Open follow-ups (post-v1)
-
-- `/api/v1/sidecar/:id/restart` (stop + wait + start). Could be
-  client-side (sequential calls).
-- `/api/v1/sidecar/:id/config` POST — TOML writer for the
-  `${MASC_BASE_PATH}/.gate/runtime/<id>/config.toml` file the wrapper
-  already loads. Mode 0600.
-- `/api/v1/sidecar/:id/schema` GET — proxy to each sidecar's Pydantic
-  `BotConfig.model_json_schema()` so the dashboard form is generated
-  once, never drifts.
+process, but it's still spawned by an interactive operator. For
+production deployments, launchd plists (macOS) or systemd units (Linux)
+remain appropriate when process supervision outside the dev server is desired.
 
 ## Test plan (next PR)
 

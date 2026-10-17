@@ -209,7 +209,7 @@ type tempo_config = {
 }
 ```
 
-클러스터 실행 속도를 제어한다. `delay_ms`는 작업 간 인위적 지연을 삽입한다.
+워크스페이스/서버 실행 속도를 제어한다. `delay_ms`는 작업 간 인위적 지연을 삽입한다.
 
 ### 2.12 Backlog
 
@@ -298,6 +298,11 @@ module Task_error : sig
     | NotClaimed of string
     | InvalidState of string
     | InvalidId of string
+    | VerificationSuperseded of {
+        task_id: string;
+        requested: string;
+        current: string;
+      }
   val to_string : t -> string
 end
 
@@ -476,10 +481,10 @@ end
 ### 9.1 Agent Role (auth)
 
 ```ocaml
-type agent_role = Worker | Admin
+type agent_role = Worker | Admin | Player
 ```
 
-인증/인가 역할은 `Worker`와 `Admin` 두 단계만 남긴다. task assignment 전용 role 타입은 제거되었다.
+인증/인가 역할은 `Worker`, `Admin`, 그리고 공유 머신 초대용 `Player`로 구성된다. task assignment 전용 role 타입은 제거되었다.
 
 ### 9.2 Permission
 
@@ -494,13 +499,15 @@ type permission =
   | CanBroadcast
   | CanVote
   | CanAdmin
+  | CanPlayMachine
 ```
 
-9개 variant. 각 `agent_role`에 허용된 permission 목록:
+10개 variant. 각 `agent_role`에 허용된 permission 목록:
 
 | Role | Permissions |
 |------|------------|
-| Worker | `CanReadState`, `CanAddTask`, `CanClaimTask`, `CanCompleteTask`, `CanBroadcast`, `CanVote` |
+| Player | `CanPlayMachine` |
+| Worker | `CanReadState`, `CanAddTask`, `CanClaimTask`, `CanCompleteTask`, `CanBroadcast`, `CanVote`, `CanPlayMachine` |
 | Admin | Worker + `CanInit`, `CanReset`, `CanAdmin` (전체) |
 
 ### 9.3 Agent Credential

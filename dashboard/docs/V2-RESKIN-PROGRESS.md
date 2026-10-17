@@ -1,8 +1,8 @@
 # Dashboard v2 big-bang reskin — progress & plan
 
-Branch: `feat/dashboard-v2-skin-bigbang` (worktree). Goal: 100% match the
-keeper-v2 design prototype (icons, fonts, colors, margins, padding, weight),
-SSOT CSS, production-grade, no stub/hardcode/silent-failure.
+Branch: `feat/dashboard-v2-skin-bigbang` (worktree). Goal: align the dashboard
+surfaces with the keeper-v2 design prototype (icons, fonts, colors, margins,
+padding, weight) using vendored SSOT CSS.
 
 ## Ground truth (prototype)
 - Source: the keeper-v2 design prototype is now IN-REPO at

@@ -1,6 +1,6 @@
 ---
 name: diagram-in-chat
-description: "Draws a flow, pipeline, state machine, message exchange or set of groups as a mermaid fence in chat, within what the terminal renderer can draw: graph or flowchart and sequenceDiagram, one-row boxes, and a pane about 80 cells wide. Use when explaining steps, states or groupings to the operator instead of writing them out as a list."
+description: "Draws a flow, pipeline, state machine, message exchange or set of groups as a mermaid fence in chat, within what the terminal renderer can draw: graph or flowchart, sequenceDiagram, and stateDiagram/stateDiagram-v2, one-row boxes, and a pane about 80 cells wide. Use when explaining steps, states or groupings to the operator instead of writing them out as a list."
 ---
 
 # 채팅에 그림을 그린다

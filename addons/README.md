@@ -20,6 +20,7 @@ step in other Keeper activity.
 | [dos-world](dos-world/README.md) | Runs a homebrew DOS counter, accepts an optional action and emits guest-state and screen artifacts. | Owns its DOS/WASM machine inside its worker; replacement starts a new machine. |
 | [quiz-questions](quiz-questions/) | Derives questions from a supplied fact deck without publishing the answer key. | Reads the deck; owns no source records or score. |
 | [quiz-grader](quiz-grader/README.md) | Grades answers against the same deck and retains exact upstream question references. | Keeps attempts and scores in worker memory; the host retains completed outputs and action receipts. |
+| [fusion-compute](fusion-compute/README.md) | Executes Fusion compute requests in an isolated worker and returns structured artifacts and receipts. | Owns its compute worker; credentials, publication and durable delivery stay in the existing host. |
 | [fusion-results](fusion-results/README.md) | Projects captured Fusion status and exact-run Board evidence into named outputs for downstream packages. | Owns its projection worker; Fusion compute, credentials and durable delivery stay in the existing host. |
 | [fusion-report](fusion-report/README.md) | Produces readable reports from Fusion outputs, preserving failures, incomplete input and exact evidence lineage. | Owns its report worker; publication and Keeper delivery remain host operations. |
 
@@ -33,7 +34,7 @@ The package's `lane.toml` declares its image, command, contributions, resource
 envelope and optional `world` connections. A separate workspace declaration
 selects the package with `id`, `run_id`, `manifest_path` and `[binding]`.
 
-Prepare the image in CI and load it into the Docker engine used by MASC. Place the
+Prepare the image in CI and load it into the container engine used by MASC (`[lane_addons] runtime = "docker" | "container"` in `server.toml`, defaulting to `"docker"`). Place the
 package where MASC can read its manifest and bundled Skills, then save the
 workspace declaration under `<resolved-config-root>/lane-addons/`. Resolve
 `manifest_path` relative to that declaration's location. Existing reconciliation

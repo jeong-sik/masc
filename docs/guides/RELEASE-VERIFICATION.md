@@ -6,9 +6,9 @@ requires every gate in [Production readiness](../PRODUCTION-READINESS-GATES.md),
 including quantitative Keeper fleet, performance SLO and Agent Core boundary
 evidence. Missing production data remains blocked or not evaluated. The artifact
 gate is not automatically every test in the repository.
-This document defines the target split; it does not change the current root
-`@runtest` RC or retroactively excuse its failures. Implement the split in a
-separate reviewed change for the next release.
+This document defines the split integrated into `release-candidate.yml` and
+`config/release-behavior.json` (`release-behavior.yml`), while full root
+`@runtest` (`test.yml`) runs as a separate regression lane.
 
 ## Required on every candidate
 
@@ -73,9 +73,11 @@ Full compilation/type checks, four-platform installation and the complete
 declared essential behavior profile run against the same candidate SHA. A
 reviewed versioned profile must record its exact suites and identity in the
 candidate receipt; it cannot be reduced after a failure to manufacture a pass.
-Full repository regression remains a separate manual validation lane when the
-selected-profile architecture is implemented. The current workflow still runs
-root `@runtest`; this document does not assert that #41156 is integrated.
+Full repository regression (`test.yml` root `@runtest`) remains a separate
+manual/scheduled validation lane recorded in the candidate ledger (`run id`,
+`head`, `TARGET_SUITES`, or `미실행` if not run on that candidate), while
+`release-candidate.yml` enforces the explicit essential behavior selection in
+`config/release-behavior.json` (`release-behavior.yml`).
 Diagnostic focused
 passes do not replace this complete selected release gate. Review missing
 coverage and test removals independently; do not reclassify a failing test after

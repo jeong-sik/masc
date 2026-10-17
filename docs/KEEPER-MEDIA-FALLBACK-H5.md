@@ -54,19 +54,16 @@ messages are projected with the same rule at attempt time, which is how a later
 turn on a text-only runtime still answers from the reading.
 
 ### 4. Readers (existing contracts only)
-- Audio: `Voice_bridge.transcribe_audio ~audio_file ?language_code ()` returns
-  `(Yojson.Safe.t, string) result` through the configured STT endpoint chain.
-  It needs a file path, so the decoded bytes go to a temporary file inside the
-  keeper sandbox that is removed after the call. When voice/STT is not
-  configured it returns `Error "no enabled STT endpoints configured"`; that
+- Audio: `Voice_bridge.transcribe_audio ?deadline ~audio_file ?language_code ()`
+  returns `(Yojson.Safe.t, string) result` through the configured STT endpoint
+  chain. It needs a file path, so the decoded bytes go to a temporary file
+  inside the keeper sandbox that is removed after the call. When voice/STT is
+  not configured it returns `Error "no enabled STT endpoints configured"`; that
   becomes `unavailable`, never an invented transcript.
-- Document: the only extraction code found is `Verification_pdf_inspection`
-  (Poppler, PDF only, owned by the verification/review path and bounded by that
-  path's review slots). It is not wired for the keeper turn path. First step
-  reuses its text extraction for `application/pdf` only if its budget and
-  slot behavior are safe off the review path; if not, the document reader is
-  reported as an explicit gap and S2 stays `not_measured` rather than adding a
-  second extractor here. Non-PDF documents are `unavailable: no_reader`.
+- Document: `Verification_pdf_inspection.extract_text ~deadline ~budget_sec ~base_path ~bytes ()`
+  extracts per-page text for `application/pdf` using Poppler (`pdftotext`)
+  under a private directory and scrubbed environment without holding a review
+  slot or rendering PNGs. Non-PDF documents are `unavailable: no_document_reader`.
 
 ### 5. Failure behavior (H5-S3)
 Any reader error, timeout, missing dependency, empty output or oversize payload
@@ -93,25 +90,20 @@ red/green result is deterministic and does not depend on an STT service.
 A real-endpoint run, if an STT endpoint is available in the lane, is recorded
 separately and never substituted for the fixtures.
 
-## Implementation notes (first wiring)
-- `Keeper_media_reading` (new) owns identity, store and projection;
-  `Keeper_turn_driver.project_input_for_attempt` calls it for the goal, the
-  pre-turn history and the resumed checkpoint before the generic strip, and
-  gains an optional `?project_media` seam for tests. The manifest row keeps the
-  `media_degraded_to_text` action and adds `media_projected_*` fields.
-- Audio uses the configured STT chain; **no document reader is wired**, so a
-  document is projected as `unavailable: no_document_reader`. H5-S2 therefore
-  only proves the projection and reuse with an injected reader. It does not
-  prove a real PDF extraction. That stays `not_measured` until a reader is
-  chosen (open question: reuse the Poppler path from
-  `Verification_pdf_inspection` after checking its slot/budget behavior off the
-  review path).
+## Implementation summary
+- `Keeper_media_reading` owns identity, store (`.masc/media-readings/`) and
+  projection; `Keeper_turn_driver.project_input_for_attempt` calls it for the
+  goal, the pre-turn history and the resumed checkpoint before the generic
+  strip, and exposes an optional `?project_media` seam for tests. The manifest
+  row keeps the `media_degraded_to_text` action and adds `media_projected_*`
+  fields.
+- Audio uses the configured STT chain (`Voice_bridge.transcribe_audio ?deadline`);
+  PDF documents use `Verification_pdf_inspection.extract_text ~deadline ~budget_sec`.
+  Both share the single projection `Monotonic_deadline.t` built from
+  `Keeper_runtime_resolved.provider_call_deadline_sec ()`.
 - A reading is stored without a byte cap, following the rule against numeric
-  size caps. A very long transcript therefore reaches the fallback input
-  unabridged; if that proves a problem it belongs to the token-budget
-  mechanism, not to a number here.
-- Reuse is keyed by payload sha256, media type and reader version; the first
-  version is `1`.
+  size caps.
+- Reuse is keyed by payload sha256, media type and reader version (`1`).
 
 ## Document reader: what `Verification_pdf_inspection` is, and a minimal share
 Read at main 5d0f1558 (lib/verification_pdf_inspection.ml, lib/pdf_runtime_dependencies.ml,

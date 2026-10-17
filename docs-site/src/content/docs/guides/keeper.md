@@ -16,7 +16,7 @@ Key attributes:
 
 ## Task Lifecycle
 
-Tasks move through a clear 5-stage lifecycle:
+Tasks move through a clear 6-state lifecycle (`Todo`, `Claimed`, `InProgress`, `AwaitingVerification`, `Done`, `Cancelled`). An assigned Keeper can also cancel its own Task directly with a reason (including from `AwaitingVerification`), without requiring verifier approval:
 
 ```mermaid
 stateDiagram-v2
@@ -26,7 +26,9 @@ stateDiagram-v2
     InProgress --> AwaitingVerification: Submit with Evidence
     AwaitingVerification --> InProgress: Verification Failed (Retry)
     AwaitingVerification --> Done: Verifier Confirmed
-    InProgress --> Cancelled: Operator Cancelled
+    Claimed --> Cancelled: Assigned Keeper or Operator Cancelled (with reason)
+    InProgress --> Cancelled: Assigned Keeper or Operator Cancelled (with reason)
+    AwaitingVerification --> Cancelled: Assigned Keeper or Operator Cancelled (with reason)
     Done --> [*]
 ```
 
@@ -40,10 +42,10 @@ writes this for you; the fields are documented in the
 
 ```toml
 [keeper]
-autoboot_enabled = true
-proactive_enabled = true
-sandbox_profile = "docker"   # "docker" | "microvm" | "remote_ssh" (host is refused)
-network_mode = "inherit"     # "none" | "inherit" | "policy"
+activation_mode = "autonomous"  # "manual" | "reactive" | "scheduled" | "autonomous"
+sandbox_profile = "docker"      # "docker" | "microvm" | "remote_ssh" (no "local" or host profile)
+sandbox_image = "base"          # "base" | "ocaml" (promoted in sandbox-image-builds.toml)
+network_mode = "inherit"        # "none" | "inherit" | "policy"
 instructions = """
 You are the review Keeper. Inspect the current change and report concrete
 evidence with file paths and commands.
@@ -53,7 +55,7 @@ evidence with file paths and commands.
 native = "read"              # "none" | "read" | "full"
 ```
 
-Which model a Keeper's turns use comes from `runtime.toml` — `[runtime].default`,
+Valid `sandbox_profile` values are `"docker"`, `"microvm"`, or `"remote_ssh"` (there is no `"local"` or host profile). Which model a Keeper's turns use comes from `runtime.toml` — `[runtime].default`,
 or a lane the Keeper's work maps to. See the
 [Configuration Reference](/reference/config/#runtimetoml) for how model bindings
 and lanes are declared.

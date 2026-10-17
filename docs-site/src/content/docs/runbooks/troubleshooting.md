@@ -19,11 +19,17 @@ See the [Quickstart](/getting-started/quickstart/) PATH step for details.
 
 ## The server exits at startup instead of staying in the foreground
 
-The server prints why before it exits — read the last lines it wrote. A common
-cause is a `runtime.toml` whose `[runtime].default` points at a `<provider>.<model>`
-pair that is not fully defined (missing binding, or a dispatch limit the binding
-does not declare). Fix the pair in `<base-path>/.masc/config/runtime.toml`, or
-re-run the installer's wizard to pick a source that is ready. The
+The server prints why before it exits — read the last lines it wrote. Common
+causes include:
+
+- A `runtime.toml` whose `[runtime].default` points at a `<provider>.<model>`
+  pair that is not fully defined (missing binding, or a dispatch limit the binding
+  does not declare).
+- `credential_undeclared`: a keyed HTTP provider in `runtime.toml` is missing its
+  required `[providers.<id>.credentials]` block (`type = "env"`, `key = "<ENV_VAR>"`).
+
+Fix the declaration in `<base-path>/.masc/config/runtime.toml`, or re-run
+`masc setup` to pick a source that is ready. The
 [Configuration Reference](/reference/config/) shows the required shape.
 
 ## Port 8935 is already in use
@@ -53,10 +59,13 @@ the same base path you started the server with: `masc-tui --base-path ~/masc`.
 ## A Keeper will not start
 
 A Keeper needs a command sandbox; MASC refuses to run one without an accepted
-`sandbox_profile`. Install Docker, or on Apple Silicon the `container` CLI, then
-set the profile — see [Keeper Sandbox](/runbooks/sandbox/). A Keeper whose work is
-web search or `git push` also needs `network_mode = "inherit"`; the default,
-`none`, gives the guest no network.
+`sandbox_profile` (`"docker"`, `"microvm"`, or `"remote_ssh"`). Install Docker, or
+on Apple Silicon the `container` CLI, then set the profile — see
+[Keeper Sandbox](/runbooks/sandbox/). Also check:
+
+- **`sandbox_image` not promoted for the target store**: `<base-path>/.masc/config/sandbox-image-builds.toml` must have a promoted tag for the Keeper's `sandbox_image` (`"base"` or `"ocaml"`) in the active runtime's image store (Docker and each microVM runtime keep separate stores). Run `masc sandbox-image` (with `--runtime <backend>` for microVM) and `masc sandbox-image promote` as shown in the refusal message.
+- **Invalid `microvm_dns` address**: if `[sandbox] microvm_dns` in `runtime.toml` (or `MASC_KEEPER_MICROVM_DNS`) contains a non-IP token instead of IPv4/IPv6 literals, microVM startup is refused.
+- **Guest network mode**: a Keeper whose work is web search or `git push` needs `network_mode = "inherit"`; the default, `none`, gives the guest no network.
 
 ## Provider rate limits
 
@@ -76,8 +85,9 @@ Eio main domain event loop may be experiencing scheduler delays:
    ```
    Check `.scheduler.lag.stalls` (count of stalls >= 1s) and the `.scheduler.lag`
    percentiles (`p50_ms`, `p95_ms`, `p99_ms`, `max_ms`, `mean_ms`,
-   `over_50ms_count`, `over_200ms_count`). These are the last minute's ring
-   measurements; elevated values mean the main domain could not run a ready
+   `over_50ms_count`, `over_200ms_count`), alongside resident memory (`rss_bytes`),
+   its measurement source, and process `pid`. These lag fields are the last minute's
+   ring measurements; elevated values mean the main domain could not run a ready
    fiber on time (a fiber computing without yielding, a stop-the-world GC
    section, a blocking call on the scheduler thread).
 

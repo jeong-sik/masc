@@ -15,17 +15,16 @@ background task lifecycle are not part of the callable surface.
 ## Related Documents
 
 - [`ENV-CONTRACT.md`](./ENV-CONTRACT.md) §4 — authoritative flag matrix
-- `planning/graceful-panda/Legendary-Execute-plan.md` — historical source plan
 
 ## Scope
 
 - Covers: `Execute`, typed semantic exit, output truncation, Shell IR command
-  gating, verification contract markers, and shell-gate counters.
+  gating, and verification contract markers.
 - `Grep` owns file/content search. Execute owns typed command execution.
 - Does not cover: the runtime verifier itself or the approval layer for MCP
   tools.
 - Async boundary: the typed `Execute` callable surface is synchronous. There is
-  no background shell lifecycle surface anywhere below it.
+  no background shell lifecycle surface inside `Execute`.
 
 ## Current Rollout State
 
@@ -94,7 +93,7 @@ When a pipeline falls back to decomposed stage execution, stage stderr is
 streamed as each stage runs and only the final stage's stdout is surfaced as
 user output; intermediate stdout remains stdin for the next stage.
 
-Verification:
+Verification (human contributors / Keeper lanes with a local toolchain):
 
 ```bash
 scripts/dune-local.sh build lib/exec/test/test_exec_dispatch_pipeline_streaming.exe
@@ -105,25 +104,25 @@ scripts/dune-local.sh build lib/exec/test/test_exec_dispatch_docker_streaming.ex
 ./_build/default/lib/exec/test/test_exec_dispatch_docker_streaming.exe
 ```
 
-## Async Boundary Proof
+## Async Surfaces Outside `Execute`
 
 `Execute` remains synchronous at the callable-surface level. The public schema
 rejects legacy background flags and accepts only typed command fields:
 `argv`, `command`, `shell`, `cwd`, `timeout_sec`, and `intent`. It does not expose
 `job_id`, `request_id`, `poll`, or `cancel` fields.
 
-Keeper-turn async messaging is a separate surface (`keeper_msg`,
-`keeper_msg_result`, `keeper_msg_cancel`, `keeper_msg_list`) and is serialized
-through `Keeper_turn_admission`.
+Asynchronous execution is provided by separate typed tool families:
+- **Keeper turn messaging**: `keeper_msg`, `keeper_msg_result`, `keeper_msg_cancel`, `keeper_msg_list` (serialized through `Keeper_turn_admission`).
+- **Isolated Docker jobs**: `keeper_job_start`, `keeper_job_status`, `keeper_job_result`, `keeper_job_cancel` (each job runs in an isolated container and delivers a wakeup on completion).
+- **Multi-Keeper compositions**: `keeper_composition_prepare`, `keeper_composition_run`, `keeper_composition_status`, `keeper_composition_result`, `keeper_composition_cancel`.
 
-For explicitly requested targeted verification, the surviving
-`test_tool_input_validation` suite exercises Execute's accepted fields and
-rejects background and async lifecycle fields. The Test workflow is reusable
-(`workflow_call`), so it cannot be dispatched directly. The MASC leader first
-prepares an approved candidate and its selection receipt using the
+For explicitly requested targeted verification, the `test_tool_input_validation`
+suite exercises `Execute`'s accepted fields and rejects background and async
+lifecycle fields. The MASC leader prepares an approved candidate and its
+selection receipt using the
 [selection procedure](../scripts/review/APPROVED-CI-SELECTION.md). With
 `candidate_sha` set to that exact candidate and `selection.json` containing its
-receipt, request the explicit suite through the dispatchable caller on main:
+receipt, request the explicit suite through `leader-ci.yml` on `main`:
 
 ```bash
 gh workflow run leader-ci.yml --repo jeong-sik/masc --ref main \
@@ -134,14 +133,3 @@ gh workflow run leader-ci.yml --repo jeong-sik/masc --ref main \
 A dispatch is a request, not a passing result. Retain the completed run URL,
 exact candidate SHA and selected PR scope. A candidate result does not certify
 a different head or authorize a merge.
-
-## Counter Endpoint
-
-```text
-GET /api/v1/legendary_bash/counters
-```
-
-The payload contains only live observer families:
-
-- `credential_exit_*` / `credential_signaled_*` / `credential_stopped_*`
-- `shell_gate_*`

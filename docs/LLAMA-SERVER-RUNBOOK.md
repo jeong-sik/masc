@@ -52,7 +52,7 @@ llama-server의 프리픽스 캐시는 요청 토큰열이 슬롯의 기존 열�
 
 ## 3. MASC 등록
 
-### 3.1 `<MASC_BASE_PATH>/config/runtime.toml`
+### 3.1 `<MASC_BASE_PATH>/.masc/config/runtime.toml`
 
 ```toml
 [providers.llama_cpp]
@@ -85,18 +85,18 @@ return-progress = true
 
 `[models.<model-row-id>.capabilities]` 블록은 빼면 안 된다. AGENT_CORE 내장 카탈로그에
 없는 모델은 이 블록이 있어야만 능력이 정해지고, 없으면 서버가 부팅을 거부한다
-(`runtime_adapter.ml:478`이 블록이 없을 때 `None`을 돌려주고, `runtime.ml:1068`이 그걸
+(`lib/runtime/runtime_adapter.ml`이 블록이 없을 때 `None`을 돌려주고, `lib/runtime/runtime.ml`이 그걸
 "카탈로그에 없는 모델"로 판정한다).
 
 **적지 않은 불리언은 꺼진 것으로 읽힌다.** 기준선이
 `Capabilities.default_capabilities`라서, 모델이 지원하는 것은 전부 적어야 한다
-(`runtime_toml.ml:825`의 기본값이 `false`, `emits-usage-tokens`만 `true`).
+(`lib/runtime/runtime_toml.ml`의 기본값이 `false`, `emits-usage-tokens`만 `true`).
 `max-context`·`tools-support`·`thinking-support`·`streaming`은 `[models.<model-row-id>]`
 쪽에서 읽어가므로 capabilities 블록에 다시 적지 않는다.
 
 `preserve-thinking = true`는 예외다. "이전 턴 reasoning을 다시 넣어라"까지만 말하고,
 **어떤 형식으로 넣을지는 runtime.toml에 적을 키가 없다.** 카탈로그 행이 없으면 그 형식이
-`No_preserve_thinking_control`로 떨어진다(`capabilities.ml:256`). 2절 표의
+`No_preserve_thinking_control`로 떨어진다(`capabilities.ml`). 2절 표의
 preserve + append-only(26 tok / 0.7s)를 실제로 받으려면 이 모델이 AGENT_CORE 내장
 카탈로그에 행을 가져야 한다. 행 없이 켜 두면 플래그만 켜진 상태가 된다.
 
@@ -109,7 +109,7 @@ runtime.toml은 dashboard API로 핫 반영할 수 있다:
 ```sh
 # 검증만 (저장 안 함)
 curl -s -X POST localhost:8935/api/v1/runtime/config/raw/preview \
-  -H "Authorization: Bearer $(cat <MASC_BASE_PATH>/auth/dashboard.token)" \
+  -H "Authorization: Bearer $(cat <MASC_BASE_PATH>/.masc/auth/dashboard.token)" \
   --data-binary @runtime.toml
 # 저장 + 핫 리로드
 curl -s -X POST localhost:8935/api/v1/runtime/config/raw ...

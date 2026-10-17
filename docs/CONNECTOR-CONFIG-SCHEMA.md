@@ -215,54 +215,24 @@ Telegram-specific setup:
 2. Optional `/setprivacy` → disable to let bot see group messages (or mention-only).
 3. Get user IDs via `@userinfobot` for `admin_user_ids`.
 
-## Dashboard UI contract (target for Phase 7 follow-ups)
+## Dashboard UI and Backend Endpoints
 
-For each connector the dashboard should render:
+For each connector the dashboard renders:
 
-1. **Status header** (already exists): `healthy | degraded | failing`,
-   heartbeat age, bot identity.
-2. **Lifecycle bar** (C4): `Start` · `Stop` · `Restart` · `Tail logs` — hits a
-   new `/api/v1/sidecar/<name>/{start,stop,status,logs}` endpoint.
-3. **Config form** (C5+): generated from the Pydantic JSON schema
-   (`BotConfig.model_json_schema()`) — one endpoint per sidecar exposes the
-   schema, so the form never drifts from the Python definition.
-   - Secret fields (`*_token`, `gate_api_token`) render as masked with a
-     "reveal once" button. Write-only — GET returns `"<redacted:len=72>"`.
-   - Enums (`reply_mode`) render as radio / segmented control.
-   - CSV fields (`admin_user_ids`) render as a tag input with int validation.
-   - JSON fields (`discord_keeper_map`) render as a key/value grid.
-4. **Setup wizard** (C6): per-connector click-through for the platform steps
-   that can't be automated (Discord token / Slack Socket Mode / Telegram
-   BotFather / iMessage Full Disk Access).
-5. **Validation**: form submit POSTs TOML to backend; backend calls
-   `BotConfig(**payload)` to re-run Pydantic validators, returns per-field
-   errors on failure.
-
-## Known gaps and progress
-
-- ~~`sidecars/{imessage,telegram}-bot/src/config.py` reference `Path` and
-  `os` inside `_runtime_toml_path()` without importing them — `BotConfig()`
-  hits `NameError` the moment `TomlConfigSettingsSource` is wired.~~ **Fixed**
-  in `fix/sidecar-config-imports` (regression test per sidecar).
-- ~~imessage/telegram have no first-class start/tail/status entry point.~~
-  **Fixed** in `feature/sidecar-run-sh`: both sidecars expose
-  `./run.sh [start|stop|tail|status]` with a `.env.example` and
-  per-bridge token guidance.
-- ~~Dashboard's lifecycle hint forks discord-only `./run.sh` from
-  `python -m src` for the others.~~ **Fixed** in
-  `feature/dash-connectors-toplevel`: `sidecarCommands()` is now a single
-  `./run.sh <verb>` table; stop routes through `./run.sh stop` (no more
-  hand-rolled pkill).
-- **Open**: no backend endpoint to start/stop a sidecar — the dashboard
-  shows shell snippets to copy. Native Start/Stop/Restart buttons need a
-  `/api/v1/sidecar/<id>/{start,stop,status,logs}` endpoint that shells out
-  to the wrapper (Eio.Process based).
-- **Open**: no per-connector config-TOML write endpoint. Form submit needs
-  `/api/v1/sidecar/<id>/config` POST that writes
-  `${MASC_BASE_PATH}/.gate/runtime/<id>/config.toml` with mode 0600.
-- **Open**: no JSON-schema export endpoint for Pydantic models. Each sidecar
-  could expose `BotConfig.model_json_schema()` once and the dashboard
-  generates a form from that — single source of truth, zero drift.
+1. **Status header**: `healthy | degraded | failing`, heartbeat age, bot identity.
+2. **Lifecycle bar**: `Start` · `Stop` · `Restart` · `Tail logs` via
+   `POST /api/v1/sidecar/start?name=<id>`, `POST /api/v1/sidecar/stop?name=<id>`,
+   `GET /api/v1/sidecar/status?name=<id>`, and `GET /api/v1/sidecar/logs?name=<id>`.
+3. **Config form**: generated from the Pydantic JSON schema exposed by
+   `GET /api/v1/sidecar/schema?name=<id>` (`BotConfig.model_json_schema()`).
+   - Secret fields (`*_token`, `gate_api_token`) render masked.
+   - Enums (`reply_mode`) render as segmented controls.
+   - CSV fields (`admin_user_ids`) render as a tag input with integer validation.
+4. **Setup guide**: per-connector instructions for platform steps (Discord token,
+   Slack Socket Mode, Telegram BotFather, iMessage Full Disk Access).
+5. **Config persistence**: `GET /api/v1/sidecar/config?name=<id>` reads and
+   `POST` / `PUT /api/v1/sidecar/config?name=<id>` writes
+   `${MASC_BASE_PATH}/.gate/runtime/<id>/config.toml`.
 
 ## References
 

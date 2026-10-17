@@ -17,7 +17,7 @@ policy controls new execution. Keeper retirement conditionally releases the
 named holder without executing a game move.
 
 The Dockerfile expects a Linux `masc-dos-addon-worker` executable at the root of
-its build context, produced from `bin/masc_dos_addon_worker.exe`. The image uses
+its build context, produced from `bin/masc_dos_addon_worker_main.exe`. The image uses
 `/state` as its persistent workspace and `/addon` as its read-only package.
 See [state and media provisioning](../../docs/guides/machine-addon-state.md) for
 programs, guest saves, checkpoints, pad layouts and replacement behavior.

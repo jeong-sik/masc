@@ -13,7 +13,10 @@ side derives memory from a model-authored state envelope.
 | Store | Owner | Purpose |
 |---|---|---|
 | agent core checkpoint/context | agent core | active transcript and restartable agent context |
-| Memory OS current snapshot | MASC | supported current claims from librarian updates and explicit writes, minus exact retractions |
+| Memory OS current snapshot | MASC | supported current claims from librarian updates and admitted writes, minus exact retractions |
+| Memory OS admission queue & WAL | MASC | durable pending candidates from explicit `keeper_memory_write` operations awaiting Librarian consolidation |
+| Shared Wiki (`.masc/wiki/`) | MASC | workspace-wide Markdown pages, revision log, and structural lint surface |
+| Workspace Memory Ledger & Briefing (`.masc/workspace-memory/`) | MASC | shared cross-Keeper memory ledger (`ledger.json`) and curator briefing (`briefing.json`) |
 | Tool/history logs | MASC | observable evidence and recall source |
 
 Memory OS snapshot path:
@@ -22,7 +25,9 @@ Memory OS snapshot path:
 default is `<base-path>/.masc/config/keepers`, and a configured `MASC_CONFIG_DIR`
 changes the config root.
 A missing snapshot means fresh empty state. Memory OS does not import, migrate,
-or fall back to alternate store layouts.
+or fall back to alternate store layouts. All durable snapshot, WAL, and sidecar
+replacements enforce strict file + parent-directory `fsync` and publication
+recovery before reporting commit success.
 
 ## Context delivery evidence
 
@@ -51,7 +56,13 @@ does not change layer relevance or independently omit individual world layers.
 ## Write Contract
 
 A memory claim must come from an explicit memory operation or the librarian
-lane's typed result. A fact stores its exact claim text, typed category,
+lane's typed result. When the Librarian lane is enabled (the default), explicit
+`keeper_memory_write` calls do not mutate `memory-current.json` directly: they
+append a durable observed candidate to the Librarian admission queue so the
+Librarian can deduplicate, absorb, or supersede against current memory before
+recall. Direct immediate writes to `memory-current.json` occur only when the
+Librarian lane is explicitly disabled or via a superseding/retracting
+maintenance boundary. A fact stores its exact claim text, typed category,
 `first_seen` and `last_seen` timestamps, writer origin, and observed or derived
 basis (`Keeper_memory_os_types.fact`). Its `memory_id` is the SHA-256 digest of the exact claim
 bytes and is used for exact write receipts, derivation premises, duplicate
@@ -272,6 +283,39 @@ provenance clearly separated. Multiple observations do not duplicate the same
 current target in a result. Model failure, uncertain scope or changed evidence
 leave additional retrieval explicitly unresolved while preserving direct matches;
 they must not turn into an authoritative no-match answer.
+
+## Shared Wiki System
+
+MASC provides a workspace-shared Wiki under `<base-path>/.masc/wiki/` (`lib/tool_wiki.ml`, `lib/wiki_page.ml`, and `lib/wiki_lint.ml`,
+exposed through `masc_wiki_*` and `keeper_wiki_*` tools and `masc://wiki/*`
+MCP resources). Pages are Markdown documents with structured frontmatter, slugs,
+and revision history (`log.jsonl`).
+
+- **Search**: `masc_wiki_search` / `keeper_wiki_search` support multi-word
+  queries and enforce word-boundary matching on short tokens (`<= 2` ASCII
+  characters) to prevent noisy substring hits.
+- **Resource tail**: `masc://wiki/log` returns a bounded 64 KiB UTF-8-safe tail
+  of `log.jsonl` when the revision log exceeds 64 KiB.
+- **Structural lint (`masc_wiki_lint`)**: inspects the wiki graph and revision
+  log for 9 finding kinds (`broken_link`, `orphan_page`, `missing_summary`,
+  `stale_source`, `unlinked_mention`, `empty_section`, `duplicate_title`,
+  `unindexed_page`, `revision_log_hole`) and reports `revision_log_hole_suppressed`
+  when known historical log gaps are explicitly suppressed.
+
+## Workspace Memory Ledger and Curator Briefing
+
+Beyond per-Keeper Memory OS snapshots, MASC maintains a workspace-level memory
+ledger and curator briefing under `<base-path>/.masc/workspace-memory/`:
+
+- `ledger.json`: durable workspace memory claims and cross-Keeper provenance
+  managed through `lib/workspace_memory/`.
+- `briefing.json`: structured workspace briefing synthesized by the
+  `workspace_curator_exact` lane from current workspace memory, active tasks/goals,
+  and recent collaboration state.
+
+Both files use atomic temp-file write + file/parent `fsync` and strict schema
+decoding; malformed or missing curator state is reported explicitly rather than
+silently fabricating an empty briefing.
 
 ## See also
 

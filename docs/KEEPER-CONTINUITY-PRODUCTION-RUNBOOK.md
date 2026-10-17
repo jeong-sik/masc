@@ -72,7 +72,10 @@ The files are not touched. Two ways forward:
 2. Start with `--accept-store-quarantine`. Each refused file moves to
    `<path>.rejected-<timestamp>` (kept as bytes), the snapshot's journal gets
    a `quarantined` line, and the keeper starts with an empty store. The flag is
-   for one start; do not put it in a launcher.
+   for one start; do not put it in a launcher. Note: if a store is left in an
+   unrecoverable publication state, `--accept-store-quarantine` is also refused;
+   repair the store and re-verify with `validate-stores --base-path <base>`
+   before starting.
 
 `scripts/deploy.sh` never reaches this refusal: its `validate-stores` preflight
 stops the deploy on the same files before the executable starts. A refusal

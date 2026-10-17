@@ -40,6 +40,8 @@ reference is [`?`](guides/TUI-KEYS.md); `/help` lists the slash commands.
 
 ## Quick Start
 
+For human contributors building from source (external coding-agent sessions must not run local `dune` commands per `docs/constitution.xml`):
+
 ```bash
 dune build --root . bin/masc_tui.exe
 ./_build/default/bin/masc_tui.exe --base-path ~/me
@@ -706,8 +708,9 @@ What YOLO covers is narrower than the name. It skips the approval hook that
 asks over the open chat stream, and nothing else. External effects that go to
 the Gate — writing to a service the Keeper is attached to, a sandbox command,
 a durable memory write — are still decided by the workspace Gate mode and that
-Keeper's own override, whatever this toggle says. It is in memory too: a
-restart puts every Keeper back on `auto`.
+Keeper's own override, whatever this toggle says. The per-Keeper `yolo` / `auto`
+setting is persisted under `.masc/gate/` across server restarts (or seeded from
+`[keeper_runtime] keeper_tool_approval_mode` in `runtime.toml`).
 
 ### Lanes
 
@@ -2203,9 +2206,9 @@ you to Runtime's resolved value. Typed parse errors remain visible instead of
 inventing values for unsupported settings. Params come from the typed live
 registry, and `Enter` edits one value while `x` restores its registered default.
 
-Prompt overrides open as a reduced operator catalog: the six complete prompts
+Prompt overrides open as a reduced operator catalog: the complete prompts
 for Keeper, Librarian, verification, and judges are visible by default. The
-other fourteen files are still live, editable assembly fragments; `a` toggles
+assembly fragments in `config/prompts/` remain live, editable fragments; `a` toggles
 them into the list without presenting headings and row snippets as complete
 prompts. The list uses Korean category and purpose labels, while exact keys and
 template-variable names remain unchanged. The detail pane renders the effective
@@ -2298,7 +2301,6 @@ Per surface:
 | `H` | Code, file open | The commits that touched the file, newest first |
 | `d` | Code, file open | The working tree's diff against HEAD |
 | `m` | Code, file open, repository scope | The notes anchored to the file |
-| `w` | Code, notes view | Add a note through the `$EDITOR` form |
 | `K` / `D` | Code, file open | Ask the language server: hover / definition of a name on the cursor line |
 | `o` | Keeper detail | Open logs (container logs on the Sandbox tab) |
 | `h` / `l` | Keeper detail, split width | Focus roster / detail; below the split width `l` opens logs |
@@ -2314,6 +2316,8 @@ Per surface:
 | `a` | Keeper list or detail | Create a keeper in `$EDITOR`. Malformed or refused declarations remain available for another `a` in this session. A confirmed response opens that Keeper's composer; writing and sending the first request is a separate action |
 | Left / `Esc` | any structural detail or logs view | Back one level; Left never interrupts chat |
 | `Enter` | Message | Send |
+| `Ctrl-S` | Message | Toggle chat detail view (including live turn-preparation scopes and saved preparation reports bound to the selected execution) |
+| `…?` | Message footer | Toggle the chat footer key legend (hidden by default) |
 | `Ctrl-G` | Message | Switch to the next Keeper while no turn is in flight |
 | `Ctrl-U` | Message | Clear the input line |
 | `Backspace` | Message | Delete the last UTF-8 scalar without splitting its byte encoding |

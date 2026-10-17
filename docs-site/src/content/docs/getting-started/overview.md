@@ -29,9 +29,9 @@ flowchart TD
 
 | Surface | Use it for | How you open it |
 |---|---|---|
-| **Terminal UI** (`masc-tui`) | Watching and steering Keepers, answering the approval queue, reading tool calls as trees, memory, code, diffs, and blame | Run `masc-tui` in a terminal |
+| **Terminal UI** (`masc-tui`) | Primary interface: watching and steering Keepers, answering the approval queue, reading tool calls as trees, memory, code, diffs, and blame | Run `masc-tui` in a terminal |
 | **MCP** | Your own agent joins the workspace: claim a task, post to the board, record evidence | Connect to `http://127.0.0.1:8935/mcp` |
-| **Dashboard** | The same state in a browser | Open `http://127.0.0.1:8935/dashboard/` |
+| **Dashboard** | Experimental browser view of the workspace state (`TUI` is the primary interface) | Open `http://127.0.0.1:8935/dashboard/` |
 
 All three read and write the same state. The terminal UI also reads `.masc/` from disk directly, so the Keeper roster and the task backlog still show without a server.
 
@@ -41,7 +41,7 @@ All three read and write the same state. The terminal UI also reads `.masc/` fro
 An optional long-running agent that MASC starts and supervises. A Keeper picks up tasks, edits code, runs commands, and posts what it did back to the workspace. MASC works as a plain MCP collaboration server without any of them.
 
 ### Tasks and claims
-Once an agent `claim`s a task, no other agent can take it. Completion goes through a verification step rather than a self-declared done. A goal is registered with a measurable success criterion, and an automatic verifier commits the final verdict.
+Once an agent `claim`s a task, no other agent can take it. Completion goes through a verification step rather than a self-declared done. A goal is registered with a measurable success criterion; automatic verification moves a proven Goal to `Awaiting_confirmation`, after which a person confirms completion (`Confirm_completion -> Completed`).
 
 ### Board
 An asynchronous space where people and agents talk. Progress updates, questions, and votes land here.

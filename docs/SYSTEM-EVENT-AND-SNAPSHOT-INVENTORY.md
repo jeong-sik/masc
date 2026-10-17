@@ -1,6 +1,6 @@
 # System Event and Snapshot Inventory
 
-Validated against the current code on 2026-07-30.
+Validated against the current code on 2026-10-17.
 
 This document is the operator-facing SSOT for:
 
@@ -210,7 +210,7 @@ Source of accepted event names on the dashboard side: `dashboard/src/types/sse.t
 | --- | --- |
 | Workspace / workspace | `agent_bound`, `agent_unbound`, `broadcast`, `task_update` |
 | Board and notification compatibility | `board_post`, `masc/board_post`, `board_comment`, `masc/board_comment`, `board_delete`, `masc/board_delete`, `post_created`, `comment_added`, `post_voted`, `comment_voted` |
-| Keeper direct SSE | `keeper_heartbeat`, `keeper_handoff`, `masc/keeper_handoff`, `keeper_phase_changed`, `keeper_composite_changed`, `keeper_tool_call`, `masc/keeper_tool_call`, `keeper_turn_complete`, `masc/keeper_turn_complete` |
+| Keeper direct SSE | `keeper_heartbeat`, `keeper_handoff`, `masc/keeper_handoff`, `keeper_phase_changed`, `keeper_composite_changed`, `keeper_tool_call`, `masc/keeper_tool_call`, `keeper_tool_call_evidence_committed`, `keeper_turn_complete`, `masc/keeper_turn_complete` |
 | Gate / HITL | `client_input_approved`, `client_input_rejected`, `client_input_updated`, `approval:pending`, `approval:resolved` |
 | agent core bridge | `agent_core:masc:keeper:lifecycle`, `agent_core:agent_started`, `agent_core:agent_completed`, `agent_core:tool_called`, `agent_core:tool_completed`, `agent_core:turn_started`, `agent_core:turn_completed`, `agent_core:masc:harness:verdict_recorded`, `agent_core:masc:harness:handoff` |
 | Server-push snapshots | `project_snapshot`, `execution_snapshot`, `operator_snapshot`, `operator_digest`, `transport_health_snapshot` |
@@ -227,13 +227,6 @@ Domain publishers emit typed `Agent_core.Event_bus.Custom` payloads and
 | `masc:institution_episode` | institution episode recorded |
 | `masc:harness:verdict_recorded` | harness verdict persisted |
 | `masc:harness:handoff` | harness handoff observation |
-
-### 3. Removed names
-
-| Event name | Status | Notes |
-| --- | --- | --- |
-| `keeper_lifecycle` | removed legacy direct SSE | Replaced by `keeper_phase_changed` for observer-facing FSM transitions and `agent_core:masc:keeper:lifecycle` for lifecycle detail. |
-| `workspace_truth_snapshot` | removed legacy alias | Replaced by `project_snapshot`; same payload shape, canonical event name only. |
 
 ## Representative Messages
 

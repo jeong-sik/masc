@@ -64,12 +64,11 @@ producer fiber ─── Stream.add ──▶  [bounded mailbox]
    `Atomic.fetch_and_add` / `Atomic.compare_and_set` instead. See
    `lib/metrics_store_eio.ml:72-75`.
 3. **`Eio.Mutex` across domains** — Eio.Mutex is fiber-scoped within
-   a single domain. Cross-domain locking needs `Stdlib.Mutex` or a
-   different approach. See `memory/feedback_eio-mutex-vs-stdlib.md`.
+   a single domain. Cross-domain locking needs `Stdlib.Mutex` or
+   `Cross_context_mutex`.
 4. **`Eio.traceln` inside the critical section** — the fiber yields
    inside `Eio.traceln`, which lengthens the lock window. Capture
-   locals first, release the lock, then trace. See
-   `memory/feedback_eio-traceln-outside-critical-section.md`.
+   locals first, release the lock, then trace.
 5. **Naked callback invocation** (PR-J context) — when a mailbox
    message carries a callback closure, invoking it without
    `try/with` lets a transient consumer-side failure abort the

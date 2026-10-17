@@ -131,9 +131,9 @@ prove the bad flow without rejecting legitimate boundary orchestration.
 CI runs the audit after the authoritative `@default @check @install` build:
 
 ```sh
-bash scripts/ocaml-boundary-ratchet.sh
-bash scripts/ocaml-boundary-ratchet.sh --json
-bash scripts/ocaml-boundary-ratchet.sh --regenerate  # reductions only
+dune exec --root . ./tools/ocaml_boundary_audit/main.exe -- --check
+dune exec --root . ./tools/ocaml_boundary_audit/main.exe -- --format json
+dune exec --root . ./tools/ocaml_boundary_audit/main.exe -- --write-baseline  # reductions only
 ```
 
 ## PR shape and proof

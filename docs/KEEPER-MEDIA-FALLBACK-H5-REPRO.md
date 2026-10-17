@@ -65,7 +65,7 @@ The observation to make, with real readers:
    the `status=read` block with the fact. Record the manifest rows
    (`media_degraded_to_text`, `media_projected_*`) and the model's answer.
 3. Next turn on the same keeper: the stored reading under
-   `<base_path>/media-readings/<keeper>/` is reused, with no reader call
+   `<base_path>/.masc/media-readings/<keeper>/` is reused, with no reader call
    (observe by making the reader unavailable, e.g. PATH without Poppler).
 4. Restart the keeper process and repeat (3).
 5. Negative (H5-S3), kept apart from 2-4. A stored reading is looked up before

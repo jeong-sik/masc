@@ -42,7 +42,7 @@ This is a **process doc**, not enforced. Survey work doesn't always fit this sha
 | 1 | #12123 (MERGED) | Survey: 3 gap classes (Bug Model coverage, tautology, split-pair). 5 zero-coverage domains |
 | 2 | #12132 (MERGED) | Tautology candidates 21 → 0 via SPECIFICATION line diff |
 | 3 | #12137 (MERGED, RFC stubs) + 8 implementation PRs (#12160, #12167, #12168, #12174, #12175, #12178, #12180, #12186) | 0%-coverage domains 5 → 0. Phase 3 prereq classification accuracy 1/3 (33%) |
-| 4 | (next PR) | `tla-bug-model-ratchet.sh` + CI wire-up |
+| 4 | (ratchet phase) | CI ratchet wire-up |
 
 ## 4. Self-correcting property
 
@@ -68,7 +68,7 @@ Across six chains using this pattern (boundary, specs gap, PPX adoption, dashboa
 | **Narrow-collapse** | Phase 2 finds the gap doesn't exist at all. | Server HTTP routes C4 (no auth check): Phase 1 estimate 3–5 → Phase 2 found 0 (all routes wrap in `with_tool_auth` / `with_public_read`). Auth/credential C4 (credential redaction): Phase 1 candidates 2 → Phase 2 found 0 `Log.*` callsites in scope. |
 | **Narrow-discover** | Phase 2 confirms the gap is real *because* a Phase 1 hopeful fallback (platform enforcement, shared middleware, etc.) doesn't exist. | Server HTTP routes C1 (no body size-limit): Phase 1 hoped `Http_server_eio` enforced limits globally → Phase 2 confirmed it doesn't. Gap stays real. |
 
-A single audit can produce multiple outcome categories simultaneously. Server HTTP routes Phase 2 (PR #12218) produced one of each: confirm (C2), collapse (C4), discover (C1). Auth Phase 2 (PR #12217) additionally exposed a fourth, less-clean variant — **anchor-falsification**: Phase 1 listed `auth_strict_mode` and `auth_resolve` as C5 anchors based on domain centrality, but legacy metrics backend grep showed 0 calls in either. Phase 1 wasn't over-classifying gaps; it was over-classifying *coverage*.
+A single audit can produce multiple outcome categories simultaneously. Server HTTP routes Phase 2 (PR #12218) produced one of each: confirm (C2), collapse (C4), discover (C1). Auth Phase 2 (PR #12217) additionally exposed a fourth, less-clean variant — **anchor-falsification**: Phase 1 listed `auth_strict_mode` and `auth_resolve` as C5 anchors based on domain centrality, but metrics backend grep showed 0 calls in either. Phase 1 wasn't over-classifying gaps; it was over-classifying *coverage*.
 
 Calling these out:
 - **Narrow-confirm** is the boring base case; expect it on most classes.
@@ -89,7 +89,7 @@ The most leveraged decisions live in Phase 1. From observed patterns:
 
 Phase 2's narrowing usually uses one of:
 
-- **Mechanical script** (Q-P0-2: `cycle11-tautology-sweep.sh` diffed SPECIFICATION lines across 21 candidates)
+- **Mechanical check** (Q-P0-2: diffing `SPECIFICATION` lines across 21 candidates)
 - **Reference taxonomy** (Q-P0-3: C1–C4 reference categories per call site)
 - **Header inspection** (Q-P0-2: spec headers' `OCaml↔TLA mapping` text)
 
@@ -119,17 +119,12 @@ Rule of thumb: **defer hard-gating until at least 2 Phase 3 PRs have moved the f
 - **Quick tactical fix**: single bug, single PR. No survey needed.
 - **Design RFC**: this pattern is for *measuring existing state*, not for *deciding direction*. RFCs and audits are different shapes.
 - **Homogeneous domain**: if all specs/modules look alike, a single audit pass suffices. The 4-phase shape is for *heterogeneous* domains where wide-net first-cuts mis-classify.
-- **High-stakes destructive change**: wide-net surveys can recommend deletes. Don't bundle delete recommendations into a Phase 3 PR — split as a separate decision. (Memory rule: `feedback_self_confession_comments_must_be_measured` — don't trust audit prose alone for irreversible work.)
+- **High-stakes destructive change**: wide-net surveys can recommend deletes. Don't bundle delete recommendations into a Phase 3 PR — split as a separate decision.
 
 ## 10. References
 
 - `docs/audit/TLA-SPECS-GAP-AUDIT-2026-04*.md` — Q-P0-2 chain (Phase 3 closure in #12188)
 - `docs/audit/TLA-PPX-ADOPTION-AUDIT-2026-04.md` — runtime-side PPX adoption (PR #12143 MERGED)
-- `docs/audit/DASHBOARD-OBSERVABILITY-AUDIT-2026-04*.md` — first new-domain application of codified pattern (PR #12202 Phase 1, PR #12208 Phase 2)
-- `docs/audit/AUTH-CREDENTIAL-AUDIT-2026-04*.md` — second new-domain application; surfaced anchor-falsification outcome (PR #12209 Phase 1, PR #12217 Phase 2)
-- `docs/audit/SERVER-HTTP-ROUTES-AUDIT-2026-04*.md` — third new-domain application; surfaced narrow-confirm + narrow-collapse + narrow-discover in a single chain (PR #12213 Phase 1, PR #12218 Phase 2)
-- `scripts/tla-ppx-ratchet.sh` — ratchet template (increasing-monotonic, PR #12151)
-- `scripts/tla-bug-model-ratchet.sh` — first mixed-direction ratchet (PR #12192)
-- Memory: `feedback_diagnostic_with_measurement_strongly_triggers_root_fix` — measurement matters
+- `tools/ocaml_boundary_audit/main.ml` — typed-tree boundary ratchet
 
-*Process doc / 2026-04-30 / source: Q-P0-2 + Q-P0-3 closure observations + 3 new-domain chains; updated 2026-04-30 with §4.5 outcome categories from Auth + Server HTTP Phase 2 findings*
+*Process doc / 2026-04-30 / source: Q-P0-2 + Q-P0-3 closure observations + 3 new-domain chains*

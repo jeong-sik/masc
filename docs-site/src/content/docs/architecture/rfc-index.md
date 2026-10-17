@@ -27,17 +27,17 @@ The MASC architecture was settled incrementally through roughly 270 internal RFC
 
 ---
 
-## 4. Long-term memory (Memory OS)
+## Long-Term Memory & Fusion
 
 * **Two stores**: Each keeper has an ordinary fact store and a source-bound store with invalidation records.
 * **Usage-driven reinforcement (RFC-0418)**: The stagnant reobservation counter is gone; retrieval, citation, and revision events are recorded in a dedicated sidecar.
-* **Librarian selection**: Curation is the librarian lane's selection — keep, or drop with a reason — with no numeric scores or decay curves. See the [Memory OS page](/architecture/memory-os/).
+* **Librarian selection**: Curation is the librarian lane's selection — keep, or drop with a reason — with no numeric scores or decay curves. See the [Keeper Long-Term Memory page](/architecture/memory-os/).
 
 ---
 
 ## 5. Performance observation
 
-* **Scheduler-lag probe**: A probe fiber on a 100ms interval records wake overshoot into a one-minute ring and exposes p50 and over-one-second stalls through `/health` diagnostics (`lib/core/scheduler_lag.ml`).
+* **Scheduler-lag probe**: A probe fiber on a 100ms interval records wake overshoot into a one-minute ring and `/health` exposes scheduler lag under `.scheduler.lag` (including `p50_ms`, `p95_ms`, `p99_ms`, and over-one-second `stalls`) along with resident memory (`rss_bytes`), measurement source, and `pid` (`lib/core/scheduler_lag.ml`).
 * **Differential terminal rendering**: Row prefixes are precomputed and buffers reused, so only what changed is redrawn.
 * **Conditional revalidation (304)**: Dashboard responses carry a weak ETag; a matching `If-None-Match` gets a bodyless 304, cutting the payload of high-frequency polling.
 

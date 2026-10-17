@@ -18,8 +18,12 @@
     hashes that were candidates in the previous durable snapshot and remain
     unreferenced in the new complete scan. The offline deployment helper runs
     it only while holding the BasePath process lease, so two complete offline
-    scans are required. A malformed reference, scan failure, candidate-store
-    failure, or unlink failure aborts visibly.
+    scans are required. Registered sources must decode as JSON documents,
+    JSONL rows, or exact canonical marker rows; blank rows carry no references.
+    An undecodable row, malformed reference, scan failure, or candidate-store
+    failure aborts visibly before deletion. Parse failure leaves the previous
+    candidate snapshot intact. An unlink failure is reported during deletion;
+    earlier candidate deletions may already have succeeded.
 
     The blob store is one per BasePath and the consumers write under the same
     BasePath's [<base>/.masc]; a hash is live when any consumer there
@@ -37,6 +41,11 @@ type error =
   | Durable_source_read_failed of
       { path : string
       ; reason : string
+      }
+  | Durable_source_parse_failed of
+      { path : string
+      ; line : int
+      ; detail : string
       }
   | Malformed_artifact_reference of
       { path : string

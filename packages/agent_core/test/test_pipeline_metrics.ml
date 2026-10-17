@@ -93,6 +93,27 @@ let check_agent_empty_failure agent = function
   | Ok _ -> Alcotest.fail "expected EmptyCompletion, got Ok"
 ;;
 
+(* Since #43427 an empty MaxTokens turn is a structural response: the stop
+   reason survives as [Ok] instead of collapsing into [EmptyCompletion].
+   This pins only that boundary (stop reason kept, no content). Whether the
+   agent should keep the empty assistant message in its history is a separate
+   open question and is deliberately not asserted here. *)
+let check_agent_empty_stop expected_stop_reason = function
+  | Ok (response : Types.api_response) ->
+    Alcotest.(check bool)
+      "stop reason preserved"
+      true
+      (response.stop_reason = expected_stop_reason);
+    Alcotest.(check int) "no content" 0 (List.length response.content)
+  | Error err -> Alcotest.failf "expected Ok, got %s" (Error.to_string err)
+;;
+
+let check_agent_empty_result agent ~stop_reason result =
+  if stop_reason = Types.MaxTokens
+  then check_agent_empty_stop stop_reason result
+  else check_agent_empty_failure agent result
+;;
+
 let test_sync_dispatches_via_complete_triggers_metrics () =
   Eio_main.run
   @@ fun env ->
@@ -208,7 +229,7 @@ let test_agent_run_rejects_injected_empty_completion () =
        let agent =
          make_empty_agent ~net:(Eio.Stdenv.net env) ~stop_reason ~name:"agent-sync-empty"
        in
-       Agent.run ~sw agent "ping" |> check_agent_empty_failure agent)
+       Agent.run ~sw agent "ping" |> check_agent_empty_result agent ~stop_reason)
     [ Types.EndTurn; Types.MaxTokens ]
 ;;
 
@@ -226,7 +247,7 @@ let test_agent_run_stream_rejects_injected_empty_completion () =
            ~name:"agent-stream-empty"
        in
        Agent.run_stream ~sw ~on_event:(fun _ -> ()) agent "ping"
-       |> check_agent_empty_failure agent)
+       |> check_agent_empty_result agent ~stop_reason)
     [ Types.EndTurn; Types.MaxTokens ]
 ;;
 

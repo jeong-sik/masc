@@ -3434,7 +3434,8 @@ let test_interrupted_prepared_launch_resumes_the_same_job keeper_turn_id () = wi
         ~deliver:(fun ~composition_tool:_ _ -> incr delivered; Ok ()) |> require "actual pending outbox" in
     check int (label ^ " emits no outbox notification") 0 !delivered;
     check int (label ^ " delivers no terminal") 0 report.delivered;
-    check int (label ^ " keeps readable guarded outbox authority") 0 (List.length report.failures);
+    check (list (pair string string)) (label ^ " keeps readable guarded outbox authority") []
+      (List.map (fun (identity,error) -> identity,Outbox.error_to_string error) report.failures);
     let pending = pending_completions fixture in
     check int (label ^ " adds no queue completion") queued (List.length pending);
     let original_request_notifications = pending |> List.filter
@@ -5222,6 +5223,85 @@ let test_completion_pulse_does_not_join_blocked_backend () = with_fixture @@ fun
       "duplicate_blocked_worker_backend_calls", `Int 0]))
 
 
+let test_held_absent_presence_reactivates_only_original_authority () = with_fixture @@ fun _env _initialize fixture ->
+  set_source fixture ~task_id:"task-A" ~turn:41;
+  control fixture (`Assoc ["mode", `String "create_unknown_created"]);
+  let id = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) |> job_id in
+  let config = Workspace.default_config fixture.base_path in
+  let supervisor = Completion_wake.create ~config () in
+  let pulse supervisor = Eio.Switch.run @@ fun sw ->
+    Completion_wake.pulse ~sw supervisor |> store_value "settle one actual maintenance round" in
+  control fixture (`Assoc ["mode", `String "hide_owner_inventory"]);
+  let before = List.length (calls fixture) in
+  pulse supervisor;
+  let full_absence_calls = List.length (calls fixture) - before in
+  check int "initial absence requires daemon and exact inventory" 2 full_absence_calls;
+  let owner_bytes = read (owner_path fixture id) in
+  let before = List.length (calls fixture) in
+  pulse supervisor;
+  let held_presence_calls = List.length (calls fixture) - before in
+  check int "unchanged held absence uses one exact inventory hint" 1 held_presence_calls;
+  check string "a missing presence hint does not rewrite the owner" owner_bytes (read (owner_path fixture id));
+  let restarted = Completion_wake.create ~config () in
+  let before = List.length (calls fixture) in
+  pulse restarted;
+  check int "fresh supervisor cannot inherit process-local absence" 2 (List.length (calls fixture) - before);
+  let record = load fixture id in
+  let paths = Store.paths ~base_path:fixture.base_path record.job_id in
+  let injected = Filename.concat paths.cli_config_dir "config.json" in
+  write injected "{}";
+  let before = List.length (calls fixture) in
+  pulse supervisor;
+  check int "private CLI changes refuse before even the presence command" before (List.length (calls fixture));
+  check int "presence refusal cannot launch the original program" 0 (effect_count fixture "start");
+  Unix.unlink injected;
+  let before = List.length (calls fixture) in
+  pulse supervisor;
+  check int "failed presence evidence is cleared before recovery" 2 (List.length (calls fixture) - before);
+  control fixture (`Assoc ["daemon_id", `String "replacement-daemon"]);
+  pulse supervisor;
+  check int "positive hint cannot bypass original daemon identity" 0 (effect_count fixture "start");
+  check bool "foreign daemon never advances original create intent" true ((load fixture id).phase=Store.Create_requested);
+  control fixture (`Assoc []);
+  pulse supervisor;
+  check int "late original container is started once" 1 (effect_count fixture "start");
+  check int "reactivation never prepares another container" 1 (effect_count fixture "create");
+  (match (load fixture id).phase with Store.Running _ -> () | _ -> fail "late original did not resume");
+  control fixture (`Assoc ["state", `String "exited"; "exit_code", `Int 7]);
+  pulse supervisor;
+  let completion = only_selection fixture |> completion_payload in
+  check string "eventual result names the exact original job" id (Store.Job_id.to_string completion.oj_job_id);
+  check bool "original result is acknowledged after durable notification" true (load fixture id).completion_delivered;
+  Printf.printf "owned_job_held_presence_measurement=%s\n%!"
+    (Yojson.Safe.to_string (`Assoc ["scope", `String "synthetic CLI actual maintenance supervisor";
+      "full_absence_backend_calls", `Int full_absence_calls;
+      "unchanged_held_backend_calls", `Int held_presence_calls;
+      "owner_unchanged_on_hint", `Bool true;
+      "original_creates", `Int (effect_count fixture "create");
+      "original_starts", `Int (effect_count fixture "start");
+      "original_result_delivered", `Bool true]))
+
+let test_changed_cancel_intent_bypasses_held_presence () = with_fixture @@ fun _env _initialize fixture ->
+  set_source fixture ~task_id:"task-A" ~turn:41;
+  control fixture (`Assoc ["mode", `String "create_unknown_created"]);
+  let id = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) |> job_id in
+  let supervisor = Completion_wake.create ~config:(Workspace.default_config fixture.base_path) () in
+  let pulse () = Eio.Switch.run @@ fun sw ->
+    Completion_wake.pulse ~sw supervisor |> store_value "settle original cancellation recovery" in
+  control fixture (`Assoc ["mode", `String "hide_owner_inventory"]);
+  pulse ();
+  let current = load fixture id in
+  ignore (Store.transition current ~phase:current.phase ~cancel_requested:true
+    ~outputs:current.outputs ~detail:current.detail |> store_value "durable original cancellation intent");
+  let before = List.length (calls fixture) in
+  pulse ();
+  check int "changed cancellation requires full inspection, not a held hint" 2 (List.length (calls fixture) - before);
+  let current = load fixture id in
+  check bool "original cancelled launch closes explicitly" true (current.phase=Store.Cancelled_unconfirmed_launch);
+  check bool "cancelled result is delivered instead of waiting on stale absence" true current.completion_delivered;
+  check int "cancellation never recreates the uncertain program" 1 (effect_count fixture "create");
+  check int "cancellation never starts the uncertain program" 0 (effect_count fixture "start")
+
 let test_completion_recovery_preserves_refused_owner_bytes () = with_fixture @@ fun _env _initialize fixture ->
   set_source fixture ~task_id:"task-A" ~turn:41;
   let first_id = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) |> job_id in
@@ -5531,6 +5611,10 @@ let () = match Array.to_list Sys.argv with
       ; test_case "fresh supervisor retains upstream inline arguments and original child authority" `Quick
           (test_nested_skill_job_continuation ~dynamic_arguments:true)
       ; test_case "maintenance admits new job recovery while another backend is blocked" `Quick test_completion_pulse_does_not_join_blocked_backend
+      ; test_case "held absence uses a presence hint and reactivates only original authority" `Quick
+          test_held_absent_presence_reactivates_only_original_authority
+      ; test_case "changed cancellation bypasses process-local held absence" `Quick
+          test_changed_cancel_intent_bypasses_held_presence
       ; test_case "recovery keeps refused foreign and corrupt owner bytes intact" `Quick test_completion_recovery_preserves_refused_owner_bytes
       ; test_case "owner mismatch reports hold before readiness" `Quick test_owner_mismatch_reports_hold_before_readiness
       ; test_case "held continuation is not retried until restart" `Quick test_held_continuation_is_not_retried_until_restart ]]

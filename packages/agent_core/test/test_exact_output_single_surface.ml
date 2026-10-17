@@ -1430,7 +1430,9 @@ let test_empty_output_limit_classes () =
          | Types.MaxTokens, EO.Output_limit_reached -> ()
          (* A refusal stop is terminal whether or not text accompanied it, so
             it takes the same typed cause as a non-empty refusal; the raw
-            response (checked above) retains the provider's stop evidence. *)
+            response (checked above) retains the provider's stop evidence.
+            The cause itself does not carry the stop reason, so this pins the
+            current collapse of refusal and incomplete answers; see #43514. *)
          | Types.Refusal, EO.Incomplete_output -> ()
          | Types.Unknown _, EO.Completion_failed
              { error = Http_client.ProviderFailure

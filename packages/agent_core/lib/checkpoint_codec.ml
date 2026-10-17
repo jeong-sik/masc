@@ -1222,8 +1222,6 @@ let to_pieces_with_encoding_memo memo (cp : Checkpoint_types.t) =
     , None )
 ;;
 
-(* The checks [validated_message_encoding] runs on the JSON it encodes, here
-   on the JSON a document carries for a message it decoded. *)
 (* Two trees print to the same bytes when they are the same tree: floats by
    their bits, object fields in their order. Trees that print alike but differ
    here, an [`Intlit] and an [`Int] of one number, count as different. *)

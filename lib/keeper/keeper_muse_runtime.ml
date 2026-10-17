@@ -1500,6 +1500,10 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
                     ~on_prompt_sent:(fun () ->
                       admission := Dispatched;
                       report_transmitted_input ())
+                    ~on_context_submission:(fun submission ->
+                      Host.record_context_submission ~keeper_name ~raw_trace_run
+                        ~runtime_profile:runtime_id ~client_turn_ordinal:turn_count
+                        ~submission:(Serve.context_submission_to_json submission) ())
                     ~on_stream_event:(fun event ->
                       (match event with
                        | Serve.Turn_terminal_received terminal -> provider_terminal := Some terminal

@@ -93,6 +93,10 @@ type fixture_step =
        fixture exits 97 when the needle is absent, so a turn that loses a block
        between the caller and the wire fails the test instead of passing on a
        reply the fixture would have emitted anyway. *)
+  | Capture_user_message of string
+    (* Copy the user message line the CLI read, without its LF, to a file. *)
+  | Capture_system_prompt_file of string
+    (* Copy the file named by [--system-prompt-file] to a file. *)
   | Pause of float
   | Leave_pipe_holder of float
     (* Start a background child that inherits stdout and stderr and outlives
@@ -136,6 +140,14 @@ let fixture_script
         (Printf.sprintf
            "printf '%%s' \"$user_message\" | grep -F %s >/dev/null || exit 97\n"
            (shell_quote needle))
+    | Capture_user_message target ->
+      output_string output
+        (Printf.sprintf "printf '%%s' \"$user_message\" > %s\n" (shell_quote target))
+    | Capture_system_prompt_file target ->
+      output_string output
+        (Printf.sprintf
+           "next=''; for arg in \"$@\"; do if [ \"$next\" = 1 ]; then cp \"$arg\" %s; next=''; fi; [ \"$arg\" != --system-prompt-file ] || next=1; done\n"
+           (shell_quote target))
     | Pause seconds ->
       output_string output (Printf.sprintf "sleep %.3f\n" seconds)
     | Leave_pipe_holder seconds ->
@@ -223,6 +235,7 @@ let run_fixture ?(dynamic_tools = []) ?session_mode ?(timeout_s = 2.0)
     ?account_home
     ?admission_timeout_s ?(no_turn_deadline = false) ?on_session_ready_delay_s
     ?on_turn_started_delay_s ?on_stream_event ?on_input_observation ?on_prompt_sent ?on_spawned
+    ?on_context_submission ?system_prompt
     ?(prompt = "Return the fixture marker") ?(images = []) path =
   Eio_main.run (fun env ->
     let clock = Eio.Stdenv.clock env in
@@ -233,6 +246,7 @@ let run_fixture ?(dynamic_tools = []) ?session_mode ?(timeout_s = 2.0)
       ; native
       ; admission_timeout_s = Option.value admission_timeout_s ~default:timeout_s
       ; timeout_s = if no_turn_deadline then None else Some timeout_s
+      ; system_prompt
       }
     in
     let on_session_ready =
@@ -261,6 +275,7 @@ let run_fixture ?(dynamic_tools = []) ?session_mode ?(timeout_s = 2.0)
       ?on_input_observation
       ?on_prompt_sent
       ?on_spawned
+      ?on_context_submission
       config
       ~prompt
       ~images)
@@ -554,6 +569,57 @@ let test_image_reaches_the_cli_user_message () =
       | Error error ->
         failwith
           ("image turn failed: " ^ Runtime_claude_code.error_to_string error))
+;;
+
+(* The receipts are of the bytes the CLI read: the system prompt file it was
+   started with, and the user message line, whose text block is the turn's
+   [Turn_text] after the image. *)
+let test_receipts_are_the_bytes_the_cli_read () =
+  let image =
+    { Runtime_claude_code.media_type = "image/png"
+    ; base64_data = Base64.encode_string "\x89PNG\r\n\x1a\nfixture"
+    }
+  in
+  let message_copy = Filename.temp_file "claude-user-message-" ".json" in
+  let prompt_copy = Filename.temp_file "claude-system-prompt-" ".txt" in
+  Fun.protect ~finally:(fun () -> Sys.remove message_copy; Sys.remove prompt_copy) (fun () ->
+    let receipts = ref [] and sent = ref 0 in
+    with_fixture
+      [ Capture_user_message message_copy
+      ; Capture_system_prompt_file prompt_copy
+      ; Emit assistant
+      ; Emit result ]
+      (fun path ->
+        match
+          run_fixture ~images:[ image ] ~prompt:"receipt \"marker\"\n"
+            ~system_prompt:"system \"prompt\" bytes"
+            ~on_prompt_sent:(fun () -> incr sent)
+            ~on_context_submission:(fun submission -> receipts := (submission, !sent) :: !receipts)
+            path
+        with
+        | Error error -> fail (Runtime_claude_code.error_to_string error)
+        | Ok _ -> ());
+    let read file = In_channel.with_open_bin file In_channel.input_all in
+    let hash text = Digestif.SHA256.(digest_string text |> to_hex) in
+    let line = read message_copy and file = read prompt_copy in
+    let module Write = Runtime_official_client_write in
+    match List.rev !receipts with
+    | [ ({ Runtime_claude_code.frame = System_prompt_file; write = prompt_write }, 0)
+      ; ({ frame = User_message _; write = message_write }, 0) ] ->
+      check int "the file receipt counts the file the CLI read" (String.length file) prompt_write.bytes;
+      check string "the file receipt hashes the file the CLI read" (hash file) prompt_write.sha256;
+      check bool "the file is one whole slot" true
+        (Option.is_some (Write.matching_fragment prompt_write ~slot:Whole_write file));
+      check int "the message receipt counts the line the CLI read" (String.length line) message_write.bytes;
+      check string "the message receipt hashes the line the CLI read" (hash line) message_write.sha256;
+      check bool "the text after the image is turn text 1" true
+        (Option.is_some
+           (Write.matching_fragment message_write ~slot:(Turn_text 1) "receipt \"marker\"\n"));
+      check bool "the image is not a text slot" true
+        (Option.is_none (Write.matching_fragment message_write ~slot:(Turn_text 0) "receipt \"marker\"\n"))
+    | receipts ->
+      failf "expected the file then the message, both before the transmission report; got %d receipts"
+        (List.length receipts))
 ;;
 
 (* A media type the block cannot carry is rejected before the CLI is spawned,
@@ -4762,6 +4828,8 @@ let () =
     ; ( "images"
       , [ test_case "image reaches the CLI user message" `Quick
             test_image_reaches_the_cli_user_message
+        ; test_case "receipts are the bytes the CLI read" `Quick
+            test_receipts_are_the_bytes_the_cli_read
         ; test_case "unsupported media type is rejected" `Quick
             (fun () -> test_unsupported_image_media_type_is_rejected ())
         ; test_case "malformed Base64 image is rejected before client dispatch" `Quick

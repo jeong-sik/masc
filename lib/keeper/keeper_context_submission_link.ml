@@ -1,5 +1,5 @@
 module Assembly = Keeper_context_assembly
-module Wire = Runtime_codex_app_server
+module Write = Runtime_official_client_write
 
 type unavailable_reason =
   | Missing_issuer
@@ -156,37 +156,26 @@ let issuer_attribution acquisitions =
     "unavailable", `List (List.rev unavailable);
     "scope", `String "source_acquisition_and_local_filter_not_transport_or_remote_retention"]
 
-let binding_to_json ~slot piece (submission : Wire.context_submission) =
-  let encoded = Yojson.Safe.to_string (`String piece.text) in
-  let matched = match submission.fragments with
-    | Serialization_mismatch -> None
-    | Partitioned fragments -> List.find_opt (fun (f : Wire.context_fragment) ->
-      f.slot = slot && f.json_bytes = String.length encoded && f.json_sha256 = hash encoded) fragments in
+let binding_to_json ~slot piece (write : Write.t) =
+  let matched = Write.matching_fragment write ~slot piece.text in
   let status = match matched with None -> "unavailable_slot_mismatch" | Some _ -> "matched_completed_slot" in
-  let slot_name, index = match slot with
-    | Developer_instructions -> "developer_instructions", `Null
-    | Turn_text i -> "turn_text", `Int i
-    | Injected_item i -> "injected_item", `Int i
-    | Dynamic_tools -> "dynamic_tools", `Null
-    | Unattributed_carrier -> "unattributed_carrier", `Null in
-  let matched_slot = Option.fold ~none:`Null ~some:(fun (fragment : Wire.context_fragment) ->
-    `Assoc [ "json_bytes", `Int fragment.json_bytes;
-      "json_sha256", `String fragment.json_sha256;
-      "json_offset", Option.fold ~none:`Null ~some:(fun i -> `Int i) fragment.json_offset]) matched in
+  let matched_slot = Option.fold ~none:`Null ~some:(fun (fragment : Write.fragment) ->
+    `Assoc [ "bytes", `Int fragment.bytes;
+      "sha256", `String fragment.sha256;
+      "offset", Option.fold ~none:`Null ~some:(fun i -> `Int i) fragment.offset]) matched in
   let occurrences = match matched with None -> [] | Some _ -> List.mapi (fun index occurrence ->
     `Assoc [ "attributed_occurrence_index", `Int index;
       "encoded_message_offset_in_decoded_slot", `Int occurrence.offset;
       "encoded_message_bytes", `Int occurrence.bytes;
       "encoded_message_sha256", `String (hash (String.sub piece.text occurrence.offset occurrence.bytes));
       "source",occurrence.proof]) piece.occurrences in
-  `Assoc [ "schema", `String "masc.codex-assembly-slot-binding.v2";
+  `Assoc ([ "schema", `String "masc.client-assembly-slot-binding.v1";
       "status", `String status;
-    "scope", `String "issuer_carrier_only_not_tool_history_or_remote_retention";
-    "request_id", Wire.context_frame_id_to_json submission.request_id;
-    "method", `String (Wire.context_submission_method_label submission.method_); "slot", `String slot_name; "index", index;
-    "matched_slot", matched_slot;
-    "expected_slot_json_sha256", `String (hash encoded);
+    "scope", `String "issuer_carrier_only_not_tool_history_or_remote_retention" ]
+    @ Write.slot_fields slot
+    @ [ "matched_slot", matched_slot;
+    "expected_slot_sha256", `String (Write.encoded_text_sha256 write piece.text);
     "issuer_attribution", issuer_attribution piece.acquisitions;
     "occurrences", `List occurrences;
     "omission_scope", `String "local_resume_filter_decision_not_remote_retention";
-    "omitted_held", `List (match matched with None -> [] | Some _ -> piece.omitted)]
+    "omitted_held", `List (match matched with None -> [] | Some _ -> piece.omitted)])

@@ -605,11 +605,38 @@ let window_for_phase config = function
 
 type io =
   { send : Yojson.Safe.t -> unit
+  ; send_context :
+      Runtime_official_client_write.selection -> Yojson.Safe.t -> Runtime_official_client_write.t
+        (* The same line write, returning the receipt of the bytes written. *)
   ; receive : unit -> (Msp.wire_message, error) result
   ; set_receive_phase : receive_phase -> unit
   ; next_id : unit -> int
   ; on_subscription_usage : Msp.subscription_usage -> unit
   }
+
+type context_submission =
+  { request_id : int
+  ; session_id : string
+  ; write : Runtime_official_client_write.t
+  }
+
+let context_submission_to_json submission =
+  `Assoc
+    [ "schema", `String "masc.muse-context-submission.v1"
+    ; "phase", `String "stdin_write_completed"
+    ; "method", `String "turn/start"
+    ; "request_id", `Int submission.request_id
+    ; "session_id", `String submission.session_id
+    ; "write", Runtime_official_client_write.to_json submission.write
+    ; "server_acceptance", `String "not_observed_by_this_event"
+    ]
+;;
+
+(* The turn's text and images ride [params.input]; the rest of the request is
+   carried. *)
+let turn_start_selection =
+  Runtime_official_client_write.(Fields [ "params", Fields [ "input", turn_input ] ])
+;;
 
 let with_spawned_client ?storage_root ?(on_subscription_usage = fun _ -> ()) ~mgr ~clock ~cwd config run =
   Eio.Switch.run (fun sw ->
@@ -642,18 +669,34 @@ let with_spawned_client ?storage_root ?(on_subscription_usage = fun _ -> ()) ~mg
       let reader = Eio.Buf_read.of_flow ~max_size:max_wire_line_bytes stdout_r in
       let receive_phase = ref Awaiting_admission in
       let last_id = ref 0 in
+      let write_line payload =
+        (* The host decodes stdin as UTF-8; refuse the write rather than hand
+           it a line it cannot read. *)
+        if not (String_util.is_valid_utf8 payload)
+        then failwith "muse serve stdin: refusing an invalid UTF-8 payload";
+        Eio.Flow.copy_string payload stdin_w;
+        Eio.Flow.copy_string "\n" stdin_w
+      in
       let send json =
         with_idle_timeout
           clock
           config.admission_timeout_s
+          (fun () -> write_line (Yojson.Safe.to_string json))
+      in
+      (* Encoding and hashing share the write's admission bound, and run off
+         the scheduler domain: a turn with images is megabytes of base64. *)
+      let send_context selection json =
+        with_idle_timeout
+          clock
+          config.admission_timeout_s
           (fun () ->
-             let payload = Yojson.Safe.to_string json in
-             (* The host decodes stdin as UTF-8; refuse the write rather
-                than hand it a line it cannot read. *)
-             if not (String_util.is_valid_utf8 payload)
-             then failwith "muse serve stdin: refusing an invalid UTF-8 payload";
-             Eio.Flow.copy_string payload stdin_w;
-             Eio.Flow.copy_string "\n" stdin_w)
+             let payload, write =
+               Domain_pool_ref.submit_cpu_or_inline (fun () ->
+                 let payload = Yojson.Safe.to_string json in
+                 payload, Runtime_official_client_write.json_line selection json payload)
+             in
+             write_line payload;
+             write)
       in
       let exited () =
         match
@@ -694,6 +737,7 @@ let with_spawned_client ?storage_root ?(on_subscription_usage = fun _ -> ()) ~mg
         (fun () ->
            run
              { send
+             ; send_context
              ; on_subscription_usage
              ; receive
              ; set_receive_phase = (fun phase -> receive_phase := phase)
@@ -1251,6 +1295,7 @@ let run_protocol
       ~images
       ~on_session_ready
       ~on_prompt_sent
+      ~on_context_submission
       ~on_stream_event
   =
   let requested_capabilities =
@@ -1282,16 +1327,17 @@ let run_protocol
     @ [ Msp.Text prompt ]
   in
   let turn_request_id = io.next_id () in
-  let* () =
+  let* write =
     try
-      io.send
-        (Msp.turn_start_request
-           ~id:turn_request_id
-           ~session_id
-           ~command_id:(new_command_id ())
-           ~input
-           ~reasoning_effort);
-      Ok ()
+      Ok
+        (io.send_context
+           turn_start_selection
+           (Msp.turn_start_request
+              ~id:turn_request_id
+              ~session_id
+              ~command_id:(new_command_id ())
+              ~input
+              ~reasoning_effort))
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | Eio.Time.Timeout as exn -> raise exn
@@ -1299,6 +1345,10 @@ let run_protocol
       Llm_provider.Reserved_exn.reraise_if_reserved exn;
       Error (Turn_input_write_failed (Printexc.to_string exn))
   in
+  Runtime_official_client_write.report
+    ~label:(Printf.sprintf "Muse turn/start request_id=%d" turn_request_id)
+    on_context_submission
+    { request_id = turn_request_id; session_id; write };
   let* () =
     invoke_state_callback ~stage:"prompt sent callback" (fun () ->
       on_prompt_sent ();
@@ -1428,6 +1478,7 @@ let run_turn
       ?reasoning_effort
       ?(on_session_ready = fun ~session_id:_ -> Ok ())
       ?(on_prompt_sent = fun () -> ())
+      ?(on_context_submission = fun _ -> ())
       ?on_stream_event
       ~mgr
       ~clock
@@ -1465,6 +1516,7 @@ let run_turn
         ~images
         ~on_session_ready
         ~on_prompt_sent
+        ~on_context_submission
         ~on_stream_event))
 ;;
 

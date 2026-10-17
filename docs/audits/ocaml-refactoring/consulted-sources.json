@@ -15,11 +15,13 @@
     "bin/masc_tui_kept_reads.ml",
     "bin/masc_tui_lane_application.ml",
     "bin/masc_tui_lane_subscriptions.ml",
+    "bin/masc_tui_loader.ml",
     "bin/masc_tui_machine_live.ml",
     "bin/masc_tui_render_schedule.ml",
     "bin/masc_tui_runtime_account_form.ml",
     "bin/masc_tui_runtime_config_edit.ml",
     "bin/masc_tui_runtime_config_edit.mli",
+    "bin/masc_tui_usage_trend.ml",
     "docs/constitution.xml",
     "docs/guides/CONTRIBUTOR-WORKFLOW.md",
     "lib/auth/auth.ml",
@@ -41,6 +43,8 @@
     "lib/browser_webdriver.ml",
     "lib/completion_authority_agent.ml",
     "lib/core/eio_guard.ml",
+    "lib/dated_jsonl/dated_jsonl.ml",
+    "lib/dated_jsonl/dated_jsonl.mli",
     "lib/dated_jsonl/dated_jsonl_store.ml",
     "lib/dune",
     "lib/exec/command_gate/shell_command_gate.ml",
@@ -72,6 +76,7 @@
     "lib/gate/connector_ingress_lane.mli",
     "lib/goal/goal_phase.mli",
     "lib/goal/goal_store.ml",
+    "lib/jsonl_writer/jsonl_writer.ml",
     "lib/keeper/keeper_agent_run.ml",
     "lib/keeper/keeper_antigravity_runtime.ml",
     "lib/keeper/keeper_approval_queue.ml",
@@ -85,6 +90,8 @@
     "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
     "lib/keeper/keeper_chat_media_store.ml",
     "lib/keeper/keeper_chat_media_store.mli",
+    "lib/keeper/keeper_claude_code_runtime.ml",
+    "lib/keeper/keeper_codex_runtime.ml",
     "lib/keeper/keeper_composition_continuation_wake.ml",
     "lib/keeper/keeper_composition_dependency_result.ml",
     "lib/keeper/keeper_composition_dependency_result.mli",
@@ -102,11 +109,13 @@
     "lib/keeper/keeper_multimodal_input.mli",
     "lib/keeper/keeper_post_turn.ml",
     "lib/keeper/keeper_sandbox_docker.ml",
+    "lib/keeper/keeper_tag_dispatch.ml",
     "lib/keeper/keeper_tool_composition_surface.ml",
     "lib/keeper/keeper_tool_descriptor.ml",
     "lib/keeper/keeper_tool_emission_hook.ml",
     "lib/keeper/keeper_tool_execute_runtime.ml",
     "lib/keeper/keeper_tool_execute_typed_input.ml",
+    "lib/keeper/keeper_tool_in_process_runtime.ml",
     "lib/keeper/keeper_tool_plan_executor.ml",
     "lib/keeper/keeper_tool_runtime.ml",
     "lib/keeper/keeper_tools_agent_core_bundle.ml",
@@ -117,6 +126,8 @@
     "lib/keeper/keeper_vision_tool.ml",
     "lib/keeper_tooling/execute_shell_ir.ml",
     "lib/keeper_tooling/shell_costume.ml",
+    "lib/masc_log/log.ml",
+    "lib/mcp_server_eio_execute.ml",
     "lib/multimodal/artifact.mli",
     "lib/multimodal/dune",
     "lib/multimodal/keeper_emitter.ml",
@@ -144,13 +155,27 @@
     "lib/runtime/runtime_config_projection.ml",
     "lib/runtime/runtime_config_text.ml",
     "lib/runtime/runtime_config_text.mli",
+    "lib/runtime/runtime_muse_usage.ml",
     "lib/runtime/runtime_provider_usage_read.ml",
     "lib/runtime/runtime_provider_usage_window.ml",
     "lib/runtime/runtime_provider_usage_window.mli",
+    "lib/runtime/runtime_quota_window.ml",
     "lib/runtime/runtime_schema.ml",
+    "lib/schedule/dune",
     "lib/schedule/schedule_domain.mli",
+    "lib/schedule/schedule_occurrence_id.ml",
+    "lib/schedule/schedule_occurrence_id.mli",
+    "lib/schedule/schedule_runner.ml",
+    "lib/schedule/schedule_runner.mli",
+    "lib/schedule/schedule_runner_status.ml",
+    "lib/schedule/schedule_service.ml",
+    "lib/schedule/schedule_service.mli",
+    "lib/schedule/schedule_store.ml",
+    "lib/schedule/schedule_store.mli",
+    "lib/server/dune",
     "lib/server/keeper_stream_media_accum.ml",
     "lib/server/keeper_stream_media_accum.mli",
+    "lib/server/server_bootstrap_maintenance.ml",
     "lib/server/server_dashboard_runtime_request.ml",
     "lib/server/server_dashboard_runtime_resolved_json.ml",
     "lib/server/server_discord_in_process_gateway.ml",
@@ -162,12 +187,16 @@
     "lib/server/server_routes_http_routes_dashboard.ml",
     "lib/server/server_routes_http_routes_provider_runs.ml",
     "lib/server/server_routes_http_runtime.ml",
+    "lib/server/server_schedule_consumers.ml",
     "lib/server/server_slack_in_process_gateway.ml",
     "lib/task/task_goal_assignment.ml",
     "lib/task/tool_task.ml",
     "lib/toml_line_editor/toml_line_editor.ml",
+    "lib/tool_schedule.ml",
     "lib/tui_decode.ml",
     "lib/tui_decode_connectors.ml",
+    "lib/tui_decode_usage.ml",
+    "lib/tui_decode_usage.mli",
     "lib/verification_protocol.ml",
     "lib/workspace/workspace_backlog.ml",
     "lib/workspace/workspace_task.ml",
@@ -199,9 +228,11 @@
     "packages/agent_core/test/test_pipeline.ml",
     "packages/agent_core/test/test_provider_admission.ml",
     "packages/agent_core/test/test_wire_parse_dump.ml",
+    "test/deps/dune",
     "test/dune",
     "test/multimodal/test_vision_artifact_store.ml",
     "test/multimodal/test_workspace_holder.ml",
+    "test/stanzas/test_provider_usage_history_snapshots.inc",
     "test/test_auth_token_rotation_transaction.ml",
     "test/test_board_delete_rewrite_requeue.ml",
     "test/test_board_persistence_load_contract.ml",
@@ -210,6 +241,7 @@
     "test/test_browser_lane.ml",
     "test/test_browser_lane_watched_work.ml",
     "test/test_channel_gate_connector_routes.ml",
+    "test/test_dated_jsonl_store.ml",
     "test/test_exact_output_catalog_precedence.ml",
     "test/test_fusion_config_edit.ml",
     "test/test_fusion_decision.ml",
@@ -231,6 +263,10 @@
     "test/test_provider_usage_windows.ml",
     "test/test_runtime_antigravity.ml",
     "test/test_runtime_per_keeper_routing.ml",
+    "test/test_schedule_consumer_dispatch.ml",
+    "test/test_schedule_runner.ml",
+    "test/test_schedule_store.ml",
+    "test/test_schedule_tool_wiring.ml",
     "test/test_server_discord_trigger_policy.ml",
     "test/test_server_runtime_bootstrap.ml",
     "test/test_server_slack_trigger_policy.ml",
@@ -241,6 +277,7 @@
     "test/test_tui_io_domain.ml",
     "test/test_tui_kept_reads.ml",
     "test/test_tui_machine_live.ml",
+    "test/test_tui_overview_providers.ml",
     "test/test_tui_render_schedule.ml",
     "test/test_tui_runtime_config_edit.ml",
     "test/test_verification.ml",
@@ -2062,6 +2099,856 @@
       "kind": "semantic",
       "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
       "carry": "Whole-file byte-identical comparison to refreshed main."
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/schedule/dune",
+      "ranges": [
+        [
+          1,
+          34
+        ]
+      ],
+      "scope": "Actual standalone unwrapped schedule library and dependency direction.",
+      "kind": "build_declaration",
+      "full_file": true,
+      "audit_area": "Round8 Schedule"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/schedule/schedule_runner.mli",
+      "ranges": [
+        [
+          1,
+          160
+        ]
+      ],
+      "scope": "Consumer dispatch/hold/result and opaque acceptance proof interface.",
+      "kind": "interface",
+      "full_file": true,
+      "audit_area": "Round8 Schedule"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/schedule/schedule_runner.ml",
+      "ranges": [
+        [
+          1,
+          665
+        ]
+      ],
+      "scope": "Complete runner: typed signal codec, seen-key recovery/cache, append progress, dispatch/acceptance and held tick decision.",
+      "kind": "source_or_scenario",
+      "full_file": true,
+      "audit_area": "Round8 Schedule"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/schedule/schedule_store.mli",
+      "ranges": [
+        [
+          1,
+          348
+        ]
+      ],
+      "scope": "Complete ledger API including note identity, mutation/refusal, recovery observation, wake acceptance/failure and retention contracts.",
+      "kind": "interface",
+      "full_file": true,
+      "audit_area": "Round8 Schedule"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/schedule/schedule_service.mli",
+      "ranges": [
+        [
+          1,
+          84
+        ]
+      ],
+      "scope": "Service create/update/cancel and clock/actor ownership interface.",
+      "kind": "interface",
+      "full_file": true,
+      "audit_area": "Round8 Schedule"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/schedule/schedule_service.ml",
+      "ranges": [
+        [
+          1,
+          129
+        ]
+      ],
+      "scope": "Service argument validation, identity/clock boundary and delegation to store.",
+      "kind": "source_or_scenario",
+      "full_file": true,
+      "audit_area": "Round8 Schedule"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/schedule/schedule_domain.mli",
+      "ranges": [
+        [
+          1,
+          222
+        ]
+      ],
+      "scope": "Closed schedule/wake/recurrence types and opaque payload/cancellation contract; implementation not reviewed.",
+      "kind": "interface",
+      "full_file": true,
+      "audit_area": "Round8 Schedule"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/schedule/schedule_occurrence_id.ml",
+      "ranges": [
+        [
+          1,
+          19
+        ]
+      ],
+      "scope": "Canonical persisted occurrence identity construction.",
+      "kind": "source_or_scenario",
+      "full_file": true,
+      "audit_area": "Round8 Schedule"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/schedule/schedule_occurrence_id.mli",
+      "ranges": [
+        [
+          1,
+          16
+        ]
+      ],
+      "scope": "Private string occurrence identity and exact input contract.",
+      "kind": "interface",
+      "full_file": true,
+      "audit_area": "Round8 Schedule"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/schedule/schedule_store.ml",
+      "ranges": [
+        [
+          195,
+          498
+        ],
+        [
+          615,
+          944
+        ],
+        [
+          1064,
+          1394
+        ]
+      ],
+      "scope": "Ledger codec/load/write/cache; note append and ID/count helpers; ordinary locked mutation examples; exact wake and recurring/recovery settlement. Top error definitions, prune_wakes and retention helper bodies were not read.",
+      "kind": "source_or_scenario",
+      "full_file": false,
+      "audit_area": "Round8 Schedule"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/schedule/schedule_runner_status.ml",
+      "ranges": [
+        [
+          1,
+          170
+        ]
+      ],
+      "scope": "Immutable status record, Atomic publication and pure tick count fold only; later completion/read/projection helpers not reviewed.",
+      "kind": "source_or_scenario",
+      "full_file": false,
+      "audit_area": "Round8 Schedule"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/tool_schedule.ml",
+      "ranges": [
+        [
+          533,
+          578
+        ],
+        [
+          1285,
+          1419
+        ]
+      ],
+      "scope": "Workflow/runtime error projections, direct note append/list, and exhaustive action dispatch/registration. Start of first span is inside cancellation result context; not whole tool.",
+      "kind": "source_or_scenario",
+      "full_file": false,
+      "audit_area": "Round8 Schedule"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/server/server_bootstrap_maintenance.ml",
+      "ranges": [
+        [
+          83,
+          205
+        ],
+        [
+          594,
+          665
+        ]
+      ],
+      "scope": "Actual runner tick with consumer and clock, status/log/cache effects, cancellation escape and one-time startup recovery before sequential sleep/tick loop. Not full maintenance.",
+      "kind": "source_or_scenario",
+      "full_file": false,
+      "audit_area": "Round8 Schedule"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/server/server_schedule_consumers.ml",
+      "ranges": [
+        [
+          900,
+          1210
+        ],
+        [
+          1255,
+          1373
+        ]
+      ],
+      "scope": "Existing occurrence reconciliation, absent-occurrence supersession/durable enqueue, callback acceptance, intake fence, self-clock/hold and fence-owner redrive. Disposition index/transfer internals and broad Keeper lifecycle not reviewed.",
+      "kind": "source_or_scenario",
+      "full_file": false,
+      "audit_area": "Round8 Schedule"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/mcp_server_eio_execute.ml",
+      "ranges": [
+        [
+          403,
+          451
+        ]
+      ],
+      "scope": "Concrete MCP Mod_schedule route to Tool_schedule.dispatch with caller and admission/withdrawal wiring; only immediate route span.",
+      "kind": "source_or_scenario",
+      "full_file": false,
+      "audit_area": "Round8 Schedule"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/keeper/keeper_tag_dispatch.ml",
+      "ranges": [
+        [
+          105,
+          132
+        ]
+      ],
+      "scope": "Concrete Keeper tag route to schedule dispatch, with no schedule-file transaction introduced in this route span.",
+      "kind": "source_or_scenario",
+      "full_file": false,
+      "audit_area": "Round8 Schedule"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/keeper/keeper_tool_in_process_runtime.ml",
+      "ranges": [
+        [
+          2010,
+          2058
+        ]
+      ],
+      "scope": "Concrete handle_masc_schedule_with_outcome route and existing context construction; surrounding spawn tail only as context.",
+      "kind": "source_or_scenario",
+      "full_file": false,
+      "audit_area": "Round8 Schedule"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/workspace/workspace_utils_ops.ml",
+      "ranges": [
+        [
+          252,
+          316
+        ],
+        [
+          630,
+          707
+        ]
+      ],
+      "scope": "Unconditional encoded JSON backend/local write path and separate explicit file-lock/lease helpers; no read-version CAS argument in the inspected write API. Full backend internals not read.",
+      "kind": "source_or_scenario",
+      "full_file": false,
+      "audit_area": "Round8 Schedule"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "test/test_schedule_store.ml",
+      "ranges": [
+        [
+          1,
+          113
+        ],
+        [
+          1163,
+          1183
+        ],
+        [
+          1530,
+          1693
+        ],
+        [
+          1740,
+          1810
+        ]
+      ],
+      "scope": "Real workspace fixture, corruption refusal/preserved bytes, busy domain-pool encode/decode and cache scenarios, sequential note/terminal-retention scenario. No execution.",
+      "kind": "source_or_scenario",
+      "full_file": false,
+      "audit_area": "Round8 Schedule"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "test/test_schedule_tool_wiring.ml",
+      "ranges": [
+        [
+          90,
+          140
+        ],
+        [
+          1530,
+          1583
+        ],
+        [
+          1715,
+          1775
+        ]
+      ],
+      "scope": "Actual Tool_schedule dispatch fixture and unnamed/spoofed note-author refusal scenarios; no positive concurrent-note scenario inspected.",
+      "kind": "source_or_scenario",
+      "full_file": false,
+      "audit_area": "Round8 Schedule"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "test/test_schedule_runner.ml",
+      "ranges": [
+        [
+          362,
+          430
+        ],
+        [
+          830,
+          938
+        ],
+        [
+          1182,
+          1232
+        ]
+      ],
+      "scope": "Seen recovery/write failure, occurrence-versus-declaration failure, retry identity and held/no-advance scenarios. Permission-based write failure fixture is not portable proof under privileged execution.",
+      "kind": "source_or_scenario",
+      "full_file": false,
+      "audit_area": "Round8 Schedule"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "test/test_schedule_consumer_dispatch.ml",
+      "ranges": [
+        [
+          2450,
+          2504
+        ],
+        [
+          3120,
+          3286
+        ]
+      ],
+      "scope": "Real Keeper queue storage failure/retry, offline owner durable acceptance, self-clock and failed acceptance commit reconciliation; no behavior execution.",
+      "kind": "source_or_scenario",
+      "full_file": false,
+      "audit_area": "Round8 Schedule"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/server/server_provider_usage_history.ml",
+      "ranges": [
+        [
+          1,
+          291
+        ]
+      ],
+      "scope": "Complete owner, encoding, strict item decoding, two-stage reduction, journal/error shell and response.",
+      "kind": "source_or_scenario",
+      "blob": "237ee7d43761d39ad97b90ea3d552e39043bf6a7",
+      "audit_area": "Round8 S8 design"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/server/server_provider_usage_history.mli",
+      "ranges": [
+        [
+          1,
+          34
+        ]
+      ],
+      "scope": "Complete stable public API; window variant and read contract, opaque scope identity.",
+      "kind": "interface",
+      "blob": "a897473d60bbadb28e5da90927897ca905af394e",
+      "audit_area": "Round8 S8 design"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/runtime/runtime_provider_usage_window.ml",
+      "ranges": [
+        [
+          1,
+          105
+        ],
+        [
+          858,
+          914
+        ],
+        [
+          1011,
+          1077
+        ]
+      ],
+      "scope": "Canonical report types/source wire names/shape, observer resource state and accepted-report publication order.",
+      "kind": "source_or_scenario",
+      "blob": "dbd55dd9e13d291515bca1ce23641c574da2b882",
+      "audit_area": "Round8 S8 design"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/runtime/runtime_provider_usage_window.mli",
+      "ranges": [
+        [
+          28,
+          43
+        ],
+        [
+          228,
+          231
+        ],
+        [
+          284,
+          317
+        ]
+      ],
+      "scope": "Canonical utilization, complete/sparse distinction, observer contract and latest sink failure.",
+      "kind": "interface",
+      "blob": "f49ec972673c22a4ec41c3a24a88ccae5d8d2372",
+      "audit_area": "Round8 S8 design"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/runtime/runtime_provider_usage_read.ml",
+      "ranges": [
+        [
+          73,
+          91
+        ],
+        [
+          108,
+          124
+        ],
+        [
+          222,
+          231
+        ],
+        [
+          577,
+          585
+        ]
+      ],
+      "scope": "Real HTTP/CLI read producers stamp observations and publish accepted reports.",
+      "kind": "source_or_scenario",
+      "blob": "fd963e71398fcdbc5c4b72193b1cad4ab744acf5",
+      "audit_area": "Round8 S8 design"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/runtime/runtime_muse_usage.ml",
+      "ranges": [
+        [
+          1,
+          68
+        ]
+      ],
+      "scope": "Real Muse producer: prior quota rest, canonical report, time-stamped record; cancellation may occur in durable sink.",
+      "kind": "source_or_scenario",
+      "blob": "81059eac69a523684e8765edf4c26dba86356c66",
+      "audit_area": "Round8 S8 design"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/keeper/keeper_claude_code_runtime.ml",
+      "ranges": [
+        [
+          137,
+          142
+        ]
+      ],
+      "scope": "Claude stream usage keeps admitted turn quota scope.",
+      "kind": "source_or_scenario",
+      "blob": "331567eee30223008efd9804a8b71b754dcc6821",
+      "audit_area": "Round8 S8 design"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/keeper/keeper_codex_runtime.ml",
+      "ranges": [
+        [
+          246,
+          251
+        ]
+      ],
+      "scope": "Codex stream usage keeps admitted turn quota scope.",
+      "kind": "source_or_scenario",
+      "blob": "c1b891822b9f8c2afc53b3b16f135effaa7dade6",
+      "audit_area": "Round8 S8 design"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/runtime/runtime_quota_window.ml",
+      "ranges": [
+        [
+          91,
+          104
+        ]
+      ],
+      "scope": "Single existing scope digest authority; credential location is not authenticated account ID.",
+      "kind": "source_or_scenario",
+      "blob": "62158a1ca24893c3bf0523c5b715b8c52aa41da9",
+      "audit_area": "Round8 S8 design"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/server/server_bootstrap_maintenance.ml",
+      "ranges": [
+        [
+          423,
+          441
+        ]
+      ],
+      "scope": "Production history observer installation during background-maintenance setup.",
+      "kind": "source_or_scenario",
+      "blob": "25d9220779746a03032f3fb85b44f16c3f841a89",
+      "audit_area": "Round8 S8 design"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/server/server_routes_http_routes_provider_runs.ml",
+      "ranges": [
+        [
+          7,
+          34
+        ],
+        [
+          53,
+          198
+        ],
+        [
+          325,
+          372
+        ]
+      ],
+      "scope": "Actual history HTTP route, cache admission/refresh/error behavior and cancellation.",
+      "kind": "source_or_scenario",
+      "blob": "4e78f49b2b793a4c597aa896448607a1ff1f0bcc",
+      "audit_area": "Round8 S8 design"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/server/server_dashboard_runtime_resolved_json.ml",
+      "ranges": [
+        [
+          315,
+          344
+        ]
+      ],
+      "scope": "Current usage projection shares History.scope_id with retained history.",
+      "kind": "source_or_scenario",
+      "blob": "00bbf8bb125381391e612a3ca7128d636cc11276",
+      "audit_area": "Round8 S8 design"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/dated_jsonl/dated_jsonl.ml",
+      "ranges": [
+        [
+          143,
+          172
+        ],
+        [
+          228,
+          248
+        ],
+        [
+          300,
+          306
+        ],
+        [
+          375,
+          430
+        ],
+        [
+          609,
+          614
+        ],
+        [
+          808,
+          849
+        ],
+        [
+          1182,
+          1200
+        ],
+        [
+          1224,
+          1292
+        ]
+      ],
+      "scope": "Actual append mutex/path clock, strict chronological read, syntax-error reporting, file resource/error boundaries.",
+      "kind": "source_or_scenario",
+      "blob": "a61d9eb35479a560f28b98376ee2b29bb452fcd1",
+      "audit_area": "Round8 S8 design"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/dated_jsonl/dated_jsonl.mli",
+      "ranges": [
+        [
+          1,
+          88
+        ],
+        [
+          364,
+          383
+        ]
+      ],
+      "scope": "Opaque store, typed storage errors and recent_entry, physical JSONL traversal contract.",
+      "kind": "interface",
+      "blob": "f84d2f9af78f07474006e54d6936d4da627364ee",
+      "audit_area": "Round8 S8 design"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/dated_jsonl/dated_jsonl_store.ml",
+      "ranges": [
+        [
+          106,
+          132
+        ],
+        [
+          179,
+          196
+        ]
+      ],
+      "scope": "16-day history retention and UTC append-day identity, independent of observation timestamps.",
+      "kind": "source_or_scenario",
+      "blob": "270c00a906920ad7c4282d5fe6d1ad8354206c6a",
+      "audit_area": "Round8 S8 design"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/jsonl_writer/jsonl_writer.ml",
+      "ranges": [
+        [
+          1,
+          16
+        ]
+      ],
+      "scope": "Canonical UTC gmtime day helper shared by file paths and Log date keys.",
+      "kind": "source_or_scenario",
+      "blob": "ecf906d23b3dc030884cb434dc1d28f7f03494ad",
+      "audit_area": "Round8 S8 design"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/masc_log/log.ml",
+      "ranges": [
+        [
+          174,
+          185
+        ]
+      ],
+      "scope": "Existing pure Log.format_utc_date_of delegates to writer day_key.",
+      "kind": "source_or_scenario",
+      "blob": "9077a95e5a2aa42bcfc73a0b3282485111b9ac9e",
+      "audit_area": "Round8 S8 design"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/tui_decode_usage.ml",
+      "ranges": [
+        [
+          172,
+          235
+        ]
+      ],
+      "scope": "Actual JSON response decoder and typed measured/empty report payload.",
+      "kind": "source_or_scenario",
+      "blob": "b76de320ad8a860fa3559a6a04b3706d634f150c",
+      "audit_area": "Round8 S8 design"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/tui_decode_usage.mli",
+      "ranges": [
+        [
+          67,
+          91
+        ]
+      ],
+      "scope": "Public consumer types and uncertainty count.",
+      "kind": "interface",
+      "blob": "5cc5ae4612855cd4aa2fe948d4e3953b60ae8688",
+      "audit_area": "Round8 S8 design"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "bin/masc_tui_http.ml",
+      "ranges": [
+        [
+          2027,
+          2030
+        ]
+      ],
+      "scope": "Actual client GET path and day parameter.",
+      "kind": "source_or_scenario",
+      "blob": "b6e16f47b96a1b8b251319e7eee5ce0a08483ebc",
+      "audit_area": "Round8 S8 design"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "bin/masc_tui_loader.ml",
+      "ranges": [
+        [
+          979,
+          1001
+        ]
+      ],
+      "scope": "Cache error/loading/unavailable handling before typed history decode.",
+      "kind": "source_or_scenario",
+      "blob": "b29426a6406a1c33ed0d4d25519072222d6919cc",
+      "audit_area": "Round8 S8 design"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "bin/masc_tui_usage_trend.ml",
+      "ranges": [
+        [
+          1,
+          100
+        ]
+      ],
+      "scope": "Actual data projection preserves UTC days, measured zero, no report and successful empty report; no UI proof claimed.",
+      "kind": "source_or_scenario",
+      "blob": "8eef724b68861bb339cb1a26a99464f3defdec7c",
+      "audit_area": "Round8 S8 design"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "test/test_provider_usage_history_snapshots.ml",
+      "ranges": [
+        [
+          1,
+          173
+        ]
+      ],
+      "scope": "Complete six actual-file scenarios and decoder continuity; direct target for S8.",
+      "kind": "source_or_scenario",
+      "blob": "46ae3c88908f4bded3a3d9af6ca56cac857d2914",
+      "audit_area": "Round8 S8 design"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "test/test_tui_overview_providers.ml",
+      "ranges": [
+        [
+          583,
+          709
+        ]
+      ],
+      "scope": "Adjacent consumer scenarios, including typed empty/uncapped samples; some assertions inspect rendering, so do not add/recommend such gates.",
+      "kind": "source_or_scenario",
+      "blob": "10886de664f1233276551907772ee0b86232abb8",
+      "audit_area": "Round8 S8 design"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "test/test_model_inference_metrics.ml",
+      "ranges": [
+        [
+          1728,
+          1760
+        ]
+      ],
+      "scope": "Exclusion evidence: this is distinct runtime decision/cost history, not the provider-usage history owner.",
+      "kind": "source_or_scenario",
+      "blob": "1ecb90c8a371afd3203a82fe268995844bad04cb",
+      "audit_area": "Round8 S8 design"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "test/test_dated_jsonl_store.ml",
+      "ranges": [
+        [
+          234,
+          245
+        ]
+      ],
+      "scope": "Adjacent retained store lifecycle scenario; no change proposed.",
+      "kind": "source_or_scenario",
+      "blob": "20aee515a1e4ff54967f9c30c3209763359ea170",
+      "audit_area": "Round8 S8 design"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/server/dune",
+      "ranges": [
+        [
+          1,
+          17
+        ]
+      ],
+      "scope": "New private module registration; server library already owns the effect shell.",
+      "kind": "build_declaration",
+      "blob": "c76dc1d4ab77ebab247a030306ebbb4f30e771b3",
+      "audit_area": "Round8 S8 design"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "test/stanzas/test_provider_usage_history_snapshots.inc",
+      "ranges": [
+        [
+          1,
+          4
+        ]
+      ],
+      "scope": "Existing test registration; no new executable required.",
+      "kind": "build_declaration",
+      "blob": "aa66634fd5f487cc343d1a552b3a4bc579547008",
+      "audit_area": "Round8 S8 design"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "test/deps/dune",
+      "ranges": [
+        [
+          1,
+          6
+        ],
+        [
+          19,
+          49
+        ],
+        [
+          145,
+          153
+        ]
+      ],
+      "scope": "Existing re-exported dated_jsonl/Eio/server/runtime dependencies suffice.",
+      "kind": "build_declaration",
+      "blob": "70d3515a1e159ad22a84e8beaaafb6ccd5dced35",
+      "audit_area": "Round8 S8 design"
     }
   ],
   "discovery_only_sources": [
@@ -2274,6 +3161,230 @@
         }
       ],
       "meaning": "44 multimodal/media source/interface/build/scenario records and 9 K3 records (8 semantic, 1 build declaration). Three multimodal governance records and one K3 README audit-context record are retained here but excluded from files/focused additions. Interface reads do not imply implementation review. Historical census denominators and previous round counts are unchanged."
+    },
+    {
+      "round": 8,
+      "area": "Schedule ledger/runner and S8 provider-history design",
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "direct_reading_records": 51,
+      "schedule_records": 22,
+      "s8_records": 29,
+      "new_unique_paths": 37,
+      "unique_files_after_round": 280,
+      "focused_records_after_round": 202,
+      "new_paths": [
+        "bin/masc_tui_loader.ml",
+        "bin/masc_tui_usage_trend.ml",
+        "lib/dated_jsonl/dated_jsonl.ml",
+        "lib/dated_jsonl/dated_jsonl.mli",
+        "lib/jsonl_writer/jsonl_writer.ml",
+        "lib/keeper/keeper_claude_code_runtime.ml",
+        "lib/keeper/keeper_codex_runtime.ml",
+        "lib/keeper/keeper_tag_dispatch.ml",
+        "lib/keeper/keeper_tool_in_process_runtime.ml",
+        "lib/masc_log/log.ml",
+        "lib/mcp_server_eio_execute.ml",
+        "lib/runtime/runtime_muse_usage.ml",
+        "lib/runtime/runtime_quota_window.ml",
+        "lib/schedule/dune",
+        "lib/schedule/schedule_occurrence_id.ml",
+        "lib/schedule/schedule_occurrence_id.mli",
+        "lib/schedule/schedule_runner.ml",
+        "lib/schedule/schedule_runner.mli",
+        "lib/schedule/schedule_runner_status.ml",
+        "lib/schedule/schedule_service.ml",
+        "lib/schedule/schedule_service.mli",
+        "lib/schedule/schedule_store.ml",
+        "lib/schedule/schedule_store.mli",
+        "lib/server/dune",
+        "lib/server/server_bootstrap_maintenance.ml",
+        "lib/server/server_schedule_consumers.ml",
+        "lib/tool_schedule.ml",
+        "lib/tui_decode_usage.ml",
+        "lib/tui_decode_usage.mli",
+        "test/deps/dune",
+        "test/stanzas/test_provider_usage_history_snapshots.inc",
+        "test/test_dated_jsonl_store.ml",
+        "test/test_schedule_consumer_dispatch.ml",
+        "test/test_schedule_runner.ml",
+        "test/test_schedule_store.ml",
+        "test/test_schedule_tool_wiring.ml",
+        "test/test_tui_overview_providers.ml"
+      ],
+      "excluded_readings": [
+        {
+          "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+          "path": "docs/constitution.xml",
+          "ranges": [
+            [
+              1,
+              555
+            ]
+          ],
+          "scope": "Full read plus 180-325 supplement for initially truncated middle.",
+          "kind": "governance",
+          "full_file": true,
+          "audit_area": "Round8 Schedule"
+        },
+        {
+          "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+          "path": "docs/guides/CONTRIBUTOR-WORKFLOW.md",
+          "ranges": [
+            [
+              1,
+              352
+            ]
+          ],
+          "scope": "Full contributor procedure read after constitution.",
+          "kind": "governance",
+          "full_file": true,
+          "audit_area": "Round8 Schedule"
+        },
+        {
+          "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+          "path": ".agents/skills/ocaml-coding/SKILL.md",
+          "ranges": [
+            [
+              1,
+              184
+            ]
+          ],
+          "scope": "Prior full Round7 read carried by whole-file byte comparison; no new abbreviated skill reading claimed.",
+          "kind": "governance_carried",
+          "full_file": true,
+          "audit_area": "Round8 Schedule"
+        },
+        {
+          "baseline": "c12ccd6d4348c31e62b1d1cfdda313b318094c53",
+          "path": "docs/audits/ocaml-refactoring/README.md",
+          "ranges": [
+            [
+              196,
+              220
+            ],
+            [
+              632,
+              656
+            ]
+          ],
+          "scope": "K4 attempt evidence and S7 connector lane lifecycle inspected to avoid duplicate candidates. Other schedule mentions and queue totals were searched only.",
+          "kind": "audit_context",
+          "full_file": false,
+          "audit_area": "Round8 Schedule"
+        },
+        {
+          "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+          "path": "docs/constitution.xml",
+          "ranges": [
+            [
+              1,
+              555
+            ]
+          ],
+          "scope": "Full required contract; pure effects boundary, typed ownership, no local builds, evidence limits.",
+          "kind": "governance",
+          "blob": "98ead93d57ca1dd113b3094a1fd353997224c628",
+          "audit_area": "Round8 S8 design"
+        },
+        {
+          "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+          "path": "docs/guides/CONTRIBUTOR-WORKFLOW.md",
+          "ranges": [
+            [
+              1,
+              352
+            ]
+          ],
+          "scope": "Full contributor workflow; source review and focused consumer reachability.",
+          "kind": "governance",
+          "blob": "fa12d6c3701d364164bd918e2b34c283042a0ad3",
+          "audit_area": "Round8 S8 design"
+        },
+        {
+          "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+          "path": ".agents/skills/ocaml-coding/SKILL.md",
+          "ranges": [
+            [
+              1,
+              184
+            ]
+          ],
+          "scope": "Full skill read; result boundaries, cancellation propagation, legitimate resource mutation, interfaces.",
+          "kind": "governance",
+          "blob": "35a6bf28411c666f8d9e75fe2099589dfe804dfe",
+          "audit_area": "Round8 S8 design"
+        },
+        {
+          "baseline": "c12ccd6d4348c31e62b1d1cfdda313b318094c53",
+          "path": "docs/audits/ocaml-refactoring/README.md",
+          "ranges": [
+            [
+              657,
+              682
+            ]
+          ],
+          "scope": "Existing S8 candidate; absent from main baseline, so pinned separately to campaign commit.",
+          "kind": "audit_context",
+          "blob": "56d4c2d6426d5c09f6c3f45ae460351acfe12c0c",
+          "audit_area": "Round8 S8 design"
+        }
+      ],
+      "input_artifacts": [
+        {
+          "name": "schedule-round8",
+          "sha256": "4959921573cb089a75b268b0bbbc35fb1f0a931bda8c7e16fdad7dbd24cd2e5c"
+        },
+        {
+          "name": "s8-design-round8",
+          "sha256": "e107e931e9faf4fa5ba021fd3256f570e49572cf279bc0b0c31c38f353f47004"
+        }
+      ],
+      "review_corrections": [
+        {
+          "artifact": "schedule-round8",
+          "updates": []
+        },
+        {
+          "artifact": "s8-design-round8",
+          "updates": [
+            {
+              "reason": "Independent Round8 review P3: do not characterize constitution legacy_residue as a general preference or imply an approval exception.",
+              "previous_artifact_sha256": "7f3a9e0a870e7de6d8175c35383678e863818e9162a235a965d611e6a2b9750b",
+              "correction": "Only the final limitation wording is replaced. Existing source behavior, proposal scope and direct-read accounting are unchanged.",
+              "replacement": "This bounded extraction preserves the reader’s existing alias and absent-marker-state decoding behavior; changing those stored-history semantics is outside this proposed patch. No compatibility policy or exception to the constitution is introduced."
+            }
+          ]
+        }
+      ],
+      "memory_os_integration": {
+        "source": "Root-provided REST merged-state plus local commit-ancestry observation; no new semantic source reading",
+        "observed_main": "776383528786929d01f8103e27823041c3cee755",
+        "pull_requests": [
+          {
+            "number": 43347,
+            "merge_commit": "11c2f3c08d7e20fd9338197188b8a39cab3368b0",
+            "merged_at": "2026-10-16T23:22:02Z",
+            "included_in_main": "776383528786929d01f8103e27823041c3cee755",
+            "merged": true
+          },
+          {
+            "number": 43348,
+            "merge_commit": "8ff0aa5d695df60d72132a06863f3bd6c4e2f547",
+            "merged_at": "2026-10-16T23:22:03Z",
+            "included_in_main": "776383528786929d01f8103e27823041c3cee755",
+            "merged": true
+          },
+          {
+            "number": 43353,
+            "merge_commit": "c5337092c70bc5cf6a615f481684810db40a7116",
+            "merged_at": "2026-10-16T23:22:04Z",
+            "included_in_main": "776383528786929d01f8103e27823041c3cee755",
+            "merged": true
+          }
+        ],
+        "campaign_context": "c12ccd6d4348c31e62b1d1cfdda313b318094c53 is a distinct historical campaign checkout; integration is not imputed to its Memory OS source."
+      },
+      "meaning": "22 Schedule and 29 S8 source/interface/build/scenario records; six governance and two README-context records excluded. Shared files can have separate scoped records from each audit; unique paths are counted once. test_model_inference_metrics is retained only as directly read exclusion evidence, not a direct S8 scenario. Historical census denominators and round counts remain unchanged."
     }
   ],
   "generator_inputs": {
@@ -2427,6 +3538,122 @@
       "scope": "Search for contention cancellation test names and fork/sleep cancellation references was discovery only; lack of hits is not a full-suite absence proof.",
       "method": "K3 source/test symbol discovery; excluded from direct-reading totals",
       "area": "Round 7 Board contention rearm design"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "method": "git ls-tree and filename filters",
+      "scope": "Schedule module/test/generator path inventory and scoped AGENTS discovery. Root and docs-site AGENTS only; no nested schedule/test instructions found. Names are not source reads.",
+      "examples": [
+        "lib/schedule/schedule_domain.ml",
+        "lib/schedule/schedule_contract_values.ml",
+        "lib/schedule/schedule_supported_kinds.ml",
+        "lib/schedule_payload_projection.ml",
+        "lib/schedule_projection.ml",
+        "test/test_schedule_domain.ml",
+        "test/test_schedule_service.ml",
+        "test/test_schedule_interval_runner_tick.ml"
+      ],
+      "area": "Round8 Schedule discovery/context; excluded from focused totals"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "method": "git grep direct references plus module alias/open/include and function-name inventories",
+      "scope": "Schedule_runner.tick, commit_acceptance, Schedule_store.append_note, Schedule_store module aliases and Tool_schedule.dispatch guided the listed direct reads. One direct qualified production append caller and an open Schedule_store test consumer found; arbitrary external consumers are not exhaustively enumerated.",
+      "examples": [
+        "lib/schedule_payload_projection.mli",
+        "lib/server_keeper_waiting_inventory.ml",
+        "test/test_schedule_tool_toml_parity.ml",
+        "test/test_server_dashboard_http_schedule_actions.ml"
+      ],
+      "area": "Round8 Schedule discovery/context; excluded from focused totals"
+    },
+    {
+      "baseline": "c12ccd6d4348c31e62b1d1cfdda313b318094c53",
+      "path": "docs/audits/ocaml-refactoring/consulted-sources.json",
+      "method": "Metadata JSON files query",
+      "scope": "Compared existing consulted path set: schedule_domain.mli was already retained; no prior Schedule note transaction candidate. This context lookup adds no semantic reading count.",
+      "area": "Round8 Schedule discovery/context; excluded from focused totals"
+    },
+    {
+      "baseline": "c12ccd6d4348c31e62b1d1cfdda313b318094c53",
+      "path": "docs/audits/ocaml-refactoring/README.md",
+      "method": "Keyword and heading matches outside the explicitly read K4/S7 sections",
+      "scope": "Existing K3/retained scheduler boundaries and Round7 queue counts were discovery/context, not fresh source review.",
+      "area": "Round8 Schedule discovery/context; excluded from focused totals"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "method": "S8 symbol/path discovery; no new semantic read",
+      "path": "test/test_provider_usage_windows.ml",
+      "matches": [
+        268,
+        665
+      ],
+      "reason": "scope_id consumers discovered by git grep; bodies not reviewed for S8."
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "method": "S8 symbol/path discovery; no new semantic read",
+      "path": "test/test_tui_runtime_listing.ml",
+      "matches": [
+        1299
+      ],
+      "reason": "scope_id consumer discovered, not a history read scenario."
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "method": "S8 symbol/path discovery; no new semantic read",
+      "path": "test/test_server_runtime_startup_maintenance.ml",
+      "matches": [
+        184,
+        186
+      ],
+      "reason": "Retention mention discovered only; do not claim full scenario coverage."
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "method": "S8 symbol/path discovery; no new semantic read",
+      "path": "test/test_dated_jsonl.ml",
+      "reason": "Listed storage test target only; no bodies read."
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "method": "S8 symbol/path discovery; no new semantic read",
+      "path": "test/test_dated_jsonl_count_cache.ml",
+      "reason": "Filename discovery only; unrelated storage count cache is not S8 state."
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "method": "S8 symbol/path discovery; no new semantic read",
+      "path": "test/test_dated_jsonl_off_fiber.ml",
+      "reason": "Filename discovery only; no storage offload change proposed."
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "method": "S8 symbol/path discovery; no new semantic read",
+      "path": "bin/masc_tui.ml",
+      "matches": [
+        11353,
+        11679,
+        11875
+      ],
+      "reason": "History load/apply call sites discovered only; loader and typed trend implementation were reviewed directly."
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "method": "S8 symbol/path discovery; no new semantic read",
+      "path": "bin/masc_tui_render.ml",
+      "matches": [
+        10992,
+        11210
+      ],
+      "reason": "Rendering entrypoints discovered only; no screen or layout review claimed."
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "method": "S8 symbol/path discovery; no new semantic read",
+      "path": "dashboard",
+      "reason": "Exact endpoint/decode search found no additional browser consumer. This is bounded search evidence, not a general dashboard audit."
     }
   ]
 }

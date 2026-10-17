@@ -117,6 +117,20 @@ let test_precedence_and_exact_identity () =
       | Some entry -> entry
       | None -> fail "second exact entry missing"
     in
+    check bool "only the first exact source identity is effective" true
+      (Snapshot.is_effective_identity snapshot first_identity
+       && not (Snapshot.is_effective_identity snapshot second_identity));
+    let decoded_identity = match Reference.identity_of_yojson
+        (Reference.identity_to_yojson second_identity) with
+      | Ok identity -> identity | Error _ -> fail "exact identity roundtrip failed" in
+    check bool "decoded exact identity returns the original shadow entry object" true
+      (match Snapshot.find_exact snapshot decoded_identity with
+       | Some entry -> entry == second_entry | None -> false);
+    let wrong_package = Snapshot.make_identity ~source_id:first_id
+        ~package_id:(package "absent") ~name:"review" in
+    check bool "same Skill name cannot substitute for a missing exact package" true
+      (Snapshot.find_exact snapshot wrong_package = None
+       && not (Snapshot.is_effective_identity snapshot wrong_package));
     let first_reference = Snapshot.entry_reference first_entry in
     let second_reference = Snapshot.entry_reference second_entry in
     (match Snapshot.resolve_reference snapshot first_reference with
@@ -171,7 +185,20 @@ let test_precedence_and_exact_identity () =
          true
          (Reference.equal_identity missing_identity identity)
      | Error _ -> fail "missing identity returned the wrong typed error"
-     | Ok _ -> fail "missing exact identity resolved")
+     | Ok _ -> fail "missing exact identity resolved");
+    let changed = candidate ~directory:"review"
+        (document ~name:"review" ~description:"Changed" ~body:"updated body") in
+    let later = configured_snapshot ~config
+        (scans ~base_path:"/workspace" config [[changed];[second]]) in
+    check bool "a later snapshot cannot rebind the original frozen exact entry" true
+      (match Snapshot.find_exact snapshot first_identity, Snapshot.find_exact later first_identity with
+       | Some original, Some replacement -> original == first_entry
+           && original != replacement && replacement.document.description = "Changed"
+       | _ -> false);
+    check bool "the original pin remains stale in the changed snapshot" true
+      (match Snapshot.resolve_reference later first_reference with
+       | Error (Snapshot.Content_revision_mismatch _) -> true
+       | Error _ | Ok _ -> false)
   | _ -> fail "expected two configured sources"
 ;;
 
@@ -343,14 +370,27 @@ let test_exact_duplicate_is_rejected () =
   let config =
     parse_config (config_text (source_row ~id:"only" ~path:"skills"))
   in
-  let duplicate = candidate ~directory:"same" (document ~name:"same" ~description:"Same" ~body:"body") in
+  let original = candidate ~directory:"same" (document ~name:"same" ~description:"First" ~body:"body") in
+  let duplicate_source = document ~name:"same" ~description:"Rejected second" ~body:"other body" in
+  let duplicate = candidate ~directory:"same" duplicate_source in
   let snapshot =
     configured_snapshot
       ~config
-      (scans ~base_path:"/workspace" config [ [ duplicate; duplicate ] ])
+      (scans ~base_path:"/workspace" config [ [ original; duplicate ] ])
   in
   check int "one exact entry" 1 (List.length (Snapshot.entries snapshot));
-  check int "one exact duplicate rejection" 1 (List.length (Snapshot.rejections snapshot))
+  check int "one exact duplicate rejection" 1 (List.length (Snapshot.rejections snapshot));
+  (match Snapshot.find_effective_by_name snapshot "same" with
+   | Some entry ->
+     check string "rejected duplicate cannot replace the effective entry" "First" entry.document.description;
+     check bool "the effective winner is still its original exact entry" true
+       (match Snapshot.find_exact snapshot entry.identity with Some exact -> exact == entry | None -> false)
+   | None -> fail "duplicate rejection lost the original winner");
+  match Snapshot.rejections snapshot with
+  | [rejection] ->
+    check bool "duplicate retains its own rejected source revision" true
+      (rejection.content_revision = Some (Reference.content_revision_of_source_text duplicate_source))
+  | _ -> fail "duplicate rejection count changed"
 ;;
 
 let test_public_projection_redacts_private_content () =

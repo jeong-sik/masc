@@ -153,10 +153,16 @@ val catalog_revision : t -> catalog_revision
 val snapshot_revision : t -> snapshot_revision
 
 val find_exact : t -> identity -> entry option
+(** Indexed exact lookup, including shadowed entries. Returns the original
+    immutable entry object from {!entries}. *)
 val entry_reference : entry -> Skill_reference.t
 val resolve_reference :
   t -> Skill_reference.t -> (entry, reference_resolution_error) result
 val find_effective_by_name : t -> string -> entry option
+val is_effective_identity : t -> identity -> bool
+(** Whether this exact identity is the snapshot's first-source winner for its
+    name. A shadowed or missing identity is false; content revisions remain
+    the separate {!resolve_reference} check. *)
 
 val source_operation_to_string : source_operation -> string
 val content_revision_to_string : content_revision -> string

@@ -68,7 +68,7 @@ let completed result =
 let failed result =
   match result.Keeper_tool_execution.disposition with
   | Tool_result.Failed _ -> ()
-  | Tool_result.Completed () | Tool_result.Deferred () -> fail "changed prepared authority performed an Edit"
+  | Tool_result.Completed () | Tool_result.Deferred () -> fail "changed prepared authority performed a file effect"
 ;;
 
 let execute ?(hooks = Agent_core.Hooks.empty) env tools calls =
@@ -120,7 +120,8 @@ let batch env config meta recovery inputs =
   dispatch env [tool] calls
 ;;
 
-let public_bundle ?snapshot ?(sourceful = true) ?(with_read = false) env sw config meta recovery operation =
+let public_bundle ?snapshot ?(sourceful = true) ?(with_read = false) ?(with_write = false)
+    env sw config meta recovery operation =
   Masc_test_deps.with_process_env "MASC_BASE_PATH" (Some config.Workspace.base_path) @@ fun () ->
   Config_dir_resolver.reset ();
   Eio.Switch.on_release sw Config_dir_resolver.reset;
@@ -148,6 +149,10 @@ let public_bundle ?snapshot ?(sourceful = true) ?(with_read = false) env sw conf
     match Keeper_tool_descriptor.find_id "agent.read_file" with
     | Some read -> [descriptor; read]
     | None -> fail "canonical public Read descriptor is absent" in
+  let descriptors = if not with_write then descriptors else
+    match Keeper_tool_descriptor.find_id "agent.write_file" with
+    | Some write -> descriptors @ [write]
+    | None -> fail "canonical public Write descriptor is absent" in
   let snapshot = match snapshot with
     | Some snapshot -> snapshot
     | None -> Skill_catalog_snapshot.config_unreadable ~detail:"tool-only fixture has no shared Skill source" in
@@ -248,6 +253,412 @@ let physical_leaves meta =
   Keeper_tool_call_log.read_recent ~keeper_name:meta.Keeper_meta_contract.name ()
   |> (function Ok rows -> rows | Error (Index_unavailable detail) -> fail detail)
   |> List.filter (fun row -> Yojson.Safe.Util.member "composition_node_id" row <> `Null)
+;;
+
+let recipe_edit ?(after = []) id input =
+  `Assoc ["id", `String id; "tool", `String "Edit"; "args", input;
+          "after", `List (List.map (fun id -> `String id) after)]
+;;
+
+let recipe_call ?(id = "recipe-edit") nodes =
+  Agent_core.Types.ToolUse
+    {id; name = Keeper_composition_draft.run_tool_name;
+     input = `Assoc ["recipe", `Assoc ["execution", `String "inline"; "nodes", `List nodes]]}
+;;
+
+let recipe_read id path =
+  `Assoc ["id", `String id; "tool", `String "Read";
+          "args", `Assoc ["file_path", `String path]]
+;;
+
+let recipe_patch_input source before after =
+  let literal value = `Assoc ["kind", `String "literal"; "value", value] in
+  let field name value = `Assoc ["name", `String name; "value", value] in
+  `Assoc ["kind", `String "object"; "fields", `List
+    [field "file_path" (`Assoc ["kind", `String "output"; "node", `String source; "pointer", `String "/path"]);
+     field "old_string" (literal (`String before)); field "new_string" (literal (`String after))]]
+;;
+
+let recipe_dynamic_edit id source before after =
+  `Assoc ["id", `String id; "tool", `String "Edit";
+          "input", recipe_patch_input source before after]
+;;
+
+let test_inline_recipe_writes_original_upstream_bytes () =
+  fixture @@ fun env sw config meta recovery root ->
+  public_bundle ~with_read:true ~with_write:true env sw config meta recovery
+  @@ fun meta task_id _cell causal bundle ->
+  let source = Filename.concat root "source.txt" in
+  let target = Filename.concat root "new-directory/report.txt" in
+  let original = "  진행 결과\n\n원래 공백과 마지막 줄바꿈을 보존합니다.\n" in
+  write source original;
+  let value kind fields = `Assoc (("kind", `String kind) :: fields) in
+  let field name input = `Assoc ["name", `String name; "value", input] in
+  let nodes =
+    [ recipe_read "source" source
+    ; `Assoc ["id", `String "save"; "tool", `String "Write";
+        "input", value "object" ["fields", `List
+          [field "file_path" (value "literal" ["value", `String target]);
+           field "content" (value "output" ["node", `String "source"; "pointer", `String "/content"])]]]
+    ; `Assoc ["id", `String "verify"; "tool", `String "Read";
+        "after", `List [`String "save"]; "args", `Assoc ["file_path", `String target]]
+    ]
+  in
+  let authorized = ref 0 in
+  let rows = FS.For_testing.with_before_write_authorization (fun () ->
+      incr authorized;
+      check bool "the original write boundary precedes directory/file creation" false (Sys.file_exists target))
+    (fun () -> dispatch env bundle.tools [recipe_call ~id:"recipe-write" nodes]) in
+  check int "one public recipe executes the original Read/Write/Read flow" 1 (List.length rows);
+  check int "original file write authorization is reached exactly once" 1 !authorized;
+  check string "original upstream bytes land in the new file" original (read target);
+  check string "source bytes remain unchanged" original (read source);
+  let leaves = physical_leaves meta in
+  check int "all original physical leaf receipts are retained" 3 (List.length leaves);
+  List.iter (fun row ->
+    check string "file flow retains the original Task" task_id
+      Yojson.Safe.Util.(member "task_id" row |> to_string);
+    check string "file flow retains the original parent invocation" "recipe-write"
+      Yojson.Safe.Util.(member "parent_tool_use_id" row |> to_string)) leaves;
+  check int "all three results reach the original Gate aggregate" 3
+    Yojson.Safe.Util.(member "completed_tool_calls"
+      (Keeper_gate_causal_context.snapshot causal).snapshot |> to_list |> List.length);
+  Printf.printf "inline_file_write_measurement=%s\n%!"
+    (Yojson.Safe.to_string (`Assoc ["scope", `String "actual public inline recipe and filesystem producer";
+      "public_recipe_calls", `Int (List.length rows);
+      "physical_leaf_receipts", `Int (List.length leaves);
+      "write_authorization_calls", `Int !authorized;
+      "preserved_output_bytes", `Int (String.length (read target));
+      "original_task_and_parent_retained", `Bool true]))
+;;
+
+let test_recipe_writes_overlap ?(missing_parents = false) ~create ~dynamic () =
+  fixture @@ fun env sw config meta recovery root ->
+  public_bundle ~with_read:dynamic ~with_write:true env sw config meta recovery
+  @@ fun meta task_id _cell causal bundle ->
+  let target name = Filename.concat root
+      (if missing_parents then "writes/" ^ name ^ "/new/deep/result"
+       else if create then "writes/" ^ name ^ "/result"
+       else "writes/" ^ name) in
+  let left = target "left" and right = target "right" in
+  List.iter (fun path ->
+    let parent = if missing_parents then Filename.dirname (Filename.dirname (Filename.dirname path))
+      else Filename.dirname path in
+    Fs_compat.mkdir_p parent;
+    if not create then write path "before") [left;right];
+  let source = Filename.concat root "source" in
+  write source "  원래 결과\n\n";
+  let bytes = read source in
+  let node id path =
+    if dynamic then
+      let literal value = `Assoc ["kind", `String "literal"; "value", value] in
+      `Assoc ["id", `String id; "tool", `String "Write";
+        "input", `Assoc ["kind", `String "object"; "fields", `List
+          [`Assoc ["name", `String "file_path"; "value", literal (`String path)];
+           `Assoc ["name", `String "content"; "value", `Assoc
+             ["kind", `String "output"; "node", `String "source"; "pointer", `String "/content"]]]]]
+    else `Assoc ["id", `String id; "tool", `String "Write";
+      "args", `Assoc ["file_path", `String path; "content", `String bytes]] in
+  let nodes = [node "left" left;node "right" right] in
+  let nodes = if dynamic then recipe_read "source" source :: nodes else nodes in
+  let both, resolve_both = Eio.Promise.create () in
+  let entered = ref 0 in
+  let rows = FS.For_testing.with_before_write_authorization (fun () ->
+      if create then List.iter (fun path ->
+        check bool "preparation and authorization create no target" false (Sys.file_exists path)) [left;right];
+      if missing_parents then List.iter (fun path ->
+        check bool "original authorization precedes missing parent creation" false
+          (Sys.file_exists (Filename.dirname path))) [left;right];
+      incr entered;
+      if !entered = 2 then Eio.Promise.resolve resolve_both ();
+      Eio.Promise.await both)
+    (fun () -> dispatch env bundle.tools [recipe_call ~id:"parallel-writes" nodes]) in
+  check int "one original recipe invocation" 1 (List.length rows);
+  check int "independent canonical Write authorizations overlap" 2 !entered;
+  List.iter (fun path -> check string "canonical Write preserves exact input bytes" bytes (read path)) [left;right];
+  let leaves = physical_leaves meta in
+  check int "one physical receipt per original leaf" (if dynamic then 3 else 2) (List.length leaves);
+  List.iter (fun row ->
+    check string "original Task survives prepared Write" task_id
+      Yojson.Safe.Util.(member "task_id" row |> to_string);
+    check string "original parent survives prepared Write" "parallel-writes"
+      Yojson.Safe.Util.(member "parent_tool_use_id" row |> to_string)) leaves;
+  check int "original result observers retain every leaf" (if dynamic then 3 else 2)
+    Yojson.Safe.Util.(member "completed_tool_calls" (Keeper_gate_causal_context.snapshot causal).snapshot
+      |> to_list |> List.length)
+;;
+
+let test_prepared_write_retains_owner_and_creation_conflicts () =
+  fixture @@ fun _env sw config meta recovery root ->
+  let first = Filename.concat root "first" and second = Filename.concat root "second" in
+  let input path content mode = `Assoc ["path",`String path;"content",`String content;"mode",`String mode] in
+  let first_input = input first "first bytes" "overwrite" in
+  let prepare input = match FS.prepare_write ~sw ~config ~meta ~args:input with
+    | Ok (Some prepared) -> prepared
+    | Ok None -> fail "Write with existing parent was not prepared"
+    | Error detail -> fail detail in
+  let consume meta prepared input = FS.handle_file_write_with_outcome
+      ~turn_sandbox_factory:None ~config ~meta ~publication_recovery:recovery
+      ~prepared_write:prepared ~args:input () in
+  let first_prepared = prepare first_input and second_prepared = prepare (input second "second bytes" "overwrite") in
+  let conflicts left right = List.exists (fun scope ->
+    List.exists (Agent_core.Tool_contract.Resource_scope.conflicts scope)
+      (FS.prepared_write_scopes right)) (FS.prepared_write_scopes left) in
+  check bool "missing entries share the real parent creation claim" true
+    (conflicts first_prepared second_prepared);
+  check bool "preparing creation performs no file effect" false (Sys.file_exists first);
+  consume {meta with name="other-owner"} first_prepared first_input |> failed;
+  consume meta first_prepared (input first "changed input" "overwrite") |> failed;
+  check bool "rejected owners and inputs create no target" false (Sys.file_exists first);
+  consume meta first_prepared first_input |> completed;
+  check string "original consumer creates original bytes" "first bytes" (read first);
+  let alias = Filename.concat root "hard-link" in
+  Unix.link first alias;
+  let append = prepare (input first "!" "append")
+  and alias_append = prepare (input alias "?" "append") in
+  check bool "append hard links retain backend object ordering" true (conflicts append alias_append);
+  consume meta append (input first "!" "append") |> completed;
+  check string "append uses the original pinned file semantics" "first bytes!" (read alias);
+  FS.release_prepared_write alias_append;
+  FS.release_prepared_write alias_append;
+  consume meta alias_append (input alias "?" "append") |> failed;
+  check string "released authority performs no later effect" "first bytes!" (read first);
+  let parent = Filename.concat root "pinned-parent" in
+  let target = Filename.concat parent "result" in
+  write target "original parent";
+  let original_input = input target "must not land" "overwrite" in
+  let prepared = prepare original_input in
+  Unix.rename parent (parent ^ "-held");
+  write target "replacement parent";
+  consume meta prepared original_input |> failed;
+  check string "changed physical parent cannot consume the old resource" "replacement parent" (read target);
+  check string "retired parent receives no effect" "original parent"
+    (read (Filename.concat (parent ^ "-held") "result"))
+;;
+
+let test_prepared_missing_parent_writes_recompute_after_predecessor () =
+  fixture @@ fun _env sw config meta recovery root ->
+  let left = Filename.concat root "creation-left" in
+  let right = Filename.concat root "creation-right" in
+  List.iter Fs_compat.mkdir_p [left; right];
+  let target = Filename.concat left "new/deep/result" in
+  let input path content mode = `Assoc ["path", `String path;
+      "content", `String content; "mode", `String mode] in
+  let prepare input = match FS.prepare_write ~sw ~config ~meta ~args:input with
+    | Ok (Some prepared) -> prepared
+    | Ok None -> fail "missing parent Write lost its prepared resources"
+    | Error detail -> fail detail in
+  let consume meta prepared input = FS.handle_file_write_with_outcome
+      ~turn_sandbox_factory:None ~config ~meta ~publication_recovery:recovery
+      ~prepared_write:prepared ~args:input () in
+  let conflicts a b = List.exists (fun scope ->
+    List.exists (Agent_core.Tool_contract.Resource_scope.conflicts scope)
+      (FS.prepared_write_scopes b)) (FS.prepared_write_scopes a) in
+  let first_input = input target "  first\n" "overwrite" in
+  let append_input = input target "두 번째\n" "append" in
+  let first = prepare first_input and append = prepare append_input in
+  let sibling = prepare (input (Filename.concat left "other/result") "sibling" "overwrite") in
+  let independent = prepare (input (Filename.concat right "new/result") "other" "overwrite") in
+  let alias = Filename.concat root "creation-left-alias" in
+  Unix.symlink left alias;
+  let aliased = prepare (input (Filename.concat alias "aliased/result") "alias" "overwrite") in
+  check bool "future writes in one physical ancestor retain order" true (conflicts first append);
+  check bool "missing sibling directories share their physical ancestor" true (conflicts first sibling);
+  check bool "ancestor aliases retain the same creation claim" true (conflicts first aliased);
+  check bool "disjoint existing ancestors admit independent creation" false (conflicts first independent);
+  check bool "preparing every future write creates no directory" false
+    (Sys.file_exists (Filename.concat left "new"));
+  consume {meta with name="other-owner"} first first_input |> failed;
+  consume meta first (input target "changed bytes" "overwrite") |> failed;
+  check bool "rejected inputs create no directory" false (Sys.file_exists (Filename.dirname target));
+  let authorized = ref 0 in
+  FS.For_testing.with_before_write_authorization (fun () ->
+      incr authorized;
+      check bool "each Gate sees current predecessor directory state" (!authorized > 1)
+        (Sys.file_exists (Filename.dirname target)))
+    (fun () ->
+      consume meta first first_input |> completed;
+      consume meta append append_input |> completed);
+  check int "each original operation reaches its own authorization" 2 !authorized;
+  check string "preprepared Append consumes the predecessor's actual file" "  first\n두 번째\n" (read target);
+  FS.release_prepared_write independent;
+  consume meta independent (input (Filename.concat right "new/result") "other" "overwrite") |> failed;
+  check bool "released missing-parent authority creates no directory" false
+    (Sys.file_exists (Filename.concat right "new"));
+  List.iter FS.release_prepared_write [first; append; sibling; aliased]
+;;
+
+let test_prepared_missing_parent_write_retains_physical_ancestor () =
+  fixture @@ fun _env sw config meta recovery root ->
+  let input path = `Assoc ["path", `String path; "content", `String "original bytes"] in
+  let prepare input = match FS.prepare_write ~sw ~config ~meta ~args:input with
+    | Ok (Some prepared) -> prepared
+    | Ok None -> fail "missing parent Write was not prepared"
+    | Error detail -> fail detail in
+  let consume prepared input = FS.handle_file_write_with_outcome
+      ~turn_sandbox_factory:None ~config ~meta ~publication_recovery:recovery
+      ~prepared_write:prepared ~args:input () in
+  let retained = Filename.concat root "retained" in
+  Fs_compat.mkdir_p retained;
+  let target = Filename.concat retained "new/deep/result" in
+  let original_input = input target in
+  let prepared = prepare original_input in
+  Unix.rename retained (retained ^ "-held");
+  Fs_compat.mkdir_p retained;
+  consume prepared original_input |> failed;
+  List.iter (fun path -> check bool "rebound ancestors receive no effect" false (Sys.file_exists path))
+    [Filename.concat retained "new"; Filename.concat (retained ^ "-held") "new"];
+  let owned = Filename.concat root "owned" and other = Filename.concat root "other" in
+  List.iter Fs_compat.mkdir_p [owned; other];
+  let redirected = Filename.concat owned "new/deep/result" in
+  let redirected_input = input redirected in
+  let redirect_prepared = prepare redirected_input in
+  Unix.symlink other (Filename.concat owned "new");
+  consume redirect_prepared redirected_input |> failed;
+  check bool "a redirect outside the claimed ancestor creates nothing" false
+    (Sys.file_exists (Filename.concat other "deep"));
+  let materialized = Filename.concat owned "materialized" in
+  Fs_compat.mkdir_p materialized;
+  let internal_target = Filename.concat owned "later/deep/result" in
+  let internal_input = input internal_target in
+  let internal_prepared = prepare internal_input in
+  Unix.symlink materialized (Filename.concat owned "later");
+  consume internal_prepared internal_input |> completed;
+  check string "resolution inside the original claimed ancestor remains usable" "original bytes"
+    (read (Filename.concat materialized "deep/result"));
+  List.iter FS.release_prepared_write [prepared; redirect_prepared; internal_prepared]
+;;
+
+let test_recipe_edits_overlap_with_original_source ?(dynamic = false) ~nested () =
+  fixture @@ fun env sw config meta recovery root ->
+  let snapshot = if nested then Some (publish_edit_skills sw config) else None in
+  public_bundle ?snapshot ~with_read:dynamic env sw config meta recovery @@ fun meta task_id _cell causal bundle ->
+  let left = Filename.concat root "recipe/left" and right = Filename.concat root "recipe/right" in
+  write left "left-before"; write right "right-before";
+  let inputs = [public_args left "left-before" "left-after";
+                public_args right "right-before" "right-after"] in
+  let make_input index input =
+    if dynamic then
+      let before = Yojson.Safe.Util.(member "old_string" input |> to_string) in
+      let after = Yojson.Safe.Util.(member "new_string" input |> to_string) in
+      "input", recipe_patch_input ("read-" ^ string_of_int index) before after
+    else "args", input in
+  let nodes = match snapshot with
+    | None -> List.mapi (fun index input ->
+        `Assoc ["id", `String ("patch-" ^ string_of_int index); "tool", `String "Edit";
+                make_input index input]) inputs
+    | Some snapshot ->
+        let references = Skill_catalog_snapshot.entries snapshot
+            |> List.map Skill_catalog_snapshot.entry_reference in
+        List.mapi (fun index (reference, input) ->
+          `Assoc ["id", `String ("child-" ^ string_of_int index);
+                  "skill_reference", Skill_reference.to_yojson reference; make_input index input])
+          (List.combine references inputs) in
+  let nodes = if dynamic then [recipe_read "read-0" left; recipe_read "read-1" right] @ nodes else nodes in
+  let both, resolve_both = Eio.Promise.create () in
+  let entered = ref 0 in
+  let rows = FS.For_testing.with_before_write_authorization (fun () ->
+      incr entered;
+      if !entered = 2 then Eio.Promise.resolve resolve_both ();
+      Eio.Promise.await both)
+    (fun () -> dispatch env bundle.tools [recipe_call nodes]) in
+  check int "one public recipe call executes both leaves" 1 (List.length rows);
+  check int "independent recipe leaves overlap actual file authorization" 2 !entered;
+  check string "recipe left committed bytes" "left-after" (read left);
+  check string "recipe right committed bytes" "right-after" (read right);
+  let leaves = physical_leaves meta in
+  check int "original node receipts survive resolved resource binding"
+    (if dynamic then (if nested then 6 else 4) else 2) (List.length leaves);
+  List.iter (fun row ->
+    check string "recipe retains original Task" task_id
+      Yojson.Safe.Util.(member "task_id" row |> to_string);
+    check string "recipe retains original trace" (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+      Yojson.Safe.Util.(member "trace_id" row |> to_string);
+    check string "recipe retains original parent Tool invocation" "recipe-edit"
+      Yojson.Safe.Util.(member "parent_tool_use_id" row |> to_string)) leaves;
+  check int "file results reach the original Gate aggregate" (if dynamic then 4 else 2)
+    Yojson.Safe.Util.(member "completed_tool_calls"
+      (Keeper_gate_causal_context.snapshot causal).snapshot |> to_list |> List.length);
+  if nested then begin
+    let ledger = Keeper_skill_activation_ledger.load_existing ~config ~trace_id:meta.runtime.trace_id
+        |> function
+        | Ok (Some ledger) -> ledger
+        | Ok None -> fail "nested recipe did not retain its activation ledger"
+        | Error error -> fail (Keeper_skill_activation_ledger.store_error_to_string error) in
+    check int "exact nested Skill activations survive file overlap" 2
+      (List.length (Keeper_skill_activation_ledger.activations ledger))
+  end
+;;
+
+let test_recipe_conflicts_consume_predecessor_bytes ?(dynamic = false) () =
+  fixture @@ fun env sw config meta recovery root ->
+  public_bundle ~with_read:dynamic env sw config meta recovery @@ fun meta _task _cell _causal bundle ->
+  let path = Filename.concat root "recipe-conflict/file" in
+  write path "first";
+  let nodes = if dynamic then
+      [recipe_read "source" path;
+       recipe_dynamic_edit "first" "source" "first" "second";
+       recipe_dynamic_edit "second" "source" "second" "third"]
+    else [recipe_edit "first" (public_args path "first" "second");
+          recipe_edit "second" (public_args path "second" "third")] in
+  ignore (dispatch env bundle.tools [recipe_call nodes]);
+  check string "conflicting recipe patches consume committed predecessor bytes" "third" (read path);
+  check int "conflict-ordered handlers retain receipts" (if dynamic then 3 else 2) (List.length (physical_leaves meta))
+;;
+
+let test_cancelled_recipe_releases_file_capabilities ?(dynamic = false) () =
+  fixture @@ fun env sw config meta recovery root ->
+  public_bundle ~with_read:dynamic env sw config meta recovery @@ fun _meta _task _cell _causal bundle ->
+  let left = Filename.concat root "recipe-cancel/left" and right = Filename.concat root "recipe-cancel/right" in
+  write left "before"; write right "before";
+  let nodes = if dynamic then
+      [recipe_read "source-left" left; recipe_read "source-right" right;
+       recipe_dynamic_edit "left" "source-left" "before" "after";
+       recipe_dynamic_edit "right" "source-right" "before" "after"]
+    else [recipe_edit "left" (public_args left "before" "after");
+          recipe_edit "right" (public_args right "before" "after")] in
+  let both, resolve_both = Eio.Promise.create () in
+  let entered = ref 0 in
+  (match Eio.Switch.run (fun child ->
+    FS.For_testing.with_before_write_authorization (fun () ->
+        incr entered;
+        if !entered = 2 then Eio.Promise.resolve resolve_both ();
+        Eio.Fiber.await_cancel ()) (fun () ->
+      Eio.Fiber.fork ~sw:child (fun () -> ignore (dispatch env bundle.tools [recipe_call nodes]));
+      Eio.Promise.await both;
+      Eio.Switch.fail child Exit)) with
+   | () -> fail "recipe cancellation did not propagate"
+   | exception Exit -> ());
+  check string "cancelled recipe left remains untouched" "before" (read left);
+  check string "cancelled recipe right remains untouched" "before" (read right);
+  ignore (dispatch env bundle.tools [recipe_call ~id:"recipe-after-cancel" nodes]);
+  check string "successor invocation reacquires left" "after" (read left);
+  check string "successor invocation reacquires right" "after" (read right)
+;;
+
+let test_dynamic_failed_conflict_keeps_independent_branch () =
+  fixture @@ fun env sw config meta recovery root ->
+  public_bundle ~with_read:true env sw config meta recovery @@ fun meta _task _cell _causal bundle ->
+  let shared = Filename.concat root "dynamic-failure/shared" in
+  let other = Filename.concat root "dynamic-failure/other" in
+  write shared "before"; write other "before";
+  let nodes = [recipe_read "shared-source" shared; recipe_read "other-source" other;
+    recipe_dynamic_edit "failed" "shared-source" "absent" "after";
+    recipe_dynamic_edit "blocked" "shared-source" "before" "must-not-run";
+    recipe_dynamic_edit "independent" "other-source" "before" "after"] in
+  let call = Agent_core.Types.ToolUse {id = "failed-dynamic"; name = Keeper_composition_draft.run_tool_name;
+    input = `Assoc ["recipe", `Assoc ["execution", `String "inline";
+      "branch_failure_policy", `String "continue_independent"; "nodes", `List nodes]]} in
+  let rows = execute env bundle.tools [call] in
+  (match rows with
+   | [(row : Agent_core.Agent_tools.tool_execution_result)] ->
+     (match row.outcome with
+      | Agent_core.Types.Tool_failed _ -> ()
+      | Agent_core.Types.Tool_succeeded -> fail "dynamic failed patch became a successful outer result")
+   | [] | _ :: _ -> fail "dynamic recipe did not retain exactly one outer result");
+  check string "failed conflict prevents the later write" "before" (read shared);
+  check string "independent resolved resource still completes" "after" (read other);
+  check int "only reads, failed patch and independent patch dispatch" 4 (List.length (physical_leaves meta))
 ;;
 
 let test_one_inline_overlaps_its_disjoint_edits () =
@@ -942,7 +1353,24 @@ let test_prepared_read_skips_a_long_line_and_stops_at_eof () =
 ;;
 
 let () = run "prepared actual file resources"
-  ["actual filesystem and SDK", [
+  ["prepared Write and actual recipes", [
+    test_case "existing disjoint Writes overlap original authorization" `Quick
+      (test_recipe_writes_overlap ~create:false ~dynamic:false);
+    test_case "new targets under disjoint existing parents overlap" `Quick
+      (test_recipe_writes_overlap ~create:true ~dynamic:false);
+    test_case "upstream content binds original Write resources when ready" `Quick
+      (test_recipe_writes_overlap ~create:true ~dynamic:true);
+    test_case "missing directories under disjoint ancestors overlap original authorization" `Quick
+      (test_recipe_writes_overlap ~missing_parents:true ~create:true ~dynamic:false);
+    test_case "upstream writes create missing directories with original receipts" `Quick
+      (test_recipe_writes_overlap ~missing_parents:true ~create:true ~dynamic:true);
+    test_case "prepared future writes consume current predecessor state" `Quick
+      test_prepared_missing_parent_writes_recompute_after_predecessor;
+    test_case "missing parent writes retain their claimed physical ancestor" `Quick
+      test_prepared_missing_parent_write_retains_physical_ancestor;
+    test_case "Write ownership creation claims hard links and release remain original" `Quick
+      test_prepared_write_retains_owner_and_creation_conflicts];
+    "actual filesystem and SDK", [
     test_case "disjoint actual Edits overlap" `Quick test_disjoint_actual_edits_overlap;
     test_case "conflicting patches read current predecessor bytes" `Quick test_successive_patches_use_current_source;
     test_case "directory aliases retain planned order" `Quick test_directory_alias_keeps_patch_order;
@@ -965,6 +1393,27 @@ let () = run "prepared actual file resources"
         test_public_edits_overlap_through_handler_and_bridge;
       test_case "public conflicting patches consume predecessor bytes" `Quick test_public_conflicting_edits_keep_current_bytes;
       test_case "public Edit with unavailable source stays Serial" `Quick test_public_edits_without_source_stay_serial];
+    "task recipes and original file producers", [
+      test_case "one inline recipe writes original upstream bytes and verifies through Read" `Quick
+        test_inline_recipe_writes_original_upstream_bytes;
+      test_case "one recipe overlaps independent Edits with original Task and Gate receipts" `Quick
+        (test_recipe_edits_overlap_with_original_source ~dynamic:false ~nested:false);
+      test_case "fixed exact child Skills overlap through the original recipe" `Quick
+        (test_recipe_edits_overlap_with_original_source ~dynamic:false ~nested:true);
+      test_case "upstream file outputs bind independent recipe resources" `Quick
+        (test_recipe_edits_overlap_with_original_source ~dynamic:true ~nested:false);
+      test_case "upstream arguments preserve exact nested Skill overlap and activations" `Quick
+        (test_recipe_edits_overlap_with_original_source ~dynamic:true ~nested:true);
+      test_case "resolved dynamic conflicts consume committed predecessor bytes" `Quick
+        (test_recipe_conflicts_consume_predecessor_bytes ~dynamic:true);
+      test_case "cancelled dynamic recipe releases capabilities for its successor" `Quick
+        (test_cancelled_recipe_releases_file_capabilities ~dynamic:true);
+      test_case "dynamic failed conflict preserves independent completed effects" `Quick
+        test_dynamic_failed_conflict_keeps_independent_branch;
+      test_case "recipe conflicts consume committed predecessor bytes" `Quick
+        (test_recipe_conflicts_consume_predecessor_bytes ~dynamic:false);
+      test_case "cancelled recipe releases capabilities for its successor" `Quick
+        (test_cancelled_recipe_releases_file_capabilities ~dynamic:false)];
     "published Inline Skills and actual Edit", [
       test_case "one published Skill overlaps Edits sharing the resolved source" `Quick
         (test_shared_source_edits_overlap ~in_skill:true);

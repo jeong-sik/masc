@@ -9,10 +9,13 @@ SDK errored and native started are distinct facts; native start carries no
 completion verdict. Original and receiving turns/runtimes remain visible.
 This display implementation needs installed runtime/UI verification separately.
 
-For an instantiated named Inline Skill with at least one Edit and only Read/Edit
-leaves, see [Read/Edit resources](PREPARED-EDIT-RESOURCES.md) for file preparation
-and independent leaf execution. Its inputs must be available before execution;
-nested children and Async plans retain their own admission contracts.
+Inline Read/Edit/Write recipes and exact inline children can bind producer-owned file
+resources after upstream inputs resolve, including pure child argument validation.
+Shared-mount Overwrite/Append can retain an existing ancestor when parent
+directories are missing; creation stays at the original authorized Write boundary.
+See [recipe file execution](keeper-recipe-file-execution.md) for independent leaf
+execution, conflict order and call-owned cleanup. Async file effects require their
+own durable replay contract.
 
 `Keeper_composition_nested.compile` expands an exact, turn-frozen inline Skill
 into the existing typed plan and lowers an async Skill into native submission
@@ -229,8 +232,8 @@ arguments and source-to-expanded leaf mapping for later durable evidence.
 
 Inline parents refuse async children as `async_child_requires_suspension`.
 Async parents use the native submission and result operands described above;
-an async request receipt is not a child result. Named async Skills and expanded
-inline leaves admit static read-only ordinary Tool contracts and the isolated
+an async request receipt is not a child result. Within async parents, named Skills
+and expanded inline leaves admit static read-only ordinary Tool contracts and the isolated
 owned-job launch producer with its Serial durable ownership. An async child can
 start its own job, wait for its original result and export its complete output.
 Fresh continuation reuses the settled launch instead of dispatching it again.

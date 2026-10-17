@@ -391,6 +391,107 @@ let prepare ~base_path surface json = match Draft.prepare ~base_path ~capability
   | Ok value -> value | Error error -> fail (Yojson.Safe.to_string (Draft.error_to_json error))
 ;;
 
+let test_inline_edit_recipe_preserves_effect_and_durable_admission () =
+  let surface, _ = fixture () in
+  let patch = `Assoc [ "id", `String "patch"; "tool", `String "Edit"
+      ; "args", `Assoc [ "file_path", `String "document.txt"
+          ; "old_string", `String "before"; "new_string", `String "after" ] ] in
+  let recipe = request [ patch ] in
+  let compiled = Nested.compile ~execution:Masc.Keeper_tool_composition_catalog.Inline
+      ~capability_surface:surface recipe |> require "inline Edit recipe rejected" in
+  let node = match Plan.nodes (Nested.plan compiled) with
+    | [node] -> node | _ -> fail "one original Edit leaf" in
+  let descriptor = Plan.descriptor (Nested.plan compiled) node.id
+      |> function Some descriptor -> descriptor | None -> fail "Edit descriptor absent" in
+  check bool "Edit retains its effectful serial producer" true
+    (descriptor.execution = Masc.Keeper_tool_descriptor.Ordinary Serial
+     && Masc.Keeper_tool_descriptor.prepared_leaf_admission descriptor = Owned_file_mutation_leaf
+     && Masc.Keeper_tool_descriptor.readonly_static_hint descriptor = Some false);
+  (match Nested.compile ~execution:Masc.Keeper_tool_composition_catalog.Async
+      ~capability_surface:surface recipe with
+   | Error (Nested.Unsupported_leaf {node_id;tool_name}) ->
+       check string "durable refusal retains original node" "patch" (Plan.Node_id.to_string node_id);
+       check string "durable refusal retains original Tool" "Edit" tool_name
+   | Error _ -> fail "async Edit refused for an unrelated reason"
+   | Ok _ -> fail "ordinary Edit acquired a replayable async launch contract");
+  let source = {|---
+name: nested-read
+description: Apply one exact owned-file patch.
+---
+```toml composition
+[[compositions]]
+name = "nested-read"
+execution = "inline"
+branch_failure_policy = "continue_independent"
+[[compositions.nodes]]
+id = "patch"
+tool = "Edit"
+[compositions.nodes.input]
+kind = "literal"
+value = { file_path = "document.txt", old_string = "before", new_string = "after" }
+```
+|} in
+  let surface, reference = fixture ~source () in
+  let parent = request [ nested ~args:(`Assoc []) "child" reference ] in
+  let compiled = Nested.compile ~execution:Masc.Keeper_tool_composition_catalog.Inline
+      ~capability_surface:surface parent |> require "exact inline Edit child rejected" in
+  check int "exact Edit child keeps one activation scope" 1 (List.length (Nested.calls compiled));
+  check int "fixed child retains one original file leaf" 1 (List.length (Plan.nodes (Nested.plan compiled)));
+  match Nested.compile ~execution:Masc.Keeper_tool_composition_catalog.Async
+      ~capability_surface:surface parent with
+  | Error (Nested.Unsupported_leaf _) -> ()
+  | Error _ -> fail "durable parent refused for an unrelated reason"
+  | Ok _ -> fail "inline child smuggled file effects into durable async admission"
+;;
+
+let test_inline_write_keeps_original_effect_and_durable_refusal () =
+  let surface, _ = fixture () in
+  let recipe = request [`Assoc ["id", `String "save"; "tool", `String "Write";
+    "args", `Assoc ["file_path", `String "report.txt"; "content", `String "original bytes\n"]]] in
+  let compiled = compile surface recipe in
+  let node = match Plan.nodes (Nested.plan compiled) with
+    | [node] -> node | _ -> fail "one original Write leaf" in
+  let descriptor = Plan.descriptor (Nested.plan compiled) node.id
+    |> function Some descriptor -> descriptor | None -> fail "original Write descriptor absent" in
+  check bool "Write stays effectful and Serial" true
+    (descriptor.execution = Masc.Keeper_tool_descriptor.Ordinary Serial
+     && Masc.Keeper_tool_descriptor.readonly_static_hint descriptor = Some false);
+  (match Nested.compile ~execution:Masc.Keeper_tool_composition_catalog.Async
+      ~capability_surface:surface recipe with
+   | Error (Nested.Unsupported_leaf {node_id;tool_name}) ->
+       check string "async refusal names the original Write node" "save" (Plan.Node_id.to_string node_id);
+       check string "async refusal names the original Write capability" "Write" tool_name
+   | Error _ -> fail "async Write refused for an unrelated reason"
+   | Ok _ -> fail "ordinary Write acquired durable replay authority");
+  let declaration execution = Printf.sprintf {|[[compositions]]
+name = "nested-read"
+execution = %S
+branch_failure_policy = "continue_independent"
+[[compositions.nodes]]
+id = "save"
+tool = "Write"
+[compositions.nodes.input]
+kind = "literal"
+value = { file_path = "report.txt", content = "original bytes\n" }
+|} execution in
+  (match Masc.Keeper_tool_composition_catalog.parse (declaration "async") with
+   | Error (Async_leaf_not_admitted {tool_name;_}) ->
+       check string "durable catalog keeps the same original refusal" "Write" tool_name
+   | Error _ -> fail "async Write catalog refused for an unrelated reason"
+   | Ok _ -> fail "async catalog admitted an ordinary file write");
+  let source = "---\nname: nested-read\ndescription: Save the original file bytes.\n---\n```toml composition\n"
+      ^ declaration "inline" ^ "```\n" in
+  let surface, reference = fixture ~source () in
+  let parent = request [nested ~args:(`Assoc []) "child" reference] in
+  let compiled = compile surface parent in
+  check int "exact inline Write child retains one activation scope" 1 (List.length (Nested.calls compiled));
+  match Nested.compile ~execution:Masc.Keeper_tool_composition_catalog.Async
+      ~capability_surface:surface parent with
+  | Error (Nested.Unsupported_leaf _) -> ()
+  | Error _ -> fail "async Write child refused for an unrelated reason"
+  | Ok _ -> fail "inline Write child acquired durable async replay authority"
+;;
+
 let test_nested_draft_freezes_and_revalidates_recipe () =
   Eio_main.run @@ fun _ ->
   with_base @@ fun base_path ->
@@ -791,6 +892,14 @@ let test_public_nested_prepare_run_records_only_admitted_children ?(execution=Ma
      let original_request = accepted |> member "request_id" |> to_string in
      let original_terminal = Async.load_canonical_durable_terminal ~base_path ~caller:"fixture" original_request
        |> require "original completed request before authority fault" |> Async.durable_terminal_entry in
+     (* Canonical publication precedes the worker wrapper's switch cleanup.
+        Let the original worker finish before faulting its ledger and comparing
+        worker counts; its normal departure must not masquerade as a resume
+        admission change. This isolated scenario owns the async workers. *)
+     let rec await_worker_cleanup () =
+       if Async.For_testing.active_switch_count () = 0 then ()
+       else (Eio.Fiber.yield (); await_worker_cleanup ()) in
+     await_worker_cleanup ();
      let resume_input = `Assoc ["sha256",`String draft_reference.sha256;"resume_run_id",`String run_id] in
      List.iter (fun corrupt ->
        Unix.rename events saved;
@@ -843,6 +952,10 @@ let () = run "exact inline composition compiler"
         ; test_case "upstream arguments bind repeated exact async Skills independently" `Quick test_upstream_child_arguments_bind_exact_declared_plan
         ; test_case "upstream inline arguments preserve namespaces and whole-child failure" `Quick test_upstream_inline_arguments_and_whole_child_failure
         ; test_case "authority, arguments, cycles and semantic refusals" `Quick test_refusals_preserve_frozen_authority_and_contracts
+        ; test_case "inline Edit recipes and exact children retain effect and durable admission" `Quick
+            test_inline_edit_recipe_preserves_effect_and_durable_admission
+        ; test_case "inline Write and exact children retain effect and durable refusal" `Quick
+            test_inline_write_keeps_original_effect_and_durable_refusal
         ; test_case "frozen nested draft recipe and exact provenance" `Quick test_nested_draft_freezes_and_revalidates_recipe
         ; test_case "public prepare/run admits exact children once and delivers through parent" `Quick
             (test_public_nested_prepare_run_records_only_admitted_children ~reject_child:false)

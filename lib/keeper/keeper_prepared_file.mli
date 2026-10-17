@@ -51,3 +51,50 @@ val with_parents
     The source file opens at execution, retaining sequential reads/patches
     after an earlier atomic replacement. This
     does not authorize the effect or bypass Gate/publication recovery. *)
+
+module Write : sig
+  type t
+
+  val prepare
+    : sw:Eio.Switch.t
+    -> operation:Keeper_tool_write_mode.t
+    -> config:Workspace.config
+    -> meta:Keeper_meta_contract.keeper_meta
+    -> args:Yojson.Safe.t
+    -> confined:Keeper_alerting_path.confined_path
+    -> (t option, string) result
+  (** Pin existing target/resolved-source parents, or their deepest existing
+      ancestors, for Overwrite or Append. The file and child directories may
+      be absent. Preparation creates nothing; unsupported resources retain
+      ordinary execution through [None]. *)
+
+  val scopes : t -> Agent_core.Tool_contract.Resource_scope.t list
+  (** Existing objects carry entry and inode writes. An absent object claims
+      its actual parent for creation. Missing directories claim their existing
+      ancestor subtree, so filesystem spelling aliases and intervening parent
+      creation are ordered without guessed normalization. Disjoint subtrees
+      retain independent resource scopes. *)
+  val release : t -> unit
+
+  val with_parents
+    : operation:Keeper_tool_write_mode.t
+    -> config:Workspace.config
+    -> meta:Keeper_meta_contract.keeper_meta
+    -> args:Yojson.Safe.t
+    -> confined:Keeper_alerting_path.confined_path
+    -> t
+    -> (root_dir:Eio.Fs.dir_ty Eio.Path.t
+        -> parent_dir:Eio.Fs.dir_ty Eio.Path.t
+        -> parent_components:string list
+        -> missing_parents:string list
+        -> leaf:string
+        -> ('a, string) result)
+    -> ('a, string) result
+  (** Revalidate the exact operation, owner/input, confinement and pinned
+      physical directory bindings, then invoke the original write consumer.
+      For missing parents, resolution may advance inside the claimed physical
+      ancestor as predecessors create directories; execution recomputes the
+      remaining missing segments before Gate. A redirect outside that ancestor
+      is refused, never an unprepared fallback. This supplies neither Gate
+      permission nor durable replay authority. *)
+end

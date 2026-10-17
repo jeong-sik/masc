@@ -3,8 +3,11 @@
     ({!Keeper_tool_composition_catalog.requires_async_controls}). Named inline
     compositions may overlap when all leaves are statically read-only,
     ordinary and concurrent, and mutable causal evidence can be forked.
-    Edit-only Inline plans with fully resolved inputs can instead bind actual
-    producer-owned directory claims through their original executor calls. *)
+    Inline Read/Edit plans bind actual producer-owned directory claims through
+    their original executor calls. Upstream-dependent inputs bind when ready,
+    including pure argument validation for exact nested inline children.
+    This includes task recipes and named inline Skills;
+    transient run calls retain their Serial outer descriptor. *)
 
 val composition_run_summary_tool_name : string
 (** Internal durable row name for one terminal composition run. It is not a

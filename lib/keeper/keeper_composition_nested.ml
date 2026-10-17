@@ -327,15 +327,20 @@ let flatten nodes =
   |> Result.map (fun (nodes,children,arguments) -> List.rev nodes,List.rev children,List.rev arguments)
 ;;
 
-let rec validate_leaves ?(parameterized=false) plan =
+let rec validate_leaves ~execution ?(parameterized=false) plan =
   let* () = List.fold_left (fun acc (node : Plan.node) ->
       let* () = acc in
       match Plan.contract plan node.id with
       | Some {target=Plan.Descriptor_target descriptor;_} -> (match Keeper_tool_descriptor.prepared_leaf_admission descriptor with
           | Read_only_ordinary_leaf | Owned_job_launch_leaf -> Ok ()
+          | Owned_file_mutation_leaf ->
+            (match execution with
+             | Catalog.Inline -> Ok ()
+             | Catalog.Async -> Error (Unsupported_leaf { node_id = node.id; tool_name = node.tool_name }))
           | Direct_only ->
             Error (Unsupported_leaf { node_id = node.id; tool_name = node.tool_name }))
-      | Some {target=Plan.Child_submission child;_} -> validate_leaves ~parameterized:true (Plan.child_plan child.child)
+      | Some {target=Plan.Child_submission child;_} ->
+          validate_leaves ~execution:Catalog.Async ~parameterized:true (Plan.child_plan child.child)
       | Some {target=(Plan.Child_arguments _ | Plan.Child_result _);_} -> Ok ()
       | None -> Error (Unsupported_leaf { node_id = node.id; tool_name = node.tool_name })) (Ok ()) (Plan.nodes plan) in
   (if parameterized then Plan.validate_parameterized_inputs plan
@@ -371,7 +376,7 @@ let compile_with ~descriptors ~execution ~capability_surface json =
           |> Result.map_error (fun error -> Expanded_plan_rejected error) in
       let calls = List.filter_map (function Leaf _ -> None | Inline_child (_,_,call,_) | Async_child (_,_,call) -> Some call) expanded in
       Ok (plan, calls) in
-  let* () = validate_leaves plan in
+  let* () = validate_leaves ~execution plan in
   Ok { plan; calls }
 ;;
 

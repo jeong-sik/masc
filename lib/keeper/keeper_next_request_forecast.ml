@@ -381,7 +381,11 @@ let readings_of_records (records : Turn_record.t list) =
 ;;
 
 (* The wake line as the range's encoder counts it, the same figure the
-   assembly subtracts from the transmitted bytes. *)
+   assembly subtracts from the transmitted bytes. It is the plain wake
+   prompt: the turn appends answered Asks and the completion line its
+   response policy picks from that turn's inputs
+   ([Keeper_agent_run.with_completion_clause]), neither of which exists
+   before the turn. *)
 let wake_line () =
   let message =
     { Agent_core.Types.role = Agent_core.Types.User

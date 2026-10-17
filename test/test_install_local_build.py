@@ -114,12 +114,13 @@ def register(manifests, base, name):
 # Stands in for the new build's deployment preflight helper and records every
 # call in helper-calls beside it. install-local-build asks it which workspace
 # masc would use; the gate asks for its identity and filenames, then for the
-# runtime.toml verdict. [unnamed_workspace] is what resolve-workspace answers
+# runtime.toml verdict, and install-local-build then asks for the stored-state
+# verdict. [unnamed_workspace] is what resolve-workspace answers
 # without --base-path: a (root, source) pair, a raw answer body for malformed
 # answers, or None for no workspace. An [old] helper predates the check and
 # knows neither subcommand.
 def preflight_helper(build, verdict_exit=0, unnamed_workspace=None, old=False,
-                     resolve_failure=False):
+                     resolve_failure=False, stores_exit=0):
     path = build / "deployment_preflight_helper.exe"
     if unnamed_workspace is None:
         unnamed = "printf 'workspace=none\\n'"
@@ -137,7 +138,8 @@ def preflight_helper(build, verdict_exit=0, unnamed_workspace=None, old=False,
                "      printf 'workspace=resolved\\nroot=%s\\nsource=explicit_cli\\n' \"$3\"\n"
                f"    else {unnamed}; fi ;;\n")
     validate = ("" if old else
-                f"  validate-runtime-config) echo 'runtime.toml fixture verdict'; exit {verdict_exit} ;;\n")
+                f"  validate-runtime-config) echo 'runtime.toml fixture verdict'; exit {verdict_exit} ;;\n"
+                f"  validate-stores) echo 'stored state fixture verdict'; exit {stores_exit} ;;\n")
     path.write_text("#!/bin/sh\n"
                     "printf '%s\\n' \"$*\" >> \"$(dirname \"$0\")/helper-calls\"\n"
                     "case \"$1\" in\n"
@@ -719,6 +721,52 @@ class LocalBuildInstall(unittest.TestCase):
             self.assertIn("runtime.toml is not one this build accepts", result.stderr)
             self.assertIn("nothing was stopped or installed", result.stderr)
             self.assertFalse(prefix.exists(), "a build that refused the live runtime.toml was installed")
+            self.assertFalse(any(call.startswith("validate-stores") for call in helper_calls(build)))
+
+    # #43483: a store this build cannot decode stops the install the way the
+    # deploy preflight stops a deploy. #42020 changed the Memory admission
+    # queue file; the install went ahead and five Keepers could not write
+    # explicit Memory for a week.
+    def test_unreadable_stored_state_installs_nothing(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            build = root / "build"
+            build.mkdir()
+            binaries(build)
+            preflight_helper(build, stores_exit=124)
+            prefix = root / "prefix"
+            base = workspace(root)
+            result = subprocess.run(["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
+                                     "--prefix", str(prefix), "--manifest-dir", str(root / "absent"),
+                                     "--base-path", str(base)],
+                                    capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("stored state fixture verdict", result.stdout)
+            self.assertIn("nothing installed", result.stderr)
+            self.assertIn("Fresh state required", result.stderr)
+            self.assertIn(f"validate-stores --base-path {base}", helper_calls(build))
+            self.assertFalse(prefix.exists(), "a build that cannot read the stored state was installed")
+
+    # The stored state is read after runtime.toml passes and before anything
+    # is replaced; a readable state lets the install go ahead.
+    def test_readable_stored_state_is_checked_and_installed(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            build = root / "build"
+            build.mkdir()
+            binaries(build)
+            preflight_helper(build)
+            prefix = root / "prefix"
+            base = workspace(root)
+            result = subprocess.run(["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
+                                     "--prefix", str(prefix), "--manifest-dir", str(root / "absent"),
+                                     "--base-path", str(base)],
+                                    check=True, capture_output=True, text=True)
+            self.assertIn(f"checking stored state of {base}", result.stdout)
+            calls = helper_calls(build)
+            self.assertLess(calls.index(f"validate-runtime-config --base-path {base}"),
+                            calls.index(f"validate-stores --base-path {base}"))
+            self.assertTrue((prefix / "masc").is_file())
 
     # Without --base-path the check runs on the workspace masc itself would use,
     # as the helper resolves it, and the install goes ahead once it passes.
@@ -757,6 +805,7 @@ class LocalBuildInstall(unittest.TestCase):
             self.assertIn("--base-path DIR or set MASC_BASE_PATH", warnings[0])
             self.assertIn("issues/39431", warnings[0])
             self.assertFalse(any(call.startswith("validate-runtime-config") for call in helper_calls(build)))
+            self.assertFalse(any(call.startswith("validate-stores") for call in helper_calls(build)))
             self.assertTrue((prefix / "masc").is_file())
 
     def test_skip_build_without_the_helper_warns_skips_the_check_and_installs(self):
@@ -826,6 +875,7 @@ class LocalBuildInstall(unittest.TestCase):
                                      "--base-path", str(root / "not yet")],
                                     check=True, capture_output=True, text=True)
             self.assertIn("does not exist yet", result.stdout)
+            self.assertFalse(any(call.startswith("validate-stores") for call in helper_calls(build)))
             self.assertTrue((prefix / "masc").is_file())
 
     # A resolved workspace with no root is an invalid answer, not a workspace

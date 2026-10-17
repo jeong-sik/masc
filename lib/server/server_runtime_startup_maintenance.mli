@@ -1,13 +1,6 @@
-val prune_children_dirs : prune_dir:(string -> int) -> string -> int
-(** Fold [prune_dir] over the immediate sub-directories of the given
-    root path. Missing root counts 0; stray files are skipped.
-    Exposed for unit tests. *)
-
 val prune_flat_jsonl_older_than : days:int -> string -> int
-
-
-
-
+(** Flat-file mtime retention under an absolute physical directory spelling.
+    Root links are refused; production passes use a held runtime root. *)
 val keeper_scoped_flat_stores : string list
 (** Flat-JSONL stores pruned keeper-scoped ([keepers/<name>/<store>]) by
     mtime in BOTH passes: [raw-traces] (one file per turn) and
@@ -21,7 +14,11 @@ val prune_shared_jsonl_stores :
     files, keeper-scoped trajectories and [keeper_chat_events], flat
     [messages/] JSON files and [keeper_scoped_flat_stores]. [masc_root] is
     [<base>/.masc]. Both the startup pass and the 24h periodic pass call
-    exactly this function so the covered-store set cannot drift. Returns the
+    exactly this function so the covered-store set cannot drift. One admitted
+    physical runtime-root descriptor owns all traversal and unlink operations;
+    configured BasePath aliases are resolved before that binding, while runtime
+    root/descendant links are refused or skipped. This is per-pass containment,
+    not boot-pinned root continuity. Returns the
     number of files removed. Exposed for unit tests. *)
 
 type jsonl_prune_outcome = {

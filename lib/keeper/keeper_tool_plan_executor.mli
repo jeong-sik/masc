@@ -194,7 +194,13 @@ val execute
     Exact prepared leaves can overlap when their producer-owned resources do
     not conflict. Conflicting leaves follow dependency-layer order, standing
     down after a failed predecessor; explicit plan dependencies still apply.
-    Each such leaf captures immutable Gate evidence before its handler runs. *)
+    [ready_files] additionally binds producer resources after upstream outputs
+    validate the actual input. Nodes publish binding before waiting for earlier
+    bindings in topological order; only conflicting bindings await settlement.
+    Pure child argument validation has no file effect. Unsupported preparation
+    uses the ordinary handler alone, ordered against all earlier file effects.
+    The call-owned switch releases every opened capability on cancellation.
+    Each prepared leaf captures immutable Gate evidence before its handler runs. *)
 val execute_keeper
   :  capability_surface:Keeper_capability_surface.t
   -> plan:Keeper_tool_plan.t
@@ -208,6 +214,7 @@ val execute_keeper
   -> keeper_turn_id:(unit -> int option)
   -> ?source_context:Keeper_tool_call_log_context.turn_context
   -> ?prepared_files:Keeper_prepared_inline_files.t
+  -> ?ready_files:Keeper_prepared_inline_files.Ready.t
   -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?continuation_channel:Keeper_continuation_channel.t
@@ -241,6 +248,7 @@ module Compatibility : sig
     -> keeper_turn_id:(unit -> int option)
     -> ?source_context:Keeper_tool_call_log_context.turn_context
     -> ?prepared_files:Keeper_prepared_inline_files.t
+    -> ?ready_files:Keeper_prepared_inline_files.Ready.t
     -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
     -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
     -> ?continuation_channel:Keeper_continuation_channel.t

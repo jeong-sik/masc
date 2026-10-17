@@ -69,10 +69,13 @@ type tool_kind =
 type prepared_leaf_admission =
   | Read_only_ordinary_leaf
   | Owned_job_launch_leaf
+  | Owned_file_mutation_leaf
   | Direct_only
-(** Prepared ordinary leaves carry either a static read-only contract or the
-    isolated owned-job producer's durable launch ownership. Job launch retains
-    its Serial effectful execution contract. *)
+(** Prepared leaves retain their original producer's ownership. File Edit and
+    Write are available to inline drafts; durable async plans still require
+    read-only leaves or the owned-job producer's replayable launch contract.
+    File mutations and job launch retain their Serial effectful descriptor
+    contracts. A file mutation admission is not a prepared resource claim. *)
 
 (** Descriptor-owned output contract for typed composition. [Opaque_output]
     cannot be referenced by another plan node. [Json_output] carries a schema
@@ -293,8 +296,9 @@ val descriptors_for_internal : string -> t list
 val readonly_static_hint : t -> bool option
 val readonly_for_input : t -> input:Yojson.Safe.t -> bool option
 val prepared_leaf_admission : t -> prepared_leaf_admission
-(** Resolve the exact descriptor route and canonical owned-job action. Terminal
-    calls and other effectful tools retain their direct admission. *)
+(** Classify the exact descriptor route and canonical owned-job action. The
+    consumer applies the inline/durable distinction. Terminal calls and other
+    effectful tools retain their direct admission. *)
 val translate_input_for_descriptor : t -> Yojson.Safe.t -> Yojson.Safe.t
 
 (** Descriptor-owned read-only projection. The returned names are internal

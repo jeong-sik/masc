@@ -607,6 +607,39 @@ let execute_keeper_plan ~capability_authority =
     Executor.Compatibility.execute_keeper
 ;;
 
+let isolate_gate_context ~gate_causal_context ~gate_context ~record_gate_result =
+  match gate_causal_context with
+  | Some parent ->
+    let local = Keeper_gate_causal_context.fork parent in
+    let record ~operation ~input result =
+      Keeper_gate_causal_context.record_tool_result local ~operation ~input result;
+      match record_gate_result with
+      | Some record -> record ~operation ~input result
+      | None -> Keeper_gate_causal_context.record_tool_result parent ~operation ~input result
+    in
+    Some (fun () -> Keeper_gate_causal_context.snapshot local), Some record
+  | None -> gate_context, record_gate_result
+;;
+
+let with_ready_inline_files ~config ~meta ~source ~plan ~prepared_files
+    ~gate_causal_context ~gate_context ~record_gate_result run =
+  let invoke ready_files =
+    let gate_context, record_gate_result =
+      if Option.is_some ready_files then
+        isolate_gate_context ~gate_causal_context ~gate_context ~record_gate_result
+      else gate_context, record_gate_result in
+    run ready_files gate_context record_gate_result in
+  match prepared_files, Fs_compat.execution_context () with
+  | Some _, _ | None, Fs_compat.Non_eio -> invoke None
+  | None, Fs_compat.Eio_fiber ->
+    Eio.Switch.run (fun sw ->
+      let ready_files = match gate_causal_context, gate_context with
+        | None, Some _ -> None
+        | Some _, _ | None, None ->
+          Keeper_prepared_inline_files.Ready.create ~sw ~config ~meta ~source plan in
+      invoke ready_files)
+;;
+
 let result_from_json ~tool_name ~start_time ~class_ ~ok data =
   if ok
   then Tool_result.make_ok ~tool_name ~start_time ~data ()
@@ -2412,19 +2445,7 @@ let make_tools_with_authority
            | Some parent_invocation ->
              let gate_context, record_gate_result =
                if (concurrent || Option.is_some prepared_files) && entry.execution = Catalog.Inline
-               then
-                 match gate_causal_context with
-                 | Some parent ->
-                   let local = Keeper_gate_causal_context.fork parent in
-                   let record ~operation ~input result =
-                     Keeper_gate_causal_context.record_tool_result local ~operation ~input result;
-                     match record_gate_result with
-                     | Some record -> record ~operation ~input result
-                     | None -> Keeper_gate_causal_context.record_tool_result parent ~operation ~input result
-                   in
-                   Some (fun () -> Keeper_gate_causal_context.snapshot local), Some record
-                 | None ->
-                   gate_context, record_gate_result
+               then isolate_gate_context ~gate_causal_context ~gate_context ~record_gate_result
                else gate_context, record_gate_result
              in
              let turn_context =
@@ -2530,6 +2551,9 @@ let make_tools_with_authority
              let composition_run_id = Keeper_tool_plan.Composition_run_id.fresh () in
              let committed_receipts = ref [] in
              let execution =
+               with_ready_inline_files ~config ~meta ~source:turn_context ~plan
+                 ~prepared_files ~gate_causal_context ~gate_context ~record_gate_result
+                 (fun ready_files gate_context record_gate_result ->
                execute_keeper_plan
                  ~capability_authority
                  ~plan
@@ -2543,6 +2567,7 @@ let make_tools_with_authority
                  ~keeper_turn_id:(keeper_turn_id_of turn_context)
                  ?source_context:turn_context
                  ?prepared_files
+                 ?ready_files
                  ?turn_sandbox_factory
                  ?clock
                  ?continuation_channel
@@ -2570,7 +2595,7 @@ let make_tools_with_authority
                            ~meta
                            ~turn_context)
                       turn_context)
-                 ()
+                 ())
              in
              (match execution with
               | Error
@@ -2819,13 +2844,16 @@ let make_tools_with_authority
                       ~parent_invocation ~config ~meta ~capability_authority ~publication_recovery
                       ~ctx_snapshot ~turn_context ?clock ()
                   | Catalog.Inline ->
+                    with_ready_inline_files ~config ~meta ~source:turn_context ~plan
+                      ~prepared_files:None ~gate_causal_context ~gate_context ~record_gate_result
+                      (fun ready_files gate_context record_gate_result ->
                     let nested_run = Keeper_composition_nested_run.create
                         ~calls:(Draft.nested_calls draft) ~composition_run_id ~parent_invocation
                         ~tool_name:Draft.run_tool_name ~record_activation:record_nested_composition_activation () in
                     let execution = execute_keeper_plan ~capability_authority ~plan ~composition_run_id
                         ~run_id:(Keeper_tool_plan.Run_id.fresh ()) ~parent_invocation ~config ~meta
                         ~publication_recovery ~ctx_snapshot ~keeper_turn_id:(keeper_turn_id_of turn_context)
-                        ?source_context:turn_context
+                        ?source_context:turn_context ?ready_files
                         ?turn_sandbox_factory ?clock ?continuation_channel ?gate_context ?gate_grant ?record_gate_result
                         ?on_deferred ?on_external_effect_deferred
                         ~admit_node:(Keeper_composition_nested_run.admit_node nested_run)
@@ -2849,7 +2877,7 @@ let make_tools_with_authority
                       ~parent_invocation ~meta ~turn_context ~input ~output_text:(Tool_result.message result)
                       ~success:(Tool_result.is_success result) ~duration_ms:(Tool_result.duration_ms result)
                       ~typed_result:result ();
-                    result
+                    result)
                 in
                 bind_result ~composition_run_id ~run_reference result
               in

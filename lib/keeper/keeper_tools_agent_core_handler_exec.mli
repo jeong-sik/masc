@@ -27,6 +27,7 @@ val execute_with_observers
   -> ?owned_job_replay:Keeper_owned_job_invocation.replay
   -> ?prepared_read:Keeper_tool_filesystem_runtime.prepared_read
   -> ?prepared_edit:Keeper_tool_filesystem_runtime.prepared_edit
+  -> ?prepared_write:Keeper_tool_filesystem_runtime.prepared_write
   -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
   -> ?sw:Eio.Switch.t
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
@@ -55,6 +56,7 @@ val execute_with_observers_from_meta
   -> ?owned_job_replay:Keeper_owned_job_invocation.replay
   -> ?prepared_read:Keeper_tool_filesystem_runtime.prepared_read
   -> ?prepared_edit:Keeper_tool_filesystem_runtime.prepared_edit
+  -> ?prepared_write:Keeper_tool_filesystem_runtime.prepared_write
   -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
   -> ?sw:Eio.Switch.t
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t

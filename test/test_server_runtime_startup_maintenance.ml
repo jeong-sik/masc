@@ -2,56 +2,59 @@
 
 module SM = Server_runtime_startup_maintenance
 
-let counter = ref 0
-
 let fresh_dir prefix =
-  let dir =
-    Filename.concat
-      (Filename.get_temp_dir_name ())
-      (Printf.sprintf "%s_%d_%.0f" prefix (Unix.getpid ()) (Unix.gettimeofday ()))
-  in
-  Fs_compat.mkdir_p dir;
-  dir
+  let dir = Filename.temp_file prefix "" in
+  Sys.remove dir;
+  Unix.mkdir dir 0o700;
+  Unix.realpath dir
 
-let record_prune dir =
-  incr counter;
-  String.length dir
+let test_prune_refuses_linked_runtime_root () =
+  let base = fresh_dir "masc_prune_root" in
+  let outside = fresh_dir "masc_prune_outside" in
+  Unix.symlink outside (Filename.concat base Common.masc_dirname);
+  match SM.prune_shared_jsonl_stores ~days:30
+      ~masc_root:(Filename.concat base Common.masc_dirname) with
+  | _ -> Alcotest.fail "runtime root was resolved through its link"
+  | exception Unix.Unix_error ((Unix.ENOTDIR | Unix.ELOOP), _, _) -> ()
 
-let test_missing_root_counts_zero () =
-  counter := 0;
-  let n =
-    SM.prune_children_dirs ~prune_dir:record_prune "/nonexistent/masc-prune-children"
-  in
-  Alcotest.(check int) "missing root counts 0" 0 n;
-  Alcotest.(check int) "prune_dir never called" 0 !counter
+let test_shared_prune_skips_ancestor_links () =
+  List.iter (fun (before, after) ->
+    let base = fresh_dir "masc_prune_containment" in
+    let root = Common.masc_dir_from_base_path ~base_path:base in
+    let outside = fresh_dir "masc_prune_foreign" in
+    let path root segments = List.fold_left Filename.concat root segments in
+    Fs_compat.mkdir_p (Filename.dirname (path root before));
+    let target = path outside after in
+    Fs_compat.mkdir_p (Filename.dirname target);
+    Out_channel.with_open_text target (fun oc -> output_string oc "foreign sentinel");
+    Unix.utimes target 1. 1.;
+    Unix.symlink outside (path root before);
+    Alcotest.(check int) "no foreign file counted" 0
+      (SM.prune_shared_jsonl_stores ~days:30 ~masc_root:root);
+    Alcotest.(check string) "foreign contents preserved" "foreign sentinel"
+      (In_channel.with_open_text target In_channel.input_all))
+    [ ["logs"], ["old.jsonl"];
+      ["trajectories";"keeper-a"], ["old.jsonl"];
+      ["keepers";"keeper-a"], ["turn-records";"2020-01";"01.jsonl"];
+      ["keepers";"keeper-a";"raw-traces"], ["old.jsonl"];
+      ["keepers";"keeper-a";"reaction-ledger";"v7"], ["2020-01";"01.jsonl"];
+      ["decision_audit";"keeper-a"], ["2020-01";"01.jsonl"];
+      ["agent-core-events";"2020-01"], ["01.jsonl"];
+      ["schedules"], ["signals";"2020-01";"01.jsonl"] ]
 
-let test_subdirs_pruned_and_stray_files_skipped () =
-  counter := 0;
-  let root = fresh_dir "masc_prune_children" in
-  let keeper_a = Filename.concat root "keeper-a" in
-  let keeper_b = Filename.concat root "keeper-b" in
-  Fs_compat.mkdir_p keeper_a;
-  Fs_compat.mkdir_p keeper_b;
-  let stray = Filename.concat root "stray.txt" in
-  let oc = open_out stray in
-  output_string oc "x";
-  close_out oc;
-  let n = SM.prune_children_dirs ~prune_dir:record_prune root in
-  Alcotest.(check int) "prune called for both subdirs" 2 !counter;
-  Alcotest.(check bool)
-    "return sums prune_dir results" true (n = String.length keeper_a + String.length keeper_b)
-
-(* A broken link under the root is not a keeper folder and does not stop
-   the fold; a link to a folder is one (#42891). *)
-let test_broken_link_is_skipped () =
-  counter := 0;
-  let root = fresh_dir "masc_prune_children_links" in
-  let target = fresh_dir "masc_prune_children_target" in
-  Fs_compat.mkdir_p (Filename.concat root "keeper-a");
-  Unix.symlink target (Filename.concat root "keeper-b");
-  Unix.symlink (Filename.concat root "gone") (Filename.concat root "ghost");
-  ignore (SM.prune_children_dirs ~prune_dir:record_prune root : int);
-  Alcotest.(check int) "prune called for the folder and the linked folder" 2 !counter
+let test_shared_prune_accepts_base_alias () =
+  let base = fresh_dir "masc_prune_alias_base" in
+  let holder = fresh_dir "masc_prune_alias_holder" in
+  let alias = Filename.concat holder "workspace" in
+  Unix.symlink base alias;
+  let old = Filename.concat (Common.masc_dir_from_base_path ~base_path:base) "logs/old.jsonl" in
+  Fs_compat.mkdir_p (Filename.dirname old);
+  Out_channel.with_open_text old (fun oc -> output_string oc "{}\n");
+  Unix.utimes old 1. 1.;
+  Alcotest.(check int) "configured BasePath alias still prunes its physical root" 1
+    (SM.prune_shared_jsonl_stores ~days:30
+      ~masc_root:(Common.masc_dir_from_base_path ~base_path:alias));
+  Alcotest.(check bool) "owned old file removed" false (Sys.file_exists old)
 
 (* The flat pass reads and unlinks on a system thread, so another fiber runs
    while it is in flight (#42935). *)
@@ -92,9 +95,7 @@ let test_prune_flat_jsonl_removes_old_files () =
   let old_ts = Unix.gettimeofday () -. (40. *. 86400.) in
   Unix.utimes old_file old_ts old_ts;
   let n =
-    SM.prune_children_dirs
-      ~prune_dir:(SM.prune_flat_jsonl_older_than ~days:30)
-      root
+    SM.prune_flat_jsonl_older_than ~days:30 keeper
   in
   Alcotest.(check int) "old trajectory pruned" 1 n;
   Alcotest.(check bool) "old file removed" false (Sys.file_exists old_file);
@@ -299,16 +300,11 @@ let test_unknown_typesafeai_exclusions_come_from_declarations () =
 let () =
   Alcotest.run "server_runtime_startup_maintenance"
     [
-      ( "prune_children_dirs",
-        [
-          Alcotest.test_case "missing root counts zero" `Quick
-            test_missing_root_counts_zero;
-          Alcotest.test_case "broken link skipped" `Quick test_broken_link_is_skipped;
-          Alcotest.test_case "flat prune leaves the fiber free" `Quick
-            test_flat_prune_leaves_the_fiber_free;
-          Alcotest.test_case "subdirs pruned, stray files skipped" `Quick
-            test_subdirs_pruned_and_stray_files_skipped;
-        ] );
+      ( "physical containment",
+        [ Alcotest.test_case "runtime root link refused" `Quick test_prune_refuses_linked_runtime_root;
+          Alcotest.test_case "all layouts skip ancestor links" `Quick test_shared_prune_skips_ancestor_links;
+          Alcotest.test_case "configured BasePath alias accepted" `Quick test_shared_prune_accepts_base_alias;
+          Alcotest.test_case "flat prune leaves the fiber free" `Quick test_flat_prune_leaves_the_fiber_free ] );
       ( "prune_flat_jsonl_older_than",
         [
           Alcotest.test_case "populated trajectories dir prunes old files" `Quick

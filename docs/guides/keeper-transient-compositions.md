@@ -135,10 +135,10 @@ A launch node without its complete recorded identity keeps refusing replay.
 
 These journal records require the exact original identity and replay-mode
 fields. Missing evidence is rejected rather than inferred or rewritten into
-fresh work. Task-specific drafts retain the ordinary admission described below;
-the named Inline file-resource producer has its own supported scope.
+fresh work. Inline task recipes can also use canonical Edit leaves through their
+original file producer; this does not give those effects durable async replay.
 
-Prepared plans admit static read-only ordinary nodes and the isolated owned-job
+Async prepared plans admit static read-only ordinary nodes and the isolated owned-job
 launch action. The descriptor and canonical action classify admission; a job
 launch keeps its existing Serial effectful contract. Other writes, builds,
 status/cancel effects and terminal actions use their direct tools until their
@@ -207,14 +207,15 @@ turn still collects every completion for later judgments. Without producer-owned
 resource preparation, a serial leaf keeps its enclosing composition serial.
 Transient run and async submission controls keep their serial admission contracts.
 
-Named Inline Skills with at least one Edit and only ordinary Read/Edit leaves
-can also prepare producer-owned file claims when every validated input and the
-original call source are available before execution. Read/Read sharing may
-overlap while target writes and Read/Write conflicts keep their order.
-Missing or unsupported preparation retains the ordinary schedule. This path
-does not add resource claims to task-specific drafts or `run.recipe`.
-See [file resource ordering](keeper-file-resource-ordering.md) for the physical
-entry, ancestry, owned-tree Read backend and supported execution scope.
+Inline Skills and task recipes with at least one Edit and only Read/Edit leaves
+can bind producer-owned file claims with the original call source. Upstream
+inputs and exact inline child arguments bind when their values resolve. Read/Read
+sharing and disjoint ready files may overlap; conflicting effects retain
+topological order. Unprepared file operations use their ordinary handler alone.
+Missing source or unisolatable causal callbacks retain the ordinary schedule.
+See [recipe file execution](keeper-recipe-file-execution.md) for supported dynamic
+and nested inputs and [file resource ordering](keeper-file-resource-ordering.md)
+for physical entry, ancestry and owned-tree Read behavior.
 
 See [exact Skill children](keeper-nested-compositions.md) for nested inputs and
 exports, and [owned jobs](keeper-owned-jobs.md) for durable effect ownership and

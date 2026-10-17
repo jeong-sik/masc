@@ -457,6 +457,7 @@ let handle_keeper_tool_approvals_list _state request reqd =
    empty fleet: reading unreadable as "nobody is running" would hide every
    badge exactly when the store is broken. *)
 let handle_keeper_turns_list state request reqd =
+  let preparation_details_for = Server_utils.query_param request "preparation_details_for" in
   let config = Mcp_server.workspace_config state in
   match Keeper_meta_store.keeper_names_result config with
   | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
@@ -499,7 +500,11 @@ let handle_keeper_turns_list state request reqd =
               match Keeper_turn_preview.current_for_turn ~keeper_name ~interrupt_token:turn.interrupt_token with
               | None -> `Null
               | Some (preview : Keeper_turn_preview.t) ->
-                Keeper_turn_preview.to_json preview
+                (* The name selects detail volume only. The actual Owner token
+                   above remains the identity authority for the preview. *)
+                Keeper_turn_preview.to_json
+                  ~include_preparation_timeline:(Option.exists (String.equal keeper_name) preparation_details_for)
+                  preview
             in
             `Assoc
               [ ("lane", `String (Keeper_owner.turn_lane_to_string turn.lane))

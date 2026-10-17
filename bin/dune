@@ -1563,8 +1563,6 @@
  (modules masc_tui_types)
  (libraries
   masc_tui_preparation_details
-  masc.keeper_operation_identity
-  masc.keeper_execution_scope
   masc_tui_native_tasks
   masc_tui_child_content
   masc_tui_chat_search

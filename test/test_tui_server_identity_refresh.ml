@@ -1058,7 +1058,7 @@ let test_early_asks_apply_once_without_granting_authority () =
       {early.ea_observation with asks_result = result early.ea_observation.asks_result}} in
     let authority = state.workspace_authority and server = state.server_identity in
     accept_http_progress state {hp_ticket=early.ea_ticket;hp_authority=authority;
-      hp_event=Http_refresh_progress.Started (Surface_data,1L)};
+      hp_event=Http_refresh_progress.Started (Surface_data Surface_read_source.Planning,1L)};
     Alcotest.(check bool) "matching early result settles while unrelated data is pending" true
       (take_early_asks_observation state early = Some early.ea_observation.asks_result);
     Alcotest.(check bool) "terminal copy cannot be applied a second time" true
@@ -1145,6 +1145,10 @@ let test_refresh_progress_tracks_independent_sources_and_interruption () =
   let ticket = Http_refresh_order.dispatch state.http_refresh_order in
   let authority = state.workspace_authority in
   let original_identity = state.workspace_identity in
+  let needs = {nothing with needs_planning=true; needs_overview_goals=true} in
+  let reads, _ = Surface_read_order.dispatch ~kind:Surface_read_order.Full
+      ~needs ~started_ns:10_000_000L state.http_surface_reads in
+  state.http_surface_reads <- reads;
   begin_http_refresh_state state ~ticket ~started_ns:10_000_000L;
   let deliver hp_event = accept_http_progress state
     { hp_ticket = ticket; hp_authority = authority; hp_event } in
@@ -1153,23 +1157,33 @@ let test_refresh_progress_tracks_independent_sources_and_interruption () =
     | None -> Alcotest.fail "refresh lost its observation" in
   deliver (Progress.Started (Progress.Questions, 20_000_000L));
   deliver (Progress.Started (Progress.Keepers, 30_000_000L));
-  deliver (Progress.Started (Progress.Surface_data, 40_000_000L));
+  let work = Progress.Surface_data Surface_read_order.Planning in
+  let goals = Progress.Surface_data Surface_read_order.Overview_goals in
+  deliver (Progress.Started (work, 40_000_000L));
+  deliver (Progress.Started (goals, 45_000_000L));
   deliver (Progress.Completed (Progress.Questions, 60_000_000L, Progress.Received));
-  deliver (Progress.Completed (Progress.Keepers, 70_000_000L, Progress.Failed));
-  Alcotest.(check bool) "one slow source does not hide a received or failed sibling" true
-    (Progress.counts (progress ()) = (1, 1, 1, 0)
-     && Progress.pending_sources (progress ()) = [Progress.Surface_data]);
+  deliver (Progress.Completed (Progress.Keepers, 70_000_000L, Progress.Received));
+  deliver (Progress.Completed (work, 75_000_000L, Progress.Failed));
+  Alcotest.(check bool) "a pending Goal read does not hide the failed Work read" true
+    (Progress.counts (progress ()) = (1, 2, 1, 0)
+     && Progress.pending_sources (progress ()) = [goals]
+     && Progress.settled_sources ~outcome:Progress.Failed (progress ()) = [work]);
   let settled = state.http_refresh_progress in
   deliver (Progress.Completed (Progress.Questions, 80_000_000L, Progress.Failed));
+  deliver (Progress.Completed (work, 80_000_000L, Progress.Received));
   deliver (Progress.Completed (Progress.Overview, 80_000_000L, Progress.Received));
   Alcotest.(check bool) "duplicate and undispatched settlements preserve the actual observation" true
     (state.http_refresh_progress = settled);
   Alcotest.(check bool) "diagnostics never confirm workspace identity or publish data" true
     (state.workspace_identity = original_identity && state.workspace_authority = authority
-     && state.overview = None && state.asks_snapshot = None);
+     && state.overview = None && state.asks_snapshot = None
+     && Surface_read_order.pending ~needs state.http_surface_reads
+          = [Surface_read_order.Planning;Surface_read_order.Overview_goals]
+     && Surface_read_order.pending_scoped ~needs state.http_surface_reads = []);
   finish_http_refresh_state ~finished_ns:100_000_000L state;
   Alcotest.(check bool) "a stopped refresh records its remaining read as interrupted" true
-    (Progress.counts (progress ()) = (0, 1, 1, 1));
+    (Progress.counts (progress ()) = (0, 2, 1, 1)
+     && Progress.settled_sources ~outcome:Progress.Interrupted (progress ()) = [goals]);
   Alcotest.(check (float 0.)) "total duration uses the same monotonic interval" 90.
     Yojson.Safe.Util.(Progress.to_json (progress ()) |> member "elapsed_ms" |> to_number);
   let finished = state.http_refresh_progress in
@@ -1223,7 +1237,7 @@ let test_early_roster_settles_before_slow_siblings_once () =
   let state,early = early_roster_fixture () in
   let authority=state.workspace_authority and server=state.server_identity in
   accept_http_progress state {hp_ticket=early.er_ticket;hp_authority=authority;
-    hp_event=Http_refresh_progress.Started (Surface_data,1L)};
+    hp_event=Http_refresh_progress.Started (Surface_data Surface_read_source.Planning,1L)};
   Alcotest.(check bool) "verified roster is usable while another reader is pending" true
     (take_early_keeper_roster_observation state early = Some early.er_observation.roster_result);
   Alcotest.(check bool) "early delivery neither ends refresh nor confirms new authority" true

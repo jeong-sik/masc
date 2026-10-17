@@ -28,8 +28,9 @@ different evidence.
 ## Read the observations
 
 The header keeps the connection/workspace warning and adds the oldest pending
-logical reader, with the number of other pending readers. Failed or interrupted
-readers remain visible after the refresh finishes, until the next refresh starts.
+logical reader, with the number of other pending readers. The first failed or
+interrupted reader is named with its number of peers. These outcomes remain
+visible after the refresh finishes, until the next refresh starts.
 A successful completed refresh adds no extra header text. These are diagnostic
 counts, not the number of usable records or completed tasks.
 
@@ -42,13 +43,23 @@ Each requested source starts once and settles once. The sources are:
 | confirmations | Requested approval listing |
 | questions | Questions listing and its response-bound workspace/readiness verification |
 | keepers | Requested roster, its identity verification and Candle reading |
-| view data | Other reads required by the current surface, grouped together |
+| transport | Requested transport/delivery snapshot |
+| Board | Requested Board list and hearths, collected in parallel as one dataset |
+| Work | Requested planning snapshot |
+| logs | Requested system-log page |
+| fleet health | Requested fleet-safety snapshot |
+| provider windows | Requested runtime catalogue and quota reading |
+| Keeper usage | Requested Keeper usage snapshot |
+| provider history | Requested usage-history window |
+| Goals | Requested Goal tree |
+| accounts | Requested provider account identities |
 | workspace verification | Final identity probe after the independent reads join |
 
-Not every surface requests all seven readers. A reader can contain multiple HTTP
-calls; the counts are not endpoint or network request counts. `view data` fails
-when any requested constituent returns an error. A Keeper roster with a failed
-Candle read is also a failed group, even if the roster itself was received.
+Only requested dataset readers emit observations. A reader can contain multiple
+HTTP calls; the counts are not endpoint or network request counts. Board fails
+when either its list or hearth reading fails; provider windows fails when either
+its runtime or quota reading fails. A Keeper roster with a failed Candle read is
+also a failed group, even if the roster itself was received.
 
 `received` means the reader returned its declared successful result. It does not
 mean the final workspace identity matched, the dataset was published, or a Tool
@@ -72,6 +83,50 @@ the time an operator can act. Existing slow endpoint and mailbox records retain
 their narrower meaning. The synchronous fallback has the total refresh clock but
 does not emit individual reader events. Scoped refreshes and independent side
 reads are outside this ledger.
+
+## Identify the dataset behind a full-refresh wait
+
+The source baseline for this follow-up is
+`fff87c55e38dacc65e078cc63b2810d768e01b13`. The collector already ran independent
+current-view reads in parallel, but one `view data` observation combined them.
+It hid which dataset had failed or remained pending. The header also preferred
+full-bundle publication ownership over execution progress: a completed Work
+reader could remain labeled as reading Work while the bundle waited for Goals.
+
+| Aspect | Before | Source implementation |
+|---|---|---|
+| Current-view observation identity | One aggregate `view data` row | One row per requested typed dataset |
+| Full Work read completed, only Goal tree remains | Full publication ownership can still report Work pending | Actual execution progress identifies Goals as the remaining reader |
+| Work fails before another source settles | Aggregate failure appears after every view reader joins | Work settles as failed independently; header names the failed source |
+| Unrequested dataset | Aggregate still starts even with no view dataset | No dataset start/completion event |
+| Board list and hearths | Two existing parallel calls inside the aggregate | Same calls, one Board observation spanning both |
+| Navigation or independent filter is pending | Existing dataset ownership tracks it | Same ownership, distinguished from full-refresh execution progress |
+| No individual worker observations | Could say finishing refresh | Header reports refreshing without inventing a known final stage |
+
+`Surface_read_source.t` is shared by read ownership and progress. The existing
+`Surface_read_order.source` re-exports that same type; presentation names are
+defined once and are not parsed to select behavior. Full-refresh publication
+owners remain until their existing final identity admission. They do not override
+the full refresh's actual pending-reader display. Navigation and independent
+filter reads retain their separate pending-ownership display and are not added
+to the full-refresh ledger.
+
+The former aggregate emitted one start/completion pair. With `N` requested view
+datasets, this path emits `N` pairs, or none when `N=0`. This is additional internal
+progress delivery, not additional HTTP traffic, and its runtime overhead is
+unmeasured. Dataset labels/counts in the new ledger have a different scope from
+the former aggregate; do not compare their row counts as network-call reduction.
+Reader clocks end at worker completion; publication, first usable state, painted
+frames and full-refresh completion remain distinct boundaries.
+
+The source change preserves requested data, existing parallel calls, result
+assembly, cancellation, workspace probes and source admission. It does not make
+Work or another dataset independently actionable before final admission.
+Extended state scenarios cover an independent Work failure and pending Goal
+read, duplicate settlement, interruption, unchanged data ownership and concurrent
+navigation/filter ownership. They are authored, not executed. Native normal and
+narrow frames, types, behavior and matched Before/After remain unverified; no
+wording/layout/row-order assertion test is introduced.
 
 ## Retain Work navigation after a failed planning refresh
 

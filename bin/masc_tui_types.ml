@@ -47,12 +47,25 @@ end = struct
   let in_flight state = Option.is_some state.pending
 end
 
+module Surface_read_source = struct
+  type t = Transport | Board | Planning | System_logs | Fleet_safety
+    | Runtime_quota | Keeper_usage | Provider_history | Overview_goals | Account_emails
+
+  let name = function
+    | Transport -> "transport" | Board -> "Board" | Planning -> "Work"
+    | System_logs -> "logs" | Fleet_safety -> "fleet health"
+    | Runtime_quota -> "provider windows" | Keeper_usage -> "Keeper usage"
+    | Provider_history -> "provider history" | Overview_goals -> "Goals"
+    | Account_emails -> "accounts"
+end
+
 (** Logical full-refresh readers, not individual HTTP calls. Diagnostic
     observations never publish a dataset or grant workspace authority. *)
 module Http_refresh_progress = struct
   type source =
     | Identity_before | Overview | Approvals | Questions | Keepers
-    | Surface_data | Identity_after
+    | Surface_data of Surface_read_source.t
+    | Identity_after
   type outcome = Received | Failed | Interrupted
   type status = Pending | Settled of { finished_ns : int64; outcome : outcome }
   type reading = { source : source; started_ns : int64; status : status }
@@ -68,7 +81,7 @@ module Http_refresh_progress = struct
     | Approvals -> "confirmations"
     | Questions -> "questions"
     | Keepers -> "keepers"
-    | Surface_data -> "view data"
+    | Surface_data source -> Surface_read_source.name source
     | Identity_after -> "workspace verification"
 
   let start ~started_ns = { started_ns; phase = In_flight; readings = [] }
@@ -110,6 +123,12 @@ module Http_refresh_progress = struct
     List.filter_map (fun reading -> match reading.status with
       | Pending -> Some reading.source
       | Settled _ -> None) state.readings
+
+  let settled_sources ~outcome state =
+    List.filter_map (fun reading -> match reading.status with
+      | Pending -> None
+      | Settled {outcome = observed; _} ->
+          if observed = outcome then Some reading.source else None) state.readings
 
   let to_json state =
     let elapsed_ms start finish =
@@ -3567,7 +3586,7 @@ let surface_needs_any needs = needs <> nothing
    Questions, approvals and roster already have independent source owners. *)
 module Surface_read_order : sig
   type kind = Full | Navigation | Independent
-  type source = Transport | Board | Planning | System_logs | Fleet_safety
+  type source = Surface_read_source.t = Transport | Board | Planning | System_logs | Fleet_safety
     | Runtime_quota | Keeper_usage | Provider_history | Overview_goals | Account_emails
   type t
   type request
@@ -3577,6 +3596,9 @@ module Surface_read_order : sig
   val finish : t -> request -> t
   val invalidate : t -> t
   val pending : needs:surface_needs -> t -> source list
+  val pending_scoped : needs:surface_needs -> t -> source list
+  (** Visible sources owned by navigation or independent reads. Full-refresh
+      readers have their own execution progress, distinct from publication. *)
   val source_name : source -> string
   val request_id : request -> int
   val started_ns : request -> int64
@@ -3587,7 +3609,7 @@ module Surface_read_order : sig
   val latest_navigation : t -> request -> bool
 end = struct
   type kind = Full | Navigation | Independent
-  type source = Transport | Board | Planning | System_logs | Fleet_safety
+  type source = Surface_read_source.t = Transport | Board | Planning | System_logs | Fleet_safety
     | Runtime_quota | Keeper_usage | Provider_history | Overview_goals | Account_emails
   type request = { id: int; kind: kind; started_ns: int64; sources: source list; owner: unit ref }
   type t = {
@@ -3631,12 +3653,11 @@ end = struct
   let invalidate current = {current with owners=[]; latest_navigation=None}
   let pending ~needs current =
     List.filter (fun source -> List.mem_assoc source current.owners) (sources needs)
-  let source_name = function
-    | Transport -> "transport" | Board -> "Board" | Planning -> "Work"
-    | System_logs -> "logs" | Fleet_safety -> "fleet health"
-    | Runtime_quota -> "provider windows" | Keeper_usage -> "Keeper usage"
-    | Provider_history -> "provider history" | Overview_goals -> "Goals"
-    | Account_emails -> "accounts"
+  let pending_scoped ~needs current =
+    List.filter (fun source -> match List.assoc_opt source current.owners with
+      | Some {kind = Navigation | Independent; _} -> true
+      | Some {kind = Full; _} | None -> false) (sources needs)
+  let source_name = Surface_read_source.name
   let request_id request = request.id
   let started_ns request = request.started_ns
   let request_kind request = request.kind

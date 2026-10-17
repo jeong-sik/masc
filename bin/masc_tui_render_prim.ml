@@ -1445,7 +1445,7 @@ let connection_status_badge (status : Masc_tui_types.connection_status) =
 let refresh_progress_badge (state : state) =
   let foreground =
     if state.workspace_identity <> Workspace_identity_match then ""
-    else match Surface_read_order.pending
+    else match Surface_read_order.pending_scoped
       ~needs:(surface_needs_of_surface state.view) state.http_surface_reads with
       | [] -> ""
       | source :: rest -> " · reading " ^ Surface_read_order.source_name source
@@ -1453,16 +1453,21 @@ let refresh_progress_badge (state : state) =
   in
   match state.http_refresh_progress with
   | Some (authority, progress) when authority = state.workspace_authority ->
-      let _, _, failed, interrupted = Http_refresh_progress.counts progress in
-      let failures =
-        (if failed = 0 then "" else Printf.sprintf " · %d read failed" failed)
-        ^ (if interrupted = 0 then "" else Printf.sprintf " · %d interrupted" interrupted) in
+      let outcome_notice outcome label =
+        match Http_refresh_progress.settled_sources ~outcome progress with
+        | [] -> ""
+        | source :: rest -> " · " ^ Http_refresh_progress.source_name source ^ " " ^ label
+            ^ (match rest with [] -> "" | _ -> Printf.sprintf " +%d" (List.length rest)) in
+      let failures = outcome_notice Http_refresh_progress.Failed "read failed"
+        ^ outcome_notice Http_refresh_progress.Interrupted "interrupted" in
       (match progress.Http_refresh_progress.phase with
        | Http_refresh_progress.Finished _ -> failures ^ foreground
        | Http_refresh_progress.In_flight ->
            if foreground <> "" then failures ^ foreground else
            let pending = match Http_refresh_progress.pending_sources progress with
-             | [] -> "finishing refresh"
+             | [] -> (match progress.Http_refresh_progress.readings with
+                 | [] -> "refreshing"
+                 | _ :: _ -> "finishing refresh")
              | source :: rest -> "reading " ^ Http_refresh_progress.source_name source
                  ^ (match rest with [] -> "" | _ -> Printf.sprintf " +%d" (List.length rest)) in
            failures ^ " · " ^ pending)

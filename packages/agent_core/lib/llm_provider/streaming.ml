@@ -2263,11 +2263,27 @@ let responses_capture_output_item ?(drop_function_call=false) state emit ~output
            | Some (Tool_index_ambiguous _) | None -> [] in
          capture kind indices
        else
-         (match Responses_function_call.decode item with
+         let item_for_decode, wire_tool_id =
+           match responses_tool_id_of_item item with
+           | Some id when not (Api_common.string_is_blank id) -> item, Some id
+           | Some _ | None ->
+             (match Hashtbl.find_opt state.tool_block_indices output_index with
+              | Some (Tool_index_single block_index) ->
+                (match Hashtbl.find_opt state.tool_block_identities block_index with
+                 | Some { id; origin = Agent_core_allocated } ->
+                   (match item with
+                    | `Assoc fields ->
+                      `Assoc (("call_id", `String id) :: List.remove_assoc "call_id" fields), None
+                    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+                      item, None)
+                 | Some { origin = Provider_supplied; _ } | None -> item, None)
+              | Some (Tool_index_ambiguous _) | None -> item, None)
+         in
+         (match Responses_function_call.decode item_for_decode with
           | Error _ -> emit(SSEParseFailed{raw="";reason="responses_replay:malformed_function_call"})
           | Ok call ->
             let index = responses_ensure_tool_block state emit ~output_index
-              ~tool_id:(Some call.call_id) ~tool_name:(Some call.name) in
+              ~tool_id:wire_tool_id ~tool_name:(Some call.name) in
             Option.iter (fun index ->
               emit(ContentBlockDelta{index;delta=InputJsonSnapshot call.arguments})) index;
             capture kind (Option.to_list index)))

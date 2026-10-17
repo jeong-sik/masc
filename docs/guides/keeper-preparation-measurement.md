@@ -31,14 +31,40 @@ again for every item.
 
 Compared with `6633d8223ca8ffe5eff597f3592f518c0cac322a`, `K` consumers of one bound
 selection assemble the catalog/inventory once instead of `K` times. This is a
-source-path expectation, not an executed count or latency result. Cold catalog
-projection still has its existing effective-entry lookup; the entire preparation
-path is not claimed to be linear. Changed source or Tool objects and mixed
+source-path expectation, not an executed count or latency result. Per-turn
+sharing and lookup indexing are separate stages; the entire preparation path is
+not claimed to be linear. Changed source or Tool objects and mixed
 preparations derive a coherent new product, preserving exact Task provenance and
 the existing unreadable-source failure semantics. Feature scenarios for
 interleaving, source/Tool changes and shadowed/invalid entries are authored but
 unexecuted in this unit. Measure cold and interleaved preparations separately from
 same-binding reuse when collecting native/model Before/After evidence.
+
+## Indexed exact lookup and cold projection
+
+Compared with `c7c2194c116f165114f872e68cdef8cd01a53f6b`, immutable snapshot indexes
+replace exact-entry and effective-name list searches. Task resolution uses the
+snapshot's exact index, and catalog projection asks the same snapshot whether an
+exact identity is effective. A retained catalog preparation indexes its projected
+entries too, with the original entry-object check before reuse. Same-identity
+entries from another frozen snapshot are projected independently.
+
+For `E` exact entries and `F` effective entries, one exact/prepared lookup changes
+from a linear scan to `O(log E)` Map lookup. Effective classification across the
+catalog changes from up to `O(E*F)` comparisons to `O(E log F)`. Index construction
+adds `O(E log E)` work and linear-sized retained indexes. These bounds describe
+lookup operations, excluding I/O, document parsing/hashing, Composition compilation
+and model roundtrips; they are not observed runtime counts or latency.
+
+The ordered entries, first-source precedence, shadows and rejections remain the
+serialization/revision inputs. Indexes retain original entry objects and do not
+add public fields or execution authority. Authored compound scenarios cover
+decoded shadow identities, missing exact packages with the same name, stale pins
+across snapshots, rejected duplicate source digests and foreign projection
+isolation. They are unexecuted in this unit. Keep cold index construction,
+same-snapshot lookup and cross-Keeper interleaving separate in a matched native
+comparison, and record memory/latency overhead rather than assuming a total
+speedup from the source bounds.
 
 ## Recorded queue admission
 

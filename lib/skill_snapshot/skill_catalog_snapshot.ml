@@ -99,11 +99,16 @@ type config_state =
       }
   | Config_unreadable of { detail : string }
 
+module Identity_map = Skill_reference.Identity_map
+module Name_map = Map.Make (String)
+
 type t =
   { config_state : config_state
   ; sources : source_scan list
   ; entries : entry list
   ; effective_entries : entry list
+  ; entries_by_identity : entry Identity_map.t
+  ; effective_by_name : entry Name_map.t
   ; rejections : rejection list
   ; shadows : shadow list
   ; catalog_revision : catalog_revision
@@ -310,18 +315,16 @@ let catalog_projection ~sources ~entries ~rejections ~shadows =
 ;;
 
 let effective_projection (entries : entry list) =
-  let winners = Hashtbl.create (List.length entries) in
   List.fold_left
-    (fun (effective, shadows) entry ->
-       match Hashtbl.find_opt winners entry.identity.name with
+    (fun (effective, shadows, winners) entry ->
+       match Name_map.find_opt entry.identity.name winners with
        | None ->
-         Hashtbl.add winners entry.identity.name entry.identity;
-         entry :: effective, shadows
+         entry :: effective, shadows, Name_map.add entry.identity.name entry winners
        | Some winner ->
-         effective, { winner; shadowed = entry.identity } :: shadows)
-    ([], [])
+         effective, { winner = winner.identity; shadowed = entry.identity } :: shadows, winners)
+    ([], [], Name_map.empty)
     entries
-  |> fun (effective, shadows) -> List.rev effective, List.rev shadows
+  |> fun (effective, shadows, winners) -> List.rev effective, List.rev shadows, winners
 ;;
 
 let build_entries sources =
@@ -440,7 +443,13 @@ let config_state_private_yojson = function
 
 let make ~config_state sources =
   let entries, rejections = build_entries sources in
-  let effective_entries, shadows = effective_projection entries in
+  let effective_entries, shadows, effective_by_name = effective_projection entries in
+  let entries_by_identity =
+    List.fold_left
+      (fun index (entry : entry) -> Identity_map.add entry.identity entry index)
+      Identity_map.empty
+      entries
+  in
   let catalog_revision =
     catalog_projection ~sources ~entries ~rejections ~shadows
     |> Yojson.Safe.to_string
@@ -457,6 +466,8 @@ let make ~config_state sources =
   ; sources
   ; entries
   ; effective_entries
+  ; entries_by_identity
+  ; effective_by_name
   ; rejections
   ; shadows
   ; catalog_revision
@@ -554,8 +565,7 @@ let catalog_revision snapshot = snapshot.catalog_revision
 let snapshot_revision snapshot = snapshot.snapshot_revision
 
 let find_exact snapshot identity =
-  let key = identity_key identity in
-  List.find_opt (fun entry -> identity_key entry.identity = key) snapshot.entries
+  Identity_map.find_opt identity snapshot.entries_by_identity
 ;;
 
 let entry_reference (entry : entry) =
@@ -580,9 +590,13 @@ let resolve_reference snapshot (reference : Skill_reference.t) =
 ;;
 
 let find_effective_by_name snapshot name =
-  List.find_opt
-    (fun entry -> String.equal entry.identity.name name)
-    snapshot.effective_entries
+  Name_map.find_opt name snapshot.effective_by_name
+;;
+
+let is_effective_identity snapshot (identity : identity) =
+  match find_effective_by_name snapshot identity.name with
+  | Some winner -> Skill_reference.equal_identity identity winner.identity
+  | None -> false
 ;;
 
 let source_observation_to_public_yojson = function

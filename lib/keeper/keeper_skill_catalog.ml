@@ -388,11 +388,7 @@ let projected_entry_of ~descriptors snapshot (entry : Skill_catalog_snapshot.ent
     | Projected { surface = Composition _; _ } | Frozen_instruction _ | Entry_unavailable _
       -> []
   in
-  let effective =
-    Skill_catalog_snapshot.effective_entries snapshot
-    |> List.exists (fun (effective : Skill_catalog_snapshot.entry) ->
-      Skill_reference.equal_identity effective.identity entry.identity)
-  in
+  let effective = Skill_catalog_snapshot.is_effective_identity snapshot entry.identity in
   { snapshot_entry = entry; projection; effective; advisories }
 ;;
 
@@ -413,6 +409,7 @@ type prepared =
   { snapshot : Skill_catalog_snapshot.t
   ; descriptors : Keeper_tool_descriptor.t list
   ; entries : projected_entry list
+  ; entries_by_identity : projected_entry Skill_reference.Identity_map.t
   }
 
 let last_projected_snapshot : prepared option Atomic.t = Atomic.make None
@@ -433,7 +430,14 @@ let prepare_snapshot ~descriptors snapshot =
     let entries =
       List.map (projected_entry_of ~descriptors snapshot) (Skill_catalog_snapshot.entries snapshot)
     in
-    let prepared = { snapshot; descriptors; entries } in
+    let entries_by_identity =
+      List.fold_left
+        (fun index (entry : projected_entry) ->
+           Skill_reference.Identity_map.add entry.snapshot_entry.identity entry index)
+        Skill_reference.Identity_map.empty
+        entries
+    in
+    let prepared = { snapshot; descriptors; entries; entries_by_identity } in
     Atomic.set last_projected_snapshot (Some prepared);
     prepared
 ;;
@@ -442,12 +446,10 @@ let prepare_snapshot ~descriptors snapshot =
    projection answers. An entry from elsewhere is projected on the spot. *)
 let project_prepared_entry prepared (entry : Skill_catalog_snapshot.entry) =
   match
-    List.find_opt
-      (fun (projected : projected_entry) -> projected.snapshot_entry == entry)
-      prepared.entries
+    Skill_reference.Identity_map.find_opt entry.identity prepared.entries_by_identity
   with
-  | Some projected -> projected.projection
-  | None -> entry_projection_of ~descriptors:prepared.descriptors prepared.snapshot entry
+  | Some projected when projected.snapshot_entry == entry -> projected.projection
+  | Some _ | None -> entry_projection_of ~descriptors:prepared.descriptors prepared.snapshot entry
 ;;
 
 let project_entry_or_fallback

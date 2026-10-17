@@ -82,6 +82,11 @@ val identity_package_id_to_string : identity -> string
 val equal_identity : identity -> identity -> bool
 val equal : t -> t -> bool
 
+module Identity_map : Map.S with type key = identity
+(** Immutable exact-identity index. Key ordering uses the same canonical
+    source id, package id and name as {!equal_identity}; it grants no
+    snapshot resolution or execution authority. *)
+
 val identity_to_yojson : identity -> Yojson.Safe.t
 
 val identity_of_yojson : Yojson.Safe.t -> (identity, decode_error) result

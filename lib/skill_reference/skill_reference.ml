@@ -133,18 +133,28 @@ let identity_package_id_to_string identity =
   package_id_to_string identity.package_id
 ;;
 
-let equal_identity left right =
-  String.equal
-    (Skill_source_config.source_id_to_string left.source_id)
-    (Skill_source_config.source_id_to_string right.source_id)
-  && String.equal left.package_id right.package_id
-  && String.equal left.name right.name
+let compare_identity left right =
+  let source = String.compare
+      (identity_source_id_to_string left) (identity_source_id_to_string right) in
+  if source <> 0 then source
+  else
+    let package = String.compare
+        (identity_package_id_to_string left) (identity_package_id_to_string right) in
+    if package <> 0 then package else String.compare left.name right.name
+;;
+
+let equal_identity left right = compare_identity left right = 0
 ;;
 
 let equal left right =
   equal_identity left.identity right.identity
   && equal_content_revision left.content_revision right.content_revision
 ;;
+
+module Identity_map = Map.Make (struct
+  type t = identity
+  let compare = compare_identity
+end)
 
 let identity_to_yojson identity =
   `Assoc

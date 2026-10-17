@@ -15171,8 +15171,8 @@ let keeper_preparation_observed_by (row : Tui_decode.keeper_turn_row) preparatio
     | Keeper_turn_running {lane=Turn_lane_chat_operation;preview=Some preview;_},
       Masc_tui_keeper_chat_log.Operation _ ->
       Option.exists (fun scope ->
-        Option.exists (fun id -> Masc.Keeper_operation_id.to_string id = Transcript.execution_id transcript)
-          (Masc.Keeper_execution_scope_id.direct_operation_id scope)) preview.ktp_execution_scope
+        Option.exists (fun id -> Keeper_operation_id.to_string id = Transcript.execution_id transcript)
+          (Keeper_execution_scope_id.direct_operation_id scope)) preview.ktp_execution_scope
     | Keeper_turn_running {lane=(Turn_lane_autonomous | Turn_lane_maintenance);_},
       Autonomous_turn original -> preparation.Masc.Keeper_turn_preview.turn_ref = Some original
     | Keeper_turn_running {lane=Turn_lane_chat_operation;_}, Autonomous_turn _

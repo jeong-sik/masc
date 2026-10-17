@@ -100,57 +100,6 @@ job ID and typed observation (`presence_not_seen`,
 recovery work, not program completion. No polling timer, expiration or retry
 limit is introduced.
 
-### Share a backend inventory within one maintenance pulse
-
-Unchanged held owners in the same maintenance pulse now share an in-flight
-inventory when their frozen base path, complete CLI command, endpoint, daemon,
-context, process owner and required rootless/user-namespace boundaries agree.
-The read uses a newly created empty private CLI directory outside every job
-workspace. It does not borrow any job's CLI directory or host credentials.
-That exact empty directory is released after the read; unexpected contents or
-a changed identity are retained and reported, never recursively removed.
-Inventory decoding uses the full owned stdout capture after observed pipe EOF,
-not the process runner's bounded head/tail preview. Both stream captures must
-be complete. Validated complete files are removed with their read scope;
-incomplete or changed files remain diagnostic evidence and cannot imply absence.
-
-Each worker still recovers its own original owner and validates its own frozen
-directories and empty CLI before using the shared read, then checks them again
-afterwards. JSON projects individual owner labels with Docker's documented
-[`container ls` formatting](https://docs.docker.com/reference/cli/docker/container/ls/#format-the-output---format);
-comma-separated label prose does not establish ownership. Every returned row
-must match the workspace/component/kind, and each hint matches the exact Keeper
-and job. The inventory is still only a reactivation hint: positive visibility
-uses that job's full original daemon/container/isolation inspection before any
-phase change or effect. Missing visibility cannot complete, clean up or relaunch
-the job.
-
-| Cohort | As-Is at #43444 | To-Be source path |
-| --- | --- | --- |
-| Two unchanged held owners, same frozen route | Two presence CLI reads | One shared read; both original owners remain held |
-| Two different frozen endpoints | Two presence reads | Two separate reads |
-| One private CLI changes | That owner's hint fails | That owner's hint fails; another valid owner can still read |
-| Shared response or transport fails | Each hint fails separately | One failed read is shared; each owner clears its reusable hint and next uses full recovery |
-| Late original container appears | Per-job hint followed by full inspection | Shared hint followed by the same per-job full inspection |
-| Fresh owner, changed intent or new supervisor | Full inspection | Full inspection, independent of the shared hint |
-
-For an uncancelled read round, `N` eligible held jobs across `B` exact frozen
-routes require `B` presence CLI calls rather than `N`. Private filesystem checks
-still happen per owner. The shared scope is discarded after the pulse's workers
-settle and is never reused on a later pulse. A cancelled fetch releases its
-private scope and can restart for a remaining waiter; cancellation is not an
-absence observation. No backend wait is added to the caller of `pulse`.
-
-The source comparison baseline is #43444 at
-`9bce155523dfd2fb2ea3370a2cc7e8772a5a965c`. Authored public-handler/maintenance
-scenarios cover one versus two frozen routes, original owner bytes, fresh
-private CLI use/release, foreign projected scope, transport failure, a changed
-job CLI, late original start and durable result delivery. Their transport is
-synthetic. The visible target is surrounded by enough rows to exceed the process
-preview head/tail limits and require full-output coverage. These scenarios are
-not executed in this unit: parser checks do not prove types,
-single-flight execution, real Docker latency or end-to-end Keeper speedup.
-
 ## Result and reconciliation
 
 Job replies separate the original `phase`, `result_ready`, and `reconciliation`.

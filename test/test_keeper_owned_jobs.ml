@@ -5281,112 +5281,6 @@ let test_held_absent_presence_reactivates_only_original_authority () = with_fixt
       "original_starts", `Int (effect_count fixture "start");
       "original_result_delivered", `Bool true]))
 
-let test_shared_held_presence_round ~different_endpoint () = with_fixture @@ fun env _initialize fixture ->
-  set_source fixture ~task_id:"task-A" ~turn:41;
-  let launch tool_use_id = with_bundle fixture (fun bundle ->
-    invoke fixture bundle ~tool_use_id ~turn:41 "keeper_job_start"
-      (`Assoc ["argv",`List [`String "fixture-program"]])) |> job_id in
-  control fixture (`Assoc ["mode",`String "create_unknown_created"]);
-  let first = launch "shared-presence-first" in
-  control fixture (`Assoc ["mode",`String "create_unknown_absent"]);
-  let second = if different_endpoint then
-      with_environment ["DOCKER_HOST",Some "unix:///fixture/other-docker.sock"] (fun () -> launch "shared-presence-second")
-    else launch "shared-presence-second" in
-  check bool "the scenario owns two distinct original jobs" true (first<>second);
-  let transport_calls () = read (Filename.concat fixture.base_path "transport-events.jsonl")
-    |> String.split_on_char '\n' |> List.filter (fun line -> String.trim line<>"")
-    |> List.map Yojson.Safe.from_string
-    |> List.filter (fun row -> member "event" row=`String "entered")
-    |> List.map (fun row -> member "argv" row |> to_list |> List.map to_string) in
-  let call_count () = List.length (transport_calls ()) in
-  let option name args =
-    let rec find = function
-      | key::value::_ when key=name -> value
-      | _::rest -> find rest
-      | [] -> fail ("transport omitted " ^ name) in
-    find args in
-  let supervisor = Completion_wake.create ~config:(Workspace.default_config fixture.base_path) () in
-  let pulse () = Eio.Switch.run @@ fun sw ->
-    Completion_wake.pulse ~sw supervisor |> store_value "actual shared maintenance pulse" in
-  control fixture (`Assoc ["mode",`String "hide_owner_inventory"]);
-  let before = call_count () in
-  pulse ();
-  check int "fresh owners each retain full daemon and inventory verification" 4 (call_count ()-before);
-  let owners = List.map (fun id -> id,read (owner_path fixture id)) [first;second] in
-  let before = call_count () in
-  if different_endpoint then pulse () else (
-    control fixture (`Assoc ["mode",`String "hide_owner_inventory";"presence_blocked",`Bool true]);
-    Eio.Switch.run (fun sw ->
-      Completion_wake.pulse ~sw supervisor |> store_value "pulse returns before shared backend release";
-      let entered = Filename.concat fixture.base_path "presence-entered" in
-      let rec await_shared () =
-        if Sys.file_exists entered then ()
-        else (Eio.Time.sleep (Eio.Stdenv.clock env) 0.01;await_shared ()) in
-      await_shared ();
-      let active_calls = call_count () in
-      Completion_wake.pulse ~sw supervisor |> store_value "active original workers remain reserved";
-      check int "another pulse cannot duplicate the blocked original read" active_calls (call_count ());
-      write (Filename.concat fixture.base_path "presence-release") "release original shared inventory\n");
-    control fixture (`Assoc ["mode",`String "hide_owner_inventory"]));
-  let batch_calls = List.drop before (transport_calls ()) in
-  let routes = if different_endpoint then 2 else 1 in
-  check int "one shared inventory per exact frozen backend route" routes (List.length batch_calls);
-  let private_clis = List.map (fun id ->
-    let job_id = Store.Job_id.of_string id |> require "typed shared job" in
-    (Store.paths ~base_path:fixture.base_path job_id).cli_config_dir) [first;second] in
-  List.iter (fun args ->
-    let cli = option "--config" args in
-    check bool "shared observation never borrows either job's CLI" false (List.mem cli private_clis);
-    check bool "completed shared read releases its exact empty CLI scope" false (Sys.file_exists cli)) batch_calls;
-  check int "different frozen endpoints never join one read" routes
-    (List.length (List.sort_uniq String.compare (List.map (option "--host") batch_calls)));
-  List.iter (fun (id,bytes) -> check string "absence cannot rewrite an original owner"
-    bytes (read (owner_path fixture id))) owners;
-  check int "presence observation does not start a program" 0 (effect_count fixture "start");
-  if not different_endpoint then (
-    control fixture (`Assoc ["presence_wrong_scope",`Bool true]);
-    let before = call_count () in
-    pulse ();
-    check int "a malformed shared ownership projection is fetched once" 1 (call_count ()-before);
-    check int "foreign projected ownership cannot start either job" 0 (effect_count fixture "start");
-    control fixture (`Assoc ["mode",`String "hide_owner_inventory"]);
-    let before = call_count () in
-    pulse ();
-    check int "failed shared evidence clears each owner's held hint" 4 (call_count ()-before);
-    let injected = Filename.concat (List.hd private_clis) "config.json" in
-    write injected "{}";
-    let before = call_count () in
-    pulse ();
-    check int "one changed private CLI cannot stop the other owner from observing" 1 (call_count ()-before);
-    Unix.unlink injected;
-    pulse ();
-    pulse ();
-    control fixture (`Assoc ["mode",`String "hide_owner_inventory";"presence_unavailable",`Bool true]);
-    let before = call_count () in
-    pulse ();
-    check int "one failed transport is shared without per-job retry" 1 (call_count ()-before);
-    control fixture (`Assoc ["mode",`String "hide_owner_inventory"]);
-    let before = call_count () in
-    pulse ();
-    check int "transport failure sends both original owners through full recovery" 4 (call_count ()-before);
-    let second_owner = read (owner_path fixture second) in
-    control fixture (`Assoc ["presence_padding_bytes",`Int
-      (Common.max_process_capture_head_bytes+Common.max_process_capture_tail_bytes+1)]);
-    pulse ();
-    check int "late original in the middle of a complete inventory starts only its original program" 1 (effect_count fixture "start");
-    check int "shared hints never prepare replacement programs" 2 (effect_count fixture "create");
-    check string "another original job stays held without a phase rewrite" second_owner (read (owner_path fixture second));
-    (match (load fixture first).phase with Store.Running _ -> () | _ -> fail "the original visible job did not resume");
-    control fixture (`Assoc ["state",`String "exited";"exit_code",`Int 7]);
-    pulse ();
-    let completion = only_selection fixture |> completion_payload in
-    check string "durable result delivery keeps the exact original job" first (Store.Job_id.to_string completion.oj_job_id));
-  Printf.printf "owned_job_shared_presence_round=%s\n%!"
-    (Yojson.Safe.to_string (`Assoc ["scope",`String "synthetic CLI actual maintenance supervisor";
-      "held_original_jobs",`Int 2;"distinct_frozen_backend_routes",`Int routes;
-      "as_is_expected_per_job_presence_calls",`Int 2;"after_observed_shared_presence_calls",`Int (List.length batch_calls);
-      "borrows_job_private_cli",`Bool false;"original_owner_bytes_unchanged_on_absence",`Bool true]))
-
 let test_changed_cancel_intent_bypasses_held_presence () = with_fixture @@ fun _env _initialize fixture ->
   set_source fixture ~task_id:"task-A" ~turn:41;
   control fixture (`Assoc ["mode", `String "create_unknown_created"]);
@@ -5721,10 +5615,6 @@ let () = match Array.to_list Sys.argv with
           test_held_absent_presence_reactivates_only_original_authority
       ; test_case "changed cancellation bypasses process-local held absence" `Quick
           test_changed_cancel_intent_bypasses_held_presence
-      ; test_case "held jobs share an original-backend presence round and preserve recovery" `Quick
-          (test_shared_held_presence_round ~different_endpoint:false)
-      ; test_case "different frozen backend endpoints cannot share presence" `Quick
-          (test_shared_held_presence_round ~different_endpoint:true)
       ; test_case "recovery keeps refused foreign and corrupt owner bytes intact" `Quick test_completion_recovery_preserves_refused_owner_bytes
       ; test_case "owner mismatch reports hold before readiness" `Quick test_owner_mismatch_reports_hold_before_readiness
       ; test_case "held continuation is not retried until restart" `Quick test_held_continuation_is_not_retried_until_restart ]]

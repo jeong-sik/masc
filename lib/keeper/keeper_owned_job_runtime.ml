@@ -157,10 +157,10 @@ let reconcile record =
 
 type held_absent = Store.record
 
-let reconcile_for_recovery ?presence_round ?previous (record : Store.record) =
+let reconcile_for_recovery ?previous (record : Store.record) =
   let result = match previous with
     | Some held when held = record ->
-        (match Backend.presence_hint ?round:presence_round record.preparation with
+        (match Backend.presence_hint record.preparation with
          | Backend.No_owned_container_seen ->
              Log.Keeper.debug "owned_job_recovery job_id=%s observation=presence_not_seen"
                (Store.Job_id.to_string record.job_id);

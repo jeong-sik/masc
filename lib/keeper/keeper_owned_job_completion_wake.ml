@@ -45,7 +45,7 @@ let deliver ~on_result_ready (record : Store.record) =
      a later maintenance fiber settles the same acknowledged terminal owner. *)
   Ok Delivered
 
-let recover ?presence_round ?held_absent ~on_result_ready ~base_path (marker : Store.pending_delivery) =
+let recover ?held_absent ~on_result_ready ~base_path (marker : Store.pending_delivery) =
   try
     let* record = Store.recover ~base_path ~keeper_name:marker.keeper_name marker.job_id in
     if record.completion_delivered then
@@ -54,7 +54,7 @@ let recover ?presence_round ?held_absent ~on_result_ready ~base_path (marker : S
     else if Store.result_ready record then deliver ~on_result_ready record
     else
       let* (record, held_absent) = Keeper_owned_job_runtime.reconcile_for_recovery
-          ?presence_round ?previous:held_absent record in
+          ?previous:held_absent record in
       if Store.result_ready record then deliver ~on_result_ready record else Ok (Waiting held_absent)
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -100,7 +100,6 @@ let create ~config ?(on_result_ready=ignore) () =
 let pulse ~sw supervisor =
   let base_path = supervisor.config.Workspace.base_path in
   let* pending = Store.pending_deliveries ~base_path in
-  let presence_round = Keeper_owned_job_backend.create_presence_round () in
   let pending_ids = List.fold_left (fun ids (marker : Store.pending_delivery) ->
       Job_set.add marker.job_id ids) Job_set.empty pending.entries in
   supervisor.held_absent <- Job_map.filter (fun job_id _ -> Job_set.mem job_id pending_ids)
@@ -119,7 +118,7 @@ let pulse ~sw supervisor =
         Fun.protect
           ~finally:(fun () -> supervisor.active <- Job_set.remove marker.job_id supervisor.active)
           (fun () ->
-            match recover ~presence_round ?held_absent ~on_result_ready:supervisor.on_result_ready ~base_path marker with
+            match recover ?held_absent ~on_result_ready:supervisor.on_result_ready ~base_path marker with
             | Error error -> Log.Server.warn "owned job completion retained job=%s error=%s"
                 (Store.Job_id.to_string marker.job_id) (Store.error_to_string error)
             | Ok (Waiting None) -> ()

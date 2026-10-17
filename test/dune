@@ -6060,7 +6060,7 @@
 (test
  (name test_tui_preparation_details)
  (modules test_tui_preparation_details)
- (libraries alcotest masc masc.server masc.masc_types masc.keeper_operation_identity
+ (libraries alcotest masc masc.server masc_test_deps masc.masc_types masc.keeper_runtime masc.keeper_chat_operations masc.keeper_operation_identity
   masc.keeper_execution_scope eio eio_main masc_tui_preparation_details
   masc_tui_keeper_chat_log masc_tui_keeper_chat_live masc_tui_keeper_chat_transcript uri yojson))
 

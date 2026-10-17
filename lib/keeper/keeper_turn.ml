@@ -575,6 +575,7 @@ let run_keeper_invocation_turn_admitted_inner
           ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
           ~absolute_turn:keeper_turn_id
       in
+      Keeper_turn_preview_owner.note_turn_ref turn_ref;
       let turn_tracker = Progress.start_tracking ~task_id:turn_task_id ~total_steps:5 () in
       Progress.Tracker.step turn_tracker ~message:"Preparing keeper turn configuration" ();
       let selected_runtime = match native_resume with

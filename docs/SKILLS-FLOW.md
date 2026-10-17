@@ -684,7 +684,7 @@ Ctrl-S 상세에서 기존 `GET /api/v1/keepers/<name>/runtime-trace`를 조회�
 | 조건 | Before | After |
 |---|---|---|
 | 종료 뒤 Owner가 idle 또는 다른 실행으로 이동 | live 준비 이력이 사라짐 | 선택한 원래 실행의 저장 보고서를 비동기로 조회 |
-| 직접 요청·배치 실행 | 저장 보고서와 TUI 연결 없음 | 기록된 reply Turn_ref와 실제 execution ID 모두 일치해야 표시 |
+| 직접 요청·배치 실행 | 저장 보고서와 TUI 연결 없음 | 기록된 reply 또는 종단 operation Turn_ref와 실제 execution ID 모두 일치해야 표시 |
 | 자율 실행 실패·취소 | live 슬롯 종료 뒤 TUI 연결 없음 | journal의 원래 Turn_ref로 저장된 관측 조회; reply가 없어도 연결 |
 | 불완전·중복·미지원 응답 | 선택된 읽기 없음 | 진단을 남기고 확인된 보고서를 보존; 중복 ID는 어느 쪽도 선택하지 않음 |
 | 같은 저널 revision·반복 frame | 선택된 읽기 없음 | 추가 요청·읽기 state 변경 없이 완료 결과 재사용 |
@@ -704,14 +704,35 @@ system thread에서 실행한다. 기본 polling과 접힌 대화에서는 내�
 
 기존 runtime trace API는 tail/반환 범위를 제한하므로 부분 조회를 명시하고 전체
 이력이 확인됐다고 주장하지 않는다. 빈 응답도 준비가 없었다는 증거로 쓰지 않는다.
-직접 요청이 reply Turn_ref를 남기지 못한 실패는 `연결 불가`로 남는다. 해당 경로의
-명시적 실패 identity 전달, 오래된 기록의 paging, standalone identity, 전체 Ask·
-Composition 연속성과 동일 조건 Before/After는 계속 남아 있다.
+reply가 없는 직접 실패도 아래의 producer identity 경로를 사용한다. 아직 원래 턴을
+만들지 못했거나 연결이 모호한 실패는 추정하지 않는다. 오래된 기록의 paging,
+standalone identity, 전체 Ask·Composition 연속성과 동일 조건 Before/After는 계속 남아 있다.
 
 실제 writer 저장 → 기존 runtime API → 새 typed decoder·선택된 request state의
 시나리오를 작성했다. 직접 배치·자율 취소·부분/중복 응답·선택 철회·workspace retirement·
 저널 revision·늦은 응답을 다루며 실행하지 않았다. 화면 문구·배치 테스트는 추가하지
 않았다. 타입·실제 HTTP/화면·성능·통합 경로 검증은 별도이며 이 소스 변경으로 확정하지 않는다.
+
+#### reply 이전 직접 실패의 원래 턴 연결
+
+비교 기준은 `9fb943d14ebc5303ede063d16a58b192de64ea00`다. 직접 producer가
+Turn_ref를 실제로 만드는 자리에서 해당 Owner invocation의 관측값에 남긴다.
+Owner는 실행 Switch의 정리가 끝난 뒤 반환·예외·취소의 실패에 outcome_ref가 없을
+때만 이 값을 채운다. 이미 있는 outcome_ref와 실패 종류·원래 실행 결과는 보존한다.
+별도 저장소나 Keeper 이름·최근 preview 조회는 추가하지 않는다. 서로 다른 턴을
+관측했으면 어느 쪽도 고르지 않는다. 턴 생성 전 실패는 여전히 연결 미확인이다.
+
+| 조건 | Before | After 소스 경로 |
+|---|---|---|
+| 턴 생성 뒤 reply 이전 실패 | 저장 보고서가 있어도 직접 TUI 연결 없음 | 기존 canonical failure의 outcome_ref로 원래 보고서 조회 |
+| reply와 canonical 연결 불일치 | canonical 연결을 사용하지 않음 | 두 typed reference가 다르면 연결 거절 |
+| 실패 알림이 durable settlement보다 먼저 도착 | 종료된 stream의 Running metadata가 남을 수 있음 | 상세를 열 때와 기존 turns 관측 주기에 선택된 미정착 operation 하나만 확인 |
+| 이미 진행 중인 동일 읽기·접힌 상세·작업 중인 턴 | 추가 실패 identity 조회 없음 | 추가 읽기 없음; 종단 metadata 확인 뒤에는 reference가 없어도 재조회 종료 |
+
+실제 Owner·operation 저장·public JSON·TUI decoder·기존 runtime API를 잇는 반환 실패,
+예외, 취소와 턴 생성 전 실패 시나리오를 작성했다. 중첩 Owner·상충 관측과 선택된
+metadata 요청 결정도 다룬다. 실행하지 않았으며 TUI 문구·배치 검사는 추가하지 않았다.
+이 변경은 연결 범위의 개선이다. 타입·화면·최신 지연 개선은 확인하지 않았다.
 
 #### 공유 world 출처별 대기 관측
 

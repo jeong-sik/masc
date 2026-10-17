@@ -17,10 +17,21 @@ let target ~journal ~execution_id ~reply_turn_ref =
     | Log.Autonomous_turn turn_ref -> Ok (turn_ref, None)
     | Operation _ ->
       let* operation_id = Keeper_operation_id.of_string execution_id in
-      let* turn_ref = match reply_turn_ref with
-        | None -> Error "원래 턴 연결이 기록되지 않음"
+      let terminal_turn_ref = match Log.operation_state journal with
+        | Some (Keeper_chat_operation.Succeeded {outcome_ref;_}) -> Some outcome_ref
+        | Some (Failed {failure={outcome_ref;_};_}) -> outcome_ref
+        | None | Some (Queued | Running _ | Cancelled _) -> None in
+      let decode = function
+        | None -> Ok None
         | Some value -> (match Ids.Turn_ref.of_string value with
-          | Some turn_ref -> Ok turn_ref | None -> Error "기록된 턴 연결을 읽을 수 없음") in
+          | Some turn_ref -> Ok (Some turn_ref) | None -> Error "기록된 턴 연결을 읽을 수 없음") in
+      let* reply = decode reply_turn_ref in
+      let* terminal = decode terminal_turn_ref in
+      let* turn_ref = match reply, terminal with
+        | None, None -> Error "원래 턴 연결이 아직 확인되지 않음"
+        | Some turn_ref, None | None, Some turn_ref -> Ok turn_ref
+        | Some reply, Some terminal when Ids.Turn_ref.equal reply terminal -> Ok reply
+        | Some _, Some _ -> Error "응답과 operation의 원래 턴 연결이 일치하지 않음" in
       Ok (turn_ref, Some operation_id) in
   Ok {journal; revision=Log.revision journal; keeper_name=Log.keeper_name journal; turn_ref; operation_id}
 ;;

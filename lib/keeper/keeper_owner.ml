@@ -1441,12 +1441,13 @@ let start
         then (
           t.child_active := true;
           let interrupt_token = Keeper_interrupt_token.fresh () in
+          let observation = Keeper_turn_preview_owner.create_turn_observation () in
           publish_turn_in_flight
             t
             (Some { lane = Chat_operation; started_at = t.now ()
                   ; interrupt_token });
           Eio.Fiber.fork ~sw (fun () ->
-            Keeper_turn_preview_owner.with_owner ~interrupt_token @@ fun () ->
+            Keeper_turn_preview_owner.with_owner ~interrupt_token ~observation @@ fun () ->
             let claimed_operation_id = ref None in
             let claim () =
               match request t Claim_next_operation with
@@ -1515,6 +1516,14 @@ let start
                     }
                 , Child_raised )
             in
+            let execution = match execution with
+              | Operation_failed {kind; detail; outcome_ref=None} ->
+                (match Keeper_turn_preview_owner.observed_turn_ref observation with
+                 | None -> execution
+                 | Some turn_ref -> Operation_failed
+                     {kind; detail; outcome_ref=Some (Ids.Turn_ref.to_string turn_ref)})
+              | Operation_failed {outcome_ref=Some _; _}
+              | Operation_deferred | Operation_succeeded _ -> execution in
             let ended =
               if Atomic.get operator_interrupted
               then Child_interrupted_by_operator
@@ -2164,12 +2173,13 @@ let start
                         turn or the turn completes. *)
                      t.child_active := true;
                      let interrupt_token = Keeper_interrupt_token.fresh () in
+                     let observation = Keeper_turn_preview_owner.create_turn_observation () in
                      publish_turn_in_flight
                        t
                        (Some { lane; started_at = t.now ()
                              ; interrupt_token });
                      Eio.Fiber.fork ~sw (fun () ->
-                       Keeper_turn_preview_owner.with_owner ~interrupt_token @@ fun () ->
+                       Keeper_turn_preview_owner.with_owner ~interrupt_token ~observation @@ fun () ->
                        let outcome =
                          try
                            Ok

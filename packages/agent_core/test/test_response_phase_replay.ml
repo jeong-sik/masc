@@ -96,6 +96,39 @@ let incomplete_malformed_tool ()=
  let partial=`Assoc["type",`String"function_call";"name",`String"test";"arguments",`String"{"]in
  terminal ~status:"incomplete" ~reason:"max_output_tokens" state acc[message;partial];
  Alcotest.(check bool)"cut-off tool is dropped under existing incomplete policy"true(equal_items(replay acc)[message])
+
+let encrypted_reasoning_fields =
+  [ "type", `String "reasoning"
+  ; "id", `String "reasoning-item"
+  ; "encrypted_content", `String "unchanged-opaque-ciphertext"
+  ; "summary", `List []
+  ]
+
+let encrypted_reasoning_reordered () =
+  let state, acc = start () in
+  let original = `Assoc encrypted_reasoning_fields in
+  done_item state acc 0 original;
+  terminal state acc [`Assoc (List.rev encrypted_reasoning_fields)];
+  match Acc.finalize_stream_acc acc with
+  | Ok response ->
+    Alcotest.(check bool) "first opaque replay artifact stays exact" true
+      (response.content = [RedactedThinking (Yojson.Safe.to_string original)])
+  | Error _ -> Alcotest.fail "identical reasoning object was refused after key reordering"
+
+let encrypted_reasoning_changed () =
+  let state, acc = start () in
+  done_item state acc 0 (`Assoc encrypted_reasoning_fields);
+  let changed =
+    ("encrypted_content", `String "changed-ciphertext")
+    :: List.remove_assoc "encrypted_content" encrypted_reasoning_fields
+  in
+  terminal state acc [`Assoc changed];
+  match Acc.finalize_stream_acc acc with
+  | Error error ->
+    Alcotest.(check bool) "changed opaque ciphertext is still refused" true
+      (error = Stream_parse_failed
+        {reason="responses_replay:conflicting_reasoning_item";raw=""})
+  | Ok _ -> Alcotest.fail "changed opaque ciphertext was accepted"
 end
 
 let cache_roundtrip () =
@@ -155,4 +188,6 @@ let () = Alcotest.run "provider replay conformance" [
   Alcotest.test_case "omitted terminal phase" `Quick Streams.omitted_terminal_phase;
   Alcotest.test_case "malformed completed calls" `Quick Streams.malformed_terminal_calls;
   Alcotest.test_case "unsupported custom terminal" `Quick Streams.unsupported_custom;
-  Alcotest.test_case "incomplete malformed call" `Quick Streams.incomplete_malformed_tool]]
+  Alcotest.test_case "incomplete malformed call" `Quick Streams.incomplete_malformed_tool;
+  Alcotest.test_case "encrypted reasoning key order" `Quick Streams.encrypted_reasoning_reordered;
+  Alcotest.test_case "changed encrypted reasoning" `Quick Streams.encrypted_reasoning_changed]]

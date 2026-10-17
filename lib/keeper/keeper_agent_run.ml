@@ -1013,6 +1013,8 @@ let run_turn
      [Keeper_agent_run_receipt.finalize] never ran: no receipt, and neither
      degraded-retry lane settled. *)
   match
+    Keeper_turn_preview.with_preparation_result ~writer:preview ~turn_ref:None
+      ~phase:Keeper_turn_preview.Context_preparation (fun () ->
     Keeper_run_context.prepare_run_context
       ~config
       ~meta
@@ -1022,7 +1024,7 @@ let run_turn
       ?temperature
       ?shared_context
       ?checkpoint:direct_resume_checkpoint
-      ()
+      ())
     |> Result.map_error (function
       | Keeper_run_context.Checkpoint_unread error ->
         Agent_core.Error.Io
@@ -1198,7 +1200,10 @@ let run_turn
     ~agent_name:meta.name;
   let setup = match native_scope with
     | Error detail -> Error (checkpoint_persistence_error ~keeper_name:meta.name ~detail)
-    | Ok () -> Keeper_run_tools.prepare_agent_setup
+    | Ok () -> Keeper_turn_preview.with_preparation_result
+      ~writer:preview ~turn_ref:(Some turn_ref)
+      ~phase:Keeper_turn_preview.Tool_preparation (fun () ->
+      Keeper_run_tools.prepare_agent_setup
       ?preview
       ?observation_token
       ?dynamic_context_for_tools:prompt_ctx.dynamic_context_for_tools
@@ -1241,7 +1246,7 @@ let run_turn
              ~site:"context_injection_hook"
              config
              manifest)
-      ()
+      ())
   in
   (* Section 2: prepare runtime tools and hooks. *)
   match setup with

@@ -73,6 +73,7 @@
    links. Mirrors .ap-req-goal's dim mono look but is NOT interactive — no
    cursor:pointer / hover shift, so a non-clickable span is not a false affordance. */
 .ap-req-meta { font-size: var(--fs-10); color: var(--text-dim); }
+.ap-origin-summary { overflow-wrap: anywhere; }
 
 /* HITL context-summary worker briefing (approvals-surface.ts approvalSummaryBlock).
    The available card carries the LLM operator briefing; pending/failed states are

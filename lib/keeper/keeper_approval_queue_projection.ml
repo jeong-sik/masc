@@ -16,6 +16,15 @@ let input_preview_of_json (json : Yojson.Safe.t) =
   Observability_redact.redact_preview ~max_len:200 raw
 ;;
 
+(* One serializer for the audit witness and the dashboard row. The full stored
+   route, [user_id] included, is kept so both carry the same exact receipt; the
+   dashboard checks it strictly but does not display [user_id]. *)
+let origin_json_fields (entry : pending_approval) =
+  [ "origin", Keeper_approval_origin.to_yojson entry.origin
+  ; "continuation_channel", Keeper_continuation_channel.to_yojson entry.continuation_channel
+  ]
+;;
+
 let pending_entry_json_fields
       ?(include_input = false)
       (entry : pending_approval)
@@ -31,6 +40,7 @@ let pending_entry_json_fields
   ; "task_id", Json_util.string_opt_to_json entry.task_id
   ; "goal_id", Json_util.string_opt_to_json entry.goal_id
   ]
+  @ origin_json_fields entry
   @ (if include_input
      then
        [ "input", entry.input
@@ -105,6 +115,7 @@ let record_pending ~call_summary (entry : pending_approval) =
     Keeper_approval.Audit.record
       ~base_path:entry.audit_base_path
       ~event_type:Keeper_approval.Audit.Pending
+      ~extra_fields:(origin_json_fields entry)
       ~id:entry.id
       ~keeper_name:entry.keeper_name
       ~tool_name:entry.tool_name
@@ -166,7 +177,7 @@ let record_summary_updated ~now (entry : pending_approval) =
        ~exact_attempt:entry.exact_attempt
        ~summary_attempt_disposition:entry.summary_attempt_disposition
        ~timestamp:event_ts
-       ~extra_fields:(summary_audit_extras entry)
+       ~extra_fields:(origin_json_fields entry @ summary_audit_extras entry)
        ());
   try
     Sse.broadcast
@@ -208,6 +219,7 @@ let resolve_entry
     Keeper_approval.Audit.record
       ~base_path
       ~event_type:Keeper_approval.Audit.Resolved
+      ~extra_fields:(origin_json_fields entry)
       ~id:entry.id
       ~keeper_name:entry.keeper_name
       ~tool_name:entry.tool_name

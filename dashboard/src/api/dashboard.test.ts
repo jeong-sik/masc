@@ -2852,6 +2852,8 @@ describe('fetchDashboardGate', () => {
 
   it('quarantines a contract-violating queue row instead of blanking the queue (#26094)', async () => {
     const validItem = {
+      origin: { source: { kind: 'no_admitted_source' }, turn_ref: null },
+      continuation_channel: { kind: 'keeper', keeper_name: 'fixture-origin-recipient' },
       id: 'appr-valid',
       keeper_name: 'keeper-a',
       tool_name: 'shell_exec',
@@ -2872,6 +2874,8 @@ describe('fetchDashboardGate', () => {
         approval_queue: [
           validItem,
           {
+            origin: { source: { kind: 'no_admitted_source' }, turn_ref: null },
+            continuation_channel: { kind: 'keeper', keeper_name: 'fixture-origin-recipient' },
             id: 'appr-drifted',
             keeper_name: 'keeper-b',
             tool_name: 'fs_write',

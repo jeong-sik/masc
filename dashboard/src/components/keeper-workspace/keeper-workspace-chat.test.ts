@@ -33,6 +33,8 @@ const mockGateData = signal<DashboardGateResponse | undefined>(undefined)
 function approvalItem(id: string, keeperName: string, toolName: string): KeeperApprovalQueueItem {
   return {
     id,
+    origin: { source: { kind: 'no_admitted_source' }, turn_ref: null },
+    continuation_channel: { kind: 'keeper', keeper_name: keeperName },
     keeper_name: keeperName,
     tool_name: toolName,
     waiting_s: 10,

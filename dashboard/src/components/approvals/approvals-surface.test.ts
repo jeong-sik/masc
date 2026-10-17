@@ -14,6 +14,8 @@ async function flushUi(): Promise<void> {
 
 function queueItem(overrides: Partial<KeeperApprovalQueueItem> & { id: string }): KeeperApprovalQueueItem {
   return {
+    origin: { source: { kind: 'no_admitted_source' }, turn_ref: null },
+    continuation_channel: { kind: 'keeper', keeper_name: 'keeper-x' },
     keeper_name: 'keeper-x',
     tool_name: 'fs_write',
     input_hash: 'a'.repeat(64),
@@ -286,6 +288,39 @@ describe('ApprovalsSurface', () => {
     vi.doUnmock('../../api')
     vi.doUnmock('../../api/dashboard-gate')
     vi.doUnmock('../../sse-store')
+  })
+
+  it('shows actual Board admission, original turn and reply route beside the request', async () => {
+    const { ApprovalsSurface } = await loadSurface([queueItem({
+      id: 'appr-origin',
+      origin: {
+        source: { kind: 'admitted_sources', sources: [{
+          snapshot_ref: 'b'.repeat(64), admitted_revision: '7', board_post_id: 'board-original',
+        }] },
+        turn_ref: 'actual-trace#12',
+      },
+      continuation_channel: { kind: 'discord', channel_id: 'source-channel', thread_id: 'source-thread', user_id: 'actor' },
+      input_preview: '{"post_id":"invented-from-input"}',
+    })])
+    render(html`<${ApprovalsSurface} />`, container)
+    await flushUi()
+    expect(container.querySelector('[data-testid="approval-origin-summary"]')?.textContent).toBe('접수된 입력 1건 · Board board-original')
+    const details = container.querySelector('.ap-dossier')?.textContent ?? ''
+    expect(details).toContain('actual-trace#12')
+    expect(details).toContain('Discord · source-channel / source-thread')
+    expect(details).toContain(`${'b'.repeat(64)}@7`)
+    const sourceRow = [...container.querySelectorAll('.ap-dossier-row')].find(row => row.querySelector('dt')?.textContent === '승인 맥락')
+    expect(sourceRow?.querySelector('dd')?.textContent).toBe('접수된 입력 1건 · Board board-original')
+  })
+
+  it('keeps unavailable origin explicit rather than deriving it from the input', async () => {
+    const { ApprovalsSurface } = await loadSurface([queueItem({ id: 'appr-unavailable', input_preview: 'Board guessed-post turn#99' })])
+    render(html`<${ApprovalsSurface} />`, container)
+    await flushUi()
+    expect(container.querySelector('[data-testid="approval-origin-summary"]')?.textContent).toBe('요청 출처 확인 불가')
+    const rows = [...container.querySelectorAll('.ap-dossier-row')]
+    expect(rows.find(row => row.querySelector('dt')?.textContent === '요청 턴')?.querySelector('dd')?.textContent).toBe('확인 불가')
+    expect(rows.find(row => row.querySelector('dt')?.textContent === '응답 경로')?.querySelector('dd')?.textContent).toBe('Keeper · keeper-x')
   })
 
   it('renders a card per pending approval bound to the live queue fields', async () => {

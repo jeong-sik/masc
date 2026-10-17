@@ -1181,7 +1181,7 @@ let preparation_status preparation =
   | Preparation_active -> Progress, "최근 확인 · " ^ phase ^ " 중"
   | Preparation_finished {outcome=Prepared;_} ->
     Progress, "최근 확인 · " ^ phase ^ "됨 · 다음 활동 확인 중"
-  | Preparation_finished {outcome;_} ->
+  | Preparation_finished {outcome=(Rejected | Raised | Cancelled) as outcome;_} ->
     let outcome = match outcome with
       | Rejected -> "거절됨" | Raised -> "실패" | Cancelled -> "취소됨"
       | Prepared -> "완료됨" in

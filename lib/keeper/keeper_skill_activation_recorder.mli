@@ -4,6 +4,10 @@ type t
 type bound_context
 val physical_turn_ref : t -> Ids.Turn_ref.t
 val current_runtime_id : t -> string option
+val task_references : task_id:Keeper_id.Task_id.t -> t -> Skill_reference.t list
+(** Exact references selected by this Task in the immutable turn frame. This
+    reads no source, resolves no runtime and records no activation. Held Tasks
+    without this exact Task identity and unavailable references are excluded. *)
 type result_child =
   { alias : string
   ; skill_reference : Skill_reference.t

@@ -1566,8 +1566,7 @@ let keeper_state_glyph ~paused ~(health : Tui_decode.keeper_health option) =
    Returning the unpadded id when it already fits lets a chat header spend the
    remaining cells on context instead of blank padding. *)
 let fit_runtime_id width runtime_id =
-  if Message_layout.display_width runtime_id <= width then runtime_id
-  else Message_layout.fit_middle width runtime_id
+  Message_layout.truncate_middle width runtime_id
 
 
 (* Keeper and document indexes share one quiet edge. The row, including its
@@ -2134,11 +2133,7 @@ let board_score_style votes =
    spaces -- "[post-a      ]", "[executing ]", "[active    ]". A row that
    needs the bracket to line up pads after it. *)
 let bracketed ~max_cells text =
-  let text =
-    if Message_layout.display_width text <= max_cells then text
-    else Message_layout.fit_middle max_cells text
-  in
-  "[" ^ text ^ "]"
+  "[" ^ Message_layout.truncate_middle max_cells text ^ "]"
 
 (* The Board reader's title row: the screen, which post, its hearth, its score
    and its replies. The id is folded at the list's ID column. Replies read "💬3"
@@ -2962,14 +2957,14 @@ let build_change_context_lines (change_ctx : change_context) : string list =
   let line1_items =
     match change_ctx.ctx_goal_id, change_ctx.ctx_goal_title with
     | Some gid, Some title ->
-        Printf.sprintf "Goal: %s (%s)" gid (Message_layout.fit_middle 24 title) :: line1_items
+        Printf.sprintf "Goal: %s (%s)" gid (Message_layout.truncate_middle 24 title) :: line1_items
     | Some gid, None -> ("Goal: " ^ gid) :: line1_items
     | None, _ -> line1_items
   in
   let line1_items =
     match change_ctx.ctx_task_id, change_ctx.ctx_task_title with
     | Some tid, Some title ->
-        Printf.sprintf "Task: %s (%s)" tid (Message_layout.fit_middle 26 title) :: line1_items
+        Printf.sprintf "Task: %s (%s)" tid (Message_layout.truncate_middle 26 title) :: line1_items
     | Some tid, None -> ("Task: " ^ tid) :: line1_items
     | None, _ -> line1_items
   in
@@ -3349,8 +3344,7 @@ let config_pane_title ~cols ~name ?(reading = "") ?(note = "") ?(clock = "")
         framed_inner_width cols - cells before - cells config_pane_keys
         - strip_floor - cells tail - cells "  "
       in
-      if room >= cells note then note
-      else Masc_tui_message_layout.fit_middle (max 0 room) note
+      Masc_tui_message_layout.truncate_middle (max 0 room) note
   in
   before ^ config_pane_strip ~cols ~before ~after:(piece note ^ tail) state
   ^ piece note ^ tail

@@ -428,7 +428,10 @@ let skill_usage_box ~cols rows =
       (if Masc_tui_message_layout.display_width text <= content_width then [text]
        else Masc_tui_message_layout.wrap_words ~max_cells:content_width text)
       |> List.map (fun line ->
-        style, Ansi.box_v ^ " " ^ fit_width line content_width ^ " " ^ Ansi.box_v)) rows
+        "",
+        Ansi.dim ^ Ansi.box_v ^ Ansi.reset ^ " "
+        ^ style ^ fit_width line content_width ^ Ansi.reset
+        ^ " " ^ Ansi.dim ^ Ansi.box_v ^ Ansi.reset)) rows
   in
   if width < 5 then
     List.concat_map (fun (style, text) ->

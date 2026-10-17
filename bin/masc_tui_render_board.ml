@@ -139,10 +139,7 @@ let render_board_compose (state : state) =
         let label = "  attach file: " in
         let room = max 1 (cols - 8 - String.length label - 1) in
         let path = Terminal_text.single_line (Buffer.contents input) in
-        let shown =
-          if Message_layout.display_width path <= room then path
-          else Message_layout.fit_middle room path
-        in
+        let shown = Message_layout.truncate_middle room path in
         Some (label ^ shown ^ Ansi.reverse ^ " " ^ Ansi.reset)
     | None -> None
   in

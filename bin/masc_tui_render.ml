@@ -890,10 +890,13 @@ let planning_updated_age ~now (goal : planning_goal) =
    Callers choose their height from the available rows and retain selection. *)
 let studio_panel ~width ~title ~lines =
   let inner = max 1 (width - 4) in
+  let heading = Message_layout.truncate_middle inner title in
   let border left right =
     Theme.recede () ^ left ^ draw_hline (max 0 (width - 2)) ^ right ^ Ansi.reset
   in
-  [ Theme.info () ^ "┌ " ^ fit_width title (max 1 (width - 4)) ^ " ┐" ^ Ansi.reset ]
+  [ Theme.info () ^ "┌ " ^ heading ^ " "
+    ^ draw_hline (max 0 (width - Message_layout.display_width heading - 4))
+    ^ "┐" ^ Ansi.reset ]
   @ List.map (fun line ->
       Theme.recede () ^ "│ " ^ Ansi.reset ^ fit_width line inner
       ^ Theme.recede () ^ " │" ^ Ansi.reset) lines
@@ -3386,7 +3389,7 @@ let render_exact_lane_provider_editor (state : state) editor =
             let scope_width =
               max 1 (framed_inner_width cols - Message_layout.display_width (prefix ^ suffix)) in
             box_line_styled buf cols ~style:(Theme.recede ())
-              (prefix ^ Masc_tui_message_layout.fit_middle scope_width
+              (prefix ^ Masc_tui_message_layout.truncate_middle scope_width
                  (Terminal_text.single_line (runtime_quota_scope_label runtime)) ^ suffix));
      (match picker.rlp_selected_row with
       | Some offset ->
@@ -3481,7 +3484,7 @@ let render_exact_lane_provider_editor (state : state) editor =
            let scope_width =
              max 1 (framed_inner_width cols - Message_layout.display_width (prefix ^ suffix)) in
            box_line_styled buf cols ~style:(Theme.info ())
-             (prefix ^ Masc_tui_message_layout.fit_middle scope_width
+             (prefix ^ Masc_tui_message_layout.truncate_middle scope_width
                 (Terminal_text.single_line (runtime_quota_scope_label runtime)) ^ suffix)
          | None -> box_line_styled buf cols ~style:(Theme.warn ()) "  Model details unavailable");
         box_line_styled buf cols ~style:(Theme.recede ())
@@ -8315,7 +8318,8 @@ let render_repository_changes (state : state) =
                   let line =
                     Printf.sprintf "  %-18s %s%s"
                       (repository_change_status row)
-                      (Message_layout.fit_middle (max 8 (cols - 28 - String.length attr))
+                      (Message_layout.truncate_middle
+                         (max 8 (framed_inner_width cols - 21 - Message_layout.display_width attr))
                          (Terminal_text.single_line row.rc_path))
                       attr
                   in
@@ -11041,7 +11045,7 @@ let provider_history_lines ~cols (state : state) =
           @ wrap latest
           @ Masc_tui_usage_trend.plot ~width:inner trend row
           @ wrap (Printf.sprintf "%d/%d UTC days reported" row.reported_days days) in
-        let heading = Message_layout.fit_middle inner (label row.scope_id) in
+        let heading = Message_layout.truncate_middle inner (label row.scope_id) in
         let line text = Theme.recede () ^ Ansi.box_v ^ Ansi.reset ^ " "
           ^ Message_layout.fit_width text inner ^ " " ^ Theme.recede () ^ Ansi.box_v ^ Ansi.reset in
         (Theme.info () ^ Ansi.box_tl ^ " " ^ Ansi.bold ^ heading ^ Ansi.reset ^ Theme.info ()
@@ -12632,15 +12636,9 @@ let config_identity_rows ~cols (state : state) =
       let room =
         max_cells - Message_layout.display_width lead - Message_layout.display_width trail
       in
-      (* [fit_middle] pads a label that fits, so it only runs on one that
-         does not. *)
-      let fit cells text =
-        if Message_layout.display_width text <= cells then text
-        else Message_layout.fit_middle cells text
-      in
       let notice =
-        if room > 0 then lead ^ fit room reason ^ trail
-        else fit max_cells (lead ^ reason ^ trail)
+        if room > 0 then lead ^ Message_layout.truncate_middle room reason ^ trail
+        else Message_layout.truncate_middle max_cells (lead ^ reason ^ trail)
       in
       ("  " ^ notice) :: rows
   | Workspace_identity_unread | Workspace_identity_match

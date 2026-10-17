@@ -721,29 +721,33 @@ let chat_role_label_width ~pane_cells =
 
    The tail gets two thirds of the budget because it is the deciding end. As
    [column] shrinks the head's third reaches zero and this degrades into
-   a tail-only cut, which is the right thing to lose last.
-
-   Left-aligned and padded to [column], so this is a drop-in where
-   [fit_width] was cutting identifiers. *)
-let fit_middle column label =
+   a tail-only cut, which is the right thing to lose last. *)
+let truncate_middle column label =
   if column <= 0 then ""
   else
     let pieces = display_pieces label in
     let cells = pieces_width pieces in
-    if cells <= column then label ^ String.make (column - cells) ' '
+    if cells <= column then label
     else if column <= cut_mark_cells then cut_mark
     else
       let usable = column - cut_mark_cells in
       let head_cells = usable / 3 in
       let tail_cells = usable - head_cells in
-      let head, head_width, saw_ansi =
+      let head, _, saw_ansi =
         cell_prefix_of_pieces label pieces head_cells
       in
       let tail = cell_suffix_of_pieces label pieces tail_cells in
-      let tail_width = pieces_width (display_pieces tail) in
       let reset = if saw_ansi then "\x1B[0m" else "" in
-      let used = head_width + cut_mark_cells + tail_width in
-      head ^ reset ^ cut_mark ^ tail ^ String.make (Int.max 0 (column - used)) ' '
+      head ^ reset ^ cut_mark ^ tail
+
+(* Left-aligned and padded to [column], so this is a drop-in where
+   [fit_width] was cutting identifiers. *)
+let fit_middle column label =
+  if column <= 0 then ""
+  else
+    let truncated = truncate_middle column label in
+    let used = display_width truncated in
+    truncated ^ String.make (Int.max 0 (column - used)) ' '
 
 (* One glyph per speaker, from the vocabulary the Keepers roster and Acting
    already use. Colour carries this distinction better, and NO_COLOR takes

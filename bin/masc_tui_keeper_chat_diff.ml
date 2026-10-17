@@ -334,8 +334,7 @@ let address_row ~max_line_cells ~summary change =
         (max_line_cells - Layout.display_width prefix
        - Layout.display_width suffix)
     in
-    if Layout.display_width address <= address_cells then address
-    else Layout.fit_middle address_cells address
+    Layout.truncate_middle address_cells address
   in
   clipped ~max_cells:max_line_cells (prefix ^ address ^ suffix)
 

@@ -1004,11 +1004,7 @@ let detail_heading ~cols ~lead ~id ~after ~tail =
   let after_drawn, room = take after_cells room in
   let id_extra, room = take (id_cells - id_floor_drawn) room in
   let id_drawn = id_floor_drawn + id_extra in
-  let id =
-    if id_drawn >= id_cells then id
-    else if id_drawn = 0 then ""
-    else Masc_tui_message_layout.fit_middle id_drawn id
-  in
+  let id = Masc_tui_message_layout.truncate_middle id_drawn id in
   (* A cut or dropped [after] may have been what closed a style the lead
      opened, so the reset it carried is put back. *)
   let after =

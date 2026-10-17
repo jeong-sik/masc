@@ -1154,5 +1154,5 @@ let prepare_agent_setup
     ~runtime_id_string
     ~config_root ~runtime_config_path
     ~trajectory_acc
-    ~skill_projection_diagnostics
+    ~skill_projection_diagnostics:preparation.diagnostics
     ?runtime_manifest_context ?runtime_manifest_append ()

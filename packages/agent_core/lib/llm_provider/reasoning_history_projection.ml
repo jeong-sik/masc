@@ -37,6 +37,7 @@ type error =
       { message_index : int
       ; classification : Types.Reasoning_source.classification
       }
+  | Invalid_response_replay of { message_index : int; detail : string }
   | Unsupported_reasoning_block of
       { message_index : int
       ; block_index : int
@@ -56,6 +57,8 @@ let error_to_string = function
       "reasoning source is attached to a non-Assistant message at history index %d (%s)"
       message_index
       (Types.Reasoning_source.show_classification classification)
+  | Invalid_response_replay {message_index; detail} ->
+    Printf.sprintf "invalid response replay at history index %d: %s" message_index detail
   | Unsupported_reasoning_block { message_index; block_index; block_kind } ->
     Printf.sprintf
       "reasoning block %s at history index %d block %d is not representable by the \
@@ -71,7 +74,11 @@ let validate_and_classify (messages : Types.message list) =
     | (message : Types.message) :: rest ->
       let classification = Types.Reasoning_source.classify message.metadata in
       let result =
-        match message.role, classification with
+        match Response_replay.of_metadata ~content:message.content message.metadata with
+        | Error detail -> Error (Invalid_response_replay {message_index; detail})
+        | Ok (Some _) when message.role <> Assistant ->
+          Error (Invalid_response_replay {message_index; detail="responses_replay:non_assistant"})
+        | Ok _ -> match message.role, classification with
         | Assistant, (Types.Reasoning_source.Absent | Present _) -> Ok ()
         | Assistant, (Invalid | Duplicate) ->
           Error (Invalid_reasoning_source { message_index; classification })
@@ -109,8 +116,14 @@ let content_has_tool_use =
     | Audio _ -> false)
 ;;
 
+let filter_content keep content =
+  let retained = List.mapi (fun index block -> index, block) content
+    |> List.filter (fun (_, block) -> keep block) in
+  List.map snd retained, List.map fst retained
+;;
+
 let without_reasoning content =
-  List.filter
+  filter_content
     (function
       | Thinking _ | ReasoningDetails _ | RedactedThinking _ -> false
       | Text _ | ToolUse _ | ToolResult _ | Image _ | Document _ | Audio _ -> true)
@@ -130,7 +143,7 @@ let content_has_generic_reasoning =
 ;;
 
 let without_generic_reasoning content =
-  List.filter
+  filter_content
     (function
       | Thinking _ | ReasoningDetails _ -> false
       | Text _
@@ -250,7 +263,7 @@ let project
         let has_reasoning = content_has_reasoning message.content in
         let content_result =
           match message.role, has_reasoning with
-          | _, false -> Ok (message.content, None)
+          | _, false -> Ok ((message.content, List.mapi (fun index _ -> index) message.content), None)
           | Assistant, true ->
             (match source_classification with
              (* Continuity across a source change is a declared decision, not an
@@ -273,7 +286,7 @@ let project
                  , Some { message_index; reason = Missing_reasoning_source } )
              | Types.Reasoning_source.Present _
                when replay_policy = Reasoning_replay_contract.Provider_opaque_state ->
-               let content = without_generic_reasoning message.content in
+               let content, retained_indices = without_generic_reasoning message.content in
                Result.map
                  (fun content ->
                     let replay_drop =
@@ -283,7 +296,7 @@ let project
                           { message_index; reason = Replay_policy_excluded replay_policy }
                       else None
                     in
-                    content, replay_drop)
+                    (content, retained_indices), replay_drop)
                  (validate_supported_reasoning
                     ~reasoning_block_supported
                     ~message_index
@@ -297,7 +310,7 @@ let project
                    ~latest_user_message_index
                then
                  Result.map
-                   (fun content -> content, None)
+                   (fun content -> (content, List.mapi (fun index _ -> index) content), None)
                    (validate_supported_reasoning
                       ~reasoning_block_supported
                       ~message_index
@@ -316,8 +329,12 @@ let project
         in
         (match content_result with
          | Error _ as error -> error
-         | Ok (content, replay_drop) ->
-           let message = { message with content } in
+         | Ok ((content, retained_indices), replay_drop) ->
+           (match Response_replay.retain_metadata ~original_content:message.content
+              ~content ~retained_indices message.metadata with
+            | Error detail -> Error (Invalid_response_replay {message_index; detail})
+            | Ok metadata ->
+           let message = { message with content; metadata } in
            let projected, removed_empty =
              match message.role, assistant_has_payload content with
              | Assistant, false -> projected, message_index :: removed_empty
@@ -329,7 +346,7 @@ let project
              | Some drop -> drop :: replay_drops
              | None -> replay_drops
            in
-           loop projected replay_drops removed_empty rest)
+           loop projected replay_drops removed_empty rest))
     in
     loop [] [] [] classified_messages
 ;;
@@ -454,9 +471,9 @@ let verify_prefix_binding ~head ~encode_block ~role_tag messages =
         ( without_reasoning message.content
         , Some { message_index; cause; stored_message_digest } )
       in
-      let content, drop =
+      let (content, retained_indices), drop =
         if not has_reasoning
-        then message.content, None
+        then (message.content, List.mapi (fun index _ -> index) message.content), None
         else (
           match Types.Reasoning_source.classify message.metadata with
           | Types.Reasoning_source.Present _ -> (
@@ -483,7 +500,7 @@ let verify_prefix_binding ~head ~encode_block ~role_tag messages =
                 let current = content_wire_digest ~encode_block message.content in
                 if not (String.equal stored_message_digest current)
                 then dropped ~stored_message_digest Prefix_reasoning_mismatch
-                else message.content, None))
+                else (message.content, List.mapi (fun index _ -> index) message.content), None))
           | Types.Reasoning_source.Absent
           | Types.Reasoning_source.Invalid
           | Types.Reasoning_source.Duplicate ->
@@ -496,7 +513,11 @@ let verify_prefix_binding ~head ~encode_block ~role_tag messages =
         (fun block ->
            chain := chain_extend !chain "blk" (block_bytes ~encode_block block))
         content;
-      let message = { message with content } in
+      let metadata = match Response_replay.retain_metadata
+          ~original_content:message.content ~content ~retained_indices message.metadata with
+        | Ok metadata -> metadata
+        | Error detail -> invalid_arg detail in
+      let message = { message with content; metadata } in
       let projected, removed =
         match message.role, content with
         | Assistant, [] -> projected, message_index :: removed

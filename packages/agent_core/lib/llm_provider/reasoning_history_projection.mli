@@ -42,6 +42,7 @@ type error =
       { message_index : int
       ; classification : Types.Reasoning_source.classification
       }
+  | Invalid_response_replay of { message_index : int; detail : string }
   | Unsupported_reasoning_block of
       { message_index : int
       ; block_index : int

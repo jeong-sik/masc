@@ -604,11 +604,14 @@ module Response_replay : sig
   type t = group list [@@deriving show, yojson]
 
   val metadata_key : string
+  val phase_of_fields : (string * Yojson.Safe.t) list -> (phase, string) result
+  val phase_fields : phase -> (string * Yojson.Safe.t) list
   val partition : content:content_block list -> t -> ((kind * content_block list) list, string) result
   val make : content:content_block list -> group list -> (t, string) result
   val metadata : t -> string * Yojson.Safe.t
   val of_metadata : content:content_block list -> (string * Yojson.Safe.t) list -> (t option, string) result
   val retain : content:content_block list -> retained_indices:int list -> t -> (t, string) result
+  val retain_metadata : original_content:content_block list -> content:content_block list -> retained_indices:int list -> (string * Yojson.Safe.t) list -> ((string * Yojson.Safe.t) list, string) result
 end
 
 type inference_telemetry =

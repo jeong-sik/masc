@@ -879,6 +879,23 @@ module Response_replay = struct
 
   let metadata_key = "openai.responses.output_items"
 
+  let phase_of_fields fields =
+    match List.filter (fun (key, _) -> String.equal key "phase") fields with
+    | [] -> Ok Absent
+    | [(_, `Null)] -> Ok Null
+    | [(_, `String "commentary")] -> Ok Commentary
+    | [(_, `String "final_answer")] -> Ok Final_answer
+    | [_] -> Error "responses_replay:unsupported_phase"
+    | _ :: _ -> Error "responses_replay:duplicate_phase"
+  ;;
+
+  let phase_fields = function
+    | Absent -> []
+    | Null -> ["phase", `Null]
+    | Commentary -> ["phase", `String "commentary"]
+    | Final_answer -> ["phase", `String "final_answer"]
+  ;;
+
   let content_matches kind = function
     | Text _ -> (match kind with Message _ -> true | Reasoning | Function_call -> false)
     | Thinking _ | ReasoningDetails _ | RedactedThinking _ ->
@@ -949,6 +966,17 @@ module Response_replay = struct
             counts boundary remaining acc rest
     in
     counts 0 retained_indices [] groups
+  ;;
+
+  let retain_metadata ~original_content ~content ~retained_indices metadata =
+    match of_metadata ~content:original_content metadata with
+    | Error _ as error -> error
+    | Ok None -> Ok metadata
+    | Ok (Some replay) ->
+      Result.map (fun replay ->
+        List.map (fun (key, value) -> if String.equal key metadata_key
+          then key, to_yojson replay else key, value) metadata)
+        (retain ~content ~retained_indices replay)
   ;;
 end
 

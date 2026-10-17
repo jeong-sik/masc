@@ -177,6 +177,26 @@ let admitted_names (admission : Agent_tools.tool_use_admission) =
     admission.admitted
 ;;
 
+let test_admission_preserves_native_replay_positions () =
+  let blocks = [Types.Text "checking"; tool_use "denied" "not_registered";
+                tool_use "kept" "Execute1139645993.1"; Types.Text "answer"] in
+  let admission = admit ["Execute"] blocks in
+  check (list int) "actual retained source positions" [0;2;3]
+    admission.retained_content_indices;
+  let groups : Types.Response_replay.t =
+    [{kind=Message Commentary;content_count=1};
+     {kind=Function_call;content_count=1};
+     {kind=Function_call;content_count=1};
+     {kind=Message Final_answer;content_count=1}] in
+  match Types.Response_replay.retain ~content:admission.admitted
+          ~retained_indices:admission.retained_content_indices groups with
+  | Error detail -> Alcotest.fail detail
+  | Ok replay -> check bool "rejected group removed and phase remains attached" true
+      (replay=[{kind=Message Commentary;content_count=1};
+               {kind=Function_call;content_count=1};
+               {kind=Message Final_answer;content_count=1}])
+;;
+
 let test_admission_keeps_exact_name () =
   let admission = admit [ "Execute" ] [ tool_use "t1" "Execute" ] in
   check (list string) "exact name survives" [ "Execute" ] (admitted_names admission);
@@ -374,6 +394,7 @@ let () =
         ] )
     ; ( "history admission"
       , [ test_case "exact name survives" `Quick test_admission_keeps_exact_name
+        ; test_case "native replay retained positions" `Quick test_admission_preserves_native_replay_positions
         ; test_case
             "recovered call is stored under the registered name"
             `Quick

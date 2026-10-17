@@ -41,16 +41,6 @@ let non_blank_json_string json =
   | Some _ | None -> None
 ;;
 
-let ok_concat_map f xs =
-  let rec loop acc = function
-    | [] -> Ok (List.rev acc |> List.concat)
-    | x :: rest ->
-      let* blocks = f x in
-      loop (blocks :: acc) rest
-  in
-  loop [] xs
-;;
-
 let assoc_remove keys fields =
   List.filter (fun (key, _) -> not (List.mem key keys)) fields
 ;;
@@ -333,6 +323,28 @@ let tool_result_items blocks =
     | Audio _ -> None)
 ;;
 
+let input_items_of_native_groups content replay =
+  let groups =
+    match Response_replay.partition ~content replay with
+    | Ok groups -> groups
+    | Error detail -> invalid_arg detail
+  in
+  List.concat_map
+    (fun (kind, blocks) ->
+       match kind with
+       | Response_replay.Message phase ->
+         let parts = List.map (function
+           | Text text -> output_text_content_part text
+           | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
+           | ToolResult _ | Image _ | Document _ | Audio _ ->
+             invalid_arg "responses_replay:message_content_kind") blocks in
+         [`Assoc (Response_replay.phase_fields phase @
+           ["type", `String "message"; "role", `String "assistant"; "content", `List parts])]
+       | Response_replay.Reasoning | Response_replay.Function_call ->
+         List.filter_map assistant_output_item_of_block blocks)
+    groups
+;;
+
 let input_items_of_message (msg : message) =
   match msg.role with
   | System -> message_item ~role:"system" msg.content
@@ -354,8 +366,15 @@ let input_items_of_message (msg : message) =
     in
     tool_results @ message_item ~role:"user" non_tool_content
   | Assistant ->
-    let phase = response_phase_of_metadata msg.metadata in
-    List.filter_map (assistant_output_item_of_block ?phase) msg.content
+    (match Response_replay.of_metadata ~content:msg.content msg.metadata with
+     | Error detail -> invalid_arg detail
+     | Ok (Some replay) ->
+       if List.mem_assoc response_phase_metadata_key msg.metadata then
+         invalid_arg "responses_replay:aggregate_phase_conflict";
+       input_items_of_native_groups msg.content replay
+     | Ok None ->
+       let phase = response_phase_of_metadata msg.metadata in
+       List.filter_map (assistant_output_item_of_block ?phase) msg.content)
   | Tool -> tool_result_items msg.content
 ;;
 
@@ -647,6 +666,31 @@ let content_blocks_of_output_item ~drop_function_call item =
   | None -> Error "malformed_responses_output_item:missing_type"
 ;;
 
+let content_and_replay_of_output ~drop_function_call output =
+  let rec loop content_rev groups_rev = function
+    | [] ->
+      let content = List.rev content_rev |> List.concat in
+      let* replay = Response_replay.make ~content (List.rev groups_rev) in
+      Ok (content, replay)
+    | item :: rest ->
+      let* blocks = content_blocks_of_output_item ~drop_function_call item in
+      let* kind = match opt_bind (json_assoc_opt "type" item) json_string_opt with
+        | Some "message" ->
+          let fields = match item with `Assoc fields -> fields | _ -> [] in
+          Result.map (fun phase -> Some (Response_replay.Message phase))
+            (Response_replay.phase_of_fields fields)
+        | Some "reasoning" -> Ok (Some Response_replay.Reasoning)
+        | Some "function_call" -> Ok (Some Response_replay.Function_call)
+        | Some _ | None -> Ok None in
+      let groups_rev = match kind, blocks with
+        | Some (Response_replay.Message _ as kind), _
+        | Some kind, (_ :: _) -> {Response_replay.kind; content_count=List.length blocks} :: groups_rev
+        | Some (Reasoning | Function_call), [] | None, _ -> groups_rev in
+      loop (blocks :: content_rev) groups_rev rest
+  in
+  loop [] [] output
+;;
+
 let usage_of_response_json json =
   match json_assoc_opt "usage" json with
   | Some (`Assoc fields) ->
@@ -745,9 +789,7 @@ let parse_response_result json_str =
         | "incomplete" | "failed" -> true
         | _ -> false
       in
-      let* content =
-        ok_concat_map (content_blocks_of_output_item ~drop_function_call) output
-      in
+      let* content, replay = content_and_replay_of_output ~drop_function_call output in
       let has_tool_calls =
         List.exists
           (function
@@ -773,7 +815,9 @@ let parse_response_result json_str =
         ; stop_reason
         ; content
         ; usage = usage_of_response_json json
-        ; telemetry = telemetry_of_response_json json
+        ; telemetry = Some
+            { (Option.value ~default:Types.default_inference_telemetry
+                 (telemetry_of_response_json json)) with response_replay = Some replay }
         }
   with
   | Yojson.Json_error msg -> Error ("JSON parse error: " ^ msg)

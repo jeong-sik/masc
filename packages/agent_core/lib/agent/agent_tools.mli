@@ -75,6 +75,7 @@ val strip_registered_suffix : available:string list -> string -> string option
     unnamed call. *)
 type tool_use_admission =
   { admitted : Types.content_block list
+  ; retained_content_indices : int list
   ; rejected_names : string list
   ; tool_source_map : Hooks.admitted_tool_source_map
   }

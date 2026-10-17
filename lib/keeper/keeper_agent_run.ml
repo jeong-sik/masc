@@ -1358,20 +1358,31 @@ let run_turn
               answerer as the speaker. Stamped before admission so the admitted
               copy already carries it; the admission digest leaves the speaker
               out, so stamping does not change what was admitted. *)
-           let co_inputs = List.fold_left (fun result (ask_id, text, answered_by) ->
-             Result.bind result (fun inputs ->
-               let evidence_fingerprint = Digestif.SHA256.(digest_string text |> to_hex) in
-               let message =
-                 Agent_core.Types.make_message
-                   ~metadata:(Keeper_input_speaker.metadata
-                                (Keeper_input_speaker.Person answered_by))
-                   ~role:Agent_core.Types.User
-                   [ Agent_core.Types.Text text ]
-               in
-               Keeper_approval_input_admission.answered_ask_identity ~ask_id ~evidence_fingerprint
-               |> Result.map_error Keeper_approval_input_admission.error_to_string
-               |> Result.map (fun identity -> inputs @ [identity, message])))
-             (Ok []) answered_ask_inputs in
+           let co_inputs =
+             List.fold_left
+               (fun result
+                    ({ Keeper_unified_prompt.ask_id
+                     ; evidence_fingerprint
+                     ; text
+                     ; answered_by
+                     }) ->
+                 Result.bind result (fun inputs ->
+                   let message =
+                     Agent_core.Types.make_message
+                       ~metadata:
+                         (Keeper_input_speaker.metadata
+                            (Keeper_input_speaker.Person answered_by))
+                       ~role:Agent_core.Types.User
+                       [ Agent_core.Types.Text text ]
+                   in
+                   Keeper_approval_input_admission.answered_ask_identity
+                     ~ask_id
+                     ~evidence_fingerprint
+                   |> Result.map_error Keeper_approval_input_admission.error_to_string
+                   |> Result.map (fun identity -> inputs @ [ identity, message ])))
+               (Ok [])
+               answered_ask_inputs
+           in
            Result.bind co_inputs (fun co_inputs ->
              Keeper_approval_input_checkpoint.admit ~co_inputs
                ~session_dir:session.session_dir ~identity ~message checkpoint

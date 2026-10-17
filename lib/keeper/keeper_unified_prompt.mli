@@ -251,14 +251,26 @@ module For_testing : sig
       quoting. *)
 end
 
+type answered_ask_turn_input = {
+  ask_id : string;
+  evidence_fingerprint : string;
+  text : string;
+  answered_by : Keeper_input_speaker.person;
+}
+
+val answered_ask_evidence_fingerprint :
+  Keeper_world_observation.answered_ask_input -> string
+(** Canonical answer fingerprint derived from [ask_id], [answered_at], and
+    canonical [answers], independent of prompt-row rendering changes. *)
+
 val answered_ask_inputs :
   Keeper_world_observation.world_observation ->
-  (string * string * Keeper_input_speaker.person) list
-(** Ask correlation identity, quoted canonical question/answer input with its
-    original Task/Goal/context, and who answered. This is the ordinary durable
-    user turn's copy; transient Board context excludes it. Original bindings
-    are historical data and never replace current Task/Goal ownership. Excludes
-    all other world observations. *)
+  answered_ask_turn_input list
+(** Ask correlation identity, canonical answer fingerprint, quoted canonical
+    question/answer input with its original Task/Goal/context, and who answered.
+    This is the ordinary durable user turn's copy; transient Board context
+    excludes it. Original bindings are historical data and never replace current
+    Task/Goal ownership. Excludes all other world observations. *)
 
 val autonomous_input_speaker :
   Keeper_world_observation.world_observation -> Keeper_input_speaker.t

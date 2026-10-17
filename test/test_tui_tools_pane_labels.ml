@@ -122,6 +122,40 @@ let test_wire_name_preserved () =
      | [] -> Alcotest.fail "expected one activation")
   | _ -> Alcotest.fail "inventory should hold the ledger"
 
+let test_skill_usage_box_borders () =
+  let state = tools_state () in
+  state.tools_pane <- Tools_usage;
+  state.skills_catalog <-
+    Some
+      { Masc.Tui_decode_tools.sc_state = Masc.Tui_decode_tools.Skills_ready
+      ; sc_config = None
+      ; sc_sources = []
+      ; sc_surfaces = []
+      ; sc_rejections = []
+      ; sc_shadows = []
+      ; sc_usage_coverage = None
+      };
+  let lines = Masc_tui_render_tools.tools_display_lines ~cols:100 state in
+  let dim_pipe =
+    Masc_tui_theme.Sgr.dim ^ Masc_tui_theme.Box.v ^ Masc_tui_theme.Sgr.reset
+  in
+  let boxed_rows =
+    List.filter
+      (fun (_, text) -> contains ~needle:"Skill Usage — 0 of 0" text)
+      lines
+  in
+  Alcotest.check Alcotest.bool "usage heading row is rendered inside skill_usage_box"
+    true (boxed_rows <> []);
+  List.iter
+    (fun (style, text) ->
+      Alcotest.check Alcotest.string "outer row style is neutral so side borders stay dim"
+        "" style;
+      Alcotest.check Alcotest.bool "left border is dim vertical rule with reset"
+        true (String.starts_with ~prefix:(dim_pipe ^ " ") text);
+      Alcotest.check Alcotest.bool "right border is dim vertical rule with reset"
+        true (String.ends_with ~suffix:(" " ^ dim_pipe) text))
+    boxed_rows
+
 let () =
   let open Alcotest in
   run "TUI tools pane labels"
@@ -131,5 +165,7 @@ let () =
             test_actions
         ; test_case "stored action keeps the wire name" `Quick
             test_wire_name_preserved
+        ; test_case "skill_usage_box keeps dim side borders isolated from row styles" `Quick
+            test_skill_usage_box_borders
         ] )
     ]

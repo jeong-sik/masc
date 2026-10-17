@@ -28,7 +28,7 @@ let home_decision_rows (state : state) =
       if current && approval_item_needs_person row then
         Some (Home_request (home_request_of_approval row),
               Printf.sprintf "%s · %s [%s] · %s" kind (clean who)
-                (String.trim (Masc_tui_message_layout.fit_middle 12 (clean request_id))) (clean why))
+                (Masc_tui_message_layout.truncate_middle 12 (clean request_id)) (clean why))
       else None)
   in
   let questions =
@@ -42,7 +42,7 @@ let home_decision_rows (state : state) =
           in
           Home_request (Home_question row.ar_id),
           Printf.sprintf "Question · %s [%s] · %s" (clean row.ar_keeper)
-            (String.trim (Masc_tui_message_layout.fit_middle 12 (clean row.ar_id))) (clean why))
+            (Masc_tui_message_layout.truncate_middle 12 (clean row.ar_id)) (clean why))
     else []
   in
   let source_notes =

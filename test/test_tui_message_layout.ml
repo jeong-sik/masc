@@ -408,6 +408,33 @@ let test_journal_source_spans () =
           (holds row (String.sub span.value a (b-a)))) span.source_ranges) mapped.journal_fields
   ) [5;16;38;100]
 
+let test_truncate_middle () =
+  check string "non-positive column returns empty" ""
+    (Layout.truncate_middle 0 "masc-worktree-branch");
+  check string "negative column returns empty" ""
+    (Layout.truncate_middle (-3) "masc-worktree-branch");
+  check string "fitting label returns unpadded original" "short-id"
+    (Layout.truncate_middle 16 "short-id");
+  check int "fit_middle still pads fitting label to column" 16
+    (Layout.display_width (Layout.fit_middle 16 "short-id"));
+  let long_id = "feature/tui-work-narrow-summary-and-grouping-02" in
+  let cut = Layout.truncate_middle 18 long_id in
+  check bool "overflowing label contains middle ellipsis" true
+    (holds cut "…");
+  check bool "overflowing label keeps prefix and suffix" true
+    (String.starts_with ~prefix:"featu" cut && String.ends_with ~suffix:"grouping-02" cut);
+  check bool "overflowing label never exceeds column width" true
+    (Layout.display_width cut <= 18);
+  let korean = "가나다라마바사아자차카타파하" in
+  List.iter
+    (fun col ->
+      let s = Layout.truncate_middle col korean in
+      check bool (Printf.sprintf "valid UTF-8 at col=%d" col) true
+        (String.is_valid_utf_8 s);
+      check bool (Printf.sprintf "display_width <= %d" col) true
+        (Layout.display_width s <= col))
+    [ 1; 2; 3; 4; 5; 6; 7; 8; 9; 10 ]
+
 let () =
   run "tui_message_layout"
     [
@@ -420,6 +447,8 @@ let () =
         ; test_case "a text is split again after a frame without it" `Quick
             test_a_text_is_split_again_after_a_frame_without_it
         ; test_case "an ASCII text is not kept" `Quick test_an_ascii_text_is_not_kept
+        ; test_case "truncate_middle preserves unpadded fit and wide scalar boundaries" `Quick
+            test_truncate_middle
         ] );
       ( "clause packing"
       , [] );

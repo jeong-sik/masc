@@ -560,6 +560,11 @@ val pad_left : string -> int -> string
     with {!fit_width} when it does not fit. Printf's ["%*s"] counts bytes,
     which leaves a cell holding a multi-byte mark short of its column. *)
 
+val truncate_middle : int -> string -> string
+(** [truncate_middle max_cells label] keeps both ends of [label] in at most
+    [max_cells] cells, dropping the middle and marking the cut with ["…"]
+    without right-padding when [label] already fits. *)
+
 val fit_middle : int -> string -> string
 
 val role_label_mark_cells : ?column:int -> style:style -> unit -> int

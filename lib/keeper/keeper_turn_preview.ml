@@ -32,6 +32,7 @@ module Preparation_scopes = Map.Make (Int)
 type preparation_timeline = preparation_span Preparation_scopes.t
 let empty_preparation_timeline = Preparation_scopes.empty
 let preparation_spans timeline = List.map snd (Preparation_scopes.bindings timeline)
+let preparation_timeline_is_empty = Preparation_scopes.is_empty
 
 type source_position = { generation : int; start_byte : int }
 
@@ -92,6 +93,8 @@ let empty ~execution_scope now =
 let current ~keeper_name =
   with_lock (fun () ->
     Option.map (fun writer -> (!writer).preview) (Hashtbl.find_opt table keeper_name))
+
+let snapshot writer = with_lock (fun () -> (!writer).preview)
 
 let current_for_turn ~keeper_name ~interrupt_token =
   with_lock (fun () ->
@@ -409,6 +412,10 @@ let preparation_span_to_json span =
     "preparation",preparation_to_json span.preparation]
 ;;
 
+let preparation_timeline_to_json timeline =
+  `List (List.map preparation_span_to_json (preparation_spans timeline))
+;;
+
 let preparation_timeline_of_json json =
   let ( let* ) = Result.bind in
   let scope_id = function
@@ -466,5 +473,5 @@ let to_json ?(include_preparation_timeline = false) preview =
     "updated_at_unix", `Float preview.updated_at;
     "preparation",Option.fold ~none:`Null ~some:preparation_to_json preview.preparation;
     "preparation_timeline",(if include_preparation_timeline then
-      `List (List.map preparation_span_to_json (preparation_spans preview.preparation_timeline)) else `Null);
+      preparation_timeline_to_json preview.preparation_timeline else `Null);
     "execution_scope",Option.fold ~none:`Null ~some:Keeper_execution_scope_id.to_json preview.execution_scope]

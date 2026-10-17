@@ -40,9 +40,12 @@ val preparation_spans : preparation_timeline -> preparation_span list
     available after provider activity while this writer is retained. A new
     writer starts empty; this is neither durable history nor execution authority.
     Nested elapsed times overlap and must not be added into total latency. *)
+val preparation_timeline_is_empty : preparation_timeline -> bool
 val preparation_timeline_of_json : Yojson.Safe.t -> (preparation_timeline, string) result
 (** Strict scope list decoder: unique increasing IDs, earlier existing parents
     and valid preparation observations. *)
+val preparation_timeline_to_json : preparation_timeline -> Yojson.Safe.t
+(** Serialize this immutable snapshot without consulting the displayed writer. *)
 
 type source_position = { generation : int; start_byte : int }
 (** Byte offsets in the text this writer's redactor actually released.
@@ -70,6 +73,11 @@ val tail_bytes : int
 (** A write capability for exactly one preview and its redaction state. Older
     writers never resolve the currently displayed preview by Keeper name. *)
 type writer
+
+val snapshot : writer -> t
+(** Read this exact writer under the preview lock. The immutable result stays
+    valid after another execution replaces the displayed preview. No I/O or
+    timeline traversal occurs while the lock is held. *)
 
 val current : keeper_name:string -> t option
 (** Last installed snapshot for diagnostics; not proof of a running owner. *)

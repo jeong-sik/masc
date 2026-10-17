@@ -846,6 +846,8 @@ let run_keeper_cycle
                  ~now:(Time_compat.now ())
                  ~redaction:(Keeper_secret_redaction.snapshot ~base_path:config.base_path
                    ~keeper_name:meta.name) in
+               Keeper_preparation_runtime_observation.with_turn ~config
+                 ~keeper_name:meta.name ~preview @@ fun () ->
                let current_task,skill_snapshot =
                  Keeper_turn_preview.with_preparation ~writer:(Some preview)
                    ~turn_ref:(Some preparation_turn_ref) ~phase:Keeper_turn_preview.Task_preparation (fun () ->

@@ -539,7 +539,7 @@ let make_tool_bundle_for_descriptors_with_policy
       descriptors
   in
   let descriptor_tools = List.map fst descriptor_tools_with_loading in
-  let composition_tools_with_loading, task_required_tool_names =
+  let composition_tools_with_loading, (task_composition_names, task_node_tool_names) =
     let instruction_skills =
       Keeper_tool_composition_surface.instruction_skills_of_catalog skill_catalog
     in
@@ -556,15 +556,20 @@ let make_tool_bundle_for_descriptors_with_policy
       | Some context, Some task_id ->
         Keeper_skill_activation_recorder.task_references ~task_id context
       | None, _ | Some _, None -> [] in
-    let task_required_tool_names = List.concat_map
+    let task_skills = List.filter
         (fun (skill : Keeper_tool_composition_surface.composition_skill) ->
-          if List.exists (Skill_reference.equal skill.reference) task_references then
-            Keeper_tool_composition_catalog.tool_name skill.entry ::
-              List.filter_map (fun (node : Keeper_tool_plan.node) ->
-                match Keeper_tool_plan.descriptor skill.entry.plan node.id with
-                | Some _ -> Some node.tool_name
-                | None -> None) (Keeper_tool_plan.nodes skill.entry.plan)
-          else []) composition_skills
+          List.exists (Skill_reference.equal skill.reference) task_references)
+        composition_skills in
+    let task_composition_names = List.map
+        (fun (skill : Keeper_tool_composition_surface.composition_skill) ->
+          Keeper_tool_composition_catalog.tool_name skill.entry) task_skills
+        |> List.sort_uniq String.compare in
+    let task_node_tool_names = List.concat_map
+        (fun (skill : Keeper_tool_composition_surface.composition_skill) ->
+          List.filter_map (fun (node : Keeper_tool_plan.node) ->
+            match Keeper_tool_plan.descriptor skill.entry.plan node.id with
+            | Some _ -> Some node.tool_name
+            | None -> None) (Keeper_tool_plan.nodes skill.entry.plan)) task_skills
         |> List.sort_uniq String.compare in
     let record_instruction_activation =
       Option.map
@@ -637,7 +642,7 @@ let make_tool_bundle_for_descriptors_with_policy
         ~on_externalization_error:mark_completed_terminal_externalization_failed
         ()
     in
-    tools, task_required_tool_names
+    tools, (task_composition_names, task_node_tool_names)
   in
   let composition_tools =
     List.map (fun (tool, _, _) -> tool) composition_tools_with_loading
@@ -699,18 +704,29 @@ let make_tool_bundle_for_descriptors_with_policy
        composition selection already names the schemas needed for the work:
        its callable and ordinary leaves are provided now, without a model
        loader roundtrip. This changes delivery, not the stored declaration,
-       source authority, or activation. Unrelated tools remain deferrable. *)
-    let split tools_with_loading =
+       source authority, or activation. Unrelated tools remain deferrable.
+
+       Each family is matched only against the names it can own, so a name
+       shared across families cannot provide a schema: plan nodes against
+       descriptors, the Task's composition against compositions. Within a
+       family a name names one tool: [Keeper_tool_plan.create_compiled]
+       refuses a repeated descriptor model name on the surface the plan
+       compiled against ([Duplicate_tool_name]), and
+       [Keeper_skill_catalog.project_turn] keeps one composition per tool
+       name. Attached-service tools never reach [split]; they always go to
+       the listing below. *)
+    let split ~provided tools_with_loading =
       let deferred, loaded =
         List.partition (fun ((tool : Agent_core.Tool.t), loading) ->
           deferrable loading
-          && not (List.exists (String.equal tool.schema.name) task_required_tool_names)) tools_with_loading
+          && not (List.exists (String.equal tool.schema.name) provided)) tools_with_loading
       in
       List.map fst deferred, List.map fst loaded
     in
-    let deferred_descriptors, loaded_descriptors = split descriptor_tools_with_loading in
+    let deferred_descriptors, loaded_descriptors =
+      split ~provided:task_node_tool_names descriptor_tools_with_loading in
     let deferred_compositions, loaded_compositions =
-      split
+      split ~provided:task_composition_names
         (List.map
            (fun (tool, loading, _) -> tool, loading)
            composition_tools_with_loading)

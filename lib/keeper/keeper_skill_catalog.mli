@@ -191,8 +191,12 @@ val partition_documents :
 
 type prepared
 (** Immutable entry projections bound to the exact snapshot and canonical Tool
-    objects. A caller may retain this value across other catalog preparations;
-    it does not grant invocation or replay authority. *)
+    objects. Reused across interleaved preparations while the snapshot and all
+    descriptor objects remain owned. The cache holds those inputs weakly;
+    replacing a publication or retiring a Tool does not pin its old preparation.
+    Concurrent callers of the same binding share one construction; failed
+    construction is not published. A caller may also retain this value directly.
+    It does not grant invocation or replay authority. *)
 val prepare_snapshot :
   descriptors:Keeper_tool_descriptor.t list -> Skill_catalog_snapshot.t -> prepared
 val prepared_matches :
@@ -220,8 +224,8 @@ val of_snapshot :
     that entry; neither failure rejects the snapshot or an unrelated Keeper
     turn. An instruction skill whose body carries a fence info near-miss also
     returns an advisory {!Composition_info_near_miss} diagnostic while staying
-    projected. The entries of the snapshot last projected are not projected
-    again under the same exact descriptor objects; see {!project_entry_or_fallback}. *)
+    projected. Interleaved snapshots and descriptor bindings retain independent
+    preparations under their actual input ownership; see {!prepare_snapshot}. *)
 
 val all_entries_of_snapshot :
   ?descriptors:Keeper_tool_descriptor.t list -> Skill_catalog_snapshot.t -> t * projection_diagnostic list

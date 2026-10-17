@@ -5,7 +5,7 @@
 
 type activity = Preparing | Awaiting_response | Receiving_response | Tool_observed | Failed
 
-type preparation_phase = Task_preparation | Context_preparation | Prompt_preparation
+type preparation_phase = Task_preparation | World_preparation | Context_preparation | Prompt_preparation
   | Tool_preparation | Skill_preparation
 type preparation_outcome = Prepared | Rejected | Raised | Cancelled
 type preparation_state =

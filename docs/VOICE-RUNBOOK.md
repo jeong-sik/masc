@@ -1290,8 +1290,8 @@ checks whether something answers on it; for a command kind it registers the
 name and the probe is what reports whether that command is there. Starting a
 local STT/TTS server remains an external step using that server's own command.
 
-### Verification and sidecar doctor checks
+### Verification and voice bridge checks
 
-- Wizard question order, session state, key routing, and `[voice]` TOML save/load round-trips are covered by `test/voice_wizard`, `test/voice_wizard_session`, and `test/test_tui_voice_wizard_wiring.ml`.
-- For the Discord voice bridge sidecar (`bin/voice_bridge_core.py`), `scripts/doctor-voice-sidecar.sh` runs an 11-step diagnostic check (including `VOICE_BRIDGE_DRY_RUN=1` readiness probing and `MASC_BASE_PATH` resolution before `MASC_DATA_DIR`).
+- Wizard question order, session state, key routing, and `[voice]` TOML save/load round-trips are covered by `test/voice_wizard/test_voice_wizard.ml`, `test/voice_wizard_session/test_voice_wizard_session.ml`, `test/voice_setup/test_voice_setup.ml`, and `test/voice_setup_routes/test_voice_setup_routes.ml`.
+- Voice bridge state and transport behavior (`lib/voice_bridge_core/voice_bridge_core.mli`, `lib/voice_bridge_core/voice_bridge_transport.mli`) are covered by `test/test_voice_bridge_error.ml`, `test/test_voice_bridge_watched_work.ml`, and `test/test_env_config_voice_bridge_timeouts.ml`.
 

@@ -84,7 +84,7 @@ Representative modules:
 |--------|------|--------|
 | Agent_core | `lib/agent_core.mli` | Top-level package facade |
 | Runtime | `lib/runtime.mli` | Runtime protocol types are still evolving |
-| Canonical_tool | `lib/canonical_tool.mli` | Canonical tool descriptor and schema surface |
+| Canonical_tool | `lib/llm_provider/canonical_tool.mli` | Canonical tool descriptor and schema surface |
 | Wire_observer | `lib/llm_provider/wire_observer.mli` | Caller-owned wire observation boundary is still evolving |
 | Request_wire_observer | `lib/llm_provider/request_wire_observer.mli` | Request body component attribution and wire observation |
 

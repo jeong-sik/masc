@@ -103,7 +103,7 @@ MASC는 최상위 public library(`masc`)와 `lib/` 아래의 도메인별 내부
 | `lib/goal/`, `lib/candle*/` | Goal phase 상태 기계, 측정값, Candle 원장 및 정산 |
 | `lib/lane_addon/`, `lib/msx_lane/`, `lib/dos_lane/`, `lib/browser_lane/` | Lane Add-on 호스트, MSX/DOS 공유 머신 레인, Browser 레인 |
 | `lib/operator/` | Operator 제어 및 관측 표면 |
-| `lib/grpc/` | gRPC transport (`MascCoord` 서비스) |
+| `lib/server/masc_grpc_server.ml`, `lib/server/masc_grpc_service.ml` | gRPC transport (`MascCoord` 서비스) |
 | `lib/voice/` | Voice/TTS 브리지 |
 | `lib/` (root 및 기타 하위 디렉터리) | Tool dispatch, types, Memory OS, Wiki, Schedule, Fusion 등 |
 
@@ -118,13 +118,13 @@ MASC는 최상위 public library(`masc`)와 `lib/` 아래의 도메인별 내부
 | `masc_cost` | `masc-cost` | `bin/masc_cost.ml` | Token 사용량 집계, 비용 계산 CLI. |
 | `masc_trace` | `masc-trace` | `bin/masc_trace.ml` | 실행 트레이스 조회 및 분석 CLI. |
 | `masc_tui` | `masc-tui` | `bin/masc_tui.ml` | Terminal UI. Keeper 채팅·상태·보드·머신·설정 인터페이스. |
-| `masc_fusion_run` | `masc-fusion-run` | `bin/masc_fusion_run.ml` | 독립 Fusion 패널/심판 실행 CLI. |
+| `fusion_run` | `masc-fusion-run` | `bin/fusion_run.ml` | 독립 Fusion 패널/심판 실행 CLI. |
 | `masc_checkpoint_purge` | `masc-checkpoint-purge` | `bin/masc_checkpoint_purge.ml` | 체크포인트 정리 유틸리티. |
 | `masc_exec_shim` | `masc-exec-shim` | `bin/masc_exec_shim.ml` | Keeper 명령 실행 격리 심(shim). |
 | `masc_exec_ssh_bootstrap` | `masc-exec-ssh-bootstrap` | `bin/masc_exec_ssh_bootstrap.ml` | `remote_ssh` 샌드박스 부트스트랩 헬퍼. |
-| `masc_keeper_capability_probe` | `masc-keeper-capability-probe` | `bin/masc_keeper_capability_probe.ml` | Keeper 런타임 역량 프로브. |
+| `keeper_capability_probe_cli` | `masc-keeper-capability-probe` | `bin/keeper_capability_probe_cli.ml` | Keeper 런타임 역량 프로브. |
 | `masc_lane_cli_probe` | `masc-lane-cli-probe` | `bin/masc_lane_cli_probe.ml` | 공식 CLI 레인 가용성 프로브. |
-| `masc_deployment_preflight_helper` | `masc-deployment-preflight-helper` | `bin/masc_deployment_preflight_helper.ml` | 배포 사전 점검 헬퍼. |
+| `deployment_preflight_helper` | `masc-deployment-preflight-helper` | `bin/deployment_preflight_helper.ml` | 배포 사전 점검 헬퍼. |
 | `masc_browser_host` | `masc-browser-host` | `bin/masc_browser_host.ml` | WebDriver BiDi 및 브라우저 호스트 브리지. |
 | `masc_reliable_change_g1_check` | `masc-reliable-change-g1-check` | `bin/masc_reliable_change_g1_check.ml` | Reliable Change G1 검증기. |
 | `masc_http_probe` | `masc-http-probe` | `bin/masc_http_probe.ml` | HTTP 엔드포인트 상태 프로브. |

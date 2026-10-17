@@ -19,7 +19,7 @@ Machine-readable catalog: `docs/schema-surfaces/operator-output-surfaces.v1.json
 | `masc.runtime_contract_projection.v1` | Runtime contract JSON projection | `lib/keeper/keeper_runtime_contract.mli` | Tool-call/runtime contract tests |
 | `masc.mcp_openapi_tool_schema.v1` | MCP tool schemas and generated OpenAPI | `lib/keeper/keeper_schema.mli` | Tool matrix and OpenAPI smoke tests |
 | `masc.agent_core_bridge_events.v1` | agent core custom events bridged into MASC | `lib/keeper/keeper_event_bridge.mli`, event inventory doc | agent core integration tests |
-| `masc.skill-snapshot/v1` | Skill snapshot and activation ledger projection | `lib/skill_snapshot/skill_snapshot.mli` | Skill snapshot tests |
+| `masc.skill-snapshot/v1` | Skill snapshot and activation ledger projection | `lib/skill_snapshot/skill_catalog_snapshot.mli`, `lib/skill_snapshot_service/skill_catalog_snapshot_service.mli` | Skill snapshot tests |
 
 ## Boundary Rules
 

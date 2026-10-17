@@ -286,7 +286,7 @@ they must not turn into an authoritative no-match answer.
 
 ## Shared Wiki System
 
-MASC provides a workspace-shared Wiki under `<base-path>/.masc/wiki/` (`lib/wiki/`,
+MASC provides a workspace-shared Wiki under `<base-path>/.masc/wiki/` (`lib/tool_wiki.ml`, `lib/wiki_page.ml`, and `lib/wiki_lint.ml`,
 exposed through `masc_wiki_*` and `keeper_wiki_*` tools and `masc://wiki/*`
 MCP resources). Pages are Markdown documents with structured frontmatter, slugs,
 and revision history (`log.jsonl`).

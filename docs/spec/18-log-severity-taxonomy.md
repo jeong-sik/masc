@@ -6,7 +6,7 @@ status: reference
 
 > Part of: [SPEC-INDEX](./SPEC-INDEX.md)
 
-Log severity is chosen at the typed event emission boundary (`lib/log.ml`).
+Log severity is chosen at the typed event emission boundary (`lib/masc_log/log.ml`).
 Consumers never recover severity by matching message strings, tool names,
 provider names, or a count/time threshold.
 

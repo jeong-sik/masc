@@ -384,17 +384,17 @@ cd dashboard && pnpm run typecheck  # TypeScript type check
 
 ### 13.1. Pure Function 불변량
 
-`Keeper_state_machine.apply_event` (`lib/keeper/keeper_state_machine.mli`)는 mli에 "Pure function — no I/O"를 명시한다. 안에 counter emission을 추가하면:
+`Keeper_state_machine.apply_event` (`lib/keeper_registry/keeper_state_machine.mli`)는 mli에 "Pure function — no I/O"를 명시한다. 안에 counter emission을 추가하면:
 - property test의 idempotency 가 false로 깨짐
 - counter label 결정이 함수 내부로 들어가 caller-context를 잃음 (edge label 결정 사이트가 흩어짐)
 
 **규칙:** counter는 caller site에서만 emit. pure function은 transition/decision 만 반환.
 
-**예외:** observability-only `Log.*` 호출은 mli에 documented exception이면 허용 (예: `lib/keeper/keeper_state_machine.ml`). counter는 예외 없음.
+**예외:** observability-only `Log.*` 호출은 mli에 documented exception이면 허용 (예: `lib/keeper_registry/keeper_state_machine.ml`). counter는 예외 없음.
 
 **PR 체크:**
 ```bash
-rg -nP 'inc_counter' lib/keeper/keeper_state_machine.ml
+rg -nP 'inc_counter' lib/keeper_registry/keeper_state_machine.ml
 # 기대: 0 매치
 ```
 

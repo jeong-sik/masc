@@ -258,6 +258,62 @@ let test_catch_up_target_codec () =
   expect_error "a target that is not an integer accepted" (S.of_json (with_target (`String "2")))
 ;;
 
+(* The prefix hash encodes every covered message, so it runs on the shared CPU
+   pool: the caller's fiber waits for it while the caller's domain runs its
+   other fibers. Run in place it never yields, and a fiber beside it never
+   runs until it returns. The history is long enough that the pool cannot
+   answer before the caller starts waiting. *)
+let long_history_turns = 1_000
+let long_history_text_bytes = 1_000
+
+let test_prefix_hash_leaves_the_callers_domain () =
+  let long_history =
+    pinned
+    :: List.concat
+         (List.init long_history_turns (fun turn ->
+            [ msg T.User (Printf.sprintf "turn %d %s" turn (String.make long_history_text_bytes 'x'))
+            ; msg T.Assistant (Printf.sprintf "answer %d" turn)
+            ]))
+  in
+  let long_lines = [ 1, boundary long_history ] in
+  let capture_long () =
+    S.capture ~trace_id ~lines:long_lines ~messages:long_history ~working_state:state |> require
+  in
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let in_place = capture_long () in
+  let previous = Domain_pool_ref.get () in
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | None -> Domain_pool_ref.clear_for_tests ()
+      | Some pool -> Domain_pool_ref.set pool)
+    (fun () ->
+      Domain_pool_ref.set (Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env));
+      let beside = ref 0 and finished = ref false in
+      let runs_beside f =
+        let before = !beside in
+        let value = f () in
+        value, !beside - before
+      in
+      Eio.Fiber.both
+        (fun () ->
+          while not !finished do
+            incr beside;
+            Eio.Fiber.yield ()
+          done)
+        (fun () ->
+          let pooled, during_capture = runs_beside capture_long in
+          let _, during_restore =
+            runs_beside (fun () -> restore ~lines:long_lines long_history pooled |> require)
+          in
+          finished := true;
+          check string "the pool computes the same digest"
+            in_place.S.prefix_sha256 pooled.S.prefix_sha256;
+          check bool "capture lets the fiber beside it run" true (during_capture > 0);
+          check bool "restore lets the fiber beside it run" true (during_restore > 0)))
+;;
+
 let () = run "offline continuity snapshot"
   ["pair", [test_case "captured partial prefix" `Quick test_captured_partial_prefix;
             test_case "official-client start state" `Quick test_official_client_start_state_is_the_covering_line;
@@ -268,4 +324,5 @@ let () = run "offline continuity snapshot"
             test_case "restart witness required" `Quick test_capture_requires_witness;
             test_case "strict codec" `Quick test_exact_codec;
             test_case "catch-up target codec" `Quick test_catch_up_target_codec;
-            test_case "atomic file pair" `Quick test_file_pair]]
+            test_case "atomic file pair" `Quick test_file_pair;
+            test_case "prefix hash on the pool" `Quick test_prefix_hash_leaves_the_callers_domain]]

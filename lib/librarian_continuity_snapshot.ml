@@ -180,7 +180,11 @@ let checkpoint_prefix_range ~trace_id ~lines ~messages =
 let prefix_sha256 messages range =
   (* Hash the same compact JSON array without materializing the whole prefix
      as a JSON tree and then a string. Only one encoded message is needed at
-     a time; range selection still owns the atom and pinned-message rules. *)
+     a time; range selection still owns the atom and pinned-message rules.
+     Encoding every covered message is the cost: a 107.7 MB prefix of 33,234
+     messages took 1.2-1.8 s and allocated 471 MB (2026-10-17). It runs on the
+     shared CPU pool, so a caller on the main domain -- the next-request
+     forecast -- does not hold every other request for that long. *)
   let module Hash = Digestif.SHA256 in
   let rec feed ctx = function
     | [] -> Hash.feed_string ctx "]" |> Hash.get |> Hash.to_hex
@@ -190,7 +194,8 @@ let prefix_sha256 messages range =
       let ctx = match rest with [] -> ctx | _ :: _ -> Hash.feed_string ctx "," in
       feed ctx rest
   in
-  feed (Hash.feed_string (Hash.init ()) "[") (R.slice messages range)
+  Domain_pool_ref.submit_cpu_or_inline (fun () ->
+    feed (Hash.feed_string (Hash.init ()) "[") (R.slice messages range))
 ;;
 
 (* Only the lines of the history's current generation can witness where it

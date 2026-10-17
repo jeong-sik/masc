@@ -619,6 +619,9 @@ type answered_ask_turn_input = {
   answered_by : Keeper_input_speaker.person;
 }
 
+(* Fingerprint material: depends on [Keeper_ask.answer_to_json] and deterministic
+   [Yojson.Safe.to_string] float serialization of [answered_at]. Bump the
+   ["ask-answer-v1:"] prefix version if either serialization shape changes. *)
 let answered_ask_evidence_fingerprint
     (input : Keeper_world_observation.answered_ask_input)
   =

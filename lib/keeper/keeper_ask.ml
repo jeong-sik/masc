@@ -493,6 +493,10 @@ let response_of_json json =
   | "skipped" -> Ok Skipped
   | other -> Error ("response.kind: unknown value " ^ other)
 
+(* Fingerprint material for [Keeper_unified_prompt.answered_ask_evidence_fingerprint]:
+   changing the JSON shape of [answer_to_json] (or [response_to_json]) changes
+   the durable admission fingerprint and requires bumping the ["ask-answer-v1:"]
+   prefix version. *)
 let answer_to_json a =
   `Assoc
     [ ("question_id", `String a.question_id); ("response", response_to_json a.response) ]

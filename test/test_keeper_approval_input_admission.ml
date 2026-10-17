@@ -250,21 +250,9 @@ let speaker_stamp_resumes_pre_speaker_admission () =
   | Ok (Admission.Admission_new _) -> Alcotest.fail "the stamped input was admitted again"
   | Error error -> Alcotest.fail (Admission.error_to_string error)
 
-let answered_ask_prompt_upgrade_and_legacy_marker () =
-  let legacy_text =
+let answered_ask_prompt_upgrade () =
+  let base_text =
     "event=ask_answered post_id=\"keeper-ask:schedule\" author=\"operator\" title=\"schedule\" preview=\"2026-10-17 / 전시실\""
-  in
-  let legacy_msg = Agent_core.Types.user_msg legacy_text in
-  let legacy_id =
-    Admission.answered_ask_identity
-      ~ask_id:"keeper-ask:schedule"
-      ~evidence_fingerprint:(Digestif.SHA256.(digest_string legacy_text |> to_hex))
-    |> unwrap
-  in
-  let legacy_cp =
-    match Admission.prepare ~identity:legacy_id ~message:legacy_msg (checkpoint []) |> unwrap with
-    | Admission.Admission_new cp -> cp
-    | Admission.Admission_resume _ -> Alcotest.fail "expected initial legacy admission"
   in
   let module Ask = Masc.Keeper_ask in
   let question =
@@ -307,21 +295,31 @@ let answered_ask_prompt_upgrade_and_legacy_marker () =
       ~evidence_fingerprint:canonical_fp
     |> unwrap
   in
+  let initial_msg = Agent_core.Types.user_msg base_text in
+  let initial_cp =
+    match
+      Admission.prepare ~identity:canonical_id ~message:initial_msg (checkpoint [])
+      |> unwrap
+    with
+    | Admission.Admission_new cp -> cp
+    | Admission.Admission_resume _ ->
+      Alcotest.fail "expected initial canonical answer admission"
+  in
   let expanded_msg =
     Agent_core.Types.user_msg
-      (legacy_text
+      (base_text
        ^ " ask_origin=\"{\\\"task_id\\\":\\\"task-101\\\"}\" questions=\"[...]\"")
   in
   let upgraded_cp =
     match
-      Admission.prepare ~identity:canonical_id ~message:expanded_msg legacy_cp |> unwrap
+      Admission.prepare ~identity:canonical_id ~message:expanded_msg initial_cp |> unwrap
     with
     | Admission.Admission_new cp -> cp
     | Admission.Admission_resume _ ->
-      Alcotest.fail "expected legacy text-hash marker to revoke and readmit expanded row"
+      Alcotest.fail "expected prompt-rendering change to revoke old marker and admit expanded row"
   in
   Alcotest.(check int)
-    "legacy message preserved without marker plus upgraded message"
+    "initial message preserved without marker plus upgraded message"
     2
     (List.length upgraded_cp.messages);
   (match
@@ -335,7 +333,7 @@ let answered_ask_prompt_upgrade_and_legacy_marker () =
    | Admission.Admission_new _ ->
      Alcotest.fail "upgraded canonical answer should resume on subsequent wake");
   let reworded_msg =
-    Agent_core.Types.user_msg (legacy_text ^ " questions=\"[updated-rendering]\"")
+    Agent_core.Types.user_msg (base_text ^ " questions=\"[updated-rendering]\"")
   in
   (match
      Admission.prepare ~identity:canonical_id ~message:reworded_msg upgraded_cp |> unwrap
@@ -377,4 +375,4 @@ let () = Alcotest.run "approval input admission"
       ; "interrupted tool before approval", interrupted_tool_then_approval
       ; "stable replay identity and wire projection", stable_replay_identity
       ; "speaker stamp resumes a pre-speaker admission", speaker_stamp_resumes_pre_speaker_admission
-      ; "answered Ask prompt upgrade and legacy marker", answered_ask_prompt_upgrade_and_legacy_marker ] ]
+      ; "answered Ask prompt upgrade", answered_ask_prompt_upgrade ] ]

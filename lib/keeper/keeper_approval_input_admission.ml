@@ -94,23 +94,6 @@ let contains ~identity:expected ~message messages =
       | _ -> false)
     messages
 
-let is_canonical_answered_ask_fingerprint s =
-  String.starts_with ~prefix:"ask-answer-v1:" s
-
-let is_legacy_answered_ask_text_marker
-    (current : Agent_core.Types.message)
-    actual
-    expected
-  =
-  match actual.source, expected.source, current.content with
-  | Answered_ask _, Answered_ask _, [ Agent_core.Types.Text legacy_text ] ->
-    is_canonical_answered_ask_fingerprint expected.evidence_fingerprint
-    && not (is_canonical_answered_ask_fingerprint actual.evidence_fingerprint)
-    && String.equal
-         actual.evidence_fingerprint
-         (Digestif.SHA256.(digest_string legacy_text |> to_hex))
-  | _ -> false
-
 let prepare ~identity:expected ~message (checkpoint : Agent_core.Checkpoint.t) =
   if message.Agent_core.Types.role <> Agent_core.Types.User || marker_values message <> []
   then Error Invalid_input
@@ -128,17 +111,14 @@ let prepare ~identity:expected ~message (checkpoint : Agent_core.Checkpoint.t) =
               if not (actual.source = expected.source)
               then inspect found (current :: kept) rest
               else if not (String.equal actual.evidence_fingerprint expected.evidence_fingerprint)
-                      && not (is_legacy_answered_ask_text_marker current actual expected)
               then Error Conflicting_evidence
               else if current.Agent_core.Types.role <> Agent_core.Types.User
                       || not (String.equal body_digest (digest (without_marker current)))
                       || not (String.equal body_digest expected_digest)
-                      || not (String.equal actual.evidence_fingerprint expected.evidence_fingerprint)
               then
-                (* Compaction or a prompt-row rendering upgrade may rewrite the
-                   evidence message while retaining metadata. Preserve that
-                   history, revoke its stale marker, and admit the original
-                   input again if no intact copy exists. *)
+                (* Compaction may rewrite the evidence message while retaining
+                   metadata. Preserve that history, revoke its stale marker,
+                   and admit the original input again if no intact copy exists. *)
                 inspect found (without_marker current :: kept) rest
               else if found then Error Duplicate_admission
               else inspect true (current :: kept) rest)

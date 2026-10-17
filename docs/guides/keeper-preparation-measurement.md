@@ -150,6 +150,8 @@ with a recorded source batch can join that identity to
 `Turn_started.intake_sources`. Existing Tool and Ask links require their own
 original identities; missing Task/source/Ask links stay unrecorded. A nearby
 timestamp or matching Task title is not a join.
+One turn can contain multiple provider attempts; this row alone does not select
+a particular provider request, Task or Ask continuation.
 
 | Boundary | Before | After |
 |---|---|---|

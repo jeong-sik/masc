@@ -15,12 +15,14 @@ type artifact =
   | Activity_event
   | Metrics_snapshot
   | Raw_trace
+  | Structured_response_failure
 
 (** Who prunes an artifact and by which rule. *)
 type retention =
   | Dated_jsonl_operator_window
   | Startup_flat_file_mtime
   | Raw_trace_reachability_window
+  | Operator_owned_evidence
 
 type entry =
   { producer : string

@@ -2259,7 +2259,12 @@ let wait_for_a_queue_read ~clock ~reads_before =
   let deadline = Eio.Time.now clock +. queue_read_deadline_s in
   let rec wait () =
     if Persistence.For_testing.snapshot_cache_reads () > reads_before then ()
-    else if Eio.Time.now clock > deadline then Alcotest.fail "registration never read its queue"
+    else if Eio.Time.now clock > deadline
+    then
+      Alcotest.failf
+        "registration never read its queue: %d snapshot reads before it, %d now"
+        reads_before
+        (Persistence.For_testing.snapshot_cache_reads ())
     else (
       Eio.Time.sleep clock queue_read_poll_interval_s;
       wait ())

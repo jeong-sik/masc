@@ -289,7 +289,7 @@ let status_text preview =
       (match preparation.state with
        | Preparation_active -> "preparing " ^ phase
        | Preparation_finished {outcome=Prepared;_} -> phase ^ " prepared; next activity unobserved"
-       | Preparation_finished {outcome;_} -> phase ^ " preparation " ^ preparation_outcome_name outcome)
+       | Preparation_finished {outcome=(Rejected | Raised | Cancelled) as outcome;_} -> phase ^ " preparation " ^ preparation_outcome_name outcome)
     | None, Preparing -> "preparing turn"
     | None, Awaiting_response -> "waiting for provider response"
     | None, Receiving_response -> "receiving response"

@@ -47,6 +47,8 @@ stack #43349, source-reviewed but unmerged at this round's observation.
   hide representation behind signatures; use immutable maps when retained
   values and explicit transformations simplify reasoning.
 
+- [OCaml lexer entrypoints](https://ocaml.org/manual/5.5/lexyacc.html): explicit arguments can carry invocation state before the final lexbuf argument, while preserving longest-match and source-order tie behavior. The grammar here uses Menhir; ocamlyacc-specific concurrency claims are not applied to it.
+
 These principles are applied to the actual call graph and invariants. They do
 not require importing Base/Core or rewriting all references, caches and locks.
 
@@ -69,7 +71,7 @@ runtime gates. Source-review completion alone leaves a Draft item in review.
 
 ## Current queue
 
-The queue now contains **26 concrete candidates**: 24 from the first semantic pass, A1 from the Agent Core follow-up and T1 from the integrated TUI investigation. Six are implemented as PRs; their source-review evidence is recorded on each PR: `S1` in [#43367](https://github.com/jeong-sik/masc/pull/43367) isolates provider usage acceptance; `K1` in [#43370](https://github.com/jeong-sik/masc/pull/43370) preserves separate Librarian failure-policy axes; `D2` in [#43374](https://github.com/jeong-sik/masc/pull/43374) returns an explicit Goal commit result; `A1` in [#43386](https://github.com/jeong-sik/masc/pull/43386) separates stream error projection from diagnostic file I/O; `D1` in [#43399](https://github.com/jeong-sik/masc/pull/43399) returns the committed Task verification obligation together with its public result. `K2` in [#43411](https://github.com/jeong-sik/masc/pull/43411) isolates canonical child export selection. Other `next` items remain queued; this ordering does not waive their coverage.
+The queue now contains **28 concrete candidates**: 24 from the first semantic pass, A1 from the Agent Core follow-up, T1 from the integrated TUI investigation, and E1/E2 from the Exec investigation. Six are implemented as PRs; their source-review evidence is recorded on each PR: `S1` in [#43367](https://github.com/jeong-sik/masc/pull/43367) isolates provider usage acceptance; `K1` in [#43370](https://github.com/jeong-sik/masc/pull/43370) preserves separate Librarian failure-policy axes; `D2` in [#43374](https://github.com/jeong-sik/masc/pull/43374) returns an explicit Goal commit result; `A1` in [#43386](https://github.com/jeong-sik/masc/pull/43386) separates stream error projection from diagnostic file I/O; `D1` in [#43399](https://github.com/jeong-sik/masc/pull/43399) returns the committed Task verification obligation together with its public result. `K2` in [#43411](https://github.com/jeong-sik/masc/pull/43411) isolates canonical child export selection. Other `next` items remain queued; this ordering does not waive their coverage.
 
 | ID | Priority | Status | Refactoring point |
 | --- | --- | --- | --- |
@@ -99,6 +101,8 @@ The queue now contains **26 concrete candidates**: 24 from the first semantic pa
 | [R2](#r2) | later | candidate | Fusion decision event ownership |
 | [A1](#a1) | next | in review | Separate stream error projection from optional diagnostic file I/O |
 | [T1](#t1) | investigate | candidate | Preserve dispatch and commit knowledge in Board post completion |
+| [E1](#e1) | later | candidate | Make token-budget state belong to one top-level parse while sharing it with nested substitutions |
+| [E2](#e2) | investigate | candidate | Investigate repeated timeout debit when a typed substitution passes remaining seconds with the original start epoch |
 
 ## Candidate evidence
 
@@ -503,9 +507,15 @@ Preserve:
 - Preserve inline/dotted-table refusal semantics and every existing source-revision conflict/lock-warning distinction.
 - Do not move parse or reads outside the write transaction merely to make the planner appear pure.
 
+Design refresh at `01168475d83c920242df72fa0bd549f6c798cf2a`: retain malformed-input and same-name-rename refusal before path resolution or lock acquisition. Every declaration-dependent plan still runs on the just-read content/config pair under the existing lock. A private prepared edit can encode validated inputs; do not duplicate raw and prepared operation variants or add a generic transaction framework.
+
+Keep `set_runtime_lane_candidates` as its separate typed CAS transaction. The exact-slot format classifier must remain one definition shared by planning, first-run setup and the public resolved projection. Existing public `Runtime_config_text` helpers and route-reference types remain stable. Replacement currently classifies current/replacement groups before editable-table and duplicate checks; preserve that refusal precedence. The public move documentation should clarify that already-first promotion is refused without changing order, matching current implementation and scenario source.
+
+Additional verification needed before claiming behavior: one real-file rename with Keeper assignments, default and every Fusion seat together; an edit waiting on the file lock while another writer changes declarations; CLI same-group replacement plus cross-group/no-schema refusal. Existing sequential edits and CAS cases do not establish the lock-acquisition race.
+
 Consumers: [lib/server/server_routes_http_routes_dashboard.ml](../../../lib/server/server_routes_http_routes_dashboard.ml), [lib/runtime/runtime_config_text.ml](../../../lib/runtime/runtime_config_text.ml), [lib/runtime/runtime.mli](../../../lib/runtime/runtime.mli).
 
-Scenarios: [test/test_runtime_per_keeper_routing.ml](../../../test/test_runtime_per_keeper_routing.ml), [test/test_exact_output_catalog_precedence.ml](../../../test/test_exact_output_catalog_precedence.ml). **Not executed in this audit.**
+Scenarios: [test/test_fusion_config_edit.ml](../../../test/test_fusion_config_edit.ml), [test/test_runtime_per_keeper_routing.ml](../../../test/test_runtime_per_keeper_routing.ml), [test/test_exact_output_catalog_precedence.ml](../../../test/test_exact_output_catalog_precedence.ml). **Not executed in this audit.**
 
 Ordering rationale: The source explicitly documents previous lost-slot and partial-rename failures, and tests exercise real persisted TOML plus resolution. This refresh confirms the boundary remains at this baseline; existing edit_runtime_lanes should be retained as the effect shell.
 
@@ -775,6 +785,62 @@ Ordering rationale: The causal issue is lost commit knowledge at a real request-
 
 Open contract questions: The current route exposes ok/message rather than a structured post identifier. Complete post-commit failure behavior and reconciliation need investigation. Comments and votes require their own persistence trace before expanding this scope.
 
+### E1
+
+**Make token-budget state belong to one top-level parse while sharing it with nested substitutions**
+
+Source: [lib/exec/parser/bash_lexer.mll:13](https://github.com/jeong-sik/masc/blob/684336274720034611073beab836159fd4ee3b94/lib/exec/parser/bash_lexer.mll#L13-L50), [lib/exec/parser/bash_lexer.mll:374](https://github.com/jeong-sik/masc/blob/684336274720034611073beab836159fd4ee3b94/lib/exec/parser/bash_lexer.mll#L374-L381), [lib/exec/parser/bash.ml:203](https://github.com/jeong-sik/masc/blob/684336274720034611073beab836159fd4ee3b94/lib/exec/parser/bash.ml#L203-L230).
+
+Problem: The public parse_string entry resets a module-global token counter; recursive child parsing intentionally shares it. Ownership is encoded in a reset-and-call convention instead of a value scoped to the invocation. A second concurrent top-level parse would share/reset that mutable budget, but no real multi-domain production overlap or observed refusal bypass is established by this audit. The hook is different: module initialization creates an unset ref, each top-level parse installs the same parse_source closure, and child calls parse_source directly without reinstall/reset. This is stable recursive wiring, not demonstrated request-dependent hook swapping.
+
+Change: Introduce a small invocation-local parser context/counter threaded through ocamllex entrypoint arguments. Construct it once in parse_string and share it through parent and recursive source parsing; pass the recursive callback explicitly or otherwise keep static recursive wiring separate from mutable accounting. Keep local mutable counter and Buffer use. Add only a minimal parser-facing interface if needed after caller census; do not introduce a parser-wide lock, new recursion policy, functor hierarchy or regex replacement.
+
+Preserve:
+
+- The existing 50,000 token/piece threshold and exact increment sites stay unchanged.
+- Nested substitutions spend the same top-level token budget; only a fresh top-level call gets a fresh counter.
+- Longest-match/source-order tie behavior, quote metadata, argv concatenation, heredoc source bytes and refusal precedence stay unchanged.
+- Child refusal is returned unchanged; no broad exception defaulting.
+- No implicit new size/depth/deadline limit and no new Eio yield point.
+- Same-domain synchronous parsing currently has no Eio yield; do not claim a proven race from ref presence alone.
+
+Consumers: [lib/exec/command_gate/shell_command_gate.ml:308](https://github.com/jeong-sik/masc/blob/684336274720034611073beab836159fd4ee3b94/lib/exec/command_gate/shell_command_gate.ml#L308-L317), [lib/keeper_tooling/shell_costume.ml:69](https://github.com/jeong-sik/masc/blob/684336274720034611073beab836159fd4ee3b94/lib/keeper_tooling/shell_costume.ml#L69-L74), [lib/keeper/keeper_gate_readonly.ml:495](https://github.com/jeong-sik/masc/blob/684336274720034611073beab836159fd4ee3b94/lib/keeper/keeper_gate_readonly.ml#L495-L504), [lib/exec_policy/exec_policy.ml:154](https://github.com/jeong-sik/masc/blob/684336274720034611073beab836159fd4ee3b94/lib/exec_policy/exec_policy.ml#L154-L165), [lib/exec_policy/execute_script_paths.ml:207](https://github.com/jeong-sik/masc/blob/684336274720034611073beab836159fd4ee3b94/lib/exec_policy/execute_script_paths.ml#L207-L258), [lib/keeper/keeper_sandbox_docker.ml:388](https://github.com/jeong-sik/masc/blob/684336274720034611073beab836159fd4ee3b94/lib/keeper/keeper_sandbox_docker.ml#L388-L427).
+
+Existing scenarios: [lib/exec/test/test_bash_parser.ml](https://github.com/jeong-sik/masc/blob/684336274720034611073beab836159fd4ee3b94/lib/exec/test/test_bash_parser.ml). Nested substitution AST/refusal and token/piece limit cases; inspected, not run. The existing substitution token-limit test at lines 395-403 puts the child alone above the cap, so it does not distinguish shared accounting from a separate child budget. **Not executed in this audit.**
+
+Proposed verification: Additional validation still needed: sequential top-level success after a token-limit refusal; parent and child individually below cap but combined above cap, distinguishing shared accounting from separate child budgets; independent parser sessions interleaved on domains if concurrency is to be claimed. Establish actual production scheduling separately before labeling an incident.
+
+Ordering rationale: A bounded OCaml ownership cleanup makes the invocation lifetime explicit while retaining useful local mutation. Benefit is not inferred from file size; current global reset, recursive non-reset and public consumer path give the concrete boundary. Multi-domain production reachability remains open.
+
+### E2
+
+**Investigate repeated timeout debit when a typed substitution passes remaining seconds with the original start epoch**
+
+Source: [lib/exec/exec_dispatch.ml:393](https://github.com/jeong-sik/masc/blob/684336274720034611073beab836159fd4ee3b94/lib/exec/exec_dispatch.ml#L393-L396), [lib/exec/exec_dispatch.ml:479](https://github.com/jeong-sik/masc/blob/684336274720034611073beab836159fd4ee3b94/lib/exec/exec_dispatch.ml#L479-L507), [lib/exec/exec_dispatch.ml:706](https://github.com/jeong-sik/masc/blob/684336274720034611073beab836159fd4ee3b94/lib/exec/exec_dispatch.ml#L706-L746), [lib/exec/exec_dispatch.ml:799](https://github.com/jeong-sik/masc/blob/684336274720034611073beab836159fd4ee3b94/lib/exec/exec_dispatch.ml#L799-L804), [lib/exec/exec_dispatch.ml:1010](https://github.com/jeong-sik/masc/blob/684336274720034611073beab836159fd4ee3b94/lib/exec/exec_dispatch.ml#L1010-L1015), [lib/exec/exec_dispatch.mli:34](https://github.com/jeong-sik/masc/blob/684336274720034611073beab836159fd4ee3b94/lib/exec/exec_dispatch.mli#L34-L47), [lib/exec/exec_dispatch.mli:58](https://github.com/jeong-sik/masc/blob/684336274720034611073beab836159fd4ee3b94/lib/exec/exec_dispatch.mli#L58-L72).
+
+Problem: The API promises one caller-owned timeout epoch across stages/substitutions. At eval_substitutions:719, remaining_timeout computes original budget minus elapsed time; :740-746 passes that reduced value plus unchanged started to child dispatch; a Simple child at :497 subtracts elapsed from the same epoch again. With budget 10 and 3 seconds already spent, the source arithmetic hands child 7 then computes about 4 at its Host Process_eio call boundary. Pipeline fallback explicitly keeps the original budget with started to avoid this double debit. This is a source-derived contract concern, not an observed timeout incident; no reproduction was executed.
+
+Change: First reproduce with typed Subst by observing the timeout argument at the Host Process_eio boundary or by explicit clock/arithmetic observation that distinguishes too-small remaining duration from a refreshed full budget. Injected Docker/MicroVM/SSH/Delegated runners have no timeout argument and are not the proposed measurement point. If confirmed, use one private invocation budget/deadline representation passed unchanged through recursive workers and convert to relative seconds at the existing Host Process_eio timeout boundary. Preserve exported optional timeout_sec/started API unless separately justified; choose representation after checking floating-point and time-basis compatibility. Do not introduce any new autonomous or cumulative execution deadline or add timeout arguments to injected runners.
+
+Preserve:
+
+- None remains unlimited; this work concerns existing explicit caller-supplied timeouts only.
+- Existing finite-positive process timeout validation, exhausted-budget status and diagnostic precedence stay stable.
+- Child and parent share one original deadline; neither fresh budgets per stage nor repeated debit of already elapsed time.
+- Env substitutions execute before argv substitutions in original order; stdout trimming/single argument and child exit semantics unchanged.
+- Keep current wall-clock basis unless a separate intentional API change is approved; do not silently add monotonic or depth policies.
+- Native pipelines keep live pipes/backpressure and callback ordering; cancellation continues to escape with resource cleanup.
+
+Consumers: [lib/exec/exec_dispatch.ml:1041](https://github.com/jeong-sik/masc/blob/684336274720034611073beab836159fd4ee3b94/lib/exec/exec_dispatch.ml#L1041-L1071), [lib/keeper_tooling/execute_shell_ir.ml:73](https://github.com/jeong-sik/masc/blob/684336274720034611073beab836159fd4ee3b94/lib/keeper_tooling/execute_shell_ir.ml#L73-L102), [lib/process/process_eio.ml:97](https://github.com/jeong-sik/masc/blob/684336274720034611073beab836159fd4ee3b94/lib/process/process_eio.ml#L97-L125), [lib/process/process_eio.ml:1149](https://github.com/jeong-sik/masc/blob/684336274720034611073beab836159fd4ee3b94/lib/process/process_eio.ml#L1149-L1179).
+
+Existing scenarios: [lib/exec/test/test_shell_ir_subst_exec.ml](https://github.com/jeong-sik/masc/blob/684336274720034611073beab836159fd4ee3b94/lib/exec/test/test_shell_ir_subst_exec.ml). Exhausted-child and sequence-shared deadline scenarios exist. The observer assertion only rejects a second timeout above 0.15s; it does not establish a lower bound or entry after previous elapsed work. Inspected, not run. **Not executed in this audit.**
+
+Proposed verification: Call typed Simple with Subst using an explicitly earlier started value and observe the timeout argument at the Host Process_eio boundary, or explicitly observe clock/arithmetic values. Compare expected duration minus elapsed once; extend to sequential substitutions and nested Subst after earlier work. Injected Docker/MicroVM/SSH/Delegated runners expose no timeout argument, so a spy on those runners cannot make this measurement. Include None and finite exhausted cases. Reproduce before changing types or behavior.
+
+Reachability limit: Current Keeper Command/Argv lowering read here produces literal Simple invoking shell/program. Parser-produced Subst is concretely executed by the dedicated test and exported dispatcher supports it, but no in-repository production entry that currently constructs and dispatches parsed Subst was established. Do not generalize to all Keeper shell commands or claim deployed impact.
+
+Ordering rationale: The causal concern is mixing original budget and already-reduced duration in identically typed float options. A small private type could prevent that ambiguity after reproduction. The need for an existing explicit deadline is not questioned and no new deadline is proposed.
+
 ## Boundaries retained or excluded
 
 These are reasons not to perform a blanket rewrite, not whole-module correctness claims.
@@ -818,15 +884,24 @@ These are reasons not to perform a blanket rewrite, not whole-module correctness
 - [lib/browser_lane/browser_upload_lease.ml](https://github.com/jeong-sik/masc/blob/857c8647ce7cc7305d6aa081d1aa24ac5b93f05e/lib/browser_lane/browser_upload_lease.ml): Retain the Pending/Owned/Released lease and owner-local mutable registry. Claims transfer only exact registered snapshot batches before WebDriver mutation; claimed bytes survive callback failure/cancellation until confirmed session teardown or invalid-session evidence. The short non-yielding mutex protects that ownership transfer, and cleanup runs after it. Removing refs or physical lease identity alone would obscure the lifetime protocol. This does not certify every cleanup-exception path.
 - [lib/browser_lane/browser_lane.ml](https://github.com/jeong-sik/masc/blob/857c8647ce7cc7305d6aa081d1aa24ac5b93f05e/lib/browser_lane/browser_lane.ml): Retain live client queues, per-client waiters, retired identity set and last delivered result as effect-owner state. Disconnect settles waiters and drains work; switch release removes pending request ownership; retry of the most recently delivered ID/payload is acknowledged while a changed payload for that ID is refused. Watched_work retains an answer/command that arrived as the time window closed. An immutable map alone would not replace those resource and delivery obligations.
 
+Exec inspection at `684336274720034611073beab836159fd4ee3b94` retains these boundaries:
+
+- [lib/exec/parser/bash_lexer.mll:20](https://github.com/jeong-sik/masc/blob/684336274720034611073beab836159fd4ee3b94/lib/exec/parser/bash_lexer.mll#L20-L38), [lib/exec/parser/bash.ml:203](https://github.com/jeong-sik/masc/blob/684336274720034611073beab836159fd4ee3b94/lib/exec/parser/bash.ml#L203-L220): Lexer-owned refusal variants and parser boundary translation already preserve construct identity and child failure. Keep exhaustive closed outcomes; do not reintroduce post-hoc substring refusal guesses.
+- [lib/exec/shell_ir.mli:42](https://github.com/jeong-sik/masc/blob/684336274720034611073beab836159fd4ee3b94/lib/exec/shell_ir.mli#L42-L77), [lib/keeper_tooling/execute_shell_ir.ml:73](https://github.com/jeong-sik/masc/blob/684336274720034611073beab836159fd4ee3b94/lib/keeper_tooling/execute_shell_ir.ml#L73-L102): Closed recursive IR, nonempty sequence head, typed target/path ownership and gate-before-dispatch are coherent boundaries. No blanket Result/default rewrites warranted.
+- [lib/exec/exec_dispatch.ml:403](https://github.com/jeong-sik/masc/blob/684336274720034611073beab836159fd4ee3b94/lib/exec/exec_dispatch.ml#L403-L477), [lib/exec/exec_dispatch.ml:766](https://github.com/jeong-sik/masc/blob/684336274720034611073beab836159fd4ee3b94/lib/exec/exec_dispatch.ml#L766-L1004), [lib/exec/test/test_exec_dispatch_pipeline_streaming.ml:21](https://github.com/jeong-sik/masc/blob/684336274720034611073beab836159fd4ee3b94/lib/exec/test/test_exec_dispatch_pipeline_streaming.ml#L21-L63): Native pipeline selection exists to retain real pipe backpressure and live callback semantics. Same-target physical identity identifies a resource runner owner; do not replace it with structural comparison or purify execution into a buffered whole-pipeline fold.
+- [lib/process/process_eio.ml:1149](https://github.com/jeong-sik/masc/blob/684336274720034611073beab836159fd4ee3b94/lib/process/process_eio.ml#L1149-L1248), [lib/process/process_eio.ml:1444](https://github.com/jeong-sik/masc/blob/684336274720034611073beab836159fd4ee3b94/lib/process/process_eio.ml#L1444-L1601): Local phase/open-handle refs, output buffers, Eio switches and concurrent await/drain implement resource lifetime and cleanup. Their mutation is legitimate per-call I/O state, distinct from parser process-global accounting.
+- [lib/exec/parser/bash_subset.mly:112](https://github.com/jeong-sik/masc/blob/684336274720034611073beab836159fd4ee3b94/lib/exec/parser/bash_subset.mly#L112-L114): The left-recursive pipeline action appends one stage and can repeatedly copy its prefix. No latency/allocation measurements or harmful production input distribution were established; do not promote to an extra broad performance candidate merely to enlarge the list.
+
 ## Coverage still open
 
-[Consulted sources](consulted-sources.json) records 157 unique files used for named boundaries, callers and scenarios. Focused reading records distinguish full-source and selected-span reads and pin later inspection revisions; symbol-search-only paths are not counted. Historical test paths remain tied to the revision at which they were inspected. This is selective semantic inspection of the complete file census. The original Round 5 TUI log retains all 29 records: 26 direct readings and three discovery-only searches. Their original scopes and baseline remain in the JSON; discovery-only records are excluded from the 56 focused reading records and the unique-file total.
+[Consulted sources](consulted-sources.json) records 193 unique files used for named boundaries, callers and scenarios. Focused reading records distinguish full-source and selected-span reads and pin later inspection revisions; symbol-search-only paths are not counted. Historical test paths remain tied to the revision at which they were inspected. This is selective semantic inspection of the complete file census. The original Round 5 TUI log retains all 29 records: 26 direct readings and three discovery-only searches. Their original scopes and baseline remain in the JSON; discovery-only records are excluded from the 98 focused reading records and the unique-file total.
 
 - TUI inspection now covers the integrated I/O domain, selected HTTP/cancellation/cache owners, typed scheduling/machine payloads and Board post completion. The full orchestrator, all asynchronous admission classifiers, stream replay/acknowledgement and underlying HTTP pool/TLS/socket internals remain open. T1 requires server receipt and reconciliation design before implementation.
 - Agent Core coverage now includes committed WAL scanning and selected provider-admission, stream-error, runner and lifecycle boundaries. The full stream assembler, backend codecs, scheduler internals, exact-output admission, standard/advanced run-loop differences and lifecycle consumer integrations remain open.
 - Remaining production directories have not been cleared by representative samples. Browser upload leases and selected live-command ownership were inspected; cleanup failure settlement, full native/BiDi host lifecycle, WebDriver/DOM protocols, sandbox, multimedia, process and observation paths remain open.
 - TypeScript/sidecar consumers are included only when tracing an OCaml contract. A full frontend or third-party-code audit is not implied.
-- Lexer/parser inputs (`lib/exec/parser/bash_lexer.mll`, `lib/exec/parser/bash_subset.mly`) are outside the `.ml`/`.mli` census and remain an explicit follow-up surface.
+- The two tracked lexer/parser generator inputs at `684336274720034611073beab836159fd4ee3b94`, `lib/exec/parser/bash_lexer.mll` and `lib/exec/parser/bash_subset.mly`, have now been read with their generator declaration. They remain a separate input inventory, outside the historical `.ml`/`.mli` census denominator. Generated output, Menhir conflicts and parser behavior were not checked by execution.
+- Exec coverage remains selective: full process/spawn/detached lifecycle, remote runner cleanup, complete command/path policy and real concurrent parser scheduling remain open. E2 is a source-derived timeout concern requiring reproduction, not a reported Keeper shell incident.
 - Test/tooling refactoring follows production contract understanding; no broad test rewrite or new style/count gate is planned.
 
 ## Round log
@@ -840,4 +915,5 @@ These are reasons not to perform a blanket rewrite, not whole-module correctness
 - Round 5 implementation continued: D1 implemented in [#43399](https://github.com/jeong-sik/masc/pull/43399), preserving committed verification obligations across ordinary projection errors without changing cancellation or lock ownership. The existing compensation comment was corrected to distinguish returned cleanup errors from raised exceptions.
 - Round 5 coverage: 39 scoped reading records across TUI and Browser added 34 unique paths in [#43400](https://github.com/jeong-sik/masc/pull/43400), bringing the consulted-source set to 157. Added T1 as investigate and retained eight existing ownership boundaries. The queue has 26 candidates; the complete initial file census remains pinned and semantic coverage remains selective.
 - Round 6 implementation: K2 implemented in [#43411](https://github.com/jeong-sik/masc/pull/43411), preserving native child authority and publication while extracting the pure selected-export contract. The whole stack was rebased onto main `da50197434e17182ca30348afd92a541eea3b155`; S1 now retains the upstream quota-rest effect using the same accepted immutable snapshot, before the observer. Empty complete reports revoke usage observations but do not clear an existing quota rest. Independent source reviews checked the changed S1 integration and the other layers' rebased context.
+- Round 6 coverage: [#43414](https://github.com/jeong-sik/masc/pull/43414) adds 42 scoped source-reading records across Exec and lane planning and 36 unique paths, bringing the set to 193 files and 98 focused records. Added E1 as later and E2 as investigate, retained five Exec/resource boundaries, and refined S2 with its real Fusion consumers and transaction/error ordering. The queue has 28 candidates, six implemented PRs and 22 remaining candidates.
 - No local Dune build, CI polling, behavior execution, formal GitHub approval, merge or runtime proof is supplied by this inventory.

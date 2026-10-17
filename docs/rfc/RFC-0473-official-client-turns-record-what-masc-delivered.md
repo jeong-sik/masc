@@ -7,7 +7,7 @@ updated: 2026-10-17
 author: vincent + claude
 supersedes: []
 superseded_by: null
-related: ["#37752", "#43561", "#43564", "RFC-0390", "RFC-0460"]
+related: ["#37752", "#43561", "#43564", "#43583", "RFC-0390", "RFC-0460"]
 implementation_prs: []
 ---
 
@@ -155,8 +155,8 @@ type delivery =
 지금 `/provider-input` 은 본문 전체를 한 번에 준다(#37752: 19.6 MB 에 2.1초, 57 MB 에 8.6초). 공식 클라이언트 턴까지 기록하면 404 로 바로 끝나던 Keeper 들의 화면이 큰 응답을 받게 된다.
 그래서 이 스택의 맨 아래에서 응답을 바꾼다.
 
-- `/provider-input?turn_ref=…` 는 목록만 준다. 칸·조각마다 종류, 바이트, sha256 이다. 스키마 이름은 `masc.resolved-provider-input.v2` 로 올린다.
-- 조각 본문은 `/provider-input/part?turn_ref=…&index=N` 으로 따로 받는다. 서버는 그 행의 목록에 있는 조각만 준다. `Tool_blob_store` 는 workspace 전체가 같이 쓰므로, sha256 만 받아 아무 blob 이나 내주지 않는다.
+- `/provider-input?turn_ref=…` 는 목록만 준다. 칸·조각마다 종류, 바이트, sha256 이다. 스키마 이름은 `masc.provider-input-manifest.v1` 이다.
+- 조각 본문은 `/provider-input/part?turn_ref=…&index=N` 으로 따로 받는다(`masc.provider-input-part.v1`). 서버는 그 행의 목록에 있는 조각만 준다. `Tool_blob_store` 는 workspace 전체가 같이 쓰므로, sha256 만 받아 아무 blob 이나 내주지 않는다.
 - Agent Core 기록도 같은 응답을 쓴다. #37752 가 같이 닫힌다.
 
 ### 5.6 TUI 세 탭
@@ -216,7 +216,7 @@ turn record 와 provider-input JSON 을 읽는 곳은 모르는 키가 있으면
 
 MASC Native Stack 하나로 올리고, 맨 위 PR 로 한 번에 병합한다.
 
-1. provider-input 목록 응답과 조각 받기(5.5). Agent Core 기록으로 먼저 바꾸고, TUI·대시보드도 같이 바꾼다. #37752 가 닫힌다.
+1. provider-input 목록 응답과 조각 받기(5.5). Agent Core 기록으로 먼저 바꾸고, TUI·대시보드도 같이 바꾼다. #37752 가 닫힌다. #43583(스택 #43584, #43561 위)이다.
 2. 쓰기 기록: Codex 의 `context_submission` 을 공통 모듈로 옮기고, Claude Code·Muse·Antigravity 가 같은 값을 남긴다(5.2).
 3. 타입: `delivery`, `Host.resume_prompt` 의 맥락별 텍스트, provider-input `origin`, turn record `client_delivery`, `write_best_effort` 의 결과, JSON 읽기·쓰기. 5.7 의 소비처를 같이 고친다.
 4. lane 네 곳: `delivery` 를 만들고 쓰기 기록과 맞춰 provider-input 과 turn record 를 쓴다.

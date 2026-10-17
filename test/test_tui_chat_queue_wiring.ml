@@ -6010,7 +6010,7 @@ let test_preparation_requires_actual_turn_owner_and_exact_execution () =
     let module Preview = Masc.Keeper_turn_preview in
     let module Owner = Masc.Keeper_turn_preview_owner in
     let module Token = Masc.Keeper_interrupt_token in
-    let scope id = match Masc.Keeper_execution_scope_id.of_json
+    let scope id = match Keeper_execution_scope_id.of_json
         (`Assoc ["kind",`String "direct_operation";"id",`String id]) with
       | Ok value -> value | Error detail -> fail detail in
     let current = Token.fresh () and successor = Token.fresh () in

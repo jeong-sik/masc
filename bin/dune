@@ -995,7 +995,8 @@
  (name masc_tui_preparation_details)
  (wrapped false)
  (modules masc_tui_preparation_details)
- (libraries masc masc_tui_keeper_chat_log uri yojson))
+ (libraries masc masc.masc_types masc.keeper_operation_identity masc.keeper_execution_scope
+  masc_tui_keeper_chat_log uri yojson))
 
 (library
  (name masc_tui_execute_result)
@@ -1562,6 +1563,8 @@
  (modules masc_tui_types)
  (libraries
   masc_tui_preparation_details
+  masc.keeper_operation_identity
+  masc.keeper_execution_scope
   masc_tui_native_tasks
   masc_tui_child_content
   masc_tui_chat_search

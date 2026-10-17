@@ -1,9 +1,21 @@
 {
   "baseline": "aea8424926ea79f110315eec5ab429ac51043598",
-  "meaning": "Files consulted for named boundaries and caller/scenario discovery; not complete semantic audits. Other production sources remain unreviewed by this round.",
+  "meaning": "Files directly read for named boundaries, callers and scenarios, not complete semantic audits. baseline identifies the initial inventory; a focused reading baseline overrides it. Historical paths remain recorded even after removal by later refactors. Symbol-search-only records remain in discovery_only_sources and are excluded from files and focused_reading_scopes.",
   "files": [
+    "bin/masc_tui.ml",
+    "bin/masc_tui_async_protocol.ml",
+    "bin/masc_tui_async_read.ml",
+    "bin/masc_tui_board_requests.ml",
+    "bin/masc_tui_board_updates.ml",
+    "bin/masc_tui_board_upload.ml",
+    "bin/masc_tui_http.ml",
+    "bin/masc_tui_io_domain.ml",
+    "bin/masc_tui_io_domain.mli",
+    "bin/masc_tui_kept_reads.ml",
     "bin/masc_tui_lane_application.ml",
     "bin/masc_tui_lane_subscriptions.ml",
+    "bin/masc_tui_machine_live.ml",
+    "bin/masc_tui_render_schedule.ml",
     "bin/masc_tui_runtime_account_form.ml",
     "bin/masc_tui_runtime_config_edit.ml",
     "bin/masc_tui_runtime_config_edit.mli",
@@ -16,7 +28,18 @@
     "lib/board/board_core_persist.ml",
     "lib/board/board_dispatch.ml",
     "lib/board/board_votes.ml",
+    "lib/board_tool_adapter/board_tool_post.ml",
+    "lib/browser_host/browser_host.ml",
+    "lib/browser_host/browser_host.mli",
+    "lib/browser_host/dune",
+    "lib/browser_lane/browser_action.mli",
+    "lib/browser_lane/browser_lane.ml",
+    "lib/browser_lane/browser_upload_lease.ml",
+    "lib/browser_lane/browser_upload_lease.mli",
+    "lib/browser_lane/dune",
+    "lib/browser_webdriver.ml",
     "lib/completion_authority_agent.ml",
+    "lib/core/eio_guard.ml",
     "lib/dated_jsonl/dated_jsonl_store.ml",
     "lib/fs_compat/atomic_replace.mli",
     "lib/fs_compat/atomic_write.ml",
@@ -33,6 +56,7 @@
     "lib/keeper/keeper_antigravity_runtime.ml",
     "lib/keeper/keeper_approval_queue.ml",
     "lib/keeper/keeper_board_attention_worker.ml",
+    "lib/keeper/keeper_browser_upload.ml",
     "lib/keeper/keeper_composition_continuation_wake.ml",
     "lib/keeper/keeper_composition_dependency_result.ml",
     "lib/keeper/keeper_composition_dependency_result.mli",
@@ -59,6 +83,7 @@
     "lib/server/server_discord_in_process_gateway.ml",
     "lib/server/server_provider_usage_history.ml",
     "lib/server/server_provider_usage_history.mli",
+    "lib/server/server_routes_http_routes_activity.ml",
     "lib/server/server_routes_http_routes_channel_gate.ml",
     "lib/server/server_routes_http_routes_dashboard.ml",
     "lib/server/server_routes_http_routes_provider_runs.ml",
@@ -102,6 +127,9 @@
     "test/test_board_delete_rewrite_requeue.ml",
     "test/test_board_persistence_load_contract.ml",
     "test/test_board_vote_persistence.ml",
+    "test/test_browser_controls.ml",
+    "test/test_browser_lane.ml",
+    "test/test_browser_lane_watched_work.ml",
     "test/test_channel_gate_connector_routes.ml",
     "test/test_fusion_decision.ml",
     "test/test_goal_store.ml",
@@ -122,7 +150,13 @@
     "test/test_server_runtime_bootstrap.ml",
     "test/test_server_slack_trigger_policy.ml",
     "test/test_task_transition_broadcast.ml",
+    "test/test_tui_board_attachments.ml",
+    "test/test_tui_credential.ml",
     "test/test_tui_decode.ml",
+    "test/test_tui_io_domain.ml",
+    "test/test_tui_kept_reads.ml",
+    "test/test_tui_machine_live.ml",
+    "test/test_tui_render_schedule.ml",
     "test/test_tui_runtime_config_edit.ml",
     "test/test_verification.ml"
   ],
@@ -283,6 +317,289 @@
         ]
       ],
       "scope": "Snapshot and transition scenarios"
+    },
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "docs/constitution.xml",
+      "scope": "full file, exact baseline"
+    },
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "docs/guides/CONTRIBUTOR-WORKFLOW.md",
+      "scope": "full file, exact baseline"
+    },
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "bin/masc_tui_io_domain.ml",
+      "scope": "full file"
+    },
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "bin/masc_tui_io_domain.mli",
+      "scope": "full file"
+    },
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "test/test_tui_io_domain.ml",
+      "scope": "full file"
+    },
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "bin/masc_tui_http.ml",
+      "scope": "merged PR diff plus current ranges 170-315,317-762,2418-2637; function inventory; system-thread handoff census"
+    },
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "bin/masc_tui.ml",
+      "scope": "ranges 1605-1882,2790-2965,11450-11835,13201-13312,13687-13780,15005-15065,15630-15742,16685-16714,18101-18167,19615-19678,30578-30691; orchestration symbol inventory"
+    },
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "bin/masc_tui_async_protocol.ml",
+      "scope": "ranges 463-486,907-952 and Board completion occurrence census"
+    },
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "bin/masc_tui_board_requests.ml",
+      "scope": "full file"
+    },
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "bin/masc_tui_board_updates.ml",
+      "scope": "full file"
+    },
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "bin/masc_tui_board_upload.ml",
+      "scope": "full file"
+    },
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "bin/masc_tui_kept_reads.ml",
+      "scope": "full file"
+    },
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "bin/masc_tui_render_schedule.ml",
+      "scope": "decision core lines 1-68; remainder not used for candidate selection"
+    },
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "bin/masc_tui_machine_live.ml",
+      "scope": "full file"
+    },
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "bin/masc_tui_async_read.ml",
+      "scope": "full file"
+    },
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "lib/core/eio_guard.ml",
+      "scope": "lines 1-130"
+    },
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "lib/tui_decode.ml",
+      "scope": "lines 1115-1179"
+    },
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "lib/server/server_routes_http_routes_activity.ml",
+      "scope": "lines 1245-1363"
+    },
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "lib/board_tool_adapter/board_tool_post.ml",
+      "scope": "lines 56-165"
+    },
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "lib/board/board_core_persist.ml",
+      "scope": "lines 620-755"
+    },
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "lib/board/board_dispatch.ml",
+      "scope": "lines 345-394"
+    },
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "test/test_tui_board_attachments.ml",
+      "scope": "lines 290-397"
+    },
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "test/test_tui_kept_reads.ml",
+      "scope": "full file"
+    },
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "test/test_tui_machine_live.ml",
+      "scope": "lines 1-245"
+    },
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "test/test_tui_credential.ml",
+      "scope": "refusal/refresh tests and registration contexts only"
+    },
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "test/test_tui_render_schedule.ml",
+      "scope": "lines 1-135"
+    },
+    {
+      "path": "lib/browser_lane/browser_upload_lease.ml",
+      "ranges": null,
+      "scope": "Full ownership and staging implementation",
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e"
+    },
+    {
+      "path": "lib/browser_lane/browser_upload_lease.mli",
+      "ranges": null,
+      "scope": "Full ownership interface",
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e"
+    },
+    {
+      "path": "lib/browser_lane/browser_lane.ml",
+      "ranges": [
+        [
+          385,
+          421
+        ],
+        [
+          577,
+          680
+        ]
+      ],
+      "scope": "Client ownership, retirement, waiters, result acknowledgement and dispatch",
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e"
+    },
+    {
+      "path": "lib/browser_host/browser_host.ml",
+      "ranges": [
+        [
+          1,
+          245
+        ]
+      ],
+      "scope": "Native framing, reply/poll decoding and configuration context only",
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e"
+    },
+    {
+      "path": "lib/browser_host/browser_host.mli",
+      "ranges": null,
+      "scope": "Full public host contract; implementation beyond selected spans is not audited",
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e"
+    },
+    {
+      "path": "lib/browser_lane/browser_action.mli",
+      "ranges": null,
+      "scope": "Full closed action interface",
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e"
+    },
+    {
+      "path": "lib/browser_host/dune",
+      "ranges": null,
+      "scope": "Library ownership/dependencies",
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e"
+    },
+    {
+      "path": "lib/browser_lane/dune",
+      "ranges": null,
+      "scope": "Library ownership/dependencies",
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e"
+    },
+    {
+      "path": "lib/browser_webdriver.ml",
+      "ranges": [
+        [
+          48,
+          63
+        ],
+        [
+          160,
+          195
+        ]
+      ],
+      "scope": "Upload claim-before-mutation and invalid-session teardown edges only",
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e"
+    },
+    {
+      "path": "lib/keeper/keeper_browser_upload.ml",
+      "ranges": [
+        [
+          60,
+          93
+        ]
+      ],
+      "scope": "Authorized readers and staged-file adapter",
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e"
+    },
+    {
+      "path": "test/test_browser_controls.ml",
+      "ranges": [
+        [
+          170,
+          225
+        ]
+      ],
+      "scope": "Upload refusal, uncertain transport/teardown and cancellation scenarios",
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e"
+    },
+    {
+      "path": "test/test_browser_lane.ml",
+      "ranges": [
+        [
+          45,
+          95
+        ],
+        [
+          303,
+          321
+        ]
+      ],
+      "scope": "Stale selection, queue timeout, disconnect and duplicate acknowledgement scenarios",
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e"
+    },
+    {
+      "path": "test/test_browser_lane_watched_work.ml",
+      "ranges": [
+        [
+          64,
+          120
+        ]
+      ],
+      "scope": "Reply/command arrival at timeout boundary scenarios",
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e"
+    }
+  ],
+  "discovery_only_sources": [
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "bin/masc_tui_async_protocol.mli",
+      "scope": "Board completion occurrence census only"
+    },
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "bin/masc_tui_loader.ml",
+      "scope": "top-level symbol inventory only"
+    },
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "test/test_tui_board_composer.ml",
+      "scope": "test function inventory and draft-related lines"
+    }
+  ],
+  "audit_history": [
+    {
+      "round": 5,
+      "area": "TUI",
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "raw_record_count": 29,
+      "direct_reading_records": 26,
+      "discovery_only_records": 3,
+      "meaning": "The original 29 records and their scopes remain split between focused_reading_scopes and discovery_only_sources. This accounting correction adds no retrospective source-reading claim."
     }
   ]
 }

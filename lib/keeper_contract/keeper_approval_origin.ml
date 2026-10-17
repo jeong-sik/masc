@@ -59,6 +59,8 @@ let same_logical_source left right =
     String.equal (Keeper_operation_id.to_string left) (Keeper_operation_id.to_string right)
   | Admitted_sources left, Admitted_sources right ->
     List.equal (fun left right -> compare_source left right = 0 && left.board_post_id = right.board_post_id) left right
+  (* Intended: unknown sources keep the pre-origin identity, so a next-turn retry still
+     folds onto one approval (#28866). The grant stays one-shot for the exact input. *)
   | No_admitted_source, No_admitted_source -> true
   | Direct_operation _, (Admitted_sources _ | No_admitted_source)
   | Admitted_sources _, (Direct_operation _ | No_admitted_source)

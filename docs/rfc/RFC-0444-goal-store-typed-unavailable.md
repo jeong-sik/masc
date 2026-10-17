@@ -85,7 +85,16 @@ Codex 가 요구한 여섯 조건은 이렇게 갈린다. 미초기화 = `Uninit
 
 ### 2.2 쓰기
 
-`update_state`·`transact_goal`·`update_goal_if_phase`·`delete_goal`·`with_existing_goals` 는 지금처럼 `with_file_lock` 아래에서 `load_source` 를 부른다. `Unavailable u` 면 `Error (Store_unavailable u)` 로 거부하고 파일을 건드리지 않는다. `Uninitialized` 일 때만 첫 쓰기가 파일을 만든다. 빈 상태를 미리 써 두는 부팅 코드는 없다. 동시 writer 는 같은 lock 을 잡으므로 "한쪽은 Unavailable 을 보고 다른 쪽은 쓴다" 가 생기지 않는다.
+Goal upsert의 내부 `commit_state`와 `transact_goal`·`update_goal_if_phase`·`delete_goal`,
+Goal ID를 받은 `with_existing_goals`는 같은 Goal 파일 잠금 안에서 `load_source`를 부른다.
+`Unavailable u`면 각 경로의 typed 오류로
+거부하고 파일을 건드리지 않는다. `commit_state`에서는 `Error (Store_unavailable u)`다.
+동시 writer는 같은 lock을 잡으므로 "한쪽은 Unavailable을 보고 다른 쪽은 쓴다"가 생기지 않는다.
+
+현재 upsert 구현에서 `commit_state`는 준비 함수가 `Error`를 반환하면 쓰지 않고,
+`Ok { next_state; value }`를 반환하면 그 상태를 저장한 뒤 결과를 돌려준다.
+`Uninitialized`에서는 허용된 첫 쓰기만 파일을 만든다. 거부된 생성은 Goal과 감사 outbox를
+쓰지 않으며, 빈 상태를 미리 써 두는 부팅 코드도 없다.
 
 ### 2.3 producer → store → consumer → caller
 

@@ -122,8 +122,10 @@ val validate_page_name : string -> (string, page_name_error) result
 
 val list_pages : base_path:string -> string list
 (** Every [.md] file directly under {!wiki_root}, as full paths in name
-    order; [[]] when the directory does not exist. No file is skipped by
-    name. *)
+    order; [[]] when the directory does not exist. The wiki's own index/log
+    files are omitted. An existing path that cannot be listed, including a
+    regular file at the root or a failed filesystem lookup, raises [Sys_error]
+    rather than claiming emptiness. Only an actual missing root is empty. *)
 
 val read_index_entries :
   base_path:string -> (Wiki_journal.entry list, string) result
@@ -175,11 +177,9 @@ val dispatch :
   name:string ->
   args:Yojson.Safe.t ->
   Tool_result.result option
-(** [dispatch ctx ~name ~args] routes by tool name to the
-    private handlers ([handle_list], [handle_create], [handle_update]) plus
-    {!handle_read} / {!handle_search}.  Returns [None] when
-    [name] is not one of the 5 wiki tools — caller treats
-    that as "not my tool". *)
+(** [dispatch ctx ~name ~args] routes registered Wiki operations. Returns [None] when
+    [name] is not a registered wiki operation. Filesystem [Sys_error] failures
+    become typed [Runtime_failure] results; cancellation is not intercepted. *)
 
 (** {1 MCP schemas} *)
 

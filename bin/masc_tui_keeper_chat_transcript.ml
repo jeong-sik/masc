@@ -1183,6 +1183,17 @@ let preparation_phase_label phase =
     | Prompt_preparation -> "프롬프트 준비"
     | Tool_preparation -> "Tool 준비"
     | Skill_preparation -> "Skill 준비"
+    | Lane_inputs_preparation -> "Lane 확인"
+    | Workspace_memory_preparation -> "공유 메모리 확인"
+    | Wiki_preparation -> "Wiki 확인"
+;;
+
+let preparation_rejection_label phase =
+  let open Masc.Keeper_turn_preview in
+  match phase with
+  | Lane_inputs_preparation | Workspace_memory_preparation | Wiki_preparation -> "조회 불가"
+  | Task_preparation | World_preparation | Context_preparation | Prompt_preparation
+  | Tool_preparation | Skill_preparation -> "거절됨"
 ;;
 
 let preparation_status preparation =
@@ -1194,7 +1205,7 @@ let preparation_status preparation =
     Progress, "최근 확인 · " ^ phase ^ "됨 · 다음 활동 확인 중"
   | Preparation_finished {outcome=(Rejected | Raised | Cancelled) as outcome;_} ->
     let outcome = match outcome with
-      | Rejected -> "거절됨" | Raised -> "실패" | Cancelled -> "취소됨"
+      | Rejected -> preparation_rejection_label preparation.phase | Raised -> "실패" | Cancelled -> "취소됨"
       | Prepared -> "완료됨" in
     Attention, "최근 확인 · " ^ phase ^ " " ^ outcome
 ;;
@@ -1208,7 +1219,8 @@ let preparation_timeline_rows timeline =
       | Preparation_active -> "진행 관측"
       | Preparation_finished {outcome;elapsed_ns;_} ->
         let label = match outcome with
-          | Prepared -> "완료" | Rejected -> "거절" | Raised -> "실패" | Cancelled -> "취소" in
+          | Prepared -> "완료" | Rejected -> preparation_rejection_label span.preparation.phase
+          | Raised -> "실패" | Cancelled -> "취소" in
         Printf.sprintf "%s · %.2f ms" label (Int64.to_float elapsed_ns /. 1_000_000.) in
     Diagnostic, Printf.sprintf "준비 #%d%s · %s · %s" (span.scope_id :> int) parent
       (preparation_phase_label span.preparation.phase) outcome)

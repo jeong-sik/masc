@@ -4,6 +4,7 @@
  (flags :standard)
  (public_name masc)
  (private_modules
+  keeper_composition_child_exports
   keeper_librarian_failure_evidence
   keeper_official_client_context_projection
   keeper_board_attention_worker_disposition

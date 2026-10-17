@@ -731,3 +731,8 @@
  (name test_response_replay)
  (modules test_response_replay)
  (libraries llm_provider alcotest))
+
+(test
+ (name test_response_phase_replay)
+ (modules test_response_phase_replay)
+ (libraries llm_provider alcotest))

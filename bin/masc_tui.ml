@@ -11673,15 +11673,19 @@ let load_http_keeper_surfaces ~on_progress ~on_asks ~on_roster ~ask_request ~ros
                Option.iter (fun identity -> publish identity observation) expected_workspace) on_roster;
              observation)) roster_request)
 
-let load_http_scoped_surface_reads ~surface_request ~ask_request ~roster_request ~refresh_ticket ~server_identity ~host ~port ~approval_ticket ~board_sort
+let load_http_scoped_surface_reads ~on_progress ~surface_request ~ask_request ~roster_request ~refresh_ticket ~server_identity ~host ~port ~approval_ticket ~board_sort
     ~board_hearth ~system_log_level ~provider_history_days
     ~(needs : Masc_tui_types.surface_needs) : unit http_scoped_surface_readings =
-  let when_needed wanted load = if wanted then Some (load ()) else None in
+  let when_needed ~source ~received wanted load =
+    if wanted then Some (observe_http_reader ~on_progress
+        (Http_refresh_progress.Surface_data source) ~received load)
+    else None in
   (* Metrics draws the transport and the Overview reads its queue pressure,
      so a refresh on another surface does not spend a request on it. [None]
      leaves whatever the last read observed. *)
   let read_transport () =
-    when_needed needs.needs_transport (fun () ->
+    when_needed ~source:Surface_read_order.Transport ~received:Result.is_ok
+      needs.needs_transport (fun () ->
         load_transport_health ~host ~port)
   in
   let read_approvals () =
@@ -11691,30 +11695,39 @@ let load_http_scoped_surface_reads ~surface_request ~ask_request ~roster_request
       approval_ticket
   in
   let read_board () =
-    when_needed needs.needs_board (fun () ->
-        load_board_list ~host ~port ~sort_by:(board_sort_label board_sort)
-          ~hearth:board_hearth)
-  in
-  let read_board_hearths () =
-    when_needed needs.needs_board (fun () -> load_board_hearths ~host ~port)
+    if not needs.needs_board then None, None
+    else
+      let board, hearths = observe_http_reader ~on_progress
+          (Http_refresh_progress.Surface_data Surface_read_order.Board)
+          ~received:(fun (board, hearths) -> Result.is_ok board && Result.is_ok hearths)
+          (fun () -> Masc_tui_loader.read_pair
+            (fun () -> load_board_list ~host ~port ~sort_by:(board_sort_label board_sort)
+              ~hearth:board_hearth)
+            (fun () -> load_board_hearths ~host ~port)) in
+      Some board, Some hearths
   in
   let read_planning () =
-    when_needed needs.needs_planning (fun () -> load_planning ~host ~port)
+    when_needed ~source:Surface_read_order.Planning ~received:Result.is_ok
+      needs.needs_planning (fun () -> load_planning ~host ~port)
   in
   let read_system_logs () =
-    when_needed needs.needs_system_logs (fun () ->
+    when_needed ~source:Surface_read_order.System_logs ~received:Result.is_ok
+      needs.needs_system_logs (fun () ->
         load_system_logs ~host ~port ?level:system_log_level
           ~limit:system_log_page ())
   in
   let read_fleet_safety () =
-    when_needed needs.needs_fleet_safety (fun () -> load_fleet_safety ~host ~port)
+    when_needed ~source:Surface_read_order.Fleet_safety ~received:Result.is_ok
+      needs.needs_fleet_safety (fun () -> load_fleet_safety ~host ~port)
   in
   let read_keeper_surfaces () =
     load_http_keeper_surfaces ~on_progress:None ~on_asks:None ~on_roster:None
       ~ask_request ~roster_request ~server_identity ~host ~port ~needs
   in
   let read_runtime_quota () =
-    when_needed needs.needs_runtime_quota (fun () ->
+    when_needed ~source:Surface_read_order.Runtime_quota
+      ~received:(fun (runtimes, quota) -> Result.is_ok runtimes && Result.is_ok quota)
+      needs.needs_runtime_quota (fun () ->
         (* A raise here would fail the whole scoped refresh and drop the
            transport and ask readings it carries; the picker's loader maps
            the same raise to [Error] for the same reason. *)
@@ -11726,14 +11739,17 @@ let load_http_scoped_surface_reads ~surface_request ~ask_request ~roster_request
             (Error reason, Error reason))
   in
   let read_keeper_usage () =
-    when_needed needs.needs_keeper_usage (fun () ->
+    when_needed ~source:Surface_read_order.Keeper_usage ~received:Result.is_ok
+      needs.needs_keeper_usage (fun () ->
       match Masc_tui_loader.load_keeper_usage ~host ~port with
       | result -> result
       | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
       | exception exn -> Error (Printexc.to_string exn))
   in
   let read_provider_history () =
-    when_needed needs.needs_provider_history (fun () ->
+    when_needed ~source:Surface_read_order.Provider_history
+      ~received:(fun (_, result) -> Result.is_ok result)
+      needs.needs_provider_history (fun () ->
       match Masc_tui_loader.load_provider_usage_history ~host ~port
               ~days:provider_history_days with
       | result -> provider_history_days, result
@@ -11742,14 +11758,16 @@ let load_http_scoped_surface_reads ~surface_request ~ask_request ~roster_request
           provider_history_days, Error (Printexc.to_string exn))
   in
   let read_overview_goals () =
-    when_needed needs.needs_overview_goals (fun () ->
+    when_needed ~source:Surface_read_order.Overview_goals ~received:Result.is_ok
+      needs.needs_overview_goals (fun () ->
         match Masc_tui_loader.load_overview_goals ~host ~port with
         | result -> result
         | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
         | exception exn -> Error (Printexc.to_string exn))
   in
   let read_account_emails () =
-    when_needed needs.needs_account_emails (fun () ->
+    when_needed ~source:Surface_read_order.Account_emails ~received:Result.is_ok
+      needs.needs_account_emails (fun () ->
         match Masc_tui_loader.load_account_emails ~host ~port with
         | result -> result
         | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
@@ -11772,8 +11790,7 @@ let load_http_scoped_surface_reads ~surface_request ~ask_request ~roster_request
           (fun () ->
             Masc_tui_loader.read_pair
               (fun () ->
-                Masc_tui_loader.read_pair read_approvals
-                  (fun () -> Masc_tui_loader.read_pair read_board read_board_hearths))
+                Masc_tui_loader.read_pair read_approvals read_board)
               (fun () -> Masc_tui_loader.read_pair read_planning read_system_logs)))
       (fun () ->
         Masc_tui_loader.read_pair
@@ -11801,24 +11818,6 @@ let load_http_scoped_surface_reads ~surface_request ~ask_request ~roster_request
   ; http_overview_goals
   ; http_account_emails
   }
-
-let scoped_http_reads_received (reading : unit http_scoped_surface_readings) =
-  let optional_ok = function None -> true | Some result -> Result.is_ok result in
-  optional_ok reading.http_transport
-  && (match reading.http_approvals with None -> true | Some value -> Result.is_ok value.ao_result)
-  && (match reading.http_asks with None -> true | Some value -> Result.is_ok value.asks_result)
-  && optional_ok reading.http_board && optional_ok reading.http_board_hearths
-  && optional_ok reading.http_planning && optional_ok reading.http_system_logs
-  && optional_ok reading.http_fleet_safety
-  && (match reading.http_keeper_roster with
-      | None -> true
-      | Some observation -> (match observation.roster_result with
-          | Ok (_, Ok _) -> true | Ok (_, Error _) | Error _ -> false))
-  && (match reading.http_runtime_quota with
-      | None -> true | Some (runtimes, quota) -> Result.is_ok runtimes && Result.is_ok quota)
-  && optional_ok reading.http_keeper_usage
-  && (match reading.http_provider_history with None -> true | Some (_, value) -> Result.is_ok value)
-  && optional_ok reading.http_overview_goals && optional_ok reading.http_account_emails
 
 let load_http_surfaces ~surface_request ~on_initial_identity ~on_progress ~on_overview ~on_asks ~on_approvals ~on_roster ~ask_request ~roster_request ~refresh_ticket ~host ~port ~approval_ticket ~board_sort
     ~board_hearth ~system_log_level ~provider_history_days
@@ -11893,13 +11892,11 @@ let load_http_surfaces ~surface_request ~on_initial_identity ~on_progress ~on_ov
                   ~ask_request ~roster_request ~server_identity:http_server_identity
                   ~host ~port ~needs:{ needs with needs_asks = true })
              (fun () ->
-                observe_http_reader ~on_progress Http_refresh_progress.Surface_data
-                  ~received:scoped_http_reads_received (fun () ->
-                load_http_scoped_surface_reads ~surface_request ~ask_request:None ~roster_request:None ~refresh_ticket
+                load_http_scoped_surface_reads ~on_progress ~surface_request ~ask_request:None ~roster_request:None ~refresh_ticket
                   ~server_identity:http_server_identity
                   ~host ~port ~approval_ticket:None
                   ~board_sort ~board_hearth ~system_log_level ~provider_history_days
-                  ~needs:{ needs with needs_asks = false; needs_keeper_roster = false })))
+                  ~needs:{ needs with needs_asks = false; needs_keeper_roster = false }))
     in
     let identity_after = observe_http_reader ~on_progress
       Http_refresh_progress.Identity_after ~received:Result.is_ok
@@ -14008,7 +14005,7 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight
             else Error "Workspace identity changed or is unavailable; scoped refresh withdrawn"
         in
         let* server_identity = probe () in
-        let readings = load_http_scoped_surface_reads ~surface_request ~ask_request ~roster_request ~refresh_ticket
+        let readings = load_http_scoped_surface_reads ~on_progress:None ~surface_request ~ask_request ~roster_request ~refresh_ticket
               ~server_identity:(Ok server_identity) ~host ~port
               ~approval_ticket ~board_sort
               ~board_hearth

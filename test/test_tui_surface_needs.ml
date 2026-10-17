@@ -238,13 +238,19 @@ let test_navigation_settles_while_a_full_reader_is_pending () =
     (Types.Http_refresh_order.is_current full_ticket navigation_ticket);
   let reads, full = Order.dispatch ~kind:Order.Full ~needs:(needs Types.Metrics)
     ~started_ns:1L Order.initial in
+  check bool "full publication ownership does not stand in for scoped execution progress" true
+    (Order.pending_scoped ~needs:(needs Types.Metrics) reads = []);
   let reads, navigation = Order.dispatch ~kind:Order.Navigation ~needs:(needs Types.Board)
     ~started_ns:2L reads in
+  check bool "the actual foreground request has its own pending dataset" true
+    (Order.pending_scoped ~needs:(needs Types.Board) reads = [Order.Board]);
   let reads, accepted = Order.take reads navigation in
   check bool "Board can be admitted before the unrelated full read finishes" true
     (List.mem Order.Board accepted);
   check bool "the provider history still has its original pending owner" true
     (List.mem Order.Provider_history (Order.pending ~needs:(needs Types.Metrics) reads));
+  check bool "settled navigation is not kept pending by full publication ownership" true
+    (Order.pending_scoped ~needs:(needs Types.Board) reads = []);
   let _, accepted = Order.take reads full in
   check bool "the full read retains its independent provider result" true
     (List.mem Order.Provider_history accepted);
@@ -386,6 +392,8 @@ let test_log_filter_read_supersedes_old_collectors_without_releasing_them () =
     ~started_ns:1L Order.initial in
   let full_reads, current_filter = Order.dispatch ~kind:Order.Independent
     ~needs:(needs Types.System_logs) ~started_ns:2L full_reads in
+  check bool "independent filter reads remain visible as scoped pending data" true
+    (Order.pending_scoped ~needs:(needs Types.System_logs) full_reads = [Order.System_logs]);
   let full_reads, old_full_sources = Order.take full_reads full in
   check bool "a late full page cannot replace the filtered page" true (old_full_sources = []);
   let _, current_filter_sources = Order.take full_reads current_filter in

@@ -73,6 +73,65 @@ their narrower meaning. The synchronous fallback has the total refresh clock but
 does not emit individual reader events. Scoped refreshes and independent side
 reads are outside this ledger.
 
+## Retain Work navigation after a failed planning refresh
+
+A failed planning read supplies no replacement Goal list. Work retains the last
+successful same-workspace snapshot, baseline, selected Goal/list cursor, detail
+mode and scroll. It records the new failure and disarms a pending lifecycle
+action. An operator's unfinished drop-reason draft stays as input; retaining it
+submits no action. A successful later read still clears the error and reconciles
+selection against the actual replacement list; a removed Goal returns to list
+mode through the existing reconciliation.
+
+| Boundary | Before | Source implementation |
+|---|---|---|
+| Failed refresh after successful Goal list/detail | Clear the snapshot, leave detail mode and reset scroll | Keep the observed snapshot and navigation, record failure |
+| Failed first read | No readable snapshot | Same unavailable state, without an invented empty Goal list |
+| Drop-reason text being entered | Discarded along with the pending action | Keep the input draft while disarming an armed lifecycle command |
+| Retained list/detail | No retained body | Persistent refresh-failed notice, displayed snapshot generation and failure reason |
+| Work tab verifying count after failure | Unavailable after snapshot was cleared | Still unavailable; retained rows are not a new current count |
+| Named workspace source replacement or readiness revocation | Clear planning snapshot and baseline | Also clear the old source's planning error |
+| Workspace temporarily becomes unconfirmed | Existing same-workspace data may stay under suspended authority | Retained list/detail adds explicit workspace-unconfirmed snapshot provenance; verifying count remains unknown |
+
+The failure notice, or the stronger workspace-unconfirmed notice, sits in the
+list/detail header. The same projected header
+rows determine the detail viewport and proof presentation calculation; no notice
+is inserted ahead of proof rows inside the scrollable body. Verbose diagnostics
+use the existing single error row, while the original error remains in the event
+stream. The comparison summary calls its timestamp the displayed snapshot rather
+than implying a successful current refresh.
+
+Retention creates no Goal proof, action submission or confirmation authority.
+The pending lifecycle arm is still cleared on failure; a retained reason is
+submitted only through its existing explicit operator input and server checks.
+The independent proof
+reader and its presented-binding requirement retain their own state. Operator
+confirmation still names the exact criterion revision, request and verifier run;
+the server reads the canonical Goal and authoritative verification record inside
+its transaction before deciding the transition. The retained planning snapshot
+does not enter that confirmation body or replace those reads. A temporary loss
+of identity keeps the existing suspended-authority behavior and now explains the
+retained snapshot on the detail itself. Named workspace replacement or readiness
+revocation clears the source before a successor can use it.
+
+`tui_planning_refresh_failed` records whether a snapshot and input draft were retained, its server
+generation timestamp (or null) and the process monotonic observation clock. These
+are repeated state observations, not counts of distinct failures, fresh server
+reads or rendered frames. Compare the server timestamp only within its own clock
+domain. Existing error deduplication and source application outcomes continue.
+
+The source baseline is `5c548a74be2478d9c83bf0086838a1828ca8b151`.
+No candidate native Before/After or behavior execution has been performed for
+this change. For a matched comparison, hold workspace, Goal data, viewport and
+navigation fixed: first open a successful detail and scroll, fail the next
+planning read, and retain the actual HTTP/source results and final frames. Check
+the same Goal and snapshot remain with an explicit failure notice; keep the
+first-read failure as a separate case. Then restore a successful response with
+the selected Goal retained or removed and verify normal reconciliation. Include
+workspace withdrawal/replacement, a partially entered drop reason, the independent proof reader and unfinished
+attempts. Inspect normal and narrow frames manually; no wording, layout or
+row-order assertion test is introduced.
+
 ## Navigate while an unrelated full refresh is still running
 
 A ready, admitted workspace can start its existing navigation-delta read while

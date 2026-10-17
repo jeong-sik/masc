@@ -2520,9 +2520,13 @@ let planning_workspace_lead = screen_title " MASC Work" ^ "  "
 let planning_workspace_tabs (state : state) ~(tab : planning_tab) ~(window : string) =
   let review_count = Option.map (fun s -> s.vs_total) state.verification in
   let verifying_count =
-    Option.map
-      (fun (p : planning_snapshot) -> p.pl_rollup.pr_verifying)
-      state.planning
+    (* Other Work tabs retain the previous unavailable-count behavior. The
+       retained Goal rows carry their provenance on their own list/detail. *)
+    match state.workspace_identity, state.planning_error with
+    | Workspace_identity_match, None -> Option.map
+        (fun (p : planning_snapshot) -> p.pl_rollup.pr_verifying) state.planning
+    | (Workspace_identity_unread | Workspace_identity_match_unconfirmed _ | Workspace_identity_mismatch _), _
+    | Workspace_identity_match, Some _ -> None
   in
   let stops =
     Render_schedule.planning_strip_plain ~tab ~review_count ~verifying_count

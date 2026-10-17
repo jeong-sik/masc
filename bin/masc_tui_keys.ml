@@ -1643,7 +1643,12 @@ let bindings_memory_facts =
   ]
   @ row_list_edges @ listing_meta
 
-let footer_hints_memory_facts = hints_of_bindings bindings_memory_facts
+let footer_hints_memory_facts ~cols =
+  let bindings =
+    if cols >= Masc_tui_roster_pane.threshold_cols then bindings_memory_facts
+    else List.filter (fun (binding : binding) -> binding.key <> "d") bindings_memory_facts
+  in
+  hints_of_bindings bindings
 
 (* The reading the browser's Enter opens. One fact scrolls under the cursor
    instead of the cursor moving rows, so it owns page and edge keys the

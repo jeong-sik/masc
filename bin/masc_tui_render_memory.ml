@@ -1548,13 +1548,16 @@ let render_memory_facts_body ~cols ~budget (state : state)
   else begin
     let width = Masc_tui_roster_pane.pane_cols in
     let fact_cols = memory_facts_pane_cols state cols in
+    let fact_inner_cols = framed_inner_width fact_cols in
     let facts = ref [] in
     let collect text = facts := text :: !facts in
     render_memory_facts_body_single ~show_category_strip:false ~cols:fact_cols ~budget state
       ~push:collect
       ~push_styled:(fun ~style text -> collect (style ^ text ^ Ansi.reset))
-      ~push_selected:(fun text -> collect (Theme.selection ^ text ^ Ansi.reset))
-      ~push_divider:(fun () -> collect (String.make fact_cols '-'))
+      ~push_selected:(fun text ->
+        collect (Theme.selection ^ fit_width text fact_inner_cols ^ Ansi.reset))
+      ~push_divider:(fun () ->
+        collect (Theme.recede () ^ draw_hline fact_inner_cols ^ Ansi.reset))
       ~push_empty:(fun () -> collect "");
     let count category =
       match memory_facts_snapshot state with
@@ -1577,7 +1580,12 @@ let render_memory_facts_body ~cols ~budget (state : state)
         | Category_all, None, _
         | Category_all, _, None -> None
     in
-    let header = [Theme.info () ^ "CATEGORIES" ^ Ansi.reset ^ Ansi.dim ^ "  d:접기" ^ Ansi.reset; "c/C 순서 이동 · 클릭 선택"; ""] in
+    let header =
+      [ Theme.info () ^ "CATEGORIES" ^ Ansi.reset ^ Ansi.dim ^ "  d:접기" ^ Ansi.reset
+      ; Theme.recede () ^ "c/C 순서 이동 · 클릭 선택" ^ Ansi.reset
+      ; Theme.recede () ^ draw_hline width ^ Ansi.reset
+      ]
+    in
     let height = max 0 (budget - List.length header) in
     let categories = Category_all :: memory_fact_categories state in
     let selected =
@@ -1591,15 +1599,17 @@ let render_memory_facts_body ~cols ~budget (state : state)
       |> List.concat_map (fun category ->
         let count = match count category with None -> "?" | Some count -> string_of_int count in
         let suffix = " (" ^ count ^ ")" in
-        (* Category names are validated ASCII. Bound bytes before wrapping:
-           the selected label gets the rail height; other previews get one row.
-           Enter's fact detail retains the complete category value. *)
+        (* Bound display cells before wrapping: the selected label gets the rail
+           height; other previews get one row. Enter's fact detail retains the
+           complete category value. *)
         let rows = if category = state.memory_facts_category then max 1 height else 1 in
-        let room = max 1 (rows * (width - 2) - String.length suffix) in
-        let name = memory_category_filter_label category in
-        let name = if String.length name <= room then name
-          else String.sub name 0 (room - 1) ^ "…" in
-        Message_layout.wrap_words ~max_cells:(width - 2) (Terminal_text.single_line (name ^ suffix))
+        let room = max 1 (rows * (width - 2) - Message_layout.display_width suffix) in
+        let name = Terminal_text.single_line (memory_category_filter_label category) in
+        let name =
+          if Message_layout.display_width name <= room then name
+          else Message_layout.take_cells name (max 0 (room - 1)) ^ "…"
+        in
+        Message_layout.wrap_words ~max_cells:(width - 2) (name ^ suffix)
         |> List.map (fun text -> category, text)) in
     let selected_indices =
       entries
@@ -1633,6 +1643,6 @@ let render_memory_facts_body ~cols ~budget (state : state)
     for index = 0 to height - 1 do
       let cell window = Option.value (Rows.at window index) ~default:"" in
       push (fit_width (cell rail_window) width ^ Theme.recede () ^ " │ " ^ Ansi.reset
-        ^ fit_width (cell facts_window) fact_cols)
+        ^ fit_width (cell facts_window) fact_inner_cols)
     done
   end

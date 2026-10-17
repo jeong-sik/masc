@@ -1314,6 +1314,22 @@ let test_workspace_activity_offers_no_row_search () =
   Alcotest.(check (option int)) "Workspace Activity answers no search"
     None (Masc_tui_surface_search.surface_search_count state Repositories ~query:"masc")
 
+let test_memory_facts_footer_hints_respect_split_threshold () =
+  let has_sub needle text =
+    let n = String.length needle and len = String.length text in
+    let rec loop i =
+      i + n <= len && (String.sub text i n = needle || loop (i + 1))
+    in
+    loop 0
+  in
+  let threshold = Masc_tui_roster_pane.threshold_cols in
+  let narrow = Masc_tui_keys.footer_hints_memory_facts ~cols:(threshold - 1) in
+  let wide = Masc_tui_keys.footer_hints_memory_facts ~cols:threshold in
+  Alcotest.(check bool) "narrow Memory facts footer omits disabled Category pane toggle"
+    false (has_sub "d:Category pane" narrow);
+  Alcotest.(check bool) "wide Memory facts footer includes Category pane toggle"
+    true (has_sub "d:Category pane" wide)
+
 let () =
   Alcotest.run "masc_tui_keys"
     [ ( "table"
@@ -1335,6 +1351,8 @@ let () =
             `Quick test_detail_search_counts_follow_the_active_pane
         ; Alcotest.test_case "Workspace Activity offers no row search"
             `Quick test_workspace_activity_offers_no_row_search
+        ; Alcotest.test_case "Memory facts footer hints respect split threshold"
+            `Quick test_memory_facts_footer_hints_respect_split_threshold
         ;] )
     ; ( "two-press arms"
       , [ Alcotest.test_case "a loop turn without input keeps an arm" `Quick

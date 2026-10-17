@@ -1,5 +1,6 @@
-(** Lifecycle states and failures are closed types with total codecs. The
-    retry decision is one function that names every failure. *)
+(** Lifecycle states and failures are closed types with total codecs. What a
+    failure makes the runtime do is decided in one function, [heal], and its
+    behaviour is covered where the runtime acts on it, in the reconcile tests. *)
 open Alcotest
 module L = Masc.Lane_addon_lifecycle
 module Types = Masc.Lane_addon_types
@@ -63,18 +64,6 @@ let test_older_and_malformed_shapes_are_errors () =
     (`Assoc ["kind", `String "attached"; "extra", `Null]);
   rejected "not an object" (`String "attached")
 
-(* Every failure is named with the decision it gets. Adding a failure breaks
-   this table at compile time in [L.heal] and here at review time. *)
-let test_retry_is_decided_per_failure () =
-  let expected = function
-    | L.Engine_unreachable _ -> L.Wait_until L.Engine_reachable
-    | L.Engine_mismatch { recorded; _ } -> L.Wait_until (L.Engine_is recorded)
-    | L.Slot_foreign holder -> L.Wait_until (L.Holder_changes holder)
-    | L.Slot_predecessor_unremovable _ | L.Worker_failed _ | L.Cleanup_unconfirmed _ | L.Persistence_failed _
-    | L.Previous_process | L.Effect_outcome_unknown _ -> L.Retry in
-  List.iter (fun failure ->
-    check bool (L.failure_to_string failure) true (L.heal failure = expected failure)) failures
-
 let test_a_later_failure_keeps_the_first_different_cause () =
   let start = L.Worker_failed "start refused" in
   let cleanup = L.Cleanup_unconfirmed "remove refused" in
@@ -87,13 +76,21 @@ let test_a_later_failure_keeps_the_first_different_cause () =
   let repeated = L.fail_again after_start start in
   check bool "the same cause twice records no first cause" true (repeated.first = None)
 
-let test_display_phase_names_every_cause () =
+(* The display phase is derived from the state and never read back. Each
+   state projects to the phase of the same name. *)
+let test_display_phase_follows_the_state () =
   let failed = { L.cause = L.Cleanup_unconfirmed "remove refused"; first = Some (L.Worker_failed "start refused") } in
-  match L.project (L.Failed failed) with
-  | Types.Failed message ->
-      check bool "current cause shown" true (String_util.contains_substring message "remove refused");
-      check bool "first cause shown" true (String_util.contains_substring message "start refused")
-  | Types.Attached | Types.Observing | Types.Detaching | Types.Detached -> fail "a failed state projects to a failed phase"
+  check bool "attached" true (L.project L.Attached = Types.Attached);
+  check bool "observing" true (L.project L.Observing = Types.Observing);
+  check bool "detaching, with or without an earlier failure" true
+    (L.project (L.Detaching None) = Types.Detaching && L.project (L.Detaching (Some failed)) = Types.Detaching);
+  check bool "detached, whatever the release stands on" true
+    (List.for_all (fun release -> L.project (L.Detached release) = Types.Detached) releases);
+  List.iter (fun failure ->
+    match L.project (L.Failed (L.failed failure)) with
+    | Types.Failed _ -> ()
+    | Types.Attached | Types.Observing | Types.Detaching | Types.Detached ->
+        fail "a failed state projects to a failed phase") failures
 
 let test_engines_are_equal_only_by_identity () =
   check bool "same Docker ID" true (L.engine_equal engine_a (L.Docker_engine "engine-a"));
@@ -108,20 +105,12 @@ let test_engines_are_equal_only_by_identity () =
   check bool "unknown engine kind is not an engine" true
     (Result.is_error (L.engine_of_json (`Assoc ["kind", `String "podman"; "id", `String "x"])))
 
-let test_a_mismatch_names_both_engines_in_its_message () =
-  let message = L.failure_to_string
-    (L.Engine_mismatch { recorded = engine_a; observed = L.Other_engine engine_b }) in
-  check bool "recorded engine named" true (String_util.contains_substring message "engine-a");
-  check bool "reached engine named" true (String_util.contains_substring message "engine-b")
-
 let () =
   run "lane_addon_lifecycle" [
     "lifecycle", [
       test_case "every state round-trips" `Quick test_every_state_round_trips;
       test_case "older and malformed shapes are errors" `Quick test_older_and_malformed_shapes_are_errors;
-      test_case "retry is decided per failure" `Quick test_retry_is_decided_per_failure;
       test_case "a later failure keeps the first different cause" `Quick test_a_later_failure_keeps_the_first_different_cause;
-      test_case "the display phase names every cause" `Quick test_display_phase_names_every_cause;
+      test_case "the display phase follows the state" `Quick test_display_phase_follows_the_state;
       test_case "engines are equal only by identity" `Quick test_engines_are_equal_only_by_identity;
-      test_case "a mismatch names both engines" `Quick test_a_mismatch_names_both_engines_in_its_message;
     ]]

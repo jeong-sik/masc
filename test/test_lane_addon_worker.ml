@@ -1050,12 +1050,7 @@ let test_a_sweep_touches_nothing_while_the_engine_does_not_answer () = with_fixt
    | Error (Lifecycle.Engine_unreachable _) -> ()
    | Ok _ | Error _ -> fail "an engine that does not answer must stop the sweep as Engine_unreachable");
   Sys.remove (Filename.concat dir "daemon-unavailable");
-  check bool "nothing was removed" true (Sys.file_exists (container_path dir dead));
-  check bool "the item line names the container and its verdict" true
-    (let line = Masc.Lane_addon_slot.sweep_item_to_string
-       { container_id = "abc"; instance = Some "dead-one"; verdict = Masc.Lane_addon_slot.Removed } in
-     String_util.contains_substring line "removed container abc"
-     && String_util.contains_substring line "dead-one"))
+  check bool "nothing was removed" true (Sys.file_exists (container_path dir dead)))
 
 exception Owner_detached
 

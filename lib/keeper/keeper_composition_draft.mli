@@ -30,6 +30,12 @@ val failure_class : error -> Tool_result.tool_failure_class
 val prepare_schema : Masc_domain.tool_schema
 val run_schema : Masc_domain.tool_schema
 
+val without_recursive_refs : Yojson.Safe.t -> Yojson.Safe.t
+(** Replace the recursive [$ref] to the dropped [$defs.template] with the
+    non-recursive placeholder object. The match is on the [$ref] string value,
+    not whole-object equality, so a generator key-order change cannot make
+    the projection miss the recursive reference. *)
+
 val prepare
   :  base_path:string
   -> capability_surface:Keeper_capability_surface.t

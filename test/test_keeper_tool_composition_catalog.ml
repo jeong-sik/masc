@@ -1302,6 +1302,37 @@ let test_prepare_schema_has_no_recursive_references () =
     alternatives
 ;;
 
+let test_without_recursive_refs_matches_ref_string_not_key_order () =
+  (* A key-order change in the generator must not make [without_recursive_refs]
+     miss the recursive [$ref]. Match the string value, not object equality. *)
+  let schema = `Assoc
+    [ "$defs", `Assoc [ "template", `String "recursive" ]
+    ; "properties", `Assoc
+        [ "value", `Assoc [ "$ref", `String "#/$defs/template" ]
+        ; "label", `String "plain string, not a ref" ]
+    ; "required", `List [ `String "value" ] ] in
+  let projected = Masc.Keeper_composition_draft.without_recursive_refs schema in
+  let member key = function
+    | `Assoc fields -> List.assoc_opt key fields
+    | _ -> None in
+  Alcotest.(check bool)
+    "$defs dropped from the projected schema"
+    true
+    (match member "$defs" projected with None -> true | Some _ -> false);
+  (match member "properties" projected with
+   | Some (`Assoc fields) ->
+     (match List.assoc_opt "value" fields with
+      | Some (`Assoc inner) ->
+        Alcotest.(check bool)
+          "single-key $ref replaced by the placeholder object"
+          true
+          (match List.assoc_opt "$ref" inner with
+           | None -> true
+           | Some _ -> false)
+      | _ -> Alcotest.fail "projected value field is not an object")
+   | _ -> Alcotest.fail "projected schema has no properties")
+;;
+
 let test_frozen_plan_json_preserves_values_and_rejects_mixed_forms () =
   let descriptors = Masc.Keeper_tool_descriptor.all_descriptors () in
   (* Compile fidelity, not an assertion that these fixture values are valid
@@ -1434,6 +1465,10 @@ let () =
             "prepare schema advertises no recursive references"
             `Quick
             test_prepare_schema_has_no_recursive_references
+        ; test_case
+            "without_recursive_refs matches the $ref string, not key order"
+            `Quick
+            test_without_recursive_refs_matches_ref_string_not_key_order
         ] )
     ]
 ;;

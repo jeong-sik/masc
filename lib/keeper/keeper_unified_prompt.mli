@@ -140,6 +140,41 @@ val emit_prompt_metrics :
     message, not the pre-tool source placeholder. This observes prepared input,
     not provider delivery; omitted post-tool context does not replace it. *)
 
+type prepared_prompt
+(** Complete immutable common world text/digests owned by one preparation call.
+    A new turn or world snapshot requires a new product. *)
+
+val prepare_prompt :
+  turn_decision:Keeper_world_observation.keeper_cycle_decision ->
+  ?previous_turn_stop:Keeper_turn_checkpoint_reason.t ->
+  current_task:Keeper_world_observation_inputs.current_task_observation ->
+  ?task_skill_surfaces:(string * Keeper_skill_catalog.exact_surface list) list ->
+  ?active_goal_summaries:(goal_summary list, Goal_store.unavailable) result ->
+  ?workspace_memory:Workspace_memory_ledger.observation ->
+  ?wiki_contents:Keeper_wiki_contents.t ->
+  ?lane_updates:(Yojson.Safe.t, string) result ->
+  ?repository_freshness:Keeper_sandbox_control.freshness_row list ->
+  observation:Keeper_world_observation.world_observation ->
+  unit -> prepared_prompt
+(** Render common layers, frame provenance and durable user input once from
+    this exact turn's data and prompt fragments. No process-global cache or
+    permission result is retained. Tool-dependent layers are deferred to
+    {!project_prompt}; new preparations observe current inputs/fragments. *)
+
+val project_prompt :
+  prepared_prompt ->
+  ?workspace_memory_access:Keeper_request_tool_access.t ->
+  ?own_recent_actions:(Keeper_own_recent_actions.turn list, Keeper_tool_call_log.index_error) result ->
+  ?recent_work:Keeper_recent_work.transmission ->
+  unit -> turn_prompt_parts
+(** Reassemble canonical ordered spans from the captured common layers and
+    this request's memory/wiki access, recent-action projection and actual
+    recent-work transmission. Omitted recent actions use the captured source;
+    omitted recent work is absent. Shared products are immutable and can be
+    projected concurrently; caller-owned effects such as artifact publication
+    remain on the actual offered-tool path. User input retains the original
+    answered Ask; the transient world frame never becomes conversation input. *)
+
 (** Build the per-turn channels of the unified prompt: the observation frame
     and the user message. The system prompt is not built here; the turn sends
     the one {!Keeper_run_context.prepare_run_context} built.

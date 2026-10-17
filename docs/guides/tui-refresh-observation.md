@@ -201,6 +201,45 @@ workspace/refresh retirement, malformed query authority and actual JSON/304 wire
 receipts are authored but unexecuted; type checks and feature execution remain
 unverified.
 
+## Keep response interpretation off the UI domain
+
+The source baseline is `8788c03d30e16ecfb24b611227d1d025a22e1d3f`.
+Early dataset delivery already reaches the UI application path. Its HTTP bodies
+and typed view models were still interpreted synchronously by fibers on the
+drawing domain, so the interpretation itself could delay keys and other ready
+results even after the network response arrived.
+
+| Boundary | Before | Source implementation |
+|---|---|---|
+| Successful common HTTP JSON body | Parse on the requesting domain | Parse immutable bytes on the installed shared CPU pool |
+| Refused HTTP response | Read credential status and interpret the body on the requesting domain | Capture credential facts on the caller, interpret immutable body/facts on the CPU pool |
+| Ten scoped dataset families | Decode typed values on the drawing domain | Thirteen pure loader branches, including Board's pair plus Overview and initial/final identity, use the same CPU boundary |
+| HTTP, workspace proof, ETag cache, dataset publication | Existing caller-owned paths | Same paths; worker interpretation grants no source ownership |
+| Cached 304 | Reuse parsed JSON, then decode its typed value | Still skips raw JSON parsing; typed interpretation uses the CPU pool |
+| Absent pool, non-Eio caller or nested shared worker | Synchronous API | Existing inline policy, with no resubmission from the worker |
+
+`Masc_tui_response_decode.run` labels its caller's existing Eio runtime-event
+scope with the source-specific `decode_wait` name. This span includes pool
+admission, interpretation and return scheduling; it is not pure CPU time or a
+painted-frame clock. The worker does not change UI-owned frame timing state.
+No timer, size threshold, queue cap, new executor or automatic retry is added.
+
+Raw JSON and typed interpretation are distinct submissions on a modified body;
+a 304 avoids the raw submission. Their extra queue/return overhead is unmeasured.
+Already entered pure work retains the existing pool cancellation policy and may
+finish after its caller stops waiting. It has no cache publication or dataset
+admission effect. Other typed detail loaders and the UI's final application and
+rendering work remain outside this bounded change.
+
+Authored source scenarios combine actual CPU workers, JSON/identity/Goal
+decoders, conditional-cache reuse and current dataset ownership. They cover
+navigation while interpretation is pending, late-result rejection, nested
+single-worker calls, original errors/exceptions and synchronous calls. They are
+unexecuted. Parser checks do not prove types, runtime responsiveness, lower
+refresh latency or current-candidate native Before/After. Compare first usable
+state, key response and terminal refresh separately, retaining failed,
+unfinished and unobserved attempts.
+
 ## Retain Work navigation after a failed planning refresh
 
 A failed planning read supplies no replacement Goal list. Work retains the last

@@ -1474,10 +1474,133 @@ let test_dataset_admission_rejects_retired_workspace_and_refresh () =
     (take_early_surface_read state ~ticket ~authority ~identity:observed
        ~request:successor ~source:Surface_read_order.Planning)
 
+let with_response_decode_pool f =
+  Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+    let previous = Domain_pool_ref.get () in
+    Eio.Switch.on_release sw (fun () -> match previous with
+      | Some pool -> Domain_pool_ref.set pool
+      | None -> Domain_pool_ref.clear_for_tests ());
+    let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+    Domain_pool_ref.set pool;
+    f ()))
+
+let test_response_decode_keeps_cache_and_typed_results () = with_response_decode_pool (fun () ->
+  let caller = Domain.self () in
+  let off_domain = Atomic.make true and parsed = Atomic.make 0 in
+  let document = `Assoc ["version", `String "decode-worker";
+    "paths", `Assoc ["effective_base_path", `String "/workspace/decode";
+      "effective_masc_root", `String "/workspace/decode/.masc"];
+    "startup", `Assoc ["state_ready", `Bool true]] in
+  let reads = Masc_tui_kept_reads.create () in
+  let read status =
+    Alcotest.(check bool) "HTTP and cache callbacks stay on their caller" true (Domain.self ()=caller);
+    Masc_tui_kept_reads.read reads ~address:"owned-health"
+      ~send:(fun headers ->
+        if status=304 then Alcotest.(check (option string)) "conditional read retains its entity tag"
+          (Some "health-v1") (List.assoc_opt "If-None-Match" headers);
+        Ok {Masc_tui_kept_reads.status; headers=["ETag","health-v1"];
+          body=(if status=304 then "" else Yojson.Safe.to_string document)})
+      ~decode:(fun response -> Masc_tui_response_decode.run ~name:"test.http.decode_wait" (fun () ->
+        Atomic.incr parsed;
+        Atomic.set off_domain (Atomic.get off_domain && Domain.self ()<>caller);
+        Tui_decode.decode_json_response_body ~allow_empty:false
+          ~status_code:response.status ~body:response.body)) in
+  let decode = function
+    | Error detail -> Alcotest.fail detail
+    | Ok json -> Masc_tui_response_decode.run ~name:"test.identity.decode_wait" (fun () ->
+        Atomic.set off_domain (Atomic.get off_domain && Domain.self ()<>caller);
+        Tui_decode.decode_server_identity json) in
+  let first = decode (read 200) in
+  let unchanged = decode (read 304) in
+  Alcotest.(check bool) "raw and typed interpretation run on the installed CPU worker" true
+    (Atomic.get off_domain);
+  Alcotest.(check int) "304 reuses parsed JSON without another raw decode" 1 (Atomic.get parsed);
+  Alcotest.(check bool) "typed identity survives conditional reuse unchanged" true
+    (first=unchanged && match first with
+      | Ok value -> value.Tui_decode.sid_base_path="/workspace/decode"
+      | Error _ -> false))
+
+let test_decode_completion_cannot_consume_new_navigation () = with_response_decode_pool (fun () ->
+  let open Masc_tui_types in
+  let state = create_state ~workspace:"decode" ~local_base_path:"/workspace/decode"
+      ~port:0 ~refresh_interval:0. () in
+  let observed = identity "/workspace/decode" in
+  state.server_identity <- Some observed;
+  state.workspace_identity <- Workspace_identity_match;
+  let authority = state.workspace_authority in
+  let ticket = Http_refresh_order.dispatch state.http_refresh_order in
+  begin_http_refresh_state state ~ticket ~started_ns:0L;
+  let needs = {nothing with needs_overview_goals=true} in
+  let reads, original = Surface_read_order.dispatch ~kind:Surface_read_order.Full
+      ~needs ~started_ns:0L state.http_surface_reads in
+  state.http_surface_reads <- reads;
+  let started, start = Eio.Promise.create () and released, release = Eio.Promise.create () in
+  let successor = ref None and caller = Domain.self () in
+  Eio.Fiber.both
+    (fun () ->
+      let result = Masc_tui_response_decode.run ~name:"test.goals.decode_wait" (fun () ->
+        Eio.Promise.resolve start (Domain.self ()<>caller);
+        Eio.Promise.await released;
+        Tui_decode.decode_overview_goals (`Assoc ["tree", `List []])) in
+      Alcotest.(check bool) "the original immutable response finishes normally" true (result=Ok []);
+      Alcotest.(check bool) "late decoding cannot consume a successor's dataset" false
+        (take_early_surface_read state ~ticket ~authority ~identity:observed
+          ~request:original ~source:Surface_read_order.Overview_goals))
+    (fun () ->
+      Alcotest.(check bool) "UI can navigate while the actual worker is waiting" true
+        (Eio.Promise.await started);
+      let reads, request = Surface_read_order.dispatch ~kind:Surface_read_order.Navigation
+          ~needs ~started_ns:1L state.http_surface_reads in
+      state.http_surface_reads <- reads;
+      successor := Some request;
+      Eio.Promise.resolve release ());
+  let successor = match !successor with Some request -> request
+    | None -> Alcotest.fail "navigation was not dispatched" in
+  Alcotest.(check bool) "the new dataset retains its original admission authority" true
+    (take_early_surface_read state ~ticket ~authority ~identity:observed
+      ~request:successor ~source:Surface_read_order.Overview_goals))
+
+exception Response_decode_failed
+
+let test_response_decode_preserves_nested_failures () = with_response_decode_pool (fun () ->
+  let malformed = "{" in
+  let expected = Tui_decode.decode_json_response_body ~allow_empty:false ~status_code:200 ~body:malformed in
+  let actual = Masc_tui_response_decode.run ~name:"test.invalid.decode_wait" (fun () ->
+    Tui_decode.decode_json_response_body ~allow_empty:false ~status_code:200 ~body:malformed) in
+  Alcotest.(check bool) "malformed JSON keeps its original error" true
+    (Result.is_error expected && expected=actual);
+  let outer, inner = Masc_tui_response_decode.run ~name:"test.outer.decode_wait" (fun () ->
+    let outer = Domain.self () in
+    outer, Masc_tui_response_decode.run ~name:"test.inner.decode_wait" Domain.self) in
+  Alcotest.(check bool) "nested decoding stays on the original single worker" true (outer=inner);
+  let attempts = Atomic.make 0 in
+  (match Masc_tui_response_decode.run ~name:"test.raised.decode_wait" (fun () ->
+      Atomic.incr attempts; raise Response_decode_failed) with
+   | _ -> Alcotest.fail "decoder exception was swallowed"
+   | exception Response_decode_failed -> ());
+  Alcotest.(check int) "decoder failure is not replayed" 1 (Atomic.get attempts))
+
+let test_response_decode_without_runtime_stays_synchronous () =
+  let previous = Domain_pool_ref.get () in
+  Fun.protect ~finally:(fun () -> match previous with
+    | Some pool -> Domain_pool_ref.set pool | None -> Domain_pool_ref.clear_for_tests ()) (fun () ->
+    Domain_pool_ref.clear_for_tests ();
+    let caller = Domain.self () in
+    Alcotest.(check bool) "no-pool non-Eio callers retain their synchronous API" true
+      (Masc_tui_response_decode.run ~name:"test.sync.decode_wait" Domain.self=caller))
+
 let () =
   Alcotest.run "tui_server_identity_refresh"
     [ ( "server-identity-refresh"
-      , [ Alcotest.test_case "datasets settle independently under original request ownership" `Quick
+      , [ Alcotest.test_case "response decode preserves cache and typed results" `Quick
+            test_response_decode_keeps_cache_and_typed_results
+        ; Alcotest.test_case "decode completion cannot consume new navigation" `Quick
+            test_decode_completion_cannot_consume_new_navigation
+        ; Alcotest.test_case "response decode preserves nested failures" `Quick
+            test_response_decode_preserves_nested_failures
+        ; Alcotest.test_case "response decode without runtime stays synchronous" `Quick
+            test_response_decode_without_runtime_stays_synchronous
+        ; Alcotest.test_case "datasets settle independently under original request ownership" `Quick
             test_datasets_settle_independently_under_original_request
         ; Alcotest.test_case "dataset admission rejects retired workspace and refresh" `Quick
             test_dataset_admission_rejects_retired_workspace_and_refresh

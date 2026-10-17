@@ -11653,9 +11653,9 @@ let load_http_keeper_surfaces ~on_progress ~on_asks ~on_roster ~ask_request ~ros
                Option.iter (fun identity -> publish identity observation) expected_workspace) on_roster;
              observation)) roster_request)
 
-let load_http_scoped_surfaces ~ask_request ~roster_request ~refresh_ticket ~server_identity ~host ~port ~approval_ticket ~board_sort
+let load_http_scoped_surface_reads ~ask_request ~roster_request ~refresh_ticket ~server_identity ~host ~port ~approval_ticket ~board_sort
     ~board_hearth ~system_log_level ~provider_history_days
-    ~(needs : Masc_tui_types.surface_needs) =
+    ~(needs : Masc_tui_types.surface_needs) : unit http_scoped_surface_readings =
   let when_needed wanted load = if wanted then Some (load ()) else None in
   (* Metrics draws the transport and the Overview reads its queue pressure,
      so a refresh on another surface does not spend a request on it. [None]
@@ -11736,9 +11736,9 @@ let load_http_scoped_surfaces ~ask_request ~roster_request ~refresh_ticket ~serv
         | exception exn -> Error (Printexc.to_string exn))
   in
   (* These reads consume the same dispatch snapshot and none needs a sibling's
-     result. Join them before the existing trailing identity probe: a refused
-     interval still discards the whole bundle. With no Eio switch, [read_pair]
-     runs the same readers synchronously. *)
+     result. The enclosing request verifies identity after all its readers
+     join; this collector grants no publication authority and adds no probe.
+     With no Eio switch, [read_pair] runs the same readers synchronously. *)
   let ((http_transport, http_fleet_safety),
        ((http_approvals, (http_board, http_board_hearths)),
         (http_planning, http_system_logs))),
@@ -11763,15 +11763,8 @@ let load_http_scoped_surfaces ~ask_request ~roster_request ~refresh_ticket ~serv
               (fun () -> Masc_tui_loader.read_pair read_runtime_quota read_keeper_usage)
               (fun () -> Masc_tui_loader.read_pair read_provider_history read_account_emails)))
   in
-  let confirmed_identity =
-    match server_identity, load_server_identity ~host ~port with
-    | Ok before, Ok after
-      when same_server_workspace before after -> Ok after
-    | Error reason, _ | _, Error reason -> Error reason
-    | Ok _, Ok _ -> Error "Workspace changed while reading surface data; refresh required"
-  in
   { http_refresh_ticket = refresh_ticket
-  ; http_scoped_server_identity = confirmed_identity
+  ; http_scoped_server_identity = ()
   ; http_transport
   ; http_approvals
   ; http_asks
@@ -11788,10 +11781,9 @@ let load_http_scoped_surfaces ~ask_request ~roster_request ~refresh_ticket ~serv
   ; http_account_emails
   }
 
-let scoped_http_reads_received (reading : http_scoped_surface_results) =
+let scoped_http_reads_received (reading : unit http_scoped_surface_readings) =
   let optional_ok = function None -> true | Some result -> Result.is_ok result in
-  Result.is_ok reading.http_scoped_server_identity
-  && optional_ok reading.http_transport
+  optional_ok reading.http_transport
   && (match reading.http_approvals with None -> true | Some value -> Result.is_ok value.ao_result)
   && (match reading.http_asks with None -> true | Some value -> Result.is_ok value.asks_result)
   && optional_ok reading.http_board && optional_ok reading.http_board_hearths
@@ -11860,13 +11852,12 @@ let load_http_surfaces ~on_progress ~on_overview ~on_asks ~on_roster ~ask_reques
              (fun () ->
                 observe_http_reader ~on_progress Http_refresh_progress.Surface_data
                   ~received:scoped_http_reads_received (fun () ->
-                load_http_scoped_surfaces ~ask_request:None ~roster_request:None ~refresh_ticket
+                load_http_scoped_surface_reads ~ask_request:None ~roster_request:None ~refresh_ticket
                   ~server_identity:http_server_identity
                   ~host ~port ~approval_ticket:None
                   ~board_sort ~board_hearth ~system_log_level ~provider_history_days
                   ~needs:{ needs with needs_asks = false; needs_keeper_roster = false })))
     in
-    let http_scoped = { http_scoped with http_asks; http_keeper_roster } in
     let identity_after = observe_http_reader ~on_progress
       Http_refresh_progress.Identity_after ~received:Result.is_ok
       (fun () -> load_server_identity ~host ~port) in
@@ -11874,8 +11865,10 @@ let load_http_surfaces ~on_progress ~on_overview ~on_asks ~on_roster ~ask_reques
       Refresh_server_booting { refresh_ticket; identity = identity_after; approval_ticket }
     else if Masc_tui_types.server_workspace_matches
         ~expected:(Result.to_option http_server_identity) identity_after
-        && Masc_tui_types.server_workspace_matches
-             ~expected:(Result.to_option http_scoped.http_scoped_server_identity) identity_after then
+    then
+      let http_scoped =
+        { http_scoped with http_asks; http_keeper_roster;
+          http_scoped_server_identity = identity_after } in
       Refresh_surfaces
         { http_overview; http_approvals; http_scoped; http_server_identity = identity_after }
     else Refresh_workspace_unconfirmed
@@ -12616,7 +12609,7 @@ let apply_refused_workspace_identity state ~detail latest =
    | Poll_ready _ | Poll_pending _ -> ());
   apply_server_identity_reading state reading
 
-(* Scoped navigation reads carry the identity observed before their datasets.
+(* Scoped navigation reads carry the final identity of their verified interval.
    A successful older full refresh cannot authorize a same-port replacement. *)
 let apply_http_scoped_surfaces state ~currency_authority results =
   if Http_refresh_order.is_current state.http_refresh_order results.http_refresh_ticket then begin
@@ -13857,7 +13850,7 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight
             else Error "Workspace identity changed or is unavailable; scoped refresh withdrawn"
         in
         let* server_identity = probe () in
-        let results = load_http_scoped_surfaces ~ask_request ~roster_request ~refresh_ticket
+        let readings = load_http_scoped_surface_reads ~ask_request ~roster_request ~refresh_ticket
               ~server_identity:(Ok server_identity) ~host ~port
               ~approval_ticket ~board_sort:state.board_sort
               ~board_hearth:state.board_hearth
@@ -13866,10 +13859,8 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight
                 (Option.map Masc.Tui_decode.system_log_level_query
                    state.system_logs_min_level)
               ~needs in
-        let* _ = probe () in
-        if Masc_tui_types.server_workspace_matches ~expected:identity
-             results.http_scoped_server_identity then Ok results
-        else Error "Workspace changed during scoped surface collection; bundle discarded"
+        let* confirmed_identity = probe () in
+        Ok { readings with http_scoped_server_identity = Ok confirmed_identity }
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printf.sprintf "HTTP surface refresh failed: %s"

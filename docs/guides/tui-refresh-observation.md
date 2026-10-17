@@ -73,6 +73,34 @@ their narrower meaning. The synchronous fallback has the total refresh clock but
 does not emit individual reader events. Scoped refreshes and independent side
 reads are outside this ledger.
 
+## One enclosing workspace verification
+
+Full refreshes and scoped refreshes each own one initial identity probe and one
+final probe after all their requested readers have joined. Previously the shared
+scoped-data collector also ran its own trailing health request, so both paths
+waited for three enclosing identity requests. The collector now returns
+`unit http_scoped_surface_readings`: it carries data and its original request
+ticket, but no checked server identity. Only the enclosing successful interval
+binds the final identity and constructs the result accepted by the UI mailbox.
+
+| Enclosing identity requests | Before | Source implementation |
+|---|---:|---:|
+| Full refresh | 3 | 2 |
+| Scoped refresh | 3 | 2 |
+
+These counts exclude independent early-preview and per-surface requests. The
+full refresh still checks booting, foreign, failed and unread final identities
+before producing a usable bundle. A scoped refresh still checks its original
+workspace and authority before and after its own reads. Early Ask and roster
+admission retain their separate response-bound workspace and request receipts.
+No data source is dropped, and a failed source remains a failed observation.
+
+The `view data` reader now ends when its data reads settle; final workspace
+verification has its own existing ledger entry. Reader success still grants no
+publication authority. Removing one request is a source-level result; matched
+native request counts, full refresh timing and final workspace-refusal behavior
+must be recorded separately before claiming an observed latency improvement.
+
 ## Early Keeper roster delivery
 
 For a workspace already confirmed by the TUI, a successful roster response may

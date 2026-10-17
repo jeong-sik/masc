@@ -9,9 +9,13 @@ type approval_observation = {
   ao_result: (approval_snapshot, string) result;
 }
 
-type http_scoped_surface_results = {
+(* Collection has no identity authority of its own. The enclosing full or
+   scoped request owns the before/after probes and binds the final identity
+   only after its entire read interval has settled. [unit] readings cannot
+   be sent as [Http_scoped_refresh_done] or applied as a verified bundle. *)
+type 'identity http_scoped_surface_readings = {
   http_refresh_ticket: Http_refresh_order.ticket;
-  http_scoped_server_identity: (Masc.Tui_decode.server_identity, string) result;
+  http_scoped_server_identity: 'identity;
   http_transport: (Masc.Tui_decode.transport_health, string) result option;
   http_approvals: approval_observation option;
   (* [None] on surfaces that do not draw them. Each is read by one surface, and
@@ -43,6 +47,9 @@ type http_scoped_surface_results = {
   (* [None] off Usage, the surface that draws account emails. *)
   http_account_emails: ((string * string) list * int, string) result option;
 }
+
+type http_scoped_surface_results =
+  (Masc.Tui_decode.server_identity, string) result http_scoped_surface_readings
 
 type http_surface_results = {
   http_overview: (overview_snapshot, string) result;

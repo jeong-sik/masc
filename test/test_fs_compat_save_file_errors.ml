@@ -30,7 +30,7 @@ let raises_sys_error name content =
     ~finally:(fun () -> Sys.remove path)
     (fun () ->
       let fd = Unix.openfile path [ Unix.O_RDONLY ] 0 in
-      (match Fs_compat.write_all_and_close_for_testing fd content with
+      (match Fs_compat.write_all_and_close fd content with
        | () -> failf "%s: the write to a descriptor that cannot be written succeeded" name
        | exception Sys_error _ -> ());
       check bool (name ^ ": the descriptor is closed") true (fd_is_closed fd);
@@ -51,7 +51,7 @@ let test_a_good_write_lands_and_closes () =
     ~finally:(fun () -> Sys.remove path)
     (fun () ->
       let fd = Unix.openfile path [ Unix.O_WRONLY; Unix.O_TRUNC ] 0 in
-      Fs_compat.write_all_and_close_for_testing fd "complete";
+      Fs_compat.write_all_and_close fd "complete";
       check string "the content landed" "complete" (read path);
       check bool "the descriptor is closed" true (fd_is_closed fd))
 ;;

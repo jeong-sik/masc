@@ -165,8 +165,6 @@ let write_all_and_close (fd : Unix.file_descr) (content : string) : unit =
     Printexc.raise_with_backtrace exn backtrace
 ;;
 
-let write_all_and_close_for_testing = write_all_and_close
-
 let save_file_unix (path : string) (content : string) : unit =
   let fd =
     Unix.openfile path [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC ] save_file_mode

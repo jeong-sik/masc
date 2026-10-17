@@ -1049,8 +1049,10 @@
  exec_ssh_protocol
  test_operator_control_support
  ;; test_keeper_wake_turn_context builds a Keeper_continuation_channel for Ask.ask;
- ;; it lives in the runtime library, not the wrapped masc namespace.
- masc.keeper_runtime))
+ ;; it lives in the runtime library, not the wrapped masc namespace. It also uses
+ ;; Fs_compat (tree/file helpers) directly from the unwrapped fs_compat library.
+ masc.keeper_runtime
+ masc.fs_compat))
 
 (test
  (name test_voice_session_manager)

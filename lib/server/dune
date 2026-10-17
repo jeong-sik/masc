@@ -5,6 +5,7 @@
  (public_name masc.server)
  (wrapped false)
  (private_modules
+  keeper_stream_media_state
   server_provider_usage_history_projection
   server_dashboard_keeper_state_projection
   server_dashboard_runtime_declaration_projection

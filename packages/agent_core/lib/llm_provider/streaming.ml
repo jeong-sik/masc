@@ -903,7 +903,7 @@ type openai_stream_state =
         the sole identity authority for an open tool block. *)
   ; responses_text_blocks : ((int * int), int) Hashtbl.t
   ; responses_thinking_blocks : (int, int) Hashtbl.t
-  ; responses_redacted_items : (int, string) Hashtbl.t
+  ; responses_redacted_items : (int, Yojson.Safe.t) Hashtbl.t
   ; responses_output_ids : (int, string) Hashtbl.t
   ; responses_output_kinds : (int, Response_replay.kind) Hashtbl.t
   ; responses_output_groups : (int, Response_replay.kind * int list) Hashtbl.t
@@ -2235,11 +2235,13 @@ let responses_capture_output_item ?(drop_function_call=false) state emit ~output
         let raw = Yojson.Safe.to_string item in
         (match Hashtbl.find_opt state.responses_redacted_items output_index with
          | Some previous ->
-           if not (String.equal previous raw) then
+           if not (Yojson.Safe.equal previous item) then
              emit(SSEParseFailed {raw="";reason="responses_replay:conflicting_reasoning_item"});
            Hashtbl.find_opt state.responses_thinking_blocks output_index
          | None ->
-           Hashtbl.add state.responses_redacted_items output_index raw;
+           (* Compare objects without giving JSON member order authority. The
+              first opaque replay artifact emitted below stays unchanged. *)
+           Hashtbl.add state.responses_redacted_items output_index item;
            (match Hashtbl.find_opt state.responses_thinking_blocks output_index with
             | Some index -> emit(ContentBlockDelta {index;delta=RedactedThinkingSnapshot raw});Some index
             | None ->

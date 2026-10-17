@@ -2,10 +2,9 @@
 
     Accumulates model-generated media streamed during a keeper turn so the turn's
     persist path can record it as reload-visible chat blocks. Fed the same raw AGENT_CORE
-    stream events, it mirrors the bridge's media validity rules for durable reload
-    persistence. It collects media
-    payload per block index, rejects media deltas for tool/invalid blocks, preserves
-    the first media metadata for an active block, and finalizes at either
+    stream events, it collects media payload per block index for durable reload,
+    rejects media deltas for tool/invalid blocks, preserves the first media
+    metadata for an active block, and finalizes at either
     [ContentBlockStop], a stop-bearing [MessageDelta], or [MessageStop].
     {!Keeper_chat_agent_core_stream_bridge} surfaces
     the same media live over SSE; this captures it for durable chat persistence so
@@ -16,16 +15,18 @@ type t
 val create : unit -> t
 
 val start_runtime_attempt : t -> unit
-(** Mark the resolved-candidate attempt boundary. The first attempt keeps the
-    initial empty state; later attempts discard unfinished media/tool occupancy
-    while retaining already finalized delivery evidence. *)
+(** Mark the resolved-candidate attempt boundary. The first call only marks the
+    attempt as seen, preserving any content already supplied; later calls clear
+    block occupancy and reset scope/phase while retaining finalized delivery evidence. *)
 
 val on_event : ?stream_scope:int -> t -> Agent_core.Types.sse_event -> unit
 (** Feed one raw AGENT_CORE stream event. Media deltas accumulate per block index;
     [ContentBlockStop] finalizes one index; the first stop-bearing
     [MessageDelta] and [MessageStop] finalize all still-open media. The optional
     [stream_scope] is the exact Agent Core turn scope; production callers always
-    pass it, while focused single-scope tests may use the default 0. *)
+    pass it, while focused single-scope tests may use the default 0. A new scope
+    clears block occupancy while retaining completed media. Provider failures and
+    timeout also clear occupancy; [StreamIncomplete] and [StreamRepeating] are ignored. *)
 
 val to_chat_blocks : base_dir:string -> t -> Keeper_chat_blocks.chat_block list
 (** Decode and persist each finalized media payload under [base_dir] via

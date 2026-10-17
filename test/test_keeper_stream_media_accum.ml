@@ -11,7 +11,7 @@ let with_env key value f =
     ~finally:(fun () ->
       match previous with
       | Some previous -> Unix.putenv key previous
-      | None -> Unix.putenv key "")
+      | None -> Unix.unsetenv key)
     (fun () ->
       Unix.putenv key value;
       f ())
@@ -401,6 +401,141 @@ let test_dropped_and_persisted_media_keep_stream_order () =
     | [ Blocks.Attach { src = None; _ }; Blocks.Image _ ] -> ()
     | _ -> fail "dropped and persisted media must retain stream terminal order")
 
+(* Follow the HTTP collector callbacks into actual media and failed-request
+   transcript storage. This does not invoke the HTTP route or a provider. *)
+let test_failed_request_reloads_completed_media_across_attempts () =
+  with_env "MASC_KEEPER_GENERATED_MEDIA_MAX_BYTES" "1024" @@ fun () ->
+  with_env "MASC_KEEPER_GENERATED_MEDIA_DIR_MAX_BYTES" "1024" @@ fun () ->
+  with_env "MASC_KEEPER_GENERATED_MEDIA_RETENTION_SEC" "86400" @@ fun () ->
+  let open Agent_core.Types in
+  let module Tool = Masc.Keeper_stream_tool_accum in
+  let module Media = Masc.Keeper_chat_media_store in
+  let module Store = Masc.Keeper_chat_store in
+  let module Delivery = Keeper_chat_delivery_identity in
+  let require label = function
+    | Ok value -> value
+    | Error error -> failf "%s: %s" label error
+  in
+  let rec remove path =
+    match Unix.lstat path with
+    | { Unix.st_kind = Unix.S_DIR; _ } ->
+        Array.iter (fun name -> remove (Filename.concat path name)) (Sys.readdir path);
+        Unix.rmdir path
+    | _ -> Unix.unlink path
+  in
+  let previous_fs = Fs_compat.get_fs_opt () in
+  let base_dir = Filename.temp_dir "media_accum_failure_reload_" "" in
+  Fun.protect
+    ~finally:(fun () ->
+      (match previous_fs with
+       | Some fs -> Fs_compat.set_fs fs
+       | None -> Fs_compat.clear_fs ());
+      remove base_dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let media = A.create () in
+      let tools = Tool.create () in
+      (* HTTP marks the media attempt first, then the exact scope owner. *)
+      let start_attempt () =
+        A.start_runtime_attempt media;
+        ignore (Tool.start_runtime_attempt tools)
+      in
+      (* HTTP delivers each raw event to the scope owner before media. *)
+      let on_event event =
+        Tool.on_event tools event;
+        let stream_scope = Tool.current_stream_scope tools in
+        A.on_event ~stream_scope media event
+      in
+      let media_type = "image/png" in
+      let image ~index raw =
+        on_event
+          (ContentBlockStart
+             { index; content_type = "image"; tool_id = None; tool_name = None });
+        let encoded = Base64.encode_string raw in
+        let split = String.length encoded / 2 in
+        List.iter
+          (fun data ->
+            on_event
+              (ContentBlockDelta
+                 { index; delta = MediaDelta { media_type; source_type = Base64; data } }))
+          [ String.sub encoded 0 split
+          ; String.sub encoded split (String.length encoded - split)
+          ]
+      in
+      let raw_a = "\000completed-A\255" in
+      let raw_b = "\000unfinished-B\255" in
+      let raw_c = "\000completed-C\255" in
+      let prelude =
+        MessageStart { id = "reused-provider-message"; model = "media-fixture"; usage = None }
+      in
+      start_attempt ();
+      on_event prelude;
+      image ~index:0 raw_a;
+      on_event (ContentBlockStop { index = 0 });
+      image ~index:1 raw_b;
+      on_event (Timeout "first runtime attempt failed");
+      start_attempt ();
+      on_event prelude;
+      image ~index:0 raw_c;
+      let terminal = MessageDelta { stop_reason = Some Refusal; usage = None } in
+      List.iter on_event
+        [ terminal; terminal; MessageStop; MessageStop; terminal; MessageStop
+        ; Timeout "final runtime attempt failed"
+        ];
+      let blocks = A.to_chat_blocks ~base_dir media in
+      let image_sources =
+        List.map (function
+          | Blocks.Image { src; cap = None } -> src
+          | _ -> fail "expected completed image blocks without captions")
+      in
+      let token raw = expected_token ~media_type raw in
+      let expected_sources =
+        List.map (fun raw -> "/api/v1/media/" ^ token raw) [ raw_a; raw_c ]
+      in
+      check (list string) "completed A/C remain ordered without terminal duplicates"
+        expected_sources (image_sources blocks);
+      List.iter
+        (fun (label, raw) ->
+          match Media.file_path_of_token ~base_dir ~token:(token raw) with
+          | None -> failf "%s media file is absent" label
+          | Some path ->
+              check string (label ^ " file contains the decoded bytes") raw
+                (In_channel.with_open_bin path In_channel.input_all))
+        [ "A", raw_a; "C", raw_c ];
+      check (option string) "unfinished B never becomes a media file" None
+        (Media.file_path_of_token ~base_dir ~token:(token raw_b));
+      let keeper_name = "media-failure-reload" in
+      let operation_id =
+        Delivery.Request_id.of_string "media-failure-operation"
+        |> require "operation identity"
+      in
+      let failure = "Runtime attempts failed after producing completed media." in
+      Server_keeper_operation_transcript.persist ~base_dir ~keeper_name ~operation_id
+        ~resumed_from:None
+        ~settlement:(Server_keeper_operation_transcript.Request_failed failure)
+        ~tool_calls:[] ~blocks ()
+      |> require "failed-request transcript persistence";
+      match Store.load_all_result ~base_dir ~keeper_name |> require "strict transcript reload" with
+      | [ row ] ->
+          check bool "reload retains the server failure role" true
+            (Store.Role.equal row.role Store.Role.Request_failure);
+          check string "failure content survives reload" failure row.content;
+          (match row.blocks with
+           | Some reloaded ->
+               check (list string) "durable failure retains only ordered completed A/C"
+                 expected_sources (image_sources reloaded)
+           | None -> fail "failed-request transcript lost its completed media");
+          let expected_provenance : Delivery.delivery_provenance =
+            { delivery_key = Delivery.Operation operation_id
+            ; transcript_slot = Delivery.Terminal_result
+            }
+          in
+          check bool "failure belongs to the exact operation terminal slot" true
+            (Option.equal Delivery.delivery_provenance_equal
+               (Some expected_provenance) row.delivery_provenance)
+      | rows -> failf "expected one failed-request row, found %d" (List.length rows))
+
 let () =
   run
     "keeper_stream_media_accum"
@@ -427,5 +562,7 @@ let () =
             test_media_persist_failure_surfaces_as_placeholder;
           test_case "dropped and persisted media retain stream order" `Quick
             test_dropped_and_persisted_media_keep_stream_order;
+          test_case "failed request reloads completed media across runtime attempts" `Quick
+            test_failed_request_reloads_completed_media_across_attempts;
         ] );
     ]

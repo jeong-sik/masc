@@ -2226,8 +2226,11 @@
   masc
   masc_server
   masc.agent_core
+  masc.fs_compat
+  masc.keeper_chat_delivery_identity
   base64
   digestif
+  eio
   eio_main
   unix))
 

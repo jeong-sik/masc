@@ -1,266 +1,72 @@
-(* RFC-0301 item 6 — see keeper_stream_media_accum.mli. Mirrors the media chunk
-   accumulation the SSE bridge does ([Keeper_chat_agent_core_stream_bridge]'s
-   [Active_media] block), kept as a parallel turn-local collector rather than a
-   shared abstraction so the bridge (which owns live SSE translation) and this
-   collector (which owns durable persistence) stay on their own side of the
-   AGENT_CORE-stream / chat-store boundary. *)
+(* RFC-0301 item 6 — see keeper_stream_media_accum.mli. The live SSE bridge and
+   this turn-local durable collector retain their separate delivery policies. *)
 
-(* Attach-block label for generated media with no dedicated image/voice reload
-   block (documents, unrecognized types). The payload is still persisted and served
-   by token, so this keeps it visible on reload rather than dropping it silently. *)
-let generic_media_label = "generated media"
+module State = Keeper_stream_media_state
 
-type finalized = {
-  index : int;
-  media_type : string;
-  source_type : Agent_core.Types.media_source_kind;
-  data : string;
-}
-
-(* A generated media payload the wire cap rejected. Recorded the moment the
-   block is invalidated so the drop surfaces as a reload-visible placeholder
-   block instead of the media silently vanishing from the persisted turn. *)
-type wire_drop = {
-  media_type : string;
-  encoded_bytes : int;
-  max_wire_bytes : int;
-}
-
-type completed =
-  | Persistable of finalized
-  | Wire_dropped of wire_drop
-
-(* Why a block index stopped accepting media deltas. [Tool_block] indexes are
-   never media and are skipped without trace (mirrors the SSE bridge);
-   [Oversize] is a real generated payload the reader must still learn about. *)
-type invalid_reason =
-  | Tool_block
-  | Oversize
-
-type block_state =
-  | Active_media of
-      { media_type : string;
-        source_type : Agent_core.Types.media_source_kind;
-        chunks : string list;
-        encoded_bytes : int
-      }
-  | Invalid_block of invalid_reason
-  | Closed_block
-
-type stream_phase =
-  | Accepting_content
-  | Stop_reason_seen of Agent_core.Types.stop_reason
-  | Message_stopped
-
-type t = {
-  mutable blocks_by_index : (int * block_state) list;
-  mutable completed_rev : completed list;
-  mutable current_stream_scope : int option;
-  mutable stream_phase : stream_phase;
-  mutable runtime_attempt_seen : bool;
-  (* Read once per turn. [Keeper_chat_media_store.max_wire_bytes] resolves an
-     env var on every call, so reading it again at finalize could reject a
-     payload the chunk path had already accepted, or keep one it had already
-     dropped — within a single turn, from an operator edit landing mid-stream.
-     The accumulator decides against one number (#24018). *)
-  max_wire_bytes : int;
-}
+type t = { mutable state : State.t }
 
 let create () =
-  { blocks_by_index = [];
-    completed_rev = [];
-    current_stream_scope = None;
-    stream_phase = Accepting_content;
-    runtime_attempt_seen = false;
-    max_wire_bytes = Keeper_chat_media_store.max_wire_bytes ()
-  }
+  (* Freeze the wire cap before any event. Persistence still owns its separate
+     decoded-byte limit and reads that limit when the files are written. *)
+  let max_wire_bytes = Keeper_chat_media_store.max_wire_bytes () in
+  { state = State.create ~max_wire_bytes }
 
 let start_runtime_attempt t =
-  if t.runtime_attempt_seen
-  then (
-    t.blocks_by_index <- [];
-    t.current_stream_scope <- None;
-    t.stream_phase <- Accepting_content)
-  else t.runtime_attempt_seen <- true
-;;
+  t.state <- State.start_runtime_attempt t.state
 
-let enter_stream_scope t stream_scope =
-  match t.current_stream_scope with
-  | Some current when current = stream_scope -> ()
-  | None -> t.current_stream_scope <- Some stream_scope
-  | Some _ ->
-    t.blocks_by_index <- [];
-    t.current_stream_scope <- Some stream_scope;
-    t.stream_phase <- Accepting_content
-;;
-
-let record_oversize_drop t ~index ~media_type ~encoded_bytes ~max_wire_bytes =
+let record_oversize_drop t ~index (dropped : State.wire_drop) =
   Log.Keeper.warn
     "generated media dropped index=%d media_type=%S: %d wire-carrier bytes exceed the %d-byte cap"
     index
-    media_type
-    encoded_bytes
-    max_wire_bytes;
-  t.completed_rev <-
-    Wire_dropped { media_type; encoded_bytes; max_wire_bytes }
-    :: t.completed_rev
+    dropped.media_type
+    dropped.encoded_bytes
+    dropped.max_wire_bytes;
+  (* The logger can invoke an observer. Preserve its changes, and record no
+     drop if the warning raised. *)
+  t.state <- State.record_completed t.state (State.Wire_dropped dropped)
 
-let stream_block_for_index t index = List.assoc_opt index t.blocks_by_index
-
-let replace_block t index block =
-  t.blocks_by_index <- (index, block) :: List.remove_assoc index t.blocks_by_index
-
-let stream_start_is_tool ~index ~content_type ~tool_id ~tool_name =
-  Agent_core.Llm_provider.Streaming.sse_event_is_deliverable_progress_signal
-    (Agent_core.Types.ContentBlockStart
-       { index; content_type; tool_id; tool_name })
-
-let add_media_chunk t ~media_type ~source_type ~chunks ~encoded_bytes data =
-  let encoded_bytes = encoded_bytes + String.length data in
-  let max_wire_bytes = t.max_wire_bytes in
-  if encoded_bytes > max_wire_bytes
-  then Error (encoded_bytes, max_wire_bytes)
-  else
-    Ok
-      (Active_media
-         { media_type; source_type; chunks = data :: chunks; encoded_bytes })
-
-let finalize_media t index ~media_type ~source_type ~chunks ~encoded_bytes =
-  let max_wire_bytes = t.max_wire_bytes in
-  if encoded_bytes > max_wire_bytes
-  then
-    record_oversize_drop t ~index ~media_type ~encoded_bytes ~max_wire_bytes
-  else (
-    let data = String.concat "" (List.rev chunks) in
-    t.completed_rev <-
-      Persistable { index; media_type; source_type; data } :: t.completed_rev);
-  replace_block t index Closed_block
-
-let finalize_open_media t =
-  (* [MessageStop] terminalizes every still-open block at once. Content-block
-     index is the protocol order and therefore the deterministic tie-breaker. *)
-  let blocks =
-    List.sort
-      (fun (left_index, _) (right_index, _) ->
-         Int.compare left_index right_index)
-      t.blocks_by_index
+let finalize_media t pending =
+  let index =
+    match State.finalize_media pending with
+    | Ok finalized ->
+        t.state <- State.record_completed t.state (State.Persistable finalized);
+        finalized.index
+    | Error (index, dropped) ->
+        record_oversize_drop t ~index dropped;
+        index
   in
-  List.iter
-    (fun (index, block) ->
-      match block with
-      | Active_media { media_type; source_type; chunks; encoded_bytes } ->
-          finalize_media t index ~media_type ~source_type ~chunks ~encoded_bytes
-      | Invalid_block (Tool_block | Oversize)
-      | Closed_block -> ())
-    blocks
+  t.state <- State.close_block t.state index
 
-let discard_current_scope t =
-  (* Completed media was already delivered live and remains reload evidence
-     even if a later event poisons the provider response. Only unfinished
-     occupancy is discarded. *)
-  t.blocks_by_index <- []
-;;
+let on_event ?(stream_scope = 0) t evt =
+  (* Scope entry precedes event evaluation, including any diagnostic failure. *)
+  t.state <- State.enter_stream_scope t.state stream_scope;
+  match State.on_event t.state evt with
+  | State.Unchanged -> ()
+  | State.Updated state -> t.state <- state
+  | State.Metadata_drift
+      { index; expected_media_type; received_media_type;
+        expected_source_type; received_source_type } ->
+      Log.Keeper.warn
+        "generated media metadata drift ignored index=%d expected_media_type=%S received_media_type=%S expected_source_type=%s received_source_type=%s"
+        index
+        expected_media_type
+        received_media_type
+        (Agent_core.Types.media_source_kind_to_string expected_source_type)
+        (Agent_core.Types.media_source_kind_to_string received_source_type)
+  | State.Wire_rejected (index, dropped) ->
+      record_oversize_drop t ~index dropped;
+      t.state <- State.reject_block t.state index
+  | State.Finalize (pending, terminal) ->
+      (* Publish each completed block before the next concatenation or warning.
+         The captured entries survive observer changes to current occupancy. *)
+      List.iter (finalize_media t) pending;
+      Option.iter
+        (fun terminal -> t.state <- State.finish_message t.state terminal)
+        terminal
 
-let on_event ?(stream_scope = 0) t (evt : Agent_core.Types.sse_event) =
-  enter_stream_scope t stream_scope;
-  match evt with
-  | Agent_core.Types.ContentBlockStart { index; content_type; tool_id; tool_name }
-    when t.stream_phase = Accepting_content
-         && stream_start_is_tool ~index ~content_type ~tool_id ~tool_name ->
-      replace_block t index (Invalid_block Tool_block)
-  | Agent_core.Types.ContentBlockDelta
-      { index; delta = Agent_core.Types.MediaDelta { media_type; source_type; data } } ->
-      if t.stream_phase <> Accepting_content
-      then ()
-      else
-      (match stream_block_for_index t index with
-       | Some (Active_media m)
-         when String.equal m.media_type media_type && m.source_type = source_type ->
-           (match
-              add_media_chunk t ~media_type ~source_type ~chunks:m.chunks
-                ~encoded_bytes:m.encoded_bytes data
-            with
-            | Ok block -> replace_block t index block
-            | Error (encoded_bytes, max_wire_bytes) ->
-                record_oversize_drop t ~index ~media_type ~encoded_bytes
-                  ~max_wire_bytes;
-                replace_block t index (Invalid_block Oversize))
-       | Some (Active_media active) ->
-           Log.Keeper.warn
-             "generated media metadata drift ignored index=%d expected_media_type=%S received_media_type=%S expected_source_type=%s received_source_type=%s"
-             index
-             active.media_type
-             media_type
-             (Agent_core.Types.media_source_kind_to_string active.source_type)
-             (Agent_core.Types.media_source_kind_to_string source_type)
-       | Some (Invalid_block _ | Closed_block) ->
-           ()
-       | None ->
-           (match
-              add_media_chunk t ~media_type ~source_type ~chunks:[]
-                ~encoded_bytes:0 data
-            with
-            | Ok block -> replace_block t index block
-            | Error (encoded_bytes, max_wire_bytes) ->
-                record_oversize_drop t ~index ~media_type ~encoded_bytes
-                  ~max_wire_bytes;
-                replace_block t index (Invalid_block Oversize)))
-  | Agent_core.Types.ContentBlockStop { index } -> (
-      if t.stream_phase = Message_stopped
-      then ()
-      else
-      match stream_block_for_index t index with
-      | Some (Active_media { media_type; source_type; chunks; encoded_bytes }) ->
-          finalize_media t index ~media_type ~source_type ~chunks ~encoded_bytes
-      | Some (Invalid_block (Tool_block | Oversize)) ->
-          ()
-      | Some Closed_block -> ()
-      | None -> ())
-  | Agent_core.Types.MessageDelta { stop_reason; _ } ->
-    (match t.stream_phase, stop_reason with
-     | Accepting_content, None -> ()
-     | Accepting_content, Some stop_reason ->
-       finalize_open_media t;
-       t.stream_phase <- Stop_reason_seen stop_reason
-     | Stop_reason_seen _, None -> ()
-     | Stop_reason_seen recorded, Some replay when recorded = replay -> ()
-     | Stop_reason_seen _, Some _
-     | Message_stopped, None
-     | Message_stopped, Some _ -> discard_current_scope t)
-  | Agent_core.Types.MessageStop ->
-      (match t.stream_phase with
-       | Message_stopped -> ()
-       | Accepting_content | Stop_reason_seen _ ->
-         finalize_open_media t;
-         t.stream_phase <- Message_stopped)
-  | Agent_core.Types.SSEError _
-  | Agent_core.Types.NDJSONError _
-  | Agent_core.Types.SSEParseFailed _
-  | Agent_core.Types.NDJSONParseFailed _
-  | Agent_core.Types.SSEUnknownEventType _
-  | Agent_core.Types.SSEUnsupportedPart _
-  | Agent_core.Types.SSEUnsupportedResponse _
-  (* A liveness timeout ends the attempt like a provider failure; the media
-     block it left open never completes. *)
-  | Agent_core.Types.Timeout _ -> discard_current_scope t
-  | Agent_core.Types.StreamIncomplete _
-  | Agent_core.Types.StreamRepeating _
-  | Agent_core.Types.MessageStart _
-  | Agent_core.Types.ContentBlockStart _
-  | Agent_core.Types.ContentBlockDelta
-      { delta =
-          ( Agent_core.Types.TextDelta _
-          | Agent_core.Types.TextSnapshot _
-          | Agent_core.Types.ThinkingDelta _
-          | Agent_core.Types.ThinkingSignatureDelta _
-          | Agent_core.Types.RedactedThinkingSnapshot _
-          | Agent_core.Types.ReasoningDetailsDelta _
-          | Agent_core.Types.InputJsonDelta _
-          | Agent_core.Types.InputJsonSnapshot _ )
-      ; _
-      }
-  | Agent_core.Types.Connected
-  | Agent_core.Types.Ping -> ()
+(* Attach-block label for generated media without a dedicated image/voice
+   reload block. Its payload is still persisted and served by token. *)
+let generic_media_label = "generated media"
 
 (* Reload placeholder for an oversize drop: no payload to serve (src = None),
    but the reader sees what was generated, its type, and how large it was
@@ -281,7 +87,7 @@ let unavailable_attachment ~name ~media_type ~size ~size_bytes =
     }
 
 let wire_drop_placeholder_block
-    { media_type; encoded_bytes; max_wire_bytes; _ } =
+    ({ media_type; encoded_bytes; max_wire_bytes } : State.wire_drop) =
   unavailable_attachment
     ~name:
       (Printf.sprintf
@@ -353,8 +159,8 @@ let persisted_block ~media_type media_ref =
         }
 
 let completed_to_chat_block ~base_dir = function
-  | Wire_dropped dropped -> wire_drop_placeholder_block dropped
-  | Persistable { index; media_type; source_type; data } ->
+  | State.Wire_dropped dropped -> wire_drop_placeholder_block dropped
+  | State.Persistable { index; media_type; source_type; data } ->
       (match
          Keeper_chat_media_store.persist_media_source_result ~base_dir
            ~media_type ~source_type ~data
@@ -373,6 +179,5 @@ let completed_to_chat_block ~base_dir = function
              err)
 
 let to_chat_blocks ~base_dir t =
-  t.completed_rev
-  |> List.rev
+  State.completed t.state
   |> List.map (completed_to_chat_block ~base_dir)

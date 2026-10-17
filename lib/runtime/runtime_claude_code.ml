@@ -804,8 +804,38 @@ let find_dynamic_tool tools name =
 
 type io =
   { send : Yojson.Safe.t -> unit
+  ; send_context :
+      Runtime_official_client_write.selection -> Yojson.Safe.t -> Runtime_official_client_write.t
+        (* The same line write, returning the receipt of the bytes written. *)
   ; receive : unit -> (Yojson.Safe.t, error) result
   }
+
+type context_frame =
+  | System_prompt_file
+  | User_message of { client_uuid : string }
+
+type context_submission =
+  { frame : context_frame
+  ; write : Runtime_official_client_write.t
+  }
+
+let context_submission_to_json submission =
+  let frame = match submission.frame with
+    | System_prompt_file -> [ "frame", `String "system_prompt_file" ]
+    | User_message { client_uuid } ->
+      [ "frame", `String "user_message"; "client_uuid", `String client_uuid ] in
+  `Assoc ([ "schema", `String "masc.claude-code-context-submission.v1"
+          ; "phase", `String "write_completed" ]
+    @ frame
+    @ [ "write", Runtime_official_client_write.to_json submission.write
+      ; "client_acceptance", `String "not_observed_by_this_event" ])
+;;
+
+(* The turn's text and images ride [message.content]; the rest of the
+   envelope is carried. *)
+let user_message_selection =
+  Runtime_official_client_write.(Fields [ "message", Fields [ "content", turn_input ] ])
+;;
 
 let send_control_success io ~request_id response =
   io.send
@@ -2848,7 +2878,7 @@ let terminate_spawned_process ~clock proc stdin_w =
 
 let run_protocol io ~native_posture ~dynamic_tools ~subscription ~session_mode ~session_id
     ~prompt ~images ~on_session_ready ~on_turn_starting ~on_turn_started ~on_prompt_sent
-    ~on_stream_event ~on_input_observation ~turn_admitted =
+    ~on_context_submission ~on_stream_event ~on_input_observation ~turn_admitted =
   let tool_call_count = ref 0 in
   let assistant_usage = new_assistant_usage () in
   let mcp_session = Runtime_official_client_mcp.create_session () in
@@ -2882,17 +2912,19 @@ let run_protocol io ~native_posture ~dynamic_tools ~subscription ~session_mode ~
     (* No rejection or claim that the child read zero bytes, even on cancel. *)
     emit_input_observation input_observer (Input_attribution.write_unknown input_observer.input_state);
     raise exn in
-  let* () =
+  let* write =
     try
-      (try io.send (Input_attribution.user_message input_observer.input_state
-          ~content:(List.map image_block images @
-            [`Assoc ["type", `String "text"; "text", `String prompt]]))
-       with
-       | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> failed_write exn
-       | Eio.Cancel.Cancelled _ as exn -> failed_write exn
-       | exn -> failed_write exn);
+      let write =
+        try io.send_context user_message_selection
+            (Input_attribution.user_message input_observer.input_state
+               ~content:(List.map image_block images @
+                 [`Assoc ["type", `String "text"; "text", `String prompt]]))
+        with
+        | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> failed_write exn
+        | Eio.Cancel.Cancelled _ as exn -> failed_write exn
+        | exn -> failed_write exn in
       turn_admitted := true;
-      Ok ()
+      Ok write
     with
     | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
     | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -2907,6 +2939,10 @@ let run_protocol io ~native_posture ~dynamic_tools ~subscription ~session_mode ~
            })
   in
   emit_input_observation input_observer (Input_attribution.written input_observer.input_state);
+  Runtime_official_client_write.report ~label:"Claude Code user message" on_context_submission
+    { frame = User_message
+          { client_uuid = (Input_attribution.ticket input_observer.input_state).client_uuid }
+    ; write };
   let* () = invoke_state_callback ~stage:"prompt sent callback" (fun () ->
     on_prompt_sent (); Ok ()) in
   await_terminal
@@ -2938,7 +2974,9 @@ let run_protocol io ~native_posture ~dynamic_tools ~subscription ~session_mode ~
 
 (* The replacement System channel supports files in print mode. Keep complete
    projected context off argv (Linux limits each argument independently), and
-   keep the private file alive until the child and its scoped fibers exit. *)
+   keep the private file alive until the child and its scoped fibers exit. The
+   caller gets the file's path and the text it holds, so the receipt is of the
+   bytes this function wrote. *)
 let with_system_prompt_file prompt use = match prompt with
   | None -> use None
   | Some contents ->
@@ -2953,16 +2991,17 @@ let with_system_prompt_file prompt use = match prompt with
         output_string output contents;
         close_out output;
         let absolute_path = if Filename.is_relative path then Filename.concat (Sys.getcwd ()) path else path in
-        use (Some absolute_path))
+        use (Some (absolute_path, contents)))
 ;;
 
 let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
     ~reasoning_effort ~session_mode ~session_id ~subscription ~prompt ~images
-    ~on_session_ready ~on_turn_starting ~on_turn_started ~on_prompt_sent ~on_stream_event
-    ~on_input_observation =
+    ~on_session_ready ~on_turn_starting ~on_turn_started ~on_prompt_sent ~on_context_submission
+    ~on_stream_event ~on_input_observation =
   let turn_admitted = ref false in
   try
-    with_system_prompt_file config.system_prompt (fun system_prompt_file ->
+    with_system_prompt_file config.system_prompt (fun system_prompt ->
+    let system_prompt_file = Option.map fst system_prompt in
     let* argv = command ~system_prompt_file config ~dynamic_tools ~reasoning_effort ~session_mode ~session_id in
     Eio.Switch.run (fun sw ->
     let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
@@ -2988,6 +3027,14 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
       | exn -> raise (Runtime_error (Spawn_failed (Printexc.to_string exn)))
     in
     Option.iter (fun callback -> callback ()) on_spawned;
+    (* The child was started with the file's path; the file was complete before. *)
+    Option.iter (fun (_, contents) ->
+      Runtime_official_client_write.report ~label:"Claude Code system prompt file"
+        on_context_submission
+        { frame = System_prompt_file
+        ; write = Domain_pool_ref.submit_cpu_or_inline (fun () ->
+            Runtime_official_client_write.raw contents) })
+      system_prompt;
     Eio.Flow.close stdin_r;
     Eio.Flow.close stdout_w;
     Eio.Flow.close stderr_w;
@@ -3007,6 +3054,19 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
       with_optional_idle_timeout clock (current_timeout_s ()) (fun () ->
         Eio.Flow.copy_string (Yojson.Safe.to_string json) stdin_w;
         Eio.Flow.copy_string "\n" stdin_w)
+    in
+    (* Encoding and hashing share the write's timeout, and run off the
+       scheduler domain: a message with images is megabytes of base64. *)
+    let send_context selection json =
+      with_optional_idle_timeout clock (current_timeout_s ()) (fun () ->
+        let payload, write =
+          Domain_pool_ref.submit_cpu_or_inline (fun () ->
+            let payload = Yojson.Safe.to_string json in
+            payload, Runtime_official_client_write.json_line selection json payload)
+        in
+        Eio.Flow.copy_string payload stdin_w;
+        Eio.Flow.copy_string "\n" stdin_w;
+        write)
     in
     let receive () =
       let timeout_s = current_timeout_s () in
@@ -3038,7 +3098,7 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
           with_idle_timeout clock config.admission_timeout_s callback
         in
         run_protocol
-          { send; receive }
+          { send; send_context; receive }
           ~native_posture:config.native
           ~dynamic_tools
           ~subscription
@@ -3053,6 +3113,7 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
           ~on_turn_started:(fun ~session_id ~turn_id ->
             with_admission_timeout (fun () -> on_turn_started ~session_id ~turn_id))
           ~on_prompt_sent
+          ~on_context_submission
           ~on_stream_event
           ~on_input_observation
           ~turn_admitted)))
@@ -3182,7 +3243,8 @@ let probe_subscription ~mgr ~clock ~cwd config =
 ;;
 
 let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
-    ?admitted_subscription ?on_spawned ?(on_prompt_sent = fun () -> ()) ~mgr ~clock ~cwd
+    ?admitted_subscription ?on_spawned ?(on_prompt_sent = fun () -> ())
+    ?(on_context_submission = fun _ -> ()) ~mgr ~clock ~cwd
     ?(on_session_ready = fun ~session_id:_ -> Ok ())
     ?(on_turn_starting = fun ~session_id:_ -> Ok ())
     ?(on_turn_started = fun ~session_id:_ ~turn_id:_ -> Ok ()) ?on_stream_event ?on_input_observation config
@@ -3227,6 +3289,7 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
         ~on_turn_starting
         ~on_turn_started
         ~on_prompt_sent
+        ~on_context_submission
         ~on_stream_event
         ~on_input_observation
     with

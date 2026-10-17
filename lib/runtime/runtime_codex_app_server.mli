@@ -466,45 +466,20 @@ type context_frame_id =
 
 val context_frame_id_to_json : context_frame_id -> Yojson.Safe.t
 
-type context_fragment_slot =
-  | Developer_instructions
-  | Dynamic_tools
-  | Injected_item of int
-  | Turn_text of int
-  | Unattributed_carrier
-
-type context_fragment = private
-  { slot : context_fragment_slot
-  ; json_offset : int option
-  ; json_bytes : int
-  ; json_sha256 : string
-  }
-(** Selected values include their JSON quotes/brackets. Their offsets name
-    disjoint ranges in the submitted JSON. [Unattributed_carrier] has no single
-    offset: its hash covers the ordered concatenation of all remaining bytes,
-    including field names and punctuation, excluding the transport LF.
-    [Turn_steer] input text uses [Turn_text] like [Turn_start]. A
-    [Dynamic_tool_response] selects no slot: its content items are counted in
-    [Unattributed_carrier]. *)
-
-type context_fragments =
-  | Partitioned of context_fragment list
-  | Serialization_mismatch
-(** A mismatch leaves the complete-write receipt valid but slot attribution
-    unavailable. These are serialized JSON bytes, not source text or tokens. *)
-
 type context_submission = private
   { method_ : context_submission_method
   ; request_id : context_frame_id
   ; thread_id : string option
-  ; ipc_json_bytes : int
-  ; ipc_json_sha256 : string
-  ; fragments : context_fragments
+  ; write : Runtime_official_client_write.t
+        (** The compact JSON written before the LF. Start and resume select
+            [Developer_instructions] and [Dynamic_tools]; inject_items selects
+            each [Injected_item]; turn/start and turn/steer select each
+            [Turn_text]. A [Dynamic_tool_response] selects no slot: its
+            content items are counted in [Unattributed_carrier]. *)
   }
 
 val context_submission_to_json : context_submission -> Yojson.Safe.t
 (** Content-free proof of a complete JSON-plus-newline write to Codex stdin.
-    Bytes and SHA cover serialized JSON only, excluding its trailing newline.
     This is neither server acceptance nor the provider's complete model input. *)
 
 val run_turn :

@@ -15,7 +15,10 @@ val concat : separator:string -> t list -> t
 val trim : t -> t
 val omit_held : assembly:Keeper_context_assembly.t option ->
   blocks:Prompt_block_id.t list option -> Agent_core.Types.message -> t -> t
-val binding_to_json : slot:Runtime_codex_app_server.context_fragment_slot ->
-  t -> Runtime_codex_app_server.context_submission -> Yojson.Safe.t
-(** Called only by the completed-write observer. A mismatch yields unavailable
-    evidence, never a provider failure or retry. Content-free; no Tool history. *)
+val binding_to_json : slot:Runtime_official_client_write.slot ->
+  t -> Runtime_official_client_write.t -> Yojson.Safe.t
+(** Called only by a completed-write observer. The piece matches when the
+    write's [slot] holds its text as that write encodes it. A mismatch yields
+    unavailable evidence, never a provider failure or retry. Content-free; no
+    Tool history. The frame the write belongs to is recorded beside this
+    binding, not in it. *)

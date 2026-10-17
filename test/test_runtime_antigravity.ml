@@ -190,6 +190,7 @@ let run_fixture
     ?home_dir
     ?on_conversation_ready
     ?on_prompt_sent
+    ?on_context_submission
     ?on_spawned
     ?on_stream_event
     ?(timeout_s = 2.0)
@@ -211,6 +212,7 @@ let run_fixture
       ?home_dir
       ?on_conversation_ready
       ?on_prompt_sent
+      ?on_context_submission
       ?on_spawned
       ?on_stream_event
       ~mgr:(Eio.Stdenv.process_mgr env)
@@ -803,15 +805,31 @@ let test_large_prompt_streams_over_stdin () =
   let captured = Filename.temp_file "antigravity-prompt-" ".txt" in
   Fun.protect ~finally:(fun () -> Sys.remove captured) (fun () ->
     let sent = ref 0 in
+    let receipts = ref [] in
     with_fixture ~capture_prompt:captured [ init (); result () ] (fun path ->
-      match run_fixture ~prompt ~on_prompt_sent:(fun () -> incr sent) path with
+      match
+        run_fixture ~prompt ~on_prompt_sent:(fun () -> incr sent)
+          ~on_context_submission:(fun write -> receipts := (write, !sent) :: !receipts) path
+      with
       | Error error -> fail (Runtime_antigravity.error_to_string error)
       | Ok turn ->
         check string "response" "MASC_ANTIGRAVITY_OK\n" turn.text;
         check int "turn count" 1 turn.num_turns;
         check int "one complete prompt transmission" 1 !sent;
-        check string "client received exact complete prompt" prompt
-          (In_channel.with_open_bin captured In_channel.input_all)))
+        let received = In_channel.with_open_bin captured In_channel.input_all in
+        check string "client received exact complete prompt" prompt received;
+        match !receipts with
+        | [ ((write : Runtime_official_client_write.t), sent_before) ] ->
+          check int "the receipt comes before the transmission report" 0 sent_before;
+          check int "receipt counts the bytes the client received"
+            (String.length received) write.bytes;
+          check string "receipt hashes the bytes the client received"
+            Digestif.SHA256.(digest_string received |> to_hex) write.sha256;
+          check bool "the whole write is the one slot" true
+            (Option.is_some
+               (Runtime_official_client_write.matching_fragment write
+                  ~slot:Whole_write prompt))
+        | receipts -> failf "expected one receipt, got %d" (List.length receipts)))
 ;;
 
 let test_incomplete_prompt_is_not_reported () =
@@ -828,7 +846,8 @@ let test_incomplete_prompt_is_not_reported () =
        it, so a successful spawn cannot imply a complete prompt write. *)
     let result = run_fixture ~prompt:(String.make 1_100_000 'x')
       ~on_spawned:(fun () -> incr spawned)
-      ~on_prompt_sent:(fun () -> incr sent) path in
+      ~on_prompt_sent:(fun () -> incr sent)
+      ~on_context_submission:(fun _ -> incr sent) path in
     check int "write failure occurs after real spawn" 1 !spawned;
     check bool "incomplete input does not complete a turn" true (Result.is_error result);
     check int "partial write does not report transmission" 0 !sent)

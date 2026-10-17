@@ -269,6 +269,17 @@ val validate_turn
 (** Every deterministic client-side admission condition. [run_turn] repeats
     it before spawning. *)
 
+type context_submission = private
+  { request_id : int
+  ; session_id : string
+  ; write : Runtime_official_client_write.t
+        (** The [turn/start] line: [Turn_text] slots in [params.input]. *)
+  }
+
+val context_submission_to_json : context_submission -> Yojson.Safe.t
+(** Content-free proof of a complete [turn/start] write to [muse serve]
+    stdin. Not the host's acceptance. *)
+
 val run_turn
   :  ?storage_root:string
   -> ?session_mode:session_mode
@@ -276,6 +287,7 @@ val run_turn
   -> ?reasoning_effort:Runtime_muse_msp.reasoning_effort
   -> ?on_session_ready:(session_id:string -> (unit, string) result)
   -> ?on_prompt_sent:(unit -> unit)
+  -> ?on_context_submission:(context_submission -> unit)
   -> ?on_stream_event:(stream_event -> unit)
   -> mgr:_ Eio.Process.mgr
   -> clock:_ Eio.Time.clock
@@ -311,7 +323,9 @@ val run_turn
     [on_session_ready] runs once the host has returned the session id, before
     the turn is written, so the caller can persist the id first. Its failure
     fails the turn. [on_prompt_sent] runs after the complete [turn/start]
-    line is written. *)
+    line is written. [on_context_submission] receives that line's receipt
+    just before it; its non-reserved exceptions are logged as unavailable
+    measurement and the turn continues. *)
 
 val read_usage
   :  mgr:_ Eio.Process.mgr

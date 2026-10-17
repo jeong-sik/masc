@@ -1259,6 +1259,43 @@ let observe_raw_trace ~keeper_name ~stage observe =
     None
 ;;
 
+let record_context_submission
+      ~keeper_name
+      ~raw_trace_run
+      ~runtime_profile
+      ~client_turn_ordinal
+      ~submission
+      ?logical_context_bindings
+      ()
+  =
+  let detail =
+    `Assoc
+      ([ "keeper", `String keeper_name
+       ; "runtime_profile", `String runtime_profile
+       ; "client_turn_ordinal", `Int client_turn_ordinal
+       ; "submission", submission
+       ]
+       @
+       match logical_context_bindings with
+       | None -> []
+       | Some bindings -> [ "logical_context_bindings", bindings ])
+  in
+  match raw_trace_run with
+  | None ->
+    Log.Keeper.warn
+      ~keeper_name
+      "context submission measurement unavailable: no raw-trace attempt binding"
+  | Some active ->
+    ignore
+      (observe_raw_trace ~keeper_name ~stage:Context_submission (fun () ->
+         Agent_core.Raw_trace.record_hook_invoked
+           active
+           ~hook_name:"client_context_submission"
+           ~hook_decision:"write_completed"
+           ~hook_detail:(Yojson.Safe.to_string detail)
+           ()))
+;;
+
 let start_raw_trace ~keeper_name ~raw_trace ~prompt ?model ?reasoning_effort () =
   match raw_trace with
   | None -> None

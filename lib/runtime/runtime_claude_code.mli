@@ -522,6 +522,21 @@ val command :
     contract with the installed client — tests pin how [config.native]
     selects [--tools] and what [--allowedTools] pre-approves (RFC-0390). *)
 
+type context_frame =
+  | System_prompt_file  (** The [--system-prompt-file] the child was started with. *)
+  | User_message of { client_uuid : string }
+      (** The stream-json user message on stdin: [Turn_text] slots in
+          [message.content]. *)
+
+type context_submission = private
+  { frame : context_frame
+  ; write : Runtime_official_client_write.t
+  }
+
+val context_submission_to_json : context_submission -> Yojson.Safe.t
+(** Content-free proof of a completed write: the file the child was started
+    with, or the user message line on stdin. Not the client's acceptance. *)
+
 val run_turn :
   ?dynamic_tools:dynamic_tool list ->
   ?reasoning_effort:Llm_provider.Reasoning_effort.t ->
@@ -532,6 +547,11 @@ val run_turn :
   (* Called after the complete turn-input message is written to the CLI.
       This is transport evidence, not provider acceptance. Never called for
       preparation, spawn, handshake, or incomplete input-write failures. *)
+  ?on_context_submission:(context_submission -> unit) ->
+  (* The system prompt file once the child started with it, and the user
+     message once its line is written, before [on_prompt_sent]. Non-reserved
+     observer exceptions are logged as unavailable measurement; the turn
+     continues. *)
   mgr:_ Eio.Process.mgr ->
   clock:_ Eio.Time.clock ->
   cwd:Eio.Fs.dir_ty Eio.Path.t ->

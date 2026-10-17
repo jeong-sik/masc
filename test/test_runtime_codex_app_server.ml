@@ -613,11 +613,14 @@ let check_context_fragments raw event =
         then Some ("turn_text",`Int index,member "text" value) else None)
     | `Null when member "result" request <> `Null -> []
     | _ -> fail "unexpected observed method" in
-  check string "versioned fragment receipt" "masc.codex-context-submission.v3"
+  check string "versioned fragment receipt" "masc.codex-context-submission.v4"
     (member "schema" event |> to_string);
   check string "logical memory attribution is not claimed" "unknown"
     (member "logical_memory_partition" event |> to_string);
-  let partition = member "fragments" event in
+  let write = member "write" event in
+  check string "a JSON line is its own encoding" "json_line" (member "encoding" write |> to_string);
+  check int "the write counts the exact line" (String.length raw) (member "bytes" write |> to_int);
+  let partition = member "fragments" write in
   check string "actual serializer supports exact slot attribution" "partitioned"
     (member "status" partition |> to_string);
   let fragments = member "values" partition |> to_list in
@@ -628,12 +631,12 @@ let check_context_fragments raw event =
   List.iteri (fun index (slot,item,value) ->
     let fragment = List.nth fragments index in
     check (list string) "fragment metadata is content-free"
-      ["index";"json_bytes";"json_offset";"json_sha256";"slot"]
+      ["bytes";"index";"offset";"sha256";"slot"]
       (to_assoc fragment |> List.map fst |> List.sort String.compare);
     check string "slot identity" slot (member "slot" fragment |> to_string);
     check bool "array position is preserved" true (member "index" fragment=item);
-    let offset = member "json_offset" fragment |> to_int in
-    let bytes = member "json_bytes" fragment |> to_int in
+    let offset = member "offset" fragment |> to_int in
+    let bytes = member "bytes" fragment |> to_int in
     check bool "selected ranges are disjoint and inside exact wire bytes" true
       (offset >= !cursor && bytes >= 0 && offset + bytes <= String.length raw);
     Buffer.add_substring residual raw !cursor (offset - !cursor);
@@ -641,18 +644,18 @@ let check_context_fragments raw event =
     check string "actual range equals independently decoded JSON slot" (Yojson.Safe.to_string value) selected;
     check string "fragment SHA binds actual captured bytes"
       Digestif.SHA256.(digest_string selected |> to_hex)
-      (member "json_sha256" fragment |> to_string);
+      (member "sha256" fragment |> to_string);
     cursor := offset + bytes; selected_bytes := !selected_bytes + bytes) expected;
   Buffer.add_substring residual raw !cursor (String.length raw - !cursor);
   let residual_bytes = Buffer.contents residual in
   let remainder = List.nth fragments (List.length expected) in
   check string "residual identity" "unattributed_carrier" (member "slot" remainder |> to_string);
-  check bool "noncontiguous residual has no fictitious offset" true (member "json_offset" remainder=`Null);
+  check bool "noncontiguous residual has no fictitious offset" true (member "offset" remainder=`Null);
   check int "residual counts captured gaps including framing" (String.length residual_bytes)
-    (member "json_bytes" remainder |> to_int);
+    (member "bytes" remainder |> to_int);
   check string "residual SHA binds ordered captured gaps"
     Digestif.SHA256.(digest_string residual_bytes |> to_hex)
-    (member "json_sha256" remainder |> to_string);
+    (member "sha256" remainder |> to_string);
   check int "disjoint selected values plus residual close exact IPC JSON bytes"
     (String.length raw) (!selected_bytes + String.length residual_bytes)
 ;;
@@ -768,9 +771,9 @@ let test_scheduling_handoff_preserves_active_protocol ?(terminal_second = false)
           (if member "method" written = `Null then "response" else "request")
           (member "frame" json |> to_string);
         check (option string) "late frames name the active thread" (Some "thread-1") event.thread_id;
-        check int "byte count is the written line" (String.length line) event.ipc_json_bytes;
+        check int "byte count is the written line" (String.length line) event.write.bytes;
         check string "SHA binds the written line"
-          Digestif.SHA256.(digest_string line |> to_hex) event.ipc_json_sha256;
+          Digestif.SHA256.(digest_string line |> to_hex) event.write.sha256;
         check_context_fragments line json) late lines))
     (if terminal_second then [Some true; None] else [Some true; Some false; None])
 ;;
@@ -1564,8 +1567,8 @@ let test_content_free_context_submission () =
       List.iter (fun (event:Client.context_submission) ->
         let line=List.find (fun line -> Yojson.Safe.Util.member "id" (Yojson.Safe.from_string line)
           =Client.context_frame_id_to_json event.request_id) lines in
-        check int "byte count is exact written JSON excluding newline" (String.length line) event.ipc_json_bytes;
-        check string "SHA binds exact serialized bytes" (hash line) event.ipc_json_sha256;
+        check int "byte count is exact written JSON excluding newline" (String.length line) event.write.bytes;
+        check string "SHA binds exact serialized bytes" (hash line) event.write.sha256;
         let json=Client.context_submission_to_json event in
         check_context_fragments line json;
         check bool "observation has no payload" true (Yojson.Safe.Util.member "params" json=`Null);
@@ -1661,12 +1664,12 @@ let export_assembly_submission_measurement ~fixture_kind ~scenario ~binding ~sub
     | _ -> fail "missing or unknown nested partition status"
   in
   let slot = member "matched_slot" binding in
-  let offset = member "json_offset" slot |> to_int in
-  let bytes = member "json_bytes" slot |> to_int in
+  let offset = member "offset" slot |> to_int in
+  let bytes = member "bytes" slot |> to_int in
   let captured_slot = slice "captured slot" raw offset bytes in
   let captured_sha256 = Digestif.SHA256.(digest_string captured_slot |> to_hex) in
   check string "exported slot hash comes from the same captured RPC"
-    (member "json_sha256" slot |> to_string) captured_sha256;
+    (member "sha256" slot |> to_string) captured_sha256;
   let decoded_slot = Yojson.Safe.from_string captured_slot |> to_string in
   let previous_end = ref 0 in
   binding |> member "occurrences" |> to_list |> List.iteri (fun index occurrence ->
@@ -1815,10 +1818,11 @@ let test_issuer_assembly_links_to_completed_slots () =
       check bool (label ^ " completes") true (Result.is_ok result));
     let event=List.find (fun (event:Client.context_submission) -> event.method_=
       (if is_start then Client.Thread_start else Client.Turn_start)) !events in
-    let slot=if is_start then Client.Developer_instructions else Client.Turn_text (List.length images) in
-    let proof=Link.binding_to_json ~slot projection event in
+    let slot=if is_start then Runtime_official_client_write.Developer_instructions
+      else Runtime_official_client_write.Turn_text (List.length images) in
+    let proof=Link.binding_to_json ~slot projection event.write in
     check string (label ^ " exact completed slot") "matched_completed_slot" (proof |> member "status" |> to_string);
-    check string "new binding explicitly versions issuer attribution" "masc.codex-assembly-slot-binding.v2"
+    check string "new binding explicitly versions issuer attribution" "masc.client-assembly-slot-binding.v1"
       (proof |> member "schema" |> to_string);
     let attribution = member "issuer_attribution" proof in
     check string (label ^ " source acquisition state is independent of transport") issuer_status
@@ -1862,7 +1866,7 @@ let test_issuer_assembly_links_to_completed_slots () =
     let lines=In_channel.with_open_bin capture In_channel.input_lines in
     let written=captured_frame (Client.context_submission_to_json event) lines in
     check_context_fragments written (Client.context_submission_to_json event);
-    let mismatch=Link.binding_to_json ~slot (Link.concat ~separator:"" [projection;Link.literal "changed"]) event in
+    let mismatch=Link.binding_to_json ~slot (Link.concat ~separator:"" [projection;Link.literal "changed"]) event.write in
     check string "stale composed slot cannot acquire a binding" "unavailable_slot_mismatch"
       (mismatch |> member "status" |> to_string);
     export_assembly_submission_measurement
@@ -6062,7 +6066,7 @@ let test_keeper_assembly_binding_is_durable_in_same_attempt () =
   let records=match Agent_core.Raw_trace.read_all ~path:trace () with
     | Ok rows -> rows | Error error -> fail (Agent_core.Error.to_string error) in
   let start=List.find (fun (row:Agent_core.Raw_trace.record) -> row.record_type=Run_started) records in
-  let submissions=List.filter (fun (row:Agent_core.Raw_trace.record) -> row.hook_name=Some "codex_context_submission") records in
+  let submissions=List.filter (fun (row:Agent_core.Raw_trace.record) -> row.hook_name=Some "client_context_submission") records in
   let open Yojson.Safe.Util in
   let developer=List.find (fun (row:Agent_core.Raw_trace.record) ->
     let detail=Yojson.Safe.from_string (Option.get row.hook_detail) in
@@ -6161,7 +6165,7 @@ let test_keeper_context_lifecycle_three_settled_turns () =
     attempts := started.worker_run_id :: !attempts;
     let method_name = if ordinal=1 then "thread/start" else "turn/start" in
     let row = List.find (fun (row:Agent_core.Raw_trace.record) ->
-      row.hook_name=Some "codex_context_submission" &&
+      row.hook_name=Some "client_context_submission" &&
       (Yojson.Safe.from_string (Option.get row.hook_detail) |> member "submission" |> member "method")=`String method_name) records in
     check string "submission is joined to this actual turn attempt" started.worker_run_id row.worker_run_id;
     check (option string) "submission preserves admitted trace session" started.session_id row.session_id;
@@ -6188,15 +6192,15 @@ let test_keeper_context_lifecycle_three_settled_turns () =
     (* Check every completed context RPC independently of the attribution helper,
        not just the one slot chosen for this turn's lifecycle measurement. *)
     records |> List.filter (fun (record:Agent_core.Raw_trace.record) ->
-      record.hook_name = Some "codex_context_submission") |> List.iter (fun record ->
+      record.hook_name = Some "client_context_submission") |> List.iter (fun record ->
         let observed = Yojson.Safe.from_string (Option.get record.Agent_core.Raw_trace.hook_detail)
           |> member "submission" in
         let captured = captured_frame observed written in
         check int "whole RPC byte count matches actual captured frame" (String.length captured)
-          (member "ipc_json_bytes" observed |> to_int);
+          (member "write" observed |> member "bytes" |> to_int);
         check string "whole RPC SHA matches actual captured frame"
           Digestif.SHA256.(digest_string captured |> to_hex)
-          (member "ipc_json_sha256" observed |> to_string));
+          (member "write" observed |> member "sha256" |> to_string));
     let session_method = if ordinal=1 then "thread/start" else "thread/resume" in
     let session_requests = List.filter (fun row -> member "method" row=`String session_method) calls in
     check int "one actual Start or Resume per settled turn" 1 (List.length session_requests);
@@ -6322,7 +6326,7 @@ let test_keeper_codex_raw_trace_contains_actual_tool_and_response () =
                 | Error error -> fail (Agent_core.Error.to_string error)
               in
               let submitted=List.filter (fun (record:Agent_core.Raw_trace.record) ->
-                record.hook_name=Some "codex_context_submission") records in
+                record.hook_name=Some "client_context_submission") records in
               check int "actual Keeper caller durably records thread start, turn start and the tool result" 3
                 (List.length submitted);
               let written=In_channel.with_open_bin capture_path In_channel.input_all
@@ -6344,8 +6348,8 @@ let test_keeper_codex_raw_trace_contains_actual_tool_and_response () =
                   (to_assoc detail |> List.map fst |> List.sort String.compare);
                 let event=member "submission" detail in
                 check (list string) "submission never retains content, tool schemas or credentials"
-                  ["fragments";"frame";"framing";"ipc_json_bytes";"ipc_json_sha256";"logical_memory_partition";"method";"phase";"remote_history";
-                   "request_id";"schema";"server_acceptance";"thread_id"]
+                  ["frame";"logical_memory_partition";"method";"phase";"remote_history";
+                   "request_id";"schema";"server_acceptance";"thread_id";"write"]
                   (to_assoc event |> List.map fst |> List.sort String.compare);
                 let raw=captured_frame event written in
                 check_context_fragments raw event;
@@ -6355,10 +6359,10 @@ let test_keeper_codex_raw_trace_contains_actual_tool_and_response () =
                    | _ -> member "method" event=`String "item/tool/call"
                      && member "result" (Yojson.Safe.from_string raw)<>`Null);
                 check int "durable submission names exact stdin bytes" (String.length raw)
-                  (event |> member "ipc_json_bytes" |> to_int);
+                  (event |> member "write" |> member "bytes" |> to_int);
                 check string "durable submission SHA binds the actual stdin request"
                   Digestif.SHA256.(digest_string raw |> to_hex)
-                  (event |> member "ipc_json_sha256" |> to_string)) submitted;
+                  (event |> member "write" |> member "sha256" |> to_string)) submitted;
               let kinds =
                 List.map
                   (fun (record : Agent_core.Raw_trace.record) -> record.record_type)

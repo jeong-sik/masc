@@ -1490,24 +1490,16 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
            let logical_context_bindings = Domain_pool_ref.submit_cpu_or_inline (fun () ->
              match observation.Runtime_codex_app_server.method_ with
              | Thread_start | Thread_resume -> Keeper_context_submission_link.binding_to_json
-                 ~slot:Developer_instructions composed_developer_instructions observation
+                 ~slot:Developer_instructions composed_developer_instructions observation.write
              | Turn_start -> Keeper_context_submission_link.binding_to_json
-                 ~slot:(Turn_text (List.length images)) prompt_projection observation
+                 ~slot:(Turn_text (List.length images)) prompt_projection observation.write
              | Thread_inject_items -> `Assoc ["status", `String "out_of_scope_history"]
              | Turn_steer -> `Assoc ["status", `String "out_of_scope_host_notice"]
              | Dynamic_tool_response -> `Assoc ["status", `String "out_of_scope_tool_result"]) in
-           let detail=`Assoc ["keeper",`String keeper_name;
-             "runtime_profile",`String runtime_id;"client_turn_ordinal",`Int turn_count;
-             "submission",Runtime_codex_app_server.context_submission_to_json observation;
-             "logical_context_bindings", logical_context_bindings] in
-           match raw_trace_run with
-           | None -> Log.Keeper.warn ~keeper_name
-               "Codex context submission measurement unavailable: no raw-trace attempt binding"
-           | Some active ->
-             ignore (Host.observe_raw_trace ~keeper_name ~stage:Host.Context_submission (fun () ->
-               Agent_core.Raw_trace.record_hook_invoked active
-                 ~hook_name:"codex_context_submission" ~hook_decision:"stdin_write_completed"
-                 ~hook_detail:(Yojson.Safe.to_string detail) ())))
+           Host.record_context_submission ~keeper_name ~raw_trace_run
+             ~runtime_profile:runtime_id ~client_turn_ordinal:turn_count
+             ~submission:(Runtime_codex_app_server.context_submission_to_json observation)
+             ~logical_context_bindings ())
          ~on_prompt_sent:report_transmitted_input
          ~on_turn_starting:(fun ~thread_id ->
            update_session "turn-starting transition" (fun expected ->

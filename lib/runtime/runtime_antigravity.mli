@@ -195,11 +195,16 @@ val validate_turn :
   prompt:string ->
   (unit, error) result
 
+val context_submission_to_json : Runtime_official_client_write.t -> Yojson.Safe.t
+(** Content-free proof that the prompt was written to the client's stdin and
+    EOF delivered. Not the client's acceptance. *)
+
 val run_turn :
   ?conversation_mode:conversation_mode ->
   ?home_dir:string ->
   ?on_spawned:(unit -> unit) ->
   ?on_prompt_sent:(unit -> unit) ->
+  ?on_context_submission:(Runtime_official_client_write.t -> unit) ->
   mgr:_ Eio.Process.mgr ->
   clock:_ Eio.Time.clock ->
   cwd:Eio.Fs.dir_ty Eio.Path.t ->
@@ -212,6 +217,10 @@ val run_turn :
     the spawned client's stdin and EOF has been delivered. It does not claim
     provider acceptance or successful execution. Spawn, validation, and partial
     write failures do not call it. Callback failures fail the runtime turn.
+
+    [on_context_submission] receives the receipt of those stdin bytes (one
+    [Whole_write] slot) just before [on_prompt_sent]. Its non-reserved
+    exceptions are logged as unavailable measurement and the turn continues.
 
     [home_dir], when present, replaces inherited [HOME] and removes inherited
     XDG directory overrides before spawning the official client. *)

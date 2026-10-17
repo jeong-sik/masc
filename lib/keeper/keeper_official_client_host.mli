@@ -144,6 +144,21 @@ val observe_raw_trace
     cancellation result. Reserved exceptions from the observation still
     propagate. *)
 
+val record_context_submission
+  :  keeper_name:string
+  -> raw_trace_run:Agent_core.Raw_trace.active_run option
+  -> runtime_profile:string
+  -> client_turn_ordinal:int
+  -> submission:Yojson.Safe.t
+  -> ?logical_context_bindings:Yojson.Safe.t
+  -> unit
+  -> unit
+(** One completed write of Keeper context to an official client, kept as the
+    RAW-trace hook record [client_context_submission] of the turn's attempt.
+    [submission] is the runtime's receipt JSON. Without an attempt binding the
+    measurement is logged as unavailable; a failed trace write is counted by
+    {!observe_raw_trace}. Neither fails the turn. *)
+
 val start_raw_trace
   :  keeper_name:string
   -> raw_trace:Agent_core.Raw_trace.t option

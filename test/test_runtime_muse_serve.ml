@@ -300,6 +300,54 @@ let compaction_completed =
   {|{"jsonrpc":"2.0","method":"item/completed","params":{"sessionId":"s-1","viewCursor":"v:6","item":{"itemId":"c-1","kind":"compaction","turnId":"t-1","revision":2,"status":"completed","outcome":"compacted","trigger":"auto","strategyId":"summary-preserved-suffix/v1","tokensBefore":1761964,"tokensAfter":12941}}}|}
 ;;
 
+(* The receipt is of the [turn/start] line the host read: its count and
+   hash, and the prompt as the turn's one text slot. It reaches its observer
+   before the prompt-sent report. *)
+let test_turn_start_receipt_is_the_line_the_host_read () =
+  let receipts = ref [] and sent = ref 0 in
+  with_script
+    (handshake_and_session ~granted:[]
+     @ [ Write agent_started; Write (delta "MASC_MUSE_OK"); Write agent_completed; Write turn_completed ])
+    (fun ~dir ~requests:_ ->
+      Eio_main.run (fun env ->
+        match
+          Serve.run_turn
+            ~on_prompt_sent:(fun () -> incr sent)
+            ~on_context_submission:(fun submission -> receipts := (submission, !sent) :: !receipts)
+            ~mgr:(Eio.Stdenv.process_mgr env)
+            ~clock:(Eio.Stdenv.clock env)
+            ~cwd:Eio.Path.(Eio.Stdenv.fs env / dir)
+            (config ())
+            ~workspace_root:"/w"
+            ~prompt:"say \"MASC\"\nMUSE_OK"
+            ~images:[]
+        with
+        | Error error -> fail (Serve.error_to_string error)
+        | Ok _ -> ());
+      let line =
+        In_channel.with_open_bin (Filename.concat dir "requests.jsonl") In_channel.input_all
+        |> String.split_on_char '\n'
+        |> List.find (fun line ->
+          line <> ""
+          && Yojson.Safe.Util.member "method" (Yojson.Safe.from_string line) = `String "turn/start")
+      in
+      match !receipts with
+      | [ ((submission : Serve.context_submission), 0) ] ->
+        check int "the receipt names the written request id"
+          (Yojson.Safe.Util.(member "id" (Yojson.Safe.from_string line) |> to_int))
+          submission.request_id;
+        check int "the receipt counts the line the host read" (String.length line)
+          submission.write.bytes;
+        check string "the receipt hashes the line the host read"
+          Digestif.SHA256.(digest_string line |> to_hex) submission.write.sha256;
+        check bool "the prompt is the turn's text slot" true
+          (Option.is_some
+             (Runtime_official_client_write.matching_fragment submission.write
+                ~slot:(Turn_text 0) "say \"MASC\"\nMUSE_OK"))
+      | receipts ->
+        failf "expected one receipt before the prompt-sent report, got %d" (List.length receipts))
+;;
+
 let test_compaction_reaches_the_stream () =
   let observed = ref [] in
   run_scripted
@@ -1132,6 +1180,8 @@ let () =
         ; test_case "stream callback preserves reserved controls" `Quick
             test_stream_callback_preserves_reserved_controls
         ; test_case "turn with tool and approval" `Quick test_turn_with_tool_and_approval
+        ; test_case "turn/start receipt is the line the host read" `Quick
+            test_turn_start_receipt_is_the_line_the_host_read
         ; test_case "auth required" `Quick test_auth_required
         ; test_case "compaction reaches the stream" `Quick test_compaction_reaches_the_stream
         ; test_case "exit code is typed" `Quick test_exit_code_is_typed

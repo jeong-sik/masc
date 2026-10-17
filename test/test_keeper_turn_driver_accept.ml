@@ -1483,6 +1483,15 @@ let test_quiet_final_shape_names_the_settled_form () =
     true
     (shape [ Agent_core.Types.Thinking { signature = None; content = "hidden" } ]
      = Some Keeper_tooling.Response.Quiet_thinking_only);
+  List.iter
+    (fun stop_reason ->
+       Alcotest.(check bool)
+         "reasoning alone that did not end its turn"
+         true
+         (shape ~stop_reason
+            [ Agent_core.Types.Thinking { signature = None; content = "hidden" } ]
+          = None))
+    [ Agent_core.Types.MaxTokens; Agent_core.Types.StopToolUse ];
   Alcotest.(check bool)
     "no content cut by max tokens"
     true
@@ -1548,12 +1557,15 @@ let autonomous_wake_speaker =
   Masc.Keeper_input_speaker.Host_prompt
     (Masc.Keeper_input_speaker.Autonomous_wake { answered_asks = [] })
 
+(* The autonomous unified turn runs with this history source
+   (Keeper_unified_turn_execution). *)
 let policy_for_turn ~turn_kind ~speaker ~observation ~hitl_resolution =
   Masc.Keeper_agent_run.For_testing.response_policy_for_turn
     ~turn_kind
     ~input_speaker:speaker
     ~world_observation:observation
     ~hitl_resolution
+    ~history_assistant_source:"internal_assistant"
 
 let check_policy label expected actual =
   Alcotest.(check bool)
@@ -1571,6 +1583,22 @@ let test_response_policy_autonomous_wake_without_input_allows_quiet_final () =
        ~speaker:autonomous_wake_speaker
        ~observation:(Some observation)
        ~hitl_resolution:None)
+
+(* #41925: a thinking lane's silence is reasoning with no text, and only an
+   internal turn's finalization keeps that reasoning out of replay. An
+   autonomous wake on a turn that replays its reply may not end quietly, so a
+   caller that forgets the internal source cannot replay that reasoning. *)
+let test_response_policy_requires_progress_when_the_reply_is_replayed () =
+  let observation = wake_observation ~pending_messages:[] ~pending_board_events:[] in
+  check_policy
+    "a wake whose reply is replayed requires progress"
+    Keeper_tooling.Response.Require_progress
+    (Masc.Keeper_agent_run.For_testing.response_policy_for_turn
+       ~turn_kind:Turn_record.Autonomous
+       ~input_speaker:autonomous_wake_speaker
+       ~world_observation:(Some observation)
+       ~hitl_resolution:None
+       ~history_assistant_source:"direct_assistant")
 
 let test_response_policy_pending_message_requires_progress () =
   let message =
@@ -2396,6 +2424,10 @@ let () =
             "autonomous wake without input allows a quiet final"
             `Quick
             test_response_policy_autonomous_wake_without_input_allows_quiet_final;
+          Alcotest.test_case
+            "a wake whose reply is replayed requires progress"
+            `Quick
+            test_response_policy_requires_progress_when_the_reply_is_replayed;
           Alcotest.test_case
             "pending message requires progress"
             `Quick

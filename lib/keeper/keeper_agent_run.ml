@@ -34,12 +34,18 @@ let progress_keeper_tool_names_for_contract =
 
 let response_policy_for_turn ~turn_kind ~input_speaker
     ~(world_observation : Keeper_world_observation.world_observation option)
-    ~hitl_resolution =
+    ~hitl_resolution ~history_assistant_source =
   let open Keeper_tooling.Response in
   match turn_kind, input_speaker, hitl_resolution, world_observation with
   | Turn_record.Autonomous,
     Keeper_input_speaker.Host_prompt (Autonomous_wake { answered_asks = [] }),
-    None, Some observation ->
+    None, Some observation
+    (* Silence is allowed only on a turn whose replay keeps none of its reply:
+       an internal turn (RFC-0385), read with the predicate finalization uses
+       for [exclude_thought_from_replay]. A thinking lane's silence is
+       reasoning with no text, and a turn that replayed its reply would carry
+       that reasoning into the next request (#41925). *)
+    when Keeper_types_support.is_internal_history_source history_assistant_source ->
     (* Only a schedule without an authorized result delivery may end quietly.
        Its substantive instructions still reach the model; this permits a
        model-chosen no-update result, not skipping scheduled work. Every other
@@ -961,7 +967,8 @@ let run_turn
      where that message is born and never changed afterwards. *)
   let input_metadata = Keeper_input_speaker.metadata input_speaker in
   let response_policy = response_policy_for_turn
-      ~turn_kind ~input_speaker ~world_observation ~hitl_resolution in
+      ~turn_kind ~input_speaker ~world_observation ~hitl_resolution
+      ~history_assistant_source in
   let deferred_runtime_lane_ref = ref None in
   let record_produced_checkpoint ~runtime_id ~attempt checkpoint =
     Option.iter (fun callback -> callback ~runtime_id ~attempt checkpoint) on_produced_checkpoint in

@@ -77,10 +77,11 @@ type quiet_final_shape =
   | Quiet_thinking_only
 
 (* A thinking lane's silence carries the model's reasoning and no text. Only
-   an autonomous wake allows silence, and an autonomous turn is internal
-   (RFC-0385): its replay persistence drops the turn's trailing assistant
-   messages with their retained context, so a thinking-only final never
-   reaches the next request (#41925). *)
+   an internal turn's wake allows silence
+   ([Keeper_agent_run.response_policy_for_turn]), and finalizing an internal
+   turn (RFC-0385) drops its trailing assistant messages with their retained
+   context from replay, so a finalized thinking-only final is not in the next
+   request (#41925). *)
 let quiet_final_shape ~policy (response : Agent_core.Types.api_response) =
   match policy, response.stop_reason with
   | Allow_quiet_final, Agent_core.Types.EndTurn ->

@@ -988,24 +988,27 @@ let load_with_projection ~projection ~base_path ~keeper_name =
   load_state_result ~base_path ~keeper_name |> Result.map projection
 ;;
 
-(* Every commit runs its [after_commit] under the owner lock, so [f] sees the
-   durable pending queue with no commit between the read and [f]. *)
-let with_pending_locked_result ~base_path ~keeper_name f =
+(* Every commit runs its [after_commit] under the owner lock, so [f] gets the
+   read of the durable pending queue, failed or not, with no commit between
+   the read and [f]. *)
+let with_pending_read_locked ~base_path ~keeper_name f =
   match resolve_owner ~base_path ~keeper_name with
   | Error _ as error -> error
   | Ok owner ->
-    (try
-       Owner_lock.with_durable_lock owner (fun () ->
-         load_state_unlocked owner |> Result.map (fun state -> f (State.pending state)))
-     with
-     | Eio.Cancel.Cancelled _ as exn -> raise exn
-     | exn ->
-       Error
-         (Printf.sprintf
-            "event queue locked pending read raised keeper=%s path=%s: %s"
-            (keeper_name_of_owner owner)
-            (snapshot_path_of_owner owner)
-            (Printexc.to_string exn)))
+    Ok
+      (Owner_lock.with_durable_lock owner (fun () ->
+         let read =
+           try load_state_unlocked owner |> Result.map State.pending with
+           | Eio.Cancel.Cancelled _ as exn -> raise exn
+           | exn ->
+             Error
+               (Printf.sprintf
+                  "event queue locked pending read raised keeper=%s path=%s: %s"
+                  (keeper_name_of_owner owner)
+                  (snapshot_path_of_owner owner)
+                  (Printexc.to_string exn))
+         in
+         f read))
 ;;
 
 let load_result ~base_path ~keeper_name =

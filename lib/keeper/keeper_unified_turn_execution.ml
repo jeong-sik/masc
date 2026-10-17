@@ -68,6 +68,7 @@ type ctx =
   ; tool_completed_count_snapshot : unit -> int
   ; keeper_turn_id : int
   ; meta : keeper_meta
+  ; preview : Keeper_turn_preview.writer
   ; turn_ctx_cell : Keeper_tool_call_log.turn_ctx_cell
   ; observation : Keeper_world_observation.world_observation
   ; profile_defaults : Keeper_types_profile.keeper_profile_defaults
@@ -100,6 +101,7 @@ let run (ctx : ctx)
 =
   let { config
       ; meta
+      ; preview
       ; turn_ctx_cell
       ; observation
       ; keeper_turn_id
@@ -223,6 +225,7 @@ let run (ctx : ctx)
                  ~prev:Keeper_turn_fsm.Awaiting_provider
                  Keeper_turn_fsm.Streaming;
                Keeper_agent_run.run_turn
+                 ~preview
                  ~event_scope
                  ~observation_token
                  ~config

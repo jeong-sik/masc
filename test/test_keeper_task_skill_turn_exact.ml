@@ -1721,13 +1721,25 @@ let test_preparation_manifest_retains_original_turn_and_private_boundaries () =
   let config = Masc.Workspace.default_config root in
   let keeper_name = "observed" in
   let turn_ref = Ids.Turn_ref.make ~trace_id:"original-preparation-trace" ~absolute_turn:7 in
+  let owner = Masc.Keeper_interrupt_token.fresh () in
+  let preview = Masc.Keeper_turn_preview_owner.with_owner ~interrupt_token:owner (fun () ->
+    Masc.Keeper_turn_preview.reset ~keeper_name ~execution_scope:None ~turn_ref:(Some turn_ref)
+      ~now:0. ~redaction:Masc.Keeper_secret_redaction.empty) in
   let frozen = cache_scenario_snapshot "persisted-observation" in
   let descriptors = Masc.Keeper_tool_descriptor.all_descriptors () in
-  let selection = match R.with_turn_result ~config ~keeper_name ~turn_ref ~phase:R.Direct_task_resolution
-      (fun () -> Selection.resolve ~descriptors ~snapshot:frozen []) with
+  let selection = match R.with_turn_result ~preview ~config ~keeper_name ~turn_ref ~phase:R.Direct_task_resolution
+      (fun () ->
+        check bool "actual resolution publishes its active owned Skill scope" true
+          (match Masc.Keeper_turn_preview.current_for_turn ~keeper_name ~interrupt_token:owner with
+           | Some {preparation=Some {phase=Skill_preparation;state=Preparation_active;turn_ref=Some observed;_};_} ->
+             Ids.Turn_ref.equal observed turn_ref
+           | Some _ | None -> false);
+        Selection.resolve ~descriptors ~snapshot:frozen []) with
     | Ok selection -> selection | Error error -> fail (Selection.error_to_string error) in
-  ignore (R.with_turn_result ~config ~keeper_name ~turn_ref ~phase:R.Executable_setup
+  ignore (R.with_turn_result ~preview ~config ~keeper_name ~turn_ref ~phase:R.Executable_setup
     (fun () -> Ok (Selection.prepare_surface ~snapshot:frozen ~descriptors selection)));
+  check bool "the carried writer retains the producer's original identity" true
+    (Masc.Keeper_turn_preview.original_turn_ref preview = Some turn_ref);
   let path = M.path_for_trace config ~keeper_name ~trace_id:(Ids.Turn_ref.trace_id turn_ref) in
   let rows = In_channel.with_open_bin path In_channel.input_lines |> List.map (fun line ->
     match M.decode_persisted_row (Yojson.Safe.from_string line) with

@@ -15149,6 +15149,38 @@ let keeper_message_timing_visible (state : state) =
   | Masc_tui_message_layout.Origin_bare -> false
   | Origin_inline | Origin_row -> true
 
+(* Current slot evidence remains independent of a requested operation. Before
+   an autonomous journal exists, no request id or journal is invented. *)
+let keeper_message_observed_preparation (state : state) ~keeper_name =
+  if Option.is_some state.keeper_turns_error then None
+  else
+    let candidates = List.filter_map (fun (row : Tui_decode.keeper_turn_row) ->
+      if row.ktr_keeper_name <> keeper_name then None
+      else match row.ktr_state with
+        | Keeper_turn_running {preview=Some preview;_} ->
+          Option.map (fun preparation -> row,preparation) preview.ktp_preparation
+        | Keeper_turn_running {preview=None;_} | Keeper_turn_idle | Keeper_turn_unavailable _ -> None)
+      state.keeper_turns in
+    match candidates with [preparation] -> Some preparation | [] | _::_::_ -> None
+;;
+
+let keeper_preparation_observed_by (row : Tui_decode.keeper_turn_row) preparation transcript =
+  let module Transcript = Masc_tui_keeper_chat_transcript in
+  if row.ktr_keeper_name <> Transcript.keeper_name transcript then false
+  else match row.ktr_state,Transcript.source transcript with
+    | Keeper_turn_running {lane=Turn_lane_chat_operation;preview=Some preview;_},
+      Masc_tui_keeper_chat_log.Operation _ ->
+      Option.exists (fun scope ->
+        Option.exists (fun id -> Masc.Keeper_operation_id.to_string id = Transcript.execution_id transcript)
+          (Masc.Keeper_execution_scope_id.direct_operation_id scope)) preview.ktp_execution_scope
+    | Keeper_turn_running {lane=(Turn_lane_autonomous | Turn_lane_maintenance);_},
+      Autonomous_turn original -> preparation.Masc.Keeper_turn_preview.turn_ref = Some original
+    | Keeper_turn_running {lane=Turn_lane_chat_operation;_}, Autonomous_turn _
+    | Keeper_turn_running {lane=(Turn_lane_autonomous | Turn_lane_maintenance);_}, Operation _
+    | Keeper_turn_running {lane=Turn_lane_chat_operation;preview=None;_}, Operation _
+    | (Keeper_turn_idle | Keeper_turn_unavailable _), (Operation _ | Autonomous_turn _) -> false
+;;
+
 let keeper_message_preparation (state : state) transcript =
   let module Transcript = Masc_tui_keeper_chat_transcript in
   if Option.is_some state.keeper_turns_error || not (Transcript.can_observe_preparation transcript)
@@ -15172,6 +15204,17 @@ let keeper_message_preparation (state : state) transcript =
         | Keeper_turn_running {preview=None;_} | Keeper_turn_idle | Keeper_turn_unavailable _ -> None)
       state.keeper_turns in
     match candidates with [preparation] -> Some preparation | [] | _::_::_ -> None
+;;
+
+let keeper_message_uncovered_preparation state ~keeper_name transcript =
+  let observed = keeper_message_observed_preparation state ~keeper_name in
+  let covered = match transcript,observed with
+    | Some transcript,Some (row,preparation) ->
+      Option.is_some (keeper_message_preparation state transcript)
+      || (keeper_preparation_observed_by row preparation transcript
+          && not (Masc_tui_keeper_chat_transcript.can_observe_preparation transcript))
+    | (None,_ | Some _,None) -> false in
+  if covered then None else observed
 ;;
 
 let keeper_message_unfolded_status_rows (state : state) live ~now =
@@ -15517,13 +15560,20 @@ let keeper_message_activity_rows (state : state) =
       if not has_working then
         (match state.keeper_turns_error with
          | Some _ -> attention "현재 작업 확인 불가"
-         | None -> List.iter (fun (row : Tui_decode.keeper_turn_row) ->
+         | None ->
+           let transcript = Option.map (fun log -> log.tl_transcript) (keeper_message_status_log state) in
+           (match keeper_message_uncovered_preparation state ~keeper_name transcript with
+           | Some (_,preparation) ->
+             let kind,text = Masc_tui_keeper_chat_transcript.preparation_status preparation in
+             let text = "현재 작업 · " ^ text in
+             if kind = Masc_tui_keeper_chat_transcript.Attention then attention text else add text
+           | None -> List.iter (fun (row : Tui_decode.keeper_turn_row) ->
              if String.equal row.ktr_keeper_name keeper_name then
                match row.ktr_state with
                | Keeper_turn_running _ ->
                    if not has_progress then add "기존 작업 처리 중"
                | Keeper_turn_unavailable _ -> attention "현재 작업 확인 불가"
-               | Keeper_turn_idle -> ()) state.keeper_turns);
+               | Keeper_turn_idle -> ()) state.keeper_turns));
       if waiting <> [] then begin
         add (Printf.sprintf "내 메시지 %d건 대기" (List.length waiting));
         let count delivery = List.length (List.filter (fun (_, kind) -> kind = delivery) waiting) in

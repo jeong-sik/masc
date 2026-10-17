@@ -839,6 +839,16 @@ let run_keeper_cycle
                   and an unavailable backlog remain distinct typed prompt
                   inputs; observation failure must not crash the turn or imply
                   that the keeper holds no task. *)
+               let preparation_turn_ref = Ids.Turn_ref.make
+                 ~trace_id:runtime_manifest_context.manifest_trace_id ~absolute_turn:keeper_turn_id in
+               let preview = Keeper_turn_preview.reset ~keeper_name:meta.name ~execution_scope:None
+                 ~turn_ref:(Some preparation_turn_ref)
+                 ~now:(Time_compat.now ())
+                 ~redaction:(Keeper_secret_redaction.snapshot ~base_path:config.base_path
+                   ~keeper_name:meta.name) in
+               let current_task,skill_snapshot =
+                 Keeper_turn_preview.with_preparation ~writer:(Some preview)
+                   ~turn_ref:(Some preparation_turn_ref) ~phase:Keeper_turn_preview.Task_preparation (fun () ->
                let current_task =
                  Keeper_world_observation_inputs.read_current_task ~config ~meta
                in
@@ -846,12 +856,13 @@ let run_keeper_cycle
                  Keeper_agent_run.capture_skill_snapshot
                    ~base_path:config.base_path
                in
+               current_task,skill_snapshot)
+               in
                let task_skill_selection =
                  Keeper_skill_preparation_runtime_observation.with_turn_result
+                   ~preview
                    ~config ~keeper_name:meta.name
-                   ~turn_ref:(Ids.Turn_ref.make
-                     ~trace_id:runtime_manifest_context.manifest_trace_id
-                     ~absolute_turn:keeper_turn_id)
+                   ~turn_ref:preparation_turn_ref
                    ~phase:Keeper_skill_preparation_runtime_observation.Autonomous_task_resolution @@ fun () ->
                  Keeper_task_skill_turn.resolve_live_observations
                   ~config:config ~keeper_name:meta.name
@@ -863,6 +874,8 @@ let run_keeper_cycle
                  match task_skill_selection with
                  | Error _ -> []
                  | Ok merged ->
+                   Keeper_turn_preview.with_preparation ~writer:(Some preview)
+                     ~turn_ref:(Some preparation_turn_ref) ~phase:Keeper_turn_preview.Skill_preparation (fun () ->
                    Keeper_task_skill_turn.exact_task_surfaces
                      ~snapshot:skill_snapshot
                      ~tool_deny:profile_defaults.tool_deny
@@ -870,7 +883,7 @@ let run_keeper_cycle
                      ~skill_names:profile_defaults.skill_names
                      ~selection:merged
                      ~current_task
-                     ~held_task_skills:observation.held_task_skills
+                     ~held_task_skills:observation.held_task_skills)
                in
                let active_goal_summaries =
                  Keeper_unified_prompt.active_goal_summaries_for_task
@@ -1201,6 +1214,7 @@ let run_keeper_cycle
                            ; tool_completed_count_snapshot
                            ; keeper_turn_id
                            ; meta
+                           ; preview
                            ; turn_ctx_cell
                            ; observation
                            ; profile_defaults

@@ -559,12 +559,8 @@ let prepare_agent_setup
         Ok (Keeper_tool_descriptor.all_descriptors ()
           @ List.map Keeper_lane_addon_descriptor.create snapshot.exports) in
   let* (task_skill_selection, preparation) =
-    Keeper_turn_preview.with_preparation_result ~writer:preview
-      ~turn_ref:(Some (Ids.Turn_ref.make
-        ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-        ~absolute_turn:keeper_turn_id))
-      ~phase:Keeper_turn_preview.Skill_preparation (fun () ->
     Keeper_skill_preparation_runtime_observation.with_turn_result
+      ?preview
       ~config ~keeper_name:meta.name
       ~turn_ref:(Ids.Turn_ref.make
         ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
@@ -576,7 +572,7 @@ let prepare_agent_setup
     let preparation =
       Keeper_task_skill_turn.prepare_surface ~descriptors:tool_descriptors
         ~snapshot:skill_snapshot task_skill_selection in
-    Ok (task_skill_selection, preparation)))
+    Ok (task_skill_selection, preparation))
   in
   let snapshot_rev =
     Skill_catalog_snapshot.snapshot_revision_to_string

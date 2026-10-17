@@ -319,6 +319,126 @@ let test_a_second_save_does_not_allocate_the_document_again () =
      < float_of_int written)
 ;;
 
+(* 다음 턴은 디스크에서 다시 읽는 대신 [written_checkpoint] 에서 시작한다. 그러려면
+   그 값이 저장한 값이 아니라 쓴 바이트를 읽은 값이어야 한다: wire 는
+   [ToolResult.json] 을 싣지 않는다. *)
+let written_checkpoint_fixture () =
+  let open Types in
+  make_checkpoint
+    ~messages:
+      [ message ~metadata:[ "weight", `Float (-0.0) ] User (Text "hello \xed\x95\x9c")
+      ; message
+          Tool
+          (ToolResult
+             { tool_use_id = "t1"
+             ; content = "{\"rows\":3}"
+             ; outcome = Tool_succeeded
+             ; json = Some (`Assoc [ "rows", `Int 3 ])
+             ; content_blocks = None
+             })
+      ]
+    ~tools:[ sample_tool_schema ]
+    ~turn_count:1
+    ()
+;;
+
+let tool_result_json (cp : Checkpoint.t) =
+  List.find_map
+    (fun (m : Types.message) ->
+       List.find_map
+         (function
+           | Types.ToolResult { json; _ } -> Some json
+           | Types.Text _ | Types.Thinking _ | Types.RedactedThinking _
+           | Types.ToolUse _ | Types.Image _ | Types.Document _ | Types.Audio _
+           | Types.ReasoningDetails _ -> None)
+         m.content)
+    cp.messages
+;;
+
+let test_written_checkpoint_is_what_a_load_of_the_bytes_gives () =
+  let memo = Checkpoint.create_encoding_memo () in
+  let saved = written_checkpoint_fixture () in
+  let bytes = String.concat "" (Checkpoint.to_pieces_with_encoding_memo memo saved) in
+  let loaded =
+    match Checkpoint.of_string bytes with
+    | Ok cp -> cp
+    | Error error -> Alcotest.fail (Error.to_string error)
+  in
+  match Checkpoint.written_checkpoint memo with
+  | None -> Alcotest.fail "a successful save left no written checkpoint"
+  | Some written ->
+    Alcotest.(check bool) "the saved value still carries the parsed json" true
+      (tool_result_json saved = Some (Some (`Assoc [ "rows", `Int 3 ])));
+    Alcotest.(check bool) "the written value is the loaded one, json dropped" true
+      (tool_result_json written = Some None && tool_result_json loaded = Some None);
+    Alcotest.(check bool) "its messages equal the loaded messages" true
+      (written.messages = loaded.messages);
+    Alcotest.(check string) "it encodes to the bytes written" bytes
+      (Checkpoint.to_string written);
+    Alcotest.(check string) "its context is the loaded context"
+      (Yojson.Safe.to_string (Context.to_json loaded.context))
+      (Yojson.Safe.to_string (Context.to_json written.context))
+;;
+
+(* 다음 턴의 첫 저장이 히스토리 전체를 다시 인코딩하지 않으려면, [written_checkpoint]
+   의 레코드도 memo 에 걸려야 한다. 예산은 위 테스트와 같다. *)
+let test_a_save_from_the_written_checkpoint_reuses_its_encodings () =
+  let open Types in
+  let history =
+    List.init history_messages_in_the_fixture (fun index ->
+      message
+        User
+        (Text (String.make bytes_per_fixture_message 'x' ^ string_of_int index)))
+  in
+  let memo = Checkpoint.create_encoding_memo () in
+  let first =
+    make_checkpoint ~messages:history ~tools:[ sample_tool_schema ] ~turn_count:1 ()
+  in
+  let written_bytes =
+    document_bytes (Checkpoint.to_pieces_with_encoding_memo memo first)
+  in
+  let written =
+    match Checkpoint.written_checkpoint memo with
+    | Some written -> written
+    | None -> Alcotest.fail "a successful save left no written checkpoint"
+  in
+  let next =
+    { written with
+      messages = written.messages @ [ message Assistant (Text "next turn") ]
+    ; turn_count = 2
+    }
+  in
+  let before = Gc.allocated_bytes () in
+  let pieces = Checkpoint.to_pieces_with_encoding_memo memo next in
+  let allocated = Gc.allocated_bytes () -. before in
+  Alcotest.(check string) "the save writes the bytes of to_string"
+    (Checkpoint.to_string next) (String.concat "" pieces);
+  Alcotest.(check bool)
+    (Printf.sprintf "the save allocated %.0f bytes for %d" allocated written_bytes)
+    true
+    (allocated *. document_bytes_per_byte_a_second_save_may_allocate
+     < float_of_int written_bytes)
+;;
+
+let test_a_refused_save_leaves_no_written_checkpoint () =
+  let open Types in
+  let memo = Checkpoint.create_encoding_memo () in
+  let saved = written_checkpoint_fixture () in
+  ignore (Checkpoint.to_pieces_with_encoding_memo memo saved : string list);
+  let refused =
+    { saved with
+      messages =
+        saved.messages
+        @ [ message Assistant (ToolUse { id = ""; name = "read"; input = `Assoc [] }) ]
+    }
+  in
+  (match Checkpoint.to_pieces_with_encoding_memo memo refused with
+   | (_ : string list) -> Alcotest.fail "a checkpoint with an empty tool id was written"
+   | exception Invalid_argument _ -> ());
+  Alcotest.(check bool) "nothing claims to be the written bytes" true
+    (Option.is_none (Checkpoint.written_checkpoint memo))
+;;
+
 let test_image_carriers_remain_canonical () =
   let open Types in
   let images =
@@ -557,6 +677,12 @@ let () =
             test_encoding_memo_writes_to_string_bytes
         ; test_case "a second save does not allocate the document again" `Quick
             test_a_second_save_does_not_allocate_the_document_again
+        ; test_case "the written checkpoint is what a load of the bytes gives" `Quick
+            test_written_checkpoint_is_what_a_load_of_the_bytes_gives
+        ; test_case "a save from the written checkpoint reuses its encodings" `Quick
+            test_a_save_from_the_written_checkpoint_reuses_its_encodings
+        ; test_case "a refused save leaves no written checkpoint" `Quick
+            test_a_refused_save_leaves_no_written_checkpoint
         ; test_case "drop_unencodable_json is None for an encodable checkpoint" `Quick (fun () ->
             match Checkpoint.drop_unencodable_json (make_checkpoint ()) with
             | None -> ()

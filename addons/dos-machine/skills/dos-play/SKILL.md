@@ -100,18 +100,33 @@ the result still carries what you asked for, plus
 
 After a restart, before anything is loaded, a call that needs a machine
 (`masc_dos_screen`, `masc_dos_peek`) and `masc_dos_load` with no `program` say
-whether an autosave exists (what it is, when, and who saved it) under
-`autosave` in the result. If the file is there but cannot be read, the field
-says `unreadable` and why. Nothing resumes it for you: read the field and call
-`masc_dos_restore slot=autosave` yourself when you want it back.
+what the two autosave slots hold: `autosave` and `previous_autosave` in the
+result, each with the program, steps, who saved it, when, and a `resume`
+command. A file that is there but cannot be read shows as `unreadable` with the
+reason. Nothing resumes anything for you: read the fields and call
+`masc_dos_restore` yourself when you want a slot back.
 
-There is one `autosave` slot, and the next call that runs the guest replaces
-it. `masc_dos_load` with a program name is refused while an `autosave` file
-exists, readable or not, and the refusal names it: program, steps, who saved it
-and when. Nothing is loaded and the file is as it was. Resume it with
-`masc_dos_restore slot=autosave`. To start the program anyway, call
-`masc_dos_load` again with `replace_autosave: true`. The new machine's first
-autosave then moves the file to `autosave-prev` and replaces whatever
-`autosave-prev` held, so ask yourself first whether that campaign is still
-wanted. `masc_dos_restore slot=autosave-prev` brings it back until a later
-consented load replaces it.
+There are two lane-owned slots. `autosave` is the machine's latest state.
+`autosave-prev` holds the autosave that was current when the running machine
+started. A machine started by `masc_dos_load` or `masc_dos_restore` copies the
+`autosave` file to `autosave-prev` with its first autosave, and whatever
+`autosave-prev` held is gone. So the start asks for consent exactly when both
+files exist, readable or not:
+
+- `autosave-prev` has no file: nothing is discarded. The autosave moves to
+  `autosave-prev` and stays there. The start asks nothing.
+- `autosave` and `autosave-prev` both exist: `masc_dos_load` with a program
+  name, and `masc_dos_restore` of any slot except `autosave-prev`, are
+  refused. The refusal names what `autosave-prev` holds under
+  `would_discard` (program, steps, who saved it, when) and the autosave that
+  would move in under `moves_to_previous`. Nothing is loaded and both files are
+  as they were. `masc_dos_restore slot=autosave` is refused too, with the same
+  answer.
+- To keep what `autosave-prev` holds, restore it first with
+  `masc_dos_restore slot=autosave-prev`, which asks for nothing, and save it
+  under a name with `masc_dos_save`. To go on and discard it, call the same
+  tool again with `discard_previous_autosave: true`.
+- Only `autosave-prev` is left: a start leaves it in place and asks nothing.
+
+`masc_dos_restore slot=autosave-prev` asks for nothing because the machine it
+restores already holds what the first autosave would replace.

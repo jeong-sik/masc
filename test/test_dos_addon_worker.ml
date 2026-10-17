@@ -259,7 +259,7 @@ let test_a_raising_call_gives_the_pad_back () =
          (Dos_lane.load ~who:owner ~ledger_dir:directory
             ~saves_dir:(Filename.concat directory "saves")
             ~checkpoint_dir:(Filename.concat directory "checkpoints")
-            ~autosave:Dos_lane.Keep_autosave ~program_name:"game.com"
+            ~previous_autosave:Dos_lane.Keep_previous_autosave ~program_name:"game.com"
             ~program_bytes:exec_after_a_key_com
             ~files:[ "BAD.EXE", malformed_child ]
             ~announce:ignore));
@@ -290,7 +290,7 @@ let test_a_core_exception_while_booting_is_a_faulted_boot () =
        Dos_lane.load ~who:owner ~ledger_dir:directory
          ~saves_dir:(Filename.concat directory "saves")
          ~checkpoint_dir:(Filename.concat directory "checkpoints")
-         ~autosave:Dos_lane.Keep_autosave ~program_name:"boom.com"
+         ~previous_autosave:Dos_lane.Keep_previous_autosave ~program_name:"boom.com"
          ~program_bytes:exec_at_boot_com
          ~files:[ "BAD.EXE", malformed_child ]
          ~announce:(fun () -> incr announced)
@@ -321,7 +321,7 @@ let test_a_typed_outcome_still_keeps_the_pad () =
          (Dos_lane.load ~who:owner ~ledger_dir:directory
             ~saves_dir:(Filename.concat directory "saves")
             ~checkpoint_dir:(Filename.concat directory "checkpoints")
-            ~autosave:Dos_lane.Keep_autosave ~program_name:"game.com"
+            ~previous_autosave:Dos_lane.Keep_previous_autosave ~program_name:"game.com"
             ~program_bytes:"\xb4\x00\xcd\x16\x09\xc0\x74\xf8\x8d\xc0" ~files:[]
             ~announce:ignore));
     ignore (require (Dos_lane.pass ~who:owner ~to_:None ~announce:ignore));

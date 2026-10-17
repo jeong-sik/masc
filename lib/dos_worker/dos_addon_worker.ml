@@ -89,7 +89,7 @@ let create ~base_path () =
          | Dos_lane.Unsaveable _
          | Dos_lane.Checkpoint_refused _
          | Dos_lane.Other_program _
-         | Dos_lane.Autosave_exists _ ) as error) -> Error (Dos_lane.error_to_string error) in
+         | Dos_lane.Would_discard_previous_autosave _ ) as error) -> Error (Dos_lane.error_to_string error) in
   let authorize ~tool (call : Lane_addon_call_context.t) =
     let need = Controller.controller_need tool in
     let controlled = match need with
@@ -155,7 +155,7 @@ let create ~base_path () =
             | Dos_lane.Unsaveable _
             | Dos_lane.Checkpoint_refused _
             | Dos_lane.Other_program _
-         | Dos_lane.Autosave_exists _ ) as error)) -> failure "capture_failed" (Machine.of_lane ~base_path ~tool_name ~start_time (Error error))
+         | Dos_lane.Would_discard_previous_autosave _ ) as error)) -> failure "capture_failed" (Machine.of_lane ~base_path ~tool_name ~start_time (Error error))
     | Error (Machine.Encode message) -> failure "encode_failed" (Machine.image_capture_failed ~tool_name ~start_time message)
     | Ok {observation; width; height; png} ->
         let pad = if not (Tool_args.get_bool arguments "include_pad" false) then [] else
@@ -211,7 +211,7 @@ let create ~base_path () =
              | Dos_lane.Unsaveable _
              | Dos_lane.Checkpoint_refused _
              | Dos_lane.Other_program _
-         | Dos_lane.Autosave_exists _ ) as error) -> response (Machine.reject ~tool_name:Controller.release_tool
+         | Dos_lane.Would_discard_previous_autosave _ ) as error) -> response (Machine.reject ~tool_name:Controller.release_tool
             ~start_time:(Tool_timing.start ()) (Dos_lane.error_to_string error)) in
       Ok {answer with S._meta=Some (`Assoc ["io.github.jeong-sik/masc.machine.events",
         `List (List.rev !events)])})) server in
@@ -295,7 +295,7 @@ let create ~base_path () =
            | Dos_lane.Unsaveable _
            | Dos_lane.Checkpoint_refused _
            | Dos_lane.Other_program _
-         | Dos_lane.Autosave_exists _ ) as error) -> Error (Dos_lane.error_to_string error)
+         | Dos_lane.Would_discard_previous_autosave _ ) as error) -> Error (Dos_lane.error_to_string error)
       | Ok capture ->
           let o = capture.Dos_lane.observation in
           let inputs = Machine_input_history.publish history ~incarnation:capture.incarnation

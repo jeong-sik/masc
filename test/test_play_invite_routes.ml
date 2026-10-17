@@ -197,7 +197,7 @@ let test_invite_routes () =
             dos_ok "load"
               (Dos_lane.load ~who:"operator" ~ledger_dir:(Filename.concat dir "ledger")
                  ~saves_dir:(Filename.concat dir "saves")
-                 ~checkpoint_dir:(Filename.concat dir "checkpoints") ~autosave:Dos_lane.Keep_autosave ~program_name:"game.com"
+                 ~checkpoint_dir:(Filename.concat dir "checkpoints") ~previous_autosave:Dos_lane.Keep_previous_autosave ~program_name:"game.com"
                  ~program_bytes:hello_com ~files:[] ~announce:ignore);
             dos_ok "pass" (Dos_lane.pass ~who:"operator" ~to_:(Some "minsu") ~announce:ignore);
             check (option string) "the invite holds the controller" (Some "minsu") (controller ());
@@ -232,7 +232,7 @@ let test_invite_routes () =
             dos_ok "load"
               (Dos_lane.load ~who:"operator" ~ledger_dir:(Filename.concat dir "ledger")
                  ~saves_dir:(Filename.concat dir "saves")
-                 ~checkpoint_dir:(Filename.concat dir "checkpoints") ~autosave:Dos_lane.Keep_autosave ~program_name:"game.com"
+                 ~checkpoint_dir:(Filename.concat dir "checkpoints") ~previous_autosave:Dos_lane.Keep_previous_autosave ~program_name:"game.com"
                  ~program_bytes:hello_com ~files:[] ~announce:ignore);
             dos_ok "the late request" (Dos_lane.pass ~who:"operator" ~to_:(Some "minsu") ~announce:ignore);
             let freed = call ~token:operator "DELETE" (invites ^ "/minsu") in

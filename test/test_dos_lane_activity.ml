@@ -17,7 +17,7 @@ let with_machine run =
     ignore (Dos_lane.eject ~who:holder ~announce:ignore ());
     Dos_lane.install_activity_observer None; remove directory) (fun () ->
     let load () = Dos_lane.load ~who ~ledger_dir:directory ~saves_dir:saves ~checkpoint_dir:checkpoints
-      ~autosave:Dos_lane.Keep_autosave ~program_name:"hello.com" ~program_bytes:hello ~files:[] ~announce:ignore in
+      ~previous_autosave:Dos_lane.Keep_previous_autosave ~program_name:"hello.com" ~program_bytes:hello ~files:[] ~announce:ignore in
     ignore (require (load ()));
     run directory saves checkpoints load)
 let rejected name = function
@@ -36,7 +36,7 @@ let test_off_retains () = with_machine @@ fun directory saves checkpoints load -
   rejected "click" (Dos_lane.click ~who ~x:0 ~y:0 ~buttons:1 ~steps:2);
   rejected "type" (Dos_lane.type_text ~until_ready:true ~who ~text:"a" ~steps:1);
   rejected "pass to another holder" (Dos_lane.pass ~who ~to_:(Some "next") ~announce:ignore);
-  rejected "restore" (Dos_lane.restore ~who ~dir:checkpoints ~slot ~ledger_dir:directory ~saves_dir_of:(fun _ -> saves) ~announce:ignore);
+  rejected "restore" (Dos_lane.restore ~who ~dir:checkpoints ~slot ~previous_autosave:Dos_lane.Keep_previous_autosave ~ledger_dir:directory ~saves_dir_of:(fun _ -> saves) ~announce:ignore);
   let after = require (Dos_lane.capture_with_identity ()) in
   check string "same machine" before.incarnation after.incarnation;
   check int "same steps" before.observation.steps after.observation.steps;
@@ -47,7 +47,7 @@ let test_off_retains () = with_machine @@ fun directory saves checkpoints load -
   ignore (require (Dos_lane.checkpoints ~dir:checkpoints));
   ignore (require (Dos_lane.pass ~who ~to_:None ~announce:ignore));
   current := Machine_configuration.Enabled;
-  ignore (require (Dos_lane.restore ~who ~dir:checkpoints ~slot ~ledger_dir:directory ~saves_dir_of:(fun _ -> saves) ~announce:ignore));
+  ignore (require (Dos_lane.restore ~who ~dir:checkpoints ~slot ~previous_autosave:Dos_lane.Keep_previous_autosave ~ledger_dir:directory ~saves_dir_of:(fun _ -> saves) ~announce:ignore));
   ignore (require (Dos_lane.step ~who ~steps:1 ~until_ready:false))
 let test_unobserved () = with_machine @@ fun _ _ _ _ ->
   Dos_lane.install_activity_observer None;

@@ -744,7 +744,7 @@ let render_changes_list (state : state) =
    | Some _ -> ());
   if shown > content_height then
     box_line_styled buf cols ~style:(Theme.recede ())
-      (Printf.sprintf "[changes %s]" (Masc_tui_scroll.window_text ~scroll ~height:content_height shown));
+      (Printf.sprintf "  [changes %s]" (Masc_tui_scroll.window_text ~scroll ~height:content_height shown));
   box_bottom buf cols;
   Buffer.add_string buf
     (* The footer is the key table's (for_surface Changes); never a literal here. *)

@@ -924,7 +924,7 @@ let render_keeper_list (state : state) =
 
   if overflowing then
     box_line_styled buf cols ~style:(Theme.recede ())
-      (Printf.sprintf "[keepers %s]"
+      (Printf.sprintf "  [keepers %s]"
          (Masc_tui_scroll.window_text ~scroll:scroll_offset ~height:keeper_rows
             keeper_count));
 
@@ -2357,14 +2357,10 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
     done;
 
     (* Scroll indicator *)
-    if total_lines > content_height then begin
-      let indicator =
-        Ansi.dim
-        ^ Masc_tui_scroll.window_text ~scroll ~height:content_height total_lines
-        ^ Ansi.reset
-      in
-      box_line buf cols indicator
-    end;
+    Option.iter
+      (fun row ->
+        box_line buf cols ((Theme.recede ()) ^ row ^ Ansi.reset))
+      (Masc_tui_scroll.position_row ~scroll ~height:content_height total_lines);
 
     (* Bottom border *)
     box_bottom buf cols;
@@ -2378,9 +2374,15 @@ let render_keeper_detail (state : state) =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   if state.keeper_cursor >= List.length state.keepers then begin
-    Buffer.add_string buf "No keeper selected.\n";
-    finish_surface state ~surface_key:"keeper-detail" ~rows:terminal_rows
-      ~cols buf
+    surface_chrome ~overflow:Fits state ~terminal_rows ~cols
+      ~surface_key:"keeper-detail"
+      ~title:
+        (Printf.sprintf "%s  %s"
+           (screen_title " Keepers \xe2\x96\xb8 detail")
+           (connection_badge state))
+      ~hints:(Masc_tui_keys.footer_hints state.view)
+      ~body:(fun ~budget:_ c ->
+        c.push_styled ~style:(Theme.recede ()) "  No keeper selected.")
   end else begin
     let k = List.nth state.keepers state.keeper_cursor in
     (* The row the Keepers list draws, through the same [footer_line]: the
@@ -2450,9 +2452,15 @@ let render_keeper_logs (state : state) =
   let buf = Buffer.create 4096 in
 
   if state.keeper_cursor >= List.length state.keepers then begin
-    Buffer.add_string buf "No keeper selected.\n";
-    finish_surface state ~surface_key:"keeper-logs" ~rows:terminal_rows
-      ~cols buf
+    surface_chrome ~overflow:Fits state ~terminal_rows ~cols
+      ~surface_key:"keeper-logs"
+      ~title:
+        (Printf.sprintf "%s  %s"
+           (screen_title " Keepers \xe2\x96\xb8 logs")
+           (connection_badge state))
+      ~hints:(Masc_tui_keys.footer_hints state.view)
+      ~body:(fun ~budget:_ c ->
+        c.push_styled ~style:(Theme.recede ()) "  No keeper selected.")
   end else begin
     let k = List.nth state.keepers state.keeper_cursor in
     let total_entries = List.length state.log_entries in
@@ -3128,7 +3136,7 @@ let render_connectors (state : state) =
         done;
         if overflowing then
           c.push_styled ~style:(Theme.recede ())
-            (Printf.sprintf "[connectors %s]" (Masc_tui_scroll.window_text ~scroll ~height:content_height shown))
+            (Printf.sprintf "  [connectors %s]" (Masc_tui_scroll.window_text ~scroll ~height:content_height shown))
       end)
 
 let runtime_refresh_badge refresh_state =
@@ -3579,8 +3587,9 @@ let render_runtime_detail (state : state) target =
        ~id:target_label ~after:"" ~tail:(connection_badge state));
   box_divider buf cols;
   let lines = runtime_detail_lines state target ~width:(max 1 (cols - 8)) in
+  let total = List.length lines in
   let content_height = max 1 (rows - 5) in
-  let max_scroll = max 0 (List.length lines - content_height) in
+  let max_scroll = max 0 (total - content_height) in
   let scroll = max 0 (min state.runtime_detail_scroll max_scroll) in
   let lines_window = Rows.of_list ~first:scroll ~height:content_height lines in
   for index = 0 to content_height - 1 do
@@ -3589,9 +3598,18 @@ let render_runtime_detail (state : state) target =
     | Some (style, line) -> box_line_styled buf cols ~style line
   done;
   box_bottom buf cols;
+  let position =
+    if total > content_height then
+      Some
+        (Printf.sprintf "lines %s"
+           (Masc_tui_scroll.window_text ~scroll ~height:content_height total))
+    else None
+  in
   Buffer.add_string buf
-    (footer_line state ~max_cells:cols
-       ~hints:(Masc_tui_keys.footer_hints_runtime_detail ()));
+    (footer_line state ~max_cells:cols ?position
+       ~hints:
+         (Masc_tui_keys.footer_hints_runtime_detail
+            ~routes:(target = Runtime_routes) ()));
   finish_surface state ~clamped:(Runtime_detail_scroll scroll)
     ~surface_key:"runtime-detail" ~rows:terminal_rows ~cols buf
 
@@ -4472,9 +4490,10 @@ let render_metrics (state : state) =
             if index >= scroll && index < scroll + height then c.push line)
           lines;
         if overflow_rows > 0 then
-          c.push (Printf.sprintf " [rows %s · j/k to scroll]"
-                    (Masc_tui_scroll.window_text ~scroll ~height
-                       (List.length lines)))
+          c.push_styled ~style:(Theme.recede ())
+            (Printf.sprintf "  [rows %s · j/k to scroll]"
+               (Masc_tui_scroll.window_text ~scroll ~height
+                  (List.length lines)))
       end)
 
 (** Render the runtime picker: the dispatchable catalogue, with the keeper it
@@ -4559,11 +4578,9 @@ let render_runtime_pick (state : state) =
             in
             let target =
               Message_layout.fit_middle target_width columns.Masc_tui_types.rpc_target
-              |> fun text -> fit_width text target_width
             in
             let route_col =
               Message_layout.fit_middle route_width columns.Masc_tui_types.rpc_route
-              |> fun text -> fit_width text route_width
             in
             let facts =
               Masc_tui_types.runtime_pick_visible_facts ~cols item

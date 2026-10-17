@@ -190,9 +190,9 @@ let view target state =
   match state.selected with
   | Some selected when equal target selected ->
     (match state.pending, state.cached with
-     | Some request, _ when equal request.target target -> Loading
-     | _, Some (cached, Ok snapshot) when equal cached target -> Loaded snapshot
-     | _, Some (cached, Error detail) when equal cached target -> Failed detail
-     | Some _, (Some _ | None) | None, (Some _ | None) -> Not_loaded)
+     | Some request, (Some (_, (Ok _ | Error _)) | None) when equal request.target target -> Loading
+     | (Some _ | None), Some (cached, Ok snapshot) when equal cached target -> Loaded snapshot
+     | (Some _ | None), Some (cached, Error detail) when equal cached target -> Failed detail
+     | (Some _ | None), (Some (_, (Ok _ | Error _)) | None) -> Not_loaded)
   | Some _ | None -> Not_loaded
 ;;

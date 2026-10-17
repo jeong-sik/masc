@@ -14,6 +14,7 @@
   provider_http_codec
   tool_result_projection
   tool_call_input
+  responses_function_call
   output_token_wire_internal
   request_artifact_internal
   exact_output_count_tokens

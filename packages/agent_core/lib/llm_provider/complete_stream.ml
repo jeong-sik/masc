@@ -51,6 +51,7 @@ let event_carries_stream_failure = function
   | Types.ContentBlockDelta _
   | Types.ContentBlockStop _
   | Types.MessageDelta _
+  | Types.ResponsesOutputItems _
   | Types.MessageStop
   | Types.Ping
   | Types.Timeout _
@@ -572,6 +573,7 @@ let complete_stream_http
            | None -> `Skip)
         | Types.MessageDelta _ -> `Skip
         | Types.MessageStop -> `Done
+        | Types.ResponsesOutputItems _ -> `Skip
         | Types.Ping -> `Heartbeat
         (* A provider-owned error envelope is NOT a wire failure: the response
            satisfied its contract and the provider reported a problem inside
@@ -971,6 +973,7 @@ let complete_stream_http
                                      | Types.SSEUnknownEventType _
                                      | Types.SSEUnsupportedPart _
                                      | Types.SSEUnsupportedResponse _
+                                     | Types.ResponsesOutputItems _
                                      | Types.Connected
                                      | Types.Timeout _
                                      | Types.StreamIncomplete _

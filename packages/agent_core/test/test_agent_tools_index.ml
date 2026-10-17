@@ -188,7 +188,7 @@ let test_admission_preserves_native_replay_positions () =
      {kind=Function_call;content_count=1};
      {kind=Function_call;content_count=1};
      {kind=Message Final_answer;content_count=1}] in
-  match Types.Response_replay.retain ~content:admission.admitted
+  match Types.Response_replay.retain ~original_content:blocks ~content:admission.admitted
           ~retained_indices:admission.retained_content_indices groups with
   | Error detail -> Alcotest.fail detail
   | Ok replay -> check bool "rejected group removed and phase remains attached" true

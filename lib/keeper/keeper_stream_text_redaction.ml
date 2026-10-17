@@ -248,7 +248,7 @@ let on_event t (event : Agent_core.Types.sse_event) =
   | ContentBlockDelta
       { delta = ThinkingSignatureDelta _ | RedactedThinkingSnapshot _ | MediaDelta _; _ }
   | MessageStart _
-  | Ping | Connected | MessageDelta { stop_reason = None; _ } -> [ event ]
+  | ResponsesOutputItems _ | Ping | Connected | MessageDelta { stop_reason = None; _ } -> [ event ]
 ;;
 
 module Scoped = struct

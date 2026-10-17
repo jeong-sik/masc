@@ -59,11 +59,17 @@ let assistant_history () =
 
 let admission_remap () =
   let original = [group (Message Commentary) 1;group Function_call 1;group Function_call 1;group (Message Final_answer) 1] in
+  let original_content = [Text "checking";
+    ToolUse {id="denied";name="not_registered";input=`Assoc []};
+    ToolUse {id="accepted";name="original";input=`Assoc []};Text "answer"] in
   let retained = [Text "checking";ToolUse {id="accepted";name="normalized";input=`Assoc []};Text "answer"] in
-  let replay = ok (Replay.retain ~content:retained ~retained_indices:[0;2;3] original) in
+  let replay = ok (Replay.retain ~original_content ~content:retained ~retained_indices:[0;2;3] original) in
   Alcotest.(check bool) "rejected tool group removed and later phase retained" true
     (replay = [group (Message Commentary) 1;group Function_call 1;group (Message Final_answer) 1]);
-  rejected "repeated source position" (Replay.retain ~content:retained ~retained_indices:[0;0;3] original)
+  rejected "repeated source position" (Replay.retain ~original_content ~content:retained ~retained_indices:[0;0;3] original);
+  rejected "an invalid original partition cannot become valid by filtering"
+    (Replay.retain ~original_content:[Text "short"] ~content:[]
+       ~retained_indices:[] original)
 
 let chat_control () =
   let response : api_response =

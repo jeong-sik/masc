@@ -1,9 +1,11 @@
 ---------------------------- MODULE KeeperHitlDeferred ----------------------------
 \* Request-local, nonblocking HITL delivery for one Keeper lane.
 \*
-\* Authorization is request-local and non-hierarchical. Submit returns Deferred
-\* immediately. A later resolution wakes only the originating lane, unrelated
-\* lanes remain able to progress, and the resolution can be consumed once.
+\* One approved request, an existing recipient, and successful logical store
+\* commits. Submission does not wait for an operator decision. Decision commit,
+\* durable wake enqueue, and process-local signal are separate boundaries.
+\* See docs/guides/HITL-MODEL-CORRESPONDENCE.md for the production mapping and
+\* excluded failure/resource guarantees; this is not a filesystem latency proof.
 
 EXTENDS Naturals
 
@@ -15,6 +17,7 @@ VARIABLES
     request_phase,
     submit_result,
     submitter_blocked,
+    wake_durable,
     wake_target,
     consume_count,
     origin_progress,
@@ -24,6 +27,7 @@ vars ==
     << request_phase,
        submit_result,
        submitter_blocked,
+       wake_durable,
        wake_target,
        consume_count,
        origin_progress,
@@ -37,6 +41,7 @@ TypeOK ==
     /\ request_phase \in PhaseSet
     /\ submit_result \in SubmitResultSet
     /\ submitter_blocked \in BOOLEAN
+    /\ wake_durable \in BOOLEAN
     /\ wake_target \in WakeTargetSet
     /\ consume_count \in 0..2
     /\ origin_progress \in 0..MaxProgress
@@ -46,6 +51,7 @@ Init ==
     /\ request_phase = "absent"
     /\ submit_result = "none"
     /\ submitter_blocked = FALSE
+    /\ wake_durable = FALSE
     /\ wake_target = "none"
     /\ consume_count = 0
     /\ origin_progress = 0
@@ -57,7 +63,8 @@ SubmitDeferred ==
     /\ submit_result' = "deferred"
     /\ submitter_blocked' = FALSE
     /\ UNCHANGED
-          << wake_target,
+          << wake_durable,
+             wake_target,
              consume_count,
              origin_progress,
              other_progress >>
@@ -65,13 +72,40 @@ SubmitDeferred ==
 ResolveForOrigin ==
     /\ request_phase = "pending"
     /\ request_phase' = "resolved"
-    /\ wake_target' = "origin-lane"
     /\ UNCHANGED
           << submit_result,
              submitter_blocked,
+             wake_durable,
+             wake_target,
              consume_count,
              origin_progress,
              other_progress >>
+
+CommitWakeForOrigin ==
+    /\ request_phase = "resolved"
+    /\ ~wake_durable
+    /\ wake_durable' = TRUE
+    /\ UNCHANGED
+          << request_phase, submit_result, submitter_blocked, wake_target,
+             consume_count, origin_progress, other_progress >>
+
+SignalOrigin ==
+    /\ request_phase = "resolved"
+    /\ wake_durable
+    /\ wake_target = "none"
+    /\ wake_target' = "origin-lane"
+    /\ UNCHANGED
+          << request_phase, submit_result, submitter_blocked, wake_durable,
+             consume_count, origin_progress, other_progress >>
+
+\* Restart loses the process-local signal, never the committed decision,
+\* accepted wake, or spent grant. Boot redelivery may signal the origin again.
+Restart ==
+    /\ wake_target # "none"
+    /\ wake_target' = "none"
+    /\ UNCHANGED
+          << request_phase, submit_result, submitter_blocked, wake_durable,
+             consume_count, origin_progress, other_progress >>
 
 ConsumeOnce ==
     /\ request_phase = "resolved"
@@ -82,6 +116,7 @@ ConsumeOnce ==
     /\ UNCHANGED
           << submit_result,
              submitter_blocked,
+             wake_durable,
              origin_progress,
              other_progress >>
 
@@ -92,6 +127,7 @@ ProgressOrigin ==
           << request_phase,
              submit_result,
              submitter_blocked,
+             wake_durable,
              wake_target,
              consume_count,
              other_progress >>
@@ -103,6 +139,7 @@ ProgressOther ==
           << request_phase,
              submit_result,
              submitter_blocked,
+             wake_durable,
              wake_target,
              consume_count,
              origin_progress >>
@@ -116,6 +153,9 @@ Done ==
 Next ==
     \/ SubmitDeferred
     \/ ResolveForOrigin
+    \/ CommitWakeForOrigin
+    \/ SignalOrigin
+    \/ Restart
     \/ ConsumeOnce
     \/ ProgressOrigin
     \/ ProgressOther
@@ -135,6 +175,11 @@ DeferredImmediately ==
 ResolutionWakesOriginOnly ==
     wake_target \in {"none", "origin-lane"}
 
+WakeAfterDurableEnqueue ==
+    wake_target # "none" =>
+        /\ wake_durable
+        /\ request_phase \in {"resolved", "consumed"}
+
 ResolutionConsumedAtMostOnce ==
     consume_count <= 1
 
@@ -148,6 +193,7 @@ Safety ==
     /\ TypeOK
     /\ DeferredImmediately
     /\ ResolutionWakesOriginOnly
+    /\ WakeAfterDurableEnqueue
     /\ ResolutionConsumedAtMostOnce
 
 SubmitBlocking ==
@@ -156,7 +202,8 @@ SubmitBlocking ==
     /\ submit_result' = "none"
     /\ submitter_blocked' = TRUE
     /\ UNCHANGED
-          << wake_target,
+          << wake_durable,
+             wake_target,
              consume_count,
              origin_progress,
              other_progress >>
@@ -164,18 +211,21 @@ SubmitBlocking ==
 NextBlockingBuggy == Next \/ SubmitBlocking
 SpecBlockingBuggy == Init /\ [][NextBlockingBuggy]_vars
 
-ResolveForOtherLane ==
-    /\ request_phase = "pending"
-    /\ request_phase' = "resolved"
+SignalOtherLane ==
+    /\ request_phase = "resolved"
+    /\ wake_durable
+    /\ wake_target = "none"
     /\ wake_target' = "other-lane"
     /\ UNCHANGED
-          << submit_result,
+          << request_phase,
+             submit_result,
              submitter_blocked,
+             wake_durable,
              consume_count,
              origin_progress,
              other_progress >>
 
-NextWakeBuggy == Next \/ ResolveForOtherLane
+NextWakeBuggy == Next \/ SignalOtherLane
 SpecWakeBuggy == Init /\ [][NextWakeBuggy]_vars
 
 ConsumeAgain ==
@@ -186,11 +236,39 @@ ConsumeAgain ==
           << request_phase,
              submit_result,
              submitter_blocked,
+             wake_durable,
              wake_target,
              origin_progress,
              other_progress >>
 
 NextConsumeBuggy == Next \/ ConsumeAgain
 SpecConsumeBuggy == Init /\ [][NextConsumeBuggy]_vars
+
+SignalBeforeDurableEnqueue ==
+    /\ request_phase = "resolved"
+    /\ ~wake_durable
+    /\ wake_target = "none"
+    /\ wake_target' = "origin-lane"
+    /\ UNCHANGED
+          << request_phase, submit_result, submitter_blocked, wake_durable,
+             consume_count, origin_progress, other_progress >>
+
+NextEarlySignalBuggy == Next \/ SignalBeforeDurableEnqueue
+SpecEarlySignalBuggy == Init /\ [][NextEarlySignalBuggy]_vars
+
+RestartForgetsDecision ==
+    /\ request_phase = "resolved"
+    /\ request_phase' = "pending"
+    /\ wake_target' = "none"
+    /\ UNCHANGED
+          << submit_result, submitter_blocked, wake_durable,
+             consume_count, origin_progress, other_progress >>
+
+NextRestartBuggy == Next \/ RestartForgetsDecision
+SpecRestartBuggy ==
+    /\ Init
+    /\ [][NextRestartBuggy]_vars
+    /\ WF_vars(ProgressOther)
+    /\ WF_vars(ConsumeOnce)
 
 =============================================================================

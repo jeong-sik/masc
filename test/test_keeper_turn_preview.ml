@@ -415,7 +415,7 @@ let test_preparation_error_exception_and_cancellation_keep_their_outcomes () =
         Ok ())))
       (fun () -> Eio.Promise.await entered);
     Alcotest.(check string) "cancelled operation leaves a settled cancellation" "cancelled" (state ());
-    let json = Preview.to_json (Option.get (Preview.current ~keeper_name:name)) in
+    let json = Preview.to_json ~include_preparation_timeline:true (Option.get (Preview.current ~keeper_name:name)) in
     let outcomes = Preview.preparation_spans
         (Option.get (Preview.current ~keeper_name:name)).preparation_timeline
       |> List.map (fun (span : Preview.preparation_span) -> match span.preparation.state with
@@ -457,7 +457,9 @@ let test_parallel_preparation_lineage_and_actual_wire () =
            && match span.preparation.state with Preparation_finished _ -> true | Preparation_active -> false)
            [parent;a;b])
      | _ -> Alcotest.fail "parallel scope history is incomplete");
-    let payload = Preview.to_json current in
+    Alcotest.(check bool) "ordinary turns polling does not serialize unselected history" true
+      (Yojson.Safe.Util.member "preparation_timeline" (Preview.to_json current) = `Null);
+    let payload = Preview.to_json ~include_preparation_timeline:true current in
     let wire = `Assoc ["schema",`String "masc.keeper_turns.v1";
       "keepers",`List [`Assoc ["keeper_name",`String keeper_name;"status",`String "ok";
         "turn",`Assoc ["lane",`String "maintenance";"interrupt_token",`String "original-slot";
@@ -465,7 +467,7 @@ let test_parallel_preparation_lineage_and_actual_wire () =
     (match Tui_decode.decode_keeper_turns wire with
      | Ok [{ktr_state=Keeper_turn_running {preview=Some decoded;_};_}] ->
        Alcotest.(check bool) "actual turns wire retains all exact observation records" true
-         (Preview.preparation_spans decoded.ktp_preparation_timeline
+         (Preview.preparation_spans (Option.get decoded.ktp_preparation_timeline)
           = Preview.preparation_spans current.preparation_timeline)
      | Ok _ -> Alcotest.fail "actual turns decoder lost the prepared scope history"
      | Error detail -> Alcotest.fail detail);

@@ -450,7 +450,7 @@ let status_text preview =
        ; Option.map (fun name -> "last observed tool: " ^ name) preview.last_tool
        ; Option.map (fun detail -> "last failure: " ^ detail) preview.last_failure ])
 
-let to_json preview =
+let to_json ?(include_preparation_timeline = false) preview =
   `Assoc ["status_text", `String (status_text preview);
     "text_tail", `String preview.text_tail;
     "text_position", `Assoc ["generation", `Int preview.text_position.generation;
@@ -458,5 +458,6 @@ let to_json preview =
     "last_tool", (match preview.last_tool with None -> `Null | Some name -> `String name);
     "updated_at_unix", `Float preview.updated_at;
     "preparation",Option.fold ~none:`Null ~some:preparation_to_json preview.preparation;
-    "preparation_timeline",`List (List.map preparation_span_to_json (preparation_spans preview.preparation_timeline));
+    "preparation_timeline",(if include_preparation_timeline then
+      `List (List.map preparation_span_to_json (preparation_spans preview.preparation_timeline)) else `Null);
     "execution_scope",Option.fold ~none:`Null ~some:Keeper_execution_scope_id.to_json preview.execution_scope]

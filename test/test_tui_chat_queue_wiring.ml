@@ -6016,7 +6016,7 @@ let test_preparation_requires_actual_turn_owner_and_exact_execution () =
     let current = Token.fresh () and successor = Token.fresh () in
     let writer = Owner.with_owner ~interrupt_token:current (fun () ->
       fst (Eio.Fiber.pair
-        (fun () -> Preview.reset ~keeper_name:"alpha" ~execution_scope:(Some (scope "execution-a"))
+        (fun () -> Preview.reset ~turn_ref:None ~keeper_name:"alpha" ~execution_scope:(Some (scope "execution-a"))
           ~now:1. ~redaction:Masc.Keeper_secret_redaction.empty)
         (fun () -> ()))) in
     let state = Tui_types.create_state ~workspace:"test" ~port:0 ~refresh_interval:2. () in
@@ -6093,7 +6093,7 @@ let test_preparation_requires_actual_turn_owner_and_exact_execution () =
       check bool "a fresh clock cannot grant the successor the old owner's preview" true
         (Preview.current_for_turn ~keeper_name:"alpha" ~interrupt_token:successor = None);
       let next = Owner.with_owner ~interrupt_token:successor (fun () ->
-        Preview.reset ~keeper_name:"alpha" ~execution_scope:(Some (scope "execution-b"))
+        Preview.reset ~turn_ref:None ~keeper_name:"alpha" ~execution_scope:(Some (scope "execution-b"))
           ~now:4. ~redaction:Masc.Keeper_secret_redaction.empty) in
       Preview.note_attempt ~writer:(Some next) ~now:5. ~runtime_id:"new-provider";
       Ok ()));
@@ -6105,10 +6105,79 @@ let test_preparation_requires_actual_turn_owner_and_exact_execution () =
       (Preview.current_for_turn ~keeper_name:"alpha" ~interrupt_token:current = None))
 ;;
 
+let test_task_preparation_precedes_journal_and_keeps_original_writer () =
+  Eio_main.run (fun _ ->
+    let module Preview = Masc.Keeper_turn_preview in
+    let token = Masc.Keeper_interrupt_token.fresh () in
+    let original = Masc.Ids.Turn_ref.make ~trace_id:"early-task-source" ~absolute_turn:4 in
+    let writer = Masc.Keeper_turn_preview_owner.with_owner ~interrupt_token:token (fun () ->
+      Preview.reset ~keeper_name:"alpha" ~execution_scope:None ~turn_ref:(Some original)
+        ~now:0. ~redaction:Masc.Keeper_secret_redaction.empty) in
+    let state = Tui_types.create_state ~workspace:"test" ~port:0 ~refresh_interval:2. () in
+    let snapshot () =
+      let preview = match Preview.current_for_turn ~keeper_name:"alpha" ~interrupt_token:token with
+        | Some value -> Preview.to_json value | None -> fail "original writer disappeared" in
+      let wire = `Assoc ["schema",`String "masc.keeper_turns.v1";
+        "keepers",`List [`Assoc ["keeper_name",`String "alpha";"status",`String "ok";
+          "turn",`Assoc ["lane",`String "autonomous";"interrupt_token",`String (Masc.Keeper_interrupt_token.to_string token);
+            "turn_ref",`Null;"started_at_unix",`Float 0.;"preview",preview]]]] in
+      state.keeper_turns <- (match Tui_decode.decode_keeper_turns wire with
+        | Ok rows -> rows | Error detail -> fail detail) in
+    let queued = Keeper_chat_transcript.create_for_source ~keeper_name:"alpha"
+        ~source:(Log.Operation "queued-input") ~started_at:0. in
+    let product = ref "original Task inputs" in
+    let returned = Preview.with_preparation ~writer:(Some writer)
+      ~turn_ref:(Preview.original_turn_ref writer) ~phase:Preview.Task_preparation (fun () ->
+      snapshot ();
+      check bool "a real current slot can expose Task work before any journal identity" true
+        (match Tui_types.keeper_message_uncovered_preparation state ~keeper_name:"alpha" None with
+         | Some (row,preparation) -> preparation.phase = Preview.Task_preparation
+             && preparation.turn_ref = Some original && preparation.state = Preview.Preparation_active
+             && (match row.Tui_decode.ktr_state with
+                 | Keeper_turn_running {interrupt_token;turn_ref=None;_} ->
+                   interrupt_token = Masc.Keeper_interrupt_token.to_string token
+                 | Keeper_turn_running _ | Keeper_turn_idle | Keeper_turn_unavailable _ -> false)
+         | None -> false);
+      check bool "queued input does not acquire the autonomous preparation" true
+        (Tui_types.keeper_message_preparation state queued = None);
+      check bool "independent slot evidence does not invent input admission" true
+        (Keeper_chat_transcript.admission queued = None);
+      check bool "current work remains observable beside an unrelated queued input" true
+        (Option.is_some (Tui_types.keeper_message_uncovered_preparation state ~keeper_name:"alpha" (Some queued)));
+      let journal = Keeper_chat_transcript.create_for_source ~keeper_name:"alpha"
+          ~source:(Log.Autonomous_turn original) ~started_at:0. in
+      Keeper_chat_transcript.apply ~now:1. journal Live.Run_started;
+      Keeper_chat_transcript.apply ~now:2. journal
+        (Live.Runtime_attempt_started {runtime_id=None;attempt_index=Some 0});
+      check bool "late pre-journal snapshot cannot bypass newer provider evidence through the slot band" true
+        (Tui_types.keeper_message_uncovered_preparation state ~keeper_name:"alpha" (Some journal) = None);
+      product) in
+    check bool "value-returning preparation preserves the original product" true (returned == product);
+    let failure = Failure "private prompt failure" in
+    (match Preview.with_preparation ~writer:(Some writer)
+      ~turn_ref:(Preview.original_turn_ref writer) ~phase:Preview.Prompt_preparation (fun () ->
+        snapshot ();
+        check bool "the same original writer exposes the new Prompt boundary" true
+          (match Tui_types.keeper_message_observed_preparation state ~keeper_name:"alpha" with
+           | Some (_,preparation) -> preparation.phase = Preview.Prompt_preparation
+               && preparation.turn_ref = Some original
+           | None -> false);
+        raise failure) with
+     | _ -> fail "plain preparation swallowed its exception"
+     | exception actual -> check bool "plain preparation preserves its exception identity" true (actual == failure));
+    check bool "Prompt failure settles on the same Owner without changing original identity" true
+      (match Preview.current_for_turn ~keeper_name:"alpha" ~interrupt_token:token with
+       | Some {preparation=Some {phase=Prompt_preparation;state=Preparation_finished {outcome=Raised;_};_};_} ->
+         Preview.original_turn_ref writer = Some original
+       | Some _ | None -> false))
+;;
+
 let () =
   run
     "tui_chat_queue_wiring"
-    [("owned preparation", [test_case "turn owner and exact execution select preparation" `Quick
+    [("owned preparation", [test_case "Task preparation precedes journals and keeps its original writer" `Quick
+        test_task_preparation_precedes_journal_and_keeps_original_writer;
+      test_case "turn owner and exact execution select preparation" `Quick
         test_preparation_requires_actual_turn_owner_and_exact_execution]);
      ("native progress density", [test_case "interrupted native output remains in Results" `Quick test_interrupted_native_progress_survives_results_projection]); ( "expanded diagnostics",
         [ test_case "search finds a batched request by its own id" `Quick

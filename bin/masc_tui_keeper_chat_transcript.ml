@@ -593,7 +593,9 @@ let keeper_name t = t.keeper_name
 let request_id t = t.request_id
 let execution_id t = Option.value ~default:t.request_id t.batch_execution_id
 let source t = t.source
-let can_observe_preparation t = t.phase = Working && not t.preparation_superseded
+let can_observe_preparation t = match t.phase with
+  | Waiting | Working -> not t.preparation_superseded
+  | Stream_ended | Stream_failed _ -> false
 let note_rejection ~now t detail =
   t.phase <- Stream_failed detail;
   t.ended_at <- Some now;
@@ -1174,7 +1176,9 @@ let awaiting_text t =
 let preparation_status preparation =
   let open Masc.Keeper_turn_preview in
   let phase = match preparation.phase with
+    | Task_preparation -> "Task 준비"
     | Context_preparation -> "문맥 준비"
+    | Prompt_preparation -> "프롬프트 준비"
     | Tool_preparation -> "Tool 준비"
     | Skill_preparation -> "Skill 준비" in
   match preparation.state with

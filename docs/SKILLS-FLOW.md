@@ -323,9 +323,9 @@ Skill 준비 manifest에 더해, `Keeper_turn_preview`는 실제 작업을 부�
 연결한 경계는 `prepare_run_context`, `prepare_agent_setup`, 그 안의 executable
 Skill 준비다. 각 scope는 실제 writer에 결속되고, 시작 시각과 완료 시 그 scope만의
 monotonic span을 기록한다. JSON에는 phase·state·turn reference·시각·측정 span만
-추가하며 입력·예외 본문·Tool 결과를 담지 않는다. context 준비 이전에는 아직
-확정되지 않은 turn reference를 `null`로 남긴다. 이후 Tool·Skill 단계는 소유자가
-확정한 원래 reference를 전달한다. 준비 성공은 provider dispatch나 턴 완료를 뜻하지
+추가하며 입력·예외 본문·Tool 결과를 담지 않는다. 생산자가 아직 확정하지 않은
+turn reference는 `null`로 남긴다. 직접·자율 Task 진입에서 만든 writer는 생산자가
+확정한 원래 reference를 context 단계에도 전달한다. 준비 성공은 provider dispatch나 턴 완료를 뜻하지
 않으며, 다음 활동이 관측되기 전에는 그 사실도 명시한다.
 
 이 값은 실행 중인 턴의 기존 `/api/v1/keepers/turns` preview로 전달된다. 별도의
@@ -335,9 +335,9 @@ monotonic span을 기록한다. JSON에는 phase·state·turn reference·시각�
 다시 준비 상태로 바꾸지 못한다. writer가 없으면 추가 시계·상태 갱신 없이 실행한다.
 
 이 서버 데이터는 아래의 원래 실행에 결속된 TUI status projection으로 전달된다.
-Keeper 이름만 같다는 이유로 다른 실행의 상태를 빌려 쓰지 않는다. 직접·자율 Task
-해석 등 agent 진입 전의 준비 구간과 아직 관측하지 않는 prompt·queue·lock 대기도
-남아 있다.
+Keeper 이름만 같다는 이유로 다른 실행의 상태를 빌려 쓰지 않는다. Task 입력과
+agent 진입 전 Skill 해석, 프롬프트 조립의 경계는 아래의 실행 진입 연속성에서
+연결한다. 아직 관측하지 않는 queue·lock 등 대기 구간은 남아 있다.
 
 작성한 시나리오는 실행 중 JSON, 중첩 복귀, 원래 turn reference, provider 전환 뒤
 늦은 완료, 새 writer 보호, 오류·예외·실제 fiber 취소를 다룬다. 이 단위에서는
@@ -378,14 +378,64 @@ provider 이름이 없는 attempt를 포함해 모델·Tool·승인·종단·불
 
 새 polling이나 저장 경로를 추가하지 않고 기존 turns 조회를 사용한다. 전송된
 snapshot이 마지막 관측이라는 점을 표시하며, 순간적인 실제 실행 상태나 전체
-진척률을 보장하지 않는다. 초기 준비 뒤의 continuation, agent 진입 전 Task 준비,
-prompt·queue·lock 대기와 모든 병렬 분기의 상세 원장은 여전히 별도 연결이 필요하다.
+진척률을 보장하지 않는다. 초기 준비 뒤의 continuation, 아직 관측하지 않는 상위
+입력·queue·lock 대기와 모든 병렬 분기의 상세 원장은 여전히 별도 연결이 필요하다.
 다른 TUI·Composition 스택을 조합한 실행, 실제 화면과 지연 개선도 아직 확인하지 않았다.
 
 작성한 복합 시나리오는 fiber 자식의 Owner 결속부터 실제 preview JSON과 turns
 decoder, typed TUI 선택, batch·자율 identity, 모르는/중복 metadata 거절, 이름 없는
 provider 관측 뒤 재조회, 새 slot 이전의 늦은 callback까지 다룬다. 이 단위에서는
 실행하지 않았다. source Before/After이며 실제 화면·타입·성능 검증이 아니다.
+
+#### Task 진입에서 프롬프트까지 같은 writer 사용
+
+비교 기준은 `4827e20c6b9a48e5777d8056547aabb72fc87fd0`다. 직접·자율 실행은
+Task 입력을 읽기 직전에 writer를 만들고 `Keeper_agent_run.run_turn`에 그 실제
+capability를 전달한다. agent 진입에서 새 writer를 만들며 앞선 준비 관측을
+교체하지 않는다. 독립적인 agent 진입은 writer를 전달받지 않은 경우 그 자리에서
+시작한다. Keeper 이름·현재 표시·마지막 활동에서 writer를 찾지 않는다.
+
+| 조건 | As-Is | To-Be 소스 경로 |
+| --- | --- | --- |
+| current Task·held Skill·snapshot 읽기 | agent writer 생성 전 구간 | 실제 Task 준비 scope 게시 |
+| Task의 exact Skill 해석·표면 조립 | 완료 후 manifest만 있거나 scope 없음 | 같은 writer의 live Skill scope와 기존 manifest 유지 |
+| agent 진입 | 여기서 writer 생성 | 호출자가 전달한 writer 사용 |
+| context 준비의 원래 turn reference | context 전에는 미관측 | 생산자가 앞서 확정한 reference 유지; 실제 미확정만 null |
+| 프롬프트·history·user-message 조립 | 별도 phase 없음 | `build_turn_context`의 Prompt scope |
+| 자율 journal 생성 전 | 기본 화면에 일반 작업 상태 | 실제 Owner 슬롯의 `현재 작업` 준비 관측 |
+| 그 journal에서 provider 활동 후 늦은 조회 | 이 별도 표시 경로 없음 | 이전 snapshot이 별도 Owner 줄로도 다시 표시되지 않음 |
+
+phase 종류는 context·Tool·Skill의 3개에서 Task·Prompt를 포함한 5개가 된다.
+이는 소스의 구분 가능한 경계 수이며 시간·속도·모델 왕복의 측정값이 아니다.
+새 범위는 직접 실행의 current Task·held Skill·snapshot 읽기, 자율 실행의
+current Task·snapshot 읽기, 양쪽 exact Skill 해석·표면 조립과 agent의 실제
+프롬프트 조립이다. 자율 실행이 인자로 받은 held Skill 관측이나 더 앞선 routing·
+recovery·memory/world-state 조립까지 모두 포함한다는 뜻은 아니다.
+
+writer는 생산자가 생성 시 전달한 원래 turn reference를 별도로 보유한다.
+context 준비는 이 값을 읽으며 이전 preview의 마지막 activity나 history에서 ID를
+유추하지 않는다. 같은 실행이 사용하는 redaction snapshot도 writer에 유지된다.
+성공 경로의 writer/redaction 생성은 진입 시점이 앞당겨지는 것이며, 새 실패 경로의
+생성 비용과 scope·clock·projection 비용은 아직 측정하지 않았다.
+
+값을 반환하는 준비와 Result를 반환하는 준비는 같은 scope lifecycle을 사용한다.
+값·Result·예외·취소의 원래 의미를 바꾸지 않는다. Task 읽기의 `prepared`는 입력
+관측이 끝났다는 뜻이며 Task 존재나 권한을 승인하지 않는다. 기존 Skill manifest의
+capture span은 수집 구간만, live scope span은 report 게시까지 포함한 바깥 구간을
+잰다. 이 둘을 더하거나 같은 시계 구간으로 취급하지 않는다.
+
+기본 채팅의 독립 Owner 관측은 실제 슬롯과 준비 metadata를 보유한 row에서 나온다.
+journal이나 요청 ID를 합성하지 않으며, 대기 요청의 admission도 바꾸지 않는다.
+같은 원래 execution/turn의 journal이 더 나중 활동을 관측했으면 독립 줄도 그
+snapshot을 사용하지 않는다. 계속 필요한 전체 phase 이력·queue·lock·모든 병렬
+분기와 continuation segment의 연결은 별도 작업이다.
+
+작성한 시나리오는 Task의 실제 preview JSON → turns decoder → 독립 Owner 선택,
+journal 전 대기 요청의 identity 보존, 이름 없는 provider 관측 뒤 재표시 거절,
+같은 writer의 Prompt scope와 예외 보존, 실제 Skill 해석·준비의 manifest와 live
+scope 병행을 다룬다. 이 단위에서는 실행하지 않았다. 별칭으로 호출되던 기존
+preview fixture도 현재 필수 identity 인자에 맞췄다. 문법 검사는 타입·동작·실제
+TUI 화면이나 지연 개선을 증명하지 않는다.
 
 ### 2b. 프롬프트 — 지명된 스킬 안내
 

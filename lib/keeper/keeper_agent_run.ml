@@ -896,6 +896,7 @@ let capture_skill_snapshot ~base_path =
            [Keeper_config.keeper_unified_temperature] is the fallback. *)
 let run_turn
       ?event_scope
+      ?preview
       ?observation_token
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
@@ -959,8 +960,11 @@ let run_turn
   let shared_context = match native_resume with
     | Some resumed -> Some (Keeper_direct_native_continuation.restored_context resumed)
     | None -> shared_context in
-  let preview = Some (Keeper_turn_preview.reset ~keeper_name:meta.name
+  let preview = match preview with
+    | Some _ as preview -> preview
+    | None -> Some (Keeper_turn_preview.reset ~keeper_name:meta.name
       ~execution_scope:(Option.map Keeper_repetition_scope.Execution.scope repetition_execution)
+      ~turn_ref:None
       ~now:(Time_compat.now ())
       ~redaction:(Keeper_secret_redaction.snapshot ~base_path:config.base_path
                     ~keeper_name:meta.name)) in
@@ -1060,7 +1064,8 @@ let run_turn
      [Keeper_agent_run_receipt.finalize] never ran: no receipt, and neither
      degraded-retry lane settled. *)
   match
-    Keeper_turn_preview.with_preparation_result ~writer:preview ~turn_ref:None
+    Keeper_turn_preview.with_preparation_result ~writer:preview
+      ~turn_ref:(Option.bind preview Keeper_turn_preview.original_turn_ref)
       ~phase:Keeper_turn_preview.Context_preparation (fun () ->
     Keeper_run_context.prepare_run_context
       ~config
@@ -1199,6 +1204,8 @@ let run_turn
     | None, None -> user_turn_record
   in
   let prompt_ctx =
+    Keeper_turn_preview.with_preparation ~writer:preview ~turn_ref:(Some turn_ref)
+      ~phase:Keeper_turn_preview.Prompt_preparation (fun () ->
     Keeper_run_prompt.build_turn_context
       ~ctx
       ~build_turn_prompt
@@ -1209,7 +1216,7 @@ let run_turn
       ~turn_ref
       ~history_user_source
       ~user_turn_record:prompt_user_turn_record
-      ~start_turn_count
+      ~start_turn_count)
   in
   let turn_system_prompt = match native_resume with
     | Some resumed -> Keeper_direct_native_continuation.system_prompt resumed

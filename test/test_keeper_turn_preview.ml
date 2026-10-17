@@ -6,7 +6,7 @@ open Masc
    serves is redacted across delta boundaries. *)
 
 let reset keeper_name ~now =
-  Keeper_turn_preview.reset ~execution_scope:None ~keeper_name ~now ~redaction:Keeper_secret_redaction.empty
+  Keeper_turn_preview.reset ~execution_scope:None ~turn_ref:None ~keeper_name ~now ~redaction:Keeper_secret_redaction.empty
 ;;
 
 let text_delta text =
@@ -158,7 +158,7 @@ let test_secret_split_across_deltas_never_reaches_the_tail () =
     let first = "deploy with preview-split-" and second = "secret-9931 now\n" in
     Alcotest.(check string) "the second half alone passes plain redaction" second
       (Keeper_secret_redaction.redact_text redaction second);
-    let writer = Some (Keeper_turn_preview.reset ~execution_scope:None ~keeper_name ~now:1. ~redaction) in
+    let writer = Some (Keeper_turn_preview.reset ~execution_scope:None ~turn_ref:None ~keeper_name ~now:1. ~redaction) in
     Keeper_turn_preview.note_stream ~writer ~now:2. (text_delta first);
     Alcotest.(check string) "an unfinished line is held back" "" (tail keeper_name);
     Alcotest.(check bool) "while the activity already shows the response" true
@@ -186,7 +186,7 @@ let test_secret_split_across_deltas_never_reaches_the_tail () =
 
 let test_held_text_is_released_at_the_message_stop () =
   let keeper_name = "held-tail-preview" in
-  let writer = Some (Keeper_turn_preview.reset ~execution_scope:None ~keeper_name ~now:1. ~redaction:Keeper_secret_redaction.empty) in
+  let writer = Some (Keeper_turn_preview.reset ~execution_scope:None ~turn_ref:None ~keeper_name ~now:1. ~redaction:Keeper_secret_redaction.empty) in
   Keeper_turn_preview.note_stream ~writer ~now:2. (text_delta "no newline yet");
   Alcotest.(check string) "held while the line is open" "" (tail keeper_name);
   Keeper_turn_preview.note_stream ~writer ~now:3. Agent_core.Types.MessageStop;
@@ -202,7 +202,7 @@ let test_korean_without_secrets_passes_through_whole () =
   let cut_in_a_syllable = 7 in
   let second_cut = String.length korean - 5 in
   with_secret_redaction ~keeper_name "unrelated-secret-value-5550" (fun redaction ->
-    let writer = Some (Keeper_turn_preview.reset ~execution_scope:None ~keeper_name ~now:1. ~redaction) in
+    let writer = Some (Keeper_turn_preview.reset ~execution_scope:None ~turn_ref:None ~keeper_name ~now:1. ~redaction) in
     List.iteri
       (fun index piece ->
          Keeper_turn_preview.note_stream ~writer ~now:(2. +. float_of_int index)
@@ -237,7 +237,7 @@ let test_late_execution_keeps_successor_preview_and_redactor () =
     let a = Some (reset keeper_name ~now:1.) in
     let emit_a = callbacks a in
     emit_a (text_delta "old unfinished ");
-    let b = Some (Keeper_turn_preview.reset ~execution_scope:None ~keeper_name ~now:2. ~redaction) in
+    let b = Some (Keeper_turn_preview.reset ~execution_scope:None ~turn_ref:None ~keeper_name ~now:2. ~redaction) in
     let emit_b = callbacks b in
     Keeper_turn_preview.note_attempt ~writer:b ~now:3. ~runtime_id:"current";
     emit_b (text_delta "successor-");
@@ -321,7 +321,7 @@ let test_released_source_position_through_turns_decoder () =
   Keeper_turn_preview.note_text ~writer ~now:8. "replacement";
   check_position 7 (String.length "replacement");
   with_secret_redaction ~keeper_name:name "exact-secret" (fun redaction ->
-    let writer = Some (Keeper_turn_preview.reset ~execution_scope:None ~keeper_name:name ~now:9. ~redaction) in
+    let writer = Some (Keeper_turn_preview.reset ~execution_scope:None ~turn_ref:None ~keeper_name:name ~now:9. ~redaction) in
     Keeper_turn_preview.note_stream ~writer ~now:10. (text_delta "before exact-");
     check_position 0 0;
     Keeper_turn_preview.note_stream ~writer ~now:11. (text_delta "secret after\n");

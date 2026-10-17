@@ -27,6 +27,7 @@ let openai_chunk
   ; delta_content
   ; delta_reasoning
   ; delta_reasoning_details
+  ; delta_refusal = false
   ; delta_tool_calls
   ; finish_reason
   ; chunk_usage

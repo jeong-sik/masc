@@ -1428,7 +1428,11 @@ let test_empty_output_limit_classes () =
         let expected = Types.stop_reason_of_string finish_reason in
         (match expected, cause with
          | Types.MaxTokens, EO.Output_limit_reached -> ()
-         | (Types.Refusal | Types.Unknown _), EO.Completion_failed
+         (* A refusal stop is terminal whether or not text accompanied it, so
+            it takes the same typed cause as a non-empty refusal; the raw
+            response (checked above) retains the provider's stop evidence. *)
+         | Types.Refusal, EO.Incomplete_output -> ()
+         | Types.Unknown _, EO.Completion_failed
              { error = Http_client.ProviderFailure
                  { kind = Http_client.Empty_completion { stop_reason }; _ }
              ; dispatch = EO.Generation_dispatch_started } ->

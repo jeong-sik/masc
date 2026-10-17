@@ -1,14 +1,15 @@
 (** Screen dispatch and shared rendering projections.
     Board, Code, MCP resource, Approval, Fusion, Verification, Repository,
     Work, Lanes/Clients, Activity/Logs, System Config, Keepers,
-    System/Runtime/Tools/Metrics, and Overlay/Modal screens are owned by
-    {!Masc_tui_render_board}, {!Masc_tui_render_code},
+    System/Runtime/Tools/Metrics, Overlay/Modal, and Connectors/Browser Lane
+    screens are owned by {!Masc_tui_render_board}, {!Masc_tui_render_code},
     {!Masc_tui_render_resources}, {!Masc_tui_render_approvals},
     {!Masc_tui_render_fusion}, {!Masc_tui_render_verification},
     {!Masc_tui_render_repositories}, {!Masc_tui_render_work},
     {!Masc_tui_render_lanes}, {!Masc_tui_render_activity},
     {!Masc_tui_render_config}, {!Masc_tui_render_keepers},
-    {!Masc_tui_render_runtime} and {!Masc_tui_render_overlays}. *)
+    {!Masc_tui_render_runtime}, {!Masc_tui_render_overlays} and
+    {!Masc_tui_render_connectors}. *)
 
 module Frame_presenter = Masc_tui_frame_presenter
 module Ask_projection = Masc_tui_ask_projection

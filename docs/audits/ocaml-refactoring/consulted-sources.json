@@ -2,6 +2,7 @@
   "baseline": "aea8424926ea79f110315eec5ab429ac51043598",
   "meaning": "Files directly read for named boundaries, callers and scenarios, not complete semantic audits. baseline identifies the initial inventory; a focused reading baseline overrides it. Historical paths remain recorded even after removal by later refactors. Symbol-search-only records remain in discovery_only_sources and are excluded from files and focused_reading_scopes.",
   "files": [
+    "bin/deployment_preflight_helper.ml",
     "bin/masc_tui.ml",
     "bin/masc_tui_async_protocol.ml",
     "bin/masc_tui_async_read.ml",
@@ -41,6 +42,7 @@
     "lib/completion_authority_agent.ml",
     "lib/core/eio_guard.ml",
     "lib/dated_jsonl/dated_jsonl_store.ml",
+    "lib/dune",
     "lib/exec/command_gate/shell_command_gate.ml",
     "lib/exec/exec_dispatch.ml",
     "lib/exec/exec_dispatch.mli",
@@ -73,8 +75,16 @@
     "lib/keeper/keeper_agent_run.ml",
     "lib/keeper/keeper_antigravity_runtime.ml",
     "lib/keeper/keeper_approval_queue.ml",
+    "lib/keeper/keeper_board_attention_partition_generation.ml",
+    "lib/keeper/keeper_board_attention_partition_generation.mli",
     "lib/keeper/keeper_board_attention_worker.ml",
+    "lib/keeper/keeper_board_attention_worker.mli",
+    "lib/keeper/keeper_board_attention_worker_wake.ml",
+    "lib/keeper/keeper_board_attention_worker_wake.mli",
     "lib/keeper/keeper_browser_upload.ml",
+    "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+    "lib/keeper/keeper_chat_media_store.ml",
+    "lib/keeper/keeper_chat_media_store.mli",
     "lib/keeper/keeper_composition_continuation_wake.ml",
     "lib/keeper/keeper_composition_dependency_result.ml",
     "lib/keeper/keeper_composition_dependency_result.mli",
@@ -85,18 +95,47 @@
     "lib/keeper/keeper_librarian_durable_consumer.ml",
     "lib/keeper/keeper_librarian_queue_refresh.ml",
     "lib/keeper/keeper_librarian_runtime.ml",
+    "lib/keeper/keeper_media_reading.ml",
+    "lib/keeper/keeper_media_reading.mli",
     "lib/keeper/keeper_memory_os_current.ml",
+    "lib/keeper/keeper_multimodal_input.ml",
+    "lib/keeper/keeper_multimodal_input.mli",
+    "lib/keeper/keeper_post_turn.ml",
     "lib/keeper/keeper_sandbox_docker.ml",
     "lib/keeper/keeper_tool_composition_surface.ml",
     "lib/keeper/keeper_tool_descriptor.ml",
+    "lib/keeper/keeper_tool_emission_hook.ml",
     "lib/keeper/keeper_tool_execute_runtime.ml",
     "lib/keeper/keeper_tool_execute_typed_input.ml",
     "lib/keeper/keeper_tool_plan_executor.ml",
     "lib/keeper/keeper_tool_runtime.ml",
     "lib/keeper/keeper_tools_agent_core_bundle.ml",
     "lib/keeper/keeper_turn.ml",
+    "lib/keeper/keeper_turn_driver.ml",
+    "lib/keeper/keeper_vision_ingest.ml",
+    "lib/keeper/keeper_vision_ingest.mli",
+    "lib/keeper/keeper_vision_tool.ml",
     "lib/keeper_tooling/execute_shell_ir.ml",
     "lib/keeper_tooling/shell_costume.ml",
+    "lib/multimodal/artifact.mli",
+    "lib/multimodal/dune",
+    "lib/multimodal/keeper_emitter.ml",
+    "lib/multimodal/multimodal_hydrator.mli",
+    "lib/multimodal/multimodal_keeper_bridge.ml",
+    "lib/multimodal/multimodal_keeper_bridge.mli",
+    "lib/multimodal/payload.mli",
+    "lib/multimodal/tool_emission.ml",
+    "lib/multimodal/vision_analyze.ml",
+    "lib/multimodal/vision_analyze.mli",
+    "lib/multimodal/vision_artifact_store.ml",
+    "lib/multimodal/vision_artifact_store.mli",
+    "lib/multimodal/vision_kept_maintenance.ml",
+    "lib/multimodal/vision_kept_maintenance.mli",
+    "lib/multimodal/wirein_helpers.ml",
+    "lib/multimodal/workspace.ml",
+    "lib/multimodal/workspace.mli",
+    "lib/multimodal/workspace_holder.ml",
+    "lib/multimodal/workspace_holder.mli",
     "lib/process/process_eio.ml",
     "lib/runtime/dune",
     "lib/runtime/runtime.ml",
@@ -110,11 +149,14 @@
     "lib/runtime/runtime_provider_usage_window.mli",
     "lib/runtime/runtime_schema.ml",
     "lib/schedule/schedule_domain.mli",
+    "lib/server/keeper_stream_media_accum.ml",
+    "lib/server/keeper_stream_media_accum.mli",
     "lib/server/server_dashboard_runtime_request.ml",
     "lib/server/server_dashboard_runtime_resolved_json.ml",
     "lib/server/server_discord_in_process_gateway.ml",
     "lib/server/server_provider_usage_history.ml",
     "lib/server/server_provider_usage_history.mli",
+    "lib/server/server_routes_http_keeper_stream.ml",
     "lib/server/server_routes_http_routes_activity.ml",
     "lib/server/server_routes_http_routes_channel_gate.ml",
     "lib/server/server_routes_http_routes_dashboard.ml",
@@ -151,12 +193,15 @@
     "packages/agent_core/lib/llm_provider/complete_sync.ml",
     "packages/agent_core/lib/llm_provider/provider_admission.ml",
     "packages/agent_core/lib/llm_provider/provider_admission_state.ml",
+    "packages/agent_core/lib/llm_provider/streaming.ml",
     "packages/agent_core/test/test_agent_lifecycle.ml",
     "packages/agent_core/test/test_execution_event_store.ml",
     "packages/agent_core/test/test_pipeline.ml",
     "packages/agent_core/test/test_provider_admission.ml",
     "packages/agent_core/test/test_wire_parse_dump.ml",
     "test/dune",
+    "test/multimodal/test_vision_artifact_store.ml",
+    "test/multimodal/test_workspace_holder.ml",
     "test/test_auth_token_rotation_transaction.ml",
     "test/test_board_delete_rewrite_requeue.ml",
     "test/test_board_persistence_load_contract.ml",
@@ -168,7 +213,9 @@
     "test/test_exact_output_catalog_precedence.ml",
     "test/test_fusion_config_edit.ml",
     "test/test_fusion_decision.ml",
+    "test/test_gate_keeper_backend.ml",
     "test/test_goal_store.ml",
+    "test/test_h5_media_failover_continuity.ml",
     "test/test_keeper_approval_queue.ml",
     "test/test_keeper_board_attention_worker.ml",
     "test/test_keeper_composition_nested.ml",
@@ -176,6 +223,8 @@
     "test/test_keeper_librarian_cli_lane.ml",
     "test/test_keeper_memory_os_current.ml",
     "test/test_keeper_prompt_metrics.ml",
+    "test/test_keeper_stream_media_accum.ml",
+    "test/test_keeper_turn_driver_failover.ml",
     "test/test_model_inference_metrics.ml",
     "test/test_provider_usage_history_snapshots.ml",
     "test/test_provider_usage_snapshots.ml",
@@ -194,7 +243,8 @@
     "test/test_tui_machine_live.ml",
     "test/test_tui_render_schedule.ml",
     "test/test_tui_runtime_config_edit.ml",
-    "test/test_verification.ml"
+    "test/test_verification.ml",
+    "test/test_vision_kept_maintenance.ml"
   ],
   "focused_reading_scopes": [
     {
@@ -1142,6 +1192,876 @@
         ]
       ],
       "scope": "Live callback-before-completion scenario and full returned chunk concatenation; source only."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/multimodal/dune",
+      "ranges": [
+        [
+          1,
+          11
+        ]
+      ],
+      "scope": "Library membership and dependencies; not a whole-library semantic audit.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "build_declaration",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/multimodal/payload.mli",
+      "ranges": [
+        [
+          1,
+          42
+        ]
+      ],
+      "scope": "Payload representation/serialization contract, including lossy lazy payload rehydration warning; implementation not read.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "interface",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/multimodal/artifact.mli",
+      "ranges": [
+        [
+          1,
+          133
+        ]
+      ],
+      "scope": "Typed artifact identity/provenance/interface contract; implementation not read.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "interface",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/multimodal/multimodal_hydrator.mli",
+      "ranges": [
+        [
+          1,
+          92
+        ]
+      ],
+      "scope": "Hydration identity/effect contract; implementation not read.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "interface",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/multimodal/multimodal_keeper_bridge.mli",
+      "ranges": [
+        [
+          1,
+          85
+        ]
+      ],
+      "scope": "Working-context ingestion interface.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "interface",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/multimodal/vision_analyze.mli",
+      "ranges": [
+        [
+          1,
+          50
+        ]
+      ],
+      "scope": "Pure request/classification interface.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "interface",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/multimodal/vision_kept_maintenance.mli",
+      "ranges": [
+        [
+          1,
+          58
+        ]
+      ],
+      "scope": "Two-pass kept-root maintenance contract.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "interface",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/multimodal/vision_artifact_store.ml",
+      "ranges": [
+        [
+          1,
+          262
+        ]
+      ],
+      "scope": "Content-addressed frame/kept store, prune/unlink outcomes and verified fallback load.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "source_or_scenario",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/multimodal/vision_artifact_store.mli",
+      "ranges": [
+        [
+          1,
+          81
+        ]
+      ],
+      "scope": "Private handle, explicit prune and typed load contracts; completed after initially truncated interface read.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "interface",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/multimodal/vision_kept_maintenance.ml",
+      "ranges": [
+        [
+          1,
+          299
+        ]
+      ],
+      "scope": "Root validation, full reference scan, previous/current candidate intersection, atomic snapshot and deletion order.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "source_or_scenario",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/multimodal/wirein_helpers.ml",
+      "ranges": [
+        [
+          1,
+          70
+        ]
+      ],
+      "scope": "Working-context parse/strip and metadata pure helpers.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "source_or_scenario",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/multimodal/multimodal_keeper_bridge.ml",
+      "ranges": [
+        [
+          1,
+          119
+        ]
+      ],
+      "scope": "Closed artifact kinds, hydration and preserved external-ID metadata.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "source_or_scenario",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/multimodal/workspace_holder.ml",
+      "ranges": [
+        [
+          1,
+          18
+        ]
+      ],
+      "scope": "Atomic immutable snapshot publication and CAS retry.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "source_or_scenario",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/multimodal/workspace.ml",
+      "ranges": [
+        [
+          1,
+          89
+        ]
+      ],
+      "scope": "Immutable artifact registry/timeline/DAG updates.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "source_or_scenario",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/multimodal/tool_emission.ml",
+      "ranges": [
+        [
+          1,
+          76
+        ]
+      ],
+      "scope": "Reserved-key typed extraction and ordered batch emission.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "source_or_scenario",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/multimodal/keeper_emitter.ml",
+      "ranges": [
+        [
+          1,
+          52
+        ]
+      ],
+      "scope": "Working-context emission serialization.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "source_or_scenario",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/multimodal/workspace.mli",
+      "ranges": [
+        [
+          1,
+          101
+        ]
+      ],
+      "scope": "Immutable workspace and DAG-retention public contract.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "interface",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/multimodal/workspace_holder.mli",
+      "ranges": [
+        [
+          1,
+          47
+        ]
+      ],
+      "scope": "Effect-free CAS callback contract and global owner.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "interface",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/keeper/keeper_multimodal_input.mli",
+      "ranges": [
+        [
+          1,
+          83
+        ]
+      ],
+      "scope": "Typed input carrier and request conversion public contract.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "interface",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/keeper/keeper_media_reading.ml",
+      "ranges": [
+        [
+          1,
+          366
+        ]
+      ],
+      "scope": "Audio/PDF reader shell, durable keyed readings, per-walk memo and lazily started deadline.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "source_or_scenario",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/keeper/keeper_media_reading.mli",
+      "ranges": [
+        [
+          1,
+          105
+        ]
+      ],
+      "scope": "Reading identity/cache/deadline and projection interface.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "interface",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/keeper/keeper_chat_media_store.ml",
+      "ranges": [
+        [
+          1,
+          271
+        ]
+      ],
+      "scope": "Generated media MIME table, typed decode/cap/persistence errors, token storage and cleanup.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "source_or_scenario",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/keeper/keeper_chat_media_store.mli",
+      "ranges": [
+        [
+          1,
+          73
+        ]
+      ],
+      "scope": "Generated media persistence and reader-reference contract.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "interface",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/keeper/keeper_tool_emission_hook.ml",
+      "ranges": [
+        [
+          1,
+          121
+        ]
+      ],
+      "scope": "Per-keeper short mutex-protected emitter accumulation and drain effect owner.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "source_or_scenario",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/multimodal/vision_analyze.ml",
+      "ranges": [
+        [
+          1,
+          27
+        ]
+      ],
+      "scope": "Pure request validation and nonempty/empty/truncated extraction classification.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "source_or_scenario",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/server/keeper_stream_media_accum.ml",
+      "ranges": [
+        [
+          1,
+          378
+        ]
+      ],
+      "scope": "Complete durable media state machine, diagnostics and final persistence projection.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "source_or_scenario",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/server/keeper_stream_media_accum.mli",
+      "ranges": [
+        [
+          1,
+          40
+        ]
+      ],
+      "scope": "Abstract accumulator API; exact scope and reload order contract.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "interface",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "test/test_keeper_stream_media_accum.ml",
+      "ranges": [
+        [
+          1,
+          431
+        ]
+      ],
+      "scope": "Real temporary-store public accumulator scenarios; all bodies and registration read, no execution.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "source_or_scenario",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/keeper/keeper_vision_ingest.mli",
+      "ranges": [
+        [
+          1,
+          120
+        ]
+      ],
+      "scope": "Ingestion versus fallback projection, reference passthrough and per-walk cache contract; full reread.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "interface",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/keeper/keeper_vision_ingest.ml",
+      "ranges": [
+        [
+          1,
+          363
+        ]
+      ],
+      "scope": "Image validation/store-before-read, delegated/native carrier policy, eager budget and per-walk memo; missing initial middle supplemented.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "source_or_scenario",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/keeper/keeper_post_turn.ml",
+      "ranges": [
+        [
+          1,
+          160
+        ]
+      ],
+      "scope": "Emitter drain, hydration before CAS, pure workspace update and checkpoint metadata; lifecycle tail not read.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "source_or_scenario",
+      "full_file": false,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/server/server_routes_http_keeper_stream.ml",
+      "ranges": [
+        [
+          1995,
+          2088
+        ],
+        [
+          2155,
+          2220
+        ],
+        [
+          2330,
+          2552
+        ]
+      ],
+      "scope": "Actual turn-local collector creation/raw event feed/runtime attempt boundary, failed-reply persistence, and selected assistant-row persistence: construction at 2370-2373, helper append at 2408-2414, control Assistant_row at 2465-2467, Visible_blocks at 2486-2488, visible spoken reply at 2514-2516. Direct-continuation and Tool_calls_only branches do not use that assistant append; not every successful/control outcome persists media. Not the whole HTTP handler.",
+      "read_at": "mixed: initial ranges 1995-2088 and 2155-2220 carried byte-identically; final pinned source reread 2330-2552 after review",
+      "kind": "source_or_scenario",
+      "full_file": false,
+      "read_baselines": [
+        "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+        "d3e01a8d75986ef32807d10d81c50dfa6d31bebf"
+      ],
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+      "ranges": [
+        [
+          1,
+          145
+        ],
+        [
+          435,
+          470
+        ],
+        [
+          540,
+          665
+        ],
+        [
+          920,
+          1035
+        ],
+        [
+          1110,
+          1185
+        ],
+        [
+          1480,
+          1545
+        ]
+      ],
+      "scope": "Selected live bridge state/scope disposition, runtime reset, media finalization, terminal and failure policies; not whole tool/reasoning bridge.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "source_or_scenario",
+      "full_file": false,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/keeper/keeper_turn_driver.ml",
+      "ranges": [
+        [
+          1400,
+          1450
+        ],
+        [
+          2240,
+          2305
+        ],
+        [
+          2420,
+          2465
+        ]
+      ],
+      "scope": "Real candidate-local projection and one projector per walk; original inputs remain for later candidates. Not whole candidate engine.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "source_or_scenario",
+      "full_file": false,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "test/test_h5_media_failover_continuity.ml",
+      "ranges": [
+        [
+          1,
+          406
+        ]
+      ],
+      "scope": "Observational serialization/projection/checkpoint harness: most equality outcomes are printed, not asserted; not proof of a real provider failover. First span read at final pin, remainder carried from identical initial file.",
+      "read_at": "mixed: final baseline lines 1-260; identical initial file lines 260-406",
+      "kind": "source_or_scenario",
+      "full_file": true,
+      "read_baselines": [
+        "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+        "d3e01a8d75986ef32807d10d81c50dfa6d31bebf"
+      ],
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "bin/deployment_preflight_helper.ml",
+      "ranges": [
+        [
+          475,
+          525
+        ]
+      ],
+      "scope": "Actual kept-root maintenance command consumer, base-path resolution and error aggregation; command not executed.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "source_or_scenario",
+      "full_file": false,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/keeper/keeper_vision_tool.ml",
+      "ranges": [
+        [
+          1,
+          118
+        ],
+        [
+          392,
+          470
+        ],
+        [
+          775,
+          938
+        ]
+      ],
+      "scope": "Latest-main frame/kept store effects, provider request construction, typed structured response classification, candidate result handling and run_vision boundary. Entire initial-to-main delta inspected; most candidate-loop and CLI failure internals not read.",
+      "read_at": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "kind": "source_or_scenario",
+      "full_file": false
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "test/test_gate_keeper_backend.ml",
+      "ranges": [
+        [
+          2564,
+          2735
+        ]
+      ],
+      "scope": "Live bridge native media URL, tool/media conflict, bad base64 and wire-cap scenario bodies; last range ends inside cap scenario, so not a full scenario-suite claim.",
+      "read_at": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "kind": "source_or_scenario",
+      "full_file": false
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "test/test_vision_kept_maintenance.ml",
+      "ranges": [
+        [
+          35,
+          155
+        ]
+      ],
+      "scope": "Real-store referenced/unreferenced/two-pass/reappearing reference/missing-load and symlink refusal scenarios.",
+      "read_at": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "kind": "source_or_scenario",
+      "full_file": false
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "test/multimodal/test_workspace_holder.ml",
+      "ranges": [
+        [
+          93,
+          123
+        ]
+      ],
+      "scope": "Cross-domain CAS publication scenario and suite registration, not executed.",
+      "read_at": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "kind": "source_or_scenario",
+      "full_file": false
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "test/multimodal/test_vision_artifact_store.ml",
+      "ranges": [
+        [
+          245,
+          338
+        ]
+      ],
+      "scope": "Protected-new-frame/future-mtime, invalid-limit, re-store mtime, unlink-failure and verified frame fallback scenarios. Permission-based unlink fixture is not portable proof under privileged runners.",
+      "read_at": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "kind": "source_or_scenario",
+      "full_file": false
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "packages/agent_core/lib/llm_provider/streaming.ml",
+      "ranges": [
+        [
+          270,
+          350
+        ],
+        [
+          3190,
+          3260
+        ]
+      ],
+      "scope": "Actual synthetic media event producer and inline source scenario; Gemini inlineData MediaDelta emission. Other parsers and provider implementations remain outside scope.",
+      "read_at": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "kind": "source_or_scenario",
+      "full_file": false
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/keeper/keeper_multimodal_input.ml",
+      "ranges": [
+        [
+          214,
+          297
+        ],
+        [
+          489,
+          563
+        ]
+      ],
+      "scope": "Exactly one image carrier, URL/file-id validation and MIME/data URL normalization into typed provider blocks; not complete parser/attachment census.",
+      "read_at": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "kind": "source_or_scenario",
+      "full_file": false
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "test/test_keeper_turn_driver_failover.ml",
+      "ranges": [
+        [
+          1070,
+          1185
+        ],
+        [
+          1230,
+          1415
+        ]
+      ],
+      "scope": "Actual project_input_for_attempt with real reading store and injected reader: attachment facts, restarted cache reuse, type identity, shared/lazy deadline and once-per-walk failed-read retry.",
+      "read_at": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "kind": "source_or_scenario",
+      "full_file": false
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/keeper/keeper_board_attention_worker.ml",
+      "ranges": [
+        [
+          1,
+          512
+        ],
+        [
+          1660,
+          1755
+        ],
+        [
+          1950,
+          2255
+        ]
+      ],
+      "scope": "Complete contention scheduler and adjacent separate deferred scheduler; exact-claim contention producer, drain result routing, production scheduler installation/worker lifecycle and For_testing exposure.",
+      "kind": "semantic",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "carry": "Whole-file byte-identical comparison to refreshed main."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/keeper/keeper_board_attention_worker.mli",
+      "ranges": [
+        [
+          1,
+          100
+        ],
+        [
+          150,
+          170
+        ],
+        [
+          320,
+          365
+        ]
+      ],
+      "scope": "Public contention/drain/rearm results, opaque testing schedulers and callback contract; selected surrounding worker contracts only.",
+      "kind": "semantic",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "carry": "Whole-file byte-identical comparison to refreshed main."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/keeper/keeper_board_attention_worker_wake.ml",
+      "ranges": [
+        [
+          1,
+          119
+        ]
+      ],
+      "scope": "Wake registration identity, coalescing request, unregister, resume and await resource state.",
+      "kind": "semantic",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "carry": "Whole-file byte-identical comparison to refreshed main."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/keeper/keeper_board_attention_worker_wake.mli",
+      "ranges": [
+        [
+          1,
+          44
+        ]
+      ],
+      "scope": "Process-local hints versus durable authority and successful Not_registered contract.",
+      "kind": "semantic",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "carry": "Whole-file byte-identical comparison to refreshed main."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/keeper/keeper_keepalive.ml",
+      "ranges": [
+        [
+          400,
+          453
+        ],
+        [
+          1400,
+          1482
+        ]
+      ],
+      "scope": "Actual lane-switch worker installation, Watched_work call, stop promise and heartbeat-finalizer wiring; not full keepalive.",
+      "kind": "semantic",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "carry": "Whole-file byte-identical comparison to refreshed main."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/keeper/keeper_board_attention_partition_generation.ml",
+      "ranges": [
+        [
+          1,
+          24
+        ]
+      ],
+      "scope": "Canonical generation equality/serialization and checked advancement; scheduler must not replace generation identity with time.",
+      "kind": "semantic",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "carry": "Whole-file byte-identical comparison to refreshed main."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/keeper/keeper_board_attention_partition_generation.mli",
+      "ranges": [
+        [
+          1,
+          16
+        ]
+      ],
+      "scope": "Opaque durable generation identity and transition contract.",
+      "kind": "semantic",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "carry": "Whole-file byte-identical comparison to refreshed main."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/dune",
+      "ranges": [
+        [
+          1,
+          50
+        ]
+      ],
+      "scope": "Existing private-module registration and parent library context for a narrow optional rearm-state module.",
+      "kind": "build_declaration",
+      "read_at": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "carry": "Directly reread lines 1-50 at refreshed main; complete delta only removes four private modules from unmerged campaign layers."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "test/test_keeper_board_attention_worker.ml",
+      "ranges": [
+        [
+          1,
+          150
+        ],
+        [
+          960,
+          1295
+        ],
+        [
+          4408,
+          4468
+        ]
+      ],
+      "scope": "Fixture ownership, complete five contention/rescan scenario bodies and registration; adjacent claims read only as context, no suite execution.",
+      "kind": "semantic",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "carry": "Whole-file byte-identical comparison to refreshed main."
     }
   ],
   "discovery_only_sources": [
@@ -1179,6 +2099,181 @@
       "unique_files_after_round": 193,
       "focused_records_after_round": 98,
       "meaning": "21 Exec source/generator/build/test records and 21 lane-planning records. Two Exec governance reads are excluded from these semantic-reading totals. Discovery searches are retained separately. The historical ml/mli census denominator is unchanged."
+    },
+    {
+      "round": 7,
+      "area": "Multimodal/media and Board contention rearm design",
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "raw_direct_or_context_records": 57,
+      "direct_reading_records": 53,
+      "new_unique_paths": 50,
+      "unique_files_after_round": 243,
+      "focused_records_after_round": 151,
+      "new_paths": [
+        "bin/deployment_preflight_helper.ml",
+        "lib/dune",
+        "lib/keeper/keeper_board_attention_partition_generation.ml",
+        "lib/keeper/keeper_board_attention_partition_generation.mli",
+        "lib/keeper/keeper_board_attention_worker.mli",
+        "lib/keeper/keeper_board_attention_worker_wake.ml",
+        "lib/keeper/keeper_board_attention_worker_wake.mli",
+        "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+        "lib/keeper/keeper_chat_media_store.ml",
+        "lib/keeper/keeper_chat_media_store.mli",
+        "lib/keeper/keeper_media_reading.ml",
+        "lib/keeper/keeper_media_reading.mli",
+        "lib/keeper/keeper_multimodal_input.ml",
+        "lib/keeper/keeper_multimodal_input.mli",
+        "lib/keeper/keeper_post_turn.ml",
+        "lib/keeper/keeper_tool_emission_hook.ml",
+        "lib/keeper/keeper_turn_driver.ml",
+        "lib/keeper/keeper_vision_ingest.ml",
+        "lib/keeper/keeper_vision_ingest.mli",
+        "lib/keeper/keeper_vision_tool.ml",
+        "lib/multimodal/artifact.mli",
+        "lib/multimodal/dune",
+        "lib/multimodal/keeper_emitter.ml",
+        "lib/multimodal/multimodal_hydrator.mli",
+        "lib/multimodal/multimodal_keeper_bridge.ml",
+        "lib/multimodal/multimodal_keeper_bridge.mli",
+        "lib/multimodal/payload.mli",
+        "lib/multimodal/tool_emission.ml",
+        "lib/multimodal/vision_analyze.ml",
+        "lib/multimodal/vision_analyze.mli",
+        "lib/multimodal/vision_artifact_store.ml",
+        "lib/multimodal/vision_artifact_store.mli",
+        "lib/multimodal/vision_kept_maintenance.ml",
+        "lib/multimodal/vision_kept_maintenance.mli",
+        "lib/multimodal/wirein_helpers.ml",
+        "lib/multimodal/workspace.ml",
+        "lib/multimodal/workspace.mli",
+        "lib/multimodal/workspace_holder.ml",
+        "lib/multimodal/workspace_holder.mli",
+        "lib/server/keeper_stream_media_accum.ml",
+        "lib/server/keeper_stream_media_accum.mli",
+        "lib/server/server_routes_http_keeper_stream.ml",
+        "packages/agent_core/lib/llm_provider/streaming.ml",
+        "test/multimodal/test_vision_artifact_store.ml",
+        "test/multimodal/test_workspace_holder.ml",
+        "test/test_gate_keeper_backend.ml",
+        "test/test_h5_media_failover_continuity.ml",
+        "test/test_keeper_stream_media_accum.ml",
+        "test/test_keeper_turn_driver_failover.ml",
+        "test/test_vision_kept_maintenance.ml"
+      ],
+      "excluded_readings": [
+        {
+          "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+          "path": "docs/constitution.xml",
+          "ranges": [
+            [
+              1,
+              555
+            ]
+          ],
+          "scope": "Full repository contract; initial full read plus missing-middle supplement.",
+          "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+          "kind": "governance"
+        },
+        {
+          "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+          "path": "docs/guides/CONTRIBUTOR-WORKFLOW.md",
+          "ranges": [
+            [
+              1,
+              352
+            ]
+          ],
+          "scope": "Full contributor procedure and source-review/build restrictions.",
+          "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+          "kind": "governance"
+        },
+        {
+          "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+          "path": ".agents/skills/ocaml-coding/SKILL.md",
+          "ranges": [
+            [
+              1,
+              184
+            ]
+          ],
+          "scope": "OCaml checklist refreshed; no implementation performed.",
+          "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+          "kind": "governance"
+        },
+        {
+          "baseline": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+          "path": "docs/audits/ocaml-refactoring/README.md",
+          "ranges": [
+            [
+              165,
+              190
+            ]
+          ],
+          "scope": "Current K3 candidate, invariants, consumers and historical scenario references. Historical stack document; this path is absent on refreshed main, so its baseline is intentionally not promoted.",
+          "kind": "audit_context"
+        }
+      ],
+      "review_corrections": [
+        {
+          "artifact": "multimodal-round7",
+          "updates": [
+            {
+              "reason": "Independent review P3: earlier success-consumer evidence ended at media-block construction, before actual append and branch selection.",
+              "previous_artifact_sha256": "86c4df40acd5d0cd87aa29fe4f5fbe5c54f9f930a0a5332311393a4ec512b3b8",
+              "review_report": "masc-round7-audit-design-review.md",
+              "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+              "additional_direct_read": {
+                "path": "lib/server/server_routes_http_keeper_stream.ml",
+                "ranges": [
+                  [
+                    2330,
+                    2506
+                  ],
+                  [
+                    2507,
+                    2552
+                  ]
+                ]
+              },
+              "correction": "Extended the existing path, without adding a new consulted file. Directly read the append helper and selected control/media-only branches plus normal Visible_reply/Some invocation. Narrowed claims to those branches; direct-continuation and tool-only outcomes are not asserted to persist media.",
+              "count_effect": "No change: 47 direct paths, 3 governance, 44 source/scenario records."
+            }
+          ]
+        },
+        {
+          "artifact": "k3-design-round7",
+          "updates": [
+            {
+              "reason": "Independent review P3: distinguish subsequent scheduling from request-callback reentrancy.",
+              "previous_artifact_sha256": "f89854be9eccd1fe70531258386157abe057ba725363d2bdad7bea562ecf8548",
+              "review_report": "masc-round7-audit-design-review.md",
+              "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+              "reread": {
+                "path": "test/test_keeper_board_attention_worker.ml",
+                "ranges": [
+                  [
+                    1147,
+                    1237
+                  ]
+                ]
+              },
+              "correction": "Narrow wording correction to the returned-error scenario. Its existing read range already covers this body; no new file/coverage count. True request-callback reentrancy remains separately attributed to 1202-1213."
+            }
+          ]
+        }
+      ],
+      "input_artifacts": [
+        {
+          "name": "multimodal-round7",
+          "sha256": "0d287bf117f8a0ff047c7094001099474c9fe532002ec69a690792378ea31d9b"
+        },
+        {
+          "name": "k3-design-round7",
+          "sha256": "77b8ca21a60c6e6f0d9fa4a59856ac5c212da140097bea28cb32840b5929129d"
+        }
+      ],
+      "meaning": "44 multimodal/media source/interface/build/scenario records and 9 K3 records (8 semantic, 1 build declaration). Three multimodal governance records and one K3 README audit-context record are retained here but excluded from files/focused additions. Interface reads do not imply implementation review. Historical census denominators and previous round counts are unchanged."
     }
   ],
   "generator_inputs": {
@@ -1252,6 +2347,86 @@
           "scope": "Occurrence census only: public Runtime_config_text.remove_runtime_assignment_text and update_runtime_assignment_text at lines 800 and 807."
         }
       ]
+    },
+    {
+      "method": "rg --files and filename filters",
+      "scope": "lib/multimodal and media/vision/audio/image/video names across lib/test/Agent Core; only direct_read_paths count as reads.",
+      "examples": [
+        "lib/multimodal/payload.ml",
+        "lib/multimodal/artifact.ml",
+        "lib/multimodal/multimodal_hydrator.ml",
+        "lib/multimodal/vision_artifact_reference.ml",
+        "lib/server/server_routes_http_routes_multimodal.ml",
+        "lib/keeper/keeper_autonomous_stream.ml",
+        "test/multimodal/test_payload.ml",
+        "test/multimodal/test_multimodal_hydrator.ml"
+      ],
+      "baseline": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "area": "Round 7 multimodal discovery; initial worktree searches, not promoted to final-baseline semantic reads"
+    },
+    {
+      "method": "rg symbol/caller/function-name matches",
+      "scope": "Keeper media/vision producer/consumer and test names; no full read inferred from matches.",
+      "examples": [
+        "lib/keeper/keeper_media_reading_maintenance.ml",
+        "test/test_keeper_media_reading_maintenance.ml",
+        "test/test_keeper_vision_ingest.ml",
+        "test/test_keeper_chat_media_store.ml",
+        "test/test_keeper_turn_driver_accept.ml",
+        "lib/browser_screenshot.ml",
+        "packages/agent_core/lib/llm_provider/complete_stream_state.ml"
+      ],
+      "baseline": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "area": "Round 7 multimodal discovery; initial worktree searches, not promoted to final-baseline semantic reads"
+    },
+    {
+      "method": "Initially truncated interface reads, intentionally omitted from direct accounting",
+      "scope": "Only names and incomplete context were retained.",
+      "examples": [
+        "lib/multimodal/tool_emission.mli",
+        "lib/multimodal/keeper_emitter.mli",
+        "lib/keeper/keeper_vision_tool.mli"
+      ],
+      "baseline": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "area": "Round 7 multimodal discovery; initial worktree searches, not promoted to final-baseline semantic reads"
+    },
+    {
+      "method": "Governance/path discovery",
+      "scope": "Only root AGENTS and docs-site AGENTS discovered; no nested lib/test instructions found in the initial scoped census. Campaign README candidate-name lookup was search-only.",
+      "examples": [],
+      "baseline": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "area": "Round 7 multimodal discovery; initial worktree searches, not promoted to final-baseline semantic reads"
+    },
+    {
+      "baseline": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "paths": [
+        "test/dune"
+      ],
+      "scope": "Read name-list snippets at 470-490 and 824-850 and searched stanza headers; these only establish test name occurrences, not a full build stanza/target dependency review. Excluded from consulted semantic files.",
+      "method": "K3 source/test symbol discovery; excluded from direct-reading totals",
+      "area": "Round 7 Board contention rearm design"
+    },
+    {
+      "baseline": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "paths": [
+        "lib/keeper/keeper_board_attention_partition.ml",
+        "lib/keeper/keeper_board_attention_partition.mli"
+      ],
+      "scope": "Occurrence search for Generation alias/advancement and contention references only. Generation module itself was read directly; no partition persistence audit claimed.",
+      "method": "K3 source/test symbol discovery; excluded from direct-reading totals",
+      "area": "Round 7 Board contention rearm design"
+    },
+    {
+      "baseline": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "scope": "Complete symbol search for make_contention_rearm_scheduler/schedule_contention_rearm/reset_contention_rearms/apply_drain_rearm under lib, bin and test, excluding the owner implementation/interface, found only test/test_keeper_board_attention_worker.ml consumers. This does not enumerate arbitrary aliases or external library users.",
+      "method": "K3 source/test symbol discovery; excluded from direct-reading totals",
+      "area": "Round 7 Board contention rearm design"
+    },
+    {
+      "baseline": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "scope": "Search for contention cancellation test names and fork/sleep cancellation references was discovery only; lack of hits is not a full-suite absence proof.",
+      "method": "K3 source/test symbol discovery; excluded from direct-reading totals",
+      "area": "Round 7 Board contention rearm design"
     }
   ]
 }

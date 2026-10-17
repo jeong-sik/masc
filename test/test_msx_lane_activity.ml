@@ -14,7 +14,7 @@ let with_machine run =
     else Sys.remove path in
   Fun.protect ~finally:(fun () -> ignore (Msx_lane.eject ()); Msx_lane.install_activity_observer None; remove directory)
     (fun () ->
-      ignore (require (Msx_lane.load ~ledger_dir:directory ~boot:Msx_lane.Bare_machine));
+      ignore (require (Msx_lane.For_testing.load_bare_machine ~ledger_dir:directory));
       run directory)
 let off () = current := { !current with msx_enabled = false }
 let rejected name result = match result with
@@ -36,7 +36,7 @@ let test_off_retains () = with_machine @@ fun directory ->
   let before = require (Msx_lane.capture_with_identity ()) in
   let ledger = Msx_lane.ledger () in
   off ();
-  rejected "load" (Msx_lane.load ~ledger_dir:directory ~boot:Msx_lane.Bare_machine);
+  rejected "load" (Msx_lane.For_testing.load_bare_machine ~ledger_dir:directory);
   rejected "step" (Msx_lane.step ~frames:1);
   rejected "settle" (Msx_lane.step_until_change ~max_frames:1);
   rejected "HTTP tick owner" (Msx_lane.step_frame ~frames:1);

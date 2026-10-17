@@ -37,9 +37,8 @@ let with_tick_machine f =
     (fun () ->
       Msx_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
       (match
-         Lane.load
+         Lane.For_testing.load_bare_machine
            ~ledger_dir:dir
-           ~boot:Lane.Bare_machine
        with
        | Ok _ -> ()
        | Error e -> fail (Lane.error_to_string e));
@@ -548,8 +547,8 @@ let test_pre_effect_checkpoint_refusal_settles_refused () =
         ignore (require_ok (Lane.eject ()));
         refuses "save with no machine" ~restore:false "save-without-machine";
         (* The server needs no offline acknowledgement afterwards. *)
-        ignore (require_ok (Lane.load ~ledger_dir:(Filename.concat config.base_path "ledger")
-          ~boot:Lane.Bare_machine));
+        ignore (require_ok (Lane.For_testing.load_bare_machine
+          ~ledger_dir:(Filename.concat config.base_path "ledger")));
         check (option string) "a later save is admitted" (Some "committed")
           (match member "status" (post ~restore:false "save-after-refusals") with
            | Some (`String s) -> Some s | _ -> None))))
@@ -1284,11 +1283,8 @@ let test_encoded_pixel_snapshot () =
            (Result.bind (Msx_lane.read_bios ~dir:roms_dir) (fun triple ->
               Msx_lane.load
                 ~ledger_dir
-                ~boot:
-                  (Msx_lane.Boot_image
-                     { bios = Msx_lane.Present triple
-                     ; image = Msx_lane.Cartridge_file cart_path
-                     }))));
+                ~bios:(Msx_lane.Present triple)
+                ~image:(Msx_lane.Cartridge_file cart_path))));
       let save_path = Filename.concat base_path "before.json" in
       ignore (require (Lane.save ~path:save_path));
       ignore (require (Lane.save ~path:save_path));
@@ -1350,9 +1346,8 @@ let test_encoded_pixel_snapshot () =
       check bool "eject leaves machine empty" true (Lane.frame () = None);
       ignore
         (require
-           (Lane.load
-              ~ledger_dir
-              ~boot:Lane.Bare_machine));
+           (Lane.For_testing.load_bare_machine
+              ~ledger_dir));
       check bool "replacement machine loaded" true (Lane.frame () <> None))
 ;;
 

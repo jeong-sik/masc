@@ -273,6 +273,7 @@ let answered_ask_prompt_upgrade () =
       ~context:"전시 준비 결정"
       ~task_id:"task-101"
       ~goal_id:"goal-original"
+      ~continuation:(Masc.Keeper_continuation_channel.unrouted "approval admission fixture")
       ~asked_at:100.0
       ()
     |> unwrap

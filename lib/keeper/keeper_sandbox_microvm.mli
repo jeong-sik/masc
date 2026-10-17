@@ -278,9 +278,11 @@ val shim_exec_prefix_for :
 (** The prefix the remote lane delivers a framed request through, ending at
     the guest name so the caller appends the shim path.
 
-    The prefix carries the config location and the identity the shim runs
-    under. All three CLIs document the environment entry the first needs
-    ([msb exec] has [-e, --env]).
+    The prefix carries the writable guest [HOME]
+    ({!Keeper_microvm_backend.scratch_guest_root}, so the shim does not inherit
+    an image [HOME] on the read-only rootfs), the config location, and the
+    identity the shim runs under. All three CLIs document the environment
+    entries the first two need ([msb exec] has [-e, --env]).
 
     [container exec --user] documents [name|uid[:gid]] and nerdctl takes
     Docker's. [msb exec --user] documents a guest user name and no numeric form,
@@ -409,7 +411,8 @@ val shim_mount_args : host_dir:string -> string list
 
 val shim_config_content : payload_path:string -> string
 (** [remote_root=<work root>], [path=<payload_path>] and
-    [env_allowlist=<config env names>]: the lines the guest's shim reads.
+    [env_allowlist=<config env names + GIT_CONFIG_GLOBAL>]: the lines the
+    guest's shim reads.
     No [scratch_root]: the boot mounts the scratch filesystem at the shim's
     default ({!Keeper_microvm_backend.scratch_guest_root}), and a shim one
     release behind refuses any key it does not know, failing every request

@@ -58,7 +58,8 @@ val microvm_remote_endpoint_of_running :
 (** The running guest as a remote endpoint (RFC-0400): [container exec] into
     [container_name] delivering the framed request to the mounted shim, the
     work volume as the remote root, the mounted identity snapshot as
-    [GH_CONFIG_DIR], and the config env naming the mounted config. Refused
+    [GH_CONFIG_DIR] (and its derived credential config as
+    [GIT_CONFIG_GLOBAL]), and the config env naming the mounted config. Refused
     for a non-microvm keeper. Pure. *)
 
 val microvm_remote_endpoint :

@@ -95,6 +95,14 @@ type login_lane =
 val config_dir : config:Workspace.config -> keeper_name:string -> string
 val container_config_dir : container_masc_dir:string -> keeper_name:string -> string
 
+val git_config_global_env_name : string
+(** ["GIT_CONFIG_GLOBAL"]: the environment variable pointing git at the
+    derived credential-helper config inside a mounted GitHub CLI directory. *)
+
+val git_credential_config_path : config_dir:string -> string
+(** [<config_dir>/gitconfig]: the derived credential-helper config file
+    inside [config_dir]. *)
+
 val default_hostname : string
 (** The GitHub host a login, a status read and a token read address when the
     caller names none. *)

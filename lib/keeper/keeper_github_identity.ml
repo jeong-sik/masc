@@ -661,6 +661,11 @@ let empty_local_tool_config_snapshot () =
 ;;
 
 let git_credential_config_file_name = "gitconfig"
+let git_config_global_env_name = "GIT_CONFIG_GLOBAL"
+
+let git_credential_config_path ~config_dir =
+  Filename.concat config_dir git_credential_config_file_name
+;;
 
 (* The hostnames this identity is logged into. hosts.yml is gh-owned and
    stable in shape: a top-level key is a line that starts at column zero and
@@ -769,8 +774,9 @@ let docker_args_persistent ~config ~keeper_name ~container_masc_dir =
             ; "-v"
             ; host_dir ^ ":" ^ container_dir ^ ":ro"
             ; "--env"
-            ; "GIT_CONFIG_GLOBAL="
-              ^ Filename.concat container_dir git_credential_config_file_name
+            ; git_config_global_env_name
+              ^ "="
+              ^ git_credential_config_path ~config_dir:container_dir
             ]))
 ;;
 
@@ -825,8 +831,9 @@ let docker_args_for_tool ~config ~keeper_name ~container_masc_dir =
                if has_git_wiring
                then
                  [ "--env"
-                 ; "GIT_CONFIG_GLOBAL="
-                   ^ Filename.concat container_dir git_credential_config_file_name
+                 ; git_config_global_env_name
+                   ^ "="
+                   ^ git_credential_config_path ~config_dir:container_dir
                  ]
                else []
              in

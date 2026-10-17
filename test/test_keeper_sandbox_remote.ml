@@ -197,6 +197,7 @@ let gh_config_dir = "/masc-runtime/.masc/keepers/keeper-a/github-cli"
    what Apple's runtime produces rather than letting this file re-derive it. *)
 let exec_prefix ~cli =
   [ cli; "exec"; "-i"; "--user"; "501:20"; "-w"; remote_root
+  ; "--env"; "HOME=/tmp"
   ; "--env"; "MASC_EXEC_SHIM_CONFIG=" ^ shim_config_path; guest_name ]
 ;;
 

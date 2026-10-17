@@ -21,6 +21,16 @@ val archive_entries_of_json : Yojson.Safe.t -> Yojson.Safe.t list
     file does not exist. *)
 val read_archive_task_ids : Workspace_utils_backend_setup.config -> int list
 
+val read_archived_task_status_r :
+  Workspace_utils_backend_setup.config -> task_id:string ->
+  (Masc_domain.task_status option, string) result
+(** Exact read-only status lookup. The immutable archive identity index shares
+    the existing file-version cache policy and is invalidated by archive writes.
+    Only the requested Task body is decoded. Duplicate requested identities,
+    malformed requested rows and unreadable storage are errors. An unidentified
+    row cannot prove absence; a known unique positive remains observable.
+    [None] means not found in this archive snapshot, not deleted or completed. *)
+
 (** Append [tasks] to [tasks-archive.json]. The tasks given are the current
     copies: each replaces the archive row with the same id, whatever that row
     holds (an older copy, or a row that does not decode as a task). Every other

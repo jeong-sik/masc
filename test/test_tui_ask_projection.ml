@@ -527,7 +527,8 @@ let test_followup_protocol_keeps_exact_identity_and_unknowns () =
     "stimulus_id",`String "original-source";"turn_started_at",`Float 201.;
     "turn_finished_at",`Null;"queue_settled_at",`Null;"queue_cancelled_at",`Null;
     "evidence_complete",`Bool false;
-    "tool_actions", `Assoc ["state", `String "unavailable"]] in
+    "tool_actions", `Assoc ["state", `String "unavailable"];
+    "linked_task", `Assoc ["state", `String "unlinked"]] in
   let fields = ["workspace",`Assoc ["base_path",`String "/workspace";"masc_root",`String "/workspace/.masc"];
     "state_ready",`Bool true;"keeper",`String "alpha";"answer_progress_for",`String "ask-original"] in
   let decode fields progress = Decode.decode_ask_followup ~expected_base_path:"/workspace"
@@ -550,7 +551,37 @@ let test_followup_protocol_keeps_exact_identity_and_unknowns () =
      ("turn_started_at",`Float nan)::List.remove_assoc "turn_started_at" progress;
      ("turn_started_at",`Null)::progress;
      ("state",`String "unknown")::List.remove_assoc "state" progress;
-     List.remove_assoc "evidence_complete" progress];
+     List.remove_assoc "evidence_complete" progress;
+     List.remove_assoc "linked_task" progress];
+  let task = ["state",`String "observed";"task_id",`String "task-original";
+    "location",`String "archive";"observed_at",`Float 203.;
+    "status",`Assoc ["status",`String "done";"assignee",`String "other-worker";
+      "completed_at",`String "2026-10-17T00:00:00Z";"notes",`String "must not retain"]] in
+  let with_task value = ("linked_task",value)::List.remove_assoc "linked_task" progress in
+  let observed_task = decode fields (with_task (`Assoc task)) |> Result.get_ok in
+  Alcotest.(check bool) "original archived phase is independent of turn and Tool observations" true
+    (match observed_task.af_linked_task with
+     | Decode.Ask_task_observed value -> value.akt_task_id="task-original"
+         && value.akt_location=Decode.Ask_task_archive && value.akt_evidence_current
+         && (match value.akt_status with Masc_domain.Done {notes=None;_} -> true
+             | Done {notes=Some _;_} | Todo | Claimed _ | InProgress _ | AwaitingVerification _ | Cancelled _ -> false)
+         && observed_task.af_turn_finished_at=None
+     | Ask_task_unlinked | Ask_task_missing _ | Ask_task_unavailable _ -> false);
+  let bad_task key value = (key,value)::List.remove_assoc key task in
+  List.iter (fun bad -> Alcotest.(check bool) "malformed Task evidence cannot imply completion" true
+    (Result.is_error (decode fields (with_task (`Assoc bad)))))
+    [bad_task "state" (`String "completed");bad_task "task_id" (`String " ");
+     bad_task "location" (`String "recovery");bad_task "observed_at" (`Float nan);
+     ("task_id",`String "duplicate")::task;
+     bad_task "status" (`Assoc ["status",`String "done"]);
+     bad_task "status" (`Assoc ["status",`String "done";"assignee",`String " ";
+       "completed_at",`String "2026-10-17T00:00:00Z"]);
+     bad_task "status" (`Assoc ["status",`String "done";"assignee",`String "owner";
+       "completed_at",`String "invalid"]);
+     bad_task "status" (`Assoc ["status",`String "todo";"status",`String "done"]);
+     bad_task "status" (`Assoc ["status",`String "awaiting_verification";
+       "assignee",`String "owner";"started_at",`String "2026-10-17T00:00:00Z";
+       "submitted_at",`String "2026-10-17T00:00:00Z";"verification_id",`String ""])];
   let actions = `Assoc ["state", `String "observed"; "observed_count", `Int 1;
     "first_recorded_at", `Float 202.; "latest", `Assoc ["execution_id", `String "logical-one";
       "physical_execution_id", `String "physical-one";

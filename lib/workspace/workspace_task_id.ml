@@ -46,6 +46,52 @@ let read_archive_entries_for_write config =
      | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _)
      | None -> Error "the document has no \"tasks\" list")
 
+module Archive_ids = Map.Make (String)
+type archive_identity = Unique of Yojson.Safe.t | Duplicate
+type archive_index = { rows : archive_identity Archive_ids.t; unidentified : bool }
+
+let archive_status_cache : archive_index File_version_cache.t = File_version_cache.create ()
+
+let archive_index config =
+  let decode () =
+    let entries = match read_json_doc config (archive_path config) with
+      | Ok None -> Ok []
+      | Error error -> Error (json_doc_error_to_string error)
+      | Ok (Some (`Assoc fields)) ->
+          (match List.filter (fun (key, _) -> key = "tasks") fields with
+           | [_, `List entries] -> Ok entries
+           | _ -> Error "archive needs one tasks list")
+      | Ok (Some _) -> Error "archive must be an object" in
+    entries |> Result.map (fun entries ->
+      List.fold_left (fun index row ->
+        let identity = match row with
+          | `Assoc fields ->
+              (match List.filter (fun (key, _) -> key = "id") fields with
+               | [_, `String id] when String.trim id <> "" -> Some id
+               | _ -> None)
+          | _ -> None in
+        match identity with
+        | None -> { index with unidentified = true }
+        | Some id ->
+            let entry = if Archive_ids.mem id index.rows then Duplicate else Unique row in
+            { index with rows = Archive_ids.add id entry index.rows })
+        { rows = Archive_ids.empty; unidentified = false } entries) in
+  match config.backend with
+  | Memory _ -> decode ()
+  | FileSystem _ -> File_version_cache.load archive_status_cache (archive_path config) ~decode
+
+let read_archived_task_status_r config ~task_id =
+  let ( let* ) = Result.bind in
+  let* index = archive_index config in
+  match Archive_ids.find_opt task_id index.rows with
+  | Some Duplicate -> Error "archive contains duplicate requested Task identities"
+  | Some (Unique row) ->
+      let* _task = task_of_yojson row in
+      Task_status_observation.of_yojson row
+      |> Result.map Option.some
+  | None when index.unidentified -> Error "archive has unidentified rows; requested Task absence is unconfirmed"
+  | None -> Ok None
+
 (** Append tasks to archive file (tasks-archive.json).
 
     The read->merge->write sequence is wrapped in [with_file_lock] so
@@ -95,7 +141,8 @@ let append_archive_tasks config (tasks : task list) =
           ("tasks", `List (kept @ appended));
           ("last_updated", `String (now_iso ()));
         ] in
-        write_json_result config arch_path archive_json
+        Fun.protect ~finally:(fun () -> File_version_cache.forget archive_status_cache arch_path)
+          (fun () -> write_json_result config arch_path archive_json)
         |> Result.map_error (fun detail ->
              Printf.sprintf "tasks-archive.json could not be written: %s" detail))
 
@@ -133,7 +180,8 @@ let drop_archive_tasks config ~ids =
         ("tasks", `List kept);
         ("last_updated", `String (now_iso ()));
       ] in
-      write_json config arch_path archive_json)
+      Fun.protect ~finally:(fun () -> File_version_cache.forget archive_status_cache arch_path)
+        (fun () -> write_json config arch_path archive_json))
 
 let task_ids_of_event_json json =
   [ Json_util.get_string json "task"; Json_util.get_string json "task_id" ]

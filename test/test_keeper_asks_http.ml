@@ -131,6 +131,9 @@ let test_original_questions_are_bound_to_receiving_workspace () =
           ~expected_masc_root:root ~keeper_name:name ~ask_id:ask.ask_id body |> valid Fun.id in
       check bool "queued delivery alone cannot invent turn entry" true
         (observed.af_turn_started_at=None && observed.af_turn_finished_at=None);
+      check bool "HTTP and production decoder preserve absence of original Task binding" true
+        (match observed.af_linked_task with Tui_decode_asks.Ask_task_unlinked -> true
+         | Ask_task_unavailable _ | Ask_task_missing _ | Ask_task_observed _ -> false);
       let status,_ = wire_response ~router (followup_path ^ "&answer_progress_for=another") in
       check int "ambiguous question identity is rejected" 400 status;
       let status,_ = wire_response ~router (path ^ "?answer_progress_for=" ^ ask.ask_id ^ "&" ^ query) in

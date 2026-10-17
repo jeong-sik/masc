@@ -48,11 +48,27 @@ type tool_actions = {
     duplicate physical identities leave evidence unavailable. No start or
     unfinished native-action claim. *)
 
+type linked_task =
+  | Task_unlinked
+  | Task_missing of string
+  | Task_unavailable of { task_id : string; detail : string }
+  | Task_observed of {
+      task_id : string;
+      location : Workspace_query.task_status_location;
+      status : Masc_domain.task_status;
+      observed_at : float;
+    }
+(** Current lookup of the Task ID on the canonical original question. A Task's
+    actual phase is independent of answer delivery, turn boundaries and Tool
+    results. This association proves neither answer causation nor whole-work
+    completion and grants no claim/resume authority. No current-Task fallback. *)
+
 type followup = {
   answered_at : float;
   stimulus_id : string;
   reactions : Keeper_reaction_ledger.event_queue_reaction_evidence_outcome;
   tool_actions : (tool_actions, string) result;
+  linked_task : linked_task;
 }
 
 val observe_followup :
@@ -65,8 +81,9 @@ val observe_followup :
 
 val followup_to_json : followup -> Yojson.Safe.t
 (** Source identity, canonical answer time, reaction clocks, any first
-    quarantine reason code and known physical Tool result metadata; no question,
-    answer text or responder identity. *)
+    quarantine reason code, known physical Tool results and linked Task status
+    metadata. No question, answer text, responder identity, Task
+    title/description, completion notes or reason. *)
 
 type failure = { keeper_name : string option; ask_id : string option; error : error }
 type report =

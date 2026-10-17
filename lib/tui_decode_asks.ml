@@ -202,6 +202,19 @@ type ask_tool_actions =
       at_evidence_current : bool;
     }
 
+type ask_task_location = Ask_task_backlog | Ask_task_archive
+type ask_linked_task =
+  | Ask_task_unlinked
+  | Ask_task_missing of string
+  | Ask_task_unavailable of string
+  | Ask_task_observed of {
+      akt_task_id : string;
+      akt_location : ask_task_location;
+      akt_status : Masc_domain.task_status;
+      akt_observed_at : float;
+      akt_evidence_current : bool;
+    }
+
 type ask_followup = {
   af_answered_at : float;
   af_stimulus_id : string;
@@ -211,6 +224,7 @@ type ask_followup = {
   af_queue_cancelled_at : float option;
   af_evidence_complete : bool;
   af_tool_actions : ask_tool_actions;
+  af_linked_task : ask_linked_task;
 }
 
 let decode_ask_followup ~expected_base_path ~expected_masc_root ~keeper_name ~ask_id json =
@@ -287,8 +301,32 @@ let decode_ask_followup ~expected_base_path ~expected_masc_root ~keeper_name ~as
                    Ok (Ask_tools_observed {at_count;at_first_recorded_at;at_latest;at_evidence_current=true})
                | _ -> Error "answer Tool count and observation clocks disagree")
           | _ -> Error "unknown answer Tool observation state" in
+        let* linked = single progress "linked_task" in
+        let* linked_state = string linked "state" in
+        let task_id () = let* value = string linked "task_id" in
+          if String.trim value = "" then Error "linked Task identity is blank" else Ok value in
+        let* af_linked_task = match linked_state with
+          | "unlinked" ->
+              (match linked with
+               | `Assoc [_] -> Ok Ask_task_unlinked
+               | _ -> Error "unlinked Task observation contains a binding or extra evidence")
+          | "missing" -> let* id = task_id () in Ok (Ask_task_missing id)
+          | "unavailable" -> let* id = task_id () in Ok (Ask_task_unavailable id)
+          | "observed" ->
+              let* akt_task_id = task_id () in
+              let* location = string linked "location" in
+              let* akt_location = match location with
+                | "backlog" -> Ok Ask_task_backlog | "archive" -> Ok Ask_task_archive
+                | _ -> Error "unknown linked Task location" in
+              let* observed_at = single linked "observed_at" in
+              let* akt_observed_at = finite observed_at in
+              let* status = single linked "status" in
+              let* akt_status = Task_status_observation.of_yojson status in
+              Ok (Ask_task_observed {akt_task_id; akt_location; akt_status; akt_observed_at;
+                akt_evidence_current = true})
+          | _ -> Error "unknown linked Task observation state" in
         Ok {af_answered_at;af_stimulus_id;af_turn_started_at;af_turn_finished_at;
-            af_queue_settled_at;af_queue_cancelled_at;af_evidence_complete;af_tool_actions}
+            af_queue_settled_at;af_queue_cancelled_at;af_evidence_complete;af_tool_actions;af_linked_task}
     | _ -> Error "unknown answer follow-up state"
 
 type ask_answer_delivery =

@@ -295,11 +295,11 @@ let with_persistence f =
     (fun () -> f config ensure_keeper)
 ;;
 
-let persist_answer ~base_path ~keeper_name ~ask_id ?(answered_at = 200.) () =
+let persist_answer ~base_path ~keeper_name ~ask_id ?task_id ?(answered_at = 200.) () =
   let continuation = Keeper_continuation_channel.dashboard ~thread_id:"original-ask-thread" |> Result.get_ok in
   let ask = Keeper_ask.ask ~ask_id ~keeper_name
       ~questions:[ question ~id:"q1" ~header:"deploy" ~choices:[ choice ~id:"c1" ~label:"yes" ] ]
-      ~context:"original task" ~continuation ~asked_at:100. () |> Result.get_ok in
+      ~context:"original task" ?task_id ~continuation ~asked_at:100. () |> Result.get_ok in
   (match Keeper_ask_store.record_ask ~base_path ask with
    | Ok () -> () | Error error -> fail error);
   (match Keeper_ask_store.answer ~base_path ~keeper_name ~ask_id
@@ -599,6 +599,87 @@ let test_followup_reads_exact_source_without_waking () =
      | _ -> false)
 ;;
 
+let test_followup_keeps_original_task_through_archive_and_read_failure () =
+  with_persistence @@ fun config ensure_keeper ->
+  let base_path = config.Workspace.base_path and keeper_name = "alpha" in
+  ensure_keeper keeper_name;
+  let create title = match Workspace_task_create.add_task_with_result config
+      ~title ~priority:3 ~description:"private Task description" with
+    | Ok created -> created.task_id
+    | Error error -> fail (Workspace_task_create.add_task_error_to_string error) in
+  let original_id = create "original question Task" in
+  let unrelated_id = create "a later unrelated Task" in
+  let backlog () = Workspace_backlog.read_backlog_r config |> Result.get_ok in
+  let original = List.find (fun (task : Masc_domain.task) -> task.id = original_id) (backlog ()).tasks in
+  let unrelated = List.find (fun (task : Masc_domain.task) -> task.id = unrelated_id) (backlog ()).tasks in
+  let replace tasks = Workspace_utils.with_file_lock config (Workspace_backlog.backlog_lock_path config)
+      (fun () -> Workspace_backlog.write_backlog config {(backlog ()) with tasks}) in
+  let at = "2026-10-17T00:00:00Z" in
+  let done_status : Masc_domain.task_status = Done {assignee="other-worker";completed_at=at;notes=Some "private notes"} in
+  let in_progress : Masc_domain.task_status = InProgress {assignee="replacement-worker";started_at=at} in
+  replace [{original with task_status=in_progress};{unrelated with task_status=done_status}];
+  let ask = persist_answer ~base_path ~keeper_name ~ask_id:"original-task" ~task_id:original_id () in
+  let resolution ask = match Keeper_ask_store.rows_result ~base_path ~keeper_name with
+    | Ok (Keeper_ask_store.Stored_rows rows) -> snd (List.assoc ask.Keeper_ask.ask_id rows)
+    | Ok Missing_log -> fail "canonical answer disappeared"
+    | Error error -> fail (Keeper_ask_store.read_error_to_string error) in
+  let observe ask = match Wake.observe_followup ~base_path ~keeper_name ~ask ~resolution:(resolution ask) with
+    | Ok value -> value | Error detail -> fail detail in
+  let check_status label location status = match (observe ask).linked_task with
+    | Wake.Task_observed value ->
+        check string (label ^ " original Task") original_id value.task_id;
+        check bool (label ^ " phase and source") true
+          (value.location=location && value.status=status && Float.is_finite value.observed_at)
+    | Task_unlinked | Task_missing _ | Task_unavailable _ -> fail (label ^ ": Task not observed") in
+  check_status "different worker and unrelated Done" Workspace_query.Task_backlog in_progress;
+  let submitted : Masc_domain.task_status = AwaitingVerification
+      {assignee="replacement-worker";started_at=at;submitted_at=at;verification_id="verification-original"} in
+  replace [{original with task_status=submitted}];
+  check_status "submission is awaiting verification" Workspace_query.Task_backlog submitted;
+  let archived = {original with task_status=done_status} in
+  Workspace_task_id.append_archive_tasks config [archived] |> Result.get_ok;
+  replace [{unrelated with task_status=done_status}];
+  let done_metadata : Masc_domain.task_status = Done {assignee="other-worker";completed_at=at;notes=None} in
+  check_status "archived original" Workspace_query.Task_archive done_metadata;
+  let wire = Wake.followup_to_json (observe ask) |> Yojson.Safe.to_string in
+  List.iter (fun secret -> check bool "free text excluded" false (contains wire secret))
+    ["private notes";"private Task description";"original question Task"];
+  let cancelled : Masc_domain.task_status = Cancelled {cancelled_by="operator";cancelled_at=at;reason=None} in
+  Workspace_task_id.append_archive_tasks config [{original with task_status=cancelled}] |> Result.get_ok;
+  check_status "archive rewrite invalidates index" Workspace_query.Task_archive cancelled;
+  Workspace_task_id.drop_archive_tasks config ~ids:[original_id];
+  check bool "missing remains unobserved" true
+    (match (observe ask).linked_task with Task_missing id -> id=original_id
+     | Task_unlinked | Task_observed _ | Task_unavailable _ -> false);
+  let write_archive rows = Workspace_utils.write_json config (Workspace_utils.archive_path config)
+      (`Assoc ["tasks",`List rows;"last_updated",`String at]) in
+  let original_json = Masc_domain.task_to_yojson archived in
+  write_archive [original_json;`Assoc ["id",`String unrelated_id;"status",`String "corrupt"]];
+  check_status "unrelated known-id corrupt row" Workspace_query.Task_archive done_metadata;
+  write_archive [original_json;original_json];
+  check bool "duplicate original identity is unavailable" true
+    (match (observe ask).linked_task with Task_unavailable {task_id;_} -> task_id=original_id
+     | Task_unlinked | Task_observed _ | Task_missing _ -> false);
+  write_archive [`Assoc ["status",`String "done"]];
+  check bool "unidentified row cannot prove absence" true
+    (match (observe ask).linked_task with Task_unavailable _ -> true
+     | Task_unlinked | Task_observed _ | Task_missing _ -> false);
+  replace [{original with task_status=in_progress}];
+  Workspace_task_id.drop_archive_tasks config ~ids:[original_id];
+  check_status "restored primary" Workspace_query.Task_backlog in_progress;
+  replace [{original with task_status=done_status}];
+  write_archive [original_json];
+  Workspace_utils.write_json config (Workspace_backlog.backlog_path config) (`String "broken primary");
+  check bool "recovery and archive cannot replace unreadable primary" true
+    (match (observe ask).linked_task with Task_unavailable _ -> true
+     | Task_unlinked | Task_observed _ | Task_missing _ -> false);
+  let unlinked = persist_answer ~base_path ~keeper_name ~ask_id:"no-task" () in
+  check bool "unlinked question does not need Task storage" true
+    (match (observe unlinked).linked_task with Task_unlinked -> true
+     | Task_unavailable _ | Task_observed _ | Task_missing _ -> false);
+  check int "observation never enqueued an answer" 0 (List.length (pending_asks ~base_path ~keeper_name))
+;;
+
 let test_followup_queue_settlement_does_not_invent_a_turn () =
   with_persistence @@ fun config ensure_keeper ->
   let base_path = config.Workspace.base_path and keeper_name = "alpha" in
@@ -723,7 +804,9 @@ let test_followup_matches_committed_answer_input_tool_rows () =
 let () =
   run "keeper_ask_answer_wake"
     [ ( "wake"
-      , [ test_case "Tool followup binds exact canonical answer inputs and committed rows" `Quick
+      , [ test_case "original linked Task survives archive and read failure" `Quick
+            test_followup_keeps_original_task_through_archive_and_read_failure
+        ; test_case "Tool followup binds exact canonical answer inputs and committed rows" `Quick
             test_followup_matches_committed_answer_input_tool_rows
         ; test_case "queue settlement does not invent a turn" `Quick
             test_followup_queue_settlement_does_not_invent_a_turn

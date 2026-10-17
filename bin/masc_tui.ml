@@ -16527,11 +16527,17 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       if Masc_tui_types.take_early_surface_read state
           ~ticket:early.ed_ticket ~authority:early.ed_authority
           ~identity:early.ed_identity ~request:early.ed_request ~source then begin
+        let kind, full_started_ns = match Surface_read_order.request_kind early.ed_request with
+          | Surface_read_order.Full -> "full", state.http_refresh_started_ns
+          | Navigation -> "navigation", None
+          | Independent -> "independent", None in
         apply_http_dataset state early.ed_dataset;
         Log.Transport.info
-          "tui_dataset_early request=%d started_ns=%Ld admitted_ns=%Ld source=%s outcome=%s"
+          "tui_dataset_early request=%d kind=%s started_ns=%Ld full_refresh_started_ns=%s admitted_ns=%Ld source=%s outcome=%s"
           (Surface_read_order.request_id early.ed_request)
-          (Surface_read_order.started_ns early.ed_request) (Mtime_clock.elapsed_ns ())
+          kind (Surface_read_order.started_ns early.ed_request)
+          (match full_started_ns with Some started -> Int64.to_string started | None -> "unrecorded")
+          (Mtime_clock.elapsed_ns ())
           (Surface_read_order.source_name source)
           (if http_dataset_received early.ed_dataset then "received" else "failed")
       end

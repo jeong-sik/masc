@@ -179,7 +179,12 @@ Keeper, or prove a Tool effect. Existing Work snapshot/cursor/draft retention on
 failure remains the data application's policy.
 
 `tui_dataset_early` records the admitted dataset source, original request ID,
-monotonic `started_ns` and `admitted_ns`, and `outcome=received|failed`. Its scope
+collector kind, monotonic `started_ns` and `admitted_ns`, and
+`outcome=received|failed`. A full collector also records its own
+`full_refresh_started_ns`, which joins the terminal `tui_http_refresh` clock,
+including cold-start acknowledgement. Navigation/independent readers record
+`unrecorded` for that full-refresh field; an overlapping full pass is not their
+dispatch origin. Its scope
 is UI-state admission; failed samples are not usable-data latency. No dataset
 body, question, answer or workspace path is copied to this log. Join the request
 with `tui_surface_read_finished`; full-refresh source execution and terminal

@@ -45,6 +45,11 @@ val of_yojson : Yojson.Safe.t -> (t, string) result
 type admission =
   | Direct_request of Keeper_operation_id.t
   | Admitted of Keeper_event_queue_state.pending_selection list
+      (** One intake batch taken once from one durable queue state, which keeps a
+          single entry per stimulus identity ([uniq_stimuli] on admission,
+          [validate_state] on decode). [snapshot_ref] hashes the whole stimulus, so
+          the same [snapshot_ref] + [admitted_revision] cannot appear twice; a
+          duplicate is a fabricated batch and {!from_admission} refuses it. *)
   | Unavailable
 
 val from_admission : admission -> turn_ref:Ids.Turn_ref.t -> (t, string) result

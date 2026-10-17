@@ -69,7 +69,7 @@ let wiki_root ~base_path = Config_dir_resolver.wiki_dir ~base_path
    wiki page shows up as one whose header does not read. *)
 let list_pages ~base_path =
   let dir = wiki_root ~base_path in
-  if Sys.file_exists dir && Sys.is_directory dir then
+  if Sys.file_exists dir then
     Sys.readdir dir
     |> Array.to_list
     |> List.filter (fun f ->
@@ -711,7 +711,7 @@ let find_operation name =
 let dispatch ctx ~name ~args : Tool_result.result option =
   let start = Tool_timing.start () in
   let lift r = Some r in
-  match find_operation name with
+  try match find_operation name with
   | None -> None
   | Some Tool_schemas_wiki.List_pages ->
     lift (handle_list ~tool_name:name ~start_time:start ctx args)
@@ -725,6 +725,8 @@ let dispatch ctx ~name ~args : Tool_result.result option =
     lift (handle_search ~tool_name:name ~start_time:start ctx args)
   | Some Tool_schemas_wiki.Lint_pages ->
     lift (handle_lint ~tool_name:name ~start_time:start ctx args)
+  with Sys_error detail ->
+    Some (runtime_err ~tool_name:name ~start_time:start detail)
 
 (* ================================================================ *)
 (* Tool_spec registration                                           *)

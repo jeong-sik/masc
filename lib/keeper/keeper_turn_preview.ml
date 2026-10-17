@@ -7,6 +7,7 @@ type activity = Preparing | Awaiting_response | Receiving_response | Tool_observ
 
 type preparation_phase = Task_preparation | World_preparation | Context_preparation | Prompt_preparation
   | Tool_preparation | Skill_preparation
+  | Lane_inputs_preparation | Workspace_memory_preparation | Wiki_preparation
 type preparation_outcome = Prepared | Rejected | Raised | Cancelled
 type preparation_state =
   | Preparation_active
@@ -337,6 +338,9 @@ let preparation_phase_name = function
   | Prompt_preparation -> "prompt"
   | Tool_preparation -> "tools"
   | Skill_preparation -> "skills"
+  | Lane_inputs_preparation -> "lane_inputs"
+  | Workspace_memory_preparation -> "workspace_memory"
+  | Wiki_preparation -> "wiki"
 ;;
 
 let preparation_outcome_name = function
@@ -373,6 +377,9 @@ let preparation_of_json json =
     | `String "prompt" -> Ok Prompt_preparation
     | `String "tools" -> Ok Tool_preparation
     | `String "skills" -> Ok Skill_preparation
+    | `String "lane_inputs" -> Ok Lane_inputs_preparation
+    | `String "workspace_memory" -> Ok Workspace_memory_preparation
+    | `String "wiki" -> Ok Wiki_preparation
     | _ -> Error "unknown preparation phase" in
   let* turn_ref = match field "turn_ref" with
     | `Null -> Ok None

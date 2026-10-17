@@ -5,15 +5,33 @@ type t =
   }
 
 let observe ?preview ~(config : Workspace.config) ~keeper_name () =
+  let turn_ref = Option.bind preview Keeper_turn_preview.original_turn_ref in
   Keeper_turn_preview.with_preparation ~writer:preview
-    ~turn_ref:(Option.bind preview Keeper_turn_preview.original_turn_ref)
+    ~turn_ref
     ~phase:Keeper_turn_preview.World_preparation (fun () ->
-      let lane () = Domain_pool_ref.submit_io_or_inline (fun () ->
-        Lane_addon_subscription.observe ~config ~keeper_name) in
-      let memory () = Domain_pool_ref.submit_io_or_inline (fun () ->
-        Workspace_memory_ledger.observe ~base_path:config.base_path) in
-      let wiki () = Domain_pool_ref.submit_io_or_inline (fun () ->
-        Keeper_wiki_contents.observe ~base_path:config.base_path) in
+      let lane () =
+        Keeper_turn_preview.with_preparation_result ~writer:preview ~turn_ref
+          ~phase:Keeper_turn_preview.Lane_inputs_preparation (fun () ->
+            Domain_pool_ref.submit_io_or_inline (fun () ->
+              Lane_addon_subscription.observe ~config ~keeper_name)) in
+      let memory () =
+        Keeper_turn_preview.with_preparation_result ~writer:preview ~turn_ref
+          ~phase:Keeper_turn_preview.Workspace_memory_preparation (fun () ->
+            let observed = Domain_pool_ref.submit_io_or_inline (fun () ->
+              Workspace_memory_ledger.observe ~base_path:config.base_path) in
+            match observed with
+            | Workspace_memory_ledger.Unavailable _ -> Error observed
+            | Missing | Available _ -> Ok observed)
+        |> Result.fold ~ok:Fun.id ~error:Fun.id in
+      let wiki () =
+        Keeper_turn_preview.with_preparation_result ~writer:preview ~turn_ref
+          ~phase:Keeper_turn_preview.Wiki_preparation (fun () ->
+            let observed = Domain_pool_ref.submit_io_or_inline (fun () ->
+              Keeper_wiki_contents.observe ~base_path:config.base_path) in
+            match observed with
+            | Keeper_wiki_contents.Unlisted _ -> Error observed
+            | Off | Listed _ -> Ok observed)
+        |> Result.fold ~ok:Fun.id ~error:Fun.id in
       let lane_updates,workspace_memory,wiki_contents =
         match Eio_guard.execution_context () with
         | Eio_guard.Eio_fiber ->

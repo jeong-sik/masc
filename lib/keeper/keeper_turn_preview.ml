@@ -5,7 +5,7 @@
 
 type activity = Preparing | Awaiting_response | Receiving_response | Tool_observed | Failed
 
-type preparation_phase = Task_preparation | Context_preparation | Prompt_preparation
+type preparation_phase = Task_preparation | World_preparation | Context_preparation | Prompt_preparation
   | Tool_preparation | Skill_preparation
 type preparation_outcome = Prepared | Rejected | Raised | Cancelled
 type preparation_state =
@@ -288,6 +288,7 @@ let note_stream ~writer ~now event =
 
 let preparation_phase_name = function
   | Task_preparation -> "task"
+  | World_preparation -> "world"
   | Context_preparation -> "context"
   | Prompt_preparation -> "prompt"
   | Tool_preparation -> "tools"
@@ -323,6 +324,7 @@ let preparation_of_json json =
     | _ -> Error ("preparation " ^ key ^ " must be a finite number") in
   let* phase = match field "phase" with
     | `String "task" -> Ok Task_preparation
+    | `String "world" -> Ok World_preparation
     | `String "context" -> Ok Context_preparation
     | `String "prompt" -> Ok Prompt_preparation
     | `String "tools" -> Ok Tool_preparation

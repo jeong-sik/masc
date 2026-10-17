@@ -437,6 +437,43 @@ scope 병행을 다룬다. 이 단위에서는 실행하지 않았다. 별칭으
 preview fixture도 현재 필수 identity 인자에 맞췄다. 문법 검사는 타입·동작·실제
 TUI 화면이나 지연 개선을 증명하지 않는다.
 
+#### 직접·자율 실행의 공통 world 입력 병렬 조회
+
+비교 기준은 `65bfac964a57e7e3d20e7ba0dc8575665ee25444`다.
+`Keeper_turn_shared_inputs.observe`는 실제 두 진입 경로가 읽는 Lane 구독 참조,
+workspace memory 관측, wiki 목차를 함께 준비한다. 각 출처는 기존 권한·오류·
+부재 의미를 유지하며, 반환값이 다른 출처의 입력이 아닌 세 조회만 병렬로 묶는다.
+
+| 조건 | As-Is | To-Be 소스 경로 |
+| --- | --- | --- |
+| Eio 직접·자율 실행 | pool 조회 결과를 하나씩 기다린 뒤 다음 조회 시작 | 세 조회를 nested `Eio.Fiber.pair`로 시작하고 합류 |
+| IO worker 정책 | 각 조회의 `submit_io_or_inline` | 같은 정책 유지; worker 안의 자식도 재제출하지 않음 |
+| Eio 밖 호출 | 순차 조회 | 그대로 순차 조회; Eio effect를 새로 요구하지 않음 |
+| 출처가 typed unavailable 반환 | 출처별 오류·부재 값 | 다른 출처 결과와 함께 보존; 성공으로 변환하지 않음 |
+| 준비 표시 | 앞선 Skill 완료 뒤 이 구간을 구분하지 못함 | 원래 writer·turn reference의 `world` phase |
+| 로그·workspace gauge | 두 진입부의 중복 코드 | 세 조회 합류 뒤 호출 fiber에서 한 번 기록 |
+
+관측은 하나의 실제 바깥 scope다. 각 병렬 분기의 이력이나 atomic cross-store
+snapshot을 합성하지 않는다. 조립 결과와 실제 제공 Tools에 따른 권한 projection은
+기존 경로가 계속 결정한다. 조회는 구독 output을 소비·acknowledge하지 않는다.
+
+독립 조회 시간 `L`, `M`, `W`의 소스 critical path 목표는 `L+M+W`에서
+`max(L,M,W)+scheduling/join 비용`으로 옮기는 것이다. 이것은 의존성 구조의
+비교이며 시간 절감 실측값이 아니다. pool 용량·공유 lock·동기 IO가 겹침을
+제한할 수 있고, pool이 없으면 모든 읽기가 실제로 겹친다고 보장하지 않는다.
+
+실제 private Lane 참조·소비되지 않은 원래 receipt·정상 wiki 목차와 손상된 memory
+ledger를 함께 읽는 복합 시나리오를 작성했다. Eio 밖, Eio 안의 pool 부재, 단일
+pool worker와 그 worker 내부의 재진입, 원래 Owner와 turn reference, strict preview
+decoder를 다룬다. 이 단위에서는 실행하지 않았다. 타입·실제 겹침·TUI frame·
+최신 native/model Before/After는 확인하지 않았다.
+
+예외·취소는 재시도하지 않고 호출자에게 전파한다. 기존 executor는 caller의
+result wait 취소만으로 이미 수락한 worker의 정지를 보장하지 않는다. 이 단위는
+worker 취소 전달을 구현했다고 주장하지 않으며, 해당 primitive의 실제 worker
+수명·취소 전달은 후속 수리 대상이다. repository freshness·recent work·초기
+world snapshot·routing/recovery는 이번 세 조회 범위에 포함하지 않는다.
+
 ### 2b. 프롬프트 — 지명된 스킬 안내
 
 `task.skills`(`masc_add_task`가 지정, `lib/task/tool_task_handlers.ml`의

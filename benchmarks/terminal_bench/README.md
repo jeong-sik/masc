@@ -127,7 +127,7 @@ CPU 24개가 필요하다. CPU 가 16개인 Mac 에서는 로컬 docker 로 동�
 
 | arm | 구성 |
 |---|---|
-| a | 같은 모델, harbor 기본 에이전트 (anthropic → `claude-code`, kimi_coding → `kimi-cli`) |
+| a | 같은 모델의 CLI (anthropic → Harbor `claude-code`, kimi_coding → `agents.kimi_code_agent:KimiCodeAgent`) |
 | b | keeper 1, skills·composition·parallel·fusion 끔 |
 | c | b + skills |
 | d | c + composition (Skill이 정의한 조합 도구) |
@@ -137,6 +137,16 @@ CPU 24개가 필요하다. CPU 가 16개인 Mac 에서는 로컬 docker 로 동�
 | h | g + fusion |
 | k | harbor `claude-code`/`opencode` 가 풀고, keeper 풀을 MCP 도구로 받는다 (아래) |
 | l | e + 후보 순서. 모델 둘 이상을 `[runtime.lanes.bench]` 로 묶는다 (아래) |
+
+Kimi 기준선은 공식 native Kimi Code CLI 2.2.0을 고정 설치한다. Harbor 0.23의
+`kimi-cli`는 폐기된 PyPI 패키지를 설치해 안내문만 출력하고 정상 종료하므로 사용하지 않는다.
+새 adapter는 공식 설치기의 checksum 검증과 버전 확인을 거치고 `-p --output-format
+stream-json`으로 실행한다. JSON 메시지와 마지막 assistant 응답이 없으면 실행 오류로
+처리한다. 실제 도구 호출·결과 수는 `agent_result.metadata.execution_evidence`에 기록한다.
+명령 로그는 `agent/kimi-code.jsonl`, stderr는 `agent/kimi-code.stderr.log`에 남는다.
+
+설치 및 비대화형 실행 계약: [공식 설치 안내](https://www.kimi.com/code/docs/en/kimi-code-cli/guides/getting-started),
+[CLI 옵션](https://www.kimi.com/code/docs/en/kimi-code-cli/reference/kimi-command).
 
 spawn 도구는 parallel 이 꺼진 arm(b, c, d)에서, delegate 도구는 keeper 1 인 arm(b–e, l)에서
 keeper TOML `tools.deny` 로 막는다.

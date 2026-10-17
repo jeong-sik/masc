@@ -70,11 +70,9 @@ done <<<"${excluded}"
 # agents name some providers differently.
 case "${MODEL%%/*}" in
   anthropic) BASELINE_AGENT=claude-code; BASELINE_MODEL="${MODEL}" ;;
-  # kimi-for-coding answers with a reasoning-only payload whose empty assistant
-  # message the coding endpoint rejects with 400 under terminus-2 (3 recorded
-  # attempts); kimi-cli, Moonshot's reference CLI, is the baseline that runs.
-  # harbor's kimi-cli calls the provider `kimi`.
-  kimi_coding) BASELINE_AGENT=kimi-cli; BASELINE_MODEL="kimi/${MODEL#*/}" ;;
+  # Harbor 0.23's kimi-cli installs the retired PyPI package, which exits 0
+  # after a retirement notice. The maintained native CLI uses another protocol.
+  kimi_coding) BASELINE_AGENT=agents.kimi_code_agent:KimiCodeAgent; BASELINE_MODEL="kimi/${MODEL#*/}" ;;
   *) BASELINE_AGENT=""; BASELINE_MODEL="" ;;
 esac
 

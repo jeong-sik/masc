@@ -9769,7 +9769,7 @@ let test_direct_gate_current_history_resume ?(failed_producer=false) ?(source_un
             (Masc.Keeper_gate.decision_to_yojson decision)
         | _ -> fail "one-shot fixture did not defer")
         else KET.execute_keeper_tool_call_with_outcome ~config ~meta ~publication_recovery ~ctx_work
-          ~gate_context:(fun () -> {Masc.Keeper_gate.turn_id=Some 18; snapshot=`Assoc []})
+          ~gate_context:(fun () -> {Masc.Keeper_gate.turn_id=Some 18; origin=Keeper_approval_origin.unavailable; snapshot=`Assoc []})
           ~name:"WebSearch" ~input:(`Assoc ["query", `String "original research evidence"; "limit", `Int 1]) () in
       let approval_id = match deferred.deferred_kind with
         | Some (Masc.Keeper_tool_execution.External_effect_deferred {approval_id=Some id}) -> id

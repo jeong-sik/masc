@@ -213,10 +213,11 @@ val route_of_error : boundary:error_boundary -> Agent_core.Error.t -> route
 (** Total over every [core_error] class. The caller supplies the actual execution
     boundary. MASC-internal typed envelopes are decoded only at
     [Masc_execution], except [Terminal_effect_failed], [Runtime_connection_closed],
-    and an [Accept_rejected] with no usable progress, an empty response shape,
-    and [MaxTokens]. Those exact MASC-owned observations cross the live
+    and a process-local MASC-carried [Accept_rejected] with no usable progress,
+    an empty response shape, and [MaxTokens]. Those exact MASC-owned observations cross the live
     AGENT_CORE boundary and retain their typed routes there. Other accept
-    rejections remain boundary-specific. No arm returns "no route". *)
+    rejections, including plain or foreign-carried serialized messages, remain
+    boundary-specific. No arm returns "no route". *)
 
 val usable_retry_after : float option -> float option
 (** The provider hint that names a wait: present, finite, above zero. A

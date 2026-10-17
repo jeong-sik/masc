@@ -448,7 +448,8 @@ let route_of_error ~boundary (err : Agent_core.Error.t) : route =
   | Some
       (Keeper_internal_error.Accept_rejected
          { reason_kind; response_shape; stop_reason; _ } as internal)
-    when empty_max_tokens_accept_rejection ~reason_kind ~response_shape ~stop_reason ->
+    when empty_max_tokens_accept_rejection ~reason_kind ~response_shape ~stop_reason
+         && Option.is_some (Keeper_internal_error.carried_masc_internal_error err) ->
     route_of_masc_internal internal
   | Some
       (( Keeper_internal_error.Official_client_recovery_required _

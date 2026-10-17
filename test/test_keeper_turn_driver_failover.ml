@@ -6072,6 +6072,41 @@ let test_guarded_terminal_and_nonempty_truncation_controls_do_not_resume () =
     ]
 ;;
 
+let test_guarded_empty_truncation_requires_owner_carrier_at_core_boundary () =
+  let module Foreign = struct
+    type Agent_core.Error.carrier += Value
+  end in
+  let typed = guarded_accept_rejection Llm_provider.Types.MaxTokens in
+  let message = Agent_core.Error.to_string typed in
+  let plain = Agent_core.Error.Internal message in
+  let foreign = Agent_core.Error.Internal_carried { message; carrier = Foreign.Value } in
+  let altered_message =
+    match typed with
+    | Agent_core.Error.Internal_carried value ->
+      Agent_core.Error.Internal_carried { value with message = "not an encoded envelope" }
+    | Agent_core.Error.Api _ | Agent_core.Error.Provider _
+    | Agent_core.Error.Agent _ | Agent_core.Error.Mcp _
+    | Agent_core.Error.Config _ | Agent_core.Error.Serialization _
+    | Agent_core.Error.Io _ | Agent_core.Error.Orchestration _
+    | Agent_core.Error.Internal _ -> Alcotest.fail "producer lost its own typed carrier"
+  in
+  List.iter
+    (fun (label, error, expected) ->
+       let route = Keeper_runtime_failure_route.route_of_error
+           ~boundary:Keeper_runtime_failure_route.Agent_core_execution error in
+       Alcotest.(check bool) label expected
+         (Keeper_runtime_failure_route.route_resumes_on_same_path route))
+    [ "actual owner carrier", typed, true
+    ; "plain serialized text", plain, false
+    ; "foreign carrier message", foreign, false
+    ; "owner value ignores altered message", altered_message, true
+    ];
+  let persisted_route = Keeper_runtime_failure_route.route_of_error
+      ~boundary:Keeper_runtime_failure_route.Masc_execution plain in
+  Alcotest.(check bool) "existing explicit MASC persisted boundary is retained"
+    true (Keeper_runtime_failure_route.route_resumes_on_same_path persisted_route)
+;;
+
 let test_deterministic_empty_stops_do_not_resume_after_saved_tool_results () =
   List.iter
     (fun stop_reason ->
@@ -7204,6 +7239,10 @@ let () =
             "guarded terminal and nonempty truncation controls do not resume"
             `Quick
             test_guarded_terminal_and_nonempty_truncation_controls_do_not_resume;
+          Alcotest.test_case
+            "guarded empty truncation requires its owner carrier at the core boundary"
+            `Quick
+            test_guarded_empty_truncation_requires_owner_carrier_at_core_boundary;
           Alcotest.test_case
             "deterministic empty stops do not resume after saved tool results"
             `Quick

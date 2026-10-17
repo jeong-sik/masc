@@ -957,6 +957,20 @@ let accept_rejection_has_no_progress_retry_hint err =
    before the carrier existed. *)
 type Agent_core.Error.carrier += Masc_internal of masc_internal_error
 
+let carried_masc_internal_error = function
+  | Agent_core.Error.Internal_carried { carrier = Masc_internal err; _ } -> Some err
+  | Agent_core.Error.Internal_carried _
+  | Agent_core.Error.Internal _
+  | Agent_core.Error.Api _
+  | Agent_core.Error.Provider _
+  | Agent_core.Error.Agent _
+  | Agent_core.Error.Mcp _
+  | Agent_core.Error.Config _
+  | Agent_core.Error.Serialization _
+  | Agent_core.Error.Io _
+  | Agent_core.Error.Orchestration _ -> None
+;;
+
 let core_error_of_masc_internal_error err =
   Agent_core.Error.Internal_carried
     { message =

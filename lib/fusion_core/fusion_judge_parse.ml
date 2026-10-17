@@ -359,8 +359,16 @@ let strip_fences (s : string) : string =
     | None -> s
   else s
 
-let of_string (s : string) : (Fusion_types.judge_synthesis, string) result =
+type parse_failure = Invalid_json of string | Invalid_synthesis of string
+
+let of_string_detailed (s : string) =
   let s = strip_fences s in
   match Yojson.Safe.from_string s with
-  | json -> of_json json
-  | exception Yojson.Json_error msg -> Error ("invalid JSON: " ^ msg)
+  | json -> Result.map_error (fun detail -> Invalid_synthesis detail) (of_json json)
+  | exception Yojson.Json_error detail -> Error (Invalid_json detail)
+
+let of_string s =
+  of_string_detailed s
+  |> Result.map_error (function
+    | Invalid_json detail -> "invalid JSON: " ^ detail
+    | Invalid_synthesis detail -> detail)

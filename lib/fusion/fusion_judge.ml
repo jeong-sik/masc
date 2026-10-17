@@ -95,6 +95,20 @@ let attach_usage
   | Ok synthesis -> Ok (synthesis, usage)
   | Error msg -> Error (Fusion_types.Parse_error msg, usage)
 
+let parse_response ~record_invalid text usage =
+  let parsed =
+    Fusion_judge_parse.of_string_detailed text
+    |> Result.map_error (fun failure ->
+      let reason, detail = match failure with
+        | Fusion_judge_parse.Invalid_json detail -> Agent_core.Error.Invalid_json, detail
+        | Invalid_synthesis detail -> Agent_core.Error.Schema_rejected, detail
+      in
+      Agent_core.Error.structured_output_parse_error ~reason ~detail ~raw:text
+      |> record_invalid)
+  in
+  attach_usage parsed usage
+;;
+
 let core_error_detail (e : Agent_core.Error.t) : string =
   match e with
   | Agent_core.Error.Api api_error -> Agent_core.Error.Retry.error_message api_error
@@ -177,7 +191,8 @@ let judge_failure_of_route_failure
    HTTP 쪽이 wire response format 을 싣지 않는 것과 같은 한 가지 계약을 유지한다.
 
    공식 클라이언트가 보고한 사용량은 빈 응답과 파싱 실패에서도 유지한다. [max_tokens] 와 masc web 도구는 이 경로에 실을 곳이 없다. *)
-let attempt_official ~base_dir ?timeout_s ~judge_system_prompt ~runtime_id ~prompt () :
+let attempt_official ~base_dir ?timeout_s ~judge_system_prompt ~runtime_id ~prompt
+    ~record_invalid () :
     ( Fusion_types.judge_synthesis * Fusion_types.usage
     , Fusion_types.judge_failure * Fusion_types.usage )
     result =
@@ -192,13 +207,13 @@ let attempt_official ~base_dir ?timeout_s ~judge_system_prompt ~runtime_id ~prom
       ( Fusion_types.Empty_response
           (Printf.sprintf "judge: %s: official client returned no text" runtime_id)
       , usage )
-  | Ok (text, usage) -> attach_usage (Fusion_judge_parse.of_string text) usage
+  | Ok (text, usage) -> parse_response ~record_invalid text usage
 
 (* Agent_core 후보 한 번. 에러도 usage를 동반한다: 토큰을 태운 뒤 실패(빈 응답/파싱
    실패)는 소비분을, 토큰 소비 전 실패(빌드/실행/빈 결과/provider 에러)는
    [zero_usage]를 싣는다. *)
 let attempt_agent_core ~sw ~net ?max_tokens ?timeout_s ?event_bus ~judge_system_prompt
-    ~runtime_id ~web_tools ~prompt () :
+    ~runtime_id ~web_tools ~prompt ~record_invalid () :
     ( Fusion_types.judge_synthesis * Fusion_types.usage
     , Fusion_types.judge_failure * Fusion_types.usage )
     result =
@@ -239,7 +254,7 @@ let attempt_agent_core ~sw ~net ?max_tokens ?timeout_s ?event_bus ~judge_system_
            , usage )
        else
          (* 성공 종합·파싱 실패 모두에 심판이 소비한 토큰을 묶는다(panel_answer.usage와 대칭). *)
-         attach_usage (Fusion_judge_parse.of_string text) usage
+         parse_response ~record_invalid text usage
      | Ok ((_name, Error e) :: _) ->
        Error
          ( failure_of_core_error ~runtime_id ~prefix:"judge provider error: " e
@@ -273,7 +288,16 @@ let run_composed ~base_dir ~sw ~net ?max_tokens ?timeout_s ~judge_system_prompt
   | Ok candidates ->
     let actor = Option.map fst tool_trace in
     let traces = ref [] in
+    let invocation_id = Structured_response_evidence.invocation_id () in
+    let next_attempt_index = ref 0 in
     let attempt runtime_id =
+      let attempt_index = !next_attempt_index in
+      incr next_attempt_index;
+      let record_invalid error =
+        Structured_response_evidence.record_failure ~base_path:(Some base_dir)
+          ~attempt:{source=Fusion_judge; invocation_id; runtime_id; attempt_index;
+            tool_use_id=None; trace_id=None} error
+      in
       if Fusion_official_client.is_official_client ~runtime_id
       then (
         Option.iter
@@ -288,7 +312,8 @@ let run_composed ~base_dir ~sw ~net ?max_tokens ?timeout_s ~judge_system_prompt
                }
                :: !traces)
           actor;
-        attempt_official ~base_dir ?timeout_s ~judge_system_prompt ~runtime_id ~prompt ())
+        attempt_official ~base_dir ?timeout_s ~judge_system_prompt ~runtime_id ~prompt
+          ~record_invalid ())
       else (
         let observer =
           Option.map (fun actor -> Fusion_agent_core.create_tool_observer ~actor) actor
@@ -296,7 +321,7 @@ let run_composed ~base_dir ~sw ~net ?max_tokens ?timeout_s ~judge_system_prompt
         let event_bus = Option.map Fusion_agent_core.tool_observer_event_bus observer in
         let result =
           attempt_agent_core ~sw ~net ?max_tokens ?timeout_s ?event_bus
-            ~judge_system_prompt ~runtime_id ~web_tools ~prompt ()
+            ~judge_system_prompt ~runtime_id ~web_tools ~prompt ~record_invalid ()
         in
         Option.iter
           (fun observer ->
@@ -354,4 +379,5 @@ let run_meta ~base_dir ~sw ~net ?max_tokens ?timeout_s ~judge_system_prompt ~jud
 module For_testing = struct
   let apply_output_contract = apply_fusion_judge_output_contract
   let failure_of_core_error = failure_of_core_error
+  let parse_response = parse_response
 end

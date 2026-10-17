@@ -60,3 +60,12 @@ val output_schema : Yojson.Safe.t
 
 (** JSON 문자열 파싱 편의. ```json 코드펜스를 허용하고 벗긴 뒤 [of_json]. *)
 val of_string : string -> (Fusion_types.judge_synthesis, string) result
+
+type parse_failure = Invalid_json of string | Invalid_synthesis of string
+
+val of_string_detailed :
+  string -> (Fusion_types.judge_synthesis, parse_failure) result
+(** The same strict parser with a closed failure stage. MASC's actual judge
+    owner can preserve bounded original response evidence without recovering
+    the failure class from parser text. Fence removal is only for parsing;
+    the caller retains the original response bytes. *)

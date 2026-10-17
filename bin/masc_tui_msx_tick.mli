@@ -18,6 +18,17 @@ val policy_after_activity : poll_policy -> (activity, string) result -> poll_pol
     refusal; workspace control requires fresh explicit admission. *)
 val refusal_notice : refusal -> string
 val worker_unavailable_notice : string option -> string
+val notice_after_advance :
+  notice:string option -> worker_down_notice:string option -> string option
+(** The notice to show once a tick advances. [worker_down_notice] is the value
+    a tick wrote while no worker answered; it is retired only while [notice] is
+    still that same value, told by identity and not by its words, so a notice
+    written since by anything else stays. *)
+val refusal_sentence : string -> string option
+(** The sentence for the body of a refused MSX answer, read with {!Msx_wire}:
+    the code says what the operator may do next and the server's message says
+    why. [None] for a body that is not an MSX refusal, so the caller keeps its
+    own wording. *)
 val decode_activity : Yojson.Safe.t -> (activity, string) result
 
 val fetch :

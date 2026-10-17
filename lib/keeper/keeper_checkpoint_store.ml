@@ -563,21 +563,26 @@ let keep_lineage ~canonical_path ~identity ~memo ~keeper_name written =
         { lineage_owner = owner; lineage_memo = memo; lineage_written })
 
 let forget_written_lineages ~session_root ~keeper_name =
-  match Unix.realpath session_root with
-  | exception Unix.Unix_error (error, _, _) ->
-    (* The lineage stays until this Keeper saves under a new trace (#43575). *)
-    Log.Keeper.warn
-      "checkpoint lineage: cannot resolve %s to forget keeper=%s: %s"
-      session_root
-      keeper_name
-      (Unix.error_message error)
-  | resolved ->
-    let owner = { owner_session_root = resolved; owner_keeper = keeper_name } in
-    Stdlib.Mutex.protect written_lineages_mutex (fun () ->
-      Hashtbl.filter_map_inplace
-        (fun _key lineage ->
-           if same_lineage_owner lineage.lineage_owner owner then None else Some lineage)
-        written_lineages)
+  let forgets =
+    match Unix.realpath session_root with
+    | resolved -> same_lineage_owner { owner_session_root = resolved; owner_keeper = keeper_name }
+    | exception Unix.Unix_error (error, _, _) ->
+      (* A root that no longer resolves -- its directory was moved or removed
+         before the unregistration -- cannot name its lineages, so every
+         lineage of this Keeper name goes. A lineage only spares a read: one
+         dropped here for the same name in another workspace costs that
+         workspace one read of its file. *)
+      Log.Keeper.warn
+        "checkpoint lineage: cannot resolve %s; forgetting every lineage of keeper=%s: %s"
+        session_root
+        keeper_name
+        (Unix.error_message error);
+      fun owner -> String.equal owner.owner_keeper keeper_name
+  in
+  Stdlib.Mutex.protect written_lineages_mutex (fun () ->
+    Hashtbl.filter_map_inplace
+      (fun _key lineage -> if forgets lineage.lineage_owner then None else Some lineage)
+      written_lineages)
 
 (* The context is a mutable table, so each caller gets its own copy. *)
 let handed_out (checkpoint : Agent_core.Checkpoint.t) =

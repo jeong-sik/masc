@@ -2326,6 +2326,41 @@ let test_unregistering_a_keeper_drops_its_written_value () =
     "the unregistered keeper's value was still kept"
 ;;
 
+(* A session store that does not resolve at the unregistration still loses the
+   Keeper's kept value. The store is moved away for the unregistration and
+   back after it; a rename keeps the file's identity, so a value left behind
+   would answer the load. *)
+let test_unregistering_a_keeper_whose_session_store_moved_drops_its_written_value () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun _sw ->
+  let scratch = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir scratch) @@ fun () ->
+  let base_path = Unix.realpath scratch in
+  let name = "moved-store-keeper" in
+  let trace = "moved-store-trace" in
+  let session_store = Keeper_fs.session_store_path_for_base_path base_path in
+  let session_dir = Filename.concat session_store trace in
+  save_kept_ok ~keeper_name:name ~session_dir
+    (make_checkpoint ~session_id:trace ~turn_count:1 ~marker:"registered")
+    "save";
+  let entry =
+    match Keeper_registry.register_offline_if_admitted ~base_path name (keeper_meta_fixture name) with
+    | Ok entry -> entry
+    | Error (_ : Keeper_registry.registration_error) -> fail "registration refused"
+  in
+  let moved = session_store ^ ".moved" in
+  Unix.rename session_store moved;
+  (match Keeper_registry.unregister_exact entry with
+   | Keeper_registry.Exact_unregistered -> ()
+   | Keeper_registry.Exact_entry_missing | Keeper_registry.Exact_entry_replaced
+   | Keeper_registry.Exact_unregister_lifecycle_reserved _ -> fail "unregistration refused");
+  Unix.rename moved session_store;
+  let path = Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id:trace in
+  unreadable_load_refused ~session_dir ~session_id:trace ~path
+    "the unregistered keeper's value was still kept"
+;;
+
 (* A save by a tool or a test keeps nothing: the next load reads the file. *)
 let test_a_plain_save_keeps_no_written_value () =
   Eio_main.run @@ fun env ->
@@ -2750,6 +2785,8 @@ let () =
             test_a_load_for_save_keeps_what_it_read;
           test_case "unregistering a keeper drops its written value" `Quick
             test_unregistering_a_keeper_drops_its_written_value;
+          test_case "unregistering after its session store moved drops its value" `Quick
+            test_unregistering_a_keeper_whose_session_store_moved_drops_its_written_value;
           test_case "a plain save keeps no written value" `Quick
             test_a_plain_save_keeps_no_written_value;
           test_case "one keeper name in two workspaces keeps both values" `Quick

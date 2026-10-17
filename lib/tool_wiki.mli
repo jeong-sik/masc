@@ -124,7 +124,8 @@ val list_pages : base_path:string -> string list
 (** Every [.md] file directly under {!wiki_root}, as full paths in name
     order; [[]] when the directory does not exist. The wiki's own index/log
     files are omitted. An existing path that cannot be listed, including a
-    regular file at the root, raises [Sys_error] rather than claiming emptiness. *)
+    regular file at the root or a failed filesystem lookup, raises [Sys_error]
+    rather than claiming emptiness. Only an actual missing root is empty. *)
 
 val read_index_entries :
   base_path:string -> (Wiki_journal.entry list, string) result

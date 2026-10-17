@@ -1097,42 +1097,57 @@ module Encoded_messages = Hashtbl.Make (struct
     let hash = Types.Message_value.hash
   end)
 
-type encoding_memo = { mutable encoded : string Encoded_messages.t }
+(* The validated bytes one message is written as, and the message those bytes
+   decode to. A load decodes the same bytes, so [decoded] is the record the
+   load gives, which can differ from the record that was saved: the wire does
+   not carry [ToolResult.json]. *)
+type encoded_message =
+  { bytes : string
+  ; decoded : Types.message
+  }
 
-let create_encoding_memo () = { encoded = Encoded_messages.create 0 }
+type encoding_memo = { mutable entries : encoded_message Encoded_messages.t }
+
+let create_encoding_memo () = { entries = Encoded_messages.create 0 }
+
+let decode_written_bytes ~decode bytes =
+  try decode (Yojson.Safe.from_string bytes) with
+  | Yojson.Safe.Util.Type_error (msg, _) | Yojson.Json_error msg | Failure msg ->
+    Error
+      (Error.Serialization
+         (JsonParseError { detail = Printf.sprintf "Checkpoint.of_json: %s" msg }))
+;;
 
 (* The passes [checkpoint_json_result] runs over the whole checkpoint,
    restricted to one message: encode, [Execution_json.validate], the v11
-   message contract, and a decode whose result is discarded. None of them reads
-   past the message's own subtree ([Checkpoint_v11_contract.validate_messages]
-   maps [validate_message] over the array; [Execution_json.validate] checks
-   keys and numbers inside each object), so a message that passes here passes
-   inside any checkpoint. The decode handlers are those of
+   message contract, and a decode. None of them reads past the message's own
+   subtree ([Checkpoint_v11_contract.validate_messages] maps
+   [validate_message] over the array; [Execution_json.validate] checks keys and
+   numbers inside each object), so a message that passes here passes inside any
+   checkpoint. The decode reads the written bytes, with the handlers of
    [decode_current_json]. *)
 let validated_message_encoding ~message_index message =
   let* json = message_to_json_result ~message_index message in
   let* () = validate_checkpoint_json ~context:"Checkpoint v11" json in
   let* _ = Checkpoint_v11_contract.validate_message message_index json in
-  let* _ =
-    try message_of_json json with
-    | Yojson.Safe.Util.Type_error (msg, _) | Yojson.Json_error msg | Failure msg ->
-      Error
-        (Error.Serialization
-           (JsonParseError { detail = Printf.sprintf "Checkpoint.of_json: %s" msg }))
-  in
-  Ok (Yojson.Safe.to_string json)
+  let bytes = Yojson.Safe.to_string json in
+  let+ decoded = decode_written_bytes ~decode:message_of_json bytes in
+  { bytes; decoded }
 ;;
 
 (* The header passes: the checkpoint with an empty message array goes through
-   the same whole-object validation and decode as [checkpoint_json_result]. *)
+   the same whole-object validation as [checkpoint_json_result], and the decode
+   reads the bytes the header is written as. *)
 let validated_fields_around_messages cp =
   let before_messages, after_messages = checkpoint_fields_around_messages cp in
   let header =
     `Assoc (before_messages @ ((messages_field, `List []) :: after_messages))
   in
   let* () = validate_checkpoint_json ~context:"Checkpoint v11" header in
-  let+ _ = decode_current_json header in
-  before_messages, after_messages
+  let+ decoded_header =
+    decode_written_bytes ~decode:decode_current_json (Yojson.Safe.to_string header)
+  in
+  (before_messages, after_messages), decoded_header
 ;;
 
 let separated separator = function
@@ -1158,13 +1173,18 @@ let encoded_checkpoint_pieces ~before_messages ~after_messages messages =
   ("{" :: List.concat (separated [ "," ] members)) @ [ "}" ]
 ;;
 
+(* The decoded checkpoint is what [of_string] gives for the concatenated
+   pieces: the header decoded from its own bytes and each message from its
+   own. [decode_current_json] decodes field by field and maps
+   [message_of_json] over the array, so the parts decode as the whole document
+   does. *)
 let to_pieces_with_encoding_memo memo (cp : Checkpoint_types.t) =
   let next = Encoded_messages.create (List.length cp.messages) in
   let rec encode_messages message_index rev_encoded = function
     | [] -> Ok (List.rev rev_encoded)
     | message :: rest ->
       let encoding =
-        match Encoded_messages.find_opt memo.encoded message with
+        match Encoded_messages.find_opt memo.entries message with
         | Some encoded -> Ok encoded
         | None -> validated_message_encoding ~message_index message
       in
@@ -1172,6 +1192,8 @@ let to_pieces_with_encoding_memo memo (cp : Checkpoint_types.t) =
        | Error _ as error -> error
        | Ok encoded ->
          Encoded_messages.replace next message encoded;
+         (* A save that starts from the decoded checkpoint passes these. *)
+         Encoded_messages.replace next encoded.decoded encoded;
          encode_messages (message_index + 1) (encoded :: rev_encoded) rest)
   in
   match
@@ -1179,17 +1201,92 @@ let to_pieces_with_encoding_memo memo (cp : Checkpoint_types.t) =
     let+ messages = encode_messages 0 [] cp.messages in
     fields, messages
   with
-  | Ok ((before_messages, after_messages), messages) ->
-    memo.encoded <- next;
-    encoded_checkpoint_pieces ~before_messages ~after_messages messages
+  | Ok (((before_messages, after_messages), decoded_header), messages) ->
+    memo.entries <- next;
+    ( encoded_checkpoint_pieces
+        ~before_messages
+        ~after_messages
+        (List.map (fun encoded -> encoded.bytes) messages)
+    , Some
+        { decoded_header with
+          messages = List.map (fun encoded -> encoded.decoded) messages
+        } )
   | Error _ ->
     (* A refusal is reported by the whole-checkpoint encoder, whose message
        names the failing path inside the checkpoint. *)
-    [ Yojson.Safe.to_string
-        (validated_checkpoint_json_exn
-           ~scope:"Checkpoint.to_pieces_with_encoding_memo"
-           cp)
-    ]
+    ( [ Yojson.Safe.to_string
+          (validated_checkpoint_json_exn
+             ~scope:"Checkpoint.to_pieces_with_encoding_memo"
+             cp)
+      ]
+    , None )
+;;
+
+(* Two trees print to the same bytes when they are the same tree: floats by
+   their bits, object fields in their order. Trees that print alike but differ
+   here, an [`Intlit] and an [`Int] of one number, count as different. *)
+let rec same_printed_json (left : Yojson.Safe.t) (right : Yojson.Safe.t) =
+  match left, right with
+  | `Null, `Null -> true
+  | `Bool left, `Bool right -> Bool.equal left right
+  | `Int left, `Int right -> Int.equal left right
+  | `Intlit left, `Intlit right -> String.equal left right
+  | `Float left, `Float right ->
+    Int64.equal (Int64.bits_of_float left) (Int64.bits_of_float right)
+  | `String left, `String right -> String.equal left right
+  | `List left, `List right -> List.equal same_printed_json left right
+  | `Assoc left, `Assoc right ->
+    List.equal
+      (fun (left_key, left_value) (right_key, right_value) ->
+         String.equal left_key right_key && same_printed_json left_value right_value)
+      left
+      right
+  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _), _ ->
+    false
+;;
+
+(* A read message is held only when the save's own encoding of it, with the
+   save's checks, is the document's JSON for it. The held bytes are then what
+   a save writes for the record, and [decoded] is what [of_string] gives for
+   them. A document an older build or another writer produced can carry other
+   bytes for the same message -- fields in another order, text the encoder
+   sanitizes -- and such a message is left for the save to encode. *)
+let held_read_message ~message_index message json =
+  match
+    let* encoded = message_to_json_result ~message_index message in
+    let* () = validate_checkpoint_json ~context:"Checkpoint v11" encoded in
+    let+ _ = Checkpoint_v11_contract.validate_message message_index encoded in
+    encoded
+  with
+  | Ok encoded when same_printed_json encoded json -> Some (Yojson.Safe.to_string encoded)
+  | Ok _ | Error _ -> None
+;;
+
+(* [of_json] maps [message_of_json] over the [messages] array in order, so the
+   decoded messages and the array's elements pair one to one. *)
+let of_string_with_encoding_memo s =
+  match Yojson.Safe.from_string s with
+  | exception Yojson.Json_error msg ->
+    Error
+      (Error.Serialization
+         (JsonParseError { detail = Printf.sprintf "Invalid JSON: %s" msg }))
+  | json ->
+    let+ cp = of_json json in
+    let memo = create_encoding_memo () in
+    let rec hold message_index messages message_jsons =
+      match messages, message_jsons with
+      | message :: messages, message_json :: message_jsons ->
+        (match held_read_message ~message_index message message_json with
+         | Some bytes ->
+           Encoded_messages.replace memo.entries message { bytes; decoded = message }
+         | None -> ());
+        hold (message_index + 1) messages message_jsons
+      | [], [] | [], _ :: _ | _ :: _, [] -> ()
+    in
+    (match Yojson.Safe.Util.member messages_field json with
+     | `List message_jsons -> hold 0 cp.messages message_jsons
+     | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> ());
+    cp, memo
 ;;
 
 let of_string s =

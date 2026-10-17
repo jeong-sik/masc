@@ -140,24 +140,49 @@ val message_of_json : Yojson.Safe.t -> (Types.message, Error.t) result
 (** Decode one canonical checkpoint message under the current message contract.
     Malformed JSON values return serialization errors. *)
 
-(** Encodings of the messages written by earlier saves of one checkpoint
-    lineage. One memo serves one sequence of saves; it is not safe to use from
-    two saves at once. *)
+(** For each message record of one checkpoint lineage that a save wrote or a
+    read decoded: the validated bytes it is written as, and the message
+    {!of_string} gives for those bytes. One memo serves one sequence of saves;
+    it is not safe to use from two saves at once. *)
 type encoding_memo
 
 val create_encoding_memo : unit -> encoding_memo
 
-(** [to_pieces_with_encoding_memo memo cp] returns the bytes of [to_string cp]
-    split into consecutive pieces, and raises [Invalid_argument] where {!to_json}
-    does. A message that is the same record as one in the previous successful
-    call reuses that call's validated encoding; every other message is encoded,
-    validated against the v11 contract, and decoded once. After a success,
-    [memo] holds exactly the messages of [cp].
+(** [to_pieces_with_encoding_memo memo cp] returns a checkpoint document for
+    [cp] split into consecutive pieces, and what {!of_string} gives for those
+    bytes. It raises [Invalid_argument] where {!to_json} does.
+
+    A message the memo holds is written as the bytes held for it, with no
+    encode, validation or decode. That is a record the previous successful call
+    wrote, the decode that call returned for it, or a record
+    {!of_string_with_encoding_memo} read. Every other message is encoded,
+    validated against the v11 contract, and decoded once from the bytes written
+    for it. After a success, [memo] holds the messages of [cp] and their
+    decodes.
+
+    The document is [to_string cp] when each held message encodes to the bytes
+    held for it, that is, when encoding a decoded message gives back the bytes
+    it was decoded from. Either way {!of_string} reads it as the returned
+    checkpoint.
+
+    The returned checkpoint is [None] when the call fell back to encoding the
+    whole document. It can differ from [cp], as a load does: the wire does not
+    carry [ToolResult.json]. Its [context] is decoded from the written bytes,
+    so it is a table no one else holds.
 
     The caller appends the pieces in order. The live canonical checkpoints
     measured 2026-09-16 were 111MB and 107MB, so joining the pieces into one
     string would allocate that whole document again on every save. *)
-val to_pieces_with_encoding_memo : encoding_memo -> t -> string list
+val to_pieces_with_encoding_memo : encoding_memo -> t -> string list * t option
+
+(** {!of_string} together with a memo that holds each decoded message whose
+    encoding, with the checks a save runs, is the document's own JSON for it.
+    The next {!to_pieces_with_encoding_memo} call writes those messages without
+    encoding or decoding them again. A message the encoder writes differently
+    -- a document from an older build or another writer -- or one the checks
+    refuse is left out, so that call encodes it as it would with an empty
+    memo. *)
+val of_string_with_encoding_memo : string -> (t * encoding_memo, Error.t) result
 
 (** Deserialize checkpoint from a JSON string under the same current-only
     contract as {!of_json}. *)

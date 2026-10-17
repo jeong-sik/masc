@@ -727,6 +727,7 @@ val approval_outcome_to_string : approval_outcome -> string
 
 type status_kind =
   | Progress  (** How the turn is going. *)
+  | Diagnostic  (** Historical observation shown only in expanded details. *)
   | Answer_needed
       (** The turn is held and the operator's key is what releases it. Kept
           apart from [Attention] because it is the one row that cannot be
@@ -755,6 +756,9 @@ val awaiting_approval : t -> awaiting_approval option
 val preparation_status : Masc.Keeper_turn_preview.preparation -> status_kind * string
 (** Presentation shared by exact journal progress and the independently
     observed current Owner slot before an autonomous journal exists. *)
+val preparation_timeline_rows : Masc.Keeper_turn_preview.preparation_timeline -> (status_kind * string) list
+(** Diagnostic rows from the exact running writer's start-ordered observations.
+    These remain details, never a replacement for current provider activity. *)
 
 val status_rows :
   ?preparation:Masc.Keeper_turn_preview.preparation ->

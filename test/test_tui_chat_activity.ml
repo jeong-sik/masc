@@ -268,7 +268,7 @@ let test_compact_progress_follows_working_execution () =
         |> List.filter_map (fun (kind, text) ->
             match kind with
             | Masc_tui_keeper_chat_transcript.Progress -> Some text
-            | Answer_needed | Attention | Approval _ -> None)
+            | Diagnostic | Answer_needed | Attention | Approval _ -> None)
         |> String.concat "\n"
   in
   List.iter (fun folded ->

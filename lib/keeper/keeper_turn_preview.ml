@@ -19,6 +19,19 @@ type preparation =
   ; state : preparation_state
   }
 
+type preparation_scope_id = int
+
+type preparation_span =
+  { scope_id : preparation_scope_id
+  ; parent_scope_id : preparation_scope_id option
+  ; preparation : preparation
+  }
+
+module Preparation_scopes = Map.Make (Int)
+type preparation_timeline = preparation_span Preparation_scopes.t
+let empty_preparation_timeline = Preparation_scopes.empty
+let preparation_spans timeline = List.map snd (Preparation_scopes.bindings timeline)
+
 type source_position = { generation : int; start_byte : int }
 
 type t =
@@ -30,6 +43,7 @@ type t =
   ; activity : activity
   ; last_failure : string option
   ; preparation : preparation option
+  ; preparation_timeline : preparation_timeline
   ; execution_scope : Keeper_execution_scope_id.t option
   }
 
@@ -51,11 +65,14 @@ type entry =
   ; text_intake : text_intake
   ; released_bytes : int
   ; tools : string Tool_indexes.t
-  ; preparations : (unit ref * preparation) list
+  ; preparations : (unit ref * preparation_span) list
+  ; next_preparation_scope_id : int
   ; owner : Keeper_interrupt_token.t option
   ; original_turn_ref : Ids.Turn_ref.t option
   }
 type writer = entry ref
+
+let preparation_parent_key : (writer * preparation_scope_id) Eio.Fiber.key = Eio.Fiber.create_key ()
 
 (* The displayed preview points at the latest installed writer. Callbacks
    retain their own writer and never look it up in this table. *)
@@ -69,7 +86,7 @@ let with_lock f =
 
 let empty ~execution_scope now =
   { text_position = {generation=0; start_byte=0}; text_tail = ""; last_tool = None; updated_at = now
-  ; runtime_id = None; activity = Preparing; last_failure = None; preparation = None; execution_scope }
+  ; runtime_id = None; activity = Preparing; last_failure = None; preparation = None; preparation_timeline = empty_preparation_timeline; execution_scope }
 
 let current ~keeper_name =
   with_lock (fun () ->
@@ -100,28 +117,54 @@ let update ~writer ~now f =
 let observe_preparation ~returned ~writer ~turn_ref ~phase operation =
   match writer with
   | None -> operation ()
-  | Some _ ->
+  | Some owned_writer ->
     let token = ref () in
     let started = Mtime_clock.now () in
     let started_at = Time_compat.now () in
     let preparation = {phase;turn_ref;started_at;state=Preparation_active} in
-    change_entry ~writer ~now:started_at (fun entry ->
-      Some {entry with preparations=(token,preparation)::entry.preparations;
-        preview={entry.preview with preparation=Some preparation;activity=Preparing}});
+    let parent_binding = match Fs_compat.execution_context () with
+      | Fs_compat.Non_eio -> None
+      | Eio_fiber -> Eio.Fiber.get preparation_parent_key in
+    let span = with_lock (fun () ->
+      let entry = !owned_writer in
+      let scope_id = entry.next_preparation_scope_id in
+      let parent_scope_id = match parent_binding with
+        | Some (parent_writer,parent_id) when parent_writer == owned_writer
+            && List.exists (fun (_,span) -> span.scope_id=parent_id) entry.preparations -> Some parent_id
+        | Some _ | None -> None in
+      let span = {scope_id;parent_scope_id;preparation} in
+      owned_writer := {entry with
+        next_preparation_scope_id=scope_id + 1;
+        preparations=(token,span)::entry.preparations;
+        preview={entry.preview with preparation=Some preparation;activity=Preparing;
+          updated_at=started_at;
+          preparation_timeline=Preparation_scopes.add scope_id span entry.preview.preparation_timeline}};
+      span) in
     let finish outcome =
       let elapsed_ns = Mtime.Span.to_uint64_ns (Mtime.span started (Mtime_clock.now ())) in
       let finished_at = Time_compat.now () in
-      change_entry ~writer ~now:finished_at (fun entry ->
-        if not (List.exists (fun (owner,_) -> owner == token) entry.preparations) then None
+      let completed = {preparation with state=Preparation_finished {outcome;elapsed_ns;finished_at}} in
+      with_lock (fun () ->
+        let entry = !owned_writer in
+        let timeline = Preparation_scopes.add span.scope_id
+            {span with preparation=completed} entry.preview.preparation_timeline in
+        let preview = {entry.preview with preparation_timeline=timeline} in
+        if not (List.exists (fun (owner,_) -> owner == token) entry.preparations) then
+          (* Keep the completed span without reopening a superseded live phase
+             or advancing provider/Tool activity's own observation clock. *)
+          owned_writer := {entry with preview}
         else
           let preparations = List.filter (fun (owner,_) -> owner != token) entry.preparations in
           let preparation = match preparations with
-            | (_,parent)::_ -> parent
-            | [] -> {preparation with state=Preparation_finished {outcome;elapsed_ns;finished_at}} in
-          Some {entry with preparations;
-            preview={entry.preview with preparation=Some preparation}})
+            | (_,parent)::_ -> parent.preparation
+            | [] -> completed in
+          owned_writer := {entry with preparations;
+            preview={preview with preparation=Some preparation;updated_at=finished_at}})
     in
-    match operation () with
+    let run () = match Fs_compat.execution_context () with
+      | Fs_compat.Non_eio -> operation ()
+      | Eio_fiber -> Eio.Fiber.with_binding preparation_parent_key (owned_writer,span.scope_id) operation in
+    match run () with
     | result -> finish (returned result); result
     | exception error ->
       let backtrace = Printexc.get_raw_backtrace () in
@@ -143,7 +186,7 @@ let redacting redaction =
 
 let reset ~keeper_name ~execution_scope ~turn_ref ~now ~redaction =
   let writer = ref { preview = empty ~execution_scope now; text_intake = redacting redaction;
-    released_bytes = 0; tools = Tool_indexes.empty; preparations = [];
+    released_bytes = 0; tools = Tool_indexes.empty; preparations = []; next_preparation_scope_id = 0;
     owner = Keeper_turn_preview_owner.current (); original_turn_ref = turn_ref } in
   with_lock (fun () -> Hashtbl.replace table keeper_name writer);
   writer
@@ -151,7 +194,7 @@ let reset ~keeper_name ~execution_scope ~turn_ref ~now ~redaction =
 let original_turn_ref writer = with_lock (fun () -> (!writer).original_turn_ref)
 
 let note_attempt ~writer ~now ~runtime_id =
-  change_entry ~writer ~now (fun { preview; text_intake; owner; original_turn_ref; _ } ->
+  change_entry ~writer ~now (fun { preview; text_intake; owner; original_turn_ref; next_preparation_scope_id; _ } ->
     Some
       { preview =
           { preview with runtime_id = Some runtime_id; activity = Awaiting_response
@@ -163,6 +206,7 @@ let note_attempt ~writer ~now ~runtime_id =
       ; preparations = []
       ; owner
       ; original_turn_ref
+      ; next_preparation_scope_id
       ; released_bytes = 0
       ; text_intake =
           redacting text_intake.redaction
@@ -352,6 +396,39 @@ let preparation_of_json json =
   Ok {phase;turn_ref;started_at;state}
 ;;
 
+let preparation_span_to_json span =
+  `Assoc ["scope_id",`Int span.scope_id;
+    "parent_scope_id",Option.fold ~none:`Null ~some:(fun id -> `Int id) span.parent_scope_id;
+    "preparation",preparation_to_json span.preparation]
+;;
+
+let preparation_timeline_of_json json =
+  let ( let* ) = Result.bind in
+  let scope_id = function
+    | `Int value when value >= 0 -> Ok value
+    | _ -> Error "preparation scope ID must be a nonnegative integer" in
+  let rec decode previous timeline = function
+    | [] -> Ok timeline
+    | `Assoc fields :: remaining when List.sort String.compare (List.map fst fields) =
+        ["parent_scope_id";"preparation";"scope_id"] ->
+      let* id = scope_id (List.assoc "scope_id" fields) in
+      let* () = match previous with
+        | Some previous when id <= previous -> Error "preparation scopes must have unique increasing IDs"
+        | Some _ | None -> Ok () in
+      let* parent_scope_id = match List.assoc "parent_scope_id" fields with
+        | `Null -> Ok None
+        | value -> let* parent = scope_id value in
+          if Preparation_scopes.mem parent timeline then Ok (Some parent)
+          else Error "preparation parent must be an earlier existing scope" in
+      let* preparation = preparation_of_json (List.assoc "preparation" fields) in
+      let span = {scope_id=id;parent_scope_id;preparation} in
+      decode (Some id) (Preparation_scopes.add id span timeline) remaining
+    | _ -> Error "preparation span requires exactly scope_id, parent_scope_id and preparation" in
+  match json with
+  | `List spans -> decode None empty_preparation_timeline spans
+  | _ -> Error "preparation timeline must be an array"
+;;
+
 let status_text preview =
   let activity =
     match preview.preparation, preview.activity with
@@ -381,4 +458,5 @@ let to_json preview =
     "last_tool", (match preview.last_tool with None -> `Null | Some name -> `String name);
     "updated_at_unix", `Float preview.updated_at;
     "preparation",Option.fold ~none:`Null ~some:preparation_to_json preview.preparation;
+    "preparation_timeline",`List (List.map preparation_span_to_json (preparation_spans preview.preparation_timeline));
     "execution_scope",Option.fold ~none:`Null ~some:Keeper_execution_scope_id.to_json preview.execution_scope]

@@ -7,6 +7,7 @@ type activity = Preparing | Awaiting_response | Receiving_response | Tool_observ
 
 type preparation_phase = Task_preparation | World_preparation | Context_preparation | Prompt_preparation
   | Tool_preparation | Skill_preparation
+  | Lane_inputs_preparation | Workspace_memory_preparation | Wiki_preparation
 type preparation_outcome = Prepared | Rejected | Raised | Cancelled
 type preparation_state =
   | Preparation_active

@@ -36,7 +36,12 @@ type mutation_route =
   ; mutation : mutation
   }
 
-type api_error = Public_error.t
+type api_error = Public_error.t = private
+  { status : Httpun.Status.t
+  ; code : string
+  ; message : string
+  ; incident_id : string
+  }
 
 let path_segments path =
   path
@@ -664,14 +669,14 @@ module For_testing = struct
     | Edit ->
       parse_edit body
       |> Result.map Option.some
-      |> Result.map_error (fun error -> error.code)
+      |> Result.map_error (fun (error : api_error) -> error.code)
     | Move_to_end ->
       parse_empty "move-to-end" body
       |> Result.map (fun () -> None)
-      |> Result.map_error (fun error -> error.code)
+      |> Result.map_error (fun (error : api_error) -> error.code)
     | Cancel ->
       parse_empty "cancel" body
       |> Result.map (fun () -> None)
-      |> Result.map_error (fun error -> error.code)
+      |> Result.map_error (fun (error : api_error) -> error.code)
   ;;
 end

@@ -341,10 +341,10 @@ let journal_path base_path composition_run_id =
   | [path] -> path | _ -> fail "one actual run journal file"
 
 let test_source_observation_is_frozen_at_creation () = with_workspace (fun _env _sw base_path ->
-  let first : Journal.source_observation = {trace_id=Some (Masc.Keeper_id.Trace_id.of_string "original-trace" |> require "original trace");
+  let first : Journal.source_observation = {trace_id=Some (Keeper_id.Trace_id.of_string "original-trace" |> require "original trace");
     session_id=Some "original-session";keeper_turn_id=Some 17;
     answer_source_ids=["original-answer-input"]} in
-  let later : Journal.source_observation = {trace_id=Some (Masc.Keeper_id.Trace_id.of_string "later-trace" |> require "later trace");
+  let later : Journal.source_observation = {trace_id=Some (Keeper_id.Trace_id.of_string "later-trace" |> require "later trace");
     session_id=Some "later-session";keeper_turn_id=Some 29;
     answer_source_ids=["later-answer-input"]} in
   let prepared = prepare ~observation:first base_path in
@@ -618,7 +618,7 @@ let test_public_run_resume_keeps_original_task () = with_workspace (fun env sw b
   let first_execution = first_data |> member "execution_artifact" |> decode_reference |> document base_path in
   let original_leaf = match first_execution |> member "nodes" |> to_list with [row] -> row | _ -> fail "one public leaf" in
   current_meta := {meta with runtime={meta.runtime with
-    trace_id=Masc.Keeper_id.Trace_id.of_string "later-trace" |> require "later current trace"}};
+    trace_id=Keeper_id.Trace_id.of_string "later-trace" |> require "later current trace"}};
   Call_log.set_turn_context ~cell ~agent_name:keeper ~turn:43 ~keeper_turn_id:2 ~task_id:"task-B"
     ~trace_id:"later-trace" ~session_id:"later-session" ~answer_source_ids:[later_answer] ();
   let resumed = invoke ~turn:43 ~id:"public-resume-in-task-B" Draft.run_tool_name

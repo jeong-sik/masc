@@ -1,8 +1,8 @@
 id = "msx-machine"
-revision = "0.1.0"
+revision = "0.2.0"
 title = "MSX machine"
 contributions = ["observe"]
-image = "masc-lane-msx-machine:0.1.0"
+image = "masc-lane-msx-machine:0.2.0"
 command = ["/usr/local/bin/masc-msx-addon-worker", "--base-path", "/state"]
 
 [world.skills]

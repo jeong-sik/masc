@@ -1,8 +1,8 @@
 id = "dos-machine"
-revision = "0.1.0"
+revision = "0.2.0"
 title = "DOS machine"
 contributions = ["observe"]
-image = "masc-lane-dos-machine:0.1.0"
+image = "masc-lane-dos-machine:0.2.0"
 command = ["/usr/local/bin/masc-dos-addon-worker", "--base-path", "/state"]
 
 [world.skills]

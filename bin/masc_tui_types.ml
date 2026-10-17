@@ -8370,7 +8370,7 @@ let take_ask_followup (state : state) request submission
          | Error detail ->
              state.ask_followup_error <- Some detail;
              state.ask_followup <- Option.map (fun (owner, prior) ->
-               owner, {prior with Masc.Tui_decode_asks.af_linked_task=stale_task prior.af_linked_task})
+               owner, {prior with Masc.Tui_decode_asks.af_linked_task=stale_task prior.Masc.Tui_decode_asks.af_linked_task})
                state.ask_followup);
         Some result
       end

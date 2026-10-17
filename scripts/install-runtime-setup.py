@@ -3192,10 +3192,12 @@ def connect_imp_github(binary, base, row):
     """
     options = ['--keeper', IMP_KEEPER, '--hostname', GITHUB_HOST, '--base-path', str(base)]
     if row.host_login is None:
-        result = subprocess.run([str(binary), 'keeper-github', 'login'] + options, stdout=sys.stderr)
+        result = subprocess.run([str(binary), 'keeper-github', 'login'] + options, stdout=sys.stderr,
+                                env=workspace_child_env())
     else:
         result = subprocess.run([str(binary), 'keeper-github', 'set-token'] + options,
-                                input=read_host_github_token(row.host_login), text=True, stdout=sys.stderr)
+                                input=read_host_github_token(row.host_login), text=True, stdout=sys.stderr,
+                                env=workspace_child_env())
     if result.returncode != 0:
         # The command already said why. GitHub is optional, so this does not end setup.
         print("imp's GitHub login was not saved. Everything else is. Run " + github_command(base, None)

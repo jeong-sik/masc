@@ -2380,6 +2380,25 @@ class WorkspaceChildEnvironment(unittest.TestCase):
             SETUP.native_setup_command('/bin/masc', 'runtime-setup-render')
         self.assertIsNone(run.call_args.kwargs['env'])
 
+    def test_imp_github_login_runs_without_the_overrides(self):
+        from types import SimpleNamespace
+        completed = subprocess.CompletedProcess([], 0, '', '')
+        with patch.dict(os.environ, self.TERMINAL, clear=True), \
+                patch('subprocess.run', return_value=completed) as run:
+            SETUP.connect_imp_github('/bin/masc', '/workspace',
+                                     SimpleNamespace(host_login=None))
+        argv, kwargs = run.call_args.args[0], run.call_args.kwargs
+        self.assertIn('--base-path', argv)
+        self.assertNotIn('MASC_CONFIG_DIR', kwargs['env'])
+        with patch.dict(os.environ, self.TERMINAL, clear=True), \
+                patch('subprocess.run', return_value=completed) as run, \
+                patch.object(SETUP, 'read_host_github_token', return_value='token'):
+            SETUP.connect_imp_github('/bin/masc', '/workspace',
+                                     SimpleNamespace(host_login='octo'))
+        argv, kwargs = run.call_args.args[0], run.call_args.kwargs
+        self.assertIn('--base-path', argv)
+        self.assertNotIn('MASC_CONFIG_DIR', kwargs['env'])
+
     def test_onboarding_status_strips_only_with_a_workspace(self):
         state = {'schema': 'masc.onboarding_status.v1', 'scope': 'configuration_observation',
                  'opening': 'needs_journey', 'checks': []}

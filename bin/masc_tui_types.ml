@@ -8345,14 +8345,18 @@ let take_asks_observation (state : state) observation =
       state.asks_read <- reading;
       Some observation.asks_result
 
+let can_admit_early_http_read (state : state) ~ticket ~authority identity =
+  Option.is_some state.http_refresh_started_ns
+  && Http_refresh_order.is_current state.http_refresh_order ticket
+  && authority = state.workspace_authority
+  && state.workspace_identity = Workspace_identity_match
+  && server_workspace_matches ~expected:state.server_identity (Ok identity)
+  && workspace_identity_of_refresh ~local_base_path:state.local_base_path
+       (Ok identity) = Workspace_identity_match
+
 let take_early_asks_observation (state : state) early =
-  if Option.is_some state.http_refresh_started_ns
-     && Http_refresh_order.is_current state.http_refresh_order early.ea_ticket
-     && early.ea_authority = state.workspace_authority
-     && state.workspace_identity = Workspace_identity_match
-     && server_workspace_matches ~expected:state.server_identity (Ok early.ea_identity)
-     && workspace_identity_of_refresh ~local_base_path:state.local_base_path
-          (Ok early.ea_identity) = Workspace_identity_match
+  if can_admit_early_http_read state ~ticket:early.ea_ticket
+      ~authority:early.ea_authority early.ea_identity
   then take_asks_observation state early.ea_observation
   else None
 
@@ -8369,18 +8373,11 @@ let take_keeper_roster_observation (state : state) observation =
       Some observation.roster_result
 
 let take_early_keeper_roster_observation (state : state) early =
-  if Option.is_some state.http_refresh_started_ns
-     && Http_refresh_order.is_current state.http_refresh_order early.er_ticket
-     && early.er_authority = state.workspace_authority
-     && state.workspace_identity = Workspace_identity_match
-     && server_workspace_matches ~expected:state.server_identity (Ok early.er_identity)
-     && workspace_identity_of_refresh ~local_base_path:state.local_base_path
-          (Ok early.er_identity) = Workspace_identity_match then
-    (* Only a decoded response from the workspace-bound endpoint can arrive
-       early. A refusal/error retains its owner for the terminal bundle. *)
-    match early.er_observation.roster_result with
-    | Ok _ -> take_keeper_roster_observation state early.er_observation
-    | Error _ -> None
+  if can_admit_early_http_read state ~ticket:early.er_ticket
+      ~authority:early.er_authority early.er_identity then
+    (* A failure settles only its owned read. It grants no roster authority;
+       application withdraws stale lifecycle and Item observations. *)
+    take_keeper_roster_observation state early.er_observation
   else None
 
 (* Pending reads and post-action offers belong to the workspace that admitted

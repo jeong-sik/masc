@@ -805,7 +805,9 @@ let load_board_hearths ~(host : string) ~(port : int) :
     ((string * int) list, string) result =
   match fetch_board_hearths ~host ~port with
   | Error err -> Error ("board hearths load failed: " ^ err)
-  | Ok json -> decode_board_hearths json
+  | Ok json ->
+      Masc_tui_response_decode.run ~name:"board.hearths.decode_wait" (fun () ->
+        decode_board_hearths json)
 
 let decode_board_posts json_list =
   Masc.Tui_decode_fields.decode_list "posts" decode_board_post json_list
@@ -853,8 +855,9 @@ let load_board_list ~(host : string) ~(port : int)
   match fetch_board ~host ~port ~sort_by ~hearth with
   | Error err -> Error ("board load failed: " ^ err)
   | Ok json ->
-      let* posts = Masc.Tui_decode_fields.required_list_field json "posts" in
-      decode_board_posts posts
+      Masc_tui_response_decode.run ~name:"board.list.decode_wait" (fun () ->
+        let* posts = Masc.Tui_decode_fields.required_list_field json "posts" in
+        decode_board_posts posts)
 
 (** The ordinary Board read uses the newest twenty. The reader can request
     the complete history explicitly; that read walks bounded REST pages. *)
@@ -975,39 +978,43 @@ let load_overview_runtime_resolved ~(host : string) ~(port : int) :
       let reason = "runtime catalogue load failed: " ^ err in
       (Error reason, Error reason)
   | Ok json ->
-      ( Result.map
-          (fun (options, _lanes, _assignments) -> options)
-          (Tui_decode.decode_runtime_resolved_full json)
-      , Masc.Tui_decode_usage.decode_provider_usage_windows json )
+      Masc_tui_response_decode.run ~name:"runtime.quota.decode_wait" (fun () ->
+        ( Result.map
+            (fun (options, _lanes, _assignments) -> options)
+            (Tui_decode.decode_runtime_resolved_full json)
+        , Masc.Tui_decode_usage.decode_provider_usage_windows json ))
 
 let load_keeper_usage ~(host : string) ~(port : int) =
   match fetch_keeper_usage ~host ~port with
   | Error reason -> Error ("keeper usage load failed: " ^ reason)
-  | Ok json -> Masc.Tui_decode_usage.decode_keeper_usage_window json
+  | Ok json ->
+      Masc_tui_response_decode.run ~name:"keeper.usage.decode_wait" (fun () ->
+        Masc.Tui_decode_usage.decode_keeper_usage_window json)
 
 let load_provider_usage_history ~(host : string) ~(port : int) ~(days : int) =
   match fetch_provider_usage_history ~host ~port ~days with
   | Error reason -> Error ("provider usage history load failed: " ^ reason)
   | Ok json ->
-      let cache_error =
-        match Json_util.assoc_member_opt "cache" json with
-        | Some cache ->
-            (match Json_util.assoc_member_opt "last_error" cache with
-             | Some (`String reason) -> Some reason
-             | _ -> None)
-        | None -> None
-      in
-      (match cache_error with
-       | Some reason -> Error ("history read failed: " ^ reason)
-       | None ->
-      match Json_util.assoc_member_opt "state" json with
-       | Some (`String "loading") ->
-           Error "history is loading"
-       | Some (`String "unavailable") ->
-           (match Json_util.assoc_member_opt "reason" json with
-            | Some (`String reason) -> Error reason
-            | _ -> Error "history unavailable without a reason")
-       | Some _ | None -> Masc.Tui_decode_usage.decode_provider_usage_history json)
+      Masc_tui_response_decode.run ~name:"provider.history.decode_wait" (fun () ->
+        let cache_error =
+          match Json_util.assoc_member_opt "cache" json with
+          | Some cache ->
+              (match Json_util.assoc_member_opt "last_error" cache with
+               | Some (`String reason) -> Some reason
+               | _ -> None)
+          | None -> None
+        in
+        (match cache_error with
+         | Some reason -> Error ("history read failed: " ^ reason)
+         | None ->
+        match Json_util.assoc_member_opt "state" json with
+         | Some (`String "loading") ->
+             Error "history is loading"
+         | Some (`String "unavailable") ->
+             (match Json_util.assoc_member_opt "reason" json with
+              | Some (`String reason) -> Error reason
+              | _ -> Error "history unavailable without a reason")
+         | Some _ | None -> Masc.Tui_decode_usage.decode_provider_usage_history json))
 
 type runtime_surface_load = {
   rsl_resolved : Tui_decode.runtime_resolved_snapshot;
@@ -1103,7 +1110,9 @@ let load_transport_health ~(host : string) ~(port : int) :
     (Tui_decode.transport_health, string) result =
   match fetch_transport_health ~host ~port with
   | Error err -> Error ("transport health load failed: " ^ err)
-  | Ok json -> Tui_decode.decode_transport_health json
+  | Ok json ->
+      Masc_tui_response_decode.run ~name:"transport.decode_wait" (fun () ->
+        Tui_decode.decode_transport_health json)
 
 (* The briefing gives each Keeper the control plane's own liveness word, and
    [Keeper_status_runtime] owns both ends of that vocabulary -- the producer
@@ -1147,7 +1156,9 @@ let load_account_emails ~(host : string) ~(port : int) :
     ((string * string) list * int, string) result =
   match Masc_tui_http.fetch_account_emails ~host ~port with
   | Error err -> Error err
-  | Ok json -> Masc_tui_account_login.emails_of_document json
+  | Ok json ->
+      Masc_tui_response_decode.run ~name:"account.emails.decode_wait" (fun () ->
+        Masc_tui_account_login.emails_of_document json)
 
 (* The Overview's GOALS section. A phase this build does not know refuses the
    whole reading: a goal dropped from the list, or drawn under a phase it is
@@ -1157,8 +1168,9 @@ let load_overview_goals ~(host : string) ~(port : int) :
   match Masc_tui_http.fetch_dashboard_goals ~host ~port with
   | Error err -> Error ("goals load failed: " ^ err)
   | Ok json ->
-      Result.map_error Tui_decode.overview_goals_error_to_string
-        (Tui_decode.decode_overview_goals json)
+      Masc_tui_response_decode.run ~name:"overview.goals.decode_wait" (fun () ->
+        Result.map_error Tui_decode.overview_goals_error_to_string
+          (Tui_decode.decode_overview_goals json))
 
 (** Load overview snapshot from /api/v1/dashboard/briefing *)
 let load_overview ~(host : string) ~(port : int) :
@@ -1166,71 +1178,72 @@ let load_overview ~(host : string) ~(port : int) :
   match fetch_dashboard_briefing ~host ~port with
   | Error err -> Error ("overview load failed: " ^ err)
   | Ok json ->
-      let* summary = Masc.Tui_decode_fields.required_object_field json "summary" in
-      let* incidents =
-        let* items = Masc.Tui_decode_fields.optional_list_field json "incidents" in
-        decode_attention_items items
-      in
-      let* attention_queue =
-        let* items = Masc.Tui_decode_fields.optional_list_field json "attention_queue" in
-        decode_attention_items items
-      in
-      let* agent_briefs = Masc.Tui_decode_fields.optional_list_field json "agent_briefs" in
-      let* keeper_briefs = Masc.Tui_decode_fields.optional_list_field json "keeper_briefs" in
-      (* Keepers the server listed but could not build a row for. They are
-         not in [keeper_briefs]; before #38090 they were in neither, and the
-         Overview counted a fleet that had lost a Keeper as a smaller one. *)
-      let* keepers_unread =
-        let* items = Masc.Tui_decode_fields.required_list_field json "keepers_unread" in
-        Keeper_snapshot_unread.list_of_json (`List items)
-      in
-      let* ov_keeper_listing =
-        let* listing = Masc.Tui_decode_fields.required_object_field json "keepers_listing" in
-        Keeper_snapshot_unread.listing_of_json listing
-      in
-      let* ov_workspace_health =
-        let* workspace_health = Masc.Tui_decode_fields.required_string_field summary "workspace_health" in
-        decode_workspace_health workspace_health
-      in
-      (* Counted from the lists the briefing carries. The summary object
-         holds workspace_health and project and nothing else --
-         [lib/dashboard/dashboard_briefing.ml] writes no count into it -- so
-         a count read from there was a default dressed as a reading. *)
-      (* An unread Keeper is still a Keeper -- the server listed its name --
-         so it is in the count and among the unreadable, the same as a brief
-         whose liveness word this build cannot name. The count stays exact:
-         what is missing is the Keeper's state, not the Keeper. *)
-      let n_unread = List.length keepers_unread in
-      let ov_keepers = List.length keeper_briefs + n_unread in
-      let ov_keeper_liveness =
-        let counts = keeper_liveness_of_briefs keeper_briefs in
-        { counts with klc_unreadable = counts.klc_unreadable + n_unread }
-      in
-      let ov_mcp_agents = List.length agent_briefs in
-      let* ov_generated_at = Masc.Tui_decode_fields.required_string_field json "generated_at" in
-      Ok
-        {
-          ov_workspace_health;
-          ov_keepers;
-          ov_keeper_listing;
-          ov_keeper_liveness;
-          ov_mcp_agents;
-          (* The briefing projects one fact onto two lists: an incident is
-             also queued for operator attention, as the same JSON row. On the
-             live runtime all three incidents came back on both lists and the
-             panel drew each twice. One fact, one row: a later item
-             structurally equal to an earlier one is the same projection
-             again, not a second fact. Items that differ in any field keep
-             both rows. *)
-          ov_attention_items =
-            (incidents @ attention_queue
-            |> List.fold_left
-                 (fun kept item ->
-                   if List.mem item kept then kept else item :: kept)
-                 []
-            |> List.rev);
-          ov_generated_at;
-        }
+      Masc_tui_response_decode.run ~name:"overview.decode_wait" (fun () ->
+        let* summary = Masc.Tui_decode_fields.required_object_field json "summary" in
+        let* incidents =
+          let* items = Masc.Tui_decode_fields.optional_list_field json "incidents" in
+          decode_attention_items items
+        in
+        let* attention_queue =
+          let* items = Masc.Tui_decode_fields.optional_list_field json "attention_queue" in
+          decode_attention_items items
+        in
+        let* agent_briefs = Masc.Tui_decode_fields.optional_list_field json "agent_briefs" in
+        let* keeper_briefs = Masc.Tui_decode_fields.optional_list_field json "keeper_briefs" in
+        (* Keepers the server listed but could not build a row for. They are
+           not in [keeper_briefs]; before #38090 they were in neither, and the
+           Overview counted a fleet that had lost a Keeper as a smaller one. *)
+        let* keepers_unread =
+          let* items = Masc.Tui_decode_fields.required_list_field json "keepers_unread" in
+          Keeper_snapshot_unread.list_of_json (`List items)
+        in
+        let* ov_keeper_listing =
+          let* listing = Masc.Tui_decode_fields.required_object_field json "keepers_listing" in
+          Keeper_snapshot_unread.listing_of_json listing
+        in
+        let* ov_workspace_health =
+          let* workspace_health = Masc.Tui_decode_fields.required_string_field summary "workspace_health" in
+          decode_workspace_health workspace_health
+        in
+        (* Counted from the lists the briefing carries. The summary object
+           holds workspace_health and project and nothing else --
+           [lib/dashboard/dashboard_briefing.ml] writes no count into it -- so
+           a count read from there was a default dressed as a reading. *)
+        (* An unread Keeper is still a Keeper -- the server listed its name --
+           so it is in the count and among the unreadable, the same as a brief
+           whose liveness word this build cannot name. The count stays exact:
+           what is missing is the Keeper's state, not the Keeper. *)
+        let n_unread = List.length keepers_unread in
+        let ov_keepers = List.length keeper_briefs + n_unread in
+        let ov_keeper_liveness =
+          let counts = keeper_liveness_of_briefs keeper_briefs in
+          { counts with klc_unreadable = counts.klc_unreadable + n_unread }
+        in
+        let ov_mcp_agents = List.length agent_briefs in
+        let* ov_generated_at = Masc.Tui_decode_fields.required_string_field json "generated_at" in
+        Ok
+          {
+            ov_workspace_health;
+            ov_keepers;
+            ov_keeper_listing;
+            ov_keeper_liveness;
+            ov_mcp_agents;
+            (* The briefing projects one fact onto two lists: an incident is
+               also queued for operator attention, as the same JSON row. On the
+               live runtime all three incidents came back on both lists and the
+               panel drew each twice. One fact, one row: a later item
+               structurally equal to an earlier one is the same projection
+               again, not a second fact. Items that differ in any field keep
+               both rows. *)
+            ov_attention_items =
+              (incidents @ attention_queue
+              |> List.fold_left
+                   (fun kept item ->
+                     if List.mem item kept then kept else item :: kept)
+                   []
+              |> List.rev);
+            ov_generated_at;
+          })
 
 (** Load the system log page from /api/v1/dashboard/logs. [level] is the
     minimum-level floor in the route's lowercase spelling. *)
@@ -1238,7 +1251,9 @@ let load_system_logs ~(host : string) ~(port : int) ?level ~(limit : int) () :
     (system_log_snapshot, string) result =
   match fetch_dashboard_logs ~host ~port ?level ~limit () with
   | Error err -> Error ("system logs load failed: " ^ err)
-  | Ok json -> Tui_decode.decode_system_log_snapshot json
+  | Ok json ->
+      Masc_tui_response_decode.run ~name:"system.logs.decode_wait" (fun () ->
+        Tui_decode.decode_system_log_snapshot json)
 
 (** Load the registered tool inventory and, when selected, one Keeper's exact
     effective turn surface from /api/v1/dashboard/tools. *)
@@ -1479,7 +1494,9 @@ let load_planning ~(host : string) ~(port : int) :
     (planning_snapshot, string) result =
   match fetch_dashboard_planning ~host ~port with
   | Error err -> Error ("planning load failed: " ^ err)
-  | Ok json -> Tui_decode.decode_planning_snapshot json
+  | Ok json ->
+      Masc_tui_response_decode.run ~name:"planning.decode_wait" (fun () ->
+        Tui_decode.decode_planning_snapshot json)
 
 (* Which server this is. [/health] is the compact probe, and the caller asks on
    every refresh because another process may bind the same endpoint without a
@@ -1488,7 +1505,9 @@ let load_server_identity ~(host : string) ~(port : int) :
     (Tui_decode.server_identity, string) result =
   match fetch_server_identity ~host ~port with
   | Error err -> Error ("server identity load failed: " ^ err)
-  | Ok json -> Tui_decode.decode_server_identity json
+  | Ok json ->
+      Masc_tui_response_decode.run ~name:"server.identity.decode_wait" (fun () ->
+        Tui_decode.decode_server_identity json)
 
 (** Load the prompt registry from /api/v1/prompts. *)
 let load_prompts ~(host : string) ~(port : int) :
@@ -1553,7 +1572,9 @@ let load_fleet_safety ~(host : string) ~(port : int) :
     (Tui_decode.fleet_safety_reading, string) result =
   match fetch_fleet_safety ~host ~port with
   | Error err -> Error ("fleet safety load failed: " ^ err)
-  | Ok json -> Tui_decode.decode_fleet_safety json
+  | Ok json ->
+      Masc_tui_response_decode.run ~name:"fleet.safety.decode_wait" (fun () ->
+        Tui_decode.decode_fleet_safety json)
 
 (** Load the live keeper roster. Truncation is carried into the typed roster
     rather than dropped: a clamped list cannot answer whether a keeper the TUI

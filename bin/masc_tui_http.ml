@@ -592,24 +592,28 @@ let http_post ~headers ~(host : string) ~(port : int) ~(path : string)
    server's own words: those are about the request, and the surface is right to
    show them. *)
 let refusal ~status_code ~body =
-  match status_code with
-  | 401 | 403 -> (
-      match Masc_tui_credential.server_reason_of_body body with
-      | Some reason ->
-          let said =
-            Masc_tui_credential.refusal
-              ~credential_sent:(operator_token_present ())
-              reason
-          in
-          (match refresh_failure () with
-          | None -> said
-          | Some why -> said ^ " (this client could not replace it: " ^ why ^ ")")
-      | None -> Masc.Tui_decode.http_status_error ~status_code ~body)
-  | _ -> Masc.Tui_decode.http_status_error ~status_code ~body
+  let credential_sent = operator_token_present () in
+  let failed_refresh = refresh_failure () in
+  Masc_tui_response_decode.run ~name:"http.refusal.decode_wait" (fun () ->
+    match status_code with
+    | 401 | 403 -> (
+        match Masc_tui_credential.server_reason_of_body body with
+        | Some reason ->
+            let said =
+              Masc_tui_credential.refusal
+                ~credential_sent
+                reason
+            in
+            (match failed_refresh with
+            | None -> said
+            | Some why -> said ^ " (this client could not replace it: " ^ why ^ ")")
+        | None -> Masc.Tui_decode.http_status_error ~status_code ~body)
+    | _ -> Masc.Tui_decode.http_status_error ~status_code ~body)
 
 let decode_json ~allow_empty ~status_code ~body =
   if Masc.Tui_decode.is_success_http_status status_code then
-    Masc.Tui_decode.decode_json_response_body ~allow_empty ~status_code ~body
+    Masc_tui_response_decode.run ~name:"http.json.decode_wait" (fun () ->
+      Masc.Tui_decode.decode_json_response_body ~allow_empty ~status_code ~body)
   else Error (refusal ~status_code ~body)
 
 (* A refused read that does not go through [decode_json], named so the

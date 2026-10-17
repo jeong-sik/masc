@@ -788,7 +788,7 @@ let render_harness_list (state : state) =
     done;
   if shown > content_height then
     box_line_styled buf cols ~style:(Theme.recede ())
-      (Printf.sprintf "[verdicts %s]" (Masc_tui_scroll.window_text ~scroll ~height:content_height shown));
+      (Printf.sprintf "  [verdicts %s]" (Masc_tui_scroll.window_text ~scroll ~height:content_height shown));
   Buffer.add_buffer buf tail;
   finish_surface state ~surface_key:"harness" ~rows:terminal_rows ~cols buf
 

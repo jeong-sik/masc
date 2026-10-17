@@ -4394,7 +4394,20 @@ let render_keeper_message (state : state) =
 
   match state.msg_target_keeper_name with
   | None ->
-    Buffer.add_string buf "No keeper selected.\n";
+    box_top buf cols;
+    box_line buf cols
+      (Printf.sprintf "%s  %s"
+         (screen_title " Keepers \xe2\x96\xb8 chat")
+         (connection_badge state));
+    box_divider buf cols;
+    box_line_styled buf cols ~style:(Theme.recede ()) "  No keeper selected.";
+    for _ = 1 to max 0 (rows - 6) do
+      box_empty buf cols
+    done;
+    box_bottom buf cols;
+    Buffer.add_string buf
+      (footer_line state ~max_cells:cols
+         ~hints:(Masc_tui_keys.footer_hints state.view));
     finish_frame_beside_acting_pane state ~surface_key:"keeper-message" ~cursor:Frame_presenter.Hidden
       ~rows ~cols buf
   | Some keeper_name ->

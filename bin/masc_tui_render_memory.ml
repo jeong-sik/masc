@@ -1242,7 +1242,7 @@ let render_memory_body ~cols ~budget (state : state)
     done;
     if overflowing then
       push_styled ~style:(Theme.recede ())
-        (Printf.sprintf "[keepers %s]" (Masc_tui_scroll.window_text ~scroll ~height:content_height shown))
+        (Printf.sprintf "  [keepers %s]" (Masc_tui_scroll.window_text ~scroll ~height:content_height shown))
   end;
   (match projection.context with
    | [] -> ()
@@ -1532,7 +1532,7 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
     done;
     if overflowing then
       push_styled ~style:(Theme.recede ())
-        (Printf.sprintf "[facts %s]" (Masc_tui_scroll.window_text ~scroll ~height:content_height total))
+        (Printf.sprintf "  [facts %s]" (Masc_tui_scroll.window_text ~scroll ~height:content_height total))
   end;
   (match detail_lines with
    | [] -> ()

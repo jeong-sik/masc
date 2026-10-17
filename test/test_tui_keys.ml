@@ -1358,6 +1358,29 @@ let test_acting_evidence_footer_hints_and_help_section () =
         true (List.exists (fun (k, _) -> String.equal k "g / G") entries)
   | [] -> Alcotest.fail "expected non-empty help sections"
 
+let test_runtime_detail_routes_omits_model_settings_hint () =
+  let has_sub needle text =
+    let n = String.length needle and len = String.length text in
+    let rec loop i =
+      i + n <= len && (String.sub text i n = needle || loop (i + 1))
+    in
+    loop 0
+  in
+  let candidate_hints = Masc_tui_keys.footer_hints_runtime_detail ~routes:false () in
+  let routes_hints = Masc_tui_keys.footer_hints_runtime_detail ~routes:true () in
+  Alcotest.(check bool) "runtime candidate detail footer offers e:model settings"
+    true (has_sub "e:model settings" candidate_hints);
+  Alcotest.(check bool) "Runtime_routes footer omits e:model settings"
+    false (has_sub "e:model settings" routes_hints);
+  let state = create_state ~workspace:"test" ~port:0 ~refresh_interval:2.0 () in
+  state.view <- Runtime;
+  state.runtime_detail_target <- Some Runtime_routes;
+  match Masc_tui_keys.help_sections_for_state state with
+  | (_, entries) :: _ ->
+      Alcotest.(check bool) "Runtime_routes help sheet omits e"
+        false (List.exists (fun (k, _) -> String.equal k "e") entries)
+  | [] -> Alcotest.fail "expected non-empty help sections"
+
 let () =
   Alcotest.run "masc_tui_keys"
     [ ( "table"
@@ -1383,6 +1406,8 @@ let () =
             `Quick test_memory_facts_footer_hints_respect_split_threshold
         ; Alcotest.test_case "Acting evidence footer hints and help section"
             `Quick test_acting_evidence_footer_hints_and_help_section
+        ; Alcotest.test_case "Runtime_routes detail omits e:model settings"
+            `Quick test_runtime_detail_routes_omits_model_settings_hint
         ;] )
     ; ( "two-press arms"
       , [ Alcotest.test_case "a loop turn without input keeps an arm" `Quick

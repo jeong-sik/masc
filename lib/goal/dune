@@ -11,6 +11,7 @@
  (name masc_goal)
  (public_name masc.masc_goal)
  (wrapped false)
+ (private_modules goal_document)
  (libraries
   masc_types
   masc_core

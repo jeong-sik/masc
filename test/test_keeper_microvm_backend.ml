@@ -418,6 +418,7 @@ let test_the_shim_prefix_refuses_where_the_identity_cannot_be_named () =
     (Alcotest.list Alcotest.string)
     "container carries the config env"
     [ "container"; "exec"; "-i"; "--user"; "1:2"; "-w"; "/masc-work"
+    ; "--env"; "HOME=/tmp"
     ; "--env"; "MASC_EXEC_SHIM_CONFIG=/opt/masc-exec-shim/masc-exec-shim.conf"
     ; "g" ]
     (match shim_prefix Backend.Apple_container with
@@ -427,6 +428,7 @@ let test_the_shim_prefix_refuses_where_the_identity_cannot_be_named () =
     (Alcotest.list Alcotest.string)
     "nerdctl carries it too"
     [ "nerdctl"; "exec"; "-i"; "--user"; "1:2"; "-w"; "/masc-work"
+    ; "--env"; "HOME=/tmp"
     ; "--env"; "MASC_EXEC_SHIM_CONFIG=/opt/masc-exec-shim/masc-exec-shim.conf"
     ; "g" ]
     (match shim_prefix Backend.Nerdctl_kata with
@@ -440,6 +442,8 @@ let test_the_shim_prefix_refuses_where_the_identity_cannot_be_named () =
     ; "--stream"
     ; "-w"
     ; "/masc-work"
+    ; "--env"
+    ; "HOME=/tmp"
     ; "--env"
     ; "MASC_EXEC_SHIM_CONFIG=/opt/masc-exec-shim/masc-exec-shim.conf"
     ; "g"

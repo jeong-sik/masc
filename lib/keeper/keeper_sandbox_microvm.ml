@@ -875,6 +875,8 @@ let shim_exec_prefix_for ?(stdin = true) backend ~container_name ~uid ~gid ~remo
          ; "-w"
          ; remote_root
          ; "--env"
+         ; "HOME=" ^ Backend.scratch_guest_root
+         ; "--env"
          ; Exec_ssh_protocol.shim_config_env_var ^ "=" ^ shim_config_path
          ; container_name
          ]
@@ -891,6 +893,8 @@ let shim_exec_prefix_for ?(stdin = true) backend ~container_name ~uid ~gid ~remo
        @ (if stdin then Backend.exec_stdin_args backend else [])
        @ [ "-w"
          ; remote_root
+         ; "--env"
+         ; "HOME=" ^ Backend.scratch_guest_root
          ; "--env"
          ; Exec_ssh_protocol.shim_config_env_var ^ "=" ^ shim_config_path
          ; container_name
@@ -1365,12 +1369,17 @@ let shim_mount_args ~host_dir =
     and a shim one release behind refuses a key it does not know, which
     would fail every request on the guest. The host writes only the keys
     every spoken shim reads. *)
+let shim_env_allowlist =
+  Keeper_sandbox_runtime.config_env_names
+  @ [ Keeper_github_identity.git_config_global_env_name ]
+;;
+
 let shim_config_content ~payload_path =
   Printf.sprintf
     "remote_root=%s\npath=%s\nenv_allowlist=%s\n"
     work_volume_guest_root
     payload_path
-    (String.concat "," Keeper_sandbox_runtime.config_env_names)
+    (String.concat "," shim_env_allowlist)
 ;;
 
 (** What the guest endpoint declares to the remote runner. No caller env

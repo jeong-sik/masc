@@ -2678,8 +2678,8 @@ let test_shim_travels_read_only_with_its_config () =
      request env it was not told to accept, and the guest was given the
      config mount, so the names that point at it must get through. *)
   Alcotest.(check string)
-    "config names the work root, the image's PATH and the config env, and no scratch_root a v2 shim would refuse"
-    "remote_root=/masc-work\npath=/home/opam/.opam/5.5/bin:/usr/bin\nenv_allowlist=MASC_BASE_PATH,MASC_CONFIG_DIR\n"
+    "config names the work root, the image's PATH and the config and git credential env, and no scratch_root a v2 shim would refuse"
+    "remote_root=/masc-work\npath=/home/opam/.opam/5.5/bin:/usr/bin\nenv_allowlist=MASC_BASE_PATH,MASC_CONFIG_DIR,GIT_CONFIG_GLOBAL\n"
     (M.shim_config_content ~payload_path:"/home/opam/.opam/5.5/bin:/usr/bin");
   (* The boot mounts the scratch at the shim's default scratch root: the
      same constant on both sides, so the box the shim builds has a place to
@@ -2820,6 +2820,8 @@ let test_running_guest_is_a_remote_endpoint () =
     Alcotest.(check bool) "execs into the guest" true
       (adjacent ~flag:"exec" ~value:"-i" argv && contains container_name argv);
     Alcotest.(check bool) "names the mounted shim" true (contains M.shim_guest_path argv);
+    Alcotest.(check bool) "hands the shim a writable guest HOME" true
+      (adjacent ~flag:"--env" ~value:("HOME=" ^ Backend.scratch_guest_root) argv);
     Alcotest.(check bool) "hands the shim its config" true
       (adjacent ~flag:"--env" ~value:("MASC_EXEC_SHIM_CONFIG=" ^ M.shim_config_guest_path) argv);
     Alcotest.(check bool) "starts in the work root" true
@@ -2832,6 +2834,9 @@ let test_running_guest_is_a_remote_endpoint () =
     Alcotest.(check (option string)) "the config mount is named by its env"
       (Some "/tmp/masc-runtime/.masc/config")
       (List.assoc_opt "MASC_CONFIG_DIR" injected);
+    Alcotest.(check (option string)) "git credential config is named by its env"
+      (Some "/tmp/masc-runtime/.masc/keepers/lane-smith/github-cli/gitconfig")
+      (List.assoc_opt "GIT_CONFIG_GLOBAL" injected);
     Alcotest.(check bool) "the lane's own env still leads" true
       (List.mem_assoc "GH_CONFIG_DIR" injected);
     Alcotest.(check (option string)) "commits carry the keeper as author"

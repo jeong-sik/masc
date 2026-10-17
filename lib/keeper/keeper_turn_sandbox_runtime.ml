@@ -2371,7 +2371,10 @@ let microvm_remote_endpoint_of_running_fields
                 ~injected_env:
                   (Keeper_sandbox_runtime.docker_config_env
                      ~base_path:config.base_path
-                     ~container_root)
+                     ~container_root
+                   @ [ ( Keeper_github_identity.git_config_global_env_name
+                       , Keeper_github_identity.git_credential_config_path
+                           ~config_dir:gh_config_dir ) ])
                 ~env_allowlist:Keeper_sandbox_microvm.remote_env_allowlist
                 ~connect_timeout_sec:Keeper_sandbox_microvm.remote_connect_timeout_sec
                 ~max_concurrent_sessions:

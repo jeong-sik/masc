@@ -127,6 +127,23 @@ let check_typed_empty_completion expected = function
     failf "expected typed empty completion, got %s" (string_of_http_error err)
 ;;
 
+let check_content_free_terminal expected = function
+  | Ok (response : Types.api_response) ->
+    check bool "typed terminal reason" true (response.stop_reason = expected);
+    check int "no answer content invented" 0 (List.length response.content)
+  | Error err ->
+    failf "terminal state erased by completion boundary: %s" (string_of_http_error err)
+;;
+
+let empty_failure_stops =
+  Types.[ EndTurn; StopSequence; StopToolUse; ContextWindowExceeded
+        ; PauseTurn; Compaction; UnmatchedToolCalls; Unknown "provider_terminal" ]
+;;
+
+let content_free_terminal_stops =
+  Types.[ Refusal; MaxTokens; ContentFilter; RepetitionTruncation ]
+;;
+
 (* ── Provider defaults / public helpers ───────────────── *)
 
 let test_gemini_url_variants () =
@@ -344,7 +361,7 @@ let test_complete_injected_transport_rejects_typed_empty () =
          ~messages:[ Types.user_msg "hello" ]
          ()
        |> check_typed_empty_completion stop_reason)
-    [ Types.EndTurn; Types.MaxTokens ]
+    empty_failure_stops
 ;;
 
 let test_complete_stream_injected_transport_rejects_typed_empty () =
@@ -369,7 +386,36 @@ let test_complete_stream_injected_transport_rejects_typed_empty () =
          ~on_event:(fun _ -> ())
          ()
        |> check_typed_empty_completion stop_reason)
-    [ Types.EndTurn; Types.MaxTokens ]
+    empty_failure_stops
+;;
+
+let test_complete_injected_terminal_outcomes () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  List.iter
+    (fun stop_reason ->
+       let response = make_response ~stop_reason ~content:[] () in
+       let transport = transport_of_sync (fun () ->
+         { Llm_transport.response = Ok response; latency_ms = Some 1 }) in
+       Complete.complete ~sw ~net:(Eio.Stdenv.net env) ~transport
+         ~config:(make_config ()) ~messages:[ Types.user_msg "hello" ] ()
+       |> check_content_free_terminal stop_reason)
+    content_free_terminal_stops
+;;
+
+let test_complete_stream_injected_terminal_outcomes () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  List.iter
+    (fun stop_reason ->
+       let response = make_response ~stop_reason ~content:[] () in
+       let transport = transport_of_sync (fun () ->
+         { Llm_transport.response = Ok response; latency_ms = Some 1 }) in
+       Complete.complete_stream ~sw ~net:(Eio.Stdenv.net env) ~transport
+         ~config:(make_config ()) ~messages:[ Types.user_msg "hello" ]
+         ~on_event:(fun _ -> ()) ()
+       |> check_content_free_terminal stop_reason)
+    content_free_terminal_stops
 ;;
 
 let test_complete_cached_empty_fails_before_transport () =
@@ -377,7 +423,7 @@ let test_complete_cached_empty_fails_before_transport () =
   @@ fun env ->
   Eio.Switch.run
   @@ fun sw ->
-  let response = make_response ~stop_reason:Types.MaxTokens ~content:[] () in
+  let response = make_response ~stop_reason:Types.EndTurn ~content:[] () in
   let cached_json = Cache.response_to_json response in
   let cache : Cache.t =
     { get = (fun ~key:_ -> Some cached_json); set = (fun ~key:_ ~ttl_sec:_ _ -> ()) }
@@ -394,7 +440,27 @@ let test_complete_cached_empty_fails_before_transport () =
       ()
   in
   check int "cache hit does not emit dispatch observation" 0 !observations;
-  check_typed_empty_completion Types.MaxTokens result
+  check_typed_empty_completion Types.EndTurn result
+;;
+
+let test_complete_cached_terminal_outcomes () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  List.iter
+    (fun stop_reason ->
+       let response = make_response ~stop_reason ~content:[] () in
+       let cached_json = Cache.response_to_json response in
+       let cache : Cache.t =
+         { get = (fun ~key:_ -> Some cached_json)
+         ; set = (fun ~key:_ ~ttl_sec:_ _ -> fail "cache hit must not be stored again") }
+       in
+       let observations = ref 0 in
+       Complete.complete ~sw ~net:(Eio.Stdenv.net env)
+         ~config:(make_config ()) ~messages:[ Types.user_msg "hello" ] ~cache
+         ~request_wire_observer:(fun _ -> incr observations; Ok ()) ()
+       |> check_content_free_terminal stop_reason;
+       check int "cached terminal has no dispatch observation" 0 !observations)
+    content_free_terminal_stops
 ;;
 
 let test_complete_transport_failure_is_one_shot () =
@@ -686,9 +752,19 @@ let () =
             `Quick
             test_complete_stream_injected_transport_rejects_typed_empty
         ; test_case
+            "injected sync preserves terminal outcomes"
+            `Quick
+            test_complete_injected_terminal_outcomes
+        ; test_case
+            "injected stream preserves terminal outcomes"
+            `Quick
+            test_complete_stream_injected_terminal_outcomes
+        ; test_case
             "cached empty fails before transport"
             `Quick
             test_complete_cached_empty_fails_before_transport
+        ; test_case "cached terminal outcomes are preserved" `Quick
+            test_complete_cached_terminal_outcomes
         ; test_case
             "stream transport success metrics and telemetry"
             `Quick

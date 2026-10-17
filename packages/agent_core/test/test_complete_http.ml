@@ -245,6 +245,13 @@ let check_typed_empty_completion expected = function
   | Error _ -> fail "expected typed empty completion provider failure"
 ;;
 
+let check_content_free_terminal expected = function
+  | Ok (response : Types.api_response) ->
+    check bool "typed terminal reason" true (response.stop_reason = expected);
+    check int "no answer content invented" 0 (List.length response.content)
+  | Error _ -> fail "completion boundary erased authoritative terminal state"
+;;
+
 (* ── complete: success ───────────────────────────────── *)
 
 let test_complete_anthropic_ok () =
@@ -291,7 +298,10 @@ let test_complete_http_rejects_typed_empty_completion () =
   in
   List.iter
     (fun (expected, wire) -> run expected wire)
-    [ Types.EndTurn, "end_turn"; Types.MaxTokens, "max_tokens" ]
+    [ Types.EndTurn, "end_turn"
+    ; Types.ContextWindowExceeded, "model_context_window_exceeded"
+    ; Types.Unknown "new_provider_finish", "new_provider_finish"
+    ; Types.UnmatchedToolCalls, "unmatched_tool_calls" ]
 ;;
 
 let test_complete_stream_http_rejects_typed_empty_completion () =
@@ -318,7 +328,41 @@ let test_complete_stream_http_rejects_typed_empty_completion () =
   in
   List.iter
     (fun (expected, wire) -> run expected wire)
-    [ Types.EndTurn, "end_turn"; Types.MaxTokens, "max_tokens" ]
+    [ Types.EndTurn, "end_turn"
+    ; Types.ContextWindowExceeded, "model_context_window_exceeded"
+    ; Types.Unknown "new_provider_finish", "new_provider_finish"
+    ; Types.UnmatchedToolCalls, "unmatched_tool_calls" ]
+;;
+
+let test_complete_http_preserves_content_free_terminal () =
+  List.iter (fun (expected, wire_stop_reason) ->
+    Eio_main.run @@ fun env ->
+    try Eio.Switch.run @@ fun sw ->
+      let url = start_mock_server ~sw ~net:env#net
+          (anthropic_empty_response wire_stop_reason) in
+      Complete.complete ~sw ~net:env#net ~config:(make_config url) ~messages ()
+      |> check_content_free_terminal expected;
+      Eio.Switch.fail sw Exit
+    with Exit -> ())
+    [ Types.Refusal, "refusal"; Types.MaxTokens, "max_tokens"
+    ; Types.ContentFilter, "content_filter"
+    ; Types.RepetitionTruncation, "repetition_truncation" ]
+;;
+
+let test_complete_stream_http_preserves_content_free_terminal () =
+  List.iter (fun (expected, wire_stop_reason) ->
+    Eio_main.run @@ fun env ->
+    try Eio.Switch.run @@ fun sw ->
+      let url = start_mock_server ~sw ~net:env#net
+          (anthropic_empty_sse wire_stop_reason) in
+      Complete.complete_stream ~sw ~net:env#net ~config:(make_config url)
+        ~messages ~on_event:(fun _ -> ()) ()
+      |> check_content_free_terminal expected;
+      Eio.Switch.fail sw Exit
+    with Exit -> ())
+    [ Types.Refusal, "refusal"; Types.MaxTokens, "max_tokens"
+    ; Types.ContentFilter, "content_filter"
+    ; Types.RepetitionTruncation, "repetition_truncation" ]
 ;;
 
 (* llama-server (OpenAI-compat SSE) attaches a [timings] object — including
@@ -4492,6 +4536,8 @@ let () =
             "HTTP rejects typed empty completion"
             `Quick
             test_complete_http_rejects_typed_empty_completion
+        ; test_case "HTTP preserves content-free terminal" `Quick
+            test_complete_http_preserves_content_free_terminal
         ; test_case "http error" `Quick test_complete_http_error
         ; test_case
             "wire observer sees exact sync body"
@@ -4674,6 +4720,8 @@ let () =
             "HTTP stream rejects typed empty completion"
             `Quick
             test_complete_stream_http_rejects_typed_empty_completion
+        ; test_case "HTTP stream preserves content-free terminal" `Quick
+            test_complete_stream_http_preserves_content_free_terminal
         ; test_case
             "preserves thinking signature"
             `Quick

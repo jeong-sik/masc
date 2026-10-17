@@ -70,6 +70,24 @@ let test_explicit_address_is_closed () =
     "broadcast"
     "@@all and @alpha"
 
+let test_effective_targets_share_the_routing_fallback () =
+  let project keeper_name mention_targets =
+    Lane.effective_target_ids ~keeper_name ~mention_targets |> List.map Kid.to_string
+  in
+  check ids "unconfigured uses canonical Keeper name" [ "beta" ]
+    (project " Beta " []);
+  check ids "configured aliases replace name, fold and deduplicate" [ "alpha"; "omega" ]
+    (project "beta" [ " Alpha "; "ALPHA"; "Omega" ]);
+  check bool "alias is a route match" true
+    (Lane.ids_match
+       ~target_ids:(Lane.effective_target_ids ~keeper_name:"beta" ~mention_targets:[ "Alpha" ])
+       (Lane.mention_ids_of_content "@ALPHA please inspect"));
+  check bool "display name is not an invented alias" false
+    (Lane.ids_match
+       ~target_ids:(Lane.effective_target_ids ~keeper_name:"beta" ~mention_targets:[ "Alpha" ])
+       (Lane.mention_ids_of_content "@beta please inspect"))
+;;
+
 let rec remove_tree path =
   if Sys.file_exists path then
     if Sys.is_directory path then begin
@@ -126,6 +144,7 @@ let () =
     [
       ( "parser",
         [ test_case "goldens" `Quick test_parser_goldens;
+          test_case "effective address projection" `Quick test_effective_targets_share_the_routing_fallback;
           test_case "closed explicit address" `Quick
             test_explicit_address_is_closed;
         ] );

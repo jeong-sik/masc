@@ -3669,6 +3669,66 @@ beanie = 200
     ~expected_balance:None;
   check string "warm HTTP and SSE preparation never repair the damaged ledger" corrupt (Fs_compat.load_file ledger)
 
+let test_board_address_overlay_follows_effective_config_after_cache () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let name = "board-address-beta" in
+  let meta = match Masc_test_deps.meta_of_json_fixture
+    (`Assoc [ "name", `String name; "trace_id", `String "board-address-trace" ]) with
+    | Ok meta -> { meta with Masc.Keeper_meta_contract.mention_targets = [ "raw-address" ] }
+    | Error detail -> fail detail in
+  (match Masc.Keeper_meta_store.replace_snapshot config meta with
+   | Ok () -> () | Error detail -> fail detail);
+  let dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path in
+  mkdir_p dir;
+  let path = Filename.concat dir (name ^ ".toml") in
+  let configure target = write_file path (Printf.sprintf
+    "[keeper]\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\ninstructions = \"Board address fixture\"\nmention_targets = [%S]\n" target) in
+  (* This immutable seed stands for a previously computed metadata/HTTP
+     snapshot. The current-observation boundary must not reuse its addresses. *)
+  let seed = `Assoc [ "keepers", `List [`Assoc [ "name", `String name
+    ; "board_address", `Assoc [ "state", `String "ready"
+      ; "target_ids", `List [`String "stale-address"] ] ]] ] in
+  let projected () = Dashboard_projection_cache.with_current_keeper_observations ~config seed in
+  let address json = Yojson.Safe.Util.(json |> member "keepers" |> to_list |> List.hd |> member "board_address") in
+  let ids json = Yojson.Safe.Util.(address json |> member "target_ids" |> to_list |> List.map to_string) in
+  let routes target =
+    let signal : Masc.Board_dispatch.board_signal =
+      { kind = Masc.Board_dispatch.Board_post_created; post_id = "post-effective-address"
+      ; author = "external-author"; title = "address fixture"; content = "@" ^ target
+      ; hearth = None; updated_at = Some 123. } in
+    let audience = match Masc.Keeper_board_audience.classify ~visibility:Masc.Board.Internal signal with
+      | Ok audience -> audience | Error error -> fail (Masc.Keeper_board_audience.classification_error_to_string error) in
+    let effective = match Masc.Keeper_meta_store.read_effective_meta config name with
+      | Ok (Some meta) -> meta | Ok None -> fail "effective meta missing" | Error detail -> fail detail in
+    match Masc.Keeper_board_audience.route_for_keeper ~audience ~meta:effective ~signal with
+    | Masc.Keeper_world_observation_board_signal.Available
+        (Masc.Keeper_board_audience.Deliver Masc.Keeper_world_observation_board_signal.Explicit_mention) -> true
+    | Masc.Keeper_world_observation_board_signal.Available _ -> false
+    | Masc.Keeper_world_observation_board_signal.Unavailable error ->
+      fail (Masc.Keeper_world_observation_board_signal.unavailable_to_string error)
+  in
+  configure "Alpha";
+  let first = projected () in
+  check (list string) "public current address uses profile, not raw metadata" [ "alpha" ] (ids first);
+  check bool "same alias receives backend direct delivery" true (routes "ALPHA");
+  check bool "Keeper name is not inferred as an address" false (routes name);
+  configure "Omega";
+  let changed = projected () in
+  check (list string) "same cached seed follows changed configuration" [ "omega" ] (ids changed);
+  let sequence json = Yojson.Safe.Util.(json |> member "candle_observation_sequence" |> to_int) in
+  check bool "address-only change advances fresh-observation ordering" true
+    (sequence changed > sequence first);
+  check bool "old alias no longer delivers" false (routes "Alpha");
+  check bool "new public alias delivers" true (routes "OMEGA");
+  write_file path "not = [\n";
+  let unavailable = address (projected ()) in
+  check string "bad profile is explicit unavailable, never raw fallback" "unavailable"
+    Yojson.Safe.Util.(unavailable |> member "state" |> to_string);
+  check string "typed read failure is retained" "effective_metadata_unread"
+    Yojson.Safe.Util.(unavailable |> member "reason" |> to_string);
+  check (list string) "cached metadata seed stays untouched" [ "stale-address" ] (ids seed)
+;;
+
 let test_candle_account_revision_tracks_free_purchase_and_price_edit () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   let base_path = config.Workspace.base_path in
@@ -8042,6 +8102,8 @@ let () =
             test_execution_first_compute_reuses_prepared_bytes;
           test_case "warm execution and briefing follow equipped or unreadable authority" `Quick
             test_warm_dashboard_responses_follow_equipment_authority;
+          test_case "Board current addresses follow effective config after cache" `Quick
+            test_board_address_overlay_follows_effective_config_after_cache;
           test_case "Item account revision follows free purchase and price edit" `Quick
             test_candle_account_revision_tracks_free_purchase_and_price_edit;
           test_case "execution fixture broadcast and unknown override" `Quick

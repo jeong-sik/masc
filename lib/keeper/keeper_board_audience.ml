@@ -59,10 +59,9 @@ let classify ~visibility signal =
 ;;
 
 let keeper_target_ids (meta : Keeper_meta_contract.keeper_meta) =
-  let targets =
-    if meta.mention_targets = [] then [ meta.name ] else meta.mention_targets
-  in
-  Keeper_lane_mentions.target_ids_of targets
+  Keeper_lane_mentions.effective_target_ids
+    ~keeper_name:meta.name
+    ~mention_targets:meta.mention_targets
 ;;
 
 let route_for_keeper ~audience ~(meta : Keeper_meta_contract.keeper_meta) ~signal =

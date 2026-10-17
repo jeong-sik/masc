@@ -9,7 +9,7 @@ import { showToast } from '../common/toast'
 import { EmptyState } from '../common/feedback-state'
 import { LoadingState } from '../common/feedback-state'
 import { RichComposer } from '../common/rich-composer'
-import { RichContent } from '../common/rich-content'
+import { BoardRichContent } from './board-rich-content'
 import { TextInput } from '../common/input'
 import { TurnInspectorDrawer } from '../keeper-turn-inspector-drawer'
 import { findKeeper } from '../../lib/keeper-utils'
@@ -331,7 +331,7 @@ function CommentItem({
             onClick=${() => { replyingTo.value = isReplying ? null : comment.id; commentText.value = '' }}
           >${isReplying ? '취소' : '답글'}<//>
         </div>
-        <div class="text-sm text-[var(--color-fg-primary)] leading-paragraph"><${RichContent} text=${displayText} previewLimit=${1} /></div>
+        <div class="text-sm text-[var(--color-fg-primary)] leading-paragraph"><${BoardRichContent} text=${displayText} previewLimit=${1} /></div>
         ${needsTruncation ? html`
           <${ActionButton}
             variant="subtle"
@@ -628,7 +628,7 @@ export function PostDetail({ post }: { post: BoardPost }) {
           </div>
 
           <div class="text-sm text-[var(--color-fg-primary)] leading-loose">
-            <${RichContent} text=${post.body} previewLimit=${4} />
+            <${BoardRichContent} audience=${post.audience} text=${post.body} previewLimit=${4} />
           </div>
 
           ${post.attachments

@@ -10,11 +10,14 @@ val normalize_actor_name : string option -> string
 
 val with_current_keeper_observations :
   config:Workspace_utils.config -> Yojson.Safe.t -> Yojson.Safe.t
-(** Refresh Keeper equipment, wallet balances, Item-account revisions and currency supply together in
+(** Refresh current effective Board addresses, Keeper equipment, wallet balances, Item-account revisions and currency supply together in
     an operator/execution/briefing envelope.
     Call after outer HTTP caches as well as the metadata snapshot cache.
-    [candle_observation_sequence] orders fresh reads independently of cached
-    metadata generations; consumers reject an older observation in the same
+    [candle_observation_sequence] orders the combined fresh observations,
+    including address changes, independently of cached metadata generations.
+    Board addresses are reread from effective metadata
+    once per Keeper per response, including on encoded-cache hits.
+    Consumers reject an older observation in the same
     server incarnation. *)
 
 val with_current_gate_keeper_observations :

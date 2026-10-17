@@ -1,3 +1,4 @@
+import { readKeeperBoardAddress } from './lib/board-address'
 import { readKeeperPortrait } from './lib/keeper-portrait'
 import { readCandleAccountRevision, readCandleBalance } from './lib/candle-observation'
 import { parseKeeperActivationMode } from './lib/keeper-activation-mode'
@@ -700,6 +701,7 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
             value === 'runtime_check_required' || value === 'sandbox_check_required' || value === 'declaration_invalid')
           : [],
         portrait: readKeeperPortrait(row.portrait),
+        board_address: readKeeperBoardAddress(row.board_address),
         candle_balance_milli: readCandleBalance(row.candle_balance_milli),
         candle_account_revision: readCandleAccountRevision(row.candle_account_revision),
         status: normalizeKeeperAgentStatus(statusRaw),

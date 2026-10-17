@@ -40,6 +40,13 @@ let target_ids_of (targets : string list) :
   |> List.sort_uniq Keeper_identity.Keeper_id.compare
 ;;
 
+(* This projection is shared by event-time routing and the public Board UI.
+   Callers supply effective metadata, after the profile overlay; a display name
+   is not a second address when an explicit target list exists. *)
+let effective_target_ids ~keeper_name ~mention_targets =
+  target_ids_of (if mention_targets = [] then [ keeper_name ] else mention_targets)
+;;
+
 let ids_match ~(target_ids : Keeper_identity.Keeper_id.t list)
       (mentions : Keeper_identity.Keeper_id.t list)
   : bool

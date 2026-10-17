@@ -1,3 +1,4 @@
+import { readBoardAudience } from '../lib/board-address'
 import { currentDashboardActor, get, post, del, put, runRequest, defaultBoardVoter } from './core'
 import { isRecord, asNullableString, asString, asNumber, asInt, asStringList } from '../components/common/normalize'
 import { normalizePendingConfirmation } from '../pending-confirm'
@@ -666,6 +667,7 @@ function normalizeBoardPost(raw: unknown): BoardPost | null {
   return {
     id,
     author,
+    audience: readBoardAudience(raw.audience),
     author_identity: normalizeBoardActorIdentity(raw.author_identity, author),
     post_kind:
       (() => {

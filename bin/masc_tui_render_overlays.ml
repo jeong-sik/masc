@@ -951,7 +951,7 @@ let render_collab state view =
 
 let render_lane_addons state (view : Masc_tui_lane_addons.t) =
   let terminal_rows, cols = get_terminal_size () in
-  surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"lanes"
+  surface_chrome ~overflow:Paged_by_cursor ~frame:Chrome_overlay state ~terminal_rows ~cols ~surface_key:"lanes"
     ~title:(screen_title " MASC Lane Add-ons")
     ~hints:(if Option.is_some view.evidence_prompt then "j/k:choose  Enter:preserve  Esc:back"
       else if Option.is_some view.subscription_panel then "j/k:select  Enter:choose/save  a:add  d:remove  J/K:scroll  r:refresh  Esc:back"
@@ -962,7 +962,7 @@ let render_lane_addons state (view : Masc_tui_lane_addons.t) =
       else Masc_tui_lane_addons.overview_hints view)
     ~body:(fun ~budget c ->
       let lines = Masc_tui_lane_addons.lines ~height:budget ~width:(framed_inner_width cols) view in
-      let scroll = max 0 (min view.scroll (max 0 (List.length lines - budget))) in
+      let scroll = Masc_tui_scroll.normalize ~count:(List.length lines) ~height:budget view.scroll in
       lines
       |> List.filteri (fun index _ -> index >= scroll && index < scroll + budget)
       |> List.iter c.push)

@@ -2132,6 +2132,7 @@
   masc_tui_render_keepers
   masc_tui_render_runtime
   masc_tui_render_overlays
+  masc_tui_render_connectors
   masc_tui_loader
   masc_tui_http)
  (public_name masc-tui)

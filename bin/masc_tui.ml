@@ -23400,14 +23400,17 @@ and is loaded on demand through keeper_skill.
                 let selected action = match Addons.selected_instance view with
                   | None -> update { view with error = lane_addons_input_failure "Choose an attached instance first" }
                   | Some instance -> launch_lane_addons state ~mailbox:async_messages (action instance.id) in
+                let scroll_lane_addons ~down =
+                  let terminal_rows, cols = get_terminal_size () in
+                  let height = Masc_tui_render_prim.surface_chrome_budget state ~terminal_rows in
+                  let count = List.length (Addons.lines ~height ~width:(framed_inner_width cols) view) in
+                  let move = if down then Masc_tui_scroll.down else Masc_tui_scroll.up in
+                  update { view with scroll = move ~count ~height view.scroll }
+                in
                 (match view.installer with
                  | Some installer ->
-                     if key="pageup" || key="pagedown" then (
-                       let terminal_rows, cols = get_terminal_size () in
-                       let height = Masc_tui_render_prim.surface_chrome_budget state ~terminal_rows in
-                       let count = List.length (Addons.lines ~height ~width:(framed_inner_width cols) view) in
-                       let move = if key="pagedown" then Masc_tui_scroll.down else Masc_tui_scroll.up in
-                       update {view with scroll=move ~count ~height view.scroll})
+                     if key="pageup" || key="pagedown" then
+                       scroll_lane_addons ~down:(key = "pagedown")
                      else if view.loading then (
                        if key="esc" then invalidate {view with installer=None;loading=false;error=None;scroll=0})
                      else (match Masc_tui_lane_installer.handle ~key installer with
@@ -23438,10 +23441,7 @@ and is loaded on demand through keeper_skill.
                      let set panel = update {view with subscription_panel=Some panel;scroll=0} in
                      (match key with
                       | "esc" | "q" -> update {view with subscription_panel=Subs.back panel;scroll=0}
-                      | "J" | "K" ->
-                          let _,cols=get_terminal_size () in
-                          let last=List.length (Addons.lines ~width:(framed_inner_width cols) view)-1 in
-                          update {view with scroll=max 0 (min last (view.scroll + if key="J" then 1 else -1))}
+                      | "J" | "K" -> scroll_lane_addons ~down:(key = "J")
                       | _ when view.loading -> ()
                       | "j" | "down" -> set (Subs.move panel 1)
                       | "k" | "up" -> set (Subs.move panel (-1))
@@ -23455,10 +23455,8 @@ and is loaded on demand through keeper_skill.
                           Option.iter (launch_lane_subscriptions state ~mailbox:async_messages) request
                       | _ -> ())
                  | None,Some {form=Some _;_}, _ ->
-                     if key="pageup" || key="pagedown" then (
-                       let _, cols = get_terminal_size () in
-                       let last = List.length (Addons.lines ~width:(framed_inner_width cols) view) - 1 in
-                       update {view with scroll=max 0 (min last (view.scroll + (if key="pagedown" then 1 else -1)))})
+                     if key="pageup" || key="pagedown" then
+                       scroll_lane_addons ~down:(key = "pagedown")
                      else (match Addons.edit_action ~key view with
                       | Ok (next,None) -> update next
                       | Ok (_,Some action) -> launch_lane_addons state ~mailbox:async_messages (Addons.Act action)
@@ -23468,10 +23466,7 @@ and is loaded on demand through keeper_skill.
                       | "esc" -> update {view with action_menu=None;scroll=0}
                       | "j" | "down" -> update (Addons.move_action view 1)
                       | "k" | "up" -> update (Addons.move_action view (-1))
-                      | "J" | "K" ->
-                          let _, cols = get_terminal_size () in
-                          let last = List.length (Addons.lines ~width:(framed_inner_width cols) view) - 1 in
-                          update {view with scroll=max 0 (min last (view.scroll + (if key="J" then 1 else -1)))}
+                      | "J" | "K" -> scroll_lane_addons ~down:(key = "J")
                       | "\r" | "\n" | "enter" ->
                           (match Addons.submit_action view with
                            | Ok action -> launch_lane_addons state ~mailbox:async_messages (Addons.Act action)
@@ -23624,11 +23619,7 @@ and is loaded on demand through keeper_skill.
                            | Addons.Connections -> Addons.Configurations
                            | Addons.Configurations -> Addons.Rows
                            | Addons.Rows -> Addons.Timeline) }
-                     | "J" | "K" ->
-                         let _, cols = get_terminal_size () in
-                         let width = framed_inner_width cols in
-                         let last = List.length (Addons.lines ~width view) - 1 in
-                         update { view with scroll = max 0 (min last (view.scroll + (if key = "J" then 1 else -1))) }
+                     | "J" | "K" -> scroll_lane_addons ~down:(key = "J")
                      | "left" | "right" when (match view.focus with
                        | Addons.Timeline | Addons.Connections -> true
                        | Addons.Configurations | Instances | Rows -> false) ->

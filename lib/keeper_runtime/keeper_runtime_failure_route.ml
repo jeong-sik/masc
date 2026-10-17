@@ -157,6 +157,12 @@ let rotate rotate_class = Rotate_now { rotate = rotate_class }
 
 let exhaust terminal_class = Exhausted_visible_alive { terminal = terminal_class }
 
+let empty_max_tokens_accept_rejection ~reason_kind ~response_shape ~stop_reason =
+  reason_kind = Some Keeper_internal_error.Accept_no_usable_progress
+  && response_shape = Some Keeper_internal_error.Accept_response_empty
+  && stop_reason = Some Llm_provider.Types.MaxTokens
+;;
+
 let route_of_masc_internal (internal : Keeper_internal_error.masc_internal_error) =
   match internal with
   | Keeper_internal_error.Resumable_cli_session _ -> rotate Resumable_cli_session
@@ -172,6 +178,13 @@ let route_of_masc_internal (internal : Keeper_internal_error.masc_internal_error
      | Keeper_internal_error.Session_conflict
      | Keeper_internal_error.Other_detail _ ->
        rotate Runtime_exhausted)
+  (* The SDK preserves an empty authoritative truncation as a response. The
+     accept gate retains its original stop and shape, so keep the same retry
+     policy as the former provider-level EmptyCompletion MaxTokens error. *)
+  | Keeper_internal_error.Accept_rejected
+      { reason_kind; response_shape; stop_reason; _ }
+    when empty_max_tokens_accept_rejection ~reason_kind ~response_shape ~stop_reason ->
+    observe_retry (Empty_completion { stop_reason = Llm_provider.Types.MaxTokens })
   | Keeper_internal_error.Accept_rejected _ ->
     (match Keeper_internal_error.accept_no_progress_retry_kind internal with
      | Some `Empty_no_progress -> rotate No_progress_empty
@@ -427,6 +440,15 @@ let route_of_error ~boundary (err : Agent_core.Error.t) : route =
   | Some
       (( Keeper_internal_error.Terminal_effect_failed _
        | Keeper_internal_error.Runtime_connection_closed _ ) as internal) ->
+    route_of_masc_internal internal
+  (* The provider walk reads its result at the AGENT_CORE boundary, after
+     MASC's accept gate may have rejected the SDK-preserved empty truncation.
+     That exact typed outcome carries the same provider observation at either
+     boundary; other accept rejections retain their boundary-specific route. *)
+  | Some
+      (Keeper_internal_error.Accept_rejected
+         { reason_kind; response_shape; stop_reason; _ } as internal)
+    when empty_max_tokens_accept_rejection ~reason_kind ~response_shape ~stop_reason ->
     route_of_masc_internal internal
   | Some
       (( Keeper_internal_error.Official_client_recovery_required _

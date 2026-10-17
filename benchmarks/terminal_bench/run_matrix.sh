@@ -22,6 +22,9 @@ FALLBACK_MODELS="${BENCH_FALLBACK_MODELS:-}"
 ENVIRONMENT="${BENCH_ENV:-docker}"
 CONCURRENCY="${CONCURRENCY:-2}"
 TS="$(date +%Y%m%d-%H%M%S)"
+RUN_DIR="results/jobs/matrix-${TS}"
+mkdir -p "$RUN_DIR"
+echo "matrix jobs: $RUN_DIR"
 
 # Before the dataset download and any arm, so a missing list does not stop
 # the job after hours of earlier arms.
@@ -70,11 +73,9 @@ done <<<"${excluded}"
 # agents name some providers differently.
 case "${MODEL%%/*}" in
   anthropic) BASELINE_AGENT=claude-code; BASELINE_MODEL="${MODEL}" ;;
-  # kimi-for-coding answers with a reasoning-only payload whose empty assistant
-  # message the coding endpoint rejects with 400 under terminus-2 (3 recorded
-  # attempts); kimi-cli, Moonshot's reference CLI, is the baseline that runs.
-  # harbor's kimi-cli calls the provider `kimi`.
-  kimi_coding) BASELINE_AGENT=kimi-cli; BASELINE_MODEL="kimi/${MODEL#*/}" ;;
+  # Harbor 0.23's kimi-cli installs the retired PyPI package, which exits 0
+  # after a retirement notice. The maintained native CLI uses another protocol.
+  kimi_coding) BASELINE_AGENT=agents.kimi_code_agent:KimiCodeAgent; BASELINE_MODEL="kimi/${MODEL#*/}" ;;
   *) BASELINE_AGENT=""; BASELINE_MODEL="" ;;
 esac
 
@@ -85,7 +86,7 @@ for arm in ${ARMS_CSV//,/ }; do
   # bootstrap's package installs, which harbor's 360s default does not fit.
   common=( -d "${DATASET}" --env "${ENVIRONMENT}"
            -k "$K" -n "${CONCURRENCY}" --agent-setup-timeout-multiplier 5
-           -o results/jobs --job-name "$job" )
+           -o "$RUN_DIR" --job-name "$job" )
   if [[ "$arm" == "a" ]]; then
     if [[ -z "${BASELINE_AGENT}" ]]; then
       echo "no same-model harbor agent known for ${MODEL}; skipping arm a" >&2
@@ -106,5 +107,5 @@ for arm in ${ARMS_CSV//,/ }; do
       ${EXCLUDE_ARGS[@]+"${EXCLUDE_ARGS[@]}"}
   fi
 done
-uv run python aggregate.py "results/jobs" > "results/summary-${TS}.csv"
+uv run python aggregate.py "$RUN_DIR" > "results/summary-${TS}.csv"
 echo "wrote results/summary-${TS}.csv"

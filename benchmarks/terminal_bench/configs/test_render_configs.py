@@ -52,6 +52,18 @@ class RenderReasoningPolicy(unittest.TestCase):
         self.assertTrue(controlled["thinking-support"])
         self.assertNotIn("reasoning-uncontrolled", controlled)
 
+    def test_kimi_vision_routes_to_the_same_selected_model(self):
+        config = self.render("kimi_coding.kimi-for-coding")
+        self.assertEqual(config["runtime"]["media_failover"], ["kimi_coding.kimi-for-coding"])
+        caps = config["models"]["kimi-for-coding"]["capabilities"]
+        self.assertTrue(caps["supports-image-input"])
+        self.assertTrue(caps["supports-multimodal-inputs"])
+
+    def test_undeclared_model_does_not_gain_vision_from_provider(self):
+        config = self.render("kimi_coding.unknown-model")
+        self.assertEqual(config["runtime"]["media_failover"], [])
+        self.assertNotIn("supports-image-input", config["models"]["unknown-model"]["capabilities"])
+
 
 if __name__ == "__main__":
     unittest.main()

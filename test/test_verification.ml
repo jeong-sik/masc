@@ -2024,6 +2024,7 @@ let test_system_llm_agent_defers_invalid_contract_without_rejecting_task () =
 
 let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
   with_eio_temp_dir_and_clock (fun ~clock base_path ->
+    let previous_base_path = Sys.getenv_opt "MASC_BASE_PATH" in
     Masc.Workspace_metric_hooks.install ();
     let prompt_dir =
       match Sys.getenv_opt "DUNE_SOURCEROOT" with
@@ -2043,6 +2044,9 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
       Atomic.get Workspace_hooks.verification_notify_verdict_fn
     in
     let previous_submitted = Atomic.get Workspace_hooks.verification_submitted_fn in
+    let previous_change_observer =
+      Atomic.get Masc.Verification_run_registry.change_observer_fn
+    in
     Fun.protect
       ~finally:(fun () ->
         Atomic.set Workspace_hooks.get_default_runtime_id_fn previous_runtime;
@@ -2051,8 +2055,17 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
           previous_lane_slots;
         Atomic.set Masc.Task.Anti_rationalization.run_llm_reviewer_fn previous_reviewer;
         Atomic.set Workspace_hooks.verification_notify_verdict_fn previous_notification;
-        Atomic.set Workspace_hooks.verification_submitted_fn previous_submitted)
+        Atomic.set Workspace_hooks.verification_submitted_fn previous_submitted;
+        Atomic.set Masc.Verification_run_registry.change_observer_fn previous_change_observer;
+        Masc.Board.reset_global_for_test ();
+        Masc.Board_dispatch.reset_for_test ();
+        match previous_base_path with
+        | Some value -> Unix.putenv "MASC_BASE_PATH" value
+        | None -> Unix.unsetenv "MASC_BASE_PATH")
       (fun () ->
+        Unix.putenv "MASC_BASE_PATH" base_path;
+        Masc.Board.reset_global_for_test ();
+        Masc.Board_dispatch.reset_for_test ();
         Atomic.set Workspace_hooks.get_default_runtime_id_fn
           (fun () -> "test-system-evaluator");
         Atomic.set
@@ -2061,14 +2074,26 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
         Eio.Switch.run (fun sw ->
           let reviewer_called, resolve_reviewer_called = Eio.Promise.create () in
           let verdict_committed, resolve_verdict_committed = Eio.Promise.create () in
+          let run_completed, resolve_run_completed = Eio.Promise.create () in
+          let committed_verification_id = ref None in
           let captured_prompt = ref None in
-          Atomic.set Masc.Task.Anti_rationalization.run_llm_reviewer_fn
-            (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
-               captured_prompt := Some prompt;
-               Eio.Promise.resolve resolve_reviewer_called ();
-               Ok {Masc.Task.Anti_rationalization.selected_runtime_id="test-system-evaluator";verdict=Some (Masc.Task.Anti_rationalization.Approve "")});
+          let captured_lookup = ref None in
+          (* Verdict notification precedes mark_completed; wait for the owned
+             run to finish before inspecting its result or cleaning the store. *)
+          Atomic.set Masc.Verification_run_registry.change_observer_fn (fun () ->
+            previous_change_observer ();
+            match !committed_verification_id with
+            | None -> ()
+            | Some verification_id ->
+              (match Masc.Verification_run_registry.get
+                 (Masc.Verification_run_registry.global ()) ~verification_id with
+               | Some { status = Masc.Verification_run_registry.Completed _; _ }
+                 when not (Eio.Promise.is_resolved run_completed) ->
+                 Eio.Promise.resolve resolve_run_completed ()
+               | _ -> ()));
           Atomic.set Workspace_hooks.verification_notify_verdict_fn
             (fun _config ~task_id ~producer:_ ~authority ~verification_id ~decision ->
+               committed_verification_id := Some verification_id;
                ignore
                  (previous_notification
                     _config
@@ -2090,6 +2115,46 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
           ignore (W.init config ~agent_name:(Some "snapshot-test-worker"));
           ensure_keeper_meta config "snapshot-test-worker";
           ensure_producer_playground config "snapshot-test-worker";
+          let producer_root =
+            Keeper_sandbox_config.host_root_abs_of_agent
+              ~base_path:(VS.project_root_of_base_path base_path)
+              ~agent_name:"snapshot-test-worker"
+          in
+          let truncated_marker = "OMITTED_PREFIX_7d1e" in
+          let aggregate_marker = "OMITTED_COMPLETE_8f2a" in
+          let collaboration_marker = "OMITTED_BOARD_9a3b" in
+          let small_body = "ADMITTED_SMALL_BODY_6c4d" in
+          let cap = VS.verification_evidence_max_bytes in
+          let truncated_body = truncated_marker ^ String.make cap 'x' in
+          let complete_body =
+            aggregate_marker ^ String.make (cap - String.length aggregate_marker) 'y'
+          in
+          List.iter
+            (fun (name, body) ->
+              Fs_compat.save_file (Filename.concat producer_root name) body)
+            [ "oversize.txt", truncated_body
+            ; "complete.txt", complete_body
+            ; "small.txt", small_body
+            ];
+          let original_post =
+            match Masc.Board_dispatch.create_post ~author:"snapshot-test-worker"
+              ~content:collaboration_marker ~post_kind:Masc.Board.System_post
+              ~visibility:Masc.Board.Internal ~ttl_hours:0 () with
+            | Ok post -> post
+            | Error error -> Alcotest.fail (Masc.Board.show_board_error error)
+          in
+          let post_id = Masc.Board.Post_id.to_string original_post.id in
+          let board_reference = "board:" ^ post_id in
+          let evidence_refs =
+            [ "artifact:oversize.txt"; "artifact:complete.txt"; "artifact:small.txt"
+            ; board_reference
+            ]
+          in
+          let handoff_context : Masc_domain.task_handoff_context =
+            { summary = ""; reason = None; next_step = None; failure_mode = None
+            ; reclaim_policy = None; evidence_refs; updated_at = None; updated_by = None
+            }
+          in
           ignore
             (W.add_task
                config
@@ -2109,10 +2174,81 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
                ~task_id:"task-001"
                ~action:Masc_domain.Submit_for_verification
                ~notes:"note:snapshot-evidence"
+               ~handoff_context
                ()
            with
            | Ok _ -> ()
            | Error error -> Alcotest.fail (Masc_domain.masc_error_to_string error));
+          let request_id =
+            match W.get_tasks_raw config with
+            | [ { task_status = Masc_domain.AwaitingVerification { verification_id; _ }; _ } ] ->
+              verification_id
+            | _ -> Alcotest.fail "submission did not persist an awaiting request"
+          in
+          let load_request () =
+            match V.load_request base_path request_id with
+            | Ok request -> request
+            | Error detail -> Alcotest.fail detail
+          in
+          let stored_before = V.request_to_yojson (load_request ()) in
+          let access =
+            VS.inspect_submitted_evidence_for_authority
+              ~base_path ~request_id ~task_id:"task-001" ~task_worker:"snapshot-test-worker"
+              ~authority:(Masc_domain.Human_operator { operator_id = "snapshot-test-operator" })
+          in
+          let items = match access with
+            | VS.Evidence_available { items; _ } -> items
+            | VS.Evidence_unavailable { reason; _ } ->
+              Alcotest.fail (VS.evidence_access_failure_to_string ~request_id reason)
+          in
+          let artifact reference =
+            match List.find_opt (function
+              | VS.Evidence_artifact item -> String.equal item.reference reference
+              | _ -> false) items with
+            | Some (VS.Evidence_artifact { content; bytes; truncated; _ }) ->
+              content, bytes, truncated
+            | _ -> Alcotest.fail ("missing captured artifact: " ^ reference)
+          in
+          let prefix, bytes, truncated = artifact "artifact:oversize.txt" in
+          Alcotest.(check bool) "stored artifact is truncated" true truncated;
+          Alcotest.(check int) "snapshot retains original source size"
+            (String.length truncated_body) bytes;
+          Alcotest.(check string) "stored prefix remains exact"
+            (String.sub truncated_body 0 cap) prefix;
+          let complete, _, truncated = artifact "artifact:complete.txt" in
+          Alcotest.(check bool) "aggregate-withheld artifact is complete" false truncated;
+          Alcotest.(check string) "audit retains the complete artifact" complete_body complete;
+          let open Yojson.Safe.Util in
+          let transport = VS.submitted_evidence_access_transport_to_yojson access in
+          let transported reference =
+            transport |> member "items" |> to_list
+            |> List.find (fun item -> member "reference" item = `String reference)
+          in
+          List.iter (fun reference ->
+            let item = transported reference in
+            Alcotest.(check bool) (reference ^ " is omitted by transport") true
+              (member "content_omitted" item = `Bool true && member "content" item = `Null))
+            [ "artifact:oversize.txt"; "artifact:complete.txt"; board_reference ];
+          Alcotest.(check string) "small artifact is selected for the reviewer"
+            small_body (transported "artifact:small.txt" |> member "content" |> to_string);
+          let captured_source =
+            match Masc.Verification_collaboration_evidence.read_board
+              ~submitted_evidence:items ~args:(`Assoc [ "post_id", `String post_id ]) with
+            | Ok source -> source
+            | Error error -> Alcotest.fail
+                (Masc.Verification_collaboration_evidence.error_to_string error)
+          in
+          Alcotest.(check bool) "persisted collaboration captures the original post" true
+            (member "post" captured_source = Masc.Board.post_to_yojson original_post);
+          List.iter (fun name ->
+            Fs_compat.save_file (Filename.concat producer_root name) "changed after capture")
+            [ "oversize.txt"; "complete.txt"; "small.txt" ];
+          (match Masc.Board_dispatch.update_post ~post_id ~editor:"snapshot-test-worker"
+             ~content:"CHANGED_LIVE_BOARD_0b4c" ~new_author:"snapshot-other" () with
+           | Ok changed ->
+             Alcotest.(check bool) "live Board differs from the captured source" false
+               (Masc.Board.post_to_yojson changed = member "post" captured_source)
+           | Error error -> Alcotest.fail (Masc.Board.show_board_error error));
           let mutated_contract =
             { original_contract with
               completion_contract = [ "mutated live completion criterion" ]
@@ -2130,10 +2266,39 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
               backlog.tasks
           in
           W.write_backlog config { backlog with tasks };
+          Atomic.set Masc.Task.Anti_rationalization.run_llm_reviewer_fn
+            (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt ?goal_blocks:_
+                 ~report_tool_schema:_ ~lookup ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
+               captured_prompt := Some prompt;
+               captured_lookup := Some
+                 (lookup.dispatch ~name:"masc_board_post_get"
+                    ~args:(`Assoc [ "post_id", `String post_id ]));
+               Eio.Promise.resolve resolve_reviewer_called ();
+               Ok { Masc.Task.Anti_rationalization.selected_runtime_id = "test-system-evaluator"
+                  ; verdict = Some (Masc.Task.Anti_rationalization.Approve "") });
           CA.start ~sw ~clock ~config;
           Eio.Time.with_timeout_exn clock 5.0 (fun () ->
             Eio.Promise.await reviewer_called;
-            Eio.Promise.await verdict_committed);
+            Eio.Promise.await verdict_committed;
+            Eio.Promise.await run_completed);
+          Alcotest.(check bool) "review leaves the persisted request unchanged" true
+            (V.request_to_yojson (load_request ()) = stored_before);
+          (match !captured_lookup with
+           | Some (Tool_result.Completed _ as result) ->
+             let observation = Tool_result.data result in
+             Alcotest.(check bool) "review lookup records successful evidence inspection" true
+               (member "evidence_lookup_succeeded" observation = `Bool true);
+             let source =
+               observation |> member "lookup_result" |> to_string |> Yojson.Safe.from_string
+             in
+             Alcotest.(check bool) "review lookup returns the frozen collaboration" true
+               (source = captured_source)
+           | Some result -> Alcotest.fail (Tool_result.message result)
+           | None -> Alcotest.fail "reviewer did not perform the captured-source lookup");
+          (match Masc.Verification_run_registry.get
+             (Masc.Verification_run_registry.global ()) ~verification_id:request_id with
+           | Some { status = Masc.Verification_run_registry.Completed _; _ } -> ()
+           | _ -> Alcotest.fail "review run did not settle");
           (match !captured_prompt with
            | None -> Alcotest.fail "system LLM reviewer did not receive a prompt"
            | Some prompt ->
@@ -2152,14 +2317,28 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
              Alcotest.(check bool)
                "prompt does not use mutated live required artifact"
                false
-               (String_util.contains_substring prompt "mutated live required artifact"));
-          match W.get_tasks_raw config with
+               (String_util.contains_substring prompt "mutated live required artifact");
+             List.iter (fun expected ->
+               Alcotest.(check bool) ("review keeps " ^ expected) true
+                 (String_util.contains_substring prompt expected))
+               (small_body :: "snapshot-evidence" :: "content_omitted" :: "verification tools"
+                :: "persisted gate artifact" :: evidence_refs));
+          (match W.get_tasks_raw config with
           | [ { task_status = Masc_domain.Done _; _ } ] -> ()
           | [ task ] ->
             Alcotest.failf
               "snapshot review did not complete task: %s"
               (Masc_domain.task_status_to_string task.task_status)
-          | tasks -> Alcotest.failf "expected one task, got %d" (List.length tasks)))
+          | tasks -> Alcotest.failf "expected one task, got %d" (List.length tasks));
+          (* Check the real rendered boundary last: capture, immutable lookup,
+             persistence and registry completion must already have succeeded. *)
+          let prompt = Option.get !captured_prompt in
+          Alcotest.(check bool) "final reviewer prompt omits the captured truncated prefix"
+            false (String_util.contains_substring prompt truncated_marker);
+          Alcotest.(check bool) "final reviewer prompt omits aggregate-withheld full content"
+            false (String_util.contains_substring prompt aggregate_marker);
+          Alcotest.(check bool) "initial reviewer prompt leaves captured collaboration to lookup"
+            false (String_util.contains_substring prompt collaboration_marker)))
   )
 
 let test_rejected_verdict_audit_preserves_reason () =

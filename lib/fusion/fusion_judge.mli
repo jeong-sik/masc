@@ -167,6 +167,12 @@ val run_meta
      result
 
 module For_testing : sig
+  val parse_response :
+    record_invalid:(Agent_core.Error.t -> string) ->
+    string -> Fusion_types.usage ->
+    ( Fusion_types.judge_synthesis * Fusion_types.usage
+    , Fusion_types.judge_failure * Fusion_types.usage ) result
+
   val apply_output_contract
     :  Llm_provider.Provider_config.t
     -> (Llm_provider.Provider_config.t, string) result

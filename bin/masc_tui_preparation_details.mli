@@ -4,7 +4,8 @@ val target :
   journal:Masc_tui_keeper_chat_log.t -> execution_id:string -> reply_turn_ref:string option ->
   (target, string) result
 (** Autonomous journals supply their exact Turn_ref. Direct journals require a
-    recorded reply Turn_ref and the actual execution ID, including batch binding.
+    reply or exact terminal operation outcome reference and the actual execution
+    ID, including batch binding. Two recorded references must agree.
     The journal object and its revision identify the local observation generation;
     neither a Keeper name nor a timestamp supplies a missing execution link. *)
 val path : target -> string

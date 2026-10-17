@@ -15345,6 +15345,20 @@ let keeper_message_saved_preparation_rows state live =
   | Some _ | None -> []
 ;;
 
+let keeper_message_preparation_operation_targets state ~keeper_name =
+  match keeper_message_preparation_selection state, keeper_message_status_log state with
+  | Some (selected, Error _), Some log when selected == log.tl_transcript
+      && turn_log_keeper_name log=keeper_name ->
+    (match Masc_tui_keeper_chat_log.source log.tl_log,
+           Masc_tui_keeper_chat_log.operation_state log.tl_log with
+     | Operation operation_id, (None | Some (Keeper_chat_operation.Queued | Running _))
+         when not (List.mem (keeper_name, Masc_tui_keeper_chat_log.Operation operation_id)
+           state.msg_journal_inflight) -> [operation_id]
+     | Operation _, (None | Some (Queued | Running _ | Succeeded _ | Failed _ | Cancelled _))
+     | Autonomous_turn _, (None | Some _) -> [])
+  | Some (_, (Ok _ | Error _)), (Some _ | None) | None, (Some _ | None) -> []
+;;
+
 let keeper_message_unfolded_status_rows (state : state) live ~now =
   Masc_tui_keeper_chat_transcript.status_rows
     ?preparation:(keeper_message_preparation state live)

@@ -1722,7 +1722,7 @@ let test_preparation_manifest_retains_original_turn_and_private_boundaries () =
   let keeper_name = "observed" in
   let turn_ref = Ids.Turn_ref.make ~trace_id:"original-preparation-trace" ~absolute_turn:7 in
   let owner = Masc.Keeper_interrupt_token.fresh () in
-  let preview = Masc.Keeper_turn_preview_owner.with_owner ~interrupt_token:owner (fun () ->
+  let preview = Masc.Keeper_turn_preview_owner.with_owner ~interrupt_token:owner ~observation:(Masc.Keeper_turn_preview_owner.create_turn_observation ()) (fun () ->
     Masc.Keeper_turn_preview.reset ~keeper_name ~execution_scope:None ~turn_ref:(Some turn_ref)
       ~now:0. ~redaction:Masc.Keeper_secret_redaction.empty) in
   let frozen = cache_scenario_snapshot "persisted-observation" in

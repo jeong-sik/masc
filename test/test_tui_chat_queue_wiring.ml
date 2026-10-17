@@ -6014,7 +6014,7 @@ let test_preparation_requires_actual_turn_owner_and_exact_execution () =
         (`Assoc ["kind",`String "direct_operation";"id",`String id]) with
       | Ok value -> value | Error detail -> fail detail in
     let current = Token.fresh () and successor = Token.fresh () in
-    let writer = Owner.with_owner ~interrupt_token:current (fun () ->
+    let writer = Owner.with_owner ~interrupt_token:current ~observation:(Owner.create_turn_observation ()) (fun () ->
       fst (Eio.Fiber.pair
         (fun () -> Preview.reset ~turn_ref:None ~keeper_name:"alpha" ~execution_scope:(Some (scope "execution-a"))
           ~now:1. ~redaction:Masc.Keeper_secret_redaction.empty)
@@ -6092,7 +6092,7 @@ let test_preparation_requires_actual_turn_owner_and_exact_execution () =
       Preview.note_tool ~writer:(Some writer) ~now:1_000_000. "late-old-tool";
       check bool "a fresh clock cannot grant the successor the old owner's preview" true
         (Preview.current_for_turn ~keeper_name:"alpha" ~interrupt_token:successor = None);
-      let next = Owner.with_owner ~interrupt_token:successor (fun () ->
+      let next = Owner.with_owner ~interrupt_token:successor ~observation:(Owner.create_turn_observation ()) (fun () ->
         Preview.reset ~turn_ref:None ~keeper_name:"alpha" ~execution_scope:(Some (scope "execution-b"))
           ~now:4. ~redaction:Masc.Keeper_secret_redaction.empty) in
       Preview.note_attempt ~writer:(Some next) ~now:5. ~runtime_id:"new-provider";
@@ -6110,7 +6110,7 @@ let test_task_preparation_precedes_journal_and_keeps_original_writer () =
     let module Preview = Masc.Keeper_turn_preview in
     let token = Masc.Keeper_interrupt_token.fresh () in
     let original = Masc.Ids.Turn_ref.make ~trace_id:"early-task-source" ~absolute_turn:4 in
-    let writer = Masc.Keeper_turn_preview_owner.with_owner ~interrupt_token:token (fun () ->
+    let writer = Masc.Keeper_turn_preview_owner.with_owner ~interrupt_token:token ~observation:(Masc.Keeper_turn_preview_owner.create_turn_observation ()) (fun () ->
       Preview.reset ~keeper_name:"alpha" ~execution_scope:None ~turn_ref:(Some original)
         ~now:0. ~redaction:Masc.Keeper_secret_redaction.empty) in
     let state = Tui_types.create_state ~workspace:"test" ~port:0 ~refresh_interval:2. () in
@@ -6172,13 +6172,61 @@ let test_task_preparation_precedes_journal_and_keeps_original_writer () =
        | Some _ | None -> false))
 ;;
 
+let test_failed_preparation_refreshes_only_selected_unsettled_operation () =
+  let fresh ~ended =
+    let state = Tui_types.create_state ~workspace:"test" ~port:0 ~refresh_interval:2. () in
+    state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+    state.msg_target_keeper_name <- Some "alpha";
+    let log = Tui_types.turn_log_create ~keeper_name:"alpha" ~request_id:"failed-member" ~started_at:0. in
+    Tui_types.turn_log_add ~now:1. log ~seq:(Some 0) Live.Run_started;
+    Tui_types.turn_log_add ~now:2. log ~seq:(Some 1)
+      (Live.Batch_bound {operation_id="failed-member"; execution_id="failed-batch"});
+    if ended then Tui_types.turn_log_add ~now:3. log ~seq:(Some 2)
+      (Live.Run_failed {message="failed before reply"});
+    state.msg_live <- Some log;
+    state, log in
+  let state, log = fresh ~ended:true in
+  let targets keeper_name = Tui_types.keeper_message_preparation_operation_targets state ~keeper_name in
+  state.msg_turn_folded <- true;
+  check (list string) "folded work requests no extra operation read" [] (targets "alpha");
+  state.msg_turn_folded <- false;
+  check (list string) "failure before canonical settlement reads only its exact operation"
+    ["failed-member"] (targets "alpha");
+  check (list string) "another Keeper cannot request the selected operation" [] (targets "beta");
+  state.msg_journal_inflight <- ["alpha", Log.Operation "failed-member"];
+  check (list string) "an in-flight exact operation read is not duplicated" [] (targets "alpha");
+  state.msg_journal_inflight <- [];
+  Log.observe_operation_state log.tl_log (Some (Keeper_chat_operation.Running {started_at=1.}));
+  check (list string) "early failure can refresh its still-running canonical metadata"
+    ["failed-member"] (targets "alpha");
+  Log.observe_operation_state log.tl_log (Some (Keeper_chat_operation.Failed {completed_at=4.;
+    failure={kind=Turn_exception; detail="failed before turn creation"; outcome_ref=None}}));
+  check (list string) "known terminal metadata without an original turn stops further reads"
+    [] (targets "alpha");
+  let linked, linked_log = fresh ~ended:true in
+  linked.msg_turn_folded <- false;
+  Log.observe_operation_state linked_log.tl_log (Some (Keeper_chat_operation.Failed {completed_at=4.;
+    failure={kind=Turn_exception; detail="failed after turn creation"; outcome_ref=Some "failed-original#7"}}));
+  check (list string) "late canonical turn identity ends metadata refresh" []
+    (Tui_types.keeper_message_preparation_operation_targets linked ~keeper_name:"alpha");
+  check bool "late canonical identity makes the original saved preparation selectable" true
+    (match Tui_types.keeper_message_preparation_selection linked with
+     | Some (_, Ok _) -> true | Some (_, Error _) | None -> false);
+  let working, _ = fresh ~ended:false in
+  working.msg_turn_folded <- false;
+  check (list string) "working turns keep their existing observation path" []
+    (Tui_types.keeper_message_preparation_operation_targets working ~keeper_name:"alpha")
+;;
+
 let () =
   run
     "tui_chat_queue_wiring"
     [("owned preparation", [test_case "Task preparation precedes journals and keeps its original writer" `Quick
         test_task_preparation_precedes_journal_and_keeps_original_writer;
       test_case "turn owner and exact execution select preparation" `Quick
-        test_preparation_requires_actual_turn_owner_and_exact_execution]);
+        test_preparation_requires_actual_turn_owner_and_exact_execution;
+      test_case "failed preparation refreshes only its selected unsettled operation" `Quick
+        test_failed_preparation_refreshes_only_selected_unsettled_operation]);
      ("native progress density", [test_case "interrupted native output remains in Results" `Quick test_interrupted_native_progress_survives_results_projection]); ( "expanded diagnostics",
         [ test_case "search finds a batched request by its own id" `Quick
             test_search_finds_a_batched_request_by_its_own_id ] )

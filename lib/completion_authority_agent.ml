@@ -375,34 +375,6 @@ let evidence_images_of_snapshot ~base_path
     { images = List.rev images; unread = List.rev unread }
 ;;
 
-(* The request owns the durable snapshot; the judge receives its transport
-   projection below. Remove every copy of that output member from this local
-   request projection so the stored bodies cannot bypass transport omissions. *)
-let completion_notes_of_evidence
-      ~(request : Verification.verification_request)
-      ~evidence_access
-  =
-  let output =
-    match request.output with
-    | `Assoc fields ->
-      `Assoc
-        (List.filter
-           (fun (name, _) -> not (String.equal name "submitted_evidence"))
-           fields)
-    | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _)
-      as output -> output
-  in
-  let request_for_judge = { request with output } in
-  Yojson.Safe.to_string
-    (`Assoc
-       [ "verification_request", Verification.request_to_yojson request_for_judge
-       ; ( "submitted_evidence_access"
-         , Workspace_verification_store
-            .submitted_evidence_access_transport_to_yojson
-             evidence_access )
-       ])
-;;
-
 type prepared_review =
   { request : Verification.verification_request
   ; evidence_access : Workspace_verification_store.submitted_evidence_access
@@ -529,7 +501,14 @@ let prepare_review
            checkout-relative path and to establish the tree's shape before
            calling a path absent. A REJECT from there reaches the producer. *)
         let completion_notes =
-          completion_notes_of_evidence ~request ~evidence_access
+          Yojson.Safe.to_string
+            (`Assoc
+               [ "verification_request", Verification.request_to_yojson request
+               ; ( "submitted_evidence_access"
+                 , Workspace_verification_store
+                    .submitted_evidence_access_transport_to_yojson
+                     evidence_access )
+               ])
         in
         let { images = evidence_images; unread = unread_images } =
           evidence_images_of_snapshot ~base_path:config.base_path evidence_access

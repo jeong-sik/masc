@@ -2285,8 +2285,14 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
             (V.request_to_yojson (load_request ()) = stored_before);
           (match !captured_lookup with
            | Some (Tool_result.Completed _ as result) ->
+             let observation = Tool_result.data result in
+             Alcotest.(check bool) "review lookup records successful evidence inspection" true
+               (member "evidence_lookup_succeeded" observation = `Bool true);
+             let source =
+               observation |> member "lookup_result" |> to_string |> Yojson.Safe.from_string
+             in
              Alcotest.(check bool) "review lookup returns the frozen collaboration" true
-               (Yojson.Safe.from_string (Tool_result.message result) = captured_source)
+               (source = captured_source)
            | Some result -> Alcotest.fail (Tool_result.message result)
            | None -> Alcotest.fail "reviewer did not perform the captured-source lookup");
           (match Masc.Verification_run_registry.get

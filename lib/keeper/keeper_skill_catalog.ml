@@ -468,12 +468,19 @@ let prepared_matches prepared ~descriptors snapshot =
 ;;
 
 let prepared_snapshot prepared = prepared.snapshot
+let prepared_descriptor_count prepared = List.length prepared.descriptors
 
 let prepare_snapshot ~descriptors snapshot =
+  Keeper_skill_preparation_observation.cache_access Keeper_skill_preparation_observation.Projection ~snapshot
+    ~descriptor_count:(fun () -> List.length descriptors) @@ fun observation ->
   let slot = preparation_slot ~descriptors snapshot in
+  Keeper_skill_preparation_observation.lookup_finished observation;
   Cross_context_mutex.with_lock slot.construction_lock (fun () ->
+    Keeper_skill_preparation_observation.lock_acquired observation;
     match slot.value with
-    | Some prepared -> prepared
+    | Some prepared ->
+      Keeper_skill_preparation_observation.decided observation Keeper_skill_preparation_observation.Reused;
+      prepared
     | None ->
       let entries =
         List.map (projected_entry_of ~descriptors snapshot) (Skill_catalog_snapshot.entries snapshot)
@@ -487,6 +494,7 @@ let prepare_snapshot ~descriptors snapshot =
       in
       let prepared = { snapshot; descriptors; entries; entries_by_identity } in
       slot.value <- Some prepared;
+      Keeper_skill_preparation_observation.decided observation Keeper_skill_preparation_observation.Constructed;
       prepared)
 ;;
 

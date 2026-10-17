@@ -35,7 +35,7 @@ let source_clock_of_string = function
 
 let source_clock_of_event = function
   | Event_bus_correlated -> Event_bus
-  | Context_injected | History_projection_observed -> Logical
+  | Context_injected | History_projection_observed | Skill_preparation_observed -> Logical
   | Turn_started | Phase_gate_decided | Runtime_routed | Runtime_execution_built | Runtime_completed
   | Runtime_failed | Pre_dispatch_blocked | Provider_lane_resolved | Checkpoint_loaded
   | Checkpoint_saved | Receipt_appended | Turn_finished -> Wall
@@ -152,6 +152,7 @@ let comparable_for_latency a b =
 let clock_lane_of_event = function
   | Turn_started
   | Phase_gate_decided
+  | Skill_preparation_observed
   | Pre_dispatch_blocked
   | Receipt_appended
   | Turn_finished ->
@@ -200,7 +201,7 @@ let clock_refs_for_context ctx ~event ?agent_core_turn_count ?elapsed_ms
       Some (context_tool_batch_id ctx ?agent_core_turn_count ())
     | Turn_started | Phase_gate_decided | Runtime_routed | Runtime_execution_built
     | Runtime_completed | Runtime_failed | Pre_dispatch_blocked | Context_injected
-    | History_projection_observed | Event_bus_correlated | Checkpoint_loaded | Checkpoint_saved
+    | History_projection_observed | Skill_preparation_observed | Event_bus_correlated | Checkpoint_loaded | Checkpoint_saved
     | Receipt_appended | Turn_finished -> None
   in
   let checkpoint_id =
@@ -210,7 +211,7 @@ let clock_refs_for_context ctx ~event ?agent_core_turn_count ?elapsed_ms
       Some (context_checkpoint_id ctx ?agent_core_turn_count ())
     | Turn_started | Phase_gate_decided | Runtime_routed | Runtime_execution_built
     | Runtime_completed | Runtime_failed | Pre_dispatch_blocked | Provider_lane_resolved
-    | Context_injected | History_projection_observed | Event_bus_correlated | Receipt_appended
+    | Context_injected | History_projection_observed | Skill_preparation_observed | Event_bus_correlated | Receipt_appended
     | Turn_finished -> None
   in
   clock_refs ~edge_id:(context_edge_id ctx event)
@@ -326,6 +327,7 @@ let decision_public_allowlist =
        API consumer. *)
     ; "idx"; "runtime_id"; "error_kind"
     ; "routing_run_id"; "attempt_total_usage"; "attempt_usage_status"
+    ; "skill_preparation"
     ]
 
 let clock_refs_public_allowlist =
@@ -336,16 +338,27 @@ let clock_refs_public_allowlist =
     ; "event_bus_run_id"; "parent_event_id"; "caused_by"; "logical_seq"
     ]
 
+let skill_preparation_public_allowlist =
+  StringSet.of_list
+    [ "schema_version"; "clock"; "coverage"; "elapsed_ns"; "outcome"; "samples"
+    ; "phase"; "turn_ref"; "component"; "snapshot_revision"; "descriptor_count"
+    ; "entered_ns"; "lookup_finished_ns"; "lock_acquired_ns"; "decision_ns"
+    ; "decision"; "finished_ns" ]
+
 type decision_projection_scope =
   | Decision
   | Clock_refs
+  | Skill_preparation
 
 let decision_allowlist = function
   | Decision -> decision_public_allowlist
   | Clock_refs -> clock_refs_public_allowlist
+  | Skill_preparation -> skill_preparation_public_allowlist
 
 let decision_child_scope scope key =
-  if String.equal key "clock_refs" then Clock_refs else scope
+  if String.equal key "clock_refs" then Clock_refs
+  else if String.equal key "skill_preparation" then Skill_preparation
+  else scope
 
 let public_projection_of_decision decision =
   let rec project scope path = function

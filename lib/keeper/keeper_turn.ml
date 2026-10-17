@@ -692,6 +692,9 @@ let run_keeper_invocation_turn_admitted_inner
                 ~base_path:ctx.config.base_path
             in
             let task_skill_selection =
+              Keeper_skill_preparation_runtime_observation.with_turn_result
+                ~config:ctx.config ~keeper_name:meta.name ~turn_ref
+                ~phase:Keeper_skill_preparation_runtime_observation.Direct_task_resolution @@ fun () ->
               Keeper_task_skill_turn.resolve_live_observations
                   ~config:ctx.config ~keeper_name:meta.name
                 ~snapshot:skill_snapshot ~current_task ~held_task_skills

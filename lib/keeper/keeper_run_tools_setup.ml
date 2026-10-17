@@ -558,12 +558,20 @@ let prepare_agent_setup
         let snapshot = Keeper_lane_addon_runtime.snapshot ~config ~keeper_name:meta.name in
         Ok (Keeper_tool_descriptor.all_descriptors ()
           @ List.map Keeper_lane_addon_descriptor.create snapshot.exports) in
-  let* task_skill_selection = Keeper_task_skill_turn.with_descriptors
+  let* (task_skill_selection, preparation) =
+    Keeper_skill_preparation_runtime_observation.with_turn_result
+      ~config ~keeper_name:meta.name
+      ~turn_ref:(Ids.Turn_ref.make
+        ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+        ~absolute_turn:keeper_turn_id)
+      ~phase:Keeper_skill_preparation_runtime_observation.Executable_setup (fun () ->
+    let* task_skill_selection = Keeper_task_skill_turn.with_descriptors
       ~descriptors:tool_descriptors ~snapshot:skill_snapshot task_skill_selection
-    |> Result.map_error Keeper_task_skill_turn.core_error in
-  let preparation =
-    Keeper_task_skill_turn.prepare_surface ~descriptors:tool_descriptors
-      ~snapshot:skill_snapshot task_skill_selection
+      |> Result.map_error Keeper_task_skill_turn.core_error in
+    let preparation =
+      Keeper_task_skill_turn.prepare_surface ~descriptors:tool_descriptors
+        ~snapshot:skill_snapshot task_skill_selection in
+    Ok (task_skill_selection, preparation))
   in
   let snapshot_rev =
     Skill_catalog_snapshot.snapshot_revision_to_string

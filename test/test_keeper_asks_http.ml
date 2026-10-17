@@ -59,6 +59,7 @@ let test_original_questions_are_bound_to_receiving_workspace () =
         ~mode:Keeper_ask.Single ~free_text:Keeper_ask.Choices_only ~choices:[choice]
         |> valid Keeper_ask.invalid_question_to_string in
       let ask = Keeper_ask.ask ~ask_id:"original-ask" ~keeper_name:name ~questions:[question]
+        ~source_turn_ref:(Ids.Turn_ref.make ~trace_id:"original-ask-trace" ~absolute_turn:17)
         ~continuation:(Keeper_continuation_channel.unrouted "workspace-bound read fixture") ~asked_at:42. ()
         |> valid Keeper_ask.invalid_ask_to_string in
       Keeper_ask_store.record_ask ~base_path:config.base_path ask |> valid Fun.id;
@@ -74,6 +75,11 @@ let test_original_questions_are_bound_to_receiving_workspace () =
       List.iter (fun suffix ->
         let status,body = wire_response ~router (path ^ suffix) in
         check int "bound named and fleet reads succeed" 200 status;
+        let rows = Yojson.Safe.Util.(body |> member "asks" |> to_list) in
+        (match rows with
+         | [row] -> check string "HTTP preserves exact original asking execution" "original-ask-trace#17"
+             Yojson.Safe.Util.(row |> member "source_turn_ref" |> to_string)
+         | _ -> fail "expected original Ask row");
         let snapshot = Tui_decode_asks.decode_asks_snapshot ~expected_base_path:base ~expected_masc_root:root body
           |> valid Fun.id in
         match snapshot.asn_rows with

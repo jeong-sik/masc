@@ -91,14 +91,14 @@ type ask = {
   keeper_name : string;
   questions : question list;
   context : string option;
-  turn_id : int option;
+  source_turn_ref : Ids.Turn_ref.t option;
   task_id : string option;
   goal_id : string option;
   continuation : Keeper_continuation_channel.t;
   asked_at : float;
 }
 
-let ask ~ask_id ~keeper_name ~questions ?context ?turn_id ?task_id ?goal_id
+let ask ~ask_id ~keeper_name ~questions ?context ?source_turn_ref ?task_id ?goal_id
     ~continuation ~asked_at () =
   if is_blank ask_id then Error Ask_id_blank
   else if is_blank keeper_name then Error Keeper_name_blank
@@ -112,7 +112,7 @@ let ask ~ask_id ~keeper_name ~questions ?context ?turn_id ?task_id ?goal_id
             keeper_name;
             questions;
             context;
-            turn_id;
+            source_turn_ref;
             task_id;
             goal_id;
             continuation;
@@ -344,11 +344,10 @@ let string_option_field key json =
   | Some (`String s) -> Ok (Some s)
   | Some _ -> Error (key ^ ": expected string or null")
 
-let int_option_field key json =
-  match member key json with
+let source_turn_ref_option_field json =
+  match member "source_turn_ref" json with
   | None | Some `Null -> Ok None
-  | Some (`Int i) -> Ok (Some i)
-  | Some _ -> Error (key ^ ": expected int or null")
+  | Some value -> Ids.Turn_ref.of_yojson value |> Result.map Option.some
 
 let float_field key json =
   match member key json with
@@ -382,7 +381,6 @@ let rec map_results f = function
       Ok (y :: ys)
 
 let string_option_to_json = function None -> `Null | Some s -> `String s
-let int_option_to_json = function None -> `Null | Some i -> `Int i
 
 let choice_to_json c =
   `Assoc
@@ -447,7 +445,8 @@ let ask_to_json a =
       ("keeper_name", `String a.keeper_name);
       ("questions", `List (List.map question_to_json a.questions));
       ("context", string_option_to_json a.context);
-      ("turn_id", int_option_to_json a.turn_id);
+      ("source_turn_ref", (match a.source_turn_ref with
+        | None -> `Null | Some reference -> Ids.Turn_ref.to_yojson reference));
       ("task_id", string_option_to_json a.task_id);
       ("goal_id", string_option_to_json a.goal_id);
       ("continuation", Keeper_continuation_channel.to_yojson a.continuation);
@@ -460,14 +459,14 @@ let ask_of_json json =
   let* question_items = list_field "questions" json in
   let* questions = map_results question_of_json question_items in
   let* context = string_option_field "context" json in
-  let* turn_id = int_option_field "turn_id" json in
+  let* source_turn_ref = source_turn_ref_option_field json in
   let* task_id = string_option_field "task_id" json in
   let* goal_id = string_option_field "goal_id" json in
   let* continuation_json = raw_field "continuation" json in
   let* continuation = Keeper_continuation_channel.of_yojson continuation_json in
   let* asked_at = float_field "asked_at" json in
   Result.map_error invalid_ask_to_string
-    (ask ~ask_id ~keeper_name ~questions ?context ?turn_id ?task_id ?goal_id ~continuation
+    (ask ~ask_id ~keeper_name ~questions ?context ?source_turn_ref ?task_id ?goal_id ~continuation
        ~asked_at ())
 
 let response_to_json = function

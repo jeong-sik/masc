@@ -4,7 +4,7 @@ Ask the operator a question with named choices.
 
 Records the question and returns; continue independent work while waiting. Recorded answers
 arrive in a separate wake with the original questions, context and supplied
-Task/Goal IDs. Use for missing external decisions. Tool approvals use the Gate."""
+Task/Goal IDs and the calling execution when observed by the host. Use for missing external decisions. Tool approvals use the Gate."""
 additional_properties = false
 # RFC-0403 후속. 이 셋은 2026-08-03 ~ 09-02 31일간 fleet 전체에서 호출 0회이고,
 # 그 사이 agent-core keeper 4곳의 요청마다 5,498 B 를 싣고 있었다. 지연의

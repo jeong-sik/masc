@@ -7,11 +7,12 @@
    arguments and hands them to Keeper_ask, which decides whether they make a
    question anyone could answer. *)
 
-(* The handlers read three things: who is asking, where the store lives, and
+(* The shared context carries who is asking, where the store lives, and
    the raw arguments. The MCP server context also carries the session registry,
    the server state, and a switch none of them touch, and the agent-core lane
    has none of those to give -- so the handlers take the narrow record and each
-   lane adapts its own context at the call site. *)
+   lane adapts its own context at the call site. Ask creation separately accepts
+   frozen host provenance; raw client arguments cannot supply that identity. *)
 type context = {
   config : Workspace.config;
   agent_name : string;
@@ -103,6 +104,8 @@ let ask_json (a : Keeper_ask.ask) =
     [
       ("ask_id", `String a.ask_id);
       ("keeper_name", `String a.keeper_name);
+      ("source_turn_ref", match a.source_turn_ref with
+        | None -> `Null | Some reference -> Ids.Turn_ref.to_yojson reference);
       ( "questions",
         `List
           (List.map
@@ -115,7 +118,7 @@ let ask_json (a : Keeper_ask.ask) =
              a.questions) );
     ]
 
-let handle_ask ~tool_name ~start_time (ctx : context) : Tool_result.result option =
+let handle_ask ?source_turn_ref ~tool_name ~start_time (ctx : context) : Tool_result.result option =
   (* RFC-0393: a Keeper reaches its tools under its keeper_name — there is no
      alias or nickname spelling to unwrap. A name the registry does not know
      fails the registry check, which is the honest answer for a caller that
@@ -164,6 +167,7 @@ let handle_ask ~tool_name ~start_time (ctx : context) : Tool_result.result optio
           let asked_at = Time_compat.now () in
           match
             Keeper_ask.ask ~ask_id ~keeper_name ~questions ?context ?task_id ?goal_id
+              ?source_turn_ref
               ~continuation ~asked_at ()
           with
           | Error e -> reject (Keeper_ask.invalid_ask_to_string e)

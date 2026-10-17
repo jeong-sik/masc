@@ -94,6 +94,16 @@ let set_turn_context
 
 let get_turn_context_record ~(cell : cell) () = !cell
 
+let source_turn_ref (context : turn_context) =
+  match context.trace_id, context.keeper_turn_id with
+  | Some trace_id, Some absolute_turn ->
+      (match Keeper_id.Trace_id.of_string trace_id with
+       | Ok trace_id -> Some (Ids.Turn_ref.make
+           ~trace_id:(Keeper_id.Trace_id.to_string trace_id) ~absolute_turn)
+       | Error _ -> None)
+  | Some _, None | None, _ -> None
+;;
+
 let get_turn_context ~cell () =
   let ctx = get_turn_context_record ~cell () in
   ( ctx.lane

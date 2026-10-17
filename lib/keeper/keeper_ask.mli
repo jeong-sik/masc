@@ -92,7 +92,9 @@ type ask = private {
       (** Why the Keeper is asking, in its own words. Surfaces render this
           beside the prompt: a reader who cannot see the reason cannot tell a
           decision that matters from one that does not. *)
-  turn_id : int option;
+  source_turn_ref : Ids.Turn_ref.t option;
+      (** Host-observed original execution. [None] means unobserved; related
+          Task/Goal arguments do not establish this identity. *)
   task_id : string option;
   goal_id : string option;
   continuation : Keeper_continuation_channel.t;
@@ -106,7 +108,7 @@ val ask :
   keeper_name:string ->
   questions:question list ->
   ?context:string ->
-  ?turn_id:int ->
+  ?source_turn_ref:Ids.Turn_ref.t ->
   ?task_id:string ->
   ?goal_id:string ->
   continuation:Keeper_continuation_channel.t ->

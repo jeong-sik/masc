@@ -283,9 +283,12 @@ val handle_masc_workspace_with_outcome
     cluster handler for [masc_config] / [masc_dashboard] / [masc_tool_help] /
     [masc_web_search] / [masc_web_fetch].
     Constructs a [Tool_misc.context] from [config + meta.name] and calls
-    [Tool_misc.dispatch]. *)
+    [Tool_misc.dispatch]. [source_context] is the frozen invocation snapshot;
+    missing original execution remains unobserved rather than using [meta]. *)
 val handle_masc_misc_with_outcome
-  : config:Workspace.config -> meta:keeper_meta -> name:string -> args:Yojson.Safe.t
+  : config:Workspace.config -> meta:keeper_meta
+  -> source_context:Keeper_tool_call_log_context.turn_context option
+  -> name:string -> args:Yojson.Safe.t
   -> Keeper_tool_execution.t
 
 (** RFC-0182 §3.1 — [handle_masc_control_with_outcome] is the descriptor-projection

@@ -561,6 +561,65 @@ let rec await_public_completion base_path request_id =
   | Some value -> value
   | None -> Eio.Fiber.yield (); await_public_completion base_path request_id
 
+let test_resumed_ask_uses_only_original_source_evidence () =
+  let original_trace = Keeper_id.Trace_id.of_string "original-ask-source" |> require "source trace" in
+  let observation trace_id keeper_turn_id : Journal.source_observation =
+    {trace_id;keeper_turn_id;session_id=Some "original-session";answer_source_ids=[]} in
+  List.iter (fun (original_observation,expected) -> with_workspace (fun env sw base_path ->
+    let module Tools = Masc.Keeper_tool_composition_surface in
+    let module Call_log = Masc.Keeper_tool_call_log in
+    Eio_context.with_test_env ~net:(Eio.Stdenv.net env) ~clock:(Eio.Stdenv.clock env)
+      ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw @@ fun () ->
+    let config = Workspace.default_config base_path in
+    let meta = Masc_test_deps.meta_of_json_fixture
+        (`Assoc ["name",`String keeper;"activation_mode",`String "manual";
+          "trace_id",`String "current-unrelated-trace"]) |> require "current metadata" in
+    let plan = Plan.create ~descriptors:[descriptor "masc_ask"]
+        [Plan.node ~id:(node_id "original-question") ~tool_name:"masc_ask"
+          ~input:(Plan.Json_template.literal (`Assoc ["task_id",`String "decision-task";
+            "questions",`List [`Assoc ["header",`String "Next";"prompt",`String "Which original action?";
+              "mode",`String "single";"free_text",`Bool true]]])) ()]
+        |> require "original Ask plan" in
+    (* The original invocation and journal exist before the later run. No
+       external effect or terminal result is fabricated for the Ask node. *)
+    let prepared = prepare ?observation:original_observation ~plan base_path in
+    let cell = Call_log.create_turn_ctx_cell () in
+    Call_log.set_turn_context ~cell ~agent_name:keeper ~task_id:"later-task"
+      ~trace_id:"current-unrelated-trace" ~turn:777 ~keeper_turn_id:900 ();
+    let publication_recovery : Masc.Keeper_publication_recovery_availability.turn_context =
+      {provider=Masc.Keeper_publication_recovery_availability.non_runtime_provider;keeper_name=keeper} in
+    let tools = Tools.make_tools ~capability_surface:(surface base_path) ~config ~meta ~publication_recovery
+        ~ctx_snapshot:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"resumed Ask source fixture")
+        ~turn_ctx_cell:cell ~clock:(Eio.Stdenv.clock env) () in
+    let tool = List.find_map (fun (tool,_,_) ->
+        if tool.Agent_core.Tool.schema.name=Draft.run_tool_name then Some tool else None) tools
+        |> Option.get in
+    let invocation = Agent_core.Tool_contract.Invocation.create ~tool_use_id:"later-resume" ~turn:777
+        ~schedule:{planned_index=0;batch_index=0;batch_size=1;execution_mode=Serial}
+        ~completion:Continue_after_success in
+    let output = Agent_core.Tool.execute ~invocation tool
+        (`Assoc ["sha256",`String (Draft.reference prepared.draft).sha256;
+          "resume_run_id",`String (Plan.Composition_run_id.to_string prepared.source.composition_run_id)])
+        |> function Ok output -> output | Error error -> fail error.Agent_core.Types.message in
+    let accepted = public_content base_path output.content in
+    let request_id = Yojson.Safe.Util.(accepted |> member "request_id" |> to_string) in
+    let entry = await_public_terminal base_path request_id in
+    (match entry.Async.status with
+     | Done {ok=true;_} -> ()
+     | _ -> fail "resumed Ask should run even with unobserved source");
+    ignore (await_public_completion base_path request_id);
+    match Masc.Keeper_ask_store.open_asks ~base_path ~keeper_name:keeper with
+    | [ask] ->
+        check (option string) "resumed Ask never borrows current trace or turn" expected
+          (Option.map Ids.Turn_ref.to_string ask.source_turn_ref);
+        check (option string) "explicit related Task stays independent of source ownership"
+          (Some "decision-task") ask.task_id
+    | _ -> fail "one real resumed Ask should be recorded"))
+    [Some (observation (Some original_trace) (Some 17)),Some "original-ask-source#17";
+     Some (observation (Some original_trace) None),None;
+     Some (observation None (Some 17)),None;
+     None,None]
+
 let test_public_run_resume_keeps_original_task () = with_workspace (fun env sw base_path ->
   let module Tools = Masc.Keeper_tool_composition_surface in
   let module Call_log = Masc.Keeper_tool_call_log in
@@ -1256,6 +1315,8 @@ let () = match Array.to_list Sys.argv with
         test_case "restart reuses completed data and occurrence" `Quick test_restart_reuses_completed;
         test_case "source and plan identity refuse unsafe dispatch" `Quick test_source_and_plan_identity;
         test_case "original source observations freeze once without late backfill" `Quick test_source_observation_is_frozen_at_creation;
+        test_case "resumed Ask never borrows missing source from current run" `Quick
+          test_resumed_ask_uses_only_original_source_evidence;
         test_case "unavailable original evidence refuses dispatch" `Quick test_unavailable_evidence;
         test_case "canonical ownership, concurrent resume and stale worker" `Quick test_owned_transport_and_race;
         test_case "unknown, post-effect and deferred results are not replayed" `Quick test_unproven_outcomes_refuse_replay;

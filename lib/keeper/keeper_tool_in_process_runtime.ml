@@ -1740,7 +1740,9 @@ let handle_masc_workspace_with_outcome ~(config : Workspace.config) ~(meta : kee
    extraction (2026-05-27) broke the Tool_agent_timeline → Keeper_*
    back edge that previously cycled Config → ... →
    Keeper_tool_in_process_runtime. *)
-let handle_masc_misc_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
+let handle_masc_misc_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta)
+    ~(source_context : Keeper_tool_call_log_context.turn_context option) ~name ~args =
+  let ask_source_turn_ref = Option.bind source_context Keeper_tool_call_log_context.source_turn_ref in
   let candle operation =
     Some (Keeper_candle_tools.handle ~operation ~base_path:config.base_path
       ~keeper_name:meta.name ~keeper_names:(Play_seat.keeper_names config)
@@ -1800,7 +1802,7 @@ let handle_masc_misc_with_outcome ~(config : Workspace.config) ~(meta : keeper_m
    | (Some (Tool_schemas_misc.Misc_play_room), None)
    | (Some (Tool_schemas_misc.Misc_dos_pass), None) | (Some (Tool_schemas_misc.Misc_dos_save), None)
    | (Some (Tool_schemas_misc.Misc_dos_restore), None) ->
-     Tool_misc.dispatch ~lane_access:(Lane_addon_sources.Keeper meta.name) ctx ~name ~args)
+     Tool_misc.dispatch ?ask_source_turn_ref ~lane_access:(Lane_addon_sources.Keeper meta.name) ctx ~name ~args)
   |> dispatch_option_to_execution ~name
 ;;
 

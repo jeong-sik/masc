@@ -88,12 +88,55 @@ stays pending. It is excluded from admitted sources, turn-entry delivery proof
 and acknowledgement. Other readable sources may proceed in the same turn. A
 source-read retry does not count as a crashed Keeper cycle.
 
+## Preserve the execution that created a question
+
+The Keeper Tool handler freezes its per-run source context at invocation entry,
+before argument preparation can yield or change the carrier. The shared misc
+adapter now passes the exact `(trace_id, absolute Keeper turn)` through the
+host-only `source_turn_ref` argument into the canonical question. The logical
+Agent Core turn, provider call ID, later metadata and current Task are not
+substitutes. Related `task_id` and `goal_id` retain their separate decision
+meaning and are never overwritten by execution ownership.
+
+The question log, creation response, operator HTTP projection and durable
+answered input preserve this typed `Ids.Turn_ref`. The source is JSON `null`
+when unobserved. External MCP callers have no new argument requirement and
+cannot establish host provenance by adding a JSON field. A malformed recorded
+reference is rejected by the canonical decoder. This field provides attribution;
+it does not grant a Task claim, Gate approval or permission to replay an effect.
+
+Resumed Composition leaves use the original journal's source observation.
+Missing trace, session or absolute Keeper turn stays absent instead of borrowing
+it from the current run. This also prevents a nested composition from freezing a
+mixture of current and original coordinates as a new producer observation. The
+current operational environment still comes from the resumed run. A source-bound
+Tool may require original identity; missing evidence is not synthesized to make
+that effect executable. Asking itself remains available without provenance.
+
+| Path | Before | After in source |
+| --- | --- | --- |
+| Ordinary Keeper Ask | Shared adapter dropped producer execution | Frozen source reaches canonical storage and answered input |
+| Resumed Ask | No saved Ask execution; partial source restoration could borrow current coordinates | Original captured pair, or explicit unobserved source |
+| External caller | No host source | Still unobserved; raw arguments cannot supply proof |
+| Related Task/Goal | Explicit decision references | Preserved independently of execution source |
+| Operator observation | No original execution in question HTTP row | `source_turn_ref` string or `null`; TUI decoding/display is a separate follow-up |
+
+Authored, unexecuted scenarios exercise the real SDK handler with a carrier
+change during preparation, actual persistence and answer projection, forged
+client provenance, partial source evidence, malformed stored references,
+workspace-bound HTTP and prepared async resume with complete/partial/absent
+original observations. An existing durable job-completion scenario now asks a
+new question after resuming under another Task and trace. No model, backend
+Docker process, TUI frame, installed binary, latency or token improvement is
+proved by this source change. Parser-only checks do not establish typing or
+behavior.
+
 ## Keep the original question in conversation input
 
 The admitted answer row retains the canonical original `Keeper_ask.ask`, exact
 per-question answers and first-answer time as typed data. The question already
 owns its prompt, complete choices/descriptions, response mode, writing hint,
-purpose and optional original Task/Goal/turn IDs. Intake reuses the strict Ask
+purpose, optional related Task/Goal IDs and the host-observed original execution. Intake reuses the strict Ask
 snapshot it already read; it performs no extra Task, Goal, Ask-status or model
 request. An absent original binding stays JSON `null`, even if the Keeper's
 current Task changed. Non-finite historical clocks are also `null` rather than a
@@ -121,7 +164,7 @@ answer speakers selects typed metadata without rendering the full answer again.
 | Surface | Before this source change | After |
 | --- | --- | --- |
 | Original question | Short header and joined answer labels/text | Complete questions, choices/descriptions, writing hints and exact per-question answers |
-| Original work context | Original purpose and Task/Goal/turn missing from model input | Recorded context and original bindings; absent stays `null` |
+| Original work context | Original purpose and work bindings missing from model input | Recorded purpose, related Task/Goal and original execution; absent stays `null` |
 | Answer placement | Full answer in transient Board context and durable user input | Canonical answer data only in durable user input |
 | Speaker extraction | Renders complete input before discarding its text | Selects typed speaker metadata |
 | Display identity | Exact original answer source | Same source; preview changes do not create another input |

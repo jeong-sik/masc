@@ -326,6 +326,7 @@ let declare_configured_keeper config name =
 
 let call config name tool args =
   Keeper_tool_in_process_runtime.handle_masc_misc_with_outcome
+    ~source_context:None
     ~config
     ~meta:(meta name)
     ~name:tool

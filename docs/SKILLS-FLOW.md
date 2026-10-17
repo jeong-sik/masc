@@ -635,6 +635,47 @@ Keeper의 실제 Owner만 읽고 나머지 preview의 이력을 순회·직렬�
 중첩·병렬·취소·선택된 실제 turns decoder 시나리오는
 작성했으며 실행하지 않았다. 타입·현재 통합 경로·실제 화면·성능은 미확인이다.
 
+#### 공유 world 출처별 대기 관측
+
+비교 기준은 `1ed37dd4be2d4697d018a9ba3b9d349def0b7b95`다. 직접·자율 진입부가
+공유하는 `Keeper_turn_shared_inputs.observe`는 world 전체 준비만 관측했다.
+이제 원래 writer·turn reference로 Lane·workspace memory·wiki 확인을 각각
+관측한다. Eio에서는 worker 제출 전 호출자 fiber에서 scope를 열어 세 병렬 분기가
+실제 world 부모를 유지한다. non-Eio는 순차 실행하며 증명되지 않은 부모를
+추측하지 않는다.
+
+| 조건 | As-Is | To-Be 소스 경로 |
+| --- | --- | --- |
+| 한 번의 공유 입력 조회 | world scope 하나 | world와 세 출처 scope, 총 네 관측 |
+| 어느 출처의 대기가 남았는지 | 합류 전에는 전체 준비만 표시 | 아직 끝나지 않은 실제 출처의 확인 단계 표시 |
+| 일부 출처를 읽지 못함 | 원래 typed unavailable 값은 있으나 출처별 준비 결과 없음 | 해당 scope는 Rejected, 원래 결과 값은 그대로 반환 |
+| memory 없음·wiki 꺼짐 | Missing·Off 반환 | 같은 값 보존; 확인 종료와 데이터 조회 성공은 구분 |
+| source scope 시간 | 개별 관측 없음 | pool admission·실제 확인·취소 정리까지의 호출자 대기 |
+| TUI·wire | 준비 phase 여섯 종류 | Lane·memory·wiki 세 종류 추가, 조회 실패는 `조회 불가` |
+
+관측 위치를 worker 안으로 옮기거나 내부 IO 시간을 만들어 내지 않았다. 세
+출처의 실제 호출과 원래 결과를 유지하며 로그·workspace gauge도 기존처럼
+합류 뒤 한 번 기록한다. 일부 typed unavailable은 다른 분기의 조회를 막지
+않는다. world scope의 Prepared는 결과가 모두 합류했다는 뜻이며 각 출처의
+정상 판정이나 Task 완료·effect 권한이 아니다. 중첩·병렬 시간은 합산하지 않는다.
+
+실제 Wiki reader도 수정했다. Wiki root가 디렉터리 대신 일반 파일일 때
+`list_pages`가 빈 목록을 반환해 정상적인 출처 없음으로 보이던 경우다. 이제
+실제 디렉터리 열기 실패가 `read_index_entries`의 Error와 Keeper의 Unlisted로
+전달된다. Wiki 도구 dispatch는 해당 Sys_error를 Runtime_failure 결과로 돌려주며
+취소를 잡거나 IO를 재실행하지 않는다. 없는 Wiki root의 정상적인 빈 목록은
+기존대로 유지한다.
+
+실제 private Lane 참조·손상/없는 memory·켜진/꺼진 Wiki와 사용할 수 없는 root,
+worker pool·원래 Owner·세 병렬 부모·선택된 turns decoder·네 Wiki reader의
+typed 실패를 다루는 복합 시나리오를 작성했다. 실행하지 않았다. 1→4 scope와
+6→9 phase는 소스 관측 범위 비교이며 실제 지연 개선값이 아니다. 추가 관측의
+할당·시계·선택된 상세 payload 비용도 미측정이다. 기본 poll의 미요청 이력과
+실제 선택한 Keeper만 상세를 읽는 경로는 유지한다.
+
+내구 이력, queue·worker·provider 시간의 더 세밀한 원인 연결, 실제 화면·속도와
+Composition·held job·Ask 이후 원래 작업의 최신 통합 증거는 계속 남아 있다.
+
 ### 2b. 프롬프트 — 지명된 스킬 안내
 
 `task.skills`(`masc_add_task`가 지정, `lib/task/tool_task_handlers.ml`의

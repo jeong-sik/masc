@@ -348,7 +348,14 @@ let cursor_publication_requires_durable_visibility () = with_workspace (fun conf
   check bool "an older receipt cannot move the acknowledged cursor backwards" true
     (Result.is_error (ack config first_receipt)))
 
-let shared_turn_inputs_keep_private_sources_and_original_owner () = with_workspace (fun config ->
+let shared_turn_inputs_keep_private_sources_and_original_owner () =
+  let wiki_key = Env_config_keeper.KeeperWikiContents.enabled_env_key in
+  let with_wiki enabled operation =
+    let previous = Sys.getenv_opt wiki_key in
+    Unix.putenv wiki_key (if enabled then "true" else "false");
+    Fun.protect ~finally:(fun () -> match previous with
+      | None -> Unix.unsetenv wiki_key | Some value -> Unix.putenv wiki_key value) operation in
+  with_wiki true (fun () -> with_workspace (fun config ->
   ignore (save config);
   let retained = store config in
   let visibility = `Assoc ["kind",`String "keeper";"keeper",`String "researcher"] in
@@ -386,6 +393,29 @@ let shared_turn_inputs_keep_private_sources_and_original_owner () = with_workspa
         ~now:0. ~redaction:Keeper_secret_redaction.empty) in
     check bool "pool-backed input preparation preserves the original source products" true
       (read ~preview () = reference);
+    let module P = Keeper_turn_preview in
+    let current () = match P.current_for_turn ~keeper_name:"researcher" ~interrupt_token:owner with
+      | Some current -> current | None -> fail "original preparation writer missing" in
+    let check_sources expected =
+      let spans = P.preparation_spans (current ()).preparation_timeline in
+      let parent = match List.find_opt (fun (span : P.preparation_span) ->
+          span.preparation.phase=P.World_preparation) (List.rev spans) with
+        | Some parent -> parent | None -> fail "world scope missing" in
+      let children = List.filter (fun (span : P.preparation_span) ->
+          span.parent_scope_id=Some parent.scope_id) spans in
+      check int "all actual source branches retain the same proven world parent" 3 (List.length children);
+      List.iter (fun (phase,outcome) ->
+        match List.find_opt (fun (span : P.preparation_span) -> span.preparation.phase=phase) children with
+        | Some {preparation={turn_ref=Some actual;state=Preparation_finished {outcome=actual_outcome;_};_};_} ->
+          check bool "each source retains its original turn and actual availability outcome" true
+            (Ids.Turn_ref.equal actual original && actual_outcome=outcome)
+        | Some _ | None -> fail "source observation was lost or left active") expected;
+      check bool "the world joins results without claiming all sources were available" true
+        (match parent.preparation.state with Preparation_finished {outcome=Prepared;_} -> true
+         | Preparation_active | Preparation_finished _ -> false)
+    in
+    check_sources [P.Lane_inputs_preparation,P.Prepared;
+      P.Workspace_memory_preparation,P.Rejected;P.Wiki_preparation,P.Prepared];
     check bool "actual world preparation retains its original Owner and turn reference" true
       (match Keeper_turn_preview.current_for_turn ~keeper_name:"researcher" ~interrupt_token:owner with
        | Some {preparation=Some {phase=World_preparation;turn_ref=Some actual;
@@ -398,13 +428,66 @@ let shared_turn_inputs_keep_private_sources_and_original_owner () = with_workspa
       (foreign.lane_updates = Ok (`List []));
     check bool "discovery does not acknowledge the pending original receipt" true
       (receipt (call config "researcher" (args "read") |> ok) = first_receipt);
-    let decoded = match Keeper_turn_preview.current_for_turn ~keeper_name:"researcher" ~interrupt_token:owner with
-      | Some preview -> Keeper_turn_preview.preparation_of_json
-          (member "preparation" (Keeper_turn_preview.to_json preview))
-      | None -> fail "world preparation observation missing" in
-    check bool "world preparation passes the shared strict protocol decoder" true
-      (match decoded with Ok {phase=World_preparation;turn_ref=Some actual;_} ->
-        Ids.Turn_ref.equal actual original | Ok _ | Error _ -> false)))))
+    let payload = P.to_json ~include_preparation_timeline:true (current ()) in
+    let wire = `Assoc ["schema",`String "masc.keeper_turns.v1";
+      "keepers",`List [`Assoc ["keeper_name",`String "researcher";"status",`String "ok";
+        "turn",`Assoc ["lane",`String "maintenance";"interrupt_token",`String (Keeper_interrupt_token.to_string owner);
+          "turn_ref",Ids.Turn_ref.to_yojson original;"started_at_unix",`Float 0.;"preview",payload]]]] in
+    (match Tui_decode.decode_keeper_turns wire with
+     | Ok [{ktr_state=Keeper_turn_running {preview=Some decoded;_};_}] ->
+       check bool "all source phases pass the actual selected turns decoder" true
+         (Option.map P.preparation_spans decoded.ktp_preparation_timeline
+          = Some (P.preparation_spans (current ()).preparation_timeline))
+     | Ok _ -> fail "source history missing in actual turns response"
+     | Error detail -> fail detail);
+    let subscription_path = operator_call config (`Assoc ["operation",`String "inspect"])
+      |> ok |> member "source_path" |> Yojson.Safe.Util.to_string in
+    let original_subscriptions = In_channel.with_open_text subscription_path In_channel.input_all in
+    Sys.remove ledger;
+    let unavailable_lane = Fun.protect
+        ~finally:(fun () -> Out_channel.with_open_text subscription_path (fun out ->
+          Out_channel.output_string out original_subscriptions))
+        (fun () ->
+          Out_channel.with_open_text subscription_path (fun out -> output_string out "[broken subscriptions");
+          let inputs = with_wiki false (fun () -> read ~preview ()) in
+          check_sources [P.Lane_inputs_preparation,P.Rejected;
+            P.Workspace_memory_preparation,P.Prepared;P.Wiki_preparation,P.Prepared];
+          inputs) in
+    check bool "unreadable Lane, missing memory and disabled wiki retain distinct original states" true
+      (match unavailable_lane with
+       | {lane_updates=Error _;workspace_memory=Missing;wiki_contents=Off} -> true
+       | {lane_updates=_;workspace_memory=_;wiki_contents=_} -> false);
+    let wiki_root = Tool_wiki.wiki_root ~base_path:config.base_path in
+    let backup = wiki_root ^ ".source-wait-fixture" in
+    Sys.rename wiki_root backup;
+    Fun.protect ~finally:(fun () ->
+      if Sys.file_exists wiki_root then Sys.remove wiki_root;
+      Sys.rename backup wiki_root) (fun () ->
+      Out_channel.with_open_text wiki_root (fun out -> output_string out "not a wiki directory");
+      let inputs = read ~preview () in
+      check_sources [P.Lane_inputs_preparation,P.Prepared;
+        P.Workspace_memory_preparation,P.Prepared;P.Wiki_preparation,P.Rejected];
+      check bool "unavailable wiki retains its typed result without erasing private Lane references" true
+        (match inputs with
+         | {lane_updates=Ok (`List [_]);workspace_memory=Missing;wiki_contents=Unlisted _} -> true
+         | {lane_updates=_;workspace_memory=_;wiki_contents=_} -> false);
+      List.iter (fun (name,args) ->
+        match Tool_wiki.dispatch wiki ~name ~args with
+        | Some result -> check bool "Wiki tools report an unavailable root as a typed runtime failure" true
+            (Tool_result.failure_class result=Some Tool_result.Runtime_failure)
+        | None -> fail "registered Wiki reader was not dispatched")
+        ["masc_wiki_list",`Assoc [];
+         "masc_wiki_read",`Assoc ["topic",`String "retained-page"];
+         "masc_wiki_search",`Assoc ["query",`String "Reference"];
+         "masc_wiki_lint",`Assoc []]);
+    check bool "later source repair never erases the original memory failure observation" true
+      (List.exists (fun (span : P.preparation_span) ->
+        span.preparation.phase=P.Workspace_memory_preparation
+        && match span.preparation.state with Preparation_finished {outcome=Rejected;_} -> true
+           | Preparation_active | Preparation_finished _ -> false)
+        (P.preparation_spans (current ()).preparation_timeline));
+    check bool "observation across failures never acknowledges original retained work" true
+      (receipt (call config "researcher" (args "read") |> ok)=first_receipt))))))
 
 let () = run "Lane subscription use" ["operator scenarios",[
   test_case "shared turn inputs retain source authority and original preparation ownership" `Quick

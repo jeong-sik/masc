@@ -151,14 +151,15 @@ let make_meta name : Masc.Keeper_meta_contract.keeper_meta =
 
 let minimal_meta : Masc.Keeper_meta_contract.keeper_meta = make_meta "test-keeper"
 
-let build_prompt ?workspace_memory ~meta observation =
+let build_prompt ?workspace_memory
+    ?(current_task=Masc.Keeper_world_observation_inputs.No_current_task) ~meta observation =
   let turn_decision =
     Masc.Keeper_world_observation.keeper_cycle_decision ~meta observation
   in
   Masc.Keeper_unified_prompt.build_prompt
     ~turn_decision
     ?workspace_memory
-    ~current_task:Masc.Keeper_world_observation_inputs.No_current_task
+    ~current_task
     ~observation
     ()
 ;;
@@ -1111,26 +1112,69 @@ let test_autonomous_continuation_is_an_ordinary_user_turn () =
     Masc.Keeper_unified_prompt.autonomous_wake_marker
     user_message
 
+let ask_input_fixture ?context ?task_id ?goal_id ?turn_id ~id ~prompt ~answer () : WO.answered_ask_input =
+  let module Ask = Masc.Keeper_ask in
+  let question = Ask.question ~question_id:"q-original" ~header:"short label" ~prompt
+      ~choices:[] ~mode:Ask.Single ~free_text:(Ask.Free_text_allowed {hint=None}) |> Result.get_ok in
+  let original_ask = Ask.ask ~ask_id:id ~keeper_name:minimal_meta.name ~questions:[question]
+      ?context ?task_id ?goal_id ?turn_id
+      ~continuation:(Masc.Keeper_continuation_channel.unrouted "original fixture")
+      ~asked_at:100. () |> Result.get_ok in
+  let answers = Ask.parse_answers ~ask:original_ask
+      ~submissions:[question.question_id,Ask.Wrote answer] |> Result.get_ok in
+  {original_ask;answers;answered_at=200.}
+
 let test_answered_ask_survives_later_turns_and_checkpoint_reload () = Eio_main.run (fun _ ->
-  let answer = "2026-10-17 토요일 14:00–17:00 / 은빛정류장 전시실\n무료" in
-  let answered : WO.pending_board_event =
-    { sample_board_event with
-      event_kind = WO.Ask_answered_row { answered_by = Masc.Keeper_input_speaker.Owner; answer_source_id = None }
-    ; post_id = "keeper-ask:schedule"
-    ; author = "operator"
-    ; title = "확정 정보"
-    ; preview = answer
-    ; post_kind = Masc.Board.System_post
-    }
-  in
-  let prompt = build_prompt ~meta:minimal_meta
+  let answer = "ANSWER_CANONICAL: 2026-10-17 토요일 14:00–17:00 / 은빛정류장 전시실\n무료" in
+  let input = ask_input_fixture ~id:"schedule"
+      ~prompt:"ORIGINAL_QUESTION_BODY: 어느 전시의 일정과 입장료를 확정할까요?"
+      ~context:"ORIGINAL_PURPOSE: 첫 번째 전시 준비 작업의 결정입니다.\n현재 작업과 별개입니다."
+      ~task_id:"task-101" ~goal_id:"goal-original" ~turn_id:17 ~answer () in
+  let answered = WO.pending_board_event_of_ask_answer ~meta:minimal_meta
+      ~ask:input.original_ask ~answers:input.answers ~answered_at:input.answered_at
+      ~responder:{Masc.Keeper_ask.surface=Masc.Surface_ref.Dashboard {session_id=None};
+        actor_id=Some "operator";display_name=Some "operator"} in
+  let current_id = Keeper_id.Task_id.of_string "task-900" |> Result.get_ok in
+  let meta = {minimal_meta with current_task_id=Some current_id} in
+  let ask_only = {base_observation with pending_board_events=[answered]} in
+  check bool "Ask remains reactive activity for intake" true
+    (WO.has_pending_board_activity ask_only);
+  let affordances = UM.observed_affordances_of_observation ask_only in
+  List.iter (fun name -> check bool "Ask alone supplies no Board action affordance" false
+    (List.mem name affordances)) ["board_post_or_comment";"board_curation"];
+  let prompt = build_prompt ~meta
+      ~current_task:(Masc.Keeper_world_observation_inputs.Current_task_missing
+        {task_id=current_id;recovery=None})
       { base_observation with pending_board_events = [ sample_board_event; answered ] } in
   check bool "answer is durable input" true
     (contains_sub "2026-10-17" prompt.user_message);
   check bool "answer provenance is durable" true
     (contains_sub "post_id=\"keeper-ask:schedule\"" prompt.user_message);
-  check bool "answer newlines stay quoted" true
-    (contains_sub "전시실\\n무료" prompt.user_message);
+  let fields = Masc.Keeper_unified_prompt.For_testing.board_event_fields answered in
+  let origin = List.assoc "ask_origin" fields |> Yojson.Safe.from_string in
+  check string "original Task is retained after current Task changed" "task-101"
+    Yojson.Safe.Util.(origin |> member "task_id" |> to_string);
+  check string "original Goal retained" "goal-original"
+    Yojson.Safe.Util.(origin |> member "goal_id" |> to_string);
+  check int "original asking turn retained" 17
+    Yojson.Safe.Util.(origin |> member "turn_id" |> to_int);
+  check string "question purpose retained in full" (Option.get input.original_ask.context)
+    Yojson.Safe.Util.(origin |> member "context" |> to_string);
+  let answers = List.assoc "answers" fields |> Yojson.Safe.from_string |> Yojson.Safe.Util.to_list in
+  check (list string) "answer newlines survive canonical data projection" [answer]
+    (List.map (fun value -> Yojson.Safe.Util.(value |> member "response" |> member "text" |> to_string)) answers);
+  check bool "literal multiline answer cannot escape its quoted input field" false
+    (contains_sub answer prompt.user_message);
+  check bool "original question body reaches durable input" true
+    (contains_sub "ORIGINAL_QUESTION_BODY" prompt.user_message);
+  check bool "original purpose reaches durable input" true
+    (contains_sub "ORIGINAL_PURPOSE" prompt.user_message);
+  check bool "current Task is an independent world observation" true
+    (contains_sub "task-900" prompt.world_state && not (contains_sub "task-900" prompt.user_message));
+  check bool "answer and original question are not duplicated in transient world context" false
+    (contains_sub "ANSWER_CANONICAL" prompt.world_state
+     || contains_sub "ORIGINAL_QUESTION_BODY" prompt.world_state
+     || contains_sub "ORIGINAL_PURPOSE" prompt.world_state);
   check bool "ordinary Board content stays ephemeral" false
     (contains_sub sample_board_event.preview prompt.user_message);
   let module Context = Masc.Keeper_context_runtime in
@@ -1161,10 +1205,11 @@ let test_answered_ask_survives_later_turns_and_checkpoint_reload () = Eio_main.r
    row in the order the rows are joined, who answered. *)
 let test_autonomous_wake_speaker_names_each_answer () =
   let module S = Masc.Keeper_input_speaker in
-  let answered ~post_id ~preview answered_by : WO.pending_board_event =
+  let answered ~id ~preview answered_by : WO.pending_board_event =
+    let input = ask_input_fixture ~id ~prompt:"Which original item?" ~answer:preview () in
     { sample_board_event with
-      event_kind = WO.Ask_answered_row { answered_by; answer_source_id = None }
-    ; post_id
+      event_kind = WO.Ask_answered_row { answered_by; answer_source_id = None; input }
+    ; post_id = "keeper-ask:" ^ id
     ; preview
     ; post_kind = Masc.Board.System_post
     }
@@ -1177,9 +1222,9 @@ let test_autonomous_wake_speaker_names_each_answer () =
   let observation =
     { base_observation with
       pending_board_events =
-        [ answered ~post_id:"keeper-ask:first" ~preview:"first answer" S.Owner
+        [ answered ~id:"first" ~preview:"first answer" S.Owner
         ; sample_board_event
-        ; answered ~post_id:"keeper-ask:second" ~preview:"second answer" (S.Keeper beta)
+        ; answered ~id:"second" ~preview:"second answer" (S.Keeper beta)
         ]
     }
   in

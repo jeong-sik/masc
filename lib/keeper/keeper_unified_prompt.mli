@@ -254,9 +254,11 @@ end
 val answered_ask_inputs :
   Keeper_world_observation.world_observation ->
   (string * string * Keeper_input_speaker.person) list
-(** Ask correlation identity, the same attributed, quoted row used in the
-    ordinary user turn, and who answered. Excludes all other world
-    observations. *)
+(** Ask correlation identity, quoted canonical question/answer input with its
+    original Task/Goal/context, and who answered. This is the ordinary durable
+    user turn's copy; transient Board context excludes it. Original bindings
+    are historical data and never replace current Task/Goal ownership. Excludes
+    all other world observations. *)
 
 val autonomous_input_speaker :
   Keeper_world_observation.world_observation -> Keeper_input_speaker.t

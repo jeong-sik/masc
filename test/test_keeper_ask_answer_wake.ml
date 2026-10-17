@@ -191,9 +191,16 @@ let test_complete_multi_question_answers_reach_the_prompt () =
         [ "format", Keeper_ask.Wrote format; "details", Keeper_ask.Wrote details ])
       ~responder ~answered_at:200. in
   let fields = Keeper_unified_prompt.For_testing.board_event_fields row in
-  check string "all question answers survive model-facing field projection"
-    ("행사 형태: " ^ format ^ " · 확정 정보: " ^ details)
-    (List.assoc "preview" fields)
+  let answers = List.assoc "answers" fields |> Yojson.Safe.from_string
+      |> Yojson.Safe.Util.to_list in
+  check (list string) "complete answers retain exact per-question identities"
+    ["format";"details"]
+    (List.map (fun value -> Yojson.Safe.Util.(value |> member "question_id" |> to_string)) answers);
+  check (list string) "all question answers survive model-facing field projection"
+    [format;details]
+    (List.map (fun value -> Yojson.Safe.Util.(value |> member "response" |> member "text" |> to_string)) answers);
+  check bool "display answer and short excerpt are not repeated in model input" false
+    (List.mem_assoc "preview" fields || List.mem_assoc "latest_external_preview" fields)
 ;;
 
 (* The row is what the turn renders. Left out of the rendered set, the Keeper
@@ -347,6 +354,86 @@ let terminalize_answer ~base_path ~keeper_name source =
   | Ok (Queue.Turn_source_acked _) -> ()
   | Ok Queue.Turn_selection_withdrawn -> fail "answer source was withdrawn"
   | Error error -> fail error
+;;
+
+let test_original_question_input_uses_canonical_store_and_keeps_unlinked_state () =
+  with_persistence @@ fun config ensure_keeper ->
+  let base_path = config.Workspace.base_path and keeper_name = "alpha" in
+  ensure_keeper keeper_name;
+  let chosen = Keeper_ask.choice ~choice_id:"choice-original" ~label:"원래 선택지"
+      ~description:"ORIGINAL_CHOICE_DETAIL\n기존 작업의 결정" () |> Result.get_ok in
+  let multi = Keeper_ask.question ~question_id:"choice-question" ~header:"same header"
+      ~prompt:"ORIGINAL_CHOICE_PROMPT: 원래 작업에서 어느 선택지를 고를까요?"
+      ~choices:[chosen;choice ~id:"other-choice" ~label:"다른 선택지"]
+      ~mode:Keeper_ask.Multi ~free_text:Keeper_ask.Choices_only |> Result.get_ok in
+  let full_prompt = String.concat "\n" (List.init 25 (fun _ -> "원래 질문의 긴 설명")) ^ "\nORIGINAL_PROMPT_TAIL" in
+  let written = Keeper_ask.question ~question_id:"written-question" ~header:"same header"
+      ~prompt:full_prompt ~choices:[] ~mode:Keeper_ask.Single
+      ~free_text:(Keeper_ask.Free_text_allowed {hint=Some "ORIGINAL_WRITING_HINT"}) |> Result.get_ok in
+  let skipped = question ~id:"skipped-question" ~header:"decline"
+      ~choices:[choice ~id:"unused" ~label:"not selected"] in
+  let ask = Keeper_ask.ask ~ask_id:"canonical-original-context" ~keeper_name
+      ~questions:[multi;written;skipped] ~context:"ORIGINAL_ASK_PURPOSE\n원래 이유 전체"
+      ~task_id:"task-101" ~goal_id:"goal-original" ~turn_id:17
+      ~continuation:(Keeper_continuation_channel.unrouted "original context fixture")
+      ~asked_at:100. () |> Result.get_ok in
+  Keeper_ask_store.record_ask ~base_path ask |> Result.get_ok;
+  let text = "CANONICAL_WRITTEN_ANSWER\nquote=\"원문\"\\tail" in
+  Keeper_ask_store.answer ~base_path ~keeper_name ~ask_id:ask.ask_id
+    ~submissions:[written.question_id,Keeper_ask.Wrote text;
+      skipped.question_id,Keeper_ask.Skipped;
+      multi.question_id,Keeper_ask.Chose {choice_ids=["other-choice";"choice-original"]}]
+    ~responder ~now:200. |> Result.get_ok |> ignore;
+  check bool "late losing answer is refused" true
+    (Result.is_error (Keeper_ask_store.answer ~base_path ~keeper_name ~ask_id:ask.ask_id
+      ~submissions:[written.question_id,Keeper_ask.Wrote "LOSING_ANSWER"] ~responder ~now:201.));
+  let current = Keeper_id.Task_id.of_string "task-900" |> Result.get_ok in
+  let current_meta = {meta with current_task_id=Some current} in
+  let read_input ask_id = match Keeper_ask_store.rows_result ~base_path ~keeper_name with
+    | Ok (Keeper_ask_store.Stored_rows rows) ->
+        (match List.assoc ask_id rows with
+         | original_ask,Keeper_ask.Answered_by {answers;responder;answered_at} ->
+             Keeper_world_observation.pending_board_event_of_ask_answer
+               ~meta:current_meta ~ask:original_ask ~answers ~responder ~answered_at
+         | _,(Keeper_ask.Open | Keeper_ask.Withdrawn_because _) -> fail "canonical answer missing")
+    | Ok Missing_log -> fail "canonical log missing"
+    | Error error -> fail (Keeper_ask_store.read_error_to_string error) in
+  let row = read_input ask.ask_id in
+  let fields = Keeper_unified_prompt.For_testing.board_event_fields row in
+  let origin = List.assoc "ask_origin" fields |> Yojson.Safe.from_string in
+  let open Yojson.Safe.Util in
+  check string "original Task is not current Task" "task-101" (origin |> member "task_id" |> to_string);
+  check string "original Goal" "goal-original" (origin |> member "goal_id" |> to_string);
+  check int "original asking turn" 17 (origin |> member "turn_id" |> to_int);
+  check string "original purpose remains complete" (Option.get ask.context) (origin |> member "context" |> to_string);
+  check (float 0.) "canonical first answer time" 200. (origin |> member "answered_at" |> to_float);
+  check string "canonical exact input identity"
+    (Keeper_ask.answer_source_id ~ask_id:ask.ask_id ~answered_at:200. |> Option.get)
+    (origin |> member "answer_source_id" |> to_string);
+  let questions = List.assoc "questions" fields |> Yojson.Safe.from_string |> to_list in
+  check string "complete original prompt tail survives canonical storage" full_prompt
+    (List.nth questions 1 |> member "prompt" |> to_string);
+  check string "choice description survives canonical storage" (Option.get chosen.description)
+    (List.hd questions |> member "choices" |> to_list |> List.hd |> member "description" |> to_string);
+  let answers = List.assoc "answers" fields |> Yojson.Safe.from_string |> to_list in
+  check (list string) "exact per-question binding follows original question order"
+    [multi.question_id;written.question_id;skipped.question_id]
+    (List.map (fun value -> value |> member "question_id" |> to_string) answers);
+  check (list string) "selected identities retain canonical selection order"
+    ["other-choice";"choice-original"]
+    (List.hd answers |> member "response" |> member "choice_ids" |> to_list |> List.map to_string);
+  check string "canonical text wins over later submission" text
+    (List.nth answers 1 |> member "response" |> member "text" |> to_string);
+  check string "declined is not an empty written answer" "skipped"
+    (List.nth answers 2 |> member "response" |> member "kind" |> to_string);
+  check bool "display changes do not remint answer identity" true
+    (Keeper_world_observation.same_board_event_identity row {row with title="changed display";preview="changed preview"});
+  let unlinked = persist_answer ~base_path ~keeper_name ~ask_id:"canonical-unlinked" () |> fun ask -> read_input ask.ask_id in
+  let unlinked = Keeper_unified_prompt.For_testing.board_event_fields unlinked
+      |> List.assoc "ask_origin" |> Yojson.Safe.from_string in
+  List.iter (fun key -> check bool "absent original binding stays explicit and unobserved" true
+    (member key unlinked = `Null)) ["task_id";"goal_id";"turn_id"];
+  check int "input projection did not enqueue a wake" 0 (List.length (pending_asks ~base_path ~keeper_name))
 ;;
 
 let test_recorded_answer_recovers_once_on_original_continuation () =
@@ -804,7 +891,9 @@ let test_followup_matches_committed_answer_input_tool_rows () =
 let () =
   run "keeper_ask_answer_wake"
     [ ( "wake"
-      , [ test_case "original linked Task survives archive and read failure" `Quick
+      , [ test_case "original question input uses canonical store and preserves absent bindings" `Quick
+            test_original_question_input_uses_canonical_store_and_keeps_unlinked_state
+        ; test_case "original linked Task survives archive and read failure" `Quick
             test_followup_keeps_original_task_through_archive_and_read_failure
         ; test_case "Tool followup binds exact canonical answer inputs and committed rows" `Quick
             test_followup_matches_committed_answer_input_tool_rows

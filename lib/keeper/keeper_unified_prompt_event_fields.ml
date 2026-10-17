@@ -85,6 +85,26 @@ let board_vote_fields (vote : Board_dispatch.board_vote_change) =
   ]
 ;;
 
+let answered_ask_fields ~answer_source_id (input : Keeper_world_observation.answered_ask_input) =
+  let ask = input.original_ask in
+  let optional_string = function None -> `Null | Some value -> `String value in
+  let optional_int = function None -> `Null | Some value -> `Int value in
+  let clock value = if Float.is_finite value then `Float value else `Null in
+  [ "ask_origin", Yojson.Safe.to_string (`Assoc
+      [ "ask_id", `String ask.ask_id
+      ; "keeper_name", `String ask.keeper_name
+      ; "asked_at", clock ask.asked_at
+      ; "answered_at", clock input.answered_at
+      ; "answer_source_id", optional_string answer_source_id
+      ; "turn_id", optional_int ask.turn_id
+      ; "task_id", optional_string ask.task_id
+      ; "goal_id", optional_string ask.goal_id
+      ; "context", optional_string ask.context ])
+  ; "questions", Yojson.Safe.to_string (`List (List.map Keeper_ask.question_to_json ask.questions))
+  ; "answers", Yojson.Safe.to_string (`List (List.map Keeper_ask.answer_to_json input.answers))
+  ]
+;;
+
 let board_event_note_fields = function
   | Keeper_world_observation.Board_reaction_changed reaction ->
     board_reaction_fields reaction
@@ -136,8 +156,8 @@ let board_event_note_fields = function
     (* No side fact: these payloads are short by construction and the
        row already carries them whole; see the note above. *)
     []
-  (* The answer is the row's title and preview; there is no side fact to add. *)
-  | Keeper_world_observation.Ask_answered_row _
+  | Keeper_world_observation.Ask_answered_row {answer_source_id; input; answered_by = _} ->
+    answered_ask_fields ~answer_source_id input
   | Keeper_world_observation.Composition_completed -> []
   | Keeper_world_observation.Owned_job_completed completion ->
     [ "job_id", Keeper_owned_job_identity.Job_id.to_string completion.oj_job_id
@@ -201,14 +221,14 @@ let board_event_fields
         ; "newest_new_reply_id", Board.Comment_id.to_string newest
         ]
   in
-  let fields =
-    match event.latest_external_author, event.latest_external_preview with
-    | Some author, Some preview ->
-      fields @ [ "latest_external_author", author; "latest_external_preview", preview ]
-    | Some author, None -> fields @ [ "latest_external_author", author ]
-    | None, _ -> fields
-  in
-  fields @ [ "preview", event.preview ]
+  if Keeper_world_observation.is_answered_ask_event event then fields
+  else
+    let fields = match event.latest_external_author, event.latest_external_preview with
+      | Some author, Some preview ->
+          fields @ [ "latest_external_author", author; "latest_external_preview", preview ]
+      | Some author, None -> fields @ [ "latest_external_author", author ]
+      | None, _ -> fields in
+    fields @ [ "preview", event.preview ]
 ;;
 
 let format_board_event_text

@@ -2,7 +2,9 @@ name = "masc_ask"
 description = """
 Ask the operator a question with named choices.
 
-Answers arrive in a separate wake. Use when blocked on an external choice."""
+Returns immediately; continue independent work while waiting. Recorded answers
+arrive in a separate wake with the original questions, context and supplied
+Task/Goal IDs. Use for missing external decisions. Tool approvals use the Gate."""
 additional_properties = false
 # RFC-0403 후속. 이 셋은 2026-08-03 ~ 09-02 31일간 fleet 전체에서 호출 0회이고,
 # 그 사이 agent-core keeper 4곳의 요청마다 5,498 B 를 싣고 있었다. 지연의
@@ -35,7 +37,7 @@ description = "Short decision title."
 name = "prompt"
 type = "string"
 required = true
-description = "Question prompt for operator."
+description = "Complete decision question. It returns with the answer so the decision remains understandable after other work."
 
 [[params.items.params]]
 name = "mode"
@@ -77,14 +79,14 @@ description = "Commitment of choice."
 [[params]]
 name = "context"
 type = "string"
-description = "Why you need the answer, and what you will do once it arrives."
+description = "Why this decision is needed and which work depends on it. Retained with the original question when the answer arrives."
 
 [[params]]
 name = "task_id"
 type = "string"
-description = "Related task id."
+description = "Exact Task this decision concerns, when known. Retained as the original binding even if the Keeper later works on another Task."
 
 [[params]]
 name = "goal_id"
 type = "string"
-description = "Related goal id."
+description = "Exact Goal this decision concerns, when known. Retained with the original question; omitted means no Goal binding was recorded."

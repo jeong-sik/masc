@@ -59,6 +59,16 @@ val detect :
   unit ->
   t
 
+(** [effective_base_path] and [effective_masc_root] as {!detect} reports
+    them, each resolved now. The request-entry workspace precondition
+    compares a request's expected workspace with this pair, so it and
+    [/health] never disagree about which workspace the server serves. *)
+val served_paths :
+  cwd:string ->
+  effective_base_path:string ->
+  effective_masc_root:string ->
+  string * string
+
 (** [true] when startup must stop instead of serving with malformed runtime
     state such as a directory-shaped or inaccessible [current_task] path. *)
 val startup_should_abort : t -> bool

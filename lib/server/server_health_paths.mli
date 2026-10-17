@@ -2,6 +2,9 @@
 
     Issue #8403 — see [.ml] header for context. *)
 
+val health : string
+(** [/health], the probe that reports which workspace this server serves. *)
+
 val liveness : string
 (** [/health/live] *)
 

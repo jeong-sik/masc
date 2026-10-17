@@ -351,6 +351,38 @@ Auth/CORS, redirect, OpenAPI, agent-card, discovery/runtime projection은 이
 typed authority만 소비한다. downstream에서 raw `Host`/`:authority`를 다시
 고르거나 설정 host로 fallback하는 경로는 두지 않는다.
 
+### 6.0.1 Workspace precondition
+
+HTTP/1.1 입구와 HTTP/2 gateway 는 rate limit 과 MCP origin 검사 다음, 라우팅
+바로 앞에서 같은 `Server_workspace_precondition` 확인을 거친다(#43356). 한
+작업공간을 보고 요청하는 client 는 두 헤더를 같이 보낸다.
+
+| 헤더 | 값 |
+|---|---|
+| `x-masc-expected-base-path` | `/health` 의 `paths.effective_base_path` |
+| `x-masc-expected-masc-root` | `/health` 의 `paths.effective_masc_root` |
+
+서버는 헤더가 붙은 요청마다 자기 작업공간 경로를 `/health` 와 같은 함수
+(`Server_base_path_diagnostics.served_paths`)로 풀어서 문자열로 비교한다. 그래서
+`/health` 와 이 확인은 늘 같은 경로를 말하고, 부팅 뒤에 symlink 가 바뀌면 둘 다
+새 경로를 말한다. 다르게 적은 경로(끝의 `/`, symlink)는 다른 작업공간이다.
+헤더가 없는 요청은 경로를 풀지 않는다.
+
+| 경우 | 응답 |
+|---|---|
+| 두 헤더가 다 없음 | 확인 없이 라우팅 |
+| 하나만 있음, 반복, 빈 값, 상대 경로 | 400 `invalid_workspace_precondition` |
+| 다른 작업공간 | 409 `workspace_precondition_failed` |
+| 서버 상태가 아직 없거나 ready 전 | 503 `server_booting`, `retry-after: 1` |
+
+형식이 틀리면 다른 것을 보기 전에 400 이다. 서버 상태가 있으면 ready 전이라도
+다른 작업공간이면 409 다. 본문은 `Server_refusal` 모양(`error` 문장과 `code`)이고
+서버 경로를 담지 않는다.
+
+`/health` 는 확인하지 않는다. 거절을 받은 client 가 서버가 어느 작업공간을
+보는지 읽는 곳이라서다. 이 확인은 route 인증보다 먼저 돈다. 인증 없는 client 도
+경로를 맞춰 볼 수 있지만, 같은 경로를 `/health` 가 이미 공개한다.
+
 ### 6.1 MCP 엔드포인트 (main_eio.ml에서 직접 매칭)
 
 | Method | Path | Handler | 설명 |

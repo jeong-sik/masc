@@ -2101,6 +2101,20 @@ let question_asks (state : state) =
   | Some snapshot -> Ask_projection.open_rows snapshot
 
 
+let draw_ask_origin buf cols (state : state) =
+  Option.iter (fun (origin : Ask_projection.origin) ->
+    box_divider buf cols;
+    box_wrapped_field buf cols ~head:"  " ~style:(Theme.info ())
+      "Recorded question source · o:close";
+    box_wrapped_field buf cols ~head:"  Keeper: " ~style:Ansi.dim origin.ao_keeper_name;
+    box_wrapped_field buf cols ~head:"  Question: " ~style:Ansi.dim origin.ao_ask_id;
+    match origin.ao_source_turn_ref with
+    | None -> box_wrapped_field buf cols ~head:"  " ~style:Ansi.dim
+        "Calling turn was not recorded. Current Keeper activity does not establish it."
+    | Some reference ->
+        box_wrapped_field buf cols ~head:"  Asking turn: " ~style:Ansi.dim
+          (Ids.Turn_ref.to_string reference)) (Masc_tui_types.current_ask_origin state)
+
 let ask_question_viewport (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -2122,6 +2136,7 @@ let ask_question_viewport (state : state) =
                      question.aq_prompt;
                    draw_ask_text_entry b cols ~draft ~question entry
                | Some _ | None ->
+                   draw_ask_origin b cols state;
                    draw_ask_question b cols state ~row ~draft ~question
                      ~answering:true ~selected_question:true;
                    draw_ask_context b cols ~row) in

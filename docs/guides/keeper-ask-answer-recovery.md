@@ -145,7 +145,9 @@ read handling retains previous question state and reports the read error.
 In Questions, `o` opens or closes the selected question's recorded source. With
 no open question, it can inspect the last answer's original source. This is an
 explicit diagnostic: Keeper, question ID and original Turn_ref are shown there,
-with normal terminal escaping and wrapping. It performs no HTTP request, opens
+with normal terminal escaping and wrapping. Browsing and the scrollable answer
+reader share the same diagnostic renderer; viewport and scroll limits include
+its measured content. It performs no HTTP request, opens
 no latest-turn inspector and grants no work/effect authority. A missing source
 is readable and does not prevent answering. The regular question/choice body
 and the free-text editor keep their existing meaning; `o` remains text while

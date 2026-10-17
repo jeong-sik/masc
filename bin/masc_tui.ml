@@ -14381,6 +14381,7 @@ let toggle_selected_ask_origin state =
        | None -> report_action state "system" "No question source is available"
        | Some origin ->
            Masc_tui_types.toggle_ask_origin state origin;
+           state.ask_question_scroll <- 0;
            Option.iter (fun origin ->
              Log.Transport.info "tui_ask_source=%s"
                (Yojson.Safe.to_string (`Assoc

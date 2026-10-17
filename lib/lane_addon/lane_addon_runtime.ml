@@ -13,7 +13,8 @@ exception Fleet_commit_uncertain of string
 exception Fleet_commit_pending of string
 exception Worker_detached
 exception Action_persistence_failed of string
-type tool_export = Lane_addon_tool_export.t = private { instance_id : string; tool : Mcp_protocol.Mcp_types.tool }
+type tool_export = Lane_addon_tool_export.t = private
+  { owner : Lane_addon_tool_export.owner; instance_id : string; tool : Mcp_protocol.Mcp_types.tool }
 type tool_call_error = Unavailable of string | Outcome_unknown of string
   | Host_refusal of Lane_addon_call_context.host_refusal
 let tool_change_handler = ref (fun () -> ())
@@ -42,6 +43,10 @@ type backend = {
     (unit, string) result;
   image_ready : package:package -> (unit, string) result;
 }
+type owned_connection =
+  { export_owner : Lane_addon_tool_export.owner
+  ; worker : connection
+  }
 type configuration_owner = { id : string; source_path : string; revision : string }
 type inventory_presence = Live | Retained
 type inventory_instance = {
@@ -92,7 +97,7 @@ type observation_request = Idle | Run_actions | Refresh_sources | Observe_now
 type entry = {
   instance_id : string; run_id : string; package : package; binding : Yojson.Safe.t;
   mutable phase : phase; mutable seq : int; mutable output : output;
-  mutable connection : connection option; mutable stopping : bool;
+  mutable connection : owned_connection option; mutable stopping : bool;
   mutable cleanup_running : bool; mutable wake : unit Eio.Promise.t;
   mutable resolver : unit Eio.Promise.u; mutable pending : observation_request;
   refresh_interest : Lane_addon_sources.refresh_interest;
@@ -313,7 +318,7 @@ let authorize_retained_read ~bindings ~access json =
 let entry_json e =
   `Assoc ["instance_id", `String e.instance_id; "incarnation", `String e.instance_id;
     "action_schema", (match e.connection with None -> `Null
-      | Some c -> Option.fold ~none:`Null ~some:Fun.id (c.action_schema ()));
+      | Some c -> Option.fold ~none:`Null ~some:Fun.id (c.worker.action_schema ()));
     "run_id", `String e.run_id;
     "addon_id", `String e.package.id; "title", `String e.package.title;
     "revision", `String e.package.revision; "phase", phase_to_json e.phase;
@@ -325,7 +330,7 @@ let entry_json e =
     "package", package_to_json e.package;
     "visibility", visibility_to_json e.visibility;
     "configuration", Option.fold ~none:`Null ~some:configuration_owner_json e.configuration;
-    "container_id", (match e.connection with None -> `Null | Some c -> `String c.container_id)]
+    "container_id", (match e.connection with None -> `Null | Some c -> `String c.worker.container_id)]
 (* A detached worker that never created a container and never committed an
    observation leaves nothing for Inspect, Slice or Evidence to read. When
    its start returned [Error], the masc:lane:resource:acquire_failed event in
@@ -449,7 +454,7 @@ let publish_resource lifecycle e container_id detail =
 let stop_entry ~sw ~backend m e =
   if not e.cleanup_running then
     let cleanup = match e.connection with
-      | Some c -> Some (Some c.container_id, c.stop)
+      | Some c -> Some (Some c.worker.container_id, c.worker.stop)
       | None when not e.running -> Some (None, fun () ->
           let* state_owner = state_owner_for_entry m e in
           backend.recover_stop ~runtime:e.package.runtime ~state_owner ~instance_id:e.instance_id ~container_id:None)
@@ -670,7 +675,8 @@ let run ~sw backend m e =
     let work () = try
       Eio.Switch.run (fun worker_sw ->
         e.cancel_worker <- Some (fun () -> Eio.Switch.fail worker_sw Worker_detached);
-        let created c = e.connection <- Some c;
+        let export_owner = Lane_addon_tool_export.create_owner ~instance_id:e.instance_id in
+        let created c = e.connection <- Some {export_owner;worker=c};
           publish_resource Lane_addon_resource_events.Acquired e (Some c.container_id) None;
           (match persist m e with Ok () -> () | Error message ->
             e.stopping <- true; e.phase <- Failed message);
@@ -681,13 +687,13 @@ let run ~sw backend m e =
         match started with
         | Error message ->
             publish_resource Lane_addon_resource_events.Acquire_failed e
-              (Option.map (fun c -> c.container_id) e.connection) (Some message);
+              (Option.map (fun c -> c.worker.container_id) e.connection) (Some message);
             if e.stopping then (
               match e.connection with None -> e.phase <- Failed ("startup/cleanup: " ^ message)
               | Some _ -> stop_entry ~sw ~backend m e)
             else failed m e message
         | Ok c ->
-            e.connection <- Some c; e.started <- true;
+            e.connection <- Some {export_owner;worker=c}; e.started <- true;
             notify_tool_change e.package;
             let rec loop () =
               if e.stopping then (
@@ -819,9 +825,9 @@ let live_exports m access =
     if not e.started || e.stopping || not (can_read access e.visibility) then []
     else match e.phase, e.connection with
       | (Attached | Observing), Some connection ->
-          connection.exported_tools () |> List.filter_map (fun (tool : Mcp_protocol.Mcp_types.tool) ->
+          connection.worker.exported_tools () |> List.filter_map (fun (tool : Mcp_protocol.Mcp_types.tool) ->
             if List.mem tool.Mcp_protocol.Mcp_types.name e.package.exported_tools
-            then Some (Lane_addon_tool_export.create ~instance_id:e.instance_id ~tool) else None)
+            then Some (Lane_addon_tool_export.create ~owner:connection.export_owner ~tool) else None)
       | (Attached | Observing), None | (Failed _ | Detaching | Detached), _ -> [])
 
 let unique_exports ~reserved exports =
@@ -892,11 +898,12 @@ let call_exported_tool_with_authority ~on_complete ~on_result ~authorize ~princi
       | Some m -> Ok m | None -> Error (Unavailable "Add-on owner is unavailable") in
     let snapshot = Lane_addon_tool_export.isolate ~reserved (live_exports m access) in
     let exports = snapshot.exports in
-    let* () = if List.exists (fun (current : tool_export) -> current.instance_id = export.instance_id
-        && current.tool = export.tool) exports then Ok ()
+    let* () = if List.exists (fun (current : tool_export) ->
+        Lane_addon_tool_export.equal_owner current.owner export.owner && current.tool = export.tool) exports then Ok ()
       else Error (Unavailable "Add-on tool installation is no longer available") in
     let* e, connection = match Hashtbl.find_opt m.entries export.instance_id with
-      | Some ({connection=Some connection; _} as e) -> Ok (e, connection)
+      | Some ({connection=Some connection; _} as e)
+        when Lane_addon_tool_export.equal_owner connection.export_owner export.owner -> Ok (e, connection.worker)
       | _ -> Error (Unavailable "Add-on tool connection is unavailable") in
     let* sw = match Eio_context.get_root_switch_opt () with
       | Some sw -> Ok sw | None -> Error (Unavailable "Add-on background owner is unavailable") in
@@ -1733,7 +1740,7 @@ let enqueue_action ?caller m args =
     | None ->
         let* e = request_result (find m args) in
         let* () = if not e.running || e.stopping then Error (Request_rejected "action worker is stopped or detaching") else Ok () in
-        let* c = match e.connection with Some c -> Ok c | None -> Error (Request_rejected "action worker initialization pending") in
+        let* c = match e.connection with Some c -> Ok c.worker | None -> Error (Request_rejected "action worker initialization pending") in
         let* name, schema = match e.package.action_tool, c.action_schema () with
           | Some name, Some schema -> Ok (name, schema)
           | _ -> Error (Request_rejected "worker has no available advertised action port") in

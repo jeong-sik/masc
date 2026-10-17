@@ -56,12 +56,14 @@ let make_backend ?observe_step () =
       let stopped = ref false in
       Hashtbl.add state.modes instance_id package.id;
       Hashtbl.add state.bindings instance_id binding;
+      (* Real workers retain the Tool objects from protocol initialization. *)
+      let exported_tools = List.map (fun name ->
+        match Mcp_protocol.Mcp_types.tool_of_yojson (`Assoc ["name",`String name;
+          "inputSchema",`Assoc ["type",`String "object"]]) with
+        | Ok tool -> tool | Error message -> fail message) package.exported_tools in
       let connection : Runtime.For_testing.connection = {
         container_id = Store.digest instance_id;
-        exported_tools = (fun () -> List.map (fun name ->
-          match Mcp_protocol.Mcp_types.tool_of_yojson (`Assoc ["name",`String name;
-            "inputSchema",`Assoc ["type",`String "object"]]) with
-          | Ok tool -> tool | Error message -> fail message) package.exported_tools);
+        exported_tools = (fun () -> exported_tools);
         call_exported_tool = (fun ~on_result:_ ~authorize ~principal ~name:_ ~arguments:_ ->
           state.principals := principal :: !(state.principals);
           let invoke admission =
@@ -1439,7 +1441,31 @@ let test_tool_exports_bind_live_incarnations () = with_fixture (fun env sw confi
   check string "MCP preserves worker result content" first
     (invoked_result |> member "content" |> Yojson.Safe.Util.to_list |> List.hd |> text "text");
   let handle = List.hd (unwrap (exports ())) in
+  let descriptor = Keeper_lane_addon_descriptor.create handle in
+  Gc.full_major ();
+  let observed_again = List.hd (unwrap (exports ())) in
+  check bool "repeated live inventories retain the same owned export" true (handle == observed_again);
+  check bool "repeated Keeper observations retain the same actual descriptor" true
+    (descriptor == Keeper_lane_addon_descriptor.create observed_again);
+  check bool "cached descriptor remains canonical and Serial" true
+    (Keeper_lane_addon_descriptor.is_canonical descriptor
+     && descriptor.execution = Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Serial);
   let call handle = Runtime.call_exported_tool ~config ~access ~reserved:[] ~export:handle ~arguments:(`Assoc []) in
+  let unrelated_owner = Lane_addon_tool_export.create_owner ~instance_id:handle.instance_id in
+  let unrelated = Lane_addon_tool_export.create ~owner:unrelated_owner ~tool:handle.tool in
+  check bool "equal ids and Tool objects cannot substitute a worker start" false
+    (Lane_addon_tool_export.equal_owner handle.owner unrelated.owner);
+  check bool "unrelated generation does not reuse the old descriptor" false
+    (descriptor == Keeper_lane_addon_descriptor.create unrelated);
+  let before = List.length !(state.principals) in
+  check bool "an unowned generation cannot invoke a visible installation" true (Result.is_error (call unrelated));
+  check int "generation refusal happens before worker dispatch" before (List.length !(state.principals));
+  let changed_tool = {handle.tool with input_schema=`Assoc ["type",`String "string"]} in
+  let changed = Lane_addon_tool_export.create ~owner:handle.owner ~tool:changed_tool in
+  check bool "a different frozen Tool object does not reuse the descriptor" false
+    (descriptor == Keeper_lane_addon_descriptor.create changed);
+  check bool "same generation cannot bypass current live schema validation" true (Result.is_error (call changed));
+  check int "schema refusal happens before worker dispatch" before (List.length !(state.principals));
   check bool "live installation is callable" true (Result.is_ok (call handle));
   ignore (unwrap (Runtime.call_exported_tool ~config ~access ~reserved:[] ~export:handle
     ~arguments:(`Assoc ["caller", `Assoc ["kind", `String "keeper"; "name", `String "forged"]])

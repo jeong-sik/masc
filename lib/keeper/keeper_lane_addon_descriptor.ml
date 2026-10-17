@@ -1,4 +1,4 @@
-(* Weak keys retain neither retired worker handles nor turn descriptors. The
+(* Weak keys retain neither unowned export data nor turn descriptors. The
    mutex protects only non-yielding weak-table operations across domains. *)
 module Issued = Weak.Make (struct
   type t = Keeper_tool_descriptor.t
@@ -7,6 +7,15 @@ module Issued = Weak.Make (struct
 end)
 
 let issued = Issued.create 16
+module Export_key = struct
+  type t = Lane_addon_tool_export.t
+  let equal left right = left == right
+  let hash export = Hashtbl.hash
+      (export.Lane_addon_tool_export.instance_id,export.tool.Mcp_protocol.Mcp_types.name)
+end
+
+module Descriptors = Ephemeron.K1.Make (Export_key)
+let descriptors : Keeper_tool_descriptor.t Descriptors.t = Descriptors.create 0
 let issued_mutex = Mutex.create ()
 let with_issued f =
   Mutex.lock issued_mutex;
@@ -15,8 +24,9 @@ let with_issued f =
 let is_canonical descriptor =
   with_issued (fun () -> Issued.mem issued descriptor)
 
-(** Dynamic descriptors carry a frozen worker handle, never a name-only route. *)
-let create (export : Lane_addon_tool_export.t) : Keeper_tool_descriptor.t =
+(** Dynamic descriptors carry a frozen owner/schema export. Runtime dispatch
+    revalidates that generation instead of resolving by a Tool name alone. *)
+let make (export : Lane_addon_tool_export.t) : Keeper_tool_descriptor.t =
   let open Keeper_tool_descriptor in
   let tool = export.tool in
   let id = "lane-addon:" ^ Digestif.SHA256.(to_hex (digest_string
@@ -47,5 +57,16 @@ let create (export : Lane_addon_tool_export.t) : Keeper_tool_descriptor.t =
   }
 
   in
-  with_issued (fun () -> Issued.add issued descriptor);
   descriptor
+
+let create export =
+  with_issued (fun () ->
+    match Descriptors.find_opt descriptors export with
+    | Some descriptor -> descriptor
+    | None ->
+      Descriptors.clean descriptors;
+      let descriptor = make export in
+      Issued.add issued descriptor;
+      Descriptors.add descriptors export descriptor;
+      descriptor)
+;;

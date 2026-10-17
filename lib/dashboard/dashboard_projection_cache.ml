@@ -48,7 +48,7 @@ let candle_observations = Hashtbl.create 4
 let candle_observation_sequence ~base_path ~request_sequence observation =
   let previous = Stdlib.Mutex.protect candle_observation_mu (fun () ->
     Hashtbl.find_opt candle_observations base_path) in
-  (* Comparing immutable ledger observations may traverse their event history.
+  (* Comparing immutable observations may traverse the ledger event history.
      Do that outside the short publication lock, then confirm the same memo. *)
   let unchanged_request = match previous with
     | Some (latest_request, _, previous)
@@ -74,8 +74,6 @@ let with_current_keeper_observations_using ~read ~(config : Workspace_utils.conf
      Equipment, balances and supply share one fresh ledger view per response. *)
   let request_sequence = Atomic.fetch_and_add candle_read_sequence 1 in
   let candle = read () in
-  let observation_sequence = candle_observation_sequence
-    ~base_path:config.base_path ~request_sequence candle in
   let equipment = Candle_observe.equipment candle in
   let revisions = Hashtbl.create 16 in
   let account_revision keeper =
@@ -91,6 +89,18 @@ let with_current_keeper_observations_using ~read ~(config : Workspace_utils.conf
     if List.mem_assoc key fields then
       List.map (fun (name, previous) -> name, if name = key then value else previous) fields
     else (key, value) :: fields in
+  (* Address reads belong after both metadata and encoded HTTP caches. Board
+     delivery reads effective metadata at event time too. Memoize only within
+     this response because the same Keeper may appear in several sections. *)
+  let board_addresses = Hashtbl.create 8 in
+  let board_address keeper =
+    match Hashtbl.find_opt board_addresses keeper with
+    | Some address -> address
+    | None ->
+      let address = Keeper_board_address.read config keeper |> Keeper_board_address.to_yojson in
+      Hashtbl.add board_addresses keeper address;
+      address
+  in
   let row = function
     | `Assoc fields as json ->
       let portrait = match Json_util.assoc_string_opt "name" json with
@@ -105,7 +115,11 @@ let with_current_keeper_observations_using ~read ~(config : Workspace_utils.conf
       let account_revision = match Json_util.assoc_string_opt "name" json with
         | Some keeper -> account_revision keeper
         | None -> None in
-      `Assoc (fields |> set "portrait" value
+      let address = match Json_util.assoc_string_opt "name" json with
+        | Some keeper -> board_address keeper
+        | None -> Keeper_board_address.to_yojson
+            (Keeper_board_address.Unavailable Keeper_board_address.Metadata_absent) in
+      `Assoc (fields |> set "board_address" address |> set "portrait" value
         |> set "candle_balance_milli" (Json_util.option_to_yojson (fun value -> `String value) balance)
         |> set "candle_account_revision" (Json_util.option_to_yojson (fun value -> `String value) account_revision))
     | json -> json in
@@ -122,6 +136,13 @@ let with_current_keeper_observations_using ~read ~(config : Workspace_utils.conf
           | "keepers", `List rows -> "keepers", `List (List.map row rows)
           | field -> field) fields)
       | field -> field) fields in
+    (* This ordering witness covers every fresh row observation, including
+       addresses. Equal Candle state alone must not let a delayed response
+       restore an older alias after a newer configuration was displayed. *)
+    let addresses = Hashtbl.to_seq board_addresses |> List.of_seq
+      |> List.sort (fun (left, _) (right, _) -> String.compare left right) in
+    let observation_sequence = candle_observation_sequence
+      ~base_path:config.base_path ~request_sequence (candle, addresses) in
     let projected = set "candle_observation_sequence" (`Int observation_sequence) projected in
     (match List.assoc_opt "keepers" fields with
      | Some (`Assoc _) -> `Assoc projected

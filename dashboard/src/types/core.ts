@@ -188,7 +188,21 @@ export interface BoardPostCloseState {
   summary?: string | null
 }
 
+/** Persisted Board write-boundary audience; never inferred from rendered prose. */
+export type BoardAudience =
+  | { kind: 'targets'; targets: string[] }
+  | { kind: 'broadcast' | 'thread_participants' | 'discoverable' }
+  | { kind: 'unavailable'; reason: 'not_recorded' | 'invalid_payload' }
+
+/** Current canonical addresses from the same effective configuration as routing. */
+export type KeeperBoardAddress =
+  | { state: 'ready'; target_ids: string[] }
+  | { state: 'unavailable'; reason:
+      | 'metadata_absent' | 'effective_metadata_unread'
+      | 'not_reported' | 'invalid_payload' }
+
 export interface BoardPost {
+  audience?: BoardAudience
   id: string
   author: string
   author_identity?: BoardActorIdentity | null
@@ -1344,6 +1358,7 @@ export function sandboxContainerCli(raw: string | null | undefined): string | nu
 }
 
 export interface Keeper {
+  board_address?: KeeperBoardAddress
   /** Required by the live wire; absent local fixtures are explicitly unavailable. */
   portrait?: KeeperPortraitReading
   candle_balance_milli?: string | null

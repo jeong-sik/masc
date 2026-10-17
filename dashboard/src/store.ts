@@ -1420,6 +1420,7 @@ function canReuseBoardPost(previous: BoardPost, next: BoardPost): boolean {
     && previous.classification_reason === next.classification_reason
     && previous.title === next.title
     && previous.body === next.body
+    && stableValueEqual(previous.audience, next.audience)
     && previous.flair === next.flair
     && previous.hearth === next.hearth
     && previous.visibility === next.visibility

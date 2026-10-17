@@ -43,6 +43,14 @@ val target_ids_of : string list -> Keeper_identity.Keeper_id.t list
 (** Mint a keeper's mention-target names (e.g.
     [message_feed_targets meta]) into comparable ids. *)
 
+val effective_target_ids
+  :  keeper_name:string
+  -> mention_targets:string list
+  -> Keeper_identity.Keeper_id.t list
+(** Canonical Board addresses from an effective Keeper configuration. An empty
+    configured target list uses the Keeper name, exactly as the route does;
+    a nonempty list replaces that fallback. No alias is inferred from a name. *)
+
 val ids_match
   :  target_ids:Keeper_identity.Keeper_id.t list
   -> Keeper_identity.Keeper_id.t list

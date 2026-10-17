@@ -10,7 +10,7 @@ import { EmptyState, LoadingState } from '../state-surfaces'
 import { TextInput } from '../common/input'
 import { Select } from '../common/select'
 import { Checkbox } from '../common/checkbox'
-import { RichContent } from '../common/rich-content'
+import { BoardRichContent } from './board-rich-content'
 import { CursorPagination } from '../common/pagination'
 import { route } from '../../router'
 import { keepers as dashboardKeepers, messages, refreshExecution } from '../../store'
@@ -431,7 +431,7 @@ function PostCard({ post, reactions, supportedEmojis, reactionsArriving = false 
       </div>
       <div class="bd-post-title">${stripInlineMarkdown(post.title)}</div>
       <div class="bd-post-body">
-        <${RichContent} text=${previewBody} previewLimit=${1} />
+        <${BoardRichContent} audience=${post.audience} text=${previewBody} previewLimit=${1} />
       </div>
       ${post.attachments
         ? html`<div onClick=${(event: Event) => event.stopPropagation()} onKeyDown=${(event: KeyboardEvent) => event.stopPropagation()}>
@@ -701,7 +701,7 @@ function BdThreadDetail({
                 >전체 상세 보기<//>
                 <${PostShareActions} post=${post} />
               </div>
-              <${RichContent} text=${post.body} previewLimit=${4} />
+              <${BoardRichContent} audience=${post.audience} text=${post.body} previewLimit=${4} />
               <${PostReferences} post=${post} />
               <${FusionBoardEvidence} post=${evidencePost} class="mt-3" />
             </div>

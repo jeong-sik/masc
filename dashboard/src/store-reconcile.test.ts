@@ -203,3 +203,13 @@ describe('isInitializingExecutionPayload', () => {
     expect(isInitializingExecutionPayload({ keepers: [] })).toBe(false)
   })
 })
+
+
+it('replaces a Board row when only its authoritative audience changes', () => {
+  const before = { id: 'post-audience', author: 'author', title: 'Title', body: '@Alpha', votes: 0,
+    comment_count: 0, tags: [], created_at: '2026-10-17T00:00:00Z', updated_at: '2026-10-17T00:00:00Z',
+    audience: { kind: 'targets' as const, targets: ['Alpha'] } }
+  const after = { ...before, audience: { kind: 'targets' as const, targets: ['Omega'] } }
+  expect(reconcileBoardPosts([before], [after])).toEqual([after])
+  expect(reconcileBoardPosts([before], [after])[0]).toBe(after)
+})

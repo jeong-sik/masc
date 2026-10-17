@@ -1607,3 +1607,21 @@ describe('board attachments decode', () => {
     expect(result.posts[0]?.attachments).toBeUndefined()
   })
 })
+
+
+describe('Board persisted audience wire boundary', () => {
+  it('preserves authoritative audience through the direct Board list decoder', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ posts: [
+      { id: 'post-alias', author: 'human', title: 'Alias', body: '@Alpha', audience: { kind: 'targets', targets: ['Alpha'] } },
+      { id: 'post-legacy', author: 'human', title: 'Missing', body: '@Alpha' },
+      { id: 'post-bad', author: 'human', title: 'Malformed', body: '@Alpha', audience: { kind: 'targets', targets: [] } },
+    ] }), { status: 200, headers: { 'content-type': 'application/json' } })))
+    const result = await fetchBoard()
+    expect(result.posts[0]?.body).toBe('@Alpha')
+    expect(result.posts.map(post => post.audience)).toEqual([
+      { kind: 'targets', targets: ['Alpha'] },
+      { kind: 'unavailable', reason: 'not_recorded' },
+      { kind: 'unavailable', reason: 'invalid_payload' },
+    ])
+  })
+})

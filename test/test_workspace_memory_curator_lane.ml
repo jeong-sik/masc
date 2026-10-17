@@ -671,13 +671,14 @@ let check_delivery ~base_path ~freshness expected =
   let access = Masc.Keeper_request_tool_access.create ~offered:[reader]
       ~deferred_names:[] ~loader_alive:false in
   let observation = Ledger.observe ~base_path in
-  let direct = Masc.Keeper_turn.For_testing.direct_turn_dynamic_context
+  let prepared = Masc.Keeper_direct_turn_context.prepare
     ~lane_updates:(Ok (`List [])) ~workspace_memory:observation
-    ~workspace_memory_access:(Some access)
     ~wiki_contents:Masc.Keeper_wiki_contents.Off
     ~current_task:Inputs.No_current_task ~held_task_skills:[] ~task_skill_surfaces:[]
     ~approval_authority_text:"" ~recent_direct_conversation_text:""
-    ~worktree_text:"" ~telemetry_feedback_text:"" ~turn_instructions_text:"" in
+    ~worktree_text:"" ~telemetry_feedback_text:"" ~turn_instructions_text:"" () in
+  let direct = Masc.Keeper_direct_turn_context.project prepared
+      ~workspace_memory_access:(Some access) in
   let autonomous = Prompt.build_prompt_preview ~current_task:Inputs.No_current_task
       ~observation:empty_world ~workspace_memory:observation
       ~workspace_memory_access:access () in

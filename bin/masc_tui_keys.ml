@@ -1664,6 +1664,21 @@ let bindings_memory_fact_detail =
 
 let memory_fact_detail_hints = hints_of_bindings bindings_memory_fact_detail
 
+(* The reading Activity's [Enter] opens on an event row. One event's evidence
+   scrolls under the cursor instead of the cursor moving rows, so it owns page
+   and edge keys the feed row has none of. *)
+let bindings_acting_evidence =
+  [ b Navigate "j/k" "scroll"
+  ; b Navigate "PgUp/PgDn" "page"
+  ; b Navigate "g / G" "top/bottom"
+      ~help:"jump to the first or last line of the event evidence"
+  ; b Act "Left / Esc" "back to events"
+      ~help:"close the snapshot and return to the live event feed"
+  ]
+  @ [ b Meta "Tab" "next"; b Meta "q" "quit" ]
+
+let acting_evidence_hints = hints_of_bindings bindings_acting_evidence
+
 (* One section per surface family; the strip's spelling names it. Keepers
    sub-modes collapse into the two sections an operator thinks in. *)
 let help_surfaces : (string * surface) list =
@@ -1990,6 +2005,8 @@ let help_sections_for_state (state : state) =
       Some ("Keeper voices", bindings)
     else if state.view = Runtime && Option.is_some state.runtime_detail_target then
       Some ("Runtime detail", runtime_detail_bindings)
+    else if state.view = Acting && Option.is_some state.acting_detail then
+      Some ("Event evidence", bindings_acting_evidence)
     else if state.view = Code && state.code_focus_file = Right_pane
             && state.code_history_open && not state.repository_changes_open then
       Some ("Code history", code_history_bindings)

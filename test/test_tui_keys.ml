@@ -1330,6 +1330,34 @@ let test_memory_facts_footer_hints_respect_split_threshold () =
   Alcotest.(check bool) "wide Memory facts footer includes Category pane toggle"
     true (has_sub "d:Category pane" wide)
 
+let test_acting_evidence_footer_hints_and_help_section () =
+  let has_sub needle text =
+    let n = String.length needle and len = String.length text in
+    let rec loop i =
+      i + n <= len && (String.sub text i n = needle || loop (i + 1))
+    in
+    loop 0
+  in
+  let hints = Masc_tui_keys.acting_evidence_hints in
+  Alcotest.(check bool) "acting evidence footer includes g / G:top/bottom"
+    true (has_sub "g / G:top/bottom" hints);
+  Alcotest.(check bool) "acting evidence footer includes Left / Esc:back to events"
+    true (has_sub "Left / Esc:back to events" hints);
+  let state = create_state ~workspace:"test" ~port:0 ~refresh_interval:2.0 () in
+  state.view <- Acting;
+  state.acting_detail <-
+    Some
+      { Masc_tui_acting.ae_at = 1.0
+      ; ae_event = Masc_tui_observer.Internal_agent_runs_changed
+      };
+  match Masc_tui_keys.help_sections_for_state state with
+  | (title, entries) :: _ ->
+      Alcotest.(check string) "Event evidence leads the help sheet while open"
+        ("Event evidence" ^ Masc_tui_keys.here_marker) title;
+      Alcotest.(check bool) "Event evidence help sheet documents g / G"
+        true (List.exists (fun (k, _) -> String.equal k "g / G") entries)
+  | [] -> Alcotest.fail "expected non-empty help sections"
+
 let () =
   Alcotest.run "masc_tui_keys"
     [ ( "table"
@@ -1353,6 +1381,8 @@ let () =
             `Quick test_workspace_activity_offers_no_row_search
         ; Alcotest.test_case "Memory facts footer hints respect split threshold"
             `Quick test_memory_facts_footer_hints_respect_split_threshold
+        ; Alcotest.test_case "Acting evidence footer hints and help section"
+            `Quick test_acting_evidence_footer_hints_and_help_section
         ;] )
     ; ( "two-press arms"
       , [ Alcotest.test_case "a loop turn without input keeps an arm" `Quick

@@ -279,6 +279,15 @@ val memory_fact_detail_hints : string
     help sheet cannot name different keys. The renderer leads the row with the
     window marker, which is not a key. *)
 
+val bindings_acting_evidence : binding list
+(** The Activity event-evidence reading opened by [Enter] on an event row.
+    Separate from {!for_surface} [Acting] because it scrolls a pinned event
+    snapshot instead of filtering or stepping the live feed. *)
+
+val acting_evidence_hints : string
+(** The Activity event-evidence footer hints, projected from
+    {!bindings_acting_evidence} so the footer and [?] agree. *)
+
 val keeper_detail_tab_bindings :
   Masc_tui_types.keeper_detail_tab -> binding list
 (** A detail tab's own keys. Separate from {!for_surface} because they are

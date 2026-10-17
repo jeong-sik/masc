@@ -16,4 +16,5 @@
   masc_tui_file_icon
   masc_tui_message_layout
   masc_tui_roster_pane
+  masc_tui_acting masc_tui_observer
   masc_tui_fetched masc_tui_keeper_chat_transcript))

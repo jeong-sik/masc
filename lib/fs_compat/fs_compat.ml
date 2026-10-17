@@ -1050,6 +1050,15 @@ let load_owned_regular_file ~ownership_root path =
   |> Result.map (Option.map (fun contents -> contents.content))
 ;;
 
+module Retention_directory = struct
+  include Fs_compat_internal.Retention_directory
+  let blocking_io = { run = (fun f ->
+    match execution_context () with
+    | Non_eio -> f ()
+    | Eio_fiber -> Eio_unix.run_in_systhread ~label:"retention-directory" f) }
+  let with_root ?(io = blocking_io) path f = with_root ~io path f
+end
+
 external open_owned_directory_root : string -> Unix.file_descr
   = "caml_masc_owned_directory_root"
 external open_owned_directory_child : Unix.file_descr -> string -> Unix.file_descr

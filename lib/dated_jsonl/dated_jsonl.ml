@@ -733,48 +733,20 @@ let find_latest_entry_in_file_result path f =
            Error (Io_error { operation = Read_file; path; detail }))
 ;;
 
-(* Only a removal that happened counts. A day file someone else already
-   removed is not counted; one that cannot be removed stays for the next
-   pass and is not counted either. *)
-let remove_day_file path =
-  match Unix.unlink path with
-  | () -> true
-  | exception Unix.Unix_error (_, _, _) -> false
+let prune_bound_directory ~location ~days directory =
+  if days <= 0 then 0
+  else
+    (* NDT-OK: the operator/store retention declaration owns this wall-clock cutoff. *)
+    let cutoff = Unix.gettimeofday () -. (float_of_int days *. Masc_time_constants.day) in
+    (* The writer owns the calendar spelling (#27143). *)
+    let cutoff_path = Store.dated_path location ~ts:cutoff in
+    Dated_jsonl_retention.prune
+      ~cutoff_month:cutoff_path.Store.month_dir
+      ~cutoff_day:(Filename.remove_extension cutoff_path.Store.day_file) directory
 
 let prune_unlocked t ~days =
   if days <= 0 then 0
-  else begin
-    let now = Unix.gettimeofday () in
-    let cutoff = now -. (float_of_int days *. Masc_time_constants.day) in
-    (* The cutoff has to name directories the same way the writer named them.
-       Rebuilding the format here is what lets prune delete by one calendar
-       while the writer files by another (#27143). *)
-    let cutoff_path = Store.dated_path t.location ~ts:cutoff in
-    let cutoff_month = cutoff_path.Store.month_dir in
-    let cutoff_day = Filename.remove_extension cutoff_path.Store.day_file in
-    let deleted = ref 0 in
-    let months = list_month_dirs t.base_dir in
-    List.iter (fun m ->
-      let month_path = Filename.concat t.base_dir m in
-      if String.compare m cutoff_month < 0 then begin
-        (* Entire month is before cutoff — remove all files *)
-        let day_files = list_day_files month_path in
-        List.iter (fun d ->
-          if remove_day_file (Filename.concat month_path d) then incr deleted
-        ) day_files;
-        (try Unix.rmdir month_path with Unix.Unix_error _ -> ())
-      end else if m = cutoff_month then begin
-        let day_files = list_day_files month_path in
-        List.iter (fun d ->
-          let day_num = Filename.remove_extension d in
-          if String.compare day_num cutoff_day < 0
-             && remove_day_file (Filename.concat month_path d)
-          then incr deleted
-        ) day_files
-      end
-    ) months;
-    !deleted
-  end
+  else Store.with_retention_location t.location (prune_bound_directory ~location:t.location ~days)
 
 let prune_to_max_bytes_unlocked t ~max_bytes ~keep_path =
   if max_bytes <= 0 then 0
@@ -1894,14 +1866,12 @@ let read_range_recent ?offset t ~since ~until n =
   filter_map_range_recent ?offset t ~since ~until n ~f:(fun json -> Some json)
 ;;
 
-(* The store's lock is taken on the fiber; the directory reads and unlinks
-   run on a system thread, so a pass over large day files does not hold the
-   domain (#42935). *)
+(* Keep the existing store mutex on the fiber. Descriptor operations offload
+   through Fs_compat, so neither directory reads nor unlinks block the domain. *)
 let prune t ~days =
   let mutex = Atomic.get t.mutex in
   Eio.Mutex.use_ro mutex (fun () ->
-    Eio_guard.run_in_systhread ~label:"dated-jsonl-prune" (fun () ->
-      prune_unlocked t ~days))
+    prune_unlocked t ~days)
 
 let days_to_keep ~operator_window_days store =
   match Store.retention store with
@@ -1911,18 +1881,25 @@ let days_to_keep ~operator_window_days store =
   | Store.Own_days read -> Some (read ())
   | Store.Kept -> None
 
-let prune_listed_stores root ~operator_window_days =
+let prune_listed_stores_bound root held ~operator_window_days =
   List.fold_left
     (fun pruned store ->
        match days_to_keep ~operator_window_days store with
        | None -> pruned
+       | Some days when days <= 0 -> pruned
        | Some days ->
-         List.fold_left
-           (fun pruned location -> pruned + prune (open_store location) ~days)
-           pruned
-           (Store.locations_on_disk root store))
-    0
-    Store.all
+         pruned + Store.fold_retention_directories root held store
+           ~f:(fun location directory ->
+             let t = open_store location in
+             Eio.Mutex.use_ro (Atomic.get t.mutex) (fun () ->
+               prune_bound_directory ~location ~days directory)))
+    0 Store.all
+
+let prune_listed_stores root ~operator_window_days =
+  match Store.with_retention_root root (fun held ->
+    prune_listed_stores_bound root held ~operator_window_days) with
+  | None -> 0
+  | Some count -> count
 
 (* Test hooks declared in the .mli — implementation lives in this
    module so tests can verify mutex-registry sharing without

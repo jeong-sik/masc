@@ -390,10 +390,15 @@ val prune : t -> days:int -> int
     Returns the number of files deleted.  Removes empty month directories. *)
 
 val prune_listed_stores : Store.root -> operator_window_days:int -> int
-(** Prune every store in {!Store.all} by its {!Store.retention}, in every
-    directory {!Store.locations_on_disk} finds. [operator_window_days] is
+(** Prune every store in {!Store.all} by its {!Store.retention}, through
+    descriptor-owned traversal of the declared geometry. [operator_window_days] is
     the workspace's window for [Operator_window] stores. Returns the number
     of day files deleted. *)
+
+val prune_listed_stores_bound :
+  Store.root -> Fs_compat.Retention_directory.t -> operator_window_days:int -> int
+(** Same declared stores/windows through the caller's already bound runtime
+    root, so a shared flat/dated pass never reopens its root by pathname. *)
 
 (* OCaml 5.3 emits warning 32 on this exported signature item under
    [warn-error=+a] even though the implementation and internal call sites are

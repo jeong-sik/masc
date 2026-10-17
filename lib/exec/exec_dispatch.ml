@@ -387,13 +387,40 @@ let strip_trailing_newlines s =
   let kept = keep n in
   if kept = n then s else String.sub s 0 kept
 
-(* NDT-OK: the wall clock enters only as budget arithmetic — how much of
-   the caller's timeout a substitution may still spend — never as a
-   scheduling decision of its own. *)
-let remaining_timeout ~started = function
-  | None -> None
-  (* NDT-OK: budget arithmetic on the wall clock, never a scheduling decision. *)
-  | Some budget -> Some (budget -. (Unix.gettimeofday () -. started))
+(* Recursive dispatch carries the caller's original budget and epoch together.
+   Relative seconds belong only to the existing checks and process calls; they
+   cannot be passed back to a worker as another invocation's budget. *)
+module Invocation_timeout : sig
+  type t
+
+  val create : timeout_sec:float option -> started:float -> t
+  val is_unlimited : t -> bool
+  val remaining : now:float -> t -> float option
+end = struct
+  type t =
+    | Unlimited
+    | Limited of { budget : float; started : float }
+
+  let create ~timeout_sec ~started =
+    match timeout_sec with
+    | None -> Unlimited
+    | Some budget -> Limited { budget; started }
+
+  let is_unlimited = function
+    | Unlimited -> true
+    | Limited _ -> false
+
+  let remaining ~now = function
+    | Unlimited -> None
+    | Limited { budget; started } -> Some (budget -. (now -. started))
+end
+
+let remaining_timeout timeout =
+  if Invocation_timeout.is_unlimited timeout then None
+  else
+    (* NDT-OK: preserve wall-clock budget arithmetic at the execution boundary;
+       an unlimited invocation does not read the clock here. *)
+    Invocation_timeout.remaining ~now:(Unix.gettimeofday ()) timeout
 
 (* A stage's own redirections travel with it, so a pipeline that names a file
    still runs on real process pipes. Dropping to the buffered chain instead
@@ -404,9 +431,8 @@ let host_pipeline_specs ?base_host_env stages =
   let rec loop acc = function
     | [] -> Some (List.rev acc)
     | Shell_ir.Simple simple :: rest ->
-        (* A stage carrying a substitution must evaluate it before argv
-           exists, which is [dispatch_simple]'s job — the native pipeline
-           declines and the chain fallback runs the stage. *)
+        (* [dispatch_pipeline_with_timeout] evaluates substitutions before
+           choosing a runner. Only already evaluated argv can be prepared here. *)
         if Shell_ir.has_command_substitution (Shell_ir.Simple simple)
         then None
         else
@@ -447,8 +473,8 @@ let sandbox_pipeline_specs stages =
   let rec loop pipeline_runner sandbox_target acc = function
     | [] -> Option.map (fun runner -> runner, List.rev acc) pipeline_runner
     | Shell_ir.Simple simple :: rest ->
-        (* As in [host_pipeline_specs]: a substitution is evaluated by
-           [dispatch_simple], not by a per-target pipeline runner. *)
+        (* As in [host_pipeline_specs], stage substitutions are evaluated
+           before native runner selection, not by the per-target runner. *)
         if Shell_ir.has_command_substitution (Shell_ir.Simple simple)
         then None
         else
@@ -476,25 +502,18 @@ let sandbox_pipeline_specs stages =
   in
   loop None None [] stages
 
-let rec dispatch_simple ?base_host_env ?timeout_sec ?stdin_content ?on_output_chunk
-    (* NDT-OK: the default clock only fixes the budget epoch — see
-       [remaining_timeout]; it never picks a branch. *)
-    ?(started = Unix.gettimeofday ())
-    (s : Shell_ir.simple) =
+let rec dispatch_simple_with_timeout ?base_host_env ?stdin_content ?on_output_chunk
+    ~(timeout : Invocation_timeout.t) (s : Shell_ir.simple) =
   if Shell_ir.has_variable_expansion (Shell_ir.Simple s) then
     unsupported_expansion_result ()
   else
-  (* NDT-OK: budget arithmetic only — see [remaining_timeout]; the clock
-     never picks a branch here. [~started] arrives from an enclosing
-     pipeline or sequence so every stage debits one deadline, not a fresh
-     copy of the caller's timeout. *)
   let s, subst_stderr =
-    eval_substitutions ?base_host_env ?timeout_sec ?stdin_content ~started s in
+    eval_substitutions ?base_host_env ?stdin_content ~timeout s in
   (* The parent runs in what remains of its budget after its substitutions
      (RFC shell-ir-typed-command-substitution §2.3: a child runs inside what
      remains of the parent's timeout, and the parent spends only what the
      children left). *)
-  let timeout_sec = remaining_timeout ~started timeout_sec in
+  let timeout_sec = remaining_timeout timeout in
   let on_output_chunk, emitted = tracked_output_callback on_output_chunk in
   let argv, env, cwd = process_spec_of_simple s in
   let result =
@@ -687,8 +706,8 @@ let rec dispatch_simple ?base_host_env ?timeout_sec ?stdin_content ?on_output_ch
   emit_split_stderr_captured_output on_output_chunk emitted ~child_stderr:subst_stderr
     { result with stderr = subst_stderr ^ result.stderr }
 
-(* Evaluating a substitution is dispatch: the child runs through [dispatch]
-   itself, so pipelines, sequences and nested substitutions inside one use
+(* Evaluating a substitution is dispatch: [dispatch_with_timeout] handles
+   pipelines, sequences and nested substitutions inside the child with
    the same semantics as any other IR, and the child inherits the parent's
    dispatch target through [Shell_ir.with_sandbox] (RFC
    shell-ir-typed-command-substitution §2.3 item 1).  The path jail covers
@@ -699,12 +718,13 @@ let rec dispatch_simple ?base_host_env ?timeout_sec ?stdin_content ?on_output_ch
    never streamed to the parent's [on_output_chunk]; child stderr joins the
    parent's stderr.  Nesting depth is bounded only by the shared ~50k-token
    parse budget (roughly 100KB of source), and the recursion
-   [eval_substitutions] -> [dispatch] -> [dispatch_simple] is not
+   [eval_substitutions] -> [dispatch_with_timeout] ->
+   [dispatch_simple_with_timeout] is not
    tail-recursive, so a maximally nested source can raise [Stack_overflow]
    rather than fail closed.  A depth counter is new scope and deliberately
    not wired here. *)
-and eval_substitutions ?base_host_env ?timeout_sec ?stdin_content ~started
-    (s : Shell_ir.simple) : Shell_ir.simple * string =
+and eval_substitutions ?base_host_env ?stdin_content
+    ~(timeout : Invocation_timeout.t) (s : Shell_ir.simple) : Shell_ir.simple * string =
   let child_stderr = Buffer.create 256 in
   let rec eval_arg = function
     | Shell_ir.Subst child ->
@@ -716,7 +736,7 @@ and eval_substitutions ?base_host_env ?timeout_sec ?stdin_content ~started
          saw. *)
       let child = Shell_ir.with_sandbox_cwd s.sandbox s.cwd child in
       let result =
-        match remaining_timeout ~started timeout_sec with
+        match remaining_timeout timeout with
         | Some remaining
           when (not (Float.is_finite remaining)) || remaining <= 0.0 ->
           (* [Process_eio] refuses a nonpositive timeout, so an exhausted
@@ -727,22 +747,20 @@ and eval_substitutions ?base_host_env ?timeout_sec ?stdin_content ~started
           ; stderr =
               "command substitution exhausted the parent's timeout budget"
           }
-        | remaining ->
-            (* [~started] rides along with the remaining seconds: a child
-               that is itself a sequence, or holds several substitutions of
-               its own, spends the one deadline rather than a fresh copy of
-               this stage's remaining time per child (RFC
-               shell-ir-typed-command-substitution §2.3 item 4). The child
-               also reads the same [stdin_content] the parent will — in
-               bash the two share one file descriptor and race for it;
-               handing each the same bytes is the deterministic reading of
-               that. *)
-            dispatch
+        | None | Some _ ->
+            (* Keep the original budget and epoch together through nested
+               substitutions, sequences and pipelines. Passing the checked
+               remainder with the original epoch would debit elapsed time
+               again in the child (RFC shell-ir-typed-command-substitution
+               §2.3 item 4). The child also reads the same [stdin_content]
+               the parent will — in bash the two share one file descriptor
+               and race for it; handing each the same bytes is the
+               deterministic reading of that. *)
+            dispatch_with_timeout
               ?base_host_env
-              ?timeout_sec:remaining
               ?stdin_content
               ?on_output_chunk:None
-              ~started
+              ~timeout
               child
       in
       Buffer.add_string child_stderr result.stderr;
@@ -758,22 +776,16 @@ and eval_substitutions ?base_host_env ?timeout_sec ?stdin_content ~started
   let args = List.map eval_arg s.Shell_ir.args in
   ({ s with Shell_ir.env = env; args }, Buffer.contents child_stderr)
 
-(* --- pipeline + entry point (mutually recursive with dispatch_simple) --- *)
+(* --- pipeline + entry point (mutually recursive with simple dispatch) --- *)
 
 (* TEL-OK: this lower-level Shell IR dispatcher is wrapped by Execute/keeper
    telemetry at the action boundary; it preserves output delivery but does not
    record action-level telemetry directly. *)
-and dispatch_pipeline ?base_host_env ?timeout_sec ?stdin_content
-    ?on_output_chunk
-    (* NDT-OK: budget arithmetic only — [started] fixes the one deadline
-       that stage substitutions and every stage debit; never a branch. *)
-    ?(started = Unix.gettimeofday ()) stages =
+and dispatch_pipeline_with_timeout ?base_host_env ?stdin_content
+    ?on_output_chunk ~(timeout : Invocation_timeout.t) stages =
   if List.exists Shell_ir.has_variable_expansion stages then
     unsupported_expansion_result ()
   else
-  (* NDT-OK: [started] fixes one deadline for the stage substitutions below
-     and every stage that follows — budget arithmetic, never a scheduling
-     decision. *)
   let subst_stderr = Buffer.create 256 in
   (* A substitution must be evaluated before its stage's argv exists.
      Evaluating here — ahead of choosing the native runners — keeps a
@@ -782,13 +794,13 @@ and dispatch_pipeline ?base_host_env ?timeout_sec ?stdin_content
      chain, where a producer that only stops when its reader closes ([yes
      $(printf x) | head -1]) never stops. The evaluated stage is literal,
      so the native runners accept it. A [Pipeline]/[Sequence] stage is left
-     as is: it declines the native runners anyway and the chain's
-     [dispatch_simple] evaluates it under this same [started]. *)
+     as is: it declines the native runners and is rejected if reached by the
+     chain, which does not spawn a subshell. *)
   let eval_stage (stage : Shell_ir.t) =
     match stage with
     | Shell_ir.Simple s when Shell_ir.has_command_substitution stage ->
         let s, child_stderr =
-          eval_substitutions ?base_host_env ?timeout_sec ?stdin_content ~started s
+          eval_substitutions ?base_host_env ?stdin_content ~timeout s
         in
         Buffer.add_string subst_stderr child_stderr;
         Shell_ir.Simple s
@@ -798,10 +810,9 @@ and dispatch_pipeline ?base_host_env ?timeout_sec ?stdin_content
   let stages = List.map eval_stage stages in
   (* The pipeline runs in what its substitutions left of the caller's
      timeout; an exhausted budget answers as the timeout it is, the same
-     rule a simple command follows after its children. [timeout_sec] itself
-     stays whole: the chain passes it with [~started] and the native runner
-     takes [remaining], so neither path debits the deadline twice. *)
-  let remaining = remaining_timeout ~started timeout_sec in
+     rule a simple command follows after its children. The chain keeps the
+     original [timeout]; only the native process runner takes [remaining]. *)
+  let remaining = remaining_timeout timeout in
   let budget_refusal =
     match remaining with
     | Some left
@@ -872,12 +883,11 @@ and dispatch_pipeline ?base_host_env ?timeout_sec ?stdin_content
                          decomposed_stage_callback ~is_final s on_output_chunk
                        in
                        let stage_result =
-                         dispatch_simple
+                         dispatch_simple_with_timeout
                            ?base_host_env
-                           ?timeout_sec
                            ?on_output_chunk:stage_on_output_chunk
                            ~stdin_content:prev_stdout
-                           ~started
+                           ~timeout
                            s
                        in
                        let stage_streamed =
@@ -946,11 +956,10 @@ and dispatch_pipeline ?base_host_env ?timeout_sec ?stdin_content
                             on_output_chunk
                         in
                         let first_result =
-                          dispatch_simple
+                          dispatch_simple_with_timeout
                             ?base_host_env
-                            ?timeout_sec
                             ?on_output_chunk:first_on_output_chunk
-                            ~started
+                            ~timeout
                             s
                         in
                         let first_streamed =
@@ -1007,12 +1016,10 @@ and dispatch_pipeline ?base_host_env ?timeout_sec ?stdin_content
    not, exactly as a shell reads them. Whatever ran last decides, so a run of
    connectors reads left to right without any precedence of its own. Output
    from every command that ran is concatenated in the order it ran. *)
-and dispatch_sequence ?base_host_env ?timeout_sec ?stdin_content ?on_output_chunk
-    (* NDT-OK: budget arithmetic only — the epoch the timeout is debited
-       against, as in [dispatch_simple]. *)
-    ?(started = Unix.gettimeofday ()) ~head ~tail () =
+and dispatch_sequence_with_timeout ?base_host_env ?stdin_content ?on_output_chunk
+    ~(timeout : Invocation_timeout.t) ~head ~tail () =
   let run ir =
-    dispatch ?base_host_env ?timeout_sec ?stdin_content ?on_output_chunk ~started ir
+    dispatch_with_timeout ?base_host_env ?stdin_content ?on_output_chunk ~timeout ir
   in
   let took_the_branch connector (status : Unix.process_status) =
     match connector, status with
@@ -1038,34 +1045,56 @@ and dispatch_sequence ?base_host_env ?timeout_sec ?stdin_content ?on_output_chun
   in
   step (run head) tail
 
-and dispatch ?base_host_env ?timeout_sec ?stdin_content ?on_output_chunk ?started
+and dispatch_with_timeout ?base_host_env ?stdin_content ?on_output_chunk
+    ~(timeout : Invocation_timeout.t) (ir : Shell_ir.t) =
+  if Shell_ir.has_variable_expansion ir then unsupported_expansion_result ()
+  else
+  match ir with
+  | Shell_ir.Simple s ->
+    dispatch_simple_with_timeout
+      ?base_host_env ?stdin_content ?on_output_chunk ~timeout s
+  | Pipeline stages ->
+    dispatch_pipeline_with_timeout
+      ?base_host_env ?stdin_content ?on_output_chunk ~timeout stages
+  | Sequence { head; tail } ->
+    dispatch_sequence_with_timeout
+      ?base_host_env ?stdin_content ?on_output_chunk ~timeout ~head ~tail ()
+
+(* The public optional arguments are decoded once. Direct simple/pipeline calls
+   retain their default epoch capture before variable rejection; general dispatch
+   still rejects variables before reaching any default clock read. *)
+let dispatch_simple ?base_host_env ?timeout_sec ?stdin_content ?on_output_chunk
+    (* NDT-OK: this default captures the caller's wall-clock budget epoch. *)
+    ?(started = Unix.gettimeofday ()) (s : Shell_ir.simple) =
+  let timeout = Invocation_timeout.create ~timeout_sec ~started in
+  dispatch_simple_with_timeout
+    ?base_host_env ?stdin_content ?on_output_chunk ~timeout s
+
+let dispatch_pipeline ?base_host_env ?timeout_sec ?stdin_content ?on_output_chunk
+    (* NDT-OK: this default captures the caller's wall-clock budget epoch. *)
+    ?(started = Unix.gettimeofday ()) stages =
+  let timeout = Invocation_timeout.create ~timeout_sec ~started in
+  dispatch_pipeline_with_timeout
+    ?base_host_env ?stdin_content ?on_output_chunk ~timeout stages
+
+let dispatch ?base_host_env ?timeout_sec ?stdin_content ?on_output_chunk ?started
     (ir : Shell_ir.t) =
   if Shell_ir.has_variable_expansion ir then unsupported_expansion_result ()
   else
   match ir with
   | Shell_ir.Simple s ->
     dispatch_simple
-      ?base_host_env
-      ?timeout_sec
-      ?stdin_content
-      ?on_output_chunk
-      ?started
-      s
+      ?base_host_env ?timeout_sec ?stdin_content ?on_output_chunk ?started s
   | Pipeline stages ->
     dispatch_pipeline
-      ?base_host_env
-      ?timeout_sec
-      ?stdin_content
-      ?on_output_chunk
-      ?started
-      stages
+      ?base_host_env ?timeout_sec ?stdin_content ?on_output_chunk ?started stages
   | Sequence { head; tail } ->
-    dispatch_sequence
-      ?base_host_env
-      ?timeout_sec
-      ?stdin_content
-      ?on_output_chunk
-      ?started
-      ~head
-      ~tail
-      ()
+    let started =
+      match started with
+      | Some started -> started
+      (* NDT-OK: preserve the sequence entry's wall-clock budget epoch. *)
+      | None -> Unix.gettimeofday ()
+    in
+    let timeout = Invocation_timeout.create ~timeout_sec ~started in
+    dispatch_sequence_with_timeout
+      ?base_host_env ?stdin_content ?on_output_chunk ~timeout ~head ~tail ()

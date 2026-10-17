@@ -211,6 +211,66 @@ let test_substitution_sequence_shares_deadline () =
                ^ Float.to_string second)
       | _ -> fail "expected exactly one observed child timeout")
 
+let test_substitution_debits_prior_elapsed_time_once () =
+  (* Start beyond half of an explicit budget, while its original deadline
+     remains far ahead. Double-debiting that elapsed time refuses a child
+     before spawn and substitutes empty stdout, even though the parent can
+     still run. Fast host commands expose the lost value without a sleep or
+     waiting for the process-timeout observer (which fires only on expiry). *)
+  let child value = Shell_ir.Simple (simple "printf" [ "%s"; value ]) in
+  let subst value = Shell_ir.Subst (child value) in
+  let printf args =
+    Shell_ir.Simple { (simple "printf" []) with Shell_ir.args = args }
+  in
+  let cases =
+    [ ("argv", printf [ lit "<%s>"; subst "argv-value" ], "<argv-value>")
+    ; ( "env"
+      , Shell_ir.Simple
+          { (simple "printenv" [ "MASC_ELAPSED_SUBST_VALUE" ]) with
+            Shell_ir.env = [ "MASC_ELAPSED_SUBST_VALUE", subst "env-value" ]
+          }
+      , "env-value\n" )
+    ; ( "nested and successive argv"
+      , printf
+          [ lit "<%s>|<%s>"
+          ; Shell_ir.Subst (printf [ lit "%s"; subst "nested-value" ])
+          ; subst "second-value"
+          ]
+      , "<nested-value>|<second-value>" )
+    ]
+  in
+  with_process_env (fun () ->
+    List.iter
+      (fun (label, ir, expected) ->
+        (* Fixture inputs, not a timing tolerance: three quarters of the
+           original duration are already spent, leaving a generous quarter
+           for these short commands. No elapsed work is simulated by sleep. *)
+        let timeout_sec = 1024.0 in
+        let before = Unix.gettimeofday () in
+        let started = before -. (timeout_sec *. 0.75) in
+        let result = Exec_dispatch.dispatch ~timeout_sec ~started ir in
+        let after = Unix.gettimeofday () in
+        let remaining_before = timeout_sec -. (before -. started) in
+        let remaining_after = timeout_sec -. (after -. started) in
+        Printf.printf
+          "elapsed substitution %s: original %.0fs; remaining at entry %.6fs, after dispatch %.6fs\n%!"
+          label timeout_sec remaining_before remaining_after;
+        if after < before
+           || remaining_before <= 0.0
+           || remaining_before >= timeout_sec /. 2.0
+           || remaining_after <= 0.0
+        then fail (label ^ ": fixture did not retain the original deadline");
+        if result.Exec_dispatch.status <> Unix.WEXITED 0 then
+          fail (label ^ ": parent did not complete inside its original deadline");
+        if result.stdout <> expected then
+          fail
+            (Printf.sprintf
+               "%s substitution lost output before the original deadline: expected %S, got %S (stderr %S)"
+               label expected result.stdout result.stderr);
+        if result.stderr <> "" then
+          fail (label ^ ": successful substitution produced an error: " ^ result.stderr))
+      cases)
+
 let test_substitution_inherits_parent_cwd () =
   (* PR review #34929: a substitution child with no cwd of its own inherits
      the parent's — [eval_substitutions] hands every [Subst] child through
@@ -282,6 +342,7 @@ let test_child_stderr_reaches_stream_callback () =
     | _ -> fail "expected exactly one stderr chunk — the child's diagnostics")
 
 let () =
+  test_substitution_debits_prior_elapsed_time_once ();
   test_roundtrip ();
   test_strips_trailing_newlines ();
   test_one_argv_element_no_resplit ();

@@ -668,34 +668,51 @@ let test_followup_matches_committed_answer_input_tool_rows () =
     ~keeper_turn_id:17 ~answer_source_ids:[source] ();
   Keeper_tool_call_log.set_turn_context ~cell:interleaved ~trace_id:"other-trace"
     ~keeper_turn_id:18 ~answer_source_ids:[other_source] ();
-  let emit ~cell ~keeper_name ~execution_id ~wire_outcome =
+  let invocation () = Agent_core.Tool_contract.Invocation.create
+      ~tool_use_id:"repeated-provider-id" ~turn:1
+      ~schedule:{planned_index=0;batch_index=0;batch_size=1;execution_mode=Serial}
+      ~completion:Agent_core.Tool_contract.Continue_after_success in
+  let emit ~invocation ~cell ~keeper_name ~execution_id ~wire_outcome =
     let context = Keeper_tool_call_log_context.get_turn_context_record ~cell () in
     Keeper_tool_call_log.log_call ~keeper_name ~tool_name:"Read"
       ~input:(`Assoc []) ~output_text:"private result" ~duration_ms:1. ~wire_outcome
       ~execution_id:(Ids.Execution_id.of_string execution_id)
+      ~physical_execution_id:(Keeper_tool_call_log.invocation_execution_id ~invocation)
       ?trace_id:context.trace_id ?keeper_turn_id:context.keeper_turn_id
       ~answer_source_ids:context.answer_source_ids ~on_committed:(fun () -> ()) () in
-  emit ~cell:original ~keeper_name ~execution_id:"original-tool" ~wire_outcome:Tool_result.Ok;
-  emit ~cell:interleaved ~keeper_name ~execution_id:"other-answer-time" ~wire_outcome:Tool_result.Ok;
-  emit ~cell:original ~keeper_name:"beta" ~execution_id:"other-keeper" ~wire_outcome:Tool_result.Ok;
+  let original_invocation = invocation () in
+  emit ~invocation:original_invocation ~cell:original ~keeper_name ~execution_id:"original-tool" ~wire_outcome:Tool_result.Ok;
+  emit ~invocation:(invocation ()) ~cell:interleaved ~keeper_name ~execution_id:"other-answer-time" ~wire_outcome:Tool_result.Ok;
+  emit ~invocation:(invocation ()) ~cell:original ~keeper_name:"beta" ~execution_id:"other-keeper" ~wire_outcome:Tool_result.Ok;
   let observed = actions () in
   check int "only the original canonical answer input supplies a Tool result" 1 observed.observed_count;
   (match observed.latest with
    | Some action ->
-       check string "the physical invocation survives interleaved context" "original-tool" action.execution_id;
+       check string "the original logical identity survives interleaved context" "original-tool" action.execution_id;
+       check string "the physical invocation survives repeated access"
+         (Ids.Execution_id.to_string (Keeper_tool_call_log.invocation_execution_id ~invocation:original_invocation))
+         action.physical_execution_id;
        check string "the original input turn remains exact" "original-trace" action.trace_id;
        check int "the original Keeper turn remains exact" 17 action.keeper_turn_id
    | None -> fail "physical Tool identity was lost");
-  emit ~cell:original ~keeper_name ~execution_id:"failed-tool" ~wire_outcome:Tool_result.Error;
+  let failed_invocation = invocation () in
+  emit ~invocation:failed_invocation ~cell:original ~keeper_name ~execution_id:"failed-tool" ~wire_outcome:Tool_result.Error;
   check int "observed errors are results, not proof of successful effects" 2 (actions ()).observed_count;
+  emit ~invocation:(invocation ()) ~cell:original ~keeper_name ~execution_id:"failed-tool" ~wire_outcome:Tool_result.Ok;
+  check int "a fresh recheck of one logical node is a distinct physical result" 3 (actions ()).observed_count;
+  Keeper_tool_call_log.log_call ~keeper_name ~tool_name:"native-operand"
+    ~input:(`Assoc []) ~output_text:"logical value" ~duration_ms:0. ~wire_outcome:Tool_result.Ok
+    ~execution_id:(Ids.Execution_id.of_string "logical-only")
+    ~answer_source_ids:[source] ~on_committed:(fun () -> ()) ();
+  check int "a logical-only row neither invents a call nor hides known physical results" 3 (actions ()).observed_count;
   check int "observing Tool rows does not enqueue an answer again" 0
     (List.length (pending_asks ~base_path ~keeper_name));
-  emit ~cell:original ~keeper_name ~execution_id:"failed-tool" ~wire_outcome:Tool_result.Error;
+  emit ~invocation:failed_invocation ~cell:original ~keeper_name ~execution_id:"failed-tool" ~wire_outcome:Tool_result.Error;
   check bool "duplicate execution evidence cannot become a confident count" true
     (Result.is_error (observe ()).tool_actions);
   let path = Keeper_tool_call_log.current_log_path () |> Option.get in
   Fs_compat.save_file path "";
-  emit ~cell:interleaved ~keeper_name ~execution_id:"replacement-unrelated" ~wire_outcome:Tool_result.Ok;
+  emit ~invocation:(invocation ()) ~cell:interleaved ~keeper_name ~execution_id:"replacement-unrelated" ~wire_outcome:Tool_result.Ok;
   check int "ledger shrink rebuilds source membership instead of inheriting stale offsets" 0
     (actions ()).observed_count;
   Keeper_tool_call_log.init ~base_path:(Filename.concat base_path "other-workspace") ();

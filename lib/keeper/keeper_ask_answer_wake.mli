@@ -28,6 +28,7 @@ val deliver :
 
 type tool_action = {
   execution_id : string;
+  physical_execution_id : string;
   trace_id : string;
   keeper_turn_id : int;
   tool_name : string;
@@ -41,7 +42,11 @@ type tool_actions = {
 }
 (** Committed Tool result observations in turns whose input contains this exact
     canonical answer. Includes failed results; proves neither effect success nor
-    that the answer caused the action. No start/unfinished/native action claim. *)
+    that the answer caused the action. Physical invocation identity determines
+    uniqueness; multiple fresh rechecks may share a logical [execution_id].
+    Rows without physical identity do not supply an observation. Malformed or
+    duplicate physical identities leave evidence unavailable. No start or
+    unfinished native-action claim. *)
 
 type followup = {
   answered_at : float;

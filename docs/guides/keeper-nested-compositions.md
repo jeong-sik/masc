@@ -237,6 +237,11 @@ and expanded inline leaves admit static read-only ordinary Tool contracts and th
 owned-job launch producer with its Serial durable ownership. An async child can
 start its own job, wait for its original result and export its complete output.
 Fresh continuation reuses the settled launch instead of dispatching it again.
+The producer journal also retains the original answer-input observation frame
+through fresh continuation. Logical node IDs remain stable, while fresh Tool
+result rechecks carry distinct physical invocation IDs. See
+[Ask answer follow-up](keeper-ask-answer-recovery.md#preserve-the-answer-through-async-composition-continuation)
+for source ownership, unknown evidence and the Before/After scenario scope.
 An unfinished launch without proven replay authority remains refused as above.
 General resource-aware effect admission remains a separate implementation unit.
 

@@ -18043,6 +18043,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                     @ (match at_latest with
                       | None -> []
                       | Some action -> ["latest_execution_id", `String action.ata_execution_id;
+                          "latest_physical_execution_id", `String action.ata_physical_execution_id;
                           "latest_trace_id", `String action.ata_trace_id;
                           "latest_keeper_turn_id", `Int action.ata_keeper_turn_id;
                           "latest_tool_result_recorded_at", `Float action.ata_recorded_at])) in

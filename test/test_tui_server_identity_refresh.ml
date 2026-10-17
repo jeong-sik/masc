@@ -1323,7 +1323,7 @@ let test_answer_followup_retains_current_source_observations () =
     af_turn_started_at=Some 201.;af_turn_finished_at=None;af_queue_settled_at=None;
     af_queue_cancelled_at=None;af_evidence_complete=true;
     af_tool_actions=Decode.Ask_tools_observed {at_count=1;at_first_recorded_at=Some 202.;
-      at_latest=Some {ata_execution_id="original-tool";ata_trace_id="original-trace";
+      at_latest=Some {ata_execution_id="original-tool";ata_physical_execution_id="original-call";ata_trace_id="original-trace";
         ata_keeper_turn_id=17;ata_tool="Read";ata_recorded_at=202.};at_evidence_current=true}} in
   ignore (take_ask_followup state request owner (Ok observed));
   Alcotest.(check bool) "original observation survives without releasing the POST gate" true

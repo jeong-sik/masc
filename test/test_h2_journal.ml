@@ -97,7 +97,7 @@ let make_plan ?(changed_input = false) () =
        ~input:consumer_input ()] |> require "valid canonical plan"
 
 type prepared = { draft : Draft.t; journal : Journal.t; source : Journal.source }
-let prepare ?plan base_path =
+let prepare ?observation ?plan base_path =
   let capability_surface = surface base_path in
   let plan = Option.value plan ~default:(make_plan ()) in
   let draft = Draft.prepare ~base_path ~capability_surface ~keeper_name:keeper
@@ -114,7 +114,7 @@ let prepare ?plan base_path =
     ; parent_tool_use_id = Agent_core.Tool_contract.Invocation.tool_use_id invocation
     ; source_turn = Agent_core.Tool_contract.Invocation.turn invocation
     ; source_task_id = Some "original-source-task"; producer=Journal.Prepared } in
-  {draft; source; journal = Journal.prepare ~base_path source |> journal_value "prepare journal"}
+  {draft; source; journal = Journal.prepare ?observation ~base_path source |> journal_value "prepare journal"}
 let context (source : Journal.source) =
   ["composition_tool", `String composition_tool;
    "composition_run_id", `String (Plan.Composition_run_id.to_string source.composition_run_id);
@@ -339,6 +339,35 @@ let journal_path base_path composition_run_id =
   let filename = Plan.Composition_run_id.to_string composition_run_id ^ ".jsonl" in
   match List.filter (fun path -> Filename.basename path = filename) (regular_files directory) with
   | [path] -> path | _ -> fail "one actual run journal file"
+
+let test_source_observation_is_frozen_at_creation () = with_workspace (fun _env _sw base_path ->
+  let first : Journal.source_observation = {trace_id=Some (Keeper_id.Trace_id.of_string "original-trace" |> require "original trace");
+    session_id=Some "original-session";keeper_turn_id=Some 17;
+    answer_source_ids=["original-answer-input"]} in
+  let later : Journal.source_observation = {trace_id=Some (Keeper_id.Trace_id.of_string "later-trace" |> require "later trace");
+    session_id=Some "later-session";keeper_turn_id=Some 29;
+    answer_source_ids=["later-answer-input"]} in
+  let prepared = prepare ~observation:first base_path in
+  let path = journal_path base_path prepared.source.composition_run_id in
+  let original_bytes = read path in
+  let replay = Journal.prepare ~observation:later ~base_path prepared.source
+      |> journal_value "reopen original producer source" in
+  let fresh = Journal.load ~base_path ~keeper_name:keeper
+      ~composition_run_id:prepared.source.composition_run_id |> journal_value "fresh source load" in
+  List.iter (fun journal ->
+    check bool "every reader retains the first original observation" true
+      (Journal.source_observation journal=Some first);
+    check bool "observations do not replace execution source authority" true
+      (Journal.same_source prepared.source (Journal.source journal))) [prepared.journal;replay;fresh];
+  check string "replay does not rewrite the original source prefix" original_bytes (read path);
+  let unknown = prepare base_path in
+  let path = journal_path base_path unknown.source.composition_run_id in
+  let unknown_bytes = read path in
+  let reopened = Journal.prepare ~observation:later ~base_path unknown.source
+      |> journal_value "reopen source without an observation" in
+  check bool "an uncaptured original cannot borrow a later answer" true
+    (Journal.source_observation reopened=None);
+  check string "unknown observation stays unknown without mutating the source" unknown_bytes (read path))
 let test_unavailable_evidence () =
   List.iter (fun damage -> with_workspace (fun _env sw base_path ->
     let prepared = prepare base_path in
@@ -541,18 +570,25 @@ let test_public_run_resume_keeps_original_task () = with_workspace (fun env sw b
   Fun.protect ~finally:Call_log.reset_for_testing @@ fun () ->
   Call_log.init ~base_path ();
   let config = Workspace.default_config base_path in
-  let meta = Masc_test_deps.meta_of_json_fixture (`Assoc ["name", `String keeper; "activation_mode", `String "manual"])
+  let meta = Masc_test_deps.meta_of_json_fixture (`Assoc ["name", `String keeper; "activation_mode", `String "manual";
+      "trace_id", `String "original-trace"])
       |> require "public keeper metadata" in
+  let current_meta = ref meta in
   let ctx_snapshot = Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"public continuation fixture" in
   let publication_recovery : Masc.Keeper_publication_recovery_availability.turn_context =
     {provider = Masc.Keeper_publication_recovery_availability.non_runtime_provider; keeper_name = keeper} in
   let cell = Call_log.create_turn_ctx_cell () in
-  Call_log.set_turn_context ~cell ~agent_name:keeper ~turn:42 ~keeper_turn_id:1 ~task_id:"task-A" ();
-  let tools = Tools.make_tools ~capability_surface:(surface base_path) ~config ~meta ~publication_recovery
+  let original_answer = Masc.Keeper_ask.answer_source_id ~ask_id:"original-question" ~answered_at:100.
+      |> Option.get in
+  let later_answer = Masc.Keeper_ask.answer_source_id ~ask_id:"later-question" ~answered_at:200.
+      |> Option.get in
+  Call_log.set_turn_context ~cell ~agent_name:keeper ~turn:42 ~keeper_turn_id:1 ~task_id:"task-A"
+    ~trace_id:"original-trace" ~session_id:"original-session" ~answer_source_ids:[original_answer] ();
+  let tools () = Tools.make_tools ~capability_surface:(surface base_path) ~config ~meta:!current_meta ~publication_recovery
       ~ctx_snapshot ~turn_ctx_cell:cell ~clock:(Eio.Stdenv.clock env) () in
   let invoke ~turn ~id name input =
     let tool = List.find_map (fun (tool, _, _) ->
-        if tool.Agent_core.Tool.schema.name = name then Some tool else None) tools
+        if tool.Agent_core.Tool.schema.name = name then Some tool else None) (tools ())
         |> function Some tool -> tool | None -> fail ("public control absent: " ^ name) in
     let invocation = Agent_core.Tool_contract.Invocation.create ~tool_use_id:id ~turn
         ~schedule:{planned_index = 0; batch_index = 0; batch_size = 1; execution_mode = Serial}
@@ -581,7 +617,10 @@ let test_public_run_resume_keeps_original_task () = with_workspace (fun env sw b
   let first_data = match first_entry.status with Done {ok = true; data = Some data; _} -> data | _ -> fail "public initial run failed" in
   let first_execution = first_data |> member "execution_artifact" |> decode_reference |> document base_path in
   let original_leaf = match first_execution |> member "nodes" |> to_list with [row] -> row | _ -> fail "one public leaf" in
-  Call_log.set_turn_context ~cell ~agent_name:keeper ~turn:43 ~keeper_turn_id:2 ~task_id:"task-B" ();
+  current_meta := {meta with runtime={meta.runtime with
+    trace_id=Keeper_id.Trace_id.of_string "later-trace" |> require "later current trace"}};
+  Call_log.set_turn_context ~cell ~agent_name:keeper ~turn:43 ~keeper_turn_id:2 ~task_id:"task-B"
+    ~trace_id:"later-trace" ~session_id:"later-session" ~answer_source_ids:[later_answer] ();
   let resumed = invoke ~turn:43 ~id:"public-resume-in-task-B" Draft.run_tool_name
       (`Assoc ["sha256", `String draft_reference.sha256; "resume_run_id", `String original_run]) in
   check string "public resume keeps original run UUID" original_run (resumed |> member "composition_run_id" |> to_string);
@@ -605,6 +644,27 @@ let test_public_run_resume_keeps_original_task () = with_workspace (fun env sw b
   let rows = Call_log.read_recent ~keeper_name:keeper () |> require "canonical public observations" in
   let leaves = List.filter (fun row -> member "tool" row = `String "keeper_lane_status") rows in
   check int "public resume does not dispatch or observe a fresh leaf" 1 (List.length leaves);
+  List.iter (fun row ->
+    check bool "the real original leaf carries a physical invocation identity" true
+      (match member "physical_execution_id" row with `String id -> id<>"" | _ -> false);
+    check_json "the original leaf keeps the original answer input" (`List [`String original_answer])
+      (member "answer_source_ids" row);
+    check_json "the original leaf keeps its trace" (`String "original-trace") (member "trace_id" row);
+    check_json "the original leaf keeps its physical Keeper turn" (`Int 1) (member "keeper_turn_id" row)) leaves;
+  let inline_preview = invoke ~turn:43 ~id:"prepare-inline-observation" Draft.prepare_tool_name
+      (match request with `Assoc fields -> `Assoc (("execution", `String "inline")::fields)
+       | _ -> fail "inline recipe object") in
+  let inline_reference = inline_preview |> member "draft" |> decode_reference in
+  let inline = invoke ~turn:43 ~id:"inline-observation" Draft.run_tool_name
+      (`Assoc ["sha256",`String inline_reference.sha256]) in
+  let inline_run = member "composition_run_id" inline in
+  Call_log.flush_now ();
+  let inline_rows = Call_log.read_recent ~keeper_name:keeper () |> require "inline result observations"
+      |> List.filter (fun row -> member "tool" row=`String "keeper_lane_status"
+          && member "composition_run_id" row=inline_run) in
+  check int "inline recipe retains one physical leaf observation" 1 (List.length inline_rows);
+  List.iter (fun row -> check_json "inline leaf uses its own current answer input"
+      (`List [`String later_answer]) (member "answer_source_ids" row)) inline_rows;
   let projected = Masc.Keeper_composition_completion_result.read ~base_path ~keeper_name:keeper completion
       |> Masc.Keeper_composition_completion_result.to_json in
   check_json "public wake carries task A" (`String "task-A") (projected |> member "source" |> member "source_task_id"))
@@ -1195,6 +1255,7 @@ let () = match Array.to_list Sys.argv with
       ["continuation", [
         test_case "restart reuses completed data and occurrence" `Quick test_restart_reuses_completed;
         test_case "source and plan identity refuse unsafe dispatch" `Quick test_source_and_plan_identity;
+        test_case "original source observations freeze once without late backfill" `Quick test_source_observation_is_frozen_at_creation;
         test_case "unavailable original evidence refuses dispatch" `Quick test_unavailable_evidence;
         test_case "canonical ownership, concurrent resume and stale worker" `Quick test_owned_transport_and_race;
         test_case "unknown, post-effect and deferred results are not replayed" `Quick test_unproven_outcomes_refuse_replay;

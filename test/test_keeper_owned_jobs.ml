@@ -188,8 +188,9 @@ let with_fixture ?fixture_base_path ?continuation_channel f =
         [fixture.daemon_path;fixture.control_path;Filename.concat base_path "transport-events.jsonl"];
       fail "public owned job scenario did not finish; see process and transport evidence")
 
-let set_source fixture ~task_id ~turn =
+let set_source ?(answer_source_ids = []) fixture ~task_id ~turn =
   Call_log.set_turn_context ~cell:fixture.cell ~agent_name:keeper ~task_id
+    ~answer_source_ids
     ~turn ~keeper_turn_id:turn
     ~trace_id:(Keeper_id.Trace_id.to_string fixture.meta.runtime.trace_id) ()
 let control fixture json = write fixture.control_path (Yojson.Safe.to_string json)
@@ -3176,11 +3177,16 @@ let test_completion_hint_resumes_original_dag () = with_fixture @@ fun env _init
      "program_creates",`Int (effect_count fixture "create");"program_starts",`Int (effect_count fixture "start")]))
 
 
-let test_prepared_job_launch_and_continuation () = with_fixture @@ fun env _initialize fixture ->
+let test_prepared_job_launch_and_continuation ~launch_after_result () = with_fixture @@ fun env _initialize fixture ->
   with_environment ["MASC_CONFIG_DIR",None] @@ fun () ->
   let module Wake = Masc.Keeper_composition_continuation_wake in
   let module Async = Masc.Keeper_msg_async in
-  set_source fixture ~task_id:"task-A" ~turn:41;
+  let original_answer = Masc.Keeper_ask.answer_source_id ~ask_id:"original-prepared-question" ~answered_at:100.
+      |> Option.get in
+  let later_answer = Masc.Keeper_ask.answer_source_id ~ask_id:"later-prepared-question" ~answered_at:200.
+      |> Option.get in
+  let original_trace = Keeper_id.Trace_id.to_string fixture.meta.runtime.trace_id in
+  set_source ~answer_source_ids:[original_answer] fixture ~task_id:"task-A" ~turn:41;
   Call_log.init ~base_path:fixture.base_path ();
   let recipe = `Assoc ["execution",`String "async";"nodes",`List
       [`Assoc ["id",`String "launch";"tool",`String "keeper_job_start";
@@ -3196,6 +3202,17 @@ let test_prepared_job_launch_and_continuation () = with_fixture @@ fun env _init
            [`Assoc ["name",`String "sha256";"value",`Assoc
              ["kind",`String "output";"node",`String "await";
               "pointer",`String "/artifacts/0/_blob/sha256"]]]]]]] in
+  let recipe = if not launch_after_result then recipe else
+    let next = `Assoc ["id",`String "launch-next";"tool",`String "keeper_job_start";
+      "after",`List [`String "consume"];"input",`Assoc ["kind",`String "literal";
+        "value",`Assoc ["argv",`List [`String "fixture-next-program"]]]] in
+    match recipe with
+    | `Assoc fields -> `Assoc (List.map (fun (key,value) ->
+        if key="nodes" then match value with
+          | `List nodes -> key, `List (nodes@[next])
+          | _ -> fail "prepared job nodes are not an array"
+        else key,value) fields)
+    | _ -> fail "prepared job recipe is not an object" in
   let prepare_started = Mtime_clock.counter () in
   let prepared = with_bundle fixture (fun bundle -> invoke fixture bundle
       ~tool_use_id:"prepare-hint" ~turn:41 "keeper_composition_prepare" recipe) in
@@ -3258,7 +3275,10 @@ let test_prepared_job_launch_and_continuation () = with_fixture @@ fun env _init
       Wake.pulse ~sw:context.sw continuations |> require "actual durable completion hints original DAG") () in
   (* Change the current turn before the original job completes. No direct
      composition resume or independent continuation pulse follows this point. *)
-  set_source fixture ~task_id:"task-B" ~turn:52;
+  set_source ~answer_source_ids:[later_answer] fixture ~task_id:"task-B" ~turn:52;
+  let later_trace = Keeper_id.Trace_id.of_string "prepared-later-runtime-trace" |> require "later trace" in
+  let later_meta = {fixture.meta with runtime={fixture.meta.runtime with trace_id=later_trace}} in
+  ignore (Masc.Keeper_meta_store.replace_snapshot config later_meta |> require "persist later metadata trace");
   control fixture (`Assoc ["state",`String "exited";"exit_code",`Int 7]);
   let backend_before = List.length (calls fixture) in
   let completion_started = Mtime_clock.counter () in
@@ -3284,7 +3304,8 @@ let test_prepared_job_launch_and_continuation () = with_fixture @@ fun env _init
     else (Eio.Time.sleep (Eio.Stdenv.clock env) 0.01; await_original_ack ()) in
   await_original_ack ();
   check bool "ordinary completion ACK is retained" true (load fixture id).completion_delivered;
-  check int "continuation does not query the backend after complete output" backend_at_ready (List.length (calls fixture));
+  if not launch_after_result then
+    check int "continuation does not query the backend after complete output" backend_at_ready (List.length (calls fixture));
   check string "completion keeps the original run" (accepted |> member "composition_run_id" |> to_string)
     (resumed |> member "composition_run_id" |> to_string);
   let completed_nodes = completed |> member "actions" |> to_list in
@@ -3303,10 +3324,47 @@ let test_prepared_job_launch_and_continuation () = with_fixture @@ fun env _init
   let request_context = match completed_entry.request_context with
     | Some fields -> `Assoc fields | None -> fail "original hint completion has no source context" in
   check_json "hint completion belongs to original Task" (`String "task-A") (request_context |> member "source_task_id");
-  check int "completion never recreates the original program" 1 (effect_count fixture "create");
-  check int "completion never restarts the original program" 1 (effect_count fixture "start");
+  Call_log.flush_now ();
+  let all_rows = Call_log.read_recent ~keeper_name:keeper () |> require "recovered original Tool observations" in
+  let await_rows = List.filter (fun row -> member "composition_node_id" row=`String "await"
+      && member "composition_run_id" row=member "composition_run_id" accepted) all_rows in
+  check int "waiting and completed result reads both retain physical observations" 2 (List.length await_rows);
+  let physical_ids = List.map (fun row -> member "physical_execution_id" row |> to_string) await_rows in
+  check int "one logical wait retains two distinct physical calls" 2
+    (List.length (List.sort_uniq String.compare physical_ids));
+  List.iter (fun row ->
+    check_json "physical result rechecks retain one logical node identity"
+      (member "execution_id" waiting_node) (member "execution_id" row);
+    check_json "physical rechecks retain the original answer input"
+      (`List [`String original_answer]) (member "answer_source_ids" row);
+    check_json "physical rechecks retain the original trace" (`String original_trace) (member "trace_id" row);
+    check_json "physical rechecks retain the original Keeper turn" (`Int 41) (member "keeper_turn_id" row)) await_rows;
+  let recovered_rows = all_rows
+      |> List.filter (fun row -> member "tool" row=`String "keeper_artifact_read"
+          && member "composition_run_id" row=member "composition_run_id" accepted) in
+  check int "the actual post-completion consumer has one physical Tool result" 1 (List.length recovered_rows);
+  List.iter (fun row ->
+    check_json "fresh continuation keeps the original answer input" (`List [`String original_answer])
+      (member "answer_source_ids" row);
+    check_json "fresh continuation keeps the original trace despite current metadata" (`String original_trace)
+      (member "trace_id" row);
+    check_json "fresh continuation keeps the original physical Keeper turn" (`Int 41) (member "keeper_turn_id" row);
+    check_json "fresh continuation never adopts the current Task" (`String "task-A") (member "task_id" row)) recovered_rows;
+  if launch_after_result then (
+    let next = composition_node "launch-next" completed_nodes in
+    let next_id = next |> member "result" |> member "data" |> member "job_id" |> to_string in
+    check bool "the post-wait node starts its own distinct job" true (next_id<>id);
+    let next_job = load fixture next_id in
+    check (option string) "new post-wait launch keeps the original Task" (Some "task-A") next_job.source.task_id;
+    check (option string) "new post-wait launch keeps the original trace" (Some original_trace) next_job.source.trace_id;
+    check (option int) "new post-wait launch keeps the original physical Keeper turn" (Some 41)
+      next_job.source.keeper_turn_id);
+  let expected_programs = if launch_after_result then 2 else 1 in
+  check int "only the declared distinct programs are created" expected_programs (effect_count fixture "create");
+  check int "only the declared distinct programs are started" expected_programs (effect_count fixture "start");
   Printf.printf "OWNED_PREPARED_JOB_LAUNCH_CONTINUATION %s\n%!" (Yojson.Safe.to_string (`Assoc
     ["scope",`String "synthetic CLI public prepare/run launching an owned job within the original DAG";
+     "launch_after_saved_result",`Bool launch_after_result;
      "prepare_and_launch_to_saved_job_wait_ms",`Float prepare_to_wait_ms;
      "completion_pulse_to_original_dag_completion_ms",`Float completion_ms;
      "backend_calls_to_complete_original_job",`Int (backend_at_ready-backend_before);
@@ -5745,7 +5803,10 @@ let () = match Array.to_list Sys.argv with
       ; test_case "finished without outputs and absent inventory is notified once and leaves waiting" `Quick test_finished_without_outputs_absent_inventory_notified_once
       ; test_case "running with absent inventory is notified once and leaves waiting" `Quick test_running_absent_inventory_notified_once
       ; test_case "durable completion hint resumes original DAG without a provider turn" `Quick test_completion_hint_resumes_original_dag
-      ; test_case "prepared DAG launches an owned job and resumes its original result" `Quick test_prepared_job_launch_and_continuation
+      ; test_case "prepared DAG launches an owned job and resumes its original result" `Quick
+          (test_prepared_job_launch_and_continuation ~launch_after_result:false)
+      ; test_case "post-wait new launch keeps the captured original frame after metadata changes" `Quick
+          (test_prepared_job_launch_and_continuation ~launch_after_result:true)
       ; test_case "interrupted prepared launch publicly resumes original K41" `Quick
           (test_interrupted_prepared_launch_resumes_the_same_job (Some 41))
       ; test_case "interrupted prepared launch publicly preserves absent K" `Quick

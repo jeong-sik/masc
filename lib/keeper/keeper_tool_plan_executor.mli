@@ -35,6 +35,7 @@ val node_execution_origin_to_string : node_execution_origin -> string
 type node_result = private
   { node_id : Keeper_tool_plan.Node_id.t
   ; execution_id : Ids.Execution_id.t
+  ; physical_execution_id : Ids.Execution_id.t option
   ; tool_name : string
   ; input : Yojson.Safe.t
   ; schedule : Agent_core.Tool_contract.schedule
@@ -47,6 +48,10 @@ type node_result = private
   ; result_bytes : int
   ; truncated_to : int option
   }
+(** [execution_id] is the stable logical occurrence, including rechecks.
+    [physical_execution_id] comes from a fresh dispatched invocation. [None]
+    means this settlement supplies no physical dispatch identity, including
+    retained completions and compiled pure operands; observers must not mint it. *)
 
 type dispatch_result
 
@@ -58,9 +63,11 @@ type admission_rejection =
 
 (** Construct a low-level dispatch settlement. Callers that own more precise
     producer evidence must supply it; absent failure evidence is conservatively
-    treated as an unknown effect outcome. *)
+    treated as an unknown effect outcome. Supply [physical_execution_id] only
+    from the invocation actually dispatched, never from its logical node id. *)
 val dispatch_result
-  :  ?failure_effect_disposition:Tool_result.failure_effect_disposition
+  :  ?physical_execution_id:Ids.Execution_id.t
+  -> ?failure_effect_disposition:Tool_result.failure_effect_disposition
   -> ?deferred_kind:Keeper_tool_execution.deferred_kind
   -> ?result_bytes:int
   -> ?truncated_to:int

@@ -186,6 +186,7 @@ let decode_asks_snapshot ~expected_base_path ~expected_masc_root json =
 
 type ask_tool_action = {
   ata_execution_id : string;
+  ata_physical_execution_id : string;
   ata_trace_id : string;
   ata_keeper_turn_id : int;
   ata_tool : string;
@@ -271,14 +272,15 @@ let decode_ask_followup ~expected_base_path ~expected_masc_root ~keeper_name ~as
                     let nonempty key = let* text = string value key in
                       if text="" then Error ("empty Tool observation " ^ key) else Ok text in
                     let* ata_execution_id = nonempty "execution_id" in
+                    let* ata_physical_execution_id = nonempty "physical_execution_id" in
                     let* ata_trace_id = nonempty "trace_id" in
                     let* ata_tool = nonempty "tool" in
                     let* turn = single value "keeper_turn_id" in
                     let* ata_keeper_turn_id = match turn with
-                      | `Int n when n>0 -> Ok n | _ -> Error "answer Tool turn identity is invalid" in
+                      | `Int n when n>=0 -> Ok n | _ -> Error "answer Tool turn identity is invalid" in
                     let* recorded = single value "recorded_at" in
                     let* ata_recorded_at = finite recorded in
-                    Ok (Some {ata_execution_id;ata_trace_id;ata_keeper_turn_id;ata_tool;ata_recorded_at}) in
+                    Ok (Some {ata_execution_id;ata_physical_execution_id;ata_trace_id;ata_keeper_turn_id;ata_tool;ata_recorded_at}) in
               (match at_count, at_first_recorded_at, at_latest with
                | 0, None, None -> Ok (Ask_tools_observed {at_count;at_first_recorded_at;at_latest;at_evidence_current=true})
                | n, Some first, Some last when n>0 && first<=last.ata_recorded_at ->

@@ -39,6 +39,13 @@ type source =
   ; producer : producer
   }
 
+type source_observation = {
+  trace_id : Keeper_id.Trace_id.t option;
+  session_id : string option;
+  keeper_turn_id : int option;
+  answer_source_ids : string list;
+}
+
 type completed =
   { execution_id : Ids.Execution_id.t
   ; tool_use_id : string
@@ -290,6 +297,29 @@ let source_of_yojson json =
   decode (fun () -> source_of_json json)
   |> Result.map_error (fun detail -> Invalid_source detail)
 
+let source_observation_json (observation : source_observation) =
+  `Assoc ["trace_id", option_json (fun id -> `String (Keeper_id.Trace_id.to_string id)) observation.trace_id;
+    "session_id", option_json (fun id -> `String id) observation.session_id;
+    "keeper_turn_id", option_json (fun id -> `Int id) observation.keeper_turn_id;
+    "answer_source_ids", `List (List.map (fun id -> `String id)
+      (List.sort_uniq String.compare observation.answer_source_ids))]
+
+let source_observation_of_json json =
+  let fields = object_fields ["trace_id";"session_id";"keeper_turn_id";"answer_source_ids"] json in
+  let identity json = let id = string json in require (exact_name id) "invalid source observation identity"; id in
+  let trace_id = optional (fun json ->
+      let id = identity json in match Keeper_id.Trace_id.of_string id with
+      | Ok id -> id | Error detail -> refuse detail) (field "trace_id" fields)
+  and session_id = optional identity (field "session_id" fields)
+  and keeper_turn_id = optional nonnegative (field "keeper_turn_id" fields) in
+  let answer_source_ids = match field "answer_source_ids" fields with
+    | `List ids -> List.map identity ids |> List.sort_uniq String.compare
+    | _ -> refuse "source observation answers are not an array" in
+  {trace_id;session_id;keeper_turn_id;answer_source_ids}
+
+let same_source_observation left right = canonical_equal
+    (option_json source_observation_json left) (option_json source_observation_json right)
+
 (* Checkpoint's strict codec owns content variants and failure provenance. Its
    wire codec deliberately omits ToolResult.json, so this typed sidecar retains
    that optional value and recursively restores nested result blocks. *)
@@ -398,10 +428,11 @@ type child_link =
   ; accepted : Dependency.composition option
   }
 type state =
-  { source : source; source_sha : string; owner : binding option
+  { source : source; source_sha : string; source_observation : source_observation option; owner : binding option
   ; prior_owners : (binding * node_record Nodes.t) list; nodes : node_record Nodes.t
   ; children : child_link Nodes.t }
-type t = {base_path : string; root : string; path : string; immutable_source : source; source_sha : string}
+type t = {base_path : string; root : string; path : string; immutable_source : source; source_sha : string;
+          immutable_observation : source_observation option}
 type worker = {journal : t; binding : binding}
 type attempt = {worker : worker; occurrence : occurrence}
 type child_submission = {attempt : attempt; link : child_link}
@@ -522,6 +553,8 @@ let completed_of_json json =
 let event kind source_sha fields = `Assoc (["schema", `Int 3; "kind", `String kind; "source_sha", `String source_sha] @ fields)
 let row json = Yojson.Safe.to_string json ^ "\n"
 let source_event source = event "source" (json_sha (source_json source)) ["source", source_json source]
+let source_observation_event source_sha observation =
+  event "source_observation" source_sha ["observation",source_observation_json observation]
 let attempt_event source_sha occurrence = event "attempting" source_sha ["occurrence", occurrence_json occurrence]
 
 let dependency_wait_json = option_json Dependency.to_json
@@ -640,6 +673,14 @@ let decode_state bytes = decode (fun () ->
   let source = source_of_json (field "source" fields) in
   let source_sha = string (field "source_sha" fields) in
   require (String.equal source_sha (json_sha (source_json source))) "source fingerprint mismatch";
+  let source_observation, events = match events with
+    | (`Assoc fields as json) :: rest
+      when List.assoc_opt "kind" fields = Some (`String "source_observation") ->
+        let fields = object_fields ["schema";"kind";"source_sha";"observation"] json in
+        require (field "schema" fields = `Int 3 && field "source_sha" fields = `String source_sha)
+          "source observation belongs to another source";
+        Some (source_observation_of_json (field "observation" fields)), rest
+    | _ -> None, events in
   List.fold_left (fun state json ->
     let kind = match json with `Assoc fields -> string (field "kind" fields) | _ -> refuse "invalid journal row" in
     let extras = match kind with
@@ -732,10 +773,12 @@ let decode_state bytes = decode (fun () ->
         Settled (occurrence, completed, phase, dependency_wait)) in
       {state with nodes = Nodes.add key record state.nodes}
     | _ -> refuse "unknown journal event")
-    {source; source_sha; owner = None; prior_owners = []; nodes = Nodes.empty;children=Nodes.empty} events)
+    {source; source_sha; source_observation; owner = None; prior_owners = []; nodes = Nodes.empty;children=Nodes.empty} events)
 
 let source journal = journal.immutable_source
+let source_observation journal = journal.immutable_observation
 let worker_source (worker : worker) = worker.journal.immutable_source
+let worker_source_observation (worker : worker) = worker.journal.immutable_observation
 let path_for ~base_path ~keeper_name ~composition_run_id =
   let root = Common.masc_dir_from_base_path ~base_path in
   let directory = Filename.concat (Filename.concat (Filename.concat root "keeper_msg_requests") "execution_journals") (sha keeper_name) in
@@ -820,6 +863,7 @@ let strict_read ~root path =
 
 let check_source (journal : t) (state : state) =
   if source_json journal.immutable_source = source_json state.source && journal.source_sha = state.source_sha
+     && same_source_observation journal.immutable_observation state.source_observation
   then Ok () else Error Source_conflict
 
 let cleanup_warning path failure =
@@ -850,12 +894,13 @@ let update_existing journal decide = filesystem (fun () ->
   | Private_file_failed_with_cleanup_failure {error; cleanup_failure} ->
     Error (Persistence_failed (Fs_compat.private_jsonl_transaction_error_to_string error ^ "; cleanup=" ^ Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure)))
 
-let prepare ~base_path immutable_source = filesystem (fun () ->
+let prepare ?observation ~base_path immutable_source = filesystem (fun () ->
   let* () = Result.map_error (fun detail -> Invalid_source detail) (decode (fun () -> validate_source immutable_source)) in
   let base_path = Fs_compat.realpath base_path in
   let* () = validate_artifacts ~base_path immutable_source in
   let root, path = path_for ~base_path ~keeper_name:immutable_source.keeper_name ~composition_run_id:immutable_source.composition_run_id in
-  let journal = {base_path; root; path; immutable_source; source_sha = json_sha (source_json immutable_source)} in
+  let journal = {base_path; root; path; immutable_source; source_sha = json_sha (source_json immutable_source);
+                 immutable_observation=observation} in
   let* () = validate_owned_path ~root ~path ~create:true in
   Fs_compat.mkdir_p (Filename.dirname path);
   let* () = validate_owned_path ~root ~path ~create:true in
@@ -867,15 +912,27 @@ let prepare ~base_path immutable_source = filesystem (fun () ->
         | Node_identity_conflict _ | Replay_not_proven _ | Attempt_conflict _ | Plan_identity_conflict
         | Draft_unavailable _ | Invalid_result _ | Invalid_continuation_marker _
         | Persistence_failed _ as error) -> Error error
-    | Ok state -> let* () = check_source journal state in Ok false in
+    | Ok state ->
+        let* () = check_source {journal with immutable_observation=state.source_observation} state in
+        Ok false in
   let callback bytes =
     match validate_owned_path ~root ~path ~create:false with
     | Error error -> None, Error error
     | Ok () ->
-      if bytes = "" && absent then Some (row (source_event immutable_source)), Ok journal
+      if bytes = "" && absent then
+        (match decode (fun () -> Option.map (fun observation ->
+            source_observation_of_json (source_observation_json observation)) observation) with
+         | Error detail -> None, Error (Invalid_source detail)
+         | Ok observation ->
+             let bytes = row (source_event immutable_source)
+               ^ (match observation with None -> "" | Some observation ->
+                   row (source_observation_event journal.source_sha observation)) in
+             Some bytes, Ok {journal with immutable_observation=observation})
       else match Result.map_error (fun detail -> Corrupt_journal detail) (decode_state bytes) with
         | Error error -> None, Error error
-        | Ok state -> None, Result.map (fun () -> journal) (check_source journal state) in
+        | Ok state ->
+            let journal = {journal with immutable_observation=state.source_observation} in
+            None, Result.map (fun () -> journal) (check_source journal state) in
   match Fs_compat.update_private_file_durable_locked_result path callback with
   | Fs_compat.Private_file_succeeded value -> value
   | Private_file_succeeded_with_cleanup_failure {value; cleanup_failure} -> cleanup_warning path cleanup_failure; value
@@ -891,7 +948,8 @@ let load ~base_path ~keeper_name ~composition_run_id = filesystem (fun () ->
   if not (String.equal state.source.keeper_name keeper_name && Plan.Composition_run_id.equal state.source.composition_run_id composition_run_id)
   then Error Source_conflict else
   let* () = validate_artifacts ~base_path state.source in
-  Ok {base_path; root; path; immutable_source = state.source; source_sha = state.source_sha})
+  Ok {base_path; root; path; immutable_source = state.source; source_sha = state.source_sha;
+      immutable_observation=state.source_observation})
 
 let entry_matches_source source (entry : Async.entry) = decode (fun () ->
   require (String.equal entry.keeper_name source.keeper_name && String.equal entry.submitted_by source.keeper_name) "request caller/keeper mismatch";

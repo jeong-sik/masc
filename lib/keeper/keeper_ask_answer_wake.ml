@@ -54,6 +54,7 @@ let answered_stimulus ~keeper_name (ask : Keeper_ask.ask) resolution =
 
 type tool_action = {
   execution_id : string;
+  physical_execution_id : string;
   trace_id : string;
   keeper_turn_id : int;
   tool_name : string;
@@ -80,29 +81,39 @@ let observe_tool_actions ~base_path ~keeper_name ~source_id =
           let string key = let* value = field key in match value with
             | `String value when value<>"" -> Ok value
             | _ -> Error ("Tool observation has invalid " ^ key) in
-          let* kind = string "record_kind" in
-          let* () = match Keeper_tool_call_log.record_kind_of_string kind with
-            | Some Tool_call -> Ok ()
-            | Some (Composition_run | Lifecycle_event) | None -> Error "answer Tool row is not a physical Tool result" in
-          let* execution_id = string "execution_id" in
-          if Set_util.StringSet.mem execution_id seen then Error "ambiguous answer Tool execution identity" else
-          let* trace_id = string "trace_id" in
-          let* tool_name = string "tool" in
-          let* turn = field "keeper_turn_id" in
-          let* keeper_turn_id = match turn with
-            | `Int value when value>0 -> Ok value | _ -> Error "Tool turn identity is invalid" in
-          let* clock = field "ts" in
-          let* recorded_at = match clock with
-            | `Float value when Float.is_finite value -> Ok value
-            | `Int value -> Ok (float_of_int value) | _ -> Error "Tool observation clock is invalid" in
-          let action = {execution_id;trace_id;keeper_turn_id;tool_name;recorded_at} in
-          let first_recorded_at = Some (match summary.first_recorded_at with
-            | None -> recorded_at | Some prior -> Float.min prior recorded_at) in
-          let latest = match summary.latest with
-            | Some prior when prior.recorded_at > recorded_at -> Some prior
-            | Some _ | None -> Some action in
-          Ok ({observed_count=summary.observed_count+1;first_recorded_at;latest},
-              Set_util.StringSet.add execution_id seen)) in
+          let* physical_execution_id = match row with
+            | `Assoc fields ->
+                (match List.filter (fun (name,_) -> name="physical_execution_id") fields with
+                 | [] -> Ok None
+                 | [_,`String value] when value<>"" -> Ok (Some value)
+                 | _ -> Error "Tool observation has invalid/duplicate physical_execution_id")
+            | _ -> Error "Tool observation is not an object" in
+          match physical_execution_id with
+          | None -> Ok (summary, seen)
+          | Some physical_execution_id ->
+            let* kind = string "record_kind" in
+            let* () = match Keeper_tool_call_log.record_kind_of_string kind with
+              | Some Tool_call -> Ok ()
+              | Some (Composition_run | Lifecycle_event) | None -> Error "answer Tool row is not a physical Tool result" in
+            let* execution_id = string "execution_id" in
+            if Set_util.StringSet.mem physical_execution_id seen then Error "ambiguous answer Tool execution identity" else
+            let* trace_id = string "trace_id" in
+            let* tool_name = string "tool" in
+            let* turn = field "keeper_turn_id" in
+            let* keeper_turn_id = match turn with
+              | `Int value when value>=0 -> Ok value | _ -> Error "Tool turn identity is invalid" in
+            let* clock = field "ts" in
+            let* recorded_at = match clock with
+              | `Float value when Float.is_finite value -> Ok value
+              | `Int value -> Ok (float_of_int value) | _ -> Error "Tool observation clock is invalid" in
+            let action = {execution_id;physical_execution_id;trace_id;keeper_turn_id;tool_name;recorded_at} in
+            let first_recorded_at = Some (match summary.first_recorded_at with
+              | None -> recorded_at | Some prior -> Float.min prior recorded_at) in
+            let latest = match summary.latest with
+              | Some prior when prior.recorded_at > recorded_at -> Some prior
+              | Some _ | None -> Some action in
+            Ok ({observed_count=summary.observed_count+1;first_recorded_at;latest},
+                Set_util.StringSet.add physical_execution_id seen)) in
       Ok summary
   | Some _, Some _ | None, _ | _, None -> Error "Tool ledger workspace is unavailable or different"
 
@@ -142,6 +153,7 @@ let followup_to_json followup =
         "latest", (match actions.latest with
           | None -> `Null
           | Some action -> `Assoc ["execution_id", `String action.execution_id;
+              "physical_execution_id", `String action.physical_execution_id;
               "trace_id", `String action.trace_id; "keeper_turn_id", `Int action.keeper_turn_id;
               "tool", `String action.tool_name; "recorded_at", `Float action.recorded_at])] in
   `Assoc (["state", `String "observed";

@@ -270,9 +270,13 @@ end
     @param event_scope Producer scope shared with a turn subscriber. Omission
       creates a fresh scope for this execution.
     @param observation_token Captured registry observation ownership. Omission
-      disables observation updates; it never adopts a currently active turn. *)
+      disables observation updates; it never adopts a currently active turn.
+    @param preview The caller's explicitly captured execution writer. Reused
+      across Task/context/prompt/tool setup; omission starts a writer here.
+      This never resolves another writer by Keeper name or recent activity. *)
 val run_turn
   : ?event_scope:Keeper_turn_scope.t
+  -> ?preview:Keeper_turn_preview.writer
   -> ?observation_token:Keeper_turn_observation_token.t
   -> config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta

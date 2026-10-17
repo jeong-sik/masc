@@ -1,10 +1,12 @@
-(** Ephemeral activity for the running Keeper turn. Reset at agent entry;
+(** Ephemeral activity for the running Keeper turn. Created at Task entry or
+    standalone agent entry;
     the turns route reads only the writer bound to its actual Owner slot.
     Provider attempts, stream events, and tool hooks write this projection. *)
 
 type activity = Preparing | Awaiting_response | Receiving_response | Tool_observed | Failed
 
-type preparation_phase = Context_preparation | Tool_preparation | Skill_preparation
+type preparation_phase = Task_preparation | Context_preparation | Prompt_preparation
+  | Tool_preparation | Skill_preparation
 type preparation_outcome = Prepared | Rejected | Raised | Cancelled
 type preparation_state =
   | Preparation_active
@@ -13,7 +15,7 @@ type preparation_state =
 type preparation =
   { phase : preparation_phase
   ; turn_ref : Ids.Turn_ref.t option
-      (** Absent before context preparation establishes the turn identity. *)
+      (** Absent only when this producer has not established the turn identity. *)
   ; started_at : float
   ; state : preparation_state
   }
@@ -66,12 +68,23 @@ val with_preparation_result :
     older scopes, so their late completion cannot replace newer activity.
     This is ephemeral observation, not a dispatch or completion decision. *)
 
+val with_preparation :
+  writer:writer option -> turn_ref:Ids.Turn_ref.t option -> phase:preparation_phase ->
+  (unit -> 'a) -> 'a
+(** Same owned scope for a value-returning preparation operation. Exceptions
+    and cancellation still settle the observation and propagate unchanged. *)
+
 val reset : keeper_name:string -> execution_scope:Keeper_execution_scope_id.t option ->
+  turn_ref:Ids.Turn_ref.t option ->
   now:float -> redaction:Keeper_secret_redaction.t -> writer
 (** Install a new displayed preview and return its writer. Every response text the turn records passes
     through [redaction] first; streamed deltas pass through one
     {!Keeper_stream_text_redaction} per provider attempt, so the tail grows a
     line at a time and a secret split between deltas never reaches it. *)
+
+val original_turn_ref : writer -> Ids.Turn_ref.t option
+(** Identity explicitly supplied at writer creation, never inferred from its
+    last activity or found by Keeper name. [None] before an owner establishes it. *)
 
 val note_attempt : writer:writer option -> now:float -> runtime_id:string -> unit
 val note_failure : writer:writer option -> now:float -> runtime_id:string -> string -> unit

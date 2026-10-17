@@ -1,10 +1,12 @@
-(** Ephemeral activity for the running Keeper turn. Reset at agent entry;
+(** Ephemeral activity for the running Keeper turn. Created at Task entry or
+    standalone agent entry;
     the turns route reads only the writer bound to its actual Owner slot.
     Provider attempts, stream events, and tool hooks write this projection. *)
 
 type activity = Preparing | Awaiting_response | Receiving_response | Tool_observed | Failed
 
-type preparation_phase = Context_preparation | Tool_preparation | Skill_preparation
+type preparation_phase = Task_preparation | Context_preparation | Prompt_preparation
+  | Tool_preparation | Skill_preparation
 type preparation_outcome = Prepared | Rejected | Raised | Cancelled
 type preparation_state =
   | Preparation_active
@@ -51,6 +53,7 @@ type entry =
   ; tools : string Tool_indexes.t
   ; preparations : (unit ref * preparation) list
   ; owner : Keeper_interrupt_token.t option
+  ; original_turn_ref : Ids.Turn_ref.t option
   }
 type writer = entry ref
 
@@ -94,7 +97,7 @@ let update ~writer ~now f =
     Some { entry with preparations = [];
       preview = { (f entry.preview) with preparation = None } })
 
-let with_preparation_result ~writer ~turn_ref ~phase operation =
+let observe_preparation ~returned ~writer ~turn_ref ~phase operation =
   match writer with
   | None -> operation ()
   | Some _ ->
@@ -119,25 +122,36 @@ let with_preparation_result ~writer ~turn_ref ~phase operation =
             preview={entry.preview with preparation=Some preparation}})
     in
     match operation () with
-    | result -> finish (match result with Ok _ -> Prepared | Error _ -> Rejected); result
+    | result -> finish (returned result); result
     | exception error ->
       let backtrace = Printexc.get_raw_backtrace () in
       finish (match error with Eio.Cancel.Cancelled _ -> Cancelled | _ -> Raised);
       Printexc.raise_with_backtrace error backtrace
 ;;
 
+let with_preparation_result ~writer ~turn_ref ~phase operation =
+  observe_preparation ~returned:(function Ok _ -> Prepared | Error _ -> Rejected)
+    ~writer ~turn_ref ~phase operation
+;;
+
+let with_preparation ~writer ~turn_ref ~phase operation =
+  observe_preparation ~returned:(fun _ -> Prepared) ~writer ~turn_ref ~phase operation
+;;
+
 let redacting redaction =
   { redaction; stream = Keeper_stream_text_redaction.create redaction }
 
-let reset ~keeper_name ~execution_scope ~now ~redaction =
+let reset ~keeper_name ~execution_scope ~turn_ref ~now ~redaction =
   let writer = ref { preview = empty ~execution_scope now; text_intake = redacting redaction;
     released_bytes = 0; tools = Tool_indexes.empty; preparations = [];
-    owner = Keeper_turn_preview_owner.current () } in
+    owner = Keeper_turn_preview_owner.current (); original_turn_ref = turn_ref } in
   with_lock (fun () -> Hashtbl.replace table keeper_name writer);
   writer
 
+let original_turn_ref writer = with_lock (fun () -> (!writer).original_turn_ref)
+
 let note_attempt ~writer ~now ~runtime_id =
-  change_entry ~writer ~now (fun { preview; text_intake; owner; _ } ->
+  change_entry ~writer ~now (fun { preview; text_intake; owner; original_turn_ref; _ } ->
     Some
       { preview =
           { preview with runtime_id = Some runtime_id; activity = Awaiting_response
@@ -148,6 +162,7 @@ let note_attempt ~writer ~now ~runtime_id =
       ; tools = Tool_indexes.empty
       ; preparations = []
       ; owner
+      ; original_turn_ref
       ; released_bytes = 0
       ; text_intake =
           redacting text_intake.redaction
@@ -272,7 +287,9 @@ let note_stream ~writer ~now event =
     | None, true -> Some {entry with preparations=[];preview={entry.preview with preparation=None}})
 
 let preparation_phase_name = function
+  | Task_preparation -> "task"
   | Context_preparation -> "context"
+  | Prompt_preparation -> "prompt"
   | Tool_preparation -> "tools"
   | Skill_preparation -> "skills"
 ;;
@@ -305,7 +322,9 @@ let preparation_of_json json =
     | `Int value -> Ok (float_of_int value)
     | _ -> Error ("preparation " ^ key ^ " must be a finite number") in
   let* phase = match field "phase" with
+    | `String "task" -> Ok Task_preparation
     | `String "context" -> Ok Context_preparation
+    | `String "prompt" -> Ok Prompt_preparation
     | `String "tools" -> Ok Tool_preparation
     | `String "skills" -> Ok Skill_preparation
     | _ -> Error "unknown preparation phase" in

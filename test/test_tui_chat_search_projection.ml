@@ -896,7 +896,7 @@ let test_idle_search_pin_reuses_semantic_index () = at_sizes (fun origin ->
 let test_polled_source_survives_tail_and_journal_takeover () = at_sizes (fun origin ->
   let module Preview = Masc.Keeper_turn_preview in
   let state = state origin in
-  let writer = Preview.reset ~keeper_name:"alpha" ~now:120.
+  let writer = Preview.reset ~execution_scope:None ~turn_ref:None ~keeper_name:"alpha" ~now:120.
     ~redaction:Masc.Keeper_secret_redaction.empty in
   let stream delta = Preview.note_stream ~writer:(Some writer) ~now:121.
     (Agent_core.Types.ContentBlockDelta {index=0;delta}) in
@@ -1285,7 +1285,7 @@ let test_no_match_survives_pending_arrival () = at_sizes (fun origin ->
 let test_held_polled_keeps_chronology () = at_sizes (fun origin ->
   let module Preview = Masc.Keeper_turn_preview in
   let state = state origin in
-  let writer = Preview.reset ~keeper_name:"alpha" ~now:120.
+  let writer = Preview.reset ~execution_scope:None ~turn_ref:None ~keeper_name:"alpha" ~now:120.
     ~redaction:Masc.Keeper_secret_redaction.empty in
   let stream delta = Preview.note_stream ~writer:(Some writer) ~now:121.
     (Agent_core.Types.ContentBlockDelta {index=0;delta}) in
@@ -1347,7 +1347,7 @@ let test_retired_matcher_stops_before_next_candidate () =
 let test_first_scroll_holds_the_painted_preview () = at_sizes (fun origin ->
   let module Preview = Masc.Keeper_turn_preview in
   let state = state origin in
-  let writer = Preview.reset ~keeper_name:"alpha" ~now:120.
+  let writer = Preview.reset ~execution_scope:None ~turn_ref:None ~keeper_name:"alpha" ~now:120.
     ~redaction:Masc.Keeper_secret_redaction.empty in
   let stream delta = Preview.note_stream ~writer:(Some writer) ~now:121.
     (Agent_core.Types.ContentBlockDelta {index=0;delta}) in
@@ -1394,7 +1394,7 @@ let test_held_excerpt_reflows_badge_to_current_width () = at_sizes (fun origin -
   let set_cols columns = ignore (Masc_tui_render_schedule.Terminal_size_cache.refresh
       Masc_tui_ansi.terminal_size_cache ~probe:(fun () -> Some (26,columns))) in
   let state = state Layout.Origin_inline in
-  let writer = Preview.reset ~keeper_name:"alpha" ~now:120.
+  let writer = Preview.reset ~execution_scope:None ~turn_ref:None ~keeper_name:"alpha" ~now:120.
     ~redaction:Masc.Keeper_secret_redaction.empty in
   let stream delta = Preview.note_stream ~writer:(Some writer) ~now:121.
     (Agent_core.Types.ContentBlockDelta {index=0;delta}) in

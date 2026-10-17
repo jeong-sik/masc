@@ -381,7 +381,8 @@ val execution_id : t -> string
 (** Shared batch execution owner, or the singleton request identity. *)
 val source : t -> Masc_tui_keeper_chat_log.journal_source
 val can_observe_preparation : t -> bool
-(** Initial running segment before any provider/Tool activity was observed.
+(** Before any provider/Tool activity was observed. Exact Owner evidence may
+    arrive before the request's RUN_STARTED; this never changes admission.
     A poll cannot replace a later stream observation or a resumed segment. *)
 val note_rejection : now:float -> t -> string -> unit
 (** Ends the turn as failed with the detail of a verified pre-execution
@@ -750,6 +751,10 @@ val status_row_survives_folding : status_kind -> bool
 val awaiting_approval : t -> awaiting_approval option
 (** The call the turn is held at, if any. One at a time: the turn cannot reach
     a second call while it is waiting on this one. *)
+
+val preparation_status : Masc.Keeper_turn_preview.preparation -> status_kind * string
+(** Presentation shared by exact journal progress and the independently
+    observed current Owner slot before an autonomous journal exists. *)
 
 val status_rows :
   ?preparation:Masc.Keeper_turn_preview.preparation ->

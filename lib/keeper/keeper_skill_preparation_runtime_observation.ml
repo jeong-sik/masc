@@ -6,7 +6,9 @@ let phase_name = function
   | Executable_setup -> "executable_setup"
 ;;
 
-let with_turn_result ~config ~keeper_name ~turn_ref ~phase operation =
+let with_turn_result ?preview ~config ~keeper_name ~turn_ref ~phase operation =
+  Keeper_turn_preview.with_preparation_result ~writer:preview ~turn_ref:(Some turn_ref)
+    ~phase:Keeper_turn_preview.Skill_preparation (fun () ->
   Keeper_skill_preparation_observation.capture_result operation ~on_report:(fun report ->
     let context : Keeper_runtime_manifest.turn_context =
       {manifest_keeper_name=keeper_name;manifest_trace_id=Ids.Turn_ref.trace_id turn_ref
@@ -24,5 +26,5 @@ let with_turn_result ~config ~keeper_name ~turn_ref ~phase operation =
       ~decision:(Keeper_runtime_manifest.with_payload_role
           ~payload_role:Keeper_runtime_manifest.Operator_evidence
           (Keeper_runtime_manifest.with_clock_refs ~clock_refs (`Assoc ["skill_preparation",payload]))) ()
-    |> Keeper_runtime_manifest.append_best_effort ~site:"skill_preparation_observed" config)
+    |> Keeper_runtime_manifest.append_best_effort ~site:"skill_preparation_observed" config))
 ;;

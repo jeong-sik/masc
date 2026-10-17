@@ -302,6 +302,12 @@ val accept_rejection_has_no_progress_retry_hint : masc_internal_error -> bool
 val core_error_of_masc_internal_error :
   masc_internal_error -> Agent_core.Error.t
 
+val carried_masc_internal_error : Agent_core.Error.t -> masc_internal_error option
+(** Process-local downcast of this owner's private carrier only. The message is
+    never parsed; plain [Internal] text and foreign carriers return [None], even
+    when their message contains a serialized MASC envelope. Persisted values
+    remain the separate {!classify_masc_internal_error} boundary below. *)
+
 val parse_masc_internal_error_json :
   Yojson.Safe.t -> masc_internal_error option
 (** Strict: an unknown kind, a missing or extra field, or a field of the wrong

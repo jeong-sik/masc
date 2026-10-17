@@ -212,9 +212,12 @@ type route =
 val route_of_error : boundary:error_boundary -> Agent_core.Error.t -> route
 (** Total over every [core_error] class. The caller supplies the actual execution
     boundary. MASC-internal typed envelopes are decoded only at
-    [Masc_execution], except [Terminal_effect_failed]: that MASC-owned effect
-    crosses the live AGENT_CORE tool boundary and is therefore decoded at either
-    boundary. No arm returns "no route". *)
+    [Masc_execution], except [Terminal_effect_failed], [Runtime_connection_closed],
+    and a process-local MASC-carried [Accept_rejected] with no usable progress,
+    an empty response shape, and [MaxTokens]. Those exact MASC-owned observations cross the live
+    AGENT_CORE boundary and retain their typed routes there. Other accept
+    rejections, including plain or foreign-carried serialized messages, remain
+    boundary-specific. No arm returns "no route". *)
 
 val usable_retry_after : float option -> float option
 (** The provider hint that names a wait: present, finite, above zero. A
@@ -279,7 +282,10 @@ val route_resumes_on_same_path : route -> bool
     [Network_transient], [Provider_timeout], and [Hard_quota] with a usable
     reset hint (positive, not NaN). The empty-completion reasons resume a
     direct operation once so its saved tool results are not discarded; another
-    resume still requires a newly saved tool result.
+    resume still requires a newly saved tool result. An accept rejection with
+    no usable progress, an empty response shape, and [MaxTokens] uses this same
+    empty-completion route when the SDK preserves the authoritative terminal.
+    Blank, thinking-only, and partial-content rejections retain their rotations.
 
     [false]: [Empty_completion] with [Refusal], [ContentFilter],
     [RepetitionTruncation], [StopToolUse], [PauseTurn], [Compaction],

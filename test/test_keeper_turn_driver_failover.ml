@@ -5952,6 +5952,161 @@ let test_a_chat_operation_resumes_after_attributed_empty_completion () =
     ]
 ;;
 
+let guarded_accept_rejection ?(content = []) stop_reason =
+  let result = completed_run_result () in
+  let response = { result.response with content; stop_reason } in
+  match Llm_provider.Complete_common.ensure_nonempty_completion (Ok response) with
+  | Error _ -> Alcotest.fail "SDK guard erased the typed terminal"
+  | Ok response ->
+    (match Try_provider.apply_accept ~runtime_id:"only"
+        ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress
+        { result with response } with
+     | Error error -> error
+     | Ok _ -> Alcotest.fail "the rejected terminal became a successful answer")
+;;
+
+let test_guarded_empty_max_tokens_resumes_saved_operation () =
+  let error = guarded_accept_rejection Llm_provider.Types.MaxTokens in
+  (match Driver.classify_masc_internal_error error with
+   | Some internal ->
+     let json = Driver.masc_internal_error_to_json internal in
+     Alcotest.(check string) "original no-progress reason"
+       "no_usable_progress" (string_member "reason_kind" json);
+     Alcotest.(check string) "original empty response shape"
+       "empty" (string_member "response_shape" json);
+     Alcotest.(check string) "original authoritative terminal"
+       "max_tokens" (string_member "stop_reason" json)
+   | None -> Alcotest.fail "accept rejection lost its typed evidence");
+  List.iter
+    (fun boundary ->
+       let route = Keeper_runtime_failure_route.route_of_error ~boundary error in
+       Alcotest.(check bool) "empty truncation retains its attributed retry policy"
+         true
+         (route = Keeper_runtime_failure_route.Retry_after_observed
+            { retry_class = Keeper_runtime_failure_route.Empty_completion
+                { stop_reason = Llm_provider.Types.MaxTokens }
+            ; retry_after = None
+            }))
+    [ Keeper_runtime_failure_route.Masc_execution
+    ; Keeper_runtime_failure_route.Agent_core_execution
+    ];
+  let attempts = ref 0 in
+  let result, hints, rows =
+    same_path_walk ~continuation:resume_chat_operation [ "only" ]
+      (fun ~save _candidate ->
+         incr attempts;
+         save Agent_core.Agent.After_tool_results_appended Wrote;
+         error)
+  in
+  Alcotest.(check int) "saved tools are not replayed in the current walk" 1 !attempts;
+  Alcotest.(check (list string)) "the operation retains only its original path"
+    [ "lane.chat: only -> [only]" ] (List.map describe_hint hints);
+  Alcotest.(check (list string)) "the resume decision is recorded" [ "only" ] rows;
+  Alcotest.(check (result string string)) "truncation is not promoted to success"
+    (Error (Agent_core.Error.to_string error))
+    (Result.map_error Agent_core.Error.to_string result)
+;;
+
+let test_guarded_empty_max_tokens_still_requires_saved_operation_progress () =
+  let error = guarded_accept_rejection Llm_provider.Types.MaxTokens in
+  List.iter
+    (fun (label, continuation, stage, outcome) ->
+       let attempts = ref 0 in
+       let _result, hints, rows =
+         same_path_walk ~continuation [ "only" ]
+           (fun ~save _candidate ->
+              incr attempts;
+              save stage outcome;
+              error)
+       in
+       Alcotest.(check int) (label ^ ": no immediate replay") 1 !attempts;
+       Alcotest.(check (list string)) (label ^ ": no continuation") []
+         (List.map describe_hint hints);
+       Alcotest.(check (list string)) (label ^ ": no decision") [] rows)
+    [ "only an answer was saved", resume_chat_operation,
+        Agent_core.Agent.After_assistant_collected, Wrote
+    ; "tool-results write was stale", resume_chat_operation,
+        Agent_core.Agent.After_tool_results_appended, Wrote_nothing
+    ; "tool-results write failed", resume_chat_operation,
+        Agent_core.Agent.After_tool_results_appended, Write_failed
+    ; "a heartbeat cycle restarts", Driver.Restart_cycle,
+        Agent_core.Agent.After_tool_results_appended, Wrote
+    ]
+;;
+
+let test_guarded_terminal_and_nonempty_truncation_controls_do_not_resume () =
+  List.iter
+    (fun (label, content, stop_reason) ->
+       let error = guarded_accept_rejection ~content stop_reason in
+       let route = Keeper_runtime_failure_route.route_of_error
+           ~boundary:Keeper_runtime_failure_route.Masc_execution error in
+       Alcotest.(check bool) (label ^ ": no same-path retry") false
+         (Keeper_runtime_failure_route.route_resumes_on_same_path route);
+       let core_route = Keeper_runtime_failure_route.route_of_error
+           ~boundary:Keeper_runtime_failure_route.Agent_core_execution error in
+       Alcotest.(check bool) (label ^ ": other accept errors keep their core boundary")
+         true
+         (core_route = Keeper_runtime_failure_route.Exhausted_visible_alive
+            { terminal = Keeper_runtime_failure_route.Internal_opaque });
+       let result, hints, rows =
+         same_path_walk ~continuation:resume_chat_operation [ "only" ]
+           (fun ~save _candidate ->
+              save Agent_core.Agent.After_tool_results_appended Wrote;
+              error)
+       in
+       Alcotest.(check (list string)) (label ^ ": no continuation") []
+         (List.map describe_hint hints);
+       Alcotest.(check (list string)) (label ^ ": no decision") [] rows;
+       Alcotest.(check (result string string)) (label ^ ": error retained")
+         (Error (Agent_core.Error.to_string error))
+         (Result.map_error Agent_core.Error.to_string result))
+    [ "refusal", [], Llm_provider.Types.Refusal
+    ; "content filter", [], Llm_provider.Types.ContentFilter
+    ; "repetition truncation", [], Llm_provider.Types.RepetitionTruncation
+    ; "blank-only truncation", [ Agent_core.Types.Text " \n" ], Llm_provider.Types.MaxTokens
+    ; "thinking-only truncation",
+        [ Agent_core.Types.Thinking { signature = None; content = "private" } ],
+        Llm_provider.Types.MaxTokens
+    ; "partial-content truncation", [ Agent_core.Types.Text "partial" ],
+        Llm_provider.Types.MaxTokens
+    ]
+;;
+
+let test_guarded_empty_truncation_requires_owner_carrier_at_core_boundary () =
+  let module Foreign = struct
+    type Agent_core.Error.carrier += Value
+  end in
+  let typed = guarded_accept_rejection Llm_provider.Types.MaxTokens in
+  let message = Agent_core.Error.to_string typed in
+  let plain = Agent_core.Error.Internal message in
+  let foreign = Agent_core.Error.Internal_carried { message; carrier = Foreign.Value } in
+  let altered_message =
+    match typed with
+    | Agent_core.Error.Internal_carried value ->
+      Agent_core.Error.Internal_carried { value with message = "not an encoded envelope" }
+    | Agent_core.Error.Api _ | Agent_core.Error.Provider _
+    | Agent_core.Error.Agent _ | Agent_core.Error.Mcp _
+    | Agent_core.Error.Config _ | Agent_core.Error.Serialization _
+    | Agent_core.Error.Io _ | Agent_core.Error.Orchestration _
+    | Agent_core.Error.Internal _ -> Alcotest.fail "producer lost its own typed carrier"
+  in
+  List.iter
+    (fun (label, error, expected) ->
+       let route = Keeper_runtime_failure_route.route_of_error
+           ~boundary:Keeper_runtime_failure_route.Agent_core_execution error in
+       Alcotest.(check bool) label expected
+         (Keeper_runtime_failure_route.route_resumes_on_same_path route))
+    [ "actual owner carrier", typed, true
+    ; "plain serialized text", plain, false
+    ; "foreign carrier message", foreign, false
+    ; "owner value ignores altered message", altered_message, true
+    ];
+  let persisted_route = Keeper_runtime_failure_route.route_of_error
+      ~boundary:Keeper_runtime_failure_route.Masc_execution plain in
+  Alcotest.(check bool) "existing explicit MASC persisted boundary is retained"
+    true (Keeper_runtime_failure_route.route_resumes_on_same_path persisted_route)
+;;
+
 let test_deterministic_empty_stops_do_not_resume_after_saved_tool_results () =
   List.iter
     (fun stop_reason ->
@@ -7072,6 +7227,22 @@ let () =
             "a chat operation resumes after an attributed empty completion"
             `Quick
             test_a_chat_operation_resumes_after_attributed_empty_completion;
+          Alcotest.test_case
+            "guarded empty MaxTokens resumes the saved operation"
+            `Quick
+            test_guarded_empty_max_tokens_resumes_saved_operation;
+          Alcotest.test_case
+            "guarded empty MaxTokens still requires saved operation progress"
+            `Quick
+            test_guarded_empty_max_tokens_still_requires_saved_operation_progress;
+          Alcotest.test_case
+            "guarded terminal and nonempty truncation controls do not resume"
+            `Quick
+            test_guarded_terminal_and_nonempty_truncation_controls_do_not_resume;
+          Alcotest.test_case
+            "guarded empty truncation requires its owner carrier at the core boundary"
+            `Quick
+            test_guarded_empty_truncation_requires_owner_carrier_at_core_boundary;
           Alcotest.test_case
             "deterministic empty stops do not resume after saved tool results"
             `Quick

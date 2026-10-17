@@ -233,7 +233,8 @@ arguments and source-to-expanded leaf mapping for later durable evidence.
 Inline parents refuse async children as `async_child_requires_suspension`.
 Async parents use the native submission and result operands described above;
 an async request receipt is not a child result. Within async parents, named Skills
-and expanded inline leaves admit static read-only ordinary Tool contracts and the isolated
+and expanded inline leaves admit static read-only ordinary Tool contracts, owned
+Ask questions (`masc_ask`), and the isolated
 owned-job launch producer with its Serial durable ownership. An async child can
 start its own job, wait for its original result and export its complete output.
 Fresh continuation reuses the settled launch instead of dispatching it again.

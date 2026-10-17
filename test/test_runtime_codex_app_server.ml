@@ -7672,15 +7672,6 @@ let run_cost_ledger_turn ?(after_turn = ignore) ~base_path ~trace_id ~cli_path (
     ~turn_instructions:None
 ;;
 
-(* A Codex turn the usage limit ends has already paid for two model
-   responses. The thread's count reaches the ledger as each frame is read,
-   so the count the turn ended on is there although the turn failed; before,
-   a failed official-client turn wrote no row at all. The repeated frame
-   states the same count, which adds nothing to a spend resolved from it. *)
-(* The turn ended on a compaction estimate (8 of 2,709 completed Codex
-   turns, 2026-09-23..25). Its occupancy is the estimate with no cache split
-   and no output, not a request of zero input; the spend is still the
-   thread count. *)
 (* The production Keeper turn appends the clause its response policy chose to
    an autonomous wake input. Without a world observation the policy requires
    progress, so the Codex turn input ends with that clause. *)
@@ -7736,6 +7727,10 @@ let test_production_wake_input_carries_the_completion_clause () =
               (String.ends_with ~suffix:clause turn_input)))
 ;;
 
+(* The turn ended on a compaction estimate (8 of 2,709 completed Codex
+   turns, 2026-09-23..25). Its occupancy is the estimate with no cache split
+   and no output, not a request of zero input; the spend is still the
+   thread count. *)
 let test_production_keeper_takes_a_compaction_estimate_as_occupancy () =
   let base_path = temp_workspace "masc-codex-production-estimate-" in
   Fun.protect

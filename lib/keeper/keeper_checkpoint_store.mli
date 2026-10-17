@@ -197,9 +197,10 @@ val load_agent_core_for_save :
   (Agent_core.Checkpoint.t, checkpoint_load_error) result
 
 (** Drops what the store keeps for [keeper_name]'s checkpoints under
-    [session_root]: no turn of an unregistered Keeper starts from it. When
-    [session_root] no longer resolves, it drops what it keeps for every
-    Keeper of that name. *)
+    [session_root], or for every Keeper of that name when [session_root] no
+    longer resolves. A save still running keeps its value again afterwards:
+    the decode of the bytes it wrote, handed out only while the file keeps
+    that identity (#43575). *)
 val forget_written_lineages : session_root:string -> keeper_name:string -> unit
 
 (** Message count of the canonical checkpoint for [session_id]. Answered

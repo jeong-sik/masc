@@ -2289,8 +2289,7 @@ let keeper_meta_fixture keeper_name =
   | Error detail -> fail ("keeper meta fixture failed: " ^ detail)
 ;;
 
-(* No turn of an unregistered Keeper starts from its kept value, so the
-   registry's unregistration drops it. *)
+(* The registry's unregistration drops the Keeper's kept value. *)
 let test_unregistering_a_keeper_drops_its_written_value () =
   Eio_main.run @@ fun env ->
   ensure_fs env;

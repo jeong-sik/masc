@@ -921,7 +921,9 @@ let finish_unregistration entry =
   Atomic.set entry.fiber_wakeup true;
   if entry.phase = Running then decr_running_count_clamped ();
   (* The checkpoint store keeps each Keeper's last written or read history for
-     its next turn. No turn of an unregistered Keeper starts from it. *)
+     its next turn; unregistering drops it. A save still running keeps its
+     value again afterwards: the decode of the bytes it wrote, handed out only
+     while the file keeps that identity (#43575). *)
   Keeper_checkpoint_store.forget_written_lineages
     ~session_root:(Keeper_fs.session_store_path_for_base_path entry.base_path)
     ~keeper_name:entry.name

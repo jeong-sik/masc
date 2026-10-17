@@ -1616,6 +1616,151 @@ let test_preparation_cache_does_not_own_retired_inputs () =
   check int "the independently owned source remains usable" 1 (List.length (Snapshot.entries active_source))
 ;;
 
+let test_preparation_observes_actual_cold_and_reused_products () =
+  Eio_main.run @@ fun _ ->
+  let module O = Masc.Keeper_skill_preparation_observation in
+  let frozen = cache_scenario_snapshot "observed-products" in
+  let descriptors = Masc.Keeper_tool_descriptor.all_descriptors () in
+  let reports = ref [] in
+  let result = O.capture_result ~on_report:(fun report -> reports := report :: !reports) (fun () ->
+    let first = preparation_for_cache_scenario ~snapshot:frozen ~descriptors in
+    let again = preparation_for_cache_scenario ~snapshot:frozen ~descriptors:(List.map Fun.id descriptors) in
+    check bool "measurement retains actual product sharing" true (first == again);
+    Ok ()) in
+  check bool "measurement retains the operation result" true (result = Ok ());
+  let report = match !reports with [report] -> report | _ -> fail "one complete preparation report expected" in
+  check bool "actual fiber coverage" true (report.coverage = O.Fiber_capture);
+  let count component decision = List.filter (fun (sample : O.sample) ->
+      sample.component = component && sample.decision = Some decision) report.samples |> List.length in
+  check int "one actual projection construction" 1 (count O.Projection O.Constructed);
+  check int "one actual projection reuse" 1 (count O.Projection O.Reused);
+  check int "one actual full product construction" 1 (count O.Task_product O.Constructed);
+  check int "one actual full product reuse" 1 (count O.Task_product O.Reused);
+  check int "both retained surface uses are distinct from cache lookups" 2 (count O.Retained_turn_surface O.Reused);
+  List.iter (fun (sample : O.sample) ->
+    check bool "only this original source is sampled" true
+      (sample.snapshot_revision = Snapshot.snapshot_revision frozen);
+    check bool "sample completion is actual, within this capture" true
+      (match sample.finished_ns with Some finished -> sample.entered_ns <= finished && finished <= report.elapsed_ns | None -> false);
+    match sample.component with
+    | O.Retained_turn_surface ->
+      check bool "retained handles do not invent a lock acquisition" true (Option.is_none sample.lock_acquired_ns)
+    | O.Projection | O.Task_product ->
+      check bool "actual lookup and acquisition precede the decision" true
+        (match sample.lookup_finished_ns,sample.lock_acquired_ns,sample.decision_ns with
+         | Some lookup,Some acquired,Some decided -> sample.entered_ns <= lookup && lookup <= acquired && acquired <= decided
+         | _ -> false)) report.samples
+;;
+
+let test_preparation_capture_isolates_nested_work_and_preserves_cancellation () =
+  Eio_main.run @@ fun _ ->
+  let module O = Masc.Keeper_skill_preparation_observation in
+  let descriptors = Masc.Keeper_tool_descriptor.all_descriptors () in
+  let outer = cache_scenario_snapshot "outer-observation" and inner = cache_scenario_snapshot "inner-observation" in
+  let reports = ref [] in
+  let capture name operation = O.capture_result ~on_report:(fun report -> reports := (name,report)::!reports) operation in
+  (try
+    Eio.Cancel.sub (fun context ->
+      ignore (capture "outer" (fun () ->
+        ignore (preparation_for_cache_scenario ~snapshot:outer ~descriptors);
+        ignore (capture "inner" (fun () ->
+          ignore (preparation_for_cache_scenario ~snapshot:inner ~descriptors); Ok ()));
+        Eio.Cancel.cancel context Exit;
+        Eio.Fiber.yield ();
+        Ok ()))
+    );
+    fail "caller cancellation was swallowed"
+   with Eio.Cancel.Cancelled _ -> ());
+  let outside = List.assoc "outer" !reports and inside = List.assoc "inner" !reports in
+  check bool "cancelled outer work is not reported as success" true (outside.outcome = O.Cancelled);
+  check bool "settled nested work keeps its own result" true (inside.outcome = O.Returned);
+  List.iter (fun (sample : O.sample) -> check bool "nested work cannot borrow outer clock or source" true
+    (sample.snapshot_revision = Snapshot.snapshot_revision inner)) inside.samples;
+  List.iter (fun (sample : O.sample) ->
+    check bool "original samples survive cancellation without nested attribution" true
+      (sample.snapshot_revision = Snapshot.snapshot_revision outer && sample.outcome = O.Returned)) outside.samples;
+  let unreadable = Snapshot.config_unreadable ~detail:"fixture unavailable" in
+  let failed = O.capture_result ~on_report:(fun report -> reports := ("error",report)::!reports)
+      (fun () -> Selection.resolve ~snapshot:unreadable
+        [(match Snapshot.entries outer with entry::_ -> Snapshot.entry_reference entry | [] -> fail "missing fixture entry")]) in
+  check bool "a typed preparation error stays an error" true (Result.is_error failed);
+  let error = List.assoc "error" !reports in
+  check bool "failure before cache access is not an empty successful preparation" true
+    (error.outcome = O.Returned_error && error.samples = []);
+  let left_entered,enter_left = Eio.Promise.create () and right_entered,enter_right = Eio.Promise.create () in
+  Eio.Fiber.both
+    (fun () -> ignore (capture "left" (fun () ->
+      ignore (preparation_for_cache_scenario ~snapshot:outer ~descriptors);
+      Eio.Promise.resolve enter_left ();
+      Eio.Promise.await right_entered;
+      Ok ())))
+    (fun () -> ignore (capture "right" (fun () ->
+      ignore (preparation_for_cache_scenario ~snapshot:inner ~descriptors);
+      Eio.Promise.resolve enter_right ();
+      Eio.Promise.await left_entered;
+      Ok ())));
+  List.iter (fun (name,source) ->
+    let report = List.assoc name !reports in
+    check bool "overlapping original work retains its own settled capture" true
+      (report.outcome = O.Returned && report.samples <> []);
+    List.iter (fun (sample : O.sample) ->
+      check bool "parallel work cannot borrow sibling source or clock scope" true
+        (sample.snapshot_revision = Snapshot.snapshot_revision source)) report.samples)
+    ["left",outer;"right",inner]
+;;
+
+let test_preparation_manifest_retains_original_turn_and_private_boundaries () =
+  Eio_main.run @@ fun _ ->
+  Eio.Switch.run @@ fun sw ->
+  let module R = Masc.Keeper_skill_preparation_runtime_observation in
+  let module M = Masc.Keeper_runtime_manifest in
+  let root = Filename.temp_file "masc-preparation-observation-" "" in
+  Sys.remove root;
+  Fs_compat.mkdir_p root;
+  Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree root);
+  let config = Masc.Workspace.default_config root in
+  let keeper_name = "observed" in
+  let turn_ref = Ids.Turn_ref.make ~trace_id:"original-preparation-trace" ~absolute_turn:7 in
+  let frozen = cache_scenario_snapshot "persisted-observation" in
+  let descriptors = Masc.Keeper_tool_descriptor.all_descriptors () in
+  let selection = match R.with_turn_result ~config ~keeper_name ~turn_ref ~phase:R.Direct_task_resolution
+      (fun () -> Selection.resolve ~descriptors ~snapshot:frozen []) with
+    | Ok selection -> selection | Error error -> fail (Selection.error_to_string error) in
+  ignore (R.with_turn_result ~config ~keeper_name ~turn_ref ~phase:R.Executable_setup
+    (fun () -> Ok (Selection.prepare_surface ~snapshot:frozen ~descriptors selection)));
+  let path = M.path_for_trace config ~keeper_name ~trace_id:(Ids.Turn_ref.trace_id turn_ref) in
+  let rows = In_channel.with_open_bin path In_channel.input_lines |> List.map (fun line ->
+    match M.decode_persisted_row (Yojson.Safe.from_string line) with
+    | Ok (M.Active_row row) -> row
+    | Ok (M.Unsupported_row _) | Error _ -> fail "actual preparation row did not decode") in
+  check int "one record per actual resolution/setup boundary" 2 (List.length rows);
+  List.iter (fun (row : M.t) ->
+    check bool "original identity and event survive durable readback" true
+      (row.event = M.Skill_preparation_observed && row.trace_id = Ids.Turn_ref.trace_id turn_ref && row.keeper_turn_id = Some 7);
+    let public = M.public_to_json row in
+    check string "public observation retains the original turn reference"
+      (Ids.Turn_ref.to_string turn_ref)
+      Yojson.Safe.Util.(public |> member "decision" |> member "skill_preparation" |> member "turn_ref" |> to_string)) rows;
+  check bool "observations do not prove turn completion" false (M.is_finished_turn rows);
+  let module Scan = Masc.Server_dashboard_http_keeper_runtime_manifest_scan in
+  let scan = List.fold_left Scan.update_runtime_manifest_scan
+      (Scan.make_runtime_manifest_scan ~path ~limit:(List.length rows)
+        ~scan_line_limit:(List.length rows) ~scan_scope:"test") rows in
+  check int "preparation records do not count as context injection" 0 scan.context_injected_count;
+  check int "the direct consumer retains actual preparation records" 2
+    (Hashtbl.find scan.event_counts "skill_preparation_observed");
+  let edges = Masc.Server_dashboard_http_keeper_runtime_lens_clock_edges.clock_edge_jsons scan in
+  check int "actual preparation clock edges survive the API projection" 2 (List.length edges);
+  List.iter (fun edge -> check bool "wall-clock row timestamps do not become measured edges" true
+    Yojson.Safe.Util.(member "started_at" edge = `Null && member "finished_at" edge = `Null)) edges;
+  let public = M.public_projection_of_decision (`Assoc ["skill_preparation",`Assoc
+      ["phase",`String "fixture";"document_body",`String "PRIVATE_BODY"
+      ;"samples",`List [`Assoc ["component",`String "projection";"tool_input",`String "PRIVATE_INPUT"]]]]) in
+  check bool "new public scope omits document text and Tool input" true
+    Yojson.Safe.Util.(member "skill_preparation" public |> fun payload ->
+      member "document_body" payload = `Null && member "tool_input" (payload |> member "samples" |> to_list |> List.hd) = `Null)
+;;
+
 let () =
   run
     "Keeper Task Skill frozen exact selection"
@@ -1644,6 +1789,12 @@ let () =
             test_simultaneous_cold_preparation_is_shared
         ; test_case "preparation cache does not own retired inputs" `Quick
             test_preparation_cache_does_not_own_retired_inputs
+        ; test_case "preparation observes actual cold and reused products" `Quick
+            test_preparation_observes_actual_cold_and_reused_products
+        ; test_case "preparation capture isolates nested work and preserves cancellation" `Quick
+            test_preparation_capture_isolates_nested_work_and_preserves_cancellation
+        ; test_case "preparation manifest retains original turn and private boundaries" `Quick
+            test_preparation_manifest_retains_original_turn_and_private_boundaries
         ; test_case "exact ref consumer rejects name fallback" `Quick
             test_exact_reference_consumer_rejects_name_fallback
         ; test_case "resolved body remains frozen" `Quick

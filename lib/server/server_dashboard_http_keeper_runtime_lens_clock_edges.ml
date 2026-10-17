@@ -80,6 +80,7 @@ let event_started_at (row : manifest_row) =
   | Keeper_runtime_manifest.Checkpoint_loaded ->
     Some row.Keeper_runtime_manifest.ts
   | Keeper_runtime_manifest.Runtime_completed
+  | Keeper_runtime_manifest.Skill_preparation_observed
   | Keeper_runtime_manifest.Runtime_failed
   | Keeper_runtime_manifest.Checkpoint_saved
   | Keeper_runtime_manifest.Pre_dispatch_blocked
@@ -97,6 +98,7 @@ let event_finished_at (row : manifest_row) =
   | Keeper_runtime_manifest.Turn_finished ->
     Some row.Keeper_runtime_manifest.ts
   | Keeper_runtime_manifest.Turn_started
+  | Keeper_runtime_manifest.Skill_preparation_observed
   | Keeper_runtime_manifest.Phase_gate_decided
   | Keeper_runtime_manifest.Runtime_routed
   | Keeper_runtime_manifest.Runtime_execution_built
@@ -126,6 +128,7 @@ let clock_edge_json ~idx (row : manifest_row) =
     | Keeper_runtime_manifest_types.Pre_dispatch_blocked
     | Keeper_runtime_manifest_types.Context_injected
     | Keeper_runtime_manifest_types.History_projection_observed
+    | Keeper_runtime_manifest_types.Skill_preparation_observed
     | Keeper_runtime_manifest_types.Event_bus_correlated
     | Keeper_runtime_manifest_types.Checkpoint_loaded
     | Keeper_runtime_manifest_types.Checkpoint_saved
@@ -144,6 +147,7 @@ let clock_edge_json ~idx (row : manifest_row) =
     | Keeper_runtime_manifest_types.Provider_lane_resolved
     | Keeper_runtime_manifest_types.Context_injected
     | Keeper_runtime_manifest_types.History_projection_observed
+    | Keeper_runtime_manifest_types.Skill_preparation_observed
     | Keeper_runtime_manifest_types.Event_bus_correlated
     | Keeper_runtime_manifest_types.Receipt_appended | Keeper_runtime_manifest_types.Turn_finished -> clock_string row "checkpoint_id"
   in
@@ -174,6 +178,7 @@ let clock_edge_json ~idx (row : manifest_row) =
     | Keeper_runtime_manifest_types.Context_injected
     | Keeper_runtime_manifest_types.History_projection_observed
     | Keeper_runtime_manifest_types.Checkpoint_loaded
+    | Keeper_runtime_manifest_types.Skill_preparation_observed
     | Keeper_runtime_manifest_types.Checkpoint_saved
     | Keeper_runtime_manifest_types.Receipt_appended | Keeper_runtime_manifest_types.Turn_finished -> None
   in
@@ -190,6 +195,7 @@ let clock_edge_json ~idx (row : manifest_row) =
     | Keeper_runtime_manifest_types.Context_injected
     | Keeper_runtime_manifest_types.History_projection_observed
     | Keeper_runtime_manifest_types.Checkpoint_loaded
+    | Keeper_runtime_manifest_types.Skill_preparation_observed
     | Keeper_runtime_manifest_types.Checkpoint_saved
     | Keeper_runtime_manifest_types.Receipt_appended | Keeper_runtime_manifest_types.Turn_finished -> []
   in

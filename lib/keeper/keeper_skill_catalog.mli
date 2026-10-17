@@ -202,6 +202,7 @@ val prepare_snapshot :
 val prepared_matches :
   prepared -> descriptors:Keeper_tool_descriptor.t list -> Skill_catalog_snapshot.t -> bool
 val prepared_snapshot : prepared -> Skill_catalog_snapshot.t
+val prepared_descriptor_count : prepared -> int
 val prepared_catalog : prepared -> t * projection_diagnostic list
 val project_prepared_entry : prepared -> Skill_catalog_snapshot.entry -> entry_projection
 (** Look up a retained projection by exact identity and reuse it only for the

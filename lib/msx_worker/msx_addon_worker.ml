@@ -20,18 +20,34 @@ let response ?(extra_content = []) result : S.tool_result =
         | Some (Tool_result.Operator_cancelled) -> ["io.github.jeong-sik/masc.machine.failure", `String "failed"] in
       Some (`Assoc (failure @ fields)) }
 
+(* What an exception that reached this edge leaves behind for the operator: the
+   exception and where it was raised. The result carries only the exception's
+   text, so without this line the raise site is lost. A log call can itself
+   raise (a terminal that hung up), and that must not replace the typed result
+   the caller is waiting for. *)
+let report_contained ~what exn backtrace =
+  try
+    Log.MsxLog.error "%s raised an unexpected exception: %s\n%s" what
+      (Printexc.to_string exn) (Printexc.raw_backtrace_to_string backtrace)
+  with
+  | Eio.Cancel.Cancelled _ as cancelled -> raise cancelled
+  | _ -> ()
+
 (* The one place an escaping exception becomes a result. This process owns the
    only machine and RAM-only state: an exception that leaves a handler ends the
    process and the machine with it, and container logs are not readable. The
    machine operations return typed results for the failures they know (a file
    that will not read, a ledger that will not write); what reaches this edge
    is a defect, reported as a runtime failure whose effect is unknown because
-   the exception may follow one. Cancellation is not a failure and passes. *)
+   the exception may follow one, and logged with its backtrace. Cancellation is
+   not a failure and passes. *)
 let contain ~tool_name ~start_time run =
   match run () with
   | result -> result
   | exception (Eio.Cancel.Cancelled _ as cancelled) -> raise cancelled
   | exception exn ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      report_contained ~what:tool_name exn backtrace;
       response (Tool_result.make_err ~tool_name ~start_time
         ~class_:Tool_result.Runtime_failure
         ~effect_disposition:Tool_result.Effect_outcome_unknown
@@ -41,7 +57,10 @@ let contain_message ~what run =
   match run () with
   | result -> result
   | exception (Eio.Cancel.Cancelled _ as cancelled) -> raise cancelled
-  | exception exn -> Error (what ^ " raised an unexpected exception: " ^ Printexc.to_string exn)
+  | exception exn ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      report_contained ~what exn backtrace;
+      Error (what ^ " raised an unexpected exception: " ^ Printexc.to_string exn)
 
 let screen ~tool_name ~start_time ~arguments =
   match Msx_lane.capture () with

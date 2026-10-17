@@ -216,6 +216,28 @@ let test_exception_boundary () =
   check_raises "cancellation is not a failure" (Eio.Cancel.Cancelled Exit)
     (fun () -> ignore (contain (fun () -> raise (Eio.Cancel.Cancelled Exit))))
 
+(* The result names the exception; the log keeps where it was raised. *)
+let test_exception_boundary_logs_the_raise_site () =
+  Printexc.record_backtrace true;
+  let marker = "boundary-log-marker-7f3a" in
+  let contains text needle =
+    let n = String.length needle in
+    let rec go i = i + n <= String.length text && (String.sub text i n = needle || go (i + 1)) in
+    go 0 in
+  ignore (Msx_addon_worker.contain ~tool_name:"masc_msx_screen"
+    ~start_time:(Tool_timing.start ()) (fun () -> failwith marker));
+  let logged =
+    Log.Ring.recent ~limit:50 ~module_filter:"Msx" ()
+    |> List.filter (fun (entry : Log.Ring.entry) -> contains entry.message marker) in
+  match logged with
+  | [ entry ] ->
+      check bool "it is an error line" true (entry.level = Log.Error);
+      check bool "it carries the raise site" true (contains entry.message "Raised at")
+  | entries ->
+      fail (Printf.sprintf "expected one log line for the exception, got %d" (List.length entries))
+
 let () = run "MSX standalone Add-on worker"
   ["stdio", [test_case "tool validation, screen and checkpoint lifecycle" `Quick test_stdio_machine_lifecycle];
-   "boundary", [test_case "an escaped exception becomes a result" `Quick test_exception_boundary]]
+   "boundary", [test_case "an escaped exception becomes a result" `Quick test_exception_boundary;
+                test_case "an escaped exception is logged with its raise site" `Quick
+                  test_exception_boundary_logs_the_raise_site]]

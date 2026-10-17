@@ -670,26 +670,23 @@ let note_count_per_schedule state schedule_id =
 ;;
 
 let append_note config ~schedule_id ~author_id ~author_kind ~body ~now =
-  let open Result in
-  let* state =
-    read_state_result config |> Result.map_error (fun read_err ->
-        Schedule_not_found)
-  in
-  match find_schedule state schedule_id with
-  | None -> Error Schedule_not_found
-  | Some _ ->
-    let note = make_note state ~schedule_id ~author_id ~author_kind ~body ~now in
-    let notes = state.notes @ [ note ] in
-    let next_state =
-      { version = state.version + 1
-      ; updated_at = now
-      ; schedules = state.schedules
-      ; wakes = state.wakes
-      ; notes
-      }
-    in
-    let* () = write_state config next_state in
-    Ok (note, note_count_per_schedule next_state schedule_id)
+  Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
+    let* state = load_for_mutation config in
+    match find_schedule state schedule_id with
+    | None -> Error Schedule_not_found
+    | Some _ ->
+      let note = make_note state ~schedule_id ~author_id ~author_kind ~body ~now in
+      let notes = state.notes @ [ note ] in
+      let next_state =
+        { version = state.version + 1
+        ; updated_at = now
+        ; schedules = state.schedules
+        ; wakes = state.wakes
+        ; notes
+        }
+      in
+      let* () = write_state config next_state in
+      Ok (note, note_count_per_schedule next_state schedule_id))
 ;;
 
 let is_due_wake_candidate (request : schedule_request) =

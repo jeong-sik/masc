@@ -27,7 +27,19 @@ def inspect_stream(path: Path) -> dict:
     messages = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
     if not messages or any(not isinstance(m, dict) for m in messages):
         raise KimiCodeProtocolError("Kimi Code emitted no message objects")
-    final = messages[-1]
+    conversation = []
+    for message in messages:
+        match message.get("role"):
+            case "meta":
+                if message.get("type") not in {"system.version", "session.resume_hint"}:
+                    raise KimiCodeProtocolError("Kimi Code emitted an unknown metadata event")
+            case "assistant" | "tool":
+                conversation.append(message)
+            case _:
+                raise KimiCodeProtocolError("Kimi Code emitted an unknown message role")
+    if not conversation:
+        raise KimiCodeProtocolError("Kimi Code emitted no conversation")
+    final = conversation[-1]
     if final.get("role") != "assistant" or final.get("tool_calls") or not final.get("content"):
         raise KimiCodeProtocolError("Kimi Code emitted no final assistant response")
     return {
@@ -93,7 +105,8 @@ class KimiCodeAgent(BaseInstalledAgent):
             f"p=Path({KIMI_CODE_HOME!r}); p.mkdir(parents=True,exist_ok=True); "
             f"(p/'config.toml').write_text({config!r})"
         )
-        env = {"KIMI_API_KEY": key, "KIMI_CODE_HOME": KIMI_CODE_HOME}
+        env = {"KIMI_API_KEY": key, "KIMI_CODE_HOME": KIMI_CODE_HOME,
+               "KIMI_CODE_NO_AUTO_UPDATE": "true"}
         await self.exec_as_agent(environment, "python3 -c " + shlex.quote(writer), env=env)
         skills = " --skills-dir " + shlex.quote(str(self.skills_dir)) if self.skills_dir else ""
         try:
@@ -110,4 +123,12 @@ class KimiCodeAgent(BaseInstalledAgent):
                 **(context.metadata or {}), "cli_version": self._version,
                 "model": self.model_name, "output_protocol": "stream-json",
             }
-        context.metadata["execution_evidence"] = inspect_stream(self.logs_dir / STREAM_NAME)
+        # Non-mounted environments publish logs only after run() returns.
+        # Download before inspecting; local Docker's mount is not the contract.
+        if not environment.capabilities.mounted:
+            await environment.download_file(
+                source_path=f"/logs/agent/{STREAM_NAME}",
+                target_path=self.logs_dir / STREAM_NAME,
+            )
+        evidence = inspect_stream(self.logs_dir / STREAM_NAME)
+        context.metadata.update(execution_evidence=evidence, tool_calls=evidence["tool_calls"])

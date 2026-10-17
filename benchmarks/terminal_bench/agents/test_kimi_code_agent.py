@@ -26,12 +26,14 @@ class BaselineEvidence(unittest.TestCase):
 
     def test_real_completed_exchange_keeps_execution_evidence(self):
         messages = [
+            {"role": "meta", "type": "system.version", "version": "2.2.0"},
             {"role": "assistant", "tool_calls": [{"id": "x"}]},
             {"role": "tool", "tool_call_id": "x", "content": "wrote result"},
             {"role": "assistant", "content": "Done"},
+            {"role": "meta", "type": "session.resume_hint", "session_id": "x"},
         ]
         evidence = self.inspect("\n".join(json.dumps(m) for m in messages))
-        self.assertEqual(evidence, {"messages": 3, "assistant_messages": 2,
+        self.assertEqual(evidence, {"messages": 5, "assistant_messages": 2,
                                     "tool_calls": 1, "tool_results": 1})
 
 

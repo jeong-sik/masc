@@ -292,7 +292,7 @@ let finalize
              let outcome, canonical_bytes =
                match save_result with
                | Ok (Keeper_checkpoint_store.Saved { canonical_bytes; _ }) ->
-                 "saved", Option.fold ~none:"unknown" ~some:string_of_int canonical_bytes
+                 "saved", string_of_int canonical_bytes
                | Ok (Keeper_checkpoint_store.Stale_noop _) -> "stale_noop", "unknown"
                | Error _ -> "error", "unknown"
              in

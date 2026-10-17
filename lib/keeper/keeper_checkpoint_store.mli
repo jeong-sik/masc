@@ -53,15 +53,15 @@ type save_agent_core_outcome =
   | Saved of
       { relation : save_agent_core_relation
       ; turn_count : int
-      ; canonical_bytes : int option
+      ; canonical_bytes : int
       }
   | Stale_noop of { incoming_turn_count : int; known_turn_count : int }
 
 (** Save [ckpt] in one locked disk-SSOT transaction. A missing [session_dir]
     is created by the durable writer, retaining the public create-first contract.
     [Saved] means payload, rename, and parent-directory fsync succeeded; history
-    is observed best effort. [canonical_bytes] comes from the file identity
-    already observed after the write; [None] means that observation failed.
+    is observed best effort. [canonical_bytes] is the size of the file the save
+    wrote, from that file's descriptor.
 
     [history_retained] is how many past checkpoints to leave beside the
     canonical one; zero writes no history at all. The caller reads it from
@@ -510,4 +510,14 @@ module For_testing : sig
     expected_source_ref:Keeper_checkpoint_ref.t ->
     Agent_core.Checkpoint.t ->
     checkpoint_installation
+
+  val save_agent_core_for_keeper_with_before_stage :
+    before_stage:(Keeper_fs.durable_write_stage -> unit) ->
+    keeper_name:string ->
+    session_dir:string ->
+    history_retained:int ->
+    Agent_core.Checkpoint.t ->
+    (save_agent_core_outcome, string) result
+  (** {!save_agent_core_for_keeper} with [before_stage] run just before each
+      filesystem step of the canonical write. *)
 end

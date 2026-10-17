@@ -369,7 +369,11 @@ let load_agent_core_history_file ~(session_dir : string) ~(snapshot_id : string)
    re-read and re-parsed the canonical file on every turn, 5.2 GB allocated
    per 4 minutes across the fleet, and every heartbeat did the same for one
    integer. The whole value of a file this process wrote is kept under the
-   same identity rule as [written_lineages] below. *)
+   same identity rule as [written_lineages] below, so a false match hands out
+   a stale history, not one integer. A save therefore takes the identity from
+   the file it wrote, never from the path afterwards. A writer that rewrites
+   the file in place and keeps its size and mtime (touch -r, rsync -t) would
+   still fool the rule. *)
 type canonical_identity =
   { device : int
   ; inode : int
@@ -476,7 +480,8 @@ let publish_summary_after_write ~canonical_path checkpoint =
    saves and the value of the bytes the file holds, which is what [of_string]
    gives for them -- the decode of the file, not a second truth, so the disk
    stays the only watermark (RFC-0225 §3.2). A save keeps what it wrote, under
-   the identity [publish_summary_after_write] samples under the session lock.
+   the identity of the file it wrote, taken from that file's descriptor
+   ([Keeper_fs.save_encoded_durable_atomic_from]).
    [load_agent_core_for_save] keeps what it read, with a memo the read filled
    ([Agent_core.Checkpoint.of_string_with_encoding_memo]), so the first save
    after a restart or after another writer encodes only the new messages. A
@@ -559,7 +564,13 @@ let keep_lineage ~canonical_path ~identity ~memo ~keeper_name written =
 
 let forget_written_lineages ~session_root ~keeper_name =
   match Unix.realpath session_root with
-  | exception Unix.Unix_error _ -> ()
+  | exception Unix.Unix_error (error, _, _) ->
+    (* The lineage stays until this Keeper saves under a new trace (#43575). *)
+    Log.Keeper.warn
+      "checkpoint lineage: cannot resolve %s to forget keeper=%s: %s"
+      session_root
+      keeper_name
+      (Unix.error_message error)
   | resolved ->
     let owner = { owner_session_root = resolved; owner_keeper = keeper_name } in
     Stdlib.Mutex.protect written_lineages_mutex (fun () ->
@@ -719,7 +730,7 @@ type save_agent_core_outcome =
   | Saved of
       { relation : save_agent_core_relation
       ; turn_count : int
-      ; canonical_bytes : int option
+      ; canonical_bytes : int
       }
   | Stale_noop of { incoming_turn_count : int; known_turn_count : int }
 
@@ -1637,6 +1648,175 @@ let retain_exact_snapshot_with ~write_checkpoint_bytes ~session_dir snapshot =
 let retain_exact_snapshot ~session_dir snapshot =
   retain_exact_snapshot_with ~write_checkpoint_bytes ~session_dir snapshot
 
+(* Who a save keeps a lineage for. Only a Keeper's own saves do; a save by a
+   tool or a test writes the file and keeps nothing. *)
+type save_lineage =
+  | Save_for_keeper of string
+  | Save_without_lineage
+
+(* The summary and the lineage are kept under the identity of the file this
+   save wrote, from its own descriptor ([written_file]). A stat of the path
+   after the rename would name whatever file is there by then. *)
+let save_outcome_after_write
+    ~session_dir ~canonical_path ~save_lineage ~memo ~written ~written_file ~known
+    ~history_retained ckpt
+  =
+  let identity = canonical_identity_of_stats written_file in
+  publish_summary ~canonical_path (summary_of_checkpoint ~identity ckpt);
+  (match save_lineage with
+   | Save_for_keeper keeper_name ->
+     keep_lineage ~canonical_path ~identity ~memo ~keeper_name written
+   | Save_without_lineage -> ());
+  archive_agent_core_history_best_effort ~session_dir ~retained:history_retained ckpt;
+  Ok
+    (Saved
+       { relation = save_relation ~known ~incoming:ckpt.turn_count
+       ; turn_count = ckpt.turn_count
+       ; canonical_bytes = identity.size
+       })
+
+let write_canonical_durably ~ownership_root path encoded_source =
+  Keeper_fs.save_encoded_durable_atomic_from ~ownership_root path encoded_source
+
+let save_agent_core_classified_typed
+    ~(write_canonical :
+       ownership_root:string ->
+       string ->
+       (unit -> string list) ->
+       (Unix.stats, Keeper_fs.durable_write_error) result)
+    ~save_lineage
+    ~(session_dir : string)
+    ~(history_retained : int)
+    (ckpt : Agent_core.Checkpoint.t)
+  : (save_agent_core_outcome, save_agent_core_error) result =
+  match Keeper_transcript_unit.validate ckpt.messages with
+  | Error structural -> Error (Structurally_invalid structural)
+  | Ok () ->
+  match Keeper_id.Trace_id.of_string ckpt.session_id with
+  | Error reason -> Error (Invalid_session_id reason)
+  | Ok trace_id ->
+    with_session_lock_typed ~session_dir (fun session_dir ->
+      let session_id = Keeper_id.Trace_id.to_string trace_id in
+      let canonical_path = agent_core_checkpoint_path ~session_dir ~session_id in
+      match
+        (* A canonical this binary supersedes carries no watermark to respect.
+           The load already refused it and started the keeper fresh, so nothing
+           in memory descends from it, and the write below replaces it -- under
+           the same durable session lock as every other write here. Reporting
+           it as unreadable instead made every save fail the same way forever,
+           because nothing ever replaced the file: a keeper whose workspace
+           predates the version bump could not checkpoint again until someone
+           deleted it by hand. *)
+        match known_watermark ~canonical_path with
+        | Error (Superseded_version { expected; got }) ->
+          Log.Keeper.warn
+            "AGENT_CORE checkpoint %s is version %d, superseded by %d; this \
+             turn's checkpoint replaces it"
+            canonical_path got expected;
+          Ok None
+        | (Error (Not_found | (Store_error _ | (Parse_error _ | (Newer_version _ | (Io_error _ | (Read_failed _ | Agent_core_error _)))))) | Ok _) as answer -> answer
+      with
+      | Error error -> Error (Existing_checkpoint_unreadable error)
+      | Ok (Some existing) when not (String.equal existing.session_id session_id) ->
+        Error
+          (Existing_checkpoint_unreadable
+             (Store_error
+                (Printf.sprintf
+                   "canonical checkpoint identity mismatch: expected=%s actual=%s"
+                   session_id existing.session_id)))
+      | Ok (Some existing) when ckpt.turn_count < existing.turn_count ->
+        Log.Keeper.warn
+          "stale AGENT_CORE checkpoint write skipped for %s: incoming turn_count=%d, last saved=%d"
+          ckpt.session_id ckpt.turn_count existing.turn_count;
+        Otel_metric_store.inc_counter
+          "masc_keeper_checkpoint_stale_noop_total"
+          ~labels:[("site", "store_watermark")]
+          ();
+        Ok
+          (Stale_noop
+             { incoming_turn_count = ckpt.turn_count
+             ; known_turn_count = existing.turn_count
+             })
+      | Ok existing ->
+        let known = Option.map (fun (w : watermark) -> w.turn_count) existing in
+        let ownership_root = Filename.dirname session_dir in
+        let memo =
+          match save_lineage with
+          | Save_for_keeper _ -> lineage_memo ~canonical_path
+          | Save_without_lineage -> Agent_core.Checkpoint.create_encoding_memo ()
+        in
+        (* What this save's encode returned, read only by this save. *)
+        let written = ref None in
+        let write payload =
+          written := None;
+          write_canonical
+            ~ownership_root
+            canonical_path
+            (fun () ->
+               let pieces, decoded =
+                 Agent_core.Checkpoint.to_pieces_with_encoding_memo memo payload
+               in
+               written := decoded;
+               pieces)
+        in
+        (match write ckpt with
+         | Ok written_file ->
+           save_outcome_after_write
+             ~session_dir ~canonical_path ~save_lineage ~memo ~written:!written ~written_file
+             ~known ~history_retained ckpt
+         (* #31677: a payload-encode refusal means the in-memory checkpoint
+            carries a json payload the v10 contract cannot encode — a
+            provider-authored duplicate key or non-finite float. Without
+            recovery the write refuses at this stage of every later turn,
+            which is what bricked keepers for hours on 2026-08-29. The
+            codec still rejects the original; this drop-and-retry-once
+            stores the recovered copy, so the keeper survives and the next
+            restart loads a clean checkpoint. Any other stage failure (or a
+            refusal with nothing droppable) keeps the original error. *)
+         | Error ({ stage = Keeper_fs.Payload_encode; _ } as error) -> (
+           match Agent_core.Checkpoint.drop_unencodable_json ckpt with
+           | None -> Error (Canonical_write_failed error)
+           | Some recovered ->
+             Log.Keeper.warn
+               "checkpoint payload unencodable (%s); storing the recovery \
+                copy with the offending json dropped for %s"
+               (Keeper_fs.durable_write_error_to_string error)
+               ckpt.session_id;
+             (match write recovered with
+              | Error retry_error -> Error (Canonical_write_failed retry_error)
+              | Ok written_file ->
+                save_outcome_after_write
+                  ~session_dir ~canonical_path ~save_lineage ~memo ~written:!written
+                  ~written_file ~known ~history_retained recovered))
+         | Error
+             ({ stage =
+                  ( Keeper_fs.Directory_prepare
+                  | Keeper_fs.Temp_file_create
+                  | Keeper_fs.Payload_write
+                  | Keeper_fs.Payload_fsync
+                  | Keeper_fs.Temp_file_close
+                  | Keeper_fs.Atomic_rename
+                  | Keeper_fs.Parent_directory_fsync_after_rename
+                  | Keeper_fs.Temp_directory_fsync_after_rename )
+              ; _
+              } as error) -> Error (Canonical_write_failed error)))
+
+let save_agent_core_classified
+    ~(session_dir : string) ~(history_retained : int) (ckpt : Agent_core.Checkpoint.t)
+  : (save_agent_core_outcome, string) result =
+  save_agent_core_classified_typed
+    ~write_canonical:write_canonical_durably
+    ~save_lineage:Save_without_lineage ~session_dir ~history_retained ckpt
+  |> Result.map_error save_agent_core_error_to_string
+
+let save_agent_core_for_keeper
+    ~keeper_name ~(session_dir : string) ~(history_retained : int) (ckpt : Agent_core.Checkpoint.t)
+  : (save_agent_core_outcome, string) result =
+  save_agent_core_classified_typed
+    ~write_canonical:write_canonical_durably
+    ~save_lineage:(Save_for_keeper keeper_name) ~session_dir ~history_retained ckpt
+  |> Result.map_error save_agent_core_error_to_string
+
 module For_testing = struct
   let with_before_history_link hook f =
     let previous = Atomic.exchange before_history_link_hook (Some hook) in
@@ -1742,159 +1922,15 @@ module For_testing = struct
       ~expected_source_ref
       candidate
   ;;
+
+  let save_agent_core_for_keeper_with_before_stage
+      ~before_stage ~keeper_name ~session_dir ~history_retained ckpt
+    =
+    save_agent_core_classified_typed
+      ~write_canonical:(fun ~ownership_root path encoded_source ->
+        Keeper_fs.For_testing.save_encoded_durable_atomic_from
+          ~before_stage ~ownership_root path encoded_source)
+      ~save_lineage:(Save_for_keeper keeper_name) ~session_dir ~history_retained ckpt
+    |> Result.map_error save_agent_core_error_to_string
+  ;;
 end
-
-(* Who a save keeps a lineage for. Only a Keeper's own saves do; a save by a
-   tool or a test writes the file and keeps nothing. *)
-type save_lineage =
-  | Save_for_keeper of string
-  | Save_without_lineage
-
-let save_outcome_after_write
-    ~session_dir ~canonical_path ~save_lineage ~memo ~written ~known ~history_retained ckpt
-  =
-  let identity = publish_summary_after_write ~canonical_path ckpt in
-  (match save_lineage, identity with
-   | Save_for_keeper keeper_name, Some identity ->
-     keep_lineage ~canonical_path ~identity ~memo ~keeper_name written
-   | Save_for_keeper _, None | Save_without_lineage, (Some _ | None) -> ());
-  let canonical_bytes = Option.map (fun identity -> identity.size) identity in
-  archive_agent_core_history_best_effort ~session_dir ~retained:history_retained ckpt;
-  Ok
-    (Saved
-       { relation = save_relation ~known ~incoming:ckpt.turn_count
-       ; turn_count = ckpt.turn_count
-       ; canonical_bytes
-       })
-
-let save_agent_core_classified_typed
-    ~save_lineage
-    ~(session_dir : string)
-    ~(history_retained : int)
-    (ckpt : Agent_core.Checkpoint.t)
-  : (save_agent_core_outcome, save_agent_core_error) result =
-  match Keeper_transcript_unit.validate ckpt.messages with
-  | Error structural -> Error (Structurally_invalid structural)
-  | Ok () ->
-  match Keeper_id.Trace_id.of_string ckpt.session_id with
-  | Error reason -> Error (Invalid_session_id reason)
-  | Ok trace_id ->
-    with_session_lock_typed ~session_dir (fun session_dir ->
-      let session_id = Keeper_id.Trace_id.to_string trace_id in
-      let canonical_path = agent_core_checkpoint_path ~session_dir ~session_id in
-      match
-        (* A canonical this binary supersedes carries no watermark to respect.
-           The load already refused it and started the keeper fresh, so nothing
-           in memory descends from it, and the write below replaces it -- under
-           the same durable session lock as every other write here. Reporting
-           it as unreadable instead made every save fail the same way forever,
-           because nothing ever replaced the file: a keeper whose workspace
-           predates the version bump could not checkpoint again until someone
-           deleted it by hand. *)
-        match known_watermark ~canonical_path with
-        | Error (Superseded_version { expected; got }) ->
-          Log.Keeper.warn
-            "AGENT_CORE checkpoint %s is version %d, superseded by %d; this \
-             turn's checkpoint replaces it"
-            canonical_path got expected;
-          Ok None
-        | (Error (Not_found | (Store_error _ | (Parse_error _ | (Newer_version _ | (Io_error _ | (Read_failed _ | Agent_core_error _)))))) | Ok _) as answer -> answer
-      with
-      | Error error -> Error (Existing_checkpoint_unreadable error)
-      | Ok (Some existing) when not (String.equal existing.session_id session_id) ->
-        Error
-          (Existing_checkpoint_unreadable
-             (Store_error
-                (Printf.sprintf
-                   "canonical checkpoint identity mismatch: expected=%s actual=%s"
-                   session_id existing.session_id)))
-      | Ok (Some existing) when ckpt.turn_count < existing.turn_count ->
-        Log.Keeper.warn
-          "stale AGENT_CORE checkpoint write skipped for %s: incoming turn_count=%d, last saved=%d"
-          ckpt.session_id ckpt.turn_count existing.turn_count;
-        Otel_metric_store.inc_counter
-          "masc_keeper_checkpoint_stale_noop_total"
-          ~labels:[("site", "store_watermark")]
-          ();
-        Ok
-          (Stale_noop
-             { incoming_turn_count = ckpt.turn_count
-             ; known_turn_count = existing.turn_count
-             })
-      | Ok existing ->
-        let known = Option.map (fun (w : watermark) -> w.turn_count) existing in
-        let ownership_root = Filename.dirname session_dir in
-        let memo =
-          match save_lineage with
-          | Save_for_keeper _ -> lineage_memo ~canonical_path
-          | Save_without_lineage -> Agent_core.Checkpoint.create_encoding_memo ()
-        in
-        (* What this save's encode returned, read only by this save. *)
-        let written = ref None in
-        let write payload =
-          written := None;
-          Keeper_fs.save_encoded_durable_atomic_from
-            ~ownership_root
-            canonical_path
-            (fun () ->
-               let pieces, decoded =
-                 Agent_core.Checkpoint.to_pieces_with_encoding_memo memo payload
-               in
-               written := decoded;
-               pieces)
-        in
-        (match write ckpt with
-         | Ok () ->
-           save_outcome_after_write
-             ~session_dir ~canonical_path ~save_lineage ~memo ~written:!written ~known
-             ~history_retained ckpt
-         (* #31677: a payload-encode refusal means the in-memory checkpoint
-            carries a json payload the v10 contract cannot encode — a
-            provider-authored duplicate key or non-finite float. Without
-            recovery the write refuses at this stage of every later turn,
-            which is what bricked keepers for hours on 2026-08-29. The
-            codec still rejects the original; this drop-and-retry-once
-            stores the recovered copy, so the keeper survives and the next
-            restart loads a clean checkpoint. Any other stage failure (or a
-            refusal with nothing droppable) keeps the original error. *)
-         | Error ({ stage = Keeper_fs.Payload_encode; _ } as error) -> (
-           match Agent_core.Checkpoint.drop_unencodable_json ckpt with
-           | None -> Error (Canonical_write_failed error)
-           | Some recovered ->
-             Log.Keeper.warn
-               "checkpoint payload unencodable (%s); storing the recovery \
-                copy with the offending json dropped for %s"
-               (Keeper_fs.durable_write_error_to_string error)
-               ckpt.session_id;
-             (match write recovered with
-              | Error retry_error -> Error (Canonical_write_failed retry_error)
-              | Ok () ->
-                save_outcome_after_write
-                  ~session_dir ~canonical_path ~save_lineage ~memo ~written:!written ~known
-                  ~history_retained recovered))
-         | Error
-             ({ stage =
-                  ( Keeper_fs.Directory_prepare
-                  | Keeper_fs.Temp_file_create
-                  | Keeper_fs.Payload_write
-                  | Keeper_fs.Payload_fsync
-                  | Keeper_fs.Temp_file_close
-                  | Keeper_fs.Atomic_rename
-                  | Keeper_fs.Parent_directory_fsync_after_rename
-                  | Keeper_fs.Temp_directory_fsync_after_rename )
-              ; _
-              } as error) -> Error (Canonical_write_failed error)))
-
-let save_agent_core_classified
-    ~(session_dir : string) ~(history_retained : int) (ckpt : Agent_core.Checkpoint.t)
-  : (save_agent_core_outcome, string) result =
-  save_agent_core_classified_typed
-    ~save_lineage:Save_without_lineage ~session_dir ~history_retained ckpt
-  |> Result.map_error save_agent_core_error_to_string
-
-let save_agent_core_for_keeper
-    ~keeper_name ~(session_dir : string) ~(history_retained : int) (ckpt : Agent_core.Checkpoint.t)
-  : (save_agent_core_outcome, string) result =
-  save_agent_core_classified_typed
-    ~save_lineage:(Save_for_keeper keeper_name) ~session_dir ~history_retained ckpt
-  |> Result.map_error save_agent_core_error_to_string

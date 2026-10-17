@@ -822,7 +822,7 @@ P4v 는 앞의 것들과 종류가 다르다. 옮긴 게 아니라 **필요 없�
 - 왕복 증명(8.5 P4b 가 2단계의 조건으로 둔 것): live 체크포인트 5개(60–214 MB)를 디코드한 값을 다시 인코딩하면 5개 모두 원래 바이트와 같았다. 다만 저장할 때 메모리에 있는 값은 디코드한 값과 다를 수 있다. wire 는 `ToolResult.json` 을 싣지 않는다.
 - 그래서 저장한 값을 재사용하지 않는다. 저장은 메시지마다 방금 쓴 바이트를 디코드한 레코드를 함께 만들고, 머리 필드도 자기 바이트에서 디코드해서, 쓴 바이트를 `of_string` 한 값을 돌려준다(`to_pieces_with_encoding_memo` 의 두 번째 값). `decode_current_json` 은 필드별로, 메시지는 `message_of_json` 을 배열에 대고 디코드하므로 조각의 디코드는 파일 전체의 디코드와 같다. 디코드하는 것은 새 메시지뿐이다.
 - 재시작이나 다른 쓰기 뒤의 턴은 파일을 읽는다. `of_string_with_encoding_memo` 는 `of_string` 처럼 디코드한 뒤, 메시지마다 저장 쪽 인코더로 다시 인코딩해 본다. 그 결과가 문서 안의 그 메시지 JSON 과 트리째 같을 때만(float 은 비트로, 필드는 순서대로) 그 레코드와 바이트를 memo 에 넣는다. 다른 빌드나 다른 writer 가 쓴 문서는 같은 메시지를 다른 바이트로 담을 수 있다(필드 순서, 인코더가 고쳐 쓰는 UTF-8). 그런 메시지와 저장 검사를 못 넘는 메시지는 빈 memo 일 때처럼 저장이 다시 인코딩한다. 그래서 읽은 뒤 첫 저장은 이 빌드의 인코더가 쓰는 바이트만 쓰고, 새 메시지와 그런 메시지만 인코딩한다.
-- 저장소: canonical 파일마다 lineage(그 memo, 파일이 담은 바이트의 디코드 값, 그 파일의 identity)를 둔다. keeper 의 저장(`save_agent_core_for_keeper`)은 쓴 값을, `load_agent_core_for_save`(keeper 턴과 official client host 의 거절 기록)는 읽은 값을 남긴다. 둘 다 keeper 이름을 받는다. 체크포인트의 `agent_name` 은 턴이 돈 런타임("agent_core-<runtime>")이라 같은 런타임의 keeper 끼리 겹치기 때문이다. 도구나 테스트의 저장(`save_agent_core_classified`)과 읽기만 하는 load(대시보드, Librarian, 상태 조회)는 아무것도 남기지 않는다. 어느 load 든 파일이 그 identity 이면 파일을 읽지 않고 그 값을 준다(`context` 는 복사본). identity 는 (device, inode, size, mtime) 이다. ctime 은 넣지 않는다. 저장 직후 history 스냅샷이 canonical 파일에 hard link 를 걸어 ctime 을 바꾸기 때문이다.
+- 저장소: canonical 파일마다 lineage(그 memo, 파일이 담은 바이트의 디코드 값, 그 파일의 identity)를 둔다. keeper 의 저장(`save_agent_core_for_keeper`)은 쓴 값을, `load_agent_core_for_save`(keeper 턴과 official client host 의 거절 기록)는 읽은 값을 남긴다. 둘 다 keeper 이름을 받는다. 체크포인트의 `agent_name` 은 턴이 돈 런타임("agent_core-<runtime>")이라 같은 런타임의 keeper 끼리 겹치기 때문이다. 도구나 테스트의 저장(`save_agent_core_classified`)과 읽기만 하는 load(대시보드, Librarian, 상태 조회)는 아무것도 남기지 않는다. 어느 load 든 파일이 그 identity 이면 파일을 읽지 않고 그 값을 준다(`context` 는 복사본). identity 는 (device, inode, size, mtime) 이다. 저장은 rename 뒤에 경로를 stat 하지 않고, 쓴 파일의 fd 를 fsync 뒤에 fstat 해서 얻는다. rename 은 inode·size·mtime 을 바꾸지 않으므로 그 사이 다른 writer 가 경로를 바꿔도 이 값은 자기 파일에만 묶인다. ctime 은 넣지 않는다. 저장 직후 history 스냅샷이 canonical 파일에 hard link 를 걸어 ctime 을 바꾸기 때문이다.
 - 하네스: 113 MB 사본 4개에서 keeper 4개가 6턴씩 돈다(불러오기 → 메시지 둘 → 저장). 네 체크포인트의 `agent_name` 은 운영처럼 같은 런타임 이름이다. 서버와 같은 pool 과 minor heap 을 쓰고, main 도메인의 probe 가 5 ms 씩 잠들며 늦게 깬 시간을 잰다. 첫 턴 넷이 한꺼번에 도는 것이 서버 재시작이다.
 
 세 번씩 잰 범위다.
@@ -844,6 +844,5 @@ P4v 는 앞의 것들과 종류가 다르다. 옮긴 게 아니라 **필요 없�
 - 비용: lineage 는 디코드한 히스토리와 인코딩 문자열(GC 가 훑지 않는 문자열)을 든다. 하네스에서는 파일 크기의 2.28배였다(113 MB 4개에 1,031 MB). live 16개(958 MB)라면 약 2.2 GB 다. keeper 하나에 lineage 하나다. 새 trace 로 저장하면 같은 keeper 의 앞 것을 버리고, keeper 를 등록 해제하면 버린다.
 - 남은 것:
   - CAS 경로는 문서 전체를 디코드하고 다시 인코딩한다(113 MB 에 약 3 s). lineage 를 쓰게 하면 이 비용과 다음 턴의 읽기가 없어진다.
-  - identity 는 rename 뒤에 경로를 stat 해서 뜬다. flock 을 잡지 않는 쓰기가 그 사이에 파일을 바꾸면 그 inode 에 이 값이 묶인다. 쓴 fd 를 fstat 하면 이 틈이 없어진다.
   - 같은 keeper 의 lineage 둘이 동시에 살아 있으면(턴 도중 trace 가 바뀔 때) 저장마다 서로를 버린다.
   - `Librarian_continuity_snapshot.prefix_sha256`(같은 창 5.9 GB)과 `Keeper_official_client_host.measure_message_bytes`(3.65 GB)는 이 memo 의 바이트를 쓸 수 있다.

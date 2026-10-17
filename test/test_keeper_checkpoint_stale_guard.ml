@@ -2152,6 +2152,48 @@ let test_a_file_rewritten_in_place_is_read_again () =
   check bool "the rewritten file was decoded again" true (reread.messages != kept.messages)
 ;;
 
+(* Another writer renames its own checkpoint over the canonical right after
+   this save's rename, before the save has finished. The save keeps its value
+   under the identity of the file it wrote, so the next load does not match
+   the other writer's file and reads it. *)
+let test_a_file_renamed_over_a_save_right_after_its_rename_is_read () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun _sw ->
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) @@ fun () ->
+  let sid = "renamed-over-a-save" in
+  let path = Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id:sid in
+  let foreign_bytes =
+    Agent_core.Checkpoint.to_string
+      { (make_checkpoint ~session_id:sid ~turn_count:1 ~marker:"the other writer") with
+        agent_name = shared_runtime_agent_name }
+  in
+  let replaced = ref false in
+  let replace_the_path () =
+    let foreign = path ^ ".foreign" in
+    Out_channel.with_open_bin foreign (fun oc -> output_string oc foreign_bytes);
+    Unix.rename foreign path;
+    replaced := true
+  in
+  (match
+     Keeper_checkpoint_store.For_testing.save_agent_core_for_keeper_with_before_stage
+       ~before_stage:(function
+         | Keeper_fs.Parent_directory_fsync_after_rename when not !replaced -> replace_the_path ()
+         | _ -> ())
+       ~keeper_name:kept_keeper ~history_retained:(history_retained ()) ~session_dir
+       { (make_checkpoint ~session_id:sid ~turn_count:1 ~marker:"this save") with
+         agent_name = shared_runtime_agent_name }
+   with
+   | Ok _ -> ()
+   | Error e -> fail ("save: " ^ e));
+  check bool "the other writer replaced the path during the save" true !replaced;
+  let loaded = load_or_fail ~session_dir ~session_id:sid "load after the replacement" in
+  check (list string) "the load holds the other writer's file"
+    [ "hello"; "the other writer" ]
+    (List.map Agent_core.Types.text_of_message loaded.messages)
+;;
+
 (* The saving side keeps changing its context after the save. A load must give
    what the file holds, not that table. *)
 let test_a_load_does_not_see_context_changes_made_after_the_save () =
@@ -2700,6 +2742,8 @@ let () =
             test_two_keepers_keep_their_written_values_side_by_side;
           test_case "a file rewritten in place is read again" `Quick
             test_a_file_rewritten_in_place_is_read_again;
+          test_case "a file renamed over a save right after its rename is read" `Quick
+            test_a_file_renamed_over_a_save_right_after_its_rename_is_read;
           test_case "a load does not see context changes made after the save" `Quick
             test_a_load_does_not_see_context_changes_made_after_the_save;
           test_case "a load for save keeps what it read" `Quick

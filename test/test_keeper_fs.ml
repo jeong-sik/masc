@@ -196,7 +196,7 @@ let test_durable_encoded_pieces_write_the_joined_bytes () =
        let path = Filename.concat base "encoded.json" in
        let pieces = [ "{\"a\":"; "1"; ",\"b\":\""; "\000\r\n\255 \xed\x95\x9c"; "\"}" ] in
        (match KF.save_encoded_durable_atomic_from path (fun () -> pieces) with
-        | Ok () -> ()
+        | Ok (_ : Unix.stats) -> ()
         | Error error -> fail (KF.durable_write_error_to_string error));
        check string "the file is the pieces joined" (String.concat "" pieces)
          (read_file path);
@@ -209,7 +209,7 @@ let test_durable_encoded_pieces_write_the_joined_bytes () =
         with
         | Error { renamed = false; stage = KF.Payload_encode; _ } -> ()
         | Error error -> fail (KF.durable_write_error_to_string error)
-        | Ok () -> fail "an encode refusal was published");
+        | Ok (_ : Unix.stats) -> fail "an encode refusal was published");
        check bool "a refused encode writes nothing" false (Sys.file_exists absent);
        (* An empty piece carries no bytes and does not end the payload early. *)
        let with_empty = Filename.concat base "empty-piece.txt" in
@@ -217,7 +217,7 @@ let test_durable_encoded_pieces_write_the_joined_bytes () =
           KF.save_encoded_durable_atomic_from with_empty (fun () ->
             [ "head"; ""; "tail" ])
         with
-        | Ok () -> ()
+        | Ok (_ : Unix.stats) -> ()
         | Error error -> fail (KF.durable_write_error_to_string error));
        check string "an empty piece is skipped" "headtail" (read_file with_empty))
 
@@ -376,6 +376,41 @@ let test_durable_write_post_publish_failure_reports_visible_target () =
          (Yojson.Safe.pretty_to_string json)
          (read_file path);
        check bool "renamed temp is absent" false (has_tmp_files base))
+
+(* Another writer renames its own file over the path right after this write's
+   rename. The stats the write returns name the file it wrote, not whatever
+   is at the path by then. *)
+let test_durable_write_returns_the_file_it_wrote_not_the_path () =
+  Eio_main.run
+  @@ fun _env ->
+  let base = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base)
+    (fun () ->
+       let path = Filename.concat base "durable.json" in
+       let payload = {|{"writer":"this write"}|} in
+       let foreign = {|{"writer":"another writer, longer bytes"}|} in
+       let result =
+         KF.For_testing.save_encoded_durable_atomic_from
+           ~before_stage:(function
+             | KF.Parent_directory_fsync_after_rename ->
+               let temp = Filename.concat base "foreign.json" in
+               Out_channel.with_open_bin temp (fun oc -> output_string oc foreign);
+               Unix.rename temp path
+             | _ -> ())
+           path
+           (fun () -> [ payload ])
+       in
+       match result with
+       | Error error ->
+         failf "durable write failed: %s" (KF.durable_write_error_to_string error)
+       | Ok written ->
+         let at_path = Unix.stat path in
+         check string "the path holds the other writer's file" foreign (read_file path);
+         check int "the returned size is this write's" (String.length payload)
+           written.Unix.st_size;
+         check bool "the returned inode is not the file at the path" true
+           (written.Unix.st_ino <> at_path.Unix.st_ino))
 
 let test_durable_write_uses_explicit_atomic_staging_directory () =
   Eio_main.run
@@ -649,6 +684,10 @@ let () =
             "post-publish failure reports visible target"
             `Quick
             test_durable_write_post_publish_failure_reports_visible_target;
+          test_case
+            "a write returns the file it wrote, not the path"
+            `Quick
+            test_durable_write_returns_the_file_it_wrote_not_the_path;
           test_case
             "explicit staging directory owns temp file"
             `Quick

@@ -88,9 +88,14 @@ let searxng_settings_path config_dir = Filename.concat config_dir searxng_settin
 
 (* What the container reads from [/etc/searxng]. JSON is on because masc's
    search tool asks for it; the limiter is off because the only client is this
-   host; the secret key is generated for this install. The container listens
-   on all of its own interfaces, and the host publishes the port on 127.0.0.1
-   only, so nothing outside this computer reaches it. *)
+   host; the secret key is generated for this install. There is deliberately
+   no [server.bind_address] or [server.port]: the image execs granian, which
+   takes its bind and port from [GRANIAN_HOST]/[GRANIAN_PORT] ([::]:8080 in
+   the image), and those two settings only apply to a direct
+   [python searx/webapp.py] run (docs.searxng.org settings/server). Measured
+   2026-10-17: the pinned image booted and answered /search on 8080 with
+   neither line present. [scripts/searxng-local.sh] writes the same text; a
+   test pins the two spellings equal. *)
 let searxng_settings ~secret_key =
   String.concat "\n"
     [ "use_default_settings: true"
@@ -101,8 +106,6 @@ let searxng_settings ~secret_key =
     ; "    - json"
     ; ""
     ; "server:"
-    ; "  bind_address: \"0.0.0.0\""
-    ; Printf.sprintf "  port: %d" searxng_container_port
     ; "  limiter: false"
     ; Printf.sprintf "  secret_key: \"%s\"" secret_key
     ; "" ]
@@ -110,9 +113,16 @@ let searxng_settings ~secret_key =
 let searxng_published_port = Masc_network_defaults.searxng_default_port
 
 let searxng_pull = ["docker"; "pull"; searxng_image]
+(* [--cap-drop ALL --security-opt no-new-privileges]: the entrypoint chowns
+   its mounts (failures on this read-only one are ignored noise) and execs
+   granian as the same uid, so no capability or privilege transition is
+   needed. Measured 2026-10-17 on the pinned image: boots, /healthz 200,
+   /search answers 20 results, with both flags. *)
 let searxng_run ~config_dir =
   ["docker"; "run"; "--detach"; "--name"; searxng_container_name;
    "--restart"; "unless-stopped";
+   "--cap-drop"; "ALL";
+   "--security-opt"; "no-new-privileges:true";
    "--publish"; Printf.sprintf "%s:%d:%d" Masc_network_defaults.searxng_published_host
                   searxng_published_port searxng_container_port;
    "--volume"; config_dir ^ ":/etc/searxng:ro"; searxng_image]

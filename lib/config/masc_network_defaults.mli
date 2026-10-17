@@ -148,6 +148,11 @@ val searxng_default_port : int
     container on it. *)
 
 val searxng_default_url : string
+(** The URL a client uses when nothing names one. It is the published
+    address and not [localhost], which may resolve to [::1] where another
+    program listens on the same port; it coincides with
+    {!searxng_published_url} today. An instance that only listens on [::1]
+    needs an explicit URL. *)
 
 val searxng_published_host : string
 (** The host address the SearXNG container is published on: [127.0.0.1], so

@@ -2794,6 +2794,18 @@ status: reference
   의존 관계를 따르며, 노드 사이의 새 모델 판단을 대신하지 않는다. 필요한 노드
   도구가 Keeper의 현재 표면에 없으면 합성 도구도 그 턴에 제공하지 않는다.
 
+**Isolated Job (격리 Job)**
+: `keeper_job_start`가 argv를 Docker 안에서 따로 돌리는 작업. 작업은 전용 작업 공간을 쓰고
+  네트워크·자격증명·Keeper 신원·호스트 작업 공간 마운트가 없다. 복사되는 것은 체크섬을
+  확인한 입력 artifact뿐이다. 시작하면 내구성 있는 `job_id`를 돌려주며, 이 핸들은 Keeper 턴과
+  서버 재시작을 넘어 남는다. 이후 도구는 그 정확한 `job_id`를 받는다 —
+  `keeper_job_status`(백엔드 상태를 대조하며 종결 증거를 저장할 수 있다)·`keeper_job_cancel`·
+  `keeper_job_result`(저장된 결과만 읽고 백엔드를 건드리지 않는다. 확정 전에는 `Deferred`).
+  시작이 확정되지 않았다고 같은 명령을 새로 시작하지 않는다 — 원래 핸들을 조회한다.
+  Composition이 이 작업을 시작하고 결과를 기다릴 수 있다.
+  → [Keeper_owned_job_store](../../lib/keeper/keeper_owned_job_store.mli) ·
+  [도구 정의](../../lib/tool_schemas/tool_schemas_owned_job.mli)
+
 **Ready-Wave Scheduler (레디 웨이브 스케줄러)**
 : 검증된 도구 실행 계획(Tool Plan) 및 Composition Skill의 DAG 노드를 동적으로 즉시 발송하고 분기 실패를 처리하는 스케줄링 엔진(#41815, task-2186).
   정적 레이어 배리어(static batch barrier)로 인해 독립 분기(B)가 다른 완료 분기(A→C)의 후속 실행을 가로막던 문제를 해소하고, 선언된 의존성(`after` 간선 및 상류 JSON 출력 참조)이 해결된 노드를 레디 웨이브(ready wave)로 즉시 디스패치한다.

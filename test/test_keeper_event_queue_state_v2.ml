@@ -2233,10 +2233,92 @@ let test_durable_enqueue_replays_write_and_signal_nothing () =
                      (Persistence.load_state_result ~base_path ~keeper_name
                       |> require_ok "read")))))))
 
+(* #43494. Registration reads the durable queue, then takes the lifecycle
+   key lock to install the entry. The test holds that lock, waits until
+   registration has started its read (the snapshot read counter moves), and
+   commits a source. The commit waits for that read to release the owner
+   lock, so the read cannot see it, and nothing is registered to publish to.
+   Released, registration installs an entry built from the earlier read; only
+   the read after the install brings the source in. *)
+let registration_meta keeper_name =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc [ "name", `String keeper_name; "activation_mode", `String "manual" ])
+  with
+  | Ok meta -> meta
+  | Error detail -> Alcotest.fail ("keeper meta fixture failed: " ^ detail)
+;;
+
+let wait_for_a_queue_read ~reads_before =
+  let rec wait remaining =
+    if Persistence.For_testing.snapshot_cache_reads () > reads_before then ()
+    else if remaining = 0 then Alcotest.fail "registration never read its queue"
+    else (
+      Eio.Fiber.yield ();
+      wait (remaining - 1))
+  in
+  wait 100_000
+;;
+
+let check_registration_sees_a_commit_before_its_install ~label register =
+  Eio_main.run @@ fun _env ->
+  with_temp_dir ("keeper-registration-race-" ^ label) (fun base_path ->
+    let base_path = Unix.realpath base_path in
+    let keeper_name = "registration-race" in
+    let meta = registration_meta keeper_name in
+    Eio.Switch.run @@ fun sw ->
+    let registered, set_registered = Eio.Promise.create () in
+    Masc.Keeper_lifecycle_reservation.with_key_lock ~base_path ~keeper_name (fun () ->
+      let reads_before = Persistence.For_testing.snapshot_cache_reads () in
+      Eio.Fiber.fork ~sw (fun () ->
+        Eio.Promise.resolve set_registered (register ~base_path keeper_name meta));
+      wait_for_a_queue_read ~reads_before;
+      match
+        Persistence.enqueue_stimulus_if_absent_result ~base_path ~keeper_name
+          (stimulus "committed-before-install" 1.0)
+      with
+      | Ok Persistence.Enqueued -> ()
+      | Ok Persistence.Already_present -> Alcotest.fail "the source was already queued"
+      | Error detail -> Alcotest.fail detail);
+    (match Eio.Promise.await registered with
+     | Ok () -> ()
+     | Error detail -> Alcotest.fail (label ^ ": " ^ detail));
+    match Registry_event_queue.snapshot_result ~base_path keeper_name with
+    | Error detail -> Alcotest.fail detail
+    | Ok queue ->
+      Alcotest.(check (list string))
+        (label ^ ": the installed entry holds the committed source")
+        [ "committed-before-install" ]
+        (post_ids queue))
+;;
+
+let test_registration_sees_a_commit_before_its_install () =
+  check_registration_sees_a_commit_before_its_install ~label:"register"
+    (fun ~base_path name meta ->
+       match Masc.Keeper_registry.register_offline_if_admitted ~base_path name meta with
+       | Ok (_ : Masc.Keeper_registry.registry_entry) -> Ok ()
+       | Error (_ : Masc.Keeper_registry.registration_error) -> Error "registration refused")
+;;
+
+let test_restart_registration_sees_a_commit_before_its_install () =
+  check_registration_sees_a_commit_before_its_install ~label:"restart"
+    (fun ~base_path name meta ->
+       match Masc.Keeper_registry.register_restarting ~base_path name meta with
+       | Ok (_ : Masc.Keeper_registry.registry_entry) -> Ok ()
+       | Error (_ : Masc.Keeper_registry.register_restarting_error) ->
+         Error "restart registration refused")
+;;
+
 let () =
   Alcotest.run
     "keeper pending queue current schema"
-    [ ( "scope binding"
+    [ ( "registration"
+      , [ Alcotest.test_case "a commit before the install reaches the entry" `Quick
+            test_registration_sees_a_commit_before_its_install
+        ; Alcotest.test_case "a commit before a restart install reaches the entry" `Quick
+            test_restart_registration_sees_a_commit_before_its_install
+        ] )
+    ; ( "scope binding"
       , [ Alcotest.test_case "atomic batch and idempotent replay" `Quick test_scope_batch_atomic_and_idempotent
         ; Alcotest.test_case "scheduling preserves; reincarnation clears" `Quick test_scope_preserved_by_scheduling_not_reincarnation
         ; Alcotest.test_case "strict optional codec" `Quick test_scope_codec_strict_optional_binding

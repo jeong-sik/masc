@@ -409,6 +409,28 @@ type registration_error =
       ; detail : string
       }
 
+(* Registration reads the durable pending queue before it installs the
+   entry, so a commit between that read and the install publishes to no
+   entry, or to the one being replaced, and the new entry misses the source
+   until the Keeper's next commit (#43494). Every commit publishes from
+   [after_commit] under the queue owner lock, so one more read under that
+   lock after the install leaves no gap: a commit is either in this read or
+   publishes to the installed entry. *)
+let reconcile_installed_event_queue ~base_path name (entry : registry_entry) =
+  match
+    Keeper_event_queue_persistence.with_pending_locked_result
+      ~base_path
+      ~keeper_name:name
+      (fun pending -> Atomic.set entry.event_queue pending)
+  with
+  | Ok () -> ()
+  | Error detail ->
+    Log.Keeper.warn
+      "registry: event queue re-read after install failed name=%s: %s"
+      name
+      detail
+;;
+
 let register_with_state_result
       ?lifecycle_token
       ?intake_token
@@ -593,6 +615,7 @@ let register_with_state_result
   | Error _ as error -> error
   | Ok () ->
     if phase = Running then Atomic.incr running_count_atomic;
+    reconcile_installed_event_queue ~base_path name entry;
     Log.Keeper.debug
       "registry: keeper registered name=%s running_count=%d"
       name
@@ -843,6 +866,7 @@ let register_restarting_internal ?lifecycle_token ?intake_token ~base_path name 
   match commit_result with
   | Error _ as error -> error
   | Ok registered ->
+    reconcile_installed_event_queue ~base_path name registered;
     Log.Keeper.info
       "registry: registering keeper name=%s base_path=%s phase=%s"
       name

@@ -292,7 +292,9 @@ let forget_snapshot path =
    leave a mismatch, and the replay crosses the barrier again as before. A
    write that failed before its rename left the confirmed snapshot in place.
    This rests on what [snapshot_cache] rests on: under the owner lock no other
-   writer replaces these files.
+   writer replaces these files. An inode number freed by a rename can be
+   reused; a new file on it whose size, mtime and ctime also matched would be
+   taken for the confirmed one, as [snapshot_cache] would take it.
 
    Keyed by snapshot path like [snapshot_cache]. *)
 type durable_confirmation =
@@ -986,6 +988,26 @@ let move_aside_undecodable_result ~base_path ~keeper_name ~rejected_path_of =
 
 let load_with_projection ~projection ~base_path ~keeper_name =
   load_state_result ~base_path ~keeper_name |> Result.map projection
+;;
+
+(* Every commit runs its [after_commit] under the owner lock, so [f] sees the
+   durable pending queue with no commit between the read and [f]. *)
+let with_pending_locked_result ~base_path ~keeper_name f =
+  match resolve_owner ~base_path ~keeper_name with
+  | Error _ as error -> error
+  | Ok owner ->
+    (try
+       Owner_lock.with_durable_lock owner (fun () ->
+         load_state_unlocked owner |> Result.map (fun state -> f (State.pending state)))
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Error
+         (Printf.sprintf
+            "event queue locked pending read raised keeper=%s path=%s: %s"
+            (keeper_name_of_owner owner)
+            (snapshot_path_of_owner owner)
+            (Printexc.to_string exn)))
 ;;
 
 let load_result ~base_path ~keeper_name =

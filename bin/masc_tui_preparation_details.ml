@@ -8,7 +8,7 @@ type target =
   ; revision : int
   ; keeper_name : string
   ; turn_ref : Ids.Turn_ref.t
-  ; operation_id : Masc.Keeper_operation_id.t option
+  ; operation_id : Keeper_operation_id.t option
   }
 
 let target ~journal ~execution_id ~reply_turn_ref =
@@ -16,7 +16,7 @@ let target ~journal ~execution_id ~reply_turn_ref =
   let* turn_ref, operation_id = match Log.source journal with
     | Log.Autonomous_turn turn_ref -> Ok (turn_ref, None)
     | Operation _ ->
-      let* operation_id = Masc.Keeper_operation_id.of_string execution_id in
+      let* operation_id = Keeper_operation_id.of_string execution_id in
       let* turn_ref = match reply_turn_ref with
         | None -> Error "원래 턴 연결이 기록되지 않음"
         | Some value -> (match Ids.Turn_ref.of_string value with
@@ -29,7 +29,7 @@ let equal a b =
   a.journal == b.journal && a.revision=b.revision
   && String.equal a.keeper_name b.keeper_name && Ids.Turn_ref.equal a.turn_ref b.turn_ref
   && (match a.operation_id, b.operation_id with
-    | Some a, Some b -> Masc.Keeper_operation_id.equal a b
+    | Some a, Some b -> Keeper_operation_id.equal a b
     | None, None -> true | Some _, None | None, Some _ -> false)
 ;;
 
@@ -96,11 +96,11 @@ let decode ~target json =
   let report_matches (report : Observation.report) =
     match target.operation_id, report.execution_scope with
     | Some expected, Some scope ->
-      `Matches (Option.exists (Masc.Keeper_operation_id.equal expected)
-        (Masc.Keeper_execution_scope_id.direct_operation_id scope))
+      `Matches (Option.exists (Keeper_operation_id.equal expected)
+        (Keeper_execution_scope_id.direct_operation_id scope))
     | Some _, None -> `Unlinked
     | None, None -> `Matches true
-    | None, Some scope -> `Matches (Option.is_none (Masc.Keeper_execution_scope_id.direct_operation_id scope)) in
+    | None, Some scope -> `Matches (Option.is_none (Keeper_execution_scope_id.direct_operation_id scope)) in
   let read_row (reports, issues, ids) raw =
     let reject issue = reports, issue::issues, ids in
     match Manifest.decode_persisted_row raw with

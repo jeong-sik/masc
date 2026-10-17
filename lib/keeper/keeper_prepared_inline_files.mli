@@ -7,8 +7,9 @@ type operation =
 
 val eligible : Keeper_tool_plan.t -> bool
 (** At least one leaf is Edit; every leaf is a canonical ordinary Read or Edit.
-    Read-only plans, compiled children, other effects and terminal leaves
-    retain ordinary admission. *)
+    Fixed inline children flattened to such leaves are included. Read-only
+    plans, synthetic child targets, other effects and terminal leaves retain
+    ordinary admission. *)
 
 val prepare
   : sw:Eio.Switch.t

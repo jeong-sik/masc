@@ -250,6 +250,106 @@ let physical_leaves meta =
   |> List.filter (fun row -> Yojson.Safe.Util.member "composition_node_id" row <> `Null)
 ;;
 
+let recipe_edit ?(after = []) id input =
+  `Assoc ["id", `String id; "tool", `String "Edit"; "args", input;
+          "after", `List (List.map (fun id -> `String id) after)]
+;;
+
+let recipe_call ?(id = "recipe-edit") nodes =
+  Agent_core.Types.ToolUse
+    {id; name = Keeper_composition_draft.run_tool_name;
+     input = `Assoc ["recipe", `Assoc ["execution", `String "inline"; "nodes", `List nodes]]}
+;;
+
+let test_recipe_edits_overlap_with_original_source ~nested () =
+  fixture @@ fun env sw config meta recovery root ->
+  let snapshot = if nested then Some (publish_edit_skills sw config) else None in
+  public_bundle ?snapshot env sw config meta recovery @@ fun meta task_id _cell causal bundle ->
+  let left = Filename.concat root "recipe/left" and right = Filename.concat root "recipe/right" in
+  write left "left-before"; write right "right-before";
+  let inputs = [public_args left "left-before" "left-after";
+                public_args right "right-before" "right-after"] in
+  let nodes = match snapshot with
+    | None -> List.mapi (fun index input -> recipe_edit ("patch-" ^ string_of_int index) input) inputs
+    | Some snapshot ->
+        let references = Skill_catalog_snapshot.entries snapshot
+            |> List.map Skill_catalog_snapshot.entry_reference in
+        List.mapi (fun index (reference, input) ->
+          `Assoc ["id", `String ("child-" ^ string_of_int index);
+                  "skill_reference", Skill_reference.to_yojson reference; "args", input])
+          (List.combine references inputs) in
+  let both, resolve_both = Eio.Promise.create () in
+  let entered = ref 0 in
+  let rows = FS.For_testing.with_before_write_authorization (fun () ->
+      incr entered;
+      if !entered = 2 then Eio.Promise.resolve resolve_both ();
+      Eio.Promise.await both)
+    (fun () -> dispatch env bundle.tools [recipe_call nodes]) in
+  check int "one public recipe call executes both leaves" 1 (List.length rows);
+  check int "independent recipe leaves overlap actual file authorization" 2 !entered;
+  check string "recipe left committed bytes" "left-after" (read left);
+  check string "recipe right committed bytes" "right-after" (read right);
+  let leaves = physical_leaves meta in
+  check int "two original file producers retain physical receipts" 2 (List.length leaves);
+  List.iter (fun row ->
+    check string "recipe retains original Task" task_id
+      Yojson.Safe.Util.(member "task_id" row |> to_string);
+    check string "recipe retains original trace" (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+      Yojson.Safe.Util.(member "trace_id" row |> to_string);
+    check string "recipe retains original parent Tool invocation" "recipe-edit"
+      Yojson.Safe.Util.(member "parent_tool_use_id" row |> to_string)) leaves;
+  check int "both recipe results reach the original Gate aggregate" 2
+    Yojson.Safe.Util.(member "completed_tool_calls"
+      (Keeper_gate_causal_context.snapshot causal).snapshot |> to_list |> List.length);
+  if nested then begin
+    let ledger = Keeper_skill_activation_ledger.load_existing ~config ~trace_id:meta.runtime.trace_id
+        |> function
+        | Ok (Some ledger) -> ledger
+        | Ok None -> fail "nested recipe did not retain its activation ledger"
+        | Error error -> fail (Keeper_skill_activation_ledger.store_error_to_string error) in
+    check int "exact nested Skill activations survive file overlap" 2
+      (List.length (Keeper_skill_activation_ledger.activations ledger))
+  end
+;;
+
+let test_recipe_conflicts_consume_predecessor_bytes () =
+  fixture @@ fun env sw config meta recovery root ->
+  public_bundle env sw config meta recovery @@ fun meta _task _cell _causal bundle ->
+  let path = Filename.concat root "recipe-conflict/file" in
+  write path "first";
+  ignore (dispatch env bundle.tools [recipe_call
+    [recipe_edit "first" (public_args path "first" "second");
+     recipe_edit "second" (public_args path "second" "third")]]);
+  check string "conflicting recipe patches consume committed predecessor bytes" "third" (read path);
+  check int "both conflict-ordered handlers retain receipts" 2 (List.length (physical_leaves meta))
+;;
+
+let test_cancelled_recipe_releases_file_capabilities () =
+  fixture @@ fun env sw config meta recovery root ->
+  public_bundle env sw config meta recovery @@ fun _meta _task _cell _causal bundle ->
+  let left = Filename.concat root "recipe-cancel/left" and right = Filename.concat root "recipe-cancel/right" in
+  write left "before"; write right "before";
+  let nodes = [recipe_edit "left" (public_args left "before" "after");
+               recipe_edit "right" (public_args right "before" "after")] in
+  let both, resolve_both = Eio.Promise.create () in
+  let entered = ref 0 in
+  (match Eio.Switch.run (fun child ->
+    FS.For_testing.with_before_write_authorization (fun () ->
+        incr entered;
+        if !entered = 2 then Eio.Promise.resolve resolve_both ();
+        Eio.Fiber.await_cancel ()) (fun () ->
+      Eio.Fiber.fork ~sw:child (fun () -> ignore (dispatch env bundle.tools [recipe_call nodes]));
+      Eio.Promise.await both;
+      Eio.Switch.fail child Exit)) with
+   | () -> fail "recipe cancellation did not propagate"
+   | exception Exit -> ());
+  check string "cancelled recipe left remains untouched" "before" (read left);
+  check string "cancelled recipe right remains untouched" "before" (read right);
+  ignore (dispatch env bundle.tools [recipe_call ~id:"recipe-after-cancel" nodes]);
+  check string "successor invocation reacquires left" "after" (read left);
+  check string "successor invocation reacquires right" "after" (read right)
+;;
+
 let test_one_inline_overlaps_its_disjoint_edits () =
   fixture @@ fun env sw config meta recovery root ->
   let snapshot = publish_edit_skills ~two_nodes:true sw config in
@@ -965,6 +1065,15 @@ let () = run "prepared actual file resources"
         test_public_edits_overlap_through_handler_and_bridge;
       test_case "public conflicting patches consume predecessor bytes" `Quick test_public_conflicting_edits_keep_current_bytes;
       test_case "public Edit with unavailable source stays Serial" `Quick test_public_edits_without_source_stay_serial];
+    "task recipes and original file producers", [
+      test_case "one recipe overlaps independent Edits with original Task and Gate receipts" `Quick
+        (test_recipe_edits_overlap_with_original_source ~nested:false);
+      test_case "fixed exact child Skills overlap through the original recipe" `Quick
+        (test_recipe_edits_overlap_with_original_source ~nested:true);
+      test_case "recipe conflicts consume committed predecessor bytes" `Quick
+        test_recipe_conflicts_consume_predecessor_bytes;
+      test_case "cancelled recipe releases capabilities for its successor" `Quick
+        test_cancelled_recipe_releases_file_capabilities];
     "published Inline Skills and actual Edit", [
       test_case "one published Skill overlaps Edits sharing the resolved source" `Quick
         (test_shared_source_edits_overlap ~in_skill:true);

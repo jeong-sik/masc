@@ -139,6 +139,73 @@ alone does not establish an installed runtime result or a preparation
 speedup by itself. Effectful job ownership/resume and fresh Ask Question TUI
 evidence remain separately tracked in #42799.
 
+## Runtime Skill preparation observations
+
+The isolated preparation trial's stage journal is experiment evidence, not a
+runtime cache observation. Runtime Skill preparation now emits
+`skill_preparation_observed` manifest rows at the direct and autonomous Task
+resolution boundaries and executable setup. The owner supplies the original
+`turn_ref`; the row keeps its Keeper, trace and absolute turn. Autonomous turns
+with a recorded source batch can join that identity to
+`Turn_started.intake_sources`. Existing Tool and Ask links require their own
+original identities; missing Task/source/Ask links stay unrecorded. A nearby
+timestamp or matching Task title is not a join.
+One turn can contain multiple provider attempts; this row alone does not select
+a particular provider request, Task or Ask continuation.
+
+| Boundary | Before | After |
+|---|---|---|
+| Projection/product reuse | Source construction estimates or isolated trial stages. | Actual `constructed` / `reused` decisions from each cache access. |
+| Waiting | No per-access boundary. | Actual lookup finish and binding-lock acquisition offsets; missing marks stay null. |
+| Existing turn handle | Could be mistaken for another cache lookup. | `retained_turn_surface` reuse, with no invented lookup or lock marks. |
+| Error, cancellation, missing observation | Not represented by cache timings. | Typed report/sample outcome and explicit non-Eio coverage; no success inferred from an empty sample list. |
+| Runtime lens | No preparation event. | The existing Keeper lane includes this observation without treating it as context injection, a terminal event or a required completion gate. |
+
+`decision.skill_preparation` contains the phase, original turn reference,
+coverage, outcome, total elapsed nanoseconds and samples. Each sample retains
+the exact snapshot revision, descriptor count, component and actual decision.
+The revision describes the input; it is not the cache equality key or an
+execution permission. Documents, paths, Tool inputs and exception text are not
+copied. The public projection uses a dedicated allowlist for this payload.
+
+All sample times are decimal-string nanosecond offsets from that report's
+monotonic capture start. Use `lookup_finished_ns - entered_ns` for lookup and
+`lock_acquired_ns - lookup_finished_ns` for binding-lock acquisition. The latter
+includes uncontended overhead: a nonzero value does not prove another owner was
+running. For a `constructed` sample, `decision_ns - lock_acquired_ns` covers the
+locked construction through publication and observation marking. A reused
+sample does not report a new construction. Retained-handle samples start after
+binding validation; the enclosing scope includes validation work.
+
+Nested or parallel samples can overlap. Do not sum their durations into a
+whole-task latency; the enclosing elapsed time measures only its stated scope.
+Uninstrumented gaps are not evidence of model reasoning or another wait cause.
+
+Missing marks and unfinished samples remain missing/in progress. Nested captures
+own their samples; child fibers inherit only their actual capture, and closure
+prevents late inherited accesses from appending to a finished report. Cancellation
+and exceptions retain their original propagation after recording. A crash before
+scope settlement can leave no row; absence never proves success. Non-Eio scopes
+say `non_eio_unobserved` instead of manufacturing zero cache accesses.
+
+The envelope remains a logical observation. Its wall-clock write timestamp is
+not a measured start or finish; runtime-lens clock edges keep both absent for this
+event. Compare offsets within one report and matched durations across reports,
+not absolute offsets across captures or process restarts.
+
+Cache instrumentation reads clocks and retains scalar metadata in memory. One
+best-effort manifest append happens after each covered operation settles and
+outside cache locks. That append is outside the measured interval; its overhead,
+clock/Atomic work and public projection cost have not been measured. The scope
+does not include earlier Task/held-task filesystem reads, later provider work,
+first useful action or whole TUI refresh. Operator inventory reads and continuation
+wakes without a capture stay unobserved; they do not borrow another turn's clock.
+
+Authored scenarios cover real cold/reused preparation, nested/parallel capture and caller
+cancellation, a typed setup error, and original-turn durable/public/API readback.
+They are unexecuted for this change. Runtime event generation, current native
+visibility and matched Before/After latency remain unverified.
+
 ## Select only the status inspection needed
 
 `masc_keeper_status` with `fast:true` skips repository checkout inspection by

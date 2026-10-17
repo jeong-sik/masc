@@ -847,6 +847,12 @@ let run_keeper_cycle
                    ~base_path:config.base_path
                in
                let task_skill_selection =
+                 Keeper_skill_preparation_runtime_observation.with_turn_result
+                   ~config ~keeper_name:meta.name
+                   ~turn_ref:(Ids.Turn_ref.make
+                     ~trace_id:runtime_manifest_context.manifest_trace_id
+                     ~absolute_turn:keeper_turn_id)
+                   ~phase:Keeper_skill_preparation_runtime_observation.Autonomous_task_resolution @@ fun () ->
                  Keeper_task_skill_turn.resolve_live_observations
                   ~config:config ~keeper_name:meta.name
                    ~snapshot:skill_snapshot

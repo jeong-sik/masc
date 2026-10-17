@@ -370,6 +370,7 @@ let test_manifest_event_vocabulary_is_pinned () =
     ; "provider_lane_resolved"
     ; "context_injected"
     ; "history_projection_observed"
+    ; "skill_preparation_observed"
     ; "event_bus_correlated"
     ; "checkpoint_loaded"
     ; "checkpoint_saved"

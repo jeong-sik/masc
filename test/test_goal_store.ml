@@ -1205,7 +1205,7 @@ let test_identical_audited_upsert_still_commits () =
     check bool "returned goal is the persisted row" true (after.goals = [goal]);
     (match events with
      | [event] ->
-         check bool "identical edit emits Updated only" true (event.kind = Goal_store.Updated);
+         check bool "identical edit emits Updated only" true (event.Goal_store.kind = Goal_store.Updated);
          check int "event witnesses this commit" after.version event.store_revision;
          check int "snapshot witnesses the same commit" after.version
            Yojson.Safe.Util.(event.payload |> member "store_version" |> to_int)

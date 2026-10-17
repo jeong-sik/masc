@@ -3381,6 +3381,7 @@
   masc_tui_fetched
   alcotest
   eio_main
+  eio
   astring
   masc
   masc.masc_types

@@ -910,6 +910,103 @@ let test_source_schema_rejected_names_criterion_revision () =
   | u -> fail ("expected Schema_rejected on criterion_revision for both files: "
                ^ Goal_store.unavailable_to_string u)
 
+(* Setup validation and the authoritative reader must agree on the first
+   document rejection, without promoting a readable mirror to current state. *)
+let test_document_rejection_order_through_public_consumers () =
+  with_workspace @@ fun config ->
+  let goal =
+    { (make_goal "codec-goal" "Resume the verification") with
+      phase = Goal_phase.Paused Goal_phase.Resume_verifying }
+  in
+  let stamp = goal.updated_at in
+  let created : Goal_store.pending_event =
+    { event_id = "event-z"; goal_id = goal.id; store_revision = 6;
+      recorded_at = stamp; kind = Goal_store.Created;
+      payload = `Assoc ["actor", `String "original-creator"] }
+  in
+  let events =
+    [ created;
+      { created with event_id = "event-a"; store_revision = 7; kind = Goal_store.Phase;
+        payload = `Assoc ["phase", `String "paused"] } ]
+  in
+  let state : Goal_store.state =
+    { version = 7; updated_at = stamp; goals = [goal];
+      pending_events = events; pending_notifications = [] }
+  in
+  (match Goal_store.write_state_result config state with
+   | Ok () -> () | Error detail -> fail detail);
+  let primary = Goal_store.goals_path config in
+  let mirror = mirror_path config in
+  let read path = In_channel.with_open_bin path In_channel.input_all in
+  let valid_primary = read primary in
+  let valid_mirror = read mirror in
+  let goal_fields = match Goal_store.goal_to_yojson goal with
+    | `Assoc fields -> fields
+    | _ -> fail "Goal serializer returned a non-object"
+  in
+  let damaged_primary resume_phase =
+    let row = `Assoc (("resume_phase", `String resume_phase)
+      :: List.remove_assoc "resume_phase" goal_fields) in
+    Yojson.Safe.to_string (`Assoc [
+      "version", `Int state.version; "updated_at", `String stamp;
+      "goals", `List [row]; "pending_events", `Null;
+      "pending_notifications", `List []])
+  in
+  let expect_unavailable expected_field expected_detail (u : Goal_store.unavailable) =
+    check string "unavailable names the primary file" primary u.file;
+    (match u.reason with
+     | Goal_store.Schema_rejected { field; detail } ->
+       check string "reader keeps the canonical rejected field" expected_field field;
+       check string "reader keeps the canonical rejection detail" expected_detail detail
+     | Goal_store.Missing_after_init | Goal_store.Unreadable _ | Goal_store.Not_json _ ->
+       fail (Goal_store.unavailable_to_string u));
+    (match u.mirror with
+     | Goal_store.Mirror_decodes { goal_count; updated_at } ->
+       check int "valid mirror remains evidence" 1 goal_count;
+       check string "mirror evidence keeps its timestamp" stamp updated_at
+     | Goal_store.Mirror_absent | Goal_store.Mirror_unreadable _ | Goal_store.Mirror_rejected _ ->
+       fail ("expected a readable mirror: " ^ Goal_store.unavailable_to_string u));
+    check bool "repair step names the rejected field" true
+      (u.reset_step = Goal_store.Repair_field expected_field)
+  in
+  let check_rejection resume_phase expected_field expected_detail =
+    write_raw primary (damaged_primary resume_phase);
+    let before = read primary in
+    (match Goal_store.validate_state_json (Yojson.Safe.from_string before) with
+     | Error detail ->
+       check string "setup validator renders the same canonical rejection"
+         (expected_detail ^ " (field " ^ expected_field ^ ")") detail
+     | Ok () -> fail "setup validator accepted a malformed document");
+    expect_unavailable expected_field expected_detail (unavailable config);
+    let entered = ref false in
+    let result = Goal_store.transact_goal config ~goal_id:goal.id
+      (fun current ->
+        entered := true;
+        Ok ({ current with title = "must not commit" }, ())) in
+    check bool "rejected mutation never enters its callback" false !entered;
+    (match result with
+     | Error (Goal_store.Store_unavailable u) ->
+       expect_unavailable expected_field expected_detail u
+     | Error error -> fail ("unexpected mutation refusal: " ^ write_error_msg error)
+     | Ok _ -> fail "readable mirror authorized a mutation");
+    check string "refused primary remains byte-identical" before (read primary);
+    check string "refused mutation leaves mirror unchanged" valid_mirror (read mirror)
+  in
+  check_rejection "completed" "phase"
+    "goal \"codec-goal\": suspended Goal requires a live resume_phase";
+  (* Only the restore target is repaired; the outbox is still malformed. *)
+  check_rejection "verifying" "pending_events" "pending_events must be a list";
+  write_raw primary valid_primary;
+  (match Goal_store.validate_state_json (Yojson.Safe.from_string (read primary)) with
+   | Ok () -> () | Error detail -> fail detail);
+  let restored = available config in
+  check bool "restored primary retains the suspended Goal and its restore target" true
+    (restored.goals = [goal]);
+  check bool "restored primary retains outbox payloads in submitted order" true
+    (restored.pending_events = events);
+  check int "restored primary retains its own revision" state.version restored.version;
+  check string "reading restored primary leaves the mirror unchanged" valid_mirror (read mirror)
+
 (* A directory at the path opens read-only and fails on the first read, so
    the errno that survives is EISDIR; it needs no permission change and
    holds as root. *)
@@ -1475,6 +1572,8 @@ let () =
           test_case "not json" `Quick test_source_not_json;
           test_case "schema rejected names criterion_revision" `Quick
             test_source_schema_rejected_names_criterion_revision;
+          test_case "document errors agree through public consumers" `Quick
+            test_document_rejection_order_through_public_consumers;
           test_case "unreadable EISDIR" `Quick test_source_unreadable_eisdir;
           test_case "unreadable EACCES" `Quick test_source_unreadable_eacces;
           test_case "available never consults the mirror" `Quick

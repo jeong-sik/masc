@@ -1808,17 +1808,8 @@ let fetch_keeper_context_inspector ~(host : string) ~(port : int)
      row itself; the newest reading keeps the attributed fallback, because a
      keeper mid-turn has not written the snapshot for the row it is on and
      the newest row that did is still the honest newest answer. *)
-  let viewing_record selection =
-    if turn_back <= 0 then
-      Option.map
-        (fun (attributed : Masc_tui_context_inspector.attributed_turn) ->
-           attributed.record)
-        selection.Masc_tui_context_inspector.attributed
-    else
-      List.nth_opt selection.Masc_tui_context_inspector.rows turn_back
-  in
   let read_provider_input selection =
-    match viewing_record selection with
+    match Masc_tui_context_inspector.viewing_record selection ~turn_back with
     | None ->
         Error "no turn on this page recorded an exact input composition"
     | Some record ->
@@ -1838,7 +1829,7 @@ let fetch_keeper_context_inspector ~(host : string) ~(port : int)
      row by the turn_ref the chat rows carry. Rows this join cannot reach
      say so; they never borrow another turn's answer. *)
   let read_response selection =
-    match viewing_record selection with
+    match Masc_tui_context_inspector.viewing_record selection ~turn_back with
     | None -> Error "no row on this page to name"
     | Some record ->
         let key = Ids.Turn_ref.to_string record.Turn_record.turn_ref in

@@ -290,6 +290,13 @@ val decode_turn_records : Yojson.Safe.t -> (selection, string) result
     not: that is a fact about the keeper worth showing rather than an absent
     reading. *)
 
+val viewing_record : selection -> turn_back:int -> Turn_record.t option
+(** The row the request and proof tabs read at a [turn_back] step: the
+    attributed row at [0], otherwise the stepped row itself and never another
+    turn's. The provider-input fetch, the proof tab's drawing and the proof
+    tab's keys all take their row from here, so the rows [j]/[k] and [Enter]
+    walk are the rows on screen. *)
+
 val decode_forecast : Yojson.Safe.t -> (forecast, string) result
 (** Strict decode of the next-request forecast; a malformed field fails the
     reading rather than reading as an absent forecast. *)

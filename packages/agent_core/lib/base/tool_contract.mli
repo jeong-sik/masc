@@ -53,6 +53,11 @@ type schedule =
   ; batch_size : int
   ; execution_mode : execution_mode
   }
+(** Planned invocation coordinates. Resource-scoped execution preserves the
+    deterministic wave index/size while admitting successors after their own
+    conflicting predecessors settle. Equal wave coordinates describe a planned
+    cohort; later coordinates do not impose an unrelated peer-completion
+    barrier. They grant no effect, replay or permission authority. *)
 
 module Invocation : sig
   type t

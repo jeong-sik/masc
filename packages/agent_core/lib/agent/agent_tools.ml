@@ -51,6 +51,10 @@ type scheduled_tool_use =
   ; restored_invocation : restored_invocation option
   }
 
+type scoped_settlement =
+  | Scoped_settled of scheduled_tool_outcome
+  | Scoped_not_started
+
 type tool_index = (string, Tool.t) Hashtbl.t
 
 let add_first tbl key value = if not (Hashtbl.mem tbl key) then Hashtbl.add tbl key value
@@ -1302,21 +1306,61 @@ let execute_tools
       Int.compare left_index right_index)
     |> List.map snd
   in
+  let run_scoped ~batch_index (group : scheduled_tool_use Agent_tool_batch_plan.scoped_group) =
+    let outcomes = Array.of_list (List.map (fun _ -> Eio.Promise.create ()) group.nodes) in
+    let known_failure : execution_failure_cause option Atomic.t = Atomic.make None in
+    let run_node (node : scheduled_tool_use Agent_tool_batch_plan.scoped_node) =
+      let predecessors = List.map (fun index ->
+          let outcome, _ = outcomes.(index) in
+          Eio.Promise.await outcome) node.predecessors in
+      let predecessor_stopped = List.exists (function
+        | Scoped_not_started -> true
+        | Scoped_settled outcome -> Option.is_some outcome.failure) predecessors in
+      (* Roots are the same admitted concurrent cohort as before. Successors
+         acquire admission only after their actual resource predecessors and
+         complete observers settle. Never start a new successor after a known
+         failure; an already-started effect still settles under the Eio scope. *)
+      let admitted = match node.predecessors with
+        | [] -> true
+        | _ :: _ -> not predecessor_stopped && Option.is_none (Atomic.get known_failure) in
+      let outcome =
+        if admitted then
+          let batch_size = Agent_tool_batch_plan.Index_map.find
+              node.batch_offset group.batch_sizes in
+          let schedule = hook_schedule_of_tool_use
+              ~batch_index:(batch_index + node.batch_offset) ~batch_size node.value in
+          let result = run_one ~schedule node.value in
+          Option.iter (fun failure ->
+            ignore (Atomic.compare_and_set known_failure None (Some failure) : bool)) result.failure;
+          Scoped_settled result
+        else Scoped_not_started
+      in
+      let _, resolve = outcomes.(node.local_index) in
+      Eio.Promise.resolve resolve outcome;
+      outcome
+    in
+    Eio.Fiber.List.map run_node group.nodes
+    |> List.filter_map (function Scoped_settled outcome -> Some outcome | Scoped_not_started -> None)
+  in
   let rec run_batches batch_index completed completion = function
     | [] -> Ok { completed_results = ordered_results completed; completion }
     | batch :: rest ->
-      let batch_results =
+      let batch_results, next_batch_index =
         match batch with
         | Agent_tool_batch_plan.Serial_batch tool_use ->
           let schedule = hook_schedule_of_tool_use ~batch_index ~batch_size:1 tool_use in
-          [ run_one ~schedule tool_use ]
+          [ run_one ~schedule tool_use ], batch_index + 1
         | Agent_tool_batch_plan.Concurrent_batch tool_uses ->
           let batch_size = List.length tool_uses in
-          tool_uses
+          let outcomes = tool_uses
           |> List.map (fun tool_use ->
             let schedule = hook_schedule_of_tool_use ~batch_index ~batch_size tool_use in
             tool_use, schedule)
-          |> Eio.Fiber.List.map (fun (tool_use, schedule) -> run_one ~schedule tool_use)
+          |> Eio.Fiber.List.map (fun (tool_use, schedule) -> run_one ~schedule tool_use) in
+          outcomes, batch_index + 1
+        | Agent_tool_batch_plan.Scoped_batch group ->
+          run_scoped ~batch_index group,
+          batch_index + Agent_tool_batch_plan.Index_map.cardinal group.batch_sizes
       in
       let batch_completed, batch_completion, failure = collect_batch batch_results in
       let completed = List.rev_append batch_completed completed in
@@ -1328,7 +1372,7 @@ let execute_tools
       (match failure with
        | Some cause ->
          Error { completed_results = ordered_results completed; completion; cause }
-       | None -> run_batches (batch_index + 1) completed completion rest)
+       | None -> run_batches next_batch_index completed completion rest)
   in
   match plan with
   | Agent_tool_batch_plan.Rejected_terminal_mix scheduled ->

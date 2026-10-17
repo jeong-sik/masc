@@ -243,7 +243,14 @@ val find_and_execute_tool
     prepared call carries its exact input and handler through the same
     PreToolUse, durable invocation, and observer boundaries. Within a scoped
     region, every earlier conflicting occupied resource is an ordering edge;
-    disjoint ready calls may overlap. Read-only concurrent regions and ordinary
+    a successor starts once its actual predecessors settle, without waiting
+    for an unrelated slow peer in a static wave. Static [batch_index] and
+    [batch_size] remain planned wave coordinates, not synchronization barriers.
+    The region's initial root cohort is admitted together. A known hook,
+    observer or durability failure prevents admission of later successors;
+    already-admitted roots and started successors settle and retain their
+    actual results. An ordinary model-visible tool error keeps its existing
+    non-aborting behavior. Read-only concurrent regions and ordinary
     Serial calls remain barriers around scoped effects. Preparation resources
     remain live through execution and observers and close on cancellation or
     failure. Calls without scoped descriptors keep their existing path.
@@ -251,8 +258,8 @@ val find_and_execute_tool
     On success, returns one [tool_execution_result] per [ToolUse] block in the
     same relative order as the input. On failure, [completed_results] retains
     every completed result in that order alongside the terminal cause. Serial
-    work after a failure is not started; already-running concurrent siblings
-    finish under their declared structured-concurrency batch. *)
+    work after a failure is not started; already-admitted concurrent siblings
+    finish under their declared structured-concurrency region. *)
 val execute_tools
   :  context:Context.t
   -> tools:Tool.t list

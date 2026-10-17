@@ -315,6 +315,14 @@ let test_tool_projection_is_nonblocking_without_identity () =
       ^ ":/tmp/masc-runtime/.masc/keepers/missing-identity/github-cli:ro"
     ]
     docker_projection.args;
+  Alcotest.(check (list (pair string string)))
+    "an unconfigured microvm keeper gets no GIT_CONFIG_GLOBAL"
+    []
+    (Github.microvm_git_credential_env
+       ~config
+       ~keeper_name
+       ~container_config_dir:
+         "/tmp/masc-runtime/.masc/keepers/missing-identity/github-cli");
   let host_dir =
     match Github.ensure_config_dir ~config ~keeper_name with
     | Error message -> Alcotest.fail message
@@ -345,6 +353,15 @@ let test_tool_projection_is_nonblocking_without_identity () =
   Alcotest.(check string) "next snapshot contains the login state"
     "github.com:\n  user: first-login\n  oauth_token: first-token\n"
     (read_file (Filename.concat after_login_snapshot "hosts.yml"));
+  Alcotest.(check (list (pair string string)))
+    "a configured microvm keeper gets GIT_CONFIG_GLOBAL pointing at its mounted gitconfig"
+    [ ( "GIT_CONFIG_GLOBAL"
+      , "/tmp/masc-runtime/.masc/keepers/missing-identity/github-cli/gitconfig" ) ]
+    (Github.microvm_git_credential_env
+       ~config
+       ~keeper_name
+       ~container_config_dir:
+         "/tmp/masc-runtime/.masc/keepers/missing-identity/github-cli");
   docker_projection.cleanup ();
   after_login_projection.cleanup ();
   Alcotest.(check bool) "empty Docker snapshot is cleaned" false
@@ -475,24 +492,34 @@ let test_persistent_container_commits_under_the_keeper_name_with_login () =
     | Error message -> Alcotest.fail message
     | Ok path -> path
   in
+  let container_masc_dir = "/tmp/masc-runtime/.masc" in
+  let container_dir = Github.container_config_dir ~container_masc_dir ~keeper_name in
+  let expected_args =
+    commit_name_args keeper_name
+    @ [ "--env"
+      ; "GH_CONFIG_DIR=" ^ container_dir
+      ; "-v"
+      ; host_dir ^ ":" ^ container_dir ^ ":ro"
+      ; "--env"
+      ; "GIT_CONFIG_GLOBAL=" ^ Filename.concat container_dir "gitconfig"
+      ]
+  in
+  (match Github.docker_args_persistent ~config ~keeper_name ~container_masc_dir with
+   | Error message -> Alcotest.fail message
+   | Ok args ->
+     Alcotest.(check (list string))
+       "persistent container wires GIT_CONFIG_GLOBAL even before hosts.yml exists so later logins take effect without recreating the container"
+       expected_args
+       args);
   let hosts = Filename.concat host_dir "hosts.yml" in
   write_file hosts "github.com:\n  user: stored-user\n  oauth_token: stored-token\n";
   Unix.chmod hosts 0o600;
-  let container_masc_dir = "/tmp/masc-runtime/.masc" in
-  let container_dir = Github.container_config_dir ~container_masc_dir ~keeper_name in
   match Github.docker_args_persistent ~config ~keeper_name ~container_masc_dir with
   | Error message -> Alcotest.fail message
   | Ok args ->
     Alcotest.(check (list string))
       "commit names, then the live config mount and its git wiring"
-      (commit_name_args keeper_name
-       @ [ "--env"
-         ; "GH_CONFIG_DIR=" ^ container_dir
-         ; "-v"
-         ; host_dir ^ ":" ^ container_dir ^ ":ro"
-         ; "--env"
-         ; "GIT_CONFIG_GLOBAL=" ^ Filename.concat container_dir "gitconfig"
-         ])
+      expected_args
       args
 ;;
 

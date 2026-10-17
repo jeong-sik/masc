@@ -667,6 +667,17 @@ let git_credential_config_path ~config_dir =
   Filename.concat config_dir git_credential_config_file_name
 ;;
 
+let git_credential_config_env ~has_git_wiring ~config_dir =
+  if has_git_wiring
+  then [ git_config_global_env_name, git_credential_config_path ~config_dir ]
+  else []
+;;
+
+let git_credential_docker_args ~has_git_wiring ~config_dir =
+  git_credential_config_env ~has_git_wiring ~config_dir
+  |> List.concat_map (fun (name, value) -> [ "--env"; name ^ "=" ^ value ])
+;;
+
 (* The hostnames this identity is logged into. hosts.yml is gh-owned and
    stable in shape: a top-level key is a line that starts at column zero and
    ends with ':'. Nothing else in the file has that shape. *)
@@ -681,6 +692,25 @@ let hostnames_of_hosts_yml contents =
       if String.equal host "" || String.contains host ' ' || String.contains host '"'
       then None
       else Some host))
+;;
+
+let has_git_credential_wiring ~config ~keeper_name =
+  match existing_config_dir ~config ~keeper_name with
+  | Error _ | Ok None -> false
+  | Ok (Some host_dir) ->
+    (match
+       Fs_compat.load_owned_regular_file
+         ~ownership_root:host_dir
+         (Filename.concat host_dir "hosts.yml")
+     with
+     | Error _ | Ok None -> false
+     | Ok (Some contents) -> hostnames_of_hosts_yml contents <> [])
+;;
+
+let microvm_git_credential_env ~config ~keeper_name ~container_config_dir =
+  git_credential_config_env
+    ~has_git_wiring:(has_git_credential_wiring ~config ~keeper_name)
+    ~config_dir:container_config_dir
 ;;
 
 (* git never consults gh's hosts.yml on its own: an https push without a
@@ -828,14 +858,7 @@ let docker_args_for_tool ~config ~keeper_name ~container_masc_dir =
                container_config_dir ~container_masc_dir ~keeper_name
              in
              let git_wiring_args =
-               if has_git_wiring
-               then
-                 [ "--env"
-                 ; git_config_global_env_name
-                   ^ "="
-                   ^ git_credential_config_path ~config_dir:container_dir
-                 ]
-               else []
+               git_credential_docker_args ~has_git_wiring ~config_dir:container_dir
              in
              Ok
                { args =

@@ -2834,8 +2834,9 @@ let test_running_guest_is_a_remote_endpoint () =
     Alcotest.(check (option string)) "the config mount is named by its env"
       (Some "/tmp/masc-runtime/.masc/config")
       (List.assoc_opt "MASC_CONFIG_DIR" injected);
-    Alcotest.(check (option string)) "git credential config is named by its env"
-      (Some "/tmp/masc-runtime/.masc/keepers/lane-smith/github-cli/gitconfig")
+    Alcotest.(check (option string))
+      "an unconfigured keeper does not point GIT_CONFIG_GLOBAL at a missing gitconfig"
+      None
       (List.assoc_opt "GIT_CONFIG_GLOBAL" injected);
     Alcotest.(check bool) "the lane's own env still leads" true
       (List.mem_assoc "GH_CONFIG_DIR" injected);
@@ -2845,6 +2846,32 @@ let test_running_guest_is_a_remote_endpoint () =
     Alcotest.(check (option string)) "commits carry the keeper as committer"
       (Some "lane-smith")
       (List.assoc_opt "GIT_COMMITTER_NAME" injected);
+    let host_gh_dir =
+      match
+        Masc.Keeper_github_identity.ensure_config_dir
+          ~config
+          ~keeper_name:"lane-smith"
+      with
+      | Error message -> Alcotest.fail message
+      | Ok dir -> dir
+    in
+    let hosts_path = Filename.concat host_gh_dir "hosts.yml" in
+    Out_channel.with_open_bin hosts_path (fun channel ->
+      output_string channel "github.com:\n  oauth_token: gho_fixture\n");
+    Unix.chmod hosts_path 0o600;
+    (match
+       Masc.Keeper_turn_sandbox_runtime.microvm_remote_endpoint_of_running
+         runtime ~container_name
+     with
+     | Error message -> Alcotest.fail message
+     | Ok configured_endpoint ->
+       let configured_injected =
+         Masc.Keeper_sandbox_remote.injected_env configured_endpoint
+       in
+       Alcotest.(check (option string))
+         "git credential config is named by its env when GitHub identity is configured"
+         (Some "/tmp/masc-runtime/.masc/keepers/lane-smith/github-cli/gitconfig")
+         (List.assoc_opt "GIT_CONFIG_GLOBAL" configured_injected));
     (match Masc.Keeper_sandbox_remote.transport endpoint with
      | Masc.Keeper_sandbox_remote.Container_exec
          (guest : Masc.Keeper_sandbox_remote.container_exec) ->

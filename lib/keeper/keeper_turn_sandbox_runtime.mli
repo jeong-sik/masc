@@ -59,8 +59,9 @@ val microvm_remote_endpoint_of_running :
     [container_name] delivering the framed request to the mounted shim, the
     work volume as the remote root, the mounted identity snapshot as
     [GH_CONFIG_DIR] (and its derived credential config as
-    [GIT_CONFIG_GLOBAL]), and the config env naming the mounted config. Refused
-    for a non-microvm keeper. Pure. *)
+    [GIT_CONFIG_GLOBAL] when the keeper has a configured GitHub identity), and
+    the config env naming the mounted config. Refused for a non-microvm keeper.
+    Pure. *)
 
 val microvm_remote_endpoint :
   ?timeout_sec:float -> t -> (Keeper_sandbox_remote.t, string) result

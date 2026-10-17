@@ -414,11 +414,12 @@ let shim_prefix backend =
    the identity is the half that cannot be said and the prefix refuses rather
    than sending a value read from no help output. *)
 let test_the_shim_prefix_refuses_where_the_identity_cannot_be_named () =
+  let writable_home = "HOME=" ^ Backend.scratch_guest_root in
   check
     (Alcotest.list Alcotest.string)
     "container carries the config env"
     [ "container"; "exec"; "-i"; "--user"; "1:2"; "-w"; "/masc-work"
-    ; "--env"; "HOME=/tmp"
+    ; "--env"; writable_home
     ; "--env"; "MASC_EXEC_SHIM_CONFIG=/opt/masc-exec-shim/masc-exec-shim.conf"
     ; "g" ]
     (match shim_prefix Backend.Apple_container with
@@ -428,7 +429,7 @@ let test_the_shim_prefix_refuses_where_the_identity_cannot_be_named () =
     (Alcotest.list Alcotest.string)
     "nerdctl carries it too"
     [ "nerdctl"; "exec"; "-i"; "--user"; "1:2"; "-w"; "/masc-work"
-    ; "--env"; "HOME=/tmp"
+    ; "--env"; writable_home
     ; "--env"; "MASC_EXEC_SHIM_CONFIG=/opt/masc-exec-shim/masc-exec-shim.conf"
     ; "g" ]
     (match shim_prefix Backend.Nerdctl_kata with
@@ -443,7 +444,7 @@ let test_the_shim_prefix_refuses_where_the_identity_cannot_be_named () =
     ; "-w"
     ; "/masc-work"
     ; "--env"
-    ; "HOME=/tmp"
+    ; writable_home
     ; "--env"
     ; "MASC_EXEC_SHIM_CONFIG=/opt/masc-exec-shim/masc-exec-shim.conf"
     ; "g"

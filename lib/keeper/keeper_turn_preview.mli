@@ -4,6 +4,20 @@
 
 type activity = Preparing | Awaiting_response | Receiving_response | Tool_observed | Failed
 
+type preparation_phase = Context_preparation | Tool_preparation | Skill_preparation
+type preparation_outcome = Prepared | Rejected | Raised | Cancelled
+type preparation_state =
+  | Preparation_active
+  | Preparation_finished of
+      { outcome : preparation_outcome; elapsed_ns : int64; finished_at : float }
+type preparation =
+  { phase : preparation_phase
+  ; turn_ref : Ids.Turn_ref.t option
+      (** Absent before context preparation establishes the turn identity. *)
+  ; started_at : float
+  ; state : preparation_state
+  }
+
 type source_position = { generation : int; start_byte : int }
 (** Byte offsets in the text this writer's redactor actually released.
     Attempts and full-text replacements create a new generation. *)
@@ -20,6 +34,7 @@ type t =
   ; runtime_id : string option
   ; activity : activity
   ; last_failure : string option
+  ; preparation : preparation option
   }
 
 val tail_bytes : int
@@ -36,6 +51,15 @@ val note_text : writer:writer option -> now:float -> string -> unit
     the last visible words. A missing writer records nothing. *)
 
 val note_tool : writer:writer option -> now:float -> string -> unit
+
+val with_preparation_result :
+  writer:writer option -> turn_ref:Ids.Turn_ref.t option -> phase:preparation_phase ->
+  (unit -> ('a, 'e) result) -> ('a, 'e) result
+(** Publish the active scope before calling its operation, then record its
+    result, exception or cancellation without changing that result. Nested
+    scopes restore the still-active parent. Provider/Tool activity retires
+    older scopes, so their late completion cannot replace newer activity.
+    This is ephemeral observation, not a dispatch or completion decision. *)
 
 val reset : keeper_name:string -> now:float -> redaction:Keeper_secret_redaction.t -> writer
 (** Install a new displayed preview and return its writer. Every response text the turn records passes

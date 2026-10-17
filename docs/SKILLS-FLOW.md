@@ -306,6 +306,44 @@ Task 표면 조립을 재사용한다. 새 hash 조회·lock·약한 table 비�
 이 단위에서는 실행하지 않았다. parser 검사는 타입·기능·실제 Docker·모델·TUI
 동작을 증명하지 않으며, 설치나 서버 재시작도 수행하지 않는다.
 
+#### 실행 중인 준비 단계의 관측
+
+비교 기준은 `c77324736453a06c6cb5ce4bb90c82bfb5e5c226`다. 완료 후 기록되는
+Skill 준비 manifest에 더해, `Keeper_turn_preview`는 실제 작업을 부르기 전에
+실행 중인 준비 scope를 게시한다.
+
+| 조건 | As-Is | To-Be 소스 경로 |
+| --- | --- | --- |
+| context·Tool·Skill 준비가 실행 중 | 하나의 일반 준비 상태 | 실제로 진입한 단계와 `active` 상태 |
+| 중첩된 Skill 준비가 끝남 | 세부 단계 없음 | 아직 실행 중인 바깥 Tool 준비로 복귀 |
+| 준비가 반환·거절·예외·취소로 끝남 | 마지막 일반 준비 상태가 남을 수 있음 | `prepared`·`rejected`·`raised`·`cancelled`를 구분 |
+| 준비 뒤 모델 활동이 관측됨 | 기존 provider 상태 | 준비 scope를 폐기하고 실제 provider 상태 유지 |
+| 이전 실행의 늦은 완료 | 원래 writer에만 기록 | 같은 소유 원칙을 유지하며 새 활동도 덮어쓰지 않음 |
+
+연결한 경계는 `prepare_run_context`, `prepare_agent_setup`, 그 안의 executable
+Skill 준비다. 각 scope는 실제 writer에 결속되고, 시작 시각과 완료 시 그 scope만의
+monotonic span을 기록한다. JSON에는 phase·state·turn reference·시각·측정 span만
+추가하며 입력·예외 본문·Tool 결과를 담지 않는다. context 준비 이전에는 아직
+확정되지 않은 turn reference를 `null`로 남긴다. 이후 Tool·Skill 단계는 소유자가
+확정한 원래 reference를 전달한다. 준비 성공은 provider dispatch나 턴 완료를 뜻하지
+않으며, 다음 활동이 관측되기 전에는 그 사실도 명시한다.
+
+이 값은 실행 중인 턴의 기존 `/api/v1/keepers/turns` preview로 전달된다. 별도의
+주기 조회나 저장 작업을 추가하지 않는다. snapshot은 가장 최근의 활성 scope와
+그 부모를 추적하는 미리보기이며 전체 병렬 분기·자원 대기 원장이 아니다.
+새 provider·본문·Tool 활동은 기존 scope를 무효화하므로 늦게 끝난 scope가 이를
+다시 준비 상태로 바꾸지 못한다. writer가 없으면 추가 시계·상태 갱신 없이 실행한다.
+
+이번 단위는 TUI의 기존 preview 소비 경로까지 사용할 수 있는 서버 데이터를 만든다.
+live 채팅 진행줄은 이 typed preparation을 아직 읽지 않는다. compact 진행줄에
+합치려면 원래 operation/turn과의 정확한 연결이 필요하며, Keeper 이름만 같다는
+이유로 다른 실행의 상태를 빌려 쓰지 않는다. 직접·자율 Task 해석 등 agent 진입 전의
+준비 구간과 아직 관측하지 않는 prompt·queue·lock 대기도 남아 있다.
+
+작성한 시나리오는 실행 중 JSON, 중첩 복귀, 원래 turn reference, provider 전환 뒤
+늦은 완료, 새 writer 보호, 오류·예외·실제 fiber 취소를 다룬다. 이 단위에서는
+실행하지 않았다. 문법 검사는 타입·기능·실제 화면·실행 지연 개선의 증거가 아니다.
+
 ### 2b. 프롬프트 — 지명된 스킬 안내
 
 `task.skills`(`masc_add_task`가 지정, `lib/task/tool_task_handlers.ml`의

@@ -950,6 +950,9 @@ let test_a_snapshot_is_projected_once () =
   let other = snapshot_of_document ~directory:"other" (document "other") in
   check (list string) "another snapshot gets its own skills" [ "other" ]
     (names (Skill_catalog.of_snapshot other));
+  Gc.full_major ();
+  check bool "interleaving and collecting list containers preserves the owned original binding" true
+    (same_skills first (skills (Skill_catalog.of_snapshot snapshot)));
   check (list string) "and the first one its own again" [ "once" ]
     (names (Skill_catalog.of_snapshot rebuilt));
   let changed = snapshot_of_document ~directory:"once"

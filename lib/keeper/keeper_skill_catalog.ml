@@ -398,10 +398,10 @@ let projected_entry_of ~descriptors snapshot (entry : Skill_catalog_snapshot.ent
    must never reuse a plan bound to different descriptor objects.
    Keeper turns, the skill inventory and the skills route project the
    current snapshot several times between two publications, so its entries
-   are projected once and kept with the snapshot they came from. The global
-   cache retains one preparation; turns retain their own immutable handle,
-   so another workspace replacing the global entry cannot evict a turn's
-   already prepared entries.
+   are projected once for each exact descriptor binding. Both the snapshot
+   and every individual descriptor are weak keys: fresh list/array containers
+   do not discard an owned binding, and old preparations cannot keep a retired
+   publication or dynamic descriptor alive through their own back references.
    Composition plans are then shared by those callers; a plan's outputs are
    bound to the run that produced them as well as to the plan, so sharing one
    keeps runs apart. *)
@@ -412,7 +412,53 @@ type prepared =
   ; entries_by_identity : projected_entry Skill_reference.Identity_map.t
   }
 
-let last_projected_snapshot : prepared option Atomic.t = Atomic.make None
+module Preparation_snapshot_key = struct
+  type t = Skill_catalog_snapshot.t
+  let equal left right = left == right
+  let hash snapshot = Hashtbl.hash (Skill_catalog_snapshot.snapshot_revision snapshot)
+end
+
+module Preparation_descriptor_key = struct
+  type t = Keeper_tool_descriptor.t
+  let equal left right = left == right
+  let hash descriptor = Hashtbl.hash descriptor.Keeper_tool_descriptor.id
+end
+
+module Preparation_snapshots = Ephemeron.K1.Make (Preparation_snapshot_key)
+module Preparation_bindings = Ephemeron.Kn.Make (Preparation_descriptor_key)
+
+type preparation_slot =
+  { construction_lock : Cross_context_mutex.t
+  ; mutable value : prepared option
+  }
+
+let preparations : preparation_slot Preparation_bindings.t Preparation_snapshots.t =
+  Preparation_snapshots.create 0
+
+let preparations_mutex = Stdlib.Mutex.create ()
+
+let preparation_slot ~descriptors snapshot =
+  let keys = Array.of_list descriptors in
+  (* Only non-yielding weak-table lookup/insertion is protected here. Actual
+     projection and cooperative waiting use the exact binding's own lock. *)
+  Stdlib.Mutex.protect preparations_mutex (fun () ->
+    let bindings =
+      match Preparation_snapshots.find_opt preparations snapshot with
+      | Some bindings -> bindings
+      | None ->
+        Preparation_snapshots.clean preparations;
+        let bindings = Preparation_bindings.create 0 in
+        Preparation_snapshots.add preparations snapshot bindings;
+        bindings
+    in
+    match Preparation_bindings.find_opt bindings keys with
+    | Some slot -> slot
+    | None ->
+      Preparation_bindings.clean bindings;
+      let slot = { construction_lock = Cross_context_mutex.create (); value = None } in
+      Preparation_bindings.add bindings keys slot;
+      slot)
+;;
 
 let prepared_matches prepared ~descriptors snapshot =
   prepared.snapshot == snapshot
@@ -424,22 +470,24 @@ let prepared_matches prepared ~descriptors snapshot =
 let prepared_snapshot prepared = prepared.snapshot
 
 let prepare_snapshot ~descriptors snapshot =
-  match Atomic.get last_projected_snapshot with
-  | Some projected when prepared_matches projected ~descriptors snapshot -> projected
-  | Some _ | None ->
-    let entries =
-      List.map (projected_entry_of ~descriptors snapshot) (Skill_catalog_snapshot.entries snapshot)
-    in
-    let entries_by_identity =
-      List.fold_left
-        (fun index (entry : projected_entry) ->
-           Skill_reference.Identity_map.add entry.snapshot_entry.identity entry index)
-        Skill_reference.Identity_map.empty
-        entries
-    in
-    let prepared = { snapshot; descriptors; entries; entries_by_identity } in
-    Atomic.set last_projected_snapshot (Some prepared);
-    prepared
+  let slot = preparation_slot ~descriptors snapshot in
+  Cross_context_mutex.with_lock slot.construction_lock (fun () ->
+    match slot.value with
+    | Some prepared -> prepared
+    | None ->
+      let entries =
+        List.map (projected_entry_of ~descriptors snapshot) (Skill_catalog_snapshot.entries snapshot)
+      in
+      let entries_by_identity =
+        List.fold_left
+          (fun index (entry : projected_entry) ->
+             Skill_reference.Identity_map.add entry.snapshot_entry.identity entry index)
+          Skill_reference.Identity_map.empty
+          entries
+      in
+      let prepared = { snapshot; descriptors; entries; entries_by_identity } in
+      slot.value <- Some prepared;
+      prepared)
 ;;
 
 (* An entry resolved from [snapshot] is one of its entries, so its kept

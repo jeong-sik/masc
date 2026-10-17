@@ -125,10 +125,44 @@ let unreadable_pin_error ~snapshot ~reference = function
           Some (Skill_source_unreadable { source_id; observation })))
 ;;
 
+module Preparation_key = struct
+  type t = Keeper_skill_catalog.prepared
+  let equal left right = left == right
+  let hash projection =
+    Hashtbl.hash
+      (Skill_catalog_snapshot.snapshot_revision
+         (Keeper_skill_catalog.prepared_snapshot projection))
+end
+
+module Preparations = Ephemeron.K1.Make (Preparation_key)
+
+type preparation_slot =
+  { construction_lock : Cross_context_mutex.t
+  ; mutable value : preparation option
+  }
+
+let preparations : preparation_slot Preparations.t = Preparations.create 0
+let preparations_mutex = Stdlib.Mutex.create ()
+
 let preparation_of_projection projection =
-  let catalog, diagnostics = Keeper_skill_catalog.prepared_catalog projection in
-  let inventory = Keeper_skill_inventory.of_prepared projection in
-  { projection; catalog; diagnostics; inventory }
+  let slot = Stdlib.Mutex.protect preparations_mutex (fun () ->
+    match Preparations.find_opt preparations projection with
+    | Some slot -> slot
+    | None ->
+      Preparations.clean preparations;
+      let slot = { construction_lock = Cross_context_mutex.create (); value = None } in
+      Preparations.add preparations projection slot;
+      slot)
+  in
+  Cross_context_mutex.with_lock slot.construction_lock (fun () ->
+    match slot.value with
+    | Some preparation -> preparation
+    | None ->
+      let catalog, diagnostics = Keeper_skill_catalog.prepared_catalog projection in
+      let inventory = Keeper_skill_inventory.of_prepared projection in
+      let preparation = { projection; catalog; diagnostics; inventory } in
+      slot.value <- Some preparation;
+      preparation)
 ;;
 
 (* Against a configured snapshot, a pinned reference it cannot give back is a

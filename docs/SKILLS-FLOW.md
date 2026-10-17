@@ -220,6 +220,50 @@ projection 분리를 다룬다. 이 단위에서는 작성만 했고 실행하�
 실제 메모리·첫 요청 준비 시간·모델 왕복·TUI 지연 개선은 미측정이다. lookup 부분의
 복잡도 감소를 전체 준비 경로의 선형화나 실측 속도 향상으로 부르지 않는다.
 
+#### Keeper 교차 실행에서 준비 결과 공유
+
+비교 기준은 `6a997d6f11ddd44f337116da0d9fb5a800ff8f78`다. 한 턴의 handle을
+보관하는 것에 더해, 같은 입력을 다시 쓰는 새 턴도 원래 준비 결과를 받는다.
+
+| 조건 | As-Is | To-Be 소스 경로 |
+| --- | --- | --- |
+| 입력 A → B → A로 새 턴 준비 | 마지막 projection 한 칸이 교체되어 A를 다시 투영할 수 있음 | 소유 중인 A·B 준비 결과를 각각 재사용 |
+| 같은 snapshot·Tool 객체를 새 목록에 담아 전달 | 마지막 binding일 때만 재사용 | 목록 컨테이너와 무관하게 실제 객체와 순서로 조회 |
+| 새 턴의 카탈로그·diagnostic·inventory | projection이 같아도 파생 결과를 다시 조립 | 같은 projection의 완성된 준비 결과를 공유 |
+| 같은 입력의 동시 최초 준비 | 호출마다 조립한 뒤 마지막 결과가 cache를 교체할 수 있음 | 해당 binding의 lock으로 한 번 조립하고 완성된 결과만 게시 |
+| 새 snapshot·교체한 Tool 객체·순서 변경 | 별도 준비 | 별도 준비; 같은 이름·id·revision만으로 합치지 않음 |
+| 소유자가 사라진 입력 | 마지막 cache가 한 입력을 계속 보유 | snapshot·각 Tool 객체를 약한 키로 사용해 회수 가능 |
+
+snapshot은 `Ephemeron.K1`, Tool binding은 각 descriptor를 키로 갖는
+`Ephemeron.Kn`에 결속된다. 새 목록이나 배열 자체를 약한 키로 삼지 않으므로
+컨테이너의 GC가 살아 있는 실제 Tool binding을 버리지 않는다. snapshot과 모든 Tool
+객체의 소유가 유지될 때만 projection을 보관하며, 완성된 카탈로그·inventory도 그
+projection의 소유에 결속된다. 결과가 자기 입력을 가리키는 순환 참조만으로 입력을
+살려 두지 않는다. 발행 교체·workspace retire 후에도 실제 턴이 보유한 handle은
+유효하며, 소유가 사라진 입력과 결과는 GC가 회수한다. 즉시 해제나 worker 종료를
+수행하는 API는 아니다. 죽은 hash binding은 다음 miss에서도 정리한다.
+
+약한 table의 조회·삽입만 짧은 Stdlib mutex로 보호한다. 조립 중에는 binding별
+`Cross_context_mutex`를 잡고 전역 lock은 잡지 않는다. 같은 입력의 Eio 대기는
+cooperative하며, 다른 binding의 조립은 공유 lock으로 직렬화하지 않는다. 조립이
+예외로 끝나면 부분 결과를 게시하지 않고, lock을 해제해 다음 호출이 다시 시도한다.
+
+Task의 reference·출처·현재/보유 Task 선택·capability 판정은 각 호출에서 해석한다.
+공유하는 것은 불변 문서와 Tool 입력의 준비 결과이며 실행 결과나 권한이 아니다.
+동적 Tool이 매번 새 descriptor 객체를 발급하면 여전히 별도 입력으로 준비한다.
+
+입력 A와 B가 소유된 상태에서 A → B → A → B를 준비하면, 소스 경로상 projection
+조립은 `4회 → 2회`, Task 표면의 카탈로그·inventory 조립도 `4회 → 2회`가 된다.
+이는 정의한 입력 순서의 조립 횟수 비교다. 실제 cache hit/build/wait 계측값이나
+실행된 benchmark가 아니다. 약한 table·키 배열·lock과 여러 활성 준비 결과의 메모리
+비용도 추가되며 아직 측정하지 않았다. 직접 inventory API가 수행하는 별도 투영까지
+모두 한 번이 된다는 뜻도 아니다.
+
+작성한 시나리오는 교차 입력 뒤의 새 Task 준비, Tool 객체 교체·순서 변경,
+두 Domain의 최초 준비 공유, 소유하지 않는 snapshot·descriptor와 순환 참조의 회수를
+다룬다. 이 단위에서는 실행하지 않았다. 전체 준비 시간, 첫 유효 작업까지의 시간,
+모델 왕복, TUI 지연 개선은 별도의 같은 조건 비교가 필요하다.
+
 ### 2b. 프롬프트 — 지명된 스킬 안내
 
 `task.skills`(`masc_add_task`가 지정, `lib/task/tool_task_handlers.ml`의

@@ -62,6 +62,7 @@ type fake = {
   condition_checks : int ref;
   sweeps : int ref;
   swept : Lane_addon_slot.sweep_item list ref;
+  liveness : (string -> bool) option ref;
 }
 
 let output : Types.output = {
@@ -81,7 +82,7 @@ let make_backend () =
   let state = { events = ref []; state_owners=Hashtbl.create 4; recovered_state_owners=Hashtbl.create 4; recovered_runtimes=Hashtbl.create 4; observations = ref []; recovery_barrier = ref None;
                 startup_available = ref true; startup_barrier = ref None; cleanup_available = ref true;
                 image_available = ref true; create_refusal = ref None;
-                world = Fake.create home; home; condition_checks = ref 0; sweeps = ref 0; swept = ref [] } in
+                world = Fake.create home; home; condition_checks = ref 0; sweeps = ref 0; swept = ref []; liveness = ref None } in
   let record event = state.events := event :: !(state.events) in
   let proven ~engine work =
     Lane_addon_slot.proven (Fake.port state.world) ~expected:engine ~lift:Fun.id work in
@@ -186,6 +187,7 @@ let make_backend () =
       Fake.condition_met state.world condition);
     sweep = (fun ~runtime ~is_live_instance ->
       incr state.sweeps;
+      state.liveness := Some is_live_instance;
       let result = Lane_addon_slot.sweep (Fake.port state.world) ~runtime ~is_live_instance in
       Result.iter (fun items -> state.swept := !(state.swept) @ items) result;
       result);
@@ -1822,6 +1824,87 @@ let test_a_sweep_that_refused_a_foreign_container_is_not_repeated () =
     await_ready clock config id;
     detach clock config id)
 
+(* The runtime hands the backend one question, whether an incarnation is still
+   alive in this process. A worker answers it, and so does a cleanup that is
+   still running for a record of an earlier process; a container of such an
+   incarnation must not be taken for a dead server's. *)
+let test_an_incarnation_is_live_while_it_has_a_worker_or_a_cleanup () =
+  with_fixture (fun env _ config directory packages state ->
+    let clock = Eio.Stdenv.clock env in
+    let manifest = package packages "ready" in
+    let path = Filename.concat directory "observer.toml" in
+    let bytes = declaration ~id:"observer" ~manifest () in
+    write path bytes;
+    ignore (reconcile config directory);
+    let old_id = declared_instance config "observer" |> text "instance_id" in
+    await_ready clock config old_id;
+    let live id = match !(state.liveness) with
+      | Some is_live -> is_live id
+      | None -> fail "the sweep has not asked yet" in
+    check bool "an incarnation with a worker is live" true (live old_id);
+    check bool "an incarnation nothing holds is not live" false (live "nobody");
+    let captured = instance config old_id in
+    let container_id = text "container_id" captured in
+    detach clock config old_id;
+    Runtime.For_testing.reset ();
+    let store = Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+    unwrap (Store.save_binding store ~instance_id:old_id captured);
+    write path bytes;
+    let recovered, release_recovery = Eio.Promise.create () in
+    state.recovery_barrier := Some recovered;
+    ignore (reconcile config directory);
+    await clock (fun () -> List.mem (Recovery_requested (old_id, Some container_id)) !(state.events));
+    check bool "an incarnation whose cleanup is running is live, with no worker" true (live old_id);
+    Eio.Promise.resolve release_recovery ();
+    await clock (fun () -> not (live old_id));
+    ignore (reconcile config directory);
+    let replacement = declared_instance config "observer" |> text "instance_id" in
+    await_ready clock config replacement;
+    detach clock config replacement)
+
+(* The slot procedures are exercised over a port that answers a name lookup
+   with a container of another name, as an engine's pattern filter could. The
+   containers carry labels that would make them removable if the name were not
+   checked. *)
+let test_a_container_under_another_name_is_never_the_slot () =
+  let world = Fake.create (Fake.docker "engine-a") in
+  let owner = "owner-label" in
+  ignore (Fake.add (Fake.current world) ~id:"dead-predecessor" ~name:"somewhere-else"
+    ~labels:[Lane_addon_engine.instance_label, "dead"; Lane_addon_engine.state_owner_label, owner] ());
+  ignore (Fake.add (Fake.current world) ~id:"own-leftover" ~name:"also-elsewhere"
+    ~labels:[Lane_addon_engine.instance_label, "new"; Lane_addon_engine.state_owner_label, owner] ());
+  let answering id = { (Fake.port world) with Lane_addon_slot.find = (fun _ -> Ok (Some id)) } in
+  (match Lane_addon_slot.claim (answering "dead-predecessor") ~name:"the-slot" ~instance_id:"new"
+           ~mine:(Some owner) ~is_live_instance:(fun _ -> false) with
+   | Error (Lifecycle.Worker_failed _) -> ()
+   | Ok () | Error _ -> fail "a container under another name must stop the claim as unreadable");
+  check bool "the would-be predecessor survives the claim" true (Fake.holds (Fake.current world) "dead-predecessor");
+  (match Lane_addon_slot.release (answering "own-leftover") ~lookup:(Lane_addon_engine.Name "the-slot")
+           ~instance_id:"new" ~mine:(Some owner) with
+   | Error (Lifecycle.Cleanup_unconfirmed _) -> ()
+   | Ok () | Error _ -> fail "a release by name must not be confirmed by a container of another name");
+  check bool "the would-be own container survives the release" true (Fake.holds (Fake.current world) "own-leftover")
+
+(* A container left under the slot by this very incarnation is its own,
+   whatever the process thinks of the incarnation: it is removed, and a failed
+   removal is a cleanup the caller must see, not a predecessor it can ignore. *)
+let test_a_worker_clears_its_own_leftover_from_the_slot () =
+  let world = Fake.create (Fake.docker "engine-a") in
+  let owner = "owner-label" in
+  let labels = [Lane_addon_engine.instance_label, "new"; Lane_addon_engine.state_owner_label, owner] in
+  ignore (Fake.add (Fake.current world) ~id:"own-leftover" ~name:"the-slot" ~labels ());
+  let claim () = Lane_addon_slot.claim (Fake.port world) ~name:"the-slot" ~instance_id:"new"
+    ~mine:(Some owner) ~is_live_instance:(fun _ -> true) in
+  Fake.refuse_removal (Fake.current world) "own-leftover";
+  (match claim () with
+   | Error (Lifecycle.Cleanup_unconfirmed _) -> ()
+   | Ok () | Error _ -> fail "a leftover of this incarnation that cannot be removed is an unconfirmed cleanup");
+  Fake.allow_removal (Fake.current world) "own-leftover";
+  (match claim () with
+   | Ok () -> ()
+   | Error _ -> fail "a leftover of this incarnation is removed even though the incarnation is live");
+  check bool "the leftover is gone" false (Fake.holds (Fake.current world) "own-leftover")
+
 let test_binding_inventory_issues_carry_failure_kind_tags () =
   with_fixture (fun _ _ config _directory _packages _state ->
     let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
@@ -1952,6 +2035,12 @@ let () = run "Lane Add-on TOML reconciliation" ["declarative optional extension"
     test_a_sweep_that_could_not_remove_is_run_again;
   test_case "a sweep that refused a foreign container is not repeated" `Quick
     test_a_sweep_that_refused_a_foreign_container_is_not_repeated;
+  test_case "an incarnation is live while it has a worker or a cleanup" `Quick
+    test_an_incarnation_is_live_while_it_has_a_worker_or_a_cleanup;
+  test_case "a container under another name is never the slot" `Quick
+    test_a_container_under_another_name_is_never_the_slot;
+  test_case "a worker clears its own leftover from the slot" `Quick
+    test_a_worker_clears_its_own_leftover_from_the_slot;
   test_case "Detach keeps the declaration when cleanup fails" `Quick
     test_detach_keeps_the_declaration_when_cleanup_fails;
   test_case "Detach of a retained record keeps the declaration when cleanup fails" `Quick

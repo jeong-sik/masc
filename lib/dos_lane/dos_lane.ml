@@ -31,14 +31,28 @@ type autosave_lookup =
   | Autosave of autosave_status
   | Autosave_unreadable of string
 
-(* An autosave file that a load would move aside. *)
+(* What a slot holds, as far as it can be said: its status, or that the file
+   is there and will not read. *)
 type held_autosave =
   | Held of autosave_status
   | Held_unreadable of string
 
-type autosave_consent =
-  | Keep_autosave
-  | Replace_autosave
+(* An incarnation's first autosave copies the autosave to the previous-autosave
+   slot, so it replaces what that slot held. Starting a machine -- a load, or a
+   restore of any slot but the previous autosave itself -- is therefore the
+   act that discards the previous autosave, and it is the consent for that act
+   that is asked for. With no previous autosave nothing is discarded: the
+   autosave moves to the slot and survives there. *)
+type previous_autosave_consent =
+  | Keep_previous_autosave
+  | Discard_previous_autosave
+
+(* Both files a start would touch: [previous] is what it would discard and
+   [current] is what moves into its place. *)
+type discard =
+  { previous : held_autosave
+  ; current : held_autosave
+  }
 
 type error =
   | Activity_disabled
@@ -51,7 +65,7 @@ type error =
   | Unsaveable of string
   | Checkpoint_refused of Machine_checkpoint.error
   | Other_program of { expected : string; loaded : string }
-  | Autosave_exists of held_autosave
+  | Would_discard_previous_autosave of discard
 
 let error_to_string = function
   | Activity_disabled -> "machines.dos is off; enable it before new machine work"
@@ -71,11 +85,13 @@ let error_to_string = function
   | Checkpoint_refused e -> Machine_checkpoint.error_to_string e
   | Other_program { expected; loaded } ->
     Printf.sprintf "%s is loaded now, not %s, so nothing was pressed" loaded expected
-  | Autosave_exists (Held s) ->
-    Printf.sprintf "an autosave is waiting (%s, %d steps, saved by %s), so nothing was loaded"
+  | Would_discard_previous_autosave { previous = Held s; current = _ } ->
+    Printf.sprintf
+      "the previous autosave (%s, %d steps, saved by %s) would be replaced, so nothing was done"
       s.program s.steps s.saved_by
-  | Autosave_exists (Held_unreadable reason) ->
-    Printf.sprintf "an autosave file is there that this server cannot read (%s), so nothing was loaded"
+  | Would_discard_previous_autosave { previous = Held_unreadable reason; current = _ } ->
+    Printf.sprintf
+      "the previous autosave file cannot be read (%s) and would be replaced, so nothing was done"
       reason
 ;;
 
@@ -306,7 +322,7 @@ let running f =
    | Ok _ | Error (Unreadable _ | Guest_fault _) -> mark_change ()
    | Error
        ( Activity_disabled | Activity_unobserved | No_machine | Invalid_request _ | Held_by _ | Unsaveable _ | Checkpoint_refused _
-       | Other_program _ | Autosave_exists _ ) ->
+       | Other_program _ | Would_discard_previous_autosave _ ) ->
      publish_stable ());
   result
 ;;
@@ -343,7 +359,7 @@ let with_control ~who f =
          (* the call ran: the machine may have moved *)
        | Error
            ( Activity_disabled | Activity_unobserved | No_machine | Invalid_request _ | Held_by _ | Unsaveable _ | Checkpoint_refused _
-           | Other_program _ | Autosave_exists _ ) ->
+           | Other_program _ | Would_discard_previous_autosave _ ) ->
          st.controller <- before);
       result)
 ;;
@@ -827,6 +843,9 @@ let lookup_slot ~dir slot =
 let lookup_autosave ~dir = lookup_slot ~dir autosave_slot
 ;;
 
+let lookup_previous_autosave ~dir = lookup_slot ~dir autosave_prev_slot
+;;
+
 (* Every call that ran the guest ends here. The guest has moved whatever the
    disk did, so the observation always comes back; a save that did not reach
    disk rides along in [unsaved] instead of turning the call into an error a
@@ -984,23 +1003,37 @@ type prepared_load = {
   load_change_count : int;
 }
 
-(* A fresh machine's first autosave moves whatever [autosave_slot] holds to
-   [autosave_prev_slot], replacing what that slot held. After a worker restart
-   the autosave is the only copy of the campaign, and a second load moves it
-   once more -- the campaign is gone from both slots. So an existing autosave
-   file, readable or not, stops a load unless the caller consented to the
-   move. With no file the lookup returns at once; with one it reads the file
-   to name it in the refusal. *)
-let check_autosave_consent ~checkpoint_dir = function
-  | Replace_autosave -> Ok ()
-  | Keep_autosave ->
-    (match lookup_autosave ~dir:checkpoint_dir with
-     | No_autosave -> Ok ()
-     | Autosave status -> Error (Autosave_exists (Held status))
-     | Autosave_unreadable reason -> Error (Autosave_exists (Held_unreadable reason)))
+let held_of = function
+  | No_autosave -> None
+  | Autosave status -> Some (Held status)
+  | Autosave_unreadable reason -> Some (Held_unreadable reason)
 ;;
 
-let prepare_load ~ledger_dir ~saves_dir ~checkpoint_dir ~autosave ~program_name ~program_bytes ~files =
+(* What a machine started now would discard, if anything. Its first autosave
+   copies the autosave to [autosave_prev_slot] and replaces that slot, so the
+   previous autosave is lost exactly when both files exist; with no autosave
+   there is nothing to copy and the previous one stays, and with no previous
+   one the autosave moves into the slot and survives. An unreadable file counts
+   as there: the campaign it held may be the only copy. The files are read only
+   to name them in a refusal, after both are known to exist. *)
+let discard_at_stake ~dir =
+  let exists slot = Sys.file_exists (Machine_checkpoint.path ~dir slot) in
+  if not (exists autosave_slot && exists autosave_prev_slot) then None
+  else
+    match held_of (lookup_previous_autosave ~dir), held_of (lookup_autosave ~dir) with
+    | Some previous, Some current -> Some { previous; current }
+    | None, _ | _, None -> None (* a file vanished between the check and the read *)
+;;
+
+let check_previous_autosave_consent ~dir = function
+  | Discard_previous_autosave -> Ok ()
+  | Keep_previous_autosave ->
+    (match discard_at_stake ~dir with
+     | None -> Ok ()
+     | Some discard -> Error (Would_discard_previous_autosave discard))
+;;
+
+let prepare_load ~ledger_dir ~saves_dir ~checkpoint_dir ~previous_autosave ~program_name ~program_bytes ~files =
   let* () = require_activity () in
   (* Guest writes raise this counter. A load must not install a save overlay
      read across a concurrent run of the old machine. *)
@@ -1012,7 +1045,7 @@ let prepare_load ~ledger_dir ~saves_dir ~checkpoint_dir ~autosave ~program_name 
       Error (Invalid_request (Printf.sprintf
         "%s and %s are one name to DOS; the guest can only see one" earlier later))
   | None ->
-      let* () = check_autosave_consent ~checkpoint_dir autosave in
+      let* () = check_previous_autosave_consent ~dir:checkpoint_dir previous_autosave in
       let m = Dos_machine.create () in
       List.iter (fun (name, contents) -> Dos_machine.mount_file m name contents) files;
       load_image m image;
@@ -1063,7 +1096,7 @@ let commit_load ~who prepared ~announce =
           | Error
               (( Activity_disabled | Activity_unobserved | No_machine | Invalid_request _
                | Unreadable _ | Held_by _ | Unsaveable _ | Checkpoint_refused _
-               | Other_program _ | Autosave_exists _ ) as error) ->
+               | Other_program _ | Would_discard_previous_autosave _ ) as error) ->
             Error (Core_exception (error_to_string error))
           | exception (Eio.Cancel.Cancelled _ as cancelled) -> raise cancelled
           | exception exn -> Error (Core_exception (Printexc.to_string exn))
@@ -1074,8 +1107,8 @@ let commit_load ~who prepared ~announce =
          | Error fault -> Ok (observe st, Boot_faulted fault)))
 ;;
 
-let load ~who ~ledger_dir ~saves_dir ~checkpoint_dir ~autosave ~program_name ~program_bytes ~files ~announce =
-  let* prepared = prepare_load ~ledger_dir ~saves_dir ~checkpoint_dir ~autosave
+let load ~who ~ledger_dir ~saves_dir ~checkpoint_dir ~previous_autosave ~program_name ~program_bytes ~files ~announce =
+  let* prepared = prepare_load ~ledger_dir ~saves_dir ~checkpoint_dir ~previous_autosave
       ~program_name ~program_bytes ~files in
   commit_load ~who prepared ~announce
 ;;
@@ -1386,6 +1419,11 @@ type restore_payload = {
   restore_checkpoint_dir : string;
   restore_slot : Machine_checkpoint.slot;
   restore_slot_writes : int;
+  restore_previous_writes : int;
+      (* How many times this lane replaced the previous autosave when the
+         consent was checked. A load that lands between preparation and commit
+         copies the autosave into that slot, and the restore's own first
+         autosave would then discard what it just kept. *)
 }
 
 type prepared_restore = restore_payload option Atomic.t
@@ -1399,10 +1437,26 @@ let discard_prepared_restore prepared =
   | Some owned -> remove_restore_stage owned.restore_staged_ledger
 ;;
 
-let prepare_restore ~dir ~slot ~ledger_dir ~saves_dir_of =
+(* A restore starts a machine like a load does, so its first autosave discards
+   the previous autosave and the same consent is asked -- except for a restore
+   of the previous autosave itself, whose content the restored machine already
+   holds. A slot that is not there is not asked about: the read reports it. *)
+let check_restore_consent ~dir ~slot consent =
+  match classify_slot slot with
+  | Previous_autosave -> Ok ()
+  | Current_autosave | Named _ ->
+    if Sys.file_exists (Machine_checkpoint.path ~dir slot) then
+      check_previous_autosave_consent ~dir consent
+    else Ok ()
+;;
+
+let prepare_restore ~dir ~slot ~previous_autosave ~ledger_dir ~saves_dir_of =
   let* () = require_activity () in
-  let restore_slot_writes =
-    locked (fun () -> checkpoint_write_count (Machine_checkpoint.path ~dir slot)) in
+  let restore_slot_writes, restore_previous_writes =
+    locked (fun () ->
+      ( checkpoint_write_count (Machine_checkpoint.path ~dir slot)
+      , checkpoint_write_count (Machine_checkpoint.path ~dir autosave_prev_slot) )) in
+  let* () = check_restore_consent ~dir ~slot previous_autosave in
   let* checkpoint = match Machine_checkpoint.read ~dir slot ~machine:Machine_checkpoint.Dos
       ~format:checkpoint_format with
     | Ok checkpoint -> Ok checkpoint
@@ -1441,7 +1495,7 @@ let prepare_restore ~dir ~slot ~ledger_dir ~saves_dir_of =
           restore_machine=m;restore_kept=kept;restore_meta=meta;restore_entries=entries;
           restore_staged_ledger=temporary;restore_ledger_path=Filename.concat ledger_dir "ledger.jsonl";
           restore_saves_dir=saves_dir;restore_checkpoint_dir=dir;restore_slot=slot;
-          restore_slot_writes}) in
+          restore_slot_writes;restore_previous_writes}) in
         transferred := true;
         Ok prepared)
   with
@@ -1469,6 +1523,12 @@ let commit_restore ~who prepared ~announce =
             Error (Invalid_request (Printf.sprintf
               "DOS checkpoint %s was saved again during restore preparation; request the restore again"
               (Machine_checkpoint.slot_to_string owned.restore_slot)))
+          else if checkpoint_write_count
+                    (Machine_checkpoint.path ~dir:owned.restore_checkpoint_dir autosave_prev_slot)
+                  <> owned.restore_previous_writes
+          then
+            Error (Invalid_request
+              "the previous autosave changed during restore preparation; request the restore again")
           else
           let meta = owned.restore_meta in
           let st = {m=owned.restore_machine; steps=meta.saved_steps; program=meta.saved_program;
@@ -1486,8 +1546,8 @@ let commit_restore ~who prepared ~announce =
             Ok (observe st)))
 ;;
 
-let restore ~who ~dir ~slot ~ledger_dir ~saves_dir_of ~announce =
-  let* prepared = prepare_restore ~dir ~slot ~ledger_dir ~saves_dir_of in
+let restore ~who ~dir ~slot ~previous_autosave ~ledger_dir ~saves_dir_of ~announce =
+  let* prepared = prepare_restore ~dir ~slot ~previous_autosave ~ledger_dir ~saves_dir_of in
   Fun.protect ~finally:(fun () -> discard_prepared_restore prepared)
     (fun () -> commit_restore ~who prepared ~announce)
 ;;

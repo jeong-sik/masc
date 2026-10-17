@@ -82,21 +82,33 @@ type autosave_lookup =
           parse. Not the same as {!No_autosave}: the next call that runs the
           guest replaces it. *)
 
-(** An autosave file a load would move aside. *)
+(** What a slot holds, as far as it can be said: its status, or that the file
+    is there and will not read. *)
 type held_autosave =
   | Held of autosave_status
   | Held_unreadable of string
 
-(** What a caller of {!load} agrees to about the autosave slot. A load starts
-    a new machine, whose first autosave moves the file in [autosave_slot] to
-    [autosave_prev_slot] and replaces what that slot held. *)
-type autosave_consent =
-  | Keep_autosave
-      (** Refuse with {!error.Autosave_exists} when an autosave file is on
-          disk, readable or not. *)
-  | Replace_autosave
-      (** The caller was told what is there. It moves to [autosave_prev_slot],
-          replacing what that slot held. *)
+(** What a caller of {!load} or {!restore} agrees to. The first autosave of a
+    new machine copies [autosave_slot] to [autosave_prev_slot], replacing what
+    that slot held; so starting a machine is the act that discards the
+    previous autosave, and this is the consent for it. With no previous
+    autosave nothing is discarded: the autosave moves into the slot and
+    survives there, and no consent is asked. *)
+type previous_autosave_consent =
+  | Keep_previous_autosave
+      (** Refuse with {!error.Would_discard_previous_autosave} when starting
+          would discard the previous autosave: both files are there, readable
+          or not. *)
+  | Discard_previous_autosave
+      (** The caller was told what the previous autosave holds and lets the
+          start replace it. *)
+
+(** The two files a start would touch: [previous] is what it would discard,
+    [current] is the autosave that moves into its place. *)
+type discard =
+  { previous : held_autosave
+  ; current : held_autosave
+  }
 
 type error =
   | Activity_disabled
@@ -126,9 +138,10 @@ type error =
   | Other_program of { expected : string; loaded : string }
       (** {!press_into} was asked for the program kept under [expected], and
           the one loaded is kept under [loaded]; nothing was pressed. *)
-  | Autosave_exists of held_autosave
-      (** {!load} was called with {!Keep_autosave} and [autosave_slot] holds a
-          file. Nothing was loaded and the file is as it was. *)
+  | Would_discard_previous_autosave of discard
+      (** {!load} or {!restore} was called with {!Keep_previous_autosave} and
+          starting the machine would replace the previous autosave. Nothing
+          was done and both files are as they were. *)
 
 val error_to_string : error -> string
 
@@ -263,7 +276,7 @@ type prepared_load
     preparations are reclaimed normally. An admitted commit attempt consumes the guest. *)
 val prepare_load :
   ledger_dir:string -> saves_dir:string -> checkpoint_dir:string ->
-  autosave:autosave_consent ->
+  previous_autosave:previous_autosave_consent ->
   program_name:string -> program_bytes:string -> files:(string * string) list ->
   (prepared_load, error) result
 val commit_load :
@@ -277,17 +290,18 @@ val load :
   ledger_dir:string ->
   saves_dir:string ->
   checkpoint_dir:string ->
-  autosave:autosave_consent ->
+  previous_autosave:previous_autosave_consent ->
   program_name:string ->
   program_bytes:string ->
   files:(string * string) list ->
   announce:(unit -> unit) ->
   (observation * boot, error) result
-(** Creates the workspace machine, replacing any previous one. An autosave
-    file in [checkpoint_dir] is never moved or overwritten unless [autosave]
-    is {!Replace_autosave}; otherwise the load is {!Autosave_exists} and
-    nothing changes. The check happens in {!prepare_load}, before the machine
-    is built. The loader is
+(** Creates the workspace machine, replacing any previous one. The new
+    machine's first autosave replaces the previous autosave in
+    [checkpoint_dir], so when both that and the autosave are there the load is
+    {!Would_discard_previous_autosave} unless [previous_autosave] is
+    {!Discard_previous_autosave}, and nothing changes. The check happens in
+    {!prepare_load}, before the machine is built. The loader is
     chosen by the image's own bytes — an MZ signature is an EXE, anything
     else is a COM — not by the file name, so a misnamed image still boots the
     way DOS would boot it.
@@ -523,7 +537,8 @@ type prepared_restore
     The caller must scope it with {!discard_prepared_restore}, including when
     controller admission refuses. Commit and discard claim ownership atomically. *)
 val prepare_restore :
-  dir:string -> slot:Machine_checkpoint.slot -> ledger_dir:string ->
+  dir:string -> slot:Machine_checkpoint.slot ->
+  previous_autosave:previous_autosave_consent -> ledger_dir:string ->
   saves_dir_of:(string -> string) -> (prepared_restore, error) result
 val discard_prepared_restore : prepared_restore -> unit
 (** Discard an unconsumed preparation. Idempotent after commit/discard; only its
@@ -540,6 +555,7 @@ val restore :
   who:string ->
   dir:string ->
   slot:Machine_checkpoint.slot ->
+  previous_autosave:previous_autosave_consent ->
   ledger_dir:string ->
   saves_dir_of:(string -> string) ->
   announce:(unit -> unit) ->
@@ -557,6 +573,16 @@ val restore :
     save a game wrote after the checkpoint is not overwritten by restoring an
     older one.
 
+    The restored machine's first autosave replaces the previous autosave, as
+    a loaded machine's does, so the same consent is asked: with both the
+    autosave and the previous autosave on disk, restoring any slot but
+    {!autosave_prev_slot} is {!Would_discard_previous_autosave} under
+    {!Keep_previous_autosave}. A restore of {!autosave_prev_slot} is never
+    asked, because the machine it restores already holds what would be
+    replaced. A slot that does not exist is not asked about; the read reports
+    it. A commit refuses when the previous autosave was replaced since
+    {!prepare_restore}.
+
     Everything is read and checked first; on any error the current machine,
     its ledger and its controller are untouched. [announce] runs under the
     machine's lock, as {!load}'s does. *)
@@ -572,18 +598,24 @@ val autosave_slot : Machine_checkpoint.slot
     validates, so every caller shares this value instead of the string. *)
 
 val autosave_prev_slot : Machine_checkpoint.slot
-(** Where an incarnation's first autosave moves whatever {!autosave_slot}
+(** Where an incarnation's first autosave copies whatever {!autosave_slot}
     already held, before writing its own state there. That file is the
     previous incarnation's own last save -- a fresh {!load} or {!restore}'s
-    first autosave must not erase it silently. Listed and restorable like any
-    other slot ({!checkpoints}, {!restore}); nothing offers it back on its
-    own the way {!lookup_autosave} offers {!autosave_slot}. *)
+    first autosave must not erase it silently. The copy replaces what this
+    slot held, which is why starting a machine asks for
+    {!previous_autosave_consent} when both files exist. Listed and restorable
+    like any other slot ({!checkpoints}, {!restore}); nothing offers it back
+    on its own the way {!lookup_autosave} offers {!autosave_slot}. *)
 
 val lookup_autosave : dir:string -> autosave_lookup
 (** What the autosave slot holds, read through {!Machine_checkpoint}'s header
     and meta alone -- never through {!restore}, which would reconstruct the
     whole guest machine just to say who saved it last. This is an offer to
     resume, never a fact anything depends on. *)
+
+val lookup_previous_autosave : dir:string -> autosave_lookup
+(** {!lookup_autosave} for {!autosave_prev_slot}. After a restart this can be
+    all that is left of a campaign. *)
 
 val ledger : unit -> entry list
 (** Oldest first. Empty when no machine is loaded. *)

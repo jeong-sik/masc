@@ -1,5 +1,8 @@
-(* A load never moves or replaces an autosave file unless the caller consents.
-   Lane level: the tool arguments and messages are in test_dos_tools. *)
+(* Starting a machine -- a load, or a restore -- never discards the previous
+   autosave unless the caller consents. Its first autosave copies the autosave
+   to autosave-prev, so what is at stake is the file in autosave-prev; with no
+   file there the autosave moves in and survives, and nothing is asked. Lane
+   level: the tool arguments and messages are in test_dos_tools. *)
 
 open Alcotest
 
@@ -47,10 +50,17 @@ let with_fixture run =
     (fun () -> run fixture)
 ;;
 
-let load ?(autosave = Dos_lane.Keep_autosave) fixture =
+let load ?(previous_autosave = Dos_lane.Keep_previous_autosave) fixture =
   Dos_lane.load ~who ~ledger_dir:fixture.directory ~saves_dir:fixture.saves
-    ~checkpoint_dir:fixture.checkpoints ~autosave ~program_name:"hello.com"
+    ~checkpoint_dir:fixture.checkpoints ~previous_autosave ~program_name:"hello.com"
     ~program_bytes:hello ~files:[] ~announce:ignore
+;;
+
+let restore ?(previous_autosave = Dos_lane.Keep_previous_autosave) fixture slot =
+  Dos_lane.restore ~who ~dir:fixture.checkpoints ~slot ~previous_autosave
+    ~ledger_dir:fixture.directory
+    ~saves_dir_of:(fun _ -> fixture.saves)
+    ~announce:ignore
 ;;
 
 let require = function
@@ -61,146 +71,6 @@ let require = function
 let step () =
   ignore (require (Dos_lane.step ~who ~steps:1_000 ~until_ready:false))
 ;;
-
-let slot_path fixture slot =
-  match Machine_checkpoint.slot_of_string slot with
-  | Ok slot -> Machine_checkpoint.path ~dir:fixture.checkpoints slot
-  | Error message -> fail message
-;;
-
-let autosave_path fixture = slot_path fixture "autosave"
-let prev_path fixture = slot_path fixture "autosave-prev"
-
-let steps_in fixture slot =
-  match Machine_checkpoint.slot_of_string slot with
-  | Error message -> fail message
-  | Ok slot ->
-    (match
-       Machine_checkpoint.read_meta ~dir:fixture.checkpoints slot
-         ~machine:Machine_checkpoint.Dos ~format:Dos_lane.checkpoint_format
-     with
-     | Error e -> fail (Machine_checkpoint.error_to_string e)
-     | Ok { meta = `Assoc fields; _ } ->
-       (match List.assoc_opt "steps" fields with
-        | Some (`Int steps) -> steps
-        | _ -> fail "the checkpoint's meta names no step count")
-     | Ok _ -> fail "the checkpoint's meta is not an object")
-;;
-
-let incarnation () = (require (Dos_lane.capture_with_identity ())).Dos_lane.incarnation
-
-(* The campaign: a machine that has run past its boot, so its autosave holds a
-   step count no fresh boot reaches. *)
-let play_a_campaign fixture =
-  let booted, _ran = require (load fixture) in
-  step ();
-  let campaign_steps = steps_in fixture "autosave" in
-  check bool "the campaign is past its boot" true (campaign_steps > booted.Dos_lane.steps);
-  campaign_steps
-;;
-
-let refused_with_status ~name ~expected_steps = function
-  | Error (Dos_lane.Autosave_exists (Dos_lane.Held status)) ->
-    check string (name ^ ": names the program") "hello.com" status.Dos_lane.program;
-    check int (name ^ ": names the step count") expected_steps status.Dos_lane.steps;
-    check string (name ^ ": names who saved it") who status.Dos_lane.saved_by
-  | Error error -> failf "%s: unexpected %s" name (Dos_lane.error_to_string error)
-  | Ok _ -> failf "%s: the load went through over an autosave" name
-;;
-
-let test_a_second_load_keeps_the_campaign () =
-  with_fixture (fun fixture ->
-    let campaign_steps = play_a_campaign fixture in
-    let before = Digest.file (autosave_path fixture) in
-    let machine = incarnation () in
-    refused_with_status ~name:"second load" ~expected_steps:campaign_steps (load fixture);
-    check string "the autosave file is byte for byte as it was" before
-      (Digest.file (autosave_path fixture));
-    check bool "nothing moved to autosave-prev" false (Sys.file_exists (prev_path fixture));
-    check string "the running machine is the one from before" machine (incarnation ());
-    (* A third attempt meets the same autosave: a refusal changes nothing, so
-       repeating it cannot wear the campaign down. *)
-    refused_with_status ~name:"third load" ~expected_steps:campaign_steps (load fixture);
-    check string "still byte for byte" before (Digest.file (autosave_path fixture)))
-;;
-
-let test_a_load_after_a_restore_keeps_the_campaign () =
-  with_fixture (fun fixture ->
-    let campaign_steps = play_a_campaign fixture in
-    let slot =
-      match Machine_checkpoint.slot_of_string "autosave" with
-      | Ok slot -> slot
-      | Error message -> fail message
-    in
-    ignore
-      (require
-         (Dos_lane.restore ~who ~dir:fixture.checkpoints ~slot ~ledger_dir:fixture.directory
-            ~saves_dir_of:(fun _ -> fixture.saves)
-            ~announce:ignore));
-    let before = Digest.file (autosave_path fixture) in
-    refused_with_status ~name:"load after restore" ~expected_steps:campaign_steps (load fixture);
-    check string "the restored-from file is untouched" before
-      (Digest.file (autosave_path fixture));
-    check bool "nothing moved to autosave-prev" false (Sys.file_exists (prev_path fixture)))
-;;
-
-let test_a_load_after_an_eject_keeps_the_campaign () =
-  with_fixture (fun fixture ->
-    let campaign_steps = play_a_campaign fixture in
-    ignore (require (Dos_lane.eject ~who ~announce:ignore ()));
-    refused_with_status ~name:"load with no machine" ~expected_steps:campaign_steps
-      (load fixture);
-    check bool "no machine was installed" true
-      (match Dos_lane.screen () with Error Dos_lane.No_machine -> true | _ -> false))
-;;
-
-let test_a_consented_load_moves_the_campaign_to_prev () =
-  with_fixture (fun fixture ->
-    let campaign_steps = play_a_campaign fixture in
-    let reloaded, _ran = require (load ~autosave:Dos_lane.Replace_autosave fixture) in
-    check int "autosave-prev holds the campaign" campaign_steps (steps_in fixture "autosave-prev");
-    check int "and the autosave is the new machine's own boot" reloaded.Dos_lane.steps
-      (steps_in fixture "autosave");
-    (* The consent covers what autosave-prev held: the next consented load
-       replaces it with the autosave the second machine wrote. *)
-    step ();
-    let second_steps = steps_in fixture "autosave" in
-    ignore (require (load ~autosave:Dos_lane.Replace_autosave fixture));
-    check int "a second consented load replaces autosave-prev" second_steps
-      (steps_in fixture "autosave-prev"))
-;;
-
-let test_a_load_with_no_autosave_needs_no_consent () =
-  with_fixture (fun fixture ->
-    ignore (require (load ~autosave:Dos_lane.Keep_autosave fixture));
-    check bool "the boot wrote the autosave" true (Sys.file_exists (autosave_path fixture));
-    check bool "and moved nothing" false (Sys.file_exists (prev_path fixture)));
-  with_fixture (fun fixture ->
-    ignore (require (load ~autosave:Dos_lane.Replace_autosave fixture));
-    check bool "consent with nothing to move moves nothing" false
-      (Sys.file_exists (prev_path fixture)))
-;;
-
-let write_file path contents =
-  Out_channel.with_open_bin path (fun oc -> output_string oc contents)
-;;
-
-let test_an_unreadable_autosave_stops_a_load_until_consent () =
-  with_fixture (fun fixture ->
-    Unix.mkdir fixture.checkpoints 0o755;
-    write_file (autosave_path fixture) "not a checkpoint";
-    (match load fixture with
-     | Error (Dos_lane.Autosave_exists (Dos_lane.Held_unreadable _)) -> ()
-     | Error error -> fail (Dos_lane.error_to_string error)
-     | Ok _ -> fail "a load replaced a file it could not read");
-    check string "the file is as it was" "not a checkpoint"
-      (In_channel.with_open_bin (autosave_path fixture) In_channel.input_all);
-    ignore (require (load ~autosave:Dos_lane.Replace_autosave fixture));
-    check string "with consent the file moves to autosave-prev" "not a checkpoint"
-      (In_channel.with_open_bin (prev_path fixture) In_channel.input_all))
-;;
-
-(* ---------- slots ---------- *)
 
 let slot_of name =
   match Machine_checkpoint.slot_of_string name with
@@ -214,6 +84,252 @@ let named_of name =
   | Dos_lane.Current_autosave | Dos_lane.Previous_autosave ->
     failf "%s is a slot the lane writes itself" name
 ;;
+
+let slot_path fixture name = Machine_checkpoint.path ~dir:fixture.checkpoints (slot_of name)
+let autosave_path fixture = slot_path fixture "autosave"
+let prev_path fixture = slot_path fixture "autosave-prev"
+
+let steps_in fixture name =
+  match
+    Machine_checkpoint.read_meta ~dir:fixture.checkpoints (slot_of name)
+      ~machine:Machine_checkpoint.Dos ~format:Dos_lane.checkpoint_format
+  with
+  | Error e -> fail (Machine_checkpoint.error_to_string e)
+  | Ok { meta = `Assoc fields; _ } ->
+    (match List.assoc_opt "steps" fields with
+     | Some (`Int steps) -> steps
+     | _ -> fail "the checkpoint's meta names no step count")
+  | Ok _ -> fail "the checkpoint's meta is not an object"
+;;
+
+let incarnation () = (require (Dos_lane.capture_with_identity ())).Dos_lane.incarnation
+
+let write_file path contents =
+  Out_channel.with_open_bin path (fun oc -> output_string oc contents)
+;;
+
+(* The campaign: a machine that has run past its boot, so its autosave holds a
+   step count no fresh boot reaches. *)
+let play_a_campaign fixture =
+  let booted, _boot = require (load fixture) in
+  step ();
+  let campaign_steps = steps_in fixture "autosave" in
+  check bool "the campaign is past its boot" true (campaign_steps > booted.Dos_lane.steps);
+  campaign_steps
+;;
+
+(* The state a second start meets: the campaign in autosave-prev and a fresh
+   machine's boot in the autosave. The first start asked for nothing, because
+   autosave-prev was empty. Returns the campaign's step count and the boot's. *)
+let campaign_in_previous fixture =
+  let campaign_steps = play_a_campaign fixture in
+  let booted, _boot = require (load fixture) in
+  check int "the campaign moved to autosave-prev" campaign_steps (steps_in fixture "autosave-prev");
+  (campaign_steps, booted.Dos_lane.steps)
+;;
+
+let would_discard ~name ~discarded_steps ~kept_steps = function
+  | Error
+      (Dos_lane.Would_discard_previous_autosave
+        { previous = Dos_lane.Held discarded; current = Dos_lane.Held kept }) ->
+    check int (name ^ ": the steps it would discard") discarded_steps discarded.Dos_lane.steps;
+    check int (name ^ ": the steps that move into its place") kept_steps kept.Dos_lane.steps;
+    check string (name ^ ": who saved the one it would discard") who discarded.Dos_lane.saved_by
+  | Error error -> failf "%s: unexpected %s" name (Dos_lane.error_to_string error)
+  | Ok _ -> failf "%s: the start went through and discarded the previous autosave" name
+;;
+
+let unchanged ~name fixture ~autosave ~previous =
+  check string (name ^ ": the autosave is byte for byte as it was") autosave
+    (Digest.file (autosave_path fixture));
+  check string (name ^ ": the previous autosave is byte for byte as it was") previous
+    (Digest.file (prev_path fixture))
+;;
+
+let test_a_start_over_an_autosave_alone_keeps_it_and_asks_nothing () =
+  with_fixture (fun fixture ->
+    let campaign_steps = play_a_campaign fixture in
+    let campaign = Digest.file (autosave_path fixture) in
+    check bool "autosave-prev is empty" false (Sys.file_exists (prev_path fixture));
+    let reloaded, _boot = require (load fixture) in
+    check string "the campaign file survives as autosave-prev" campaign
+      (Digest.file (prev_path fixture));
+    check int "with its steps" campaign_steps (steps_in fixture "autosave-prev");
+    check int "and the autosave is the new machine's own boot" reloaded.Dos_lane.steps
+      (steps_in fixture "autosave"))
+;;
+
+(* The repeat of the original bug: a second start moved the campaign to
+   autosave-prev, and a third replaced autosave-prev with the fresh boot. *)
+let test_a_third_start_would_discard_the_campaign_and_is_refused () =
+  with_fixture (fun fixture ->
+    let campaign_steps, boot_steps = campaign_in_previous fixture in
+    let autosave = Digest.file (autosave_path fixture)
+    and previous = Digest.file (prev_path fixture) in
+    let machine = incarnation () in
+    let refused name =
+      would_discard ~name ~discarded_steps:campaign_steps ~kept_steps:boot_steps (load fixture);
+      unchanged ~name fixture ~autosave ~previous;
+      check string (name ^ ": the running machine is the one from before") machine
+        (incarnation ())
+    in
+    refused "third start";
+    (* A refusal changes nothing, so repeating it cannot wear the campaign down. *)
+    refused "fourth start";
+    let reloaded, _boot = require (load ~previous_autosave:Dos_lane.Discard_previous_autosave fixture) in
+    check int "with consent the boot moves into autosave-prev" boot_steps
+      (steps_in fixture "autosave-prev");
+    check int "and the autosave is the newest machine's own boot" reloaded.Dos_lane.steps
+      (steps_in fixture "autosave"))
+;;
+
+(* After a restart there is no machine and both files are on disk. *)
+let test_a_load_after_an_eject_is_refused_when_it_would_discard () =
+  with_fixture (fun fixture ->
+    let campaign_steps, boot_steps = campaign_in_previous fixture in
+    ignore (require (Dos_lane.eject ~who ~announce:ignore ()));
+    would_discard ~name:"load with no machine" ~discarded_steps:campaign_steps
+      ~kept_steps:boot_steps (load fixture);
+    check bool "no machine was installed" true
+      (match Dos_lane.screen () with Error Dos_lane.No_machine -> true | _ -> false))
+;;
+
+(* The second bug the review found: autosave A, restore a named slot, run,
+   restore it again, run. The second run's first save replaced the copy of A. *)
+let test_a_restore_asks_before_it_would_discard_the_campaign () =
+  with_fixture (fun fixture ->
+    let campaign_steps = play_a_campaign fixture in
+    ignore (require (Dos_lane.save ~who ~dir:fixture.checkpoints ~slot:(named_of "quick")));
+    ignore (require (restore fixture (slot_of "quick")));
+    step ();
+    check int "the first restore asked nothing and kept the campaign" campaign_steps
+      (steps_in fixture "autosave-prev");
+    let autosave = Digest.file (autosave_path fixture)
+    and previous = Digest.file (prev_path fixture) in
+    let machine = incarnation () in
+    let kept_steps = steps_in fixture "autosave" in
+    would_discard ~name:"second restore" ~discarded_steps:campaign_steps ~kept_steps
+      (restore fixture (slot_of "quick"));
+    unchanged ~name:"second restore" fixture ~autosave ~previous;
+    check string "the running machine is the one from before" machine (incarnation ());
+    ignore
+      (require
+         (restore ~previous_autosave:Dos_lane.Discard_previous_autosave fixture (slot_of "quick")));
+    step ();
+    check int "with consent autosave-prev holds the machine that was running" kept_steps
+      (steps_in fixture "autosave-prev"))
+;;
+
+let test_a_restore_of_the_autosave_asks_when_both_files_are_there () =
+  with_fixture (fun fixture ->
+    let campaign_steps, boot_steps = campaign_in_previous fixture in
+    would_discard ~name:"restore of the autosave" ~discarded_steps:campaign_steps
+      ~kept_steps:boot_steps (restore fixture Dos_lane.autosave_slot))
+;;
+
+(* What would be replaced is already inside the machine that restore builds. *)
+let test_a_restore_of_the_previous_autosave_asks_nothing () =
+  with_fixture (fun fixture ->
+    let campaign_steps, _boot_steps = campaign_in_previous fixture in
+    let restored = require (restore fixture Dos_lane.autosave_prev_slot) in
+    check int "the campaign is the restored machine" campaign_steps restored.Dos_lane.steps)
+;;
+
+let test_a_slot_that_does_not_exist_is_reported_not_asked_about () =
+  with_fixture (fun fixture ->
+    ignore (campaign_in_previous fixture);
+    match restore fixture (slot_of "never-saved") with
+    | Error (Dos_lane.Checkpoint_refused (Machine_checkpoint.No_slot _)) -> ()
+    | Error error -> fail (Dos_lane.error_to_string error)
+    | Ok _ -> fail "a slot that was never saved restored")
+;;
+
+(* A file that will not read still counts: it may hold the only copy. *)
+let test_an_unreadable_previous_autosave_is_at_stake () =
+  with_fixture (fun fixture ->
+    ignore (play_a_campaign fixture);
+    write_file (prev_path fixture) "not a checkpoint";
+    (match load fixture with
+     | Error
+         (Dos_lane.Would_discard_previous_autosave
+           { previous = Dos_lane.Held_unreadable _; current = Dos_lane.Held _ }) -> ()
+     | Error error -> fail (Dos_lane.error_to_string error)
+     | Ok _ -> fail "a load replaced a previous autosave it could not read");
+    check string "the file is as it was" "not a checkpoint"
+      (In_channel.with_open_bin (prev_path fixture) In_channel.input_all))
+;;
+
+let test_an_unreadable_autosave_moves_to_previous_and_asks_nothing () =
+  with_fixture (fun fixture ->
+    Unix.mkdir fixture.checkpoints 0o755;
+    write_file (autosave_path fixture) "not a checkpoint";
+    ignore (require (load fixture));
+    check string "the file moved to autosave-prev byte for byte" "not a checkpoint"
+      (In_channel.with_open_bin (prev_path fixture) In_channel.input_all))
+;;
+
+let test_an_unreadable_autosave_is_at_stake_when_previous_holds_something () =
+  with_fixture (fun fixture ->
+    ignore (play_a_campaign fixture);
+    let campaign = Digest.file (autosave_path fixture) in
+    (* The campaign is the previous autosave; the autosave is damaged. *)
+    Sys.rename (autosave_path fixture) (prev_path fixture);
+    write_file (autosave_path fixture) "damaged";
+    (match load fixture with
+     | Error
+         (Dos_lane.Would_discard_previous_autosave
+           { previous = Dos_lane.Held _; current = Dos_lane.Held_unreadable _ }) -> ()
+     | Error error -> fail (Dos_lane.error_to_string error)
+     | Ok _ -> fail "a load replaced a previous autosave");
+    check string "the previous autosave is as it was" campaign (Digest.file (prev_path fixture)))
+;;
+
+(* With no autosave there is nothing to copy, so the previous one stays. *)
+let test_a_start_with_only_a_previous_autosave_leaves_it () =
+  with_fixture (fun fixture ->
+    ignore (play_a_campaign fixture);
+    Sys.rename (autosave_path fixture) (prev_path fixture);
+    let previous = Digest.file (prev_path fixture) in
+    ignore (require (load fixture));
+    check string "autosave-prev is untouched" previous (Digest.file (prev_path fixture));
+    check bool "and the new machine wrote its own autosave" true
+      (Sys.file_exists (autosave_path fixture)))
+;;
+
+let test_a_start_with_nothing_on_disk_asks_nothing () =
+  with_fixture (fun fixture ->
+    ignore (require (load fixture));
+    check bool "the boot wrote the autosave" true (Sys.file_exists (autosave_path fixture));
+    check bool "and moved nothing" false (Sys.file_exists (prev_path fixture)))
+;;
+
+(* A load that lands between a restore's preparation and its commit copies the
+   autosave into autosave-prev; the restore's own first save would then replace
+   what that load just kept. The commit notices. *)
+let test_a_restore_commit_refuses_when_the_previous_autosave_changed () =
+  with_fixture (fun fixture ->
+    let campaign_steps = play_a_campaign fixture in
+    ignore (require (Dos_lane.save ~who ~dir:fixture.checkpoints ~slot:(named_of "quick")));
+    let prepared =
+      require
+        (Dos_lane.prepare_restore ~dir:fixture.checkpoints ~slot:(slot_of "quick")
+           ~previous_autosave:Dos_lane.Keep_previous_autosave ~ledger_dir:fixture.directory
+           ~saves_dir_of:(fun _ -> fixture.saves))
+    in
+    Fun.protect
+      ~finally:(fun () -> Dos_lane.discard_prepared_restore prepared)
+      (fun () ->
+        ignore (require (load fixture));
+        check int "the load kept the campaign" campaign_steps (steps_in fixture "autosave-prev");
+        let machine = incarnation () in
+        (match Dos_lane.commit_restore ~who prepared ~announce:ignore with
+         | Error (Dos_lane.Invalid_request _) -> ()
+         | Error error -> fail (Dos_lane.error_to_string error)
+         | Ok _ -> fail "a restore went through over a previous autosave it had not seen");
+        check string "the running machine is the one from before" machine (incarnation ())))
+;;
+
+(* ---------- slots ---------- *)
 
 let test_the_lane_owned_slots_are_not_named () =
   let kind name =
@@ -285,16 +401,20 @@ let test_a_save_leaves_only_the_checkpoint () =
 let test_a_failed_copy_keeps_the_old_autosave_and_is_retried () =
   with_fixture (fun fixture ->
     ignore (play_a_campaign fixture);
-    let slot = match Machine_checkpoint.slot_of_string "quick" with
-      | Ok slot -> slot | Error message -> fail message in
     ignore (require (Dos_lane.save ~who ~dir:fixture.checkpoints ~slot:(named_of "quick")));
     let campaign = Digest.file (autosave_path fixture) in
     Unix.mkdir (prev_path fixture) 0o755;
+    (* The directory is an unreadable previous autosave, so the restore asks. *)
+    (match restore fixture (slot_of "quick") with
+     | Error
+         (Dos_lane.Would_discard_previous_autosave
+           { previous = Dos_lane.Held_unreadable _; current = Dos_lane.Held _ }) -> ()
+     | Error error -> fail (Dos_lane.error_to_string error)
+     | Ok _ -> fail "a restore went through over a previous autosave it could not read");
     ignore
       (require
-         (Dos_lane.restore ~who ~dir:fixture.checkpoints ~slot ~ledger_dir:fixture.directory
-            ~saves_dir_of:(fun _ -> fixture.saves)
-            ~announce:ignore));
+         (restore ~previous_autosave:Dos_lane.Discard_previous_autosave fixture
+            (slot_of "quick")));
     let stepped = require (Dos_lane.step ~who ~steps:1_000 ~until_ready:false) in
     (match (snd stepped).Dos_lane.autosave with
      | Dos_lane.Autosave_failed _ -> ()
@@ -326,7 +446,7 @@ let test_a_faulted_boot_installs_the_machine_and_keeps_the_autosave () =
     let announced = ref 0 in
     let faulting =
       Dos_lane.load ~who ~ledger_dir:fixture.directory ~saves_dir:fixture.saves
-        ~checkpoint_dir:fixture.checkpoints ~autosave:Dos_lane.Replace_autosave
+        ~checkpoint_dir:fixture.checkpoints ~previous_autosave:Dos_lane.Keep_previous_autosave
         ~program_name:"fault.com" ~program_bytes:faulting_program ~files:[]
         ~announce:(fun () -> incr announced)
     in
@@ -350,23 +470,39 @@ let test_a_faulted_boot_installs_the_machine_and_keeps_the_autosave () =
 
 let () =
   run "DOS autosave guard"
-    [ ( "load"
-      , [ test_case "a second load keeps the campaign" `Quick
-            test_a_second_load_keeps_the_campaign
-        ; test_case "a load after a restore keeps the campaign" `Quick
-            test_a_load_after_a_restore_keeps_the_campaign
-        ; test_case "a load after an eject keeps the campaign" `Quick
-            test_a_load_after_an_eject_keeps_the_campaign
-        ; test_case "a consented load moves the campaign to autosave-prev" `Quick
-            test_a_consented_load_moves_the_campaign_to_prev
-        ; test_case "a load with no autosave needs no consent" `Quick
-            test_a_load_with_no_autosave_needs_no_consent
-        ; test_case "an unreadable autosave stops a load until consent" `Quick
-            test_an_unreadable_autosave_stops_a_load_until_consent
+    [ ( "start"
+      , [ test_case "a start over an autosave alone keeps it and asks nothing" `Quick
+            test_a_start_over_an_autosave_alone_keeps_it_and_asks_nothing
+        ; test_case "a third start would discard the campaign and is refused" `Quick
+            test_a_third_start_would_discard_the_campaign_and_is_refused
+        ; test_case "a load after an eject is refused when it would discard" `Quick
+            test_a_load_after_an_eject_is_refused_when_it_would_discard
+        ; test_case "an unreadable previous autosave is at stake" `Quick
+            test_an_unreadable_previous_autosave_is_at_stake
+        ; test_case "an unreadable autosave moves to previous and asks nothing" `Quick
+            test_an_unreadable_autosave_moves_to_previous_and_asks_nothing
+        ; test_case "an unreadable autosave is at stake when previous holds something" `Quick
+            test_an_unreadable_autosave_is_at_stake_when_previous_holds_something
+        ; test_case "a start with only a previous autosave leaves it" `Quick
+            test_a_start_with_only_a_previous_autosave_leaves_it
+        ; test_case "a start with nothing on disk asks nothing" `Quick
+            test_a_start_with_nothing_on_disk_asks_nothing
         ; test_case "a failed copy keeps the old autosave and is retried" `Quick
             test_a_failed_copy_keeps_the_old_autosave_and_is_retried
         ; test_case "a faulted boot installs the machine and keeps the autosave" `Quick
             test_a_faulted_boot_installs_the_machine_and_keeps_the_autosave
+        ] )
+    ; ( "restore"
+      , [ test_case "a restore asks before it would discard the campaign" `Quick
+            test_a_restore_asks_before_it_would_discard_the_campaign
+        ; test_case "a restore of the autosave asks when both files are there" `Quick
+            test_a_restore_of_the_autosave_asks_when_both_files_are_there
+        ; test_case "a restore of the previous autosave asks nothing" `Quick
+            test_a_restore_of_the_previous_autosave_asks_nothing
+        ; test_case "a slot that does not exist is reported, not asked about" `Quick
+            test_a_slot_that_does_not_exist_is_reported_not_asked_about
+        ; test_case "a restore commit refuses when the previous autosave changed" `Quick
+            test_a_restore_commit_refuses_when_the_previous_autosave_changed
         ] )
     ; ( "slots"
       , [ test_case "the lane-owned slots are not names" `Quick

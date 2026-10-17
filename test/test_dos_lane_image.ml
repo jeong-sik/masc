@@ -78,7 +78,7 @@ let with_lane run =
 let load directory image =
   Dos_lane.load ~who ~ledger_dir:directory ~saves_dir:(Filename.concat directory "saves")
     ~checkpoint_dir:(Filename.concat directory "checkpoints")
-    ~autosave:Dos_lane.Replace_autosave ~program_name:"game.exe" ~program_bytes:image ~files:[]
+    ~previous_autosave:Dos_lane.Discard_previous_autosave ~program_name:"game.exe" ~program_bytes:image ~files:[]
     ~announce:ignore
 ;;
 

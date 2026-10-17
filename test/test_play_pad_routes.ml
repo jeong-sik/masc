@@ -146,7 +146,7 @@ let with_machine ~saves_name f =
       dos_ok "load"
         (Dos_lane.load ~who:"operator" ~ledger_dir:(Filename.concat dir "ledger")
            ~saves_dir:(Filename.concat (Filename.concat dir "saves") saves_name)
-           ~checkpoint_dir:(Filename.concat dir "checkpoints") ~autosave:Dos_lane.Keep_autosave ~program_name:"KOEI.COM"
+           ~checkpoint_dir:(Filename.concat dir "checkpoints") ~previous_autosave:Dos_lane.Keep_previous_autosave ~program_name:"KOEI.COM"
            ~program_bytes:hello_com ~files:[] ~announce:ignore);
       f ())
 

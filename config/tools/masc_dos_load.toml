@@ -8,10 +8,12 @@ mounted; boot names the executable when there are several. Runs until the \
 program waits for a key or the boot budget ends, and returns the \
 observation (see masc_dos_screen) -- read it to see where it got.
 
-An autosave on disk is never moved by accident: with one present the load is \
-refused and names it. Resume it with masc_dos_restore slot=autosave, or pass \
-replace_autosave=true to start a new machine and move the autosave to \
-autosave-prev (replacing what that slot holds)."""
+A new machine's first save copies the autosave to autosave-prev, replacing \
+what autosave-prev held. When both are on disk the load is refused and names \
+them: what autosave-prev holds would be lost, and the autosave survives as \
+autosave-prev. Restore autosave-prev first to keep it, or pass \
+discard_previous_autosave=true to let it go. With no autosave-prev nothing \
+is lost and no flag is needed."""
 additional_properties = false
 
 defer_loading = true
@@ -27,7 +29,7 @@ type = "string"
 description = "Executable inside a game directory, e.g. KOEI.COM. A file name, not a path."
 
 [[params]]
-name = "replace_autosave"
+name = "discard_previous_autosave"
 type = "boolean"
-description = "Set true only after a refused load showed the waiting autosave and you do not need it. The autosave then moves to autosave-prev, replacing what that slot holds. Default false."
+description = "Set true only after a refused load showed what autosave-prev holds and you do not need it. The new machine's first save then replaces it. Default false."
 default = false

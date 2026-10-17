@@ -66,11 +66,20 @@ name that already holds a checkpoint replaces it and reports what it held in
 save to either is refused.
 
 After a worker restart nothing is loaded. `masc_dos_screen` and
-`masc_dos_load` with no program say whether an autosave exists. Resume it with
-`masc_dos_restore` and `slot` set to `autosave`. `masc_dos_load` with a program
-name is refused while an autosave file exists and names it in the refusal.
-Passing `replace_autosave` as `true` starts a new machine: the autosave moves
-to `autosave-prev` and replaces whatever `autosave-prev` held.
+`masc_dos_load` with no program say what the two autosave slots hold, under
+`autosave` and `previous_autosave`. Resume with `masc_dos_restore` and `slot`
+set to `autosave`, or to `autosave-prev` when the autosave is gone.
+
+A machine started by `masc_dos_load` or `masc_dos_restore` copies the
+`autosave` file to `autosave-prev` with its first autosave, and what
+`autosave-prev` held is gone. The start therefore asks for consent exactly
+when both files exist, readable or not. Without consent the call is refused
+before anything changes, and the refusal names what `autosave-prev` holds
+(`would_discard`) and the autosave that would move in (`moves_to_previous`).
+To keep the old campaign, restore `autosave-prev` first and save it under a
+name. To discard it, repeat the call with `discard_previous_autosave` set to
+`true`. With no file in `autosave-prev`, or with only `autosave-prev` left, the
+start asks nothing. A restore of `autosave-prev` itself asks nothing either.
 
 ## What counts as complete
 

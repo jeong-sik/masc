@@ -118,121 +118,198 @@ let checkpoint_status_fields (s : Dos_lane.autosave_status) =
   ]
 ;;
 
-let autosave_status_json (s : Dos_lane.autosave_status) =
-  `Assoc
-    (checkpoint_status_fields s
-     @ [ ( "resume"
-         , `String
-             (Printf.sprintf "masc_dos_restore slot=%s"
-                (Machine_checkpoint.slot_to_string Dos_lane.autosave_slot)) )
-       ])
+(* A checkpoint in one of the two slots a restart leaves behind, with the
+   command that brings it back. *)
+let slot_status_fields ~slot (s : Dos_lane.autosave_status) =
+  checkpoint_status_fields s
+  @ [ ( "resume"
+      , `String (Printf.sprintf "masc_dos_restore slot=%s" (Machine_checkpoint.slot_to_string slot)) )
+    ]
 ;;
 
-(* Reads the autosave slot on a system thread: the read decompresses and
-   checksums the whole machine body, work that does not belong on the event
-   loop. *)
-let lookup_autosave ~base_path =
+let slot_status_json ~slot s = `Assoc (slot_status_fields ~slot s)
+
+let held_fields ~slot = function
+  | Dos_lane.Held s -> slot_status_fields ~slot s
+  | Dos_lane.Held_unreadable reason -> [ ("unreadable", `String reason) ]
+;;
+
+(* What the two autosave slots hold. After a restart this is all that is left of
+   a campaign: the autosave is the last state, and the previous autosave can be
+   the only copy of the one before it. *)
+type autosave_slots =
+  { current : Dos_lane.autosave_lookup
+  ; previous : Dos_lane.autosave_lookup
+  }
+
+(* Reads both slots on a system thread: each read decompresses and checksums a
+   whole machine body, work that does not belong on the event loop. *)
+let lookup_autosave_slots ~base_path =
+  let dir = checkpoints_dir ~base_path in
   let found =
-    off_domain (fun () -> Dos_lane.lookup_autosave ~dir:(checkpoints_dir ~base_path))
+    off_domain (fun () ->
+      { current = Dos_lane.lookup_autosave ~dir
+      ; previous = Dos_lane.lookup_previous_autosave ~dir
+      })
   in
-  (match found with
-   | Dos_lane.Autosave_unreadable reason -> Log.DosLog.warn "masc_dos autosave: %s" reason
-   | Dos_lane.No_autosave | Dos_lane.Autosave _ -> ());
+  let warn which = function
+    | Dos_lane.Autosave_unreadable reason -> Log.DosLog.warn "masc_dos %s: %s" which reason
+    | Dos_lane.No_autosave | Dos_lane.Autosave _ -> ()
+  in
+  warn "autosave" found.current;
+  warn "previous autosave" found.previous;
   found
 ;;
 
-let autosave_lookup_fields = function
+let lookup_fields ~key ~slot = function
   | Dos_lane.No_autosave -> []
-  | Dos_lane.Autosave s -> [ ("autosave", autosave_status_json s) ]
-  | Dos_lane.Autosave_unreadable reason ->
-    [ ("autosave", `Assoc [ ("unreadable", `String reason) ]) ]
+  | Dos_lane.Autosave s -> [ (key, slot_status_json ~slot s) ]
+  | Dos_lane.Autosave_unreadable reason -> [ (key, `Assoc [ ("unreadable", `String reason) ]) ]
+;;
+
+let autosave_slots_fields { current; previous } =
+  lookup_fields ~key:"autosave" ~slot:Dos_lane.autosave_slot current
+  @ lookup_fields ~key:"previous_autosave" ~slot:Dos_lane.autosave_prev_slot previous
 ;;
 
 (* [reject]'s [~data] defaults to [`Null], and Tool_bridge (tool_bridge.ml)
    only drops a [`Null] one from the model-facing message; a [`Null] and an
-   [`Assoc []] are not the same to it. [No_autosave] must reach [reject] as
-   the same [`Null] a plain refusal always carried, not as an empty object
-   that turns every ordinary No_machine refusal into a JSON envelope. *)
+   [`Assoc []] are not the same to it. A lookup with nothing in either slot must
+   reach [reject] as the same [`Null] a plain refusal always carried, not as an
+   empty object that turns every ordinary No_machine refusal into a JSON
+   envelope. *)
 let reject_data_of_fields = function
   | [] -> `Null
   | fields -> `Assoc fields
 ;;
 
+let describe_held = function
+  | Dos_lane.Held s ->
+    Printf.sprintf "%s, %d steps, saved by %s at %s" s.Dos_lane.program s.Dos_lane.steps
+      s.Dos_lane.saved_by (Time_codec.rfc3339_of_unix s.Dos_lane.saved_at)
+  | Dos_lane.Held_unreadable reason -> Printf.sprintf "a file this server cannot read (%s)" reason
+;;
+
+let held_of_lookup = function
+  | Dos_lane.No_autosave -> None
+  | Dos_lane.Autosave s -> Some (Dos_lane.Held s)
+  | Dos_lane.Autosave_unreadable reason -> Some (Dos_lane.Held_unreadable reason)
+;;
+
 (* What a caller needs next when it asks for a machine and none is loaded. The
    lane cannot say: with no machine it holds no checkpoint directory, so the
-   autosave is looked up here, where [base_path] is known. Restoring is the
-   first answer whenever an autosave exists, because [masc_dos_restore] works
-   with no machine loaded while [masc_dos_load] is refused over that file
-   unless the call consents to moving it. *)
+   slots are looked up here, where [base_path] is known. Restoring is the first
+   answer whenever something is saved, because [masc_dos_restore] works with no
+   machine loaded. A start that is not a restore of the previous autosave --
+   a load, or a restore of the autosave -- replaces the previous autosave with
+   its first save, so [discards] says what that would be: [None] when the
+   previous slot is empty, and then no consent is needed. *)
 type no_machine_guidance =
-  | Restore_autosave of Dos_lane.autosave_status
-  | Replace_unreadable_autosave of string
+  | Restore_autosave of
+      { autosave : Dos_lane.autosave_status
+      ; discards : Dos_lane.held_autosave option
+      }
+  | Unreadable_autosave of
+      { reason : string
+      ; discards : Dos_lane.held_autosave option
+      }
+  | Restore_previous_autosave of Dos_lane.autosave_status
+  | Unreadable_previous_autosave of string
   | Load_a_program
 
-let no_machine_guidance = function
-  | Dos_lane.Autosave status -> Restore_autosave status
-  | Dos_lane.Autosave_unreadable reason -> Replace_unreadable_autosave reason
-  | Dos_lane.No_autosave -> Load_a_program
+let no_machine_guidance { current; previous } =
+  let discards = held_of_lookup previous in
+  match current, previous with
+  | Dos_lane.Autosave autosave, _ -> Restore_autosave { autosave; discards }
+  | Dos_lane.Autosave_unreadable reason, _ -> Unreadable_autosave { reason; discards }
+  | Dos_lane.No_autosave, Dos_lane.Autosave status -> Restore_previous_autosave status
+  | Dos_lane.No_autosave, Dos_lane.Autosave_unreadable reason ->
+    Unreadable_previous_autosave reason
+  | Dos_lane.No_autosave, Dos_lane.No_autosave -> Load_a_program
 ;;
 
 let no_machine_message guidance =
   let slot = Machine_checkpoint.slot_to_string in
-  let resume = slot Dos_lane.autosave_slot and prev = slot Dos_lane.autosave_prev_slot in
+  let current = slot Dos_lane.autosave_slot and previous = slot Dos_lane.autosave_prev_slot in
   let refusal = Dos_lane.error_to_string Dos_lane.No_machine in
+  let consent =
+    "discard_previous_autosave=true"
+  in
   match guidance with
   | Load_a_program -> refusal ^ ": call masc_dos_load first"
-  | Restore_autosave s ->
+  | Restore_previous_autosave s ->
     Printf.sprintf
-      "%s. An autosave is waiting: %s, %d steps, saved by %s at %s. Resume it with \
-       masc_dos_restore slot=%s. masc_dos_load starts a different program instead and \
-       needs replace_autosave=true, which moves the autosave to %s."
-      refusal s.Dos_lane.program s.Dos_lane.steps s.Dos_lane.saved_by
-      (Time_codec.rfc3339_of_unix s.Dos_lane.saved_at) resume prev
-  | Replace_unreadable_autosave reason ->
+      "%s. There is no autosave, but %s holds %s. Resume it with masc_dos_restore slot=%s."
+      refusal previous (describe_held (Dos_lane.Held s)) previous
+  | Unreadable_previous_autosave reason ->
+    Printf.sprintf "%s. There is no autosave, and %s is a file this server cannot read (%s)."
+      refusal previous reason
+  | Restore_autosave { autosave; discards = None } ->
+    Printf.sprintf
+      "%s. An autosave is waiting: %s. Resume it with masc_dos_restore slot=%s. \
+       masc_dos_load starts a different program instead; the autosave then moves to %s \
+       and stays there."
+      refusal (describe_held (Dos_lane.Held autosave)) current previous
+  | Restore_autosave { autosave; discards = Some held } ->
+    Printf.sprintf
+      "%s. An autosave is waiting: %s. %s holds %s, which the first save of a resumed or \
+       newly loaded machine replaces. Resume the autosave with masc_dos_restore slot=%s %s, \
+       or look at %s first with masc_dos_restore slot=%s, which asks for nothing. \
+       masc_dos_load needs %s too."
+      refusal (describe_held (Dos_lane.Held autosave)) previous (describe_held held) current
+      consent previous previous consent
+  | Unreadable_autosave { reason; discards = None } ->
     Printf.sprintf
       "%s. An autosave file is there but this server cannot read it: %s. masc_dos_load \
-       needs replace_autosave=true to move it to %s."
-      refusal reason prev
+       moves it to %s and starts the program."
+      refusal reason previous
+  | Unreadable_autosave { reason; discards = Some held } ->
+    Printf.sprintf
+      "%s. An autosave file is there but this server cannot read it: %s. %s holds %s, which \
+       masc_dos_load would replace, so it needs %s."
+      refusal reason previous (describe_held held) consent
 ;;
 
 (* The answer to a call that needs a machine when none is loaded. It is the
-   answer a caller gets right after a restart, so it says what the autosave
-   slot holds and how to resume it. Every other refusal is unaffected. *)
+   answer a caller gets right after a restart, so it says what the two
+   autosave slots hold and how to resume. Every other refusal is unaffected. *)
 let no_machine ~base_path ~tool_name ~start_time =
-  let found = lookup_autosave ~base_path in
+  let found = lookup_autosave_slots ~base_path in
   let message = no_machine_message (no_machine_guidance found) in
   Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Workflow_rejection
     ~effect_disposition:Tool_result.Proven_pre_effect
-    ~data:(reject_data_of_fields (autosave_lookup_fields found)) message
+    ~data:(reject_data_of_fields (autosave_slots_fields found)) message
 ;;
 
-(* [masc_dos_load] found an autosave on disk and the call did not consent to
-   moving it. A refusal before anything changed: it names what is there and
-   both ways forward, so the caller does not have to guess which one keeps the
-   campaign. *)
-let autosave_exists ~tool_name ~start_time held =
+(* [masc_dos_load] or [masc_dos_restore] would start a machine whose first save
+   replaces the previous autosave, and the call did not consent. A refusal
+   before anything changed: it names what would be lost, what survives, and
+   both ways forward. *)
+let would_discard_previous ~tool_name ~start_time (discard : Dos_lane.discard) =
   let slot = Machine_checkpoint.slot_to_string in
-  let resume = slot Dos_lane.autosave_slot and prev = slot Dos_lane.autosave_prev_slot in
-  let found, message =
-    match held with
-    | Dos_lane.Held s ->
-      ( Dos_lane.Autosave s
-      , Printf.sprintf
-          "nothing was loaded: an autosave is waiting (%s, %d steps, saved by %s at %s). \
-           Resume it with masc_dos_restore slot=%s. To start this program instead, call \
-           masc_dos_load again with replace_autosave=true: the autosave moves to %s and \
-           replaces what %s holds."
-          s.Dos_lane.program s.Dos_lane.steps s.Dos_lane.saved_by
-          (Time_codec.rfc3339_of_unix s.Dos_lane.saved_at) resume prev prev )
-    | Dos_lane.Held_unreadable reason ->
-      ( Dos_lane.Autosave_unreadable reason
-      , Printf.sprintf
-          "nothing was loaded: an autosave file is there that this server cannot read (%s). \
-           To start this program anyway, call masc_dos_load again with \
-           replace_autosave=true: the file moves to %s and replaces what %s holds."
-          reason prev prev )
+  let current = slot Dos_lane.autosave_slot and previous = slot Dos_lane.autosave_prev_slot in
+  let message =
+    Printf.sprintf
+      "nothing was done: %s holds %s, and the first save of the new machine would replace \
+       it. The current autosave (%s) would move to %s and survive there. To keep what %s \
+       holds, restore it first with masc_dos_restore slot=%s (that asks for nothing) and \
+       save it under a name. To go on and discard it, call %s again with \
+       discard_previous_autosave=true."
+      previous (describe_held discard.Dos_lane.previous) (describe_held discard.Dos_lane.current)
+      previous previous previous tool_name
   in
-  reject ~tool_name ~start_time ~data:(reject_data_of_fields (autosave_lookup_fields found)) message
+  let data =
+    [ ( "would_discard"
+      , `Assoc
+          (("slot", `String previous)
+           :: held_fields ~slot:Dos_lane.autosave_prev_slot discard.Dos_lane.previous) )
+    ; ( "moves_to_previous"
+      , `Assoc
+          (("slot", `String current)
+           :: held_fields ~slot:Dos_lane.autosave_slot discard.Dos_lane.current) )
+    ]
+  in
+  reject ~tool_name ~start_time ~data:(`Assoc data) message
 ;;
 
 (* [png] adds the frame for a model that reads images: the observation's text,
@@ -254,7 +331,8 @@ let of_lane ?(extra = []) ?png ~base_path ~tool_name ~start_time
     in
     Tool_result.make_ok ~tool_name ~start_time ~data ?content_blocks ()
   | Error Dos_lane.No_machine -> no_machine ~base_path ~tool_name ~start_time
-  | Error (Dos_lane.Autosave_exists held) -> autosave_exists ~tool_name ~start_time held
+  | Error (Dos_lane.Would_discard_previous_autosave discard) ->
+    would_discard_previous ~tool_name ~start_time discard
   | Error ((Dos_lane.Activity_disabled | Dos_lane.Activity_unobserved) as error) ->
     Tool_result.make_err ~tool_name ~class_:Tool_result.Workflow_rejection
       ~effect_disposition:Tool_result.Proven_pre_effect ~start_time
@@ -698,10 +776,10 @@ let release_retired_keeper ~holder ~by =
 ;;
 
 (* The wire carries a boolean; the lane takes a variant, so every call site
-   of [Dos_lane.load] states which of the two it means. *)
-let autosave_consent args =
-  if get_bool args "replace_autosave" false then Dos_lane.Replace_autosave
-  else Dos_lane.Keep_autosave
+   of [Dos_lane.load] and [Dos_lane.restore] states which of the two it means. *)
+let previous_autosave_consent args =
+  if get_bool args "discard_previous_autosave" false then Dos_lane.Discard_previous_autosave
+  else Dos_lane.Keep_previous_autosave
 ;;
 
 let handle_load ~tool_name ~start_time ~base_path ~agent_name args =
@@ -711,7 +789,7 @@ let handle_load ~tool_name ~start_time ~base_path ~agent_name args =
        here too: this is the first call a caller makes after a restart, and
        an autosave from before it is worth resuming rather than starting
        over. *)
-    let autosave = autosave_lookup_fields (lookup_autosave ~base_path) in
+    let autosave = autosave_slots_fields (lookup_autosave_slots ~base_path) in
     (match programs_available ~base_path with
      | Ok names ->
        Tool_result.make_ok ~tool_name ~start_time
@@ -737,7 +815,7 @@ let handle_load ~tool_name ~start_time ~base_path ~agent_name args =
          off_domain (fun () ->
            Dos_lane.load ~who:agent_name ~ledger_dir:(dos_dir ~base_path)
              ~saves_dir:(saves_dir ~base_path (String.trim name))
-             ~checkpoint_dir:(checkpoints_dir ~base_path) ~autosave:(autosave_consent args)
+             ~checkpoint_dir:(checkpoints_dir ~base_path) ~previous_autosave:(previous_autosave_consent args)
              ~program_name ~program_bytes
              ~files
              ~announce:
@@ -1104,7 +1182,7 @@ let handle_peek ~tool_name ~start_time ~base_path args =
           | Dos_lane.Unsaveable _
           | Dos_lane.Checkpoint_refused _
           | Dos_lane.Other_program _
-          | Dos_lane.Autosave_exists _ ) as e) ->
+          | Dos_lane.Would_discard_previous_autosave _ ) as e) ->
        reject ~tool_name ~start_time (Dos_lane.error_to_string e))
 ;;
 
@@ -1190,7 +1268,8 @@ let handle_restore ~tool_name ~start_time ~base_path ~agent_name args =
   | Ok (Some slot) ->
     let restored =
       off_domain (fun () ->
-        Dos_lane.restore ~who:agent_name ~dir ~slot ~ledger_dir:(dos_dir ~base_path)
+        Dos_lane.restore ~who:agent_name ~dir ~slot
+          ~previous_autosave:(previous_autosave_consent args) ~ledger_dir:(dos_dir ~base_path)
           ~saves_dir_of:(saves_dir ~base_path)
           ~announce:
             (announce ~author:agent_name

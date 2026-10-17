@@ -1677,22 +1677,30 @@ status: reference
   `masc_dos_restore` 도 쓰지 않는다. 되살린 기계의 다음 호출부터 쓴다.
   쓰기가 실패해도(예: 디렉터리를 쓸 수 없음) 원래 호출의 결과는 그대로 돌아가고,
   결과 안에 `autosave: {"saved": false, "reason": ...}` 로만 남는다.
-  기계를 움직이는 다음 호출이 `autosave` 슬롯을 덮어쓴다. 다만 `autosave` 파일이 있으면
-  `masc_dos_load` 는 아무것도 바꾸지 않고 거절한다(파일이 읽히지 않는 경우도 같다).
-  거절 응답이 그 파일의 프로그램, 실행한 명령어 수, 저장한 사람, 시각을 알려 준다.
-  이어 하려면 `masc_dos_restore slot=autosave` 를 부른다. 그래도 새로 시작하려면
-  `masc_dos_load` 에 `replace_autosave=true` 를 넣는다. 그러면 새 기계(incarnation)의
-  첫 자동 저장이 먼저 그 파일을 `autosave-prev` 슬롯으로 옮기고, `autosave-prev` 에
-  있던 것은 사라진다. `masc_dos_restore slot=autosave-prev` 로 되살릴 수 있다.
-  `masc_dos_restore` 로 되살린 기계의 첫 자동 저장도 같은 이동을 한다. 같은 기계가
-  그 뒤 또 자동 저장할 때는 옮기지 않고 `autosave` 를 그대로 갈아 쓴다.
+  슬롯은 둘이다. `autosave` 는 기계의 가장 최근 상태이고, `autosave-prev` 는 지금 도는
+  기계가 시작될 때 `autosave` 에 있던 것이다. `masc_dos_load`·`masc_dos_restore` 로 시작한
+  새 기계(incarnation)의 첫 자동 저장이 `autosave` 파일을 `autosave-prev` 로 복사하고,
+  `autosave-prev` 에 있던 것은 사라진다. 그 뒤 같은 기계의 자동 저장은 복사하지 않고
+  `autosave` 만 갈아 쓴다.
+  그래서 두 파일이 모두 있을 때만 시작에 동의가 필요하다(파일이 읽히지 않아도 있는 것으로
+  센다). 동의 없이 부르면 아무것도 바꾸지 않고 거절하며, 거절 응답의 `would_discard` 가
+  사라질 `autosave-prev` 의 내용(프로그램, 실행한 명령어 수, 저장한 사람, 시각)을,
+  `moves_to_previous` 가 그 자리로 옮겨 가는 `autosave` 를 알려 준다.
+  `masc_dos_load` 와 `masc_dos_restore`(`autosave-prev` 를 되살리는 경우는 빼고)가 같은
+  관문을 지난다. `autosave-prev` 의 내용을 지키려면 먼저
+  `masc_dos_restore slot=autosave-prev` 로 되살려 이름을 붙여 저장한다. 그래도 새로
+  시작하려면 같은 호출에 `discard_previous_autosave=true` 를 넣는다.
+  `autosave-prev` 파일이 없으면 `autosave` 가 그대로 옮겨 가 남으므로 동의가 필요 없고,
+  `autosave` 없이 `autosave-prev` 만 남았을 때도 건드리지 않으므로 묻지 않는다.
+  `autosave-prev` 를 되살리는 호출은 되살린 기계가 이미 그 내용을 들고 있어서 묻지 않는다.
   기계가 없을 때 — 기계가 필요한 호출의 거절(`masc_dos_screen`·`masc_dos_peek` 등)과
-  프로그램 이름 없이 부른 `masc_dos_load` 의 인벤토리 응답 — 는 이 자동 저장이 있는지,
-  무엇인지(프로그램, 실행한 명령어 수, 저장한 사람, 시각), 어떻게 되살리는지
-  (`masc_dos_restore slot=autosave`)를 `autosave` 필드로 알려 준다. 파일이 있는데 읽히지
-  않으면(다른 체크포인트 형식, 손상) `autosave: {"unreadable": 이유}` 로 그렇게 말한다.
+  프로그램 이름 없이 부른 `masc_dos_load` 의 인벤토리 응답 — 는 두 슬롯에 무엇이 있는지
+  (프로그램, 실행한 명령어 수, 저장한 사람, 시각, 되살리는 명령)를 `autosave` 와
+  `previous_autosave` 필드로 알려 준다. 파일이 있는데 읽히지 않으면(다른 체크포인트 형식,
+  손상) `{"unreadable": 이유}` 로 그렇게 말한다.
   되살리는 것은 언제나 사람의 몫이고, 서버가 스스로 되살리지 않는다.
   → [Dos_lane.lookup_autosave](../../lib/dos_lane/dos_lane.mli),
+  [Dos_lane.lookup_previous_autosave](../../lib/dos_lane/dos_lane.mli),
   [Machine_checkpoint.read_meta](../../lib/machine_checkpoint/machine_checkpoint.mli)
 
 **MSX Lane**

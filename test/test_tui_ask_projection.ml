@@ -23,7 +23,7 @@ let row ?(resolution = Masc.Tui_decode_asks.Ask_open) ?(questions = [ question "
     ar_keeper = "asker";
     ar_id = id;
     ar_asked_at = 1.0;
-    ar_context = None;
+    ar_source_turn_ref = None; ar_context = None;
     ar_questions = questions;
     ar_resolution = resolution;
   }
@@ -342,6 +342,7 @@ let test_wire_question_reaches_the_answer_draft () =
     ~free_text:Domain.Choices_only) in
   let ask = valid (Domain.ask ~ask_id:"wire-ask" ~keeper_name:"reader"
     ~questions:[question] ~context:"Choose a deployment window"
+    ~source_turn_ref:(Ids.Turn_ref.make ~trace_id:"original-question-trace" ~absolute_turn:17)
     ~continuation:(Keeper_continuation_channel.unrouted "wire projection test") ~asked_at:42. ()) in
   let row = Masc.Keeper_ask_operator_projection.ask_row_json ~keeper_name:"reader"
     (ask.ask_id, (ask, Domain.Open)) in
@@ -354,6 +355,14 @@ let test_wire_question_reaches_the_answer_draft () =
   | Ok snapshot ->
       (match Ask.open_rows snapshot with
        | [row] ->
+           Alcotest.(check (option string)) "question source survives the canonical wire"
+             (Some "original-question-trace#17") (Option.map Ids.Turn_ref.to_string row.ar_source_turn_ref);
+           let origin = Ask.origin_of_row row in
+           let feedback = Ask.answer_feedback ?source_turn_ref:row.ar_source_turn_ref
+               ~keeper_name:row.ar_keeper ~ask_id:row.ar_id ~submitted_label:"private answer"
+               (Ok (Masc.Tui_decode_asks.Ask_answer_recorded Masc.Tui_decode_asks.Ask_wake_stored)) in
+           Alcotest.(check bool) "answer origin is the same original question" true
+             (Ask.same_origin origin (Ask.origin_of_feedback feedback));
            Alcotest.(check (option string)) "context survives the wire"
              (Some "Choose a deployment window") row.ar_context;
            (match row.ar_questions with
@@ -372,13 +381,36 @@ let test_wire_question_reaches_the_answer_draft () =
             | _ -> Alcotest.fail "expected one wire question")
        | _ -> Alcotest.fail "expected one open wire ask")
 
+let test_question_source_is_explicit_and_unambiguous () =
+  let decode source_fields =
+    let row = `Assoc (["keeper",`String "reader";"ask_id",`String "wire-ask";
+      "asked_at",`Float 42.;"context",`Null;"questions",`List [];
+      "resolution",`Assoc ["state",`String "open"]] @ source_fields) in
+    Masc.Tui_decode_asks.decode_asks_snapshot ~expected_base_path:"/wire"
+      ~expected_masc_root:"/wire/.masc"
+      (`Assoc ["workspace",`Assoc ["base_path",`String "/wire";"masc_root",`String "/wire/.masc"];
+        "state_ready",`Bool true;"open_count",`Int 1;"asks",`List [row]]) in
+  (match decode ["source_turn_ref",`Null] with
+   | Ok {asn_rows=[row];_} ->
+       Alcotest.(check bool) "unobserved source stays unobserved" true (row.ar_source_turn_ref=None)
+   | Ok _ | Error _ -> Alcotest.fail "explicit unobserved source should remain readable");
+  List.iter (fun source_fields -> Alcotest.(check bool)
+      "missing, malformed or duplicate source cannot become current-turn provenance" true
+      (Result.is_error (decode source_fields)))
+    [ []; ["source_turn_ref",`Int 17]; ["source_turn_ref",`Bool false];
+      ["source_turn_ref",`String "missing-turn"];
+      ["source_turn_ref",`String "#17"];
+      ["source_turn_ref",`Null;"source_turn_ref",`Null];
+      ["source_turn_ref",`Null;"source_turn_ref",`String "forged#17"];
+      ["source_turn_ref",`String "first#17";"source_turn_ref",`String "second#17"] ]
+
 let test_unknown_wire_resolution_is_rejected () =
   let snapshot = Yojson.Safe.from_string {|{
     "workspace":{"base_path":"/wire","masc_root":"/wire/.masc"},
     "state_ready":true,
     "keeper":"reader", "open_count":0, "asks":[{
       "keeper":"reader", "ask_id":"wire-ask", "asked_at":42,
-      "context":null, "questions":[], "resolution":{"state":"future"}
+      "source_turn_ref":null, "context":null, "questions":[], "resolution":{"state":"future"}
     }]
   }|} in
   match Masc.Tui_decode_asks.decode_asks_snapshot
@@ -518,7 +550,7 @@ let test_feedback_preserves_receipt_and_canonical_winner () =
     Alcotest.(check string) "recording fact" recording (json |> member "recording" |> to_string);
     Alcotest.(check bool) "delivery is not Keeper action" true ((json |> member "delivery") = delivery);
     Alcotest.(check (list string)) "receipt log contains metadata, no submitted/error bodies"
-      ["ask_id"; "delivery"; "keeper"; "recording"]
+      ["ask_id"; "delivery"; "keeper"; "recording"; "source_turn_ref"]
       (json |> to_assoc |> List.map fst |> List.sort String.compare)) cases
 
 let test_followup_protocol_keeps_exact_identity_and_unknowns () =
@@ -616,6 +648,8 @@ let () =
     [ ( "answer receipt",
         [ Alcotest.test_case "followup protocol preserves original identity and unknown evidence" `Quick
             test_followup_protocol_keeps_exact_identity_and_unknowns
+        ; Alcotest.test_case "question source is explicit and unambiguous" `Quick
+            test_question_source_is_explicit_and_unambiguous
         ; Alcotest.test_case "retained feedback preserves original receipt and winner" `Quick
             test_feedback_preserves_receipt_and_canonical_winner
         ; Alcotest.test_case "recorded answer and wake outcome" `Quick

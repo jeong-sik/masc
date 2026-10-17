@@ -271,6 +271,10 @@ let draw_ask_answer_feedback buf cols (state : state) =
     let subject = match feedback.af_submitted_label with
       | Some label -> label | None -> feedback.af_keeper_name in
     box_line buf cols ("  " ^ Ansi.dim ^ Terminal_text.single_line subject ^ Ansi.reset);
+    let source = match feedback.af_source_turn_ref with
+      | None -> "Original asking turn: not recorded"
+      | Some reference -> Printf.sprintf "Original asking turn: #%d" (Ids.Turn_ref.absolute_turn reference) in
+    box_wrapped_field buf cols ~head:"  " ~style:Ansi.dim source;
     Option.iter (fun (observed : Decode.ask_followup) ->
       let facts = List.filter_map Fun.id
         [Option.map (fun _ -> "turn entry observed") observed.af_turn_started_at;
@@ -321,6 +325,7 @@ let draw_ask_answer_feedback buf cols (state : state) =
     (Masc_tui_types.current_ask_answer_feedback state)
 
 let draw_ask_questions buf cols (state : state) ~budget =
+  draw_ask_origin buf cols state;
   let now = Unix.gettimeofday () in
   (* Questions Keepers put to a human sit under the approval queue rather than
      in it. Nothing is held waiting on them -- the Keeper that asked kept

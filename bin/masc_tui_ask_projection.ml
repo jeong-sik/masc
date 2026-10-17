@@ -13,16 +13,17 @@ type draft = {
 type answer_feedback = {
   af_keeper_name : string;
   af_ask_id : string;
+  af_source_turn_ref : Ids.Turn_ref.t option;
   af_receipt : (Decode.ask_answer_receipt, string) result;
   af_submitted_label : string option;
 }
 
-let answer_feedback ~keeper_name ~ask_id ~submitted_label receipt =
+let answer_feedback ?source_turn_ref ~keeper_name ~ask_id ~submitted_label receipt =
   let af_submitted_label = match receipt with
     | Ok (Decode.Ask_answer_recorded _) -> Some submitted_label
     | Ok (Decode.Ask_answer_already_recorded _ | Decode.Ask_answer_written_unconfirmed _
          | Decode.Ask_answer_refused _) | Error _ -> None in
-  { af_keeper_name = keeper_name; af_ask_id = ask_id;
+  { af_keeper_name = keeper_name; af_ask_id = ask_id; af_source_turn_ref = source_turn_ref;
     af_receipt = receipt; af_submitted_label }
 
 let answer_feedback_to_json feedback =
@@ -37,7 +38,32 @@ let answer_feedback_to_json feedback =
     | Ok (Decode.Ask_answer_refused _) -> "refused", `Null
     | Error _ -> "unconfirmed", `Null in
   `Assoc ["keeper", `String feedback.af_keeper_name; "ask_id", `String feedback.af_ask_id;
+    "source_turn_ref", (match feedback.af_source_turn_ref with
+      | None -> `Null | Some reference -> Ids.Turn_ref.to_yojson reference);
     "recording", `String recording; "delivery", delivery]
+
+type origin = {
+  ao_keeper_name : string;
+  ao_ask_id : string;
+  ao_source_turn_ref : Ids.Turn_ref.t option;
+}
+
+let origin_of_row (row : Decode.ask_row) =
+  {ao_keeper_name=row.ar_keeper;ao_ask_id=row.ar_id;ao_source_turn_ref=row.ar_source_turn_ref}
+
+let origin_of_feedback feedback =
+  {ao_keeper_name=feedback.af_keeper_name;ao_ask_id=feedback.af_ask_id;
+   ao_source_turn_ref=feedback.af_source_turn_ref}
+
+let same_origin left right =
+  String.equal left.ao_keeper_name right.ao_keeper_name
+  && String.equal left.ao_ask_id right.ao_ask_id
+  && Option.equal Ids.Turn_ref.equal left.ao_source_turn_ref right.ao_source_turn_ref
+
+let origin_to_json origin =
+  `Assoc ["keeper",`String origin.ao_keeper_name;"ask_id",`String origin.ao_ask_id;
+    "source_turn_ref",(match origin.ao_source_turn_ref with
+      | None -> `Null | Some reference -> Ids.Turn_ref.to_yojson reference)]
 
 let empty_draft ~ask_id = { d_ask_id = ask_id; d_responses = [] }
 let draft_ask_id draft = draft.d_ask_id

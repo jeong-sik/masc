@@ -370,6 +370,10 @@ val draw_ask_question :
 
 val draw_ask_context : Buffer.t -> int -> row:Masc.Tui_decode_asks.ask_row -> unit
 
+val draw_ask_origin : Buffer.t -> int -> Masc_tui_types.state -> unit
+(** Explicit recorded-question diagnostics, shared by browsing and the
+    scrollable answer reader. It performs no read or effect. *)
+
 val ask_block : (Buffer.t -> 'a) -> string * int
 
 val question_hints : Masc_tui_types.state -> string

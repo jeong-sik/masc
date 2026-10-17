@@ -14,11 +14,15 @@ type exact_input_kind =
   | Message of { role : string }
   | Tool_schema of { name : string }
 
+(** One part the server listed for the turn's request. The list carries no
+    text; {!decode_part} reads one part's bytes when a pane shows it. *)
 type exact_input_item =
-  { kind : exact_input_kind
+  { index : int
+        (** The part's position in the request, as the server numbers it for
+            [/provider-input/part?index=]. *)
+  ; kind : exact_input_kind
   ; bytes : int
   ; sha256 : string
-  ; text : string
   }
 
 type provider_input =
@@ -278,7 +282,16 @@ type input_map_row =
   ; source : input_source
   ; evidence : input_evidence
   ; digest : string option
-  ; exact_text : string option
+  ; verified_item : exact_input_item option
+        (** The listed part this row was verified against: same turn, same
+            byte count, and its SHA-256 is the producer's digest. *)
+  }
+
+(** Which part a pane is reading: one listed item of one Keeper's turn. *)
+type part_key =
+  { part_keeper : string
+  ; part_turn_ref : Ids.Turn_ref.t
+  ; part_item : exact_input_item
   }
 
 val decode_turn_records : Yojson.Safe.t -> (selection, string) result
@@ -306,6 +319,16 @@ val decode_provider_input :
   expected_turn_ref:Ids.Turn_ref.t ->
   Yojson.Safe.t ->
   (provider_input, string) result
+(** Strict decode of the parts list. Parts must be numbered from [0] without
+    a gap. *)
+
+val decode_part : part_key -> Yojson.Safe.t -> (string, string) result
+(** Strict decode of one part. The answer must name the same Keeper, turn and
+    listed part, and its text must have the listed byte count and SHA-256;
+    any difference is an error, never another part's text. A message or a
+    tool schema comes back as indented JSON. *)
+
+val same_part_key : part_key -> part_key -> bool
 
 val exact_input_category : exact_input_kind -> string
 (** The group an item is counted under on the input tab. A tool schema is
@@ -336,8 +359,8 @@ val input_map_rows :
   provider_input option ->
   input_map_row list
 (** The composition categories and exact input are joined only when both name
-    the same [turn_ref]. Exact item text remains available in the input tab;
-    categories that cannot be isolated without reinterpreting message content
+    the same [turn_ref]. A verified row names its listed part, whose text a
+    pane reads with {!decode_part}; categories that cannot be isolated without reinterpreting message content
     remain explicitly non-verified, distinguishing a same-turn pre-dispatch
     serialization from producer-digest-only and byte-count-only evidence.
     [digest] is producer-owned prompt-block evidence when the component is a
@@ -352,3 +375,16 @@ val client_context_tokens :
     its model window: that request's input plus its output (an estimate after
     a compaction has no output). Only a per-request figure is one request's;
     a conversation-cumulative or turn total is [None], never a context size. *)
+
+val shown_part :
+  keeper:string ->
+  tab:tab ->
+  turn_back:int ->
+  opened:int option ->
+  cursor:int ->
+  reading ->
+  part_key option
+(** The one part a pane shows, so the caller reads that part and no other.
+    The request tab shows the opened item, or the item under the cursor; the
+    proof tab shows the opened or selected row's verified part. The
+    composition tab shows none. *)

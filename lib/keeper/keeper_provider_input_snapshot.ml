@@ -33,36 +33,31 @@ type t =
   ; tool_schemas : tool_schema list
   }
 
-type resolved_message =
-  { rmsg_index : int
-  ; rmsg_role : string
-  ; rmsg_bytes : int
-  ; rmsg_sha256 : string
-  ; rmsg_content : Yojson.Safe.t
+(* One retained part of a request, in the order the request carries them:
+   the system prompt, the messages, the tool schemas. [part_index] is the
+   position in that order, so a part request names one part of one row. *)
+type part_kind =
+  | System_prompt
+  | Message of { role : string }
+  | Tool_schema of { name : string }
+
+type part =
+  { part_index : int
+  ; part_kind : part_kind
+  ; part_bytes : int
+  ; part_sha256 : string
   }
 
-type resolved_tool_schema =
-  { rts_index : int
-  ; rts_name : string
-  ; rts_bytes : int
-  ; rts_sha256 : string
-  ; rts_content : Yojson.Safe.t
+type manifest =
+  { mf_snapshot : t
+  ; mf_parts : part list
   }
 
-type resolved_system_prompt =
-  { rsp_bytes : int
-  ; rsp_sha256 : string
-  ; rsp_text : string
-  }
-
-(* The record was [resolved] and its fields repeated [resolved_], so a reader
-   met the word twice for one fact. The prefix now names the record, not the
-   state. *)
-type resolved =
-  { rv_snapshot : t
-  ; rv_system_prompt : resolved_system_prompt option
-  ; rv_messages : resolved_message list
-  ; rv_tool_schemas : resolved_tool_schema list
+type part_content =
+  { pc_keeper : string
+  ; pc_turn_ref : Ids.Turn_ref.t
+  ; pc_part : part
+  ; pc_text : string
   }
 
 type read_error =
@@ -78,9 +73,9 @@ type read_error =
       ; expected : int
       ; actual : int
       }
-  | Artifact_json_invalid of
-      { sha256 : string
-      ; detail : string
+  | Part_not_found of
+      { turn_ref : Ids.Turn_ref.t
+      ; index : int
       }
 
 let ( let* ) = Result.bind
@@ -115,11 +110,11 @@ let read_error_to_string = function
       sha256
       expected
       actual
-  | Artifact_json_invalid { sha256; detail } ->
+  | Part_not_found { turn_ref; index } ->
     Printf.sprintf
-      "provider-input artifact is not JSON sha256=%s: %s"
-      sha256
-      detail
+      "provider-input for %s has no part %d"
+      (Ids.Turn_ref.to_string turn_ref)
+      index
 ;;
 
 (* The JSON keys keep their old spelling: the prefixes name fields in OCaml,
@@ -599,95 +594,96 @@ let fetch_artifact store artifact =
          })
 ;;
 
-let parse_artifact_json ~sha256 content =
-  match Yojson.Safe.from_string content with
-  | json -> Ok json
-  | exception Yojson.Json_error detail ->
-    Error (Artifact_json_invalid { sha256; detail })
-;;
-
-let rec resolve_messages store reversed = function
-  | [] -> Ok (List.rev reversed)
-  | message :: rest ->
-    let* sha256, payload = fetch_artifact store message.msg_artifact in
-    let* content = parse_artifact_json ~sha256 payload in
-    resolve_messages
-      store
-      ({ rmsg_index = message.msg_index
-       ; rmsg_role = message.msg_role
-       ; rmsg_bytes = message.msg_artifact.art_bytes
-       ; rmsg_sha256 = sha256
-       ; rmsg_content = content
-       }
-       :: reversed)
-      rest
-;;
-
-let rec resolve_tool_schemas store reversed = function
-  | [] -> Ok (List.rev reversed)
-  | tool :: rest ->
-    let* sha256, payload = fetch_artifact store tool.ts_artifact in
-    let* content = parse_artifact_json ~sha256 payload in
-    resolve_tool_schemas
-      store
-      ({ rts_index = tool.ts_index
-       ; rts_name = tool.ts_name
-       ; rts_bytes = tool.ts_artifact.art_bytes
-       ; rts_sha256 = sha256
-       ; rts_content = content
-       }
-       :: reversed)
-      rest
-;;
-
-let read_resolved ~config ~keeper ~turn_ref =
-  let* snapshot = find_snapshot ~config ~keeper ~turn_ref in
-  let store = Tool_blob_store.create ~base_path:config.base_path in
-  let* resolved_system_prompt =
+let part_artifacts snapshot =
+  let system_prompt =
     match snapshot.system_prompt with
-    | None -> Ok None
-    | Some artifact ->
-      let* sha256, text = fetch_artifact store artifact in
-      Ok
-        (Some
-           { rsp_bytes = artifact.art_bytes; rsp_sha256 = sha256; rsp_text = text })
+    | None -> []
+    | Some artifact -> [ System_prompt, artifact ]
   in
-  let* resolved_messages = resolve_messages store [] snapshot.messages in
-  let* resolved_tool_schemas =
-    resolve_tool_schemas store [] snapshot.tool_schemas
+  let messages =
+    List.map
+      (fun message -> Message { role = message.msg_role }, message.msg_artifact)
+      snapshot.messages
   in
-  Ok
-    { rv_snapshot = snapshot
-    ; rv_system_prompt = resolved_system_prompt
-    ; rv_messages = resolved_messages
-    ; rv_tool_schemas = resolved_tool_schemas
-    }
+  let tool_schemas =
+    List.map
+      (fun tool -> Tool_schema { name = tool.ts_name }, tool.ts_artifact)
+      snapshot.tool_schemas
+  in
+  List.mapi
+    (fun index (kind, artifact) -> index, kind, artifact)
+    (system_prompt @ messages @ tool_schemas)
 ;;
 
-let resolved_message_to_json message =
-  `Assoc
-    [ "index", `Int message.rmsg_index
-    ; "role", `String message.rmsg_role
-    ; "bytes", `Int message.rmsg_bytes
-    ; "sha256", `String message.rmsg_sha256
-    ; "content", message.rmsg_content
-    ]
+(* The digest comes from the row's artifact marker, so listing a request reads
+   no blob. A request of 212 messages and 57 tool schemas used to read, hash
+   and parse every one of them to answer a list (#37752). *)
+let rec parts_of reversed = function
+  | [] -> Ok (List.rev reversed)
+  | (index, kind, artifact) :: rest ->
+    let* reference = artifact_reference artifact in
+    parts_of
+      ({ part_index = index
+       ; part_kind = kind
+       ; part_bytes = artifact.art_bytes
+       ; part_sha256 = reference.sha256
+       }
+       :: reversed)
+      rest
 ;;
 
-let resolved_tool_schema_to_json tool =
-  `Assoc
-    [ "index", `Int tool.rts_index
-    ; "name", `String tool.rts_name
-    ; "bytes", `Int tool.rts_bytes
-    ; "sha256", `String tool.rts_sha256
-    ; "content", tool.rts_content
-    ]
+let read_manifest ~config ~keeper ~turn_ref =
+  let* snapshot = find_snapshot ~config ~keeper ~turn_ref in
+  let* parts = parts_of [] (part_artifacts snapshot) in
+  Ok { mf_snapshot = snapshot; mf_parts = parts }
 ;;
 
-let resolved_to_json resolved =
-  let snapshot = resolved.rv_snapshot in
+(* Only a part this row lists is read. The blob store is shared by the whole
+   workspace, so a digest alone must not open any blob in it. *)
+let read_part ~config ~keeper ~turn_ref ~index =
+  let* snapshot = find_snapshot ~config ~keeper ~turn_ref in
+  match
+    List.find_opt
+      (fun (candidate, _, _) -> candidate = index)
+      (part_artifacts snapshot)
+  with
+  | None -> Error (Part_not_found { turn_ref; index })
+  | Some (index, kind, artifact) ->
+    let store = Tool_blob_store.create ~base_path:config.base_path in
+    let* sha256, text = fetch_artifact store artifact in
+    Ok
+      { pc_keeper = snapshot.keeper
+      ; pc_turn_ref = snapshot.turn_ref
+      ; pc_part =
+          { part_index = index
+          ; part_kind = kind
+          ; part_bytes = artifact.art_bytes
+          ; part_sha256 = sha256
+          }
+      ; pc_text = text
+      }
+;;
+
+let manifest_schema = "masc.provider-input-manifest.v1"
+let part_schema = "masc.provider-input-part.v1"
+
+let part_to_json part =
+  let kind =
+    match part.part_kind with
+    | System_prompt -> [ "kind", `String "system_prompt" ]
+    | Message { role } -> [ "kind", `String "message"; "role", `String role ]
+    | Tool_schema { name } -> [ "kind", `String "tool_schema"; "name", `String name ]
+  in
   `Assoc
-    [ "schema", `String "masc.resolved-provider-input.v1"
+    (("index", `Int part.part_index)
+     :: kind
+     @ [ "bytes", `Int part.part_bytes; "sha256", `String part.part_sha256 ])
+;;
+
+let manifest_to_json manifest =
+  let snapshot = manifest.mf_snapshot in
+  `Assoc
+    [ "schema", `String manifest_schema
     ; "keeper", `String snapshot.keeper
     ; "trace_id", `String snapshot.trace_id
     ; "absolute_turn", `Int snapshot.absolute_turn
@@ -696,20 +692,16 @@ let resolved_to_json resolved =
     ; "captured_at", `Float snapshot.captured_at
     ; ( "wire"
       , Llm_provider.Request_wire_observer.observation_to_yojson snapshot.wire )
-    ; ( "system_prompt"
-      , match resolved.rv_system_prompt with
-        | Some prompt ->
-          `Assoc
-            [ "bytes", `Int prompt.rsp_bytes
-            ; "sha256", `String prompt.rsp_sha256
-            ; "text", `String prompt.rsp_text
-            ]
-        | None -> `Null )
-    ; ( "messages"
-      , `List (List.map resolved_message_to_json resolved.rv_messages) )
-    ; ( "tool_schemas"
-      , `List
-          (List.map resolved_tool_schema_to_json resolved.rv_tool_schemas)
-      )
+    ; "parts", `List (List.map part_to_json manifest.mf_parts)
+    ]
+;;
+
+let part_content_to_json content =
+  `Assoc
+    [ "schema", `String part_schema
+    ; "keeper", `String content.pc_keeper
+    ; "turn_ref", Ids.Turn_ref.to_yojson content.pc_turn_ref
+    ; "part", part_to_json content.pc_part
+    ; "text", `String content.pc_text
     ]
 ;;

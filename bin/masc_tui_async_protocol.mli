@@ -344,6 +344,9 @@ type async_msg =
       string * (Masc_tui_child_content.t, Masc_tui_child_content.error) result
   | Context_inspector_loaded of
       int * string * Masc_tui_context_inspector.reading
+  | Context_inspector_part_loaded of
+      Masc_tui_context_inspector.part_key Masc_tui_fetched.request
+      * (string, string) result
   | Keeper_chat_older_loaded of
       int * string * string option * (Masc_tui_keeper_chat_history.page, Masc_tui_keeper_chat_history.page_error) result
   | Local_workspace_read of string * Masc_tui_loader.local_reading

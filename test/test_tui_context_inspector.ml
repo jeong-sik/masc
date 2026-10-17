@@ -206,32 +206,42 @@ let wire =
     ~stream:true
     ~body:"serialized provider body"
 
+let message_text =
+  Yojson.Safe.to_string
+    (`Assoc
+       [ "role", `String "tool"
+       ; ( "content_blocks"
+         , `List
+             [ `Assoc
+                 [ "type", `String "tool_result"
+                 ; "tool_use_id", `String "call-1"
+                 ; "content", `String "large result"
+                 ; "is_error", `Bool false
+                 ]
+             ] )
+       ])
+
+let tool_text =
+  Yojson.Safe.to_string
+    (`Assoc
+       [ "name", `String "masc_execute"
+       ; "description", `String "Execute one command"
+       ; "input_schema", `Assoc [ "type", `String "object" ]
+       ])
+
+let part_json ~index ~kind ?label text =
+  `Assoc
+    ([ "index", `Int index; "kind", `String kind ]
+     @ (match label with
+        | None -> []
+        | Some (key, value) -> [ key, `String value ])
+     @ [ "bytes", `Int (String.length text); "sha256", `String (digest text) ])
+
 let provider_input_response ?(keeper = "omega") ?(trace = "trace-map")
     ?(turn = 9) system_prompt =
-  let message_content =
-    `Assoc
-      [ "role", `String "tool"
-      ; ( "content_blocks"
-        , `List
-            [ `Assoc
-                [ "type", `String "tool_result"
-                ; "tool_use_id", `String "call-1"
-                ; "content", `String "large result"
-                ; "is_error", `Bool false
-                ]
-            ] )
-      ]
-  in
-  let tool_content =
-    `Assoc
-      [ "name", `String "masc_execute"
-      ; "description", `String "Execute one command"
-      ; "input_schema", `Assoc [ "type", `String "object" ]
-      ]
-  in
   `Assoc
     [ "dashboard_surface", `String "/api/v1/keepers/:name/provider-input"
-    ; "schema", `String "masc.resolved-provider-input.v1"
+    ; "schema", `String "masc.provider-input-manifest.v1"
     ; "keeper", `String keeper
     ; "trace_id", `String trace
     ; "absolute_turn", `Int turn
@@ -239,32 +249,23 @@ let provider_input_response ?(keeper = "omega") ?(trace = "trace-map")
     ; "runtime_profile", `String "glm-coding"
     ; "captured_at", `Float 1_787_600_000.
     ; "wire", Llm_provider.Request_wire_observer.observation_to_yojson wire
-    ; ( "system_prompt"
-      , `Assoc
-          [ "bytes", `Int (String.length system_prompt)
-          ; "sha256", `String (digest system_prompt)
-          ; "text", `String system_prompt
-          ] )
-    ; ( "messages"
+    ; ( "parts"
       , `List
-          [ `Assoc
-              [ "index", `Int 0
-              ; "role", `String "tool"
-              ; "bytes", `Int 160
-              ; "sha256", `String (String.make 64 'a')
-              ; "content", message_content
-              ]
+          [ part_json ~index:0 ~kind:"system_prompt" system_prompt
+          ; part_json ~index:1 ~kind:"message" ~label:("role", "tool") message_text
+          ; part_json ~index:2 ~kind:"tool_schema" ~label:("name", "masc_execute")
+              tool_text
           ] )
-    ; ( "tool_schemas"
-      , `List
-          [ `Assoc
-              [ "index", `Int 0
-              ; "name", `String "masc_execute"
-              ; "bytes", `Int 120
-              ; "sha256", `String (String.make 64 'b')
-              ; "content", tool_content
-              ]
-          ] )
+    ]
+
+let part_response ?(keeper = "omega") ?(turn = 9) ~part text =
+  `Assoc
+    [ "dashboard_surface", `String "/api/v1/keepers/:name/provider-input/part"
+    ; "schema", `String "masc.provider-input-part.v1"
+    ; "keeper", `String keeper
+    ; "turn_ref", Ids.Turn_ref.to_yojson (turn_ref "trace-map" turn)
+    ; "part", part
+    ; "text", `String text
     ]
 
 let decode_provider_input system_prompt =
@@ -327,8 +328,10 @@ let test_input_map_opens_only_digest_verified_system_prompt () =
     | Error detail -> fail detail
   in
   let rows = Inspector.input_map_rows observed (Some input) in
-  check (option string) "system prompt verified" (Some system_prompt)
-    (List.nth rows 0).exact_text;
+  check (option int) "system prompt verified against its listed part" (Some 0)
+    (Option.map
+       (fun (item : Inspector.exact_input_item) -> item.index)
+       (List.nth rows 0).verified_item);
   check bool "system prompt has verified evidence" true
     ((List.nth rows 0).evidence = Inspector.Verified_exact_text);
   check bool "message points to the same-turn serialized snapshot" true
@@ -341,8 +344,8 @@ let test_input_map_opens_only_digest_verified_system_prompt () =
     { observed with blocks = [ { block with digest = digest "other" } ] }
   in
   let changed_row = List.hd (Inspector.input_map_rows changed (Some input)) in
-  check (option string) "digest mismatch is not opened" None
-    changed_row.exact_text;
+  check bool "digest mismatch is not opened" true
+    (Option.is_none changed_row.verified_item);
   check bool "digest mismatch is not mislabeled verified" true
     (changed_row.evidence = Inspector.Serialized_turn_snapshot);
   let without_snapshot = Inspector.input_map_rows observed None in
@@ -350,6 +353,123 @@ let test_input_map_opens_only_digest_verified_system_prompt () =
     ((List.nth without_snapshot 0).evidence = Inspector.Producer_digest_only);
   check bool "a component with no digest or snapshot stays byte-only" true
     ((List.nth without_snapshot 1).evidence = Inspector.Byte_count_only)
+
+let decoded_input () =
+  match decode_provider_input "immutable keeper instructions" with
+  | Ok input -> input
+  | Error detail -> fail detail
+
+let key_for (input : Inspector.provider_input) index =
+  { Inspector.part_keeper = "omega"
+  ; part_turn_ref = input.turn_ref
+  ; part_item = List.nth input.items index
+  }
+
+let test_a_part_is_its_listed_bytes () =
+  let input = decoded_input () in
+  let message = key_for input 1 in
+  let listed = part_json ~index:1 ~kind:"message" ~label:("role", "tool") message_text in
+  (match Inspector.decode_part message (part_response ~part:listed message_text) with
+   | Ok text ->
+     check bool "a message reads as its JSON" true
+       (Yojson.Safe.equal
+          (Yojson.Safe.from_string message_text)
+          (Yojson.Safe.from_string text))
+   | Error detail -> fail detail);
+  let prompt = key_for input 0 in
+  let prompt_part = part_json ~index:0 ~kind:"system_prompt" "immutable keeper instructions" in
+  check (result string string) "the system prompt reads as its text"
+    (Ok "immutable keeper instructions")
+    (Inspector.decode_part prompt
+       (part_response ~part:prompt_part "immutable keeper instructions"));
+  check bool "bytes that do not hash to the listed digest are refused" true
+    (Result.is_error
+       (Inspector.decode_part prompt
+          (part_response ~part:prompt_part "immutable keeper instructionz")));
+  check bool "another listed part is refused" true
+    (Result.is_error
+       (Inspector.decode_part prompt (part_response ~part:listed message_text)));
+  check bool "another turn's part is refused" true
+    (Result.is_error
+       (Inspector.decode_part prompt
+          (part_response ~turn:10 ~part:prompt_part "immutable keeper instructions")));
+  check bool "another keeper's part is refused" true
+    (Result.is_error
+       (Inspector.decode_part prompt
+          (part_response ~keeper:"other" ~part:prompt_part
+             "immutable keeper instructions")))
+
+let test_parts_must_be_numbered_without_a_gap () =
+  let gapped =
+    match provider_input_response "immutable keeper instructions" with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (function
+             | "parts", `List (first :: _ :: rest) -> "parts", `List (first :: rest)
+             | field -> field)
+           fields)
+    | _ -> fail "fixture shape changed"
+  in
+  check bool "a list with a missing index is refused" true
+    (Result.is_error
+       (Inspector.decode_provider_input
+          ~expected_keeper:"omega"
+          ~expected_turn_ref:(turn_ref "trace-map" 9)
+          gapped))
+
+let test_a_pane_reads_the_part_it_shows () =
+  let system_prompt = "immutable keeper instructions" in
+  let observed =
+    record ~trace:"trace-map" ~turn:9
+      ~blocks:
+        [ { block = Prompt_block_id.Keeper_instructions
+          ; bytes = String.length system_prompt
+          ; digest = digest system_prompt
+          }
+        ]
+      ~input_components:
+        [ { component = Message_tool_result; bytes = 12 }
+        ; { component = Prompt_block Prompt_block_id.Keeper_instructions
+          ; bytes = String.length system_prompt
+          }
+        ]
+      ()
+  in
+  let selection =
+    match Inspector.decode_turn_records (envelope [ observed ]) with
+    | Ok selection -> selection
+    | Error detail -> fail detail
+  in
+  let input = decoded_input () in
+  let reading =
+    Inspector.Turn_read
+      { selection
+      ; provider_input = Ok input
+      ; response = Error "not read"
+      ; forecast = Error "not read"
+      }
+  in
+  let shown ~tab ~opened ~cursor =
+    Option.map
+      (fun (key : Inspector.part_key) -> key.part_item.index)
+      (Inspector.shown_part ~keeper:"omega" ~tab ~turn_back:0 ~opened ~cursor
+         reading)
+  in
+  check (option int) "the request tab reads the item under the cursor" (Some 2)
+    (shown ~tab:Inspector.Exact_input ~opened:None ~cursor:2);
+  check (option int) "a cursor past the list reads the last item" (Some 2)
+    (shown ~tab:Inspector.Exact_input ~opened:None ~cursor:7);
+  check (option int) "an opened item wins over the cursor" (Some 1)
+    (shown ~tab:Inspector.Exact_input ~opened:(Some 1) ~cursor:2);
+  check (option int) "an opened item past the list reads nothing" None
+    (shown ~tab:Inspector.Exact_input ~opened:(Some 5) ~cursor:0);
+  check (option int) "a verified proof row reads its listed part" (Some 0)
+    (shown ~tab:Inspector.Input_map ~opened:None ~cursor:1);
+  check (option int) "an unverified proof row reads nothing" None
+    (shown ~tab:Inspector.Input_map ~opened:None ~cursor:0);
+  check (option int) "the composition tab reads nothing" None
+    (shown ~tab:Inspector.Composition ~opened:None ~cursor:0)
 
 let test_every_kind_names_one_producer () =
   let label = Inspector.input_source_label in
@@ -401,6 +521,12 @@ let () =
             test_provider_input_rejects_another_keeper_or_turn
         ; test_case "opens only digest-verified system prompt" `Quick
             test_input_map_opens_only_digest_verified_system_prompt
+        ; test_case "a part is its listed bytes" `Quick
+            test_a_part_is_its_listed_bytes
+        ; test_case "parts are numbered without a gap" `Quick
+            test_parts_must_be_numbered_without_a_gap
+        ; test_case "a pane reads the part it shows" `Quick
+            test_a_pane_reads_the_part_it_shows
         ; Alcotest.test_case "every kind names one producer" `Quick
             test_every_kind_names_one_producer
         ] )

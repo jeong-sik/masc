@@ -4,10 +4,10 @@ type exact_input_kind =
   | Tool_schema of { name : string }
 
 type exact_input_item =
-  { kind : exact_input_kind
+  { index : int
+  ; kind : exact_input_kind
   ; bytes : int
   ; sha256 : string
-  ; text : string
   }
 
 type provider_input =
@@ -175,7 +175,13 @@ type input_map_row =
   ; source : input_source
   ; evidence : input_evidence
   ; digest : string option
-  ; exact_text : string option
+  ; verified_item : exact_input_item option
+  }
+
+type part_key =
+  { part_keeper : string
+  ; part_turn_ref : Ids.Turn_ref.t
+  ; part_item : exact_input_item
   }
 
 let ( let* ) = Result.bind
@@ -278,58 +284,77 @@ let sha256 name = function
   | `String value when String_util.is_lowercase_sha256_hex value -> Ok value
   | _ -> Error (name ^ " is not a lowercase SHA-256")
 
-let decode_system_prompt = function
-  | `Null -> Ok []
-  | `Assoc fields when exact_fields [ "bytes"; "sha256"; "text" ] fields ->
-    let* bytes_json = field "bytes" fields in
-    let* bytes = nonnegative_int "system_prompt.bytes" bytes_json in
-    let* sha_json = field "sha256" fields in
-    let* sha256 = sha256 "system_prompt.sha256" sha_json in
-    let* text_json = field "text" fields in
-    let* text = nonempty_string "system_prompt.text" text_json in
-    if String.length text <> bytes
-    then Error "system_prompt text length does not match bytes"
-    else Ok [ { kind = System_prompt; bytes; sha256; text } ]
-  | `Assoc _ -> Error "system_prompt fields are not exact"
-  | _ -> Error "system_prompt is not an object or null"
+let manifest_schema = "masc.provider-input-manifest.v1"
+let part_schema = "masc.provider-input-part.v1"
 
-let decode_indexed_items ~kind_of_label ~label_key = function
+let decode_part_entry json =
+  match json with
+  | `Assoc fields ->
+    let kind_fields, label =
+      match List.assoc_opt "kind" fields with
+      | Some (`String "system_prompt") -> [ "index"; "kind"; "bytes"; "sha256" ], None
+      | Some (`String "message") ->
+        [ "index"; "kind"; "role"; "bytes"; "sha256" ], Some "role"
+      | Some (`String "tool_schema") ->
+        [ "index"; "kind"; "name"; "bytes"; "sha256" ], Some "name"
+      | Some _ | None -> [], None
+    in
+    if kind_fields = [] || not (exact_fields kind_fields fields)
+    then Error "provider-input part fields are not exact"
+    else
+      let* index_json = field "index" fields in
+      let* index = nonnegative_int "part.index" index_json in
+      let* bytes_json = field "bytes" fields in
+      let* bytes = nonnegative_int "part.bytes" bytes_json in
+      let* sha_json = field "sha256" fields in
+      let* sha256 = sha256 "part.sha256" sha_json in
+      let* kind =
+        match label with
+        | None -> Ok System_prompt
+        | Some key ->
+          let* label_json = field key fields in
+          let* label = nonempty_string ("part." ^ key) label_json in
+          Ok
+            (if String.equal key "role"
+             then Message { role = label }
+             else Tool_schema { name = label })
+      in
+      Ok { index; kind; bytes; sha256 }
+  | _ -> Error "provider-input part is not an object"
+
+let decode_parts = function
   | `List values ->
-    let rec loop index reversed = function
+    let rec loop expected reversed = function
       | [] -> Ok (List.rev reversed)
-      | `Assoc fields :: rest
-        when exact_fields
-               [ "index"; label_key; "bytes"; "sha256"; "content" ]
-               fields ->
-        let* actual_index_json = field "index" fields in
-        let* actual_index =
-          nonnegative_int (label_key ^ ".index") actual_index_json
-        in
-        if actual_index <> index
+      | value :: rest ->
+        let* item = decode_part_entry value in
+        if item.index <> expected
         then
           Error
-            (Printf.sprintf
-               "%s index %d is not contiguous"
-               label_key
-               actual_index)
-        else
-          let* label_json = field label_key fields in
-          let* label = nonempty_string label_key label_json in
-          let* bytes_json = field "bytes" fields in
-          let* bytes = nonnegative_int (label_key ^ ".bytes") bytes_json in
-          let* sha_json = field "sha256" fields in
-          let* sha256 = sha256 (label_key ^ ".sha256") sha_json in
-          let* content = field "content" fields in
-          let text = Yojson.Safe.pretty_to_string content in
-          loop
-            (index + 1)
-            ({ kind = kind_of_label label; bytes; sha256; text } :: reversed)
-            rest
-      | `Assoc _ :: _ -> Error (label_key ^ " fields are not exact")
-      | _ -> Error (label_key ^ " item is not an object")
+            (Printf.sprintf "provider-input part index %d is not contiguous"
+               item.index)
+        else loop (expected + 1) (item :: reversed) rest
     in
     loop 0 [] values
-  | _ -> Error (label_key ^ " list is not an array")
+  | _ -> Error "provider-input parts is not an array"
+
+let check_keeper ~expected_keeper fields =
+  let* keeper_json = field "keeper" fields in
+  let* keeper = nonempty_string "keeper" keeper_json in
+  if String.equal keeper expected_keeper
+  then Ok ()
+  else
+    Error
+      (Printf.sprintf
+         "provider-input belongs to %S, expected %S"
+         keeper
+         expected_keeper)
+
+let decode_turn_ref_field fields =
+  let* turn_ref_json = field "turn_ref" fields in
+  match Ids.Turn_ref.of_yojson turn_ref_json with
+  | Ok value -> Ok value
+  | Error detail -> Error detail
 
 let decode_provider_input ~expected_keeper ~expected_turn_ref = function
   | `Assoc fields
@@ -343,41 +368,23 @@ let decode_provider_input ~expected_keeper ~expected_turn_ref = function
            ; "runtime_profile"
            ; "captured_at"
            ; "wire"
-           ; "system_prompt"
-           ; "messages"
-           ; "tool_schemas"
+           ; "parts"
            ]
            fields ->
     let* schema_json = field "schema" fields in
     let* schema = nonempty_string "schema" schema_json in
     let* () =
-      if String.equal schema "masc.resolved-provider-input.v1"
+      if String.equal schema manifest_schema
       then Ok ()
       else Error ("unknown provider-input schema " ^ schema)
     in
-    let* keeper_json = field "keeper" fields in
-    let* keeper = nonempty_string "keeper" keeper_json in
-    let* () =
-      if String.equal keeper expected_keeper
-      then Ok ()
-      else
-        Error
-          (Printf.sprintf
-             "provider-input belongs to %S, expected %S"
-             keeper
-             expected_keeper)
-    in
+    let* () = check_keeper ~expected_keeper fields in
     let* trace_json = field "trace_id" fields in
     let* trace_id = nonempty_string "trace_id" trace_json in
     let* turn_json = field "absolute_turn" fields in
     let* absolute_turn = nonnegative_int "absolute_turn" turn_json in
     let turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn in
-    let* turn_ref_json = field "turn_ref" fields in
-    let* observed_turn_ref =
-      match Ids.Turn_ref.of_yojson turn_ref_json with
-      | Ok value -> Ok value
-      | Error detail -> Error detail
-    in
+    let* observed_turn_ref = decode_turn_ref_field fields in
     let* () =
       if Ids.Turn_ref.equal turn_ref observed_turn_ref
          && Ids.Turn_ref.equal turn_ref expected_turn_ref
@@ -399,22 +406,8 @@ let decode_provider_input ~expected_keeper ~expected_turn_ref = function
       | Ok value -> Ok value
       | Error detail -> Error detail
     in
-    let* system_json = field "system_prompt" fields in
-    let* system_items = decode_system_prompt system_json in
-    let* messages_json = field "messages" fields in
-    let* message_items =
-      decode_indexed_items
-        ~kind_of_label:(fun role -> Message { role })
-        ~label_key:"role"
-        messages_json
-    in
-    let* tools_json = field "tool_schemas" fields in
-    let* tool_items =
-      decode_indexed_items
-        ~kind_of_label:(fun name -> Tool_schema { name })
-        ~label_key:"name"
-        tools_json
-    in
+    let* parts_json = field "parts" fields in
+    let* items = decode_parts parts_json in
     Ok
       { trace_id
       ; absolute_turn
@@ -422,10 +415,67 @@ let decode_provider_input ~expected_keeper ~expected_turn_ref = function
       ; runtime_profile
       ; captured_at
       ; wire
-      ; items = system_items @ message_items @ tool_items
+      ; items
       }
   | `Assoc _ -> Error "provider-input response fields are not exact"
   | _ -> Error "provider-input response is not an object"
+
+(* The answer must be the part the list named, and its bytes must be the
+   ones the list counted and hashed; anything else is another part. A message
+   or a tool schema is stored as compact JSON and read here indented. *)
+let decode_part (key : part_key) = function
+  | `Assoc fields
+    when exact_fields
+           [ "dashboard_surface"; "schema"; "keeper"; "turn_ref"; "part"; "text" ]
+           fields ->
+    let* schema_json = field "schema" fields in
+    let* () =
+      match schema_json with
+      | `String schema when String.equal schema part_schema -> Ok ()
+      | _ -> Error "unknown provider-input part schema"
+    in
+    let* () = check_keeper ~expected_keeper:key.part_keeper fields in
+    let* turn_ref = decode_turn_ref_field fields in
+    let* () =
+      if Ids.Turn_ref.equal turn_ref key.part_turn_ref
+      then Ok ()
+      else Error "provider-input part belongs to another turn"
+    in
+    let* part_json = field "part" fields in
+    let* part = decode_part_entry part_json in
+    let* () =
+      if part = key.part_item
+      then Ok ()
+      else Error "provider-input part is not the part the list named"
+    in
+    let* text =
+      match List.assoc_opt "text" fields with
+      | Some (`String text) -> Ok text
+      | Some _ | None -> Error "provider-input part text is not a string"
+    in
+    if String.length text <> part.bytes
+    then Error "provider-input part length does not match its byte count"
+    else if
+      not
+        (String.equal
+           Digestif.SHA256.(digest_string text |> to_hex)
+           part.sha256)
+    then Error "provider-input part does not hash to its SHA-256"
+    else (
+      match part.kind with
+      | System_prompt -> Ok text
+      | Message _ | Tool_schema _ ->
+        (match Yojson.Safe.from_string text with
+         | json -> Ok (Yojson.Safe.pretty_to_string json)
+         | exception Yojson.Json_error detail ->
+           Error ("provider-input part is not JSON: " ^ detail)))
+  | `Assoc _ -> Error "provider-input part fields are not exact"
+  | _ -> Error "provider-input part response is not an object"
+
+let same_part_key left right =
+  String.equal left.part_keeper right.part_keeper
+  && Ids.Turn_ref.equal left.part_turn_ref right.part_turn_ref
+  && left.part_item = right.part_item
 
 let prompt_block_label = function
   | Prompt_block_id.Keeper_instructions -> "Keeper instructions"
@@ -522,7 +572,6 @@ let verified_system_prompt (record : Turn_record.t) provider_input component_byt
   | Some input when Ids.Turn_ref.equal input.turn_ref record.turn_ref ->
     (match List.find_opt (fun item -> item.kind = System_prompt) input.items with
      | Some item ->
-       let digest = Digestif.SHA256.(digest_string item.text |> to_hex) in
        (match
           List.find_opt
             (fun (block : Turn_record.prompt_block) ->
@@ -532,8 +581,8 @@ let verified_system_prompt (record : Turn_record.t) provider_input component_byt
         | Some block
           when block.bytes = component_bytes
                && item.bytes = component_bytes
-               && String.equal block.digest digest ->
-          Some item.text
+               && String.equal block.digest item.sha256 ->
+          Some item
         | Some _ | None -> None)
      | None -> None)
   | Some _ | None -> None
@@ -545,7 +594,7 @@ let input_map_rows (record : Turn_record.t) provider_input =
       List.map
         (fun (item : Turn_record.input_component) ->
            let source = input_source item.component in
-           let exact_text =
+           let verified_item =
              match item.component with
              | Turn_record.Prompt_block Prompt_block_id.Keeper_instructions ->
                verified_system_prompt record provider_input item.bytes
@@ -590,7 +639,7 @@ let input_map_rows (record : Turn_record.t) provider_input =
              | Turn_record.Message_audio -> None
            in
            let evidence =
-             match exact_text, provider_input, digest with
+             match verified_item, provider_input, digest with
              | Some _, _, _ -> Verified_exact_text
              | None, Some input, _
                when Ids.Turn_ref.equal input.turn_ref record.turn_ref ->
@@ -603,7 +652,7 @@ let input_map_rows (record : Turn_record.t) provider_input =
            ; source
            ; evidence
            ; digest
-           ; exact_text
+           ; verified_item
            })
         components
 
@@ -912,3 +961,36 @@ let client_context_tokens ~scope ~input_tokens ~output_tokens =
   | Per_request, None
   | (Turn_total | Conversation_cumulative | Usage_scope_unavailable), _ -> None
 ;;
+
+(* The part a pane shows. On the request tab: the opened item, or with none
+   opened the item under the cursor, which the wide layout draws beside the
+   list. On the proof tab: the opened or selected row's verified part. A part
+   is read only for these, so moving through a list costs one part per stop. *)
+let shown_part ~keeper ~tab ~turn_back ~opened ~cursor = function
+  | Turn_read { selection; provider_input = Ok input; _ } ->
+    let at_cursor rows =
+      List.nth_opt rows (min (max 0 (List.length rows - 1)) (max 0 cursor))
+    in
+    let at rows =
+      match opened with
+      | Some index -> List.nth_opt rows index
+      | None -> at_cursor rows
+    in
+    let item =
+      match tab with
+      | Composition -> None
+      | Exact_input -> at input.items
+      | Input_map ->
+        (match viewing_record selection ~turn_back with
+         | None -> None
+         | Some record ->
+           Option.bind
+             (at (input_map_rows record (Some input)))
+             (fun row -> row.verified_item))
+    in
+    Option.map
+      (fun part_item ->
+         { part_keeper = keeper; part_turn_ref = input.turn_ref; part_item })
+      item
+  | Turn_read { provider_input = Error _; _ } | Turn_read_failed _ | Request_failed _ ->
+    None

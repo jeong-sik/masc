@@ -13,28 +13,16 @@ export type ProviderInputWire = {
   bodySha256: string
 }
 
-export type ProviderInputSystemPrompt = {
-  bytes: number
-  sha256: string
-  text: string
-}
+// One retained part of the request, in the order the request carries them:
+// the system prompt, the messages, the tool schemas. `index` is the position
+// the server numbers for /provider-input/part?index=.
+export type ProviderInputPart =
+  | { kind: 'system_prompt'; index: number; bytes: number; sha256: string }
+  | { kind: 'message'; role: string; index: number; bytes: number; sha256: string }
+  | { kind: 'tool_schema'; name: string; index: number; bytes: number; sha256: string }
 
-export type ProviderInputMessage = {
-  index: number
-  role: string
-  bytes: number
-  sha256: string
-  content: unknown
-}
-
-export type ProviderInputToolSchema = {
-  index: number
-  name: string
-  bytes: number
-  sha256: string
-  content: unknown
-}
-
+// The parts list carries no text. A part's text is read with
+// fetchKeeperProviderInputPart when a reader opens it.
 export type ProviderInputSnapshot = {
   keeper: string
   traceId: string
@@ -43,9 +31,7 @@ export type ProviderInputSnapshot = {
   runtimeProfile: string
   capturedAt: number
   wire: ProviderInputWire
-  systemPrompt: ProviderInputSystemPrompt | null
-  messages: ProviderInputMessage[]
-  toolSchemas: ProviderInputToolSchema[]
+  parts: ProviderInputPart[]
 }
 
 function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
@@ -115,44 +101,54 @@ function decodeWire(raw: unknown): ProviderInputWire | null {
   }
 }
 
-function decodeSystemPrompt(raw: unknown): ProviderInputSystemPrompt | null | undefined {
-  if (raw === null) return null
-  if (!isRecord(raw) || !hasExactKeys(raw, ['bytes', 'sha256', 'text'])) return undefined
+function decodePart(raw: unknown): ProviderInputPart | null {
+  if (!isRecord(raw)) return null
+  const index = nonNegativeInteger(raw.index)
   const bytes = nonNegativeInteger(raw.bytes)
   const digest = sha256(raw.sha256)
-  const text = nonEmptyString(raw.text)
-  if (bytes === null || digest === null || text === null || new TextEncoder().encode(text).length !== bytes) {
-    return undefined
+  if (index === null || bytes === null || digest === null) return null
+  if (raw.kind === 'system_prompt') {
+    if (!hasExactKeys(raw, ['index', 'kind', 'bytes', 'sha256'])) return null
+    return { kind: 'system_prompt', index, bytes, sha256: digest }
   }
-  return { bytes, sha256: digest, text }
+  if (raw.kind === 'message') {
+    const role = nonEmptyString(raw.role)
+    if (!hasExactKeys(raw, ['index', 'kind', 'role', 'bytes', 'sha256']) || role === null) return null
+    return { kind: 'message', role, index, bytes, sha256: digest }
+  }
+  if (raw.kind === 'tool_schema') {
+    const name = nonEmptyString(raw.name)
+    if (!hasExactKeys(raw, ['index', 'kind', 'name', 'bytes', 'sha256']) || name === null) return null
+    return { kind: 'tool_schema', name, index, bytes, sha256: digest }
+  }
+  return null
 }
 
-function decodeIndexed<T>(
-  raw: unknown,
-  labelKey: 'role' | 'name',
-  project: (value: {
-    index: number
-    label: string
-    bytes: number
-    sha256: string
-    content: unknown
-  }) => T,
-): T[] | null {
+function decodeParts(raw: unknown): ProviderInputPart[] | null {
   if (!Array.isArray(raw)) return null
-  const decoded: T[] = []
+  const decoded: ProviderInputPart[] = []
   for (let index = 0; index < raw.length; index += 1) {
-    const value = raw[index]
-    if (!isRecord(value) || !hasExactKeys(value, [
-      'index', labelKey, 'bytes', 'sha256', 'content',
-    ])) return null
-    const actualIndex = nonNegativeInteger(value.index)
-    const label = nonEmptyString(value[labelKey])
-    const bytes = nonNegativeInteger(value.bytes)
-    const digest = sha256(value.sha256)
-    if (actualIndex !== index || label === null || bytes === null || digest === null) return null
-    decoded.push(project({ index, label, bytes, sha256: digest, content: value.content }))
+    const part = decodePart(raw[index])
+    if (part === null || part.index !== index) return null
+    decoded.push(part)
   }
   return decoded
+}
+
+function samePart(left: ProviderInputPart, right: ProviderInputPart): boolean {
+  if (
+    left.index !== right.index
+    || left.bytes !== right.bytes
+    || left.sha256 !== right.sha256
+  ) return false
+  switch (left.kind) {
+    case 'system_prompt':
+      return right.kind === 'system_prompt'
+    case 'message':
+      return right.kind === 'message' && right.role === left.role
+    case 'tool_schema':
+      return right.kind === 'tool_schema' && right.name === left.name
+  }
 }
 
 export function decodeProviderInputSnapshot(raw: unknown): ProviderInputSnapshot | null {
@@ -166,9 +162,7 @@ export function decodeProviderInputSnapshot(raw: unknown): ProviderInputSnapshot
     'runtime_profile',
     'captured_at',
     'wire',
-    'system_prompt',
-    'messages',
-    'tool_schemas',
+    'parts',
   ])) return null
   const keeper = nonEmptyString(raw.keeper)
   const traceId = nonEmptyString(raw.trace_id)
@@ -177,24 +171,10 @@ export function decodeProviderInputSnapshot(raw: unknown): ProviderInputSnapshot
   const runtimeProfile = nonEmptyString(raw.runtime_profile)
   const capturedAt = finiteNonNegative(raw.captured_at)
   const wire = decodeWire(raw.wire)
-  const systemPrompt = decodeSystemPrompt(raw.system_prompt)
-  const messages = decodeIndexed(raw.messages, 'role', value => ({
-    index: value.index,
-    role: value.label,
-    bytes: value.bytes,
-    sha256: value.sha256,
-    content: value.content,
-  }))
-  const toolSchemas = decodeIndexed(raw.tool_schemas, 'name', value => ({
-    index: value.index,
-    name: value.label,
-    bytes: value.bytes,
-    sha256: value.sha256,
-    content: value.content,
-  }))
+  const parts = decodeParts(raw.parts)
   if (
     raw.dashboard_surface !== '/api/v1/keepers/:name/provider-input'
-    || raw.schema !== 'masc.resolved-provider-input.v1'
+    || raw.schema !== 'masc.provider-input-manifest.v1'
     || keeper === null
     || traceId === null
     || absoluteTurn === null
@@ -203,9 +183,7 @@ export function decodeProviderInputSnapshot(raw: unknown): ProviderInputSnapshot
     || runtimeProfile === null
     || capturedAt === null
     || wire === null
-    || systemPrompt === undefined
-    || messages === null
-    || toolSchemas === null
+    || parts === null
   ) return null
   return {
     keeper,
@@ -215,10 +193,36 @@ export function decodeProviderInputSnapshot(raw: unknown): ProviderInputSnapshot
     runtimeProfile,
     capturedAt,
     wire,
-    systemPrompt,
-    messages,
-    toolSchemas,
+    parts,
   }
+}
+
+// The answer must name the keeper, the turn and the part the list named, and
+// carry the byte count the list counted; anything else is another part.
+export function decodeProviderInputPart(
+  raw: unknown,
+  expected: { keeper: string; turnRef: string; part: ProviderInputPart },
+): string | null {
+  if (!isRecord(raw) || !hasExactKeys(raw, [
+    'dashboard_surface',
+    'schema',
+    'keeper',
+    'turn_ref',
+    'part',
+    'text',
+  ])) return null
+  const part = decodePart(raw.part)
+  if (
+    raw.dashboard_surface !== '/api/v1/keepers/:name/provider-input/part'
+    || raw.schema !== 'masc.provider-input-part.v1'
+    || raw.keeper !== expected.keeper
+    || raw.turn_ref !== expected.turnRef
+    || part === null
+    || !samePart(part, expected.part)
+    || typeof raw.text !== 'string'
+    || new TextEncoder().encode(raw.text).length !== part.bytes
+  ) return null
+  return raw.text
 }
 
 export async function fetchKeeperProviderInput(
@@ -234,5 +238,22 @@ export async function fetchKeeperProviderInput(
     const decoded = decodeProviderInputSnapshot(raw)
     if (!decoded) throw new Error('유효하지 않은 keeper provider-input payload')
     return decoded
+  })
+}
+
+export async function fetchKeeperProviderInputPart(
+  name: string,
+  turnRef: string,
+  part: ProviderInputPart,
+  opts?: AbortableRequestOptions,
+): Promise<string> {
+  await ensureDevToken()
+  return get<Record<string, unknown>>(
+    `/api/v1/keepers/${encodeURIComponent(name)}/provider-input/part?turn_ref=${encodeURIComponent(turnRef)}&index=${part.index}`,
+    { signal: opts?.signal },
+  ).then((raw) => {
+    const text = decodeProviderInputPart(raw, { keeper: name, turnRef, part })
+    if (text === null) throw new Error('유효하지 않은 keeper provider-input part payload')
+    return text
   })
 }

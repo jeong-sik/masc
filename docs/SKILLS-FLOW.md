@@ -468,11 +468,51 @@ pool worker와 그 worker 내부의 재진입, 원래 Owner와 turn reference, s
 decoder를 다룬다. 이 단위에서는 실행하지 않았다. 타입·실제 겹침·TUI frame·
 최신 native/model Before/After는 확인하지 않았다.
 
-예외·취소는 재시도하지 않고 호출자에게 전파한다. 기존 executor는 caller의
-result wait 취소만으로 이미 수락한 worker의 정지를 보장하지 않는다. 이 단위는
-worker 취소 전달을 구현했다고 주장하지 않으며, 해당 primitive의 실제 worker
-수명·취소 전달은 후속 수리 대상이다. repository freshness·recent work·초기
+예외·취소는 재시도하지 않고 호출자에게 전파한다. 이 비교 기준의 executor는
+caller의 result wait 취소만으로 이미 수락한 worker의 정지를 보장하지 않았다.
+해당 병렬 조회 단위는 worker 취소 전달을 포함하지 않았으며, 아래 수명 수리와
+구분한다. repository freshness·recent work·초기
 world snapshot·routing/recovery는 이번 세 조회 범위에 포함하지 않는다.
+
+#### Executor 제출의 실제 worker 수명과 실패 보존
+
+비교 기준은 `04b929bf6e0b3dea4ad40008cfa6c960d11a1b06`다. 설치된 Eio의
+`Executor_pool.submit_exn`은 작업을 pool 소유 fiber에 넘긴 뒤 caller에서 결과를
+기다린다. 이 대기를 취소하는 것과 이미 수락된 작업을 취소·정리하는 것은 다르다.
+비공개 `Executor_pool_submission`이 Domain pool과 shared executor의 실제
+제출을 함께 소유하며, IO/CPU weight와 worker 표식은 각 기존 진입부가 유지한다.
+
+| 조건 | As-Is | To-Be 소스 경로 |
+| --- | --- | --- |
+| Domain pool의 동기 IO·CPU | caller 대기만 취소될 수 있음 | 정확한 worker에 취소 전달, 진입한 invocation의 정리 합류 |
+| Domain pool의 비동기 IO·CPU | 지정 Switch가 결과 waiter만 소유 | 같은 소유 Switch의 제출 fiber가 공통 취소·정리 경로 사용 |
+| shared executor 일반 제출 | 취소는 전달하지만 정리 완료 전 caller 종료 가능 | 같은 completion acknowledgement를 기다림 |
+| 일반 제출의 worker 예외 | catch-all이 caller에서 함수를 다시 실행 | 원래 실패 전파, 실패한 effect 재실행 없음 |
+| strict 제출 | 원래 Work_failed 보존, worker 취소 연결 없음 | typed Work_failed·Submission_failed 구분 유지, worker 취소·정리 연결 |
+| 취소와 worker 진입 경합 | 별도 진입 소유 상태 없음 | 진입 전 취소가 CAS를 이기면 사용자 함수 실행 금지 |
+
+상태는 `Awaiting_worker`, `Entered_worker`, `Cancelled_before_entry`다. 제출마다
+별도 atomic entry와 취소·정리 promise를 만든다. 취소는 진입을 retire하거나,
+이미 진입한 worker의 자기 cancellation context에 전달한다. caller는 후자의
+정리가 끝날 때까지 취소로부터 보호된 대기를 한 뒤 원래 취소를 다시 던진다.
+이 경로에 재시도, elapsed-time 제한, inline 재실행은 없다. pool 부재·Eio 밖·
+이미 shared worker인 호출자의 기존 inline 정책과 strict 거절 정책은 유지한다.
+
+`취소 요청`과 `정리 완료`는 구분한다. CPU 루프·동기 syscall·보호된 정리가
+양보하지 않으면 합류가 늦어질 수 있다. 즉시 중단이나 응답 시간 단축의 보장이
+아니다. world 준비 scope도 실제 진입한 worker 정리를 건너뛰어 끝내지 않는다.
+비동기 promise를 별도 fiber에서 기다리다가 그 관측 fiber만 취소한 경우는
+소유 Switch의 제출을 취소한 것이 아니다. raw executor escape hatch는 이 계약의
+대상이 아니며, 사용자 함수가 별도로 분리한 전역 작업까지 추적하지 않는다.
+
+실제 공개 API 6개에 대해 보호된 worker 정리 전 owner 종료 거절·독립 sibling
+유지·동일 pool의 후속 작업, capacity 대기 중 취소 뒤 사용자 함수 미진입,
+effect 이후 원래 예외·단일 실행 보존의 18개 시나리오를 작성했다. source상
+조합 수이며 실행 결과가 아니다. 비동기 IO·CPU의 관측 fiber 취소 뒤 원래 결과
+수신 2개와 유효하지 않은 weight 거절 뒤 사용자 effect 미실행 1개도 작성했다.
+새로운 timeout·TUI 문구·배치 검사는 추가하지
+않았다. 타입·동작 실행·취소 비용·실제 Tool/TUI 연속성·최신 native/model
+Before/After와 독립 리뷰는 아직 확인하지 않았다.
 
 ### 2b. 프롬프트 — 지명된 스킬 안내
 

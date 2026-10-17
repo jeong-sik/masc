@@ -288,7 +288,7 @@ let render_overview (state : state) =
         let health = if candle_fits then health else
           match Masc_tui_candle.compact_status state.candle_observation with
           | None -> health
-          | Some status -> " " ^ status ^ " · " ^ health in
+          | Some status -> " " ^ status ^ " ·" ^ health in
         let readings = [None, health; Some (Theme.recede ()), work]
           @ (if candle_fits then candle else []) in
         let shown_readings = List.take spare readings in
@@ -1255,7 +1255,7 @@ let render_exact_lane_provider_editor (state : state) editor =
         (match List.nth_opt picker.rlp_choices offset with
          | Some (Masc_tui_types.Runtime_choice runtime) ->
            box_line_styled buf cols ~style:(Theme.recede ())
-             ("  " ^ Masc_tui_message_layout.fit_middle (max 1 (cols - 6))
+             ("  " ^ Masc_tui_message_layout.truncate_middle (max 1 (cols - 6))
                 (Terminal_text.single_line ("Connection " ^ runtime.ro_provider_id ^ " · Selected " ^ runtime.ro_id)))
          | Some (Masc_tui_types.Lane_choice _) | None -> ())
       | None -> ());
@@ -1347,7 +1347,7 @@ let render_exact_lane_provider_editor (state : state) editor =
                 (Terminal_text.single_line (runtime_quota_scope_label runtime)) ^ suffix)
          | None -> box_line_styled buf cols ~style:(Theme.warn ()) "  Model details unavailable");
         box_line_styled buf cols ~style:(Theme.recede ())
-          ("  " ^ Masc_tui_message_layout.fit_middle (max 1 (cols - 6)) identity));
+          ("  " ^ Masc_tui_message_layout.truncate_middle (max 1 (cols - 6)) identity));
      box_line_styled buf cols ~style:(Theme.recede ())
        "  arrows/j/k select · r replace model/effort · a add fallback · 1 first in group";
      box_line_styled buf cols ~style:(Theme.recede ())
@@ -4440,11 +4440,12 @@ let render_keeper_logs (state : state) =
 
     (* Header *)
     let header =
-      Printf.sprintf "%s  (%s)"
+      Printf.sprintf "%s  (%s)  %s"
         (screen_title
            (Printf.sprintf " Keepers \xe2\x96\xb8 %s \xe2\x96\xb8 logs"
               (Terminal_text.single_line k.k_name)))
         (Masc_tui_message_layout.count_noun ~plural:"entries" total_entries "entry")
+        (connection_badge state)
     in
 
     box_top buf cols;
@@ -4483,8 +4484,9 @@ let render_keeper_logs (state : state) =
     done;
     if row_count > content_height then
       box_line_styled buf cols ~style:(Theme.recede ())
-        (Printf.sprintf "newest rows %d-%d of %d" (scroll + 1)
-           (min row_count (scroll + content_height)) row_count);
+        (Printf.sprintf "  [newest rows %d-%d of %d]" (scroll + 1)
+           (min row_count (scroll + content_height)) row_count)
+    else box_empty buf cols;
 
     box_bottom buf cols;
 
@@ -4592,6 +4594,7 @@ let render_system_log_detail (state : state) seq =
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
+       ~position:(Masc_tui_scroll.window_text ~scroll ~height:content_height (List.length lines))
        ~hints:(Masc_tui_keys.footer_hints ~detail_open:true System_logs));
   finish_surface state ~clamped:(System_log_detail_scroll scroll)
     ~surface_key:"system-log-detail" ~rows:terminal_rows ~cols buf
@@ -4806,7 +4809,7 @@ let render_system_logs (state : state) =
     done;
   if total_entries > content_height then
     box_line_styled buf cols ~style:(Theme.recede ())
-      (Printf.sprintf "[entries %s]" (Masc_tui_scroll.window_text ~scroll ~height:content_height total_entries));
+      (Printf.sprintf "  [entries %s]" (Masc_tui_scroll.window_text ~scroll ~height:content_height total_entries));
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
@@ -6471,7 +6474,7 @@ let render_tools (state : state) =
   done;
   if drawable > content_height then
     box_line_styled buf cols ~style:(Theme.recede ())
-      (Printf.sprintf "[rows %s]" (Masc_tui_scroll.window_text ~scroll ~height:content_height drawable));
+      (Printf.sprintf "  [rows %s]" (Masc_tui_scroll.window_text ~scroll ~height:content_height drawable));
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols ~hints:(Masc_tui_keys.footer_hints state.view));
@@ -6738,7 +6741,7 @@ let render_acting_evidence (state : state) entry =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   box_top buf cols;
-  box_line buf cols (screen_title " ACTING EVENT EVIDENCE");
+  box_line buf cols (screen_title " ACTING EVENT EVIDENCE" ^ "  " ^ connection_badge state);
   box_line_styled buf cols ~style:Ansi.dim " Selected event snapshot; new arrivals do not replace this reading";
   box_line_styled buf cols ~style:Ansi.dim
     (Printf.sprintf " Retained feed events: %d (selection pinned)" (List.length state.acting));
@@ -6804,7 +6807,7 @@ let render_acting_evidence (state : state) entry =
        (Masc_tui_scroll.window_text ~scroll ~height:content_height (List.length lines)));
   box_bottom buf cols;
   Buffer.add_string buf (footer_line state ~max_cells:cols
-      ~hints:"j/k:scroll  PgUp/PgDn:page  Esc:back to events");
+      ~hints:Masc_tui_keys.acting_evidence_hints);
   finish_surface state ~clamped:(Acting_detail_scroll scroll)
     ~surface_key:"acting-evidence" ~rows:terminal_rows ~cols buf
 
@@ -7069,7 +7072,7 @@ let render_acting (state : state) =
     done;
   if shown > content_height then
     box_line_styled buf cols ~style:(Theme.recede ())
-      (Printf.sprintf "[rows %s]" (Masc_tui_scroll.window_text ~scroll ~height:content_height shown))
+      (Printf.sprintf "  [rows %s]" (Masc_tui_scroll.window_text ~scroll ~height:content_height shown))
   else box_empty buf cols;
   box_bottom buf cols;
   Buffer.add_string buf
@@ -8008,7 +8011,7 @@ let render_prompt_registry (state : state) =
   done;
   box_divider buf cols;
   box_line_styled buf cols ~style:(Theme.recede ())
-    ("  " ^ Message_layout.fit_middle (max 1 (cols - 6))
+    ("  " ^ Message_layout.truncate_middle (max 1 (cols - 6))
        (match selected with
         | None -> "선택 없음"
         | Some row -> Terminal_text.single_line row.Tui_decode.pr_key));
@@ -8077,7 +8080,7 @@ let render_runtime_prompt_assets (state : state) =
   done;
   box_divider buf cols;
   box_line_styled buf cols ~style:(Theme.recede ())
-    ("  " ^ Message_layout.fit_middle (max 1 (cols - 6))
+    ("  " ^ Message_layout.truncate_middle (max 1 (cols - 6))
        (match selected with
         | None -> "선택 없음"
         | Some asset -> Terminal_text.single_line asset.Tui_decode.pra_path));

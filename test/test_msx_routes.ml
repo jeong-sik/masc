@@ -555,6 +555,59 @@ let test_pre_effect_checkpoint_refusal_settles_refused () =
            | Some (`String s) -> Some s | _ -> None))))
 ;;
 
+(* The other half of the settlement rule. A failure the worker cannot place
+   before the effect is unknown, and an unknown receipt keeps the terminal's
+   intent in force: the operator may not act again until the outcome is
+   known. Here the lane's activity check, which restore runs first, raises
+   something the lane never declares. The worker's boundary reports that as a
+   runtime failure of unknown effect, and the receipt must settle as unknown,
+   not refused. *)
+let test_unexpected_worker_exception_settles_checkpoint_unknown () =
+  let module Pending = Masc_tui_msx_checkpoint_pending in
+  let module Tui = Masc.Tui_decode in
+  with_tick_machine (fun () ->
+    with_attached_worker (fun ~config ~env ~sw ->
+      Fs_compat.mkdir_p (Masc.Workspace.masc_dir config);
+      let masc_root = Unix.realpath (Masc.Workspace.masc_dir config) in
+      let base_path = Unix.realpath config.base_path in
+      let expected = `Assoc ["base_path",`String base_path;"masc_root",`String masc_root] in
+      let pool = Eio.Executor_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+      Executor_pool_ref.For_testing.with_pool pool (fun () ->
+        let id = "restore-through-a-defect" in
+        let body = Yojson.Safe.to_string (`Assoc ["operation_id",`String id;
+          "slot",`String "quick";"expected_workspace",expected]) in
+        let binding : Pending.binding =
+          {operation_id=(match Keeper_operation_id.of_string id with Ok v -> v | Error m -> fail m);
+           restore=true; slot="quick"; base_path; masc_root} in
+        (match Pending.remember ~masc_root binding with
+         | Ok () -> () | Error detail -> fail detail);
+        Fun.protect
+          ~finally:(fun () ->
+            Msx_lane.install_activity_observer
+              (Some (fun () -> Machine_configuration.Enabled)))
+          (fun () ->
+            Msx_lane.install_activity_observer
+              (Some (fun () -> failwith "activity observer defect"));
+            let receipt = snd (Route.checkpoint_response ~config ~restore:true ~body) in
+            check (option string) "a failure of unknown effect settles as unknown"
+              (Some "unknown")
+              (match member "status" receipt with Some (`String s) -> Some s | _ -> None);
+            check bool "and claims no pre-effect proof" true
+              (member "effect_disposition" receipt = None);
+            (match Tui.decode_msx_checkpoint_receipt ~operation_id:id ~restore:true
+                     ~slot:"quick" ~base_path ~masc_root receipt with
+             | Ok (Tui.Checkpoint_unknown detail) ->
+                 check bool "the terminal reads it as unknown with a reason" true
+                   (String.trim detail <> "")
+             | Ok _ -> fail "the terminal does not read this as unknown"
+             | Error detail -> fail detail);
+            (* An unknown receipt frees nothing: the intent still gates writes. *)
+            (match Pending.load ~masc_root with
+             | Ok [_] -> ()
+             | Ok _ -> fail "the intent should stay in force"
+             | Error detail -> fail detail)))))
+;;
+
 let test_checkpoint_route () =
   with_tick_machine (fun () ->
     let config = Lazy.force unwatched_config in
@@ -1312,6 +1365,8 @@ let () =
         ; test_case "checkpoint terminal store failure recovers without replay" `Quick test_checkpoint_terminal_store_failure_can_be_recovered
         ; test_case "checkpoint receipt durable lifecycle" `Quick test_checkpoint_receipt_lifecycle
         ; test_case "pre-effect refusal settles refused" `Quick test_pre_effect_checkpoint_refusal_settles_refused
+        ; test_case "unexpected worker exception settles unknown" `Quick
+            test_unexpected_worker_exception_settles_checkpoint_unknown
         ; test_case
             "validation, worker, restore and storage failure"
             `Quick

@@ -126,7 +126,7 @@ def print_verification_next_step(failure):
         print(paint('Next: ', style) + step, file=sys.stderr)
 
 
-def run_with_elapsed(argv, label):
+def run_with_elapsed(argv, label, env=None):
     """Run a child whose work can take a while, showing that it is alive.
 
     Provider checks wait on remote models; without a visible clock a slow or
@@ -135,9 +135,9 @@ def run_with_elapsed(argv, label):
     # NO_COLOR removes color, not the clock: the line is shown on any terminal
     # that can redraw it, and paint() alone decides on color.
     if not label or not sys.stderr.isatty() or os.environ.get('TERM') == 'dumb':
-        return subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        return subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
     started = time.monotonic()
-    with subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as process:
+    with subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env) as process:
         try:
             while True:
                 try:
@@ -157,6 +157,22 @@ def run_with_elapsed(argv, label):
     return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
 
 
+# `masc setup` gives the server it starts the workspace's own values for these
+# two in place of the terminal's (Config_dir_resolver.environment_for_workspace).
+# Every wizard child given a workspace (--base-path on its argv) runs without
+# them, so it opens the same runtime.toml the server will and not one the
+# terminal's MASC_CONFIG_DIR names (#43144). Stripping (rather than setting
+# workspace values) is enough because the child always receives --base-path,
+# and it avoids porting the resolver's path normalization into this script.
+# A child without --base-path keeps the inherited environment: its ambient
+# overrides are the operator's, not the wizard's to remove.
+WORKSPACE_OWNED_ENVIRONMENT = ('MASC_BASE_PATH', 'MASC_CONFIG_DIR')
+
+
+def workspace_child_env():
+    return {key: value for key, value in os.environ.items() if key not in WORKSPACE_OWNED_ENVIRONMENT}
+
+
 def native_setup_command(binary, command, payload=None, arguments=(), progress=None):
     # The compiled renderer is the only identity authority. This helper handles
     # terminal interaction and private IPC; it never renders or edits TOML.
@@ -168,7 +184,8 @@ def native_setup_command(binary, command, payload=None, arguments=(), progress=N
             path = Path(directory) / 'request.json'
             atomic_write(path, json.dumps(payload, ensure_ascii=False, allow_nan=False).encode(), 0o600)
             argv += ['--spec' if command == 'runtime-setup-render' else '--request', str(path)]
-        result = run_with_elapsed(argv, progress)
+        child_env = workspace_child_env() if '--base-path' in list(arguments) else None
+        result = run_with_elapsed(argv, progress, env=child_env)
     try:
         receipt = json.loads(result.stdout)
     except (TypeError, ValueError):
@@ -900,7 +917,7 @@ def prepare_antigravity_account(source, credentials):
         arguments.append('--sign-in')
     elif selected == 'saved':
         arguments += ['--credential-file', source['credential_file']]
-    response = subprocess.run(arguments, stdout=subprocess.PIPE, text=True)
+    response = subprocess.run(arguments, stdout=subprocess.PIPE, text=True, env=workspace_child_env())
     try:
         receipt = json.loads(response.stdout)
         if response.returncode:
@@ -991,7 +1008,7 @@ def docker_account_action(binary, base_path, port, action):
     # its own typed outcome, never mixed with the child's interactive output.
     result = subprocess.run([str(binary), 'docker-account-access', '--execute', action,
                              '--base-path', str(base_path), '--port', str(port)],
-                            stdout=subprocess.PIPE, text=True)
+                            stdout=subprocess.PIPE, text=True, env=workspace_child_env())
     try:
         receipt = json.loads(result.stdout)
         if (receipt.get('schema') != 'masc.docker_account_action_result.v1'
@@ -1116,7 +1133,8 @@ def presentation_tools_status(binary, base_path):
         result = subprocess.run([str(binary), 'prerequisite-actions', 'presentation-tools',
                                  '--base-path', str(base_path)],
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                                timeout=PDF_TOOLS_PROBE_TIMEOUT_SECONDS)
+                                timeout=PDF_TOOLS_PROBE_TIMEOUT_SECONDS,
+                                env=workspace_child_env())
     except subprocess.TimeoutExpired:
         raise SetupError('MASC did not answer about presentation tool availability in time')
     try:
@@ -1233,7 +1251,8 @@ def decode_searxng_readiness(value):
 
 def prerequisite_catalog(binary, dependency, workspace_args=()):
     result = subprocess.run([str(binary), 'prerequisite-actions', dependency] + list(workspace_args),
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                            env=workspace_child_env() if workspace_args else None)
     try:
         catalog = json.loads(result.stdout)
         if (result.returncode or not isinstance(catalog, dict)
@@ -1299,7 +1318,8 @@ def execute_prerequisite(binary, dependency, action_id, workspace_args=(), base_
     # The selected native action owns commands and privilege boundaries. Child
     # password prompts and vendor output keep the terminal, not a hidden pipe.
     result = subprocess.run([str(binary), 'prerequisite-actions', dependency, '--execute', action_id] + list(workspace_args),
-                            stdout=subprocess.PIPE, text=True)
+                            stdout=subprocess.PIPE, text=True,
+                            env=workspace_child_env() if workspace_args else None)
     try:
         receipt = json.loads(result.stdout)
         if not isinstance(receipt, dict) or receipt.get('schema') != 'masc.prerequisite_action_result.v1':
@@ -2016,7 +2036,8 @@ def wizard_with_credentials(binary, base_path, timeout, credentials, quick_model
 
 def workspace_upgrade_catalog(binary, base_path):
     result = subprocess.run([str(binary), 'workspace-upgrade', '--base-path', str(base_path)],
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                            env=workspace_child_env())
     try:
         catalog = json.loads(result.stdout)
         if (result.returncode or catalog.get('schema') != 'masc.workspace_upgrades.v1'
@@ -2030,7 +2051,8 @@ def workspace_upgrade_catalog(binary, base_path):
 
 def workspace_upgrade_action(binary, base_path, arguments, schema):
     result = subprocess.run([str(binary), 'workspace-upgrade', '--base-path', str(base_path)] + arguments,
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                            env=workspace_child_env())
     try:
         receipt = json.loads(result.stdout)
         if result.returncode:
@@ -2074,7 +2096,8 @@ def workspace_check(binary, base_path):
     base = Path(base_path).expanduser().resolve()
     while True:
         result = subprocess.run([str(binary), 'setup-preflight', '--base-path', str(base)],
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                env=workspace_child_env())
         try:
             receipt = json.loads(result.stdout)
         except ValueError:
@@ -2128,7 +2151,8 @@ def onboarding_status(binary, base_path=None):
     argv = [str(binary), 'doctor', '--json']
     if base_path is not None:
         argv += ['--base-path', str(base_path)]
-    response = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    response = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                              env=workspace_child_env() if base_path is not None else None)
     try:
         state = json.loads(response.stdout)
     except ValueError:
@@ -2147,7 +2171,8 @@ def open_workspace(binary, base_path, port):
     tui = str(sibling) if os.access(str(sibling), os.X_OK) else shutil.which('masc-tui')
     if not tui:
         raise SetupError('The terminal UI is missing. Reinstall the complete MASC release, then run masc again.')
-    return subprocess.run([tui, '--base-path', str(base_path), '--port', str(port)]).returncode
+    return subprocess.run([tui, '--base-path', str(base_path), '--port', str(port)],
+                         env=workspace_child_env()).returncode
 
 
 def workspace_port(binary, base_path, requested=None, save=False):
@@ -2156,7 +2181,8 @@ def workspace_port(binary, base_path, requested=None, save=False):
         argv += ['--port', str(requested)]
     if save:
         argv += ['--save']
-    response = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    response = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                              env=workspace_child_env())
     try:
         observed = json.loads(response.stdout)
         if (response.returncode or observed.get('schema') != 'masc.workspace_connection.v1'
@@ -2171,7 +2197,8 @@ def workspace_port(binary, base_path, requested=None, save=False):
 def select_setup_server(binary, base_path, port, require_new_owner=False, resume_existing=False):
     while True:
         response = subprocess.run([str(binary), 'setup-server', '--base-path', str(base_path), '--port', str(port)],
-                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                  env=workspace_child_env())
         try:
             observed = json.loads(response.stdout)
             if response.returncode or observed.get('schema') != 'masc.setup_server.v1' or observed.get('read_only') is not True:
@@ -2202,7 +2229,8 @@ def select_setup_server(binary, base_path, port, require_new_owner=False, resume
                 raise SetupError('setup paused; the existing workspace server was preserved')
             result = subprocess.run([str(binary), 'setup-stop-previous-owner', '--base-path', str(base_path),
                                      '--port', str(port), '--expected-version', server_version],
-                                    stdout=subprocess.PIPE, text=True)
+                                    stdout=subprocess.PIPE, text=True,
+                                    env=workspace_child_env())
             try:
                 receipt = json.loads(result.stdout)
                 if result.returncode:
@@ -2235,7 +2263,8 @@ SANDBOX_NAMES = {'docker': 'Docker', 'apple_container': 'Apple Container', 'nerd
 
 def sandbox_catalog(binary, base_path):
     response = subprocess.run([str(binary), 'sandbox-catalog', '--base-path', str(base_path)],
-                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                              env=workspace_child_env())
     try:
         catalog = json.loads(response.stdout)
     except (TypeError, ValueError):
@@ -2339,7 +2368,8 @@ def local_voices(binary, base):
     # records a default, so without the flag the list depended on whatever the
     # launcher happened to export.
     result = subprocess.run([str(binary), 'voice-local-setup', '--base-path', base, '--list-voices'],
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                            env=workspace_child_env())
     if result.returncode != 0:
         # Said rather than swallowed: an empty list here skips the voice
         # question without a word, and the reader cannot tell that from a
@@ -2464,7 +2494,7 @@ def ask_local_voice(binary, base):
             print('Listening needs both whisper-cli and a model file, so imp will speak but not listen. '
                   'Run masc voice-local-setup --model <file> once both are ready.', file=sys.stderr)
     result = subprocess.run([str(binary), 'voice-local-setup', '--base-path', base] + arguments,
-                            stdout=sys.stderr)
+                            stdout=sys.stderr, env=workspace_child_env())
     if result.returncode != 0:
         # The writer already said why on stderr, and every reason for it is a
         # configuration one. Voice is optional, so this does not end setup.
@@ -2972,7 +3002,8 @@ def note_running_server(binary, base, port):
     try:
         response = subprocess.run([str(binary), 'setup-server', '--base-path', str(base), '--port', str(port)],
                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                                  timeout=SETUP_SERVER_PROBE_TIMEOUT_SECONDS)
+                                  timeout=SETUP_SERVER_PROBE_TIMEOUT_SECONDS,
+                                  env=workspace_child_env())
         status = json.loads(response.stdout).get('status')
     except (OSError, ValueError, AttributeError, subprocess.TimeoutExpired):
         status = None
@@ -3029,7 +3060,7 @@ def prepare_browser_lane(binary, base, modes, port=None):
     argv = [str(binary), 'browser-lane-setup']
     for mode in modes:
         argv += ['--mode', mode]
-    result = subprocess.run(argv + ['--base-path', str(base)], stdout=sys.stderr)
+    result = subprocess.run(argv + ['--base-path', str(base)], stdout=sys.stderr, env=workspace_child_env())
     if result.returncode != 0:
         # The writer already said why. The browser is optional, so this does not end setup.
         print("imp's browser was not saved. Nothing was written for any of the routes in that one command. "
@@ -3039,17 +3070,6 @@ def prepare_browser_lane(binary, base, modes, port=None):
         return
     if port is not None and any(mode in RUNTIME_TABLE_MODES for mode in modes):
         note_running_server(binary, base, port)
-
-
-# `masc setup` gives the server it starts the workspace's own values for these
-# two in place of the terminal's (Config_dir_resolver.environment_for_workspace).
-# A command that reports what that server will read is run without them, so it
-# opens the same runtime.toml the server will and not one MASC_CONFIG_DIR names.
-WORKSPACE_OWNED_ENVIRONMENT = ('MASC_BASE_PATH', 'MASC_CONFIG_DIR')
-
-
-def server_like_environment():
-    return {key: value for key, value in os.environ.items() if key not in WORKSPACE_OWNED_ENVIRONMENT}
 
 
 def check_web_search(binary, base):
@@ -3062,7 +3082,7 @@ def check_web_search(binary, base):
     """
     try:
         failed = subprocess.run([str(binary), 'web-search-setup', '--base-path', str(base)],
-                                stdout=sys.stderr, env=server_like_environment()).returncode != 0
+                                stdout=sys.stderr, env=workspace_child_env()).returncode != 0
     except OSError as error:
         print(terminal_text(str(error)), file=sys.stderr)
         failed = True
@@ -3076,7 +3096,7 @@ def run_web_search_setup(binary, base, options):
     server must restart, so only a failure is added to."""
     try:
         return subprocess.run([str(binary), 'web-search-setup'] + list(options) + ['--base-path', str(base)],
-                              stdout=sys.stderr, env=server_like_environment()).returncode == 0
+                              stdout=sys.stderr, env=workspace_child_env()).returncode == 0
     except OSError as error:
         print(terminal_text(str(error)), file=sys.stderr)
         return False
@@ -3172,10 +3192,12 @@ def connect_imp_github(binary, base, row):
     """
     options = ['--keeper', IMP_KEEPER, '--hostname', GITHUB_HOST, '--base-path', str(base)]
     if row.host_login is None:
-        result = subprocess.run([str(binary), 'keeper-github', 'login'] + options, stdout=sys.stderr)
+        result = subprocess.run([str(binary), 'keeper-github', 'login'] + options, stdout=sys.stderr,
+                                env=workspace_child_env())
     else:
         result = subprocess.run([str(binary), 'keeper-github', 'set-token'] + options,
-                                input=read_host_github_token(row.host_login), text=True, stdout=sys.stderr)
+                                input=read_host_github_token(row.host_login), text=True, stdout=sys.stderr,
+                                env=workspace_child_env())
     if result.returncode != 0:
         # The command already said why. GitHub is optional, so this does not end setup.
         print("imp's GitHub login was not saved. Everything else is. Run " + github_command(base, None)
@@ -3302,7 +3324,7 @@ def journey(binary, base_path, port, timeout, resume=False):
     # The workspace was chosen on this screen, so it becomes the default the next
     # bare `masc` finds, including when the operator finishes later.
     if subprocess.run([str(binary), 'init', '--base-path', base, '--record-default'],
-                      stdout=sys.stderr).returncode != 0:
+                      stdout=sys.stderr, env=workspace_child_env()).returncode != 0:
         raise SetupError('Workspace initialization stopped. Existing files were preserved; run masc setup to resume.')
     workspace_port(binary, base, port, save=True)
     print('\n2 · Connect a model\nA subscription or API credit may be required by your provider.', file=sys.stderr)
@@ -3359,7 +3381,8 @@ def sandbox_journey(binary, base, port, refresh_owner=False, quick_backend=None,
         # Native setup owns staging, image preparation, server/operator login,
         # and imp boot. --no-tui avoids re-entering this interactive journey.
         code = subprocess.run([str(binary), 'setup', '--base-path', base, '--port', str(port),
-                               '--no-tui'] + sandbox_args, stdout=sys.stderr).returncode
+                               '--no-tui'] + sandbox_args, stdout=sys.stderr,
+                               env=workspace_child_env()).returncode
         if code == 0:
             # imp exists now, which the GitHub login needs.
             finish_imp_tools(binary, base, confirmed)

@@ -164,11 +164,20 @@ let rec wait_for_child pid =
   try snd (Unix.waitpid [] pid) with
   | Unix.Unix_error (Unix.EINTR, _, _) -> wait_for_child pid
 
-let run_process argv =
+(* A descendant that replaces the terminal: give it the terminal's three
+   standard descriptors and wait for it. The descendant is a workspace child,
+   so it runs with the workspace's own MASC_BASE_PATH/MASC_CONFIG_DIR in
+   place of the terminal's, exactly like the server the wizard starts
+   (#43144): otherwise the terminal's MASC_CONFIG_DIR would override the
+   --base-path the child was given. *)
+let run_process ~base_path argv =
   match argv with
   | [] -> invalid_arg "setup process needs argv"
   | program :: _ ->
-    let pid = Unix.create_process program (Array.of_list argv)
+    let env =
+      Config_dir_resolver.environment_for_workspace ~cwd:(Sys.getcwd ())
+        ~base_path ~env:(Unix.environment ()) in
+    let pid = Unix.create_process_env program (Array.of_list argv) env
         Unix.stdin Unix.stdout Unix.stderr in
     match wait_for_child pid with
     | Unix.WEXITED code -> code
@@ -328,7 +337,7 @@ let run_with_selection ~network_mode ~base_path ~port ~initialize ~prepare_image
             ~base_path:(Some base_path) ~executable_name:Sys.argv.(0)
             ~path_env:(Sys.getenv_opt "PATH") ~is_executable with
           | Masc_front_door.Open_tui { argv; _ } ->
-            require_ok "Terminal UI" (fun () -> run_process argv)
+            require_ok "Terminal UI" (fun () -> run_process ~base_path argv)
           | Masc_front_door.Serve ->
             fail "masc-tui is missing beside masc and from PATH. Add the installation prefix to PATH and rerun setup.")
         else (

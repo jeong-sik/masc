@@ -22,13 +22,16 @@ type held_absent
     exact original record with [Backend_absent]. Not execution authority. *)
 
 val reconcile_for_recovery :
+  ?presence_round:Keeper_owned_job_backend.presence_round ->
   ?previous:held_absent -> Keeper_owned_job_store.record ->
   (Keeper_owned_job_store.record * held_absent option, Keeper_owned_job_store.error) result
 (** Reuse the held observation only when the entire freshly recovered owner
     record is unchanged. A missing-container hint leaves that record held;
     a positive hint or changed record requires full canonical reconciliation.
     Hint failures clear reusable evidence. Fresh supervisors and manual status
-    reads retain full inspection. No timer, retry limit or relaunch is added. *)
+    reads retain full inspection. [presence_round] shares only the read hint,
+    after that exact owner equality check. No timer, retry limit or relaunch is
+    added. *)
 
 val cleanup : Keeper_owned_job_store.record ->
   (Keeper_owned_job_store.record, Keeper_owned_job_store.error) result

@@ -676,18 +676,11 @@ load, naming it.
 
 ## Local STT
 
-`scripts/whisper-server.sh` (in the `me` repo) wraps whisper.cpp:
+Run `whisper-server` (from `whisper.cpp`) with `--inference-path /v1/audio/transcriptions` so `<base_url>/audio/transcriptions` matches the path `openai_compat` builds:
 
 ```sh
-scripts/whisper-server.sh start     # :2022, /v1/audio/transcriptions, lang=ko
-scripts/whisper-server.sh status    # includes resident size
-scripts/whisper-server.sh test      # says a phrase, prints the transcript
-scripts/whisper-server.sh stop
+whisper-server --port 2022 --inference-path /v1/audio/transcriptions -l ko -m /path/to/ggml-model.bin
 ```
-
-whisper.cpp serves `/inference` by default; the script moves it with
-`--inference-path` so `<base_url>/audio/transcriptions` lands, which is the
-path `openai_compat` builds.
 
 ```toml
 [[voice.stt.endpoints]]
@@ -1294,31 +1287,11 @@ Use `masc voice-verify --audio FILE`, and see above for making a file.
 
 The wizard does not install or start anything. It registers an address and
 checks whether something answers on it; for a command kind it registers the
-name and the probe is what reports whether that command is there. Starting a local server is still
-`scripts/whisper-server.sh start` in the `me` repo, or whatever that server's own
-command is.
+name and the probe is what reports whether that command is there. Starting a
+local STT/TTS server remains an external step using that server's own command.
 
-### How much of this was measured
+### Verification and sidecar doctor checks
 
-The CLI numbers above came from real runs against the real endpoints. The
-screen did not: nobody has opened this wizard in a terminal yet, because doing
-so needs a server booted from this branch and a stray `--base-path` boot has
-rewritten the recorded default workspace before (#35101).
-
-What stands in for that, and what it is worth:
-
-| Claim | Held by | What it cannot tell you |
-|---|---|---|
-| the questions, their order, and when a draft is enough | `test/voice_wizard` | nothing about the terminal |
-| step position, typed text, and what survives going back | `test/voice_wizard_session` | nothing about the terminal |
-| the pane hands over to the wizard; every mover has a key | `test/test_tui_voice_wizard_wiring.ml` | that the drawing is legible |
-| the wire shape both ends agree on | save request → apply → loader, in `test/voice_wizard` | that the pane sends it |
-
-No test holds key routing. It broke once: typing an endpoint name containing
-`i` put the `i` into a keeper message and sent the rest of the word after it,
-because the composer sees every key before the field does. `whisper` reached the
-screen as `wh`. No test reads the request the wizard posts on save either.
-#42153 moves both into tests that do not read the screen. That such a request
-writes a loadable `[voice]` section is `save_request` → `apply` → loader in
-`test/voice_wizard`. Nobody has run the wizard against a real server yet.
+- Wizard question order, session state, key routing, and `[voice]` TOML save/load round-trips are covered by `test/voice_wizard`, `test/voice_wizard_session`, and `test/test_tui_voice_wizard_wiring.ml`.
+- For the Discord voice bridge sidecar (`bin/voice_bridge_core.py`), `scripts/doctor-voice-sidecar.sh` runs an 11-step diagnostic check (including `VOICE_BRIDGE_DRY_RUN=1` readiness probing and `MASC_BASE_PATH` resolution before `MASC_DATA_DIR`).
 

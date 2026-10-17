@@ -51,5 +51,5 @@
 
 - `docs/spec/04-turn-lifecycle.md` — current turn-level execution contract
 - `lib/keeper/keeper_turn_fsm.mli` — typed FSM states
-- `lib/keeper/keeper_runtime_engine.mli` — runtime routing boundary
+- `lib/keeper/keeper_runtime.mli` — runtime routing boundary
 - agent core analysis 2026-05-21 §8 — external comparison checklist origin

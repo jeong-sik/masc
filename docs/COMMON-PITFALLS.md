@@ -61,9 +61,9 @@ Tests break when:
 - Function signature changes but test uses old signature
 - Eio context required but test doesn't wrap in `Eio_main.run`
 
-**After any refactoring:**
+**After any refactoring (human contributors / Keeper lanes with toolchain; external AI sessions use CI per `docs/constitution.xml`):**
 ```bash
-dune build --root .  # catches compilation errors in tests
+scripts/dune-local.sh build @default  # catches compilation errors in tests
 ```
 
 ## 5. Silent Error Patterns — When to Log
@@ -304,21 +304,21 @@ scripts/build-dashboard-if-needed.sh
 
 Codebase health는 특정 anti-pattern 사용 횟수로 추적된다.
 
-**Current Baseline (baseline/health-snapshot.json):**
+**Current Baseline (`.ci/health-baseline.json`):**
 ```json
 {
-  "lib_failwith": 26,        // lib/에서 failwith 사용
-  "lib_list_hd": 2,          // lib/에서 List.hd 사용
-  "lib_list_tl": 2,          // lib/에서 List.tl 사용
+  "lib_failwith": 21,        // lib/에서 failwith 사용
+  "lib_list_hd": 1,          // lib/에서 List.hd 사용
+  "lib_list_tl": 0,          // lib/에서 List.tl 사용
   "lib_option_get": 0,       // lib/에서 Option.get 사용
-  "test_failwith": 247,      // test/에서 failwith 사용
-  "test_list_hd": 162        // test/에서 List.hd 사용
+  "test_failwith": 520,      // test/에서 failwith 사용
+  "test_list_hd": 341        // test/에서 List.hd 사용
 }
 ```
 
 **Ratcheting Rule:**
-- 현재 카운트를 초과하면 CI 실패
-- 카운트 감소는 허용 (개선 환영)
+- 현재 카운트를 초과하면 CI 실패 (`scripts/health_snapshot.sh --fail-on-lib-regression`)
+- 카운트 감소는 허용
 - 신규 anti-pattern 발견 시 baseline 업데이트
 
 **Before using partial functions:**
@@ -340,7 +340,7 @@ let value = Option.value ~default:fallback my_option
 
 **PR이 health regression을 일으킨 경우:**
 ```bash
-# CI fails with: "lib_failwith count increased from 26 to 27"
+# CI fails when a lib_* counter increases above .ci/health-baseline.json.
 # 두 가지 선택:
 # 1. failwith를 Result/Option pattern으로 refactor (선호)
 # 2. 정당한 사유가 있다면 baseline 업데이트 (reviewer 승인 필요)
@@ -359,8 +359,8 @@ Merge: both exist (no textual conflict) ← Git OK, CI should fail
 
 **After editing registry-like files:**
 ```bash
-# Dune files (module list in libraries)
-dune build --root .  # fails on missing modules
+# Dune files (human contributors / Keeper lanes with toolchain; external AI sessions use CI)
+scripts/dune-local.sh build @default  # fails on missing modules
 
 # Dashboard routes
 cd dashboard && pnpm run typecheck  # TypeScript type check
@@ -378,29 +378,29 @@ cd dashboard && pnpm run typecheck  # TypeScript type check
 
 ---
 
-## 13. Cross-FSM Coupling Discipline (PR #11120/#11127/#11134)
+## 13. Cross-FSM Coupling Discipline
 
-4 sub-FSM(KSM/KTC/KDP/KCL)이 직접 호출로 결합된 구조 — silent failure가 cross-FSM boundary에서 가장 쉽게 발생함. PR-H/I/J에서 도입된 invariants와 reviewer rule.
+4 sub-FSM(KSM/KTC/KDP/KCL)이 직접 호출로 결합된 구조 — silent failure가 cross-FSM boundary에서 가장 쉽게 발생한다.
 
-### 14.1. Pure Function 불변량
+### 13.1. Pure Function 불변량
 
-`Keeper_state_machine.apply_event`와 `Keeper_runtime_routing.select_runtime`는 mli에 "Pure function — no I/O" 명시. 안에 counter emission을 추가하면:
+`Keeper_state_machine.apply_event` (`lib/keeper/keeper_state_machine.mli`)는 mli에 "Pure function — no I/O"를 명시한다. 안에 counter emission을 추가하면:
 - property test의 idempotency 가 false로 깨짐
 - counter label 결정이 함수 내부로 들어가 caller-context를 잃음 (edge label 결정 사이트가 흩어짐)
 
 **규칙:** counter는 caller site에서만 emit. pure function은 transition/decision 만 반환.
 
-**예외:** observability-only `Log.*` 호출은 mli에 documented exception이면 허용 (예: `lib/keeper_registry/keeper_state_machine.ml` no-savings warn). counter는 예외 없음.
+**예외:** observability-only `Log.*` 호출은 mli에 documented exception이면 허용 (예: `lib/keeper/keeper_state_machine.ml`). counter는 예외 없음.
 
 **PR 체크:**
 ```bash
-rg -nP 'inc_counter' lib/keeper_registry/keeper_state_machine.ml
+rg -nP 'inc_counter' lib/keeper/keeper_state_machine.ml
 # 기대: 0 매치
 ```
 
-### 14.2. Variant 추가 시 Sweep 강제
+### 13.2. Variant 추가 시 Sweep 강제
 
-ADT variant 추가 PR이 모든 매치 사이트를 sweep 안 하면 strict mode partial-match로 runtime. 실제 사례: masc #10574 (Stale_turn_timeout), #10510/#10511 (InferenceTelemetry), #10516/#10521 (OperatorPauseBroadcast).
+ADT variant 추가 PR이 모든 매치 사이트를 sweep 안 하면 컴파일 또는 런타임 경계가 깨진다.
 
 **규칙:** variant 정의 변경 commit과 같은 PR에 모든 match arm 업데이트.
 
@@ -411,7 +411,7 @@ git diff origin/main..HEAD -- '*.ml' | rg -B 2 -A 2 '\| <NewVariant>'
 # 위 명령이 1개 이상의 match arm을 보여야 정상 (정의만 추가됐다면 sweep 누락)
 ```
 
-### 14.3. TLA+ BugAction 규율 (PR #11120)
+### 13.3. TLA+ BugAction 규율
 
 SafetyInvariant 추가 시 같은 spec에 `BugAction`도 짝으로 추가, clean cfg(invariant pass) + buggy cfg(invariant violation) 양쪽 검증.
 
@@ -431,7 +431,7 @@ comm -23 \
 # bug-model 누락된 spec 출력. 새 spec PR이라면 0줄 기대 (기존 미커버 spec은 별도 backlog)
 ```
 
-### 14.4. Per-edge Counter 일치성 (PR #11127)
+### 13.4. Per-edge Counter 일치성
 
 `docs/keeper-fsm-graph.dot`에 명시된 edge와 코드에 wire된 `masc_keeper_fsm_edge_transitions_total{edge}` label이 1:1 일치해야 함. 한쪽만 추가/제거하면 graph가 거짓이거나 counter가 drift함.
 
@@ -447,22 +447,10 @@ bash scripts/validate-keeper-fsm-graph.sh
 
 ## Related Architecture Decision Records (ADRs)
 
-이 문서의 pitfall들은 다음 ADR에서 더 깊이 다룬다:
-
-| Pitfall Section | Related ADR | Key Takeaway |
+| Pitfall Section | Related Contract | Key Takeaway |
 |----------------|-------------|--------------|
-| Context handoff pattern | Keeper/agent core checkpoint and handoff docs | Historical mitosis runtime and ADR were removed. Context transfer now uses Relay/Handoff plus keeper/agent core checkpoint paths |
-| Dashboard Control Surface | `masc_operator_*` tool 이름이 SSOT (현재 9개) | `masc_operator_*` 가 canonical, generic tool executor는 admin-only |
-
-**Why ADRs?**
-- **Common Pitfalls**: 실무에서 자주 발생하는 실수와 즉시 적용 가능한 회피책
-- **ADRs**: 설계 결정의 맥락, trade-off, 장기적 결과를 명확히 문서화
-- ADR은 "왜 이렇게 해야 하는가"를 설명, Pitfalls는 "무엇을 하지 말아야 하는가"를 설명
-
-**Reading Order:**
-1. 먼저 이 문서(Common Pitfalls)를 읽고 실무 체크리스트 확인
-2. 설계 맥락이 궁금하면 관련 ADR 참조
-3. PR review 시 양쪽 모두 참조하여 일관성 확인
+| Context handoff pattern | Keeper/agent core checkpoint and handoff docs | Context transfer uses Relay/Handoff plus keeper/agent core checkpoint paths |
+| Dashboard Control Surface | `masc_operator_*` tool 이름이 SSOT (총 7개, 원격 operator 프로파일 6개) | `masc_operator_*` 가 canonical, generic tool executor는 admin-only |
 
 ---
 
@@ -470,25 +458,17 @@ bash scripts/validate-keeper-fsm-graph.sh
 
 이 문서는 git commit history 분석과 실제 발생한 문제에 기반한다.
 
-**업데이트 trigger:**
-- 같은 실수가 3회 이상 반복될 때 (신규 pitfall 추가)
-- 기존 pitfall의 회피책이 더 나은 방법으로 개선될 때
-- ADR이 새로 작성되어 관련 맥락을 제공할 때
-
 **PR 체크리스트 with this doc:**
 - [ ] 새 모듈 삭제했는가? → Section #1 체크
 - [ ] Eio context에서 작업하는가? → Section #2, #5.2 체크
-- [ ] Dashboard 변경했는가? → Section #3, #11 체크
-- [ ] 테스트 추가/변경했는가? → Section #4, #10 체크
+- [ ] Dashboard 변경했는가? → Section #3, #10 체크
+- [ ] 테스트 추가/변경했는가? → Section #4, #9 체크
 - [ ] Lifecycle callback closure 호출했는가? → Section #5.1 체크
 - [ ] `drain_turn_event_bus` 호출 추가했는가? → Section #5.3 체크
-- [ ] Feature flag 추가했는가? → Section #8 체크
-- [ ] Config 추가/변경했는가? → Section #9 체크
-- [ ] Partial function 사용했는가? → Section #12 체크
-- [ ] Registry-like file 수정했는가? → Section #13 체크
-- [ ] `keeper_state_machine` 수정했는가? → Section #14.1 체크
-- [ ] ADT variant 추가했는가? → Section #14.2 체크
-- [ ] `*.tla` 추가/수정했는가? → Section #14.3 체크
-- [ ] FSM edge counter 추가/제거했는가? → Section #14.4 체크
-
-**마지막 업데이트**: 2026-04-27 (Section #5.1-#5.3, #14 신규 — PR-H/I/J cross-FSM coupling rules)
+- [ ] Config / 환경변수 추가·변경했는가? → Section #8, #9 체크
+- [ ] Partial function 사용했는가? → Section #11 체크
+- [ ] Registry-like file 수정했는가? → Section #12 체크
+- [ ] `keeper_state_machine` 수정했는가? → Section #13.1 체크
+- [ ] ADT variant 추가했는가? → Section #13.2 체크
+- [ ] `*.tla` 추가/수정했는가? → Section #13.3 체크
+- [ ] FSM edge counter 추가/제거했는가? → Section #13.4 체크

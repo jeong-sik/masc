@@ -215,7 +215,7 @@ against the recipe file. Overall mean **0.965**; seven sit below 0.95.
 |---|---|---|
 | overview | 0.842 | surface width, decided |
 | work-kanban | 0.855 | `.wk-kcol-body` capped at 42rem with an inner scroll; the design lets the column grow and the page scroll |
-| monitor-internal | 0.870 | harness boundary — rebuilt onto the design's `.ia-*`/`.ai-*` vocabulary 2026-08-23; SSIM cannot see dashboard markup, so it reads the pre-rebuild value by construction (component probe: 88.6%) |
+| monitor-internal | 0.870 | harness boundary — rebuilt onto the design's `.ia-*`/`.ai-*` vocabulary 2026-08-23; SSIM cannot see dashboard markup, so it continues to read the pre-rebuild value (component probe: 88.6%) |
 | approvals-history | 0.891 | component rewritten; `.ap-hist-reason` is now fed by the live `decision_reason` field (2026-08-23), so the no-live-field gap is down to `.ap-hist-kind`/`-lat`; re-measured 2026-08-23: 0.891 confirmed |
 | keepers | 0.913 | the prototype's missing CSS reset (buttons keep UA Arial) |
 | lab-performance | 0.935 | Korean line-breaking, below |

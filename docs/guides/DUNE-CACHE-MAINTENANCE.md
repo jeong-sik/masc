@@ -93,7 +93,7 @@ this is a scheduled budget, not a constant wipe.
 ### 3. Schedule it
 
 macOS launchd, following the template style in
-[`infrastructure/launchd`](../infrastructure/launchd): a daily
+[`infrastructure/launchd`](../../infrastructure/launchd): a daily
 `StartCalendarInterval` job that trims to the same budget.
 
 ```xml

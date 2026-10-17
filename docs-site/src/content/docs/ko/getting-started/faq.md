@@ -8,14 +8,14 @@ description: MASC 프로젝트에 대한 핵심 개념 및 기술적 질문들�
 대부분의 코딩 에이전트는 개별 세션 안에서만 기억을 유지하는 독립된 단일 에이전트입니다.  
 MASC는 이들 에이전트가 한 공간에 모여 일할 수 있는 **공유 작업장(Shared Context & Coordination Harness)**입니다:
 - `.masc/` 디렉터리에 공통의 백로그(Tasks), 토론 게시판(Board), 실행 증거(Evidence)를 영속화합니다.
-- 특정 에이전트가 잡은 작업은 다른 에이전트가 건드리지 못하게 잠그고(Claim), 한 에이전트가 실패한 시도(Negative Evidence)를 다른 에이전트가 즉시 공유받아 중복 시행착오를 방지합니다.
+- 작업 선점(`claim`)은 원장(ledger)에 작업 담당 소유권을 기록해 두 에이전트가 같은 Task를 중복 수주하지 않게 합니다(단, 저장소 파일 자체를 잠그지는 않으므로 동시 파일 수정에는 별도 git worktree를 사용하세요). 또한 한 에이전트가 실패한 시도(Negative Evidence)를 공유해 중복 시행착오를 방지합니다.
 
 ---
 
 ### Q. LLM API 키 없이도 MASC를 사용할 수 있나요?
 
 **네, 가능합니다.**  
-MASC는 순수 로컬 MCP 협업 서버로 구동될 수 있습니다. 또한 `llama-server`나 Ollama 같은 로컬 오픈소스 모델(Qwen 등)을 연결하여 토큰 비용 없이 독립 검증자(Verifier) 및 판정자(Judge)로 활용할 수 있습니다.
+MASC는 순수 로컬 MCP 협업 서버로 구동될 수 있습니다. 또한 `llama-server`나 Ollama 같은 로컬 오픈소스 모델(Qwen 등)을 연결하여 외부 API 키나 클라우드 과금 없이 독립 검증자(Verifier) 및 판정자(Judge)로 활용할 수 있습니다.
 
 ---
 
@@ -27,4 +27,4 @@ MASC는 순수 로컬 MCP 협업 서버로 구동될 수 있습니다. 또한 `l
 
 ### Q. Gate(게이트)란 무엇인가요?
 
-**Gate**는 MASC의 인간 개입(HITL, Human-In-The-Loop) 승인 경계입니다. 에이전트가 중요한 쉘 명령어나 위험한 파일 수정을 시도할 때 일시 중지되며, TUI 상에서 오퍼레이터가 승인(`y`) 또는 거절(`n`)할 때까지 대기합니다.
+**Gate**는 MASC의 인간 개입(HITL, Human-In-The-Loop) 승인 경계입니다. 에이전트가 민감한 셸 명령어나 파일·외부 서비스 변경을 시도할 때, 승인이 필요한 호출은 구성된 승인 정책(`hitl_auto_judge` 또는 채팅 스트림 훅에 대한 Keeper `yolo` 모드)에 따라 평가되거나, TUI의 `Work` → `Approvals`(`:go Approvals`) 대기열에 올라가 오퍼레이터가 승인(`y`) 또는 거절(`n`)할 때까지 대기합니다.

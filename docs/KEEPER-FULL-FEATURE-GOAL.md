@@ -90,41 +90,35 @@ filesystem/network/process effect는 바깥 shell에서 실행한다. 유효한 
 곱타입의 boolean 묶음보다 닫힌 합타입으로 표현한다. 이 원칙 역시 기존 기능을
 막는 새 framework를 만들기 위한 이유로 사용하지 않는다.
 
-## 5. 현재 확인된 실제 고장과 수정 순서
+## 5. 핵심 실행 경계 불변량
 
 ### 5.1 Dashboard 상태 의미
 
-- As-Is: 같은 화면에서 executable, running fiber, configured roster가 같은
-  `실행 중` 또는 `정상` 의미로 섞였다. Gate loading이 fleet health를 가리기도 했다.
-- To-Be: fresh health의 executable, shell의 Keeper fiber, roster-derived running을
+- fresh health의 executable, shell의 Keeper fiber, roster-derived running을
   서로 다른 이름으로 표시한다. backend status와 operator-action 신호를 둘 다 보존하고,
   action 신호가 없는 non-ok 상태를 숨기거나 주의 항목으로 재해석하지 않는다. 미수집은
   0이 아니라 unknown으로 표시한다.
 
 ### 5.2 Sandbox 설정 전달
 
-- As-Is: direct/message turn이 TOML로 resolve한 meta를 registry의 raw Local meta로
-  다시 덮어썼다.
-- To-Be: 최신 registry meta에 한 번 읽은 TOML defaults를 overlay한 단일 effective
+- 최신 registry meta에 한 번 읽은 TOML defaults를 overlay한 단일 effective
   meta를 runtime/tool/receipt까지 전달한다.
 
-### 5.3 Docker의 Host 강등
+### 5.3 Sandbox 격리 및 Host 강등 금지
 
-- As-Is: Docker image preflight 실패 시 Host target으로 바꿔 실행할 수 있었다.
-- To-Be: Local 요청만 Host에서 실행한다. Docker 요청은 Docker target에서 실행하거나
-  구체적인 typed tool failure로 끝난다.
+- `local` 샌드박스 프로파일은 제거되었으며, Keeper는 `docker` (`docker_hardened` / `docker_with_git`), `microvm`, `remote_ssh` 프로파일만 사용한다.
+- 샌드박스 준비 실패 시 Host 실행으로 강등하지 않고 구체적인 typed tool failure로 끝난다.
 
 ### 5.4 Hidden reasoning 공개 저장
 
-- As-Is: provider thinking 원문이 raw trace와 public trajectory/API 경로에 남았다.
-- To-Be: 공개 관측에는 kind, size, redacted 여부만 남긴다. Agent Core가 provider
+- 공개 관측에는 kind, size, redacted 여부만 남긴다. Agent Core가 provider
   continuation에 필요한 private checkpoint는 이 변경에서 삭제하지 않는다.
 
 ### 5.5 Queue 정체
 
-- As-Is: 현재 live의 일부 pending event는 owner가 operator-paused여서 처리되지 않는다.
-- To-Be: 이는 곧바로 FIFO 구현 결함으로 단정하지 않는다. owner를 실행 가능한
-  상태로 둔 canary에서도 claim/terminal이 유실될 때에만 queue 코드 수정 PR을 만든다.
+- pending event가 처리되지 않을 때는 먼저 owner가 operator-paused 상태인지 확인한다.
+  owner를 실행 가능한 상태로 둔 canary에서도 claim/terminal이 유실될 때에만 queue
+  코드 수정 PR을 만든다.
 
 다음 작업은 고정 architecture stack이나 고정 순서로 진행하지 않는다. queue delivery,
 scheduler occurrence, HITL wake, async/batch/broadcast, verification/fusion,

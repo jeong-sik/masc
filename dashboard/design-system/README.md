@@ -1,13 +1,13 @@
 # MASC Cockpit Design System
 
-> **MASC** is a dashboard-plus-IDE observation tool for managing a fleet of AI "keeper" agents. Information density is intentionally extreme — this is an ops cockpit, not a marketing page.
+> **MASC** is a dashboard-plus-IDE observation tool for managing a fleet of AI "keeper" agents. Information density is high — this is an ops cockpit, not a marketing page.
 
 ---
 
 ## SSOT documents
 
 - **[`SPEC.md`](SPEC.md)** — canonical design system specification covering `dashboard/`(Preact). Token taxonomy (Raw/Semantic/Role), canonical vocabulary, theme matrix, ARIA pattern catalog, governance.
-- **[`patterns/a11y/`](patterns/a11y/)** — ARIA pattern catalog: `region` · `list` · `tablist` · `radiogroup` · `log` · `dialog`. Each file has JSX + Bonsai examples, keyboard contracts, screen reader expectations.
+- **[`patterns/a11y/`](patterns/a11y/)** — ARIA pattern catalog: `region` · `list` · `tablist` · `radiogroup` · `log` · `dialog`. Each file has JSX examples, keyboard contracts, screen reader expectations.
 
 새 token / 컴포넌트 패턴 / 테마 추가는 SPEC.md 갱신이 선행되어야 합니다.
 
@@ -15,7 +15,7 @@
 
 ## What MASC is
 
-MASC is a **single-pane-of-glass cockpit** where a human operator (or agent) can watch multiple AI keepers work in parallel across codebases, tasks, goals, and providers. It fuses two modes into one view:
+MASC is a **unified operations cockpit** where a human operator (or agent) can watch multiple AI keepers work in parallel across codebases, tasks, goals, and providers. It fuses two modes into one view:
 
 - **Dashboard mode** — fleet ticker, KPI strip, lifeline heartbeat, swimlane timeline, ops rail, and a multi-tab "deck" (Board / Tasks / Goals / Verified / Providers / Sandbox / Runtime).
 - **Code mode** — a 4-column IDE layer (tree · editor · review · activity) with stacked **observational overlays** (time · parallel · tools · approve · notes) that can explode into a 3D z-axis view.
@@ -49,13 +49,13 @@ MASC is **bilingual Korean/English** under the hood — titles, goals and some c
 
 ## Sources used
 
-- **`tokens/source.ts`** — single source of truth for all design tokens (raw + semantic + themes). Codegen via `pnpm tokens:build` emits 4 artifacts (preview / Tailwind v4 / Preact TS / DTCG JSON). See `tokens/build.ts`.
+- **`tokens/source.ts`** — single source of truth for design-system tokens (raw + semantic + themes). Codegen via `pnpm tokens:build` emits 4 artifacts (preview / Tailwind v4 / Preact TS / DTCG JSON). See `tokens/build.ts`.
 - **`source_styles/`** — generated `tokens.generated.css` (preview surface) plus reference copies of zone-specific stylesheets:
   - `primitives.css` — chip, pill, bar, spark, kv-row, btn variants, elevation helpers, status surfaces, animations
   - `layout.css` — the 3-col × 7-row cockpit grid
   - `sidebar.css` · `ticker.css` · `kpi.css` · `lifeline.css` · `center.css` · `swimlanes.css` · `deck.css` · `drawer.css` · `rail.css` — zone-specific styles
   - `code.css` · `layers.css` — code mode + stacked overlays
-  - The hand-written `tokens.css` was deleted (Wave 2); the generated counterpart now ships in its place.
+  - The preview-local hand-written `tokens.css` was replaced in Wave 2 by `source_styles/tokens.generated.css` (note: `dashboard/src/styles/tokens.css` and `dashboard/src/styles/keeper-v2/colors_and_type.css` remain active in the live Preact app; see `dashboard/CSS-ARCHITECTURE.md`).
 - **Synthetic seed data only** — repository previews must not embed `.masc/` records, keeper prompts, provider model names, decision logs, auth material, trajectories, or operator transcripts.
 - No Figma provided.
 - No slide template provided — `slides/` is omitted per instructions.
@@ -167,7 +167,7 @@ Bundled as `--elev-0 … --elev-6` (bg + border + shadow). Low-level elements st
 - **Tables are sticky-headed** with hairline row separators.
 
 ### The "now" metaphor
-- **Vertical brass column spans all swimlanes** at the current time, with a linear-gradient top-to-bottom fade and a 4px brass glow. Optional pulse animation. This is the strongest visual element in the app — a single shining needle through time.
+- **Vertical brass column spans all swimlanes** at the current time, with a linear-gradient top-to-bottom fade and a 4px brass glow. Optional pulse animation. This is the primary temporal marker in the swimlane view.
 
 ---
 
@@ -295,10 +295,7 @@ If new icons are genuinely needed (they usually aren't), **use Lucide at 12–14
                                         Swimlanes, Deck, Rail, Composer, Drawer, CodeMode
 ```
 
-The hand-written `colors_and_type.css` was removed in Wave 2 (#11250) and is no
-longer part of the layout — the preview surface now consumes
-`source_styles/tokens.generated.css` directly. Sibling generated artifacts live
-in their consuming surfaces:
+The preview-local `colors_and_type.css` in `design-system/` was removed in Wave 2 (#11250) — the preview surface consumes `source_styles/tokens.generated.css` directly (while the live Preact dashboard also loads `dashboard/src/styles/tokens.css` and `dashboard/src/styles/keeper-v2/colors_and_type.css`). Sibling generated artifacts live in their consuming surfaces:
 
 - `dashboard/src/styles/tokens.generated.css` (Tailwind v4 `@theme`)
 - `dashboard/src/styles/tokens.generated.ts`  (Preact typed)

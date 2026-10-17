@@ -28,7 +28,7 @@ extra discovery window only on the first page. Continuation pages carry an empty
 window and retain the complete ordered page stream. Restart from the first page
 to discover new arrivals; paging is not a frozen historical snapshot.
 
-When `truncated=true`, pass `next_cursor` with the same filters and projection.
+When `truncated=true`, pass `next_cursor` as `cursor` with the same filters and projection.
 Changing a filter invalidates that cursor instead of silently restarting it.
 For a repeated read of the same selection/page, pass its `revision` as
 `if_revision`; `kind="unchanged"` means the prior result still applies. It does

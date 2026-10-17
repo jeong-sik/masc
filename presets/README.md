@@ -5,11 +5,11 @@ keepers into a live MASC config root. It exists because config seeding
 intentionally excludes `keepers/` — a fresh
 install boots zero keepers until an operator opts a team in.
 
-`scripts/seed-team.sh <preset> <base-path>` copies a preset's `keepers/` and
-into `<base-path>/.masc/config/`. A preset's keepers inherit
+`scripts/seed-team.sh --preset <preset> --base-path <base-path>` copies a
+preset's `keepers/` into `<base-path>/.masc/config/`. A preset's keepers inherit
 `[runtime].default` from `runtime.toml` and never name a model themselves, so a
 preset never edits the model catalog and stays coherent with `runtime.toml`
-and AGENT_CORE's embedded catalog by construction.
+and AGENT_CORE's embedded catalog.
 
 Presets live at the repo top level (`presets/`), not under `config/`, so the
 server's config-root bootstrap never copies them into a live runtime config
@@ -81,11 +81,11 @@ scripts/seed-team.sh --preset world-scarcity --base-path ~/lab/scarcity
 `restore` 는 덮기 전에 현재 상태를 `_autosave` 에 덮어써 저장한다. `/preset restore _autosave` 는 마지막 restore 의 prompt override 와 runtime 배정을 되돌린다.
 instructions 는 각 keeper 의 다음 up 에서 반영된다.
 
-### autoboot 와 proactive 가 켜져 있다
+### `activation_mode = "autonomous"` 가 켜져 있다
 
-모든 world keeper 가 `autoboot_enabled = true`, `proactive_enabled = true` 다. 실험이
+모든 world keeper 가 `[keeper] activation_mode = "autonomous"` 다. 실험이
 사람의 재촉 없이 돌아야 하기 때문이다. seed 하면 다음 기동에서 넷이 스스로 움직이고
-토큰을 쓴다. 그걸 원하지 않으면 seed 하기 전에 해당 값을 끄거나 별도 base path 를 쓴다.
+토큰을 쓴다. 그걸 원하지 않으면 seed 하기 전에 `activation_mode` 를 `"on_demand"` 나 `"manual"` 로 바꾸거나 별도 base path 를 쓴다.
 
 ### 도구면은 세계마다 같다
 

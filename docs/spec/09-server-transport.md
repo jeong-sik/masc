@@ -25,7 +25,7 @@ MCP(Model Context Protocol)를 다중 트랜스포트(HTTP/1.1, HTTP/2 h2c, WebS
 - SSE는 per-session `Eio.Stream.t` mailbox 패턴. broadcast 시 global write-lock 없음.
 - HTTP/2는 `h2-eio` 기반이며 `MASC_USE_H2=auto|1|0`로 listener mode를 제어한다. 기본값 `auto`는 HTTP/1.1과 h2c를 같은 포트에서 자동 감지한다.
 - WebSocket은 기본 활성화(`MASC_WS_ENABLED=0`으로 비활성화), gRPC는 기본 비활성화(`MASC_GRPC_ENABLED=1`로 활성화)되는 보조 지원 트랜스포트다.
-- stdio 모드는 CLI-Tool-A MCP 클라이언트의 표준 연결 방식.
+- stdio 모드는 Claude Code 등 로컬 MCP 클라이언트의 표준 연결 방식.
 
 ---
 
@@ -34,9 +34,9 @@ MCP(Model Context Protocol)를 다중 트랜스포트(HTTP/1.1, HTTP/2 h2c, WebS
 ```mermaid
 graph TB
     subgraph Clients["클라이언트"]
-        CC[CLI-Tool-A<br/>MCP stdio]
-        GC[CLI-Tool-C<br/>MCP HTTP]
-        CX[CLI-Tool-B<br/>MCP HTTP]
+        CC[Claude Code<br/>MCP stdio]
+        GC[Antigravity<br/>MCP HTTP]
+        CX[Codex<br/>MCP HTTP]
         DB[Dashboard<br/>Browser SSE]
         EXT[외부 에이전트<br/>gRPC / WS]
     end
@@ -61,7 +61,7 @@ graph TB
     end
 
     subgraph Dispatch["Tool Dispatch"]
-        TD[tool_dispatch.ml<br/>371 MCP tools]
+        TD[tool_dispatch.ml<br/>MCP tool catalog]
     end
 
     CC -->|stdio| STDIO
@@ -411,6 +411,7 @@ let make_routes ~port ~host:_ ~sw ~clock =
 | Runtime | `/api/v1/runtime/*` | `_dashboard` / `_activity` | `GET /api/v1/runtime/resolved` |
 | Activity | `/api/v1/activity/*` | `_activity` | `GET /api/v1/activity/events` |
 | Channel Gate | `/api/v1/gate/*` | `_channel_gate` | `GET /api/v1/gate/health` |
+| Lane Add-ons | `/api/v1/lane-addons/*` | `_lane_addons` | `GET /api/v1/lane-addons` |
 | Board | `/api/v1/board/*` | `_activity` | `GET /api/v1/board/{id}` |
 | OpenAPI | `/api/v1/openapi.json` | `_frontend` (`Transport.Rest`) | OpenAPI 3.1 문서 자동 생성 |
 
@@ -438,15 +439,16 @@ let make_routes ~port ~host:_ ~sw ~clock =
   workspace_secret.hash     -- workspace-level secret (SHA256 해시)
   initial_admin        -- 최초 admin agent 이름
   agents/
-    agent-llm-a.json        -- credential JSON (agent_name, token_hash, admin, expires_at)
-    provider-f.json
+    claude-code.json   -- credential JSON (agent_name, token_hash, admin, expires_at)
+    codex.json
 ```
 
 ### 7.2 인증 흐름
 
 1. **토큰 생성**: agent 이름과 admin 여부를 바탕으로 raw token과 credential을 만든다. raw token은 한 번만 반환, 서버는 SHA256 해시만 저장한다.
-2. **요청 인증**: `Authorization: Bearer <raw_token>` 헤더로 전달. 서버가 해시 비교.
-3. **만료 검사**: `expires_at` ISO 문자열 비교 (`now > exp_str`).
+2. **요청 인증**: `Authorization: Bearer <raw_token>` 헤더로 전달. 서버가 해시 비교. 인메모리 토큰 인덱스에 없는 토큰이 들어오면 `.masc/auth/agents/` 디렉토리를 즉시 재로드(live reload)하여 외부 CLI(`masc-mcp login` 등)가 발급한 신규 토큰을 서버 재시작 없이 수용한다.
+3. **저장소 가용성**: `.masc/auth/` 또는 credential 스토어를 읽을 수 없는 I/O 장애는 `401 Unauthorized`로 위장하지 않고 `503 Service Unavailable`을 반환해 일시적 저장소 오류와 잘못된 자격 증명을 구분한다.
+4. **만료 검사**: `expires_at` ISO 문자열 비교 (`now > exp_str`).
 
 ### 7.3 인증 계층
 
@@ -465,6 +467,7 @@ let make_routes ~port ~host:_ ~sw ~clock =
 |------|----------|
 | `Admin` | 모든 작업 (auth enable/disable, tool grant/revoke 포함) |
 | `Worker` | 도구 호출, broadcast, task claim/complete |
+| `Player` | 머신/게임 레인 조작 (`CanPlayMachine`, `CanBroadcast`) |
 | `Observer` | 읽기 전용 (status, messages 조회) |
 
 도구 인증은 per-tool required-permission 매핑을 사용하지 않는다. 알려진 내부 도구와 `masc_*` 도구는 `CanBroadcast` 이상을 요구하고, unknown external 도구명은 거부한다. 이 동작은 fail-closed 고정값이며 환경변수로 완화할 수 없다.
@@ -534,6 +537,7 @@ let httpun_request = Httpun.Request.create ~headers:httpun_headers httpun_meth h
 모든 REST API, MCP, Dashboard 경로를 HTTP/2로도 제공한다. H2 고유 기능:
 - 무제한 SSE stream per connection (브라우저 6-connection 제한 해소)
 - `flush_headers_immediately:true`로 streaming response 지원
+- 개별 스트림/연결의 프로토콜 또는 핸들러 예외는 해당 H2 연결 범위에서만 격리 처리되며 리스너 전체나 다른 클라이언트 세션을 중단시키지 않는다.
 
 ### 8.3 Cloudflare Tunnel 제약
 
@@ -572,7 +576,7 @@ WebSocket 세션은 `ws-{timestamp_ms}-{counter}` 형식 ID를 사용한다. SHA
 
 ### 10.1 활성화
 
-기본값은 **비활성**이다 (2026-08-25부터). `MASC_GRPC_ENABLED=1`일 때만 뜬다. 포트는 `MASC_GRPC_PORT` (기본값: 8936).
+기본값은 **비활성**이다 (2026-08-25부터). `MASC_GRPC_ENABLED=1`일 때만 뜬다. 포트는 `MASC_GRPC_PORT` (기본값: 8936). 활성화 시 리스닝 소켓 바인드가 실제로 완료된 뒤에만 gRPC readiness를 공개하므로, 부트스트랩 직후 내부/외부 클라이언트가 바인드 전 포트에 연결해 실패하는 경쟁 조건을 방지한다.
 
 껐다기보다 **아무도 켠 적이 없었다**: 서버 자신의 transport-health 집계가 이 표면이 듣고 있던 내내 `subscribers: 0`, `events_delivered: 0`을 보고했다. 그동안 websocket이 `primary_path`를 맡고 SSE가 브로드캐스트를 날랐다. 코드는 그대로이므로 되돌리는 건 환경변수 하나다.
 
@@ -711,7 +715,7 @@ sequenceDiagram
 
 1. `init_runtime_context`: Eio 환경(clock, net, proc_mgr, fs) 추출
 2. `create_server_state`: 서버 상태 생성 (Workspace config, Eio context 설정)
-3. `bootstrap_server_state`: Workspace 초기화, Chain bootstrap, Tool registry warm-up, JSONL pruning
+3. `bootstrap_server_state`: 단일 루트 `<base-path>/.masc` Workspace 초기화 (레거시 `.masc/clusters` 하위 트리는 사용하지 않음), Chain bootstrap, Tool registry warm-up, 단일 루트 `.masc` JSONL pruning
 4. `bootstrap_keepers`: Keeper 에이전트 부트스트랩
 6. `start_background_maintenance`: 주기적 cleanup fiber 시작
 7. HTTP 서버 listen 시작

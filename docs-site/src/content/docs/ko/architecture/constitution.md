@@ -3,7 +3,7 @@ title: 헌법 불변식 (Constitution)
 description: MASC 런타임과 참여 에이전트가 따르는 6대 불변식과 7대 금지 조항
 ---
 
-MASC 런타임과 모든 하위 에이전트는 `docs/constitution.xml`에 정의된 헌법 불변식을 따릅니다. 이 페이지는 그 원문을 요약한 것이며, 원본은 XML 쪽입니다.
+`docs/constitution.xml`은 MASC의 제품·개발 계약(코딩 에이전트 `<execution_protocol>` 포함)이며, Keeper 런타임 시스템 프롬프트(`config/prompts/keeper.md` 및 개별 `keepers/<name>.toml`)가 아닙니다. 이 페이지는 그 원문의 도메인 불변식과 금지 조항을 요약한 것이며, 원본은 XML 쪽입니다.
 
 ---
 
@@ -20,12 +20,14 @@ flowchart TD
     ROOT --> P6["6. 실패는 증거를 남긴다<br/>(failure_keeps_evidence)"]
 ```
 
-1. **`no_wall_clock_death`** — 시간 경과로 상태를 죽이지 않습니다. Task에도 Board attention Pending에도 만료가 없고, Board 기본 TTL은 0(영구)입니다. 만료가 필요해 보이면 그건 대개 상태 전이가 빠진 것입니다.
+1. **`no_wall_clock_death`** — 시간 경과로 상태를 죽이지 않습니다. Task에도 Board attention Pending에도 만료가 없고, Board 기본 TTL은 0(영구)입니다. 만료가 필요해 보이면 그건 대개 상태 전이가 빠진 것입니다. **예외**: Candle 잔액(잔액 감소는 지수 반감기를 따르는 화폐 보유 규칙이며, Task·Goal·Board의 어떤 상태도 만료시키지 않고 원장의 사실도 지우지 않습니다).
 2. **`closed_sum_over_string`** — 상태와 판정은 닫힌 합타입으로 표현합니다. task_status, Goal_phase, attempt result, board_error, delivery 모두 variant이며, wire 문자열을 비교해 분기하지 않습니다.
 3. **`strict_parse_no_default`** — 파서는 unknown 입력에 `None`을 줍니다. 모르는 값을 편리한 기본값으로 눌러 담지 않습니다. Goal은 `status` 필드가 들어오면 decode를 실패시킵니다.
 4. **`persist_before_model_call`** — 모델을 부르기 전에 판단 대상을 먼저 영속화합니다. Board attention candidate가 이 형태입니다.
 5. **`authoritative_read_only`** — 권위 있는 저장소를 읽지 못하면 변경을 승인하지 않습니다. 복구 스냅샷으로 mutation을 허가하지 않습니다.
 6. **`failure_keeps_evidence`** — 전달 실패는 증거를 남기고 대상을 소비하지 않습니다. 실패가 상태를 조용히 진행시키지 않습니다.
+
+MASC는 이 규칙을 OCaml 타입과 전이 검사로 구현하여 허용되지 않는 상태 전이를 서버에서 거부합니다.
 
 ---
 

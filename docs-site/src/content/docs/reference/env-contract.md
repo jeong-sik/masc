@@ -29,6 +29,9 @@ Default policy: every environment variable is `boot_static`. Live tuning goes th
 | `MASC_LOG_LEVEL` | Log level (`debug`, `info`, `warn`, `error`) |
 | `MASC_GRPC_PORT` · `MASC_GRPC_ENABLED` · `MASC_WS_ENABLED` | gRPC/WebSocket transports |
 | `MASC_STARTUP_WATCHDOG_SEC` | Boot watchdog |
+| `MASC_JSONL_RETENTION_DAYS` | Dated JSONL retention window in days (default `30`; overrides `[maintenance] jsonl_retention_days`) |
+| `MASC_KEEPER_WIKI_CONTENTS_ENABLED` | Overrides `[wiki_contents] enabled` (`true`/`false`) for injecting `<wiki_contents>` into Keeper system prompts |
+| `MASC_KEEPER_MICROVM_DNS` | Comma-separated IPv4/IPv6 DNS servers passed to microVM guests (overrides `[sandbox] microvm_dns`) |
 
 ### Web search (read at request time)
 
@@ -36,14 +39,14 @@ Default policy: every environment variable is `boot_static`. Live tuning goes th
 
 | Variable | Default | Effect |
 |---|---|---|
-| `MASC_SEARXNG_URL` | `http://localhost:8888` | Enables the self-hosted SearXNG provider at first priority |
+| `MASC_SEARXNG_URL` | `http://127.0.0.1:8888` | Enables the self-hosted SearXNG provider at first priority |
 | `MASC_WEB_SEARCH_PROVIDER` | `auto` | Pins one provider |
 | `MASC_WEB_SEARCH_TIMEOUT_SEC` | `15` | Per-provider request timeout |
-| `BRAVE_SEARCH_API_KEY` · `TAVILY_API_KEY` · `EXA_API_KEY` · `BING_SEARCH_API_KEY` | (none) | Admits the named search provider |
+| `ZAI_API_KEY` · `BRAVE_SEARCH_API_KEY` · `TAVILY_API_KEY` · `EXA_API_KEY` · `BING_SEARCH_API_KEY` · `AZURE_BING_SEARCH_API_KEY` · `OLLAMA_API_KEY` | (none) | Admits the named search provider |
 
 ### Provider API keys
 
-There is no fixed list: `[providers.<id>.credentials]` in `runtime.toml` (`type = "env"`, `key = "<name>"`) names the variable, and the server reads it from the environment it was started in. On a source checkout `quickstart.sh` writes `.env.local` (mode 600) and `start-masc.sh` loads it; a binary install has neither, so export the variable yourself.
+There is no fixed list: `[providers.<id>.credentials]` in `runtime.toml` (`type = "env"`, `key = "<name>"`) names the variable, and the server reads it from the environment it was started in. Every keyed HTTP provider must declare a `[providers.<id>.credentials]` block in `runtime.toml`; omitting it is rejected with `credential_undeclared`. On a source checkout `quickstart.sh` writes `.env.local` (mode 600) and `start-masc.sh` loads it; a binary install has neither, so export the variable yourself.
 
 ## Rules for new environment variables
 

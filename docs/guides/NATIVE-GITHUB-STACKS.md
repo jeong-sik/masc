@@ -76,7 +76,7 @@ the exact top head (fire-and-forget, never watch or poll):
 gh workflow run merge-compile.yml --ref main -f sha=TOP_PR_CURRENT_HEAD -f pr=TOP_PR_NUMBER
 ```
 
-Use `scripts/review/merge-guard.sh --check --repo OWNER/REPO --pr NUMBER --head SHA`
+Use `scripts/review/merge-guard.sh --check --repo OWNER/REPO --pr TOP_PR_NUMBER --head TOP_PR_CURRENT_HEAD`
 to check the included scope. The guard also reports the top head's
 merge-compile verdict — freshness against `stack.base` plus the
 `merge-compile` success status — as `ADVISORY #N: ...` until convention
@@ -114,7 +114,7 @@ destination: stack metadata may still change between that read and the request.
 Capture the response's `details.uuid` and retrieve its result:
 
 ```bash
-gh api repos/OWNER/REPO/pulls/NUMBER/merge-async/UUID
+gh api repos/OWNER/REPO/pulls/TOP_PR_NUMBER/merge-async/UUID
 ```
 
 Acceptance is not a successful merge: at a work boundary, read that result and

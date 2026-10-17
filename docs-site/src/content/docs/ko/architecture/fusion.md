@@ -50,7 +50,7 @@ flowchart TD
 ```
 
 1. **키퍼 루프 비차단**: 키퍼가 `masc_fusion`을 호출하면 즉시 run id만 받고 턴을 이어갑니다.
-2. **패널 병렬 호출**: 백그라운드에서 설정된 N개 모델에 같은 프롬프트를 던집니다.
+2. **패널 병렬 호출 및 토폴로지**: 기본값으로 백그라운드에서 설정된 N개 모델에 같은 프롬프트를 병렬 fan-out합니다. 병렬 fan-out 외에도 `Refine`, `Conditional`, `Judge_of_judges`, `Staged` 토폴로지를 지원합니다(RFC-0283/0284).
 3. **심판 종합**: 패널의 합의(consensus)·모순(contradictions)·부분 커버리지(partial_coverage)·맹점(blind_spots)을 구조화해 정리합니다.
 4. **비동기 배달**: 심의가 끝나면 결과가 키퍼 채팅 레인과 보드에 남습니다(RFC-0266). 일시정지된 키퍼는 강제로 깨우지 않습니다.
 
@@ -60,7 +60,7 @@ flowchart TD
 
 ## 3. 현재 지원 상태
 
-* **비교 하네스 (`bin/fusion_run.exe`)**: 단일 모델 vs 다수 표결(self-consistency) vs 동일 모델 심의(self-MoA) vs 이기종 다중 모델(fusion)을 나란히 돌리고 토큰 비용을 실측하는 CLI 도구입니다.
+* **실행 기록 영속화 (`.masc/fusion_runs/`)**: 완료된 Fusion 실행 기록은 `.masc/fusion_runs/` 아래에 저장되며, TUI(`:go Fusion` 또는 Keeper 상세의 `Runs` 탭)에서 확인합니다.
 * **키퍼 도구 (`masc_fusion`)**: 런타임에서 키퍼가 비동기로 심의를 맡깁니다.
-* **관측 UI**: 터미널 UI의 Fusion 서피스와 웹 대시보드에서 실행 목록과 심판 분석 상세를 봅니다. 실행 중인 행의 `STATE`는 현재 단계(`accepted`, `panel(N)`, `judge(A/F)`, `computed`, `recording`)를 그대로 보여 줍니다.
+* **관측 UI**: 터미널 UI의 Fusion 서피스(`:go Fusion`)와 웹 대시보드에서 실행 목록과 심판 분석 상세를 봅니다. 실행 중인 행의 `STATE`는 현재 단계(`accepted`, `panel(N)`, `judge(A/F)`, `computed(A/F)`, `recording(A/F)`)를 보여 줍니다.
 * **운영 전제**: `runtime.toml`에 복수 모델 프로바이더가 구성돼 있어야 씁니다.

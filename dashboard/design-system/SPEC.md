@@ -12,10 +12,10 @@ masc 레포의 dashboard surface와 design-system preview는 같은 서버에서
 
 | Surface | 경로 | 스타일 시스템 | Active 테마 |
 |---------|------|----------------|------|
-| `dashboard/` | `/dashboard/*` | Preact + Tailwind utility (`src/styles/tokens.generated.css`) + handwritten component CSS | dark / light |
+| `dashboard/` | `/dashboard/*` | Preact + Tailwind utility (`src/styles/tokens.generated.css`) + `src/styles/tokens.css` + `src/styles/keeper-v2/*.css` | dark / light |
 | `dashboard/design-system/preview/` | `/dashboard/design-system/preview/*` | preview surface, generated tokens (`source_styles/tokens.generated.css`) | dark / light |
 
-모든 토큰 정의는 `dashboard/design-system/tokens/source.ts` SSOT 에서 codegen 으로 4 개 artifact 가 emit 된다. hand-written `tokens.css` / `semantic.css` / `colors_and_type.css` 는 모든 surface 에서 삭제되었다 (Wave 2). 자세한 이행 기록은 §12 audit 참조.
+디자인 시스템 토큰 정의는 `dashboard/design-system/tokens/source.ts` SSOT 에서 codegen 으로 4 개 artifact 가 emit 된다. preview surface 의 hand-written `tokens.css` / `semantic.css` / `colors_and_type.css` 는 삭제되었으며, live `dashboard/` 앱은 generated 토큰 위에 `src/styles/tokens.css` (Dark Brass) 및 vendored `src/styles/keeper-v2/colors_and_type.css` 를 함께 로드한다 (`dashboard/CSS-ARCHITECTURE.md` 참조). 자세한 이행 기록은 §12 audit 참조.
 
 이 spec이 **변경되기 전에 코드가 변경되어선 안 된다.** 새 token, 새 컴포넌트 패턴, 테마 추가는 모두 SPEC PR이 선행해야 한다.
 
@@ -358,8 +358,8 @@ active named variant 테마는 **dark-fantasy + paper** 두 종이며 source.ts 
 ### 7.1 dashboard/ 마이그레이션 우선순위
 
 1. ✅ semantic alias matrix 등재 + ARIA 패턴 — Wave 0/1 머지 완료
-2. ✅ `colors_and_type.css` / `tokens.css` 삭제, source.ts SSOT 단일화 — Wave 2 머지 완료
-3. (지속) `source_styles/components.css` 등 component CSS 의 raw token 직접 참조를 Semantic 으로 점진 치환
+2. ✅ preview surface 의 `colors_and_type.css` / `tokens.css` 삭제 및 `source.ts` codegen 도입 — Wave 2 머지 완료
+3. (지속) component CSS 의 raw token 직접 참조를 Semantic 으로 점진 치환
 
 ---
 
@@ -379,30 +379,30 @@ active named variant 테마는 **dark-fantasy + paper** 두 종이며 source.ts 
 | Version | Date | 변경 |
 |---------|------|------|
 | v0.1 | 2026-04-26 | 초안. dashboard PR #10427 alias matrix와 bonsai 5 테마를 canonical 형태로 통합. |
-| v0.2 | 2026-04-27 | Wave 5 docs sweep. source.ts SSOT 이행 반영, archived 테마 (cyberpunk · terminal · parchment) 분리, hand-written `tokens.css` / `colors_and_type.css` 참조 제거, §12 audit 섹션 신규. |
+| v0.2 | 2026-04-27 | Wave 5 docs sweep. source.ts SSOT 이행 반영, archived 테마 (cyberpunk · terminal · parchment) 분리, preview hand-written `tokens.css` / `colors_and_type.css` 참조 정리, §12 audit 섹션 신규. |
 
 ---
 
 ## 12. 2026-04 SSOT 이행 완료 (audit)
 
-다음 PR 시리즈로 디자인 시스템이 codegen SSOT 로 통일되었다. 이전 §6 / §7 의 옛 PR-S 진행 표시 (PR-S2, PR-S2.5, PR-S3, PR-S3g, PR-M5 등) 는 모두 머지/완료되어 archived.
+다음 PR 시리즈로 디자인 시스템이 codegen SSOT 로 통일되었다. 이전 §6 / §7 의 옛 PR-S 진행 표시 (PR-S2, PR-S2.5, PR-S3, PR-S3g, PR-M5 등) 는 모두 머지/완료되어 archived. (`dashboard_bonsai/` 디렉터리는 이후 레포에서 제거되었으며, 아래 표의 Bonsai 행은 당시 이행 기록이다.)
 
 | Wave | PR | 내용 |
 |------|----|------|
 | 1b | #11189 | codegen scaffold (`source.ts` → 4 generated outputs) |
-| 1b | #11235 | build.ts artifact 7/7 (Bonsai `colors_and_type.generated.css`) |
+| 1b | #11235 | build.ts artifact 7/7 (historical Bonsai `colors_and_type.generated.css`) |
 | 2 | #11250 | preview swap (`tokens.css` 880L + `semantic.css` 117L + façade 20L 삭제) |
-| 2 | #11255 | Preact swap (`dashboard/src/styles/tokens.css` 137L 삭제) |
+| 2 | #11255 | Preact swap (`dashboard/src/styles/tokens.css` 137L 교체; 이후 Dark Brass `tokens.css` 와 vendored `keeper-v2/colors_and_type.css` 가 추가됨) |
 | 2 | #11275 | source.ts superset extension (+32 토큰, Preact 컴포넌트 호환) |
-| 2 | #11301 | Bonsai swap (`dashboard_bonsai/static/colors_and_type.css` 566L 삭제 + 3 archived themes 보존) |
+| 2 | #11301 | historical Bonsai swap (이후 `dashboard_bonsai/` 제거됨) |
 | 5 | #11330 | `check-equivalence.mjs` 복원 (status canon + keeper ΔE 단순화) |
 | 5 | #11293 | `tokens-drift` CI workflow (Tokens drift + Tier integrity 게이트) |
 
 이행 결과:
 
-- hand-written CSS 모든 surface 에서 삭제 (preview, Preact, Bonsai)
-- 2 themes (dark-fantasy + paper) 만 active, 3 archived themes (cyberpunk, terminal, parchment) 는 `dashboard_bonsai/static/themes/archive/` 보존
+- preview surface 의 hand-written token CSS 삭제 (`source_styles/tokens.generated.css` 사용)
+- 2 themes (dark-fantasy + paper) active (`dashboard_bonsai/` 및 그 하위 archive 는 이후 레포에서 제거됨)
 - drift 방지 CI 4 gate 활성화: idempotent build, status canon pin, keeper OkLCH ΔE < 2, tier integrity (generated 직접 수정 차단)
-- §6.1 새 token 추가 절차가 SSOT 단일 경로 (source.ts → `pnpm tokens:build` → 7 artifact emit) 로 단순화됨
+- §6.1 새 token 추가 절차가 SSOT 경로 (`source.ts` → `pnpm tokens:build` → 4 artifact emit) 로 단순화됨
 
 historical note: 본 audit 섹션 머지 이전, SPEC 본문 §6.2 governance 예외 목록에는 `--font-mono` stack divergence (PR-S2.5) 와 `--shadow-inset` vs `--shadow-ring` rename (PR-S3g) 항목이 active exception 으로 등재되어 있었다. 두 divergence 모두 source.ts 단일 SSOT 도입 후 해소되어 예외 목록에서 제거.

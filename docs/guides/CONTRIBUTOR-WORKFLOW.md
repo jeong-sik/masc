@@ -30,8 +30,8 @@ flowchart LR
 
 ## Repository strategy
 
-- Work in stacked PRs. The bottom PR targets `main`; each later PR targets the
-  preceding branch. Give each PR one concrete outcome.
+- Work in stacked PRs created and maintained with `gh stack`. The bottom PR targets `main`; each later PR targets the
+  preceding branch. Never merge another PR or `main` into a stack branch. Give each PR one concrete outcome.
 - **Land a native stack whole, once, through its top PR. Never merge it layer by
   layer from the bottom**, including `merge-async` on a lower PR. Each partial
   merge moves `main` and makes the remaining layers, and other stacks, conflict again.

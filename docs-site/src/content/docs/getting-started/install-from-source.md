@@ -34,8 +34,7 @@ opam install ./masc.opam --deps-only --locked
 
 ## 2. Start the workspace server
 
-`quickstart.sh` initializes a `.masc/` workspace under `~/masc-quickstart` and
-starts the server:
+`./quickstart.sh` initializes a `.masc/` workspace under `~/masc-quickstart`, writes the MCP bearer token to `.masc/config/mcp-client.env`, and starts the server. It starts no Keeper by default and needs no API key unless `--team classic` is passed:
 
 ```bash
 ./quickstart.sh
@@ -44,15 +43,15 @@ starts the server:
 Endpoints on startup:
 
 - **MCP endpoint**: `http://127.0.0.1:8935/mcp`
-- **Dashboard**: `http://127.0.0.1:8935/dashboard/`
+- **Dashboard (experimental)**: `http://127.0.0.1:8935/dashboard/`
 - **Health check**: `curl http://127.0.0.1:8935/health`
 
-## 3. Open the Terminal UI
+## 3. Build and open the server & Terminal UI manually
 
-Build and run the TUI from the checkout:
+To build both the server (`bin/main_eio.exe`) and the TUI (`bin/masc_tui.exe`) directly from the checkout:
 
 ```bash
-dune build bin/masc_tui.exe
+dune build bin/main_eio.exe bin/masc_tui.exe
 ./_build/default/bin/masc_tui.exe --base-path ~/masc-quickstart
 ```
 
@@ -61,12 +60,13 @@ The keys and surfaces match the prebuilt binary — see the
 
 ## 4. Enable autonomous Keepers (optional)
 
-As with the prebuilt install, Keepers need a model source and a command sandbox.
-Export a provider key (or wire a local model) and start the server. `--base-path` is required:
+As with the prebuilt install, Keepers need a model runtime and a command sandbox.
+Run `masc setup` to configure your model runtime, build the default sandbox image, and start the workspace, or start the server directly with `masc start`:
 
 ```bash
-export ANTHROPIC_API_KEY="sk-ant-..."
-./start-masc.sh --http --base-path ~/masc
+masc setup --base-path ~/masc
+# Or start the server directly once configured:
+masc start --base-path ~/masc
 ```
 
 See [Local Models](/runbooks/llama-server/) for the no-key option and

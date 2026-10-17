@@ -278,7 +278,7 @@ none -- it is the provider and model half of the catalog -- so a copy of it is
 not a working replacement on its own.
 
 The **installed binary** provisions one `imp` with `activation_mode = "manual"` and the
-`browser-lanes` skill. That `imp` defaults to the Docker sandbox and is
+built-in skills (including `browser-lanes`). That `imp` defaults to the Docker sandbox and is
 started by hand once a model and an execution environment are ready. The
 installer takes its configuration from the binary. The instructions are a starting point; edit them directly. Model weights,
 model CLIs, API keys, Docker, Apple Container, SSH servers,
@@ -614,7 +614,7 @@ managed directory on the host and differs from Apple's guest ext4 disk.
 space actually available follows the host filesystem. This difference is
 shown in the boot log. Host descriptor characteristics measured on Apple are
 not guaranteed to be the same on Linux. Use `network_mode=none` or `inherit`;
-`policy` is not supported on Linux. `scripts/smoke-nerdctl-kata-volume.sh`
+`policy` is not supported on Linux. When `network_mode=inherit` is used on a host whose `/etc/resolv.conf` only lists loopback, link-local, or unspecified resolvers, configure reachable upstream DNS servers via `[sandbox] microvm_dns` in `runtime.toml` or `MASC_KEEPER_MICROVM_DNS` so the microVM guest can resolve hostnames. `scripts/smoke-nerdctl-kata-volume.sh`
 checks Kata's volume and isolation. To verify as far as an installed Keeper,
 set `release_run` of the `Kata volume smoke` workflow to the run number of a
 Release whose Linux x64 job succeeded. That path installs that release's
@@ -639,9 +639,10 @@ image for MASC development, not part of a regular install.
 ## Initial prompts, skills, and Keepers
 
 The default installation prepares **one Keeper, `imp`, that does not start on its own** and the
-built-in skills `browser-lanes`, `frontend-change`, `evidence-review`, `run-and-read`,
-`prior-art`, `verify-before-claiming-done`, `root-cause-first`, `diagram-in-chat`,
-`skill-authoring`, and `work-intake`.
+built-in skills `browser-lanes`, `browser-live-follow-read`, `browser-navigate-read`,
+`diagram-in-chat`, `evidence-review`, `frontend-change`, `lane-addon-author`,
+`observe-act-verify`, `prior-art`, `root-cause-first`, `run-and-read`,
+`skill-authoring`, `verify-before-claiming-done`, and `work-intake`.
 Configure a model and a sandbox, then start the Keeper.
 
 Task and Goal verification agents can also read the instruction Skills

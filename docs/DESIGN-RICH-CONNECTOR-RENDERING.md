@@ -399,20 +399,19 @@ Acceptance criteria:
 - `lib/keeper/keeper_chat_discord.ml`
 - `lib/keeper/keeper_chat_slack.ml`
 - `lib/gate/discord_rest_client.ml`
-- `lib/gate/connector_capabilities.ml{,i}` or `config/connector-formats.toml`
 - `lib/gate/gate_protocol.ml{,i}`
 - `lib/gate/channel_gate.ml`
 - `lib/gate/channel_gate_*_state.ml{,i}`
 - `lib/gate/channel_gate_metrics.ml{,i}`
 - `lib/gate/channel_gate_connector.ml{,i}`
-- `lib/gate_keeper_backend.ml`
+- `lib/gate/channel_gate_imessage.ml{,i}`
 - `lib/keeper/keeper_multimodal_input.ml{,i}`
 - `lib/keeper/keeper_turn.ml`
 - `lib/keeper/keeper_agent_run_response_text.ml`
 - `lib/server/server_routes_http_keeper_stream.ml`
 - `lib/ag_ui/ag_ui.ml`
 - `lib/board/board_attachment_meta.ml{,i}`
-- `lib/board/board_core.ml`, `board_core_persist.ml`, `board_dispatch.ml`
+- `lib/board/board_dispatch.ml`
 - `bin/masc_tui_ansi.ml`, `bin/masc_tui_render.ml`, `bin/masc_tui.ml`
 - `lib/workspace_status_rendering.ml`
 
@@ -420,7 +419,6 @@ Acceptance criteria:
 - `sidecars/shared/gate_shared/gate_response.py`
 - `sidecars/shared/gate_shared/gate_client_base.py`
 - `sidecars/telegram-bot/src/formatters.py`, `bot.py`
-- `sidecars/imessage-bot/src/bot.py`, `imessage_bridge.py`
 - `sidecars/cli-connector/src/bot.py`
 
 ### MASC Dashboard
@@ -438,9 +436,8 @@ Acceptance criteria:
 - Dashboard API schemas for gate responses, poll snapshots, and turn lifecycle events.
 
 ### Optional agent core generic follow-up, separate PR
-- `lib/llm_provider/types.ml`
-- `lib/llm_provider/api_common.ml`
-- `lib/tool_result_store.ml`
+- `packages/agent_core/lib/llm_provider/types.ml`
+- `packages/agent_core/lib/llm_provider/api_common.ml`
 
 ---
 

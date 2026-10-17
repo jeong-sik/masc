@@ -1,31 +1,24 @@
 # Jane Street Base Adoption Contract
 
-> **MASC tracking**: goal `goal-janestreet-base-adoption`, task `task-130`
->
-> This document is the single source of truth for how Jane Street
-> [Base](https://github.com/janestreet/base) is used in `masc`.
-> It exists so reviewers can give consistent feedback without relying
-> on ad-hoc PR memory.
+This document is the single source of truth for how Jane Street
+[Base](https://github.com/janestreet/base) is used in `masc`.
 
 ---
 
 ## 1. Inventory
 
-`open Base` is not in this tree. Counted 2026-08-25 with
-`rg '^\s*open!? Base'` over every `.ml` and `.mli`:
+`open Base` is not in this tree:
 
 | Layer | `.mli` with `open Base` | `.ml` with `open Base` |
 |---|---:|---:|
 | `lib/` (top-level) | 0 | 0 |
 | every sub-package  | 0 | 0 |
 
-The contract was written when `lib/` top-level held 97 `.mli` and 100 `.ml`
-with `open Base`. The purge in §7 ran to completion; §6 asked whether to
-continue it or stop, and continuing is what happened.
-
-The one `Base.` left in `lib/` is `Agent_core.Base.Tool` in
-`tool_bridge.ml` -- masc's own module of that name, not Jane Street's. The
-`base` in several `dune` files is `masc.agent_core.base`, likewise.
+The `Base.` references in `lib/` are `Agent_core.Base.Tool` (in `tool_bridge.ml`,
+`keeper/keeper_identity_gate.ml`, and `keeper/keeper_agent_run.ml`, referring to
+MASC's own module of that name) and `Otoml.Base` (in `toml_line_editor.ml` and
+`runtime_account_declaration.ml`), not Jane Street's `Base`. The `base` in
+several `dune` files is `masc.agent_core.base`, likewise.
 
 ## 2. Adoption rules
 
@@ -141,33 +134,3 @@ Run without arguments to report counts without failing:
 ```sh
 bash scripts/base-policy-audit.sh
 ```
-
----
-
-## 5. MASC goal and task linkage
-
-| Field | Value |
-|---|---|
-| Goal ID | `goal-janestreet-base-adoption` |
-| Task ID | `task-130` |
-
-The decision §6 of the original contract left open -- continue the purge or
-stop it -- was settled by continuing. There are no `open Base` occurrences
-left to evaluate, so the lane has nothing to claim; what remains is the audit
-in §4, which holds the count at zero.
-
----
-
-## 6. Migration order — done
-
-The order the contract recommended, and what is left of each step:
-
-1. **`.mli` files in `lib/`** — nothing left (0).
-2. **`.ml` files with the Stdlib-shadow anti-pattern** — nothing left (0),
-   and `scripts/base-policy-audit.sh` holds `ml_base_stdlib_shadow` and
-   `bin_ml_base_stdlib_shadow` at that count.
-3. **`.ml` files with genuine Base usage** — nothing left (0).
-4. **Sub-packages** — Base-free, as they were.
-
-So this document is no longer a plan. It is the rule a reviewer applies to a
-new `open Base`, and §4 is the check that catches one.

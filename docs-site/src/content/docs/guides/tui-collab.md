@@ -1,39 +1,38 @@
 ---
 title: TUI Collab Hub
-description: Shared MSX and DOS observation, F5 control toggle, play links, and public chat.
+description: Shared MSX and DOS observation, MSX cartridge loading, F5 control toggle, DOS play invites, and public chat.
 ---
 
-## (a) Overview / 한 줄 요약
+## Overview
 
-The TUI Collab hub provides zero-Keeper shared MSX and DOS screen observation, explicit `F5` game control toggling, DOS spectator play invite issuing and revocation, and shared public conversation in a unified spectator window.
-
-TUI Collab 허브는 별도 Keeper 선택 없이 공유 MSX/DOS 화면을 관측하고, `F5` 키로 MSX 게임 제어권을 전환하며, DOS 공개 플레이 초대 링크 발급·회수 및 관측자 공개 채팅을 한 화면에서 수행하는 통합 협업 제어 허브입니다.
+The TUI Collab hub provides shared MSX and DOS screen observation without requiring a selected Keeper, an MSX cartridge load menu (`g`), explicit `F5` MSX game control toggling, DOS play invite issuing and revocation (`n` / `/play invite`), and shared public conversation in a unified window.
 
 ---
 
-## (b1) Enabling: Settings & Entry Keys / 켜는 법: 설정 이름
+## Enabling: Settings & Entry Keys
 
 The Collab hub is built into `masc-tui` and accessed directly from the terminal interface:
 
 - **Hub Entry**: Press `&` in normal mode, or type `:` then `go Collab` in the command bar.
-- **Direct Machine Views**: Press `m` for MSX, `d` for DOS, or `:` then `go MSX` / `go DOS`.
-- **MSX Control Toggle**: In the MSX view, press `F5` to toggle between `Observation` and `Control`.
-- **Machine Switching**: In the shared spectator view, press `F4` to cycle between MSX and DOS without losing draft text or spectator presence.
-- **Public Chat Focus**: In the Collab spectator view, press `Tab` to switch focus between the machine frame and the public chat composer.
-- **Play Invites**: In Collab, press `n` to issue a new player invite (prompts for player name and expiry hours), `x` to revoke the selected invite, and `r` to refresh the inventory.
+- **Direct Machine Views (`m` / `d`)**: Press `m` to watch the shared MSX machine or `d` to watch the shared DOS machine (or `:` then `go MSX` / `go DOS`).
+- **MSX Cartridge Load Menu (`g`)**: In Collab, press `g` to open the MSX cartridge load menu listing ROM images in `<base-path>/.masc/msx/carts/`, then watch or play the loaded game.
+- **MSX Control Toggle (`F5`)**: In the MSX view, press `F5` to toggle between `Observation` and `Control`.
+- **Machine Switching (`F4`)**: In the shared spectator view, press `F4` to cycle between MSX and DOS without losing draft text or spectator presence.
+- **Public Chat Focus (`Tab`)**: In the Collab spectator view, press `Tab` to switch focus between the machine frame and the public chat composer.
+- **DOS Play Invites (`n` / `/play invite`)**: In Collab, press `n` (or run `/play invite <name> <hours>` in chat) to issue a new DOS player invite, `x` to revoke the selected invite, and `r` to refresh the inventory. Invited guests and external AI agents can view and control the shared DOS machine in a browser via `/play#<token>` or over MCP at `/mcp/play` (instructions served at `/play/agent.md`).
 
 ### Key Code & Module Coordinates
 - `bin/masc_tui_collab.ml` / `bin/masc_tui_collab.mli`: Collab hub state machine and layout rendering.
-- `bin/masc_tui_keys.ml`: Navigation key bindings (`&`, `F5`, `F4`, `Tab`).
+- `bin/masc_tui_keys.ml`: Navigation key bindings (`&`, `g`, `m`, `d`, `F5`, `F4`, `Tab`).
 - `bin/masc_tui_types.ml`: `Collab_focus` (`Spectator` | `Conversation` | `PlayInvites`).
 - `bin/masc_tui_play_pending.ml`: Journaling durable invite intents before dispatch (`.masc/tui-play-pending.jsonl`).
 
 ---
 
-## (b2) Activation Conditions & Fail-Closed Behavior / 켜지는 조건과 실패 증상
+## Activation Conditions & Fail-Closed Behavior
 
 ### Conditions
-- **Observation by Default**: Entering Collab or switching games always resets the controller to safe `Observation` mode. No keystrokes are forwarded to the game engine until `F5` is explicitly pressed.
+- **Observation by Default**: Entering Collab, opening the `g` cartridge picker, or switching games always resets the controller to safe `Observation` mode. No keystrokes are forwarded to the game engine until `F5` is explicitly pressed.
 - **Workspace Authority Binding**: All invite modifications (`issue`, `revoke`) and game control dispatches require the server to verify and match the TUI's local workspace (`expected_base_path` and `expected_masc_root`).
 
 ### Failure Symptoms & Recovery
@@ -44,30 +43,27 @@ The Collab hub is built into `masc-tui` and accessed directly from the terminal 
 
 ---
 
-## (c) Runnable Examples / 실행 예시
+## Runnable Examples
 
 ### 1. Launching MASC TUI
 ```bash
-# Build the TUI binary from source
-dune build --root . bin/masc_tui.exe
-
 # Start the TUI pointing to your workspace and server port
-./_build/default/bin/masc_tui.exe --base-path ~/masc --port 8935
+masc-tui --base-path ~/masc --port 8935
 ```
 
 ### 2. Interactive Navigation Sequence
 1. Press `&` to open the Collab hub.
-2. Press `m` to watch the active MSX screen.
+2. Press `g` to open the MSX cartridge load menu (or `m` / `d` to switch directly to the active MSX or DOS machine screen).
 3. Observe the mode badge in the status bar (initially `[Observation]`).
-4. Press `F5` to enable input forwarding (badge flips to `[Control]`). Directional keys and action buttons now drive the MSX machine.
-5. Press `F4` to switch to the DOS spectator view.
+4. In MSX, press `F5` to enable input forwarding (badge flips to `[Control]`). Directional keys and action buttons now drive the MSX machine.
+5. Press `F4` to switch between the MSX and DOS views.
 6. Press `Tab` to jump focus into the chat input bar, type a message, and press `Enter`.
 7. Press `Esc` to return to the Collab overview menu.
-8. Press `n`, type a player nickname (e.g. `guest1`) and expiry hours (e.g. `12`), then press `Enter` to generate a spectator QR and play link.
+8. Press `n`, type a player nickname (e.g. `guest1`) and expiry hours (e.g. `12`), then press `Enter` to generate a one-time QR card and play link (`/play#<token>`, with MCP access at `/mcp/play`).
 
 ---
 
-## (d) Disabling & Reverting / 끄는 법 및 되돌리는 법
+## Disabling & Reverting
 
 - **Release Control**: Press `F5` in the MSX view to return immediately to `Observation` mode.
 - **Exit View**: Press `Esc` to leave the active machine screen and return to Collab; press `q` or `Esc` in Collab to return to the primary TUI surface.
@@ -75,9 +71,9 @@ dune build --root . bin/masc_tui.exe
 
 ---
 
-## (e) Experimental Status & Known Limitations / 실험 표시 및 알려진 한계
+## Status & Known Limitations
 
-- **Status**: Stable in v0.52.0+; relies on local loopback or authenticated reverse proxy for remote guests.
-- **Single Active Controller**: Only one player or Keeper may hold the machine controller at any given moment. Spectators can watch the frame updates in real-time but cannot inject inputs while another entity holds the controller.
+- **Status**: Stable in v0.52.0+; relies on local loopback or an authenticated reverse proxy (`MASC_HTTP_BASE_URL`) for remote guests.
+- **Single Active Controller**: Only one player or Keeper may hold the machine controller at any given moment. Spectators can watch frame updates but cannot inject inputs while another participant holds the controller.
 - **Terminal Width Constraints**: On narrow terminals (under 80 columns), public chat messages may be truncated or compact mode will hide conversational sidebars to preserve game frame aspect ratios.
-- **Offline Confirmation Requirement**: Lost network acknowledgements for invites must be cleared via the `u` confirmation workflow; simply restarting the TUI will not bypass an unresolved `.masc/tui-play-pending.jsonl` entry.
+- **Offline Confirmation Requirement**: Lost network acknowledgements for invites must be cleared via the `u` confirmation workflow; restarting the TUI does not bypass an unresolved `.masc/tui-play-pending.jsonl` entry.

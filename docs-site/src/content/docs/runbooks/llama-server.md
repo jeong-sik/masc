@@ -16,8 +16,8 @@ seeds already carries three self-hosted servers, commented out.
 | MLX | `mlx_server` | commented |
 | Ollama (local) | `ollama` | **already live** at `http://localhost:11434` |
 
-If local Ollama is all you want, there is nothing to do: it is the one provider
-of the seeded five that needs no key.
+If local Ollama is all you want, there is nothing to do: it is the seeded local
+HTTP provider that needs no API key.
 
 The other three are commented for a reason the seed states itself — none of
 those servers exists on a fresh machine, and `enabled = false` is not an option

@@ -31,7 +31,19 @@ Fusion      -> Runtime_agent.build -> Agent_core.Async_agent
 - Fusion builds with the same runtime configuration owner, then executes its
   typed panel through `Agent_core.Async_agent` inside `Masc_agent_core_bridge.run_safe`.
 - `Agent_core.Agent` owns agent construction, tool turns, provider requests,
-  typed responses, usage, and typed failures.
+  typed responses, usage, and typed failures. It preserves OpenAI Responses
+  phase items across turns (`#43520`), distinguishes explicit model refusal,
+  policy filtering, token truncation, and content-free stop outcomes
+  (`#43427`, `#43512`), and records HTTP request body component attribution
+  (system prompt, dynamic context, conversation history, tool schemas) at the
+  wire observation boundary (`#43388`).
+- `Agent_core.Runtime_output_schema` owns provider-aware structured output
+  schema validation, wire-format normalization, and exact-output decoding.
+- `Agent_core.Capability_manifest` owns runtime capability manifests and
+  provider/model capability derivation (including explicit OpenAI Chat model
+  capability rows `#43406` and GLM thinking capability bindings `#43466`).
+- `Agent_core.Raw_trace` captures turn-level raw provider request/response
+  traces for replay, debugging, and audit evidence.
 - Feature code projects typed Agent Core results directly. It must not recreate
   response, error-category, usage, or tool-schema facades.
 
@@ -39,7 +51,11 @@ Fusion      -> Runtime_agent.build -> Agent_core.Async_agent
 
 MASC owns tool descriptors, authorization, and handlers. `Tool_bridge` converts
 descriptor-owned schemas and handlers into `Agent_core.Tool.t`. A model call is
-validated against the same captured descriptor that is dispatched.
+validated against the same captured descriptor that is dispatched. When a turn
+emits multiple tool calls, producer-prepared resource-bound wave concurrency
+(`Tool.ordinary_descriptor_scoped`, `#43222`) schedules non-conflicting claims
+in parallel and releases each waiting successor immediately when its specific
+conflicting predecessor settles (`#43498`).
 
 ## Event boundary
 

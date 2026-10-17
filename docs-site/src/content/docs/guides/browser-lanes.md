@@ -48,8 +48,8 @@ masc browser-lane-setup --mode bidi --base-path /path/to/workspace
 ```
 
 This installs the host and writes `[browser.live.bidi]` into the workspace's
-`runtime.toml`. `--firefox`, `--profile` and `--port` name its values. A table
-that is already there keeps its values. Restart the MASC server so it reads the
+`runtime.toml`. `--firefox`, `--profile` and `--port` update the key they name;
+keys you do not pass keep their existing values. Restart the MASC server so it reads the
 table, then log in once in that Firefox: its profile keeps the login. The port
 has no authentication, so any program on the computer can drive that Firefox.
 Give `--mode` twice for both routes. `--mode host` installs only the host and
@@ -70,7 +70,7 @@ UUID, so discover and select it again.
 
 ## Setup: automation
 
-`masc browser-lane-setup --mode automation` writes this for you. It names the
+To inspect or install the host browser binaries first, run `masc prerequisite-actions firefox` and `masc prerequisite-actions geckodriver`. Then `masc browser-lane-setup --mode automation` writes the `[browser]` configuration for you. It names the
 `geckodriver` that `PATH` finds first, when it answers `--version` (`--geckodriver` names
 another; `--browser` writes `binary`), keeps values that are already there, and
 installs no host or extension. Or set the geckodriver executable in the resolved
@@ -200,6 +200,7 @@ explicit new choice.
 | --- | --- |
 | `l` / `a` / `c` | Live / automation / stagehand source |
 | `b` | Choose a live browser connection |
+| `h` | Open the selected Keeper's browser observation history (`[`/`]` switches saved pages, `y` copies receipt/artifact ref) |
 | `[` / `]` | Previous / next tab and read its page |
 | `j` / `k`, arrows | Scroll page text |
 | Page Up / Page Down, Home | Page scroll / top |

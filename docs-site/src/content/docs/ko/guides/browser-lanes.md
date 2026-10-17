@@ -25,7 +25,7 @@ launcher에는 서버 주소를 적지 않습니다. host는 워크스페이스�
 masc browser-lane-setup --mode bidi --base-path /path/to/workspace
 ```
 
-이 명령은 host를 설치하고 워크스페이스의 `runtime.toml`에 `[browser.live.bidi]`를 씁니다. 값은 `--firefox`, `--profile`, `--port`로 지정합니다. 표가 이미 있으면 그 값을 바꾸지 않습니다. 서버를 다시 시작해야 표를 읽습니다. 그다음 그 Firefox에 한 번 로그인하면 프로필이 로그인을 기억합니다. 포트에는 인증이 없어서 같은 컴퓨터의 프로그램은 누구나 그 Firefox를 움직일 수 있습니다. `--mode`를 두 번 주면 두 길을 모두 연결합니다. `--mode host`는 host와 launcher만 설치합니다. 직접 브라우저를 붙일 때, 또는 설치된 레인의 host를 지금 빌드로 갱신할 때 쓰고, 확장·manifest·`runtime.toml`은 쓰지 않습니다.
+이 명령은 host를 설치하고 워크스페이스의 `runtime.toml`에 `[browser.live.bidi]`를 씁니다. `--firefox`, `--profile`, `--port`는 지정한 키를 갱신하며, 전달하지 않은 키의 기존 값은 유지합니다. 서버를 다시 시작해야 표를 읽습니다. 그다음 그 Firefox에 한 번 로그인하면 프로필이 로그인을 기억합니다. 포트에는 인증이 없어서 같은 컴퓨터의 프로그램은 누구나 그 Firefox를 움직일 수 있습니다. `--mode`를 두 번 주면 두 길을 모두 연결합니다. `--mode host`는 host와 launcher만 설치합니다. 직접 브라우저를 붙일 때, 또는 설치된 레인의 host를 지금 빌드로 갱신할 때 쓰고, 확장·manifest·`runtime.toml`은 쓰지 않습니다.
 
 `--mode extension` 명령은 macOS와 Linux를 지원하며 Mozilla native messaging manifest를 등록합니다. 다른 manifest 디렉터리가 필요하면 `--manifest-dir`로 지정합니다. 확장은 `<base-path>/.masc/browser-lane/extension/`에 씁니다. Firefox 또는 Zen의 `about:debugging` → **임시 부가 기능 로드**에서 그 안의 `manifest.json`을 선택합니다. 브라우저가 종료되면 임시 로드도 끝납니다.
 
@@ -33,7 +33,7 @@ masc browser-lane-setup --mode bidi --base-path /path/to/workspace
 
 ## 설정: automation
 
-`masc browser-lane-setup --mode automation`이 이 설정을 써 줍니다. `PATH`가 처음 찾는 `geckodriver`가 `--version`에 답하면 그것을 쓰고(`--geckodriver`로 다른 것을, `--browser`로 `binary`를 지정), 이미 있는 값은 바꾸지 않으며 host와 확장은 설치하지 않습니다. 직접 하려면 해석된 설정 디렉터리의 `runtime.toml`에 geckodriver 실행 파일 경로를 넣고 MASC를 재시작합니다.
+먼저 호스트 브라우저 프로그램을 확인하거나 설치하려면 `masc prerequisite-actions firefox`와 `masc prerequisite-actions geckodriver`를 실행합니다. 그다음 `masc browser-lane-setup --mode automation`이 `[browser]` 설정을 써 줍니다. `PATH`가 처음 찾는 `geckodriver`가 `--version`에 답하면 그것을 쓰고(`--geckodriver`로 다른 것을, `--browser`로 `binary`를 지정), 이미 있는 값은 바꾸지 않으며 host와 확장은 설치하지 않습니다. 직접 하려면 해석된 설정 디렉터리의 `runtime.toml`에 geckodriver 실행 파일 경로를 넣고 MASC를 재시작합니다.
 
 ```toml
 [browser]
@@ -104,6 +104,7 @@ selector click·fill은 JavaScript 이벤트(`isTrusted=false`)를 보냅니다.
 | --- | --- |
 | `l` / `a` / `c` | live / automation / stagehand 소스 |
 | `b` | live 브라우저 연결 선택 |
+| `h` | 선택한 Keeper의 브라우저 관측 기록(observation history) 열기 (`[`/`]`로 저장된 페이지 전환, `y`로 영수증·아티팩트 참조 복사) |
 | `[` / `]` | 이전 / 다음 탭으로 이동하며 읽기 |
 | `j` / `k`, 방향키 | 페이지 텍스트 스크롤 |
 | Page Up / Page Down, Home | 페이지 스크롤 / 맨 위 |

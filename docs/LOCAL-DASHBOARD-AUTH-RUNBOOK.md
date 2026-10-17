@@ -297,7 +297,7 @@ Then rerun the login JSON and `/health` checks with `MASC_BASE_PATH="$BASE_PATH"
 
 ## 7. Bootstrap an Admin Bearer
 
-If you already have an admin bearer, skip to step 7.
+If you already have an admin bearer, skip to step 8.
 
 The shortest local CLI path is:
 
@@ -384,6 +384,7 @@ Path:
 Notes:
 
 - the server stores only the SHA256 hash, not the raw bearer
+- the server's in-memory credential index monitors `.masc/auth/agents` and automatically rebuilds when new credentials are written on disk (without requiring a server restart)
 - keep the raw bearer outside the repo
 - this is for trusted local operator use, not a remote/public bootstrap path
 
@@ -491,7 +492,7 @@ rm -f "$BASE_PATH/.masc/auth/agents/agent-code-tool-matrix.json"
 The automatic dev-token is a persistent `dashboard` Worker credential and is
 independent of the explicit admin credential created by this runbook.
 
-## 10. Known Failure Modes
+## 11. Known Failure Modes
 
 - `effective_base_path` points somewhere else:
   you edited the wrong `.masc/auth` tree
@@ -501,5 +502,7 @@ independent of the explicit admin credential created by this runbook.
   your bearer is valid but not admin
 - `agent-code cannot CanAdmin` or `agent-code-mcp-client is role=worker`:
   the request is authenticated with a worker bearer; rerun login JSON and switch to an admin bearer
+- HTTP `503 Service Unavailable` (`auth_cred_store_unreadable` / `auth_Bootstrap_failed`):
+  a credential file under `.masc/auth/agents` could not be read due to transient I/O or descriptor pressure (`EMFILE`/`ENFILE`) rather than a token mismatch (`401`)
 - `{"error":"not found"}` on keeper boot/shutdown:
   you may still be running an older server build without the fixed route classifier

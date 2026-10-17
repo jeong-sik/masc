@@ -17,18 +17,23 @@ the dashboard never edits persistence directly.
 
 The UI projects source facts from:
 
-- Keeper lanes, turns, transcripts, Jobs, and lifecycle events;
+- Keeper lanes, turns, transcripts (including offline or archived Keepers read
+  directly from durable transcript stores), Jobs, and lifecycle events;
 - Task and Goal versions, judgments, and evidence references;
 - Board posts, comments, reactions, mentions, and LLM curation snapshots;
 - Channel/Connector scope and message correlations;
-- Gate pending/resolved records and LLM/operator provenance;
+- Gate pending/resolved records, persisted `auto`/`yolo` mode state, rule
+  renewal expiry (`expires_at`), and LLM/operator provenance;
 - Fusion panel runs, individual results, Judge results, and failures;
 - Memory events and consolidation provenance;
-- agent core runtime/provider/model call telemetry.
+- agent core runtime/provider/model call telemetry, canonical IDE execution
+  identities, and Skill v6/v7 causal action facts.
 
 Every projection retains the source id, version, timestamp, and correlation
 needed to trace it back. Missing source data renders as an explicit unavailable
-or error state, never as a fabricated empty success.
+or error state, never as a fabricated empty success. Each dashboard HTTP/SSE
+response domain is owned by a single state reducer so concurrent views do not
+fork mutable client state.
 
 ## 3. Keeper chat
 
@@ -42,17 +47,22 @@ Keeper chat preserves the provider stream order and renders interleaved:
 - errors and cancellation.
 
 The UI does not reconstruct this order from timestamps or string prefixes. It
-uses the durable sequence emitted by the turn boundary. Sending a message
-appends a typed stimulus to that Keeper's lane; it does not demand an immediate
-turn when the Keeper is busy.
+uses the durable sequence emitted by the turn boundary and reads historical
+windows through a deterministic transcript pagination cursor. Transcript reads
+remain available when a Keeper is offline or archived so operators can inspect
+prior history without starting the lane. Sending a message appends a typed
+stimulus to that Keeper's lane; it does not demand an immediate turn when the
+Keeper is busy.
 
 ## 4. Gate UI
 
-The Gate view exposes the configured mode and durable request state:
+The Gate view exposes the configured mode (`.masc/gate/`, including persisted
+`Auto` and `Yolo` modes) and durable request state:
 
-- `Always_allow` dispatch evidence;
+- `Always_allow` and `Yolo` dispatch evidence;
 - `Auto_judge` verdict, rationale, runtime/model, and evidence;
-- `Manual` pending request and explicit operator resolution.
+- `Manual` pending request, rule renewal expiry (`renewed_expires_at` / v12
+  receipt provenance), and explicit operator resolution.
 
 The dashboard does not calculate risk tiers, recognize product/tool names, or
 invent local vetoes. Resolving one request wakes only its originating Keeper
@@ -65,7 +75,9 @@ completion shows configured LLM judgment provenance; the UI does not aggregate
 votes or assign verifier authority.
 
 Board views render exact source ordering such as recent, updated, discussed,
-or voted. Semantic recommendations come from a separately persisted configured
+or voted. Delete receipts distinguish full durable persistence from in-memory
+mutation with a pending snapshot rewrite (`persisted` vs pending snapshot error
+receipts). Semantic recommendations come from a separately persisted configured
 LLM curation snapshot. Karma, flair, reputation, hot/trending formulas, and
 author-status inference are not dashboard contracts.
 
@@ -116,8 +128,10 @@ snapshots; it must not create a second mutable SSOT.
 ## 7. Observability
 
 The dashboard exposes turn duration, time-to-first-token, token throughput,
-provider/model, tool latency, Job/Fusion/Gate latency, queue position, failures,
-and correlation ids. Metrics explain behavior; they do not authorize it.
+provider/model, canonical IDE execution identities, Skill v6/v7 causal action
+facts, `/health` process identity (`pid`, RSS memory, build identity), tool
+latency, Job/Fusion/Gate latency, queue position, failures, and correlation
+ids. Metrics explain behavior; they do not authorize it.
 
 All error surfaces include a typed code and trace/correlation where available.
 Filtering and text search are presentation functions only and do not reclassify

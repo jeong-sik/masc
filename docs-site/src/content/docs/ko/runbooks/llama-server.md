@@ -16,8 +16,8 @@ description: 시드에 이미 들어 있는 자체 호스팅 provider 주석을 
 | MLX | `mlx_server` | 주석 |
 | Ollama (로컬) | `ollama` | **이미 활성** — `http://localhost:11434` |
 
-로컬 Ollama 만 쓸 거면 아무것도 안 해도 됩니다. 시드의 다섯 provider 중 키가 필요
-없는 하나가 그것입니다.
+로컬 Ollama 만 쓸 거면 아무것도 안 해도 됩니다. 시드에 활성 상태로 들어 있는 로컬
+HTTP provider 로 API 키가 필요 없습니다.
 
 세 벌이 주석인 이유는 시드가 직접 적어 둡니다 — 갓 설치한 기계에는 그 서버들이
 없고, `enabled = false` 로는 안 됩니다. 설치 마법사가 선언된 provider 를 전부 훑는데

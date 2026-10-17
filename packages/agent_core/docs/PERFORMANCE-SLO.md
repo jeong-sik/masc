@@ -24,8 +24,8 @@ and finish-only finalizer chunks.
 Targets are **uncalibrated baseline values** at PR-1b.  The
 calibration run described in RFC-AC-020 §3.5 has not been executed
 because real provider keys / a live local llama-server are not
-available to the agent that authored this file.  When operator runs
-`scripts/bench/ttft_distribution.sh` for the first time, this table
+available in hermetic CI.  When an operator runs live TTFT
+calibration against `Streaming_summary.ttft_ms`, this table
 SHOULD be updated to the measured P50/P95 + a +30 % headroom on
 P95 (so transient spikes don't page).
 
@@ -44,14 +44,12 @@ before the first `ContentBlockDelta`); `None` otherwise.
 
 ## Measurement protocol
 
-The bench script `scripts/bench/ttft_distribution.sh` measures
-**TTFB** (Time To First Byte of body) as a transport-level proxy.
-For OpenAI-compat / GLM / Ollama the gap between TTFB and TTFT is
-typically < 5 ms, so the script is a useful operational smoke
-check.  For Anthropic the gap can be tens to hundreds of
-milliseconds, so the SLO targets in this document **must** be
-calibrated against the in-process `Streaming_summary.ttft_ms`
-field, not against the bench script output alone.
+Transport-level **TTFB** (Time To First Byte of body) is a useful operational
+proxy for OpenAI-compat / GLM / Ollama where the gap between TTFB and TTFT is
+typically < 5 ms.  For Anthropic the gap between `MessageStart` and the first
+content delta can be tens to hundreds of milliseconds, so the SLO targets in
+this document **must** be calibrated against the in-process
+`Streaming_summary.ttft_ms` field rather than transport TTFB alone.
 
 ## Calibration log
 
@@ -62,13 +60,13 @@ field, not against the bench script output alone.
 When you run the bench, append a row here and update the targets
 table above if the new baseline is materially different.
 
-## Boundary with masc-mcp
+## Boundary with masc
 
-`masc-mcp` adds an *operator-visible* SLO on top of these provider
+`masc` adds an *operator-visible* SLO on top of these provider
 SLOs: `ttft_to_client_ms ≈ ttft_ms + transport_overhead_ms` where
-`transport_overhead_ms` is the masc-mcp-side time from first SSE
+`transport_overhead_ms` is the `masc`-side time from first SSE
 chunk arrival to flush-to-client (typically < 5 ms).  That
-composition lives in masc-mcp `docs/PERFORMANCE-SLO.md` (TBD) and
+composition lives in `docs/PERFORMANCE-SLO.md` at the repository root and
 is intentionally *not* coupled to this agent_core-side document.
 
 ## References

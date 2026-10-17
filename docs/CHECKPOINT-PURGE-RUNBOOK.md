@@ -87,24 +87,7 @@ equal-watermark re-save through the locked validated store.
 | recovery drops the history from its structural break on, and none of the N turn-boundary lines the Librarian position has counted names an end ahead of the break | moved to an end no line states, the position would stop the Librarian for good (#37772) | leave the file untouched and record the keeper, the trace and the error in #37772 |
 | structural validation fails even with its break set aside | the write boundary admitted a history recovery cannot cut back to a sound prefix (#25443) | leave the file untouched and record the trace and error in #25443 |
 
-## Fleet log
-
-| Date (UTC) | Trace / keeper | Result | Backup |
-|---|---|---|---|
-| 2026-07-21 | sangsu | 885→313 msgs, 631KB→202KB (−68%, two passes: pre-fixpoint binary then final) | `backups-checkpoint-purge-trace-1780648779957-00000-20260721T133717Z`, `…T134005Z` |
-| 2026-07-21 | taskmaster | −35.4% (1.0MB→650KB) | `…T155445Z` set |
-| 2026-07-21 | nick0cave | −42.0% (1.1MB→630KB) | 〃 |
-| 2026-07-21 | analyst | 1730→789 msgs, −38.6% | 〃 |
-| 2026-07-21 | ramarama | 824→434 msgs, −48.0% | 〃 |
-| 2026-07-21 | verifier | −27.1% | 〃 |
-| 2026-07-21 | base | −28.6% | 〃 |
-| 2026-07-21 | hitl-verifier | −4.1% | 〃 |
-| 2026-07-21 | executor, idealist, garnet, rondo, albini | **refused** — `Overlapping_tool_cycle` (recorded in #25443) | untouched |
-| 2026-07-21 | mad-improver (−48% available), issue_king, hitl-switch-verifier | skipped — keeper active at rollout time | — |
-| 2026-07-29 | verifier | 510→341 msgs, 178133→154158 B (−13.5%); unstick from `request_body_too_large(262507>262144)` wedge | `backups-checkpoint-purge-trace-1785189111950-00007-20260729T161155Z` |
-| 2026-07-30 | keeper-executor-agent | 585→581 msgs, 1112843→522174 B (−53.1%, tool results 904건 정리); unstick from `request_body_too_large(1049460>1048576)` + compaction suspension wedge | `backups-checkpoint-purge-trace-1785369403346-00000-20260730T074336Z` |
-
-### Live resume after a purge (observed 2026-07-29)
+## Live resume after a purge
 
 `masc_keeper_down` marks the keeper operator-paused, so `…/boot` afterwards is
 refused with "commit Resume_owner through the directive endpoint". The working

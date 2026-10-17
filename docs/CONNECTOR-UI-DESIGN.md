@@ -110,8 +110,8 @@ one row each in the accent + emoji tables — no per-surface re-styling.
 - **Connector list** = exactly 4 ids in `KNOWN_CONNECTOR_IDS`. The backend
   sidecar whitelist (`known_ids` in
   `lib/server/server_routes_http_sidecar_paths.ml`) is the external subset —
-  `KNOWN_CONNECTOR_IDS` minus `IN_PROCESS_CONNECTOR_IDS` — pinned by the
-  `known_ids size = 2` invariant test. Never compute the list from "what the
+  `KNOWN_CONNECTOR_IDS` minus `IN_PROCESS_CONNECTOR_IDS` (`["telegram"]`) — pinned by the
+  `known_ids size = 1` invariant test (`test/test_sidecar_lifecycle_routes.ml`). Never compute the list from "what the
   gate is currently advertising" — that's empty during cold start.
 
 ## 7. Best-effort vs strict fetches
@@ -163,9 +163,6 @@ imports rail; rail does NOT import overview-strip. Cycles avoided.
 - GET `/api/v1/sidecar/config` 4xx → form silently falls back to
   schema defaults (best-effort fetch, see §7).
 
-This is what lets the dashboard PR (#7833) merge before the backend
-PR (#7831) without breaking the live dashboard.
-
 ---
 
 ## What this surface does NOT do (and shouldn't)
@@ -213,7 +210,7 @@ mental model than discovering the do.
    ([start|stop|tail|status]).
 4. Add `CONNECTOR_SETUP_GUIDES['<id>']` (token-acquisition steps).
 5. For an external sidecar, update the `test_known_ids_size_matches_dashboard`
-   invariant to expect 3.
+   invariant in `test/test_sidecar_lifecycle_routes.ml` to expect 2.
 
 If any of these are skipped the dashboard will draw a card the
 backend refuses to spawn — the invariant test catches it before merge.

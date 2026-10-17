@@ -44,7 +44,7 @@ agent_core wiring.
 | `max_output_tokens` | `int option` | agent_config.max_tokens must not exceed this. Range: 8K-128K. Silent truncation if exceeded. |
 
 Discovery fills these for local models (`ctx_size` from `/props`).
-Cloud provider limits come from the validated provider/model catalog; runtime code does not
+Cloud provider limits and per-model feature overrides (including explicit OpenAI Chat model capability rows) come from the validated provider/model catalog; runtime code does not
 infer them from model names.
 
 ### Tier 2: Feature flags (boolean, affects agent behavior)
@@ -57,7 +57,8 @@ infer them from model names.
 | `supports_named_tool_choice` | exists in code | keep separate | Named forced tool selection can differ from `required`/`any` forced selection and from mere auto/none tool choice support. |
 | `supports_parallel_tool_calls` | exists | keep | Request builders derive effective `disable_parallel_tool_use` from caller intent plus provider/model capability. |
 | `assistant_tool_content_format` | exists in code | keep separate | Assistant tool-call content shape (`content:null` vs `content:""`) is a provider wire-contract axis, independent from reasoning replay. |
-| `supports_system_prompt` | missing | add | Most models support it, but some fine-tuned/distilled variants do not. Agent must fold system into first user message. |
+| `supports_system_prompt` | exists in code | keep | Most models support it, but some fine-tuned/distilled variants do not. Agent must fold system into first user message. |
+| `supports_assistant_prefill` | exists in code | keep | Controls whether trailing assistant continuation messages are admitted on the wire (for example, Haiku 5.5 declares `false`). |
 | `supports_reasoning` | exists | **split into 4** | See Thinking Taxonomy below. |
 | `supports_think_tool` | missing | add | Anthropic-only. Mid-reasoning pause between tool calls. |
 | `supports_adaptive_reasoning` | missing | add | Model auto-selects depth. Opus 4.6, Gemini 3 dynamic. |
@@ -66,10 +67,11 @@ infer them from model names.
 | `supports_structured_output` | exists in code | keep, tighten semantics | Use only for provider-native schema-constrained output APIs. Do not use it for JSON mode or "prompt with schema text + app-side validator" patterns. |
 | `supports_response_format_json` | exists in code | keep, separate from schema guarantee | JSON mode means "return valid JSON" only. It is not a subset of native schema support and still requires caller-side shape validation. |
 | `supports_native_streaming` | exists | keep | |
-| `supports_multimodal_inputs` | exists | **split into 3** | See Multimodal Taxonomy below. |
-| `supports_image_input` | missing | add | Most models except DeepSeek, Cohere. |
-| `supports_audio_input` | missing | add | Gemini only (native audio tokens). |
-| `supports_video_input` | missing | add | Gemini, Qwen 3.5 large. |
+| `supports_multimodal_inputs` | exists | **split into 4** | See Multimodal Taxonomy below. |
+| `supports_image_input` | exists in code | keep | Most models except DeepSeek, Cohere. |
+| `supports_audio_input` | exists in code | keep | Gemini only (native audio tokens). |
+| `supports_video_input` | exists in code | keep | Gemini, Qwen 3.5 large. |
+| `supports_document_input` | exists in code | keep | Native document/PDF input blocks. |
 | `supports_top_k` | exists | keep | |
 | `supports_min_p` | exists | keep | |
 
@@ -148,7 +150,7 @@ different provider contracts.
 
 | Surface | Request control | Historical reasoning replay | Response / stream reasoning | Tool / structured notes |
 |---------|-----------------|-----------------------------|-----------------------------|-------------------------|
-| Z.AI standard API / OpenAI-compatible `api.z.ai/api/paas/v4` | `thinking: {type, clear_thinking}`; GLM-5.2/5.1/5/4.7 thinking defaults on, disable with `type=disabled` | Preserved Thinking is off by default on the standard API; enable by sending `clear_thinking=false` and replay unmodified `reasoning_content` in the original sequence | Chat/stream deltas use `reasoning_content` for the thinking side channel | `tool_choice` only supports `auto`; streaming tool calls use Z.AI `tool_stream=true`; structured output docs describe JSON mode `response_format={"type":"json_object"}` plus caller-side/schema validation |
+| Z.AI standard API / OpenAI-compatible `api.z.ai/api/paas/v4` | `thinking: {type, clear_thinking}` (`Thinking_object_only`); GLM-5.2/5.1/5/4.7 thinking defaults on, disable with `type=disabled` (GLM-5.3/5.3-Flash only allow `enabled`) | Preserved Thinking is off by default on the standard API (`Thinking_object_clear_thinking`); enable by sending `clear_thinking=false` and replay unmodified `reasoning_content` in the original sequence | Chat/stream deltas use `reasoning_content` for the thinking side channel | `tool_choice` only supports `auto`; streaming tool calls use Z.AI `tool_stream=true`; structured output docs describe JSON mode `response_format={"type":"json_object"}` plus caller-side/schema validation |
 | Z.AI Coding Plan endpoint | Same GLM `thinking` object | Preserved Thinking is enabled by default according to Z.AI docs | Same Z.AI `reasoning_content` channel | Treat endpoint defaults as provider/endpoint config, not model-family inference |
 | Ollama native `/api/chat` or `/api/generate`, including Ollama Cloud `https://ollama.com/api/chat` GLM models | `think` bool/level on the request; agent_core records this as `ollama_think` | No Z.AI `clear_thinking` contract and no `reasoning_content` replay field | Native response uses `message.thinking` separate from `message.content`; streaming interleaves thinking chunks before answer chunks | Do not send Z.AI `thinking`, `clear_thinking`, `tool_stream`, or historical `reasoning_content` fields to native Ollama |
 

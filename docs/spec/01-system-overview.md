@@ -6,13 +6,13 @@ status: reference
 
 > Part of: [SPEC-INDEX](./SPEC-INDEX.md)
 > Status: Draft
-> Last Updated: 2026-04-23
+> Last Updated: 2026-10-17
 
 ---
 
 ## 1. Problem Statement
 
-여러 AI 에이전트(CLI-Tool-A, CLI-Tool-C, CLI-Tool-B, 로컬 LLM 등)가 동일 코드베이스에서 동시에 작업할 때, 다음 문제가 발생한다:
+여러 AI 에이전트(Claude Code, Codex, Antigravity, 로컬 LLM 등)가 동일 코드베이스에서 동시에 작업할 때, 다음 문제가 발생한다:
 
 1. **충돌**: 두 에이전트가 같은 파일을 동시에 수정하면 git conflict가 발생하고, 한쪽 작업이 소실된다.
 2. **중복**: 동일한 CI 실패를 여러 에이전트가 독립적으로 수정 시도하면, 중복 PR이 생성된다.
@@ -30,8 +30,8 @@ MASC가 명시적으로 **하지 않는 것**:
 |----------|------|
 | Production multi-tenant SaaS | 단일 머신, localhost-trust 모델. 인증/격리/과금 미구현. |
 | 범용 오케스트레이션 프레임워크 (Temporal/Airflow 대체) | 대상은 AI 에이전트 협업에 한정. DAG 스케줄링, 재시도 정책, 워커 풀 관리는 범위 밖. |
-| 모델 추론 서버 | LLM 호출은 Runtime를 통해 외부 서버(llama-server, GLM Cloud/Coding Plan)로 위임. 자체 GPU 추론 없음. |
-| agent core Agent SDK 대체 | MASC는 agent core에 의존한다. Agent 생명주기(run, checkpoint, context reduction)는 agent core 책임. MASC는 workspace collaboration layer. |
+| 모델 추론 서버 | LLM 호출은 `runtime.toml`과 `packages/agent_core`를 통해 외부 프로바이더(OpenAI, Anthropic, Google/Antigravity, GLM, Kimi, Ollama, llama-server) 및 공식 클라이언트 레인(Claude Code, Codex, Antigravity, Muse Code)으로 위임. 자체 GPU 추론 없음. |
+| agent core Agent SDK 대체 | MASC는 `packages/agent_core`에 의존한다. Agent 실행 루프(run, checkpoint, context reduction)는 `agent_core` 책임. MASC는 workspace collaboration 및 Keeper 제품 계층. |
 | 범용 채팅/메시징 시스템 | Broadcast와 Board는 에이전트 간 조율 목적. 사람 간 커뮤니케이션 도구가 아님. |
 
 ## 3. Deployment Model
@@ -40,22 +40,21 @@ MASC가 명시적으로 **하지 않는 것**:
 ┌─────────────────────────────────────────────────┐
 │                  Single Machine                  │
 │                                                  │
-│  ┌──────────┐    ┌──────────┐    ┌──────────┐   │
-│  │ Agent-LLM-A   │    │ Provider-F   │    │ Agent-Code    │   │
-│  │ Code     │    │ CLI      │    │ CLI      │   │
-│  └────┬─────┘    └────┬─────┘    └────┬─────┘   │
-│       │ MCP           │ MCP           │ MCP      │
-│       └───────────────┼───────────────┘          │
-│                       │                          │
-│              ┌────────▼────────┐                 │
-│              │   MASC      │                 │
-│              │   :8935         │                 │
-│              └────────┬────────┘                 │
-│                       │                          │
-│              ┌────────▼────────┐                 │
-│              │ .masc/ JSONL    │                 │
-│              │ filesystem      │                 │
-│              └─────────────────┘                 │
+│  ┌─────────────┐  ┌──────────┐  ┌─────────────┐  │
+│  │ Claude Code │  │ Codex    │  │ Antigravity │  │
+│  │ CLI         │  │ CLI      │  │ IDE / CLI   │  │
+│  └──────┬──────┘  └────┬─────┘  └──────┬──────┘  │
+│         │ MCP          │ MCP           │ MCP     │
+│         └──────────────┼───────────────┘         │
+│                        │                         │
+│              ┌─────────▼────────┐                │
+│              │   MASC (:8935)   │                │
+│              └─────────┬────────┘                │
+│                        │                         │
+│              ┌─────────▼────────┐                │
+│              │ <base>/.masc/    │                │
+│              │ single-root FS   │                │
+│              └──────────────────┘                │
 └─────────────────────────────────────────────────┘
          │
          │ Cloudflare Tunnel
@@ -63,10 +62,10 @@ MASC가 명시적으로 **하지 않는 것**:
    masc.crying.pictures (remote access)
 ```
 
-- **Trust model**: localhost 전제. 모든 MCP 클라이언트는 신뢰할 수 있다고 가정.
-- **Persistence**: runtime workspace collaboration state는 로컬 `.masc/` filesystem/JSONL을 source of truth로 사용한다.
+- **Trust model**: localhost 전제. 인증이 활성화된 환경에서는 `.masc/auth/` 자격증명과 역할별 권한(`Worker`/`Admin`/`Player`)을 검사한다.
+- **Persistence**: runtime workspace collaboration state는 `<base-path>/.masc/` 단일 루트(`Common.masc_dirname`) 아래 JSONL/JSON 파일시스템을 source of truth로 사용한다 (구 `.masc/clusters/<name>/` 및 `MASC_CLUSTER_NAME` 다중 클러스터 디렉터리는 폐지됨, #43188).
 - **Remote access**: Cloudflare Tunnel을 통해 원격 브라우저에서 dashboard 접근 가능. Origin은 HTTP/1.1, Cloudflare가 브라우저에 HTTP/2를 제공.
-- **단일 인스턴스**: MASC 서버는 한 대만 실행. 수평 확장 미지원.
+- **단일 인스턴스**: MASC 서버는 한 workspace base path에 대해 단일 인스턴스로 실행. 수평 확장 미지원.
 
 ## 4. Technology Stack
 
@@ -74,55 +73,76 @@ MASC가 명시적으로 **하지 않는 것**:
 |------|------|------|
 | Runtime | OCaml 5.x + Eio | Effect-based cooperative concurrency. Stdlib.Mutex 사용 금지 (EDEADLK). |
 | HTTP/1.1 | httpun-eio | 기본 transport. Cloudflare Tunnel 호환. |
-| HTTP/2 | h2-eio (h2c) | `MASC_USE_H2=1`로 활성화. SSE 멀티플렉싱 (브라우저 6-conn 제한 회피). |
+| HTTP/2 | h2-eio (h2c) | 기본값 `MASC_USE_H2=auto` (H1/H2 자동 감지; `h2_only`는 H2 전용, `0`/`false`/`h1_only`는 H1 전용). |
 | TLS | mirage-crypto + tls-eio | 인증서: `SSL_CERT_FILE` 환경변수. |
 | JSON | yojson | JSON 파싱/생성. `Yojson.Safe.t` 표준 사용. |
 | SQLite | sqlite3 | 로컬 경량 저장 (일부 모듈). |
-| Protocol | MCP JSON-RPC | `tools/call`, `tools/list` over SSE + POST. |
+| Protocol | MCP JSON-RPC | `tools/call`, `tools/list` over SSE + POST (`/mcp`, `/mcp/operator`, `/mcp/managed`, `/mcp/play`). |
 | gRPC | grpc-direct (h2-eio) | Agent-to-Agent 통신. proto 정의: `proto/`. |
-| AI | agent_core (agent core) | Finite Agent.run, typed providers, tools, reasoning, multimodal values. |
-| Inference | Runtime | llama (local) -> GLM Cloud/Coding Plan (fallback) -> skip. |
+| AI | `agent_core` (`packages/agent_core`) | Finite `Agent.run`, typed providers, tools, resource-bound wave scheduler, reasoning, multimodal values. |
+| Inference | Multi-Provider Runtime (`lib/runtime_model/`, `lib/runtime/`) | `runtime.toml`에 선언된 HTTP API 바인딩 및 공식 CLI 레인(Claude Code, Codex, Antigravity, Muse Code) 순서대로 failover; 할당량 소진 프로바이더는 후보 순서 뒤로 감우선순위화(#43375). |
 | Build | dune 3.13+ | `dune-project` 기반. opam package: `masc`. |
 | Coverage | bisect_ppx | `BISECT_FILE` 환경변수 필수. |
 | Dashboard | Preact + HTM + Vite | TypeScript SPA. `dashboard/` 소스, `assets/dashboard/` 빌드 산출물. |
 
 ## 5. Library Structure
 
-MASC는 단일 public library(`masc`)로 구성된다. `lib/` 아래 기능별 하위 디렉토리가 있으며, 이들은 별도 dune library가 아니라 `masc` library의 일부다.
+MASC는 최상위 public library(`masc`)와 `lib/` 아래의 도메인별 내부 sub-library들(`masc_types`, `masc_workspace`, `masc_keeper`, `masc_server`, `masc_dashboard`, `masc_board`, `masc_runtime` 등), 그리고 인-리포지토리 패키지 `packages/agent_core`로 구성된다.
 
 ### 주요 기능별 디렉토리
 
-| Directory | `.ml` | `.mli` | LOC | 역할 |
-|-----------|------:|-------:|----:|------|
-| `lib/keeper/` | 129 | 87 | 57,858 | Keeper 자율 에이전트 엔진 |
-| `lib/server/` | 55 | 12 | 20,710 | MCP server, HTTP transport, SSE |
-| `lib/dashboard/` | 37 | 16 | 15,768 | Dashboard 렌더링, API |
-| `lib/operator/` | 9 | 5 | 3,646 | Operator 인터페이스 |
-| `lib/voice/` | 4 | 1 | 2,184 | Voice/TTS |
-| `lib/local/` | 5 | 0 | 2,057 | 로컬 LLM runtime pool |
-| `lib/grpc/` | 5 | 5 | 2,109 | gRPC transport |
-| `lib/goal/` | 5 | 2 | 1,878 | Goal 관리 |
-| `lib/memory/` | 1 | 0 | 219 | Memory stream |
-| `lib/` (root) | 287 | 174 | 96,685 | Tool modules, config, types, utilities |
-
-숫자는 2026-04-23 `wc -l` 기준.
+| Directory | 역할 |
+|-----------|------|
+| `packages/agent_core/` | 에이전트 실행 루프(`Agent.run`), 프로바이더 어댑터(`Llm_provider`), 도구 스케줄러, 훅, 체크포인트 |
+| `lib/keeper/` | Keeper 자율 에이전트 엔진, 장기 실행 레인, 메모리/스킬/합성/격리 잡 도구 |
+| `lib/server/` | MCP server, HTTP/1.1 & HTTP/2 transport, SSE, REST 라우트 |
+| `lib/dashboard/` | Dashboard 투영, API payload 조립 |
+| `lib/workspace/` | Workspace 상태, Task/Backlog 생명주기, 검증 스토어, 단일 루트 `.masc/` 파일시스템 |
+| `lib/runtime/`, `lib/runtime_model/` | `runtime.toml` 파서, 프로바이더·레인 바인딩, exact-output 레인 레지스트리 |
+| `lib/board/`, `lib/board_types/` | Board 게시물·댓글·투표·SubBoard·첨부 |
+| `lib/goal/`, `lib/candle*/` | Goal phase 상태 기계, 측정값, Candle 원장 및 정산 |
+| `lib/lane_addon/`, `lib/msx_lane/`, `lib/dos_lane/`, `lib/browser_lane/` | Lane Add-on 호스트, MSX/DOS 공유 머신 레인, Browser 레인 |
+| `lib/operator/` | Operator 제어 및 관측 표면 |
+| `lib/grpc/` | gRPC transport (`MascCoord` 서비스) |
+| `lib/voice/` | Voice/TTS 브리지 |
+| `lib/` (root 및 기타 하위 디렉터리) | Tool dispatch, types, Memory OS, Wiki, Schedule, Fusion 등 |
 
 ## 6. Executable Inventory
 
+공개 실행 파일 (`bin/dune`의 `public_name` 기준 20종):
+
 | Executable | Public Name | Entry Point | 역할 |
 |------------|-------------|-------------|------|
-| `main_eio` | `masc` | `bin/main_eio.ml` | HTTP 서버. 기본 진입점. httpun-eio(HTTP/1.1) 또는 h2-eio(HTTP/2). Dashboard 서빙, SSE, MCP JSON-RPC, gRPC, REST API. |
-| `main_stdio_eio` | `masc-stdio` | `bin/main_stdio_eio.ml` | Stdio 기반 MCP 서버. CLI-Tool-A `--mcp` 모드 연동. |
+| `main_eio` | `masc` | `bin/main_eio.ml` | HTTP 서버 및 CLI(`web-search-setup`, `browser-lane-setup` 등). httpun-eio(HTTP/1.1) 및 h2-eio(HTTP/2). Dashboard 서빙, SSE, MCP JSON-RPC, gRPC, REST API. |
+| `main_stdio_eio` | `masc-stdio` | `bin/main_stdio_eio.ml` | Stdio 기반 MCP 서버. Claude Code 등 `--mcp` 모드 연동. |
 | `masc_cost` | `masc-cost` | `bin/masc_cost.ml` | Token 사용량 집계, 비용 계산 CLI. |
-| `masc_tui` | `masc-tui` | `bin/masc_tui.ml` | Terminal UI. Keeper 목록, 상태, 연결 인터페이스. |
+| `masc_trace` | `masc-trace` | `bin/masc_trace.ml` | 실행 트레이스 조회 및 분석 CLI. |
+| `masc_tui` | `masc-tui` | `bin/masc_tui.ml` | Terminal UI. Keeper 채팅·상태·보드·머신·설정 인터페이스. |
+| `masc_fusion_run` | `masc-fusion-run` | `bin/masc_fusion_run.ml` | 독립 Fusion 패널/심판 실행 CLI. |
+| `masc_checkpoint_purge` | `masc-checkpoint-purge` | `bin/masc_checkpoint_purge.ml` | 체크포인트 정리 유틸리티. |
+| `masc_exec_shim` | `masc-exec-shim` | `bin/masc_exec_shim.ml` | Keeper 명령 실행 격리 심(shim). |
+| `masc_exec_ssh_bootstrap` | `masc-exec-ssh-bootstrap` | `bin/masc_exec_ssh_bootstrap.ml` | `remote_ssh` 샌드박스 부트스트랩 헬퍼. |
+| `masc_keeper_capability_probe` | `masc-keeper-capability-probe` | `bin/masc_keeper_capability_probe.ml` | Keeper 런타임 역량 프로브. |
+| `masc_lane_cli_probe` | `masc-lane-cli-probe` | `bin/masc_lane_cli_probe.ml` | 공식 CLI 레인 가용성 프로브. |
+| `masc_deployment_preflight_helper` | `masc-deployment-preflight-helper` | `bin/masc_deployment_preflight_helper.ml` | 배포 사전 점검 헬퍼. |
+| `masc_browser_host` | `masc-browser-host` | `bin/masc_browser_host.ml` | WebDriver BiDi 및 브라우저 호스트 브리지. |
+| `masc_reliable_change_g1_check` | `masc-reliable-change-g1-check` | `bin/masc_reliable_change_g1_check.ml` | Reliable Change G1 검증기. |
+| `masc_http_probe` | `masc-http-probe` | `bin/masc_http_probe.ml` | HTTP 엔드포인트 상태 프로브. |
+| `masc_librarian_replay` | `masc-librarian-replay` | `bin/masc_librarian_replay.ml` | Librarian 메모리 재생 검증기. |
+| `masc_librarian_continuity` | `masc-librarian-continuity` | `bin/masc_librarian_continuity.ml` | Librarian 연속성 검증기. |
+| `masc_librarian_preflight_eval` | `masc-librarian-preflight-eval` | `bin/masc_librarian_preflight_eval.ml` | Librarian 사전 평가 실행기. |
+| `masc_msx_addon_worker` | `masc-msx-addon-worker` | `bin/masc_msx_addon_worker.ml` | MSX 공유 머신 Add-on worker. |
+| `masc_dos_addon_worker` | `masc-dos-addon-worker` | `bin/masc_dos_addon_worker.ml` | DOS 공유 머신 Add-on worker. |
 
-내부용 실행 파일 (`public_name` 없음, 빌드 산출물로 직접 실행):
+내부용 실행 파일 (`public_name` 없음, 빌드 산출물로 직접 실행, 5종):
 
 | Executable | Entry Point | 역할 |
 |------------|-------------|------|
 | `public_tool_manifest` | `bin/public_tool_manifest.ml` | Tool manifest 생성 |
 | `keeper_store_layout_manifest` | `bin/keeper_store_layout_manifest.ml` | Keeper 런타임 저장소 레이아웃 manifest 생성 |
 | `gen_board_tool_registry` | `bin/gen_board_tool_registry.ml` | Board 도구 레지스트리 미러 코드 생성 |
+| `stagehand_model_probe` | `bin/stagehand_model_probe.ml` | Stagehand 모델 프로브 |
+| `masc_tui_keys_doc_cli` | `bin/masc_tui_keys_doc_cli.ml` | TUI 키바인딩 문서 생성/검증 CLI |
 
 ## 7. Canonical Front Door and Internal Supporting Substrates
 
@@ -157,10 +177,10 @@ MASC의 현재 canonical front door는 3가지다.
 
 | Service | Location | Protocol | 용도 | 비고 |
 |---------|----------|----------|------|------|
-| agent core Agent SDK | In-process (OCaml library) | Function call | Finite Agent.run, typed providers, tools, reasoning, multimodal values | MASC는 Keeper lifecycle과 durable product operation을 소유한다. |
+| `agent_core` (`packages/agent_core`) | In-process (OCaml library) | Function call | Finite `Agent.run`, typed providers, tools, reasoning, multimodal values | MASC는 Keeper lifecycle과 durable product operation을 소유한다. |
 | Cloudflare Tunnel | `masc.crying.pictures` | HTTP -> HTTPS | 원격 dashboard 접근 | Origin HTTP/1.1. Cloudflare가 HTTP/2 변환. |
-| local runtime | configured local endpoint | Provider-D-compatible API | 로컬 LLM 추론 (Runtime 1순위) | agent core discovery endpoint. |
-| GLM Cloud / Coding Plan | Z.AI API | HTTP | Cloud LLM 추론 (Runtime 2순위) | `sb glm-text` 또는 `glm-coding` runtime 경로. |
+| Local LLM Runtime (`ollama`, `llama-server`) | configured local endpoint | OpenAI-compatible / Ollama API | 로컬 LLM 추론 및 Standalone exact-output 레인 | `runtime.toml` `[providers.*]` 바인딩. |
+| Cloud LLM Providers & Official CLI Lanes | OpenAI, Anthropic, Google/Antigravity, GLM (Z.AI), Kimi, Ollama Cloud | HTTPS / Official CLI subprocess | Keeper turn, Fusion, Verifier/Judge/Librarian 추론 | `[providers.<id>.credentials]` 및 공식 CLI 레인(`claude_code`, `codex_cli`, `antigravity`, `muse_code`). |
 
 ## 9. Invariants (System-Level)
 
@@ -177,7 +197,7 @@ MASC의 현재 canonical front door는 3가지다.
 
 | ID | 질문 | 관련 코드 | 상태 |
 |----|------|----------|------|
-| OQ-SYS-001 | Sub-library 추출을 어디까지 진행할 것인가? keeper(33K LOC)와 chain(30K LOC)은 별도 sub-library 후보. | `lib/keeper/`, `lib/chain/` | Open |
+| OQ-SYS-001 | Sub-library 경계를 어디까지 세분화할 것인가? | `lib/keeper/`, `lib/server/` | Open |
 | OQ-SYS-002 | HTTP/2 h2c를 기본 transport로 전환할 시점은? Cloudflare Tunnel이 cleartext h2를 지원하지 않는 제약. | `bin/main_eio.ml` | Open |
-| OQ-SYS-003 | MASC -> agent core 이관 완료 후 MASC의 최종 범위는? 순수 workspace collaboration layer만 남길 것인지. | — | Open |
+| OQ-SYS-003 | MASC와 `packages/agent_core` 사이의 장기 경계는 어떻게 유지할 것인가? | `packages/agent_core/`, `lib/keeper/` | Open |
 | OQ-SYS-004 | Multi-protocol transport(SSE/gRPC/WebSocket) 중 어디를 canonical으로 수렴할 것인가? | `lib/grpc/`, `lib/server/` | Open |

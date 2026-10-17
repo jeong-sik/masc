@@ -8,7 +8,7 @@ MASC depends on the embedded `masc.agent_core` library. Agent Core never
 depends on the MASC coordinator.
 
 Agent Core carries its own specifications under
-[`packages/agent_core/docs/`](../packages/agent_core/docs/README.md) — 24 RFCs
+[`packages/agent_core/docs/`](../packages/agent_core/docs/README.md) — 25 RFCs
 plus capability, catalog, and design references. Read those before changing
 anything under `packages/agent_core/`; the repository-level `docs/rfc/` does
 not cover that subtree.

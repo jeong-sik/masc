@@ -1,20 +1,18 @@
 ---
 title: Keeper Runtime Configuration
-description: User guide for tool_approval_timeout_sec, keeper_memory_select, and workspace memory metrics gauges.
+description: User guide for tool_approval_timeout_sec, persistent Keeper yolo mode, keeper_memory_select, wiki_contents, microvm_dns, jsonl_retention_days, and workspace memory metrics gauges.
 ---
 
-## (a) Overview / 한 줄 요약
+## Overview
 
-This guide details configuration settings for tuning human-in-the-loop (HITL) tool approval timeouts, enabling the purpose-driven `keeper_memory_select` tool, and observing workspace memory briefing and claim growth through OpenTelemetry (OTLP) metrics gauges.
-
-Keeper 런타임의 인간 개입(HITL) 도구 승인 대기 시간 조절, 목적 기반 장기 기억 선별 도구(`keeper_memory_select`) 활성화, 워크스페이스 메모리 관측 게이지 메트릭을 설정하고 제어하는 가이드입니다.
+This guide details configuration settings for tuning human-in-the-loop (HITL) tool approval timeouts and persistent Keeper `yolo` mode, enabling the purpose-driven `keeper_memory_select` tool and workspace wiki table-of-contents injection (`[wiki_contents]`), configuring microVM guest DNS (`[sandbox] microvm_dns`) and JSONL retention (`[maintenance] jsonl_retention_days`), and observing workspace memory briefing and claim growth through OpenTelemetry (OTLP) metrics gauges.
 
 ---
 
-## (b1) Enabling: Settings & Environment Variables / 켜는 법: 설정 이름
+## Enabling: Settings & Environment Variables
 
-### 1. Tool Approval Timeout (`tool_approval_timeout_sec`)
-Controls the duration the runtime waits for an operator's approval when a Keeper invokes a sensitive tool protected by the Gate.
+### 1. Tool Approval Timeout (`tool_approval_timeout_sec`) & Persistent `yolo` Mode
+Controls the duration the runtime waits for an operator's approval when a Keeper invokes a sensitive tool protected by the Gate, and whether the open chat stream hook is skipped per Keeper.
 
 - **TOML Setting**: `<base-path>/.masc/config/runtime.toml`
   ```toml
@@ -25,6 +23,7 @@ Controls the duration the runtime waits for an operator's approval when a Keeper
   ```bash
   export MASC_KEEPER_TOOL_APPROVAL_TIMEOUT_SEC=300
   ```
+- **Persistent Keeper `yolo` Mode**: Pressing `g` on the Keepers surface toggles a Keeper between `auto` and `yolo` for the chat stream PreToolUse approval hook. Overrides are persisted on disk under the workspace gate root (`masc.tool_approval_modes.v1`) and replayed into the server registry at boot so the stance survives server restarts until explicitly switched back to `auto`. (External Gate effects such as sandbox commands, attached service writes, and durable memory writes are still governed by the workspace Gate policy.)
 
 ### 2. Purpose-Driven Memory Selection (`keeper_memory_select`)
 Enables the `keeper_memory_select` tool, allowing Keepers to retrieve verified current ordinary and source-bound memory facts relevant to an explicit decision context.
@@ -36,8 +35,38 @@ Enables the `keeper_memory_select` tool, allowing Keepers to retrieve verified c
   # excluded_keepers = ["some-keeper"]       # Optional exclusion list
   ```
 
-### 3. Workspace Memory Observation Gauges (`gauge`)
-Tracks briefing size and classified ledger claim count to prevent unbounded memory growth.
+### 3. Workspace Wiki Table of Contents (`[wiki_contents]`)
+Injects the Workspace Wiki table of contents (one line per page: title, file, summary) from `<base-path>/.masc/wiki` at the start of every Keeper turn.
+
+- **TOML Setting**: `<base-path>/.masc/config/runtime.toml`
+  ```toml
+  [wiki_contents]
+  enabled = true  # Default: true. Set false to omit the wiki listing from Keeper turns.
+  ```
+- **Environment Variable**: `MASC_KEEPER_WIKI_CONTENTS_ENABLED` (`true` / `false`).
+
+### 4. MicroVM Sandbox Guest DNS (`[sandbox] microvm_dns`)
+Configures custom DNS servers passed into microVM Keeper guests (`apple_container`, `microsandbox`, `nerdctl_kata`).
+
+- **TOML Setting**: `<base-path>/.masc/config/runtime.toml`
+  ```toml
+  [sandbox]
+  microvm_dns = ["1.1.1.1", "8.8.8.8"]  # Valid IPv4 or IPv6 literals
+  ```
+- **Environment Variable**: `MASC_KEEPER_MICROVM_DNS` (comma-separated IPv4/IPv6 addresses).
+
+### 5. Dated JSONL Store Retention (`[maintenance] jsonl_retention_days`)
+Controls the day-file retention window for dated JSONL stores under `.masc/` (`audit`, `telemetry`, `tool_usage`, `tool_calls`, `agent-core-events`, etc.), shared by startup prune and periodic 24-hour maintenance prune.
+
+- **TOML Setting**: `<base-path>/.masc/config/runtime.toml`
+  ```toml
+  [maintenance]
+  jsonl_retention_days = 30  # Positive integer; default 30
+  ```
+- **Environment Variable**: `MASC_JSONL_RETENTION_DAYS` (takes precedence over `runtime.toml`).
+
+### 6. Workspace Memory Observation Gauges (`gauge`)
+Tracks briefing size and classified ledger claim count to monitor memory growth.
 
 - **Metric Names**:
   - `masc_keeper_workspace_memory_briefing_bytes`: Current byte size of the published shared workspace briefing summary body.
@@ -46,13 +75,14 @@ Tracks briefing size and classified ledger claim count to prevent unbounded memo
 
 ### Key Code & Module Coordinates
 - `lib/keeper/keeper_config.ml` and `lib/keeper/keeper_config.mli`: HITL configuration parser and validation clamping (`tool_approval_timeout_sec`).
+- `lib/keeper/keeper_tool_approval_mode.ml` & `lib/keeper/keeper_tool_approval_mode.mli`: Persistent `auto` / `yolo` tool approval stance store and boot replay.
 - `lib/typesafeai/typesafeai_config.ml` & `lib/runtime/runtime_schema.ml`: `workspace_memory_selection_enabled` flag.
 - `lib/keeper/keeper_workspace_memory_observation_metrics.ml`: Unlabeled gauge series definitions and update logic (`record`).
 - `lib/keeper/keeper_turn.ml` & `lib/keeper/keeper_unified_turn.ml`: Turn observation hook boundaries.
 
 ---
 
-## (b2) Activation Conditions & Diagnostic Behavior / 켜지는 조건과 실패 증상
+## Activation Conditions & Diagnostic Behavior
 
 ### Conditions
 - **Tool Approval Timeout**:
@@ -68,15 +98,24 @@ Tracks briefing size and classified ledger claim count to prevent unbounded memo
 ### Failure Symptoms & Diagnostics
 - **Approval Timeout Expiry**: When the timeout expires before operator decision, the tool call fails with a `timed_out` rejection. If the operator approves later, the response is routed to the late-approval journal rather than resurrecting the expired turn.
 - **Memory Select Rejection**: If `workspace_memory_selection_enabled = false`, calling `keeper_memory_select` fails immediately with `workflow_rejection`.
-- **Missing Briefing Gauge Retention**: If the shared briefing is temporarily missing or unreadable, the gauge retains its last measured size rather than erroneously dropping to 0 bytes.
+- **Missing Briefing Gauge Retention**: If the shared briefing is temporarily missing or unreadable, the gauge retains its last measured size rather than dropping to 0 bytes.
 
 ---
 
-## (c) Runnable Examples / 실행 예시
+## Runnable Examples
 
 ### 1. Configuration in `runtime.toml`
 ```toml
-# Append to .masc/config/runtime.toml
+# In .masc/config/runtime.toml
+
+[wiki_contents]
+enabled = true
+
+[maintenance]
+jsonl_retention_days = 30
+
+[sandbox]
+microvm_dns = ["1.1.1.1", "8.8.8.8"]
 
 [keeper.hitl]
 # Set operator approval wait window to 5 minutes
@@ -89,9 +128,10 @@ workspace_memory_selection_enabled = true
 
 ### 2. Environment Variable Override
 ```bash
-# Launch server with custom approval timeout
+# Launch server with custom approval timeout and JSONL retention
 export MASC_KEEPER_TOOL_APPROVAL_TIMEOUT_SEC=600
-dune exec --root . masc -- start --port 8935
+export MASC_JSONL_RETENTION_DAYS=14
+masc start --base-path . --port 8935
 ```
 
 ### 3. Exporting Memory Gauges via OpenTelemetry (OTLP)
@@ -100,7 +140,7 @@ The gauges are stored in `Otel_metric_store` and pushed via OpenTelemetry OTLP o
 # Enable OTel export to a local OTLP HTTP collector (defaults to http://127.0.0.1:4318)
 export MASC_OTEL_ENABLED=true
 export OTEL_EXPORTER_OTLP_ENDPOINT="http://127.0.0.1:4318"
-dune exec --root . masc -- start --port 8935
+masc start --base-path . --port 8935
 
 # Exported gauge series names in OTLP metric batches:
 # - masc_keeper_workspace_memory_briefing_bytes (Gauge, unlabeled)
@@ -109,17 +149,19 @@ dune exec --root . masc -- start --port 8935
 
 ---
 
-## (d) Disabling & Reverting / 끄는 법 및 되돌리는 법
+## Disabling & Reverting
 
 - **Reset Approval Timeout**: Remove `tool_approval_timeout_sec` or unset `MASC_KEEPER_TOOL_APPROVAL_TIMEOUT_SEC` to restore the 180s default.
+- **Revert Keeper `yolo` Mode**: Press `g` on the selected Keeper in the TUI (or set mode to `auto` via the API) to remove the persisted override row.
+- **Disable Wiki Table of Contents**: Set `[wiki_contents] enabled = false` (or `MASC_KEEPER_WIKI_CONTENTS_ENABLED=false`).
 - **Disable Memory Select**: Set `workspace_memory_selection_enabled = false` in `[typesafeai]`.
-- **Metrics**: The metrics gauges are zero-overhead observation probes built into the turn pipeline and require no deactivation.
+- **Metrics**: The metrics gauges are built into the turn observation pipeline and require no separate deactivation.
 
 ---
 
-## (e) Experimental Status & Known Limitations / 실험 표시 및 알려진 한계
+## Status & Known Limitations
 
 - **Status**: Stable in v0.52.0+.
-- **Silent Clamping**: Setting `tool_approval_timeout_sec` outside 5–3600 seconds silently clamps the value without raising a configuration error.
-- **Provenance Verification Latency**: When `keeper_memory_select` is called in workspaces with large numbers of source-bound facts, file hash revalidation across local worktrees may introduce slight turn latency.
-- **Unlabeled Aggregation**: Gauges reflect workspace-level totals; individual Keeper attribution is not tracked in the metric series to avoid high-cardinality leakage.
+- **Silent Clamping**: Setting `tool_approval_timeout_sec` outside 5–3600 seconds clamps the value without raising a configuration error.
+- **Provenance Verification Latency**: When `keeper_memory_select` is called in workspaces with large numbers of source-bound facts, file hash revalidation across local worktrees may add turn latency.
+- **Unlabeled Aggregation**: Gauges reflect workspace-level totals; individual Keeper attribution is not tracked in the metric series to avoid high-cardinality series.

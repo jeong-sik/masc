@@ -15,11 +15,15 @@ snapshot -> diagnose -> preview -> human confirm -> execute -> re-check
 
 - Supervisor endpoint: `/mcp/operator`
 - Worker endpoint: `/mcp`
-- Primary tools:
+- Primary tools on `/mcp/operator`:
   - `masc_operator_snapshot`
   - `masc_operator_digest`
   - `masc_operator_action`
   - `masc_operator_confirm`
+  - `masc_operator_board_attention_quarantine_requeue`
+  - `masc_operator_task_recovery_resolve`
+- Full-surface operator judgment write (`/mcp`):
+  - `masc_operator_judgment_write`
 - Runtime follow-up:
   - namespace/task hygiene tools
   - keeper lifecycle and keeper messaging tools

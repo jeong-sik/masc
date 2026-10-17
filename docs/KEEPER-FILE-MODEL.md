@@ -1,7 +1,6 @@
 # Keeper file model
 
-Each configured Keeper has exactly two authored files under the resolved MASC
-config root:
+Each configured Keeper has one authored TOML file (plus an optional directory for Keeper-scoped assets) under the resolved MASC config root:
 
 ```text
 <config-root>/
@@ -15,22 +14,23 @@ config root:
 
 ## `keepers/<name>.toml` — `keeper.instructions`
 
-`keeper.instructions` is the Keeper's complete individual prompt. Its full UTF-8 content
+`[keeper].instructions` is the Keeper's complete individual prompt. Its full UTF-8 content
 is loaded into `keeper_meta.instructions` and included in autonomous turns.
 
-The file is mandatory whenever `keepers/<name>.toml` exists. Missing, empty,
-or placeholder content is a typed profile error. Prompt text is not accepted
-inside Keeper TOML.
+`instructions` is mandatory whenever `keepers/<name>.toml` exists. Missing, empty,
+or placeholder content is a typed profile error.
 
 ## `keepers/<name>.toml`
 
-The TOML file contains operational configuration only. The filename is the
+The TOML file contains both `instructions` and operational configuration. The filename is the
 canonical Keeper name; `[keeper].name` is optional.
 
 ```toml
 [keeper]
+instructions = "Review the current change and report concrete evidence."
 activation_mode = "autonomous"
 sandbox_profile = "docker"
+sandbox_image = "base"
 mention_targets = ["operator"]
 board_interests = []
 ```
@@ -38,16 +38,28 @@ board_interests = []
 Current `[keeper]` fields:
 
 - `name`
+- `instructions`
 - `activation_mode`
+- `input_policy`
 - `mention_targets`
 - `board_interests`
 - `sandbox_profile`
 - `sandbox_image`
 - `network_mode`
+- `remote_endpoint`
+- `microvm_backend`
+- `microvm_memory`
+- `microvm_cpus`
+- `observation_run`
 - `max_context_override`
 - `telemetry_feedback_enabled`
 - `telemetry_feedback_window_hours`
 - `always_allow`
+- `voice_always_allow`
+- `tools.native`
+- `tools.attached_allow`
+- `tools.deny`
+- `skills.names`
 - `[keeper.agent_core_env]` scalar entries
 
 Any other TOML key fails closed as `unknown keeper TOML keys`.
@@ -62,7 +74,7 @@ empty.
 ## Runtime and tool context
 
 Runtime assignment lives only in `runtime.toml` under
-`[runtime.assignments]`. Tool definitions do not live in Keeper files. agent core
+`[runtime.assignments]`. Tool schemas do not live in Keeper files; agent core
 supplies the current tool schemas separately for each turn, so the prompt
 should describe behavior and boundaries without copying a tool catalog.
 
@@ -97,8 +109,8 @@ candidates = [
 sangsu = "codex_subscription.gpt-5.3-codex-spark"
 ```
 
-The fallback candidate must already be a valid binding in the same file.
-There is intentionally no `[providers.codex_subscription.credentials]` table.
+The fallback candidate must already be a valid binding in the same file, and any keyed HTTP provider referenced in `runtime.toml` (such as `glm-coding`) must declare an explicit `[providers.<id>.credentials]` block.
+There is intentionally no `[providers.codex_subscription.credentials]` table because `codex-app-server` uses the Codex CLI subscription login.
 An unspecified reasoning effort is omitted from the app-server request so the
 official client can choose a value supported by the selected model. MASC does
 not project the provider-neutral `enable_thinking` toggle into official

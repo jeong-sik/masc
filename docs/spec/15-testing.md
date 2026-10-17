@@ -103,7 +103,8 @@ rg -n '^\((test|tests|executable)\b|^\s+\((name|names|modules)\b' test/dune test
 
 테스트는 입력에 대한 제품의 출력·상태 변화·저장·복구를 검증한다. 소스의 함수 호출
 횟수, 문구·파일명·구현 형태를 고정하는 검사, 과거 호환만 유지하는 검사와 폐기한 기능의 부재 검사는 두지 않는다.
-TUI 화면 문구·배치·폭별 레이아웃·행 순서를 확인하는 테스트(PTY 시나리오 포함)도 두지 않는다.
+TUI 화면 문구·배치·폭별 레이아웃·행 순서를 확인하는 테스트(PTY 시나리오 포함)도 두지 않는다
+(`v0.51.0`에서 181개 Python PTY 시나리오와 48개 OCaml TUI 레이아웃 테스트 제거).
 TUI 는 자주 바뀐다. TUI 검사는 보낸 요청·저장한 상태·결정만 본다.
 기능 검증에 필요한 프로토콜·권한·자원 경계는 실제 입력과 결과로 확인한다.
 
@@ -157,7 +158,9 @@ type scenario = {
 
 ### 5.3 Trajectory (`lib/trajectory/trajectory.ml`)
 
-Keeper tool call의 JSONL 기반 궤적 로깅. 결정적 재생, 비용 누적, 엔트로피 탐지, eval_harness 연동을 지원한다.
+Keeper tool call과 사고(thinking) 요약을 `.masc/trajectories/{keeper_name}/{trace_id}.jsonl`에
+JSONL로 기록한다. 결정적 재생, 비용 누적, 엔트로피 탐지, eval_harness 연동을 지원하며,
+메모리 내 trajectory 행은 디스크 JSONL append 성공이 확인된 뒤에만 정리(retire)한다(`#43376`).
 
 **기록 위치**: `.masc/trajectories/{keeper_name}/{trace_id}.jsonl`
 
@@ -168,11 +171,15 @@ Keeper tool call의 JSONL 기반 궤적 로깅. 결정적 재생, 비용 누적,
 | `ts` | float | Unix 타임스탬프 |
 | `turn` | int | 세션 내 턴 번호 |
 | `round` | int | 턴 내 도구 라운드 (1-3) |
+| `execution_id` | string option | 정확한 도구 호출 실행 식별자 (`Tool.Invocation.t` 조인용) |
 | `tool_name` | string | 호출된 도구 |
 | `gate_decision` | Pass/Reject | 사전 게이트 결과 |
 | `result` | string option | 실행 결과 (게이트 차단 시 None) |
 | `duration_ms` | int | 실행 시간 |
 | `cost_usd` | float | 추정 비용 |
+
+모델이 원문 사고 블록을 비공개(withheld/redacted)로 반환한 경우 `withheld_thinking_entry`
+레코드로 턴/라운드/타임스탬프와 비공개 사유를 별도 기록한다.
 
 **trajectory_outcome**: `Completed | Failed | Timeout | Gated`.
 
@@ -230,6 +237,12 @@ make test-contract           # scripts/harness/contract/run_all.sh
 MASC_E2E_TESTS=true scripts/dune-local.sh build @test/runtest-test_sse_storm_e2e
 ```
 
+일반 스택 병합 대상 head는 소스 리뷰와 `merge-compile` 권고 기록을 확인하고,
+`.github/workflows/test.yml`은 일일(daily) 스케줄 및 수동 실행으로 전체 행동/단위 회귀
+(`@runtest`)를 검증한다. Release/Tag 후보 검증은 `.github/workflows/release-candidate.yml`이
+`config/release-behavior.json`에 선언된 통합 행동 스위트(bootstrap, TUI, viewer,
+dashboard, lane add-on smoke)를 실행한다.
+
 ### 6.3 Contract Harness
 
 | Contract | 파일 | 검증 대상 |
@@ -259,7 +272,7 @@ bisect-ppx-report html --coverage-path _coverage
 
 ### 7.2 Coverage 파일 분포
 
-100개의 `*_coverage.ml` 파일이 커버리지 보강 목적으로 존재한다. 이 파일들은 기존 테스트에서 누락된 경로를 보완한다.
+45개의 `*_coverage.ml` 파일이 커버리지 보강 목적으로 존재한다 (`test/dune`이 SSOT). 이 파일들은 기존 기능 테스트에서 누락된 분기 경로를 보완한다.
 
 ---
 

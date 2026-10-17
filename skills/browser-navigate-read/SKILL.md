@@ -14,7 +14,7 @@ and returns the frontmatter `description`, so it holds the same text. The
 recovery rules a Keeper needs (retry only the read, verify site content)
 therefore live in that description. The
 live-browser counterpart is `browser-live-follow-read`; the broader navigation
-guidance is in `browser-lanes/references/composition.md`.
+guidance is in `browser-lanes/SKILL.md`.
 
 ```toml composition
 [[compositions]]

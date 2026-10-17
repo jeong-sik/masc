@@ -39,7 +39,7 @@ a duplicated `ENTRYPOINT` can cause a different program invocation.
 
 An installation TOML contains exactly `id`, `run_id`, `manifest_path` and
 `[binding]`. Its sources use typed `snapshot_file`, `browser_document`,
-`msx_capture` or `lane_output` connections. Read current tool/schema documentation
+`msx_capture`, `dos_capture` or `lane_output` connections. Read current tool/schema documentation
 for required fields; do not infer source kinds from filenames. Relative manifest
 and snapshot paths resolve against the installation TOML directory.
 

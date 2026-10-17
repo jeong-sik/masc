@@ -103,7 +103,7 @@ grpcurl -plaintext 127.0.0.1:8936 list
 grpcurl -plaintext 127.0.0.1:8936 grpc.health.v1.Health/Check
 ```
 
-`Subscribe` / `Heartbeat`는 `proto/masc_workspace collaboration.proto` 기준으로 client를 붙인다. dashboard `transport-health`에서 `subscribers`, `active_streams`가 즉시 증가해야 한다.
+`Subscribe` / `Heartbeat`는 `proto/masc_workspace.proto` 기준으로 client를 붙인다. dashboard `transport-health`에서 `subscribers`, `active_streams`가 즉시 증가해야 한다.
 
 ### 5. WebSocket discovery
 

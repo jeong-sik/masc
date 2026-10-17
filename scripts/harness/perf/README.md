@@ -124,7 +124,7 @@ scheduled promptly. Production starvation therefore requires the domain to be **
 dashboard serving) *and* contended; "just inject CPU load" is not a faithful reproduction. This is
 exactly the false premise Harness-First exists to catch before a fix is built on it.
 
-## Gate semantics (falsifiable, per CLAUDE.md TLA+ bug-model discipline)
+## Gate semantics (falsifiable, per `docs/constitution.xml` TLA+ bug-model discipline)
 
 ```
 RED (exit 2)  if  loaded p95 > THRESHOLD_MS  OR  p95(loaded)/p95(baseline) > MAX_AMP
@@ -153,7 +153,7 @@ server runs its serialize+compress path as production browsers trigger; set empt
 and `MASC_HARNESS_SERVER_EXE` (pin a specific binary so two builds can be A/B-compared without
 overwriting `_build`).
 
-The booted server runs with `MASC_KEEPER_AUTONOMOUS_ENABLED=0` (harness lib default): **no keepers run**, so
+The booted server runs with an empty `keepers/` directory (or non-autonomous per-keeper `activation_mode` in harness defaults): **no keepers run**, so
 the in-process axis is the only "busy domain" source. To exercise the keeper axis, use `--base-url`
 against a live runtime (see below).
 
@@ -192,18 +192,20 @@ that prompt into its ephemeral base path from the explicit root.
 
 **The boot recipe (verified — keepers issue real turns; FSM reaches `awaiting_provider -> streaming`):**
 
-1. **runtime.toml must borrow a catalog-valid model id.** `Runtime.init_default_strict`
-   (`server_runtime_bootstrap.ml`) rejects any model whose `api-name` is absent from the AGENT_CORE catalog
-   (the AGENT_CORE embedded catalog). Set `api-name = "deepseek-v4-flash"` (a catalog `id_prefix`) while pointing
-   the provider `endpoint` at the local mock.
+1. **runtime.toml must declare a valid model contract.** `Runtime.init_default_strict`
+   (`server_runtime_bootstrap.ml`) requires either a model whose `api_name` is present in the
+   embedded AGENT_CORE catalog (for example `api_name = "deepseek-v4-flash"`) or an explicit
+   `max_context_tokens` + `capabilities` declaration in `runtime.toml` while pointing the provider
+   `endpoint` at the local mock.
 2. **The keeper TOML must select autonomous activation.** Set
    `[keeper] activation_mode = "autonomous"` to restore the owner and produce
    spontaneous turns. `on_demand` restores the owner for requested work;
    `manual` waits for an explicit start. Paused keepers remain paused.
 3. **The keeper TOML must set `sandbox_profile`** (`docker`, `microvm`, or `remote_ssh`) — boot
    rejects without it.
-4. Boot env: `MASC_KEEPER_AUTONOMOUS_ENABLED=true`, `MASC_ORCHESTRATOR_ENABLED=1`,
-   `MASC_KEEPER_HEARTBEAT_INTERVAL_SEC=<n>`. Boot the exe directly —
+4. Boot env: `MASC_ORCHESTRATOR_ENABLED=1`,
+   `MASC_KEEPER_HEARTBEAT_INTERVAL_SEC=<n>`, with per-keeper `activation_mode = "autonomous"` in
+   each keeper TOML. Boot the exe directly —
    **not** via `harness_start_server`, which disables Keeper bootstrap and autonomous activation.
 5. Every generated Keeper has a non-empty
    `$BASE/.masc/config/keepers/<keeper>.toml`; the gate copies a checked-in

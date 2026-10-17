@@ -50,7 +50,7 @@ flowchart TD
 ```
 
 1. **Non-blocking**: `masc_fusion` returns a run id immediately; the keeper's turn continues.
-2. **Parallel panel**: the background fans the prompt out to the N configured models.
+2. **Parallel panel and topologies**: by default the background fans the prompt out in parallel to the N configured models. In addition to parallel fan-out, Fusion supports `Refine`, `Conditional`, `Judge_of_judges`, and `Staged` topologies (RFC-0283/0284).
 3. **Judge synthesis**: consensus, contradictions, partial coverage, and blind spots are structured into one verdict.
 4. **Async delivery**: when deliberation ends, the result lands in the keeper's chat lane and on the board (RFC-0266). A paused keeper is not force-woken.
 
@@ -60,7 +60,7 @@ Panel and judge agents receive no fusion tool, so recursive deliberation is bloc
 
 ## 3. What exists today
 
-* **Comparison harness (`bin/fusion_run.exe`)**: a CLI that runs single-model vs. self-consistency voting vs. same-model deliberation (self-MoA) vs. heterogeneous multi-model (fusion) side by side, with measured token cost.
+* **Run persistence (`.masc/fusion_runs/`)**: completed Fusion runs are persisted on disk under `.masc/fusion_runs/` and inspected through the TUI (`:go Fusion` or the Keeper detail `Runs` tab).
 * **Keeper tool (`masc_fusion`)**: delegates a deliberation asynchronously at runtime.
-* **Observation UI**: the terminal UI's Fusion surface and the web dashboard list runs with judge detail. An active row's `STATE` shows the exact stage (`accepted`, `panel(N)`, `judge(A/F)`, `computed`, `recording`).
+* **Observation UI**: the terminal UI's Fusion surface (`:go Fusion`) and the web dashboard list runs with judge detail. An active row's `STATE` shows the exact stage (`accepted`, `panel(N)`, `judge(A/F)`, `computed(A/F)`, `recording(A/F)`).
 * **Prerequisite**: multiple model providers configured in `runtime.toml`.

@@ -67,21 +67,24 @@ feature tests and installation smoke; source wording, arbitrary snapshots and
 checker self-tests are not product behavior proof. Review test cleanup as a
 separate change rather than deleting useful coverage during an RC failure.
 
-The current full RC runs the root `@runtest` once, plus full compile and four
-platform installation checks. Scoped checks help diagnose repairs but do not
-replace that complete successful same-SHA RC. Failed-job reruns for unchanged
-source may reuse successful same-run assets under the existing workflow.
-Changing this verification architecture is a separate next-version change.
+The current `release-candidate.yml` workflow runs full compile/type checks,
+four-platform installation checks, and the explicit essential behavior
+selection declared in `config/release-behavior.json` (`release-behavior.yml`).
+Full root `@runtest` (`test.yml`) remains a separate manual/scheduled
+regression lane recorded in the candidate ledger (`미실행` if not run on that
+candidate). Scoped checks help diagnose repairs but do not replace a complete
+successful same-SHA RC. Failed-job reruns for unchanged source may reuse
+successful same-run assets under the existing workflow.
 
 ## Publish the verified candidate
 
 Require independent review of the final candidate and successful exact-SHA
-verification of every declared candidate stage. The current implementation uses
-full root `@runtest`; a reviewed versioned essential profile may replace that
-behavior selection for a later release while retaining full type/compile and
-four-platform install checks. Its exact profile identity belongs in the receipt.
-A source approval, partial pass, cancelled run or old candidate is not complete
-verification. Production-ready additionally requires every quantitative gate in
+verification of every declared candidate stage: full type/compile checks,
+four-platform install checks, and the versioned essential behavior profile in
+`config/release-behavior.json` (whose exact profile list and SHA-256 hash are
+recorded in the candidate receipt). A source approval, partial pass, cancelled
+run or old candidate is not complete verification. Production-ready
+additionally requires every quantitative gate in
 [Production readiness](../PRODUCTION-READINESS-GATES.md). Release tags and published assets identify that verified commit;
 publish its existing RC assets with `rc_run_id`, without a fresh rebuild.
 

@@ -19,11 +19,15 @@ echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc && source ~/.bashrc
 
 ## 서버가 앞단에 머무르지 않고 시작하자마자 꺼짐
 
-서버는 꺼지기 전에 이유를 찍습니다 — 마지막 줄을 읽어 보세요. 흔한 원인은
-`[runtime].default` 가 완전히 정의되지 않은 `<provider>.<model>` 쌍을 가리키는
-경우입니다(바인딩 누락, 또는 바인딩이 선언하지 않은 dispatch 한도). `<base-path>/
-.masc/config/runtime.toml` 에서 그 쌍을 고치거나, 설치 마법사를 다시 돌려 준비된
-소스를 고르세요. 필요한 모양은 [설정 파일](/ko/reference/config/)에 있습니다.
+서버는 꺼지기 전에 이유를 찍습니다 — 마지막 줄을 읽어 보세요. 흔한 원인은 다음과 같습니다:
+
+- `[runtime].default` 가 완전히 정의되지 않은 `<provider>.<model>` 쌍을 가리키는
+  경우(바인딩 누락, 또는 바인딩이 선언하지 않은 dispatch 한도).
+- `credential_undeclared`: `runtime.toml` 의 키 기반 HTTP 프로바이더에 필수인
+  `[providers.<id>.credentials]` 블록(`type = "env"`, `key = "<ENV_VAR>"`)이 빠져 있는 경우.
+
+`<base-path>/.masc/config/runtime.toml` 에서 해당 선언을 고치거나, `masc setup` 을
+다시 돌려 준비된 소스를 고르세요. 필요한 모양은 [설정 파일](/ko/reference/config/)에 있습니다.
 
 ## 8935 포트가 이미 사용 중
 
@@ -50,11 +54,14 @@ base-path 를 넘기세요: `masc-tui --base-path ~/masc`.
 
 ## Keeper 가 안 뜸
 
-Keeper 는 명령 격리가 필요하고, MASC 는 허용된 `sandbox_profile` 없이는 Keeper 를
-띄우지 않습니다. Docker 를 설치하거나 Apple Silicon 이면 `container` CLI 를 설치한
-뒤 프로필을 지정하세요 — [명령어 안전 격리](/ko/runbooks/sandbox/)를 보세요. 웹
-검색이나 `git push` 를 하는 Keeper 는 `network_mode = "inherit"` 도 필요합니다.
-기본값 `none` 은 게스트에 네트워크를 주지 않습니다.
+Keeper 는 명령 격리가 필요하고, MASC 는 허용된 `sandbox_profile`(`"docker"`,
+`"microvm"`, `"remote_ssh"`) 없이는 Keeper 를 띄우지 않습니다. Docker 를 설치하거나
+Apple Silicon 이면 `container` CLI 를 설치한 뒤 프로필을 지정하세요 —
+[명령어 안전 격리](/ko/runbooks/sandbox/)를 보세요. 다음 항목도 함께 확인하세요:
+
+- **해당 런타임 스토어에 `sandbox_image` 가 promote 되지 않음**: `<base-path>/.masc/config/sandbox-image-builds.toml` 에 Keeper 의 `sandbox_image`(`"base"` 또는 `"ocaml"`)가 현재 런타임 스토어(Docker 와 각 microVM 런타임은 이미지 스토어를 따로 씁니다)에 promote 되어 있어야 합니다. 거부 메시지에 안내된 대로 `masc sandbox-image`(microVM 은 `--runtime <backend>` 포함)와 `masc sandbox-image promote` 를 실행하세요.
+- **잘못된 `microvm_dns` 주소**: `runtime.toml` 의 `[sandbox] microvm_dns`(또는 `MASC_KEEPER_MICROVM_DNS`)에 유효한 IPv4/IPv6 주소가 아닌 문자열이 들어 있으면 microVM 기동이 거부됩니다.
+- **게스트 네트워크 모드**: 웹 검색이나 `git push` 를 하는 Keeper 는 `network_mode = "inherit"` 도 필요합니다. 기본값 `none` 은 게스트에 네트워크를 주지 않습니다.
 
 ## 프로바이더 rate limit
 
@@ -72,8 +79,9 @@ TUI에 `reconnecting...` 배너가 반복되거나 서버 지연이 튀는 경�
    curl -s http://127.0.0.1:8935/health | jq '{scheduler: .scheduler, gc: .gc}'
    ```
    `.scheduler.lag.stalls`(1초 이상 스톨 횟수)와 `.scheduler.lag` 백분위(`p50_ms`,
-   `p95_ms`, `p99_ms`, `max_ms`, `mean_ms`, `over_50ms_count`, `over_200ms_count`)를
-   보세요. 이 값들은 최근 1분 링의 실측이고, 높다는 건 메인 도메인이
+   `p95_ms`, `p99_ms`, `max_ms`, `mean_ms`, `over_50ms_count`, `over_200ms_count`),
+   그리고 상주 메모리(`rss_bytes`)와 측정 출처 및 프로세스 `pid` 를 함께 보세요.
+   이 지연 값들은 최근 1분 링의 실측이고, 높다는 건 메인 도메인이
    준비된 파이버를 제때 못 돌렸다는 뜻입니다(yield 없이 계산한 파이버, stop-the-world
    GC, 스케줄러 스레드의 블로킹 호출 등).
 

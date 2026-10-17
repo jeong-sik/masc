@@ -17,7 +17,7 @@ comment; unannotated modules are Internal by default.
 ### Stable
 
 - Types and functions that downstream consumers (external coordinators, embedding agents) import directly.
-- Core abstractions: `Types`, `Error`, `Agent`, `Builder`, `Tool`, `Provider`, `Hooks`.
+- Core abstractions: `Types`, `Error`, `Agent`, `Builder`, `Tool`, `Llm_provider`, `Hooks`.
 - Breaking a Stable module breaks all consumers.
 
 ### Evolving
@@ -68,7 +68,6 @@ Core types and interfaces that downstream consumers depend on.
 | Tool | `lib/base/tool.mli` |
 | Tool_set | `lib/tool_set.mli` |
 | Hooks | `lib/base/hooks.mli` |
-| Provider | `lib/provider.mli` |
 | Raw_trace | `lib/raw_trace.mli` |
 | Checkpoint | `lib/checkpoint.mli` |
 | Checkpoint_store | `lib/checkpoint_store.mli` |
@@ -83,28 +82,15 @@ Representative modules:
 
 | Module | File | Reason |
 |--------|------|--------|
+| Agent_core | `lib/agent_core.mli` | Top-level package facade |
 | Runtime | `lib/runtime.mli` | Runtime protocol types are still evolving |
+| Canonical_tool | `lib/canonical_tool.mli` | Canonical tool descriptor and schema surface |
 | Wire_observer | `lib/llm_provider/wire_observer.mli` | Caller-owned wire observation boundary is still evolving |
+| Request_wire_observer | `lib/llm_provider/request_wire_observer.mli` | Request body component attribution and wire observation |
 
 CDAL proof-bundle artifacts are intentionally schema-only in agent_core. They are
 tracked in `docs/schema-surfaces/runtime-output-surfaces.v1.json`, not as
 public OCaml modules in this stability table.
-
-### Removed surfaces
-
-The legacy request-dispatch island — superseded by `Llm_provider.Complete` —
-was removed (2026-07-21) after its one minor-version deprecation window:
-
-- `Api.create_message` / `Api.create_message_detailed` (was `lib/api.mli`)
-- `Streaming.create_message_stream` / `Streaming.create_message_stream_detailed` (was `lib/streaming.mli`)
-- All of `Provider_intf` (was `lib/provider_intf.mli`)
-- The rest of `Api`/`Api_anthropic`/`Api_openai`/`Api_common`/`Streaming`
-  (request body builders, response parsers, JSON codecs such as
-  `content_block_to_json` / `content_block_of_json`, the stream accumulator
-  re-export) — these were not themselves deprecated, but existed only as a
-  facade over `Llm_provider`; call sites now use the `Llm_provider` modules
-  (`Api_common`, `Backend_anthropic`, `Backend_openai`, `Backend_openai_parse`,
-  `Streaming`, `Complete_stream_acc`) directly.
 
 ### Internal modules
 
@@ -116,7 +102,7 @@ external consumers should not depend on directly.
 #### Execution-journal migration boundary
 
 `Execution_event` and `Execution_journal` are private implementation modules.
-They are not re-exported by `Agent_sdk`, are not an external extension point,
+They are not re-exported by `Agent_core`, are not an external extension point,
 and have no supported writer API. Their repository-local regression suite uses
 Dune's internal library alias; that alias is not a supported external API
 contract.

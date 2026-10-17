@@ -41,7 +41,7 @@ exact historical projection remains typed and stable.
 | t1 | producer | read server identity and exact existing Keeper/runtime | health snapshot |
 | t2 | producer | submit the unchanged natural message once | queued operation id |
 | t3 | Keeper | choose whether to call a Skill and continue acting | operation `Turn_ref` |
-| t4 | runtime | record activation, delivery, and later actions | session Skill activation event log `traces/<session>/skill-activation-events.jsonl` |
+| t4 | runtime | record activation, delivery, and later actions (including `async_result_delivered` v6 and `async_action_observed` v7 events) | session Skill activation event log `traces/<session>/skill-activation-events.jsonl` and `.masc/skill-activation-events.jsonl` |
 | t5 | join | load t3's trace through the OCaml typed decoder and compare it with the event log's rows applied in order | exact 0/1/many result |
 | t6 | collector | require one exact id, delivery, action, and zero invalid transitions | proof JSON + Dashboard PNG |
 | t7 | TUI capture | select the exact Keeper and observe its ledger-bound receipt identity | TUI JSON + connected PNG carrying the exact digest |

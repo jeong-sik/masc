@@ -2,8 +2,8 @@
 
 > Current package version: v0.58.0
 > Latest changelog entry: v0.58.0 (2026-10-16)
-> Latest published GitHub release: v0.57.0 (2026-10-16)
-> Updated: 2026-10-16
+> Latest published GitHub release: v0.58.0 (2026-10-16)
+> Updated: 2026-10-17
 
 A planning view, not a release promise. The operating model behind it
 (labels, priority, pull-request and release rules) is
@@ -24,8 +24,8 @@ historical feature-train rules are
 
 ## Release train
 
-State read on 2026-10-15 02:3xZ from `gh release list`, the main branch, and
-the release ledger posts. The cut date holds and scope varies.
+State read on 2026-10-17 from `gh release list`, the `main` branch, and
+[`CHANGELOG.md`](CHANGELOG.md). The cut date holds and scope varies.
 
 | Version | Published (UTC) | Note |
 |---|---|---|
@@ -34,31 +34,14 @@ the release ledger posts. The cut date holds and scope varies.
 | v0.54.0 | 2026-10-13 23:50 | |
 | v0.55.0 | 2026-10-14 06:18 | |
 | v0.56.0 | 2026-10-14 16:36 | |
-| v0.57.0 | 2026-10-16 09:23 | latest |
-| v0.58.0 | not cut | |
+| v0.57.0 | 2026-10-16 09:23 | |
+| v0.58.0 | 2026-10-16 22:06 | latest |
+| v0.59.0 | not cut | |
 
-v0.58.0 has no `release/v0.58.0` branch yet. What stands between `main` and the
-cut:
-
-- **`main` must build.** The `Main minimal build` run was failing on the
-  #43276 merge commit (`b43e5275f6`) when this was written; the repair PR
-  covered two of the files with non-exhaustive matches, not all seven. A
-  repair that lets the four executables build comes first.
-- **A full regression green on the tip.** The last green full regression
-  (run 38859872654) is on the v0.57.0 base, not on the current tip.
-- **The stacked-PR queue.** Stack #43146 (50 layers, with draft and
-  changes-requested layers mixed in) is being split: the ready run at the
-  bottom lands first, and the authors re-stack the rest.
-- **Carried in from earlier cycles.** Promote `masc_wiki_lint` out of
-  Experimental; a conversion tool for binding files written by v0.48.0 and
-  earlier (#42868); `merge-guard` and `approve-guard` support for
-  release-candidate PRs whose base is `release/*`; the composition completion
-  and Ask-path delivery work; the #43175 shared-memory log questions listed
-  under Known issues in the v0.57.0 notes.
-
-The cut order is unchanged: freeze, `release/v0.58.0`, bump and notes, RC, an
-independent release approval bound to the head and the RC run, tag, publish
-check.
+The cut order for each train is: freeze, `release/v0.y.0`, version bump and
+changelog assembly, release candidate (`v0.y.0-rc*`), an independent release
+approval bound to the exact head SHA and completed full Release/Tag CI run,
+tag, and publish check.
 
 ## Where the backlog comes from
 

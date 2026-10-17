@@ -74,7 +74,7 @@ Keeper 는 컨테이너를 띄우지 않습니다. 거절 메시지에 위 명�
 런타임을 지목합니다.
 
 ```bash
-masc sandbox-image --runtime apple_container
+masc sandbox-image --base-path ~/masc --runtime apple_container --image base
 ```
 
 `apple_container` 는 `container build` 가 `-` 를 안 받고 컨텍스트 디렉터리를 받으므로
@@ -87,11 +87,14 @@ masc sandbox-image --runtime apple_container
 ## 설정
 
 `masc keeper-create` 가 이 값들을 대신 써 줍니다(`--sandbox-profile` 과 필수 항목인
-`--network-mode`). 만들어지는 `<base-path>/.masc/config/keepers/<name>.toml` 모양은
-이렇습니다.
+`--network-mode`). `sandbox_profile` 에는 `"docker"`, `"microvm"`, `"remote_ssh"` 만
+허용되며 `"local"` 프로필은 존재하지 않습니다. 만들어지는
+`<base-path>/.masc/config/keepers/<name>.toml` 모양은 이렇습니다.
 
 ```toml
+[keeper]
 sandbox_profile = "docker"   # "docker" | "microvm" | "remote_ssh"
+sandbox_image = "base"       # "base" | "ocaml"
 network_mode = "none"        # "none" | "inherit" | "policy"
 
 # sandbox_profile = "remote_ssh" 일 때만:
@@ -104,6 +107,14 @@ network_mode = "none"        # "none" | "inherit" | "policy"
 (지금 이 모드를 실제로 지원하는 백엔드는 `apple_container` 마이크로VM뿐입니다).
 `docker` 와 `microvm` 의 기본값은 `none` 이라, `masc keeper-create` 는 대신 정하지
 않고 이 값을 안 주면 진행을 거부합니다.
+
+microVM 게스트에 사용자 지정 DNS 서버를 넘겨야 한다면 `<base-path>/.masc/config/runtime.toml`
+의 `[sandbox]` 섹션에 `microvm_dns` 를 지정합니다(또는 `MASC_KEEPER_MICROVM_DNS` 환경 변수 사용).
+
+```toml
+[sandbox]
+microvm_dns = ["1.1.1.1", "8.8.8.8"]
+```
 
 ---
 

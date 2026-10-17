@@ -39,7 +39,7 @@ Command:
 
 ```bash
 scripts/keeper-production-readiness-gate.py \
-  --base-path /Users/dancer/me \
+  --base-path <base-path> \
   --expected-keepers 18 \
   --max-turns-per-keeper 3 \
   --min-terminal-turns 54 \
@@ -106,7 +106,7 @@ performance data as green.
 released package. Dune owns dependency resolution; the gate owns the package
 shape that Dune's library graph does not describe.
 
-Commands:
+Commands (for human operators or CI; external coding agents must not run local Dune builds per `docs/constitution.xml`):
 
 ```bash
 bash scripts/dune-local.sh build test/test_tool_schema_agent_core_boundary.exe

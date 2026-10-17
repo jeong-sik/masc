@@ -1487,7 +1487,11 @@ let run_keeper_cycle
                      | Some requested -> string_of_int requested
                      | None -> "none")
                     (* A turn refused before its prompt was built sent no
-                       system prompt; a count would claim one. *)
+                       system prompt; a count would claim one. [world_state]
+                       and [user_message] are the parts rendered here, before
+                       a request re-renders the world for its offered tools
+                       and [run_turn] appends the completion line, so the sum
+                       is an estimate. *)
                     (match !sent_system_prompt_bytes with
                      | Some system_bytes ->
                        string_of_int

@@ -1,0 +1,36 @@
+ Dashboard  ▸Work  Keepers  Usage  Board  Workspace  System                                                             
+                                                                                                                        
+   MASC Approvals (0)  03:32:46  HTTP [connected]                                                                       
+    [w] Workspace: Let Auto Judge decide  |  [e] Outside services: Ask me for each decision                             
+    Always-allow rules: none                                                                                            
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+    (no pending approvals)                                                                                              
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+    [?] Questions waiting on you (0) · a:open answers                                                                   
+    none -- no Keeper is waiting on a decision                                                                          
+  j/k:move  y / n:decide  w:Workspace mode  e:Outside mode  [ / ]:ask  a:answer a question  r:refresh  Tab:next  ?:help 
+ › to imp   (i to write)                                                                                                

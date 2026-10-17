@@ -13,7 +13,7 @@ TUI used the server's source. Both used the same isolated workspace, fixture
 bytes and 120 by 36 viewport. These were native binaries with local supplemental
 dynamic libraries, not an installed operator runtime or a real-model trial.
 
-| Boundary | Before, observed | After, implemented; native confirmation pending |
+| Boundary | Before, observed | After, implemented |
 |---|---|---|
 | Manual/offline Keeper has an original open Ask | Fleet returned zero Keepers and zero questions in both arms | Discover canonical owners from the durable Asked records; named and fleet reads include the original question |
 | Answer that original question | Route required live Keeper registration | Validate and append against the original Ask; retain canonical first-winner and durable wake outcomes |
@@ -39,3 +39,10 @@ fleet requests, rejects a foreign choice, records an answer, retains the
 canonical duplicate-answer receipt, rejects an unknown Ask, and refuses an
 incomplete inventory without rewriting the original answer. No UI wording,
 layout or row-order assertions are used.
+
+The subsequent [native read and answer-draft comparison](../2026-10-17-native-asks/README.md)
+uses the repaired server at two viewports. It confirms the original offline
+question is returned and can enter the actual TUI draft. Native answer
+submission and Keeper action remain unobserved. The counts above describe the
+original discovery attempts; the linked comparison retains the complete later
+attempt history as well.

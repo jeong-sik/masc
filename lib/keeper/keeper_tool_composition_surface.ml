@@ -1417,7 +1417,7 @@ let rec async_worker_result
       ~source_invocation
       ~request_sw
       ~(config : Workspace.config)
-      ~meta
+      ~(meta : Keeper_meta_contract.keeper_meta)
       ~capability_authority
       ~publication_recovery
       ~ctx_snapshot

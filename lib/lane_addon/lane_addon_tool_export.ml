@@ -15,7 +15,7 @@ end
 module Tool_key = struct
   type t = Mcp_protocol.Mcp_types.tool
   let equal left right = left == right
-  let hash tool = Hashtbl.hash tool.Mcp_protocol.Mcp_types.name
+  let hash (tool : t) = Hashtbl.hash tool.Mcp_protocol.Mcp_types.name
 end
 
 module Exports = Ephemeron.K2.Make (Owner_key) (Tool_key)

@@ -496,9 +496,8 @@ let handle_keeper_turns_list state request reqd =
                is process memory that outlives turn end unread, and gating
                it here is what keeps a stale tail unreachable. *)
             let preview_json =
-              match Keeper_turn_preview.current ~keeper_name with
+              match Keeper_turn_preview.current_for_turn ~keeper_name ~interrupt_token:turn.interrupt_token with
               | None -> `Null
-              | Some (preview : Keeper_turn_preview.t) when preview.updated_at < turn.started_at -> `Null
               | Some (preview : Keeper_turn_preview.t) ->
                 Keeper_turn_preview.to_json preview
             in

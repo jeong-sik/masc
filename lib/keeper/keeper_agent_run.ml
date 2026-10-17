@@ -960,6 +960,7 @@ let run_turn
     | Some resumed -> Some (Keeper_direct_native_continuation.restored_context resumed)
     | None -> shared_context in
   let preview = Some (Keeper_turn_preview.reset ~keeper_name:meta.name
+      ~execution_scope:(Option.map Keeper_repetition_scope.Execution.scope repetition_execution)
       ~now:(Time_compat.now ())
       ~redaction:(Keeper_secret_redaction.snapshot ~base_path:config.base_path
                     ~keeper_name:meta.name)) in

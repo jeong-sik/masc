@@ -1644,6 +1644,10 @@
   masc_tui_rows
   masc_tui_utf8_input
   masc_tui_send_disposition
+  ;; [Keeper_operation_id] and [Keeper_execution_scope_id] name the execution
+  ;; a preparation belongs to.
+  masc.keeper_operation_identity
+  masc.keeper_execution_scope
   unix
   yojson
   masc.server))

@@ -8300,6 +8300,8 @@ let test_decode_keeper_turns_reads_the_preview () =
                             ; ("status_text", `String "last observed tool: Execute")
                             ; ("last_tool", `String "Execute")
                             ; ("updated_at_unix", `Float 2.0)
+                            ; ("preparation", `Null)
+                            ; ("execution_scope", `Null)
                             ] )
                       ] )
                 ]

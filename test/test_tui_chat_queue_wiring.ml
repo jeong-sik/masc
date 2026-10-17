@@ -3176,7 +3176,7 @@ let test_an_observed_running_turn_is_drawn_from_its_journal () =
     Tui_types.hold_settled_log state running;
     let preview : Tui_decode.keeper_turn_preview =
       { ktp_status_text = "glm · receiving response"; ktp_updated_at_unix = 130.
-      ; ktp_text_position={kpp_generation=0; kpp_start_byte=0}; ktp_text_tail = "said"; ktp_last_tool = None }
+      ; ktp_text_position={kpp_generation=0; kpp_start_byte=0}; ktp_text_tail = "said"; ktp_last_tool = None; ktp_preparation=None; ktp_execution_scope=None }
     in
     state.keeper_turns <-
       [ { Tui_decode.ktr_chat_control_token = None; ktr_keeper_name = "alpha"
@@ -5704,7 +5704,7 @@ let test_speech_keeps_original_words_across_metadata_and_retry () =
           ktr_state=Keeper_turn_running {lane=Turn_lane_maintenance; started_at_unix=120.;
             interrupt_token="preview-stop"; turn_ref=None;
             preview=Some {ktp_status_text="working"; ktp_updated_at_unix=121.;
-              ktp_text_position={kpp_generation=0; kpp_start_byte=0}; ktp_text_tail="관측 답변 원문"; ktp_last_tool=None}}}];
+              ktp_text_position={kpp_generation=0; kpp_start_byte=0}; ktp_text_tail="관측 답변 원문"; ktp_last_tool=None; ktp_preparation=None; ktp_execution_scope=None}}}];
         let preview = Masc_tui_render_chat.polled_turn_output_entries state ~keeper_name:"alpha"
             ~role_label_column:(Layout.chat_role_label_width ~pane_cells:columns) in
         check (list string) "polled speech separates its observation status"
@@ -5846,7 +5846,7 @@ let test_scroll_pins_follow_live_and_hold_transient_rows () =
        ktr_state=Keeper_turn_running {lane=Turn_lane_maintenance; started_at_unix=120.;
          interrupt_token="one-observed-turn"; turn_ref=None;
          preview=Some {ktp_status_text="working"; ktp_updated_at_unix=121.;
-           ktp_text_position={kpp_generation=0; kpp_start_byte=0}; ktp_text_tail=text; ktp_last_tool=None}}} in
+           ktp_text_position={kpp_generation=0; kpp_start_byte=0}; ktp_text_tail=text; ktp_last_tool=None; ktp_preparation=None; ktp_execution_scope=None}}} in
     polled.keeper_turns <- [preview long_body];
     ignore (draw polled);
     Tui_types.set_msg_scroll polled 5;
@@ -6005,10 +6005,112 @@ let test_a_landed_preview_keeps_the_entries () =
     (fun b a -> check bool "each entry is the one built before" true (b == a))
     before after
 
+let test_preparation_requires_actual_turn_owner_and_exact_execution () =
+  Eio_main.run (fun _ ->
+    let module Preview = Masc.Keeper_turn_preview in
+    let module Owner = Masc.Keeper_turn_preview_owner in
+    let module Token = Masc.Keeper_interrupt_token in
+    let scope id = match Masc.Keeper_execution_scope_id.of_json
+        (`Assoc ["kind",`String "direct_operation";"id",`String id]) with
+      | Ok value -> value | Error detail -> fail detail in
+    let current = Token.fresh () and successor = Token.fresh () in
+    let writer = Owner.with_owner ~interrupt_token:current (fun () ->
+      fst (Eio.Fiber.pair
+        (fun () -> Preview.reset ~keeper_name:"alpha" ~execution_scope:(Some (scope "execution-a"))
+          ~now:1. ~redaction:Masc.Keeper_secret_redaction.empty)
+        (fun () -> ()))) in
+    let state = Tui_types.create_state ~workspace:"test" ~port:0 ~refresh_interval:2. () in
+    let turn_ref = Masc.Ids.Turn_ref.make ~trace_id:"preparation-wire" ~absolute_turn:8 in
+    let wire ~lane ~turn_ref preview = `Assoc ["schema",`String "masc.keeper_turns.v1";
+      "keepers",`List [`Assoc ["keeper_name",`String "alpha";"status",`String "ok";
+        "turn",`Assoc ["lane",`String lane;"interrupt_token",`String (Token.to_string current);
+          "turn_ref",Option.fold ~none:`Null ~some:Masc.Ids.Turn_ref.to_yojson turn_ref;
+          "started_at_unix",`Float 0.;"preview",preview]]]] in
+    let decode payload = match Tui_decode.decode_keeper_turns payload with
+      | Ok rows -> rows | Error detail -> fail detail in
+    let preview () = match Preview.current_for_turn ~keeper_name:"alpha" ~interrupt_token:current with
+      | Some value -> Preview.to_json value | None -> fail "the actual owner lost its preview" in
+    let transcript = Keeper_chat_transcript.create_for_source ~keeper_name:"alpha"
+        ~source:(Log.Operation "watcher") ~started_at:0. in
+    Keeper_chat_transcript.apply ~now:1. transcript Live.Run_started;
+    ignore (Preview.with_preparation_result ~writer:(Some writer) ~turn_ref:(Some turn_ref)
+      ~phase:Preview.Skill_preparation (fun () ->
+      let encoded = preview () in
+      state.keeper_turns <- decode (wire ~lane:"chat_operation" ~turn_ref:None encoded);
+      check bool "an unbound watcher cannot borrow another operation's preparation" true
+        (Tui_types.keeper_message_preparation state transcript = None);
+      Keeper_chat_transcript.apply ~now:2. transcript
+        (Live.Batch_bound {operation_id="watcher";execution_id="execution-a"});
+      check bool "exact batch execution receives its actual typed preparation" true
+        (Option.exists (fun (p : Preview.preparation) ->
+          p.phase = Preview.Skill_preparation && p.turn_ref = Some turn_ref
+          && p.state = Preview.Preparation_active)
+          (Tui_types.keeper_message_preparation state transcript));
+      let unrelated = Keeper_chat_transcript.create_for_source ~keeper_name:"alpha"
+          ~source:(Log.Operation "execution-b") ~started_at:0. in
+      Keeper_chat_transcript.apply ~now:1. unrelated Live.Run_started;
+      check bool "same Keeper cannot merge different executions" true
+        (Tui_types.keeper_message_preparation state unrelated = None);
+      let autonomous = Keeper_chat_transcript.create_for_source ~keeper_name:"alpha"
+          ~source:(Log.Autonomous_turn turn_ref) ~started_at:0. in
+      Keeper_chat_transcript.apply ~now:1. autonomous Live.Run_started;
+      check bool "a missing autonomous source identity is not borrowed" true
+        (Tui_types.keeper_message_preparation state autonomous = None);
+      let autonomous_encoded = match encoded with
+        | `Assoc fields -> `Assoc (List.map (fun (key,value) ->
+            key, if key="execution_scope" then `Null else value) fields)
+        | _ -> fail "preview encoder lost its object" in
+      state.keeper_turns <- decode (wire ~lane:"autonomous" ~turn_ref:(Some turn_ref) autonomous_encoded);
+      check bool "exact autonomous source joins without operation string matching" true
+        (Option.is_some (Tui_types.keeper_message_preparation state autonomous));
+      let malformed = match encoded with
+        | `Assoc fields -> `Assoc (List.map (fun (key,value) ->
+            key, if key="preparation" then match value with
+              | `Assoc fields -> `Assoc (("state",`String "active")::fields)
+              | _ -> value else value) fields)
+        | _ -> fail "preview encoder lost its object" in
+      check bool "duplicate preparation fields reject the actual turns payload" true
+        (Result.is_error (Tui_decode.decode_keeper_turns (wire ~lane:"chat_operation" ~turn_ref:None malformed)));
+      List.iter (fun (key,bad_value) ->
+        let malformed = match encoded with
+          | `Assoc fields -> `Assoc (List.map (fun (name,value) -> name,
+              if name="preparation" then match value with
+                | `Assoc fields -> `Assoc (List.map (fun (name,value) ->
+                    name,if name=key then bad_value else value) fields)
+                | _ -> value else value) fields)
+          | _ -> fail "preview encoder lost its object" in
+        check bool "unknown state/phase and contradictory clocks reject the actual turns payload" true
+          (Result.is_error (Tui_decode.decode_keeper_turns (wire ~lane:"chat_operation" ~turn_ref:None malformed))))
+        ["state",`String "unknown";"phase",`String "unknown";"elapsed_ns",`String "0"];
+      state.keeper_turns <- decode (wire ~lane:"chat_operation" ~turn_ref:None encoded);
+      check bool "the original poll still selects preparation before provider activity" true
+        (Option.is_some (Tui_types.keeper_message_preparation state transcript));
+      Keeper_chat_transcript.apply ~now:3. transcript
+        (Live.Runtime_attempt_started {runtime_id=None;attempt_index=Some 0});
+      check bool "even an unnamed provider observation supersedes a late preparation poll" true
+        (Tui_types.keeper_message_preparation state transcript = None);
+      Preview.note_tool ~writer:(Some writer) ~now:1_000_000. "late-old-tool";
+      check bool "a fresh clock cannot grant the successor the old owner's preview" true
+        (Preview.current_for_turn ~keeper_name:"alpha" ~interrupt_token:successor = None);
+      let next = Owner.with_owner ~interrupt_token:successor (fun () ->
+        Preview.reset ~keeper_name:"alpha" ~execution_scope:(Some (scope "execution-b"))
+          ~now:4. ~redaction:Masc.Keeper_secret_redaction.empty) in
+      Preview.note_attempt ~writer:(Some next) ~now:5. ~runtime_id:"new-provider";
+      Ok ()));
+    check bool "old scope completion cannot replace the current owner's provider" true
+      (match Preview.current_for_turn ~keeper_name:"alpha" ~interrupt_token:successor with
+       | Some value -> value.activity = Preview.Awaiting_response && value.preparation = None
+       | None -> false);
+    check bool "retired owner cannot read the replacement writer" true
+      (Preview.current_for_turn ~keeper_name:"alpha" ~interrupt_token:current = None))
+;;
+
 let () =
   run
     "tui_chat_queue_wiring"
-    [("native progress density", [test_case "interrupted native output remains in Results" `Quick test_interrupted_native_progress_survives_results_projection]); ( "expanded diagnostics",
+    [("owned preparation", [test_case "turn owner and exact execution select preparation" `Quick
+        test_preparation_requires_actual_turn_owner_and_exact_execution]);
+     ("native progress density", [test_case "interrupted native output remains in Results" `Quick test_interrupted_native_progress_survives_results_projection]); ( "expanded diagnostics",
         [ test_case "search finds a batched request by its own id" `Quick
             test_search_finds_a_batched_request_by_its_own_id ] )
     ; ( "attachment captions", [test_case "journal replacement retains source-owned media" `Quick

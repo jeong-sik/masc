@@ -334,15 +334,58 @@ monotonic span을 기록한다. JSON에는 phase·state·turn reference·시각�
 새 provider·본문·Tool 활동은 기존 scope를 무효화하므로 늦게 끝난 scope가 이를
 다시 준비 상태로 바꾸지 못한다. writer가 없으면 추가 시계·상태 갱신 없이 실행한다.
 
-이번 단위는 TUI의 기존 preview 소비 경로까지 사용할 수 있는 서버 데이터를 만든다.
-live 채팅 진행줄은 이 typed preparation을 아직 읽지 않는다. compact 진행줄에
-합치려면 원래 operation/turn과의 정확한 연결이 필요하며, Keeper 이름만 같다는
-이유로 다른 실행의 상태를 빌려 쓰지 않는다. 직접·자율 Task 해석 등 agent 진입 전의
-준비 구간과 아직 관측하지 않는 prompt·queue·lock 대기도 남아 있다.
+이 서버 데이터는 아래의 원래 실행에 결속된 TUI status projection으로 전달된다.
+Keeper 이름만 같다는 이유로 다른 실행의 상태를 빌려 쓰지 않는다. 직접·자율 Task
+해석 등 agent 진입 전의 준비 구간과 아직 관측하지 않는 prompt·queue·lock 대기도
+남아 있다.
 
 작성한 시나리오는 실행 중 JSON, 중첩 복귀, 원래 turn reference, provider 전환 뒤
 늦은 완료, 새 writer 보호, 오류·예외·실제 fiber 취소를 다룬다. 이 단위에서는
 실행하지 않았다. 문법 검사는 타입·기능·실제 화면·실행 지연 개선의 증거가 아니다.
+
+#### 원래 실행에 결속된 TUI 준비 진행줄
+
+비교 기준은 `ba44e17b5b589a7f0fb6aa841167168db5f34b01`다. 준비 미리보기의
+서버 데이터에서 기본·상세 채팅의 같은 status projection까지 연결한다.
+
+| 조건 | As-Is | To-Be 소스 경로 |
+| --- | --- | --- |
+| agent 진입 후 첫 provider 관측 전 준비 | 채팅은 일반 응답 대기 | 실제 준비 phase·state를 `최근 확인` 진행줄에 표시 |
+| 배치의 다른 요청이 같은 실행을 구독 | 준비 snapshot과 연결하지 않음 | batch binding의 원래 execution ID로 연결 |
+| 같은 Keeper의 다른 operation | 준비 snapshot과 연결하지 않음 | ID가 다르면 연결하지 않음 |
+| 자율 실행 | 준비 snapshot과 연결하지 않음 | 원래 journal turn과 snapshot turn이 모두 같은 경우 연결 |
+| provider·Tool 활동 뒤 늦은 준비 조회 | 준비 표시 없음 | 실제 stream 관측을 유지하고 준비 표시를 사용하지 않음 |
+| 새 턴이 writer를 설치하기 전 이전 callback이 갱신 | 최근 시각이면 이전 preview가 현재 턴에 붙을 수 있음 | Owner slot token이 다르면 preview를 전달하지 않음 |
+
+Keeper Owner가 chat child와 `Run_if_idle` child를 시작할 때, 슬롯에 실제 게시한
+interrupt token을 fiber scope에 결속한다. writer는 그 토큰을 생성 시 보유하고,
+turns route는 요청한 슬롯과 같은 토큰의 writer만 읽는다. 시계가 최신이라는
+이유로 소유가 다른 preview를 인정하지 않는다. writer가 아직 없거나 이 관측
+scope 밖에서 생성됐으면 preview가 없다. 스케줄링·중단 권한은 기존 Owner에 남는다.
+
+직접 실행의 preview는 원래 `Keeper_repetition_scope.Execution`의 불변 scope를
+전달한다. TUI는 원래 operation 또는 batch execution과 이를 비교한다. 자율 실행은
+lane 종류와 두 turn reference를 함께 확인한다. Keeper 이름만 같거나 후보가 여러
+개이면 상태를 빌려 쓰지 않는다. preview의 준비·실행 identity는 nullable 필수
+필드로 읽고, 준비 객체의 모르는 phase·state, 중복·추가 필드, 잘못된 시각과
+불완전한 완료 span은 decode 오류로 남긴다.
+
+provider 이름이 없는 attempt를 포함해 모델·Tool·승인·종단·불명확한 stream
+관측이 도착하면 그 transcript의 준비 관측 창을 닫는다. 이 판단에는 경과 시간이나
+본문 문자열을 쓰지 않는다. 접수와 batch binding은 준비 이후의 활동으로 간주하지
+않는다. 준비 거절·예외·취소는 attention으로 남기며, 성공은 다음 활동의 관측을
+기다리는 상태다. 기본 표시와 row budget은 같은 projection을 사용한다.
+
+새 polling이나 저장 경로를 추가하지 않고 기존 turns 조회를 사용한다. 전송된
+snapshot이 마지막 관측이라는 점을 표시하며, 순간적인 실제 실행 상태나 전체
+진척률을 보장하지 않는다. 초기 준비 뒤의 continuation, agent 진입 전 Task 준비,
+prompt·queue·lock 대기와 모든 병렬 분기의 상세 원장은 여전히 별도 연결이 필요하다.
+다른 TUI·Composition 스택을 조합한 실행, 실제 화면과 지연 개선도 아직 확인하지 않았다.
+
+작성한 복합 시나리오는 fiber 자식의 Owner 결속부터 실제 preview JSON과 turns
+decoder, typed TUI 선택, batch·자율 identity, 모르는/중복 metadata 거절, 이름 없는
+provider 관측 뒤 재조회, 새 slot 이전의 늦은 callback까지 다룬다. 이 단위에서는
+실행하지 않았다. source Before/After이며 실제 화면·타입·성능 검증이 아니다.
 
 ### 2b. 프롬프트 — 지명된 스킬 안내
 

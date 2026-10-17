@@ -1189,6 +1189,8 @@ type keeper_turn_preview = {
       (** Tail of the newest response text this turn has produced. *)
   ktp_last_tool : string option;
       (** Most recently observed tool request or return; not execution status. *)
+  ktp_preparation : Keeper_turn_preview.preparation option;
+  ktp_execution_scope : Keeper_execution_scope_id.t option;
 }
 
 type keeper_turn_state =

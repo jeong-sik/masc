@@ -1,5 +1,5 @@
-(** Ephemeral activity for the running Keeper turn. Reset at turn entry;
-    the turns route also rejects observations older than its running turn.
+(** Ephemeral activity for the running Keeper turn. Reset at agent entry;
+    the turns route reads only the writer bound to its actual Owner slot.
     Provider attempts, stream events, and tool hooks write this projection. *)
 
 type activity = Preparing | Awaiting_response | Receiving_response | Tool_observed | Failed
@@ -28,6 +28,7 @@ type t =
   ; activity : activity
   ; last_failure : string option
   ; preparation : preparation option
+  ; execution_scope : Keeper_execution_scope_id.t option
   }
 
 (* Enough to recognize the work ("ah, it is writing the PR body"), small
@@ -49,6 +50,7 @@ type entry =
   ; released_bytes : int
   ; tools : string Tool_indexes.t
   ; preparations : (unit ref * preparation) list
+  ; owner : Keeper_interrupt_token.t option
   }
 type writer = entry ref
 
@@ -62,13 +64,20 @@ let with_lock f =
   Mutex.lock mutex;
   Fun.protect ~finally:(fun () -> Mutex.unlock mutex) f
 
-let empty now =
+let empty ~execution_scope now =
   { text_position = {generation=0; start_byte=0}; text_tail = ""; last_tool = None; updated_at = now
-  ; runtime_id = None; activity = Preparing; last_failure = None; preparation = None }
+  ; runtime_id = None; activity = Preparing; last_failure = None; preparation = None; execution_scope }
 
 let current ~keeper_name =
   with_lock (fun () ->
     Option.map (fun writer -> (!writer).preview) (Hashtbl.find_opt table keeper_name))
+
+let current_for_turn ~keeper_name ~interrupt_token =
+  with_lock (fun () ->
+    match Hashtbl.find_opt table keeper_name with
+    | Some writer when Option.exists (Keeper_interrupt_token.equal interrupt_token) (!writer).owner ->
+      Some (!writer).preview
+    | Some _ | None -> None)
 
 (* [f] returns [None] when the note changes nothing, which leaves
    [updated_at] where it was. *)
@@ -120,14 +129,15 @@ let with_preparation_result ~writer ~turn_ref ~phase operation =
 let redacting redaction =
   { redaction; stream = Keeper_stream_text_redaction.create redaction }
 
-let reset ~keeper_name ~now ~redaction =
-  let writer = ref { preview = empty now; text_intake = redacting redaction;
-    released_bytes = 0; tools = Tool_indexes.empty; preparations = [] } in
+let reset ~keeper_name ~execution_scope ~now ~redaction =
+  let writer = ref { preview = empty ~execution_scope now; text_intake = redacting redaction;
+    released_bytes = 0; tools = Tool_indexes.empty; preparations = [];
+    owner = Keeper_turn_preview_owner.current () } in
   with_lock (fun () -> Hashtbl.replace table keeper_name writer);
   writer
 
 let note_attempt ~writer ~now ~runtime_id =
-  change_entry ~writer ~now (fun { preview; text_intake; _ } ->
+  change_entry ~writer ~now (fun { preview; text_intake; owner; _ } ->
     Some
       { preview =
           { preview with runtime_id = Some runtime_id; activity = Awaiting_response
@@ -137,6 +147,7 @@ let note_attempt ~writer ~now ~runtime_id =
            still held belongs to the tail this clears. *)
       ; tools = Tool_indexes.empty
       ; preparations = []
+      ; owner
       ; released_bytes = 0
       ; text_intake =
           redacting text_intake.redaction
@@ -281,6 +292,45 @@ let preparation_to_json preparation =
     "finished_at_unix",finished_at;"elapsed_ns",elapsed_ns]
 ;;
 
+let preparation_of_json json =
+  let ( let* ) = Result.bind in
+  let* fields = match json with
+    | `Assoc fields when List.sort String.compare (List.map fst fields) =
+        List.sort String.compare ["phase";"turn_ref";"started_at_unix";"state";"finished_at_unix";"elapsed_ns"] ->
+      Ok fields
+    | _ -> Error "preparation requires exactly its phase, identity, state and clock fields" in
+  let field key = List.assoc key fields in
+  let time key = match field key with
+    | `Float value when Float.is_finite value -> Ok value
+    | `Int value -> Ok (float_of_int value)
+    | _ -> Error ("preparation " ^ key ^ " must be a finite number") in
+  let* phase = match field "phase" with
+    | `String "context" -> Ok Context_preparation
+    | `String "tools" -> Ok Tool_preparation
+    | `String "skills" -> Ok Skill_preparation
+    | _ -> Error "unknown preparation phase" in
+  let* turn_ref = match field "turn_ref" with
+    | `Null -> Ok None
+    | `String raw -> (match Ids.Turn_ref.of_string raw with
+        | Some value -> Ok (Some value) | None -> Error "invalid preparation turn_ref")
+    | _ -> Error "preparation turn_ref must be text or null" in
+  let* started_at = time "started_at_unix" in
+  let* state = match field "state",field "elapsed_ns",field "finished_at_unix" with
+    | `String "active",`Null,`Null -> Ok Preparation_active
+    | `String state,`String raw,_ ->
+      let* outcome = match state with
+        | "prepared" -> Ok Prepared | "rejected" -> Ok Rejected
+        | "raised" -> Ok Raised | "cancelled" -> Ok Cancelled
+        | _ -> Error "unknown settled preparation state" in
+      let* elapsed_ns = match Int64.of_string_opt raw with
+        | Some value when value >= 0L -> Ok value
+        | Some _ | None -> Error "preparation elapsed_ns must be nonnegative int64 text" in
+      let* finished_at = time "finished_at_unix" in
+      Ok (Preparation_finished {outcome;elapsed_ns;finished_at})
+    | _ -> Error "preparation state has incomplete or conflicting clocks" in
+  Ok {phase;turn_ref;started_at;state}
+;;
+
 let status_text preview =
   let activity =
     match preview.preparation, preview.activity with
@@ -309,4 +359,5 @@ let to_json preview =
       "start_byte", `Int preview.text_position.start_byte];
     "last_tool", (match preview.last_tool with None -> `Null | Some name -> `String name);
     "updated_at_unix", `Float preview.updated_at;
-    "preparation",Option.fold ~none:`Null ~some:preparation_to_json preview.preparation]
+    "preparation",Option.fold ~none:`Null ~some:preparation_to_json preview.preparation;
+    "execution_scope",Option.fold ~none:`Null ~some:Keeper_execution_scope_id.to_json preview.execution_scope]

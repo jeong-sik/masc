@@ -277,6 +277,7 @@ type t =
   ; source : Masc_tui_keeper_chat_log.journal_source
   ; request_id : string
   ; mutable batch_execution_id : string option
+  ; mutable preparation_superseded : bool
   ; started_at : float
         (* When the request left, not when the run started. The wait before
            RUN_STARTED is the part that hid a 63-minute hang (masc #29229), so
@@ -412,6 +413,7 @@ let create_for_source ~keeper_name ~source ~started_at =
   ; source
   ; request_id = Masc_tui_keeper_chat_log.source_key source
   ; batch_execution_id = None
+  ; preparation_superseded = false
   ; started_at
   ; text_buffer = Buffer.create 1024
   ; thinking_buffer = Buffer.create 256
@@ -590,6 +592,8 @@ let trail_text ~now t text =
 let keeper_name t = t.keeper_name
 let request_id t = t.request_id
 let execution_id t = Option.value ~default:t.request_id t.batch_execution_id
+let source t = t.source
+let can_observe_preparation t = t.phase = Working && not t.preparation_superseded
 let note_rejection ~now t detail =
   t.phase <- Stream_failed detail;
   t.ended_at <- Some now;
@@ -1167,13 +1171,32 @@ let awaiting_text t =
       | because -> Printf.sprintf "%s\n  because %s" base because)
     t.awaiting
 
-let status_rows ?(compact = false) ?(show_timing = true) ~now t =
+let preparation_status preparation =
+  let open Masc.Keeper_turn_preview in
+  let phase = match preparation.phase with
+    | Context_preparation -> "문맥 준비"
+    | Tool_preparation -> "Tool 준비"
+    | Skill_preparation -> "Skill 준비" in
+  match preparation.state with
+  | Preparation_active -> Progress, "최근 확인 · " ^ phase ^ " 중"
+  | Preparation_finished {outcome=Prepared;_} ->
+    Progress, "최근 확인 · " ^ phase ^ "됨 · 다음 활동 확인 중"
+  | Preparation_finished {outcome=(Rejected | Raised | Cancelled) as outcome;_} ->
+    let outcome = match outcome with
+      | Rejected -> "거절됨" | Raised -> "실패" | Cancelled -> "취소됨"
+      | Prepared -> "완료됨" in
+    Attention, "최근 확인 · " ^ phase ^ " " ^ outcome
+;;
+
+let status_rows ?preparation ?(compact = false) ?(show_timing = true) ~now t =
   [ (if awaiting_continuation t then None
      else
-       Some
+       Some (match preparation with
+       | Some preparation when can_observe_preparation t -> preparation_status preparation
+       | Some _ | None ->
          ( Progress
          , (if compact then compact_progress_text else progress_text)
-             ~show_timing ~now t ))
+             ~show_timing ~now t )))
   ; Option.map (fun text -> (Answer_needed, text)) (awaiting_text t)
   ; Option.map
       (fun settlement ->
@@ -1979,6 +2002,17 @@ let apply_delta ~now t (delta : Live.delta) =
       note_unreadable t detail
 
 let apply ~now t delta =
+  (match delta with
+   | Live.Run_started | Live.Batch_bound _ | Live.Accepted _ -> ()
+   | Live.Runtime_attempt_started _ | Live.Provider_retry_observed _
+   | Live.Stream_model_started _ | Live.Model_content_activity _ | Live.Stream_model_stopped _
+   | Live.Stream_details _ | Live.Text _ | Live.Thinking _
+   | Live.Native_tool_started _ | Live.Native_tool_progress _ | Live.Native_tool_ended _
+   | Live.Tool_started _ | Live.Tool_args _ | Live.Tool_ended _ | Live.Tool_result _
+   | Live.Stream_protocol_error _ | Live.Approval_requested _ | Live.Approval_settled _
+   | Live.Checkpoint | Live.External_effect_completed | Live.Reply_details _
+   | Live.Run_failed _ | Live.Run_finished | Live.Undecodable _ ->
+       t.preparation_superseded <- true);
   bump t;
   apply_delta ~now t delta
 

@@ -1484,7 +1484,7 @@ let test_prepared_prompt_keeps_turn_inputs_and_request_authority () =
         ~keeper_name:meta.name
         ~questions:[ question ]
         ~context:"original answer"
-        ~continuation:(Masc.Keeper_continuation_channel.unrouted "wake turn context fixture")
+        ~continuation:(Keeper_continuation_channel.unrouted "wake turn context fixture")
         ~asked_at:1.
         ()
       |> Result.get_ok

@@ -1047,7 +1047,10 @@
   ;; The fake ssh shim renders its result trailer with the same function
   ;; the real shim uses, so the wire version cannot be typed in by hand.
  exec_ssh_protocol
- test_operator_control_support))
+ test_operator_control_support
+ ;; test_keeper_wake_turn_context builds a Keeper_continuation_channel for Ask.ask;
+ ;; it lives in the runtime library, not the wrapped masc namespace.
+ masc.keeper_runtime))
 
 (test
  (name test_voice_session_manager)

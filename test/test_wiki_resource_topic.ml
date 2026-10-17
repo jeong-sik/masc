@@ -420,6 +420,38 @@ let test_missing_wiki_lists_nothing () =
       (List.length (Lib.Mcp_server_eio_resource.wiki_resources ~base_path:dir)))
 ;;
 
+(* A regular file where the wiki directory belongs makes [list_pages] raise
+   [Sys_error]. The resource reads answer the error envelope and the listing
+   has no wiki pages, instead of the exception escaping resources/read or
+   resources/list. *)
+let with_file_as_wiki_root f =
+  let dir = test_dir () in
+  Fun.protect ~finally:(fun () -> rm_rf dir) (fun () ->
+    let wiki_dir = Lib.Tool_wiki.wiki_root ~base_path:dir in
+    Unix.mkdir (Filename.dirname wiki_dir) 0o755;
+    write wiki_dir "not a directory\n";
+    Eio_main.run @@ fun env ->
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
+    let state = Lib.Mcp_server_eio.For_testing.create_state ~base_path:dir () in
+    f state)
+;;
+
+let test_unlistable_wiki_root_answers_an_error_envelope () =
+  with_file_as_wiki_root (fun state ->
+    List.iter
+      (fun uri ->
+        let response = read_resource state uri in
+        check (option string) (uri ^ " has no content") None (served_text response);
+        check bool (uri ^ " is a JSON-RPC error") true
+          (Yojson.Safe.Util.(response |> member "error") <> `Null))
+      [ "masc://wiki"; "masc://wiki.json"; "masc://wiki/topic"; "masc://wiki/topic.json" ])
+;;
+
+let test_unlistable_wiki_root_lists_no_pages () =
+  with_file_as_wiki_root (fun state ->
+    check int "no wiki pages" 0 (List.length (listed state)))
+;;
+
 let () =
   run
     "wiki_resource_topic"
@@ -496,6 +528,14 @@ let () =
             `Quick
             test_own_index_file_is_not_a_listed_page
         ; test_case "a missing wiki lists nothing" `Quick test_missing_wiki_lists_nothing
+        ; test_case
+            "an unlistable wiki root lists no pages"
+            `Quick
+            test_unlistable_wiki_root_lists_no_pages
+        ; test_case
+            "an unlistable wiki root answers an error envelope"
+            `Quick
+            test_unlistable_wiki_root_answers_an_error_envelope
         ] )
     ]
 ;;

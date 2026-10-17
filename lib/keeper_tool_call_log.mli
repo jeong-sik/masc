@@ -245,7 +245,10 @@ val make_commit_observer : (committed_call -> unit) -> commit_observer
 val with_commit_observer : commit_observer -> (unit -> 'a) -> 'a
 (** Eio-fiber scope inherited by its children, isolated from sibling scopes.
     Opting into durable observation requires synchronous appends in this scope,
-    including direct SDK calls and native composition leaves. No event is
+    including direct SDK calls and native composition leaves. In this scope an
+    unavailable store or a failed append raises from [log_call], even for a
+    row that would otherwise be queued or dropped, so a caller with no handler
+    of its own fails its Tool call. No event is
     delivered for an unavailable store or failed append. This changes observer
     I/O cost; matched timing comparisons must use the same observer mode. *)
 val failed_commit_deliveries : commit_observer -> int

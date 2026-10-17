@@ -756,9 +756,10 @@ val awaiting_approval : t -> awaiting_approval option
 val preparation_status : Masc.Keeper_turn_preview.preparation -> status_kind * string
 (** Presentation shared by exact journal progress and the independently
     observed current Owner slot before an autonomous journal exists. *)
-val preparation_timeline_rows : Masc.Keeper_turn_preview.preparation_timeline -> (status_kind * string) list
+val preparation_timeline_rows : ?archived:bool -> Masc.Keeper_turn_preview.preparation_timeline -> (status_kind * string) list
 (** Diagnostic rows from the exact running writer's start-ordered observations.
-    These remain details, never a replacement for current provider activity. *)
+    These remain details, never a replacement for current provider activity.
+    Archived unfinished scopes describe the capture, not current execution. *)
 
 val status_rows :
   ?preparation:Masc.Keeper_turn_preview.preparation ->

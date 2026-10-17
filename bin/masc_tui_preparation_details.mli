@@ -1,0 +1,40 @@
+(** Selected, durable preparation evidence. No execution/resume authority. *)
+type target
+val target :
+  journal:Masc_tui_keeper_chat_log.t -> execution_id:string -> reply_turn_ref:string option ->
+  (target, string) result
+(** Autonomous journals supply their exact Turn_ref. Direct journals require a
+    recorded reply Turn_ref and the actual execution ID, including batch binding.
+    The journal object and its revision identify the local observation generation;
+    neither a Keeper name nor a timestamp supplies a missing execution link. *)
+val path : target -> string
+
+type issue =
+  | Partial_scan | Partial_return | Missing_manifest
+  | Unsupported_rows of int | Invalid_rows of int
+  | Invalid_report of string | Duplicate_report of string | Unlinked_report
+type snapshot = private
+  { observed_target : target
+  ; reports : Masc.Keeper_preparation_runtime_observation.report list
+  ; issues : issue list
+  }
+val decode : target:target -> Yojson.Safe.t -> (snapshot, string) result
+(** Read the existing runtime-trace response, validate envelope/turn/report
+    ownership and retain partial/unsupported/invalid evidence explicitly.
+    Duplicate report IDs are excluded, never chosen by time or list position.
+    An empty result does not prove no preparation occurred. *)
+
+type t
+type request
+type view = Not_loaded | Loading | Failed of string | Loaded of snapshot
+val empty : t
+val select : target option -> t -> t * request option
+(** One current read for the selected journal revision. Hiding details keeps
+    that owned read and can cache its result without displaying it. Selecting
+    another execution retires the previous request. A completed result is reused for that exact
+    journal/revision; no all-Keeper cache or history scan is introduced. *)
+val requested_target : request -> target
+val receive : request -> (snapshot, string) result -> t -> t
+(** Only the still-current request capability may settle this selection. *)
+val view : target -> t -> view
+(** Workspace retirement and explicit refresh discard [t] with [empty]. *)

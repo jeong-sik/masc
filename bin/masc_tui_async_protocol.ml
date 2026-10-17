@@ -266,6 +266,8 @@ type async_msg =
       }
   | Keeper_native_tasks_loaded of
       string * (Masc_tui_native_tasks.t, Masc_tui_native_tasks.error) result
+  | Keeper_preparation_loaded of
+      Masc_tui_preparation_details.request * (Masc_tui_preparation_details.snapshot, string) result
   | Keeper_child_content_loaded of
       string * (Masc_tui_child_content.t, Masc_tui_child_content.error) result
   | Context_inspector_loaded of
@@ -690,6 +692,7 @@ let rec workspace_message_is_read = function
   | Keeper_chat_copy_loaded _
   | Keeper_native_tasks_loaded _
   | Keeper_child_content_loaded _
+  | Keeper_preparation_loaded _
   | Keeper_chat_journal_loaded _
   | Context_inspector_loaded _
   | Keeper_chat_older_loaded _
@@ -910,7 +913,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Keeper_chat_history_loaded (_, _, _, _)
     | Keeper_chat_copy_loaded (_, _, _) | Keeper_chat_operation_loaded _
     | Keeper_chat_journal_loaded _ | Keeper_native_tasks_loaded (_, _)
-    | Keeper_child_content_loaded (_, _) | Context_inspector_loaded (_, _, _)
+    | Keeper_child_content_loaded (_, _) | Keeper_preparation_loaded (_, _) | Context_inspector_loaded (_, _, _)
     | Keeper_chat_older_loaded (_, _, _, _) | Local_workspace_read (_, _)
     | Lanes_loaded (_, _) | Lane_inventory_loaded (_, _) | Clients_loaded (_, _)
     | Lane_runs_loaded (_, _, _, _) | Lane_run_detail_loaded (_, _, _)
@@ -1043,7 +1046,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Keeper_chat_interrupt_done (_, _, _)
   | Keeper_chat_history_loaded (_, _, _, _) | Keeper_chat_copy_loaded (_, _, _)
   | Keeper_chat_operation_loaded _ | Keeper_chat_journal_loaded _
-  | Keeper_native_tasks_loaded (_, _) | Keeper_child_content_loaded (_, _)
+  | Keeper_native_tasks_loaded (_, _) | Keeper_child_content_loaded (_, _) | Keeper_preparation_loaded (_, _)
   | Context_inspector_loaded (_, _, _) | Keeper_chat_older_loaded (_, _, _, _)
   | Local_workspace_read (_, _) | Lanes_loaded (_, _)
   | Lane_inventory_loaded (_, _) | Clients_loaded (_, _)

@@ -1,6 +1,6 @@
 module Usage = Runtime_provider_usage_window
 
-let ( let* ) = Result.bind
+module Projection = Server_provider_usage_history_projection
 
 let store config =
   Dated_jsonl.open_store
@@ -10,47 +10,11 @@ let store config =
 
 let scope_id = Runtime_quota_window.scope_id
 
-let kind_json = function
-  | Usage.Five_hour -> `String "five_hour"
-  | Usage.Seven_day -> `String "seven_day"
-  | Usage.Duration_minutes minutes ->
-      `String (Printf.sprintf "duration_%dm" minutes)
-  | Usage.Provider_label label -> `String ("provider:" ^ label)
-
-let utilization_json = function
-  | Usage.Fraction value -> [ "unit", `String "fraction"; "value", `Float value ]
-  | Usage.Percent value -> [ "unit", `String "percent"; "value", `Int value ]
-  | Usage.Usd { used; limit } ->
-      [ "unit", `String "usd"; "value", `Float used
-      ; "limit", Json_util.float_opt_to_json limit ]
-
-let record_json ~scope ~observed_at (report : Usage.report) =
-  let scope_id = scope_id scope in
-  let source = Usage.source_to_string report.source in
-  let snapshot = match Usage.report_shape report.source with
-    | Sparse_update -> []
-    | Complete_snapshot ->
-        [ `Assoc [ "record", `String "complete_snapshot";
-            "scope_id", `String scope_id; "source", `String source;
-            "state", `String (if report.windows = [] then "reported_no_windows" else "reported");
-            "observed_at", `Float observed_at ] ] in
-  snapshot @ List.map
-    (fun (window : Usage.window) ->
-      `Assoc
-        ([ "scope_id", `String scope_id
-        ; "source", `String source
-        ; "kind", kind_json window.kind
-        ; "limit_id", Option.fold ~none:`Null ~some:(fun id -> `String id) window.limit_id
-        ; "observed_at", `Float observed_at
-        ; "resets_at", Option.fold ~none:`Null ~some:(fun ts -> `Int ts) window.resets_at
-        ] @ utilization_json window.utilization))
-    report.windows
-
 let install config =
   let journal = store config in
   Usage.set_record_observer (fun ~scope ~observed_at report ->
     Dated_jsonl.append journal
-      (`List (record_json ~scope ~observed_at report)))
+      (`List (Projection.record_json ~scope_id:(scope_id scope) ~observed_at report)))
 
 type window = One_day | Seven_days | Fourteen_days
 
@@ -64,94 +28,6 @@ let days_of_window = function
   | One_day -> 1
   | Seven_days -> 7
   | Fourteen_days -> 14
-
-type point = {
-  scope_id : string;
-  source : string;
-  kind : string;
-  limit_id : string option;
-  utilization : Usage.utilization;
-  observed_at : float;
-  resets_at : int option;
-}
-
-let member key json = Json_util.assoc_member_opt key json
-
-let string key json =
-  match member key json with
-  | Some (`String value) when value <> "" -> Ok value
-  | _ -> Error ("provider usage history: missing " ^ key)
-
-let optional_string key json =
-  match member key json with
-  | Some (`String value) -> Ok (Some value)
-  | Some `Null -> Ok None
-  | _ -> Error ("provider usage history: invalid " ^ key)
-
-let optional_int key json =
-  match member key json with
-  | Some (`Int value) -> Ok (Some value)
-  | Some `Null -> Ok None
-  | _ -> Error ("provider usage history: invalid " ^ key)
-
-let number key json =
-  match member key json with
-  | Some (`Float value) when Float.is_finite value -> Ok value
-  | Some (`Int value) -> Ok (float_of_int value)
-  | _ -> Error ("provider usage history: invalid " ^ key)
-
-(* The stored line back into the variant [utilization_json] wrote: the unit
-   word and the value's JSON type decide together, and anything else is not
-   a report this store wrote. *)
-let utilization_of_json json =
-  match member "unit" json, member "value" json with
-  | Some (`String "fraction"), Some (`Float value) when Float.is_finite value ->
-      Ok (Usage.Fraction value)
-  | Some (`String "fraction"), Some (`Int value) ->
-      Ok (Usage.Fraction (float_of_int value))
-  | Some (`String "percent"), Some (`Int value) -> Ok (Usage.Percent value)
-  | Some (`String "usd"), _ ->
-      let* used = number "value" json in
-      let* limit = match member "limit" json with
-        | Some `Null -> Ok None
-        | Some _ -> let* limit = number "limit" json in
-            if limit > 0.0 then Ok (Some limit)
-            else Error "provider usage history: invalid USD limit"
-        | None -> Error "provider usage history: missing USD limit"
-      in
-      if used >= 0.0 then Ok (Usage.Usd { used; limit })
-      else Error "provider usage history: invalid USD usage"
-  | _ -> Error "provider usage history: invalid unit or value"
-
-let decode json =
-  let* scope_id = string "scope_id" json in
-  let* source = string "source" json in
-  let* kind = string "kind" json in
-  (* OpenRouter renamed the display label; retain the same history series.
-     Restrict the alias to its source so another provider's label is untouched. *)
-  let kind =
-    if String.equal source (Usage.source_to_string Usage.Openrouter_key_read) then
-      match kind with
-      | "provider:credit limit" -> "provider:API key credit limit"
-      | "provider:credit usage (all time)" -> "provider:API key usage (all time)"
-      | _ -> kind
-    else kind
-  in
-  let* limit_id = optional_string "limit_id" json in
-  let* utilization = utilization_of_json json in
-  let* observed_at = number "observed_at" json in
-  let* resets_at = optional_int "resets_at" json in
-  Ok { scope_id; source; kind; limit_id; utilization; observed_at; resets_at }
-
-let point_json point =
-  `Assoc
-    ([ "scope_id", `String point.scope_id
-    ; "source", `String point.source
-    ; "kind", `String point.kind
-    ; "limit_id", Option.fold ~none:`Null ~some:(fun id -> `String id) point.limit_id
-    ; "observed_at", `Float point.observed_at
-    ; "resets_at", Option.fold ~none:`Null ~some:(fun ts -> `Int ts) point.resets_at
-    ] @ utilization_json point.utilization)
 
 let window_start ~now ~window =
   (floor (now /. 86400.0) -. float_of_int (days_of_window window - 1)) *. 86400.0
@@ -171,43 +47,13 @@ let read config ~now ~window =
   else
     let since_at = window_start ~now ~window in
     let journal = store config in
-    let latest = Hashtbl.create 128 in
-    let snapshots = Hashtbl.create 32 in
-    let unreadable = ref 0 in
+    (* The callback owns one accumulator cell; all history decisions return
+       a new immutable projection. Diagnostics stay in traversal order. *)
+    let projection = ref (Projection.create ~since_at ~now) in
     let skip ~where detail =
       Log.Server.warn "provider usage history unreadable report: %s: %s" where
         detail;
-      incr unreadable
-    in
-    let in_window observed_at = observed_at >= since_at && observed_at <= now in
-    let snapshot json =
-      let* scope_id = string "scope_id" json in
-      let* source = string "source" json in
-      let* observed_at = number "observed_at" json in
-      let* empty = match member "state" json with
-        | Some (`String "reported_no_windows") -> Ok true
-        | Some (`String "reported") | None -> Ok false
-        | Some _ -> Error "provider usage history: invalid snapshot state" in
-      if in_window observed_at then (
-        let key = scope_id, source, Log.format_utc_date_of observed_at in
-        match Hashtbl.find_opt snapshots key with
-        | Some (held, _) when held >= observed_at -> ()
-        | Some _ | None -> Hashtbl.replace snapshots key (observed_at, empty));
-      Ok ()
-    in
-    let consume_item item =
-      match member "record" item with
-      | Some (`String "complete_snapshot") -> snapshot item
-      | Some _ -> Error "provider usage history: unknown record kind"
-      | None ->
-          let* point = decode item in
-          if in_window point.observed_at then (
-            let day = Log.format_utc_date_of point.observed_at in
-            let key = point.scope_id, point.source, point.kind, point.limit_id, day in
-            match Hashtbl.find_opt latest key with
-            | Some held when held.observed_at >= point.observed_at -> ()
-            | Some _ | None -> Hashtbl.replace latest key point);
-          Ok ()
+      projection := Projection.note_unreadable !projection
     in
     let consume = function
       | Dated_jsonl.Malformed_json { path; line_number; detail } ->
@@ -219,9 +65,9 @@ let read config ~now ~window =
       | Dated_jsonl.Parsed (`List items) ->
           List.iter
             (fun item ->
-              match consume_item item with
+              match Projection.consume_item !projection item with
               | Error detail -> skip ~where:"stored report" detail
-              | Ok () -> ())
+              | Ok next -> projection := next)
             items
       | Dated_jsonl.Parsed _ ->
           skip ~where:"stored line" "expected a report list"
@@ -237,55 +83,4 @@ let read config ~now ~window =
           (Dated_jsonl.read_error_to_string read_error);
         Error "provider usage history store unavailable"
     | Ok () ->
-        (* A complete report supersedes every older window from its source on
-           that day, including an omitted window. Keep prior days as history.
-           Filtering after reading also handles observer writes that arrive
-           out of timestamp order. Old list-only records remain readable. *)
-        let points = Hashtbl.fold (fun _ point acc ->
-          let key = point.scope_id, point.source, Log.format_utc_date_of point.observed_at in
-          match Hashtbl.find_opt snapshots key with
-          | Some (at, _) when point.observed_at < at -> acc
-          | Some _ | None -> point :: acc) latest [] in
-        (* Source replacement must happen before choosing one daily point:
-           a later empty source must not erase another source's observation. *)
-        let daily = Hashtbl.create 128 in
-        List.iter (fun point ->
-          let key = point.scope_id, point.kind, point.limit_id,
-            Log.format_utc_date_of point.observed_at in
-          match Hashtbl.find_opt daily key with
-          | Some held when compare (held.observed_at, held.source)
-              (point.observed_at, point.source) >= 0 -> ()
-          | Some _ | None -> Hashtbl.replace daily key point) points;
-        let points = Hashtbl.fold (fun _ point acc -> point :: acc) daily [] in
-        let points =
-          List.sort
-            (fun a b ->
-              let key p = p.scope_id, p.kind, p.limit_id, p.observed_at in
-              compare (key a) (key b))
-            points
-        in
-        (* An empty report is an observation, not a zero utilization point.
-           A different source's surviving windows still make that scope/day a
-           numeric report. Markers without a shape assert only replacement. *)
-        let empty_days = Hashtbl.create 16 in
-        Hashtbl.iter (fun (scope_id, _source, day) (observed_at, empty) ->
-          if empty && not (List.exists (fun point -> point.scope_id = scope_id
-            && Log.format_utc_date_of point.observed_at = day) points) then
-            let key = scope_id, day in
-            match Hashtbl.find_opt empty_days key with
-            | Some held when held >= observed_at -> ()
-            | Some _ | None -> Hashtbl.replace empty_days key observed_at) snapshots;
-        let empty_reports = Hashtbl.fold (fun (scope_id, _) observed_at rows ->
-            (scope_id, observed_at) :: rows) empty_days []
-          |> List.sort compare
-          |> List.map (fun (scope_id, observed_at) -> `Assoc [
-               "scope_id", `String scope_id; "observed_at", `Float observed_at]) in
-        Ok
-          (`Assoc
-            [ "days", `Int (days_of_window window)
-            ; "generated_at", `Float now
-            ; "sampling", `String "latest_provider_report_per_utc_day"
-            ; "unreadable_reports", `Int !unreadable
-            ; "reported_no_windows", `List empty_reports
-            ; "points", `List (List.map point_json points)
-            ])
+        Ok (Projection.response_json ~days:(days_of_window window) !projection)

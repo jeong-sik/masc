@@ -15356,7 +15356,7 @@ let keeper_message_preparation_operation_targets state ~keeper_name =
            state.msg_journal_inflight) -> [operation_id]
      | Operation _, (None | Some (Queued | Running _ | Succeeded _ | Failed _ | Cancelled _))
      | Autonomous_turn _, (None | Some _) -> [])
-  | Some _, (Some _ | None) | None, (Some _ | None) -> []
+  | Some (_, (Ok _ | Error _)), (Some _ | None) | None, (Some _ | None) -> []
 ;;
 
 let keeper_message_unfolded_status_rows (state : state) live ~now =

@@ -287,6 +287,10 @@ val run_turn
   -> user_message:string
   -> input_speaker:Keeper_input_speaker.t
   -> turn_kind:Turn_record.turn_kind
+  -> approval_admission:Keeper_approval_origin.admission
+     (** Host-owned direct operation or exact admitted-source context. It is
+         not inferred from rendered prompts and does not change exact-grant
+         authorization when this turn continues an approval. *)
   -> skill_snapshot:Skill_catalog_snapshot.t
   -> task_skill_selection:
        (Keeper_task_skill_turn.t, Keeper_task_skill_turn.error) result

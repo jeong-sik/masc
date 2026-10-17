@@ -1,5 +1,6 @@
 type causal_context =
   { turn_id : int option
+  ; origin : Keeper_approval_origin.t
   ; snapshot : Yojson.Safe.t
   }
 

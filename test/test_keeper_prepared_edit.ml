@@ -171,7 +171,7 @@ let public_bundle ?snapshot ?(sourceful = true) ?(with_read = false) ?(with_writ
       ~global_skill_catalog:catalog
       ~skill_inventory:(Keeper_skill_inventory.of_snapshot ~descriptors snapshot)
       ~task_skills:(Keeper_task_skill_turn.skills selection) in
-  let causal = Keeper_gate_causal_context.create ~turn_id:(Some 13)
+  let causal = Keeper_gate_causal_context.create ~origin:Keeper_approval_origin.unavailable ~turn_id:(Some 13)
       ~initial:(`Assoc ["task_id", `String task.task_id]) in
   let bundle = Keeper_tools_agent_core_bundle.make_tool_bundle_for_capability_surface ~config ~meta
       ~publication_recovery:recovery ~capability_surface:surface ~clock:env#clock ~gate_context:causal

@@ -462,6 +462,7 @@ let prepare_agent_setup
       ~(context_injector : Agent_core.Hooks.context_injector)
       ~(start_turn_count : int)
       ~(keeper_turn_id : int)
+      ~(approval_admission : Keeper_approval_origin.admission)
       ~(turn_kind : Turn_record.turn_kind)
       ~(runtime_id : string)
       ~(config_root : string)
@@ -541,8 +542,16 @@ let prepare_agent_setup
   in
   let ctx_snapshot = ctx_work in
   let gate_history, gate_history_omitted = gate_history_slice history_messages in
+  let skill_turn_ref = Ids.Turn_ref.make
+    ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+    ~absolute_turn:keeper_turn_id in
+  let* approval_origin =
+    Keeper_approval_origin.from_admission approval_admission ~turn_ref:skill_turn_ref
+    |> Result.map_error (fun detail -> Agent_core.Error.Internal detail)
+  in
   let gate_context =
     Keeper_gate_causal_context.create
+      ~origin:approval_origin
       ~turn_id:(Some keeper_turn_id)
       ~initial:
         (gate_causal_initial
@@ -648,9 +657,6 @@ let prepare_agent_setup
       ~projection:turn_skill_projection
       task_skill_selection
   in
-  let skill_turn_ref = Ids.Turn_ref.make
-    ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-    ~absolute_turn:keeper_turn_id in
   let composition_result_delivery = Keeper_composition_result_delivery.create
     ~base_path:config.base_path ~physical_turn_ref:skill_turn_ref in
   let* skill_activation_context =

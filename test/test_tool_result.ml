@@ -587,7 +587,7 @@ let test_repeated_result_keys_resolve_to_the_first_binding () =
 
 let test_gate_causal_context_preserves_deferred () =
   let context =
-    Masc.Keeper_gate_causal_context.create
+    Masc.Keeper_gate_causal_context.create ~origin:Keeper_approval_origin.unavailable
       ~turn_id:(Some 7)
       ~initial:(`Assoc [])
   in

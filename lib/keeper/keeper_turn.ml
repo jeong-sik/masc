@@ -837,6 +837,7 @@ let run_keeper_invocation_turn_admitted_inner
                     ~turn_id:keeper_turn_id
                     (fun () ->
                       Keeper_agent_run.run_turn
+                                      ~approval_admission:(Keeper_approval_origin.Direct_request operation_id)
                                       ~observation_token
                                       ?direct_resume
                                       ~native_continuation:{ binding = native_binding; resumed = native_resume }

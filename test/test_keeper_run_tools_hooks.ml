@@ -683,7 +683,7 @@ let test_completed_calls_share_the_history_budget () =
 
 let test_tool_payload_is_never_rendered () =
   let context =
-    Masc.Keeper_gate_causal_context.create ~turn_id:(Some 1) ~initial:(`Assoc [])
+    Masc.Keeper_gate_causal_context.create ~origin:Keeper_approval_origin.unavailable ~turn_id:(Some 1) ~initial:(`Assoc [])
   in
   record_calls context 13;
   let kept, omitted = completed_calls_of_snapshot context in
@@ -710,7 +710,7 @@ let test_tool_payload_is_never_rendered () =
 let test_disposition_survives_for_every_call () =
   (* [disposition] is the part the judgment turns on once the payload is gone. *)
   let context =
-    Masc.Keeper_gate_causal_context.create ~turn_id:(Some 1) ~initial:(`Assoc [])
+    Masc.Keeper_gate_causal_context.create ~origin:Keeper_approval_origin.unavailable ~turn_id:(Some 1) ~initial:(`Assoc [])
   in
   Masc.Keeper_gate_causal_context.record_tool_result
     context
@@ -745,7 +745,7 @@ let test_budget_still_bounds_a_large_input () =
   (* The payload is gone but a tool [input] can itself be large, and an axis with
      no declared ceiling is the one that grows until a provider refuses. *)
   let context =
-    Masc.Keeper_gate_causal_context.create ~turn_id:(Some 1) ~initial:(`Assoc [])
+    Masc.Keeper_gate_causal_context.create ~origin:Keeper_approval_origin.unavailable ~turn_id:(Some 1) ~initial:(`Assoc [])
   in
   let total = 40 in
   List.iter
@@ -784,7 +784,7 @@ let test_budget_still_bounds_a_large_input () =
 
 let test_completed_calls_short_list_is_whole () =
   let context =
-    Masc.Keeper_gate_causal_context.create ~turn_id:(Some 1) ~initial:(`Assoc [])
+    Masc.Keeper_gate_causal_context.create ~origin:Keeper_approval_origin.unavailable ~turn_id:(Some 1) ~initial:(`Assoc [])
   in
   record_calls context 3;
   let kept, omitted = completed_calls_of_snapshot context in

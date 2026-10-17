@@ -910,6 +910,7 @@ let run_turn
       ~(user_message : string)
       ~(input_speaker : Keeper_input_speaker.t)
       ~(turn_kind : Turn_record.turn_kind)
+      ~(approval_admission : Keeper_approval_origin.admission)
       ~(skill_snapshot : Skill_catalog_snapshot.t)
       ~(task_skill_selection :
           (Keeper_task_skill_turn.t, Keeper_task_skill_turn.error) result)
@@ -1244,6 +1245,7 @@ let run_turn
   let setup = match native_scope with
     | Error detail -> Error (checkpoint_persistence_error ~keeper_name:meta.name ~detail)
     | Ok () -> Keeper_run_tools.prepare_agent_setup
+      ~approval_admission
       ?preview
       ?observation_token
       ?dynamic_context_for_tools:prompt_ctx.dynamic_context_for_tools

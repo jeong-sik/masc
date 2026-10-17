@@ -4282,7 +4282,7 @@ candidates = ["projection.http", "codex.codex"]
                                        ())
                                 else None
                               in
-                              let settlement = Keeper_agent_run.run_turn
+                              let settlement = Keeper_agent_run.run_turn ~approval_admission:Keeper_approval_origin.Unavailable
                                 ?trajectory_acc
                                 ~config
                                 ~meta

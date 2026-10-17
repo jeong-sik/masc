@@ -1186,6 +1186,9 @@ let run_keeper_cycle
                            ; build_turn_prompt
                            ; channel
                            ; continuation_channel = continuation_channel_of_wake wake
+                           ; approval_admission = Keeper_approval_origin.Admitted
+                               (Keeper_heartbeat_source_batch.selections
+                                  (Keeper_heartbeat_source_batch.sources turn_input))
                            ; hitl_resolution
                            ; cleanup
                            ; config

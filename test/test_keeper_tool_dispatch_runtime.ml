@@ -3480,6 +3480,7 @@ let approved_web_search_resolution
       ~ctx_work
       ~gate_context:(fun () ->
         { Masc.Keeper_gate.turn_id = Some 18
+        ; origin = Keeper_approval_origin.unavailable
         ; snapshot = `Assoc []
         })
       ~name:"WebSearch"

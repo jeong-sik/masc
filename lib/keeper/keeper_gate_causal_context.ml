@@ -6,12 +6,13 @@ type completed_call =
 
 type t =
   { turn_id : int option
+  ; origin : Keeper_approval_origin.t
   ; initial : Yojson.Safe.t
   ; completed_rev : completed_call list Atomic.t
   }
 
-let create ~turn_id ~initial =
-  { turn_id; initial; completed_rev = Atomic.make [] }
+let create ~turn_id ~origin ~initial =
+  { turn_id; origin; initial; completed_rev = Atomic.make [] }
 ;;
 
 let fork t =
@@ -92,6 +93,7 @@ let snapshot t : Keeper_gate.causal_context =
     Atomic.get t.completed_rev |> completed_calls_within_budget
   in
   { turn_id = t.turn_id
+  ; origin = t.origin
   ; snapshot =
       `Assoc
         [ "initial", t.initial

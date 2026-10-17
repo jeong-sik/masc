@@ -382,6 +382,99 @@ let test_logical_origin_survives_approval_and_reopen () =
    (match (read_original ()).turn_ref with Some x -> Ids.Turn_ref.to_string x | None -> Alcotest.fail "no witness"))
 ;;
 
+let test_mixed_hitl_board_origin_keeps_exact_grant_separate () =
+  let module Origin = Keeper_approval_origin in
+  let module Causal = Masc.Keeper_gate_causal_context in
+  let base_path = temp_dir () in
+  let keeper_name = "mixed-origin" in
+  AQ.For_testing.reset_runtime_state ();
+  Fun.protect
+    ~finally:(fun () -> AQ.For_testing.reset_runtime_state (); cleanup_dir base_path)
+    (fun () ->
+       ignore (install_exn ~base_path);
+       ensure_keeper_exists ~base_path ~keeper_name;
+       let channel = Keeper_continuation_channel.dashboard ~thread_id:"mixed-thread" |> Result.get_ok in
+       let turn n = Ids.Turn_ref.make ~trace_id:"mixed-origin" ~absolute_turn:n in
+       let operation_id = Keeper_operation_id.of_string "original-operation" |> Result.get_ok in
+       let original = Origin.from_admission (Origin.Direct_request operation_id) ~turn_ref:(turn 1) |> Result.get_ok in
+       let input_a = `Assoc ["target", `String "effect-a"] in
+       let input_b = `Assoc ["target", `String "effect-b"] in
+       let id_a = match AQ.submit_pending ~origin:original ~keeper_name ~tool_name:"external-effect"
+           ~call_summary:None ~base_path ~input:input_a ~continuation_channel:channel () with
+         | Ok submission -> submission.approval_id
+         | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.storage_error_to_string error) in
+       (match AQ.resolve_with_policy ~base_path ~id:id_a ~decision:Rule_types.Decision.Approve
+           ~source:Rule_types.Human_operator () with
+        | Ok _ -> () | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
+       let resolution : Keeper_event_queue.hitl_resolution =
+         {approval_id=id_a; decision=Hitl_approved; channel} in
+       let grant = match Gate.cycle_grant_of_resolution resolution with
+         | Some grant -> grant | None -> Alcotest.fail "approval has no exact grant" in
+       let board : Keeper_event_queue.stimulus =
+         {post_id="board-b"; urgency=Normal; arrived_at=1.0
+         ; payload=Board_signal {kind=Post_created; author="author"; title="request"; content="new request"
+           ; hearth=None; updated_at=None}} in
+       let hitl = {board with post_id="hitl-a"; payload=Hitl_resolved resolution} in
+       let selections stimuli =
+         List.fold_left Keeper_event_queue.enqueue Keeper_event_queue.empty stimuli
+         |> fun queue -> Keeper_event_queue_state.with_pending queue
+             (Keeper_event_queue_state.with_revision 7L Keeper_event_queue_state.empty)
+         |> Keeper_event_queue_state.pending_selections in
+       let mixed_selections = selections [hitl;board] in
+       let current n = Origin.from_admission (Origin.Admitted mixed_selections) ~turn_ref:(turn n) |> Result.get_ok in
+       let request origin input : Gate.request =
+         let causal = Causal.create ~turn_id:(Some 200) ~origin ~initial:(`Assoc []) in
+         {keeper_name; operation="external-effect"; call_summary=None; input; base_path
+         ; causal_context=Some (Causal.snapshot (Causal.fork causal)); task_id=None
+         ; continuation_channel=Some channel; sandbox_profile=None} in
+       let decide origin input = Gate.decide_external_service ~cycle_grant:grant
+           ~keeper_always_allow:false (request origin input) in
+       let deferred_id = function
+         | Gate.Deferred {approval_id;_} -> approval_id
+         | Gate.Allow _ -> Alcotest.fail "new effect unexpectedly allowed"
+         | Gate.Unavailable error -> Alcotest.fail (Gate.unavailable_reason_to_string error) in
+       let id_b = decide (current 2) input_b |> deferred_id in
+       Alcotest.(check bool) "new nonmatching B never folds onto A" true (id_a <> id_b);
+       let pending_b () = match AQ.get_pending_entry_for_workspace ~base_path ~id:id_b with
+         | Ok (Some entry) -> entry
+         | Ok None -> Alcotest.fail "pending B disappeared"
+         | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.storage_error_to_string error) in
+       Alcotest.(check yojson) "B keeps actual mixed admission, not original A"
+         (Origin.to_yojson (current 2)) (Origin.to_yojson (pending_b ()).origin);
+       AQ.For_testing.reset_runtime_state ();
+       (match decide (current 2) input_a with
+        | Gate.Unavailable (Gate.Approval_grant_unavailable _) -> ()
+        | Gate.Unavailable ((Gate.Queue_storage_unavailable _ | Gate.Approval_grant_consumption_in_progress _) as error) ->
+          Alcotest.fail (Gate.unavailable_reason_to_string error)
+        | Gate.Allow _ | Gate.Deferred _ -> Alcotest.fail "store failure spent grant or submitted again");
+       ignore (install_exn ~base_path);
+       (match AQ.list_pending_entries_for_workspace ~base_path with
+        | Ok entries -> Alcotest.(check (list string)) "failure created no second submission" [id_b]
+            (List.map (fun (entry : Rule_types.pending_approval) -> entry.id) entries)
+        | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.storage_error_to_string error));
+       (match decide (current 3) input_a with
+        | Gate.Allow {source=Gate.One_shot_resolution id;_} -> Alcotest.(check string) "exact A consumed once" id_a id
+        | Gate.Allow {source=(Gate.Exact_always_rule _ | Gate.Keeper_always_allow | Gate.Workspace_always_allow
+            | Gate.Readonly_sandbox | Gate.Local_output | Gate.Observed_in_box _);_}
+        | Gate.Deferred _ -> Alcotest.fail "exact A lost original grant"
+        | Gate.Unavailable error -> Alcotest.fail (Gate.unavailable_reason_to_string error));
+       (match AQ.observe_waiting_request ~base_path ~id:id_a with
+        | Ok (Some observed) -> Alcotest.(check yojson) "grant retains original A origin"
+            (Origin.to_yojson original) (Origin.to_yojson observed.waiting_request.origin)
+        | Ok None -> Alcotest.fail "original A delivery absent"
+        | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.storage_error_to_string error));
+       let repeated_a = decide (current 3) input_a |> deferred_id in
+       Alcotest.(check bool) "spent exact grant cannot authorize again" true (repeated_a <> id_a);
+       Alcotest.(check string) "same mixed logical request survives another physical turn" id_b
+         (decide (current 3) input_b |> deferred_id);
+       Alcotest.(check yojson) "B retains its first physical witness"
+         (Origin.to_yojson (current 2)) (Origin.to_yojson (pending_b ()).origin);
+       let different = Origin.from_admission (Origin.Admitted (selections [{board with post_id="board-c"}]))
+           ~turn_ref:(turn 4) |> Result.get_ok in
+       let id_c = decide different input_b |> deferred_id in
+       Alcotest.(check bool) "another admitted Board request cannot fold onto B" true (id_c <> id_b))
+;;
+
 (* The producer's line arrives with the submission and is written on the
    request row; every later row of the approval copies it from there. A
    producer that states nothing leaves every row without one, whatever the
@@ -2323,7 +2416,7 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
          ; base_path
          ; sandbox_profile = None
          ; causal_context =
-             Some { Gate.turn_id = Some 99; snapshot = `Assoc [] }
+             Some { Gate.turn_id = Some 99; origin = Keeper_approval_origin.unavailable; snapshot = `Assoc [] }
          ; task_id
          ; continuation_channel = None
          }
@@ -5801,7 +5894,7 @@ let test_default_auto_judge_defers_without_blocking () =
          ; base_path
          ; sandbox_profile = None
          ; causal_context =
-             Some { Gate.turn_id = Some 9; snapshot = `Assoc [] }
+             Some { Gate.turn_id = Some 9; origin = Keeper_approval_origin.unavailable; snapshot = `Assoc [] }
          ; task_id = Some "task-auto-judge"
          ; continuation_channel = None
          }
@@ -6967,6 +7060,8 @@ let () =
             test_dedup_never_merges_distinct_origins
         ; Alcotest.test_case "logical origin survives approval and reopen" `Quick
             test_logical_origin_survives_approval_and_reopen
+        ; Alcotest.test_case "mixed HITL and Board origins preserve exact grant" `Quick
+            test_mixed_hitl_board_origin_keeps_exact_grant_separate
         ; Alcotest.test_case
             "retry folds onto unconsumed grant until consumed"
             `Quick

@@ -40,3 +40,19 @@ val same_logical_source : t -> t -> bool
 val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, string) result
 (** Strict canonical object; missing, duplicate and unknown fields are errors. *)
+
+(** Typed host admission before the physical turn reference is allocated. *)
+type admission =
+  | Direct_request of Keeper_operation_id.t
+  | Admitted of Keeper_event_queue_state.pending_selection list
+      (** One intake batch taken once from one durable queue state, which keeps a
+          single entry per stimulus identity ([uniq_stimuli] on admission,
+          [validate_state] on decode). [snapshot_ref] hashes the whole stimulus, so
+          the same [snapshot_ref] + [admitted_revision] cannot appear twice; a
+          duplicate is a fabricated batch and {!from_admission} refuses it. *)
+  | Unavailable
+
+val from_admission : admission -> turn_ref:Ids.Turn_ref.t -> (t, string) result
+(** Exact durable source coordinates only; an empty batch is explicitly
+    unavailable. Only Board payloads contribute a [board_post_id]. The set
+    describes admitted context, not an invented per-tool causal attribution. *)

@@ -1690,6 +1690,64 @@ let test_parse_error_default_message () =
   | Ok _ -> Alcotest.fail "expected API error"
 ;;
 
+let test_empty_context_overflow_keeps_recovery () =
+  let empty =
+    parse_empty
+      (response_json ~content:(`String "")
+         ~finish_reason:"model_context_window_exceeded" ())
+  in
+  check_bool "overflow reason survives empty classification" true
+    (empty.stop_reason = ContextWindowExceeded);
+  check_bool "existing recovery still receives context overflow" true
+    (match Retry.verdict_of_empty_completion
+             ~stop_reason:empty.stop_reason ~message:"controlled empty response" with
+     | Retry.Empty_overflow _ -> true
+     | Retry.Empty_attributed | Retry.Empty_unattributed _ -> false)
+;;
+
+let test_empty_unknown_stop_keeps_unattributed_failure () =
+  let token = "new_provider_finish" in
+  let empty = parse_empty (response_json ~content:(`String "") ~finish_reason:token ()) in
+  check_bool "unknown token survives empty classification" true
+    (empty.stop_reason = Unknown token);
+  match Retry.verdict_of_empty_completion
+          ~stop_reason:empty.stop_reason ~message:"controlled empty response" with
+  | Retry.Empty_unattributed { token = actual } ->
+    check_string "unattributed token remains visible" token actual
+  | Retry.Empty_attributed | Retry.Empty_overflow _ ->
+    Alcotest.fail "unknown empty turn must remain unattributed"
+;;
+
+let test_empty_unmatched_tools_keep_failure () =
+  let empty =
+    parse_empty (response_json ~content:(`String "") ~finish_reason:"tool_calls" ())
+  in
+  check_bool "missing tool blocks cannot become a successful empty turn" true
+    (empty.stop_reason = UnmatchedToolCalls);
+  check_bool "existing empty-turn classifier remains authoritative" true
+    (Retry.verdict_of_empty_completion
+       ~stop_reason:empty.stop_reason ~message:"controlled empty response"
+     = Retry.Empty_attributed)
+;;
+
+let test_other_empty_stops_keep_failure () =
+  List.iter (fun (finish_reason, expected) ->
+    let empty = parse_empty (response_json ~content:(`String "") ~finish_reason ()) in
+    check_bool "other empty stop remains classified" true (empty.stop_reason = expected))
+    [ "stop", EndTurn; "stop_sequence", StopSequence
+    ; "pause_turn", PauseTurn; "compaction", Compaction ]
+;;
+
+let test_content_free_policy_and_truncation_remain_responses () =
+  List.iter (fun (finish_reason, expected) ->
+    let response = parse_ok (response_json ~content:(`String "") ~finish_reason ()) in
+    check_bool "authoritative policy or truncation stop is preserved" true
+      (response.stop_reason = expected);
+    check_int "no answer content invented" 0 (List.length response.content))
+    [ "refusal", Refusal; "length", MaxTokens
+    ; "content_filter", ContentFilter; "repetition_truncation", RepetitionTruncation ]
+;;
+
 let test_parse_edge_shapes_for_text_and_telemetry () =
   let invalid_fence =
     parse_ok (response_json ~content:(`String "```json\nnot-json\n```") ())
@@ -3241,6 +3299,16 @@ let () =
             "error default message"
             `Quick
             test_parse_error_default_message
+        ; Alcotest.test_case "empty context overflow keeps recovery" `Quick
+            test_empty_context_overflow_keeps_recovery
+        ; Alcotest.test_case "empty unknown stop keeps unattributed failure" `Quick
+            test_empty_unknown_stop_keeps_unattributed_failure
+        ; Alcotest.test_case "empty unmatched tools keep failure" `Quick
+            test_empty_unmatched_tools_keep_failure
+        ; Alcotest.test_case "other empty stops keep failure" `Quick
+            test_other_empty_stops_keep_failure
+        ; Alcotest.test_case "content-free policy and truncation remain responses" `Quick
+            test_content_free_policy_and_truncation_remain_responses
         ; Alcotest.test_case
             "edge text shapes and telemetry"
             `Quick

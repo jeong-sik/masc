@@ -39,9 +39,10 @@ type empty_completion =
     that is neither an object nor a string. It is not the provider reporting
     anything.
 
-    [Empty_completion] is a fail-closed normal all-empty 200. Authoritative
-    refusal, truncation and interruption reasons remain typed responses even
-    without content, so the receiving consumer can distinguish those states. *)
+    [Empty_completion] retains empty turns for the existing retry/overflow
+    classifier, including unknown finish reasons and unmatched tool claims.
+    Only [Refusal], [MaxTokens], [ContentFilter] and [RepetitionTruncation]
+    remain typed responses without content. *)
 type parse_error =
   | Provider_error of
       { message : string

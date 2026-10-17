@@ -448,9 +448,10 @@ let parse_openai_response_result_json_raw
      | None -> Error (unreadable_response "malformed_openai_response:error_not_object_or_string"))
 ;;
 
-(* A normal all-empty completion fails closed. A typed refusal, truncation or
-   interruption remains a response even without content: replacing its reason
-   with an empty-completion failure would erase the provider's terminal state. *)
+(* Preserve only authoritative policy/truncation stops without content.
+   Other empty turns still need the existing Empty_completion classification:
+   context overflow recovers there, and unknown/missing-tool stops cannot
+   silently become a successful empty turn. *)
 let parse_openai_response_result_json
       ?(content_inline_reasoning = Capabilities.No_content_inline_reasoning)
       raw_json
@@ -460,10 +461,10 @@ let parse_openai_response_result_json
   | Ok ({ content = []; id; model; stop_reason; usage; telemetry } : Types.api_response)
     as response ->
     (match stop_reason with
-     | EndTurn | StopSequence ->
+     | EndTurn | StopToolUse | StopSequence | ContextWindowExceeded
+     | PauseTurn | Compaction | UnmatchedToolCalls | Unknown _ ->
        Error (Empty_completion { id; model; stop_reason; usage; telemetry })
-     | StopToolUse | MaxTokens | Refusal | ContentFilter | RepetitionTruncation
-     | ContextWindowExceeded | PauseTurn | Compaction | UnmatchedToolCalls | Unknown _ -> response)
+     | MaxTokens | Refusal | ContentFilter | RepetitionTruncation -> response)
   | Ok resp -> Ok resp
 ;;
 

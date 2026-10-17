@@ -193,13 +193,16 @@ type machine = {
       (* A fresh identity per load: an observer holding an older one knows
          the machine it read was replaced, even when the step count is back
          where it was. *)
-  mutable autosaved_once : bool;
-      (* Whether this incarnation has written [autosave_slot] yet. The first
-         time it does, whatever was there belongs to a machine this
-         incarnation never touched -- the previous load's or restore's -- and
-         [autosave_after] moves it to [autosave_prev_slot] first rather than
-         overwrite it. Every write after the first is this incarnation's own
-         history and just replaces the last one, same slot. *)
+  mutable previous_kept : bool;
+      (* Whether this incarnation has kept the autosave it found. The first
+         autosave of an incarnation finds a file that belongs to a machine it
+         never touched -- the previous load's or restore's -- and
+         [autosave_after] copies it to [autosave_prev_slot] before it writes.
+         Once the copy is on disk this is true and it is not made again, even
+         if the write that follows fails: a second copy would put this
+         incarnation's own history over the one it was keeping. Every write
+         after the first is this incarnation's own history replacing the last
+         one, same slot. *)
 }
 
 let state : machine option ref = ref None
@@ -688,23 +691,23 @@ let write_checkpoint st ~who ~dir ~slot =
      | Error message -> Error (Unreadable message))
 ;;
 
-(* Best-effort: move whatever is at [autosave_slot] to [autosave_prev_slot]
-   before this incarnation's first write replaces it. A missing source is not
-   an error -- a fresh checkpoint dir has nothing to preserve. A rename that
-   fails (permissions, a concurrent reader holding the old inode on some
-   filesystems) is swallowed: losing the previous incarnation's safety net is
-   better than blocking this incarnation's own progress from ever being
-   saved. *)
-let preserve_previous_autosave ~dir =
-  let source = Machine_checkpoint.path ~dir autosave_slot in
-  if Sys.file_exists source then (
-    let target = Machine_checkpoint.path ~dir autosave_prev_slot in
-    try
-      Sys.rename source target;
-      mark_checkpoint_write source;
-      mark_checkpoint_write target
+(* Copies what [autosave_slot] holds to [autosave_prev_slot], so the file an
+   incarnation's first autosave replaces survives it. A copy and not a rename:
+   the autosave stays in place until the new one replaces it atomically, so a
+   copy that fails, or a write that fails after it, leaves the autosave as it
+   was. Nothing here is swallowed. No file at [autosave_slot] means there is
+   nothing to keep. The copy is made from the lane's own file and not read as
+   a checkpoint, so one this server cannot decode is kept like any other. *)
+let keep_previous_autosave ~dir =
+  if not (Sys.file_exists (Machine_checkpoint.path ~dir autosave_slot)) then Ok ()
+  else
+    match
+      Machine_checkpoint.copy ~dir ~from:autosave_slot ~to_:autosave_prev_slot
     with
-    | Sys_error _ -> ())
+    | Ok () ->
+      mark_checkpoint_write (Machine_checkpoint.path ~dir autosave_prev_slot);
+      Ok ()
+    | Error message -> Error message
 ;;
 
 (* The autosave at the end of a call that ran the guest to an answer. It runs
@@ -718,21 +721,29 @@ let preserve_previous_autosave ~dir =
    resume. A failed write is reported in [ran.autosave] and never turns the
    call into an error, because the guest moved either way.
 
-   This incarnation's first successful write here preserves whatever
-   [autosave_slot] already held under [autosave_prev_slot] first: that file is
-   the previous incarnation's own last save, not this one's, and [load]'s or
-   [restore]'s very next call must not silently overwrite it. Every autosave
-   after the first is this incarnation's own history overwriting its own
-   history, same slot, no preservation. *)
+   This incarnation's first autosave keeps whatever [autosave_slot] already
+   held, by copying it to [autosave_prev_slot] first: that file is the previous
+   incarnation's own last save, not this one's, and [load]'s or [restore]'s
+   very next call must not silently overwrite it. If the copy fails nothing is
+   written and the reason is reported, so the old autosave stays and the next
+   call tries again. Every autosave after the copy is this incarnation's own
+   history replacing its own history. *)
 let autosave_after st ~who =
   if Dos_machine.exited st.m then Not_attempted
   else begin
-    if not st.autosaved_once then preserve_previous_autosave ~dir:st.checkpoint_dir;
-    match write_checkpoint st ~who ~dir:st.checkpoint_dir ~slot:autosave_slot with
+    let kept =
+      if st.previous_kept then Ok () else keep_previous_autosave ~dir:st.checkpoint_dir
+    in
+    match kept with
+    | Error message ->
+      Autosave_failed
+        (Printf.sprintf "the previous autosave could not be kept, so nothing was written: %s"
+           message)
     | Ok () ->
-      st.autosaved_once <- true;
-      Autosaved
-    | Error e -> Autosave_failed (error_to_string e)
+      st.previous_kept <- true;
+      (match write_checkpoint st ~who ~dir:st.checkpoint_dir ~slot:autosave_slot with
+       | Ok () -> Autosaved
+       | Error e -> Autosave_failed (error_to_string e))
   end
 ;;
 
@@ -1031,7 +1042,7 @@ let commit_load ~who prepared ~announce =
       | () ->
         let st = {m; steps=0; program=prepared.load_program; ledger_path; entries=[];
           saves_dir=prepared.load_saves_dir; checkpoint_dir=prepared.load_checkpoint_dir; kept;
-          controller=Some who; incarnation=Random_id.uuid_v7 (); autosaved_once=false} in
+          controller=Some who; incarnation=Random_id.uuid_v7 (); previous_kept=false} in
         state := Some st;
         mark_change ();
         note_activity ~who (Printf.sprintf "load %s" prepared.load_program);
@@ -1464,7 +1475,7 @@ let commit_restore ~who prepared ~announce =
             ledger_path=owned.restore_ledger_path; entries=owned.restore_entries;
             saves_dir=owned.restore_saves_dir;checkpoint_dir=owned.restore_checkpoint_dir;
             kept=owned.restore_kept;controller=Some who;
-            incarnation=Random_id.uuid_v7 ();autosaved_once=false} in
+            incarnation=Random_id.uuid_v7 ();previous_kept=false} in
           match Sys.rename owned.restore_staged_ledger owned.restore_ledger_path with
           | exception Sys_error message -> Error (Unreadable message)
           | () ->

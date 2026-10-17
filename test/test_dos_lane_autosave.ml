@@ -278,6 +278,44 @@ let test_a_save_leaves_only_the_checkpoint () =
       [ "autosave.ckpt"; "kept.ckpt" ] files)
 ;;
 
+(* The copy that keeps the previous autosave fails: autosave-prev cannot be
+   replaced because a directory holds its name. Nothing is written, the old
+   autosave is the file it was, and the call says why. Once the blocker is gone
+   the next call keeps the autosave and writes. *)
+let test_a_failed_copy_keeps_the_old_autosave_and_is_retried () =
+  with_fixture (fun fixture ->
+    ignore (play_a_campaign fixture);
+    let slot = match Machine_checkpoint.slot_of_string "quick" with
+      | Ok slot -> slot | Error message -> fail message in
+    ignore (require (Dos_lane.save ~who ~dir:fixture.checkpoints ~slot:(named_of "quick")));
+    let campaign = Digest.file (autosave_path fixture) in
+    Unix.mkdir (prev_path fixture) 0o755;
+    ignore
+      (require
+         (Dos_lane.restore ~who ~dir:fixture.checkpoints ~slot ~ledger_dir:fixture.directory
+            ~saves_dir_of:(fun _ -> fixture.saves)
+            ~announce:ignore));
+    let stepped = require (Dos_lane.step ~who ~steps:1_000 ~until_ready:false) in
+    (match (snd stepped).Dos_lane.autosave with
+     | Dos_lane.Autosave_failed _ -> ()
+     | Dos_lane.Autosaved | Dos_lane.Not_attempted ->
+       fail "the autosave was written although the previous one could not be kept");
+    check string "the old autosave is the file it was" campaign (Digest.file (autosave_path fixture));
+    Unix.rmdir (prev_path fixture);
+    let retried = require (Dos_lane.step ~who ~steps:1_000 ~until_ready:false) in
+    (match (snd retried).Dos_lane.autosave with
+     | Dos_lane.Autosaved -> ()
+     | Dos_lane.Autosave_failed reason -> fail reason
+     | Dos_lane.Not_attempted -> fail "no autosave attempted");
+    check string "the old autosave was kept under autosave-prev" campaign
+      (Digest.file (prev_path fixture));
+    check bool "and the autosave is the machine's own now" true
+      (Digest.file (autosave_path fixture) <> campaign);
+    (* The copy is made once: a later autosave leaves autosave-prev alone. *)
+    ignore (require (Dos_lane.step ~who ~steps:1_000 ~until_ready:false));
+    check string "autosave-prev is still the kept file" campaign (Digest.file (prev_path fixture)))
+;;
+
 (* lea ax,ax: the core does not implement it, so the boot faults at once. *)
 let faulting_program = "\x8d\xc0"
 
@@ -325,6 +363,8 @@ let () =
             test_a_load_with_no_autosave_needs_no_consent
         ; test_case "an unreadable autosave stops a load until consent" `Quick
             test_an_unreadable_autosave_stops_a_load_until_consent
+        ; test_case "a failed copy keeps the old autosave and is retried" `Quick
+            test_a_failed_copy_keeps_the_old_autosave_and_is_retried
         ; test_case "a faulted boot installs the machine and keeps the autosave" `Quick
             test_a_faulted_boot_installs_the_machine_and_keeps_the_autosave
         ] )

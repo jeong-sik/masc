@@ -2053,7 +2053,7 @@ let steps_in_slot ~base_path slot_name =
 ;;
 
 (* A restart looks like a fresh [masc_dos_load]: a new incarnation in memory,
-   [autosaved_once] starting false again, and the previous incarnation's
+   [previous_kept] starting false again, and the previous incarnation's
    autosave still on disk at the one slot everything writes to. A load that
    consents to replacing it has the new machine's first write move that file
    to autosave-prev rather than overwrite it. *)

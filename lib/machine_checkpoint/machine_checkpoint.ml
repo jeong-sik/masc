@@ -234,6 +234,15 @@ let write ~dir slot header ~meta ~machine_bytes =
 
 let read_file file = In_channel.with_open_bin file In_channel.input_all
 
+(* The bytes of [from] under [to_], whole and unread: a checkpoint this server
+   cannot decode copies like any other. The replace is [write]'s, so [to_] is
+   the old file or the complete copy, and [from] is never touched. *)
+let copy ~dir ~from ~to_ =
+  match read_file (path ~dir from) with
+  | exception Sys_error message -> Error message
+  | contents -> Fs_compat.save_file_atomic (path ~dir to_) contents
+;;
+
 let load_file ~dir slot =
   let file = path ~dir slot in
   if not (Sys.file_exists file) then Error (No_slot slot)

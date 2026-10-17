@@ -60,6 +60,12 @@ val write :
     right after [Ok] can bring the previous checkpoint back, which is a valid
     one. Creates [dir]. *)
 
+val copy : dir:string -> from:slot -> to_:slot -> (unit, string) result
+(** Copies the file of [from] over [to_] byte for byte, with {!write}'s atomic
+    and fsynced replace. [from] is not read as a checkpoint, so a damaged or
+    foreign one copies too, and it is never modified. [Error] when [from]
+    cannot be read or [to_] cannot be replaced; [to_] is then as it was. *)
+
 type contents = { header : header; meta : Yojson.Safe.t; machine_bytes : string }
 
 val read :

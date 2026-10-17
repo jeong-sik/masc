@@ -196,6 +196,41 @@ let test_list_refuses_a_header_that_outgrows_its_file () =
     | _ -> fail "one row")
 ;;
 
+(* A copy is the bytes of one slot under another, replaced as a write is: the
+   source is never touched, the target is the old file or the whole copy, and
+   a file this server cannot decode copies like any other. *)
+let test_copy () =
+  with_dir (fun dir ->
+    write_ok dir "from" (header ~core:"source" ());
+    let source_before = Digest.file (file dir "from") in
+    write_ok dir "to" (header ~core:"old" ());
+    check bool "the copy succeeds" true (Result.is_ok (C.copy ~dir ~from:(slot "from") ~to_:(slot "to")));
+    check string "the target is the source's bytes" source_before (Digest.file (file dir "to"));
+    check string "the source is untouched" source_before (Digest.file (file dir "from"));
+    check (list string) "no temporary file stays" [ "from.ckpt"; "to.ckpt" ]
+      (List.sort String.compare (Array.to_list (Sys.readdir dir)));
+    write_file (file dir "junk") "not a checkpoint";
+    check bool "a file that does not decode copies" true
+      (Result.is_ok (C.copy ~dir ~from:(slot "junk") ~to_:(slot "junk-copy")));
+    check string "byte for byte" "not a checkpoint" (read_file (file dir "junk-copy")))
+;;
+
+let test_copy_failures_leave_the_target () =
+  with_dir (fun dir ->
+    write_ok dir "to" (header ~core:"old" ());
+    let target_before = Digest.file (file dir "to") in
+    check bool "a missing source is an error" true
+      (Result.is_error (C.copy ~dir ~from:(slot "missing") ~to_:(slot "to")));
+    check string "and the target is as it was" target_before (Digest.file (file dir "to"));
+    write_ok dir "from" (header ());
+    Sys.mkdir (file dir "blocked") 0o755;
+    check bool "a target that cannot be replaced is an error" true
+      (Result.is_error (C.copy ~dir ~from:(slot "from") ~to_:(slot "blocked")));
+    check bool "and the blocker stays a directory" true (Sys.is_directory (file dir "blocked"));
+    check (list string) "no temporary file stays" [ "blocked.ckpt"; "from.ckpt"; "to.ckpt" ]
+      (List.sort String.compare (Array.to_list (Sys.readdir dir))))
+;;
+
 let read_meta dir s = C.read_meta ~dir (slot s) ~machine:C.Dos ~format:1
 
 (* What [read_meta] gives up to stay cheap: the machine bytes never come
@@ -250,6 +285,8 @@ let () =
         ; test_case "round trip" `Quick test_round_trip
         ; test_case "refusals" `Quick test_refusals
         ; test_case "atomic replace" `Quick test_replace_is_atomic
+        ; test_case "copy" `Quick test_copy
+        ; test_case "a failed copy leaves the target" `Quick test_copy_failures_leave_the_target
         ; test_case "list" `Quick test_list
         ; test_case "list reads only the header" `Quick test_list_reads_only_the_header
         ; test_case "list refuses a header that outgrows its file" `Quick

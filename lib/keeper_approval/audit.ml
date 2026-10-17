@@ -597,7 +597,27 @@ let resolved_audit_fields =
   ; "summary_status"
   ; "exact_attempt"
   ; "summary_attempt_disposition"
+  ; "origin"
+  ; "continuation_channel"
   ]
+;;
+
+(* Rows written since the approval origin was persisted carry the admitted
+   source and the reply route the request was made under. Older rows have
+   neither, so both are optional; when present they must decode, because a
+   history row that claims a route we cannot read is not evidence of one. *)
+let validate_optional_provenance ~surface fields =
+  let ( let* ) = Result.bind in
+  let check key decode =
+    match List.assoc_opt key fields with
+    | None | Some `Null -> Ok ()
+    | Some json ->
+      decode json
+      |> Result.map ignore
+      |> Result.map_error (fun detail -> Printf.sprintf "%s.%s: %s" surface key detail)
+  in
+  let* () = check "origin" Keeper_approval_origin.of_yojson in
+  check "continuation_channel" Keeper_continuation_channel.of_yojson
 ;;
 
 let required_member ~surface key fields =
@@ -652,6 +672,7 @@ let resolved_approval_json_of_audit_event json =
   match json with
   | `Assoc fields ->
     let* () = Json_util.reject_unknown_fields ~surface ~allowed:resolved_audit_fields fields in
+    let* () = validate_optional_provenance ~surface fields in
     let* event = required_nonblank_string ~surface "event" fields in
     let* () =
       if String.equal event (event_to_string Resolved)

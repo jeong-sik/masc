@@ -1150,7 +1150,7 @@ esac
   Call_log.init ~base_path ();
   let turn_ctx_cell = Call_log.create_turn_ctx_cell () in
   Call_log.set_turn_context ~cell:turn_ctx_cell ~agent_name:meta.name ~turn:7 ~keeper_turn_id:1 ();
-  let causal = Causal.create ~turn_id:(Some 1) ~initial:(`Assoc []) in
+  let causal = Causal.create ~turn_id:(Some 1) ~origin:Keeper_approval_origin.unavailable ~initial:(`Assoc []) in
   let both_read, release = Eio.Promise.create () in
   let arrivals = Atomic.make 0 in
   let record_gate_result ~operation ~input result =
@@ -1228,7 +1228,7 @@ esac
 
 let test_causal_forks_keep_invocation_owned_history () =
   let module Causal = Masc.Keeper_gate_causal_context in
-  let parent = Causal.create ~turn_id:(Some 1) ~initial:(`Assoc []) in
+  let parent = Causal.create ~turn_id:(Some 1) ~origin:Keeper_approval_origin.unavailable ~initial:(`Assoc []) in
   let record cell operation = Causal.record_tool_result cell ~operation ~input:(`Assoc [])
       (Tool_result.make_ok ~tool_name:operation ~start_time:(Tool_timing.start ()) ()) in
   record parent "prior";

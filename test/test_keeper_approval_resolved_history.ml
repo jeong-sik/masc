@@ -70,7 +70,7 @@ let append_row ~base_path ~ts (row : Yojson.Safe.t) =
 ;;
 
 let seed_resolved ~base_path ~ts ~id ?(keeper = "beta") ?(tool = "tool_execute")
-      ?(decision = "approve") ?(source = "auto_judge") ()
+      ?(decision = "approve") ?(source = "auto_judge") ?(extra = []) ()
   =
   let decision_kind, decision_reason =
     if String.equal decision "approve"
@@ -98,6 +98,7 @@ let seed_resolved ~base_path ~ts ~id ?(keeper = "beta") ?(tool = "tool_execute")
     ; "exact_attempt", `Assoc [ "state", `String "unbound" ]
     ; "summary_attempt_disposition", `Null
     ]
+    @ extra
   in
   append_row ~base_path ~ts (`Assoc fields)
 ;;
@@ -246,6 +247,48 @@ let test_resolved_row_missing_current_field_is_rejected base_path =
     check bool "missing current field is named" true (String.length detail > 0)
   | Error _ -> fail "wrong audit read stage"
   | Ok _ -> fail "incomplete resolved row was accepted"
+;;
+
+(* The writer puts the admitted origin and the reply route on every approval
+   audit row. The reader must take them, and must not take a route it cannot
+   decode. *)
+let test_resolved_row_with_provenance_is_listed base_path =
+  let origin =
+    Keeper_approval_origin.from_admission
+      Keeper_approval_origin.Unavailable
+      ~turn_ref:(Ids.Turn_ref.make ~trace_id:"history-trace" ~absolute_turn:3)
+    |> Result.get_ok
+  in
+  let channel =
+    Keeper_continuation_channel.dashboard ~thread_id:"history-thread" |> Result.get_ok
+  in
+  seed_resolved
+    ~base_path
+    ~ts:(now -. minutes 5)
+    ~id:"with-provenance"
+    ~extra:
+      [ "origin", Keeper_approval_origin.to_yojson origin
+      ; "continuation_channel", Keeper_continuation_channel.to_yojson channel
+      ]
+    ();
+  let history = AQ.list_recent_resolved ~base_path ~now_ts:now () in
+  check (list string) "row carrying origin and route is listed" [ "with-provenance" ]
+    (ids history)
+;;
+
+let test_resolved_row_with_unreadable_route_is_rejected base_path =
+  seed_resolved
+    ~base_path
+    ~ts:(now -. minutes 5)
+    ~id:"bad-route"
+    ~extra:[ "continuation_channel", `Assoc [ "kind", `String "no-such-channel" ] ]
+    ();
+  match Audit.list_recent_resolved ~base_path ~now_ts:now () with
+  | Error { stage = List_recent_resolved; detail } ->
+    check bool "the unreadable key is named" true
+      (String_util.contains_substring detail "continuation_channel")
+  | Error _ -> fail "wrong audit read stage"
+  | Ok _ -> fail "a route that does not decode was accepted"
 ;;
 
 let test_malformed_jsonl_is_unavailable base_path =
@@ -451,6 +494,10 @@ let () =
     ; ( "boundaries"
       , [ test_case "missing current resolved field is rejected" `Quick
             (with_store test_resolved_row_missing_current_field_is_rejected)
+        ; test_case "resolved row with origin and route is listed" `Quick
+            (with_store test_resolved_row_with_provenance_is_listed)
+        ; test_case "resolved row with an unreadable route is rejected" `Quick
+            (with_store test_resolved_row_with_unreadable_route_is_rejected)
         ; test_case "malformed JSONL is unavailable" `Quick
             (with_store test_malformed_jsonl_is_unavailable)
         ; test_case "empty store is an empty page" `Quick

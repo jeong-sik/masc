@@ -9,8 +9,8 @@
     newest durable snapshot lets the next turn derive an immutable reuse map
     without process-global cache state or rewriting and fsyncing the same
     bytes. Snapshot rows keep empty artifact previews, so message text lives
-    only in the blob and is exposed through the administrator-only resolving
-    endpoint. *)
+    only in the blob. The administrator-only endpoints list a row's parts and
+    return one listed part's bytes at a time. *)
 
 type artifact =
   { art_bytes : int
@@ -42,36 +42,33 @@ type t =
   ; tool_schemas : tool_schema list
   }
 
-type resolved_message =
-  { rmsg_index : int
-  ; rmsg_role : string
-  ; rmsg_bytes : int
-  ; rmsg_sha256 : string
-  ; rmsg_content : Yojson.Safe.t
+(** One retained part of a request. Parts are listed in the order the request
+    carries them: the system prompt, the messages, the tool schemas.
+    [part_index] is the position in that order. *)
+type part_kind =
+  | System_prompt
+  | Message of { role : string }
+  | Tool_schema of { name : string }
+
+type part =
+  { part_index : int
+  ; part_kind : part_kind
+  ; part_bytes : int
+  ; part_sha256 : string
   }
 
-type resolved_tool_schema =
-  { rts_index : int
-  ; rts_name : string
-  ; rts_bytes : int
-  ; rts_sha256 : string
-  ; rts_content : Yojson.Safe.t
+(** A row and its parts, read without opening any blob. *)
+type manifest =
+  { mf_snapshot : t
+  ; mf_parts : part list
   }
 
-type resolved_system_prompt =
-  { rsp_bytes : int
-  ; rsp_sha256 : string
-  ; rsp_text : string
-  }
-
-(* The record was [resolved] and its fields repeated [resolved_], so a reader
-   met the word twice for one fact. The prefix now names the record, not the
-   state. *)
-type resolved =
-  { rv_snapshot : t
-  ; rv_system_prompt : resolved_system_prompt option
-  ; rv_messages : resolved_message list
-  ; rv_tool_schemas : resolved_tool_schema list
+(** One part's exact stored bytes. *)
+type part_content =
+  { pc_keeper : string
+  ; pc_turn_ref : Ids.Turn_ref.t
+  ; pc_part : part
+  ; pc_text : string
   }
 
 type read_error =
@@ -87,9 +84,9 @@ type read_error =
       ; expected : int
       ; actual : int
       }
-  | Artifact_json_invalid of
-      { sha256 : string
-      ; detail : string
+  | Part_not_found of
+      { turn_ref : Ids.Turn_ref.t
+      ; index : int
       }
 
 val read_error_to_string : read_error -> string
@@ -108,15 +105,33 @@ val write_best_effort :
 (** Persist one immutable snapshot. Cancellation propagates; storage failures
     are logged and do not fail the Keeper turn. *)
 
-val read_resolved :
+val read_manifest :
   config:Workspace.config ->
   keeper:string ->
   turn_ref:Ids.Turn_ref.t ->
-  (resolved, read_error) result
+  (manifest, read_error) result
+(** The row for exactly [turn_ref] and the kind, byte count and SHA-256 of
+    each part. The digests come from the row's artifact markers; no blob is
+    read. *)
+
+val read_part :
+  config:Workspace.config ->
+  keeper:string ->
+  turn_ref:Ids.Turn_ref.t ->
+  index:int ->
+  (part_content, read_error) result
+(** The stored bytes of one part the row for [turn_ref] lists.
+    [Part_not_found] when the row has no part at [index]: a digest alone
+    never opens a blob, because the blob store is shared by the whole
+    workspace. The blob store checks the bytes against their digest. *)
 
 val to_json : t -> Yojson.Safe.t
 val of_json : Yojson.Safe.t -> (t, string) result
-val resolved_to_json : resolved -> Yojson.Safe.t
+
+val manifest_schema : string
+val part_schema : string
+val manifest_to_json : manifest -> Yojson.Safe.t
+val part_content_to_json : part_content -> Yojson.Safe.t
 
 (** {1 Payloads} *)
 

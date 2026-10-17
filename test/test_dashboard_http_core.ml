@@ -631,7 +631,8 @@ let test_keeper_sensitive_get_permissions_are_exact () =
     (* file-changes returns the exact text a keeper wrote to a file, which is
        part of what raw-trace already holds. Same data, same gate — a lighter
        one here would be a second door onto the first door's content. *)
-    [ "raw-traces"; "raw-trace"; "provider-input"; "memory-journal"
+    [ "raw-traces"; "raw-trace"; "provider-input"; "provider-input/part"
+    ; "memory-journal"
     ; "memory-facts"; "working-context"; "file-changes"; "tool-calls" ];
   check bool "safe chat history stays on its ordinary read route" true
     (permission "/api/v1/keepers/fixture-keeper/chat/history" = None);

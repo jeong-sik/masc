@@ -140,10 +140,9 @@ export { fetchDashboardNamespaceTruth } from './dashboard-hot'
 
 export {
   fetchKeeperProviderInput,
-  type ProviderInputMessage,
+  fetchKeeperProviderInputPart,
+  type ProviderInputPart,
   type ProviderInputSnapshot,
-  type ProviderInputSystemPrompt,
-  type ProviderInputToolSchema,
   type ProviderInputWire,
 } from './dashboard-provider-input'
 

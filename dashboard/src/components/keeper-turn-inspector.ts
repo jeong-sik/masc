@@ -14,12 +14,14 @@ import { ContextWindowFacts } from './common/context-window-facts'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import {
   fetchKeeperProviderInput,
+  fetchKeeperProviderInputPart,
   fetchKeeperToolCalls,
   fetchKeeperTurnRecords,
 } from '../api/dashboard'
 import type {
   MemoryOsFact,
   MemoryOsTurnRecordSnapshot,
+  ProviderInputPart,
   ProviderInputSnapshot,
   ToolCallEntry,
   ToolCallsResponse,
@@ -678,12 +680,82 @@ function toProviderInputView(state: {
   return { kind: 'loading' }
 }
 
-function providerInputContentText(content: unknown): string {
+// A message or a tool schema is stored as compact JSON and read here
+// indented; the system prompt is text.
+function providerInputPartText(part: ProviderInputPart, text: string): string {
+  if (part.kind === 'system_prompt') return text
   try {
-    return JSON.stringify(content, null, 2) ?? String(content)
+    return JSON.stringify(JSON.parse(text), null, 2) ?? text
   } catch {
-    return String(content)
+    return text
   }
+}
+
+// A part's text is read when the reader opens it, not with the list: one
+// answer used to carry every message body of the request, 19.6 MB for a long
+// history (#37752).
+function ProviderInputPartCard({
+  keeperName,
+  turnRef,
+  part,
+  cap,
+  openAtStart = false,
+}: {
+  keeperName: string
+  turnRef: string
+  part: ProviderInputPart
+  cap: string
+  openAtStart?: boolean
+}) {
+  const [open, setOpen] = useState(openAtStart)
+  const resource = useManagedAsyncResource<string>(null)
+  useEffect(() => {
+    if (!open) return undefined
+    resource.reset()
+    void resource.load(signal => fetchKeeperProviderInputPart(keeperName, turnRef, part, { signal }))
+    return () => {
+      resource.cancel()
+    }
+  }, [open, keeperName, turnRef, part, resource])
+  const head = html`
+    <div class="ti-code-h">
+      <span class="cap">${cap}</span>
+      <button
+        class="ti-copy"
+        data-testid="turn-provider-part-toggle"
+        onClick=${(e: Event) => {
+          e.stopPropagation()
+          setOpen(!open)
+        }}
+      >
+        ${open ? '접기' : '열기'}
+      </button>
+    </div>
+  `
+  if (!open) return html`<div class="ti-code">${head}</div>`
+  const state = resource.state.value
+  if (state.error) {
+    return html`
+      <div class="ti-code">
+        ${head}
+        <div class="text-2xs text-[var(--color-status-warn)] px-1 pb-1" data-testid="turn-provider-part-error">
+          이 항목을 불러오지 못했습니다 · ${state.error}
+        </div>
+      </div>
+    `
+  }
+  if (state.data === null) {
+    return html`
+      <div class="ti-code">
+        ${head}
+        <div class="text-2xs text-[var(--color-fg-muted)] px-1 pb-1" data-testid="turn-provider-part-loading">
+          불러오는 중…
+        </div>
+      </div>
+    `
+  }
+  const text = providerInputPartText(part, state.data)
+  return html`<${CodeCard} cap=${cap} text=${text} tokens=${approxTokens(text)} />`
 }
 
 function ProviderInputStatus({ input }: { input: ProviderInputView }) {
@@ -704,46 +776,54 @@ function ProviderInputStatus({ input }: { input: ProviderInputView }) {
   return null
 }
 
-function MessagesTab({ input }: { input: ProviderInputView }) {
+function MessagesTab({ keeperName, input }: { keeperName: string; input: ProviderInputView }) {
   if (input.kind !== 'loaded') {
     return html`<div class="ti-sec"><${ProviderInputStatus} input=${input} /></div>`
   }
   const snapshot = input.data
+  const messages = snapshot.parts.filter(
+    (part): part is Extract<ProviderInputPart, { kind: 'message' }> => part.kind === 'message',
+  )
   return html`
     <div class="ti-sec">
       <div class="ti-sec-h">
         <h4>실제 전송 메시지</h4>
-        <span class="n">${snapshot.messages.length}개 · ${snapshot.turnRef}</span>
+        <span class="n">${messages.length}개 · ${snapshot.turnRef}</span>
       </div>
       <div class="text-3xs text-[var(--color-fg-disabled)] px-1 pb-2" data-testid="turn-provider-wire">
         ${snapshot.wire.provider} / ${snapshot.wire.model} · ${snapshot.wire.httpCodec} ·
         ${snapshot.wire.bodyBytes.toLocaleString()}B · ${snapshot.wire.bodySha256}
       </div>
       <div class="ti-seq-rail" data-testid="turn-provider-messages">
-        ${snapshot.messages.map(message => {
-          const text = providerInputContentText(message.content)
-          return html`
-            <div key=${message.index} class="ti-msg">
-              <div class="ti-msg-h">
-                <span class="ti-msg-role ${message.role}">${message.role}</span>
-                <span class="who">전송 메시지</span>
-                <span class="seq">#${message.index} · ${message.bytes}B · ${message.sha256.slice(0, 12)}</span>
-              </div>
-              <${CodeCard} cap="정규화된 메시지 JSON" text=${text} tokens=${approxTokens(text)} />
+        ${messages.map(message => html`
+          <div key=${message.index} class="ti-msg">
+            <div class="ti-msg-h">
+              <span class="ti-msg-role ${message.role}">${message.role}</span>
+              <span class="who">전송 메시지</span>
+              <span class="seq">#${message.index} · ${message.bytes}B · ${message.sha256.slice(0, 12)}</span>
             </div>
-          `
-        })}
+            <${ProviderInputPartCard}
+              keeperName=${keeperName}
+              turnRef=${snapshot.turnRef}
+              part=${message}
+              cap="정규화된 메시지 JSON"
+            />
+          </div>
+        `)}
       </div>
     </div>
   `
 }
 
-function ContextTab({ input }: { input: ProviderInputView }) {
+function ContextTab({ keeperName, input }: { keeperName: string; input: ProviderInputView }) {
   if (input.kind !== 'loaded') {
     return html`<div class="ti-sec"><${ProviderInputStatus} input=${input} /></div>`
   }
   const snapshot = input.data
-  const systemPrompt = snapshot.systemPrompt
+  const systemPrompt = snapshot.parts.find(part => part.kind === 'system_prompt') ?? null
+  const toolSchemas = snapshot.parts.filter(
+    (part): part is Extract<ProviderInputPart, { kind: 'tool_schema' }> => part.kind === 'tool_schema',
+  )
   return html`
     <div class="ti-sec">
       <div class="ti-ctx-card">
@@ -752,10 +832,17 @@ function ContextTab({ input }: { input: ProviderInputView }) {
           ${systemPrompt
             ? html`<span class="tok">${systemPrompt.bytes}B · ${systemPrompt.sha256.slice(0, 12)}</span>`
             : html`<span class="tok">없음</span>`}
-          ${systemPrompt ? html`<${CopyBtn} text=${systemPrompt.text} />` : null}
         </div>
         ${systemPrompt
-          ? html`<pre data-testid="turn-provider-system-prompt">${systemPrompt.text}</pre>`
+          ? html`<div data-testid="turn-provider-system-prompt">
+              <${ProviderInputPartCard}
+                keeperName=${keeperName}
+                turnRef=${snapshot.turnRef}
+                part=${systemPrompt}
+                cap="시스템 프롬프트"
+                openAtStart=${true}
+              />
+            </div>`
           : html`<div class="ti-msg-b ti-msg-absent" data-testid="turn-provider-system-prompt-absent">
               이 요청에는 별도의 시스템 프롬프트가 없습니다
             </div>`}
@@ -764,20 +851,18 @@ function ContextTab({ input }: { input: ProviderInputView }) {
     <div class="ti-sec">
       <div class="ti-sec-h">
         <h4>실제 도구 스키마</h4>
-        <span class="n">${snapshot.toolSchemas.length}개</span>
+        <span class="n">${toolSchemas.length}개</span>
       </div>
-      ${snapshot.toolSchemas.length
-        ? snapshot.toolSchemas.map(tool => {
-          const text = providerInputContentText(tool.content)
-          return html`
-            <${CodeCard}
-              key=${tool.index}
-              cap=${`#${tool.index} ${tool.name} · ${tool.bytes}B · ${tool.sha256.slice(0, 12)}`}
-              text=${text}
-              tokens=${approxTokens(text)}
-            />
-          `
-        })
+      ${toolSchemas.length
+        ? toolSchemas.map(tool => html`
+          <${ProviderInputPartCard}
+            key=${tool.index}
+            keeperName=${keeperName}
+            turnRef=${snapshot.turnRef}
+            part=${tool}
+            cap=${`#${tool.index} ${tool.name} · ${tool.bytes}B · ${tool.sha256.slice(0, 12)}`}
+          />
+        `)
         : html`<div class="ti-msg-b ti-msg-absent" data-testid="turn-provider-tool-schemas-absent">
             이 요청에 전송된 도구 스키마가 없습니다
           </div>`}
@@ -999,8 +1084,8 @@ function TurnDetailDrawer({
 
         <div class="ti-body">
           ${tab === 'timeline' && html`<${TimelineTab} t=${t} />`}
-          ${tab === 'messages' && html`<${MessagesTab} input=${providerInput} />`}
-          ${tab === 'context' && html`<${ContextTab} input=${providerInput} />`}
+          ${tab === 'messages' && html`<${MessagesTab} keeperName=${keeperName} input=${providerInput} />`}
+          ${tab === 'context' && html`<${ContextTab} keeperName=${keeperName} input=${providerInput} />`}
           ${tab === 'meta' && html`<${MetaTab} record=${row.record} t=${t} source=${source} />`}
         </div>
       </div>

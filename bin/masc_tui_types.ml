@@ -6809,11 +6809,18 @@ type state = {
   mutable context_inspector_loading: bool;
   mutable context_inspector_generation: int;
   (* Stepping through turns starts a read per step, and one read asks the
-     server to resolve a whole provider input (hundreds of blob artifacts,
-     seconds of work). The reads a step replaced were left running and their
-     answers thrown away, so holding a key queued that work several times
-     over. Each launch stops the one before it through this. *)
+     server to find the turn's row among the Keeper's stored requests. The
+     reads a step replaced were left running and their answers thrown away,
+     so holding a key queued that work several times over. Each launch stops
+     the one before it through this. *)
   mutable context_inspector_cancel: (unit -> unit) option;
+  (* The one part whose text a pane shows, and its reading. The list names
+     parts without text; a part is read when the cursor or an opened row
+     lands on it, and the pane draws it only under the same key. Moving on
+     stops the read in flight the way a new turn read does. *)
+  mutable context_inspector_part:
+    (Masc_tui_context_inspector.part_key, string) Masc_tui_fetched.t;
+  mutable context_inspector_part_cancel: (unit -> unit) option;
   mutable context_inspector_reading:
     (string * Masc_tui_context_inspector.reading) option;
   (* When the reading above was received. The pane refreshes only by hand
@@ -11004,6 +11011,11 @@ let supersede_context_inspector_load state stop =
   state.context_inspector_cancel <- stop
 ;;
 
+let supersede_context_inspector_part_load state stop =
+  Option.iter (fun previous -> previous ()) state.context_inspector_part_cancel;
+  state.context_inspector_part_cancel <- stop
+;;
+
 (* The invite card on screen, if there is one. *)
 let play_card_shown (state : state) =
   match state.play_invite.shown_name with
@@ -11311,6 +11323,8 @@ let help_key_answers ~compact_viewport (state : state) =
 let close_context_inspector (state : state) =
   state.context_inspector_open <- false;
   supersede_context_inspector_load state None;
+  supersede_context_inspector_part_load state None;
+  state.context_inspector_part <- Masc_tui_fetched.clear state.context_inspector_part;
   state.context_inspector_exact <- None;
   state.context_inspector_scroll <- 0;
   state.context_inspector_detail_scroll <- 0;
@@ -11437,6 +11451,8 @@ let create_state
   context_inspector_generation = 0;
   context_inspector_cancel = None;
   context_inspector_reading = None;
+  context_inspector_part = Masc_tui_fetched.initial;
+  context_inspector_part_cancel = None;
   context_inspector_read_at = None;
   context_inspector_tab = Masc_tui_context_inspector.Composition;
   context_inspector_cursor = 0;

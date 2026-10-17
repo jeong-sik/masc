@@ -4,6 +4,7 @@ import { html } from 'htm/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   fetchKeeperProviderInput,
+  fetchKeeperProviderInputPart,
   fetchKeeperToolCalls,
   fetchKeeperTurnRecords,
   type ProviderInputSnapshot,
@@ -21,14 +22,29 @@ import type { KeeperConversationEntry } from '../types'
 vi.mock('../api/dashboard', () => {
   return {
     fetchKeeperProviderInput: vi.fn(),
+    fetchKeeperProviderInputPart: vi.fn(),
     fetchKeeperToolCalls: vi.fn(),
     fetchKeeperTurnRecords: vi.fn(),
   }
 })
 
 const fetchKeeperProviderInputMock = vi.mocked(fetchKeeperProviderInput)
+const fetchKeeperProviderInputPartMock = vi.mocked(fetchKeeperProviderInputPart)
 const fetchKeeperToolCallsMock = vi.mocked(fetchKeeperToolCalls)
 const fetchKeeperTurnRecordsMock = vi.mocked(fetchKeeperTurnRecords)
+
+// The text each listed part reads back as, by index.
+const providerInputPartTexts: Record<number, string> = {
+  0: 'exact system prompt T42',
+  1: JSON.stringify({ role: 'user', content: 'deploy the staging build' }),
+  2: JSON.stringify({ role: 'assistant', content: 'previous keeper reply' }),
+  3: JSON.stringify({ role: 'tool', content: 'large tool result retained in this turn' }),
+  4: JSON.stringify({
+    name: 'masc_board_post_get',
+    description: 'read a board post',
+    input_schema: { type: 'object' },
+  }),
+}
 
 function providerInputForTurn(): ProviderInputSnapshot {
   return {
@@ -48,46 +64,12 @@ function providerInputForTurn(): ProviderInputSnapshot {
       bodyBytes: 560_513,
       bodySha256: 'a'.repeat(64),
     },
-    systemPrompt: {
-      bytes: 25,
-      sha256: 'b'.repeat(64),
-      text: 'exact system prompt T42',
-    },
-    messages: [
-      {
-        index: 0,
-        role: 'user',
-        bytes: 58,
-        sha256: 'c'.repeat(64),
-        content: { role: 'user', content: 'deploy the staging build' },
-      },
-      {
-        index: 1,
-        role: 'assistant',
-        bytes: 65,
-        sha256: 'd'.repeat(64),
-        content: { role: 'assistant', content: 'previous keeper reply' },
-      },
-      {
-        index: 2,
-        role: 'tool',
-        bytes: 96,
-        sha256: 'e'.repeat(64),
-        content: { role: 'tool', content: 'large tool result retained in this turn' },
-      },
-    ],
-    toolSchemas: [
-      {
-        index: 0,
-        name: 'masc_board_post_get',
-        bytes: 87,
-        sha256: 'f'.repeat(64),
-        content: {
-          name: 'masc_board_post_get',
-          description: 'read a board post',
-          input_schema: { type: 'object' },
-        },
-      },
+    parts: [
+      { kind: 'system_prompt', index: 0, bytes: 23, sha256: 'b'.repeat(64) },
+      { kind: 'message', role: 'user', index: 1, bytes: 58, sha256: 'c'.repeat(64) },
+      { kind: 'message', role: 'assistant', index: 2, bytes: 65, sha256: 'd'.repeat(64) },
+      { kind: 'message', role: 'tool', index: 3, bytes: 96, sha256: 'e'.repeat(64) },
+      { kind: 'tool_schema', name: 'masc_board_post_get', index: 4, bytes: 87, sha256: 'f'.repeat(64) },
     ],
   }
 }
@@ -362,6 +344,8 @@ describe('KeeperTurnInspector v2 drawer', () => {
   beforeEach(() => {
     fetchKeeperToolCallsMock.mockResolvedValue(toolCallsForTurn())
     fetchKeeperProviderInputMock.mockResolvedValue(providerInputForTurn())
+    fetchKeeperProviderInputPartMock.mockImplementation(async (_name, _turnRef, part) =>
+      providerInputPartTexts[part.index] ?? '')
     Object.defineProperty(navigator, 'clipboard', {
       value: {
         writeText: vi.fn().mockResolvedValue(undefined),
@@ -1122,7 +1106,7 @@ describe('KeeperTurnInspector v2 drawer', () => {
 
   })
 
-  it('loads and renders the exact provider messages for the selected turn_ref', async () => {
+  it('lists the provider messages and reads one only when it is opened', async () => {
     fetchKeeperTurnRecordsMock.mockResolvedValue(turnRecordsWithMemoryOs())
 
     const { container } = render(html`<${KeeperTurnInspector} keeperName="albini" />`)
@@ -1147,19 +1131,27 @@ describe('KeeperTurnInspector v2 drawer', () => {
       'trace-active#42',
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     )
-    const text = container.textContent ?? ''
-    expect(text).toContain('실제 전송 메시지')
-    expect(text).toContain('trace-active#42')
-    expect(text).toContain('deploy the staging build')
-    expect(text).toContain('previous keeper reply')
-    expect(text).toContain('large tool result retained in this turn')
-    expect(text).toContain('560,513B')
-    expect(text).toContain('a'.repeat(64))
-    expect(text).not.toContain('요청 · input')
-    expect(text).not.toContain('응답 · result')
+    const toggles = container.querySelectorAll('[data-testid="turn-provider-messages"] [data-testid="turn-provider-part-toggle"]')
+    expect(toggles).toHaveLength(3)
+    expect(fetchKeeperProviderInputPartMock).not.toHaveBeenCalled()
+    expect(container.textContent).not.toContain('deploy the staging build')
+
+    fireEvent.click(toggles[2]!)
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('large tool result retained in this turn')
+    })
+    expect(fetchKeeperProviderInputPartMock).toHaveBeenCalledTimes(1)
+    expect(fetchKeeperProviderInputPartMock).toHaveBeenCalledWith(
+      'albini',
+      'trace-active#42',
+      expect.objectContaining({ kind: 'message', role: 'tool', index: 3 }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    )
+    expect(container.textContent).not.toContain('deploy the staging build')
   })
 
-  it('renders the exact system prompt and tool schemas in the context tab', async () => {
+  it('reads the system prompt with the context tab and a tool schema when it is opened', async () => {
     fetchKeeperTurnRecordsMock.mockResolvedValue(turnRecordsWithMemoryOs())
 
     const { container } = render(html`<${KeeperTurnInspector} keeperName="albini" />`)
@@ -1176,15 +1168,46 @@ describe('KeeperTurnInspector v2 drawer', () => {
     fireEvent.click(container.querySelector('[data-testid="turn-tab-context"]')!)
 
     await waitFor(() => {
-      expect(container.querySelector('[data-testid="turn-provider-system-prompt"]')).toBeTruthy()
+      expect(container.querySelector('[data-testid="turn-provider-system-prompt"]')?.textContent)
+        .toContain('exact system prompt T42')
     })
-    const text = container.textContent ?? ''
-    expect(text).toContain('exact system prompt T42')
-    expect(text).toContain('실제 도구 스키마')
-    expect(text).toContain('masc_board_post_get')
-    expect(text).toContain('read a board post')
-    expect(text).not.toContain('당신은 MASC 코디네이션 서버의 keeper')
-    expect(text).not.toContain('주입 컨텍스트')
+    expect(container.textContent).not.toContain('read a board post')
+
+    const toggles = container.querySelectorAll('[data-testid="turn-provider-part-toggle"]')
+    fireEvent.click(toggles[toggles.length - 1]!)
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('read a board post')
+    })
+    expect(fetchKeeperProviderInputPartMock).toHaveBeenCalledWith(
+      'albini',
+      'trace-active#42',
+      expect.objectContaining({ kind: 'tool_schema', name: 'masc_board_post_get', index: 4 }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    )
+  })
+
+  it('says so when one part cannot be read', async () => {
+    fetchKeeperTurnRecordsMock.mockResolvedValue(turnRecordsWithMemoryOs())
+    fetchKeeperProviderInputPartMock.mockRejectedValue(new Error('artifact is absent'))
+
+    const { container } = render(html`<${KeeperTurnInspector} keeperName="albini" />`)
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('T42')
+    })
+
+    fireEvent.click(container.querySelector('.ti-turn-summary')!)
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="turn-detail-drawer"]')).toBeTruthy()
+    })
+
+    fireEvent.click(container.querySelector('[data-testid="turn-tab-context"]')!)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="turn-provider-part-error"]')).toBeTruthy()
+    })
+    expect(container.textContent).toContain('artifact is absent')
   })
 
   it('rejects a provider-input response for a different turn', async () => {

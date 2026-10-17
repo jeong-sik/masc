@@ -35,13 +35,13 @@ def read(path):
         return stream.read()
 
 
-def inspect(turns, provider, trace, keeper, turn_ref, proposal_id, fragment):
+def inspect(turns, provider, parts, trace, keeper, turn_ref, proposal_id, fragment):
     require(turns['keeper'] == keeper, 'Turn listing keeper mismatch')
     matches = [e['record'] for e in turns['entries'] if e['record']['turn_ref'] == turn_ref]
     require(len(matches) == 1, 'Expected exactly one selected TurnRecord')
     turn = matches[0]
     require(type(turn['absolute_turn']) is int and turn['absolute_turn'] > 0, 'Invalid absolute turn')
-    require(provider['schema'] == 'masc.resolved-provider-input.v1', 'Provider input schema mismatch')
+    require(provider['schema'] == 'masc.provider-input-manifest.v1', 'Provider input schema mismatch')
     for key in ('keeper', 'trace_id', 'absolute_turn', 'turn_ref'):
         require(provider[key] == turn[key], 'Provider input and TurnRecord identity mismatch')
     require(turn['keeper'] == keeper and turn['turn_ref'] == turn_ref, 'Selected turn mismatch')
@@ -66,22 +66,33 @@ def inspect(turns, provider, trace, keeper, turn_ref, proposal_id, fragment):
             'Raw trace is incomplete, duplicated or out of order')
     require(trace[0]['record_type'] == 'run_started' and trace[-1]['record_type'] == 'run_finished',
             'Expected a complete captured run')
+    def part_text(entry):
+        captured = parts.get(entry['index'])
+        require(captured is not None, 'Missing captured provider-input part')
+        require(captured['schema'] == 'masc.provider-input-part.v1',
+                'Provider input part schema mismatch')
+        require(captured['keeper'] == keeper and captured['turn_ref'] == turn_ref,
+                'Provider input part identity mismatch')
+        require(captured['part'] == entry, 'Captured part is not the listed part')
+        data = captured['text'].encode('utf-8')
+        require(type(entry['bytes']) is int and entry['bytes'] == len(data),
+                'Provider input part byte count mismatch')
+        require(entry['sha256'] == hashlib.sha256(data).hexdigest(),
+                'Provider input part SHA-256 mismatch')
+        return captured['text']
+
     texts = []
     system_prompt_integrity = 'not_present'
-    if provider['system_prompt'] is not None:
-        prompt = provider['system_prompt']
-        prompt_bytes = prompt['text'].encode('utf-8')
-        require(type(prompt['bytes']) is int and prompt['bytes'] == len(prompt_bytes),
-                'System prompt byte count mismatch')
-        require(prompt['sha256'] == hashlib.sha256(prompt_bytes).hexdigest(),
-                'System prompt SHA-256 mismatch')
-        system_prompt_integrity = 'verified'
-        texts.append(prompt['text'])
-    for message in provider['messages']:
-        require(message['content']['role'] == message['role'], 'Captured message role mismatch')
-        for block in message['content']['content_blocks']:
-            if block['type'] == 'text':
-                texts.append(block['text'])
+    for entry in provider['parts']:
+        if entry['kind'] == 'system_prompt':
+            texts.append(part_text(entry))
+            system_prompt_integrity = 'verified'
+        elif entry['kind'] == 'message':
+            message = decode(part_text(entry))
+            require(message['role'] == entry['role'], 'Captured message role mismatch')
+            for block in message['content_blocks']:
+                if block['type'] == 'text':
+                    texts.append(block['text'])
     fragment_count = sum(text.count(fragment) for text in texts)
     calls = []
     seen = set()
@@ -113,10 +124,9 @@ def inspect(turns, provider, trace, keeper, turn_ref, proposal_id, fragment):
             'complete_fragment_occurrences_in_captured_input': fragment_count,
             'exact_id_read_invocations': calls,
             'system_prompt_integrity': system_prompt_integrity,
-            'message_artifact_integrity': 'not_verified',
+            'message_artifact_integrity': 'verified',
             'semantic_adoption': 'not_verified', 'source_authenticity': 'not_attested',
             'limits': ['Captured pre-dispatch input does not prove remote provider receipt.',
-                       'Message artifact byte counts and hashes are not verified; Python JSON serialization is not the original Yojson byte stream.',
                        'Text occurrence does not establish its dynamic-context origin.',
                        'A successful tool completion does not prove full proposal delivery, reading or understanding.',
                        'Inspect raw tool results, artifact reads and subsequent behavior before claiming adoption.']}
@@ -126,6 +136,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('turn-records', 'provider-input', 'raw-trace', 'publication', 'fragment'):
         parser.add_argument('--' + name, type=Path, required=True)
+    parser.add_argument('--provider-input-parts', type=Path, required=True,
+                        help='Directory of captured /provider-input/part responses named <index>.json')
     parser.add_argument('--keeper', required=True)
     parser.add_argument('--turn-ref', required=True)
     parser.add_argument('--output', type=Path, required=True)
@@ -152,9 +164,20 @@ def main():
                 (publication['proposal_id'], publication['context_sha256'], 'keeper_workspace_memory_read',
                  'model_proposed', 'not_performed', 'not_checked_against_current_memory')),
                 'Incomplete expected discovery fragment')
+        parts = {}
+        for path in sorted(args.provider_input_parts.iterdir()):
+            stem = path.name[:-len('.json')] if path.name.endswith('.json') else ''
+            require(stem.isdigit(), 'Unexpected file among captured provider-input parts')
+            name = 'provider_input_part_' + stem
+            raw = read(path)
+            inputs[name] = raw
+            with (args.output / (name + '.raw')).open('xb') as stream:
+                os.chmod(stream.name, 0o600)
+                stream.write(raw)
+            parts[int(stem)] = decode(raw)
         trace = [decode(line) for line in inputs['raw_trace'].splitlines() if line.strip()]
-        report = inspect(decode(inputs['turn_records']), decode(inputs['provider_input']), trace,
-                         args.keeper, args.turn_ref, publication['proposal_id'], fragment)
+        report = inspect(decode(inputs['turn_records']), decode(inputs['provider_input']), parts,
+                         trace, args.keeper, args.turn_ref, publication['proposal_id'], fragment)
     except (ValueError, KeyError, TypeError, OSError) as error:
         report['error_type'] = type(error).__name__
         # Do not echo potentially private input, filesystem paths or provider text.

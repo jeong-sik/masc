@@ -1780,6 +1780,27 @@ let fetch_keeper_memory_input ~host ~port ~keeper_name =
        | exception Yojson.Json_error detail ->
            Error ("Memory input was not JSON: " ^ detail))
 
+(** One part the provider-input list named, read when a pane shows it. The
+    list itself carries no text, so opening a request costs its parts' counts
+    and digests, not every message it carried. *)
+let fetch_provider_input_part ~(host : string) ~(port : int)
+    (key : Masc_tui_context_inspector.part_key) : (string, string) result =
+  let path =
+    Printf.sprintf "/api/v1/keepers/%s/provider-input/part?turn_ref=%s&index=%d"
+      (percent_encode_path_segment key.part_keeper)
+      (percent_encode_query_value (Ids.Turn_ref.to_string key.part_turn_ref))
+      key.part_item.index
+  in
+  match http_get ~host ~port ~path with
+  | Error detail -> Error ("provider-input part: " ^ detail)
+  | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status) ->
+      Error (named_refusal "provider-input part" ~status ~body)
+  | Ok (_, body) ->
+      (match Yojson.Safe.from_string body with
+       | json -> Masc_tui_context_inspector.decode_part key json
+       | exception Yojson.Json_error detail ->
+           Error ("provider-input part was not JSON: " ^ detail))
+
 (** Fetch one completed turn and the immutable provider-input snapshot joined
     by that turn's exact [turn_ref]. A failure on either side stays visible;
     no mutable latest-prompt value is allowed to fill another turn. *)

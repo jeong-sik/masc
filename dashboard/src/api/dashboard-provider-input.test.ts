@@ -7,15 +7,19 @@ vi.mock('./core', () => ({ get: getMock }))
 vi.mock('./dev-token', () => ({ ensureDevToken }))
 
 import {
+  decodeProviderInputPart,
   decodeProviderInputSnapshot,
   fetchKeeperProviderInput,
+  fetchKeeperProviderInputPart,
+  type ProviderInputPart,
 } from './dashboard-provider-input'
 
+const systemPrompt = 'exact system prompt'
+
 function payload(overrides: Record<string, unknown> = {}) {
-  const systemPrompt = 'exact system prompt'
   return {
     dashboard_surface: '/api/v1/keepers/:name/provider-input',
-    schema: 'masc.resolved-provider-input.v1',
+    schema: 'masc.provider-input-manifest.v1',
     keeper: 'albini',
     trace_id: 'trace-one',
     absolute_turn: 7,
@@ -32,25 +36,35 @@ function payload(overrides: Record<string, unknown> = {}) {
       body_bytes: 8192,
       body_sha256: 'a'.repeat(64),
     },
-    system_prompt: {
-      bytes: new TextEncoder().encode(systemPrompt).length,
-      sha256: 'b'.repeat(64),
-      text: systemPrompt,
-    },
-    messages: [{
-      index: 0,
-      role: 'user',
-      bytes: 42,
-      sha256: 'c'.repeat(64),
-      content: { role: 'user', content: 'hello' },
-    }],
-    tool_schemas: [{
-      index: 0,
-      name: 'masc_status',
-      bytes: 64,
-      sha256: 'd'.repeat(64),
-      content: { name: 'masc_status', input_schema: { type: 'object' } },
-    }],
+    parts: [
+      {
+        index: 0,
+        kind: 'system_prompt',
+        bytes: new TextEncoder().encode(systemPrompt).length,
+        sha256: 'b'.repeat(64),
+      },
+      { index: 1, kind: 'message', role: 'user', bytes: 42, sha256: 'c'.repeat(64) },
+      { index: 2, kind: 'tool_schema', name: 'masc_status', bytes: 64, sha256: 'd'.repeat(64) },
+    ],
+    ...overrides,
+  }
+}
+
+const promptPart: ProviderInputPart = {
+  kind: 'system_prompt',
+  index: 0,
+  bytes: new TextEncoder().encode(systemPrompt).length,
+  sha256: 'b'.repeat(64),
+}
+
+function partPayload(overrides: Record<string, unknown> = {}) {
+  return {
+    dashboard_surface: '/api/v1/keepers/:name/provider-input/part',
+    schema: 'masc.provider-input-part.v1',
+    keeper: 'albini',
+    turn_ref: 'trace-one#7',
+    part: { index: 0, kind: 'system_prompt', bytes: promptPart.bytes, sha256: 'b'.repeat(64) },
+    text: systemPrompt,
     ...overrides,
   }
 }
@@ -61,7 +75,7 @@ afterEach(() => {
 })
 
 describe('keeper provider input', () => {
-  it('decodes the exact turn, wire digest, messages, and tool schemas', () => {
+  it('decodes the exact turn, wire digest, and the listed parts', () => {
     expect(decodeProviderInputSnapshot(payload())).toMatchObject({
       keeper: 'albini',
       traceId: 'trace-one',
@@ -73,10 +87,20 @@ describe('keeper provider input', () => {
         bodyBytes: 8192,
         bodySha256: 'a'.repeat(64),
       },
-      systemPrompt: { text: 'exact system prompt' },
-      messages: [{ index: 0, role: 'user' }],
-      toolSchemas: [{ index: 0, name: 'masc_status' }],
+      parts: [
+        { kind: 'system_prompt', index: 0 },
+        { kind: 'message', index: 1, role: 'user' },
+        { kind: 'tool_schema', index: 2, name: 'masc_status' },
+      ],
     })
+  })
+
+  it('rejects a parts list with a missing index or a part carrying text', () => {
+    const parts = payload().parts
+    expect(decodeProviderInputSnapshot(payload({ parts: [parts[0], parts[2]] }))).toBeNull()
+    expect(decodeProviderInputSnapshot(payload({
+      parts: [{ ...parts[0], text: systemPrompt }, parts[1], parts[2]],
+    }))).toBeNull()
   })
 
   it('requests the selected turn_ref without weakening the join key', async () => {
@@ -106,13 +130,24 @@ describe('keeper provider input', () => {
     }))).toBeNull()
   })
 
-  it('rejects a system prompt whose declared byte length is false', () => {
-    expect(decodeProviderInputSnapshot(payload({
-      system_prompt: {
-        bytes: 1,
-        sha256: 'b'.repeat(64),
-        text: 'exact system prompt',
-      },
-    }))).toBeNull()
+  it('reads one part as the bytes the list named', () => {
+    const expected = { keeper: 'albini', turnRef: 'trace-one#7', part: promptPart }
+    expect(decodeProviderInputPart(partPayload(), expected)).toBe(systemPrompt)
+    expect(decodeProviderInputPart(partPayload({ text: 'exact system prompt!' }), expected)).toBeNull()
+    expect(decodeProviderInputPart(partPayload({ turn_ref: 'trace-one#8' }), expected)).toBeNull()
+    expect(decodeProviderInputPart(partPayload({ keeper: 'other' }), expected)).toBeNull()
+    expect(decodeProviderInputPart(partPayload({
+      part: { index: 1, kind: 'message', role: 'user', bytes: promptPart.bytes, sha256: 'b'.repeat(64) },
+    }), expected)).toBeNull()
+  })
+
+  it('requests one part by the turn_ref and its listed index', async () => {
+    getMock.mockResolvedValue(partPayload())
+
+    await expect(fetchKeeperProviderInputPart('albini', 'trace-one#7', promptPart)).resolves.toBe(systemPrompt)
+    expect(getMock).toHaveBeenCalledWith(
+      '/api/v1/keepers/albini/provider-input/part?turn_ref=trace-one%237&index=0',
+      { signal: undefined },
+    )
   })
 })

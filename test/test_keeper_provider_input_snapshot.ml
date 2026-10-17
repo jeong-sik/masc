@@ -76,12 +76,25 @@ let write config absolute_turn =
     ~tools:[ tool ]
 ;;
 
+let turn_ref absolute_turn =
+  Ids.Turn_ref.make ~trace_id:"trace-provider-input" ~absolute_turn
+;;
+
 let read config absolute_turn =
-  let turn_ref = Ids.Turn_ref.make ~trace_id:"trace-provider-input" ~absolute_turn in
-  match Snapshot.read_resolved ~config ~keeper ~turn_ref with
-  | Ok resolved -> resolved
+  match Snapshot.read_manifest ~config ~keeper ~turn_ref:(turn_ref absolute_turn) with
+  | Ok manifest -> manifest
   | Error error ->
     failf "provider input read failed: %s" (Snapshot.read_error_to_string error)
+;;
+
+let read_part config absolute_turn index =
+  Snapshot.read_part ~config ~keeper ~turn_ref:(turn_ref absolute_turn) ~index
+;;
+
+let prompt_sha (manifest : Snapshot.manifest) =
+  match manifest.mf_parts with
+  | { part_kind = Snapshot.System_prompt; part_sha256; _ } :: _ -> part_sha256
+  | _ -> fail "the system prompt is not the first part"
 ;;
 
 let blob_path store sha256 =
@@ -93,43 +106,85 @@ let blob_path store sha256 =
 let test_exact_turn_round_trip () =
   with_workspace (fun config ->
     write config 7;
-    let resolved = read config 7 in
-    check string "keeper" keeper resolved.rv_snapshot.keeper;
-    check int "absolute turn" 7 resolved.rv_snapshot.absolute_turn;
+    let manifest = read config 7 in
+    check string "keeper" keeper manifest.mf_snapshot.keeper;
+    check int "absolute turn" 7 manifest.mf_snapshot.absolute_turn;
     check string
       "turn ref"
       "trace-provider-input#7"
-      (Ids.Turn_ref.to_string resolved.rv_snapshot.turn_ref);
-    check string "wire provider" "openai-compatible" resolved.rv_snapshot.wire.provider;
-    check int "wire bytes" 8192 resolved.rv_snapshot.wire.body_bytes;
-    (match resolved.rv_system_prompt with
-     | None -> fail "system prompt artifact was not resolved"
-     | Some prompt -> check string "system prompt" "exact system prompt" prompt.rsp_text);
-    (match resolved.rv_messages with
-     | [ message ] ->
-       check int "message index" 0 message.rmsg_index;
-       check string "message role" "user" message.rmsg_role;
-       check bool
-         "message content"
-         true
-         (Yojson.Safe.equal
-            (`Assoc
-              [ "role", `String "user"
-              ; ( "content_blocks"
-                , `List
-                    [ `Assoc
-                        [ "type", `String "text"
-                        ; "text", `String "remember exact fact"
-                        ]
-                    ] )
-              ])
-            message.rmsg_content)
-     | messages -> failf "expected one message, got %d" (List.length messages));
-    (match resolved.rv_tool_schemas with
-     | [ schema ] ->
-       check int "schema index" 0 schema.rts_index;
-       check string "schema name" "masc_status" schema.rts_name
-     | schemas -> failf "expected one tool schema, got %d" (List.length schemas)))
+      (Ids.Turn_ref.to_string manifest.mf_snapshot.turn_ref);
+    check string "wire provider" "openai-compatible" manifest.mf_snapshot.wire.provider;
+    check int "wire bytes" 8192 manifest.mf_snapshot.wire.body_bytes;
+    (match manifest.mf_parts with
+     | [ { part_index = 0; part_kind = Snapshot.System_prompt; _ }
+       ; { part_index = 1; part_kind = Snapshot.Message { role = "user" }; _ }
+       ; { part_index = 2; part_kind = Snapshot.Tool_schema { name = "masc_status" }; _ }
+       ] -> ()
+     | parts -> failf "expected prompt, message, schema; got %d parts" (List.length parts));
+    List.iter
+      (fun (part : Snapshot.part) ->
+         match read_part config 7 part.part_index with
+         | Error error ->
+           failf "part %d read failed: %s" part.part_index
+             (Snapshot.read_error_to_string error)
+         | Ok content ->
+           check bool "the part read is the part listed" true (content.pc_part = part);
+           check int "bytes" part.part_bytes (String.length content.pc_text);
+           check string "sha256 of the bytes" part.part_sha256
+             Digestif.SHA256.(digest_string content.pc_text |> to_hex))
+      manifest.mf_parts;
+    (match read_part config 7 0 with
+     | Ok content -> check string "system prompt" "exact system prompt" content.pc_text
+     | Error error -> failf "%s" (Snapshot.read_error_to_string error));
+    match read_part config 7 1 with
+    | Ok content ->
+      check bool
+        "message bytes are the serialised message"
+        true
+        (Yojson.Safe.equal
+           (`Assoc
+             [ "role", `String "user"
+             ; ( "content_blocks"
+               , `List
+                   [ `Assoc
+                       [ "type", `String "text"
+                       ; "text", `String "remember exact fact"
+                       ]
+                   ] )
+             ])
+           (Yojson.Safe.from_string content.pc_text))
+    | Error error -> failf "%s" (Snapshot.read_error_to_string error))
+;;
+
+(* The list answers from the row alone. With every blob gone the parts are
+   still listed, and only reading a part reports the absent blob. *)
+let test_the_list_reads_no_blob () =
+  with_workspace (fun config ->
+    write config 7;
+    let store = Tool_blob_store.create ~base_path:config.base_path in
+    List.iter
+      (fun sha256 -> Sys.remove (blob_path store sha256))
+      (Tool_blob_store.list_all store);
+    check int "parts listed" 3 (List.length (read config 7).mf_parts);
+    match read_part config 7 0 with
+    | Error (Snapshot.Artifact_missing _) -> ()
+    | Error error ->
+      failf "expected Artifact_missing, got %s" (Snapshot.read_error_to_string error)
+    | Ok _ -> fail "a removed blob was read")
+;;
+
+let test_a_part_the_row_does_not_list_is_refused () =
+  with_workspace (fun config ->
+    write config 7;
+    List.iter
+      (fun index ->
+         match read_part config 7 index with
+         | Error (Snapshot.Part_not_found { index = refused; _ }) ->
+           check int "the index asked for is refused" index refused
+         | Error error ->
+           failf "expected Part_not_found, got %s" (Snapshot.read_error_to_string error)
+         | Ok _ -> failf "part %d was read from a row that lists 3" index)
+      [ 3; -1 ])
 ;;
 
 let test_repeated_history_is_content_deduplicated () =
@@ -139,7 +194,7 @@ let test_repeated_history_is_content_deduplicated () =
     let first = Tool_blob_store.list_all store |> List.sort String.compare in
     let first_snapshot = read config 7 in
     let snapshot_json =
-      Snapshot.to_json first_snapshot.rv_snapshot |> Yojson.Safe.to_string
+      Snapshot.to_json first_snapshot.mf_snapshot |> Yojson.Safe.to_string
     in
     check bool
       "snapshot row does not preview the system prompt"
@@ -149,12 +204,7 @@ let test_repeated_history_is_content_deduplicated () =
       "snapshot row does not preview message text"
       false
       (String_util.contains_substring snapshot_json "remember exact fact");
-    let prompt_sha =
-      match first_snapshot.rv_system_prompt with
-      | Some prompt -> prompt.rsp_sha256
-      | None -> fail "system prompt artifact was not resolved"
-    in
-    let prompt_path = blob_path store prompt_sha in
+    let prompt_path = blob_path store (prompt_sha first_snapshot) in
     let sentinel_mtime = 1_500_000_000. in
     Unix.utimes prompt_path sentinel_mtime sentinel_mtime;
     write config 8;
@@ -174,12 +224,7 @@ let test_malformed_latest_snapshot_is_not_used_for_reuse () =
     write config 7;
     let store = Tool_blob_store.create ~base_path:config.base_path in
     let first_snapshot = read config 7 in
-    let prompt_sha =
-      match first_snapshot.rv_system_prompt with
-      | Some prompt -> prompt.rsp_sha256
-      | None -> fail "system prompt artifact was not resolved"
-    in
-    let prompt_path = blob_path store prompt_sha in
+    let prompt_path = blob_path store (prompt_sha first_snapshot) in
     let sentinel_mtime = 1_500_000_000. in
     Unix.utimes prompt_path sentinel_mtime sentinel_mtime;
     Dated_jsonl.append
@@ -197,7 +242,7 @@ let test_wrong_turn_is_not_substituted () =
   with_workspace (fun config ->
     write config 7;
     let missing = Ids.Turn_ref.make ~trace_id:"trace-provider-input" ~absolute_turn:8 in
-    match Snapshot.read_resolved ~config ~keeper ~turn_ref:missing with
+    match Snapshot.read_manifest ~config ~keeper ~turn_ref:missing with
     | Error (Snapshot.Snapshot_not_found actual) ->
       check string
         "missing turn"
@@ -220,7 +265,7 @@ let test_a_scan_stops_at_an_older_turn_of_the_same_trace () =
     write config 5;
     write config 6;
     let missing = Ids.Turn_ref.make ~trace_id:"trace-provider-input" ~absolute_turn:9 in
-    (match Snapshot.read_resolved ~config ~keeper ~turn_ref:missing with
+    (match Snapshot.read_manifest ~config ~keeper ~turn_ref:missing with
      | Error (Snapshot.Snapshot_not_found actual) ->
        check string
          "the turn asked for is the one reported missing"
@@ -250,12 +295,12 @@ let test_another_trace_does_not_end_the_scan () =
       ~messages:[ message ]
       ~tools:[ tool ];
     let wanted = Ids.Turn_ref.make ~trace_id:"trace-provider-input" ~absolute_turn:5 in
-    match Snapshot.read_resolved ~config ~keeper ~turn_ref:wanted with
-    | Ok resolved ->
+    match Snapshot.read_manifest ~config ~keeper ~turn_ref:wanted with
+    | Ok manifest ->
       check string
         "the older trace's turn is still found"
         (Ids.Turn_ref.to_string wanted)
-        (Ids.Turn_ref.to_string resolved.rv_snapshot.turn_ref)
+        (Ids.Turn_ref.to_string manifest.mf_snapshot.turn_ref)
     | Error error ->
       failf "the scan stopped too early: %s" (Snapshot.read_error_to_string error))
 ;;
@@ -278,7 +323,12 @@ let () =
   Alcotest.run
     "keeper provider input snapshot"
     [ ( "round trip"
-      , [ test_case "exact turn resolves all artifacts" `Quick test_exact_turn_round_trip
+      , [ test_case "exact turn lists and reads every part" `Quick test_exact_turn_round_trip
+        ; test_case "the list reads no blob" `Quick test_the_list_reads_no_blob
+        ; test_case
+            "a part the row does not list is refused"
+            `Quick
+            test_a_part_the_row_does_not_list_is_refused
         ; test_case
             "repeated history is content-deduplicated"
             `Quick

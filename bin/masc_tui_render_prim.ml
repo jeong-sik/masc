@@ -4320,7 +4320,34 @@ type context_pane_body =
       ; right : string list
       }
 
-let context_exact_item_detail_lines ~width ~scale
+(* The reading of one listed part, as the loop's part read left it. A part
+   read for another Keeper, turn or item reads as not asked, so a pane never
+   draws one part's text under another's row. *)
+let context_part_view state (input : Masc_tui_context_inspector.provider_input)
+    item =
+  match state.context_inspector_keeper with
+  | None -> Masc_tui_fetched.Absent
+  | Some keeper ->
+      Masc_tui_fetched.view_for ~equal:Masc_tui_context_inspector.same_part_key
+        state.context_inspector_part
+        ~key:
+          { Masc_tui_context_inspector.part_keeper = keeper
+          ; part_turn_ref = input.turn_ref
+          ; part_item = item
+          }
+
+(* The part's text when it has been read, or one line saying where its read
+   stands. *)
+let context_part_text_or_status = function
+  | Masc_tui_fetched.Ready text | Masc_tui_fetched.Stale (text, _) -> Ok text
+  | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading ->
+      Error (Ansi.dim ^ "Reading this part…" ^ Ansi.reset)
+  | Masc_tui_fetched.Failed detail ->
+      Error
+        ((Theme.bad ()) ^ "This part could not be read: "
+         ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset)
+
+let context_exact_item_detail_lines ~width ~scale ~part
     (item : Masc_tui_context_inspector.exact_input_item) =
   let module Inspector = Masc_tui_context_inspector in
   (* A message's text is wire JSON; its typed blocks are where the prose
@@ -4344,8 +4371,11 @@ let context_exact_item_detail_lines ~width ~scale
         ]
   in
   let body =
-    Retained_view.sections ~text:item.text
-    |> List.concat_map (fun group -> section_lines group @ [ "" ])
+    match context_part_text_or_status part with
+    | Error status -> [ status ]
+    | Ok text ->
+        Retained_view.sections ~text
+        |> List.concat_map (fun group -> section_lines group @ [ "" ])
   in
   [ Ansi.bold ^ Theme.info () ^ "[ RETAINED ITEM ]" ^ Ansi.reset
   ; Ansi.bold ^ Inspector.exact_input_label item.kind ^ Ansi.reset
@@ -4481,7 +4511,8 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
              , None )
        | Some item ->
            let detail =
-             context_exact_item_detail_lines ~width ~scale item
+             context_exact_item_detail_lines ~width ~scale
+               ~part:(context_part_view state input item) item
              |> List.map (fun line -> "  " ^ line)
            in
            Plain (detail, None))
@@ -4697,7 +4728,8 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
           match selected with
           | None -> [ Ansi.dim ^ "  Select an item with j/k" ^ Ansi.reset ]
           | Some item ->
-              context_exact_item_detail_lines ~width:right_width ~scale item
+              context_exact_item_detail_lines ~width:right_width ~scale
+                ~part:(context_part_view state input item) item
         in
         (* The detail column starts at the top of its own window and keeps
            its own scroll. It used to be padded down to sit beside the
@@ -4742,7 +4774,7 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
           , selected )
 
 
-let context_input_map_detail_lines ~width ~scale
+let context_input_map_detail_lines ~width ~scale ~part_of
     (row : Masc_tui_context_inspector.input_map_row) =
   let module Inspector = Masc_tui_context_inspector in
   let digest =
@@ -4754,7 +4786,7 @@ let context_input_map_detail_lines ~width ~scale
   let explanation =
     match row.evidence with
     | Inspector.Verified_exact_text ->
-        "The retained text, component byte count, and producer digest agree."
+        "The retained part's SHA-256 and byte count match the producer's digest and byte count."
     | Inspector.Serialized_turn_snapshot ->
         "A same-turn pre-dispatch serialization snapshot exists, but no item-level join key binds this component row to one retained item. Inspect 2:request for the exact retained items."
     | Inspector.Producer_digest_only ->
@@ -4777,15 +4809,24 @@ let context_input_map_detail_lines ~width ~scale
   ]
   @ wrap explanation
   @
-  match row.exact_text with
+  match row.verified_item with
   | None -> []
-  | Some text ->
-      [ ""; Ansi.dim ^ "VERIFIED TEXT" ^ Ansi.reset ] @ wrap text
+  | Some item ->
+      [ ""; Ansi.dim ^ "VERIFIED TEXT" ^ Ansi.reset ]
+      @ (match context_part_text_or_status (part_of item) with
+         | Ok text -> wrap text
+         | Error status -> [ status ])
 
 
 let context_input_map_lines ~cols ~scale state (record : Turn_record.t)
     (provider_input : (Masc_tui_context_inspector.provider_input, string) result) =
   let module Inspector = Masc_tui_context_inspector in
+  (* Only a verified row names a part, and only the joined input lists it. *)
+  let part_of item =
+    match provider_input with
+    | Ok input -> context_part_view state input item
+    | Error _ -> Masc_tui_fetched.Absent
+  in
   let rows, exact_input, error_rows =
     match provider_input with
     | Ok input -> Inspector.input_map_rows record (Some input), Some input, []
@@ -4798,7 +4839,7 @@ let context_input_map_lines ~cols ~scale state (record : Turn_record.t)
   match state.context_inspector_exact with
   | Some index ->
       (match List.nth_opt rows index with
-       | Some ({ exact_text = Some text; _ } as row) ->
+       | Some ({ verified_item = Some item; _ } as row) ->
            let width = max 8 (framed_inner_width cols - 4) in
            let heading =
              Printf.sprintf "  %s%s%s  ·  %s tok (%s)  ·  %s  ·  %s"
@@ -4819,8 +4860,11 @@ let context_input_map_lines ~cols ~scale state (record : Turn_record.t)
                    Ansi.reset
            in
            let body =
-             Message_layout.wrap_body ~max_cells:width
-               ~sanitize:Keeper_chat.terminal_safe_text text
+             (match context_part_text_or_status (part_of item) with
+              | Ok text ->
+                  Message_layout.wrap_body ~max_cells:width
+                    ~sanitize:Keeper_chat.terminal_safe_text text
+              | Error status -> [ status ])
              |> List.map (fun line -> "  " ^ line)
            in
            Plain (error_rows @ (heading :: digest :: "" :: body), None)
@@ -4891,7 +4935,7 @@ let context_input_map_lines ~cols ~scale state (record : Turn_record.t)
           match List.nth_opt rows cursor with
           | None -> [ Ansi.dim ^ "  Select a block with j/k" ^ Ansi.reset ]
           | Some row ->
-              context_input_map_detail_lines ~width:right_width ~scale row
+              context_input_map_detail_lines ~width:right_width ~scale ~part_of row
         in
         let right =
           (Ansi.bold
@@ -4941,7 +4985,7 @@ let context_input_map_lines ~cols ~scale state (record : Turn_record.t)
                        | Some row ->
                            context_input_map_detail_lines
                              ~width:(max 8 (framed_inner_width cols - 4))
-                             ~scale row
+                             ~scale ~part_of row
                            |> List.map (fun detail -> "    " ^ detail)
                      in
                      line

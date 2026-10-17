@@ -361,6 +361,9 @@ type async_msg =
       string * (Masc_tui_child_content.t, Masc_tui_child_content.error) result
   | Context_inspector_loaded of
       int * string * Masc_tui_context_inspector.reading
+  | Context_inspector_part_loaded of
+      Masc_tui_context_inspector.part_key Masc_tui_fetched.request
+      * (string, string) result
   | Keeper_chat_older_loaded of
       int * string * string option * (Masc_tui_keeper_chat_history.page, Masc_tui_keeper_chat_history.page_error) result
   | Local_workspace_read of string * Masc_tui_loader.local_reading
@@ -784,6 +787,7 @@ let rec workspace_message_is_read = function
   | Keeper_preparation_loaded _
   | Keeper_chat_journal_loaded _
   | Context_inspector_loaded _
+  | Context_inspector_part_loaded _
   | Keeper_chat_older_loaded _
   | Local_workspace_read _
   | Lanes_loaded _
@@ -1003,6 +1007,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Keeper_chat_copy_loaded (_, _, _) | Keeper_chat_operation_loaded _
     | Keeper_chat_journal_loaded _ | Keeper_native_tasks_loaded (_, _)
     | Keeper_child_content_loaded (_, _) | Keeper_preparation_loaded (_, _) | Context_inspector_loaded (_, _, _)
+    | Context_inspector_part_loaded (_, _)
     | Keeper_chat_older_loaded (_, _, _, _) | Local_workspace_read (_, _)
     | Lanes_loaded (_, _) | Lane_inventory_loaded (_, _) | Clients_loaded (_, _)
     | Lane_runs_loaded (_, _, _, _) | Lane_run_detail_loaded (_, _, _)
@@ -1136,7 +1141,8 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Keeper_chat_history_loaded (_, _, _, _) | Keeper_chat_copy_loaded (_, _, _)
   | Keeper_chat_operation_loaded _ | Keeper_chat_journal_loaded _
   | Keeper_native_tasks_loaded (_, _) | Keeper_child_content_loaded (_, _) | Keeper_preparation_loaded (_, _)
-  | Context_inspector_loaded (_, _, _) | Keeper_chat_older_loaded (_, _, _, _)
+  | Context_inspector_loaded (_, _, _)
+  | Context_inspector_part_loaded (_, _) | Keeper_chat_older_loaded (_, _, _, _)
   | Local_workspace_read (_, _) | Lanes_loaded (_, _)
   | Lane_inventory_loaded (_, _) | Clients_loaded (_, _)
   | Lane_runs_loaded (_, _, _, _) | Lane_run_detail_loaded (_, _, _)

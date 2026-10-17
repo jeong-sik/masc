@@ -6,7 +6,10 @@ called the read tool, or used the proposal. `scripts/inspect-workspace-memory-tu
 inspects the next evidence boundary without converting it into semantic approval.
 
 Capture the selected Keeper's `/turn-records` response, its `/provider-input?turn_ref=…`
-response, and the exact raw trace referenced by that TurnRecord. Supply the
+response, and the exact raw trace referenced by that TurnRecord. The provider-input
+response lists the request's parts without their text; capture
+`/provider-input/part?turn_ref=…&index=N` for the system prompt and every message
+part into one directory as `N.json`. Supply the
 publication descriptor and resolved discovery fragment preserved by the installed
 discovery probe. URL-encode `#` in the turn reference as `%23` when making HTTP
 requests. Keep captures private: provider input can contain full historical tool
@@ -18,6 +21,7 @@ python3 scripts/inspect-workspace-memory-turn.py \
   --turn-ref 'trace-example#502' \
   --turn-records /path/to/turn-records.json \
   --provider-input /path/to/provider-input.json \
+  --provider-input-parts /path/to/provider-input-parts \
   --raw-trace /path/to/selected-turn.jsonl \
   --publication /path/to/discovery/publication.json \
   --fragment /path/to/discovery/resolved-discovery-fragment.txt \
@@ -25,7 +29,8 @@ python3 scripts/inspect-workspace-memory-turn.py \
 ```
 
 The output directory must be new. It retains exact source bytes and hashes plus
-an inspection receipt. The inspector joins the selected Keeper, turn reference,
+an inspection receipt. Each captured part must be the part the list names, with the
+listed byte count and SHA-256. The inspector joins the selected Keeper, turn reference,
 trace session and worker identities, checks the captured run sequence, counts
 complete fragment occurrences, and records exact-ID read invocations and their
 matching tool completions. Missing reads, absent fragments and tool errors remain

@@ -1210,13 +1210,13 @@ let preparation_status preparation =
     Attention, "최근 확인 · " ^ phase ^ " " ^ outcome
 ;;
 
-let preparation_timeline_rows timeline =
+let preparation_timeline_rows ?(archived=false) timeline =
   let open Masc.Keeper_turn_preview in
   preparation_spans timeline |> List.map (fun (span : preparation_span) ->
     let parent = match span.parent_scope_id with
       | None -> "" | Some id -> Printf.sprintf " ← #%d" (id :> int) in
     let outcome = match span.preparation.state with
-      | Preparation_active -> "진행 관측"
+      | Preparation_active -> if archived then "기록 당시 미완료" else "진행 관측"
       | Preparation_finished {outcome;elapsed_ns;_} ->
         let label = match outcome with
           | Prepared -> "완료" | Rejected -> preparation_rejection_label span.preparation.phase

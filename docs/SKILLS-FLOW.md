@@ -667,11 +667,51 @@ Map snapshot은 mutex 안에서 참조만 읽는다. 순회·직렬화·저장�
 취소를 다시 전파한다. 저장은 기존 manifest의 best-effort·retention 계약을 따르며,
 append 실패나 종료 전 process crash까지 기록을 보장하지 않는다.
 
-완료 후 TUI의 선택된 상세 조회, standalone 진입부의 명시적 identity 연결,
-queue/provider/continuation 전체 인과 연결은 후속 작업이다. 기본 turns polling은
+완료 후 TUI의 선택된 상세 조회는 아래 경로로 연결한다. standalone 진입부의
+명시적 identity와 queue/provider/continuation 전체 인과 연결은 후속 작업이다. 기본 turns polling은
 이 내구 이력을 읽지 않는다. 실제 저장·후속 writer·public projection과 예외·취소·
 sink 실패 시나리오는 작성했으며 실행하지 않았다. parser 확인은 타입·실행 검증을
 대체하지 않는다.
+
+#### 종료 작업의 선택된 TUI 준비 기록
+
+비교 기준은 `99cb706e25727197b7b3a7b06654f91b1f515213`다. 저장된 보고서는
+manifest/runtime lens에서 읽을 수 있었지만 TUI는 실행 중 Owner의 timeline만
+표시했다. 이제 선택한 작업이 종료되고 실제 Owner의 live 준비 관측이 끝나면
+Ctrl-S 상세에서 기존 `GET /api/v1/keepers/<name>/runtime-trace`를 조회한다.
+원래 `trace_id`·`turn_id`를 명시하고 별도 저장소나 전체 Keeper 이력 조회를 추가하지 않는다.
+
+| 조건 | Before | After |
+|---|---|---|
+| 종료 뒤 Owner가 idle 또는 다른 실행으로 이동 | live 준비 이력이 사라짐 | 선택한 원래 실행의 저장 보고서를 비동기로 조회 |
+| 직접 요청·배치 실행 | 저장 보고서와 TUI 연결 없음 | 기록된 reply Turn_ref와 실제 execution ID 모두 일치해야 표시 |
+| 자율 실행 실패·취소 | live 슬롯 종료 뒤 TUI 연결 없음 | journal의 원래 Turn_ref로 저장된 관측 조회; reply가 없어도 연결 |
+| 불완전·중복·미지원 응답 | 선택된 읽기 없음 | 진단을 남기고 확인된 보고서를 보존; 중복 ID는 어느 쪽도 선택하지 않음 |
+| 같은 저널 revision·반복 frame | 선택된 읽기 없음 | 추가 요청·읽기 state 변경 없이 완료 결과 재사용 |
+
+scope 번호는 보고서 UUID 안에서만 의미가 있다. continuation의 보고서를 시각으로
+고르거나 scope 시간을 합산하지 않는다. 저장 당시 active는 현재 실행 중이라는
+뜻이 아니며 별도로 표시한다. 준비 진단은 대화 본문·현재 진행 상태와 분리한다.
+렌더러와 row budget은 같은 status projection을 사용한다.
+
+읽기 state는 한 선택의 pending capability와 직전 완료 결과를 보관한다. 저널
+객체·revision·turn·execution이 모두 같을 때만 재사용한다. 상세를 접어도 소유한 읽기는
+유지하고 결과를 표시 없이 보관하므로 다시 펼칠 때 중복 요청하지 않는다. 다른 작업을
+선택한 뒤 돌아오면 이전 pending 응답이 새 요청을 끝내지 못한다. workspace retirement와
+명시적 history refresh는 읽기 state를 비운다. 매 frame 변함없는 선택은 기존 state를
+그대로 반환하므로 추가 repaint를 요청하지 않는다. JSON 해석과 typed report 검증은
+system thread에서 실행한다. 기본 polling과 접힌 대화에서는 내구 이력 조회를 새로 시작하지 않는다.
+
+기존 runtime trace API는 tail/반환 범위를 제한하므로 부분 조회를 명시하고 전체
+이력이 확인됐다고 주장하지 않는다. 빈 응답도 준비가 없었다는 증거로 쓰지 않는다.
+직접 요청이 reply Turn_ref를 남기지 못한 실패는 `연결 불가`로 남는다. 해당 경로의
+명시적 실패 identity 전달, 오래된 기록의 paging, standalone identity, 전체 Ask·
+Composition 연속성과 동일 조건 Before/After는 계속 남아 있다.
+
+실제 writer 저장 → 기존 runtime API → 새 typed decoder·선택된 request state의
+시나리오를 작성했다. 직접 배치·자율 취소·부분/중복 응답·선택 철회·workspace retirement·
+저널 revision·늦은 응답을 다루며 실행하지 않았다. 화면 문구·배치 테스트는 추가하지
+않았다. 타입·실제 HTTP/화면·성능·통합 경로 검증은 별도이며 이 소스 변경으로 확정하지 않는다.
 
 #### 공유 world 출처별 대기 관측
 

@@ -267,6 +267,8 @@ type async_msg =
       }
   | Keeper_native_tasks_loaded of
       string * (Masc_tui_native_tasks.t, Masc_tui_native_tasks.error) result
+  | Keeper_preparation_loaded of
+      Masc_tui_preparation_details.request * (Masc_tui_preparation_details.snapshot, string) result
   | Keeper_child_content_loaded of
       string * (Masc_tui_child_content.t, Masc_tui_child_content.error) result
   | Context_inspector_loaded of

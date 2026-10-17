@@ -69,14 +69,17 @@ let wiki_root ~base_path = Config_dir_resolver.wiki_dir ~base_path
    wiki page shows up as one whose header does not read. *)
 let list_pages ~base_path =
   let dir = wiki_root ~base_path in
-  if Sys.file_exists dir then
+  match Unix.stat dir with
+  | _ ->
     Sys.readdir dir
     |> Array.to_list
     |> List.filter (fun f ->
       Filename.check_suffix f ".md" && not (Wiki_journal.is_own_file f))
     |> List.sort String.compare
     |> List.map (fun f -> Filename.concat dir f)
-  else []
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> []
+  | exception Unix.Unix_error (error, operation, _) ->
+    raise (Sys_error (operation ^ ": " ^ Unix.error_message error))
 
 (* What the index says about each file: a page gives its title and summary,
    a file whose header does not read gives the reason. A file that vanishes

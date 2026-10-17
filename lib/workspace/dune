@@ -4,6 +4,7 @@
  (name masc_workspace)
  (public_name masc.masc_workspace)
  (wrapped false)
+ (private_modules workspace_verification_snapshot)
  (flags
   (:standard -w +4 -w +33 -w +37))
  (modules
@@ -43,6 +44,7 @@
   workspace_task_transition_executor
   workspace_task_transitions
   workspace_task_verification
+  workspace_verification_snapshot
   workspace_verification_store
   workspace_verification_operator_evidence
   event_kind

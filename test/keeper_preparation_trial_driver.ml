@@ -1040,7 +1040,7 @@ let run_trial ~base ~experiment ~strategy ~prompt_root ~counter ~receipt ~sw ~en
        | [] | _ :: _ -> unknown "useful event has no unique physical execution join")
     | [] | _ :: _ -> unknown "no unique successful selection-read observation" in
   let _,checkpoint = Keeper_context_runtime.load_context_from_checkpoint_classified
-      ~trace_id:(string "trace_id" fixture) ~base_dir:(Keeper_types_support.session_base_dir_ config) in
+      ~keeper_name:keeper ~trace_id:(string "trace_id" fixture) ~base_dir:(Keeper_types_support.session_base_dir_ config) in
   let checkpoint_last_assistant = match checkpoint with
     | Checkpoint_loaded context ->
       let messages = Keeper_context_runtime.messages_of_context context in

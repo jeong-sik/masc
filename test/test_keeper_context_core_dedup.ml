@@ -552,7 +552,8 @@ let test_a_missing_checkpoint_is_not_an_unreadable_one () =
     ~finally:(fun () -> Fs_compat.remove_tree base_dir)
     (fun () ->
       let _session, missing =
-        C.load_context_from_checkpoint_classified ~trace_id:"never-written" ~base_dir
+        C.load_context_from_checkpoint_classified ~keeper_name:"load-classified-keeper"
+          ~trace_id:"never-written" ~base_dir
       in
       Alcotest.(check string) "no file" "absent" (describe_load missing);
       let trace_id = "written-badly" in
@@ -564,7 +565,8 @@ let test_a_missing_checkpoint_is_not_an_unreadable_one () =
            ~session_id:trace_id)
         (fun channel -> Out_channel.output_string channel "{ not a checkpoint");
       let _session, unreadable =
-        C.load_context_from_checkpoint_classified ~trace_id ~base_dir
+        C.load_context_from_checkpoint_classified ~keeper_name:"load-classified-keeper"
+          ~trace_id ~base_dir
       in
       Alcotest.(check string) "a file that does not parse" "unread"
         (describe_load unreadable);

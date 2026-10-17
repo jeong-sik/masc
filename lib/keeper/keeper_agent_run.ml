@@ -1788,11 +1788,6 @@ let run_turn
          let checkpoint_progress =
            Atomic.make Keeper_turn_driver_try_provider.No_checkpoint_stage
          in
-         (* The stage saves of this turn and its finalize save write one
-            growing history. The memo keeps each saved message's encoding, so a
-            save encodes only the messages the previous save did not write; the
-            first save of the turn encodes the whole history. *)
-         let checkpoint_encoding_memo = Agent_core.Checkpoint.create_encoding_memo () in
          (* masc#28885: typed pre_tool_use rejects recorded by the
             official-client host during this turn. Flushed into the
             replay checkpoint only when the turn dies, so the model can
@@ -1820,9 +1815,9 @@ let run_turn
                 let save_started_at = Time_compat.now () in
                 let save_started_mono = Mtime_clock.now () in
                 let save_result =
-                  Keeper_checkpoint_store.save_agent_core_classified_with_encoding_memo
+                  Keeper_checkpoint_store.save_agent_core_for_keeper
+                    ~keeper_name:meta.name
                     ~session_dir:session.session_dir
-                    ~encoding_memo:checkpoint_encoding_memo
                     ~history_retained:
                       (Runtime_params.get Runtime_settings.keeper_checkpoint_history_retained)
                     checkpoint
@@ -2163,6 +2158,7 @@ let run_turn
                | Error e ->
                  (match
                     Keeper_official_client_host.persist_pre_tool_rejects
+                      ~keeper_name:meta.name
                       ~session_dir:session.session_dir
                       ~session_id:
                         (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
@@ -2326,7 +2322,6 @@ let run_turn
                              ~result
                              ~last_persisted_checkpoint:
                                !last_persisted_checkpoint_ref
-                             ~checkpoint_encoding_memo
                              ~final_agent_core_turn_ordinal
                              ~checkpoint_persistence_error
                              ~post_turn_t0

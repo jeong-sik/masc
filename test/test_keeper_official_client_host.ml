@@ -2361,7 +2361,7 @@ let test_persist_appends_roundtrips_in_call_order () =
     ; reject ~call_id:"call-1" ~detail:"first correction"
     ]
   in
-  (match Host.persist_pre_tool_rejects ~session_dir ~session_id rejects with
+  (match Host.persist_pre_tool_rejects ~keeper_name:"reject-keeper" ~session_dir ~session_id rejects with
    | Ok persisted -> check int "two rejects persisted" 2 persisted
    | Error detail -> fail ("persist failed: " ^ detail));
   match Keeper_checkpoint_store.load_agent_core ~session_dir ~session_id with
@@ -2415,6 +2415,7 @@ let test_persist_skips_when_no_checkpoint_exists () =
   Fs_compat.mkdir_p session_dir;
   match
     Host.persist_pre_tool_rejects
+      ~keeper_name:"reject-keeper"
       ~session_dir
       ~session_id:"trace-absent"
       [ reject ~call_id:"call-x" ~detail:"lost" ]

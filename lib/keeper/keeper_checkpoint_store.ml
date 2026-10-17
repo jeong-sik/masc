@@ -365,12 +365,11 @@ let load_agent_core_history_file ~(session_dir : string) ~(snapshot_id : string)
    rename, so a changed file is a new inode; equal (device, inode, size,
    mtime) therefore means the file the summary describes is still the one on
    disk. A summary is filled from a parse of the bytes on disk, or from the
-   value a writer installed. The whole checkpoint value is never cached: its
-   codec round trip is not proven exact, and a second copy of a 13-20 MB
-   checkpoint per keeper would grow the live heap the major GC walks.
-   Measured 2026-09-05: the save watermark alone re-read and re-parsed the
-   canonical file on every turn, 5.2 GB allocated per 4 minutes across the
-   fleet, and every heartbeat did the same for one integer. *)
+   value a writer installed. Measured 2026-09-05: the save watermark alone
+   re-read and re-parsed the canonical file on every turn, 5.2 GB allocated
+   per 4 minutes across the fleet, and every heartbeat did the same for one
+   integer. The whole value of a file this process wrote is kept under the
+   same identity rule as [written_lineages] below. *)
 type canonical_identity =
   { device : int
   ; inode : int
@@ -464,10 +463,151 @@ let publish_summary_after_write ~canonical_path checkpoint =
   match canonical_identity_opt canonical_path with
   | Some identity ->
     publish_summary ~canonical_path (summary_of_checkpoint ~identity checkpoint);
-    Some identity.size
+    Some identity
   | None -> None
 
-let load_agent_core ~(session_dir : string) ~(session_id : string) :
+(* ── Written value (RFC main-domain-scheduler-latency §8 P4b step 2) ──
+   A turn used to start by reading and decoding the whole canonical file, and
+   its first save encoded the whole history again because the decoded records
+   were new. The live canonicals on 2026-10-17 were 60-214 MB; the 118 MB one
+   took 0.9 s and 439 MB of allocation to decode.
+
+   Per canonical file this process keeps a lineage: the encoding memo of its
+   saves and the value of the bytes the file holds, which is what [of_string]
+   gives for them -- the decode of the file, not a second truth, so the disk
+   stays the only watermark (RFC-0225 §3.2). A save keeps what it wrote, under
+   the identity [publish_summary_after_write] samples under the session lock.
+   [load_agent_core_for_save] keeps what it read, with a memo the read filled
+   ([Agent_core.Checkpoint.of_string_with_encoding_memo]), so the first save
+   after a restart or after another writer encodes only the new messages. A
+   load answers from the value while the file still has its identity; another
+   writer, a removal or a restart leaves a mismatch, and the load reads the
+   file.
+
+   A lineage holds the decoded history and its encodings as strings the major
+   GC does not scan: 2.28x of the files in the 2026-10-17 harness, four 113 MB
+   canonicals holding 1,031 MB after their turns. Only a Keeper's own saves
+   and save-bound loads keep one, and they name the Keeper: a checkpoint's
+   [agent_name] is the runtime the turn ran on ("agent_core-<runtime>"), which
+   Keepers share. Each Keeper has one: a save under a new trace drops the
+   Keeper's older one, and unregistering the Keeper drops it
+   ([forget_written_lineages]). *)
+type written_value =
+  { written_identity : canonical_identity
+  ; written_checkpoint : Agent_core.Checkpoint.t
+  }
+
+(* The Keeper a lineage belongs to: the session root its traces live under, as
+   resolved, and its registry name. *)
+type lineage_owner =
+  { owner_session_root : string
+  ; owner_keeper : string
+  }
+
+type written_lineage =
+  { lineage_owner : lineage_owner
+  ; lineage_memo : Agent_core.Checkpoint.encoding_memo
+  ; lineage_written : written_value option
+  }
+
+let written_lineages : (string, written_lineage) Hashtbl.t = Hashtbl.create 16
+
+(* Same discipline as [canonical_summaries_mutex]. *)
+let written_lineages_mutex = Stdlib.Mutex.create ()
+
+let same_lineage_owner left right =
+  String.equal left.owner_session_root right.owner_session_root
+  && String.equal left.owner_keeper right.owner_keeper
+
+(* The key is the resolved [<session root>/<trace>/<trace>.json]. *)
+let lineage_owner_of_key ~key ~keeper_name =
+  { owner_session_root = Filename.dirname (Filename.dirname key); owner_keeper = keeper_name }
+
+(* The memo of the file's lineage, or a fresh one for a file this process has
+   not written. A file that does not exist yet has no key. *)
+let lineage_memo ~canonical_path =
+  match summary_key canonical_path with
+  | None -> Agent_core.Checkpoint.create_encoding_memo ()
+  | Some key ->
+    Stdlib.Mutex.protect written_lineages_mutex (fun () ->
+      match Hashtbl.find_opt written_lineages key with
+      | Some lineage -> lineage.lineage_memo
+      | None -> Agent_core.Checkpoint.create_encoding_memo ())
+
+(* [written] is [None] when the save fell back to encoding the whole document:
+   the file then holds bytes no value here describes, and the memo is kept for
+   the next save. *)
+let keep_lineage ~canonical_path ~identity ~memo ~keeper_name written =
+  match summary_key canonical_path with
+  | None -> ()
+  | Some key ->
+    let owner = lineage_owner_of_key ~key ~keeper_name in
+    let lineage_written =
+      Option.map
+        (fun written_checkpoint -> { written_identity = identity; written_checkpoint })
+        written
+    in
+    Stdlib.Mutex.protect written_lineages_mutex (fun () ->
+      Hashtbl.filter_map_inplace
+        (fun other lineage ->
+           if (not (String.equal other key)) && same_lineage_owner lineage.lineage_owner owner
+           then None
+           else Some lineage)
+        written_lineages;
+      Hashtbl.replace written_lineages key
+        { lineage_owner = owner; lineage_memo = memo; lineage_written })
+
+let forget_written_lineages ~session_root ~keeper_name =
+  match Unix.realpath session_root with
+  | exception Unix.Unix_error _ -> ()
+  | resolved ->
+    let owner = { owner_session_root = resolved; owner_keeper = keeper_name } in
+    Stdlib.Mutex.protect written_lineages_mutex (fun () ->
+      Hashtbl.filter_map_inplace
+        (fun _key lineage ->
+           if same_lineage_owner lineage.lineage_owner owner then None else Some lineage)
+        written_lineages)
+
+(* The context is a mutable table, so each caller gets its own copy. *)
+let handed_out (checkpoint : Agent_core.Checkpoint.t) =
+  { checkpoint with context = Agent_core.Context.copy checkpoint.context }
+
+(* [Some] only while the file has the identity it had when this process wrote
+   or read it. A mismatch changes nothing here: a load that sampled the
+   identity before a concurrent save's rename would otherwise drop the value
+   that save just kept. The next save or save-bound load replaces a value
+   whose file changed. *)
+let reusable_written_value ~canonical_path ~identity =
+  match summary_key canonical_path with
+  | None -> None
+  | Some key ->
+    Stdlib.Mutex.protect written_lineages_mutex (fun () ->
+      match Hashtbl.find_opt written_lineages key with
+      | None | Some { lineage_written = None; _ } -> None
+      | Some { lineage_written = Some written; _ } ->
+        if canonical_identity_equal written.written_identity identity
+        then Some written.written_checkpoint
+        else None)
+    |> Option.map handed_out
+
+(* After a save-bound read: the lineage describes the bytes read only if the
+   file identity is the same before and after the read, as for the summary. *)
+let keep_read_lineage ~canonical_path ~identity_before ~memo ~keeper_name checkpoint =
+  match identity_before, canonical_identity_opt canonical_path with
+  | Some before, Some after when canonical_identity_equal before after ->
+    keep_lineage
+      ~canonical_path
+      ~identity:before
+      ~memo
+      ~keeper_name
+      (Some checkpoint)
+  | Some _, (Some _ | None) | None, (Some _ | None) -> ()
+
+type read_use =
+  | Read_only
+  | Read_for_save of string  (** the Keeper that saves this lineage next *)
+
+let load_agent_core_as ~read_use ~(session_dir : string) ~(session_id : string) :
     (Agent_core.Checkpoint.t, checkpoint_load_error) result =
   (* Absence comes from [read_checkpoint_bytes]'s typed owned-file read, not
      [file_exists], whose boolean also covers stat failures. An unreadable
@@ -486,20 +626,44 @@ let load_agent_core ~(session_dir : string) ~(session_id : string) :
   else
   let path = agent_core_checkpoint_path ~session_dir ~session_id in
   let identity_before = canonical_identity_opt path in
+  match
+    Option.bind identity_before (fun identity ->
+      reusable_written_value ~canonical_path:path ~identity)
+  with
+  | Some checkpoint -> Ok checkpoint
+  | None ->
     try
       match read_checkpoint_bytes ~session_dir path with
       | Error e -> Error e
       | Ok bytes ->
-        (match decode_checkpoint_off_scheduler bytes with
-         | Ok ckpt ->
-           publish_summary_after_parse ~canonical_path:path ~identity_before ckpt;
-           Ok ckpt
-         | Error e -> Error (classify_core_error e))
+        (match read_use with
+         | Read_only ->
+           (match decode_checkpoint_off_scheduler bytes with
+            | Ok ckpt ->
+              publish_summary_after_parse ~canonical_path:path ~identity_before ckpt;
+              Ok ckpt
+            | Error e -> Error (classify_core_error e))
+         | Read_for_save keeper_name ->
+           (match
+              offload_checkpoint_cpu (fun () ->
+                Agent_core.Checkpoint.of_string_with_encoding_memo bytes)
+            with
+            | Ok (ckpt, memo) ->
+              publish_summary_after_parse ~canonical_path:path ~identity_before ckpt;
+              keep_read_lineage ~canonical_path:path ~identity_before ~memo ~keeper_name ckpt;
+              Ok (handed_out ckpt)
+            | Error e -> Error (classify_core_error e)))
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | Unix.Unix_error (errno, _, _) as exn ->
       Error (Read_failed { cause = Os_error errno; detail = Printexc.to_string exn })
     | exn -> Error (Read_failed { cause = Read_raised; detail = Printexc.to_string exn })
+
+let load_agent_core ~session_dir ~session_id =
+  load_agent_core_as ~read_use:Read_only ~session_dir ~session_id
+
+let load_agent_core_for_save ~keeper_name ~session_dir ~session_id =
+  load_agent_core_as ~read_use:(Read_for_save keeper_name) ~session_dir ~session_id
 
 (** Message count of the canonical checkpoint. Answered from the canonical
     summary while the file on disk is the one the summary was taken from;
@@ -1258,7 +1422,7 @@ let save_agent_core_if_source_with
        of bytes whose hash already matched, so a save that leaves none behind
        makes the next one decode the whole checkpoint. *)
     let publish ~canonical_path auxiliary =
-      ignore (publish_summary_after_write ~canonical_path candidate);
+      ignore (publish_summary_after_write ~canonical_path candidate : canonical_identity option);
       let installed = { installed_ref = candidate_ref; auxiliary } in
       committed_installation := Some installed;
       Installed installed
@@ -1580,8 +1744,21 @@ module For_testing = struct
   ;;
 end
 
-let save_outcome_after_write ~session_dir ~canonical_path ~known ~history_retained ckpt =
-  let canonical_bytes = publish_summary_after_write ~canonical_path ckpt in
+(* Who a save keeps a lineage for. Only a Keeper's own saves do; a save by a
+   tool or a test writes the file and keeps nothing. *)
+type save_lineage =
+  | Save_for_keeper of string
+  | Save_without_lineage
+
+let save_outcome_after_write
+    ~session_dir ~canonical_path ~save_lineage ~memo ~written ~known ~history_retained ckpt
+  =
+  let identity = publish_summary_after_write ~canonical_path ckpt in
+  (match save_lineage, identity with
+   | Save_for_keeper keeper_name, Some identity ->
+     keep_lineage ~canonical_path ~identity ~memo ~keeper_name written
+   | Save_for_keeper _, None | Save_without_lineage, (Some _ | None) -> ());
+  let canonical_bytes = Option.map (fun identity -> identity.size) identity in
   archive_agent_core_history_best_effort ~session_dir ~retained:history_retained ckpt;
   Ok
     (Saved
@@ -1591,8 +1768,8 @@ let save_outcome_after_write ~session_dir ~canonical_path ~known ~history_retain
        })
 
 let save_agent_core_classified_typed
+    ~save_lineage
     ~(session_dir : string)
-    ~(encoding_memo : Agent_core.Checkpoint.encoding_memo)
     ~(history_retained : int)
     (ckpt : Agent_core.Checkpoint.t)
   : (save_agent_core_outcome, save_agent_core_error) result =
@@ -1647,15 +1824,30 @@ let save_agent_core_classified_typed
       | Ok existing ->
         let known = Option.map (fun (w : watermark) -> w.turn_count) existing in
         let ownership_root = Filename.dirname session_dir in
+        let memo =
+          match save_lineage with
+          | Save_for_keeper _ -> lineage_memo ~canonical_path
+          | Save_without_lineage -> Agent_core.Checkpoint.create_encoding_memo ()
+        in
+        (* What this save's encode returned, read only by this save. *)
+        let written = ref None in
         let write payload =
+          written := None;
           Keeper_fs.save_encoded_durable_atomic_from
             ~ownership_root
             canonical_path
             (fun () ->
-               fst (Agent_core.Checkpoint.to_pieces_with_encoding_memo encoding_memo payload))
+               let pieces, decoded =
+                 Agent_core.Checkpoint.to_pieces_with_encoding_memo memo payload
+               in
+               written := decoded;
+               pieces)
         in
         (match write ckpt with
-         | Ok () -> save_outcome_after_write ~session_dir ~canonical_path ~known ~history_retained ckpt
+         | Ok () ->
+           save_outcome_after_write
+             ~session_dir ~canonical_path ~save_lineage ~memo ~written:!written ~known
+             ~history_retained ckpt
          (* #31677: a payload-encode refusal means the in-memory checkpoint
             carries a json payload the v10 contract cannot encode — a
             provider-authored duplicate key or non-finite float. Without
@@ -1677,7 +1869,9 @@ let save_agent_core_classified_typed
              (match write recovered with
               | Error retry_error -> Error (Canonical_write_failed retry_error)
               | Ok () ->
-                save_outcome_after_write ~session_dir ~canonical_path ~known ~history_retained recovered))
+                save_outcome_after_write
+                  ~session_dir ~canonical_path ~save_lineage ~memo ~written:!written ~known
+                  ~history_retained recovered))
          | Error
              ({ stage =
                   ( Keeper_fs.Directory_prepare
@@ -1691,20 +1885,16 @@ let save_agent_core_classified_typed
               ; _
               } as error) -> Error (Canonical_write_failed error)))
 
-let save_agent_core_classified_with_encoding_memo
-    ~(session_dir : string)
-    ~(encoding_memo : Agent_core.Checkpoint.encoding_memo)
-    ~(history_retained : int)
-    (ckpt : Agent_core.Checkpoint.t)
-  : (save_agent_core_outcome, string) result =
-  save_agent_core_classified_typed ~session_dir ~encoding_memo ~history_retained ckpt
-  |> Result.map_error save_agent_core_error_to_string
-
 let save_agent_core_classified
     ~(session_dir : string) ~(history_retained : int) (ckpt : Agent_core.Checkpoint.t)
   : (save_agent_core_outcome, string) result =
-  save_agent_core_classified_with_encoding_memo
-    ~session_dir
-    ~encoding_memo:(Agent_core.Checkpoint.create_encoding_memo ())
-    ~history_retained
-    ckpt
+  save_agent_core_classified_typed
+    ~save_lineage:Save_without_lineage ~session_dir ~history_retained ckpt
+  |> Result.map_error save_agent_core_error_to_string
+
+let save_agent_core_for_keeper
+    ~keeper_name ~(session_dir : string) ~(history_retained : int) (ckpt : Agent_core.Checkpoint.t)
+  : (save_agent_core_outcome, string) result =
+  save_agent_core_classified_typed
+    ~save_lineage:(Save_for_keeper keeper_name) ~session_dir ~history_retained ckpt
+  |> Result.map_error save_agent_core_error_to_string

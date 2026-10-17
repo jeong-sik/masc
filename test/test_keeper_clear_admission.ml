@@ -273,7 +273,9 @@ let test_undecodable_checkpoint_is_removed () =
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   match Keeper_owner_registry.run_autonomous_if_idle
     ~base_path:config.base_path ~keeper_name:meta.name (fun () ->
-      match Context.load_context_from_checkpoint_classified ~trace_id ~base_dir with
+      match
+        Context.load_context_from_checkpoint_classified ~keeper_name:meta.name ~trace_id ~base_dir
+      with
       | _, Context.Checkpoint_absent -> ()
       | _, Context.Checkpoint_loaded _ -> fail "next turn loaded a checkpoint"
       | _, Context.Checkpoint_unread error ->

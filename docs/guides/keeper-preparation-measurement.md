@@ -141,6 +141,23 @@ evidence remain separately tracked in #42799.
 
 ## Runtime Skill preparation observations
 
+The complete invocation-level preparation snapshot is separate from these cache
+samples. Direct and autonomous Task entries retain their original preview writer
+and append one `preparation_observed` manifest row after returning, raising or
+being cancelled. `decision.preparation_report` keeps the original turn reference,
+available execution scope, observation report UUID and actual preparation scopes.
+The report UUID distinguishes snapshots of a continued execution; it is not an
+execution or resume authority. A returned error remains a returned invocation,
+with the rejected preparation scopes represented separately. Active scopes stay
+active in the immutable report. Missing original identity is not inferred.
+
+Publication uses the existing best-effort runtime manifest store and retention.
+There is no per-scope write or history scan added to the default turns poll.
+Report publication cost is additional and unmeasured. Saved reports can outlive
+their live writer, but append failure and process exit before publication remain
+coverage gaps. Completed-turn TUI selection and standalone entry identity are
+not connected by this change. Source scenarios were authored, not executed.
+
 The isolated preparation trial's stage journal is experiment evidence, not a
 runtime cache observation. Runtime Skill preparation now emits
 `skill_preparation_observed` manifest rows at the direct and autonomous Task

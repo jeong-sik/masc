@@ -484,11 +484,145 @@ let test_parallel_preparation_lineage_and_actual_wire () =
        `List [match first with `Assoc fields -> `Assoc (("scope_id",`Int 0)::fields) | _ -> first]])
 ;;
 
+let test_original_preparation_is_durable_after_successor () =
+  let module Preview = Keeper_turn_preview in
+  let module Observation = Keeper_preparation_runtime_observation in
+  let module Manifest = Keeper_runtime_manifest in
+  let rec remove path =
+    if Sys.is_directory path then (
+      Array.iter (fun name -> remove (Filename.concat path name)) (Sys.readdir path);
+      Sys.rmdir path)
+    else Sys.remove path in
+  let base = Filename.temp_dir "preparation-report-" "" in
+  Fun.protect ~finally:(fun () -> remove base) (fun () ->
+    Eio_main.run (fun _ ->
+      let config = Workspace.default_config base in
+      let keeper_name = "durable-preparation" in
+      let turn_ref = Ids.Turn_ref.make ~trace_id:"original-report-trace" ~absolute_turn:3 in
+      let operation_id = match Keeper_operation_id.of_string "original-preparation-operation" with
+        | Ok value -> value | Error detail -> Alcotest.fail detail in
+      let execution_scope = Keeper_execution_scope_id.direct_operation operation_id in
+      let preview = Preview.reset ~keeper_name ~turn_ref:(Some turn_ref)
+          ~execution_scope:(Some execution_scope) ~now:0. ~redaction:Keeper_secret_redaction.empty in
+      let expected = Error (ref "original returned error") in
+      let result = Observation.with_turn ~config ~keeper_name ~preview (fun () ->
+        Preview.with_preparation_result ~writer:(Some preview) ~turn_ref:(Some turn_ref)
+          ~phase:Preview.World_preparation (fun () ->
+            ignore (Preview.with_preparation_result ~writer:(Some preview) ~turn_ref:(Some turn_ref)
+              ~phase:Preview.Workspace_memory_preparation (fun () -> Error "unavailable"));
+            ignore (reset keeper_name ~now:1.);
+            expected)) in
+      Alcotest.(check bool) "the exact returned error is preserved" true (result == expected);
+      let successor = Option.get (Preview.current ~keeper_name) in
+      Alcotest.(check bool) "the displayed successor has no inherited history" true
+        (Preview.preparation_timeline_is_empty successor.preparation_timeline);
+      let path = Manifest.path_for_trace config ~keeper_name ~trace_id:"original-report-trace" in
+      let rows = In_channel.with_open_text path In_channel.input_all
+          |> String.split_on_char '\n' |> List.filter (fun row -> row <> "") in
+      let row = match rows with
+        | [row] -> (match Manifest.decode_persisted_row (Yojson.Safe.from_string row) with
+          | Ok (Manifest.Active_row row) -> row
+          | Ok (Manifest.Unsupported_row _) -> Alcotest.fail "new event was not registered"
+          | Error detail -> Alcotest.fail detail)
+        | _ -> Alcotest.fail "the invocation must append exactly one report" in
+      Alcotest.(check bool) "report is an observation, not a finished turn" true
+        (row.event=Manifest.Preparation_observed && not (Manifest.is_finished_turn [row]));
+      let module Scan = Server_dashboard_http_keeper_runtime_manifest_scan in
+      let scan = Scan.update_runtime_manifest_scan
+          (Scan.make_runtime_manifest_scan ~path ~limit:1 ~scan_line_limit:1 ~scan_scope:"test") row in
+      Alcotest.(check int) "the actual runtime lens counts the new observation" 1
+        (Hashtbl.find scan.event_counts "preparation_observed");
+      Alcotest.(check int) "preparation is not context injection" 0 scan.context_injected_count;
+      List.iter (fun edge -> Alcotest.(check bool) "publication time is not a measured preparation edge" true
+        Yojson.Safe.Util.(member "started_at" edge = `Null && member "finished_at" edge = `Null))
+        (Server_dashboard_http_keeper_runtime_lens_clock_edges.clock_edge_jsons scan);
+      let report_json = Yojson.Safe.Util.(Manifest.public_to_json row
+          |> member "decision" |> member "preparation_report") in
+      let report = match Observation.report_of_json report_json with
+        | Ok report -> report | Error detail -> Alcotest.fail detail in
+      Alcotest.(check bool) "original execution identity survives durable public projection" true
+        (report.turn_ref=Some turn_ref && report.execution_scope=Some execution_scope
+         && report.boundary=Observation.Returned);
+      (match Preview.preparation_spans report.timeline with
+       | [outer; inner] ->
+         Alcotest.(check bool) "both failed scopes retain their original lineage" true
+           (inner.parent_scope_id=Some outer.scope_id
+            && List.for_all (fun (span : Preview.preparation_span) ->
+              span.preparation.turn_ref=Some turn_ref && match span.preparation.state with
+              | Preview.Preparation_finished {outcome=Preview.Rejected; _} -> true
+              | Preview.Preparation_finished _ | Preview.Preparation_active -> false) [outer;inner])
+       | _ -> Alcotest.fail "preparation history was lost after replacement");
+      let with_unknown = function `Assoc fields -> `Assoc (("private_probe",`String "hidden")::fields)
+        | value -> value in
+      let decision = Manifest.public_projection_of_decision
+          (`Assoc ["preparation_report", with_unknown report_json]) in
+      Alcotest.(check bool) "report projection removes undeclared fields" true
+        (Yojson.Safe.Util.(decision |> member "preparation_report" |> member "private_probe") = `Null);
+      List.iter (fun malformed -> match Observation.report_of_json malformed with
+        | Error _ -> () | Ok _ -> Alcotest.fail "malformed report was accepted")
+        [with_unknown report_json; `Null]))
+;;
+
+let test_preparation_report_preserves_failure_and_cancellation () =
+  let module Preview = Keeper_turn_preview in
+  let module Observation = Keeper_preparation_runtime_observation in
+  Eio_main.run (fun _ ->
+    let preview = reset "report-outcomes" ~now:0. in
+    let reports = ref [] in
+    let observe operation = Observation.with_report ~preview
+        ~on_report:(fun report -> reports := report :: !reports) operation in
+    let scoped operation = Preview.with_preparation ~writer:(Some preview) ~turn_ref:None
+        ~phase:Preview.Context_preparation operation in
+    let expected = Failure "original invocation error" in
+    (match observe (fun () -> scoped (fun () -> raise expected)) with
+     | _ -> Alcotest.fail "original exception was swallowed"
+     | exception actual -> Alcotest.(check bool) "original exception identity" true (actual == expected));
+    let entered, enter = Eio.Promise.create () in
+    let never, _ = Eio.Promise.create () in
+    Eio.Fiber.first
+      (fun () -> observe (fun () -> scoped (fun () ->
+        Eio.Promise.resolve enter (); Eio.Promise.await never)))
+      (fun () -> Eio.Promise.await entered);
+    (match !reports with
+     | [cancelled; raised] ->
+       Alcotest.(check bool) "exception and cancellation retain separate boundaries and identities" true
+         (cancelled.boundary=Observation.Cancelled && raised.boundary=Observation.Raised
+          && cancelled.report_id<>raised.report_id);
+       Alcotest.(check int) "earlier report remains an immutable snapshot" 1
+         (List.length (Preview.preparation_spans raised.timeline));
+       Alcotest.(check int) "later cancellation retains both scope observations" 2
+         (List.length (Preview.preparation_spans cancelled.timeline));
+       Alcotest.(check bool) "the cancelled scope keeps its actual outcome" true
+         (List.exists (fun (span : Preview.preparation_span) -> match span.preparation.state with
+           | Preview.Preparation_finished {outcome=Preview.Cancelled; _} -> true
+           | Preview.Preparation_finished _ | Preview.Preparation_active -> false)
+            (Preview.preparation_spans cancelled.timeline))
+     | _ -> Alcotest.fail "exceptional report publication did not settle");
+    let unfinished = ref None in
+    scoped (fun () -> Observation.with_report ~preview
+      ~on_report:(fun report -> unfinished := Some report) (fun () -> ()));
+    Alcotest.(check bool) "a scope still active at capture is never fabricated as completed" true
+      (List.exists (fun (span : Preview.preparation_span) -> span.preparation.state=Preview.Preparation_active)
+         (Preview.preparation_spans (Option.get !unfinished).timeline));
+    let returned = ref "original return" in
+    let failed_sink () = raise (Failure "observation sink unavailable") in
+    let result = Observation.with_report ~preview ~on_report:(fun _ -> failed_sink ()) (fun () -> returned) in
+    Alcotest.(check bool) "ordinary sink failure preserves returned value" true (result == returned);
+    (match Observation.with_report ~preview ~on_report:(fun _ -> failed_sink ()) (fun () -> raise expected) with
+     | _ -> Alcotest.fail "sink failure swallowed the invocation exception"
+     | exception actual -> Alcotest.(check bool) "ordinary sink failure preserves original exception" true
+         (actual == expected)))
+;;
+
 let () =
   Alcotest.run "keeper_turn_preview"
     [ ( "keeper-turn-preview"
       , [ Alcotest.test_case "preparation scopes are visible and keep their actual owner" `Quick
             test_preparation_scopes_are_visible_owned_and_do_not_dispatch
+        ; Alcotest.test_case "original preparation remains durable after a successor" `Quick
+            test_original_preparation_is_durable_after_successor
+        ; Alcotest.test_case "preparation reports preserve failure and cancellation" `Quick
+            test_preparation_report_preserves_failure_and_cancellation
         ; Alcotest.test_case "parallel scopes retain original lineage through the actual turns protocol" `Quick
             test_parallel_preparation_lineage_and_actual_wire
         ; Alcotest.test_case "preparation errors, exceptions and cancellation retain their outcomes" `Quick

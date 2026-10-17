@@ -630,10 +630,48 @@ Keeper의 실제 Owner만 읽고 나머지 preview의 이력을 순회·직렬�
 상세 투영은 N개 scope에 비례한다. 임의 이력 상한이나 timeout은 추가하지
 않았다. 추가 메모리·선택된 payload·렌더 비용은 미측정이다.
 
-현재 기록은 해당 writer의 수명 동안만 유지된다. idle·다음 writer·서버 재시작을
-넘는 내구 기록과 전체 queue/provider/continuation 인과 연결은 남아 있다.
+위 live timeline은 해당 writer의 수명 동안만 유지된다. 아래 종료 보고서는
+직접·자율 Task 진입부의 기록을 기존 manifest에 따로 보존한다.
 중첩·병렬·취소·선택된 실제 turns decoder 시나리오는
 작성했으며 실행하지 않았다. 타입·현재 통합 경로·실제 화면·성능은 미확인이다.
+
+#### 실행 종료 후 준비 보고서
+
+비교 기준은 `3646e7fb00b6d6cb3e2698af0a400a625ab36d40`다.
+
+| 조건 | As-Is | To-Be |
+|---|---|---|
+| 직접·자율 Task 실행 종료 | 실행 중 writer의 timeline만 있음 | 원래 writer를 읽어 기존 runtime manifest에 보고서 한 번 append |
+| 다음 writer가 화면을 대체 | 기존 live 조회에서 이전 이력에 접근할 수 없음 | 저장에 성공한 이전 보고서는 원래 turn reference로 보존 |
+| 오류·취소·미완료 scope | writer 수명 안에서만 확인 | 각 scope의 실제 상태를 그대로 보존; 미완료를 성공으로 바꾸지 않음 |
+| 일반 sink 오류 | 종료 보고서 없음 | 오류를 기록하고 원래 반환값·예외 유지; reserved exception은 전파 |
+
+`Keeper_preparation_runtime_observation.with_turn`은 두 실제 Task 진입부에서
+준비와 실행을 감싼다. 종료 경계는 `returned`·`raised`·`cancelled`이며 `returned`는
+Task 성공을 뜻하지 않는다. 결과가 Error인 정상 반환도 `returned`다.
+준비 scope의 `prepared`·`rejected`·`raised`·`cancelled`·`active`는 별도로 유지한다.
+
+새 `Preparation_observed`는 `operator_evidence`다. 보고서는 원래 turn reference,
+있는 경우 실제 execution scope, start-ordered scopes와 관측 보고서 UUID를 갖는다.
+UUID는 같은 실행의 continuation 보고서를 구별하는 관측 좌표이며 새 실행을
+만들거나 재개할 권한이 아니다. 이름·시각으로 원래 writer를 추정하지 않는다.
+Provider 응답·prompt·Tool 인자·오류 본문·Owner token은 보고서에 포함하지 않는다.
+public manifest projection은 각 중첩 객체의 명시적 필드만 전달하며 strict decoder가
+동일한 timeline/identity 형식을 읽는다. 논리 clock edge의 행 시각을 준비 경과
+시간으로 바꾸지 않으며, 중첩·병렬 scope의 elapsed를 합산하지 않는다.
+
+Map snapshot은 mutex 안에서 참조만 읽는다. 순회·직렬화·저장은 lock 밖이며
+준비 단계마다 I/O를 추가하지 않는다. 저장은 invocation 종료 후 한 번으로,
+기록한 준비 span 밖에 있다. 그 추가 비용과 실제 체감 시간은 미측정이다.
+취소 경로에서는 기존 Eio cancellation protection으로 보고서를 발행한 뒤 원래
+취소를 다시 전파한다. 저장은 기존 manifest의 best-effort·retention 계약을 따르며,
+append 실패나 종료 전 process crash까지 기록을 보장하지 않는다.
+
+완료 후 TUI의 선택된 상세 조회, standalone 진입부의 명시적 identity 연결,
+queue/provider/continuation 전체 인과 연결은 후속 작업이다. 기본 turns polling은
+이 내구 이력을 읽지 않는다. 실제 저장·후속 writer·public projection과 예외·취소·
+sink 실패 시나리오는 작성했으며 실행하지 않았다. parser 확인은 타입·실행 검증을
+대체하지 않는다.
 
 #### 공유 world 출처별 대기 관측
 

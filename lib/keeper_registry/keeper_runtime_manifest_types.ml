@@ -17,6 +17,7 @@ type event_kind =
   | Context_injected
   | History_projection_observed
   | Skill_preparation_observed
+  | Preparation_observed
   | Event_bus_correlated
   | Checkpoint_loaded
   | Checkpoint_saved
@@ -36,6 +37,7 @@ let all_event_kinds =
     Context_injected;
     History_projection_observed;
     Skill_preparation_observed;
+    Preparation_observed;
     Event_bus_correlated;
     Checkpoint_loaded;
     Checkpoint_saved;
@@ -55,6 +57,7 @@ let event_kind_to_string = function
   | Context_injected -> "context_injected"
   | History_projection_observed -> "history_projection_observed"
   | Skill_preparation_observed -> "skill_preparation_observed"
+  | Preparation_observed -> "preparation_observed"
   | Event_bus_correlated -> "event_bus_correlated"
   | Checkpoint_loaded -> "checkpoint_loaded"
   | Checkpoint_saved -> "checkpoint_saved"
@@ -73,6 +76,7 @@ let event_kind_of_string = function
   | "context_injected" -> Some Context_injected
   | "history_projection_observed" -> Some History_projection_observed
   | "skill_preparation_observed" -> Some Skill_preparation_observed
+  | "preparation_observed" -> Some Preparation_observed
   | "event_bus_correlated" -> Some Event_bus_correlated
   | "checkpoint_loaded" -> Some Checkpoint_loaded
   | "checkpoint_saved" -> Some Checkpoint_saved

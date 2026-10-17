@@ -35,7 +35,7 @@ let source_clock_of_string = function
 
 let source_clock_of_event = function
   | Event_bus_correlated -> Event_bus
-  | Context_injected | History_projection_observed | Skill_preparation_observed -> Logical
+  | Context_injected | History_projection_observed | Skill_preparation_observed | Preparation_observed -> Logical
   | Turn_started | Phase_gate_decided | Runtime_routed | Runtime_execution_built | Runtime_completed
   | Runtime_failed | Pre_dispatch_blocked | Provider_lane_resolved | Checkpoint_loaded
   | Checkpoint_saved | Receipt_appended | Turn_finished -> Wall
@@ -152,7 +152,7 @@ let comparable_for_latency a b =
 let clock_lane_of_event = function
   | Turn_started
   | Phase_gate_decided
-  | Skill_preparation_observed
+  | Skill_preparation_observed | Preparation_observed
   | Pre_dispatch_blocked
   | Receipt_appended
   | Turn_finished ->
@@ -201,7 +201,7 @@ let clock_refs_for_context ctx ~event ?agent_core_turn_count ?elapsed_ms
       Some (context_tool_batch_id ctx ?agent_core_turn_count ())
     | Turn_started | Phase_gate_decided | Runtime_routed | Runtime_execution_built
     | Runtime_completed | Runtime_failed | Pre_dispatch_blocked | Context_injected
-    | History_projection_observed | Skill_preparation_observed | Event_bus_correlated | Checkpoint_loaded | Checkpoint_saved
+    | History_projection_observed | Skill_preparation_observed | Preparation_observed | Event_bus_correlated | Checkpoint_loaded | Checkpoint_saved
     | Receipt_appended | Turn_finished -> None
   in
   let checkpoint_id =
@@ -211,7 +211,7 @@ let clock_refs_for_context ctx ~event ?agent_core_turn_count ?elapsed_ms
       Some (context_checkpoint_id ctx ?agent_core_turn_count ())
     | Turn_started | Phase_gate_decided | Runtime_routed | Runtime_execution_built
     | Runtime_completed | Runtime_failed | Pre_dispatch_blocked | Provider_lane_resolved
-    | Context_injected | History_projection_observed | Skill_preparation_observed | Event_bus_correlated | Receipt_appended
+    | Context_injected | History_projection_observed | Skill_preparation_observed | Preparation_observed | Event_bus_correlated | Receipt_appended
     | Turn_finished -> None
   in
   clock_refs ~edge_id:(context_edge_id ctx event)
@@ -328,6 +328,7 @@ let decision_public_allowlist =
     ; "idx"; "runtime_id"; "error_kind"
     ; "routing_run_id"; "attempt_total_usage"; "attempt_usage_status"
     ; "skill_preparation"
+    ; "preparation_report"
     ]
 
 let clock_refs_public_allowlist =
@@ -345,18 +346,37 @@ let skill_preparation_public_allowlist =
     ; "entered_ns"; "lookup_finished_ns"; "lock_acquired_ns"; "decision_ns"
     ; "decision"; "finished_ns" ]
 
+let preparation_report_public_allowlist = StringSet.of_list
+    ["schema_version"; "report_id"; "boundary"; "turn_ref"; "execution_scope"; "scopes"]
+let preparation_span_public_allowlist = StringSet.of_list ["scope_id"; "parent_scope_id"; "preparation"]
+let preparation_observation_public_allowlist = StringSet.of_list
+    ["phase"; "turn_ref"; "started_at_unix"; "state"; "finished_at_unix"; "elapsed_ns"]
+let preparation_execution_scope_public_allowlist = StringSet.of_list ["kind"; "id"]
+
 type decision_projection_scope =
   | Decision
   | Clock_refs
   | Skill_preparation
+  | Preparation_report
+  | Preparation_span
+  | Preparation_observation
+  | Preparation_execution_scope
 
 let decision_allowlist = function
   | Decision -> decision_public_allowlist
   | Clock_refs -> clock_refs_public_allowlist
   | Skill_preparation -> skill_preparation_public_allowlist
+  | Preparation_report -> preparation_report_public_allowlist
+  | Preparation_span -> preparation_span_public_allowlist
+  | Preparation_observation -> preparation_observation_public_allowlist
+  | Preparation_execution_scope -> preparation_execution_scope_public_allowlist
 
 let decision_child_scope scope key =
-  if String.equal key "clock_refs" then Clock_refs
+  if String.equal key "preparation_report" then Preparation_report
+  else if scope = Preparation_report && String.equal key "scopes" then Preparation_span
+  else if scope = Preparation_report && String.equal key "execution_scope" then Preparation_execution_scope
+  else if scope = Preparation_span && String.equal key "preparation" then Preparation_observation
+  else if String.equal key "clock_refs" then Clock_refs
   else if String.equal key "skill_preparation" then Skill_preparation
   else scope
 

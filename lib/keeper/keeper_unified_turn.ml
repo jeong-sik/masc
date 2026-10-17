@@ -917,38 +917,40 @@ let run_keeper_cycle
                    []
                in
                let recent_work = Keeper_recent_work.collect ~config ~meta in
-               let render_prompt ?workspace_memory_access tools observation =
-                 let recent_work = Keeper_recent_work.transmit ~base_path:config.base_path ~tools recent_work in
-                 Keeper_unified_prompt.build_prompt
+               let render_prompt,prompt_parts =
+                 Keeper_turn_preview.with_preparation ~writer:(Some preview)
+                   ~turn_ref:(Some preparation_turn_ref) ~phase:Keeper_turn_preview.Prompt_preparation (fun () ->
+                 Eio_guard.with_named_switch "turn:prompt" (fun () ->
+                 let prepared = Keeper_unified_prompt.prepare_prompt
                      ~turn_decision
                      ?previous_turn_stop
                      ~current_task
                      ~task_skill_surfaces
                      ~active_goal_summaries
                      ~workspace_memory
-                     ?workspace_memory_access
                      ~wiki_contents
                      ~lane_updates
                      ~repository_freshness
-                     ~recent_work
                      ~observation
-                     ()
-               in
-               let prompt_parts =
-                 Eio_guard.with_named_switch "turn:prompt" (fun () -> render_prompt [] observation)
+                     () in
+                 let render_prompt ?workspace_memory_access own_recent_actions tools =
+                   let recent_work = Keeper_recent_work.transmit ~base_path:config.base_path ~tools recent_work in
+                   Keeper_unified_prompt.project_prompt prepared ?workspace_memory_access
+                     ~own_recent_actions ~recent_work () in
+                 render_prompt,render_prompt observation.own_recent_actions []))
                in
                let { Keeper_unified_prompt.world_state; user_message; _ } = prompt_parts in
                let dynamic_context_for_tools = Some (fun access ->
                  let tools = Keeper_request_tool_access.offered access in
                  Domain_pool_ref.submit_io_or_inline (fun () ->
-                   let observation = match meta.input_policy, observation.own_recent_actions with
+                   let own_recent_actions = match meta.input_policy, observation.own_recent_actions with
                      | Keeper_input_policy.Small, Ok turns ->
                        let own_recent_actions = Keeper_own_recent_actions.externalize_failures
                          ~base_path:config.base_path ~keeper_name:meta.name
                          ~policy:meta.input_policy ~tools turns in
-                       {observation with own_recent_actions=Ok own_recent_actions}
-                     | Wide, _ | Small, Error _ -> observation in
-                   (render_prompt ~workspace_memory_access:access tools observation).world_partition)) in
+                       Ok own_recent_actions
+                     | Wide, _ | Small, Error _ -> observation.own_recent_actions in
+                   (render_prompt ~workspace_memory_access:access own_recent_actions tools).world_partition)) in
                Eio.Fiber.yield ();
                let base_dir = session_base_dir config in
                (* Ensure session dir tree for trace artifacts. *)

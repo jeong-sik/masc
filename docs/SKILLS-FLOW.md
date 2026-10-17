@@ -514,6 +514,48 @@ effect 이후 원래 예외·단일 실행 보존의 18개 시나리오를 작�
 않았다. 타입·동작 실행·취소 비용·실제 Tool/TUI 연속성·최신 native/model
 Before/After와 독립 리뷰는 아직 확인하지 않았다.
 
+#### 자율 프롬프트 공통 결과의 실행 소유 재사용
+
+비교 기준은 `4a6e34856c9c944119c511bbda3aca5f7cf335ed`다. 자율 실행은 Tools를
+정하기 전의 프롬프트와 실제 요청의 `dynamic_context_for_tools`에서 world 전체를
+다시 조립했다. 이제 해당 cycle에서 `prepare_prompt`를 한 번 호출하고, 같은
+실제 결과를 초기 조립과 요청별 `project_prompt`에 직접 전달한다. Keeper 이름·
+현재 화면·모델 이름으로 이전 결과를 찾거나 process-global cache에 보관하지 않는다.
+
+| 조건 | As-Is | To-Be 소스 경로 |
+| --- | --- | --- |
+| Goals·Task·Gate 관측·Board 등 공통 layer | 초기와 실제 요청마다 다시 렌더 | 원래 turn 입력에서 한 번 렌더한 불변 content 사용 |
+| 공통 layer·frame의 SHA-256 | 매 조립에서 같은 문자열을 다시 해시 | 실제 문자열에서 생성한 opaque content의 digest 사용 |
+| memory·wiki 접근 안내 | 실제 Tools에 맞춰 전체 world를 다시 렌더 | 실제 request access로 해당 두 layer만 다시 투영 |
+| 최근 행동·작업 근거 | 갱신된 행동을 넣은 observation 전체를 재조립 | 실제 행동 projection·artifact transmission을 네 동적 layer에만 반영 |
+| 요청의 renderer receipt | 전체 조립에서 offset·digest 생성 | canonical 순서로 새 offset 생성, 불변 content에 결속된 digest 사용 |
+| answered Ask 입력 | 매 전체 조립에서 다시 포맷 | 처음 준비한 원래 user input 유지; fresh wake는 새 준비 |
+| 초기 공통 조립 관측 | 별도 live scope 없음 | 원래 writer·turn reference의 Prompt 준비 scope |
+
+현재 20종 layer 중 16종은 공통, 4종은 Workspace_memory·Wiki·Own_recent_actions·
+Recent_work다. 실제 요청 callback 호출 수가 `R`이면, 공통 layer의 content 분기와
+존재하는 content의 해시는 초기 조립을 포함한 `1+R`회에서 한 번으로 옮긴다.
+`R=1`일 때의 소스 중복은 2→1이다. 모델 왕복·Tool 호출·요청 수·전송 bytes의
+측정값이나 감소 보장이 아니다. 네 동적 layer와 실제 artifact 권한·publication은
+요청마다 기존 생산자가 결정한다. 전체 world 문자열 조립과 receipt의 전체 text
+hash도 실제 bytes에서 계속 생성한다.
+
+공통 text·digest와 프레임·user input은 해당 준비가 읽은 입력과 prompt fragment에
+고정된다. 새 turn·world snapshot·공통 prompt 변경에는 새 준비가 필요하다.
+Task/Gate 문구의 관측을 effect 권한으로 재사용하지 않는다. 실제 Tool effect의
+권한 경계와 제공 Tools에 따른 reader·discovery 경로도 기존대로 유지한다.
+one-shot renderer와 dashboard preview는 같은 준비·투영 구현을 사용하되 재사용
+이득이 없는 Map/content 생성 비용을 지불한다. 추가 보관·할당·조립 비용과 실제
+native/model 지연은 아직 측정하지 않았다.
+
+작성한 시나리오는 다른 Task 준비가 끼어들어도 원래 Task·answered Ask를 유지하고,
+동일 준비에서 unavailable·direct·discoverable request access를 투영한다. 최근 행동
+조회 실패 뒤 원래 source 복원, 원래 Ask가 소비된 fresh wake, 실제 history/artifact
+reader의 제거·복구, 각 실제 UTF8 span과 digest도 다룬다. 실행하지 않았다.
+타입·실제 concurrent worker·화면·현재 통합 경로와 성능 개선은 미확인이다.
+직접 요청의 공통 문맥 조립, 준비 전반의 전체 timeline·continuation segment 연결,
+Composition·held job 및 원래 작업 재개의 최신 조합 증거도 계속 남아 있다.
+
 ### 2b. 프롬프트 — 지명된 스킬 안내
 
 `task.skills`(`masc_add_task`가 지정, `lib/task/tool_task_handlers.ml`의

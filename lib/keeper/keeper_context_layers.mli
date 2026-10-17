@@ -49,11 +49,15 @@ val order_index : layer_id -> int
     a new variant forces an arm here as well as in any [content_of]. *)
 
 type unattributed = World_frame | Host_workspace_recall | Direct_turn | Unprojected_input
+type prepared_content
+(** Immutable text and the SHA-256 computed from those exact UTF8 bytes. *)
+val prepare_content : string -> prepared_content
 type rendered
 val text : rendered -> string
 val unattributed : unattributed -> string -> rendered
 val append_unattributed : rendered -> unattributed -> string -> rendered
 val prepend_unattributed : unattributed -> string -> rendered -> rendered
+val prepend_prepared_unattributed : unattributed -> prepared_content -> rendered -> rendered
 val receipt_to_json : rendered -> Yojson.Safe.t
 (** Renderer-issued raw UTF8 spans, not a prepared or delivered IPC claim. *)
 val assemble : content_of:(layer_id -> string option) -> rendered
@@ -61,3 +65,6 @@ val assemble : content_of:(layer_id -> string option) -> rendered
     and concatenates the [Some] results in order; a [None] layer contributes
     nothing. The concatenation is byte-exact — each [content_of] result is
     expected to carry its own header and trailing separators. *)
+val assemble_prepared : content_of:(layer_id -> prepared_content option) -> rendered
+(** Same canonical fold and fresh offsets as {!assemble}, reusing each exact
+    immutable content's digest. Content identities grant no delivery claim. *)

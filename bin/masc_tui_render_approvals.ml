@@ -291,7 +291,26 @@ let draw_ask_answer_feedback buf cols (state : state) =
                  at_count latest.ata_tool latest.ata_keeper_turn_id, Theme.info () in
             if at_evidence_current then text
             else fst text ^ " · retained earlier evidence", Theme.warn () in
-      box_wrapped_field buf cols ~head:"  " ~style:action_style action_text)
+      box_wrapped_field buf cols ~head:"  " ~style:action_style action_text;
+      let task_text, task_style = match observed.af_linked_task with
+        | Decode.Ask_task_unlinked -> "Original question: no linked Task", Theme.recede ()
+        | Ask_task_missing id -> "Original Task " ^ id ^ ": not observed in lookup", Theme.warn ()
+        | Ask_task_unavailable id -> "Original Task " ^ id ^ ": observation unavailable", Theme.warn ()
+        | Ask_task_observed {akt_task_id;akt_location;akt_status;akt_evidence_current;akt_observed_at=_} ->
+            let phase = match akt_status with
+              | Masc_domain.Todo -> "to do"
+              | Claimed {assignee;_} -> "claimed by " ^ assignee
+              | InProgress {assignee;_} -> "in progress by " ^ assignee
+              | AwaitingVerification {verification_id;_} -> "awaiting verification " ^ verification_id
+              | Done {assignee;_} -> "done by " ^ assignee
+              | Cancelled {cancelled_by;_} -> "cancelled by " ^ cancelled_by in
+            let location = match akt_location with
+              | Decode.Ask_task_backlog -> "" | Ask_task_archive -> " · archived" in
+            let freshness = if akt_evidence_current then ""
+              else " · last observed; latest read did not confirm" in
+            "Original Task " ^ akt_task_id ^ ": " ^ phase ^ location ^ freshness,
+            (if akt_evidence_current then Theme.info () else Theme.warn ()) in
+      box_wrapped_field buf cols ~head:"  " ~style:task_style task_text)
       followup;
     (match state.ask_followup_error with
      | None -> ()

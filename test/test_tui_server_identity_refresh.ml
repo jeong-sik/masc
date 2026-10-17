@@ -1359,7 +1359,9 @@ let test_answer_followup_retains_current_source_observations () =
     af_queue_cancelled_at=None;af_evidence_complete=true;
     af_tool_actions=Decode.Ask_tools_observed {at_count=1;at_first_recorded_at=Some 202.;
       at_latest=Some {ata_execution_id="original-tool";ata_physical_execution_id="original-call";ata_trace_id="original-trace";
-        ata_keeper_turn_id=17;ata_tool="Read";ata_recorded_at=202.};at_evidence_current=true}} in
+        ata_keeper_turn_id=17;ata_tool="Read";ata_recorded_at=202.};at_evidence_current=true};
+    af_linked_task=Decode.Ask_task_observed {akt_task_id="task-original";akt_location=Ask_task_backlog;
+      akt_status=Masc_domain.Todo;akt_observed_at=203.;akt_evidence_current=true}} in
   ignore (take_ask_followup state request owner (Ok observed));
   Alcotest.(check bool) "original observation survives without releasing the POST gate" true
     (current_ask_followup state=Some observed && state.ask_submit_inflight);
@@ -1368,17 +1370,53 @@ let test_answer_followup_retains_current_source_observations () =
   let request, owner = begin_read () in
   ignore (take_ask_followup state request owner (Error "read unavailable"));
   Alcotest.(check bool) "failed reread retains prior source facts and explicit error" true
-    (current_ask_followup state=Some observed && Option.is_some state.ask_followup_error);
+    (Option.exists (fun value -> value.Decode.af_turn_started_at=Some 201.
+       && match value.af_linked_task with
+          | Decode.Ask_task_observed {akt_status=Masc_domain.Todo;akt_evidence_current=false;_} -> true
+          | Ask_task_observed _ | Ask_task_unlinked | Ask_task_missing _ | Ask_task_unavailable _ -> false)
+       (current_ask_followup state) && Option.is_some state.ask_followup_error);
   let request, owner = begin_read () in
   ignore (take_ask_followup state request owner
     (Ok {observed with af_turn_started_at=None;af_evidence_complete=false;
-      af_tool_actions=Decode.Ask_tools_unavailable}));
+      af_tool_actions=Decode.Ask_tools_unavailable;af_linked_task=Decode.Ask_task_unavailable "task-original"}));
   Alcotest.(check bool) "missing observations cannot undo a positive fact" true
     (Option.exists (fun value -> value.Decode.af_turn_started_at=Some 201.
        && not value.af_evidence_complete
        && (match value.af_tool_actions with
           | Decode.Ask_tools_observed {at_count=1;at_evidence_current=false;_} -> true
-          | Decode.Ask_tools_observed _ | Decode.Ask_tools_unavailable -> false)) (current_ask_followup state));
+          | Decode.Ask_tools_observed _ | Decode.Ask_tools_unavailable -> false)
+       && (match value.af_linked_task with
+          | Decode.Ask_task_observed {akt_evidence_current=false;_} -> true
+          | Ask_task_observed _ | Ask_task_unlinked | Ask_task_missing _ | Ask_task_unavailable _ -> false))
+      (current_ask_followup state));
+  let request, owner = begin_read () in
+  let changed = {observed with af_linked_task=Decode.Ask_task_observed
+    {akt_task_id="task-original";akt_location=Ask_task_archive;akt_status=Masc_domain.Done
+      {assignee="replacement-worker";completed_at="2026-10-17T00:00:00Z";notes=None};
+     akt_observed_at=204.;akt_evidence_current=true}} in
+  ignore (take_ask_followup state request owner (Ok changed));
+  Alcotest.(check bool) "fresh canonical status replaces stale observation" true
+    (current_ask_followup state=Some changed && Option.is_none state.ask_followup_error);
+  let request, owner = begin_read () in
+  ignore (take_ask_followup state request owner
+    (Ok {changed with af_linked_task=Decode.Ask_task_missing "task-original"}));
+  Alcotest.(check bool) "missing lookup retains last status as stale" true
+    (Option.exists (fun value -> match value.Decode.af_linked_task with
+      | Decode.Ask_task_observed {akt_status=Masc_domain.Done _;akt_evidence_current=false;_} -> true
+      | Ask_task_observed _ | Ask_task_unlinked | Ask_task_missing _ | Ask_task_unavailable _ -> false)
+      (current_ask_followup state));
+  List.iter (fun foreign ->
+    let request, owner = begin_read () in
+    Alcotest.(check bool) "changed original identity is refused" true
+      (match take_ask_followup state request owner (Ok foreign) with
+       | Some (Error _) -> true | Some (Ok _) | None -> false))
+    [{observed with af_linked_task=Decode.Ask_task_missing "task-other"};
+     {observed with af_linked_task=Decode.Ask_task_unlinked};
+     {observed with af_stimulus_id="another-source"};{observed with af_answered_at=300.}];
+  let request, owner = begin_read () in
+  ignore (take_ask_followup state request owner (Ok observed));
+  Alcotest.(check bool) "new valid observation may return to an earlier phase" true
+    (current_ask_followup state=Some observed);
   let retired, old_owner = begin_read () in
   let second = submission "new-answer" in
   begin_ask_submission_state ~submission:second state;

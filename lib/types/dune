@@ -16,6 +16,7 @@
   turn_record
   health_status
   types_core
+  task_status_observation
   types_auth
   masc_domain
   goal_store_unavailable

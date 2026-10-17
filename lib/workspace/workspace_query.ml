@@ -76,6 +76,30 @@ let update_priority config ~task_id ~priority =
     | Ok result -> result
     | Error error -> Error (Lock_error error)
 
+type task_status_location = Task_backlog | Task_archive
+type task_status_reading = { location : task_status_location; status : Masc_domain.task_status }
+
+let read_task_status_r config ~task_id =
+  let ( let* ) = Result.bind in
+  let primary () =
+    let* backlog = read_backlog_r config in
+    match List.filter (fun (task : task) -> task.id = task_id) backlog.tasks with
+    | [] -> Ok None
+    | [task] ->
+        Task_status_observation.of_yojson (Task_status_observation.to_yojson task.task_status)
+        |> Result.map (fun status -> Some { location = Task_backlog; status })
+    | _ -> Error "backlog contains duplicate requested Task identities" in
+  if String.trim task_id = "" then Error "requested Task identity is blank"
+  else
+    let* observed = primary () in
+    match observed with
+    | Some _ -> Ok observed
+    | None ->
+        let* archived = Workspace_task_id.read_archived_task_status_r config ~task_id in
+        match archived with
+        | Some status -> Ok (Some { location = Task_archive; status })
+        | None -> primary ()
+
 (** Get raw task list (for orchestrator).
     Requires initialization. *)
 let get_tasks_raw config =

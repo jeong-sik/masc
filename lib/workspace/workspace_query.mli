@@ -36,6 +36,20 @@ val update_priority :
 
 (** {1 Raw Data Retrieval} *)
 
+type task_status_location = Task_backlog | Task_archive
+type task_status_reading = {
+  location : task_status_location;
+  status : Masc_domain.task_status;
+}
+
+val read_task_status_r :
+  config -> task_id:string -> (task_status_reading option, string) result
+(** Read the exact Task from the strict primary backlog, then the archive when
+    needed. Never replace an unreadable primary with a recovery copy or infer a
+    Task from an agent's current-task cache. A missing archive result rechecks
+    the backlog to cover restoration. [None] is an unobserved lookup, not proof
+    of deletion; the two stores are not one atomic snapshot. No mutation. *)
+
 (** Return raw task list (used by orchestrator).
     Requires initialization. *)
 val get_tasks_raw : config -> Masc_domain.task list

@@ -94,6 +94,22 @@ type ask_tool_actions =
       at_evidence_current : bool;
     }
 
+type ask_task_location = Ask_task_backlog | Ask_task_archive
+type ask_linked_task =
+  | Ask_task_unlinked
+  | Ask_task_missing of string
+  | Ask_task_unavailable of string
+  | Ask_task_observed of {
+      akt_task_id : string;
+      akt_location : ask_task_location;
+      akt_status : Masc_domain.task_status;
+      akt_observed_at : float;
+      akt_evidence_current : bool;
+    }
+(** The original question's declared Task, independently of delivery and Tool
+    observations. Retained observations are explicitly not a current lookup.
+    Missing means unobserved in the lookup, not deletion or completion. *)
+
 type ask_followup = {
   af_answered_at : float;
   af_stimulus_id : string;
@@ -103,6 +119,7 @@ type ask_followup = {
   af_queue_cancelled_at : float option;
   af_evidence_complete : bool;
   af_tool_actions : ask_tool_actions;
+  af_linked_task : ask_linked_task;
 }
 
 val decode_ask_followup :

@@ -5,6 +5,46 @@ answer; the event queue carries its question ID and original continuation
 channel. A durable wake is evidence of delivery admission, not proof that the
 Keeper completed the requested work.
 
+The exact-answer follow-up also observes the `task_id` recorded on the original
+question. It does not substitute the Keeper's current Task or infer a binding
+from Tool results. `linked_task` distinguishes `unlinked`, `missing`,
+`unavailable` and `observed`; an observed reading includes `task_id`, `location`
+(`backlog` or `archive`), `observed_at` and canonical status metadata. Task title,
+description, completion notes and cancellation reason are excluded. The shared
+status codec validates required metadata and lifecycle clocks without changing
+Task transition or completion authority.
+
+The lookup reads the strict primary backlog first, then the archive. A recovery
+copy cannot replace an unreadable primary. If both lookups miss, it rechecks
+the primary to cover restoration; the stores still are not one atomic snapshot,
+so `missing` means unobserved, not deleted. The archive keeps an immutable index
+under the existing file-version cache policy, invalidated by archive writes;
+only the requested row is decoded as a Task. Duplicate requested identities and
+unidentified rows that prevent establishing absence leave the reading
+unavailable. An unrelated known-id malformed row does not erase a valid exact
+positive. Memory backends bypass the filesystem index cache. Read work uses the
+existing shared I/O pool when installed, retaining Eio handlers for backend
+operations, with the existing no-pool and nested-worker behavior. In an Eio
+request the independent Tool and Task observations run as sibling fibers;
+non-Eio callers read them sequentially. They retain their own result states and
+do not add another HTTP request or timer.
+
+The TUI displays the original Task's actual phase alongside answer, reaction and
+Tool evidence. A newer valid reading replaces the old phase, even if the phase
+moves back. Failed or missing rereads retain a prior phase as last observed,
+explicitly unconfirmed by the latest read. A changed answer source or Task
+binding is refused; a newer submission or workspace retires old observations.
+`tui_ask_followup` records Task identity, phase, location, clock and freshness
+without free text. These observations grant no claim or resume authority, and a
+Task phase does not establish answer causation or completion of the whole Goal.
+
+Before this change, follow-up covered exact reaction and Tool results but no
+original Task status. After this source change, original Task status is a
+separate observation, including archived terminal Tasks and explicit stale or
+unavailable evidence. Persistence, HTTP/decoder and state scenarios are authored
+but unexecuted; parser checks do not establish typing, behavior, painted UI,
+installed inclusion or any latency improvement.
+
 After an answer append, the store rereads the canonical first winner. Concurrent
 submissions can append different answers, but only the first terminal answer is
 canonical. A losing submission remains a conflict; its choice labels must not be

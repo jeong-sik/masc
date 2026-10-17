@@ -117,11 +117,42 @@ let observe_tool_actions ~base_path ~keeper_name ~source_id =
       Ok summary
   | Some _, Some _ | None, _ | _, None -> Error "Tool ledger workspace is unavailable or different"
 
+type linked_task =
+  | Task_unlinked
+  | Task_missing of string
+  | Task_unavailable of { task_id : string; detail : string }
+  | Task_observed of {
+      task_id : string;
+      location : Workspace_query.task_status_location;
+      status : Masc_domain.task_status;
+      observed_at : float;
+    }
+
+let observe_linked_task ~base_path (ask : Keeper_ask.ask) =
+  match ask.task_id with
+  | None -> Task_unlinked
+  | Some task_id ->
+      let config = Workspace_core.default_config base_path in
+      let reading =
+        try Eio_guard.with_named_switch "ask-linked-task-status" (fun () ->
+          Domain_pool_ref.submit_io_or_inline
+            (fun () -> Workspace_query.read_task_status_r config ~task_id))
+        with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Printexc.to_string exn) in
+      match reading with
+      | Error detail -> Task_unavailable { task_id; detail }
+      | Ok None -> Task_missing task_id
+      | Ok (Some reading) -> Task_observed
+          { task_id; location = reading.location; status = reading.status;
+            observed_at = Time_compat.now () }
+
 type followup = {
   answered_at : float;
   stimulus_id : string;
   reactions : Keeper_reaction_ledger.event_queue_reaction_evidence_outcome;
   tool_actions : (tool_actions, string) result;
+  linked_task : linked_task;
 }
 
 let observe_followup ~base_path ~keeper_name ~ask ~resolution =
@@ -132,10 +163,17 @@ let observe_followup ~base_path ~keeper_name ~ask ~resolution =
   let* reactions = Keeper_reaction_ledger.event_queue_reaction_evidence_result
       ~base_path ~keeper_name ~stimulus_id
       |> Result.map_error Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string in
-  let tool_actions = match Keeper_ask.answer_source_id ~ask_id:ask.ask_id ~answered_at:stimulus.arrived_at with
+  let read_actions () =
+    match Keeper_ask.answer_source_id ~ask_id:ask.ask_id ~answered_at:stimulus.arrived_at with
     | None -> Error "canonical answer input identity is invalid"
     | Some source_id -> observe_tool_actions ~base_path ~keeper_name ~source_id in
-  Ok {answered_at=stimulus.arrived_at; stimulus_id; reactions; tool_actions}
+  let read_task () = observe_linked_task ~base_path ask in
+  let tool_actions, linked_task = match Eio_guard.execution_context () with
+    | Eio_fiber -> Eio.Fiber.pair read_actions read_task
+    | Non_eio ->
+        let actions = read_actions () in
+        actions, read_task () in
+  Ok {answered_at=stimulus.arrived_at; stimulus_id; reactions; tool_actions; linked_task}
 
 let followup_to_json followup =
   let evidence, complete, quarantine_fields = match followup.reactions with
@@ -156,6 +194,16 @@ let followup_to_json followup =
               "physical_execution_id", `String action.physical_execution_id;
               "trace_id", `String action.trace_id; "keeper_turn_id", `Int action.keeper_turn_id;
               "tool", `String action.tool_name; "recorded_at", `Float action.recorded_at])] in
+  let linked_task = match followup.linked_task with
+    | Task_unlinked -> `Assoc ["state", `String "unlinked"]
+    | Task_missing task_id -> `Assoc ["state", `String "missing"; "task_id", `String task_id]
+    | Task_unavailable {task_id; detail = _} ->
+        `Assoc ["state", `String "unavailable"; "task_id", `String task_id]
+    | Task_observed {task_id; location; status; observed_at} ->
+        `Assoc ["state", `String "observed"; "task_id", `String task_id;
+          "location", `String (match location with Workspace_query.Task_backlog -> "backlog" | Task_archive -> "archive");
+          "observed_at", `Float observed_at;
+          "status", Task_status_observation.to_yojson status] in
   `Assoc (["state", `String "observed";
     "answered_at", `Float followup.answered_at;
     "stimulus_id", `String followup.stimulus_id;
@@ -164,7 +212,7 @@ let followup_to_json followup =
     "queue_settled_at", clock evidence.event_queue_ack_recorded_at;
     "queue_cancelled_at", clock evidence.event_queue_cancelled_recorded_at;
     "evidence_complete", `Bool complete;
-    "tool_actions", tool_actions] @ quarantine_fields)
+    "tool_actions", tool_actions; "linked_task", linked_task] @ quarantine_fields)
 
 let deliver_row ~base_path ~keeper_name ~already_delivered ask resolution =
   let ( let* ) = Result.bind in

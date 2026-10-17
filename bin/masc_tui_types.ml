@@ -8319,10 +8319,23 @@ let take_ask_followup (state : state) request submission
       if not (current && submission.as_authority = state.workspace_authority
               && state.workspace_identity = Workspace_identity_match) then None
       else begin
+        let linked_id = function
+          | Masc.Tui_decode_asks.Ask_task_unlinked -> None
+          | Ask_task_missing id | Ask_task_unavailable id -> Some id
+          | Ask_task_observed value -> Some value.akt_task_id in
+        let stale_task = function
+          | Masc.Tui_decode_asks.Ask_task_observed old ->
+              Masc.Tui_decode_asks.Ask_task_observed {old with akt_evidence_current=false}
+          | (Ask_task_unlinked | Ask_task_missing _ | Ask_task_unavailable _) as value -> value in
         let result = match result with
           | Error _ as error -> error
           | Ok observed ->
-              let observed = match state.ask_followup with
+              (match state.ask_followup with
+                | Some (owner, prior) when owner.as_request == submission.as_request
+                    && (prior.Masc.Tui_decode_asks.af_stimulus_id <> observed.af_stimulus_id
+                        || prior.af_answered_at <> observed.af_answered_at
+                        || linked_id prior.af_linked_task <> linked_id observed.af_linked_task) ->
+                    Error "answer follow-up changed original answer or linked Task identity"
                 | Some (owner, prior) when owner.as_request == submission.as_request
                     && prior.Masc.Tui_decode_asks.af_stimulus_id = observed.af_stimulus_id
                     && prior.af_answered_at = observed.af_answered_at ->
@@ -8337,17 +8350,28 @@ let take_ask_followup (state : state) request submission
                       | Ask_tools_observed fresh, (Ask_tools_observed _ | Ask_tools_unavailable) ->
                           Ask_tools_observed fresh
                       | Ask_tools_unavailable, Ask_tools_unavailable -> Ask_tools_unavailable in
-                    {observed with
+                    let af_linked_task = match observed.af_linked_task with
+                      | (Ask_task_missing _ | Ask_task_unavailable _) as fresh ->
+                          (match prior.af_linked_task with
+                           | Ask_task_observed old ->
+                               Masc.Tui_decode_asks.Ask_task_observed {old with akt_evidence_current=false}
+                           | Ask_task_unlinked | Ask_task_missing _ | Ask_task_unavailable _ -> fresh)
+                      | (Ask_task_unlinked | Ask_task_observed _) as fresh -> fresh in
+                    Ok {observed with
                       af_tool_actions;
+                      af_linked_task;
                       af_turn_started_at=retain observed.af_turn_started_at prior.af_turn_started_at;
                       af_turn_finished_at=retain observed.af_turn_finished_at prior.af_turn_finished_at;
                       af_queue_settled_at=retain observed.af_queue_settled_at prior.af_queue_settled_at;
                       af_queue_cancelled_at=retain observed.af_queue_cancelled_at prior.af_queue_cancelled_at}
-                | Some _ | None -> observed in
-              Ok observed in
+                | Some _ | None -> Ok observed) in
         (match result with
          | Ok observed -> state.ask_followup <- Some (submission, observed); state.ask_followup_error <- None
-         | Error detail -> state.ask_followup_error <- Some detail);
+         | Error detail ->
+             state.ask_followup_error <- Some detail;
+             state.ask_followup <- Option.map (fun (owner, prior) ->
+               owner, {prior with Masc.Tui_decode_asks.af_linked_task=stale_task prior.Masc.Tui_decode_asks.af_linked_task})
+               state.ask_followup);
         Some result
       end
 

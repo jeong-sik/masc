@@ -18112,7 +18112,18 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                           "latest_physical_execution_id", `String action.ata_physical_execution_id;
                           "latest_trace_id", `String action.ata_trace_id;
                           "latest_keeper_turn_id", `Int action.ata_keeper_turn_id;
-                          "latest_tool_result_recorded_at", `Float action.ata_recorded_at])) in
+                          "latest_tool_result_recorded_at", `Float action.ata_recorded_at]))
+              @ (match observed.af_linked_task with
+                | Masc.Tui_decode_asks.Ask_task_unlinked -> ["linked_task_state", `String "unlinked"]
+                | Ask_task_missing id -> ["linked_task_state", `String "missing"; "linked_task_id", `String id]
+                | Ask_task_unavailable id -> ["linked_task_state", `String "unavailable"; "linked_task_id", `String id]
+                | Ask_task_observed task ->
+                    ["linked_task_state", `String "observed"; "linked_task_id", `String task.akt_task_id;
+                     "linked_task_phase", `String (Masc_domain.task_status_to_string task.akt_status);
+                     "linked_task_location", `String (match task.akt_location with
+                       | Masc.Tui_decode_asks.Ask_task_backlog -> "backlog" | Ask_task_archive -> "archive");
+                     "linked_task_observed_at", `Float task.akt_observed_at;
+                     "linked_task_evidence_current", `Bool task.akt_evidence_current]) in
         Log.Transport.info "tui_ask_followup=%s" (Yojson.Safe.to_string (`Assoc
           (["keeper", `String submission.as_keeper_name; "ask_id", `String submission.as_ask_id;
             "admitted_ns", `String (Int64.to_string (Mtime_clock.elapsed_ns ()))] @ facts))))

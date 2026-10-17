@@ -14,13 +14,14 @@ type http_read_requests = {
   hrr_approval: Masc_tui_operator_projection.Listing_order.ticket option;
   hrr_asks: Snapshot_read.request option;
   hrr_roster: Snapshot_read.request option;
+  hrr_surfaces: Surface_read_order.request;
 }
 
 type http_initial_identity_read = {
   hir_ticket: Http_refresh_order.ticket;
   hir_authority: workspace_authority;
   hir_identity: Masc.Tui_decode.server_identity;
-  hir_needs_roster: bool;
+  hir_needs: surface_needs;
   hir_acknowledge: http_read_requests option Eio.Promise.u;
 }
 (** The UI may admit a cold matching probe before collection, then issue fresh
@@ -40,6 +41,7 @@ type early_approval_observation = {
    be sent as [Http_scoped_refresh_done] or applied as a verified bundle. *)
 type 'identity http_scoped_surface_readings = {
   http_refresh_ticket: Http_refresh_order.ticket;
+  http_surface_request: Surface_read_order.request;
   http_scoped_server_identity: 'identity;
   http_transport: (Masc.Tui_decode.transport_health, string) result option;
   http_approvals: approval_observation option;
@@ -232,6 +234,7 @@ type async_msg =
   | Http_keeper_roster_loaded of early_keeper_roster_observation
   (** Diagnostic reader status; it grants no data or action authority. *)
   | Http_progress_observed of http_progress_observation
+  | Http_surface_read_completed of Surface_read_order.request * async_msg
   | Http_initial_identity_read of http_initial_identity_read
   | Http_refresh_done of http_refresh_outcome
   | Http_refresh_failed of

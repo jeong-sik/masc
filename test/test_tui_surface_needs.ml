@@ -229,6 +229,62 @@ let test_usage_and_config_ask_for_account_emails () =
     ]
 ;;
 
+let test_navigation_settles_while_a_full_reader_is_pending () =
+  let module Order = Types.Surface_read_order in
+  let full_ticket = Types.Http_refresh_order.dispatch Types.Http_refresh_order.initial in
+  let navigation_ticket = Types.Http_refresh_order.for_navigation
+    ~full_refresh_inflight:true full_ticket in
+  check bool "foreground collection keeps the current enclosing interval" true
+    (Types.Http_refresh_order.is_current full_ticket navigation_ticket);
+  let reads, full = Order.dispatch ~needs:(needs Types.Metrics)
+    ~started_ns:1L Order.initial in
+  let reads, navigation = Order.dispatch ~needs:(needs Types.Board)
+    ~started_ns:2L reads in
+  let reads, accepted = Order.take reads navigation in
+  check bool "Board can be admitted before the unrelated full read finishes" true
+    (List.mem Order.Board accepted);
+  check bool "the provider history still has its original pending owner" true
+    (List.mem Order.Provider_history (Order.pending ~needs:(needs Types.Metrics) reads));
+  let _, accepted = Order.take reads full in
+  check bool "the full read retains its independent provider result" true
+    (List.mem Order.Provider_history accepted);
+  let successor = Types.Http_refresh_order.for_navigation
+    ~full_refresh_inflight:false full_ticket in
+  check bool "navigation without a full pass starts a new interval" false
+    (Types.Http_refresh_order.is_current full_ticket successor)
+
+let test_navigation_owns_overlapping_data_and_cleanup () =
+  let module Order = Types.Surface_read_order in
+  let reads, full = Order.dispatch ~needs:(needs Types.Metrics)
+    ~started_ns:1L Order.initial in
+  let reads, navigation = Order.dispatch ~needs:(needs Types.Config)
+    ~started_ns:2L reads in
+  let reads, accepted = Order.take reads full in
+  check bool "late full accounts do not replace the newer request" false
+    (List.mem Order.Account_emails accepted);
+  check bool "full completion does not release the newer accounts owner" true
+    (List.mem Order.Account_emails (Order.pending ~needs:(needs Types.Config) reads));
+  let reads = Order.finish reads full in
+  let reads, accepted = Order.take reads navigation in
+  check bool "original navigation admits its accounts" true
+    (List.mem Order.Account_emails accepted);
+  let _, duplicate = Order.take reads navigation in
+  check bool "a repeated completion cannot apply again" true (duplicate = [])
+
+let test_withdrawn_surface_source_cannot_settle_its_successor () =
+  let module Order = Types.Surface_read_order in
+  let reads, old = Order.dispatch ~needs:(needs Types.Board)
+    ~started_ns:1L Order.initial in
+  let reads = Order.invalidate reads in
+  let reads, current = Order.dispatch ~needs:(needs Types.Board)
+    ~started_ns:2L reads in
+  let reads, stale = Order.take reads old in
+  check bool "withdrawn result has no publication ownership" true (stale = []);
+  let reads = Order.finish reads old in
+  let _, accepted = Order.take reads current in
+  check bool "old completion and cleanup leave the successor intact" true
+    (List.mem Order.Board accepted)
+
 let () =
   run "tui_surface_needs"
     [ ( "refresh scope"
@@ -252,6 +308,12 @@ let () =
             test_equal_needs_have_no_delta
         ; test_case "authoritative refresh coalesces to one followup" `Quick
             test_authoritative_refresh_waits_for_both_owners_then_runs_once
+        ; test_case "foreground navigation settles while full readers remain pending" `Quick
+            test_navigation_settles_while_a_full_reader_is_pending
+        ; test_case "navigation owns overlapping data and cleanup" `Quick
+            test_navigation_owns_overlapping_data_and_cleanup
+        ; test_case "withdrawn source cannot settle its successor" `Quick
+            test_withdrawn_surface_source_cannot_settle_its_successor
         ] )
     ]
 ;;

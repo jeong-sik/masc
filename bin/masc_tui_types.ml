@@ -3562,6 +3562,61 @@ let surface_needs_delta ~previous ~next =
 
 let surface_needs_any needs = needs <> nothing
 
+(* Full and navigation reads can overlap. Each dataset keeps its own latest
+   producer, so a late full bundle cannot overwrite a newer navigation read.
+   Questions, approvals and roster already have independent source owners. *)
+module Surface_read_order : sig
+  type source = Transport | Board | Planning | System_logs | Fleet_safety
+    | Runtime_quota | Keeper_usage | Provider_history | Overview_goals | Account_emails
+  type t
+  type request
+  val initial : t
+  val dispatch : needs:surface_needs -> started_ns:int64 -> t -> t * request
+  val take : t -> request -> t * source list
+  val finish : t -> request -> t
+  val invalidate : t -> t
+  val pending : needs:surface_needs -> t -> source list
+  val source_name : source -> string
+  val request_id : request -> int
+  val started_ns : request -> int64
+end = struct
+  type source = Transport | Board | Planning | System_logs | Fleet_safety
+    | Runtime_quota | Keeper_usage | Provider_history | Overview_goals | Account_emails
+  type request = { id: int; started_ns: int64; sources: source list; owner: unit ref }
+  type t = { next: int; owners: (source * request) list }
+  let initial = {next=0; owners=[]}
+  let sources needs =
+    [Transport, needs.needs_transport; Board, needs.needs_board;
+     Planning, needs.needs_planning; System_logs, needs.needs_system_logs;
+     Fleet_safety, needs.needs_fleet_safety; Runtime_quota, needs.needs_runtime_quota;
+     Keeper_usage, needs.needs_keeper_usage; Provider_history, needs.needs_provider_history;
+     Overview_goals, needs.needs_overview_goals; Account_emails, needs.needs_account_emails]
+    |> List.filter_map (fun (source, wanted) -> if wanted then Some source else None)
+  let dispatch ~needs ~started_ns current =
+    let request = {id=current.next; started_ns; sources=sources needs; owner=ref ()} in
+    let retained = List.filter (fun (source, _) -> not (List.mem source request.sources)) current.owners in
+    {next=current.next+1; owners=List.map (fun source -> source,request) request.sources @ retained}, request
+  let owned current request =
+    List.filter (fun source ->
+      match List.assoc_opt source current.owners with
+      | Some latest -> latest.owner == request.owner
+      | None -> false) request.sources
+  let finish current request =
+    {current with owners=List.filter (fun (_, latest) -> latest.owner != request.owner) current.owners}
+  let take current request = finish current request, owned current request
+  let invalidate current = {current with owners=[]}
+  let pending ~needs current =
+    List.filter (fun source -> List.mem_assoc source current.owners) (sources needs)
+  let source_name = function
+    | Transport -> "transport" | Board -> "Board" | Planning -> "Work"
+    | System_logs -> "logs" | Fleet_safety -> "fleet health"
+    | Runtime_quota -> "provider windows" | Keeper_usage -> "Keeper usage"
+    | Provider_history -> "provider history" | Overview_goals -> "Goals"
+    | Account_emails -> "accounts"
+  let request_id request = request.id
+  let started_ns request = request.started_ns
+end
+
 type full_refresh_intent = Cadence | Revalidate
 
 (* Full and scoped bundles share one authority order. A later dispatch
@@ -3571,6 +3626,10 @@ module Http_refresh_order = struct
   let initial = Ticket 0
   let dispatch (Ticket generation) = Ticket (generation + 1)
   let is_current latest ticket = latest = ticket
+  (* A foreground read uses the running full pass's interval authority.
+     Dataset ownership, rather than another global dispatch, orders its data. *)
+  let for_navigation ~full_refresh_inflight latest =
+    if full_refresh_inflight then latest else dispatch latest
 end
 
 (** Display-only result from a refresh whose other reads are still running.
@@ -7151,6 +7210,7 @@ type state = {
   mutable http_refresh_started_ns: int64 option;
   mutable http_refresh_progress: (workspace_authority * Http_refresh_progress.t) option;
   mutable http_refresh_order: Http_refresh_order.ticket;
+  mutable http_surface_reads: Surface_read_order.t;
   mutable local_workspace: local_workspace_reading;
   mutable view: surface;
   mutable opening_mode: Masc_tui_config.opening;
@@ -8423,6 +8483,7 @@ let retire_keeper_message_search state =
   Atomic.incr state.msg_search_generation
 
 let suspend_workspace_readings state =
+  state.http_surface_reads <- Surface_read_order.invalidate state.http_surface_reads;
   retire_keeper_message_search state;
   state.workspace_read_authority <- ref ();
   (* Retired completions cannot release these slots. Keep observations and
@@ -11467,6 +11528,7 @@ let create_state
   http_refresh_started_ns = None;
   http_refresh_progress = None;
   http_refresh_order = Http_refresh_order.initial;
+  http_surface_reads = Surface_read_order.initial;
   local_workspace = Local_workspace_unread;
   view = Overview;
   opening_mode = Masc_tui_config.Overview;

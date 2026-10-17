@@ -146,14 +146,30 @@ let load_file_unix (path : string) : string =
    (#29358). The mode is named here so both branches agree. *)
 let save_file_mode = 0o644
 
+(* Writes [content] through [fd] and closes it. The channel buffers up to 64
+   KiB, so the tail of every smaller write reaches the kernel only at the
+   flush; a flush or close error (ENOSPC, EDQUOT, EIO) must reach the caller.
+   [close_out_noerr] alone swallowed it, and the atomic writers then fsynced
+   and renamed a truncated temp file over a good one. The descriptor is
+   closed on every path. *)
+let write_all_and_close (fd : Unix.file_descr) (content : string) : unit =
+  let oc = Unix.out_channel_of_descr fd in
+  match
+    Stdlib.output_string oc content;
+    Stdlib.flush oc
+  with
+  | () -> Stdlib.close_out oc
+  | exception exn ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    Stdlib.close_out_noerr oc;
+    Printexc.raise_with_backtrace exn backtrace
+;;
+
 let save_file_unix (path : string) (content : string) : unit =
   let fd =
     Unix.openfile path [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC ] save_file_mode
   in
-  let oc = Unix.out_channel_of_descr fd in
-  Stdlib.Fun.protect
-    ~finally:(fun () -> Stdlib.close_out_noerr oc)
-    (fun () -> Stdlib.output_string oc content)
+  write_all_and_close fd content
 ;;
 
 (* RFC-0108: per-path Stdlib.Mutex registry + fresh-fd open/close

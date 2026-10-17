@@ -50,9 +50,21 @@ val path : dir:string -> slot -> string
 val write :
   dir:string -> slot -> header -> meta:Yojson.Safe.t -> machine_bytes:string ->
   (unit, string) result
-(** Replaces the slot atomically: the file is written beside its target and
-    renamed over it, so a reader sees the old checkpoint or the new one,
-    never half of one. Creates [dir]. *)
+(** Replaces the slot atomically: the file is written beside its target,
+    fsynced, and renamed over it. A reader sees the old checkpoint or the new
+    one, never half of one, and a crash after [Ok] cannot leave an empty or
+    partial file in the slot, because the bytes were fsynced before the
+    rename. The directory is fsynced after the rename, but an error from that
+    fsync is ignored, as is a file system's refusal to fsync at all (this is
+    [Fs_compat.save_file_atomic]; its strict sibling reports both). So a crash
+    right after [Ok] can bring the previous checkpoint back, which is a valid
+    one. Creates [dir]. *)
+
+val copy : dir:string -> from:slot -> to_:slot -> (unit, string) result
+(** Copies the file of [from] over [to_] byte for byte, with {!write}'s atomic
+    and fsynced replace. [from] is not read as a checkpoint, so a damaged or
+    foreign one copies too, and it is never modified. [Error] when [from]
+    cannot be read or [to_] cannot be replaced; [to_] is then as it was. *)
 
 type contents = { header : header; meta : Yojson.Safe.t; machine_bytes : string }
 
@@ -82,4 +94,7 @@ type listed = {
 
 val list : dir:string -> (listed list, string) result
 (** Every [*.ckpt] under [dir] whose name is a slot, by slot name. A missing
-    [dir] is an empty list. *)
+    [dir] is an empty list. Each file is read from its front only, as far as
+    the header: the machine bytes behind it are not read, so listing a
+    directory of large checkpoints costs a few dozen bytes a file, not their
+    size. *)

@@ -73,7 +73,10 @@ on the call that wrote it; the call itself still happened.
 `masc_dos_save` keeps the whole machine under a slot name — CPU, memory,
 screen, open files and the key ledger — without moving it, and anyone may
 call it. It works in every game and keeps the exact moment, so save at the
-end of your turn and before a risky choice. `masc_dos_restore` with no slot
+end of your turn and before a risky choice. A save under a name that already
+holds a checkpoint replaces it and says what it held in `replaced`; the names
+`autosave` and `autosave-prev` belong to the lane and are refused.
+`masc_dos_restore` with no slot
 lists the saved ones; with a slot it puts that machine back and you hold the
 controller, so restore only a game nobody else is playing. Restoring does not
 touch the game's own save files.
@@ -97,16 +100,33 @@ the result still carries what you asked for, plus
 
 After a restart, before anything is loaded, a call that needs a machine
 (`masc_dos_screen`, `masc_dos_peek`) and `masc_dos_load` with no `program` say
-whether an autosave exists (what it is, when, and who saved it) under
-`autosave` in the result. If the file is there but cannot be read, the field
-says `unreadable` and why. Nothing resumes it for you: read the field and call
-`masc_dos_restore slot=autosave` yourself when you want it back.
+what the two autosave slots hold: `autosave` and `previous_autosave` in the
+result, each with the program, steps, who saved it, when, and a `resume`
+command. A file that is there but cannot be read shows as `unreadable` with the
+reason. Nothing resumes anything for you: read the fields and call
+`masc_dos_restore` yourself when you want a slot back.
 
-There is one `autosave` slot, and the next call that runs the guest replaces
-it -- except a new machine's own first autosave, which moves whatever was
-there to `autosave-prev` first. So after a restart, `masc_dos_load` with a
-program name is safe to call directly: it starts a new machine, and that
-machine's own first autosave preserves what was there before the restart
-under `autosave-prev` (`masc_dos_restore slot=autosave-prev` to get it back)
-rather than overwriting it. Calling `masc_dos_screen` first is still fine,
-just no longer required to avoid losing the previous run.
+There are two lane-owned slots. `autosave` is the machine's latest state.
+`autosave-prev` holds the autosave that was current when the running machine
+started. A machine started by `masc_dos_load` or `masc_dos_restore` copies the
+`autosave` file to `autosave-prev` with its first autosave, and whatever
+`autosave-prev` held is gone. So the start asks for consent exactly when both
+files exist, readable or not:
+
+- `autosave-prev` has no file: nothing is discarded. The autosave moves to
+  `autosave-prev` and stays there. The start asks nothing.
+- `autosave` and `autosave-prev` both exist: `masc_dos_load` with a program
+  name, and `masc_dos_restore` of any slot except `autosave-prev`, are
+  refused. The refusal names what `autosave-prev` holds under
+  `would_discard` (program, steps, who saved it, when) and the autosave that
+  would move in under `moves_to_previous`. Nothing is loaded and both files are
+  as they were. `masc_dos_restore slot=autosave` is refused too, with the same
+  answer.
+- To keep what `autosave-prev` holds, restore it first with
+  `masc_dos_restore slot=autosave-prev`, which asks for nothing, and save it
+  under a name with `masc_dos_save`. To go on and discard it, call the same
+  tool again with `discard_previous_autosave: true`.
+- Only `autosave-prev` is left: a start leaves it in place and asks nothing.
+
+`masc_dos_restore slot=autosave-prev` asks for nothing because the machine it
+restores already holds what the first autosave would replace.

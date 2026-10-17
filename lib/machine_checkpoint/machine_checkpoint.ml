@@ -114,25 +114,30 @@ let string c =
   take c n
 ;;
 
-let decode_header c =
-  if String.length c.s < String.length magic
-     || not (String.equal (take c (String.length magic)) magic)
+(* The header is the first bytes of the file, ahead of the body. [take] is how
+   the bytes arrive, so a string in memory and a file read from its front
+   decode through one function. [total] is how many bytes exist: a length the
+   file cannot honour is a truncation, whichever way the bytes arrive. *)
+let decode_header_via ~take ~total =
+  if total < String.length magic || not (String.equal (take (String.length magic)) magic)
   then raise (Bad "not a machine checkpoint");
+  let int64 () = Int64.to_int (String.get_int64_be (take 8) 0) in
+  let string () =
+    let n = int64 () in
+    if n < 0 then raise (Bad "negative length");
+    take n
+  in
   let machine =
-    match machine_of_string (string c) with
+    match machine_of_string (string ()) with
     | Some m -> m
     | None -> raise (Bad "unknown machine")
   in
-  let core = string c in
-  let format = int64 c in
+  let core = string () in
+  let format = int64 () in
   { machine; format; core }
 ;;
 
-let header_of_string s =
-  match decode_header { s; at = 0 } with
-  | h -> Ok h
-  | exception Bad message -> Error (Corrupt message)
-;;
+let decode_header c = decode_header_via ~take:(take c) ~total:(String.length c.s)
 
 type contents = { header : header; meta : Yojson.Safe.t; machine_bytes : string }
 
@@ -207,25 +212,36 @@ let rec mkdir_p dir =
   end
 ;;
 
+(* Fs_compat.save_file_atomic writes a sibling temp file, fsyncs it, renames
+   it over the slot and fsyncs the directory. A bare rename could leave an
+   empty or partial checkpoint after a crash, and that file is the only copy
+   of a campaign after a restart.
+
+   It is not the strict variant, on purpose. Both fsync the bytes before the
+   rename, which is what keeps a partial file out of the slot. They differ in
+   the fsync of the directory after it: this one ignores its error, and a file
+   system's refusal to fsync (EINVAL, EOPNOTSUPP, as on some tmpfs and FUSE
+   mounts). What that costs is a crash right after the rename bringing back the
+   previous checkpoint, which is a valid one. The strict variant would turn
+   the same file systems into a permanent write failure, with no autosave at
+   all. *)
 let write ~dir slot header ~meta ~machine_bytes =
   let contents = encode header ~meta ~machine_bytes in
-  match
-    mkdir_p dir;
-    let tmp, oc = Filename.open_temp_file ~temp_dir:dir ~mode:[ Open_binary ] ".ckpt-" ".tmp" in
-    Fun.protect
-      ~finally:(fun () ->
-        close_out_noerr oc;
-        if Sys.file_exists tmp then Sys.remove tmp)
-      (fun () ->
-        output_string oc contents;
-        close_out oc;
-        Sys.rename tmp (path ~dir slot))
-  with
-  | () -> Ok ()
+  match mkdir_p dir with
   | exception Sys_error message -> Error message
+  | () -> Fs_compat.save_file_atomic (path ~dir slot) contents
 ;;
 
 let read_file file = In_channel.with_open_bin file In_channel.input_all
+
+(* The bytes of [from] under [to_], whole and unread: a checkpoint this server
+   cannot decode copies like any other. The replace is [write]'s, so [to_] is
+   the old file or the complete copy, and [from] is never touched. *)
+let copy ~dir ~from ~to_ =
+  match read_file (path ~dir from) with
+  | exception Sys_error message -> Error message
+  | contents -> Fs_compat.save_file_atomic (path ~dir to_) contents
+;;
 
 let load_file ~dir slot =
   let file = path ~dir slot in
@@ -261,6 +277,30 @@ type listed = {
   header : (header, error) result;
 }
 
+(* A listing names what each file is; the machine bytes behind the header are
+   megabytes and play no part in that. Reading the front of the file keeps a
+   listing of a full checkpoint directory from reading all of it. A length in
+   the header that runs past the end of the file is a truncation, not a
+   reason to allocate it. *)
+let read_header_of_file file ~size =
+  match
+    In_channel.with_open_bin file (fun ic ->
+      let at = ref 0 in
+      let take n =
+        if n < 0 || !at + n > size then raise (Bad "truncated");
+        match really_input_string ic n with
+        | bytes ->
+          at := !at + n;
+          bytes
+        | exception End_of_file -> raise (Bad "truncated")
+      in
+      decode_header_via ~take ~total:size)
+  with
+  | header -> Ok header
+  | exception Bad message -> Error (Corrupt message)
+  | exception Sys_error message -> Error (Unreadable message)
+;;
+
 let list ~dir =
   if not (Sys.file_exists dir) then Ok []
   else
@@ -280,12 +320,9 @@ let list ~dir =
                Some { slot; size = 0; modified = 0.;
                       header = Error (Unreadable (Unix.error_message e)) }
              | st ->
-               let header =
-                 match read_file file with
-                 | exception Sys_error message -> Error (Unreadable message)
-                 | s -> header_of_string s
-               in
-               Some { slot; size = st.Unix.st_size; modified = st.Unix.st_mtime; header }))
+               let size = st.Unix.st_size in
+               Some { slot; size; modified = st.Unix.st_mtime;
+                      header = read_header_of_file file ~size }))
       |> List.sort (fun a b -> String.compare a.slot b.slot)
       |> fun l -> Ok l
 ;;

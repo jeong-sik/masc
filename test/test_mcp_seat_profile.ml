@@ -356,7 +356,7 @@ let test_an_invite_recovers_only_a_stopped_keepers_controller () =
                   ~ledger_dir:(Filename.concat base_path "ledger")
                   ~saves_dir:(Filename.concat base_path "saves")
                   ~checkpoint_dir:(Filename.concat base_path "checkpoints")
-                  ~program_name:"wait.com" ~program_bytes:program ~files:[]
+                  ~previous_autosave:Lane.Keep_previous_autosave ~program_name:"wait.com" ~program_bytes:program ~files:[]
                   ~announce:(fun () -> ()) with
                  | Ok _ -> ()
                  | Error error -> fail (Lane.error_to_string error));
@@ -409,7 +409,7 @@ let test_an_invite_passes_only_to_someone_at_the_machine () =
           ~ledger_dir:(Filename.concat base_path "ledger")
           ~saves_dir:(Filename.concat base_path "saves")
           ~checkpoint_dir:(Filename.concat base_path "checkpoints")
-          ~program_name:"wait.com" ~program_bytes:program ~files:[]
+          ~previous_autosave:Lane.Keep_previous_autosave ~program_name:"wait.com" ~program_bytes:program ~files:[]
           ~announce:(fun () -> ()) with
          | Ok _ -> ()
          | Error error -> fail (Lane.error_to_string error));

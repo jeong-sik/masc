@@ -213,7 +213,22 @@ let stage_collect ?raw_trace_run ?clock ~turn ~provider_config ~context_message 
            (Agent_tools.build_index (Tool_set.to_list agent.tools))
            response.content
        in
-       let response = { response with content = admission.Agent_tools.admitted } in
+       let* response =
+         let content = admission.Agent_tools.admitted in
+         match response.telemetry with
+         | None | Some { response_replay = None; _ } -> Ok { response with content }
+         | Some ({ response_replay = Some replay; _ } as telemetry) ->
+           let* replay =
+             match Types.Response_replay.make ~content:response.content replay with
+             | Ok replay ->
+               Types.Response_replay.retain ~content
+                 ~retained_indices:admission.Agent_tools.retained_content_indices replay
+               |> Result.map_error (fun detail -> Error.Internal detail)
+             | Error detail -> Error (Error.Internal detail)
+           in
+           Ok { response with content;
+                telemetry = Some {telemetry with response_replay = Some replay} }
+       in
        (match admission.Agent_tools.rejected_names with
         | [] -> ()
         | names ->

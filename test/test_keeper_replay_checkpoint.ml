@@ -1023,11 +1023,32 @@ let test_blank_response_drops_only_blank_assistant () =
     (List.length patched.messages)
 ;;
 
+let test_native_response_groups_survive_visible_normalization () =
+  let open Agent_core.Types in
+  let content=[Text "checking";Text "one";Text "two"] in
+  let replay=match Response_replay.make ~content
+    [{kind=Message Commentary;content_count=1};
+     {kind=Message Final_answer;content_count=2}] with
+    | Ok replay->replay | Error detail->Alcotest.fail detail in
+  let assistant=make_message ~metadata:[Response_replay.metadata replay]
+      ~role:Assistant content in
+  let cp=checkpoint [message User [Text "question"];assistant] in
+  let patched=Masc.Keeper_context_core.patch_checkpoint_last_assistant cp
+      ~session_id:"current-session" ~response_text:"collapsed display answer" in
+  Alcotest.(check bool) "native content and per-item phase remain exact" true
+    (patched.messages=[message User [Text "question"];assistant]);
+  Alcotest.(check string) "session identity still updated" "current-session" patched.session_id;
+  Alcotest.(check bool) "working context remains absent" true
+    (Option.is_none patched.working_context)
+;;
+
 let () =
   Alcotest.run
     "keeper replay checkpoint"
     [ ( "persistence"
-      , [ Alcotest.test_case
+      , [ Alcotest.test_case "native output groups preserve history" `Quick
+            test_native_response_groups_survive_visible_normalization
+        ; Alcotest.test_case
             "patch preserves typed reasoning"
             `Quick
             test_patch_last_assistant_preserves_typed_reasoning

@@ -253,7 +253,11 @@ let patch_checkpoint_last_assistant
          | Agent_core.Types.Audio _ as block) :: rest ->
           patch_content replaced (block :: acc) rest
     in
-    let content = patch_content false [] msg.Agent_core.Types.content in
+    let content =
+      if List.mem_assoc Agent_core.Types.Response_replay.metadata_key msg.metadata
+      then msg.Agent_core.Types.content
+      else patch_content false [] msg.Agent_core.Types.content
+    in
     let rec content_unchanged left right =
       match left, right with
       | [], [] -> true

@@ -731,3 +731,8 @@
  (modules test_glm_thinking_contract)
  (libraries agent_core_test_deps llm_provider alcotest)
  (deps ../models.toml))
+
+(test
+ (name test_response_replay)
+ (modules test_response_replay)
+ (libraries llm_provider alcotest))

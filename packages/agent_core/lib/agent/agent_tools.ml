@@ -243,18 +243,23 @@ let resolve_tool_call tool_index name input =
    evidence authority for what the provider actually sent. *)
 type tool_use_admission =
   { admitted : Types.content_block list
+  ; retained_content_indices : int list
   ; rejected_names : string list
   ; tool_source_map : Hooks.admitted_tool_source_map
   }
 
 let admit_tool_use_names tool_index blocks =
   let rejected_names = ref [] in
+  let retained_content_indices = ref [] in
   let next_planned_index = ref 0 in
   let next_source_tool_use_ordinal = ref 0 in
   let admitted_tool_sources = ref [] in
   let admitted =
     List.filter_map
-      (fun (block : Types.content_block) ->
+      (fun (content_index, (block : Types.content_block)) ->
+         let retain block =
+           retained_content_indices := content_index :: !retained_content_indices;
+           Some block in
          match block with
          | Types.ToolUse { id; name; input } ->
            let source_tool_use_ordinal = !next_source_tool_use_ordinal in
@@ -266,7 +271,7 @@ let admit_tool_use_names tool_index blocks =
               admitted_tool_sources :=
                 { Hooks.planned_index; source_tool_use_ordinal }
                 :: !admitted_tool_sources;
-              Some (Types.ToolUse { id; name = resolved; input = resolved_input })
+              retain (Types.ToolUse { id; name = resolved; input = resolved_input })
             | _, _, None ->
               rejected_names := name :: !rejected_names;
               None)
@@ -277,10 +282,11 @@ let admit_tool_use_names tool_index blocks =
          | Types.ToolResult _
          | Types.Image _
          | Types.Document _
-         | Types.Audio _ -> Some block)
-      blocks
+         | Types.Audio _ -> retain block)
+      (List.mapi (fun index block -> index, block) blocks)
   in
   { admitted
+  ; retained_content_indices = List.rev !retained_content_indices
   ; rejected_names = List.rev !rejected_names
   ; tool_source_map =
       { Hooks.admitted_tool_sources = List.rev !admitted_tool_sources

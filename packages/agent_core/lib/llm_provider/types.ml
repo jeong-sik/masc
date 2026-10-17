@@ -862,6 +862,124 @@ let equal_output_token_receipt = Output_token_wire_internal.equal_receipt
 
 (** Per-call inference telemetry.
     Parsed from the raw API response; never computed by downstream. *)
+(** Native Responses output-item boundaries, referencing the existing content
+    partition rather than copying provider payloads. No phase belongs to the
+    flattened canonical assistant message. *)
+module Response_replay = struct
+  type phase = Absent | Null | Commentary | Final_answer
+  [@@deriving show, yojson]
+
+  type kind = Message of phase | Reasoning | Function_call
+  [@@deriving show, yojson]
+
+  type group = { kind : kind; content_count : int }
+  [@@deriving show, yojson]
+
+  type t = group list [@@deriving show, yojson]
+
+  let metadata_key = "openai.responses.output_items"
+
+  let phase_of_fields fields =
+    match List.filter (fun (key, _) -> String.equal key "phase") fields with
+    | [] -> Ok Absent
+    | [(_, `Null)] -> Ok Null
+    | [(_, `String "commentary")] -> Ok Commentary
+    | [(_, `String "final_answer")] -> Ok Final_answer
+    | [_] -> Error "responses_replay:unsupported_phase"
+    | _ :: _ -> Error "responses_replay:duplicate_phase"
+  ;;
+
+  let phase_fields = function
+    | Absent -> []
+    | Null -> ["phase", `Null]
+    | Commentary -> ["phase", `String "commentary"]
+    | Final_answer -> ["phase", `String "final_answer"]
+  ;;
+
+  let content_matches kind = function
+    | Text _ -> (match kind with Message _ -> true | Reasoning | Function_call -> false)
+    | Thinking _ | ReasoningDetails _ | RedactedThinking _ ->
+      (match kind with Reasoning -> true | Message _ | Function_call -> false)
+    | ToolUse _ -> (match kind with Function_call -> true | Message _ | Reasoning -> false)
+    | ToolResult _ | Image _ | Document _ | Audio _ -> false
+  ;;
+
+  let partition ~content groups =
+    let rec take kind remaining acc blocks =
+      if remaining = 0 then Ok (List.rev acc, blocks)
+      else match blocks with
+        | block :: rest when content_matches kind block ->
+          take kind (remaining - 1) (block :: acc) rest
+        | _ :: _ -> Error "responses_replay:content_kind_mismatch"
+        | [] -> Error "responses_replay:content_partition_short"
+    in
+    let rec loop acc blocks = function
+      | [] -> if blocks = [] then Ok (List.rev acc)
+        else Error "responses_replay:content_partition_long"
+      | {kind; content_count} :: rest ->
+        if content_count < 0 then Error "responses_replay:negative_content_count"
+        else if (match kind with Message _ -> false | Reasoning | Function_call -> content_count <> 1)
+        then Error "responses_replay:non_message_cardinality"
+        else match take kind content_count [] blocks with
+          | Error _ as error -> error
+          | Ok (items, remaining) -> loop ((kind, items) :: acc) remaining rest
+    in
+    loop [] content groups
+  ;;
+
+  let make ~content groups = Result.map (fun _ -> groups) (partition ~content groups)
+  let metadata replay = metadata_key, to_yojson replay
+
+  let of_metadata ~content metadata =
+    match List.filter (fun (key, _) -> String.equal key metadata_key) metadata with
+    | [] -> Ok None
+    | [(_, json)] ->
+      (match of_yojson json with
+       | Error _ -> Error "responses_replay:invalid_metadata"
+       | Ok groups -> Result.map Option.some (make ~content groups))
+    | _ :: _ -> Error "responses_replay:duplicate_metadata"
+  ;;
+
+  (* Admission owns these source positions, so normalization does not need to
+     recover identity from provider names, text or structurally equal blocks. *)
+  let retain ~content ~retained_indices groups =
+    let rec counts offset positions acc = function
+      | [] -> if positions = [] then make ~content (List.rev acc)
+        else Error "responses_replay:retained_index_out_of_range"
+      | ({content_count; _} as group) :: rest ->
+        let boundary = offset + content_count in
+        let rec consume previous count = function
+          | index :: tail when index < boundary ->
+            if index < offset || index <= previous then Error "responses_replay:invalid_retained_index"
+            else consume index (count + 1) tail
+          | remaining -> Ok (count, remaining)
+        in
+        if content_count < 0 then Error "responses_replay:negative_content_count"
+        else match consume (offset - 1) 0 positions with
+          | Error _ as error -> error
+          | Ok (count, remaining) ->
+            let acc = match group.kind with
+              | Message _ -> {group with content_count = count} :: acc
+              | Reasoning | Function_call when count = 0 -> acc
+              | Reasoning | Function_call -> {group with content_count = count} :: acc
+            in
+            counts boundary remaining acc rest
+    in
+    counts 0 retained_indices [] groups
+  ;;
+
+  let retain_metadata ~original_content ~content ~retained_indices metadata =
+    match of_metadata ~content:original_content metadata with
+    | Error _ as error -> error
+    | Ok None -> Ok metadata
+    | Ok (Some replay) ->
+      Result.map (fun replay ->
+        List.map (fun (key, value) -> if String.equal key metadata_key
+          then key, to_yojson replay else key, value) metadata)
+        (retain ~content ~retained_indices replay)
+  ;;
+end
+
 type inference_telemetry =
   { system_fingerprint : string option
   ; timings : inference_timings option
@@ -873,6 +991,7 @@ type inference_telemetry =
   ; canonical_model_id : string option
   ; reasoning_source : Reasoning_source.t option
   ; reasoning_prefix : Reasoning_prefix.t option [@default None]
+  ; response_replay : Response_replay.t option [@default None]
   ; effective_context_window : int option
   ; provider_internal_action_count : int option
   ; ttfrc_ms : float option
@@ -891,6 +1010,7 @@ let default_inference_telemetry : inference_telemetry =
   ; canonical_model_id = None
   ; reasoning_source = None
   ; reasoning_prefix = None
+  ; response_replay = None
   ; effective_context_window = None
   ; provider_internal_action_count = None
   ; ttfrc_ms = None
@@ -912,6 +1032,7 @@ type api_response =
 type assistant_message_error =
   | Reasoning_source_telemetry_missing
   | Reasoning_source_missing
+  | Invalid_response_replay of string
 [@@deriving show]
 
 let content_has_reasoning_artifact content =
@@ -931,20 +1052,31 @@ let assistant_message_of_response (response : api_response) =
     ; metadata
     }
   in
-  if not (content_has_reasoning_artifact response.content)
-  then Ok (message [])
-  else (
-    match response.telemetry with
-    | None -> Error Reasoning_source_telemetry_missing
-    | Some { reasoning_source = None; _ } -> Error Reasoning_source_missing
-    | Some { reasoning_source = Some source; reasoning_prefix; _ } ->
-      let metadata = Reasoning_source.metadata source in
-      let metadata =
-        match reasoning_prefix with
-        | None -> metadata
-        | Some prefix -> Reasoning_prefix.metadata prefix @ metadata
-      in
-      Ok (message metadata))
+  let replay_metadata =
+    match Option.bind response.telemetry (fun telemetry -> telemetry.response_replay) with
+    | None -> Ok []
+    | Some replay ->
+      (match Response_replay.make ~content:response.content replay with
+       | Error detail -> Error (Invalid_response_replay detail)
+       | Ok replay -> Ok [Response_replay.metadata replay])
+  in
+  match replay_metadata with
+  | Error _ as error -> error
+  | Ok metadata ->
+    if not (content_has_reasoning_artifact response.content)
+    then Ok (message metadata)
+    else (
+      match response.telemetry with
+      | None -> Error Reasoning_source_telemetry_missing
+      | Some { reasoning_source = None; _ } -> Error Reasoning_source_missing
+      | Some { reasoning_source = Some source; reasoning_prefix; _ } ->
+        let metadata = Reasoning_source.metadata source @ metadata in
+        let metadata =
+          match reasoning_prefix with
+          | None -> metadata
+          | Some prefix -> Reasoning_prefix.metadata prefix @ metadata
+        in
+        Ok (message metadata))
 ;;
 
 (** {1 SSE Streaming Types} *)

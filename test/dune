@@ -1206,6 +1206,8 @@
  (modules test_server_request_authority)
  (libraries alcotest masc_test_deps eio_main h2))
 
+(include stanzas/test_request_workspace_precondition.inc)
+
 ; Operator snapshot cache: stale-while-revalidate + background refresh.
 
 (test

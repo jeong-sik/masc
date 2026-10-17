@@ -18,6 +18,8 @@
 
     @stability Internal *)
 
+let health = "/health"
+
 let liveness = "/health/live"
 
 let readiness = "/health/ready"

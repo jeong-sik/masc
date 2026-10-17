@@ -529,15 +529,20 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
     startup_config_resolution ~base_path |> Config_dir_resolver.to_json
   in
   let config = Mcp_server.workspace_config state in
-  let path_diagnostics =
+  let detected_paths =
     Server_base_path_diagnostics.detect
       ?input_base_path
       ?env_masc_base_path:((Host_config.from_env ()).base_path_raw)
       ~effective_base_path:config.base_path
       ~effective_masc_root:(Workspace.masc_dir config)
       ()
-    |> Server_base_path_diagnostics.to_yojson
   in
+  (* The paths [/health] reports, from the same inputs; a request's workspace
+     precondition is compared with them (#43356). *)
+  Server_workspace_precondition.publish_served_workspace
+    ~base_path:detected_paths.effective_base_path
+    ~masc_root:detected_paths.effective_masc_root;
+  let path_diagnostics = Server_base_path_diagnostics.to_yojson detected_paths in
   Server_startup_state.note_input_base_path input_base_path;
   Server_startup_state.note_runtime_resolution ~path_diagnostics
     ~config_resolution;

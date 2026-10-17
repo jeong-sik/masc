@@ -109,6 +109,14 @@ val handle_mutation
   -> unit
 
 module For_testing : sig
+  val invalid_input_response : string -> Httpun.Status.t * Yojson.Safe.t
+  val command_error_response :
+    Keeper_owner_registry.command_error -> Httpun.Status.t * Yojson.Safe.t
+  val page_failure_response :
+    Keeper_chat_event_log.page_failure -> Httpun.Status.t * Yojson.Safe.t
+  (** Actual response projection used by HTTP handlers: fixed public values and
+      a server-generated incident ID; typed causes remain operator diagnostics. *)
+
   val events_page_of_request
     :  path:string
     -> Httpun.Request.t

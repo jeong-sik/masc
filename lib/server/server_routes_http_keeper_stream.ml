@@ -625,6 +625,43 @@ let handle_keeper_tool_approval_mode_set ~actor state request reqd =
                 | Some detail -> [ ("audit_error", `String detail) ]))))
 ;;
 
+let operation_command_error_kind = function
+  | Keeper_owner_registry.Command_lifecycle_reserved _ -> Server_keeper_chat_public_error.Owner_stopping
+  | Command_lookup_failed Inventory_stopping -> Server_keeper_chat_public_error.Owner_stopping
+  | Command_lookup_failed
+      (Inventory_not_installed _ | Owner_not_found _ | Owner_unavailable _
+      | Owner_initialization_failed _) ->
+    Server_keeper_chat_public_error.Store_unavailable
+  | Command_rejected (Keeper_owner.Owner_stopping | Owner_closed) -> Server_keeper_chat_public_error.Owner_stopping
+  | Command_rejected (Keeper_owner.Operation_rejected error) ->
+    (match Keeper_owner.operation_error_kind error with
+     | Invalid_operation_input -> Server_keeper_chat_public_error.Invalid_input
+     | Unknown_operation -> Server_keeper_chat_public_error.Unknown_operation
+     | Operation_not_queued -> Server_keeper_chat_public_error.Not_queued
+     | Operation_idempotency_conflict -> Server_keeper_chat_public_error.Idempotency_conflict
+     | Operation_native_call_unsettled -> Server_keeper_chat_public_error.Native_call_unsettled
+     | Operation_store_unavailable -> Server_keeper_chat_public_error.Store_unavailable)
+  | Command_rejected
+      (Keeper_owner.Store_unavailable _ | Reducer_rejected _) ->
+    Server_keeper_chat_public_error.Store_unavailable
+;;
+
+let control_public_error kind detail =
+  let error = Server_keeper_chat_public_error.make
+      ~incident_id:(Random_id.uuid_v7 ()) kind in
+  Log.Keeper.warn "keeper_chat_control incident_id=%s code=%s detail=%s"
+    error.incident_id error.code detail;
+  error
+;;
+
+let control_failure_fields kind detail =
+  control_public_error kind detail |> Server_keeper_chat_public_error.failure_fields
+;;
+
+let control_error_json kind detail =
+  control_public_error kind detail |> Server_keeper_chat_public_error.to_json
+;;
+
 let handle_keeper_run_next state ~actor request reqd =
   Http.Request.read_body_async reqd (fun body ->
     let base_path = (Mcp_server.workspace_config state).base_path in
@@ -661,32 +698,33 @@ let handle_keeper_run_next state ~actor request reqd =
       | _ -> Error "JSON object required"
       with Yojson.Json_error error -> Error error
     in
-    let respond_error status error = respond_json_value_with_cors ~status request reqd
-      (`Assoc ["error", `String error]) in
+    let respond_error status kind detail = respond_json_value_with_cors ~status request reqd
+      (control_error_json kind detail) in
     match parsed with
-    | Error error -> respond_error `Bad_request error
+    | Error error -> respond_error `Bad_request Invalid_input error
     | Ok (name, request_id, operation_id, token, priority_predecessors) ->
       match Keeper_owner_registry.exact_operation ~base_path ~keeper_name:name operation_id with
-      | Error error -> respond_error `Service_unavailable (Keeper_owner_registry.command_error_to_string error)
-      | Ok None -> respond_error `Not_found "operation not found"
+      | Error error -> respond_error `Service_unavailable (operation_command_error_kind error)
+          (Keeper_owner_registry.command_error_to_string error)
+      | Ok None -> respond_error `Not_found Unknown_operation "operation not found"
       | Ok (Some operation) ->
         match Keeper_chat_operation_payload.source_of_json operation.source with
-        | Error error -> respond_error `Service_unavailable error
+        | Error error -> respond_error `Service_unavailable Store_unavailable error
         | Ok source when not (String.equal actor source.submitted_by) ->
-          respond_error `Forbidden "only your own queued message can be prioritized"
+          respond_error `Forbidden Operation_forbidden "only your own queued message can be prioritized"
         | Ok _ ->
           match Keeper_owner_registry.run_next_operation ?priority_predecessors
             ~base_path ~keeper_name:name ~operation_id ~interrupt_token:token () with
-          | Error error -> respond_error `Conflict (Keeper_owner_registry.command_error_to_string error)
-          | Ok Keeper_owner.Run_next_paused -> respond_error `Conflict "Keeper is explicitly paused; resume it before run-next"
+          | Error error -> respond_error `Conflict (operation_command_error_kind error)
+              (Keeper_owner_registry.command_error_to_string error)
+          | Ok Keeper_owner.Run_next_paused -> respond_error `Conflict Keeper_paused "Keeper is explicitly paused; resume it before run-next"
           | Ok (Keeper_owner.Run_next_applied result) ->
-            let detail = match result.interrupt_error, result.signalled with
-              | Some error, _ -> "queued with priority; interrupt failed: " ^ error
-              | None, true -> "queued with priority; interrupt received; waiting for the turn to settle"
-              | None, false -> "queued with priority; no matching observed turn was interrupted" in
+            let interrupt_error = Option.map
+                (control_public_error Server_keeper_chat_public_error.Interrupt_failed)
+                result.interrupt_error in
             respond_json_value_with_cors ~status:`OK request reqd
-              (`Assoc ["request_id", `String request_id; "prioritized", `Bool true;
-                "signalled", `Bool result.signalled; "detail", `String detail]))
+              (Server_keeper_chat_public_error.prioritized_operation_json
+                 ~request_id ~signalled:result.signalled ~interrupt_error))
 ;;
 
 let handle_keeper_turn_interrupt ~actor state request reqd =
@@ -733,12 +771,12 @@ let handle_keeper_turn_interrupt ~actor state request reqd =
     match target_result with
     | Error msg ->
       respond_json_value_with_cors ~status:`Bad_request request reqd
-        (keeper_chat_stream_error_json msg)
+        (control_error_json Invalid_input msg)
     | Ok (keeper_name, request_id, interrupt_token, expected_control_token) ->
       if not (Keeper_registry.is_registered ~base_path keeper_name)
       then
         respond_json_value_with_cors ~status:`Not_found request reqd
-          (keeper_chat_stream_error_json "keeper not registered")
+          (control_error_json Unknown_keeper "keeper not registered")
       else match interrupt_token with
       | Some token ->
         let fields = match Keeper_owner_registry.pause_observed_turn ~base_path ~keeper_name ~interrupt_token:token with
@@ -753,15 +791,19 @@ let handle_keeper_turn_interrupt ~actor state request reqd =
                ["signalled", `Bool false; "reason", `String "maintenance_running"]
              | Interrupt_result Operation_slot_held_by_autonomous_turn ->
                ["signalled", `Bool false; "reason", `String "slot_held_by_autonomous_turn"]
-             | Interrupt_result (Operation_interrupt_failed detail) -> ["signalled", `Bool false; "reason", `String "cancel_failed"; "detail", `String detail])
-          | Error error -> ["signalled", `Bool false; "reason", `String "interrupt_failed";
-              "detail", `String (Keeper_owner_registry.command_error_to_string error)] in
+             | Interrupt_result (Operation_interrupt_failed detail) ->
+               ["signalled", `Bool false; "reason", `String "cancel_failed"]
+               @ control_failure_fields Interrupt_failed detail)
+          | Error error -> ["signalled", `Bool false; "reason", `String "interrupt_failed"]
+              @ control_failure_fields (operation_command_error_kind error)
+                (Keeper_owner_registry.command_error_to_string error) in
         respond_json_value_with_cors ~status:`OK request reqd (`Assoc (("interrupt_token", `String (Keeper_interrupt_token.to_string token)) :: fields))
       | None ->
         match request_id with
         | Some request_id ->
           (match Keeper_chat_operation.Operation_id.of_string request_id with
-           | Error detail -> respond_json_value_with_cors ~status:`Bad_request request reqd (keeper_chat_stream_error_json detail)
+           | Error detail -> respond_json_value_with_cors ~status:`Bad_request request reqd
+               (control_error_json Invalid_input detail)
            | Ok operation_id ->
              let fields = match Keeper_owner_registry.pause_running_operation ?expected_control_token ~base_path ~keeper_name operation_id with
                | Ok (result, control_token) ->
@@ -777,9 +819,12 @@ let handle_keeper_turn_interrupt ~actor state request reqd =
                     ["signalled", `Bool false; "reason", `String "maintenance_running"]
                   | Interrupt_result Operation_slot_held_by_autonomous_turn ->
                     ["signalled", `Bool false; "reason", `String "slot_held_by_autonomous_turn"]
-                  | Interrupt_result (Operation_interrupt_failed detail) -> ["signalled", `Bool false; "reason", `String "cancel_failed"; "detail", `String detail])
-               | Error error -> ["signalled", `Bool false; "reason", `String "owner_unavailable";
-                   "detail", `String (Keeper_owner_registry.command_error_to_string error)] in
+                  | Interrupt_result (Operation_interrupt_failed detail) ->
+                    ["signalled", `Bool false; "reason", `String "cancel_failed"]
+                    @ control_failure_fields Interrupt_failed detail)
+               | Error error -> ["signalled", `Bool false; "reason", `String "owner_unavailable"]
+                   @ control_failure_fields (operation_command_error_kind error)
+                     (Keeper_owner_registry.command_error_to_string error) in
              respond_json_value_with_cors ~status:`OK request reqd (`Assoc (("request_id", `String request_id) :: fields)))
         | None ->
         (* The server fails the turn switch and learns nothing more within this
@@ -811,9 +856,9 @@ let handle_keeper_turn_interrupt ~actor state request reqd =
             (`Assoc
                ([ ("signalled", `Bool false)
                 ; ("reason", `String "cancel_failed")
-                ; ("detail", `String detail)
                 ; ("actor", `String actor)
                 ]
+                @ control_failure_fields Interrupt_failed detail
                 @ (match turn_id with
                    | Some turn_id -> [ ("turn_id", `Int turn_id) ]
                    | None -> [])))))
@@ -3139,8 +3184,11 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
              | Error (Journal_unreadable detail | Journal_corrupt detail) ->
                failed Keeper_chat_operation.Store_unavailable detail
              | Ok first_seq ->
+            let journal_redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
             let events = Keeper_chat_events.create ~first_seq
               ~on_publish:(fun ~seq ~ts event ->
+                let event = Keeper_chat_events.public_content
+                    ~redact_text:(Keeper_secret_redaction.redact_text journal_redaction) event in
                 List.iter (fun (operation_id, journal) -> Keeper_chat_event_log.append journal ~seq ~ts
                   (Keeper_chat_operation_batch.event_for_member ~operation_id event)) journals)
               () in
@@ -3488,15 +3536,17 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
    this hook; no successor can claim until the hook returns. A prior segment's
    Run_finished is a continuation boundary, not evidence of this failure. *)
 let record_settled_error ~base_path ~keeper_name ~operation_id ~message =
+  Log.Keeper.warn ~keeper_name "keeper_chat_error incident_id=%s detail=%s" operation_id message;
   let journal =
     Keeper_chat_event_log.open_journal ~base_dir:base_path ~keeper_name ~operation_id ()
   in
-  Keeper_chat_event_log.record_terminal_error journal ~ts:(Time_compat.now ()) ~message
+  Keeper_chat_event_log.record_terminal_error journal ~ts:(Time_compat.now ())
+    ~message:Keeper_chat_events.public_error_message
 
 let synthesize_wire_terminal_on_settle ~base_path ~keeper_name ~operation_id ~execution =
   let wire = take_operation_wire_stream ~base_path ~keeper_name ~operation_id in
   match execution with
-  | Keeper_owner.Operation_failed { kind; detail; _ } ->
+  | Keeper_owner.Operation_failed { detail; _ } ->
     let receipt = record_settled_error ~base_path ~keeper_name ~operation_id ~message:detail in
     (match wire, receipt with
      | Some Wire_terminal_sent, _
@@ -3513,16 +3563,16 @@ let synthesize_wire_terminal_on_settle ~base_path ~keeper_name ~operation_id ~ex
      | (Some Wire_started | None),
        Ok ((Keeper_chat_event_log.Existing_terminal_error _
            | Keeper_chat_event_log.Recorded_terminal_error _) as receipt) ->
-       let seq, timestamp, message = match receipt with
-         | Keeper_chat_event_log.Existing_terminal_error { seq; ts; message } ->
-           Some seq, ts, message
+       let seq, timestamp = match receipt with
+         | Keeper_chat_event_log.Existing_terminal_error { seq; ts; _ } ->
+           Some seq, ts
          | Keeper_chat_event_log.Recorded_terminal_error { seq; ts } ->
-           Some seq, ts, detail in
+           Some seq, ts in
        let event = Ag_ui.make_event ~timestamp
          ~thread_id:("keeper:" ^ keeper_name)
          ~run_id:(Some ("keeper-operation-run-" ^ operation_id))
-         ~message:(Some message)
-         ~code:(Some (Keeper_chat_operation.failure_kind_to_string kind))
+         ~message:(Some Keeper_chat_events.public_error_message)
+         ~code:(Some Keeper_chat_events.public_error_code)
          Ag_ui.Run_error in
        (match wire with
         | Some Wire_started -> note_operation_wire_event ~base_path ~keeper_name ~operation_id event
@@ -3594,26 +3644,7 @@ let keeper_chat_stream_headers origin =
      ]
     @ cors_headers origin)
 
-let operation_submit_error_code = function
-  | Keeper_owner_registry.Command_lifecycle_reserved _ -> "owner_stopping"
-  | Command_lookup_failed Inventory_stopping -> "owner_stopping"
-  | Command_lookup_failed
-      (Inventory_not_installed _ | Owner_not_found _ | Owner_unavailable _
-      | Owner_initialization_failed _) ->
-    "store_unavailable"
-  | Command_rejected (Keeper_owner.Owner_stopping | Owner_closed) -> "owner_stopping"
-  | Command_rejected (Keeper_owner.Operation_rejected error) ->
-    (match Keeper_owner.operation_error_kind error with
-     | Invalid_operation_input -> "invalid_input"
-     | Unknown_operation -> "unknown_operation"
-     | Operation_not_queued -> "not_queued"
-     | Operation_idempotency_conflict -> "idempotency_conflict"
-     | Operation_native_call_unsettled -> "native_call_unsettled"
-     | Operation_store_unavailable -> "store_unavailable")
-  | Command_rejected
-      (Keeper_owner.Store_unavailable _ | Reducer_rejected _) ->
-    "store_unavailable"
-;;
+
 
 (* Reconnect dedup (RFC-0412 §3.2): a live or buffered event is dropped only
    when the replay already wrote that exact seq. A "highest seq written" mark
@@ -3689,8 +3720,8 @@ let restart_terminal_after_replay ~base_path ~keeper_name
       else Some (Ag_ui.make_event ~timestamp:completed_at
         ~thread_id:("keeper:" ^ keeper_name)
         ~run_id:(Some ("keeper-operation-run-" ^ operation_id))
-        ~message:(Some (Keeper_request_failure.summary {cause=Keeper_request_failure.Server_restarted}))
-        ~code:(Some (Keeper_chat_operation.failure_kind_to_string Interrupted_by_restart)) Ag_ui.Run_error)
+        ~message:(Some Keeper_chat_events.public_error_message)
+        ~code:(Some Keeper_chat_events.public_error_code) Ag_ui.Run_error)
   | Queued
   | Running _
   | Succeeded _
@@ -3803,11 +3834,20 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
                ; "state", `String state
                ; "queued_count", `Int acceptance.queued_count
                ] @ match interactive with None -> [] | Some (receipt : Keeper_owner.interactive_receipt) ->
+                 let interrupt_error = Option.map (fun detail ->
+                   let public = Server_keeper_chat_public_error.make
+                       ~incident_id:operation_id Interrupt_failed in
+                   Log.Keeper.warn ~keeper_name:payload.name
+                     "keeper_chat_interrupt incident_id=%s code=%s detail=%s"
+                     public.incident_id public.code detail;
+                   public) receipt.interrupt_error in
                  ["interactive", `Assoc [
                    "outcome", `String (match receipt.outcome with Applied -> "applied" | Stale_control -> "stale_control" | Paused -> "paused" | Replayed -> "replayed");
                    "chat_control_token", `String receipt.chat_control_token;
                    "signalled", `Bool receipt.signalled; "resumed", `Bool receipt.resumed;
-                   "interrupt_error", Option.fold ~none:`Null ~some:(fun detail -> `String detail) receipt.interrupt_error]]))
+                   "interrupt_error", Option.fold ~none:`Null ~some:(fun error -> `String error.Server_keeper_chat_public_error.message) interrupt_error;
+                   "interrupt_error_code", Option.fold ~none:`Null ~some:(fun error -> `String error.Server_keeper_chat_public_error.code) interrupt_error;
+                   "interrupt_incident_id", Option.fold ~none:`Null ~some:(fun error -> `String error.Server_keeper_chat_public_error.incident_id) interrupt_error]]))
         in
         (* See durable acceptance: a closed SSE stream cannot roll back the operation. *)
         ignore (keeper_stream_send_event writer mutex closed event);
@@ -3868,27 +3908,28 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
        | Ok acceptance -> publish_acceptance acceptance
        | Error (`Input detail) ->
          Server_keeper_stream_handoff.close handoff;
+         let public = Server_keeper_chat_public_error.make
+             ~incident_id:operation_id Invalid_input in
+         Log.Keeper.warn "keeper_chat_submit incident_id=%s code=%s detail=%s"
+           public.incident_id public.code detail;
          ignore
-           (keeper_stream_send_event
-              writer
-              mutex
-              closed
-              (Ag_ui.run_error ~thread_id ~message:detail ~code:"invalid_input" ()));
+           (keeper_stream_send_event writer mutex closed
+              (Ag_ui.run_error ~thread_id
+                 ~run_id:("keeper-operation-run-" ^ public.incident_id)
+                 ~message:public.message ~code:public.code ()));
          finish ()
        | Error (`Owner error) ->
          Server_keeper_stream_handoff.close handoff;
-         let detail = Keeper_owner_registry.command_error_to_string error in
-         let code = operation_submit_error_code error in
+         let public = Server_keeper_chat_public_error.make
+             ~incident_id:operation_id (operation_command_error_kind error) in
+         Log.Keeper.warn "keeper_chat_submit incident_id=%s code=%s detail=%s"
+           public.incident_id public.code
+           (Keeper_owner_registry.command_error_to_string error);
          ignore
-           (keeper_stream_send_event
-              writer
-              mutex
-              closed
-              (Ag_ui.run_error
-                 ~thread_id
-                 ~message:detail
-                 ~code
-                 ()));
+           (keeper_stream_send_event writer mutex closed
+              (Ag_ui.run_error ~thread_id
+                 ~run_id:("keeper-operation-run-" ^ public.incident_id)
+                 ~message:public.message ~code:public.code ()));
          finish ());
       (* A queued operation has no journal events until its Keeper gets the
          slot. Keep the HTTP stream alive during that silence, so a healthy
@@ -3952,6 +3993,7 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
 (** Build routes for MCP server *)
 
 module For_testing = struct
+  let control_public_error = control_public_error
   let operation_heartbeat_decision = operation_heartbeat_decision
   let persist_batch_user_rows = persist_batch_user_rows
   let operation_execution_of_outcome = operation_execution_of_outcome

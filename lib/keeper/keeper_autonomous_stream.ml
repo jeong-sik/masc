@@ -39,7 +39,9 @@ let create ~base_path ~keeper_name ~turn_ref = Eio.Cancel.protect (fun () ->
       Log.Keeper.error ~keeper_name "autonomous stream journal unavailable: %s" detail;
       None
     | Ok first_seq -> Some (Events.create ~first_seq ~on_publish:(fun ~seq ~ts event ->
-    Journal.append journal ~seq ~ts event;
+    Journal.append journal ~seq ~ts
+      (Events.public_content
+        ~redact_text:(Keeper_secret_redaction.redact_text redaction) event);
     (* A notification names the canonical journal cursor. Readers fetch the
        journal rather than racing live frames against replay or exposing
        reasoning on a general observer connection. *)
@@ -197,7 +199,11 @@ let finish t ending =
       publish t Events.Text_message_end;
       publish t (match ending with
         | Completed _ -> Events.Run_finished {run_id = Ids.Turn_ref.to_string t.turn_ref}
-        | Failed message -> Events.Event_error {message = t.redact_text message}
+        | Failed message ->
+          Log.Keeper.warn ~keeper_name:t.keeper_name
+            "keeper_turn_error incident_id=%s detail=%s"
+            (Ids.Turn_ref.to_string t.turn_ref) message;
+          Events.Event_error {message = t.redact_text message}
         | Cancelled -> Events.Event_error {message = "Autonomous turn cancelled"}))))
 
 let task_journal_health t = Keeper_native_task_journal.health t.task_journal

@@ -1,7 +1,7 @@
 module Plan = Keeper_tool_plan
 module FS = Keeper_tool_filesystem_runtime
 
-type operation = Read of FS.prepared_read | Edit of FS.prepared_edit
+type operation = Read of FS.prepared_read | Edit of FS.prepared_edit | Write of FS.prepared_write
 
 type leaf =
   { node : Plan.node
@@ -35,10 +35,12 @@ let eligible plan =
 let release = function
   | Read read -> FS.release_prepared_read read
   | Edit edit -> FS.release_prepared_edit edit
+  | Write write -> FS.release_prepared_write write
 
 let operation_scopes = function
   | Read read -> FS.prepared_read_scopes read
   | Edit edit -> FS.prepared_edit_scopes edit
+  | Write write -> FS.prepared_write_scopes write
 
 let source_matches (meta : Keeper_meta_contract.keeper_meta)
     (source : Keeper_tool_call_log_context.turn_context) =
@@ -50,7 +52,8 @@ let source_matches (meta : Keeper_meta_contract.keeper_meta)
 
 let prepare_operation ~sw ~config ~meta ~tool_name descriptor ~input =
   if descriptor.Keeper_tool_descriptor.runtime_handler <> Keeper_tool_descriptor.Tool_read_file
-     && descriptor.runtime_handler <> Keeper_tool_descriptor.Tool_edit_file then None
+     && descriptor.runtime_handler <> Keeper_tool_descriptor.Tool_edit_file
+     && descriptor.runtime_handler <> Keeper_tool_descriptor.Tool_write_file then None
   else
   match Keeper_tool_descriptor_resolution.prepare_model_input_for_descriptor
       ~tool_name descriptor ~input with
@@ -60,9 +63,13 @@ let prepare_operation ~sw ~config ~meta ~tool_name descriptor ~input =
       (match FS.prepare_read ~sw ~config ~meta ~args with
        | Ok (Some read) -> Some (Read read)
        | Ok None | Error _ -> None)
-    else
+    else if descriptor.runtime_handler = Keeper_tool_descriptor.Tool_edit_file then
       (match FS.prepare_edit ~sw ~config ~meta ~args with
        | Ok (Some edit) -> Some (Edit edit)
+       | Ok None | Error _ -> None)
+    else
+      (match FS.prepare_write ~sw ~config ~meta ~args with
+       | Ok (Some write) -> Some (Write write)
        | Ok None | Error _ -> None)
 ;;
 

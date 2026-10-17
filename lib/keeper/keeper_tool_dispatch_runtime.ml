@@ -259,6 +259,7 @@ let execute_keeper_tool_descriptor_with_authority
       ?owned_job_replay
       ?prepared_read
       ?prepared_edit
+      ?prepared_write
       ?turn_sandbox_factory
       ?sw
       ?clock
@@ -314,7 +315,7 @@ let execute_keeper_tool_descriptor_with_authority
         ~capability_authority
         ()
     in
-    (match Keeper_tool_runtime.handle ?prepared_read ?prepared_edit context ~descriptor ~args:input with
+    (match Keeper_tool_runtime.handle ?prepared_read ?prepared_edit ?prepared_write context ~descriptor ~args:input with
      | Some execution -> execution
      | None ->
        descriptor_route_invariant_error
@@ -354,6 +355,7 @@ let execute_keeper_tool_call_with_authority
       ?owned_job_replay
       ?prepared_read
       ?prepared_edit
+      ?prepared_write
       ?turn_sandbox_factory
       (* RFC-0182 Phase 5 PR-A.2: optional Eio resources threaded to
          Keeper_tool_runtime.context for Eio-bound descriptor handlers. *)
@@ -422,6 +424,7 @@ let execute_keeper_tool_call_with_authority
              , Keeper_tool_runtime.handle
                  ?prepared_read
                  ?prepared_edit
+                 ?prepared_write
                  keeper_tool_runtime_context
                  ~descriptor
                  ~args:translated_args )

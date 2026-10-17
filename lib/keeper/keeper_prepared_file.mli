@@ -51,3 +51,43 @@ val with_parents
     The source file opens at execution, retaining sequential reads/patches
     after an earlier atomic replacement. This
     does not authorize the effect or bypass Gate/publication recovery. *)
+
+module Write : sig
+  type t
+
+  val prepare
+    : sw:Eio.Switch.t
+    -> operation:Keeper_tool_write_mode.t
+    -> config:Workspace.config
+    -> meta:Keeper_meta_contract.keeper_meta
+    -> args:Yojson.Safe.t
+    -> confined:Keeper_alerting_path.confined_path
+    -> (t option, string) result
+  (** Pin existing target/resolved-source parents for Overwrite or Append.
+      The target file may be absent. Missing parents and unsupported resources
+      return [None] without creating anything; ordinary execution retains them. *)
+
+  val scopes : t -> Agent_core.Tool_contract.Resource_scope.t list
+  (** Existing objects carry entry and inode writes. An absent object claims
+      its actual parent for creation, so filesystem spelling aliases are
+      ordered without guessed normalization. *)
+  val release : t -> unit
+
+  val with_parents
+    : operation:Keeper_tool_write_mode.t
+    -> config:Workspace.config
+    -> meta:Keeper_meta_contract.keeper_meta
+    -> args:Yojson.Safe.t
+    -> confined:Keeper_alerting_path.confined_path
+    -> t
+    -> (root_dir:Eio.Fs.dir_ty Eio.Path.t
+        -> parent_dir:Eio.Fs.dir_ty Eio.Path.t
+        -> parent_components:string list
+        -> missing_parents:string list
+        -> leaf:string
+        -> ('a, string) result)
+    -> ('a, string) result
+  (** Revalidate the exact operation, owner/input, confinement and pinned
+      physical directory bindings, then invoke the original write consumer.
+      This supplies neither Gate permission nor durable replay authority. *)
+end

@@ -2082,6 +2082,19 @@ let test_projection_profile_snapshot_refuses_name_mismatch () =
         (String_util.contains_substring error.detail "declared-key"
          && String_util.contains_substring error.detail "file-key"))
     ["file-key"; "declared-key"];
+  (match KTP.snapshot_profile_defaults snapshot "file-key",
+         KTP.load_keeper_profile_defaults_result_for_base_path ~base_path "file-key" with
+   | Error captured, Error live ->
+     check bool "per-file load refuses mismatched file with identical error" true
+       (captured = live)
+   | _ -> fail "per-file loader must refuse a declaration whose keeper.name differs from its file name");
+  (match KTP.keeper_toml_config_errors_in_dir_result keepers_dir with
+   | Ok [ row ] ->
+     check string "config error row names the file stem" "file-key" row.KTP.keeper_name;
+     check bool "config error row kind is Invalid_name" true (row.KTP.kind = KTP.Invalid_name);
+     check string "config error row failing path" path row.KTP.failing_path
+   | Ok rows -> failf "expected one config error row, got %d" (List.length rows)
+   | Error _ -> fail "expected config errors scan to succeed");
   match Masc.Keeper_declared_roster.missing ~base_path ~persisted_names:[] with
   | [ row ] ->
     check string "roster row carries the declared name" "declared-key"

@@ -268,8 +268,9 @@ Captured takes can be placed, trimmed in seconds, repeated and saved as paired
 regions. `:play-audio` explicitly auditions the WAV portions on the captured
 clock, including delayed starts, silent tails and compressed repeats; it sends
 no MIDI. Ordinary Space playback uses [paired MIDI2/WAV regions](CAPTURE-UMP-REGIONS.md)
-with selected audio/MIDI outputs and per-input `:midi-source` overrides. Audible
-SMF plus captured UMP composition and arrangement overdubs remain unfinished.
+with selected audio/MIDI outputs and per-input `:midi-source` overrides.
+[Hybrid arrangements](HYBRID-ARRANGEMENT.md) combine SMF, captured MIDI2 and WAV
+under one clock; monitored arrangement overdubs remain unfinished.
 See [captured audio timing](CAPTURE-AUDIO-CLOCK.md).
 
 Saved captures also have [paired original WAV/UMP playback](CAPTURE-PLAYBACK.md).

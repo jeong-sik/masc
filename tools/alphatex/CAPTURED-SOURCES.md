@@ -98,6 +98,6 @@ See [paired region transport](CAPTURE-UMP-REGIONS.md) for exact cuts, repeats,
 clock-only captures, physical ownership and reconstruction limits. The player
 owns all four copied source parts until its native process closes. `:play-audio`
 remains an explicit WAV-only audition, and `:open-take` opens paired full-source
-playback. Audible standalone SMF plus captured UMP composition currently returns
-an explicit diagnostic. Monitoring, overdubbing and latency compensation remain
+playback. [Hybrid playback](HYBRID-ARRANGEMENT.md) combines standalone SMF and captured
+UMP with joint physical channel admission. Monitoring, overdubbing and latency compensation remain
 subsequent work; original WAV/UMP bytes and existing WAV/SMF routes are retained.

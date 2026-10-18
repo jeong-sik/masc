@@ -82,7 +82,8 @@ Re-triggered live notes start a new instrument envelope; release tails, arbitrar
 device internals and sample-perfect or acoustically seamless resume are not
 reconstructed. [Captured regions](CAPTURE-UMP-REGIONS.md) also use the ordinary
 arrangement play command with exact cuts and compressed repeats. Existing SMF
-regions retain their separate implementation; SMF/UMP composition remains work.
+regions retain their own protocol engine; [hybrid playback](HYBRID-ARRANGEMENT.md)
+coordinates both engines and their resource ownership.
 
 Monitoring, overdubbing against the arrangement, latency compensation, external
 MIDI clock, VST routing, practice/count-in and physical hardware verification

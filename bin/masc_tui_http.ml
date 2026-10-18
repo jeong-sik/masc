@@ -1876,9 +1876,12 @@ let fetch_keeper_context_response ~host ~port ~keeper_name ~turn_ref =
 
 (** Fetch one completed turn and the immutable provider-input snapshot joined
     by that turn's exact [turn_ref]. A failure on either side stays visible;
-    no mutable latest-prompt value is allowed to fill another turn. *)
-let fetch_keeper_context_inspector ~(host : string) ~(port : int)
-    ~(keeper_name : string) ~(turn_back : int)
+    no mutable latest-prompt value is allowed to fill another turn. When
+    [~forecast] is [Some _] (turn navigation on an already-loaded recent page),
+    the next-request forecast is reused rather than re-fetched (#43592). *)
+let fetch_keeper_context_inspector
+    ~(forecast : (Masc_tui_context_inspector.forecast, string) result option)
+    ~(host : string) ~(port : int) ~(keeper_name : string) ~(turn_back : int)
     : Masc_tui_context_inspector.reading =
   let fetch ~label ~path ~decode =
     fetch_context_json ~host ~port ~label ~path ~decode
@@ -1929,11 +1932,14 @@ let fetch_keeper_context_inspector ~(host : string) ~(port : int)
   in
   (* Computed now from the turn's own values, without a turn; a server
      that does not serve it yet says so in the band rather than hiding
-     the band. *)
+     the band. Reused across [ and ] steps on the same page (#43592). *)
   let forecast =
-    fetch ~label:"next-request"
-      ~path:(Printf.sprintf "/api/v1/keepers/%s/next-request" encoded)
-      ~decode:Masc_tui_context_inspector.decode_forecast
+    match forecast with
+    | Some forecast -> forecast
+    | None ->
+        fetch ~label:"next-request"
+          ~path:(Printf.sprintf "/api/v1/keepers/%s/next-request" encoded)
+          ~decode:Masc_tui_context_inspector.decode_forecast
   in
   match dependent with
   | Error detail -> Masc_tui_context_inspector.Turn_read_failed { detail; forecast }

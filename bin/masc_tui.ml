@@ -7219,7 +7219,7 @@ let launch_runtime_catalog_load state ~mailbox =
     (fun () -> Masc_tui_loader.load_runtime_resolved ~host ~port)
   end
 
-let launch_context_inspector_load state ~mailbox ~keeper_name =
+let launch_context_inspector_load ?forecast state ~mailbox ~keeper_name =
   if server_authority_ready state then begin
   let enqueue_async = workspace_enqueue state in
   let host = server_peer_host in
@@ -7242,7 +7242,9 @@ let launch_context_inspector_load state ~mailbox ~keeper_name =
     try
       match target with
       | Masc_tui_context_inspector.Recent turn_back ->
-          publish (Masc_tui_http.fetch_keeper_context_inspector ~host ~port ~keeper_name ~turn_back)
+          publish
+            (Masc_tui_http.fetch_keeper_context_inspector ~forecast ~host ~port
+               ~keeper_name ~turn_back)
       | Masc_tui_context_inspector.Pinned turn_ref ->
           Masc_tui_http.fetch_keeper_exact_context_inspector
             ~host ~port ~keeper_name ~turn_ref ~publish
@@ -25169,6 +25171,13 @@ and is loaded on demand through keeper_skill.
                          ~older:(String.equal k "[") ~count with
                  | None -> ()
                  | Some target ->
+                     let forecast =
+                       match state.context_inspector_reading, state.context_inspector_keeper with
+                       | Some (reading_keeper, reading), Some keeper_name
+                         when String.equal reading_keeper keeper_name ->
+                           Masc_tui_context_inspector.retained_forecast reading
+                       | Some _, _ | None, _ -> None
+                     in
                      state.context_inspector_target <- target;
                      state.context_inspector_reading <- None;
                      state.context_inspector_read_at <- None;
@@ -25180,7 +25189,7 @@ and is loaded on demand through keeper_skill.
                      supersede_context_inspector_part_load state None;
                      state.context_inspector_part <- Masc_tui_fetched.clear state.context_inspector_part;
                      Option.iter
-                       (fun keeper_name -> launch_context_inspector_load state
+                       (fun keeper_name -> launch_context_inspector_load ?forecast state
                           ~mailbox:async_messages ~keeper_name)
                        state.context_inspector_keeper)
             | "/" when

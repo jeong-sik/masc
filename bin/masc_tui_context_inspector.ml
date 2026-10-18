@@ -306,7 +306,7 @@ let decode_turn_records = function
 
 let viewing_record selection ~turn_back =
   if turn_back <= 0 then
-    Option.map (fun attributed -> attributed.record) selection.attributed
+    Option.map (fun (attributed : attributed_turn) -> attributed.record) selection.attributed
   else List.nth_opt selection.rows turn_back
 
 let inspected_record ~target = function

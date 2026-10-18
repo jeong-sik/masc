@@ -23,6 +23,11 @@ func source(_ id:String,_ rows:[UmpPacket],numer:UInt32=1,denom:UInt32=1,extent:
 }
 func clip(_ id:String="clip",source:String="take",start:Double=0,offset:String="0",extent:String="1000000000",repeatCount:UInt64=1)->UmpRegion{UmpRegion(id:id,source:source,startSeconds:start,offset:offset,extent:extent,repeatCount:repeatCount)}
 func owner(_ sources:[UmpRegionSource],_ clips:[UmpRegion],duration:Double=1)throws->UmpRegionTransport{try UmpRegionTransport(timeline:UmpArrangement(schemaVersion:1,duration:duration,sources:sources,regions:clips))}
+// A clock-only capture can share a paired arrangement without fabricating UMP.
+let silent=UmpRegionSource(id:"silent",extent:"1000000000",timeline:UmpTimeline(schemaVersion:4,duration:1,clock:UmpClock(origin:"0",numer:1,denom:1),bindings:[],packets:[]))
+refuses{_ = try silent.timeline.timedEvents()}
+let silentOwner=try owner([silent],[clip(source:"silent")]);precondition(silentOwner.clips[0].events.isEmpty && silentOwner.output.bindings.isEmpty)
+host=0;sent=[];try silentOwner.stageCoordinated(at:0);try silentOwner.runCoordinated(anchorNanoseconds:10);host=1_000_000_010;silentOwner.tick();precondition(sent.isEmpty && silentOwner.state == .ended)
 // Adjacent raw ticks merge as Double seconds at this source offset. Exact cuts
 // and stable source order must still deliver each original word exactly once.
 let huge:UInt64=1_000_000_000_000_000_000

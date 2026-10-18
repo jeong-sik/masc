@@ -80,8 +80,9 @@ Staging sends no restored Note On before the shared future epoch. If its callbac
 is delayed, it reconstructs that current phase so expired keys stay silent.
 Re-triggered live notes start a new instrument envelope; release tails, arbitrary
 device internals and sample-perfect or acoustically seamless resume are not
-reconstructed. Captured-region placement, trims and repeats remain subsequent
-work. Existing SMF regions retain their separate implementation.
+reconstructed. [Captured regions](CAPTURE-UMP-REGIONS.md) also use the ordinary
+arrangement play command with exact cuts and compressed repeats. Existing SMF
+regions retain their separate implementation; SMF/UMP composition remains work.
 
 Monitoring, overdubbing against the arrangement, latency compensation, external
 MIDI clock, VST routing, practice/count-in and physical hardware verification

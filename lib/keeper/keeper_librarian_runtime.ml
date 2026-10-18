@@ -1318,6 +1318,16 @@ let run_pass
         let complete ?selected_slot ?usage outcome output =
           let selected_slot = if !full_llm_skipped then None else selected_slot in
           let usage = if !full_llm_skipped then None else usage in
+          let output = match inference, output with
+            | Some (Infer_memory _), `Assoc fields ->
+              let fields = List.fold_left (fun fields key -> List.remove_assoc key fields)
+                fields ["memory_write"; "memory_inference"; "context_write"; "continuity_write"] in
+              `Assoc (["memory_write", `String "not_attempted";
+                       "memory_inference", `Bool true;
+                       "context_write", `Assoc ["status", `String "not_attempted"];
+                       "continuity_write", `Assoc ["status", `String "not_attempted"]] @ fields)
+            | (None | Some (Infer_state _)), _
+            | Some (Infer_memory _), _ -> output in
           let output = match !observed_preflight, output with
             | Some observation, `Assoc fields ->
               `Assoc (("jev_preflight", Typesafeai_librarian_preflight.to_yojson observation)
@@ -1819,10 +1829,7 @@ let run_pass
              Eio.Fiber.check ()
            | Ok (`Memory_inferred (step, served_by, exact_output, selected_slot)) ->
              complete ~selected_slot ?usage:!observed_usage Exact_lane_run_registry.Succeeded
-               (`Assoc ["memory_write", `String "not_attempted";
-                        "continuity_write", `Assoc ["status", `String "not_attempted"];
-                        "memory_inference", `Bool true;
-                        "absorb_gate", Keeper_librarian_absorb_gate.run_result_to_yojson step.absorb_gate;
+               (`Assoc ["absorb_gate", Keeper_librarian_absorb_gate.run_result_to_yojson step.absorb_gate;
                         "exact_output", exact_output]);
              (match inference with
               | Some (Infer_memory {observe;_}) -> observe ~served_by step

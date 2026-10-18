@@ -1187,7 +1187,9 @@ let test_memory_inference_retains_gated_decision () =
     (reading.lp_memory_scope = Masc.Tui_decode.Memory_inference_scope);
   check bool "no successful Memory snapshot is claimed" true (reading.lp_memory_result=None);
   check bool "no successful side write is claimed" true
-    (reading.lp_side_writes = [Masc.Tui_decode.Continuity_write,Masc.Tui_decode.Side_not_attempted]);
+    (reading.lp_side_writes =
+      [Masc.Tui_decode.Context_write,Masc.Tui_decode.Side_not_attempted;
+       Masc.Tui_decode.Continuity_write,Masc.Tui_decode.Side_not_attempted]);
   let member = Yojson.Safe.Util.member in
   let output = member "output" (member "run" json) in
   let with_field key value = match json, output with
@@ -1234,6 +1236,9 @@ let test_memory_inference_failure_keeps_pending_publication failure () =
   let paths = inference_store_paths ~keepers_dir ~keeper_id in
   let before = List.map Fs_compat.load_file_opt paths in
   let wakes = ref 0 in
+  let module Registry = Masc.Exact_lane_run_registry in
+  let registry = Registry.global () in
+  let prior_runs = List.map (fun (run : Registry.run) -> run.run_id) (Registry.list_runs registry) in
   let unsubscribe = Masc.Keeper_memory_commit_notifications.subscribe (fun _ -> incr wakes) in
   Fun.protect ~finally:unsubscribe @@ fun () ->
   let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ = match failure with
@@ -1256,7 +1261,21 @@ let test_memory_inference_failure_keeps_pending_publication failure () =
       | Invalid_memory_answer | Gate_unavailable | Opaque_cli_failure -> fail "unexpected cancellation"));
   check bool "failure leaves pending publication and all Memory bytes untouched" true
     (before = List.map Fs_compat.load_file_opt paths);
-  check int "failure sends no Memory commit notification" 0 !wakes
+  check int "failure sends no Memory commit notification" 0 !wakes;
+  let run = match Registry.list_runs registry
+      |> List.filter (fun (run : Registry.run) -> not (List.mem run.run_id prior_runs)) with
+    | [run] -> (match Registry.get registry ~run_id:run.run_id with
+        | Some loaded -> loaded | None -> fail "failure run payload missing")
+    | _ -> fail "expected one failed inference run" in
+  let decoded = Masc.Tui_decode.decode_lane_run_detail
+      (`Assoc ["run", Registry.run_to_yojson run]) in
+  let reading = match decoded with
+    | Ok {lrd_librarian_preflight=Some reading;_} -> reading
+    | Ok {lrd_librarian_preflight=None;_} -> fail "failed inference scope missing"
+    | Error detail -> fail detail in
+  check bool "failure and cancellation retain the inference scope" true
+    (reading.lp_memory_scope = Masc.Tui_decode.Memory_inference_scope
+      && reading.lp_memory_result=None)
 ;;
 
 let () =

@@ -132,9 +132,10 @@ let observe_linked_task ~base_path (ask : Keeper_ask.ask) =
   match ask.task_id with
   | None -> Task_unlinked
   | Some task_id ->
-      let config = Workspace_core.default_config base_path in
       let reading =
-        try Eio_guard.with_named_switch "ask-linked-task-status" (fun () ->
+        try
+          let config = Workspace_core.default_config base_path in
+          Eio_guard.with_named_switch "ask-linked-task-status" (fun () ->
           Domain_pool_ref.submit_io_or_inline
             (fun () -> Workspace_query.read_task_status_r config ~task_id))
         with

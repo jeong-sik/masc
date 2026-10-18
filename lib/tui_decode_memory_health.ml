@@ -459,7 +459,9 @@ let decode_memory_context_cycle keeper_json =
       then Ok () else Error "snapshot contains an official-turn unread record" in
   let* () = match mcc_unread_snapshot, mcc_saved_unreadable, mcc_saved with
     | Error (), true, None | Ok [], false, None | Ok _, false, Some _ -> Ok ()
-    | _ -> Error "snapshot unread evidence disagrees with snapshot reading" in
+    | Error (), false, (None | Some _) | Error (), true, Some _
+    | Ok _, true, (None | Some _) | Ok (_ :: _), false, None ->
+      Error "snapshot unread evidence disagrees with snapshot reading" in
   let* value = required_member json "prepared" in
   let* mcc_prepared = nullable prepared value in
   let* value = required_member json "synthesis" in

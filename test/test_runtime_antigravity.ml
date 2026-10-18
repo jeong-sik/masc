@@ -78,7 +78,8 @@ type fixture_stdin =
   | Leave_unread
 
 (* [line_delays]: seconds the fixture sleeps before printing the line at that
-   index, so one gap can be placed inside or after a chosen step. *)
+   index, so one gap can be placed inside or after a chosen step.
+   [line_gates] waits for a callback's marker before starting that gap. *)
 let fixture_script
     ?(require_resume = false)
     ?required_home
@@ -87,6 +88,7 @@ let fixture_script
     ?(stdin = Read_to_end)
     ?line_delay_s
     ?(line_delays = [])
+    ?(line_gates = [])
     ?pipe_holder_s
     ?exit_delay_s
     ?(stderr_line = "")
@@ -136,6 +138,12 @@ let fixture_script
   List.iteri
     (fun index line ->
        Option.iter
+         (fun path ->
+            output_string output
+              (Printf.sprintf "while [ ! -f %s ]; do sleep 0.01; done\n"
+                 (shell_quote path)))
+         (List.assoc_opt index line_gates);
+       Option.iter
          (fun seconds ->
             output_string output (Printf.sprintf "sleep %.3f\n" seconds))
          line_delay_s;
@@ -166,7 +174,7 @@ let fixture_script
 ;;
 
 let with_fixture ?require_resume ?required_home ?sleep_s ?capture_prompt ?stdin ?line_delay_s
-    ?line_delays ?pipe_holder_s ?exit_delay_s ?stderr_line ?exit_code lines f =
+    ?line_delays ?line_gates ?pipe_holder_s ?exit_delay_s ?stderr_line ?exit_code lines f =
   let path =
     fixture_script
       ?require_resume
@@ -176,6 +184,7 @@ let with_fixture ?require_resume ?required_home ?sleep_s ?capture_prompt ?stdin 
       ?stdin
       ?line_delay_s
       ?line_delays
+      ?line_gates
       ?pipe_holder_s
       ?exit_delay_s
       ?stderr_line
@@ -184,6 +193,12 @@ let with_fixture ?require_resume ?required_home ?sleep_s ?capture_prompt ?stdin 
   in
   Fun.protect ~finally:(fun () -> Sys.remove path) (fun () -> f path)
 ;;
+
+(* A deadline a test asserts *fires* wants to be short (0.05 s); a deadline a
+   test needs to *not* fire must cover spawning the fixture shell as well as
+   any pre-admission pause (#43596; see the matching note in
+   [test_runtime_claude_code.ml]). *)
+let window_outlasting_process_start_s = 5.0
 
 let run_fixture
     ?conversation_mode
@@ -857,13 +872,15 @@ let test_a_cli_that_answers_without_reading_the_prompt_does_not_hold_the_turn ()
   (* The CLI never reads stdin and lingers after answering, so a prompt past
      the pipe buffer is still in the pipe when the answer arrives. The turn
      ends on the lane's own admission window; before it covered the write, it
-     ended only when the CLI finally left. *)
+     ended only when the CLI finally left. 1.5 s leaves room for spawning the
+     fixture and the first-event [lsof] child-fd sample before the blocked
+     stdin writer expires (#43596), while staying well inside [exit_delay_s]. *)
   let ready = ref false in
   with_fixture ~stdin:Leave_unread ~exit_delay_s:5.0 [ init (); result () ] (fun path ->
     match
       run_fixture
         ~prompt:(String.make 1_100_000 'x')
-        ~admission_timeout_s:0.5
+        ~admission_timeout_s:1.5
         ~timeout_s:5.0
         ~on_conversation_ready:(fun ~conversation_id:_ ->
           ready := true;
@@ -872,7 +889,7 @@ let test_a_cli_that_answers_without_reading_the_prompt_does_not_hold_the_turn ()
     with
     | Error (Runtime_antigravity.Timeout seconds) ->
       check bool "the CLI had answered while the prompt was still in the pipe" true !ready;
-      check (float 0.001) "the window is the lane's admission window" 0.5 seconds
+      check (float 0.001) "the window is the lane's admission window" 1.5 seconds
     | Error error ->
       fail
         ("an unread prompt ended the turn some other way: "
@@ -1524,7 +1541,12 @@ let test_progress_resets_stream_idle_timeout () =
     ~line_delay_s:0.4
     [ init (); step ~index:1 (); result () ]
     (fun path ->
-       match run_fixture ~timeout_s:0.75 path with
+       match
+         run_fixture
+           ~timeout_s:0.75
+           ~admission_timeout_s:window_outlasting_process_start_s
+           path
+       with
        | Ok turn ->
          check string "progressing turn completes" "MASC_ANTIGRAVITY_OK\n" turn.text
        | Error error -> fail (Runtime_antigravity.error_to_string error))
@@ -1565,7 +1587,7 @@ let test_no_deadline_keeps_init_bounded () =
    fixture's first line is not what is under test (#28919). *)
 let tool_step_idle_window_s = 0.3
 let tool_step_gap_s = 1.0
-let tool_step_admission_s = 5.0
+let tool_step_admission_s = window_outlasting_process_start_s
 
 let test_tool_step_outlasting_the_idle_window_completes () =
   with_fixture
@@ -1622,19 +1644,34 @@ let test_idle_window_rearms_when_the_tool_step_ends () =
 ;;
 
 let test_no_deadline_starts_after_init () =
-  with_fixture
-    ~line_delays:[ 1, 0.2 ]
-    [ init (); result () ]
-    (fun path ->
-       match
-         run_fixture
-           ~admission_timeout_s:0.05
-           ~no_turn_deadline:true
-           path
-       with
-       | Ok turn ->
-         check string "unbounded result" "MASC_ANTIGRAVITY_OK\n" turn.text
-       | Error error -> fail (Runtime_antigravity.error_to_string error))
+  let gate = Filename.temp_file "masc-antigravity-init-" ".ready" in
+  Sys.remove gate;
+  Fun.protect
+    ~finally:(fun () -> if Sys.file_exists gate then Sys.remove gate)
+    (fun () ->
+       (* The first-event FD probe precedes the init callback. Start the
+          silence only after that callback, so probing cannot consume the
+          interval that must outlast admission. Keeping Awaiting_admission
+          after init would then time out before the result, even with no
+          model-turn deadline. *)
+       with_fixture
+         ~line_gates:[ 1, gate ]
+         ~line_delays:[ 1, window_outlasting_process_start_s +. 0.2 ]
+         [ init (); result () ]
+         (fun path ->
+            match
+              run_fixture
+                ~admission_timeout_s:window_outlasting_process_start_s
+                ~no_turn_deadline:true
+                ~on_conversation_ready:(fun ~conversation_id:_ ->
+                  let output = open_out_bin gate in
+                  close_out output;
+                  Ok ())
+                path
+            with
+            | Ok turn ->
+              check string "unbounded result" "MASC_ANTIGRAVITY_OK\n" turn.text
+            | Error error -> fail (Runtime_antigravity.error_to_string error)))
 ;;
 
 let test_admission_is_process_free () =

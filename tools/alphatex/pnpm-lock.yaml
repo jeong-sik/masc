@@ -14,6 +14,12 @@ importers:
       '@coderline/alphatab':
         specifier: 1.8.4
         version: 1.8.4
+      jzz:
+        specifier: 1.9.6
+        version: 1.9.6
+      jzz-midi-smf:
+        specifier: 1.9.9
+        version: 1.9.9
 
 packages:
 
@@ -37,6 +43,16 @@ packages:
     resolution: {integrity: sha512-VN5rfTZZWgA63Ny1aDKCp02k3Qm9CHhg4Q9AnK0kHm7G+fNDNZo36TeToPDFoJ6VpB9+AHcCrHwHFUP1tKqdsw==}
     engines: {node: '>=6.0.0'}
 
+  jazz-midi@1.7.9:
+    resolution: {integrity: sha512-c8c4BBgwxdsIr1iVm53nadCrtH7BUlnX3V95ciK/gbvXN/ndE5+POskBalXgqlc/r9p2XUbdLTrgrC6fou5p9w==}
+    engines: {node: '>=10.0.0'}
+
+  jzz-midi-smf@1.9.9:
+    resolution: {integrity: sha512-A6PT/JVohcryitVgWvCKQyUVV/ISaPPG3lvLImi8v4PoWVxr0IUJZsTmh5j5gNVOoJfAJ7vvKehvig+FdGIkfw==}
+
+  jzz@1.9.6:
+    resolution: {integrity: sha512-J7ENLhXwfm2BNDKRUrL8eKtPhUS/CtMBpiafxQHDBcOWSocLhearDKEdh+ylnZFcr5OXWTed0gj6l/txeQA9vg==}
+
 snapshots:
 
   '@coderline/alphaskia-linux@3.5.147':
@@ -55,3 +71,13 @@ snapshots:
       '@coderline/alphaskia-windows': 3.5.147
 
   '@coderline/alphatab@1.8.4': {}
+
+  jazz-midi@1.7.9: {}
+
+  jzz-midi-smf@1.9.9:
+    dependencies:
+      jzz: 1.9.6
+
+  jzz@1.9.6:
+    dependencies:
+      jazz-midi: 1.7.9

@@ -29,6 +29,7 @@ remains available on other terminals. In the score view:
 - +/- change notation size; `t` cycles all tracks and individual tracks.
 - Left/Right select a frozen score from the current conversation snapshot.
 - Space synthesizes and plays the selected tracks, then pauses/resumes.
+- `r` opens audio/MIDI input selection and the recording timeline on macOS.
 - `v` shows the source and complete official diagnostics; `s` stops playback;
   `q` or Escape returns to the conversation.
 
@@ -60,6 +61,45 @@ Exports refuse to overwrite an existing file. Rendering and synthesis in the
 interactive view run on workers. Only the active generation may replace the
 score or start audio, and workers stop before temporary files are removed.
 
+## Recording audio and MIDI
+
+On macOS, the installer compiles a CoreAudio/CoreMIDI companion using the Xcode
+command-line tools. In a score view press `r`, or run `masc-alphatex --record`.
+Device discovery does not capture audio. Choose the audio input with `i` and
+the MIDI sources with `m`, then press `r` to begin a new take. `s` stops and saves;
+leaving the view also waits for file finalization. Recording never starts merely
+because the score view opens. The input may be a connected audio interface,
+built-in microphone, aggregate device or loopback device exposed by CoreAudio.
+
+The take folder is displayed before recording. Its default is `music-sessions`
+under the process's working directory; `--session-root /path/to/folder` chooses
+another location. Every take has its own directory and no saved take is replaced.
+`--input DEVICE_UID` and `--midi all|none|SOURCE_ID` preselect inputs from
+`--devices`; the recording still requires pressing `r`.
+WAV channel waveforms and MIDI source/group/channel tracks share the native host
+clock. Waveforms show captured block extrema, not an editable sample waveform.
+Use arrows to scroll tracks or time, +/- to zoom, and `f` to follow incoming data.
+Space plays/stops the saved WAV through the system default output. It does not
+play the captured MIDI tracks. Open an existing take with:
+
+```sh
+masc-alphatex --devices
+masc-alphatex --session /path/to/take-directory
+```
+
+Press `e` after saving to export one MIDI 2.0 Clip per input source. UMP group and
+channel data, 16-bit velocity and 32-bit controllers remain intact. Clip times
+are quantized to 1000 ticks per quarter note; original timestamps and every UMP
+word remain in `midi.ump.jsonl`. Clip-owned timing/start/end utility messages are
+not duplicated in the export. Capture failures remain visible and retain their
+files. See the [native protocol](native/README.md) for clock and failure semantics.
+
+This recording view captures simultaneous tracks in a take. Overdubbing,
+multi-take arrangement/mixing, MIDI playback/output, input monitoring, output
+device selection and practice scoring are not implemented here. The existing
+score playback remains available when returning to the score view.
+
 alphaTab is MPL-2.0, Bravura is OFL-1.1, alphaSkia is BSD-3-Clause. Their notices ship
 with the locked dependencies. The Sonivox license is in alphaTab's
 `dist/soundfont/LICENSE` and must remain with a redistributed installation.
+JZZ and JZZ MIDI SMF are MIT-licensed; their notices ship with the pinned packages.

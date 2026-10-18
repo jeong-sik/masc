@@ -1,0 +1,237 @@
+import { mkdir } from 'node:fs/promises'
+import { join, resolve } from 'node:path'
+import { randomUUID } from 'node:crypto'
+import { emitKeypressEvents } from 'node:readline'
+import { spawn } from 'node:child_process'
+import { devices, record } from './capture.mjs'
+import { CaptureTimeline, readCapture, waveform, exportMidiClips } from './session-data.mjs'
+import { safeText } from './terminal.mjs'
+
+// The score viewer lends us its terminal while suspended; standalone invocation
+// additionally owns alternate screen/raw mode and restores exactly what it acquired.
+export async function viewSession({ directory, root = resolve('music-sessions'), input, midi, signal, embedded = false } = {}) {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error('Music sessions require a terminal')
+  let available = null, inputIndex = 0, midiIndex = 0, timeline = null
+  let take = directory, capture = null, captureTask = null, player = null
+  let captureIntent = null
+  const players = new Map()
+  const discoveryAbort = new AbortController()
+  let phase = directory ? 'loading' : 'discovering', status = '', closed = false, scroll = 0, dirty = false
+  let start = 0, span = 10, follow = true, exportTask = null
+  let helpShown = false
+  const wasRaw = process.stdin.isRaw
+  let finish
+  const done = new Promise(resolve => { finish = () => { discoveryAbort.abort(); resolve() } })
+  const fit = text => {
+    let used = 0, result = ''
+    for (const char of safeText(text)) {
+      const code = char.codePointAt(0)
+      const width = code >= 0x1100 && (code <= 0x115f || code >= 0x2e80) ? 2 : 1
+      if (used + width > Math.max(1, process.stdout.columns - 1)) break
+      result += char; used += width
+    }
+    return result
+  }
+  const inputs = () => available?.audio.filter(device => device.inputs > 0) ?? []
+  const midiChoices = () => [{ id: 'all', name: 'All MIDI inputs' }, { id: 'none', name: 'No MIDI input' }, ...(available?.midi ?? [])]
+  function draw() {
+    if (closed) return
+    dirty = false
+    const rows = process.stdout.rows || 24, width = Math.max(1, (process.stdout.columns || 80) - 9)
+    if (follow && timeline) start = Math.max(0, timeline.duration - span)
+    const lines = [
+      `Music session · ${phase} · ${timeline?.duration.toFixed(2) ?? '0.00'}s · ${status}`,
+      `Next audio: ${inputs()[inputIndex]?.name ?? 'no input'} · MIDI: ${midiChoices()[midiIndex]?.name ?? ''}${timeline ? ` · Take: ${timeline.manifest.input.name}` : ''}`,
+      `Save: ${take ?? root}`,
+      `${start.toFixed(2)}s ${'─'.repeat(Math.max(1, width - 10))} ${(start + span).toFixed(2)}s`,
+    ]
+    const tracks = []
+    if (helpShown) tracks.push(
+      'i: choose the next audio input; m: choose MIDI inputs (all, none or one source)',
+      'r: begin a new take using the selected inputs; s: stop and save',
+      'Space: play/stop this take\'s WAV through the system default output',
+      'e: export one MIDI 2.0 Clip per input source (saved takes only)',
+      'Up/Down: scroll tracks; Left/Right: move the time window',
+      '+/-: zoom time; f: follow the end of the take',
+      '?: show/hide help; q/Esc: finish recording and return',
+    )
+    else if (timeline) {
+      for (let channel = 0; channel < timeline.channels; channel++) {
+        const peaks = waveform(timeline, channel, start, span / width, width)
+        const peak = peaks.reduce((max, pair) => pair ? Math.max(max, Math.abs(pair[0]), Math.abs(pair[1])) : max, 0)
+        const scale = peak || 1
+        tracks.push(`Audio ${channel + 1} · ${timeline.sampleRate}Hz · ${peak ? `${(20 * Math.log10(peak)).toFixed(1)} dBFS` : 'silence'} · display ±${scale.toFixed(3)}`)
+        for (let y = 0; y < 5; y++) {
+          const high = (1 - y * 0.4) * scale, low = high - 0.4 * scale
+          tracks.push(`       ${peaks.map(pair => pair && (pair[0] !== 0 || pair[1] !== 0) && pair[1] >= low && pair[0] <= high ? '█' : y === 2 ? '─' : ' ').join('')}`)
+        }
+      }
+      for (const track of timeline.midi.values()) {
+        tracks.push(`${track.name} · group ${(track.group ?? -1) + 1 || '—'} · channel ${(track.channel ?? -1) + 1 || '—'} · ${track.events.length} events`)
+        const pitches = [...new Set(track.notes.map(note => note.pitch))].sort((a, b) => b - a)
+        if (!pitches.length) tracks.push('       MIDI data preserved · no note events')
+        for (const pitch of pitches) {
+          const cells = Array(width).fill(' ')
+          for (const note of track.notes) {
+            if (note.pitch !== pitch) continue
+            const first = Math.max(0, Math.floor((note.start - start) * width / span))
+            const last = Math.min(width - 1, Math.floor(((note.end ?? timeline.duration) - start) * width / span))
+            for (let x = first; x <= last; x++) cells[x] = '━'
+          }
+          tracks.push(`${String(pitch).padStart(6)} ${cells.join('')}`)
+        }
+      }
+    }
+    const height = Math.max(1, rows - lines.length - 2)
+    scroll = Math.max(0, Math.min(scroll, Math.max(0, tracks.length - height)))
+    lines.push(...tracks.slice(scroll, scroll + height))
+    let output = '\x1b[H'
+    for (let row = 1; row <= rows; row++) output += `\x1b[${row};1H\x1b[2K`
+    lines.forEach((line, row) => { if (row < rows - 1) output += `\x1b[${row + 1};1H${fit(line)}` })
+    output += `\x1b[${rows};1H${fit('r:record  s:save  Space:WAV  q:back  i:input  m:MIDI  e:export  ?:help')}`
+    process.stdout.write(output)
+  }
+  function stopPlayer() {
+    if (player) { player.kill('SIGTERM'); player = null }
+  }
+  function startRecording() {
+    if (!['ready', 'saved', 'failed'].includes(phase) || !inputs().length || captureTask) return
+    stopPlayer()
+    phase = 'starting'; status = ''; timeline = null; start = 0; scroll = 0; follow = true
+    take = join(root, `take-${new Date().toISOString().replaceAll(':', '-')}-${randomUUID()}`)
+    const input = inputs()[inputIndex].id, midi = midiChoices()[midiIndex].id
+    const intent = new AbortController()
+    captureIntent = intent
+    captureTask = (async () => {
+      try {
+        await mkdir(root, { recursive: true, mode: 0o700 })
+        // Closing during directory preparation must not begin a new recording.
+        if (closed || signal?.aborted || intent.signal.aborted) return
+        capture = record({ input, midi, directory: take, onEvent: event => {
+          dirty = true
+          switch (event.kind) {
+            case 'recording':
+              timeline = new CaptureTimeline({ ...event, schemaVersion: 1, state: 'recorded' })
+              phase = intent.signal.aborted ? 'saving' : 'recording'; break
+            case 'audio':
+              if (!timeline) throw new Error('Audio arrived before the capture clock')
+              timeline.addAudio(event); break
+            case 'midi':
+              if (!timeline) throw new Error('MIDI arrived before the capture clock')
+              timeline.addMidi(event); break
+            case 'stopped': phase = 'saving'; break
+            case 'error': status = event.message; break
+          }
+        } })
+        timeline = await capture.completion
+        phase = 'saved'; status = 'WAV and MIDI saved'
+      } catch (error) { phase = 'failed'; status = error.message }
+      finally { capture = null; captureTask = null; captureIntent = null; draw() }
+    })()
+    draw()
+  }
+  function playWave() {
+    if (player) { stopPlayer(); status = 'Stopped'; return }
+    if (phase !== 'saved' || !take) return
+    const child = spawn(process.platform === 'darwin' ? 'afplay' : 'ffplay',
+      process.platform === 'darwin' ? [join(take, 'audio.wav')] : ['-nodisp', '-autoexit', '-loglevel', 'error', join(take, 'audio.wav')],
+      { stdio: ['ignore', 'ignore', 'pipe'] })
+    player = child
+    let detail = ''
+    child.stderr.setEncoding('utf8').on('data', text => { detail += text })
+    child.once('error', error => { status = error.message; draw() })
+    players.set(child, new Promise(resolve => child.once('close', (code, signal) => {
+      if (player === child) { player = null; status = code === 0 ? 'Playback finished' : detail || `Playback ended: ${code ?? signal}`; draw() }
+      players.delete(child)
+      resolve()
+    })))
+    status = 'Playing WAV'
+  }
+  function keypress(text, key = {}) {
+    if (key.ctrl && key.name === 'c' || ['q', 'escape'].includes(key.name)) { finish(); return }
+    if (text === '?') { helpShown = !helpShown; scroll = 0; draw(); return }
+    switch (key.name) {
+      case 'r': startRecording(); return
+      case 's':
+        captureIntent?.abort()
+        if (capture) { phase = 'saving'; capture.stop() }
+        else if (captureTask) { phase = 'ready'; status = 'Recording cancelled before opening inputs'; take = null }
+        break
+      case 'i': if (!captureTask && inputs().length) inputIndex = (inputIndex + 1) % inputs().length; break
+      case 'm': if (!captureTask) midiIndex = (midiIndex + 1) % midiChoices().length; break
+      case 'space': playWave(); break
+      case 'up': scroll -= 3; break
+      case 'down': scroll += 3; break
+      case 'left': follow = false; start = Math.max(0, start - span / 2); break
+      case 'right': follow = false; start += span / 2; break
+      case 'f': follow = !follow; break
+      case 'e':
+        if (phase === 'saved' && !exportTask) {
+          exportTask = exportMidiClips(timeline, take).then(paths => { status = `${paths.length} MIDI 2.0 clips exported` }, error => { status = error.message })
+            .finally(() => { exportTask = null; draw() })
+        }
+        break
+      default:
+        let nextSpan
+        if (text === '+' || text === '=') nextSpan = span / 2
+        else if (text === '-') nextSpan = span * 2
+        else return
+        if (!(Number.isFinite(nextSpan) && nextSpan > 0)) return
+        span = nextSpan
+        // A visible column cannot be finer than a PCM frame.
+        if (timeline) span = Math.max(span, widthInFrames() / timeline.sampleRate)
+    }
+    draw()
+  }
+  const widthInFrames = () => Math.max(1, (process.stdout.columns || 80) - 9)
+  const onEnd = () => finish(), onSignal = () => finish(), onAbort = () => finish()
+  const resize = () => draw()
+  emitKeypressEvents(process.stdin)
+  process.stdin.setRawMode(true); process.stdin.resume()
+  process.stdin.on('keypress', keypress); process.stdin.on('end', onEnd)
+  process.stdout.on('resize', resize)
+  for (const name of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(name, onSignal)
+  signal?.addEventListener('abort', onAbort, { once: true })
+  if (!embedded) process.stdout.write('\x1b[?1049h\x1b[?25l\x1b[2J')
+  const timer = setInterval(() => { if (dirty) draw() }, 100)
+  try {
+    if (signal?.aborted) finish()
+    draw()
+    // Discovery is not recording. It never opens an input stream.
+    try { available = await devices({ signal: discoveryAbort.signal }) } catch (error) { if (!discoveryAbort.signal.aborted) status = error.message }
+    if (discoveryAbort.signal.aborted) return
+    if (input !== undefined) {
+      inputIndex = inputs().findIndex(device => device.id === input)
+      if (inputIndex < 0) throw new Error('Selected audio input is unavailable')
+    }
+    if (midi !== undefined) {
+      midiIndex = midiChoices().findIndex(source => source.id === midi)
+      if (midiIndex < 0) throw new Error('Selected MIDI input is unavailable')
+    }
+    if (directory) {
+      timeline = await readCapture(directory, { signal: discoveryAbort.signal })
+      phase = timeline.manifest.state === 'recorded' ? 'saved' : 'failed'
+      status = timeline.manifest.failure ?? status
+    } else phase = available ? 'ready' : 'failed'
+    draw()
+    if (signal?.aborted) finish()
+    await done
+  } catch (error) {
+    if (!discoveryAbort.signal.aborted) throw error
+  } finally {
+    closed = true
+    clearInterval(timer)
+    process.stdin.off('keypress', keypress); process.stdin.off('end', onEnd)
+    process.stdout.off('resize', resize)
+    for (const name of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.off(name, onSignal)
+    signal?.removeEventListener('abort', onAbort)
+    captureIntent?.abort()
+    capture?.stop(); stopPlayer()
+    for (const child of players.keys()) child.kill('SIGTERM')
+    await Promise.allSettled([captureTask, ...players.values(), exportTask])
+    if (!embedded) {
+      process.stdout.write('\x1b[?25h\x1b[?1049l')
+      process.stdin.setRawMode(wasRaw ?? false); process.stdin.pause()
+    }
+  }
+}

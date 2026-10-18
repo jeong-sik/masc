@@ -44,10 +44,11 @@ type providers = Web_search_provider.t * Web_search_provider.t list
 
 type change =
   | Set_searxng_url of string
-      (** An http or https URL with a host, refused as {!Section_invalid}
-          otherwise. The loader does not look at the scheme, and the reader
-          refuses any other on every search, so a typo written here would be a
-          provider that reads as configured and fails each call. *)
+      (** An http or https URL with a host and no userinfo credentials, refused
+          as {!Section_invalid} otherwise. The loader does not look at the
+          scheme, and the reader refuses any other on every search, so a typo
+          written here would be a provider that reads as configured and fails
+          each call. *)
   | Set_provider of Web_search_provider.t
       (** The provider tried first. The others follow. *)
   | Set_provider_order of providers
@@ -64,6 +65,12 @@ type change =
 
 val change_key : change -> key
 (** The key a change sets or removes. *)
+
+val display_searxng_url : string -> string
+(** [display_searxng_url url] returns [url] with any authority userinfo
+    ([user:password@] or [user@]) replaced by [[REDACTED]@], so printing a
+    hand-edited [runtime.toml] or a refusal message never echoes embedded
+    credentials (#43143). *)
 
 type settings =
   { searxng_url : string option

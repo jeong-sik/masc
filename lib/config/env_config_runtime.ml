@@ -358,11 +358,16 @@ module Tools = struct
         else normalized
       | None -> Masc_network_defaults.searxng_default_url
     in
-    match Uri.scheme (Uri.of_string url) |> Option.map String.lowercase_ascii with
-    | Some ("http" | "https") -> Ok url
-    | Some _ | None ->
+    let uri = Uri.of_string url in
+    match Uri.scheme uri |> Option.map String.lowercase_ascii, Uri.userinfo uri with
+    | Some ("http" | "https"), None -> Ok url
+    | Some ("http" | "https"), Some _ ->
+      Error "MASC_SEARXNG_URL must not contain userinfo credentials"
+    | (Some _ | None), _ ->
       Error
-        (Printf.sprintf "MASC_SEARXNG_URL must use http or https scheme (got: %s)" url)
+        (Printf.sprintf
+           "MASC_SEARXNG_URL must use http or https scheme (got: %s)"
+           (Uri.with_userinfo uri None |> Uri.to_string))
 
 end
 

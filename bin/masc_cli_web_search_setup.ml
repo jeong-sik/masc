@@ -72,7 +72,7 @@ let show ~runtime_config_path (observation : Web_search_setup.observation) =
   List.iter
     (fun (key, value) -> Printf.printf "  %-15s %s\n" (Web_search_setup.key_name key) value)
     Web_search_setup.
-      [ Searxng_url, text settings.searxng_url
+      [ Searxng_url, text (Option.map Web_search_setup.display_searxng_url settings.searxng_url)
       ; Provider, text settings.provider
       ; Provider_order, text settings.provider_order
       ; Fallbacks, text settings.fallbacks

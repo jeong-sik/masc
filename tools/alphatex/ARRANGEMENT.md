@@ -4,8 +4,9 @@ The terminal arrangement editor opens with `masc-alphatex --arrange`, the score
 view's `a` key, or `--project song.json` for a saved arrangement. It arranges
 retained WAV/MIDI sources independently of the phrase piano roll. WAV regions have
 a streamed multi-voice transport, and MIDI regions have an expressive source-state
-transport. Shared WAV/MIDI clock alignment and overdub integration remain
-subsequent work; source and phrase editors retain their separate transports.
+transport. The [native shared clock](ARRANGEMENT-CLOCK.md) accepts combined plans; its
+terminal route and overdub integration remain subsequent work. Source and phrase
+editors retain their separate transports.
 
 ## Terminal workflow
 

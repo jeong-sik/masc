@@ -10,7 +10,7 @@ struct AudioFailure: Error, CustomStringConvertible {
     let description: String
     init(_ value: String) { description = value }
 }
-func checked(_ value: OSStatus, _ operation: String) throws {
+func audioChecked(_ value: OSStatus, _ operation: String) throws {
     if value != noErr { throw AudioFailure("\(operation): OSStatus \(value)") }
 }
 func address(_ selector: AudioObjectPropertySelector, _ scope: AudioObjectPropertyScope = kAudioObjectPropertyScopeGlobal) -> AudioObjectPropertyAddress {
@@ -18,22 +18,22 @@ func address(_ selector: AudioObjectPropertySelector, _ scope: AudioObjectProper
 }
 func deviceNumber(_ object: AudioObjectID, _ selector: AudioObjectPropertySelector) throws -> UInt32 {
     var key = address(selector), value: UInt32 = 0, size = UInt32(MemoryLayout<UInt32>.size)
-    try checked(AudioObjectGetPropertyData(object, &key, 0, nil, &size, &value), "read selected device property")
+    try audioChecked(AudioObjectGetPropertyData(object, &key, 0, nil, &size, &value), "read selected device property")
     return value
 }
 func deviceString(_ object: AudioObjectID, _ selector: AudioObjectPropertySelector) throws -> String {
     var key = address(selector), size = UInt32(MemoryLayout<UnsafeRawPointer?>.size), value: UnsafeRawPointer?
-    try checked(AudioObjectGetPropertyData(object, &key, 0, nil, &size, &value), "read selected device identity")
+    try audioChecked(AudioObjectGetPropertyData(object, &key, 0, nil, &size, &value), "read selected device identity")
     guard let value else { throw AudioFailure("selected device identity is unavailable") }
     return Unmanaged<CFString>.fromOpaque(value).takeRetainedValue() as String
 }
 func outputChannels(_ object: AudioObjectID) throws -> Int {
     var key = address(kAudioDevicePropertyStreamConfiguration, kAudioObjectPropertyScopeOutput), size: UInt32 = 0
-    try checked(AudioObjectGetPropertyDataSize(object, &key, 0, nil, &size), "read output configuration size")
+    try audioChecked(AudioObjectGetPropertyDataSize(object, &key, 0, nil, &size), "read output configuration size")
     guard size >= MemoryLayout<AudioBufferList>.size else { throw AudioFailure("output configuration is unavailable") }
     let memory = UnsafeMutableRawPointer.allocate(byteCount: Int(size), alignment: MemoryLayout<AudioBufferList>.alignment)
     defer { memory.deallocate() }
-    try checked(AudioObjectGetPropertyData(object, &key, 0, nil, &size, memory), "read output configuration")
+    try audioChecked(AudioObjectGetPropertyData(object, &key, 0, nil, &size, memory), "read output configuration")
     return UnsafeMutableAudioBufferListPointer(memory.assumingMemoryBound(to: AudioBufferList.self)).reduce(0) { $0 + Int($1.mNumberChannels) }
 }
 struct OutputDevice {
@@ -48,7 +48,7 @@ struct OutputDevice {
             var key = address(kAudioHardwarePropertyTranslateUIDToDevice), uid = requested as CFString
             var size = UInt32(MemoryLayout<AudioObjectID>.size)
             try withUnsafePointer(to: &uid) { pointer in
-                try checked(AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &key,
+                try audioChecked(AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &key,
                     UInt32(MemoryLayout<CFString>.size), pointer, &size, &object), "resolve selected output UID")
             }
         } else { object = try deviceNumber(AudioObjectID(kAudioObjectSystemObject), kAudioHardwarePropertyDefaultOutputDevice) }
@@ -60,7 +60,7 @@ struct OutputDevice {
         guard channels > 0, requested == nil || requested == uid else { throw AudioFailure("selected device has no matching audio output") }
     }
 }
-func emit(_ value: [String: Any]) throws {
+func audioEmit(_ value: [String: Any]) throws {
     var data = try JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]); data.append(10)
     try FileHandle.standardOutput.write(contentsOf: data)
 }
@@ -101,8 +101,11 @@ struct Plan: Decodable {
     let duration: Double
     let assets: [Asset]
     let regions: [Region]
+    let midi: Timeline?
+    var mixed: Bool { kind == "mixed-arrangement" }
     func validate() throws {
-        guard schemaVersion == 1, kind == "wave-arrangement", duration.isFinite, duration > 0,
+        guard (schemaVersion == 1 && kind == "wave-arrangement" && midi == nil
+               || schemaVersion == 2 && mixed && midi?.schemaVersion == 3), duration.isFinite, duration > 0,
               !regions.isEmpty, Set(assets.map(\.id)).count == assets.count, Set(regions.map(\.id)).count == regions.count else { throw AudioFailure("invalid WAV arrangement plan") }
         for asset in assets {
             guard !asset.id.isEmpty, !asset.path.isEmpty, asset.sampleRate.isFinite, asset.sampleRate > 0,
@@ -120,7 +123,13 @@ struct Plan: Decodable {
         }
         // Float arithmetic may differ by a final ULP, never by a source sample.
         let sample = assets.map { 1 / $0.sampleRate }.min() ?? 0
-        guard abs(end - duration) < sample else { throw AudioFailure("duration does not match region sources") }
+        if let midi {
+            try midi.validate()
+            let midiEnd = midi.regions.map(\.end).max() ?? 0
+            guard midi.duration == duration, abs(max(end, midiEnd) - duration) < sample else { throw AudioFailure("mixed duration does not match its source regions") }
+        } else {
+            guard abs(end - duration) < sample else { throw AudioFailure("duration does not match region sources") }
+        }
     }
 }
 final class Voice {
@@ -222,7 +231,7 @@ final class Voice {
     }
     func stop() { queue.sync { generation &+= 1 }; player.stop() }
 }
-enum Command: Decodable {
+enum AudioCommand: Decodable {
     case pause, resume, seek(Double), status, stop
     enum Keys: String, CodingKey { case kind, seconds }
     enum Kind: String, Decodable { case pause, resume, seek, status, stop }
@@ -254,6 +263,8 @@ final class ArrangementTransport {
     var listeners: [(AudioObjectID, AudioObjectPropertyAddress, AudioObjectPropertyListenerBlock)] = []
     var signals: [DispatchSourceSignal] = []
     var configuration: NSObjectProtocol?
+    var midi: MidiTransport?
+    var midiEnded = false
     init(plan: Plan, output: String?) throws {
         try plan.validate(); self.plan = plan; device = try OutputDevice(output)
         try engine.outputNode.auAudioUnit.setDeviceID(device.object)
@@ -280,6 +291,18 @@ final class ArrangementTransport {
             voices.append(voice); engine.attach(voice.player)
             engine.connect(voice.player, to: engine.mainMixerNode, format: voice.file.processingFormat)
         }
+        if let timeline = plan.midi {
+            guard let uid = timeline.bindings.first?.destination else { throw AudioFailure("missing mixed MIDI destination") }
+            let transport = try MidiTransport(timeline: timeline, uid: uid, coordinated: true)
+            midi = transport; try transport.prepare()
+            transport.onCoordinatedFailure = { [weak self] reason, error in self?.finish(reason: reason, error: error) }
+            transport.onCoordinatedEnd = { [weak self] in self?.midiReachedEnd() }
+        }
+    }
+    func midiReachedEnd() {
+        guard state != .stopped else { return }
+        midiEnded = true
+        if active.isEmpty { finish(reason: "finished") }
     }
     func checkOutput() throws {
         let alive = try deviceNumber(device.object, kAudioDevicePropertyDeviceIsAlive)
@@ -292,11 +315,19 @@ final class ArrangementTransport {
         return min(plan.duration, position + AVAudioTime.seconds(forHostTime: time.hostTime - anchor))
     }
     func snapshot(_ kind: String) -> [String: Any] {
-        ["kind": kind, "currentTime": currentTime(), "duration": plan.duration, "device": device.json,
-         "loop": false, "format": "wave-arrangement", "streamBufferFrames": capacity, "regions": voices.count]
+        var value: [String: Any] = ["kind": kind, "currentTime": currentTime(), "duration": plan.duration, "device": device.json,
+         "loop": false, "format": plan.kind, "streamBufferFrames": capacity, "regions": voices.count]
+        if let midi {
+            value["bindings"] = midi.snapshot(kind)["bindings"]
+            value["clock"] = ["kind": "mach-host-time", "anchor": String(anchor), "position": position,
+                              "renderQuantum": renderQuantum, "sampleRate": engine.outputNode.outputFormat(forBus: 0).sampleRate,
+                              "presentationLatency": engine.outputNode.presentationLatency,
+                              "midiAnchorNanoseconds": String(midi.anchor), "midiPosition": midi.position()]
+        }
+        return value
     }
     func publish() {
-        do { try emit(snapshot(state == .playing ? "playing" : "paused")) }
+        do { try audioEmit(snapshot(state == .playing ? "playing" : "paused")) }
         catch { finish(reason: "event-output-failed", error: error, publish: false) }
     }
     func stopVoices() { generation &+= 1; for voice in voices { voice.stop() }; active.removeAll() }
@@ -304,12 +335,13 @@ final class ArrangementTransport {
         guard state != .stopped else { return }
         if seconds >= plan.duration { position = plan.duration; finish(reason: "finished"); return }
         engine.pause(); stopVoices(); position = seconds
+        try midi?.stageCoordinated(at: seconds); midiEnded = false
         let expected = generation
         for voice in voices {
             let admitted = try voice.prepare(from: seconds, finished: { [weak self] in
                 guard let self, self.generation == expected, self.state == .playing else { return }
                 self.active.remove(voice.region.id)
-                if self.active.isEmpty { self.finish(reason: "finished") }
+                if self.active.isEmpty && (self.midi == nil || self.midiEnded) { self.finish(reason: "finished") }
             }, failed: { [weak self] error in
                 guard let self, self.generation == expected, self.state != .stopped else { return }
                 self.finish(reason: "source-read-failed", error: error)
@@ -321,7 +353,7 @@ final class ArrangementTransport {
     }
     func run() throws {
         guard state != .stopped else { return }
-        guard position < plan.duration, !active.isEmpty else { position = plan.duration; finish(reason: "finished"); return }
+        guard position < plan.duration, !active.isEmpty || midi != nil else { position = plan.duration; finish(reason: "finished"); return }
         try checkOutput(); engine.prepare(); try engine.start()
         let rate = engine.outputNode.outputFormat(forBus: 0).sampleRate, latency = engine.outputNode.presentationLatency
         guard rate.isFinite, rate > 0, latency.isFinite, latency >= 0 else { throw AudioFailure("output clock is unavailable") }
@@ -335,6 +367,7 @@ final class ArrangementTransport {
             let when = try futureHost(max(0, voice.region.startSeconds - position), from: anchor)
             voice.player.play(at: AVAudioTime(hostTime: when))
         }
+        if let midi { try midi.runCoordinated(anchorNanoseconds: AudioConvertHostTimeToNanos(anchor)) }
         guard mach_absolute_time() < anchor else { throw AudioFailure("audio graph missed its common start deadline") }
         state = .playing; try checkOutput()
     }
@@ -344,7 +377,7 @@ final class ArrangementTransport {
             guard let self, self.state != .stopped else { return }
             do { try self.checkOutput() } catch { self.finish(reason: "output-unavailable", error: error) }
         }
-        try checked(AudioObjectAddPropertyListenerBlock(object, &key, .main, listener), "observe selected output")
+        try audioChecked(AudioObjectAddPropertyListenerBlock(object, &key, .main, listener), "observe selected output")
         listeners.append((object, key, listener))
     }
     func start() throws {
@@ -367,11 +400,12 @@ final class ArrangementTransport {
         guard state != .stopped else { return }
         do {
             try checkOutput()
-            switch try JSONDecoder().decode(Command.self, from: Data(line.utf8)) {
+            switch try JSONDecoder().decode(AudioCommand.self, from: Data(line.utf8)) {
             case .pause: if state == .playing {
                 let time = currentTime()
                 if time >= plan.duration { position = plan.duration; finish(reason: "finished"); return }
                 engine.pause(); stopVoices(); position = time; state = .paused
+                try midi?.stageCoordinated(at: time)
             }
             case .resume: if state == .paused { try schedule(from: position, playing: true) }
             case .seek(let seconds):
@@ -386,16 +420,18 @@ final class ArrangementTransport {
     }
     func finish(reason: String, error: Error? = nil, publish: Bool = true) {
         guard state != .stopped else { return }
-        var event = snapshot("stopped")
+        var event = snapshot("stopped"), finalError = error
         if reason == "finished" { event["currentTime"] = plan.duration }
         state = .stopped; stopVoices(); engine.stop()
+        midi?.finish(reason: reason, error: finalError, publish: false)
+        finalError = finalError ?? midi?.terminalFailure
         if let configuration { NotificationCenter.default.removeObserver(configuration) }; configuration = nil
         for (object, original, listener) in listeners { var key = original; AudioObjectRemovePropertyListenerBlock(object, &key, .main, listener) }
         listeners.removeAll(); for source in signals { source.cancel() }; signals.removeAll()
-        var failure = error != nil; event["reason"] = reason; event["success"] = !failure
-        if let error { report(String(describing: error)) }
+        var failure = finalError != nil; event["reason"] = reason; event["success"] = !failure
+        if let finalError { report(String(describing: finalError)) }
         if publish {
-            do { if let error { try emit(["kind": "error", "message": String(describing: error)]) }; try emit(event) }
+            do { if let finalError { try audioEmit(["kind": "error", "message": String(describing: finalError)]) }; try audioEmit(event) }
             catch { failure = true; report("audio event output failed: \(error)") }
         }
         exit(failure ? 1 : 0)
@@ -419,6 +455,8 @@ struct Options {
         if let output, output.isEmpty { throw AudioFailure("missing output UID") }
     }
 }
+@main enum ArrangementCommandLine {
+static func main() {
 _ = signal(SIGPIPE, SIG_IGN)
 do {
     let options = try Options()
@@ -432,6 +470,9 @@ do {
     withExtendedLifetime(transport) { RunLoop.main.run() }
 } catch {
     report(String(describing: error))
-    do { try emit(["kind": "error", "message": String(describing: error)]) } catch { report("audio event output failed: \(error)") }
+    do { try audioEmit(["kind": "error", "message": String(describing: error)]) } catch { report("audio event output failed: \(error)") }
     exit(1)
+}
+
+}
 }

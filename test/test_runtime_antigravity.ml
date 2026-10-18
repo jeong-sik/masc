@@ -78,7 +78,8 @@ type fixture_stdin =
   | Leave_unread
 
 (* [line_delays]: seconds the fixture sleeps before printing the line at that
-   index, so one gap can be placed inside or after a chosen step. *)
+   index, so one gap can be placed inside or after a chosen step.
+   [line_gates] waits for a callback's marker before starting that gap. *)
 let fixture_script
     ?(require_resume = false)
     ?required_home
@@ -87,6 +88,7 @@ let fixture_script
     ?(stdin = Read_to_end)
     ?line_delay_s
     ?(line_delays = [])
+    ?(line_gates = [])
     ?pipe_holder_s
     ?exit_delay_s
     ?(stderr_line = "")
@@ -136,6 +138,12 @@ let fixture_script
   List.iteri
     (fun index line ->
        Option.iter
+         (fun path ->
+            output_string output
+              (Printf.sprintf "while [ ! -f %s ]; do sleep 0.01; done\n"
+                 (shell_quote path)))
+         (List.assoc_opt index line_gates);
+       Option.iter
          (fun seconds ->
             output_string output (Printf.sprintf "sleep %.3f\n" seconds))
          line_delay_s;
@@ -166,7 +174,7 @@ let fixture_script
 ;;
 
 let with_fixture ?require_resume ?required_home ?sleep_s ?capture_prompt ?stdin ?line_delay_s
-    ?line_delays ?pipe_holder_s ?exit_delay_s ?stderr_line ?exit_code lines f =
+    ?line_delays ?line_gates ?pipe_holder_s ?exit_delay_s ?stderr_line ?exit_code lines f =
   let path =
     fixture_script
       ?require_resume
@@ -176,6 +184,7 @@ let with_fixture ?require_resume ?required_home ?sleep_s ?capture_prompt ?stdin 
       ?stdin
       ?line_delay_s
       ?line_delays
+      ?line_gates
       ?pipe_holder_s
       ?exit_delay_s
       ?stderr_line
@@ -1635,20 +1644,33 @@ let test_idle_window_rearms_when_the_tool_step_ends () =
 ;;
 
 let test_no_deadline_starts_after_init () =
-  with_fixture
-    ~line_delays:[ 1, 0.2 ]
-    [ init (); result () ]
-    (fun path ->
-       match
-         run_fixture
-           ~timeout_s:0.05
-           ~admission_timeout_s:window_outlasting_process_start_s
-           ~no_turn_deadline:true
-           path
-       with
-       | Ok turn ->
-         check string "unbounded result" "MASC_ANTIGRAVITY_OK\n" turn.text
-       | Error error -> fail (Runtime_antigravity.error_to_string error))
+  let gate = Filename.temp_file "masc-antigravity-init-" ".ready" in
+  Sys.remove gate;
+  Fun.protect
+    ~finally:(fun () -> if Sys.file_exists gate then Sys.remove gate)
+    (fun () ->
+       (* The first-event FD probe precedes the init callback. Start the
+          silence only after that callback, so probing cannot consume the
+          interval that must outlast admission. Keeping Awaiting_admission
+          after init would then time out before the result, even with no
+          model-turn deadline. *)
+       with_fixture
+         ~line_gates:[ 1, gate ]
+         ~line_delays:[ 1, window_outlasting_process_start_s +. 0.2 ]
+         [ init (); result () ]
+         (fun path ->
+            match
+              run_fixture
+                ~admission_timeout_s:window_outlasting_process_start_s
+                ~no_turn_deadline:true
+                ~on_conversation_ready:(fun _ ->
+                  let output = open_out_bin gate in
+                  close_out output)
+                path
+            with
+            | Ok turn ->
+              check string "unbounded result" "MASC_ANTIGRAVITY_OK\n" turn.text
+            | Error error -> fail (Runtime_antigravity.error_to_string error)))
 ;;
 
 let test_admission_is_process_free () =

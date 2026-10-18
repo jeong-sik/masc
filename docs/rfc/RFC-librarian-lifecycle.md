@@ -365,6 +365,8 @@ flowchart TD
 
   스냅숏의 끝은 구멍을 제외한 표현 범위다. append 때 유효한 이전 구멍을 새 working state와 함께 이어 싣고, summarized 요청은 그 원문 좌표와 원인을 working state와 함께 보낸다. purge는 이 스냅숏의 앞부분을 원문 그대로 보존하며, 구멍이 있는 스냅숏이 원문과 맞지 않으면 없는 것으로 취급해 지우지 않고 거절한다. 구멍이 있는 스냅숏 자체는 durable 소비자의 전부 읽음 증명이 아니다.
 
+  Memory WAL의 atom·공식 턴 영수증 ID도 스키마 2이며, 비어 있는 경우까지 `unread_messages`를 필수로 싣는다. atom 기록은 해당 trace·이력 세대의 선택 구간 안에 있어야 하고, 공식 턴 기록은 선택된 경계 줄과 턴 ID에 있어야 한다. 누락 기록도 원래의 `Prepared → snapshot → Committed` 영수증 전체에 포함되므로 snapshot 해시와 revision으로 함께 복구된다. 사실이 바뀌지 않는 Memory 커밋에서도 같은 영수증을 남긴다. 기존의 전부 읽음 조회는 누락 목록이 비어 있을 때만 영수증을 돌려주며, 별도의 coverage 조회는 누락 기록까지 돌려준다. 이 기록은 해당 커밋 구간의 증거이며, 나중 구간으로 위치를 옮기는 소비자는 이전 구멍도 별도로 보존해야 한다.
+
   이 저장·요청 계약만으로 건너뛰기를 켜지 않는다. Memory 영수증과 진행 위치의 원자적 복구, absorbed 요청, 대시보드·TUI, TLA 불변식이 같은 뜻을 갖춘 뒤 바닥의 실제 거절을 unread 기록에 연결한다. 전체 구현은 #37850에서 추적한다.
 
   이 사다리가 필요한 경우는 둘뿐이다. 자를 자리가 없는 구간과, 스냅숏을 atom 0 부터 다시 쓰는 회차다. 뒤엣것은 흔하지 않다. #37751 뒤로 purge 는 이 이력에 맞는 연속성 스냅숏이 덮은 앞부분을 바이트 그대로 두므로 `Librarian_continuity_snapshot` 의 `prefix_sha256` 이 살아남는다(`keeper_checkpoint_purge.ml` 의 `fitting_continuity` 갈래, `test_a_fitting_working_state_keeps_its_prefix` 가 고정). 0 부터 다시 쓰게 되는 길은 그 규칙 전에 지워진 이력(2026-09-22 goo-yang-bong 이 그것이다), 이미 이력과 맞지 않던 스냅숏, 이력 세대가 실제로 바뀌는 경우다. 새 도구를 만들지 않는다.

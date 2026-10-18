@@ -1667,7 +1667,8 @@ let test_purge_plan_removes_memory_sidecars () =
 ;;
 
 let durable_range_id : Current.durable_range_id =
-  { receipt_scope = "receipt-scope-a"
+  { unread_messages = []
+  ; receipt_scope = "receipt-scope-a"
   ; trace_id = "trace"
   ; history_start_boundary_line = 1
   ; start_atom = 1
@@ -1679,7 +1680,8 @@ let durable_range_id : Current.durable_range_id =
 ;;
 
 let official_range_id : Current.official_range_id =
-  { receipt_scope = durable_range_id.receipt_scope
+  { unread_messages = []
+  ; receipt_scope = durable_range_id.receipt_scope
   ; after_boundary_line = 2
   ; turns = [ 3, Ids.Turn_ref.make ~trace_id:"official" ~absolute_turn:1
             ; 5, Ids.Turn_ref.make ~trace_id:"official" ~absolute_turn:2 ]
@@ -1717,6 +1719,129 @@ let map_field key f = function
   | _ -> fail "expected object"
 ;;
 
+let unread_receipt_fixture () =
+  let module H = Masc.Keeper_librarian_unread in
+  let text role body = Agent_core.Types.make_message ~role [Agent_core.Types.Text body] in
+  let messages = [text Agent_core.Types.User "Read prefix"; text Agent_core.Types.User "Unread oversized source"] in
+  let atom_hole = H.for_atom ~trace_id:durable_range_id.trace_id
+    ~history_start_boundary_line:durable_range_id.history_start_boundary_line
+    ~atom:1 ~message_in_atom:0 ~messages
+    ~reasons:[Masc.Keeper_librarian_input_refusal.Request_body_refused] |> require_ok in
+  let end_digest = Runtime_model_input_tail_window.atom_opening_digest messages 1
+    |> Option.get in
+  let atom = {durable_range_id with last_atom_digest=end_digest;unread_messages=[atom_hole]} in
+  let line, turn_ref = List.hd official_range_id.turns in
+  let official_messages = [text Agent_core.Types.User "Official request";
+    text Agent_core.Types.Assistant "Unread official answer"] in
+  let official_hole = H.for_official_turn ~turn_ref ~boundary_line:line
+    ~message_in_turn:1 ~messages:official_messages ~reasons:atom_hole.reasons |> require_ok in
+  atom, {official_range_id with unread_messages=[official_hole]}
+;;
+
+let test_unread_receipts_preserve_coverage_without_fully_read_authority () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let atom, official = unread_receipt_fixture () in
+  let read_atom () = Current.committed_durable_coverage ~keepers_dir ~keeper_id:"keeper"
+    ~receipt_scope:atom.receipt_scope |> require_ok in
+  let read_official () = Current.committed_official_coverage ~keepers_dir ~keeper_id:"keeper"
+    ~receipt_scope:official.receipt_scope |> require_ok in
+  let check_coverage () =
+    check bool "atom coverage retains exact unread source and causes" true (read_atom () = Some atom);
+    check bool "official coverage retains exact unread source and causes" true (read_official () = Some official);
+    check bool "hole-bearing atom receipt cannot prove fully read" true
+      (Current.committed_durable_range ~keepers_dir ~keeper_id:"keeper"
+        ~receipt_scope:atom.receipt_scope |> require_ok = None);
+    check bool "hole-bearing official receipt cannot prove fully read" true
+      (Current.committed_official_range ~keepers_dir ~keeper_id:"keeper"
+        ~receipt_scope:official.receipt_scope |> require_ok = None) in
+  let first = apply_disposition ~keepers_dir ~durable_range_id:atom ~official_range_id:official () |> require_ok in
+  check_coverage ();
+  (* Model the interruption after the exact snapshot landed, before the
+     Prepared markers were promoted. Recovery must preserve both identities. *)
+  rewrite_receipts ~keepers_dir (map_receipts (map_field "state" (fun _ -> `String "prepared")));
+  check_coverage ();
+  let path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+  let before = Fs_compat.load_file path in
+  let unchanged = apply_disposition ~keepers_dir ~durable_range_id:atom ~official_range_id:official () |> require_ok in
+  check int "no-change commit retains stored Memory revision" first.revision unchanged.revision;
+  check string "no-change commit retains snapshot bytes" before (Fs_compat.load_file path);
+  check_coverage ();
+  ignore (apply_disposition ~keepers_dir ~new_claims:[fact ~claim:"A later independent Memory claim" ()] () |> require_ok);
+  check_coverage ();
+  let other = {durable_range_id with receipt_scope="other-reader"} in
+  ignore (apply_disposition ~keepers_dir ~durable_range_id:other () |> require_ok);
+  check_coverage ();
+  check bool "another reader can still certify its wholly read interval" true
+    (Current.committed_durable_range ~keepers_dir ~keeper_id:"keeper"
+      ~receipt_scope:other.receipt_scope |> require_ok = Some other)
+;;
+
+let test_unread_receipt_schema_and_selected_source_validation () =
+  let atom, official = unread_receipt_fixture () in
+  List.iter (fun key ->
+    let remove = function `Assoc fields -> `Assoc (List.remove_assoc key fields)
+      | _ -> fail "receipt identity object" in
+    check bool "atom schema/unread list must be explicit" true
+      (Current.durable_range_id_of_json (remove (Current.durable_range_id_to_json atom)) |> Result.is_error);
+    check bool "official schema/unread list must be explicit" true
+      (Current.official_range_id_of_json (remove (Current.official_range_id_to_json official)) |> Result.is_error))
+    ["schema_version";"unread_messages"];
+  List.iter (fun version ->
+    let wrong = map_field "schema_version" (fun _ -> `Int version) in
+    check bool "other atom schema cannot become accounted coverage" true
+      (Current.durable_range_id_of_json (wrong (Current.durable_range_id_to_json atom)) |> Result.is_error);
+    check bool "other official schema cannot become accounted coverage" true
+      (Current.official_range_id_of_json (wrong (Current.official_range_id_to_json official)) |> Result.is_error)) [1;3];
+  List.iter (fun causes ->
+    let wrong = map_field "unread_messages" (function
+      | `List holes -> `List (List.map (map_field "reasons" (fun _ -> causes)) holes)
+      | _ -> fail "hole list") in
+    check bool "unclassified cause cannot become durable atom omission" true
+      (Current.durable_range_id_of_json (wrong (Current.durable_range_id_to_json atom)) |> Result.is_error))
+    [`List [];`List [`String "invalid_request"]];
+  let invalid_atoms = [
+    {atom with trace_id="another-history"};
+    {atom with history_start_boundary_line=2};
+    {atom with start_atom=0;end_atom=1};
+    {atom with start_atom=2;end_atom=3};
+    {atom with unread_messages=official.unread_messages};
+    {atom with unread_messages=atom.unread_messages @ atom.unread_messages}] in
+  List.iter (fun invalid -> with_temp_keepers @@ fun keepers_dir ->
+    match apply_disposition ~keepers_dir ~durable_range_id:invalid
+      ~new_claims:[fact ~claim:"must not persist" ()] () with
+    | Error _ -> check bool "invalid atom identity cannot write Memory" false
+        (Sys.file_exists (Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"))
+    | Ok _ -> fail "invalid unread atom receipt committed") invalid_atoms;
+  let invalid_official = [
+    {official with turns=[5, Ids.Turn_ref.make ~trace_id:"official" ~absolute_turn:2]};
+    {official with turns=[3, Ids.Turn_ref.make ~trace_id:"official" ~absolute_turn:2]};
+    {official with unread_messages=atom.unread_messages}] in
+  List.iter (fun invalid -> with_temp_keepers @@ fun keepers_dir ->
+    match apply_disposition ~keepers_dir ~official_range_id:invalid
+      ~new_claims:[fact ~claim:"must not persist" ()] () with
+    | Error _ -> check bool "invalid official identity cannot write Memory" false
+        (Sys.file_exists (Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"))
+    | Ok _ -> fail "unselected unread official receipt committed") invalid_official
+;;
+
+let test_unread_prepared_receipts_need_the_exact_snapshot () =
+  List.iter (fun missing -> with_temp_keepers @@ fun keepers_dir ->
+    let atom, official = unread_receipt_fixture () in
+    ignore (apply_disposition ~keepers_dir ~durable_range_id:atom ~official_range_id:official () |> require_ok);
+    rewrite_receipts ~keepers_dir (map_receipts (map_field "state" (fun _ -> `String "prepared")));
+    let path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+    (if missing then Sys.remove path else
+      let changed = Yojson.Safe.from_string (Fs_compat.load_file path)
+        |> map_field "updated_at" (fun _ -> `Float 201.) in
+      Fs_compat.save_file path (Yojson.Safe.to_string changed));
+    check bool "unconfirmed atom coverage cannot advance recovery" true
+      (Current.committed_durable_coverage ~keepers_dir ~keeper_id:"keeper"
+        ~receipt_scope:atom.receipt_scope |> require_ok = None);
+    check bool "unconfirmed official coverage cannot advance recovery" true
+      (Current.committed_official_coverage ~keepers_dir ~keeper_id:"keeper"
+        ~receipt_scope:official.receipt_scope |> require_ok = None)) [true;false]
+;;
+
 let test_atom_receipt_wire_and_exclusive_identity () =
   with_temp_keepers @@ fun keepers_dir ->
   ignore (apply_disposition ~keepers_dir ~durable_range_id () |> require_ok);
@@ -1726,7 +1851,9 @@ let test_atom_receipt_wire_and_exclusive_identity () =
     `Assoc [ "receipts", `List [
       `Assoc [ "state", `String "committed"
       ; "range_id", `Assoc
-          [ "receipt_scope", `String "receipt-scope-a"
+          [ "schema_version", `Int 2
+          ; "unread_messages", `List []
+          ; "receipt_scope", `String "receipt-scope-a"
           ; "trace_id", `String "trace"
           ; "history_start_boundary_line", `Int 1
           ; "start_atom", `Int 1; "end_atom", `Int 2
@@ -1739,14 +1866,13 @@ let test_atom_receipt_wire_and_exclusive_identity () =
   let path = Current.durable_range_receipt_path ~keepers_dir ~keeper_id:"keeper" in
   check string "atom wire remains exact" (Yojson.Safe.to_string expected)
     (String.trim (Fs_compat.load_file path));
-  (* The frozen version-1 bytes must still be accepted after a writer change. *)
   Fs_compat.save_file path (Yojson.Safe.to_string expected);
   (match Current.committed_durable_range
            ~keepers_dir ~keeper_id:"keeper"
            ~receipt_scope:durable_range_id.receipt_scope with
-   | Ok (Some range) -> check bool "historical atom receipt" true
+   | Ok (Some range) -> check bool "exact atom receipt" true
                           (range = durable_range_id)
-   | Ok None -> fail "historical atom receipt missing"
+   | Ok None -> fail "exact atom receipt missing"
    | Error detail -> fail detail);
   (* An entry with both or neither identity reads as absent: never honored,
      and never failing the whole file. Failing the file stopped every pass
@@ -1776,7 +1902,9 @@ let test_official_receipt_survives_other_commits () =
     `Assoc [ "receipts", `List [
       `Assoc [ "state", `String "committed"
       ; "official_range_id", `Assoc
-          [ "receipt_scope", `String "receipt-scope-a"
+          [ "schema_version", `Int 2
+          ; "unread_messages", `List []
+          ; "receipt_scope", `String "receipt-scope-a"
           ; "after_boundary_line", `Int 2
           ; "turns", `List
               (List.map (fun (line, turn_ref) ->
@@ -4405,6 +4533,12 @@ let () =
             "range receipt survives retract and replace"
             `Quick
             test_committed_range_receipt_survives_retract_and_replace
+        ; test_case "unread receipts retain coverage without fully-read authority" `Quick
+            test_unread_receipts_preserve_coverage_without_fully_read_authority
+        ; test_case "unread receipt schema and selected sources are exact" `Quick
+            test_unread_receipt_schema_and_selected_source_validation
+        ; test_case "unread prepared receipts need the exact snapshot" `Quick
+            test_unread_prepared_receipts_need_the_exact_snapshot
         ; test_case "atom wire and exclusive receipt identity" `Quick
             test_atom_receipt_wire_and_exclusive_identity
         ; test_case "official receipt survives other commits" `Quick

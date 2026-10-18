@@ -259,6 +259,7 @@ let memory_range_id ~config ~keeper_name prepared =
     { Keeper_memory_os_current.receipt_scope = path ~config ~keeper_name;
       trace_id = prepared.trace_id;
       history_start_boundary_line = prepared.range.history_start_boundary_line;
+      unread_messages = [];
       start_atom = prepared.start_atom; end_atom = prepared.end_atom; last_atom_digest;
       end_boundary_line = cut.cut_line;
       boundary_lines_seen = List.fold_left (fun count (_, read) ->

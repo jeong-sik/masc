@@ -552,9 +552,9 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
               split. Infer the continuation without publishing partial state;
               the original prepared range remains the sole commit boundary. *)
            (match memory_committed, input.messages with
-            | true, _ :: _ :: _ -> message_floor ~selected ~input
+            | true, _ :: _ -> message_floor ~selected ~input
             | false, _ :: _ -> memory_message_floor ~selected ~input
-            | false, [] | true, ([] | [_]) ->
+            | false, [] | true, [] ->
               report O.Not_committed O.Indivisible_unit_uncommitted
                 (Printf.sprintf "one unit remains and the pass did not commit; cause=%s" (cause_detail ()))))
       | Some observed ->
@@ -573,8 +573,8 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
             | None -> memory_message_floor ~selected ~input)
          | Ok None ->
            (match input.messages with
-            | _ :: _ :: _ -> message_floor ~selected ~input
-            | [] | [_] -> report O.Capacity_refused O.Observed_capacity_unfit
+            | _ :: _ -> message_floor ~selected ~input
+            | [] -> report O.Capacity_refused O.Observed_capacity_unfit
                 "source cannot fit the reported CLI input capacity")
          | Ok (Some smaller) when P.end_atom smaller < P.end_atom selected ->
            Log.Keeper.info ~keeper_name
@@ -630,7 +630,7 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
               (match Runtime.infer_working_state ?cli_runner ~base_path ~keepers_dir
                 ~keeper_id:keeper_name ~previous_state:None ~unread_messages empty with
                | Runtime.Inferred {working_state;served_by} -> Ok (working_state,Some served_by)
-               | Runtime.Not_inferred reports -> Error (refusal_detail reports)) in
+               | Runtime.Not_inferred failure -> Error (refusal_detail failure.reports)) in
           let* program = Keeper_librarian_memory_program.create
             ~transaction_id:(Random_id.prefixed ~prefix:"librarian-floor-" ~bytes:16)
             ~keeper_id:input.keeper_id ~turn_ref:input.turn_ref
@@ -697,51 +697,87 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
          if not (has_waiting ()) then next ())
   and message_floor ~selected ~(input : Keeper_librarian.input) =
     let module H = Keeper_librarian_task_context in
-    let rec read state served position = function
-      | [] ->
-        (match state, served with
-         | Some state, Some served -> Ok (state, served)
-         | None, _ | Some _, None -> Error (position, []))
-      | message :: remaining ->
-        let historical_task_contexts = List.filter_map (fun (context : H.t) ->
-          if context.first_message <= position && position < context.after_message then
-            Some {context with first_message=0;after_message=1;
-              first_tool_observation=0;after_tool_observation=0}
-          else None) input.historical_task_contexts in
-        let selected_input = {input with messages=[message]; historical_task_contexts;
-          tool_observations=[];counterpart_observations=[]} in
-        match Runtime.infer_working_state ?cli_runner ~base_path ~keepers_dir
-          ~keeper_id:keeper_name ~previous_state:state
-          ~unread_messages:(P.previous_unread_messages selected) selected_input with
-        | Runtime.Inferred {working_state;served_by} ->
-          read (Some working_state) (Some served_by) (position + 1) remaining
-        | Runtime.Not_inferred reports -> Error (position, reports)
-    in
-    match read (P.previous_working_state selected) None 0 input.messages with
-    | Error (position, reports) ->
-      let detail = match reports with
+    let module Unread = Keeper_librarian_unread in
+    let ( let* ) = Result.bind in
+    let refusal_detail position (failure : Runtime.inference_failure) =
+      let detail = match failure.reports with
         | [] -> "no classified provider outcome"
-        | _ :: _ -> String.concat "; " (List.map
+        | reports -> String.concat "; " (List.map
             (fun (outcome : Runtime.not_committed) -> Printf.sprintf
               "%s; provider_input_refusals=[%s]" outcome.detail
               (String.concat "," (List.map Keeper_librarian_input_refusal.to_string
                 outcome.provider_input_refusals))) reports) in
+      Printf.sprintf "message %d did not read; cause=%s" position detail in
+    let known = P.previous_unread_messages selected in
+    let inferred =
+      let* sources = P.memory_sources selected in
+      (* Context-only input already excludes exact holes from Memory recovery.
+         Keep the original coordinates, rather than renumbering the retained
+         input's messages inside their atoms. *)
+      let sources = List.filter (fun source -> not (List.exists
+        (fun (hole : Unread.t) -> hole.source=source) known)) sources in
+      let rec bind sources messages = match sources,messages with
+        | [],[] -> Ok ()
+        | source::sources,message::messages ->
+          let digest = match source with
+            | Unread.Atom source -> source.message_sha256
+            | Unread.Official_turn source -> source.message_sha256 in
+          if digest=Unread.message_digest message then bind sources messages
+          else Error "continuity message differs from its original source"
+        | [],_::_ | _::_,[] -> Error "continuity message source manifest differs" in
+      let* () = bind sources input.messages in
+      let rec read state served position holes sources messages =
+        let* unread_messages = Unread.merge known holes in
+        match sources,messages with
+        | [],[] ->
+          (match state with
+           | Some state -> Ok (state,served,holes)
+           | None ->
+             let empty = {input with messages=[];historical_task_contexts=[];
+               tool_observations=[];counterpart_observations=[]} in
+             (match Runtime.infer_working_state ?cli_runner ~base_path ~keepers_dir
+               ~keeper_id:keeper_name ~previous_state:None ~unread_messages empty with
+              | Runtime.Inferred {working_state;served_by} -> Ok (working_state,Some served_by,holes)
+              | Runtime.Not_inferred failure -> Error (refusal_detail position failure)))
+        | source::sources,message::remaining ->
+          let historical_task_contexts = List.filter_map (fun (context : H.t) ->
+            if context.first_message <= position && position < context.after_message then
+              Some {context with first_message=0;after_message=1;
+                first_tool_observation=0;after_tool_observation=0}
+            else None) input.historical_task_contexts in
+          let selected_input = {input with messages=[message]; historical_task_contexts;
+            tool_observations=[];counterpart_observations=[]} in
+          (match Runtime.infer_working_state ?cli_runner ~base_path ~keepers_dir
+            ~keeper_id:keeper_name ~previous_state:state ~unread_messages selected_input with
+           | Runtime.Inferred {working_state;served_by} ->
+             read (Some working_state) (Some served_by) (position + 1) holes sources remaining
+           | Runtime.Not_inferred failure ->
+             (match failure.exhausted_input_refusals with
+              | Some (_::_ as reasons) ->
+                let* hole = P.unread_message selected ~source ~reasons in
+                let* holes = Unread.merge holes [hole] in
+                read state served (position+1) holes sources remaining
+              | None | Some [] -> Error (refusal_detail position failure)))
+        | [],_::_ | _::_,[] -> Error "continuity message source manifest differs"
+      in
+      read (P.previous_working_state selected) None 0 [] sources input.messages in
+    match inferred with
+    | Error detail ->
       (* A later signal starts at the unchanged snapshot. Neither a partial
          inferred state nor a failed message is published as consumed. *)
       report O.Not_committed O.Indivisible_unit_uncommitted
-        (Printf.sprintf "message %d did not read; volatile state discarded; cause=%s"
-          position detail)
-    | Ok (working_state, served_by) ->
+        (detail ^ "; volatile state and new unread records discarded")
+    | Ok (working_state, served_by, new_unread_messages) ->
       let published = Eio.Cancel.protect (fun () ->
         let result = Domain_pool_ref.submit_io_or_inline (fun () ->
-          P.commit ~config ~keeper_name ~prepared:selected ~working_state) in
+          P.commit ~config ~keeper_name ~prepared:selected ~new_unread_messages ~working_state) in
         (match result with
          | Error detail -> report O.Not_committed O.Input_build_failed detail
          | Ok _ ->
            (match served_by with
-            | Runtime.Api_slot _ ->
+            | Some (Runtime.Api_slot _) ->
               forget_input_capacity ~config ~keeper_name; capacity := None
-            | Runtime.Cli_slot _ -> ());
+            | Some (Runtime.Cli_slot _) | None -> ());
            observe O.Committed);
         result) in
       Eio.Fiber.check ();

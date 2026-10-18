@@ -871,7 +871,7 @@ let test_memory_the_continuity_round_saved_is_not_sent_again () =
     (if publish
      then
        match
-         Continuity.commit ~config ~keeper_name ~prepared ~working_state:"continue"
+         Continuity.commit ~new_unread_messages:[] ~config ~keeper_name ~prepared ~working_state:"continue"
        with
        | Ok _ -> ()
        | Error detail -> failf "continuity publication: %s" detail);

@@ -390,10 +390,17 @@ let with_original_source ~config ~keeper_name ~prepared publish =
   | Error (C.Ref_session_mismatch _) -> Error "continuity checkpoint trace changed at publication"
   | Error (C.Ref_lock_failed detail) -> Error detail
 
-let commit ~config ~keeper_name ~prepared ~working_state =
+let commit ~config ~keeper_name ~prepared ~new_unread_messages ~working_state =
   let* covered = memory_committed ~config ~keeper_name prepared in
   let* () = if covered then Ok () else Error "Memory has not committed this continuity source" in
-  let* snapshot = capture_snapshot ~prepared ~unread_messages:prepared.previous_unread_messages ~working_state in
+  let* () = List.fold_left (fun result (hole : Keeper_librarian_unread.t) ->
+    let* () = result in
+    let* original = unread_message prepared ~source:hole.source ~reasons:hole.reasons in
+    if original=hole then Ok () else Error "continuity unread record differs from its original message")
+    (Ok ()) new_unread_messages in
+  let* unread_messages = Keeper_librarian_unread.merge
+    prepared.previous_unread_messages new_unread_messages in
+  let* snapshot = capture_snapshot ~prepared ~unread_messages ~working_state in
   let file = path ~config ~keeper_name in
   Fs_compat.mkdir_p (Filename.dirname file);
   with_original_source ~config ~keeper_name ~prepared (fun () ->

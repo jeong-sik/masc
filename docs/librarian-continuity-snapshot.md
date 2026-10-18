@@ -80,6 +80,15 @@ durable 턴 바닥에 같은 처리를 연결하는 작업, 측정값 없는 nat
 진입 정책, program-aware absorption recall, 실제 타입·동작 검증은 #37850에 남아 있다.
 
 
+Memory가 이미 읽은 범위에서 하던 일 저장본만 만드는 경우에도 같은 API 소진 증거로
+메시지를 unread로 기록한다. 이 소비자의 새 구멍은 snapshot에만 남기며 Memory의 기존
+읽은 범위 receipt나 원장을 바꾸지 않는다. 복구한 기존 구멍을 제외한 실제 입력을 원래
+메시지 좌표와 해시에 결속하고, 새 구멍과 중간 상태는 원래 범위 끝까지 process 안에만
+보관한다. 마지막 source 잠금과 snapshot CAS에서 둘을 함께 게시한다. 뒤의 메시지가
+실패하면 둘 다 버린다. 전부 unread라면 기존 하던 일 상태를 유지하며, 기존 상태가 없을
+때는 unread 기록을 제공한 빈 입력으로 실제 하던 일 판단을 받아야 게시한다.
+
+
 ## 선택 가능한 작은 입력
 
 Keeper 설정 `input_policy`는 `small`(기본)과 `wide` 중 하나다. `keeper_up`과 설정 API,

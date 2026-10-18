@@ -90,6 +90,17 @@ let add_request requests body =
   loop ()
 ;;
 
+(* Feed the TUI the same detail projection as the HTTP route. A raw registry
+   row is storage evidence, not the run-detail wire contract. *)
+let lane_run_detail (run : Masc.Exact_lane_run_registry.run) =
+  let module Projection = Server_standalone_lane_projection in
+  match Projection.For_testing.run_detail_json_with ~run_id:run.run_id
+      ~exact_runs:[run] ~verification_runs:[] ~goal_verification_runs:[] with
+  | Projection.Detail_found json -> json
+  | Projection.Detail_not_found | Projection.Detail_ambiguous ->
+    Alcotest.fail "expected one actual retained run detail"
+;;
+
 let start_server ?on_request_before_reply ~sw ~net ~clock behavior =
   let posts = Atomic.make 0 in
   let requests = Atomic.make [] in

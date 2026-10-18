@@ -52,10 +52,14 @@ val previous_working_state : prepared -> string option
 val previous_unread_messages : prepared -> Keeper_librarian_unread.t list
 (** Exact prior holes retained only when the previous snapshot fits. *)
 val commit : config:Workspace.config -> keeper_name:string -> prepared:prepared ->
-  working_state:string -> (Librarian_continuity_snapshot.t, string) result
+  new_unread_messages:Keeper_librarian_unread.t list -> working_state:string ->
+  (Librarian_continuity_snapshot.t, string) result
 (** Publication requires an exact continuity-owned Memory receipt, or coverage
     within the serial ordinary consumer's genuinely read interval, and uses
-    snapshot CAS. It never changes the durable consumer cursor. *)
+    snapshot CAS. New holes must name exact messages in the selected original
+    range and are merged with prior snapshot holes. The inference caller owns
+    actual exhausted-walk authority. This updates only the continuation's
+    evidence, never Memory's already-read receipt, ledger or durable cursor. *)
 
 val messages : prepared -> Agent_core.Types.message list
 (** Exact new source atoms of the range. The pass renders them once, folded,

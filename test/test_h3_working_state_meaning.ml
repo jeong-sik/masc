@@ -91,7 +91,7 @@ let prepare () =
 
 let commit prepared text =
   record_memory config prepared;
-  P.commit ~config ~keeper_name ~prepared ~working_state:text |> get
+  P.commit ~new_unread_messages:[] ~config ~keeper_name ~prepared ~working_state:text |> get
 
 let current_state () = P.read ~config ~keeper_name |> get |> (function
   | Some snapshot -> snapshot | None -> fail "no committed continuity snapshot")
@@ -217,7 +217,7 @@ let phase_s3_lossy () =
   let next = prepare () in
   check string "S3 prompt carried the lossless v2" state_v2 (previous_working_state next);
   record_memory config next;
-  (match P.commit ~config ~keeper_name ~prepared:next ~working_state:state_lossy with
+  (match P.commit ~new_unread_messages:[] ~config ~keeper_name ~prepared:next ~working_state:state_lossy with
    | Ok saved ->
      check string "S3 CONTRACT: lossy answer accepted; original overwritten" state_v2
        saved.working_state;

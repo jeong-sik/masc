@@ -235,6 +235,7 @@ type inference =
       { previous_state : string option
       ; unread_messages : Keeper_librarian_unread.t list
       ; observe : served_by:served_slot -> string -> unit
+      ; observe_failure : Keeper_librarian_input_refusal.t list option -> unit
       }
   | Infer_memory of
       { previous_state : string option
@@ -1232,8 +1233,9 @@ let run_pass
   let on_not_committed ?(exhausted_input_refusals=None) report =
     on_not_committed report;
     match inference with
-    | Some (Infer_memory {observe_failure;_}) -> observe_failure exhausted_input_refusals
-    | Some (Infer_state _) | None -> ()
+    | Some (Infer_memory {observe_failure;_})
+    | Some (Infer_state {observe_failure;_}) -> observe_failure exhausted_input_refusals
+    | None -> ()
   in
   let trace_id = input_trace_id inp in
   (* A normal failure observes authoritative Memory and its journal. An
@@ -1654,7 +1656,7 @@ let run_pass
                   ~commit:(fun () ->
                    Keeper_librarian_continuity.commit
                      ~config:(Workspace.default_config base_path) ~keeper_name:keeper_id
-                     ~prepared ~working_state)
+                     ~prepared ~new_unread_messages:[] ~working_state)
                   ~observe:(function
                  | Ok snapshot ->
                    continuity_write := `Assoc
@@ -2110,31 +2112,33 @@ let run_pass
 
 let run_best_effort = run_pass ?inference:None
 
-type working_state_inference =
-  | Inferred of { working_state : string; served_by : served_slot }
-  | Not_inferred of not_committed list
-
-let infer_working_state ?cli_runner ~base_path ~keepers_dir ~keeper_id
-    ~previous_state ~unread_messages input =
-  let inferred = ref None and reports = ref [] in
-  run_pass ~write_scope:Context_only
-    ~inference:(Infer_state {previous_state; unread_messages;
-      observe=(fun ~served_by working_state -> inferred := Some (working_state, served_by))})
-    ~on_not_committed:(fun report -> reports := report :: !reports)
-    ?cli_runner ~base_path ~keepers_dir ~keeper_id ~expected_revision:None input;
-  match !inferred with
-  | Some (working_state, served_by) -> Inferred { working_state; served_by }
-  | None -> Not_inferred (List.rev !reports)
-;;
-
-type memory_inference_failure =
+type inference_failure =
   { reports : not_committed list
   ; exhausted_input_refusals : Keeper_librarian_input_refusal.t list option
   }
 
+type working_state_inference =
+  | Inferred of { working_state : string; served_by : served_slot }
+  | Not_inferred of inference_failure
+
+let infer_working_state ?cli_runner ~base_path ~keepers_dir ~keeper_id
+    ~previous_state ~unread_messages input =
+  let inferred = ref None and reports = ref [] and exhausted_input_refusals = ref None in
+  run_pass ~write_scope:Context_only
+    ~inference:(Infer_state {previous_state; unread_messages;
+      observe=(fun ~served_by working_state -> inferred := Some (working_state, served_by));
+      observe_failure=(fun exhausted -> exhausted_input_refusals := exhausted)})
+    ~on_not_committed:(fun report -> reports := report :: !reports)
+    ?cli_runner ~base_path ~keepers_dir ~keeper_id ~expected_revision:None input;
+  match !inferred with
+  | Some (working_state, served_by) -> Inferred { working_state; served_by }
+  | None -> Not_inferred {reports=List.rev !reports;
+      exhausted_input_refusals= !exhausted_input_refusals}
+;;
+
 type memory_inference =
   | Memory_inferred of { step : memory_step; served_by : served_slot }
-  | Memory_not_inferred of memory_inference_failure
+  | Memory_not_inferred of inference_failure
 
 let infer_memory_step ?cli_runner ~base_path ~keepers_dir ~keeper_id
     ~previous_state ~unread_messages input =

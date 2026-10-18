@@ -131,9 +131,18 @@ type not_committed =
             2N-1 of them during a quota or an outage. *)
   }
 
+type inference_failure = private
+  { reports : not_committed list
+  ; exhausted_input_refusals : Keeper_librarian_input_refusal.t list option
+  }
+(** [Some] contains nonempty named input refusals from an actually exhausted
+    API-only walk. Every declared candidate reached generation and no CLI tail,
+    semantic/domain-invalid output or local terminal interrupted the walk.
+    Diagnostic reports alone never establish this skip authority. *)
+
 type working_state_inference =
   | Inferred of { working_state : string; served_by : served_slot }
-  | Not_inferred of not_committed list
+  | Not_inferred of inference_failure
 
 val infer_working_state
   :  ?cli_runner:Keeper_lane_cli_oneshot.runner
@@ -170,20 +179,9 @@ type memory_step = private
     become the current input of another step; a working-state summary is
     never substituted for Memory evidence. *)
 
-type memory_inference_failure = private
-  { reports : not_committed list
-  ; exhausted_input_refusals : Keeper_librarian_input_refusal.t list option
-  }
-(** [Some] contains a nonempty set of named provider input refusals from an
-    actually exhausted API-only candidate walk. No CLI tail was declared,
-    every visited candidate reached generation, and no semantic/domain-invalid
-    output or local terminal interrupted the walk. Other dispatched provider
-    failures may coexist with the named refusals. [None] grants no floor
-    exhaustion evidence; diagnostic reports alone never establish it. *)
-
 type memory_inference =
   | Memory_inferred of { step : memory_step; served_by : served_slot }
-  | Memory_not_inferred of memory_inference_failure
+  | Memory_not_inferred of inference_failure
 
 val infer_memory_step
   :  ?cli_runner:Keeper_lane_cli_oneshot.runner

@@ -54,11 +54,34 @@ private files before returning terminal ownership.
 
 ## Remaining sequencer integration
 
-This route auditions a complete captured source once. Space stops/restarts it;
-stateful pause/resume/seek commands explicitly fail and stop the owner until UMP
-expression-state reconstruction is connected. Restoring channel/per-note state,
-region trimming/repeats and captured-region placement in an arrangement are
-subsequent work. Existing SMF region pause/seek retains its separate implementation.
+Native take playback supports `p` to pause/resume, `:pause`, `:resume`, and
+`:seek SECONDS` to move WAV and MIDI together. Space or `:stop` stops the take.
+Select an audio or MIDI output to use this native route; default WAV-only `afplay`
+audition continues to use Space for play/stop.
+
+On resume or seek, reconstruction preserves original control order and restores
+only keys still held or retained by sustain/sostenuto at the new position.
+It retains original Note On attributes and releases, program/bank ordering,
+channel controllers and pitch, per-note controllers/pitch/pressure, and ordered
+per-note detach/reset. Relative registered/assignable parameters require an
+absolute value in the source prefix. MIDI 1.0 channel-voice UMP words remain
+MIDI 1.0 UMP words; no MIDI 2.0 expression is reduced to that dialect.
+
+Previously changed fields need an explicit source baseline, including before a
+surviving Note On that selected a patch or pitch. Unknown initial values are not
+invented. Unsupported reconstruction stops both owners with a diagnostic; it
+does not change the retained source. Opaque system/SysEx effects, channel-mode
+changes, Hold 2, MIDI 1.0 compound parameter controls and mixed message dialects
+on one output channel currently require complete-source playback. Full-source
+audition still emits every original message. Per-note management and CC121 are
+handled according to the [UMP v1.1.2 specification](https://amei-music.github.io/midi2.0-docs/amei-pdf/M2-104-UM_v1-1-2_UMP_and_MIDI_2-0_Protocol_Specification.pdf).
+
+Staging sends no restored Note On before the shared future epoch. If its callback
+is delayed, it reconstructs that current phase so expired keys stay silent.
+Re-triggered live notes start a new instrument envelope; release tails, arbitrary
+device internals and sample-perfect or acoustically seamless resume are not
+reconstructed. Captured-region placement, trims and repeats remain subsequent
+work. Existing SMF regions retain their separate implementation.
 
 Monitoring, overdubbing against the arrangement, latency compensation, external
 MIDI clock, VST routing, practice/count-in and physical hardware verification

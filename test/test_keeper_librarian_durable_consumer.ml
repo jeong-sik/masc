@@ -2892,6 +2892,7 @@ type official_memory_floor_case =
 
 let test_runtime_official_memory_floor case () =
   let open Masc in
+  let module Progress = Keeper_librarian_progress in
   let module F = Exact_output_fixture in
   let module Current = Keeper_memory_os_current in
   let module Unread = Keeper_librarian_unread in

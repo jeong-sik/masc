@@ -11,6 +11,7 @@ import { arrangementRoute, selectArrangementRoute, arrangementPlaybackRequest } 
 import * as editorAPI from '../arrangement-editor.mjs'
 import { loadArrangement } from '../arrangement-files.mjs'
 import { importMidiSource, exportMidiSource } from '../midi-source.mjs'
+import { recordingEpoch } from '../arrangement-recording.mjs'
 
 const waveAsset = { id: 'asset-1', name: 'Bass', kind: 'wave', file: `assets/${'a'.repeat(64)}.wav`, sha256: 'a'.repeat(64),
   metadata: { encoding: 'pcm', channels: 1, sampleRate: 48000, bitsPerSample: 16, validBits: 16, blockAlign: 2, frames: 48000 } }
@@ -67,7 +68,7 @@ test('actual IO worker preserves sources in redo history when saving to a differ
 
 const flush=()=>new Promise(resolve=>setImmediate(resolve))
 async function controller(options={}){
-  const observed={requests:[],saved:[],recovered:[],terminated:false,players:[],removed:[],takes:[]},process=new EventEmitter()
+  const observed={requests:[],saved:[],recovered:[],terminated:false,players:[],removed:[],takes:[],captures:[]},process=new EventEmitter()
   process.stdin=Object.assign(new EventEmitter(),{isTTY:true,isRaw:false,setRawMode(value){this.isRaw=value},resume(){},pause(){}})
   process.stdout=Object.assign(new EventEmitter(),{isTTY:true,columns:100,rows:24,write(){}});process.stderr={write(){}}
   let owner
@@ -84,7 +85,15 @@ async function controller(options={}){
   }
   const slot=`arrange-controller-${randomUUID()}`
   globalThis[slot]={process,Worker:OwnedWorker,arrangementSchedule,arrangementRoute,selectArrangementRoute,arrangementPlaybackRequest,...editorAPI,join,dirname,resolve,tmpdir,randomUUID,
-    emitKeypressEvents(){},safeText:String,
+    emitKeypressEvents(){},safeText:String,recordingEpoch,
+    mkdir:options.mkdir??(async()=>{}), devices:async()=>({audio:[],midi:[]}),
+    record(options){
+      let finish,reject
+      const completion=new Promise((yes,no)=>{finish=yes;reject=no})
+      const entry={options,stops:0,finish,reject}
+      observed.captures.push(entry)
+      return{completion,stop(){entry.stops++}}
+    },
     viewSession(options){
       let finish
       const completion=new Promise(resolve=>{finish=resolve})
@@ -95,7 +104,8 @@ async function controller(options={}){
     mkdtemp:async()=>'/owned-recovery',writeFile:async()=>{},rm:async path=>{observed.removed.push(path)},openPlayback(options){
       let resolve,reject
       const completion=new Promise((yes,no)=>{resolve=yes;reject=no})
-      const event=(kind,currentTime=0)=>options.onEvent({kind,currentTime,duration:10,device:{id:'output',name:'Output',outputs:2},loop:false})
+      const event=(kind,currentTime=0)=>options.onEvent({kind,currentTime,duration:10,device:{id:'output',name:'Output',outputs:2},loop:false,
+        clock:{kind:'mach-host-time',anchor:'9007199254740993123',position:0,numer:125,denom:3}})
       const handle={completion,ready:Promise.resolve(),stop(){entry.commands.push('stop')},terminate(){entry.commands.push('terminate')},pause(){entry.commands.push('pause');event('paused')},resume(){entry.commands.push('resume');event('playing')},status(){entry.commands.push('status')},seek(seconds){entry.commands.push(['seek',seconds])}}
       const entry={options,handle,commands:[],finish(){event('stopped');resolve({kind:'stopped'})},reject,event}
       observed.players.push(entry);queueMicrotask(()=>event('playing'));return handle
@@ -507,4 +517,37 @@ test('ordinary hybrid TUI playback retains every audible lane and both selected 
     view.command('stop');await flush();assert.ok(player.commands.includes('stop'));assert.ok(!view.observed.removed.includes('/owned-recovery/hybrid'))
     player.finish();await flush();assert.ok(view.observed.removed.includes('/owned-recovery/hybrid'))
   }finally{await closeController(view)}
+})
+
+test('recording finalization owns transport mutation, imports once, and preserves failed takes',async()=>{
+ const view=await controller();await primeWave(view)
+ view.command('input interface');view.command('midi-input keys');view.key('space');await flush()
+ const prepare=view.observed.requests.find(job=>job.kind==='prepare-wave')
+ view.worker.emit('message',{id:prepare.id,ok:true,result:{path:'/owned/play/plan.json',format:'wave-arrangement'}});await flush()
+ view.command('record');await flush()
+ const capture=view.observed.captures[0],player=view.observed.players[0]
+ assert.equal(capture.options.input,'interface');assert.equal(capture.options.midi,'keys')
+ view.key('space');await flush()
+ assert.ok(capture.stops>0);assert.ok(!player.commands.includes('pause'))
+ capture.finish({});await flush()
+ const attach=view.observed.requests.find(job=>job.kind==='attach-recording')
+ assert.ok(attach);assert.equal(attach.epoch.clock.anchor,'9007199254740993123')
+ view.worker.emit('message',{id:attach.id,ok:false,error:'Disk write failed'});await flush()
+ assert.ok(player.commands.includes('pause'))
+ assert.ok(!view.observed.removed.includes(capture.options.directory))
+ view.key('q');await flush();player.finish();await view.done
+ assert.equal(view.process.stdin.isRaw,false)
+})
+
+test('closing an opening recording cannot open late inputs or lose admitted edits',async()=>{
+ let release
+ const pending=new Promise(resolve=>{release=resolve})
+ const view=await controller({mkdir:()=>pending});await primeWave(view)
+ view.command('input interface');view.key('space');await flush()
+ const prepare=view.observed.requests.find(job=>job.kind==='prepare-wave')
+ view.worker.emit('message',{id:prepare.id,ok:true,result:{path:'/owned/play/plan.json',format:'wave-arrangement'}});await flush()
+ view.command('record');await flush();view.key('q');await flush()
+ assert.equal(view.observed.captures.length,0);assert.equal(view.observed.terminated,false)
+ release();await flush();view.observed.players[0].finish();await view.done
+ assert.equal(view.observed.captures.length,0);assert.equal(view.process.stdin.isRaw,false)
 })

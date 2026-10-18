@@ -128,7 +128,9 @@ export function arrangementCommand(editor, line) {
       if (!editor.project.assets.some(item => item.id === asset && item.kind === 'capture')) throw new Error('Choose a captured take')
       return { editor, effect: { kind: 'open-take', asset } }
     }
-    case 'save': case 'help': case 'play': case 'play-audio': case 'stop': count(0); return { editor, effect: { kind: command } }
+    case 'save': case 'help': case 'play': case 'play-audio': case 'stop':
+    case 'inputs': case 'record': case 'record-stop': count(0); return { editor, effect: { kind: command } }
+    case 'input': case 'midi-input': if (!tail) throw new Error('Choose an input UID'); return { editor, effect: { kind: command, input: tail } }
     case 'seek': count(1); return { editor, effect: { kind: 'seek', tick: position(beats(args[0])) } }
     case 'midi-output': count(1); return { editor, effect: { kind: command, destination: args[0] } }
     case 'midi-source': {
@@ -147,7 +149,7 @@ export function arrangementCommand(editor, line) {
       return { editor, effect: { kind: command, asset: args[0], port, destination: args[2] } }
     }
     case 'output': case 'mixed-output': if (!tail) throw new Error('Choose an output UID'); return { editor, effect: { kind: command, path: tail } }
-    case 'record': case 'export': case 'wave':
+    case 'export': case 'wave':
       throw new Error('Arrangement export and overdub are not connected yet')
     case 'asset': {
       count(1)

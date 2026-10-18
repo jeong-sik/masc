@@ -35,6 +35,7 @@ const help = [
   'Regions run at original speed. Project tempo moves positions without warping.',
   'Space: play/pause/resume; :stop; :seek BEAT; :output AUDIO_UID',
   ':midi-output MIDI_UID    :midi-port asset-1 PORT MIDI_UID',
+  ':midi-source asset-2 SOURCE_ID MIDI_UID overrides one captured input.',
   ':mixed-output AUDIO_UID enables audio plus the selected MIDI routes.',
   ':play-audio explicitly auditions WAV, including captured regions and silent gaps.',
   'Whole-arrangement looping and overdub remain under development.',
@@ -216,7 +217,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
         transport.handle.seek(value.tick / editor.project.ppq * 60 / editor.project.tempo)
         break
       }
-      case 'midi-output': case 'midi-port': case 'output': case 'mixed-output':
+      case 'midi-output': case 'midi-port': case 'midi-source': case 'output': case 'mixed-output':
         stop(); route = selectArrangementRoute(route, value); status = 'Playback outputs selected'; break
       case 'save': await save(); break
       case 'save-as': if (accepting) await save(value.path); break

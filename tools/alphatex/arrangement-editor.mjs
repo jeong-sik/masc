@@ -131,6 +131,13 @@ export function arrangementCommand(editor, line) {
     case 'save': case 'help': case 'play': case 'play-audio': case 'stop': count(0); return { editor, effect: { kind: command } }
     case 'seek': count(1); return { editor, effect: { kind: 'seek', tick: position(beats(args[0])) } }
     case 'midi-output': count(1); return { editor, effect: { kind: command, destination: args[0] } }
+    case 'midi-source': {
+      count(3)
+      const asset = editor.project.assets.find(asset => asset.id === args[0] && asset.kind === 'capture')
+      if (!asset?.manifest.midiSources.some(source => source.id === args[1])) throw new Error('Choose a captured asset and its original MIDI source ID')
+      if (!/^-?(0|[1-9][0-9]*)$/.test(args[2]) || BigInt(args[2]) < -2147483648n || BigInt(args[2]) > 2147483647n || String(Number(args[2])) !== args[2]) throw new Error('Choose an exact MIDI destination UID')
+      return { editor, effect: { kind: command, asset: args[0], source: args[1], destination: args[2] } }
+    }
     case 'midi-port': {
       count(3)
       if (!editor.project.assets.some(asset => asset.id === args[0] && asset.kind === 'midi')) throw new Error('Choose a MIDI asset')

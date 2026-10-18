@@ -1,7 +1,7 @@
 import { parentPort } from 'node:worker_threads'
 import { dirname } from 'node:path'
 import { importArrangementWave, importArrangementMidi, importArrangementCapture, prepareArrangementCapture, saveArrangement, materializeArrangementAssets } from './arrangement-files.mjs'
-import { prepareArrangementWave, prepareArrangementMidi, prepareArrangementMixed, prepareArrangementAudio } from './arrangement-playback.mjs'
+import { prepareArrangementWave, prepareArrangementMidi, prepareArrangementMixed, prepareArrangementAudio, prepareArrangementCaptureRegions } from './arrangement-playback.mjs'
 
 const active = new Map()
 parentPort.on('message', async job => {
@@ -15,6 +15,7 @@ parentPort.on('message', async job => {
   try {
     let result
     switch (job.kind) {
+      case 'prepare-capture': result = await prepareArrangementCaptureRegions(job.project, { sourceRoot: job.sourceRoot, directory: job.directory, signal, midiOutput: job.midiOutput, sourceBindings: job.sourceBindings }); break
       case 'prepare-take': result = await prepareArrangementCapture(job.project, job.asset, { sourceRoot: job.sourceRoot, directory: job.directory, signal }); break
       case 'import-take': result = await importArrangementCapture(job.project, job.path, { projectPath: job.projectPath, signal }); break
       case 'prepare-mixed': result = await prepareArrangementMixed(job.project, { sourceRoot: job.sourceRoot, directory: job.directory, signal, midiOutput: job.midiOutput, portBindings: job.portBindings }); break

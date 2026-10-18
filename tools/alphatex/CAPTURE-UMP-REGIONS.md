@@ -3,8 +3,10 @@
 The standalone `music-arrangement` helper accepts `capture-arrangement` schema 5
 for paired WAV/UMP region transport. The JS `openPlayback` bridge recognizes this
 format, checks the common host clock and pins native MIDI2 destination bindings.
-Automatic project preparation and the arrangement TUI's ordinary play command
-still require their source/binding connection; `:play-audio` remains WAV-only.
+The arrangement TUI's ordinary play command prepares captured and ordinary WAV
+lanes through the IO worker. Choose `:midi-output MIDI_UID` and
+`:mixed-output AUDIO_UID`, or `:midi-source ASSET SOURCE_ID MIDI_UID` for a
+captured input override. `:play-audio` remains explicitly WAV-only.
 
 A plan retains the existing `assets` and `regions` for WAV. Captured WAV regions
 use [their rational source clock](CAPTURE-AUDIO-CLOCK.md). `umpRegions` contains
@@ -58,5 +60,21 @@ This follows the established distinction between [MIDI state chase at a new
 position](https://www.steinberg.help/r/cubase-elements/15.0/en/cubase_nuendo/topics/playback/playback_chase_c.html)
 and original sequential event delivery. Native event-list submission uses
 [CoreMIDI's MIDI2 API](https://developer.apple.com/documentation/coremidi/midisendeventlist(_:_:_:)).
-Arrangement SMF/UMP composition, ordinary TUI preparation, monitored overdub,
+Arrangement SMF/UMP composition, monitored overdub,
 latency compensation and physical/visible/acoustic proof remain separate work.
+
+
+Project preparation owns one private root until its native player closes. Each
+capture is verified and copied once with all four original parts; waveform and
+UMP derive from those same immutable files. Repeats remain compressed. Binding
+keys include asset and original input source ID, so two takes named by the same
+input cannot accidentally share an override. A selected default MIDI output
+applies to inputs without an explicit override; native admission still checks
+physical group/channel ownership. Source IDs are in the captured source manifest.
+A capture with no MIDI packets retains a clock-only region alongside paired
+sources. When all audible captures have no MIDI, ordinary play uses the native
+WAV clock without requiring a MIDI output. It never fabricates note messages.
+Audible SMF and captured UMP in the same arrangement currently receive an explicit
+composition diagnostic; no lanes are silently omitted. A muted SMF lane does not
+prevent captured/WAV playback. Failed or cancelled preparation removes the whole
+private root, and a late cancelled result cannot acquire a native player.

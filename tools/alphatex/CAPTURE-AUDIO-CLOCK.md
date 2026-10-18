@@ -5,8 +5,8 @@ of audible WAV and capture lanes. `:output AUDIO_UID` selects its audio output.
 Space then pauses/resumes, and `:seek BEAT` seeks the arrangement. Stop before
 switching to another playback route. Audible standalone MIDI lanes must be muted
 because this route does not synthesize them. Source packets remain in the project;
-this command deliberately sends no MIDI. Regular play continues to diagnose
-captured regions until paired region UMP output is connected.
+this command deliberately sends no MIDI. Ordinary Space playback selects
+[paired UMP/WAV regions](CAPTURE-UMP-REGIONS.md) with its selected MIDI routes.
 
 A capture's region length comes from integer host ticks, independently of its WAV
 length. If a .2-second region contains audio only at .1–.2 seconds, two copies

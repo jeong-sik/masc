@@ -57,9 +57,9 @@ struct UmpTimeline: Decodable {
         guard duration * 1e9 < Double(UInt64.max) else { throw MidiFailure("captured UMP exceeds the native timeline") }
         return try timedEvents().map(\.event)
     }
-    func timedEvents() throws -> [UmpTimedEvent] {
+    func timedEvents(allowEmpty: Bool = false) throws -> [UmpTimedEvent] {
         guard schemaVersion == 4, duration.isFinite, duration > 0,
-              !packets.isEmpty, !bindings.isEmpty, Set(bindings.map(\.source)).count == bindings.count else { throw MidiFailure("invalid captured UMP timeline") }
+              (!packets.isEmpty && !bindings.isEmpty || allowEmpty && packets.isEmpty && bindings.isEmpty), Set(bindings.map(\.source)).count == bindings.count else { throw MidiFailure("invalid captured UMP timeline") }
         _ = try clock.seconds(clock.origin)
         var endpointSources: [String: Set<String>] = [:], groupSources: [String: Set<String>] = [:]
         var exclusiveGroups = Set<String>(), exclusiveEndpoints = Set<String>()

@@ -8,7 +8,9 @@ function concreteSvg(svg, colors) {
   const document = new DOMParser().parseFromString(svg, 'image/svg+xml');
   const presentationAttributes = new Set([
     'fill', 'stroke', 'color', 'stop-color', 'flood-color', 'lighting-color',
-    'font-family', 'font-size', 'stroke-width', 'rx', 'ry',
+    'font-family', 'font-size', 'font-weight', 'font-style',
+    'opacity', 'fill-opacity', 'stroke-opacity', 'stop-opacity',
+    'stroke-width', 'stroke-dasharray', 'stroke-dashoffset', 'rx', 'ry',
   ]);
   function resolve(value, variables, seen = new Set()) {
     return value.replace(/var\((--[\w-]+)(?:,([^()]*))?\)/g, (_, name, fallback) => {

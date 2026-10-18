@@ -78,7 +78,7 @@ try {
       ? { midiOutputs: outputs.value } : { midiOutputError: outputs.reason.message }) }))
   } else if (values.record || values.session) {
     const { viewSession } = await import('./music-session.mjs')
-    await viewSession({ directory: values.session, root: values['session-root'], input: values.input, midi: values.midi })
+    await viewSession({ directory: values.session, root: values['session-root'], input: values.input, midi: values.midi, output: values.output, midiOutput: values['midi-output'] })
   } else {
   const sources = values.bundle
     ? JSON.parse(readFileSync(values.bundle, 'utf8')).sources
@@ -444,7 +444,7 @@ async function viewScores(sources, initialIndex) {
               if (!closed) await viewArrangement({ root: values['project-root'], output: values.output, midiOutput: values['midi-output'], embedded: true, signal: sessionAbort.signal })
             } else {
               const { viewSession } = await import('./music-session.mjs')
-              if (!closed) await viewSession({ root: values['session-root'], input: values.input, midi: values.midi, embedded: true, signal: sessionAbort.signal })
+              if (!closed) await viewSession({ root: values['session-root'], input: values.input, midi: values.midi, output: values.output, midiOutput: values['midi-output'], embedded: true, signal: sessionAbort.signal })
             }
           } catch (error) { status = error.message }
           finally {

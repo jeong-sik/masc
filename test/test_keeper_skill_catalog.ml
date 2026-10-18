@@ -871,15 +871,15 @@ let test_composition_skill_joins_projection () =
     (List.mem "keeper_compose_status-memory-query" expected);
   (* The transient-draft tools ride along on every turn (#43156), and the
      shared controls accompany them, so the default projection carries the
-     controls even when no async request needs addressing. Only the legacy
-     compatibility authority builds none. *)
+     controls even when no async request needs addressing. An inline-only
+     surface without transient drafts needs no shared controls. *)
   check
     bool
     "the default projection carries the controls with the transient-draft tools"
     true
     (List.mem Catalog.status_tool_name expected
      && List.mem Catalog.cancel_tool_name expected);
-  let expected_legacy =
+  let expected_inline =
     Masc.Keeper_run_tools_setup.expected_model_tool_names
         ~identity_names:[]
       ~skill_catalog:
@@ -892,21 +892,29 @@ let test_composition_skill_joins_projection () =
     bool
     "an inline-only surface has no async request for the controls to address"
     false
-    (List.mem Catalog.status_tool_name expected_legacy
-     || List.mem Catalog.cancel_tool_name expected_legacy);
+    (List.mem Catalog.status_tool_name expected_inline
+     || List.mem Catalog.cancel_tool_name expected_inline);
   let expected_async =
     Masc.Keeper_run_tools_setup.expected_model_tool_names
         ~identity_names:[]
       ~skill_catalog:(skill_catalog_of [ "quiet-lane", async_composition_document ])
       ~model_visible_descriptors:descriptors
+      ~transient_drafts:false
       ()
   in
   check
     bool
     "async skill adds the shared status and cancel controls"
     true
-    (List.mem Catalog.status_tool_name expected_async
-     && List.mem Catalog.cancel_tool_name expected_async)
+    (List.mem "keeper_compose_quiet-lane" expected_async
+     && List.mem Catalog.status_tool_name expected_async
+     && List.mem Catalog.cancel_tool_name expected_async);
+  check
+    bool
+    "named async work retains controls without exposing transient draft tools"
+    false
+    (List.mem Catalog.prepare_tool_name expected_async
+     || List.mem Catalog.run_tool_name expected_async)
 ;;
 
 (* The entries of one published snapshot are projected once, and every

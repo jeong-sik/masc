@@ -116,6 +116,40 @@ let gate_causal_initial
     ]
 ;;
 
+(* This part is common to the official-client and Agent Core surfaces of one
+   frozen turn. Names do not require schema/description materialization. *)
+let base_model_tool_names
+      ?(transient_drafts = true)
+      ~skill_catalog
+      ~model_visible_descriptors
+      ()
+  =
+  let descriptor_names =
+    List.concat_map Keeper_tool_descriptor.keeper_model_names model_visible_descriptors in
+  let composition_names =
+    Keeper_skill_catalog.composition_entries skill_catalog
+    |> List.map (fun entry -> entry, ())
+    |> fun skill_compositions ->
+    Keeper_tool_composition_surface.schema_tool_name_rows
+      ~include_drafts:transient_drafts ~skill_compositions ()
+    |> List.map snd in
+  let instruction_names =
+    if Keeper_skill_catalog.instruction_entries skill_catalog <> []
+    then [Keeper_tool_composition_catalog.skill_tool_name]
+    else [] in
+  descriptor_names @ composition_names @ instruction_names
+;;
+
+let project_model_tool_names ?(deferred_names = []) ~base_names ~identity_names () =
+  (* Deferred builtins are judged against the actual assembled surface: a
+     schema carried by conversation history is present even when its original
+     declaration permits deferral. Attached tools belong to their own axis;
+     the builtin deferral list must not remove those names. *)
+  let is_deferred name = List.exists (String.equal name) deferred_names in
+  List.sort_uniq String.compare
+    (List.filter (fun name -> not (is_deferred name)) base_names @ identity_names)
+;;
+
 let expected_model_tool_names
       ?(deferred_names = [])
       ?(transient_drafts = true)
@@ -124,57 +158,9 @@ let expected_model_tool_names
       ~model_visible_descriptors
       ()
   =
-  (* [deferred_names] are the built-ins this surface actually holds behind the
-     listing. Empty for the surface that carries every tool as a schema, and
-     for every caller that predates the axis.
-
-     "Actually" is the load-bearing word. A tool declaring
-     [defer_loading = true] is not enough: a tool this conversation has run is
-     placed with its schema again, so a declared tool the Keeper uses is on the
-     surface after all. Reading the declaration instead cost 60
-     [keeper_model_tool_projection_mismatch] errors in an hour on 2026-08-31,
-     all on [keeper_ide_annotate] -- declared deferrable, called once the day
-     before, and legitimately present ever since.
-
-     Subtracted rather than the check being widened: a tool leaving the request
-     is the thing this whole change does, so an invariant that stopped noticing
-     it would stop being an invariant. What it still catches is a tool that
-     left for any other reason. *)
-  let is_deferred name = List.exists (String.equal name) deferred_names in
-  let descriptor_names =
-    model_visible_descriptors
-    |> List.concat_map Keeper_tool_descriptor.keeper_model_names
-  in
-  (* Frozen turns can prepare async work without a named Skill. Derive the
-     declared, transient and request-control names from their schema owner.
-     Composition names are not checked independently of that owner; this
-     projection still compares descriptor/Skill membership, attached tools
-     and duplicate names against each assembled model surface. *)
-  let composition_names =
-    Keeper_skill_catalog.composition_entries skill_catalog
-    |> List.map (fun entry -> entry, ())
-    |> fun skill_compositions ->
-    Keeper_tool_composition_surface.schema_tool_rows ~include_drafts:transient_drafts ~skill_compositions ()
-    |> List.map (fun (_, (tool : Agent_core.Tool.t)) -> tool.schema.name)
-  in
-  let instruction_names =
-    if Keeper_skill_catalog.instruction_entries skill_catalog <> []
-    then [ Keeper_tool_composition_catalog.skill_tool_name ]
-    else []
-  in
-  List.sort_uniq
-    String.compare
-    (List.filter
-       (fun name -> not (is_deferred name))
-       (descriptor_names @ composition_names @ instruction_names)
-         (* What the work services this Keeper is attached to offer, as this
-            surface names them: the official-client lanes carry the tools
-            themselves, the Agent Core lane carries the one listing tool that
-            hands them over on request. Named by the caller from the same
-            list the bundle was handed, so the projection check keeps meaning
-            "the surface is what it was built from" rather than being widened
-            into always passing. *)
-         @ identity_names)
+  let base_names = base_model_tool_names ~transient_drafts
+      ~skill_catalog ~model_visible_descriptors () in
+  project_model_tool_names ~deferred_names ~base_names ~identity_names ()
 ;;
 
 (* One question, asked from both sides: of the names this surface was built to
@@ -994,15 +980,14 @@ let prepare_agent_setup
      check over one of them would leave the other free to drift: they differ
      only in how the attached tools appear, which is exactly the part being
      changed. *)
+  let expected_base_names =
+    base_model_tool_names ~skill_catalog
+      ~model_visible_descriptors:turn_model_visible_descriptors () in
   let check_projection ?deferred_names ~surface ~identity_names tools =
     let actual = List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name) tools in
     let expected =
-      expected_model_tool_names
-        ?deferred_names
-        ~skill_catalog
-        ~identity_names
-        ~model_visible_descriptors:turn_model_visible_descriptors
-        ()
+      project_model_tool_names ?deferred_names
+        ~base_names:expected_base_names ~identity_names ()
     in
     let deduped = List.sort_uniq String.compare actual in
     if not (expected = deduped && List.length deduped = List.length actual)

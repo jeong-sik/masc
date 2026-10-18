@@ -44,6 +44,30 @@ val of_google_oauth : string -> (t, missing) result
 (** Each reads the bytes of one client's login file. A key that appears twice
     in one object is [Source_unrecognized]; [null] reads as absent. *)
 
+type login_source
+(** One resolved file and client-specific interpretation. A shared path alone
+    cannot combine different clients' login formats. This is display metadata,
+    not account identity, credentials, routing or admission authority. *)
+
+val read_source : login_source -> (t, missing) result
+(** Read and interpret that selected source once, with the existing regular-file
+    restriction and IO/error/cancellation boundary. No process cache is used. *)
+
+type observation = {
+  integration_id : string;
+  email : (t, missing) result;
+}
+
+val observe_providers :
+  read:(login_source -> (t, missing) result) ->
+  Runtime_schema.provider list -> observation list
+(** Resolve all provider sources before reading their login contents, then read each
+    distinct client/file once per invocation. Successes and missing results are
+    shared only within that invocation. Provider order and separate rows remain.
+    Providers with no client account remain absent; environment-credential and
+    unavailable-source rows retain their own refusal without invoking [read].
+    Reader exceptions, including cancellation, propagate without retry. *)
+
 val of_provider : Runtime_schema.provider -> (t, missing) result option
 (** Reads, now, the login file of the account a declared provider runs on. A
     Codex, Claude Code or Muse Code provider runs on its [account-home], or
@@ -64,8 +88,9 @@ val row_json : integration_id:string -> (t, missing) result -> Yojson.Safe.t
     {!missing_to_wire}. *)
 
 val providers_json : Runtime_schema.provider list -> Yojson.Safe.t
-(** {!row_json} of {!of_provider} for each provider with an account, in the
-    given order. *)
+(** {!row_json} for every account from {!observe_providers}, using {!read_source}.
+    A later invocation re-resolves and rereads sources, so sign-in changes and
+    previous failures are not hidden by a process-wide cache. *)
 
 val inventory_json : Runtime_schema.config -> Yojson.Safe.t
 (** {!providers_json} of every declared provider. *)

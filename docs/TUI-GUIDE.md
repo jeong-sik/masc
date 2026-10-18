@@ -554,6 +554,13 @@ per usage window, the value as a whole percent (a fraction is multiplied by
 meter takes 10 to 24 cells; when 10 do not fit beside the hearing age, the
 age is left out first.
 
+Connections selecting the same client's login file share one email observation
+within each inventory response, including an unavailable-file result. Their
+individual connection rows remain. The next refresh rereads the login sources,
+so signing in or repairing a login file is visible without restarting MASC.
+Different client formats remain separate even if they select the same path.
+Email is display metadata and does not select an account or authorize a turn.
+
 ```
  Plan usage
  Claude Max · 1a2b3c4d  5h ▕██████████▋     ▏  67%  ↻ 18:10 in 4h12m        heard 3m00s ago

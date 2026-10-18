@@ -17921,8 +17921,8 @@ type keeper_message_status_frame =
   | Message_status of turn_log * keeper_message_status_projection
 
 (* One synchronous draw may pass this value through menu measurement, history
-   budgeting and status drawing. Neither it nor its original log is cached or
-   handed to workers; the next draw observes the current selection again. *)
+   budgeting and status drawing. The frame adds no cache or worker handoff;
+   the next draw observes the current selection again. *)
 let keeper_message_status_frame (state : state) ~now =
   match keeper_message_status_log state with
   | None -> No_message_status

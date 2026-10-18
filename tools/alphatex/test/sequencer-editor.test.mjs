@@ -3,9 +3,11 @@ import assert from 'node:assert/strict'
 import { newEditor, editorCommand, editorAction, selectedNote } from '../sequencer-editor.mjs'
 import { projectMidi, loadProject, saveProject } from '../sequencer-files.mjs'
 import { harmonyAt, PPQ } from '../sequencer-project.mjs'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { newArrangement } from '../arrangement.mjs'
+import { mkdtemp, rm, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { randomUUID } from 'node:crypto'
 
 test('musician creates a progression and bass, changes sound, solos, undoes and reopens', async () => {
   let editor = newEditor()
@@ -63,4 +65,31 @@ test('invalid commands are transactional and IO is returned as explicit effects'
   assert.equal(editor.project.tracks[0].notes.length, 0)
   assert.deepEqual(editorCommand(editor, 'save-as /tmp/My phrase.json').effect, { kind: 'save-as', path: '/tmp/My phrase.json' })
   assert.deepEqual(editorCommand(editor, 'export /tmp/phrase.mid').effect, { kind: 'export', path: '/tmp/phrase.mid' })
+})
+
+test('editor admission rejects arrangements, unknown kinds and malformed phrase documents', () => {
+  assert.throws(() => newEditor(newArrangement()), /Unsupported sequencer editor document/)
+  assert.throws(() => newEditor({ ...newEditor().project, kind: 'unknown' }), /Unsupported sequencer editor document/)
+  assert.throws(() => newEditor(null), /Unsupported sequencer document/)
+  assert.throws(() => newEditor({ ...newEditor().project, tracks: undefined }), /needs a track/)
+})
+
+test('loading a saved arrangement rejects before terminal or background resource admission', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'masc-arrangement-editor-admission-'))
+  const slot = `sequencer-admission-${randomUUID()}`
+  const ownership = { raw: [], workers: 0, temporary: 0 }
+  const process = { stdin: { isTTY: true, setRawMode(value) { ownership.raw.push(value) } }, stdout: { isTTY: true } }
+  globalThis[slot] = { process, loadProject, newEditor, join, tmpdir, randomUUID,
+    async mkdtemp() { ownership.temporary++; throw new Error('Unexpected terminal temporary directory') },
+    Worker: class { constructor() { ownership.workers++; throw new Error('Unexpected terminal worker') } } }
+  try {
+    const path = join(directory, 'arrangement.json')
+    await saveProject(path, newArrangement())
+    assert.equal((await loadProject(path)).project.kind, 'arrangement')
+    const source = (await readFile(new URL('../sequencer-tui.mjs', import.meta.url), 'utf8')).replace(/^import .*$/gm, '')
+    const prefix = `const {${Object.keys(globalThis[slot]).join(',')}} = globalThis[${JSON.stringify(slot)}];\n`
+    const { viewSequencer } = await import('data:text/javascript;base64,' + Buffer.from(prefix + source).toString('base64'))
+    await assert.rejects(viewSequencer({ path, root: directory }), /Unsupported sequencer editor document/)
+    assert.deepEqual(ownership, { raw: [], workers: 0, temporary: 0 })
+  } finally { delete globalThis[slot]; await rm(directory, { recursive: true, force: true }) }
 })

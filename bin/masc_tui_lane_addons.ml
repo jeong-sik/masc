@@ -2,6 +2,15 @@ module Row = Masc.Lane_addon_types
 module Document = Masc_tui_lane_declaration
 module Action = Masc.Lane_addon_action
 module Application = Masc_tui_lane_application
+
+(* Split written line breaks before neutralising terminal controls. These are
+   document blocks (JSON, readings, receipts), not single-line table cells.
+   Cell splitting preserves indentation, blank lines and exact value spaces. *)
+let document_rows ~width text =
+  Masc_tui_text_block.lines text
+  |> List.concat_map (fun line ->
+      Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
+        (Masc.Tui_terminal_text.sanitize_terminal_text line))
 type runtime_presence = Live_entry | Retained_binding | Presence_unknown
 type instance = {
   id : string; run_id : string; addon_id : string; title : string;
@@ -863,9 +872,7 @@ let rec finite_values = function
 
 let technical_lines ?(height=24) ?(failed_note = "") ~width view =
   let _ = height in
-  let wrap text =
-    Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
-      (Masc.Tui_terminal_text.sanitize_terminal_text text) in
+  let wrap = document_rows ~width in
   let raw_row (row : Row.row) =
     [row.title; "Row " ^ row.id; "Lane " ^ row.lane_id;
      "Observed " ^ utc_stamp row.observed_at ^ " UTC";
@@ -930,8 +937,7 @@ let technical_lines ?(height=24) ?(failed_note = "") ~width view =
      @ action_lines view @ receipt)
 
 let installation_detail_lines ~width view =
-  let wrap line = Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
-      (Masc.Tui_terminal_text.sanitize_terminal_text line) in
+  let wrap = document_rows ~width in
   let edit_hint = if Option.is_some (selected_source_path view) then "  E:edit TOML" else "" in
   let refresh_hint = if view.loading then "  Reading …" else "  r:refresh" in
   let body = match view.snapshot with
@@ -1137,8 +1143,7 @@ let snapshot_coverage_lines coverage =
         ^ Option.fold ~none:"" ~some:(fun detail -> " · " ^ detail) source.detail) coverage
 
 let overview_lines ~width view =
-  let wrap text = Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
-    (Masc.Tui_terminal_text.sanitize_terminal_text text) in
+  let wrap = document_rows ~width in
   let content = match view.snapshot with
     | None -> [unread_body_text ~failed_note:"Read failed · r:retry" view]
     | Some snapshot ->
@@ -1267,8 +1272,7 @@ let help_lines = [
 ]
 
 let detail_lines ~width view =
-  let wrap text = Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
-    (Masc.Tui_terminal_text.sanitize_terminal_text text) in
+  let wrap = document_rows ~width in
   match selected_instance view, view.snapshot with
   | None, _ -> ["The selected Add-on changed. Esc returns to the list."]
   | Some item, Some snapshot ->
@@ -1524,21 +1528,18 @@ let flow_lines ?(embedded=false) view =
 let lines ?(height=24) ?(failed_note = "") ~width view =
   match view.installer with
   | Some installer ->
-      let render line = Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
-        (Masc.Tui_terminal_text.sanitize_terminal_text line) in
+      let render = document_rows ~width in
       let diagnostics = List.concat_map render (diagnostic_lines view) in
       diagnostics @ Masc_tui_lane_installer.lines ~height:(max 1 (height - List.length diagnostics)) ~render installer
   | None -> match view.evidence_prompt with
   | Some prompt ->
       (diagnostic_lines view @ evidence_lines prompt)
-      |> List.concat_map (fun line -> Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
-           (Masc.Tui_terminal_text.sanitize_terminal_text line))
+      |> List.concat_map (document_rows ~width)
   | None -> match view.subscription_panel,view.action_menu with
   | Some panel,_ ->
       (Masc_tui_message_layout.fit_width (if view.loading then "Refreshing…" else "Last received subscription state") (max 1 width)
        :: Masc_tui_lane_subscriptions.lines panel)
-      |> List.concat_map (fun line -> Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
-           (Masc.Tui_terminal_text.sanitize_terminal_text line))
+      |> List.concat_map (document_rows ~width)
   | None,Some menu ->
       (["Run action on " ^ menu.target_title]
        @ diagnostic_lines view
@@ -1551,14 +1552,11 @@ let lines ?(height=24) ?(failed_note = "") ~width view =
        @ (match List.nth_opt menu.choices menu.cursor with
           | Some action -> action_fields "" action
           | None -> ["No selected action"])))
-      |> List.concat_map (fun line ->
-        Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
-          (Masc.Tui_terminal_text.sanitize_terminal_text line))
+      |> List.concat_map (document_rows ~width)
   | None,None ->
-      if view.help_open then List.map (fun line ->
-        Masc_tui_message_layout.fit_width line (max 1 width)) help_lines
+      if view.help_open then List.concat_map (document_rows ~width) help_lines
       else if view.presentation = Flow then flow_lines view |> List.concat_map
-        (fun line -> Masc_tui_message_layout.split_cells ~max_cells:(max 1 width) (Masc.Tui_terminal_text.sanitize_terminal_text line))
+        (document_rows ~width)
       else if view.presentation = Technical && view.screen=Overview && view.focus=Configurations
         && Option.is_none view.document_key && Option.is_none view.draft
       then installation_detail_lines ~width view
@@ -1570,16 +1568,13 @@ let lines ?(height=24) ?(failed_note = "") ~width view =
           | Some json -> (match evidence_receipt_lines json with
               | [] -> []
               | receipt -> ["Last evidence receipt"] @ receipt @ [""]) in
-        let receipt_lines = List.concat_map (fun line ->
-          Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
-            (Masc.Tui_terminal_text.sanitize_terminal_text line)) receipt_lines in
+        let receipt_lines = List.concat_map (document_rows ~width) receipt_lines in
         (match view.screen with
         | Overview -> overview_lines ~width view @ receipt_lines
         | Detail _ -> receipt_lines @ detail_lines ~width view
             @ (match view.focus with
                | Connections -> [""] @ (flow_lines ~embedded:true view |> List.concat_map (fun line ->
-                   Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
-                     (Masc.Tui_terminal_text.sanitize_terminal_text line)))
+                   document_rows ~width line))
                | Timeline | Configurations | Instances | Rows -> []))
 
 (* A TOML declaration may exist while no worker can run. Keep the file count,

@@ -207,3 +207,10 @@ Press `r` in the TOML view to request a read immediately. This read leaves your
 draft, save receipt and save errors intact and does not occupy the save request.
 A different reconciled source or worker-input revision is shown as unconfirmed;
 missing workers alone do not confirm Off.
+
+## Reading multiline results
+
+Results, Records, raw details and receipts preserve written line breaks and JSON
+indentation. Long lines wrap to the available cells; `J`/`K` reads the same
+wrapped document. Control characters inside each line remain escaped. `?` help
+also wraps, so narrow terminals can read complete action descriptions.

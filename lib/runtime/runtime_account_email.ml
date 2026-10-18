@@ -120,10 +120,22 @@ let read_login_file path parse =
   | read -> read
   | exception (Unix.Unix_error _ | Sys_error _ | End_of_file) -> Error Source_unavailable
 
-let of_provider (provider : Runtime_schema.provider) =
-  let native path parse =
+type login_source =
+  | Codex_auth of string
+  | Claude_account of string
+  | Muse_auth of string
+  | Google_oauth of string
+
+let read_source = function
+  | Codex_auth path -> read_login_file path of_codex_auth
+  | Claude_account path -> read_login_file path of_claude_account
+  | Muse_auth path -> read_login_file path of_muse_auth
+  | Google_oauth path -> read_login_file path of_google_oauth
+
+let resolve_provider (provider : Runtime_schema.provider) =
+  let native path source =
     match path with
-    | Some path -> Some (read_login_file path parse)
+    | Some path -> Some (Ok (source path))
     | None -> Some (Error Source_unavailable)
   in
   match provider.api_format, provider.credentials with
@@ -132,17 +144,43 @@ let of_provider (provider : Runtime_schema.provider) =
       (Option.map
          (fun codex_home -> Runtime_verification_codex_home.auth_path ~codex_home)
          (Runtime_codex_app_server.effective_account_home provider.account_home))
-      of_codex_auth
+      (fun path -> Codex_auth path)
   | Claude_code_runtime, _ when Runtime_claude_code.runs_on_environment_credential provider.account_home ->
     Some (Error Environment_credential)
   | Claude_code_runtime, _ ->
-    native (Runtime_claude_code.account_file provider.account_home) of_claude_account
-  | Muse_serve_runtime, _ -> native (Runtime_muse_home.auth_path provider.account_home) of_muse_auth
+    native (Runtime_claude_code.account_file provider.account_home) (fun path -> Claude_account path)
+  | Muse_serve_runtime, _ -> native (Runtime_muse_home.auth_path provider.account_home) (fun path -> Muse_auth path)
   | Antigravity_cli_runtime, Some (Runtime_schema.File path) ->
-    Some (read_login_file path of_google_oauth)
+    Some (Ok (Google_oauth path))
   | Antigravity_cli_runtime, (Some (Runtime_schema.Env _ | Inline _) | None) -> None
   | (Messages_api | Chat_completions_api | Ollama_api | Gemini_api | Vertex_gemini_api), _ ->
     None
+
+let of_provider provider =
+  Option.map (fun selected -> Result.bind selected read_source) (resolve_provider provider)
+
+module Source_map = Map.Make (struct
+  type nonrec t = login_source
+  let compare = Stdlib.compare
+end)
+
+type observation = {
+  integration_id : string;
+  email : (t, missing) result;
+}
+
+let observe_providers ~read providers =
+  let selected = List.filter_map (fun (provider : Runtime_schema.provider) ->
+    Option.map (fun source -> provider.id, source) (resolve_provider provider)) providers in
+  let _, observations = List.fold_left (fun (observed, observations) (integration_id, source) ->
+    let observed, email = match source with
+      | Error missing -> observed, Error missing
+      | Ok source ->
+          (match Source_map.find_opt source observed with
+           | Some email -> observed, email
+           | None -> let email = read source in Source_map.add source email observed, email) in
+    observed, {integration_id; email} :: observations) (Source_map.empty, []) selected in
+  List.rev observations
 
 let row_json ~integration_id read =
   let state =
@@ -153,10 +191,7 @@ let row_json ~integration_id read =
   `Assoc (("integration_id", `String integration_id) :: state)
 
 let providers_json providers =
-  `List
-    (List.filter_map
-       (fun (provider : Runtime_schema.provider) ->
-          Option.map (row_json ~integration_id:provider.id) (of_provider provider))
-       providers)
+  `List (List.map (fun observation -> row_json ~integration_id:observation.integration_id observation.email)
+    (observe_providers ~read:read_source providers))
 
 let inventory_json (config : Runtime_schema.config) = providers_json config.providers

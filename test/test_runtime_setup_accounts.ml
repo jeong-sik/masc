@@ -326,7 +326,127 @@ let live_login_emails () = fixture (fun directory _ ->
       Some (snd (read "muse-inherited" "home-muse@example.com")) ]
     [ List.assoc_opt "claude-inherited" rows; List.assoc_opt "muse-inherited" rows ])
 
+let email_batch_provider ~home id =
+  let config = inventory_config ~account_home:home ~oauth_file:(Filename.concat home "oauth.json") in
+  match Runtime_schema.provider_of_id config "claude-selected" with
+  | Some provider -> {provider with Runtime_schema.id}
+  | None -> fail "selected account missing"
+
+let email_batch_addresses observations =
+  List.map (fun (observation : Email.observation) -> observation.integration_id, email_of observation.email) observations
+
+let shared_login_observation_and_rotation () = fixture (fun directory _ ->
+  let home = Filename.concat directory "shared-login" in
+  Unix.mkdir home 0o700;
+  let path = Filename.concat home ".claude.json" in
+  let login email = Printf.sprintf {|{"oauthAccount":{"emailAddress":%S}}|} email in
+  write path (login "before@example.com");
+  let providers = List.map (email_batch_provider ~home) ["first";"second"] in
+  let calls = ref 0 in
+  let read source =
+    incr calls;
+    let observed = Email.read_source source in
+    write path (login "after@example.com");
+    observed in
+  let observations = Email.observe_providers ~read providers in
+  check int "one selected login read in a shared response" 1 !calls;
+  check (list (pair string string)) "aliases keep separate rows from the same observation"
+    ["first","before@example.com";"second","before@example.com"] (email_batch_addresses observations);
+  let observations = Email.observe_providers ~read providers in
+  check int "next response rereads the selected source" 2 !calls;
+  check (list (pair string string)) "rotation is visible on the next observation"
+    ["first","after@example.com";"second","after@example.com"] (email_batch_addresses observations);
+  match Email.providers_json providers with
+  | `List rows -> check int "public inventory keeps both integration rows" 2 (List.length rows)
+  | _ -> fail "public inventory is not a row list")
+
+let failed_login_sharing_and_independent_sources () = fixture (fun directory _ ->
+  let home = Filename.concat directory "malformed-login" in
+  let other = Filename.concat directory "unavailable-login" in
+  List.iter (fun path -> Unix.mkdir path 0o700) [home;other];
+  write (Filename.concat home ".claude.json") "{";
+  let first = email_batch_provider ~home "first" in
+  let second = {first with Runtime_schema.id="second"} in
+  let unavailable = {first with Runtime_schema.id="unavailable"; account_home=Some other} in
+  let inherited = {first with Runtime_schema.id="inherited"; account_home=None} in
+  let http = {first with Runtime_schema.id="http"; api_format=Messages_api; credentials=None} in
+  with_env ["ANTHROPIC_API_KEY",Some "synthetic-env-credential"] (fun () ->
+    let calls = ref 0 in
+    let read source = incr calls; Email.read_source source in
+    let observations = Email.observe_providers ~read [first;second;unavailable;inherited;http] in
+    let gap id = match List.find_opt (fun (row : Email.observation) -> row.integration_id=id) observations with
+      | Some row -> missing row.email | None -> fail (id ^ " missing from observations") in
+    check int "failed shared file and another file remain two observations" 2 !calls;
+    check int "environment refusal remains a row, HTTP has no account row" 4 (List.length observations);
+    check bool "malformed shared source remains unavailable for both aliases" true
+      (gap "first" = Email.Source_unrecognized && gap "second" = Email.Source_unrecognized);
+    check bool "another unavailable source does not become the shared error" true
+      (gap "unavailable" = Email.Source_unavailable);
+    check bool "environment credential bypasses login-file reader" true
+      (gap "inherited" = Email.Environment_credential);
+    write (Filename.concat home ".claude.json") {|{"oauthAccount":{"emailAddress":"recovered@example.com"}}|};
+    let recovered = Email.observe_providers ~read [first;second] in
+    check int "failed observation is not sticky across responses" 3 !calls;
+    check (list (pair string string)) "both aliases observe the repaired source"
+      ["first","recovered@example.com";"second","recovered@example.com"] (email_batch_addresses recovered)))
+
+let same_path_client_interpretations_remain_separate () = fixture (fun directory _ ->
+  let home = Filename.concat directory "dual-format-login" in
+  Unix.mkdir home 0o700;
+  let path = Runtime_verification_codex_home.auth_path ~codex_home:home in
+  write path (Printf.sprintf {|{"tokens":{"id_token":%S},"id_token":%S}|}
+    (id_token {|{"email":"codex@example.com"}|}) (id_token {|{"email":"google@example.com"}|}));
+  let base = email_batch_provider ~home "codex" in
+  let codex = {base with Runtime_schema.api_format=Codex_app_server_runtime} in
+  let google = {base with Runtime_schema.id="google"; api_format=Antigravity_cli_runtime;
+    credentials=Some (File path); account_home=None} in
+  let calls = ref 0 in
+  let observations = Email.observe_providers ~read:(fun source -> incr calls; Email.read_source source) [codex;google] in
+  check int "equal path with different client formats has two source observations" 2 !calls;
+  check (list (pair string string)) "each client interprets its own declared login format"
+    ["codex","codex@example.com";"google","google@example.com"] (email_batch_addresses observations))
+
+let inherited_login_selection_is_frozen_before_reads () = fixture (fun directory _ ->
+  let first_home = Filename.concat directory "first-codex" in
+  let next_home = Filename.concat directory "next-codex" in
+  List.iter (fun home -> Unix.mkdir home 0o700) [first_home;next_home];
+  let login home email = write (Runtime_verification_codex_home.auth_path ~codex_home:home)
+    (Printf.sprintf {|{"tokens":{"id_token":%S}}|} (id_token (Printf.sprintf {|{"email":%S}|} email))) in
+  login first_home "first@example.com"; login next_home "next@example.com";
+  let base = email_batch_provider ~home:first_home "first" in
+  let first = {base with Runtime_schema.api_format=Codex_app_server_runtime; account_home=None} in
+  let second = {first with Runtime_schema.id="second"} in
+  with_env ["CODEX_HOME",Some first_home] (fun () ->
+    let calls = ref 0 in
+    let read source = incr calls; let result = Email.read_source source in
+      Unix.putenv "CODEX_HOME" next_home; result in
+    let observations = Email.observe_providers ~read [first;second] in
+    check int "source selections are frozen before the first read effect" 1 !calls;
+    check (list (pair string string)) "one response cannot switch an alias midway"
+      ["first","first@example.com";"second","first@example.com"] (email_batch_addresses observations);
+    let next = Email.observe_providers ~read [first;second] in
+    check int "new response resolves the new inherited home" 2 !calls;
+    check (list (pair string string)) "new selection is not cached process-wide"
+      ["first","next@example.com";"second","next@example.com"] (email_batch_addresses next)))
+
+let cancelled_login_observation_never_retries () = fixture (fun directory _ ->
+  let provider = email_batch_provider ~home:directory "first" in
+  let alias = {provider with Runtime_schema.id="second"} in
+  let calls = ref 0 in
+  let exception Observation_cancelled in
+  (match Email.observe_providers ~read:(fun _ -> incr calls;
+      raise (Eio.Cancel.Cancelled Observation_cancelled)) [provider;alias] with
+   | _ -> fail "cancelled source became inventory rows"
+   | exception Eio.Cancel.Cancelled Observation_cancelled -> ());
+  check int "cancellation cannot retry the reader for an alias" 1 !calls)
+
+
 let () = run "setup account references" ["private account",[
+  test_case "shared login observation and later rotation" `Quick shared_login_observation_and_rotation;
+  test_case "failed source sharing keeps independent sources" `Quick failed_login_sharing_and_independent_sources;
+  test_case "same path keeps client interpretations separate" `Quick same_path_client_interpretations_remain_separate;
+  test_case "inherited login sources freeze before read effects" `Quick inherited_login_selection_is_frozen_before_reads;
+  test_case "cancelled source observation never retries an alias" `Quick cancelled_login_observation_never_retries;
   test_case "native home revalidated on resolution" `Quick native_home_revalidated;
   test_case "native home scoped reference" `Quick native_home_scope;
   test_case "persistent scoped reference" `Quick persisted_scope;

@@ -40,6 +40,40 @@ test('substituted output or malformed protocol fails and waits for the owned chi
   const g = fixture(); g.child.stdout.write('not JSON\n'); g.close(1)
   await assert.rejects(g.playback.completion, /JSON/)
 })
+test('a protocol failure rejects readiness and refuses buffered states and commands until child close', async () => {
+  const seen = [], f = fixture({ onEvent: event => seen.push(event.kind) })
+  let readiness = 'pending', completed = false
+  f.playback.ready.then(() => { readiness = 'resolved' }, () => { readiness = 'rejected' })
+  f.playback.completion.then(() => { completed = true }, () => { completed = true })
+  const playing = { kind: 'playing', currentTime: 0.2, duration: 2, loop: false,
+    device: { id: 'test-output', name: 'Test output', outputs: 2 } }
+  f.child.stdout.write(`not JSON\n${JSON.stringify(playing)}\n`)
+  await Promise.resolve()
+  assert.equal(readiness, 'rejected')
+  assert.equal(completed, false)
+  assert.deepEqual(seen, [])
+  assert.deepEqual(f.signals, ['SIGTERM'])
+  for (const command of ['pause', 'resume', 'status']) assert.throws(() => f.playback[command](), /JSON/)
+  assert.throws(() => f.playback.seek(1))
+  f.playback.stop()
+  assert.deepEqual(f.commands, [])
+  f.event('stopped')
+  f.close(0)
+  await assert.rejects(f.playback.ready, /JSON/)
+  await assert.rejects(f.playback.completion, /JSON/)
+})
+test('native failure after readiness closes state admission without replacing orderly stop semantics', async () => {
+  const seen = [], f = fixture({ onEvent: event => seen.push(event.kind) })
+  f.event('playing'); await f.playback.ready
+  f.event('error', { message: 'Device disappeared' })
+  f.event('playing'); f.event('paused'); f.event('stopped')
+  assert.deepEqual(seen, ['playing', 'error'])
+  assert.throws(() => f.playback.pause(), /Device disappeared/)
+  f.playback.stop()
+  assert.deepEqual(f.commands, [])
+  f.close(0)
+  await assert.rejects(f.playback.completion, /Device disappeared/)
+})
 test('early stop, cancellation and native failure do not become successful playback', async () => {
   const f = fixture(); f.playback.stop(); assert.deepEqual(f.commands, [{ kind: 'stop' }]); f.close(0)
   await assert.rejects(f.playback.completion, /without finalization/)

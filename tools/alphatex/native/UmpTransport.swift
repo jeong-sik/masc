@@ -17,6 +17,19 @@ protocol CoordinatedMidiTransport: AnyObject {
 }
 extension MidiTransport: CoordinatedMidiTransport {}
 
+// UMP message widths from the format type nibble, shared by closed-source and
+// live-input decoding. A CoreMIDI event packet contains complete UMP messages.
+let umpMessageWordCounts = [1,1,1,2,2,4,1,1,2,2,2,3,3,4,4,4]
+func umpMessages(_ words: [UInt32]) throws -> [[UInt32]] {
+    var result: [[UInt32]] = [], offset = 0
+    while offset < words.count {
+        let count = umpMessageWordCounts[Int(words[offset] >> 28)]
+        guard offset + count <= words.count else { throw MidiFailure("truncated UMP message") }
+        result.append(Array(words[offset..<(offset + count)])); offset += count
+    }
+    return result
+}
+
 struct UmpClock: Decodable {
     let origin: String
     let numer: UInt32
@@ -67,7 +80,6 @@ struct UmpTimeline: Decodable {
         for binding in bindings {
             guard !binding.source.isEmpty, let uid = Int32(binding.destination), String(uid) == binding.destination else { throw MidiFailure("invalid UMP source destination") }
         }
-        let sizes = [1,1,1,2,2,4,1,1,2,2,2,3,3,4,4,4]
         for packet in packets {
             guard packet.kind == "midi", packet.protocolID == 2, ["packet", "received"].contains(packet.timestampOrigin),
                   let binding = bindings.first(where: { $0.source == packet.source }), !packet.words.isEmpty else { throw MidiFailure("invalid or unbound captured UMP packet") }
@@ -76,7 +88,7 @@ struct UmpTimeline: Decodable {
             used.insert(packet.source)
             var offset = 0
             while offset < packet.words.count {
-                let word = packet.words[offset], type = Int(word >> 28), count = sizes[type]
+                let word = packet.words[offset], type = Int(word >> 28), count = umpMessageWordCounts[type]
                 guard offset + count <= packet.words.count else { throw MidiFailure("truncated captured UMP message") }
                 endpointSources[binding.destination, default: []].insert(packet.source)
                 let group = "\(binding.destination)/\((word >> 24) & 15)"

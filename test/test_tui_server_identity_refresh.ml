@@ -1170,9 +1170,9 @@ let test_refresh_progress_tracks_independent_sources_and_interruption () =
   deliver (Progress.Completed (Progress.Keepers, 70_000_000L, Progress.Received));
   deliver (Progress.Completed (work, 75_000_000L, Progress.Failed));
   Alcotest.(check bool) "a pending Goal read does not hide the failed Work read" true
-    (Progress.counts (progress ()) = (1, 2, 1, 0)
+    (Progress.counts (progress ()) = Progress.{pending=1;received=2;partial=0;failed=1;interrupted=0}
      && Progress.pending_sources (progress ()) = [goals]
-     && Progress.settled_sources ~outcome:Progress.Failed (progress ()) = [work]);
+     && Progress.settled_sources ~completion:Progress.Failed_read (progress ()) = [work]);
   let settled = state.http_refresh_progress in
   deliver (Progress.Completed (Progress.Questions, 80_000_000L, Progress.Failed));
   deliver (Progress.Completed (work, 80_000_000L, Progress.Received));
@@ -1187,14 +1187,99 @@ let test_refresh_progress_tracks_independent_sources_and_interruption () =
      && Surface_read_order.pending_scoped ~needs state.http_surface_reads = []);
   finish_http_refresh_state ~finished_ns:100_000_000L state;
   Alcotest.(check bool) "a stopped refresh records its remaining read as interrupted" true
-    (Progress.counts (progress ()) = (0, 2, 1, 1)
-     && Progress.settled_sources ~outcome:Progress.Interrupted (progress ()) = [goals]);
+    (Progress.counts (progress ()) = Progress.{pending=0;received=2;partial=0;failed=1;interrupted=1}
+     && Progress.settled_sources ~completion:Progress.Interrupted_read (progress ()) = [goals]);
   Alcotest.(check (float 0.)) "total duration uses the same monotonic interval" 90.
     Yojson.Safe.Util.(Progress.to_json (progress ()) |> member "elapsed_ms" |> to_number);
   let finished = state.http_refresh_progress in
   deliver (Progress.Started (Progress.Identity_after, 110_000_000L));
   Alcotest.(check bool) "late diagnostics cannot reopen a completed refresh" true
     (state.http_refresh_progress = finished)
+
+let test_refresh_progress_retains_partial_runtime_receipt () =
+  let open Masc_tui_types in
+  let module Progress = Http_refresh_progress in
+  let state = create_state ~workspace:"partial" ~local_base_path:"/workspace/partial"
+      ~port:0 ~refresh_interval:0. () in
+  let ticket = Http_refresh_order.dispatch state.http_refresh_order in
+  let authority = state.workspace_authority and identity = state.workspace_identity in
+  let needs = {nothing with needs_runtime_quota=true} in
+  let reads,_ = Surface_read_order.dispatch ~kind:Surface_read_order.Full ~needs
+    ~started_ns:10_000_000L state.http_surface_reads in
+  state.http_surface_reads <- reads;
+  begin_http_refresh_state state ~ticket ~started_ns:10_000_000L;
+  let deliver hp_event = accept_http_progress state {hp_ticket=ticket;hp_authority=authority;hp_event} in
+  let progress () = match state.http_refresh_progress with
+    | Some (_,progress) -> progress | None -> Alcotest.fail "partial receipt was lost" in
+  let runtime = Progress.Surface_data Surface_read_order.Runtime_quota in
+  let board = Progress.Surface_data Surface_read_order.Board in
+  deliver (Progress.Started (runtime,20_000_000L));
+  deliver (Progress.Started (board,21_000_000L));
+  let partial = Progress.of_runtime_quota (Ok [],Error "usage unavailable") in
+  deliver (Progress.Completed (runtime,30_000_000L,partial));
+  Alcotest.(check bool) "partial reader is neither full success nor total failure" true
+    (Progress.counts (progress ())=Progress.{pending=1;received=0;partial=1;failed=0;interrupted=0}
+     && Progress.settled_sources ~completion:Progress.Partial (progress ())=[runtime]);
+  (match Progress.partial_readings (progress ()) with
+   | [(_,parts)] -> Alcotest.(check bool) "both actual component outcomes remain joined" true
+       (Progress.components parts=[Progress.Runtime_catalogue,Progress.Part_received;
+                                  Progress.Provider_windows,Progress.Part_failed])
+   | readings -> Alcotest.failf "expected one partial reader, got %d" (List.length readings));
+  let json = Progress.to_json (progress ()) in
+  let runtime_json = List.hd Yojson.Safe.Util.(json |> member "sources" |> to_list) in
+  Alcotest.(check string) "diagnostic protocol retains partial completion" "partial"
+    Yojson.Safe.Util.(runtime_json |> member "status" |> to_string);
+  let components = Yojson.Safe.Util.(runtime_json |> member "components" |> to_list) in
+  let component_status component =
+    let name = Progress.component_name component in
+    List.find_map (fun fields -> if Yojson.Safe.Util.member "component" fields=`String name
+      then Some (Yojson.Safe.Util.member "status" fields) else None) components in
+  Alcotest.(check bool) "serialized component receipts retain which result succeeded and failed" true
+    (component_status Progress.Runtime_catalogue=Some (`String "received")
+     && component_status Progress.Provider_windows=Some (`String "failed"));
+  Alcotest.(check bool) "component receipts do not invent separate completion clocks" true
+    (List.for_all (fun component -> Yojson.Safe.Util.member "elapsed_ms" component=`Null) components);
+  Alcotest.(check bool) "diagnostics do not authorize a workspace or settle dataset ownership" true
+    (state.workspace_identity=identity && state.runtime_catalog=[]
+     && Surface_read_order.pending ~needs state.http_surface_reads=[Surface_read_order.Runtime_quota]);
+  let original = state.http_refresh_progress in
+  deliver (Progress.Completed (runtime,35_000_000L,Progress.Received));
+  Alcotest.(check bool) "a duplicate receipt cannot replace observed partial evidence" true
+    (state.http_refresh_progress=original);
+  finish_http_refresh_state ~finished_ns:40_000_000L state;
+  Alcotest.(check bool) "unfinished sibling is interrupted while the partial receipt survives" true
+    (Progress.counts (progress ())=Progress.{pending=0;received=0;partial=1;failed=0;interrupted=1}
+     && Progress.settled_sources ~completion:Progress.Interrupted_read (progress ())=[board])
+
+let test_composed_refresh_receipts_preserve_all_availability_cases () =
+  let open Masc_tui_types in
+  let module Progress = Http_refresh_progress in
+  let runtime = Progress.Surface_data Surface_read_order.Runtime_quota
+  and board = Progress.Surface_data Surface_read_order.Board in
+  let cases =
+    [runtime,Progress.of_runtime_quota (Ok (),Ok ()),Progress.Complete;
+     runtime,Progress.of_runtime_quota (Ok (),Error "usage"),Progress.Partial;
+     runtime,Progress.of_runtime_quota (Error "catalogue",Ok ()),Progress.Partial;
+     runtime,Progress.of_runtime_quota (Error "catalogue",Error "usage"),Progress.Failed_read;
+     board,Progress.of_board (Ok (),Ok ()),Progress.Complete;
+     board,Progress.of_board (Ok (),Error "hearths"),Progress.Partial;
+     board,Progress.of_board (Error "posts",Ok ()),Progress.Partial;
+     board,Progress.of_board (Error "posts",Error "hearths"),Progress.Failed_read;
+     Progress.Keepers,Progress.of_keeper_roster (Ok ((),Ok ())),Progress.Complete;
+     Progress.Keepers,Progress.of_keeper_roster (Ok ((),Error "Candle")),Progress.Partial;
+     Progress.Keepers,Progress.of_keeper_roster (Error "roster unavailable"),Progress.Failed_read] in
+  List.iter (fun (source,outcome,expected) ->
+    let reading = Progress.start ~started_ns:1L
+      |> fun state -> Progress.observe state (Progress.Started (source,2L))
+      |> fun state -> Progress.observe state (Progress.Completed (source,3L,outcome))
+      |> Progress.finish ~finished_ns:4L in
+    Alcotest.(check bool) "logical reader preserves the composed availability verdict" true
+      (Progress.settled_sources ~completion:expected reading=[source]);
+    Alcotest.(check bool) "component evidence exists only when the producer returned those results" true
+      (match outcome with
+       | Progress.Composed parts -> List.length (Progress.components parts)=2
+       | Progress.Failed -> source=Progress.Keepers
+       | Progress.Received | Progress.Interrupted -> false)) cases
 
 let test_refresh_progress_rejects_old_request_and_workspace () =
   let open Masc_tui_types in
@@ -3350,6 +3435,10 @@ let () =
             test_early_roster_preserves_read_ownership
         ; Alcotest.test_case "refresh observations retain independent source outcomes" `Quick
             test_refresh_progress_tracks_independent_sources_and_interruption
+        ; Alcotest.test_case "refresh observations retain partial receipts without granting dataset authority" `Quick
+            test_refresh_progress_retains_partial_runtime_receipt
+        ; Alcotest.test_case "composed refresh receipts retain success, partial and failure states" `Quick
+            test_composed_refresh_receipts_preserve_all_availability_cases
         ; Alcotest.test_case "refresh observations reject superseded source authority" `Quick
             test_refresh_progress_rejects_old_request_and_workspace
         ; Alcotest.test_case "early questions settle once without granting authority" `Quick

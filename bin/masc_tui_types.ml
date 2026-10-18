@@ -133,7 +133,16 @@ module Http_refresh_progress = struct
     | Identity_before | Overview | Approvals | Questions | Keepers
     | Surface_data of Surface_read_source.t
     | Identity_after
-  type outcome = Received | Failed | Interrupted
+  type part_outcome = Part_received | Part_failed
+  type component = Runtime_catalogue | Provider_windows | Board_posts | Board_hearths
+    | Keeper_roster | Keeper_candle
+  type composition =
+    | Runtime_parts of { catalogue : part_outcome; usage : part_outcome }
+    | Board_parts of { posts : part_outcome; hearths : part_outcome }
+    | Keeper_parts of { roster : part_outcome; candle : part_outcome }
+  type outcome = Received | Failed | Interrupted | Composed of composition
+  type completion = Complete | Partial | Failed_read | Interrupted_read
+  type counts = { pending : int; received : int; partial : int; failed : int; interrupted : int }
   type status = Pending | Settled of { finished_ns : int64; outcome : outcome }
   type reading = { source : source; started_ns : int64; status : status }
   type phase = In_flight | Finished of int64
@@ -150,6 +159,46 @@ module Http_refresh_progress = struct
     | Keepers -> "keepers"
     | Surface_data source -> Surface_read_source.name source
     | Identity_after -> "workspace verification"
+
+  let of_result = function Ok _ -> Received | Error _ -> Failed
+  let part_of_result = function Ok _ -> Part_received | Error _ -> Part_failed
+
+  let of_runtime_quota (catalogue,usage) =
+    Composed (Runtime_parts {catalogue=part_of_result catalogue;usage=part_of_result usage})
+  let of_board (posts,hearths) =
+    Composed (Board_parts {posts=part_of_result posts;hearths=part_of_result hearths})
+  let of_keeper_roster = function
+    | Ok (_,candle) -> Composed (Keeper_parts {roster=Part_received;candle=part_of_result candle})
+    | Error _ -> Failed
+
+  let composition_pair = function
+    | Runtime_parts {catalogue;usage} -> catalogue,usage
+    | Board_parts {posts;hearths} -> posts,hearths
+    | Keeper_parts {roster;candle} -> roster,candle
+
+  let completion = function
+    | Received -> Complete | Failed -> Failed_read | Interrupted -> Interrupted_read
+    | Composed parts ->
+        (match composition_pair parts with
+         | Part_received,Part_received -> Complete
+         | Part_failed,Part_failed -> Failed_read
+         | Part_received,Part_failed | Part_failed,Part_received -> Partial)
+
+  let completion_name = function
+    | Complete -> "received" | Partial -> "partial"
+    | Failed_read -> "failed" | Interrupted_read -> "interrupted"
+
+  let components = function
+    | Runtime_parts {catalogue;usage} -> [Runtime_catalogue,catalogue;Provider_windows,usage]
+    | Board_parts {posts;hearths} -> [Board_posts,posts;Board_hearths,hearths]
+    | Keeper_parts {roster;candle} -> [Keeper_roster,roster;Keeper_candle,candle]
+
+  let component_name = function
+    | Runtime_catalogue -> "runtime catalogue" | Provider_windows -> "provider windows"
+    | Board_posts -> "Board posts" | Board_hearths -> "Board hearths"
+    | Keeper_roster -> "Keeper roster" | Keeper_candle -> "Candle"
+
+  let part_name = function Part_received -> "received" | Part_failed -> "failed"
 
   let start ~started_ns = { started_ns; phase = In_flight; readings = [] }
 
@@ -178,43 +227,62 @@ module Http_refresh_progress = struct
             | Settled _ -> reading) state.readings }
 
   let counts state =
-    List.fold_left (fun (pending, received, failed, interrupted) reading ->
-      match reading.status with
-      | Pending -> pending + 1, received, failed, interrupted
-      | Settled { outcome = Received; _ } -> pending, received + 1, failed, interrupted
-      | Settled { outcome = Failed; _ } -> pending, received, failed + 1, interrupted
-      | Settled { outcome = Interrupted; _ } -> pending, received, failed, interrupted + 1)
-      (0, 0, 0, 0) state.readings
+    List.fold_left (fun counts reading -> match reading.status with
+      | Pending -> {counts with pending=counts.pending+1}
+      | Settled {outcome;_} ->
+          (match completion outcome with
+           | Complete -> {counts with received=counts.received+1}
+           | Partial -> {counts with partial=counts.partial+1}
+           | Failed_read -> {counts with failed=counts.failed+1}
+           | Interrupted_read -> {counts with interrupted=counts.interrupted+1}))
+      {pending=0;received=0;partial=0;failed=0;interrupted=0} state.readings
 
   let pending_sources state =
     List.filter_map (fun reading -> match reading.status with
       | Pending -> Some reading.source
       | Settled _ -> None) state.readings
 
-  let settled_sources ~outcome state =
+  let settled_sources ~completion:expected state =
     List.filter_map (fun reading -> match reading.status with
       | Pending -> None
-      | Settled {outcome = observed; _} ->
-          if observed = outcome then Some reading.source else None) state.readings
+      | Settled {outcome; _} ->
+          if completion outcome=expected then Some reading.source else None) state.readings
+
+  let partial_readings state =
+    List.filter_map (fun reading -> match reading.status with
+      | Settled {outcome=Composed parts;_} ->
+          (match completion (Composed parts) with
+           | Partial -> Some (reading.source,parts)
+           | Complete | Failed_read | Interrupted_read -> None)
+      | Pending | Settled {outcome=(Received | Failed | Interrupted);_} -> None) state.readings
 
   let to_json state =
     let elapsed_ms start finish =
       Int64.to_float (Int64.max 0L (Int64.sub finish start)) /. 1_000_000. in
     let reading_to_json reading =
-      let status, elapsed = match reading.status with
-        | Pending -> "pending", `Null
+      let status, elapsed, component_fields = match reading.status with
+        | Pending -> "pending", `Null, []
         | Settled { finished_ns; outcome } ->
-            (match outcome with
-             | Received -> "received" | Failed -> "failed" | Interrupted -> "interrupted"),
-            `Float (elapsed_ms reading.started_ns finished_ns) in
-      `Assoc ["source", `String (source_name reading.source);
-        "status", `String status; "elapsed_ms", elapsed] in
+            let component_fields = match outcome with
+              | Received | Failed | Interrupted -> []
+              | Composed parts ->
+                  ["components",`List (List.map (fun (component,outcome) ->
+                    `Assoc ["component",`String (component_name component);"status",`String (part_name outcome)])
+                    (components parts))] in
+            completion_name (completion outcome),
+            `Float (elapsed_ms reading.started_ns finished_ns), component_fields in
+      `Assoc (["source", `String (source_name reading.source);
+        "status", `String status; "elapsed_ms", elapsed] @ component_fields) in
+    let totals = counts state in
     `Assoc ["scope", `String "logical full-refresh readers";
       "started_ns", `String (Int64.to_string state.started_ns);
       "elapsed_ms", (match state.phase with
         | In_flight -> `Null
         | Finished finished_ns -> `Float (elapsed_ms state.started_ns finished_ns));
+      "counts", `Assoc ["pending",`Int totals.pending;"received",`Int totals.received;
+        "partial",`Int totals.partial;"failed",`Int totals.failed;"interrupted",`Int totals.interrupted];
       "sources", `List (List.map reading_to_json state.readings)]
+
 end
 
 (** TUI shared types — split from masc_tui.ml (#3808) *)

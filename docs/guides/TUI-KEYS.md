@@ -140,6 +140,11 @@ Overview keeps catalogue and usage availability independent: valid usage remains
 available after catalogue validation fails, and usage failure leaves healthy
 catalogue rows usable. Both observations belong to the same response; a failed
 usage read does not borrow a prior response's quota identity.
+Full-refresh progress labels a composed read as partial when one returned result
+failed, naming both failed and received components. This covers Runtime
+catalogue/usage, Board posts/hearths and available Keeper roster/Candle results.
+Partial is separate from full receipt; unfinished reads remain interrupted when
+the refresh stops. These notices do not grant action authority or confirm Task completion.
 
 ## Usage
 

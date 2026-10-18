@@ -209,7 +209,7 @@ let test_reports_revision_snapshot_bytes_and_latest_delta () =
   let keeper = keeper_obj "solo" json in
   Alcotest.(check string)
     "schema"
-    "keeper.memory_os.current_health.v7"
+    "keeper.memory_os.current_health.v8"
     (string_field "schema" json);
   Alcotest.(check int) "revision" 2 (int_field "revision" keeper);
   Alcotest.(check int) "facts" 2 (int_field "facts" keeper);
@@ -805,6 +805,69 @@ let test_context_cycle_separates_saved_and_prepared () =
    request pays for: it starts at the cut and carries every atom up to the
    position. The cut alone cannot say that, so the position is read from its
    own file and reported beside it (#37793). *)
+let test_unread_evidence_is_observed_without_publication () =
+  let module H = Masc.Keeper_librarian_unread in
+  let module S = Masc.Librarian_continuity_snapshot in
+  let module B = Masc.Keeper_turn_boundaries in
+  let module D = Masc.Tui_decode_memory_health in
+  let base = fresh_dir "masc-unread-health" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base) @@ fun () ->
+  let config = Masc.Workspace.default_config base in
+  let keeper_name = "unread-observed" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
+  write_keeper_config ~keepers_dir ~keeper_id:keeper_name ();
+  let ledger = Current.unread_ledger_path ~keepers_dir ~keeper_id:keeper_name in
+  Alcotest.(check bool) "an absent ledger is only observed" true
+    (Current.read_unread_messages ~keepers_dir ~keeper_id:keeper_name = Ok []);
+  Alcotest.(check bool) "reading absence creates no ledger" false (Sys.file_exists ledger);
+  let trace_id = "unread-health-trace" in
+  let messages = [Agent_core.Types.make_message ~role:Agent_core.Types.User
+    [Agent_core.Types.Text "PRIVATE_UNREAD_ORIGINAL"]] in
+  let position = B.position_of_messages messages |> require_ok in
+  let turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1 in
+  let lines = [1, Ok {B.recorded_at=test_now;event=B.Turn_ended
+    {task_context=Masc.Keeper_turn_task_context.No_task;turn_ref;
+     history_at_start=B.Fresh_history;position}}] in
+  let atom = H.for_atom ~trace_id ~history_start_boundary_line:1 ~atom:0 ~message_in_atom:0
+      ~messages ~reasons:[Masc.Keeper_librarian_input_refusal.Request_body_refused] |> require_ok in
+  let official = H.for_official_turn ~turn_ref ~boundary_line:2 ~message_in_turn:0 ~messages
+      ~reasons:[Masc.Keeper_librarian_input_refusal.Input_capacity] |> require_ok in
+  let snapshot = S.capture ~unread_messages:[atom] ~trace_id ~lines ~messages
+      ~working_state:"PRIVATE_DERIVED_STATE" |> Result.map_error S.error_to_string |> require_ok in
+  let path = Masc.Keeper_librarian_continuity.path ~config ~keeper_name in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  Yojson.Safe.to_file path (S.to_json snapshot);
+  let range : Current.official_range_id = {receipt_scope="health-fixture";
+    after_boundary_line=0;turns=[2,turn_ref];unread_messages=[official]} in
+  ignore (Current.apply_disposition ~keepers_dir ~keeper_id:keeper_name ~now:test_now
+    ~source ~revisions:[] ~absorbed:[] ~official_range_id:range ~new_claims:[] () |> require_ok);
+  ignore (Current.committed_unread_messages ~keepers_dir ~keeper_id:keeper_name |> require_ok);
+  let files = [path;ledger;Current.durable_range_receipt_path ~keepers_dir ~keeper_id:keeper_name] in
+  let before = List.map Fs_compat.load_file files in
+  let reading () =
+    let json = Health.keeper_memory_health_http_json ~base_path:base in
+    let decoded = D.decode_memory_health_snapshot json |> require_ok in
+    match List.find_opt (fun (row : D.memory_keeper_health) -> row.mkh_keeper_id=keeper_name) decoded.mhs_keepers with
+    | Some row -> row.mkh_context_cycle
+    | None -> Alcotest.fail "production health projection lost the Keeper row" in
+  let observed = reading () in
+  Alcotest.(check bool) "HTTP projection reaches TUI with exact snapshot evidence" true
+    (observed.mcc_unread_snapshot = Ok [atom]);
+  Alcotest.(check bool) "official evidence remains separate from the snapshot" true
+    (observed.mcc_unread_memory = Ok [official]);
+  Alcotest.(check (list string)) "diagnostics do not rewrite stores" before
+    (List.map Fs_compat.load_file files);
+  Fs_compat.save_file ledger "{";
+  let partial = reading () in
+  Alcotest.(check bool) "unreadable Memory does not hide known snapshot evidence" true
+    (partial.mcc_unread_memory = Error () && partial.mcc_unread_snapshot = Ok [atom]);
+  Fs_compat.save_file ledger (List.nth before 1);
+  Fs_compat.save_file path "{";
+  let partial = reading () in
+  Alcotest.(check bool) "unreadable snapshot does not hide known Memory evidence" true
+    (partial.mcc_unread_snapshot = Error () && partial.mcc_unread_memory = Ok [official])
+;;
+
 let test_context_cycle_reads_the_librarian_position_beside_the_cut () =
   let module S = Masc.Librarian_continuity_snapshot in
   let module B = Masc.Keeper_turn_boundaries in
@@ -1117,7 +1180,9 @@ let () =
   Alcotest.run
     "server_dashboard_http_keeper_memory_health"
     [ ( "current snapshot"
-      , [ Alcotest.test_case "saved versus prepared context" `Quick
+      , [ Alcotest.test_case "unread evidence is observed without publication" `Quick
+            test_unread_evidence_is_observed_without_publication
+        ; Alcotest.test_case "saved versus prepared context" `Quick
             test_context_cycle_separates_saved_and_prepared
         ; Alcotest.test_case "the Librarian position is read beside the cut" `Quick
             test_context_cycle_reads_the_librarian_position_beside_the_cut

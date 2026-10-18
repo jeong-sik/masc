@@ -2870,6 +2870,8 @@ let committed_official_range ~keepers_dir ~keeper_id ~receipt_scope =
     | Some _ | None -> None)
 ;;
 
+let read_unread_messages = Keeper_librarian_unread_ledger.read
+
 let committed_unread_messages ~keepers_dir ~keeper_id =
   with_committed_receipts ~keepers_dir ~keeper_id
     (fun _snapshot _receipts -> Keeper_librarian_unread_ledger.read ~keepers_dir ~keeper_id)

@@ -140,6 +140,11 @@ type memory_context_cycle = {
       (** Where a snapshot being rewritten from atom 0 has to reach before a
           request starts from it. Always past [mcc_saved]'s cut; [None] on a
           snapshot that is not being rewritten. *)
+  mcc_unread_snapshot : (Keeper_librarian_unread.t list, unit) result;
+  mcc_unread_memory : (Keeper_librarian_unread.t list, unit) result;
+      (** Independent stored evidence readings; errors never mean an empty
+          list. Snapshot and cumulative Memory records can overlap. Neither
+          certifies that the whole history or the current request was read. *)
   mcc_prepared : memory_context_prepared option;
   mcc_synthesis : Keeper_continuity_observation.synthesis option;
 }

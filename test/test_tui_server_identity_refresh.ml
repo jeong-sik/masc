@@ -2326,6 +2326,109 @@ let test_board_delivery_preserves_workspace_and_refresh_guards () =
       (not (take observed Surface_read_order.Board_hearths)
        && state.http_surface_reads==withdrawn)) withdrawals
 
+let test_board_census_distinguishes_unread_loading_empty_and_failure () =
+  let open Masc_tui_types in
+  let unread=create_state ~workspace:"census" ~local_base_path:"/workspace/census"
+    ~port:0 ~refresh_interval:0. () in
+  Alcotest.(check bool) "unread census has no observed zero or total" true
+    (board_census_reading unread=(Masc_tui_fetched.Absent,false)
+     && board_census_holding unread=None);
+  List.iter (fun result ->
+    let state,observed,ticket,authority,needs,request=board_dataset_fixture Surface_read_order.Navigation in
+    Alcotest.(check bool) "initial owned census is loading without an invented empty result" true
+      (board_census_reading state=(Masc_tui_fetched.Loading,true)
+       && board_census_holding state=None);
+    if not (take_early_surface_dataset state ~ticket ~authority ~identity:observed
+      ~request ~dataset:Surface_read_order.Board_hearths) then Alcotest.fail "census admission failed";
+    apply_board_census_load state result;
+    Alcotest.(check bool) "census settlement leaves posts and Planning pending" true
+      (Surface_read_order.pending ~needs state.http_surface_reads=
+        [Surface_read_order.Board;Surface_read_order.Planning]);
+    (match result with
+     | Ok census -> Alcotest.(check bool) "received empty is a known zero without a pending census" true
+         (board_census_reading state=(Masc_tui_fetched.Ready census,false)
+          && board_census_holding state=Some 0)
+     | Error detail -> Alcotest.(check bool) "first failure remains unavailable instead of empty" true
+         (board_census_reading state=(Masc_tui_fetched.Failed detail,false)
+          && board_census_holding state=None))) [Ok [];Error "census endpoint unavailable"]
+
+let test_board_census_retains_values_through_retry_failure_and_missing_result () =
+  let open Masc_tui_types in
+  let state,observed,ticket,authority,_,initial=board_dataset_fixture Surface_read_order.Full in
+  let take request dataset=take_early_surface_dataset state ~ticket ~authority ~identity:observed ~request ~dataset in
+  let census=["alpha",4;"beta",2] in
+  if not (take initial Surface_read_order.Board_hearths) then Alcotest.fail "initial census not owned";
+  apply_board_census_load state (Ok census);
+  state.board_hearth <- Some "beta";
+  Alcotest.(check bool) "received census supplies matching hearth total" true
+    (board_census_holding state=Some 2);
+  let dispatch ()=
+    let reads,request=Surface_read_order.dispatch ~kind:Surface_read_order.Navigation
+      ~needs:{nothing with needs_board=true} ~started_ns:1L state.http_surface_reads in
+    state.http_surface_reads <- reads;request in
+  let retry=dispatch () in
+  Alcotest.(check bool) "reread keeps navigation candidates but does not lend an old total" true
+    (board_census_reading state=(Masc_tui_fetched.Ready census,true)
+     && board_census_values state=census && board_census_holding state=None);
+  if not (take retry Surface_read_order.Board_hearths) then Alcotest.fail "retry census not owned";
+  apply_board_census_load state (Error "census read failed");
+  Alcotest.(check bool) "failure retains the actual census and diagnostic" true
+    (board_census_reading state=(Masc_tui_fetched.Stale (census,"census read failed"),false)
+     && board_census_values state=census && board_census_holding state=None
+     && state.board_hearth=Some "beta");
+  let missing=dispatch () in
+  Alcotest.(check bool) "retry does not erase the previous failure or retained value" true
+    (board_census_reading state=(Masc_tui_fetched.Stale (census,"census read failed"),true));
+  if not (take missing Surface_read_order.Board_posts) then Alcotest.fail "independent posts not owned";
+  finish_http_surface_read state missing;
+  Alcotest.(check bool) "collector exit without census records unavailability and keeps candidates" true
+    ((match board_census_reading state with
+      | Masc_tui_fetched.Stale (retained,_),false -> retained=census
+      | (Absent | Loading | Ready _ | Stale _ | Failed _),_ -> false)
+     && board_census_values state=census && board_census_holding state=None
+     && not (Surface_read_order.navigation_active state.http_surface_reads missing));
+  let terminal=dispatch () in
+  let datasets=take_http_surface_datasets state terminal in
+  Alcotest.(check bool) "terminal ownership reservation cannot turn an unapplied census into fresh data" true
+    (List.mem Surface_read_order.Board_hearths datasets
+     && (match board_census_reading state with
+         | Masc_tui_fetched.Stale (retained,_),false -> retained=census
+         | (Absent | Loading | Ready _ | Stale _ | Failed _),_ -> false));
+  apply_board_census_load state (Ok ["beta",5]);
+  finish_http_surface_read state terminal;
+  Alcotest.(check bool) "actual admitted terminal result restores received census availability" true
+    (board_census_reading state=(Masc_tui_fetched.Ready ["beta",5],false)
+     && board_census_holding state=Some 5)
+
+let test_board_census_old_cleanup_and_workspace_withdrawal () =
+  let open Masc_tui_types in
+  let state,observed,ticket,authority,_,initial=board_dataset_fixture Surface_read_order.Full in
+  let take request=take_early_surface_dataset state ~ticket ~authority ~identity:observed
+    ~request ~dataset:Surface_read_order.Board_hearths in
+  if not (take initial) then Alcotest.fail "initial census not owned";
+  apply_board_census_load state (Ok ["old",3]);
+  let dispatch ()=
+    let reads,request=Surface_read_order.dispatch ~kind:Surface_read_order.Navigation
+      ~needs:{nothing with needs_board=true} ~started_ns:1L state.http_surface_reads in
+    state.http_surface_reads <- reads;request in
+  let retired=dispatch () in
+  let current=dispatch () in
+  finish_http_surface_read state retired;
+  Alcotest.(check bool) "old collector cannot invent failure for the current pending census" true
+    (board_census_reading state=(Masc_tui_fetched.Ready ["old",3],true)
+     && Surface_read_order.navigation_active state.http_surface_reads current);
+  if not (take current) then Alcotest.fail "current census not owned";
+  apply_board_census_load state (Ok ["current",7]);
+  finish_http_surface_read state initial;
+  Alcotest.(check bool) "old cleanup cannot downgrade a received successor observation" true
+    (board_census_reading state=(Masc_tui_fetched.Ready ["current",7],false)
+     && board_census_holding state=Some 7);
+  suspend_workspace_readings state;
+  finish_http_surface_read state current;
+  Alcotest.(check bool) "workspace withdrawal removes census values and old ownership together" true
+    (board_census_reading state=(Masc_tui_fetched.Absent,false)
+     && board_census_values state=[] && board_census_holding state=None && not (take current))
+
 let test_dataset_admission_rejects_retired_workspace_and_refresh () =
   let open Masc_tui_types in
   let state = create_state ~workspace:"datasets" ~local_base_path:"/workspace/datasets"
@@ -3611,6 +3714,12 @@ let () =
             test_board_delivery_supersedes_both_parts_without_replaying_early_data
         ; Alcotest.test_case "Board delivery preserves workspace and refresh guards" `Quick
             test_board_delivery_preserves_workspace_and_refresh_guards
+        ; Alcotest.test_case "Board census distinguishes unread loading empty and failure" `Quick
+            test_board_census_distinguishes_unread_loading_empty_and_failure
+        ; Alcotest.test_case "Board census retains observations through retry and missing result" `Quick
+            test_board_census_retains_values_through_retry_failure_and_missing_result
+        ; Alcotest.test_case "Board census preserves successor and workspace ownership" `Quick
+            test_board_census_old_cleanup_and_workspace_withdrawal
         ; Alcotest.test_case "dataset admission rejects retired workspace and refresh" `Quick
             test_dataset_admission_rejects_retired_workspace_and_refresh
         ; Alcotest.test_case "answer followup retains exact current source observations" `Quick

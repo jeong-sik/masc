@@ -1,6 +1,6 @@
 ---
 name: tui-chat-design
-description: "MASC TUI의 채팅·입력·로딩·진행 상태, 복합 조회의 부분 수신·하위 완료 관측과 Board 독립 데이터 반영, Keeper·Work·로그·질문 원본의 비동기 조회, Runtime·Overview 목록/사용량의 공유 해석, Keeper 설정·Sandbox 단축키·Runtime 폼·원문 저장과 설정 snapshot 해석을 바꿀 때 쓴다. 원본 입력·revision·요청 소유권, 마지막 관측과 부분 실패, 준비 작업·상태 반영·paint 증거를 구분하는 규칙이다."
+description: "MASC TUI의 채팅·입력·로딩·진행 상태, 복합 조회의 부분 수신·하위 완료 관측과 Board 독립 데이터·census 가용성, Keeper·Work·로그·질문 원본의 비동기 조회, Runtime·Overview 목록/사용량의 공유 해석, Keeper 설정·Sandbox 단축키·Runtime 폼·원문 저장과 설정 snapshot 해석을 바꿀 때 쓴다. 원본 입력·revision·요청 소유권, 마지막 관측과 부분 실패, 준비 작업·상태 반영·paint 증거를 구분하는 규칙이다."
 ---
 
 # 대화를 먼저 읽는 채팅
@@ -124,6 +124,15 @@ description: "MASC TUI의 채팅·입력·로딩·진행 상태, 복합 조회�
   두 슬롯 모두 새 owner로 바꾸고, terminal bundle은 아직 반영하지 않은 슬롯만 처리한다.
   기존 글 cursor·초안과 census의 마지막 정상 관측 유지 정책을 보존한다. UI 반영 로그는
   source와 dataset을 구분하며 paint·실측 속도나 원자적 Board snapshot으로 부르지 않는다.
+- census는 raw 목록 대신 기존 Fetched view로 미조회·최초 읽기·수신·이전 값과 실패·값 없는
+  실패를 표현한다. 진행 여부는 기존 hearth dataset 소유권에서 읽으며 별도 요청 세대나
+  타이머를 만들지 않는다. 재조회·실패 중 값은 목록·팔레트·hearth 이동에서 함께 유지한다.
+  header·reader index의 전체 수치는 수신 후 census 대기가 없는 경우만 쓰고, 나머지는
+  census 줄·팔레트에서 마지막 관측임을 밝힌다. 정상 empty와 조회 실패를 같은 0으로 만들지 않는다.
+- terminal이 census 슬롯을 가져갔지만 실제 반영하지 못했거나, 소유 collector가 결과 없이
+  끝나면 미수신을 unavailable로 남긴다. 이전 collector가 현재 슬롯을 소유하지 않으면
+  새 관측을 실패로 바꾸지 않는다. workspace 철회는 census 값과 후보도 지워 다른 Board
+  데이터와 같은 경계를 지킨다. 이 상태·문구는 worker 종료나 paint·속도 증거가 아니다.
 
 ## Runtime 폼 저장
 

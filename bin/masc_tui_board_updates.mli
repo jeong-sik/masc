@@ -4,10 +4,6 @@
 val leave_board_detail : Masc_tui_types.state -> unit
 (** Clear detail selection, history and both reading scroll positions. *)
 
-val apply_board_hearths_load :
-  Masc_tui_types.state -> ((string * int) list, string) result -> unit
-(** A failed census retains the last successful reading. *)
-
 val apply_board_list_load :
   Masc_tui_types.state -> remember_error:(string -> unit) ->
   (Masc_tui_types.board_post list, string) result -> unit

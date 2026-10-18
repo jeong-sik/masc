@@ -12507,11 +12507,6 @@ let load_http_surfaces ~surface_request ~on_initial_identity ~on_progress ~on_da
           approval_ticket }
   end
 
-let take_http_surface_datasets state request =
-  let reading, datasets = Surface_read_order.take state.http_surface_reads request in
-  state.http_surface_reads <- reading;
-  datasets
-
 let apply_http_scoped_data state ~datasets results =
   let outcomes = ref [] in
   let apply dataset ~received load reading =
@@ -12532,7 +12527,7 @@ let apply_http_scoped_data state ~datasets results =
            ~current_error:state.board_list_error
            ~set_error:(fun value -> state.board_list_error <- value) err))
     results.http_board;
-  apply Surface_read_order.Board_hearths ~received:Result.is_ok (Masc_tui_board_updates.apply_board_hearths_load state) results.http_board_hearths;
+  apply Surface_read_order.Board_hearths ~received:Result.is_ok (Masc_tui_types.apply_board_census_load state) results.http_board_hearths;
   apply Surface_read_order.Planning_data ~received:Result.is_ok (apply_planning_load state) results.http_planning;
     apply Surface_read_order.Overview_goals_data ~received:Result.is_ok (apply_overview_goals_load state) results.http_overview_goals
   end;
@@ -12559,7 +12554,7 @@ let apply_http_dataset state = function
         remember_surface_error state ~surface:"board list"
           ~current_error:state.board_list_error
           ~set_error:(fun value -> state.board_list_error <- value) err) board
-  | Dataset_board_hearths hearths -> Masc_tui_board_updates.apply_board_hearths_load state hearths
+  | Dataset_board_hearths hearths -> Masc_tui_types.apply_board_census_load state hearths
   | Dataset_planning result -> apply_planning_load state result
   | Dataset_system_logs result -> apply_system_logs_load state result
   | Dataset_fleet_safety result -> apply_fleet_safety_load state result
@@ -12709,6 +12704,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.board_compose_attach_input <- None;
   state.board_post_inflight <- false;
   state.board_posts <- [];
+  state.board_census <- Masc_tui_fetched.Absent;
   state.board_detail <- Board_detail.clear state.board_detail;
   state.board_list_reading <- Board_list_unread;
   state.board_list_error <- None;
@@ -13246,6 +13242,7 @@ let apply_confirmed_server_identity_reading state ~mailbox reading =
     let reason = "workspace identity is unverified; decisions require a fresh matching read" in
     apply_approvals_load state (Error reason);
     state.board_posts <- [];
+    state.board_census <- Masc_tui_fetched.Absent;
     state.board_detail <- Board_detail.clear state.board_detail;
     state.board_list_reading <- Board_list_unread;
     state.board_list_error <- Some reason;
@@ -14385,7 +14382,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
         Fun.protect
           ~finally:(fun () ->
             refresh_inflight := false;
-            state.http_surface_reads <- Surface_read_order.finish state.http_surface_reads surface_request;
+            Masc_tui_types.finish_http_surface_read state surface_request;
             finish_observed_http_refresh state ~ticket:refresh_ticket)
           (fun () ->
              apply_http_refresh_outcome state ~mailbox
@@ -14865,7 +14862,7 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight
     | None ->
         Fun.protect
           ~finally:(fun () ->
-            state.http_surface_reads <- Surface_read_order.finish state.http_surface_reads surface_request;
+            Masc_tui_types.finish_http_surface_read state surface_request;
             refresh_inflight := Surface_read_order.navigation_in_flight state.http_surface_reads)
           (fun () ->
              match read_refresh () with
@@ -16184,7 +16181,7 @@ let handle_board_compose_key state ~mailbox ?restore ?reenter (key : string) : b
   | "h" | "H" when state.board_compose_armed && Option.is_none state.board_compose_reply_to ->
       state.board_compose_hearth <-
         Board_hearth.next ~current:state.board_compose_hearth
-          ~census:state.board_hearths;
+          ~census:(board_census_values state);
       (* Keep armed so the operator can continue cycling hearths or press 's' to send *)
       report_action state "system"
         (match state.board_compose_hearth with
@@ -17334,7 +17331,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
             Surface_read_order.navigation_active state.http_surface_reads request in
       if active then begin
         Fun.protect ~finally:(fun () ->
-          state.http_surface_reads <- Surface_read_order.finish state.http_surface_reads request;
+          Masc_tui_types.finish_http_surface_read state request;
           http_scoped_refresh_inflight :=
             Surface_read_order.navigation_in_flight state.http_surface_reads)
           (fun () -> apply_async_message ~input_pending state ~base_path ~http_refresh_inflight
@@ -30836,7 +30833,7 @@ and is loaded on demand through keeper_skill.
               page in hand. *)
            state.board_hearth <-
              (if key = Some "F" then Board_hearth.previous else Board_hearth.next)
-               ~current:state.board_hearth ~census:state.board_hearths;
+               ~current:state.board_hearth ~census:(board_census_values state);
            state.board_cursor <- 0;
            state.board_mode <- Board_list;
            report_action state "system"

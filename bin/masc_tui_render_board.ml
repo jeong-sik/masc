@@ -247,35 +247,27 @@ let board_heading_with_tail ~cols head tail =
    with, so the two cannot drift apart. *)
 let census_separator = "  \xc2\xb7  "
 
-(* What the board holds behind this page: the census over the whole board, or
-   over the hearth being read when one is narrowed, since the listing itself
-   is narrowed server-side. A hearth the census has not counted leaves the
-   page to speak for itself.
-
-   The list's title and the reader's index both state it, so it is read once
-   here rather than derived twice. *)
-let board_holding (state : state) =
-  match state.board_hearth with
-  | Some hearth -> List.assoc_opt hearth state.board_hearths
-  | None -> (
-      match state.board_hearths with
-      | [] -> None
-      | census ->
-          Some (List.fold_left (fun sum (_, count) -> sum + count) 0 census))
-
+(* Retained values stay readable here, with their availability. The title and
+   reader index only borrow totals from a received, non-pending census. *)
 let board_hearth_census_line ~cols (state : state) =
-  match state.board_hearths with
-  | [] ->
-      Ansi.dim
-      (* The row above this one always names H, so the empty census says
-         only what is its own to say: that nothing is counted yet, and
-         that f walks hearths once something is. It used to open with
-         "H:choose hearth" too, which put that key on two adjacent rows
-         whenever the board had no counted hearth. *)
-      ^ board_heading_with_tail ~cols "  f/F:next/previous · none counted yet"
-          " \xe2\x80\x94 f narrows once they are"
-      ^ Ansi.reset
-  | census ->
+  let observation,pending=board_census_reading state in
+  let status=match observation with
+    | Masc_tui_fetched.Absent -> Some (if pending then "reading census" else "census not read")
+    | Loading -> Some "reading census"
+    | Ready _ -> if pending then Some "refreshing; last observed" else None
+    | Stale (_,detail) -> Some ((if pending then "refreshing; " else "")
+        ^ "last observed; unavailable: " ^ Terminal_text.single_line detail)
+    | Failed detail -> Some ((if pending then "retrying; " else "")
+        ^ "unavailable: " ^ Terminal_text.single_line detail) in
+  let tone=match observation with
+    | Masc_tui_fetched.Stale _ | Failed _ -> Theme.bad ()
+    | Absent | Loading | Ready _ -> Ansi.dim in
+  let notice text = tone
+    ^ Message_layout.truncate_middle (framed_inner_width cols) ("  hearths · " ^ text) ^ Ansi.reset in
+  match Masc_tui_fetched.value observation with
+  | None -> notice (match status with Some text -> text | None -> "census not observed")
+  | Some [] -> notice (match status with Some text -> "last census empty; " ^ text | None -> "census empty")
+  | Some census ->
       let total = List.fold_left (fun sum (_, count) -> sum + count) 0 census in
       (* Banded over the whole census, then cut to what fits. Banding the
          visible slice would rank each hearth against the four that happened
@@ -314,12 +306,16 @@ let board_hearth_census_line ~cols (state : state) =
          hearths ran past the frame and "198 posts" -- the reading the row
          ends on -- was cut to "19". *)
       let cells = Message_layout.display_width in
-      let label = "hearths" in
-      let lead = "  " ^ label ^ " " in
       let tail =
         Printf.sprintf "   %s" (Masc_tui_message_layout.count_noun total "post")
       in
       let dropped_note count = Printf.sprintf "%s+%d" census_separator count in
+      let label=match status with
+        | None -> "hearths"
+        | Some text -> Message_layout.truncate_middle
+            (max 0 (framed_inner_width cols - cells "   " - cells tail
+              - cells (dropped_note (List.length hearths)))) ("hearths · " ^ text) in
+      let lead = "  " ^ label ^ " " in
       let room = framed_inner_width cols - cells lead - cells tail in
       (* The hearths that fit in [budget] cells, in census order, and how many
          are left over. *)
@@ -359,7 +355,7 @@ let board_hearth_census_line ~cols (state : state) =
         List.map entry kept
         |> String.concat (Ansi.dim ^ census_separator ^ Ansi.reset)
       in
-      Printf.sprintf "  %s%s%s %s%s%s" Ansi.dim label Ansi.reset shown
+      Printf.sprintf "  %s%s%s %s%s%s" tone label Ansi.reset shown
         (match note with
          | None -> ""
          | Some note -> Printf.sprintf "%s%s%s" Ansi.dim note Ansi.reset)
@@ -401,7 +397,7 @@ let render_board_list (state : state) =
      read that failed, "(0)" read as a board with nothing on it. A count
      already on screen stays when a later refresh fails: those posts are
      still the last reading. *)
-  let holding = board_holding state in
+  let holding = board_census_holding state in
   let header = Printf.sprintf "%s %s%s  %s  %s"
     (screen_title " MASC Board")
     (match state.board_posts, board_list_page state ~error:board_list_error with
@@ -1106,7 +1102,7 @@ let board_list_pane (state : state) ~(open_post : board_post) ~rows ~cols buf =
   in
   write_list_sidebar buf ~rows ~cols ~title:"Board"
     ~focused:(state.board_focus = Left_pane)
-    ~holding:(board_holding state)
+    ~holding:(board_census_holding state)
     ~labels:(List.map format_sidebar_post state.board_posts)
     ~selected
 

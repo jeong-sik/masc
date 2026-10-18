@@ -78,3 +78,65 @@ scenarios with controlled clock/send effects. It checks late-cycle and late-note
 decisions, seek boundaries, send-time phase accounting and preparation admission.
 It does not register CoreMIDI clients, enumerate devices or send hardware MIDI;
 actual endpoint timing and delivery require a separate runtime probe.
+
+## Live UMP input backend
+
+`music-midi-live --plan LIVE_MIDI_JSON` opens selected CoreMIDI sources and
+forwards their delivered UMP messages to explicitly selected native MIDI 2.0
+destinations. This helper is a backend: the TUI and backing transport do not yet
+start it or derive its reservations. Its plan requires an explicit `reserved`
+array, including `[]` for a standalone owner:
+
+```json
+{
+  "schemaVersion": 1,
+  "routes": [
+    {"source": "1234", "destination": "5678", "scope": {"kind": "channels", "channels": [{"group": 0, "channel": 0}]}}
+  ],
+  "reserved": [{"destination": "5678", "scope": {"kind": "channels", "channels": [{"group": 0, "channel": 1}]}}]
+}
+```
+
+UIDs are exact signed decimal CoreMIDI unique IDs. Groups and channels are
+zero-based values from 0 through 15. A `channels` scope forwards only MIDI 1.0
+or MIDI 2.0 channel voice messages in the selected group/channel pairs. System,
+SysEx and other message types are filtered in this mode. `{"kind":"endpoint"}`
+forwards all complete delivered message types, including opaque words, and owns
+the whole destination. No route rewrites a message's group or channel.
+
+Overlapping destination scopes across routes or against declared reservations
+are rejected before resources open. Disjoint channels can share a destination.
+The caller must supply authoritative backing claims before integrating this
+helper with playback; accepting a plan does not establish actual backing
+ownership. A destination must report protocol 2. Input delivery requests protocol
+2, so CoreMIDI may convert a source into that delivery protocol. Preservation
+here refers to the complete delivered UMP words, not the original physical wire
+representation or an unnegotiated end-to-end MIDI 2.0 instrument connection.
+
+The callback copies variable-sized packets, including packets larger than 64
+words. It performs no device discovery, file/JSON I/O, sends or musical-state
+updates. The main lifecycle orders timestamps, retains stable admission order
+for equal timestamps, validates complete message framing and sends only due
+messages. Future timestamps remain local; they are never queued in CoreMIDI.
+The explicit resource bound is 65,536 pending words (256 KiB of raw payload),
+including callback handoffs and future timestamps. Exhaustion fails and stops
+forwarding with an error; it never hides dropped messages or imposes a cumulative
+performance duration/event budget.
+
+Stdout JSONL publishes `monitoring` only after selected resources are validated.
+It includes `deliveryProtocol`, source/destination/scope bindings,
+`forwardedMessages`, `filteredMessages` and `pendingWords`. Message counters are
+decimal strings. Stdin accepts `{"kind":"status"}` and `{"kind":"stop"}`.
+EOF, SIGINT, SIGTERM, SIGHUP, malformed commands, selected endpoint removal,
+identity/state/property failure and send errors stop this owner. There is no
+replacement device. Stop closes admission, waits for admitted callback handoffs,
+cancels future deadlines and releases acquired keys, pedals and partial SysEx
+through the existing UMP output owner before publishing `stopped`. A cleanup
+failure produces an error, `success:false` and nonzero exit; a removed instrument
+cannot receive its cleanup. The caller must await process/pipes closure as well
+as the final acknowledgement.
+
+`node tools/alphatex/native/test-live-midi.mjs` exercises production decisions
+with controlled property/send effects, without registering devices. Actual
+selected-source/destination delivery, physical instruments, synth/audio output,
+measured roundtrip latency and visible TUI use require separate evidence.

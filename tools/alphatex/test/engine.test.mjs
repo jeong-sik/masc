@@ -83,3 +83,42 @@ C3.2 G2 |
 test('invalid source does not turn into a successful empty score', () => {
   assert.throws(() => readScore(String.raw`\nonexistentDirective 123`))
 })
+
+test('solo percussion tracks match isolated parts even when they share MIDI channel 9', () => {
+  const parts = [
+    String.raw`\track "Kick" \instrument percussion :4 36 36 36 36`,
+    String.raw`\track "Snare" \instrument percussion :4 38 38 38 38`,
+  ]
+  const source = parts.join(' | ')
+  assert.deepEqual(readScore(source).score.tracks.map(track => track.playbackInfo.primaryChannel), [9, 9])
+  const pcm = (text, tracks) => {
+    const chunks = []
+    const exporter = createAudioExporter(text, { tracks })
+    for (let chunk; (chunk = exporter.render(500));) {
+      chunks.push(Buffer.from(chunk.samples.buffer, chunk.samples.byteOffset, chunk.samples.byteLength))
+    }
+    return Buffer.concat(chunks)
+  }
+  const kick = pcm(source, [0])
+  const snare = pcm(source, [1])
+  assert.deepEqual(kick, pcm(parts[0]))
+  assert.deepEqual(snare, pcm(parts[1]))
+  assert.notDeepEqual(kick, snare)
+})
+
+test('selected tracks retain global repeat and tempo order without accepting missing tracks', () => {
+  const source = String.raw`\tempo 80 \track "First" \ro :4 0.6 r r r | \tempo 120 \rc 2 0.6 r r r |
+\track "Second" :4 3.3 r r r | 5.3 r r r`
+  const full = midiForScore(source)
+  const selected = midiForScore(source, { tracks: [1] })
+  assert.equal(selected.score.tracks.length, 1)
+  assert.equal(selected.score.tracks[0].name, 'Second')
+  assert.equal(selected.score.tracks[0].index, 0)
+  assert.deepEqual(
+    selected.generator.tickLookup.masterBars.map(bar => [bar.start, bar.end, bar.masterBar.index, bar.tempoChanges]),
+    full.generator.tickLookup.masterBars.map(bar => [bar.start, bar.end, bar.masterBar.index, bar.tempoChanges]),
+  )
+  for (const tracks of [[], [-1], [2], [0.5]]) {
+    assert.throws(() => createAudioExporter(source, { tracks }), /existing score track indices/)
+  }
+})

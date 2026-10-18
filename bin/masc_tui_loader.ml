@@ -411,13 +411,17 @@ let replace_keeper_rows ~preserve_on_error (state : state)
     List.map (fun keeper -> keeper.k_name) state.keepers
   in
   let hold_created_chat =
-    match state.msg_target_keeper_name, current_keeper_mode with
-    | Some target, Some Keeper_message ->
-        (match keeper_creation_wait_for state target with
-         | Some wait -> Option.is_some keepers_error
-             || not (Local_read_order.covers state.local_keeper_read_order wait.kcw_revision)
-         | None -> false)
-    | (None | Some _), (None | Some _) -> false
+    match current_keeper_mode with
+    | Some Keeper_message ->
+        (match state.msg_target_keeper_name with
+         | None -> false
+         | Some target ->
+             match keeper_creation_wait_for state target with
+             | Some wait -> Option.is_some keepers_error
+                 || not (Local_read_order.covers state.local_keeper_read_order wait.kcw_revision)
+             | None -> false)
+    | Some (Keeper_list | Keeper_detail | Keeper_logs | Keeper_calls | Keeper_runtime_pick)
+    | None -> false
   in
   reconcile_identity_login_keepers state ~keeper_names:next_keeper_ids
     ~error:keepers_error;

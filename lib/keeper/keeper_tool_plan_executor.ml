@@ -63,7 +63,7 @@ let prepared_layer plan dependencies nodes =
   waves nodes
 ;;
 
-let schedule_with_resources ?resource_dependencies plan =
+let schedule_layers ?resource_dependencies plan layers =
   let planned_indexes =
     Keeper_tool_plan.nodes plan
     |> List.mapi (fun index node -> node.Keeper_tool_plan.id, index)
@@ -77,7 +77,7 @@ let schedule_with_resources ?resource_dependencies plan =
     | Some (_, index) -> index
     | None -> invalid_arg "validated composition plan lost a canonical node"
   in
-  Keeper_tool_plan.dependency_layers plan
+  layers
   |> List.concat_map (match resource_dependencies with
     | None -> unscheduled_layer plan
     | Some dependencies -> prepared_layer plan dependencies)
@@ -103,7 +103,7 @@ let schedule_with_resources ?resource_dependencies plan =
         (scheduled_node ~execution_mode:Agent_core.Tool_contract.Concurrent ~batch_size) nodes))
 ;;
 
-let schedule plan = schedule_with_resources plan
+let schedule plan = schedule_layers plan (Keeper_tool_plan.dependency_layers plan)
 ;;
 
 let outer_completion plan =
@@ -609,6 +609,10 @@ let execute_with_tool_use_id
       Tool_result.Proven_pre_effect
       settled
   in
+  (* The immutable graph is shared by scheduling and ready binding order.
+     Inputs, producer resources and outcomes still resolve in their own node
+     fibers; this execution-local value carries none of their authority. *)
+  let dependency_layers = Keeper_tool_plan.dependency_layers plan in
   (* Dynamic ready-wave runner: every node owns one fiber that starts when all
      of its dependencies have settled, instead of waiting for a static batch
      barrier. Ordinary serial and terminal nodes additionally follow the static
@@ -718,6 +722,9 @@ let execute_with_tool_use_id
       | None -> []
       | Some _ -> List.map (fun (node : Keeper_tool_plan.node) ->
           let promise, resolve = Eio.Promise.create () in node.id, promise, resolve) nodes in
+    let ready_order = match ready_files with
+      | None -> []
+      | Some _ -> List.concat dependency_layers in
     let find_binding node_id =
       match List.find_opt (fun (id, _, _) -> Keeper_tool_plan.Node_id.equal id node_id) bindings with
       | Some (_, promise, resolve) -> promise, resolve
@@ -728,7 +735,7 @@ let execute_with_tool_use_id
         | (node : Keeper_tool_plan.node) :: rest ->
           if Keeper_tool_plan.Node_id.equal node.id node_id then []
           else node.id :: before rest in
-      before (List.concat (Keeper_tool_plan.dependency_layers plan)) in
+      before ready_order in
     let stopped = function
       | Wave_skipped -> true
       | Wave_settled (settlement, _) -> Option.is_some settlement.cause in
@@ -900,7 +907,7 @@ let execute_with_tool_use_id
        Error { settled; cause; additional_causes=List.map snd rest;
          effect_disposition = aggregate_effect_disposition settled })
   in
-  let batches = schedule_with_resources ?resource_dependencies plan in
+  let batches = schedule_layers ?resource_dependencies plan dependency_layers in
   let journal_admission = match journal with
     | None -> Ok ()
     | Some worker -> Keeper_tool_execution_journal.validate_plan worker ~plan

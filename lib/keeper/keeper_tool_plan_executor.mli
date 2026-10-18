@@ -203,7 +203,10 @@ val execute
     down after a failed predecessor; explicit plan dependencies still apply.
     [ready_files] additionally binds producer resources after upstream outputs
     validate the actual input. Nodes publish binding before waiting for earlier
-    bindings in topological order. Earlier opaque ordinary operations settle
+    bindings in topological order. One execution-local dependency-layer value
+    supplies both scheduling and the stable ready binding order. The value
+    contains only the original immutable plan nodes, never inputs, resources,
+    settlements or permission to execute. Earlier opaque ordinary operations settle
     before a later file mutation captures its physical bindings. Real file
     conflicts and original Serial-to-Serial chains require success; ordering
     barriers alone do not propagate failure under Continue_independent.

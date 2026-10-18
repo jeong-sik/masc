@@ -1321,6 +1321,62 @@ let test_credit_cap_removal_clears_spent_warning () =
   record 100.5 {|{"data":{"limit":20,"limit_remaining":0}}|};
   expect "late older snapshot cannot resurrect the removed cap" 0 (snd (reading ()))
 
+let test_default_lane_route_counts_unassigned_keepers () =
+  let keeper name : Masc.Tui_decode.keeper =
+    { k_origin = Masc.Tui_decode.Persisted_keeper
+    ; k_name = name
+    ; k_paused = false
+    ; k_identity =
+        Ok
+          { k_trace_id = name
+          ; k_created_at = "2026-10-01T00:00:00Z"
+          ; k_updated_at = "2026-10-01T00:00:00Z"
+          }
+    ; k_activity = None
+    }
+  in
+  let names ks = List.map (fun (k : Masc.Tui_decode.keeper) -> k.k_name) ks in
+  let state = lane_state () in
+  state.keepers <- [ keeper "unassigned-imp"; keeper "explicit-solo" ];
+  state.runtime_assignments <-
+    [ { ra_keeper = "explicit-solo"
+      ; ra_source = Explicit_runtime
+      ; ra_resolution = Runtime_assignment_lane "solo"
+      }
+    ];
+  (match state.runtime_surface with
+   | None -> Alcotest.fail "missing runtime surface"
+   | Some snapshot ->
+     let resolved =
+       { snapshot.rss_resolved with
+         rrs_default_route = Some "primary"
+       ; rrs_default_runtime_id = Some "a"
+       }
+     in
+     match Masc.Tui_decode.join_runtime_surface ~probe:None ~probe_error:None ~resolved with
+     | Ok joined -> state.runtime_surface <- Some joined
+     | Error detail -> Alcotest.fail detail);
+  Alcotest.(check (list string))
+    "unassigned keeper is counted on the default lane"
+    [ "unassigned-imp" ]
+    (names (keepers_for_lane state "primary"));
+  Alcotest.(check (list string))
+    "explicitly assigned keeper remains on its own lane"
+    [ "explicit-solo" ]
+    (names (keepers_for_lane state "solo"));
+  Alcotest.(check (list string))
+    "entry runtime has no direct keeper when default route is a lane"
+    []
+    (names (keepers_for_runtime state "a"));
+  Alcotest.(check (list string))
+    "both candidates of the default lane include the unassigned keeper via lanes"
+    [ "unassigned-imp" ]
+    (names (keepers_for_runtime_with_lanes state ~lanes:[ "primary" ] "a"));
+  Alcotest.(check (list string))
+    "fallback candidate of the default lane also includes the unassigned keeper"
+    [ "unassigned-imp" ]
+    (names (keepers_for_runtime_with_lanes state ~lanes:[ "primary" ] "b"))
+
 let () = Alcotest.run "runtime list geometry"
   ["operator states", [ Alcotest.test_case "dismissed commit stays dismissed after reread" `Quick test_dismissed_commit_stays_dismissed_after_reread;
        Alcotest.test_case "commit application survives successful and failed rereads" `Quick test_commit_application_survives_reread;
@@ -1373,4 +1429,6 @@ let () = Alcotest.run "runtime list geometry"
         test_schema_less_client_is_refused_only_for_exact_lane
         ;Alcotest.test_case "HTTP slot without a body deadline is refused for an exact lane" `Quick
           test_http_slot_without_body_deadline_is_refused_for_exact_lane
+        ;Alcotest.test_case "default lane route counts unassigned keepers" `Quick
+          test_default_lane_route_counts_unassigned_keepers
         ;]]

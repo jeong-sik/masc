@@ -16119,6 +16119,77 @@ let runtime_default_route_lines ~cols state =
     ~max_cells:(max 1 (Masc_tui_frame.inner_width ~cols - 2))
     (Masc.Tui_terminal_text.sanitize_terminal_text text)
 
+let runtime_assignment_targets (assignment : Tui_decode.runtime_assignment) target =
+  match assignment.ra_resolution with
+  | Runtime_assignment_lane lane_id -> String.equal lane_id target
+  | Runtime_assignment_missing | Runtime_assignment_unavailable _ -> false
+
+let is_declared_runtime_lane (state : state) (id : string) : bool =
+  match state.runtime_surface with
+  | None -> false
+  | Some s ->
+      List.exists
+        (fun (lane : Tui_decode.runtime_resolved_lane) ->
+           lane.rrl_declared && String.equal lane.rrl_id id)
+        s.rss_resolved.rrs_lanes
+
+let keepers_for_lane (state : state) (lane_id : string) : Tui_decode.keeper list =
+  let default_target =
+    match state.runtime_surface with
+    | Some s -> s.rss_resolved.rrs_default_route
+    | None -> None
+  in
+  state.keepers
+  |> List.filter (fun (k : Tui_decode.keeper) ->
+       match
+         List.find_opt
+           (fun (a : Tui_decode.runtime_assignment) ->
+              String.equal a.ra_keeper k.k_name)
+           state.runtime_assignments
+       with
+       | Some a -> runtime_assignment_targets a lane_id
+       | None ->
+           match default_target with
+           | Some def -> String.equal def lane_id
+           | None -> false)
+
+let keepers_for_runtime (state : state) (runtime_id : string) : Tui_decode.keeper list =
+  if is_declared_runtime_lane state runtime_id then []
+  else
+    let default_target =
+      match state.runtime_surface with
+      | Some s -> s.rss_resolved.rrs_default_route
+      | None -> None
+    in
+    state.keepers
+    |> List.filter (fun (k : Tui_decode.keeper) ->
+         match
+           List.find_opt
+             (fun (a : Tui_decode.runtime_assignment) ->
+                String.equal a.ra_keeper k.k_name)
+             state.runtime_assignments
+         with
+         | Some a -> runtime_assignment_targets a runtime_id
+         | None ->
+             match default_target with
+             | Some def -> String.equal def runtime_id
+             | None -> false)
+
+let keepers_for_runtime_with_lanes (state : state) ~lanes (runtime_id : string)
+  : Tui_decode.keeper list =
+  let direct = keepers_for_runtime state runtime_id in
+  let via_lanes = List.concat_map (keepers_for_lane state) lanes in
+  List.fold_left
+    (fun acc (k : Tui_decode.keeper) ->
+       if List.exists
+            (fun (existing : Tui_decode.keeper) ->
+               String.equal existing.k_name k.k_name)
+            acc
+       then acc
+       else k :: acc)
+    direct
+    via_lanes
+
 let runtime_selection_summary_lines ~cols state =
   let selected = match state.runtime_surface, state.runtime_mode with
     | None, _ -> None

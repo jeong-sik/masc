@@ -19,45 +19,8 @@ let runtime_lane_notice_style = Masc_tui_render_lanes.runtime_lane_notice_style
    format lives beside that arithmetic. *)
 let format_context_tokens = Masc_tui_types.format_context_tokens
 
-let keepers_for_lane (state : state) (lane_id : string) : Tui_decode.keeper list =
-  let default_target =
-    match state.runtime_surface with
-    | Some s -> s.rss_resolved.rrs_default_runtime_id
-    | None -> None
-  in
-  state.keepers
-  |> List.filter (fun (k : Tui_decode.keeper) ->
-       match
-         List.find_opt
-           (fun (a : Tui_decode.runtime_assignment) ->
-              String.equal a.ra_keeper k.k_name)
-           state.runtime_assignments
-       with
-       | Some a -> runtime_assignment_targets a lane_id
-       | None ->
-           match default_target with
-           | Some def -> String.equal def lane_id
-           | None -> false)
-
-let keepers_for_runtime (state : state) (runtime_id : string) : Tui_decode.keeper list =
-  let default_target =
-    match state.runtime_surface with
-    | Some s -> s.rss_resolved.rrs_default_runtime_id
-    | None -> None
-  in
-  state.keepers
-  |> List.filter (fun (k : Tui_decode.keeper) ->
-       match
-         List.find_opt
-           (fun (a : Tui_decode.runtime_assignment) ->
-              String.equal a.ra_keeper k.k_name)
-           state.runtime_assignments
-       with
-       | Some a -> runtime_assignment_targets a runtime_id
-       | None ->
-           match default_target with
-           | Some def -> String.equal def runtime_id
-           | None -> false)
+let keepers_for_lane = Masc_tui_types.keepers_for_lane
+let keepers_for_runtime_with_lanes = Masc_tui_types.keepers_for_runtime_with_lanes
 
 
 let runtime_refresh_badge refresh_state =
@@ -430,13 +393,7 @@ let runtime_detail_lines state target ~width =
           | Runtime_lane_candidate { lane_id; runtime_id = _ } ->
               keepers_for_lane state lane_id
           | Runtime_catalog_entry { runtime_id } ->
-              let direct = keepers_for_runtime state runtime_id in
-              let via_lanes = List.concat_map (keepers_for_lane state) lanes in
-              List.fold_left
-                (fun acc (k : Tui_decode.keeper) ->
-                   if List.exists (fun (existing : Tui_decode.keeper) -> String.equal existing.k_name k.k_name) acc then acc
-                   else k :: acc)
-                direct via_lanes
+              keepers_for_runtime_with_lanes state ~lanes runtime_id
         in
         match target_keepers with
         | [] ->
@@ -948,13 +905,7 @@ let render_runtime (state : state) =
                  | many -> Printf.sprintf "%d lanes" (List.length many)
                in
                let bound_keepers =
-                 let direct = keepers_for_runtime state runtime.ro_id in
-                 let via_lanes = List.concat_map (keepers_for_lane state) lanes in
-                 List.fold_left
-                   (fun acc (k : Tui_decode.keeper) ->
-                      if List.exists (fun (existing : Tui_decode.keeper) -> String.equal existing.k_name k.k_name) acc then acc
-                      else k :: acc)
-                   direct via_lanes
+                 keepers_for_runtime_with_lanes state ~lanes runtime.ro_id
                in
                let default_fact =
                  if runtime.ro_is_default then [ (Theme.ok ()) ^ "[DEFAULT]" ^ Ansi.reset ] else []

@@ -2645,3 +2645,13 @@ widths. `S` opens the successor named by that post's metadata, including posts
 outside the loaded list. Esc returns to the original post. A missing successor
 read remains an explicit failure; the TUI does not choose another post from
 body text or the current list cursor.
+
+### Following an account through Usage
+
+On Usage, `f` searches accounts through the command palette. Choose an account
+from current inventory or recorded history; `v` switches Plan/Trend/Keepers and
+`w` changes the history window while retaining the exact quota scope ID. Plan
+and Trend show that account; `a` restores all accounts. Keepers usage remains a
+workspace-wide reading. If an account disappears from current inventory, its
+selection remains explicit instead of jumping to a different account. Missing
+history, unreadable reports and failed reads keep their distinct states.

@@ -6078,6 +6078,11 @@
  (libraries alcotest masc_tui_types masc_tui_detail_reading))
 
 (test
+ (name test_tui_usage_scope)
+ (modules test_tui_usage_scope)
+ (libraries alcotest masc masc_tui_types masc_tui_usage_trend masc_tui_palette))
+
+(test
  (name test_runtime_native_tasks)
  (modules test_runtime_native_tasks)
  (libraries alcotest yojson masc.runtime))

@@ -6914,6 +6914,7 @@ type state = {
   mutable metrics_section: metrics_section;
   mutable usage_telemetry_open: bool;
   mutable usage_section: usage_section;
+  mutable usage_scope_id: string option;
   mutable agents: agent list;
   mutable tasks: task list;
   (* The full domain rows the Overview list is projected from, kept so the
@@ -12236,6 +12237,33 @@ let withdraw_machine_control state =
    the composer, a surface binding, a press on a row -- may act first. Every
    place that has to stand aside for them asks this one question, so an
    overlay added later is added here once rather than to each list. *)
+let usage_scope_ids (state : state) =
+  let current = match state.overview_providers with
+    | Providers_unread | Providers_failed _ -> []
+    | Providers_read reading -> List.map (fun account ->
+        account.Masc.Tui_decode_usage.pua_scope_id) reading.puws_accounts in
+  let historical = match state.provider_history with
+    | Provider_history_unread | Provider_history_error _ -> []
+    | Provider_history_read trend -> List.map (fun row ->
+        row.Masc_tui_usage_trend.scope_id) trend.rows in
+  List.sort_uniq String.compare (current @ historical)
+
+let usage_providers_reading (state : state) =
+  match state.usage_scope_id, state.overview_providers with
+  | None, reading -> reading
+  | Some _, ((Providers_unread | Providers_failed _) as reading) -> reading
+  | Some scope_id, Providers_read reading ->
+      Providers_read {reading with puws_accounts=List.filter (fun account ->
+        String.equal account.Masc.Tui_decode_usage.pua_scope_id scope_id) reading.puws_accounts}
+
+let usage_history_reading (state : state) =
+  match state.usage_scope_id, state.provider_history with
+  | None, reading -> reading
+  | Some _, ((Provider_history_unread | Provider_history_error _) as reading) -> reading
+  | Some scope_id, Provider_history_read trend ->
+      Provider_history_read {trend with rows=List.filter (fun row ->
+        String.equal row.Masc_tui_usage_trend.scope_id scope_id) trend.rows}
+
 let board_post_on_screen (state : state) =
   match state.view, state.board_mode with
   | Board, Board_read post_id ->
@@ -12393,6 +12421,7 @@ let create_state
   metrics_section = Section_fleet;
   usage_telemetry_open = false;
   usage_section = Usage_plan;
+  usage_scope_id = None;
   agents = [];
   tasks = [];
   tasks_domain = [];

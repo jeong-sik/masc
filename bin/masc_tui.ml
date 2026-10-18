@@ -12478,6 +12478,7 @@ let withdraw_currency_authority state =
    just stopped serving. *)
 let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigation =
   state.followed_from <- None;
+  state.usage_scope_id <- None;
   withdraw_voice_capture state;
   (* Retire action authority immediately. A missing identity quarantines its
      cards; only a confirmed different workspace discards them. Old replies
@@ -26469,6 +26470,7 @@ and is loaded on demand through keeper_skill.
                         | Masc_tui_palette.Palette_dos
                         | Masc_tui_palette.Palette_lane_addons
                         | Masc_tui_palette.Palette_goto _
+                        | Masc_tui_palette.Palette_usage_scope _
                         | Masc_tui_palette.Palette_config _
                         | Masc_tui_palette.Palette_gate_mode _
                         | Masc_tui_palette.Palette_chat _
@@ -26529,6 +26531,12 @@ and is loaded on demand through keeper_skill.
                  | Some (_, Masc_tui_palette.Palette_gate_mode (lane, mode)) ->
                      launch_gate_mode_set state ~mailbox:async_messages ~lane
                        ~mode:(Masc.Keeper_gate_mode.to_string mode)
+                 | Some (_, Masc_tui_palette.Palette_usage_scope scope_id) ->
+                     state.usage_scope_id <- scope_id;
+                     state.usage_telemetry_open <- false;
+                     if state.usage_section=Usage_keepers then state.usage_section <- Usage_plan;
+                     state.metrics_scroll <- 0;
+                     goto_surface state ~mailbox:async_messages Metrics
                  | Some (_, Masc_tui_palette.Palette_config pane) ->
                      state.config_pane <- pane;
                      state.config_scroll <- 0;
@@ -27991,6 +27999,14 @@ and is loaded on demand through keeper_skill.
             | Home_create_keeper -> handle_keeper_create ~return_to:Keeper_chat_return_home ()))
         | Some ("m" | "M") when state.view = Overview ->
             goto_surface state ~mailbox:async_messages Metrics
+        | Some "f" when state.view = Metrics && not state.usage_telemetry_open ->
+            state.palette_open <- true;
+            state.palette_mode <- Palette_jump;
+            state.palette_query <- "usage account / ";
+            state.palette_cursor <- 0
+        | Some "a" when state.view = Metrics && not state.usage_telemetry_open ->
+            state.usage_scope_id <- None;
+            state.metrics_scroll <- 0
         | Some "v" when state.view = Metrics && not state.usage_telemetry_open ->
             state.usage_section <- next_usage_section state.usage_section;
             state.metrics_scroll <- 0

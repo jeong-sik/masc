@@ -44,6 +44,7 @@ type palette_action =
   | Palette_dos
   | Palette_lane_addons
   | Palette_goto of surface
+  | Palette_usage_scope of string option
   | Palette_config of config_pane
   | Palette_gate_mode of gate_lane * Masc.Keeper_gate_mode.t
   | Palette_chat of string
@@ -184,6 +185,21 @@ let palette_entries (state : state) =
   @ List.map
       (fun (pane, label) -> ("go System / " ^ label, Palette_config pane))
       config_panes
+  @ ["usage account / all accounts", Palette_usage_scope None]
+  @ List.map (fun scope_id ->
+      let accounts = match state.overview_providers with
+        | Providers_unread | Providers_failed _ -> []
+        | Providers_read reading -> reading.puws_accounts in
+      let account = List.find_opt (fun account ->
+        String.equal account.Masc.Tui_decode_usage.pua_scope_id scope_id) accounts in
+      let label = Option.fold ~none:("scope " ^ scope_id)
+          ~some:(fun account ->
+            Masc_tui_overview_providers.scope_name account
+            ^ Option.fold ~none:"" ~some:(fun email -> " · " ^ email)
+                (Masc_tui_overview_providers.account_email
+                   ~account_emails:state.overview_account_emails account)) account in
+      "usage account / " ^ label, Palette_usage_scope (Some scope_id))
+      (usage_scope_ids state)
   @ List.map
       (fun (keeper : keeper) ->
         ("keeper " ^ keeper.k_name, Palette_chat keeper.k_name))
@@ -233,6 +249,7 @@ let palette_subsequence ~needle haystack =
    (Masc_tui_command.spelled_catalog). *)
 let palette_action_words = function
   | Palette_goto Metrics -> [ "metrics"; "telemetry"; "charts"; "stats" ]
+  | Palette_usage_scope (Some scope_id) -> [scope_id]
   | Palette_goto
       ( Overview | Acting | Keepers _ | Memory | Lanes | Clients | Board
       | Approvals | Planning | Schedules | Verification | Harness | Fusion
@@ -240,7 +257,7 @@ let palette_action_words = function
       | Resources | Tools | System_logs )
   | Palette_browser_lane | Palette_hide_browser_lane | Palette_connectors
   | Palette_collab | Palette_msx | Palette_dos
-  | Palette_lane_addons | Palette_config _ | Palette_gate_mode _
+  | Palette_lane_addons | Palette_usage_scope None | Palette_config _ | Palette_gate_mode _
   | Palette_chat _ | Palette_task _ | Palette_board_hearth _
   | Palette_board_post _ | Palette_lsp _ ->
       []
@@ -261,7 +278,7 @@ let palette_matches (state : state) =
                  , ( Palette_browser_lane | Palette_hide_browser_lane
                    | Palette_connectors | Palette_collab | Palette_msx
                    | Palette_dos | Palette_lane_addons | Palette_goto _
-                   | Palette_config _ | Palette_gate_mode _ | Palette_chat _
+                   | Palette_usage_scope _ | Palette_config _ | Palette_gate_mode _ | Palette_chat _
                    | Palette_task _ | Palette_board_hearth _
                    | Palette_board_post _ ) ) -> false) entries
          | Some (_, Some _) -> [])

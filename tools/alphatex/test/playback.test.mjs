@@ -2,20 +2,20 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
 import { PassThrough, Writable } from 'node:stream'
-import { openPlayback } from '../playback.mjs'
+import { openPlayback, arrangementTransportPath } from '../playback.mjs'
 
 function fixture(options = {}) {
   const child = new EventEmitter(), commands = [], signals = []
   child.stdout = new PassThrough(); child.stderr = new PassThrough()
   child.stdin = new Writable({ write(data, _, done) { commands.push(JSON.parse(data)); done() } })
   child.kill = name => { signals.push(name); return true }
-  let args
+  let args, executable
   const playback = openPlayback({ path: '/synthetic/phrase.wav', output: 'test-output', ...options,
-    spawnProcess(_, arguments_) { args = arguments_; return child } })
+    spawnProcess(file, arguments_) { executable = file; args = arguments_; return child } })
   const event = (kind, values = {}) => child.stdout.write(JSON.stringify({ kind, currentTime: 0.2, duration: 2,
     loop: options.loop ?? false, device: { id: 'test-output', name: 'Test output', outputs: 2 }, ...values }) + '\n')
   const close = (code = 0) => { child.stdout.end(); child.stderr.end(); child.emit('close', code, null) }
-  return { child, playback, commands, signals, args, event, close }
+  return { child, playback, commands, signals, args, executable, event, close }
 }
 test('one native transport owns pause, seek, resume and loop state until child close', async () => {
   const seen = [], f = fixture({ loop: true, onEvent: event => seen.push(event.kind) })
@@ -145,4 +145,15 @@ test('source playback pins every port binding and admits a zero-duration source 
   await assert.rejects(g.playback.ready, /source ports/)
   await assert.rejects(g.playback.completion, /source ports/)
   assert.throws(() => openPlayback({ path: 'source', midiOutput: '-120', midiBindings: [{ port: 2, destination: '123' }] }), /bindings/)
+})
+
+
+test('WAV arrangement route uses its native helper and refuses unsupported MIDI or whole-project looping',async()=>{
+  const f=fixture({format:'wave-arrangement'})
+  assert.equal(f.executable,arrangementTransportPath)
+  assert.deepEqual(f.args,['play','--file','/synthetic/phrase.wav','--output','test-output'])
+  f.event('playing');await f.playback.ready;f.playback.stop();f.event('stopped');f.close();await f.playback.completion
+  for(const options of [{format:'unknown'},{format:'wave-arrangement',loop:true},{format:'wave-arrangement',midiOutput:'midi'}]){
+    assert.throws(()=>fixture(options))
+  }
 })

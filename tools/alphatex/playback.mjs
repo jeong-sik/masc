@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 
 export const transportPath = fileURLToPath(new URL('./music-transport', import.meta.url))
 export const midiTransportPath = fileURLToPath(new URL('./music-midi', import.meta.url))
+export const arrangementTransportPath = fileURLToPath(new URL('./music-arrangement', import.meta.url))
 export async function midiDestinations({ executable = midiTransportPath, signal } = {}) {
   signal?.throwIfAborted()
   const child = spawn(executable, ['destinations'], { stdio: ['ignore', 'pipe', 'pipe'] })
@@ -36,9 +37,10 @@ export async function midiDestinations({ executable = midiTransportPath, signal 
 
 // One owned child is one transport. Completion means its pipes and process have
 // closed, rather than merely receiving a stopped acknowledgement.
-export function openPlayback({ path, output, midiOutput, midiBindings, loop = false, onEvent = () => {}, signal,
-  executable = midiOutput === undefined ? transportPath : midiTransportPath, spawnProcess = spawn } = {}) {
+export function openPlayback({ path, output, midiOutput, midiBindings, loop = false, format = 'wave', onEvent = () => {}, signal,
+  executable = format === 'wave-arrangement' ? arrangementTransportPath : midiOutput === undefined ? transportPath : midiTransportPath, spawnProcess = spawn } = {}) {
   signal?.throwIfAborted()
+  if (!['wave', 'wave-arrangement'].includes(format) || format === 'wave-arrangement' && (midiOutput !== undefined || loop)) throw new Error('Invalid arrangement playback route or loop')
   if (typeof path !== 'string' || !path) throw new Error('A playback source path is required')
   if (output !== undefined && (typeof output !== 'string' || !output)) throw new Error('Invalid output UID')
   if (midiOutput !== undefined && (typeof midiOutput !== 'string' || !midiOutput)) throw new Error('Invalid MIDI destination ID')

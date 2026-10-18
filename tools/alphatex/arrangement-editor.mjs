@@ -111,9 +111,11 @@ export function arrangementCommand(editor, line) {
     case 'import-wave': case 'import-midi': case 'save-as':
       if (!tail) throw new Error('Choose a file path')
       return { editor, effect: { kind: command, path: tail } }
-    case 'save': case 'help': count(0); return { editor, effect: { kind: command } }
-    case 'play': case 'stop': case 'record': case 'export': case 'wave':
-      throw new Error('Arrangement playback, export and overdub are not connected yet')
+    case 'save': case 'help': case 'play': case 'stop': count(0); return { editor, effect: { kind: command } }
+    case 'seek': count(1); return { editor, effect: { kind: 'seek', tick: position(beats(args[0])) } }
+    case 'output': if (!tail) throw new Error('Choose an output UID'); return { editor, effect: { kind: 'output', path: tail } }
+    case 'record': case 'export': case 'wave':
+      throw new Error('Arrangement export and overdub are not connected yet')
     case 'asset': {
       count(1)
       if (!editor.project.assets.some(asset => asset.id === args[0])) throw new Error('Unknown arrangement asset')

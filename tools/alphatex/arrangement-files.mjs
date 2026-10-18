@@ -1,3 +1,6 @@
+import { isDeepStrictEqual } from 'node:util'
+import { capturePartNames, validateCapturedSource, validateCaptureManifest } from './captured-source.mjs'
+import { readCaptureFiles, readCapture } from './session-data.mjs'
 import { readFile, open, mkdir, mkdtemp, lstat, link, rm, chmod } from 'node:fs/promises'
 import { createReadStream, createWriteStream } from 'node:fs'
 import { Transform } from 'node:stream'
@@ -84,10 +87,91 @@ export async function importArrangementMidi(project, input, { name = basename(in
   const asset = { kind: 'midi', id: arrangementID(project.assets, 'asset'), name, source }
   return { project: editArrangement(project, { kind: 'asset-add', asset }), asset: asset.id }
 }
+// The capture's JSONL and manifest bytes are source material too. Publish
+// private immutable copies with the same exclusive content identity as WAVs.
+async function copyCapturePart(input, root, { signal } = {}) {
+  signal?.throwIfAborted()
+  const folder = join(root, 'assets'); await directory(folder)
+  const temporary = await mkdtemp(join(folder, '.import-')), candidate = join(temporary, 'source.capture')
+  try {
+    const hash = createHash('sha256')
+    const observe = new Transform({ transform(bytes, _, done) { hash.update(bytes); done(null, bytes) } })
+    await pipeline(createReadStream(input), observe, createWriteStream(candidate, { flags: 'wx', mode: 0o600 }), { signal })
+    const sha256 = hash.digest('hex'), file = `assets/${sha256}.capture`, target = join(root, file)
+    const handle = await open(candidate, 'r'); try { await handle.sync() } finally { await handle.close() }
+    await chmod(candidate, 0o444); signal?.throwIfAborted()
+    try { await link(candidate, target) }
+    catch (error) {
+      if (error.code !== 'EEXIST') throw error
+      if (!(await lstat(target)).isFile() || await digestFile(target, { signal }) !== sha256) throw new Error('Captured source content changed at publication')
+    }
+    const parent = await open(folder, 'r'); try { await parent.sync() } finally { await parent.close() }
+    signal?.throwIfAborted()
+    return { file, sha256 }
+  } finally { await rm(temporary, { recursive: true, force: true }) }
+}
+function capturePaths(root, asset) {
+  return Object.fromEntries(Object.entries(asset.parts).map(([role, part]) => [role, join(root, part.file)]))
+}
+function captureMatches(asset, timeline) {
+  if (!isDeepStrictEqual(asset.manifest, timeline.manifest)
+      || (timeline.audio[0]?.hostTime ?? null) !== asset.manifest.clock.firstAudioHostTime
+      || [...timeline.midi.values()].some(track => !asset.manifest.midiSources.some(source => source.id === track.source))) {
+    throw new Error('Captured source manifest or clock provenance disagrees with its data')
+  }
+}
+async function inspectCaptureAsset(root, asset, { signal } = {}) {
+  validateCapturedSource(asset)
+  if (!(await lstat(join(root, 'assets'))).isDirectory()) throw new Error('Project assets must be a directory, not a symlink')
+  const files = capturePaths(root, asset)
+  for (const [role, file] of Object.entries(files)) {
+    if (!(await lstat(file)).isFile() || await digestFile(file, { signal }) !== asset.parts[role].sha256) throw new Error(`Captured source content changed: ${asset.name}`)
+  }
+  const timeline = await readCaptureFiles(files, { signal }); captureMatches(asset, timeline)
+  signal?.throwIfAborted(); return files
+}
+export async function importArrangementCapture(project, input, { projectPath, name = basename(input), signal } = {}) {
+  validateArrangement(project)
+  if (typeof projectPath !== 'string' || !projectPath) throw new Error('Choose a project path before importing a captured take')
+  const root = dirname(resolve(projectPath)), parts = {}
+  for (const [role, filename] of Object.entries(capturePartNames)) {
+    const copied = role === 'audio' ? await copyWaveAsset(join(input, filename), root, { signal })
+      : await copyCapturePart(join(input, filename), root, { signal })
+    parts[role] = { file: copied.file, sha256: copied.sha256 }
+  }
+  const timeline = await readCaptureFiles(capturePaths(root, { parts }), { signal })
+  const asset = { kind: 'capture', id: arrangementID(project.assets, 'asset'), name, parts,
+    manifest: structuredClone(validateCaptureManifest(timeline.manifest)) }
+  captureMatches(asset, timeline); signal?.throwIfAborted()
+  return { project: editArrangement(project, { kind: 'asset-add', asset }), asset: asset.id }
+}
+// The viewer owns these snapshots until it drains WAV playback/export and
+// restores the terminal. A project asset mutation cannot change an open take.
+export async function prepareArrangementCapture(project, assetID, { sourceRoot, directory: parent, signal } = {}) {
+  validateArrangement(project); signal?.throwIfAborted()
+  const asset = project.assets.find(asset => asset.id === assetID && asset.kind === 'capture')
+  if (!asset) throw new Error('Choose a captured take')
+  const files = await inspectCaptureAsset(sourceRoot, asset, { signal }), temporary = await mkdtemp(join(parent, 'take-'))
+  try {
+    for (const [role, filename] of Object.entries(capturePartNames)) {
+      const candidate = join(temporary, filename), hash = createHash('sha256')
+      const observe = new Transform({ transform(bytes, _, done) { hash.update(bytes); done(null, bytes) } })
+      await pipeline(createReadStream(files[role]), observe, createWriteStream(candidate, { flags: 'wx', mode: 0o600 }), { signal })
+      if (hash.digest('hex') !== asset.parts[role].sha256) throw new Error('Captured source changed during view preparation')
+      await chmod(candidate, 0o444)
+    }
+    captureMatches(asset, await readCapture(temporary, { signal })); signal?.throwIfAborted()
+    return { directory: temporary }
+  } catch (error) { await rm(temporary, { recursive: true, force: true }); throw error }
+}
+
 export async function verifyArrangementAssets(project, root, options = {}) {
   validateArrangement(project)
   const paths = new Map()
-  for (const asset of project.assets) if (asset.kind === 'wave') paths.set(asset.id, await inspectWaveAsset(resolve(root), asset, options))
+  for (const asset of project.assets) {
+    if (asset.kind === 'wave') paths.set(asset.id, await inspectWaveAsset(resolve(root), asset, options))
+    else if (asset.kind === 'capture') paths.set(asset.id, await inspectCaptureAsset(resolve(root), asset, options))
+  }
   options.signal?.throwIfAborted()
   return paths
 }
@@ -107,6 +191,12 @@ export async function materializeArrangementAssets(project, sourceRoot, targetRo
     for (const asset of project.assets) if (asset.kind === 'wave') {
       const copied = await copyWaveAsset(paths.get(asset.id), targetRoot, { signal })
       if (copied.sha256 !== asset.sha256 || !equalMetadata(copied.metadata, asset.metadata)) throw new Error('WAV source changed during save-as')
+    } else if (asset.kind === 'capture') {
+      for (const [role, file] of Object.entries(paths.get(asset.id))) {
+        const copied = role === 'audio' ? await copyWaveAsset(file, targetRoot, { signal }) : await copyCapturePart(file, targetRoot, { signal })
+        if (copied.sha256 !== asset.parts[role].sha256) throw new Error('Captured source changed during save-as')
+      }
+      await inspectCaptureAsset(targetRoot, asset, { signal })
     }
   }
   signal?.throwIfAborted()

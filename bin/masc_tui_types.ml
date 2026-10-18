@@ -8579,15 +8579,20 @@ let live_context_view (state : state) keeper =
       Masc_tui_fetched.Absent
 
 let take_live_context_observation (state : state) request result =
-  match live_context_keeper state with
-  | None -> false
-  | Some keeper ->
-      if Masc_tui_context_state.same_key (live_context_key state keeper)
-           (Masc_tui_context_state.request_key request)
-         && Masc_tui_context_state.is_current state.live_context request then begin
+  if not (Masc_tui_context_state.is_current state.live_context request) then false
+  else match live_context_keeper state with
+    | Some keeper when
+        Masc_tui_context_state.same_key (live_context_key state keeper)
+          (Masc_tui_context_state.request_key request) ->
         state.live_context <- Masc_tui_context_state.complete state.live_context request result;
         true
-      end else false
+    | Some _ | None ->
+        (* The worker has returned. Retire its pending slot as well as dropping
+           the value, so returning to this key before reconciliation cannot
+           leave a read pending with no worker able to finish it. *)
+        state.live_context <- Masc_tui_context_state.clear state.live_context;
+        supersede_live_context_read state None;
+        false
 
 (* Pending reads and post-action offers belong to the workspace that admitted
    them. A successful health response with missing paths is still unread;

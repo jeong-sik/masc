@@ -1401,6 +1401,15 @@ let test_live_context_refuses_changed_trace_before_reconciliation () =
   state.keepers <- [ current ];
   Alcotest.(check bool) "queued old trace cannot land before reconciliation" false
     (take_live_context_observation state old (Error "previous trace"));
+  Alcotest.(check bool) "discarded completion also retires its pending owner" true
+    (Masc_tui_context_state.current_key state.live_context = None);
+  (* A return to the original identity before the next reconciliation must
+     start a new worker, rather than coalesce onto the discarded result. *)
+  state.keepers <- [ keeper ];
+  let returned = start_live_context_exn state keeper in
+  Alcotest.(check bool) "return to the original key can settle afresh" true
+    (take_live_context_observation state returned (Error "returned key"));
+  state.keepers <- [ current ];
   let fresh = start_live_context_exn state current in
   Alcotest.(check bool) "late old result cannot settle the successor" true
     (not (take_live_context_observation state old (Error "late result"))

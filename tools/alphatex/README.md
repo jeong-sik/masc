@@ -9,7 +9,9 @@ fragment positions without allocating a whole-song image.
 
 Install Node.js 22+ and pnpm, then run `scripts/install-alphatex.sh` from the
 repository. This installs `masc-alphatex` beside the MASC commands and its
-runtime files under the adjacent `share/masc/alphatex` directory. The helper
+runtime files under the adjacent `share/masc/alphatex/<source digest>` directory.
+Installation validates the native backend before atomically replacing the
+launcher; an existing score view retains its own immutable runtime. The helper
 must be on the TUI's PATH. For development, run `pnpm install --frozen-lockfile`
 here and put this directory on PATH; `masc-alphatex` is the launcher.
 

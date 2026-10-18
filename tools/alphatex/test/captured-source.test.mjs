@@ -224,3 +224,38 @@ test('every arrangement playback entrypoint diagnoses audible capture regions in
     }
   } finally { await worker.terminate() }
 }))
+
+test('explicit audio-only region audition preserves original clock gaps, compressed repeats and owned source bytes', async () => fixture(async ({ root, input, bytes }) => {
+  const { prepareArrangementAudio } = await import('../arrangement-playback.mjs')
+  const path = join(root, 'song.json'), imported = await importArrangementCapture(newArrangement(), input, { projectPath: path })
+  let editor = arrangementCommand(arrangementEditor(imported.project), 'place asset-1 0').editor
+  editor = arrangementCommand(editor, 'repeat 2000000').editor
+  assert.deepEqual(arrangementCommand(editor, 'play-audio').effect, { kind: 'play-audio' })
+  assert.throws(() => arrangementPlaybackRequest(editor.project, { kind: 'audio' }), /not connected/)
+  const prepared = await prepareArrangementAudio(editor.project, { sourceRoot: root, directory: root })
+  const plan = JSON.parse(await readFile(prepared.path, 'utf8'))
+  assert.equal(plan.kind, 'capture-audio-arrangement'); assert.equal(plan.assets.length, 1); assert.equal(plan.regions.length, 1)
+  assert.equal(plan.duration, 400000)
+  const region = plan.regions[0], source = editor.project.assets[0]
+  assert.deepEqual(region, { id: editor.project.clips[0].id, asset: 'asset-1', startSeconds: 0,
+    offsetFrames: 0, frameCount: 4800, repeat: 2000000, captureClock: { origin: source.manifest.clock.requestedStart,
+      offset: '0', extent: '4800000', numer: 125, denom: 3, firstAudioHostTime: source.manifest.clock.firstAudioHostTime } })
+  assert.deepEqual(await readFile(plan.assets[0].path), bytes.audio)
+  const copy = dirname(plan.assets[0].path)
+  for (const [role, filename] of Object.entries(capturePartNames)) assert.deepEqual(await readFile(join(copy, filename)), bytes[role])
+  await rm(input, { recursive: true }); await rm(join(root, 'assets'), { recursive: true })
+  assert.deepEqual(await readFile(plan.assets[0].path), bytes.audio)
+}))
+
+test('a captured subframe cut keeps its silent timeline and cancelled audio preparation leaves no snapshots', async () => fixture(async ({ root, input }) => {
+  const { prepareArrangementAudio } = await import('../arrangement-playback.mjs')
+  const imported = await importArrangementCapture(newArrangement(), input, { projectPath: join(root, 'song.json') })
+  let editor = arrangementCommand(arrangementEditor(imported.project), 'place asset-1 0').editor
+  editor = arrangementCommand(editor, 'trim 0 1').editor
+  const prepared = await prepareArrangementAudio(editor.project, { sourceRoot: root, directory: root })
+  const plan = JSON.parse(await readFile(prepared.path, 'utf8'))
+  assert.deepEqual(plan.assets, []); assert.deepEqual(plan.regions, []); assert.equal(plan.duration, 125 / 3e9)
+  const before = await readdir(root), controller = new AbortController(); controller.abort()
+  await assert.rejects(prepareArrangementAudio(editor.project, { sourceRoot: root, directory: root, signal: controller.signal }), { name: 'AbortError' })
+  assert.deepEqual(await readdir(root), before)
+}))

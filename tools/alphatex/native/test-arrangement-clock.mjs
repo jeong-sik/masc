@@ -15,7 +15,7 @@ var reviewHost: UInt64 = 1_000_000_000
 struct AudioFailure: Error { let description: String; init(_ value:String){description=value} }
 ${future}
 ${command}
-struct FakePlan { let duration=1.0;let captured=false }
+struct FakePlan { let duration=1.0;let captured=false;var capturedAudio=false }
 struct FakeRegion { let id="region-1", startSeconds=0.0 }
 final class FakePlayer { var plays=0;func play(at:AVAudioTime){plays+=1} }
 final class FakeVoice {
@@ -28,7 +28,8 @@ final class FakeOutput {var lastRenderTime:AVAudioTime?;let presentationLatency=
 final class FakeEngine {let outputNode=FakeOutput();var starts=0,stops=0,pauses=0;func prepare(){};func start()throws{starts+=1};func pause(){pauses+=1};func stop(){stops+=1}}
 final class FakeMidi { var stages:[Double]=[], runs:[UInt64]=[];func stageCoordinated(at seconds:Double)throws{stages.append(seconds)};func runCoordinated(anchorNanoseconds:UInt64)throws{runs.append(anchorNanoseconds)} }\nfinal class Probe {
  enum State {case prepared,playing,paused,stopped}
- let plan=FakePlan(),engine=FakeEngine(),renderQuantum=1024
+ var plan=FakePlan();let engine=FakeEngine(),renderQuantum=1024
+ var horizon:DispatchSourceTimer?;var horizonEnded=false
  var midi:FakeMidi?;var midiEnded=false\n var state=State.prepared,voices=[FakeVoice()],active=Set<String>(),position=0.0,anchor:UInt64=0,generation:UInt64=0,finished=0,published=0
  func checkOutput()throws{}
  func publish(){published+=1}

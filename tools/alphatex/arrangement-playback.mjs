@@ -2,7 +2,8 @@ import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises'
 import { join, dirname } from 'node:path'
 import { arrangementSchedule, newArrangement } from './arrangement.mjs'
 import { sourceMidiTimeline } from './midi-source-playback.mjs'
-import { importArrangementWave } from './arrangement-files.mjs'
+import { importArrangementWave, prepareArrangementCapture } from './arrangement-files.mjs'
+import { readWaveMetadata } from './wave-file.mjs'
 
 function requireRegionTransport(project) {
   const schedule = arrangementSchedule(project)
@@ -138,4 +139,54 @@ export async function prepareArrangementMixed(project, options = {}) {
     if (wave) await rm(dirname(wave.path), { recursive: true, force: true })
     throw error
   } finally { await rm(dirname(midi.path), { recursive: true, force: true }) }
+}
+
+// Explicit audio-only audition. Capture clips retain their paired source parts,
+// while this route deliberately selects only WAV. Regular play still requires
+// a paired region transport and does not silently omit UMP.
+export async function prepareArrangementAudio(project, { sourceRoot, directory, signal } = {}) {
+  signal?.throwIfAborted()
+  const schedule = arrangementSchedule(project), byID = new Map(project.assets.map(asset => [asset.id, asset]))
+  if (!schedule.length) throw new Error('No audible arrangement regions')
+  if (schedule.some(clip => byID.get(clip.asset).kind === 'midi')) throw new Error('Audio-only audition cannot synthesize MIDI assets; mute those lanes')
+  const temporary = await mkdtemp(join(directory, 'audio-play-'))
+  try {
+    const assets = [], regions = []
+    for (const id of new Set(schedule.map(clip => clip.asset))) {
+      const asset = byID.get(id)
+      if (asset.kind === 'capture') {
+        const snapshot = await prepareArrangementCapture(project, id, { sourceRoot, directory: temporary, signal })
+        const path = join(snapshot.directory, 'audio.wav'), metadata = await readWaveMetadata(path, {}, { signal })
+        const frames = Number(metadata.frames)
+        if (!Number.isSafeInteger(frames)) throw new Error('Captured WAV exceeds exact native plan frame precision')
+        // A source with no complete audio frames still owns its silent interval.
+        if (frames) assets.push({ id, path, sha256: asset.parts.audio.sha256, ...metadata, frames })
+      } else {
+        const snapshot = await prepareArrangementWave({ ...project, clips: project.clips.filter(clip => clip.asset === id) },
+          { sourceRoot, directory: temporary, signal })
+        const plan = JSON.parse(await readFile(snapshot.path, { encoding: 'utf8', signal }))
+        assets.push(...plan.assets); regions.push(...plan.regions)
+      }
+    }
+    for (const clip of schedule) {
+      const asset = byID.get(clip.asset)
+      if (asset.kind !== 'capture' || !clip.audio) continue
+      const frame = text => {
+        const value = Number(text)
+        if (!Number.isSafeInteger(value)) throw new Error('Captured WAV exceeds exact native plan frame precision')
+        return value
+      }
+      regions.push({ id: clip.id, asset: clip.asset, startSeconds: clip.startSeconds,
+        offsetFrames: frame(clip.audio.offsetFrames), frameCount: frame(clip.audio.frameCount), repeat: clip.repeat,
+        captureClock: { ...clip.sourceClock, firstAudioHostTime: asset.manifest.clock.firstAudioHostTime } })
+    }
+    // Snapshots for silent-only cuts are still verified, but need no audio node.
+    const used = new Set(regions.map(region => region.asset))
+    const duration = schedule.reduce((end, clip) => Math.max(end, clip.endSeconds), 0)
+    const path = join(temporary, 'plan.json')
+    await writeFile(path, JSON.stringify({ schemaVersion: 4, kind: 'capture-audio-arrangement', duration,
+      assets: assets.filter(asset => used.has(asset.id)), regions }), { flag: 'wx', mode: 0o600, signal })
+    signal?.throwIfAborted()
+    return { path, duration, format: 'capture-audio-arrangement' }
+  } catch (error) { await rm(temporary, { recursive: true, force: true }); throw error }
 }

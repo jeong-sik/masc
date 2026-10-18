@@ -158,8 +158,10 @@ func umpRestoration(_ events: [UmpEvent], before seconds: Double, replacing prev
     let count = events.firstIndex(where: { $0.seconds >= seconds }) ?? events.count
     return try umpRestoration(events, prefixCount: count, replacing: previous)
 }
-func umpRestoration(_ events: [UmpEvent], prefixCount: Int, followingCount: Int = 0, excludingNotes: Set<Int> = [], replacing previous: UmpFootprint) throws -> UmpRestoration {
+func umpRestoration(_ events: [UmpEvent], prefixCount: Int, followingCount: Int = 0, preambleEndIndex: Int? = nil, excludingNotes: Set<Int> = [], replacing previous: UmpFootprint) throws -> UmpRestoration {
     guard prefixCount >= 0, prefixCount <= events.count, followingCount >= 0, followingCount <= events.count - prefixCount else { throw MidiFailure("invalid captured UMP prefix") }
+    let admissionEnd = preambleEndIndex ?? (prefixCount + followingCount)
+    guard admissionEnd >= prefixCount + followingCount, admissionEnd <= events.count else { throw MidiFailure("invalid captured UMP preamble boundary") }
     try previous.requireSupported()
     var footprint = UmpFootprint(), known = Set<UmpField>(), channels: [UmpAddress: UmpChannelState] = [:]
     var notes = Set<Int>(), next = 0
@@ -202,7 +204,11 @@ func umpRestoration(_ events: [UmpEvent], prefixCount: Int, followingCount: Int 
         channel.prune(); channels[address] = channel
     }
     var entryKnown = known
-    for event in events[prefixCount..<(prefixCount + followingCount)] {
+    // Region admission may inspect the retained due stream to prove that its
+    // original preamble establishes each field before an attack/relative use.
+    // This is validation only: future messages are never added to replay.
+    // Historical live voices still require their own pre-attack baselines below.
+    for event in events[prefixCount..<admissionEnd] {
         let message = UmpMessage(event)
         footprint.observe(message)
         if case .on(let number) = message.action {

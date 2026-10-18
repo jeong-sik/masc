@@ -16,6 +16,26 @@ type error =
   | Original_activation_unavailable of Keeper_composition_draft.error
   | Original_task_skills_unavailable of Keeper_task_skill_turn.error
 
+type recovery_hold =
+  | Original_run_unavailable of Keeper_composition_draft.error
+  | Task_skill_publication_unavailable of
+      { error : Keeper_task_skill_turn.error
+      ; snapshot_revision : Skill_catalog_snapshot.snapshot_revision
+      }
+  | Explicit_recovery_required of string
+
+let recovery_hold_to_string = function
+  | Original_run_unavailable error ->
+    Yojson.Safe.to_string (Keeper_composition_draft.error_to_json error)
+  | Task_skill_publication_unavailable {error; snapshot_revision=_} ->
+    Keeper_task_skill_turn.error_to_string error
+  | Explicit_recovery_required detail -> detail
+
+let recovery_hold_kind = function
+  | Original_run_unavailable _ -> "waiting_original_run"
+  | Task_skill_publication_unavailable _ -> "waiting_skill_publication"
+  | Explicit_recovery_required _ -> "explicit_recovery_required"
+
 let error_to_string = function
   | Profile_unavailable error -> Keeper_types_profile.keeper_toml_load_error_to_string error
   | Metadata_unavailable (Unreadable detail | Not_current detail) -> detail
@@ -46,10 +66,10 @@ let read_profiles ~base_path =
 
 let resume_with_profiles ?on_recovery_held ~profiles ~context continuation =
   let source = Journal.continuation_source continuation in
-  let hold_original error =
+  let hold_original cause error =
     Option.iter (fun observe ->
       observe ~request_id:(Journal.continuation_request_id continuation)
-        ~reason:(error_to_string error)) on_recovery_held;
+        ~cause) on_recovery_held;
     error in
   let config = context.Keeper_types_profile.config in
   let* defaults = Keeper_types_profile.snapshot_profile_defaults profiles source.keeper_name
@@ -110,20 +130,25 @@ let resume_with_profiles ?on_recovery_held ~profiles ~context continuation =
   let* () = if meta.paused then Error Keeper_paused else Ok () in
   let* snapshot = current_snapshot ~base_path:config.base_path in
   let* nested_activation = Keeper_composition_draft.load_nested_activation ~base_path:config.base_path source
-    |> Result.map_error (fun error -> hold_original (Original_activation_unavailable error)) in
+    |> Result.map_error (fun error -> hold_original (Original_run_unavailable error)
+        (Original_activation_unavailable error)) in
   let addons = Keeper_lane_addon_runtime.snapshot ~config ~keeper_name:source.keeper_name in
   let descriptors = Keeper_tool_descriptor.all_descriptors ()
     @ List.map Keeper_lane_addon_descriptor.create addons.exports in
   let original_activation = match source.producer with
     | Journal.Prepared -> nested_activation
     | Journal.Named {activation;tool_name=_;skill_reference=_;origin=_} -> activation in
+  let hold_task_skills error = hold_original
+      (Task_skill_publication_unavailable
+         {error; snapshot_revision=Skill_catalog_snapshot.snapshot_revision snapshot})
+      (Original_task_skills_unavailable error) in
   let* task_selection = match original_activation with
     | None -> Ok Keeper_task_skill_turn.empty
     | Some bound -> Keeper_task_skill_turn.resolve ~descriptors ~snapshot
         (Keeper_skill_activation_recorder.bound_task_references bound)
-        |> Result.map_error (fun error -> hold_original (Original_task_skills_unavailable error)) in
+        |> Result.map_error hold_task_skills in
   let* task_selection = Keeper_task_skill_turn.with_descriptors ~descriptors ~snapshot task_selection
-    |> Result.map_error (fun error -> hold_original (Original_task_skills_unavailable error)) in
+    |> Result.map_error hold_task_skills in
   let preparation = Keeper_task_skill_turn.prepare_surface ~descriptors ~snapshot task_selection in
   List.iter (fun (diagnostic : Keeper_skill_catalog.projection_diagnostic) ->
     Log.Keeper.warn ~keeper_name:source.keeper_name "continuation Skill projection unavailable: %s"
@@ -143,7 +168,9 @@ let resume_with_profiles ?on_recovery_held ~profiles ~context continuation =
       ~completion:Agent_core.Tool_contract.Continue_after_success in
   let publication_recovery : Keeper_publication_recovery_availability.turn_context =
     {provider=context.publication_recovery_provider;keeper_name=source.keeper_name} in
-  Ok (Keeper_tool_composition_surface.resume_continuation ?on_recovery_held ?owner_metadata_refusal ~capability_surface ~continuation
+  let on_execution_held = Option.map (fun observe ~request_id ~reason ->
+      observe ~request_id ~cause:(Explicit_recovery_required reason)) on_recovery_held in
+  Ok (Keeper_tool_composition_surface.resume_continuation ?on_recovery_held:on_execution_held ?owner_metadata_refusal ~capability_surface ~continuation
       ~config ~meta ~publication_recovery
       ~ctx_snapshot:(Keeper_context_runtime.create ~eio:true ~system_prompt:meta.instructions)
       ~turn_context ~invocation
@@ -164,11 +191,32 @@ end
 module Run_set = Set.Make (Run_key)
 module Run_map = Map.Make (Run_key)
 
+type held_recovery = { request_id : string; cause : recovery_hold }
+
+type recovery_readiness =
+  | Continue_holding of recovery_hold
+  | Revalidate_original
+
+let recovery_readiness ~base_path candidate cause =
+  match cause with
+  | Original_run_unavailable _ ->
+    (match Domain_pool_ref.submit_io_or_inline (fun () ->
+       Keeper_composition_draft.load_nested_activation ~base_path
+         (Journal.continuation_source candidate)) with
+     | Ok _ -> Revalidate_original
+     | Error error -> Continue_holding (Original_run_unavailable error))
+  | Task_skill_publication_unavailable {error=_; snapshot_revision} ->
+    (match current_snapshot ~base_path with
+     | Ok snapshot when not (Skill_catalog_snapshot.equal_snapshot_revision
+         snapshot_revision (Skill_catalog_snapshot.snapshot_revision snapshot)) -> Revalidate_original
+     | Ok _ | Error _ -> Continue_holding cause)
+  | Explicit_recovery_required _ -> Continue_holding cause
+
 type 'a t =
   { context : 'a Keeper_types_profile.context
   ; on_result : Journal.continuation -> (Tool_result.result,error) result -> unit
   ; mutable active : Run_set.t
-  ; mutable held : string Run_map.t }
+  ; mutable held : held_recovery Run_map.t }
 
 
 let log_result candidate outcome =
@@ -199,31 +247,52 @@ let pulse_with_resume ~resume ~sw supervisor =
     let source = Journal.continuation_source candidate in
     let key = source.keeper_name,source.composition_run_id in
     let held = match Run_map.find_opt key supervisor.held with
-      | Some request_id when String.equal request_id (Journal.continuation_request_id candidate) -> true
-      | None -> false
-      | Some _ -> supervisor.held <- Run_map.remove key supervisor.held; false in
-    if not held && not (Run_set.mem key supervisor.active) then (
+      | Some held when String.equal held.request_id (Journal.continuation_request_id candidate) -> Some held
+      | None -> None
+      | Some _ -> supervisor.held <- Run_map.remove key supervisor.held; None in
+    let explicit_recovery = match held with
+      | Some {cause=Explicit_recovery_required _; _} -> true
+      | None | Some {cause=(Original_run_unavailable _ | Task_skill_publication_unavailable _); _} -> false in
+    if not explicit_recovery && not (Run_set.mem key supervisor.active) then (
       (* Single-domain reservation is a scheduling hint, never effect authority. *)
       supervisor.active <- Run_set.add key supervisor.active;
       try Eio.Fiber.fork ~sw (fun () ->
         let outcome = Fun.protect
             ~finally:(fun () -> supervisor.active <- Run_set.remove key supervisor.active)
             (fun () ->
-              let on_recovery_held ~request_id ~reason =
-                supervisor.held <- Run_map.add key request_id supervisor.held;
+              let on_recovery_held ~request_id ~cause =
+                supervisor.held <- Run_map.add key {request_id; cause} supervisor.held;
                 Log.Keeper.warn ~keeper_name:source.keeper_name
-                  "prepared continuation held run=%s request=%s reason=%s; repair original authority and explicitly resume"
-                  (Keeper_tool_plan.Composition_run_id.to_string source.composition_run_id) request_id reason in
+                  "prepared continuation held run=%s request=%s state=%s reason=%s"
+                  (Keeper_tool_plan.Composition_run_id.to_string source.composition_run_id) request_id
+                  (recovery_hold_kind cause) (recovery_hold_to_string cause) in
               try
-                let profiles = Eio.Lazy.force profiles in
-                resume ~on_recovery_held ~profiles ~context:supervisor.context candidate
+                let readiness = match held with
+                  | None -> Revalidate_original
+                  | Some held -> recovery_readiness ~base_path:supervisor.context.config.base_path
+                      candidate held.cause in
+                match readiness with
+                | Continue_holding cause ->
+                  supervisor.held <- Run_map.add key
+                    {request_id=Journal.continuation_request_id candidate; cause} supervisor.held;
+                  None
+                | Revalidate_original ->
+                  Option.iter (fun _ ->
+                    supervisor.held <- Run_map.remove key supervisor.held;
+                    Log.Keeper.info ~keeper_name:source.keeper_name
+                      "prepared continuation evidence changed run=%s request=%s; revalidating original authority"
+                      (Keeper_tool_plan.Composition_run_id.to_string source.composition_run_id)
+                      (Journal.continuation_request_id candidate)) held;
+                  let profiles = Eio.Lazy.force profiles in
+                  Some (resume ~on_recovery_held ~profiles ~context:supervisor.context candidate)
               with
               | Eio.Cancel.Cancelled _ as exn -> raise exn
-              | exn -> Error (Runtime_failed (Printexc.to_string exn))) in
+              | exn -> Some (Error (Runtime_failed (Printexc.to_string exn)))) in
 
-        (try supervisor.on_result candidate outcome with
-         | Eio.Cancel.Cancelled _ as exn -> raise exn
-         | exn -> Log.Server.warn "prepared continuation observer failed: %s" (Printexc.to_string exn)))
+        Option.iter (fun outcome ->
+          try supervisor.on_result candidate outcome with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn -> Log.Server.warn "prepared continuation observer failed: %s" (Printexc.to_string exn)) outcome)
       with exn ->
         supervisor.active <- Run_set.remove key supervisor.active;
         raise exn)) pending.ready;

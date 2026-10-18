@@ -1418,8 +1418,8 @@ let test_held_continuation_is_not_retried_until_restart () =
   let stub ~on_recovery_held ~profiles:_ ~context:_ candidate =
     let request_id = Journal.continuation_request_id candidate in
     calls := request_id :: !calls;
-    on_recovery_held ~request_id ~reason:"hold-proof stub holds every intake";
-    Error (Wake.Original_activation_unavailable Masc.Keeper_composition_draft.Draft_not_found) in
+    on_recovery_held ~request_id ~cause:(Wake.Explicit_recovery_required "hold-proof stub holds every intake");
+    Error (Wake.Runtime_failed "original worker authority requires explicit recovery") in
   let context =
     Eio.Switch.run @@ fun sw ->
     let open Masc.Keeper_types_profile in
@@ -1456,6 +1456,98 @@ let test_held_continuation_is_not_retried_until_restart () =
   check int "a restarted supervisor retries once" (first * 2) (List.length !calls);
   pulse restarted;
   check int "a restarted supervisor holds again after one retry" (first * 2) (List.length !calls)
+
+let test_original_evidence_repair_reactivates_continuation ~skill_publication () =
+  with_fixture @@ fun env _initialize fixture ->
+  with_environment ["MASC_CONFIG_DIR", None] @@ fun () ->
+  with_parked_named_producer env fixture @@ fun parked ->
+  let module Wake = Masc.Keeper_composition_continuation_wake in
+  control fixture (`Assoc ["state", `String "exited"]);
+  ignore (with_bundle fixture (fun bundle -> invoke fixture bundle
+      ~tool_use_id:"collect-before-authority-repair" ~turn:52 "keeper_job_status" (argument parked.job_id)));
+  let declaration = Config_dir_resolver.keeper_toml_path_for_base_path
+      ~base_path:fixture.base_path keeper in
+  Fs_compat.mkdir_p (Filename.dirname declaration);
+  write declaration "[keeper]\nactivation_mode = \"manual\"\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\nnetwork_mode = \"inherit\"\ninstructions = \"Original authority recovery fixture\"\n";
+  let source = Journal.continuation_source parked.child_continuation in
+  let blob = Tool_blob_store.create ~base_path:fixture.base_path in
+  let run_path = Filename.concat (Filename.concat (Tool_blob_store.root_dir blob)
+      (String.sub source.run_reference.sha256 0 2)) source.run_reference.sha256 in
+  let skills_path = Filename.concat fixture.base_path ".agents/skills" in
+  let original_path = if skill_publication then skills_path else run_path in
+  let detached_path = original_path ^ ".fixture-held" in
+  let workspace = Skill_catalog_snapshot_service.workspace_of_base_path ~base_path:fixture.base_path
+      |> require "recovery fixture published workspace" in
+  let runtime_path = Config_dir_resolver.runtime_toml_path_for_base_path ~base_path:fixture.base_path in
+  let publish () = match Skill_catalog_snapshot_service.refresh ~workspace ~user_home:None
+      ~read_config:(fun () -> {path=runtime_path; source_text=read runtime_path}) with
+    | Published _ | Unchanged _ -> () | Workspace_retired -> fail "authority fixture publication retired" in
+  let repair () =
+    if Sys.file_exists detached_path then (
+      if Sys.file_exists original_path then Unix.unlink original_path;
+      Unix.rename detached_path original_path) in
+  Fun.protect ~finally:repair @@ fun () ->
+  let context : _ Masc.Keeper_types_profile.context =
+    {config=parked.config; agent_name="authority-repair-maintenance";
+     sw=Masc.Keeper_msg_async.server_background_switch () |> require "authority repair background switch";
+     clock=Eio.Stdenv.clock env; proc_mgr=Some (Eio.Stdenv.process_mgr env); net=None;
+     publication_recovery_provider=Masc.Keeper_publication_recovery_availability.non_runtime_provider} in
+  let outcomes = ref [] and reported_hold = ref None in
+  let supervisor = Wake.create ~context ~on_result:(fun candidate outcome ->
+      check (option string) "recovery retains the original Task" (Some "task-A")
+        (Journal.continuation_source candidate).source_task_id;
+      outcomes := (candidate, outcome) :: !outcomes) () in
+  let initial_resume ~on_recovery_held ~profiles:_ ~context candidate =
+    check string "fault is injected only into the original child intake"
+      parked.binding.request_id (Journal.continuation_request_id candidate);
+    Unix.rename original_path detached_path;
+    if skill_publication then (write original_path "source temporarily not a directory\n"; publish ());
+    Wake.resume ~context candidate ~on_recovery_held:(fun ~request_id ~cause ->
+      reported_hold := Some (request_id, cause); on_recovery_held ~request_id ~cause) in
+  let backend_before = List.length (calls fixture) in
+  Eio.Switch.run (fun sw ->
+    Wake.For_testing.pulse ~resume:initial_resume ~sw supervisor |> require "original evidence fault intake");
+  check int "one original intake reports the unavailable evidence" 1 (List.length !outcomes);
+  (match !reported_hold with
+   | Some (request_id, Wake.Original_run_unavailable _) when not skill_publication ->
+     check string "run hold owns the sealed request" parked.binding.request_id request_id
+   | Some (request_id, Wake.Task_skill_publication_unavailable _) when skill_publication ->
+     check string "Skill hold owns the sealed request" parked.binding.request_id request_id
+   | None | Some _ -> fail "pre-intake authority was not reported as a typed recoverable hold");
+  let pulse () = Eio.Switch.run (fun sw -> Wake.pulse ~sw supervisor |> require "authority recovery pulse") in
+  pulse ();
+  check int "unchanged unavailable evidence starts no further intake" 1 (List.length !outcomes);
+  check int "unavailable evidence never calls the job backend" backend_before (List.length (calls fixture));
+  repair ();
+  if skill_publication then (
+    pulse ();
+    check int "file restoration alone cannot borrow an unpublished Skill view" 1 (List.length !outcomes);
+    publish ());
+  set_source fixture ~task_id:"task-other" ~turn:90;
+  pulse ();
+  check int "repaired evidence revalidates the same original child once" 2 (List.length !outcomes);
+  let accepted_child = match snd (List.hd !outcomes) with
+    | Ok result when Tool_result.is_success result -> Tool_result.data result
+    | Ok _ | Error _ -> fail "repaired original child was not accepted" in
+  let child_ok, _, child_entry = await_composition env fixture accepted_child in
+  check bool "the original child produces a usable result after repair" true child_ok;
+  check bool "physical recovery keeps a distinct request" true
+    (child_entry.request_id <> parked.binding.request_id);
+  ignore (Masc.Keeper_composition_completion_wake.reconcile ~base_path:fixture.base_path
+      |> require "original child result publication after repair");
+  pulse ();
+  let accepted_parent = List.find_map (fun (candidate, outcome) ->
+      let source = Journal.continuation_source candidate in
+      if Masc.Keeper_tool_plan.Composition_run_id.equal source.composition_run_id
+          (Journal.continuation_source parked.parent_continuation).composition_run_id
+      then match outcome with
+        | Ok result when Tool_result.is_success result -> Some (Tool_result.data result)
+        | Ok _ | Error _ -> None
+      else None) !outcomes |> function
+    | Some accepted -> accepted | None -> fail "original parent did not resume from the repaired child result" in
+  let parent_ok, _, _ = await_composition env fixture accepted_parent in
+  check bool "the original parent consumes its child's usable result" true parent_ok;
+  check int "recovery consumes saved results without backend replay" backend_before (List.length (calls fixture))
 
 let test_continuation_pulse_shares_declarations ~invalid_initial () =
   with_fixture @@ fun env _initialize fixture ->
@@ -2099,7 +2191,7 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
   let held_resume ~on_recovery_held ~profiles:_ ~context:_ candidate =
     incr held_intakes;
     on_recovery_held ~request_id:(Journal.continuation_request_id candidate)
-      ~reason:"original child authority requires repair";
+      ~cause:(Wake.Explicit_recovery_required "original child authority requires repair");
     Ok (Tool_result.make_err ~tool_name:"keeper_composition_run" ~start_time:(Tool_timing.start ())
       ~class_:Tool_result.Runtime_failure ~effect_disposition:Tool_result.Proven_pre_effect
       "original child authority requires repair") in
@@ -2297,8 +2389,8 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
      removing it before pulse would never exercise this admission boundary. *)
   let resume_without_original ~on_recovery_held ~profiles:_ ~context candidate =
     Unix.rename draft_path detached_draft;
-    Wake.resume ~on_recovery_held:(fun ~request_id ~reason ->
-      pre_admission_hold := Some request_id; on_recovery_held ~request_id ~reason)
+    Wake.resume ~on_recovery_held:(fun ~request_id ~cause ->
+      pre_admission_hold := Some request_id; on_recovery_held ~request_id ~cause)
       ~context candidate in
   Fun.protect
       ~finally:(fun () -> if Sys.file_exists detached_draft then Unix.rename detached_draft draft_path)
@@ -5950,4 +6042,8 @@ let () = match Array.to_list Sys.argv with
       ; test_case "ready continuations share declarations until the next pulse" `Quick
           (test_continuation_pulse_shares_declarations ~invalid_initial:false)
       ; test_case "shared declaration failures remain explicit until a new projection" `Quick
-          (test_continuation_pulse_shares_declarations ~invalid_initial:true) ]]
+          (test_continuation_pulse_shares_declarations ~invalid_initial:true)
+      ; test_case "exact run restoration reactivates original child and parent" `Quick
+          (test_original_evidence_repair_reactivates_continuation ~skill_publication:false)
+      ; test_case "published Skill repair reactivates original child and parent" `Quick
+          (test_original_evidence_repair_reactivates_continuation ~skill_publication:true) ]]

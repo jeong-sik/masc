@@ -16,8 +16,21 @@ type error =
   | Original_task_skills_unavailable of Keeper_task_skill_turn.error
 
 val error_to_string : error -> string
+
+type recovery_hold =
+  | Original_run_unavailable of Keeper_composition_draft.error
+  | Task_skill_publication_unavailable of
+      { error : Keeper_task_skill_turn.error
+      ; snapshot_revision : Skill_catalog_snapshot.snapshot_revision
+      }
+  | Explicit_recovery_required of string
+(** Pre-intake original evidence can be revalidated after exact run restoration
+    or a changed published Skill projection. Surface/worker holds require
+    explicit recovery: their diagnostic text is never a retry decision. *)
+
+val recovery_hold_to_string : recovery_hold -> string
 val resume :
-  ?on_recovery_held:(request_id:string -> reason:string -> unit) ->
+  ?on_recovery_held:(request_id:string -> cause:recovery_hold -> unit) ->
   context:'a Keeper_types_profile.context ->
   Keeper_tool_execution_journal.continuation -> (Tool_result.result, error) result
 (** Strictly resolve current declarations (including name/duplicate ownership),
@@ -37,13 +50,17 @@ val create :
 val pulse : sw:Eio.Switch.t -> 'a t -> (unit, Keeper_tool_execution_journal.error) result
 (** Schedule independent ready-run intake fibers and return without joining
     them. Active intake and workers reporting held original authority suppress
-    repeated automatic attempts for that exact canonical request. Explicit
-    public resume or a new controller may retry after authority is repaired;
-    a changed request owner is re-admitted normally. Holds are process-local
+    repeated automatic attempts for that exact canonical request. Before another
+    intake, read-only probes can release [Original_run_unavailable] when its exact
+    sealed run reads again, or [Task_skill_publication_unavailable] when a different
+    configured Skill snapshot is published. Release only requests fresh original
+    validation; it grants no effect authority. [Explicit_recovery_required] stays
+    held until public recovery or a changed request owner. A new controller can
+    retry intake. Holds are process-local
     scheduling hints, never durable effect authority. Exact durable owner/node
     CAS still admits the worker. Eligible intakes in one pulse share one immutable
     declaration projection, acquired on first demand through the common I/O
-    executor. A pulse containing only active/held candidates performs no
+    executor. A pulse containing only active candidates or unreleased holds performs no
     declaration read. A later pulse captures anew; metadata, Skill publication,
     original evidence and admission remain per intake. Cancelled acquisition may
     restart for a remaining caller after worker cleanup. Single-domain Eio caller.
@@ -51,7 +68,7 @@ val pulse : sw:Eio.Switch.t -> 'a t -> (unit, Keeper_tool_execution_journal.erro
 
 module For_testing : sig
   val pulse :
-    resume:(on_recovery_held:(request_id:string -> reason:string -> unit) ->
+    resume:(on_recovery_held:(request_id:string -> cause:recovery_hold -> unit) ->
       profiles:Keeper_types_profile.keeper_profile_snapshot ->
       context:'a Keeper_types_profile.context ->
       Keeper_tool_execution_journal.continuation -> (Tool_result.result, error) result) ->

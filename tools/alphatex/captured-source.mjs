@@ -1,3 +1,5 @@
+import { captureRange } from './capture-time.mjs'
+
 // A captured source keeps the complete native take, including opaque UMP and
 // its timestamp origin. It is not a note-only MIDI source or an audio region.
 export const capturePartNames = Object.freeze({ manifest: 'session.json', audio: 'audio.wav', audioBlocks: 'audio-blocks.jsonl', midi: 'midi.ump.jsonl' })
@@ -31,5 +33,6 @@ export function validateCapturedSource(asset) {
         || part.file !== `assets/${part.sha256}.${suffix}`) throw new Error('Invalid captured source identity/path')
   }
   validateCaptureManifest(asset.manifest)
+  captureRange(asset)
   return asset
 }

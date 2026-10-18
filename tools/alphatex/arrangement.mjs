@@ -1,4 +1,5 @@
 import { validateCapturedSource } from './captured-source.mjs'
+import { captureRegionTime } from './capture-time.mjs'
 import { validateMidiSource, midiSourcePattern } from './midi-source.mjs'
 import { PPQ } from './sequencer-project.mjs'
 
@@ -68,26 +69,41 @@ export function sourceSecondsAtTick(performance, tick) {
 export function arrangementClipTime(project, clip) {
   const asset = project.assets.find(asset => asset.id === clip.asset)
   if (!asset) throw new Error('Region source is missing')
-  integer(clip.position, 'region project position'); integer(clip.offset, 'region source offset')
-  integer(clip.extent, 'region source extent', asset.kind === 'wave' ? 1 : 0)
+  integer(clip.position, 'region project position')
   integer(clip.repeat, 'region repeat count', 1)
-  let sourceStart, sourceEnd
-  if (asset.kind === 'wave') {
+  let sourceStart, sourceEnd, duration, capture
+  switch (asset.kind) {
+  case 'capture': {
+    if (clip.pattern !== undefined) throw new Error('Captured regions do not have MIDI patterns')
+    capture = captureRegionTime(asset, clip)
+    sourceStart = capture.sourceStartSeconds; sourceEnd = capture.sourceEndSeconds; duration = capture.durationSeconds
+    break
+  }
+  case 'wave': {
+    integer(clip.offset, 'region source offset'); integer(clip.extent, 'region source extent', 1)
     if (clip.pattern !== undefined) throw new Error('WAV regions do not have MIDI patterns')
     if (clip.offset + clip.extent > asset.metadata.frames || !Number.isSafeInteger(clip.offset + clip.extent)) {
       throw new Error('WAV region exceeds its source frames')
     }
     sourceStart = clip.offset / asset.metadata.sampleRate
     sourceEnd = (clip.offset + clip.extent) / asset.metadata.sampleRate
-  } else {
+    break
+  }
+  case 'midi': {
+    integer(clip.offset, 'region source offset'); integer(clip.extent, 'region source extent')
     const performance = midiSourcePattern(asset.source, { pattern: clip.pattern })
     sourceStart = sourceSecondsAtTick(performance, clip.offset)
     sourceEnd = sourceSecondsAtTick(performance, integer(clip.offset + clip.extent, 'region MIDI source end'))
+    break
+  }
+  default: throw new Error('Unknown region source kind')
   }
   const position = clip.position / project.ppq * 60 / project.tempo
-  const duration = sourceEnd - sourceStart, end = position + duration * clip.repeat
+  duration ??= sourceEnd - sourceStart
+  const end = position + duration * clip.repeat
   if (![position, sourceStart, sourceEnd, duration, end].every(Number.isFinite)) throw new Error('Region time is not representable')
-  return { startSeconds: position, sourceStartSeconds: sourceStart, sourceEndSeconds: sourceEnd, durationSeconds: duration, endSeconds: end }
+  return { startSeconds: position, sourceStartSeconds: sourceStart, sourceEndSeconds: sourceEnd, durationSeconds: duration, endSeconds: end,
+    ...(capture ? { sourceClock: capture.sourceClock, audio: capture.audio } : {}) }
 }
 export function validateArrangement(project) {
   if (project?.schemaVersion !== 1 || project.kind !== 'arrangement' || project.ppq !== PPQ) throw new Error('Unsupported arrangement document')
@@ -103,7 +119,7 @@ export function validateArrangement(project) {
   const assets = new Map(project.assets.map(asset => [asset.id, asset])), lanes = new Map(project.lanes.map(lane => [lane.id, lane]))
   for (const lane of project.lanes) {
     text(lane.name, 'lane name')
-    if (!['wave', 'midi'].includes(lane.kind) || typeof lane.muted !== 'boolean' || typeof lane.solo !== 'boolean') throw new Error('Invalid arrangement lane')
+    if (!['wave', 'midi', 'capture'].includes(lane.kind) || typeof lane.muted !== 'boolean' || typeof lane.solo !== 'boolean') throw new Error('Invalid arrangement lane')
   }
   for (const clip of project.clips) {
     text(clip.name, 'region name')

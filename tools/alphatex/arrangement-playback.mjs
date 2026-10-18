@@ -4,11 +4,19 @@ import { arrangementSchedule, newArrangement } from './arrangement.mjs'
 import { sourceMidiTimeline } from './midi-source-playback.mjs'
 import { importArrangementWave } from './arrangement-files.mjs'
 
+function requireRegionTransport(project) {
+  const schedule = arrangementSchedule(project)
+  if (schedule.some(clip => project.assets.find(asset => asset.id === clip.asset).kind === 'capture')) {
+    throw new Error('Captured-region playback is not connected yet; mute captured lanes or use :open-take for paired source playback')
+  }
+  return schedule
+}
+
 // One compressed region record retains whole source frames. Preparation owns
 // private copies, so editing/moving project files cannot change admitted audio.
 export async function prepareArrangementWave(project, { sourceRoot, directory, signal } = {}) {
   signal?.throwIfAborted()
-  const schedule = arrangementSchedule(project)
+  const schedule = requireRegionTransport(project)
   if (!schedule.length) throw new Error('No audible arrangement regions')
   if (schedule.some(clip => project.assets.find(asset => asset.id === clip.asset).kind !== 'wave')) {
     throw new Error('MIDI region playback requires expression-state reconstruction; mute MIDI lanes for WAV playback')
@@ -45,7 +53,7 @@ export async function prepareArrangementWave(project, { sourceRoot, directory, s
 // trims and finite repeat counts; neither preparation nor playback expands copies.
 export async function prepareArrangementMidi(project, { directory, signal, midiOutput, portBindings = [] } = {}) {
   signal?.throwIfAborted()
-  const schedule = arrangementSchedule(project)
+  const schedule = requireRegionTransport(project)
   if (!schedule.length) throw new Error('No audible arrangement regions')
   if (schedule.some(clip => project.assets.find(asset => asset.id === clip.asset).kind !== 'midi')) {
     throw new Error('Mixed WAV/MIDI arrangement playback needs the shared-clock transport; mute WAV lanes for MIDI playback')
@@ -97,7 +105,7 @@ export function selectArrangementRoute(route, effect) {
   }
 }
 export function arrangementPlaybackRequest(project, route) {
-  const kinds = new Set(arrangementSchedule(project).map(clip => project.assets.find(asset => asset.id === clip.asset).kind))
+  const kinds = new Set(requireRegionTransport(project).map(clip => project.assets.find(asset => asset.id === clip.asset).kind))
   if (!kinds.size) throw new Error('No audible arrangement regions')
   if (kinds.size > 1 && route.kind !== 'mixed') throw new Error('Select :mixed-output AUDIO_UID and MIDI destinations for mixed playback')
   if (kinds.has('wave') && route.kind === 'midi') throw new Error('Choose an audio output for audible WAV regions')
@@ -109,6 +117,7 @@ export function arrangementPlaybackRequest(project, route) {
 
 export async function prepareArrangementMixed(project, options = {}) {
   options.signal?.throwIfAborted()
+  requireRegionTransport(project)
   const kinds = new Map(project.assets.map(asset => [asset.id, asset.kind]))
   const part = kind => ({ ...project, clips: project.clips.filter(clip => kinds.get(clip.asset) === kind) })
   const midi = await prepareArrangementMidi(part('midi'), options)

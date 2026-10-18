@@ -176,6 +176,24 @@ let test_quota_rest_uses_accepted_source_snapshot () =
           (first = foreign_state && last = foreign_state)
       | _ -> fail "quota rest, accepted reports and observed snapshots diverged")
 
+let test_retraction_before_older_acceptance_converges () =
+  let in_order = scope "snapshot_retraction_in_order" in
+  let out_of_order = scope "snapshot_retraction_out_of_order" in
+  let cap = decode Usage.decode_openrouter_key
+      {|{"data":{"limit":20,"limit_remaining":5}}|} in
+  let retracted = decode Usage.decode_openrouter_key
+      {|{"data":{"limit":null}}|} in
+  Usage.record ~scope:in_order ~observed_at:100. cap;
+  Usage.record ~scope:in_order ~observed_at:200. retracted;
+  Usage.record ~scope:out_of_order ~observed_at:200. retracted;
+  Usage.record ~scope:out_of_order ~observed_at:100. cap;
+  let expected : Usage.scope_state =
+    Reported_no_windows { source = Openrouter_key_read; observed_at = 200. }
+  in
+  check bool "in-order and out-of-order retraction converge on the same state" true
+    (Usage.state ~scope:in_order = expected
+     && Usage.state ~scope:out_of_order = expected)
+
 let () =
   run "provider usage snapshots"
     [ "account lifecycle",
@@ -187,4 +205,6 @@ let () =
       ; test_case "empty reports distinguish unseen and reported scopes" `Quick
           test_empty_reports_distinguish_unseen_and_reported_scopes
       ; test_case "quota rest uses the accepted source snapshot" `Quick
-          test_quota_rest_uses_accepted_source_snapshot ] ]
+          test_quota_rest_uses_accepted_source_snapshot
+      ; test_case "retraction arriving before older acceptance converges" `Quick
+          test_retraction_before_older_acceptance_converges ] ]

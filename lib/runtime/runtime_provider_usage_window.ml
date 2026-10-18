@@ -969,6 +969,8 @@ let record ~scope ~observed_at (report : report) =
         | None -> Observations.empty
       in
       let next, accepted = Observations.apply_report ~observed_at report observations in
+      (* When [accepted] is [None], [next] is [observations] unchanged; writing
+         unconditionally keeps a single table update path. *)
       Hashtbl.replace table scope next;
       Option.map (fun accepted -> accepted, next) accepted)
     in

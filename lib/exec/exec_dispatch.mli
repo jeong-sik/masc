@@ -15,6 +15,11 @@ val resolve_arg : Shell_ir.arg -> string
     executing any command or opening a redirect. *)
 
 
+val monotonic_now : unit -> float
+(** Monotonic seconds elapsed since process start ([Mtime_clock.elapsed_ns]),
+    used as the default [?started] epoch for invocation timeout budgets so
+    wall-clock adjustments do not shrink or extend a running command's budget. *)
+
 val dispatch_simple :
   ?base_host_env:string array ->
   ?timeout_sec:float ->
@@ -32,7 +37,8 @@ val dispatch_simple :
     targets receive the same callback contract.
 
     [?timeout_sec] is the original invocation budget; omission is unlimited.
-    [?started] is its wall-clock epoch, defaulting to now. Every substitution
+    [?started] is its monotonic epoch in seconds ({!monotonic_now}), defaulting
+    to now. Every substitution
     child and every stage retains that same budget and epoch; elapsed time is
     subtracted once when deriving a process duration, not from an already
     reduced child budget (RFC shell-ir-typed-command-substitution §2.3 item 4).

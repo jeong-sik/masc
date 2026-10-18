@@ -150,6 +150,9 @@ let render_context_inspector state =
          ])
   in
   let hints =
+    let turn_hint = match state.context_inspector_target with
+      | Masc_tui_context_inspector.Recent _ -> "[ / ]:turn  "
+      | Masc_tui_context_inspector.Pinned _ -> "" in
     match state.context_inspector_exact with
     | Some _ -> "j/k:scroll  Esc:list"
     | None -> (
@@ -157,9 +160,9 @@ let render_context_inspector state =
           state.context_inspector_tab, cols >= keeper_split_threshold_cols
         with
         | (Masc_tui_context_inspector.Exact_input | Masc_tui_context_inspector.Input_map), true ->
-            "1/2/3 or Tab:switch  [ / ]:turn  /:search  j/k:select or scroll  h/l:pane  Enter:open exact  r:refresh  Esc:close"
+            "1/2/3 or Tab:switch  " ^ turn_hint ^ "/:search  j/k:select or scroll  h/l:pane  Enter:open exact  r:refresh  Esc:close"
         | ((Masc_tui_context_inspector.Exact_input | Masc_tui_context_inspector.Input_map), false)
-        | (Masc_tui_context_inspector.Composition, _) -> "1/2/3 or Tab:switch  [ / ]:turn  /:search  j/k:select  Enter:open exact  r:refresh  Esc:close")
+        | (Masc_tui_context_inspector.Composition, _) -> "1/2/3 or Tab:switch  " ^ turn_hint ^ "/:search  j/k:select  Enter:open exact  r:refresh  Esc:close")
   in
   let content = context_inspector_content_lines ~cols state in
   (* The plain shapes are one list, so the contract windows it and says which

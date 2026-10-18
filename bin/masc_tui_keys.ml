@@ -368,8 +368,8 @@ let approval_answer =
   b Act "a" "answer a question"
     ~help:"open the selected Keeper question in its own mode; Esc leaves it"
 let approval_origin =
-  b Act "o" "question source"
-    ~help:"show or hide the selected question's recorded calling turn; with no open question, inspect the last answer's source; this does not open the Keeper's latest turn"
+  b Act "o / O" "source / inspect"
+    ~help:"o shows the question source; O opens that immutable turn's retained input. With no open question use the last answer's source. Esc returns to the question draft; a missing source is never replaced by the Keeper's latest turn"
 let approval_walk =
   b Navigate "[ / ]" "ask"
     ~help:"while browsing or answering a question, move to the previous or next ask; \

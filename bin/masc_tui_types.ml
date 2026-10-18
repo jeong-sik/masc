@@ -6852,10 +6852,9 @@ type state = {
      list row it used to be pinned beside. *)
   mutable context_inspector_detail_scroll: int;
   mutable context_inspector_focus: pane_focus;
-  (* How many rows back from the newest the inspector is reading. [0] is the
-     newest; the keys that move it re-fetch the exact provider input for the
-     row they name, so every tab describes the turn the operator chose. *)
-  mutable context_inspector_turn_back: int;
+  (* A recent-page offset and an immutable source reference are different
+     targets. Recent navigation cannot turn a pinned Ask source into latest. *)
+  mutable context_inspector_target: Masc_tui_context_inspector.target;
   (* The roster starts closed. An explicit Ctrl-B choice survives both
      navigation and resizing; Left navigation is transient. *)
   mutable roster_pane_preference: Masc_tui_roster_pane.preference;
@@ -11347,7 +11346,7 @@ let close_context_inspector (state : state) =
   state.context_inspector_scroll <- 0;
   state.context_inspector_detail_scroll <- 0;
   state.context_inspector_focus <- Left_pane;
-  state.context_inspector_turn_back <- 0
+  state.context_inspector_target <- Masc_tui_context_inspector.Recent 0
 
 let close_agenda (state : state) =
   state.agenda_open <- false;
@@ -11478,7 +11477,7 @@ let create_state
   context_inspector_exact = None;
   context_inspector_detail_scroll = 0;
   context_inspector_focus = Left_pane;
-  context_inspector_turn_back = 0;
+  context_inspector_target = Masc_tui_context_inspector.Recent 0;
   (* Keep the reading surface full-width until Left opens the navigator
      or Ctrl-B explicitly pins the roster. *)
   roster_pane_preference = Masc_tui_roster_pane.Hidden;

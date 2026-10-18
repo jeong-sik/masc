@@ -2113,7 +2113,9 @@ let draw_ask_origin buf cols (state : state) =
         "Calling turn was not recorded. Current Keeper activity does not establish it."
     | Some reference ->
         box_wrapped_field buf cols ~head:"  Asking turn: " ~style:Ansi.dim
-          (Ids.Turn_ref.to_string reference)) (Masc_tui_types.current_ask_origin state)
+          (Ids.Turn_ref.to_string reference);
+        box_wrapped_field buf cols ~head:"  " ~style:Ansi.dim
+          "O:inspect this turn · Esc returns to the question") (Masc_tui_types.current_ask_origin state)
 
 let ask_question_viewport (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -3697,7 +3699,7 @@ let context_next_request_lines ?(runtime_details = fun _ -> []) ?(show_scale_not
 let token_cell_width = 7
 
 let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
-    ~(forecast : (Masc_tui_context_inspector.forecast, string) result)
+    ?forecast
     (selection : Masc_tui_context_inspector.selection) =
   let module Inspector = Masc_tui_context_inspector in
   (* The usable cells after the two-space indent every row carries. No floor
@@ -4300,8 +4302,8 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
     ]
   @ history_lines
   @ [ "" ]
-  @ context_next_request_lines ~runtime_details ~cols ~scale forecast
-  @ recent_turns_lines @ [ "" ]
+  @ Option.fold ~none:[] ~some:(context_next_request_lines ~runtime_details ~cols ~scale) forecast
+  @ (if selection.Inspector.recent = [] then [] else recent_turns_lines) @ [ "" ]
   @ prose
       "Three measurements of one turn, not three views of one number: none of \
        them is a breakdown of another, and they do not add up."
@@ -4581,17 +4583,19 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
          pane carries the full text and the note says so by counting. *)
       let response_block =
         match response_parts with
-        | Error detail ->
+        | Inspector.Pending ->
+            [ Ansi.dim ^ "  Response observation is still loading" ^ Ansi.reset ]
+        | Inspector.Observed (Error detail) ->
             [ "  "
               ^ Context_bars.band ~width ~title:"RESPONSE"
                   ~caption:"what came back for this request"
             ; (Theme.bad ()) ^ "  " ^ Keeper_chat.terminal_safe_text detail
               ^ Ansi.reset
             ]
-        | Ok
+        | Inspector.Observed (Ok
             { Masc_tui_context_inspector.parts = []
             ; outside_newest_page = true
-            } ->
+            }) ->
             [ "  "
               ^ Context_bars.band ~width ~title:"RESPONSE"
                   ~caption:"what came back for this request"
@@ -4599,7 +4603,7 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
               ^ "  This turn's reply is not in the newest history page"
               ^ Ansi.reset
             ]
-        | Ok { Masc_tui_context_inspector.parts; _ } ->
+        | Inspector.Observed (Ok { Masc_tui_context_inspector.parts; _ }) ->
             let cap = 14 in
             let lines =
               List.concat_map
@@ -4819,18 +4823,21 @@ let context_input_map_detail_lines ~width ~scale ~part_of
 
 
 let context_input_map_lines ~cols ~scale state (record : Turn_record.t)
-    (provider_input : (Masc_tui_context_inspector.provider_input, string) result) =
+    (provider_input : Masc_tui_context_inspector.provider_input Masc_tui_context_inspector.observation) =
   let module Inspector = Masc_tui_context_inspector in
   (* Only a verified row names a part, and only the joined input lists it. *)
   let part_of item =
     match provider_input with
-    | Ok input -> context_part_view state input item
-    | Error _ -> Masc_tui_fetched.Absent
+    | Inspector.Observed (Ok input) -> context_part_view state input item
+    | Inspector.Pending | Inspector.Observed (Error _) -> Masc_tui_fetched.Absent
   in
   let rows, exact_input, error_rows =
     match provider_input with
-    | Ok input -> Inspector.input_map_rows record (Some input), Some input, []
-    | Error detail ->
+    | Inspector.Observed (Ok input) -> Inspector.input_map_rows record (Some input), Some input, []
+    | Inspector.Pending ->
+        ( Inspector.input_map_rows record None, None
+        , [ Ansi.dim ^ "  Original input is still loading; verification is pending" ^ Ansi.reset ] )
+    | Inspector.Observed (Error detail) ->
         ( Inspector.input_map_rows record None
         , None
         , [ (Theme.bad ()) ^ "  " ^ Keeper_chat.terminal_safe_text detail
@@ -5067,30 +5074,86 @@ let context_inspector_content_lines ~cols state : context_pane_body =
              ( [ (Theme.bad ()) ^ "  Input map unavailable: " ^ detail
                  ^ Ansi.reset ]
              , None ))
+  | Some (_, Masc_tui_context_inspector.Exact_read reading) ->
+      let module Inspector = Masc_tui_context_inspector in
+      let record = Inspector.inspected_record ~target:state.context_inspector_target
+          (Inspector.Exact_read reading) in
+      let prefix =
+        [ "  Original question turn: "
+          ^ Keeper_chat.terminal_safe_text (Ids.Turn_ref.to_string reading.turn_ref) ]
+        @ (match reading.record with
+           | Inspector.Pending -> [ Ansi.dim ^ "  Turn record is still loading" ^ Ansi.reset ]
+           | Inspector.Observed (Error detail) ->
+               [ (Theme.bad ()) ^ "  Turn record unavailable: "
+                 ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset ]
+           | Inspector.Observed (Ok exact) ->
+               if exact.skipped_rows = 0 then [] else
+                 [ Ansi.dim ^ Printf.sprintf "  Exact record found; %d unreadable history rows were encountered"
+                     exact.skipped_rows ^ Ansi.reset ])
+      in
+      let prepend = function
+        | Plain (lines, selected) ->
+            Plain (prefix @ lines, Option.map (fun row -> List.length prefix + row) selected)
+        | Split body -> Split { body with common = prefix @ body.common }
+      in
+      let pending label = Plain ([ Ansi.dim ^ "  " ^ label ^ " is still loading" ^ Ansi.reset ], None) in
+      let unavailable label detail = Plain
+          ([ (Theme.bad ()) ^ "  " ^ label ^ " unavailable: "
+             ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset ], None) in
+      let scale = Option.fold ~none:Masc_tui_token_scale.fleet
+          ~some:(fun record -> Masc_tui_token_scale.of_turn ~rows:[ record ] record) record in
+      let body = match state.context_inspector_tab with
+        | Inspector.Composition ->
+            (match record with
+             | None -> Plain ([], None)
+             | Some record ->
+                 let selection : Inspector.selection =
+                   { latest = record
+                   ; attributed = Option.map
+                       (fun components -> { Inspector.record; components; turns_behind_latest = 0 })
+                       record.input_components
+                   ; recent = []
+                   ; rows = [ record ] } in
+                 Plain (context_composition_lines ~cols ~turn_back:0 selection, None))
+        | Inspector.Exact_input ->
+            (match reading.provider_input with
+             | Inspector.Pending -> pending "Original input"
+             | Inspector.Observed (Error detail) -> unavailable "Original input" detail
+             | Inspector.Observed (Ok input) ->
+                 context_exact_input_lines ~cols ~scale state ~response:record
+                   ~response_parts:reading.response input)
+        | Inspector.Input_map ->
+            (match record with
+             | None -> Plain ([], None)
+             | Some record -> context_input_map_lines ~cols ~scale state record
+                 reading.provider_input)
+      in
+      prepend body
   | Some
       ( _
       , Masc_tui_context_inspector.Turn_read
           { selection; provider_input; response; forecast } ) ->
+      (match state.context_inspector_target with
+       | Masc_tui_context_inspector.Pinned _ ->
+           Plain ([ "  Waiting for the requested immutable source" ], None)
+       | Masc_tui_context_inspector.Recent turn_back ->
       (match state.context_inspector_tab with
        | Masc_tui_context_inspector.Composition ->
            Plain
              ( context_composition_lines ~runtime_details ~cols
-                 ~turn_back:state.context_inspector_turn_back ~forecast selection
+                 ~turn_back ~forecast selection
              , None )
        | Masc_tui_context_inspector.Exact_input ->
            (match provider_input with
             | Ok input ->
-                (* The request tab reads sizes at the newest turn's scale;
-                   its body is that turn's, whichever row is stepped to
-                   on the stack tab. *)
-                let scale =
-                  Masc_tui_token_scale.of_turn
-                    ~rows:selection.Masc_tui_context_inspector.rows
-                    selection.Masc_tui_context_inspector.latest
-                in
+                (* The same stepped/attributed record names the input,
+                   token scale and response counters on this tab. *)
+                let record = Masc_tui_context_inspector.viewing_record selection ~turn_back in
+                let scale = Option.fold ~none:Masc_tui_token_scale.fleet
+                    ~some:(Masc_tui_token_scale.of_turn ~rows:selection.Masc_tui_context_inspector.rows) record in
                 context_exact_input_lines ~cols ~scale state
-                  ~response:(Some selection.Masc_tui_context_inspector.latest)
-                  ~response_parts:response input
+                  ~response:record
+                  ~response_parts:(Masc_tui_context_inspector.Observed response) input
             | Error detail ->
                 Plain
                   ( [ (Theme.bad ()) ^ "  Exact input unavailable: "
@@ -5104,7 +5167,7 @@ let context_inspector_content_lines ~cols state : context_pane_body =
                    row's components. *)
                 match
                   Masc_tui_context_inspector.viewing_record selection
-                    ~turn_back:state.context_inspector_turn_back
+                    ~turn_back
                 with
                 | None ->
                     (* The map is a per-component table; with no attribution
@@ -5123,7 +5186,7 @@ let context_inspector_content_lines ~cols state : context_pane_body =
                         ~rows:selection.Masc_tui_context_inspector.rows record
                     in
                     context_input_map_lines ~cols ~scale state record
-                      provider_input))
+                      (Masc_tui_context_inspector.Observed provider_input))))
 
 
 (* The rows a split body holds below the common summary: one pinned header

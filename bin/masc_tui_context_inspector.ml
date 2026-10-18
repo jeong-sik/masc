@@ -140,6 +140,22 @@ type forecast =
   ; candidates : forecast_candidate list
   }
 
+type target = Recent of int | Pinned of Ids.Turn_ref.t
+
+type exact_turn_record =
+  { record : Turn_record.t
+  ; skipped_rows : int
+  }
+
+type 'a observation = Pending | Observed of ('a, string) result
+
+type exact_reading =
+  { turn_ref : Ids.Turn_ref.t
+  ; record : exact_turn_record observation
+  ; provider_input : provider_input observation
+  ; response : response_turn observation
+  }
+
 type reading =
   | Request_failed of string
   | Turn_read_failed of
@@ -152,6 +168,41 @@ type reading =
       ; response : (response_turn, string) result
       ; forecast : (forecast, string) result
       }
+  | Exact_read of exact_reading
+
+let is_loading = function
+  | Request_failed _ | Turn_read_failed _ | Turn_read _ -> false
+  | Exact_read { record; provider_input; response; _ } ->
+      let pending = function Pending -> true | Observed _ -> false in
+      pending record || pending provider_input || pending response
+
+let merge_progress ~previous incoming =
+  match incoming with
+  | Request_failed _ | Turn_read_failed _ | Turn_read _ -> incoming
+  | Exact_read next ->
+      (match previous with
+       | Some (Exact_read held) when Ids.Turn_ref.equal held.turn_ref next.turn_ref ->
+           let merge held = function Pending -> held | Observed result -> Observed result in
+           Exact_read
+             { next with
+               record = merge held.record next.record
+             ; provider_input = merge held.provider_input next.provider_input
+             ; response = merge held.response next.response }
+       | Some (Exact_read _ | Request_failed _ | Turn_read_failed _ | Turn_read _) | None -> incoming)
+
+let observed_input = function
+  | Turn_read { provider_input = Ok input; _ }
+  | Exact_read { provider_input = Observed (Ok input); _ } -> Some input
+  | Request_failed _ | Turn_read_failed _
+  | Turn_read { provider_input = Error _; _ }
+  | Exact_read { provider_input = (Pending | Observed (Error _)); _ } -> None
+
+let step_recent target ~older ~count =
+  match target with
+  | Pinned _ -> None
+  | Recent turn_back ->
+      let next = if older then min (count - 1) (turn_back + 1) else max 0 (turn_back - 1) in
+      if count <= 0 || next = turn_back then None else Some (Recent next)
 
 type tab =
   | Composition
@@ -255,8 +306,21 @@ let decode_turn_records = function
 
 let viewing_record selection ~turn_back =
   if turn_back <= 0 then
-    Option.map (fun attributed -> attributed.record) selection.attributed
+    Option.map (fun (attributed : attributed_turn) -> attributed.record) selection.attributed
   else List.nth_opt selection.rows turn_back
+
+let inspected_record ~target = function
+  | Request_failed _ | Turn_read_failed _ -> None
+  | Turn_read { selection; _ } ->
+      (match target with
+       | Recent turn_back -> viewing_record selection ~turn_back
+       | Pinned _ -> None)
+  | Exact_read reading ->
+      (match target, reading.record with
+       | Pinned expected, Observed (Ok exact)
+         when Ids.Turn_ref.equal expected reading.turn_ref
+              && Ids.Turn_ref.equal expected exact.record.turn_ref -> Some exact.record
+       | (Pinned _ | Recent _), (Pending | Observed _) -> None)
 
 let exact_fields expected fields =
   List.length expected = List.length fields
@@ -283,11 +347,6 @@ let nonnegative_int name = function
 let sha256 name = function
   | `String value when String_util.is_lowercase_sha256_hex value -> Ok value
   | _ -> Error (name ^ " is not a lowercase SHA-256")
-
-type exact_turn_record =
-  { record : Turn_record.t
-  ; skipped_rows : int
-  }
 
 let decode_exact_turn_record ~expected_keeper ~expected_turn_ref json =
   let fail detail = Error ("exact turn-records: " ^ detail) in
@@ -1013,8 +1072,12 @@ let client_context_tokens ~scope ~input_tokens ~output_tokens =
    opened the item under the cursor, which the wide layout draws beside the
    list. On the proof tab: the opened or selected row's verified part. A part
    is read only for these, so moving through a list costs one part per stop. *)
-let shown_part ~keeper ~tab ~turn_back ~opened ~cursor = function
-  | Turn_read { selection; provider_input = Ok input; _ } ->
+let shown_part ~keeper ~tab ~target ~opened ~cursor reading =
+  match observed_input reading with
+  | Some input when
+      (match target with
+       | Recent _ -> (match reading with Turn_read _ -> true | Exact_read _ | Turn_read_failed _ | Request_failed _ -> false)
+       | Pinned reference -> Ids.Turn_ref.equal reference input.turn_ref) ->
     let at_cursor rows =
       List.nth_opt rows (min (max 0 (List.length rows - 1)) (max 0 cursor))
     in
@@ -1028,7 +1091,7 @@ let shown_part ~keeper ~tab ~turn_back ~opened ~cursor = function
       | Composition -> None
       | Exact_input -> at input.items
       | Input_map ->
-        (match viewing_record selection ~turn_back with
+        (match inspected_record ~target reading with
          | None -> None
          | Some record ->
            Option.bind
@@ -1039,5 +1102,4 @@ let shown_part ~keeper ~tab ~turn_back ~opened ~cursor = function
       (fun part_item ->
          { part_keeper = keeper; part_turn_ref = input.turn_ref; part_item })
       item
-  | Turn_read { provider_input = Error _; _ } | Turn_read_failed _ | Request_failed _ ->
-    None
+  | Some _ | None -> None

@@ -1833,6 +1833,47 @@ let fetch_provider_input_part ~(host : string) ~(port : int)
        | exception Yojson.Json_error detail ->
            Error ("provider-input part was not JSON: " ^ detail))
 
+let fetch_context_json ~host ~port ~label ~path ~decode =
+  match http_get ~host ~port ~path with
+  | Error detail -> Error (label ^ ": " ^ detail)
+  | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status) ->
+      Error (named_refusal label ~status ~body)
+  | Ok (_, body) ->
+      Masc_tui_response_decode.run ~name:("context." ^ label ^ ".decode_wait") (fun () ->
+        match Yojson.Safe.from_string body with
+        | json -> decode json
+        | exception Yojson.Json_error detail ->
+            Error (label ^ " was not JSON: " ^ detail))
+
+let fetch_keeper_context_response ~host ~port ~keeper_name ~turn_ref =
+  match fetch_keeper_chat_history_page ~host ~port ~keeper_name ~cursor:None with
+  | Error error -> Error (Masc_tui_keeper_chat_history.page_error_to_string error)
+  | Ok page ->
+      Masc_tui_response_decode.run ~name:"context.response.decode_wait" (fun () ->
+        let parts = List.filter_map
+          (fun (row : Masc_tui_keeper_chat_history.row) ->
+            match Option.bind row.turn_id Ids.Turn_ref.of_string with
+            | Some reference when Ids.Turn_ref.equal reference turn_ref ->
+                (match row.kind with
+                 | Masc_tui_keeper_chat_history.Said_by_keeper
+                 | Masc_tui_keeper_chat_history.Autonomous_reply ->
+                     if String.equal row.text "" then None
+                     else Some (Masc_tui_context_inspector.Reply_text row.text)
+                 | Masc_tui_keeper_chat_history.Tool_calls block ->
+                     Some (Masc_tui_context_inspector.Tool_steps
+                       (Masc_tui_keeper_chat_history.tool_rows block))
+                 | Masc_tui_keeper_chat_history.Reasoning lines ->
+                     Some (Masc_tui_context_inspector.Reasoning_lines lines)
+                 | Masc_tui_keeper_chat_history.Addressed_to_keeper _
+                 | Masc_tui_keeper_chat_history.Delivery_failed _
+                 | Masc_tui_keeper_chat_history.Skill_activity _
+                 | Masc_tui_keeper_chat_history.Gate_activity _
+                 | Masc_tui_keeper_chat_history.Memory_activity _
+                 | Masc_tui_keeper_chat_history.Fusion_conclusion _ -> None)
+            | Some _ | None -> None)
+          page.Masc_tui_keeper_chat_history.decoded.rows in
+        Ok { Masc_tui_context_inspector.parts; outside_newest_page = parts = [] })
+
 (** Fetch one completed turn and the immutable provider-input snapshot joined
     by that turn's exact [turn_ref]. A failure on either side stays visible;
     no mutable latest-prompt value is allowed to fill another turn. *)
@@ -1840,15 +1881,7 @@ let fetch_keeper_context_inspector ~(host : string) ~(port : int)
     ~(keeper_name : string) ~(turn_back : int)
     : Masc_tui_context_inspector.reading =
   let fetch ~label ~path ~decode =
-    match http_get ~host ~port ~path with
-    | Error detail -> Error (label ^ ": " ^ detail)
-    | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status) ->
-        Error (named_refusal label ~status ~body)
-    | Ok (_, body) ->
-        (match Yojson.Safe.from_string body with
-         | json -> decode json
-         | exception Yojson.Json_error detail ->
-             Error (label ^ " was not JSON: " ^ detail))
+    fetch_context_json ~host ~port ~label ~path ~decode
   in
   let encoded = percent_encode_path_segment keeper_name in
   let turn =
@@ -1885,50 +1918,8 @@ let fetch_keeper_context_inspector ~(host : string) ~(port : int)
     match Masc_tui_context_inspector.viewing_record selection ~turn_back with
     | None -> Error "no row on this page to name"
     | Some record ->
-        let key = Ids.Turn_ref.to_string record.Turn_record.turn_ref in
-        (match fetch_keeper_chat_history_page ~host ~port ~keeper_name
-                 ~cursor:None with
-            | Error error -> Error (Masc_tui_keeper_chat_history.page_error_to_string error)
-            | Ok page ->
-                let parts =
-                  List.filter_map
-                    (fun (row : Masc_tui_keeper_chat_history.row) ->
-                       if
-                         not
-                           (String.equal
-                              (Option.value ~default:"" row.turn_id)
-                              key)
-                       then None
-                       else
-                         match row.kind with
-                         | Masc_tui_keeper_chat_history.Said_by_keeper
-                         | Masc_tui_keeper_chat_history.Autonomous_reply ->
-                             if row.text = "" then None
-                             else
-                               Some
-                                 (Masc_tui_context_inspector.Reply_text
-                                    row.text)
-                         | Masc_tui_keeper_chat_history.Tool_calls block ->
-                             Some
-                               (Masc_tui_context_inspector.Tool_steps
-                                  (Masc_tui_keeper_chat_history.tool_rows
-                                     block))
-                         | Masc_tui_keeper_chat_history.Reasoning lines ->
-                             Some
-                               (Masc_tui_context_inspector.Reasoning_lines
-                                  lines)
-                         | Masc_tui_keeper_chat_history.Addressed_to_keeper _
-                         | Masc_tui_keeper_chat_history.Delivery_failed _
-                         | Masc_tui_keeper_chat_history.Skill_activity _
-                         | Masc_tui_keeper_chat_history.Gate_activity _
-                         | Masc_tui_keeper_chat_history.Memory_activity _
-                         | Masc_tui_keeper_chat_history.Fusion_conclusion _ -> None)
-                    page.Masc_tui_keeper_chat_history.decoded.rows
-                in
-                Ok
-                  { Masc_tui_context_inspector.parts
-                  ; outside_newest_page = parts = []
-                  })
+        fetch_keeper_context_response ~host ~port ~keeper_name
+          ~turn_ref:record.Turn_record.turn_ref
   in
   let dependent =
     Result.map
@@ -1949,6 +1940,64 @@ let fetch_keeper_context_inspector ~(host : string) ~(port : int)
   | Ok (selection, provider_input, response) ->
       Masc_tui_context_inspector.Turn_read
         { selection; provider_input; response; forecast }
+
+(** Read a known immutable source without a recent-record dependency. Each
+    completed observation is delivered while the other reads remain pending.
+    The caller owns cancellation, workspace/generation admission and drawing. *)
+let fetch_keeper_exact_context_inspector ~host ~port ~keeper_name ~turn_ref ~publish =
+  let module Inspector = Masc_tui_context_inspector in
+  let current : Inspector.exact_reading ref = ref
+    { turn_ref; record = Inspector.Pending; provider_input = Inspector.Pending; response = Inspector.Pending } in
+  let emit () = publish (Inspector.Exact_read !current) in
+  let observe read =
+    try read () with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> Error (Printexc.to_string exn)
+  in
+  let encoded = percent_encode_path_segment keeper_name in
+  let reference = percent_encode_query_value (Ids.Turn_ref.to_string turn_ref) in
+  let read_started_ns = Mtime_clock.elapsed_ns () in
+  let observe_part part read =
+    let started_ns = Mtime_clock.elapsed_ns () in
+    let common =
+      [ "keeper", `String keeper_name
+      ; "turn_ref", Ids.Turn_ref.to_yojson turn_ref
+      ; "read_started_ns", `String (Int64.to_string read_started_ns)
+      ; "part", `String part
+      ; "started_ns", `String (Int64.to_string started_ns) ] in
+    let log fields = Log.Transport.info "tui_context_source_read=%s"
+        (Yojson.Safe.to_string (`Assoc (common @ fields))) in
+    log [ "phase", `String "started" ];
+    let result = observe read in
+    let observed_ns = Mtime_clock.elapsed_ns () in
+    log [ "phase", `String "observed"
+        ; "observed_ns", `String (Int64.to_string observed_ns)
+        ; "elapsed_ns", `String (Int64.to_string (Int64.sub observed_ns started_ns))
+        ; "result", `String (match result with Ok _ -> "decoded" | Error _ -> "unavailable") ];
+    result
+  in
+  emit ();
+  Eio.Fiber.all
+    [ (fun () ->
+        let result = observe_part "record" (fun () ->
+          fetch_context_json ~host ~port ~label:"exact-turn-record"
+            ~path:(Printf.sprintf "/api/v1/keepers/%s/turn-records?turn_ref=%s" encoded reference)
+            ~decode:(Inspector.decode_exact_turn_record ~expected_keeper:keeper_name ~expected_turn_ref:turn_ref)) in
+        current := { !current with record = Inspector.Observed result };
+        emit ())
+    ; (fun () ->
+        let result = observe_part "input" (fun () ->
+          fetch_context_json ~host ~port ~label:"provider-input"
+            ~path:(Printf.sprintf "/api/v1/keepers/%s/provider-input?turn_ref=%s" encoded reference)
+            ~decode:(Inspector.decode_provider_input ~expected_keeper:keeper_name ~expected_turn_ref:turn_ref)) in
+        current := { !current with provider_input = Inspector.Observed result };
+        emit ())
+    ; (fun () ->
+        let result = observe_part "response" (fun () ->
+          fetch_keeper_context_response ~host ~port ~keeper_name ~turn_ref) in
+        current := { !current with response = Inspector.Observed result };
+        emit ())
+    ]
 
 (** What the server did with one answer to a held tool call.
 

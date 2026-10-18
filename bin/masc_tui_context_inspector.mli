@@ -242,6 +242,23 @@ type forecast =
             fresh cycle walks them. *)
   }
 
+type target = Recent of int | Pinned of Ids.Turn_ref.t
+(** A pinned source never becomes the Keeper's current/recent turn. *)
+
+type exact_turn_record =
+  { record : Turn_record.t
+  ; skipped_rows : int
+  }
+
+type 'a observation = Pending | Observed of ('a, string) result
+
+type exact_reading =
+  { turn_ref : Ids.Turn_ref.t
+  ; record : exact_turn_record observation
+  ; provider_input : provider_input observation
+  ; response : response_turn observation
+  }
+
 type reading =
   | Request_failed of string
       (** The whole inspector request could not start. Keep its cause once. *)
@@ -259,6 +276,19 @@ type reading =
       }
       (** Once the turn is known, its provider input and response may each
           fail independently. *)
+  | Exact_read of exact_reading
+      (** Independent, progressively delivered observations for one immutable
+          source. A missing record never prevents its known input read. There
+          is no current next-request forecast in a historical reading. *)
+
+val is_loading : reading -> bool
+val merge_progress : previous:reading option -> reading -> reading
+(** Within one admitted generation, late pending fields cannot erase an
+    already completed observation. The caller clears the previous generation. *)
+val observed_input : reading -> provider_input option
+val inspected_record : target:target -> reading -> Turn_record.t option
+val step_recent : target -> older:bool -> count:int -> target option
+(** Recent-page navigation only. A pinned source returns [None]. *)
 
 type tab =
   | Composition
@@ -292,11 +322,6 @@ type part_key =
   { part_keeper : string
   ; part_turn_ref : Ids.Turn_ref.t
   ; part_item : exact_input_item
-  }
-
-type exact_turn_record =
-  { record : Turn_record.t
-  ; skipped_rows : int
   }
 
 val decode_exact_turn_record :
@@ -394,7 +419,7 @@ val client_context_tokens :
 val shown_part :
   keeper:string ->
   tab:tab ->
-  turn_back:int ->
+  target:target ->
   opened:int option ->
   cursor:int ->
   reading ->

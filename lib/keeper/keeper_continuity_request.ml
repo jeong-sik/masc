@@ -65,7 +65,7 @@ let to_json ~unread ~runtime_id ~selection ~(range : range) ~wire =
         ]
     ]
 
-let record_best_effort ~unread ~config ~keeper_name ~runtime_id ~selection ~range ~wire =
+let record_best_effort ~config ~keeper_name ~unread ~runtime_id ~selection ~range ~wire =
   let append () =
     let location =
       Dated_jsonl.Store.keeper

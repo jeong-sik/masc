@@ -2,6 +2,7 @@ import { newArrangement, validateArrangement, editArrangement, arrangementSchedu
 import { midiSourcePattern } from './midi-source.mjs'
 import { captureRange, captureRegionFromSeconds } from './capture-time.mjs'
 import { beats, PPQ } from './sequencer-project.mjs'
+import { calibrationSelection } from './audio-calibration.mjs'
 
 function reconcile(editor, project) {
   const selected = project.clips.find(clip => clip.id === editor.region)
@@ -120,6 +121,9 @@ export function arrangementCommand(editor, line) {
   }
   let value
   switch (command) {
+    case 'calibrate':
+      count(4)
+      return { editor, effect: { kind: command, ...calibrationSelection({ output: args[0], inputChannel: Number(args[1]), outputChannel: Number(args[2]), maxLagMs: Number(args[3]) }) } }
     case 'import-wave': case 'import-midi': case 'import-take': case 'save-as':
       if (!tail) throw new Error('Choose a file path')
       return { editor, effect: { kind: command, path: tail } }

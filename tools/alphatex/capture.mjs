@@ -5,10 +5,10 @@ import { readCapture } from './session-data.mjs'
 
 export const nativePath = fileURLToPath(new URL('./music-native', import.meta.url))
 
-export async function devices({ executable = nativePath, signal } = {}) {
+export async function devices({ executable = nativePath, signal, audioOnly = false } = {}) {
   const aborted = () => new DOMException('Device discovery cancelled', 'AbortError')
   if (signal?.aborted) throw aborted()
-  const child = spawn(executable, ['devices'], { stdio: ['ignore', 'pipe', 'pipe'] })
+  const child = spawn(executable, [audioOnly ? 'audio-devices' : 'devices'], { stdio: ['ignore', 'pipe', 'pipe'] })
   let output = '', detail = '', failure = null, cancelled = false
   child.stdout.setEncoding('utf8').on('data', text => { output += text })
   child.stderr.setEncoding('utf8').on('data', text => { detail += text })

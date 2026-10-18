@@ -15,8 +15,10 @@ import { devices, record, monitorInput } from './capture.mjs'
 import { openLiveMidi, backingMidiClaims, liveMidiPlan } from './live-midi.mjs'
 import { midiDestinations } from './playback.mjs'
 import { recordingEpoch } from './arrangement-recording.mjs'
+import { measureAudioCalibration } from './audio-calibration.mjs'
 
 const help = [
+  ':calibrate OUTPUT_UID IN_CH OUT_CH MAX_LAG_MS  audio loopback candidates; Esc/q cancels and returns',
   ':import-wave /path/take.wav     :import-midi /path/song.mid',
   ':import-take /path/session      :open-take [ASSET] (WAV + raw UMP)',
   ':place asset-1 0               full source at quarter-note beat 0',
@@ -76,12 +78,14 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
   let liveMidi = null, liveRoutes = [], liveTransitions = Promise.resolve()
   const playerPlans = new Map(), planInspections = new Map()
   let recording = null, input = null, midiInput = 'all', transportPending = false, inputDevices = null, discoveryTicket = 0
+  let calibration = null
   const discovery = new AbortController()
   let complete
   const done = new Promise(resolve => { complete = resolve })
   function finish() {
     if (!accepting) return
     accepting = false
+    calibration?.abort()
     takeAbort?.abort()
     discovery.abort()
     // Recording owns finalization and source import through child close. Keep
@@ -387,6 +391,27 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
   }
   async function effect(value) {
     switch (value.kind) {
+      case 'calibrate': {
+        if (!input) throw new Error('Select :input AUDIO_UID before calibration')
+        if (recording || transport.kind !== 'stopped' || players.size || preparations.size) throw new Error('Stop and drain arrangement playback before calibration')
+        const selectedInput = input, target = join(dirname(path), 'calibrations', randomUUID())
+        await mkdir(dirname(target), { recursive: true, mode: 0o700 })
+        await settleMonitoring()
+        await transitionLiveMidi(() => settleLiveMidi())
+        if (!accepting) return
+        const owned = new AbortController(); calibration = owned
+        status = 'Measuring selected audio loopback; Esc/q cancels and returns'; draw()
+        try {
+          const result = await measureAudioCalibration({ ...value, input: selectedInput, directory: target, signal: owned.signal,
+            analyze: ({ signal, ...job }) => request({ kind: 'analyze-calibration', ...job }) })
+          if (accepting) status = `Unapplied calibration: ${result.matches.map(m => `${m.residualMs.toFixed(3)} ms (correlation ${m.correlation.toFixed(3)})`).join(', ')}; saved ${result.directory}`
+        } finally {
+          if (calibration === owned) calibration = null
+          startMonitoring()
+          await transitionLiveMidi(async () => { const live = startLiveMidi(); if (live) await live.ready })
+        }
+        break
+      }
       case 'inputs': {
         const ticket = ++discoveryTicket
         if (inputDevices !== null) { inputDevices = null; break }

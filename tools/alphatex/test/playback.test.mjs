@@ -157,3 +157,23 @@ test('WAV arrangement route uses its native helper and refuses unsupported MIDI 
     assert.throws(()=>fixture(options))
   }
 })
+
+test('combined playback pins its audio device and every MIDI binding in one native owner', async () => {
+  const bindings = [{ port: 0, destination: '-120' }, { port: 1, destination: '122' }]
+  const options = { format: 'mixed-arrangement', midiOutput: '-120', midiBindings: bindings }
+  const f = fixture(options)
+  assert.equal(f.executable, arrangementTransportPath)
+  assert.deepEqual(f.args, ['play', '--file', '/synthetic/phrase.wav', '--output', 'test-output'])
+  const state = { format: 'mixed-arrangement', clock: { kind: 'mach-host-time' }, bindings: bindings.map(({ port, destination }) => ({ port,
+    device: { id: destination, kind: 'midi', protocol: 1, name: 'Selected destination' } })) }
+  f.event('playing', state); await f.playback.ready
+  f.playback.pause(); f.event('paused', state); f.playback.seek(.4); f.playback.resume(); f.event('playing', state)
+  f.playback.stop(); f.event('stopped', state); f.close(); await f.playback.completion
+  assert.deepEqual(f.commands, [{ kind: 'pause' }, { kind: 'seek', seconds: .4 }, { kind: 'resume' }, { kind: 'stop' }])
+  for (const change of [{ device: { id: 'other', name: 'Wrong audio', outputs: 2 } }, { bindings: [] }, { clock: undefined }, { format: 'wave-arrangement' }]) {
+    const bad = fixture(options); bad.event('playing', { ...state, ...change }); bad.close(1)
+    await assert.rejects(bad.playback.ready); await assert.rejects(bad.playback.completion)
+  }
+  assert.throws(() => fixture({ ...options, output: undefined }))
+  assert.throws(() => fixture({ ...options, loop: true }))
+})

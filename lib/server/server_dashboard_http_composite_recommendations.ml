@@ -1,4 +1,5 @@
-include Server_dashboard_http_composite_claims
+open Server_dashboard_http_composite_claims
+
 
 let fleet_fsm_action_payload ~keeper_name ~kind ~reason ~snapshot ~execution =
   `Assoc

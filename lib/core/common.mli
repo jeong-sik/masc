@@ -196,3 +196,26 @@ val safe_filename : string -> string
 (** Fold a value into one path component: lowercase, keep [a-z0-9._-], and
     escape anything else as [_XX]. Every layer that turns a name into a file
     name goes through this, so a name cannot mean two files. *)
+
+val tool_call_read_index_basename : string
+(** File name of the derived SQLite read index that [Keeper_tool_call_index]
+    stores inside [<masc root>/tool_calls/]. Shared so the index owner and the
+    durable-source scanners agree on one spelling. *)
+
+val is_tool_call_read_index_file : string -> bool
+(** Whether [path] (or a bare file name) names {!tool_call_read_index_basename}
+    or one of the sidecar files SQLite creates beside it while the WAL or
+    rollback journal is active ([-wal], [-shm], [-journal]). *)
+
+val chat_operation_store_basename : string
+(** File name of the authoritative SQLite operation store that
+    [Keeper_chat_operation_store] keeps at
+    [<masc root>/keepers/<keeper>/chat-operations.sqlite3]. Shared so the store
+    owner and durable-source scanners agree on one spelling. *)
+
+val is_chat_operation_store_sidecar_file : string -> bool
+(** Whether [path] (or a bare file name) names one of the SQLite WAL or
+    rollback-journal sidecar files beside {!chat_operation_store_basename}
+    ([-wal], [-shm], [-journal]). Unlike {!is_tool_call_read_index_file}, the
+    database file itself is authoritative and must be inspected rather than
+    skipped. *)

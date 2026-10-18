@@ -1279,6 +1279,325 @@ let test_maintenance_keeps_normalized_tool_call_blob_reference () =
         (Some "normalized tool-call output")
         (fetch_ok store ~sha256:reference.sha256))
 
+let test_maintenance_skips_open_tool_call_read_index_and_wal_sidecars () =
+  with_temp_dir (fun base_path ->
+      let store = B.create ~base_path in
+      let reference =
+        B.put
+          store
+          ~bytes:"tool-call output alongside open read index"
+          ~mime:"text/plain"
+        |> stored_ref_exn
+      in
+      Masc.Keeper_tool_call_log.reset_for_testing ();
+      Masc.Keeper_tool_call_log.init ~base_path ();
+      let ledger_dir =
+        Filename.concat (Common.masc_dir_from_base_path ~base_path) "tool_calls"
+      in
+      Fun.protect
+        ~finally:(fun () ->
+          (match Masc.Keeper_tool_call_log.store () with
+           | Some ledger_store ->
+             Dated_jsonl.prepare_for_directory_removal ledger_store
+           | None -> ());
+          Masc.Keeper_tool_call_log.reset_for_testing ();
+          Masc.Keeper_tool_call_index.forget_for_ledger ~ledger_dir)
+        (fun () ->
+          Masc.Keeper_tool_call_log.log_call
+            ~keeper_name:"keeper-tool-log"
+            ~tool_name:"large_output"
+            ~input:(`Assoc [])
+            ~output_text:(O.encode_for_agent_core (O.Stored reference))
+            ~duration_ms:1.0
+            ~wire_outcome:Masc.Tool_result.Ok
+            ~artifact_refs:[ reference ]
+            ();
+          (match
+             Masc.Keeper_tool_call_log.read_recent
+               ~keeper_name:"keeper-tool-log"
+               ~n:10
+               ()
+           with
+           | Ok rows ->
+             Alcotest.(check int) "indexed row read back" 1 (List.length rows)
+           | Error (Masc.Keeper_tool_call_log.Index_unavailable detail) ->
+             Alcotest.failf "read_recent failed: %s" detail);
+          let db_path = Masc.Keeper_tool_call_index.database_path ~ledger_dir in
+          Alcotest.(check bool)
+            "SQLite read index exists"
+            true
+            (Sys.file_exists db_path);
+          Alcotest.(check bool)
+            "SQLite WAL sidecar exists while connection is open"
+            true
+            (Sys.file_exists (db_path ^ "-wal"));
+          Alcotest.(check bool)
+            "SQLite SHM sidecar exists while connection is open"
+            true
+            (Sys.file_exists (db_path ^ "-shm"));
+          Fs_compat.save_file (db_path ^ "-journal") "\x00\xd9\xd5\x05\xf9\x20\xa1\x63";
+          let observed = maintenance_ok ~base_path ~mode:M.Observe_only in
+          Alcotest.(check int)
+            "tool-call reference remains live across open WAL index scan"
+            1
+            observed.live_references;
+          Alcotest.(check int)
+            "referenced blob is not marked as candidate"
+            0
+            observed.candidates_recorded))
+
+let test_maintenance_reads_chat_operation_store_and_prepared_gate_checkpoint () =
+  with_temp_dir (fun base_path ->
+      let module Store = Keeper_chat_operation_store in
+      let module Operation = Keeper_chat_operation in
+      let module Semantic = Keeper_semantic_execution in
+      let require = function
+        | Ok value -> value
+        | Error detail -> Alcotest.fail detail
+      in
+      let ok = function
+        | Ok value -> value
+        | Error error -> Alcotest.fail (Store.error_to_string error)
+      in
+      let blob_store = B.create ~base_path in
+      let terminal_outcome_blob =
+        B.put
+          blob_store
+          ~bytes:"terminal chat operation outcome payload"
+          ~mime:"text/plain"
+        |> stored_ref_exn
+      in
+      let batch_leader_blob =
+        B.put
+          blob_store
+          ~bytes:"frozen batch leader original input payload"
+          ~mime:"text/plain"
+        |> stored_ref_exn
+      in
+      let queued_blob =
+        B.put
+          blob_store
+          ~bytes:"queued chat operation payload"
+          ~mime:"text/plain"
+        |> stored_ref_exn
+      in
+      let gate_checkpoint_blob =
+        B.put
+          blob_store
+          ~bytes:"prepared gate checkpoint payload"
+          ~mime:"text/plain"
+        |> stored_ref_exn
+      in
+      let keepers_runtime_dir = Common.keepers_runtime_dir_of_base ~base_path in
+      let db_path =
+        Store.path_for_keeper
+          ~keepers_runtime_dir
+          ~keeper_name:"keeper-exec-tools"
+      in
+      Fs_compat.mkdir_p (Filename.dirname db_path);
+      let op_store = Store.open_or_create ~path:db_path |> ok in
+      Fun.protect
+        ~finally:(fun () -> ignore (Store.close op_store : (unit, Store.error) result))
+        (fun () ->
+          let terminal_op_id =
+            Operation.Operation_id.of_string "op-terminal-ref" |> require
+          in
+          let gate_op_id =
+            Operation.Operation_id.of_string "op-gate-reconcile" |> require
+          in
+          let batch_leader_id =
+            Operation.Operation_id.of_string "op-batch-leader-ref" |> require
+          in
+          let queued_op_id =
+            Operation.Operation_id.of_string "op-queued-ref" |> require
+          in
+          let source = `Assoc [ "kind", `String "dashboard" ] in
+          let gate_input = `Assoc [ "message", `String "run gate turn" ] in
+          let batch_leader_input =
+            `Assoc
+              [ ( "leader_ref"
+                , `String (O.encode_for_agent_core (O.Stored batch_leader_blob)) )
+              ]
+          in
+          let queued_input =
+            `Assoc
+              [ ( "output_ref"
+                , `String (O.encode_for_agent_core (O.Stored queued_blob)) )
+              ]
+          in
+          ignore
+            (Store.submit
+               op_store
+               ~now:0.5
+               ~operation_id:terminal_op_id
+               ~source
+               ~input:(`Assoc [ "message", `String "complete me" ])
+             |> ok);
+          ignore (Store.claim_next op_store ~now:0.6 |> ok);
+          ignore
+            (Store.succeed_running
+               op_store
+               ~now:0.7
+               ~operation_id:terminal_op_id
+               ~outcome_ref:
+                 (O.encode_for_agent_core (O.Stored terminal_outcome_blob))
+             |> ok);
+          ignore
+            (Store.submit
+               op_store
+               ~now:1.0
+               ~operation_id:gate_op_id
+               ~source
+               ~input:gate_input
+             |> ok);
+          let claimed =
+            match Store.claim_next op_store ~now:2.0 |> ok with
+            | Some op -> op
+            | None -> Alcotest.fail "expected gate operation to claim"
+          in
+          let canonical_checkpoint_bytes =
+            Agent_core.Checkpoint.to_string
+              Agent_core.Checkpoint.
+                { version = checkpoint_version
+                ; session_id = "gate-trace"
+                ; agent_name = "keeper-exec-tools"
+                ; model = "fixture"
+                ; system_prompt = None
+                ; messages =
+                    [ Agent_core.Types.user_msg
+                        (O.encode_for_agent_core
+                           (O.Stored gate_checkpoint_blob))
+                    ]
+                ; usage = Agent_core.Types.empty_usage
+                ; turn_count = 1
+                ; created_at = 2.0
+                ; tools = []
+                ; tool_choice = None
+                ; disable_parallel_tool_use = false
+                ; temperature = None
+                ; top_p = None
+                ; top_k = None
+                ; min_p = None
+                ; enable_thinking = None
+                ; preserve_thinking = None
+                ; response_format = Agent_core.Types.Off
+                ; reasoning_effort = None
+                ; cache_system_prompt = false
+                ; context = Agent_core.Context.create_sync ()
+                ; mcp_sessions = []
+                ; working_context = None
+                }
+          in
+          let reference =
+            Keeper_checkpoint_ref.create
+              ~trace_id:(Keeper_id.Trace_id.of_string "gate-trace" |> require)
+              ~turn_count:1
+              ~canonical_checkpoint_bytes
+            |> Result.map_error Keeper_checkpoint_ref.error_to_string
+            |> require
+          in
+          let session_scope =
+            Semantic.session_scope [ "channels"; "default" ] |> require
+          in
+          let preparation : Semantic.gate_preparation =
+            { session_scope
+            ; source =
+                Semantic.Prepared_agent_core
+                  { reference; canonical_checkpoint_bytes }
+            }
+          in
+          let binding =
+            Semantic.gate_binding
+              ~preparation
+              ~approval_ids:[ "approval-1" ]
+              ~obligations:[]
+              ~runtime_suffix:None
+            |> Result.map_error Semantic.error_to_string
+            |> require
+          in
+          ignore
+            (Store.defer_direct_gate_reconciliation
+               op_store
+               ~now:3.0
+               ~operation_id:gate_op_id
+               ~execution_digest:claimed.execution_digest
+               ~binding
+               ~diagnostic:"unconfirmed checkpoint retained in sqlite"
+             |> ok);
+          ignore
+            (Store.submit
+               op_store
+               ~now:4.0
+               ~operation_id:batch_leader_id
+               ~source
+               ~input:batch_leader_input
+             |> ok);
+          ignore
+            (Store.submit
+               op_store
+               ~now:4.5
+               ~operation_id:queued_op_id
+               ~source
+               ~input:queued_input
+             |> ok);
+          ignore
+            (Store.claim_next
+               op_store
+               ~now:5.0
+               ~batch:(fun head tail ->
+                 match tail with
+                 | member :: _ ->
+                   Ok
+                     (Some
+                        { Store.members =
+                            [ head.operation_id; member.operation_id ]
+                        ; input = `Assoc [ "combined", `String "merged input" ]
+                        })
+                 | [] -> Alcotest.fail "expected second batch candidate")
+             |> ok);
+          let observed = maintenance_ok ~base_path ~mode:M.Observe_only in
+          Alcotest.(check int)
+            "terminal outcome, batch leader original input, member input, and prepared gate checkpoint references are live"
+            4
+            observed.live_references;
+          Alcotest.(check int)
+            "no blob is marked as candidate"
+            0
+            observed.candidates_recorded;
+          let swept =
+            maintenance_ok
+              ~base_path
+              ~mode:M.Delete_previous_candidates
+          in
+          Alcotest.(check int) "no live blob deleted" 0 swept.deleted;
+          Alcotest.(check (option string))
+            "terminal outcome blob survives"
+            (Some "terminal chat operation outcome payload")
+            (fetch_ok blob_store ~sha256:terminal_outcome_blob.sha256);
+          Alcotest.(check (option string))
+            "batch leader original input blob survives"
+            (Some "frozen batch leader original input payload")
+            (fetch_ok blob_store ~sha256:batch_leader_blob.sha256);
+          Alcotest.(check (option string))
+            "queued operation blob survives"
+            (Some "queued chat operation payload")
+            (fetch_ok blob_store ~sha256:queued_blob.sha256);
+          Alcotest.(check (option string))
+            "prepared gate checkpoint blob survives"
+            (Some "prepared gate checkpoint payload")
+            (fetch_ok blob_store ~sha256:gate_checkpoint_blob.sha256);
+          Store.close op_store |> ok;
+          Sys.remove db_path;
+          Fs_compat.save_file (db_path ^ "-wal") "\x37\x7f\x06\x82";
+          match M.run ~base_path ~board_posts_file ~mode:M.Observe_only with
+          | Error (M.Durable_source_parse_failed _) -> ()
+          | Error error ->
+            Alcotest.failf
+              "expected Durable_source_parse_failed for orphan WAL, got: %s"
+              (M.error_to_string error)
+          | Ok _ ->
+            Alcotest.fail "orphan chat-operations WAL without database succeeded"))
+
 let test_maintenance_follows_typed_result_manifest () =
   with_temp_dir (fun base_path ->
       let store = B.create ~base_path in
@@ -1905,6 +2224,14 @@ let () =
             "maintenance keeps normalized tool-call blob reference"
             `Quick
             test_maintenance_keeps_normalized_tool_call_blob_reference;
+          Alcotest.test_case
+            "maintenance skips open tool-call read index and WAL sidecars"
+            `Quick
+            test_maintenance_skips_open_tool_call_read_index_and_wal_sidecars;
+          Alcotest.test_case
+            "maintenance reads chat operation store and prepared gate checkpoint"
+            `Quick
+            test_maintenance_reads_chat_operation_store_and_prepared_gate_checkpoint;
           Alcotest.test_case
             "maintenance follows typed result manifest"
             `Quick

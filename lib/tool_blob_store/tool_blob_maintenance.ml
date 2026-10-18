@@ -272,9 +272,89 @@ let references_in_file ~ownership_root path =
                         references
                         line))
               in
-              line_number + 1, next)
-           (1, Ok Artifact_reference_set.empty)
-      |> snd
+               line_number + 1, next)
+            (1, Ok Artifact_reference_set.empty)
+       |> snd
+;;
+
+let references_in_chat_operation_store ~ownership_root path =
+  match Fs_compat.load_owned_regular_file ~ownership_root path with
+  | Error error ->
+    Error
+      (Durable_source_read_failed
+         { path
+         ; reason = Fs_compat.owned_regular_file_read_error_to_string error
+         })
+  | Ok None ->
+    Error
+      (Durable_source_read_failed
+         { path; reason = "durable source disappeared during scan" })
+  | Ok (Some _) ->
+    (match Keeper_chat_operation_store.inspect_durable_records ~path with
+     | Error error ->
+       Error
+         (Durable_source_parse_failed
+            { path
+            ; line = 1
+            ; detail = Keeper_chat_operation_store.error_to_string error
+            })
+     | Ok Keeper_chat_operation_store.Missing_durable_store ->
+       Error
+         (Durable_source_read_failed
+            { path; reason = "durable source disappeared during scan" })
+     | Ok
+         (Keeper_chat_operation_store.Stored_durable_records
+           { chat_operations; batch_member_inputs; semantic_executions }) ->
+       let fold_json result json =
+         Result.bind result (fun references ->
+           references_in_json ~path ~line:1 references json)
+       in
+       let with_operations =
+         List.fold_left
+           (fun result operation ->
+              fold_json result (Keeper_chat_operation.to_json operation))
+           (Ok Artifact_reference_set.empty)
+           chat_operations
+       in
+       let with_batch_inputs =
+         List.fold_left fold_json with_operations batch_member_inputs
+       in
+       List.fold_left
+         (fun result (execution : Keeper_semantic_execution.t) ->
+            let after_record =
+              fold_json result (Keeper_semantic_execution.to_json execution)
+            in
+            match execution.phase with
+            | Keeper_semantic_execution.Recovering
+                { origin =
+                    Keeper_semantic_execution.Gate_binding
+                      { preparation =
+                          { source =
+                              Keeper_semantic_execution.Prepared_agent_core
+                                { canonical_checkpoint_bytes; _ }
+                          ; _
+                          }
+                      ; _
+                      }
+                ; _
+                } ->
+              Result.bind after_record (fun references ->
+                match Yojson.Safe.from_string canonical_checkpoint_bytes with
+                | checkpoint_json ->
+                  references_in_json ~path ~line:1 references checkpoint_json
+                | exception Yojson.Json_error detail ->
+                  Error (Durable_source_parse_failed { path; line = 1; detail }))
+            | Keeper_semantic_execution.Preparing
+            | Keeper_semantic_execution.Ready
+            | Keeper_semantic_execution.Running
+            | Keeper_semantic_execution.Resuming_runtime_retry _
+            | Keeper_semantic_execution.Resuming_gate _
+            | Keeper_semantic_execution.Recovering _
+            | Keeper_semantic_execution.Suspended _
+            | Keeper_semantic_execution.Settled _ ->
+              after_record)
+         with_batch_inputs
+         semantic_executions)
 ;;
 
 let durable_consumer_basenames =
@@ -339,7 +419,7 @@ let live_references ~base_path ~board_posts_file =
       | Error rejection ->
         Error
           (Durable_source_stat_failed
-             { path
+            { path
              ; reason =
                  Fs_compat.owned_directory_chain_rejection_to_string
                    rejection
@@ -380,9 +460,55 @@ let live_references ~base_path ~board_posts_file =
       match (Unix.lstat path).Unix.st_kind with
       | Unix.S_DIR -> scan_directory path references
       | Unix.S_REG ->
-        Result.map
-          (Artifact_reference_set.union references)
-          (references_in_file ~ownership_root:base_path path)
+        let basename = Filename.basename path in
+        (* Keeper_tool_call_index keeps its derived SQLite read index and WAL /
+           journal sidecars in [<ledger_dir>/] (which is [tool_calls/], a
+           registered durable consumer). The index is derived, holds no blob
+           references itself, and is rebuilt from the ledger; skip both the
+           database and its active SQLite sidecar files. *)
+        if Common.is_tool_call_read_index_file basename
+        then Ok references
+        else if String.equal basename Common.chat_operation_store_basename
+        then
+          (* Keeper_chat_operation_store keeps its authoritative SQLite store
+             at [keepers/<keeper>/chat-operations.sqlite3]. Inspect its active
+             operations, semantic executions, and prepared Gate checkpoints
+             through the SQLite store reader rather than raw JSONL text scan. *)
+          Result.map
+            (Artifact_reference_set.union references)
+            (references_in_chat_operation_store ~ownership_root:base_path path)
+        else if Common.is_chat_operation_store_sidecar_file basename
+        then
+          let db_path =
+            Filename.concat
+              (Filename.dirname path)
+              Common.chat_operation_store_basename
+          in
+          if Sys.file_exists db_path
+          then Ok references
+          else
+            (match
+               Keeper_chat_operation_store.inspect_outstanding ~path:db_path
+             with
+             | Error error ->
+               Error
+                 (Durable_source_parse_failed
+                    { path
+                    ; line = 1
+                    ; detail =
+                        Keeper_chat_operation_store.error_to_string error
+                    })
+             | Ok _ ->
+               Error
+                 (Durable_source_parse_failed
+                    { path
+                    ; line = 1
+                    ; detail = "operation journal exists without its database"
+                    }))
+        else
+          Result.map
+            (Artifact_reference_set.union references)
+            (references_in_file ~ownership_root:base_path path)
         | Unix.S_LNK ->
           Error
             (Durable_source_stat_failed

@@ -40,7 +40,7 @@ type inventory =
   ; interrupted_count : int
   }
 
-let database_file = "chat-operations.sqlite3"
+let database_file = Common.chat_operation_store_basename
 
 let path_for_keeper ~keepers_runtime_dir ~keeper_name =
   Filename.concat (Filename.concat keepers_runtime_dir keeper_name) database_file
@@ -49,6 +49,14 @@ let path_for_keeper ~keepers_runtime_dir ~keeper_name =
 type outstanding_snapshot =
   | Missing_store
   | Stored_operations of { chat_operations : Operation.t list; semantic_executions : Semantic.t list }
+
+type durable_snapshot =
+  | Missing_durable_store
+  | Stored_durable_records of
+      { chat_operations : Operation.t list
+      ; batch_member_inputs : Yojson.Safe.t list
+      ; semantic_executions : Semantic.t list
+      }
 let database_schema = "masc.keeper_chat_operations.v2"
 let database_application_id = 0x4d4b4f50L
 let database_user_version = 2L
@@ -874,9 +882,29 @@ let semantic_rows db ~active_only =
       in loop [])
 ;;
 
-type inspection_scope = Outstanding_integrity_audit | Pending_inputs
+type inspection_scope =
+  | Outstanding_integrity_audit
+  | Pending_inputs
+  | All_durable_records
 
-let inspect_outstanding_with ~scope ~path =
+let read_batch_member_inputs db =
+  with_statement db ~operation:"inspect durable batch member inputs"
+    "SELECT admitted_input_json, admitted_digest FROM operation_batch_members WHERE admitted_input_json IS NOT NULL ORDER BY execution_id, position"
+    (fun stmt ->
+      let rec read acc =
+        let rc = Sqlite3.step stmt in
+        if rc = Sqlite3.Rc.DONE then Ok (List.rev acc)
+        else if rc = Sqlite3.Rc.ROW then
+          let* input = json_of_stored "batch original input" (Sqlite3.column_text stmt 0) in
+          let* digest = validate_digest "batch admitted digest" (Sqlite3.column_text stmt 1) in
+          let* actual = Operation.execution_digest input |> Result.map_error (fun detail -> Integrity_error detail) in
+          if actual = digest then read (input :: acc)
+          else Error (Integrity_error "batch original input digest mismatch")
+        else Error (Store_unavailable (sqlite_error db "inspect durable batch member inputs" rc))
+      in read [])
+;;
+
+let inspect_store_with ~scope ~path =
   let inspect db =
     let* () = exec db ~operation:"begin read-only inspection" "BEGIN" in
     let* version = single_int64 db ~operation:"read inspection schema version" "PRAGMA user_version" in
@@ -889,16 +917,16 @@ let inspect_outstanding_with ~scope ~path =
     in
     let* () = match scope with
       | Pending_inputs -> Ok ()
-      | Outstanding_integrity_audit ->
+      | Outstanding_integrity_audit | All_durable_records ->
         let* integrity = single_text db ~operation:"check operation store integrity" "PRAGMA quick_check" in
         if String.equal integrity "ok" then Ok () else Error (Integrity_error integrity) in
     let* objects = read_schema_objects db in
     let has_batches = List.exists (fun (_, name, _) -> name = "operation_batch_members") objects in
-    let* outstanding =
+    let* chat_operations =
       with_statement db ~operation:"inspect durable operations"
         ("SELECT " ^ select_columns ^ " FROM operations"
          ^ (match scope with Pending_inputs -> " WHERE state IN ('queued', 'running')"
-            | Outstanding_integrity_audit -> "") ^ " ORDER BY sequence")
+            | Outstanding_integrity_audit | All_durable_records -> "") ^ " ORDER BY sequence")
         (fun stmt ->
           let rec read acc =
             let rc = Sqlite3.step stmt in
@@ -906,15 +934,25 @@ let inspect_outstanding_with ~scope ~path =
             else if rc = Sqlite3.Rc.ROW then
               let* operation = decode_operation stmt in
               let* operation = if has_batches then project_batch_with_db db operation else Ok operation in
-              read (if Operation.is_terminal operation.state then acc else operation :: acc)
+              let keep = match scope with
+                | All_durable_records -> true
+                | Outstanding_integrity_audit | Pending_inputs -> not (Operation.is_terminal operation.state) in
+              read (if keep then operation :: acc else acc)
             else Error (Store_unavailable (sqlite_error db "inspect durable operations" rc))
           in read [])
+    in
+    let* batch_member_inputs =
+      match scope with
+      | All_durable_records when has_batches -> read_batch_member_inputs db
+      | All_durable_records | Outstanding_integrity_audit | Pending_inputs -> Ok []
     in
     (* An exactly validated v1 schema cannot contain semantic records.
        Ownerless stores remain inspectable without a write or migration. *)
     let* semantic_executions =
       match scope with
       | Pending_inputs -> Ok []
+      | All_durable_records ->
+        if chat_only then Ok [] else semantic_rows db ~active_only:false
       | Outstanding_integrity_audit -> if chat_only then Ok [] else
         let* rows = semantic_rows db ~active_only:false in
         Ok (List.filter (fun (row : Semantic.t) ->
@@ -922,7 +960,7 @@ let inspect_outstanding_with ~scope ~path =
           | Keeper_native_call.No_native_call -> false
           | Keeper_native_call.Active _ | Keeper_native_call.Terminal_unacknowledged _ -> true) rows) in
     let* () = exec db ~operation:"end read-only inspection" "COMMIT" in
-    Ok (Stored_operations { chat_operations = outstanding; semantic_executions })
+    Ok (Some (chat_operations, batch_member_inputs, semantic_executions))
   in
   let inspect_existing () =
     match Sqlite3.db_open ~mode:`READONLY path with
@@ -942,7 +980,7 @@ let inspect_outstanding_with ~scope ~path =
   | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
     (* A journal without its database is damaged evidence, not an empty queue. *)
     let rec absent_companions = function
-      | [] -> Ok Missing_store
+      | [] -> Ok None
       | suffix :: rest ->
         (match Unix.lstat (path ^ suffix) with
          | _ -> Error (Integrity_error "operation journal exists without its database")
@@ -952,11 +990,24 @@ let inspect_outstanding_with ~scope ~path =
   | exception Unix.Unix_error (error, _, _) -> Error (Store_unavailable (Unix.error_message error))
 ;;
 
-let inspect_outstanding ~path = inspect_outstanding_with ~scope:Outstanding_integrity_audit ~path
+let inspect_outstanding ~path =
+  inspect_store_with ~scope:Outstanding_integrity_audit ~path |> Result.map (function
+    | None -> Missing_store
+    | Some (chat_operations, _batch_member_inputs, semantic_executions) ->
+      Stored_operations { chat_operations; semantic_executions })
+;;
+
+let inspect_durable_records ~path =
+  inspect_store_with ~scope:All_durable_records ~path |> Result.map (function
+    | None -> Missing_durable_store
+    | Some (chat_operations, batch_member_inputs, semantic_executions) ->
+      Stored_durable_records { chat_operations; batch_member_inputs; semantic_executions })
+;;
+
 let inspect_pending_inputs ~path =
-  inspect_outstanding_with ~scope:Pending_inputs ~path |> Result.map (function
-    | Missing_store -> None
-    | Stored_operations {chat_operations; _} -> Some chat_operations)
+  inspect_store_with ~scope:Pending_inputs ~path |> Result.map (function
+    | None -> None
+    | Some (chat_operations, _, _) -> Some chat_operations)
 ;;
 
 

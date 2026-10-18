@@ -721,7 +721,7 @@ let commit_output m e ~sources output =
      | _ -> match saved with
        | Ok () -> Error detail
        | Error error -> Error (detail ^ "; binding persistence: " ^ error))
-let perform_action m e c (queued : Lane_addon_action.receipt) =
+let perform_action m e (c : connection) (queued : Lane_addon_action.receipt) =
   e.current_action <- Some queued;
   let running = {queued with state = Lane_addon_action.Running; executor = Some c.container_id} in
   match save_action m running with

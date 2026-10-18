@@ -569,9 +569,17 @@ let test_recorded_answer_recovers_once_on_original_continuation () =
   check string "receipt correlates to the exact ask" ask.ask_id
     Yojson.Safe.Util.(receipt |> member "ask_id" |> to_string);
   Unix.unlink queue_path;
+  let deferred_hint_logs_since since_seq =
+    let expected = Printf.sprintf "answer wake durably pending; live hint deferred ask_id=%s" ask.ask_id in
+    Log.Ring.recent ~since_seq ~module_filter:"Keeper" ~order:`Oldest_first ()
+    |> List.filter (fun (entry : Log.Ring.entry) -> String.equal entry.message expected)
+    |> List.length
+  in
+  let seq0 = (Log.Ring.bounds ()).total - 1 in
   let recovered = reconcile_or_fail ~base_path in
   check int "canonical record recovers without another answer" 1 recovered.enqueued;
   check int "recovery has no retained failures" 0 (List.length recovered.failures);
+  check int "initial enqueue logs deferred wake hint once" 1 (deferred_hint_logs_since seq0);
   let source = match pending_asks ~base_path ~keeper_name with
     | [ source, payload ] ->
         check string "original ask pointer" ask.ask_id payload.Keeper_event_queue.ask_id;
@@ -579,10 +587,12 @@ let test_recorded_answer_recovers_once_on_original_continuation () =
         check (float 0.) "canonical answer timestamp is stable" 200. source.Keeper_event_queue.arrived_at;
         source
     | _ -> fail "recovery did not create one exact answer source" in
+  let seq1 = (Log.Ring.bounds ()).total - 1 in
   (match Wake.deliver ~base_path ~keeper_name ~ask_id:ask.ask_id with
    | Ok Wake.Already_pending -> ()
    | Ok _ -> fail "pending answer delivery was not idempotent"
    | Error error -> fail (Wake.error_to_string error));
+  check int "already-pending delivery suppresses repeat deferred wake log" 0 (deferred_hint_logs_since seq1);
   check int "duplicate delivery leaves one pending source" 1 (List.length (pending_asks ~base_path ~keeper_name));
   terminalize_answer ~base_path ~keeper_name source;
   let repeated = reconcile_or_fail ~base_path in

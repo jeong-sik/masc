@@ -32,11 +32,39 @@ let input_capacities :
    2026-09-22 one walked 12756 -> 6378 -> 3189 ninety-six times and committed
    nothing, because a pass holds as many attempts as the walk has slots
    (#37793). *)
+type problem_site =
+  | Durable_drain
+  | Unread_count
+  | Explicit_admission
+  | Memory_cleanup
+
+let all_problem_sites =
+  [ Durable_drain; Unread_count; Explicit_admission; Memory_cleanup ]
+;;
+
 let limited_widths : ((string * string), (string * int)) Hashtbl.t = Hashtbl.create 16
+let reported_problems : (((string * string) * problem_site), string) Hashtbl.t =
+  Hashtbl.create 16
 let measurements_mu = Stdlib.Mutex.create ()
 
 let measurement_key ~config ~keeper_name =
   Workspace.keepers_runtime_dir config, keeper_name
+;;
+
+let should_report_problem ~config ~keeper_name ~site detail =
+  let key = measurement_key ~config ~keeper_name, site in
+  Stdlib.Mutex.protect measurements_mu (fun () ->
+    match Hashtbl.find_opt reported_problems key with
+    | Some previous when String.equal previous detail -> false
+    | Some _ | None ->
+      Hashtbl.replace reported_problems key detail;
+      true)
+;;
+
+let clear_reported_problem ~config ~keeper_name ~site =
+  let key = measurement_key ~config ~keeper_name, site in
+  Stdlib.Mutex.protect measurements_mu (fun () ->
+    Hashtbl.remove reported_problems key)
 ;;
 
 let last_measurement ~config ~keeper_name =
@@ -50,7 +78,10 @@ let forget_measurement ~config ~keeper_name =
   Stdlib.Mutex.protect measurements_mu (fun () ->
     Hashtbl.remove measurements key;
     Hashtbl.remove input_capacities key;
-    Hashtbl.remove limited_widths key)
+    Hashtbl.remove limited_widths key;
+    List.iter
+      (fun site -> Hashtbl.remove reported_problems (key, site))
+      all_problem_sites)
 ;;
 
 let limited_width ~config ~keeper_name ~trace_id =
@@ -120,16 +151,23 @@ let publish_measurement ~config ~keeper_name ~last_pass ~unread =
 let measure_unread ~config ~keeper_name =
   try
     match Keeper_librarian_durable_consumer.unread_turns ~config ~keeper_name with
-    | Ok unread -> Some unread
+    | Ok unread ->
+      clear_reported_problem ~config ~keeper_name ~site:Unread_count;
+      Some unread
     | Error error ->
-      Log.Keeper.warn ~keeper_name "Librarian unread count unavailable: %s"
-        (Keeper_librarian_durable_consumer.error_to_string error);
+      let detail = Keeper_librarian_durable_consumer.error_to_string error in
+      if should_report_problem ~config ~keeper_name ~site:Unread_count detail
+      then
+        Log.Keeper.warn ~keeper_name "Librarian unread count unavailable: %s" detail;
       None
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
     (* Observation failure must not change the durable drain's result. *)
-    Log.Keeper.warn ~keeper_name "Librarian unread count raised: %s" (Printexc.to_string exn);
+    let detail = Printexc.to_string exn in
+    if should_report_problem ~config ~keeper_name ~site:Unread_count ("raised:" ^ detail)
+    then
+      Log.Keeper.warn ~keeper_name "Librarian unread count raised: %s" detail;
     None
 ;;
 
@@ -147,12 +185,19 @@ let uncommitted_pass () =
 let run_durable_with_commit ~config ~keeper_name ~commit =
   let rec drain () =
     match Env_config.KeeperMemoryOs.librarian_config_state () with
-    | Disabled | Invalid -> Off
+    | Disabled | Invalid ->
+      clear_reported_problem ~config ~keeper_name ~site:Durable_drain;
+      Off
     | Enabled ->
       match Keeper_librarian_durable_consumer.consume_one ~config ~keeper_name ~commit with
-      | Ok Keeper_librarian_durable_consumer.Nothing_to_read -> Drained
-      | Ok Memory_not_committed -> uncommitted_pass ()
+      | Ok Keeper_librarian_durable_consumer.Nothing_to_read ->
+        clear_reported_problem ~config ~keeper_name ~site:Durable_drain;
+        Drained
+      | Ok Memory_not_committed ->
+        clear_reported_problem ~config ~keeper_name ~site:Durable_drain;
+        uncommitted_pass ()
       | Ok (Baseline_advanced _ | Progress_advanced _ | Official_advanced _) ->
+        clear_reported_problem ~config ~keeper_name ~site:Durable_drain;
         (* A committed range is the boundary at which later phases and a
            waiting unit can run. New completed turns may arrive faster than
            Memory reads them; draining until empty would then never reach
@@ -162,15 +207,19 @@ let run_durable_with_commit ~config ~keeper_name ~commit =
         then Yielded_to_waiting_unit
         else drain ()
       | Error error ->
-        Log.Keeper.warn ~keeper_name "durable Librarian range not consumed: %s"
-          (Keeper_librarian_durable_consumer.error_to_string error);
+        let detail = Keeper_librarian_durable_consumer.error_to_string error in
+        if should_report_problem ~config ~keeper_name ~site:Durable_drain detail
+        then
+          Log.Keeper.warn ~keeper_name "durable Librarian range not consumed: %s" detail;
         Stopped error
   in
   try
     let last_pass = drain () in
     let unread =
       match last_pass with
-      | Off -> None
+      | Off | Stopped Keeper_librarian_durable_consumer.Keeper_meta_absent ->
+        clear_reported_problem ~config ~keeper_name ~site:Unread_count;
+        None
       | Lane_unconfigured | Drained | Yielded_to_waiting_unit | Not_committed | Stopped _ | Raised _ ->
         measure_unread ~config ~keeper_name
     in
@@ -601,34 +650,46 @@ let run_with_readers ~durable ~continuity ~base_path ~keeper_name =
              | Owner_projection {stopping = true; _}) -> ()
 
 let run_memory_cleanup ~base_path ~keeper_name =
+  let config = Workspace.default_config base_path in
   match Keeper_memory_cleanup.run ~base_path ~keeper_name with
-  | Disabled | Within_limits | Already_reviewed -> ()
+  | Disabled | Within_limits | Already_reviewed ->
+    clear_reported_problem ~config ~keeper_name ~site:Memory_cleanup
   | Reviewed Limits_reached ->
+    clear_reported_problem ~config ~keeper_name ~site:Memory_cleanup;
     Log.Keeper.info ~keeper_name
       "Librarian memory count cleanup reached the configured limits"
   | Reviewed Progress_with_excess ->
+    clear_reported_problem ~config ~keeper_name ~site:Memory_cleanup;
     Log.Keeper.info ~keeper_name
       "Librarian memory count cleanup reduced excess; next pass requested"
   | Reviewed Excess_retained ->
+    clear_reported_problem ~config ~keeper_name ~site:Memory_cleanup;
     Log.Keeper.info ~keeper_name
       "Librarian memory count cleanup retained excess; awaiting a later wake"
   | Unavailable detail ->
-    Log.Keeper.warn ~keeper_name "Librarian memory count cleanup unavailable: %s" detail
+    if should_report_problem ~config ~keeper_name ~site:Memory_cleanup detail then
+      Log.Keeper.warn ~keeper_name "Librarian memory count cleanup unavailable: %s" detail
 ;;
 
 let run_explicit_admission ~base_path ~keeper_name =
+  let config = Workspace.default_config base_path in
   match Keeper_memory_admission_worker.run ~base_path ~keeper_name with
-  | Disabled | Idle -> ()
+  | Disabled | Idle ->
+    clear_reported_problem ~config ~keeper_name ~site:Explicit_admission
   | Recheck_new_input ->
+    clear_reported_problem ~config ~keeper_name ~site:Explicit_admission;
     Log.Keeper.info ~keeper_name "Librarian explicit admission remains pending; new input arrived during judgment";
     Keeper_librarian_queue_signal.changed ~base_path ~keeper_name
   | Settled {has_more} ->
+    clear_reported_problem ~config ~keeper_name ~site:Explicit_admission;
     Log.Keeper.info ~keeper_name "Librarian explicit admission committed and acknowledged";
     if has_more then Keeper_librarian_queue_signal.changed ~base_path ~keeper_name
   | Pending detail ->
+    clear_reported_problem ~config ~keeper_name ~site:Explicit_admission;
     Log.Keeper.info ~keeper_name "Librarian explicit admission remains pending: %s" detail
   | Unavailable detail ->
-    Log.Keeper.warn ~keeper_name "Librarian explicit admission unavailable: %s" detail
+    if should_report_problem ~config ~keeper_name ~site:Explicit_admission detail then
+      Log.Keeper.warn ~keeper_name "Librarian explicit admission unavailable: %s" detail
 ;;
 
 let run ~base_path ~keeper_name =

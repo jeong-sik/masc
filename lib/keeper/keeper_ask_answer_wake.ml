@@ -17,7 +17,7 @@ let error_to_string = function
       Keeper_reaction_ledger.strict_delivery_evidence_error_to_string error
   | Queue_storage_failed detail -> "answer wake storage failed: " ^ detail
 
-let wake_hint ~base_path ~keeper_name ~ask_id =
+let wake_hint ~log_deferred ~base_path ~keeper_name ~ask_id =
   try
     match Keeper_registry.wakeup_running ~intent:Keeper_registry.Reactive_signal
         ~base_path keeper_name with
@@ -25,7 +25,8 @@ let wake_hint ~base_path ~keeper_name ~ask_id =
     | Keeper_registry.Deferred_not_running _
     | Keeper_registry.Deferred_lifecycle _
     | Keeper_registry.Deferred_unregistered ->
-        Log.Keeper.info ~keeper_name "answer wake durably pending; live hint deferred ask_id=%s" ask_id
+        if log_deferred then
+          Log.Keeper.info ~keeper_name "answer wake durably pending; live hint deferred ask_id=%s" ask_id
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> Log.Keeper.warn ~keeper_name "answer wake hint failed after commit ask_id=%s: %s"
@@ -278,7 +279,7 @@ let deliver_row ~base_path ~keeper_name ~already_delivered ask resolution =
         ~not_before:evidence_since ~base_path keeper_name stimulus with
     | Keeper_registry_event_queue.Stimulus_storage_error detail -> Error (Queue_storage_failed detail)
     | Keeper_registry_event_queue.Stimulus_enqueued ->
-        wake_hint ~base_path ~keeper_name ~ask_id:ask.Keeper_ask.ask_id;
+        wake_hint ~log_deferred:true ~base_path ~keeper_name ~ask_id:ask.Keeper_ask.ask_id;
         Ok Enqueued
     | Keeper_registry_event_queue.Stimulus_already_present ->
         (* The owner-lock recheck may have observed consumption after our
@@ -289,7 +290,7 @@ let deliver_row ~base_path ~keeper_name ~already_delivered ask resolution =
             |> Result.map_error (fun error -> Delivery_evidence_unavailable error) in
         if consumed then Ok Already_delivered
         else (
-          wake_hint ~base_path ~keeper_name ~ask_id:ask.Keeper_ask.ask_id;
+          wake_hint ~log_deferred:false ~base_path ~keeper_name ~ask_id:ask.Keeper_ask.ask_id;
           Ok Already_pending)
 
 let deliver ~base_path ~keeper_name ~ask_id =

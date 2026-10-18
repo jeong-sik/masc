@@ -649,21 +649,39 @@ let test_durable_drain_publishes_scoped_health () =
         | Some value -> value
         | None -> Alcotest.fail "durable drain did not publish an observation"
       in
+      let log_cursor () = (Log.Ring.bounds ()).total - 1 in
+      let keeper_warnings_since since_seq =
+        Log.Ring.recent ~since_seq ~module_filter:"Keeper" ~order:`Oldest_first ()
+        |> List.filter (fun (entry : Log.Ring.entry) -> entry.level = Log.Warn)
+        |> List.map (fun (entry : Log.Ring.entry) -> entry.message)
+      in
       Unix.putenv env_key "false";
       run ();
       (match (observed ()).last_pass, (observed ()).unread with
        | Queue_refresh.Off, None -> ()
        | _ -> Alcotest.fail "disabled drain must not measure lag");
       Unix.putenv env_key "true";
+      let seq0 = log_cursor () in
       run ();
       (match (observed ()).last_pass, (observed ()).unread with
        | Queue_refresh.Stopped Masc.Keeper_librarian_durable_consumer.Keeper_meta_absent, None -> ()
        | _ -> Alcotest.fail "missing metadata must replace the old observation");
+      Alcotest.(check (list string))
+        "missing metadata logs drain stop once without redundant unread warning"
+        [ "durable Librarian range not consumed: keeper metadata is absent" ]
+        (keeper_warnings_since seq0);
+      let seq1 = log_cursor () in
+      run ();
+      Alcotest.(check (list string))
+        "repeated missing metadata pass suppresses duplicate warning"
+        []
+        (keeper_warnings_since seq1);
       (* Effective metadata requires both its runtime snapshot and declaration.
          Create the real profile before asking the durable reader to use it. *)
       let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:root in
       Fs_compat.mkdir_p keepers_dir;
-      Out_channel.with_open_bin (Filename.concat keepers_dir (keeper_name ^ ".toml"))
+      let profile_path = Filename.concat keepers_dir (keeper_name ^ ".toml") in
+      Out_channel.with_open_bin profile_path
         (fun oc -> Printf.fprintf oc
           "[keeper]\nname = %S\ninstructions = %S\nsandbox_profile = %S\nsandbox_image = \"base\"\n"
           keeper_name "test durable health" "docker");
@@ -674,6 +692,14 @@ let test_durable_drain_publishes_scoped_health () =
       (match (observed ()).last_pass, (observed ()).unread with
        | Queue_refresh.Drained, Some { atoms = 0; official = 0 } -> ()
        | _ -> Alcotest.fail "empty real source must publish drained with zero lag");
+      Unix.unlink (Masc.Keeper_types.keeper_meta_path config keeper_name);
+      Masc.Keeper_meta_store.invalidate_cached_snapshot config keeper_name;
+      let seq2 = log_cursor () in
+      run ();
+      Alcotest.(check (list string))
+        "newly missing metadata after recovery logs once again"
+        [ "durable Librarian range not consumed: keeper metadata is absent" ]
+        (keeper_warnings_since seq2);
       let other = Masc.Workspace.default_config (Filename.concat root "other-runtime") in
       Alcotest.(check bool) "same name in another runtime has no borrowed observation" true
         (Option.is_none (Queue_refresh.last_measurement ~config:other ~keeper_name));

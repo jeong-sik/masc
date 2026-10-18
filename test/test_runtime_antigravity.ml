@@ -185,6 +185,12 @@ let with_fixture ?require_resume ?required_home ?sleep_s ?capture_prompt ?stdin 
   Fun.protect ~finally:(fun () -> Sys.remove path) (fun () -> f path)
 ;;
 
+(* A deadline a test asserts *fires* wants to be short (0.05 s); a deadline a
+   test needs to *not* fire must cover spawning the fixture shell as well as
+   any pre-admission pause (#43596; see the matching note in
+   [test_runtime_claude_code.ml]). *)
+let window_outlasting_process_start_s = 5.0
+
 let run_fixture
     ?conversation_mode
     ?home_dir
@@ -857,13 +863,15 @@ let test_a_cli_that_answers_without_reading_the_prompt_does_not_hold_the_turn ()
   (* The CLI never reads stdin and lingers after answering, so a prompt past
      the pipe buffer is still in the pipe when the answer arrives. The turn
      ends on the lane's own admission window; before it covered the write, it
-     ended only when the CLI finally left. *)
+     ended only when the CLI finally left. 1.5 s leaves room for spawning the
+     fixture and the first-event [lsof] child-fd sample before the blocked
+     stdin writer expires (#43596), while staying well inside [exit_delay_s]. *)
   let ready = ref false in
   with_fixture ~stdin:Leave_unread ~exit_delay_s:5.0 [ init (); result () ] (fun path ->
     match
       run_fixture
         ~prompt:(String.make 1_100_000 'x')
-        ~admission_timeout_s:0.5
+        ~admission_timeout_s:1.5
         ~timeout_s:5.0
         ~on_conversation_ready:(fun ~conversation_id:_ ->
           ready := true;
@@ -872,7 +880,7 @@ let test_a_cli_that_answers_without_reading_the_prompt_does_not_hold_the_turn ()
     with
     | Error (Runtime_antigravity.Timeout seconds) ->
       check bool "the CLI had answered while the prompt was still in the pipe" true !ready;
-      check (float 0.001) "the window is the lane's admission window" 0.5 seconds
+      check (float 0.001) "the window is the lane's admission window" 1.5 seconds
     | Error error ->
       fail
         ("an unread prompt ended the turn some other way: "
@@ -1524,7 +1532,12 @@ let test_progress_resets_stream_idle_timeout () =
     ~line_delay_s:0.4
     [ init (); step ~index:1 (); result () ]
     (fun path ->
-       match run_fixture ~timeout_s:0.75 path with
+       match
+         run_fixture
+           ~timeout_s:0.75
+           ~admission_timeout_s:window_outlasting_process_start_s
+           path
+       with
        | Ok turn ->
          check string "progressing turn completes" "MASC_ANTIGRAVITY_OK\n" turn.text
        | Error error -> fail (Runtime_antigravity.error_to_string error))
@@ -1565,7 +1578,7 @@ let test_no_deadline_keeps_init_bounded () =
    fixture's first line is not what is under test (#28919). *)
 let tool_step_idle_window_s = 0.3
 let tool_step_gap_s = 1.0
-let tool_step_admission_s = 5.0
+let tool_step_admission_s = window_outlasting_process_start_s
 
 let test_tool_step_outlasting_the_idle_window_completes () =
   with_fixture
@@ -1628,7 +1641,8 @@ let test_no_deadline_starts_after_init () =
     (fun path ->
        match
          run_fixture
-           ~admission_timeout_s:0.05
+           ~timeout_s:0.05
+           ~admission_timeout_s:window_outlasting_process_start_s
            ~no_turn_deadline:true
            path
        with

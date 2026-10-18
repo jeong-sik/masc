@@ -219,6 +219,8 @@ type librarian_prompt_material =
 type memory_step =
   { run_id : string
   ; source_input : Keeper_librarian.input
+  ; prompt_variables : (string * string) list
+  ; rendered_prompt : string
   ; absorb_gate : Keeper_librarian_absorb_gate.run_result
   ; new_claims : Keeper_memory_os_types.fact list
   ; dropped : Keeper_memory_os_types.dropped_statement list
@@ -1744,6 +1746,8 @@ let run_pass
                   let step =
                     { run_id
                     ; source_input = prompt_input
+                    ; prompt_variables
+                    ; rendered_prompt = prompt
                     ; absorb_gate
                     ; new_claims = Keeper_librarian_absorb_gate.without_copies
                         absorb_gate selection.new_claims

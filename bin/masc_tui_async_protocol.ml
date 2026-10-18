@@ -733,7 +733,8 @@ type async_msg =
     }
 
 (* Every async result carries the instant it was ready, so the loop can say
-   how long it sat in the mailbox. A result that arrived in a second and was
+   how long it awaited UI application, whether queued or request-owned.
+   A result that arrived in a second and was
    applied ten seconds later names the loop, not the request (RFC-0429
    §3.0). The instant is read off [Mtime_clock.elapsed_ns] so that a clock
    correction landing between the two reads cannot fabricate the wait or
@@ -756,6 +757,62 @@ let ask_answer_completion_message (submission : ask_submission)
     (completion : Ask_answer_completion.observation) =
   Workspace_scoped (submission.as_authority, submission.as_reading,
     Ask_answer_done (submission, completion.receipt, completion.asks))
+
+(* One finite observation of the actual pending owners, not a live priority
+   scan after each application. New publications belong to a later round.
+   Reserve final Ask transport offers here; their raw facts stay in history. *)
+let collect_owned_results state =
+  let receipts = List.map (fun (submission, (observation : Ask_answer_receipt.observation)) ->
+    {ready_at_ns=observation.observed_ns; message=Ask_answer_receipt_ready submission})
+      (pending_ask_answer_receipts state) in
+  let completions = List.map (fun (submission, (completion : Ask_answer_completion.observation)) ->
+    {ready_at_ns=completion.observed_ns;
+     message=ask_answer_completion_message submission completion})
+      (take_pending_ask_answer_completions state) in
+  let runtime_forms = List.map (fun (request,status,ready_at_ns) ->
+    {ready_at_ns;message=Runtime_form_save_changed (request,status,ready_at_ns)})
+      (pending_runtime_form_save_receipts state) in
+  let settings = List.map (fun (request,status,ready_at_ns) ->
+    {ready_at_ns;message=Keeper_settings_save_changed (request,status,ready_at_ns)})
+      (pending_keeper_settings_save_receipts state) in
+  let assignments = List.map (fun (request,status,ready_at_ns) ->
+    {ready_at_ns;message=Runtime_assignment_changed (request,status,ready_at_ns)})
+      (pending_runtime_assignment_receipts state) in
+  let creations = List.map (fun (request,status,ready_at_ns) ->
+    {ready_at_ns;message=Keeper_creation_changed (request,status)})
+      (pending_keeper_creation_receipts state) in
+  List.concat [receipts;completions;runtime_forms;settings;assignments;creations]
+
+module Delivery_round : sig
+  type 'a t
+  val empty : 'a t
+  (** Capture the actual queued prefix, apply it in FIFO order, then collect
+      and deliver one finite set of owned results. A completed round returns
+      [None] even if new shared traffic is queued. [can_take] uses the caller's
+      existing deadline; a paused round retains its exact prefix/remainder. *)
+  val take : 'a t -> can_take:(unit -> bool) -> queued:(unit -> int) ->
+    take_shared:(unit -> 'a option) -> collect_owned:(unit -> 'a list) ->
+    'a option * 'a t
+end = struct
+  type 'a t = Await_prefix | Shared_prefix of int | Owned_results of 'a list
+  let empty = Await_prefix
+  let rec take round ~can_take ~queued ~take_shared ~collect_owned =
+    if not (can_take ()) then None, round
+    else match round with
+    | Await_prefix ->
+        take (Shared_prefix (queued ())) ~can_take ~queued ~take_shared ~collect_owned
+    | Shared_prefix remaining when remaining > 0 ->
+        (match take_shared () with
+         | Some ready -> Some ready, Shared_prefix (remaining-1)
+         | None ->
+             take (Owned_results (collect_owned ()))
+               ~can_take ~queued ~take_shared ~collect_owned)
+    | Shared_prefix _ ->
+        take (Owned_results (collect_owned ()))
+          ~can_take ~queued ~take_shared ~collect_owned
+    | Owned_results (ready :: rest) -> Some ready, Owned_results rest
+    | Owned_results [] -> None, Await_prefix
+end
 
 let rec workspace_message_is_read = function
   | Keeper_logs_loaded _ -> true

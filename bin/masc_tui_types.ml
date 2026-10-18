@@ -9027,12 +9027,12 @@ let owns_ask_submission (state : state) submission =
 let ask_submission_inflight state submission =
   state.ask_submit_inflight && current_ask_submission state submission
 
-let pending_ask_answer_receipt state =
+let pending_ask_answer_receipts state =
   state.ask_answer_receipt_pending <- List.filter (fun submission ->
     match Ask_answer_receipt.read submission.as_receipt with
     | Ask_answer_receipt.Closed_without_result -> false
     | Ask_answer_receipt.Waiting | Ask_answer_receipt.Returned _ -> true) state.ask_answer_receipt_pending;
-  List.find_map (fun submission ->
+  List.filter_map (fun submission ->
     match Ask_answer_receipt.read submission.as_receipt with
     | Ask_answer_receipt.Returned observation -> Some (submission, observation)
     | Ask_answer_receipt.Waiting | Ask_answer_receipt.Closed_without_result -> None) state.ask_answer_receipt_pending
@@ -9049,24 +9049,18 @@ let take_ask_answer_receipt state submission =
          (fun pending -> pending.as_request != owner.as_request) state.ask_answer_receipt_pending;
        Some (owner, observation))
 
-let take_pending_ask_answer_completion state =
-  state.ask_answer_completion_pending <- List.filter (fun submission ->
+let take_pending_ask_answer_completions state =
+  let pending, ready = List.fold_left (fun (pending, ready) submission ->
     match Ask_answer_completion.read submission.as_completion with
-    | Ask_answer_completion.Closed_without_result -> false
-    | Ask_answer_completion.Waiting | Ask_answer_completion.Returned _ -> true)
-      state.ask_answer_completion_pending;
-  match List.find_map (fun submission ->
-    match Ask_answer_completion.read submission.as_completion with
-    | Ask_answer_completion.Returned observation -> Some (submission, observation)
-    | Ask_answer_completion.Waiting | Ask_answer_completion.Closed_without_result -> None)
-      state.ask_answer_completion_pending with
-  | None -> None
-  | Some (owner, observation) ->
-    (* Consume only the transport offer. The raw fact remains owned; its UI
-       message must still pass the original operation/read projection. *)
-    state.ask_answer_completion_pending <- List.filter
-      (fun pending -> pending.as_request != owner.as_request) state.ask_answer_completion_pending;
-    Some (owner, observation)
+    | Ask_answer_completion.Waiting -> submission :: pending, ready
+    | Ask_answer_completion.Closed_without_result -> pending, ready
+    | Ask_answer_completion.Returned observation ->
+        pending, (submission, observation) :: ready)
+      ([], []) state.ask_answer_completion_pending in
+  (* Reserve only these transport offers for the UI delivery round. Raw facts
+     remain owned; each message still needs its original operation/read gate. *)
+  state.ask_answer_completion_pending <- List.rev pending;
+  List.rev ready
 
 let observe_ask_reread_completion (state : state) submission ~at_ns
     (result : (Masc.Tui_decode_asks.asks_snapshot, string) result) =
@@ -9831,8 +9825,8 @@ let publish_runtime_assignment request ~observed_ns status =
     then true else publish () in
   publish ()
 
-let pending_runtime_assignment_receipt state =
-  List.find_map (fun attempt ->
+let pending_runtime_assignment_receipts state =
+  List.filter_map (fun attempt ->
     let status,observed_ns = Atomic.get attempt.raa_request.ras_observation in
     if runtime_assignment_advances attempt.raa_status status
     then Some (attempt.raa_request,status,observed_ns) else None) state.runtime_assignment_saves
@@ -9941,8 +9935,8 @@ let begin_keeper_sandbox_save state ~profile ~started_ns =
         ~input:(Sandbox_shortcut_input profile) ~current:true ~started_ns
   | (Some _ | None),(Some _ | None) -> Error "Sandbox save requires a verified workspace and selected Keeper"
 
-let pending_keeper_settings_save_receipt state =
-  List.find_map (fun attempt ->
+let pending_keeper_settings_save_receipts state =
+  List.filter_map (fun attempt ->
     let status,observed_ns = Atomic.get attempt.ksa_request.ksv_observation in
     if keeper_settings_save_advances attempt.ksa_status status
     then Some (attempt.ksa_request,status,observed_ns) else None) state.keeper_settings_saves
@@ -12548,8 +12542,8 @@ let begin_runtime_form_save state ~draft ~started_ns =
   | None | Some _ -> Error (if busy then "A runtime configuration save is pending or unconfirmed; input retained"
       else "Workspace is unverified; save not sent, input retained")
 
-let pending_runtime_form_save_receipt state =
-  List.find_map (fun attempt ->
+let pending_runtime_form_save_receipts state =
+  List.filter_map (fun attempt ->
     match Atomic.get attempt.rfa_request.rfs_observation with
     | (status, observed_ns) when runtime_form_save_advances attempt.rfa_status status ->
         Some (attempt.rfa_request, status, observed_ns)
@@ -12729,8 +12723,8 @@ let publish_keeper_creation_status request ~observed_ns status =
   in
   publish ()
 
-let pending_keeper_creation_receipt state =
-  List.find_map (fun request ->
+let pending_keeper_creation_receipts state =
+  List.filter_map (fun request ->
     match Atomic.get request.kcr_observation with
     | (Creation_finished _, ready_at_ns) as observed ->
         Some (request, fst observed, ready_at_ns)

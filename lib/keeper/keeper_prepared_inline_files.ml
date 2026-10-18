@@ -15,6 +15,20 @@ type t =
   ; leaves : leaf list
   }
 
+let is_file descriptor =
+  descriptor.Keeper_tool_descriptor.runtime_handler = Keeper_tool_descriptor.Tool_read_file
+  || descriptor.runtime_handler = Keeper_tool_descriptor.Tool_edit_file
+  || descriptor.runtime_handler = Keeper_tool_descriptor.Tool_write_file
+;;
+
+let supported_file descriptor =
+  ((descriptor.Keeper_tool_descriptor.runtime_handler = Keeper_tool_descriptor.Tool_edit_file
+    || descriptor.runtime_handler = Keeper_tool_descriptor.Tool_write_file)
+   && descriptor.execution = Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Serial)
+  || (descriptor.runtime_handler = Keeper_tool_descriptor.Tool_read_file
+      && descriptor.execution = Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Concurrent)
+;;
+
 let eligible plan =
   let nodes = Plan.nodes plan in
   let is_mutation (node : Plan.node) =
@@ -26,12 +40,7 @@ let eligible plan =
   List.exists is_mutation nodes && List.for_all (fun (node : Plan.node) ->
     match Plan.descriptor plan node.id with
     | None -> false
-    | Some descriptor ->
-      ((descriptor.Keeper_tool_descriptor.runtime_handler = Keeper_tool_descriptor.Tool_edit_file
-        || descriptor.runtime_handler = Keeper_tool_descriptor.Tool_write_file)
-       && descriptor.execution = Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Serial)
-      || (descriptor.runtime_handler = Keeper_tool_descriptor.Tool_read_file
-          && descriptor.execution = Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Concurrent)) nodes
+    | Some descriptor -> supported_file descriptor) nodes
 ;;
 
 let release = function
@@ -53,9 +62,7 @@ let source_matches (meta : Keeper_meta_contract.keeper_meta)
 ;;
 
 let prepare_operation ~sw ~config ~meta ~tool_name descriptor ~input =
-  if descriptor.Keeper_tool_descriptor.runtime_handler <> Keeper_tool_descriptor.Tool_read_file
-     && descriptor.runtime_handler <> Keeper_tool_descriptor.Tool_edit_file
-     && descriptor.runtime_handler <> Keeper_tool_descriptor.Tool_write_file then None
+  if not (is_file descriptor) then None
   else
   match Keeper_tool_descriptor_resolution.prepare_model_input_for_descriptor
       ~tool_name descriptor ~input with
@@ -142,14 +149,42 @@ let for_node ~plan ~node ~input t =
 ;;
 
 module Ready = struct
+  type ordering = No_order | Wait_for_settlement | Require_success
+
   type t =
     { plan : Plan.t
     ; sw : Eio.Switch.t
     ; config : Workspace.config
     ; meta : Keeper_meta_contract.keeper_meta
+    ; preparation_orders : (Plan.Node_id.t * (Plan.Node_id.t * ordering) list) list
     }
 
-  type binding = Pure_arguments | Ordinary_file | Prepared_file of operation
+  type binding =
+    | Pure_arguments
+    | Ordinary of Keeper_tool_descriptor.ordinary_execution_mode
+    | Unprepared_file of Keeper_tool_descriptor.ordinary_execution_mode
+    | Prepared_file of operation
+
+  let preparation_orders plan =
+    let before_prepare prior current = match prior.Keeper_tool_descriptor.execution,current.Keeper_tool_descriptor.execution with
+      | Ordinary Serial, Ordinary Serial -> Require_success
+      | Ordinary Concurrent, Ordinary Concurrent -> No_order
+      | Ordinary (Serial | Concurrent), Ordinary (Serial | Concurrent) -> Wait_for_settlement
+      | Terminal, _ | _, Terminal -> No_order in
+    let rec collect earlier orders = function
+      | [] -> List.rev orders
+      | (node : Plan.node) :: rest ->
+        match Plan.descriptor plan node.id with
+        | None -> collect earlier orders rest
+        | Some descriptor when not (is_file descriptor) -> collect ((node.id,descriptor) :: earlier) orders rest
+        | Some descriptor ->
+          let predecessors = List.filter_map (fun (id,prior) -> match before_prepare prior descriptor with
+            | No_order -> None | (Wait_for_settlement | Require_success) as order -> Some (id,order)) earlier
+            |> List.rev in
+          let orders = match predecessors with [] -> orders | _ :: _ -> (node.id,predecessors) :: orders in
+          collect earlier orders rest in
+    collect [] [] (List.concat (Plan.dependency_layers plan))
+  ;;
 
   let create ~sw ~config ~meta ~source plan =
     let nodes = Plan.nodes plan in
@@ -163,19 +198,23 @@ module Ready = struct
       match Plan.contract plan node.id with
       | Some {target = Plan.Child_arguments _; _} -> true
       | Some {target = Plan.Descriptor_target descriptor; _} ->
-        ((descriptor.runtime_handler = Keeper_tool_descriptor.Tool_edit_file
-          || descriptor.runtime_handler = Keeper_tool_descriptor.Tool_write_file)
-         && descriptor.execution = Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Serial)
-        || (descriptor.runtime_handler = Keeper_tool_descriptor.Tool_read_file
-            && descriptor.execution = Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Concurrent)
+        if is_file descriptor then supported_file descriptor
+        else (match descriptor.execution with
+          | Keeper_tool_descriptor.Ordinary (Serial | Concurrent) -> true
+          | Keeper_tool_descriptor.Terminal -> false)
       | Some {target = (Plan.Child_submission _ | Plan.Child_result _); _} | None -> false) nodes in
     match source with
     | Some source when source_matches meta source && has_mutation && supported ->
-      Some {plan; sw; config; meta}
+      Some {plan; sw; config; meta; preparation_orders=preparation_orders plan}
     | Some _ | None -> None
   ;;
 
   let plan t = t.plan
+
+  let preparation_predecessors t ~node =
+    match List.find_opt (fun (id,_) -> Plan.Node_id.equal id node.Plan.id) t.preparation_orders with
+    | Some (_,orders) -> orders | None -> []
+  ;;
 
   let bind t ~node ~input =
     if not (List.exists (fun member -> member == node) (Plan.nodes t.plan)) then
@@ -183,24 +222,50 @@ module Ready = struct
     match Plan.contract t.plan node.Plan.id with
     | Some {target = Plan.Child_arguments _; _} -> Pure_arguments
     | Some {target = Plan.Descriptor_target descriptor; _} ->
-      (match prepare_operation ~sw:t.sw ~config:t.config ~meta:t.meta
-          ~tool_name:node.tool_name descriptor ~input with
-       | Some operation -> Prepared_file operation
-       | None -> Ordinary_file)
+      (match descriptor.execution with
+       | Keeper_tool_descriptor.Terminal -> invalid_arg "ready file plan contains a terminal leaf"
+       | Keeper_tool_descriptor.Ordinary mode ->
+         if not (is_file descriptor) then Ordinary mode
+         else match prepare_operation ~sw:t.sw ~config:t.config ~meta:t.meta
+             ~tool_name:node.tool_name descriptor ~input with
+           | Some operation -> Prepared_file operation
+           | None -> Unprepared_file mode)
     | Some {target = (Plan.Child_submission _ | Plan.Child_result _); _} | None ->
       invalid_arg "ready Inline file lost its original producer"
   ;;
 
-  let operation = function Prepared_file operation -> Some operation | Pure_arguments | Ordinary_file -> None
-  let exclusive = function Ordinary_file -> true | Pure_arguments | Prepared_file _ -> false
+  let operation = function
+    | Prepared_file operation -> Some operation
+    | Pure_arguments | Ordinary _ | Unprepared_file _ -> None
 
-  let conflicts left right = match left, right with
-    | Pure_arguments, _ | _, Pure_arguments -> false
-    | Ordinary_file, (Ordinary_file | Prepared_file _)
-    | Prepared_file _, Ordinary_file -> true
+  let exclusive = function
+    | Unprepared_file _ | Ordinary Keeper_tool_descriptor.Serial -> true
+    | Pure_arguments | Prepared_file _ | Ordinary Keeper_tool_descriptor.Concurrent -> false
+
+  let originally_serial = function
+    | Ordinary Keeper_tool_descriptor.Serial | Unprepared_file Keeper_tool_descriptor.Serial
+    | Prepared_file (Edit _ | Write _) -> true
+    | Pure_arguments | Ordinary Keeper_tool_descriptor.Concurrent
+    | Unprepared_file Keeper_tool_descriptor.Concurrent | Prepared_file (Read _) -> false
+
+  let ordering left right = match left, right with
+    | Pure_arguments, _ | _, Pure_arguments -> No_order
     | Prepared_file left, Prepared_file right ->
-      List.exists (fun scope ->
+      if List.exists (fun scope ->
         List.exists (Agent_core.Tool_contract.Resource_scope.conflicts scope)
           (operation_scopes right)) (operation_scopes left)
+      then Require_success else No_order
+    | Unprepared_file _, (Unprepared_file _ | Prepared_file _)
+    | Prepared_file _, Unprepared_file _ -> Require_success
+    | Ordinary Keeper_tool_descriptor.Concurrent, Ordinary Keeper_tool_descriptor.Concurrent
+    | Ordinary Keeper_tool_descriptor.Concurrent, Prepared_file (Read _)
+    | Prepared_file (Read _), Ordinary Keeper_tool_descriptor.Concurrent -> No_order
+    | Ordinary _, (Ordinary _ | Unprepared_file _ | Prepared_file _)
+    | (Unprepared_file _ | Prepared_file _), Ordinary _ ->
+      (* Unknown footprint: preserve execution ordering, without claiming a
+         shared file. Only an original Serial-to-Serial chain carries the
+         legacy failure dependency; a concurrent lookup is just a barrier. *)
+      if originally_serial left && originally_serial right then Require_success
+      else Wait_for_settlement
   ;;
 end

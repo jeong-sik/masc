@@ -612,8 +612,9 @@ let execute_with_tool_use_id
   (* Dynamic ready-wave runner: every node owns one fiber that starts when all
      of its dependencies have settled, instead of waiting for a static batch
      barrier. Ordinary serial and terminal nodes additionally follow the static
-     schedule order and run alone behind [Exclusive_gate]. Exact prepared Read/Edit
-     leaves instead wait for every earlier conflicting resource owner. A node whose
+     schedule order and run alone behind [Exclusive_gate]. Exact prepared
+     Read/Edit/Write leaves wait for conflicting resource owners and opaque
+     ordinary barriers, retaining the original Serial success dependencies. A node whose
      dependency failed or was skipped never dispatches; under [Fail_fast] no
      new node dispatches once any node is blocked, while under
      [Continue_independent] only the failed branch's descendants are blocked.
@@ -731,6 +732,14 @@ let execute_with_tool_use_id
     let stopped = function
       | Wave_skipped -> true
       | Wave_settled (settlement, _) -> Option.is_some settlement.cause in
+    let ordering_blocks outcomes = List.exists (fun (_,order,outcome) ->
+      match order with
+      | Keeper_prepared_inline_files.Ready.No_order -> false
+      | Require_success -> stopped outcome
+      | Wait_for_settlement ->
+        match policy with
+        | Keeper_tool_plan.Fail_fast -> stopped outcome
+        | Keeper_tool_plan.Continue_independent -> false) outcomes in
     let run_node node =
       let node_id = node.Keeper_tool_plan.id in
       let scheduled = find_scheduled node_id in
@@ -754,24 +763,46 @@ let execute_with_tool_use_id
           | Wave_settled (settlement, _) -> Option.map (fun output -> dependency, output) settlement.output
           | Wave_skipped -> None) dependency_outcomes in
       let input = resolve_node_input ~plan ~run_id ~node_id ~prepared_inputs ~outputs in
+      (* An opaque predecessor may change physical file bindings. Wait for it
+         before preparing a later file, not just before invoking its handler.
+         Earlier topological nodes cannot depend on this unpublished binding. *)
+      let preparation_outcomes = match ready_files,input with
+        | Some ready,Ok _ -> List.filter_map (fun (earlier,order) ->
+            match order with
+            | Keeper_prepared_inline_files.Ready.No_order -> None
+            | (Wait_for_settlement | Require_success) as order ->
+                let promise,_ = find_outcome earlier in
+                Some (earlier,order,Eio.Promise.await promise))
+            (Keeper_prepared_inline_files.Ready.preparation_predecessors ready.files ~node)
+        | None,_ | Some _,Error _ -> [] in
+      if ordering_blocks preparation_outcomes then skip () else
       let binding = match ready_files, input with
         | Some ready, Ok input -> Some (Keeper_prepared_inline_files.Ready.bind ready.files ~node ~input)
         | None, _ | Some _, Error _ -> None in
       publish_binding binding;
       (* Publish resolved producer claims before waiting for earlier claims.
          Binding order is topological, so an earlier unresolved input cannot
-         depend on this node. Only actual conflicts wait for tool settlement. *)
-      let predecessor_ids = match ready_files with
-        | None -> ordering_predecessors node_id
-        | Some _ -> List.filter (fun earlier ->
+         depend on this node. File conflicts and opaque ordering barriers wait
+         for tool settlement with their separate failure requirements. *)
+      let predecessors = match ready_files with
+        | None -> List.map (fun id -> id, Keeper_prepared_inline_files.Ready.Require_success)
+            (ordering_predecessors node_id)
+        | Some _ -> List.filter_map (fun earlier ->
             let promise, _ = find_binding earlier in
             match binding, Eio.Promise.await promise with
-            | Some current, Some prior -> Keeper_prepared_inline_files.Ready.conflicts prior current
-            | None, _ | Some _, None -> false) (earlier_nodes node_id) in
-      let predecessor_outcomes = List.map (fun predecessor ->
+            | Some current, Some prior ->
+                (match Keeper_prepared_inline_files.Ready.ordering prior current with
+                 | Keeper_prepared_inline_files.Ready.No_order -> None
+                 | (Wait_for_settlement | Require_success) as order -> Some (earlier,order))
+            | None, _ | Some _, None -> None) (earlier_nodes node_id) in
+      let ordered_outcomes = List.map (fun (predecessor,order) ->
           let promise, _ = find_outcome predecessor in
-          predecessor, Eio.Promise.await promise) predecessor_ids in
-      if List.exists (fun (_, outcome) -> stopped outcome) predecessor_outcomes
+          predecessor, order, Eio.Promise.await promise) predecessors in
+      let predecessor_outcomes = List.filter_map (fun (predecessor,order,outcome) ->
+        match order with
+        | Keeper_prepared_inline_files.Ready.Require_success -> Some (predecessor,outcome)
+        | No_order | Wait_for_settlement -> None) ordered_outcomes in
+      if ordering_blocks ordered_outcomes
       then skip ()
       else (
         let commit_ticket, dependency_blocked = List.fold_left
@@ -782,6 +813,13 @@ let execute_with_tool_use_id
             (-1, false)
             (dependency_outcomes @ (match resource_dependencies with
               | Some _ -> predecessor_outcomes | None -> [])) in
+        (* Soft barriers contribute observed settlement tickets to Fail_fast
+           ordering, but are not producer/data dependencies. *)
+        let commit_ticket = match ready_files with
+          | None -> commit_ticket
+          | Some _ -> List.fold_left (fun latest (_,_,outcome) -> match outcome with
+              | Wave_skipped -> latest
+              | Wave_settled (_,ticket) -> max latest ticket) commit_ticket ordered_outcomes in
         let halted () = match policy with
           | Keeper_tool_plan.Fail_fast -> List.exists
               (fun (_, failure_ticket) -> failure_ticket < commit_ticket) (Atomic.get failures)

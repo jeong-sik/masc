@@ -38,6 +38,14 @@ type outstanding_snapshot =
   | Missing_store
   | Stored_operations of { chat_operations : Operation.t list; semantic_executions : Semantic.t list }
 
+type durable_snapshot =
+  | Missing_durable_store
+  | Stored_durable_records of
+      { chat_operations : Operation.t list
+      ; batch_member_inputs : Yojson.Safe.t list
+      ; semantic_executions : Semantic.t list
+      }
+
 val inspect_outstanding : path:string -> (outstanding_snapshot, error) result
 (** Read-only schema/integrity checked snapshot of queued and running operations.
     Exactly validated v1 chat-only stores are readable without migration; v2
@@ -47,6 +55,13 @@ val inspect_outstanding : path:string -> (outstanding_snapshot, error) result
     Never creates, initializes, or recovers a store. Missing files remain distinct
     from a validated empty queue. Callers authorizing lifecycle changes must
     exclude the sole writer and its creation for the whole enclosing commit. *)
+
+val inspect_durable_records : path:string -> (durable_snapshot, error) result
+(** Read-only schema/integrity checked snapshot of every durable record in the
+    operation store, including terminal operations, frozen batch-member
+    original inputs, and settled semantic executions. Used by whole-workspace
+    blob reference scanning so no reference retained in an authoritative SQLite
+    column can be collected. *)
 
 val inspect_pending_inputs : path:string -> (Operation.t list option, error) result
 (** Read-only, schema-checked transaction over queued/running inputs only.

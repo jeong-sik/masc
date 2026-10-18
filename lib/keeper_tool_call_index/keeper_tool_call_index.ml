@@ -12,7 +12,8 @@ let ( let* ) = Result.bind
    to migrate. *)
 let schema_version = 8
 
-let database_path ~ledger_dir = Filename.concat ledger_dir "read-index.sqlite3"
+let database_path ~ledger_dir =
+  Filename.concat ledger_dir Common.tool_call_read_index_basename
 
 let schema_sql =
   {|

@@ -257,3 +257,26 @@ let safe_filename name =
       else Printf.bprintf buf "_%02x" (Char.code c))
     name;
   Buffer.contents buf
+
+let tool_call_read_index_basename = "read-index.sqlite3"
+
+let tool_call_read_index_filenames =
+  [ tool_call_read_index_basename
+  ; tool_call_read_index_basename ^ "-wal"
+  ; tool_call_read_index_basename ^ "-shm"
+  ; tool_call_read_index_basename ^ "-journal"
+  ]
+
+let is_tool_call_read_index_file path =
+  List.mem (Filename.basename path) tool_call_read_index_filenames
+
+let chat_operation_store_basename = "chat-operations.sqlite3"
+
+let chat_operation_store_sidecar_filenames =
+  [ chat_operation_store_basename ^ "-wal"
+  ; chat_operation_store_basename ^ "-shm"
+  ; chat_operation_store_basename ^ "-journal"
+  ]
+
+let is_chat_operation_store_sidecar_file path =
+  List.mem (Filename.basename path) chat_operation_store_sidecar_filenames

@@ -201,7 +201,7 @@ let with_exact_api fn =
         let target = Uri.make ~path:("/api/v1/keepers/" ^ keeper ^ "/turn-records") ~query ()
           |> Uri.to_string in
         Api.keeper_turn_record_lookup_response ~config ~keeper_name:keeper
-          (Httpun.Request.create ~meth:`GET target) in
+          (Httpun.Request.create `GET target) in
       fn path lookup))
 
 let test_exact_http_response_reaches_tui () =

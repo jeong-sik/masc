@@ -1301,7 +1301,7 @@ let test_maintenance_skips_open_tool_call_read_index_and_wal_sidecars () =
              Dated_jsonl.prepare_for_directory_removal ledger_store
            | None -> ());
           Masc.Keeper_tool_call_log.reset_for_testing ();
-          Masc.Keeper_tool_call_index.forget_for_ledger ~ledger_dir)
+          Keeper_tool_call_index.forget_for_ledger ~ledger_dir)
         (fun () ->
           Masc.Keeper_tool_call_log.log_call
             ~keeper_name:"keeper-tool-log"
@@ -1309,7 +1309,7 @@ let test_maintenance_skips_open_tool_call_read_index_and_wal_sidecars () =
             ~input:(`Assoc [])
             ~output_text:(O.encode_for_agent_core (O.Stored reference))
             ~duration_ms:1.0
-            ~wire_outcome:Masc.Tool_result.Ok
+            ~wire_outcome:Tool_result.Ok
             ~artifact_refs:[ reference ]
             ();
           (match
@@ -1322,7 +1322,7 @@ let test_maintenance_skips_open_tool_call_read_index_and_wal_sidecars () =
              Alcotest.(check int) "indexed row read back" 1 (List.length rows)
            | Error (Masc.Keeper_tool_call_log.Index_unavailable detail) ->
              Alcotest.failf "read_recent failed: %s" detail);
-          let db_path = Masc.Keeper_tool_call_index.database_path ~ledger_dir in
+          let db_path = Keeper_tool_call_index.database_path ~ledger_dir in
           Alcotest.(check bool)
             "SQLite read index exists"
             true
@@ -1493,7 +1493,7 @@ let test_maintenance_reads_chat_operation_store_and_prepared_gate_checkpoint () 
               ~trace_id:(Keeper_id.Trace_id.of_string "gate-trace" |> require)
               ~turn_count:1
               ~canonical_checkpoint_bytes
-            |> Result.map_error Keeper_checkpoint_ref.error_to_string
+            |> Result.map_error Masc.Keeper_checkpoint_store.checkpoint_ref_create_error_to_string
             |> require
           in
           let session_scope =
@@ -1507,12 +1507,13 @@ let test_maintenance_reads_chat_operation_store_and_prepared_gate_checkpoint () 
             }
           in
           let binding =
+            (* gate_binding already reports its error as a string, so
+               require takes it directly. *)
             Semantic.gate_binding
               ~preparation
               ~approval_ids:[ "approval-1" ]
               ~obligations:[]
               ~runtime_suffix:None
-            |> Result.map_error Semantic.error_to_string
             |> require
           in
           ignore

@@ -308,8 +308,9 @@ describe('reduceKeeperResponse stop and closure', () => {
     expect(run([{ kind: 'stop', owner: owner(1) }]).last.accepted).toBe(false)
   })
 
-  it('refuses a stop after an attempt retired the current response', () => {
-    expect(run([observe(6, 0), { kind: 'attempt' }, { kind: 'stop', owner: owner(6, 0) }]).last.accepted).toBe(false)
+  it('refuses a pre-floor stop after an attempt cleared the current owner while accepting the floor stop', () => {
+    expect(run([observe(6, 0), { kind: 'attempt' }, { kind: 'stop', owner: owner(5, 0) }]).last.accepted).toBe(false)
+    expect(run([observe(6, 0), { kind: 'attempt' }, { kind: 'stop', owner: owner(6, 0) }]).last.accepted).toBe(true)
   })
 
   it('refuses a second stop for a closed response', () => {

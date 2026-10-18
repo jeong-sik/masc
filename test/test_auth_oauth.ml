@@ -1076,6 +1076,98 @@ let test_unbound_resource_context_fails_closed_without_raising () =
       | Error error -> fail (Masc_domain.show_masc_error error)))
 ;;
 
+let test_transient_bootstrap_read_failure_does_not_revoke_family () =
+  if Unix.geteuid () = 0
+  then ()
+  else
+    with_env "MASC_OAUTH_ENABLED" "1" (fun () ->
+      with_workspace (fun base_path ->
+        Eio_main.run (fun env ->
+          Fs_compat.set_fs (Eio.Stdenv.fs env);
+          Eio_guard.enable ();
+          Fun.protect
+            ~finally:(fun () ->
+              Eio_guard.disable ();
+              Fs_compat.clear_fs ())
+            (fun () ->
+              let _, bootstrap_credential =
+                Auth.create_token
+                  base_path
+                  ~agent_name:"transient-codex"
+                  ~role:Masc_domain.Worker
+                |> auth_ok
+              in
+              let resource = "http://127.0.0.1:8935/mcp" in
+              let client, pair =
+                issue_pair
+                  ~base_path
+                  ~bootstrap_credential
+                  ~redirect_uri:"http://127.0.0.1:43133/callback/transient"
+                  ~resource
+                  ~scope:"mcp:tools"
+              in
+              let bootstrap_path =
+                Filename.concat base_path ".masc/auth/agents/transient-codex.json"
+              in
+              Unix.chmod bootstrap_path 0o000;
+              Fun.protect
+                ~finally:(fun () -> Unix.chmod bootstrap_path 0o600)
+                (fun () ->
+                  check
+                    bool
+                    "access lookup surfaces IoError when bootstrap file is unreadable"
+                    true
+                    (match
+                       Auth_oauth.with_expected_resource resource (fun () ->
+                         Auth.find_credential_by_token
+                           base_path
+                           ~token:pair.access_token)
+                     with
+                     | Error (Masc_domain.System (Masc_domain.System_error.IoError _)) ->
+                       true
+                     | Ok _ | Error _ -> false);
+                  check
+                    bool
+                    "refresh rotation surfaces Store_error when bootstrap file is unreadable"
+                    true
+                    (match
+                       Auth_oauth.rotate_refresh_token
+                         ~base_path
+                         ~expected_resource:resource
+                         ~refresh_token:pair.refresh_token
+                         ~client_id:client.client_id
+                         ~scope:None
+                         ~resource:(Some resource)
+                     with
+                     | Error (Auth_oauth.Store_error _) -> true
+                     | Ok _ | Error _ -> false));
+              let recovered =
+                Auth_oauth.with_expected_resource resource (fun () ->
+                  Auth.find_credential_by_token
+                    base_path
+                    ~token:pair.access_token)
+                |> auth_ok
+              in
+              check string "access token survives transient bootstrap read failure"
+                "transient-codex" recovered.agent_name;
+              let rotated =
+                Auth_oauth.rotate_refresh_token
+                  ~base_path
+                  ~expected_resource:resource
+                  ~refresh_token:pair.refresh_token
+                  ~client_id:client.client_id
+                  ~scope:None
+                  ~resource:(Some resource)
+                |> oauth_ok
+              in
+              ignore
+                (Auth_oauth.with_expected_resource resource (fun () ->
+                   Auth.find_credential_by_token
+                     base_path
+                     ~token:rotated.access_token)
+                 |> auth_ok)))))
+;;
+
 let () =
   run
     "auth_oauth"
@@ -1128,6 +1220,10 @@ let () =
             "unbound resource context fails closed without raising"
             `Quick
             test_unbound_resource_context_fails_closed_without_raising
+        ; test_case
+            "transient bootstrap read failure does not revoke family"
+            `Quick
+            test_transient_bootstrap_read_failure_does_not_revoke_family
         ] )
     ]
 ;;

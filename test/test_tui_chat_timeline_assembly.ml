@@ -447,6 +447,55 @@ let test_an_empty_conversation_has_no_edges () =
   check_edges "nothing to draw" [] []
 ;;
 
+let test_source_scoped_row_check_matches_full_held_scan () =
+  let autonomous_source =
+    Masc_tui_keeper_chat_log.Autonomous_turn
+      { trace_id = "trace-auto-1"; turn_generation = 2 }
+  in
+  let with_source source (entry : Tui_types.msg_entry) =
+    { entry with me_execution_source = source }
+  in
+  let rows =
+    [ user ~request_id:"held-a" "asked a" 1.
+    ; keeper ~request_id:"held-a" "answered a" 2.
+    ; tool ~request_id:"held-a" "read_file" 3.
+    ; row ~request_id:"held-b" ~role:Tui_types.Message_thinking
+        ~phase:Tui_types.Turn_progress ~text:"thought b" 4.
+    ; row ~request_id:"held-b"
+        ~role:(Tui_types.Message_skill Masc_tui_keeper_chat_transcript.Skill_used)
+        ~phase:Tui_types.Turn_progress ~text:"skill b" 5.
+    ; keeper ~request_id:"held-b" "answered b" 6.
+    ; with_source (Some autonomous_source)
+        (row ~request_id:"auto-1" ~role:Tui_types.Message_autonomous
+           ~phase:Tui_types.Turn_output ~text:"autonomous speech" 7.)
+    ; with_source (Some autonomous_source)
+        (tool ~request_id:"auto-1" "autonomous tool" 8.)
+    ; keeper ~request_id:"unheld" "unheld speech" 9.
+    ; with_source None (memory "journal row without source" 10.)
+    ; with_source None (unowned "status without source" 11.)
+    ]
+  in
+  let held =
+    [ { Tui_types.ht_source = Masc_tui_keeper_chat_log.Operation "held-a" }
+    ; { Tui_types.ht_source = autonomous_source }
+    ; { Tui_types.ht_source = Masc_tui_keeper_chat_log.Operation "held-b" }
+    ]
+  in
+  let full_scan =
+    List.filter_map
+      (fun (entry : Tui_types.msg_entry) ->
+        if List.exists (fun turn -> Tui_types.log_draws_row turn entry) held
+        then Tui_types.media_remainder entry
+        else Some entry)
+      rows
+  in
+  let scoped = Tui_types.rows_the_logs_do_not_draw ~held rows in
+  Alcotest.(check (list string))
+    "source-scoped row check retains the exact same rows as a full held scan"
+    (List.map (fun (r : Tui_types.msg_entry) -> r.me_text) full_scan)
+    (List.map (fun (r : Tui_types.msg_entry) -> r.me_text) scoped)
+;;
+
 let () =
   Alcotest.run
     "tui chat timeline assembly"
@@ -493,6 +542,8 @@ let () =
             test_only_another_turn_breaks_a_run;
           Alcotest.test_case "a held turn keeps only the rows the log does not draw" `Quick
             test_a_held_turn_keeps_only_the_rows_the_log_does_not_draw;
+          Alcotest.test_case "source-scoped row check matches full held scan" `Quick
+            test_source_scoped_row_check_matches_full_held_scan;
           Alcotest.test_case "an empty conversation has no edges" `Quick
             test_an_empty_conversation_has_no_edges
         ] )

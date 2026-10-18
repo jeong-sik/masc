@@ -9,7 +9,7 @@ import { randomUUID } from 'node:crypto'
 import { openPlayback } from '../playback.mjs'
 const flush=()=>new Promise(resolve=>setImmediate(resolve))
 async function scenario(paired) {
- const process=new EventEmitter(),observed={plans:[],options:[],spawn:[],removed:[],kills:[]}
+ const process=new EventEmitter(),observed={plans:[],options:[],spawn:[],removed:[],kills:[],commands:[]}
  process.platform='darwin'
  process.stdin=Object.assign(new EventEmitter(),{isTTY:true,isRaw:false,setRawMode(value){this.isRaw=value},resume(){},pause(){}})
  process.stdout=Object.assign(new EventEmitter(),{isTTY:true,columns:80,rows:24,write(){}})
@@ -25,6 +25,7 @@ async function scenario(paired) {
   openPlayback(options){
    observed.options.push(options)
    const child=Object.assign(new EventEmitter(),{stdout:new PassThrough(),stderr:new PassThrough(),stdin:new PassThrough(),kill(signal){observed.kills.push(signal)}})
+   child.stdin.on('data',chunk=>observed.commands.push(...chunk.toString().trim().split('\n').map(JSON.parse)))
    const handle=openPlayback({...options,spawnProcess(executable,args){observed.spawn.push({executable,args});return child}})
    observed.child=child;return handle
   }
@@ -45,6 +46,17 @@ async function scenario(paired) {
   assert.equal(observed.spawn[0].args.at(-1),'selected-audio')
   const event={kind:'playing',currentTime:0,duration:1,device:{id:'selected-audio',name:'Audio',outputs:2},loop:false,...(paired?{format:'capture-session',clock:{kind:'mach-host-time'},bindings:[{port:0,device:{kind:'midi',protocol:2,id:'123',name:'MIDI'}}]}:{})}
   observed.child.stdout.write(JSON.stringify(event)+'\n');await flush()
+  process.stdin.emit('keypress','p',{name:'p'});await flush()
+  assert.deepEqual(observed.commands.at(-1),{kind:'pause'})
+  observed.child.stdout.write(JSON.stringify({...event,kind:'paused',currentTime:0.2})+'\n');await flush()
+  const command=line=>{
+   process.stdin.emit('keypress',':',{});process.stdin.emit('keypress',line,{});process.stdin.emit('keypress','\r',{name:'return'})
+  }
+  command('seek 0.35');await flush();assert.deepEqual(observed.commands.at(-1),{kind:'seek',seconds:0.35})
+  const sent=observed.commands.length;command('seek 2');await flush();assert.equal(observed.commands.length,sent,'out of range seeks never reach the native owner')
+  observed.child.stdout.write(JSON.stringify({...event,kind:'paused',currentTime:0.35})+'\n');await flush()
+  process.stdin.emit('keypress','p',{name:'p'});await flush();assert.deepEqual(observed.commands.at(-1),{kind:'resume'})
+  observed.child.stdout.write(JSON.stringify({...event,currentTime:0.35})+'\n');await flush()
   let returned=false;done.then(()=>{returned=true})
   process.stdin.emit('keypress','q',{name:'q'});await flush()
   assert.equal(returned,false,'screen return awaits owned child close')

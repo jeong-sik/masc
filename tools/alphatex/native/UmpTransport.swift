@@ -94,8 +94,8 @@ struct UmpTimeline: Decodable {
 }
 
 // A complete source audition delivers every original UMP, including opaque
-// system/expression data. Stateful trim/pause/seek is a separate reconstruction
-// contract and is explicitly refused by the audio owner for this route.
+// system/expression data. Reconstruction additionally requires known source
+// state; staging is silent and its restoration shares the audio start epoch.
 final class UmpTransport: CoordinatedMidiTransport {
     let timeline: UmpTimeline
     let events: [UmpEvent]
@@ -109,6 +109,9 @@ final class UmpTransport: CoordinatedMidiTransport {
     enum State { case prepared, staged, playing, ended, stopped }
     var state = State.prepared
     var index = 0
+    var offset: Double = 0
+    var pendingRestore = false
+    var footprint = UmpFootprint()
     // Keys include physical endpoint, group, channel, message dialect and note.
     // Retain uncertain acquisitions/releases until a successful cleanup send.
     struct Key: Hashable { let source: String; let prefix: UInt32; let number: UInt32 }
@@ -154,6 +157,7 @@ final class UmpTransport: CoordinatedMidiTransport {
         }
     }
     func apply(_ event: UmpEvent) throws {
+        footprint.observe(UmpMessage(event))
         let word = event.words[0], type = word >> 28, status = (word >> 20) & 15, number = (word >> 8) & 127
         let key = Key(source: event.source, prefix: word & 0xff0f0000, number: number)
         let channel = type == 2 || type == 4
@@ -198,8 +202,13 @@ final class UmpTransport: CoordinatedMidiTransport {
         if let failure { throw failure }
     }
     func stageCoordinated(at seconds: Double) throws {
-        guard Thread.isMainThread, state == .prepared, seconds == 0 else { throw MidiFailure("captured UMP state reconstruction for pause or seek is not connected") }
-        try checkDestinations(); state = .staged
+        guard Thread.isMainThread, state != .stopped, seconds.isFinite, seconds >= 0, seconds < timeline.duration else { throw MidiFailure("invalid captured UMP position or owner") }
+        let original = state == .prepared && seconds == 0
+        if !original { _ = try umpRestoration(events, before: seconds, replacing: footprint) }
+        try checkDestinations()
+        timer?.cancel(); timer = nil
+        try silence()
+        offset = seconds; pendingRestore = !original; state = .staged
     }
     func runCoordinated(anchorNanoseconds: UInt64) throws {
         guard state == .staged, anchorNanoseconds > DispatchTime.now().uptimeNanoseconds else { throw MidiFailure("captured UMP missed the common start deadline") }
@@ -207,14 +216,14 @@ final class UmpTransport: CoordinatedMidiTransport {
     }
     func position(at host: UInt64) -> Double {
         if state == .ended { return timeline.duration }
-        guard state == .playing else { return 0 }
-        return min(timeline.duration, host > anchor ? Double(host - anchor) / 1e9 : 0)
+        guard state == .playing else { return offset }
+        return min(timeline.duration, offset + (host > anchor ? Double(host - anchor) / 1e9 : 0))
     }
     func schedule() {
         timer?.cancel(); timer = nil
         guard state == .playing else { return }
-        let seconds = index < events.count ? events[index].seconds : timeline.duration
-        let when = anchor.addingReportingOverflow(UInt64(seconds * 1e9))
+        let seconds = pendingRestore ? offset : index < events.count ? events[index].seconds : timeline.duration
+        let when = anchor.addingReportingOverflow(UInt64(max(0, seconds - offset) * 1e9))
         guard !when.overflow else { finish(reason: "clock-overflow", error: MidiFailure("UMP deadline exceeds host clock"), publish: false); return }
         let source = DispatchSource.makeTimerSource(queue: .main); timer = source
         source.schedule(deadline: DispatchTime(uptimeNanoseconds: when.partialValue), leeway: .nanoseconds(0))
@@ -227,6 +236,13 @@ final class UmpTransport: CoordinatedMidiTransport {
             let host = DispatchTime.now().uptimeNanoseconds
             guard host >= anchor else { schedule(); return }
             let seconds = position(at: host)
+            if pendingRestore {
+                // Reconstruct the current phase if the callback was delayed:
+                // notes that ended between staging and this epoch stay silent.
+                let restored = try umpRestoration(events, before: seconds, replacing: footprint)
+                pendingRestore = false; index = restored.nextIndex
+                for event in restored.events { try apply(event) }
+            }
             while index < events.count && events[index].seconds <= seconds { try apply(events[index]); index += 1 }
             if index == events.count && seconds >= timeline.duration {
                 timer?.cancel(); timer = nil; try silence(); state = .ended; onCoordinatedEnd?(); return

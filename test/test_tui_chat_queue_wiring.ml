@@ -5211,8 +5211,8 @@ let test_observed_checkpoint_retains_earlier_output () =
     Tui_types.turn_log_add ~now:110. log ~seq:(Some 8) Live.Run_started;
     Tui_types.turn_log_add ~now:111. log ~seq:(Some 9) (Live.Text {text="TEXT_AFTER_CHECKPOINT"; response=Unobserved_scope (None)});
     retained "continuation starts";
-    let status () = Tui_types.keeper_message_visible_status_rows state
-        log.tl_transcript ~now:172_911.
+    let status () = (Tui_types.keeper_message_status_projection state
+        log.tl_transcript ~now:172_911.).kmsp_rows
       |> List.map snd |> String.concat "\n" in
     check bool "resumed progress keeps its activity" true
       (Astring.String.is_infix ~affix:"STREAMING" (status ()));
@@ -5504,7 +5504,7 @@ let test_status_details_and_fold_counts_reach_the_frame () =
     List.iter (fun mode ->
       state.msg_tool_visibility <- mode;
       check int "only fold-hidden Approval and Attention rows are counted" 2
-        (Tui_types.keeper_message_folded_status_count state entry.log.tl_transcript ~now:3.);
+        (Tui_types.keeper_message_status_projection state entry.log.tl_transcript ~now:3.).kmsp_folded_count;
       check bool "compact summary offers hidden rows and expansion" true
         (has_detail "+2" Masc_tui_keys.expand_turn_label);
       state.msg_turn_folded <- false;
@@ -5524,9 +5524,9 @@ let test_status_details_and_fold_counts_reach_the_frame () =
       state.msg_origin_display <- origin;
       check bool "checkpoint has no progress row" false
         (List.exists (fun (kind, _) -> kind = Keeper_chat_transcript.Progress)
-          (Tui_types.keeper_message_visible_status_rows state entry.log.tl_transcript ~now:5.));
+          (Tui_types.keeper_message_status_projection state entry.log.tl_transcript ~now:5.).kmsp_rows);
       check int "folded checkpoint counts the rows it hides" hidden
-        (Tui_types.keeper_message_folded_status_count state entry.log.tl_transcript ~now:5.))
+        (Tui_types.keeper_message_status_projection state entry.log.tl_transcript ~now:5.).kmsp_folded_count)
       [Masc_tui_message_layout.Origin_bare, 1; Origin_inline, 2])
 
 let test_verified_rejection_is_visible_without_mutating_original_input () =

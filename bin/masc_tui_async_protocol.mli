@@ -264,7 +264,6 @@ type async_msg =
   | Http_keeper_roster_loaded of early_keeper_roster_observation
   | Http_dataset_loaded of early_http_dataset
   (** Diagnostic reader status; it grants no data or action authority. *)
-  | Http_progress_observed of http_progress_observation
   | Http_surface_read_completed of Surface_read_order.request * async_msg
   | Http_initial_identity_read of http_initial_identity_read
   | Http_refresh_done of http_refresh_outcome

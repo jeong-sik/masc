@@ -1281,6 +1281,133 @@ let test_composed_refresh_receipts_preserve_all_availability_cases () =
        | Progress.Failed -> source=Progress.Keepers
        | Progress.Received | Progress.Interrupted -> false)) cases
 
+let test_board_child_receipts_survive_parent_interruption () =
+  let open Masc_tui_types in
+  let module Progress = Http_refresh_progress in
+  let state = create_state ~workspace:"board-progress" ~local_base_path:"/workspace/board-progress"
+      ~port:0 ~refresh_interval:0. () in
+  let ticket = Http_refresh_order.dispatch state.http_refresh_order in
+  let authority=state.workspace_authority and identity=state.workspace_identity in
+  let needs={nothing with needs_board=true} in
+  let reads,_=Surface_read_order.dispatch ~kind:Surface_read_order.Full ~needs
+      ~started_ns:1_000_000L state.http_surface_reads in
+  state.http_surface_reads <- reads;
+  begin_http_refresh_state state ~ticket ~started_ns:1_000_000L;
+  let inbox=state.http_refresh_progress_events in
+  let publish hp_event=publish_http_progress inbox {hp_ticket=ticket;hp_authority=authority;hp_event} in
+  let progress ()=match state.http_refresh_progress with
+    | Some (_,progress) -> progress | None -> Alcotest.fail "missing Board observation" in
+  let board=Progress.Surface_data Surface_read_source.Board in
+  publish (Progress.Started (board,2_000_000L));
+  publish (Progress.Component_started (Progress.Board_posts,3_000_000L));
+  publish (Progress.Component_started (Progress.Board_hearths,4_000_000L));
+  publish (Progress.Component_completed (Progress.Board_posts,8_000_000L,
+    Progress.Component_returned Progress.Part_received));
+  Alcotest.(check bool) "producer publication does not mutate UI state" true
+    ((progress ()).readings=[]);
+  ignore (drain_http_progress state);
+  let parts=Progress.unreturned_component_reads (progress ()) in
+  Alcotest.(check bool) "completed child is observable while sibling and parent are pending" true
+    (List.map (fun part -> part.Progress.cr_component,part.cr_status) parts=
+      [Progress.Board_posts,Progress.Component_settled (8_000_000L,
+         Progress.Component_returned Progress.Part_received);
+       Progress.Board_hearths,Progress.Component_pending]
+     && Progress.pending_sources (progress ())=[board]);
+  publish (Progress.Component_completed (Progress.Board_posts,9_000_000L,Progress.Component_exception));
+  publish (Progress.Component_started (Progress.Board_posts,9_000_000L));
+  (* Terminal application must recover pending receipts before interrupting the
+     remaining child, even when no ordinary mailbox notification was delivered. *)
+  finish_http_refresh_state ~finished_ns:12_000_000L state;
+  let reading=List.hd (progress ()).readings in
+  Alcotest.(check bool) "interrupted parent retains original success without inventing sibling cancellation" true
+    (reading.status=Progress.Settled {finished_ns=12_000_000L;outcome=Progress.Interrupted}
+     && List.map (fun part -> part.Progress.cr_status) reading.component_reads=
+       [Progress.Component_settled (8_000_000L,Progress.Component_returned Progress.Part_received);
+        Progress.Component_settled (12_000_000L,Progress.Component_unfinished)]
+     && Progress.counts (progress ())=Progress.{pending=0;received=0;partial=0;failed=0;interrupted=1});
+  let source=List.hd Yojson.Safe.Util.(Progress.to_json (progress ()) |> member "sources" |> to_list) in
+  let components=Yojson.Safe.Util.(source |> member "components" |> to_list) in
+  Alcotest.(check bool) "child protocol retains receipt interval and unfinished observation boundary" true
+    (List.map (fun part -> Yojson.Safe.Util.member "status" part) components=
+       [`String "received";`String "unfinished"]
+     && List.map (fun part -> Yojson.Safe.Util.member "elapsed_ms" part) components=
+       [`Float 5.;`Float 8.]);
+  Alcotest.(check bool) "child evidence does not settle Board data or workspace identity" true
+    (state.workspace_identity=identity && state.workspace_authority=authority
+     && Surface_read_order.pending ~needs state.http_surface_reads=[Surface_read_order.Board]);
+  let ended=state.http_refresh_progress in
+  publish (Progress.Component_completed (Progress.Board_hearths,13_000_000L,
+    Progress.Component_returned Progress.Part_received));
+  ignore (drain_http_progress state);
+  Alcotest.(check bool) "late child cannot reopen finished refresh" true (state.http_refresh_progress=ended)
+
+let test_board_component_receipts_keep_parent_category () =
+  let open Masc_tui_types in
+  let module Progress=Http_refresh_progress in
+  let board=Progress.Surface_data Surface_read_source.Board in
+  List.iter (fun (posts,hearths) ->
+    let progress=Progress.start ~started_ns:0L in
+    let progress=List.fold_left Progress.observe progress
+      [Progress.Started (board,1L);
+       Progress.Component_completed (Progress.Board_posts,2L,Progress.Component_exception);
+       Progress.Component_started (Progress.Runtime_catalogue,2L);
+       Progress.Component_started (Progress.Board_posts,3L);
+       Progress.Component_started (Progress.Board_hearths,4L);
+       Progress.Component_completed (Progress.Board_hearths,6L,
+         Progress.Component_returned (Progress.part_of_result hearths));
+       Progress.Component_completed (Progress.Board_posts,8L,
+         Progress.Component_returned (Progress.part_of_result posts));
+       Progress.Completed (board,10L,Progress.of_board (posts,hearths))] in
+    let reading=List.hd progress.readings in
+    Alcotest.(check bool) "child evidence preserves all parent availability decisions" true
+      (reading.status=Progress.Settled {finished_ns=10L;outcome=Progress.of_board (posts,hearths)}
+       && List.map (fun part -> part.Progress.cr_component,part.cr_status) reading.component_reads=
+         [Progress.Board_posts,Progress.Component_settled (8L,
+            Progress.Component_returned (Progress.part_of_result posts));
+          Progress.Board_hearths,Progress.Component_settled (6L,
+            Progress.Component_returned (Progress.part_of_result hearths))]
+       && Progress.unreturned_component_reads progress=[]))
+    [Ok (),Ok ();Ok (),Error "hearths";Error "posts",Ok ();Error "posts",Error "hearths"];
+  let interrupted=List.fold_left Progress.observe (Progress.start ~started_ns:0L)
+    [Progress.Started (board,1L);
+     Progress.Component_started (Progress.Board_posts,2L);
+     Progress.Component_started (Progress.Board_hearths,3L);
+     Progress.Component_completed (Progress.Board_posts,4L,Progress.Component_exception);
+     Progress.Component_completed (Progress.Board_hearths,5L,Progress.Component_interrupted);
+     Progress.Completed (board,6L,Progress.Failed)] in
+  Alcotest.(check bool) "actual child failure and cancellation survive a failed parent" true
+    (List.map (fun part -> part.Progress.cr_status) (List.hd interrupted.readings).component_reads=
+      [Progress.Component_settled (4L,Progress.Component_exception);
+       Progress.Component_settled (5L,Progress.Component_interrupted)])
+
+let test_progress_inbox_cannot_cross_refresh_or_workspace () =
+  let open Masc_tui_types in
+  let module Progress=Http_refresh_progress in
+  let state=create_state ~workspace:"inbox" ~local_base_path:"/workspace/inbox"
+    ~port:0 ~refresh_interval:0. () in
+  let first=Http_refresh_order.dispatch state.http_refresh_order in
+  let authority=state.workspace_authority in
+  begin_http_refresh_state state ~ticket:first ~started_ns:0L;
+  let retired=state.http_refresh_progress_events in
+  let next=Http_refresh_order.dispatch first in
+  begin_http_refresh_state state ~ticket:next ~started_ns:10L;
+  let original=state.http_refresh_progress in
+  let board=Progress.Surface_data Surface_read_source.Board in
+  publish_http_progress retired {hp_ticket=first;hp_authority=authority;
+    hp_event=Progress.Started (board,11L)};
+  publish_http_progress state.http_refresh_progress_events {hp_ticket=first;hp_authority=authority;
+    hp_event=Progress.Component_started (Progress.Board_posts,12L)};
+  ignore (drain_http_progress state);
+  Alcotest.(check bool) "retired inbox and stale ticket cannot spend successor request" true
+    (state.http_refresh_progress=original && Atomic.get state.http_refresh_progress_events=[]);
+  publish_http_progress state.http_refresh_progress_events {hp_ticket=next;hp_authority=authority;
+    hp_event=Progress.Started (board,13L)};
+  let Workspace_authority generation=authority in
+  state.workspace_authority <- Workspace_authority (generation+1);
+  ignore (drain_http_progress state);
+  Alcotest.(check bool) "queued event cannot acquire replacement workspace authority" true
+    (state.http_refresh_progress=original)
+
 let test_refresh_progress_rejects_old_request_and_workspace () =
   let open Masc_tui_types in
   let module Progress = Http_refresh_progress in
@@ -3441,6 +3568,12 @@ let () =
             test_composed_refresh_receipts_preserve_all_availability_cases
         ; Alcotest.test_case "refresh observations reject superseded source authority" `Quick
             test_refresh_progress_rejects_old_request_and_workspace
+        ; Alcotest.test_case "Board child receipts survive parent interruption" `Quick
+            test_board_child_receipts_survive_parent_interruption
+        ; Alcotest.test_case "Board child evidence preserves parent availability" `Quick
+            test_board_component_receipts_keep_parent_category
+        ; Alcotest.test_case "progress inbox retains request and workspace ownership" `Quick
+            test_progress_inbox_cannot_cross_refresh_or_workspace
         ; Alcotest.test_case "early questions settle once without granting authority" `Quick
             test_early_asks_apply_once_without_granting_authority
         ; Alcotest.test_case "unadmitted cold questions retain their source owner" `Quick

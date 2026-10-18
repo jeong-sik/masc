@@ -145,6 +145,10 @@ failed, naming both failed and received components. This covers Runtime
 catalogue/usage, Board posts/hearths and available Keeper roster/Candle results.
 Partial is separate from full receipt; unfinished reads remain interrupted when
 the refresh stops. These notices do not grant action authority or confirm Task completion.
+Board also reports its posts/hearth readers before the pair returns. A completed
+child remains visible when its parent fails or stops. A caught child cancellation
+is interrupted; a started child without a terminal observation is unfinished.
+Child intervals describe those observations, not proven worker exit or screen paint.
 
 ## Usage
 

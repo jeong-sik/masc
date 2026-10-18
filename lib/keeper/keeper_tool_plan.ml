@@ -13,6 +13,8 @@ module Node_id = struct
   let compare = String.compare
 end
 
+module Node_map = Map.Make (Node_id)
+
 (* The composable subset supports an explicit nullable type pair. Normalize
    only a known non-null type plus null; other unions remain unsupported.
    Contract validation, value validation and pointer traversal share this
@@ -999,6 +1001,7 @@ type inline_arguments =
 type t =
   { identity : int
   ; nodes : node list
+  ; operands : (node * contract option) Node_map.t
   ; descriptors : (string * Keeper_tool_descriptor.t) list
   ; children : child_nodes list
   ; arguments : inline_arguments list
@@ -1020,13 +1023,13 @@ and child_nodes =
   ; output_schema : Yojson.Safe.t
   }
 
-type execution_target =
+and execution_target =
   | Descriptor_target of Keeper_tool_descriptor.t
   | Child_arguments of inline_arguments
   | Child_submission of child_nodes
   | Child_result of child_nodes
 
-type contract =
+and contract =
   { target : execution_target
   ; input_schema : Yojson.Safe.t
   ; composable_output : Keeper_tool_descriptor.composable_output
@@ -1213,11 +1216,17 @@ let contract_for_node descriptors children arguments (node : node) =
        composable_output=descriptor.composable_output;execution=descriptor.execution})
       (descriptor_for_name descriptors node.tool_name)
 
+let node_in_plan plan node_id =
+  Option.map fst (Node_map.find_opt node_id plan.operands)
+
+let contract plan node_id =
+  Option.bind (Node_map.find_opt node_id plan.operands) snd
+
 let child_exports_schema plan =
   let properties = List.map (fun (export : export) ->
-    let producer = match node_for_id plan.nodes export.node_id with
+    let producer = match node_in_plan plan export.node_id with
       | Some node -> node | None -> invalid_arg "validated child export lost its producer" in
-    let schema = match contract_for_node plan.descriptors plan.children plan.arguments producer with
+    let schema = match contract plan producer.id with
       | Some {composable_output=Keeper_tool_descriptor.Json_output {schema};_} -> schema
       | Some {composable_output=Keeper_tool_descriptor.Opaque_output;_} | None ->
         invalid_arg "validated child export lost its output contract" in
@@ -1235,9 +1244,6 @@ let child_nodes ~child ~submission_id ~result_id ?(after=[]) () =
       ~after:[submission_id] ~input:(Json_template.literal (`Assoc [])) ()
   ; output_schema = child_exports_schema child.declared_plan
   }
-
-let contract plan node_id =
-  Option.bind (node_for_id plan.nodes node_id) (contract_for_node plan.descriptors plan.children plan.arguments)
 
 let inline_arguments ~alias ~reference ~id ~tool_name ~input ~input_schema ~output_schema ?(after=[]) () =
   {alias;reference;node=node ~id ~tool_name ~input ~after ();input_schema;output_schema}
@@ -1453,11 +1459,18 @@ let create_compiled ~descriptors ~children ?(arguments=[]) ?(branch_failure_poli
         | Some id -> Error (Duplicate_node_id id)
         | None ->
           let descriptors = descriptor_entries canonical_descriptors in
-          let resolve = contract_for_node descriptors children arguments in
           let off_surface = off_surface_entries canonical_descriptors in
           (match first_repeated_name (List.map fst descriptors) with
            | Some name -> Error (Duplicate_tool_name name)
            | None ->
+             (* IDs and compiled operands are already checked. Every resolver
+                below visits these original nodes, directly or through
+                [node_for_id nodes]. Keep validation/error order list-driven;
+                retain the same resolved contracts for this plan's lifetime. *)
+             let operands = List.fold_left (fun index node ->
+               let contract = contract_for_node descriptors children arguments node in
+               Node_map.add node.id (node,contract) index) Node_map.empty nodes in
+             let resolve (node : node) = Option.bind (Node_map.find_opt node.id operands) snd in
              (match validate_known_tools resolve off_surface nodes with
               | Some error -> Error error
               | None ->
@@ -1484,6 +1497,7 @@ let create_compiled ~descriptors ~children ?(arguments=[]) ?(branch_failure_poli
                                   Ok
                                     { identity = Atomic.fetch_and_add next_plan_identity 1
                                     ; nodes
+                                    ; operands
                                     ; descriptors
                                     ; children
                                     ; arguments
@@ -1545,7 +1559,6 @@ let bind_child_plan ~input (child : async_child) =
 ;;
 
 let dependency_layers plan =
-  let module Node_map = Map.Make (Node_id) in
   let module Ready_map = Map.Make (Int) in
   (* [t] is abstract and every constructor validates unique IDs, closed edges
      and acyclicity. Count each semantic dependency once, retaining the exact
@@ -1628,7 +1641,7 @@ type execution_error =
 let output_node_id output = output.node_id
 
 let validate_output plan ~run_id ~node_id value =
-  match node_for_id plan.nodes node_id with
+  match node_in_plan plan node_id with
   | None -> Error (Unknown_node_id node_id)
   | Some node ->
     (match contract plan node.id with
@@ -1698,11 +1711,11 @@ let validate_node_input plan (node : node) input =
 ;;
 
 let resolve_input plan ~run_id ~node_id ~lookup =
-  match node_for_id plan.nodes node_id with
+  match node_in_plan plan node_id with
   | None -> Error (Unknown_node_id node_id)
   | Some node ->
     let lookup_value dependency =
-      match node_for_id plan.nodes dependency, lookup dependency with
+      match node_in_plan plan dependency, lookup dependency with
       | Some source_node, Some output
         when Int.equal output.plan_identity plan.identity
              && Run_id.equal output.run_id run_id

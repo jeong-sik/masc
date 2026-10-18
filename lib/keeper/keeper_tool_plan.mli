@@ -378,7 +378,10 @@ val create_compiled : descriptors:Keeper_tool_descriptor.t list ->
   children:child_nodes list -> ?arguments:inline_arguments list -> ?branch_failure_policy:branch_failure_policy ->
   ?exports:export list -> node list -> (t, error) result
 (** Native compiler entry. Every compiled node must exactly match its operand;
-    a plain node or model JSON cannot acquire a child route by tool name. *)
+    a plain node or model JSON cannot acquire a child route by tool name.
+    Canonical unique nodes and their resolved contracts are indexed once for
+    this immutable plan. Validation retains its original node/error order;
+    reconstructed or parameter-bound plans build their own index. *)
 val compiled_children : t -> child_nodes list
 
 type execution_target =
@@ -396,7 +399,9 @@ type contract = private
 val contract : t -> Node_id.t -> contract option
 val readonly_for_input : t -> node_id:Node_id.t -> input:Yojson.Safe.t -> bool option
 (** Resolve the exact per-node contract, including distinct export schemas for
-    different children. [descriptor] below returns [None] for compiled nodes. *)
+    different children. Reuses this plan's original resolved contract without
+    searching the node/child/descriptor lists again. [descriptor] below returns
+    [None] for compiled nodes. The index grants no effect or replay authority. *)
 
 val nodes : t -> node list
 val exports : t -> export list

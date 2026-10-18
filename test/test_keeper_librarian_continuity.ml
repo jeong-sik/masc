@@ -1301,7 +1301,7 @@ let test_reports_in_one_pass_keep_any_size_verdict () =
   let merge = Masc.Keeper_librarian_queue_refresh.For_testing.merge_not_committed in
   let report ?(same = false) detail walk_shows_size =
     { R.detail; walk_shows_size; smaller_range_meets_same_failure = same;
-      input_capacity_evidence = R.No_input_capacity_refusal } in
+      input_capacity_evidence = R.No_input_capacity_refusal; provider_input_refusals = [] } in
   List.iter
     (fun (name, earlier, (latest : R.not_committed), expected) ->
        let merged = merge earlier latest in
@@ -1317,7 +1317,20 @@ let test_reports_in_one_pass_keep_any_size_verdict () =
   check bool "a quota seen by the walk survives a later raise" true
     merged.R.smaller_range_meets_same_failure;
   check bool "no report saw one" false
-    (merge (Some (report "walk" true)) (report "raise" false)).R.smaller_range_meets_same_failure
+    (merge (Some (report "walk" true)) (report "raise" false)).R.smaller_range_meets_same_failure;
+  let module I = Masc.Keeper_librarian_input_refusal in
+  let named causes = { (report "walk" true) with
+    R.provider_input_refusals = causes } in
+  let first = named [I.Request_body_refused; I.Context_overflow] in
+  let second = named [I.Input_capacity; I.Request_body_refused] in
+  let causes earlier latest = List.map I.to_string
+    (merge (Some earlier) latest).R.provider_input_refusals in
+  check (list string) "named causes survive a later report without evidence"
+    ["context_overflow";"request_body_refused"] (causes first (report "raise" false));
+  check (list string) "every named cause survives slot order and deduplicates"
+    ["context_overflow";"input_capacity";"request_body_refused"] (causes first second);
+  check (list string) "reversing reports preserves the same named causes"
+    (causes first second) (causes second first)
 
 let () = run "production continuity pair"
   ["cycle",[test_case "completed turns are work units" `Quick test_completed_turn_work_units;

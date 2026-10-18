@@ -64,13 +64,15 @@ let test_callback ?(cli_errors = []) ?expected_limit ?shows_size ?same_failure ~
     cli_calls := !cli_calls @ [runtime_id];
     Error (List.assoc runtime_id cli_errors) in
   let refused = ref 0 and committed = ref false and observed_limit = ref None in
-  let verdict = ref None and same = ref None in
+  let verdict = ref None and same = ref None and provider_refusals = ref [] in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
   Runtime.run_best_effort ~cli_runner
     ~on_cli_input_limit:(fun limit ->
       incr refused;
       observed_limit := Some (limit.Keeper_lane_cli_oneshot.runtime_id, limit.capacity.max_chars))
     ~on_not_committed:(fun outcome ->
+      provider_refusals := List.sort_uniq compare
+        (!provider_refusals @ outcome.Runtime.provider_input_refusals);
       (* Folded as the continuity pass folds it: any report's size verdict
          stands. *)
       let shows_size = outcome.Runtime.walk_shows_size in
@@ -103,6 +105,13 @@ let test_callback ?(cli_errors = []) ?expected_limit ?shows_size ?same_failure ~
   Option.iter (fun (_, count) -> Alcotest.(check int)
     "body-refused first provider really ran" 1 !count) first;
   Alcotest.(check bool) "refused request never commits Memory" false !committed;
+  let expected_refusals =
+    if first_overflow || status = `Request_entity_too_large
+    then [Keeper_librarian_input_refusal.Request_body_refused]
+    else [] in
+  Alcotest.(check (list string)) "named HTTP body refusal survives subsequent slots and CLI fallback"
+    (List.map Keeper_librarian_input_refusal.to_string expected_refusals)
+    (List.map Keeper_librarian_input_refusal.to_string !provider_refusals);
   let runs = Runs.list_runs registry |> List.filter
     (fun (run : Runs.run) -> String.equal run.actor keeper_id) in
   match runs with
@@ -451,6 +460,31 @@ let test_prefit_real_continuity ~base_path () =
 (* The size verdict, cause by cause. A walk reads less when any of its
    failures answers true, so this table is the whole rule: a row that flips
    changes what a keeper reads after a refusal. *)
+let test_named_provider_input_refusals () =
+  let module E = Agent_core.Exact_output in
+  let module I = Keeper_librarian_input_refusal in
+  let refused refusal = E.Provider_response_refused
+    { http_status = 400; refusal; retry_after_s = None } in
+  List.iter (fun (label, cause, expected) ->
+    Alcotest.(check (list string)) label
+      (List.map I.to_string expected)
+      (List.map I.to_string (Runtime.For_testing.cause_input_refusals cause)))
+    [ "named context overflow", refused E.Context_overflow, [I.Context_overflow]
+    ; "named input capacity", refused E.Input_capacity, [I.Input_capacity]
+    ; "named request body refusal", refused E.Request_body_refused, [I.Request_body_refused]
+    ; "unknown invalid request cannot become a named size refusal", refused E.Invalid_request, []
+    ; "missing refusal body cannot become a named size refusal", refused E.Refusal_body_not_received, []
+    ; "timeout cannot become a named size refusal", refused E.Timeout, []
+    ; "quota cannot become a named size refusal", refused E.Rate_limited, []
+    ; "invalid answer cannot become a named size refusal", E.Invalid_json_output, []
+    ];
+  let module Http = Agent_core.Llm_provider.Http_client in
+  let context_error = Http.ProviderFailure
+    {kind=Http.Context_overflow {limit=None};message="fixture"} in
+  Alcotest.(check (list string)) "an unsent context failure is not a provider refusal" []
+    (List.map I.to_string (Runtime.For_testing.cause_input_refusals
+      (E.Completion_failed {error=context_error;dispatch=E.No_generation_dispatch})))
+
 let test_size_verdict_table () =
   let module E = Agent_core.Exact_output in
   (* The verdict reads the refusal and never the status it arrived with. *)
@@ -683,7 +717,9 @@ let () =
       test_callback ~cli_errors ?expected_limit ~shows_size ~base_path ~registry ~keeper_id:name
         ~first_overflow ~status:`Too_many_requests ~expected ()) in
   Alcotest.run "Librarian capacity callbacks"
-    ["size verdict", [Alcotest.test_case "every provider cause, one row each" `Quick
+    ["size verdict", [Alcotest.test_case "named input refusal is separate from descent evidence" `Quick
+       test_named_provider_input_refusals;
+       Alcotest.test_case "every provider cause, one row each" `Quick
        test_size_verdict_table;
        Alcotest.test_case "every official-client failure, one row each" `Quick
          test_cli_size_verdict_table;

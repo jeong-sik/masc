@@ -484,6 +484,7 @@ let input_capacity_of_failure evidence =
    log, and independent evidence about reading a smaller input. *)
 type not_committed =
   { input_capacity_evidence : input_capacity_evidence
+  ; provider_input_refusals : Keeper_librarian_input_refusal.t list
   ; detail : string
   ; walk_shows_size : bool
   ; smaller_range_meets_same_failure : bool
@@ -1147,7 +1148,7 @@ let run_best_effort
       ~has_official_range_id:(Option.is_some official_range_id) in
   if not admission_mode_valid then
     on_not_committed {detail = "explicit admission requires a standalone Memory maintenance pass";
-                      walk_shows_size = false; input_capacity_evidence = No_input_capacity_refusal; smaller_range_meets_same_failure = false}
+                      walk_shows_size = false; input_capacity_evidence = No_input_capacity_refusal; provider_input_refusals = []; smaller_range_meets_same_failure = false}
   else
     try
       match Eio_context.get_net_opt (), Eio_context.get_clock_opt () with
@@ -1160,7 +1161,7 @@ let run_best_effort
         (match acquired with
          | Error (Exact_setup_failed (Exact_lane_unavailable (Exact_lane_off _))) ->
            let detail = "Librarian is off; pending input remains unconsumed" in
-           on_not_committed {detail; walk_shows_size=false; input_capacity_evidence=No_input_capacity_refusal; smaller_range_meets_same_failure = false};
+           on_not_committed {detail; walk_shows_size=false; input_capacity_evidence=No_input_capacity_refusal; provider_input_refusals=[]; smaller_range_meets_same_failure = false};
            Log.Keeper.info ~keeper_name:keeper_id "%s" detail
          | Ok _ | Error (Prompt_render_failed _)
          | Error
@@ -1535,14 +1536,14 @@ let run_best_effort
                    (* A snapshot that did not commit -- a CAS the history moved
                       under, a disk error -- is not the range's size, so the
                       caller keeps the width and logs this cause. *)
-                   on_not_committed { detail = reason; walk_shows_size = false; input_capacity_evidence = No_input_capacity_refusal; smaller_range_meets_same_failure = false};
+                   on_not_committed { detail = reason; walk_shows_size = false; input_capacity_evidence = No_input_capacity_refusal; provider_input_refusals = []; smaller_range_meets_same_failure = false};
                    Log.Keeper.warn ~keeper_name:keeper_id "%s" reason;
                    Continuity_not_committed reason)
              in
              match answer with
              | Admission_deferred_answer ->
                let detail = "explicit admission remains pending: Librarian deferred every candidate" in
-               on_not_committed {detail; walk_shows_size = false; input_capacity_evidence = No_input_capacity_refusal; smaller_range_meets_same_failure = false};
+               on_not_committed {detail; walk_shows_size = false; input_capacity_evidence = No_input_capacity_refusal; provider_input_refusals = []; smaller_range_meets_same_failure = false};
                Ok (`Admission_deferred (exact_output, selected_slot))
              | Working_context_answer proposed ->
                organize_working_context proposed;
@@ -1776,6 +1777,7 @@ let run_best_effort
                { detail
                ; walk_shows_size = Failure_evidence.shows_range_size evidence
                ; input_capacity_evidence = input_capacity_of_failure evidence
+               ; provider_input_refusals = evidence.provider_input_refusals
                ; smaller_range_meets_same_failure = evidence.size_independent_execution_failure
                };
              complete
@@ -1891,7 +1893,7 @@ let run_best_effort
         in
         (* No request was composed, so nothing here says the range's size
            stopped the pass. *)
-        on_not_committed { detail; walk_shows_size = false; input_capacity_evidence = No_input_capacity_refusal; smaller_range_meets_same_failure = false};
+        on_not_committed { detail; walk_shows_size = false; input_capacity_evidence = No_input_capacity_refusal; provider_input_refusals = []; smaller_range_meets_same_failure = false};
         record_failure
           ~keepers_dir
           ~keeper_id
@@ -1910,7 +1912,7 @@ let run_best_effort
       on_not_committed
         { detail = "librarian raised: " ^ Printexc.to_string exn
         ; walk_shows_size = false
-        ; input_capacity_evidence = No_input_capacity_refusal; smaller_range_meets_same_failure = false
+        ; input_capacity_evidence = No_input_capacity_refusal; provider_input_refusals = []; smaller_range_meets_same_failure = false
         };
       record_failure
         ~keepers_dir
@@ -1925,6 +1927,9 @@ let run_best_effort
 ;;
 
 module For_testing = struct
+  let cause_input_refusals cause =
+    (Failure_evidence.of_cause cause).provider_input_refusals
+
   type classified_error = extraction_error
 
   let classified_error_detail = extraction_error_to_string

@@ -1,12 +1,15 @@
 module Exact_output = Agent_core.Exact_output
 module Http_client = Llm_provider.Http_client
 
+module Input_refusal = Keeper_librarian_input_refusal
+
 type t =
   { historical_range_size : bool
   ; named_input_capacity : bool
   ; invalid_output : bool
   ; size_independent_execution_failure : bool
   ; measured_cli_capacity : Keeper_lane_cli_oneshot.input_capacity option
+  ; provider_input_refusals : Input_refusal.t list
   }
 
 let empty =
@@ -15,6 +18,7 @@ let empty =
   ; invalid_output = false
   ; size_independent_execution_failure = false
   ; measured_cli_capacity = None
+  ; provider_input_refusals = []
   }
 ;;
 
@@ -42,6 +46,8 @@ let combine left right =
   ; size_independent_execution_failure =
       left.size_independent_execution_failure || right.size_independent_execution_failure
   ; measured_cli_capacity = larger_capacity left.measured_cli_capacity right.measured_cli_capacity
+  ; provider_input_refusals =
+      Input_refusal.union left.provider_input_refusals right.provider_input_refusals
   }
 ;;
 
@@ -53,6 +59,7 @@ let execution ~historical_range_size ~named_input_capacity =
 let size_independent = execution ~historical_range_size:false ~named_input_capacity:false
 let historical_size = execution ~historical_range_size:true ~named_input_capacity:false
 let input_size = execution ~historical_range_size:true ~named_input_capacity:true
+let provider_input_size refusal = { input_size with provider_input_refusals = [refusal] }
 
 (* Only a sent request's handling deadline counts for the historical range
    policy. Admission requires a named input refusal, never a timeout alone. *)
@@ -73,11 +80,11 @@ let sent_error (error : Http_client.http_error) =
   | AcceptRejected _ | ProviderTerminal _ -> size_independent
   | ProviderFailure { kind; _ } ->
     (match kind with
-     | Context_overflow _ -> input_size
+     | Context_overflow _ -> provider_input_size Context_overflow
      | Response_body_too_large _ -> historical_size
      | Empty_completion { stop_reason } ->
        (match stop_reason with
-        | ContextWindowExceeded -> input_size
+        | ContextWindowExceeded -> provider_input_size Context_overflow
         | MaxTokens -> historical_size
         | EndTurn | StopToolUse | StopSequence | Refusal | ContentFilter
         | RepetitionTruncation | PauseTurn | Compaction | UnmatchedToolCalls
@@ -92,7 +99,9 @@ let of_cause (cause : Exact_output.execution_error_cause) =
   match cause with
   | Provider_response_refused { refusal; _ } ->
     (match refusal with
-     | Context_overflow | Input_capacity | Request_body_refused -> input_size
+     | Context_overflow -> provider_input_size Context_overflow
+     | Input_capacity -> provider_input_size Input_capacity
+     | Request_body_refused -> provider_input_size Request_body_refused
      | Timeout | Invalid_request | Refusal_body_not_received -> historical_size
      | Rate_limited | Overloaded | Server_error | Network_error
      | Auth_failed | Authorization_refused | Payment_required | Not_found -> size_independent)
@@ -201,6 +210,8 @@ let of_cli_failure (failure : Keeper_lane_cli_oneshot.failure) =
     ; invalid_output = false
     ; size_independent_execution_failure = not named_input_capacity
     ; measured_cli_capacity
+    ; provider_input_refusals =
+        if native_input_refusal cause then [Context_overflow] else []
     }
 ;;
 

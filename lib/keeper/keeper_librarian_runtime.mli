@@ -79,6 +79,11 @@ type input_capacity_evidence = No_input_capacity_refusal | Input_capacity_refuse
 
 type not_committed =
   { input_capacity_evidence : input_capacity_evidence
+  ; provider_input_refusals : Keeper_librarian_input_refusal.t list
+      (** Named provider input refusals from the exhausted walk, including earlier
+          slots. Empty for local admission, unknown/opaque CLI failures and
+          timeouts. This records the actual causes without granting consumption
+          authority or claiming that the selected source is indivisible. *)
   ; detail : string
         (** Diagnostic text for the caller's log, not a classification input. *)
   ; walk_shows_size : bool
@@ -218,6 +223,8 @@ type accepted =
   }
 
 module For_testing : sig
+  val cause_input_refusals : Agent_core.Exact_output.execution_error_cause -> Keeper_librarian_input_refusal.t list
+  (** Named provider refusals, independently of the wider historical sizing policy. *)
   val cause_shows_size : Agent_core.Exact_output.execution_error_cause -> bool
   (** The size verdict one provider cause gives, so the whole table can be
       asserted cause by cause. A walk reads less when any of its failures

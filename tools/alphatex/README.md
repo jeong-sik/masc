@@ -271,12 +271,35 @@ no MIDI. Ordinary Space playback uses [paired MIDI2/WAV regions](CAPTURE-UMP-REG
 with selected audio/MIDI outputs and per-input `:midi-source` overrides.
 [Hybrid arrangements](HYBRID-ARRANGEMENT.md) combine SMF, captured MIDI2 and WAV
 under one clock. [Record audio and MIDI against backing](ARRANGEMENT-RECORDING.md)
-with `:input UID`, `:record`, and `:record-stop`; monitoring remains unfinished.
+with `:input UID`, `:record`, and `:record-stop`. Use `:monitor AUDIO_OUTPUT_UID`
+for selected audio input monitoring, including monitored recording.
 See [captured audio timing](CAPTURE-AUDIO-CLOCK.md).
 
 Saved captures also have [paired original WAV/UMP playback](CAPTURE-PLAYBACK.md).
 Select MIDI and audio outputs in the take viewer; original MIDI 2.0 words and
 capture timing survive full-source audition. Native playback also pauses/resumes
 with `p` and seeks audio and supported UMP state together with `:seek SECONDS`.
-Captured regions also use the ordinary arrangement transport; monitored
-arrangement overdub remains subsequent work.
+Captured regions also use the ordinary arrangement transport and recorded takes
+can be attached while the backing epoch remains continuous.
+
+
+In the arrangement editor, `:inputs` lists MIDI inputs and outputs as well as
+audio interfaces. `:midi-monitor SOURCE_UID DEST_UID [GROUP CHANNEL ...]` enables
+live MIDI input to the selected native MIDI 2.0 instrument. Groups and channels
+in this command run from **1 to 16**; `:midi-monitor 1234 5678 1 2` forwards
+channel voice messages in group 1/channel 2. Omit pairs to forward all complete
+delivered messages. Channel scopes filter system/SysEx; recording independently
+retains the whole original delivered UMP source. Input delivery requests protocol
+2 and CoreMIDI may convert a source; no MIDI1 destination conversion is selected.
+
+Repeat the command for additional source/destination routes. Repeating one pair
+replaces its scope. `:midi-monitor remove SOURCE_UID DEST_UID` removes a pair;
+`:midi-monitor off` closes every live route. Monitoring can run with stopped or
+playing backing and simultaneous WAV/MIDI recording. Changing a live route does
+not finalize the recorder. Backing and live routes must own disjoint physical
+destination/group/channel state, including replayed source prefixes. Native
+preflight uses the actual playback parsers, not track names; conflicting routes
+fail before a new backing/live combination is admitted. Route replacement,
+backing restart, source-view suspension and exit wait for owned live process
+closure and scoped cleanup. A failed route stays off until explicitly selected.
+See [native MIDI transport](native/MIDI-TRANSPORT.md) for protocol details.

@@ -8758,7 +8758,7 @@ let keeper_log_snapshot state =
   | Some snapshot -> snapshot
   | None -> Metrics_tail.empty
 
-let begin_keeper_log_read state ~intent ~limit ~started_ns keeper =
+let begin_keeper_log_read state ~intent ~limit ~started_ns (keeper : keeper) =
   match state.workspace_identity, keeper_log_target state with
   | Workspace_identity_match, Some selected when String.equal selected.k_name keeper.k_name ->
     (match state.keeper_log_read with

@@ -360,7 +360,11 @@ val remove_keeper_volumes_by_name :
     Microsandbox and nerdctl create the work volume as a host directory but
     have no established removal spelling, so they return [Error] naming the
     volume left behind, as does a [Micro_vm] keeper with no
-    [microvm_backend]. The default timeout is the microVM removal budget. *)
+    [microvm_backend]. The default per-command timeout is the
+    {!Env_config_sandbox.Shell_timeout.Io} bucket (the same budget
+    {!Keeper_sandbox_microvm.recreate_apple_build_volume} uses for
+    [container volume] commands, rather than the 180s guest VM shutdown
+    budget). *)
 
 val teardown_keeper_sandbox :
   ?timeout_sec:float ->

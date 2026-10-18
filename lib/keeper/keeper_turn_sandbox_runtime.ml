@@ -1994,7 +1994,7 @@ let remove_keeper_volumes_by_name
   let timeout_sec =
     match timeout_sec with
     | Some seconds -> seconds
-    | None -> Env_config_sandbox.Runtime.microvm_remove_timeout_sec ()
+    | None -> Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Io ()
   in
   match backend with
   | Keeper_sandbox.Docker | Keeper_sandbox.Remote_ssh -> Ok ()

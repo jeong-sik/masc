@@ -54,14 +54,11 @@ val load : store:Dated_jsonl.t -> expected_keeper:string -> limit:int -> snapsho
 (** Read exactly the newest [limit] physical non-empty rows. Rejected rows
     and rows attributed to a different Keeper consume that bound and are
     reported; they are never backfilled. *)
-val for_selection : load:('a -> snapshot) -> 'a option -> snapshot
-val reconcile_selection :
-  current:snapshot ->
-  previous_keeper:string option ->
-  selected_keeper:string option ->
-  snapshot
-(** Retain a cached snapshot only while the selected Keeper identity is
-    unchanged. A missing or replacement selection clears the cache. *)
+val load_keeper : base_path:string -> keeper_name:string -> limit:int -> (snapshot, string) result
+(** Read the canonical metrics location without initializing writer directories
+    or workspace configuration. Storage failures reject revalidation; valid
+    partial rows retain their typed diagnostics in the snapshot. *)
+
 val content_height : terminal_rows:int -> error:load_error option -> int
 val maximum_scroll : entry_count:int -> content_height:int -> int
 val normalize_scroll : entry_count:int -> content_height:int -> int -> int

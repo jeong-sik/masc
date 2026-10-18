@@ -81,7 +81,7 @@ let test_resolve_is_physical_bounded_and_chronological () =
   | Some Tail.Remote_workspace | Some Tail.Workspace_unconfirmed -> fail "local read became a remote observation"
   | None -> fail "row failures were silently discarded"
 
-let test_storage_error_and_empty_selection_are_explicit () =
+let test_storage_failure_is_explicit () =
   let read_error =
     Dated_jsonl.Io_error
       { operation = Dated_jsonl.Read_file;
@@ -108,40 +108,7 @@ let test_storage_error_and_empty_selection_are_explicit () =
            })) ->
        ()
    | Some (Tail.Storage_error _) -> fail "wrong typed storage error"
-   | Some Tail.Remote_workspace | Some Tail.Workspace_unconfirmed | Some (Tail.Row_errors _) | None -> fail "storage failure was flattened");
-  let calls = ref 0 in
-  let cleared =
-    Tail.for_selection
-      ~load:(fun _ ->
-        incr calls;
-        failed)
-      None
-  in
-  check int "empty selection does not read storage" 0 !calls;
-  check int "empty selection clears entries" 0 (List.length cleared.entries);
-  check bool "empty selection clears error" true (Option.is_none cleared.error);
-  let retained =
-    Tail.reconcile_selection ~current:failed
-      ~previous_keeper:(Some "keeper-a") ~selected_keeper:(Some "keeper-a")
-  in
-  check bool "metadata refresh retains same Keeper logs" true
-    (Option.is_some retained.error);
-  let cleared_after_replacement =
-    Tail.reconcile_selection ~current:failed
-      ~previous_keeper:(Some "keeper-a") ~selected_keeper:(Some "keeper-b")
-  in
-  check int "replacement Keeper clears entries" 0
-    (List.length cleared_after_replacement.entries);
-  check bool "replacement Keeper clears error" true
-    (Option.is_none cleared_after_replacement.error);
-  let cleared_after_empty_roster =
-    Tail.reconcile_selection ~current:failed
-      ~previous_keeper:(Some "keeper-a") ~selected_keeper:None
-  in
-  check int "empty refreshed roster clears entries" 0
-    (List.length cleared_after_empty_roster.entries);
-  check bool "empty refreshed roster clears error" true
-    (Option.is_none cleared_after_empty_roster.error)
+   | Some Tail.Remote_workspace | Some Tail.Workspace_unconfirmed | Some (Tail.Row_errors _) | None -> fail "storage failure was flattened")
 
 let test_diagnostic_controls_are_terminal_safe () =
   let unsafe_error =
@@ -350,15 +317,32 @@ let test_load_is_bounded_by_tail_not_file_size () =
   check bool "tail allocation stays below a whole-file read" true
     (allocated < Float.of_int (4 * 1024 * 1024))
 
+let test_keeper_read_does_not_create_writer_directories () =
+  let base_path = tmpdir "tui_metrics_read_only" in
+  Fun.protect ~finally:(fun () ->
+    if Array.length (Sys.readdir base_path) = 0 then Unix.rmdir base_path)
+    (fun () ->
+      let location = Dated_jsonl.Store.keeper
+          (Dated_jsonl.Store.root_of_base_path ~base_path)
+          ~keeper:"not-created" Dated_jsonl.Store.Keeper.Metrics in
+      (match Tail.load_keeper ~base_path ~keeper_name:"not-created" ~limit:4 with
+       | Error detail -> fail detail
+       | Ok snapshot -> check int "missing metrics are observed empty" 0 (List.length snapshot.entries));
+      check bool "read does not initialize the Keeper store" false
+        (Sys.file_exists (Dated_jsonl.Store.dir location));
+      check int "workspace root remains untouched" 0 (Array.length (Sys.readdir base_path)))
+
 let () =
   run "tui_metrics_tail"
     [ ( "event window"
       , [] )
     ; ( "strict tail"
-      , [ test_case "physical bound and chronology" `Quick
+      , [ test_case "Keeper reads do not create writer directories" `Quick
+            test_keeper_read_does_not_create_writer_directories
+        ; test_case "physical bound and chronology" `Quick
             test_resolve_is_physical_bounded_and_chronological
-        ; test_case "storage and empty selection" `Quick
-            test_storage_error_and_empty_selection_are_explicit
+        ; test_case "typed storage failure" `Quick
+            test_storage_failure_is_explicit
         ; test_case "diagnostic control safety" `Quick
             test_diagnostic_controls_are_terminal_safe
         ; test_case "a misfiled row is counted apart" `Quick

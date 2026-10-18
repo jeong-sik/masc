@@ -136,7 +136,12 @@ final class UmpLiveInput {
         var clock = mach_timebase_info_data_t(); mach_timebase_info(&clock); timebase = clock
         guard clock.numer > 0, clock.denom > 0 else { throw MidiFailure("live MIDI host clock is unavailable") }
     }
+    func checkFailure() throws {
+        lock.lock(); let failure = firstFailure; lock.unlock()
+        if let failure { throw failure }
+    }
     func check() throws {
+        try checkFailure()
         for source in sources.values { try source.check() }
         for output in outputs { try output.checkDestinations() }
     }
@@ -167,8 +172,10 @@ final class UmpLiveInput {
         }
         try check()
         state = .running
-        try onEvent?(snapshot("monitoring"))
         lock.lock(); accepting = true; lock.unlock()
+        // Handoffs queue on this lifecycle: opening admission before the ACK
+        // preserves its first input without permitting a send ahead of the ACK.
+        try onEvent?(snapshot("monitoring"))
     }
     func fail(_ error: Error) {
         lock.lock(); if firstFailure == nil { firstFailure = error }; accepting = false; lock.unlock()
@@ -224,6 +231,7 @@ final class UmpLiveInput {
                 for words in messages {
                     for (index, route) in plan.routes.enumerated() where route.source == packet.source {
                         if route.scope.includes(words[0]) {
+                            try checkFailure()
                             try outputs[index].apply(UmpEvent(seconds: 0, source: packet.source, words: words)); forwarded += 1
                         } else { filtered += 1 }
                     }

@@ -1250,7 +1250,7 @@ let test_memory_inference_retains_gated_decision () =
   let module Registry = Masc.Exact_lane_run_registry in
   let run = match Registry.get (Registry.global ()) ~run_id:step.run_id with
     | Some run -> run | None -> fail "inference run evidence missing" in
-  let json = `Assoc ["run", Registry.run_to_yojson run] in
+  let json = Fixture.lane_run_detail run in
   let decoded = Masc.Tui_decode.decode_lane_run_detail json |> require in
   let reading = match decoded.lrd_librarian_preflight with
     | Some reading -> reading | None -> fail "inference reading missing" in
@@ -1264,9 +1264,12 @@ let test_memory_inference_retains_gated_decision () =
   let member = Yojson.Safe.Util.member in
   let output = member "output" (member "run" json) in
   let with_field key value = match json, output with
-    | `Assoc ["run", `Assoc fields], `Assoc output ->
-      `Assoc ["run", `Assoc (("output", `Assoc ((key,value)::List.remove_assoc key output))
-        :: List.remove_assoc "output" fields)]
+    | `Assoc envelope, `Assoc output ->
+      (match List.assoc_opt "run" envelope with
+       | Some (`Assoc fields) ->
+         `Assoc (("run", `Assoc (("output", `Assoc ((key,value)::List.remove_assoc key output))
+           :: List.remove_assoc "output" fields)) :: List.remove_assoc "run" envelope)
+       | Some _ | None -> fail "invalid captured run")
     | _ -> fail "invalid captured run" in
   let after = `Assoc ["revision",`Int 1;"fact_count",`Int 1;"commit",`String "unchanged";
     "change",`Assoc ["added_count",`Int 0;"removed_count",`Int 0]] in
@@ -1625,7 +1628,7 @@ let test_memory_inference_failure_keeps_pending_publication failure () =
         | Some loaded -> loaded | None -> fail "failure run payload missing")
     | _ -> fail "expected one failed inference run" in
   let decoded = Masc.Tui_decode.decode_lane_run_detail
-      (`Assoc ["run", Registry.run_to_yojson run]) in
+      (Fixture.lane_run_detail run) in
   let reading = match decoded with
     | Ok {lrd_librarian_preflight=Some reading;_} -> reading
     | Ok {lrd_librarian_preflight=None;_} -> fail "failed inference scope missing"

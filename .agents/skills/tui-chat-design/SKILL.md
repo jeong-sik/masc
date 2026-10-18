@@ -47,6 +47,19 @@ description: "MASC TUI 채팅·입력·진행 정보, 원래 준비 이력, Keep
 - 늦은 결과는 후속 폼·다른 workspace를 바꾸지 않는다. commit 영수증 보존과 현재
   workspace의 재조회 권한을 분리한다. 관측 시각을 paint·키 응답·작업 진척으로 부르지 않는다.
 
+## Runtime 원문 저장
+
+- Config 원문 편집 후 저장과 S 재시도도 폼의 같은 비동기 작업·CAS 경로를 쓴다.
+  원래 path/revision/text를 보존하고 키 처리에서 저장 HTTP를 기다리지 않는다.
+- source 재조회·실패 주석은 같은 draft owner를 유지한다. 편집·명시적 base 채택·교체는
+  새 owner다. 늦은 성공은 원래 owner만 끝내고 같은 본문의 새 편집도 지우지 않는다.
+- 결과·내구성 미확인은 본문을 유지하고 과거 비교 자료를 해제한다. 당시 진행 중이던
+  read generation 이하의 결과는 재확인으로 쓰지 않는다. 새 read 뒤 u/U로 고른 base만
+  재시도를 허용한다. 미확인 전 고른 다른 base나 X 뒤 cached source 재열기로 우회하지 않는다.
+- 비교 자료를 해제해도 나중에 편집한 본문·owner를 바꾸지 않는다. 영수증·초안은 원래
+  workspace에 속하고 read authority를 부여하지 않는다. 외부 편집기 사용 시간과 저장 대기,
+  parser-only 확인과 실행·paint·속도 증거를 나눈다.
+
 ## 보기 전환
 
 | 키 | 순서 | 기본 |

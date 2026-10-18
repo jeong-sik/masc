@@ -2607,7 +2607,7 @@ let test_runtime_form_retains_unknown_and_rejects_duplicate () =
   let open Masc_tui_types in
   let state,_ = keeper_settings_fixture () in
   let draft = runtime_model_draft () in
-  let form = match draft with Model_form_draft form -> form | Account_form_draft _ -> Alcotest.fail "model required" in
+  let form = match draft with Model_form_draft form -> form | Account_form_draft _ | Config_document_draft _ -> Alcotest.fail "model required" in
   state.runtime_model_form <- Some form;
   let request = runtime_form_request state draft in
   Alcotest.(check bool) "pending operation freezes input" true (runtime_form_input_locked state);
@@ -2671,10 +2671,133 @@ let test_runtime_account_save_keeps_typed_form_and_workspace () =
     (Option.bind state.runtime_account_form Masc_tui_runtime_account_form.source_revision)
 
 
+let runtime_document_fixture () =
+  let state,_ = keeper_settings_fixture () in
+  let workspace = match Masc_tui_types.runtime_config_workspace state with
+    | Some workspace -> workspace | None -> Alcotest.fail "workspace missing" in
+  let base : Masc_tui_runtime_config_edit.document = {
+    path=Filename.concat (snd workspace) "config/runtime.toml";
+    source_text="value = 1\n"; source_revision="opening"} in
+  let session = Masc_tui_runtime_config_edit.open_document base
+    |> Masc_tui_runtime_config_edit.edit "value = 2\n# exact original input\n" in
+  Masc_tui_types.put_runtime_config_edit state ~workspace session;
+  state,workspace,session
+
+let runtime_document_receipt durability : Masc_tui_runtime_config_receipt.t =
+  {source_revision="saved"; order="operation-1"; durability; lock_warnings=[];
+   application={operation="runtime-config"; routing_status=Routing_active;
+     routing_requires_restart=false; routing_applied_at=Not_applied;
+     keeper_status=Keeper_not_configured; keeper_requires_restart=false;
+     keeper_applied_at=Not_applied; keeper_configured_count=0; keeper_pending_keys=[];
+     keeper_applied_keys=[]; keeper_preempted_keys=[];
+     skills=Skill_unchanged {input_source_revision="saved"; snapshot_revision="skills";
+       catalog_revision="catalog"; config_state=Configured};
+     exact_output_registry=Exact_output_registry_unpublished}}
+
+let finish_runtime_document state request prepared outcome =
+  let open Masc_tui_types in
+  let status = Form_finished (Some prepared,outcome) in
+  ignore (publish_runtime_form_save request ~observed_ns:20L status);
+  if not (apply_runtime_form_save state request status) then Alcotest.fail "receipt not retained";
+  apply_runtime_document_save state request status
+
+let test_runtime_document_save_owns_exact_input_across_refresh () =
+  let open Masc_tui_types in
+  let module Edit = Masc_tui_runtime_config_edit in
+  let state,workspace,session = runtime_document_fixture () in
+  let request = runtime_form_request state (Config_document_draft session) in
+  let prepared = prepare_runtime_document session in
+  Alcotest.(check string) "submitted text is frozen" session.text prepared.rfp_text;
+  Alcotest.(check string) "guard keeps original revision" "opening" prepared.rfp_base.source_revision;
+  Alcotest.(check bool) "second raw write is not dispatched" true
+    (Result.is_error (begin_runtime_form_save state ~draft:(Config_document_draft session) ~started_ns:11L));
+  Alcotest.(check bool) "structured form shares the same pending write gate" true
+    (Result.is_error (begin_runtime_form_save state ~draft:(runtime_model_draft ()) ~started_ns:12L));
+  let current = {session.base with source_text="value = 2\n"; source_revision="saved"} in
+  let refreshed = match Edit.observe ~read_generation:1 current session with
+    | Ok session -> session | Error detail -> Alcotest.fail detail in
+  put_runtime_config_edit ~preserve_view:true state ~workspace refreshed;
+  Alcotest.(check bool) "observation preserves editing ownership" true (Edit.same_draft session refreshed);
+  Alcotest.(check bool) "confirmed receipt clears its own refreshed draft" true
+    (finish_runtime_document state request prepared (Form_saved (runtime_document_receipt Durable)));
+  Alcotest.(check int) "only submitted draft is completed" 0 (List.length state.runtime_config_edits)
+
+let test_runtime_document_late_success_keeps_same_text_successor () =
+  let open Masc_tui_types in
+  let module Edit = Masc_tui_runtime_config_edit in
+  let state,workspace,session = runtime_document_fixture () in
+  let request = runtime_form_request state (Config_document_draft session) in
+  let successor = Edit.edit session.text session in
+  Alcotest.(check bool) "same text can be another editing intent" false (Edit.same_draft session successor);
+  put_runtime_config_edit state ~workspace successor;
+  let foreign = "/other","/other/.masc" in
+  put_runtime_config_edit state ~workspace:foreign session;
+  let Workspace_authority epoch = state.workspace_authority in
+  state.workspace_authority <- Workspace_authority (epoch+1);
+  Alcotest.(check bool) "old authority cannot own current effects" false (runtime_form_save_current state request);
+  Alcotest.(check bool) "receipt cannot delete successor or another workspace" false
+    (finish_runtime_document state request (prepare_runtime_document session)
+       (Form_saved (runtime_document_receipt Durable)));
+  Alcotest.(check int) "both drafts retained" 2 (List.length state.runtime_config_edits);
+  Alcotest.(check bool) "exact successor identity retained" true
+    (List.exists (fun edit -> edit.rce_workspace=workspace && Edit.same_draft successor edit.rce_session)
+      state.runtime_config_edits)
+
+let test_runtime_document_uncertainty_requires_new_read outcome =
+  let open Masc_tui_types in
+  let module Edit = Masc_tui_runtime_config_edit in
+  let state,workspace,session = runtime_document_fixture () in
+  let before = match Edit.observe ~read_generation:8 session.base session with
+    | Ok session -> session | Error detail -> Alcotest.fail detail in
+  let request = runtime_form_request state (Config_document_draft before) in
+  let successor = Edit.edit "value = 3\n# later draft\n" before in
+  put_runtime_config_edit state ~workspace successor;
+  state.runtime_config_generation <- 9;
+  Alcotest.(check bool) "uncertainty retires comparison without replacing later input" true
+    (finish_runtime_document state request (prepare_runtime_document before) outcome);
+  let retained = (List.find (fun edit -> edit.rce_workspace=workspace) state.runtime_config_edits).rce_session in
+  Alcotest.(check string) "later input remains exact" successor.text retained.text;
+  Alcotest.(check bool) "later editing intent remains" true (Edit.same_draft successor retained);
+  Alcotest.(check bool) "old comparison cannot adopt" true (Result.is_error (Edit.adopt_current retained));
+  Alcotest.(check bool) "editing cannot bypass uncertain original basis" true
+    (Result.is_error (begin_runtime_form_save state ~draft:(Config_document_draft retained) ~started_ns:21L));
+  let premature = match Edit.adopt_current before with
+    | Ok session -> session | Error detail -> Alcotest.fail detail in
+  put_runtime_config_edit state ~workspace premature;
+  Alcotest.(check bool) "another basis chosen from a pre-outcome read cannot retry" true
+    (Result.is_error (begin_runtime_form_save state ~draft:(Config_document_draft premature) ~started_ns:21L));
+  put_runtime_config_edit state ~workspace retained;
+  Alcotest.(check bool) "in-flight read cannot reconfirm after uncertainty" true
+    (Result.is_error (Edit.observe ~read_generation:9 session.base retained));
+  Alcotest.(check bool) "unstamped observation is not fresh revalidation" true
+    (Result.is_error (Edit.observe session.base retained));
+  let fresh = match Edit.observe ~read_generation:10 session.base retained with
+    | Ok session -> session | Error detail -> Alcotest.fail detail in
+  Alcotest.(check bool) "observation alone does not adopt basis" true (Edit.same_basis retained fresh);
+  let adopted = match Edit.adopt_current fresh with
+    | Ok session -> session | Error detail -> Alcotest.fail detail in
+  Alcotest.(check string) "explicit adoption keeps later input" successor.text adopted.text;
+  Alcotest.(check bool) "explicit choice starts another basis even at equal revision" false
+    (Edit.same_basis before adopted);
+  put_runtime_config_edit state ~workspace adopted;
+  Alcotest.(check bool) "only explicit fresh intent can save again" true
+    (Result.is_ok (begin_runtime_form_save state ~draft:(Config_document_draft adopted) ~started_ns:22L))
+
+
 let () =
   Alcotest.run "tui_server_identity_refresh"
     [ ( "server-identity-refresh"
-      , [ Alcotest.test_case "runtime form transforms only its opening source" `Quick
+      , [ Alcotest.test_case "document save owns exact input across refreshed observation" `Quick
+            test_runtime_document_save_owns_exact_input_across_refresh
+        ; Alcotest.test_case "late document receipt retains same-text successor and foreign drafts" `Quick
+            test_runtime_document_late_success_keeps_same_text_successor
+        ; Alcotest.test_case "unknown document commit requires post-outcome read and explicit basis" `Quick
+            (fun () -> test_runtime_document_uncertainty_requires_new_read
+              (Masc_tui_types.Form_unconfirmed "connection ended after possible dispatch"))
+        ; Alcotest.test_case "unknown document durability requires post-outcome read and explicit basis" `Quick
+            (fun () -> test_runtime_document_uncertainty_requires_new_read
+              (Masc_tui_types.Form_saved (runtime_document_receipt Durability_unconfirmed)))
+        ; Alcotest.test_case "runtime form transforms only its opening source" `Quick
             test_runtime_form_prepares_original_revision
         ; Alcotest.test_case "runtime form unknown save retains input and rejects duplicate" `Quick
             test_runtime_form_retains_unknown_and_rejects_duplicate

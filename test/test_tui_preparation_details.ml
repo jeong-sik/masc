@@ -96,7 +96,7 @@ let actual_source_to_selected_read () = with_source (fun config keeper_name turn
   check bool "cancelled autonomous evidence survives without a reply receipt" true
     (match reports with [report] -> report.boundary=Observation.Cancelled | _ -> false))
 
-let protocol_gaps_are_not_absence () = with_source (fun _ _ _ _ selected response ->
+let protocol_gaps_are_not_absence () = with_source (fun config keeper_name turn_ref _ selected response ->
   let rows = Yojson.Safe.Util.(member "manifest_rows" response |> to_list) in
   let duplicated = response |> replace "manifest_rows" (`List (rows@rows))
       |> replace "manifest_returned_rows" (`Int (2*List.length rows))

@@ -1099,11 +1099,181 @@ let test_a_later_report_without_capacity_evidence_keeps_the_refusal () =
   check bool "without a refusal the later report stands" true
     (match keep (Worker.Deferred "earlier") silent with Worker.Deferred _ -> true | _ -> false)
 
+(* A Memory inference uses real parsing and gate policy but has no publication
+   authority. Its captured source and typed decision remain process-local. *)
+let inference_answer =
+  `Assoc ["new_claims", `List [`Assoc
+    ["claim", `String "A and revised B remain grounded in the original observations."
+    ; "category", `String "fact"; "supersedes", `String "m2"
+    ; "absorbs", `List [`String "m1"]]]
+  ; "dropped", `List [`Assoc ["memory_id", `String "m2";
+      "reason", `String "B was revised by the selected observation."]]
+  ; "working_contexts", `List []; "working_state", `String "planned continuation"]
+
+let inference_store_paths ~keepers_dir ~keeper_id =
+  [ Current.path_for_keepers_dir ~keepers_dir ~keeper_id
+  ; Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id
+  ; Current.publication_receipt_path ~keepers_dir ~keeper_id
+  ; Current.durable_range_receipt_path ~keepers_dir ~keeper_id
+  ; Current.unread_ledger_path ~keepers_dir ~keeper_id
+  ; Masc.Keeper_librarian_context.path ~keepers_dir ~keeper_id ]
+
+let test_memory_inference_retains_gated_decision () =
+  with_eio @@ fun ~sw:_ ~net:_ ~clock:_ ~base_path ->
+  Fixture.with_official_client_runtimes @@ fun () ->
+  Masc_test_deps.with_typesafeai_policy
+    {Runtime_schema.default_typesafeai with lane_enabled=false; absorb_gate=false} @@ fun () ->
+  let require = function Ok value -> value | Error detail -> fail detail in
+  Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
+  publish_unreachable_lane ~cli_only:true ~cli_slot_ids:[Fixture.cli_primary_runtime]
+    ~source:"process-only Memory inference" ();
+  let keeper_id = "cli-lane-keeper" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  ignore (Current.replace ~keepers_dir ~keeper_id ~expected_revision:None ~now:1_000_000.
+    ~source:{Current.kind=Current.Explicit_write;trace_id="seed"}
+    ~facts:[current_a;current_b] () |> require : Current.t);
+  let paths = inference_store_paths ~keepers_dir ~keeper_id in
+  let before = List.map Fs_compat.load_file_opt paths in
+  let captured = ref [] in
+  let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt =
+    captured := prompt :: !captured;
+    Ok (Yojson.Safe.to_string inference_answer) in
+  let selected_input = {(input ()) with
+    working_context={Masc.Keeper_librarian_context.empty with unavailable=["pending-source"]}} in
+  let started = Time_compat.now () in
+  let result = Runtime.infer_memory_step ~cli_runner:runner ~base_path ~keepers_dir ~keeper_id
+    ~previous_state:(Some "prior continuation, not Memory evidence") ~unread_messages:[] selected_input in
+  check bool "inference preserves every Memory and context store" true
+    (before = List.map Fs_compat.load_file_opt paths);
+  let step = match result with
+    | Runtime.Memory_not_inferred reports ->
+      failf "Memory inference refused: %s"
+        (String.concat "; " (List.map (fun (r : Runtime.not_committed) -> r.detail) reports))
+    | Runtime.Memory_inferred {step;served_by} ->
+      check served_slot "actual serving transport is retained"
+        (Runtime.Cli_slot Fixture.cli_primary_runtime) served_by; step in
+  check bool "exact source input is bound, excluding live queue ownership" true
+    (step.source_input = {selected_input with working_context=Masc.Keeper_librarian_context.empty});
+  let claim = match step.new_claims with [claim] -> claim | _ -> fail "expected one validated claim" in
+  let identity = Memory.memory_id claim in
+  check bool "one parser acceptance assigns fact timestamps" true
+    (claim.first_seen >= started && claim.first_seen = claim.last_seen
+      && claim.last_seen <= Time_compat.now ());
+  check bool "original extracted origin/basis remain intact" true
+    (claim.origin = {Memory.kind=Memory.Injected;trace_id=""}
+      && claim.basis = Memory.Observed Memory.Transcript);
+  check bool "retirement identity and reason remain exact" true
+    (step.dropped = [{Memory.memory_id=Memory.memory_id current_b;
+      reason="B was revised by the selected observation."}]);
+  check bool "revision identity remains exact" true
+    (step.revisions = [{Memory.superseded=Memory.memory_id current_b;superseded_by=identity}]);
+  check bool "only gated absorption is retained" true
+    (step.absorbed = [{Memory.absorbed=Memory.memory_id current_a;into=identity}]
+      && step.absorbed = Masc.Keeper_librarian_absorb_gate.absorbed_of_run step.absorb_gate);
+  check string "working state remains separate from facts" "planned continuation" step.working_state;
+  let prompt = match !captured with [prompt] -> prompt | _ -> fail "expected one Memory request" in
+  check bool "Memory prompt carries original conversation" true
+    (Astring.String.is_infix ~affix:"new conversation" prompt);
+  check bool "Memory prompt carries original current facts" true
+    (Astring.String.is_infix ~affix:current_a.claim prompt && Astring.String.is_infix ~affix:current_b.claim prompt);
+  let module Registry = Masc.Exact_lane_run_registry in
+  let run = match Registry.get (Registry.global ()) ~run_id:step.run_id with
+    | Some run -> run | None -> fail "inference run evidence missing" in
+  let json = `Assoc ["run", Registry.run_to_yojson run] in
+  let decoded = Masc.Tui_decode.decode_lane_run_detail json |> require in
+  let reading = match decoded.lrd_librarian_preflight with
+    | Some reading -> reading | None -> fail "inference reading missing" in
+  check bool "actual producer decodes as Memory inference" true
+    (reading.lp_memory_scope = Masc.Tui_decode.Memory_inference_scope);
+  check bool "no successful Memory snapshot is claimed" true (reading.lp_memory_result=None);
+  check bool "no successful side write is claimed" true
+    (reading.lp_side_writes = [Masc.Tui_decode.Continuity_write,Masc.Tui_decode.Side_not_attempted]);
+  let member = Yojson.Safe.Util.member in
+  let output = member "output" (member "run" json) in
+  let with_field key value = match json, output with
+    | `Assoc ["run", `Assoc fields], `Assoc output ->
+      `Assoc ["run", `Assoc (("output", `Assoc ((key,value)::List.remove_assoc key output))
+        :: List.remove_assoc "output" fields)]
+    | _ -> fail "invalid captured run" in
+  let after = `Assoc ["revision",`Int 1;"fact_count",`Int 1;"commit",`String "unchanged";
+    "change",`Assoc ["added_count",`Int 0;"removed_count",`Int 0]] in
+  check bool "an inference cannot claim snapshot publication" true
+    (Result.is_error (Masc.Tui_decode.decode_lane_run_detail (with_field "after" after)));
+  check bool "an inference cannot claim continuity publication" true
+    (Result.is_error (Masc.Tui_decode.decode_lane_run_detail
+      (with_field "continuity_write" (`Assoc ["status",`String "outcome_unconfirmed"]))));
+  check bool "malformed inference marker cannot change scope" true
+    (Result.is_error (Masc.Tui_decode.decode_lane_run_detail (with_field "memory_inference" (`Bool false))))
+;;
+
+type inference_failure = Invalid_memory_answer | Gate_unavailable | Opaque_cli_failure | Cancelled_inference
+
+let test_memory_inference_failure_keeps_pending_publication failure () =
+  with_eio @@ fun ~sw:_ ~net:_ ~clock:_ ~base_path ->
+  Fixture.with_official_client_runtimes @@ fun () ->
+  Masc_test_deps.with_typesafeai_policy
+    {Runtime_schema.default_typesafeai with lane_enabled=false;
+      absorb_gate=(match failure with Gate_unavailable -> true
+        | Invalid_memory_answer | Opaque_cli_failure | Cancelled_inference -> false)} @@ fun () ->
+  Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
+  publish_unreachable_lane ~cli_only:true ~cli_slot_ids:[Fixture.cli_primary_runtime]
+    ~source:"pending-publication inference" ();
+  let keeper_id = "cli-lane-keeper" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let write_snapshot path content =
+    Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
+      ~sync_file:(fun _ -> ()) ~sync_parent:(fun _ -> failwith "after rename") path content in
+  (match Current.For_testing.replace_with_publication_io
+    ~write_snapshot ~sync_snapshot:(fun _ -> Error "durability unconfirmed")
+    ~on_committed:(fun _ _ -> ()) ~before_journal:(fun () -> ())
+    ~keepers_dir ~keeper_id ~now:(Time_compat.now ()) ~source:{Current.kind=Current.Explicit_write;trace_id="pending"}
+    ~facts:[current_a;current_b] with
+   | Error _ -> () | Ok _ -> fail "expected real staged publication failure");
+  check bool "real recoverable publication is pending" true
+    (Sys.file_exists (Current.publication_receipt_path ~keepers_dir ~keeper_id));
+  let paths = inference_store_paths ~keepers_dir ~keeper_id in
+  let before = List.map Fs_compat.load_file_opt paths in
+  let wakes = ref 0 in
+  let unsubscribe = Masc.Keeper_memory_commit_notifications.subscribe (fun _ -> incr wakes) in
+  Fun.protect ~finally:unsubscribe @@ fun () ->
+  let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ = match failure with
+    | Invalid_memory_answer -> Ok {|{"working_state":"not a Memory decision"}|}
+    | Gate_unavailable -> Ok (Yojson.Safe.to_string inference_answer)
+    | Opaque_cli_failure -> Error (Masc.Fusion_official_client.Setup_failure "opaque inference failure")
+    | Cancelled_inference -> raise (Eio.Cancel.Cancelled (Failure "cancel inference")) in
+  (match Runtime.infer_memory_step ~cli_runner:runner ~base_path ~keepers_dir ~keeper_id
+      ~previous_state:None ~unread_messages:[] (input ()) with
+   | Runtime.Memory_inferred _ -> fail "a failed inference was accepted"
+   | Runtime.Memory_not_inferred reports ->
+     check bool "classified failure remains observable" true (reports<>[]);
+     (match failure with
+      | Opaque_cli_failure -> check bool "opaque CLI grants no typed skip authority" true
+          (List.for_all (fun (r : Runtime.not_committed) -> r.provider_input_refusals=[]) reports)
+      | Invalid_memory_answer | Gate_unavailable -> ()
+      | Cancelled_inference -> fail "cancellation was swallowed")
+   | exception Eio.Cancel.Cancelled _ ->
+     (match failure with Cancelled_inference -> ()
+      | Invalid_memory_answer | Gate_unavailable | Opaque_cli_failure -> fail "unexpected cancellation"));
+  check bool "failure leaves pending publication and all Memory bytes untouched" true
+    (before = List.map Fs_compat.load_file_opt paths);
+  check int "failure sends no Memory commit notification" 0 !wakes
+;;
+
 let () =
   run
     "keeper_librarian_cli_lane"
     [ ( "cli lane slots"
-      , [ test_case "a CLI execution failure names its slot once" `Quick
+      , [ test_case "Memory inference retains a gated decision without publishing" `Quick
+            test_memory_inference_retains_gated_decision
+        ; test_case "invalid Memory inference preserves pending publication" `Quick
+            (test_memory_inference_failure_keeps_pending_publication Invalid_memory_answer)
+        ; test_case "unavailable inference gate preserves pending publication" `Quick
+            (test_memory_inference_failure_keeps_pending_publication Gate_unavailable)
+        ; test_case "opaque CLI inference preserves pending publication" `Quick
+            (test_memory_inference_failure_keeps_pending_publication Opaque_cli_failure)
+        ; test_case "cancelled inference preserves pending publication" `Quick
+            (test_memory_inference_failure_keeps_pending_publication Cancelled_inference)
+        ; test_case "a CLI execution failure names its slot once" `Quick
             test_execution_failure_names_cli_slot_once
         ; test_case "CLI-only librarian selects memory without an HTTP attempt" `Quick
           (fun () -> test_cli_slot_answers_after_catalog_exhaustion ~cli_only:true ())

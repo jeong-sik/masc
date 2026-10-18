@@ -1722,6 +1722,10 @@ type librarian_side_write_status =
   | Side_not_attempted | Side_answer_missing | Side_withheld | Side_outcome_unconfirmed
   | Side_committed | Side_answer_refused of string | Side_failed of string
 type librarian_side_write_kind = Context_write | Continuity_write
+type librarian_memory_scope =
+  | Memory_disposition_scope
+  | Context_only_scope
+  | Memory_inference_scope
 type librarian_preflight_reading =
   { lp_status : librarian_preflight_status
   ; lp_generation_path : librarian_generation_path
@@ -1730,7 +1734,7 @@ type librarian_preflight_reading =
   ; lp_model : string option
   ; lp_domain_rejection : string option
   ; lp_memory_result : librarian_memory_result option
-  ; lp_context_only : bool
+  ; lp_memory_scope : librarian_memory_scope
   ; lp_side_writes : (librarian_side_write_kind * librarian_side_write_status) list
   }
 

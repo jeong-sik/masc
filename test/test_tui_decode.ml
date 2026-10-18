@@ -10145,7 +10145,7 @@ let test_librarian_preflight_detail_reports_actual_route () =
   Alcotest.(check bool) "unchanged snapshot cannot report additions" true
     (Result.is_error (Tui_decode.decode_lane_run_detail (with_after "unchanged" 1)));
   Alcotest.(check bool) "memory no-change is not context-only" false
-    (Option.get recorded.lrd_librarian_preflight).lp_context_only;
+    ((Option.get recorded.lrd_librarian_preflight).lp_memory_scope = Tui_decode.Context_only_scope);
   let with_side_write key value = match with_after "unchanged" 0 with
     | `Assoc ["run", `Assoc fields] ->
       let output = match List.assoc "output" fields with
@@ -10210,7 +10210,7 @@ let test_librarian_preflight_detail_reports_actual_route () =
     | _ -> Alcotest.fail "invalid fixture" in
   let context_only = Tui_decode.decode_lane_run_detail context_only |> Result.get_ok in
   Alcotest.(check bool) "context-only scope comes from recorded output, not absent snapshot" true
-    (Option.get context_only.lrd_librarian_preflight).lp_context_only;
+    ((Option.get context_only.lrd_librarian_preflight).lp_memory_scope = Tui_decode.Context_only_scope);
   let with_status status = function
     | `Assoc ["run", `Assoc fields] ->
       `Assoc ["run", `Assoc (("status", `String status) :: List.remove_assoc "status" fields)]

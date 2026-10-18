@@ -1029,7 +1029,7 @@ let test_volatile_message_floor ~failure () =
     let decoded = Masc.Tui_decode.decode_lane_run_detail
       (`Assoc ["run", Registry.run_to_yojson run]) |> get in
     let reading = decoded.lrd_librarian_preflight |> some in
-    check bool "actual volatile run is readable as context-only" true reading.lp_context_only;
+    check bool "actual volatile run is readable as context-only" true (reading.lp_memory_scope = Masc.Tui_decode.Context_only_scope);
     check bool "actual volatile run cannot claim continuity publication" true
       (reading.lp_side_writes = [Masc.Tui_decode.Continuity_write, Masc.Tui_decode.Side_not_attempted]))
     volatile_runs

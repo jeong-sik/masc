@@ -215,24 +215,41 @@ type librarian_prompt_material =
   ; rendered : string
   }
 
-(* What one pass asks the model for, and so which prompt it reads and which
-   answer it accepts.
+(* A process-only decision retains the exact source and gate evidence. *)
+type memory_step =
+  { run_id : string
+  ; source_input : Keeper_librarian.input
+  ; absorb_gate : Keeper_librarian_absorb_gate.run_result
+  ; new_claims : Keeper_memory_os_types.fact list
+  ; dropped : Keeper_memory_os_types.dropped_statement list
+  ; absorbed : Keeper_memory_os_types.absorbed_statement list
+  ; revisions : Keeper_memory_os_types.revision list
+  ; working_state : string
+  }
 
-   [Memory_pass] judges Memory, with the continuity state as well when a
-   continuity range is attached. The two context-only passes never write
-   Memory, so they do not ask for a Memory judgment at all: a continuity pass
-   over a range whose Memory the durable pass already committed answers the
-   working state alone, and a pending-input organization pass answers the
-   working contexts alone. Asking them for the judgment only produced output
-   that was thrown away, and a slip in it refused the part that was kept. *)
+type inference =
+  | Infer_state of
+      { previous_state : string option
+      ; unread_messages : Keeper_librarian_unread.t list
+      ; observe : served_by:served_slot -> string -> unit
+      }
+  | Infer_memory of
+      { previous_state : string option
+      ; unread_messages : Keeper_librarian_unread.t list
+      ; observe : served_by:served_slot -> memory_step -> unit
+      }
+
+(* Memory inference asks the same Memory question without publishing. Context
+   passes ask only for continuation or queue organization, never Memory. *)
 type pass =
   | Memory_pass of Keeper_librarian_continuity.prepared option
   | Continuity_state_pass of Keeper_librarian_continuity.prepared
   | Volatile_state_pass of string option * Keeper_librarian_unread.t list
+  | Volatile_memory_pass of string option * Keeper_librarian_unread.t list
   | Working_context_pass
 
 let prompt_key_of_pass = function
-  | Memory_pass _ -> Prompt_names.librarian
+  | Memory_pass _ | Volatile_memory_pass _ -> Prompt_names.librarian
   | Continuity_state_pass _ | Volatile_state_pass _ -> Prompt_names.librarian_continuity
   | Working_context_pass -> Prompt_names.librarian_working_context
 ;;
@@ -243,7 +260,8 @@ let prompt_key_of_pass = function
 let input_for_pass pass (input : Keeper_librarian.input) =
   match pass with
   | Memory_pass None | Working_context_pass -> input
-  | Memory_pass (Some _) | Continuity_state_pass _ | Volatile_state_pass _ ->
+  | Memory_pass (Some _) | Continuity_state_pass _ | Volatile_state_pass _
+  | Volatile_memory_pass _ ->
     { input with working_context = Keeper_librarian_context.empty }
 
 let prompt_variables_of_pass pass input =
@@ -260,6 +278,12 @@ let prompt_variables_of_pass pass input =
       ~continuity:(`Assoc ["previous_working_state",
         (match previous_state with None -> `Null | Some state -> `String state);
         "unread_messages", Keeper_librarian_unread.list_to_json unread_messages])
+  | Volatile_memory_pass (previous_state, unread_messages) ->
+    ("continuity", Yojson.Safe.to_string
+      (`Assoc ["previous_working_state",
+        (match previous_state with None -> `Null | Some state -> `String state);
+        "unread_messages", Keeper_librarian_unread.list_to_json unread_messages]))
+    :: List.remove_assoc "continuity" (Keeper_librarian.prompt_variables input)
   | Working_context_pass -> Keeper_librarian.working_context_prompt_variables input
 ;;
 
@@ -277,7 +301,7 @@ let resolve_librarian_prompt pass input =
   let variables = prompt_variables_of_pass pass input in
   let variables_with_rule =
     match pass with
-    | Memory_pass _ | Working_context_pass -> with_working_contexts_rule variables
+    | Memory_pass _ | Volatile_memory_pass _ | Working_context_pass -> with_working_contexts_rule variables
     | Continuity_state_pass _ | Volatile_state_pass _ -> Ok variables
   in
   match variables_with_rule with
@@ -335,7 +359,8 @@ let flow_candidates selected_slots =
 let output_requirement_of_pass pass =
   let schema = match pass with
     | Memory_pass None -> Keeper_structured_output_schema.librarian_current_output_schema
-    | Memory_pass (Some _) -> Keeper_structured_output_schema.librarian_continuity_output_schema
+    | Memory_pass (Some _) | Volatile_memory_pass _ ->
+      Keeper_structured_output_schema.librarian_continuity_output_schema
     | Continuity_state_pass _ | Volatile_state_pass _ ->
       Keeper_structured_output_schema.librarian_continuity_state_output_schema
     | Working_context_pass ->
@@ -626,8 +651,10 @@ let validate_selection ?continuity selected_input output =
 (* The accepted answer of each pass. A context-only answer carries no
    selection, so nothing downstream can reach a Memory field it never asked
    for. *)
+type memory_target = Commit_memory | Infer_memory_state of string
+
 type answer =
-  | Memory_answer of accepted
+  | Memory_answer of accepted * memory_target
   | Admission_deferred_answer
   | Continuity_state_answer of
       { prepared : Keeper_librarian_continuity.prepared
@@ -640,7 +667,12 @@ let validate_answer pass selected_input output =
   match pass with
   | Memory_pass continuity ->
     validate_selection ?continuity selected_input output
-    |> Result.map (fun accepted -> Memory_answer accepted)
+    |> Result.map (fun accepted -> Memory_answer (accepted, Commit_memory))
+  | Volatile_memory_pass _ ->
+    let open Result.Syntax in
+    let* accepted = validate_selection selected_input output in
+    let+ working_state = Keeper_librarian.continuity_working_state_of_json_result output in
+    Memory_answer (accepted, Infer_memory_state working_state)
   | Continuity_state_pass prepared ->
     Keeper_librarian.working_state_of_json_result output
     |> Result.map (fun working_state -> Continuity_state_answer { prepared; working_state })
@@ -695,8 +727,8 @@ let validate_admission_answer batch selected_input output =
                 target_memory_id=Keeper_memory_os_types.memory_id target} :: bindings)
          | _ -> Error (invalid "admitted lookup binding lacks its candidate or selected target")))
       (Ok []) judgments in
-    Ok (Memory_answer {accepted with required_memory_ids; explicit_candidate_ids;
-      admission_support = change_support; admission_recall_bindings = List.rev admission_recall_bindings})
+    Ok (Memory_answer ({accepted with required_memory_ids; explicit_candidate_ids;
+      admission_support = change_support; admission_recall_bindings = List.rev admission_recall_bindings}, Commit_memory))
 ;;
 
 let try_cli_slots
@@ -1130,7 +1162,7 @@ let admission_mode_valid ~has_admission ~write_scope ~has_continuity
 ;;
 
 let run_pass
-      ?volatile_state
+      ?inference
       ?(write_scope = Context_and_memory)
       ?admission
       ?continuity
@@ -1150,10 +1182,26 @@ let run_pass
       (inp : Keeper_librarian.input)
   =
   let trace_id = input_trace_id inp in
+  (* A normal failure observes authoritative Memory and its journal. An
+     inference must not do that read: it can recover an unrelated pending
+     publication. Its lane record and classified callback retain the failure;
+     this log adds no Memory mutation or recovery authority. *)
+  let record_pass_failure_io ~keepers_dir ~keeper_id ~trace_id ~kind ~detail =
+    match inference with
+    | None -> record_failure_io ~keepers_dir ~keeper_id ~trace_id ~kind ~detail
+    | Some (Infer_state _) | Some (Infer_memory _) ->
+      Log.Keeper.warn ~keeper_name:keeper_id
+        "librarian inference failed source_trace=%s; %s" trace_id detail
+  in
+  let record_pass_failure ~keepers_dir ~keeper_id ~trace_id ~kind ~detail =
+    Domain_pool_ref.submit_io_or_inline (fun () ->
+      record_pass_failure_io ~keepers_dir ~keeper_id ~trace_id ~kind ~detail)
+  in
   let admission_mode_valid =
-    (match volatile_state with
+    (match inference with
      | None -> true
-     | Some _ -> not (Option.is_some admission || Option.is_some continuity
+     | Some (Infer_state _) | Some (Infer_memory _) ->
+       not (Option.is_some admission || Option.is_some continuity
          || Option.is_some durable_range_id || Option.is_some official_range_id))
     && admission_mode_valid
       ~has_admission:(Option.is_some admission)
@@ -1202,9 +1250,11 @@ let run_pass
           | Some current -> List.length current.facts
         in
         let pass =
-          match volatile_state, write_scope, continuity with
-          | Some (previous_state, unread_messages, _), _, _ ->
+          match inference, write_scope, continuity with
+          | Some (Infer_state {previous_state;unread_messages;_}), _, _ ->
             Volatile_state_pass (previous_state, unread_messages)
+          | Some (Infer_memory {previous_state;unread_messages;_}), _, _ ->
+            Volatile_memory_pass (previous_state, unread_messages)
           | None, Context_and_memory, continuity -> Memory_pass continuity
           | None, Memory_maintenance, _ -> Memory_pass None
           | None, Context_only, Some prepared -> Continuity_state_pass prepared
@@ -1441,7 +1491,7 @@ let run_pass
                  | (Memory_maintenance | Context_only), _
                  | Context_and_memory,
                    (Memory_pass (Some _) | Working_context_pass | Continuity_state_pass _
-                    | Volatile_state_pass _) -> false in
+                    | Volatile_state_pass _ | Volatile_memory_pass _) -> false in
                let observation = Typesafeai_librarian_preflight.assess
                  ~observe:(fun observation -> observed_preflight := Some observation)
                  ~clock ~keeper_id ~eligible ~prompt () in
@@ -1574,7 +1624,8 @@ let run_pass
                   Ok (`Context_organized (exact_output, selected_slot))
                 | Continuity_not_committed reason ->
                   Ok (`Continuity_not_committed (reason, exact_output, selected_slot)))
-             | Memory_answer { selection; continuity_answer; required_memory_ids; explicit_candidate_ids; admission_support; admission_recall_bindings } ->
+             | Memory_answer ({ selection; continuity_answer; required_memory_ids;
+                                explicit_candidate_ids; admission_support; admission_recall_bindings }, memory_target) ->
              (* A continuity range owns no pending input; only a Memory pass
                 without one organizes the working context. An organization the
                 answer left out or got wrong is skipped for this pass and
@@ -1582,7 +1633,10 @@ let run_pass
                 A no-change judgment reaches here only with nothing pending,
                 where the empty organization is the only valid answer; writing
                 it retires consumed contexts exactly as a generated one does. *)
-             (match selection.working_contexts, continuity_answer with
+             (match memory_target with
+              | Infer_memory_state _ -> ()
+              | Commit_memory ->
+             match selection.working_contexts, continuity_answer with
               | Keeper_librarian.Working_contexts_organized pockets, Memory_only ->
                (match write_scope with
                 | Memory_maintenance -> ()
@@ -1672,6 +1726,24 @@ let run_pass
                | None -> Ok ()
              in
              let applied_absorbed = Keeper_librarian_absorb_gate.absorbed_of_run absorb_gate in
+             match memory_target with
+             | Infer_memory_state working_state ->
+               (match served_slot with
+                | None -> Error (Domain_output_invalid "Memory inference has no served slot")
+                | Some served_by ->
+                  let step =
+                    { run_id
+                    ; source_input = prompt_input
+                    ; absorb_gate
+                    ; new_claims = Keeper_librarian_absorb_gate.without_copies
+                        absorb_gate selection.new_claims
+                    ; dropped = selection.dropped
+                    ; absorbed = applied_absorbed
+                    ; revisions = selection.revisions
+                    ; working_state
+                    } in
+                  Ok (`Memory_inferred (step, served_by, exact_output, selected_slot)))
+             | Commit_memory ->
              let+ disposition =
                Keeper_memory_os_current.apply_disposition
                  ~on_committed:(fun disposition ->
@@ -1745,6 +1817,17 @@ let run_pass
                         "exact_output", exact_output]);
              on_admission_deferred ();
              Eio.Fiber.check ()
+           | Ok (`Memory_inferred (step, served_by, exact_output, selected_slot)) ->
+             complete ~selected_slot ?usage:!observed_usage Exact_lane_run_registry.Succeeded
+               (`Assoc ["memory_write", `String "not_attempted";
+                        "continuity_write", `Assoc ["status", `String "not_attempted"];
+                        "memory_inference", `Bool true;
+                        "absorb_gate", Keeper_librarian_absorb_gate.run_result_to_yojson step.absorb_gate;
+                        "exact_output", exact_output]);
+             (match inference with
+              | Some (Infer_memory {observe;_}) -> observe ~served_by step
+              | Some (Infer_state _) | None -> ());
+             Eio.Fiber.check ()
            | Ok (`Volatile_state (working_state, exact_output, served_slot)) ->
              complete ?selected_slot:(Option.map served_slot_id served_slot)
                ?usage:!observed_usage Exact_lane_run_registry.Succeeded
@@ -1752,9 +1835,9 @@ let run_pass
                         "continuity_write", `Assoc ["status", `String "not_attempted"];
                         "volatile_inference", `Bool true;
                         "exact_output", exact_output]);
-             (match volatile_state, served_slot with
-              | Some (_, _, observe), Some served_by -> observe ~served_by working_state
-              | Some _, None | None, _ -> ());
+             (match inference, served_slot with
+              | Some (Infer_state {observe;_}), Some served_by -> observe ~served_by working_state
+              | Some (Infer_state _), None | Some (Infer_memory _), _ | None, _ -> ());
              Eio.Fiber.check ()
            | Ok (`Context_organized (exact_output, selected_slot)) ->
              complete ~selected_slot ?usage:!observed_usage Exact_lane_run_registry.Succeeded
@@ -1833,7 +1916,7 @@ let run_pass
                 next signal reads from it is the caller's to decide, from the
                 verdict handed to [on_not_committed] above; nothing here
                 schedules that read or holds it back. *)
-             record_failure
+             record_pass_failure
                ~keepers_dir
                ~keeper_id
                ~trace_id
@@ -1891,7 +1974,7 @@ let run_pass
                   prevents the switch's queue-close hook from running. Join a
                   systhread for the same snapshot read and failure journal. *)
                Eio_unix.run_in_systhread ~label:"librarian-cancellation-journal" (fun () ->
-                 record_failure_io
+                 record_pass_failure_io
                    ~keepers_dir
                    ~keeper_id
                    ~trace_id
@@ -1925,7 +2008,7 @@ let run_pass
         (* No request was composed, so nothing here says the range's size
            stopped the pass. *)
         on_not_committed { detail; walk_shows_size = false; input_capacity_evidence = No_input_capacity_refusal; provider_input_refusals = []; smaller_range_meets_same_failure = false};
-        record_failure
+        record_pass_failure
           ~keepers_dir
           ~keeper_id
           ~trace_id
@@ -1945,7 +2028,7 @@ let run_pass
         ; walk_shows_size = false
         ; input_capacity_evidence = No_input_capacity_refusal; provider_input_refusals = []; smaller_range_meets_same_failure = false
         };
-      record_failure
+      record_pass_failure
         ~keepers_dir
         ~keeper_id
         ~trace_id
@@ -1957,7 +2040,7 @@ let run_pass
              (Printexc.to_string exn))
 ;;
 
-let run_best_effort = run_pass ?volatile_state:None
+let run_best_effort = run_pass ?inference:None
 
 type working_state_inference =
   | Inferred of { working_state : string; served_by : served_slot }
@@ -1967,13 +2050,30 @@ let infer_working_state ?cli_runner ~base_path ~keepers_dir ~keeper_id
     ~previous_state ~unread_messages input =
   let inferred = ref None and reports = ref [] in
   run_pass ~write_scope:Context_only
-    ~volatile_state:(previous_state, unread_messages, (fun ~served_by working_state ->
-      inferred := Some (working_state, served_by)))
+    ~inference:(Infer_state {previous_state; unread_messages;
+      observe=(fun ~served_by working_state -> inferred := Some (working_state, served_by))})
     ~on_not_committed:(fun report -> reports := report :: !reports)
     ?cli_runner ~base_path ~keepers_dir ~keeper_id ~expected_revision:None input;
   match !inferred with
   | Some (working_state, served_by) -> Inferred { working_state; served_by }
   | None -> Not_inferred (List.rev !reports)
+;;
+
+type memory_inference =
+  | Memory_inferred of { step : memory_step; served_by : served_slot }
+  | Memory_not_inferred of not_committed list
+
+let infer_memory_step ?cli_runner ~base_path ~keepers_dir ~keeper_id
+    ~previous_state ~unread_messages input =
+  let inferred = ref None and reports = ref [] in
+  run_pass ~write_scope:Context_and_memory
+    ~inference:(Infer_memory {previous_state; unread_messages;
+      observe=(fun ~served_by step -> inferred := Some (step, served_by))})
+    ~on_not_committed:(fun report -> reports := report :: !reports)
+    ?cli_runner ~base_path ~keepers_dir ~keeper_id ~expected_revision:None input;
+  match !inferred with
+  | Some (step, served_by) -> Memory_inferred {step; served_by}
+  | None -> Memory_not_inferred (List.rev !reports)
 ;;
 
 module For_testing = struct

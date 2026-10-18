@@ -373,7 +373,9 @@ flowchart TD
 
   화면 관측은 `keeper.memory_os.current_health.v8`의 필수 `context_cycle.unread`로 전달한다. `snapshot`과 `memory`는 각기 `available`과 원문 좌표·SHA-256·명명된 크기 거절 원인 목록, 또는 `unavailable`이다. 두 저장소의 기록은 겹칠 수 있으며 한쪽 읽기 실패로 다른 쪽 기록을 숨기지 않는다. 원문 내용과 working state 본문은 보내지 않는다. Memory 항목은 이미 저장된 누적 원장을 관측할 뿐, 그 조회 자체가 영수증을 확정하거나 원장을 쓰지는 않는다. 따라서 0은 그 저장소에서 관측한 기록 수이지 전체 이력·요청을 전부 읽었다는 증명이 아니다. 기존 health 경로의 별도 Memory 복구 동작은 유지한다.
 
-  Memory가 아직 처리하지 않은 메시지는 별도 설계가 필요하다. context-only 프롬프트는 Memory 처리가 끝났다고 전제하고 `previous_working_state`를 Memory의 근거로 쓰지 않으므로 이를 축약 Memory 입력으로 재사용하지 않는다. 메시지별 Memory 판정은 원래의 사실·흡수·교정·삭제와 근거 관계를 보존해 원경계에서 한 번 게시하도록 합성해야 한다. 이 계약이 완성되기 전에는 부분 Memory나 읽은 위치를 게시하지 않는다.
+  Memory가 아직 처리하지 않은 메시지는 context-only 상태로 대신하지 않는다. context-only 프롬프트는 Memory 처리가 끝났다고 전제하고 `previous_working_state`를 Memory의 근거로 쓰지 않는다. `Keeper_librarian_runtime.infer_memory_step`은 일반 Memory 프롬프트·엄격 파서·흡수/복제 판정 gate로 정확한 입력을 판단하되 저장 전에 반환한다. 반환값은 원 입력과 실행 ID, gate 원증거, 파서가 만든 사실의 시각·출처·근거, gate를 통과한 흡수, 교정·삭제 및 별도의 이어갈 상태를 보존한다. live 큐는 정리하지 않으며 Memory·continuity·영수증·읽은 위치를 게시하지 않는다. 실패·취소 관측도 Memory 조회/실패 저널을 호출하지 않으므로 별도로 남은 publication을 복구하지 않는다. 실행 원장과 typed 실패 반환에 결과를 남기며 TUI는 이 상태를 실제 저장과 구별한다.
+
+  이 판정 자체는 다음 메시지에 쓸 Memory나 최종 저장물이 아니다. 메시지별 판정을 원래의 사실·흡수·교정·삭제와 근거 관계를 보존해 원경계에서 한 번 게시하도록 합성해야 한다. `selection.facts`는 gate 전 투영이므로 사용할 수 없다. A→B→C의 중간 원문과 판정도 단순 연결로 A→C 판정이 되지 않는다. 단계마다 premise 유효성을 유지하고, 최종 잠금 안에서 원래 사실의 의존성과 concurrent Keeper 변경을 확인하며, 필요한 최종 흡수 근거를 따로 검증해야 한다. 이 합성 계약이 완성되기 전에는 부분 Memory나 읽은 위치를 게시하지 않는다.
 
   이 저장·요청 계약만으로 건너뛰기를 켜지 않는다. Memory 영수증과 진행 위치의 원자적 복구, absorbed 요청, 대시보드·TUI, TLA 불변식이 같은 뜻을 갖춘 뒤 바닥의 실제 거절을 unread 기록에 연결한다. 전체 구현은 #37850에서 추적한다.
 

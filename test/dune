@@ -1286,6 +1286,11 @@
 ; Focused CI gate for runtime TOML validity.
 
 (test
+ (name test_server_runtime_config_source)
+ (modules test_server_runtime_config_source)
+ (libraries masc_test_deps otoml))
+
+(test
  (name test_runtime_config_validity)
  (modules test_runtime_config_validity)
  ; source_tree, not named files: the mandatory-lane check discovers every

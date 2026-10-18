@@ -89,21 +89,24 @@ let rec flatten_table path fields =
     fields
 ;;
 
-let parse_toml content =
+let normalize_source content =
   (* TOML defines CRLF and LF as equivalent newlines. Otoml 1.0.5 preserves
      CRLF bytes inside multiline strings, so normalize only CRLF boundaries
      before semantic parsing. *)
-  let content =
-    content
-    |> String.split_on_char '\n'
-    |> List.map String_util.strip_trailing_cr
-    |> String.concat "\n"
-  in
-  match Otoml.Parser.from_string_result content with
-  | Error message -> Error message
-  | Ok (Otoml.TomlTable fields) -> Ok (flatten_table [] fields)
-  | Ok (Otoml.TomlString _) | Ok (Otoml.TomlInteger _) | Ok (Otoml.TomlFloat _)
-  | Ok (Otoml.TomlBoolean _) | Ok (Otoml.TomlOffsetDateTime _) | Ok (Otoml.TomlLocalDateTime _)
-  | Ok (Otoml.TomlLocalDate _) | Ok (Otoml.TomlLocalTime _) | Ok (Otoml.TomlArray _)
-  | Ok (Otoml.TomlInlineTable _) | Ok (Otoml.TomlTableArray _) -> Error "otoml returned a non-table document root"
+  content
+  |> String.split_on_char '\n'
+  |> List.map String_util.strip_trailing_cr
+  |> String.concat "\n"
+;;
+
+let of_otoml = function
+  | Otoml.TomlTable fields -> Ok (flatten_table [] fields)
+  | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
+  | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _
+  | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlArray _
+  | Otoml.TomlInlineTable _ | Otoml.TomlTableArray _ -> Error "otoml returned a non-table document root"
+;;
+
+let parse_toml content =
+  Result.bind (Otoml.Parser.from_string_result (normalize_source content)) of_otoml
 ;;

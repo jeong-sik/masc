@@ -62,6 +62,11 @@ val reserved_provider_ids : string list
     owns, plus the obsolete ones the loader refuses. Editors read this list
     from the server instead of keeping a copy. *)
 
+val parse_toml : Otoml.t -> (Runtime_schema.config, parse_error list) result
+(** Interpret a parsed document without parsing source again. A non-table root
+    is refused. Runtime semantic validation and environment-dependent home
+    expansion are the same as {!parse_string}. *)
+
 val parse_string : string -> (Runtime_schema.config, parse_error list) result
 (** Parse a TOML string into a Runtime config.
     Returns [Ok config] on success, [Error errors] with all

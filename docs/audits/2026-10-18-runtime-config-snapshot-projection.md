@@ -74,3 +74,13 @@ Ask-to-original-Task-to-useful-work, resource-owned ordinary/nested/dynamic/
 effectful Composition, held-job/shared-backend and matched Before/After goal
 remains open. Eventual comparisons must retain failed, cancelled, interrupted
 and unfinished samples. This layer does not establish goal completion.
+
+## Classification correction in the subsequent source-preparation layer
+
+Following the Runtime parser revealed that file credentials with a leading ~/
+can call Env_config_core.expand_home_prefix. The model-table projection therefore
+was not an environment-free CPU callback as described above at this historical
+head. The follow-up source-preparation layer moves client snapshot preparation
+to the shared IO boundary and corrects its interface, guide and Skill contract.
+Immutable sharing and source/model admission stay the same; this is not executed
+runtime evidence or a measured regression/speedup verdict.

@@ -3365,7 +3365,7 @@ let parse_typesafeai (toml : Otoml.t)
   | Some (Otoml.TomlArray _) | Some (Otoml.TomlTableArray _) -> Error (error path "[typesafeai] must be a TOML table")
 ;;
 
-let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) result =
+let parse_table (toml : Otoml.t) : (Runtime_schema.config, parse_error list) result =
   let obsolete_namespaces_result = reject_obsolete_top_level_namespaces toml in
   let providers_result = parse_providers toml in
   let models_result = parse_models toml in
@@ -3462,6 +3462,15 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
         ; browser
         ; machines
         })
+;;
+
+let parse_toml = function
+  | Otoml.TomlTable _ as toml -> parse_table toml
+  | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
+  | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _
+  | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlArray _
+  | Otoml.TomlInlineTable _ | Otoml.TomlTableArray _ ->
+      Error [{path="<parse>"; message="otoml returned a non-table document root"}]
 ;;
 
 let parse_string (content : string) : (Runtime_schema.config, parse_error list) result =

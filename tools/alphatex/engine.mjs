@@ -82,8 +82,21 @@ export function renderScore(source, { width = 1000, scale = 1, tracks, page } = 
   }
 }
 
-export function midiForScore(source, { smf1Mode = false } = {}) {
+export function midiForScore(source, { smf1Mode = false, tracks } = {}) {
   const { score, settings } = readScore(source)
+  if (tracks !== undefined) {
+    if (!Array.isArray(tracks) || tracks.length === 0
+      || tracks.some(index => !Number.isInteger(index) || index < 0 || index >= score.tracks.length)) {
+      throw new Error('audio track selection must contain existing score track indices')
+    }
+    // Select model tracks before generation. Percussion parts share MIDI
+    // channel 9, so channel-volume muting cannot isolate those parts. Keep
+    // the global master bars (tempo/repeats) and let the official addTrack
+    // restore contiguous indices and all existing staff/voice references.
+    const selected = score.tracks.filter(track => tracks.includes(track.index))
+    score.tracks.length = 0
+    for (const track of selected) score.addTrack(track)
+  }
   const midi = new alphaTab.midi.MidiFile()
   const handler = new alphaTab.midi.AlphaSynthMidiFileHandler(midi, smf1Mode)
   const generator = new alphaTab.midi.MidiFileGenerator(score, settings, handler)
@@ -92,18 +105,11 @@ export function midiForScore(source, { smf1Mode = false } = {}) {
 }
 
 export function createAudioExporter(source, { soundfont, tracks, sampleRate = 44100 } = {}) {
-  const { score, midi, generator } = midiForScore(source)
+  const { midi, generator } = midiForScore(source, { tracks })
   const options = new alphaTab.synth.AudioExportOptions()
   options.sampleRate = sampleRate
   options.soundFonts = [soundfont ?? readFileSync(fileURLToPath(import.meta.resolve('@coderline/alphatab/soundfont/sonivox.sf2')))]
   options.useSyncPoints = false
-  if (tracks) {
-    for (const track of score.tracks) {
-      const volume = tracks.includes(track.index) ? 1 : 0
-      options.trackVolume.set(track.playbackInfo.primaryChannel, volume)
-      options.trackVolume.set(track.playbackInfo.secondaryChannel, volume)
-    }
-  }
   // Exporting is synchronous and does not require a browser AudioContext.
   // AlphaSynth still requires an output when constructed; no playback output
   // is opened here. Audio is delivered by the exporter's render() below.

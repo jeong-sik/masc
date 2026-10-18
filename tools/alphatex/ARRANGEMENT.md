@@ -2,9 +2,9 @@
 
 The terminal arrangement editor opens with `masc-alphatex --arrange`, the score
 view's `a` key, or `--project song.json` for a saved arrangement. It arranges
-retained WAV/MIDI sources independently of the phrase piano roll. Arrangement
-playback and overdub integration remain subsequent work; the current source and
-phrase editors retain their separate transports.
+retained WAV/MIDI sources independently of the phrase piano roll. WAV regions have a streamed multi-voice transport. MIDI region state reconstruction
+and overdub integration remain subsequent work; the source and phrase editors
+retain their separate transports.
 
 ## Terminal workflow
 
@@ -127,3 +127,40 @@ exported note-only SMF is insufficient for a simultaneous recorded take. The
 current import helpers accept WAV and SMF/RMID files; capture attachment,
 recording into an existing project, overdubs, VST routing and shared clock
 alignment remain unfinished integrations.
+
+
+## WAV arrangement transport
+
+Space plays, pauses or resumes the audible WAV lanes. `:stop` stops the owned
+player; `:seek 8` seeks to quarter-note beat 8, including when paused. `:output UID`
+selects an explicit CoreAudio output and stops the previous route. Command-line
+`--output UID` is forwarded through both new and saved arrangement entrypoints.
+An active MIDI lane is explicitly refused until source expression-state chase is
+connected. Mute that lane or solo the WAV lanes for WAV-only audition. An explicitly
+selected MIDI output never silently switches to the default audio device.
+
+Preparation runs in the IO worker. It verifies and copies only audible sources
+into private read-only files, preserving compressed region repetition counts and
+whole source frames. Stop cancels that preparation request; late results cannot
+launch a player. Editing the document stops its previous playback revision;
+cursor and selection changes leave it playing. Closing waits for the owned
+worker, player process and private playback files before restoring the terminal.
+
+The native AVAudioEngine uses one AVAudioPlayerNode per region, native source
+formats and mixer rate conversion. All nodes use a common host timestamp, with
+one output render quantum reserved per synchronous node start and one for the
+next output cycle. A missed start deadline or refill deadline fails explicitly.
+Two reusable streaming buffers and a scratch buffer per voice use 64 KiB per
+channel rounded up to the output render quantum; small repeated periods can
+also be cached within that same bound. Decode storage depends on voice/channel
+count, not source length or repeat count. Short AVAudioFile reads are consumed
+incrementally. Finite repetitions are filled inside stream buffers rather than
+creating a callback per repetition. The last buffer completes at dataPlayedBack.
+
+Pause freezes the observed output render clock and stops scheduled voices;
+resume and seek reconstruct the WAV read positions under the same native owner.
+The selected output remains pinned by UID; output removal, configuration failure,
+source IO failure and malformed commands stop with failure. This path does not
+claim audio/MIDI sample alignment, external clock, physical-device latency,
+monitoring, whole-arrangement looping, VST routing or overdub recording.
+The scheduling contract follows [Apple AVAudioPlayerNode](https://developer.apple.com/documentation/avfaudio/avaudioplayernode).

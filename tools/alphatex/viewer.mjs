@@ -62,7 +62,7 @@ try {
   if ([values.sequence, values.arrange, values.project, values['midi-file']].filter(Boolean).length > 1) throw new Error('Choose --sequence, --arrange, --project or --midi-file')
   if (values.arrange) {
     const { viewArrangement } = await import('./arrangement-tui.mjs')
-    await viewArrangement({ root: values['project-root'] })
+    await viewArrangement({ root: values['project-root'], output: values.output, midiOutput: values['midi-output'] })
   } else if (values.sequence || values.project || values['midi-file']) {
     const { viewSequencer } = await import('./sequencer-tui.mjs')
     const initialDocument = values['midi-file'] ? (await import('./midi-source.mjs')).importMidiSource(readFileSync(values['midi-file']), { name: basename(values['midi-file']) }) : undefined
@@ -440,7 +440,7 @@ async function viewScores(sources, initialIndex) {
                 midiOutput: values['midi-output'], embedded: true, signal: sessionAbort.signal })
             } else if (key.name === 'a') {
               const { viewArrangement } = await import('./arrangement-tui.mjs')
-              if (!closed) await viewArrangement({ root: values['project-root'], embedded: true, signal: sessionAbort.signal })
+              if (!closed) await viewArrangement({ root: values['project-root'], output: values.output, midiOutput: values['midi-output'], embedded: true, signal: sessionAbort.signal })
             } else {
               const { viewSession } = await import('./music-session.mjs')
               if (!closed) await viewSession({ root: values['session-root'], input: values.input, midi: values.midi, embedded: true, signal: sessionAbort.signal })

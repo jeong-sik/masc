@@ -26,7 +26,9 @@ val prepare
     validated model inputs. [None] retains Serial execution and its normal
     failure observations. All opened capabilities belong to [sw]. An aggregate
     that cannot transfer every node releases its earlier preparations before
-    returning, including during cancellation. *)
+    returning, including during cancellation. The aggregate retains its
+    original ordered leaves and an immutable ID index of those same leaves;
+    ID equality never substitutes for the member's physical identity. *)
 
 val plan : t -> Keeper_tool_plan.t
 val source : t -> Keeper_tool_call_log_context.turn_context
@@ -83,7 +85,9 @@ module Ready : sig
       here too. Concurrent ordinary leaves and prepared file reads keep their
       original sharing. This immutable index is built once from the plan;
       file-only plans have no opaque preparation predecessors. The plan's
-      explicit dependencies remain independent. *)
+      explicit dependencies remain independent. Node membership and producer
+      contracts are retained from the same immutable plan, separately from
+      the ordered predecessor lists. *)
   val bind : t -> node:Keeper_tool_plan.node -> input:Yojson.Safe.t -> binding
   (** Opens capabilities owned by the call switch through the original file
       producer. Unsupported preparation retains the ordinary handler and

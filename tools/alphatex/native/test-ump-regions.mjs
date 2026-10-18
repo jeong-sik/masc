@@ -36,7 +36,13 @@ host=100;exact.tick();precondition(sent.map{$0.1}==[bend,on])
 host=101;exact.tick();precondition(sent.last!.1==[0x43e50000,0x87654321] && exact.output.held.count==1)
 host=102;exact.tick();precondition(sent.last!.1==off && exact.output.held.isEmpty)
 host=103;exact.tick();precondition(Array(sent.suffix(2)).map{$0.1}==[bend,on])
-host=106;exact.tick();precondition(exact.state == .ended && exact.output.held.isEmpty)
+host=106;exact.tick();precondition(exact.state == .ended && exact.output.held.isEmpty && sent.last!.1==off)
+// Events due exactly at entry are original wire data, not expired history.
+let attack=try owner([source("take",[packet(0,bend),packet(0,on),packet(0,off)])],[clip()])
+host=0;sent=[];try attack.stageCoordinated(at:0);try attack.runCoordinated(anchorNanoseconds:10);host=10;attack.tick()
+precondition(sent.map{$0.1}==[bend,on,off],"entry attack and original release survive the exact cut")
+attack.finish(reason:"test",error:nil,publish:false)
+refuses{_ = try owner([source("take",[packet(0,on),packet(0,bend)])],[clip()])}
 // The final host stamp belongs to a half-open bound one past UInt64max.
 let endpoint=source("take",[packet(UInt64.max,on)],extent:"18446744073709551616")
 let last=try owner([endpoint],[clip(offset:String(UInt64.max),extent:"1")],duration:1e-9)
@@ -54,6 +60,13 @@ let before=sent.count;try repeated.stageCoordinated(at:0.025);precondition(sent.
 try repeated.runCoordinated(anchorNanoseconds:host+100);host+=99;repeated.tick();precondition(sent.count==before)
 host+=1;repeated.tick();precondition(Array(sent.suffix(2)).map{$0.1}==[bend,on])
 repeated.finish(reason:"stop",error:nil,publish:false);precondition(repeated.output.held.isEmpty && repeated.output.closed)
+// A callback delayed beyond an active region drains its original release,
+// while a wholly missed later key pair never acquires a note.
+let expiredSource=source("take",[packet(0,on),packet(10_000_000,[0x43953c00,0x90000000]),packet(20_000_000,off),packet(30_000_000,[0x43853c00,0x45670000])])
+let expired=try owner([expiredSource],[clip(extent:"100000000")],duration:0.2)
+host=0;sent=[];try expired.stageCoordinated(at:0);try expired.runCoordinated(anchorNanoseconds:10);host=10;expired.tick()
+host=100_000_010;expired.tick();precondition(sent.map{$0.1}==[on,off],"only acquired FIFO instance keeps its original release")
+expired.finish(reason:"test",error:nil,publish:false)
 // Independent physical channels can overlap even when both assets call their
 // logical input A and bind the same endpoint. Region cleanup is channel-scoped.
 let otherOn:[UInt32]=[0x41923d00,0x90010000]
@@ -75,7 +88,7 @@ sequence.finish(reason:"test",error:nil,publish:false)
 refuses{_ = try owner([source("take",[packet(0,on),packet(1,p0)])],[clip(repeatCount:2)],duration:2)}
 refuses{_ = try owner([source("take",[packet(0,[0x30120102,0])])],[clip()])}
 let lost=try owner([a],[clip()]);host=0;try lost.stageCoordinated(at:0);try lost.runCoordinated(anchorNanoseconds:10);unavailable=true;host=10;lost.tick();precondition(lost.state == .stopped && lost.terminalFailure != nil)
-print("UMP_REGIONS_PASS: exact adjacent ticks and UInt64+1 end, original attributes/releases, silent staging, 2M compressed late-copy lookup, pause/seek/resume, independent overlapping scopes, sequential physical baselines, uncertain acquisition cleanup, unsupported/overlap admission and endpoint loss")
+print("UMP_REGIONS_PASS: exact adjacent ticks and UInt64+1 end, original attributes/releases and active-copy FIFO drain, exact-entry attacks, silent staging, 2M compressed late-copy lookup, pause/seek/resume, independent overlapping scopes, sequential physical baselines, uncertain acquisition cleanup, unsupported/overlap admission and endpoint loss")
 `
  await writeFile(join(directory,'main.swift'),main)
  const files=['MidiTransport.swift','UmpTransport.swift','UmpState.swift'].map(file=>new URL(file,import.meta.url).pathname)

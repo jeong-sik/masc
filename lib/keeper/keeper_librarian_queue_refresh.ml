@@ -220,7 +220,37 @@ let run_durable_with_commit ~config ~keeper_name ~commit =
       | Off | Stopped Keeper_librarian_durable_consumer.Keeper_meta_absent ->
         clear_reported_problem ~config ~keeper_name ~site:Unread_count;
         None
-      | Lane_unconfigured | Drained | Yielded_to_waiting_unit | Not_committed | Stopped _ | Raised _ ->
+      (* Any other stop reason still leaves the current unread count
+         readable, so it is measured rather than reported as a problem.
+         Every error constructor is named so a new one fails this match
+         instead of silently counting as measurable. *)
+      | Lane_unconfigured
+      | Drained
+      | Yielded_to_waiting_unit
+      | Not_committed
+      | Stopped
+          (Keeper_librarian_durable_consumer.
+             ( Keeper_meta_unreadable _
+             | Boundary_log_unreadable _
+             | Progress_unreadable _
+             | Checkpoint_unreadable _
+             | Position_in_other_trace _
+             | Position_not_in_history _
+             | Range_stopped _
+             | Range_end_boundary_missing _
+             | Progress_boundary_missing _
+             | Memory_snapshot_unreadable _
+             | Counterpart_interval_non_monotone _
+             | Counterpart_observations_unreadable _
+             | Progress_write_failed _
+             | Official_progress_unreadable _
+             | Official_progress_write_failed _
+             | Official_progress_boundary_missing _
+             | Committed_official_range_mismatch
+             | Official_range_stopped _
+             | Fragment_store_unreadable _
+             | Fragment_line_unreadable _ ))
+      | Raised _ ->
         measure_unread ~config ~keeper_name
     in
     publish_measurement ~config ~keeper_name ~last_pass ~unread

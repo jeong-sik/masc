@@ -1706,6 +1706,84 @@ let test_exact_snapshot_preserves_locked_canonical_bytes () =
              (Keeper_checkpoint_store.exact_snapshot_reference decoded))
       | Error _ -> fail "exact snapshot bytes did not decode")
 
+let test_exact_snapshot_callback_serializes_checkpoint_writer () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) @@ fun () ->
+  let session_id = "sess-exact-callback" in
+  save_ok ~session_dir
+    (make_checkpoint ~session_id ~turn_count:4 ~marker:"captured")
+    "exact callback seed";
+  let canonical_path = Filename.concat session_dir (session_id ^ ".json") in
+  let captured_bytes = Fs_compat.load_file canonical_path in
+  let result = Keeper_checkpoint_store.with_agent_core_exact_snapshot
+    ~session_dir ~session_id (fun snapshot ->
+      check string "callback receives exact captured bytes" captured_bytes
+        (Keeper_checkpoint_store.exact_snapshot_canonical_bytes snapshot);
+      let writer_done = Eio.Fiber.fork_promise ~sw (fun () ->
+        save_ok ~session_dir
+          (make_checkpoint ~session_id ~turn_count:5 ~marker:"following")
+          "writer following exact callback") in
+      let lock_path = Unix.realpath session_dir ^ ".checkpoint.lock" in
+      Eio.Fiber.first
+        (fun () ->
+          while File_lock_eio.For_testing.holders_and_waiters ~lock_path < 2 do
+            Eio.Fiber.yield ()
+          done)
+        (fun () ->
+          Eio.Promise.await_exn writer_done;
+          fail "checkpoint writer completed while the exact callback held its source");
+      check string "waiting writer has not changed the source" captured_bytes
+        (Fs_compat.load_file canonical_path);
+      Error "callback declined publication", writer_done) in
+  let writer_done = match result with
+   | Ok (Error detail, writer_done) ->
+     check string "callback refusal remains separate from source errors"
+       "callback declined publication" detail;
+     writer_done
+   | Ok (Ok _, _) -> fail "callback refusal was replaced by success"
+   | Error error ->
+     fail (Keeper_checkpoint_store.checkpoint_ref_load_error_to_string error) in
+  Eio.Promise.await_exn writer_done;
+  match Keeper_checkpoint_store.load_agent_core_exact_snapshot ~session_dir ~session_id with
+  | Error error ->
+    fail (Keeper_checkpoint_store.checkpoint_ref_load_error_to_string error)
+  | Ok snapshot ->
+    check int "writer proceeds after the callback releases the source" 5
+      (Keeper_checkpoint_store.exact_snapshot_checkpoint snapshot).turn_count
+;;
+
+let test_exact_snapshot_callback_refuses_missing_and_propagates_cancellation () =
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) @@ fun () ->
+  let session_id = "sess-exact-callback-cancel" in
+  let called = ref false in
+  (match Keeper_checkpoint_store.with_agent_core_exact_snapshot
+     ~session_dir ~session_id (fun _ -> called := true) with
+   | Error Keeper_checkpoint_store.Ref_not_found -> ()
+   | Error (Keeper_checkpoint_store.Ref_read_failed _
+           | Ref_identity_invalid _ | Ref_session_mismatch _ | Ref_lock_failed _) ->
+     fail "missing source returned a different error"
+   | Ok () -> fail "missing source ran the exact snapshot callback");
+  check bool "missing source never invokes the callback" false !called;
+  save_ok ~session_dir
+    (make_checkpoint ~session_id ~turn_count:1 ~marker:"before-cancel")
+    "cancel callback seed";
+  let cancellation = Eio.Cancel.Cancelled (Failure "cancel exact source callback") in
+  (match Keeper_checkpoint_store.with_agent_core_exact_snapshot
+     ~session_dir ~session_id (fun _ -> raise cancellation) with
+   | Ok _ -> fail "callback cancellation returned success"
+   | Error _ -> fail "callback cancellation became a source error"
+   | exception Eio.Cancel.Cancelled cause ->
+     check bool "callback cancellation keeps its cause" true
+       (cause = Failure "cancel exact source callback"));
+  save_ok ~session_dir
+    (make_checkpoint ~session_id ~turn_count:2 ~marker:"after-cancel")
+    "writer after callback cancellation"
+;;
+
 (* A save hashes the candidate bytes and its source check hashes the file on
    disk. Both hashes run in the pool job that encodes or decodes the same
    bytes. This drives the store from a fiber through a real one-domain pool,
@@ -2744,6 +2822,10 @@ let () =
             test_post_commit_unwind_is_installed;
           test_case "exact snapshot preserves canonical bytes" `Quick
             test_exact_snapshot_preserves_locked_canonical_bytes;
+          test_case "exact callback holds the source until checkpoint publication returns" `Quick
+            test_exact_snapshot_callback_serializes_checkpoint_writer;
+          test_case "exact callback refuses missing source and propagates cancellation" `Quick
+            test_exact_snapshot_callback_refuses_missing_and_propagates_cancellation;
           test_case "pooled saves and loads derive the digest of the file" `Quick
             test_pooled_saves_and_loads_derive_the_digest_of_the_file;
           test_case "structurally invalid checkpoint is refused at the store" `Quick

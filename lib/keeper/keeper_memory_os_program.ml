@@ -69,9 +69,8 @@ let validate_sources sources unread decisions =
 
 let validate_decision (decision : decision) =
   let* () =
-    if String.trim decision.run_id <> "" && String.trim decision.working_state <> ""
-       && decision.sources <> [] then Ok ()
-    else Error "a program decision requires one run, working state and nonempty processed sources" in
+    if String.trim decision.run_id <> "" && String.trim decision.working_state <> "" then Ok ()
+    else Error "a program decision requires one run and working state" in
   let* held = index_facts (facts decision.input_current) in
   let* added = index_facts decision.new_claims in
   let unique values = List.length values = List.length (List.sort_uniq compare values) in

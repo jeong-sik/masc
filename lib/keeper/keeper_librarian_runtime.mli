@@ -80,7 +80,7 @@ type input_capacity_evidence = No_input_capacity_refusal | Input_capacity_refuse
 type not_committed =
   { input_capacity_evidence : input_capacity_evidence
   ; provider_input_refusals : Keeper_librarian_input_refusal.t list
-      (** Named provider input refusals from the exhausted walk, including earlier
+      (** Named provider input refusals encountered in the walk, including earlier
           slots. Empty for local admission, unknown/opaque CLI failures and
           timeouts. This records the actual causes without granting consumption
           authority or claiming that the selected source is indivisible. *)
@@ -170,9 +170,20 @@ type memory_step = private
     become the current input of another step; a working-state summary is
     never substituted for Memory evidence. *)
 
+type memory_inference_failure = private
+  { reports : not_committed list
+  ; exhausted_input_refusals : Keeper_librarian_input_refusal.t list option
+  }
+(** [Some] contains a nonempty set of named provider input refusals from an
+    actually exhausted API-only candidate walk. No CLI tail was declared,
+    every visited candidate reached generation, and no semantic/domain-invalid
+    output or local terminal interrupted the walk. Other dispatched provider
+    failures may coexist with the named refusals. [None] grants no floor
+    exhaustion evidence; diagnostic reports alone never establish it. *)
+
 type memory_inference =
   | Memory_inferred of { step : memory_step; served_by : served_slot }
-  | Memory_not_inferred of not_committed list
+  | Memory_not_inferred of memory_inference_failure
 
 val infer_memory_step
   :  ?cli_runner:Keeper_lane_cli_oneshot.runner

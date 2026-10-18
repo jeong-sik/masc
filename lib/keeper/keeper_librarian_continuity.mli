@@ -60,11 +60,31 @@ val commit : config:Workspace.config -> keeper_name:string -> prepared:prepared 
 val messages : prepared -> Agent_core.Types.message list
 (** Exact new source atoms of the range. The pass renders them once, folded,
     for both Memory disposition and working-state inference. *)
-val source_spans : prepared ->
+val source_spans : ?include_unread:bool -> prepared ->
   (Keeper_librarian_task_context.scope * Agent_core.Types.message list) list
 (** Ordered historical attribution and its exact selected messages, derived
     solely from the frozen checkpoint and boundaries. Narrowing clips spans;
-    a missing admission witness stays unattributed. No current Task lookup. *)
+    a missing admission witness stays unattributed. No current Task lookup.
+    [include_unread=false] omits only exact holes in a recovered Memory receipt,
+    for continuation after Memory has already accounted for the source. *)
+val memory_sources : prepared -> (Keeper_librarian_unread.source list, string) result
+val unread_message : prepared -> source:Keeper_librarian_unread.source ->
+  reasons:Keeper_librarian_input_refusal.t list -> (Keeper_librarian_unread.t, string) result
+(** Bind a refusal to one exact original message in this selected range. The
+    caller must establish actual single-message exhaustion before calling. *)
+val apply_memory_program :
+  ?on_memory_committed:(unit -> unit) ->
+  config:Workspace.config -> keeper_name:string -> prepared:prepared ->
+  anchor:Keeper_memory_os_current.program_anchor ->
+  program:Keeper_memory_os_program.t -> working_state:string -> unit ->
+  (Librarian_continuity_snapshot.t, string) result
+(** Publish the complete volatile program at the original atom boundary. The
+    serial Librarian lane owns cursors and excludes destructive purge. Recheck
+    the selected checkpoint prefix and boundary generation under the stable
+    session lock, then hold continuity CAS ownership across Memory publication.
+    Normal checkpoint/boundary suffix appends are permitted. No inference runs
+    under these locks. Memory's WAL repairs interruption before continuity save;
+    the callback observes Memory durability, not continuity save success. *)
 type turn_window = { after : float option; through : float }
 val turn_window : prepared -> turn_window option
 (** The recorded times of the turn-end lines that bound this unit's turn:

@@ -360,6 +360,7 @@ type continuity_saved =
   ; saved_end_atom : int
   ; saved_last_atom_digest : string
   ; saved_end_boundary_line : int
+  ; saved_unread_messages : Keeper_librarian_unread.t list
   }
 
 (* Whether saved atoms reach past where this round starts. Unlike
@@ -380,6 +381,10 @@ let continuity_saved_reaches_past
   && selected.start_atom < saved.saved_end_atom
   && saved.saved_end_atom <= selected.end_atom
   && saved.saved_end_boundary_line <= selected_end_boundary_line
+  && Result.is_ok (Keeper_librarian_unread.validate_atom_history
+       ~trace_id:saved.saved_trace_id
+       ~history_start_boundary_line:saved.saved_history_start_boundary_line
+       ~end_atom:saved.saved_end_atom ~messages saved.saved_unread_messages)
   && endpoint_witnessed
        ~trace_id:saved.saved_trace_id
        ~end_atom:saved.saved_end_atom
@@ -417,7 +422,7 @@ let continuity_saved_ranges ~config ~keeper_name ~memory_keepers_dir =
   in
   let receipt =
     match
-      Keeper_memory_os_current.committed_durable_range
+      Keeper_memory_os_current.committed_durable_coverage
         ~keepers_dir:memory_keepers_dir
         ~keeper_id:keeper_name
         ~receipt_scope:(Keeper_librarian_continuity.path ~config ~keeper_name)
@@ -431,6 +436,7 @@ let continuity_saved_ranges ~config ~keeper_name ~memory_keepers_dir =
         ; saved_end_atom = range.end_atom
         ; saved_last_atom_digest = range.last_atom_digest
         ; saved_end_boundary_line = range.end_boundary_line
+        ; saved_unread_messages = range.unread_messages
         }
       ]
   in
@@ -439,19 +445,29 @@ let continuity_saved_ranges ~config ~keeper_name ~memory_keepers_dir =
     | Error detail -> unreadable "snapshot" detail
     | Ok None -> []
     | Ok (Some (snapshot : Librarian_continuity_snapshot.t))
-      when Int.equal snapshot.end_atom snapshot.covering_end_atom
-           && snapshot.unread_messages = [] ->
+      when Int.equal snapshot.end_atom snapshot.covering_end_atom ->
       [ { saved_trace_id = snapshot.trace_id
         ; saved_history_start_boundary_line = snapshot.history_start_boundary_line
         ; saved_start_atom = 0
         ; saved_end_atom = snapshot.end_atom
         ; saved_last_atom_digest = snapshot.last_atom_digest
         ; saved_end_boundary_line = snapshot.end_boundary_line
+        ; saved_unread_messages = snapshot.unread_messages
         }
       ]
     | Ok (Some (_ : Librarian_continuity_snapshot.t)) -> []
   in
-  receipt @ published
+  (* A historical snapshot may outlive this scope's last receipt. Never pass
+     its holes unless their exact originals/causes survived in the cumulative
+     Memory ledger; the caller reconciles that ledger before cursor recovery. *)
+  match Keeper_memory_os_current.read_unread_messages ~keepers_dir:memory_keepers_dir
+      ~keeper_id:keeper_name with
+  | Error detail -> unreadable "unread ledger" detail
+  | Ok archived ->
+    List.filter (fun candidate -> List.for_all (fun (hole : Keeper_librarian_unread.t) ->
+      List.exists (fun (stored : Keeper_librarian_unread.t) ->
+        stored.source=hole.source && List.for_all (fun reason -> List.mem reason stored.reasons)
+          hole.reasons) archived) candidate.saved_unread_messages) (receipt @ published)
 ;;
 
 (* The furthest end the continuity round's saved Memory proves for this

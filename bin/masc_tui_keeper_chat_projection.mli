@@ -36,6 +36,9 @@ type admission_intent = Queue_only | Interactive of {control_token : string; tar
 type interactive_outcome = Applied | Stale_control | Paused | Replayed
 type interactive_receipt = {outcome : interactive_outcome; chat_control_token : string;
   signalled : bool; resumed : bool; interrupt_error : string option}
+(** A validated admission receipt. [interrupt_error] is absent only when both
+    wire error metadata fields are null. A present error requires the
+    [interrupt_failed] code and the enclosing operation's exact incident ID. *)
 
 type acceptance = {
   interactive : interactive_receipt option;

@@ -1686,7 +1686,8 @@ let acceptance_wire ~request_id ~at ?(state = "Queued") outcome =
       "interactive", `Assoc ["outcome", `String outcome;
         "chat_control_token", `String "control-after-admission";
         "signalled", `Bool false; "resumed", `Bool false;
-        "interrupt_error", `Null]])
+        "interrupt_error", `Null; "interrupt_error_code", `Null;
+        "interrupt_incident_id", `Null]])
   |> Ag_ui.event_to_sse
 ;;
 

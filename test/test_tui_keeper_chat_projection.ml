@@ -27,7 +27,7 @@ let event event_type fields =
      @ fields)
 
 let acceptance ?(operation_id = "tui-request-1") ?(state = "Queued")
-    ?(queued_count = 0) () =
+    ?(queued_count = 0) ?interactive () =
   `Assoc
     [ "type", `String "CUSTOM"
     ; "threadId", `String "default"
@@ -35,10 +35,10 @@ let acceptance ?(operation_id = "tui-request-1") ?(state = "Queued")
     ; "name", `String "KEEPER_CHAT_OPERATION_ACCEPTED"
     ; ( "value"
       , `Assoc
-          [ "operation_id", `String operation_id
+          ([ "operation_id", `String operation_id
           ; "state", `String state
           ; "queued_count", `Int queued_count
-          ] )
+          ] @ Option.to_list (Option.map (fun receipt -> "interactive", receipt) interactive)) )
     ]
 
 let reply_details ?(reply = "hello") ?(turn_outcome = "visible_reply")
@@ -255,6 +255,85 @@ let test_matching_acceptance_and_reply () =
       check int "queue count" 0 completed.acceptance.queued_count
   | Ok (Chat.Replayed_succeeded _) -> fail "live response classified as replay"
   | Error error -> fail (Chat.stream_error_to_string error)
+
+let interactive_fields =
+  [ "outcome", `String "applied"
+  ; "chat_control_token", `String "current-owner-control"
+  ; "signalled", `Bool false
+  ; "resumed", `Bool false
+  ; "interrupt_error", `Null
+  ; "interrupt_error_code", `Null
+  ; "interrupt_incident_id", `Null
+  ]
+
+let replace_fields changes fields =
+  changes @ List.filter (fun (key, _) -> not (List.mem_assoc key changes)) fields
+
+let completed_interactive_stream fields =
+  [ acceptance ~interactive:(`Assoc fields) (); run_started; text_start
+  ; delta "hello"; reply_details (); text_end; run_finished
+  ]
+
+let test_interactive_receipts_reach_terminal_truth () =
+  List.iter (fun (outcome, signalled, resumed) ->
+    let fields = replace_fields
+        ["outcome", `String outcome; "signalled", `Bool signalled;
+         "resumed", `Bool resumed] interactive_fields in
+    match decode (completed_interactive_stream fields) with
+    | Ok (Chat.Turn_completed {acceptance = {interactive = Some receipt; _}; reply; _}) ->
+        check string "terminal reply is confirmed" "hello" reply;
+        check string "new control authority survives" "current-owner-control" receipt.chat_control_token;
+        check bool "actual signal effect survives" signalled receipt.signalled;
+        check bool "actual resume effect survives" resumed receipt.resumed;
+        check (option string) "no interruption failure invented" None receipt.interrupt_error
+    | Ok _ -> fail "interactive stream did not confirm its terminal reply"
+    | Error error -> fail (Chat.stream_error_to_string error))
+    ["applied", false, false; "applied", true, false; "applied", false, true;
+     "stale_control", false, false; "paused", false, false; "replayed", false, false]
+
+let interrupt_failure_fields =
+  [ "interrupt_error", `String "The active turn could not be interrupted."
+  ; "interrupt_error_code", `String "interrupt_failed"
+  ; "interrupt_incident_id", `String request.request_id
+  ]
+
+let test_interrupt_failure_keeps_accepted_operation () =
+  let fields = replace_fields interrupt_failure_fields interactive_fields in
+  match decode (completed_interactive_stream fields) with
+  | Ok (Chat.Turn_completed {acceptance = {interactive = Some receipt; _}; reply; _}) ->
+      check string "accepted operation still completes" "hello" reply;
+      check (option string) "public interrupt failure retained"
+        (Some "The active turn could not be interrupted.") receipt.interrupt_error;
+      check bool "no signal invented" false receipt.signalled
+  | Ok _ -> fail "interrupt failure discarded the accepted operation"
+  | Error error -> fail (Chat.stream_error_to_string error)
+
+let test_interactive_receipts_reject_incomplete_or_unbound_errors () =
+  let failed = replace_fields interrupt_failure_fields interactive_fields in
+  let cases =
+    List.map (fun field -> "missing " ^ field, List.remove_assoc field interactive_fields)
+      ["interrupt_error_code"; "interrupt_incident_id"]
+    @ List.map (fun (label, changes) -> label, replace_fields changes failed)
+      [ "failure without code", ["interrupt_error_code", `Null]
+      ; "unknown failure code", ["interrupt_error_code", `String "guessed"]
+      ; "failure without incident", ["interrupt_incident_id", `Null]
+      ; "blank incident", ["interrupt_incident_id", `String ""]
+      ; "another operation's incident", ["interrupt_incident_id", `String "other-operation"]
+      ; "non-string incident", ["interrupt_incident_id", `Int 1]
+      ; "metadata without failure", ["interrupt_error", `Null]
+      ; "inactive admission with failure", ["outcome", `String "paused"]
+      ]
+    @ [ "unknown field", ("guessed", `Bool true) :: interactive_fields
+      ; "duplicate metadata", ("interrupt_error_code", `Null) :: interactive_fields
+      ; "inactive admission with effects",
+          replace_fields ["outcome", `String "stale_control"; "resumed", `Bool true] interactive_fields
+      ]
+  in
+  List.iter (fun (label, fields) ->
+    match decode (completed_interactive_stream fields) with
+    | Error (Chat.Malformed_event _) -> ()
+    | Error error -> fail (label ^ ": " ^ Chat.stream_error_to_string error)
+    | Ok _ -> fail (label ^ " was accepted")) cases
 
 let test_acceptance_id_mismatch () =
   match decode [ acceptance ~operation_id:"other-request" () ] with
@@ -1515,6 +1594,12 @@ let () =
             test_active_decode_uses_complete_sse_frames
         ; test_case "matching acceptance and reply" `Quick
             test_matching_acceptance_and_reply
+        ; test_case "interactive receipts reach terminal truth" `Quick
+            test_interactive_receipts_reach_terminal_truth
+        ; test_case "interrupt failure keeps accepted operation" `Quick
+            test_interrupt_failure_keeps_accepted_operation
+        ; test_case "interactive receipts reject incomplete or unbound errors" `Quick
+            test_interactive_receipts_reject_incomplete_or_unbound_errors
         ; test_case "acceptance id mismatch" `Quick
             test_acceptance_id_mismatch
         ; test_case "RUN_ERROR beats partial delta" `Quick

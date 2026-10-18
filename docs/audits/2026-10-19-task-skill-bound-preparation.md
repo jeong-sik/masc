@@ -19,6 +19,11 @@ same exact-reference resolver and return the preparation it constructs. The
 resolver's functional result projection supplies either selection-only or paired
 output at construction, avoiding a throwaway paired container in ordinary resolve
 calls. The output is not recovered with a partial Option operation or a new error.
+The projection cache itself keys snapshots and every ordered descriptor element
+by physical identity (`Preparation_snapshot_key` / `Preparation_descriptor_key`).
+Consequently a resolver-produced preparation belongs to those exact supplied
+inputs even on cache reuse; returning its paired result does not assume equality
+of a revision label or public Tool name.
 
 | Boundary | Before | After |
 | --- | --- | --- |

@@ -14213,24 +14213,32 @@ let runtime_config_edit_session (state : state) =
       && String.equal edit.rce_session.base.path reading.rcv_path) state.runtime_config_edits
   | None, _ | _, None -> None
 
-let runtime_config_source_rows ~path source =
-  Masc_tui_code_lexer.rows_of_source
-    ~language:(Masc_tui_code_lexer.language_of_path path) source
-  |> List.map (List.map (fun (text, kind) ->
-      Masc.Tui_terminal_text.sanitize_terminal_text text, kind))
+let runtime_config_source_rows = Masc_tui_runtime_config_snapshot.source_rows
 
-let put_runtime_config_edit ?(preserve_view=false) (state : state) ~workspace session =
+let put_runtime_config_edit ?(preserve_view=false) ?snapshot (state : state) ~workspace session =
   let previous = List.find_opt (fun edit -> edit.rce_workspace = workspace
     && String.equal edit.rce_session.base.path session.Masc_tui_runtime_config_edit.base.path)
     state.runtime_config_edits in
+  let rows_for_source ~path source_text =
+    match Option.bind snapshot (Masc_tui_runtime_config_snapshot.rows_for_source ~path ~source_text) with
+    | Some rows -> rows
+    | None -> runtime_config_source_rows ~path source_text in
   let view = match preserve_view, previous, session.current with
-    | true, Some {rce_view=Config_edit_current _;_}, Some current ->
-        Config_edit_current (runtime_config_source_rows ~path:current.path current.source_text)
-    | (true, Some { rce_view = Config_edit_current _;_}, None)
-    | (true, Some { rce_view = Config_edit_draft;_}, _) | (true, None, _) | (false, _, _) -> Config_edit_draft in
+    | true, Some previous, Some current ->
+        (match previous.rce_view with
+         | Config_edit_draft -> Config_edit_draft
+         | Config_edit_current rows ->
+             let unchanged = Option.exists (fun observed ->
+               String.equal observed.Masc_tui_runtime_config_edit.path current.path
+               && String.equal observed.source_text current.source_text) previous.rce_session.current in
+             Config_edit_current (if unchanged then rows else
+               rows_for_source ~path:current.path current.source_text))
+    | (true, Some _, None) | (true, None, _) | (false, _, _) -> Config_edit_draft in
+  let draft_rows = match previous with
+    | Some previous when String.equal previous.rce_session.text session.text -> previous.rce_rows
+    | Some _ | None -> rows_for_source ~path:session.base.path session.text in
   let edit = { rce_workspace = workspace; rce_session = session;
-    rce_rows = runtime_config_source_rows ~path:session.Masc_tui_runtime_config_edit.base.path session.text;
-    rce_view = view } in
+    rce_rows = draft_rows; rce_view = view } in
   state.runtime_config_edits <- edit :: List.filter (fun existing ->
     not (existing.rce_workspace = workspace
       && String.equal existing.rce_session.base.path session.base.path)) state.runtime_config_edits

@@ -199,6 +199,20 @@ only the local draft; it does not claim that a pending server write was cancelle
 These changes do not make the external editor itself asynchronous or establish
 measured key/paint latency.
 
+Config source observations prepare whole-source tokenization, terminal sanitization
+and the model table together from one immutable reading before UI admission.
+The shared CPU path reads no live UI, environment, filesystem or palette state.
+Account-group/model interpretation failure leaves the source available; email
+observation failure stays independent. Model selection and source revision come
+from that same reading.
+
+Ordinary refreshes reuse an unchanged retained draft's existing tokenization and
+the matching observation's current-file projection. Sharing tokenization does
+not share editing ownership, adopt a revision or authorize retry. Existing
+workspace/read authority, generation checks and queued follow-up policy still
+control admission. Diagnostic clocks distinguish request start, prepared result
+and UI admission decision; these are not painted-frame or key-latency evidence.
+
 ## Activity
 
 | Keys | What it does |

@@ -608,9 +608,10 @@ type async_msg =
   | Machine_activity_read of Masc_tui_machine_activity.request * (Masc_tui_machine_activity.reading, string) result
   | Machine_activity_saved of Masc_tui_machine_activity.request * Masc_tui_machine_activity.write_result
   | Runtime_config_view_loaded of
-      int * string option
-      * (Masc_tui_runtime_config_view.reading, string) result
-      (* Read generation and captured model-settings entry request. *)
+      int * string option * int64 * int64
+      * (Masc_tui_runtime_config_snapshot.t, string) result
+      (* Original read generation/model entry intent, request start and
+         prepared-result clocks; neither clock proves UI paint. *)
   | Runtime_params_loaded of
       (Masc.Tui_decode.runtime_param_row list, string) result
   | Runtime_param_written of

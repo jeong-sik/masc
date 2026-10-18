@@ -2784,10 +2784,91 @@ let test_runtime_document_uncertainty_requires_new_read outcome =
     (Result.is_ok (begin_runtime_form_save state ~draft:(Config_document_draft adopted) ~started_ns:22L))
 
 
+let test_runtime_snapshot_preserves_source_when_models_unavailable () =
+  let module Snapshot = Masc_tui_runtime_config_snapshot in
+  let reading = { (runtime_form_reading ()) with account_groups=Error "group observation unavailable" } in
+  let snapshot = Snapshot.of_reading reading in
+  Alcotest.(check bool) "source and metadata retain their original reading" true (snapshot.reading == reading);
+  Alcotest.(check bool) "group failure is not an empty model catalogue" true
+    (match snapshot.models with Error _ -> true | Ok _ -> false);
+  Alcotest.(check bool) "failed model interpretation does not hide the original source" true
+    (Option.is_some (Snapshot.rows_for_source ~path:reading.path ~source_text:reading.source_text snapshot));
+  let malformed = { reading with source_text="[not closed"; account_groups=Ok [] } in
+  let snapshot = Snapshot.of_reading malformed in
+  Alcotest.(check string) "operator can retain malformed source to repair it" malformed.source_text snapshot.reading.source_text;
+  Alcotest.(check bool) "malformed model parse stays unavailable" true
+    (match snapshot.models with Error _ -> true | Ok _ -> false)
+
+let test_runtime_snapshot_models_use_same_source_and_server_groups () =
+  let module Snapshot = Masc_tui_runtime_config_snapshot in
+  let source = runtime_form_source ^ {|
+[providers.second]
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+account-home = "/tmp/another-account"
+[second.example]
+|} in
+  let reading = { (runtime_form_reading ()) with source_text=source;
+    account_groups=Ok [["codex";"second"]]; account_emails=Error "emails unavailable" } in
+  let snapshot = Snapshot.of_reading reading in
+  let rows = match snapshot.models with Ok rows -> rows | Error detail -> Alcotest.fail detail in
+  let row = match List.find_opt (fun (row : Masc_tui_model_runtime_table.row) -> row.provider="codex") rows with
+    | Some row -> row | None -> Alcotest.fail "binding missing from source snapshot" in
+  Alcotest.(check int) "both exact source bindings retained" 2 (List.length rows);
+  Alcotest.(check (list string)) "membership comes from this server reading" ["second"] row.same_login;
+  Alcotest.(check (option int)) "context belongs to original binding" (Some 272000) (Option.map snd row.context);
+  Alcotest.(check bool) "unavailable email observation is retained independently" true
+    (match snapshot.reading.account_emails with Error _ -> true | Ok _ -> false);
+  Alcotest.(check bool) "another path cannot reuse this projection" true
+    (Option.is_none (Snapshot.rows_for_source ~path:(reading.path ^ ".other") ~source_text:source snapshot));
+  Alcotest.(check bool) "another source cannot reuse this projection" true
+    (Option.is_none (Snapshot.rows_for_source ~path:reading.path ~source_text:runtime_form_source snapshot))
+
+let test_runtime_snapshot_refresh_reuses_draft_without_changing_ownership () =
+  let open Masc_tui_types in
+  let module Edit = Masc_tui_runtime_config_edit in
+  let module Snapshot = Masc_tui_runtime_config_snapshot in
+  let state,workspace,session = runtime_document_fixture () in
+  let initial = List.hd state.runtime_config_edits in
+  state.runtime_config_edits <- [{initial with rce_view=Config_edit_current []}];
+  let reading = { (runtime_form_reading ()) with path=session.base.path; source_text="value = 4\n";
+    metadata={ (runtime_form_reading ()).metadata with source_revision="fresh"} } in
+  let snapshot = Snapshot.of_reading reading in
+  let current : Edit.document = {path=reading.path; source_text=reading.source_text;
+    source_revision=reading.metadata.source_revision} in
+  let observed = match Edit.observe ~read_generation:3 current session with
+    | Ok session -> session | Error detail -> Alcotest.fail detail in
+  put_runtime_config_edit ~preserve_view:true ~snapshot state ~workspace observed;
+  let held = List.hd state.runtime_config_edits in
+  Alcotest.(check bool) "observation reuses existing immutable draft projection" true
+    (held.rce_rows == initial.rce_rows);
+  (match held.rce_view with
+   | Config_edit_current rows -> Alcotest.(check bool) "comparison reuses the matching source projection" true
+       (rows == snapshot.rows)
+   | Config_edit_draft -> Alcotest.fail "comparison intent was lost");
+  Alcotest.(check bool) "projection cannot change editing ownership" true (Edit.same_draft session held.rce_session);
+  Alcotest.(check bool) "projection cannot choose a new basis" true (Edit.same_basis session held.rce_session);
+  Alcotest.(check string) "observation does not replace original input" session.text held.rce_session.text;
+  Alcotest.(check (option int)) "current comparison retains original read generation" (Some 3)
+    held.rce_session.current_read_generation;
+  let successor = Edit.edit session.text held.rce_session in
+  put_runtime_config_edit ~snapshot state ~workspace successor;
+  let held = List.hd state.runtime_config_edits in
+  Alcotest.(check bool) "same-text successor may share tokens without sharing draft authority" true
+    (held.rce_rows == initial.rce_rows && not (Edit.same_draft session held.rce_session))
+
+
 let () =
   Alcotest.run "tui_server_identity_refresh"
     [ ( "server-identity-refresh"
-      , [ Alcotest.test_case "document save owns exact input across refreshed observation" `Quick
+      , [ Alcotest.test_case "config projection retains source through unavailable model interpretation" `Quick
+            test_runtime_snapshot_preserves_source_when_models_unavailable
+        ; Alcotest.test_case "config projection joins exact source and server group observations" `Quick
+            test_runtime_snapshot_models_use_same_source_and_server_groups
+        ; Alcotest.test_case "config projection reuse preserves draft and observation ownership" `Quick
+            test_runtime_snapshot_refresh_reuses_draft_without_changing_ownership
+        ; Alcotest.test_case "document save owns exact input across refreshed observation" `Quick
             test_runtime_document_save_owns_exact_input_across_refresh
         ; Alcotest.test_case "late document receipt retains same-text successor and foreign drafts" `Quick
             test_runtime_document_late_success_keeps_same_text_successor

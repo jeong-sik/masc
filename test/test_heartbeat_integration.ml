@@ -503,9 +503,9 @@ let test_restart_state_preservation () =
   ignore (R.dispatch_event ~base_path:bp "restartable"
     (KSM.Fiber_terminated { outcome = "first crash"; provider_id = None; http_status = None }));
   R.record_crash ~base_path:bp "restartable" 100.0 "first crash";
-  (* Simulate sweep restart: re-register then restore state *)
+  (* Simulate test fixture state restoration across re-registration *)
   let _reg2 = R.For_testing.register ~base_path:bp "restartable" meta in
-  R.restore_supervisor_state ~base_path:bp "restartable"
+  R.For_testing.restore_supervisor_state ~base_path:bp "restartable"
     ~restart_count:1
     ~crash_log:[(100.0, "first crash")];
   match R.get ~base_path:bp "restartable" with

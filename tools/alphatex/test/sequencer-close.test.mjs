@@ -29,7 +29,7 @@ async function controller(options = {}) {
     writeFile: async path => { observed.writes.push(path) },
     copyFile: async (from, to) => { observed.copies.push([from, to]) },
     constants, join, resolve, tmpdir: () => '/synthetic', randomUUID, emitKeypressEvents() {},
-    spawn() { observed.players++; throw new Error('Unexpected playback') }, Worker,
+    openPlayback(value) { observed.players++; if (options.playback) return options.playback(value); throw new Error('Unexpected playback') }, Worker,
     Note: { fromMidi: String }, ...editor, harmonyAt, PPQ,
     loadProject: async () => { throw new Error('Unexpected load') },
     saveProject: async (path, project) => { observed.saved.push(structuredClone(project)); return 'revision' },
@@ -43,7 +43,7 @@ async function controller(options = {}) {
   const prefix = `const {${Object.keys(globalThis[slot]).join(',')}} = globalThis[${JSON.stringify(slot)}];\n`
   const { viewSequencer } = await import('data:text/javascript;base64,' + Buffer.from(prefix + source).toString('base64'))
   const signal = new AbortController()
-  const done = viewSequencer({ root: '/synthetic', signal: signal.signal }).finally(() => { delete globalThis[slot] })
+  const done = viewSequencer({ root: '/synthetic', output: options.output, signal: signal.signal }).finally(() => { delete globalThis[slot] })
   await new Promise(resolve => setImmediate(resolve))
   const key = (name, text = '') => process.stdin.emit('keypress', text, { name })
   return { observed, done, signal, process, key,
@@ -107,4 +107,31 @@ test('closing waits for an active nested recording to finish after cancellation'
   release(); await view.done
   assert.deepEqual(pitches(view), [60])
   assert.equal(view.process.stdin.isRaw, false)
+})
+
+test('native playback owns pause, seek, resume, output identity and terminal teardown', async () => {
+  const requests = [], calls = []
+  let finishPlayback
+  const completion = new Promise(resolve => { finishPlayback = resolve })
+  const view = await controller({ output: 'loopback-UID', playback(value) {
+    requests.push(value)
+    return { ready: Promise.resolve(), completion,
+      pause() { calls.push(['pause']) }, resume() { calls.push(['resume']) },
+      seek(seconds) { calls.push(['seek', seconds]) }, status() {},
+      stop() { calls.push(['stop']) }, terminate() { calls.push(['terminate']); finishPlayback() } }
+  } })
+  view.key('return'); view.key('space'); await flush()
+  const [job] = view.observed.workers[0].requests
+  view.observed.workers[0].emit('message', { id: job.id, ok: true, result: { path: '/synthetic/phrase.wav', clippedSamples: 0 } })
+  await flush()
+  assert.equal(requests[0].output, 'loopback-UID')
+  requests[0].onEvent({ kind: 'playing', currentTime: 0, duration: 9.6 })
+  view.key('space'); await flush()
+  requests[0].onEvent({ kind: 'paused', currentTime: 0.2, duration: 9.6 })
+  view.command('seek 2'); view.key('space'); await flush()
+  assert.deepEqual(calls, [['pause'], ['seek', 1.2], ['resume']])
+  view.key('q'); await view.done
+  assert.deepEqual(calls.slice(-2), [['stop'], ['terminate']])
+  assert.equal(view.process.stdin.isRaw, false)
+  assert.deepEqual(pitches(view), [60])
 })

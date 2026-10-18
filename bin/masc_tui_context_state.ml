@@ -1,49 +1,50 @@
 module Decode = Masc.Tui_decode
 module Projection = Masc.Keeper_context_observation_projection
+module Fetched = Masc_tui_fetched
 
-type reading = {
-  observation : Decode.context_observation option;
-  error : string option;
+type key = {
+  scope : unit ref;
+  base_path : string;
+  keeper_name : string;
+  identity : (string, string) result;
 }
 
-type t =
-  | Empty
-  | Reading of {
-      keeper_name : string;
-      reading : reading;
-    }
+type request = key Fetched.request
+type t = (key, Decode.context_observation) Fetched.t
+type start_result = Already_loading | Started of t * request
 
-let empty = Empty
+let empty = Fetched.initial
+let clear = Fetched.clear
+let suspend = Fetched.suspend
 
-let reading_for_keeper ~keeper_name = function
-  | Reading snapshot when String.equal snapshot.keeper_name keeper_name ->
-      Some snapshot.reading
-  | Empty | Reading _ -> None
+let key_for_keeper ~scope ~base_path (keeper : Decode.keeper) =
+  { scope; base_path; keeper_name = keeper.k_name;
+    identity = Result.map (fun identity -> identity.Decode.k_trace_id) keeper.k_identity }
+
+let same_key left right =
+  left.scope == right.scope && String.equal left.base_path right.base_path
+  && String.equal left.keeper_name right.keeper_name && left.identity = right.identity
+
+let describe_key key = key.base_path, key.keeper_name, Result.to_option key.identity
+let current_key = Fetched.current_key
+let request_key = Fetched.request_key
+let request_id = Fetched.request_id
+let is_current state request = Fetched.is_current ~equal:same_key state request
+
+let start state ~key =
+  match Fetched.start ~equal:same_key state ~key with
+  | Fetched.Already_loading -> Already_loading
+  | Fetched.Started (state, request) -> Started (state, request)
+
+let complete state request result = Fetched.complete ~equal:same_key state request result
+let view state ~key = Fetched.view_for ~equal:same_key state ~key
 
 let resolve_with ~project (keeper : Decode.keeper) =
-  match
-    Result.bind keeper.k_identity (fun identity ->
-      let json =
-        project ~keeper_name:keeper.k_name ~current_trace_id:identity.k_trace_id
-        |> fun fields -> `Assoc fields
-      in
+  Result.bind keeper.k_identity (fun identity ->
+      let json = project ~keeper_name:keeper.k_name ~current_trace_id:identity.k_trace_id
+        |> fun fields -> `Assoc fields in
       Decode.decode_context_observation ~expected_trace_id:identity.k_trace_id json)
-  with
-  | Ok observation ->
-      Reading
-        { keeper_name = keeper.k_name;
-          reading = { observation = Some observation; error = None };
-        }
-  | Error error ->
-      Reading
-        { keeper_name = keeper.k_name;
-          reading = { observation = None; error = Some error };
-        }
 
 let load ~config =
   resolve_with ~project:(fun ~keeper_name ~current_trace_id ->
       Projection.context_fields ~config ~keeper_name ~current_trace_id)
-
-let for_selection ~load = function
-  | Some keeper -> load keeper
-  | None -> empty

@@ -1378,6 +1378,82 @@ let apply_metadata_observation state request metadata =
   | Some (Ok observed) -> Masc_tui_loader.apply_local_keepers state observed
   | Some (Error _) | None -> Alcotest.fail "metadata observation was not admitted"
 
+let start_live_context_exn state keeper =
+  match Masc_tui_context_state.start state.Masc_tui_types.live_context
+          ~key:(Masc_tui_types.live_context_key state keeper) with
+  | Masc_tui_context_state.Started (next, request) -> state.live_context <- next; request
+  | Masc_tui_context_state.Already_loading -> Alcotest.fail "context request already pending"
+
+let live_context_fixture () =
+  let state, keeper, metadata = local_keeper_source_fixture () in
+  Masc_tui_loader.apply_local_keepers state metadata;
+  state.view <- Masc_tui_types.Keepers Keeper_detail;
+  state.keeper_cursor <- 0;
+  state, keeper
+
+let test_live_context_refuses_changed_trace_before_reconciliation () =
+  let open Masc_tui_types in
+  let state, keeper = live_context_fixture () in
+  let old = start_live_context_exn state keeper in
+  let current = { keeper with k_identity =
+      Result.map (fun (identity : Tui_decode.keeper_identity) ->
+        { identity with k_trace_id = "successor-trace" }) keeper.k_identity } in
+  state.keepers <- [ current ];
+  Alcotest.(check bool) "queued old trace cannot land before reconciliation" false
+    (take_live_context_observation state old (Error "previous trace"));
+  Alcotest.(check bool) "discarded completion also retires its pending owner" true
+    (Masc_tui_context_state.current_key state.live_context = None);
+  (* A return to the original identity before the next reconciliation must
+     start a new worker, rather than coalesce onto the discarded result. *)
+  state.keepers <- [ keeper ];
+  let returned = start_live_context_exn state keeper in
+  Alcotest.(check bool) "return to the original key can settle afresh" true
+    (take_live_context_observation state returned (Error "returned key"));
+  state.keepers <- [ current ];
+  let fresh = start_live_context_exn state current in
+  Alcotest.(check bool) "late old result cannot settle the successor" true
+    (not (take_live_context_observation state old (Error "late result"))
+     && Masc_tui_context_state.is_current state.live_context fresh);
+  Alcotest.(check bool) "current failure is admitted exactly once" true
+    (take_live_context_observation state fresh (Error "current store failure")
+     && not (take_live_context_observation state fresh (Error "duplicate")))
+
+let test_live_context_chat_target_is_independent_of_roster_cursor () =
+  let open Masc_tui_types in
+  let state, keeper = live_context_fixture () in
+  let other = { keeper with k_name = "beta" } in
+  state.keepers <- [ keeper; other ];
+  state.view <- Keepers Keeper_message;
+  state.msg_target_keeper_name <- Some keeper.k_name;
+  state.keeper_cursor <- 1;
+  Alcotest.(check bool) "chat target owns the source, rather than the roster cursor" true
+    (live_context_keeper state = Some keeper);
+  let request = start_live_context_exn state keeper in
+  Alcotest.(check bool) "moving the roster does not steal the chat source" true
+    (take_live_context_observation state request (Error "target context unavailable"));
+  state.msg_target_keeper_name <- Some "missing";
+  Alcotest.(check bool) "missing chat target cannot fall back to a roster row" true
+    (live_context_keeper state = None);
+  state.view <- Overview;
+  Alcotest.(check bool) "unrelated surface does not request a Keeper context" true
+    (live_context_keeper state = None)
+
+let test_live_context_suspension_cancels_and_retires_same_path_read () =
+  let open Masc_tui_types in
+  let state, keeper = live_context_fixture () in
+  let request = start_live_context_exn state keeper in
+  let cancelled = ref 0 in
+  supersede_live_context_read state (Some (fun () -> incr cancelled));
+  suspend_workspace_readings state;
+  state.workspace_identity <- Workspace_identity_match;
+  state.local_keepers <- Local_workspace_read;
+  Alcotest.(check int) "workspace suspension requested source cancellation" 1 !cancelled;
+  Alcotest.(check bool) "same path after reconfirmation cannot revive old scope" false
+    (take_live_context_observation state request (Error "old scope"));
+  let current = start_live_context_exn state keeper in
+  Alcotest.(check bool) "new scope owns its observation" true
+    (take_live_context_observation state current (Error "current scope"))
+
 let test_keeper_metadata_admits_input_before_work_completes () =
   let open Masc_tui_types in
   let state, keeper, metadata = local_keeper_source_fixture () in
@@ -1865,6 +1941,12 @@ let () =
             test_keeper_metadata_admits_input_before_work_completes
         ; Alcotest.test_case "local source failures remain independent" `Quick
             test_local_source_failures_are_independent
+        ; Alcotest.test_case "context refuses queued prior-trace results" `Quick
+            test_live_context_refuses_changed_trace_before_reconciliation
+        ; Alcotest.test_case "chat target owns context independently of roster cursor" `Quick
+            test_live_context_chat_target_is_independent_of_roster_cursor
+        ; Alcotest.test_case "context suspension cancels and retires the source" `Quick
+            test_live_context_suspension_cancels_and_retires_same_path_read
         ; Alcotest.test_case "local tickets cannot cross sources or suspension" `Quick
             test_local_source_tickets_cannot_cross_or_survive_suspension
         ; Alcotest.test_case "early roster preserves source and workspace ownership" `Quick

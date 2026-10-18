@@ -21,7 +21,6 @@ open Masc_tui_render_prim
    the buffer's own whether or not the roster is showing. Zero means no chat
    history was drawn, which is what keeps a stale row from answering. *)
 
-module Context_state = Masc_tui_context_state
 module Frame_presenter = Masc_tui_frame_presenter
 module Keeper_chat = Masc_tui_keeper_chat_projection
 module Keeper_chat_diff = Masc_tui_keeper_chat_diff
@@ -4544,17 +4543,22 @@ let render_keeper_message (state : state) =
     let context_item =
       if not target_registered then None
       else
-        match
-          Context_state.reading_for_keeper ~keeper_name state.live_context
-        with
-        | Some { observation = Some observation; error = None } ->
+        let reading =
+          match List.find_opt (fun (keeper : keeper) -> String.equal keeper.k_name keeper_name)
+                  state.keepers with
+          | None -> Masc_tui_fetched.Absent
+          | Some keeper -> live_context_view state keeper in
+        match reading with
+        | Masc_tui_fetched.Ready observation ->
             Observation_layout.context_header_item
               ~max_cells:(min
                 (if state.msg_origin_display = Message_layout.Origin_bare then 24 else 48)
                 (telemetry_identity_cells / 2))
               ~inspect_key:Masc_tui_keys.context_inspector_label observation
-        | Some {error = Some _; _} -> Some "Context unavailable"
-        | Some _ | None -> Some "Context —"
+        | Masc_tui_fetched.Stale _ -> Some "Context refresh failed"
+        | Masc_tui_fetched.Failed _ -> Some "Context unavailable"
+        | Masc_tui_fetched.Loading -> Some "Context reading"
+        | Masc_tui_fetched.Absent -> Some "Context —"
     in
     let context_cells =
       match context_item with

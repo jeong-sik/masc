@@ -349,6 +349,8 @@ type async_msg =
       * (string, string) result
   | Keeper_chat_older_loaded of
       int * string * string option * (Masc_tui_keeper_chat_history.page, Masc_tui_keeper_chat_history.page_error) result
+  | Live_context_loaded of Masc_tui_context_state.request * int64
+      * (Masc.Tui_decode.context_observation, string) result
   | Local_keepers_read of local_workspace_request * (Masc_tui_loader.local_keeper_reading, string) result
   | Local_workspace_read of local_workspace_request * (Masc_tui_loader.local_reading, string) result
   | Lanes_loaded of

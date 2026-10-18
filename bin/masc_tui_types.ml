@@ -7390,6 +7390,7 @@ type state = {
   mutable log_scroll: int;
   mutable log_wrap_cols: int option;
   mutable live_context: Masc_tui_context_state.t;
+  mutable live_context_cancel: (unit -> unit) option;
   mutable overview: overview_snapshot option;
   mutable overview_error: string option;
   mutable overview_preview: overview_preview option;
@@ -8543,6 +8544,56 @@ let take_local_workspace_read (state : state) ~source request result =
               | Local_work -> state.local_workspace <- Local_workspace_failed detail));
         Some result
 
+let supersede_live_context_read (state : state) cancel =
+  let previous = state.live_context_cancel in
+  state.live_context_cancel <- cancel;
+  Option.iter (fun stop -> stop ()) previous
+
+let live_context_keeper (state : state) =
+  if state.workspace_identity <> Workspace_identity_match
+     || state.local_keepers <> Local_workspace_read
+     || Option.is_some state.keepers_error then None
+  else match state.view with
+    | Keepers Keeper_message ->
+        Option.bind state.msg_target_keeper_name (fun name ->
+            List.find_opt (fun (keeper : keeper) -> String.equal name keeper.k_name) state.keepers)
+    | Keepers (Keeper_list | Keeper_detail | Keeper_logs | Keeper_calls | Keeper_runtime_pick) ->
+        List.nth_opt state.keepers state.keeper_cursor
+    | Overview | Acting | Metrics | Memory | Lanes | Clients | Board | Approvals
+    | Planning | Schedules | Verification | Harness | Fusion | Repositories | Code
+    | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> None
+
+let live_context_key (state : state) keeper =
+  Masc_tui_context_state.key_for_keeper ~scope:state.workspace_read_authority
+    ~base_path:state.local_base_path keeper
+
+let live_context_view (state : state) keeper =
+  match state.workspace_identity, state.local_keepers, state.keepers_error with
+  | Workspace_identity_match, Local_workspace_read, None ->
+      Masc_tui_context_state.view state.live_context ~key:(live_context_key state keeper)
+  | Workspace_identity_match, Local_workspace_failed detail, _
+  | Workspace_identity_match, (Local_workspace_unread | Local_workspace_read), Some detail ->
+      Masc_tui_fetched.Failed detail
+  | Workspace_identity_match, Local_workspace_unread, None
+  | (Workspace_identity_unread | Workspace_identity_match_unconfirmed _ | Workspace_identity_mismatch _), _, _ ->
+      Masc_tui_fetched.Absent
+
+let take_live_context_observation (state : state) request result =
+  if not (Masc_tui_context_state.is_current state.live_context request) then false
+  else match live_context_keeper state with
+    | Some keeper when
+        Masc_tui_context_state.same_key (live_context_key state keeper)
+          (Masc_tui_context_state.request_key request) ->
+        state.live_context <- Masc_tui_context_state.complete state.live_context request result;
+        true
+    | Some _ | None ->
+        (* The worker has returned. Retire its pending slot as well as dropping
+           the value, so returning to this key before reconciliation cannot
+           leave a read pending with no worker able to finish it. *)
+        state.live_context <- Masc_tui_context_state.clear state.live_context;
+        supersede_live_context_read state None;
+        false
+
 (* Pending reads and post-action offers belong to the workspace that admitted
    them. A successful health response with missing paths is still unread;
    only comparable paths can confirm that an origin has been replaced. *)
@@ -8685,6 +8736,8 @@ let retire_keeper_message_search state =
   Atomic.incr state.msg_search_generation
 
 let suspend_workspace_readings state =
+  state.live_context <- Masc_tui_context_state.suspend state.live_context;
+  supersede_live_context_read state None;
   state.http_surface_reads <- Surface_read_order.invalidate state.http_surface_reads;
   retire_keeper_message_search state;
   state.workspace_read_authority <- ref ();
@@ -11810,6 +11863,7 @@ let create_state
   log_scroll = 0;
   log_wrap_cols = None;
   live_context = Masc_tui_context_state.empty;
+  live_context_cancel = None;
   overview = None;
   overview_error = None;
   overview_preview = None;

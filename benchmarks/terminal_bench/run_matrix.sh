@@ -72,7 +72,12 @@ done <<<"${excluded}"
 # The MASC arms take the masc provider id (render_configs.PROVIDERS); harbor's
 # agents name some providers differently.
 case "${MODEL%%/*}" in
-  anthropic) BASELINE_AGENT=claude-code; BASELINE_MODEL="${MODEL}" ;;
+  anthropic|claude_code) BASELINE_AGENT=claude-code; BASELINE_MODEL="anthropic/${MODEL#*/}" ;;
+  codex_subscription)
+    export CODEX_FORCE_AUTH_JSON="${CODEX_FORCE_AUTH_JSON:-true}"
+    BASELINE_AGENT=codex
+    BASELINE_MODEL="openai/${MODEL#*/}"
+    ;;
   # Harbor 0.23's kimi-cli installs the retired PyPI package, which exits 0
   # after a retirement notice. The maintained native CLI uses another protocol.
   kimi_coding) BASELINE_AGENT=agents.kimi_code_agent:KimiCodeAgent; BASELINE_MODEL="kimi/${MODEL#*/}" ;;

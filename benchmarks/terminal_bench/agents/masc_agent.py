@@ -30,6 +30,7 @@ from render_configs import (  # noqa: E402
     effective_runtime_id,
     keeper_route,
     render_arm,
+    resolve_provider_credential,
 )
 from masc_config_provenance import (  # noqa: E402
     ConfigProvenance,
@@ -128,10 +129,7 @@ class MascAgent(BaseInstalledAgent):
 
     def _container_env(self) -> dict[str, str]:
         provider = self.runtime_id.split(".", 1)[0]
-        key_env = PROVIDERS[provider]["api_key_env"]
-        key = self._get_env(key_env)
-        if not key:
-            raise RuntimeError(f"{key_env} not set in Harbor agent environment")
+        key_env, key = resolve_provider_credential(provider, self._get_env)
         env = {
             key_env: key,
             # masc resolves `<provider>.<binding id>`, and the binding id is a

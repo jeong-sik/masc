@@ -134,7 +134,7 @@ Docker 커널 검사로 네트워크 격리를 지원하는지도 확인한다. 
 
 | arm | 구성 |
 |---|---|
-| a | 같은 모델의 CLI (anthropic → Harbor `claude-code`, kimi_coding → `agents.kimi_code_agent:KimiCodeAgent`) |
+| a | 같은 모델의 CLI (`anthropic`/`claude_code` → Harbor `claude-code`, `codex_subscription` → Harbor `codex` + `CODEX_FORCE_AUTH_JSON=true`, `kimi_coding` → `agents.kimi_code_agent:KimiCodeAgent`) |
 | b | keeper 1, skills·composition·parallel·fusion 끔 |
 | c | b + skills |
 | d | c + composition (Skill이 정의한 조합 도구) |
@@ -188,6 +188,7 @@ Anthropic 요청에서는 `tool_choice.disable_parallel_tool_use`, OpenAI 요청
 | `ollama_cloud` | `OLLAMA_CLOUD_API_KEY` | OpenAI-compatible wire(`https://ollama.com/v1`). arm A 스킵(같은 모델 harbor 에이전트 없음), b·c·d 거절(suppression 계약 없음) — `./run_matrix.sh e,f,h` 로 돌린다. 예: `-m ollama_cloud/deepseek-v4-pro`. `deepseek-v4.1-flash` 는 uncontrolled 대신 effort low 로 렌더한다(기본값은 reasoning 반복 붕괴 6/6, low 는 통과 실측) |
 | `openai` | `OPENAI_API_KEY` | 2026-09-10 기준 키에 크레딧이 없어 요청 생성 이후는 확인하지 못했다 |
 | `claude_code` | `CLAUDE_CODE_OAUTH_TOKEN` | 아래 구독 레인 |
+| `codex_subscription` | `CODEX_AUTH_JSON` 또는 `~/.codex/auth.json` | 아래 구독 레인 (`codex-app-server`, 예: `codex_subscription/gpt-6-luna`) |
 
 Ollama Cloud의 uncontrolled 바인딩은 `reasoning-uncontrolled = true`와
 `thinking-control-format = "none"`을 선언하고, `thinking-support`와
@@ -216,7 +217,7 @@ Ollama Cloud의 uncontrolled 바인딩은 `reasoning-uncontrolled = true`와
   keeper_up 은 그 값을 keeper 의 `[runtime.assignments]` 로 쓰기 때문에, 첫 모델 id 를
   주면 keeper 가 그 모델에 고정돼 lane 을 한 번도 안 지난다.
 - 후보는 같은 provider 의 서로 다른 모델이어야 한다. 컨테이너에 넘기는 키가 하나이고,
-  같은 모델을 두 번 넣으면 이 거절을 못 넘긴다. official client(`claude_code`)는 받지 않는다.
+  같은 모델을 두 번 넣으면 이 거절을 못 넘긴다. official client(`claude_code`, `codex_subscription`)는 받지 않는다.
 - 다른 arm 에 fallback 을 주면 렌더 단계에서 거절한다. arm 하나는 처치 하나로 남긴다.
 - 후보 순서를 따라 넘어가는 arm 은 L 하나다. 나머지 arm(b–h, k)은 모델 하나만 재므로
   리더보드 비교에는 그쪽을 쓴다.
@@ -235,23 +236,29 @@ Ollama Cloud의 uncontrolled 바인딩은 `reasoning-uncontrolled = true`와
     uv run python configs/render_configs.py l --runtime-id openrouter.z-ai/glm-5.3 \
       --fallback-runtime-id openrouter.deepseek/deepseek-v4-pro
 
-## Claude Code 구독 레인 (`claude_code/<model>`)
+## Claude Code / Codex 구독 레인 (`claude_code/<model>`, `codex_subscription/<model>`)
 
-keeper 의 모델 런타임을 수정하지 않은 Claude Code CLI 로 쓴다(masc protocol
-`claude-code`). 도구는 masc 가 MCP 로 넣고 CLI 내장 도구는 끄므로 측정 대상은 masc
-루프이고, 세션·컴팩션·로그인만 CLI 가 맡는다.
+keeper 의 모델 런타임을 수정하지 않은 공식 CLI 로 쓴다(masc protocol
+`claude-code`, `codex-app-server`). 도구는 masc 가 MCP/동적 도구로 넣고 CLI 내장 도구는
+끄므로 측정 대상은 masc 루프이고, 세션·컴팩션·로그인만 CLI 가 맡는다.
 
     claude setup-token                      # 호스트에서 1회, 토큰을 복사
     export CLAUDE_CODE_OAUTH_TOKEN=...
     BENCH_MODEL=claude_code/claude-sonnet-5 CONCURRENCY=1 ./run_matrix.sh e 1
 
+    codex login                             # 호스트 ~/.codex/auth.json 사용 (또는 CODEX_AUTH_JSON_PATH / CODEX_AUTH_JSON)
+    BENCH_MODEL=codex_subscription/gpt-6-luna CONCURRENCY=1 ./run_matrix.sh a,e 1
+
 - b·c·d는 설정 생성 단계에서 거절한다. MASC의 공식 CLI 경로에는 한 응답의 병렬
   도구 호출을 끄는 요청 제어가 없다. spawn 도구 제한으로 이 조건을 대신하지 않는다.
-
 - effort 는 `--ak effort=high|max` 로 준다(CLI 의 --effort; minimal 은 거부).
-- bootstrap.sh 가 native 설치본을 깔고 `claude auth status --json` 이 `oauth_token` 을
-  보고할 때만 서버를 띄운다.
-- 구독 5시간 창을 쓰므로 `CONCURRENCY=1` 또는 2. 한도 도달은 masc 가 CLI 의
+- `claude_code` 는 bootstrap.sh 가 native 설치본을 깔고 `claude auth status --json` 이
+  `oauth_token` 을 보고할 때만 서버를 띄운다.
+- `codex_subscription` 은 bootstrap.sh 가 공식 설치 스크립트(`https://chatgpt.com/codex/install.sh`)로
+  단독 바이너리를 깔고 `/root/.codex/auth.json` 을 시드한 뒤 `codex login status` 가
+  ChatGPT 구독 로그인을 보고할 때만 서버를 띄운다. arm A 는 Harbor 내장 `codex` 에이전트에
+  `CODEX_FORCE_AUTH_JSON=true` 와 `openai/<model>` 을 넘긴다.
+- 구독 창을 쓰므로 `CONCURRENCY=1` 또는 2. 한도 도달은 masc 가 CLI 의
   rate_limit 이벤트로 받아 검증 실패와 섞이지 않는다.
 - 정책: OAuth 는 "ordinary use of Claude Code" 용도다
   (code.claude.com/docs/en/legal-and-compliance). 매트릭스 규모로 돌릴지는 운영자

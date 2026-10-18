@@ -54,6 +54,7 @@ from render_configs import (  # noqa: E402
     REPO_ROOT,
     effective_runtime_id,
     render_arm,
+    resolve_provider_credential,
 )
 from masc_config_provenance import (  # noqa: E402
     ConfigProvenance,
@@ -152,10 +153,7 @@ class MascSidecar:
         if provider not in PROVIDERS:
             raise ValueError(
                 f"unknown provider {provider!r}; expected one of {sorted(PROVIDERS)}")
-        key_env = PROVIDERS[provider]["api_key_env"]
-        key = self._get_env(key_env)
-        if not key:
-            raise RuntimeError(f"{key_env} not set in Harbor agent environment")
+        key_env, key = resolve_provider_credential(provider, self._get_env)
         env = {
             key_env: key,
             # MASC resolves `<provider>.<binding id>`, and the binding id is a

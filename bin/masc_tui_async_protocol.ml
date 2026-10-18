@@ -609,6 +609,8 @@ type async_msg =
   | Verification_evidence_loaded of
       string * (Masc_tui_evidence_picture.evidence,
                 Masc_tui_types.Verification_evidence_read.failure) result
+  | Keeper_settings_editor_loaded of Masc_tui_types.keeper_settings_request *
+      (Masc_tui_types.keeper_settings_snapshot, string) result
   | Keeper_config_view_loaded of Masc_tui_types.detail_read_request * (string list, string) result
   | Keeper_items_loaded of
       Masc_tui_types.detail_read_request * (string option * Masc_tui_keeper_items.t, string) result
@@ -850,6 +852,7 @@ let rec workspace_message_is_read = function
   | Goal_timeline_loaded _
   | Task_history_loaded _
   | Verification_evidence_loaded _
+  | Keeper_settings_editor_loaded _
   | Keeper_config_view_loaded _
   | Keeper_items_loaded _
   | Keeper_sandbox_view_loaded _
@@ -1056,7 +1059,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Verification_verdict_done _ | Harness_label_done _
     | Keeper_calls_loaded (_, _, _) | Goal_timeline_loaded (_, _)
     | Task_history_loaded (_, _) | Task_cancel_done (_, _, _)
-    | Verification_evidence_loaded (_, _) | Keeper_config_view_loaded (_, _)
+    | Verification_evidence_loaded (_, _) | Keeper_settings_editor_loaded _ | Keeper_config_view_loaded (_, _)
     | Keeper_items_loaded (_, _) | Keeper_sandbox_view_loaded (_, _)
     | Keeper_sandbox_logs_loaded (_, _, _) | Exact_activity_read (_, _)
     | Exact_activity_saved (_, _) | Browser_activity_read (_, _)
@@ -1190,7 +1193,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Verification_verdict_done _ | Harness_label_done _
   | Keeper_calls_loaded (_, _, _) | Goal_timeline_loaded (_, _)
   | Task_history_loaded (_, _) | Task_cancel_done (_, _, _)
-  | Verification_evidence_loaded (_, _) | Keeper_config_view_loaded (_, _)
+  | Verification_evidence_loaded (_, _) | Keeper_settings_editor_loaded _ | Keeper_config_view_loaded (_, _)
   | Keeper_items_loaded (_, _) | Keeper_sandbox_view_loaded (_, _)
   | Keeper_sandbox_logs_loaded (_, _, _) | Exact_activity_read (_, _)
   | Exact_activity_saved (_, _) | Browser_activity_read (_, _)

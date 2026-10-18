@@ -2320,7 +2320,7 @@ Per surface:
 | `n` | Schedules | Create a schedule through the `$EDITOR` JSON form |
 | `e` | Schedules | Modify the selected active schedule atomically |
 | `x` | Schedules | Cancel the selected schedule (armed: same key again sends) |
-| `e` | Keeper list or detail | Edit the selected keeper's settings in `$EDITOR` (JSON patch; only the fields you keep in the file are sent). Exit 0 sends, any other exit changes nothing |
+| `e` | Keeper list or detail | Read the selected Keeper's settings in the background, then open `$EDITOR`. Esc cancels preparation. Only changed fields are sent against the opening revision; editor exit 0 submits the edit, other exits change nothing |
 | `a` | Keeper list or detail | Create a keeper in `$EDITOR`. Malformed or refused declarations remain available for another `a` in this session. A confirmed response opens that Keeper's composer; writing and sending the first request is a separate action |
 | Left / `Esc` | any structural detail or logs view | Back one level; Left never interrupts chat |
 | `Enter` | Message | Send |
@@ -2331,6 +2331,12 @@ Per surface:
 | `Backspace` | Message | Delete the last UTF-8 scalar without splitting its byte encoding |
 | `PgUp` / `PgDn` | Message | Scroll chat history by a page |
 | `Up` / `Down` | Message after scrolling back | Adjust chat history by one line |
+
+Keeper settings preparation leaves the TUI usable while reading. Moving to
+another Keeper, surface or tab, opening another input/modal, or losing workspace
+identity cancels that preparation. Repeated `e` shares the pending read; queued
+keys and paste are processed before its editor handoff. Preparation status stays
+in the footer. The later external editor and save are separate operations.
 
 ## Navigation
 

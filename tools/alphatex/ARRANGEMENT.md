@@ -43,6 +43,9 @@ publication. Publication uses an exclusive hard link of the private copy, which
 has its own inode and is made read-only; an existing content-addressed pathname
 is verified and never overwritten. A directory or file symlink at the asset
 boundary is refused. Import cancellation removes only its owned partial copy.
+Streaming copy, content hashing and RIFF metadata reads all observe the caller's
+signal. Cancellation at a metadata read stops subsequent chunk reads and closes
+the opened source before returning.
 A fully published but unreferenced content file can remain after cancellation
 or a later project save conflict. Source files are not deleted automatically.
 
@@ -56,6 +59,8 @@ WAV verification is a read-time observation; future playback must own its opened
 sources, not treat a returned pathname as an immutable operating-system handle.
 
 The shared musical-document save/load decoder accepts the arrangement schema.
+Opening one in the current phrase/source editor is explicitly refused before
+terminal raw mode, workers or temporary rendering resources are acquired.
 Use the arrangement wrappers when working with referenced files: generic JSON
 shape validation does not establish that external assets are present. Existing
 phrase MIDI export explicitly refuses arrangement documents until a clip-state

@@ -64,7 +64,10 @@ val pulse : sw:Eio.Switch.t -> 'a t -> (unit, Keeper_tool_execution_journal.erro
     declaration read. A later pulse captures anew; metadata, Skill publication,
     original evidence and admission remain per intake. Cancelled acquisition may
     restart for a remaining caller after worker cleanup. Single-domain Eio caller.
-    No timer, freshness interval or timeout. *)
+    No timer, freshness interval or timeout. A cancelled/finished switch is
+    rejected before discovery and each new active-run reservation; a declined
+    [fork] cannot leave an original run falsely active. Cancellation is not a
+    journal error. *)
 
 val notify_result_ready : sw:Eio.Switch.t -> 'a t -> unit
 (** Nonblocking lifecycle hint after an original job result is durable. New

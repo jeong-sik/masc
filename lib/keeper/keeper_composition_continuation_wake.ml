@@ -244,6 +244,7 @@ let create ~context ?(on_result=log_result) () =
   {context;on_result;active=Run_set.empty;held=Run_map.empty;result_wake=None}
 
 let pulse_with_resume ~resume ~sw supervisor =
+  Eio.Switch.check sw;
   let* pending = Journal.pending_continuations ~read_composition_result:Keeper_composition_dependency_result.readiness ~base_path:supervisor.context.config.base_path in
   List.iter (fun (identity,error) -> Log.Server.warn "prepared continuation discovery retained request=%s error=%s"
       identity (Journal.error_to_string error)) pending.failures;
@@ -263,6 +264,7 @@ let pulse_with_resume ~resume ~sw supervisor =
       | Some {cause=Explicit_recovery_required _; _} -> true
       | None | Some {cause=(Original_run_unavailable _ | Task_skill_publication_unavailable _); _} -> false in
     if not explicit_recovery && not (Run_set.mem key supervisor.active) then (
+      Eio.Switch.check sw;
       (* Single-domain reservation is a scheduling hint, never effect authority. *)
       supervisor.active <- Run_set.add key supervisor.active;
       try Eio.Fiber.fork ~sw (fun () ->

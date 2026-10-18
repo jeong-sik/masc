@@ -1,5 +1,12 @@
 # TUI refresh observations and before/after comparisons
 
+Automatic job-completion and Composition continuation pulses now reject a
+cancelled/finished switch before discovery and each original worker reservation.
+This prevents a silent declined fork from leaving an original job/run falsely
+active. The [recovery scope comparison](../audits/2026-10-19-recovery-pulse-switch-admission.md)
+records the state Before/After, canonical continuity scenarios and the separate,
+unresolved resource-fanout question. It is not a live Loading or latency verdict.
+
 Automatic Composition recovery now accepts durable owned-job result hints
 through one controller-owned notification worker. Pre-read hints share a read;
 hints during discovery retain demand for a fresh follow-up. Original journal,

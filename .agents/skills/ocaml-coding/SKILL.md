@@ -61,6 +61,11 @@ Eio 는 취소를 `Eio.Cancel.Cancelled` 예외로 전한다. 모든 예외를 �
 
 ## 3. 변경 검증
 
+- 제공받은 switch로 자동 복구 fiber를 예약할 때는 discovery 전과 실제 예약 직전에
+  `Eio.Switch.check`를 한다. `Cancel.protect`도 취소된 switch를 다시 켜지 않는다.
+  `fork`가 callback 없이 반환하면 active 예약만 남을 수 있다. 취소를 저장소/저널 오류나
+  정상 접수로 바꾸지 않고, 다음 정상 scope가 원래 durable owner를 다시 읽을 수 있게 한다.
+
 - 원래 owned-job 결과가 durable해진 뒤의 Composition 알림은 controller의
   `notify_result_ready`로 요청한다. 알림 도착을 intake·Task 재개·효과 허가로 기록하지 않는다.
   첫 조회 전 알림은 공유하고 조회 중 알림은 후속 fresh pulse로 남긴다. 알림 worker의

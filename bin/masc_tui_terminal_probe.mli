@@ -4,6 +4,15 @@
     the captured byte stream. Every other byte is returned in [replay], in its
     original order, so the same input reader can serve it normally. *)
 
+type observation =
+  { palette : Masc_tui_terminal_palette.t option
+  ; theme_mode : Masc_tui_terminal_palette.theme_mode option
+  ; graphics : Masc_tui_graphics.query_reply option
+  ; cell_pixels : (int * int) option
+  }
+(** Immutable current replies, without copying replay bytes. A changed reply
+    produces a new value; reading unchanged replies returns the same value. *)
+
 type result =
   { palette : Masc_tui_terminal_palette.t option
   ; theme_mode : Masc_tui_terminal_palette.theme_mode option
@@ -35,6 +44,22 @@ val complete : decoder -> bool
     palette slot have answered. It permits an early end without rescanning the
     captured prefix after every byte. *)
 
+type startup_status = Awaiting_replies | Input_ready | Replies_ready
+val startup_status : decoder -> startup_status
+(** Decided replay hands startup back to the input loop even while replies are
+    missing. Partial replies stay owned by this same decoder. *)
+
+val observation : decoder -> observation
+val observe_palette : decoder -> Masc_tui_terminal_palette.slot ->
+  Masc_tui_terminal_palette.rgb option -> unit
+val observe_theme_mode : decoder -> Masc_tui_terminal_palette.theme_mode -> unit
+val observe_graphics : decoder -> Masc_tui_graphics.query_reply -> unit
+val observe_cell_pixels : decoder -> int * int -> unit
+(** Consume typed replies from the normal input decoder after startup's byte
+    filter completes. Palette collection retains its requested-slot/first-answer
+    policy; graphics and cell size retain their first valid answer. Theme mode
+    follows actual later notices. These grant no terminal input/effect authority. *)
+
 val theme_mode : decoder -> Masc_tui_terminal_palette.theme_mode option
 (** What the terminal has said about its own page so far. Read while the
     decoder is still live, because DECSET 2031 reports again whenever the
@@ -46,7 +71,8 @@ val palette : decoder -> Masc_tui_terminal_palette.t option
 
 val snapshot : decoder -> result
 (** The answers and replay bytes available now, without flushing a partial
-    terminal response. Startup reads this at its deadline, then hands the same
+    terminal response. Startup reads this at input handoff or its existing
+    deadline, then hands the same
     decoder to the normal input reader. *)
 
 val has_replay : decoder -> bool

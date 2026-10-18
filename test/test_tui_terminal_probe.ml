@@ -498,6 +498,106 @@ let test_process_palette_preserves_none () =
   Masc_tui_terminal_palette.set_current None
 ;;
 
+let test_early_key_handoff_keeps_split_replies_and_paste () =
+  let module Probe = Masc_tui_terminal_probe in
+  let decoder = Probe.create ~palette_requested:true in
+  let key = "한" in
+  Probe.feed decoder key.[0];
+  check bool "decided UTF-8 prefix hands off before any answer" true
+    (Probe.startup_status decoder = Probe.Input_ready);
+  check bool "handoff grants no completed query" false (Probe.complete decoder);
+  let first = read_through decoder
+      (String.sub key 1 (String.length key-1) ^ "\x1b]10;rgb:") in
+  let paste = "\x1b[200~" ^ graphics_ok ^ foreground ^ "\x1b[201~" in
+  let rest = read_through decoder
+      ("12/ab/00\x07" ^ background ^ theme_mode_reply 1
+       ^ "\x1b[6;34;15t" ^ paste ^ graphics_ok ^ "\x1b[6~") in
+  check string "same decoder preserves UTF-8, paste and later key bytes"
+    (key ^ paste ^ "\x1b[6~") (first ^ rest);
+  let observed = Probe.observation decoder in
+  check bool "late requested replies complete" true (Probe.complete decoder);
+  check (option (pair int int)) "actual cell answer survives handoff"
+    (Some (15,34)) observed.cell_pixels;
+  check bool "pasted graphics did not substitute for the real answer" true
+    (observed.graphics = Some Masc_tui_graphics.Supported);
+  check bool "theme arrives independently of the partial palette" true
+    (observed.theme_mode = Some Masc_tui_terminal_palette.Dark);
+  ignore (palette (Probe.snapshot decoder))
+;;
+
+let deliver_decoded_replies reader text =
+  let decoder = Masc_tui_input_decoder.create () in
+  let keys = ref [] in
+  String.iter (fun byte ->
+    List.iter (function
+      | Masc_tui_input_decoder.Reply reply -> Masc_tui_input_reader.observe_terminal_reply reader reply
+      | Key key -> keys := key :: !keys
+      | Paste _ | Mouse_wheel _ | Mouse_left_press _ | Mouse_left_release _ ->
+        fail "unexpected fixture input") (Masc_tui_input_decoder.feed decoder byte)) text;
+  List.rev !keys
+;;
+
+let test_late_decoded_replies_keep_the_original_observation_owner () =
+  let module Probe = Masc_tui_terminal_probe in
+  let module Reader = Masc_tui_input_reader in
+  let decoder = fed ~palette_requested:true (foreground ^ background ^ graphics_ok) in
+  check bool "startup byte filter already completed" true (Probe.complete decoder);
+  let reader = Reader.create_input_reader () in
+  let observations = ref [] in
+  Reader.install_terminal_probe reader decoder;
+  Reader.install_terminal_probe_publisher reader ~publish:(fun value -> observations := value :: !observations);
+  let original = Probe.observation decoder in
+  let other_decoder = Probe.create ~palette_requested:true in
+  let other_reader = Reader.create_input_reader () and other_observations = ref [] in
+  Reader.install_terminal_probe other_reader other_decoder;
+  Reader.install_terminal_probe_publisher other_reader
+    ~publish:(fun value -> other_observations := value :: !other_observations);
+  let other_original = !other_observations in
+  check (list string) "only actual user input becomes keys" ["x"]
+    (deliver_decoded_replies reader ("\x1b[6;34;15t" ^ osc_st "4;3;rgb:f7/ca/88"
+      ^ theme_mode_reply 1 ^ theme_mode_reply 2 ^ "x"));
+  let current = Probe.observation decoder in
+  check (option (pair int int)) "late normal-decoder cell reply reaches original owner"
+    (Some (15,34)) current.cell_pixels;
+  check bool "later theme notice replaces the prior mode" true
+    (current.theme_mode = Some Masc_tui_terminal_palette.Light);
+  check (option (pair int int)) "retained initial observation is immutable" None original.cell_pixels;
+  let initial_palette = Option.get original.palette and current_palette = Option.get current.palette in
+  check bool "retained palette did not borrow mutable slots" true
+    (Option.is_none (Masc_tui_terminal_palette.ansi initial_palette 3));
+  check bool "actual late slot is published" true
+    (Option.is_some (Masc_tui_terminal_palette.ansi current_palette 3));
+  check bool "other reader keeps its original publication" true (!other_observations == other_original);
+  check bool "other decoder has no borrowed cell reply" true
+    (Option.is_none (Probe.observation other_decoder).cell_pixels);
+  let published = !observations in
+  ignore (deliver_decoded_replies reader (theme_mode_reply 2 ^ "\x1b[6;40;20t" ^ graphics_ok));
+  check bool "duplicate notices and later first-answer slots do not republish" true
+    (!observations == published)
+;;
+
+let test_no_color_handoff_retains_refusal_and_late_geometry () =
+  let module Probe = Masc_tui_terminal_probe in
+  let module Reader = Masc_tui_input_reader in
+  let decoder = fed ~palette_requested:false "q" in
+  check bool "NO_COLOR still hands back actual input" true
+    (Probe.startup_status decoder = Probe.Input_ready);
+  check string "original key survives refusal" "q"
+    (read_through decoder (graphics_reply "ENOTSUPPORTED"));
+  let reader = Reader.create_input_reader () and observations = ref [] in
+  Reader.install_terminal_probe reader decoder;
+  Reader.install_terminal_probe_publisher reader ~publish:(fun value -> observations := value :: !observations);
+  ignore (deliver_decoded_replies reader (foreground ^ background ^ "\x1b[6;34;15t" ^ theme_mode_reply 1));
+  let observed = Probe.observation decoder in
+  check bool "unrequested colours grant no palette" true (Option.is_none observed.palette);
+  check bool "real refusal remains refusal" true
+    (observed.graphics = Some (Masc_tui_graphics.Refused "ENOTSUPPORTED"));
+  check (option (pair int int)) "geometry is independent of graphics support"
+    (Some (15,34)) observed.cell_pixels;
+  check bool "current owner receives the actual last observation" true
+    (match !observations with latest::_ -> latest == observed | [] -> false)
+;;
+
 let test_byte_cap_is_fixed () =
   check int "64 KiB" (64 * 1024) Masc_tui_terminal_probe.max_bytes
 ;;
@@ -550,7 +650,13 @@ let () =
             test_no_color_does_not_claim_osc_replies
         ] )
     ; ( "stream"
-      , [ test_case "every requested answer completes" `Quick
+      , [ test_case "early key keeps split replies, UTF-8 and opaque paste" `Quick
+            test_early_key_handoff_keeps_split_replies_and_paste
+        ; test_case "late normal replies keep their original observation owner" `Quick
+            test_late_decoded_replies_keep_the_original_observation_owner
+        ; test_case "NO_COLOR handoff retains refusal and late geometry" `Quick
+            test_no_color_handoff_retains_refusal_and_late_geometry
+        ; test_case "every requested answer completes" `Quick
             test_stream_finishes_only_after_every_answer
         ; test_case "partial OSC continues after startup" `Quick
             test_partial_osc_continues_in_the_normal_reader

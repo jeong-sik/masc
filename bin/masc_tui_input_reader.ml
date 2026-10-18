@@ -39,8 +39,9 @@ type input_reader = {
   mutable filled : int;
   mutable position : int;
   mutable terminal_probe : Masc_tui_terminal_probe.decoder option;
-  mutable late_palette_publisher :
-    (Masc_tui_terminal_palette.t -> unit) option;
+  mutable terminal_publisher :
+    (Masc_tui_terminal_probe.observation -> unit) option;
+  mutable published_terminal_observation : Masc_tui_terminal_probe.observation option;
   mutable last_source : input_source option;
   decoder : Masc_tui_input_decoder.t;
   queued : Masc_tui_input_decoder.event Queue.t;
@@ -59,7 +60,8 @@ let create_input_reader () =
     filled = 0;
     position = 0;
     terminal_probe = None;
-    late_palette_publisher = None;
+    terminal_publisher = None;
+    published_terminal_observation = None;
     last_source = None;
     decoder = Masc_tui_input_decoder.create ();
     queued = Queue.create ();
@@ -175,44 +177,33 @@ let take_terminal_buffer_byte reader ~timeout =
     Some byte
   end
 
-let take_late_palette_publisher reader =
-  match reader.late_palette_publisher with
-  | None -> None
-  | Some publish ->
-    reader.late_palette_publisher <- None;
-    Some publish
+let publish_terminal_observation reader decoder =
+  let observation = Masc_tui_terminal_probe.observation decoder in
+  match reader.terminal_publisher,reader.published_terminal_observation with
+  | None,_ -> ()
+  | Some _,Some previous when previous == observation -> ()
+  | Some publish,(Some _ | None) ->
+    reader.published_terminal_observation <- Some observation;
+    publish observation
 ;;
 
-let publish_late_terminal_palette reader decoder =
-  (* The page the terminal reports is not the palette and does not wait on
-     it: a multiplexer answers DECSET 996 and no OSC colour query, so this is
-     the only thing that ever arrives there. Published on its own so a colour
-     that has to know which way to move can still be told. *)
-  (match Masc_tui_terminal_probe.theme_mode decoder with
-   | None -> ()
-   | Some _ as theme_mode ->
-     if
-       Masc_tui_terminal_palette.snapshot_theme_mode
-         (Masc_tui_terminal_palette.snapshot ())
-       <> theme_mode
-     then Masc_tui_terminal_palette.set_theme_mode theme_mode);
-  match reader.late_palette_publisher with
-  | None -> ()
-  | Some _ ->
-    (match Masc_tui_terminal_probe.palette decoder with
-     | None -> ()
-     | Some palette ->
-       (match take_late_palette_publisher reader with
-        | None -> ()
-        | Some publish -> publish palette))
+let install_terminal_probe_publisher reader ~publish =
+  reader.terminal_publisher <- Some publish;
+  reader.published_terminal_observation <- None;
+  Option.iter (publish_terminal_observation reader) reader.terminal_probe
 ;;
 
-let install_late_palette_publisher reader ~request_full_repaint =
-  reader.late_palette_publisher <-
-    Some
-      (fun palette ->
-        Masc_tui_terminal_palette.set_current (Some palette);
-        request_full_repaint 0)
+let observe_terminal_reply reader reply =
+  Option.iter (fun decoder ->
+    (match reply with
+     | Masc_tui_input_decoder.Palette (slot,color) ->
+       Masc_tui_terminal_probe.observe_palette decoder slot color
+     | Theme_mode mode -> Masc_tui_terminal_probe.observe_theme_mode decoder mode
+     | Cell_pixels (width,height) -> Masc_tui_terminal_probe.observe_cell_pixels decoder (width,height)
+     | Graphics body ->
+       Option.iter (Masc_tui_terminal_probe.observe_graphics decoder)
+         (Masc_tui_graphics.parse_query_reply body));
+    publish_terminal_observation reader decoder) reader.terminal_probe
 ;;
 
 let take_input_byte reader ~timeout =
@@ -241,8 +232,9 @@ let take_input_byte reader ~timeout =
   | Some decoder
     when (not (Masc_tui_terminal_probe.has_replay decoder))
          && Masc_tui_terminal_probe.complete decoder ->
-    publish_late_terminal_palette reader decoder;
-    reader.terminal_probe <- None;
+    (* Retain this observation owner after its byte filter completes. Normal
+       decoded replies still update it, including answers behind early keys. *)
+    publish_terminal_observation reader decoder;
     (match terminal_byte () with
      | None ->
        reader.last_source <- None;
@@ -252,19 +244,12 @@ let take_input_byte reader ~timeout =
        Some byte)
   | Some decoder ->
     let next = Masc_tui_terminal_probe.next decoder ~next_raw:terminal_byte in
-    publish_late_terminal_palette reader decoder;
+    publish_terminal_observation reader decoder;
     (match next with
      | Some byte ->
        reader.last_source <- Some Probe_replay;
        Some byte
      | None ->
-       if
-         (not (Masc_tui_terminal_probe.has_replay decoder))
-         && Masc_tui_terminal_probe.complete decoder
-       then begin
-         publish_late_terminal_palette reader decoder;
-         reader.terminal_probe <- None
-       end;
        reader.last_source <- None;
        None)
 
@@ -358,7 +343,7 @@ type input_event =
    stays held in the decoder and the next read resumes it. *)
 let sequence_byte_wait_seconds = 0.05
 
-let input_event_of_decoded = function
+let input_event_of_decoded reader = function
   | Masc_tui_input_decoder.Key name -> Some (Key name)
   | Masc_tui_input_decoder.Paste paste -> Some (Pasted paste)
   | Masc_tui_input_decoder.Mouse_wheel (direction, row, column) ->
@@ -368,14 +353,12 @@ let input_event_of_decoded = function
   | Masc_tui_input_decoder.Mouse_left_release (row, column) ->
       Some (Mouse_left_release (row, column))
   | Masc_tui_input_decoder.Reply (Masc_tui_input_decoder.Graphics body) ->
+      observe_terminal_reply reader (Masc_tui_input_decoder.Graphics body);
       Some (Graphics_reply body)
-  (* The startup probe still reads these while it stands in front. One that
-     arrives after it finished was not asked for by anything running now;
-     reading it keeps it out of the composer, and step 3 of the RFC gives it a
-     consumer. *)
   | Masc_tui_input_decoder.Reply
-      ( Masc_tui_input_decoder.Palette _ | Masc_tui_input_decoder.Theme_mode _
-      | Masc_tui_input_decoder.Cell_pixels _ ) ->
+      (( Masc_tui_input_decoder.Palette _ | Masc_tui_input_decoder.Theme_mode _
+       | Masc_tui_input_decoder.Cell_pixels _ ) as reply) ->
+      observe_terminal_reply reader reply;
       None
 
 let in_paste reader =
@@ -401,14 +384,14 @@ let read_input ?(timeout = 0.1) reader () : input_event option =
         match Queue.take_opt reader.queued with
         | None -> None
         | Some decoded -> (
-            match input_event_of_decoded decoded with
+            match input_event_of_decoded reader decoded with
             | Some event -> Some event
             | None -> drain ())
       in
       let rec serve () =
         match Queue.take_opt reader.queued with
         | Some decoded -> (
-            match input_event_of_decoded decoded with
+            match input_event_of_decoded reader decoded with
             | Some event -> Some event
             | None -> serve ())
         | None -> read ()
@@ -459,7 +442,7 @@ let read_input ?(timeout = 0.1) reader () : input_event option =
 (* How long to wait for the combined palette and graphics answers. A terminal
    replies as soon as it has parsed a supported query; an unsupported query
    says nothing, and this is the whole cost of finding that out, paid once at
-   startup. *)
+   startup when no user input has already arrived. *)
 let terminal_probe_wait_seconds = 0.2
 
 let read_terminal_probe reader ~palette_requested =
@@ -477,7 +460,9 @@ let read_terminal_probe reader ~palette_requested =
       while
         (not !finished)
         && !bytes_read < Masc_tui_terminal_probe.max_bytes
-        && not (Masc_tui_terminal_probe.complete decoder)
+        && (match Masc_tui_terminal_probe.startup_status decoder with
+            | Awaiting_replies -> true
+            | Input_ready | Replies_ready -> false)
       do
         let remaining_ns =
           Int64.sub deadline_ns (Mtime_clock.elapsed_ns ())

@@ -48,8 +48,16 @@ val read_input : ?timeout:float -> input_reader -> unit -> input_event option
 val read_terminal_probe :
   input_reader -> palette_requested:bool ->
   Masc_tui_terminal_probe.decoder * Masc_tui_terminal_probe.result
+(** Stops when replies complete or decided user replay is available, retaining
+    the existing capture deadline/byte cap and the same decoder/buffer. *)
 val install_terminal_probe : input_reader -> Masc_tui_terminal_probe.decoder -> unit
-val install_late_palette_publisher :
-  input_reader -> request_full_repaint:(int -> unit) -> unit
+val install_terminal_probe_publisher :
+  input_reader -> publish:(Masc_tui_terminal_probe.observation -> unit) -> unit
+(** Publishes current replies once, then only changed immutable observations.
+    The same owner receives replies before and after byte-filter completion. *)
+val observe_terminal_reply : input_reader -> Masc_tui_input_decoder.reply -> unit
+(** Consume a normal decoder reply into the installed probe's original owner,
+    including late palette, theme, query graphics and cell dimensions. No read
+    or clock; reply publication runs on the owning input path. *)
 val abandon_draining : input_reader -> unit
 val recover_paste : input_reader -> Masc_tui_paste.t option

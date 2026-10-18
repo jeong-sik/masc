@@ -21975,58 +21975,48 @@ let main
      NO_COLOR omits OSC 10/11; the independent graphics query still runs. *)
   let palette_requested = Masc_tui_theme.colors_enabled in
   write_to_terminal (Masc_tui_terminal_probe.query ~palette:palette_requested);
-  let terminal_probe_decoder, terminal_probe =
+  let terminal_probe_decoder, _ =
     read_terminal_probe input_reader ~palette_requested
   in
-  (* Do not finish the decoder at the startup deadline. A terminal may have
-     split OSC 10/11 across that boundary; the same reader continues this
+  (* Do not finish the decoder at early input handoff or the startup deadline.
+     A terminal may split OSC 10/11 across that boundary; the same reader continues this
      exact state before serving its replay or unread terminal-buffer tail. *)
   install_terminal_probe input_reader terminal_probe_decoder;
-  Masc_tui_terminal_palette.set_current terminal_probe.palette;
-  (match palette_requested, terminal_probe.palette with
-   | true, None ->
-     install_late_palette_publisher input_reader ~request_full_repaint
-   | true, Some _ | false, _ -> ());
-  let proto =
-    match terminal_probe.graphics with
-    | Some Masc_tui_graphics.Supported -> Masc_tui_graphics.Kitty_protocol
-    | Some (Masc_tui_graphics.Refused _) | None ->
-        (match Sys.getenv_opt "TERM_PROGRAM" with
-         | Some "iTerm.app" -> Masc_tui_graphics.ITerm2_protocol
-         | _ -> Masc_tui_graphics.Unsupported_protocol)
-  in
-  active_graphics_protocol := proto;
-  (* The spectator draws its own screen and cannot reach this ref, so it is
-     handed the same answer rather than probing again. *)
-  Masc_tui_msx.set_graphics_protocol proto;
-  (* And what a cell measures, for the same reason: the spectator sizes an
-     image placement against the screen and cannot ask the terminal itself. *)
-  Masc_tui_msx.set_cell_pixels terminal_probe.cell_pixels;
-  image_cell_pixels := terminal_probe.cell_pixels;
-  (* How the portraits and /about candle reach this terminal, from the same answers:
-     real pixels only where the graphics query was answered -- an iTerm2
-     inline image cannot be replaced in place frame by frame --, else a
-     mosaic where stdout projects colour, else none. *)
-  Masc_tui_portrait_view.set_display
-    (Masc_tui_portrait_view.display_of
-       ~kitty:
-         (match proto with
-          | Masc_tui_graphics.Kitty_protocol -> true
-          | Masc_tui_graphics.ITerm2_protocol | Masc_tui_graphics.Unsupported_protocol -> false)
-       ~cell_pixels:terminal_probe.cell_pixels
-       ~colors_enabled:Masc_tui_theme.colors_enabled
-       ~projects_colour:
-         (match Masc_tui_terminal_palette.stdout_color_level () with
-          | Masc_tui_terminal_palette.True_color | Masc_tui_terminal_palette.Ansi256 -> true
-          | Masc_tui_terminal_palette.Ansi16 | Masc_tui_terminal_palette.Unknown -> false));
-  terminal_draws_images :=
-    Some
-      (match proto with
-       | Masc_tui_graphics.Kitty_protocol | Masc_tui_graphics.ITerm2_protocol -> true
-       | Masc_tui_graphics.Unsupported_protocol -> false);
+  let fallback_graphics_protocol = match Sys.getenv_opt "TERM_PROGRAM" with
+    | Some "iTerm.app" -> Masc_tui_graphics.ITerm2_protocol
+    | Some _ | None -> Masc_tui_graphics.Unsupported_protocol in
+  let apply_terminal_observation (observation : Masc_tui_terminal_probe.observation) =
+    Masc_tui_terminal_palette.set_current observation.palette;
+    Option.iter (fun mode -> Masc_tui_terminal_palette.set_theme_mode (Some mode))
+      observation.theme_mode;
+    let proto = match observation.graphics with
+      | Some Masc_tui_graphics.Supported -> Masc_tui_graphics.Kitty_protocol
+      | Some (Masc_tui_graphics.Refused _) | None -> fallback_graphics_protocol in
+    if !active_graphics_protocol <> proto then begin
+      active_graphics_protocol := proto;
+      Masc_tui_msx.set_graphics_protocol proto
+    end;
+    Masc_tui_msx.set_cell_pixels observation.cell_pixels;
+    image_cell_pixels := observation.cell_pixels;
+    Masc_tui_portrait_view.set_display
+      (Masc_tui_portrait_view.display_of
+         ~kitty:(proto = Masc_tui_graphics.Kitty_protocol)
+         ~cell_pixels:observation.cell_pixels
+         ~colors_enabled:Masc_tui_theme.colors_enabled
+         ~projects_colour:
+           (match Masc_tui_terminal_palette.stdout_color_level () with
+            | Masc_tui_terminal_palette.True_color | Masc_tui_terminal_palette.Ansi256 -> true
+            | Masc_tui_terminal_palette.Ansi16 | Masc_tui_terminal_palette.Unknown -> false));
+    terminal_draws_images := Some (match proto with
+      | Masc_tui_graphics.Kitty_protocol | Masc_tui_graphics.ITerm2_protocol -> true
+      | Masc_tui_graphics.Unsupported_protocol -> false);
+    request_full_repaint 0 in
+  (* One original observation owner survives early key handoff and byte-filter
+     completion. Late replies update every existing terminal capability consumer. *)
+  install_terminal_probe_publisher input_reader ~publish:apply_terminal_observation;
 
   score_terminal_handoff := Some (fun ~sources ~index ->
-    match proto, terminal_probe.cell_pixels with
+    match !active_graphics_protocol, !image_cell_pixels with
     | Masc_tui_graphics.Kitty_protocol, Some ((width, height) as cell_pixels)
       when width > 0 && height > 0 ->
         let restore () =

@@ -1545,22 +1545,49 @@ let bind_child_plan ~input (child : async_child) =
 ;;
 
 let dependency_layers plan =
-  let rec build completed remaining acc =
-    match remaining with
-    | [] -> List.rev acc
-    | _ ->
-      let ready, blocked =
-        List.partition
-          (fun node ->
-             List.for_all
-               (fun dependency -> List.exists (Node_id.equal dependency) completed)
-               (dependencies node))
-          remaining
-      in
-      let completed = completed @ List.map (fun node -> node.id) ready in
-      build completed blocked (ready :: acc)
+  let module Node_map = Map.Make (Node_id) in
+  let module Ready_map = Map.Make (Int) in
+  (* [t] is abstract and every constructor validates unique IDs, closed edges
+     and acyclicity. Count each semantic dependency once, retaining the exact
+     node operands and their original ordinal independently of ID ordering. *)
+  let pending, successors, roots =
+    plan.nodes
+    |> List.mapi (fun ordinal node -> ordinal, node)
+    |> List.fold_left
+      (fun (pending, successors, roots) (ordinal, (node : node)) ->
+         let required = dependencies node in
+         let pending = Node_map.add node.id (ordinal, node, List.length required) pending in
+         let successors = List.fold_left
+             (fun successors dependency -> Node_map.add_to_list dependency node.id successors)
+             successors required in
+         let roots = match required with
+           | [] -> Ready_map.add ordinal node roots
+           | _ :: _ -> roots in
+         pending, successors, roots)
+      (Node_map.empty, Node_map.empty, Ready_map.empty)
   in
-  build [] plan.nodes []
+  let release (pending, ready) (node : node) =
+    (* A missing adjacency entry means this validated node has no successors. *)
+    let dependents = match Node_map.find_opt node.id successors with
+      | None -> []
+      | Some dependents -> dependents in
+    List.fold_left
+      (fun (pending, ready) id ->
+         let ordinal, dependent, required = Node_map.find id pending in
+         let required = required - 1 in
+         let pending = Node_map.add id (ordinal, dependent, required) pending in
+         let ready = if required = 0 then Ready_map.add ordinal dependent ready else ready in
+         pending, ready)
+      (pending, ready) dependents
+  in
+  let rec build pending ready acc =
+    if Ready_map.is_empty ready then List.rev acc
+    else
+      let layer = Ready_map.bindings ready |> List.map snd in
+      let pending, next = List.fold_left release (pending, Ready_map.empty) layer in
+      build pending next (layer :: acc)
+  in
+  build pending roots []
 ;;
 
 let descriptor plan node_id =

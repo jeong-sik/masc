@@ -217,16 +217,28 @@ let test_fixed_async_child_compiles_exact_result_barrier () =
   check bool "native result never routes through an ordinary descriptor name" true (Plan.descriptor plan result = None)
 ;;
 
-let test_upstream_child_arguments_bind_exact_declared_plan () =
+let test_upstream_child_arguments_bind_exact_declared_plan ~children_first () =
   let surface,reference = fixture ~source:(document ~execution:"async" ()) () in
   let child alias source = `Assoc ["id",`String alias;"skill_reference",Skill_reference.to_yojson reference;
     "input",`Assoc ["kind",`String "object";"fields",`List
       [`Assoc ["name",`String "query";"value",`Assoc
         ["kind",`String "output";"node",`String source;"pointer",`String "/profile"]]]]] in
-  let recipe = request [leaf "first";leaf "second";child "a" "first";child "b" "second"] in
+  let recipe = request (if children_first then
+      [child "a" "first";child "b" "second";leaf "second";leaf "first"]
+    else [leaf "first";leaf "second";child "a" "first";child "b" "second"]) in
   let compiled = Nested.compile ~execution:Masc.Keeper_tool_composition_catalog.Async
       ~capability_surface:surface recipe |> require "upstream exact async compiler" in
   let plan = Nested.plan compiled and run_id = Plan.Run_id.fresh () in
+  let layers = Plan.dependency_layers plan in
+  let layer_of id = List.find_index (fun layer ->
+      List.exists (fun (node : Plan.node) -> Plan.Node_id.equal node.id id) layer) layers
+    |> function Some index -> index | None -> fail "compiled operand lost its layer" in
+  List.iter (List.iter (fun (node : Plan.node) ->
+    check bool "dependency layering retains original compiler-owned operands" true
+      (List.exists (fun original -> original == node) (Plan.nodes plan));
+    List.iter (fun dependency ->
+      check bool "compiled data and canonical child barriers remain causal" true
+        (layer_of dependency < layer_of node.id)) (Plan.dependencies node))) layers;
   let id name = Plan.Node_id.make (Yojson.Safe.to_string (`List [`String name])) |> require "encoded parent ID" in
   let producer name query =
     Plan.validate_output plan ~run_id ~node_id:(id name)
@@ -245,6 +257,11 @@ let test_upstream_child_arguments_bind_exact_declared_plan () =
     let child = match Plan.contract plan submission with Some {target=Plan.Child_submission child;_} -> child.child
       | _ -> fail "exact child operand missing" in
     let bound = Plan.bind_child_plan ~input child |> require "frozen child argument binding" in
+    let bound_layers = Plan.dependency_layers bound |> List.concat in
+    check int "bound child retains every original leaf" (List.length (Plan.nodes bound))
+      (List.length bound_layers);
+    List.iter (fun node -> check bool "bound child layering retains its own new operands" true
+      (List.exists (fun original -> original == node) (Plan.nodes bound))) bound_layers;
     let query = List.find (fun (node : Plan.node) -> node.tool_name = "keeper_memory_search") (Plan.nodes bound) in
     let resolved = Plan.Json_template.resolve ~lookup:(fun _ -> None) query.input |> require "bound query" in
     check bool "declared parameter reaches the correct leaf" true (Yojson.Safe.equal resolved input);
@@ -988,7 +1005,10 @@ let () = run "exact inline composition compiler"
         ; test_case "repeat exact child, bind params, namespace and map outputs" `Quick test_repeated_child_identity_bindings_and_output_mapping
         ; test_case "whole-child failure barrier with useful independent results" `Quick test_child_failure_blocks_whole_child_consumers_but_keeps_exports
         ; test_case "fixed async child compiles exact canonical result barrier" `Quick test_fixed_async_child_compiles_exact_result_barrier
-        ; test_case "upstream arguments bind repeated exact async Skills independently" `Quick test_upstream_child_arguments_bind_exact_declared_plan
+        ; test_case "upstream arguments bind repeated exact async Skills independently" `Quick
+            (test_upstream_child_arguments_bind_exact_declared_plan ~children_first:false)
+        ; test_case "forward-declared exact children retain dynamic binding and barriers" `Quick
+            (test_upstream_child_arguments_bind_exact_declared_plan ~children_first:true)
         ; test_case "upstream inline arguments preserve namespaces and whole-child failure" `Quick test_upstream_inline_arguments_and_whole_child_failure
         ; test_case "authority, arguments, cycles and semantic refusals" `Quick test_refusals_preserve_frozen_authority_and_contracts
         ; test_case "inline Edit recipes and exact children retain effect and durable admission" `Quick

@@ -216,6 +216,14 @@ turn still collects every completion for later judgments. Without producer-owned
 resource preparation, a serial leaf keeps its enclosing composition serial.
 Transient run and async submission controls keep their serial admission contracts.
 
+Dependency layers are derived once per execution from the validated plan using
+immutable dependency counts and successor adjacency. Each layer retains original
+declaration order and the actual compiler-owned node operands. Serial execution,
+failure propagation and file-resource ownership remain executor decisions; a
+dependency frontier grants no admission or replay authority. This reduces repeated
+graph scanning in source, with no measured timing claim. See the
+[source Before/After audit](../audits/2026-10-19-composition-dependency-frontier.md).
+
 When the current Task pins an exact executable composition, its callable schema
 and declared ordinary node Tool schemas are supplied on the first request. Their
 deferrable declarations still apply when that exact Task selection is absent.

@@ -318,28 +318,35 @@ final class MidiTransport {
         // cleanup closes an exclusive stream before sending channel note-offs.
         wireStates[event.port] = decoder
         for bytes in messages {
-            // Record ownership before sending: a failed OSStatus cannot prove
-            // that none of these bytes reached the endpoint.
+            // Acquire ownership before sending: a failed OSStatus cannot prove
+            // that the endpoint did not receive a note or pedal-on. Release it
+            // only after success, so failure cleanup retries uncertain releases.
+            if let status = bytes.first {
+                let channel = UInt16(status & 15), type = status & 0xf0
+                if bytes.count == 3 && type == 0x90 && bytes[2] > 0 {
+                    let key = channel << 8 | UInt16(bytes[1]), count = sourceHeld[event.port]?[key] ?? 0
+                    sourceHeld[event.port, default: [:]][key] = count + 1
+                } else if bytes.count == 3 && type == 0xb0 && [64, 66, 69].contains(bytes[1]) && bytes[2] >= 64 {
+                    sourcePedals[event.port, default: []].insert(channel << 8 | UInt16(bytes[1]))
+                }
+            }
+            if bytes.first == 0xf0 { sourceExclusive.insert(event.port) }
+            try sendWire(bytes, to: destination)
             if let status = bytes.first {
                 let channel = UInt16(status & 15), type = status & 0xf0
                 if status == 0xff { sourceHeld[event.port] = [:]; sourcePedals[event.port] = [] }
-                else if bytes.count == 3 && (type == 0x80 || type == 0x90) {
+                else if bytes.count == 3 && (type == 0x80 || type == 0x90 && bytes[2] == 0) {
                     let key = channel << 8 | UInt16(bytes[1]), count = sourceHeld[event.port]?[key] ?? 0
-                    sourceHeld[event.port, default: [:]][key] = type == 0x90 && bytes[2] > 0 ? count + 1 : max(0, count - 1)
+                    sourceHeld[event.port, default: [:]][key] = max(0, count - 1)
                 } else if bytes.count == 3 && type == 0xb0 {
                     let controller = bytes[1], key = channel << 8 | UInt16(controller)
-                    if [64, 66, 69].contains(controller) {
-                        if bytes[2] >= 64 { sourcePedals[event.port, default: []].insert(key) }
-                        else { sourcePedals[event.port]?.remove(key) }
-                    }
+                    if [64, 66, 69].contains(controller) && bytes[2] < 64 { sourcePedals[event.port]?.remove(key) }
                     if controller == 121 { sourcePedals[event.port] = (sourcePedals[event.port] ?? []).filter { $0 >> 8 != channel } }
                     if [120, 123, 124, 125, 126, 127].contains(controller) {
                         sourceHeld[event.port] = (sourceHeld[event.port] ?? [:]).filter { $0.key >> 8 != channel }
                     }
                 }
             }
-            if bytes.first == 0xf0 { sourceExclusive.insert(event.port) }
-            try sendWire(bytes, to: destination)
             if bytes.contains(0xf7) { sourceExclusive.remove(event.port) }
         }
     }

@@ -183,7 +183,50 @@ reset(0);reviewWire=[]
 let failedExclusive = try wire([["seconds":0,"port":0,"bytes":[0xf0,0x7d,1,0xf7]]])
 reviewWireFail=true;failedExclusive.tick()
 precondition(reviewWire.map(\.1) == [[0xf0,0x7d,1,0xf7],[0xf7]] && reviewExit == 1)
-print("SOURCE_MIDI_DECISIONS_PASS: F7 running status/partial messages, realtime/SysEx order, expression/release velocity, overlapping held-key cleanup, pedals, zero duration, explicit ports, partial-send cleanup")
+// A release that fails may still have reached the device, but must not erase
+// cleanup ownership. Successful releases must not add redundant cleanup offs.
+func releaseDecision(_ setup: [UInt8], _ release: [UInt8], expected: [[UInt8]], fail: Bool = true) throws {
+    reset(0); reviewWire = []; reviewWireFail = false
+    let value = try wire([["seconds":0,"port":0,"bytes":setup], ["seconds":0.5,"port":0,"bytes":release]])
+    value.tick()
+    reviewClock = 500_000_000; reviewWire = []; reviewWireFail = fail
+    value.tick()
+    if fail { precondition(value.state == .stopped && reviewExit == 1) }
+    else { try value.silence() }
+    precondition(reviewWire.map(\.1) == expected, "unexpected release cleanup: \(reviewWire.map(\.1))")
+}
+for release: [UInt8] in [[0x80,60,77], [0x90,60,0]] {
+    try releaseDecision([0x90,60,100], release, expected:[release,[0x80,60,0]])
+    try releaseDecision([0x90,60,100], release, expected:[release], fail:false)
+}
+for pedal: UInt8 in [64,66,69] {
+    let off: [UInt8] = [0xb0,pedal,0]
+    try releaseDecision([0xb0,pedal,127], off, expected:[off,off])
+    try releaseDecision([0xb0,pedal,127], off, expected:[off], fail:false)
+}
+let owned: [UInt8] = [0x90,60,100,0xb0,64,127]
+try releaseDecision(owned, [0xff], expected:[[0xff],[0x80,60,0],[0xb0,64,0]])
+try releaseDecision(owned, [0xff], expected:[[0xff]], fail:false)
+try releaseDecision(owned, [0xb0,121,0], expected:[[0xb0,121,0],[0x80,60,0],[0xb0,64,0]])
+try releaseDecision(owned, [0xb0,121,0], expected:[[0xb0,121,0],[0x80,60,0]], fail:false)
+for mode: UInt8 in [120,123,124,125,126,127] {
+    let release: [UInt8] = [0xb0,mode,0]
+    try releaseDecision(owned, release, expected:[release,[0x80,60,0],[0xb0,64,0]])
+    try releaseDecision(owned, release, expected:[release,[0xb0,64,0]], fail:false)
+}
+try releaseDecision([0x90,60,100,0x90,60,90], [0x80,60,77],
+    expected:[[0x80,60,77],[0x80,60,0],[0x80,60,0]])
+try releaseDecision([0x90,60,100,0x90,60,90], [0x80,60,77],
+    expected:[[0x80,60,77],[0x80,60,0]], fail:false)
+reset(0); reviewWire = []
+let failedOn = try wire([["seconds":0,"port":0,"bytes":[0x90,60,100]]])
+reviewWireFail = true; failedOn.tick()
+precondition(reviewWire.map(\.1) == [[0x90,60,100],[0x80,60,0]] && reviewExit == 1)
+reset(0); reviewWire = []
+let failedPedalOn = try wire([["seconds":0,"port":0,"bytes":[0xb0,64,127]]])
+reviewWireFail = true; failedPedalOn.tick()
+precondition(reviewWire.map(\.1) == [[0xb0,64,127],[0xb0,64,0]] && reviewExit == 1)
+print("SOURCE_MIDI_DECISIONS_PASS: F7 running status/partial messages, realtime/SysEx order, expression/release velocity, overlapping held-key cleanup, pedals, zero duration, explicit ports, partial-send cleanup, failed note/pedal/reset/channel-mode release retry, successful release ownership")
 print("MIDI_DECISIONS_PASS: late cycles, expired intervals, live notes, send-time epoch, inclusive seek, retrigger, one-shot end, pause/status phase, startup admission")
 `
   const swift = join(directory, 'Review.swift'), binary = join(directory, 'review')

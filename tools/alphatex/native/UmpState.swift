@@ -33,6 +33,7 @@ enum UmpObstacle: String, Hashable {
     case mode = "device channel-mode changes"
     case compound = "MIDI 1.0 compound controllers or reserved MIDI 2.0 controllers"
     case hold = "Hold 2 pedal"
+    case oneShot = "one-shot Portamento Control"
     case dialect = "mixed MIDI 1.0 and MIDI 2.0 state on one channel"
 }
 enum UmpAction {
@@ -65,6 +66,7 @@ struct UmpMessage {
             case 123: action = .release
             case 122, 124...127: action = .unsupported(.mode)
             case 69: action = .unsupported(.hold)
+            case 84: action = .unsupported(.oneShot)
             case 6, 38, 96...101: action = .unsupported(.compound)
             case 0 where dialect == 4: action = .unsupported(.compound)
             case 32 where dialect == 4: action = .unsupported(.compound)

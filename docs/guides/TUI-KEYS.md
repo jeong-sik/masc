@@ -143,7 +143,7 @@ usage read does not borrow a prior response's quota identity.
 Full-refresh progress labels a composed read as partial when one returned result
 failed, naming both failed and received components. This covers Runtime
 catalogue/usage, Board posts/hearths and available Keeper roster/Candle results.
-Partial is separate from full receipt; unfinished reads remain interrupted when
+Partial is separate from full receipt; unfinished logical readers remain interrupted when
 the refresh stops. These notices do not grant action authority or confirm Task completion.
 Board also reports its posts/hearth readers before the pair returns. A completed
 child remains visible when its parent fails or stops. A caught child cancellation

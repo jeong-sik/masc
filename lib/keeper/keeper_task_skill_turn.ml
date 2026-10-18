@@ -251,8 +251,12 @@ let resolve_for_task ?descriptors ~snapshot ~task_id references =
 
 let empty = { selected = []; unprojectable = []; descriptor_authority = None; preparation = None }
 
+module Task_owner_set = Set.Make (String)
+
 (* One row per exact reference, carrying every Task id that pinned it. *)
 let merge_rows ~reference ~task_ids ~with_task_ids rows =
+  let add_owners owners ids = List.fold_left
+      (fun owners task_id -> Task_owner_set.add task_id owners) owners ids in
   let add (next_ordinal, indexed) candidate =
     let exact = reference candidate in
     match
@@ -260,21 +264,28 @@ let merge_rows ~reference ~task_ids ~with_task_ids rows =
     with
     | None ->
       next_ordinal + 1,
-      Skill_reference.Exact_map.add exact (next_ordinal, candidate) indexed
-    | Some (ordinal, known) ->
-      let merged_task_ids =
-        List.sort_uniq String.compare (task_ids known @ task_ids candidate)
-      in
+      Skill_reference.Exact_map.add exact (next_ordinal, candidate, None) indexed
+    | Some (ordinal, known, owners) ->
+      let owners = match owners with
+        | None -> add_owners Task_owner_set.empty (task_ids known)
+        | Some owners -> owners in
+      let owners = add_owners owners (task_ids candidate) in
       next_ordinal,
       Skill_reference.Exact_map.add exact
-        (ordinal, with_task_ids known merged_task_ids) indexed
+        (ordinal, known, Some owners) indexed
   in
   let _, indexed = List.fold_left add (0, Skill_reference.Exact_map.empty) rows in
   (* Map key order must not reorder the first original rows. Ordinals belong
      to this fold only; enumeration needs no partial lookup or fallback row. *)
   Skill_reference.Exact_map.fold (fun _ row ordered -> row :: ordered) indexed []
-  |> List.sort (fun (first, _) (next, _) -> Int.compare first next)
-  |> List.map snd
+  |> List.sort (fun (first, _, _) (next, _, _) -> Int.compare first next)
+  |> List.map (fun (_, known, owners) ->
+       match owners with
+       | None -> known
+       | Some owners ->
+         (* The callbacks only read/rebuild immutable rows. No intermediate
+            union escapes; emit one canonical owner list per repeated pin. *)
+         with_task_ids known (Task_owner_set.elements owners))
 ;;
 
 let same_descriptors first next =

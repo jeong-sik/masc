@@ -17,10 +17,13 @@ and append copied the same number of list cells.
 Use a private immutable `Skill_reference.Exact_map` for each merge invocation.
 The key compares canonical source id, package id, name and content revision,
 and agrees with `Skill_reference.equal`. A new entry retains the original
-candidate and a first-appearance ordinal. A repeated exact reference updates
-only that map entry with the existing Task-owner union. Enumerate map values
+candidate and a first-appearance ordinal. On the first repeated exact reference,
+initialize an immutable owner-id set from that first row; accumulate each
+repeated candidate's owners in the same set. Enumerate map values
 and sort by those private ordinals, rather than exposing map key order or
-performing a partial lookup/fallback to reconstruct the result.
+performing a partial lookup/fallback to reconstruct the result. A unique row
+stays the same object; a repeated pin emits its final canonical Task-owner list
+once from the set. Repeated copies of the same owner do not enlarge that set.
 
 | Source boundary | Before | After |
 | --- | --- | --- |
@@ -29,7 +32,7 @@ performing a partial lookup/fallback to reconstruct the result.
 | Combine a repeated exact reference | Map over accumulated rows | Update one map binding |
 | First original row and output reference order | Retained by list construction | Retained by first ordinal and original row |
 | Same identity, different pinned revision | Separate exact-reference rows | Same: content revision is part of the key |
-| Repeated exact pin Task owners | Existing sorted/deduplicated union | Same union |
+| Repeated exact pin Task owners | Re-sort growing union at every repeated occurrence | Incremental immutable set; same canonical list emitted once |
 | Selected versus unavailable rows | Separate merge invocations | Same separation |
 
 For `R` input rows and `U` distinct exact references, reference lookup/update
@@ -38,9 +41,14 @@ work changes from worst-case `O(R * U)` accumulated-list traversal to
 cost depends on identity/revision lengths. The old all-distinct quadratic
 append/search is removed; this is not a measured count of runtime comparisons.
 
-Task-owner concatenation, sorting and deduplication remain on repeated pins;
-their cost is excluded from that bound. Map allocation and final ordinal
-sorting add overhead, especially for tiny or repeatedly identical inputs.
+Owner work is additional to that reference-work bound. If one exact pin
+occurs `N > 1` times, each with a distinct single Task owner, old sorts receive
+prefixes of sizes `2` through `N`; the new set accumulates `N` owner entries
+and enumerates its sorted result once. For `K` original owner entries and `M`
+distinct owners on a repeated pin, new owner work includes set construction,
+`O(K log(M+1))` insertion and `O(M)` result enumeration. Repeated identical
+owner ids do not cause a growing retained duplicate list or a final `K`-item
+sort. Map/set allocation and final ordinal sorting still add overhead.
 Snapshot discovery, reference resolution, catalog preparation, model/network
 work, first useful work and UI paint have not been measured or newly removed.
 No total CPU, memory, preparation percentage or speedup result is claimed.
@@ -53,8 +61,10 @@ control limit. Canonical key comparison is a typed domain operation, not a
 serialized JSON/composite-string heuristic. `Identity_map` retains its existing
 identity-only contract; `Exact_map` explicitly adds the pinned revision.
 
-Repeated rows retain the first row's Skill/diagnostic/reason data while
-combining Task owners exactly as before. Selection descriptor-authority checks,
+Repeated rows retain the first row's Skill/diagnostic/reason data and the same
+final sorted/deduplicated Task-owner union. All four private callers provide
+pure row accessors/reconstruction; no intermediate union is observable.
+Selection descriptor-authority checks,
 physical preparation compatibility and unreadable/stale pin handling remain
 in their existing callers. A selected and refused row from different frozen
 sources are not silently collapsed together; a later rebind resolves their

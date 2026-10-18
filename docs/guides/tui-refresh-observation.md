@@ -1110,5 +1110,7 @@ The earlier Task Skill reference merge also has a
 One private exact-reference index replaces repeated accumulated-list scans and
 copies at observation grouping, selection merge and retained-selection rebind.
 Its key includes content revision, and output follows first original reference
-positions. Task-owner sorting, resolution and authority checks remain separate;
-this source complexity change is not a measured preview or turn speedup.
+positions. Repeated owner ids accumulate in immutable sets with one canonical
+list emitted per repeated pin; unique rows remain unchanged. Resolution and
+authority checks retain their existing boundaries. Source complexity is not
+measured preview/turn speedup.

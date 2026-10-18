@@ -14,7 +14,7 @@ let with_machine run =
     else Sys.remove path in
   Fun.protect ~finally:(fun () -> ignore (Msx_lane.eject ()); Msx_lane.install_activity_observer None; remove directory)
     (fun () ->
-      ignore (require (Msx_lane.load ~ledger_dir:directory ~roms_dir:None ~cart_path:None ~disk_path:None));
+      ignore (require (Msx_lane.For_testing.load_bare_machine ~ledger_dir:directory));
       run directory)
 let off () = current := { !current with msx_enabled = false }
 let rejected name result = match result with
@@ -36,7 +36,7 @@ let test_off_retains () = with_machine @@ fun directory ->
   let before = require (Msx_lane.capture_with_identity ()) in
   let ledger = Msx_lane.ledger () in
   off ();
-  rejected "load" (Msx_lane.load ~ledger_dir:directory ~roms_dir:None ~cart_path:None ~disk_path:None);
+  rejected "load" (Msx_lane.For_testing.load_bare_machine ~ledger_dir:directory);
   rejected "step" (Msx_lane.step ~frames:1);
   rejected "settle" (Msx_lane.step_until_change ~max_frames:1);
   rejected "HTTP tick owner" (Msx_lane.step_frame ~frames:1);
@@ -49,7 +49,7 @@ let test_off_retains () = with_machine @@ fun directory ->
   check string "same machine" before.incarnation after.incarnation;
   check int "same frame" before.observation.frame after.observation.frame;
   check bool "same input ledger" true (ledger = Msx_lane.ledger ());
-  ignore (require (Msx_lane.peek ~address:0 ~length:1));
+  ignore (require (Msx_lane.peek ~address:(Result.get_ok (Msx_lane.Address.parse "0")) ~length:1));
   ignore (require (Msx_lane.ram_diff ()));
   let path = Filename.concat directory "retained.json" in
   ignore (require (Msx_lane.save ~path));

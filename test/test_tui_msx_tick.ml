@@ -23,6 +23,7 @@ let loaded = function Client.Advanced (Some frame, Some _) -> frame
   | Advanced (None,None) -> fail "no frame"
   | Advanced (Some _,None) | Advanced (None,Some _) -> fail "frame and mark disagree"
   | Not_started _ -> fail "tick was refused"
+  | Worker_unavailable _ -> fail "tick found no worker"
 let failure = function Error _ -> () | Ok _ -> fail "failure returned a successful frame"
 let fetch ?(host = "localhost") ?(port = 8935) ?(headers = auth "a") cache request =
   Client.fetch cache ~host ~port ~headers ~request:(fun ~body -> Result.map (fun json -> 200,json) (request ~body))
@@ -39,7 +40,7 @@ let test_retained_metadata () =
       Ok (frame ~player:"bob" number (retained tag))) |> require in
     check (option int) "tick mark follows its frame" (Some number)
       (match observation with Advanced (_,mark) -> Option.map (fun (mark : Masc_tui_machine_live.mark) -> mark.count) mark
-       | Not_started _ -> None);
+       | Not_started _ | Worker_unavailable _ -> None);
     let current = loaded observation in
     check int "clock is fresh" number current.msx_number;
     check (option (list string)) "players are fresh" (Some ["bob"])
@@ -149,6 +150,63 @@ let test_activity_refusal_and_recovery () =
   check bool "even observed on cannot retry an unknown mutation" true
     (Client.policy_after_activity unknown (Ok Client.Enabled)=Client.Outcome_unknown)
 
+(* The route answers {code, ok, message}; the terminal used to match exactly
+   {code, ok} for the activity codes, so a real activity refusal became an
+   unknown outcome and stopped the tick. The server's own encoder produces the
+   body here, with a field the terminal has never heard of beside it. *)
+let test_refusal_body_is_not_matched_by_field_set () =
+  List.iter (fun (code, refusal) ->
+    let body = match Msx_wire.encode ~code "refused before execution" with
+      | `Assoc fields -> `Assoc (fields @ ["added_later", `Bool true])
+      | other -> other in
+    let result = Client.fetch (Client.create ()) ~host:"localhost" ~port:8935 ~headers:[]
+      ~request:(fun ~body:_ -> Ok (409, body)) in
+    check bool "a refusal with a message and an extra field is still known" true
+      (result = Ok (Client.Not_started refusal));
+    check bool "and does not stop the tick" true
+      (Client.policy_after_tick result = Client.Observing refusal))
+    [Msx_wire.Activity_disabled, Client.Off;
+     Msx_wire.Activity_unobserved, Client.Activity_unobserved;
+     Msx_wire.Workspace_precondition_failed, Client.Workspace_changed];
+  List.iter (fun code ->
+    let result = Client.fetch (Client.create ()) ~host:"localhost" ~port:8935 ~headers:[]
+      ~request:(fun ~body:_ -> Ok (409, Msx_wire.encode ~code "not a start refusal")) in
+    failure result)
+    [Msx_wire.Worker_unavailable; Msx_wire.Outcome_unknown]
+
+(* A 503 is two different answers. [worker_unavailable] ran nothing, so the
+   next poll asks again and the retained pixels stay; [outcome_unknown] may have
+   run, so the poll stops until the operator observes. A 503 with neither code
+   proves nothing, and stops the poll too. *)
+let test_unavailable_worker_keeps_polling () =
+  let cache = Client.create () and tag = revision 'a' in
+  let initial = fetch cache (fun ~body:_ -> Ok (frame 1 (inline tag "rgb"))) |> require |> loaded in
+  let calls = ref 0 in
+  let reply = Client.fetch cache ~host:"localhost" ~port:8935 ~headers:(auth "a") ~request:(fun ~body:_ ->
+    incr calls;
+    Ok (503, Msx_wire.encode ~code:Msx_wire.Worker_unavailable "No attached shared Add-on provides masc_msx_step")) in
+  check bool "the answer names the missing worker" true
+    (reply = Ok (Client.Worker_unavailable (Some "No attached shared Add-on provides masc_msx_step")));
+  check int "an unavailable worker is not retried inside the call" 1 !calls;
+  check bool "the poll keeps advancing" true (Client.policy_after_tick reply = Client.Advancing);
+  let resumed = fetch cache (fun ~body ->
+    check bool "the retained pixel basis survives the unavailable worker" true
+      (known body = `Assoc (reference tag));
+    Ok (frame 2 (retained tag))) |> require |> loaded in
+  check bool "retained pixels are reused after the worker returns" true (resumed.msx_rgb == initial.msx_rgb)
+
+let test_lost_tick_answer_stops_polling () =
+  let stops label answer =
+    let reply = Client.fetch (Client.create ()) ~host:"localhost" ~port:8935 ~headers:[]
+      ~request:(fun ~body:_ -> Ok answer) in
+    failure reply;
+    check bool (label ^ " leaves the outcome unknown") true
+      (Client.policy_after_tick reply = Client.Outcome_unknown) in
+  stops "outcome_unknown" (503, Msx_wire.encode ~code:Msx_wire.Outcome_unknown "reply lost");
+  stops "a 503 with no code" (503, `Assoc ["ok", `Bool false; "message", `String "gateway"]);
+  stops "a 503 that is not JSON refusal" (503, `String "upstream");
+  stops "a 503 carrying an activity code" (503, Msx_wire.encode ~code:Msx_wire.Activity_disabled "off")
+
 let test_workspace_refusal_is_unstarted_and_cannot_rearm () =
   let cache = Client.create () in
   let tag = revision 'a' in
@@ -182,12 +240,66 @@ let test_malformed_activity_is_not_permission () =
      409,`Assoc ["ok",`Bool true;"code",`String "activity_disabled"];
      409,`Assoc ["ok",`Bool false;"message",`String "machines.msx is off"]]
 
+(* A refused answer reaches the screen as the sentence for its code, never as
+   the JSON. Each code the server can send reads to a sentence, and the codes
+   read differently from one another: the terminal branches on the code. *)
+let test_refusal_body_reads_as_a_sentence () =
+  let body code message = Yojson.Safe.to_string (Msx_wire.encode ?code message) in
+  let sentence code message =
+    match Client.refusal_sentence (body code message) with
+    | Some sentence -> sentence
+    | None -> fail "a refusal body gave no sentence" in
+  let said = "the server's own words" in
+  let with_message = List.map (fun code -> sentence (Some code) said) Msx_wire.all_of_code in
+  List.iter (fun sentence ->
+    check bool "the server's words are kept" true
+      (let n = String.length said and m = String.length sentence in
+       let rec go i = i + n <= m && (String.sub sentence i n = said || go (i + 1)) in
+       go 0);
+    check bool "it is not the JSON" false (String.contains sentence '{'))
+    with_message;
+  check int "each code reads differently" (List.length Msx_wire.all_of_code)
+    (List.length (List.sort_uniq String.compare with_message));
+  List.iter (fun code ->
+    match Client.refusal_sentence (body (Some code) "") with
+    | Some _ -> ()
+    | None -> fail "a coded refusal with an empty message gave no sentence")
+    Msx_wire.all_of_code;
+  check (option string) "a plain message without a code is the message" (Some said)
+    (Client.refusal_sentence (body None said));
+  List.iter (fun raw ->
+    check (option string) ("not an MSX refusal: " ^ raw) None (Client.refusal_sentence raw))
+    [ "not json"; "[]"; {|{"error":"words"}|}; {|{"ok":true,"message":"fine"}|};
+      {|{"ok":false,"code":"nope","message":"m"}|}; {|{"ok":false}|} ]
+
+(* The notice a tick left because no worker answered is retired by the next
+   advance, and only that notice. *)
+let test_worker_down_notice_is_retired_by_identity () =
+  let down = Some (Client.worker_unavailable_notice (Some "no worker")) in
+  check (option string) "still the notice on screen: retired" None
+    (Client.notice_after_advance ~notice:down ~worker_down_notice:down);
+  let replaced = Some "Checkpoint refused: slot is full" in
+  check (option string) "replaced by another notice: kept" replaced
+    (Client.notice_after_advance ~notice:replaced ~worker_down_notice:down);
+  let same_words = Some (String.concat "" [ Option.get down ]) in
+  check bool "same words written elsewhere are a different notice" true
+    (Client.notice_after_advance ~notice:same_words ~worker_down_notice:down == same_words);
+  check (option string) "no worker-down notice outstanding: nothing retired" replaced
+    (Client.notice_after_advance ~notice:replaced ~worker_down_notice:None);
+  check (option string) "no notice at all stays none" None
+    (Client.notice_after_advance ~notice:None ~worker_down_notice:None)
+
 let () =
   run "retained MSX tick"
     ["response protocol",
-      [test_case "workspace refusal never executes or rearms from activity" `Quick test_workspace_refusal_is_unstarted_and_cannot_rearm;
+      [test_case "a refusal is read by code, not by field set" `Quick test_refusal_body_is_not_matched_by_field_set;
+       test_case "an unavailable worker keeps the poll advancing" `Quick test_unavailable_worker_keeps_polling;
+       test_case "a lost tick answer stops the poll" `Quick test_lost_tick_answer_stops_polling;
+       test_case "workspace refusal never executes or rearms from activity" `Quick test_workspace_refusal_is_unstarted_and_cannot_rearm;
        test_case "typed activity refusal preserves pixels and resumes only from observation" `Quick test_activity_refusal_and_recovery;
        test_case "malformed activity cannot authorize execution" `Quick test_malformed_activity_is_not_permission;
+       test_case "a refusal body reads as a sentence by its code" `Quick test_refusal_body_reads_as_a_sentence;
+       test_case "the worker-down notice is retired by identity" `Quick test_worker_down_notice_is_retired_by_identity;
        test_case "fresh metadata with retained and replaced pixels" `Quick test_retained_metadata;
        test_case "malformed or failed responses never retry or resurrect" `Quick test_rejected_responses;
        test_case "server and credential scope" `Quick test_scope;

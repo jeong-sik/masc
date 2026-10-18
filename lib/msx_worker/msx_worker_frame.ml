@@ -38,52 +38,7 @@ let frame_rgb_base64 rgb =
         encoded)
 ;;
 
-(* Frames per poll-cadence tick (RFC-0439 §3.2). At the TUI's ~3 Hz spectator
-   poll this advances ~54 frames a second, close enough to the machine's 60 Hz
-   that a game reads as live without a server-side ticker. *)
-let msx_tick_default_frames = 18
-
-let clamp_tick_frames requested = max 1 (min Msx_lane.max_frames_per_call requested)
-
-type pixel_reference = { revision : string; width : int; height : int }
-type pixel_response = Full_frame | Retained_pixels of pixel_reference option
-
-let decode_pixel_reference = function
-  | `Assoc fields when List.length fields = 3 ->
-      (match List.assoc_opt "revision" fields, List.assoc_opt "width" fields,
-             List.assoc_opt "height" fields with
-       | Some (`String revision), Some (`Int width), Some (`Int height)
-         when String.length revision = 64 && width > 0 && height > 0
-              && String.for_all (function '0'..'9' | 'a'..'f' -> true | _ -> false) revision ->
-           Ok { revision; width; height }
-       | _ -> Error "known_pixels requires a SHA256 revision and positive width/height")
-  | _ -> Error "known_pixels requires exactly revision, width and height"
-
-let decode_tick body =
-  match Yojson.Safe.from_string body with
-  | exception Yojson.Json_error _ -> Error "tick body must be valid JSON"
-  | `Assoc fields ->
-      let ( let* ) = Result.bind in
-      let names = List.map fst fields in
-      let* () =
-        if List.length names <> List.length (List.sort_uniq String.compare names)
-           || List.exists (fun name -> not (List.mem name ["frames"; "pixel_response"; "known_pixels"])) names
-        then Error "tick has duplicate or unknown fields" else Ok () in
-      let* frames = match List.assoc_opt "frames" fields with
-        | None -> Ok msx_tick_default_frames
-        | Some (`Int n) -> Ok (clamp_tick_frames n)
-        | Some _ -> Error "frames must be an integer" in
-      let* pixels = match List.assoc_opt "pixel_response" fields, List.assoc_opt "known_pixels" fields with
-        | None, None -> Ok Full_frame
-        | Some (`String "retained"), None -> Ok (Retained_pixels None)
-        | Some (`String "retained"), Some value ->
-            Result.map (fun reference -> Retained_pixels (Some reference)) (decode_pixel_reference value)
-        | _ -> Error "known_pixels requires pixel_response=retained" in
-      Ok (frames, pixels)
-  | _ -> Error "tick body must be an object"
-;;
-
-type prepared_pixels = { rgb : string; encoded : string; reference : pixel_reference }
+type prepared_pixels = { rgb : string; encoded : string; reference : Msx_wire.pixel_reference }
 let tick_pixels_mutex = Mutex.create ()
 let tick_pixels : prepared_pixels option ref = ref None
 
@@ -106,8 +61,8 @@ let prepare_tick_pixels (frame : Msx_lane.frame) =
 let tick_frame_json pixel_response (frame : Msx_lane.frame) entries
     (mark : Msx_lane.change_mark) =
   let pixel_fields = match pixel_response with
-    | Full_frame -> ["rgb_base64", `String (frame_rgb_base64 frame.rgb)]
-    | Retained_pixels known ->
+    | Msx_wire.Full_frame -> ["rgb_base64", `String (frame_rgb_base64 frame.rgb)]
+    | Msx_wire.Retained_pixels known ->
         let pixels = prepare_tick_pixels frame in
         let retained = known = Some pixels.reference in
         let fields =
@@ -132,12 +87,13 @@ let step ~arguments =
   let tool_name = Msx_tool.name Msx_tool.Step and start_time = Tool_timing.start () in
   let fields = match arguments with `Assoc fields -> fields | _ -> [] in
   let fields = List.remove_assoc "include_frame" fields in
-  let fields = if List.mem_assoc "frames" fields then fields
-    else ("frames", `Int 60) :: fields in
-  match decode_tick (Yojson.Safe.to_string (`Assoc fields)) with
+  match Msx_wire.decode_tick (`Assoc fields) with
   | Error message -> Tool_result.make_err ~tool_name ~start_time
       ~class_:Tool_result.Workflow_rejection ~effect_disposition:Tool_result.Proven_pre_effect message
-  | Ok (frames, pixel_response) ->
+  | Ok { frames; pixel_response } ->
+      (* The lane refuses a count outside 1..max_frames_per_call. This path
+         used to clamp it, so a count the plain step refuses ran here. *)
+      let frames = Option.value frames ~default:Msx_machine_tools.default_step_frames in
       match Msx_lane.step_frame ~frames with
       | Ok (frame, entries, mark) ->
           (* The frames were run, so declare the progress the sibling step path

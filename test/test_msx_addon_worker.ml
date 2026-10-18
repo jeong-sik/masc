@@ -42,8 +42,20 @@ let test_stdio_machine_lifecycle () =
   Unix.mkdir carts 0o700;
   Out_channel.with_open_bin (Filename.concat carts "fixture.rom") (fun channel ->
     output_string channel "inventory-only fixture");
+  (* The worker takes its C-BIOS from the volume's bios/ inventory: three
+     zero-filled ROMs stand in for it. A host MSX_ROMS would override the
+     inventory, so it is emptied for the run. *)
+  let bios = Filename.concat msx "bios" in
+  Unix.mkdir bios 0o700;
+  List.iter (fun (name, size) ->
+    Out_channel.with_open_bin (Filename.concat bios name) (fun channel ->
+      output_string channel (String.make size '\000')))
+    ["cbios_main_msx2.rom", 32768; "cbios_logo_msx2.rom", 16384; "cbios_sub.rom", 16384];
+  let host_roms = Sys.getenv_opt "MSX_ROMS" in
+  Unix.putenv "MSX_ROMS" "";
   Msx_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
   Fun.protect ~finally:(fun () ->
+    Unix.putenv "MSX_ROMS" (Option.value host_roms ~default:"");
     ignore (Msx_lane.eject ());
     Msx_lane.install_activity_observer None;
     remove_owned_tree base_path) (fun () ->
@@ -87,9 +99,21 @@ let test_stdio_machine_lifecycle () =
                 (absent_export.is_error = Some true);
               check bool "refused export creates no file" false
                 (Sys.file_exists (Filename.concat carts "new-data.dsk"));
-              let loaded = call "masc_msx_load" (`Assoc ["roms_dir", `String ""]) in
-              check bool "load succeeds without external media" false (loaded.is_error = Some true);
+              let refused = call "masc_msx_load" (`Assoc ["roms_dir", `String ""]) in
+              check bool "a load that names no image is refused" true (refused.is_error = Some true);
+              check bool "and loads no machine" true
+                (Yojson.Safe.Util.(live_observation (observe ()) |> member "state") = `String "no_machine");
+              let loaded = call "masc_msx_load" (`Assoc ["roms_dir", `String ""; "cart", `String "fixture"]) in
+              check bool "load succeeds with an inventory image" false (loaded.is_error = Some true);
               let before = frame loaded in
+              let overflow = call "masc_msx_peek" (`Assoc ["address", `String "3fffffffffffffff";
+                "length", `Int 16]) in
+              check bool "an address beyond 16 bits is refused" true (overflow.is_error = Some true);
+              check int "the worker still answers after the refusal" before
+                (frame (call "masc_msx_screen" (`Assoc [])));
+              let digits = call "masc_msx_peek" (`Assoc ["address", `String "4096"; "length", `Int 4]) in
+              check string "bare digits are a hex address, answered as four hex digits" "4096"
+                Yojson.Safe.Util.(data digits |> member "address" |> to_string);
               check bool "loaded observation retains screen pixels in its artifact" true
                 (Yojson.Safe.Util.(live_observation (observe ()) |> member "screen" |> member "rgb_base64" |> to_string |> String.length) > 0);
               let invalid = call "masc_msx_step" (`Assoc ["frames", `Int 301]) in
@@ -173,5 +197,47 @@ let test_stdio_machine_lifecycle () =
               check bool "eject removes screen context" true
                 (Yojson.Safe.Util.(live_observation (observe ()) |> member "state") = `String "no_machine"))))))
 
+(* The exception boundary every machine call passes through. *)
+let test_exception_boundary () =
+  let tool_name = "masc_msx_screen" in
+  let contain run = Msx_addon_worker.contain ~tool_name ~start_time:(Tool_timing.start ()) run in
+  let completed = {S.content = []; is_error = Some false; structured_content = None; _meta = None} in
+  check bool "a completed call passes through unchanged" true (contain (fun () -> completed) == completed);
+  List.iter (fun (label, raise_it) ->
+    let result = contain raise_it in
+    check bool (label ^ " becomes an error result") true (result.S.is_error = Some true);
+    check bool (label ^ " is an unknown-effect runtime failure") true
+      (Lane_addon_tool_result.failure result
+       = (Tool_result.Runtime_failure, Tool_result.Effect_outcome_unknown)))
+    ["Sys_error", (fun () -> raise (Sys_error "disk full"));
+     "Invalid_argument", (fun () -> raise (Invalid_argument "index out of bounds"));
+     "Not_found", (fun () -> raise Not_found);
+     "Failure", (fun () -> failwith "defect")];
+  check_raises "cancellation is not a failure" (Eio.Cancel.Cancelled Exit)
+    (fun () -> ignore (contain (fun () -> raise (Eio.Cancel.Cancelled Exit))))
+
+(* The result names the exception; the log keeps where it was raised. *)
+let test_exception_boundary_logs_the_raise_site () =
+  Printexc.record_backtrace true;
+  let marker = "boundary-log-marker-7f3a" in
+  let contains text needle =
+    let n = String.length needle in
+    let rec go i = i + n <= String.length text && (String.sub text i n = needle || go (i + 1)) in
+    go 0 in
+  ignore (Msx_addon_worker.contain ~tool_name:"masc_msx_screen"
+    ~start_time:(Tool_timing.start ()) (fun () -> failwith marker));
+  let logged =
+    Log.Ring.recent ~limit:50 ~module_filter:"Msx" ()
+    |> List.filter (fun (entry : Log.Ring.entry) -> contains entry.message marker) in
+  match logged with
+  | [ entry ] ->
+      check bool "it is an error line" true (entry.level = Log.Error);
+      check bool "it carries the raise site" true (contains entry.message "Raised at")
+  | entries ->
+      fail (Printf.sprintf "expected one log line for the exception, got %d" (List.length entries))
+
 let () = run "MSX standalone Add-on worker"
-  ["stdio", [test_case "tool validation, screen and checkpoint lifecycle" `Quick test_stdio_machine_lifecycle]]
+  ["stdio", [test_case "tool validation, screen and checkpoint lifecycle" `Quick test_stdio_machine_lifecycle];
+   "boundary", [test_case "an escaped exception becomes a result" `Quick test_exception_boundary;
+                test_case "an escaped exception is logged with its raise site" `Quick
+                  test_exception_boundary_logs_the_raise_site]]

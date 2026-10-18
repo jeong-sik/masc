@@ -32,6 +32,15 @@ val carts_response : config:Workspace.config ->
 (** Worker-owned inventory [{carts; loaded; cartridge; disk}]. Missing shared
     installations are unavailable; the host filesystem is never a fallback. *)
 
+val call_error_answer :
+  Lane_addon_runtime.tool_call_error ->
+  [ `OK | `Conflict | `Bad_request | `Service_unavailable | `Internal_server_error ] * Yojson.Safe.t
+(** The answer to a worker call that returned no result, exposed for the route
+    test. A worker that was not reached, or a host refusal before the call, and
+    a call whose result was lost are both HTTP 503, under the codes
+    [worker_unavailable] and [outcome_unknown]: the first ran nothing, the
+    second may have. *)
+
 val load_result_json : ok:bool -> message:string -> Yojson.Safe.t
 (** The load response body: [{ok, message}]. Exposed for the route test. *)
 

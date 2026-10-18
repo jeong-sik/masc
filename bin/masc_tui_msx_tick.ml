@@ -5,11 +5,27 @@ type refusal = Off | Activity_unobserved | Workspace_changed
 type activity = Enabled | Refused of refusal
 type response = Advanced of Masc_tui_types.msx_frame option * Masc_tui_machine_live.mark option
   | Not_started of refusal
+  | Worker_unavailable of string option
 type poll_policy = Advancing | Observing of refusal | Outcome_unknown
+(* A worker the server could not reach was never sent the tick, so asking again
+   at the next poll is safe and the retained screen stays. Only a lost answer
+   after dispatch leaves the outcome unknown. *)
 let policy_after_tick = function
   | Ok (Advanced _) -> Advancing
   | Ok (Not_started refusal) -> Observing refusal
+  | Ok (Worker_unavailable _) -> Advancing
   | Error _ -> Outcome_unknown
+let worker_unavailable_notice = function
+  | Some detail -> "MSX worker unavailable; trying again at the next refresh: " ^ detail
+  | None -> "MSX worker unavailable; trying again at the next refresh."
+(* The notice a tick leaves while no worker answers is stale once a tick
+   advances. It is told from every other notice by identity: [worker_down_notice]
+   is the very value the tick wrote, so a notice that something else wrote
+   since, even with the same words, is kept. *)
+let notice_after_advance ~notice ~worker_down_notice =
+  match worker_down_notice with
+  | Some _ when notice == worker_down_notice -> None
+  | Some _ | None -> notice
 let policy_after_activity policy result = match policy,result with
   | Observing Workspace_changed, _ -> policy
   | Observing (Off | Activity_unobserved), Ok Enabled -> Advancing
@@ -134,19 +150,66 @@ let decode_frame previous json =
        | _ -> Error "MSX tick: invalid frame response")
   | _ -> Error "MSX tick: expected an object"
 
+(* A 409 is a refusal before execution. The server encodes it with
+   [Msx_wire]; this reads it with the same codec, so a field the server adds
+   beside [ok], [code] and [message] cannot turn a known refusal into an
+   unknown outcome. A code that is not an activity or workspace refusal on a
+   409 stays unconfirmed. *)
+let decode_refusal previous json =
+  match Msx_wire.decode json with
+  | Ok { code = Some Msx_wire.Activity_disabled; _ } -> Ok (Not_started Off, previous)
+  | Ok { code = Some Msx_wire.Activity_unobserved; _ } ->
+      Ok (Not_started Activity_unobserved, previous)
+  | Ok { code = Some Msx_wire.Workspace_precondition_failed; _ } ->
+      Ok (Not_started Workspace_changed, previous)
+  | Ok { code = Some (Msx_wire.Worker_unavailable | Msx_wire.Outcome_unknown); _ }
+  | Ok { code = None; _ } | Error _ -> Error "MSX tick: unknown refusal"
+
+(* A 503 names which of two different things happened. [worker_unavailable]:
+   the server had no worker to send the tick to, so nothing ran.
+   [outcome_unknown]: the tick was sent and its answer was lost, so it may have
+   run. Any other 503 body, such as a proxy's, proves neither. *)
+let decode_unavailable previous json =
+  match Msx_wire.decode json with
+  | Ok { code = Some Msx_wire.Worker_unavailable; message } ->
+      Ok (Worker_unavailable message, previous)
+  | Ok { code = Some Msx_wire.Outcome_unknown; message } ->
+      Error ("MSX tick: outcome unknown" ^ (match message with Some m -> ": " ^ m | None -> ""))
+  | Ok { code = Some (Msx_wire.Activity_disabled | Msx_wire.Activity_unobserved
+                     | Msx_wire.Workspace_precondition_failed); _ }
+  | Ok { code = None; _ } | Error _ -> Error "MSX tick: unexpected 503 answer"
+
+(* A refused MSX answer as the one sentence a person reads. The routes refuse
+   in [Msx_wire]'s body, so the terminal reads that body with the same codec
+   and branches on the code, not on the words. The code names what the
+   operator may do next; the server's message, when it sent one, says why.
+   A body that is not an MSX refusal gives [None], and the caller keeps its
+   own wording for it. *)
+let refusal_lead = function
+  | Msx_wire.Activity_disabled -> "MSX is off"
+  | Msx_wire.Activity_unobserved -> "MSX activity is not available"
+  | Msx_wire.Workspace_precondition_failed -> "the server is another workspace"
+  | Msx_wire.Worker_unavailable -> "the MSX worker is not running, nothing was sent"
+  | Msx_wire.Outcome_unknown -> "the MSX worker's answer was lost, so the call may have run"
+
+let refusal_sentence body =
+  match Yojson.Safe.from_string body with
+  | exception Yojson.Json_error _ -> None
+  | json ->
+      (match Msx_wire.decode json with
+       | Error _ -> None
+       | Ok { code; message } ->
+           (match Option.map refusal_lead code, message with
+            | Some lead, Some message -> Some (lead ^ ": " ^ message)
+            | Some lead, None -> Some lead
+            | None, Some message -> Some message
+            | None, None -> None))
+
 let decode previous (status,json) =
-  match status,json with
-  | 409, `Assoc fields ->
-      (match List.sort (fun (a, _) (b, _) -> String.compare a b) fields with
-       | ["code", `String "activity_disabled"; "ok", `Bool false] ->
-           Ok (Not_started Off, previous)
-       | ["code", `String "activity_unobserved"; "ok", `Bool false] ->
-           Ok (Not_started Activity_unobserved, previous)
-       | ["code", `String "workspace_precondition_failed";
-          "message", `String _; "ok", `Bool false] ->
-           Ok (Not_started Workspace_changed, previous)
-       | _ -> Error "MSX tick: unknown refusal")
-  | 200, _ -> Result.map (fun (frame,pixels,mark) -> Advanced (frame,mark),pixels) (decode_frame previous json)
+  match status with
+  | 409 -> decode_refusal previous json
+  | 503 -> decode_unavailable previous json
+  | 200 -> Result.map (fun (frame,pixels,mark) -> Advanced (frame,mark),pixels) (decode_frame previous json)
   | _ -> Error "MSX tick: unexpected response status"
 
 let fetch ?(body_fields = []) t ~host ~port ~headers ~request =

@@ -4,18 +4,18 @@ import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 import { emitKeypressEvents } from 'node:readline'
-import { spawn } from 'node:child_process'
 import { Worker } from 'node:worker_threads'
 import { Note } from 'tonal'
 import { newEditor, editorCommand, editorAction, selectedNote } from './sequencer-editor.mjs'
 import { harmonyAt, PPQ } from './sequencer-project.mjs'
 import { loadProject, saveProject, projectMidi } from './sequencer-files.mjs'
 import { safeText } from './terminal.mjs'
+import { openPlayback } from './playback.mjs'
 
 const help = [
   'Arrow keys: time/pitch; Shift+arrows: move note; Enter/x: insert/remove note',
   'Tab: track; n: new track; m: mute; o: solo; u/y: undo/redo',
-  '[/]: halve/double note length; +/-: velocity; g: grid; l: loop; Space: play/stop',
+  '[/]: halve/double note length; +/-: velocity; g: grid; l: loop; Space: play/pause',
   's: save; r: recording; q/Esc: save and return; : opens command input',
   'All positions and lengths below use quarter-note beats starting at 0.',
   ':note C4 0 1 96              pitch, beat, duration, optional velocity',
@@ -28,11 +28,13 @@ const help = [
   ':cursor 4 C3    :title My phrase    :undo    :redo    :mute    :solo',
   ':save-as /path/song.json    :export /path/song.mid    :wave /path/song.wav',
   'Close, drop2 and rootless voicings use Tonal. Chord labels are candidates.',
-  'Preview uses a SoundFont. Repeated WAV preview restarts the player each pass.',
+  ':output device-UID selects an audio output; --devices lists device identities.',
+  ':seek 4 moves playback to quarter-note beat 4; :stop ends the transport.',
+  'Preview uses a SoundFont and one native player for all loop iterations.',
 ]
 
 export async function viewSequencer({ path, root = resolve('music-projects'), embedded = false, signal,
-  soundfontPath, sessionRoot, input, midi } = {}) {
+  soundfontPath, sessionRoot, input, midi, output } = {}) {
   if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error('Sequencer requires a terminal')
   const loaded = path ? await loadProject(path) : null
   if (signal?.aborted) return
@@ -40,6 +42,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
   path = loaded?.path ?? join(root, `phrase-${randomUUID()}.json`)
   let saved = loaded?.project, status = 'Enter a note or :help', prompt = null, showHelp = false
   let loop = false, accepting = true, closed = false, suspended = false, task = Promise.resolve(), sessionTask = null
+  let selectedOutput = output
   const sessionAbort = new AbortController()
   const directory = await mkdtemp(join(tmpdir(), 'masc-sequencer-'))
   const worker = new Worker(new URL('./sequencer-worker.mjs', import.meta.url))
@@ -59,9 +62,10 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     return result
   }
   function playTick() {
-    if (transport.kind !== 'playing') return editor.tick
+    if (!['playing', 'paused'].includes(transport.kind)) return editor.tick
     const start = loop ? editor.project.loop.start : 0
-    return Math.min(editor.project.length - 1, start + (performance.now() - transport.since) / 60000 * editor.project.tempo * PPQ)
+    const seconds = transport.position + (transport.kind === 'playing' ? (performance.now() - transport.since) / 1000 : 0)
+    return start + (loop ? seconds % transport.duration : seconds) / 60 * editor.project.tempo * PPQ
   }
   function draw() {
     if (closed || suspended || pendingDraw) return
@@ -104,7 +108,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
         if (pitch === editor.pitch) cells[cursor] = current ? '◆' : '◇'
         lines.push(`${Note.fromMidi(pitch).padStart(5)}  ${cells.join('')}`)
       }
-      lines.push(`Playhead ${(playTick() / PPQ).toFixed(2)} · loop ${project.loop.start / PPQ}–${project.loop.end / PPQ} · ${path}`)
+      lines.push(`Playhead ${(playTick() / PPQ).toFixed(2)} · loop ${project.loop.start / PPQ}–${project.loop.end / PPQ} · output ${selectedOutput ?? 'system default'} · ${path}`)
     }
     let output = '\x1b[H'
     for (let row = 1; row <= rows; row++) output += `\x1b[${row};1H\x1b[2K`
@@ -116,7 +120,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
   function stop() {
     generation++
     if (transport.cancel) Atomics.store(transport.cancel, 0, 1)
-    transport.child?.kill('SIGTERM')
+    transport.handle?.stop()
     transport = { kind: 'stopped' }
   }
   function render(snapshot, options = {}) {
@@ -129,29 +133,33 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
   }
   function startPlayer(wave, id) {
     if (!accepting || closed || id !== generation) return
-    const child = spawn(process.platform === 'darwin' ? 'afplay' : 'ffplay',
-      process.platform === 'darwin' ? [wave.path] : ['-nodisp', '-autoexit', '-loglevel', 'error', wave.path],
-      { stdio: ['ignore', 'ignore', 'pipe'] })
-    let detail = ''
-    child.stderr.setEncoding('utf8').on('data', text => { detail += text })
-    child.once('error', error => { if (id === generation) { status = error.message; transport = { kind: 'stopped' }; draw() } })
-    players.set(child, new Promise(resolve => child.once('close', code => {
-      players.delete(child)
-      if (!closed && id === generation) {
-        if (code === 0 && loop) startPlayer(wave, id)
-        else { transport = { kind: 'stopped' }; status = code === 0 ? 'Playback finished' : detail || `Player exited ${code}`; draw() }
+    const handle = openPlayback({ path: wave.path, output: selectedOutput, loop, onEvent: event => {
+      if (!accepting || closed || id !== generation) return
+      if (['playing', 'paused'].includes(event.kind)) {
+        transport = { kind: event.kind, handle, position: event.currentTime, duration: event.duration, since: performance.now() }
       }
-      resolve()
-    })))
-    transport = { kind: 'playing', child, since: performance.now() }
+      draw()
+    } })
+    transport = { kind: 'starting', handle }
+    handle.ready.catch(error => {
+      if (!closed && id === generation) { status = error.message; draw() }
+    })
+    const settled = handle.completion.then(() => {
+      if (!closed && id === generation) { transport = { kind: 'stopped' }; status = 'Playback finished'; draw() }
+    }, error => {
+      if (!closed && id === generation) { transport = { kind: 'stopped' }; status = error.message; draw() }
+    }).finally(() => { players.delete(handle) })
+    players.set(handle, settled)
     status = wave.clippedSamples > 0 ? 'Preview clipped; lower :level' : 'SoundFont preview'; draw()
   }
   function play() {
     if (!accepting) return
+    if (transport.kind === 'playing') { transport.handle.pause(); return }
+    if (transport.kind === 'paused') { transport.handle.resume(); return }
     if (transport.kind !== 'stopped') { stop(); draw(); return }
     const id = ++generation, result = render(editor.project, { loop })
     transport = { kind: 'rendering', cancel: result.cancel }
-    result.promise.then(wave => startPlayer(wave, id), error => {
+    result.promise.then(wave => startPlayer(wave, id)).catch(error => {
       if (!closed && id === generation) { transport = { kind: 'stopped' }; status = error.message; draw() }
     })
     draw()
@@ -189,6 +197,14 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       }
       case 'play': play(); break
       case 'stop': stop(); break
+      case 'output': stop(); selectedOutput = value.path; status = `Output: ${selectedOutput}`; break
+      case 'seek': {
+        if (!accepting) return
+        if (!transport.handle) throw new Error('Start playback before seeking')
+        const start = loop ? editor.project.loop.start : 0
+        transport.handle.seek((value.tick - start) / PPQ * 60 / editor.project.tempo)
+        break
+      }
       case 'help': showHelp = !showHelp; break
       case 'record': if (!sessionTask) sessionTask = record().catch(error => { status = error.message }).finally(() => { sessionTask = null }); break
     }
@@ -264,7 +280,12 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
   process.stdout.on('resize', onResize)
   signal?.addEventListener('abort', onAbort, { once: true })
   for (const name of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(name, onSignal)
-  const timer = setInterval(() => { if (transport.kind === 'playing') draw() }, 100)
+  const timer = setInterval(() => {
+    if (transport.kind === 'playing') {
+      try { transport.handle.status() } catch (error) { status = error.message }
+      draw()
+    }
+  }, 100)
   if (!embedded) process.stdout.write('\x1b[?1049h\x1b[?25l\x1b[2J')
   let recovery = null
   try { draw(); if (signal?.aborted) finish(); await done }
@@ -274,7 +295,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     process.stdin.off('keypress', keypress); process.stdin.off('end', onEnd)
     process.stdout.off('resize', onResize); signal?.removeEventListener('abort', onAbort)
     for (const name of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.off(name, onSignal)
-    for (const child of players.keys()) child.kill('SIGKILL')
+    for (const handle of players.keys()) handle.terminate()
     for (const job of jobs.values()) { Atomics.store(job.cancel, 0, 1); job.reject(new Error('Sequencer closed')) }
     jobs.clear()
     try {

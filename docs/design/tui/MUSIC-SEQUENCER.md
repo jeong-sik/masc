@@ -53,8 +53,10 @@ This stack is one step toward the full destination. Further work remains:
 
 - Retain editable arrangements of MIDI clips and WAV regions with repeat/offset,
   recording into existing projects and overdubs; retain raw expression provenance.
-- MIDI import and MIDI 2.0 editing/export without losing controllers, expression,
-  program/tempo changes, SysEx or original source identity.
+- Connect the MIDI source-asset editor to full-message audition and arrangements,
+  then support MIDI 2.0 source assets and expression/event editing. Source import
+  and note edit/export preserve controllers, program/tempo maps, SysEx and original
+  bytes; this is not yet an imported-performance playback path.
 - External MIDI clock and a shared sample clock for live scheduling, audio/MIDI
   arrangement playback, and low-latency monitoring/recording.
 - Connect the independently developed VST instrument/preset host (#43684) to project

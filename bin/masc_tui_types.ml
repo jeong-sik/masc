@@ -8710,7 +8710,7 @@ let keeper_log_target state =
   | Planning | Schedules | Verification | Harness | Fusion | Repositories | Code
   | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> None
 
-let keeper_log_key state ~limit keeper =
+let keeper_log_key state ~limit (keeper : keeper) =
   { klk_authority = state.workspace_authority; klk_base_path = state.local_base_path;
     klk_keeper = keeper.k_name; klk_limit = limit }
 

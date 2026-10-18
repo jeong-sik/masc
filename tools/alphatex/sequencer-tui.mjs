@@ -6,8 +6,7 @@ import { randomUUID } from 'node:crypto'
 import { emitKeypressEvents } from 'node:readline'
 import { Worker } from 'node:worker_threads'
 import { Note } from 'tonal'
-import { newEditor, editorCommand, editorAction, selectedNote } from './sequencer-editor.mjs'
-import { harmonyAt, PPQ } from './sequencer-project.mjs'
+import { newEditor, editorCommand, editorAction, selectedNote, editorView, editorAxis, editorHarmony } from './sequencer-editor.mjs'
 import { loadProject, saveProject, projectMidi } from './sequencer-files.mjs'
 import { safeText } from './terminal.mjs'
 import { openPlayback } from './playback.mjs'
@@ -32,15 +31,19 @@ const help = [
   ':midi-output ID sends phrases to a MIDI destination; :audio returns to audio.',
   ':seek 4 moves playback to quarter-note beat 4; :stop ends the transport.',
   'Audio preview uses a SoundFont; MIDI output sends the project notes directly.',
+  'Imported MIDI: source ticks retain tempo/expression; :pattern N selects SMF2.',
+  'Use :channel 1–16 or :select event-ID for source notes sharing a cursor.',
+  'Source edit/save/export works; full-message audition/automation is being connected.',
 ]
 
 export async function viewSequencer({ path, root = resolve('music-projects'), embedded = false, signal,
-  soundfontPath, sessionRoot, input, midi, output, midiOutput } = {}) {
+  soundfontPath, sessionRoot, input, midi, output, midiOutput, initialDocument, pattern } = {}) {
   if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error('Sequencer requires a terminal')
   if (output !== undefined && midiOutput !== undefined) throw new Error('Choose an audio output or a MIDI destination')
+  if (path && initialDocument) throw new Error('Open a saved document or import MIDI, one at a time')
   const loaded = path ? await loadProject(path) : null
   if (signal?.aborted) return
-  let editor = newEditor(loaded?.project), revision = loaded?.revision ?? null
+  let editor = newEditor(initialDocument ?? loaded?.project, { pattern }), revision = loaded?.revision ?? null
   path = loaded?.path ?? join(root, `phrase-${randomUUID()}.json`)
   let saved = loaded?.project, status = 'Enter a note or :help', prompt = null, showHelp = false
   let loop = false, accepting = true, closed = false, suspended = false, task = Promise.resolve(), sessionTask = null
@@ -66,9 +69,10 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
   }
   function playTick() {
     if (!['playing', 'paused'].includes(transport.kind)) return editor.tick
-    const start = loop ? editor.project.loop.start : 0
+    const view = editorView(editor), per = editorAxis(editor).per
+    const start = loop ? view.loop.start : 0
     const seconds = transport.position + (transport.kind === 'playing' ? (performance.now() - transport.since) / 1000 : 0)
-    return start + (loop ? seconds % transport.duration : seconds) / 60 * editor.project.tempo * PPQ
+    return start + (loop ? seconds % transport.duration : seconds) / 60 * view.tempo * per
   }
   function draw() {
     if (closed || suspended || pendingDraw) return
@@ -79,23 +83,23 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
   function drawNow() {
     if (closed || suspended) return
     const rows = process.stdout.rows || 24, cols = Math.max(1, (process.stdout.columns || 80) - 8)
-    const project = editor.project, track = project.tracks[editor.track], current = selectedNote(editor)
-    const at = harmonyAt(project, editor.tick)
+    const project = editorView(editor), axis = editorAxis(editor), per = axis.per, track = project.tracks[editor.track], current = selectedNote(editor)
+    const at = editorHarmony(editor)
     const lines = [
-      `${project.title}${dirty() ? ' *' : ''} · ${project.tempo} BPM · ${project.meter.join('/')} · ${project.length / PPQ} beats · ${transport.kind}${loop ? ' · LOOP' : ''}`,
-      `Track ${editor.track + 1}/${project.tracks.length}: ${track.name} · ch ${track.channel + 1} · program ${track.program} · level ${track.level} · pan ${track.pan}${track.muted ? ' · MUTED' : ''}${track.solo ? ' · SOLO' : ''} · ${track.notes.length} notes`,
-      `Cursor ${editor.tick / PPQ} · ${Note.fromMidi(editor.pitch)} · grid ${editor.step / PPQ} · length ${(current?.duration ?? editor.duration) / PPQ} · velocity ${current?.velocity ?? editor.velocity}`,
+      `${project.title}${dirty() ? ' *' : ''} · ${project.timingLabel ?? `${project.tempo} BPM`} · ${project.meter.join('/')} · ${(project.displayLength ?? project.length) / per} ${axis.label} · ${transport.kind}${loop ? ' · LOOP' : ''}`,
+      `Track ${editor.track + 1}/${project.tracks.length}: ${track.name} · ${track.detail ?? `ch ${track.channel + 1} · program ${track.program} · level ${track.level} · pan ${track.pan}`}${track.muted ? ' · MUTED' : ''}${track.solo ? ' · SOLO' : ''} · ${track.notes.length} notes`,
+      `Cursor ${editor.tick / per} · ${Note.fromMidi(editor.pitch)} · grid ${editor.step / per} · length ${(current?.duration ?? editor.duration) / per} · velocity ${current?.velocity ?? editor.velocity}`,
       `Chord candidates: ${at.candidates.join(' / ') || '—'} · ${at.notes.join(' ')} · ${status}`,
     ]
     if (showHelp) lines.push(...help)
     else {
       const first = Math.floor(editor.tick / (editor.step * cols)) * editor.step * cols
-      const barTicks = project.meter[0] * PPQ * 4 / project.meter[1]
+      const barTicks = project.timingLabel ? per : project.meter[0] * per * 4 / project.meter[1]
       const ruler = Array.from({ length: cols }, (_, x) => {
         const tick = first + x * editor.step
-        return tick >= project.length ? ' ' : tick % barTicks === 0 ? '|' : tick % PPQ === 0 ? '+' : '·'
+        return tick >= project.length ? ' ' : tick % barTicks === 0 ? '|' : tick % per === 0 ? '+' : '·'
       })
-      lines.push(`       ${ruler.join('')}`, `       beats ${first / PPQ} → ${Math.min(project.length, first + cols * editor.step) / PPQ}`)
+      lines.push(`       ${ruler.join('')}`, `       ${axis.label} ${first / per} → ${Math.min(project.length, first + cols * editor.step) / per}`)
       const height = Math.max(1, rows - 10), high = Math.min(127, Math.max(height - 1, editor.pitch + Math.floor(height / 2)))
       for (let y = 0; y < height; y++) {
         const pitch = high - y
@@ -112,7 +116,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
         lines.push(`${Note.fromMidi(pitch).padStart(5)}  ${cells.join('')}`)
       }
       const destination = selectedMidiOutput === undefined ? selectedOutput ?? 'system default' : `MIDI ${selectedMidiOutput}`
-      lines.push(`Playhead ${(playTick() / PPQ).toFixed(2)} · loop ${project.loop.start / PPQ}–${project.loop.end / PPQ} · output ${destination} · ${path}`)
+      lines.push(`Playhead ${(playTick() / per).toFixed(2)} · loop ${project.loop.start / per}–${project.loop.end / per} · output ${destination} · ${path}`)
     }
     let output = '\x1b[H'
     for (let row = 1; row <= rows; row++) output += `\x1b[${row};1H\x1b[2K`
@@ -130,6 +134,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
   function render(snapshot, options = {}) {
     if (!accepting) throw new Error('Sequencer is closing')
     if (workerFailure) throw new Error(workerFailure)
+    if (snapshot.kind === 'midi-source') throw new Error('Full-message MIDI source audition is not connected yet; edit/save/export retain the source')
     const id = ++jobNumber, cancel = new Int32Array(new SharedArrayBuffer(4)), path = join(directory, `${id}.${options.format === 'midi' ? 'json' : 'wav'}`)
     const promise = new Promise((resolve, reject) => { jobs.set(id, { resolve, reject, cancel }) })
     worker.postMessage({ id, path, project: snapshot, cancel: cancel.buffer, options: { ...options, soundfontPath } })
@@ -211,11 +216,12 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       case 'seek': {
         if (!accepting) return
         if (!transport.handle) throw new Error('Start playback before seeking')
-        const start = loop ? editor.project.loop.start : 0
-        const end = loop ? editor.project.loop.end : editor.project.length
+        const view = editorView(editor), per = editorAxis(editor).per
+        const start = loop ? view.loop.start : 0
+        const end = loop ? view.loop.end : view.length
         // The WAV endpoint is the player's sample-quantized duration. Preserve
         // the musical endpoint instead of rounding it beyond the last sample.
-        const seconds = value.tick === end ? transport.duration : (value.tick - start) / PPQ * 60 / editor.project.tempo
+        const seconds = value.tick === end ? transport.duration : (value.tick - start) / per * 60 / view.tempo
         transport.handle.seek(seconds)
         break
       }
@@ -254,7 +260,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
         case 'space': play(); break
         case 's': await save(); break
         case 'r': await effect({ kind: 'record' }); break
-        case 'l': stop(); loop = !loop; break
+        case 'l': if (editor.project.kind === 'midi-source') throw new Error('MIDI source clip looping requires the arrangement transport'); stop(); loop = !loop; break
         case 'tab': editor = editorAction(editor, { kind: 'track' }); break
         case 'return': case 'x': editor = editorAction(editor, { kind: 'toggle-note' }); break
         case 'delete': case 'backspace': editor = editorAction(editor, { kind: 'remove' }); break

@@ -1,9 +1,12 @@
-import { newProject, editProject, beats, pitch, PPQ } from './sequencer-project.mjs'
+import { newProject, editProject, beats, pitch, PPQ, harmonyAt } from './sequencer-project.mjs'
+import { sourceEditor, sourceSelected, sourceAction, sourceCommand, sourceHarmony } from './midi-source-editor.mjs'
 
-export function newEditor(project = newProject()) {
+export function newEditor(project = newProject(), { pattern } = {}) {
+  if (project.kind === 'midi-source') return sourceEditor(project, {}, pattern)
   return { project, track: 0, tick: 0, pitch: 60, step: PPQ / 4, duration: PPQ, velocity: 96, undo: [], redo: [] }
 }
 export function selectedNote(editor) {
+  if (editor.project.kind === 'midi-source') return sourceSelected(editor)
   return editor.project.tracks[editor.track].notes.find(note => note.pitch === editor.pitch
     && note.start <= editor.tick && editor.tick < note.start + note.duration)
 }
@@ -12,6 +15,7 @@ function apply(editor, edit) {
   return { ...editor, project, undo: [...editor.undo, editor.project], redo: [] }
 }
 export function editorAction(editor, action) {
+  if (editor.project.kind === 'midi-source') return sourceAction(editor, action)
   const note = selectedNote(editor)
   switch (action.kind) {
     case 'move': return { ...editor, tick: Math.max(0, Math.min(editor.project.length - 1, editor.tick + (action.ticks ?? 0))),
@@ -56,6 +60,7 @@ export function editorAction(editor, action) {
 
 // A small exact command grammar. Commands yield typed effects; the terminal owns IO.
 export function editorCommand(editor, line) {
+  if (editor.project.kind === 'midi-source') return sourceCommand(editor, line)
   const [command, ...args] = line.trim().split(/\s+/)
   const count = (min, max = min) => {
     if (args.length < min || args.length > max) throw new Error(`Wrong arguments for ${command}; use :help`)
@@ -100,3 +105,7 @@ export function editorCommand(editor, line) {
   const next = apply(editor, edit)
   return { editor: command === 'track-add' ? { ...next, track: next.project.tracks.length - 1 } : next }
 }
+
+export const editorView = editor => editor.view ?? editor.project
+export const editorAxis = editor => editor.axis ?? { per: PPQ, label: 'beats' }
+export const editorHarmony = editor => editor.project.kind === 'midi-source' ? sourceHarmony(editor) : harmonyAt(editor.project, editor.tick)

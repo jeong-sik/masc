@@ -1160,6 +1160,7 @@ describe('fetchKeeperTurnTranscript', () => {
         turn_ref: 'trace-xyz#3',
         found: true,
         source: 'keeper_chat_store',
+        schema: 'masc.keeper.turn-transcript.v2',
         user: [{ role: 'user', content: 'request A', ts: 10 }],
         assistant: [
           { role: 'assistant', content: 'reply A', ts: 11 },
@@ -1188,6 +1189,7 @@ describe('fetchKeeperTurnTranscript', () => {
         turn_ref: 'trace-xyz#99',
         found: false,
         source: 'keeper_chat_store',
+        schema: 'masc.keeper.turn-transcript.v2',
         user: [],
         assistant: [],
       }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
@@ -1199,6 +1201,25 @@ describe('fetchKeeperTurnTranscript', () => {
     expect(result.found).toBe(false)
     expect(result.user).toEqual([])
     expect(result.assistant).toEqual([])
+  })
+  const invalidTranscripts: Array<[string, Record<string, unknown>]> = [
+    ['unversioned history', { schema: undefined }],
+    ['foreign keeper', { keeper: 'another-keeper' }],
+    ['foreign turn', { turn_ref: 'another-trace#3' }],
+    ['contradictory absence', { found: true }],
+    ['malformed line', { found: true, assistant: [{ role: 'assistant', content: 12, ts: 1 }] }],
+    ['wrong-side line', { found: true, user: [{ role: 'assistant', content: 'wrong side', ts: 1 }] }],
+    ['non-numeric timestamp', { found: true, assistant: [{ role: 'assistant', content: 'text', ts: '1' }] }],
+  ]
+  it.each(invalidTranscripts)('refuses %s instead of returning a repaired transcript', async (_label, overrides) => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      schema: 'masc.keeper.turn-transcript.v2', keeper: 'keeper-alpha', turn_ref: 'trace-xyz#3',
+      source: 'keeper_chat_store', found: false, user: [], assistant: [], ...overrides,
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(fetchKeeperTurnTranscript('keeper-alpha', 'trace-xyz#3')).rejects.toThrow(
+      '유효하지 않은 keeper turn transcript payload',
+    )
   })
 })
 

@@ -50,10 +50,13 @@ type response_part =
   | Reply_text of string
   | Tool_steps of string list
   | Reasoning_lines of string list
+  | Request_failure of string
+
+type response_source = Newest_history_page | Exact_turn_transcript
 
 type response_turn =
   { parts : response_part list
-  ; outside_newest_page : bool
+  ; source : response_source
   }
 
 (* ── Next request forecast ───────────────────────────── *)
@@ -771,6 +774,67 @@ let nonnegative_float name = function
   | `Float value when Float.is_finite value && value >= 0. -> Ok value
   | `Int value when value >= 0 -> Ok (Float.of_int value)
   | _ -> Error (name ^ " is not a non-negative finite number")
+
+let decode_exact_turn_transcript ~expected_keeper ~expected_turn_ref json
+    : (response_turn, string) result =
+  let fail detail = Error ("exact turn transcript: " ^ detail) in
+  let decode_line side = function
+    | `Assoc fields when exact_fields [ "role"; "content"; "ts" ] fields ->
+        let get name = match List.assoc_opt name fields with
+          | Some value -> Ok value | None -> fail ("missing line " ^ name) in
+        let* content = match List.assoc_opt "content" fields with
+          | Some (`String content) -> Ok content | _ -> fail "line content is not text" in
+        let* ts = get "ts" in
+        let* () = match ts with
+          | `Float ts when Float.is_finite ts -> Ok ()
+          | `Int _ -> Ok () | _ -> fail "line timestamp is not finite" in
+        let* role = get "role" in
+        (match side, role with
+         | `User, `String "user" -> Ok None
+         | `Assistant, `String "assistant" -> Ok (Some (Reply_text content))
+         | `Assistant, `String "request_failure" -> Ok (Some (Request_failure content))
+         | (`User | `Assistant), _ -> fail "line role does not match its transcript side")
+    | _ -> fail "line fields are not exact" in
+  let decode_lines side = function
+    | `List rows ->
+        let rec loop parts = function
+          | [] -> Ok (List.rev parts)
+          | row :: rest ->
+              let* part = decode_line side row in
+              loop (Option.fold ~none:parts ~some:(fun part -> part :: parts) part) rest in
+        let* parts = loop [] rows in
+        Ok (rows <> [], parts)
+    | _ -> fail "transcript side is not an array" in
+  match json with
+  | `Assoc fields when exact_fields
+      [ "schema"; "keeper"; "turn_ref"; "source"; "found"; "user"; "assistant" ] fields ->
+      let get name = match List.assoc_opt name fields with
+        | Some value -> Ok value | None -> fail ("missing " ^ name) in
+      let* schema = get "schema" in
+      let* () = match schema with
+        | `String "masc.keeper.turn-transcript.v2" -> Ok ()
+        | _ -> fail "unsupported transcript schema" in
+      let* keeper = get "keeper" in
+      let* () = match keeper with
+        | `String keeper when String.equal keeper expected_keeper -> Ok ()
+        | _ -> fail "Keeper does not match request" in
+      let* ref_json = get "turn_ref" in
+      let* turn_ref = Ids.Turn_ref.of_yojson ref_json in
+      let* () = if Ids.Turn_ref.equal turn_ref expected_turn_ref then Ok ()
+        else fail "Turn_ref does not match request" in
+      let* source = get "source" in
+      let* () = match source with
+        | `String "keeper_chat_store" -> Ok () | _ -> fail "unknown source" in
+      let* users_json = get "user" in
+      let* has_user, _ = decode_lines `User users_json in
+      let* assistant_json = get "assistant" in
+      let* has_assistant, parts = decode_lines `Assistant assistant_json in
+      let* found = get "found" in
+      (match found with
+       | `Bool found when Bool.equal found (has_user || has_assistant) ->
+           Ok { parts; source = Exact_turn_transcript }
+       | _ -> fail "found disagrees with the retained transcript rows")
+  | _ -> fail "response fields are not exact"
 
 let decode_forecast_rest = function
   | `Assoc fields ->

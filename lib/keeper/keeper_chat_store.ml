@@ -2331,7 +2331,12 @@ let parse_transcript_row_permissive ~path ~redaction line =
     Option.map (redact_message redaction) decoded.message)
 ;;
 
-let parse_transcript_row_strict ~path ~redaction ~line_no line =
+type transcript_position = Line_number of int | Byte_offset of int
+
+let parse_transcript_row_strict ~path ~redaction ~position line =
+  let location = match position with
+    | Line_number line -> Printf.sprintf "%s:%d" path line
+    | Byte_offset offset -> Printf.sprintf "%s at byte %d" path offset in
   let trimmed = String.trim line in
   if String.equal trimmed ""
   then `Blank
@@ -2339,26 +2344,24 @@ let parse_transcript_row_strict ~path ~redaction ~line_no line =
     match parse_line_decoded ~file_path:path trimmed with
     | { strict_decode_error = Some (Invalid_surface detail); _ } ->
       `Unreadable
-        (Printf.sprintf "%s:%d invalid surface field: %s" path line_no detail)
+        (Printf.sprintf "%s invalid surface field: %s" location detail)
     | { strict_decode_error = Some (Unknown_speaker_authority label); _ } ->
       `Unreadable
         (Printf.sprintf
-           "%s:%d unknown speaker_authority %S"
-           path
-           line_no
+           "%s unknown speaker_authority %S"
+           location
            label)
     | { strict_decode_error = Some Missing_speaker_authority; _ } ->
       `Unreadable
         (Printf.sprintf
-           "%s:%d speaker_id/speaker_name without speaker_authority"
-           path
-           line_no)
+           "%s speaker_id/speaker_name without speaker_authority"
+           location)
     | { strict_decode_error = Some (Invalid_row_contract detail); _ } ->
-      `Unreadable (Printf.sprintf "%s:%d %s" path line_no detail)
+      `Unreadable (Printf.sprintf "%s %s" location detail)
     | { message = Some message; strict_decode_error = None } ->
       `Message (redact_message redaction message)
     | { message = None; strict_decode_error = None } ->
-      `Unreadable (Printf.sprintf "%s:%d unreadable chat row" path line_no)
+      `Unreadable (Printf.sprintf "%s unreadable chat row" location)
 ;;
 
 let parse_transcript_rows ~path ~redaction rows =
@@ -2375,7 +2378,7 @@ let parse_transcript_rows_result ~path ~redaction rows =
           let ( let* ) = Result.bind in
           let* messages_rev, line_no = state in
           let line_no = line_no + 1 in
-          match parse_transcript_row_strict ~path ~redaction ~line_no line with
+          match parse_transcript_row_strict ~path ~redaction ~position:(Line_number line_no) line with
           | `Blank -> Ok (messages_rev, line_no)
           | `Message message -> Ok (message :: messages_rev, line_no)
           | `Unreadable detail -> Error detail)
@@ -2511,7 +2514,7 @@ let load_result ~base_dir ~keeper_name =
   let* () =
     List.fold_left (fun state (row : Keeper_chat_history_page.row) ->
       let* () = state in
-      match parse_transcript_row_strict ~path ~redaction ~line_no:1 row.line with
+      match parse_transcript_row_strict ~path ~redaction ~position:(Byte_offset row.offset) row.line with
       | `Blank -> Ok ()
       | `Message message -> push message; Ok ()
       | `Unreadable detail ->
@@ -2530,7 +2533,7 @@ let load_history_page_result ~base_dir ~keeper_name ?cursor
   let* messages_rev =
     List.fold_left (fun state (row : Keeper_chat_history_page.row) ->
       let* messages = state in
-      match parse_transcript_row_strict ~path ~redaction ~line_no:1 row.line with
+      match parse_transcript_row_strict ~path ~redaction ~position:(Byte_offset row.offset) row.line with
       | `Blank -> Ok messages
       | `Message message -> Ok (message :: messages)
       | `Unreadable detail -> Error (Keeper_chat_history_page.Invalid_row { offset = row.offset; detail }))
@@ -2928,3 +2931,71 @@ type turn_transcript = Keeper_chat_projection.turn_transcript = {
 
 let transcript_of_messages = Keeper_chat_projection.transcript_of_messages
 let turn_transcript_to_json = Keeper_chat_projection.turn_transcript_to_json
+
+
+let exact_transcript_row_identity line =
+  let ( let* ) = Result.bind in
+  match Yojson.Safe.from_string line with
+  | `Assoc fields ->
+      let keys = List.map fst fields in
+      let* () =
+        if List.length keys = List.length (List.sort_uniq String.compare keys)
+        then Ok () else Error "duplicate transcript row fields" in
+      let* () = match List.assoc_opt "id" fields with
+        | Some (`String id) when String.trim id <> "" -> Ok ()
+        | _ -> Error "transcript row has no non-blank identity" in
+      let* () = match List.assoc_opt "content" fields with
+        | Some (`String _) -> Ok () | _ -> Error "transcript content is not text" in
+      let* () = match List.assoc_opt "ts" fields with
+        | Some (`Float ts) when Float.is_finite ts -> Ok ()
+        | Some (`Int _) -> Ok () | _ -> Error "transcript timestamp is not finite" in
+      let* () = match List.assoc_opt "turn_ref" fields with
+        | None -> Ok ()
+        | Some json -> Result.map (fun _ -> ()) (Ids.Turn_ref.of_yojson json) in
+      Result.map (fun _ -> ())
+        (Keeper_chat_delivery_identity.delivery_provenance_of_fields fields)
+  | _ -> Error "transcript row is not an object"
+  | exception Yojson.Json_error detail -> Error detail
+
+let load_turn_transcript_result ~base_dir ~keeper_name ~turn_ref =
+  let ( let* ) = Result.bind in
+  let path = chat_path ~base_dir ~keeper_name in
+  let redaction = redaction_for ~base_dir ~keeper_name in
+  let read_page ?cursor () =
+    Eio_guard.fair_yield ();
+    let* page = Keeper_chat_history_page.read ~path ~owner:keeper_name ?cursor
+        ~max_rows:max_int () in
+    let* messages_rev = List.fold_left
+        (fun state (row : Keeper_chat_history_page.row) ->
+          let* messages = state in
+          let* () = exact_transcript_row_identity row.line
+            |> Result.map_error (fun detail ->
+                 Keeper_chat_history_page.Invalid_row { offset = row.offset; detail }) in
+          match parse_transcript_row_strict ~path ~redaction ~position:(Byte_offset row.offset) row.line with
+          | `Blank -> Ok messages
+          | `Message message -> Ok (message :: messages)
+          | `Unreadable detail ->
+              Error (Keeper_chat_history_page.Invalid_row { offset = row.offset; detail }))
+        (Ok []) page.rows in
+    Ok { history_messages = List.rev messages_rev; next_cursor = page.next_cursor }
+  in
+  let* first = read_page () in
+  (* Reuse the same first page and its cursor for both passes: a later append
+     cannot widen the second pass to a different newest boundary. *)
+  let scan select =
+    let rec loop page newer =
+      let selected = List.filter select page.history_messages in
+      let newer = selected @ newer in
+      match page.next_cursor with
+      | None -> Ok newer
+      | Some cursor ->
+          let* older = read_page ~cursor () in
+          loop older newer
+    in
+    loop first []
+  in
+  let* target = scan (fun (message : chat_message) ->
+      Option.exists (Ids.Turn_ref.equal turn_ref) message.turn_ref) in
+  let assistant = (transcript_of_messages target ~turn_ref).assistant in
+  let* user = scan (Keeper_chat_projection.user_matches_turn ~messages:target ~turn_ref) in
+  Ok { user; assistant }

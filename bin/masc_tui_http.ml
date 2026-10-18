@@ -1872,7 +1872,7 @@ let fetch_keeper_context_response ~host ~port ~keeper_name ~turn_ref =
                  | Masc_tui_keeper_chat_history.Fusion_conclusion _ -> None)
             | Some _ | None -> None)
           page.Masc_tui_keeper_chat_history.decoded.rows in
-        Ok { Masc_tui_context_inspector.parts; outside_newest_page = parts = [] })
+        Ok { Masc_tui_context_inspector.parts; source = Masc_tui_context_inspector.Newest_history_page })
 
 (** Fetch one completed turn and the immutable provider-input snapshot joined
     by that turn's exact [turn_ref]. A failure on either side stays visible;
@@ -1994,7 +1994,10 @@ let fetch_keeper_exact_context_inspector ~host ~port ~keeper_name ~turn_ref ~pub
         emit ())
     ; (fun () ->
         let result = observe_part "response" (fun () ->
-          fetch_keeper_context_response ~host ~port ~keeper_name ~turn_ref) in
+          fetch_context_json ~host ~port ~label:"turn-transcript"
+            ~path:(Printf.sprintf "/api/v1/keepers/%s/turn-transcript?turn_ref=%s" encoded reference)
+            ~decode:(Inspector.decode_exact_turn_transcript
+              ~expected_keeper:keeper_name ~expected_turn_ref:turn_ref)) in
         current := { !current with response = Inspector.Observed result };
         emit ())
     ]

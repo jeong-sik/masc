@@ -4594,7 +4594,7 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
             ]
         | Inspector.Observed (Ok
             { Masc_tui_context_inspector.parts = []
-            ; outside_newest_page = true
+            ; source = Newest_history_page
             }) ->
             [ "  "
               ^ Context_bars.band ~width ~title:"RESPONSE"
@@ -4603,7 +4603,12 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
               ^ "  This turn's reply is not in the newest history page"
               ^ Ansi.reset
             ]
-        | Inspector.Observed (Ok { Masc_tui_context_inspector.parts; _ }) ->
+        | Inspector.Observed (Ok { parts = []; source = Exact_turn_transcript }) ->
+            [ Ansi.dim ^ "  No assistant response was recorded in the retained turn transcript" ^ Ansi.reset ]
+        | Inspector.Observed (Ok { Masc_tui_context_inspector.parts; source }) ->
+            let caption = match source with
+              | Inspector.Newest_history_page -> "response in the newest history page"
+              | Inspector.Exact_turn_transcript -> "response from the retained turn transcript" in
             let cap = 14 in
             let lines =
               List.concat_map
@@ -4611,6 +4616,10 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
                   | Masc_tui_context_inspector.Reply_text text ->
                       document_markdown ~width
                         (Keeper_chat.terminal_safe_text text)
+                  | Masc_tui_context_inspector.Request_failure detail ->
+                      List.map (fun line -> (Theme.bad ()) ^ line ^ Ansi.reset)
+                        (Context_bars.wrap ~width
+                          ("Request failed: " ^ Keeper_chat.terminal_safe_text detail))
                   | Masc_tui_context_inspector.Tool_steps rows ->
                       List.map
                         (fun row ->
@@ -4637,14 +4646,14 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
             let shown, hidden = take cap lines in
             ( [ "  "
                 ^ Context_bars.band ~width ~title:"RESPONSE"
-                    ~caption:"what came back for this request"
+                    ~caption
               ]
               @ shown
               @ (if hidden = [] then []
                  else
                    [ Ansi.dim
                      ^ Printf.sprintf
-                         "  … %d more response lines; the chat pane carries                           the full reply"
+                         "  … %d response lines beyond this preview"
                          (List.length hidden)
                      ^ Ansi.reset
                    ]) )

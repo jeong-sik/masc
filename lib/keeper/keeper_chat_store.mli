@@ -611,8 +611,9 @@ val to_json_array :
     same [turn_ref] or by the assistant's exact typed delivery provenance.
     [assistant] includes utterances and typed transport-failure markers. Tool
     rows are excluded — their full I/O is surfaced by the tool-call store keyed
-    on [execution_id]. Both lists are empty when no persisted row carries the
-    requested [turn_ref] (old rows, redacted, or outside the retained window). *)
+    on [execution_id]. Both lists are empty when the supplied messages select
+    no user/assistant lines. The strict reader below establishes retained
+    history coverage; the pure projection alone does not. *)
 type turn_transcript = Keeper_chat_projection.turn_transcript = {
   user : chat_message list;
   assistant : chat_message list;
@@ -634,7 +635,25 @@ val turn_transcript_to_json :
   turn_transcript ->
   Yojson.Safe.t
 (** [turn_transcript_to_json ~keeper ~turn_ref t] renders the dashboard
-    turn-transcript payload: [keeper], [turn_ref], [found] (false when
+    versioned turn-transcript payload: [schema], [keeper], [turn_ref], [found] (false when
     both line lists are empty), [source], and the [user]/[assistant]
     line arrays. Each line carries [role]/[content]/[ts]; failed requests
     have the server-owned [request_failure] role. *)
+
+val load_turn_transcript_result :
+  base_dir:string ->
+  keeper_name:string ->
+  turn_ref:Ids.Turn_ref.t ->
+  (turn_transcript, Keeper_chat_history_page.error) result
+(** Strictly scan the retained direct transcript without a recent-row cutoff.
+    Keep only target rows and accepted-user rows joined by canonical delivery
+    provenance, reusing the captured first page/cursor boundary for a second
+    pass. Append after that boundary does not extend the reading; replacement,
+    truncation, malformed rows and unavailable storage remain errors.
+
+    Raw slices use the existing history-reader byte window. Memory retains
+    the first page, one current page and selected turn rows, not all history.
+    Page boundaries yield in Eio so cancellation can settle the entered read.
+    A single row exceeding the existing page window remains an explicit error.
+    Two passes may read the whole transcript; no latency improvement is implied.
+    Redaction is captured once for both passes. *)

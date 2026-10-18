@@ -404,6 +404,7 @@
   test_server_dashboard_http_keeper_api_trace
   test_server_dashboard_http_keeper_chat_page
   test_server_dashboard_http_keeper_tool_lookup
+  test_keeper_turn_transcript_http
   test_keeper_paused_work_resume_surface
   eval_memory_os_value
   test_attempt_state
@@ -762,6 +763,7 @@
   test_server_dashboard_http_keeper_api_trace
   test_server_dashboard_http_keeper_chat_page
   test_server_dashboard_http_keeper_tool_lookup
+  test_keeper_turn_transcript_http
   test_keeper_paused_work_resume_surface
   eval_memory_os_value
   test_attempt_state
@@ -6131,3 +6133,9 @@
    --model-id preparation-synthetic-streaming-fixture
    --max-context-tokens 1048576
    --max-output-tokens 4096)))
+
+
+(test
+ (name test_keeper_turn_transcript_http)
+ (modules test_keeper_turn_transcript_http)
+ (libraries alcotest masc masc_server masc_tui_context_inspector eio_main httpun uri yojson unix))

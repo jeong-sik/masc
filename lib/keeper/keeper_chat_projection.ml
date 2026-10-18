@@ -246,8 +246,7 @@ type turn_transcript = {
   assistant : chat_message list;
 }
 
-let transcript_of_messages (messages : chat_message list) ~turn_ref :
-    turn_transcript =
+let user_matches_turn ~messages ~turn_ref =
   let matches_turn_ref (m : chat_message) =
     match m.turn_ref with
     | Some tr -> Ids.Turn_ref.equal tr turn_ref
@@ -307,11 +306,22 @@ let transcript_of_messages (messages : chat_message list) ~turn_ref :
         ; _
         } ) -> false
   in
+  fun (m : chat_message) ->
+    match m.role with
+    | Role.User -> matches_turn_ref m || matches_accepted_user_delivery m
+    | Role.Assistant | Role.System | Role.Tool | Role.Request_failure -> false
+
+let transcript_of_messages (messages : chat_message list) ~turn_ref :
+    turn_transcript =
+  let matches_turn_ref (m : chat_message) =
+    Option.exists (Ids.Turn_ref.equal turn_ref) m.turn_ref
+  in
+  let matches_user = user_matches_turn ~messages ~turn_ref in
   let user, assistant =
     List.fold_left
       (fun (user, assistant) (m : chat_message) ->
          match m.role with
-         | Role.User when matches_turn_ref m || matches_accepted_user_delivery m ->
+         | Role.User when matches_user m ->
            m :: user, assistant
          | (Role.Assistant | Role.Request_failure) when matches_turn_ref m -> user, m :: assistant
          | Role.User | Role.Assistant | Role.System | Role.Tool | Role.Request_failure ->
@@ -331,13 +341,13 @@ let transcript_line_to_json (m : chat_message) : Yojson.Safe.t =
 
 let turn_transcript_to_json ~keeper ~turn_ref (t : turn_transcript) :
     Yojson.Safe.t =
-  (* [found] is false when no persisted row carries this turn_ref (old
-     rows, rows outside the retained window, or a turn that produced no
-     chat lines). The caller renders explicit absence, never a fabricated
-     transcript. *)
+  (* [found] describes the selected user/assistant arrays. The v2 HTTP
+     producer owns the strict retained-history read that precedes this
+     projection; formatting a supplied list is not itself storage proof. *)
   let found = t.user <> [] || t.assistant <> [] in
   `Assoc
-    [ ("keeper", `String keeper);
+    [ ("schema", `String "masc.keeper.turn-transcript.v2");
+      ("keeper", `String keeper);
       ("turn_ref", `String (Ids.Turn_ref.to_string turn_ref));
       ("found", `Bool found);
       ("source", `String "keeper_chat_store");

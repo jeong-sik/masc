@@ -4,8 +4,26 @@ val editor_stem : Yojson.Safe.t -> string
 val expected_runtime_assignment_revision :
   Yojson.Safe.t -> (Yojson.Safe.t, string) result
 
-val decode_unchanged_runtime_assignment_response :
-  Yojson.Safe.t -> (Yojson.Safe.t, string) result
+type runtime_assignment_unchanged = {
+  revision : Yojson.Safe.t;
+  warnings : Masc_tui_runtime_config_receipt.lock_warning list;
+  response : Yojson.Safe.t;
+}
+type runtime_assignment_write =
+  | Assignment_committed of Masc_tui_runtime_config_receipt.t
+  | Assignment_unchanged of runtime_assignment_unchanged
+      (** Original unchanged reply, including revision and lock warnings. *)
+
+type runtime_assignment_post_error =
+  | Assignment_revision_conflict of Yojson.Safe.t
+  | Assignment_auth_refused of { status : int; body : string }
+  | Assignment_outcome_unconfirmed of string
+
+val decode_runtime_assignment_answer : status:int -> body:string ->
+  (runtime_assignment_write, runtime_assignment_post_error) result
+(** Auth refusals happen before the route's write callback; the known 409 code
+    is a revision conflict. Other errors, including 400 IO/atomic-replace failure
+    and malformed success receipts, do not prove that nothing was written. *)
 
 val config_write_status_message :
   keeper_name:string -> Yojson.Safe.t -> ((string * string), string) result

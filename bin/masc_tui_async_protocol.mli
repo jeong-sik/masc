@@ -456,12 +456,7 @@ type async_msg =
         * string option,
         string )
       result
-  | Runtime_assignment_set of
-      string
-      * string option
-      * (Masc_tui_http.runtime_assignment_write_result, string) result
-      (** keeper, the runtime it was pointed at ([None] = back to default),
-          and whether the server took it. *)
+  | Runtime_assignment_changed of runtime_assignment_request * runtime_assignment_status * int64
   | Keeper_chat_approval_answered of
       Masc_tui_keeper_chat_projection.request
       * string

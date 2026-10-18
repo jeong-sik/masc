@@ -57,6 +57,23 @@ description: "MASC TUI의 채팅·입력·로딩·진행 상태, Keeper·Work·�
   실제 paint·키 응답·작업 완료·속도 향상 증거가 아니다. 외부 에디터의 terminal interaction은
   별도다. shortcut의 최신 조회 때문에 총 논리 HTTP 수가 늘어도 입력 처리 대기와 구분한다.
 
+## Keeper Runtime assignment
+
+- picker에서 Keeper·workspace/read owner·구체 Runtime 또는 default 복귀 선택을 원래
+  저장 작업에 캡처한다. config snapshot과 assignment revision은 worker가 읽고 원래 영수증과
+  함께 보존한다. 기존 비동기 config GET→assignment POST 두 요청을 유지하며 key handler가
+  HTTP를 기다리지 않는다. POST 직전 local authority/read owner를 재확인하고 server assignment
+  CAS를 유지한다. 서버의 atomic workspace precondition이 새로 생겼다고 주장하지 않는다.
+- 같은 Keeper의 Settings/Sandbox/assignment pending은 겹쳐 보내지 않는다. 거절된 admission은
+  picker 선택을 닫지 않으며 다른 Keeper의 저장은 독립이다. navigation 자체는 취소가 아니다.
+- 중단 전후를 미전송/결과 미확인으로 나누고 bounded mailbox 없이 session 영수증에 남긴다.
+  알려진 auth 거절·검증된 revision conflict·committed·unchanged와 lock warning을 구분한다.
+  HTTP 400에는 IO/atomic-replace 실패도 포함되므로 미적용으로 단정하지 않는다. 다음 명시적
+  선택만 current를 새로 읽고, 이전 작업을 자동 재전송하지 않는다.
+- 저장된 assignment와 현재 Keeper turn의 실행 Runtime은 별개다. worker 관측·UI admission
+  시각도 실제 paint/입력 반응/속도 향상으로 부르지 않는다. 원래 작업의 늦은 영수증이 다른
+  workspace의 catalog 갱신 권한을 빌리지 않도록 한다.
+
 ## Runtime 폼 저장
 
 - 모델·계정 폼은 원래 입력과 opening revision으로 소유한 비동기 작업을 만든다.

@@ -2743,6 +2743,88 @@ let test_sandbox_receipt_keeps_frozen_source_after_withdrawal () =
   Alcotest.(check bool) "terminal shortcut cannot dispatch again automatically" false
     (publish_keeper_settings_save request ~observed_ns:24L (Settings_posting prepared))
 
+let runtime_assignment_request state keeper runtime_id started_ns =
+  match Masc_tui_types.begin_runtime_assignment_save state ~keeper_name:keeper ~runtime_id ~started_ns with
+  | Ok request -> request | Error detail -> Alcotest.fail detail
+
+let test_assignment_receipt_keeps_original_choice_after_withdrawal () =
+  let open Masc_tui_types in
+  let state,keeper = keeper_settings_fixture () in
+  state.view <- Keepers Keeper_runtime_pick;
+  state.runtime_pick_keeper <- Some keeper.k_name;
+  let request = runtime_assignment_request state keeper.k_name (Some "codex.example") 30L in
+  let observed = (keeper_settings_snapshot ()).kss_observed in
+  let revision = match Masc_tui_keeper_config.expected_runtime_assignment_revision observed with
+    | Ok revision -> revision | Error detail -> Alcotest.fail detail in
+  let prepared = {rap_snapshot=observed;rap_expected_revision=revision} in
+  ignore (publish_runtime_assignment request ~observed_ns:31L Assignment_reading);
+  ignore (publish_runtime_assignment request ~observed_ns:32L (Assignment_posting prepared));
+  state.view <- Overview;
+  state.runtime_pick_keeper <- None;
+  Alcotest.(check bool) "navigation alone cannot retire the admitted operation" true
+    (runtime_assignment_current state request);
+  let Workspace_authority generation = state.workspace_authority in
+  state.workspace_authority <- Workspace_authority (generation+1);
+  state.workspace_read_authority <- ref ();
+  state.workspace_identity <- Workspace_identity_match_unconfirmed "server disconnected";
+  let finished = Assignment_finished (Some prepared,Assignment_unconfirmed "interrupted after dispatch") in
+  ignore (publish_runtime_assignment request ~observed_ns:33L finished);
+  let retained = match pending_runtime_assignment_receipt state with
+    | Some (owner,status,observed_ns) ->
+        owner.ras_token==request.ras_token && observed_ns=33L && apply_runtime_assignment state owner status
+    | None -> false in
+  Alcotest.(check bool) "atomic receipt survives authority withdrawal without scoped mailbox admission" true retained;
+  Alcotest.(check bool) "old operation cannot authorize a current surface refresh" false
+    (runtime_assignment_current state request);
+  Alcotest.(check bool) "original Keeper, explicit runtime, snapshot and CAS revision stay joined" true
+    (request.ras_key.ksk_keeper=keeper.k_name && request.ras_runtime_id=Some "codex.example"
+     && match (List.hd state.runtime_assignment_saves).raa_status with
+        | Assignment_finished (Some frozen,Assignment_unconfirmed _) ->
+            frozen==prepared && frozen.rap_snapshot=observed && frozen.rap_expected_revision=revision
+        | Assignment_checking | Assignment_reading | Assignment_posting _ | Assignment_finished _ -> false);
+  Alcotest.(check bool) "an interrupted terminal operation cannot start posting again" false
+    (publish_runtime_assignment request ~observed_ns:34L (Assignment_posting prepared))
+
+let test_assignment_serializes_same_keeper_config_intents () =
+  let open Masc_tui_types in
+  let state,keeper = keeper_settings_fixture () in
+  state.view <- Keepers Keeper_runtime_pick;
+  state.runtime_pick_keeper <- Some keeper.k_name;
+  let original = runtime_assignment_request state keeper.k_name (Some "codex.example") 30L in
+  Alcotest.(check bool) "a repeated default choice cannot mutate the pending concrete choice" true
+    (Result.is_error (begin_runtime_assignment_save state ~keeper_name:keeper.k_name ~runtime_id:None ~started_ns:31L)
+     && original.ras_runtime_id=Some "codex.example" && state.runtime_pick_keeper=Some keeper.k_name);
+  state.view <- Keepers Keeper_detail;
+  let editor_refused = Option.is_none (begin_keeper_settings_editor state ~available:true ~started_ns:32L) in
+  state.detail_tab <- Detail_sandbox;
+  Alcotest.(check bool) "pending assignment excludes same-Keeper editor and Sandbox writes" true
+    (editor_refused && Result.is_error (begin_keeper_sandbox_save state ~profile:Keeper_sandbox_config.Docker ~started_ns:32L));
+  let second = {keeper with k_name="beta"} in
+  state.keepers <- [keeper;second];
+  state.view <- Keepers Keeper_runtime_pick;
+  state.runtime_pick_keeper <- Some second.k_name;
+  let independent = runtime_assignment_request state second.k_name None 33L in
+  Alcotest.(check bool) "another Keeper independently owns clearing its explicit assignment" true
+    (independent.ras_runtime_id=None && independent.ras_key.ksk_keeper=second.k_name
+     && independent.ras_token != original.ras_token);
+  let finished = Assignment_finished (None,Assignment_not_sent "withdrawn before dispatch") in
+  ignore (publish_runtime_assignment original ~observed_ns:34L finished);
+  ignore (apply_runtime_assignment state original finished);
+  state.runtime_pick_keeper <- Some keeper.k_name;
+  let successor = runtime_assignment_request state keeper.k_name None 35L in
+  Alcotest.(check bool) "an explicit later choice owns a fresh operation; old receipt cannot finish it" true
+    (successor.ras_token != original.ras_token && successor.ras_runtime_id=None
+     && not (apply_runtime_assignment state original finished)
+     && (List.hd state.runtime_assignment_saves).raa_status=Assignment_checking);
+  let editor_state,editor_keeper,_,_,_ = keeper_settings_save_fixture () in
+  editor_state.view <- Keepers Keeper_runtime_pick;
+  editor_state.runtime_pick_keeper <- Some editor_keeper.k_name;
+  Alcotest.(check bool) "pending editor also excludes a runtime assignment without losing picker selection" true
+    (Result.is_error (begin_runtime_assignment_save editor_state ~keeper_name:editor_keeper.k_name
+      ~runtime_id:None ~started_ns:36L)
+     && editor_state.runtime_pick_keeper=Some editor_keeper.k_name
+     && editor_state.runtime_assignment_saves=[])
+
 let runtime_form_source = {|[providers.codex]
 protocol = "codex-app-server"
 command = "codex"
@@ -3063,7 +3145,11 @@ let test_runtime_snapshot_refresh_reuses_draft_without_changing_ownership () =
 let () =
   Alcotest.run "tui_server_identity_refresh"
     [ ( "server-identity-refresh"
-      , [ Alcotest.test_case "Sandbox shortcut binds only selected profile to observed revision" `Quick
+      , [ Alcotest.test_case "assignment receipt retains original choice after navigation and withdrawal" `Quick
+            test_assignment_receipt_keeps_original_choice_after_withdrawal
+        ; Alcotest.test_case "assignment, editor and Sandbox saves serialize per Keeper" `Quick
+            test_assignment_serializes_same_keeper_config_intents
+        ; Alcotest.test_case "Sandbox shortcut binds only selected profile to observed revision" `Quick
             test_sandbox_shortcut_uses_observed_revision
         ; Alcotest.test_case "Sandbox and editor saves share pending ownership without losing recovery" `Quick
             test_sandbox_and_editor_saves_share_pending_ownership

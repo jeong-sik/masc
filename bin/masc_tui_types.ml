@@ -3967,6 +3967,43 @@ end = struct
     | None -> false
 end
 
+(* Dispatch is intent, not proof that an HTTP reader started. Cold identity
+   admission replaces the current opaque request while preserving that intent.
+   Query metadata never grants admission or changes the original read needs. *)
+module Surface_read_context : sig
+  type t
+  val capture : needs:surface_needs -> board_query:board_query -> Surface_read_order.request -> t
+  val rebind : t -> Surface_read_order.request -> t
+  val current : t -> Surface_read_order.request
+  val origin : t -> Surface_read_order.request
+  val planned_board_query : t -> board_query option
+  (** [None] means Board was not requested; not a failed/missing Board response. *)
+  val to_yojson : t -> Yojson.Safe.t
+end = struct
+  type t = {
+    origin : Surface_read_order.request;
+    current : Surface_read_order.request;
+    planned_board_query : board_query option;
+  }
+  let capture ~needs ~board_query request =
+    {origin=request;current=request;
+     planned_board_query=(if needs.needs_board then Some board_query else None)}
+  let rebind context current = {context with current}
+  let current context = context.current
+  let origin context = context.origin
+  let planned_board_query context = context.planned_board_query
+  let to_yojson context : Yojson.Safe.t =
+    let request request = `Assoc [
+      "id", `Int (Surface_read_order.request_id request);
+      "started_ns", `Intlit (Int64.to_string (Surface_read_order.started_ns request));
+      "kind", `String (match Surface_read_order.request_kind request with
+        | Full -> "full" | Navigation -> "navigation" | Independent -> "independent")] in
+    `Assoc ["schema_version", `Int 1;
+      "origin", request context.origin; "current", request context.current;
+      "planned_board_query", (match context.planned_board_query with
+        | Some query -> board_query_to_yojson query | None -> `Null)]
+end
+
 type full_refresh_intent = Cadence | Revalidate
 
 (* Full and scoped bundles share one authority order. A later dispatch

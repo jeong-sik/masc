@@ -14,7 +14,7 @@ type http_read_requests = {
   hrr_approval: Masc_tui_operator_projection.Listing_order.ticket option;
   hrr_asks: Snapshot_read.request option;
   hrr_roster: Snapshot_read.request option;
-  hrr_surfaces: Surface_read_order.request;
+  hrr_surfaces: Surface_read_context.t;
 }
 
 type http_initial_identity_read = {
@@ -22,6 +22,7 @@ type http_initial_identity_read = {
   hir_authority: workspace_authority;
   hir_identity: Masc.Tui_decode.server_identity;
   hir_needs: surface_needs;
+  hir_surface_context: Surface_read_context.t;
   hir_acknowledge: http_read_requests option Eio.Promise.u;
 }
 (** The UI may admit a cold matching probe before collection, then issue fresh
@@ -264,7 +265,7 @@ type async_msg =
   | Http_keeper_roster_loaded of early_keeper_roster_observation
   | Http_dataset_loaded of early_http_dataset
   (** Diagnostic reader status; it grants no data or action authority. *)
-  | Http_surface_read_completed of Surface_read_order.request * async_msg
+  | Http_surface_read_completed of Surface_read_context.t * async_msg
   | Http_initial_identity_read of http_initial_identity_read
   | Http_refresh_done of http_refresh_outcome
   | Http_refresh_failed of

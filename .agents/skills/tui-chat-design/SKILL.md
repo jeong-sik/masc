@@ -1,6 +1,6 @@
 ---
 name: tui-chat-design
-description: "MASC TUI의 채팅·입력·로딩·진행 상태, 복합 조회의 부분 수신·하위 완료 관측과 Board 독립 데이터·목록/census 가용성과 요청별 조회 조건 관측, Keeper·Work·로그·질문 원본의 비동기 조회, Runtime·Overview 목록/사용량의 공유 해석, Keeper 설정·Sandbox 단축키·Runtime 폼·원문 저장과 설정 snapshot 해석을 바꿀 때 쓴다. 원본 입력·revision·요청 소유권, 마지막 관측과 부분 실패, 준비 작업·상태 반영·paint 증거를 구분하는 규칙이다."
+description: "MASC TUI의 채팅·입력·로딩·진행 상태, 복합 조회의 부분 수신·하위 완료 관측과 Board 독립 데이터·목록/census 가용성·콜드 identity 재결속과 요청별 조회 조건 관측, Keeper·Work·로그·질문 원본의 비동기 조회, Runtime·Overview 목록/사용량의 공유 해석, Keeper 설정·Sandbox 단축키·Runtime 폼·원문 저장과 설정 snapshot 해석을 바꿀 때 쓴다. 원본 입력·revision·요청 소유권, 마지막 관측과 부분 실패, 준비 작업·상태 반영·paint 증거를 구분하는 규칙이다."
 ---
 
 # 대화를 먼저 읽는 채팅
@@ -156,6 +156,13 @@ description: "MASC TUI의 채팅·입력·로딩·진행 상태, 복합 조회�
   기록하며 consumed·superseded·거절된 슬롯에 가짜 반영 기록을 만들지 않는다. 진단 JSON은
   제어 입력으로 쓰지 않고 본문·오류 text를 복사하지 않는다. 로그 필드의 소스 구현은 실제
   로그 발생·worker 종료·paint·실측 속도 증거가 아니며 화면 문구 검사를 추가하지 않는다.
+- full/navigation dispatch의 context는 원래 요청·현재 opaque owner·예정 Board query를
+  함께 보존한다. cold identity가 owner를 바꿔도 원래 query를 현재 controls에서 다시 만들지
+  않는다. 미요청 Board의 null intent와 결과 미수신의 null delivery query를 구분한다.
+  worker의 early/terminal admission에는 기존 current request를 그대로 쓰고 metadata를
+  권한·범위 게이트로 쓰지 않는다. dispatch 로그는 실제 GET 시작이 아니며 rebind는 UI owner
+  생성/ack 제안이다. cleanup 로그는 finalizer 밖에 두고 기존 취소·예외 전달을 유지한다.
+  시작만 남은 요청은 미완료 관측으로 보존하며 시간 경과로 종료·실패를 추정하지 않는다.
 
 ## Runtime 폼 저장
 

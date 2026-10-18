@@ -12439,7 +12439,7 @@ let load_http_surfaces ~surface_request ~on_initial_identity ~on_progress ~on_da
       match on_initial_identity, http_server_identity with
       | Some admit, Ok identity ->
           (match admit identity with
-           | Some requests -> requests.hrr_approval, requests.hrr_asks, requests.hrr_roster, requests.hrr_surfaces
+           | Some requests -> requests.hrr_approval, requests.hrr_asks, requests.hrr_roster, Surface_read_context.current requests.hrr_surfaces
            | None -> approval_ticket, ask_request, roster_request, surface_request)
       | None, (Ok _ | Error _) | Some _, Error _ ->
           approval_ticket, ask_request, roster_request, surface_request
@@ -14249,6 +14249,24 @@ let resolve_opening_chat state ~base_path ~mailbox =
           end
   end
 
+let log_http_surface_read_started state ~full_refresh_running context =
+  let request=Surface_read_context.current context in
+  Log.Transport.info
+    "tui_surface_read_started request=%d started_ns=%Ld full_refresh_running=%b navigation_pending=%d context=%s"
+    (Surface_read_order.request_id request) (Surface_read_order.started_ns request)
+    full_refresh_running (Surface_read_order.navigation_count state.http_surface_reads)
+    (Yojson.Safe.to_string (Surface_read_context.to_yojson context))
+
+(* Observed UI cleanup is not proof of worker exit or received data. Keep
+   logging outside finalizers so it cannot replace the original failure there. *)
+let log_http_surface_read_finished state context =
+  let request=Surface_read_context.current context in
+  Log.Transport.info
+    "tui_surface_read_finished request=%d started_ns=%Ld settled_ns=%Ld navigation_pending=%d context=%s"
+    (Surface_read_order.request_id request) (Surface_read_order.started_ns request)
+    (Mtime_clock.elapsed_ns ()) (Surface_read_order.navigation_count state.http_surface_reads)
+    (Yojson.Safe.to_string (Surface_read_context.to_yojson context))
+
 let start_http_refresh state ~host ~port ~intent ~refresh_inflight
     ~scoped_refresh_inflight ~scoped_refresh_followup ~mailbox =
   scoped_refresh_followup :=
@@ -14295,9 +14313,11 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
       ~started_ns:(Mtime_clock.elapsed_ns ()) state.http_surface_reads in
     state.http_surface_reads <- reads;
     let board_query = board_query state in
+    let surface_context=Surface_read_context.capture ~needs ~board_query surface_request in
     let provider_history_days = state.provider_history_days in
     let system_log_level = Option.map Masc.Tui_decode.system_log_level_query
       state.system_logs_min_level in
+    log_http_surface_read_started state ~full_refresh_running:true surface_context;
     (* Held tool calls ride every tick, not just the Approvals surface: the
        strip's Approvals badge is drawn from every surface, and a stale count
        there would be worse than none. The payload is a handful of rows. The
@@ -14313,7 +14333,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        read a newer workspace authority out of mutable UI state. *)
     let requests = ref
       { hrr_authority = state.workspace_authority; hrr_approval = approval_ticket;
-        hrr_asks = ask_request; hrr_roster = roster_request; hrr_surfaces = surface_request } in
+        hrr_asks = ask_request; hrr_roster = roster_request; hrr_surfaces = surface_context } in
     let cold = state.workspace_identity = Workspace_identity_unread in
     let early_sources = cold || state.workspace_identity = Workspace_identity_match in
     let on_initial_identity = if cold then
@@ -14321,7 +14341,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
         let acknowledged, hir_acknowledge = Eio.Promise.create () in
         enqueue_async mailbox (Http_initial_identity_read
           { hir_ticket = refresh_ticket; hir_authority = (!requests).hrr_authority;
-            hir_identity; hir_needs = needs; hir_acknowledge });
+            hir_identity; hir_needs = needs; hir_surface_context=(!requests).hrr_surfaces; hir_acknowledge });
         let accepted = Eio.Promise.await acknowledged in
         Option.iter (fun admitted -> requests := admitted) accepted;
         accepted)
@@ -14334,7 +14354,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
       Some (fun ed_identity ed_dataset ->
         enqueue_async mailbox (Http_dataset_loaded
           {ed_ticket=refresh_ticket;ed_authority=(!requests).hrr_authority;
-           ed_request=(!requests).hrr_surfaces;ed_identity;ed_dataset}))
+           ed_request=Surface_read_context.current (!requests).hrr_surfaces;ed_identity;ed_dataset}))
       else None in
     let on_asks =
       if early_sources then
@@ -14399,7 +14419,8 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
                   ~board_query
                 ~provider_history_days
                 ~system_log_level
-                ~needs))
+                ~needs));
+        log_http_surface_read_finished state surface_context
   end
 
 (* The task receipt and its dependent work have different authority. A
@@ -14796,12 +14817,11 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight
       ~started_ns:(Mtime_clock.elapsed_ns ()) state.http_surface_reads in
     state.http_surface_reads <- reads;
     let board_query = board_query state in
+    let surface_context=Surface_read_context.capture ~needs ~board_query surface_request in
     let provider_history_days = state.provider_history_days in
     let system_log_level = Option.map Masc.Tui_decode.system_log_level_query
       state.system_logs_min_level in
-    Log.Transport.info "tui_surface_read_started request=%d started_ns=%Ld full_refresh_running=%b navigation_pending=%d"
-      (Surface_read_order.request_id surface_request) (Surface_read_order.started_ns surface_request)
-      !full_refresh_inflight (Surface_read_order.navigation_count state.http_surface_reads);
+    log_http_surface_read_started state ~full_refresh_running:!full_refresh_inflight surface_context;
     let approval_ticket =
       if not needs.needs_operator_approvals then None
       else dispatch_approvals_listing state
@@ -14861,7 +14881,7 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight
         | Ok results -> Http_scoped_refresh_done (authority, currency_authority, results)
         | Error err -> Http_scoped_refresh_failed
             (authority, err, approval_ticket, refresh_ticket, !latest_identity, surface_request) in
-      enqueue_async mailbox (Http_surface_read_completed (surface_request, completed))
+      enqueue_async mailbox (Http_surface_read_completed (surface_context, completed))
     in
     match Eio_context.get_switch_opt () with
     | Some sw -> Eio.Fiber.fork ~sw run_refresh
@@ -14886,7 +14906,8 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight
                    ~refresh_inflight:full_refresh_inflight
                    ~scoped_refresh_inflight:refresh_inflight ~scoped_refresh_followup
                    ~before
-             | Ok _ | Error _ -> ())
+             | Ok _ | Error _ -> ());
+        log_http_surface_read_finished state surface_context
   end
 
 let start_scoped_refresh_followup state ~host ~port ~refresh_inflight
@@ -17328,7 +17349,8 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
           ("voice failed: " ^ error))
   | Http_overview_loaded preview ->
       Masc_tui_types.accept_overview_preview state preview
-  | Http_surface_read_completed (request, completed) ->
+  | Http_surface_read_completed (context, completed) ->
+      let request=Surface_read_context.current context in
       (* Dataset admission and collector completion have different lifetimes.
          A duplicate cannot reapply an identity observation or free another read. *)
       let active = match Surface_read_order.request_kind request with
@@ -17342,9 +17364,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
             Surface_read_order.navigation_in_flight state.http_surface_reads)
           (fun () -> apply_async_message ~input_pending state ~base_path ~http_refresh_inflight
             ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox completed);
-        Log.Transport.info "tui_surface_read_finished request=%d started_ns=%Ld settled_ns=%Ld navigation_pending=%d"
-          (Surface_read_order.request_id request) (Surface_read_order.started_ns request)
-          (Mtime_clock.elapsed_ns ()) (Surface_read_order.navigation_count state.http_surface_reads);
+        log_http_surface_read_finished state context;
         (* The last collector's slot must be released before a retained full
            revalidation can run. Other collectors keep their own slots. *)
         start_scoped_refresh_followup state ~host:server_peer_host ~port:state.port
@@ -17400,14 +17420,18 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
             let reads, surfaces = Surface_read_order.dispatch ~kind:Surface_read_order.Full ~needs:initial.hir_needs
               ~started_ns:(Mtime_clock.elapsed_ns ()) state.http_surface_reads in
             state.http_surface_reads <- reads;
+            let context=Surface_read_context.rebind initial.hir_surface_context surfaces in
             let admitted =
               { hrr_authority = state.workspace_authority;
                 hrr_approval = dispatch_approvals_listing state;
                 hrr_asks = Masc_tui_types.begin_asks_read state;
                 hrr_roster = if initial.hir_needs.needs_keeper_roster
                   then Masc_tui_types.begin_keeper_roster_read state else None;
-                hrr_surfaces = surfaces } in
+                hrr_surfaces = context } in
             ignore (Eio.Promise.try_resolve initial.hir_acknowledge (Some admitted));
+            Log.Transport.info "tui_surface_read_rebound previous_request=%d context=%s"
+              (Surface_read_order.request_id (Surface_read_context.current initial.hir_surface_context))
+              (Yojson.Safe.to_string (Surface_read_context.to_yojson context));
             Option.iter (fun started_ns ->
               Log.Transport.info
                 "tui_initial_identity refresh_started_ns=%Ld admitted_ms=%.3f"

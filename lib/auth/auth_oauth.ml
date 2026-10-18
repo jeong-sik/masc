@@ -681,17 +681,24 @@ let live_bootstrap_allows
     ~bootstrap_token_hash
     ~granted_role
   =
-  match Auth_credential_base.load_credential base_path agent_name with
-  | None -> false
+  let* credential =
+    Auth_credential_base.load_credential_checked base_path agent_name
+    |> Result.map_error (fun error -> Store_error (masc_error_to_string error))
+  in
+  match credential with
+  | None -> Ok false
   | Some credential ->
     let not_expired =
       match Credential_expiry.parse credential.expires_at with
       | Error (Credential_expiry.Invalid_timestamp _) -> false
       | Ok expiry -> not (Credential_expiry.is_expired ~now:(now ()) expiry)
     in
-    not_expired
-    && constant_time_string_equal (token_hash credential.token) bootstrap_token_hash
-    && live_role_allows ~granted_role credential.role
+    Ok
+      (not_expired
+       && constant_time_string_equal
+            (token_hash credential.token)
+            bootstrap_token_hash
+       && live_role_allows ~granted_role credential.role)
 ;;
 
 let revoke_family_locked ~base_path ~current family =
@@ -880,12 +887,14 @@ let exchange_authorization_code
     let* grant = claimed_grant in
     let family_id = "mof_" ^ Auth_credential_base.generate_token () in
     with_store_io ~base_path (fun () ->
-      if
+      let* live_bootstrap =
         live_bootstrap_allows
           ~base_path
           ~agent_name:grant.agent_name
           ~bootstrap_token_hash:grant.bootstrap_token_hash
           ~granted_role:grant.role
+      in
+      if live_bootstrap
       then
         mint_pair_locked
           ~base_path
@@ -932,57 +941,60 @@ let rotate_refresh_token
         let* () = revoke_family_locked ~base_path ~current family in
         Log.Auth.warn "oauth: refresh token replay revoked token family";
         Error Invalid_grant
-      | Some family
-        when not
-               (live_bootstrap_allows
-                  ~base_path
-                  ~agent_name:family.agent_name
-                  ~bootstrap_token_hash:family.bootstrap_token_hash
-                  ~granted_role:family.role) ->
-        let* () = revoke_family_locked ~base_path ~current family in
-        Log.Auth.warn "oauth: live bootstrap credential revoked token family";
-        Error Invalid_grant
-      | Some family
-        when family.refresh_expires_at_unix <= current
-             || not (String.equal family.client_id client_id)
-             || not (String.equal family.resource expected_resource)
-             || not
-                  (match resource with
-                   | None -> true
-                   | Some requested -> String.equal family.resource requested) ->
-        Error Invalid_grant
       | Some family ->
-        let* scopes =
-          match scope with
-          | None -> Ok family.scopes
-          | Some raw when String.equal (String.trim raw) "" -> Error Invalid_scope
-          | Some raw ->
-            let* requested = parse_scopes (Some raw) in
-            let granted requested_scope =
-              List.exists (equal_scope requested_scope) family.scopes
-            in
-            if List.for_all granted requested then Ok requested else Error Invalid_scope
-        in
-        let* role = effective_role ~bootstrap_role:family.role scopes in
-        let old_access_path = access_path base_path family.current_access_hash in
-        let* pair =
-          mint_pair_locked
+        let* live_bootstrap =
+          live_bootstrap_allows
             ~base_path
-            ~family_id:family.family_id
-            ~client_id:family.client_id
             ~agent_name:family.agent_name
             ~bootstrap_token_hash:family.bootstrap_token_hash
-            ~role
-            ~scopes
-            ~resource:family.resource
+            ~granted_role:family.role
         in
-        (match remove_file_if_exists old_access_path with
-         | () -> ()
-         | exception exn -> (* cancel-guard-ok: remove_file_if_exists is Sys.remove and performs no Eio operation. *)
-           Log.Auth.warn
-             "oauth: superseded access record cleanup failed error=%s"
-             (Printexc.to_string exn));
-        Ok pair)
+        if not live_bootstrap
+        then (
+          let* () = revoke_family_locked ~base_path ~current family in
+          Log.Auth.warn "oauth: live bootstrap credential revoked token family";
+          Error Invalid_grant)
+        else if
+          family.refresh_expires_at_unix <= current
+          || not (String.equal family.client_id client_id)
+          || not (String.equal family.resource expected_resource)
+          || not
+               (match resource with
+                | None -> true
+                | Some requested -> String.equal family.resource requested)
+        then Error Invalid_grant
+        else (
+          let* scopes =
+            match scope with
+            | None -> Ok family.scopes
+            | Some raw when String.equal (String.trim raw) "" -> Error Invalid_scope
+            | Some raw ->
+              let* requested = parse_scopes (Some raw) in
+              let granted requested_scope =
+                List.exists (equal_scope requested_scope) family.scopes
+              in
+              if List.for_all granted requested then Ok requested else Error Invalid_scope
+          in
+          let* role = effective_role ~bootstrap_role:family.role scopes in
+          let old_access_path = access_path base_path family.current_access_hash in
+          let* pair =
+            mint_pair_locked
+              ~base_path
+              ~family_id:family.family_id
+              ~client_id:family.client_id
+              ~agent_name:family.agent_name
+              ~bootstrap_token_hash:family.bootstrap_token_hash
+              ~role
+              ~scopes
+              ~resource:family.resource
+          in
+          (match remove_file_if_exists old_access_path with
+           | () -> ()
+           | exception exn -> (* cancel-guard-ok: remove_file_if_exists is Sys.remove and performs no Eio operation. *)
+             Log.Auth.warn
+               "oauth: superseded access record cleanup failed error=%s"
+               (Printexc.to_string exn));
+          Ok pair))
 ;;
 
 let find_access_credential ~base_path ~token =
@@ -1008,7 +1020,7 @@ let find_access_credential ~base_path ~token =
             (match family with
              | None -> Error (Store_error "OAuth access token family is missing")
              | Some family ->
-               let live_bootstrap =
+               let* live_bootstrap =
                  live_bootstrap_allows
                    ~base_path
                    ~agent_name:family.agent_name

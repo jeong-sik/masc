@@ -29,15 +29,19 @@ const { values, positionals } = parseArgs({
     input: { type: 'string' },
     midi: { type: 'string' },
     'state-dir': { type: 'string' },
+    sequence: { type: 'boolean' },
+    project: { type: 'string' },
+    'project-root': { type: 'string' },
     help: { type: 'boolean' },
   },
 })
 
 if (values.help) {
   console.log('masc-alphatex [file.atex] [--bundle snapshot.json] [--index N]\n'
-    + '  TUI score viewer: arrows/j/k scroll, +/- zoom, t tracks, Space choose/play/pause, s stop, q exit.\n'
+    + '  TUI score viewer: arrows/j/k scroll, +/- zoom, t tracks, Space choose/play/pause, p sequencer, r recording, s stop, q exit.\n'
     + '  i chooses instrument/preset, e opens its native sound browser, l toggles repeat.\n'
     + '  --state-dir stores native selection, saved presets, renders and Lane snapshot.\n'
+    + '  --sequence opens a new phrase editor; --project song.json reopens one; --project-root sets its folder.\n'
     + '  --record opens audio/MIDI input selection; r begins recording, s saves WAV and UMP.\n'
     + '  --session directory opens a saved waveform/MIDI timeline; --session-root sets the take folder.\n'
     + '  --devices lists CoreAudio/CoreMIDI inputs on macOS.\n'
@@ -46,7 +50,11 @@ if (values.help) {
 }
 
 try {
-  if (values.devices) {
+  if (values.sequence || values.project) {
+    const { viewSequencer } = await import('./sequencer-tui.mjs')
+    await viewSequencer({ path: values.project, root: values['project-root'], soundfontPath: values.soundfont,
+      sessionRoot: values['session-root'], input: values.input, midi: values.midi })
+  } else if (values.devices) {
     const { devices } = await import('./capture.mjs')
     console.log(JSON.stringify(await devices()))
   } else if (values.record || values.session) {
@@ -209,7 +217,7 @@ async function viewScores(sources, initialIndex) {
     }
     output += `\x1b[${rows};1H${fit(picker.view
       ? pickerFooter(picker.view)
-      : '↑↓/j k:scroll  [ ]:system  +/-:zoom  t:tracks  ←→:score  v:source  Space:choose/play/pause  i:instrument  l:repeat  r:recording  s:stop  q:back')}`
+      : '↑↓/j k:scroll  [ ]:system  +/-:zoom  t:tracks  ←→:score  v:source  Space:choose/play/pause  i:instrument  l:repeat  p:sequencer  r:recording  s:stop  q:back')}`
     write(output)
   }
   function render() {
@@ -399,7 +407,7 @@ async function viewScores(sources, initialIndex) {
     }
     if (key.ctrl && key.name === 'c' || ['escape', 'q'].includes(key.name)) { finish(); return }
     switch (key.name) {
-      case 'r': {
+      case 'p': case 'r': {
         if (sessionTask) return
         stop()
         write(retire(tmux))
@@ -407,8 +415,14 @@ async function viewScores(sources, initialIndex) {
         process.stdin.off('keypress', keypress)
         sessionTask = (async () => {
           try {
-            const { viewSession } = await import('./music-session.mjs')
-            if (!closed) await viewSession({ root: values['session-root'], input: values.input, midi: values.midi, embedded: true, signal: sessionAbort.signal })
+            if (key.name === 'p') {
+              const { viewSequencer } = await import('./sequencer-tui.mjs')
+              if (!closed) await viewSequencer({ root: values['project-root'], sessionRoot: values['session-root'],
+                soundfontPath: values.soundfont, input: values.input, midi: values.midi, embedded: true, signal: sessionAbort.signal })
+            } else {
+              const { viewSession } = await import('./music-session.mjs')
+              if (!closed) await viewSession({ root: values['session-root'], input: values.input, midi: values.midi, embedded: true, signal: sessionAbort.signal })
+            }
           } catch (error) { status = error.message }
           finally {
             sessionTask = null; suspended = false

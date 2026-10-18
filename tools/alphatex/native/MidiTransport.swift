@@ -31,7 +31,7 @@ func destinations() throws -> [Destination] {
         return Destination(endpoint: endpoint, uid: uid, name: name.takeRetainedValue() as String)
     }
 }
-struct Event: Decodable {
+struct Event: Decodable, Equatable {
     enum Kind: String, Decodable { case program, control, on, off }
     let kind: Kind
     let seconds: Double
@@ -103,6 +103,7 @@ final class MidiTransport {
     let loop: Bool
     let queue = DispatchQueue(label: "masc.music.midi.transport", qos: .userInteractive)
     var destination: Destination?
+    var prepared = false // admission and resources belong to queue
     var client = MIDIClientRef(), port = MIDIPortRef()
     var state = State.prepared
     var timer: DispatchSourceTimer?
@@ -117,22 +118,36 @@ final class MidiTransport {
         guard let value = Int32(uid), String(value) == uid else { throw MidiFailure("MIDI destination requires its exact unique ID") }
         selectedUID = uid; self.loop = loop
     }
-    // Create the client on the main run loop; all subsequent state and sends
-    // belong to one serial queue, independent of terminal rendering.
+    // CoreMIDI's client is created on the main run loop. Transfer its ownership
+    // before admitting notifications; resource selection and mutation use queue.
     func prepare() throws {
-        try checked(MIDIClientCreateWithBlock("MASC phrase output" as CFString, &client, { [weak self] _ in
-            self?.queue.async { [weak self] in
-                guard let self, self.state != .stopped else { return }
-                do { try self.checkDestination() }
-                catch { self.finish(reason: "destination-unavailable", error: error) }
-            }
+        guard Thread.isMainThread else { throw MidiFailure("MIDI preparation requires the main run loop") }
+        var createdClient = MIDIClientRef()
+        try checked(MIDIClientCreateWithBlock("MASC phrase output" as CFString, &createdClient, { [weak self] _ in
+            self?.queue.async { [weak self] in self?.destinationChanged() }
         }), "create MIDI client")
-        guard let found = try destinations().first(where: { String($0.uid) == selectedUID }) else {
-            throw MidiFailure("selected MIDI destination is unavailable: \(selectedUID)")
+        try queue.sync {
+            client = createdClient
+            do {
+                guard let found = try destinations().first(where: { String($0.uid) == selectedUID }) else {
+                    throw MidiFailure("selected MIDI destination is unavailable: \(selectedUID)")
+                }
+                destination = found
+                try checked(MIDIOutputPortCreate(client, "MASC phrase output" as CFString, &port), "create MIDI output port")
+                try checkDestination()
+                prepared = true
+            } catch {
+                if port != 0 { MIDIPortDispose(port); port = 0 }
+                if client != 0 { MIDIClientDispose(client); client = 0 }
+                destination = nil
+                throw error
+            }
         }
-        destination = found
-        try checked(MIDIOutputPortCreate(client, "MASC phrase output" as CFString, &port), "create MIDI output port")
-        try checkDestination()
+    }
+    func destinationChanged() {
+        guard prepared, state != .stopped else { return }
+        do { try checkDestination() }
+        catch { finish(reason: "destination-unavailable", error: error) }
     }
     func checkDestination() throws {
         guard let destination, try destinations().contains(where: {
@@ -174,9 +189,15 @@ final class MidiTransport {
         if let failure { throw failure }
     }
     func restore(at seconds: Double) throws {
-        var programs: [UInt8: Event] = [:], controls: [UInt16: Event] = [:], notes: [UInt16: Event] = [:]
-        index = 0
-        while index < timeline.events.count && timeline.events[index].seconds < seconds {
+        try reconcile(at: seconds, reconstruct: true)
+    }
+    func reconcile(at seconds: Double, reconstruct: Bool = false) throws {
+        var programs: [UInt8: Event] = [:], controls: [UInt16: Event] = [:]
+        var notes = reconstruct ? [:] : held
+        if reconstruct { index = 0 }
+        // Consume the complete target boundary before emitting. A fully expired
+        // note interval must not be replayed when the deadline queue wakes late.
+        while index < timeline.events.count && timeline.events[index].seconds <= seconds {
             let event = timeline.events[index]
             switch event.kind {
             case .program: programs[event.channel] = event
@@ -188,11 +209,15 @@ final class MidiTransport {
         }
         for event in programs.values.sorted(by: { $0.channel < $1.channel }) { try apply(event) }
         for event in controls.values.sorted(by: { $0.key < $1.key }) { try apply(event) }
-        for event in notes.values.sorted(by: { $0.key < $1.key }) { try apply(event) }
+        for event in held.values.sorted(by: { $0.key < $1.key }) where notes[event.key] != event {
+            try send([0x80 | event.channel, event.pitch!, 0])
+            held.removeValue(forKey: event.key)
+        }
+        for event in notes.values.sorted(by: { $0.key < $1.key }) where held[event.key] != event { try apply(event) }
     }
-    func position() -> Double {
+    func position(at host: UInt64 = DispatchTime.now().uptimeNanoseconds) -> Double {
         guard state == .playing else { return offset }
-        return offset + Double(DispatchTime.now().uptimeNanoseconds - anchor) / 1e9
+        return offset + Double(host - anchor) / 1e9
     }
     func schedule() throws {
         timer?.cancel(); timer = nil
@@ -210,25 +235,25 @@ final class MidiTransport {
     func tick() {
         guard state == .playing else { return }
         do {
-            let now = position()
-            while index < timeline.events.count && timeline.events[index].seconds <= min(now, timeline.duration) {
-                let event = timeline.events[index]
-                maximumLateness = max(maximumLateness, now - event.seconds)
-                try apply(event); index += 1
+            let host = DispatchTime.now().uptimeNanoseconds
+            let now = position(at: host)
+            if index < timeline.events.count && timeline.events[index].seconds <= now {
+                maximumLateness = max(maximumLateness, now - timeline.events[index].seconds)
             }
             if now >= timeline.duration {
                 if !loop { offset = timeline.duration; finish(reason: "finished"); return }
-                try silence()
-                // Skip completed cycles after suspension instead of emitting
-                // stale iterations as a burst. Restore the current musical phase.
+                // Resolve phase before replaying any pending events. Keep the
+                // same host sample so cleanup/restoration time remains elapsed.
                 offset = now.truncatingRemainder(dividingBy: timeline.duration)
-                anchor = DispatchTime.now().uptimeNanoseconds
+                anchor = host
+                try silence()
                 try restore(at: offset)
-            }
+            } else { try reconcile(at: now) }
             try schedule()
         } catch { finish(reason: "playback-failed", error: error) }
     }
     func start() {
+        guard prepared, state == .prepared else { return }
         do {
             try checkDestination()
             for number in [SIGINT, SIGTERM, SIGHUP] {
@@ -247,9 +272,12 @@ final class MidiTransport {
         catch { finish(reason: "event-output-failed", error: error, publish: false) }
     }
     func snapshot(_ kind: String) -> [String: Any] {
-        let current = min(position(), timeline.duration)
-        return ["kind": kind, "currentTime": current, "duration": timeline.duration,
-                "device": destination!.json, "loop": loop, "maximumLateness": maximumLateness]
+        let elapsed = position()
+        let current = loop ? elapsed.truncatingRemainder(dividingBy: timeline.duration) : min(elapsed, timeline.duration)
+        var value: [String: Any] = ["kind": kind, "currentTime": current, "duration": timeline.duration,
+                                  "loop": loop, "maximumLateness": maximumLateness]
+        if let destination { value["device"] = destination.json }
+        return value
     }
     func receive(_ line: String) {
         guard state != .stopped else { return }
@@ -259,24 +287,31 @@ final class MidiTransport {
             switch command {
             case .pause:
                 if state == .playing {
-                    offset = min(position(), timeline.duration); state = .paused
+                    let elapsed = position()
+                    offset = loop ? elapsed.truncatingRemainder(dividingBy: timeline.duration) : min(elapsed, timeline.duration)
+                    state = .paused
                     timer?.cancel(); timer = nil; try silence()
                 }
             case .resume:
                 if state == .paused {
-                    try restore(at: offset); anchor = DispatchTime.now().uptimeNanoseconds; state = .playing; tick()
+                    anchor = DispatchTime.now().uptimeNanoseconds; state = .playing
+                    try restore(at: offset); tick()
                 }
             case .seek(let seconds):
                 guard seconds.isFinite, seconds >= 0, seconds <= timeline.duration else { throw MidiFailure("seek must be within the MIDI timeline") }
                 let wasPlaying = state == .playing
+                let host = DispatchTime.now().uptimeNanoseconds
                 timer?.cancel(); timer = nil; try silence()
                 offset = seconds == timeline.duration && loop ? 0 : seconds
+                if wasPlaying { anchor = host }
                 if seconds == timeline.duration && !loop { finish(reason: "finished"); return }
                 // Paused seek must remain silent; resume reconstructs held notes.
                 if wasPlaying {
-                    try restore(at: offset); anchor = DispatchTime.now().uptimeNanoseconds; tick()
+                    try restore(at: offset); tick()
                 }
-            case .status: break
+            case .status:
+                if state == .playing { tick() }
+                if state == .stopped { return }
             case .stop: finish(reason: "stop"); return
             }
             publish()

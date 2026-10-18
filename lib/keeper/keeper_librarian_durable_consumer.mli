@@ -185,14 +185,20 @@ val consume_one_with_runtime
   -> unit
   -> (outcome, error) result
 (** Production source-aware consumer. After the normal pass reaches a single
-    official turn and a failure that can warrant reading less, infer its exact
-    messages into a process-local ordered Memory program. Retain the selected
-    main/internal fragments and original cursor; revalidate them under the
-    actual fragment writers' stable session lock before publishing once at the
-    original turn boundary. Only Runtime's actual exhausted API walk evidence
-    may authorize unread holes. Inherited WAL recovery archives holes before
-    external acknowledgement and progress. Generic [consume_one ~commit]
-    never turns an injected commit refusal into skip authority. *)
+    checkpoint cut or official turn and a failure that can warrant reading
+    less, infer its exact messages into a process-local ordered Memory program.
+    A checkpoint cut may span several atoms, including in a retired trace;
+    message coordinates keep the original complete checkpoint numbering.
+    Retain the original source and cursors, then revalidate under that selected
+    source's stable session lock before publishing once at the original
+    boundary. Checkpoint validation includes the full original prefix and a
+    fresh selection, rejecting body changes and later history restarts while
+    permitting an appended suffix. Official turns retain all main/internal
+    fragments and host observations under the actual writers' same lock.
+    Only Runtime's actual exhausted API walk evidence may authorize unread
+    holes. Inherited WAL recovery archives holes before external acknowledgement
+    and progress. Generic [consume_one ~commit] never turns an injected commit
+    refusal into skip authority. *)
 
 val tool_observations : Agent_core.Types.message list -> Keeper_librarian.tool_observation list
 (** The tool calls in [messages], each with how its result ended ([Unknown]

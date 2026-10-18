@@ -662,6 +662,95 @@ let floor_refusal detail : Keeper_librarian_runtime.not_committed =
   {input_capacity_evidence=No_input_capacity_refusal;provider_input_refusals=[];
    detail;walk_shows_size=false;smaller_range_meets_same_failure=false}
 
+let checkpoint_message_floor ?cli_runner ~config ~keeper_name ~lines ~progress ~official_cursor
+    ~selection_progress ~messages ~(selected_range : R.range)
+    ~(range : Keeper_memory_os_current.durable_range_id)
+    ~external_cursor ~external_through reports (input : Keeper_librarian.input) =
+  let module Current = Keeper_memory_os_current in
+  let module Unread = Keeper_librarian_unread in
+  let module Floor = Keeper_librarian_message_floor in
+  let module C = Keeper_checkpoint_store in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path in
+  let runtime_keepers_dir = Workspace.keepers_runtime_dir config in
+  let failure detail extra = Memory_refused (reports @ extra @ [floor_refusal detail]) in
+  let inferred =
+    let ( let* ) = Result.bind in
+    let* sources = Unread.sources_for_atom_range ~trace_id:range.trace_id
+      ~history_start_boundary_line:range.history_start_boundary_line
+      ~start_atom:range.start_atom ~end_atom:range.end_atom ~messages
+      |> Result.map_error (fun detail -> detail,[]) in
+    let unread_message source ~reasons = match source with
+      | Unread.Atom {trace_id;history_start_boundary_line;atom;message_in_atom;_}
+          when trace_id=range.trace_id && history_start_boundary_line=range.history_start_boundary_line
+               && range.start_atom <= atom && atom < range.end_atom ->
+        Unread.for_atom ~trace_id ~history_start_boundary_line ~atom ~message_in_atom ~messages ~reasons
+      | Unread.Atom _ | Unread.Official_turn _ -> Error "message is outside the selected checkpoint range" in
+    let* unread_messages = Domain_pool_ref.submit_io_or_inline (fun () ->
+      Current.read_unread_messages ~keepers_dir ~keeper_id:keeper_name)
+      |> Result.map_error (fun detail -> detail,[]) in
+    Floor.infer ?cli_runner ~base_path:config.Workspace.base_path ~keepers_dir ~keeper_name
+      ~sources ~unread_message ~previous_state:None ~unread_messages input
+      |> Result.map_error (fun (error : Floor.error) -> error.detail,error.reports) in
+  match inferred with
+  | Error (detail,extra) -> failure detail extra
+  | Ok inferred ->
+    let range = {range with Current.unread_messages=inferred.program.unread} in
+    let source = Current.Atom_program_source {range;checkpoint=messages} in
+    let committed = ref false in
+    let publication = Eio.Cancel.protect (fun () ->
+      Domain_pool_ref.submit_io_or_inline (fun () ->
+        (* The selected trace may already be retired. Lock its actual source,
+           not the current Keeper metadata trace, and do not reenter its loader. *)
+        let session_dir = Filename.concat (Keeper_fs.session_store_path config) range.trace_id in
+        C.with_agent_core_exact_snapshot ~session_dir ~session_id:range.trace_id (fun snapshot ->
+          let ( let* ) = Result.bind in
+          let current_messages = C.exact_snapshot_messages snapshot in
+          let* current_lines = B.read ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name in
+          let prefix = List.filter (fun (line,_) -> line <= range.end_boundary_line) in
+          let* () = if prefix current_lines=prefix lines then Ok ()
+            else Error "checkpoint boundary prefix changed during message inference" in
+          let* current_progress = P.read ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name
+            |> Result.map_error P.read_error_to_string in
+          let* current_official = O.read ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name
+            |> Result.map_error O.read_error_to_string in
+          let* () = if current_progress=progress && current_official=official_cursor then Ok ()
+            else Error "Librarian cursor changed during checkpoint message inference" in
+          (* Opening digests do not cover a later tool response. Compare every
+             original prefix message using its canonical full encoding. *)
+          let prefix_messages messages = Window.annotate messages |> fst
+            |> List.filter_map (fun (message,label) -> match label with
+              | Window.Pinned -> Some (Agent_core.Checkpoint.message_to_json message)
+              | Window.Atom atom -> if atom < range.end_atom
+                then Some (Agent_core.Checkpoint.message_to_json message) else None) in
+          let* () = if prefix_messages current_messages=prefix_messages messages then Ok ()
+            else Error "checkpoint message prefix changed during message inference" in
+          (* A restart appended beyond the selected prefix changes the history
+             generation even when all old bytes and opening digests survive.
+             A normal later cut leaves this first selected cut unchanged. *)
+          let* () = match R.select ~trace_id:range.trace_id ~lines:current_lines
+              ~progress:selection_progress ~messages:current_messages R.To_first_cut_point with
+            | R.Read {range=current;_} when current=selected_range -> Ok ()
+            | R.Read _ | R.Baseline _ | R.Nothing_to_read | R.Position_in_other_trace _ | R.Stop _ ->
+              Error "checkpoint selection or history generation changed during message inference" in
+          let* () = Keeper_external_read_cursor.prepare ~memory_keepers_dir:keepers_dir
+            ~runtime_keepers_dir ~keeper_name external_cursor ~through:external_through
+            ~atom:(Some range) ~official:None in
+          let* _ = Current.apply_program ~keepers_dir ~keeper_id:keeper_name ~now:(Time_compat.now ())
+            ~anchor:inferred.anchor ~source ~validate_source:(fun () -> Ok ())
+            ~on_committed:(fun _ -> committed := true) inferred.program in
+          Ok ()))) in
+    let settled_failure detail =
+      if !committed then (
+        Log.Keeper.warn ~keeper_name
+          "checkpoint Memory program is durable; later settlement failed and WAL recovery is required: %s" detail;
+        Memory_committed)
+      else failure detail [] in
+    (match publication with
+     | Ok (Ok ()) -> Memory_committed
+     | Ok (Error detail) -> settled_failure detail
+     | Error error -> settled_failure (C.checkpoint_ref_load_error_to_string error))
+;;
+
 let official_message_floor ?cli_runner ~config ~keeper_name ~lines ~progress ~official_cursor
     ~fragments ~(selected : R.official_line) ~(range : Keeper_memory_os_current.official_range_id)
     ~external_cursor ~external_through reports
@@ -1530,15 +1619,19 @@ let consume_one_with_extent
         }
       in
       let result = commit ~expected_revision ~range_id:atom_next ~official_range_id input in
-      let result = match result, message_floor, atom_next, official_lines, official_range_id with
-        | Memory_refused reports, Runtime_message_floor cli_runner, None, [selected], Some range
+      let result = match result, message_floor with
+        | Memory_refused reports, Runtime_message_floor cli_runner
             when input.messages <> [] && List.exists
               (fun (report : Keeper_librarian_runtime.not_committed) -> report.walk_shows_size) reports ->
-          official_message_floor ?cli_runner ~config ~keeper_name ~lines ~progress ~official_cursor
-            ~fragments ~selected ~range ~external_cursor ~external_through reports input
-        | (Memory_committed | Memory_refused _),
-            (No_message_floor | Runtime_message_floor _), (None | Some _),
-            ([] | [_] | _ :: _ :: _), (None | Some _) -> result in
+          (match atom, atom_next, official_lines, official_range_id, steps with
+           | None, None, [selected], Some range, _ ->
+             official_message_floor ?cli_runner ~config ~keeper_name ~lines ~progress ~official_cursor
+               ~fragments ~selected ~range ~external_cursor ~external_through reports input
+           | Some (selected_range,_,_,_,_), Some range, [], None, [_] ->
+             checkpoint_message_floor ?cli_runner ~config ~keeper_name ~lines ~progress ~official_cursor
+               ~selection_progress ~messages ~selected_range ~range ~external_cursor ~external_through reports input
+           | (None | Some _), (None | Some _), ([] | _::_), (None | Some _), ([] | _::_) -> result)
+        | (Memory_committed | Memory_refused _), (No_message_floor | Runtime_message_floor _) -> result in
       match result with
       | Memory_refused reports -> Ok (Memory_not_committed reports)
       | Memory_committed ->

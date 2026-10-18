@@ -2877,6 +2877,353 @@ let test_official_commit_recovers_without_resynthesis ?(through_queue = false) ?
    | Error detail -> fail detail)
 ;;
 
+type checkpoint_memory_floor_case =
+  | Partial_checkpoint_hole
+  | Retired_checkpoint_hole
+  | All_checkpoint_holes
+  | Checkpoint_holes_without_observations
+  | Unknown_checkpoint_refusal
+  | Cli_tail_checkpoint_refusal
+  | Late_checkpoint_failure
+  | Rewritten_checkpoint_source
+  | Appended_checkpoint_suffix
+  | Restarted_checkpoint_history
+  | Moved_checkpoint_progress
+  | Interrupted_checkpoint_progress
+
+(* The ordinary durable pass starts after a real stored atom position. A
+   single completion cut spans two further atoms: its tool result shares the
+   assistant's atom, so message coordinates cannot be a flattened index. *)
+let test_runtime_checkpoint_memory_floor case () =
+  let open Masc in
+  let module F = Exact_output_fixture in
+  let module Current = Keeper_memory_os_current in
+  let module Unread = Keeper_librarian_unread in
+  let module Program = Keeper_memory_os_program in
+  let module U = Yojson.Safe.Util in
+  let get = function Ok value -> value | Error detail -> fail detail in
+  Masc_test_deps.with_process_env Env_config.KeeperMemoryOs.librarian_env_key (Some "true") @@ fun () ->
+  Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
+  Masc_test_deps.with_process_env Env_config_core.config_dir_env_key None @@ fun () ->
+  let with_runtimes f = if case=Cli_tail_checkpoint_refusal then F.with_official_client_runtimes f else f () in
+  with_runtimes @@ fun () ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs env#fs;
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.with_test_env ~net:env#net ~clock:env#clock ~mono_clock:env#mono_clock ~sw @@ fun () ->
+  Masc_http_client.with_scoped_pool ~sw ~env @@ fun () ->
+  let base_path = Filename.temp_dir "checkpoint-memory-floor-" "" in
+  Config_dir_resolver.reset ();
+  Fun.protect ~finally:(fun () -> Config_dir_resolver.reset (); Fs_compat.remove_tree base_path) @@ fun () ->
+  let config = Workspace.default_config base_path in
+  ignore (Workspace.init config ~agent_name:None);
+  write_keeper_declaration config;
+  let trace_id = "checkpoint-runtime-floor-a" in
+  let prefix_marker = "The first checkpoint turn was already consumed." in
+  establish_progress config ~trace_id prefix_marker;
+  let prior_progress = match read_progress config with Some value -> value | None -> fail "missing initial checkpoint position" in
+  let has_observations = case<>Checkpoint_holes_without_observations in
+  let claim = "Checkpoint project Meridian waits for operator approval." in
+  let question = message (claim ^ " Read the fixture file and preserve its actual outcome.") in
+  let source =
+    let open Agent_core.Types in
+    if not has_observations then [question;make_message ~role:Assistant [Text "An answer that has not been read."]]
+    else [question;
+      make_message ~role:Assistant [Text claim;ToolUse {id="checkpoint-floor-call";name="read_file";
+        input=`Assoc ["path",`String "checkpoint-private-argument"]}];
+      {(make_message ~role:Tool [ToolResult {tool_use_id="checkpoint-floor-call";
+        content="checkpoint-private-result";outcome=Tool_succeeded;json=None;content_blocks=None}])
+       with tool_call_id=Some "checkpoint-floor-call"}] in
+  let completed = message prefix_marker :: source in
+  save_checkpoint config ~trace_id completed 2;
+  append_boundary config ~trace_id ~turn:2 ~recorded_at:1000.
+    ~history_at_start:(Boundaries.history_at_start_of_messages [message prefix_marker]) completed;
+  let counterpart_marker = "The external speaker asks that the completed checkpoint be reviewed." in
+  if has_observations then (
+    let item : Keeper_external_attention.item =
+      {event_id=Keeper_external_attention.event_id_of_dedupe_key "checkpoint-floor-counterpart";
+       dedupe_key="checkpoint-floor-counterpart";keeper_name;
+       conversation={conversation_id="agent:checkpoint-floor";surface=Keeper_external_attention.Agent};
+       external_message=None;source_label="agent";
+       actor={actor_id=Some "external";display_name=Some "External";authority=Keeper_chat_store.External};
+       urgency=Keeper_external_attention.Ambient;content_preview=counterpart_marker;
+       content_ref=None;received_at=999.;metadata=[]} in
+    match Keeper_external_attention.For_testing.record_with_clock ~now:(fun () -> 999.) ~base_path item with
+    | `Recorded -> () | `Duplicate _ -> fail "duplicate checkpoint counterpart fixture"
+    | `Error detail -> fail detail);
+  let next_trace = "checkpoint-runtime-floor-b" in
+  let next_trace_marker = "The new trace must wait for its retired predecessor." in
+  if case=Retired_checkpoint_hole then (
+    save_checkpoint config ~trace_id:next_trace [message next_trace_marker] 1;
+    append_boundary config ~trace_id:next_trace ~turn:1 ~recorded_at:1001. [message next_trace_marker];
+    write_meta config next_trace);
+  let runtime_keepers_dir = Workspace.keepers_runtime_dir config in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let line_count = if case=Retired_checkpoint_hole then 3 else 2 in
+  let end_atom,last_atom_digest = match Boundaries.position_of_messages completed |> get with
+    | Boundaries.Atom_history {end_atom;last_atom_digest} -> end_atom,last_atom_digest
+    | Boundaries.Empty_atom_history | Boundaries.No_atom_history | Boundaries.Stale_noop -> fail "checkpoint fixture has no atoms" in
+  check int "one completion cut contains two new atoms after the consumed prefix" 3 end_atom;
+  let original_range : Current.durable_range_id =
+    {receipt_scope=runtime_keepers_dir;trace_id;history_start_boundary_line=1;start_atom=1;end_atom;
+     last_atom_digest;end_boundary_line=2;boundary_lines_seen=line_count;unread_messages=[]} in
+  let sources = Unread.sources_for_atom_range ~trace_id ~history_start_boundary_line:1
+    ~start_atom:1 ~end_atom ~messages:completed |> get in
+  let coordinates = List.map (function
+    | Unread.Atom {atom;message_in_atom;_} -> atom,message_in_atom
+    | Unread.Official_turn _ -> fail "checkpoint fixture received an official source") sources in
+  check (list (pair int int)) "global atom coordinates retain each atom's local message numbering"
+    (if has_observations then [1,0;2,0;2,1] else [1,0;2,0]) coordinates;
+  let all_holes = case=All_checkpoint_holes || not has_observations in
+  let hole message_in_source =
+    let atom,message_in_atom = List.nth coordinates message_in_source in
+    Unread.for_atom ~trace_id ~history_start_boundary_line:1 ~atom ~message_in_atom
+      ~messages:completed ~reasons:[Keeper_librarian_input_refusal.Request_body_refused] |> get in
+  let expected_holes = if all_holes then List.mapi (fun index _ -> hole index) source
+    else if case=Partial_checkpoint_hole || case=Retired_checkpoint_hole || case=Interrupted_checkpoint_progress
+    then [hole 0] else [] in
+  let registry = Exact_lane_run_registry.create
+    ~path:(Filename.concat base_path Exact_lane_run_registry.storage_filename) () in
+  (match Exact_lane_run_registry.install_global registry with
+   | Ok () | Error Exact_lane_run_registry.Already_installed -> ());
+  Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
+  Prompt_defaults.init ();
+  let stores =
+    [Current.path_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name;
+     Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name;
+     Current.publication_receipt_path ~keepers_dir ~keeper_id:keeper_name;
+     Current.durable_range_receipt_path ~keepers_dir ~keeper_id:keeper_name;
+     Current.unread_ledger_path ~keepers_dir ~keeper_id:keeper_name;
+     Keeper_librarian_context.path ~keepers_dir ~keeper_id:keeper_name;
+     Keeper_librarian_continuity.path ~config ~keeper_name;
+     Progress.path_for_keepers_dir ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name;
+     Official.path_for_keepers_dir ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name;
+     Keeper_external_read_cursor.path_for_keepers_dir ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name] in
+  let bytes () = List.map Fs_compat.load_file_opt stores in
+  let external_state () = Keeper_external_read_cursor.path_for_keepers_dir
+    ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name |> Fs_compat.load_file |> Yojson.Safe.from_string in
+  let check_external_after expected = check int "external admission waits for a complete original checkpoint publication"
+    expected (U.member "after" (external_state ()) |> U.to_int) in
+  let check_unchanged_endpoint () =
+    let session_dir = Keeper_fs.keeper_session_dir config trace_id in
+    let persisted = Store.load_agent_core ~session_dir ~session_id:trace_id
+      |> Result.map_error Store.checkpoint_load_error_to_string |> get in
+    check bool "the actual stored checkpoint preserves every atom-opening endpoint witness" true
+      (Boundaries.position_of_messages persisted.Agent_core.Checkpoint.messages |> get
+       =Boundaries.Atom_history {end_atom;last_atom_digest}) in
+  let before_steps = ref None and after_external_mutation = ref None and requests = ref [] in
+  let cli_calls = ref 0 in
+  let cli_runner ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+    incr cli_calls;
+    check string "the real API walk reaches its declared CLI tail" F.cli_primary_runtime runtime_id;
+    Error (Fusion_official_client.Setup_failure "opaque CLI tail cannot authorize skipping a source message") in
+  let answer index =
+    let first_accepted = if expected_holes=[] then 1 else 2 in
+    let new_claims = if not all_holes && index=first_accepted then
+      [`Assoc ["claim",`String claim;"category",`String "fact";"board_post_id",`Null;
+        "board_comment_id",`Null;"supersedes",`Null;"absorbs",`List []]] else [] in
+    F.openai_response (`Assoc ["new_claims",`List new_claims;"dropped",`List [];
+      "working_contexts",`List [];"working_state",`String "Only successfully judged checkpoint messages are represented."]) in
+  let refuse = `Request_entity_too_large,
+    {|{"error":{"type":"invalid_request_error","message":"fixture checkpoint body refused"}}|} in
+  let unknown = `Internal_server_error,
+    {|{"error":{"type":"server_error","message":"fixture opaque checkpoint failure"}}|} in
+  let server = F.start_server ~sw ~net:env#net ~clock:env#clock
+    (F.Reply_with (fun index body ->
+      requests := !requests @ [body];
+      check_external_after 0;
+      (* The initial whole-pass refusal has already written its ordinary
+         diagnostic journal line; volatile steps begin after that baseline. *)
+      if index=1 then before_steps := Some (bytes ());
+      if index>1 then check bool "accepted volatile steps publish no Memory, receipt, unread ledger, context or progress"
+        true (bytes ()=Option.get !before_steps);
+      if index=3 then (
+        (match case with
+         | Rewritten_checkpoint_source ->
+           let changed = match source with
+             | [question;call;result] ->
+               [question;call;{result with Agent_core.Types.content=[Agent_core.Types.ToolResult
+                 {tool_use_id="checkpoint-floor-call";content="The original tool result was replaced.";
+                  outcome=Agent_core.Types.Tool_succeeded;json=None;content_blocks=None}]}]
+             | [] | [_] | [_;_] | _::_::_::_ -> fail "checkpoint fixture lost its tool result" in
+           (* Every atom opener, not just the endpoint, remains byte-identical.
+              Only the frozen full-message prefix detects this changed result. *)
+           save_checkpoint config ~trace_id (message prefix_marker::changed) 3;
+           check_unchanged_endpoint ()
+         | Appended_checkpoint_suffix ->
+           let extended = completed @ [message "A newly finished checkpoint suffix must remain unread."] in
+           save_checkpoint config ~trace_id extended 3;
+           append_boundary config ~trace_id ~turn:3 ~recorded_at:1001.
+             ~history_at_start:(Boundaries.history_at_start_of_messages completed) extended
+         | Restarted_checkpoint_history ->
+           (* Isolate the generation check: an adversarial restart marker
+              arrives while the entire canonical checkpoint stays unchanged. *)
+           (match Boundaries.append ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name
+             {Boundaries.recorded_at=1001.;event=Boundaries.History_restarted {trace_id}} with
+            | Ok () -> () | Error error -> fail (Boundaries.append_error_to_string error));
+           check_unchanged_endpoint ()
+         | Moved_checkpoint_progress ->
+           Progress.write ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name
+             {prior_progress with boundary_lines_seen=2}
+           |> Result.map_error Progress.write_error_to_string |> get
+         | Partial_checkpoint_hole | Retired_checkpoint_hole | All_checkpoint_holes
+         | Checkpoint_holes_without_observations | Unknown_checkpoint_refusal | Cli_tail_checkpoint_refusal
+         | Late_checkpoint_failure | Interrupted_checkpoint_progress -> ());
+        (* Any owner mutation is now the baseline. The response may complete
+           inference, but publication must not change another store byte. *)
+        after_external_mutation := Some (bytes ()));
+      match case with
+      | Unknown_checkpoint_refusal -> unknown
+      | Cli_tail_checkpoint_refusal -> refuse
+      | Checkpoint_holes_without_observations ->
+        if index<=List.length source then refuse else fail "an observation-free all-hole boundary invented a generation request"
+      | All_checkpoint_holes when index<=List.length source -> refuse
+      | Late_checkpoint_failure when index=List.length source -> unknown
+      | Partial_checkpoint_hole | Retired_checkpoint_hole | Interrupted_checkpoint_progress when index<2 -> refuse
+      | Late_checkpoint_failure | Rewritten_checkpoint_source | Appended_checkpoint_suffix
+      | Restarted_checkpoint_history | Moved_checkpoint_progress when index=0 -> refuse
+      | Partial_checkpoint_hole | Retired_checkpoint_hole | All_checkpoint_holes | Late_checkpoint_failure
+      | Rewritten_checkpoint_source | Appended_checkpoint_suffix | Restarted_checkpoint_history
+      | Moved_checkpoint_progress | Interrupted_checkpoint_progress -> `OK,answer index)) in
+  ignore (F.publish_registry ~lane_id:"librarian_exact" ~slot_ids:["checkpoint-floor-api"]
+    ~cli_slot_ids:(if case=Cli_tail_checkpoint_refusal then [F.cli_primary_runtime] else [])
+    (F.resolver_snapshot ~source:"checkpoint-floor-fixture" [{F.id="checkpoint-floor-api";base_url=server.base_url}]));
+  let run () = Consumer.consume_one_with_runtime
+    ?cli_runner:(if case=Cli_tail_checkpoint_refusal then Some cli_runner else None) ~config ~keeper_name () in
+  let result = if case=Interrupted_checkpoint_progress then
+      Consumer.For_testing.consume_one_with_runtime_and_progress_writers
+        ~write_official_progress_store:Official.write
+        ~write_progress_store:(fun ~keepers_dir:_ ~keeper_id:_ _ ->
+          check_external_after 1;
+          check bool "exact checkpoint holes are archived before external acknowledgement and atom progress" true
+            (Current.read_unread_messages ~keepers_dir ~keeper_id:keeper_name |> get=expected_holes);
+          check bool "the completed pending external receipt is cleared before atom progress" true
+            (U.member "pending" (external_state ())=`Null);
+          Error (Progress.Write_failed {path="injected-checkpoint-progress";message="fixture interrupted after checkpoint Memory"}))
+        ~config ~keeper_name ()
+    else run () in
+  let expected_calls = match case with
+    | Unknown_checkpoint_refusal -> 1 | Cli_tail_checkpoint_refusal -> 2
+    | Checkpoint_holes_without_observations -> 3 | All_checkpoint_holes -> 5
+    | Partial_checkpoint_hole | Retired_checkpoint_hole | Late_checkpoint_failure
+    | Rewritten_checkpoint_source | Appended_checkpoint_suffix | Restarted_checkpoint_history
+    | Moved_checkpoint_progress | Interrupted_checkpoint_progress -> 4 in
+  check int "one actual whole-cut failure precedes each exact-message attempt" expected_calls (List.length !requests);
+  check int "only the declared CLI tail is dispatched and never treated as proven API exhaustion"
+    (if case=Cli_tail_checkpoint_refusal then 2 else 0) !cli_calls;
+  let contains ~sub text =
+    let rec at index = index+String.length sub<=String.length text
+      && (String.sub text index (String.length sub)=sub || at (index+1)) in
+    at 0 in
+  List.iter (fun body ->
+    List.iter (fun marker -> check bool "only selected source content reaches the actual HTTP request" false
+      (contains ~sub:marker body))
+      [prefix_marker;next_trace_marker;"checkpoint-private-argument";"checkpoint-private-result"]) !requests;
+  let publications () = Current.read_journal_tail ~keepers_dir ~keeper_id:keeper_name ~limit:20
+    |> List.map get |> List.filter_map (function
+      | Current.Journal_committed {program=Some proof;_} -> Some proof
+      | Current.Journal_committed {program=None;_} | Current.Journal_failed _
+      | Current.Journal_quarantined _ -> None) in
+  match case with
+  | Unknown_checkpoint_refusal | Cli_tail_checkpoint_refusal | Late_checkpoint_failure
+  | Rewritten_checkpoint_source | Restarted_checkpoint_history | Moved_checkpoint_progress ->
+    (match result with
+     | Ok (Consumer.Memory_not_committed (_::_)) -> ()
+     | Error error -> fail (Consumer.error_to_string error)
+     | Ok _ -> fail "refused or changed checkpoint source advanced");
+    check bool "failed inference cannot create a Memory program, snapshot or unread authority" true
+      (publications ()=[] && (Current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name |> get)=None
+       && (Current.read_unread_messages ~keepers_dir ~keeper_id:keeper_name |> get)=[]);
+    check_external_after 0;
+    check bool "no official position can appear from checkpoint work" true (read_official config=None);
+    (match !after_external_mutation,!before_steps with
+     | Some before,_ | None,Some before -> check bool "failure preserves every authoritative byte after any injected owner mutation"
+         true (bytes ()=before)
+     | None,None -> check bool "an opaque whole-cut failure preserves the original atom progress" true
+         (read_progress config=Some prior_progress))
+  | Partial_checkpoint_hole | Retired_checkpoint_hole | All_checkpoint_holes
+  | Checkpoint_holes_without_observations | Appended_checkpoint_suffix | Interrupted_checkpoint_progress ->
+    let expected_range = {original_range with Current.unread_messages=expected_holes} in
+    check bool "one receipt accounts for the exact original complete checkpoint cut" true
+      (Current.committed_durable_coverage ~keepers_dir ~keeper_id:keeper_name
+        ~receipt_scope:runtime_keepers_dir |> get=Some expected_range);
+    check bool "accounted holes are never reported as fully read checkpoint history" true
+      (Current.committed_durable_range ~keepers_dir ~keeper_id:keeper_name
+        ~receipt_scope:runtime_keepers_dir |> get=if expected_holes=[] then Some expected_range else None);
+    check bool "the durable ledger preserves every original atom-local hash and actual named refusal" true
+      (Current.read_unread_messages ~keepers_dir ~keeper_id:keeper_name |> get=expected_holes);
+    let proof = match publications () with [proof] -> proof | _ -> fail "expected exactly one canonical checkpoint Memory program" in
+    let program = proof.Keeper_memory_os_program_types.execution.program in
+    check bool "the exact unflattened original source manifest is published once" true
+      (program.Program.sources=sources && program.unread=expected_holes);
+    check bool "the retired trace retains its own turn identity even while metadata names another trace" true
+      (Ids.Turn_ref.equal program.turn_ref (Ids.Turn_ref.make ~trace_id ~absolute_turn:2));
+    let accepted_sources,accepted_messages =
+      if all_holes then (if has_observations then [[]],[[]] else [],[])
+      else if expected_holes=[] then List.map (fun source -> [source]) sources,List.map (fun message -> [message]) source
+      else List.map (fun source -> [source]) (List.tl sources),List.map (fun message -> [message]) (List.tl source) in
+    check bool "only actually accepted messages receive source-bearing decisions" true
+      (List.map (fun (stage : Program.stage) -> stage.decision.sources) program.stages=accepted_sources);
+    check bool "accepted evidence preserves every original full message byte" true
+      (List.map (fun (stage : Program.stage) -> U.member "messages" stage.decision.input_evidence) program.stages
+       =List.map (fun messages -> `List (List.map Agent_core.Checkpoint.message_to_json messages)) accepted_messages);
+    let rec check_staged_facts = function
+      | first::(second::_ as rest) ->
+        check bool "each later Memory inference receives the preceding actual staged facts" true
+          (second.Program.decision.input_current=Some first.Program.after);
+        check_staged_facts rest
+      | [] | [_] -> () in
+    check_staged_facts program.stages;
+    List.iteri (fun index (stage : Program.stage) ->
+      let variables = U.member "prompt_variables" stage.decision.input_evidence in
+      check bool "joined successful tool evidence reaches the first accepted step exactly once" true
+        (U.member "turn_tool_observations" variables |> U.to_string |> Yojson.Safe.from_string
+         =`List (if index=0 then [`Assoc ["tool_name",`String "read_file";"outcome",`String "succeeded"]] else []));
+      check (list string) "the real external speaker reaches the first accepted step exactly once"
+        (if index=0 then [counterpart_marker] else [])
+        (U.member "counterpart_observations" variables |> U.to_string |> Yojson.Safe.from_string
+         |> U.to_list |> List.map (fun row -> U.member "content" row |> U.to_string))) program.stages;
+    let memory = Current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name |> get in
+    (match memory with Some snapshot ->
+       check int "one original cut publishes one Memory revision" 1 snapshot.revision;
+       check (list string) "only the actual accepted staged claim reaches final Memory"
+         (if all_holes then [] else [claim])
+         (List.map (fun (fact : Keeper_memory_os_types.fact) -> fact.claim) snapshot.facts)
+     | None -> fail "checkpoint program has no committed Memory snapshot");
+    if not has_observations then check bool "an all-hole checkpoint with no host evidence invents no judgment or summary" true
+      (program.stages=[] && program.initial_current=None && program.final_facts=[]
+       && Fs_compat.load_file_opt (Keeper_librarian_context.path ~keepers_dir ~keeper_id:keeper_name)=None
+       && Fs_compat.load_file_opt (Keeper_librarian_continuity.path ~config ~keeper_name)=None);
+    check_external_after (if has_observations then 1 else 0);
+    check bool "only completed external evidence is acknowledged" true (U.member "pending" (external_state ())=`Null);
+    (if case=Interrupted_checkpoint_progress then (
+       (match result with Error (Consumer.Progress_write_failed _) -> ()
+        | Error error -> fail (Consumer.error_to_string error) | Ok _ -> fail "expected atom progress interruption after Memory");
+       check bool "the interrupted progress write leaves the old atom position" true (read_progress config=Some prior_progress);
+       Consumer.For_testing.reset_process_state ();
+       (match run () with Ok (Consumer.Progress_advanced _) -> ()
+        | Error error -> fail (Consumer.error_to_string error) | Ok _ -> fail "checkpoint WAL recovery did not advance");
+       check int "checkpoint WAL recovery performs no new HTTP generation" expected_calls (List.length !requests);
+       check bool "checkpoint WAL recovery preserves committed Memory" true
+         (Current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name |> get=memory))
+     else match result with Ok (Consumer.Progress_advanced _) -> ()
+       | Error error -> fail (Consumer.error_to_string error) | Ok _ -> fail "complete checkpoint program did not advance");
+    (match read_progress config with
+     | Some progress ->
+       check string "the original checkpoint trace owns the new position" trace_id progress.position.trace_id;
+       check int "the original completion cut remains indivisible" end_atom progress.position.end_atom;
+       check int "progress counts only boundary rows captured before inference" line_count progress.boundary_lines_seen
+     | None -> fail "completed checkpoint program lost its position");
+    if case=Appended_checkpoint_suffix then (
+      match Consumer.unread_turns ~config ~keeper_name with
+      | Ok unread -> check int "the concurrently completed suffix remains unread" 1 unread.atoms
+      | Error error -> fail (Consumer.error_to_string error))
+    else if case<>Retired_checkpoint_hole then (
+      (match run () with Ok Consumer.Nothing_to_read -> ()
+       | Error error -> fail (Consumer.error_to_string error) | Ok _ -> fail "accounted checkpoint cut was synthesized again");
+      check int "quiet wake never generates for accounted checkpoint holes" expected_calls (List.length !requests))
+;;
+
 (* These cases exercise the official consumer's production Runtime boundary:
    only the HTTP lane's real exhausted walk may create an unread message. *)
 type official_memory_floor_case =
@@ -3809,6 +4156,32 @@ let () =
             test_trace_change_without_history_witness_keeps_prior_progress
         ; test_case "new unreadable boundary remains visible" `Quick
             test_new_unreadable_boundary_is_not_hidden_by_preflight
+        ] )
+    ; ( "checkpoint runtime message floor"
+      , [ test_case "actual runtime accounts a multi-atom checkpoint cut with one API hole" `Quick
+            (test_runtime_checkpoint_memory_floor Partial_checkpoint_hole)
+        ; test_case "actual runtime finishes the retired checkpoint before the metadata trace" `Quick
+            (test_runtime_checkpoint_memory_floor Retired_checkpoint_hole)
+        ; test_case "actual runtime judges host evidence after every checkpoint message is refused" `Quick
+            (test_runtime_checkpoint_memory_floor All_checkpoint_holes)
+        ; test_case "actual runtime publishes observation-free checkpoint holes without inventing a summary" `Quick
+            (test_runtime_checkpoint_memory_floor Checkpoint_holes_without_observations)
+        ; test_case "opaque checkpoint refusal grants no unread or progress authority" `Quick
+            (test_runtime_checkpoint_memory_floor Unknown_checkpoint_refusal)
+        ; test_case "an exhausted API walk with a CLI tail cannot skip a checkpoint message" `Quick
+            (test_runtime_checkpoint_memory_floor Cli_tail_checkpoint_refusal)
+        ; test_case "late checkpoint inference failure publishes no partial Memory" `Quick
+            (test_runtime_checkpoint_memory_floor Late_checkpoint_failure)
+        ; test_case "checkpoint publication refuses a changed source with the same endpoint" `Quick
+            (test_runtime_checkpoint_memory_floor Rewritten_checkpoint_source)
+        ; test_case "checkpoint publication leaves an appended completed suffix unread" `Quick
+            (test_runtime_checkpoint_memory_floor Appended_checkpoint_suffix)
+        ; test_case "checkpoint publication refuses a restart marker with unchanged checkpoint bytes" `Quick
+            (test_runtime_checkpoint_memory_floor Restarted_checkpoint_history)
+        ; test_case "checkpoint publication refuses a changed atom cursor" `Quick
+            (test_runtime_checkpoint_memory_floor Moved_checkpoint_progress)
+        ; test_case "checkpoint program WAL repairs atom progress without another HTTP request" `Quick
+            (test_runtime_checkpoint_memory_floor Interrupted_checkpoint_progress)
         ] )
     ; ( "official-client turns"
       , [ test_case "actual runtime accounts an official turn with one proven API hole" `Quick

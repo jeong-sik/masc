@@ -88,9 +88,16 @@ admission 확인, 공식 읽은 위치 저장 순서로 진행한다. 마지막 
 단계 없이 원래 턴을 기록한다. 공식 Memory 진행에는 가짜 요약을 만들지 않는다. 하던 일
 저장본이 필요한 atom Queue는 이전 상태가 없을 때 실제 continuity 판단을 별도로 요구한다.
 
-이전 trace의 checkpoint 턴을 직접 읽는 durable 바닥 처리, 측정값 없는 native CLI 용량
-거절의 바닥 진입 정책, program-aware absorption recall, 실제 타입·동작 검증과 설치된
-제품의 전체 시나리오 acceptance는 #37850에 남아 있다.
+Agent Core checkpoint를 직접 읽는 durable 소비자도 원래 완료 경계 하나에서 메시지
+바닥으로 내려간다. 그 경계가 여러 atom을 포함해도 원래 checkpoint의 atom·메시지
+좌표를 유지하고 중간 prefix를 게시하지 않는다. 현재 metadata가 다른 trace를 가리켜도
+실제로 선택한 이전 trace의 checkpoint를 잠근다. 게시 직전 canonical 원문 prefix와 두
+읽은 위치, 새로 계산한 첫 완료 경계를 확인한다. 도구 응답 본문 변경이나 뒤늦은 history
+restart는 거부하고, 같은 generation의 다음 완료 경계가 추가된 것은 남겨 둔다.
+unread 원장 보존·외부 admission 확인·진행 위치 및 WAL 복구는 공식 턴과 같은 순서다.
+
+측정값 없는 native CLI 용량 거절의 바닥 진입 정책, program-aware absorption recall,
+실제 타입·동작 검증과 설치된 제품의 전체 시나리오 acceptance는 #37850에 남아 있다.
 
 
 Memory가 이미 읽은 범위에서 하던 일 저장본만 만드는 경우에도 같은 API 소진 증거로

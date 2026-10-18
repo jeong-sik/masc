@@ -197,6 +197,16 @@ class StructuredOutputProbe(Workdir):
         self.assertEqual(result.returncode, 2, result.stderr)
         self.assertIn("starts with a tilde the shell did not expand", result.stderr)
 
+    def test_a_tilde_or_blank_config_flag_is_refused(self):
+        result = self.run_python(self.SCRIPT, "--config", "~/runtime.toml", base=self.root / "base")
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("starts with a tilde the shell did not expand", result.stderr)
+        for empty in ("", "  "):
+            self.assert_stops_unnamed(
+                self.run_python(self.SCRIPT, "--config", empty, base=self.root / "base"),
+                "--config",
+            )
+
 
 class JudgeEval(Workdir):
     SCRIPT = "memory_os_judge_eval.py"
@@ -231,6 +241,29 @@ class JudgeEval(Workdir):
             self.SCRIPT, "--mode", "measure", "--store-dir", str(self.root / "store"), "--runtime-config", str(config)
         )
         self.assertIn(f"cannot read runtime config '{config}'", result.stderr)
+
+    def test_tilde_and_blank_flags_are_refused(self):
+        base = self.root / "base"
+        result = self.run_python(self.SCRIPT, "--runtime-config", "~/runtime.toml", base=base)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("starts with a tilde the shell did not expand", result.stderr)
+        result = self.run_python(
+            self.SCRIPT,
+            "--mode",
+            "measure",
+            "--runtime-config",
+            str(self.root / "named.toml"),
+            "--store-dir",
+            "~/store",
+            base=base,
+        )
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("starts with a tilde the shell did not expand", result.stderr)
+        for empty in ("", "  "):
+            self.assert_stops_unnamed(
+                self.run_python(self.SCRIPT, "--runtime-config", empty, base=base),
+                "--runtime-config",
+            )
 
     def test_runs_through_a_symlink(self):
         link = self.root / "judge.py"
@@ -657,6 +690,12 @@ class ProgressExtract(Workdir):
         for empty in ("", "  "):
             result = self.extract("--masc-root", empty, base=self.root / "base")
             self.assert_stops_unnamed(result, "--masc-root")
+
+    def test_a_tilde_masc_root_is_refused(self):
+        for tilde in ("~", "~/nowhere/.masc", "~someone/.masc"):
+            result = self.extract("--masc-root", tilde, base=self.root / "base")
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertIn("starts with a tilde the shell did not expand", result.stderr)
 
 
 if __name__ == "__main__":

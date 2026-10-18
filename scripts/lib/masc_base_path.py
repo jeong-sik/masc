@@ -33,6 +33,17 @@ class Unexpanded:
         return f"{self.raw!r} starts with a tilde the shell did not expand; pass the directory itself"
 
 
+def read_path_flag(raw: str) -> Path | Unexpanded | None:
+    """One directory or file flag value: blank is ``None``, a leading ``~``
+    is :class:`Unexpanded`, and anything else is made absolute against cwd."""
+    raw = raw.strip()
+    if not raw:
+        return None
+    if raw.startswith("~"):
+        return Unexpanded(raw)
+    return Path(os.path.abspath(raw))
+
+
 def resolve(flag_value: str | None) -> Path | Unexpanded | None:
     """The base path named by the flag; without a flag, by ``MASC_BASE_PATH``.
 
@@ -42,12 +53,7 @@ def resolve(flag_value: str | None) -> Path | Unexpanded | None:
     workspace.
     """
     raw = os.environ.get(ENV_KEY, "") if flag_value is None else flag_value
-    raw = raw.strip()
-    if not raw:
-        return None
-    if raw.startswith("~"):
-        return Unexpanded(raw)
-    return Path(os.path.abspath(raw))
+    return read_path_flag(raw)
 
 
 def required(flag: str) -> str:
@@ -63,6 +69,29 @@ def require(parser: argparse.ArgumentParser, flag_value: str | None, flag: str) 
     if isinstance(base, Unexpanded):
         parser.error(base.message())
     return base
+
+
+def require_subpath(
+    parser: argparse.ArgumentParser,
+    flag_value: str | None,
+    flag: str,
+    *relative_under_base: str,
+) -> Path:
+    """The path named by ``flag_value``; when ``flag_value`` is ``None``,
+    ``relative_under_base`` under the ``MASC_BASE_PATH`` directory.
+
+    A blank ``flag_value`` names nothing (and does not fall back to
+    ``MASC_BASE_PATH``); an unexpanded leading tilde is refused with the same
+    message as :func:`require`.
+    """
+    if flag_value is None:
+        return require(parser, None, flag).joinpath(*relative_under_base)
+    parsed = read_path_flag(flag_value)
+    if parsed is None:
+        parser.error(required(flag))
+    if isinstance(parsed, Unexpanded):
+        parser.error(parsed.message())
+    return parsed
 
 
 def require_or_exit(flag_value: str | None, flag: str) -> Path:

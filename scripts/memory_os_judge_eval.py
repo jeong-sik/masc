@@ -441,9 +441,9 @@ def config_path(
 ) -> str:
     """[named] as given; unnamed, [leaf] under MASC_BASE_PATH/.masc/config.
     A usage error when it is unnamed and no base is set."""
-    if named is not None:
-        return named
-    return str(masc_base_path.require(ap, None, flag) / ".masc" / "config" / leaf)
+    return str(
+        masc_base_path.require_subpath(ap, named, flag, ".masc", "config", leaf)
+    )
 
 
 def main() -> int:

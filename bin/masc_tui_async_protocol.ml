@@ -565,6 +565,7 @@ type async_msg =
           Approvals-surface twin of [Keeper_chat_approval_answered], which
           needs the chat request this path does not have. *)
   | Keeper_chat_dispatch_blocked of Masc_tui_keeper_chat_projection.request * string
+  | Keeper_creation_changed of keeper_creation_request * keeper_creation_status
   | Keeper_action_done of
       Masc.Tui_decode.server_identity option
       * string
@@ -923,6 +924,7 @@ let rec workspace_message_is_read = function
   | Keeper_chat_dispatch_blocked _
   | Schedule_form_authority_refused _
   | Keeper_deletion_retry_done _
+  | Keeper_creation_changed _
   | Keeper_action_done _
   | Board_new_post_done _
   | Board_vote_done _
@@ -1043,7 +1045,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Surface_tool_approval_answered (_, _, _, _, _)
     | Keeper_gate_settings_loaded _ | Keeper_tool_modes_loaded (_, _)
     | Keeper_tool_mode_set (_, _, _, _) | Keeper_chat_dispatch_blocked (_, _)
-    | Keeper_action_done (_, _, _, _) | Board_new_post_done _
+    | Keeper_creation_changed _ | Keeper_action_done (_, _, _, _) | Board_new_post_done _
     | Board_vote_done _ | Goal_transition_done _ | Goal_confirmation_submitted _
     | Goal_confirmation_loaded (_, _) | Schedules_loaded (_, _)
     | Schedule_wake_history_loaded (_, _) | Keeper_schedules_loaded (_, _)
@@ -1177,7 +1179,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Surface_tool_approval_answered (_, _, _, _, _)
   | Keeper_gate_settings_loaded _ | Keeper_tool_modes_loaded (_, _)
   | Keeper_tool_mode_set (_, _, _, _) | Keeper_chat_dispatch_blocked (_, _)
-  | Keeper_action_done (_, _, _, _) | Board_new_post_done _ | Board_vote_done _
+  | Keeper_creation_changed _ | Keeper_action_done (_, _, _, _) | Board_new_post_done _ | Board_vote_done _
   | Goal_transition_done _ | Goal_confirmation_submitted _
   | Goal_confirmation_loaded (_, _) | Schedules_loaded (_, _)
   | Schedule_wake_history_loaded (_, _) | Keeper_schedules_loaded (_, _)

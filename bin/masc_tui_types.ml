@@ -3804,6 +3804,35 @@ type keeper_creation_wait = {
   kcw_revision : Local_read_order.revision;
 }
 
+type keeper_creation_outcome =
+  | Creation_created
+  | Creation_not_sent of string
+  | Creation_refused of string
+  | Creation_unconfirmed of string
+
+type keeper_creation_status =
+  | Creation_checking
+  | Creation_posting
+  | Creation_finished of keeper_creation_outcome
+
+type keeper_creation_request = {
+  kcr_token : unit ref;
+  kcr_draft_owner : unit ref;
+  kcr_authority : workspace_authority;
+  kcr_workspace : Tui_decode.server_identity;
+  kcr_keeper : string;
+  kcr_return : keeper_chat_return;
+  kcr_surface : surface;
+  kcr_started_ns : int64;
+  kcr_observation : (keeper_creation_status * int64) Atomic.t;
+}
+
+type keeper_creation_attempt = {
+  kca_request : keeper_creation_request;
+  kca_status : keeper_creation_status;
+  kca_declaration : string option;
+}
+
 type early_keeper_roster_observation = {
   er_ticket: Http_refresh_order.ticket;
   er_authority: workspace_authority;
@@ -7311,6 +7340,10 @@ type state = {
   mutable keeper_creation_draft: string option;
   mutable keeper_creation_return: keeper_chat_return option;
   mutable keeper_creation_waits: keeper_creation_wait list;
+  mutable keeper_creation_draft_owner: unit ref;
+  mutable keeper_creation_focus: unit ref option;
+  mutable keeper_creations: keeper_creation_attempt list;
+  mutable keeper_creation_pending: keeper_creation_request list;
   (* The live roster reading, separate from the durable one above: it answers
      whether a keepalive fiber is running each keeper, which metadata on disk
      cannot. It is typed rather than a plain list because "the roster did not
@@ -11140,6 +11173,124 @@ let acting_pane_layout (state : state) =
       if state.view = Overview then Masc_tui_acting_pane.Hidden
       else Masc_tui_acting_pane.Narrow
 
+(* Requests retain receipts and unresolved declarations across withdrawal.
+   Successful creation releases its retry body; receipts grant no authority. *)
+let begin_keeper_creation state ~keeper_name ~declaration ~return_to ~started_ns =
+  match state.workspace_identity, state.server_identity with
+  | Workspace_identity_match, Some workspace when server_authority_ready state ->
+    let pending = List.exists (fun attempt ->
+      attempt.kca_request.kcr_authority = state.workspace_authority
+      && String.equal attempt.kca_request.kcr_keeper keeper_name
+      && match attempt.kca_status with
+         | Creation_checking | Creation_posting -> true
+         | Creation_finished _ -> false) state.keeper_creations in
+    if pending then Error (keeper_name ^ ": creation is already pending")
+    else
+      let request = { kcr_token = ref ();
+        kcr_draft_owner = state.keeper_creation_draft_owner;
+        kcr_authority = state.workspace_authority; kcr_workspace = workspace;
+        kcr_keeper = keeper_name; kcr_return = return_to;
+        kcr_surface = state.view; kcr_started_ns = started_ns;
+        kcr_observation = Atomic.make (Creation_checking, started_ns) } in
+      state.keeper_creations <-
+        { kca_request = request; kca_status = Creation_checking;
+          kca_declaration = Some declaration } :: state.keeper_creations;
+      state.keeper_creation_pending <- request :: state.keeper_creation_pending;
+      state.keeper_creation_focus <- Some request.kcr_token;
+      Ok request
+  | (Workspace_identity_unread | Workspace_identity_mismatch _
+    | Workspace_identity_match_unconfirmed _), _
+  | Workspace_identity_match, (None | Some _) ->
+      Error "Cannot create: workspace identity is unverified; declaration retained"
+
+let keeper_creation_status_advances previous next =
+  match previous, next with
+  | Creation_checking, Creation_posting
+  | (Creation_checking | Creation_posting), Creation_finished _ -> true
+  | Creation_finished _, (Creation_checking | Creation_posting | Creation_finished _)
+  | (Creation_checking | Creation_posting), Creation_checking
+  | Creation_posting, Creation_posting -> false
+
+(* The bounded notification queue may be full during cancellation/shutdown.
+   Publish first: the UI can recover a terminal receipt without that queue. *)
+let publish_keeper_creation_status request ~observed_ns status =
+  let rec publish () =
+    let previous = Atomic.get request.kcr_observation in
+    if not (keeper_creation_status_advances (fst previous) status) then false
+    else if Atomic.compare_and_set request.kcr_observation previous (status, observed_ns)
+    then true else publish ()
+  in
+  publish ()
+
+let pending_keeper_creation_receipt state =
+  List.find_map (fun request ->
+    match Atomic.get request.kcr_observation with
+    | (Creation_finished _, ready_at_ns) as observed ->
+        Some (request, fst observed, ready_at_ns)
+    | (Creation_checking | Creation_posting), _ -> None) state.keeper_creation_pending
+
+let apply_keeper_creation_status state request status =
+  let applied = ref false in
+  state.keeper_creations <- List.map (fun attempt ->
+    if attempt.kca_request.kcr_token == request.kcr_token
+       && keeper_creation_status_advances attempt.kca_status status then begin
+      applied := true; { attempt with kca_status = status }
+    end else attempt) state.keeper_creations;
+  if !applied then (match status with
+    | Creation_finished _ ->
+        state.keeper_creation_pending <- List.filter
+          (fun held -> held.kcr_token != request.kcr_token) state.keeper_creation_pending
+    | Creation_checking | Creation_posting -> ());
+  if !applied then (match status with
+    | Creation_finished Creation_created ->
+        (* A manually retried create-only request can confirm the same target.
+           Keep older uncertain receipts, release their now-resolved drafts. *)
+        state.keeper_creations <- List.map (fun attempt ->
+          if attempt.kca_request.kcr_authority = request.kcr_authority
+             && String.equal attempt.kca_request.kcr_keeper request.kcr_keeper
+          then { attempt with kca_declaration = None } else attempt) state.keeper_creations
+    | Creation_checking | Creation_posting
+    | Creation_finished (Creation_not_sent _ | Creation_refused _ | Creation_unconfirmed _) -> ());
+  !applied
+
+let keeper_creation_recovery_draft state =
+  List.find_map (fun attempt ->
+    if attempt.kca_request.kcr_authority <> state.workspace_authority then None
+    else match attempt.kca_status with
+      | Creation_finished (Creation_not_sent _ | Creation_refused _ | Creation_unconfirmed _) ->
+          attempt.kca_declaration
+      | Creation_checking | Creation_posting | Creation_finished Creation_created -> None)
+    state.keeper_creations
+
+let keeper_creation_origin_current state request =
+  request.kcr_authority = state.workspace_authority
+  && state.workspace_identity = Workspace_identity_match
+  && server_workspace_matches ~expected:(Some request.kcr_workspace)
+       (match state.server_identity with Some identity -> Ok identity | None -> Error "unread")
+
+let take_keeper_creation_focus state request =
+  match state.keeper_creation_focus with
+  | Some owner when owner == request.kcr_token ->
+      state.keeper_creation_focus <- None;
+      state.view = request.kcr_surface
+  | Some _ | None -> false
+
+let clear_created_keeper_draft state request =
+  let confirmed = List.exists (fun attempt ->
+    attempt.kca_request.kcr_token == request.kcr_token
+    && match attempt.kca_status with
+       | Creation_finished Creation_created -> true
+       | Creation_checking | Creation_posting
+       | Creation_finished (Creation_not_sent _ | Creation_refused _ | Creation_unconfirmed _) -> false)
+    state.keeper_creations in
+  if confirmed && keeper_creation_origin_current state request
+     && state.keeper_creation_draft_owner == request.kcr_draft_owner then begin
+    state.keeper_creation_draft <- None;
+    state.keeper_creation_return <- None;
+    state.keeper_creation_draft_owner <- ref ();
+    true
+  end else false
+
 let keeper_creation_wait_for (state : state) keeper_name =
   List.find_opt (fun wait -> String.equal wait.kcw_keeper keeper_name) state.keeper_creation_waits
 
@@ -11906,6 +12057,10 @@ let create_state
   keeper_creation_draft = None;
   keeper_creation_return = None;
   keeper_creation_waits = [];
+  keeper_creation_draft_owner = ref ();
+  keeper_creation_focus = None;
+  keeper_creations = [];
+  keeper_creation_pending = [];
   keeper_roster = Masc_tui_keeper_control.Roster_unobserved;
   keeper_roster_error = None;
   keeper_roster_read = Snapshot_read.idle;

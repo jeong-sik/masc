@@ -78,6 +78,43 @@ including cancellation. A cancelled/failed read cannot poison that source's Eio
 mutex and thereby refuse every later refresh. This does not claim actual runtime
 recovery was executed.
 
+## Creation HTTP without blocking input
+
+After the editor returns, creation captures an immutable request owner, original
+workspace/authority, form owner and return destination. The UI admits checking
+state and schedules an owned workspace fiber. Its identity preflight and
+create-only POST no longer execute in the input handler. The POST still carries
+the expected workspace, so changing servers between preflight and mutation
+cannot authorize a creation in another store. No-switch admission fails without
+an inline HTTP fallback.
+
+Request state distinguishes checking, posting and a terminal result. Terminal
+results distinguish not sent, explicit refusal, confirmed creation and outcome
+unconfirmed. Cancellation after the POST boundary and unanswered/malformed
+responses retain uncertainty, not a retryable declaration failure. The worker
+publishes an immutable terminal receipt in its request-owned atomic slot before
+attempting cancellable notification and does not resend it. The main drain can
+admit a published terminal receipt even when the bounded shared notification
+queue was full or its producer was cancelled. Already-queued messages, including
+identity withdrawals, retain priority over recovered receipts. Pending slots retire on admission;
+completed history is not scanned every frame. Terminal recovery uses the existing
+drain deadline and does not wait for queue space during shutdown.
+Receipts remain session-owned after workspace withdrawal; they cannot authorize
+new workspace observations. Current-origin confirmed creation requests only
+metadata, then the existing per-Keeper coverage/name barrier governs input.
+
+Unresolved declarations stay with their attempts; confirmed creation releases
+resolved retry bodies without rewriting older uncertainty receipts. A completion
+clears only its original form owner. More user input detaches auto-open focus,
+and queued input also prevents a late completion opening chat. A new edited
+declaration, another pending creation and another workspace keep their owners.
+With no active form, the editor can reopen an unresolved declaration from its
+current authority. These records are session-local, not restart recovery.
+
+Transport diagnostics record request start and applied phases using monotonic
+clock observations, excluding declaration bodies. They do not prove server
+acceptance, actual UI paint, network-only duration or current-head speedup.
+
 ## Before and after
 
 | Scenario | Before | Source change |
@@ -93,6 +130,9 @@ recovery was executed.
 | Cache lock while archive work runs | One directory-read mutex | Metadata and work caches have separate cooperative owners |
 | Equal numeric source tickets or late optional result | One source | Source tag checked; optional payload cannot carry Keeper rows |
 | Creation, lifecycle result, chat completion and explicit refresh | Synchronous local directory reload | Source-owned I/O jobs; creation requests metadata only |
+| Creation after editor return | Identity probe and creation POST in input handler | Owned request fiber; phase and receipt return through mailbox |
+| Creation response lost or workspace withdrawn | Transport error flattened into one failure | Original receipt retains explicit uncertainty; no automatic resend |
+| Editing/navigation during creation | UI could not process the gesture during HTTP | New form/input owns focus; late result cannot clear or open it |
 | Explicit refresh while an earlier source read is pending | Each refresh superseded/cancelled and restarted the reader | Accumulate one follow-up; current reader makes progress without consuming later demand |
 | Cancelled/failed cached read | Exception poisons Eio write mutex | Unlock, then re-raise original exception; later readers may proceed |
 | Selected live context on metadata admission or navigation | Synchronous context store/config work | Separate owned I/O read; same-owner refresh retains its observation |
@@ -144,8 +184,9 @@ binary, visible UI or latency proof is established.
 
 Required Keeper metadata and optional Work now have separate source ownership.
 Explicit post-action directory reloads and selected-live-context reads now use
-owned observations. Other synchronous paths, including creation HTTP and detail
-logs, remain. Source refresh demand is now coalesced, and metadata/archive cache
+owned observations. Creation HTTP now has its own operation owner and explicit
+uncertainty. Other synchronous paths, including detail logs and other editor-form
+HTTP writes, remain. Source refresh demand is now coalesced, and metadata/archive cache
 keys include their actual file paths. These source changes do not establish
 sustained-load fairness or matched timing. Reduce unneeded preparation/discovery work
 without weakening identity,

@@ -1881,6 +1881,65 @@ let launch_workspace_request ?(operation = false) state ~mailbox ~boundary_error
            deliver_result (Error (boundary_error (Printexc.to_string exn))))
   | None -> deliver_result (Error (boundary_error "Eio switch is unavailable"))
 
+(* A creation keeps its operation receipt even after its workspace withdraws.
+   Only the result handler may use current authority to refresh or open chat. *)
+let launch_keeper_creation state ~mailbox ~request ~declaration =
+  let host = server_peer_host in
+  let port = state.port in
+  let check = workspace_check_sequence state ~mailbox
+      ~authority:request.kcr_authority ~identity:(Some request.kcr_workspace)
+      ~host ~port in
+  let deliver status =
+    if publish_keeper_creation_status request ~observed_ns:(Mtime_clock.elapsed_ns ()) status then
+      enqueue_async mailbox (Keeper_creation_changed (request, status)) in
+  let interrupted sent detail =
+    if sent then Creation_unconfirmed detail else Creation_not_sent detail in
+  let sent = ref false in
+  let run () =
+    let outcome =
+      try match check () with
+      | Error detail -> Creation_not_sent detail
+      | Ok () ->
+        deliver Creation_posting;
+        sent := true;
+        (match Masc_tui_http.post_keeper_up ~host ~port
+            ~keeper_name:request.kcr_keeper
+            ~expected_workspace:(Some request.kcr_workspace)
+            ~declaration_json:declaration with
+         | Masc_tui_http.Post_refused detail -> Creation_refused detail
+         | Post_unanswered detail -> Creation_unconfirmed detail
+         | Post_answered receipt ->
+           (match Masc_cli_keeper_create.creation_receipt
+               ~keeper_name:request.kcr_keeper receipt with
+            | Masc_cli_keeper_create.Created _ -> Creation_created
+            | Reconfigured { name } -> Creation_unconfirmed
+                (name ^ ": server reported reconfiguration instead of creation; inspect its configuration")
+            | Refused detail | Unauthorized detail | Unreachable detail ->
+                Creation_unconfirmed detail
+            | Revision_conflict -> Creation_unconfirmed "Creation revision conflict"))
+      with
+      | Eio.Cancel.Cancelled _ as exn ->
+          deliver (Creation_finished (interrupted !sent "Creation request was interrupted"));
+          raise exn
+      | exn -> interrupted !sent (Printexc.to_string exn)
+    in
+    deliver (Creation_finished outcome)
+  in
+  Log.Transport.info "tui_keeper_creation keeper=%s started_ns=%Ld phase=checking"
+    request.kcr_keeper request.kcr_started_ns;
+  match Eio_context.get_switch_opt () with
+  | None ->
+      ignore (publish_keeper_creation_status request ~observed_ns:(Mtime_clock.elapsed_ns ())
+        (Creation_finished (Creation_not_sent "Eio switch is unavailable")))
+  | Some sw ->
+      (match fork_workspace_job state ~sw run with
+       | () -> ()
+       | exception (Eio.Cancel.Cancelled _ as exn) ->
+           deliver (Creation_finished (interrupted !sent "Creation worker was interrupted"));
+           raise exn
+       | exception exn ->
+           deliver (Creation_finished (interrupted !sent (Printexc.to_string exn))))
+
 (* Wire the web-link-preview background fetcher. On the first cache miss for a
    URL, Masc_tui_link_preview renders the synthesized card immediately and calls
    this hook; the fetched <title>/og:* then replace that entry in the shared
@@ -16218,14 +16277,14 @@ let present_identity_notice state ~keeper_name (kind, text) =
   | Some name -> report_action state "system" (name ^ ": " ^ text)
   | None -> report_action state "system" text
 
-let rec apply_async_message state ~base_path ~http_refresh_inflight
+let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path ~http_refresh_inflight
     ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox =
   function
   | Workspace_scoped (authority, reading, message) ->
       if workspace_message_admitted state ~authority ~reading message then begin
         let retry = retired_operation_observation state ~authority ~reading message in
         let message = project_workspace_operation_reply state ~authority ~reading message in
-        apply_async_message state ~base_path ~http_refresh_inflight
+        apply_async_message ~input_pending state ~base_path ~http_refresh_inflight
           ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox message;
         (match retry with
          | Some retry when retain_operation_observation state retry
@@ -16305,7 +16364,8 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         | Gate_auto_judge_retried (_, _, _, _) | Gate_mode_set (_, _, _)
         | Surface_tool_approval_answered (_, _, _, _, _) | Keeper_gate_settings_loaded _
         | Keeper_tool_modes_loaded (_, _) | Keeper_tool_mode_set (_, _, _, _)
-        | Keeper_chat_dispatch_blocked (_, _) | Keeper_action_done (_, _, _, _)
+        | Keeper_chat_dispatch_blocked (_, _) | Keeper_creation_changed _
+        | Keeper_action_done (_, _, _, _)
         | Board_new_post_done _ | Board_vote_done _ | Goal_transition_done _
         | Goal_confirmation_submitted _ | Goal_confirmation_loaded (_, _) | Schedules_loaded (_, _)
         | Schedule_wake_history_loaded (_, _) | Keeper_schedules_loaded (_, _)
@@ -16338,11 +16398,11 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
   | Chat_command_read_completed (ticket, message) ->
       if List.exists (fun (pending, _, _) -> pending == ticket) state.chat_command_reads then begin
         state.chat_command_reads <- List.filter (fun (pending, _, _) -> pending != ticket) state.chat_command_reads;
-        apply_async_message state ~base_path ~http_refresh_inflight
+        apply_async_message ~input_pending state ~base_path ~http_refresh_inflight
           ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox message
       end
   | Workspace_operation message ->
-      apply_async_message state ~base_path ~http_refresh_inflight
+      apply_async_message ~input_pending state ~base_path ~http_refresh_inflight
         ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox message
   | Workspace_identity_unconfirmed { detail; latest; prior_contact; refresh_ticket } ->
       if Http_refresh_order.is_current state.http_refresh_order refresh_ticket then begin
@@ -16745,7 +16805,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
           state.http_surface_reads <- Surface_read_order.finish state.http_surface_reads request;
           http_scoped_refresh_inflight :=
             Surface_read_order.navigation_in_flight state.http_surface_reads)
-          (fun () -> apply_async_message state ~base_path ~http_refresh_inflight
+          (fun () -> apply_async_message ~input_pending state ~base_path ~http_refresh_inflight
             ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox completed);
         Log.Transport.info "tui_surface_read_finished request=%d started_ns=%Ld settled_ns=%Ld navigation_pending=%d"
           (Surface_read_order.request_id request) (Surface_read_order.started_ns request)
@@ -17306,6 +17366,59 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       if generation = state.keeper_deletions_generation && Result.is_ok result
          && Option.is_some state.keeper_deletions_retry_receipt then
         launch_keeper_deletions state ~mailbox ()
+  | Keeper_creation_changed (request, status) ->
+      if apply_keeper_creation_status state request status then begin
+        let phase = match status with
+          | Creation_checking -> "checking"
+          | Creation_posting -> "posting"
+          | Creation_finished Creation_created -> "created"
+          | Creation_finished (Creation_not_sent _) -> "not_sent"
+          | Creation_finished (Creation_refused _) -> "refused"
+          | Creation_finished (Creation_unconfirmed _) -> "unconfirmed" in
+        Log.Transport.info
+          "tui_keeper_creation keeper=%s started_ns=%Ld observed_ns=%Ld phase=%s current_origin=%b"
+          request.kcr_keeper request.kcr_started_ns (Mtime_clock.elapsed_ns ()) phase
+          (keeper_creation_origin_current state request);
+        match status with
+        | Creation_checking -> ()
+        | Creation_posting ->
+            if keeper_creation_origin_current state request
+               && Option.exists (fun owner -> owner == request.kcr_token) state.keeper_creation_focus then
+              report_action state "system" (request.kcr_keeper ^ ": creation request in progress; awaiting confirmation")
+        | Creation_finished outcome ->
+          let focus = take_keeper_creation_focus state request in
+          let current = keeper_creation_origin_current state request in
+          let prefix = if current then request.kcr_keeper ^ ": "
+            else request.kcr_keeper ^ " (" ^ request.kcr_workspace.sid_base_path ^ "): " in
+          (match outcome with
+           | Creation_created ->
+               let cleared = clear_created_keeper_draft state request in
+               if current then begin
+                 launch_local_keeper_read state ~mailbox ~intent:Snapshot_read.Refresh base_path;
+                 wait_for_created_keeper_metadata state request.kcr_keeper;
+                 if focus && cleared && not (input_pending ()) then begin
+                   open_message_for_keeper ~return_to:request.kcr_return state
+                     request.kcr_keeper ~drain_queue:(fun () -> ());
+                   set_msg_scroll state 0;
+                   state.view <- Keepers Keeper_message;
+                   launch_keeper_history_load state ~mailbox ~keeper_name:request.kcr_keeper
+                 end;
+                 start_http_refresh state ~host:server_peer_host ~port:state.port
+                   ~intent:Revalidate ~refresh_inflight:http_refresh_inflight
+                   ~scoped_refresh_inflight:http_scoped_refresh_inflight
+                   ~scoped_refresh_followup ~mailbox
+               end;
+               report_action state "system" (prefix ^ (if current
+                 then "creation confirmed; refreshing Keeper availability"
+                 else "creation confirmed in its original workspace"))
+           | Creation_not_sent detail ->
+               report_action state "error" (prefix ^ "creation not sent; declaration retained: " ^ detail)
+           | Creation_refused detail ->
+               report_action state "error" (prefix ^ "creation refused; declaration retained: " ^ detail)
+           | Creation_unconfirmed detail ->
+               report_action state "error"
+                 (prefix ^ "creation outcome unconfirmed; declaration retained. Inspect the original roster before retrying: " ^ detail))
+      end
   | Keeper_action_done (origin, keeper_name, action, result) ->
       let origin_matches =
         Option.for_all
@@ -17390,7 +17503,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
        | Goal_confirmation_submitted _, Goal_confirmation.Submitting (_, read) ->
            state.goal_confirmation <- Goal_confirmation.Inspecting read
        | (Goal_confirmation_submitted _, Goal_confirmation.Inspecting _)
-       | ((Approvals_listing_superseded | (Surface_composer_released | (Chat_search_finished (_, _, _, _) | (Workspace_scoped (_, _, _) | (Workspace_operation _ | (Chat_command_read_completed (_, _) | (Workspace_identity_unconfirmed _ | (Schedule_form_authority_refused _ | (Lane_package_catalog_loaded (_, _, _) | (Lane_package_preview_loaded (_, _, _) | (Keeper_queue_resume_confirmed (_, _, _) | (Keeper_queue_loaded (_, _, _, _) | (Lane_addons_loaded (_, _, _) | (Lane_application_loaded (_, _) | (Lane_subscriptions_loaded (_, _) | (Lane_declaration_loaded (_, _, _, _, _) | (Keeper_deletions_loaded (_, _) | (Msx_tick_withdrawn (_, _) | (Keeper_deletion_retry_done (_, _) | (Msx_frame_loaded (_, _) | (Msx_activity_loaded (_, _) | (Msx_live_loaded (_, _) | ( Dos_live_loaded (_, _) | ( Voice_wizard_saved (_, _) | ( Voice_agent_voices_loaded _ | ( Voice_agent_voice_saved _ | ( Voice_wizard_probed (_, _) | ( Voice_wizard_reread (_, _) | ( Voice_config_loaded (_, _, _) | ( Voice_level _ | ( Voice_transcribed _ | ( Voice_silent _ | ( Voice_discarded _ | ( Voice_failed _ | ( (Http_keeper_roster_loaded _ | Http_dataset_loaded _ | Http_progress_observed _ | Http_surface_read_completed _ | Http_initial_identity_read _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_observed _ | Ask_followup_loaded _ | Http_refresh_done _) | ( Http_refresh_failed (_, _, _) | ( Approvals_summary_loaded (_, _, _, _) | ( Http_scoped_refresh_done (_, _, _) | ( Http_scoped_refresh_failed (_, _, _, _, _, _) | ( Board_post_refresh_done (_, _) | ( Approval_decision_done (_, _, _, _, _) | ( Ask_answer_done (_, _, _) | ( Keeper_chat_dispatch_started (_, _, _) | ( Keeper_chat_done (_, _, _, _) | ( Keeper_chat_stream_deltas (_, _) | ( Keeper_chat_stream_unavailable (_, _) | ( Keeper_run_next_done (_, _) | ( Keeper_observed_interrupt_done (_, _, _, _) | ( Keeper_chat_interrupt_done (_, _, _) | ( Keeper_chat_history_loaded (_, _, _, _) | ( Keeper_chat_copy_loaded (_, _, _) | ( Keeper_chat_operation_loaded _ | ( Keeper_chat_journal_loaded _ | ( Keeper_native_tasks_loaded (_, _) | ( Keeper_child_content_loaded (_, _) | Keeper_preparation_loaded (_, _) | ( Context_inspector_part_loaded (_, _) | Context_inspector_loaded (_, _, _) | ( Keeper_chat_older_loaded (_, _, _, _) | ( Local_workspace_read (_, _) | Local_keepers_read (_, _) | Live_context_loaded (_, _, _) | ( Lanes_loaded (_, _) | ( Lane_inventory_loaded (_, _) | ( Clients_loaded (_, _) | ( Lane_runs_loaded (_, _, _, _) | ( Lane_run_detail_loaded (_, _, _) | ( Measurement_artifact_loaded (_, _, _) | ( Verification_loaded _ | ( Harness_loaded _ | ( Fusion_runs_loaded (_, _) | ( Fusion_detail_loaded (_, _, _) | ( Fusion_historical_detail_loaded (_, _, _) | ( Fusion_launch_options_loaded (_, _) | ( Fusion_launched (_, _) | ( Repositories_loaded _ | ( Workspace_activity_loaded (_, _) | ( Memory_loaded _ | ( Memory_input_loaded (_, _) | ( Memory_facts_loaded (_, _) | ( Repository_changes_loaded (_, _) | ( Repository_changes_diff_loaded (_, _) | ( File_changes_loaded (_, _) | ( Keeper_chat_file_changes_loaded (_, _, _) | ( Git_diff_loaded (_, _) | ( Browser_history_list_loaded (_, _) | ( Browser_history_page_loaded (_, _) | ( Browser_lane_clients_loaded (_, _) | ( Browser_lane_loaded (_, _) | ( Browser_lane_action_done (_, _) | ( Browser_lane_scene_loaded (_, _) | ( Browser_lane_follow_loaded (_, _) | ( Browser_lane_screenshot_ready _ | ( Connectors_loaded (_, _) | ( Connector_unbind_all_done _ | ( Runtime_surface_loaded (_, _) | ( Tools_loaded (_, _, _) | ( Skills_catalog_loaded (_, _) | ( Skill_evidence_loaded (_, _, _) | ( Tools_async_observation_loaded (_, _) | ( Runtime_lane_slots_written (_, _, _) | ( Runtime_catalog_loaded (_, _) | ( Runtime_assignment_set (_, _, _) | ( Keeper_chat_approval_answered (_, _, _, _) | ( Keeper_tool_approvals_loaded (_, _, _) | ( Sent_image_ready _ | ( Image_render_ready _ | ( Keeper_turns_loaded (_, _) | ( Keeper_chat_control_received (_, _, _) | ( Gate_snapshot_loaded (_, _, _) | ( Gate_approval_resolved (_, _, _, _, _) | ( Gate_auto_judge_retried (_, _, _, _) | ( Gate_mode_set (_, _, _) | ( Surface_tool_approval_answered (_, _, _, _, _) | ( Keeper_gate_settings_loaded _ | ( Keeper_tool_modes_loaded (_, _) | ( Keeper_tool_mode_set (_, _, _, _) | ( Keeper_chat_dispatch_blocked (_, _) | ( Keeper_action_done (_, _, _, _) | ( Board_new_post_done _ | ( Board_vote_done _ | ( Goal_transition_done _ | ( Goal_confirmation_loaded (_, _) | ( Schedules_loaded (_, _) | ( Schedule_wake_history_loaded (_, _) | ( Keeper_schedules_loaded (_, _) | ( System_logs_loaded _ | ( Schedule_cancel_done (_, _) | ( Verification_verdict_done _ | ( Harness_label_done _ | ( Keeper_calls_loaded (_, _, _) | ( Goal_timeline_loaded (_, _) | ( Task_history_loaded (_, _) | ( Task_cancel_done (_, _, _) | ( Verification_evidence_loaded (_, _) | ( Keeper_config_view_loaded (_, _) | ( Keeper_items_loaded (_, _) | ( Keeper_sandbox_view_loaded (_, _) | ( Keeper_sandbox_logs_loaded (_, _, _) | ( Exact_activity_read (_, _) | ( Exact_activity_saved (_, _) | ( Browser_activity_read (_, _) | ( Browser_activity_saved (_, _) | ( Machine_activity_read (_, _) | ( Machine_activity_saved (_, _) | ( Runtime_config_view_loaded (_, _, _) | ( Runtime_params_loaded _ | ( Runtime_param_written (_, _) | ( Prompts_loaded (_, _) | ( Keeper_board_quarantines_loaded (_, _) | ( Board_quarantine_requeued (_, _, _) | ( Board_quarantines_bulk_progress (_, _, _, _, _, _) | ( Board_quarantines_bulk_requeued (_, _) | ( Presets_listed (_, _) | ( Preset_detail_loaded (_, _) | ( Preset_contents_shown (_, _) | ( Preset_saved (_, _) | ( Preset_restored (_, _) | ( Preset_deleted (_, _) | ( Play_room_received (_, _) | ( Play_invites_listed (_, _) | ( Play_invite_issued (_, _, _) | ( Play_invite_revoked (_, _, _, _) | ( Librarian_input_loaded (_, _) | ( Resources_listed _ | ( Code_entries_loaded (_, _) | ( Code_file_loaded (_, _, _) | ( Code_history_loaded (_, _) | ( Code_diff_loaded (_, _) | ( Acting_pane_changes_loaded (_, _) | ( Code_blame_loaded (_, _) | ( Code_lsp_answered (_, _) | ( Resource_read (_, _) | ( Github_identity_view_loaded (_, _) | ( Identity_providers_loaded (_, _, _) | ( Identity_switch_set (_, _, _, _) | ( Identity_login_started (_, _) | ( Identity_refreshed (_, _) | ( Identity_app_saved (_, _, _) | ( Account_login_event (_, _, _) | ( Account_login_json (_, _, _, _) | ( Account_login_removal (_, _, _, _, _) | ( Github_login_lines (_, _) | ( Github_login_finished (_, _) | ( Github_token_saved (_, _) | ( Observer_opened _ | ( Observer_received (_, _) | ( Observer_closed _ | ( Task_dispatched _ | Task_dispatch_failed _))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))), _) -> ());
+       | ((Approvals_listing_superseded | (Surface_composer_released | (Chat_search_finished (_, _, _, _) | (Workspace_scoped (_, _, _) | (Workspace_operation _ | (Chat_command_read_completed (_, _) | (Workspace_identity_unconfirmed _ | (Schedule_form_authority_refused _ | (Lane_package_catalog_loaded (_, _, _) | (Lane_package_preview_loaded (_, _, _) | (Keeper_queue_resume_confirmed (_, _, _) | (Keeper_queue_loaded (_, _, _, _) | (Lane_addons_loaded (_, _, _) | (Lane_application_loaded (_, _) | (Lane_subscriptions_loaded (_, _) | (Lane_declaration_loaded (_, _, _, _, _) | (Keeper_deletions_loaded (_, _) | (Msx_tick_withdrawn (_, _) | (Keeper_deletion_retry_done (_, _) | (Msx_frame_loaded (_, _) | (Msx_activity_loaded (_, _) | (Msx_live_loaded (_, _) | ( Dos_live_loaded (_, _) | ( Voice_wizard_saved (_, _) | ( Voice_agent_voices_loaded _ | ( Voice_agent_voice_saved _ | ( Voice_wizard_probed (_, _) | ( Voice_wizard_reread (_, _) | ( Voice_config_loaded (_, _, _) | ( Voice_level _ | ( Voice_transcribed _ | ( Voice_silent _ | ( Voice_discarded _ | ( Voice_failed _ | ( (Http_keeper_roster_loaded _ | Http_dataset_loaded _ | Http_progress_observed _ | Http_surface_read_completed _ | Http_initial_identity_read _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_observed _ | Ask_followup_loaded _ | Http_refresh_done _) | ( Http_refresh_failed (_, _, _) | ( Approvals_summary_loaded (_, _, _, _) | ( Http_scoped_refresh_done (_, _, _) | ( Http_scoped_refresh_failed (_, _, _, _, _, _) | ( Board_post_refresh_done (_, _) | ( Approval_decision_done (_, _, _, _, _) | ( Ask_answer_done (_, _, _) | ( Keeper_chat_dispatch_started (_, _, _) | ( Keeper_chat_done (_, _, _, _) | ( Keeper_chat_stream_deltas (_, _) | ( Keeper_chat_stream_unavailable (_, _) | ( Keeper_run_next_done (_, _) | ( Keeper_observed_interrupt_done (_, _, _, _) | ( Keeper_chat_interrupt_done (_, _, _) | ( Keeper_chat_history_loaded (_, _, _, _) | ( Keeper_chat_copy_loaded (_, _, _) | ( Keeper_chat_operation_loaded _ | ( Keeper_chat_journal_loaded _ | ( Keeper_native_tasks_loaded (_, _) | ( Keeper_child_content_loaded (_, _) | Keeper_preparation_loaded (_, _) | ( Context_inspector_part_loaded (_, _) | Context_inspector_loaded (_, _, _) | ( Keeper_chat_older_loaded (_, _, _, _) | ( Local_workspace_read (_, _) | Local_keepers_read (_, _) | Live_context_loaded (_, _, _) | ( Lanes_loaded (_, _) | ( Lane_inventory_loaded (_, _) | ( Clients_loaded (_, _) | ( Lane_runs_loaded (_, _, _, _) | ( Lane_run_detail_loaded (_, _, _) | ( Measurement_artifact_loaded (_, _, _) | ( Verification_loaded _ | ( Harness_loaded _ | ( Fusion_runs_loaded (_, _) | ( Fusion_detail_loaded (_, _, _) | ( Fusion_historical_detail_loaded (_, _, _) | ( Fusion_launch_options_loaded (_, _) | ( Fusion_launched (_, _) | ( Repositories_loaded _ | ( Workspace_activity_loaded (_, _) | ( Memory_loaded _ | ( Memory_input_loaded (_, _) | ( Memory_facts_loaded (_, _) | ( Repository_changes_loaded (_, _) | ( Repository_changes_diff_loaded (_, _) | ( File_changes_loaded (_, _) | ( Keeper_chat_file_changes_loaded (_, _, _) | ( Git_diff_loaded (_, _) | ( Browser_history_list_loaded (_, _) | ( Browser_history_page_loaded (_, _) | ( Browser_lane_clients_loaded (_, _) | ( Browser_lane_loaded (_, _) | ( Browser_lane_action_done (_, _) | ( Browser_lane_scene_loaded (_, _) | ( Browser_lane_follow_loaded (_, _) | ( Browser_lane_screenshot_ready _ | ( Connectors_loaded (_, _) | ( Connector_unbind_all_done _ | ( Runtime_surface_loaded (_, _) | ( Tools_loaded (_, _, _) | ( Skills_catalog_loaded (_, _) | ( Skill_evidence_loaded (_, _, _) | ( Tools_async_observation_loaded (_, _) | ( Runtime_lane_slots_written (_, _, _) | ( Runtime_catalog_loaded (_, _) | ( Runtime_assignment_set (_, _, _) | ( Keeper_chat_approval_answered (_, _, _, _) | ( Keeper_tool_approvals_loaded (_, _, _) | ( Sent_image_ready _ | ( Image_render_ready _ | ( Keeper_turns_loaded (_, _) | ( Keeper_chat_control_received (_, _, _) | ( Gate_snapshot_loaded (_, _, _) | ( Gate_approval_resolved (_, _, _, _, _) | ( Gate_auto_judge_retried (_, _, _, _) | ( Gate_mode_set (_, _, _) | ( Surface_tool_approval_answered (_, _, _, _, _) | ( Keeper_gate_settings_loaded _ | ( Keeper_tool_modes_loaded (_, _) | ( Keeper_tool_mode_set (_, _, _, _) | ( Keeper_chat_dispatch_blocked (_, _) | ( Keeper_creation_changed _ | Keeper_action_done (_, _, _, _) | ( Board_new_post_done _ | ( Board_vote_done _ | ( Goal_transition_done _ | ( Goal_confirmation_loaded (_, _) | ( Schedules_loaded (_, _) | ( Schedule_wake_history_loaded (_, _) | ( Keeper_schedules_loaded (_, _) | ( System_logs_loaded _ | ( Schedule_cancel_done (_, _) | ( Verification_verdict_done _ | ( Harness_label_done _ | ( Keeper_calls_loaded (_, _, _) | ( Goal_timeline_loaded (_, _) | ( Task_history_loaded (_, _) | ( Task_cancel_done (_, _, _) | ( Verification_evidence_loaded (_, _) | ( Keeper_config_view_loaded (_, _) | ( Keeper_items_loaded (_, _) | ( Keeper_sandbox_view_loaded (_, _) | ( Keeper_sandbox_logs_loaded (_, _, _) | ( Exact_activity_read (_, _) | ( Exact_activity_saved (_, _) | ( Browser_activity_read (_, _) | ( Browser_activity_saved (_, _) | ( Machine_activity_read (_, _) | ( Machine_activity_saved (_, _) | ( Runtime_config_view_loaded (_, _, _) | ( Runtime_params_loaded _ | ( Runtime_param_written (_, _) | ( Prompts_loaded (_, _) | ( Keeper_board_quarantines_loaded (_, _) | ( Board_quarantine_requeued (_, _, _) | ( Board_quarantines_bulk_progress (_, _, _, _, _, _) | ( Board_quarantines_bulk_requeued (_, _) | ( Presets_listed (_, _) | ( Preset_detail_loaded (_, _) | ( Preset_contents_shown (_, _) | ( Preset_saved (_, _) | ( Preset_restored (_, _) | ( Preset_deleted (_, _) | ( Play_room_received (_, _) | ( Play_invites_listed (_, _) | ( Play_invite_issued (_, _, _) | ( Play_invite_revoked (_, _, _, _) | ( Librarian_input_loaded (_, _) | ( Resources_listed _ | ( Code_entries_loaded (_, _) | ( Code_file_loaded (_, _, _) | ( Code_history_loaded (_, _) | ( Code_diff_loaded (_, _) | ( Acting_pane_changes_loaded (_, _) | ( Code_blame_loaded (_, _) | ( Code_lsp_answered (_, _) | ( Resource_read (_, _) | ( Github_identity_view_loaded (_, _) | ( Identity_providers_loaded (_, _, _) | ( Identity_switch_set (_, _, _, _) | ( Identity_login_started (_, _) | ( Identity_refreshed (_, _) | ( Identity_app_saved (_, _, _) | ( Account_login_event (_, _, _) | ( Account_login_json (_, _, _, _) | ( Account_login_removal (_, _, _, _, _) | ( Github_login_lines (_, _) | ( Github_login_finished (_, _) | ( Github_token_saved (_, _) | ( Observer_opened _ | ( Observer_received (_, _) | ( Observer_closed _ | ( Task_dispatched _ | Task_dispatch_failed _))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))), _) -> ());
       match result with
       | Ok message ->
           state.goal_action_pending <- None;
@@ -20398,7 +20511,7 @@ let async_drain_budget_ns = 4_000_000L
    spent pass leaves its mailbox for the next pass, whose fresh deadline always
    admits at least that pass's first take. An item that starts in budget still
    runs whole, so one pass can overrun by the single item in flight at expiry. *)
-let drain_async_messages ?deadline_ns state ~base_path ~http_refresh_inflight
+let drain_async_messages ?deadline_ns ?(input_pending = fun () -> false) state ~base_path ~http_refresh_inflight
     ~http_scoped_refresh_inflight ~scoped_refresh_followup
     ~frame_presenter ~render_schedule mailbox =
   let over_budget () =
@@ -20407,7 +20520,15 @@ let drain_async_messages ?deadline_ns state ~base_path ~http_refresh_inflight
     | Some deadline -> Int64.compare (Mtime_clock.elapsed_ns ()) deadline >= 0
   in
   let rec loop changed =
-    match if over_budget () then None else Eio.Stream.take_nonblocking mailbox with
+    let ready = if over_budget () then None
+      else match Eio.Stream.take_nonblocking mailbox with
+      | Some ready -> Some ready
+      | None ->
+          (* Keep queued identity withdrawals ahead of recovered receipts. *)
+          Option.map (fun (request, status, ready_at_ns) ->
+            { ready_at_ns; message = Keeper_creation_changed (request, status) })
+            (pending_keeper_creation_receipt state) in
+    match ready with
     | None ->
         state.keeper_creation_waits <- List.filter
           (fun wait -> not (keeper_available_for_new_message state wait.kcw_keeper))
@@ -20423,7 +20544,7 @@ let drain_async_messages ?deadline_ns state ~base_path ~http_refresh_inflight
             (Masc_tui_http.ms_of_ns waited_ns);
         let image_was_open = state.image_open in
         let machine_was_open = state.msx_open in
-        apply_async_message state ~base_path ~http_refresh_inflight
+        apply_async_message ~input_pending state ~base_path ~http_refresh_inflight
           ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox msg;
         (* The image renderer cleared the text screen outside the presenter.
            If an async failure dismisses it, cached unchanged rows must also
@@ -22449,7 +22570,8 @@ and is loaded on demand through keeper_skill.
       let stem =
         match state.keeper_creation_draft with
         | Some declaration -> declaration
-        | None -> Masc.Keeper_turn_up_args.creation_stem
+        | None -> Option.value (keeper_creation_recovery_draft state)
+            ~default:Masc.Keeper_turn_up_args.creation_stem
       in
       match
         Masc_tui_editor.roundtrip ~restore:restore_terminal
@@ -22458,6 +22580,7 @@ and is loaded on demand through keeper_skill.
       | Error abort -> report_editor_abort state ~action:"create" abort
       | Ok declaration -> (
         state.keeper_creation_draft <- Some declaration;
+        state.keeper_creation_draft_owner <- ref ();
         state.keeper_creation_return <- Some return_to;
         let refuse detail =
           goto_surface state ~mailbox:async_messages (Keepers Keeper_list);
@@ -22479,56 +22602,27 @@ and is loaded on demand through keeper_skill.
         match declared_name with
         | Error detail -> refuse detail
         | Ok declared_name ->
-          (* The editor suspends event processing: cached identity can outlive
-             a same-port server replacement. Supersede older refresh bundles
-             and re-read identity before any creation effect. *)
-          state.http_refresh_order <- Http_refresh_order.dispatch state.http_refresh_order;
-          apply_server_identity_reading state ~mailbox:async_messages (load_server_identity ~host ~port);
-          if state.workspace_identity <> Workspace_identity_match then
-            refuse "Cannot create: workspace identity is unverified; declaration retained"
-          else if
-            List.exists (fun (keeper : Tui_decode.keeper) -> String.equal keeper.k_name declared_name)
-              state.keepers then
-            refuse (declared_name ^ ": Keeper already exists; creation did not reconfigure it. Choose a new name.")
+          (* The editor suspends observations. Revalidate the captured server
+             in the worker; the mutation itself also carries that workspace. *)
+          if List.exists (fun (keeper : Tui_decode.keeper) ->
+               String.equal keeper.k_name declared_name) state.keepers then
+            refuse (declared_name ^ ": Keeper already exists; choose a new name.")
           else
           let create_declaration =
             match Yojson.Safe.from_string declaration with
-            | `Assoc fields ->
-                Yojson.Safe.to_string
-                  (`Assoc (("create_only", `Bool true) :: List.remove_assoc "create_only" fields))
+            | `Assoc fields -> Yojson.Safe.to_string
+                (`Assoc (("create_only", `Bool true) :: List.remove_assoc "create_only" fields))
             | json -> Yojson.Safe.to_string json
           in
-          (match
-            Masc_tui_http.post_keeper_up ~host ~port ~keeper_name:declared_name
-              ~expected_workspace:state.server_identity ~declaration_json:create_declaration
-          with
+          state.http_refresh_order <- Http_refresh_order.dispatch state.http_refresh_order;
+          match begin_keeper_creation state ~keeper_name:declared_name ~declaration ~return_to
+              ~started_ns:(Mtime_clock.elapsed_ns ()) with
           | Error detail -> refuse detail
-          | Ok receipt ->
-            (match Masc_cli_keeper_create.creation_receipt ~keeper_name:declared_name receipt with
-                 | Masc_cli_keeper_create.Created _ ->
-                 state.keeper_creation_draft <- None;
-                 state.keeper_creation_return <- None;
-                 launch_local_keeper_read state ~mailbox:async_messages ~intent:Snapshot_read.Refresh base_path;
-                 wait_for_created_keeper_metadata state declared_name;
-                 open_message_for_keeper ~return_to
-                   state declared_name ~drain_queue:(fun () -> ());
-                 set_msg_scroll state 0;
-                 state.view <- Keepers Keeper_message;
-                 launch_keeper_history_load state ~mailbox:async_messages
-                   ~keeper_name:declared_name;
-                 start_http_refresh state ~host ~port ~intent:Revalidate
-                   ~refresh_inflight:http_refresh_inflight
-                   ~scoped_refresh_inflight:http_scoped_refresh_inflight
-                   ~scoped_refresh_followup ~mailbox:async_messages;
-                 report_action state "system"
-                   (declared_name ^ ": declaration accepted · write the first request")
-                 | Masc_cli_keeper_create.Reconfigured { name } ->
-                     refuse (name ^ ": server reconfigured an existing Keeper; no Keeper was created. Inspect its configuration before retrying")
-                 | Masc_cli_keeper_create.Refused detail
-                 | Masc_cli_keeper_create.Unauthorized detail
-                 | Masc_cli_keeper_create.Unreachable detail -> refuse detail
-                 | Masc_cli_keeper_create.Revision_conflict ->
-                     refuse "Creation revision conflict; inspect the roster before retrying"))))
+          | Ok request ->
+              launch_keeper_creation state ~mailbox:async_messages ~request
+                ~declaration:create_declaration;
+              report_action state "system"
+                (declared_name ^ ": checking workspace before creation; declaration retained")))
   in
   (* Same shape as [handle_keeper_create]: several fields at once go through
      $EDITOR rather than a modal the TUI does not otherwise have. The stem
@@ -22767,7 +22861,8 @@ and is loaded on demand through keeper_skill.
         Int64.add (Mtime_clock.elapsed_ns ()) async_drain_budget_ns
       in
       if
-        drain_async_messages ~deadline_ns:drain_deadline_ns state ~base_path
+        drain_async_messages ~deadline_ns:drain_deadline_ns
+          ~input_pending:(fun () -> input_reader_has_ready_input input_reader) state ~base_path
           ~http_refresh_inflight
           ~http_scoped_refresh_inflight ~scoped_refresh_followup
           ~frame_presenter ~render_schedule async_messages
@@ -22862,6 +22957,12 @@ and is loaded on demand through keeper_skill.
          operator moved on hid the hints of the screen they moved to. A key
          that has something to say sets its own. *)
       if Option.is_some input then state.last_action <- None;
+      (* Further operator input owns focus. A pending creation may finish and
+         refresh its metadata, but cannot jump over the next gesture/draft. *)
+      (match input with
+       | Some (Key _ | Pasted _ | Mouse_left_press _ | Mouse_left_release _ | Mouse_wheel _) ->
+           state.keeper_creation_focus <- None
+       | Some (Graphics_reply _) | None -> ());
       Option.iter
         (fun _ ->
           report_action state "system"
@@ -31088,7 +31189,8 @@ and is loaded on demand through keeper_skill.
          pass budget is spent this applies nothing and the mailbox waits for
          the next pass. *)
       if
-        drain_async_messages ~deadline_ns:drain_deadline_ns state ~base_path
+        drain_async_messages ~deadline_ns:drain_deadline_ns
+          ~input_pending:(fun () -> input_reader_has_ready_input input_reader) state ~base_path
           ~http_refresh_inflight
           ~http_scoped_refresh_inflight ~scoped_refresh_followup
           ~frame_presenter ~render_schedule async_messages

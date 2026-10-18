@@ -2985,15 +2985,15 @@ let post_keeper_config ~(host : string) ~(port : int) ~(keeper_name : string)
     extended budget. *)
 let post_keeper_up ~(host : string) ~(port : int) ~(keeper_name : string)
     ~(expected_workspace : Masc.Tui_decode.server_identity option)
-    ~(declaration_json : string) : (Yojson.Safe.t, string) result =
+    ~(declaration_json : string) : post_outcome =
   match expected_workspace with
-  | None -> Error "Cannot create: workspace identity is unverified"
+  | None -> Post_refused "Cannot create: workspace identity is unverified"
   | Some identity
     when String.equal identity.sid_base_path "" || String.equal identity.sid_masc_root "" ->
-      Error "Cannot create: workspace identity is incomplete"
+      Post_refused "Cannot create: workspace identity is incomplete"
   | Some identity ->
     (match Yojson.Safe.from_string declaration_json with
-     | exception Yojson.Json_error detail -> Error ("Invalid declaration: " ^ detail)
+     | exception Yojson.Json_error detail -> Post_refused ("Invalid declaration: " ^ detail)
      | `Assoc fields ->
        (* Bind the mutation itself to the probe. A replacement server on the
           same port must reject before dispatching any Keeper operation. *)
@@ -3002,13 +3002,15 @@ let post_keeper_up ~(host : string) ~(port : int) ~(keeper_name : string)
          ; "masc_root", `String identity.sid_masc_root ] in
        let body = Yojson.Safe.to_string (`Assoc
          (("expected_workspace", expected) :: List.remove_assoc "expected_workspace" fields)) in
-       post_json_with_timeout ~timeout_sec:keeper_config_save_timeout_sec ~host
+       http_post_with_timeout ~timeout_sec:keeper_config_save_timeout_sec
+         ~headers:(auth_headers ()) ~host
          ~port
          ~path:
            (Printf.sprintf "/api/v1/keepers/%s/up"
               (percent_encode_path_segment keeper_name))
          ~body
-     | _ -> Error "Keeper declaration must be a JSON object")
+       |> mutation_outcome
+     | _ -> Post_refused "Keeper declaration must be a JSON object")
 
 (** Register a repository. Same permission boundary as the dashboard's add
     dialog: the route wants CanAdmin, and [post_json] carries the token. *)

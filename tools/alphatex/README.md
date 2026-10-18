@@ -227,9 +227,9 @@ multi-channel track; `:select event-ID` chooses a specific paired note. Chord la
 use note-key intervals and do not infer sustain-pedal voice durations. Shared-key
 ambiguity and unmatched input events remain in the original source.
 
-Full-message source audition, controller/tempo editing and clip arrangement are
-being connected. Space and WAV export currently report that boundary instead of
-playing a note-only approximation. The existing phrase-project MIDI/WAV transport
+Source audition sends the complete ordered MIDI wire stream to explicitly selected
+outputs as described below. Controller/tempo editing, clip arrangement and source
+WAV synthesis remain unfinished. Existing phrase-project MIDI/WAV transport
 continues to work. See [MIDI source semantics](MIDI-SOURCE.md) for retained data,
 source-event identities and timing behavior.
 

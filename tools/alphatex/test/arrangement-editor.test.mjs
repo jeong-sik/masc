@@ -660,7 +660,7 @@ for(const order of ['route-first','backing-first'])for(const conflict of [false,
  view.command('place asset-1 0');view.command('midi-port asset-1 7 42');view.command('midi-monitor 10 42 1 2');await flush()
  const first=view.observed.live[0];view.key('space');await flush()
  const prepare=view.observed.requests.find(job=>job.kind==='prepare-midi')
- const deliver=()=>view.worker.emit('message',{id:prepare.id,ok:true,result:{path:'/owned/concurrent/plan.json',format:'midi-arrangement',bindings:[{port:0,destination:'42'}]}})
+ const deliver=()=>view.worker.emit('message',{id:prepare.id,ok:true,result:{path:'/owned/concurrent/plan.json',format:'midi-arrangement',midiOutput:'42',bindings:[{port:0,destination:'42'}]}})
  const replace=()=>view.command(`midi-monitor 10 42 1 ${conflict?1:3}`)
  if(order==='route-first'){replace();await flush();deliver()}else{deliver();await flush();replace()}
  await flush();assert.ok(first.stops>0);assert.equal(view.observed.players.length,0)

@@ -127,7 +127,7 @@ export async function readCapture(directory, { signal } = {}) {
       || timeline.packets !== clockInteger(manifest.midiPacketCount, 'MIDI packet total')) throw new Error('Capture manifest totals do not match recorded data')
   await readWaveMetadata(join(directory, 'audio.wav'), {
     sampleRate: timeline.sampleRate, channels: timeline.channels, frames: timeline.frames,
-  })
+  }, { signal })
   return timeline
 }
 

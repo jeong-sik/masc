@@ -1092,4 +1092,5 @@ module For_testing = struct
   let record_restart = record_restart
   let set_started_at_for_test = set_started_at_for_test
   let crash_log_of = crash_log_of
+  let restore_supervisor_state = restore_supervisor_state
 end

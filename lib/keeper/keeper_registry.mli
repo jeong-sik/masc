@@ -422,6 +422,16 @@ module For_testing : sig
   (** Recent crash entries (up to 5) for a keeper. *)
   val crash_log_of : base_path:string -> string -> (float * string) list
 
+  (** Seed [restart_count] and [crash_log] (and clear [last_failure_reason]) on
+      a registered entry for supervisor test fixtures. Production restarts
+      update the replacement lane through {!update_entry_exact_for_lifecycle}. *)
+  val restore_supervisor_state :
+    base_path:string ->
+    string ->
+    restart_count:int ->
+    crash_log:(float * string) list ->
+    unit
+
 end
 
 type wakeup_intent =
@@ -489,11 +499,6 @@ val wakeup_cadence_sleeper_exact :
     Returns Fiber_unknown if the keeper is not registered. *)
 val fiber_health_of : base_path:string -> string -> fiber_health
 
-(** Restore supervisor state on a freshly registered entry (used by restart). *)
-val restore_supervisor_state :
-  base_path:string -> string ->
-  restart_count:int ->
-  crash_log:(float * string) list -> unit
 
 (** Reset tracking state (agent count + board wakeups) for a keeper. *)
 val cleanup_tracking : base_path:string -> string -> unit

@@ -2039,6 +2039,119 @@ let test_actual_start_demotes_arguments_but_resume_keeps_them_held () =
     [true;false]
 ;;
 
+let test_operator_interrupt_preserves_previous_native_settlement () =
+  let base_path = temp_workspace () |> Unix.realpath in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+      Unix.mkdir (Filename.concat base_path ".masc") 0o700;
+      Masc_test_deps.declare_fixture_keeper
+        ~base_path ~sandbox_profile:(Some Keeper_types_profile_sandbox.Docker) "antigravity-fixture";
+      let oauth_source = Filename.concat base_path "operator-oauth-token" in
+      write_file ~mode:0o600 oauth_source (Masc_test_deps.antigravity_oauth_fixture "operator-oauth-fixture");
+      let cli_path = Filename.concat base_path "agy-interrupt-fixture.sh" in
+      let cwd_json =
+        Yojson.Safe.to_string
+          (`String
+             (Env_config_core.strip_trailing_slashes
+                (Filename.concat base_path
+                   (Keeper_sandbox.host_root_rel_of_profile
+                      Keeper_types_profile_sandbox.Docker
+                      "antigravity-fixture"))))
+      in
+      write_file ~mode:0o700 cli_path
+        (Printf.sprintf
+           "#!/bin/sh\nset -eu\ntest \"$(dirname \"$HOME\")\" = %s\nconversation=conversation-antigravity-fixture\nturns=1\nfor arg in \"$@\"; do\n  case \"$arg\" in\n    conversation-antigravity-fixture) turns=2 ;;\n  esac\ndone\ncat >/dev/null\nprintf '{\"event\":\"init\",\"conversation_id\":\"%%s\",\"init\":{\"model\":\"gemini-fixture\",\"cwd\":%s,\"tools\":[],\"permission_mode\":\"always-proceed\"}}\\n' \"$conversation\"\nprintf '{\"event\":\"result\",\"result\":{\"conversation_id\":\"%%s\",\"status\":\"SUCCESS\",\"response\":\"MASC_ANTIGRAVITY_OK\",\"error\":null,\"num_turns\":%%d,\"usage\":{\"input_tokens\":12,\"output_tokens\":4,\"thinking_tokens\":1,\"cache_read_tokens\":40,\"total_tokens\":16}}}\\n' \"$conversation\" \"$turns\"\n"
+           (shell_quote (account_store ~base_path))
+           cwd_json);
+      let runtime_path = Filename.concat base_path "runtime.toml" in
+      write_file ~mode:0o600 runtime_path (runtime_toml ~cli_path ~oauth_source);
+      let runtime_snapshot = Runtime.For_testing.snapshot () in
+      Fun.protect
+        ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
+        (fun () ->
+          Eio_main.run (fun env ->
+            Eio.Switch.run (fun sw ->
+              Eio_context.set_env env;
+              Eio_context.with_test_env
+                ~net:(Eio.Stdenv.net env)
+                ~clock:(Eio.Stdenv.clock env)
+                ~mono_clock:(Eio.Stdenv.mono_clock env)
+                ~sw
+                (fun () ->
+                  Runtime.init_default ~config_path:runtime_path |> Result.get_ok;
+                  let run ?on_event goal =
+                    Keeper_turn_driver.run_named ~raw_trace:None
+                      ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
+                      ~runtime_id:"antigravity.gemini"
+                      ~keeper_name:"antigravity-fixture"
+                      ~base_path
+                      ~goal
+                      ~system_prompt:"pre-dispatch fixture system prompt"
+                      ~agent_core_tools:[]
+                      ?on_event
+                      ~context:(Agent_core.Context.create ())
+                      ~sw
+                      ~net:(Eio.Stdenv.net env)
+                      ()
+                  in
+                  (match run "ORIGINAL" with
+                   | Ok _ -> ()
+                   | Error error -> fail (Agent_core.Error.to_string error));
+                  let original =
+                    Keeper_official_client_session_store.load
+                      ~base_path ~keeper_name:"antigravity-fixture"
+                    |> Result.get_ok |> Option.get
+                  in
+                  let observed : Keeper_semantic_execution.official_client_checkpoint =
+                    match original.phase with
+                    | Settled { session_id; turn_id } ->
+                      { client_kind = original.client_kind
+                      ; runtime_id = original.runtime_id
+                      ; session_id
+                      ; turn_id
+                      ; tool_surface_sha256 = original.tool_surface_sha256
+                      ; frame = Keeper_repetition_snapshot.empty
+                      }
+                    | Ready | Start _ | Active _ | Turn_inflight _ | Recovery_required _ ->
+                      fail "original native turn did not settle"
+                  in
+                  let observed_terminal_event = ref false in
+                  (match
+                     run
+                       ~on_event:(function
+                         | Agent_core.Types.MessageStop ->
+                           observed_terminal_event := true;
+                           raise Keeper_registry_types.Operator_interrupt
+                         | _ -> ())
+                       "NEWER"
+                   with
+                   | exception exn when Keeper_registry_types.is_operator_interrupt exn -> ()
+                   | exception exn -> fail (Printexc.to_string exn)
+                   | Ok _ | Error _ ->
+                     fail "operator interrupt was converted to a provider result");
+                  check bool "native terminal callback was reached" true !observed_terminal_event;
+                  let restored =
+                    Keeper_official_client_session_store.load
+                      ~base_path ~keeper_name:"antigravity-fixture"
+                    |> Result.get_ok |> Option.get
+                  in
+                  check bool "operator interruption restores prior settlement" true
+                    (restored.phase = original.phase);
+                  (match restored.last_transient_release with
+                   | Some release ->
+                     check bool "typed owner stop was recorded" true
+                       (release.failure = Owner_stopped_turn)
+                   | None -> fail "owner stop release evidence was not persisted");
+                  let resumed =
+                    Keeper_direct_checkpoint_continuation.For_testing.prepare_official_resume
+                      ~observed ~expected:(Some restored)
+                    |> Result.get_ok
+                  in
+                  check string "previous checkpoint remains resumable"
+                    observed.turn_id resumed.turn_id)))))
+;;
+
 let () =
   run
     "keeper_antigravity_runtime"
@@ -2081,6 +2194,10 @@ let () =
               test_blank_system_prompt_is_refused_not_defaulted
         ; test_case "losing claim cannot publish native policy" `Quick
             test_losing_claim_cannot_publish_native_policy
+        ; test_case
+            "operator interrupt preserves previous native settlement"
+            `Quick
+            test_operator_interrupt_preserves_previous_native_settlement
         ] )
     ; ( "model input window"
         , [ test_case

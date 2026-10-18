@@ -1094,6 +1094,7 @@ let prepare_turn ~runtime_label ~keeper_name ~turn_count ~system_prompt ~tools
          project ~tools messages
        with
        | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
        | exn ->
          Error
            (internal_error

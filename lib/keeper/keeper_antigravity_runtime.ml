@@ -265,6 +265,7 @@ let stream_projection ?on_native_tool_completion ~keeper_name ~raw_trace_run ~tu
     let emit event =
       try emit event with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
       | exn ->
         Log.Runtime_agent.warn
           "Antigravity Keeper stream callback raised (error=%s)"
@@ -687,6 +688,7 @@ let run_without_lifecycle ~argument_source ~official_task_reference ~composed_co
            let* messages =
              try project prepared.messages with
              | Eio.Cancel.Cancelled _ as exn -> raise exn
+             | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
              | exn -> Error (Host.internal_error
                  (runtime_label ^ " runtime model input projection raised: " ^ Printexc.to_string exn)) in
            Ok {prepared with messages})
@@ -708,6 +710,7 @@ let run_without_lifecycle ~argument_source ~official_task_reference ~composed_co
         let* messages =
           try project prepared.messages with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
           | exn ->
             Error
               (Host.internal_error

@@ -48,7 +48,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
   if (signal?.aborted) return
   if (loaded?.project.kind === 'arrangement') {
     const { viewArrangement } = await import('./arrangement-tui.mjs')
-    return viewArrangement({ loaded, root, embedded, signal })
+    return viewArrangement({ loaded, root, embedded, signal, output, midiOutput })
   }
   let editor = newEditor(initialDocument ?? loaded?.project, { pattern }), revision = loaded?.revision ?? null
   path = loaded?.path ?? join(root, `phrase-${randomUUID()}.json`)

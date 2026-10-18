@@ -118,5 +118,8 @@ the score view's `a` key and typed saved-document routing. It supports source
 import, region placement/editing, undo/redo and revision-protected save/reopen.
 IO runs in an owned worker and closes only after cancellation/cleanup and admitted
 editor decisions drain. Save-as materializes sources retained by edit history.
-This does not deliver arrangement playback, arbitrary source-state chase or overdub.
+WAV lanes now have streamed multi-voice playback with Space pause/resume, beat seek,
+explicit output selection and private source snapshots. Source-state chase for
+MIDI lanes and overdub remain unfinished. Active MIDI lanes fail explicitly rather
+than being silently omitted from WAV playback.
 See [the core contract](../../../tools/alphatex/ARRANGEMENT.md).

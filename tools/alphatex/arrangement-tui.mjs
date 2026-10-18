@@ -1,4 +1,4 @@
-import { mkdtemp, writeFile } from 'node:fs/promises'
+import { mkdtemp, writeFile, rm } from 'node:fs/promises'
 import { join, dirname, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
@@ -8,6 +8,7 @@ import { arrangementEditor, arrangementAction, arrangementCommand, arrangementIm
 import { loadArrangement, verifyArrangementAssets, saveArrangement } from './arrangement-files.mjs'
 import { saveProject } from './sequencer-files.mjs'
 import { safeText } from './terminal.mjs'
+import { openPlayback } from './playback.mjs'
 
 const help = [
   ':import-wave /path/take.wav     :import-midi /path/song.mid',
@@ -26,10 +27,11 @@ const help = [
   'Enter: place selected asset; d: duplicate at cursor; x/Delete: remove',
   'u/y: undo/redo; m/o: mute/solo; s: save; q/Esc: save and return',
   'Regions run at original speed. Project tempo moves positions without warping.',
-  'Arrangement playback, MIDI state chase and overdub remain under development.',
+  'Space: WAV play/pause/resume; :stop; :seek BEAT; :output DEVICE_UID',
+  'MIDI region state chase, whole-arrangement looping and overdub remain under development.',
 ]
 
-export async function viewArrangement({ path, loaded, initialDocument, root = resolve('music-projects'), embedded = false, signal } = {}) {
+export async function viewArrangement({ path, loaded, initialDocument, root = resolve('music-projects'), embedded = false, signal, output, midiOutput } = {}) {
   if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error('Arrangement editor requires a terminal')
   if ((path || loaded) && initialDocument) throw new Error('Open a saved arrangement or a new one, one at a time')
   if (signal?.aborted) return
@@ -45,25 +47,34 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
   let accepting = true, closed = false, task = Promise.resolve(), prompt = null, status = 'Import a WAV or MIDI source with :help', showHelp = false
   let pendingDraw = null, sequence = 0, workerFailure = null, recovery = null, terminatingWorker = false
   const failedSavePaths = new Set()
-  const jobs = new Map(), worker = new Worker(new URL('./arrangement-worker.mjs', import.meta.url)), wasRaw = process.stdin.isRaw
+  const directory = await mkdtemp(join(tmpdir(), 'masc-arrangement-play-'))
+  let worker
+  try { worker = new Worker(new URL('./arrangement-worker.mjs', import.meta.url)) }
+  catch (error) { await rm(directory, { recursive: true, force: true }); throw error }
+  const jobs = new Map(), players = new Map(), preparations = new Set(), wasRaw = process.stdin.isRaw
+  let transport = { kind: 'stopped' }, generation = 0, preparing = null, selectedOutput = output, selectedMidi = midiOutput
   let complete
   const done = new Promise(resolve => { complete = resolve })
   function finish() {
     if (!accepting) return
     accepting = false
+    stop()
+    for (const handle of players.keys()) handle.terminate()
     if (!workerFailure) worker.postMessage({ kind: 'cancel' })
     complete()
   }
-  function request(value) {
+  function request(value, issued) {
     if (workerFailure) return Promise.reject(workerFailure)
     const id = ++sequence
     return new Promise((resolve, reject) => {
       jobs.set(id, { resolve, reject })
+      issued?.(id)
       try { worker.postMessage({ ...value, id }) }
       catch (error) { jobs.delete(id); reject(error) }
     })
   }
   function fail(error) {
+    stop()
     workerFailure = error
     for (const job of jobs.values()) job.reject(error)
     jobs.clear(); status = error.message; draw()
@@ -77,6 +88,60 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
   })
   worker.on('error', fail)
   worker.on('exit', code => { if (!terminatingWorker) fail(new Error(`Arrangement worker exited ${code}`)) })
+  function stop() {
+    generation++
+    if (preparing !== null && !workerFailure) worker.postMessage({ kind: 'cancel', request: preparing })
+    preparing = null
+    transport.handle?.stop()
+    transport = { kind: 'stopped' }
+    draw()
+  }
+  function adopt(next) {
+    if (next.project !== editor.project) stop()
+    editor = next
+  }
+  function play() {
+    if (!accepting) return
+    if (transport.kind === 'playing') { transport.handle.pause(); return }
+    if (transport.kind === 'paused') { transport.handle.resume(); return }
+    if (transport.kind === 'preparing' || transport.kind === 'starting') { stop(); return }
+    if (selectedMidi !== undefined) throw new Error('Arrangement MIDI playback is not connected; select an audio output with :output UID')
+    const expected = ++generation, project = editor.project, output = selectedOutput
+    transport = { kind: 'preparing' }; status = 'Preparing WAV sources…'
+    const prepared = request({ kind: 'prepare-wave', project, sourceRoot, directory }, id => { preparing = id })
+    const preparation = (async () => {
+      let result
+      try {
+        result = await prepared
+        if (generation === expected) preparing = null
+        await Promise.allSettled([...players.values()])
+        if (!accepting || generation !== expected) return
+        transport = { kind: 'starting' }
+        const handle = openPlayback({ path: result.path, format: result.format, output,
+          onEvent(event) {
+            if (!accepting || generation !== expected) return
+            if (event.kind === 'error') { status = event.message; return }
+            transport = { ...transport, kind: event.kind, event }
+            draw()
+          } })
+        transport = { ...transport, handle }
+        const completion = handle.completion.then(event => {
+          if (generation === expected) { transport = { kind: 'stopped', event }; status = 'Playback stopped'; draw() }
+        }, error => {
+          if (generation === expected) { transport = { kind: 'stopped' }; status = error.message; draw() }
+        }).finally(() => { players.delete(handle) })
+        players.set(handle, completion)
+        await completion
+      } catch (error) {
+        if (generation === expected) { preparing = null; transport = { kind: 'stopped' }; status = error.message; draw() }
+      } finally {
+        if (result) await rm(dirname(result.path), { recursive: true, force: true })
+      }
+    })()
+    preparations.add(preparation)
+    preparation.catch(error => { if (accepting) { status = error.message; draw() } }).finally(() => preparations.delete(preparation))
+    draw()
+  }
   async function save(target = path) {
     target = resolve(target)
     const project = editor.project, nextRoot = dirname(target)
@@ -94,13 +159,21 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
   async function effect(value) {
     switch (value.kind) {
       case 'help': showHelp = !showHelp; break
+      case 'play': play(); break
+      case 'stop': stop(); break
+      case 'seek': {
+        if (!['playing', 'paused'].includes(transport.kind)) throw new Error('Playback is not ready')
+        transport.handle.seek(value.tick / editor.project.ppq * 60 / editor.project.tempo)
+        break
+      }
+      case 'output': stop(); selectedOutput = value.path; selectedMidi = undefined; status = 'Audio output selected'; break
       case 'save': await save(); break
       case 'save-as': if (accepting) await save(value.path); break
       case 'import-wave': case 'import-midi': {
         if (!accepting) return
         status = 'Importing source…'; draw()
         const result = await request({ ...value, project: editor.project, projectPath: path })
-        if (accepting) { editor = arrangementImported(editor, result); status = `Imported ${result.asset}; Enter places it at the cursor` }
+        if (accepting) { adopt(arrangementImported(editor, result)); status = `Imported ${result.asset}; Enter places it at the cursor` }
         break
       }
       default: throw new Error('Unknown arrangement effect')
@@ -117,7 +190,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
       else if (key.name === 'backspace') prompt = [...prompt].slice(0, -1).join('')
       else if (key.name === 'return') {
         const line = prompt; prompt = null
-        enqueue(async () => { const result = arrangementCommand(editor, line); editor = result.editor; if (result.effect) await effect(result.effect); else status = 'Edited' })
+        enqueue(async () => { const result = arrangementCommand(editor, line); adopt(result.editor); if (result.effect) await effect(result.effect); else status = 'Edited' })
       } else if (text && !key.ctrl && !key.meta) prompt += safeText(text)
       draw(); return
     }
@@ -139,10 +212,10 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
         case 'o': action = { kind: 'solo' }; break
         case 'left': case 'right': action = { kind: key.shift ? 'move' : 'cursor', ticks: editor.step * (key.name === 'left' ? -1 : 1) }; break
         case 'up': case 'down': action = { kind: 'region', direction: key.name === 'down' ? 1 : -1 }; break
-        case 'space': throw new Error('Arrangement transport is not connected yet')
+        case 'space': play(); return
         default: return
       }
-      editor = arrangementAction(editor, action); status = 'Edited'
+      adopt(arrangementAction(editor, action)); status = 'Edited'
     })
   }
   function fit(text) {
@@ -162,7 +235,8 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     const project = editor.project, clip = selectedRegion(editor), asset = project.assets.find(asset => asset.id === editor.asset)
     const rows = process.stdout.rows || 24, width = Math.max(1, (process.stdout.columns || 80) - 24)
     const lines = [`Arrangement · ${project.title}${project !== saved ? ' *' : ''} · ${project.tempo} BPM · ${project.meter.join('/')}`,
-      `Cursor ${editor.tick / project.ppq} beats · grid ${editor.step / project.ppq} · ${status}`]
+      `Cursor ${editor.tick / project.ppq} beats · grid ${editor.step / project.ppq} · ${status}`,
+      `WAV ${transport.kind} · ${(transport.event?.currentTime ?? 0).toFixed(2)} s · ${transport.event?.device.name ?? selectedOutput ?? 'default output'}`]
     if (showHelp) lines.push(...help)
     else {
       const left = Math.floor(editor.tick / editor.step / width) * width * editor.step
@@ -192,6 +266,9 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     process.stdout.write(output)
   }
   const onEnd = () => finish(), onSignal = () => finish(), onAbort = () => finish(), onResize = () => draw()
+  const ticker = setInterval(() => {
+    if (transport.kind === 'playing') { try { transport.handle.status() } catch (error) { stop(); status = error.message; draw() } }
+  }, 100)
   async function retainRecovery() {
     const directory = await mkdtemp(join(tmpdir(), 'masc-arrangement-recovery-'))
     recovery = join(directory, 'project.json')
@@ -214,18 +291,22 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     draw(); if (signal?.aborted) finish(); await done
   } finally {
     accepting = false; closed = true
+    clearInterval(ticker)
+    stop()
     if (pendingDraw) clearImmediate(pendingDraw)
     process.stdin.off('keypress', keypress); process.stdin.off('end', onEnd)
     process.stdout.off('resize', onResize); signal?.removeEventListener('abort', onAbort)
     for (const name of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.off(name, onSignal)
     try {
       await task
+      await Promise.allSettled([...preparations])
+      await Promise.allSettled([...players.values()])
       if (editor.project !== saved) {
         if (failedSavePaths.has(path)) await retainRecovery()
         else { try { await save() } catch { await retainRecovery() } }
       }
     } finally {
-      try { terminatingWorker = true; await worker.terminate() }
+      try { terminatingWorker = true; await worker.terminate(); await rm(directory, { recursive: true, force: true }) }
       finally {
         if (!embedded) { process.stdout.write('\x1b[?25h\x1b[?1049l'); process.stdin.setRawMode(wasRaw ?? false); process.stdin.pause() }
         if (recovery) process.stderr.write(`Arrangement edits retained at ${recovery}\n`)

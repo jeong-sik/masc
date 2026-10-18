@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 import { Worker } from 'node:worker_threads'
 import { emitKeypressEvents } from 'node:readline'
+import { arrangementSchedule } from './arrangement.mjs'
 import { arrangementEditor, arrangementAction, arrangementCommand, arrangementImported, selectedRegion } from './arrangement-editor.mjs'
 import { loadArrangement, verifyArrangementAssets, saveArrangement } from './arrangement-files.mjs'
 import { saveProject } from './sequencer-files.mjs'
@@ -27,12 +28,14 @@ const help = [
   'Enter: place selected asset; d: duplicate at cursor; x/Delete: remove',
   'u/y: undo/redo; m/o: mute/solo; s: save; q/Esc: save and return',
   'Regions run at original speed. Project tempo moves positions without warping.',
-  'Space: WAV play/pause/resume; :stop; :seek BEAT; :output DEVICE_UID',
-  'MIDI region state chase, whole-arrangement looping and overdub remain under development.',
+  'Space: play/pause/resume; :stop; :seek BEAT; :output AUDIO_UID',
+  ':midi-output MIDI_UID    :midi-port asset-1 PORT MIDI_UID',
+  'Mixed WAV/MIDI shared-clock playback, whole-arrangement looping and overdub remain under development.',
 ]
 
 export async function viewArrangement({ path, loaded, initialDocument, root = resolve('music-projects'), embedded = false, signal, output, midiOutput } = {}) {
   if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error('Arrangement editor requires a terminal')
+  if (output !== undefined && midiOutput !== undefined) throw new Error('Choose an audio output or a MIDI destination')
   if ((path || loaded) && initialDocument) throw new Error('Open a saved arrangement or a new one, one at a time')
   if (signal?.aborted) return
   if (loaded) await verifyArrangementAssets(loaded.project, dirname(loaded.path), { signal })
@@ -52,7 +55,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
   try { worker = new Worker(new URL('./arrangement-worker.mjs', import.meta.url)) }
   catch (error) { await rm(directory, { recursive: true, force: true }); throw error }
   const jobs = new Map(), players = new Map(), preparations = new Set(), wasRaw = process.stdin.isRaw
-  let transport = { kind: 'stopped' }, generation = 0, preparing = null, selectedOutput = output, selectedMidi = midiOutput
+  let transport = { kind: 'stopped' }, generation = 0, preparing = null, selectedOutput = output, selectedMidi = midiOutput, midiPorts = []
   let complete
   const done = new Promise(resolve => { complete = resolve })
   function finish() {
@@ -105,10 +108,15 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     if (transport.kind === 'playing') { transport.handle.pause(); return }
     if (transport.kind === 'paused') { transport.handle.resume(); return }
     if (transport.kind === 'preparing' || transport.kind === 'starting') { stop(); return }
-    if (selectedMidi !== undefined) throw new Error('Arrangement MIDI playback is not connected; select an audio output with :output UID')
-    const expected = ++generation, project = editor.project, output = selectedOutput
-    transport = { kind: 'preparing' }; status = 'Preparing WAV sources…'
-    const prepared = request({ kind: 'prepare-wave', project, sourceRoot, directory }, id => { preparing = id })
+    const schedule = arrangementSchedule(editor.project)
+    const kinds = new Set(schedule.map(clip => editor.project.assets.find(asset => asset.id === clip.asset).kind))
+    if (kinds.size > 1) throw new Error('Mixed WAV/MIDI playback requires a shared-clock transport; choose audible lanes of one kind')
+    const midi = kinds.has('midi')
+    if (midi && selectedOutput !== undefined) throw new Error('Choose a MIDI destination for audible MIDI regions')
+    if (!midi && (selectedMidi !== undefined || midiPorts.length)) throw new Error('Choose an audio output for audible WAV regions')
+    const expected = ++generation, project = editor.project, output = midi ? undefined : selectedOutput
+    transport = { kind: 'preparing' }; status = 'Preparing arrangement sources…'
+    const prepared = request({ kind: midi ? 'prepare-midi' : 'prepare-wave', project, sourceRoot, directory, midiOutput: selectedMidi, portBindings: midiPorts }, id => { preparing = id })
     const preparation = (async () => {
       let result
       try {
@@ -117,7 +125,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
         await Promise.allSettled([...players.values()])
         if (!accepting || generation !== expected) return
         transport = { kind: 'starting' }
-        const handle = openPlayback({ path: result.path, format: result.format, output,
+        const handle = openPlayback({ path: result.path, format: result.format, output, midiOutput: result.midiOutput, midiBindings: result.bindings,
           onEvent(event) {
             if (!accepting || generation !== expected) return
             if (event.kind === 'error') { status = event.message; return }
@@ -166,7 +174,10 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
         transport.handle.seek(value.tick / editor.project.ppq * 60 / editor.project.tempo)
         break
       }
-      case 'output': stop(); selectedOutput = value.path; selectedMidi = undefined; status = 'Audio output selected'; break
+      case 'midi-output': stop(); selectedOutput = undefined; selectedMidi = value.destination; midiPorts = []; status = 'MIDI output selected'; break
+      case 'midi-port':
+        stop(); selectedOutput = undefined; selectedMidi = undefined; midiPorts = [...midiPorts.filter(binding => binding.asset !== value.asset || binding.port !== value.port), { asset: value.asset, port: value.port, destination: value.destination }]; status = 'MIDI source port selected'; break
+      case 'output': stop(); selectedOutput = value.path; selectedMidi = undefined; midiPorts = []; status = 'Audio output selected'; break
       case 'save': await save(); break
       case 'save-as': if (accepting) await save(value.path); break
       case 'import-wave': case 'import-midi': {
@@ -236,7 +247,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     const rows = process.stdout.rows || 24, width = Math.max(1, (process.stdout.columns || 80) - 24)
     const lines = [`Arrangement · ${project.title}${project !== saved ? ' *' : ''} · ${project.tempo} BPM · ${project.meter.join('/')}`,
       `Cursor ${editor.tick / project.ppq} beats · grid ${editor.step / project.ppq} · ${status}`,
-      `WAV ${transport.kind} · ${(transport.event?.currentTime ?? 0).toFixed(2)} s · ${transport.event?.device.name ?? selectedOutput ?? 'default output'}`]
+      `Playback ${transport.kind} · ${(transport.event?.currentTime ?? 0).toFixed(2)} s · ${transport.event?.device.name ?? selectedOutput ?? 'default output'}`]
     if (showHelp) lines.push(...help)
     else {
       const left = Math.floor(editor.tick / editor.step / width) * width * editor.step

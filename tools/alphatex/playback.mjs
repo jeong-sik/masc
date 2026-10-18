@@ -40,14 +40,15 @@ export async function midiDestinations({ executable = midiTransportPath, signal 
 export function openPlayback({ path, output, midiOutput, midiBindings, loop = false, format = 'wave', onEvent = () => {}, signal,
   executable = format === 'wave-arrangement' ? arrangementTransportPath : midiOutput === undefined ? transportPath : midiTransportPath, spawnProcess = spawn } = {}) {
   signal?.throwIfAborted()
-  if (!['wave', 'wave-arrangement'].includes(format) || format === 'wave-arrangement' && (midiOutput !== undefined || loop)) throw new Error('Invalid arrangement playback route or loop')
+  if (!['wave', 'wave-arrangement', 'midi-arrangement'].includes(format) || format === 'wave-arrangement' && (midiOutput !== undefined || loop)) throw new Error('Invalid arrangement playback route or loop')
+  if (format === 'midi-arrangement' && (midiOutput === undefined || midiBindings === undefined || loop)) throw new Error('MIDI arrangement requires explicit bindings without whole-arrangement looping')
   if (typeof path !== 'string' || !path) throw new Error('A playback source path is required')
   if (output !== undefined && (typeof output !== 'string' || !output)) throw new Error('Invalid output UID')
   if (midiOutput !== undefined && (typeof midiOutput !== 'string' || !midiOutput)) throw new Error('Invalid MIDI destination ID')
   if (output !== undefined && midiOutput !== undefined) throw new Error('Choose an audio output or a MIDI destination')
   if (midiBindings !== undefined) {
     if (midiOutput === undefined || !Array.isArray(midiBindings) || !midiBindings.length
-        || midiBindings.some(binding => !Number.isInteger(binding?.port) || binding.port < 0 || binding.port > 127
+        || midiBindings.some(binding => !Number.isSafeInteger(binding?.port) || binding.port < 0 || binding.port > (format === 'midi-arrangement' ? Number.MAX_SAFE_INTEGER : 127)
           || typeof binding.destination !== 'string' || !binding.destination)
         || new Set(midiBindings.map(binding => binding.port)).size !== midiBindings.length
         || new Set(midiBindings.map(binding => binding.destination)).size !== midiBindings.length

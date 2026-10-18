@@ -113,6 +113,15 @@ export function arrangementCommand(editor, line) {
       return { editor, effect: { kind: command, path: tail } }
     case 'save': case 'help': case 'play': case 'stop': count(0); return { editor, effect: { kind: command } }
     case 'seek': count(1); return { editor, effect: { kind: 'seek', tick: position(beats(args[0])) } }
+    case 'midi-output': count(1); return { editor, effect: { kind: command, destination: args[0] } }
+    case 'midi-port': {
+      count(3)
+      if (!editor.project.assets.some(asset => asset.id === args[0] && asset.kind === 'midi')) throw new Error('Choose a MIDI asset')
+      const port = Number(args[1])
+      if (!Number.isInteger(port) || port < 0 || port > 127 || !/^-?(0|[1-9][0-9]*)$/.test(args[2])
+          || BigInt(args[2]) < -2147483648n || BigInt(args[2]) > 2147483647n || String(Number(args[2])) !== args[2]) throw new Error('Choose an exact source port and destination UID')
+      return { editor, effect: { kind: command, asset: args[0], port, destination: args[2] } }
+    }
     case 'output': if (!tail) throw new Error('Choose an output UID'); return { editor, effect: { kind: 'output', path: tail } }
     case 'record': case 'export': case 'wave':
       throw new Error('Arrangement export and overdub are not connected yet')

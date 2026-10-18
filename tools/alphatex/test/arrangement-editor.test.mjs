@@ -6,7 +6,7 @@ import { mkdtemp, readFile, writeFile, rename, rm } from 'node:fs/promises'
 import { join, dirname, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
-import { newArrangement, editArrangement } from '../arrangement.mjs'
+import { newArrangement, editArrangement, arrangementSchedule } from '../arrangement.mjs'
 import * as editorAPI from '../arrangement-editor.mjs'
 import { loadArrangement } from '../arrangement-files.mjs'
 import { importMidiSource, exportMidiSource } from '../midi-source.mjs'
@@ -82,7 +82,7 @@ async function controller(options={}){
     async terminate(){observed.terminated=true}
   }
   const slot=`arrange-controller-${randomUUID()}`
-  globalThis[slot]={process,Worker:OwnedWorker,...editorAPI,join,dirname,resolve,tmpdir,randomUUID,
+  globalThis[slot]={process,Worker:OwnedWorker,arrangementSchedule,...editorAPI,join,dirname,resolve,tmpdir,randomUUID,
     emitKeypressEvents(){},safeText:String,
     verifyArrangementAssets:async()=>new Map(),
     loadArrangement:async()=>{throw new Error('Unexpected load')},
@@ -244,4 +244,46 @@ test('document mutation stops the admitted playback revision while cursor motion
   view.command('title New revision');await flush();assert.ok(player.commands.includes('stop'))
   player.finish();view.key('q');await view.done
   assert.equal(view.observed.saved.at(-1).project.title,'New revision')
+})
+
+async function closeController(view) {
+  view.abort.abort()
+  for (const job of view.observed.requests.filter(job=>['prepare-wave','prepare-midi','import-wave','import-midi'].includes(job.kind))) {
+    view.worker.emit('message',{id:job.id,ok:false,cancelled:true,error:'Cancelled'})
+  }
+  for (const player of view.observed.players) player.finish()
+  await view.done
+}
+test('explicit MIDI selection cannot route a WAV arrangement to default audio; choosing audio clears MIDI bindings',async()=>{
+  const view=await controller()
+  try {
+    view.command('import-wave /music/take.wav');await flush();const importedJob=view.observed.requests.find(job=>job.kind==='import-wave')
+    view.worker.emit('message',{id:importedJob.id,ok:true,result:imported(importedJob.project)});await flush()
+    view.command('place asset-1 0');view.command('midi-output 42');view.key('space');await flush()
+    assert.equal(view.observed.requests.filter(job=>job.kind==='prepare-wave'||job.kind==='prepare-midi').length,0)
+    view.command('output explicit-audio');view.key('space');await flush()
+    const job=view.observed.requests.find(job=>job.kind==='prepare-wave');assert.ok(job)
+    view.worker.emit('message',{id:job.id,ok:true,result:{path:'/owned-recovery/play-1/plan.json',format:'wave-arrangement'}});await flush()
+    assert.equal(view.observed.players[0].options.output,'explicit-audio')
+    assert.equal(view.observed.players[0].options.midiOutput,undefined)
+  } finally { await closeController(view) }
+})
+test('MIDI asset bindings survive prepare and own pause/seek/resume; route changes stop the admitted owner',async()=>{
+  const view=await controller()
+  try {
+    view.command('import-midi /music/take.mid');await flush();const job=view.observed.requests.find(job=>job.kind==='import-midi')
+    const asset={id:'asset-1',name:'Keys',kind:'midi',source:importMidiSource(midi())}
+    view.worker.emit('message',{id:job.id,ok:true,result:{project:editArrangement(job.project,{kind:'asset-add',asset}),asset:asset.id}});await flush()
+    view.command('place asset-1 0');view.command('output explicit-audio');view.key('space');await flush()
+    assert.equal(view.observed.requests.filter(job=>job.kind==='prepare-midi').length,0)
+    view.command('midi-port asset-1 7 42');view.key('space');await flush()
+    const prepared=view.observed.requests.find(job=>job.kind==='prepare-midi');assert.ok(prepared)
+    assert.deepEqual(prepared.portBindings,[{asset:'asset-1',port:7,destination:'42'}])
+    view.worker.emit('message',{id:prepared.id,ok:true,result:{path:'/owned-recovery/play-2/plan.json',format:'midi-arrangement',midiOutput:'42',bindings:[{port:0,destination:'42'}]}});await flush()
+    const player=view.observed.players[0];assert.equal(player.options.midiOutput,'42');assert.equal(player.options.output,undefined)
+    assert.deepEqual(player.options.midiBindings,[{port:0,destination:'42'}])
+    view.key('space');await flush();view.command('seek .5');await flush();view.key('space');await flush()
+    assert.deepEqual(player.commands.slice(0,3),['pause',['seek',.3],'resume'])
+    view.command('midi-output 43');await flush();assert.ok(player.commands.includes('stop'))
+  } finally { await closeController(view) }
 })

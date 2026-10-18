@@ -63,12 +63,20 @@ describe('Keeper operation server push', () => {
           runId: 'run-1', messageId: 'message-1', delta: 'must not appear',
           timestamp: 1, textStreamScope: scope },
       })))
-      expect(decoded?.ag_ui_event).toMatchObject({ type: 'RUN_ERROR', code: 'invalid_event_payload' })
+      expect(decoded?.ag_ui_event).toMatchObject({
+        type: 'CUSTOM',
+        name: 'KEEPER_STREAM_PROTOCOL_ERROR',
+        value: {
+          kind: 'sse_parse_failed',
+          reason: expect.stringContaining('textStreamScope'),
+        },
+      })
       if (!decoded) throw new Error('expected an operation protocol error')
       recordServerPushEvent(decoded)
       const entry = keeperThreads.value.sangsu?.find(item => item.id === 'operation-reply')
       expect(entry?.text).not.toContain('must not appear')
-      expect(entry?.delivery).toBe('error')
+      expect(entry?.delivery).toBe('sending')
+      expect(entry?.error).toContain('Expected textStreamScope non-negative integer')
     })
 
 })

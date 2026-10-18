@@ -72,11 +72,10 @@ export type KeeperStreamDeltaUsage = {
 // OCaml emitter (Keeper_chat_events.stream_protocol_error_kind_to_string). A
 // kind missing here is not "unknown": the decoder rejects the frame, and on
 // the operation-projection path (keeper_chat_operation_event frames) that
-// rejection is synthesised into a terminal RUN_ERROR, so a mid-turn attempt
-// failure would end the bubble and drop the answer that follows on the next
-// attempt. The direct fetch stream in api/keeper.ts decodes with the same
-// schema (KeeperChatStreamEventSchema); a rejected frame there ends the
-// operation as failed (failKeeperStreamOperation).
+// rejection is synthesised into a KEEPER_STREAM_PROTOCOL_ERROR (sse_parse_failed)
+// diagnostic on the matched operation bubble. The direct fetch stream in
+// api/keeper.ts decodes with the same schema (KeeperChatStreamEventSchema); a
+// rejected frame there ends the operation as failed (failKeeperStreamOperation).
 export const KEEPER_STREAM_PROTOCOL_ERROR_KINDS = [
   'tool_start_duplicate_index',
   'tool_start_missing_identity',

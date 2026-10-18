@@ -730,3 +730,18 @@ test('worker failure aborts the parent-owned calibration before any monitoring s
  pending.reject(new Error('Native children drained'));await flush();assert.equal(view.observed.monitors.length,2)
  view.key('q');await flush();view.observed.monitors[1].finish({});await view.done
 })
+
+test('a failed analysis worker cannot admit calibration before or after draining an old live owner',async()=>{
+ for(const duringDrain of [false,true]){
+  const view=await controller();view.command('input interface');await flush()
+  if(duringDrain){
+   view.command('midi-monitor 10 42');await flush();view.command('calibrate output 1 1 50');await flush()
+   assert.ok(view.observed.live[0].stops>0)
+  }
+  view.worker.emit('exit',1);await flush()
+  if(duringDrain)view.observed.live[0].finish({})
+  else view.command('calibrate output 1 1 50')
+  await flush();assert.equal(view.observed.calibrations.length,0)
+  view.key('q');await view.done;assert.equal(view.process.stdin.isRaw,false)
+ }
+})

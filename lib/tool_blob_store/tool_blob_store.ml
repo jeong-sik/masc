@@ -272,18 +272,6 @@ type range =
   ; total_bytes : int
   }
 
-let range_of_bytes ~offset ~max_bytes bytes =
-  let total_bytes = String.length bytes in
-  let available = max 0 (total_bytes - offset) in
-  let length = min max_bytes available in
-  let content =
-    if offset > total_bytes
-    then ""
-    else String.sub bytes offset length
-  in
-  { content; total_bytes }
-;;
-
 let fetch_range_with ~after_window_read t ~sha256 ~offset ~max_bytes =
   match validate_sha256 sha256 with
   | Error invalid -> Error (Invalid_sha256 invalid)
@@ -305,15 +293,15 @@ let fetch_range_with ~after_window_read t ~sha256 ~offset ~max_bytes =
     let cached =
       Validated_file_map.find_opt path (Atomic.get validated_file_snapshots)
     in
-    (* Cold-cache admission: one owned descriptor streams the whole-file
-       digest through a fixed buffer (never materialising the file) and copies
-       the caller's window out of the same pass.  A nonexistent shard fails
-       fast on that open instead of falling into a whole-file materialising
-       read.
+    (* Cold-cache and changed-snapshot admission: one owned descriptor streams
+       the whole-file digest through a fixed buffer (never materialising the
+       file) and copies the caller's window out of the same pass.  A
+       nonexistent shard fails fast on that open instead of falling into a
+       whole-file materialising read.
 
        The window and the digest come from the same descriptor, so the bytes
-       returned are the bytes hashed by construction (#38972). *)
-    let validate_and_read_cold () =
+       returned are the bytes hashed by construction (#38972, #38874). *)
+    let validate_and_read_streaming () =
       (* The full-file digest is CPU work. Keep cache admission on the caller
          so a cancelled pool wait cannot publish a validated snapshot. *)
       match
@@ -347,15 +335,8 @@ let fetch_range_with ~after_window_read t ~sha256 ~offset ~max_bytes =
           forget_written path;
           Error (Integrity_mismatch { path; expected = sha256; actual }))
     in
-    let validate_whole_snapshot () =
-      match fetch t ~sha256 with
-      | Error _ as error -> error
-      | Ok None -> Ok None
-      | Ok (Some bytes) ->
-        Ok (Some (range_of_bytes ~offset ~max_bytes bytes))
-    in
     (match cached with
-     | None -> validate_and_read_cold ()
+     | None -> validate_and_read_streaming ()
      | Some { snapshot = validated_snapshot; _ } ->
        (match
           Fs_compat.load_owned_regular_file_range
@@ -376,7 +357,7 @@ let fetch_range_with ~after_window_read t ~sha256 ~offset ~max_bytes =
                  validated_snapshot
                  snapshot ->
           Ok (Some { content; total_bytes = snapshot.file_size })
-        | Ok (Some _) -> validate_whole_snapshot ()))
+        | Ok (Some _) -> validate_and_read_streaming ()))
 ;;
 
 let fetch_range t ~sha256 ~offset ~max_bytes =

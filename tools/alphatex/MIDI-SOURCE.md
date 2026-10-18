@@ -34,24 +34,28 @@ overlaps, unmatched offs and unclosed ons. They do not add missing offs or claim
 unique voice interpretation. Zero-length notes remain valid source events.
 
 `editMidiSourceNote` changes pitch, velocity, start/duration or removes a paired
-note transactionally. Edits change only its two source messages; controllers,
+note transactionally. `editMidiSourceNotes` applies a batch and can insert paired
+channel notes into a selected source track. Edits change only the selected source messages; controllers,
 pressure, pitch bend, program/tempo maps, metadata and SysEx remain intact. A
 source-event gap that cannot fit SMF's four-byte delta rejects the edit instead of
-inserting a new semantic event. `midiSourceHarmony` returns Tonal candidates for
+inserting a new semantic event. Accepted changes retain their original on/off IDs
+and source port. Moving either message across a MIDI Port change is rejected;
+there is no implicit route edit. Inserted notes use the active source port at
+their start and must retain it through their off. Edits that change FIFO pairing,
+including cross-track zero-length edits whose off sorts before the on, are
+rejected transactionally. Existing overlap diagnostics remain visible rather
+than making an imported performance invalid. `midiSourceHarmony` returns Tonal candidates for
 note-key intervals at a second position, with optional channel/pattern selection.
 It does not extend key intervals through sustain/sostenuto or infer pedal voices.
 
-This is the source-asset core for import/edit/export and arrangement integration.
-The current phrase TUI and native sender do not yet consume it. Opening these
-assets in the piano roll, event/expression editing, insertion commands, source
-routing selection, full-message audition, clip arrangement, overdub and UMP/MIDI
-2.0 source assets remain work. Do not label this core as a delivered import screen
-or full MIDI support. See [the sequencer design](../../docs/design/tui/MUSIC-SEQUENCER.md).
+This module supplies the source-asset core for import/edit/export and arrangement
+integration. Its tests do not establish a delivered import screen or full MIDI
+support. Event/expression editing, explicit routing, full-message audition, clip
+arrangement, overdub and UMP/MIDI 2.0 source assets require separate integration.
+See [the sequencer design](../../docs/design/tui/MUSIC-SEQUENCER.md).
 
-Contracts: [MIDI Association SMF specification](https://midi.org/standard-midi-files-specification),
+References: [MIDI Association SMF reference index](https://midi.org/standard-midi-files-specification),
 [JZZ SMF API](https://jazz-soft.net/doc/JZZ/midifile.html) and its pinned 1.9.9
-parser/serializer are independent cross-checks. The official download was not
-readable through the browser in this session; that link is not a claim that the
-full PDF was read. Focused fixtures check actual bytes and musical decisions,
+parser/serializer provide independent cross-checks. Focused fixtures check actual bytes and musical decisions,
 including a large vendor payload and preservation through note edits; they do not
 prove every vendor's device behavior.

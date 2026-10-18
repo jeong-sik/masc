@@ -154,6 +154,9 @@ function materialize(source) {
     for (const event of track) {
       if (event.kind === 'meta' && event.type === 0x21) port = event.data[0]
       event.port = port
+      if (changed.has(event.id) && event.port !== byID.get(event.id).port) {
+        throw new Error('MIDI edit changes the original source port; explicit route edits are not supported')
+      }
     }
   }
   return { ...parsed, tracks }
@@ -247,13 +250,25 @@ export function midiSourceHarmony(source, seconds, options = {}) {
     .filter(note => options.channel === undefined || note.channel === options.channel).map(note => note.pitch))].sort((a, b) => a - b)
   return { pitches, notes: pitches.map(Note.fromMidi), candidates: Chord.detect(pitches.map(Note.fromMidi)) }
 }
-export function editMidiSourceNote(source, { id, kind = 'change', pitch, velocity, start, duration, pattern } = {}) {
-  const performance = midiSourcePattern(source, { pattern })
-  const note = performance.notes.find(note => note.id === id)
-  if (!note) throw new Error('No paired MIDI note selected')
+export function midiSourceInfo(source) {
+  const parsed = materialize(source)
+  return { format: parsed.format, timing: parsed.timing, patterns: parsed.format === 2 ? parsed.tracks.length : 1,
+    tracks: parsed.tracks.map((events, index) => ({ index,
+      name: Buffer.from(events.find(event => event.kind === 'meta' && event.type === 3)?.data ?? []).toString('utf8') || `Track ${index + 1}` })) }
+}
+export function editMidiSourceNote(source, edit = {}) { return editMidiSourceNotes(source, [edit], { pattern: edit.pattern }) }
+export function editMidiSourceNotes(source, edits, { pattern } = {}) {
+  const performance = midiSourcePattern(source, { pattern }), info = midiSourceInfo(source)
+  const notes = new Map(performance.notes.map(note => [note.id, note]))
   const next = structuredClone(source)
   const events = new Map(performance.events.map(event => [event.id, event]))
-  const on = events.get(note.id), off = events.get(note.off)
+  const used = new Set(next.insertions.map(event => event.id)), targets = new Map()
+  let number = 1
+  const insert = (track, tick, bytes) => {
+    while (used.has(`new:${number}`)) number++
+    const id = `new:${number++}`; used.add(id)
+    next.insertions.push({ id, track, tick, bytes }); return id
+  }
   const place = (event, value) => {
     const added = next.insertions.findIndex(item => item.id === event.id)
     if (added >= 0) {
@@ -264,15 +279,42 @@ export function editMidiSourceNote(source, { id, kind = 'change', pitch, velocit
       next.changes.push({ id: event.id, ...value })
     }
   }
-  if (kind === 'remove') { place(on, { removed: true }); place(off, { removed: true }) }
-  else if (kind === 'change') {
-    const key = integer(pitch ?? note.pitch, 'MIDI note pitch', 0, 127), vel = integer(velocity ?? note.velocity, 'MIDI note velocity', 1, 127)
-    const at = integer(start ?? note.start, 'MIDI note start'), length = integer(duration ?? note.duration, 'MIDI note duration', 0)
-    const end = integer(at + length, 'MIDI note end')
-    place(on, { tick: at, bytes: [on.bytes[0], key, vel] })
-    place(off, { tick: end, bytes: [off.bytes[0], key, off.bytes[2]] })
-  } else throw new Error('Unknown MIDI note edit')
-  // Reject an unrepresentable edit transactionally, retaining the original.
+  for (const edit of edits) {
+    const { id, kind = 'change', pitch, velocity, start, duration } = edit
+    if (kind === 'insert') {
+      const track = integer(edit.track, 'MIDI insertion track', 0, info.tracks.length - 1)
+      if (info.format === 2 && track !== performance.pattern) throw new Error('Insert into the selected MIDI pattern')
+      const channel = integer(edit.channel, 'MIDI insertion channel', 0, 15)
+      const key = integer(pitch, 'MIDI note pitch', 0, 127), vel = integer(velocity, 'MIDI note velocity', 1, 127)
+      const at = integer(start, 'MIDI note start'), end = integer(at + integer(duration, 'MIDI note duration', 1), 'MIDI note end')
+      const on = insert(track, at, [0x90 | channel, key, vel]), off = insert(track, end, [0x80 | channel, key, 0])
+      // Insertions follow existing same-tick metadata, so the active port at
+      // their start is the source route they must retain through their note-off.
+      const port = performance.events.filter(event => event.track === track && event.tick <= at
+        && event.kind === 'meta' && event.type === 0x21).at(-1)?.data[0] ?? 0
+      targets.set(on, { off, port }); continue
+    }
+    const note = notes.get(id)
+    if (!note || targets.has(id)) throw new Error('No unique paired MIDI note selected')
+    const on = events.get(note.id), off = events.get(note.off)
+    if (kind === 'remove') { place(on, { removed: true }); place(off, { removed: true }); targets.set(id, null) }
+    else if (kind === 'change') {
+      const key = integer(pitch ?? note.pitch, 'MIDI note pitch', 0, 127), vel = integer(velocity ?? note.velocity, 'MIDI note velocity', 1, 127)
+      const at = integer(start ?? note.start, 'MIDI note start'), length = integer(duration ?? note.duration, 'MIDI note duration', 0)
+      const end = integer(at + length, 'MIDI note end')
+      place(on, { tick: at, bytes: [on.bytes[0], key, vel] })
+      place(off, { tick: end, bytes: [off.bytes[0], key, off.bytes[2]] })
+      targets.set(id, { off: note.off, port: note.port })
+    } else throw new Error('Unknown MIDI note edit')
+  }
+  // Reject unrepresentable deltas and edits that would silently pair the changed
+  // key with a different source note-off or move it across a source port change.
   exportMidiSource(next)
+  const pairs = new Map(midiSourcePattern(next, { pattern }).notes.map(note => [note.id, note]))
+  for (const [on, expected] of targets) {
+    if (expected !== null && (pairs.get(on)?.off !== expected.off || pairs.get(on)?.port !== expected.port)) {
+      throw new Error('MIDI edit changes note-off pairing or source port')
+    }
+  }
   return next
 }

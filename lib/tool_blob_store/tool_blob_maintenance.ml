@@ -325,31 +325,33 @@ let references_in_chat_operation_store ~ownership_root path =
               fold_json result (Keeper_semantic_execution.to_json execution)
             in
             match execution.phase with
-            | Keeper_semantic_execution.Recovering
-                { origin =
-                    Keeper_semantic_execution.Gate_binding
-                      { preparation =
-                          { source =
-                              Keeper_semantic_execution.Prepared_agent_core
-                                { canonical_checkpoint_bytes; _ }
-                          ; _
-                          }
-                      ; _
-                      }
-                ; _
-                } ->
-              Result.bind after_record (fun references ->
-                match Yojson.Safe.from_string canonical_checkpoint_bytes with
-                | checkpoint_json ->
-                  references_in_json ~path ~line:1 references checkpoint_json
-                | exception Yojson.Json_error detail ->
-                  Error (Durable_source_parse_failed { path; line = 1; detail }))
+            | Keeper_semantic_execution.Recovering { origin; _ } ->
+              (match origin with
+               | Keeper_semantic_execution.Gate_binding { preparation; _ } ->
+                 (match preparation.source with
+                  | Keeper_semantic_execution.Prepared_agent_core
+                      { canonical_checkpoint_bytes; _ } ->
+                    Result.bind after_record (fun references ->
+                      match Yojson.Safe.from_string canonical_checkpoint_bytes with
+                      | checkpoint_json ->
+                        references_in_json ~path ~line:1 references checkpoint_json
+                      | exception Yojson.Json_error detail ->
+                        Error (Durable_source_parse_failed { path; line = 1; detail }))
+                  | Keeper_semantic_execution.Prepared_official_client _ ->
+                    after_record)
+               | Keeper_semantic_execution.Unconfirmed_sources
+               | Keeper_semantic_execution.Confirmed_undispatched
+               | Keeper_semantic_execution.Checkpointed _
+               | Keeper_semantic_execution.Official_checkpointed _
+               | Keeper_semantic_execution.Interrupted_execution
+               | Keeper_semantic_execution.Runtime_retry _
+               | Keeper_semantic_execution.Gate_wait _ ->
+                 after_record)
             | Keeper_semantic_execution.Preparing
             | Keeper_semantic_execution.Ready
             | Keeper_semantic_execution.Running
             | Keeper_semantic_execution.Resuming_runtime_retry _
             | Keeper_semantic_execution.Resuming_gate _
-            | Keeper_semantic_execution.Recovering _
             | Keeper_semantic_execution.Suspended _
             | Keeper_semantic_execution.Settled _ ->
               after_record)
@@ -498,7 +500,9 @@ let live_references ~base_path ~board_posts_file =
                     ; detail =
                         Keeper_chat_operation_store.error_to_string error
                     })
-             | Ok _ ->
+             | Ok
+                 ( Keeper_chat_operation_store.Missing_store
+                 | Keeper_chat_operation_store.Stored_operations _ ) ->
                Error
                  (Durable_source_parse_failed
                     { path

@@ -9,6 +9,11 @@ import { capturePartNames } from '../captured-source.mjs'
 import { importArrangementCapture, saveArrangement, loadArrangement, prepareArrangementCapture, verifyArrangementAssets } from '../arrangement-files.mjs'
 import { readCapture } from '../session-data.mjs'
 import { arrangementEditor, arrangementCommand } from '../arrangement-editor.mjs'
+import { captureRange, captureRegionTime, captureRegionFromSeconds } from '../capture-time.mjs'
+import { arrangementSchedule, editArrangement } from '../arrangement.mjs'
+import { arrangementPlaybackRequest, prepareArrangementWave, prepareArrangementMidi, prepareArrangementMixed } from '../arrangement-playback.mjs'
+import { Worker } from 'node:worker_threads'
+import { once } from 'node:events'
 
 async function fixture(run) {
   const root = await mkdtemp(join(tmpdir(), 'masc-captured-source-')), input = join(root, 'Original take')
@@ -61,7 +66,10 @@ test('a project owns the whole captured source and survives original removal and
   for (const [role, filename] of Object.entries(capturePartNames)) assert.deepEqual(await readFile(join(snapshot.directory, filename)), bytes[role])
   const editor = arrangementEditor(moved.project)
   assert.deepEqual(arrangementCommand(editor, 'open-take').effect, { kind: 'open-take', asset: asset.id })
-  assert.throws(() => arrangementCommand(editor, `place ${asset.id} 0`), /WAV and UMP together/)
+  const placed = arrangementCommand(editor, `place ${asset.id} 0`).editor
+  assert.equal(placed.project.lanes[0].kind, 'capture')
+  assert.equal(placed.project.clips[0].offset, '0'); assert.equal(placed.project.clips[0].extent, '4800000')
+  assert.deepEqual(asset.midiTime, { first: String(BigInt(manifest.clock.requestedStart) + 1200000n), last: String(BigInt(manifest.clock.requestedStart) + 3600000n) })
 }))
 
 test('view snapshots keep their owned bytes while a changed project part fails admission', async () => fixture(async ({ root, input, bytes }) => {
@@ -87,4 +95,87 @@ test('manifest/data mismatches refuse attachment and abort leaves no private imp
   const before = await readdir(root)
   await assert.rejects(prepareArrangementCapture(project, project.assets[0].id, { sourceRoot: dirname(path), directory: root, signal: controller.signal }), { name: 'AbortError' })
   assert.deepEqual(await readdir(root), before)
+}))
+
+test('captured regions retain exact source clocks through time trims, compressed repeats, undo, save-as and worker reopen', async () => fixture(async ({ root, input, bytes }) => {
+  const worker = new Worker(new URL('../arrangement-worker.mjs', import.meta.url))
+  let id = 0
+  const request = async value => {
+    const response = once(worker, 'message'); worker.postMessage({ ...value, id: ++id })
+    const [message] = await response; assert.equal(message.ok, true, message.error); return message.result
+  }
+  try {
+    const path = join(root, 'old', 'song.json'), imported = await request({ kind: 'import-take', project: newArrangement({ tempo: 120 }), path: input, projectPath: path })
+    let editor = arrangementEditor(imported.project)
+    const command = line => { editor = arrangementCommand(editor, line).editor }
+    command('capture-region asset-1 4 .05 .1 2000000')
+    const placed = editor.project
+    assert.deepEqual(placed.clips.map(clip => [clip.offset, clip.extent, clip.repeat]), [['1200000','2400000',2000000]])
+    const schedule = arrangementSchedule(placed)
+    assert.equal(schedule.length, 1); assert.equal(schedule[0].startSeconds, 2); assert.equal(schedule[0].durationSeconds, .1)
+    assert.deepEqual(schedule[0].audio, { offsetFrames: '0', frameCount: '2400', startSeconds: .05 })
+    command('trim-time .1 .1'); command('duplicate 8'); command('move 12'); command('undo'); command('redo')
+    assert.equal(editor.project.clips[1].position, 12 * 960)
+    assert.deepEqual(editor.project.clips.map(clip => [clip.offset, clip.extent]), [['2400000','2400000'],['2400000','2400000']])
+    const muted = editArrangement(editor.project, { kind: 'lane-mute', id: 'lane-1' }); assert.deepEqual(arrangementSchedule(muted), [])
+    assert.equal(arrangementSchedule(muted, { all: true }).length, 2)
+    const before = editor
+    for (const line of ['trim 01 2','trim -1 2','trim-time .1 0','trim-time .15 .1','repeat 0','region asset-1 0 0 4800001','place asset-1 0 1']) assert.throws(() => arrangementCommand(editor, line))
+    assert.equal(editor, before)
+    // Undo the whole import in another history state. Save-as must carry the
+    // retained source, then a redo can restore its clock-aware regions.
+    const target = join(root, 'moved', 'song.json')
+    const revision = await request({ kind: 'save', project: newArrangement(), path: target, revision: null,
+      sourceRoot: dirname(path), retainedAssets: imported.project.assets })
+    await rm(input, { recursive: true }); await rm(dirname(path), { recursive: true })
+    await request({ kind: 'save', project: editor.project, path: target, revision, sourceRoot: dirname(target) })
+    const moved = await loadArrangement(target)
+    assert.deepEqual(moved.project, editor.project); assert.equal(arrangementSchedule(moved.project).length, 2)
+    for (const [role, part] of Object.entries(moved.project.assets[0].parts)) assert.deepEqual(await readFile(join(dirname(target), part.file)), bytes[role])
+  } finally { await worker.terminate() }
+}))
+
+test('half-open capture spans preserve MIDI pre-roll and endpoint packets, with inward whole-frame audio trims', async () => fixture(async ({ root, input }) => {
+  const imported = await importArrangementCapture(newArrangement(), input, { projectPath: join(root, 'project', 'song.json') })
+  const asset = imported.project.assets[0], origin = BigInt(asset.manifest.clock.requestedStart)
+  const withTail = { ...asset, midiTime: { first: String(origin - 1n), last: String(origin + 4800000n) } }
+  assert.deepEqual(captureRange(withTail), { origin: String(origin - 1n), extent: '4800002' })
+  const full = captureRegionTime(withTail, { offset: '0', extent: '4800002' })
+  assert.deepEqual(full.audio, { offsetFrames: '0', frameCount: '4800', startSeconds: 2400001 / 24000000 })
+  const inward = captureRegionTime(asset, { offset: '2400001', extent: '1000' })
+  assert.deepEqual(inward.audio, { offsetFrames: '1', frameCount: '1', startSeconds: 499 / 24000000 })
+  assert.equal(captureRegionTime(asset, { offset: '2400001', extent: '498' }).audio, null)
+  assert.equal(captureRegionTime(asset, { offset: '0', extent: '2400000' }).audio, null)
+  const fractional = { ...asset, manifest: { ...asset.manifest, audioFrames: '1', sampleRate: 44100,
+    midiPacketCount: '0', clock: { ...asset.manifest.clock, firstAudioHostTime: String(origin) } }, midiTime: { first: null, last: null } }
+  assert.equal(captureRange(fractional).extent, '545')
+  assert.deepEqual(captureRegionTime(fractional, { offset: '0', extent: '545' }).audio, { offsetFrames: '0', frameCount: '1', startSeconds: 0 })
+  assert.equal(captureRegionTime(fractional, { offset: '0', extent: '544' }).audio, null)
+  assert.deepEqual(captureRegionFromSeconds(asset, '0.0000000416666666666666666667', '.000001'), { offset: '2', extent: '23' })
+}))
+
+test('capture timing provenance is verified against raw source packets on reopen and snapshot preparation', async () => fixture(async ({ root, input }) => {
+  const path = join(root, 'project', 'song.json'), { project } = await importArrangementCapture(newArrangement(), input, { projectPath: path })
+  const wrong = structuredClone(project); wrong.assets[0].midiTime.last = wrong.assets[0].midiTime.first
+  await assert.rejects(saveArrangement(path, wrong), /clock provenance/)
+  await assert.rejects(prepareArrangementCapture(wrong, 'asset-1', { sourceRoot: dirname(path), directory: root }), /clock provenance/)
+  const invalid = structuredClone(project); invalid.assets[0].midiTime.first = '-1'
+  assert.throws(() => arrangementEditor(invalid), /first MIDI time/)
+}))
+
+test('every arrangement playback entrypoint diagnoses audible capture regions instead of silently filtering them', async () => fixture(async ({ root, input }) => {
+  const path = join(root, 'project', 'song.json'), { project } = await importArrangementCapture(newArrangement(), input, { projectPath: path })
+  const placed = arrangementCommand(arrangementEditor(project), 'place asset-1 0').editor.project
+  for (const kind of ['audio','midi','mixed']) assert.throws(() => arrangementPlaybackRequest(placed, { kind }), /Captured-region playback/)
+  const options = { sourceRoot: dirname(path), directory: root, midiOutput: '42' }
+  for (const prepare of [prepareArrangementWave, prepareArrangementMidi, prepareArrangementMixed]) await assert.rejects(prepare(placed, options), /Captured-region playback/)
+  const muted = editArrangement(placed, { kind: 'lane-mute', id: 'lane-1' })
+  assert.throws(() => arrangementPlaybackRequest(muted, { kind: 'mixed' }), /No audible/)
+  const worker = new Worker(new URL('../arrangement-worker.mjs', import.meta.url))
+  try {
+    for (const [id, kind] of ['prepare-wave','prepare-midi','prepare-mixed'].entries()) {
+      const response = once(worker, 'message'); worker.postMessage({ id, kind, project: placed, ...options })
+      const [message] = await response; assert.equal(message.ok, false); assert.match(message.error, /Captured-region playback/)
+    }
+  } finally { await worker.terminate() }
 }))

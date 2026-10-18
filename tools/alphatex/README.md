@@ -264,7 +264,8 @@ source playback with trims, finite repeats, pause/resume, beat seek and explicit
 asset/port outputs. Mixed WAV/MIDI regions use the [shared native clock](ARRANGEMENT-CLOCK.md).
 [Captured takes](CAPTURED-SOURCES.md) attach their original WAV, raw UMP and clock
 files with `:import-take DIRECTORY`; Enter opens their waveform/MIDI viewer.
-Captured-take region playback and overdubs remain unfinished.
+Captured takes can be placed, trimmed in seconds, repeated and saved as paired
+regions. Native captured-region playback and arrangement overdubs remain unfinished.
 
 Saved captures also have [paired original WAV/UMP playback](CAPTURE-PLAYBACK.md).
 Select MIDI and audio outputs in the take viewer; original MIDI 2.0 words and

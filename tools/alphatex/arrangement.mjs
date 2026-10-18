@@ -1,3 +1,4 @@
+import { validateCapturedSource } from './captured-source.mjs'
 import { validateMidiSource, midiSourcePattern } from './midi-source.mjs'
 import { PPQ } from './sequencer-project.mjs'
 
@@ -31,6 +32,7 @@ export function validateArrangementAsset(asset) {
   text(asset?.id, 'asset identity'); text(asset.name, 'asset name')
   switch (asset.kind) {
     case 'midi': validateMidiSource(asset.source); break
+    case 'capture': validateCapturedSource(asset); break
     case 'wave': {
       if (typeof asset.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(asset.sha256)
           || asset.file !== `assets/${asset.sha256}.wav`) throw new Error('Invalid portable WAV identity/path')

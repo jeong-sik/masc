@@ -67,7 +67,7 @@ test('actual IO worker preserves sources in redo history when saving to a differ
 
 const flush=()=>new Promise(resolve=>setImmediate(resolve))
 async function controller(options={}){
-  const observed={requests:[],saved:[],recovered:[],terminated:false,players:[],removed:[]},process=new EventEmitter()
+  const observed={requests:[],saved:[],recovered:[],terminated:false,players:[],removed:[],takes:[]},process=new EventEmitter()
   process.stdin=Object.assign(new EventEmitter(),{isTTY:true,isRaw:false,setRawMode(value){this.isRaw=value},resume(){},pause(){}})
   process.stdout=Object.assign(new EventEmitter(),{isTTY:true,columns:100,rows:24,write(){}});process.stderr={write(){}}
   let owner
@@ -75,7 +75,7 @@ async function controller(options={}){
     constructor(){super();owner=this}
     postMessage(job){
       observed.requests.push(job)
-      if(job.kind==='save')queueMicrotask(()=>{
+      if(job.kind==='save'&&!options.holdSave)queueMicrotask(()=>{
         if(typeof options.failSave==='function'?options.failSave(job):options.failSave)this.emit('message',{id:job.id,ok:false,error:'Publication outcome unavailable'})
         else {observed.saved.push(job);this.emit('message',{id:job.id,ok:true,result:'revision'})}
       })
@@ -85,6 +85,11 @@ async function controller(options={}){
   const slot=`arrange-controller-${randomUUID()}`
   globalThis[slot]={process,Worker:OwnedWorker,arrangementSchedule,arrangementRoute,selectArrangementRoute,arrangementPlaybackRequest,...editorAPI,join,dirname,resolve,tmpdir,randomUUID,
     emitKeypressEvents(){},safeText:String,
+    viewSession(options){
+      let finish
+      const completion=new Promise(resolve=>{finish=resolve})
+      observed.takes.push({options,finish});return completion
+    },
     verifyArrangementAssets:async()=>new Map(),
     loadArrangement:async()=>{throw new Error('Unexpected load')},
     mkdtemp:async()=>'/owned-recovery',writeFile:async()=>{},rm:async path=>{observed.removed.push(path)},openPlayback(options){
@@ -256,10 +261,11 @@ test('document mutation stops the admitted playback revision while cursor motion
 
 async function closeController(view) {
   view.abort.abort()
-  for (const job of view.observed.requests.filter(job=>['prepare-wave','prepare-midi','prepare-mixed','import-wave','import-midi'].includes(job.kind))) {
+  for (const job of view.observed.requests.filter(job=>['prepare-wave','prepare-midi','prepare-mixed','prepare-take','import-wave','import-midi','import-take'].includes(job.kind))) {
     view.worker.emit('message',{id:job.id,ok:false,cancelled:true,error:'Cancelled'})
   }
   for (const player of view.observed.players) player.finish()
+  for (const take of view.observed.takes) take.finish()
   await view.done
 }
 test('explicit MIDI selection cannot route a WAV arrangement to default audio; choosing audio clears MIDI bindings',async()=>{
@@ -334,4 +340,113 @@ test('mixed preparation cancellation refuses a late combined plan and cleans its
     await flush();assert.equal(view.observed.players.length,0)
     assert.ok(view.observed.removed.includes('/owned-recovery/mixed-late'))
   } finally { await closeController(view) }
+})
+
+async function primeCapture(view) {
+  view.command('import-take /music/My  capture');await flush()
+  const job=view.observed.requests.find(job=>job.kind==='import-take')
+  assert.equal(job.path,'/music/My  capture')
+  const asset={id:'capture-1',name:'Take',kind:'capture',parts:Object.fromEntries(['manifest','audio','audioBlocks','midi'].map((role,index)=>{
+    const sha256=String(index+1).repeat(64);return [role,{file:`assets/${sha256}.${role==='audio'?'wav':'capture'}`,sha256}]
+  })),manifest:{schemaVersion:1,state:'recorded',failure:null,audio:'audio.wav',audioBlocks:'audio-blocks.jsonl',midi:'midi.ump.jsonl',
+    sampleRate:48000,channels:1,audioFrames:'4800',midiPacketCount:'1',input:{id:'audio',name:'Interface'},midiSources:[{id:'keys',name:'Keys'}],
+    clock:{kind:'mach-host-time',numer:1,denom:1,requestedStart:'100',firstAudioHostTime:'200'}}}
+  view.worker.emit('message',{id:job.id,ok:true,result:{project:editArrangement(job.project,{kind:'asset-add',asset}),asset:asset.id}});await flush()
+  return asset
+}
+test('captured source viewer waits for playback, borrows input and returns ownership before removing its snapshot',async()=>{
+  const view=await controller()
+  try {
+    await primeWave(view);view.key('space');await flush()
+    const play=view.observed.requests.find(job=>job.kind==='prepare-wave')
+    view.worker.emit('message',{id:play.id,ok:true,result:{path:'/owned-recovery/play/plan.json',format:'wave-arrangement'}});await flush()
+    const player=view.observed.players[0];await primeCapture(view)
+    view.key('return');await flush()
+    const job=view.observed.requests.find(job=>job.kind==='prepare-take')
+    assert.equal(job.asset,'capture-1');assert.ok(player.commands.includes('stop'))
+    view.worker.emit('message',{id:job.id,ok:true,result:{directory:'/owned-recovery/take-1'}});await flush()
+    assert.equal(view.observed.takes.length,0)
+    player.finish();await flush()
+    const take=view.observed.takes[0]
+    assert.equal(take.options.directory,'/owned-recovery/take-1');assert.equal(take.options.embedded,true)
+    assert.equal(take.options.exportRoot,'/synthetic/exports');assert.equal(take.options.root,'/synthetic/recordings')
+    assert.equal(view.process.stdin.listenerCount('keypress'),0)
+    view.command('title Not admitted by parent');await flush()
+    assert.ok(!view.observed.removed.includes(take.options.directory))
+    take.finish();await flush()
+    assert.equal(view.process.stdin.listenerCount('keypress'),1)
+    assert.ok(view.observed.removed.includes(take.options.directory))
+    view.command('title Returned');await flush();view.key('q');await view.done
+    assert.equal(view.observed.saved.at(-1).project.title,'Returned')
+  } finally {await closeController(view)}
+})
+test('root cancellation aborts the take owner and drains it before deleting sources or restoring raw input',async()=>{
+  const view=await controller()
+  try {
+    await primeCapture(view);view.command('open-take');await flush()
+    const job=view.observed.requests.find(job=>job.kind==='prepare-take')
+    view.worker.emit('message',{id:job.id,ok:true,result:{directory:'/owned-recovery/take-2'}});await flush()
+    const take=view.observed.takes[0];let done=false;view.done.then(()=>{done=true})
+    view.abort.abort();await flush()
+    assert.equal(take.options.signal.aborted,true);assert.equal(done,false)
+    assert.ok(!view.observed.removed.includes(take.options.directory));assert.equal(view.process.stdin.isRaw,true)
+    take.finish();await view.done
+    assert.ok(view.observed.removed.includes(take.options.directory));assert.equal(view.process.stdin.isRaw,false)
+    assert.equal(view.process.stdin.listenerCount('keypress'),0)
+  } finally {await closeController(view)}
+})
+test('cancelled take preparation cannot open a late snapshot and removes its owned copy',async()=>{
+  const view=await controller()
+  try {
+    await primeCapture(view);view.command('open-take');await flush()
+    const job=view.observed.requests.find(job=>job.kind==='prepare-take')
+    view.command('stop');await flush()
+    assert.ok(view.observed.requests.some(value=>value.kind==='cancel'&&value.request===job.id))
+    view.worker.emit('message',{id:job.id,ok:true,result:{directory:'/owned-recovery/take-late'}});await flush()
+    assert.equal(view.observed.takes.length,0);assert.ok(view.observed.removed.includes('/owned-recovery/take-late'))
+  } finally {await closeController(view)}
+})
+test('Save As retains all captured parts in redo history before moving the project source root',async()=>{
+  const view=await controller()
+  try {
+    const asset=await primeCapture(view);view.command('undo');await flush()
+    view.command('save-as /moved/song.json');await flush()
+    const save=view.observed.saved.at(-1)
+    assert.equal(save.project.assets.length,0);assert.equal(save.retainedAssets.length,1)
+    assert.deepEqual(save.retainedAssets[0].parts,asset.parts)
+    view.command('redo');view.command('open-take');await flush()
+    const job=view.observed.requests.find(job=>job.kind==='prepare-take')
+    assert.equal(job.sourceRoot,'/moved');assert.deepEqual(job.project.assets[0],asset)
+    view.worker.emit('message',{id:job.id,ok:false,cancelled:true,error:'Cancelled'});await flush()
+  } finally {await closeController(view)}
+})
+
+test('already admitted take requests wait for the current leaf lifetime, including a delayed save between them',async()=>{
+  const view=await controller({holdSave:true})
+  try {
+    await primeCapture(view)
+    view.command('open-take');view.command('save');view.command('open-take');await flush()
+    const first=view.observed.requests.find(job=>job.kind==='prepare-take'),save=view.observed.requests.find(job=>job.kind==='save')
+    assert.ok(first&&save)
+    view.worker.emit('message',{id:first.id,ok:true,result:{directory:'/owned-recovery/take-first'}});await flush()
+    assert.equal(view.observed.takes.length,1)
+    view.worker.emit('message',{id:save.id,ok:true,result:'revision'});await flush()
+    assert.equal(view.observed.requests.filter(job=>job.kind==='prepare-take').length,1)
+    const prior=view.observed.takes[0]
+    assert.equal(prior.options.signal.aborted,false);assert.equal(view.observed.takes.length,1)
+    assert.ok(!view.observed.removed.includes(prior.options.directory))
+    prior.finish();await flush()
+    const second=view.observed.requests.filter(job=>job.kind==='prepare-take')[1];assert.ok(second)
+    view.worker.emit('message',{id:second.id,ok:true,result:{directory:'/owned-recovery/take-second'}});await flush()
+    assert.equal(view.observed.takes.length,2)
+    const current=view.observed.takes[1]
+    assert.equal(current.options.signal.aborted,false);assert.equal(view.process.stdin.listenerCount('keypress'),0)
+    assert.ok(view.observed.removed.includes(prior.options.directory))
+    view.abort.abort();await flush();assert.equal(current.options.signal.aborted,true)
+    current.finish();await view.done
+    assert.equal(view.process.stdin.listenerCount('keypress'),0)
+  } finally {
+    for(const job of view.observed.requests.filter(job=>job.kind==='save'))view.worker.emit('message',{id:job.id,ok:true,result:'revision'})
+    await closeController(view)
+  }
 })

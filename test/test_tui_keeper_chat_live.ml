@@ -710,7 +710,8 @@ let test_the_settled_event_carries_its_outcome () =
    with. Before it, a wait of minutes and a wait of seconds look the same. *)
 let test_interactive_acceptance_reports_authority () =
   let receipt = `Assoc ["outcome", `String "stale_control"; "chat_control_token", `String "new-owner-control";
-    "signalled", `Bool false; "resumed", `Bool false; "interrupt_error", `Null] in
+    "signalled", `Bool false; "resumed", `Bool false; "interrupt_error", `Null;
+    "interrupt_error_code", `Null; "interrupt_incident_id", `Null] in
   let body = sse (custom "KEEPER_CHAT_OPERATION_ACCEPTED" (`Assoc ["operation_id", `String "tui-request-1";
     "state", `String "Queued"; "queued_count", `Int 2; "interactive", receipt])) in
   match feed_whole body with

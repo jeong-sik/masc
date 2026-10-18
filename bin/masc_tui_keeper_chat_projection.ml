@@ -610,10 +610,11 @@ let acceptance_state_of_string = function
   | "Cancelled" -> Ok Cancelled
   | value -> Error (Printf.sprintf "unknown Keeper chat operation state %S" value)
 
-let decode_interactive_receipt json =
+let decode_interactive_receipt ~operation_id json =
   let surface = "KEEPER_CHAT_OPERATION_ACCEPTED.value.interactive" in
   let* fields = exact_object_fields ~surface
-    ~allowed:["outcome"; "chat_control_token"; "signalled"; "resumed"; "interrupt_error"] json in
+    ~allowed:["outcome"; "chat_control_token"; "signalled"; "resumed";
+      "interrupt_error"; "interrupt_error_code"; "interrupt_incident_id"] json in
   let* raw = required_string ~surface "outcome" fields in
   let* outcome = match raw with "applied" -> Ok Applied | "stale_control" -> Ok Stale_control
     | "paused" -> Ok Paused | "replayed" -> Ok Replayed | _ -> Error (surface ^ ": unknown outcome") in
@@ -623,9 +624,19 @@ let decode_interactive_receipt json =
     | None | Some _ -> Error (surface ^ "." ^ key ^ " must be boolean") in
   let* signalled = boolean "signalled" in
   let* resumed = boolean "resumed" in
-  let* interrupt_error = match List.assoc_opt "interrupt_error" fields with
-    | Some `Null -> Ok None | Some (`String detail) -> Ok (Some detail)
-    | None | Some _ -> Error (surface ^ ".interrupt_error must be string or null") in
+  let nullable_string key = match List.assoc_opt key fields with
+    | Some `Null -> Ok None
+    | Some (`String value) -> Ok (Some value)
+    | None | Some _ -> Error (surface ^ "." ^ key ^ " must be string or null") in
+  let* interrupt_error = nullable_string "interrupt_error" in
+  let* interrupt_error_code = nullable_string "interrupt_error_code" in
+  let* interrupt_incident_id = nullable_string "interrupt_incident_id" in
+  let* () = match interrupt_error, interrupt_error_code, interrupt_incident_id with
+    | None, None, None -> Ok ()
+    | Some _, Some "interrupt_failed", Some incident_id
+      when String.equal incident_id operation_id -> Ok ()
+    | None, _, _ -> Error (surface ^ ": successful control reports an error incident")
+    | Some _, _, _ -> Error (surface ^ ": interrupt failure requires its code and operation identity") in
   let* () = match outcome with
     | Applied -> Ok ()
     | Stale_control | Paused | Replayed ->
@@ -657,7 +668,7 @@ let decode_acceptance ?expected_request_id json =
   in
   let* interactive = match List.assoc_opt "interactive" fields with
     | None -> Ok None
-    | Some json -> decode_interactive_receipt json |> Result.map Option.some
+    | Some json -> decode_interactive_receipt ~operation_id json |> Result.map Option.some
         |> Result.map_error (fun detail -> Malformed_event detail) in
   match expected_request_id with
   | Some expected when not (String.equal operation_id expected) ->

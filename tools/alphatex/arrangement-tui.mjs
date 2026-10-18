@@ -73,7 +73,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
   const jobs = new Map(), players = new Map(), preparations = new Set(), wasRaw = process.stdin.isRaw
   let transport = { kind: 'stopped' }, generation = 0, preparing = null, route = arrangementRoute({ output, midiOutput })
   let monitoring = null, monitorOutput = null
-  let liveMidi = null, liveRoutes = []
+  let liveMidi = null, liveRoutes = [], liveTransitions = Promise.resolve()
   const playerPlans = new Map(), planInspections = new Map()
   let recording = null, input = null, midiInput = 'all', transportPending = false, inputDevices = null, discoveryTicket = 0
   const discovery = new AbortController()
@@ -118,6 +118,11 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
       }).finally(() => { if (monitoring === owned) monitoring = null; draw() })
     } catch (error) { monitoring = null; monitorOutput = null; status = error.message; draw() }
     draw()
+  }
+  function transitionLiveMidi(action) {
+    const pending = liveTransitions.then(action)
+    liveTransitions = pending.catch(() => {})
+    return pending
   }
   async function settleLiveMidi() {
     const owned = liveMidi
@@ -276,40 +281,43 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
         if (generation === expected) preparing = null
         await Promise.allSettled([...players.values()])
         if (!accepting || generation !== expected) return
-        await settleLiveMidi()
-        if (!accepting || generation !== expected) return
-        const live = startLiveMidi(result)
-        if (live) await live.ready
-        if (!accepting || generation !== expected || live && liveMidi !== live) return
-        transport = { kind: 'starting' }
-        const handle = openPlayback({ path: result.path, format: result.format, output, midiOutput: result.midiOutput, midiBindings: result.bindings,
-          onEvent(event) {
-            if (generation !== expected) return
-            const captured = recording?.generation === expected ? recording : null
-            if (event.kind === 'error') {
-              if (captured) captured.failure = new Error(event.message)
-              captured?.controller.abort(); captured?.handle?.stop(); status = event.message; return
-            }
-            if (event.kind === 'stopped' && captured) {
-              if (captured.epoch) captured.epoch.duration = Math.min(captured.epoch.duration, event.currentTime)
-              captured.controller.abort(); captured.handle?.stop()
-            }
-            if (!accepting) return
-            transportPending = false
-            transport = { ...transport, kind: event.kind, event }
-            draw()
-          } })
-        transport = { ...transport, handle }
-        playerPlans.set(handle, result)
-        const completion = handle.completion.then(event => {
-          if (recording?.generation === expected) { recording.controller.abort(); recording.handle?.stop() }
-          if (generation === expected) { transport = { kind: 'stopped', event }; status = 'Playback stopped'; draw() }
-        }, error => {
-          if (recording?.generation === expected) { recording.failure = error; recording.controller.abort(); recording.handle?.stop() }
-          if (generation === expected) { transport = { kind: 'stopped' }; status = error.message; draw() }
-        }).finally(() => { players.delete(handle); playerPlans.delete(handle) })
-        players.set(handle, completion)
-        await completion
+        const admitted = await transitionLiveMidi(async () => {
+          await settleLiveMidi()
+          if (!accepting || generation !== expected) return
+          const live = startLiveMidi(result)
+          if (live) await live.ready
+          if (!accepting || generation !== expected || live && liveMidi !== live) return
+          transport = { kind: 'starting' }
+          const handle = openPlayback({ path: result.path, format: result.format, output, midiOutput: result.midiOutput, midiBindings: result.bindings,
+            onEvent(event) {
+              if (generation !== expected) return
+              const captured = recording?.generation === expected ? recording : null
+              if (event.kind === 'error') {
+                if (captured) captured.failure = new Error(event.message)
+                captured?.controller.abort(); captured?.handle?.stop(); status = event.message; return
+              }
+              if (event.kind === 'stopped' && captured) {
+                if (captured.epoch) captured.epoch.duration = Math.min(captured.epoch.duration, event.currentTime)
+                captured.controller.abort(); captured.handle?.stop()
+              }
+              if (!accepting) return
+              transportPending = false
+              transport = { ...transport, kind: event.kind, event }
+              draw()
+            } })
+          transport = { ...transport, handle }
+          playerPlans.set(handle, result)
+          const completion = handle.completion.then(event => {
+            if (recording?.generation === expected) { recording.controller.abort(); recording.handle?.stop() }
+            if (generation === expected) { transport = { kind: 'stopped', event }; status = 'Playback stopped'; draw() }
+          }, error => {
+            if (recording?.generation === expected) { recording.failure = error; recording.controller.abort(); recording.handle?.stop() }
+            if (generation === expected) { transport = { kind: 'stopped' }; status = error.message; draw() }
+          }).finally(() => { players.delete(handle); playerPlans.delete(handle) })
+          players.set(handle, completion)
+          return { handle, completion }
+        })
+        if (admitted) await admitted.completion
       } catch (error) {
         if (generation === expected) { preparing = null; transport = { kind: 'stopped' }; status = error.message; draw() }
       } finally {
@@ -353,7 +361,9 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
         try { if (result) await rm(result.directory, { recursive: true, force: true }) }
         finally {
           if (takeTask === preparation) takeTask = null
-          startMonitoring(); startLiveMidi(); draw()
+          startMonitoring()
+          transitionLiveMidi(async () => { await settleLiveMidi(); const live = startLiveMidi(); if (live) await live.ready }).catch(() => {})
+          draw()
         }
       }
     })()
@@ -397,16 +407,18 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
         if (value.output && !input) throw new Error('Select :input AUDIO_UID before monitoring')
         await settleMonitoring(); monitorOutput = value.output; startMonitoring(); break
       case 'midi-monitor': {
-        let next
-        switch (value.action) {
-          case 'clear': next = []; break
-          case 'remove': next = liveRoutes.filter(route => route.source !== value.source || route.destination !== value.destination); break
-          case 'set': next = [...liveRoutes.filter(route => route.source !== value.route.source || route.destination !== value.route.destination), value.route]; break
-          default: throw new Error('Unknown live MIDI route change')
-        }
-        if (next.length) next = liveMidiPlan(next, []).routes
-        await settleLiveMidi(); liveRoutes = next
-        const live = startLiveMidi(); if (live) await live.ready
+        await transitionLiveMidi(async () => {
+          let next
+          switch (value.action) {
+            case 'clear': next = []; break
+            case 'remove': next = liveRoutes.filter(route => route.source !== value.source || route.destination !== value.destination); break
+            case 'set': next = [...liveRoutes.filter(route => route.source !== value.route.source || route.destination !== value.route.destination), value.route]; break
+            default: throw new Error('Unknown live MIDI route change')
+          }
+          if (next.length) next = liveMidiPlan(next, []).routes
+          await settleLiveMidi(); liveRoutes = next
+          const live = startLiveMidi(); if (live) await live.ready
+        })
         break
       }
       case 'midi-input': midiInput = value.input; status = 'MIDI input selected'; break
@@ -580,6 +592,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     try {
       await task
       await Promise.allSettled([settleMonitoring(), settleLiveMidi()])
+      await liveTransitions
       await Promise.allSettled([...preparations])
       await Promise.allSettled([...players.values()])
       if (editor.project !== saved) {

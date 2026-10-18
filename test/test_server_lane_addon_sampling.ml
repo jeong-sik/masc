@@ -417,7 +417,7 @@ max_reply_bytes=4194304
         ~invoke:(fun ~route:_ ~request:_ _params ->
           incr invocations; Error "fixture forbids provider invocation") ()) in
   let backend : Lane_addon_runtime.For_testing.backend = {
-    start=(fun ~sw ~state_owner:_ ~instance_id ~package ~binding ~on_created ->
+    start=(fun ~sw ~state_owner:_ ~instance_id ~package ~binding ~on_engine ~is_live_instance:_ ~on_created ->
       let _handler = require (factory ~sw ~store ~instance_id ~package ~binding) in
       starts := instance_id :: !starts;
       let connection : Lane_addon_runtime.For_testing.connection = {
@@ -425,10 +425,13 @@ max_reply_bytes=4194304
         act=(fun ~arguments:_ -> Error "read-only fixture");
         observe=(fun ~binding:_ ~sources:_ -> Ok {Lane_addon_types.rows=[];coverage=[]});
         stop=(fun () -> Ok ())} in
+      ignore (on_engine (Masc.Lane_addon_lifecycle.Docker_engine "fixture-engine"));
       on_created connection; Ok connection);
     acquire=(fun ~access:_ ~store:_ ~package:_ ~resolve_machine_output:_ ~resolve_lane_output:_ ~binding:_ -> Ok (`List []));
     image_ready=(fun ~package:_ -> Ok ());
-    recover_stop=(fun ~runtime:_ ~state_owner:_ ~instance_id:_ ~container_id:_ -> Ok ())} in
+    recover_stop=(fun ~runtime:_ ~state_owner:_ ~instance_id:_ ~engine:_ ~container_id:_ -> Ok ());
+    condition_met = (fun ~runtime:_ _ -> true);
+    sweep = (fun ~runtime:_ ~is_live_instance:_ -> Ok [])} in
   Lane_addon_runtime.For_testing.with_backend backend (fun () ->
     let reconcile () = require (Lane_addon_runtime.reconcile_configuration ~config ~directory) in
     let inspect () = Lane_addon_runtime.dispatch ~config ~operation:Lane_addon_runtime.Inspect (`Assoc [])

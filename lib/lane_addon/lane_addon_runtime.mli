@@ -177,19 +177,33 @@ module For_testing : sig
       (Mcp_protocol.Mcp_types.tool_result, Lane_addon_call_context.invocation_error) result;
     action_schema : unit -> Yojson.Safe.t option;
     act : arguments:Yojson.Safe.t -> (Lane_addon_action.package_result, string) result;
-    stop : unit -> (unit, string) result;
+    stop : unit -> (unit, Lane_addon_lifecycle.failure) result;
     container_id : string;
   }
   type backend = {
     start : sw:Eio.Switch.t -> state_owner:Lane_addon_worker_state.owner option -> instance_id:string -> package:Lane_addon_types.package -> binding:Yojson.Safe.t ->
-      on_created:(connection -> unit) -> (connection, string) result;
+      on_engine:(Lane_addon_lifecycle.engine -> (unit, string) result) ->
+      is_live_instance:(string -> bool) ->
+      on_created:(connection -> unit) -> (connection, Lane_addon_lifecycle.failure) result;
+    (** [on_engine] receives the engine identity before the first create and
+        returns once it is persisted. A start that creates without calling it
+        leaves the container with no engine on record. *)
     acquire : access:Lane_addon_sources.access -> store:Lane_addon_store.t -> package:Lane_addon_types.package ->
       resolve_machine_output:(Machine_lane.t -> (Lane_addon_sources.machine_output, string) result) ->
     resolve_lane_output:(installation_id:string -> (Lane_addon_sources.lane_output, string) result) ->
       binding:Yojson.Safe.t -> (Yojson.Safe.t, string) result;
-    recover_stop : runtime:Lane_addon_types.runtime -> state_owner:Lane_addon_worker_state.owner option -> instance_id:string -> container_id:string option ->
-      (unit, string) result;
+    recover_stop : runtime:Lane_addon_types.runtime -> state_owner:Lane_addon_worker_state.owner option -> instance_id:string -> engine:Lane_addon_lifecycle.engine ->
+      container_id:string option -> (unit, Lane_addon_lifecycle.failure) result;
+    (** [Ok] only when [engine], the one recorded at create, answered that the
+        container is gone or removed. *)
     image_ready : package:Lane_addon_types.package -> (unit, string) result;
+    condition_met : runtime:Lane_addon_types.runtime -> Lane_addon_lifecycle.condition -> bool;
+    (** Whether a waiting failure's condition holds now. False also when it
+        cannot be established. *)
+    sweep : runtime:Lane_addon_types.runtime -> is_live_instance:(string -> bool) ->
+      (Lane_addon_slot.sweep_item list, Lane_addon_lifecycle.failure) result;
+    (** Removes the containers of this base path that no live incarnation
+        owns; run once per runtime after its engine answers. *)
   }
   val with_backend : backend -> (unit -> 'a) -> 'a
   val with_action_writer :

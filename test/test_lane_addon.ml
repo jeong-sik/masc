@@ -14,6 +14,8 @@ module Runtime = struct
 end
 module Types = Lane_addon_types
 module Store = Lane_addon_store
+module Fake = Lane_addon_fake_engine
+module Lifecycle = Lane_addon_lifecycle
 
 let unwrap = function Ok value -> value | Error message -> fail message
 let member key json = Yojson.Safe.Util.member key json
@@ -37,6 +39,10 @@ type fake = {
   principals : Lane_addon_call_context.principal list ref;
   controller : string option ref;
   admissions : Machine_controller_contract.admission option list ref;
+  start_gate : unit Eio.Promise.t * unit Eio.Promise.u;
+  teardown_gate : unit Eio.Promise.t * unit Eio.Promise.u;
+  world : Fake.t;
+  home : Fake.engine;
 }
 
 let fake_output : Types.output = {
@@ -48,10 +54,19 @@ let fake_output : Types.output = {
 }
 
 let make_backend ?observe_step () =
+  let home = Fake.docker "engine-a" in
   let state = { bindings=Hashtbl.create 4; calls=Hashtbl.create 4; stops=Hashtbl.create 4; modes=Hashtbl.create 4;
-                recovery=ref []; principals=ref []; controller=ref None; admissions=ref [] } in
+                recovery=ref []; principals=ref []; controller=ref None; admissions=ref [];
+                start_gate = Eio.Promise.create (); teardown_gate = Eio.Promise.create ();
+                world = Fake.create home; home } in
+  let proven ~engine work =
+    Lane_addon_slot.proven (Fake.port state.world) ~expected:engine ~lift:Fun.id work in
   let backend : Runtime.For_testing.backend = {
-    start = (fun ~sw:_ ~state_owner:_ ~instance_id ~(package : Types.package) ~binding ~on_created ->
+    start = (fun ~sw ~state_owner:_ ~instance_id ~(package : Types.package) ~binding ~on_engine ~is_live_instance:_ ~on_created ->
+      match (Fake.port state.world).read_engine () with
+      | Error (Lifecycle.Unreachable detail) -> Error (Lifecycle.Engine_unreachable detail)
+      | Error (Lifecycle.Identity_unreadable detail) -> Error (Lifecycle.Worker_failed detail)
+      | Ok engine ->
       let released, release = Eio.Promise.create () in
       let stopped = ref false in
       Hashtbl.add state.modes instance_id package.id;
@@ -93,27 +108,44 @@ let make_backend ?observe_step () =
         stop = (fun () ->
           let count = 1 + Option.value ~default:0 (Hashtbl.find_opt state.stops instance_id) in
           Hashtbl.replace state.stops instance_id count;
-          if package.id = "stop-retry" && count = 1 then Error "cleanup refused"
-          else begin
-            if not !stopped then (stopped := true; Eio.Promise.resolve release ());
-            Ok ()
-          end)
+          if package.id = "stop-retry" && count = 1 then Error (Masc.Lane_addon_lifecycle.Cleanup_unconfirmed "cleanup refused")
+          else if package.id = "stop-cut-short" && count = 1 then Eio.Fiber.await_cancel ()
+          else
+            proven ~engine (fun () -> Fake.remove state.world (Store.digest instance_id); Ok ())
+            |> Result.map (fun () ->
+              if not !stopped then (stopped := true; Eio.Promise.resolve release ())))
       } in
-      if package.id = "start-error" then Error "startup unavailable"
-      else begin
+      if package.id = "start-error" then Error (Masc.Lane_addon_lifecycle.Worker_failed "startup unavailable")
+      else if package.id = "start-gated" then begin
+        (* The worker's own teardown outlives the failure it reports, as a real
+           worker's container cleanup does. *)
+        Eio.Fiber.fork ~sw (fun () -> Eio.Promise.await (fst state.teardown_gate));
+        Eio.Promise.await (fst state.start_gate);
+        Error (Masc.Lane_addon_lifecycle.Worker_failed "startup unavailable")
+      end else begin
+        (match on_engine engine with
+         | Ok () -> ()
+         | Error detail -> fail ("engine persistence: " ^ detail));
+        ignore (Fake.add (Fake.current state.world) ~id:(Store.digest instance_id)
+          ~name:("masc-lane-" ^ Store.digest instance_id)
+          ~labels:["masc.lane.instance", instance_id] ());
         on_created connection;
         if package.id = "start-hang" then
-          (Eio.Promise.await released; Error "initialization stopped")
+          (Eio.Promise.await released; Error (Masc.Lane_addon_lifecycle.Worker_failed "initialization stopped"))
         else Ok connection
       end);
-    image_ready = (fun ~package:_ -> Ok ());
+    image_ready = (fun ~package ->
+      if package.id = "image-missing" then Error "image fixture/image is not on this host" else Ok ());
     acquire = (fun ~access:_ ~store:_ ~package:_ ~resolve_machine_output:_ ~resolve_lane_output:_ ~binding:_ ->
       Ok (`List [`Assoc ["original_bytes", `String "captured source before rotation"]]));
-    recover_stop = (fun ~runtime:_ ~state_owner:_ ~instance_id ~container_id ->
+    recover_stop = (fun ~runtime:_ ~state_owner:_ ~instance_id ~engine ~container_id ->
       match container_id with
       | Some id when id = Store.digest instance_id ->
-          state.recovery := (instance_id, id) :: !(state.recovery); Ok ()
-      | Some _ | None -> Error "owner mismatch")
+          proven ~engine (fun () -> Fake.remove state.world id; Ok ())
+          |> Result.map (fun () -> state.recovery := (instance_id, id) :: !(state.recovery))
+      | Some _ | None -> Error (Masc.Lane_addon_lifecycle.Cleanup_unconfirmed "owner mismatch"));
+    condition_met = (fun ~runtime:_ condition -> Fake.condition_met state.world condition);
+    sweep = (fun ~runtime:_ ~is_live_instance:_ -> Ok [])
   } in state, backend
 
 let manifest ?refresh_policy dir mode =
@@ -144,6 +176,9 @@ let attach config dir mode =
     "run_id", `String "world"; "binding", `Assoc ["sources", `List []]])
   |> text "instance_id"
 let detach config id = ignore (unwrap (dispatch config Runtime.Detach ["instance_id", `String id]))
+let detach_refused config id = match dispatch config Runtime.Detach ["instance_id", `String id] with
+  | Error _ -> ()
+  | Ok _ -> fail "a Detach whose cleanup is refused must report the failure"
 let await clock predicate =
   let rec loop () = if predicate () then () else (Eio.Time.sleep clock 0.001; loop ()) in loop ()
 let await_phase clock config id expected = await clock (fun () -> phase (instance config id) = expected)
@@ -228,10 +263,64 @@ let test_start_and_cleanup_failures_remain_optional () = with_fixture (fun env _
     (dispatch config Runtime.Observe ["instance_id", `String startup_error]));
   let retry = attach config dir "stop-retry" in
   await clock (fun () -> int "observation_seq" (instance config retry) = 1);
-  detach config retry;
+  detach_refused config retry;
   await_phase clock config retry "failed";
   detach config retry;
   await_phase clock config retry "detached")
+
+(* A Detach that arrives while the start is still running must wait for the
+   cleanup the start's failure leaves behind. The start's state turns Failed
+   while its worker is still being torn down, and the Detach, woken at that
+   moment, used to report that failure as its own and leave the declaration to
+   be attached again. *)
+let test_detach_waits_for_a_start_that_fails_under_it () =
+  with_fixture (fun env sw config dir state ->
+    let clock = Eio.Stdenv.clock env in
+    let id = attach config dir "start-gated" in
+    await clock (fun () -> Hashtbl.mem state.modes id);
+    let outcome = Eio.Fiber.fork_promise ~sw (fun () ->
+      dispatch config Runtime.Detach ["instance_id", `String id]) in
+    Eio.Promise.resolve (snd state.start_gate) ();
+    await_phase clock config id "failed";
+    Eio.Time.sleep clock 0.05;
+    check bool "Detach is still waiting while the failed start winds down" true
+      (Option.is_none (Eio.Promise.peek outcome));
+    Eio.Promise.resolve (snd state.teardown_gate) ();
+    (match Eio.Promise.await_exn outcome with
+     | Ok _ -> ()
+     | Error message -> failf "Detach reported a failure although the cleanup then succeeded: %s" message);
+    (* The run fiber had already ended, so the released entry leaves the list. *)
+    await clock (fun () ->
+      List.for_all (fun value -> text "instance_id" value <> id)
+        (inspect config |> member "instances" |> Yojson.Safe.Util.to_list)))
+
+exception Cleanup_cut_short
+
+(* A cleanup fiber can end without reaching its last lines: a step in its tail
+   raises, or the switch it runs on is cancelled. Detach waits on the cleanup,
+   and the exception is swallowed where the fiber is forked, so the cleanup
+   must not stay marked as running. The test cuts the cleanup short at the one
+   point a caller can reach, the end of the switch it runs on. *)
+let test_a_cleanup_that_is_cut_short_can_run_again () =
+  with_fixture (fun env sw config dir state ->
+    let clock = Eio.Stdenv.clock env in
+    let id = attach config dir "stop-cut-short" in
+    await clock (fun () -> int "observation_seq" (instance config id) = 1);
+    let cut = try
+      Eio.Switch.run (fun owner ->
+        Eio_context.set_switch owner;
+        Eio.Fiber.fork ~sw:owner (fun () ->
+          ignore (dispatch config Runtime.Detach ["instance_id", `String id]));
+        await clock (fun () -> Hashtbl.find_opt state.stops id = Some 1);
+        Eio.Switch.fail owner Cleanup_cut_short);
+      false
+    with Cleanup_cut_short -> true in
+    Eio_context.set_switch sw;
+    check bool "the first cleanup was cut short" true cut;
+    check Alcotest.int "it had started its stop" 1 (Hashtbl.find state.stops id);
+    detach config id;
+    await_phase clock config id "detached";
+    check Alcotest.int "the second Detach ran the cleanup again" 2 (Hashtbl.find state.stops id))
 
 let test_evidence_is_optional_retained_and_delivery_is_only_acceptance () =
   with_fixture (fun env _ config dir state ->
@@ -308,9 +397,48 @@ let test_evidence_is_optional_retained_and_delivery_is_only_acceptance () =
     let store = Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
     let fields = Yojson.Safe.Util.to_assoc captured in
     unwrap (Store.save_binding store ~instance_id:id
-      (`Assoc (("phase", Types.phase_to_json Types.Attached) :: List.remove_assoc "phase" fields)));
+      (`Assoc (("phase", Types.phase_to_json Types.Attached)
+        :: ("lifecycle", Masc.Lane_addon_lifecycle.state_to_json Masc.Lane_addon_lifecycle.Attached)
+        :: List.remove_assoc "lifecycle" (List.remove_assoc "phase" fields))));
     detach config id; await_phase clock config id "detached";
     check Alcotest.int "one exact persisted-container recovery" 1 (List.length !(state.recovery)))
+
+(* A record left by an earlier process says a container exists. The container
+   is released only by the engine that holds it: asked through a context that
+   reaches another, empty engine, the record stays failed and the container
+   stays where it is. *)
+let test_retained_record_is_released_only_by_its_recorded_engine () =
+  with_fixture (fun env _sw config dir state ->
+    let clock = Eio.Stdenv.clock env in
+    let id = attach config dir "good" in
+    await clock (fun () -> int "observation_seq" (instance config id) = 1);
+    let captured = instance config id in
+    let container = Store.digest id in
+    detach config id; await_phase clock config id "detached";
+    (* The earlier release is taken back: the container is on its engine again. *)
+    ignore (Fake.add (Fake.current state.world) ~id:container ~name:("masc-lane-" ^ container)
+      ~labels:["masc.lane.instance", id] ());
+    Runtime.For_testing.reset ();
+    let store = Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+    let fields = Yojson.Safe.Util.to_assoc captured in
+    unwrap (Store.save_binding store ~instance_id:id
+      (`Assoc (("phase", Types.phase_to_json Types.Attached)
+        :: ("lifecycle", Lifecycle.state_to_json Lifecycle.Attached)
+        :: List.remove_assoc "lifecycle" (List.remove_assoc "phase" fields))));
+    Fake.point_at state.world (Fake.docker "engine-b");
+    detach_refused config id;
+    await_phase clock config id "failed";
+    check string "another engine's silence is a mismatch, not a release" "engine_mismatch"
+      (instance config id |> member "lifecycle" |> member "failed" |> member "cause" |> text "kind");
+    check bool "the container is still on its engine" true (Fake.holds state.home container);
+    check Alcotest.int "no recovery was recorded" 0 (List.length !(state.recovery));
+    Fake.point_at state.world state.home;
+    detach config id;
+    await_phase clock config id "detached";
+    check bool "the recorded engine released the container" false (Fake.holds state.home container);
+    let release = instance config id |> member "lifecycle" |> member "release" in
+    check string "the release names the engine" "engine-a" (member "engine" release |> text "id");
+    check string "the release names the container" container (text "container_id" release))
 
 let test_request_refusals_preserve_runtime_failure_distinction () =
   with_fixture (fun _env _sw config dir _state ->
@@ -447,6 +575,29 @@ binding_schema = '''{"type":"object","properties":{"sources":{"type":"array","it
     detach config id;
     await_phase clock config id "detached")
 
+let test_direct_attach_looks_for_the_image_first () =
+  with_fixture (fun env _sw config dir state ->
+    let attach_missing () = Lane_addon_runtime.dispatch
+      ~access:Lane_addon_sources.Operator_configuration ~config ~operation:Runtime.Attach
+      (`Assoc ["manifest_path", `String (manifest dir "image-missing");
+               "run_id", `String "world"; "binding", `Assoc ["sources", `List []]]) in
+    (match attach_missing () with
+     | Error (Lane_addon_runtime.Runtime_failed _) -> ()
+     | Error (Request_rejected detail) -> failf "a missing image is not a rejected request: %s" detail
+     | Ok _ -> fail "direct attach created an instance although the image is missing");
+    check Alcotest.int "a missing image starts no worker" 0 (Hashtbl.length state.modes);
+    check Alcotest.int "a missing image leaves no instance behind" 0
+      (inspect config |> member "instances" |> Yojson.Safe.Util.to_list |> List.length);
+    (* The same refusal on every attempt: nothing accumulates between them. *)
+    ignore (attach_missing ());
+    check Alcotest.int "a repeated attempt still leaves no instance" 0
+      (inspect config |> member "instances" |> Yojson.Safe.Util.to_list |> List.length);
+    let clock = Eio.Stdenv.clock env in
+    let id = attach config dir "good" in
+    await clock (fun () -> int "observation_seq" (instance config id) = 1);
+    detach config id;
+    await_phase clock config id "detached")
+
 let test_file_activity_preserves_explicit_observation () =
   with_fixture ~acquire:Lane_addon_sources.acquire (fun env _sw config dir _state ->
     let clock = Eio.Stdenv.clock env in
@@ -520,7 +671,7 @@ let test_capture_cannot_rewrite_detach_failure () =
     await clock (fun () -> int "observation_seq" (instance config id)=1);
     Runtime.notify_activity ~config ~activity:Lane_addon_sources.Tool_completed;
     Eio.Promise.await entered;
-    detach config id;
+    detach_refused config id;
     await_phase clock config id "failed";
     Eio.Promise.resolve release ();
     Eio.Promise.await returned;
@@ -1772,6 +1923,8 @@ let () = run "Lane Add-on runtime" ["optional extension", [
   test_case "machine source dependencies reject cycles" `Quick test_machine_dependencies_reject_cycles;
   test_case "machine activity applies to worker calls" `Quick test_machine_activity_applies_to_worker_calls;
   test_case "machine export host admission" `Quick test_machine_export_host_admission;
+  test_case "a retained record is released only by its recorded engine" `Quick
+    test_retained_record_is_released_only_by_its_recorded_engine;
   test_case "tool exports bind live incarnations" `Quick test_tool_exports_bind_live_incarnations;
   test_case "unreadable retained bindings are isolated" `Quick test_unreadable_retained_bindings_are_isolated;
   test_case "MCP attribution never authorizes private Lane reads" `Quick
@@ -1803,9 +1956,13 @@ let () = run "Lane Add-on runtime" ["optional extension", [
     test_file_activity_preserves_explicit_observation;
   test_case "direct attach enforces package binding before worker startup" `Quick
     test_direct_attach_validates_package_binding;
+  test_case "direct attach looks for the image before it creates an instance" `Quick
+    test_direct_attach_looks_for_the_image_first;
   test_case "missing targets refuse while storage failures remain faults" `Quick
     test_request_refusals_preserve_runtime_failure_distinction;
   test_case "hung and failed observers preserve primary progress" `Quick test_hang_error_coalescing_and_primary_progress;
   test_case "startup and cleanup failures stay local" `Quick test_start_and_cleanup_failures_remain_optional;
+  test_case "a cleanup that is cut short can run again" `Quick test_a_cleanup_that_is_cut_short_can_run_again;
+  test_case "Detach waits for a start that fails under it" `Quick test_detach_waits_for_a_start_that_fails_under_it;
   test_case "evidence remains optional and durable across detach" `Quick test_evidence_is_optional_retained_and_delivery_is_only_acceptance;
 ]]

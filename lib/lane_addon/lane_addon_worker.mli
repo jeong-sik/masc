@@ -7,6 +7,8 @@ type error =
   | Invalid_package of string
   | Docker_failed of { operation : string; detail : string }
   | Engine_failed of { runtime : Lane_addon_types.runtime; operation : string; detail : string }
+  | Engine_fault of { runtime : Lane_addon_types.runtime; fault : Lane_addon_lifecycle.engine_fault }
+  | Lifecycle of Lane_addon_lifecycle.failure
   | Protocol_failed of string
   | Host_refusal of Lane_addon_call_context.host_refusal
   | Invalid_observation of string
@@ -22,7 +24,16 @@ type mount = { source : string; destination : string }
     [control_timeout_sec] bounds each engine control command and cancels its
     switch so the child is killed and reaped. A host sampling declaration
     requires [sampling_handler]; disabled packages refuse a supplied callback.
-    Both mismatches fail before container creation. *)
+    Both mismatches fail before container creation.
+
+    [on_engine] receives the engine identity before the first create and must
+    persist it; an error stops the start before any create. [is_live_instance]
+    says which worker incarnations are live in the calling process. A
+    persistent slot held by a container of a dead incarnation of the same
+    installation is removed before create; any other holder is refused with
+    [Slot_foreign] and left alone. The default treats every incarnation as
+    live, so nothing is removed. [scope] labels the container with the base
+    path of the server that made it, which is what lets {!sweep} find it. *)
 val start :
   sw:Eio.Switch.t ->
   clock:_ Eio.Time.clock ->
@@ -34,6 +45,9 @@ val start :
   ?mounts:mount list ->
   ?docker_command:string ->
   ?container_command:string ->
+  ?on_engine:(Lane_addon_lifecycle.engine -> (unit, string) result) ->
+  ?is_live_instance:(string -> bool) ->
+  ?scope:string ->
   ?on_created:(t -> unit) ->
   ?artifact_store:Lane_addon_store.t ->
   ?sampling_handler:Lane_addon_sampling.t ->
@@ -52,13 +66,16 @@ val stop : t -> (unit, error) result
     container's ownership label before removal. [None] recovers a lost create
     receipt using this instance's deterministic container name, then verifies
     both the name and ownership label before removing the resolved exact ID.
-    In either case, absence requires a successful query to the retained runtime.
-    Each query is bounded by [control_timeout_sec]. [runtime] defaults to Docker
+    In either case, absence requires a successful query to the retained runtime,
+    and counts only when the engine that answered is [engine], the one recorded
+    when the container was created (see {!Lane_addon_slot.proven}). Each query
+    is bounded by [control_timeout_sec]. [runtime] defaults to Docker
     for callers that predate runtime selection. *)
 val recover_stop :
   clock:_ Eio.Time.clock -> control_timeout_sec:float ->
   mgr:_ Eio.Process.mgr ->
   instance_id:string -> container_id:string option ->
+  engine:Lane_addon_lifecycle.engine ->
   ?runtime:Lane_addon_types.runtime ->
   ?state_owner:Lane_addon_worker_state.owner ->
   ?docker_command:string -> ?container_command:string -> unit -> (unit, error) result
@@ -79,6 +96,39 @@ val act : t -> arguments:Yojson.Safe.t -> (Lane_addon_action.package_result, err
 val container_id : t -> string
 val container_name : t -> string
 val error_to_string : error -> string
+
+val start_failure : error -> Lane_addon_lifecycle.failure
+val cleanup_failure : error -> Lane_addon_lifecycle.failure
+(** The typed failure the runtime records for a failed start, or a cleanup
+    that cannot be confirmed. *)
+
+(** Removes the containers this base path's servers left behind. See
+    {!Lane_addon_slot.sweep}. [scope] is the label {!start} was given. *)
+val sweep :
+  clock:_ Eio.Time.clock -> control_timeout_sec:float ->
+  mgr:_ Eio.Process.mgr -> runtime:Lane_addon_types.runtime -> scope:string ->
+  is_live_instance:(string -> bool) ->
+  ?docker_command:string -> ?container_command:string -> unit ->
+  (Lane_addon_slot.sweep_item list, Lane_addon_lifecycle.failure) result
+
+(** True when the container that made [start] or a cleanup refuse with
+    [Slot_foreign] is gone or no longer carries those labels. False also when
+    that cannot be read. *)
+val holder_changed :
+  clock:_ Eio.Time.clock -> control_timeout_sec:float ->
+  mgr:_ Eio.Process.mgr -> runtime:Lane_addon_types.runtime ->
+  ?docker_command:string -> ?container_command:string ->
+  Lane_addon_lifecycle.holder -> bool
+
+(** The identity of the engine the control command currently reaches. The exit
+    status of [docker info] (or [container system status]) alone separates
+    [Unreachable] from an identity; no error text is classified. Each query is
+    bounded by [control_timeout_sec]. *)
+val read_engine :
+  clock:_ Eio.Time.clock -> control_timeout_sec:float ->
+  mgr:_ Eio.Process.mgr -> runtime:Lane_addon_types.runtime ->
+  ?docker_command:string -> ?container_command:string -> unit ->
+  (Lane_addon_lifecycle.engine, error) result
 
 (** Read-only engine inspection. Failure does not imply that the image is
     absent. [control_timeout_sec] also bounds this engine query. *)

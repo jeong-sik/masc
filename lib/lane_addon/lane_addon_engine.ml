@@ -3,6 +3,22 @@ open Lane_addon_types
 type mount = { source : string; destination : string }
 type lookup = Name of string | Id of string
 
+(* Every container this host creates carries the worker incarnation that made
+   it; a container for persistent state also carries the state owner. *)
+let instance_label = "masc.lane.instance"
+let state_owner_label = "masc.lane.state.owner"
+
+(* Names the base path of the server that made the container. Several servers
+   can share one engine, so a sweep must only ever see its own. *)
+let scope_label = "masc.lane.scope"
+
+type held = {
+  container_id : string;
+  name : string;
+  instance : string option;
+  state_owner : string option;
+}
+
 let ( let* ) = Result.bind
 let digest value = Digestif.SHA256.(to_hex (digest_string value))
 let owned_name runtime instance_id = match runtime with
@@ -24,8 +40,14 @@ let mount_argument runtime ({ source; destination } : mount) =
     | Docker -> Printf.sprintf "type=bind,src=%s,dst=%s,readonly" source destination
     | Apple_container -> Printf.sprintf "type=bind,source=%s,target=%s,readonly" source destination)
 
-let create_arguments package ~name ~instance_id ~image ~package_mount ~mounts ~state_mounts =
-  let common = ["--name"; name; "--label"; "masc.lane.instance=" ^ instance_id] in
+let create_arguments package ~name ~instance_id ~state_owner ~scope ~image ~package_mount ~mounts ~state_mounts =
+  let common = ["--name"; name; "--label"; instance_label ^ "=" ^ instance_id]
+    @ (match state_owner with
+       | None -> []
+       | Some owner -> ["--label"; state_owner_label ^ "=" ^ owner])
+    @ (match scope with
+       | None -> []
+       | Some scope -> ["--label"; scope_label ^ "=" ^ scope]) in
   let controls = match package.runtime with
     | Docker ->
         let memory = Int64.to_string package.resources.memory_bytes in
@@ -61,6 +83,12 @@ let list_arguments runtime lookup = match runtime with
   | Apple_container -> ["list"; "--all"; "--format"; "json"]
 
 let parse raw = try Ok (Yojson.Safe.from_string raw) with Yojson.Json_error detail -> Error detail
+
+let scoped_list_arguments runtime scope = match runtime with
+  | Docker ->
+      ["container"; "ls"; "--all"; "--no-trunc"; "--filter"; "label=" ^ scope_label ^ "=" ^ scope;
+       "--format"; "{{json .ID}}"]
+  | Apple_container -> ["list"; "--all"; "--format"; "json"]
 let member key = function `Assoc fields -> List.assoc_opt key fields | _ -> None
 let rec path keys value = match keys with
   | [] -> Some value
@@ -130,20 +158,93 @@ let verify_container runtime ~name ~resources ~image_digest raw =
              | _ -> Error "Apple container image digest differs from the inspected local image")
        | _ -> Error "Apple container identity or resource settings are absent")
 
-let verify_owner runtime ~instance_id ~name ~id raw =
+(* A blank label names nobody, the same as an absent one. It is read as absent
+   here so that a record naming the holder never carries a blank, which the
+   record's own decoder refuses. *)
+let label_value labels key = match Option.bind labels (member key) with
+  | None | Some `Null -> Ok None
+  | Some (`String value) -> Ok (if String.trim value = "" then None else Some value)
+  | Some _ -> Error ("label " ^ key ^ " is not text")
+
+let held_of_inspect runtime raw =
   let* entry = one raw in
-  let actual, actual_name, labels = match runtime with
-    | Docker -> member "Id" entry, member "Name" entry, path ["Config"; "Labels"] entry
-    | Apple_container -> member "id" entry, path ["configuration"; "id"] entry,
-        path ["configuration"; "labels"] entry in
-  let name_matches = match name with
-    | None -> true
-    | Some expected -> actual_name = Some (`String (match runtime with Docker -> "/" ^ expected | Apple_container -> expected)) in
-  if actual = Some (`String id) && name_matches
-     && (match runtime with Docker -> true | Apple_container -> actual_name = Some (`String id))
-     && Option.bind labels (member "masc.lane.instance") = Some (`String instance_id)
-  then Ok ()
-  else Error "container identity and masc.lane.instance label must match the persisted binding"
+  match runtime with
+  | Docker ->
+      (match member "Id" entry, member "Name" entry with
+       | Some (`String id), Some (`String name)
+         when valid_id id && String.length name > 1 && name.[0] = '/' ->
+           let labels = path ["Config"; "Labels"] entry in
+           let* instance = label_value labels instance_label in
+           let* state_owner = label_value labels state_owner_label in
+           Ok { container_id = id; name = String.sub name 1 (String.length name - 1);
+                instance; state_owner }
+       | _ -> Error "container identity or name is absent")
+  | Apple_container ->
+      (match member "id" entry, path ["configuration"; "id"] entry with
+       | Some (`String id), Some (`String configured) when String.equal id configured ->
+           let labels = path ["configuration"; "labels"] entry in
+           let* instance = label_value labels instance_label in
+           let* state_owner = label_value labels state_owner_label in
+           Ok { container_id = id; name = id; instance; state_owner }
+       | _ -> Error "container identity or name is absent")
+
+(* Docker lists one JSON string per line and filters by label itself. The
+   Apple runtime lists every container, so the label is filtered here. *)
+let listed_scoped_ids runtime ~scope raw = match runtime with
+  | Docker ->
+      let lines = String.split_on_char '\n' raw |> List.filter (fun line -> String.trim line <> "") in
+      List.fold_left (fun result line ->
+        let* ids = result in
+        let* value = parse line in
+        match value with
+        | `String id when valid_id id -> Ok (id :: ids)
+        | _ -> Error "unexpected container identity") (Ok []) lines
+      |> Result.map List.rev
+  | Apple_container ->
+      let* value = parse raw in
+      (match value with
+       | `List entries ->
+           List.fold_left (fun result entry ->
+             let* ids = result in
+             match member "id" entry, path ["configuration"; "id"] entry with
+             | Some (`String id), Some (`String configured) when String.equal id configured ->
+                 let* labelled = label_value (path ["configuration"; "labels"] entry) scope_label in
+                 Ok (if labelled = Some scope then id :: ids else ids)
+             | _ -> Error "container list has an incomplete identity") (Ok []) entries
+           |> Result.map List.rev
+       | _ -> Error "expected an Apple container list")
+
+(* The identity command is the same structural probe for reachability: it
+   either exits 0 with an identity or it does not. Neither outcome is read out
+   of an error message. *)
+let info_arguments runtime = match runtime with
+  | Docker -> ["info"; "--format"; "{{.ID}}"]
+  | Apple_container -> ["system"; "status"; "--format"; "json"]
+
+let max_engine_identity_bytes = 256
+
+let engine_of_info runtime raw : (Lane_addon_lifecycle.engine, Lane_addon_lifecycle.engine_fault) result =
+  let unreadable detail = Error (Lane_addon_lifecycle.Identity_unreadable detail) in
+  match runtime with
+  | Docker ->
+      let id = String.trim raw in
+      if id = "" then unreadable "engine reported no ID"
+      else if String.length id > max_engine_identity_bytes then unreadable "engine ID is too long"
+      else if String.exists (fun c -> Char.code c <= 32 || Char.code c = 127) id then
+        unreadable "engine ID contains whitespace or control characters"
+      else Ok (Lane_addon_lifecycle.Docker_engine id)
+  | Apple_container ->
+      (match parse raw with
+       | Error detail -> unreadable detail
+       | Ok value ->
+           (match member "status" value, member "appRoot" value with
+            | Some (`String "running"), Some (`String root)
+              when String.trim root <> "" && not (Filename.is_relative root) ->
+                Ok (Lane_addon_lifecycle.Apple_app_root root)
+            | Some (`String "running"), _ -> unreadable "Apple container service reported no application root"
+            | Some (`String status), _ ->
+                Error (Lane_addon_lifecycle.Unreachable ("Apple container service status is " ^ status))
+            | _, _ -> unreadable "Apple container service reported no status"))
 
 let image_arguments runtime image = match runtime with
   | Docker -> ["image"; "inspect"; "--format"; "{{.Id}}"; image]
@@ -185,7 +286,7 @@ let verify_volume runtime ~name ~owner raw =
     | Apple_container -> member "id" entry, path ["configuration"; "labels"] entry in
   if actual = Some (`String name)
      && (match runtime with Docker -> true | Apple_container -> path ["configuration"; "name"] entry = Some (`String name))
-     && Option.bind labels (member "masc.lane.state.owner") = Some (`String owner)
+     && Option.bind labels (member state_owner_label) = Some (`String owner)
   then Ok () else Error "persistent state volume belongs to a different owner"
 let state_mount runtime name = match runtime with
   | Docker -> "type=volume,src=" ^ name ^ ",dst=/state,volume-nocopy"

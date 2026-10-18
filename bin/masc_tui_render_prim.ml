@@ -133,6 +133,8 @@ let clamped_scroll_now (state : state) = function
   | Keeper_list_scroll _ -> Keeper_list_scroll state.keeper_list_scroll
   | Context_inspector_scroll _ ->
       Context_inspector_scroll state.context_inspector_scroll
+  | Context_inspector_response_scroll _ ->
+      Context_inspector_response_scroll state.context_inspector_response_scroll
 
 (* Where one wheel notch leaves a reader: as far as [j] or [k] moves it, one
    row. The wheel used to arrive as a key that only list arms knew, so over an
@@ -180,6 +182,8 @@ let reader_after_wheel (reader : clamped_scroll)
   | Preset_detail_scroll value -> Some (Preset_detail_scroll (step value))
   | Context_inspector_scroll value ->
       Some (Context_inspector_scroll (step value))
+  | Context_inspector_response_scroll value ->
+      Some (Context_inspector_response_scroll (step value))
   (* The chat reads its own wheel, three rows a notch, and its scroll counts
      rows up from the newest message rather than down from the top. *)
   | Message_scroll _ -> None
@@ -4497,6 +4501,109 @@ let context_exact_input_summary ~width ~scale
   , total )
 
 
+(* Only the explicit response reader projects its complete Markdown. Keep
+   one immutable projection across row counting, painting and scrolling; the
+   request list must not pay for a body it no longer previews. Identity and
+   display inputs belong in the key, including terminal theme changes. *)
+type context_response_projection =
+  { response_keeper : string option
+  ; response_target : Masc_tui_context_inspector.target
+  ; response_parts : Masc_tui_context_inspector.response_part list
+  ; response_width : int
+  ; response_palette_generation : int
+  ; response_table_frame : bool
+  ; response_lines : string list
+  }
+
+let context_response_projection = ref None
+
+let context_response_target_equal left right =
+  let module Inspector = Masc_tui_context_inspector in
+  match left, right with
+  | Inspector.Recent left, Inspector.Recent right -> left = right
+  | Inspector.Pinned left, Inspector.Pinned right -> Ids.Turn_ref.equal left right
+  | Inspector.Recent _, Inspector.Pinned _
+  | Inspector.Pinned _, Inspector.Recent _ -> false
+
+let context_response_body_lines ~width state parts =
+  let generation = Masc_tui_terminal_palette.(snapshot_generation (snapshot ())) in
+  match !context_response_projection with
+  | Some cached
+    when cached.response_keeper = state.context_inspector_keeper
+         && context_response_target_equal cached.response_target state.context_inspector_target
+         && cached.response_parts == parts
+         && cached.response_width = width
+         && cached.response_palette_generation = generation
+         && cached.response_table_frame = !table_frame_enabled -> cached.response_lines
+  | Some _ | None ->
+      let lines = List.concat_map
+          (function
+            | Masc_tui_context_inspector.Reply_text text ->
+                document_markdown ~width (Keeper_chat.terminal_safe_text text)
+            | Masc_tui_context_inspector.Request_failure detail ->
+                List.map (fun line -> (Theme.bad ()) ^ line ^ Ansi.reset)
+                  (Context_bars.wrap ~width
+                     ("Request failed: " ^ Keeper_chat.terminal_safe_text detail))
+            | Masc_tui_context_inspector.Tool_steps rows ->
+                List.concat_map (fun row ->
+                    Context_bars.wrap ~width (Keeper_chat.terminal_safe_text row)
+                    |> List.map (fun line -> Ansi.dim ^ line ^ Ansi.reset)) rows
+            | Masc_tui_context_inspector.Reasoning_lines rows ->
+                List.concat_map (fun row ->
+                    Context_bars.wrap ~width ("· " ^ Keeper_chat.terminal_safe_text row)
+                    |> List.map (fun line -> Ansi.dim ^ line ^ Ansi.reset)) rows)
+          parts in
+      context_response_projection := Some
+          { response_keeper = state.context_inspector_keeper
+          ; response_target = state.context_inspector_target
+          ; response_parts = parts
+          ; response_width = width
+          ; response_palette_generation = generation
+          ; response_table_frame = !table_frame_enabled
+          ; response_lines = lines };
+      lines
+
+let context_response_lines ~cols state observation =
+  let module Inspector = Masc_tui_context_inspector in
+  let width = max 1 (framed_inner_width cols - 2) in
+  let lines = match observation with
+    | Inspector.Pending -> [ Ansi.dim ^ "  Response observation is still loading" ^ Ansi.reset ]
+    | Inspector.Observed (Error detail) ->
+        [ (Theme.bad ()) ^ "  Response unavailable: "
+          ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset ]
+    | Inspector.Observed (Ok { Inspector.parts; source }) ->
+        let caption, empty = match source with
+          | Inspector.Newest_history_page ->
+              "response in the newest history page",
+              "This turn's reply is not in the newest history page"
+          | Inspector.Exact_turn_transcript ->
+              "response from the retained turn transcript",
+              "No assistant response was recorded in the retained turn transcript" in
+        [ "  " ^ Context_bars.band ~width ~title:"RESPONSE" ~caption; "" ]
+        @ (match parts with
+           | [] -> [ Ansi.dim ^ "  " ^ empty ^ Ansi.reset ]
+           | _ -> context_response_body_lines ~width state parts) in
+  Plain (lines, None)
+
+let context_response_summary observation =
+  let module Inspector = Masc_tui_context_inspector in
+  match observation with
+  | Inspector.Pending -> Ansi.dim ^ "  Response loading · 4:response" ^ Ansi.reset
+  | Inspector.Observed (Error _) -> (Theme.bad ()) ^ "  Response unavailable · 4:response" ^ Ansi.reset
+  | Inspector.Observed (Ok { Inspector.parts = []; source = Newest_history_page }) ->
+      Ansi.dim ^ "  Response not in newest history page · 4:response" ^ Ansi.reset
+  | Inspector.Observed (Ok { parts = []; source = Exact_turn_transcript }) ->
+      Ansi.dim ^ "  No assistant response in retained transcript · 4:response" ^ Ansi.reset
+  | Inspector.Observed (Ok { parts; _ }) ->
+      let count, failures = List.fold_left (fun (count, failures) part ->
+          count + 1, failures + (match part with Inspector.Request_failure _ -> 1 | _ -> 0))
+          (0, 0) parts in
+      let failure = if failures = 0 then "" else
+          Printf.sprintf " · %d request failures" failures in
+      (if failures = 0 then Ansi.dim else Theme.bad ())
+      ^ Printf.sprintf "  Response · %d retained parts%s · 4:response" count failure ^ Ansi.reset
+
+
 let context_exact_input_lines ~cols ~scale state ~response ~response_parts
     (input : Masc_tui_context_inspector.provider_input) =
   let module Inspector = Masc_tui_context_inspector in
@@ -4578,89 +4685,9 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
             | _ ->
                 [ Printf.sprintf "  Response  ·  %s" (String.concat "  ·  " parts) ]
       in
-      (* The answer itself, to the depth one history page reaches. The cap
-         keeps a long reply from taking the item list's window; the chat
-         pane carries the full text and the note says so by counting. *)
-      let response_block =
-        match response_parts with
-        | Inspector.Pending ->
-            [ Ansi.dim ^ "  Response observation is still loading" ^ Ansi.reset ]
-        | Inspector.Observed (Error detail) ->
-            [ "  "
-              ^ Context_bars.band ~width ~title:"RESPONSE"
-                  ~caption:"what came back for this request"
-            ; (Theme.bad ()) ^ "  " ^ Keeper_chat.terminal_safe_text detail
-              ^ Ansi.reset
-            ]
-        | Inspector.Observed (Ok
-            { Masc_tui_context_inspector.parts = []
-            ; source = Newest_history_page
-            }) ->
-            [ "  "
-              ^ Context_bars.band ~width ~title:"RESPONSE"
-                  ~caption:"what came back for this request"
-            ; Ansi.dim
-              ^ "  This turn's reply is not in the newest history page"
-              ^ Ansi.reset
-            ]
-        | Inspector.Observed (Ok { parts = []; source = Exact_turn_transcript }) ->
-            [ Ansi.dim ^ "  No assistant response was recorded in the retained turn transcript" ^ Ansi.reset ]
-        | Inspector.Observed (Ok { Masc_tui_context_inspector.parts; source }) ->
-            let caption = match source with
-              | Inspector.Newest_history_page -> "response in the newest history page"
-              | Inspector.Exact_turn_transcript -> "response from the retained turn transcript" in
-            let cap = 14 in
-            let lines =
-              List.concat_map
-                (function
-                  | Masc_tui_context_inspector.Reply_text text ->
-                      document_markdown ~width
-                        (Keeper_chat.terminal_safe_text text)
-                  | Masc_tui_context_inspector.Request_failure detail ->
-                      List.map (fun line -> (Theme.bad ()) ^ line ^ Ansi.reset)
-                        (Context_bars.wrap ~width
-                          ("Request failed: " ^ Keeper_chat.terminal_safe_text detail))
-                  | Masc_tui_context_inspector.Tool_steps rows ->
-                      List.map
-                        (fun row ->
-                           Ansi.dim
-                           ^ Keeper_chat.terminal_safe_text row
-                           ^ Ansi.reset)
-                        rows
-                  | Masc_tui_context_inspector.Reasoning_lines lines ->
-                      List.map
-                        (fun line ->
-                           Ansi.dim ^ "· "
-                           ^ Keeper_chat.terminal_safe_text line
-                           ^ Ansi.reset)
-                        lines)
-                parts
-            in
-            let rec take count = function
-              | [] -> ([], [])
-              | line :: rest when count = 0 -> ([], line :: rest)
-              | line :: rest ->
-                  let shown, hidden = take (count - 1) rest in
-                  (line :: shown, hidden)
-            in
-            let shown, hidden = take cap lines in
-            ( [ "  "
-                ^ Context_bars.band ~width ~title:"RESPONSE"
-                    ~caption
-              ]
-              @ shown
-              @ (if hidden = [] then []
-                 else
-                   [ Ansi.dim
-                     ^ Printf.sprintf
-                         "  … %d response lines beyond this preview"
-                         (List.length hidden)
-                     ^ Ansi.reset
-                   ]) )
-      in
       let common =
         [ identity; wire ] @ response_line @ [ "" ] @ summary @ against_wire
-        @ response_block @ [ "" ]
+        @ [ context_response_summary response_parts; "" ]
       in
       (* One letter per row says where the item stands in the assembly. The
          wire is append-only, so the last message is this turn's newest
@@ -5078,6 +5105,8 @@ let context_inspector_content_lines ~cols state : context_pane_body =
              ( [ (Theme.bad ()) ^ "  Exact input unavailable: " ^ detail
                  ^ Ansi.reset ]
              , None )
+       | Masc_tui_context_inspector.Response ->
+           context_response_lines ~cols state (Masc_tui_context_inspector.Observed (Error detail))
        | Masc_tui_context_inspector.Input_map ->
            Plain
              ( [ (Theme.bad ()) ^ "  Input map unavailable: " ^ detail
@@ -5112,6 +5141,7 @@ let context_inspector_content_lines ~cols state : context_pane_body =
       let scale = Option.fold ~none:Masc_tui_token_scale.fleet
           ~some:(fun record -> Masc_tui_token_scale.of_turn ~rows:[ record ] record) record in
       let body = match state.context_inspector_tab with
+        | Inspector.Response -> context_response_lines ~cols state reading.response
         | Inspector.Composition ->
             (match record with
              | None -> Plain ([], None)
@@ -5147,6 +5177,8 @@ let context_inspector_content_lines ~cols state : context_pane_body =
            Plain ([ "  Waiting for the requested immutable source" ], None)
        | Masc_tui_context_inspector.Recent turn_back ->
       (match state.context_inspector_tab with
+       | Masc_tui_context_inspector.Response ->
+           context_response_lines ~cols state (Masc_tui_context_inspector.Observed response)
        | Masc_tui_context_inspector.Composition ->
            Plain
              ( context_composition_lines ~runtime_details ~cols

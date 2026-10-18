@@ -211,6 +211,7 @@ type tab =
   | Composition
   | Exact_input
   | Input_map
+  | Response
 
 type input_source =
   | Turn_prompt_assembly
@@ -1152,7 +1153,7 @@ let shown_part ~keeper ~tab ~target ~opened ~cursor reading =
     in
     let item =
       match tab with
-      | Composition -> None
+      | Composition | Response -> None
       | Exact_input -> at input.items
       | Input_map ->
         (match inspected_record ~target reading with

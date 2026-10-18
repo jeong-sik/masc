@@ -6843,6 +6843,10 @@ type state = {
      the numbers describe. [None] until a reading arrives; reset with it. *)
   mutable context_inspector_read_at: float option;
   mutable context_inspector_tab: Masc_tui_context_inspector.tab;
+  (* The response reader has its own position. Its previous tab and the
+     input/proof cursor, open part and scroll remain intact until return. *)
+  mutable context_inspector_response_return: Masc_tui_context_inspector.tab;
+  mutable context_inspector_response_scroll: int;
   mutable context_inspector_cursor: int;
   mutable context_inspector_scroll: int;
   mutable context_inspector_exact: int option;
@@ -11337,6 +11341,26 @@ let help_key_answers ~compact_viewport (state : state) =
   && Option.is_none (text_input_target state ~compact_viewport)
   && not (modal_owns_keys state)
 
+let enter_context_inspector_tab (state : state) tab =
+  let module Inspector = Masc_tui_context_inspector in
+  let preserve_input = match state.context_inspector_tab, tab with
+    | Inspector.Response, Inspector.Response -> true
+    | Inspector.Response, (Inspector.Composition | Inspector.Exact_input | Inspector.Input_map) ->
+        tab = state.context_inspector_response_return
+    | (Inspector.Composition | Inspector.Exact_input | Inspector.Input_map), Inspector.Response ->
+        state.context_inspector_response_return <- state.context_inspector_tab;
+        true
+    | (Inspector.Composition | Inspector.Exact_input | Inspector.Input_map),
+      (Inspector.Composition | Inspector.Exact_input | Inspector.Input_map) -> false in
+  state.context_inspector_tab <- tab;
+  if not preserve_input then begin
+    state.context_inspector_exact <- None;
+    state.context_inspector_cursor <- 0;
+    state.context_inspector_scroll <- 0;
+    state.context_inspector_detail_scroll <- 0;
+    state.context_inspector_focus <- Left_pane
+  end
+
 let close_context_inspector (state : state) =
   state.context_inspector_open <- false;
   supersede_context_inspector_load state None;
@@ -11346,6 +11370,8 @@ let close_context_inspector (state : state) =
   state.context_inspector_scroll <- 0;
   state.context_inspector_detail_scroll <- 0;
   state.context_inspector_focus <- Left_pane;
+  state.context_inspector_response_return <- Masc_tui_context_inspector.Composition;
+  state.context_inspector_response_scroll <- 0;
   state.context_inspector_target <- Masc_tui_context_inspector.Recent 0
 
 let close_agenda (state : state) =
@@ -11472,6 +11498,8 @@ let create_state
   context_inspector_part_cancel = None;
   context_inspector_read_at = None;
   context_inspector_tab = Masc_tui_context_inspector.Composition;
+  context_inspector_response_return = Masc_tui_context_inspector.Composition;
+  context_inspector_response_scroll = 0;
   context_inspector_cursor = 0;
   context_inspector_scroll = 0;
   context_inspector_exact = None;
@@ -12934,6 +12962,7 @@ type clamped_scroll =
      scroll against the same window, but a reading that lands shorter leaves
      the stored value past it until the frame says where it drew from. *)
   | Context_inspector_scroll of int
+  | Context_inspector_response_scroll of int
 
 (* What End names on a surface whose rows the drawing counts: a row past any
    real end, so the frame's own clamp reports the last one back. The keypress
@@ -13008,6 +13037,7 @@ let apply_clamped_scroll (state : state) = function
   | Preset_detail_scroll value -> state.config_scroll <- value
   | Keeper_list_scroll value -> state.keeper_list_scroll <- value
   | Context_inspector_scroll value -> state.context_inspector_scroll <- value
+  | Context_inspector_response_scroll value -> state.context_inspector_response_scroll <- value
 
 (* Changes draws a preview under its list, so the rows the list can use are
    fewer than the chrome alone says. The number of rows the list keeps lives

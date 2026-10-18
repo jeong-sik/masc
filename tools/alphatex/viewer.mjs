@@ -45,7 +45,7 @@ if (values.help) {
     + '  --state-dir stores native selection, saved presets, renders and Lane snapshot.\n'
     + '  --sequence opens a new phrase editor; --project song.json reopens one; --project-root sets its folder.\n'
     + '  --output UID selects sequencer audio output; :output UID changes it in the editor.\n'
-    + '  --midi-output ID sends sequencer notes to that MIDI destination; :audio returns to audio.\n'
+    + '  --midi-output=ID sends sequencer notes to that MIDI destination; :audio returns to audio.\n'
     + '  --record opens audio/MIDI input selection; r begins recording, s saves WAV and UMP.\n'
     + '  --session directory opens a saved waveform/MIDI timeline; --session-root sets the take folder.\n'
     + '  --devices lists CoreAudio devices and CoreMIDI inputs/outputs on macOS.\n'

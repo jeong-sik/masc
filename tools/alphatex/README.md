@@ -158,8 +158,9 @@ quarter-note beat 4. Select an audio output with `--output UID` or `:output UID`
 read back, and unavailable outputs fail without substituting another device.
 The decoded WAV must fit the native PCM buffer resources. See the
 [transport protocol](native/TRANSPORT.md) for lifecycle and resource limits.
-For external MIDI, use `--midi-output ID` or `:midi-output ID`; `--devices` lists
-CoreMIDI destinations separately from recording sources. Space, pause/resume,
+For external MIDI, use `--midi-output=ID` or `:midi-output ID`; `--devices` lists
+CoreMIDI destinations separately from recording sources. Use the equals form
+for signed IDs, for example `--midi-output=-1234`. Space, pause/resume,
 seek and looping then send the project's notes, programs, level and pan directly
 to that pinned destination without synthesizing a WAV. Missing or removed ports
 fail without switching devices. Pausing and closing release this transport's

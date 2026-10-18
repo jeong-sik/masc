@@ -660,7 +660,7 @@ let narrowing_atom_text mark = String.make narrowing_atom_chars mark
    refused pass carries to the next one and which refusals must not move it at
    all (#37793: one live Keeper walked 12756 -> 6378 -> 3189 ninety-six times
    in a day and committed nothing, because every pass started over). *)
-let narrowing_fixture ?(cli_slot_ids = []) ?cli_runner
+let narrowing_fixture ?(cli_slot_ids = []) ?cli_runner ?has_waiting
     ?(task_context = Masc.Keeper_turn_task_context.No_task)
     ?(atoms = List.map (fun mark -> message (narrowing_atom_text mark)) narrowing_marks)
     ~slot_count ~answer f =
@@ -714,7 +714,7 @@ let narrowing_fixture ?(cli_slot_ids = []) ?cli_runner
   (* No forget_measurement between passes: that is what a server restart does,
      and the width these cases are about lives in the same memory. *)
   let pass () =
-    Masc.Keeper_librarian_queue_refresh.For_testing.run_continuity ?cli_runner ~base_path
+    Masc.Keeper_librarian_queue_refresh.For_testing.run_continuity ?cli_runner ?has_waiting ~base_path
       ~keeper_name () in
   let coverage () = Option.map (fun (s : S.t) -> s.end_atom) (P.read ~config ~keeper_name |> get) in
   (* Take the checkpoint away for one pass. prepare then answers with no
@@ -1046,16 +1046,14 @@ let test_volatile_message_floor ?native ~failure () =
     (Registry.list_runs registry) in
   pass ();
   (match failure with
-   | None | Some `Request_entity_too_large -> ()
+   | None -> ()
    | Some _ ->
      check (option int) "a later unread message discards partial state" None (coverage ());
      check int "the failed wake stops at that message" 3 (List.length !requests);
      pass ();
      check string "a new wake retries the identical first message without partial state"
        (List.nth !requests 1) (List.nth !requests 4));
-  let expected_calls = match failure with
-    | None | Some `Request_entity_too_large -> 3
-    | Some _ -> 6 in
+  let expected_calls = match failure with None -> 3 | Some _ -> 6 in
   check int "one whole refusal and one request per message per wake"
     expected_calls (List.length !requests);
   let first = List.nth !requests 1 and second = List.nth !requests (expected_calls - 1) in
@@ -1068,19 +1066,7 @@ let test_volatile_message_floor ?native ~failure () =
   check (option int) "only the complete atom is published" (Some 1) (coverage ());
   let snapshot = P.read ~config ~keeper_name |> get |> some in
   check string "the final state is published at the original atom boundary"
-    (if failure=Some `Request_entity_too_large then "remembered-call"
-     else "remembered-call-and-result") snapshot.working_state;
-  let expected_holes = if failure=Some `Request_entity_too_large then
-      let source = match P.memory_sources prepared |> get with
-        | [_; source] -> source
-        | _ -> fail "the selected atom must retain both exact message bindings" in
-      [P.unread_message prepared ~source
-        ~reasons:[Masc.Keeper_librarian_input_refusal.Request_body_refused] |> get]
-    else [] in
-  check bool "typed exhaustion preserves the exact skipped result and its cause" true
-    (snapshot.unread_messages=expected_holes);
-  check bool "continuity holes cannot rewrite the existing Memory receipt" true
-    (receipt ()=receipt_before);
+    "remembered-call-and-result" snapshot.working_state;
   check bool "successful continuity publication still leaves Memory unchanged" true
     (Current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name |> get = memory_before);
   check bool "successful continuity publication still leaves durable progress unchanged" true
@@ -1093,10 +1079,7 @@ let test_volatile_message_floor ?native ~failure () =
         when U.member "volatile_inference" output = `Bool true -> Some loaded
       | Some _ | None -> None) in
   check int "every successful message has a recorded volatile outcome"
-    (match failure with
-     | None -> 2
-     | Some `Request_entity_too_large -> 1
-     | Some _ -> 3) (List.length volatile_runs);
+    (match failure with None -> 2 | Some _ -> 3) (List.length volatile_runs);
   List.iter (fun run ->
     let decoded = Masc.Tui_decode.decode_lane_run_detail
       (Exact_output_fixture.lane_run_detail run) |> get in
@@ -1105,6 +1088,218 @@ let test_volatile_message_floor ?native ~failure () =
     check bool "actual volatile run cannot claim continuity publication" true
       (reading.lp_side_writes = [Masc.Tui_decode.Continuity_write, Masc.Tui_decode.Side_not_attempted]))
     volatile_runs
+
+type context_hole_case =
+  | Context_unknown_then_typed
+  | Context_typed_then_unknown
+  | Context_all_holes
+  | Context_single_hole
+  | Context_unknown_only
+  | Context_cli_tail
+  | Context_invalid_answer
+  | Context_late_unknown
+  | Context_rewritten_source
+  | Context_appended_suffix
+  | Context_prior_holes
+
+type context_fixture_answer =
+  | Context_typed_refusal
+  | Context_unknown_refusal
+  | Context_empty_refusal_body
+  | Context_invalid_json
+  | Context_state of string
+
+(* Exercise the actual Memory-covered Queue -> Runtime API walk. Context-only
+   holes belong to the continuation, never the already committed Memory range.
+   Two real API slots distinguish one typed witness from complete exhaustion. *)
+let test_context_only_api_holes case () =
+  let module Current = Masc.Keeper_memory_os_current in
+  let module Unread = Masc.Keeper_librarian_unread in
+  let module Progress = Masc.Keeper_librarian_progress in
+  let prior = case=Context_prior_holes in
+  let selected = if case=Context_single_hole then [message "single-original-message"]
+    else List.take 2 (List.drop 1 tool_atoms) in
+  let original = if prior then message "prior explicitly unread source" :: selected else selected in
+  let typed = Context_typed_refusal and unknown = Context_unknown_refusal in
+  let state = "The refused original remains explicitly unread." in
+  let whole = [typed;typed] in
+  let decisions = match case with
+    | Context_unknown_then_typed -> [unknown;typed;Context_state state]
+    | Context_typed_then_unknown -> [typed;unknown;Context_state state]
+    | Context_all_holes -> [typed;typed;typed;typed;Context_state state]
+    | Context_single_hole -> [typed;typed;Context_state state]
+    | Context_unknown_only -> [unknown;Context_empty_refusal_body]
+    | Context_cli_tail -> [typed;typed]
+    | Context_invalid_answer -> [Context_invalid_json;typed]
+    | Context_late_unknown -> [typed;typed;unknown;unknown]
+    | Context_rewritten_source | Context_appended_suffix -> [typed;typed;Context_state state]
+    | Context_prior_holes -> [typed;typed;typed;typed] in
+  let plan = whole @ decisions in
+  let requests = ref [] and cli_requests = ref [] in
+  let before_dispatch = ref (fun () -> ()) and before_final = ref (fun () -> ()) in
+  let last_index = List.length plan-1 in
+  let cli_runner ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt =
+    check string "the declared real CLI tail is visited" Exact_output_fixture.cli_primary_runtime runtime_id;
+    (!before_dispatch) ();
+    cli_requests := !cli_requests @ [prompt];
+    if List.length !cli_requests mod 2=1 then
+      Error (queue_native_failure ~claude:false ~tool_effect:false)
+    else Error (Masc.Fusion_official_client.Setup_failure "opaque context-only tail") in
+  narrowing_fixture ~atoms:original ~slot_count:2 ~has_waiting:(fun () -> true)
+    ~cli_slot_ids:(if case=Context_cli_tail then [Exact_output_fixture.cli_primary_runtime] else [])
+    ?cli_runner:(if case=Context_cli_tail then Some cli_runner else None)
+    ~answer:(fun index body ->
+      (!before_dispatch) ();
+      let position = index mod List.length plan in
+      requests := !requests @ [body];
+      if position=last_index then (!before_final) ();
+      match List.nth plan position with
+      | Context_typed_refusal -> `Request_entity_too_large, refused "invalid_request_error"
+      | Context_unknown_refusal -> `Bad_request, refused "invalid_request_error"
+      | Context_empty_refusal_body -> `Bad_request, ""
+      | Context_invalid_json -> `OK,
+          {|{"choices":[{"index":0,"message":{"role":"assistant","content":"not JSON"},"finish_reason":"stop"}]}|}
+      | Context_state working_state -> `OK, Exact_output_fixture.openai_response
+          (`Assoc ["working_state",`String working_state]))
+  @@ fun ~bodies:_ ~pass ~coverage:_ ~hide_source:_ ~restart:_ ~config ->
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path
+      ~base_path:config.Masc.Workspace.base_path in
+  let runtime_keepers_dir = Masc.Workspace.keepers_runtime_dir config in
+  let boundaries () = B.read ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name |> get in
+  let prior_holes = if not prior then [] else (
+    let hole = Unread.for_atom ~trace_id ~history_start_boundary_line:1 ~atom:0 ~message_in_atom:0
+      ~messages:original ~reasons:[Masc.Keeper_librarian_input_refusal.Input_capacity] |> get in
+    let snapshot = S.capture_checkpoint_prefix ~unread_messages:[hole] ~end_atom:1
+      ~catch_up_end_atom:None ~trace_id ~lines:(boundaries ()) ~messages:original
+      ~working_state:"Previously saved continuation." ()
+      |> Result.map_error S.error_to_string |> get in
+    S.save ~path:(P.path ~config ~keeper_name) snapshot |> Result.map_error S.error_to_string |> get;
+    [hole]) in
+  record_memory config;
+  let prepared = prepare config |> some in
+  let sources = P.memory_sources prepared |> get in
+  check int "the prepared manifest contains the exact selected messages" (List.length selected) (List.length sources);
+  let hole source = P.unread_message prepared ~source
+    ~reasons:[Masc.Keeper_librarian_input_refusal.Request_body_refused] |> get in
+  let new_holes = match case with
+    | Context_all_holes | Context_single_hole | Context_prior_holes -> List.map hole sources
+    | Context_unknown_then_typed | Context_typed_then_unknown
+    | Context_rewritten_source | Context_appended_suffix -> [hole (List.hd sources)]
+    | Context_unknown_only | Context_cli_tail | Context_invalid_answer | Context_late_unknown -> [] in
+  let expected_holes = Unread.merge prior_holes new_holes |> get in
+  let memory_before = Current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name |> get in
+  let range = P.memory_range_id ~config ~keeper_name prepared |> get in
+  let receipt () = Current.committed_durable_coverage ~keepers_dir ~keeper_id:keeper_name
+      ~receipt_scope:range.receipt_scope |> get in
+  let receipt_before = receipt () in
+  let ledger () = Current.read_unread_messages ~keepers_dir ~keeper_id:keeper_name |> get in
+  let ledger_before = ledger () in
+  let progress () = Progress.read ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name
+    |> Result.map_error Progress.read_error_to_string |> get in
+  let progress_before = progress () in
+  let snapshot_before = P.read ~config ~keeper_name |> get in
+  let check_memory () =
+    check bool "Context-only inference and publication preserve the exact Memory snapshot" true
+      (Current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name |> get=memory_before);
+    check bool "Context-only cannot rewrite the existing Memory receipt" true (receipt ()=receipt_before);
+    check bool "Context-only cannot create cumulative Memory unread evidence" true (ledger ()=ledger_before);
+    check bool "Context-only cannot advance the durable cursor" true (progress ()=progress_before) in
+  before_dispatch := (fun () ->
+    check bool "neither inferred state nor a newly proven hole publishes a partial snapshot" true
+      (P.read ~config ~keeper_name |> get=snapshot_before);
+    check_memory ());
+  let save messages =
+    let session_dir=Filename.concat (Masc.Keeper_fs.session_store_path config) trace_id in
+    match C.save_agent_core_classified ~session_dir ~history_retained:0 (checkpoint messages) with
+    | Ok (C.Saved _) -> ()
+    | Ok (C.Stale_noop _) -> fail "context source mutation fixture was stale"
+    | Error detail -> fail detail in
+  before_final := (fun () -> match case with
+    | Context_rewritten_source ->
+      let changed = List.mapi (fun index message -> if index=List.length original-1 then
+        {message with Agent_core.Types.content=List.map (function
+          | Agent_core.Types.ToolResult result ->
+            Agent_core.Types.ToolResult {result with content="rewritten original tool result"}
+          | block -> block) message.content}
+        else message) original in
+      check bool "source rewrite leaves the atom-opening digest unchanged" true
+        (Runtime_model_input_tail_window.atom_opening_digest changed 0=
+         Runtime_model_input_tail_window.atom_opening_digest original 0);
+      save changed
+    | Context_appended_suffix ->
+      let extended=original @ [message "later completed suffix"] in
+      save extended;
+      B.append ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name
+        {B.recorded_at=1001.;event=B.Turn_ended
+          {turn_ref=Ids.Turn_ref.make ~trace_id ~absolute_turn:2;
+           task_context=Masc.Keeper_turn_task_context.No_task;history_at_start=B.Continued_history;
+           position=B.position_of_messages extended |> get}}
+      |> Result.map_error B.append_error_to_string |> get
+    | Context_unknown_then_typed | Context_typed_then_unknown | Context_all_holes
+    | Context_single_hole | Context_unknown_only | Context_cli_tail | Context_invalid_answer
+    | Context_late_unknown | Context_prior_holes -> ());
+  pass ();
+  check int "the whole request and each exhausted message visit every declared API candidate"
+    (List.length plan) (List.length !requests);
+  let model index=U.member "model" (Yojson.Safe.from_string (List.nth !requests index)) |> U.to_string in
+  check bool "exhaustion visits two distinct real API models" true (model 0<>model 1);
+  check (list string) "the exact first message visits those same two models before any skip"
+    [model 0;model 1] [model 2;model 3];
+  check_memory ();
+  let committed = match case with
+    | Context_unknown_only | Context_cli_tail | Context_invalid_answer | Context_late_unknown
+    | Context_rewritten_source -> false
+    | Context_unknown_then_typed | Context_typed_then_unknown | Context_all_holes
+    | Context_single_hole | Context_appended_suffix | Context_prior_holes -> true in
+  if not committed then (
+    check bool "an unproven message or changed source preserves the entire original continuation" true
+      (P.read ~config ~keeper_name |> get=snapshot_before);
+    check bool "failed Context-only publication remains observably uncommitted" true
+      ((Masc.Keeper_continuity_observation.latest_synthesis ~config ~keeper_name |> some).state=
+       Masc.Keeper_continuity_observation.Not_committed);
+    if case<>Context_rewritten_source then (
+      pass ();
+      check int "the next wake retries every original source instead of retaining a volatile hole"
+        (2*List.length plan) (List.length !requests);
+      check string "retry starts with the same exact first message and no partial state"
+        (List.nth !requests 2) (List.nth !requests (List.length plan+2));
+      check bool "a second refusal still publishes neither state nor unread records" true
+        (P.read ~config ~keeper_name |> get=snapshot_before);
+      check_memory ());
+    if case=Context_cli_tail then check int "whole and single-message walks both really reach the CLI tail on each wake"
+      4 (List.length !cli_requests))
+  else (
+    let saved=P.read ~config ~keeper_name |> get |> some in
+    check int "publication stops at the complete original atom" (P.end_atom prepared) saved.end_atom;
+    check bool "only exact exhausted API holes merge with previously saved holes" true
+      (saved.unread_messages=expected_holes);
+    check string "all-hole continuation preserves the prior state or uses a real empty-input answer"
+      (if prior then "Previously saved continuation." else state) saved.working_state;
+    let last=List.nth !requests last_index in
+    if case=Context_all_holes || case=Context_single_hole then (
+      List.iter (fun unread ->
+        check bool "the final empty-source request carries every proven unread hash" true
+          (contains ~sub:(match unread.Unread.source with
+            | Unread.Atom source -> source.message_sha256
+            | Unread.Official_turn source -> source.message_sha256) last)) expected_holes;
+      check bool "an all-hole summary cannot pretend to read the original conversation" false
+        (contains ~sub:("[tool use omitted: id=" ^ tool_call_id 1) last
+         || contains ~sub:("[tool result omitted: id=" ^ tool_call_id 1) last
+         || contains ~sub:"single-original-message" last));
+    if case=Context_unknown_then_typed || case=Context_typed_then_unknown then (
+      let messages index=U.member "messages" (Yojson.Safe.from_string (List.nth !requests index)) in
+      check bool "both slots refused the identical one-message conversation" true (messages 2=messages 3);
+      check bool "the next accepted message sees the exact preceding hole" true
+        (contains ~sub:(Unread.message_digest (List.hd selected)) last));
+    if case=Context_appended_suffix then (
+      let next=prepare config |> some in
+      check int "a concurrently completed suffix stays outside this publication" (P.end_atom prepared) (P.start_atom next);
+      check int "the suffix remains available for the next signal" (P.end_atom prepared+1) (P.end_atom next))
+    else (
+      let calls=List.length !requests in
+      pass ();
+      check int "a quiet wake performs no request after complete accounted publication" calls (List.length !requests));
+    check_memory ())
 
 type memory_floor_case =
   | Complete_memory_floor
@@ -1885,8 +2080,28 @@ let () = run "production continuity pair"
       (test_volatile_message_floor ~failure:None);
     test_case "unknown message refusal discards partial state and retries source" `Quick
       (test_volatile_message_floor ~failure:(Some `Bad_request));
-    test_case "typed message exhaustion publishes an exact Context-only hole" `Quick
-      (test_volatile_message_floor ~failure:(Some `Request_entity_too_large));
+    test_case "Context-only exhausted API unknown then typed records one exact hole" `Quick
+      (test_context_only_api_holes Context_unknown_then_typed);
+    test_case "Context-only exhausted API typed then unknown records one exact hole" `Quick
+      (test_context_only_api_holes Context_typed_then_unknown);
+    test_case "Context-only all holes need a real empty-input continuation when no state exists" `Quick
+      (test_context_only_api_holes Context_all_holes);
+    test_case "Context-only one original message may become a proven hole" `Quick
+      (test_context_only_api_holes Context_single_hole);
+    test_case "Context-only unknown-only exhaustion preserves source across wakes" `Quick
+      (test_context_only_api_holes Context_unknown_only);
+    test_case "Context-only API exhaustion followed by an opaque CLI tail grants no skip" `Quick
+      (test_context_only_api_holes Context_cli_tail);
+    test_case "Context-only invalid JSON vetoes a later typed refusal" `Quick
+      (test_context_only_api_holes Context_invalid_answer);
+    test_case "Context-only late unknown refusal discards a volatile proven hole" `Quick
+      (test_context_only_api_holes Context_late_unknown);
+    test_case "Context-only hole publication rejects a rewritten non-opening source" `Quick
+      (test_context_only_api_holes Context_rewritten_source);
+    test_case "Context-only hole publication allows an unconsumed completed suffix" `Quick
+      (test_context_only_api_holes Context_appended_suffix);
+    test_case "Context-only all new holes merge prior holes and retain the actual prior state" `Quick
+      (test_context_only_api_holes Context_prior_holes);
     test_case "uncommitted Memory message floor publishes one complete program" `Quick
       (test_uncommitted_memory_message_floor Complete_memory_floor);
     test_case "native Codex capacity descends through actual uncommitted Queue Memory without holes" `Quick

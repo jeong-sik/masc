@@ -151,6 +151,10 @@ export function sourceCommand(editor,line) {
     case 'undo':case 'redo':count(0);return {editor:sourceAction(editor,{kind:command})}
     case 'save':case 'play':case 'stop':case 'record':case 'help':case 'audio':count(0);return {editor,effect:{kind:command}}
     case 'save-as':case 'export':case 'wave':case 'output':case 'midi-output':count(1,Number.MAX_SAFE_INTEGER);return {editor,effect:{kind:command,path:args.join(' ')}}
+    case 'midi-port':count(2);{
+      const port=Number(args[0]);if(!Number.isInteger(port)||port<0||port>127)throw new Error('MIDI port must be 0–127')
+      return {editor,effect:{kind:'midi-port',port,destination:args[1]}}
+    }
     case 'seek':count(1);return {editor,effect:{kind:'seek',tick:units(args[0])}}
     default:throw new Error('Unsupported source command; controller and tempo data remain in the original performance')
   }

@@ -96,3 +96,12 @@ A seek/resume implementation must define what it restores and report unsupported
 state reconstruction; silently using the phrase sender's volume/pan chase would
 lose the source performance. Source audition does not establish MIDI clock sync,
 audio/MIDI sample alignment, hardware latency or physical-device behavior.
+
+### Source audition delivery
+
+Imported source performances now have an ordered external MIDI 1.0 audition
+path: explicit source-port bindings, full channel expression, F0/F7 wire decode,
+tempo/SMPTE scheduling and held-key/hold-pedal stop cleanup. It is a one-shot
+play/stop path from the pattern beginning. The reconstruction requirements above
+remain planned for source pause/resume/seek/loop; WAV/VST arrangement, overdubs,
+shared clock and practice workflows remain separate unfinished units.

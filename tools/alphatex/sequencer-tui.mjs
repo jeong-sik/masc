@@ -8,6 +8,7 @@ import { Worker } from 'node:worker_threads'
 import { Note } from 'tonal'
 import { newEditor, editorCommand, editorAction, selectedNote, editorView, editorAxis, editorHarmony } from './sequencer-editor.mjs'
 import { loadProject, saveProject, projectMidi } from './sequencer-files.mjs'
+import { sourceTickAtSeconds } from './midi-source-playback.mjs'
 import { safeText } from './terminal.mjs'
 import { openPlayback } from './playback.mjs'
 
@@ -33,7 +34,9 @@ const help = [
   'Audio preview uses a SoundFont; MIDI output sends the project notes directly.',
   'Imported MIDI: source ticks retain tempo/expression; :pattern N selects SMF2.',
   'Use :channel 1–16 or :select event-ID for source notes sharing a cursor.',
-  'Source edit/save/export works; full-message audition/automation is being connected.',
+  'Source: select :midi-output ID, then Space plays/stops from the beginning.',
+  'Multiple source ports: :midi-port PORT ID for each port (0–127).',
+  'Source pause/seek/loop and WAV synthesis require expression-state reconstruction.',
 ]
 
 export async function viewSequencer({ path, root = resolve('music-projects'), embedded = false, signal,
@@ -48,7 +51,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
   let saved = loaded?.project, status = 'Enter a note or :help', prompt = null, showHelp = false
   let loop = false, accepting = true, closed = false, suspended = false, task = Promise.resolve(), sessionTask = null
   let selectedOutput = output
-  let selectedMidiOutput = midiOutput
+  let selectedMidiOutput = midiOutput, portBindings = []
   const sessionAbort = new AbortController()
   const directory = await mkdtemp(join(tmpdir(), 'masc-sequencer-'))
   const worker = new Worker(new URL('./sequencer-worker.mjs', import.meta.url))
@@ -72,6 +75,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     const view = editorView(editor), per = editorAxis(editor).per
     const start = loop ? view.loop.start : 0
     const seconds = transport.position + (transport.kind === 'playing' ? (performance.now() - transport.since) / 1000 : 0)
+    if (editor.project.kind === 'midi-source') return sourceTickAtSeconds(editor.performance, seconds)
     return start + (loop ? seconds % transport.duration : seconds) / 60 * view.tempo * per
   }
   function draw() {
@@ -115,7 +119,8 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
         if (pitch === editor.pitch) cells[cursor] = current ? '◆' : '◇'
         lines.push(`${Note.fromMidi(pitch).padStart(5)}  ${cells.join('')}`)
       }
-      const destination = selectedMidiOutput === undefined ? selectedOutput ?? 'system default' : `MIDI ${selectedMidiOutput}`
+      const destination = portBindings.length ? portBindings.map(binding => `${binding.port}→${binding.destination}`).join(', ')
+        : selectedMidiOutput === undefined ? selectedOutput ?? 'system default' : `MIDI ${selectedMidiOutput}`
       lines.push(`Playhead ${(playTick() / per).toFixed(2)} · loop ${project.loop.start / per}–${project.loop.end / per} · output ${destination} · ${path}`)
     }
     let output = '\x1b[H'
@@ -134,7 +139,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
   function render(snapshot, options = {}) {
     if (!accepting) throw new Error('Sequencer is closing')
     if (workerFailure) throw new Error(workerFailure)
-    if (snapshot.kind === 'midi-source') throw new Error('Full-message MIDI source audition is not connected yet; edit/save/export retain the source')
+    if (snapshot.kind === 'midi-source' && options.format !== 'midi') throw new Error('Select a MIDI output for source audition; source WAV synthesis is not connected')
     const id = ++jobNumber, cancel = new Int32Array(new SharedArrayBuffer(4)), path = join(directory, `${id}.${options.format === 'midi' ? 'json' : 'wav'}`)
     const promise = new Promise((resolve, reject) => { jobs.set(id, { resolve, reject, cancel }) })
     worker.postMessage({ id, path, project: snapshot, cancel: cancel.buffer, options: { ...options, soundfontPath } })
@@ -145,8 +150,9 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     // final note-offs must never cut off the replacement transport's notes.
     await Promise.allSettled([...players.values()])
     if (!accepting || closed || id !== generation) return
-    const handle = openPlayback({ path: wave.path, output: selectedMidiOutput === undefined ? selectedOutput : undefined,
-      midiOutput: selectedMidiOutput, loop, onEvent: event => {
+    const midiDestination = wave.midiOutput ?? selectedMidiOutput
+    const handle = openPlayback({ path: wave.path, output: midiDestination === undefined ? selectedOutput : undefined,
+      midiOutput: midiDestination, midiBindings: wave.midiBindings, loop, onEvent: event => {
       if (!accepting || closed || id !== generation) return
       if (['playing', 'paused'].includes(event.kind)) {
         transport = { kind: event.kind, handle, position: event.currentTime, duration: event.duration, since: performance.now() }
@@ -163,14 +169,18 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       if (!closed && id === generation) { transport = { kind: 'stopped' }; status = error.message; draw() }
     }).finally(() => { players.delete(handle) })
     players.set(handle, settled)
-    status = selectedMidiOutput !== undefined ? 'MIDI output' : wave.clippedSamples > 0 ? 'Preview clipped; lower :level' : 'SoundFont preview'; draw()
+    status = midiDestination !== undefined ? 'MIDI output' : wave.clippedSamples > 0 ? 'Preview clipped; lower :level' : 'SoundFont preview'; draw()
   }
   function play() {
     if (!accepting) return
-    if (transport.kind === 'playing') { transport.handle.pause(); return }
+    if (transport.kind === 'playing') {
+      if (editor.project.kind === 'midi-source') { stop(); draw() } else transport.handle.pause()
+      return
+    }
     if (transport.kind === 'paused') { transport.handle.resume(); return }
     if (transport.kind !== 'stopped') { stop(); draw(); return }
-    const id = ++generation, result = render(editor.project, { loop, format: selectedMidiOutput === undefined ? 'wav' : 'midi' })
+    const id = ++generation, result = render(editor.project, { loop, format: editor.project.kind === 'midi-source' || selectedMidiOutput !== undefined ? 'midi' : 'wav',
+      pattern: editor.pattern, midiOutput: selectedMidiOutput, portBindings })
     transport = { kind: 'rendering', cancel: result.cancel }
     result.promise.then(wave => startPlayer(wave, id)).catch(error => {
       if (!closed && id === generation) { transport = { kind: 'stopped' }; status = error.message; draw() }
@@ -210,10 +220,12 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       }
       case 'play': play(); break
       case 'stop': stop(); break
-      case 'output': stop(); selectedOutput = value.path; selectedMidiOutput = undefined; status = `Audio output: ${selectedOutput}`; break
-      case 'midi-output': stop(); selectedMidiOutput = value.path; status = `MIDI output: ${selectedMidiOutput}`; break
-      case 'audio': stop(); selectedMidiOutput = undefined; status = `Audio output: ${selectedOutput ?? 'system default'}`; break
+      case 'output': stop(); portBindings = []; selectedOutput = value.path; selectedMidiOutput = undefined; status = `Audio output: ${selectedOutput}`; break
+      case 'midi-output': stop(); portBindings = []; selectedMidiOutput = value.path; status = `MIDI output: ${selectedMidiOutput}`; break
+      case 'midi-port': stop(); selectedMidiOutput = undefined; portBindings = [...portBindings.filter(binding => binding.port !== value.port), { port: value.port, destination: value.destination }]; status = `MIDI port ${value.port}: ${value.destination}`; break
+      case 'audio': stop(); portBindings = []; selectedMidiOutput = undefined; status = `Audio output: ${selectedOutput ?? 'system default'}`; break
       case 'seek': {
+        if (editor.project.kind === 'midi-source') throw new Error('Source audition starts at the beginning; arbitrary seek requires expression-state reconstruction')
         if (!accepting) return
         if (!transport.handle) throw new Error('Start playback before seeking')
         const view = editorView(editor), per = editorAxis(editor).per
@@ -241,7 +253,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
           // This command was admitted before close; retain its editor decision.
           // effect() separately refuses new playback/recording/WAV work.
           const result = editorCommand(editor, line)
-          if (result.editor.project !== editor.project) stop()
+          if (result.editor.project !== editor.project || result.editor.pattern !== editor.pattern) stop()
           editor = result.editor
           if (result.effect) await effect(result.effect)
           else status = 'Edited'

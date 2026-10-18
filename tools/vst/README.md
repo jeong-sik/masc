@@ -11,11 +11,19 @@ new MASC container runtime, and its direct local commands are not
 executes the companion locally; retained results can enter the generic Lane
 through the existing `snapshot_file` contract.
 
-Install dependencies in an isolated Python environment, then send one JSON job:
+For a normal installation, run `scripts/install-vst-host.sh` from the repository
+root. `--python` selects a Python 3.12+ interpreter and `--prefix` selects the
+commands directory. Dependencies and native code are kept in an immutable
+adjacent `share/masc/vst/<source digest>` runtime; the launcher is replaced only
+after discovery succeeds. The installed `masc-vst-host` reads the same jobs as
+the development command below.
+
+For development, install the hashed dependency lock in an isolated Python 3.12+
+environment, then send one JSON job:
 
 ```sh
 python3 -m venv .venv
-.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python -m pip install --require-hashes -r requirements.lock
 printf '%s\n' '{"operation":"candidates"}' | .venv/bin/python host.py
 ```
 
@@ -51,7 +59,7 @@ error, not successful playback.
 
 WAV synthesis streams stereo audio in one-second blocks; phrase length has no
 synthetic limit. Only a complete non-silent render is published, and an existing
-destination is never overwritten. The result includes MIDI, preset and plug-in
+destination is never overwritten. The result includes WAV, MIDI, preset and plug-in
 state hashes, the reported plug-in identity/version, sample rate, frame count,
 peak and output path. These identify a render, not proof that a device played it.
 Native plug-in diagnostics remain on stderr, outside the JSON reply channel.

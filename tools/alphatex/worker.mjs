@@ -1,5 +1,6 @@
 import { parentPort } from 'node:worker_threads'
-import { renderScore } from './engine.mjs'
+import { renderScore, midiForScore } from './engine.mjs'
+import { writeFileSync } from 'node:fs'
 import { exportWave } from './audio.mjs'
 import { errorDetail } from './diagnostics.mjs'
 
@@ -11,6 +12,12 @@ parentPort.on('message', job => {
       case 'audio': result = exportWave(job.source, job.path, {
         ...job.options, cancelled: () => Atomics.load(new Int32Array(job.cancel), 0) !== 0,
       }); break
+      case 'midi': {
+        const { midi } = midiForScore(job.source, { ...job.options, smf1Mode: true })
+        writeFileSync(job.path, Buffer.from(midi.toBinary()), { flag: 'wx', mode: 0o600 })
+        result = { kind: 'midi', path: job.path }
+        break
+      }
       default: throw new Error('unknown score worker request')
     }
     parentPort.postMessage({ id: job.id, ok: true, result })

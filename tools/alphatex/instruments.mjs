@@ -1,0 +1,210 @@
+import { mkdir, readdir } from 'node:fs/promises'
+import { basename, join, resolve } from 'node:path'
+import { homedir } from 'node:os'
+import { randomUUID } from 'node:crypto'
+import { nativeJob, loadSelection, saveSelection, presetDirectory } from './vst.mjs'
+
+// Owns native loading and selection, independently of score rendering and
+// playback. Leaving the menu retires every pending load/editor/read result.
+export class InstrumentPicker {
+  constructor({ directory, notify, selected, soundfont, failed, run = nativeJob }) {
+    Object.assign(this, { directory, notify, selected, soundfont, failed, run })
+    this.view = null
+    this.epoch = 0
+    this.job = null
+    this.jobs = new Map()
+    this.recent = null
+  }
+
+  close() {
+    ++this.epoch
+    for (const job of this.jobs.values()) job.cancel()
+    this.job = null
+    this.view = null
+    this.notify()
+  }
+
+  async settled() { await Promise.allSettled([...this.jobs.keys()]) }
+
+  async work(request, epoch) {
+    const job = this.run(request)
+    this.job = job
+    this.jobs.set(job.promise, job)
+    try {
+      const result = await job.promise
+      return epoch === this.epoch ? result : null
+    } finally {
+      this.jobs.delete(job.promise)
+      if (this.job === job) this.job = null
+    }
+  }
+
+  async attempt(action) {
+    const epoch = this.epoch
+    const previous = this.view
+    try { await action(epoch) }
+    catch (error) {
+      if (epoch !== this.epoch) return
+      this.view = previous?.kind === 'loading'
+        ? { kind: 'plugins', title: 'VST unavailable · install scripts/install-vst-host.sh',
+          items: [{ kind: 'soundfont', name: 'SoundFont (built-in player)' }], cursor: 0, query: '', searching: false }
+        : previous
+      this.failed(error)
+      this.notify()
+    }
+  }
+
+  async open() {
+    this.close()
+    const epoch = this.epoch
+    this.view = { kind: 'loading', title: 'Finding installed VST3 plug-ins…' }
+    this.notify()
+    await this.attempt(async () => {
+      let selectionFailure
+      let recent = null
+      try { recent = await loadSelection(this.directory) }
+      catch (error) { selectionFailure = error }
+      if (epoch !== this.epoch) return
+      this.recent = recent
+      const result = await this.work({ operation: 'candidates' }, epoch)
+      if (result === null) return
+      if (!Array.isArray(result.candidates) || result.candidates.some(item =>
+        typeof item?.path !== 'string' || typeof item?.name !== 'string')) {
+        throw new Error('VST host returned an invalid plug-in catalog')
+      }
+      const items = [{ kind: 'soundfont', name: 'SoundFont (built-in player)' },
+        ...result.candidates.map(item => ({ name: item.name, plugin_path: item.path }))]
+      this.view = { kind: 'plugins', title: 'Choose a VST instrument · candidates are checked when selected',
+        items, cursor: Math.max(0, items.findIndex(item => item.plugin_path === this.recent?.plugin_path)),
+        query: '', searching: false }
+      if (this.recent && !items.some(item => item.plugin_path === this.recent.plugin_path)) {
+        this.failed(new Error(`Previously selected instrument is unavailable: ${this.recent.name}`))
+      }
+      if (selectionFailure) this.failed(selectionFailure)
+      this.notify()
+    })
+  }
+
+  items() {
+    if (!this.view?.items) return []
+    const query = this.view.query.toLocaleLowerCase()
+    return this.view.items.filter(item => item.name.toLocaleLowerCase().includes(query))
+  }
+
+  async presets(instrument, epoch, preferred = this.recent?.preset_path) {
+    const folder = presetDirectory(this.directory, instrument.plugin_path, instrument.plugin_name)
+    let files
+    try { files = await readdir(folder, { withFileTypes: true }) }
+    catch (error) { if (error.code !== 'ENOENT') throw error; files = [] }
+    if (epoch !== this.epoch) return
+    const items = [{ name: 'Default instrument state', preset_path: null },
+      ...files.filter(file => file.isFile() && file.name.endsWith('.vstpreset'))
+        .map(file => ({ name: file.name, preset_path: join(folder, file.name) }))]
+    if (preferred && !items.some(item => item.preset_path === preferred)) {
+      items.push({ name: basename(preferred), preset_path: preferred })
+    }
+    this.view = { kind: 'presets', title: `${instrument.name} · choose a sound`,
+      instrument, items, cursor: Math.max(0, items.findIndex(item => item.preset_path === preferred)),
+      query: '', searching: false }
+    this.notify()
+  }
+
+  async choose() {
+    const view = this.view
+    const item = this.items()[view?.cursor ?? 0]
+    if (!item) return
+    await this.attempt(async epoch => {
+      if (item.kind === 'soundfont') {
+        this.close()
+        this.soundfont()
+        return
+      }
+      if (view.kind === 'presets') {
+        this.view = { kind: 'loading', title: 'Saving the selected sound…' }
+        this.notify()
+        const selection = { ...view.instrument, preset_path: item.preset_path }
+        await saveSelection(this.directory, selection)
+        if (epoch !== this.epoch) return
+        this.recent = selection
+        this.close()
+        this.selected(selection)
+        return
+      }
+      const identity = { plugin_path: item.plugin_path, plugin_name: item.plugin_name ?? null }
+      this.view = { kind: 'loading', title: `Loading ${item.name}…` }
+      this.notify()
+      const result = await this.work({ operation: 'inspect', ...identity }, epoch)
+      if (result === null) return
+      if (!result.instrument) {
+        if (!Array.isArray(result.plugin_names) || result.plugin_names.some(name => typeof name !== 'string')) {
+          throw new Error('VST host returned invalid instrument names')
+        }
+        this.view = { kind: 'plugins', title: 'Choose an instrument inside this bundle',
+          items: result.plugin_names.map(name => ({ ...identity, plugin_name: name, name })),
+          cursor: Math.max(0, result.plugin_names.findIndex(name =>
+            this.recent?.plugin_path === identity.plugin_path && name === this.recent.plugin_name)),
+          query: '', searching: false }
+        this.notify()
+        return
+      }
+      if (result.instrument.is_instrument !== true || typeof result.instrument.name !== 'string') {
+        throw new Error('The selected plug-in is not a verified MIDI instrument')
+      }
+      const instrument = { ...identity, name: result.instrument.name }
+      const preferred = this.recent?.plugin_path === identity.plugin_path
+        && this.recent?.plugin_name === identity.plugin_name ? this.recent.preset_path : null
+      await this.presets(instrument, epoch, preferred)
+    })
+  }
+
+  async edit() {
+    const view = this.view
+    if (view?.kind !== 'presets') return
+    const preset = this.items()[view.cursor]?.preset_path ?? null
+    await this.attempt(async epoch => {
+      this.view = { kind: 'loading', title: 'Choose a sound in the native editor; close its window to save' }
+      this.notify()
+      const folder = presetDirectory(this.directory, view.instrument.plugin_path, view.instrument.plugin_name)
+      await mkdir(folder, { recursive: true, mode: 0o700 })
+      if (epoch !== this.epoch) return
+      const path = join(folder, `${new Date().toISOString().replaceAll(':', '-')}-${randomUUID()}.vstpreset`)
+      const result = await this.work({ operation: 'edit', ...view.instrument,
+        preset_path: preset, output_path: path }, epoch)
+      if (result === null) return
+      await this.presets(view.instrument, epoch, result.preset_path)
+    })
+  }
+
+  async keypress(text, key) {
+    const view = this.view
+    if (!view) return
+    if (key.name === 'escape') { this.close(); return }
+    if (view.kind === 'loading') return
+    if (view.searching) {
+      if (key.name === 'return') view.searching = false
+      else if (key.name === 'backspace') { view.query = view.query.slice(0, -1); view.cursor = 0 }
+      else if (text && !key.ctrl && !key.meta) { view.query += text; view.cursor = 0 }
+    } else if (view.kind === 'preset_path') {
+      if (key.name === 'return') {
+        const path = view.query.startsWith('~/') ? join(homedir(), view.query.slice(2)) : resolve(view.query)
+        await this.presets(view.instrument, this.epoch, path)
+        return
+      }
+      if (key.name === 'backspace') view.query = view.query.slice(0, -1)
+      else if (text && !key.ctrl && !key.meta) view.query += text
+    } else {
+      switch (key.name) {
+        case 'up': case 'k': view.cursor = Math.max(0, view.cursor - 1); break
+        case 'down': case 'j': view.cursor = Math.min(Math.max(0, this.items().length - 1), view.cursor + 1); break
+        case 'return': await this.choose(); return
+        case 'e': await this.edit(); return
+        case 'p':
+          if (view.kind === 'presets') this.view = { kind: 'preset_path', title: 'Path to a .vstpreset file',
+            instrument: view.instrument, query: '', searching: false }
+          break
+        default: if (text === '/') view.searching = true
+      }
+    }
+    this.notify()
+  }
+}

@@ -102,8 +102,13 @@ def edit(request):
         plugin.load_preset(nonempty(preset, "preset_path"))
     plugin.show_editor()
     data = plugin.preset_data
-    with target.open("xb") as output:
-        output.write(data)
+    stage_fd, stage_name = tempfile.mkstemp(prefix=".vst-", suffix=".vstpreset", dir=target.parent)
+    try:
+        with os.fdopen(stage_fd, "wb") as output:
+            output.write(data)
+        os.link(stage_name, target)
+    finally:
+        os.unlink(stage_name)
     return {"instrument": description(plugin), "preset_path": str(target),
             "preset_sha256": digest(data)}
 
@@ -161,6 +166,8 @@ def render(request):
                 rendered += count
         if peak == 0:
             raise ValueError("selected VST produced silence; check its preset, sample library, and license")
+        with open(stage_name, "rb") as rendered_audio:
+            wave_hash = hashlib.file_digest(rendered_audio, "sha256").hexdigest()
         # Publish a complete file, refusing to replace an existing destination.
         os.link(stage_name, output_path)
     finally:
@@ -169,6 +176,7 @@ def render(request):
             "preset_sha256": preset_hash, "state_sha256": state_hash,
             "sample_rate": sample_rate, "frames": frames,
             "duration_ms": frames / sample_rate * 1000, "peak": peak,
+            "wav_sha256": wave_hash,
             "output_path": str(output_path)}
 
 

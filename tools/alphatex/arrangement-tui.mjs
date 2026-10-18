@@ -393,6 +393,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
   async function effect(value) {
     switch (value.kind) {
       case 'calibrate': {
+        if (workerFailure) throw workerFailure
         if (!input) throw new Error('Select :input AUDIO_UID before calibration')
         if (recording || transport.kind !== 'stopped' || players.size || preparations.size) throw new Error('Stop and drain arrangement playback before calibration')
         const selectedInput = input, target = join(dirname(path), 'calibrations', randomUUID())
@@ -400,6 +401,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
         await settleMonitoring()
         await transitionLiveMidi(() => settleLiveMidi())
         if (!accepting) return
+        if (workerFailure) throw workerFailure
         const owned = new AbortController(); calibration = owned
         status = 'Measuring selected audio loopback; Esc/q cancels and returns'; draw()
         try {

@@ -1,6 +1,6 @@
-import { readFile, writeFile, rename, unlink, mkdir } from 'node:fs/promises'
-import { dirname, resolve } from 'node:path'
-import { createHash, randomUUID } from 'node:crypto'
+import { readFile, writeFile, open, rename, link, unlink, mkdir, mkdtemp } from 'node:fs/promises'
+import { basename, dirname, join, resolve } from 'node:path'
+import { createHash } from 'node:crypto'
 import JZZ from 'jzz'
 import midiFiles from 'jzz-midi-smf'
 import { validateProject, sequenceEvents, PPQ } from './sequencer-project.mjs'
@@ -11,26 +11,60 @@ export async function loadProject(path) {
   const data = await readFile(path)
   return { project: validateProject(JSON.parse(data)), revision: hash(data), path: resolve(path) }
 }
-// Saves refuse a document changed by another editor. The lock coordinates our
-// writers; a new document is published with wx so unrelated files survive.
+async function syncDirectory(path) {
+  const directory = await open(path, 'r')
+  try { await directory.sync() } finally { await directory.close() }
+}
+// The lock coordinates our writers, not other editors. Claim the current inode
+// into retained history before checking it, then publish only into an empty path.
+// Never unlink history: an external writer may still hold and change that inode.
 export async function saveProject(path, project, revision = null) {
   validateProject(project)
-  await mkdir(dirname(resolve(path)), { recursive: true, mode: 0o700 })
-  const lock = `${path}.lock`, temporary = `${path}.${randomUUID()}.tmp`
+  path = resolve(path)
+  const parent = dirname(path), lock = `${path}.lock`
+  await mkdir(parent, { recursive: true, mode: 0o700 })
   await writeFile(lock, '', { flag: 'wx', mode: 0o600 })
   const data = JSON.stringify(project, null, 2) + '\n'
-  try {
-    if (revision === null) await writeFile(path, data, { flag: 'wx', mode: 0o600 })
-    else {
-      if (hash(await readFile(path)) !== revision) throw new Error('Project changed on disk; use save-as to retain your edits')
-      await writeFile(temporary, data, { flag: 'wx', mode: 0o600 })
-      await rename(temporary, path)
-    }
-    return hash(data)
-  } finally {
-    await unlink(temporary).catch(error => { if (error.code !== 'ENOENT') throw error })
-    await unlink(lock)
+  let candidate, previous, candidateCreated = false, claimed = false, failure = null
+  const retainedError = error => {
+    const retained = candidateCreated ? ` Local candidate retained at ${candidate}.${claimed ? ` Claimed inode retained at ${previous}.` : ''}` : ''
+    const result = new Error(`${error.message}${retained}`, { cause: error })
+    result.code = error.code
+    return result
   }
+  try {
+    const history = await mkdtemp(join(parent, `.${basename(path)}.save-`))
+    candidate = join(history, 'local.json'); previous = join(history, 'previous.json')
+    const file = await open(candidate, 'wx', 0o600)
+    candidateCreated = true
+    try { await file.writeFile(data); await file.sync() } finally { await file.close() }
+    // Publication must use a different inode. A write through the live pathname
+    // must not mutate the retained local candidate, even immediately after link.
+    const publication = join(history, 'published.json'), output = await open(publication, 'wx', 0o600)
+    try { await output.writeFile(data); await output.sync() } finally { await output.close() }
+    await syncDirectory(history); await syncDirectory(parent)
+    if (revision !== null) {
+      await rename(path, previous); claimed = true
+      await syncDirectory(history); await syncDirectory(parent)
+      if (hash(await readFile(previous)) !== revision) throw new Error('Project changed on disk; use save-as to retain your edits')
+    }
+    // link is exclusive: an external editor recreating path during the claim
+    // wins that pathname, while both its file and our candidate remain intact.
+    await link(publication, path)
+    await syncDirectory(parent)
+  } catch (error) {
+    if (claimed) {
+      try { await link(previous, path); await syncDirectory(parent) }
+      catch (restore) {
+        if (restore.code !== 'EEXIST') error = new Error(`${error.message}; could not restore ${path}: ${restore.message}`, { cause: error })
+      }
+    }
+    failure = retainedError(error)
+  } finally {
+    try { await unlink(lock) } catch (error) { failure ??= retainedError(error) }
+  }
+  if (failure) throw failure
+  return hash(data)
 }
 export function projectMidi(project, options) {
   const { events, ticks } = sequenceEvents(project, options)

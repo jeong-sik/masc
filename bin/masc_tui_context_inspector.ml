@@ -320,11 +320,16 @@ let inspected_record ~target = function
        | Recent turn_back -> viewing_record selection ~turn_back
        | Pinned _ -> None)
   | Exact_read reading ->
-      (match target, reading.record with
-       | Pinned expected, Observed (Ok exact)
-         when Ids.Turn_ref.equal expected reading.turn_ref
-              && Ids.Turn_ref.equal expected exact.record.turn_ref -> Some exact.record
-       | (Pinned _ | Recent _), (Pending | Observed _) -> None)
+      (match target with
+       | Recent _ -> None
+       | Pinned expected ->
+         match reading.record with
+         | Pending | Observed (Error _) -> None
+         | Observed (Ok exact) ->
+           if Ids.Turn_ref.equal expected reading.turn_ref
+              && Ids.Turn_ref.equal expected exact.record.turn_ref
+           then Some exact.record
+           else None)
 
 let exact_fields expected fields =
   List.length expected = List.length fields
@@ -677,7 +682,10 @@ let input_evidence_label = function
 let input_evidence_badge_cells evidence =
   String.length (input_evidence_label evidence) + 4
 
-let verified_system_prompt (record : Turn_record.t) provider_input component_bytes =
+let verified_system_prompt
+    (record : Turn_record.t)
+    (provider_input : provider_input option)
+    component_bytes =
   match provider_input with
   | Some input when Ids.Turn_ref.equal input.turn_ref record.turn_ref ->
     (match List.find_opt (fun item -> item.kind = System_prompt) input.items with
@@ -697,7 +705,7 @@ let verified_system_prompt (record : Turn_record.t) provider_input component_byt
      | None -> None)
   | Some _ | None -> None
 
-let input_map_rows (record : Turn_record.t) provider_input =
+let input_map_rows (record : Turn_record.t) (provider_input : provider_input option) =
   match record.input_components with
   | None -> []
   | Some components ->

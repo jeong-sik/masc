@@ -1,6 +1,6 @@
 # Record against an arrangement
 
-Open an arrangement with `masc-alphatex --arrange` or `--arrange FILE`.
+Open an arrangement with `masc-alphatex --arrange` or reopen with `--project FILE`.
 Select backing outputs as described in [arrangement playback](ARRANGEMENT.md).
 
 1. `:inputs` discovers audio and MIDI input UIDs without opening an input stream.

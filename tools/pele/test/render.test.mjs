@@ -55,3 +55,19 @@ test('diagram image URLs are never fetched or exposed to the rasterizer', () => 
   assert.ok(!result.svg.includes('<image'));
   assert.ok(!result.svg.includes('file:///etc/passwd'));
 });
+
+test('literal chart labels in metadata are not CSS variables', () => {
+  const result = renderDiagram({ source: 'pie\n "var(--foo)":10', maxWidth: 640 });
+  assert.ok(result.svg.includes('data-id="var(--foo)"'));
+  assert.ok(result.png.length > 0);
+});
+
+test('parser diagnostics escape terminal controls embedded in source', () => {
+  const child = spawnSync(process.execPath, ['tools/pele/render.mjs'], {
+    input: JSON.stringify({ source: 'flowchart TD\n A --> \u001b]0;OWNED\u0007', maxWidth: 640 }),
+    cwd: new URL('../../..', import.meta.url),
+  });
+  assert.equal(child.status, 1);
+  assert.equal(child.stdout.length, 0);
+  assert.ok(!/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/.test(child.stderr.toString()));
+});

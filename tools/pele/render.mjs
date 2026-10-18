@@ -10,7 +10,9 @@ if (process.argv.length === 3 && process.argv[2] === '--help') {
     process.stdout.write(result.png);
   } catch (error) {
     // Errors can contain untrusted source. Emit plain diagnostics only on stderr.
-    process.stderr.write(`${error.message}\n`);
+    const diagnostic = error.message.replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g,
+      value => `\\u${value.charCodeAt(0).toString(16).padStart(4, '0')}`);
+    process.stderr.write(`${diagnostic}\n`);
     process.exitCode = 1;
   }
 }

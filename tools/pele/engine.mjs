@@ -6,6 +6,10 @@ import { Resvg } from '@resvg/resvg-js';
 // with element-local inheritance, without touching label text or path data.
 function concreteSvg(svg, colors) {
   const document = new DOMParser().parseFromString(svg, 'image/svg+xml');
+  const presentationAttributes = new Set([
+    'fill', 'stroke', 'color', 'stop-color', 'flood-color', 'lighting-color',
+    'font-family', 'font-size', 'stroke-width', 'rx', 'ry',
+  ]);
   function resolve(value, variables, seen = new Set()) {
     return value.replace(/var\((--[\w-]+)(?:,([^()]*))?\)/g, (_, name, fallback) => {
       if (seen.has(name)) throw new Error(`Cyclic SVG theme variable: ${name}`);
@@ -31,7 +35,7 @@ function concreteSvg(svg, colors) {
         .map(([name, value]) => `${name}:${resolve(value, variables)}`).join(';'));
     }
     for (const attribute of Array.from(element.attributes)) {
-      if (attribute.name !== 'style' && attribute.value.includes('var(')) {
+      if (presentationAttributes.has(attribute.name) && attribute.value.includes('var(')) {
         element.setAttribute(attribute.name, resolve(attribute.value, variables));
       }
     }

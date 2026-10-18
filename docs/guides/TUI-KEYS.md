@@ -201,8 +201,12 @@ measured key/paint latency.
 
 Config source observations prepare whole-source tokenization, terminal sanitization
 and the model table together from one immutable reading before UI admission.
-Preparation uses the shared IO path: Runtime model parsing can expand credential
-homes from the environment. It reads no UI, request ownership or palette state.
+Preparation uses the shared CPU path: the model table consumes already interpreted
+server declarations instead of reparsing Runtime source or expanding local credential
+homes. It reads no UI, environment, request ownership or palette state. The server
+model envelope must match the reading's exact path and revision. Missing, unavailable
+or malformed model evidence stays failed; source and other observations remain usable.
+Source-only form parsing still retains Runtime's environment effects.
 Account-group/model interpretation failure leaves the source available; email
 observation failure stays independent. Model selection and source revision come
 from that same reading.

@@ -22,6 +22,7 @@ type metadata = {
   preempted_keys : string list;
 }
 type reading = { path : string; source_text : string; metadata : metadata;
+  model_bindings : (Runtime_config_models.t, string) result;
   account_groups : (string list list, string) result;
   account_emails : (Masc_tui_account_login.account_emails, string) result }
 type tone = Neutral | Good | Warning | Bad
@@ -88,7 +89,7 @@ let validation json =
       then Error "validation result contradicts its error issues"
       else Ok (Checked { valid; schema_version; current_schema_version; forward_schema; issues })
 
-let decode json =
+let decode_with_model_projection ~models json =
   let* ok = get boolean "ok" json in
   if not ok then Error "response reports ok=false" else
   let* path = get string "path" json in
@@ -116,6 +117,7 @@ let decode json =
     then Error "Keeper restart status contradicts pending settings"
     else Ok ()
   in
+  let model_bindings = models ~path ~source_revision json in
   let account_groups =
     let* groups = field "account_groups" json in
     match groups with
@@ -132,10 +134,19 @@ let decode json =
     let* rows = field "account_emails" json in
     Ok (Masc_tui_account_login.account_emails_of_document (`Assoc ["account_emails", rows]))
   in
-  Ok { path; source_text; account_groups; account_emails; metadata = {
+  Ok { path; source_text; model_bindings; account_groups; account_emails; metadata = {
     source_revision; validation; routing; routing_requires_restart; keeper; keeper_requires_restart;
     configured_count; pending_keys; applied_keys; preempted_keys;
   } }
+
+let decode json =
+  decode_with_model_projection ~models:(fun ~path ~source_revision json ->
+    let* projection = field "model_bindings" json in
+    Runtime_config_models.of_json ~path ~source_revision projection) json
+
+let decode_source json =
+  decode_with_model_projection ~models:(fun ~path:_ ~source_revision:_ _ ->
+    Error "model projection not requested by document-only read") json
 
 (* Keeper carries its restart state inside its own word ("pending restart"),
    and [decode] refuses a read where [keeper = Pending_restart] and

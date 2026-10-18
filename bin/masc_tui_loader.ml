@@ -1749,7 +1749,7 @@ let load_runtime_config_view ~(host : string) ~(port : int) :
   match Masc_tui_http.fetch_runtime_config_raw ~host ~port with
   | Error err -> Error ("fetch: " ^ err)
   | Ok json ->
-      match Masc_tui_runtime_config_view.decode json with
+      match Masc_tui_runtime_config_view.decode_source json with
       | Error detail -> Error ("decode: " ^ detail)
       | Ok reading -> Ok reading
 
@@ -1760,8 +1760,7 @@ let load_runtime_config_snapshot ~(host : string) ~(port : int) :
     (Masc_tui_runtime_config_snapshot.t, string) result =
   match Masc_tui_http.fetch_runtime_config_raw ~host ~port with
   | Error detail -> Error ("fetch: " ^ detail)
-  | Ok json -> Eio_guard.with_named_switch "runtime-config-snapshot" (fun () ->
-      Domain_pool_ref.submit_io_or_inline (fun () ->
+  | Ok json -> Masc_tui_response_decode.run ~name:"runtime.config_snapshot.decode_wait" (fun () ->
       Masc_tui_runtime_config_view.decode json
       |> Result.map_error (fun detail -> "decode: " ^ detail)
-      |> Result.map Masc_tui_runtime_config_snapshot.of_reading))
+      |> Result.map Masc_tui_runtime_config_snapshot.of_reading)

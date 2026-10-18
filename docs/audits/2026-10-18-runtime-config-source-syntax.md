@@ -80,3 +80,12 @@ effectful Composition, held-job/shared-backend and matched Before/After objectiv
 remains open. Future comparisons must retain failed, cancelled, interrupted and
 unfinished samples. This layer does not establish completion or production
 readiness.
+
+## Subsequent model-projection layer
+
+The following server-owned model-projection layer removes Runtime source parsing
+from Config snapshot preparation altogether. That new pure client callback can
+use the shared CPU boundary; this historical layer correctly required IO while
+it still interpreted Runtime source. Source-only form parsing and server Runtime
+interpretation retain their environment effects. See
+[the model-projection audit](2026-10-18-runtime-config-model-projection.md).

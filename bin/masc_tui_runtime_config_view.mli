@@ -24,10 +24,15 @@ type metadata = {
   preempted_keys : string list;
 }
 type reading = { path : string; source_text : string; metadata : metadata;
+  model_bindings : (Runtime_config_models.t, string) result;
   account_groups : (string list list, string) result;
   account_emails : (Masc_tui_account_login.account_emails, string) result }
 type tone = Neutral | Good | Warning | Bad
 
 val decode : Yojson.Safe.t -> (reading, string) result
+val decode_source : Yojson.Safe.t -> (reading, string) result
+(** Document-only reads retain existing source/status/account observations but
+    do not decode unused model rows. Their [model_bindings] result is unavailable;
+    only [decode] prepares model evidence for Config snapshots. *)
 val summary_lines : metadata -> (tone * string) list
 val detail_lines : metadata -> (tone * string) list

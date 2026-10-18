@@ -435,6 +435,13 @@ let runtime_config_raw_json
          | Server_runtime_config_source.Shared_input -> "shared"
          | Reader_specific_inputs -> "reader_specific");
       let validation, keeper_settings, overlay = keeper_setting_payload source.keeper in
+      let source_revision_text = Runtime.config_source_revision_to_string source_revision in
+      let model_bindings =
+        Result.bind
+          (Result.map_error (fun errors -> String.concat "; "
+             (List.map (fun (error : Runtime_toml.parse_error) -> error.path ^ ": " ^ error.message) errors)) source.runtime)
+          Runtime_config_models.of_config
+      in
       (* Models identifies the accounts in this exact source observation, which
          may differ from the providers currently loaded by the runtime. *)
       let account_groups, account_emails =
@@ -446,12 +453,14 @@ let runtime_config_raw_json
       `Assoc
         ([ ("ok", `Bool true)
         ; ( "source_revision"
-          , `String (Runtime.config_source_revision_to_string source_revision) )
+          , `String source_revision_text )
         ; ("path", `String path)
         ; ("file_name", `String Config_dir_resolver.runtime_toml_filename)
         ; ("source_text", `String source.source_text)
         ; ("account_groups", account_groups)
         ; ("account_emails", account_emails)
+        ; ("model_bindings", Runtime_config_models.to_json ~path
+            ~source_revision:source_revision_text model_bindings)
         ; ( "application"
           , runtime_config_application_json
               ?skill_application

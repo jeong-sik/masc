@@ -78,8 +78,10 @@ Native transmission packetizes long SysEx using the [CoreMIDI packet-list API's
 65536-byte boundary](https://developer.apple.com/documentation/coremidi/midipacketlistadd(_:_:_:_:_:_:)), including ABI header offsets and checked additions.
 F0/F7 interpretation follows the [Standard MIDI Files specification](https://midi.org/standard-midi-files-specification).
 
-Audition plays once from the start and supports status/stop. Pause, resume, seek
-and looping are explicitly unavailable for source timelines. A late wake sends
+Audition starts at the beginning and supports pause/resume and source-clock seek
+through the [channel-state reconstruction boundary](SOURCE-STATE.md). Unknown
+initial fields and opaque device effects fail explicitly; source looping remains
+unavailable. A late wake sends
 every due source message in order, including zero-length notes and note-off
 release velocity; this is semantic-stream preservation, not sample-clock timing.
 Stop sends owned key-offs and enabled hold-pedal releases. Opaque vendor SysEx

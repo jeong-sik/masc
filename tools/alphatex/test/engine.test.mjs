@@ -1,0 +1,85 @@
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { readScore, renderScore, midiForScore, createAudioExporter } from '../engine.mjs'
+
+const bass = String.raw`\title "반음 연결 연습"
+\tempo 80
+\instrument 34
+\tuning (G2 D2 A1 E1)
+\staff {score tabs}
+\ts 4 4
+:4 5.3 7.2 7.2 :8 3.2 4.2 |
+:2 5.2 {d} :4 r |
+:4 7.3 7.2 7.2 :8 5.2 4.2 |
+:2 3.2 {d} :4 r`
+
+test('official importer reads bass instrument, tuning, dotted rhythm and rests', () => {
+  const { score } = readScore(bass)
+  assert.equal(score.tracks.length, 1)
+  assert.equal(score.tracks[0].playbackInfo.program, 34)
+  assert.equal(score.tracks[0].staves[0].tuning.length, 4)
+  assert.equal(score.masterBars.length, 4)
+})
+
+test('renders bass through official alphaSkia engraving into PNG pixels', () => {
+  const result = renderScore(bass)
+  assert.ok(result.pages.length > 0)
+  assert.deepEqual([...result.pages[0].png.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10])
+  assert.ok(result.pages.every(page => page.width > 0 && page.height > 0))
+})
+
+test('interactive pages rasterize official systems without allocating one whole-song image', () => {
+  const source = Array.from({ length: 40 }, () => ':4 3.3 5.3 7.3 5.3').join(' | ')
+  const first = renderScore(source, { width: 600, page: 0 })
+  assert.ok(first.pageCount > 1)
+  const last = renderScore(source, { width: 600, page: first.pageCount - 1 })
+  assert.equal(last.page + 1, first.pageCount)
+  assert.equal(last.pages[0].width, 600)
+  assert.ok(first.pages[0].height < 1000)
+  assert.ok(last.pages[0].height < 1000)
+})
+
+test('official MIDI generation produces notes for playback', () => {
+  const { midi } = midiForScore(bass, { smf1Mode: true })
+  assert.equal(Buffer.from(midi.toBinary()).subarray(0, 4).toString(), 'MThd')
+})
+
+test('official synthesizer produces audible PCM, including the score duration', () => {
+  const exporter = createAudioExporter(String.raw`\instrument 34 \tuning (G2 D2 A1 E1) :4 5.3 r 7.2 r`)
+  let peak = 0
+  let samples = 0
+  for (let chunk; (chunk = exporter.render(500));) {
+    samples += chunk.samples.length
+    for (const sample of chunk.samples) {
+      assert.ok(Number.isFinite(sample))
+      peak = Math.max(peak, Math.abs(sample))
+    }
+  }
+  assert.ok(peak > 0.001, `silent audio: peak ${peak}`)
+  assert.ok(samples >= 44100 * 2, `unexpectedly short audio: ${samples}`)
+})
+
+test('rejects the screenshot singular staff tab, preserving the actual syntax error', () => {
+  assert.throws(() => readScore(String.raw`\instrument 34 \tuning (G2 D2 A1 E1) \staff {score tab} :4 5.3`))
+})
+
+test('official renderer supports independent piano voices and guitar effects', () => {
+  const source = String.raw`\title "Ensemble"
+\track "Piano" {instrument 0}
+\staff {score}
+C4.4 D4 E4 F4 |
+\staff {score}
+\clef bass
+C3.2 G2 |
+\track "Guitar" {instrument 25}
+\staff {score tabs}
+\tuning (E4 B3 G3 D3 A2 E2)
+:8 3.3{h} 5.3 7.3{v} 5.3 3.3 5.3 7.3 5.3 |`
+  const result = renderScore(source)
+  assert.equal(result.tracks.length, 2)
+  assert.ok(result.pages.length > 0)
+})
+
+test('invalid source does not turn into a successful empty score', () => {
+  assert.throws(() => readScore(String.raw`\nonexistentDirective 123`))
+})

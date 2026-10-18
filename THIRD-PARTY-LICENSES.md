@@ -17,6 +17,15 @@ copyright metadata in the bundled fonts on 2026-09-08, with trailing whitespace
 normalized. Font subset filenames
 and CSS weights do not change their license.
 
+## alphaTex terminal companion
+
+`scripts/install-alphatex.sh` installs locked npm packages with their notices:
+alphaTab 1.8.4 (MPL-2.0), alphaSkia 3.5.147 and its native platform libraries
+(BSD-3-Clause), and alphaTab's Bravura font (SIL OFL-1.1). The optional default
+Sonivox SoundFont retains `@coderline/alphatab/dist/soundfont/LICENSE`.
+The official-source test examples in `tools/alphatex/test/upstream.test.mjs`
+are attributed to the pinned alphaTab v1.8.4 source (MPL-2.0).
+
 ## Bundled Skill files
 
 Built-in Skills ship inside the binary and are installed into a workspace's Skill

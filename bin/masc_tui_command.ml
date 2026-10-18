@@ -15,6 +15,8 @@ type t =
   | Play_invite of { name : string; hours : int }
   | Play_revoke of string
   | Play_invalid of string
+  | Open_score of int
+  | Score_invalid_index
   | Listen
   | Open_metrics
   | Account_login of string
@@ -219,6 +221,11 @@ let catalog =
     ; args = ""
     ; summary = "inspect the last observed provider input"
     }
+  ; { word = "score"
+    ; aliases = []
+    ; args = "[N]"
+    ; summary = "open alphaTex notation and playback in this terminal; N is newest-first"
+    }
   ; { word = "image"
     ; aliases = []
     ; args = "<path>"
@@ -394,6 +401,11 @@ let parse text =
         | _ -> Play_invalid "use /play invites, /play invite <name> <hours>, /play link [name], or /play revoke <name>")
     | "metrics", _ | "telemetry", _ -> Open_metrics
     | "listen", _ -> Listen
+    | "score", "" -> Open_score 1
+    | "score", index ->
+        (match int_of_string_opt index with
+         | Some index when index > 0 -> Open_score index
+         | Some _ | None -> Score_invalid_index)
     | "login", client -> Account_login client
     | "settings", _ -> Open_settings
     | "diff", _ -> Open_diff

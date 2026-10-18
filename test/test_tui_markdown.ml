@@ -442,6 +442,15 @@ let test_a_drawn_tab_is_not_a_searchable_document () =
       (mapping (tagged_fence ":4 0.6 (3.6") = Markdown.Complete_document))
     [ "alphatex"; "atex"; "ATex rhythm" ]
 
+let test_alphatex_sources_preserve_closed_snapshots () =
+  let first = "\\title \"반음\"\n\\instrument 34\n:4 5.3" in
+  let second = "\\staff {score tabs}\n:8 3.3{b (0 4)}" in
+  let text = "before\n```alphatex\n" ^ first ^ "\n```\n"
+    ^ "```ocaml\nlet x = 1\n```\n~~~ATex rhythm\n" ^ second ^ "\n~~~\n"
+    ^ "```alphatex\n:4 7.3" in
+  Alcotest.(check (list string)) "closed source snapshots in document order"
+    [first; second] (Markdown.alphatex_sources text)
+
 let () =
   Alcotest.run "tui-markdown"
     [ ( "inline"
@@ -461,6 +470,8 @@ let () =
     ; ( "blocks"
       , [ Alcotest.test_case "streaming keeps only closed blocks" `Quick
             test_streaming_boundary_keeps_only_closed_blocks
+        ; Alcotest.test_case "score snapshots preserve closed source" `Quick
+            test_alphatex_sources_preserve_closed_snapshots
         ] )
     ; ( "fenced code"
       , [] )

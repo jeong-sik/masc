@@ -1177,6 +1177,24 @@ let closes_fence line ~opened =
   | Some _, None -> true
   | None, _ -> false
 
+let alphatex_sources text =
+  let rec walk opened body sources = function
+    | [] -> List.rev sources
+    | line :: rest ->
+        match opened with
+        | Some (marker, language) when closes_fence line ~opened:(Some marker) ->
+            let sources = match language with
+              | Some tag when is_alphatex_tag tag -> String.concat "\n" (List.rev body) :: sources
+              | Some _ | None -> sources in
+            walk None [] sources rest
+        | Some _ -> walk opened (line :: body) sources rest
+        | None ->
+            match fence_marker line with
+            | Some marker -> walk (Some (marker, fence_language line)) [] sources rest
+            | None -> walk None [] sources rest
+  in
+  walk None [] [] (String.split_on_char '\n' text)
+
 type generated_field = Fence_language | Mermaid_diagnostic | Alphatex_diagnostic
 
 type semantic_origin =
@@ -1360,7 +1378,8 @@ let render_streaming_internal ?on_semantic ?on_unmapped ~palette ~width text =
               Option.iter (fun emit -> emit (block_start, [])) on_unmapped;
               List.iter (fun line -> emit_all (code_rows palette ~width line)) tab_lines
           | Error failure ->
-              let diagnostic = "alphatex: " ^ Masc_tui_alphatex.failure_text failure in
+              let diagnostic = "ASCII preview: " ^ Masc_tui_alphatex.failure_text failure
+                ^ " · /score opens the full score and playback" in
               (match on_semantic with
                | None -> emit_all (code_rows palette ~width diagnostic)
                | Some _ ->

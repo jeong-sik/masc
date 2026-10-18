@@ -10493,6 +10493,11 @@ let focus_acting_pane_or_say_why (state : state) =
   if not (focus_acting_pane state) then
     report_action state "system" "Activity pane has no row to open"
 
+(* The main session owns terminal restoration. Commands freeze their source
+   before calling this handoff; the child never reads mutable conversation data. *)
+let score_terminal_handoff :
+  (sources:string list -> index:int -> (unit, string) result) option ref = ref None
+
 let send_operator_text ?keeper_name state ~base_path ~mailbox text =
   let target =
     match keeper_name with
@@ -10520,7 +10525,8 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       | Attach_image _ | Attach_image_missing_path | Attach_image_ref _
       | Attach_image_ref_missing_value | Preset_list | Preset_save _ | Preset_save_missing_name
       | Preset_restore _ | Preset_restore_missing_name | Preset_show _ | Preset_show_missing_name
-      | Preset_delete _ | Preset_delete_missing_name | Listen | Unknown _ -> true
+      | Preset_delete _ | Preset_delete_missing_name | Listen
+      | Open_score _ | Score_invalid_index | Unknown _ -> true
   then
     notice ~kind:Notice_failure
       "A queued edit is active; press Enter for its text or Ctrl-U to abandon it"
@@ -10837,6 +10843,23 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
   | Masc_tui_command.Listen ->
       Masc_tui_message_input.clear state.msg_input;
       listen_newest_media state
+  | Masc_tui_command.Score_invalid_index ->
+      notice ~kind:Notice_failure "/score [N]: N must be a positive score number, newest first"
+  | Masc_tui_command.Open_score index ->
+      let sources = image_conversation_rows state
+        |> List.concat_map (fun (entry : msg_entry) -> Masc_tui_markdown.alphatex_sources entry.me_text)
+        |> List.rev in
+      if index > List.length sources then
+        notice ~kind:Notice_failure
+          (Printf.sprintf "/score: this loaded conversation has %d closed alphaTex block(s)" (List.length sources))
+      else
+        (match !score_terminal_handoff with
+         | None -> notice ~kind:Notice_failure "alphaTex viewer requires an active terminal session"
+         | Some launch ->
+             Masc_tui_message_input.clear state.msg_input;
+             match launch ~sources ~index with
+             | Ok () -> ()
+             | Error detail -> notice ~kind:Notice_failure detail)
   | Masc_tui_command.Switch_keeper_missing_name ->
       notice ~kind:Notice_failure "/keeper needs a name on the same line"
   | Masc_tui_command.Switch_keeper name -> (
@@ -16006,6 +16029,7 @@ let handle_composer_key state ~base_path ~mailbox key =
        | Masc_tui_command.Play_invite _
        | Masc_tui_command.Play_revoke _ | Masc_tui_command.Play_invalid _
        | Masc_tui_command.Listen
+       | Masc_tui_command.Open_score _ | Masc_tui_command.Score_invalid_index
        | Masc_tui_command.Preset_list | Masc_tui_command.Preset_save _
        | Masc_tui_command.Preset_save_missing_name
        | Masc_tui_command.Preset_restore _
@@ -21306,6 +21330,30 @@ let main
       (match proto with
        | Masc_tui_graphics.Kitty_protocol | Masc_tui_graphics.ITerm2_protocol -> true
        | Masc_tui_graphics.Unsupported_protocol -> false);
+
+  score_terminal_handoff := Some (fun ~sources ~index ->
+    match proto, terminal_probe.cell_pixels with
+    | Masc_tui_graphics.Kitty_protocol, Some ((width, height) as cell_pixels)
+      when width > 0 && height > 0 ->
+        let restore () =
+          output_string stdout (mouse_tracking_disable ^ bracketed_paste_disable);
+          if Terminal_profile.kitty_keyboard terminal_profile then
+            output_string stdout Masc_tui_csi.disable_kitty_keyboard;
+          flush stdout;
+          restore_terminal () in
+        let reenter () =
+          reenter_terminal ();
+          Frame_presenter.setup frame_presenter ~write:(output_string stdout)
+            ~flush:(fun () -> flush stdout);
+          output_string stdout mouse_tracking_enable;
+          if Terminal_profile.kitty_keyboard terminal_profile then
+            output_string stdout Masc_tui_csi.enable_kitty_keyboard;
+          flush stdout in
+        Masc_tui_score.launch ~restore ~reenter ~sources ~index ~cell_pixels
+          ~soundfont:!boot_midi_soundfont
+    | (Masc_tui_graphics.Kitty_protocol, (Some _ | None))
+    | (Masc_tui_graphics.ITerm2_protocol | Masc_tui_graphics.Unsupported_protocol), _ ->
+        Error "/score requires Kitty graphics and measured terminal cell dimensions (Ghostty, Kitty or WezTerm)");
 
   (* ── Keeper settings over $EDITOR (#29684) ─────────────────────
      The editor itself is the confirmation step: an exit other than 0

@@ -14,10 +14,17 @@
     Establishing an initial baseline writes the atom position without a
     Memory commit. *)
 
+type commit_result =
+  | Memory_committed
+  | Memory_refused of Keeper_librarian_runtime.not_committed list
+      (** All failure reports in callback order. An empty list means the pass
+          returned without committing or supplying classified evidence. Neither
+          form authorizes progress or proves that the source is too large. *)
+
 type outcome =
   | Nothing_to_read
   | Baseline_advanced of Keeper_librarian_progress.t
-  | Memory_not_committed
+  | Memory_not_committed of Keeper_librarian_runtime.not_committed list
   | Progress_advanced of Keeper_librarian_progress.t
       (** A pass of atoms only. *)
   | Official_advanced of
@@ -109,7 +116,7 @@ val consume_one
         -> range_id:Keeper_memory_os_current.durable_range_id option
           -> official_range_id:Keeper_memory_os_current.official_range_id option
         -> Keeper_librarian.input
-        -> bool)
+        -> commit_result)
   -> (outcome, error) result
 (** The first attempt reads all unread cut points and official lines. A
     failed commit, typed error, or cancellation keeps a process-local marker;
@@ -175,7 +182,10 @@ val tool_observations : Agent_core.Types.message list -> Keeper_librarian.tool_o
     reads; the continuity round's Memory pass uses it for the same atoms. *)
 
 (** Production commit edge. The selected range bypasses the retired recent
-    message window; [true] means the current Memory OS snapshot committed. *)
+    message window. [Memory_committed] means the current Memory OS snapshot
+    committed; otherwise the pass preserves every classified runtime report.
+    This adapter does not catch cancellation or exceptions that escape
+    [Keeper_librarian_runtime.run_best_effort]. *)
 val commit_with_runtime
   :  base_path:string
   -> keepers_dir:string
@@ -184,7 +194,7 @@ val commit_with_runtime
   -> range_id:Keeper_memory_os_current.durable_range_id option
           -> official_range_id:Keeper_memory_os_current.official_range_id option
   -> Keeper_librarian.input
-  -> bool
+  -> commit_result
 
 module For_testing : sig
   val consume_one_with_progress_writer
@@ -205,7 +215,7 @@ module For_testing : sig
           -> range_id:Keeper_memory_os_current.durable_range_id option
           -> official_range_id:Keeper_memory_os_current.official_range_id option
           -> Keeper_librarian.input
-          -> bool)
+          -> commit_result)
     -> (outcome, error) result
 
   val reset_process_state : unit -> unit

@@ -810,7 +810,7 @@ let durable_reads config ~commit =
   let module Consumer = Masc.Keeper_librarian_durable_consumer in
   match Consumer.consume_one ~config ~keeper_name ~commit with
   | Ok (Consumer.Progress_advanced progress) -> progress.position.end_atom
-  | Ok (Consumer.Nothing_to_read | Consumer.Baseline_advanced _ | Consumer.Memory_not_committed
+  | Ok (Consumer.Nothing_to_read | Consumer.Baseline_advanced _ | Consumer.Memory_not_committed _
        | Consumer.Official_advanced _) ->
     fail "the durable pass did not move past the turn"
   | Error error -> fail (Consumer.error_to_string error)
@@ -873,7 +873,7 @@ let test_a_turn_too_large_with_its_counterparts_is_left_to_the_durable_pass () =
        match Current.apply_disposition ~revisions:[] ?durable_range_id:range_id
                ?official_range_id ~absorbed:[] ~keepers_dir ~keeper_id:keeper_name ~now:1001.
                ~source:{kind = Current.Librarian; trace_id} ~new_claims:[] () with
-       | Ok _ -> true
+       | Ok _ -> Masc.Keeper_librarian_durable_consumer.Memory_committed
        | Error detail -> fail detail));
   check bool "with the counterpart the continuity pass could not carry" true
     (List.mem counterpart !received);

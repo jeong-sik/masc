@@ -34,6 +34,9 @@ let read_error_to_string = function
   | Log_decode_failed { path; line; detail } ->
       Printf.sprintf "%s:%d ask log decode failed: %s" path line detail
 
+let read_error_path = function
+  | Log_read_failed { path; _ } | Log_decode_failed { path; _ } -> path
+
 type withdraw_failure =
   | Withdraw_ask_not_found of { ask_id : string }
   | Withdraw_already_answered of { answered_at : float }
@@ -187,6 +190,15 @@ type discovered_log =
   | Canonical_rows of { keeper_name : string; rows : row list }
   | Unreadable_log of read_error
 
+let compare_discovered_log a b =
+  match a, b with
+  | Canonical_rows { keeper_name = ka; _ }, Canonical_rows { keeper_name = kb; _ } ->
+      String.compare ka kb
+  | Unreadable_log ea, Unreadable_log eb ->
+      String.compare (read_error_path ea) (read_error_path eb)
+  | Canonical_rows _, Unreadable_log _ -> -1
+  | Unreadable_log _, Canonical_rows _ -> 1
+
 let discover_rows_result ~base_path =
   let path = ask_dir base_path in
   match Fs_compat.read_owned_directory_if_present ~owner_uid:(Unix.getuid ())
@@ -195,23 +207,31 @@ let discover_rows_result ~base_path =
       { path; detail = Fs_compat.owned_regular_file_read_error_to_string error })
   | Ok None -> Ok []
   | Ok (Some names) ->
-      Ok (List.filter_map (fun name ->
-        if not (Filename.check_suffix name ".jsonl") then None else
-        let path = Filename.concat path name in
-        match load_events_at_path_result ~base_path ~path with
-        | Error error -> Some (Unreadable_log error)
-        | Ok None -> Some (Unreadable_log (Log_read_failed
-            { path; detail = "discovered ask log disappeared before its owned read" }))
-        | Ok (Some events) ->
-            match List.find_map (function Keeper_ask.Asked ask -> Some ask.keeper_name
-                | Keeper_ask.Answered _ | Keeper_ask.Withdrawn _ -> None) events with
-            | None ->
-                if events = [] then None else Some (Unreadable_log (Log_decode_failed
-                    { path; line = 1; detail = "ask events have no canonical Asked owner" }))
-            | Some keeper_name ->
-                match validate_owner ~base_path ~path ~keeper_name events with
-                | Error error -> Some (Unreadable_log error)
-                | Ok events -> Some (Canonical_rows { keeper_name; rows = Keeper_ask.fold_events events })) names)
+      let names = List.sort String.compare names in
+      let discovered =
+        List.filter_map (fun name ->
+          if not (Filename.check_suffix name ".jsonl") then None else
+          let path = Filename.concat path name in
+          match load_events_at_path_result ~base_path ~path with
+          | Error error -> Some (Unreadable_log error)
+          (* A file that was unlinked between [read_owned_directory_if_present]
+             and [load_events_at_path_result] makes this single scan incomplete
+             (503 for fleet list callers), and resolves on the next retry once
+             the directory listing no longer contains the unlinked entry. *)
+          | Ok None -> Some (Unreadable_log (Log_read_failed
+              { path; detail = "discovered ask log disappeared before its owned read" }))
+          | Ok (Some events) ->
+              match List.find_map (function Keeper_ask.Asked ask -> Some ask.keeper_name
+                  | Keeper_ask.Answered _ | Keeper_ask.Withdrawn _ -> None) events with
+              | None ->
+                  if events = [] then None else Some (Unreadable_log (Log_decode_failed
+                      { path; line = 1; detail = "ask events have no canonical Asked owner" }))
+              | Some keeper_name ->
+                  match validate_owner ~base_path ~path ~keeper_name events with
+                  | Error error -> Some (Unreadable_log error)
+                  | Ok events -> Some (Canonical_rows { keeper_name; rows = Keeper_ask.fold_events events })) names
+      in
+      Ok (List.sort compare_discovered_log discovered)
 
 let load_events ~base_path ~keeper_name =
   match load_events_result ~base_path ~keeper_name with

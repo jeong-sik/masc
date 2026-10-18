@@ -613,7 +613,13 @@ let original_source_context ~(source : Journal.source)
   let context = match turn_context with
     | Some context -> context | None -> Keeper_tool_call_log_context.empty_turn_context in
   let trace_id, session_id, keeper_turn_id, answer_source_ids = match observation with
-    | None -> None, None, None, []
+    | None ->
+        Log.Keeper.info ~keeper_name:source.keeper_name
+          "resumed composition run=%s source_turn=%d has no recorded source_observation (resuming_trace_id=%s); leaving producer provenance absent"
+          (Plan.Composition_run_id.to_string source.composition_run_id)
+          source.source_turn
+          (Option.value ~default:"none" context.trace_id);
+        None, None, None, []
     | Some observation ->
         let answer_source_ids = match observation.trace_id, observation.keeper_turn_id with
           | Some _, Some _ -> observation.answer_source_ids

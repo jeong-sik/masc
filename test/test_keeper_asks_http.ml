@@ -154,10 +154,24 @@ let test_original_questions_are_bound_to_receiving_workspace () =
        | Error _ -> fail "offline duplicate lost canonical answer receipt");
       let status,_ = answer "unknown-original-ask" in
       check int "offline admission still requires the original recorded ask" 404 status;
+      let second_ask = Keeper_ask.ask ~ask_id:"alpha-ask" ~keeper_name:"alpha-asker" ~questions:[question]
+        ~source_turn_ref:(Ids.Turn_ref.make ~trace_id:"alpha-ask-trace" ~absolute_turn:3)
+        ~continuation:(Keeper_continuation_channel.unrouted "workspace-bound read fixture") ~asked_at:43. ()
+        |> valid Keeper_ask.invalid_ask_to_string in
+      Keeper_ask_store.record_ask ~base_path:config.base_path second_ask |> valid Fun.id;
       let status,body = wire_response ~router (path ^ "?" ^ query) in
       check int "answered offline fleet remains readable" 200 status;
-      check int "open count uses the same canonical answered fold" 0
+      check int "open count uses the same canonical answered fold" 1
         (Yojson.Safe.Util.member "open_count" body |> Yojson.Safe.Util.to_int);
+      let status,body_all = wire_response ~router (path ^ "?include_resolved=true&" ^ query) in
+      check int "fleet with include_resolved is readable" 200 status;
+      let fleet_keepers =
+        Yojson.Safe.Util.(body_all |> member "asks" |> to_list)
+        |> List.map (fun row -> Yojson.Safe.Util.(row |> member "keeper" |> to_string))
+      in
+      check (list string) "fleet asks are sorted deterministically by keeper_name"
+        ["alpha-asker"; name] fleet_keepers;
+      Sys.remove (Keeper_ask_store.log_path ~base_path:base ~keeper_name:"alpha-asker");
       let original_log = Keeper_ask_store.log_path ~base_path:base ~keeper_name:name in
       let original_bytes = In_channel.with_open_bin original_log In_channel.input_all in
       let broken = Filename.concat (Filename.dirname original_log) "unreadable.jsonl" in
@@ -166,6 +180,12 @@ let test_original_questions_are_bound_to_receiving_workspace () =
       let status,body = wire_response ~router (path ^ "?" ^ query) in
       check int "incomplete durable discovery is unavailable" 503 status;
       check bool "incomplete discovery cannot clear questions" true (Yojson.Safe.Util.member "asks" body=`Null);
+      check string "503 response names the unreadable log path" broken
+        Yojson.Safe.Util.(body |> member "error" |> member "path" |> to_string);
+      check bool "503 error message includes the unreadable log path" true
+        (String_util.contains_substring
+           Yojson.Safe.Util.(body |> member "error" |> member "message" |> to_string)
+           broken);
       check string "failed read never rewrites original answer bytes" original_bytes
         (In_channel.with_open_bin original_log In_channel.input_all);
       Sys.remove broken;

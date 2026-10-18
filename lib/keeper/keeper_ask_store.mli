@@ -37,6 +37,7 @@ type row = string * (Keeper_ask.ask * Keeper_ask.resolution)
 type rows_snapshot = Missing_log | Stored_rows of row list
 
 val read_error_to_string : read_error -> string
+val read_error_path : read_error -> string
 
 val rows_result :
   base_path:string -> keeper_name:string -> (rows_snapshot, read_error) result
@@ -49,11 +50,15 @@ type discovered_log =
   | Unreadable_log of read_error
 
 val discover_rows_result : base_path:string -> (discovered_log list, read_error) result
-(** Read each discovered owned log once. The canonical owner comes from its
-    Asked records, never from a sanitized filename. Every Asked record must
-    name that same owner and derive this exact log_path. Existing empty logs
-    carry no recovery work. Discovery failures and unreadable entries remain
-    explicit while healthy independent owners can still recover. *)
+(** Read each discovered owned log once in deterministic order. The canonical
+    owner comes from its Asked records, never from a sanitized filename. Every
+    Asked record must name that same owner and derive this exact log_path.
+    Existing empty logs carry no recovery work. Discovery failures and
+    unreadable entries remain explicit while healthy independent owners can
+    still recover. A log that disappears between directory listing and its owned
+    read returns a transient [Unreadable_log] ("discovered ask log disappeared
+    before its owned read") that resolves on the next read once the directory
+    listing no longer includes the removed file. *)
 
 type withdraw_failure =
   | Withdraw_ask_not_found of { ask_id : string }

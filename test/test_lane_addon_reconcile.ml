@@ -1777,16 +1777,49 @@ let test_a_sweep_that_could_not_remove_is_run_again () =
     ignore (Fake.add state.home ~id:"dead-server-container" ~name:dead_name
       ~labels:["masc.lane.instance", "dead-server-instance"; Lane_addon_engine.scope_label, Fake.scope_of_world] ());
     Fake.refuse_removal state.home "dead-server-container";
-    ignore (reconcile config directory);
+    let sweep_logs ~since_seq level =
+      Log.Ring.recent ~module_filter:"Misc" ~since_seq ()
+      |> List.filter (fun (e : Log.Ring.entry) ->
+           e.level = level
+           && String_util.contains_substring e.message "dead-server-container")
+    in
+    let seq0 = (Log.Ring.bounds ()).total - 1 in
+    let first_report = reconcile config directory in
+    let seq1 = (Log.Ring.bounds ()).total - 1 in
     check int "the first beat sweeps" 1 !(state.sweeps);
     check bool "the refused container is still there" true (Fake.holds state.home "dead-server-container");
-    ignore (reconcile config directory);
+    let first_issues = values "issues" first_report |> List.map (text "message") in
+    check int "retrying sweep refusal is surfaced in configuration status" 1
+      (List.length first_issues);
+    let first_issue_msg = List.hd first_issues in
+    check bool "issue names the retrying container and first refused timestamp" true
+      (String_util.contains_substring first_issue_msg "dead-server-container"
+       && String_util.contains_substring first_issue_msg "first refused at ");
+    check (list string) "inspect configuration status matches reconcile report"
+      first_issues
+      (inspect config |> member "configuration" |> values "issues" |> List.map (text "message"));
+    check int "first refusal logs one WARN" 1 (List.length (sweep_logs ~since_seq:seq0 Log.Warn));
+    let second_report = reconcile config directory in
+    let seq2 = (Log.Ring.bounds ()).total - 1 in
     check int "a removal that failed is swept again on the next beat" 2 !(state.sweeps);
+    check (list string) "the same retrying refusal keeps its first refused timestamp"
+      first_issues
+      (values "issues" second_report |> List.map (text "message"));
+    check int "unchanged refusal does not repeat WARN on the next beat" 0
+      (List.length (sweep_logs ~since_seq:seq1 Log.Warn));
     Fake.allow_removal state.home "dead-server-container";
-    ignore (reconcile config directory);
+    let third_report = reconcile config directory in
+    let seq3 = (Log.Ring.bounds ()).total - 1 in
     check int "and again once more" 3 !(state.sweeps);
     check bool "the container is removed when the engine allows it" false
       (Fake.holds state.home "dead-server-container");
+    check (list string) "resolved sweep retry clears configuration issues" []
+      (values "issues" third_report |> List.map (text "message"));
+    let info_logs = sweep_logs ~since_seq:seq2 Log.Info in
+    check int "resolution logs one INFO" 1 (List.length info_logs);
+    check bool "resolution log mentions retry resolution" true
+      (String_util.contains_substring (List.hd info_logs).message "resolved after retry since ");
+    ignore seq3;
     ignore (reconcile config directory);
     ignore (reconcile config directory);
     check int "a sweep with nothing left to retry is not repeated" 3 !(state.sweeps);

@@ -1216,7 +1216,7 @@ let test_context_only_api_holes case () =
     | Error detail -> fail detail in
   before_final := (fun () -> match case with
     | Context_rewritten_source ->
-      let changed = List.mapi (fun index message -> if index=List.length original-1 then
+      let changed = List.mapi (fun index (message : Agent_core.Types.message) -> if index=List.length original-1 then
         {message with Agent_core.Types.content=List.map (function
           | Agent_core.Types.ToolResult result ->
             Agent_core.Types.ToolResult {result with content="rewritten original tool result"}

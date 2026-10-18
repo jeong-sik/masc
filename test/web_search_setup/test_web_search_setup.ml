@@ -284,7 +284,40 @@ let test_display_searxng_url_redacts_userinfo () =
   Alcotest.(check string)
     "scheme-less authority userinfo is redacted"
     "[REDACTED]@search.example:8888"
-    (Web_search_setup.display_searxng_url "user:SECRETPASS6@search.example:8888")
+    (Web_search_setup.display_searxng_url "user:SECRETPASS6@search.example:8888");
+  Alcotest.(check string)
+    "protocol-relative authority userinfo is redacted"
+    "//[REDACTED]@search.example:8888/search"
+    (Web_search_setup.display_searxng_url "//user:SECRETPASS6@search.example:8888/search");
+  Alcotest.(check string)
+    "scheme-less authority userinfo with :// in query is redacted"
+    "[REDACTED]@search.example/?next=http://other"
+    (Web_search_setup.display_searxng_url
+       "user:SECRETPASS6@search.example/?next=http://other");
+  Alcotest.(check string)
+    "scheme-less url without userinfo keeps @ inside :// query parameter"
+    "search.example/?next=http://a@b"
+    (Web_search_setup.display_searxng_url "search.example/?next=http://a@b");
+  with_env "MASC_SEARXNG_URL" "user:SECRETPASS6@search.example:8888" (fun () ->
+    match Env_config_runtime.Tools.searxng_base_url () with
+    | Error msg ->
+      Alcotest.(check bool)
+        "scheme-less env error redacts password"
+        false
+        (contains msg "SECRETPASS6");
+      Alcotest.(check bool)
+        "scheme-less env error shows redacted authority"
+        true
+        (contains msg "[REDACTED]@search.example:8888")
+    | Ok url -> Alcotest.failf "expected scheme refusal, got Ok %S" url);
+  with_env "MASC_SEARXNG_URL" "http:user:SECRETPASS6@search.example" (fun () ->
+    match Env_config_runtime.Tools.searxng_base_url () with
+    | Error msg ->
+      Alcotest.(check bool)
+        "missing-// http env error redacts password"
+        false
+        (contains msg "SECRETPASS6")
+    | Ok url -> Alcotest.failf "expected missing-// refusal, got Ok %S" url)
 
 let test_a_searxng_url_is_written_as_given () =
   with_config runtime_base (fun path ->

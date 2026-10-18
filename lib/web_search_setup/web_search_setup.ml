@@ -240,10 +240,20 @@ let scrub_authority value auth_start =
         ])
 ;;
 
-let display_searxng_url value =
-  match index_substring_from value "://" 0 with
-  | Some scheme_end -> scrub_authority value (scheme_end + 3)
-  | None -> scrub_authority value 0
+let authority_start value =
+  if String.starts_with ~prefix:"//" value
+  then 2
+  else (
+    let first_delim = authority_end value 0 in
+    match index_substring_from value "://" 0 with
+    | Some scheme_end
+      when scheme_end + 1 = first_delim
+           && not (String.contains (String.sub value 0 scheme_end) '@') ->
+      scheme_end + 3
+    | Some _ | None -> 0)
+;;
+
+let display_searxng_url value = scrub_authority value (authority_start value)
 ;;
 
 (* The searxng URL is refused here, not left to the loader. The loader checks a

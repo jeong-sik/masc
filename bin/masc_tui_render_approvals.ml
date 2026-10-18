@@ -344,6 +344,26 @@ let draw_ask_answer_feedback buf cols (state : state) =
       box_line buf cols ("  " ^ Ansi.dim ^ Terminal_text.single_line detail ^ Ansi.reset)) detail)
     (Masc_tui_types.current_ask_answer_feedback state)
 
+(* Copy complete terminal rows from the original safe question rendering.
+   Do not cut an ANSI/UTF-8 sequence, reflow the prompt or borrow choice/draft
+   state from another question. This preview does not enter answering mode. *)
+let draw_ask_question_preview buf cols ~rows text =
+  let length = String.length text in
+  let prompt_rows = if rows > 1 then rows - 1 else rows in
+  let rec copy offset remaining =
+    if remaining > 0 && offset < length then
+      match String.index_from_opt text offset '\n' with
+      | Some stop ->
+          Buffer.add_substring buf text offset (stop - offset + 1);
+          copy (stop + 1) (remaining - 1)
+      | None ->
+          Buffer.add_substring buf text offset (length - offset);
+          Buffer.add_char buf '\n'
+  in
+  copy 0 prompt_rows;
+  if rows > 1 then
+    box_line buf cols (Ansi.dim ^ "    … a opens the full ask and answers" ^ Ansi.reset)
+
 let draw_ask_questions buf cols (state : state) ~budget =
   draw_ask_origin buf cols state;
   let now = Unix.gettimeofday () in
@@ -385,13 +405,16 @@ let draw_ask_questions buf cols (state : state) ~budget =
             | None -> false
           in
           let questions = selected.Masc.Tui_decode_asks.ar_questions in
+          let question_cursor =
+            max 0 (min state.ask_question_cursor (List.length questions - 1))
+          in
           let question_blocks =
             List.mapi
               (fun index question ->
                 ask_block (fun b ->
                     draw_ask_question b cols state ~row:selected ~draft ~question
                       ~answering
-                      ~selected_question:(index = state.ask_question_cursor)))
+                      ~selected_question:(index = question_cursor)))
               questions
           in
           let why_text, why_rows =
@@ -400,7 +423,7 @@ let draw_ask_questions buf cols (state : state) ~budget =
           let plan =
             Ask_layout.plan ~budget ~spent:(count_frame_lines buf)
               ~question_heights:(List.map snd question_blocks)
-              ~question_cursor:state.ask_question_cursor
+              ~question_cursor
               ~context_height:why_rows ~other_asks:(count - 1)
           in
           List.iteri
@@ -410,9 +433,13 @@ let draw_ask_questions buf cols (state : state) ~budget =
                 && index
                    < plan.Ask_layout.question_start
                      + plan.Ask_layout.questions_shown
-              then Buffer.add_string buf text)
+              then
+                if plan.Ask_layout.question_preview_rows > 0 then
+                  draw_ask_question_preview buf cols
+                    ~rows:plan.Ask_layout.question_preview_rows text
+                else Buffer.add_string buf text)
             question_blocks;
-          if plan.Ask_layout.questions_hidden > 0 then
+          if plan.Ask_layout.question_notice then
             box_line buf cols
               (* "in this ask", because the count above names every question
                  the fleet is waiting on and this one names the selected

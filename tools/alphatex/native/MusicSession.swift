@@ -189,6 +189,9 @@ final class Capture {
         try checked(AudioObjectGetPropertyData(input.object, &key, 0, nil, &size, &alive),
                     "read selected input device state")
         guard alive != 0 else { throw SessionFailure("selected input device is no longer alive") }
+        guard try audioString(input.object, kAudioDevicePropertyDeviceUID) == input.uid else {
+            throw SessionFailure("selected input device identity changed")
+        }
     }
 
     func checkInputConfiguration() throws {
@@ -204,6 +207,9 @@ final class Capture {
             try checked(AudioObjectGetPropertyData(output.object, &key, 0, nil, &size, &alive), "read monitor output state")
             guard alive != 0, engine.outputNode.auAudioUnit.deviceID == routeDevice else {
                 throw SessionFailure("selected monitoring output is unavailable or changed")
+            }
+            guard try audioString(output.object, kAudioDevicePropertyDeviceUID) == output.uid else {
+                throw SessionFailure("selected monitoring output identity changed")
             }
         }
         if aggregate != 0, let output = monitorOutput, let unit = node.audioUnit {

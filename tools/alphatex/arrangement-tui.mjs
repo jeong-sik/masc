@@ -241,6 +241,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     })
   }
   function fail(error) {
+    calibration?.abort()
     if (recording) recording.failure = error
     stop()
     workerFailure = error

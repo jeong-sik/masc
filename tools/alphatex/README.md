@@ -253,3 +253,7 @@ controllers 64/66/69 that this source enabled. It never broadcasts all-notes-off
 Use destinations/channels owned for this audition: pedal state is shared by a
 MIDI channel, and opaque vendor SysEx can have device-specific side effects that
 cannot be reversed generically. Playback does not synthesize MIDI clock.
+
+The [arrangement document core](ARRANGEMENT.md) now retains MIDI/WAV sources and
+editable regions through save/reopen/relocation. Its terminal clip editor and
+arrangement/overdub transport are still being integrated.

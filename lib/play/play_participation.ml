@@ -8,7 +8,7 @@ let path ~base_path (credential : Masc_domain.agent_credential) =
   Filename.concat (Filename.concat (Common.masc_dir_from_base_path ~base_path) "play")
     ("participation-" ^ Common.safe_filename credential.agent_name ^ ".state")
 
-let read ~base_path credential =
+let read ~transaction:(_ : Auth.credential_transaction) ~base_path credential =
   Eio_guard.run_in_systhread ~label:"play-participation-read" (fun () ->
     let file = path ~base_path credential in
     try
@@ -22,7 +22,7 @@ let read ~base_path credential =
     | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok Connected
     | (Unix.Unix_error _ | Sys_error _) as exn -> Error (Printexc.to_string exn))
 
-let write ~base_path credential state =
+let write ~transaction:(_ : Auth.credential_transaction) ~base_path credential state =
   Eio_guard.run_in_systhread ~label:"play-participation-write" (fun () ->
     let file = path ~base_path credential in
     try
@@ -42,4 +42,4 @@ let current ~transaction ~base_path ~name =
      depart. Its Keeper's input authority is the Keeper registry's. *)
   | Some { Masc_domain.role = Masc_domain.Worker; _ } -> Ok Connected
   | Some ({ Masc_domain.role = Masc_domain.Admin | Masc_domain.Player; _ } as credential) ->
-    read ~base_path credential
+    read ~transaction ~base_path credential

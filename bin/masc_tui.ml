@@ -4071,6 +4071,62 @@ let save_runtime_config_text ?prior_contact state ~mailbox ~authority ~identity
   | Error _ as error -> error
   | Ok receipt -> launch_runtime_config_load ~force:true state ~mailbox; Ok receipt
 
+let launch_keeper_settings_save state ~mailbox request =
+  let host = server_peer_host and port = state.port in
+  let origin = request.ksv_origin in
+  let key = Masc_tui_fetched.request_key origin.ksr_request in
+  let sent = ref false in
+  let publish status =
+    let observed_ns = Mtime_clock.elapsed_ns () in
+    if publish_keeper_settings_save request ~observed_ns status then
+      Log.Transport.info "tui_keeper_settings_save keeper=%s started_ns=%Ld observed_ns=%Ld worker_phase=%s"
+        key.ksk_keeper request.ksv_started_ns observed_ns (keeper_settings_save_phase status) in
+  let finish outcome = publish (Settings_finished outcome) in
+  let interrupted detail = if !sent then Settings_unconfirmed detail else Settings_not_sent detail in
+  let run () =
+    let outcome = try
+      match check_workspace_request state ~mailbox ~authority:key.ksk_authority
+        ~identity:(Some origin.ksr_expected) ~host ~port () with
+      | Error detail -> Settings_not_sent detail
+      | Ok () ->
+          if origin.ksr_reading != state.workspace_read_authority then
+            Settings_not_sent "Settings read authority withdrew before dispatch"
+          else begin
+            sent := true;
+            publish Settings_posting;
+            match Masc_tui_http.post_keeper_config ~host ~port ~keeper_name:key.ksk_keeper
+              ~patch_json:(Yojson.Safe.to_string request.ksv_draft.ksd_patch) with
+            | Ok response ->
+                (match Masc_tui_keeper_config.config_write_status_message ~keeper_name:key.ksk_keeper response with
+                 | Ok (severity,message) -> Settings_applied {response;severity;message}
+                 | Error detail -> Settings_unconfirmed ("Invalid settings write receipt: " ^ detail))
+            | Error (Masc_tui_http.Keeper_config_revision_conflict response) ->
+                Settings_observation_required (Settings_revision_conflict,response)
+            | Error (Keeper_config_reconciliation_required response) ->
+                Settings_observation_required (Settings_reconciliation_required,response)
+            | Error (Keeper_config_runtime_sync_failed response) ->
+                Settings_observation_required (Settings_runtime_sync_failed,response)
+            | Error (Keeper_config_refused_before_write refusal) ->
+                Settings_refused (refusal.response,refusal.detail)
+            | Error ((Keeper_config_transport_error _ | Keeper_config_http_error _) as error) ->
+                Settings_unconfirmed (Masc_tui_http.keeper_config_post_error_to_string error)
+          end
+    with
+    | Eio.Cancel.Cancelled _ as exn -> finish (interrupted "Settings save worker interrupted"); raise exn
+    | exn -> interrupted (Printexc.to_string exn) in
+    finish outcome
+  in
+  Log.Transport.info "tui_keeper_settings_save keeper=%s started_ns=%Ld phase=checking"
+    key.ksk_keeper request.ksv_started_ns;
+  match Eio_context.get_switch_opt () with
+  | None -> finish (Settings_not_sent "Eio switch is unavailable")
+  | Some sw ->
+      (match fork_workspace_job state ~sw
+        ~on_withdrawn:(fun () -> finish (interrupted "Workspace withdrew before worker entry")) run with
+       | () -> ()
+       | exception (Eio.Cancel.Cancelled _ as exn) -> finish (interrupted "Settings save worker interrupted"); raise exn
+       | exception exn -> finish (interrupted (Printexc.to_string exn)))
+
 let launch_runtime_form_save state ~mailbox request =
   let host = server_peer_host and port = state.port in
   let prepared = ref None and sent = ref false in
@@ -16755,7 +16811,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
         | Gate_auto_judge_retried (_, _, _, _) | Gate_mode_set (_, _, _)
         | Surface_tool_approval_answered (_, _, _, _, _) | Keeper_gate_settings_loaded _
         | Keeper_tool_modes_loaded (_, _) | Keeper_tool_mode_set (_, _, _, _)
-        | Keeper_chat_dispatch_blocked (_, _) | Runtime_form_save_changed _ | Keeper_creation_changed _
+        | Keeper_chat_dispatch_blocked (_, _) | Runtime_form_save_changed _ | Keeper_settings_save_changed _ | Keeper_creation_changed _
         | Keeper_action_done (_, _, _, _)
         | Board_new_post_done _ | Board_vote_done _ | Goal_transition_done _
         | Goal_confirmation_submitted _ | Goal_confirmation_loaded (_, _) | Schedules_loaded (_, _)
@@ -17757,6 +17813,29 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
       if generation = state.keeper_deletions_generation && Result.is_ok result
          && Option.is_some state.keeper_deletions_retry_receipt then
         launch_keeper_deletions state ~mailbox ()
+  | Keeper_settings_save_changed (request,status,observed_ns) ->
+      let key = Masc_tui_fetched.request_key request.ksv_origin.ksr_request in
+      let current = keeper_settings_save_current state request in
+      if apply_keeper_settings_save state request status then begin
+        let phase = keeper_settings_save_phase status in
+        Log.Transport.info
+          "tui_keeper_settings_save keeper=%s started_ns=%Ld observed_ns=%Ld admitted_ns=%Ld phase=%s current_origin=%b"
+          key.ksk_keeper request.ksv_started_ns observed_ns (Mtime_clock.elapsed_ns ()) phase current;
+        match status with
+        | Settings_checking | Settings_posting -> ()
+        | Settings_finished outcome ->
+            let severity = match outcome with
+              | Settings_applied receipt -> receipt.severity
+              | Settings_not_sent _ | Settings_refused _ | Settings_observation_required _ | Settings_unconfirmed _ -> "error" in
+            let origin = if current then "" else " (" ^ key.ksk_base_path ^ ")" in
+            report_action state severity (key.ksk_keeper ^ origin ^ " · " ^ keeper_settings_save_outcome_detail outcome);
+            if current && state.view = Keepers Keeper_detail && state.detail_tab = Detail_instructions
+               && Option.exists (fun (keeper : keeper) -> String.equal keeper.k_name key.ksk_keeper) (selected_keeper state)
+            then begin
+              state.keeper_config_view <- None; state.keeper_config_view_error <- None;
+              launch_keeper_config_view state ~mailbox key.ksk_keeper
+            end
+      end
   | Runtime_form_save_changed (request, status, observed_ns) ->
       let attached = runtime_form_is_attached state request in
       let current = runtime_form_save_current state request in
@@ -17967,7 +18046,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
       (match message, state.goal_confirmation with
        | Goal_confirmation_submitted _, Goal_confirmation.Submitting (_, read) ->
            state.goal_confirmation <- Goal_confirmation.Inspecting read
-       | Runtime_form_save_changed _, _ -> ()
+       | Runtime_form_save_changed _, _ | Keeper_settings_save_changed _, _ -> ()
        | (Goal_confirmation_submitted _, Goal_confirmation.Inspecting _)
        | ((Approvals_listing_superseded | (Surface_composer_released | (Chat_search_finished (_, _, _, _) | (Workspace_scoped (_, _, _) | (Workspace_operation _ | (Chat_command_read_completed (_, _) | (Workspace_identity_unconfirmed _ | (Schedule_form_authority_refused _ | (Lane_package_catalog_loaded (_, _, _) | (Lane_package_preview_loaded (_, _, _) | (Keeper_queue_resume_confirmed (_, _, _) | (Keeper_queue_loaded (_, _, _, _) | (Lane_addons_loaded (_, _, _) | (Lane_application_loaded (_, _) | (Lane_subscriptions_loaded (_, _) | (Lane_declaration_loaded (_, _, _, _, _) | (Keeper_deletions_loaded (_, _) | (Msx_tick_withdrawn (_, _) | (Keeper_deletion_retry_done (_, _) | (Msx_frame_loaded (_, _) | (Msx_activity_loaded (_, _) | (Msx_live_loaded (_, _) | ( Dos_live_loaded (_, _) | ( Voice_wizard_saved (_, _) | ( Voice_agent_voices_loaded _ | ( Voice_agent_voice_saved _ | ( Voice_wizard_probed (_, _) | ( Voice_wizard_reread (_, _) | ( Voice_config_loaded (_, _, _) | ( Voice_level _ | ( Voice_transcribed _ | ( Voice_silent _ | ( Voice_discarded _ | ( Voice_failed _ | ( (Http_keeper_roster_loaded _ | Http_dataset_loaded _ | Http_progress_observed _ | Http_surface_read_completed _ | Http_initial_identity_read _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_observed _ | Ask_followup_observed _ | Ask_followup_finished _ | Http_refresh_done _) | ( Http_refresh_failed (_, _, _) | ( Approvals_summary_loaded (_, _, _, _) | ( Http_scoped_refresh_done (_, _, _) | ( Http_scoped_refresh_failed (_, _, _, _, _, _) | ( Board_post_refresh_done (_, _) | ( Approval_decision_done (_, _, _, _, _) | ( Ask_answer_done (_, _, _) | ( Keeper_chat_dispatch_started (_, _, _) | ( Keeper_chat_done (_, _, _, _) | ( Keeper_chat_stream_deltas (_, _) | ( Keeper_chat_stream_unavailable (_, _) | ( Keeper_run_next_done (_, _) | ( Keeper_observed_interrupt_done (_, _, _, _) | ( Keeper_chat_interrupt_done (_, _, _) | ( Keeper_chat_history_loaded (_, _, _, _) | ( Keeper_chat_copy_loaded (_, _, _) | ( Keeper_chat_operation_loaded _ | ( Keeper_chat_journal_loaded _ | ( Keeper_native_tasks_loaded (_, _) | ( Keeper_child_content_loaded (_, _) | Keeper_preparation_loaded (_, _) | ( Context_inspector_part_loaded (_, _) | Context_inspector_loaded (_, _, _) | ( Keeper_chat_older_loaded (_, _, _, _) | ( Local_workspace_read (_, _) | Local_keepers_read (_, _) | Live_context_loaded (_, _, _) | Keeper_logs_loaded _ | ( Lanes_loaded (_, _) | ( Lane_inventory_loaded (_, _) | ( Clients_loaded (_, _) | ( Lane_runs_loaded (_, _, _, _) | ( Lane_run_detail_loaded (_, _, _) | ( Measurement_artifact_loaded (_, _, _) | ( Verification_loaded _ | ( Harness_loaded _ | ( Fusion_runs_loaded (_, _) | ( Fusion_detail_loaded (_, _, _) | ( Fusion_historical_detail_loaded (_, _, _) | ( Fusion_launch_options_loaded (_, _) | ( Fusion_launched (_, _) | ( Repositories_loaded _ | ( Workspace_activity_loaded (_, _) | ( Memory_loaded _ | ( Memory_input_loaded (_, _) | ( Memory_facts_loaded (_, _) | ( Repository_changes_loaded (_, _) | ( Repository_changes_diff_loaded (_, _) | ( File_changes_loaded (_, _) | ( Keeper_chat_file_changes_loaded (_, _, _) | ( Git_diff_loaded (_, _) | ( Browser_history_list_loaded (_, _) | ( Browser_history_page_loaded (_, _) | ( Browser_lane_clients_loaded (_, _) | ( Browser_lane_loaded (_, _) | ( Browser_lane_action_done (_, _) | ( Browser_lane_scene_loaded (_, _) | ( Browser_lane_follow_loaded (_, _) | ( Browser_lane_screenshot_ready _ | ( Connectors_loaded (_, _) | ( Connector_unbind_all_done _ | ( Runtime_surface_loaded (_, _) | ( Tools_loaded (_, _, _) | ( Skills_catalog_loaded (_, _) | ( Skill_evidence_loaded (_, _, _) | ( Tools_async_observation_loaded (_, _) | ( Runtime_lane_slots_written (_, _, _) | ( Runtime_catalog_loaded (_, _) | ( Runtime_assignment_set (_, _, _) | ( Keeper_chat_approval_answered (_, _, _, _) | ( Keeper_tool_approvals_loaded (_, _, _) | ( Sent_image_ready _ | ( Image_render_ready _ | ( Keeper_turns_loaded (_, _) | ( Keeper_chat_control_received (_, _, _) | ( Gate_snapshot_loaded (_, _, _) | ( Gate_approval_resolved (_, _, _, _, _) | ( Gate_auto_judge_retried (_, _, _, _) | ( Gate_mode_set (_, _, _) | ( Surface_tool_approval_answered (_, _, _, _, _) | ( Keeper_gate_settings_loaded _ | ( Keeper_tool_modes_loaded (_, _) | ( Keeper_tool_mode_set (_, _, _, _) | ( Keeper_chat_dispatch_blocked (_, _) | ( Keeper_creation_changed _ | Keeper_action_done (_, _, _, _) | ( Board_new_post_done _ | ( Board_vote_done _ | ( Goal_transition_done _ | ( Goal_confirmation_loaded (_, _) | ( Schedules_loaded (_, _) | ( Schedule_wake_history_loaded (_, _) | ( Keeper_schedules_loaded (_, _) | ( System_logs_loaded _ | ( Schedule_cancel_done (_, _) | ( Verification_verdict_done _ | ( Harness_label_done _ | ( Keeper_calls_loaded (_, _, _) | ( Goal_timeline_loaded (_, _) | ( Task_history_loaded (_, _) | ( Task_cancel_done (_, _, _) | ( Verification_evidence_loaded (_, _) | ( Keeper_settings_editor_loaded _ | Keeper_config_view_loaded (_, _) | ( Keeper_items_loaded (_, _) | ( Keeper_sandbox_view_loaded (_, _) | ( Keeper_sandbox_logs_loaded (_, _, _) | ( Exact_activity_read (_, _) | ( Exact_activity_saved (_, _) | ( Browser_activity_read (_, _) | ( Browser_activity_saved (_, _) | ( Machine_activity_read (_, _) | ( Machine_activity_saved (_, _) | ( Runtime_config_view_loaded (_, _, _, _, _) | ( Runtime_params_loaded _ | ( Runtime_param_written (_, _) | ( Prompts_loaded (_, _) | ( Keeper_board_quarantines_loaded (_, _) | ( Board_quarantine_requeued (_, _, _) | ( Board_quarantines_bulk_progress (_, _, _, _, _, _) | ( Board_quarantines_bulk_requeued (_, _) | ( Presets_listed (_, _) | ( Preset_detail_loaded (_, _) | ( Preset_contents_shown (_, _) | ( Preset_saved (_, _) | ( Preset_restored (_, _) | ( Preset_deleted (_, _) | ( Play_room_received (_, _) | ( Play_invites_listed (_, _) | ( Play_invite_issued (_, _, _) | ( Play_invite_revoked (_, _, _, _) | ( Librarian_input_loaded (_, _) | ( Resources_listed _ | ( Code_entries_loaded (_, _) | ( Code_file_loaded (_, _, _) | ( Code_history_loaded (_, _) | ( Code_diff_loaded (_, _) | ( Acting_pane_changes_loaded (_, _) | ( Code_blame_loaded (_, _) | ( Code_lsp_answered (_, _) | ( Resource_read (_, _) | ( Github_identity_view_loaded (_, _) | ( Identity_providers_loaded (_, _, _) | ( Identity_switch_set (_, _, _, _) | ( Identity_login_started (_, _) | ( Identity_refreshed (_, _) | ( Identity_app_saved (_, _, _) | ( Account_login_event (_, _, _) | ( Account_login_json (_, _, _, _) | ( Account_login_removal (_, _, _, _, _) | ( Github_login_lines (_, _) | ( Github_login_finished (_, _) | ( Github_token_saved (_, _) | ( Observer_opened _ | ( Observer_received (_, _) | ( Observer_closed _ | ( Task_dispatched _ | Task_dispatch_failed _))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))), _) -> ());
       match result with
@@ -20980,9 +21059,12 @@ let drain_async_messages ?deadline_ns ?(input_pending = fun () -> false) state ~
           (match pending_runtime_form_save_receipt state with
            | Some (request, status, ready_at_ns) ->
                Some {ready_at_ns; message=Runtime_form_save_changed (request, status, ready_at_ns)}
-           | None -> Option.map (fun (request, status, ready_at_ns) ->
+           | None -> (match pending_keeper_settings_save_receipt state with
+             | Some (request,status,ready_at_ns) ->
+                 Some {ready_at_ns;message=Keeper_settings_save_changed (request,status,ready_at_ns)}
+             | None -> Option.map (fun (request, status, ready_at_ns) ->
                { ready_at_ns; message = Keeper_creation_changed (request, status) })
-               (pending_keeper_creation_receipt state)) in
+               (pending_keeper_creation_receipt state))) in
     match ready with
     | None ->
         state.keeper_creation_waits <- List.filter
@@ -22847,8 +22929,6 @@ and is loaded on demand through keeper_skill.
   let open_prepared_keeper_settings_editor request snapshot =
     let key = Masc_tui_fetched.request_key request.ksr_request in
     let keeper_name = key.ksk_keeper in
-    let authority = key.ksk_authority and identity = Some request.ksr_expected in
-    let check = workspace_check_sequence state ~mailbox:async_messages ~authority ~identity ~host ~port in
     let observed = snapshot.kss_observed in
     (* The same frozen snapshot supplies the editor text and guarded patch. *)
     let rec edit_round stem =
@@ -22873,8 +22953,8 @@ and is loaded on demand through keeper_skill.
         (match Yojson.Safe.from_string edited with
          | exception Yojson.Json_error detail ->
              reopen ("settings are not JSON: " ^ detail)
-         | edited_json -> apply_edit ~reopen edited_json)
-    and apply_edit ~reopen edited_json =
+         | edited_json -> apply_edit ~reopen ~edited edited_json)
+    and apply_edit ~reopen ~edited edited_json =
         match
           Masc_tui_keeper_config.patch_of_edit ~before:observed
             ~after:edited_json
@@ -22885,52 +22965,20 @@ and is loaded on demand through keeper_skill.
         | Ok (`Assoc []) ->
             report_action state "system"
               (keeper_name ^ ": no settings changed")
-        | Ok patch -> (
-          match check () with
-          | Error detail ->
-            apply_server_identity_reading state ~mailbox:async_messages (Error detail);
-            report_action state "error" (keeper_name ^ ": settings not saved: " ^ detail)
-          | Ok () -> match
-            Masc_tui_http.post_keeper_config ~host ~port
-              ~keeper_name
-              ~patch_json:(Yojson.Safe.to_string patch)
-          with
-          | Error
-              (( Masc_tui_http.Keeper_config_revision_conflict _
-               | Masc_tui_http.Keeper_config_reconciliation_required _
-               | Masc_tui_http.Keeper_config_runtime_sync_failed _ ) as
-               error) ->
-            report_action state "error"
-              (Masc_tui_http.keeper_config_post_error_to_string error);
-            state.keeper_config_view <- None;
-            state.keeper_config_view_error <- None;
-            launch_keeper_config_view state
-              ~mailbox:async_messages keeper_name
-          | Error
-              (( Masc_tui_http.Keeper_config_transport_error _
-               | Masc_tui_http.Keeper_config_http_error _ ) as error) ->
-            report_action state "error"
-              (Masc_tui_http.keeper_config_post_error_to_string error)
-          | Ok response ->
-              (match
-                 Masc_tui_keeper_config.config_write_status_message
-                   ~keeper_name response
-               with
-               | Error detail ->
-                 report_action state "error"
-                   (keeper_name ^ ": invalid config write receipt: " ^ detail)
-               | Ok (severity, message) ->
-                 report_action state severity message);
-              if
-                state.view = Keepers Keeper_detail
-                && state.detail_tab = Detail_instructions
-              then (
-                state.keeper_config_view <- None;
-                state.keeper_config_view_error <- None;
-                launch_keeper_config_view state
-                  ~mailbox:async_messages keeper_name))
+        | Ok patch ->
+            let draft = {ksd_snapshot=snapshot;ksd_text=edited;ksd_patch=patch} in
+            (match begin_keeper_settings_save state ~origin:request ~draft
+               ~started_ns:(Mtime_clock.elapsed_ns ()) with
+             | Error detail -> report_action state "error" detail
+             | Ok request -> launch_keeper_settings_save state ~mailbox:async_messages request)
     in
-    edit_round snapshot.kss_stem
+    let stem = match keeper_settings_recovery state key with
+      | None -> Ok snapshot.kss_stem
+      | Some retained -> Masc_tui_keeper_config.reopen_edit_on_current
+          ~before:retained.ksd_snapshot.kss_observed ~edited:retained.ksd_text ~current:observed in
+    match stem with
+    | Ok stem -> edit_round stem
+    | Error refusal -> report_action state "error" (Masc_tui_keeper_config.edit_refusal_to_string refusal)
   in
   let handle_keeper_settings_edit () =
     match selected_keeper state with
@@ -22945,7 +22993,8 @@ and is loaded on demand through keeper_skill.
              ~started_ns:(Mtime_clock.elapsed_ns ()) with
          | Some request -> launch_keeper_settings_editor_read state ~mailbox:async_messages request
          | None ->
-             (match Masc_tui_types.keeper_settings_editor_notice state with
+             (match (match Masc_tui_types.keeper_settings_editor_notice state with
+                | Some _ as notice -> notice | None -> keeper_settings_save_notice state) with
               | Some notice -> report_action state "info" notice
               | None -> report_action state "error" "Settings editor preparation requires current workspace and focus"))
   in
@@ -31419,9 +31468,8 @@ and is loaded on demand through keeper_skill.
            if Option.is_none state.runtime_lane_pick then
              open_selected_slot_config ()
        | Some "e" | Some "E" ->
-           (* Settings edit hands the terminal to $EDITOR, so it cannot live
-              inside the keeper-action pipeline: the loop is inside the
-              editor, and the POST happens only after the editor returns. *)
+           (* The terminal roundtrip stays here; preparation and the guarded
+              save run as owned asynchronous operations around it. *)
            (match state.view with
             | Code -> ()
             | Keepers Keeper_runtime_pick -> ()

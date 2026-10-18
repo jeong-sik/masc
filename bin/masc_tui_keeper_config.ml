@@ -379,6 +379,26 @@ let reopened_stem ~reason edited =
   let body = String.split_on_char '\n' edited |> drop_refusals |> String.concat "\n" in
   "// " ^ one_line ^ "\n" ^ body
 
+let reopen_edit_on_current ~before ~edited ~current =
+  let ( let* ) = Result.bind in
+  let* after = match Yojson.Safe.from_string edited with
+    | json -> Ok json
+    | exception Yojson.Json_error detail -> Error (Fix_in_editor detail) in
+  let* patch = patch_of_edit ~before ~after in
+  let* _ = expected_config_revision current |> Result.map_error (fun detail -> Cannot_send detail) in
+  match patch, editable_snapshot current with
+  | `Assoc changes, `Assoc fields ->
+      (* A fresh revision needs a fresh shrink decision too. The retained
+         request still carries the complete original text and confirmation. *)
+      let fields = List.fold_left (fun fields (key,value) ->
+        if String.equal key "expected_config_revision"
+           || String.equal key confirm_context_shrink_field then fields
+        else (key,value) :: List.remove_assoc key fields) fields changes in
+      Ok (reopened_stem
+        ~reason:"Current settings reloaded; your changed values retained. Review before saving."
+        (Yojson.Safe.pretty_to_string (`Assoc fields)))
+  | _ -> Error (Cannot_send "settings recovery requires object projections")
+
 (* Marker column. The glyph carries the editable/read-only split on its own,
    because colour collapses to nothing under NO_COLOR and dim inverts on a
    light background. Colour repeats what the glyph already says. *)

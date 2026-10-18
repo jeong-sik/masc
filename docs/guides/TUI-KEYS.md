@@ -88,6 +88,19 @@ The command palette is `:`.
 | `PgUp/PgDn` | page |
 | `Home/End` | top/bottom |
 
+Keeper settings `e` reads a fresh snapshot asynchronously before opening the
+external editor. After the editor returns, workspace rechecking and the guarded
+save also run asynchronously; navigation stays available while the receipt is
+pending. Repeated `e` shares that pending save. The footer retains progress or
+failure for the selected Keeper, and a late receipt cannot refresh another Keeper.
+
+After a refusal or unconfirmed result, `e` reads current settings and restores
+only your changed values for review in the editor. Untouched fields use current
+values. The old revision and context-shrink confirmation are not reused; saving
+requires the new editor roundtrip. Original input and receipts stay with their
+operation. The external editor itself and Sandbox shortcut saves retain their
+separate interaction paths. Runtime and painted latency remain unmeasured.
+
 ## Usage
 
 | Keys | What it does |

@@ -2902,6 +2902,7 @@ let post_harness_label ~(host : string) ~(port : int) ~(notes_hash : string)
     masc_keeper_up's arg parsing), not duplicated here. *)
 type keeper_config_post_error =
   | Keeper_config_transport_error of string
+  | Keeper_config_refused_before_write of { response : Yojson.Safe.t; detail : string }
   | Keeper_config_revision_conflict of Yojson.Safe.t
   | Keeper_config_reconciliation_required of Yojson.Safe.t
   | Keeper_config_runtime_sync_failed of Yojson.Safe.t
@@ -2912,6 +2913,7 @@ type keeper_config_post_error =
 
 let keeper_config_post_error_to_string = function
   | Keeper_config_transport_error detail -> detail
+  | Keeper_config_refused_before_write refusal -> refusal.detail
   | Keeper_config_revision_conflict _ ->
     "keeper config revision conflict; authoritative reload required"
   | Keeper_config_reconciliation_required _ ->
@@ -2966,6 +2968,13 @@ let post_keeper_config ~(host : string) ~(port : int) ~(keeper_name : string)
          | None -> false)
       | None -> false
     in
+    let declared_unchanged = match parsed with
+      | Some (`Assoc fields) ->
+          let entries key = List.filter (fun (name,_) -> String.equal name key) fields in
+          (match entries "config_applied", entries "runtime_sync", entries "config_application" with
+           | [(_,`Bool false)], [(_,`String "not_attempted")], [] -> true
+           | _ -> false)
+      | Some _ | None -> false in
     (match status, code, parsed with
      | 409, Some code, Some json
        when String.equal
@@ -2982,6 +2991,9 @@ let post_keeper_config ~(host : string) ~(port : int) ~(keeper_name : string)
      | 503, Some "keeper_runtime_sync_failed", Some json
        when Json_util.assoc_member_opt "config_applied" json = Some (`Bool true) ->
        Error (Keeper_config_runtime_sync_failed json)
+     | _, _, Some json when declared_unchanged ->
+       Error (Keeper_config_refused_before_write {response=json;
+         detail=named_refusal "keeper config" ~status ~body})
      | _ -> Error (Keeper_config_http_error { status; body }))
 
 (** POST /api/v1/keepers/:name/up — masc_keeper_up's own create-or-update

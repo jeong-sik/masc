@@ -2552,6 +2552,109 @@ let test_settings_preparation_retires_focus_and_workspace_owners () =
     (reconcile_keeper_settings_editor state ~available:true
       && not (take_keeper_settings_editor_read state active (Ok (keeper_settings_snapshot ()))))
 
+let keeper_settings_save_fixture () =
+  let open Masc_tui_types in
+  let state,keeper = keeper_settings_fixture () in
+  let origin = keeper_settings_request state and snapshot = keeper_settings_snapshot () in
+  ignore (take_keeper_settings_editor_read state origin (Ok snapshot));
+  ignore (take_ready_keeper_settings_editor state ~available:true ~input_pending:false);
+  let edited = {|{"instructions":"operator input","max_context_override":1024,"confirm_context_shrink":true}|} in
+  let patch = match Masc_tui_keeper_config.patch_of_edit ~before:snapshot.kss_observed
+    ~after:(Yojson.Safe.from_string edited) with
+    | Ok patch -> patch | Error refusal -> Alcotest.fail (Masc_tui_keeper_config.edit_refusal_to_string refusal) in
+  let draft = {ksd_snapshot=snapshot;ksd_text=edited;ksd_patch=patch} in
+  let request = match begin_keeper_settings_save state ~origin ~draft ~started_ns:20L with
+    | Ok request -> request | Error detail -> Alcotest.fail detail in
+  state,keeper,request
+
+let test_settings_save_keeps_receipt_through_withdrawal () =
+  let open Masc_tui_types in
+  let state,_,request = keeper_settings_save_fixture () in
+  Alcotest.(check bool) "repeat edit shares the admitted save" true
+    (Option.is_none (begin_keeper_settings_editor state ~available:true ~started_ns:21L));
+  Alcotest.(check bool) "duplicate dispatch refused" true
+    (Result.is_error (begin_keeper_settings_save state ~origin:request.ksv_origin
+      ~draft:request.ksv_draft ~started_ns:22L));
+  ignore (publish_keeper_settings_save request ~observed_ns:23L Settings_posting);
+  state.view <- Overview;
+  state.workspace_read_authority <- ref ();
+  let Workspace_authority epoch = state.workspace_authority in
+  state.workspace_authority <- Workspace_authority (epoch+1);
+  ignore (publish_keeper_settings_save request ~observed_ns:24L
+    (Settings_finished (Settings_unconfirmed "connection ended after possible dispatch")));
+  let recovered = match pending_keeper_settings_save_receipt state with
+    | Some (owner,status,_) -> owner.ksv_token == request.ksv_token && apply_keeper_settings_save state owner status
+    | None -> false in
+  Alcotest.(check bool) "receipt survives navigation and read withdrawal without a mailbox" true recovered;
+  Alcotest.(check bool) "receipt grants no current workspace authority" false
+    (keeper_settings_save_current state request);
+  Alcotest.(check string) "original edited bytes retained" request.ksv_draft.ksd_text
+    (List.hd state.keeper_settings_saves).ksa_request.ksv_draft.ksd_text;
+  Alcotest.(check bool) "terminal outcome cannot restart or be replaced by a late receipt" false
+    (publish_keeper_settings_save request ~observed_ns:25L Settings_posting)
+
+let test_settings_save_recovers_changes_on_fresh_revision () =
+  let open Masc_tui_types in
+  let state,_,request = keeper_settings_save_fixture () in
+  let outcome = Settings_finished (Settings_unconfirmed "write response missing") in
+  ignore (publish_keeper_settings_save request ~observed_ns:21L outcome);
+  ignore (apply_keeper_settings_save state request outcome);
+  let origin = keeper_settings_request state in
+  let retained = match keeper_settings_recovery state (Masc_tui_fetched.request_key origin.ksr_request) with
+    | Some draft -> draft | None -> Alcotest.fail "retained settings absent" in
+  let replace key value = function
+    | `Assoc fields -> `Assoc ((key,value) :: List.remove_assoc key fields)
+    | _ -> Alcotest.fail "fixture is not an object" in
+  let current = retained.ksd_snapshot.kss_observed
+    |> replace "activation_mode" (`String "manual")
+    |> replace "max_context_override" (`Int 4096)
+    |> replace "config_revision" (`Assoc [
+       "manifest",`Assoc ["state",`String "sha256";"value",`String (String.make 64 'b')];
+       "runtime_assignment",`Assoc ["state",`String "runtime_config_missing"]]) in
+  let edited = match Masc_tui_keeper_config.reopen_edit_on_current
+    ~before:retained.ksd_snapshot.kss_observed ~edited:retained.ksd_text ~current with
+    | Ok text -> text | Error refusal -> Alcotest.fail (Masc_tui_keeper_config.edit_refusal_to_string refusal) in
+  let json = Yojson.Safe.from_string edited in
+  Alcotest.(check bool) "only operator changes overlay current settings" true
+    (Yojson.Safe.Util.member "instructions" json = `String "operator input"
+     && Yojson.Safe.Util.member "activation_mode" json = `String "manual");
+  Alcotest.(check bool) "fresh context requires a new shrink confirmation" true
+    (Yojson.Safe.Util.member "confirm_context_shrink" json = `Null);
+  let patch = match Masc_tui_keeper_config.patch_of_edit ~before:current ~after:json with
+    | Ok patch -> patch | Error refusal -> Alcotest.fail (Masc_tui_keeper_config.edit_refusal_to_string refusal) in
+  Alcotest.(check bool) "new patch uses current composite revision" true
+    (Yojson.Safe.Util.member "expected_config_revision" patch = Yojson.Safe.Util.member "config_revision" current);
+  let snapshot = {kss_observed=current;kss_stem=Masc_tui_keeper_config.editor_stem current} in
+  ignore (take_keeper_settings_editor_read state origin (Ok snapshot));
+  ignore (take_ready_keeper_settings_editor state ~available:true ~input_pending:false);
+  let successor = match begin_keeper_settings_save state ~origin
+    ~draft:{ksd_snapshot=snapshot;ksd_text=edited;ksd_patch=patch} ~started_ns:30L with
+    | Ok successor -> successor | Error detail -> Alcotest.fail detail in
+  Alcotest.(check bool) "late original receipt cannot finish the successor" false
+    (apply_keeper_settings_save state request (Settings_finished (Settings_applied {
+      response=`Null;severity="system";message="late"})));
+  Alcotest.(check bool) "successor retains its own edited input" true
+    ((List.hd state.keeper_settings_saves).ksa_request.ksv_token == successor.ksv_token
+     && (List.hd state.keeper_settings_saves).ksa_status = Settings_checking);
+  Alcotest.(check string) "recovery never rewrites original request text" retained.ksd_text request.ksv_draft.ksd_text
+
+let test_settings_save_not_sent_preserves_origin_input () =
+  let open Masc_tui_types in
+  let state,_,request = keeper_settings_save_fixture () in
+  let finished = Settings_finished (Settings_not_sent "worker not entered") in
+  ignore (apply_keeper_settings_save state request finished);
+  state.workspace_read_authority <- ref ();
+  Alcotest.(check bool) "withdrawn editor authority cannot dispatch" true
+    (Result.is_error (begin_keeper_settings_save state ~origin:request.ksv_origin
+      ~draft:request.ksv_draft ~started_ns:30L));
+  let retained = List.hd state.keeper_settings_saves in
+  Alcotest.(check bool) "refused origin keeps a recoverable unposted operation" true
+    (retained.ksa_recoverable && match retained.ksa_status with
+     | Settings_finished (Settings_not_sent _) -> true
+     | Settings_checking | Settings_posting | Settings_finished (Settings_applied _
+         | Settings_refused _ | Settings_observation_required _ | Settings_unconfirmed _) -> false);
+  Alcotest.(check string) "exact refused input survives" request.ksv_draft.ksd_text retained.ksa_request.ksv_draft.ksd_text
+
 let runtime_form_source = {|[providers.codex]
 protocol = "codex-app-server"
 command = "codex"
@@ -2872,7 +2975,13 @@ let test_runtime_snapshot_refresh_reuses_draft_without_changing_ownership () =
 let () =
   Alcotest.run "tui_server_identity_refresh"
     [ ( "server-identity-refresh"
-      , [ Alcotest.test_case "config projection retains source through unavailable model interpretation" `Quick
+      , [ Alcotest.test_case "settings save retains original receipt through withdrawal" `Quick
+            test_settings_save_keeps_receipt_through_withdrawal
+        ; Alcotest.test_case "settings recovery joins changed values to a fresh revision" `Quick
+            test_settings_save_recovers_changes_on_fresh_revision
+        ; Alcotest.test_case "settings origin refusal preserves input without dispatch" `Quick
+            test_settings_save_not_sent_preserves_origin_input
+        ; Alcotest.test_case "config projection retains source through unavailable model interpretation" `Quick
             test_runtime_snapshot_preserves_source_when_models_unavailable
         ; Alcotest.test_case "config projection joins exact source and server group observations" `Quick
             test_runtime_snapshot_models_use_same_source_and_server_groups

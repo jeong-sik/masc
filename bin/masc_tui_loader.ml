@@ -480,7 +480,12 @@ type local_reading =
   ; lr_keepers_error : string option
   }
 
-let read_local_workspace (base_path : string) : local_reading =
+(* Worker reads can overlap a post-action reload or a retired workspace's
+   cleanup. Both touch the same metadata cache, so its read transaction has
+   one cooperative owner; waiting never holds the UI domain. *)
+let local_workspace_read_mutex = Eio.Mutex.create ()
+
+let read_local_workspace_unlocked (base_path : string) : local_reading =
   let masc_dir = Filename.concat base_path Common.masc_dirname in
   (* Load agents *)
   let agents_dir = Filename.concat masc_dir "agents" in
@@ -517,6 +522,10 @@ let read_local_workspace (base_path : string) : local_reading =
   ; lr_operator_stalled = operator_stalled; lr_goal_task_links = goal_task_links
   ; lr_goals_to_confirm = goals_to_confirm; lr_keepers = keepers
   ; lr_keepers_error = keepers_error }
+
+let read_local_workspace base_path =
+  Eio.Mutex.use_rw ~protect:false local_workspace_read_mutex
+    (fun () -> read_local_workspace_unlocked base_path)
 
 let apply_local_workspace (state : state) (base_path : string)
     (reading : local_reading) =
@@ -562,9 +571,12 @@ let apply_local_workspace (state : state) (base_path : string)
 
 (** Load state from .masc directory *)
 let load_from_masc_dir (state : state) (base_path : string) =
+  (* An explicit post-action read supersedes any older background snapshot. *)
+  state.local_workspace_read_order <- Snapshot_read.invalidate state.local_workspace_read_order;
   apply_local_workspace state base_path (read_local_workspace base_path)
 
 let clear_local_workspace ?(keep_keeper_rows = false) (state : state) =
+  state.local_workspace_read_order <- Snapshot_read.invalidate state.local_workspace_read_order;
   state.agents <- [];
   state.tasks <- [];
   state.tasks_domain <- [];

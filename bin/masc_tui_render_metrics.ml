@@ -160,7 +160,8 @@ let pulse_line ~cols (state : state) kpis =
   in
   let roster =
     match state.local_workspace, state.keepers_error with
-    | Local_workspace_unread, _ | Local_workspace_read, Some _ -> "roster unavailable"
+    | (Local_workspace_unread | Local_workspace_failed _), _
+    | Local_workspace_read, Some _ -> "roster unavailable"
     | Local_workspace_read, None ->
       Printf.sprintf "%d configured · %d paused" kpis.total_keepers
         kpis.paused_keepers

@@ -25,9 +25,11 @@ let of_state (state : Masc_tui_types.state) : Composer.t =
                  | Workspace_identity_match_unconfirmed _ ->
                    "server workspace unconfirmed; waiting for the next read"
                  | Workspace_identity_match ->
-                   (match state.keepers_error with
-                    | Some _ -> "keeper list unread"
-                    | None -> "no longer in the roster"))
+                   (match state.local_workspace, state.keepers_error with
+                    | Local_workspace_unread, _ -> "Keeper list is still loading"
+                    | Local_workspace_failed _, _ | Local_workspace_read, Some _ ->
+                        "keeper list unread"
+                    | Local_workspace_read, None -> "no longer in the roster"))
             }
   in
   { Composer.target

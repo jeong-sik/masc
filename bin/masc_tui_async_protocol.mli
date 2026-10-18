@@ -349,7 +349,7 @@ type async_msg =
       * (string, string) result
   | Keeper_chat_older_loaded of
       int * string * string option * (Masc_tui_keeper_chat_history.page, Masc_tui_keeper_chat_history.page_error) result
-  | Local_workspace_read of string * Masc_tui_loader.local_reading
+  | Local_workspace_read of local_workspace_request * (Masc_tui_loader.local_reading, string) result
   | Lanes_loaded of
       unit ref * ( Masc.Tui_decode.keeper_lanes_snapshot
         * Masc.Tui_decode.keeper_secret_projection list,

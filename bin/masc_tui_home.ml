@@ -216,7 +216,7 @@ let home_continue_rows (state : state) =
                "Create a Keeper  · choose who will take the work") ]
     | (Workspace_identity_match, Local_workspace_read, None, _::_)
     | (Workspace_identity_match, Local_workspace_read, Some _, _)
-    | (Workspace_identity_match, Local_workspace_unread, _, _)
+    | (Workspace_identity_match, (Local_workspace_unread | Local_workspace_failed _), _, _)
     | ((Workspace_identity_unread | (Workspace_identity_match_unconfirmed _ | Workspace_identity_mismatch _)), _, _, _) -> [ Home_choose_keeper,
           (match resume with
            | [] ->

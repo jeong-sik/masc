@@ -1294,6 +1294,72 @@ let test_early_roster_preserves_read_ownership () =
   Alcotest.(check bool) "retired workspace cannot publish a roster" true
     (take_early_keeper_roster_observation state early=None)
 
+let local_workspace_request_exn state at =
+  match Masc_tui_types.begin_local_workspace_read state
+          ~base_path:state.Masc_tui_types.local_base_path ~started_ns:at with
+  | Some request -> request
+  | None -> Alcotest.fail "local workspace read did not start"
+
+let test_local_read_and_http_sources_progress_independently () =
+  let open Masc_tui_types in
+  let state, early = early_roster_fixture () in
+  let request = local_workspace_request_exn state 5L in
+  Alcotest.(check bool) "cadence cannot duplicate the local worker" true
+    (begin_local_workspace_read state ~base_path:state.local_base_path ~started_ns:6L = None);
+  Alcotest.(check bool) "local pending does not gate HTTP source admission" true
+    (Option.is_some (take_early_keeper_roster_observation state early)
+     && Snapshot_read.in_flight state.local_workspace_read_order);
+  let reading : Masc_tui_loader.local_reading =
+    { lr_agents = []; lr_rows = Masc_tui_overview_tasks.Rows_read []
+    ; lr_tasks_domain = []; lr_tasks_error = None; lr_task_flow = None
+    ; lr_operator_stalled = Masc_tui_agenda.Read []; lr_goal_task_links = Goal_links_not_read
+    ; lr_goals_to_confirm = Masc_tui_agenda.Read []; lr_keepers = []; lr_keepers_error = None } in
+  (match take_local_workspace_read state request (Ok reading) with
+   | Some (Ok observed) -> Masc_tui_loader.apply_local_workspace state state.local_base_path observed
+   | Some (Error _) | None -> Alcotest.fail "current local result was not admitted");
+  Alcotest.(check bool) "local observation lands before enclosing collector completes" true
+    (state.local_workspace = Local_workspace_read && state.http_refresh_started_ns = Some 0L);
+  Alcotest.(check bool) "duplicate completion cannot apply again" true
+    (take_local_workspace_read state request (Ok reading) = None)
+
+let test_local_read_refuses_retired_epoch_and_wrong_path () =
+  let open Masc_tui_types in
+  let state, _ = early_roster_fixture () in
+  let old = local_workspace_request_exn state 5L in
+  suspend_workspace_readings state;
+  state.workspace_identity <- Workspace_identity_match;
+  let current = local_workspace_request_exn state 7L in
+  Alcotest.(check bool) "same path after suspension cannot accept the old epoch" true
+    (take_local_workspace_read state old (Error "old failure") = None
+     && Snapshot_read.in_flight state.local_workspace_read_order
+     && state.local_workspace = Local_workspace_unread);
+  let wrong_path = { current with lwr_base_path = "/workspace/foreign" } in
+  Alcotest.(check bool) "foreign path cannot settle the successor slot" true
+    (take_local_workspace_read state wrong_path (Ok ()) = None);
+  let Workspace_authority generation = state.workspace_authority in
+  let wrong_epoch = { current with lwr_authority = Workspace_authority (generation + 1) } in
+  Alcotest.(check bool) "foreign authority cannot spend a matching path and request" true
+    (take_local_workspace_read state wrong_epoch (Ok ()) = None);
+  Alcotest.(check bool) "only the successor can settle" true
+    (take_local_workspace_read state current (Ok ()) = Some (Ok ()))
+
+let test_local_read_failure_settles_and_can_be_retried () =
+  let open Masc_tui_types in
+  let state, _ = early_roster_fixture () in
+  let request = local_workspace_request_exn state 5L in
+  Alcotest.(check bool) "owned failure is observed" true
+    (take_local_workspace_read state request (Error "directory unavailable") = Some (Error "directory unavailable"));
+  Alcotest.(check bool) "failure is distinct from unread or empty and releases its slot" true
+    (state.local_workspace = Local_workspace_failed "directory unavailable"
+     && not (Snapshot_read.in_flight state.local_workspace_read_order)
+     && local_rows_page state ~error:None = Page_failed);
+  let retry = local_workspace_request_exn state 7L in
+  Alcotest.(check bool) "late failed attempt cannot release the retry" true
+    (take_local_workspace_read state request (Error "late failure") = None
+     && Snapshot_read.in_flight state.local_workspace_read_order);
+  Alcotest.(check bool) "fresh retry can settle" true
+    (take_local_workspace_read state retry (Ok ()) = Some (Ok ()))
+
 let test_question_origin_survives_answer_and_workspace_change () =
   let open Masc_tui_types in
   let module Ask = Masc_tui_ask_projection in
@@ -1702,6 +1768,12 @@ let () =
             test_question_origin_survives_answer_and_workspace_change
         ; Alcotest.test_case "answer receipt has one original submission owner" `Quick
             test_answer_receipt_has_one_original_submission_owner
+        ; Alcotest.test_case "local and HTTP sources progress independently" `Quick
+            test_local_read_and_http_sources_progress_independently
+        ; Alcotest.test_case "local read refuses retired epochs and foreign paths" `Quick
+            test_local_read_refuses_retired_epoch_and_wrong_path
+        ; Alcotest.test_case "local read failure releases its slot for retry" `Quick
+            test_local_read_failure_settles_and_can_be_retried
         ; Alcotest.test_case "early roster preserves source and workspace ownership" `Quick
             test_early_roster_preserves_read_ownership
         ; Alcotest.test_case "refresh observations retain independent source outcomes" `Quick

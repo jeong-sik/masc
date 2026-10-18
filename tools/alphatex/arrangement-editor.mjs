@@ -122,7 +122,7 @@ export function arrangementCommand(editor, line) {
           || BigInt(args[2]) < -2147483648n || BigInt(args[2]) > 2147483647n || String(Number(args[2])) !== args[2]) throw new Error('Choose an exact source port and destination UID')
       return { editor, effect: { kind: command, asset: args[0], port, destination: args[2] } }
     }
-    case 'output': if (!tail) throw new Error('Choose an output UID'); return { editor, effect: { kind: 'output', path: tail } }
+    case 'output': case 'mixed-output': if (!tail) throw new Error('Choose an output UID'); return { editor, effect: { kind: command, path: tail } }
     case 'record': case 'export': case 'wave':
       throw new Error('Arrangement export and overdub are not connected yet')
     case 'asset': {

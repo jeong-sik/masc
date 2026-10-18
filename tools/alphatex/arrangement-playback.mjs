@@ -1,5 +1,5 @@
-import { mkdtemp, writeFile, rm } from 'node:fs/promises'
-import { join } from 'node:path'
+import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises'
+import { join, dirname } from 'node:path'
 import { arrangementSchedule, newArrangement } from './arrangement.mjs'
 import { sourceMidiTimeline } from './midi-source-playback.mjs'
 import { importArrangementWave } from './arrangement-files.mjs'
@@ -78,4 +78,55 @@ export async function prepareArrangementMidi(project, { directory, signal, midiO
     signal?.throwIfAborted()
     return { path, duration, format: 'midi-arrangement', bindings, midiOutput: bindings[0].destination }
   } catch (error) { await rm(temporary, { recursive: true, force: true }); throw error }
+}
+
+// A route expresses the user's output intent independently of lane mute/solo.
+export function arrangementRoute({ output, midiOutput } = {}) {
+  return output !== undefined && midiOutput !== undefined ? { kind: 'mixed', output, midiOutput, portBindings: [] }
+    : midiOutput !== undefined ? { kind: 'midi', midiOutput, portBindings: [] } : { kind: 'audio', output }
+}
+export function selectArrangementRoute(route, effect) {
+  switch (effect.kind) {
+    case 'output': return { kind: 'audio', output: effect.path }
+    case 'mixed-output': return { kind: 'mixed', output: effect.path, midiOutput: route.midiOutput, portBindings: route.portBindings ?? [] }
+    case 'midi-output': return { ...(route.kind === 'mixed' ? { kind: 'mixed', output: route.output } : { kind: 'midi' }), midiOutput: effect.destination, portBindings: [] }
+    case 'midi-port': return { ...(route.kind === 'mixed' ? { kind: 'mixed', output: route.output } : { kind: 'midi' }), portBindings: [
+      ...(route.portBindings ?? []).filter(binding => binding.asset !== effect.asset || binding.port !== effect.port),
+      { asset: effect.asset, port: effect.port, destination: effect.destination }] }
+    default: throw new Error('Unknown arrangement output selection')
+  }
+}
+export function arrangementPlaybackRequest(project, route) {
+  const kinds = new Set(arrangementSchedule(project).map(clip => project.assets.find(asset => asset.id === clip.asset).kind))
+  if (!kinds.size) throw new Error('No audible arrangement regions')
+  if (kinds.size > 1 && route.kind !== 'mixed') throw new Error('Select :mixed-output AUDIO_UID and MIDI destinations for mixed playback')
+  if (kinds.has('wave') && route.kind === 'midi') throw new Error('Choose an audio output for audible WAV regions')
+  if (kinds.has('midi') && route.kind === 'audio') throw new Error('Choose a MIDI destination for audible MIDI regions')
+  return { kind: kinds.size > 1 ? 'prepare-mixed' : kinds.has('wave') ? 'prepare-wave' : 'prepare-midi',
+    ...(kinds.has('wave') ? { output: route.output } : {}),
+    ...(kinds.has('midi') ? { midiOutput: route.midiOutput, portBindings: route.portBindings } : {}) }
+}
+
+export async function prepareArrangementMixed(project, options = {}) {
+  options.signal?.throwIfAborted()
+  const kinds = new Map(project.assets.map(asset => [asset.id, asset.kind]))
+  const part = kind => ({ ...project, clips: project.clips.filter(clip => kinds.get(clip.asset) === kind) })
+  const midi = await prepareArrangementMidi(part('midi'), options)
+  let wave
+  try {
+    wave = await prepareArrangementWave(part('wave'), options)
+    const [audioPlan, midiPlan] = await Promise.all([readFile(wave.path, { encoding: 'utf8', signal: options.signal }),
+      readFile(midi.path, { encoding: 'utf8', signal: options.signal })])
+    const audio = JSON.parse(audioPlan), notes = JSON.parse(midiPlan)
+    const duration = Math.max(audio.duration, notes.duration)
+    notes.duration = duration
+    options.signal?.throwIfAborted()
+    await writeFile(wave.path, JSON.stringify({ ...audio, schemaVersion: 2, kind: 'mixed-arrangement', duration, midi: notes }),
+      { mode: 0o600, signal: options.signal })
+    options.signal?.throwIfAborted()
+    return { ...wave, duration, format: 'mixed-arrangement', bindings: midi.bindings, midiOutput: midi.midiOutput }
+  } catch (error) {
+    if (wave) await rm(dirname(wave.path), { recursive: true, force: true })
+    throw error
+  } finally { await rm(dirname(midi.path), { recursive: true, force: true }) }
 }

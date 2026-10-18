@@ -4,8 +4,8 @@ The terminal arrangement editor opens with `masc-alphatex --arrange`, the score
 view's `a` key, or `--project song.json` for a saved arrangement. It arranges
 retained WAV/MIDI sources independently of the phrase piano roll. WAV regions have
 a streamed multi-voice transport, and MIDI regions have an expressive source-state
-transport. The [native shared clock](ARRANGEMENT-CLOCK.md) accepts combined plans; its
-terminal route and overdub integration remain subsequent work. Source and phrase
+transport. The [shared clock](ARRANGEMENT-CLOCK.md) plays mixed WAV/MIDI lanes through one
+native owner. Overdub integration remains subsequent work; source and phrase
 editors retain their separate transports.
 
 ## Terminal workflow
@@ -120,13 +120,14 @@ MIDI regions reuse the supported source channel-state reconstruction boundary,
 retain original source clocks/ports and diagnose physical destination/channel
 ownership conflicts before opening outputs. WAV regions use native-rate
 conversion/mixing with frame bounds, selected-output ownership and streaming.
-These separate transports do not establish shared MIDI/audio clock alignment.
+The combined route uses the native shared host-clock epoch and paired lifecycle;
+this does not establish sample-perfect or acoustic alignment.
 
 Capture import must retain WAV plus original UMP and capture-clock provenance;
 exported note-only SMF is insufficient for a simultaneous recorded take. The
 current import helpers accept WAV and SMF/RMID files; capture attachment,
-recording into an existing project, overdubs, VST routing and shared clock
-alignment remain unfinished integrations.
+recording into an existing project, overdubs and VST routing remain unfinished
+integrations.
 
 
 ## WAV arrangement transport
@@ -135,8 +136,12 @@ Space plays, pauses or resumes the audible WAV lanes. `:stop` stops the owned
 player; `:seek 8` seeks to quarter-note beat 8, including when paused. `:output UID`
 selects an explicit CoreAudio output and stops the previous route. Command-line
 `--output UID` is forwarded through both new and saved arrangement entrypoints.
-Mixed audible WAV/MIDI lanes require the shared-clock integration. Mute the MIDI
-lanes or solo WAV lanes for WAV-only audition. An explicitly selected MIDI output
+Mixed audible WAV/MIDI lanes use `:mixed-output AUDIO_UID` followed by
+`:midi-output MIDI_UID` or `:midi-port ASSET PORT MIDI_UID` for every source port.
+`--output AUDIO_UID --midi-output MIDI_UID` selects both when opening a new or
+saved arrangement. A mixed route also supports solo/mute audition of either
+source kind. `:output AUDIO_UID` explicitly returns to audio-only selection.
+An explicitly selected MIDI output
 never silently switches to the default audio device; select :output explicitly
 to change to audio playback.
 
@@ -173,9 +178,9 @@ Space plays, pauses and resumes audible MIDI lanes. Select an exact destination
 with :midi-output ID for single-port sources, or bind each retained source port
 with :midi-port asset-1 PORT ID. Bindings are per asset and session; format-2
 regions retain their explicit pattern. :output switches to audio and clears MIDI
-selections; selecting MIDI clears the previous audio route. :stop and :seek BEAT
-have the same ownership semantics as WAV playback. Mixed audible source kinds
-are explicitly refused until the shared-clock coordinator is connected.
+selections. In a mixed route, selecting MIDI preserves its audio output; in a
+MIDI-only route it clears the previous audio route. :stop and :seek BEAT have the
+same ownership semantics as WAV playback.
 
 Native preparation decodes each retained source once. One region cursor retains
 its start, native source offset/extent and finite repeat count. Source tempo maps
@@ -206,5 +211,5 @@ Seek also jumps directly to the current copy. Storage and missed-copy processing
 do not grow with the finite repeat count. This phase policy differs from the
 original full-source audition's complete ordered-stream delivery. Maximum
 observed lateness is reported; sample-clock timing and physical latency are not
-claimed. Whole-arrangement looping, shared WAV/MIDI clocks, MIDI2/UMP, VST,
+claimed. Whole-arrangement looping, MIDI2/UMP, VST,
 monitoring and recording/overdub remain unfinished integrations.

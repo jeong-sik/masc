@@ -1618,13 +1618,90 @@ let test_antigravity_panel_selected_account_and_refresh () =
       check int "every call has a HOME of its own" 6
         (List.length (List.sort_uniq String.compare homes));
       List.iter
-        (fun home -> check bool "the HOME is removed with its call" false (Sys.file_exists home))
+        (fun home ->
+           let root_name =
+             home |> Filename.dirname |> Filename.dirname |> Filename.dirname |> Filename.dirname |> Filename.basename
+           in
+           check (option int) "panelist root stamps this process's pid"
+             (Some (Unix.getpid ()))
+             (Masc.Fusion_official_client.For_testing.antigravity_panel_root_owner_pid root_name);
+           check bool "the HOME is removed with its call" false (Sys.file_exists home))
         homes;
       check bool "no per-account state is kept under the runtime state directory" false
         (Sys.file_exists (Filename.concat base_dir ".masc/official-clients"));
       check (list string) "no temporary root outlives its call, refused ones included" []
         (Array.to_list (Sys.readdir panel_tmp))
     | _ -> fail "only six admitted model turns should spawn")
+;;
+
+(* One past the largest pid any supported platform allocates (Linux caps
+   pid_max at 4194304; macOS at 99999), so no process can hold it and
+   [Unix.kill] answers ESRCH. *)
+let dead_pid = 4194305
+
+let test_sweep_stale_antigravity_panel_roots () =
+  let parse = Masc.Fusion_official_client.For_testing.antigravity_panel_root_owner_pid in
+  check (option int) "decimal pid with nonce parsed"
+    (Some dead_pid)
+    (parse "masc-antigravity-panelist-4194305-a1b2c3");
+  List.iter
+    (fun name ->
+       check (option int) (name ^ " rejected") None (parse name))
+    [ "masc-antigravity-panelist-a1b2c3"
+    ; "masc-antigravity-panelist-0x10-a1b2c3"
+    ; "masc-antigravity-panelist-+123-a1b2c3"
+    ; "masc-antigravity-panelist-1_000-a1b2c3"
+    ; "masc-antigravity-panelist--5-a1b2c3"
+    ; "masc-antigravity-panelist-0-a1b2c3"
+    ; "masc-antigravity-panelist-4242-"
+    ; "masc-antigravity-panelist--a1b2c3"
+    ; "masc-muse-panelist-4194305-a1b2c3"
+    ];
+  let temp_dir = Filename.temp_dir "fusion-agy-sweep" "" |> Unix.realpath in
+  Fun.protect ~finally:(fun () -> remove_tree temp_dir) @@ fun () ->
+  let plant_root ?(perm = 0o700) name =
+    let root = Filename.concat temp_dir name in
+    Unix.mkdir root perm;
+    let oauth_dir =
+      List.fold_left Filename.concat root [ "official-clients"; "antigravity"; "panelist"; "rev"; ".gemini"; "antigravity-cli" ]
+    in
+    Fs_compat.mkdir_p oauth_dir;
+    write_file
+      ~path:(Filename.concat oauth_dir "antigravity-oauth-token")
+      ~perm:0o600
+      (Masc_test_deps.antigravity_oauth_fixture "ORPHAN_SECRET");
+    root
+  in
+  let dead_root = plant_root (Printf.sprintf "masc-antigravity-panelist-%d-dead01" dead_pid) in
+  let live_self_root =
+    plant_root (Printf.sprintf "masc-antigravity-panelist-%d-live01" (Unix.getpid ()))
+  in
+  let live_init_root = plant_root "masc-antigravity-panelist-1-init01" in
+  let legacy_root = plant_root "masc-antigravity-panelist-legacy01" in
+  let non_private_dead_root =
+    plant_root ~perm:0o755 (Printf.sprintf "masc-antigravity-panelist-%d-open01" dead_pid)
+  in
+  let symlink_target = Filename.concat temp_dir "outside-target" in
+  Unix.mkdir symlink_target 0o700;
+  let symlink_path =
+    Filename.concat temp_dir (Printf.sprintf "masc-antigravity-panelist-%d-link01" dead_pid)
+  in
+  Unix.symlink symlink_target symlink_path;
+  Masc.Fusion_official_client.sweep_stale_antigravity_panel_roots ~temp_dir ();
+  check bool "dead-process 0700 panelist root and OAuth copy removed" false
+    (Sys.file_exists dead_root);
+  check bool "live self-process panelist root kept" true
+    (Sys.file_exists (Filename.concat live_self_root "official-clients/antigravity/panelist/rev/.gemini/antigravity-cli/antigravity-oauth-token"));
+  check bool "live other-user (pid 1 / EPERM) panelist root kept" true
+    (Sys.file_exists live_init_root);
+  check bool "unattributed legacy panelist root kept" true
+    (Sys.file_exists legacy_root);
+  check bool "non-0700 directory is not removed" true
+    (Sys.file_exists non_private_dead_root);
+  check bool "symlink target is untouched" true
+    (Sys.file_exists symlink_target);
+  check bool "symlink entry itself is untouched" true
+    (try ignore (Unix.lstat symlink_path : Unix.stats); true with Unix.Unix_error _ -> false)
 ;;
 
 let () =
@@ -1719,6 +1796,8 @@ let () =
             test_cancelled_muse_panel_does_not_leave_a_workspace
         ; test_case "Antigravity selected account and native refresh" `Quick
             test_antigravity_panel_selected_account_and_refresh
+        ; test_case "stale Antigravity panelist roots of dead processes are swept" `Quick
+            test_sweep_stale_antigravity_panel_roots
         ] )
     ; ( "seat routes"
       , [ test_case

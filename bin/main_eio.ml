@@ -759,6 +759,7 @@ let run_cmd ?(record_default = false) host port cli_base_path accept_store_quara
      [Masc_runtime_events] mli; consumed by Olly / custom callbacks
      to bracket agent turn spans ([emit_turn_start]/[emit_turn_end]). *)
   Masc_runtime_events.start_listener ();
+  Masc.Fusion_official_client.sweep_stale_antigravity_panel_roots ();
 
   (* Signal handlers do the minimum async-signal-safe work: mark the sticky
      global flag so any fiber that observes [Eio.Cancel.Cancelled] before the

@@ -75,7 +75,7 @@ async function controller(options={}){
     postMessage(job){
       observed.requests.push(job)
       if(job.kind==='save')queueMicrotask(()=>{
-        if(options.failSave)this.emit('message',{id:job.id,ok:false,error:'Publication outcome unavailable'})
+        if(typeof options.failSave==='function'?options.failSave(job):options.failSave)this.emit('message',{id:job.id,ok:false,error:'Publication outcome unavailable'})
         else {observed.saved.push(job);this.emit('message',{id:job.id,ok:true,result:'revision'})}
       })
     }
@@ -136,4 +136,61 @@ test('uncertain save is retained at a different recovery path without retrying t
   assert.equal(view.observed.recovered[0].project.title,'Keep this')
   assert.notEqual(view.observed.recovered[0].path,view.observed.requests[0].path)
   assert.equal(view.process.stdin.isRaw,false);assert.equal(view.observed.terminated,true)
+})
+
+test('uncertain publications on two paths remain independently fenced during close',async()=>{
+  const view=await controller({failSave:true})
+  view.command('title Keep both failure histories');view.key('s');await flush()
+  const original=view.observed.requests.find(job=>job.kind==='save').path,alternative='/synthetic/alternative.json'
+  view.command(`save-as ${alternative}`);await flush()
+  view.key('q');await view.done
+  assert.deepEqual(view.observed.requests.filter(job=>job.kind==='save').map(job=>job.path),[original,alternative])
+  assert.equal(view.observed.recovered.length,1)
+  assert.ok(![original,alternative].includes(view.observed.recovered[0].path))
+  assert.equal(view.observed.recovered[0].project.title,'Keep both failure histories')
+  assert.equal(view.process.stdin.isRaw,false)
+})
+
+test('a successful explicit save clears that path failure before subsequent close autosave',async()=>{
+  let attempts=0
+  const view=await controller({failSave:()=>++attempts===1})
+  view.command('title First');view.key('s');await flush()
+  view.key('s');await flush()
+  view.command('title After successful retry');view.key('q');await view.done
+  const requests=view.observed.requests.filter(job=>job.kind==='save')
+  assert.equal(requests.length,3)
+  assert.ok(requests.every(job=>job.path===requests[0].path))
+  assert.equal(view.observed.saved.at(-1).project.title,'After successful retry')
+  assert.equal(view.observed.recovered.length,0)
+  assert.equal(view.process.stdin.isRaw,false)
+})
+
+test('worker exit during close settles its active job and drains admitted edits before recovery',async()=>{
+  const view=await controller()
+  view.command('import-wave /music/take.wav');await flush()
+  view.command('title Retained after worker exit');view.key('q');await flush()
+  assert.equal(view.observed.requests.at(-1).kind,'cancel')
+  view.worker.emit('exit',1)
+  await view.done
+  assert.equal(view.observed.requests.filter(job=>job.kind==='save').length,0)
+  assert.equal(view.observed.recovered.length,1)
+  assert.equal(view.observed.recovered[0].project.title,'Retained after worker exit')
+  assert.equal(view.observed.recovered[0].project.assets.length,0)
+  assert.equal(view.process.stdin.isRaw,false)
+  assert.equal(view.observed.terminated,true)
+})
+
+test('worker exit with no active job rejects an already admitted save after input closes',async()=>{
+  const view=await controller()
+  view.command('title Accepted before worker exit');view.key('s');view.key('q')
+  await Promise.resolve()
+  assert.equal(view.process.stdin.listenerCount('keypress'),0)
+  assert.equal(view.observed.requests.filter(job=>job.kind==='save').length,0)
+  view.worker.emit('exit',1)
+  await view.done
+  assert.equal(view.observed.requests.filter(job=>job.kind==='save').length,0)
+  assert.equal(view.observed.recovered.length,1)
+  assert.equal(view.observed.recovered[0].project.title,'Accepted before worker exit')
+  assert.equal(view.process.stdin.isRaw,false)
+  assert.equal(view.observed.terminated,true)
 })

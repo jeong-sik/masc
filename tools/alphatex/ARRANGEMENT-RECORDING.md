@@ -38,10 +38,14 @@ retained. Startup pre-roll and material beyond the backing endpoint are retained
 in the original source and excluded from the placed interval. Placement provenance
 and the rational rounding error are stored on the captured asset.
 
-This is capture against backing playback. Software input monitoring, count-in,
-latency measurement/compensation, physical-device alignment and whole-arrangement
-loop recording remain unfinished. No input is automatically routed back to an
-output. Native MIDI-only, WAV-only, mixed and hybrid arrangements publish their
+[Audio input monitoring](INPUT-MONITORING.md) is explicit: select an input and
+`:monitor AUDIO_OUTPUT_UID`, or `:monitor off`. It also works before recording.
+Recording waits for the standalone monitor to close and opens the selected monitor
+inside the recorder's own input engine. After finalization, standalone monitoring
+resumes while the view remains open. These ownership transfers can have a gap;
+they are not gapless punch-in/out. MIDI input monitoring, count-in, measured
+roundtrip latency/compensation, physical-device alignment and whole-arrangement
+loop recording remain unfinished. No monitoring output is selected automatically. Native MIDI-only, WAV-only, mixed and hybrid arrangements publish their
 host-clock epoch for recording admission; a pending transport change cannot admit
 a new take before its acknowledgement.
 

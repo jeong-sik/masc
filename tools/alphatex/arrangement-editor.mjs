@@ -131,6 +131,7 @@ export function arrangementCommand(editor, line) {
     case 'save': case 'help': case 'play': case 'play-audio': case 'stop':
     case 'inputs': case 'record': case 'record-stop': count(0); return { editor, effect: { kind: command } }
     case 'input': case 'midi-input': if (!tail) throw new Error('Choose an input UID'); return { editor, effect: { kind: command, input: tail } }
+    case 'monitor': if (!tail) throw new Error('Choose an audio output UID or off'); return { editor, effect: { kind: 'monitor', output: tail === 'off' ? null : tail } }
     case 'seek': count(1); return { editor, effect: { kind: 'seek', tick: position(beats(args[0])) } }
     case 'midi-output': count(1); return { editor, effect: { kind: command, destination: args[0] } }
     case 'midi-source': {

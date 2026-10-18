@@ -50,7 +50,7 @@ if [ "$(uname -s)" = Darwin ] && [ ! -x "$support_dir/music-native" ]; then
   if xcrun --find swiftc >/dev/null 2>&1; then
     native_binary=$(mktemp "$support_dir/.music-native.XXXXXX")
     trap 'rm -f "$native_binary"' EXIT HUP INT TERM
-    xcrun swiftc -O "$support_dir/native/MusicSession.swift" -o "$native_binary" \
+    xcrun swiftc -parse-as-library -O "$support_dir/native/MusicSession.swift" -o "$native_binary" \
       -framework AVFoundation -framework CoreAudio -framework CoreMIDI -framework AudioToolbox \
       -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker "$support_dir/native/Info.plist"
     chmod 755 "$native_binary"

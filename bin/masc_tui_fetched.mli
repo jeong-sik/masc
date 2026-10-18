@@ -45,6 +45,8 @@ val suspend : ('k, 'a) t -> ('k, 'a) t
 (** Retire a pending read while retaining its key and last completed value.
     Initial reads become [Failed]; previous values become explicitly [Stale]. *)
 val request_key : 'k request -> 'k
+val request_id : 'k request -> int64
+(** Diagnostic generation within this fetched source; include its key/scope. *)
 val same_request : equal:('k -> 'k -> bool) -> 'k request -> 'k request -> bool
 val is_current : equal:('k -> 'k -> bool) -> ('k, 'a) t -> 'k request -> bool
 

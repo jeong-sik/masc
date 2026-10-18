@@ -289,20 +289,6 @@ let load_selected_keeper_logs (state : state) (base_path : string)
     keeper
   |> apply_keeper_log_snapshot state
 
-(** Replace one identity-stamped context snapshot atomically. *)
-let apply_live_context_state (state : state) (context_state : Context_state.t) =
-  state.live_context <- context_state
-
-(** Load trace-scoped context occupancy from its current TurnRecord SSOT. *)
-let load_selected_live_context (state : state) (base_path : string)
-    (keeper : keeper option) =
-  let config = Workspace_core.default_config base_path in
-  Context_state.for_selection ~load:(Context_state.load ~config) keeper
-  |> apply_live_context_state state
-
-let load_live_context state base_path keeper =
-  load_selected_live_context state base_path (Some keeper)
-
 (** Add an event to the TUI session log, which Metrics draws. *)
 let add_event (state : state) event_type content =
   let now = Unix.localtime (Unix.gettimeofday ()) in
@@ -581,8 +567,6 @@ let load_from_masc_dir (state : state) (base_path : string) =
   state.local_keeper_read_order <- Snapshot_read.invalidate state.local_keeper_read_order;
   state.local_workspace_read_order <- Snapshot_read.invalidate state.local_workspace_read_order;
   apply_local_keepers state (read_local_keepers base_path);
-  load_selected_live_context state base_path
-    (List.nth_opt state.keepers state.keeper_cursor);
   apply_local_workspace state (read_local_workspace base_path)
 
 let clear_local_workspace ?(keep_keeper_rows = false) (state : state) =
@@ -606,7 +590,8 @@ let clear_local_workspace ?(keep_keeper_rows = false) (state : state) =
   state.lanes_action_error <- None;
   state.log_entries <- [];
   state.log_error <- None;
-  state.live_context <- Context_state.empty;
+  state.live_context <- Context_state.clear state.live_context;
+  supersede_live_context_read state None;
   state.local_workspace <- Local_workspace_unread;
   state.local_keepers <- Local_workspace_unread
 ;;

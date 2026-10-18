@@ -63,6 +63,7 @@ type ('k, 'a) start_result =
 
 let initial = { latest_generation = 0L; status = Status_absent }
 let request_key request = request.key
+let request_id request = request.generation
 
 let same_request ~equal left right =
   equal left.key right.key && Int64.equal left.generation right.generation

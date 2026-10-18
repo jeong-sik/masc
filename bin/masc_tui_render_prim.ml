@@ -613,7 +613,7 @@ let footer_line ?(status = []) ?position (state : state) ~max_cells ~hints =
   (* A workspace disagreement rides the footer every surface already draws,
      rather than replacing the screen. The reads that would be wrong under a
      mismatch are refused where they happen -- [load_local_workspace_if_safe],
-     [load_live_context_if_safe], [load_keeper_logs_if_safe],
+     [live_context_keeper], [load_keeper_logs_if_safe],
      [handle_composer_key], [handle_paste] -- and [clear_local_workspace]
      empties what a previous match had loaded. Drawing nothing but the notice
      took away Overview, Keepers, Board and Changes as well, and those read the

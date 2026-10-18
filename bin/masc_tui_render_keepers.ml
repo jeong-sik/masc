@@ -12,7 +12,6 @@ module Message_layout = Masc_tui_message_layout
 module Metrics_tail = Masc_tui_metrics_tail
 module Rows = Masc_tui_rows
 module Observation_layout = Masc_tui_observation_layout
-module Context_state = Masc_tui_context_state
 module Keeper_activity = Masc_tui_keeper_activity
 module Render_schedule = Masc_tui_render_schedule
 module Layout = Masc_tui_layout
@@ -944,68 +943,40 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
              ~default:Masc_tui_theme.Glyph.no_value activity.k_current_task_id);
       add_empty ();
 
-      (* Live Context section (Phase 2) *)
       add_section "Live Context";
-      (match
-         Context_state.reading_for_keeper ~keeper_name:k.k_name
-           state.live_context
-       with
-       | None ->
+      let add_context observation =
+        match Observation_layout.context_summary observation with
+        | Observation_layout.Context_measured observation ->
+            let ratio = observation.ratio in
+            let pct = Float.of_int (Observation_layout.percentage_tenths ratio) /. 10.0 in
+            let bar_width = Layout.keeper_context_bar_width ~inner_width:header_width in
+            add_row "Context:"
+              (Printf.sprintf "%s%.1f%%%s  %s  %s / %s tokens"
+                 (ctx_color ratio) pct Ansi.reset (ctx_bar ratio bar_width)
+                 (Masc_tui_message_layout.compact_count observation.tokens)
+                 (Masc_tui_message_layout.compact_count observation.maximum));
+            add_row "Observed:" (Terminal_text.short_timestamp observation.observed_at);
+            add_row "Turn Ref:" (Terminal_text.single_line observation.turn_ref)
+        | Observation_layout.Context_partial observation ->
+            add_row "Context:"
+              (Printf.sprintf "%s tokens in context; window not observed"
+                 (Masc_tui_message_layout.compact_count observation.tokens));
+            add_row "Observed:" (Terminal_text.short_timestamp observation.observed_at);
+            add_row "Turn Ref:" (Terminal_text.single_line observation.turn_ref)
+        | Observation_layout.Context_unavailable reason ->
+            add_row "Context:" (Ansi.dim ^ reason ^ Ansi.reset)
+      in
+      (match live_context_view state k with
+       | Masc_tui_fetched.Absent ->
            add_row "Context:" (Ansi.dim ^ "not loaded" ^ Ansi.reset)
-       | Some reading ->
-           (match
-              Terminal_text.optional_single_line reading.error,
-              reading.observation
-            with
-            | Some error, _ ->
-                add_row "Context:" ((Theme.bad ()) ^ error ^ Ansi.reset)
-            | None, Some observation ->
-                (match Observation_layout.context_summary observation with
-                 | Observation_layout.Context_measured observation ->
-                     let ratio = observation.ratio in
-                     let pct =
-                       Float.of_int (Observation_layout.percentage_tenths ratio)
-                       /. 10.0
-                     in
-                     let bar_width =
-                       Layout.keeper_context_bar_width
-                         ~inner_width:header_width
-                     in
-                     add_row "Context:"
-                       (Printf.sprintf "%s%.1f%%%s  %s  %s / %s tokens"
-                          (ctx_color ratio) pct Ansi.reset
-                          (ctx_bar ratio bar_width)
-                          (Masc_tui_message_layout.compact_count
-                             observation.tokens)
-                          (Masc_tui_message_layout.compact_count
-                             observation.maximum));
-                     add_row "Observed:"
-                       (Terminal_text.short_timestamp observation.observed_at);
-                     add_row "Turn Ref:"
-                       (Terminal_text.single_line observation.turn_ref)
-                 | Observation_layout.Context_partial observation ->
-                     (* The one reading in this row that printed a bare number.
-                        The row also carries a cumulative figure, which says
-                        "cumulative usage" in its own sentence, and a measured
-                        one, which carries a percentage and a window -- so a
-                        number alone was the only thing here a reader had to
-                        guess the scope of, and the two differ by an order of
-                        magnitude (#33791). This one is occupancy: the
-                        projection emits an observation only once it has
-                        confirmed the turn's own usage. *)
-                     add_row "Context:"
-                       (Printf.sprintf
-                          "%s tokens in context; window not observed"
-                          (Masc_tui_message_layout.compact_count
-                             observation.tokens));
-                     add_row "Observed:"
-                       (Terminal_text.short_timestamp observation.observed_at);
-                     add_row "Turn Ref:"
-                       (Terminal_text.single_line observation.turn_ref)
-                 | Observation_layout.Context_unavailable reason ->
-                     add_row "Context:" (Ansi.dim ^ reason ^ Ansi.reset))
-            | None, None ->
-                add_row "Context:" (Ansi.dim ^ "not loaded" ^ Ansi.reset)));
+       | Masc_tui_fetched.Loading ->
+           add_row "Context:" (Ansi.dim ^ "reading" ^ Ansi.reset)
+       | Masc_tui_fetched.Ready observation -> add_context observation
+       | Masc_tui_fetched.Stale (observation, detail) ->
+           add_row "Refresh:" ((Theme.bad ()) ^ Terminal_text.single_line detail ^ Ansi.reset);
+           add_context observation
+       | Masc_tui_fetched.Failed detail ->
+           add_row "Context:" ((Theme.bad ()) ^ Terminal_text.single_line detail ^ Ansi.reset));
       add_empty ();
 
       let header_lines = List.rev !lines in

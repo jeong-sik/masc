@@ -46,6 +46,20 @@ let sections =
         ; description = "switch this pane to another keeper: /keeper <name>" }
       ; { opener = Key "&"
         ; description = "Collab: watch MSX/DOS, manage play links" }
+      ; { opener = Surface "Dashboard"
+        ; description = "decisions and remembered conversations; Enter opens the selected destination" }
+      ; { opener = Surface "Work"
+        ; description = "Goals, Tasks and evidence; t switches lists, Enter reads details" }
+      ; { opener = Surface "Keepers"
+        ; description = "conversations, settings and history; c opens chat, l opens logs" }
+      ; { opener = Surface "Usage"
+        ; description = "f selects an account, v cycles Plan/Trend/Keepers, a restores all accounts" }
+      ; { opener = Surface "Board"
+        ; description = "Enter reads a discussion; S follows its recorded successor, Esc returns" }
+      ; { opener = Surface "Workspace"
+        ; description = "Enter browses files; v reads complete selected repository context" }
+      ; { opener = Surface "System"
+        ; description = "p cycles settings panes; on Models, v reads complete account/model details" }
       ] )
   ; ( "Steer a turn"
     , [ { opener = Command "steer"

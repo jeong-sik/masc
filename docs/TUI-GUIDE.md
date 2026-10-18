@@ -38,6 +38,12 @@ opens it (`/keeper <name>`, `Ctrl-L`, `masc_tool_help`, ...). Names are wire
 names, so a row can be copied and typed as it is printed. The key-level
 reference is [`?`](guides/TUI-KEYS.md); `/help` lists the slash commands.
 
+The sheet also names all seven main surfaces with their reading entrypoints:
+Work's Goal/Task details, Keeper conversations and logs, Usage's account selector,
+Board's recorded successor, complete repository context, and complete model
+settings. Use `:` then `go <surface>` to reach a named surface; its `?` sheet
+explains the keys in the current context.
+
 ## Quick Start
 
 For human contributors building from source (external coding-agent sessions must not run local `dune` commands per `docs/constitution.xml`):

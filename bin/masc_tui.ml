@@ -1809,7 +1809,7 @@ let run_machine_change ?(checkpoint_boundary=false) state ~mailbox ~refused ~unk
 (* Retire the cancellation context synchronously at the authority boundary,
    including while a request is connecting. Completion stamps also reject a
    reply already queued before withdrawal; admitted server effects remain. *)
-let fork_workspace_job ?(observation = false) state ~sw run =
+let fork_workspace_job ?(observation = false) ?(on_withdrawn = fun () -> ()) state ~sw run =
   let exception Workspace_withdrawn in
   let authority = state.workspace_authority in
   let context = ref None in
@@ -1835,7 +1835,8 @@ let fork_workspace_job ?(observation = false) state ~sw run =
         try
           Eio.Cancel.sub (fun cancellation ->
             context := Some cancellation;
-            if not !withdrawn && authority = state.workspace_authority then run ())
+            if not !withdrawn && authority = state.workspace_authority then run ()
+            else on_withdrawn ())
         with Eio.Cancel.Cancelled Workspace_withdrawn -> ());
     `Stop_daemon) with
   | () -> ()
@@ -3974,7 +3975,8 @@ let launch_runtime_config_load ?(force=false) state ~mailbox =
         (fun () -> Masc_tui_loader.load_runtime_config_view ~host ~port)
   end
 
-let save_runtime_config_text ?prior_contact state ~mailbox ~authority ~identity ~expected_source_path ~expected_source_revision edited =
+let commit_runtime_config_text ?prior_contact state ~mailbox ~authority ~identity
+    ~before_commit ~expected_source_path ~expected_source_revision edited =
   let host = server_peer_host in
   let port = state.port in
   let ( let* ) = Result.bind in
@@ -3987,10 +3989,66 @@ let save_runtime_config_text ?prior_contact state ~mailbox ~authority ~identity 
     Error (Masc_tui_http.Runtime_config_save_refused ("Preview rejected the edit: " ^ reason))
   | Masc_tui_runtime_config_receipt.Can_save ->
     let* () = refused (check_workspace_request ~prior_contact:Masc_tui_server_lifecycle.Server_reached state ~mailbox ~authority ~identity ~host ~port ()) in
-    let* receipt = Masc_tui_http.post_runtime_config_raw ~host ~port
-      ~source_text:edited ~expected_source_path ~expected_source_revision in
-    launch_runtime_config_load ~force:true state ~mailbox;
-    Ok receipt
+    before_commit ();
+    Masc_tui_http.post_runtime_config_raw ~host ~port
+      ~source_text:edited ~expected_source_path ~expected_source_revision
+
+let save_runtime_config_text ?prior_contact state ~mailbox ~authority ~identity
+    ~expected_source_path ~expected_source_revision edited =
+  match commit_runtime_config_text ?prior_contact state ~mailbox ~authority ~identity
+      ~before_commit:(fun () -> ()) ~expected_source_path ~expected_source_revision edited with
+  | Error _ as error -> error
+  | Ok receipt -> launch_runtime_config_load ~force:true state ~mailbox; Ok receipt
+
+let launch_runtime_form_save state ~mailbox request =
+  let host = server_peer_host and port = state.port in
+  let prepared = ref None and sent = ref false in
+  let publish status =
+    (* The input loop recovers each advancing observation. Publishing cannot
+       wait for a bounded mailbox before dispatch or during cancellation. *)
+    ignore (publish_runtime_form_save request ~observed_ns:(Mtime_clock.elapsed_ns ()) status) in
+  let finish outcome = publish (Form_finished (!prepared, outcome)) in
+  let interrupted detail = if !sent then Form_unconfirmed detail else Form_not_sent detail in
+  let run () =
+    let result = try
+      let ( let* ) = Result.bind in
+      let not_sent result = Result.map_error (fun detail -> Form_not_sent detail) result in
+      let* () = not_sent (check_workspace_request state ~mailbox
+        ~authority:request.rfs_authority ~identity:(Some request.rfs_workspace) ~host ~port ()) in
+      let* json = not_sent (Masc_tui_http.fetch_runtime_config_raw ~host ~port) in
+      let* reading = not_sent (Masc_tui_response_decode.run ~name:"runtime-form-source"
+        (fun () -> Masc_tui_runtime_config_view.decode json)) in
+      (* Account declaration may resolve a client path/environment. Keep that
+         boundary out of the UI domain; it is not a pure response decoder. *)
+      let* draft = Domain_pool_ref.submit_io_or_inline
+        (fun () -> prepare_runtime_form_save request.rfs_draft reading) in
+      prepared := Some draft;
+      publish (Form_previewing draft);
+      commit_runtime_config_text ~prior_contact:Masc_tui_server_lifecycle.Server_reached state
+        ~mailbox ~authority:request.rfs_authority ~identity:(Some request.rfs_workspace)
+        ~before_commit:(fun () -> sent := true; publish (Form_posting draft))
+        ~expected_source_path:draft.rfp_base.path
+        ~expected_source_revision:draft.rfp_base.source_revision draft.rfp_text
+      |> Result.map_error (function
+        | Masc_tui_http.Runtime_config_conflict current -> Form_conflict current
+        | Runtime_config_save_refused detail -> Form_refused detail
+        | Runtime_config_save_unconfirmed detail -> Form_unconfirmed detail)
+    with
+    | Eio.Cancel.Cancelled _ as exn ->
+        finish (interrupted "Save worker interrupted"); raise exn
+    | exn -> Error (interrupted (Printexc.to_string exn)) in
+    finish (match result with Ok receipt -> Form_saved receipt | Error outcome -> outcome)
+  in
+  Log.Transport.info "tui_runtime_form_save started_ns=%Ld phase=checking" request.rfs_started_ns;
+  match Eio_context.get_switch_opt () with
+  | None -> finish (Form_not_sent "Eio switch is unavailable")
+  | Some sw ->
+      (match fork_workspace_job state ~sw
+          ~on_withdrawn:(fun () -> finish (Form_not_sent "Workspace withdrew before worker entry")) run with
+       | () -> ()
+       | exception (Eio.Cancel.Cancelled _ as exn) ->
+           finish (interrupted "Save worker interrupted"); raise exn
+       | exception exn -> finish (interrupted (Printexc.to_string exn)))
 
 let launch_runtime_params_load state ~mailbox =
   if server_authority_ready state then begin
@@ -16558,7 +16616,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
         | Gate_auto_judge_retried (_, _, _, _) | Gate_mode_set (_, _, _)
         | Surface_tool_approval_answered (_, _, _, _, _) | Keeper_gate_settings_loaded _
         | Keeper_tool_modes_loaded (_, _) | Keeper_tool_mode_set (_, _, _, _)
-        | Keeper_chat_dispatch_blocked (_, _) | Keeper_creation_changed _
+        | Keeper_chat_dispatch_blocked (_, _) | Runtime_form_save_changed _ | Keeper_creation_changed _
         | Keeper_action_done (_, _, _, _)
         | Board_new_post_done _ | Board_vote_done _ | Goal_transition_done _
         | Goal_confirmation_submitted _ | Goal_confirmation_loaded (_, _) | Schedules_loaded (_, _)
@@ -17560,6 +17618,72 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
       if generation = state.keeper_deletions_generation && Result.is_ok result
          && Option.is_some state.keeper_deletions_retry_receipt then
         launch_keeper_deletions state ~mailbox ()
+  | Runtime_form_save_changed (request, status, observed_ns) ->
+      let attached = runtime_form_is_attached state request in
+      let current = runtime_form_save_current state request in
+      if apply_runtime_form_save state request status then begin
+        let phase = match status with
+          | Form_checking -> "checking" | Form_previewing _ -> "previewing"
+          | Form_posting _ -> "posting"
+          | Form_finished (_, Form_saved _) -> "saved"
+          | Form_finished (_, Form_not_sent _) -> "not_sent"
+          | Form_finished (_, Form_invalid_account _) -> "invalid_account"
+          | Form_finished (_, Form_refused _) -> "refused"
+          | Form_finished (_, Form_conflict _) -> "conflict"
+          | Form_finished (_, Form_unconfirmed _) -> "unconfirmed" in
+        Log.Transport.info
+          "tui_runtime_form_save started_ns=%Ld observed_ns=%Ld admitted_ns=%Ld phase=%s current_origin=%b attached=%b"
+          request.rfs_started_ns observed_ns
+          (Mtime_clock.elapsed_ns ()) phase current attached;
+        match status with
+        | Form_checking | Form_previewing _ | Form_posting _ -> ()
+        | Form_finished (prepared, outcome) ->
+            if current then begin
+              launch_runtime_config_load ~force:true state ~mailbox;
+              (match outcome with
+               | Form_saved _ | Form_unconfirmed _ ->
+                   launch_runtime_catalog_load state ~mailbox;
+                   launch_runtime_surface_load state ~mailbox ~force:true;
+                   launch_lanes_reread state ~mailbox
+               | Form_not_sent _ | Form_invalid_account _ | Form_refused _ | Form_conflict _ -> ())
+            end;
+            if attached && current then begin
+              match request.rfs_draft, outcome with
+              | Model_form_draft _, Form_saved _ ->
+                  state.runtime_model_form <- None; state.runtime_form_save_focus <- None
+              | Account_form_draft form, Form_saved _ ->
+                  state.runtime_account_form <- Option.bind prepared (fun draft ->
+                    Option.bind draft.rfp_account (fun declaration ->
+                      Option.map (Masc_tui_runtime_account_form.saved form ~id:declaration.id)
+                        declaration.sign_in));
+                  state.runtime_form_save_focus <- None
+              | Account_form_draft _, Form_invalid_account form ->
+                  state.runtime_account_form <- Some form
+              | Model_form_draft form, (Form_not_sent _ | Form_invalid_account _
+                  | Form_refused _ | Form_conflict _ | Form_unconfirmed _) ->
+                  state.runtime_model_form <- Some (Masc_tui_model_form.refused form
+                    (runtime_form_outcome_detail outcome))
+              | Account_form_draft form, (Form_not_sent _ | Form_refused _
+                  | Form_conflict _ | Form_unconfirmed _) ->
+                  state.runtime_account_form <- Some (Masc_tui_runtime_account_form.refused form
+                    (runtime_form_outcome_detail outcome))
+            end;
+            let origin = if current then "" else " (" ^ request.rfs_workspace.sid_base_path ^ ")" in
+            report_action state (match outcome with Form_saved _ -> "system"
+              | Form_not_sent _ | Form_invalid_account _ | Form_refused _
+              | Form_conflict _ | Form_unconfirmed _ -> "error")
+              ("Runtime form" ^ origin ^ " · " ^ runtime_form_outcome_detail outcome);
+            (match outcome, prepared with
+             | Form_saved _, Some {rfp_account=Some declaration;_} ->
+                 Option.iter (fun sign_in ->
+                   add_event state "info" (declaration.id ^ origin ^ " 로그인: "
+                     ^ Masc_tui_runtime_account_form.command sign_in);
+                   Option.iter (fun typed -> add_event state "info"
+                     (declaration.id ^ origin ^ " 그다음 client 안에서: " ^ typed))
+                     (Masc_tui_runtime_account_form.then_type sign_in)) declaration.sign_in
+             | (Form_saved _ | Form_not_sent _ | Form_invalid_account _ | Form_refused _
+                 | Form_conflict _ | Form_unconfirmed _), (None | Some _) -> ())
+      end
   | Keeper_creation_changed (request, status) ->
       if apply_keeper_creation_status state request status then begin
         let phase = match status with
@@ -18338,6 +18462,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
                  | Some (index, row) ->
                    state.config_models_cursor <- index;
                    state.config_scroll <- 0;
+                   state.runtime_form_save_focus <- None;
                    state.runtime_model_form <- Some
                      (Masc_tui_model_form.create ~source_revision:metadata.source_revision Edit row)
                  | None ->
@@ -20711,9 +20836,12 @@ let drain_async_messages ?deadline_ns ?(input_pending = fun () -> false) state ~
       | Some ready -> Some ready
       | None ->
           (* Keep queued identity withdrawals ahead of recovered receipts. *)
-          Option.map (fun (request, status, ready_at_ns) ->
-            { ready_at_ns; message = Keeper_creation_changed (request, status) })
-            (pending_keeper_creation_receipt state) in
+          (match pending_runtime_form_save_receipt state with
+           | Some (request, status, ready_at_ns) ->
+               Some {ready_at_ns; message=Runtime_form_save_changed (request, status, ready_at_ns)}
+           | None -> Option.map (fun (request, status, ready_at_ns) ->
+               { ready_at_ns; message = Keeper_creation_changed (request, status) })
+               (pending_keeper_creation_receipt state)) in
     match ready with
     | None ->
         state.keeper_creation_waits <- List.filter
@@ -22074,15 +22202,6 @@ let main
          | Error detail -> state.lane_addons <- Some {view with document_key=None;
              editor_ready=false;scroll=0;error=lane_addons_input_failure detail})
   in
-  (* Fields belong to the source on which the form opened. A fresh read
-     must not silently rebase them onto another writer's source. *)
-  let check_runtime_config_edit_revision opened_revision current_revision =
-    match opened_revision with
-    | Some revision when String.equal revision current_revision -> Ok ()
-    | Some _ | None ->
-      launch_runtime_config_load ~force:true state ~mailbox:async_messages;
-      Error "runtime.toml changed since this form opened; close the form and reopen it after reload"
-  in
   (* The raw editor and account form share preview and guarded commit. Each
      caller keeps the revision from the same read as the text it edits. *)
   let save_runtime_config_text ?prior_contact ~authority ~identity ~expected_source_path ~expected_source_revision edited =
@@ -22191,16 +22310,19 @@ let main
   (* [a] on the runtime.toml pane opens the account form on the file as the
      pane shows it. *)
   let handle_model_form_open mode () =
-    if Option.is_some state.runtime_model_jump then
+    if recover_runtime_form_save state ~account:false then ()
+    else if Option.is_some state.runtime_model_jump then
       report_action state "info" "Loading the selected binding; Esc cancels"
     else match state.runtime_config_view, selected_config_model state with
     | Some { rcv_metadata = metadata; _ }, Ok row ->
+      state.runtime_form_save_focus <- None;
       state.runtime_model_form <- Some
         (Masc_tui_model_form.create ~source_revision:metadata.source_revision mode row)
     | None, _ -> report_action state "error" "config not loaded yet; r to reload"
     | Some _, Error detail -> report_action state "error" detail
   in
   let handle_runtime_account_open () =
+    if recover_runtime_form_save state ~account:true then () else
     match state.runtime_config_view with
     | None -> report_action state "error" "config not loaded yet; r to reload"
     | Some reading -> (
@@ -22208,7 +22330,7 @@ let main
         Masc_tui_runtime_account_form.open_on ~source_revision:reading.rcv_metadata.source_revision
           ?home_dir:(Sys.getenv_opt "HOME") reading.rcv_source_text
       with
-      | Ok form -> state.runtime_account_form <- Some form
+      | Ok form -> state.runtime_form_save_focus <- None; state.runtime_account_form <- Some form
       | Error reason -> report_action state "error" reason)
   in
   let open_runtime_model_settings runtime_id =
@@ -23778,12 +23900,17 @@ and is loaded on demand through keeper_skill.
                     state.runtime_params_notice <- None)
                   state.runtime_param_edit
             | Some Text_runtime_model_form ->
-                state.runtime_model_form <- Option.map (fun form -> Masc_tui_model_form.paste form text) state.runtime_model_form
+                if not (runtime_form_input_locked state) then begin
+                  release_runtime_form_recovery state;
+                  state.runtime_model_form <- Option.map (fun form -> Masc_tui_model_form.paste form text) state.runtime_model_form
+                end
             | Some Text_runtime_account_form ->
-                state.runtime_account_form <-
-                  Option.map
-                    (fun form -> Masc_tui_runtime_account_form.paste form text)
-                    state.runtime_account_form
+                if not (runtime_form_input_locked state) then begin
+                  release_runtime_form_recovery state;
+                  state.runtime_account_form <-
+                    Option.map (fun form -> Masc_tui_runtime_account_form.paste form text)
+                      state.runtime_account_form
+                end
             | Some Text_voice_wizard ->
                 Option.iter
                   (fun session ->
@@ -24699,114 +24826,55 @@ and is loaded on demand through keeper_skill.
                  if length > 0 then set (String.sub draft 0 (length - 1))
                | s when String.length s = 1 && Char.code s.[0] >= 32 -> set (draft ^ s)
                | _ -> ()))
-       (* Each form checks its opening revision before applying fields to a
-          fresh read. A refusal or unknown outcome keeps the draft and that
-          revision; only a confirmed save completes the form. The sign-in command goes to the
-          session log, where it stays readable after the footer moves on. *)
+       (* Pending and unknown commits freeze their immutable submitted input.
+          Esc leaves the operation running/retained; Ctrl-X deliberately ends
+          recovery only after a terminal receipt. Neither key sends a retry. *)
+       | Some k when (text_input_target state ~compact_viewport = Some Text_runtime_model_form
+                     || text_input_target state ~compact_viewport = Some Text_runtime_account_form)
+           && (runtime_form_input_locked state
+               || ((k = "ctrl-x" || k = "\024") && Option.is_some (runtime_form_focused_attempt state))) ->
+           let close () =
+             state.runtime_model_form <- None; state.runtime_account_form <- None;
+             state.runtime_form_save_focus <- None in
+           (match k, runtime_form_focused_attempt state with
+            | "esc", _ -> close ()
+            | ("ctrl-x" | "\024"), Some {rfa_status=Form_finished _;_} ->
+                release_runtime_form_recovery state; close ();
+                launch_runtime_config_load ~force:true state ~mailbox:async_messages
+            | _, (None | Some _) -> ())
        | Some k
          when text_input_target state ~compact_viewport = Some Text_runtime_model_form ->
            (match state.runtime_model_form with
             | None -> ()
             | Some form -> match Masc_tui_model_form.key form k with
-              | Editing form -> state.runtime_model_form <- Some form
-              | Cancelled -> state.runtime_model_form <- None
+              | Editing form -> release_runtime_form_recovery state;
+                  state.runtime_model_form <- Some form
+              | Cancelled -> state.runtime_model_form <- None; state.runtime_form_save_focus <- None
               | Submit form ->
-                let authority = state.workspace_authority and identity = state.server_identity in
-                let result =
-                  let ( let* ) = Result.bind in
-                  let* () = check_workspace_request state ~mailbox:async_messages ~authority ~identity
-                    ~host:server_peer_host ~port:state.port () in
-                  let* json = Masc_tui_http.fetch_runtime_config_raw ~host:server_peer_host ~port:state.port in
-                  let* reading = Masc_tui_runtime_config_view.decode json in
-                  let* () = check_runtime_config_edit_revision
-                    (Masc_tui_model_form.source_revision form) reading.metadata.source_revision in
-                  let* draft = Masc_tui_model_form.apply form reading.source_text in
-                  save_runtime_config_text ~prior_contact:Masc_tui_server_lifecycle.Server_reached ~authority ~identity
-                    ~expected_source_path:reading.path ~expected_source_revision:reading.metadata.source_revision draft
-                  |> Result.map Masc_tui_runtime_config_receipt.lane_summary
-                  |> Result.map_error Masc_tui_http.runtime_config_save_error_message in
-                (match result with
-                 | Ok summary -> state.runtime_model_form <- None;
-                   launch_runtime_catalog_load state ~mailbox:async_messages;
-                   launch_runtime_surface_load state ~mailbox:async_messages ~force:true;
-                   launch_lanes_reread state ~mailbox:async_messages;
-                   report_action state "system" ("Model saved · " ^ summary ^ " · choose it in Runtime / Lanes")
-                 | Error detail -> state.runtime_model_form <- Some (Masc_tui_model_form.refused form detail)))
+                  (match begin_runtime_form_save state ~draft:(Model_form_draft form)
+                      ~started_ns:(Mtime_clock.elapsed_ns ()) with
+                   | Ok request -> launch_runtime_form_save state ~mailbox:async_messages request
+                   | Error detail -> state.runtime_model_form <- Some (Masc_tui_model_form.refused form detail)))
        | Some k
-         when text_input_target state ~compact_viewport
-              = Some Text_runtime_account_form -> (
-           match state.runtime_account_form with
-           | None -> ()
-           | Some form -> (
-               match Masc_tui_runtime_account_form.key form k with
-               | Masc_tui_runtime_account_form.Editing form ->
-                 state.runtime_account_form <- Some form
-               | Masc_tui_runtime_account_form.Cancelled ->
-                 state.runtime_account_form <- None
-               | Masc_tui_runtime_account_form.Copy (form, command) ->
-                 state.runtime_account_form <- Some form;
-                 copy_reference_to_terminal render_schedule command;
-                 report_action state "system"
-                   "로그인 명령을 OSC 52로 보냈습니다 (터미널 지원은 확인 못 함)"
-               | Masc_tui_runtime_account_form.Submitted form -> (
-                   let authority = state.workspace_authority in
-                   let identity = state.server_identity in
-                   let current =
-                     match
-                       Result.bind
-                         (check_workspace_request state ~mailbox:async_messages ~authority ~identity
-                            ~host:server_peer_host ~port:state.port ())
-                         (fun () -> Masc_tui_http.fetch_runtime_config_raw ~host:server_peer_host
-                           ~port:state.port)
-                     with
-                     | Error detail -> Error ("reading runtime.toml failed: " ^ detail)
-                     | Ok json -> (
-                         match Masc_tui_runtime_config_view.decode json with
-                         | Ok reading -> Ok reading
-                         | Error detail -> Error ("reading runtime.toml failed: " ^ detail))
-                   in
-                   let declared =
-                     match current with
-                     | Error message -> Error (Masc_tui_runtime_account_form.refused form message)
-                     | Ok current ->
-                       (match check_runtime_config_edit_revision
-                          (Masc_tui_runtime_account_form.source_revision form)
-                          current.Masc_tui_runtime_config_view.metadata.source_revision with
-                        | Error detail -> Error (Masc_tui_runtime_account_form.refused form detail)
-                        | Ok () ->
-                          Masc_tui_runtime_account_form.declare_on
-                            ~inherited_home:Masc_tui_runtime_account_form.inherited_home form
-                            current.source_text
-                          |> Result.map (fun declaration ->
-                            declaration, current.metadata.source_revision, current.path))
-                   in
-                   match declared with
-                   | Error form -> state.runtime_account_form <- Some form
-                   | Ok ({ Masc_tui_runtime_account_form.id; text; sign_in }, expected_source_revision, expected_source_path) -> (
-                       match save_runtime_config_text ~prior_contact:Masc_tui_server_lifecycle.Server_reached ~authority ~identity ~expected_source_path ~expected_source_revision text with
-                       | Ok receipt ->
-                         let summary = Masc_tui_http.runtime_config_commit_receipt_summary receipt in
-                         (* A sign-in keeps the form open on its command;
-                            Antigravity has none and closes. *)
-                         state.runtime_account_form <-
-                           Option.map (Masc_tui_runtime_account_form.saved form ~id) sign_in;
-                         report_action state "system"
-                           (Printf.sprintf
-                              "runtime.toml saved · %s · %s: lane 후보에 넣어야 턴이 갑니다"
-                              summary id);
-                         Option.iter
-                           (fun sign_in ->
-                              add_event state "info"
-                                (id ^ " 로그인: " ^ Masc_tui_runtime_account_form.command sign_in);
-                              Option.iter
-                                (fun typed ->
-                                   add_event state "info" (id ^ " 그다음 client 안에서: " ^ typed))
-                                (Masc_tui_runtime_account_form.then_type sign_in))
-                           sign_in
-                       | Error message ->
-                         state.runtime_account_form <-
-                           Some (Masc_tui_runtime_account_form.refused form
-                             (Masc_tui_http.runtime_config_save_error_message message))))))
+         when text_input_target state ~compact_viewport = Some Text_runtime_account_form ->
+           (match state.runtime_account_form with
+            | None -> ()
+            | Some form -> match Masc_tui_runtime_account_form.key form k with
+              | Masc_tui_runtime_account_form.Editing form ->
+                  release_runtime_form_recovery state; state.runtime_account_form <- Some form
+              | Masc_tui_runtime_account_form.Cancelled ->
+                  state.runtime_account_form <- None; state.runtime_form_save_focus <- None
+              | Masc_tui_runtime_account_form.Copy (form, command) ->
+                  state.runtime_account_form <- Some form;
+                  copy_reference_to_terminal render_schedule command;
+                  report_action state "system"
+                    "로그인 명령을 OSC 52로 보냈습니다 (터미널 지원은 확인 못 함)"
+              | Masc_tui_runtime_account_form.Submitted form ->
+                  (match begin_runtime_form_save state ~draft:(Account_form_draft form)
+                      ~started_ns:(Mtime_clock.elapsed_ns ()) with
+                   | Ok request -> launch_runtime_form_save state ~mailbox:async_messages request
+                   | Error detail -> state.runtime_account_form <- Some
+                       (Masc_tui_runtime_account_form.refused form detail)))
        | Some k
          when text_input_target state ~compact_viewport
               = Some Text_runtime_param ->

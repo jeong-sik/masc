@@ -3853,6 +3853,47 @@ type keeper_log_tone =
   | Keeper_log_warning
   | Keeper_log_failure
 
+(* A form save owns its immutable input and opening revision. Its operation
+   receipt survives navigation and authority withdrawal; it is not a read. *)
+type runtime_form_draft =
+  | Model_form_draft of Masc_tui_model_form.t
+  | Account_form_draft of Masc_tui_runtime_account_form.t
+
+type runtime_form_prepared = {
+  rfp_base : Masc_tui_runtime_config_edit.document;
+  rfp_text : string;
+  rfp_account : Masc_tui_runtime_account_form.declared option;
+}
+
+type runtime_form_save_outcome =
+  | Form_saved of Masc_tui_runtime_config_receipt.t
+  | Form_not_sent of string
+  | Form_invalid_account of Masc_tui_runtime_account_form.t
+  | Form_refused of string
+  | Form_conflict of Masc_tui_runtime_config_edit.document
+  | Form_unconfirmed of string
+
+type runtime_form_save_status =
+  | Form_checking
+  | Form_previewing of runtime_form_prepared
+  | Form_posting of runtime_form_prepared
+  | Form_finished of runtime_form_prepared option * runtime_form_save_outcome
+
+type runtime_form_save_request = {
+  rfs_token : unit ref;
+  rfs_authority : workspace_authority;
+  rfs_workspace : Tui_decode.server_identity;
+  rfs_draft : runtime_form_draft;
+  rfs_started_ns : int64;
+  rfs_observation : (runtime_form_save_status * int64) Atomic.t;
+}
+
+type runtime_form_save_attempt = {
+  rfa_request : runtime_form_save_request;
+  rfa_status : runtime_form_save_status;
+  rfa_recoverable : bool;
+}
+
 type keeper_creation_outcome =
   | Creation_created
   | Creation_not_sent of string
@@ -7284,6 +7325,8 @@ type state = {
      of a provider the file already declares. It holds the text it was opened
      on; the save goes through the pane's preview like [e]. *)
   mutable runtime_model_form: Masc_tui_model_form.t option;
+  mutable runtime_form_saves: runtime_form_save_attempt list;
+  mutable runtime_form_save_focus: unit ref option;
   mutable runtime_model_jump: string option;
 
   mutable runtime_account_form: Masc_tui_runtime_account_form.t option;
@@ -11445,6 +11488,175 @@ let acting_pane_layout (state : state) =
 
 (* Requests retain receipts and unresolved declarations across withdrawal.
    Successful creation releases its retry body; receipts grant no authority. *)
+let runtime_form_origin_matches state request =
+  server_workspace_matches ~expected:(Some request.rfs_workspace)
+    (match state.server_identity with Some identity -> Ok identity | None -> Error "unread")
+
+let runtime_form_save_current state request =
+  request.rfs_authority = state.workspace_authority
+  && state.workspace_identity = Workspace_identity_match
+  && server_authority_ready state && runtime_form_origin_matches state request
+
+let runtime_form_is_attached state request =
+  Option.exists (fun token -> token == request.rfs_token) state.runtime_form_save_focus
+  && match request.rfs_draft with
+     | Model_form_draft form -> Option.exists (fun current -> current == form) state.runtime_model_form
+     | Account_form_draft form -> Option.exists (fun current -> current == form) state.runtime_account_form
+
+let runtime_form_save_advances previous next =
+  match previous, next with
+  | Form_checking, (Form_previewing _ | Form_posting _ | Form_finished _)
+  | Form_previewing _, (Form_posting _ | Form_finished _)
+  | Form_posting _, Form_finished _ -> true
+  | Form_finished _, (Form_checking | Form_previewing _ | Form_posting _ | Form_finished _)
+  | (Form_checking | Form_previewing _ | Form_posting _), Form_checking
+  | (Form_previewing _ | Form_posting _), Form_previewing _
+  | Form_posting _, Form_posting _ -> false
+
+let publish_runtime_form_save request ~observed_ns status =
+  let rec publish () =
+    let previous = Atomic.get request.rfs_observation in
+    if not (runtime_form_save_advances (fst previous) status) then false
+    else if Atomic.compare_and_set request.rfs_observation previous (status, observed_ns)
+    then true else publish () in
+  publish ()
+
+let begin_runtime_form_save state ~draft ~started_ns =
+  let same_kind attempt = match draft, attempt.rfa_request.rfs_draft with
+    | Model_form_draft _, Model_form_draft _ | Account_form_draft _, Account_form_draft _ -> true
+    | Model_form_draft _, Account_form_draft _ | Account_form_draft _, Model_form_draft _ -> false in
+  let busy = List.exists (fun attempt ->
+    runtime_form_origin_matches state attempt.rfa_request
+    && match attempt.rfa_status with
+       | Form_checking | Form_previewing _ | Form_posting _ -> true
+       | Form_finished (_, Form_unconfirmed _) -> attempt.rfa_recoverable && same_kind attempt
+       | Form_finished (_, (Form_saved _ | Form_not_sent _ | Form_invalid_account _
+                           | Form_refused _ | Form_conflict _)) -> false) state.runtime_form_saves in
+  match state.server_identity with
+  | Some workspace when state.workspace_identity = Workspace_identity_match
+      && server_authority_ready state && not busy ->
+      let request = { rfs_token = ref (); rfs_authority = state.workspace_authority;
+        rfs_workspace = workspace; rfs_draft = draft; rfs_started_ns = started_ns;
+        rfs_observation = Atomic.make (Form_checking, started_ns) } in
+      state.runtime_form_saves <- {rfa_request=request; rfa_status=Form_checking;
+        rfa_recoverable=true} :: List.map (fun attempt ->
+          if runtime_form_origin_matches state attempt.rfa_request && same_kind attempt
+          then {attempt with rfa_recoverable=false} else attempt) state.runtime_form_saves;
+      state.runtime_form_save_focus <- Some request.rfs_token;
+      Ok request
+  | None | Some _ -> Error (if busy then "A runtime form save is pending or unconfirmed; input retained"
+      else "Workspace is unverified; save not sent, input retained")
+
+let pending_runtime_form_save_receipt state =
+  List.find_map (fun attempt ->
+    match Atomic.get attempt.rfa_request.rfs_observation with
+    | (status, observed_ns) when runtime_form_save_advances attempt.rfa_status status ->
+        Some (attempt.rfa_request, status, observed_ns)
+    | Form_checking, _ | Form_previewing _, _ | Form_posting _, _ | Form_finished _, _ -> None)
+    state.runtime_form_saves
+
+let apply_runtime_form_save state request status =
+  let applied = ref false in
+  state.runtime_form_saves <- List.map (fun attempt ->
+    if attempt.rfa_request.rfs_token == request.rfs_token
+       && runtime_form_save_advances attempt.rfa_status status then begin
+      applied := true;
+      {attempt with rfa_status=status;
+        rfa_recoverable=(match status with
+          | Form_finished (_, Form_saved _) -> false
+          | Form_checking | Form_previewing _ | Form_posting _
+          | Form_finished (_, (Form_not_sent _ | Form_invalid_account _ | Form_refused _
+                              | Form_conflict _ | Form_unconfirmed _)) -> attempt.rfa_recoverable)}
+    end else attempt) state.runtime_form_saves;
+  !applied
+
+let runtime_form_focused_attempt state =
+  List.find_opt (fun attempt -> runtime_form_origin_matches state attempt.rfa_request
+    && Option.exists (fun token -> token == attempt.rfa_request.rfs_token)
+      state.runtime_form_save_focus) state.runtime_form_saves
+
+let runtime_form_input_locked state =
+  match runtime_form_focused_attempt state with
+  | Some {rfa_status=(Form_checking | Form_previewing _ | Form_posting _
+      | Form_finished (_, Form_unconfirmed _));_} -> true
+  | Some {rfa_status=Form_finished (_, (Form_saved _ | Form_not_sent _
+      | Form_invalid_account _ | Form_refused _ | Form_conflict _));_} | None -> false
+
+let release_runtime_form_recovery state =
+  state.runtime_form_saves <- List.map (fun attempt ->
+    if Option.exists (fun token -> token == attempt.rfa_request.rfs_token)
+       state.runtime_form_save_focus then {attempt with rfa_recoverable=false} else attempt)
+    state.runtime_form_saves;
+  state.runtime_form_save_focus <- None
+
+let runtime_form_outcome_detail = function
+  | Form_saved receipt -> Masc_tui_runtime_config_receipt.lane_summary receipt
+  | Form_not_sent detail -> "Save not sent; input retained: " ^ detail
+  | Form_invalid_account _ -> "Account fields rejected; input retained"
+  | Form_refused detail -> "Save refused; input retained: " ^ detail
+  | Form_conflict _ -> "runtime.toml changed; input and opening revision retained. Reopen a fresh form after reading current."
+  | Form_unconfirmed detail -> "Save outcome unconfirmed; input retained. Read current before retrying: " ^ detail
+
+let recover_runtime_form_save state ~account =
+  let same_kind = function Account_form_draft _ -> account | Model_form_draft _ -> not account in
+  match List.find_opt (fun attempt -> attempt.rfa_recoverable
+      && runtime_form_origin_matches state attempt.rfa_request
+      && same_kind attempt.rfa_request.rfs_draft) state.runtime_form_saves with
+  | None -> false
+  | Some attempt ->
+      let detail = match attempt.rfa_status with
+        | Form_checking | Form_previewing _ | Form_posting _ -> None
+        | Form_finished (_, outcome) -> Some (runtime_form_outcome_detail outcome) in
+      (match attempt.rfa_request.rfs_draft with
+       | Model_form_draft form -> state.runtime_model_form <- Some
+           (match detail with None -> form | Some detail -> Masc_tui_model_form.refused form detail)
+       | Account_form_draft form -> state.runtime_account_form <- Some
+           (match attempt.rfa_status, detail with
+            | Form_finished (_, Form_invalid_account refused), _ -> refused
+            | _, None -> form
+            | _, Some detail -> Masc_tui_runtime_account_form.refused form detail));
+      state.runtime_form_save_focus <- Some attempt.rfa_request.rfs_token;
+      true
+
+let runtime_form_save_notice state =
+  let visible attempt = state.view = Config && match attempt.rfa_request.rfs_draft with
+    | Model_form_draft _ -> state.config_pane = Config_models
+    | Account_form_draft _ -> state.config_pane = Config_runtime in
+  let attempt = match runtime_form_focused_attempt state with
+    | Some attempt when visible attempt -> Some attempt
+    | Some _ | None -> List.find_opt (fun attempt -> visible attempt && attempt.rfa_recoverable
+        && runtime_form_origin_matches state attempt.rfa_request) state.runtime_form_saves in
+  Option.map (fun attempt ->
+    let recover = match attempt.rfa_request.rfs_draft with
+      | Model_form_draft _ -> "Models e/c restores input"
+      | Account_form_draft _ -> "runtime.toml a restores input" in
+    match attempt.rfa_status with
+    | Form_checking -> "Checking runtime form save · Esc leaves; " ^ recover
+    | Form_previewing _ -> "Validating runtime form save · Esc leaves; " ^ recover
+    | Form_posting _ -> "Submitting runtime form; awaiting receipt · Esc leaves; " ^ recover
+    | Form_finished (_, outcome) -> runtime_form_outcome_detail outcome
+        ^ " · " ^ recover ^ " · Ctrl-X closes retained form; next open starts fresh") attempt
+
+let prepare_runtime_form_save draft (reading : Masc_tui_runtime_config_view.reading) =
+  let revision = match draft with
+    | Model_form_draft form -> Masc_tui_model_form.source_revision form
+    | Account_form_draft form -> Masc_tui_runtime_account_form.source_revision form in
+  if not (Option.exists (String.equal reading.metadata.source_revision) revision) then
+    Error (Form_not_sent "runtime.toml changed since this form opened; read current and start a fresh form")
+  else
+    let base : Masc_tui_runtime_config_edit.document = {path=reading.path;
+      source_text=reading.source_text; source_revision=reading.metadata.source_revision} in
+    match draft with
+    | Model_form_draft form -> Masc_tui_model_form.apply form reading.source_text
+        |> Result.map (fun text -> {rfp_base=base; rfp_text=text; rfp_account=None})
+        |> Result.map_error (fun detail -> Form_not_sent detail)
+    | Account_form_draft form ->
+        Masc_tui_runtime_account_form.declare_on
+          ~inherited_home:Masc_tui_runtime_account_form.inherited_home form reading.source_text
+        |> Result.map (fun declaration -> {rfp_base=base; rfp_text=declaration.text;
+             rfp_account=Some declaration})
+        |> Result.map_error (fun form -> Form_invalid_account form)
+
 let begin_keeper_creation state ~keeper_name ~declaration ~return_to ~started_ns =
   match state.workspace_identity, state.server_identity with
   | Workspace_identity_match, Some workspace when server_authority_ready state ->
@@ -12273,6 +12485,8 @@ let create_state
   runtime_config_status_scroll = 0;
   runtime_account_form = None;
   runtime_model_form = None;
+  runtime_form_saves = [];
+  runtime_form_save_focus = None;
   runtime_model_jump = None;
 
   runtime_config_jump_section = None;

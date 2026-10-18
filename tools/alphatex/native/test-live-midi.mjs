@@ -13,7 +13,9 @@ try {
  replace('    func send(', '    func apply(', '    func send(_ words:[UInt32],source:String)throws { sent.append((source,words));if failNext {failNext=false;throw MidiFailure("uncertain acquisition")} }')
  await writeFile(join(directory,'Output.swift'),output+'\nvar sent:[(String,[UInt32])]=[];var unavailable=false;var failNext=false\n')
  const live=(await readFile(new URL('UmpLiveInput.swift',import.meta.url),'utf8')).replaceAll('MIDIObjectGetIntegerProperty(', 'reviewProperty(').replaceAll('kMIDIPropertyUniqueID', 'reviewIdentityKey').replaceAll('kMIDIPropertyOffline', 'reviewOfflineKey')
- await writeFile(join(directory,'Live.swift'),live)
+ const tail=live.slice(live.indexOf('        state = .running\n'),live.indexOf('\n    }\n    func fail('))
+ assert.ok(tail.length>0)
+ await writeFile(join(directory,'Live.swift'),live+'\nextension UmpLiveInput { func reviewStartup() throws {\n'+tail+'\n} }\n')
  const main=`import Foundation
 import CoreMIDI
 func refuses(_ action:()throws->Void){do{try action();preconditionFailure("invalid live input admitted")}catch{}}
@@ -47,6 +49,16 @@ func input(_ owner:UmpLiveInput,_ words:[UInt32],host:UInt64=100,protocolID:MIDI
  owner.receive(UnsafePointer(list),context:UnsafeMutableRawPointer(bitPattern:9))
 }
 func close(_ owner:UmpLiveInput,_ failed:Bool=false){var ended=0;owner.onClosed={error in precondition((error != nil)==failed);ended+=1};owner.stop();pump{owner.state == .closed};precondition(ended==1 && owner.pendingWords==0 && owner.pending.isEmpty && !owner.accepting && owner.outputs.allSatisfy{$0.closed});owner.stop();precondition(ended==1)}
+// The active acknowledgement must retain its first callback, while sends stay
+// behind that acknowledgement on the main lifecycle. The startup tail is read
+// from production source above; OS resource creation remains a separate probe.
+let startup=try owner();startup.state = .idle;startup.accepting=false;sent=[]
+startup.onEvent={_ in input(startup,on);precondition(sent.isEmpty && startup.pendingWords==2)}
+try startup.reviewStartup();pump{startup.pendingWords==0};precondition(sent.map{$0.1}==[on]);close(startup)
+// A callback failure latched before a queued handoff runs cannot acquire a voice.
+let latched=try owner();sent=[];input(latched,on);input(latched,[0x20903c7f],protocolID:._1_0)
+precondition(latched.firstFailure != nil && !latched.accepting);pump{latched.state == .closed}
+precondition(sent.isEmpty && latched.pendingWords==0)
 // A large variable-sized event packet preserves complete messages and exact words.
 let large=try owner();sent=[];let words=Array(repeating:on+off,count:40).flatMap{$0};input(large,words)
 precondition(large.pendingWords==160);pump{large.pendingWords==0};precondition(sent.flatMap{$0.1}==words);close(large)
@@ -74,11 +86,11 @@ input(uncertain,on);pump{uncertain.state == .closed};precondition(failed && sent
 // Truncated frames are rejected before any message from that packet is sent.
 let truncated=try owner();sent=[];input(truncated,bend+[on[0]]);pump{truncated.state == .closed};precondition(truncated.firstFailure != nil && sent.isEmpty && truncated.pendingWords==0)
 // Pending payload capacity includes callback handoffs, not cumulative usage.
-let saturated=try owner();sent=[];input(saturated,Array(repeating:UInt32(0),count:UmpLiveInput.maximumPendingWords),host:1_000_000_000_000)
+let saturated=try owner();sent=[];for _ in 0..<8{input(saturated,Array(repeating:UInt32(0),count:8_192),host:1_000_000_000_000)}
 precondition(saturated.pendingWords==UmpLiveInput.maximumPendingWords);input(saturated,on)
 pump{saturated.state == .closed};precondition(saturated.firstFailure != nil && saturated.pendingWords==0 && sent.isEmpty)
-let reused=try owner();sent=[];for _ in 0..<3{input(reused,Array(repeating:UInt32(0),count:32_768));pump{reused.pendingWords==0}}
-precondition(reused.forwarded==98_304);close(reused)
+let reused=try owner();sent=[];for _ in 0..<9{input(reused,Array(repeating:UInt32(0),count:8_192));pump{reused.pendingWords==0}}
+precondition(reused.forwarded==73_728);close(reused)
 let protocolFailure=try owner();sent=[];input(protocolFailure,[0x20903c7f],protocolID:._1_0);pump{protocolFailure.state == .closed};precondition(protocolFailure.firstFailure != nil && sent.isEmpty)
 print("LIVE_MIDI_DECISIONS_PASS: physical leases, UID pinning, raw variable packet fidelity, exact ordered future deadlines, filtering, queued callback stop barrier, scoped/uncertain cleanup, truncated framing, explicit bounded in-flight overflow, reusable capacity, protocol refusal")
 `

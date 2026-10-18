@@ -1025,14 +1025,79 @@ let image_conversation_rows (state : state) =
   chat_timeline ~loaded ~session:(image_session_rows state)
     ~queued_request_ids:[] |> chat_timeline_rows
 
-(* Session rows record arrivals observed by this pane. Loading older history
-   after a paste is not evidence of a new arrival. When that ordering is no
-   longer available, prefer the image the operator still has in the draft. *)
+(* Read the same selected execution sources as the renderer. Capture every
+   current speech stretch, including ones with no preview yet: closing a fence
+   can change a stretch in place. Thinking and superseded attempts never own
+   the current conversation's preview. *)
+let image_log_observations (state : state) =
+  match state.msg_target_keeper_name with
+  | None -> []
+  | Some keeper_name ->
+      selected_source_logs_for_keeper state keeper_name
+      |> List.map (fun log ->
+           let items = Keeper_chat_transcript.drawn log.tl_transcript
+             |> List.filter_map (fun (item : Keeper_chat_transcript.drawn_item) ->
+                  match item.superseded, item.drawn with
+                  | None, (Drawn_text text | Drawn_reply text) ->
+                      Some (item.origin,
+                        Masc_tui_image_preview.in_message ~text ~attachments:[])
+                  | Some _, _
+                  | None, (Drawn_thinking _ | Drawn_skill _ | Drawn_tools _
+                    | Drawn_status _ | Drawn_error _) -> None) in
+           turn_log_execution_source log, items)
+
+(* Source previews follow the pane's causal merge order, including held logs.
+   The renderer's structural anchors recover the original producer data;
+   labels, normalized bodies and rendered row positions are never identities. *)
+let image_preview_candidates (state : state) logs =
+  let rows = image_conversation_rows state in
+  match state.msg_target_keeper_name with
+  | None -> []
+  | Some keeper_name ->
+      let _, cols = get_terminal_size () in
+      let projection = keeper_message_projection state ~keeper_name ~chat_cols:cols in
+      let projected = projection.tagged_entries
+        |> List.filter_map (fun (tag, _) ->
+             match search_anchor_of_tag tag with
+             | Some (Search_history { row_anchor; _ } as anchor) ->
+                 Option.bind (List.find_opt (same_msg_anchor row_anchor) rows) (fun row ->
+                      match row.me_role with
+                      | Message_thinking -> None
+                      | Message_user _ | Message_keeper | Message_autonomous
+                      | Message_status | Message_local | Message_error | Message_tool
+                      | Message_skill _ | Message_memory -> Some (anchor, row.me_image))
+             | Some (Search_journal { source; origin; _ } as anchor) ->
+                 Option.bind (List.assoc_opt source logs) (fun items ->
+                   Option.map (fun preview -> anchor, preview) (List.assoc_opt origin items))
+             | Some (Search_child _ | Search_admission _) | None -> None) in
+      (* Queued inputs are visible in the pending tail, outside tagged_entries.
+         Keep their attachment actions while avoiding duplicate projected rows. *)
+      let queued = rows |> List.filter_map (fun row ->
+        match Chat_queue.find state.msg_queued ~request_id:row.me_request_id,
+              row.me_role with
+        | Some _, Message_user _ ->
+            let anchor = msg_anchor row in
+            if List.exists (fun (shown, _) -> match shown with
+              | Search_history {row_anchor; _} -> row_anchor = anchor
+              | Search_child _ | Search_admission _ | Search_journal _ -> false) projected
+            then None
+            else Some (Search_history {row_anchor=anchor; reply_source=None}, row.me_image)
+        | Some _, (Message_keeper | Message_autonomous | Message_status | Message_local
+          | Message_error | Message_tool | Message_skill _ | Message_thinking | Message_memory)
+        | None, _ -> None) in
+      projected @ queued
+
+(* History loading alone is not a new arrival. The staging observation travels
+   with the draft and is invalidated by a workspace reconnect. *)
 let note_attachment_staged (state : state) =
-  state.msg_attachments_since <-
-    (match List.rev (image_session_rows state) with
-     | newest :: _ -> Some (msg_anchor newest)
-     | [] -> None)
+  state.msg_attachments_since <- Some {
+    io_reading = state.workspace_read_authority;
+    io_keeper = state.msg_target_keeper_name;
+    io_history = (match List.rev (image_session_rows state) with
+      | newest :: _ -> Some (msg_anchor newest)
+      | [] -> None);
+    io_logs = image_log_observations state;
+  }
 ;;
 
 (* The draft is put aside on the first step back and handed over on the way
@@ -10093,15 +10158,13 @@ let open_staged_image state ~notice attachment =
       | Error (`Msg detail) -> refuse detail
       | Ok data -> draw_image state ~refuse ~title data)
 
-(* Read in observation order before considering the historical timeline:
-   server and client timestamps need not share a clock. Display labels are
-   never parsed as paths. *)
-let newest_named_image rows =
-  List.rev rows
-  |> List.find_map (fun entry ->
-         match entry.me_image with
-         | Masc_tui_image_preview.No_image -> None
-         | (Masc_tui_image_preview.Named_path _ | Masc_tui_image_preview.Staged _ | Masc_tui_image_preview.Stored_attachment _ | Masc_tui_image_preview.Output_image _ | Masc_tui_image_preview.Unavailable_image _) as image -> Some image)
+let newest_preview candidates =
+  List.rev candidates
+  |> List.find_map (fun (_, preview) ->
+       match preview with
+       | Masc_tui_image_preview.No_image -> None
+       | Named_path _ | Staged _ | Stored_attachment _ | Output_image _
+       | Unavailable_image _ -> Some preview)
 
 let image_request_is_active state entry =
   let matches request =
@@ -10118,23 +10181,61 @@ let image_request_is_active state entry =
           | Stream_ended | Stream_failed _ -> false)
        state.msg_inflight
 
-(* Active local inputs precede loaded history even across clock skew. Once
-   settled, a local row follows the canonical timeline: a bounded history
-   response may omit that row forever while including newer images.
-   Only an image observed after staging can supersede the draft; a delayed
-   history load alone supplies no such observation. *)
+(* Local active requests precede historical arrivals even across clock skew.
+   A staged draft is superseded only by a new session row or a changed speech
+   preview from a source this pane already held at staging. A newly loaded
+   journal without such provenance conservatively leaves the draft first. *)
 let conversation_image state =
   let session = image_session_rows state in
-  let observed =
-    match state.msg_attachments, state.msg_attachments_since with
-    | [], _ -> Some (List.filter (image_request_is_active state) session)
-    | _ :: _, None -> Some session
-    | _ :: _, Some since -> msg_entries_after_anchor session since
+  let logs = image_log_observations state in
+  let candidates = image_preview_candidates state logs in
+  let staged = state.msg_attachments <> [] in
+  let observation = match state.msg_attachments_since with
+    | Some observed when observed.io_reading == state.workspace_read_authority
+        && observed.io_keeper = state.msg_target_keeper_name -> Some observed
+    | Some _ | None -> None in
+  let observed_session =
+    if not staged then Some (List.filter (image_request_is_active state) session)
+    else Option.bind observation (fun observed ->
+      match observed.io_history with
+      | None -> Some session
+      | Some anchor -> msg_entries_after_anchor session anchor)
   in
-  match Option.bind observed newest_named_image with
+  let observed_rows = Option.value observed_session ~default:[] in
+  let source_has_new_input source =
+    match state.msg_target_keeper_name with
+    | None -> false
+    | Some keeper_name ->
+        let members = chat_execution_member_ids state ~keeper_name ~source in
+        List.exists (fun row -> List.mem row.me_request_id members) observed_rows
+  in
+  let active_source source =
+    List.exists (fun (entry : inflight) ->
+      turn_log_execution_source entry.log = source
+      && match Keeper_chat_transcript.phase entry.log.tl_transcript with
+         | Waiting | Working -> true
+         | Stream_ended | Stream_failed _ -> false) state.msg_inflight
+  in
+  let newly_observed (anchor, preview) = match anchor with
+    | Search_history {row_anchor; _} ->
+        List.exists (same_msg_anchor row_anchor) observed_rows
+    | Search_journal {source; origin; _} ->
+        if not staged then active_source source
+        else (match observation with
+          | None -> false
+          | Some observed ->
+              match List.assoc_opt source observed.io_logs with
+              | None -> source_has_new_input source
+              | Some previous ->
+                  match List.assoc_opt origin previous with
+                  | None -> true
+                  | Some old_preview -> old_preview <> preview)
+    | Search_child _ | Search_admission _ -> false
+  in
+  match newest_preview (List.filter newly_observed candidates) with
   | Some image -> image, Masc_tui_image_preview.Named_is_newer
   | None ->
-      match newest_named_image (image_conversation_rows state) with
+      match newest_preview candidates with
       | Some image -> image, Masc_tui_image_preview.Staged_is_newer
       | None -> Masc_tui_image_preview.No_image, Masc_tui_image_preview.Unordered
 

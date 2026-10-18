@@ -645,7 +645,7 @@
  (name masc_tui_chat_media)
  (wrapped false)
  (modules masc_tui_chat_media)
- (libraries masc masc_tui_image_preview uri yojson))
+ (libraries masc masc_tui_image_preview masc_tui_markdown uri yojson))
 
 (library
  (name masc_tui_keeper_chat_history)

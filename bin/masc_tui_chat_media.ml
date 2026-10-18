@@ -41,7 +41,12 @@ let source_line label = function
 let describe = function
   | Image image -> source_line (with_caption "Image" image.cap) (Some image.src)
   | Svg svg -> with_caption "SVG" svg.cap
-  | Mermaid diagram -> with_caption "Mermaid · Ctrl-O:diagram" diagram.caption
+  | Mermaid diagram ->
+      let source = match Masc_tui_markdown.non_colliding_fence_marker
+          (String.split_on_char '\n' diagram.source) with
+        | Some marker -> marker ^ "mermaid\n" ^ diagram.source ^ "\n" ^ marker
+        | None -> diagram.source in
+      with_caption "Mermaid · Ctrl-O:diagram" diagram.caption ^ "\n" ^ source
   | Attach attachment ->
     source_line (with_caption "File" (Some attachment.name)) attachment.src
   | Voice voice ->
@@ -56,6 +61,10 @@ let describe = function
 ;;
 
 let append_text ~text media =
+  let sources = Masc_tui_markdown.mermaid_sources text in
+  let media = List.filter (function
+    | Mermaid diagram -> not (List.mem diagram.source sources)
+    | Image _ | Voice _ | Attach _ | Svg _ -> true) media in
   match media with
   | [] -> text
   | _ ->

@@ -37,7 +37,7 @@ let unavailable_runtime_json =
 let test_unavailable_assignment_keeps_its_typed_label () =
   match Masc.Tui_decode.decode_runtime_resolved_full unavailable_runtime_json with
   | Error detail -> Alcotest.fail detail
-  | Ok (_, _, [ assignment ]) ->
+  | Ok {Masc.Tui_decode.rrc_assignments=[assignment];_} ->
     (match assignment.ra_resolution with
      | Runtime_assignment_unavailable
          { runtime_id; reason = Missing_catalog_model { provider_label; model_id } } ->
@@ -53,7 +53,7 @@ let test_unavailable_assignment_keeps_its_typed_label () =
       "shared Keeper assignment label"
       "fixture.missing (not in catalog: Fixture / missing, explicit)"
       (Masc_tui_render_prim.runtime_assignment_label assignment)
-  | Ok (_, _, assignments) ->
+  | Ok {rrc_assignments=assignments;_} ->
     Alcotest.failf "expected one unavailable assignment, got %d" (List.length assignments)
 ;;
 

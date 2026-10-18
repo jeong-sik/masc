@@ -133,6 +133,9 @@ replacement still waits for a fresh catalogue. Nested pickers and recent-context
 catalogue demand resume after workspace reconfirmation. A different workspace
 clears the old rows and demand. This sharing covers the catalogue launcher;
 Overview and the Runtime operator surface retain their separate readers.
+Catalogue rows, configured default route and Keeper assignments share one
+validated observation. A missing usage-window observation stays an explicit
+unknown alongside an otherwise usable catalogue.
 
 ## Usage
 

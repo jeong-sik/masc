@@ -4580,6 +4580,11 @@ let decode_runtime_assignment json =
   in
   Ok { ra_keeper; ra_source; ra_resolution }
 
+type runtime_resolved_catalog = {
+  rrc_snapshot : runtime_resolved_snapshot;
+  rrc_assignments : runtime_assignment list;
+}
+
 let decode_runtime_resolved_full json =
   let* snapshot = decode_runtime_resolved_snapshot json in
   let* assignment_items = required_list_field json "assignments" in
@@ -4605,11 +4610,11 @@ let decode_runtime_resolved_full json =
           (Printf.sprintf "runtime assignment for %S names an absent lane"
              assignment.ra_keeper)
   in
-  Ok (snapshot.rrs_runtimes, snapshot.rrs_lanes, assignments)
+  Ok {rrc_snapshot=snapshot;rrc_assignments=assignments}
 
 let decode_runtime_resolved json =
-  let* runtimes, _lanes, assignments = decode_runtime_resolved_full json in
-  Ok (runtimes, assignments)
+  let* catalog = decode_runtime_resolved_full json in
+  Ok (catalog.rrc_snapshot.rrs_runtimes, catalog.rrc_assignments)
 
 type server_gc_health = {
   sgc_heap_words : int;

@@ -9,6 +9,7 @@ import { newProject, editProject, chordVoicing, harmonyAt, sequenceEvents, valid
 import { saveProject, loadProject, projectMidi } from '../sequencer-files.mjs'
 import { renderProject } from '../sequencer-audio.mjs'
 import { readWaveMetadata } from '../wave-file.mjs'
+import { writeExporterWave } from '../audio.mjs'
 midiFiles(JZZ)
 const edit = (project, change) => editProject(project, project.tracks[0].id, change)
 const chord = (project, symbol = 'Cmaj7', extra = {}) => edit(project, { kind: 'chord', symbol, start: 0, duration: PPQ, velocity: 96, ...extra })
@@ -138,5 +139,74 @@ test('rendered multitrack phrase has audible PCM and loop timing follows tempo',
     const meta = await readWaveMetadata(join(dir, 'loop.wav'))
     assert.equal(meta.frames, BigInt(Math.round(60 / p.tempo * 44100)))
     assert.ok(Math.abs(result.durationMs - 600) < 1)
+  } finally { await rm(dir, { recursive: true, force: true }) }
+})
+test('track level and pan survive document and MIDI roundtrips and reject invalid edits transactionally', async () => {
+  let project = chord(newProject())
+  assert.deepEqual([project.tracks[0].level, project.tracks[0].pan], [100, 64])
+  project = edit(project, { kind: 'track-settings', level: 80, pan: 0 })
+  project = edit(project, { kind: 'track', name: 'Bass' })
+  project = editProject(project, project.tracks[1].id, { kind: 'track-settings', level: 60, pan: 127 })
+  const before = structuredClone(project)
+  for (const key of ['level', 'pan']) for (const value of [-1, 128, 1.5, '64', null]) {
+    assert.throws(() => edit(project, { kind: 'track-settings', [key]: value }), /Invalid track/)
+    assert.deepEqual(project, before)
+  }
+  const schedule = sequenceEvents(project, { loop: true })
+  assert.deepEqual(schedule.events.filter(event => event.kind === 'control').map(event => [event.tick, event.channel, event.controller, event.value]),
+    [[0, 0, 7, 80], [0, 0, 10, 0], [0, 1, 7, 60], [0, 1, 10, 127]])
+  const midi = new JZZ.MIDI.SMF(projectMidi(project, { loop: true }))
+  for (const [index, track] of project.tracks.entries()) {
+    assert.deepEqual([...midi[index + 1]].filter(event => event[0] >>> 4 === 0xb).map(event => [event.tt, event[0] & 15, event[1], event[2]]),
+      [[0, track.channel, 7, track.level], [0, track.channel, 10, track.pan]])
+  }
+  const dir = await mkdtemp(join(tmpdir(), 'masc-sequencer-mix-'))
+  try {
+    const path = join(dir, 'mix.json')
+    await saveProject(path, project)
+    assert.deepEqual((await loadProject(path)).project, project)
+  } finally { await rm(dir, { recursive: true, force: true }) }
+})
+test('measured phrase mixing exposes clipping and track controls change actual WAV level and stereo routing', async () => {
+  let project = edit(newProject(), { kind: 'progression', symbols: ['Dm7', 'G7', 'Cmaj7'], mode: 'rootless', octave: 3, start: 0, duration: 4 * PPQ, velocity: 96 })
+  project = edit(project, { kind: 'track', name: 'Bass' })
+  const bass = project.tracks[1].id
+  for (const [index, note] of ['D2', 'G2', 'C2'].entries()) {
+    project = editProject(project, bass, { kind: 'note', pitch: note, start: index * 4 * PPQ, duration: 4 * PPQ, velocity: [110, 105, 100][index] })
+  }
+  const setLevel = (project, level) => project.tracks.reduce((result, track) => editProject(result, track.id, { kind: 'track-settings', level }), project)
+  const dir = await mkdtemp(join(tmpdir(), 'masc-sequencer-level-'))
+  try {
+    const loud = renderProject(setLevel(project, 127), join(dir, 'loud.wav'))
+    assert.ok(loud.peak > 1)
+    assert.ok(loud.clippedSamples > 0)
+    const mixed = renderProject(project, join(dir, 'mixed.wav'))
+    assert.ok(mixed.peak > 0 && mixed.peak < 1)
+    assert.equal(mixed.clippedSamples, 0)
+    const silent = renderProject(setLevel(project, 0), join(dir, 'silent.wav'))
+    assert.equal(silent.peak, 0)
+    assert.equal(silent.clippedSamples, 0)
+    let single = edit(newProject(), { kind: 'note', pitch: 60, start: 0, duration: PPQ, velocity: 96 })
+    for (const pan of [0, 127]) {
+      single = edit(single, { kind: 'track-settings', pan })
+      const path = join(dir, `pan-${pan}.wav`)
+      renderProject(single, path)
+      const bytes = await readFile(path)
+      const meta = await readWaveMetadata(path)
+      const energy = [0, 0]
+      for (let offset = meta.dataOffset; offset < meta.dataOffset + meta.dataBytes; offset += 4) {
+        energy[0] += bytes.readInt16LE(offset) ** 2
+        energy[1] += bytes.readInt16LE(offset + 2) ** 2
+      }
+      assert.ok(pan === 0 ? energy[0] > energy[1] : energy[1] > energy[0])
+    }
+    let rendered = false
+    const result = writeExporterWave({ render() {
+      if (rendered) return null
+      rendered = true
+      return { samples: Float32Array.from([1.25, -1.25, 1, -1, 0, 0]) }
+    } }, join(dir, 'clipping-count.wav'))
+    assert.equal(result.clippedSamples, 2)
+    assert.equal(result.peak, 1.25)
   } finally { await rm(dir, { recursive: true, force: true }) }
 })

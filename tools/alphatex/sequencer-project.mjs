@@ -38,6 +38,7 @@ export function validateProject(project) {
     if (ids.has(track.id)) throw new Error('Duplicate track id')
     ids.add(track.id)
     int(track.channel, 'MIDI channel', 0, 15); int(track.program, 'program', 0, 127)
+    int(track.level, 'track level', 0, 127); int(track.pan, 'track pan', 0, 127)
     if (track.channel === 9) throw new Error('GM percussion channel 10 is not a melodic track')
     if (channels.has(track.channel)) throw new Error('Tracks need separate MIDI channels to retain independent programs')
     channels.add(track.channel)
@@ -67,7 +68,7 @@ export function validateProject(project) {
 export function newProject() {
   return { schemaVersion: 1, ppq: PPQ, title: 'Phrase laboratory', tempo: 100,
     meter: [4, 4], length: 16 * PPQ, loop: { start: 0, end: 16 * PPQ },
-    tracks: [{ id: 'track-1', name: 'Piano', channel: 0, program: 0, muted: false, solo: false, notes: [] }] }
+    tracks: [{ id: 'track-1', name: 'Piano', channel: 0, program: 0, level: 100, pan: 64, muted: false, solo: false, notes: [] }] }
 }
 function uniqueId(prefix, existing) {
   const used = new Set(existing.map(item => item.id))
@@ -168,11 +169,11 @@ export function editProject(project, trackId, edit) {
     case 'track': {
       const channel = MELODIC_CHANNELS.find(channel => !next.tracks.some(track => track.channel === channel))
       if (channel === undefined) throw new Error('All 15 melodic MIDI channels are already assigned')
-      next.tracks.push({ id: uniqueId('track', next.tracks), name: text(edit.name, 'track name'), channel, program: 0, muted: false, solo: false, notes: [] })
+      next.tracks.push({ id: uniqueId('track', next.tracks), name: text(edit.name, 'track name'), channel, program: 0, level: 100, pan: 64, muted: false, solo: false, notes: [] })
       break
     }
     case 'track-settings':
-      for (const key of ['muted', 'solo', 'program', 'name']) if (edit[key] !== undefined) track[key] = edit[key]
+      for (const key of ['muted', 'solo', 'program', 'name', 'level', 'pan']) if (edit[key] !== undefined) track[key] = edit[key]
       break
     case 'tempo': next.tempo = edit.value; break
     case 'title': next.title = edit.value; break
@@ -195,6 +196,9 @@ export function sequenceEvents(project, { loop = false } = {}) {
   const events = []
   for (const track of activeTracks(project)) {
     events.push({ tick: 0, kind: 'program', track: track.id, channel: track.channel, program: track.program })
+    // General MIDI channel volume and pan are shared by WAV synthesis and .mid.
+    events.push({ tick: 0, kind: 'control', track: track.id, channel: track.channel, controller: 7, value: track.level })
+    events.push({ tick: 0, kind: 'control', track: track.id, channel: track.channel, controller: 10, value: track.pan })
     for (const note of track.notes) {
       const on = Math.max(start, note.start), off = Math.min(end, note.start + note.duration)
       if (off <= on) continue
@@ -202,7 +206,7 @@ export function sequenceEvents(project, { loop = false } = {}) {
       events.push({ tick: off - start, kind: 'off', track: track.id, channel: track.channel, pitch: note.pitch, velocity: 0 })
     }
   }
-  const order = { program: 0, off: 1, on: 2 }
+  const order = { program: 0, control: 1, off: 2, on: 3 }
   events.sort((a, b) => a.tick - b.tick || order[a.kind] - order[b.kind])
   return { events, ticks: end - start, seconds: (end - start) / PPQ * 60 / project.tempo }
 }

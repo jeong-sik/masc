@@ -13,9 +13,11 @@ export function renderProject(project, path, { loop = false, soundfontPath, canc
     const index = project.tracks.findIndex(track => track.id === event.track)
     const value = event.kind === 'program'
       ? new alphaTab.midi.ProgramChangeEvent(index, event.tick, event.channel, event.program)
-      : event.kind === 'on'
-        ? new alphaTab.midi.NoteOnEvent(index, event.tick, event.channel, event.pitch, event.velocity)
-        : new alphaTab.midi.NoteOffEvent(index, event.tick, event.channel, event.pitch, 0)
+      : event.kind === 'control'
+        ? new alphaTab.midi.ControlChangeEvent(index, event.tick, event.channel, event.controller, event.value)
+        : event.kind === 'on'
+          ? new alphaTab.midi.NoteOnEvent(index, event.tick, event.channel, event.pitch, event.velocity)
+          : new alphaTab.midi.NoteOffEvent(index, event.tick, event.channel, event.pitch, 0)
     midi.addEvent(value)
   }
   for (const [index] of project.tracks.entries()) midi.addEvent(new alphaTab.midi.EndOfTrackEvent(index, schedule.ticks))

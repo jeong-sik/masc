@@ -44,8 +44,9 @@ export function projectMidi(project, options) {
     output.add(0, JZZ.MIDI.smfSeqName(track.name))
     for (const event of events.filter(event => event.track === track.id)) {
       const message = event.kind === 'program' ? JZZ.MIDI.program(event.channel, event.program)
-        : event.kind === 'on' ? JZZ.MIDI.noteOn(event.channel, event.pitch, event.velocity)
-          : JZZ.MIDI.noteOff(event.channel, event.pitch)
+        : event.kind === 'control' ? JZZ.MIDI.control(event.channel, event.controller, event.value)
+          : event.kind === 'on' ? JZZ.MIDI.noteOn(event.channel, event.pitch, event.velocity)
+            : JZZ.MIDI.noteOff(event.channel, event.pitch)
       output.add(event.tick, message)
     }
     output.add(ticks, JZZ.MIDI.smfEndOfTrack()); file.push(output)

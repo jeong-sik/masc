@@ -12,6 +12,12 @@ type source = {
 
 type rows = { body : string array; comments : string array; initial_comment_offset : (string * int) option }
 type t = { mutable retained : (source * rows) option }
+
+let close_time seconds =
+  match Ptime.of_float_s seconds with
+  | None -> Error seconds
+  | Some timestamp -> Ok (Ptime.to_rfc3339 ~frac_s:0 ~tz_offset_s:0 timestamp)
+
 let create () = { retained = None }
 
 let get cache ~source ~render =

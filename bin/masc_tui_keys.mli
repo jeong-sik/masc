@@ -215,6 +215,7 @@ val footer_hints_board_read :
   full_history:bool ->
   layout:Masc_tui_types.board_read_layout ->
   has_attachments:bool ->
+  has_successor:bool ->
   string
 (** The Board read footer. [focus_posts] is whether j/k moves the post list
     beside the open post; [focus_comments] chooses the thread instead of the

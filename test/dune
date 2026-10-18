@@ -3972,6 +3972,11 @@
  (libraries alcotest masc_tui_board_selection))
 
 (test
+ (name test_tui_board_successor)
+ (modules test_tui_board_successor)
+ (libraries alcotest masc_tui_types masc_tui_board_detail masc_tui_board_read_layout))
+
+(test
  (name test_tui_planning_selection)
  (modules test_tui_planning_selection)
  (libraries alcotest masc_tui_planning_selection))

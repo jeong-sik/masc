@@ -1123,3 +1123,13 @@ agree. It never rewrites original attempt receipts or promotes input agreement
 to execution/speedup. See the
 [capture comparison audit](../audits/2026-10-19-preparation-capture-comparison.md)
 and [harness contract](../../scripts/benchmarks/keeper-composition/PREPARATION-HARNESS.md).
+
+Recorded preparation attempts now also retain exact counter-scoped interval
+reports. The native driver emits a fresh counter owner and unsigned ns strings;
+the reader derives only same-owner nonnegative intervals. Useful-commit spans
+require original fixture/Task/turn/intake/commit metadata joins and coverage,
+while missing useful evidence does not erase a valid cycle span. Failed and
+unfinished attempts remain visible. Raw wall/legacy observations are retained
+without coercion, and metadata joins/intervals are not physical execution or
+speedup proof. See the
+[clock and interval audit](../audits/2026-10-19-preparation-clock-intervals.md).

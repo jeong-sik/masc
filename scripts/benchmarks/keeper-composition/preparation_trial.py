@@ -212,6 +212,178 @@ def same_json(first, second) -> bool:
     return True
 
 
+def clock_point(value, clock_ref: str) -> int:
+    if (not isinstance(value, dict) or not clock_ref or value.get("clock_domain") != "driver_counter"
+            or value.get("clock_ref") != clock_ref):
+        raise ValueError("clock_domain_or_owner_mismatch")
+    text = value.get("monotonic_ns")
+    if (type(text) is not str or not text or not text.isascii() or not text.isdecimal()
+            or len(text) > 20 or str(int(text)) != text or int(text) > 2**64 - 1):
+        raise ValueError("invalid_exact_counter_timestamp")
+    return int(text)
+
+
+def reported_interval(start, end, clock_ref, unavailable_reason=None) -> dict:
+    if unavailable_reason is not None:
+        return {"state": "unavailable", "reason": unavailable_reason}
+    if start is None or end is None:
+        return {"state": "unavailable", "reason": "endpoint_unobserved"}
+    try:
+        first, last = clock_point(start, clock_ref), clock_point(end, clock_ref)
+        if last < first:
+            raise ValueError("counter_time_regression")
+    except ValueError as error:
+        return {"state": "unavailable", "reason": str(error)}
+    return {"state": "available", "clock_domain": "driver_counter", "clock_ref": clock_ref,
+            "start_ns": str(first), "end_ns": str(last), "duration_ns": str(last - first)}
+
+
+def useful_identity(root: Path, attempt: dict, receipt: dict) -> dict:
+    """Join recorded metadata only; not SDK execution, stdout or model verification."""
+    if receipt.get("receipt_state") != "read":
+        return {"state": "unavailable", "reason": "receipt_not_admitted"}
+    timing = receipt.get("timing", {})
+    leaf = timing.get("first_useful_leaf", {}) if isinstance(timing, dict) else {}
+    if not isinstance(leaf, dict) or leaf.get("state") != "observed":
+        return {"state": "unobserved", "reason": "useful_leaf_not_reported"}
+    hashes = {}
+    def read_json(relative):
+        raw, digest_value = capture_bytes(root, relative)
+        hashes[relative] = digest_value
+        return decode_json(raw.decode("utf-8"))
+    def require(condition):
+        if not condition:
+            raise ValueError("recorded_identity_mismatch")
+    def text(value):
+        return type(value) is str and bool(value.strip())
+    prefix = str(Path(attempt["path"]).parent)
+    pair_prefix = f"pair-{attempt['pair']:04d}"
+    try:
+        frozen = read_json(pair_prefix + "/common-inputs.json")
+        fixture_path = pair_prefix + "/snapshot/preparation-fixture.json"
+        fixture = read_json(fixture_path)
+        require(hashes[fixture_path] == receipt.get("fixture_sha256")
+                == frozen["files"]["preparation-fixture.json"]["sha256"])
+        turn = read_json(prefix + "/turn-record.json")
+        admission = read_json(prefix + "/admission.json")
+        marker_path = prefix + "/turn-entry-manifest.json"
+        marker = read_json(marker_path)
+        intake = timing["intake_turn_entry"]
+        require(text(receipt.get("turn_ref")) and receipt["turn_ref"] == turn["turn_ref"]
+                and text(fixture["keeper"]) and fixture["keeper"] == turn["keeper"]
+                and text(fixture["task_id"]) and fixture["task_id"] == leaf.get("task_id")
+                and text(fixture["trace_id"]) and fixture["trace_id"] == turn["trace_id"] == leaf.get("trace_id")
+                and type(turn["absolute_turn"]) is int and turn["absolute_turn"] >= 0
+                and same_json(turn["absolute_turn"], leaf.get("keeper_turn_id")))
+        source_keys = ("stimulus_id", "source_snapshot_ref", "admitted_revision", "first_admitted_at")
+        sources = [{key: admission[key] for key in source_keys}]
+        require(all(text(admission[key]) for key in source_keys[:3])
+                and type(admission["first_admitted_at"]) in (int, float)
+                and same_json(admission, timing["admission"])
+                and intake["state"] == "observed" and intake["manifest_sha256"] == hashes[marker_path]
+                and intake["trace_id"] == turn["trace_id"]
+                and same_json(intake["keeper_turn_id"], turn["absolute_turn"])
+                and marker["event"] == "turn_started" and marker["trace_id"] == turn["trace_id"]
+                and marker["keeper_name"] == fixture["keeper"]
+                and same_json(marker["keeper_turn_id"], turn["absolute_turn"])
+                and text(intake["ts"]) and intake["ts"] == marker["ts"]
+                and same_json(intake["sources"], sources)
+                and same_json(marker["decision"]["intake_sources"], sources)
+                and same_json(intake["clock_refs"], marker["decision"]["clock_refs"])
+                and intake["clock_refs"]["source_clock"] == "wall")
+        metrics = receipt["tool_commit_observation"]
+        raw, events_hash = capture_bytes(root, prefix + "/tool-commit-events.jsonl")
+        hashes[prefix + "/tool-commit-events.jsonl"] = events_hash
+        events = [decode_json(line) for line in raw.decode("utf-8").splitlines() if line.strip()]
+        calls = read_json(prefix + "/tool-calls.json")
+        require(type(calls) is list and all(isinstance(row, dict) for row in calls))
+        calls = [row for row in calls if row.get("record_kind") == "tool_call"]
+        require(metrics["boundary"] == leaf["boundary"] == "durable_tool_call_commit"
+                and metrics["mode"] == "scoped_synchronous_commit" and metrics["coverage"] == "complete"
+                and type(metrics["delivery_failures"]) is int and metrics["delivery_failures"] == 0
+                and type(metrics["events"]) is int and metrics["events"] == len(events) == len(calls)
+                and metrics["events_sha256"] == events_hash)
+        identity = ("keeper", "tool", "execution_id", "tool_use_id", "trace_id", "task_id",
+                    "keeper_turn_id", "composition_node_id", "parent_tool_use_id")
+        def record_key(row):
+            values = tuple(row.get(key) for key in identity)
+            for key, value in zip(identity, values):
+                if key == "keeper_turn_id":
+                    require(value is None or (type(value) is int and value >= 0))
+                else:
+                    require(value is None or type(value) is str)
+            require(all(text(row.get(key)) for key in ("keeper", "tool", "execution_id")))
+            return values
+        indexed = {}
+        for call in calls:
+            key = record_key(call)
+            require(key not in indexed)
+            indexed[key] = call
+        seen = set()
+        joined = None
+        for event in events:
+            require(isinstance(event, dict) and all(key in event for key in identity)
+                    and type(event.get("schema_version")) is int and event["schema_version"] == 1
+                    and event["boundary"] == metrics["boundary"])
+            execution = event["execution_id"]
+            key = record_key(event)
+            require(key in indexed and key not in seen)
+            seen.add(key)
+            call = indexed[key]
+            require(all(same_json(event[key], call.get(key)) for key in identity))
+            if execution == leaf.get("execution_id"):
+                require(joined is None and event["tool"] == "keeper_artifact_read"
+                        and event["keeper"] == fixture["keeper"]
+                        and all(key in leaf and same_json(event[key], leaf[key])
+                                for key in identity if key not in ("keeper", "tool"))
+                        and same_json(event["observed"], leaf["observed"])
+                        and text(fixture["selection_sha256"])
+                        and call["input"]["sha256"] == fixture["selection_sha256"]
+                        == receipt["input"]["_blob"]["sha256"])
+                joined = execution
+        require(joined is not None)
+        return {"state": "matched", "scope": "recorded_metadata_only", "artifact_sha256": hashes,
+                "turn_ref": turn["turn_ref"], "task_id": leaf["task_id"], "trace_id": leaf["trace_id"],
+                "execution_id": joined, "source": sources[0], "physical_execution_verified": False}
+    except FileNotFoundError:
+        return {"state": "missing", "reason": "identity_artifact_unavailable", "artifact_sha256": hashes}
+    except (OSError, ValueError, KeyError, TypeError, RecursionError):
+        return {"state": "invalid", "reason": "identity_artifact_invalid_or_mismatched", "artifact_sha256": hashes}
+
+
+def attempt_timing(root: Path, attempt: dict, receipt: dict) -> dict:
+    timing = receipt.get("timing")
+    timing = timing if isinstance(timing, dict) else {}
+    admission = timing.get("admission")
+    admission = admission if isinstance(admission, dict) else {}
+    identity = useful_identity(root, attempt, receipt)
+    leaf = timing.get("first_useful_leaf")
+    leaf = leaf if isinstance(leaf, dict) else {}
+    reason = None if identity["state"] == "matched" else "useful_identity_not_joined"
+    clock_ref = receipt.get("clock_ref")
+    clock_ref = clock_ref if type(clock_ref) is str and clock_ref.strip() else ""
+    admission_reason = None if receipt.get("receipt_state") == "read" else "receipt_not_admitted"
+    if admission_reason is not None:
+        timing, admission, leaf, reason = {}, {}, {}, "receipt_not_admitted"
+    elif reason is None:
+        try:
+            entered = clock_point(timing.get("cycle_entered"), clock_ref)
+            observed = clock_point(leaf.get("observed"), clock_ref)
+            returned = clock_point(timing.get("cycle_returned"), clock_ref)
+            if not entered <= observed <= returned:
+                raise ValueError("useful_commit_outside_reported_cycle")
+        except ValueError as error:
+            reason = str(error)
+    intervals = {
+        "source_enqueue": reported_interval(admission.get("enqueue_entered"), admission.get("enqueue_returned"), clock_ref, admission_reason),
+        "cycle": reported_interval(timing.get("cycle_entered"), timing.get("cycle_returned"), clock_ref, admission_reason),
+        "cycle_to_validation": reported_interval(timing.get("cycle_returned"), timing.get("validation_finished"), clock_ref, admission_reason),
+        "enqueue_to_reported_useful_commit": reported_interval(admission.get("enqueue_entered"), leaf.get("observed"), clock_ref, reason),
+        "cycle_to_reported_useful_commit": reported_interval(timing.get("cycle_entered"), leaf.get("observed"), clock_ref, reason)}
+    return {"scope": "receipt_reported_driver_counter_intervals", "identity": identity,
+            "intervals": intervals, "wall_clock_arithmetic": False, "execution_verified": False}
+
+
 def report_capture(directory: Path) -> dict:
     """Read a declared capture without invoking a driver or changing evidence."""
     root = directory.resolve(strict=True)
@@ -251,6 +423,7 @@ def report_capture(directory: Path) -> dict:
                       receipt_sha256=receipt_hash, declared_attempt=dict(attempt))
         if state != "read":
             result.update(outcome="unfinished", receipt_error=error)
+        result["timing_report"] = attempt_timing(root, attempt, result)
         results.append(result)
         by_pair.setdefault(attempt["pair"], []).append(result)
     matching, comparisons = [], []

@@ -242,6 +242,159 @@ let test_quarantine_and_empty_incarnation () =
     Current.apply_program ~keepers_dir ~keeper_id:keeper ~now:30. ~anchor ~source:single
       ~validate_source:(fun () -> Ok ()) empty_program |> refused)
 
+type hole_boundary = Hole_atom | Hole_official
+type hole_publication_fault =
+  | Hole_before_rename
+  | Hole_after_rename
+  | Hole_journal_blocked
+  | Hole_ledger_corrupt
+
+(* The accepted decisions and typed hole are supplied here. This exercises
+   real program publication, recovery and external acknowledgement together;
+   it does not establish provider exhaustion or source-owner serialization. *)
+let test_hole_publication_recovers_external_cursor boundary fault () =
+  fixture @@ fun keepers_dir anchor ->
+  let module Cursor = Masc.Keeper_external_read_cursor in
+  let original = [List.hd messages;
+    Agent_core.Types.make_message ~role:Agent_core.Types.User
+      [Agent_core.Types.Text "The exact refused original remains explicitly unread."];
+    List.nth messages 1] in
+  let reasons = [Masc.Keeper_librarian_input_refusal.Input_capacity;
+    Masc.Keeper_librarian_input_refusal.Request_body_refused] in
+  let atom,official,source,manifest,hole = match boundary with
+    | Hole_atom ->
+      let manifest=Source.sources_for_atom_range ~trace_id:"program-source"
+        ~history_start_boundary_line:1 ~start_atom:0 ~end_atom:3 ~messages:original |> require in
+      let hole=Source.for_atom ~trace_id:"program-source" ~history_start_boundary_line:1
+        ~atom:1 ~message_in_atom:0 ~messages:original ~reasons |> require in
+      let last_atom_digest=match Runtime_model_input_tail_window.atom_opening_digest original 2 with
+        | Some digest -> digest | None -> fail "original final atom missing" in
+      let range : Current.durable_range_id =
+        {receipt_scope="hole-program-atoms";trace_id="program-source";
+         history_start_boundary_line=1;start_atom=0;end_atom=3;last_atom_digest;
+         end_boundary_line=2;boundary_lines_seen=2;unread_messages=[hole]} in
+      Some range,None,Current.Atom_program_source {range;checkpoint=original},manifest,hole
+    | Hole_official ->
+      let manifest=List.mapi (fun message_in_turn message -> Source.Official_turn
+        {turn_ref;boundary_line=1;message_in_turn;message_sha256=Source.message_digest message}) original in
+      let hole=Source.for_official_turn ~turn_ref ~boundary_line:1 ~message_in_turn:1
+        ~messages:original ~reasons |> require in
+      let range={range with unread_messages=[hole]} in
+      None,Some range,Current.Official_program_source {range;selected_turns=[1,turn_ref,original]},manifest,hole in
+  let program=Program.create ~transaction_id:"hole-recovery-publication" ~keeper_id ~turn_ref
+    ~sources:manifest ~unread:[hole] ~initial_current:(Some [a])
+    ~decisions:[{(decision 0 a b) with Program.sources=[List.nth manifest 0]};
+      {(decision 1 b c) with Program.sources=[List.nth manifest 2]}] |> require in
+  let runtime_keepers_dir=Filename.concat keepers_dir "external-runtime" in
+  let cursor_path=Cursor.path_for_keepers_dir ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper in
+  let cursor ()=Cursor.read ~memory_keepers_dir:keepers_dir ~runtime_keepers_dir ~keeper_name:keeper in
+  Cursor.prepare ~memory_keepers_dir:keepers_dir ~runtime_keepers_dir ~keeper_name:keeper
+    (cursor () |> require) ~through:1 ~atom ~official |> require;
+  let pending=Fs_compat.load_file cursor_path in
+  let prior_snapshot=Fs_compat.load_file (snapshot_path ~keepers_dir) in
+  let prior_journal=Fs_compat.load_file (journal ~keepers_dir) in
+  let ledger_path=Current.unread_ledger_path ~keepers_dir ~keeper_id:keeper in
+  let prior_ledger=Fs_compat.load_file_opt ledger_path in
+  let callbacks=ref [] in
+  let on_committed (committed : Current.program_commit)=callbacks:=committed.proof :: !callbacks in
+  let write_snapshot = match fault with
+    | Hole_before_rename -> Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
+      ~sync_file:(fun _ -> failwith "before hole snapshot rename") ~sync_parent:(fun _ -> ())
+    | Hole_after_rename -> Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
+      ~sync_file:(fun _ -> ()) ~sync_parent:(fun _ -> failwith "after hole snapshot rename")
+    | Hole_journal_blocked | Hole_ledger_corrupt -> Fs_compat.save_file_atomic_strict_staged in
+  let before_journal ()=match fault with
+    | Hole_journal_blocked ->
+      Fs_compat.invalidate_cached_writer (journal ~keepers_dir);
+      Sys.remove (journal ~keepers_dir);Unix.mkdir (journal ~keepers_dir) 0o700
+    | Hole_ledger_corrupt -> Fs_compat.save_file ledger_path "{"
+    | Hole_before_rename | Hole_after_rename -> () in
+  let attempted=Current.For_testing.apply_program_with_publication_io
+    ~keepers_dir ~keeper_id:keeper ~now:30. ~anchor ~source ~validate_source:(fun () -> Ok ())
+    ~write_snapshot ~sync_snapshot:(fun _ -> Error "snapshot durability deliberately unconfirmed")
+    ~before_journal ~on_committed program in
+  let callbacks_before_recovery=match fault with
+    | Hole_before_rename | Hole_after_rename -> refused attempted;0
+    | Hole_journal_blocked | Hole_ledger_corrupt ->
+      let committed=require attempted in
+      check bool "secondary I/O failure preserves the final durable program" true
+        (committed.snapshot.facts=[c] && committed.proof.execution.program=program);
+      1 in
+  check int "only confirmed live publication invokes its producer callback"
+    callbacks_before_recovery (List.length !callbacks);
+  check string "publication itself does not acknowledge external input" pending (Fs_compat.load_file cursor_path);
+  (match fault with
+   | Hole_journal_blocked | Hole_ledger_corrupt ->
+     let snapshot_bytes=Fs_compat.load_file (snapshot_path ~keepers_dir) in
+     let publication_bytes=Fs_compat.load_file_opt (pending_path ~keepers_dir) in
+     let receipt_path=Current.durable_range_receipt_path ~keepers_dir ~keeper_id:keeper in
+     let receipt_bytes=Fs_compat.load_file receipt_path in
+     cursor () |> refused;
+     check string "failed recovery preserves the complete pending external identity" pending (Fs_compat.load_file cursor_path);
+     check string "failed recovery preserves the already durable target" snapshot_bytes
+       (Fs_compat.load_file (snapshot_path ~keepers_dir));
+     check bool "failed recovery retains its exact publication evidence" true
+       (Fs_compat.load_file_opt (pending_path ~keepers_dir)=publication_bytes);
+     check string "failed recovery cannot replace the source receipt" receipt_bytes (Fs_compat.load_file receipt_path);
+     (match fault with
+      | Hole_journal_blocked -> Unix.rmdir (journal ~keepers_dir);Fs_compat.save_file (journal ~keepers_dir) prior_journal
+      | Hole_ledger_corrupt ->
+        check string "corrupt unread evidence remains available for repair" "{" (Fs_compat.load_file ledger_path);
+        (match prior_ledger with Some bytes -> Fs_compat.save_file ledger_path bytes | None -> Sys.remove ledger_path)
+      | Hole_before_rename | Hole_after_rename -> fail "not a secondary I/O fault")
+   | Hole_before_rename | Hole_after_rename -> ());
+  (match fault with
+   | Hole_before_rename ->
+     check int "a rolled-back target grants no external acknowledgement" 0 (Cursor.offset (cursor () |> require));
+     check string "pre-rename recovery leaves the complete prior snapshot" prior_snapshot
+       (Fs_compat.load_file (snapshot_path ~keepers_dir));
+     check string "pre-rename recovery leaves the prior canonical history" prior_journal
+       (Fs_compat.load_file (journal ~keepers_dir));
+     check bool "pre-rename rollback invents no cumulative unread authority" true
+       (Current.read_unread_messages ~keepers_dir ~keeper_id:keeper |> require=[]);
+     check string "an uncommitted program leaves its external range pending" pending (Fs_compat.load_file cursor_path);
+     check int "rollback recovery never invokes the producer" 0 (List.length !callbacks);
+     ignore (Current.apply_program ~on_committed ~keepers_dir ~keeper_id:keeper ~now:30.
+       ~anchor ~source ~validate_source:(fun () -> Ok ()) program |> require : Current.program_commit)
+   | Hole_after_rename | Hole_journal_blocked | Hole_ledger_corrupt -> ());
+  check int "ordinary recovery acknowledges only the exact complete program boundary" 1
+    (Cursor.offset (cursor () |> require));
+  (* Read persisted evidence before any Current API that could archive it. *)
+  let archived=Current.read_unread_messages ~keepers_dir ~keeper_id:keeper |> require in
+  check bool "external acknowledgement leaves the exact source and both named causes durable" true (archived=[hole]);
+  let committed=match read ~keepers_dir with Some snapshot -> snapshot | None -> fail "recovered snapshot absent" in
+  check bool "the two accepted decisions have one actual final revision" true
+    (committed.revision=2 && committed.facts=[c]);
+  (match atom,official with
+   | Some expected,None ->
+     check bool "atom accounted coverage retains the exact hole-bearing range" true
+       (Current.committed_durable_coverage ~keepers_dir ~keeper_id:keeper ~receipt_scope:expected.receipt_scope |> require=Some expected);
+     check bool "accounted atoms never become fully read evidence" true
+       (Current.committed_durable_range ~keepers_dir ~keeper_id:keeper ~receipt_scope:expected.receipt_scope |> require=None)
+   | None,Some expected ->
+     check bool "official accounted coverage retains the exact hole-bearing range" true
+       (Current.committed_official_coverage ~keepers_dir ~keeper_id:keeper ~receipt_scope:expected.receipt_scope |> require=Some expected);
+     check bool "accounted official messages never become fully read evidence" true
+       (Current.committed_official_range ~keepers_dir ~keeper_id:keeper ~receipt_scope:expected.receipt_scope |> require=None)
+   | None,None | Some _,Some _ -> fail "fixture must own exactly one original boundary");
+  let journal_rows=Fs_compat.load_jsonl (journal ~keepers_dir) in
+  let proofs=Current.read_journal_tail ~keepers_dir ~keeper_id:keeper ~limit:(List.length journal_rows)
+    |> List.filter_map (fun row -> match require row with
+    | Current.Journal_committed {program=Some proof;_} -> Some proof
+    | Current.Journal_committed {program=None;_} | Current.Journal_failed _ | Current.Journal_quarantined _ -> None) in
+  let proof=match proofs with [proof] -> proof | [] | _::_ -> fail "expected exactly one canonical ordered publication" in
+  check bool "recovered journal retains exact ordered judgments and the unread original" true
+    (proof.execution.program=program && proof.execution.program.unread=[hole]);
+  check bool "completed recovery clears its publication WAL" false (Sys.file_exists (pending_path ~keepers_dir));
+  let settled=List.map Fs_compat.load_file [snapshot_path ~keepers_dir;journal ~keepers_dir;ledger_path;cursor_path] in
+  check int "a repeated wake retains the acknowledged external boundary" 1 (Cursor.offset (cursor () |> require));
+  ignore (read ~keepers_dir);
+  check (list string) "repeated recovery preserves snapshot, journal, exact holes and external cursor" settled
+    (List.map Fs_compat.load_file [snapshot_path ~keepers_dir;journal ~keepers_dir;ledger_path;cursor_path]);
+  let expected_callbacks=match fault with Hole_after_rename -> 0
+    | Hole_before_rename | Hole_journal_blocked | Hole_ledger_corrupt -> 1 in
+  check int "recovery never repeats a live producer callback" expected_callbacks (List.length !callbacks)
+
 let () = run "keeper_memory_os_program_publication"
   ["atomic ordered publication",[
     test_case "one real revision, exact proof and original-only archive" `Quick test_single_commit_and_original_archive;
@@ -254,4 +407,21 @@ let () = run "keeper_memory_os_program_publication"
     test_case "before and after rename recover the exact proof" `Quick test_staged_recovery;
     test_case "committed journal failure and failed reset remain recoverable" `Quick test_committed_pending_journal_and_failed_reset;
     test_case "conflicting original-boundary proof preserves pending stores" `Quick test_pending_boundary_conflict_preserves_stores;
-    test_case "quarantine and absent-Memory reset invalidate captures" `Quick test_quarantine_and_empty_incarnation]]
+    test_case "quarantine and absent-Memory reset invalidate captures" `Quick test_quarantine_and_empty_incarnation];
+   "hole publication and external recovery",[
+    test_case "atom holes survive rollback before snapshot rename" `Quick
+      (test_hole_publication_recovers_external_cursor Hole_atom Hole_before_rename);
+    test_case "atom holes recover after an unconfirmed snapshot rename" `Quick
+      (test_hole_publication_recovers_external_cursor Hole_atom Hole_after_rename);
+    test_case "atom holes hold external acknowledgement until journal recovery" `Quick
+      (test_hole_publication_recovers_external_cursor Hole_atom Hole_journal_blocked);
+    test_case "atom hole ledger corruption blocks external acknowledgement" `Quick
+      (test_hole_publication_recovers_external_cursor Hole_atom Hole_ledger_corrupt);
+    test_case "official holes survive rollback before snapshot rename" `Quick
+      (test_hole_publication_recovers_external_cursor Hole_official Hole_before_rename);
+    test_case "official holes recover after an unconfirmed snapshot rename" `Quick
+      (test_hole_publication_recovers_external_cursor Hole_official Hole_after_rename);
+    test_case "official holes hold external acknowledgement until journal recovery" `Quick
+      (test_hole_publication_recovers_external_cursor Hole_official Hole_journal_blocked);
+    test_case "official hole ledger corruption blocks external acknowledgement" `Quick
+      (test_hole_publication_recovers_external_cursor Hole_official Hole_ledger_corrupt)]]

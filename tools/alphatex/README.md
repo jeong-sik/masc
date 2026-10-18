@@ -304,3 +304,34 @@ backing restart, source-view suspension and exit wait for owned live process
 closure and scoped cleanup. A live-owner failure closes every live route until
 they are explicitly selected again.
 See [native MIDI transport](native/MIDI-TRANSPORT.md) for protocol details.
+
+### Audio loopback calibration candidates
+
+In the arrangement view, stop playback and select an input with `:input AUDIO_UID`.
+Connect the chosen output channel back to the chosen input channel, then run
+`:calibrate OUTPUT_UID INPUT_CHANNEL OUTPUT_CHANNEL MAX_LAG_MS`, for example
+`:calibrate BlackHole2ch_UID 1 1 250`. Channels start at 1; the positive final value
+is the symmetric search span in milliseconds. The experiment sends two quiet
+windowed chirps on that output channel, records the selected audio input without
+software input monitoring or MIDI subscription, then compares the recorded
+samples with the actual native playback host-clock anchor. Existing live routes
+and input monitoring drain before measurement and resume afterward. Esc/q cancels
+and returns after child/file cleanup. Other queued edits wait for measurement.
+
+The unique `calibrations/` directory beside the arrangement contains the exact
+reference WAV/plan, capture WAV/block timestamps, playback epoch and
+`measurement.json`. It reports each pulse's signed residual, correlation/polarity,
+input/output UIDs/sample rates, sample resolution and pulse disagreement. These
+are **unapplied candidates**: unrelated input/noise may yield a weak or ambiguous
+correlation. Inspect both matches and the saved audio; no threshold silently
+accepts a candidate or changes recording placement. Silence, changed identities,
+invalid clocks or cancellation cannot publish a successful result. Original audio
+and host clocks are preserved; `:import-take .../calibrations/ID/capture` can open
+the captured waveform through the existing take flow.
+
+Residual means captured sample time minus scheduled playback sample time, so it
+can be negative after the system's own presentation compensation. Device-reported
+latency remains separate from this measurement. Virtual loopback validates the
+measurement path; it does not prove physical/acoustic roundtrip, sub-sample
+accuracy, MIDI latency or calibrated compensation. Explicit compensation and
+clock-based practice/count-in remain subsequent work.

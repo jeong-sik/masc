@@ -140,6 +140,27 @@ Docker process, TUI frame, installed binary, latency or token improvement is
 proved by this source change. Parser-only checks do not establish typing or
 behavior.
 
+## Independent follow-up sources
+
+The opt-in `answer_progress` response keeps canonical answer identity outside
+three independent source branches. `reaction_evidence` is either unavailable or
+observed with turn/queue clocks and evidence completeness; `tool_actions` and
+`linked_task` have their own outcomes. Reaction storage failure cannot suppress
+the Tool ledger or the original Task lookup. Reads use the common executor
+policy and join their outcomes; this does not prove physical concurrency or
+lower latency in an installed server.
+
+The TUI retains same-answer positive observations when a source becomes
+unavailable and identifies them as last observed. Whole-refresh failure marks
+all retained source observations stale. A fresh original Task phase can still
+be displayed while wake/turn evidence is unavailable. Neither this independence
+nor Task phase proves answer consumption, causation or whole-work completion.
+Server and OCaml consumer use the nested reaction shape together; removed flat
+reaction clocks are not decoded as an empty source.
+
+Before/After and source-only limits:
+[independent evidence audit](../audits/2026-10-18-ask-followup-independent-evidence.md).
+
 ## Inspect the original question source in TUI
 
 The TUI decodes the operator row's canonical `source_turn_ref` into a typed

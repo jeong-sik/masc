@@ -113,14 +113,23 @@ type ask_linked_task =
     observations. Retained observations are explicitly not a current lookup.
     Missing means unobserved in the lookup, not deletion or completion. *)
 
+type ask_reactions =
+  | Ask_reactions_unavailable
+  | Ask_reactions_observed of {
+      ar_turn_started_at : float option;
+      ar_turn_finished_at : float option;
+      ar_queue_settled_at : float option;
+      ar_queue_cancelled_at : float option;
+      ar_evidence_complete : bool;
+      ar_evidence_current : bool;
+    }
+(** Unavailable is distinct from an observed empty or quarantined ledger.
+    Retained same-source observations have [ar_evidence_current=false]. *)
+
 type ask_followup = {
   af_answered_at : float;
   af_stimulus_id : string;
-  af_turn_started_at : float option;
-  af_turn_finished_at : float option;
-  af_queue_settled_at : float option;
-  af_queue_cancelled_at : float option;
-  af_evidence_complete : bool;
+  af_reactions : ask_reactions;
   af_tool_actions : ask_tool_actions;
   af_linked_task : ask_linked_task;
 }

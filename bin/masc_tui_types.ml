@@ -8516,6 +8516,14 @@ let take_ask_followup (state : state) request submission
           | Masc.Tui_decode_asks.Ask_task_observed old ->
               Masc.Tui_decode_asks.Ask_task_observed {old with akt_evidence_current=false}
           | (Ask_task_unlinked | Ask_task_missing _ | Ask_task_unavailable _) as value -> value in
+        let stale_reactions = function
+          | Masc.Tui_decode_asks.Ask_reactions_observed old ->
+              Masc.Tui_decode_asks.Ask_reactions_observed {old with ar_evidence_current=false}
+          | Ask_reactions_unavailable -> Ask_reactions_unavailable in
+        let stale_tools = function
+          | Masc.Tui_decode_asks.Ask_tools_observed old ->
+              Masc.Tui_decode_asks.Ask_tools_observed {old with at_evidence_current=false}
+          | Ask_tools_unavailable -> Ask_tools_unavailable in
         let result = match result with
           | Error _ as error -> error
           | Ok observed ->
@@ -8531,6 +8539,15 @@ let take_ask_followup (state : state) request submission
                     (* Missing observations cannot undo an already observed
                        positive fact from the same immutable answer source. *)
                     let retain fresh old = match fresh with Some _ -> fresh | None -> old in
+                    let af_reactions = match observed.af_reactions, prior.af_reactions with
+                      | Masc.Tui_decode_asks.Ask_reactions_unavailable, old -> stale_reactions old
+                      | Ask_reactions_observed fresh, Ask_reactions_unavailable -> Ask_reactions_observed fresh
+                      | Ask_reactions_observed fresh, Ask_reactions_observed old ->
+                          Ask_reactions_observed {fresh with
+                            ar_turn_started_at=retain fresh.ar_turn_started_at old.ar_turn_started_at;
+                            ar_turn_finished_at=retain fresh.ar_turn_finished_at old.ar_turn_finished_at;
+                            ar_queue_settled_at=retain fresh.ar_queue_settled_at old.ar_queue_settled_at;
+                            ar_queue_cancelled_at=retain fresh.ar_queue_cancelled_at old.ar_queue_cancelled_at} in
                     let af_tool_actions = match observed.af_tool_actions, prior.af_tool_actions with
                       | Masc.Tui_decode_asks.Ask_tools_unavailable, Ask_tools_observed old ->
                           Masc.Tui_decode_asks.Ask_tools_observed {old with at_evidence_current=false}
@@ -8546,20 +8563,16 @@ let take_ask_followup (state : state) request submission
                                Masc.Tui_decode_asks.Ask_task_observed {old with akt_evidence_current=false}
                            | Ask_task_unlinked | Ask_task_missing _ | Ask_task_unavailable _ -> fresh)
                       | (Ask_task_unlinked | Ask_task_observed _) as fresh -> fresh in
-                    Ok {observed with
-                      af_tool_actions;
-                      af_linked_task;
-                      af_turn_started_at=retain observed.af_turn_started_at prior.af_turn_started_at;
-                      af_turn_finished_at=retain observed.af_turn_finished_at prior.af_turn_finished_at;
-                      af_queue_settled_at=retain observed.af_queue_settled_at prior.af_queue_settled_at;
-                      af_queue_cancelled_at=retain observed.af_queue_cancelled_at prior.af_queue_cancelled_at}
+                    Ok {observed with af_reactions; af_tool_actions; af_linked_task}
                 | Some _ | None -> Ok observed) in
         (match result with
          | Ok observed -> state.ask_followup <- Some (submission, observed); state.ask_followup_error <- None
          | Error detail ->
              state.ask_followup_error <- Some detail;
              state.ask_followup <- Option.map (fun (owner, prior) ->
-               owner, {prior with Masc.Tui_decode_asks.af_linked_task=stale_task prior.Masc.Tui_decode_asks.af_linked_task})
+               owner, {prior with Masc.Tui_decode_asks.af_reactions=stale_reactions prior.Masc.Tui_decode_asks.af_reactions;
+                 af_tool_actions=stale_tools prior.af_tool_actions;
+                 af_linked_task=stale_task prior.af_linked_task})
                state.ask_followup);
         Some result
       end

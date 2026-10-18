@@ -138,7 +138,9 @@ let test_original_questions_are_bound_to_receiving_workspace () =
       let observed = Tui_decode_asks.decode_ask_followup ~expected_base_path:base
           ~expected_masc_root:root ~keeper_name:name ~ask_id:ask.ask_id body |> valid Fun.id in
       check bool "queued delivery alone cannot invent turn entry" true
-        (observed.af_turn_started_at=None && observed.af_turn_finished_at=None);
+        (match observed.af_reactions with
+         | Tui_decode_asks.Ask_reactions_observed {ar_turn_started_at=None;ar_turn_finished_at=None;_} -> true
+         | Ask_reactions_observed _ | Ask_reactions_unavailable -> false);
       check bool "HTTP and production decoder preserve absence of original Task binding" true
         (match observed.af_linked_task with Tui_decode_asks.Ask_task_unlinked -> true
          | Ask_task_unavailable _ | Ask_task_missing _ | Ask_task_observed _ -> false);

@@ -751,7 +751,7 @@ let test_followup_reads_exact_source_without_waking () =
       |> function Ok value -> value | Error detail -> fail detail in
   let before = observe () |> Wake.followup_to_json in
   check bool "no turn is invented from recording the answer" true
-    (Yojson.Safe.Util.member "turn_started_at" before = `Null);
+    (Yojson.Safe.Util.member "turn_started_at" (Yojson.Safe.Util.member "reaction_evidence" before) = `Null);
   check int "observing never enqueues a wake" 0 (List.length (pending_asks ~base_path ~keeper_name));
   (match Wake.deliver ~base_path ~keeper_name ~ask_id:ask.ask_id with
    | Ok _ -> () | Error error -> fail (Wake.error_to_string error));
@@ -760,7 +760,7 @@ let test_followup_reads_exact_source_without_waking () =
   Keeper_reaction_ledger.record_event_queue_turn_started ~base_path ~keeper_name source;
   let entered = observe () |> Wake.followup_to_json in
   check bool "original source turn entry is observed" true
-    (Yojson.Safe.Util.member "turn_started_at" entered <> `Null);
+    (Yojson.Safe.Util.member "turn_started_at" (Yojson.Safe.Util.member "reaction_evidence" entered) <> `Null);
   let left, right = Eio.Fiber.pair observe observe in
   check string "concurrent native reader results retain the same exact source"
     left.stimulus_id right.stimulus_id;
@@ -771,12 +771,12 @@ let test_followup_reads_exact_source_without_waking () =
     ~disposition:"test-boundary" other;
   let unrelated = observe () |> Wake.followup_to_json in
   check bool "another question cannot supply a turn boundary" true
-    (Yojson.Safe.Util.member "turn_finished_at" unrelated = `Null);
+    (Yojson.Safe.Util.member "turn_finished_at" (Yojson.Safe.Util.member "reaction_evidence" unrelated) = `Null);
   Keeper_reaction_ledger.record_event_queue_turn_finished ~base_path ~keeper_name
     ~disposition:"test-boundary" source;
   let finished = observe () |> Wake.followup_to_json in
   check bool "the original turn boundary is observed" true
-    (Yojson.Safe.Util.member "turn_finished_at" finished <> `Null);
+    (Yojson.Safe.Util.member "turn_finished_at" (Yojson.Safe.Util.member "reaction_evidence" finished) <> `Null);
   check int "repeated observation never duplicates the pending source" 1
     (List.length (pending_asks ~base_path ~keeper_name));
   check bool "another Keeper cannot inherit this question's source" true
@@ -787,9 +787,9 @@ let test_followup_reads_exact_source_without_waking () =
     (`Assoc ["stimulus_id", `String left.stimulus_id; "record_kind", `String "reaction"]);
   let quarantined = observe () |> Wake.followup_to_json in
   check bool "quarantined matching row marks evidence incomplete" false
-    (Yojson.Safe.Util.member "evidence_complete" quarantined |> Yojson.Safe.Util.to_bool);
+    (Yojson.Safe.Util.member "evidence_complete" (Yojson.Safe.Util.member "reaction_evidence" quarantined) |> Yojson.Safe.Util.to_bool);
   check bool "quarantined matching row exposes its quarantine reason code" true
-    (match Yojson.Safe.Util.member "quarantine_reason" quarantined with
+    (match Yojson.Safe.Util.member "quarantine_reason" (Yojson.Safe.Util.member "reaction_evidence" quarantined) with
      | `String reason -> String.length reason > 0
      | _ -> false)
 ;;
@@ -895,10 +895,10 @@ let test_followup_queue_settlement_does_not_invent_a_turn () =
   let observed = match Wake.observe_followup ~base_path ~keeper_name ~ask ~resolution with
     | Ok observed -> Wake.followup_to_json observed | Error detail -> fail detail in
   check bool "queue settlement is an independent positive fact" true
-    (Yojson.Safe.Util.member "queue_settled_at" observed <> `Null);
+    (Yojson.Safe.Util.member "queue_settled_at" (Yojson.Safe.Util.member "reaction_evidence" observed) <> `Null);
   check bool "queue settlement supplies neither turn entry nor boundary" true
-    (Yojson.Safe.Util.member "turn_started_at" observed = `Null
-     && Yojson.Safe.Util.member "turn_finished_at" observed = `Null)
+    (Yojson.Safe.Util.member "turn_started_at" (Yojson.Safe.Util.member "reaction_evidence" observed) = `Null
+     && Yojson.Safe.Util.member "turn_finished_at" (Yojson.Safe.Util.member "reaction_evidence" observed) = `Null)
 ;;
 
 let test_followup_matches_committed_answer_input_tool_rows () =
@@ -911,7 +911,11 @@ let test_followup_matches_committed_answer_input_tool_rows () =
     Keeper_tool_call_log.reset_for_testing ());
   let base_path = config.Workspace.base_path and keeper_name = "alpha" in
   ensure_keeper keeper_name;
-  let ask = persist_answer ~base_path ~keeper_name ~ask_id:"tool-source" () in
+  let task_id = match Workspace_task_create.add_task config ~agent_name:keeper_name
+      ~title:"original followup Task" ~priority:3 ~description:"independent observation fixture" with
+    | Ok created -> created.task_id
+    | Error error -> fail (Workspace_task_create.add_task_error_to_string error) in
+  let ask = persist_answer ~base_path ~keeper_name ~ask_id:"tool-source" ~task_id () in
   let answers, answered_at, resolution = match Keeper_ask_store.rows_result ~base_path ~keeper_name with
     | Ok (Keeper_ask_store.Stored_rows rows) ->
         (match snd (List.assoc ask.ask_id rows) with
@@ -971,6 +975,28 @@ let test_followup_matches_committed_answer_input_tool_rows () =
        check string "the original input turn remains exact" "original-trace" action.trace_id;
        check int "the original Keeper turn remains exact" 17 action.keeper_turn_id
    | None -> fail "physical Tool identity was lost");
+  let reaction_path = Keeper_reaction_ledger.store_dir ~base_path ~keeper_name in
+  let detached = reaction_path ^ ".fixture-detached" in
+  let had_reactions = Sys.file_exists reaction_path in
+  if had_reactions then Unix.rename reaction_path detached;
+  Fs_compat.mkdir_p (Filename.dirname reaction_path);
+  Fun.protect ~finally:(fun () ->
+      Unix.unlink reaction_path;
+      if had_reactions then Unix.rename detached reaction_path) (fun () ->
+    Out_channel.with_open_bin reaction_path (fun channel -> output_string channel "unreadable reaction directory\n");
+    let partial = observe () in
+    check bool "reaction storage failure stays explicit" true (Result.is_error partial.reactions);
+    check int "reaction storage failure cannot hide a committed Tool result" 1
+      (match partial.tool_actions with Ok actions -> actions.observed_count | Error detail -> fail detail);
+    check bool "reaction storage failure cannot hide the original Task" true
+      (match partial.linked_task with
+       | Wake.Task_observed value -> value.task_id=task_id && value.status=Masc_domain.Todo
+       | Task_unlinked | Task_missing _ | Task_unavailable _ -> false);
+    let wire = Wake.followup_to_json partial in
+    check bool "reaction failure is an unavailable branch, not empty turn evidence" true
+      (Yojson.Safe.Util.member "reaction_evidence" wire = `Assoc ["state", `String "unavailable"]);
+    check int "partial evidence observation does not enqueue a wake" 0
+      (List.length (pending_asks ~base_path ~keeper_name)));
   let failed_invocation = invocation () in
   emit ~invocation:failed_invocation ~cell:original ~keeper_name ~execution_id:"failed-tool" ~wire_outcome:Tool_result.Error;
   check int "observed errors are results, not proof of successful effects" 2 (actions ()).observed_count;

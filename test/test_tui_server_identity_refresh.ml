@@ -1823,8 +1823,8 @@ let test_answer_followup_retains_current_source_observations () =
   Alcotest.(check bool) "cadence shares one inflight observation" true
     (Option.is_none (begin_ask_followup_read state));
   let observed : Decode.ask_followup = {af_answered_at=200.;af_stimulus_id="original-source";
-    af_turn_started_at=Some 201.;af_turn_finished_at=None;af_queue_settled_at=None;
-    af_queue_cancelled_at=None;af_evidence_complete=true;
+    af_reactions=Decode.Ask_reactions_observed {ar_turn_started_at=Some 201.;ar_turn_finished_at=None;
+      ar_queue_settled_at=None;ar_queue_cancelled_at=None;ar_evidence_complete=true;ar_evidence_current=true};
     af_tool_actions=Decode.Ask_tools_observed {at_count=1;at_first_recorded_at=Some 202.;
       at_latest=Some {ata_execution_id="original-tool";ata_physical_execution_id="original-call";ata_trace_id="original-trace";
         ata_keeper_turn_id=17;ata_tool="Read";ata_recorded_at=202.};at_evidence_current=true};
@@ -1838,23 +1838,50 @@ let test_answer_followup_retains_current_source_observations () =
   let request, owner = begin_read () in
   ignore (take_ask_followup state request owner (Error "read unavailable"));
   Alcotest.(check bool) "failed reread retains prior source facts and explicit error" true
-    (Option.exists (fun value -> value.Decode.af_turn_started_at=Some 201.
+    (Option.exists (fun value ->
+       (match value.Decode.af_reactions with
+        | Decode.Ask_reactions_observed {ar_turn_started_at=Some 201.;ar_evidence_current=false;_} -> true
+        | Ask_reactions_observed _ | Ask_reactions_unavailable -> false)
+       && (match value.af_tool_actions with
+           | Decode.Ask_tools_observed {at_evidence_current=false;_} -> true
+           | Ask_tools_observed _ | Ask_tools_unavailable -> false)
        && match value.af_linked_task with
           | Decode.Ask_task_observed {akt_status=Masc_domain.Todo;akt_evidence_current=false;_} -> true
           | Ask_task_observed _ | Ask_task_unlinked | Ask_task_missing _ | Ask_task_unavailable _ -> false)
        (current_ask_followup state) && Option.is_some state.ask_followup_error);
   let request, owner = begin_read () in
   ignore (take_ask_followup state request owner
-    (Ok {observed with af_turn_started_at=None;af_evidence_complete=false;
+    (Ok {observed with af_reactions=Decode.Ask_reactions_unavailable;
       af_tool_actions=Decode.Ask_tools_unavailable;af_linked_task=Decode.Ask_task_unavailable "task-original"}));
   Alcotest.(check bool) "missing observations cannot undo a positive fact" true
-    (Option.exists (fun value -> value.Decode.af_turn_started_at=Some 201.
-       && not value.af_evidence_complete
+    (Option.exists (fun value ->
+       (match value.Decode.af_reactions with
+        | Decode.Ask_reactions_observed {ar_turn_started_at=Some 201.;ar_evidence_current=false;_} -> true
+        | Ask_reactions_observed _ | Ask_reactions_unavailable -> false)
        && (match value.af_tool_actions with
           | Decode.Ask_tools_observed {at_count=1;at_evidence_current=false;_} -> true
           | Decode.Ask_tools_observed _ | Decode.Ask_tools_unavailable -> false)
        && (match value.af_linked_task with
           | Decode.Ask_task_observed {akt_evidence_current=false;_} -> true
+          | Ask_task_observed _ | Ask_task_unlinked | Ask_task_missing _ | Ask_task_unavailable _ -> false))
+      (current_ask_followup state));
+  let request, owner = begin_read () in
+  let partial = {observed with af_reactions=Decode.Ask_reactions_unavailable;
+    af_linked_task=Decode.Ask_task_observed
+      {akt_task_id="task-original";akt_location=Ask_task_backlog;
+       akt_status=Masc_domain.InProgress {assignee="original-worker";started_at="2026-10-17T00:00:00Z"};
+       akt_observed_at=204.;akt_evidence_current=true}} in
+  ignore (take_ask_followup state request owner (Ok partial));
+  Alcotest.(check bool) "unavailable wake evidence cannot hide fresh original Task progress" true
+    (Option.exists (fun value ->
+      (match value.Decode.af_reactions with
+       | Decode.Ask_reactions_observed {ar_turn_started_at=Some 201.;ar_evidence_current=false;_} -> true
+       | Ask_reactions_observed _ | Ask_reactions_unavailable -> false)
+      && (match value.af_tool_actions with
+          | Decode.Ask_tools_observed {at_count=1;at_evidence_current=true;_} -> true
+          | Ask_tools_observed _ | Ask_tools_unavailable -> false)
+      && (match value.af_linked_task with
+          | Decode.Ask_task_observed {akt_status=Masc_domain.InProgress _;akt_evidence_current=true;_} -> true
           | Ask_task_observed _ | Ask_task_unlinked | Ask_task_missing _ | Ask_task_unavailable _ -> false))
       (current_ask_followup state));
   let request, owner = begin_read () in

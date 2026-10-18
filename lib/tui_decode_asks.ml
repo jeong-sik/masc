@@ -224,14 +224,21 @@ type ask_linked_task =
       akt_evidence_current : bool;
     }
 
+type ask_reactions =
+  | Ask_reactions_unavailable
+  | Ask_reactions_observed of {
+      ar_turn_started_at : float option;
+      ar_turn_finished_at : float option;
+      ar_queue_settled_at : float option;
+      ar_queue_cancelled_at : float option;
+      ar_evidence_complete : bool;
+      ar_evidence_current : bool;
+    }
+
 type ask_followup = {
   af_answered_at : float;
   af_stimulus_id : string;
-  af_turn_started_at : float option;
-  af_turn_finished_at : float option;
-  af_queue_settled_at : float option;
-  af_queue_cancelled_at : float option;
-  af_evidence_complete : bool;
+  af_reactions : ask_reactions;
   af_tool_actions : ask_tool_actions;
   af_linked_task : ask_linked_task;
 }
@@ -261,21 +268,29 @@ let decode_ask_followup ~expected_base_path ~expected_masc_root ~keeper_name ~as
     match state with
     | "unavailable" -> Error "answer follow-up evidence is unavailable"
     | "observed" ->
-        let clock name = let* value = single progress name in match value with
-          | `Null -> Ok None
-          | value -> finite value |> Result.map Option.some in
         let* answered_at = single progress "answered_at" in
         let* af_answered_at = finite answered_at in
         let* af_stimulus_id = string progress "stimulus_id" in
         if String.equal af_stimulus_id "" then Error "answer follow-up source identity is empty" else
-        let* af_turn_started_at = clock "turn_started_at" in
-        let* af_turn_finished_at = clock "turn_finished_at" in
-        let* af_queue_settled_at = clock "queue_settled_at" in
-        let* af_queue_cancelled_at = clock "queue_cancelled_at" in
-        let* complete = single progress "evidence_complete" in
-        let* af_evidence_complete = match complete with
-          | `Bool value -> Ok value
-          | _ -> Error "answer follow-up evidence completeness is invalid" in
+        let* reactions = single progress "reaction_evidence" in
+        let* reaction_state = string reactions "state" in
+        let* af_reactions = match reaction_state with
+          | "unavailable" -> Ok Ask_reactions_unavailable
+          | "observed" ->
+            let clock name = let* value = single reactions name in match value with
+              | `Null -> Ok None
+              | value -> finite value |> Result.map Option.some in
+            let* ar_turn_started_at = clock "turn_started_at" in
+            let* ar_turn_finished_at = clock "turn_finished_at" in
+            let* ar_queue_settled_at = clock "queue_settled_at" in
+            let* ar_queue_cancelled_at = clock "queue_cancelled_at" in
+            let* complete = single reactions "evidence_complete" in
+            let* ar_evidence_complete = match complete with
+              | `Bool value -> Ok value
+              | _ -> Error "answer follow-up evidence completeness is invalid" in
+            Ok (Ask_reactions_observed {ar_turn_started_at;ar_turn_finished_at;
+              ar_queue_settled_at;ar_queue_cancelled_at;ar_evidence_complete;ar_evidence_current=true})
+          | _ -> Error "answer follow-up reaction evidence state is invalid" in
         let* actions = single progress "tool_actions" in
         let* action_state = string actions "state" in
         let* af_tool_actions = match action_state with
@@ -334,8 +349,7 @@ let decode_ask_followup ~expected_base_path ~expected_masc_root ~keeper_name ~as
               Ok (Ask_task_observed {akt_task_id; akt_location; akt_status; akt_observed_at;
                 akt_evidence_current = true})
           | _ -> Error "unknown linked Task observation state" in
-        Ok {af_answered_at;af_stimulus_id;af_turn_started_at;af_turn_finished_at;
-            af_queue_settled_at;af_queue_cancelled_at;af_evidence_complete;af_tool_actions;af_linked_task}
+        Ok {af_answered_at;af_stimulus_id;af_reactions;af_tool_actions;af_linked_task}
     | _ -> Error "unknown answer follow-up state"
 
 type ask_answer_delivery =

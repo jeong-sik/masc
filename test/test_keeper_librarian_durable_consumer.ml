@@ -2896,6 +2896,7 @@ type checkpoint_memory_floor_case =
    assistant's atom, so message coordinates cannot be a flattened index. *)
 let test_runtime_checkpoint_memory_floor case () =
   let open Masc in
+  let module Progress = Keeper_librarian_progress in
   let module F = Exact_output_fixture in
   let module Current = Keeper_memory_os_current in
   let module Unread = Keeper_librarian_unread in

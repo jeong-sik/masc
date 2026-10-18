@@ -4590,11 +4590,13 @@ let context_response_summary observation =
   match observation with
   | Inspector.Pending -> Ansi.dim ^ "  Response loading · 4:response" ^ Ansi.reset
   | Inspector.Observed (Error _) -> (Theme.bad ()) ^ "  Response unavailable · 4:response" ^ Ansi.reset
-  | Inspector.Observed (Ok { Inspector.parts = []; source = Newest_history_page }) ->
-      Ansi.dim ^ "  Response not in newest history page · 4:response" ^ Ansi.reset
-  | Inspector.Observed (Ok { parts = []; source = Exact_turn_transcript }) ->
-      Ansi.dim ^ "  No assistant response in retained transcript · 4:response" ^ Ansi.reset
-  | Inspector.Observed (Ok { parts; _ }) ->
+  | Inspector.Observed (Ok { Inspector.parts = []; source }) ->
+      (match source with
+       | Inspector.Newest_history_page ->
+           Ansi.dim ^ "  Response not in newest history page · 4:response" ^ Ansi.reset
+       | Inspector.Exact_turn_transcript ->
+           Ansi.dim ^ "  No assistant response in retained transcript · 4:response" ^ Ansi.reset)
+  | Inspector.Observed (Ok { parts = _ :: _ as parts; source = _ }) ->
       let count, failures = List.fold_left (fun (count, failures) part ->
           count + 1,
           failures + (match part with

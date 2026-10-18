@@ -262,10 +262,6 @@ let remember_snapshot ~stat path state =
     Hashtbl.replace snapshot_cache path { sce_stat = stat; sce_state = state })
 ;;
 
-let forget_snapshot path =
-  Stdlib.Mutex.protect snapshot_cache_mutex (fun () -> Hashtbl.remove snapshot_cache path)
-;;
-
 (* What a strict commit left on disk once it crossed the durability barrier
    and published its pending queue: the revision, and the identities of the
    snapshot and the transition WAL. They are sampled right after the barrier
@@ -292,9 +288,11 @@ let forget_snapshot path =
    leave a mismatch, and the replay crosses the barrier again as before. A
    write that failed before its rename left the confirmed snapshot in place.
    This rests on what [snapshot_cache] rests on: under the owner lock no other
-   writer replaces these files.
+   writer replaces these files, and a freed inode is not reused with identical
+   [size], [mtime] and [ctime] (ABA).
 
-   Keyed by snapshot path like [snapshot_cache]. *)
+   Keyed by snapshot path like [snapshot_cache], and cleared alongside it by
+   [forget_snapshot]. *)
 type durable_confirmation =
   { dc_revision : int64
   ; dc_snapshot : Unix.stats
@@ -303,6 +301,12 @@ type durable_confirmation =
 
 let durable_confirmations : (string, durable_confirmation) Hashtbl.t = Hashtbl.create 32
 let durable_confirmations_mutex = Stdlib.Mutex.create ()
+
+let forget_snapshot path =
+  Stdlib.Mutex.protect snapshot_cache_mutex (fun () -> Hashtbl.remove snapshot_cache path);
+  Stdlib.Mutex.protect durable_confirmations_mutex (fun () ->
+    Hashtbl.remove durable_confirmations path)
+;;
 
 (* [Ok None] is an absent file. A path that cannot be inspected, or is not a
    regular file, says nothing about what was confirmed. *)
@@ -484,7 +488,9 @@ let read_primary_current_unlocked ?(after_read = fun () -> ()) owner =
   | None ->
   match read_json_if_present ~after_read path with
   | Error _ as error -> error
-  | Ok None -> Ok Primary_absent
+  | Ok None ->
+    forget_snapshot path;
+    Ok Primary_absent
   | Ok (Some (json, stat)) ->
     (* A present snapshot remains authoritative even when this binary cannot
        decode it. Only physical absence permits WAL-only reconstruction.
@@ -1961,6 +1967,8 @@ module For_testing = struct
 
   let reset_snapshot_cache_for_testing () =
     Stdlib.Mutex.protect snapshot_cache_mutex (fun () -> Hashtbl.reset snapshot_cache);
+    Stdlib.Mutex.protect durable_confirmations_mutex (fun () ->
+      Hashtbl.reset durable_confirmations);
     Atomic.set snapshot_cache_read_counter 0;
     Atomic.set snapshot_cache_hit_counter 0
   ;;

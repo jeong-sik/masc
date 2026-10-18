@@ -2095,10 +2095,167 @@ let test_response_decode_without_runtime_stays_synchronous () =
     Alcotest.(check bool) "no-pool non-Eio callers retain their synchronous API" true
       (Masc_tui_response_decode.run ~name:"test.sync.decode_wait" Domain.self=caller))
 
+let creation_state () =
+  let state = Masc_tui_types.create_state ~workspace:"creation"
+      ~local_base_path:"/workspace/creation" ~port:0 ~refresh_interval:0. () in
+  state.workspace_identity <- Masc_tui_types.Workspace_identity_match;
+  state.server_identity <- Some (identity "/workspace/creation");
+  state
+
+let creation_request state name declaration =
+  let open Masc_tui_types in
+  state.keeper_creation_draft <- Some declaration;
+  state.keeper_creation_draft_owner <- ref ();
+  match begin_keeper_creation state ~keeper_name:name ~declaration
+      ~return_to:Keeper_chat_return_home ~started_ns:0L with
+  | Ok request -> request
+  | Error detail -> Alcotest.fail detail
+
+let test_creation_interleaving_preserves_new_draft_and_focus () =
+  let open Masc_tui_types in
+  let state = creation_state () in
+  let first = creation_request state "first" "first declaration" in
+  Alcotest.(check bool) "one pending mutation per target" true
+    (Result.is_error (begin_keeper_creation state ~keeper_name:"first"
+       ~declaration:"duplicate" ~return_to:Keeper_chat_return_home ~started_ns:1L));
+  let second = creation_request state "second" "second declaration" in
+  Alcotest.(check bool) "first POST phase is admitted" true
+    (apply_keeper_creation_status state first Creation_posting);
+  Alcotest.(check bool) "first receipt is retained" true
+    (apply_keeper_creation_status state first (Creation_finished Creation_created));
+  Alcotest.(check bool) "earlier success cannot clear a newly edited declaration" false
+    (clear_created_keeper_draft state first);
+  Alcotest.(check (option string)) "later declaration remains editable"
+    (Some "second declaration") state.keeper_creation_draft;
+  Alcotest.(check bool) "earlier receipt cannot consume successor focus" false
+    (take_keeper_creation_focus state first);
+  Alcotest.(check bool) "late progress cannot reopen completed creation" false
+    (apply_keeper_creation_status state first Creation_posting);
+  Alcotest.(check bool) "successor receipt is admitted" true
+    (apply_keeper_creation_status state second (Creation_finished Creation_created));
+  Alcotest.(check bool) "successor owns its focus" true
+    (take_keeper_creation_focus state second);
+  Alcotest.(check bool) "confirmed successor clears only its own draft" true
+    (clear_created_keeper_draft state second);
+  Alcotest.(check bool) "duplicate receipt cannot apply twice" false
+    (apply_keeper_creation_status state second (Creation_finished Creation_created))
+
+let test_creation_receipt_retains_original_scope_after_withdrawal () =
+  let open Masc_tui_types in
+  let state = creation_state () in
+  let original = creation_request state "same-name" "original declaration" in
+  ignore (apply_keeper_creation_status state original Creation_posting);
+  suspend_workspace_readings state;
+  Alcotest.(check bool) "read retirement does not consume the operation receipt" true
+    (apply_keeper_creation_status state original
+       (Creation_finished (Creation_unconfirmed "interrupted after POST began")));
+  let Workspace_authority epoch = state.workspace_authority in
+  state.workspace_authority <- Workspace_authority (epoch + 1);
+  state.server_identity <- Some (identity "/workspace/other");
+  let successor = creation_request state "same-name" "other workspace declaration" in
+  (* Even an A -> B -> A path match cannot authorize the old request. *)
+  state.workspace_authority <- Workspace_authority (epoch + 2);
+  state.server_identity <- Some original.kcr_workspace;
+  Alcotest.(check bool) "returning to a path does not restore original authority" false
+    (keeper_creation_origin_current state original);
+  Alcotest.(check bool) "old receipt cannot clear another declaration" false
+    (clear_created_keeper_draft state original);
+  Alcotest.(check bool) "old receipt cannot consume successor focus" false
+    (take_keeper_creation_focus state original);
+  Alcotest.(check bool) "successor remains pending under its own ticket" true
+    (List.exists (fun attempt -> attempt.kca_request.kcr_token == successor.kcr_token
+       && attempt.kca_status = Creation_checking) state.keeper_creations);
+  Alcotest.(check bool) "uncertain original retains its declaration and scope" true
+    (List.exists (fun attempt -> attempt.kca_request.kcr_token == original.kcr_token
+       && attempt.kca_declaration = Some "original declaration"
+       && attempt.kca_status = Creation_finished (Creation_unconfirmed "interrupted after POST began"))
+       state.keeper_creations)
+
+let test_creation_unknown_requires_explicit_create_only_retry () =
+  let open Masc_tui_types in
+  let state = creation_state () in
+  let unsent = creation_request state "preflight" "unsent declaration" in
+  ignore (apply_keeper_creation_status state unsent
+    (Creation_finished (Creation_not_sent "identity unavailable")));
+  Alcotest.(check bool) "unsent request cannot clear its draft" false
+    (clear_created_keeper_draft state unsent);
+  let original = creation_request state "retry" "retained declaration" in
+  ignore (apply_keeper_creation_status state original Creation_posting);
+  state.keeper_creation_focus <- None;
+  ignore (apply_keeper_creation_status state original
+    (Creation_finished (Creation_unconfirmed "response lost")));
+  Alcotest.(check bool) "input detaches late auto-navigation" false
+    (take_keeper_creation_focus state original);
+  Alcotest.(check (option string)) "unconfirmed declaration can reopen in editor"
+    (Some "retained declaration") (keeper_creation_recovery_draft state);
+  Alcotest.(check bool) "unconfirmed is not retroactively called successful" false
+    (apply_keeper_creation_status state original (Creation_finished Creation_created));
+  let retry = creation_request state "retry" "explicitly edited declaration" in
+  ignore (apply_keeper_creation_status state retry (Creation_finished Creation_created));
+  Alcotest.(check bool) "explicit success releases only resolved target retry bodies" true
+    (List.for_all (fun attempt ->
+       if String.equal attempt.kca_request.kcr_keeper "retry"
+       then Option.is_none attempt.kca_declaration else Option.is_some attempt.kca_declaration)
+       state.keeper_creations);
+  Alcotest.(check bool) "original uncertainty receipt remains" true
+    (List.exists (fun attempt -> attempt.kca_request.kcr_token == original.kcr_token
+       && attempt.kca_status = Creation_finished (Creation_unconfirmed "response lost"))
+       state.keeper_creations)
+
+let test_creation_receipt_survives_full_notification_queue_cancel () =
+  let open Masc_tui_types in
+  let exception Creation_test_cancelled in
+  Eio_main.run (fun _ -> Eio.Switch.run (fun sw ->
+    let state = creation_state () in
+    let request = creation_request state "queued" "original declaration" in
+    let notifications = Eio.Stream.create 1 in
+    Eio.Stream.add notifications ();
+    let entered, enter = Eio.Promise.create () in
+    let published, publish = Eio.Promise.create () in
+    let finished, finish = Eio.Promise.create () in
+    Eio.Fiber.fork ~sw (fun () ->
+      try Eio.Cancel.sub (fun context ->
+        Eio.Promise.resolve enter context;
+        ignore (publish_keeper_creation_status request ~observed_ns:1L Creation_posting);
+        ignore (publish_keeper_creation_status request ~observed_ns:2L
+          (Creation_finished Creation_created));
+        Eio.Promise.resolve publish ();
+        (* Same bounded notification boundary as the creation worker. It must
+           remain cancellable after its immutable terminal result is published. *)
+        Eio.Stream.add notifications ())
+      with Eio.Cancel.Cancelled Creation_test_cancelled -> Eio.Promise.resolve finish ());
+    let context = Eio.Promise.await entered in
+    Eio.Promise.await published;
+    Eio.Cancel.cancel context Creation_test_cancelled;
+    Eio.Promise.await finished;
+    match pending_keeper_creation_receipt state with
+    | None -> Alcotest.fail "cancellation lost the original mutation receipt"
+    | Some (owner, status, ready_at_ns) ->
+      Alcotest.(check bool) "receipt keeps the original owner" true
+        (owner.kcr_token == request.kcr_token);
+      Alcotest.(check int64) "receipt uses publication time" 2L ready_at_ns;
+      Alcotest.(check bool) "cancellation cannot downgrade a confirmed receipt" false
+        (publish_keeper_creation_status request ~observed_ns:3L
+          (Creation_finished (Creation_unconfirmed "notification cancelled")));
+      Alcotest.(check bool) "UI can admit the original receipt without its notification" true
+        (apply_keeper_creation_status state owner status);
+      Alcotest.(check bool) "terminal pending slot is retired" true
+        (Option.is_none (pending_keeper_creation_receipt state));
+      Alcotest.(check bool) "only the confirmed original form is cleared" true
+        (clear_created_keeper_draft state owner)))
+
 let () =
   Alcotest.run "tui_server_identity_refresh"
     [ ( "server-identity-refresh"
-      , [ Alcotest.test_case "response decode preserves cache and typed results" `Quick
+      , [ Alcotest.test_case "creation cancellation retains receipt when notification queue is full" `Quick
+            test_creation_receipt_survives_full_notification_queue_cancel
+        ; Alcotest.test_case "creation interleaving preserves successor draft and focus" `Quick
+            test_creation_interleaving_preserves_new_draft_and_focus
+        ; Alcotest.test_case "creation receipts retain original scope after withdrawal" `Quick
+            test_creation_receipt_retains_original_scope_after_withdrawal
+        ; Alcotest.test_case "creation uncertainty requires explicit retry" `Quick
+            test_creation_unknown_requires_explicit_create_only_retry
+        ; Alcotest.test_case "response decode preserves cache and typed results" `Quick
             test_response_decode_keeps_cache_and_typed_results
         ; Alcotest.test_case "decode completion cannot consume new navigation" `Quick
             test_decode_completion_cannot_consume_new_navigation

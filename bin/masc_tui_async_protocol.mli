@@ -547,6 +547,7 @@ type async_msg =
           Approvals-surface twin of [Keeper_chat_approval_answered], which
           needs the chat request this path does not have. *)
   | Keeper_chat_dispatch_blocked of Masc_tui_keeper_chat_projection.request * string
+  | Keeper_creation_changed of keeper_creation_request * keeper_creation_status
   | Keeper_action_done of
       Masc.Tui_decode.server_identity option
       * string

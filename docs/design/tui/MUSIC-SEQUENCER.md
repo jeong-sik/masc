@@ -105,3 +105,14 @@ tempo/SMPTE scheduling and held-key/hold-pedal stop cleanup. It is a one-shot
 play/stop path from the pattern beginning. The reconstruction requirements above
 remain planned for source pause/resume/seek/loop; WAV/VST arrangement, overdubs,
 shared clock and practice workflows remain separate unfinished units.
+
+### Arrangement document boundary
+
+The arrangement core retains separate source assets, typed MIDI/audio lanes and
+regions with project positions, source-native offsets/extents and repeat counts.
+MIDI assets preserve their complete source documents. WAV assets are copied into
+project-owned content-addressed files; save-as materializes verified source files
+alongside the new JSON document. Region edits and lane removal retain sources.
+This is the storage/editing boundary for a forthcoming terminal arrangement view;
+it does not deliver arrangement playback, arbitrary source-state chase or overdub.
+See [the core contract](../../../tools/alphatex/ARRANGEMENT.md).

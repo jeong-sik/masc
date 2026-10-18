@@ -4,17 +4,19 @@ import { createHash } from 'node:crypto'
 import JZZ from 'jzz'
 import midiFiles from 'jzz-midi-smf'
 import { validateProject, sequenceEvents, PPQ } from './sequencer-project.mjs'
+import { validateArrangement } from './arrangement.mjs'
 import { validateMidiSource, exportMidiSource } from './midi-source.mjs'
 midiFiles(JZZ)
 const hash = data => createHash('sha256').update(data).digest('hex')
 const validateDocument = document => {
+  if (document?.kind === 'arrangement') return validateArrangement(document)
   if (document?.kind === 'midi-source') return validateMidiSource(document)
   if (document?.kind !== undefined) throw new Error('Unsupported musical document')
   return validateProject(document)
 }
 
-export async function loadProject(path) {
-  const data = await readFile(path)
+export async function loadProject(path, { signal } = {}) {
+  const data = await readFile(path, { signal })
   return { project: validateDocument(JSON.parse(data)), revision: hash(data), path: resolve(path) }
 }
 async function syncDirectory(path) {
@@ -73,6 +75,7 @@ export async function saveProject(path, project, revision = null) {
   return hash(data)
 }
 export function projectMidi(project, options) {
+  if (project?.kind === 'arrangement') throw new Error('Arrangement MIDI export requires explicit clip-state reconstruction')
   if (project?.kind === 'midi-source') {
     if (options?.loop) throw new Error('MIDI source clip export requires explicit arrangement boundaries')
     return exportMidiSource(project)

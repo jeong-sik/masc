@@ -53,9 +53,12 @@ val sweep_stale_antigravity_panel_roots : ?temp_dir:string -> unit -> unit
 (** Remove [masc-antigravity-panelist-<pid>-*] directories in [temp_dir]
     (defaulting to {!Filename.get_temp_dir_name}) whose creator [pid] no
     longer exists ([Unix.ESRCH]) and whose entry is a [0700] directory owned
-    by the current effective UID. Roots owned by the current process, live
-    processes ([EPERM] included), or unattributed legacy names are left
-    untouched. *)
+    by the current effective UID. Deletion also requires a private ownership
+    record proving no spawn was attempted or that the recorded foreground
+    process group no longer exists. A surviving CLI or same-group native tool
+    keeps its HOME even after the creator exits. Pending, missing, malformed
+    or unreadable ownership, live creators ([EPERM] included), and
+    unattributed names are left untouched. *)
 
 val run_panelist
   :  base_dir:string
@@ -128,7 +131,9 @@ val run_panelist
     from the configured OAuth source, spawns in its private native read
     workspace, and removes the disposable HOME when the call ends; dead-process
     roots left behind by an abrupt exit are swept by
-    {!sweep_stale_antigravity_panel_roots}. It does not inherit the ambient
+    {!sweep_stale_antigravity_panel_roots} only after its foreground process
+    group is absent. A crash before the spawned group is published leaves
+    ownership unconfirmed and retains the HOME. It does not inherit the ambient
     login or the Keeper bookkeeping directory as its working tree. Other
     panelists spawn in [base_dir] unless documented above.
 

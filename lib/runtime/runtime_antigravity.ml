@@ -955,7 +955,7 @@ let context_submission_to_json write =
     ]
 ;;
 
-let run_spawned ?home_dir ?on_spawned ?on_prompt_sent ?on_context_submission ~mgr ~clock ~cwd config ~conversation_mode
+let run_spawned ?home_dir ?before_spawn ?on_spawned ?on_prompt_sent ?on_context_submission ~mgr ~clock ~cwd config ~conversation_mode
     ~prompt ~on_conversation_ready ~on_stream_event =
   Eio.Switch.run (fun sw ->
     let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
@@ -964,6 +964,7 @@ let run_spawned ?home_dir ?on_spawned ?on_prompt_sent ?on_context_submission ~mg
     let stderr_tail = Stderr.create ~limit:stderr_tail_bytes in
     let proc =
       try
+        Option.iter (fun callback -> callback ()) before_spawn;
         Eio.Process.spawn
           ~sw
           mgr
@@ -978,7 +979,7 @@ let run_spawned ?home_dir ?on_spawned ?on_prompt_sent ?on_context_submission ~mg
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> raise (Runtime_error (Spawn_failed (Printexc.to_string exn)))
     in
-    Option.iter (fun callback -> callback ()) on_spawned;
+    Option.iter (fun callback -> callback ~pid:(Eio.Process.pid proc)) on_spawned;
     Eio.Flow.close stdin_r;
     Eio.Flow.close stdout_w;
     Eio.Flow.close stderr_w;
@@ -1163,7 +1164,7 @@ let run_spawned ?home_dir ?on_spawned ?on_prompt_sent ?on_context_submission ~mg
     status, !state, String.trim (Stderr.contents stderr_tail))
 ;;
 
-let run_turn ?(conversation_mode = Start) ?home_dir ?on_spawned ?on_prompt_sent ?on_context_submission ~mgr ~clock ~cwd
+let run_turn ?(conversation_mode = Start) ?home_dir ?before_spawn ?on_spawned ?on_prompt_sent ?on_context_submission ~mgr ~clock ~cwd
     ?(on_conversation_ready = fun ~conversation_id:_ -> Ok ()) ?on_stream_event
     config ~prompt =
   let* () =
@@ -1181,6 +1182,7 @@ let run_turn ?(conversation_mode = Start) ?home_dir ?on_spawned ?on_prompt_sent 
         (Runtime_cli_spawn_gate.with_cli_spawn_slot ~clock (fun () ->
            run_spawned
              ?home_dir
+             ?before_spawn
              ?on_spawned
              ?on_prompt_sent
              ?on_context_submission

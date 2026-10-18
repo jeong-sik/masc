@@ -444,12 +444,13 @@ let sweep_stale_antigravity_panel_roots ?temp_dir () =
             | stat
               when stat.Unix.st_kind = Unix.S_DIR
                    && stat.Unix.st_uid = euid
-                   && stat.Unix.st_perm land 0o7777 = 0o700 ->
+                   && stat.Unix.st_perm land 0o7777 = 0o700
+                   && Antigravity_panel_root_owner.can_remove ~root:path ->
               Runtime_antigravity_home.forget_prepared_below ~runtime_root:path;
               (match Fs_compat.remove_tree path with
                | () ->
                  Log.Runtime_agent.info
-                   "removed stale Antigravity panelist HOME %s (pid %d no longer exists)"
+                   "removed stale Antigravity panelist HOME %s (creator %d and recorded users absent)"
                    path
                    pid
                | exception (Sys_error _ | Unix.Unix_error _) as exn ->
@@ -477,7 +478,11 @@ let create_antigravity_panel_root () =
     Filename.temp_dir ~perms:0o700 (antigravity_panel_root_pid_prefix ()) ""
     |> Unix.realpath
   with
-  | root -> Ok root
+  | root ->
+    Antigravity_panel_root_owner.initialize ~root
+    |> Result.map (fun () -> root)
+    |> Result.map_error (fun detail -> Setup_failure
+         ("cannot record Antigravity panelist HOME ownership: " ^ detail))
   | exception Sys_error detail ->
     Error (Setup_failure ("cannot create the Antigravity panelist HOME: " ^ detail))
   | exception Unix.Unix_error (error, _, path) ->
@@ -492,13 +497,17 @@ let create_antigravity_panel_root () =
 (* The root holds a copy of the account's OAuth file, so a removal that fails
    is said out loud. *)
 let remove_antigravity_panel_root root =
+  if not (Antigravity_panel_root_owner.can_remove ~root) then
+    Log.Runtime_agent.warn
+      "Antigravity panelist retained HOME %s: process-group ownership is live or unconfirmed" root
+  else (
   Runtime_antigravity_home.forget_prepared_below ~runtime_root:root;
   try Fs_compat.remove_tree root with
   | (Sys_error _ | Unix.Unix_error _) as exn ->
     Log.Runtime_agent.warn
       "Antigravity panelist left its disposable HOME %s behind: %s"
       root
-      (Printexc.to_string exn)
+      (Printexc.to_string exn))
 ;;
 
 let prepare_antigravity_panel_home ~runtime_root ~oauth_source =
@@ -686,6 +695,14 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
         ~runtime_root:panel_root ~oauth_source:execution.oauth_source) in
     let config = { config with Runtime_antigravity.cwd = native_cwd } in
     (match Runtime_antigravity.run_turn
+       ~before_spawn:(fun () ->
+         match Antigravity_panel_root_owner.before_spawn ~root:panel_root with
+         | Ok () -> ()
+         | Error detail -> raise (Sys_error detail))
+       ~on_spawned:(fun ~pid ->
+         match Antigravity_panel_root_owner.spawned ~root:panel_root ~pid with
+         | Ok () -> ()
+         | Error detail -> raise (Sys_error detail))
        ~on_stream_event:(function
          | Runtime_antigravity.Usage_reported {usage; _} -> on_usage (antigravity_usage usage)
          | Runtime_antigravity.Turn_started _ | Runtime_antigravity.Text_delta _

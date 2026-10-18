@@ -12554,7 +12554,34 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
    | Lanes | Clients | Board | Approvals | Planning | Schedules | Verification | Harness | Fusion
    | Repositories | Code | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
 
-let apply_confirmed_server_identity_reading state reading =
+(* Cold admission and cadence share the same worker and owned request.
+   The UI never scans the directory before acknowledging the initial probe.
+   Suspension cancels the worker and retires its request, even for A -> B -> A. *)
+let launch_local_workspace_read state ~mailbox base_path =
+  match Masc_tui_types.begin_local_workspace_read state ~base_path
+          ~started_ns:(Mtime_clock.elapsed_ns ()) with
+  | None -> ()
+  | Some request ->
+      Log.Transport.info "tui_local_workspace_started request=%d started_ns=%Ld"
+        (Snapshot_read.request_id request.lwr_request) request.lwr_started_ns;
+      let deliver result = enqueue_async mailbox (Local_workspace_read (request, result)) in
+      let run () =
+        let result = try
+            Ok (Domain_pool_ref.submit_io_or_inline
+              (fun () -> Masc_tui_loader.read_local_workspace request.lwr_base_path))
+          with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn -> Error (Printexc.to_string exn) in
+        deliver result in
+      (match Eio_context.get_switch_opt () with
+       | None -> deliver (Error "Eio switch is unavailable for local workspace reading")
+       | Some sw ->
+           (match fork_workspace_job ~observation:true state ~sw run with
+            | () -> ()
+            | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+            | exception exn -> deliver (Error (Printexc.to_string exn))))
+
+let apply_confirmed_server_identity_reading state ~mailbox reading =
   let previous_server = state.server_identity in
   let previous_input_workspace = workspace_input_identity_of_server previous_server in
   (* A withdrawal invalidates outstanding roster reads even if the same
@@ -12733,7 +12760,8 @@ let apply_confirmed_server_identity_reading state reading =
      | Masc_tui_types.Workspace_identity_unread
      | Masc_tui_types.Workspace_identity_match_unconfirmed _
      | Masc_tui_types.Workspace_identity_mismatch _ ->
-         load_from_masc_dir state state.local_base_path);
+         state.local_workspace <- Local_workspace_unread;
+         launch_local_workspace_read state ~mailbox state.local_base_path);
     let input_workspace = workspace_input_identity_of_server state.server_identity in
     (match List.assoc_opt input_workspace state.suspended_keeper_inputs with
      | None -> ()
@@ -12763,7 +12791,7 @@ let apply_confirmed_server_identity_reading state reading =
    identity and everything it authorized stay; the state is no longer
    [Workspace_identity_match], so decisions and new reads wait for a read that
    matches again. Only a read that names a workspace goes on to compare it. *)
-let apply_server_identity_reading state reading =
+let apply_server_identity_reading state ~mailbox reading =
   match
     Masc_tui_types.next_workspace_identity ~previous:state.workspace_identity
       ~local_base_path:state.local_base_path reading
@@ -12790,18 +12818,18 @@ let apply_server_identity_reading state reading =
        state.detail_read_authority <- ref ()
      | ( Workspace_identity_unread | Workspace_identity_match
        | Workspace_identity_match_unconfirmed _ | Workspace_identity_mismatch _ ), _ -> ());
-    apply_confirmed_server_identity_reading state reading
+    apply_confirmed_server_identity_reading state ~mailbox reading
 
-let apply_refused_workspace_identity state ~detail latest =
+let apply_refused_workspace_identity state ~mailbox ~detail latest =
   let reading = retire_refused_workspace_readings state ~detail latest in
   (match !msx_pending_poll with
    | Poll_observing (_, refusal) -> msx_pending_poll := Poll_ready (Observing refusal)
    | Poll_ready _ | Poll_pending _ -> ());
-  apply_server_identity_reading state reading
+  apply_server_identity_reading state ~mailbox reading
 
 (* Scoped navigation reads carry the final identity of their verified interval.
    A successful older full refresh cannot authorize a same-port replacement. *)
-let apply_http_scoped_surfaces state ~currency_authority results =
+let apply_http_scoped_surfaces state ~mailbox ~currency_authority results =
   if Http_refresh_order.is_current state.http_refresh_order results.http_refresh_ticket then begin
     let latest = Surface_read_order.latest_navigation state.http_surface_reads
       results.http_surface_request in
@@ -12810,7 +12838,7 @@ let apply_http_scoped_surfaces state ~currency_authority results =
     let sources = take_http_surface_reads state results.http_surface_request in
     (* Nonlatest collectors can still own independent data. Their older probe
        cannot replace identity observed by a newer navigation request. *)
-    if latest then apply_server_identity_reading state results.http_scoped_server_identity;
+    if latest then apply_server_identity_reading state ~mailbox results.http_scoped_server_identity;
     if Result.is_ok results.http_scoped_server_identity && (latest || identity_matches) then begin
       (* Identity application can withdraw authority even when this response
          has the current ticket. Only the dispatch generation and workspace
@@ -12837,9 +12865,9 @@ let resume_authorized_input_after_refresh state ~was_unavailable ~base_path ~mai
     drain_queued_message state ~base_path ~mailbox
   end
 
-let apply_http_scoped_refresh_failure state ~refresh_ticket ~approval_ticket ~latest err =
+let apply_http_scoped_refresh_failure state ~mailbox ~refresh_ticket ~approval_ticket ~latest err =
   if Http_refresh_order.is_current state.http_refresh_order refresh_ticket then begin
-    apply_refused_workspace_identity state ~detail:err latest;
+    apply_refused_workspace_identity state ~mailbox ~detail:err latest;
     Option.iter
       (fun ao_ticket ->
          apply_approval_observation state { ao_ticket; ao_result = Error err })
@@ -12852,7 +12880,7 @@ let apply_http_surfaces state ~mailbox results =
        results.http_scoped.http_refresh_ticket then begin
   let previous_items = visible_item_revision state in
   let sources = take_http_surface_reads state results.http_scoped.http_surface_request in
-  apply_server_identity_reading state results.http_server_identity;
+  apply_server_identity_reading state ~mailbox results.http_server_identity;
   let roster_refreshed = if Result.is_ok results.http_server_identity then begin
     apply_overview_load state results.http_overview;
     if state.workspace_identity = Workspace_identity_match then
@@ -12879,13 +12907,13 @@ let apply_http_surfaces state ~mailbox results =
           |> Option.to_list))
   end
 
-let apply_server_booting state ~refresh_ticket ~identity ~approval_ticket =
+let apply_server_booting state ~mailbox ~refresh_ticket ~identity ~approval_ticket =
   if Http_refresh_order.is_current state.http_refresh_order refresh_ticket then begin
   (* The identity is read the same way a full refresh reads it, so a same-port
      replacement is noticed even while the new process is still booting. No
      surface was asked. The approvals panel is told why its rows are stale,
      as a failed refresh tells it; nothing else changes. *)
-  apply_server_identity_reading state identity;
+  apply_server_identity_reading state ~mailbox identity;
   apply_keeper_roster_load state
     (Error (Keeper_control.Roster_unreachable "server booting"));
   Option.iter
@@ -12896,8 +12924,8 @@ let apply_server_booting state ~refresh_ticket ~identity ~approval_ticket =
   state.connection_status <- Masc_tui_types.Booting
   end
 
-let apply_workspace_unconfirmed state ~detail ~unreachable ~approval_ticket ~latest_identity =
-  apply_refused_workspace_identity state ~detail (Some latest_identity);
+let apply_workspace_unconfirmed state ~mailbox ~detail ~unreachable ~approval_ticket ~latest_identity =
+  apply_refused_workspace_identity state ~mailbox ~detail (Some latest_identity);
   (* The Candle surface says why it has no reading rather than looking
      unread. *)
   state.candle_observation <- Some (Error detail);
@@ -12911,10 +12939,10 @@ let apply_http_refresh_outcome state ~mailbox = function
   | Refresh_workspace_unconfirmed
       { refresh_ticket; detail; unreachable; approval_ticket; latest_identity } ->
     if Http_refresh_order.is_current state.http_refresh_order refresh_ticket then
-      apply_workspace_unconfirmed state ~detail ~unreachable ~approval_ticket ~latest_identity
+      apply_workspace_unconfirmed state ~mailbox ~detail ~unreachable ~approval_ticket ~latest_identity
   | Refresh_surfaces results -> apply_http_surfaces state ~mailbox results
   | Refresh_server_booting { refresh_ticket; identity; approval_ticket } ->
-    apply_server_booting state ~refresh_ticket ~identity ~approval_ticket
+    apply_server_booting state ~mailbox ~refresh_ticket ~identity ~approval_ticket
 
 let load_local_workspace_if_safe state base_path =
   match state.workspace_identity with
@@ -12923,46 +12951,6 @@ let load_local_workspace_if_safe state base_path =
   | Masc_tui_types.Workspace_identity_match_unconfirmed _
   | Masc_tui_types.Workspace_identity_mismatch _ -> ()
 ;;
-
-(* One read of the .masc directory in flight at a time. The cadence tick asks
-   again two seconds later, so a read that is still running is simply not
-   duplicated. *)
-let local_workspace_read_inflight = ref false
-
-(* The cadence tick's reload. The directory read (the backlog, goal links,
-   archive, keeper metadata) takes about 20ms and used to run on the UI thread
-   every tick, which is 20ms that a keypress could not be answered in. It runs
-   on the shared domain pool now and the result comes back as a mailbox
-   message; the apply that changes state stays on the UI thread. A system
-   thread would not do: the stores under the read take guarded mutexes, which
-   raise [Non_eio_mutex_context] anywhere but an Eio fiber. *)
-let launch_local_workspace_read state ~mailbox base_path =
-  match state.workspace_identity with
-  | Masc_tui_types.Workspace_identity_match ->
-      if not !local_workspace_read_inflight then begin
-        match Eio_context.get_switch_opt () with
-        | None -> load_from_masc_dir state base_path
-        | Some sw ->
-            local_workspace_read_inflight := true;
-            Eio.Fiber.fork_daemon ~sw (fun () ->
-              (match
-                 Domain_pool_ref.submit_io_or_inline
-                   (fun () -> Masc_tui_loader.read_local_workspace base_path)
-               with
-               | reading ->
-                   enqueue_async mailbox (Local_workspace_read (base_path, reading))
-               | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-               | exception exn ->
-                   local_workspace_read_inflight := false;
-                   Log.Transport.info "local workspace read failed: %s"
-                     (Printexc.to_string exn));
-              `Stop_daemon)
-      end
-  | Masc_tui_types.Workspace_identity_unread
-  | Masc_tui_types.Workspace_identity_match_unconfirmed _
-  | Masc_tui_types.Workspace_identity_mismatch _ -> ()
-;;
-
 
 let load_live_context_if_safe state base_path keeper =
   match state.workspace_identity with
@@ -13513,6 +13501,7 @@ let open_observer_if_due state ~retry_closed ~host ~port ~mailbox =
    operator navigation made during startup still takes precedence. *)
 let resolve_opening_chat state ~base_path ~mailbox =
   if state.opening_pending
+     && state.local_workspace = Local_workspace_read
      && state.workspace_identity = Masc_tui_types.Workspace_identity_match then begin
     state.opening_pending <- false;
     if state.view = Overview then
@@ -13700,7 +13689,8 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
 let resume_task_followups state ~mailbox ~refresh_inflight
     ~scoped_refresh_inflight ~scoped_refresh_followup =
   let ready = function
-    | Task_handoff _ -> Option.is_none state.keepers_error
+    | Task_handoff _ -> state.local_workspace = Local_workspace_read
+        && Option.is_none state.keepers_error
     | Task_cancel_refresh _ -> true in
   let run, withdrawn = take_task_followups state ~ready in
   List.iter (function
@@ -14064,7 +14054,7 @@ let apply_http_scoped_refresh_success state ~currency_authority ~base_path ~mail
   in
   let previous_items = visible_item_revision state in
   let authority = read_authority state in
-  let roster_refreshed = apply_http_scoped_surfaces state ~currency_authority results in
+  let roster_refreshed = apply_http_scoped_surfaces state ~mailbox ~currency_authority results in
   if roster_refreshed || Option.is_none results.http_keeper_roster then
     refresh_changed_keeper_items state ~mailbox ~roster_refreshed previous_items;
   resume_reads_after_authority_change state ~mailbox ~refresh_inflight
@@ -14172,7 +14162,7 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight
                    results
              | Error err when authority = state.workspace_authority ->
                  let before = read_authority state in
-                 apply_http_scoped_refresh_failure state
+                 apply_http_scoped_refresh_failure state ~mailbox
                    ~refresh_ticket ~approval_ticket ~latest:!latest_identity err;
                  resume_reads_after_authority_change state ~mailbox
                    ~refresh_inflight:full_refresh_inflight
@@ -16230,7 +16220,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
   | Workspace_identity_unconfirmed { detail; latest; prior_contact; refresh_ticket } ->
       if Http_refresh_order.is_current state.http_refresh_order refresh_ticket then begin
       let authority = read_authority state in
-      apply_refused_workspace_identity state ~detail (Some latest);
+      apply_refused_workspace_identity state ~mailbox ~detail (Some latest);
       state.connection_status <-
         (match latest, prior_contact with
          | Ok _, _ | Error _, Masc_tui_server_lifecycle.Server_reached -> Masc_tui_types.Degraded
@@ -16673,7 +16663,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                initial.hir_identity then begin
             let before = read_authority state in
             let progress = state.http_refresh_progress in
-            apply_server_identity_reading state (Ok initial.hir_identity);
+            apply_server_identity_reading state ~mailbox (Ok initial.hir_identity);
             (* Keep the original pass clock and already observed probe events;
                only subsequent callbacks belong to the new authority. *)
             state.http_refresh_progress <- Option.map
@@ -16745,7 +16735,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       finish_observed_http_refresh state ~ticket:refresh_ticket;
       if Http_refresh_order.is_current state.http_refresh_order refresh_ticket then begin
         let authority = read_authority state in
-        apply_workspace_unconfirmed state ~detail ~unreachable ~approval_ticket ~latest_identity;
+        apply_workspace_unconfirmed state ~mailbox ~detail ~unreachable ~approval_ticket ~latest_identity;
         resume_reads_after_authority_change state ~mailbox
           ~refresh_inflight:http_refresh_inflight
           ~scoped_refresh_inflight:http_scoped_refresh_inflight ~scoped_refresh_followup
@@ -16766,7 +16756,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
          queued on purpose -- draining it now would send surface loads to the
          booting server -- and the first non-booting completion drains it. *)
       if Http_refresh_order.is_current state.http_refresh_order refresh_ticket then
-        apply_server_booting state ~refresh_ticket ~identity ~approval_ticket
+        apply_server_booting state ~mailbox ~refresh_ticket ~identity ~approval_ticket
       else start_scoped_refresh_followup state ~host:server_peer_host
         ~port:state.port ~refresh_inflight:http_refresh_inflight
         ~scoped_refresh_inflight:http_scoped_refresh_inflight
@@ -17110,7 +17100,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
            apply_approval_observation state
              { ao_ticket; ao_result = Error err })
       approval_ticket;
-      apply_server_identity_reading state (Error err);
+      apply_server_identity_reading state ~mailbox (Error err);
       withdraw_currency_authority state;
       state.candle_observation <- Some (Error err);
       state.connection_status <- Masc_tui_types.Disconnected;
@@ -17165,7 +17155,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         (Surface_read_order.request_id request) current_authority current_generation latest_navigation;
       if current_authority && current_generation && latest_navigation then begin
         let before = read_authority state in
-        apply_http_scoped_refresh_failure state ~refresh_ticket ~approval_ticket ~latest err;
+        apply_http_scoped_refresh_failure state ~mailbox ~refresh_ticket ~approval_ticket ~latest err;
         resume_reads_after_authority_change state ~mailbox
           ~refresh_inflight:http_refresh_inflight
           ~scoped_refresh_inflight:http_scoped_refresh_inflight ~scoped_refresh_followup
@@ -20177,33 +20167,29 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
           (* The previous list stays: a failed reload must not make the queue
              look empty, which reads as "nothing is waiting". *)
           state.verification_error <- Some detail)
-  | Local_workspace_read (base_path, reading) ->
-      local_workspace_read_inflight := false;
-      (* A reading that left before the identity moved off Match, or for
-         another base path, describes a directory this pane no longer shows. *)
-      (match state.workspace_identity with
-       | Masc_tui_types.Workspace_identity_match
-         when String.equal base_path state.local_base_path ->
-           let queued_keepers =
-             Chat_queue.waiting state.msg_queued
-             |> List.map (fun (item : Chat_queue.item) -> item.request.keeper_name)
-             |> List.sort_uniq String.compare
-           in
-           let was_unavailable =
-             List.filter
-               (fun keeper_name -> not (keeper_available_for_new_message state keeper_name))
-               queued_keepers
-           in
-           Masc_tui_loader.apply_local_workspace state base_path reading;
-           (* A keeper this queue waits on may have come back with the
-              reading. Without a drain its retained line sits until an
-              unrelated action; with one it goes now that it is sendable. *)
-           if List.exists (keeper_available_for_new_message state) was_unavailable then
-             drain_queued_message state ~base_path ~mailbox
-       | Masc_tui_types.Workspace_identity_match
-       | Masc_tui_types.Workspace_identity_unread
-       | Masc_tui_types.Workspace_identity_match_unconfirmed _
-       | Masc_tui_types.Workspace_identity_mismatch _ -> ())
+  | Local_workspace_read (request, result) ->
+      let observation = Masc_tui_types.take_local_workspace_read state request result in
+      let admitted = Option.is_some observation in
+      Log.Transport.info
+        "tui_local_workspace_settled request=%d started_ns=%Ld observed_ns=%Ld outcome=%s full_refresh_running=%b"
+        (Snapshot_read.request_id request.lwr_request) request.lwr_started_ns
+        (Mtime_clock.elapsed_ns ())
+        (if not admitted then "discarded" else match result with Ok _ -> "received" | Error _ -> "failed")
+        (Option.is_some state.http_refresh_started_ns);
+      (match observation with
+        | None -> ()
+        | Some (Error detail) ->
+            report_action state "error" ("Local workspace read failed: " ^ detail)
+        | Some (Ok reading) ->
+            Masc_tui_loader.apply_local_workspace state request.lwr_base_path reading;
+            refresh_visible_detail_after_authority_recovery state ~mailbox
+              ~previous_authority:state.detail_read_authority;
+            resume_task_followups state ~mailbox ~refresh_inflight:http_refresh_inflight
+              ~scoped_refresh_inflight:http_scoped_refresh_inflight ~scoped_refresh_followup;
+            resolve_opening_chat state ~base_path ~mailbox;
+            (* Admission can have restored local input before this read. No
+               sibling HTTP collector or later unavailable flag owns its wake. *)
+            drain_queued_message state ~base_path ~mailbox)
   | Keeper_chat_older_loaded (generation, keeper_name, cursor, result) ->
       (* A page that arrived for a keeper the pane has since left, or after a
          reload moved the cursor, is dropped: prepending it would put rows
@@ -22225,7 +22211,7 @@ and is loaded on demand through keeper_skill.
               | Ok patch -> (
                 match check () with
                 | Error detail ->
-                  apply_server_identity_reading state (Error detail);
+                  apply_server_identity_reading state ~mailbox:async_messages (Error detail);
                   report_action state "error" (keeper.k_name ^ ": settings not saved: " ^ detail)
                 | Ok () -> match
                   Masc_tui_http.post_keeper_config ~host ~port
@@ -22364,7 +22350,7 @@ and is loaded on demand through keeper_skill.
              a same-port server replacement. Supersede older refresh bundles
              and re-read identity before any creation effect. *)
           state.http_refresh_order <- Http_refresh_order.dispatch state.http_refresh_order;
-          apply_server_identity_reading state (load_server_identity ~host ~port);
+          apply_server_identity_reading state ~mailbox:async_messages (load_server_identity ~host ~port);
           if state.workspace_identity <> Workspace_identity_match then
             refuse "Cannot create: workspace identity is unverified; declaration retained"
           else if

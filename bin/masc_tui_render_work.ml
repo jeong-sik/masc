@@ -352,6 +352,8 @@ let render_work_tasks (state : state) =
       (match state.local_workspace, state.task_flow with
        | Local_workspace_unread, _ ->
            c.push "  Active tasks · not observed"
+       | Local_workspace_failed detail, _ ->
+           c.push ("  Active tasks · unavailable: " ^ Terminal_text.single_line detail)
        | Local_workspace_read, None ->
            c.push "  Active tasks · unavailable"
        | Local_workspace_read, Some _ ->

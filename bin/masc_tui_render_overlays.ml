@@ -22,7 +22,7 @@ let render_about (state : state) =
   in
   let keepers =
     match state.keepers_error, state.local_workspace with
-    | Some _, _ -> Masc_tui_emblem_screen.Keepers_unreadable
+    | Some _, _ | None, Local_workspace_failed _ -> Masc_tui_emblem_screen.Keepers_unreadable
     | None, Local_workspace_unread -> Masc_tui_emblem_screen.Keepers_unread
     | None, Local_workspace_read ->
         Masc_tui_emblem_screen.Keepers_read (List.length state.keepers)

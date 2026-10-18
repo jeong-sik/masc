@@ -247,6 +247,7 @@ type workspace_input_identity =
 type local_workspace_reading =
   | Local_workspace_unread
   | Local_workspace_read
+  | Local_workspace_failed of string
 
 let canonical_path path =
   if String.equal path ""
@@ -3720,6 +3721,13 @@ type keeper_roster_observation = {
   roster_result:
     (Masc_tui_keeper_control.roster * (Candle_observation.t, string) result,
      Masc_tui_keeper_control.roster_failure) result;
+}
+
+type local_workspace_request = {
+  lwr_authority: workspace_authority;
+  lwr_base_path: string;
+  lwr_request: Snapshot_read.request;
+  lwr_started_ns: int64;
 }
 
 type early_keeper_roster_observation = {
@@ -7237,6 +7245,7 @@ type state = {
   mutable keeper_roster: Masc_tui_keeper_control.roster;
   mutable keeper_roster_error: string option;
   mutable keeper_roster_read: Snapshot_read.t;
+  mutable local_workspace_read_order: Snapshot_read.t;
   mutable candle_observation: (Candle_observation.t, string) result option;
   mutable candle_authority_generation : int;
   mutable keeper_action_inflight:
@@ -8485,6 +8494,33 @@ let take_early_keeper_roster_observation (state : state) early =
     take_keeper_roster_observation state early.er_observation
   else None
 
+(* A local read has no HTTP precondition, so its request must retain the
+   workspace epoch itself. Invalidate on suspension even if the same path is
+   confirmed again before an old worker finishes. *)
+let begin_local_workspace_read (state : state) ~base_path ~started_ns =
+  if state.workspace_identity <> Workspace_identity_match
+     || not (String.equal base_path state.local_base_path) then None
+  else
+    let reading, request = Snapshot_read.start ~intent:Snapshot_read.Poll
+        state.local_workspace_read_order in
+    state.local_workspace_read_order <- reading;
+    Option.map (fun lwr_request ->
+        { lwr_authority = state.workspace_authority; lwr_base_path = base_path;
+          lwr_request; lwr_started_ns = started_ns }) request
+
+let take_local_workspace_read (state : state) request result =
+  if state.workspace_identity <> Workspace_identity_match
+     || request.lwr_authority <> state.workspace_authority
+     || not (String.equal request.lwr_base_path state.local_base_path) then None
+  else match Snapshot_read.settle state.local_workspace_read_order request.lwr_request with
+    | None -> None
+    | Some reading ->
+        state.local_workspace_read_order <- reading;
+        (match result with
+         | Error detail -> state.local_workspace <- Local_workspace_failed detail
+         | Ok _ -> ());
+        Some result
+
 (* Pending reads and post-action offers belong to the workspace that admitted
    them. A successful health response with missing paths is still unread;
    only comparable paths can confirm that an origin has been replaced. *)
@@ -8717,6 +8753,7 @@ let suspend_workspace_readings state =
   retire_asks_read state;
   state.ask_followup_read <- Snapshot_read.invalidate state.ask_followup_read;
   state.keeper_roster_read <- Snapshot_read.invalidate state.keeper_roster_read;
+  state.local_workspace_read_order <- Snapshot_read.invalidate state.local_workspace_read_order;
   state.gate_snapshot_read <- Snapshot_read.invalidate state.gate_snapshot_read;
   state.schedules_read <- Snapshot_read.invalidate state.schedules_read;
   state.keeper_sandbox_logs_inflight <- None;
@@ -10943,6 +10980,7 @@ let keeper_available_for_new_message (state : state) keeper_name =
   | None -> false
   | Some { k_origin = Tui_decode.Persisted_keeper | Declared_keeper _; _ } ->
     state.workspace_identity = Workspace_identity_match
+    && state.local_workspace = Local_workspace_read
     && Option.is_none state.keepers_error
   | Some { k_origin = Tui_decode.Remote_keeper; _ } ->
     false
@@ -11686,6 +11724,7 @@ let create_state
   keeper_roster = Masc_tui_keeper_control.Roster_unobserved;
   keeper_roster_error = None;
   keeper_roster_read = Snapshot_read.idle;
+  local_workspace_read_order = Snapshot_read.idle;
   candle_observation = None;
   candle_authority_generation = 0;
   keeper_action_inflight = None;
@@ -12348,10 +12387,13 @@ let board_list_page (state : state) ~error =
 (* The page for a list kept from this workspace's directory, which carries no
    snapshot of its own: the list is empty both before the read and after it. *)
 let local_rows_page (state : state) ~error =
+  let error = match state.local_workspace with
+    | Local_workspace_failed detail -> Some detail
+    | Local_workspace_unread | Local_workspace_read -> error in
   empty_page_of ~error
     ~snapshot:
       (match state.local_workspace with
-       | Local_workspace_unread -> None
+       | Local_workspace_unread | Local_workspace_failed _ -> None
        | Local_workspace_read -> Some ())
 
 (* A remote roster is its own observation, never evidence of a local read. *)

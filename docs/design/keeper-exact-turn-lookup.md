@@ -194,7 +194,10 @@ stored navigation and cancellation state, not screen text or layout.
 
 ## Remaining user-facing work
 
-Finish independent panel loading and preparation reuse, then compare
+Cold/reconfirmed local directory scheduling now has a source-only followup in
+[local workspace loading](tui-local-workspace-loading.md). Independent Keeper
+metadata versus task/history reads, the other panels and preparation reuse remain.
+Then compare
 matched before/after samples: first usable input, preparation p50/p95, repeated
 discovery reads, resource-conflict waiting, and answer-to-original-work progress.
 Retain failed and unfinished samples. Source changes alone establish none of

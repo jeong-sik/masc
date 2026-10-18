@@ -366,8 +366,8 @@ type async_msg =
       * (string, string) result
   | Keeper_chat_older_loaded of
       int * string * string option * (Masc_tui_keeper_chat_history.page, Masc_tui_keeper_chat_history.page_error) result
-  | Local_workspace_read of string * Masc_tui_loader.local_reading
-      (** The .masc directory as read off the UI thread for this base path. *)
+  | Local_workspace_read of local_workspace_request * (Masc_tui_loader.local_reading, string) result
+      (** Immutable directory observation, bound to its workspace epoch and source request. *)
   | Lanes_loaded of
       unit ref * ( Masc.Tui_decode.keeper_lanes_snapshot
         * Masc.Tui_decode.keeper_secret_projection list,

@@ -96,8 +96,15 @@ Agent Core checkpoint를 직접 읽는 durable 소비자도 원래 완료 경계
 restart는 거부하고, 같은 generation의 다음 완료 경계가 추가된 것은 남겨 둔다.
 unread 원장 보존·외부 admission 확인·진행 위치 및 WAL 복구는 공식 턴과 같은 순서다.
 
-측정값 없는 native CLI 용량 거절의 바닥 진입 정책, program-aware absorption recall,
-실제 타입·동작 검증과 설치된 제품의 전체 시나리오 acceptance는 #37850에 남아 있다.
+메시지 바닥 진입은 실제 실패 순회 전체의 독립 판정으로 정한다. 도구 효과가 시작되지
+않은 Codex·Claude native context 거절은 문자 제한 측정값이 없어도 더 작게 읽을 근거가
+된다. JSON·도메인 출력 오류가 하나라도 있으면 슬롯 순서와 무관하게 이 판정을 막는다.
+측정값이 있는 경우도 같으며, 막힌 순회의 측정값은 다음 실행의 사전 축소를 위한 캐시에
+저장하지 않는다. 이 판정은 메시지를 건너뛸 권한이 아니므로 CLI로 끝난 단일 메시지는
+unread로 넘기지 않는다. 건너뛰기는 실제 소진된 API 순회의 typed 증거만 허용한다.
+
+program-aware absorption recall, 실제 타입·동작 검증과 설치된 제품의 전체 시나리오
+acceptance는 #37850에 남아 있다.
 
 
 Memory가 이미 읽은 범위에서 하던 일 저장본만 만드는 경우에도 같은 API 소진 증거로

@@ -660,6 +660,7 @@ type message_floor =
 
 let floor_refusal detail : Keeper_librarian_runtime.not_committed =
   {input_capacity_evidence=No_input_capacity_refusal;provider_input_refusals=[];
+   message_descent=No_descent_evidence;
    detail;walk_shows_size=false;smaller_range_meets_same_failure=false}
 
 let checkpoint_message_floor ?cli_runner ~config ~keeper_name ~lines ~progress ~official_cursor
@@ -1621,8 +1622,7 @@ let consume_one_with_extent
       let result = commit ~expected_revision ~range_id:atom_next ~official_range_id input in
       let result = match result, message_floor with
         | Memory_refused reports, Runtime_message_floor cli_runner
-            when input.messages <> [] && List.exists
-              (fun (report : Keeper_librarian_runtime.not_committed) -> report.walk_shows_size) reports ->
+            when input.messages <> [] && Keeper_librarian_runtime.may_descend_messages reports ->
           (match atom, atom_next, official_lines, official_range_id, steps with
            | None, None, [selected], Some range, _ ->
              official_message_floor ?cli_runner ~config ~keeper_name ~lines ~progress ~official_cursor

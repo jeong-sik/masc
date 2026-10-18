@@ -77,8 +77,20 @@ type input_capacity_evidence = No_input_capacity_refusal | Input_capacity_refuse
     policy. Only a typed input/context-capacity refusal establishes it; output,
     schema, domain, timeout and ordinary transport failures do not. *)
 
+type message_descent =
+  | No_descent_evidence
+  | Smaller_input_may_help
+  | Invalid_output_blocks_descent
+(** Whether reading a smaller original message input may answer the failed
+    walk. A safe native context refusal needs no invented character limit.
+    Invalid JSON/domain output vetoes descent across the complete walk.
+    This policy never grants permission to skip an unread message. *)
+
 type not_committed =
   { input_capacity_evidence : input_capacity_evidence
+  ; message_descent : message_descent
+      (** Whole-walk policy, independent of measured historical fitting and
+          actual exhausted API evidence used to authorize unread records. *)
   ; provider_input_refusals : Keeper_librarian_input_refusal.t list
       (** Named provider input refusals encountered in the walk, including earlier
           slots. Empty for local admission, unknown/opaque CLI failures and
@@ -89,7 +101,9 @@ type not_committed =
   ; walk_shows_size : bool
         (** Historical range-window adaptation hint, not authoritative evidence
             that the input exceeded capacity. Admission partitioning must use
-            [input_capacity_evidence] instead. This policy can include:
+            [input_capacity_evidence] instead. Message descent uses the separate
+            [message_descent] policy, which also recognizes unmeasured native
+            context refusals. This historical policy can include:
             a provider that judged the request too large, one that refused it
             for a reason it did not name, a refused output, or a candidate
             whose projection did not fit a slot's declared window.
@@ -130,6 +144,15 @@ type not_committed =
             each part would send the failing slot another request, up to
             2N-1 of them during a quota or an outage. *)
   }
+
+val merge_message_descent : message_descent -> message_descent -> message_descent
+(** Invalid output is absorbing; a neutral local settlement report cannot
+    erase an earlier size observation or unblock an earlier invalid output. *)
+
+val may_descend_messages : not_committed list -> bool
+(** Fold every report for the failed pass. Empty reports and unclassified
+    transport failures grant no descent; any invalid-output veto holds even
+    alongside a measured CLI limit. This is not an unread-message authorization. *)
 
 type inference_failure = private
   { reports : not_committed list

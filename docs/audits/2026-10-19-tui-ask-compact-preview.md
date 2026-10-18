@@ -25,6 +25,7 @@ can be read or answered.
 | A single content row remains | Could show only hidden count | Original selected question row |
 | No content rows remain | Hidden notice can still emit one row | No unbudgeted hidden notice |
 | More preview space exists | No partial question representation | Complete original rendered rows plus full-reader hint |
+| Hidden-question navigation hint in compact browsing | Named j/k, which changes questions only inside answer mode | Names the existing full-reader key a |
 | Full prompt, choices and draft | Existing scrolling answer reader | Same complete original reader |
 | Draft/answer mutation | Existing answer-mode actions | No new action or submission from preview |
 

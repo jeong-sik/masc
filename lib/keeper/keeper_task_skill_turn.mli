@@ -105,6 +105,18 @@ val resolve_observations :
     state, grouping identical exact references before projection and retaining
     every Task identity on shared references. *)
 
+val resolve_surface :
+  descriptors:Keeper_tool_descriptor.t list ->
+  snapshot:Skill_catalog_snapshot.t ->
+  Skill_reference.t list ->
+  (t * preparation, error) result
+(** Resolve fresh exact references and return the selection and its preparation
+    together from construction. The supplied immutable snapshot and authorized
+    descriptor objects bind both outputs; no retained-selection check is needed.
+    Like [resolve], these reference-only inputs carry no Task ids. Preserve the
+    same errors and successful retained-turn-surface observation as [bind_surface].
+    Use [bind_surface] instead when the input is an existing selection. *)
+
 val bind_surface : descriptors:Keeper_tool_descriptor.t list ->
   snapshot:Skill_catalog_snapshot.t -> t -> (t * preparation, error) result
 (** Bind selected exact references and return their matching immutable preparation

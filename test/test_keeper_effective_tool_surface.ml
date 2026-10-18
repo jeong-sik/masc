@@ -1072,6 +1072,8 @@ let shadowed_guide_snapshot () =
 ;;
 
 let test_frozen_selection_carries_the_shadowed_exact_reference () =
+  Eio_main.run @@ fun _ ->
+  let module O = Keeper_skill_preparation_observation in
   let snapshot, shadowed_reference = shadowed_guide_snapshot () in
   let selection =
     match
@@ -1083,7 +1085,7 @@ let test_frozen_selection_carries_the_shadowed_exact_reference () =
     | Ok selection -> selection
     | Error error -> fail (Keeper_task_skill_turn.error_to_string error)
   in
-  let project ~task_selection =
+  let project ~task_skill_references ~task_selection =
     Keeper_effective_tool_surface.For_testing.project
       ~keeper_name:"skill-shadow"
       ~runtime_id:"fixture.runtime"
@@ -1095,22 +1097,41 @@ let test_frozen_selection_carries_the_shadowed_exact_reference () =
       ~skill_names:None
       ~current_task_id:None
       ~skills_left_out:[]
-      ~task_skill_references:[]
+      ~task_skill_references
       ~task_selection
       ~skill_snapshot:snapshot
   in
-  (match project ~task_selection:(Some selection) with
+  let frozen = match project ~task_skill_references:[] ~task_selection:(Some selection) with
    | Error error -> fail (Keeper_task_skill_turn.error_to_string error)
    | Ok surface ->
      check bool "frozen selection carries the shadowed exact revision" true
        (List.exists
           (Skill_reference.equal shadowed_reference)
-          surface.Keeper_effective_tool_surface.instruction_skills));
-  match project ~task_selection:(Some Keeper_task_skill_turn.empty) with
+          surface.Keeper_effective_tool_surface.instruction_skills);
+     surface in
+  let reports = ref [] in
+  (match O.capture_result ~on_report:(fun report -> reports := report :: !reports)
+      (fun () -> project ~task_skill_references:[shadowed_reference] ~task_selection:None) with
+   | Error error -> fail (Keeper_task_skill_turn.error_to_string error)
+   | Ok fresh ->
+     check (list string) "fresh exact references and supplied selection expose the same tools"
+       (names frozen) (names fresh);
+     check bool "fresh references retain the shadowed revision instead of a name winner" true
+       (List.exists (Skill_reference.equal shadowed_reference) fresh.instruction_skills));
+  let report = match !reports with [report] -> report | _ -> fail "one fresh surface report expected" in
+  check bool "fresh effective surface reports its actual successful preparation" true
+    (report.coverage=O.Fiber_capture && report.outcome=O.Returned);
+  let retained = List.filter (fun (sample : O.sample) -> sample.component=O.Retained_turn_surface) report.samples in
+  check int "one retained surface for the fresh effective projection" 1 (List.length retained);
+  List.iter (fun (sample : O.sample) -> check bool "retained surface belongs to the exact source and completed access" true
+    (sample.snapshot_revision=Skill_catalog_snapshot.snapshot_revision snapshot
+     && sample.outcome=O.Returned && sample.decision=Some O.Reused)) retained;
+  match project ~task_skill_references:[shadowed_reference]
+      ~task_selection:(Some Keeper_task_skill_turn.empty) with
   | Error error -> fail (Keeper_task_skill_turn.error_to_string error)
   | Ok control ->
     check bool
-      "the shadowed revision has no route besides the frozen selection"
+      "supplied empty selection cannot borrow fresh references"
       false
       (List.exists
          (Skill_reference.equal shadowed_reference)

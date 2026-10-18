@@ -142,12 +142,11 @@ let resume_with_profiles ?on_recovery_held ~profiles ~context continuation =
       (Task_skill_publication_unavailable
          {error; snapshot_revision=Skill_catalog_snapshot.snapshot_revision snapshot})
       (Original_task_skills_unavailable error) in
-  let* task_selection = match original_activation with
-    | None -> Ok Keeper_task_skill_turn.empty
-    | Some bound -> Keeper_task_skill_turn.resolve ~descriptors ~snapshot
-        (Keeper_skill_activation_recorder.bound_task_references bound)
-        |> Result.map_error hold_task_skills in
-  let* (task_selection,preparation) = Keeper_task_skill_turn.bind_surface ~descriptors ~snapshot task_selection
+  let task_references = match original_activation with
+    | None -> []
+    | Some bound -> Keeper_skill_activation_recorder.bound_task_references bound in
+  let* (task_selection,preparation) = Keeper_task_skill_turn.resolve_surface
+      ~descriptors ~snapshot task_references
     |> Result.map_error hold_task_skills in
   List.iter (fun (diagnostic : Keeper_skill_catalog.projection_diagnostic) ->
     Log.Keeper.warn ~keeper_name:source.keeper_name "continuation Skill projection unavailable: %s"

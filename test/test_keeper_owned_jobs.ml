@@ -1462,6 +1462,7 @@ let test_original_evidence_repair_reactivates_continuation ~skill_publication ()
   with_environment ["MASC_CONFIG_DIR", None] @@ fun () ->
   with_parked_named_producer env fixture @@ fun parked ->
   let module Wake = Masc.Keeper_composition_continuation_wake in
+  let module O = Masc.Keeper_skill_preparation_observation in
   control fixture (`Assoc ["state", `String "exited"]);
   ignore (with_bundle fixture (fun bundle -> invoke fixture bundle
       ~tool_use_id:"collect-before-authority-repair" ~turn:52 "keeper_job_status" (argument parked.job_id)));
@@ -1493,6 +1494,7 @@ let test_original_evidence_repair_reactivates_continuation ~skill_publication ()
      clock=Eio.Stdenv.clock env; proc_mgr=Some (Eio.Stdenv.process_mgr env); net=None;
      publication_recovery_provider=Masc.Keeper_publication_recovery_availability.non_runtime_provider} in
   let outcomes = ref [] and reported_hold = ref None in
+  let failed_preparations = ref [] and repaired_preparations = ref [] in
   let supervisor = Wake.create ~context ~on_result:(fun candidate outcome ->
       check (option string) "recovery retains the original Task" (Some "task-A")
         (Journal.continuation_source candidate).source_task_id;
@@ -1502,8 +1504,9 @@ let test_original_evidence_repair_reactivates_continuation ~skill_publication ()
       parked.binding.request_id (Journal.continuation_request_id candidate);
     Unix.rename original_path detached_path;
     if skill_publication then (write original_path "source temporarily not a directory\n"; publish ());
-    Wake.resume ~context candidate ~on_recovery_held:(fun ~request_id ~cause ->
-      reported_hold := Some (request_id, cause); on_recovery_held ~request_id ~cause) in
+    O.capture_result ~on_report:(fun report -> failed_preparations := report :: !failed_preparations)
+      (fun () -> Wake.resume ~context candidate ~on_recovery_held:(fun ~request_id ~cause ->
+        reported_hold := Some (request_id, cause); on_recovery_held ~request_id ~cause)) in
   let backend_before = List.length (calls fixture) in
   Eio.Switch.run (fun sw ->
     Wake.For_testing.pulse ~resume:initial_resume ~sw supervisor |> require "original evidence fault intake");
@@ -1514,6 +1517,11 @@ let test_original_evidence_repair_reactivates_continuation ~skill_publication ()
    | Some (request_id, Wake.Task_skill_publication_unavailable _) when skill_publication ->
      check string "Skill hold owns the sealed request" parked.binding.request_id request_id
    | None | Some _ -> fail "pre-intake authority was not reported as a typed recoverable hold");
+  let failed = match !failed_preparations with
+    | [report] -> report | _ -> fail "one original failed preparation capture expected" in
+  check bool "unavailable original evidence remains a failed preparation, not a retained success" true
+    (failed.outcome=O.Returned_error
+     && not (List.exists (fun (sample : O.sample) -> sample.component=O.Retained_turn_surface) failed.samples));
   let pulse () = Eio.Switch.run (fun sw -> Wake.pulse ~sw supervisor |> require "authority recovery pulse") in
   pulse ();
   check int "unchanged unavailable evidence starts no further intake" 1 (List.length !outcomes);
@@ -1524,8 +1532,16 @@ let test_original_evidence_repair_reactivates_continuation ~skill_publication ()
     check int "file restoration alone cannot borrow an unpublished Skill view" 1 (List.length !outcomes);
     publish ());
   set_source fixture ~task_id:"task-other" ~turn:90;
-  pulse ();
+  ignore (O.capture_result ~on_report:(fun report -> repaired_preparations := report :: !repaired_preparations)
+    (fun () -> pulse (); Ok ()));
   check int "repaired evidence revalidates the same original child once" 2 (List.length !outcomes);
+  let repaired = match !repaired_preparations with
+    | [report] -> report | _ -> fail "one repaired preparation capture expected" in
+  check bool "repaired original child retains a completed preparation before consuming saved results" true
+    (repaired.outcome=O.Returned
+     && List.exists (fun (sample : O.sample) ->
+       sample.component=O.Retained_turn_surface && sample.outcome=O.Returned
+       && sample.decision=Some O.Reused) repaired.samples);
   let accepted_child = match snd (List.hd !outcomes) with
     | Ok result when Tool_result.is_success result -> Tool_result.data result
     | Ok _ | Error _ -> fail "repaired original child was not accepted" in

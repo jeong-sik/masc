@@ -180,4 +180,3 @@ inversions but do not assert a unique harmonic interpretation. `transpose -12`,
 `tempo 120`, `length 32` and `meter 3 4` set project timing. MIDI/WAV export refuses
 existing files. The broader destination and remaining work are recorded in
 [the sequencer design](../../docs/design/tui/MUSIC-SEQUENCER.md).
-

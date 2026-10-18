@@ -131,6 +131,18 @@ export function arrangementCommand(editor, line) {
     case 'save': case 'help': case 'play': case 'play-audio': case 'stop':
     case 'inputs': case 'record': case 'record-stop': count(0); return { editor, effect: { kind: command } }
     case 'input': case 'midi-input': if (!tail) throw new Error('Choose an input UID'); return { editor, effect: { kind: command, input: tail } }
+    case 'midi-monitor': {
+      if (args.length === 1 && args[0] === 'off') return { editor, effect: { kind: command, action: 'clear' } }
+      if (args[0] === 'remove') { count(3); return { editor, effect: { kind: command, action: 'remove', source: args[1], destination: args[2] } } }
+      if (args.length < 2 || args.length % 2 !== 0) throw new Error('Use :midi-monitor SOURCE_UID DEST_UID [GROUP CHANNEL ...], or off')
+      const channels = []
+      for (let i = 2; i < args.length; i += 2) {
+        const group = Number(args[i]), channel = Number(args[i + 1])
+        if (![group, channel].every(n => Number.isInteger(n) && n >= 1 && n <= 16)) throw new Error('MIDI groups and channels start at 1 and end at 16')
+        channels.push({ group: group - 1, channel: channel - 1 })
+      }
+      return { editor, effect: { kind: command, action: 'set', route: { source: args[0], destination: args[1], scope: channels.length ? { kind: 'channels', channels } : { kind: 'endpoint' } } } }
+    }
     case 'monitor': if (!tail) throw new Error('Choose an audio output UID or off'); return { editor, effect: { kind: 'monitor', output: tail === 'off' ? null : tail } }
     case 'seek': count(1); return { editor, effect: { kind: 'seek', tick: position(beats(args[0])) } }
     case 'midi-output': count(1); return { editor, effect: { kind: command, destination: args[0] } }

@@ -147,6 +147,33 @@ let test_documented_bass_score () =
       Alcotest.(check (option (pair int int))) "meter is retained"
         (Some (11, 8)) score.time_signature
 
+let test_standalone_instrument_keeps_bass_vi_music () =
+  let metadata = {|\title "Bass VI"
+\tempo 80
+\instrument 34
+\tuning E3 B2 G2 D2 A1 E1
+.
+\ts 4 4
+|} in
+  check_music "Bass VI opens C, C-sharp, D on string five"
+    (metadata ^ ":8 3.5 4.5 :4 5.5 :2 r")
+    [384, [0, 48, (false, ["3@5"]); 48, 48, (false, ["4@5"]);
+      96, 96, (false, ["5@5"]); 192, 192, (false, [])]];
+  (match Score.read (metadata ^ ":8 3.5 4.5 :4 5.5 :2 r") with
+   | Error failure -> Alcotest.fail (Score.failure_text failure)
+   | Ok score -> Alcotest.(check (list string)) "six explicitly tuned strings"
+       ["E"; "B"; "G"; "D"; "A"; "E"] score.tuning);
+  check_failure "standalone instrument still needs explicit tuning"
+    "\\instrument 34 :4 3.5" Instrument_without_tuning;
+  check_failure "track naming cannot erase the instrument's tuning requirement"
+    "\\instrument 34 \\track \"Bass\" :4 3.5" Instrument_without_tuning;
+  check_failure "unsupported timbre is not silently discarded"
+    "\\instrument 0 \\tuning E3 B2 G2 D2 A1 E1 :4 3.5" (Unsupported_instrument "0");
+  check_failure "missing instrument value is retained as a failure"
+    "\\instrument \\tuning E3 B2 G2 D2 A1 E1 :4 3.5" (Missing_argument Instrument_name);
+  check_failure "later instrument changes require the full score view"
+    ":4 3.5 \\instrument 34" Instrument_after_music
+
 let test_parenthesized_tuning_members_are_checked () =
   check_music "whitespace and comments inside the tuning list"
     "\\tuning (G2\nD2 /* middle */ A1\tE1) :8 4.3"
@@ -305,7 +332,7 @@ let test_a_drawn_tab_stays_inside_the_pane () =
 let test_a_measure_the_pane_cannot_hold () =
   match Alphatex.render_tab ~max_width:20 ":1 0.6 0.6" with
   | Error (Too_wide _) -> ()
-  | Error other -> Alcotest.failf "not Too_wide: %s" (Alphatex.failure_text other)
+  | Error (Unreadable _ as other) -> Alcotest.failf "not Too_wide: %s" (Alphatex.failure_text other)
   | Ok _ -> Alcotest.fail "a measure wider than the pane was drawn"
 
 (* Two beats whose texts are wider than the ticks they hold (two-letter
@@ -417,7 +444,7 @@ let test_a_repeated_tab_stays_inside_the_pane () =
 let test_a_repeated_measure_the_pane_cannot_hold () =
   match Alphatex.render_tab ~max_width:20 "\\ro :1 0.6 0.6 \\rc 12" with
   | Error (Too_wide _) -> ()
-  | Error other -> Alcotest.failf "not Too_wide: %s" (Alphatex.failure_text other)
+  | Error (Unreadable _ as other) -> Alcotest.failf "not Too_wide: %s" (Alphatex.failure_text other)
   | Ok _ -> Alcotest.fail "a measure wider than the pane was drawn"
 
 (* {1 The header}
@@ -667,6 +694,8 @@ let () =
         ; Alcotest.test_case "the tuning names the lines" `Quick
             test_the_tuning_names_the_lines
         ; Alcotest.test_case "the documented bass score" `Quick test_documented_bass_score
+        ; Alcotest.test_case "standalone instrument keeps Bass VI music" `Quick
+            test_standalone_instrument_keeps_bass_vi_music
         ; Alcotest.test_case "parenthesized tuning members are checked" `Quick
             test_parenthesized_tuning_members_are_checked
         ; Alcotest.test_case "single-part metadata keeps music" `Quick

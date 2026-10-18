@@ -13,6 +13,7 @@ type directive_argument =
   | Artist_text
   | Section_text
   | Key_signature_name
+  | Instrument_name
   | Tempo_number
   | Time_signature_numbers
   | Tuning_notes
@@ -34,6 +35,7 @@ type failure =
   | Unsupported_staff_properties of string
   | Unsupported_instrument of string
   | Instrument_without_tuning
+  | Instrument_after_music
   | Invalid_key_signature of string
   | Key_signature_after_note
   | Section_after_note
@@ -132,6 +134,7 @@ let failure_text = function
   | Missing_argument Artist_text -> "\\artist expects a quoted string"
   | Missing_argument Section_text -> "\\section expects a quoted string"
   | Missing_argument Key_signature_name -> "\\ks expects a key signature"
+  | Missing_argument Instrument_name -> "\\instrument expects a guitar or bass program or name"
   | Missing_argument Tempo_number -> "\\tempo expects a number"
   | Missing_argument Time_signature_numbers -> "\\ts expects two numbers"
   | Missing_argument Tuning_notes -> "\\tuning expects note names"
@@ -150,6 +153,7 @@ let failure_text = function
   | Unsupported_instrument name ->
       Printf.sprintf "instrument \"%s\" is not a supported guitar or bass" (quoted name)
   | Instrument_without_tuning -> "an instrument requires explicit \\tuning before the music"
+  | Instrument_after_music -> "an \\instrument after the first note cannot be drawn"
   | Invalid_key_signature name ->
       Printf.sprintf "\"%s\" is not a key signature" (quoted name)
   | Key_signature_after_note -> "\\ks requires a bar line before it after notes"
@@ -207,6 +211,7 @@ type directive =
   | Artist
   | Track
   | Staff
+  | Instrument
   | Key_signature
   | Section
   | Tempo
@@ -230,6 +235,7 @@ let directive_of_word = function
   | "artist" -> Some Artist
   | "track" -> Some Track
   | "staff" -> Some Staff
+  | "instrument" -> Some Instrument
   | "ks" -> Some Key_signature
   | "section" -> Some Section
   | "tempo" -> Some Tempo
@@ -1008,7 +1014,19 @@ let read source =
             | (Tk_directive _ | Tk_unknown_directive _ | Tk_quoted _ | Tk_chord _ | Tk_bar | Tk_word _) :: _ ->
                 Ok (false, rest)
           in
-          step { state with b_track_declared = true; b_instrument_declared = has_instrument } after
+          step { state with b_track_declared = true;
+            b_instrument_declared = state.b_instrument_declared || has_instrument } after
+    | Tk_directive Instrument :: rest ->
+        if started state then Error Instrument_after_music
+        else
+          (match rest with
+           | (Tk_quoted name | Tk_word name) :: after ->
+               if fretted_instrument name then
+                 step { state with b_instrument_declared = true } after
+               else Error (Unsupported_instrument name)
+           | []
+           | (Tk_directive _ | Tk_unknown_directive _ | Tk_effect _ | Tk_chord _ | Tk_bar) :: _ ->
+               Error (Missing_argument Instrument_name))
     | Tk_directive Staff :: rest ->
         if state.b_staff_declared || started state then Error Additional_staff
         else

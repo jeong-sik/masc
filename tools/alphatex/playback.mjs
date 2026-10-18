@@ -21,11 +21,14 @@ export function openPlayback({ path, output, loop = false, onEvent = () => {}, s
   // Callers may await either phase; keep rejection observed until they attach.
   ready.catch(() => {}); completion.catch(() => {})
   function fail(error) {
-    failure ??= error
+    if (failure) return
+    failure = error
+    rejectReady(error)
     if (!closed) child.kill('SIGTERM')
   }
   const lines = createInterface({ input: child.stdout, crlfDelay: Infinity })
   lines.on('line', line => {
+    if (failure || closed) return
     try {
       const event = JSON.parse(line)
       if (event.kind === 'error') {
@@ -55,7 +58,7 @@ export function openPlayback({ path, output, loop = false, onEvent = () => {}, s
   child.stdout.once('error', fail)
   child.stdin.once('error', fail)
   child.stderr.setEncoding('utf8').on('data', text => { detail += text })
-  child.once('error', error => { failure ??= error })
+  child.once('error', fail)
   const abort = () => { stopping = true; child.kill('SIGTERM') }
   signal?.addEventListener('abort', abort, { once: true })
   child.once('close', (code, exitSignal) => {
@@ -70,12 +73,13 @@ export function openPlayback({ path, output, loop = false, onEvent = () => {}, s
     }
   })
   function command(kind, extra = {}) {
+    if (failure) throw failure
     if (closed || stopping) throw new Error('Playback is stopping or closed')
     if (!current || current.kind === 'stopped') throw new Error('Playback is not ready')
     child.stdin.write(JSON.stringify({ kind, ...extra }) + '\n')
   }
   function stop() {
-    if (closed || stopping) return
+    if (failure || closed || stopping) return
     stopping = true
     if (!child.stdin.destroyed) child.stdin.end('{"kind":"stop"}\n')
   }

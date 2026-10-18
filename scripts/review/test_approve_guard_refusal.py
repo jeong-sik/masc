@@ -25,6 +25,8 @@ printf '%s\n' "$path" >> "$FAKE_DIR/calls.log"
 expr="."
 [ "$1" != --jq ] || expr="$2"
 case "$path" in
+  user) f="$FAKE_DIR/user.json";;
+  repos/*/commits/*/status) f="$FAKE_DIR/status.json";;
   repos/*/pulls/*/reviews/*) f="$FAKE_DIR/review.json";;
   repos/*/pulls/*/reviews*) f="$FAKE_DIR/reviews.json";;
   repos/*/issues/*/comments*) f="$FAKE_DIR/comments.json";;
@@ -60,6 +62,9 @@ class GuardHarness(unittest.TestCase):
             "state": "open", "draft": False, "merged": False,
             "base": {"ref": "main", "sha": BASE}, "head": {"sha": HEAD, "ref": "fix/x"},
             "user": {"login": "author-keeper"}}))
+        (self.data / "user.json").write_text(json.dumps({"login": "reviewer-account"}))
+        (self.data / "status.json").write_text(json.dumps({"statuses": []}))
+        (self.data / "reviews.json").write_text("[]")
         (self.data / "comments.json").write_text("[]")
 
     def review(self, footer, *, assoc="COLLABORATOR", first_suffix="", scope=SCOPE):
@@ -164,6 +169,44 @@ class Case(GuardHarness):
         self.assertEqual(r.stderr, "")
         calls = (self.data / "calls.log").read_text().splitlines()
         self.assertFalse(any("/compare/" in path for path in calls))
+
+
+class CheckOnlyCase(GuardHarness):
+    def test_check_refuses_self_approval(self):
+        (self.data / "user.json").write_text(json.dumps({"login": "author-keeper"}))
+        r = self.run_guard("--check")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("the PR author cannot approve their own change", r.stderr)
+        self.assertEqual(r.stdout, "")
+
+    def test_check_refuses_malformed_verdict_body_when_supplied(self):
+        body = self.tmp / "body.md"
+        body.write_text(f"verdict: PASS head: {HEAD} by: reviewer-keeper · source review\n")
+        r = self.run_guard("--check", "--body", str(body))
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("source review requires a runless exact-head verdict", r.stderr)
+        self.assertEqual(r.stdout, "")
+
+    def test_check_refuses_when_verdict_by_names_caller_login(self):
+        body = self.tmp / "body.md"
+        body.write_text(f"verdict: PASS head: {HEAD} by: reviewer-account\nsource review notes\n")
+        r = self.run_guard("--check", "--body", str(body))
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("by must name the reviewing Keeper", r.stderr)
+        self.assertEqual(r.stdout, "")
+
+    def test_check_refuses_mismatched_review_diff_when_supplied(self):
+        r = self.run_guard("--check", "--review-base", BASE, "--review-diff", "e" * 64)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("current complete diff differs from the reviewed change", r.stderr)
+        self.assertEqual(r.stdout, "")
+
+    def test_check_passes_with_valid_body_and_diff(self):
+        body = self.tmp / "body.md"
+        body.write_text(f"verdict: PASS head: {HEAD} by: reviewer-keeper\nsource review notes\n")
+        r = self.run_guard("--check", "--review-base", BASE, "--review-diff", DIFF, "--body", str(body))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn(f"WOULD APPROVE #41487 head {HEAD} policy source", r.stdout)
 
 
 class PrintFooterCase(GuardHarness):

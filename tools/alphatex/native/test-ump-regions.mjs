@@ -43,6 +43,10 @@ host=0;sent=[];try attack.stageCoordinated(at:0);try attack.runCoordinated(ancho
 precondition(sent.map{$0.1}==[bend,on,off],"entry attack and original release survive the exact cut")
 attack.finish(reason:"test",error:nil,publish:false)
 refuses{_ = try owner([source("take",[packet(0,on),packet(0,bend)])],[clip()])}
+let ending=try owner([source("take",[packet(0,on),packet(10_000_000,off)])],[clip(offset:"10000000",extent:"100000000")],duration:0.1)
+host=0;sent=[];try ending.stageCoordinated(at:0);try ending.runCoordinated(anchorNanoseconds:10);host=10;ending.tick()
+precondition(sent.isEmpty,"a historical note ending exactly at entry must not retrigger")
+ending.finish(reason:"test",error:nil,publish:false)
 // The final host stamp belongs to a half-open bound one past UInt64max.
 let endpoint=source("take",[packet(UInt64.max,on)],extent:"18446744073709551616")
 let last=try owner([endpoint],[clip(offset:String(UInt64.max),extent:"1")],duration:1e-9)
@@ -67,6 +71,14 @@ let expired=try owner([expiredSource],[clip(extent:"100000000")],duration:0.2)
 host=0;sent=[];try expired.stageCoordinated(at:0);try expired.runCoordinated(anchorNanoseconds:10);host=10;expired.tick()
 host=100_000_010;expired.tick();precondition(sent.map{$0.1}==[on,off],"only acquired FIFO instance keeps its original release")
 expired.finish(reason:"test",error:nil,publish:false)
+// Delay within an already active copy, preserving existing releases while
+// excluding newly missed expired keys; currently live missed voices still enter.
+let delayed=source("take",[packet(0,bend),packet(10_000_000,on),packet(20_000_000,off),packet(60_000_000,on),packet(90_000_000,off)])
+let same=try owner([delayed],[clip(extent:"100000000")],duration:0.1)
+host=0;sent=[];try same.stageCoordinated(at:0);try same.runCoordinated(anchorNanoseconds:10);host=10;same.tick()
+host=50_000_010;same.tick();precondition(sent.map{$0.1}==[bend],"same-copy expired acquisitions stay silent")
+host=75_000_010;same.tick();precondition(sent.last!.1==on && same.output.held.count==1,"late but live note must enter")
+host=100_000_010;same.tick();precondition(sent.map{$0.1}==[bend,on,off],"already acquired late live key retains its original release")
 // Independent physical channels can overlap even when both assets call their
 // logical input A and bind the same endpoint. Region cleanup is channel-scoped.
 let otherOn:[UInt32]=[0x41923d00,0x90010000]

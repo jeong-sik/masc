@@ -150,16 +150,20 @@ struct UmpChannelState {
 struct UmpRestoration {
     let events: [UmpEvent]
     let nextIndex: Int
+    let heldNotes: Set<Int>
+    let releaseOwners: [Int: Int]
+    let expiredNotes: [Int: Int]
 }
 func umpRestoration(_ events: [UmpEvent], before seconds: Double, replacing previous: UmpFootprint) throws -> UmpRestoration {
     let count = events.firstIndex(where: { $0.seconds >= seconds }) ?? events.count
     return try umpRestoration(events, prefixCount: count, replacing: previous)
 }
-func umpRestoration(_ events: [UmpEvent], prefixCount: Int, followingCount: Int = 0, replacing previous: UmpFootprint) throws -> UmpRestoration {
+func umpRestoration(_ events: [UmpEvent], prefixCount: Int, followingCount: Int = 0, excludingNotes: Set<Int> = [], replacing previous: UmpFootprint) throws -> UmpRestoration {
     guard prefixCount >= 0, prefixCount <= events.count, followingCount >= 0, followingCount <= events.count - prefixCount else { throw MidiFailure("invalid captured UMP prefix") }
     try previous.requireSupported()
     var footprint = UmpFootprint(), known = Set<UmpField>(), channels: [UmpAddress: UmpChannelState] = [:]
     var notes = Set<Int>(), next = 0
+    var releaseOwners: [Int: Int] = [:], expiredNotes: [Int: Int] = [:]
     for (ordinal, event) in events.enumerated() {
         guard ordinal < prefixCount else { break }
         next = ordinal + 1
@@ -175,6 +179,7 @@ func umpRestoration(_ events: [UmpEvent], prefixCount: Int, followingCount: Int 
         case .off(let number):
             notes.insert(ordinal)
             if let index = channel.voices.firstIndex(where: { $0.number == number && $0.held }) {
+                releaseOwners[ordinal] = channel.voices[index].on
                 channel.voices[index].held = false; channel.voices[index].off = ordinal
             }
         case .pedal(let number, let on):
@@ -185,18 +190,21 @@ func umpRestoration(_ events: [UmpEvent], prefixCount: Int, followingCount: Int 
                 if !on { for index in channel.voices.indices { channel.voices[index].captured = false } }
             }
         case .release: for index in channel.voices.indices { channel.voices[index].held = false }
-        case .kill: channel.voices.removeAll()
+        case .kill:
+            for voice in channel.voices { expiredNotes[voice.on] = ordinal }
+            channel.voices.removeAll()
         case .reset:
             channel.sustain = false; channel.sostenuto = false
             for index in channel.voices.indices { channel.voices[index].captured = false }
         default: break
         }
+        for voice in channel.voices where !voice.held && !channel.sustain && !(channel.sostenuto && voice.captured) { expiredNotes[voice.on] = ordinal }
         channel.prune(); channels[address] = channel
     }
-    try footprint.requireSupported()
     var entryKnown = known
     for event in events[prefixCount..<(prefixCount + followingCount)] {
         let message = UmpMessage(event)
+        footprint.observe(message)
         if case .on(let number) = message.action {
             let required = previous.touched.filter { field in
                 field.kind.determinesAttack && field.address == message.address && (field.kind.note == nil || field.kind.note == number)
@@ -208,10 +216,11 @@ func umpRestoration(_ events: [UmpEvent], prefixCount: Int, followingCount: Int 
         }
         if case .relative = message.action {} else { entryKnown.formUnion(message.fields) }
     }
+    try footprint.requireSupported()
     guard previous.touched.filter({ $0.kind.determinesAttack }).allSatisfy({ $0.covered(by: entryKnown) }) else { throw MidiFailure("captured UMP seek needs an explicit source baseline for previously changed state") }
     var live = Set<Int>()
     for channel in channels.values {
-        for voice in channel.voices { live.insert(voice.on); if let off = voice.off { live.insert(off) } }
+        for voice in channel.voices where !excludingNotes.contains(voice.on) { live.insert(voice.on); if let off = voice.off { live.insert(off) } }
     }
     // Establish prior mutations before each surviving Note On, not merely by
     // the cut. For example a later program message cannot establish the patch
@@ -227,5 +236,5 @@ func umpRestoration(_ events: [UmpEvent], prefixCount: Int, followingCount: Int 
         if case .relative = message.action {} else { known.formUnion(message.fields) }
         if !notes.contains(ordinal) || live.contains(ordinal) { replay.append(event) }
     }
-    return UmpRestoration(events: replay, nextIndex: next)
+    return UmpRestoration(events: replay, nextIndex: next, heldNotes: Set(channels.values.flatMap { $0.voices.filter { $0.held && !excludingNotes.contains($0.on) }.map(\.on) }), releaseOwners: releaseOwners, expiredNotes: expiredNotes)
 }

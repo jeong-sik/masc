@@ -15,7 +15,7 @@ command -v pnpm >/dev/null 2>&1 || { printf '%s\n' 'pnpm is required to install 
 node -e 'if (Number(process.versions.node.split(".")[0]) < 22) process.exit(1)'
 mkdir -p "$prefix"
 prefix=$(CDPATH= cd -- "$prefix" && pwd)
-runtime_files='package.json pnpm-lock.yaml engine.mjs audio.mjs diagnostics.mjs worker.mjs terminal.mjs viewer.mjs capture.mjs session-data.mjs music-session.mjs wave-file.mjs sequencer-project.mjs sequencer-files.mjs sequencer-audio.mjs sequencer-editor.mjs sequencer-worker.mjs sequencer-tui.mjs playback.mjs native/MusicSession.swift native/MusicTransport.swift native/Info.plist vst.mjs instruments.mjs'
+runtime_files='package.json pnpm-lock.yaml engine.mjs audio.mjs diagnostics.mjs worker.mjs terminal.mjs viewer.mjs capture.mjs session-data.mjs music-session.mjs wave-file.mjs sequencer-project.mjs sequencer-files.mjs sequencer-audio.mjs sequencer-midi.mjs sequencer-editor.mjs sequencer-worker.mjs sequencer-tui.mjs playback.mjs native/MusicSession.swift native/MusicTransport.swift native/MidiTransport.swift native/Info.plist vst.mjs instruments.mjs'
 revision=$(node --input-type=module - "$repo_root/tools/alphatex" $runtime_files <<'FINGERPRINT'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
@@ -71,6 +71,18 @@ if [ "$(uname -s)" = Darwin ] && [ ! -x "$support_dir/music-transport" ]; then
     trap - EXIT HUP INT TERM
   else
     printf '%s\n' 'Native sequencer playback requires the Xcode command-line tools.' >&2
+  fi
+fi
+if [ "$(uname -s)" = Darwin ] && [ ! -x "$support_dir/music-midi" ]; then
+  if xcrun --find swiftc >/dev/null 2>&1; then
+    midi_binary=$(mktemp "$support_dir/.music-midi.XXXXXX")
+    trap 'rm -f "$midi_binary"' EXIT HUP INT TERM
+    xcrun swiftc -O "$support_dir/native/MidiTransport.swift" -o "$midi_binary" -framework CoreMIDI
+    chmod 755 "$midi_binary"
+    mv -f "$midi_binary" "$support_dir/music-midi"
+    trap - EXIT HUP INT TERM
+  else
+    printf '%s\n' 'MIDI output requires the Xcode command-line tools.' >&2
   fi
 fi
 # The relative layout is shared by every prefix; no checkout or workspace path

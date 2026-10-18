@@ -39,14 +39,24 @@ voicings use Tonal's chord intervals. Rootless voicings use its left-hand dictio
 and its top-note voice-leading selection for chord progressions. Unsupported chords
 and registers are explicit errors, not fallback substitutions.
 
+Native WAV preview uses AVAudioEngine/PlayerNode buffers with pause, seek and
+looping, pinned to a CoreAudio output. External MIDI preview uses a separately
+owned CoreMIDI sender and pins a destination by unique ID. It projects the same
+notes/programs/CC7/CC10 schedule directly without rendering audio. The sender
+releases only its held keys, chases current notes after seeking/resuming, and
+never flushes a shared endpoint or sends global all-notes-off. Envelopes retrigger
+when chased. Its host deadline queue is not an external MIDI clock or a sample
+locked audio/MIDI engine. Virtual destination and loopback observations are
+narrower than physical hardware and visible Ghostty proof.
+
 This stack is one step toward the full destination. Further work remains:
 
 - Retain editable arrangements of MIDI clips and WAV regions with repeat/offset,
   recording into existing projects and overdubs; retain raw expression provenance.
 - MIDI import and MIDI 2.0 editing/export without losing controllers, expression,
   program/tempo changes, SysEx or original source identity.
-- MIDI destination and audio device selection, external clock and live scheduling;
-  sample-continuous loop playback and low-latency monitoring/recording.
+- External MIDI clock and a shared sample clock for live scheduling, audio/MIDI
+  arrangement playback, and low-latency monitoring/recording.
 - Connect the independently developed VST instrument/preset host (#43684) to project
   playback without changing the selected instrument on an error.
 - Piano-roll selections, copy/paste, step/live recording, automation,

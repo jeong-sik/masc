@@ -32,7 +32,17 @@ val kind_tool_observation : string
 val main_history_path : session_dir:string -> string
 val internal_history_path : session_dir:string -> string
 
-(** {1 Writers} *)
+(** {1 Writers}
+
+    Both writers acquire the stable checkpoint session lock before the
+    history file's append lock. An official-turn publisher can retain that
+    same session lock while rereading fragments and publishing Memory.
+    The append retains the configured history pathname so existing readers
+    share the same per-path file mutex even through a symlinked session root.
+    Callers must not already hold this session lock or acquire it after
+    Memory's aggregate/snapshot locks. No inference runs under the lock.
+    A completed append remains committed if settling the session lock fails;
+    that failure is logged separately rather than reported as a lost line. *)
 
 (** Append a conversation message, choosing [history.jsonl] /
     [history.internal.jsonl] from [source]. A prompt-only source writes

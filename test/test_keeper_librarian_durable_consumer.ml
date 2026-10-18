@@ -2877,6 +2877,267 @@ let test_official_commit_recovers_without_resynthesis ?(through_queue = false) ?
    | Error detail -> fail detail)
 ;;
 
+(* These cases exercise the official consumer's production Runtime boundary:
+   only the HTTP lane's real exhausted walk may create an unread message. *)
+type official_memory_floor_case =
+  | Partial_official_hole
+  | All_official_holes
+  | All_official_holes_without_observations
+  | Unknown_official_refusal
+  | Late_official_failure
+  | Rewritten_official_message
+  | Rewritten_official_observation
+  | Appended_official_turn
+  | Interrupted_official_progress
+
+let test_runtime_official_memory_floor case () =
+  let open Masc in
+  let module F = Exact_output_fixture in
+  let module Current = Keeper_memory_os_current in
+  let module Unread = Keeper_librarian_unread in
+  let module Program = Keeper_memory_os_program in
+  let module U = Yojson.Safe.Util in
+  let get = function Ok value -> value | Error detail -> fail detail in
+  Masc_test_deps.with_process_env Env_config.KeeperMemoryOs.librarian_env_key (Some "true") @@ fun () ->
+  Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
+  Masc_test_deps.with_process_env Env_config_core.config_dir_env_key None @@ fun () ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs env#fs;
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.with_test_env ~net:env#net ~clock:env#clock ~mono_clock:env#mono_clock ~sw @@ fun () ->
+  Masc_http_client.with_scoped_pool ~sw ~env @@ fun () ->
+  let base_path = Filename.temp_dir "official-memory-floor-" "" in
+  Config_dir_resolver.reset ();
+  Fun.protect ~finally:(fun () -> Config_dir_resolver.reset (); Fs_compat.remove_tree base_path) @@ fun () ->
+  let config = Workspace.default_config base_path in
+  ignore (Workspace.init config ~agent_name:None);
+  write_keeper_declaration config;
+  let trace_id = "official-runtime-floor" in
+  write_meta config trace_id;
+  let source = [message "The original official question.";
+    Agent_core.Types.make_message ~role:Agent_core.Types.Assistant
+      [Agent_core.Types.Text "The original official answer."]] in
+  let turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1 in
+  let has_observations = case<>All_official_holes_without_observations in
+  let counterpart_marker = "The external speaker still requires review of the original turn." in
+  let item : Keeper_external_attention.item =
+    {event_id=Keeper_external_attention.event_id_of_dedupe_key "official-floor-counterpart";
+     dedupe_key="official-floor-counterpart";keeper_name;
+     conversation={conversation_id="agent:official-floor";surface=Keeper_external_attention.Agent};
+     external_message=None;source_label="agent";
+     actor={actor_id=Some "external";display_name=Some "External";authority=Keeper_chat_store.External};
+     urgency=Keeper_external_attention.Ambient;content_preview=counterpart_marker;
+     content_ref=None;received_at=999.;metadata=[]} in
+  if has_observations then (match Keeper_external_attention.For_testing.record_with_clock ~now:(fun () -> 999.) ~base_path item with
+   | `Recorded -> () | `Duplicate _ -> fail "duplicate official counterpart fixture"
+   | `Error detail -> fail detail);
+  write_official_turn config ~trace_id ~turn:1 ~user:"The original official question."
+    ~assistant:"The original official answer." ~tools:(if has_observations then ["read_file"] else []);
+  append_official_boundary config ~trace_id ~turn:1 ~recorded_at:1000.;
+  let runtime_keepers_dir = Workspace.keepers_runtime_dir config in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let registry = Exact_lane_run_registry.create
+    ~path:(Filename.concat base_path Exact_lane_run_registry.storage_filename) () in
+  (match Exact_lane_run_registry.install_global registry with
+   | Ok () | Error Exact_lane_run_registry.Already_installed -> ());
+  Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
+  Prompt_defaults.init ();
+  let stores =
+    [Current.path_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name;
+     Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name;
+     Current.publication_receipt_path ~keepers_dir ~keeper_id:keeper_name;
+     Current.durable_range_receipt_path ~keepers_dir ~keeper_id:keeper_name;
+     Current.unread_ledger_path ~keepers_dir ~keeper_id:keeper_name;
+     Keeper_librarian_context.path ~keepers_dir ~keeper_id:keeper_name;
+     Progress.path_for_keepers_dir ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name;
+     Official.path_for_keepers_dir ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name;
+     Keeper_external_read_cursor.path_for_keepers_dir ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name] in
+  let bytes () = List.map Fs_compat.load_file_opt stores in
+  let external_state () =
+    Keeper_external_read_cursor.path_for_keepers_dir ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name
+    |> Fs_compat.load_file |> Yojson.Safe.from_string in
+  let check_external_after expected = check int "external admission advances only after a complete Memory publication"
+    expected (U.member "after" (external_state ()) |> U.to_int) in
+  let before_steps = ref None and requests = ref [] in
+  let rewrite_field path key value =
+    let rows = Fs_compat.load_file path |> String.split_on_char '\n'
+      |> List.filter (fun row -> row <> "") |> List.map Yojson.Safe.from_string in
+    let changed = match rows with
+      | `Assoc fields :: rest -> `Assoc ((key,value)::List.remove_assoc key fields)::rest
+      | _ -> fail "official mutation fixture lacks its original record" in
+    Out_channel.with_open_bin path (fun channel ->
+      List.iter (fun row -> output_string channel (Yojson.Safe.to_string row ^ "\n")) changed) in
+  let answer = F.openai_response (`Assoc ["new_claims",`List [];"dropped",`List [];
+    "working_contexts",`List [];"working_state",`String "Only actually accepted messages were judged."]) in
+  let refuse = `Request_entity_too_large,
+    {|{"error":{"type":"invalid_request_error","message":"fixture body refused"}}|} in
+  let unknown = `Internal_server_error,
+    {|{"error":{"type":"server_error","message":"fixture opaque failure"}}|} in
+  let server = F.start_server ~sw ~net:env#net ~clock:env#clock
+    (F.Reply_with (fun index body ->
+      requests := !requests @ [body];
+      check_external_after 0;
+      if index=1 then before_steps := Some (bytes ());
+      if index>1 then check bool "volatile steps cannot write Memory, journal, receipts, ledger or cursor"
+        true (bytes ()=Option.get !before_steps);
+      if index=2 then (
+        let session_dir = (session config trace_id).session_dir in
+        match case with
+        | Rewritten_official_message ->
+          rewrite_field (History.main_history_path ~session_dir) "content_blocks"
+            (`List [`Assoc ["type",`String "text";"text",`String "Replaced original message."]])
+        | Rewritten_official_observation ->
+          rewrite_field (History.internal_history_path ~session_dir) History.key_tool_name
+            (`String "a_different_tool")
+        | Appended_official_turn ->
+          write_official_turn config ~trace_id ~turn:2 ~user:"A later official question."
+            ~assistant:"A later official answer." ~tools:[];
+          append_official_boundary config ~trace_id ~turn:2 ~recorded_at:1001.
+        | Partial_official_hole | All_official_holes | All_official_holes_without_observations | Unknown_official_refusal
+        | Late_official_failure | Interrupted_official_progress -> ());
+      match case with
+      | Unknown_official_refusal -> unknown
+      | All_official_holes_without_observations ->
+        if index<3 then refuse else fail "an all-hole boundary without host evidence must not invent a summary request"
+      | Late_official_failure when index=2 -> unknown
+      | Partial_official_hole | Interrupted_official_progress when index<2 -> refuse
+      | All_official_holes when index<3 -> refuse
+      | Late_official_failure | Rewritten_official_message | Rewritten_official_observation
+      | Appended_official_turn when index=0 -> refuse
+      | Partial_official_hole | All_official_holes | Late_official_failure
+      | Rewritten_official_message | Rewritten_official_observation | Appended_official_turn
+      | Interrupted_official_progress -> `OK,answer)) in
+  ignore (F.publish_registry ~lane_id:"librarian_exact" ~slot_ids:["official-floor-api"]
+    ~cli_slot_ids:[] (F.resolver_snapshot ~source:"official-floor-fixture"
+      [{F.id="official-floor-api";base_url=server.base_url}]));
+  let run () = Consumer.consume_one_with_runtime ~config ~keeper_name () in
+  let result = match case with
+    | Interrupted_official_progress ->
+      Consumer.For_testing.consume_one_with_runtime_and_progress_writers
+        ~write_progress_store:Progress.write
+        ~write_official_progress_store:(fun ~keepers_dir:_ ~keeper_id:_ _ ->
+          check_external_after 1;
+          check bool "the cursor writer observes only an acknowledged external receipt" true
+            (U.member "pending" (external_state ())=`Null);
+          let hole = Unread.for_official_turn ~turn_ref ~boundary_line:1 ~message_in_turn:0
+            ~messages:source ~reasons:[Keeper_librarian_input_refusal.Request_body_refused] |> get in
+          check bool "exact unread evidence is archived before external acknowledgement and official progress"
+            true (Current.read_unread_messages ~keepers_dir ~keeper_id:keeper_name |> get = [hole]);
+          Error (Official.Write_failed {path="injected-official-progress";message="fixture interrupted after Memory"}))
+        ~config ~keeper_name ()
+    | Partial_official_hole | All_official_holes | All_official_holes_without_observations | Unknown_official_refusal
+    | Late_official_failure | Rewritten_official_message | Rewritten_official_observation
+    | Appended_official_turn -> run () in
+  let expected_calls = match case with
+    | Unknown_official_refusal -> 1 | All_official_holes -> 4
+    | Partial_official_hole | All_official_holes_without_observations | Late_official_failure | Rewritten_official_message
+    | Rewritten_official_observation | Appended_official_turn | Interrupted_official_progress -> 3 in
+  check int "one whole-turn attempt precedes the exact-message floor" expected_calls (List.length !requests);
+  let publications () = Current.read_journal_tail ~keepers_dir ~keeper_id:keeper_name ~limit:20
+    |> List.map get |> List.filter_map (function
+      | Current.Journal_committed {program=Some proof;_} -> Some proof
+      | Current.Journal_committed {program=None;_} | Current.Journal_failed _
+      | Current.Journal_quarantined _ -> None) in
+  match case with
+  | Unknown_official_refusal | Late_official_failure | Rewritten_official_message
+  | Rewritten_official_observation ->
+    (match result with
+     | Ok (Consumer.Memory_not_committed (_ :: _)) -> ()
+     | Error error -> fail (Consumer.error_to_string error)
+     | Ok _ -> fail "refused or changed official source advanced");
+    check bool "no original source cursor is granted" true (read_official config=None);
+    check_external_after 0;
+    check bool "no partial program is published" true (publications ()=[]);
+    check bool "no Memory snapshot or unread authority is created" true
+      (Current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name |> get = None
+       && Current.committed_unread_messages ~keepers_dir ~keeper_id:keeper_name |> get = []);
+    (match !before_steps with
+     | Some before -> check bool "a late refusal or source rewrite preserves every authoritative byte" true (bytes ()=before)
+     | None -> ())
+  | Partial_official_hole | All_official_holes | All_official_holes_without_observations | Appended_official_turn
+  | Interrupted_official_progress ->
+    let holes = if case=Appended_official_turn then [] else
+      List.init (if case=All_official_holes || not has_observations then 2 else 1) (fun message_in_turn ->
+        Unread.for_official_turn ~turn_ref ~boundary_line:1 ~message_in_turn ~messages:source
+          ~reasons:[Keeper_librarian_input_refusal.Request_body_refused] |> get) in
+    let expected_range : Current.official_range_id =
+      {receipt_scope=runtime_keepers_dir;after_boundary_line=0;turns=[1,turn_ref];unread_messages=holes} in
+    check bool "receipt accounts for the exact original whole turn and its proven holes" true
+      (Current.committed_official_coverage ~keepers_dir ~keeper_id:keeper_name
+        ~receipt_scope:runtime_keepers_dir |> get = Some expected_range);
+    check bool "ledger retains exactly the named source-local provider refusals" true
+      (Current.committed_unread_messages ~keepers_dir ~keeper_id:keeper_name |> get = holes);
+    check bool "coverage only claims fully read when every message was actually judged" true
+      (Current.committed_official_range ~keepers_dir ~keeper_id:keeper_name
+        ~receipt_scope:runtime_keepers_dir |> get =
+       if holes=[] then Some expected_range else None);
+    let proof = match publications () with [proof] -> proof | _ -> fail "expected one canonical official Memory program" in
+    let program = proof.Keeper_memory_os_program_types.execution.program in
+    let sources = List.mapi (fun message_in_turn original -> Unread.Official_turn
+      {turn_ref;boundary_line=1;message_in_turn;message_sha256=Unread.message_digest original}) source in
+    check bool "the manifest retains both exact official source hashes in order" true
+      (program.Program.sources=sources && program.unread=holes);
+    check bool "only accepted messages receive source-bearing decisions" true
+      (List.map (fun (stage : Program.stage) -> stage.decision.sources) program.stages =
+       if case=Appended_official_turn then List.map (fun source -> [source]) sources
+       else if not has_observations then []
+       else [if case=All_official_holes then [] else [List.nth sources 1]]);
+    let expected_messages = if case=Appended_official_turn then List.map (fun original -> [original]) source
+      else if not has_observations then []
+      else [if case=All_official_holes then [] else [List.nth source 1]] in
+    check bool "accepted stage evidence preserves exact original bytes and excludes each hole" true
+      (List.map (fun (stage : Program.stage) -> U.member "messages" stage.decision.input_evidence)
+         program.stages = List.map (fun messages -> `List (List.map Agent_core.Checkpoint.message_to_json messages)) expected_messages);
+    List.iteri (fun index (stage : Program.stage) ->
+      let variables = U.member "prompt_variables" stage.decision.input_evidence in
+      check bool "the actual original host tool observation is judged once, after skipped messages" true
+        (U.member "turn_tool_observations" variables |> U.to_string |> Yojson.Safe.from_string =
+         `List (if index=0 then [`Assoc ["tool_name",`String "read_file";"outcome",`String "succeeded"]] else []));
+      check (list string) "the real external speaker is judged by the first accepted step only"
+        (if index=0 then [counterpart_marker] else [])
+        (U.member "counterpart_observations" variables |> U.to_string |> Yojson.Safe.from_string
+         |> U.to_list |> List.map (fun row -> U.member "content" row |> U.to_string));
+      if case=All_official_holes then check bool "all-hole publication contains a real host-only judgment" true
+        (U.member "observations" stage.decision.input_evidence <> `List [])) program.stages;
+    let memory = Current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name |> get in
+    (match memory with
+     | Some snapshot -> check int "one original turn publishes one Memory revision" 1 snapshot.revision
+     | None -> fail "the canonical official program has no committed snapshot");
+    if not has_observations then (
+      check bool "an entirely unread boundary publishes unchanged facts with no invented Memory judgment" true
+        (program.stages=[] && program.initial_current=None && program.final_facts=[]);
+      check bool "an entirely unread boundary invents no working-state summary" true
+        (Fs_compat.load_file_opt (Keeper_librarian_context.path ~keepers_dir ~keeper_id:keeper_name)=None));
+    check_external_after (if has_observations then 1 else 0);
+    check bool "acknowledgement clears the completed pending receipt" true
+      (U.member "pending" (external_state ())=`Null);
+    (match case,result with
+     | Interrupted_official_progress,Error (Consumer.Official_progress_write_failed _) ->
+       check bool "Memory commit precedes the interrupted cursor write" true (read_official config=None);
+       Consumer.For_testing.reset_process_state ();
+       (match run () with
+        | Ok (Consumer.Official_advanced {atom=None;official}) -> check int "WAL recovery restores the original turn cursor" 1 official.boundary_line
+        | Error error -> fail (Consumer.error_to_string error)
+        | Ok _ -> fail "the real runtime path failed to recover the official program receipt");
+       check int "WAL recovery never generates again" expected_calls (List.length !requests);
+       check bool "WAL recovery preserves the committed Memory bytes" true
+         (Current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name |> get=memory)
+     | (Partial_official_hole | All_official_holes | All_official_holes_without_observations | Appended_official_turn),
+       Ok (Consumer.Official_advanced {atom=None;official}) ->
+       check int "only the original turn boundary advances" 1 official.boundary_line
+     | _,Error error -> fail (Consumer.error_to_string error)
+     | _,Ok _ -> fail "the complete official Memory program did not advance");
+    if case=Appended_official_turn then (
+      match Consumer.unread_turns ~config ~keeper_name with
+      | Ok unread -> check int "the concurrently appended turn remains unread" 1 unread.official
+      | Error error -> fail (Consumer.error_to_string error));
+    if case<>Appended_official_turn then (
+      (match run () with Ok Consumer.Nothing_to_read -> ()
+       | Error error -> fail (Consumer.error_to_string error)
+       | Ok _ -> fail "accounted official source was synthesized again");
+      check int "quiet wake does not generate for accounted holes" expected_calls (List.length !requests))
+;;
+
 let test_official_receipt_rejects_replaced_history ~bad_message_hash () =
   with_workspace @@ fun config ->
   let module Current = Masc.Keeper_memory_os_current in
@@ -3549,7 +3810,25 @@ let () =
             test_new_unreadable_boundary_is_not_hidden_by_preflight
         ] )
     ; ( "official-client turns"
-      , [ test_case "mixed refusal preserves reports and both cursors across restart" `Quick
+      , [ test_case "actual runtime accounts an official turn with one proven API hole" `Quick
+            (test_runtime_official_memory_floor Partial_official_hole)
+        ; test_case "actual runtime judges host observations after all official messages are refused" `Quick
+            (test_runtime_official_memory_floor All_official_holes)
+        ; test_case "actual runtime publishes all official holes without inventing an observation-free judgment" `Quick
+            (test_runtime_official_memory_floor All_official_holes_without_observations)
+        ; test_case "opaque official runtime refusal grants no Memory or cursor authority" `Quick
+            (test_runtime_official_memory_floor Unknown_official_refusal)
+        ; test_case "late official inference failure publishes no partial Memory" `Quick
+            (test_runtime_official_memory_floor Late_official_failure)
+        ; test_case "official program refuses a rewritten source message" `Quick
+            (test_runtime_official_memory_floor Rewritten_official_message)
+        ; test_case "official program refuses a rewritten host tool observation" `Quick
+            (test_runtime_official_memory_floor Rewritten_official_observation)
+        ; test_case "official program allows a later turn append without consuming it" `Quick
+            (test_runtime_official_memory_floor Appended_official_turn)
+        ; test_case "official program WAL recovers a failed cursor write without generation" `Quick
+            (test_runtime_official_memory_floor Interrupted_official_progress)
+        ; test_case "mixed refusal preserves reports and both cursors across restart" `Quick
             (test_refused_mixed_range_preserves_reports_and_both_cursors ~with_reports:true)
         ; test_case "unclassified mixed refusal preserves both cursors across restart" `Quick
             (test_refused_mixed_range_preserves_reports_and_both_cursors ~with_reports:false)

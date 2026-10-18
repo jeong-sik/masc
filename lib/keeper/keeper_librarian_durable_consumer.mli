@@ -178,6 +178,22 @@ val consume_one
     requires synthesizing that committed input again. A receipt whose official
     identities no longer match the log stops the pass. *)
 
+val consume_one_with_runtime
+  : ?cli_runner:Keeper_lane_cli_oneshot.runner
+  -> config:Workspace.config
+  -> keeper_name:string
+  -> unit
+  -> (outcome, error) result
+(** Production source-aware consumer. After the normal pass reaches a single
+    official turn and a failure that can warrant reading less, infer its exact
+    messages into a process-local ordered Memory program. Retain the selected
+    main/internal fragments and original cursor; revalidate them under the
+    actual fragment writers' stable session lock before publishing once at the
+    original turn boundary. Only Runtime's actual exhausted API walk evidence
+    may authorize unread holes. Inherited WAL recovery archives holes before
+    external acknowledgement and progress. Generic [consume_one ~commit]
+    never turns an injected commit refusal into skip authority. *)
+
 val tool_observations : Agent_core.Types.message list -> Keeper_librarian.tool_observation list
 (** The tool calls in [messages], each with how its result ended ([Unknown]
     when no result follows). What a pass hands the Librarian for the atoms it
@@ -199,6 +215,19 @@ val commit_with_runtime
   -> commit_result
 
 module For_testing : sig
+  val consume_one_with_runtime_and_progress_writers
+    : ?cli_runner:Keeper_lane_cli_oneshot.runner
+    -> write_progress_store:
+         (keepers_dir:string -> keeper_id:string -> Keeper_librarian_progress.t ->
+          (unit, Keeper_librarian_progress.write_error) result)
+    -> write_official_progress_store:
+         (keepers_dir:string -> keeper_id:string -> Keeper_librarian_official_progress.t ->
+          (unit, Keeper_librarian_official_progress.write_error) result)
+    -> config:Workspace.config
+    -> keeper_name:string
+    -> unit
+    -> (outcome, error) result
+
   val consume_one_with_progress_writer
     :  write_progress_store:
          (keepers_dir:string

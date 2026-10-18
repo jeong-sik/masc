@@ -184,14 +184,14 @@ let uncommitted_pass () =
     | Ok _ | Error (Runtime_exact_output_registry.No_admitted_lane_slots _) -> Not_committed
 ;;
 
-let run_durable_with_commit ~config ~keeper_name ~commit =
+let run_durable_with_consumer ~config ~keeper_name ~consume =
   let rec drain () =
     match Env_config.KeeperMemoryOs.librarian_config_state () with
     | Disabled | Invalid ->
       clear_reported_problem ~config ~keeper_name ~site:Durable_drain;
       Off
     | Enabled ->
-      match Keeper_librarian_durable_consumer.consume_one ~config ~keeper_name ~commit with
+      match consume () with
       | Ok Keeper_librarian_durable_consumer.Nothing_to_read ->
         clear_reported_problem ~config ~keeper_name ~site:Durable_drain;
         Drained
@@ -276,12 +276,15 @@ let run_durable_with_commit ~config ~keeper_name ~commit =
     raise exn
 ;;
 
+let run_durable_with_commit ~config ~keeper_name ~commit =
+  run_durable_with_consumer ~config ~keeper_name ~consume:(fun () ->
+    Keeper_librarian_durable_consumer.consume_one ~config ~keeper_name ~commit)
+;;
+
 let run_durable ~base_path ~keeper_name =
   let config = Workspace.default_config base_path in
-  let memory_keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-  run_durable_with_commit ~config ~keeper_name
-    ~commit:(Keeper_librarian_durable_consumer.commit_with_runtime
-      ~base_path ~keepers_dir:memory_keepers_dir ~keeper_id:keeper_name)
+  run_durable_with_consumer ~config ~keeper_name ~consume:(fun () ->
+    Keeper_librarian_durable_consumer.consume_one_with_runtime ~config ~keeper_name ())
 ;;
 
 (* Continuity has its own exact source position. A Memory baseline does not
@@ -586,85 +589,39 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
            report O.Capacity_refused O.Observed_capacity_disagrees "provider capacity refusal disagrees with local prompt measurement")
   and memory_message_floor ~selected ~(input : Keeper_librarian.input) =
     let module Current = Keeper_memory_os_current in
-    let module Plan = Keeper_librarian_memory_plan in
+    let module Floor = Keeper_librarian_message_floor in
     let module Unread = Keeper_librarian_unread in
-    let module H = Keeper_librarian_task_context in
     let ( let* ) = Result.bind in
     let refusal_detail reports = String.concat "; " (List.map
       (fun (outcome : Runtime.not_committed) -> Printf.sprintf "%s; provider_input_refusals=[%s]"
         outcome.detail (String.concat "," (List.map Keeper_librarian_input_refusal.to_string
           outcome.provider_input_refusals))) reports) in
-    (* Capture the basis for every virtual step once. Neither an intermediate
-       fact set nor an inferred working state is a durable Memory snapshot. *)
     let inferred =
-      let* anchor = Domain_pool_ref.submit_io_or_inline (fun () ->
-        Current.capture_program_anchor ~keepers_dir ~keeper_id:keeper_name) in
-      let initial = Current.program_anchor_snapshot anchor in
-      let* plan = Plan.create ~keeper_id:input.keeper_id ~turn_ref:input.turn_ref ~snapshot:initial
-        |> Result.map_error Plan.error_to_string in
-      let* original_sources = P.memory_sources selected in
-      let rec read plan state served position holes steps tool_observations counterpart_observations sources messages =
-        let* unread_messages = Unread.merge (P.previous_unread_messages selected) holes in
-        match sources, messages with
-        | [], [] when tool_observations <> [] || counterpart_observations <> [] ->
-          (* Host observations are separate evidence, not skipped checkpoint
-             messages. Judge them before acknowledging their source position. *)
-          let observations = {input with current=Plan.current plan;messages=[];
-            historical_task_contexts=[];tool_observations;counterpart_observations} in
-          (match Runtime.infer_memory_step ?cli_runner ~base_path ~keepers_dir ~keeper_id:keeper_name
-             ~previous_state:state ~unread_messages observations with
-           | Runtime.Memory_inferred {step;served_by} ->
-             let* plan = Plan.append plan step |> Result.map_error Plan.error_to_string in
-             read plan (Some step.working_state) (Some served_by) position holes
-               (([],step)::steps) [] [] [] []
-           | Runtime.Memory_not_inferred failure -> Error
-               ("host observations not read; " ^ refusal_detail failure.reports))
-        | [], [] ->
-          let* working_state, served = match state with
-            | Some state -> Ok (state,served)
-            | None ->
-              (* All messages may be holes in the first atom. Ask for a real
-                 continuation over the explicit holes; never invent a summary. *)
-              let empty = {input with current=Plan.current plan; messages=[];
-                historical_task_contexts=[];tool_observations=[];counterpart_observations=[]} in
-              (match Runtime.infer_working_state ?cli_runner ~base_path ~keepers_dir
-                ~keeper_id:keeper_name ~previous_state:None ~unread_messages empty with
-               | Runtime.Inferred {working_state;served_by} -> Ok (working_state,Some served_by)
-               | Runtime.Not_inferred failure -> Error (refusal_detail failure.reports)) in
-          let* program = Keeper_librarian_memory_program.create
-            ~transaction_id:(Random_id.prefixed ~prefix:"librarian-floor-" ~bytes:16)
-            ~keeper_id:input.keeper_id ~turn_ref:input.turn_ref
-            ~sources:original_sources
-            ~unread:holes
-            ~initial_current:(Option.map (fun (snapshot : Current.t) -> snapshot.facts) initial)
-            ~steps:(List.rev steps) in
-          Ok (anchor,program,working_state,served)
-        | source :: sources, message :: messages ->
-          let historical_task_contexts = List.filter_map (fun (context : H.t) ->
-            if context.first_message <= position && position < context.after_message then
-              Some {context with first_message=0;after_message=1;
-                first_tool_observation=0;after_tool_observation=List.length tool_observations}
-            else None) input.historical_task_contexts in
-          let one = {input with current=Plan.current plan; messages=[message];
-            historical_task_contexts; tool_observations;counterpart_observations} in
-          (match Runtime.infer_memory_step ?cli_runner ~base_path ~keepers_dir ~keeper_id:keeper_name
-             ~previous_state:state ~unread_messages one with
-           | Runtime.Memory_inferred {step;served_by} ->
-             let* plan = Plan.append plan step |> Result.map_error Plan.error_to_string in
-             read plan (Some step.working_state) (Some served_by) (position+1) holes
-               (([source],step)::steps) [] [] sources messages
-           | Runtime.Memory_not_inferred failure ->
-             match failure.exhausted_input_refusals with
-             | Some reasons ->
-               let* hole = P.unread_message selected ~source ~reasons in
-               let* holes = Unread.merge holes [hole] in
-               read plan state served (position+1) holes steps tool_observations counterpart_observations sources messages
-             | None -> Error (Printf.sprintf "message %d not read; %s" position
-                 (refusal_detail failure.reports)))
-        | [], _ :: _ | _ :: _, [] -> Error "message floor differs from its original source manifest"
-      in
-      read plan (P.previous_working_state selected) None 0 [] []
-        input.tool_observations input.counterpart_observations original_sources input.messages in
+      let* sources = P.memory_sources selected in
+      let* archived = Domain_pool_ref.submit_io_or_inline (fun () ->
+        Current.read_unread_messages ~keepers_dir ~keeper_id:keeper_name) in
+      let* unread_messages = Unread.merge (P.previous_unread_messages selected) archived in
+      let* inferred = Floor.infer ?cli_runner ~base_path ~keepers_dir ~keeper_name ~sources
+        ~unread_message:(fun source ~reasons -> P.unread_message selected ~source ~reasons)
+        ~previous_state:(P.previous_working_state selected) ~unread_messages input
+        |> Result.map_error (fun (error : Floor.error) ->
+          error.detail ^ "; " ^ refusal_detail error.reports) in
+      let* working_state, served_by = match inferred.working_state with
+        | Some working_state -> Ok (working_state,inferred.served_by)
+        | None ->
+          (* A continuation needs a real state even when every original
+             message is a hole and there were no host observations. *)
+          let* unread_messages = Unread.merge unread_messages inferred.program.unread in
+          let current : Keeper_librarian.current_selection option =
+            Current.program_anchor_snapshot inferred.anchor |> Option.map
+              (fun (snapshot : Current.t) -> {Keeper_librarian.facts=snapshot.facts}) in
+          let empty = {input with current;messages=[];
+            historical_task_contexts=[];tool_observations=[];counterpart_observations=[]} in
+          (match Runtime.infer_working_state ?cli_runner ~base_path ~keepers_dir
+            ~keeper_id:keeper_name ~previous_state:None ~unread_messages empty with
+           | Runtime.Inferred {working_state;served_by} -> Ok (working_state,Some served_by)
+           | Runtime.Not_inferred failure -> Error (refusal_detail failure.reports)) in
+      Ok (inferred.anchor,inferred.program,working_state,served_by) in
     match inferred with
     | Error detail -> report O.Not_committed O.Indivisible_unit_uncommitted
         (detail ^ "; volatile Memory and working state discarded")

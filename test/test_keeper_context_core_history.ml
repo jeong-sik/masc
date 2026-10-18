@@ -156,6 +156,76 @@ let test_successful_fragments_do_not_report_failures () =
     (List.length (lines_of (History.internal_history_path ~session_dir:session.session_dir)))
 ;;
 
+let test_source_owner_serializes_both_fragment_stores () =
+  with_session @@ fun session ->
+  Eio.Switch.run @@ fun sw ->
+  let main = History.main_history_path ~session_dir:session.session_dir in
+  let internal = History.internal_history_path ~session_dir:session.session_dir in
+  let before = fragment_failures ~site:"append" in
+  let locked = Masc.Keeper_checkpoint_store.with_session_lock
+    ~session_dir:session.session_dir (fun canonical_session_dir ->
+      let writers = List.map (fun write -> Eio.Fiber.fork_promise ~sw write)
+        [(fun () -> History.persist_message ~keeper_name ~turn_ref ~source:"user"
+            session (message ~role:Types.User "main after source publication"));
+         (fun () -> History.persist_message ~keeper_name ~turn_ref ~source:"internal_assistant"
+            session (message ~role:Types.Assistant "internal after source publication"));
+         (fun () -> History.persist_tool_observation ~keeper_name ~turn_ref session
+            ~tool_name:"masc_tasks" ~outcome:Tool_result.Ok)] in
+      let lock_path = canonical_session_dir ^ ".checkpoint.lock" in
+      while File_lock_eio.For_testing.holders_and_waiters ~lock_path < 4 do
+        if List.exists Eio.Promise.is_resolved writers then
+          fail "a fragment writer finished while its source owner retained the session lock";
+        Eio.Fiber.yield ()
+      done;
+      check bool "source ownership retains the absent main store" false (Sys.file_exists main);
+      check bool "source ownership retains the absent internal store" false (Sys.file_exists internal);
+      writers) in
+  let writers = match locked with
+    | Ok writers -> writers
+    | Error detail -> fail detail in
+  List.iter (fun writer -> Eio.Promise.await_exn writer) writers;
+  check int "the main message appends after source ownership ends" 1
+    (List.length (lines_of main));
+  let internal_kinds = lines_of internal
+    |> List.map (fun line -> string_field History.key_kind (fields_of line))
+    |> List.sort String.compare in
+  check (list string) "both internal writers append after source ownership ends"
+    (List.sort String.compare [History.kind_message;History.kind_tool_observation]) internal_kinds;
+  check (float 0.) "waiting successful fragments do not report append failures" before
+    (fragment_failures ~site:"append")
+;;
+
+let test_waiting_fragment_writer_propagates_cancellation () =
+  with_session @@ fun session ->
+  Eio.Switch.run @@ fun sw ->
+  let path = History.main_history_path ~session_dir:session.session_dir in
+  let before = fragment_failures ~site:"append" in
+  let locked = Masc.Keeper_checkpoint_store.with_session_lock
+    ~session_dir:session.session_dir (fun canonical_session_dir ->
+      let context, context_u = Eio.Promise.create () in
+      let writer = Eio.Fiber.fork_promise ~sw (fun () ->
+        Eio.Cancel.sub (fun cancellation ->
+          Eio.Promise.resolve context_u cancellation;
+          History.persist_message ~keeper_name ~turn_ref session
+            (message ~role:Types.User "cancelled before source release"))) in
+      let lock_path = canonical_session_dir ^ ".checkpoint.lock" in
+      while File_lock_eio.For_testing.holders_and_waiters ~lock_path < 2 do
+        if Eio.Promise.is_resolved writer then fail "fragment writer bypassed source ownership";
+        Eio.Fiber.yield ()
+      done;
+      Eio.Cancel.cancel (Eio.Promise.await context) Exit;
+      (match Eio.Promise.await writer with
+       | Error (Eio.Cancel.Cancelled _) -> ()
+       | Error error -> raise error
+       | Ok () -> fail "cancelled writer swallowed its cancellation");
+      check bool "cancelled waiter creates no fragment store" false (Sys.file_exists path)) in
+  (match locked with Ok () -> () | Error detail -> fail detail);
+  check (float 0.) "cancellation is not an append failure" before
+    (fragment_failures ~site:"append");
+  History.persist_message ~keeper_name ~turn_ref session (message ~role:Types.User "after cancellation");
+  check int "a later writer can still acquire the source lock" 1 (List.length (lines_of path))
+;;
+
 (* A store the writer cannot append to: the path is a directory. The refusal
    is counted, nothing is raised, and the turn that called goes on. *)
 let test_a_refused_line_does_not_raise () =
@@ -244,6 +314,10 @@ let () =
     ; ( "durability"
       , [ test_case "successful fragments do not report failures" `Quick
             test_successful_fragments_do_not_report_failures
+        ; test_case "source ownership serializes both fragment stores" `Quick
+            test_source_owner_serializes_both_fragment_stores
+        ; test_case "a waiting fragment writer propagates cancellation" `Quick
+            test_waiting_fragment_writer_propagates_cancellation
         ; test_case "a torn tail is cut by the next append" `Quick
             test_a_torn_tail_is_cut_by_the_next_append
         ; test_case "a refused line does not raise" `Quick

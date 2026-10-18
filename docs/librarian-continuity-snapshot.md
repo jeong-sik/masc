@@ -75,9 +75,22 @@ continuity Queue가 기존 용량 축소 경로로 Memory 미처리 atom 하나�
 continuity 입력에서 제외하고 unread 기록으로 전달하며, durable 소비자도 원문 해시와
 누적 원장의 원인 보존을 확인한 뒤 위치를 이어받는다.
 
-이 경로는 Agent Core atom을 처리하는 continuity Queue에 연결돼 있다. 공식 클라이언트의
-durable 턴 바닥에 같은 처리를 연결하는 작업, 측정값 없는 native CLI 용량 거절의 바닥
-진입 정책, program-aware absorption recall, 실제 타입·동작 검증은 #37850에 남아 있다.
+공식 클라이언트의 durable 소비자도 동일한 메시지 판단 엔진을 사용한다. 일반 순회가
+실패한 뒤 선택 범위가 공식 턴 하나이고 읽을 양을 줄일 근거가 있을 때 진입한다. 여러
+턴이나 atom과 섞인 범위가 실패하면 다음 신호에서 기존 순서대로 가장 오래된 턴부터
+읽는다. 공식 턴은 원래 main/internal fragment 전체와 도구 관측, 완료 경계 및 두 읽은
+위치를 session 잠금 아래 다시 확인한다. 실제 fragment writer도 같은 session 잠금 안에서
+기존 파일 append 잠금을 잡는다. 이후 Memory 프로그램 게시, unread 원장 보존, 외부
+admission 확인, 공식 읽은 위치 저장 순서로 진행한다. 마지막 위치 저장이 실패해도 다음
+신호는 원래 턴 receipt로 복구하며 그 메시지를 다시 판단하지 않는다.
+
+모든 공식 메시지를 typed unread로 기록하고 별도 host 관측도 없다면 읽었다고 주장하는
+단계 없이 원래 턴을 기록한다. 공식 Memory 진행에는 가짜 요약을 만들지 않는다. 하던 일
+저장본이 필요한 atom Queue는 이전 상태가 없을 때 실제 continuity 판단을 별도로 요구한다.
+
+이전 trace의 checkpoint 턴을 직접 읽는 durable 바닥 처리, 측정값 없는 native CLI 용량
+거절의 바닥 진입 정책, program-aware absorption recall, 실제 타입·동작 검증과 설치된
+제품의 전체 시나리오 acceptance는 #37850에 남아 있다.
 
 
 Memory가 이미 읽은 범위에서 하던 일 저장본만 만드는 경우에도 같은 API 소진 증거로

@@ -13496,12 +13496,16 @@ let keeper_message_waiting_positions (state : state) ~keeper_name =
       then None
       else
         let transcript = entry.log.tl_transcript in
+        let transcript_phase = Masc_tui_keeper_chat_transcript.phase transcript in
         let stage =
-          match entry.phase with
-          | Turn_preflight _ -> Before_first_post
-          | Turn_streaming -> Stream_open
-          | Turn_reconciling -> Reading_delivery_again in
-        match Masc_tui_keeper_chat_transcript.phase transcript,
+          match transcript_phase, entry.phase with
+          | Stream_failed _, (Turn_preflight _ | Turn_streaming | Turn_reconciling)
+          | (Waiting | Working | Stream_ended), Turn_reconciling ->
+              Reading_delivery_again
+          | (Waiting | Working | Stream_ended), Turn_preflight _ ->
+              Before_first_post
+          | (Waiting | Working | Stream_ended), Turn_streaming -> Stream_open in
+        match transcript_phase,
               Masc_tui_keeper_chat_transcript.admission transcript with
         | Waiting, None
           when not (Masc_tui_keeper_chat_transcript.awaiting_continuation transcript) ->
@@ -13520,9 +13524,14 @@ let keeper_message_waiting_positions (state : state) ~keeper_name =
            store is unavailable, ends with an error and no acceptance, and an
            operation it had answered as queued is still queued. *)
         | Stream_failed _, Some (Masc_tui_keeper_chat_live.Queued, _) ->
-            Some (entry.sent_request, Server_answered (Server_queued, Reading_delivery_again))
+            Some (entry.sent_request, Server_answered (Server_queued, stage))
         | Stream_failed _, Some (Masc_tui_keeper_chat_live.Running, _) ->
-            Some (entry.sent_request, Server_answered (Server_started, Reading_delivery_again))
+            Some (entry.sent_request, Server_answered (Server_started, stage))
+        (* On an open stream, [Settled] means the operation finished normally
+           and leaves the waiting list ([Waiting, Some (Settled, _)] below). On
+           a failed stream, the in-flight owner is still reconciling the
+           delivery outcome, so [Settled] stays in [Rechecking] until that
+           owner finishes. *)
         | Stream_failed _, (None | Some (Masc_tui_keeper_chat_live.Settled, _)) ->
             Some (entry.sent_request, Rechecking)
         | Waiting,

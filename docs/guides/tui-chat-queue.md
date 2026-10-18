@@ -44,7 +44,7 @@ the ones this TUI is tracking for the Keeper on screen, by where each one stands
 | In the local queue | Drops it at once. |
 | Handed over for sending, first POST not started, never answered by the server | Takes it back; it is not sent. |
 | Answered by the server as queued | Sends one cancel request for it, whatever the TUI is doing with it now. |
-| Being posted, or its delivery being rechecked, with no answer from the server | Leaves it; what the server holds is not known. |
+| Being posted, or its delivery being rechecked (with no answer from the server, or after the server answered that it already ended) | Leaves it; what the server holds is not known, or the operation has already ended and has nothing left to cancel. |
 | Answered by the server as started | Leaves it; `Esc` stops a started turn. |
 
 A dropped or taken-back message is discarded with its attachments. It does not

@@ -1711,12 +1711,12 @@ let remove_apple_keeper_volumes ~run ~timeout_sec ~keeper_name =
   match work_volume_name ~keeper_name, build_volume_name ~keeper_name with
   | Error detail, _ | _, Error detail -> Error detail
   | Ok work, Ok build ->
-    let deletions =
-      List.map
-        (fun volume_name ->
-           volume_name, run ~timeout_sec (apple_volume_delete_argv ~volume_name))
-        [ work; build ]
+    let delete volume_name =
+      volume_name, run ~timeout_sec (apple_volume_delete_argv ~volume_name)
     in
+    let work_deletion = delete work in
+    let build_deletion = delete build in
+    let deletions = [ work_deletion; build_deletion ] in
     (match run ~timeout_sec (apple_volume_list_argv ()) with
      | Unix.WEXITED 0, listing, _ ->
        (match Yojson.Safe.from_string listing with

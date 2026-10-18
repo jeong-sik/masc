@@ -24,9 +24,9 @@ val worktree_paths_of_porcelain
   -> (string list, string) result
 (** Linked worktree paths from one [git worktree list --porcelain] payload:
     the first line of every block, minus the clone's own checkout
-    ([repo_path]). A block without a [worktree] line, or a payload naming no
-    worktrees at all, rejects the whole snapshot: an unreadable answer never
-    authorizes a removal. *)
+    ([repo_path], matched literally or after [Unix.realpath]). A block without
+    a [worktree] line, or a payload naming no worktrees at all, rejects the
+    whole snapshot: an unreadable answer never authorizes a removal. *)
 
 val worktree_list_argv : repo_path:string -> string list
 

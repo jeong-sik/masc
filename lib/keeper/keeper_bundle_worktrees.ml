@@ -32,7 +32,24 @@ let worktree_paths_of_porcelain ~repo_path raw =
   with
   | Error _ as error -> error
   | Ok [] -> Error "git worktree list --porcelain named no worktrees"
-  | Ok paths -> Ok (List.filter (fun path -> not (String.equal path repo_path)) paths)
+  | Ok paths ->
+    let repo_realpath =
+      match Unix.realpath repo_path with
+      | resolved -> Some resolved
+      | exception Unix.Unix_error _ -> None
+    in
+    let is_main_checkout path =
+      if String.equal path repo_path
+      then true
+      else (
+        match repo_realpath with
+        | None -> false
+        | Some repo_resolved ->
+          (match Unix.realpath path with
+           | path_resolved -> String.equal path_resolved repo_resolved
+           | exception Unix.Unix_error _ -> false))
+    in
+    Ok (List.filter (fun path -> not (is_main_checkout path)) paths)
 ;;
 
 let worktree_list_argv ~repo_path =

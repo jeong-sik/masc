@@ -18,15 +18,16 @@ let make_temp_dir prefix =
 
 let rec remove_tree path =
   try
-    if Sys.is_directory path
-    then (
+    match (Unix.lstat path).st_kind with
+    | Unix.S_DIR ->
       Array.iter
         (fun entry ->
            if not (String.equal entry "." || String.equal entry "..")
            then remove_tree (Filename.concat path entry))
         (Sys.readdir path);
-      Unix.rmdir path)
-    else Sys.remove path
+      Unix.rmdir path
+    | Unix.S_REG | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK ->
+      Sys.remove path
   with Sys_error _ | Unix.Unix_error _ -> ()
 
 (* ── Porcelain ──────────────────────────────────────────────────────── *)
@@ -52,6 +53,37 @@ let test_porcelain_keeps_linked_worktrees_only () =
   check (result (list string) string) "the clone's own checkout is not a target"
     (Ok [ "/base/.masc/playground/gone/app-wt" ])
     (W.worktree_paths_of_porcelain ~repo_path raw)
+
+let test_porcelain_excludes_symlinked_main_checkout () =
+  let bundle_root = make_temp_dir "masc-wt-symlink" in
+  let real_repos = Filename.concat bundle_root "real-repos" in
+  Unix.mkdir real_repos 0o755;
+  let real_repo = Filename.concat real_repos "app" in
+  Unix.mkdir real_repo 0o755;
+  let linked_repos = Filename.concat bundle_root "repos" in
+  Unix.symlink real_repos linked_repos;
+  let symlink_repo = Filename.concat linked_repos "app" in
+  let wt_clean = Filename.concat bundle_root "app-wt" in
+  Unix.mkdir wt_clean 0o755;
+  Fun.protect
+    ~finally:(fun () -> remove_tree bundle_root)
+    (fun () ->
+       let raw =
+         String.concat "\n"
+           [ "worktree " ^ Unix.realpath real_repo
+           ; "HEAD 0123456789abcdef0123456789abcdef01234567"
+           ; "branch refs/heads/main"
+           ; ""
+           ; "worktree " ^ wt_clean
+           ; "HEAD fedcba9876543210fedcba9876543210fedcba98"
+           ; "detached"
+           ; ""
+           ]
+       in
+       check (result (list string) string)
+         "canonical main checkout is excluded even when repo_path crosses a symlink"
+         (Ok [ wt_clean ])
+         (W.worktree_paths_of_porcelain ~repo_path:symlink_repo raw))
 
 let test_porcelain_rejects_what_it_cannot_read () =
   check bool "empty output names nothing to remove" true
@@ -300,6 +332,8 @@ let () =
     [ ( "porcelain"
       , [ test_case "linked worktrees only, main checkout excluded" `Quick
             test_porcelain_keeps_linked_worktrees_only
+        ; test_case "symlinked repo_path still excludes canonical main checkout" `Quick
+            test_porcelain_excludes_symlinked_main_checkout
         ; test_case "unreadable porcelain removes nothing" `Quick
             test_porcelain_rejects_what_it_cannot_read
         ] )

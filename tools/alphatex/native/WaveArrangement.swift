@@ -393,8 +393,10 @@ final class ArrangementTransport {
         var value: [String: Any] = ["kind": kind, "currentTime": currentTime(), "duration": plan.duration, "device": device.json,
          "loop": false, "format": plan.kind, "streamBufferFrames": capacity, "regions": voices.count]
         if let midi { value["bindings"] = midi.snapshot(kind)["bindings"] }
-        if midi != nil || plan.clocked {
+        do {
+            var timebase = mach_timebase_info_data_t(); mach_timebase_info(&timebase)
             var clock: [String: Any] = ["kind": "mach-host-time", "anchor": String(anchor), "position": position,
+                "numer": timebase.numer, "denom": timebase.denom,
                 "renderQuantum": renderQuantum, "sampleRate": engine.outputNode.outputFormat(forBus: 0).sampleRate,
                 "presentationLatency": engine.outputNode.presentationLatency]
             if let midi { clock["midiAnchorNanoseconds"] = String(midi.anchor); clock["midiPosition"] = midi.position(at: DispatchTime.now().uptimeNanoseconds) }

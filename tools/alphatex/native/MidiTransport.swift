@@ -1015,6 +1015,7 @@ final class MidiTransport {
                                   "loop": loop, "maximumLateness": maximumLateness]
         if let destination { value["device"] = destination.json }
         if timeline.arrangement { value["format"] = "midi-arrangement"; value["regions"] = timeline.regions.count }
+        if timeline.arrangement { value["clock"] = ["kind": "mach-nanoseconds", "anchor": String(anchor), "position": offset] }
         if timeline.source { value["bindings"] = timeline.bindings.compactMap { binding in
             sourceDestinations[binding.port].map { ["port": binding.port, "device": $0.json] as [String: Any] }
         } }

@@ -1392,12 +1392,26 @@ let test_lint_stale_cursor_is_refused () =
         ~args:(`Assoc [ "limit", `Int 2; "cursor", `String cursor ])
     in
     Alcotest.(check bool) "stale cursor refused" false ok;
+    Alcotest.(check bool) "names both wiki and filter causes" true
+      (msg_contains
+         ~needle:"the wiki changed, or `kind`/`page` differ from the call that issued it"
+         message);
     Alcotest.(check bool) "says to start again" true
       (msg_contains ~needle:"without cursor" message);
-    (* The same cursor is honoured while the wiki is unchanged. *)
+    (* The same cursor is honoured while the wiki and filter are unchanged, and
+       refused with the same message when [kind] or [page] changes. *)
     let again = lint_json ctx (`Assoc [ "limit", `Int 2 ]) in
     match lint_member again "next_cursor" with
     | `String fresh ->
+      let filter_changed_ok, filter_changed_message =
+        dispatch_exn ctx ~name:"masc_wiki_lint"
+          ~args:(`Assoc [ "limit", `Int 2; "page", `String "p1"; "cursor", `String fresh ])
+      in
+      Alcotest.(check bool) "cursor with changed page filter refused" false filter_changed_ok;
+      Alcotest.(check bool) "filter-mismatch refusal names kind/page cause" true
+        (msg_contains
+           ~needle:"the wiki changed, or `kind`/`page` differ from the call that issued it"
+           filter_changed_message);
       let ok, _ =
         dispatch_exn ctx ~name:"masc_wiki_lint"
           ~args:(`Assoc [ "limit", `Int 2; "cursor", `String fresh ])

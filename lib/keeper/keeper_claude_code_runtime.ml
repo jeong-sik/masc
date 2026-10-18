@@ -85,6 +85,7 @@ let model_input_projection_for_capacity
     ~runtime_id
     source_projection
     messages =
+  let* frozen = Host.read_librarian_front librarian_front messages in
   let* windowed =
     Host.start_range_projection
       ~measure_message_bytes:measure_model_input_message_bytes
@@ -93,7 +94,7 @@ let model_input_projection_for_capacity
       ~reserved_bytes:0
       ?on_model_input_window_observation
       ?carried_front_seed
-      ?librarian_front
+      ~librarian_front:(fun _ -> Ok frozen)
       ?on_carried_front
       ~turn_start
       ~keeper_name
@@ -129,9 +130,7 @@ let model_input_projection_for_capacity
           ~measure_message_bytes:measure_model_input_message_bytes
           windowed)
   in
-  match source_projection with
-  | None -> Ok windowed
-  | Some project -> project windowed
+  Host.project_source ~unread:frozen.Keeper_turn_driver_try_provider.unread source_projection windowed
 ;;
 
 (* Keep the account scope selected at turn start. Config may be reloaded while

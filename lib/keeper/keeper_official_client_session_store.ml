@@ -138,6 +138,7 @@ type carried_context =
   | Context_block of Prompt_block_id.t
   | Context_carrier
   | Librarian_working_state
+  | Librarian_unread
   | Historical_task_reference
 
 type held_context =
@@ -674,6 +675,7 @@ let held_context_to_yojson { context; sha256 } =
       [ "context", `String "block"; "block", `String (Prompt_block_id.to_string block) ]
     | Context_carrier -> [ "context", `String "carrier" ]
     | Librarian_working_state -> [ "context", `String "working_state" ]
+    | Librarian_unread -> [ "context", `String "librarian_unread" ]
     | Historical_task_reference -> [ "context", `String "task_reference" ]
   in
   `Assoc (context_fields @ [ "sha256", `String sha256 ])
@@ -686,6 +688,7 @@ let held_context_of_yojson = function
         Prompt_block_id.of_string block |> Result.map (fun block -> Context_block block)
       | [ "context", `String "carrier"; "sha256", _ ] -> Ok Context_carrier
       | [ "context", `String "working_state"; "sha256", _ ] -> Ok Librarian_working_state
+      | [ "context", `String "librarian_unread"; "sha256", _ ] -> Ok Librarian_unread
       | [ "context", `String "task_reference"; "sha256", _ ] -> Ok Historical_task_reference
       | _ -> Error "invalid held context fields"
     in

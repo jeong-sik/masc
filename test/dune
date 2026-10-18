@@ -5811,6 +5811,7 @@
   librarian_run_tui_reading eio_main))
 
 (include stanzas/test_keeper_continuity_request_view.inc)
+(include stanzas/test_keeper_librarian_request_unread.inc)
 
 (include stanzas/test_keeper_librarian_continuity.inc)
 

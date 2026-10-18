@@ -1974,7 +1974,7 @@ let run_named
 	     way the checkpoint stores it (#37812). *)
 	  let official_client_librarian_front ~attempt_messages messages =
 	    match Eio.Lazy.force continuity with
-	    | None -> Ok Keeper_turn_driver_try_provider.No_position
+	    | None -> Ok Keeper_turn_driver_try_provider.no_librarian_position
 	    | Some chosen ->
 	      Domain_pool_ref.submit_cpu_or_inline (fun () ->
 	        Keeper_turn_driver_try_provider.librarian_position

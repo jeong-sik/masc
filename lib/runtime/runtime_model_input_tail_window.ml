@@ -39,6 +39,11 @@ let is_working_state (message : Agent_core.Types.message) =
   List.mem_assoc working_state_marker_key message.metadata
 ;;
 
+let unread_context_marker_key = "masc.librarian_unread_context.v1"
+let unread_context_metadata = [unread_context_marker_key,`Bool true]
+let is_unread_context (message : Agent_core.Types.message) =
+  List.mem_assoc unread_context_marker_key message.metadata
+
 type budget_error =
   | Reservation_exceeds_capacity of
       { capacity_bytes : int
@@ -134,7 +139,7 @@ let is_extra_context (msg : Agent_core.Types.message) =
   | Agent_core.Types.Extra_system_context_provenance.Duplicate -> true
 ;;
 
-let is_pinned msg = is_extra_context msg || is_working_state msg
+let is_pinned msg = is_extra_context msg || is_working_state msg || is_unread_context msg
 
 type label =
   | Pinned

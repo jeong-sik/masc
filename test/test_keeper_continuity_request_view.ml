@@ -678,7 +678,7 @@ let test_an_unusable_snapshot_starts_without_it () =
         ?(read_progress = fun () -> Ok (Some position))
         snapshot
     =
-    Driver.continuity_for_request ~keeper_name:"continuity-fixture" ~trace_id ~messages
+    Driver.continuity_for_request ~memory_unread:(fun () -> Ok []) ~keeper_name:"continuity-fixture" ~trace_id ~messages
       ~snapshot ~lines:read_lines ~progress:read_progress
   in
   let origin continuity = (absorbed_view continuity messages).composed.origin in
@@ -721,7 +721,7 @@ let test_an_unusable_snapshot_starts_without_it () =
    | Ok _ | Error _ -> fail "the fixture's moved history still fits the snapshot");
   (match
      (absorbed_view
-        (Driver.continuity_for_request ~keeper_name:"continuity-fixture" ~trace_id
+        (Driver.continuity_for_request ~memory_unread:(fun () -> Ok []) ~keeper_name:"continuity-fixture" ~trace_id
            ~messages:moved ~snapshot:(Ok (Some snapshot)) ~lines:(fun () -> Ok lines)
            ~progress:(fun () ->
              Ok (Some (progress ~trace_id ~end_atom:2
@@ -731,7 +731,7 @@ let test_an_unusable_snapshot_starts_without_it () =
    | Front.Librarian_progress {end_atom = 2} -> ()
    | _ -> fail "a snapshot of a history that moved on did not fall back to the position");
   (match origin
-           (Driver.continuity_for_request ~keeper_name:"continuity-fixture" ~trace_id
+           (Driver.continuity_for_request ~memory_unread:(fun () -> Ok []) ~keeper_name:"continuity-fixture" ~trace_id
               ~messages:(covered @ [fresh]) ~snapshot:(Ok (Some snapshot))
               ~lines:(fun () -> Ok lines)
               ~progress:(fun () -> Ok None))
@@ -752,22 +752,22 @@ let test_official_lanes_take_the_same_choice () =
                text T.User "Review the docs"] in
   let digest_at = Window.atom_opening_digest moved in
   let chosen =
-    Driver.continuity_for_request ~keeper_name:"continuity-fixture" ~trace_id ~messages:moved
+    Driver.continuity_for_request ~memory_unread:(fun () -> Ok []) ~keeper_name:"continuity-fixture" ~trace_id ~messages:moved
       ~snapshot:(Ok (Some snapshot)) ~lines:(fun () -> Ok lines)
       ~progress:(fun () ->
         Ok (Some (progress ~trace_id ~end_atom:2 ~last_atom_digest:(Option.get (digest_at 1)))))
   in
   (match Driver.librarian_position ~messages:moved chosen with
-   | Ok (Driver.Librarian_progress {end_atom = 2}) -> ()
+   | Ok {Driver.point=Driver.Librarian_progress {end_atom = 2};unread=_} -> ()
    | Ok _ -> fail "the purge shape did not hand the official lane the read position"
    | Error error -> fail (Agent_core.Error.to_string error));
   let current = source @ [text T.User "Continue the review"] in
   let fitting =
-    Driver.continuity_for_request ~keeper_name:"continuity-fixture" ~trace_id ~messages:current
+    Driver.continuity_for_request ~memory_unread:(fun () -> Ok []) ~keeper_name:"continuity-fixture" ~trace_id ~messages:current
       ~snapshot:(Ok (Some snapshot)) ~lines:(fun () -> Ok lines) ~progress:(fun () -> Ok None)
   in
   (match Driver.librarian_position ~messages:current fitting with
-   | Ok (Driver.Librarian_snapshot chosen_snapshot) ->
+   | Ok {Driver.point=Driver.Librarian_snapshot chosen_snapshot;unread=_} ->
      check int "the snapshot's end" snapshot.Snapshot.end_atom chosen_snapshot.Snapshot.end_atom
    | Ok _ -> fail "a fitting snapshot did not reach the official lane"
    | Error error -> fail (Agent_core.Error.to_string error));
@@ -777,7 +777,7 @@ let test_official_lanes_take_the_same_choice () =
    | Error _ -> ()
    | Ok _ -> fail "a list that no longer holds the covered messages kept the Librarian front");
   (match Driver.librarian_position ~messages:current Driver.without_snapshot with
-   | Ok Driver.No_position -> ()
+   | Ok {Driver.point=Driver.No_position;unread=_} -> ()
    | Ok _ | Error _ -> fail "no absorbed point was not handed over as no position")
 ;;
 
@@ -804,7 +804,7 @@ let test_a_rewriting_snapshot_waits_for_its_target () =
   let position = progress ~trace_id ~end_atom:4 ~last_atom_digest:(Option.get (digest_at 3)) in
   let origin ?(progress = fun () -> Ok (Some position)) snapshot =
     let continuity =
-      Driver.continuity_for_request ~keeper_name:"continuity-fixture" ~trace_id ~messages
+      Driver.continuity_for_request ~memory_unread:(fun () -> Ok []) ~keeper_name:"continuity-fixture" ~trace_id ~messages
         ~snapshot:(Ok (Some snapshot)) ~lines:(fun () -> Ok lines) ~progress in
     (absorbed_view continuity messages).composed.origin in
   let rewriting = capture (Some 4) in
@@ -837,7 +837,7 @@ let test_a_candidates_own_rendering_is_what_the_check_holds_it_to () =
   let projected = [pinned; read_instead; text T.Assistant "The build passed."] in
   let snapshot, lines = capture_source history in
   let chosen =
-    Driver.continuity_for_request ~keeper_name:"continuity-fixture" ~trace_id ~messages:history
+    Driver.continuity_for_request ~memory_unread:(fun () -> Ok []) ~keeper_name:"continuity-fixture" ~trace_id ~messages:history
       ~snapshot:(Ok (Some snapshot)) ~lines:(fun () -> Ok lines) ~progress:(fun () -> Ok None)
   in
   check int "the snapshot covers the atom the image is in" 2 snapshot.Snapshot.end_atom;
@@ -851,7 +851,7 @@ let test_a_candidates_own_rendering_is_what_the_check_holds_it_to () =
      fail ("a candidate held to its own rendering was still refused: "
            ^ Agent_core.Error.to_string error));
   (match Driver.librarian_position ~messages:projected for_this_candidate with
-   | Ok (Driver.Librarian_snapshot _) -> ()
+   | Ok {Driver.point=Driver.Librarian_snapshot _;unread=_} -> ()
    | Ok _ -> fail "the official lane did not get the snapshot it composes from"
    | Error error -> fail (Agent_core.Error.to_string error));
   let moved_in_flight =
@@ -863,7 +863,7 @@ let test_a_candidates_own_rendering_is_what_the_check_holds_it_to () =
      message of the atom before it, which the reading replaced. *)
   let digest_at = Window.atom_opening_digest history in
   let absorbed =
-    Driver.continuity_for_request ~keeper_name:"continuity-fixture" ~trace_id ~messages:history
+    Driver.continuity_for_request ~memory_unread:(fun () -> Ok []) ~keeper_name:"continuity-fixture" ~trace_id ~messages:history
       ~snapshot:(Ok None) ~lines:(fun () -> Ok lines)
       ~progress:(fun () ->
         Ok (Some (progress ~trace_id ~end_atom:1 ~last_atom_digest:(Option.get (digest_at 0)))))
@@ -892,7 +892,7 @@ let test_summarized_request_carries_exact_unread_markers () =
     ~messages:source ~working_state |> Result.get_ok in
   let messages = source @ [text T.User "Continue the task."] in
   let request = wire (view snapshot messages) in
-  let carried = List.filter Window.is_working_state request in
+  let carried = List.filter Window.is_unread_context request in
   (match carried with
    | [message] ->
      let body = Agent_core.Types.text_of_message message in
@@ -901,7 +901,7 @@ let test_summarized_request_carries_exact_unread_markers () =
          (Yojson.Safe.to_string (H.list_to_json [hole])));
      check bool "the original source remains excluded under the declared coverage" false
        (List.exists (fun message -> message = List.nth source 1) request)
-   | [] | _ :: _ :: _ -> fail "expected one pinned working-state carrier")
+   | [] | _ :: _ :: _ -> fail "expected one independent pinned unread carrier")
 ;;
 
 let () = run "continuity request projection"

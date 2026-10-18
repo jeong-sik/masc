@@ -179,6 +179,7 @@ let carried_model_input_projection
     ~runtime_id
     source_projection
     messages =
+  let* frozen = Host.read_librarian_front librarian_front messages in
   let finish sent =
     (match thread_mode with
      | Runtime_codex_app_server.Start ->
@@ -199,9 +200,7 @@ let carried_model_input_projection
          Some
            (Keeper_turn_driver_try_provider.default_context_overflow_shrink_capacity
               ~capacity:capacity_bytes));
-    match source_projection with
-    | None -> Ok sent
-    | Some project -> project sent
+    Host.project_source ~unread:frozen.Keeper_turn_driver_try_provider.unread source_projection sent
   in
   let* sent =
     Host.start_range_projection
@@ -211,7 +210,7 @@ let carried_model_input_projection
       ~reserved_bytes:0
       ?on_model_input_window_observation
       ?carried_front_seed
-      ?librarian_front
+      ~librarian_front:(fun _ -> Ok frozen)
       ?on_carried_front
       ~turn_start
       ~keeper_name

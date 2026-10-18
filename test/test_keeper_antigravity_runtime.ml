@@ -1,5 +1,36 @@
+let frozen_librarian_position point : Masc.Keeper_turn_driver_try_provider.librarian_position =
+  let snapshot=match point with
+    | Masc.Keeper_turn_driver_try_provider.Librarian_snapshot snapshot -> snapshot.unread_messages
+    | Masc.Keeper_turn_driver_try_provider.Librarian_progress _ | Masc.Keeper_turn_driver_try_provider.No_position -> [] in
+  {point;unread=Masc.Keeper_librarian_request_unread.of_results ~snapshot:(Ok snapshot) ~memory:(Ok [])}
+;;
+
 open Alcotest
 open Masc
+
+let unavailable_native_unread = Keeper_librarian_request_unread.of_results
+    ~snapshot:(Error "fixture has no snapshot reader")
+    ~memory:(Error "fixture has no Memory reader")
+;;
+
+(* Native clients retain an explicit frozen observation even when it is empty
+   or unavailable. Check that pinned carrier before comparing durable history. *)
+let attach_native_unread
+    ?(unread = unavailable_native_unread) messages =
+  Keeper_librarian_request_unread.attach ~include_empty:true ~role:Agent_core.Types.System
+    unread messages
+;;
+
+let without_native_unread
+    ?(unread = unavailable_native_unread) messages =
+  let carriers = List.filter Runtime_model_input_tail_window.is_unread_context messages in
+  let encode = List.map Keeper_official_client_host.encode_history_message in
+  check (list string) "native request carries exactly its frozen unread observation"
+    (encode (attach_native_unread ~unread [])) (encode carriers);
+  check int "the unread observation adds no durable atom" 0
+    (snd (Runtime_model_input_tail_window.annotate carriers));
+  List.filter (fun message -> not (Runtime_model_input_tail_window.is_unread_context message)) messages
+;;
 
 let carried_digest = function
   | Model_input_front.At_atom digest -> digest
@@ -1380,7 +1411,7 @@ let test_seeded_start_matches_the_agent_core_range () =
   in
   check (list string) "the same durable range is carried"
     (encoded_history (agent_core_range ~front:seed_read.seed messages))
-    (encoded_history projected);
+    (encoded_history (without_native_unread projected));
   match !observed with
   | None -> fail "the seeded projection reported no window"
   | Some reading ->
@@ -1393,7 +1424,7 @@ let test_cold_start_with_no_completed_turn_carries_everything () =
   let projected = project_range messages in
   check (list string) "without a seed and with no completed turn, everything is carried"
     (encoded_history messages)
-    (encoded_history projected)
+    (encoded_history (without_native_unread projected))
 ;;
 
 (* Without a seed on a history with completed turns, the range starts where
@@ -1404,8 +1435,8 @@ let test_cold_start_begins_at_the_turn_start () =
   let projected = project_range ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 53 }) messages in
   check (list string) "without a seed the range starts at the turn start"
     (encoded_history (agent_core_range ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 53 }) ~front:None messages))
-    (encoded_history projected);
-  check int "seven atoms of sixty went" 7 (List.length projected)
+    (encoded_history (without_native_unread projected));
+  check int "seven atoms of sixty went" 7 (List.length (without_native_unread projected))
 ;;
 
 (* The Librarian front reaches the list this lane renders -- a read position
@@ -1417,13 +1448,13 @@ let test_the_librarian_front_reaches_the_list_and_its_error_refuses () =
   let projected =
     project_range
       ~librarian_front:(fun _ ->
-        Ok (Keeper_turn_driver_try_provider.Librarian_progress { end_atom = 53 }))
+        Ok (frozen_librarian_position (Keeper_turn_driver_try_provider.Librarian_progress { end_atom = 53 })))
       ~on_carried_front:(fun front ~transmitted_bytes -> seen_front := Some (front, transmitted_bytes))
       messages
   in
   check (list string) "the range starts at the read position"
     (encoded_history (List.filteri (fun index _ -> index >= 53) messages))
-    (encoded_history projected);
+    (encoded_history (without_native_unread ~unread:Keeper_librarian_request_unread.empty projected));
   (match !seen_front with
    | Some (Keeper_official_client_host.Librarian_progress { end_atom = 53 }, bytes) ->
      check bool "the front is reported with the range's bytes" true (bytes > 0)
@@ -1488,11 +1519,11 @@ let test_a_librarian_snapshot_leads_with_its_working_state () =
   let projected =
     project_range
       ~librarian_front:(fun _ ->
-        Ok (Keeper_turn_driver_try_provider.Librarian_snapshot snapshot))
+        Ok (frozen_librarian_position (Keeper_turn_driver_try_provider.Librarian_snapshot snapshot)))
       ~on_carried_front:(fun front ~transmitted_bytes:_ -> seen_front := Some front)
       messages
   in
-  (match projected with
+  (match without_native_unread ~unread:Keeper_librarian_request_unread.empty projected with
    | ({ role = System; content = [ Text text ]; _ } : Agent_core.Types.message) :: rest ->
      check string "the working state leads the list" working_state text;
      check (list string) "and every atom from the Librarian's position follows"
@@ -1533,6 +1564,7 @@ let test_a_preamble_is_not_a_durable_atom () =
       ~on_model_input_window_observation:(fun reading -> observed := Some reading)
       history
   in
+  let sent = without_native_unread sent in
   check bool "the range opens on the preamble" true
     (match sent with
      | first :: _ -> Runtime_model_input_tail_window.is_synthetic_preamble first
@@ -1568,7 +1600,7 @@ let test_a_front_from_another_history_is_dropped () =
   in
   check (list string) "a mismatched seed restarts from the whole history"
     (encoded_history messages)
-    (encoded_history projected)
+    (encoded_history (without_native_unread projected))
 ;;
 
 (* The projection keys an Antigravity usage report as the completion hook

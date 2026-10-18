@@ -1,3 +1,10 @@
+let frozen_librarian_position point : Masc.Keeper_turn_driver_try_provider.librarian_position =
+  let snapshot=match point with
+    | Masc.Keeper_turn_driver_try_provider.Librarian_snapshot snapshot -> snapshot.unread_messages
+    | Masc.Keeper_turn_driver_try_provider.Librarian_progress _ | Masc.Keeper_turn_driver_try_provider.No_position -> [] in
+  {point;unread=Masc.Keeper_librarian_request_unread.of_results ~snapshot:(Ok snapshot) ~memory:(Ok [])}
+;;
+
 open Alcotest
 open Masc
 
@@ -2477,7 +2484,7 @@ let absorbed_snapshot () =
 ;;
 
 let start_range
-      ?(librarian_front = Choice.No_position)
+      ?(librarian_front = frozen_librarian_position Choice.No_position)
       ?(own_first_atom = 0)
       ?(turn_start = Keeper_carried_front.Turn_boundary { end_atom = 0 })
       messages
@@ -2505,7 +2512,7 @@ let texts messages =
    after them and carries the working state in their place. *)
 let test_a_start_seed_begins_at_the_librarian_position () =
   let snapshot = absorbed_snapshot () in
-  let carried = start_range ~librarian_front:(Choice.Librarian_snapshot snapshot) start_seed_messages in
+  let carried = start_range ~librarian_front:(frozen_librarian_position (Choice.Librarian_snapshot snapshot)) start_seed_messages in
   check int "the first atom is the one the Librarian did not read"
     snapshot.Snapshot.end_atom carried.Host.first_atom;
   check bool "the front says so" true
@@ -2575,7 +2582,7 @@ let test_an_unknown_turn_start_is_reported_by_the_range_sent () =
     (warnings_for ~keeper_name:"alpha" ~since_seq:before_sending);
   let decided =
     start_range
-      ~librarian_front:(Choice.Librarian_snapshot (absorbed_snapshot ()))
+      ~librarian_front:(frozen_librarian_position (Choice.Librarian_snapshot (absorbed_snapshot ())))
       ~turn_start:unknown start_seed_messages
   in
   check bool "the Librarian position chose the start" true
@@ -2596,7 +2603,7 @@ let test_an_unknown_turn_start_is_reported_by_the_range_sent () =
    provider refuses. *)
 let test_a_fully_absorbed_history_still_carries_its_newest_atom () =
   let snapshot = absorbed_snapshot () in
-  let carried = start_range ~librarian_front:(Choice.Librarian_snapshot snapshot) absorbed_messages in
+  let carried = start_range ~librarian_front:(frozen_librarian_position (Choice.Librarian_snapshot snapshot)) absorbed_messages in
   check int "the range starts one atom before the position"
     (snapshot.Snapshot.end_atom - 1) carried.Host.first_atom;
   check bool "and still says the Librarian named the front" true
@@ -2616,7 +2623,7 @@ let test_a_later_lane_cut_wins () =
   let snapshot = absorbed_snapshot () in
   let carried =
     start_range
-      ~librarian_front:(Choice.Librarian_snapshot snapshot)
+      ~librarian_front:(frozen_librarian_position (Choice.Librarian_snapshot snapshot))
       ~own_first_atom:(snapshot.Snapshot.end_atom + 1)
       start_seed_messages
   in
@@ -2635,7 +2642,7 @@ let test_a_librarian_position_behind_the_turn_start_still_wins () =
   let snapshot = absorbed_snapshot () in
   let carried =
     start_range
-      ~librarian_front:(Choice.Librarian_snapshot snapshot)
+      ~librarian_front:(frozen_librarian_position (Choice.Librarian_snapshot snapshot))
       ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = snapshot.Snapshot.end_atom + 1 })
       start_seed_messages
   in
@@ -2657,7 +2664,7 @@ let test_a_read_position_alone_starts_the_range_without_a_working_state () =
   let end_atom = 2 in
   let carried =
     start_range
-      ~librarian_front:(Choice.Librarian_progress { end_atom })
+      ~librarian_front:(frozen_librarian_position (Choice.Librarian_progress { end_atom }))
       ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
       start_seed_messages
   in
@@ -2685,7 +2692,7 @@ let test_a_read_position_alone_starts_the_range_without_a_working_state () =
 let test_a_read_position_behind_the_lane_cut_loses () =
   let carried =
     start_range
-      ~librarian_front:(Choice.Librarian_progress { end_atom = 1 })
+      ~librarian_front:(frozen_librarian_position (Choice.Librarian_progress { end_atom = 1 }))
       ~own_first_atom:2
       start_seed_messages
   in

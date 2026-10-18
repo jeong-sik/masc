@@ -151,9 +151,8 @@ let carried_history_projection
         history_messages
     in
     let* sent =
-      match source_projection with
-      | None -> Ok carried.Host.messages
-      | Some project -> project carried.Host.messages
+      Host.project_source ~unread:librarian_front.Keeper_turn_driver_try_provider.unread
+        source_projection carried.Host.messages
     in
     Ok { Host.carried; sent; atoms_kept = Host.carried_atoms carried }
   in

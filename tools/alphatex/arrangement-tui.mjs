@@ -43,7 +43,8 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
   if (signal?.aborted) return
   let sourceRoot = dirname(path), revision = loaded?.revision ?? null
   let accepting = true, closed = false, task = Promise.resolve(), prompt = null, status = 'Import a WAV or MIDI source with :help', showHelp = false
-  let pendingDraw = null, sequence = 0, workerFailure = null, recovery = null, failedSavePath = null
+  let pendingDraw = null, sequence = 0, workerFailure = null, recovery = null, terminatingWorker = false
+  const failedSavePaths = new Set()
   const jobs = new Map(), worker = new Worker(new URL('./arrangement-worker.mjs', import.meta.url)), wasRaw = process.stdin.isRaw
   let complete
   const done = new Promise(resolve => { complete = resolve })
@@ -75,7 +76,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     else { const error = new Error(message.error); error.name = message.cancelled ? 'AbortError' : 'Error'; job.reject(error) }
   })
   worker.on('error', fail)
-  worker.on('exit', code => { if (!closed) fail(new Error(`Arrangement worker exited ${code}`)) })
+  worker.on('exit', code => { if (!terminatingWorker) fail(new Error(`Arrangement worker exited ${code}`)) })
   async function save(target = path) {
     target = resolve(target)
     const project = editor.project, nextRoot = dirname(target)
@@ -86,8 +87,8 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     const retainedAssets = [...retained.values()].map((asset, index) => ({ ...asset, id: `retained-${index}` }))
     let nextRevision
     try { nextRevision = await request({ kind: 'save', path: target, project, revision: target === path ? revision : null, sourceRoot, retainedAssets }) }
-    catch (error) { failedSavePath = target; throw error }
-    failedSavePath = null
+    catch (error) { failedSavePaths.add(target); throw error }
+    failedSavePaths.delete(target)
     path = target; sourceRoot = nextRoot; revision = nextRevision; saved = project; status = `Saved ${path}`
   }
   async function effect(value) {
@@ -220,11 +221,11 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     try {
       await task
       if (editor.project !== saved) {
-        if (failedSavePath === path) await retainRecovery()
+        if (failedSavePaths.has(path)) await retainRecovery()
         else { try { await save() } catch { await retainRecovery() } }
       }
     } finally {
-      try { await worker.terminate() }
+      try { terminatingWorker = true; await worker.terminate() }
       finally {
         if (!embedded) { process.stdout.write('\x1b[?25h\x1b[?1049l'); process.stdin.setRawMode(wasRaw ?? false); process.stdin.pause() }
         if (recovery) process.stderr.write(`Arrangement edits retained at ${recovery}\n`)

@@ -200,3 +200,35 @@ existing files. `level 100` and `pan 64` set the selected track's MIDI volume an
 pan (0–127; pan 64 is center). Dense mixes can clip; lower track levels when the
 preview/export reports clipped samples. The broader destination and remaining work are recorded in
 [the sequencer design](../../docs/design/tui/MUSIC-SEQUENCER.md).
+
+
+## MIDI source experiments
+
+Open an existing SMF or RIFF RMID without changing it:
+
+```sh
+masc-alphatex --midi-file performance.mid
+masc-alphatex --midi-file patterns.mid --midi-pattern 2
+```
+
+The source editor retains original file bytes and source-event edits. Note pitch,
+velocity, timing, transpose/quantize/duplicate, chords/progressions and undo/redo
+operate on original-resolution ticks. `s` and closing save a new JSON document;
+`--project experiment.json` reopens it. `:export edited.mid` writes a MIDI file
+retaining expression, program/tempo maps, metadata, SysEx and opaque chunks. An
+unedited export is byte-for-byte original. A moved note keeps its source port and
+note-off identity; edits that would change them are refused.
+
+PPQ files use quarter-note beats; SMPTE files use frames. The grid uses whole source
+ticks, and a requested position that cannot resolve to those ticks is rejected.
+Format-2 files with several independent patterns require `:pattern N` or an explicit
+`--midi-pattern N`. `:channel 1–16` chooses an insertion/selection channel in a
+multi-channel track; `:select event-ID` chooses a specific paired note. Chord labels
+use note-key intervals and do not infer sustain-pedal voice durations. Shared-key
+ambiguity and unmatched input events remain in the original source.
+
+Full-message source audition, controller/tempo editing and clip arrangement are
+being connected. Space and WAV export currently report that boundary instead of
+playing a note-only approximation. The existing phrase-project MIDI/WAV transport
+continues to work. See [MIDI source semantics](MIDI-SOURCE.md) for retained data,
+source-event identities and timing behavior.

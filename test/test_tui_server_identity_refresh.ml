@@ -3197,7 +3197,7 @@ let test_settings_save_keeps_receipt_through_withdrawal () =
   Alcotest.(check bool) "receipt grants no current workspace authority" false
     (keeper_settings_save_current state request);
   Alcotest.(check string) "original edited bytes retained" draft.ksd_text
-    (settings_editor_text (List.hd state.keeper_settings_saves).ksa_request);
+    (settings_editor_text (List.hd (Keeper_settings_saves.all state.keeper_settings_saves)).ksa_request);
   Alcotest.(check bool) "terminal outcome cannot restart or be replaced by a late receipt" false
     (publish_keeper_settings_save request ~observed_ns:25L (Settings_posting {ksp_snapshot=draft.ksd_snapshot.kss_observed;ksp_patch=Some draft.ksd_patch}))
 
@@ -3242,8 +3242,8 @@ let test_settings_save_recovers_changes_on_fresh_revision () =
     (apply_keeper_settings_save state request (Settings_finished (None,Settings_applied {
       response=`Null;severity="system";message="late"})));
   Alcotest.(check bool) "successor retains its own edited input" true
-    ((List.hd state.keeper_settings_saves).ksa_request.ksv_token == successor.ksv_token
-     && (List.hd state.keeper_settings_saves).ksa_status = Settings_checking);
+    ((List.hd (Keeper_settings_saves.all state.keeper_settings_saves)).ksa_request.ksv_token == successor.ksv_token
+     && (List.hd (Keeper_settings_saves.all state.keeper_settings_saves)).ksa_status = Settings_checking);
   Alcotest.(check string) "recovery never rewrites original request text" retained.ksd_text draft.ksd_text
 
 let test_settings_save_not_sent_preserves_origin_input () =
@@ -3255,7 +3255,7 @@ let test_settings_save_not_sent_preserves_origin_input () =
   Alcotest.(check bool) "withdrawn editor authority cannot dispatch" true
     (Result.is_error (begin_keeper_settings_save state ~origin
       ~draft ~started_ns:30L));
-  let retained = List.hd state.keeper_settings_saves in
+  let retained = List.hd (Keeper_settings_saves.all state.keeper_settings_saves) in
   Alcotest.(check bool) "refused origin keeps a recoverable unposted operation" true
     (retained.ksa_recoverable && match retained.ksa_status with
      | Settings_finished (_,Settings_not_sent _) -> true
@@ -3312,7 +3312,7 @@ let test_sandbox_and_editor_saves_share_pending_ownership () =
   ignore (publish_keeper_settings_save shortcut ~observed_ns:26L unchanged);
   ignore (apply_keeper_settings_save state shortcut unchanged);
   Alcotest.(check bool) "read-only outcome retains its exact observation without a patch" true
-    (match (List.hd state.keeper_settings_saves).ksa_status with
+    (match (List.hd (Keeper_settings_saves.all state.keeper_settings_saves)).ksa_status with
      | Settings_finished (Some frozen,Settings_unchanged) -> frozen.ksp_snapshot == observed && frozen.ksp_patch=None
      | Settings_checking | Settings_reading | Settings_posting _ | Settings_finished _ -> false);
   Alcotest.(check bool) "completed shortcut still cannot erase editor recovery" true
@@ -3340,7 +3340,7 @@ let test_sandbox_receipt_keeps_frozen_source_after_withdrawal () =
   Alcotest.(check bool) "receipt cannot authorize a current surface refresh" false (keeper_settings_save_current state request);
   Alcotest.(check bool) "original profile, snapshot and CAS patch stay joined" true
     (request.ksv_input = Sandbox_shortcut_input Keeper_sandbox_config.Micro_vm
-     && match (List.hd state.keeper_settings_saves).ksa_status with
+     && match (List.hd (Keeper_settings_saves.all state.keeper_settings_saves)).ksa_status with
         | Settings_finished (Some frozen,Settings_unconfirmed _) -> frozen == prepared
         | Settings_checking | Settings_reading | Settings_posting _ | Settings_finished _ -> false);
   Alcotest.(check bool) "terminal shortcut cannot dispatch again automatically" false
@@ -3381,7 +3381,7 @@ let test_assignment_receipt_keeps_original_choice_after_withdrawal () =
     (runtime_assignment_current state request);
   Alcotest.(check bool) "original Keeper, explicit runtime, snapshot and CAS revision stay joined" true
     (request.ras_key.ksk_keeper=keeper.k_name && request.ras_runtime_id=Some "codex.example"
-     && match (List.hd state.runtime_assignment_saves).raa_status with
+     && match (List.hd (Runtime_assignment_saves.all state.runtime_assignment_saves)).raa_status with
         | Assignment_finished (Some frozen,Assignment_unconfirmed _) ->
             frozen==prepared && frozen.rap_snapshot=observed && frozen.rap_expected_revision=revision
         | Assignment_checking | Assignment_reading | Assignment_posting _ | Assignment_finished _ -> false);
@@ -3418,7 +3418,7 @@ let test_assignment_serializes_same_keeper_config_intents () =
   Alcotest.(check bool) "an explicit later choice owns a fresh operation; old receipt cannot finish it" true
     (successor.ras_token != original.ras_token && successor.ras_runtime_id=None
      && not (apply_runtime_assignment state original finished)
-     && (List.hd state.runtime_assignment_saves).raa_status=Assignment_checking);
+     && (List.hd (Runtime_assignment_saves.all state.runtime_assignment_saves)).raa_status=Assignment_checking);
   let editor_state,editor_keeper,_,_,_ = keeper_settings_save_fixture () in
   editor_state.view <- Keepers Keeper_runtime_pick;
   editor_state.runtime_pick_keeper <- Some editor_keeper.k_name;
@@ -3426,7 +3426,7 @@ let test_assignment_serializes_same_keeper_config_intents () =
     (Result.is_error (begin_runtime_assignment_save editor_state ~keeper_name:editor_keeper.k_name
       ~runtime_id:None ~started_ns:36L)
      && editor_state.runtime_pick_keeper=Some editor_keeper.k_name
-     && editor_state.runtime_assignment_saves=[])
+     && Runtime_assignment_saves.all editor_state.runtime_assignment_saves=[])
 
 let catalog_request state intent started_ns =
   match Masc_tui_types.begin_runtime_catalog_read state ~intent ~started_ns with
@@ -3600,7 +3600,7 @@ let test_runtime_form_retains_unknown_and_rejects_duplicate () =
     (Result.is_ok (begin_runtime_form_save state ~draft ~started_ns:17L));
   Alcotest.(check bool) "old terminal receipt cannot consume successor" false
     (apply_runtime_form_save state request unknown);
-  Alcotest.(check int) "both operation records remain" 2 (List.length state.runtime_form_saves)
+  Alcotest.(check int) "both operation records remain" 2 (List.length (Runtime_form_saves.all state.runtime_form_saves))
 
 let test_runtime_account_save_keeps_typed_form_and_workspace () =
   let open Masc_tui_types in
@@ -3964,10 +3964,127 @@ let test_owned_results_progress_between_shared_queue_prefixes () =
     (Eio.Stream.length mailbox=2 && status_of late=Some (Creation_finished Creation_created)
      && P.collect_owned_results state=[])
 
+let test_operation_histories_keep_unfinished_and_recovery_owners () =
+  let open Masc_tui_types in
+  let module P = Masc_tui_async_protocol in
+  let state,keeper,_,_,settings = keeper_settings_save_fixture () in
+  let assignment_keeper = {keeper with k_name="assignment-history"} in
+  state.keepers <- [keeper;assignment_keeper];
+  state.view <- Keepers Keeper_runtime_pick;
+  state.runtime_pick_keeper <- Some assignment_keeper.k_name;
+  let assignment = runtime_assignment_request state assignment_keeper.k_name (Some "codex.example") 30L in
+  let draft = runtime_model_draft () in
+  let form = runtime_form_request state draft in
+  let prepared = match prepare_runtime_form_save draft (runtime_form_reading ()) with
+    | Ok prepared -> prepared | Error _ -> Alcotest.fail "original form preparation failed" in
+  let apply (ready : P.async_msg P.mailed) = match ready.message with
+    | P.Runtime_form_save_changed (owner,status,_) ->
+        Alcotest.(check bool) "form observation advances only its registered owner" true
+          (apply_runtime_form_save state owner status)
+    | P.Keeper_settings_save_changed (owner,status,_) ->
+        Alcotest.(check bool) "settings observation advances only its registered owner" true
+          (apply_keeper_settings_save state owner status)
+    | P.Runtime_assignment_changed (owner,status,_) ->
+        Alcotest.(check bool) "assignment observation advances only its registered owner" true
+          (apply_runtime_assignment state owner status)
+    | _ -> Alcotest.fail "unexpected configuration delivery" in
+  let indexed form settings assignment =
+    List.exists (fun attempt -> attempt.rfa_request.rfs_token==form.rfs_token)
+      (Runtime_form_saves.pending state.runtime_form_saves)
+    && List.exists (fun attempt -> attempt.ksa_request.ksv_token==settings.ksv_token)
+      (Keeper_settings_saves.pending state.keeper_settings_saves)
+    && List.exists (fun attempt -> attempt.raa_request.ras_token==assignment.ras_token)
+      (Runtime_assignment_saves.pending state.runtime_assignment_saves) in
+  let no_pending () =
+    Runtime_form_saves.pending state.runtime_form_saves=[]
+    && Keeper_settings_saves.pending state.keeper_settings_saves=[]
+    && Runtime_assignment_saves.pending state.runtime_assignment_saves=[] in
+  ignore (publish_runtime_form_save form ~observed_ns:40L (Form_previewing prepared));
+  ignore (publish_keeper_settings_save settings ~observed_ns:41L Settings_reading);
+  ignore (publish_runtime_assignment assignment ~observed_ns:42L Assignment_reading);
+  let progress = P.collect_owned_results state in
+  let form_unknown = Form_finished (Some prepared,Form_unconfirmed "response unavailable") in
+  let settings_unknown = Settings_finished (None,Settings_unconfirmed "worker interrupted after dispatch") in
+  let assignment_unknown = Assignment_finished (None,Assignment_unconfirmed "response unavailable") in
+  ignore (publish_runtime_form_save form ~observed_ns:43L form_unknown);
+  ignore (publish_keeper_settings_save settings ~observed_ns:44L settings_unknown);
+  ignore (publish_runtime_assignment assignment ~observed_ns:45L assignment_unknown);
+  Alcotest.(check bool) "publication cannot retire owners before terminal UI application" true
+    (indexed form settings assignment);
+  List.iter apply progress;
+  Alcotest.(check bool) "captured progress cannot hide later terminal facts" true
+    (indexed form settings assignment);
+  let terminal = P.collect_owned_results state in
+  state.workspace_identity <- Workspace_identity_match_unconfirmed "disconnected";
+  suspend_workspace_readings state;
+  List.iter apply terminal;
+  Alcotest.(check bool) "withdrawn requests leave periodic delivery only after terminal application" true
+    (no_pending () && not (runtime_form_save_current state form)
+     && not (keeper_settings_save_current state settings)
+     && not (runtime_assignment_current state assignment));
+  state.workspace_identity <- Workspace_identity_match;
+  Alcotest.(check bool) "retained unknown form still blocks an implicit retry" true
+    (Result.is_error (begin_runtime_form_save state ~draft ~started_ns:46L));
+  Alcotest.(check bool) "history retains original uncertain settings input for explicit recovery" true
+    (match keeper_settings_recovery state settings.ksv_key with
+     | Some held -> held.ksd_text=settings_editor_text settings | None -> false);
+  (* Explicit new choices retain the old facts and admit distinct owners. *)
+  release_runtime_form_recovery state;
+  let next_form = runtime_form_request state draft in
+  state.view <- Keepers Keeper_detail;
+  state.detail_tab <- Detail_sandbox;
+  let next_settings = match begin_keeper_sandbox_save state ~profile:Keeper_sandbox_config.Docker ~started_ns:47L with
+    | Ok owner -> owner | Error detail -> Alcotest.fail detail in
+  state.view <- Keepers Keeper_runtime_pick;
+  state.runtime_pick_keeper <- Some assignment_keeper.k_name;
+  let next_assignment = runtime_assignment_request state assignment_keeper.k_name None 48L in
+  Alcotest.(check bool) "an empty ready collection keeps all unfinished successors indexed" true
+    (P.collect_owned_results state=[] && indexed next_form next_settings next_assignment);
+  release_runtime_form_recovery state;
+  Alcotest.(check bool) "releasing input recovery does not retire a running request" true
+    (indexed next_form next_settings next_assignment
+     && Option.is_none state.runtime_form_save_focus && not (runtime_form_input_locked state));
+  Alcotest.(check bool) "duplicate old outcomes cannot consume pending successors" true
+    (not (apply_runtime_form_save state form form_unknown)
+     && not (apply_keeper_settings_save state settings settings_unknown)
+     && not (apply_runtime_assignment state assignment assignment_unknown)
+     && indexed next_form next_settings next_assignment);
+  Alcotest.(check bool) "late old progress cannot replace a preserved terminal fact" true
+    (not (publish_runtime_form_save form ~observed_ns:49L (Form_posting prepared))
+     && not (publish_keeper_settings_save settings ~observed_ns:49L Settings_reading)
+     && not (publish_runtime_assignment assignment ~observed_ns:49L Assignment_reading));
+  let form_unsent = Form_finished (None,Form_not_sent "worker withdrawn before entry") in
+  let settings_unsent = Settings_finished (None,Settings_not_sent "worker withdrawn before entry") in
+  let assignment_unsent = Assignment_finished (None,Assignment_not_sent "worker withdrawn before entry") in
+  ignore (publish_runtime_form_save next_form ~observed_ns:50L form_unsent);
+  ignore (publish_keeper_settings_save next_settings ~observed_ns:51L settings_unsent);
+  ignore (publish_runtime_assignment next_assignment ~observed_ns:52L assignment_unsent);
+  state.workspace_identity <- Workspace_identity_match_unconfirmed "disconnected again";
+  suspend_workspace_readings state;
+  List.iter apply (P.collect_owned_results state);
+  Alcotest.(check bool) "pre-entry withdrawal facts settle their original successors without erasing history" true
+    (no_pending () && P.collect_owned_results state=[]
+     && List.exists (fun attempt -> attempt.rfa_request.rfs_token==form.rfs_token
+          && attempt.rfa_status=form_unknown) (Runtime_form_saves.all state.runtime_form_saves)
+     && List.exists (fun attempt -> attempt.rfa_request.rfs_token==next_form.rfs_token
+          && attempt.rfa_status=form_unsent) (Runtime_form_saves.all state.runtime_form_saves)
+     && List.exists (fun attempt -> attempt.ksa_request.ksv_token==settings.ksv_token
+          && attempt.ksa_status=settings_unknown) (Keeper_settings_saves.all state.keeper_settings_saves)
+     && List.exists (fun attempt -> attempt.ksa_request.ksv_token==next_settings.ksv_token
+          && attempt.ksa_status=settings_unsent) (Keeper_settings_saves.all state.keeper_settings_saves)
+     && List.exists (fun attempt -> attempt.raa_request.ras_token==assignment.ras_token
+          && attempt.raa_status=assignment_unknown && attempt.raa_request.ras_runtime_id=Some "codex.example")
+          (Runtime_assignment_saves.all state.runtime_assignment_saves)
+     && List.exists (fun attempt -> attempt.raa_request.ras_token==next_assignment.ras_token
+          && attempt.raa_status=assignment_unsent && attempt.raa_request.ras_runtime_id=None)
+          (Runtime_assignment_saves.all state.runtime_assignment_saves))
+
 let () =
   Alcotest.run "tui_server_identity_refresh"
     [ ( "server-identity-refresh"
-      , [ Alcotest.test_case "owned operation results progress between continuously refilled shared prefixes" `Quick
+      , [ Alcotest.test_case "operation histories retain unfinished delivery and uncertain recovery owners" `Quick
+            test_operation_histories_keep_unfinished_and_recovery_owners
+        ; Alcotest.test_case "owned operation results progress between continuously refilled shared prefixes" `Quick
             test_owned_results_progress_between_shared_queue_prefixes
         ; Alcotest.test_case "catalogue consumers share reads and accumulate fresh demand" `Quick
             test_catalog_demands_share_and_refresh_after_current_read

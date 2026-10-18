@@ -3,7 +3,7 @@
 A saved take can audition its original WAV and UMP stream together. Open it with:
 
 ```sh
-masc-alphatex --session /path/to/take --output AUDIO_UID --midi-output MIDI_UID
+masc-alphatex --session /path/to/take --output AUDIO_UID --midi-output=MIDI_UID
 ```
 
 In the take viewer, `o` cycles MIDI outputs (including WAV-only selection), and

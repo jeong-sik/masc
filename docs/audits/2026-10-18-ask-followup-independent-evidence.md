@@ -20,6 +20,8 @@ to two independent source attempts. This is a source-path count, not a measured
 I/O count or speedup. With cooperative executor availability, the preparation
 dependency changes from reaction then Tool/Task to three joined independent
 reads. Pool queueing, actual concurrency and rendered timing remain unmeasured.
+All branches still join before the HTTP response; this change does not stream
+early branch results or establish first-result paint.
 
 The canonical answer's Keeper, question, answer time and original stimulus are
 validated before any source read. That shared identity remains mandatory.

@@ -159,7 +159,7 @@ let pulse_line ~cols (state : state) kpis =
         count.running count.idle count.unavailable
   in
   let roster =
-    match state.local_workspace, state.keepers_error with
+    match state.local_keepers, state.keepers_error with
     | (Local_workspace_unread | Local_workspace_failed _), _
     | Local_workspace_read, Some _ -> "roster unavailable"
     | Local_workspace_read, None ->

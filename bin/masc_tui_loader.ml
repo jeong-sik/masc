@@ -464,9 +464,8 @@ let replace_keeper_rows ~preserve_on_error (state : state)
     ~selected_keeper:selected_keeper_name_after_refresh
   |> apply_keeper_log_snapshot state
 
-(** What the .masc directory held at one moment. Reading it touches the disk
-    and changes no state, so it can run away from the UI thread; applying it
-    is [apply_local_workspace]. *)
+(** Immutable local work/agent observation. Required Keeper metadata is a
+    separate source, so task/archive work cannot gate chat availability. *)
 type local_reading =
   { lr_agents : agent list
   ; lr_rows : Masc_tui_overview_tasks.rows_reading
@@ -476,16 +475,19 @@ type local_reading =
   ; lr_operator_stalled : Masc_tui_agenda.stalled Masc_tui_agenda.reading
   ; lr_goal_task_links : task_goal_links_reading
   ; lr_goals_to_confirm : Masc_tui_agenda.goal_to_confirm Masc_tui_agenda.reading
-  ; lr_keepers : keeper list
-  ; lr_keepers_error : string option
   }
 
-(* Worker reads can overlap a post-action reload or a retired workspace's
-   cleanup. Both touch the same metadata cache, so its read transaction has
-   one cooperative owner; waiting never holds the UI domain. *)
-let local_workspace_read_mutex = Eio.Mutex.create ()
+type local_keeper_reading =
+  { lkr_keepers : keeper list
+  ; lkr_error : string option
+  }
 
-let read_local_workspace_unlocked (base_path : string) : local_reading =
+(* The metadata and archive caches have different resource owners. A work
+   scan must not hold the metadata lock needed by input and saved chat opening. *)
+let local_work_read_mutex = Eio.Mutex.create ()
+let local_keeper_read_mutex = Eio.Mutex.create ()
+
+let read_local_work_unlocked (base_path : string) : local_reading =
   let masc_dir = Filename.concat base_path Common.masc_dirname in
   (* Load agents *)
   let agents_dir = Filename.concat masc_dir "agents" in
@@ -516,19 +518,21 @@ let read_local_workspace_unlocked (base_path : string) : local_reading =
     load_active_tasks base_path
   in
   let goals_to_confirm = load_goals_to_confirm base_path in
-  let keepers, keepers_error = load_keepers base_path in
   { lr_agents = agents; lr_rows = rows; lr_tasks_domain = tasks_domain
   ; lr_tasks_error = tasks_error; lr_task_flow = task_flow
   ; lr_operator_stalled = operator_stalled; lr_goal_task_links = goal_task_links
-  ; lr_goals_to_confirm = goals_to_confirm; lr_keepers = keepers
-  ; lr_keepers_error = keepers_error }
+  ; lr_goals_to_confirm = goals_to_confirm }
 
 let read_local_workspace base_path =
-  Eio.Mutex.use_rw ~protect:false local_workspace_read_mutex
-    (fun () -> read_local_workspace_unlocked base_path)
+  Eio.Mutex.use_rw ~protect:false local_work_read_mutex
+    (fun () -> read_local_work_unlocked base_path)
 
-let apply_local_workspace (state : state) (base_path : string)
-    (reading : local_reading) =
+let read_local_keepers base_path =
+  Eio.Mutex.use_rw ~protect:false local_keeper_read_mutex (fun () ->
+      let lkr_keepers, lkr_error = load_keepers base_path in
+      { lkr_keepers; lkr_error })
+
+let apply_local_workspace (state : state) (reading : local_reading) =
   state.agents <- reading.lr_agents;
   (* The domain rows land first: a detail view open across this refresh keeps
      its row even when the task just turned terminal, because the projection
@@ -563,19 +567,26 @@ let apply_local_workspace (state : state) (base_path : string)
   state.task_flow <- reading.lr_task_flow;
   state.operator_stalled <- reading.lr_operator_stalled;
   state.goals_to_confirm <- reading.lr_goals_to_confirm;
-  replace_keeper_rows ~preserve_on_error:true state ~keepers:reading.lr_keepers
-    ~error:reading.lr_keepers_error;
-  load_selected_live_context state base_path
-    (List.nth_opt state.keepers state.keeper_cursor);
   state.local_workspace <- Local_workspace_read
+
+let apply_local_keepers (state : state) (reading : local_keeper_reading) =
+  replace_keeper_rows ~preserve_on_error:true state ~keepers:reading.lkr_keepers
+    ~error:reading.lkr_error;
+  state.local_keepers <- Local_workspace_read
 
 (** Load state from .masc directory *)
 let load_from_masc_dir (state : state) (base_path : string) =
-  (* An explicit post-action read supersedes any older background snapshot. *)
+  (* Post-action reads supersede both older snapshots. Metadata is applied
+     first and no work observation can replace it afterward. *)
+  state.local_keeper_read_order <- Snapshot_read.invalidate state.local_keeper_read_order;
   state.local_workspace_read_order <- Snapshot_read.invalidate state.local_workspace_read_order;
-  apply_local_workspace state base_path (read_local_workspace base_path)
+  apply_local_keepers state (read_local_keepers base_path);
+  load_selected_live_context state base_path
+    (List.nth_opt state.keepers state.keeper_cursor);
+  apply_local_workspace state (read_local_workspace base_path)
 
 let clear_local_workspace ?(keep_keeper_rows = false) (state : state) =
+  state.local_keeper_read_order <- Snapshot_read.invalidate state.local_keeper_read_order;
   state.local_workspace_read_order <- Snapshot_read.invalidate state.local_workspace_read_order;
   state.agents <- [];
   state.tasks <- [];
@@ -596,7 +607,8 @@ let clear_local_workspace ?(keep_keeper_rows = false) (state : state) =
   state.log_entries <- [];
   state.log_error <- None;
   state.live_context <- Context_state.empty;
-  state.local_workspace <- Local_workspace_unread
+  state.local_workspace <- Local_workspace_unread;
+  state.local_keepers <- Local_workspace_unread
 ;;
 
 (** HTTP JSON decoding helpers. These intentionally fail closed for the TUI

@@ -2457,6 +2457,52 @@ let test_a_damaged_autosave_is_named_not_hidden () =
       (member "unreadable" (autosave_field listing) <> None))
 ;;
 
+(* An autosave whose outer checkpoint format and meta are valid but whose inner
+   Dos_snapshot format version is unsupported must be reported as unreadable
+   rather than advertised as resumable (#39960). *)
+let test_an_autosave_with_unsupported_snapshot_format_is_unreadable () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "echo.com" echo_com;
+    boot ~base_path "echo.com";
+    eject ();
+    let dir = checkpoints_dir ~base_path in
+    let { Machine_checkpoint.header; meta; machine_bytes } =
+      match
+        Machine_checkpoint.read ~dir Dos_lane.autosave_slot
+          ~machine:Machine_checkpoint.Dos ~format:Dos_lane.checkpoint_format
+      with
+      | Ok checkpoint -> checkpoint
+      | Error e -> fail (Machine_checkpoint.error_to_string e)
+    in
+    let magic = "OCAML-DOS-SNAPSHOT\000" in
+    let magic_len = String.length magic in
+    let current_format = Int64.to_int (String.get_int64_be machine_bytes magic_len) in
+    let bumped = Bytes.of_string machine_bytes in
+    Bytes.set_int64_be bumped magic_len (Int64.of_int (current_format + 1));
+    (match
+       Machine_checkpoint.write ~dir Dos_lane.autosave_slot header ~meta
+         ~machine_bytes:(Bytes.to_string bumped)
+     with
+     | Ok () -> ()
+     | Error message -> fail message);
+    (match Dos_lane.lookup_autosave ~dir with
+     | Dos_lane.Autosave_unreadable reason ->
+       check bool "unreadable reason names the unsupported format" true
+         (contains (Printf.sprintf "format %d" (current_format + 1)) reason)
+     | Dos_lane.No_autosave | Dos_lane.Autosave _ ->
+       fail "lookup_autosave treated an unsupported inner snapshot format as readable");
+    let screen = dispatch ~base_path "masc_dos_screen" [] in
+    check bool "still no machine" false (is_completed screen);
+    check bool "screen does not advertise resuming an unreadable snapshot format" false
+      (contains "resume with masc_dos_restore" (Tool_result.message screen));
+    check bool "screen reports that the autosave cannot be read" true
+      (contains "cannot read" (Tool_result.message screen));
+    check bool "autosave field carries unreadable reason" true
+      (member "unreadable" (autosave_field screen) <> None);
+    check bool "autosave field omits resume command" true
+      (member "resume" (autosave_field screen) = None))
+;;
+
 let test_activity_refusal_is_proven_pre_effect () =
   with_workspace @@ fun base_path ->
   List.iter (fun activity ->
@@ -2728,6 +2774,8 @@ let () =
             test_restore_stages_before_admission_and_cleans_refusal
         ; test_case "activity refusal is proven pre-effect" `Quick test_activity_refusal_is_proven_pre_effect
         ; test_case "a damaged autosave is named" `Quick test_a_damaged_autosave_is_named_not_hidden
+        ; test_case "an autosave with an unsupported snapshot format is unreadable" `Quick
+            test_an_autosave_with_unsupported_snapshot_format_is_unreadable
         ] )
     ]
 ;;

@@ -810,15 +810,34 @@ let meta_of_json json =
   | _ -> corrupt "the lane's fields are missing"
 ;;
 
-(* Read only, through {!Machine_checkpoint}'s header and meta -- never
-   {!Dos_snapshot.restore}, which would reconstruct the whole guest machine
-   just to say who last saved it. The meta goes through the same [meta_of_json]
-   a restore reads it with, so what this names is what a restore would find.
-   A file that is there but will not read is its own answer: reporting it as
-   "nothing there" would hide it until the next run replaced it. *)
+let snapshot_error_to_checkpoint_error = function
+  | Dos_snapshot.Wrong_format { saved; supported } ->
+    Machine_checkpoint.Other_format { saved; expected = supported }
+  | (Dos_snapshot.Not_a_snapshot | Dos_snapshot.Corrupt _) as e ->
+    Machine_checkpoint.Corrupt (Dos_snapshot.error_to_string e)
+;;
+
+let check_snapshot_header machine_bytes =
+  match Dos_snapshot.header machine_bytes with
+  | Error e -> Error (snapshot_error_to_checkpoint_error e)
+  | Ok { Dos_snapshot.format; core = _ } ->
+    if format <> Dos_snapshot.format_version then
+      Error
+        (Machine_checkpoint.Other_format
+           { saved = format; expected = Dos_snapshot.format_version })
+    else Ok ()
+;;
+
+(* Read only, through {!Machine_checkpoint}'s header, meta and {!Dos_snapshot.header}
+   -- never {!Dos_snapshot.restore}, which would reconstruct the whole guest
+   machine just to say who last saved it. The snapshot header and [meta_of_json]
+   use the same format and schema checks a restore reads with, so what this
+   names is what a restore would accept. A file that is there but will not read
+   is its own answer: reporting it as "nothing there" would hide it until the
+   next run replaced it. *)
 let lookup_slot ~dir slot =
   match
-    Machine_checkpoint.read_meta ~dir slot ~machine:Machine_checkpoint.Dos
+    Machine_checkpoint.read ~dir slot ~machine:Machine_checkpoint.Dos
       ~format:checkpoint_format
   with
   | Error (Machine_checkpoint.No_slot _) -> No_autosave
@@ -828,16 +847,23 @@ let lookup_slot ~dir slot =
        | Machine_checkpoint.Other_format _
        | Machine_checkpoint.Corrupt _) as e) ->
     Autosave_unreadable (Machine_checkpoint.error_to_string e)
-  | Ok { Machine_checkpoint.meta; modified; header = _ } ->
-    (match meta_of_json meta with
-     | Error e -> Autosave_unreadable (error_to_string e)
-     | Ok m ->
-       Autosave
-         { program = m.saved_program
-         ; steps = m.saved_steps
-         ; saved_by = m.saved_by
-         ; saved_at = modified
-         })
+  | Ok { Machine_checkpoint.meta; machine_bytes; header = _ } ->
+    (match Unix.stat (Machine_checkpoint.path ~dir slot) with
+     | exception Unix.Unix_error (e, _, _) ->
+       Autosave_unreadable (Unix.error_message e)
+     | st ->
+       (match check_snapshot_header machine_bytes with
+        | Error e -> Autosave_unreadable (Machine_checkpoint.error_to_string e)
+        | Ok () ->
+          (match meta_of_json meta with
+           | Error e -> Autosave_unreadable (error_to_string e)
+           | Ok m ->
+             Autosave
+               { program = m.saved_program
+               ; steps = m.saved_steps
+               ; saved_by = m.saved_by
+               ; saved_at = st.Unix.st_mtime
+               })))
 ;;
 
 let lookup_autosave ~dir = lookup_slot ~dir autosave_slot
@@ -1469,10 +1495,7 @@ let prepare_restore ~dir ~slot ~previous_autosave ~ledger_dir ~saves_dir_of =
   let* meta = meta_of_json checkpoint.Machine_checkpoint.meta in
   let* m = match Dos_snapshot.restore checkpoint.machine_bytes with
     | Ok m -> Ok m
-    | Error (Dos_snapshot.Wrong_format {saved; supported}) ->
-        Error (Checkpoint_refused (Machine_checkpoint.Other_format {saved; expected=supported}))
-    | Error ((Dos_snapshot.Not_a_snapshot | Dos_snapshot.Corrupt _) as e) ->
-        Error (Checkpoint_refused (Machine_checkpoint.Corrupt (Dos_snapshot.error_to_string e))) in
+    | Error e -> Error (Checkpoint_refused (snapshot_error_to_checkpoint_error e)) in
   let kept = Hashtbl.create 16 in
   List.iter (fun name ->
     Option.iter (Hashtbl.replace kept name) (Dos_machine.read_mounted m name))

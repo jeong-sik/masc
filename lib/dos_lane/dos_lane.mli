@@ -608,10 +608,10 @@ val autosave_prev_slot : Machine_checkpoint.slot
     on its own the way {!lookup_autosave} offers {!autosave_slot}. *)
 
 val lookup_autosave : dir:string -> autosave_lookup
-(** What the autosave slot holds, read through {!Machine_checkpoint}'s header
-    and meta alone -- never through {!restore}, which would reconstruct the
-    whole guest machine just to say who saved it last. This is an offer to
-    resume, never a fact anything depends on. *)
+(** What the autosave slot holds, read through {!Machine_checkpoint}'s header,
+    meta and the snapshot header -- never through {!restore}, which would
+    reconstruct the whole guest machine just to say who saved it last. This is
+    an offer to resume, never a fact anything depends on. *)
 
 val lookup_previous_autosave : dir:string -> autosave_lookup
 (** {!lookup_autosave} for {!autosave_prev_slot}. After a restart this can be

@@ -85,6 +85,7 @@ export function editorCommand(editor, line) {
       const tick = beats(args[0])
       if (tick >= editor.project.length) throw new Error('Cursor outside project')
       return { editor: { ...editor, tick, pitch: pitch(args[1]) } }
+    }
     case 'save': case 'play': case 'stop': case 'record': case 'help':
       count(0); return { editor, effect: { kind: command } }
     case 'save-as': case 'export': case 'wave':

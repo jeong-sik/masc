@@ -1068,7 +1068,7 @@
  (name masc_tui_context_state)
  (wrapped false)
  (modules masc_tui_context_state)
- (libraries masc masc.masc_workspace yojson))
+ (libraries masc masc.masc_workspace masc_tui_fetched yojson))
 
 (library
  (name masc_tui_context_inspector)
@@ -2036,6 +2036,7 @@
   masc_tui_command
   masc_tui_footer
   masc_tui_context_state
+  masc_tui_fetched
   masc_tui_frame_presenter
   masc_tui_keeper_chat_projection
   masc_tui_keeper_chat_diff

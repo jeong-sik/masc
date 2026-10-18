@@ -1,3 +1,4 @@
+import { liveMidiPlan } from '../live-midi.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { EventEmitter, once } from 'node:events'
@@ -68,7 +69,7 @@ test('actual IO worker preserves sources in redo history when saving to a differ
 
 const flush=()=>new Promise(resolve=>setImmediate(resolve))
 async function controller(options={}){
-  const observed={requests:[],saved:[],recovered:[],terminated:false,players:[],removed:[],takes:[],captures:[],monitors:[]},process=new EventEmitter()
+  const observed={requests:[],saved:[],recovered:[],terminated:false,players:[],removed:[],takes:[],captures:[],monitors:[],live:[],claims:[]},process=new EventEmitter()
   process.stdin=Object.assign(new EventEmitter(),{isTTY:true,isRaw:false,setRawMode(value){this.isRaw=value},resume(){},pause(){}})
   process.stdout=Object.assign(new EventEmitter(),{isTTY:true,columns:100,rows:24,write(){}});process.stderr={write(){}}
   let owner
@@ -86,6 +87,14 @@ async function controller(options={}){
   const slot=`arrange-controller-${randomUUID()}`
   globalThis[slot]={process,Worker:OwnedWorker,arrangementSchedule,arrangementRoute,selectArrangementRoute,arrangementPlaybackRequest,...editorAPI,join,dirname,resolve,tmpdir,randomUUID,
     emitKeypressEvents(){},safeText:String,recordingEpoch,
+    liveMidiPlan, midiDestinations:async()=>[],
+    backingMidiClaims:async value=>{observed.claims.push(value);await options.inspect?.(value);return options.backingClaims??[]},
+    openLiveMidi:async options=>{
+      let finish,reject;const completion=new Promise((yes,no)=>{finish=yes;reject=no})
+      const info={kind:"monitoring",bindings:options.routes.map(route=>({source:route.source,device:{id:route.destination,name:"Instrument"},scope:route.scope}))}
+      const entry={options,finish,reject,stops:0};observed.live.push(entry);options.onEvent(info)
+      return {ready:Promise.resolve(info),completion,stop(){entry.stops++}}
+    },
     mkdir:options.mkdir??(async()=>{}), devices:async()=>({audio:[],midi:[]}),
     monitorInput(options){
       let finish,reject
@@ -596,4 +605,43 @@ test('monitor output replacement waits for old close, cancellation opens no late
  view.command('input later');await flush();assert.ok(third.stops>0)
  view.key('q');await flush();third.finish({state:'monitored'});await view.done
  assert.equal(view.observed.monitors.length,3);assert.equal(view.process.stdin.isRaw,false)
+})
+
+
+test('live route replacement and exit wait for child closure while preserving independent route selections',async()=>{
+ const view=await controller()
+ view.command('midi-monitor 10 42 4 6');await flush()
+ const first=view.observed.live[0];assert.deepEqual(first.options.routes,[{source:'10',destination:'42',scope:{kind:'channels',channels:[{group:3,channel:5}]}}])
+ view.command('midi-monitor 11 43');await flush();assert.ok(first.stops>0);assert.equal(view.observed.live.length,1)
+ first.finish({});await flush();const second=view.observed.live[1];assert.equal(second.options.routes.length,2)
+ let ended=false;view.done.then(()=>{ended=true});view.key('q');await flush();assert.ok(second.stops>0);assert.equal(ended,false)
+ second.finish({});await view.done;assert.equal(view.process.stdin.isRaw,false)
+})
+test('new backing waits for live close and claims admission; live monitor changes do not finalize recording',async()=>{
+ const claims=[{destination:'42',scope:{kind:'channels',channels:[{group:0,channel:0}]}}]
+ const view=await controller({backingClaims:claims});await primeWave(view)
+ view.command('midi-monitor 10 42 1 2');await flush();const first=view.observed.live[0]
+ view.command('input interface');view.key('space');await flush()
+ const prepare=view.observed.requests.find(job=>job.kind==='prepare-wave')
+ view.worker.emit('message',{id:prepare.id,ok:true,result:{path:'/owned/play/plan.json',format:'wave-arrangement'}});await flush()
+ assert.ok(first.stops>0);assert.equal(view.observed.players.length,0)
+ first.finish({});await flush();const active=view.observed.live[1]
+ assert.deepEqual(active.options.reserved,claims);assert.equal(view.observed.players.length,1)
+ view.command('record');await flush();const capture=view.observed.captures[0];assert.ok(capture)
+ view.command('midi-monitor off');await flush();assert.equal(capture.stops,0);assert.ok(active.stops>0)
+ active.finish({});await flush();view.command('record-stop');await flush();capture.finish({});await flush()
+ const attach=view.observed.requests.find(job=>job.kind==='attach-recording');view.worker.emit('message',{id:attach.id,ok:false,error:'retained take'})
+ view.key('q');await flush();view.observed.players[0].finish();await view.done
+})
+
+
+test('backing plan survives process closure while its native ownership inspection is admitted',async()=>{
+ let release;const inspected=new Promise(resolve=>{release=resolve})
+ const view=await controller({inspect:()=>inspected});await primeWave(view);view.key('space');await flush()
+ const prepare=view.observed.requests.find(job=>job.kind==='prepare-wave')
+ view.worker.emit('message',{id:prepare.id,ok:true,result:{path:'/owned/retained/plan.json',format:'wave-arrangement'}});await flush()
+ const player=view.observed.players[0];view.command('midi-monitor 10 42');await flush();assert.equal(view.observed.claims.length,1)
+ player.finish();await flush();assert.ok(!view.observed.removed.includes('/owned/retained'));assert.equal(view.observed.live.length,0)
+ release();await flush();assert.equal(view.observed.live.length,1);assert.ok(view.observed.removed.includes('/owned/retained'))
+ view.key('q');await flush();view.observed.live[0].finish({});await view.done
 })

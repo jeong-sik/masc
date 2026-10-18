@@ -129,7 +129,7 @@ availability before Work settles, independent failures, and equal-number
 cross-source tickets plus suspension/successors. They use production admission
 and state-application functions and assert stored state, not TUI text/layout.
 Existing composer, detail-focus and metrics fixtures identify observed metadata.
-Four further authored, unexecuted cases cover explicit source supersession and
+Four further authored, unexecuted cases cover source-local refresh and
 worker cleanup, creation availability before Work, confirmed deletion without
 retargeting detail, and cancellation/exception propagation followed by another
 reader using the same cache resource.

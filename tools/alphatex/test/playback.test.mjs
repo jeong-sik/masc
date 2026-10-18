@@ -30,6 +30,19 @@ test('one native transport owns pause, seek, resume and loop state until child c
   assert.deepEqual(f.commands, [{ kind: 'pause' }, { kind: 'seek', seconds: 1 }, { kind: 'resume' }, { kind: 'stop' }])
   assert.deepEqual(seen, ['playing', 'paused', 'playing', 'stopped'])
 })
+test('seek forwards the inclusive WAV endpoint and refuses positions beyond it', async () => {
+  for (const loop of [false, true]) {
+    const f = fixture({ loop })
+    f.event('playing'); await f.playback.ready
+    f.playback.seek(2)
+    assert.deepEqual(f.commands, [{ kind: 'seek', seconds: 2 }])
+    for (const seconds of [2.001, -1, Infinity, NaN]) assert.throws(() => f.playback.seek(seconds), /Seek/)
+    assert.equal(f.commands.length, 1)
+    if (loop) { f.event('playing', { currentTime: 0 }); f.playback.stop() }
+    f.event('stopped', { currentTime: loop ? 0 : 2 }); f.close()
+    assert.equal((await f.playback.completion).currentTime, loop ? 0 : 2)
+  }
+})
 test('substituted output or malformed protocol fails and waits for the owned child', async () => {
   const f = fixture()
   f.event('playing', { device: { id: 'another-output', name: 'Other', outputs: 2 } })

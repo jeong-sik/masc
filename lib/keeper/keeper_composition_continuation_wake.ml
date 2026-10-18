@@ -147,9 +147,8 @@ let resume_with_profiles ?on_recovery_held ~profiles ~context continuation =
     | Some bound -> Keeper_task_skill_turn.resolve ~descriptors ~snapshot
         (Keeper_skill_activation_recorder.bound_task_references bound)
         |> Result.map_error hold_task_skills in
-  let* task_selection = Keeper_task_skill_turn.with_descriptors ~descriptors ~snapshot task_selection
+  let* (task_selection,preparation) = Keeper_task_skill_turn.bind_surface ~descriptors ~snapshot task_selection
     |> Result.map_error hold_task_skills in
-  let preparation = Keeper_task_skill_turn.prepare_surface ~descriptors ~snapshot task_selection in
   List.iter (fun (diagnostic : Keeper_skill_catalog.projection_diagnostic) ->
     Log.Keeper.warn ~keeper_name:source.keeper_name "continuation Skill projection unavailable: %s"
       (Keeper_skill_catalog.error_to_string diagnostic.error)) preparation.diagnostics;

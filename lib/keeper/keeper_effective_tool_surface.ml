@@ -150,13 +150,11 @@ let project
       Keeper_task_skill_turn.resolve ~descriptors:tool_descriptors
         ~snapshot:skill_snapshot task_skill_references
   in
-  let task_selection = Result.bind task_selection
-    (Keeper_task_skill_turn.with_descriptors ~descriptors:tool_descriptors ~snapshot:skill_snapshot) in
-  match task_selection with
+  let bound = Result.bind task_selection
+    (Keeper_task_skill_turn.bind_surface ~descriptors:tool_descriptors ~snapshot:skill_snapshot) in
+  match bound with
   | Error _ as error -> error
-  | Ok task_selection ->
-    let preparation = Keeper_task_skill_turn.prepare_surface
-        ~descriptors:tool_descriptors ~snapshot:skill_snapshot task_selection in
+  | Ok (task_selection, preparation) ->
     let global_skill_catalog = preparation.catalog in
     let projection_diagnostics = preparation.diagnostics in
     let capability_surface =

@@ -562,13 +562,9 @@ let prepare_agent_setup
         ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
         ~absolute_turn:keeper_turn_id)
       ~phase:Keeper_skill_preparation_runtime_observation.Executable_setup (fun () ->
-    let* task_skill_selection = Keeper_task_skill_turn.with_descriptors
+    Keeper_task_skill_turn.bind_surface
       ~descriptors:tool_descriptors ~snapshot:skill_snapshot task_skill_selection
-      |> Result.map_error Keeper_task_skill_turn.core_error in
-    let preparation =
-      Keeper_task_skill_turn.prepare_surface ~descriptors:tool_descriptors
-        ~snapshot:skill_snapshot task_skill_selection in
-    Ok (task_skill_selection, preparation))
+      |> Result.map_error Keeper_task_skill_turn.core_error)
   in
   let snapshot_rev =
     Skill_catalog_snapshot.snapshot_revision_to_string

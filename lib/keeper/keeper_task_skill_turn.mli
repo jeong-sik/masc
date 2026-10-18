@@ -105,13 +105,15 @@ val resolve_observations :
     state, grouping identical exact references before projection and retaining
     every Task identity on shared references. *)
 
-val with_descriptors : descriptors:Keeper_tool_descriptor.t list ->
-  snapshot:Skill_catalog_snapshot.t -> t -> (t, error) result
-(** Reproject only already selected exact references from the same frozen snapshot;
-    preserve Task provenance and bind the descriptor objects used by the turn.
-    The exact same snapshot object and descriptor objects reuse the immutable
-    selection without resolving/projecting again. Changed or mixed inputs
-    reproject; no revision string, current Task or wall clock is a cache key. *)
+val bind_surface : descriptors:Keeper_tool_descriptor.t list ->
+  snapshot:Skill_catalog_snapshot.t -> t -> (t * preparation, error) result
+(** Bind selected exact references and return their matching immutable preparation
+    together. Preserve Task provenance and validate selection authority and exact
+    snapshot/descriptor binding here; callers need no second [prepare_surface] check.
+    Matching inputs reuse the original selection/preparation. Changed or mixed
+    inputs resolve again and return the preparation constructed by that resolution.
+    Preserve the retained-turn-surface observation after successful binding only.
+    No revision string, current Task or wall clock is a cache key. *)
 val descriptors : t -> Keeper_tool_descriptor.t list option
 (** [None] means no runtime Tool authority has been captured yet. *)
 val prepare_surface :
@@ -119,7 +121,7 @@ val prepare_surface :
   descriptors:Keeper_tool_descriptor.t list -> t -> preparation
 (** Reuse the caller-owned preparation for matching frozen inputs. Mismatched
     or unknown input derives a fresh observation; this does not rebind Task
-    references or authorize execution. Use [with_descriptors] for binding. *)
+    references or authorize execution. Use [bind_surface] for binding. *)
 val resolve_live_observations :
   config:Workspace.config -> keeper_name:string ->
   snapshot:Skill_catalog_snapshot.t ->

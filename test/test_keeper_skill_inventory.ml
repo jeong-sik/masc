@@ -485,11 +485,10 @@ value = {}
   let unwrap = function Ok value -> value | Error error -> fail (Selection.error_to_string error) in
   let selected = unwrap (Selection.resolve_for_task ~snapshot:frozen ~task_id:"task-1" [reference]) in
   let project tool_descriptors tool_deny =
-    let catalog,_ = Catalog.of_snapshot ~descriptors:tool_descriptors frozen in
-    let selection = unwrap (Selection.with_descriptors ~descriptors:tool_descriptors ~snapshot:frozen selected) in
+    let selection,preparation = unwrap (Selection.bind_surface ~descriptors:tool_descriptors ~snapshot:frozen selected) in
     let surface = Surface.create_with_descriptors ~tool_descriptors ~tool_deny
       ~sandbox_profile:Masc.Keeper_types_profile.Docker ~skill_names:None
-      ~global_skill_catalog:catalog ~skill_inventory:(Inventory.of_snapshot ~descriptors:tool_descriptors frozen)
+      ~global_skill_catalog:preparation.catalog ~skill_inventory:preparation.inventory
       ~task_skills:(Selection.skills selection) in
     selection,surface in
   let composition surface = match Catalog.composition_entries (Surface.skill_catalog surface) with
@@ -522,7 +521,7 @@ value = {}
     let tool_descriptors = owned_descriptors () in
     let selection = unwrap (Selection.resolve_for_task ~snapshot:frozen ~descriptors:tool_descriptors
       ~task_id [reference]) in
-    Ok (selection,Selection.prepare_surface ~snapshot:frozen ~descriptors:tool_descriptors selection)) in
+    Selection.bind_surface ~snapshot:frozen ~descriptors:tool_descriptors selection) in
   let before,prepared = match prepare "owned-a" with Ok value -> value | Error _ -> fail "owned preparation failed" in
   ignore (project (descriptors ["interleaved"]) []);
   let after,reused = match prepare "owned-b" with Ok value -> value | Error _ -> fail "owned preparation reuse failed" in
@@ -538,7 +537,13 @@ value = {}
      let has decision report = List.exists (fun (sample : Observation.sample) ->
        sample.component = Observation.Projection && sample.decision = Some decision) report.Observation.samples in
      check bool "first owned generation actually constructs its projection" true (has Observation.Constructed cold);
-     check bool "second observation actually reuses its projection" true (has Observation.Reused warm)
+     check bool "second observation actually reuses its projection" true (has Observation.Reused warm);
+     List.iter (fun report ->
+       match List.filter (fun (sample : Observation.sample) ->
+         sample.component=Observation.Retained_turn_surface) report.Observation.samples with
+       | [sample] -> check bool "paired successful binding preserves one completed retained-surface observation" true
+           (sample.decision=Some Observation.Reused && sample.outcome=Observation.Returned)
+       | _ -> fail "successful paired binding lost or duplicated its retained-surface observation") [cold;warm]
    | _ -> fail "expected cold and warm preparation observations"));
   let _,denied = project first_descriptors ["addon:machine_screen"] in
   check int "denied node withholds composition" 0

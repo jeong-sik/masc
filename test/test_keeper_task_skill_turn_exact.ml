@@ -652,18 +652,16 @@ let test_task_binding_reuses_only_exact_frozen_inputs () =
     | Ok selection -> selection | Error error -> fail (Selection.error_to_string error) in
   let descriptors = Masc.Keeper_tool_descriptor.all_descriptors () in
   let bind ~snapshot descriptors selection =
-    match Selection.with_descriptors ~snapshot ~descriptors selection with
+    match Selection.bind_surface ~snapshot ~descriptors selection with
     | Ok selection -> selection | Error error -> fail (Selection.error_to_string error) in
-  let bound = bind ~snapshot:first descriptors selection in
+  let bound,prepared = bind ~snapshot:first descriptors selection in
   check int "the shared exact Skill remains one executable composition" 1
     (List.length (Selection.partition bound).compositions);
-  let prepared = Selection.prepare_surface ~snapshot:first ~descriptors bound in
   let interleaved = snapshot skill_config
       [["other",document ~name:"other" ~description:"another workspace preparation" "OTHER"]] in
   ignore (Masc.Keeper_skill_catalog.of_snapshot ~descriptors interleaved);
-  let reused = bind ~snapshot:first (List.map Fun.id descriptors) bound in
+  let reused,after_interleaving = bind ~snapshot:first (List.map Fun.id descriptors) bound in
   check bool "the prompt and execution keep one immutable binding without reprojecting" true (bound == reused);
-  let after_interleaving = Selection.prepare_surface ~snapshot:first ~descriptors reused in
   check bool "another preparation cannot evict the original turn's catalog and inventory" true
     (prepared == after_interleaving);
   check bool "the retained inventory still names the exact original Skill" true
@@ -688,26 +686,30 @@ let test_task_binding_reuses_only_exact_frozen_inputs () =
     (match mixed_preparations.preparation with
      | Some next -> next == prepared
      | None -> false);
-  let rebound_preparations = bind ~snapshot:first descriptors mixed_preparations in
+  let rebound_preparations,merged_preparation = bind ~snapshot:first descriptors mixed_preparations in
   check (list string) "reprojection keeps every original Task while unifying the preparation"
     ["task-a";"task-b";"task-c"] (one_selected rebound_preparations).task_ids;
+  check bool "merged Task binding returns the original shared catalog and inventory" true
+    (merged_preparation == prepared);
   let without_lane = List.filter (fun (descriptor : Masc.Keeper_tool_descriptor.t) ->
     not (List.mem "keeper_lane_status" (Masc.Keeper_tool_descriptor.keeper_model_names descriptor))) descriptors in
   check bool "the fixture really changes Tool authority" true (List.length without_lane < List.length descriptors);
-  let changed_tools = bind ~snapshot:first without_lane bound in
+  let changed_tools,changed_preparation = bind ~snapshot:first without_lane bound in
   check int "changed authority cannot retain the old executable composition" 0
     (List.length (Selection.partition changed_tools).compositions);
   check bool "changed Tool authority retains its actual projection diagnostic" true
     (Option.is_some (one_selected changed_tools).diagnostic);
+  check int "paired preparation cannot advertise the composition withheld by new Tool authority" 0
+    (List.length (Masc.Keeper_skill_catalog.composition_entries changed_preparation.catalog));
   let mixed_binding = Selection.merge [selection;changed_tools] in
   check bool "bound and unbound projections cannot share a reuse proof" true
     (Option.is_none mixed_binding.preparation);
-  let rebound_mixed = bind ~snapshot:first without_lane mixed_binding in
+  let rebound_mixed,_ = bind ~snapshot:first without_lane mixed_binding in
   check int "unbound selection cannot smuggle a missing Tool through merged authority" 0
     (List.length (Selection.partition rebound_mixed).compositions);
   let later = snapshot skill_config
       [["lane",composition_document ~name:"lane" ~node_id:"later"]] in
-  let changed_source = bind ~snapshot:later descriptors bound in
+  let changed_source,_ = bind ~snapshot:later descriptors bound in
   check int "same Tool objects do not hide a changed frozen source" 0 (List.length changed_source.selected);
   check int "the original pin becomes explicitly unavailable against the new source" 1
     (List.length changed_source.unprojectable);
@@ -722,14 +724,22 @@ let test_task_binding_reuses_only_exact_frozen_inputs () =
   let mixed = Selection.merge [bound;later_selection] in
   check bool "mixed source selections have no single reusable projection input" true
     (Option.is_none mixed.preparation);
-  let restored = bind ~snapshot:first descriptors mixed in
+  let restored,restored_preparation = bind ~snapshot:first descriptors mixed in
   check int "mixed sources reproject instead of borrowing the first binding" 1 (List.length restored.selected);
   check int "the later revision cannot be offered from the original snapshot" 1 (List.length restored.unprojectable);
+  check bool "restored exact pins share the original preparation without borrowing the later source" true
+    (restored_preparation == prepared);
   let unreadable = Snapshot.config_unreadable ~detail:"source unavailable after the original selection" in
   check bool "matching Tool authority cannot hide an unreadable replacement snapshot" true
-    (match Selection.with_descriptors ~snapshot:unreadable ~descriptors bound with
+    (match Selection.bind_surface ~snapshot:unreadable ~descriptors bound with
      | Error (Selection.Skill_config_unreadable _) -> true
-     | Error _ | Ok _ -> false)
+     | Error _ | Ok _ -> false);
+  check bool "a different Task without pins can still bind the unreadable observation without stale Skills" true
+    (match Selection.bind_surface ~snapshot:unreadable ~descriptors Selection.empty with
+     | Ok (unrelated,preparation) -> unrelated.selected=[] && unrelated.unprojectable=[]
+         && Masc.Keeper_skill_catalog.prepared_snapshot preparation.projection==unreadable
+         && Masc.Keeper_skill_catalog.composition_entries preparation.catalog=[]
+     | Error _ -> false)
 ;;
 
 let run_skill_tool tool input =
@@ -1737,7 +1747,7 @@ let test_preparation_manifest_retains_original_turn_and_private_boundaries () =
         Selection.resolve ~descriptors ~snapshot:frozen []) with
     | Ok selection -> selection | Error error -> fail (Selection.error_to_string error) in
   ignore (R.with_turn_result ~preview ~config ~keeper_name ~turn_ref ~phase:R.Executable_setup
-    (fun () -> Ok (Selection.prepare_surface ~snapshot:frozen ~descriptors selection)));
+    (fun () -> Selection.bind_surface ~snapshot:frozen ~descriptors selection));
   check bool "the carried writer retains the producer's original identity" true
     (Masc.Keeper_turn_preview.original_turn_ref preview = Some turn_ref);
   let path = M.path_for_trace config ~keeper_name ~trace_id:(Ids.Turn_ref.trace_id turn_ref) in

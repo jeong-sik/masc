@@ -132,9 +132,10 @@ let observe_linked_task ~base_path (ask : Keeper_ask.ask) =
   match ask.task_id with
   | None -> Task_unlinked
   | Some task_id ->
-      let config = Workspace_core.default_config base_path in
       let reading =
-        try Eio_guard.with_named_switch "ask-linked-task-status" (fun () ->
+        try
+          let config = Workspace_core.default_config base_path in
+          Eio_guard.with_named_switch "ask-linked-task-status" (fun () ->
           Domain_pool_ref.submit_io_or_inline
             (fun () -> Workspace_query.read_task_status_r config ~task_id))
         with
@@ -154,7 +155,7 @@ let observe_linked_task ~base_path (ask : Keeper_ask.ask) =
 type followup = {
   answered_at : float;
   stimulus_id : string;
-  reactions : Keeper_reaction_ledger.event_queue_reaction_evidence_outcome;
+  reactions : (Keeper_reaction_ledger.event_queue_reaction_evidence_outcome, string) result;
   tool_actions : (tool_actions, string) result;
   linked_task : linked_task;
 }
@@ -164,29 +165,50 @@ let observe_followup ~base_path ~keeper_name ~ask ~resolution =
   let* stimulus = answered_stimulus ~keeper_name ask resolution
       |> Result.map_error error_to_string in
   let stimulus_id = Keeper_reaction_ledger.stimulus_id_of_event_queue stimulus in
-  let* reactions = Keeper_reaction_ledger.event_queue_reaction_evidence_result
-      ~base_path ~keeper_name ~stimulus_id
-      |> Result.map_error Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string in
-  let read_actions () =
+  let read_observation ~source read =
+    let result = try read () with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn) in
+    (match result with
+     | Ok _ -> ()
+     | Error _ -> Log.Keeper.warn ~keeper_name
+         "ask followup source unavailable ask_id=%s source=%s" ask.ask_id source);
+    result in
+  let read_reactions () = read_observation ~source:"wake_turn" (fun () ->
+    Domain_pool_ref.submit_io_or_inline (fun () ->
+      Keeper_reaction_ledger.event_queue_reaction_evidence_result
+        ~base_path ~keeper_name ~stimulus_id
+      |> Result.map_error Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string)) in
+  let read_actions () = read_observation ~source:"tool_results" (fun () ->
     match Keeper_ask.answer_source_id ~ask_id:ask.ask_id ~answered_at:stimulus.arrived_at with
     | None -> Error "canonical answer input identity is invalid"
-    | Some source_id -> observe_tool_actions ~base_path ~keeper_name ~source_id in
+    | Some source_id -> Domain_pool_ref.submit_io_or_inline (fun () ->
+        observe_tool_actions ~base_path ~keeper_name ~source_id)) in
   let read_task () = observe_linked_task ~base_path ask in
-  let tool_actions, linked_task = match Eio_guard.execution_context () with
-    | Eio_fiber -> Eio.Fiber.pair read_actions read_task
+  let reactions, (tool_actions, linked_task) = match Eio_guard.execution_context () with
+    | Eio_fiber -> Eio.Fiber.pair read_reactions (fun () -> Eio.Fiber.pair read_actions read_task)
     | Non_eio ->
+        let reactions = read_reactions () in
         let actions = read_actions () in
-        actions, read_task () in
+        reactions, (actions, read_task ()) in
   Ok {answered_at=stimulus.arrived_at; stimulus_id; reactions; tool_actions; linked_task}
 
 let followup_to_json followup =
-  let evidence, complete, quarantine_fields = match followup.reactions with
-    | Keeper_reaction_ledger.Evidence_complete evidence -> evidence, true, []
-    | Keeper_reaction_ledger.Evidence_quarantined {evidence; first_reason} ->
-        evidence, false,
-        ["quarantine_reason",
-         `String (Keeper_reaction_ledger.row_quarantine_reason_to_string first_reason)] in
   let clock = function None -> `Null | Some at -> `Float at in
+  let reactions = match followup.reactions with
+    | Error _ -> `Assoc ["state", `String "unavailable"]
+    | Ok outcome ->
+      let evidence, complete, quarantine_fields = match outcome with
+        | Keeper_reaction_ledger.Evidence_complete evidence -> evidence, true, []
+        | Keeper_reaction_ledger.Evidence_quarantined {evidence; first_reason} ->
+          evidence, false, ["quarantine_reason",
+            `String (Keeper_reaction_ledger.row_quarantine_reason_to_string first_reason)] in
+      `Assoc (["state", `String "observed";
+        "turn_started_at", clock evidence.turn_started_recorded_at;
+        "turn_finished_at", clock evidence.turn_finished_recorded_at;
+        "queue_settled_at", clock evidence.event_queue_ack_recorded_at;
+        "queue_cancelled_at", clock evidence.event_queue_cancelled_recorded_at;
+        "evidence_complete", `Bool complete] @ quarantine_fields) in
   let tool_actions = match followup.tool_actions with
     | Error _ -> `Assoc ["state", `String "unavailable"]
     | Ok actions -> `Assoc ["state", `String "observed";
@@ -211,12 +233,8 @@ let followup_to_json followup =
   `Assoc (["state", `String "observed";
     "answered_at", `Float followup.answered_at;
     "stimulus_id", `String followup.stimulus_id;
-    "turn_started_at", clock evidence.turn_started_recorded_at;
-    "turn_finished_at", clock evidence.turn_finished_recorded_at;
-    "queue_settled_at", clock evidence.event_queue_ack_recorded_at;
-    "queue_cancelled_at", clock evidence.event_queue_cancelled_recorded_at;
-    "evidence_complete", `Bool complete;
-    "tool_actions", tool_actions; "linked_task", linked_task] @ quarantine_fields)
+    "reaction_evidence", reactions;
+    "tool_actions", tool_actions; "linked_task", linked_task])
 
 let deliver_row ~base_path ~keeper_name ~already_delivered ask resolution =
   let ( let* ) = Result.bind in

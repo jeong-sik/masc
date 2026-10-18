@@ -276,16 +276,24 @@ let draw_ask_answer_feedback buf cols (state : state) =
       | Some reference -> Printf.sprintf "Original asking turn: #%d" (Ids.Turn_ref.absolute_turn reference) in
     box_wrapped_field buf cols ~head:"  " ~style:Ansi.dim source;
     Option.iter (fun (observed : Decode.ask_followup) ->
-      let facts = List.filter_map Fun.id
-        [Option.map (fun _ -> "turn entry observed") observed.af_turn_started_at;
-         Option.map (fun _ -> "turn boundary observed") observed.af_turn_finished_at;
-         Option.map (fun _ -> "wake settled or transferred (consumption unproven)") observed.af_queue_settled_at;
-         Option.map (fun _ -> "wake cancelled") observed.af_queue_cancelled_at] in
-      let facts = if facts=[] then ["no turn entry observed"] else facts in
-      let facts = if observed.af_evidence_complete then facts else facts @ ["evidence incomplete"] in
-      box_wrapped_field buf cols ~head:"  "
-        ~style:(if observed.af_evidence_complete then Theme.info () else Theme.warn ())
-        ("Keeper follow-up: " ^ String.concat " · " facts);
+      (match observed.af_reactions with
+       | Decode.Ask_reactions_unavailable ->
+         box_wrapped_field buf cols ~head:"  " ~style:(Theme.warn ())
+           "Keeper follow-up: wake/turn observation unavailable"
+       | Ask_reactions_observed reactions ->
+         let facts = List.filter_map Fun.id
+           [Option.map (fun _ -> "turn entry observed") reactions.ar_turn_started_at;
+            Option.map (fun _ -> "turn boundary observed") reactions.ar_turn_finished_at;
+            Option.map (fun _ -> "wake settled or transferred (consumption unproven)") reactions.ar_queue_settled_at;
+            Option.map (fun _ -> "wake cancelled") reactions.ar_queue_cancelled_at] in
+         let facts = if facts=[] then ["no turn entry observed"] else facts in
+         let facts = if reactions.ar_evidence_complete then facts else facts @ ["evidence incomplete"] in
+         let facts = if reactions.ar_evidence_current then facts
+           else facts @ ["last observed; latest read did not confirm"] in
+         box_wrapped_field buf cols ~head:"  "
+           ~style:(if reactions.ar_evidence_complete && reactions.ar_evidence_current
+               then Theme.info () else Theme.warn ())
+           ("Keeper follow-up: " ^ String.concat " · " facts));
       let action_text, action_style = match observed.af_tool_actions with
         | Decode.Ask_tools_unavailable -> "Tool results: observation unavailable", Theme.warn ()
         | Decode.Ask_tools_observed {at_count;at_latest;at_evidence_current;_} ->

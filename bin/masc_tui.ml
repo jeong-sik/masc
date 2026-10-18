@@ -18525,12 +18525,18 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
           | Error _ -> ["state", `String "unavailable"]
           | Ok observed -> ["state", `String "observed";
               "stimulus_id", `String observed.Masc.Tui_decode_asks.af_stimulus_id;
-              "answered_at", `Float observed.af_answered_at;
-              "turn_started_at", clock observed.af_turn_started_at;
-              "turn_finished_at", clock observed.af_turn_finished_at;
-              "queue_settled_at", clock observed.af_queue_settled_at;
-              "queue_cancelled_at", clock observed.af_queue_cancelled_at;
-              "evidence_complete", `Bool observed.af_evidence_complete]
+              "answered_at", `Float observed.af_answered_at]
+              @ (match observed.af_reactions with
+                | Masc.Tui_decode_asks.Ask_reactions_unavailable ->
+                    ["reaction_state", `String "unavailable"]
+                | Ask_reactions_observed reactions ->
+                    ["reaction_state", `String "observed";
+                     "reaction_evidence_current", `Bool reactions.ar_evidence_current;
+                     "turn_started_at", clock reactions.ar_turn_started_at;
+                     "turn_finished_at", clock reactions.ar_turn_finished_at;
+                     "queue_settled_at", clock reactions.ar_queue_settled_at;
+                     "queue_cancelled_at", clock reactions.ar_queue_cancelled_at;
+                     "evidence_complete", `Bool reactions.ar_evidence_complete])
               @ (match observed.af_tool_actions with
                 | Masc.Tui_decode_asks.Ask_tools_unavailable -> ["tool_evidence_current", `Bool false]
                 | Ask_tools_observed {at_count;at_first_recorded_at;at_latest;at_evidence_current} ->

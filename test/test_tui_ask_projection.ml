@@ -555,10 +555,11 @@ let test_feedback_preserves_receipt_and_canonical_winner () =
 
 let test_followup_protocol_keeps_exact_identity_and_unknowns () =
   let module Decode = Masc.Tui_decode_asks in
-  let progress = ["state",`String "observed";"answered_at",`Float 200.;
-    "stimulus_id",`String "original-source";"turn_started_at",`Float 201.;
+  let reactions = ["state",`String "observed";"turn_started_at",`Float 201.;
     "turn_finished_at",`Null;"queue_settled_at",`Null;"queue_cancelled_at",`Null;
-    "evidence_complete",`Bool false;
+    "evidence_complete",`Bool false] in
+  let progress = ["state",`String "observed";"answered_at",`Float 200.;
+    "stimulus_id",`String "original-source";"reaction_evidence",`Assoc reactions;
     "tool_actions", `Assoc ["state", `String "unavailable"];
     "linked_task", `Assoc ["state", `String "unlinked"]] in
   let fields = ["workspace",`Assoc ["base_path",`String "/workspace";"masc_root",`String "/workspace/.masc"];
@@ -569,8 +570,10 @@ let test_followup_protocol_keeps_exact_identity_and_unknowns () =
   let value = match decode fields progress with
     | Ok value -> value | Error detail -> Alcotest.fail detail in
   Alcotest.(check bool) "positive entry and incomplete evidence remain distinct from completion" true
-    (value.af_turn_started_at=Some 201. && value.af_turn_finished_at=None
-     && value.af_queue_settled_at=None && not value.af_evidence_complete);
+    (match value.af_reactions with
+     | Decode.Ask_reactions_observed {ar_turn_started_at=Some 201.;ar_turn_finished_at=None;
+         ar_queue_settled_at=None;ar_evidence_complete=false;ar_evidence_current=true;_} -> true
+     | Ask_reactions_observed _ | Ask_reactions_unavailable -> false);
   List.iter (fun fields -> Alcotest.(check bool) "foreign ambiguous or booting response cannot enter" true
     (Result.is_error (decode fields progress)))
     [("keeper",`String "beta")::List.remove_assoc "keeper" fields;
@@ -579,12 +582,17 @@ let test_followup_protocol_keeps_exact_identity_and_unknowns () =
      ("state_ready",`Bool false)::List.remove_assoc "state_ready" fields];
   List.iter (fun progress -> Alcotest.(check bool) "malformed evidence cannot become an empty success" true
     (Result.is_error (decode fields progress)))
-    [List.remove_assoc "turn_started_at" progress;
-     ("turn_started_at",`Float nan)::List.remove_assoc "turn_started_at" progress;
-     ("turn_started_at",`Null)::progress;
+    [List.remove_assoc "reaction_evidence" progress;
      ("state",`String "unknown")::List.remove_assoc "state" progress;
-     List.remove_assoc "evidence_complete" progress;
      List.remove_assoc "linked_task" progress];
+  let with_reactions value = ("reaction_evidence", value)::List.remove_assoc "reaction_evidence" progress in
+  List.iter (fun bad -> Alcotest.(check bool) "malformed reaction evidence stays unavailable" true
+    (Result.is_error (decode fields (with_reactions (`Assoc bad)))))
+    [List.remove_assoc "turn_started_at" reactions;
+     ("turn_started_at",`Float nan)::List.remove_assoc "turn_started_at" reactions;
+     ("turn_started_at",`Null)::reactions;
+     ("state",`String "unknown")::List.remove_assoc "state" reactions;
+     List.remove_assoc "evidence_complete" reactions];
   let task = ["state",`String "observed";"task_id",`String "task-original";
     "location",`String "archive";"observed_at",`Float 203.;
     "status",`Assoc ["status",`String "done";"assignee",`String "other-worker";
@@ -597,7 +605,9 @@ let test_followup_protocol_keeps_exact_identity_and_unknowns () =
          && value.akt_location=Decode.Ask_task_archive && value.akt_evidence_current
          && (match value.akt_status with Masc_domain.Done {notes=None;_} -> true
              | Done {notes=Some _;_} | Todo | Claimed _ | InProgress _ | AwaitingVerification _ | Cancelled _ -> false)
-         && observed_task.af_turn_finished_at=None
+         && (match observed_task.af_reactions with
+             | Decode.Ask_reactions_observed {ar_turn_finished_at=None;_} -> true
+             | Ask_reactions_observed _ | Ask_reactions_unavailable -> false)
      | Ask_task_unlinked | Ask_task_missing _ | Ask_task_unavailable _ -> false);
   let bad_task key value = (key,value)::List.remove_assoc key task in
   List.iter (fun bad -> Alcotest.(check bool) "malformed Task evidence cannot imply completion" true
@@ -622,6 +632,18 @@ let test_followup_protocol_keeps_exact_identity_and_unknowns () =
   let with_actions value = ("tool_actions", value)::List.remove_assoc "tool_actions" progress in
   let observed = match decode fields (with_actions actions) with
     | Ok value -> value | Error detail -> Alcotest.fail detail in
+  let partial_progress = ("reaction_evidence", `Assoc ["state", `String "unavailable"])
+      :: List.remove_assoc "reaction_evidence" (with_task (`Assoc task)) in
+  let partial_progress = ("tool_actions", actions)::List.remove_assoc "tool_actions" partial_progress in
+  let partial = decode fields partial_progress |> Result.get_ok in
+  Alcotest.(check bool) "unavailable reactions preserve independent Tool and original Task observations" true
+    (partial.af_reactions=Decode.Ask_reactions_unavailable
+      && (match partial.af_tool_actions with
+          | Decode.Ask_tools_observed {at_count=1;_} -> true
+          | Ask_tools_observed _ | Ask_tools_unavailable -> false)
+      && (match partial.af_linked_task with
+          | Decode.Ask_task_observed {akt_task_id="task-original";_} -> true
+          | Ask_task_observed _ | Ask_task_unlinked | Ask_task_missing _ | Ask_task_unavailable _ -> false));
   Alcotest.(check bool) "Tool evidence retains the exact physical invocation and input turn" true
     (match observed.af_tool_actions with
      | Decode.Ask_tools_observed {at_count=1;at_latest=Some action;_} ->

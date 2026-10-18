@@ -66,7 +66,7 @@ type linked_task =
 type followup = {
   answered_at : float;
   stimulus_id : string;
-  reactions : Keeper_reaction_ledger.event_queue_reaction_evidence_outcome;
+  reactions : (Keeper_reaction_ledger.event_queue_reaction_evidence_outcome, string) result;
   tool_actions : (tool_actions, string) result;
   linked_task : linked_task;
 }
@@ -75,6 +75,8 @@ val observe_followup :
   base_path:string -> keeper_name:string -> ask:Keeper_ask.ask ->
   resolution:Keeper_ask.resolution -> (followup, string) result
 (** Read-only evidence for the exact source of this canonical answered row.
+    Reaction, Tool and linked Task reads are independent; one unavailable
+    source cannot hide another source's positive observation.
     No enqueue, wake hint or answer write. Turn entry/boundary and queue
     settlement are observations; neither a queue transfer nor an ACK proves
     answer consumption, Tool action or completion of the Keeper's work. *)

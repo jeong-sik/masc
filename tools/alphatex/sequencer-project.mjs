@@ -2,6 +2,8 @@ import { Chord, Note, Interval, Voicing, VoicingDictionary, VoiceLeading } from 
 
 // Quarter-note ticks are the document authority. Wall time belongs to transport.
 export const PPQ = 960 // alphaSynth's native quarter-note resolution
+const MAX_SMF_DELTA = 0x0fffffff // SMF variable-length delta time has at most four 7-bit bytes.
+const MELODIC_CHANNELS = Array.from({ length: 16 }, (_, i) => i).filter(channel => channel !== 9)
 const int = (value, name, low = 0, high = Number.MAX_SAFE_INTEGER) => {
   if (!Number.isSafeInteger(value) || value < low || value > high) throw new Error(`Invalid ${name}`)
   return value
@@ -22,7 +24,8 @@ export function validateProject(project) {
   if (project?.schemaVersion !== 1 || project.ppq !== PPQ) throw new Error('Unsupported sequencer document')
   text(project.title, 'title')
   int(project.tempo, 'tempo', 4, 60000000) // SMF's 24-bit microseconds/quarter field, minimum 1µs
-  int(project.length, 'length', 1)
+  // The conductor track ends at document length after its tick-zero metadata.
+  int(project.length, 'length (SMF delta-time range)', 1, MAX_SMF_DELTA)
   if (!Array.isArray(project.meter) || project.meter.length !== 2) throw new Error('Invalid meter')
   int(project.meter[0], 'meter numerator', 1, 255)
   if (![1, 2, 4, 8, 16, 32, 64, 128].includes(project.meter[1])) throw new Error('Invalid meter denominator')
@@ -35,6 +38,7 @@ export function validateProject(project) {
     if (ids.has(track.id)) throw new Error('Duplicate track id')
     ids.add(track.id)
     int(track.channel, 'MIDI channel', 0, 15); int(track.program, 'program', 0, 127)
+    if (track.channel === 9) throw new Error('GM percussion channel 10 is not a melodic track')
     if (channels.has(track.channel)) throw new Error('Tracks need separate MIDI channels to retain independent programs')
     channels.add(track.channel)
     if (typeof track.muted !== 'boolean' || typeof track.solo !== 'boolean') throw new Error('Invalid track audibility')
@@ -44,7 +48,9 @@ export function validateProject(project) {
       text(note.id, 'note id')
       if (noteIds.has(note.id)) throw new Error('Duplicate note id')
       noteIds.add(note.id)
-      pitch(note.pitch); int(note.start, 'note start', 0, project.length - 1)
+      // Note names belong to edit input. Persisted documents use one numeric key
+      // identity for overlap checks, harmony, transposition and MIDI serialization.
+      int(note.pitch, 'note pitch', 0, 127); int(note.start, 'note start', 0, project.length - 1)
       int(note.duration, 'note duration', 1, project.length - note.start)
       int(note.velocity, 'note velocity', 1, 127)
     }
@@ -88,15 +94,21 @@ export function chordVoicing(symbol, { mode = 'close', octave = 4, inversion = 0
   int(inversion, 'inversion', 0, chord.intervals.length - 1)
   let notes
   if (mode === 'rootless') {
+    if (chord.bass) throw new Error('Rootless voicing does not support an explicit slash-chord bass')
+    if (inversion !== 0) throw new Error('Rootless voicing does not support an explicit inversion')
     const low = pitch(`${chord.tonic}${octave}`), high = Math.min(127, low + 24)
-    notes = Voicing.get(symbol, [Note.fromMidi(low), Note.fromMidi(high)], VoicingDictionary.lefthand,
-      VoiceLeading.topNoteDiff, previous.map(Note.fromMidi)).map(pitch)
-    if (!notes.length) throw new Error(`No rootless voicing for ${symbol} in this register`)
+    const candidates = Voicing.search(symbol, [Note.fromMidi(low), Note.fromMidi(high)], VoicingDictionary.lefthand)
+    if (!candidates.length) throw new Error(`No rootless voicing for ${symbol} in this register`)
+    notes = (previous.length ? VoiceLeading.topNoteDiff(candidates, previous.map(Note.fromMidi)) : candidates[0]).map(pitch)
   } else {
     if (!['close', 'drop2'].includes(mode)) throw new Error('Voicing must be close, drop2 or rootless')
     const root = pitch(`${chord.tonic}${octave}`)
     notes = chord.intervals.map(interval => root + Interval.semitones(interval))
-    for (let i = 0; i < inversion; i++) notes.push(notes.shift() + 12)
+    for (let i = 0; i < inversion; i++) {
+      let raised = notes.shift()
+      while (raised <= notes[notes.length - 1]) raised += 12
+      notes.push(raised)
+    }
     if (mode === 'drop2') {
       if (notes.length < 4) throw new Error('Drop 2 needs at least four voices')
       notes[notes.length - 2] -= 12
@@ -125,7 +137,8 @@ export function editProject(project, trackId, edit) {
     case 'change-note': {
       const note = track.notes.find(note => note.id === edit.id)
       if (!note) throw new Error('No selected note')
-      for (const key of ['pitch', 'start', 'duration', 'velocity']) if (edit[key] !== undefined) note[key] = edit[key]
+      if (edit.pitch !== undefined) note.pitch = pitch(edit.pitch)
+      for (const key of ['start', 'duration', 'velocity']) if (edit[key] !== undefined) note[key] = edit[key]
       break
     }
     case 'chord': {
@@ -153,8 +166,8 @@ export function editProject(project, trackId, edit) {
       break
     }
     case 'track': {
-      const channel = Array.from({ length: 16 }, (_, i) => i).find(channel => !next.tracks.some(track => track.channel === channel))
-      if (channel === undefined) throw new Error('All 16 MIDI channels are already assigned')
+      const channel = MELODIC_CHANNELS.find(channel => !next.tracks.some(track => track.channel === channel))
+      if (channel === undefined) throw new Error('All 15 melodic MIDI channels are already assigned')
       next.tracks.push({ id: uniqueId('track', next.tracks), name: text(edit.name, 'track name'), channel, program: 0, muted: false, solo: false, notes: [] })
       break
     }

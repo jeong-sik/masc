@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import JZZ from 'jzz'
 import midiFiles from 'jzz-midi-smf'
-import { newProject, editProject, chordVoicing, harmonyAt, sequenceEvents, PPQ } from '../sequencer-project.mjs'
+import { newProject, editProject, chordVoicing, harmonyAt, sequenceEvents, validateProject, PPQ } from '../sequencer-project.mjs'
 import { saveProject, loadProject, projectMidi } from '../sequencer-files.mjs'
 import { renderProject } from '../sequencer-audio.mjs'
 import { readWaveMetadata } from '../wave-file.mjs'
@@ -34,6 +34,67 @@ test('edits reject overlap, invalid pitch and quantize beyond the document trans
   const late = edit(newProject(), { kind: 'note', pitch: 60, start: 16 * PPQ - 1, duration: 1, velocity: 80 })
   assert.throws(() => edit(late, { kind: 'quantize', grid: PPQ }), /note start/)
   assert.throws(() => edit(p, { kind: 'length', value: 10 }), /loop|duration/)
+})
+test('note-name edits become numeric keys before overlap detection, save/reopen and MIDI export', async () => {
+  const original = edit(newProject(), { kind: 'note', pitch: 62, start: 0, duration: PPQ, velocity: 80 })
+  const id = original.tracks[0].notes[0].id
+  const changed = edit(original, { kind: 'change-note', id, pitch: 'C4' })
+  assert.equal(original.tracks[0].notes[0].pitch, 62)
+  assert.equal(changed.tracks[0].notes[0].pitch, 60)
+  const before = structuredClone(changed)
+  assert.throws(() => edit(changed, { kind: 'note', pitch: 60, start: 0, duration: PPQ, velocity: 80 }), /Overlapping/)
+  assert.deepEqual(changed, before)
+  for (const key of ['pitch', 'start', 'duration', 'velocity']) {
+    const malformed = structuredClone(changed)
+    malformed.tracks[0].notes[0][key] = key === 'pitch' ? 'C4' : String(malformed.tracks[0].notes[0][key])
+    assert.throws(() => validateProject(malformed), /Invalid note/)
+    assert.throws(() => projectMidi(malformed), /Invalid note/)
+    assert.throws(() => edit(changed, { kind: 'change-note', id, [key]: key === 'pitch' ? 'C99' : '1' }), /pitch|Invalid note/)
+    assert.deepEqual(changed, before)
+  }
+  const dir = await mkdtemp(join(tmpdir(), 'masc-sequencer-note-'))
+  try {
+    const path = join(dir, 'phrase.json')
+    await saveProject(path, changed)
+    const { project } = await loadProject(path)
+    assert.deepEqual(project, changed)
+    const midi = new JZZ.MIDI.SMF(projectMidi(project))
+    assert.deepEqual([...midi[1]].filter(e => e.isNoteOn()).map(e => [e.tt, e.getNote()]), [[0, 60]])
+    assert.deepEqual([...midi[1]].filter(e => e.isNoteOff()).map(e => [e.tt, e.getNote()]), [[PPQ, 60]])
+  } finally { await rm(dir, { recursive: true, force: true }) }
+})
+test('extended inversions retain the selected bass and unsupported rootless choices fail transactionally', () => {
+  assert.equal(chordVoicing('C9', { inversion: 4 })[0], 74)
+  assert.equal(chordVoicing('C13', { inversion: 4 })[0], 74)
+  assert.equal(chordVoicing('C13', { inversion: 5 })[0], 81)
+  assert.deepEqual(chordVoicing('C/E'), [64, 67, 72])
+  assert.deepEqual(chordVoicing('Cmaj7/G'), [67, 71, 72, 76])
+  assert.deepEqual(chordVoicing('Cmaj7/F#'), [54, 60, 64, 67, 71])
+  for (const symbol of ['Cmaj7/B', 'Cmaj7/G', 'Cmaj7/F#', 'C/E']) {
+    assert.throws(() => chordVoicing(symbol, { mode: 'rootless' }), /explicit slash-chord bass/)
+  }
+  for (const symbol of ['C9', 'C13']) assert.throws(() => chordVoicing(symbol, { mode: 'rootless' }), /No rootless voicing/)
+  assert.throws(() => chordVoicing('Cmaj7', { mode: 'rootless', inversion: 1 }), /explicit inversion/)
+  const original = newProject()
+  assert.throws(() => edit(original, { kind: 'progression', symbols: ['Dm7', 'Cmaj7/B'], mode: 'rootless', start: 0, duration: PPQ, velocity: 80 }), /explicit slash-chord bass/)
+  assert.deepEqual(original, newProject())
+})
+test('MIDI duration and melodic channel boundaries cannot silently wrap or become drums', () => {
+  let project = newProject()
+  project.length = project.loop.end = 0x0fffffff
+  const midi = new JZZ.MIDI.SMF(projectMidi(project))
+  assert.equal([...midi[0]].find(event => event.isEOT()).tt, project.length)
+  project.length = project.loop.end = 0x10000000
+  assert.throws(() => projectMidi(project), /SMF delta-time range/)
+  project = newProject()
+  for (let i = 1; i < 15; i++) project = edit(project, { kind: 'track', name: `Voice ${i + 1}` })
+  assert.equal(project.tracks.length, 15)
+  assert.ok(project.tracks.every(track => track.channel !== 9))
+  const before = structuredClone(project)
+  assert.throws(() => edit(project, { kind: 'track', name: 'Extra voice' }), /15 melodic MIDI channels/)
+  assert.deepEqual(project, before)
+  project.tracks[0].channel = 9
+  assert.throws(() => projectMidi(project), /percussion/)
 })
 test('multitrack mute/solo and loop clipping match the MIDI file schedule', () => {
   let p = chord(newProject(), 'Dm7', { duration: 4 * PPQ })

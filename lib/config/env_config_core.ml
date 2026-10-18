@@ -142,6 +142,7 @@ let get_int_clamped ~default ~min_v ~max_v name =
 
 let get_float_clamped ~default ~min_v ~max_v name =
   let v = get_float ~default name in
+  let v = if Float.is_finite v then v else default in
   Float.max min_v (Float.min max_v v)
 
 let get_int_nonneg ~default name =

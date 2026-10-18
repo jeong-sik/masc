@@ -50,8 +50,8 @@ It does not extend key intervals through sustain/sostenuto or infer pedal voices
 
 This module supplies the source-asset core for import/edit/export and arrangement
 integration. Its tests do not establish a delivered import screen or full MIDI
-support. The source editor connects note experiments and explicit-output one-shot
-MIDI audition. Event/expression editing, clip arrangement, overdub and UMP/MIDI 2.0
+support. The source editor connects note experiments and explicit-output MIDI
+audition with source-state-aware pause/resume and seek. Event/expression editing, clip arrangement, overdub and UMP/MIDI 2.0
 source assets require further integration.
 See [the sequencer design](../../docs/design/tui/MUSIC-SEQUENCER.md).
 

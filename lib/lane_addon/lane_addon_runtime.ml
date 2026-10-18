@@ -151,6 +151,13 @@ let is_detached = function
   | Lifecycle.Detached _ -> true
   | Lifecycle.Attached | Lifecycle.Observing | Lifecycle.Failed _ | Lifecycle.Detaching _ -> false
 
+type sweep_retry = {
+  container_id : string;
+  instance : string option;
+  failure : Lifecycle.failure;
+  first_refused_at : string;
+}
+
 type manager = { store : Lane_addon_store.t; entries : (string, entry) Hashtbl.t;
   recovering : (string, recovery) Hashtbl.t;
   configuration_mutex : Eio.Mutex.t; action_mutex : Eio.Mutex.t; broadcast_mutex : Eio.Mutex.t;
@@ -159,7 +166,9 @@ type manager = { store : Lane_addon_store.t; entries : (string, entry) Hashtbl.t
   fleet_recipients : (((string * string) * string), unit) Hashtbl.t; mutable fleet_nudge : unit -> unit; mutable configuration_status : configuration_reading option;
   mutable configuration_nudge : unit -> unit;
   mutable configuration_visibility : (string * visibility) list;
-  mutable swept : runtime list }
+  mutable swept : runtime list;
+  sweep_retries : (runtime, sweep_retry list) Hashtbl.t;
+  sweep_warned : (runtime, (string * string option * Lifecycle.failure) list) Hashtbl.t }
 let managers : (string, manager) Hashtbl.t = Hashtbl.create 4
 let override : backend option ref = ref None
 type fleet_backend = {
@@ -971,7 +980,7 @@ let manager config =
                      fleet_journals=Hashtbl.create 8;
                      fleet_operations=Hashtbl.create 8; fleet_recipients=Hashtbl.create 16; fleet_nudge=(fun () -> ());
                      configuration_status = None; configuration_nudge = (fun () -> ()); configuration_visibility=[];
-                     swept = [] } in
+                     swept = []; sweep_retries = Hashtbl.create 2; sweep_warned = Hashtbl.create 2 } in
       Hashtbl.add managers root m; m
 let live_exports m access =
   entries m |> List.concat_map (fun (e : entry) ->
@@ -2465,19 +2474,122 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
         if not (List.mem runtime m.swept) then
           match engine_control.sweep ~runtime ~is_live_instance:(is_live_instance m) with
           | Ok items ->
-              let retry = List.exists (fun (item : Lane_addon_slot.sweep_item) -> match item.verdict with
-                | Lane_addon_slot.Refused failure ->
-                    (match Lifecycle.heal failure with
-                     | Lifecycle.Retry -> true
-                     | Lifecycle.Wait_until _ -> false)
-                | Lane_addon_slot.Removed | Lane_addon_slot.Live -> false) items in
-              if not retry then m.swept <- runtime :: m.swept;
-              List.iter (fun (item : Lane_addon_slot.sweep_item) -> match item.verdict with
-                | Lane_addon_slot.Live -> ()
-                | Lane_addon_slot.Removed -> Log.Misc.info "%s" (Lane_addon_slot.sweep_item_to_string item)
-                | Lane_addon_slot.Refused _ -> Log.Misc.warn "%s" (Lane_addon_slot.sweep_item_to_string item)) items
+              let now = Masc_domain.now_iso () in
+              let previous_retries =
+                Hashtbl.find_opt m.sweep_retries runtime |> Option.value ~default:[]
+              in
+              let previous_warned =
+                Hashtbl.find_opt m.sweep_warned runtime |> Option.value ~default:[]
+              in
+              let current_refused =
+                List.filter_map
+                  (fun (item : Lane_addon_slot.sweep_item) ->
+                    match item.verdict with
+                    | Lane_addon_slot.Refused failure ->
+                        Some (item.container_id, item.instance, failure, item)
+                    | Lane_addon_slot.Removed | Lane_addon_slot.Live -> None)
+                  items
+              in
+              let refused_signature =
+                current_refused
+                |> List.map (fun (id, inst, failure, _) -> (id, inst, failure))
+                |> List.sort Stdlib.compare
+              in
+              if refused_signature = [] then
+                Hashtbl.remove m.sweep_warned runtime
+              else
+                Hashtbl.replace m.sweep_warned runtime refused_signature;
+              let next_retries =
+                List.filter_map
+                  (fun (container_id, instance, failure, _) ->
+                    match Lifecycle.heal failure with
+                    | Lifecycle.Retry ->
+                        let first_refused_at =
+                          match
+                            List.find_opt
+                              (fun (prev : sweep_retry) ->
+                                String.equal prev.container_id container_id)
+                              previous_retries
+                          with
+                          | Some prev -> prev.first_refused_at
+                          | None -> now
+                        in
+                        Some { container_id; instance; failure; first_refused_at }
+                    | Lifecycle.Wait_until _ -> None)
+                  current_refused
+              in
+              if next_retries = [] then (
+                Hashtbl.remove m.sweep_retries runtime;
+                m.swept <- runtime :: m.swept)
+              else (
+                Hashtbl.replace m.sweep_retries runtime next_retries;
+                List.iter
+                  (fun (retry : sweep_retry) ->
+                    add_issue directory
+                      (Printf.sprintf
+                         "Orphan container sweep retrying container %s (incarnation %s, first refused at %s): %s"
+                         retry.container_id
+                         (Option.value ~default:"none" retry.instance)
+                         retry.first_refused_at
+                         (Lifecycle.failure_to_string retry.failure)))
+                  next_retries);
+              List.iter
+                (fun (item : Lane_addon_slot.sweep_item) ->
+                  match item.verdict with
+                  | Lane_addon_slot.Live -> ()
+                  | Lane_addon_slot.Removed ->
+                      (match
+                         List.find_opt
+                           (fun (prev : sweep_retry) ->
+                             String.equal prev.container_id item.container_id)
+                           previous_retries
+                       with
+                       | None ->
+                           Log.Misc.info "%s" (Lane_addon_slot.sweep_item_to_string item)
+                       | Some prev ->
+                           Log.Misc.info
+                             "%s (resolved after retry since %s)"
+                             (Lane_addon_slot.sweep_item_to_string item)
+                             prev.first_refused_at)
+                  | Lane_addon_slot.Refused failure ->
+                      if
+                        not
+                          (List.mem
+                             (item.container_id, item.instance, failure)
+                             previous_warned)
+                      then
+                        Log.Misc.warn "%s" (Lane_addon_slot.sweep_item_to_string item))
+                items;
+              List.iter
+                (fun (prev : sweep_retry) ->
+                  let still_present =
+                    List.exists
+                      (fun (item : Lane_addon_slot.sweep_item) ->
+                        String.equal item.container_id prev.container_id)
+                      items
+                  in
+                  if not still_present then
+                    Log.Misc.info
+                      "Lane Add-on sweep retry resolved for container %s (incarnation %s, first refused at %s): container is gone"
+                      prev.container_id
+                      (Option.value ~default:"none" prev.instance)
+                      prev.first_refused_at)
+                previous_retries
           | Error failure ->
-              add_issue directory ("Orphan container sweep did not run: " ^ Lifecycle.failure_to_string failure))
+              add_issue directory ("Orphan container sweep did not run: " ^ Lifecycle.failure_to_string failure);
+              (match Hashtbl.find_opt m.sweep_retries runtime with
+               | None -> ()
+               | Some retries ->
+                   List.iter
+                     (fun (retry : sweep_retry) ->
+                       add_issue directory
+                         (Printf.sprintf
+                            "Orphan container sweep retrying container %s (incarnation %s, first refused at %s): %s"
+                            retry.container_id
+                            (Option.value ~default:"none" retry.instance)
+                            retry.first_refused_at
+                            (Lifecycle.failure_to_string retry.failure)))
+                     retries))
         runtimes_in_use;
     let protected owner =
       List.exists (fun (d : Lane_addon_config.declaration) -> d.id = owner.id) snapshot.declarations

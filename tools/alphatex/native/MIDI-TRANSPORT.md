@@ -24,13 +24,21 @@ no shared endpoint flush and no queued future messages to survive a pause or
 seek. This is host-deadline MIDI scheduling, not sample-locked audio/MIDI or an
 external MIDI clock. The state event's `maximumLateness` reports observed timer
 lateness; it never stops playback by a latency threshold. After suspension,
-completed loop cycles are skipped and the current phase is reconstructed.
+completed loop cycles are skipped before sending pending events. Within a cycle,
+fully expired note intervals are omitted; notes still held at the observed phase
+are reconstructed with the latest program and controls. Cleanup and sends remain
+elapsed time against the same sampled host-clock anchor, rather than delaying
+the loop epoch by their processing time. Pause and status also observe the current
+loop phase when their command arrives before an overdue timer callback.
 
 Stdin accepts the same JSONL pause/resume/seek/status/stop commands as the
 [WAV transport](TRANSPORT.md). Pause sends note-offs for keys this player started.
 Resume reconstructs programs, volume/pan and notes held at the current position;
 their original note-offs still occur at the scheduled end. Seeking while paused
 remains silent. Seeking to duration stops a one-shot and selects zero in a loop.
+The target boundary is included before restoration, so seeking exactly to a
+note-off does not reattack that ended note. A note beginning at the same boundary
+is started once.
 An external instrument restarts its note envelope when a held note is resumed.
 No channel-wide all-notes-off/reset or global MIDI flush is sent. MIDI 1.0 key
 identity belongs to channel and pitch, so unrelated simultaneous playing on the
@@ -56,3 +64,14 @@ CoreMIDI contracts: [MIDISend](https://developer.apple.com/documentation/coremid
 [MIDI destinations](https://developer.apple.com/documentation/coremidi/midigetdestination(_:)).
 The implementation uses the installed SDK's `CoreMIDI/MIDIServices.h` packet,
 port, notification and unique-ID contracts.
+
+The client is created on the main run loop. Destination selection, port ownership,
+notification admission and playback then belong to the serial transport queue.
+Notifications before preparation completes do not inspect partial resources;
+preparation and start each verify the selected endpoint.
+
+`node tools/alphatex/native/test-midi-transport.mjs` compiles source-derived Swift
+scenarios with controlled clock/send effects. It checks late-cycle and late-note
+decisions, seek boundaries, send-time phase accounting and preparation admission.
+It does not register CoreMIDI clients, enumerate devices or send hardware MIDI;
+actual endpoint timing and delivery require a separate runtime probe.

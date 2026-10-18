@@ -1686,7 +1686,7 @@ let test_usage_signal_uses_tokens_not_cost () =
     ; executed_runtime_id = None
     ; inference_key = None
     ; ts_unix = 0.0
-    ; outcome = "success"
+    ; outcome = Keeper_decision_outcome.Success
     ; stop_reason = None
     ; turn_lane = None
     ; tok_per_sec = None
@@ -1709,7 +1709,6 @@ let test_usage_signal_uses_tokens_not_cost () =
     ; usage_anomaly_reasons = []
     ; coverage_reason = None
     ; coverage_stage = None
-    ; is_error = false
     ; streaming_ttfrc_ms = None
     ; streaming_inter_chunk_count = None
     ; streaming_inter_chunk_avg_ms = None
@@ -1964,6 +1963,46 @@ let test_runtime_history_keeps_non_error_outcomes () =
     check (list string) "recent records retain yielded outcome identity" outcomes
       (row |> member "recent_entries" |> to_list |> List.map (fun row -> row |> member "outcome" |> to_string)))
 
+let test_decision_outcome_validation () =
+  let now = now_unix () in
+  let with_telemetry_outcome outcome_field =
+    match success_entry ~model:"model" ~ts:now () with
+    | `Assoc fields ->
+      let telemetry = match List.assoc "telemetry" fields with
+        | `Assoc tfields ->
+          let without = List.remove_assoc "outcome" tfields in
+          `Assoc (match outcome_field with
+            | None -> without
+            | Some value -> ("outcome", value) :: without)
+        | _ -> fail "expected telemetry"
+      in
+      `Assoc (("telemetry", telemetry) :: List.remove_assoc "telemetry" fields)
+    | _ -> fail "expected object"
+  in
+  let refusal row =
+    match Model_inference_metrics_parser.parse_telemetry_entry row ~since_unix:0.0 with
+    | Ok _ -> "accepted"
+    | Error error -> Model_inference_metrics_entry.parse_error_label error
+  in
+  check string "absent outcome is missing_outcome" "missing_outcome"
+    (refusal (with_telemetry_outcome None));
+  check string "null outcome is missing_outcome" "missing_outcome"
+    (refusal (with_telemetry_outcome (Some `Null)));
+  check string "blank outcome is missing_outcome" "missing_outcome"
+    (refusal (with_telemetry_outcome (Some (`String "   "))));
+  check string "unknown outcome string is invalid_outcome" "invalid_outcome"
+    (refusal (with_telemetry_outcome (Some (`String "bogus"))));
+  check string "padded outcome string is invalid_outcome" "invalid_outcome"
+    (refusal (with_telemetry_outcome (Some (`String " success "))));
+  check string "non-string outcome is invalid_outcome" "invalid_outcome"
+    (refusal (with_telemetry_outcome (Some (`Int 1))));
+  let base = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+    let path = make_keeper_dir base "invalid-outcome" in
+    write_decisions path [with_telemetry_outcome (Some (`String "bogus"))];
+    check_projection_failures base
+      (M.Decision_rows_invalid { malformed_rows = 0; schema_violation_rows = 1 }))
+
 let test_unrenderable_decision_timestamp () =
   let base = test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
@@ -2017,6 +2056,7 @@ let () =
       test_case "existing projections propagate incomplete decision reads" `Quick test_existing_projections_refuse_partial_decisions;
       test_case "metrics cache preserves last-good data on a failed refresh" `Quick test_metrics_cache_retains_last_good;
       test_case "runtime history preserves yielded non-error outcomes" `Quick test_runtime_history_keeps_non_error_outcomes;
+      test_case "decision outcome validation" `Quick test_decision_outcome_validation;
       test_case "unrenderable timestamp is a typed invalid row" `Quick test_unrenderable_decision_timestamp;
       test_case "runtime history includes retained rotated logs" `Quick test_runtime_history_reads_rotated_decisions;
       test_case "empty dir" `Quick test_empty_dir;

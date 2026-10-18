@@ -147,14 +147,23 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
          let runtime_model_attribution =
            runtime_model_attribution provider_context_fields
          in
-         let outcome_opt = json_string_field_opt "outcome" tfields in
-         (* An error turn has telemetry.outcome = "error". The writer takes
-            Keeper_decision_outcome.t; reading the label back into it here is
-            #42997. *)
+         let outcome_result : (Keeper_decision_outcome.t, parse_error) result =
+           match List.assoc_opt "outcome" tfields with
+           | None | Some `Null -> Error Missing_outcome
+           | Some (`String raw) ->
+             if String.equal (String.trim raw) ""
+             then Error Missing_outcome
+             else (
+               match Keeper_decision_outcome.of_string raw with
+               | Some outcome -> Ok outcome
+               | None -> Error Invalid_outcome)
+           | Some _ -> Error Invalid_outcome
+         in
          let is_error =
-           match outcome_opt with
-           | Some "error" -> true
-           | _ -> false
+           match outcome_result with
+           | Ok Keeper_decision_outcome.Failed -> true
+           | Ok Keeper_decision_outcome.(Success | Checkpoint | Input_required)
+           | Error _ -> false
          in
          if is_error
          then (
@@ -188,7 +197,7 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
              ; executed_runtime_id
              ; inference_key = None
              ; ts_unix = ts
-             ; outcome = "error"
+             ; outcome = Keeper_decision_outcome.Failed
              ; stop_reason = json_string_field_opt "stop_reason" tfields
              ; turn_lane = json_string_field_opt "turn_lane" tfields
              ; tok_per_sec = None
@@ -212,7 +221,6 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
                  json_string_list_field "usage_anomaly_reasons" tfields
              ; coverage_reason = json_string_field_opt "coverage_reason" tfields
              ; coverage_stage = json_string_field_opt "coverage_stage" tfields
-             ; is_error = true
              ; streaming_ttfrc_ms = json_float_field_opt "streaming_ttfrc_ms" tfields
              ; streaming_inter_chunk_count = json_int_field_opt "streaming_inter_chunk_count" tfields
              ; streaming_inter_chunk_avg_ms = json_float_field_opt "streaming_inter_chunk_avg_ms" tfields
@@ -307,49 +315,48 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
            (* Outcome must be present. Previous code defaulted to "success",
               which silently classified parse failures as successful turns —
               CRITICAL for cost/error-rate accounting. *)
-	           match outcome_opt with
-	           | None -> Error Missing_outcome
-	           | Some outcome ->
-	             let inference_key =
-	               if String.equal outcome "success"
-	               then success_inference_identity fields tfields
-	               else Ok None
-	             in
-	             Result.map
-	               (fun inference_key ->
-	                  { model
-	             ; executed_runtime_id
-	             ; inference_key
-	             ; ts_unix = ts
-	             ; outcome
-             ; stop_reason = json_string_field_opt "stop_reason" tfields
-             ; turn_lane = json_string_field_opt "turn_lane" tfields
-             ; tok_per_sec = tok_per_sec_raw
-             ; prompt_tok_per_sec
-             ; hw_decode_tok_per_sec
-             ; peak_memory_gb
-             ; thinking_enabled
-             ; latency_ms
-             ; input_tokens = input_tokens_raw
-             ; output_tokens = output_tokens_raw
-             ; cache_read_tokens = cache_read_tokens_raw
-             ; cache_creation_tokens = cache_creation_tokens_raw
-             ; reasoning_tokens = reasoning_tokens_raw
-             ; cost_usd = cost_usd_raw
-             ; tool_call_count = outer_tool_call_count
-             ; tools_used = outer_tools_used
-             ; usage_reported
-             ; telemetry_reported
-             ; usage_trust
-             ; usage_anomaly_reasons
-             ; coverage_reason = json_string_field_opt "coverage_reason" tfields
-             ; coverage_stage = json_string_field_opt "coverage_stage" tfields
-             ; is_error = false
-             ; streaming_ttfrc_ms = json_float_field_opt "streaming_ttfrc_ms" tfields
-             ; streaming_inter_chunk_count = json_int_field_opt "streaming_inter_chunk_count" tfields
-	             ; streaming_inter_chunk_avg_ms = json_float_field_opt "streaming_inter_chunk_avg_ms" tfields
-	             })
-	               inference_key)
+           let* outcome = outcome_result in
+           let inference_key =
+             match outcome with
+             | Keeper_decision_outcome.Success ->
+               success_inference_identity fields tfields
+             | Keeper_decision_outcome.(Checkpoint | Input_required | Failed) ->
+               Ok None
+           in
+           Result.map
+             (fun inference_key ->
+                { model
+                ; executed_runtime_id
+                ; inference_key
+                ; ts_unix = ts
+                ; outcome
+                ; stop_reason = json_string_field_opt "stop_reason" tfields
+                ; turn_lane = json_string_field_opt "turn_lane" tfields
+                ; tok_per_sec = tok_per_sec_raw
+                ; prompt_tok_per_sec
+                ; hw_decode_tok_per_sec
+                ; peak_memory_gb
+                ; thinking_enabled
+                ; latency_ms
+                ; input_tokens = input_tokens_raw
+                ; output_tokens = output_tokens_raw
+                ; cache_read_tokens = cache_read_tokens_raw
+                ; cache_creation_tokens = cache_creation_tokens_raw
+                ; reasoning_tokens = reasoning_tokens_raw
+                ; cost_usd = cost_usd_raw
+                ; tool_call_count = outer_tool_call_count
+                ; tools_used = outer_tools_used
+                ; usage_reported
+                ; telemetry_reported
+                ; usage_trust
+                ; usage_anomaly_reasons
+                ; coverage_reason = json_string_field_opt "coverage_reason" tfields
+                ; coverage_stage = json_string_field_opt "coverage_stage" tfields
+                ; streaming_ttfrc_ms = json_float_field_opt "streaming_ttfrc_ms" tfields
+                ; streaming_inter_chunk_count = json_int_field_opt "streaming_inter_chunk_count" tfields
+                ; streaming_inter_chunk_avg_ms = json_float_field_opt "streaming_inter_chunk_avg_ms" tfields
+                })
+             inference_key)
        | _ -> Error No_telemetry_object)
     | _ -> Error Not_assoc)
 ;;
@@ -424,7 +431,7 @@ let parse_cost_entry (json : Yojson.Safe.t) ~since_unix
       ; executed_runtime_id = None
       ; inference_key = Cost_ledger.inference_key row
       ; ts_unix = row.ts_unix
-      ; outcome = "success"
+      ; outcome = Keeper_decision_outcome.Success
       ; stop_reason = None
       ; turn_lane = None
       ; tok_per_sec
@@ -447,7 +454,6 @@ let parse_cost_entry (json : Yojson.Safe.t) ~since_unix
       ; usage_anomaly_reasons
       ; coverage_reason = None
       ; coverage_stage = Some "cost_ledger"
-      ; is_error = false
       ; streaming_ttfrc_ms = None
       ; streaming_inter_chunk_count = None
       ; streaming_inter_chunk_avg_ms = None

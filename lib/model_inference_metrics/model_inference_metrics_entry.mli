@@ -155,7 +155,7 @@ type raw_entry =
     (** Exact observed answerer from the decision, never inferred from an API model name. *)
   ; inference_key : Cost_ledger.inference_key option
   ; ts_unix : float
-  ; outcome : string
+  ; outcome : Keeper_decision_outcome.t
   ; stop_reason : string option
   ; turn_lane : string option
   ; tok_per_sec : float option
@@ -178,7 +178,6 @@ type raw_entry =
   ; usage_anomaly_reasons : string list
   ; coverage_reason : string option
   ; coverage_stage : string option
-  ; is_error : bool
   ; streaming_ttfrc_ms : float option
   ; streaming_inter_chunk_count : int option
   ; streaming_inter_chunk_avg_ms : float option
@@ -191,6 +190,7 @@ type parse_error =
   | Out_of_window
   | No_telemetry_object
   | Missing_outcome
+  | Invalid_outcome
   | Missing_usage_reported
   | Missing_telemetry_reported
   | Missing_success_model

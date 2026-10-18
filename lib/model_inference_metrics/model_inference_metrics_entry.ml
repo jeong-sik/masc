@@ -185,7 +185,7 @@ type raw_entry =
     (** Exact observed answerer from the decision, never inferred from an API model name. *)
   ; inference_key : Cost_ledger.inference_key option
   ; ts_unix : float
-  ; outcome : string
+  ; outcome : Keeper_decision_outcome.t
   ; stop_reason : string option
   ; turn_lane : string option
   ; tok_per_sec : float option
@@ -212,7 +212,6 @@ type raw_entry =
   ; usage_anomaly_reasons : string list
   ; coverage_reason : string option
   ; coverage_stage : string option
-  ; is_error : bool
   ; streaming_ttfrc_ms : float option
   ; streaming_inter_chunk_count : int option
   ; streaming_inter_chunk_avg_ms : float option
@@ -232,7 +231,8 @@ type parse_error =
   | Missing_ts_unix                (* ts_unix field absent or non-numeric *)
   | Out_of_window                  (* ts_unix older than [since_unix] *)
   | No_telemetry_object            (* decisions.jsonl entry without telemetry { ... } *)
-  | Missing_outcome                (* telemetry.outcome absent on success-branch row *)
+  | Missing_outcome                (* telemetry.outcome absent or blank *)
+  | Invalid_outcome                (* telemetry.outcome not a valid Keeper_decision_outcome.t *)
   | Missing_usage_reported
   | Missing_telemetry_reported
   | Missing_success_model          (* no selected_model / model_used / executed_runtime_id *)
@@ -248,6 +248,7 @@ let parse_error_label = function
   | Out_of_window -> "out_of_window"
   | No_telemetry_object -> "no_telemetry_object"
   | Missing_outcome -> "missing_outcome"
+  | Invalid_outcome -> "invalid_outcome"
   | Missing_usage_reported -> "missing_usage_reported"
   | Missing_telemetry_reported -> "missing_telemetry_reported"
   | Missing_success_model -> "missing_success_model"
@@ -259,7 +260,7 @@ let parse_error_label = function
 
 let parse_error_detail = function
   | Invalid_current_cost_row error -> Cost_ledger.decode_error_to_string error
-  | (Not_assoc | Invalid_ts_unix | Missing_ts_unix | Out_of_window | No_telemetry_object | Missing_outcome | Missing_usage_reported | Missing_telemetry_reported | Missing_success_model | Missing_success_inference_identity | Missing_error_model_attribution | Invalid_executed_runtime_id) as error -> parse_error_label error
+  | (Not_assoc | Invalid_ts_unix | Missing_ts_unix | Out_of_window | No_telemetry_object | Missing_outcome | Invalid_outcome | Missing_usage_reported | Missing_telemetry_reported | Missing_success_model | Missing_success_inference_identity | Missing_error_model_attribution | Invalid_executed_runtime_id) as error -> parse_error_label error
 ;;
 
 (* [Out_of_window] and [Not_assoc] are routine in mixed jsonl streams; we never
@@ -271,6 +272,7 @@ let parse_error_is_schema_violation = function
   | Invalid_ts_unix
   | Missing_ts_unix
   | Missing_outcome
+  | Invalid_outcome
   | Missing_usage_reported
   | Missing_telemetry_reported
   | Missing_success_model

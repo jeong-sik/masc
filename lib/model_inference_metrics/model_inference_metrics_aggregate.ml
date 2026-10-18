@@ -15,10 +15,17 @@ open Model_inference_metrics_reader
 
 (* ── Aggregate by model ─────────────────────────────────── *)
 
+let is_error_entry (e : raw_entry) =
+  match e.outcome with
+  | Keeper_decision_outcome.Failed -> true
+  | Keeper_decision_outcome.(Success | Checkpoint | Input_required) -> false
+;;
+
 let cached_input_of_entries (entries : raw_entry list) : cached_input option =
   List.fold_left (fun total e ->
-    match e.is_error, e.input_tokens, e.cache_read_tokens with
-    | false, Some input, Some cached when input > 0 && cached >= 0 && cached <= input ->
+    match e.outcome, e.input_tokens, e.cache_read_tokens with
+    | Keeper_decision_outcome.(Success | Checkpoint | Input_required), Some input, Some cached
+      when input > 0 && cached >= 0 && cached <= input ->
       let previous = Option.value total
           ~default:{ ci_input_tokens = 0; ci_cache_read_tokens = 0; ci_sample_count = 0 } in
       Some { ci_input_tokens = previous.ci_input_tokens + input;
@@ -42,7 +49,7 @@ let aggregate_by_model (entries : raw_entry list) : model_stats list =
   StringMap.fold
     (fun model_id entries acc ->
        let n = List.length entries in
-       let success_entries = List.filter (fun e -> not e.is_error) entries in
+       let success_entries = List.filter (fun e -> not (is_error_entry e)) entries in
        let tok_vals =
          List.filter_map (fun e -> e.tok_per_sec) success_entries |> Array.of_list
        in
@@ -65,7 +72,7 @@ let aggregate_by_model (entries : raw_entry list) : model_stats list =
        in
        Array.sort Float.compare lat_vals;
        let success_count = List.length success_entries in
-       let error_count = count_if (fun e -> e.is_error) entries in
+       let error_count = count_if is_error_entry entries in
        let total_tool_calls =
          List.fold_left (fun acc e -> acc + e.tool_call_count) 0 entries
        in
@@ -184,7 +191,7 @@ let aggregate_by_model (entries : raw_entry list) : model_stats list =
              |> take 5
              |> List.map (fun e ->
                { re_ts_unix = e.ts_unix
-               ; re_outcome = e.outcome
+               ; re_outcome = Keeper_decision_outcome.to_string e.outcome
                ; re_stop_reason = e.stop_reason
                ; re_turn_lane = e.turn_lane
                ; re_input_tokens = e.input_tokens
@@ -244,8 +251,8 @@ let bucket_entries_for_model (entries : raw_entry list) ~(bucket_sec : int)
          List.filter_map (fun e -> e.latency_ms) bucket_entries |> Array.of_list
        in
        Array.sort Float.compare lat_vals;
-       let success_count = count_if (fun e -> not e.is_error) bucket_entries in
-       let error_count = count_if (fun e -> e.is_error) bucket_entries in
+       let success_count = count_if (fun e -> not (is_error_entry e)) bucket_entries in
+       let error_count = count_if is_error_entry bucket_entries in
        let cache_hit_ratio =
          cached_input_of_entries bucket_entries
          |> Option.map (fun paired ->
@@ -322,7 +329,7 @@ let compute ~base_path ~window_minutes =
   let since_unix = Time_compat.now () -. (Float.of_int window_minutes *. 60.0) in
   let* entries, cost_read = read_complete_entries ~base_path ~since_unix in
   let models = aggregate_by_model entries in
-  let total_error_entries = count_if (fun e -> e.is_error) entries in
+  let total_error_entries = count_if is_error_entry entries in
   Ok { window_minutes
   ; bucket_minutes = 0
   ; models
@@ -356,7 +363,7 @@ let compute_with_buckets ~base_path ~window_minutes ~bucket_minutes =
          { s with buckets = bucket_entries_for_model model_entries ~bucket_sec })
       models
   in
-  let total_error_entries = count_if (fun e -> e.is_error) entries in
+  let total_error_entries = count_if is_error_entry entries in
   Ok { window_minutes
   ; bucket_minutes
   ; models = models_with_buckets

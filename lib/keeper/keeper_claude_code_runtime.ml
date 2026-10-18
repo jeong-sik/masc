@@ -659,6 +659,14 @@ let recording_effect_attempt ~effect_disposition (tool : Host.dynamic_tool) =
   }
 ;;
 
+let note_transport_uncertainty effect_disposition =
+  Atomic.compare_and_set
+    effect_disposition
+    Keeper_provider_attempt_effect.No_effect_observed
+    Keeper_provider_attempt_effect.Observation_unavailable
+  |> ignore
+;;
+
 let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~quota_scope ~keeper_name
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ~loading_plan ~initial_messages ~model_input_projection_for
@@ -1292,10 +1300,6 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
       try
         let client_result =
            Runtime_claude_code.run_turn
-             ~on_spawned:(fun () ->
-               Atomic.set
-                 effect_disposition
-                 Keeper_provider_attempt_effect.Observation_unavailable)
              ~mgr:process_mgr
              ~clock
              ~cwd:process_cwd
@@ -1311,7 +1315,9 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
                    ~expected
                    ~session_id
                    ~updated_at:(Time_compat.now ())))
-             ~on_prompt_sent:report_transmitted_input
+             ~on_prompt_sent:(fun () ->
+               note_transport_uncertainty effect_disposition;
+               report_transmitted_input ())
              ~on_context_submission:(fun submission ->
                Host.record_context_submission ~keeper_name ~raw_trace_run
                  ~runtime_profile:runtime_id ~client_turn_ordinal:turn_count
@@ -1384,12 +1390,14 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
               | (Runtime_claude_code.Resume _, None, Runtime_claude_code.Context_window_exceeded { tool_effect_attempted = false; response_emitted = true;_})
               | (Runtime_claude_code.Resume _, None, Runtime_claude_code.Context_window_exceeded { tool_effect_attempted = true; response_emitted = _;_})
               | (Runtime_claude_code.Resume _, None, (Runtime_claude_code.Invalid_config _ | (Runtime_claude_code.Spawn_failed _ | (Runtime_claude_code.Protocol_error _ | (Runtime_claude_code.Subscription_required _ | (Runtime_claude_code.Unsupported_control_request _ | (Runtime_claude_code.Turn_transport_interrupted _ | (Runtime_claude_code.Turn_failed _ | (Runtime_claude_code.Turn_failed_with_observation _ | (Runtime_claude_code.Stopped_by_host _ | (Runtime_claude_code.Quota_blocked _ | (Runtime_claude_code.Process_exited _ | (Runtime_claude_code.Unhandled_exception _ | Runtime_claude_code.Timeout _))))))))))))) -> false);
-           (* A provider can reject after the child process spawned but
-              before any response or MCP tool effect. Preserve the typed
-              no-effect fact so failover is allowed for that narrow case.
+           (* A provider can reject after the prompt was sent but before any
+              response or MCP tool effect. Preserve the typed no-effect fact so
+              failover is allowed for that narrow case.
               An overflow with no activity is the same fact: when the halving
               walk finds no view that fits, the lane moves to its next runtime
-              instead of fencing the turn as if the client might have acted. *)
+              instead of fencing the turn as if the client might have acted.
+              An incomplete user-message write or post-admission exit marks
+              transport uncertainty without downgrading an observed effect. *)
            (match error with
             | Runtime_claude_code.Turn_failed_with_observation
                 { tool_effect_attempted = false; response_emitted = false; _ }
@@ -1400,10 +1408,13 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
               Atomic.set
                 effect_disposition
                 Keeper_provider_attempt_effect.No_effect_observed
+            | Runtime_claude_code.Turn_transport_interrupted _
+            | Runtime_claude_code.Process_exited { turn_admitted = true; _ } ->
+              note_transport_uncertainty effect_disposition
             | Runtime_claude_code.Turn_failed_with_observation _
             | Runtime_claude_code.Quota_blocked _
             | Runtime_claude_code.Context_window_exceeded _
-            | Runtime_claude_code.Turn_transport_interrupted _
+            | Runtime_claude_code.Process_exited { turn_admitted = false; _ }
             | Runtime_claude_code.Invalid_config _
             | Runtime_claude_code.Spawn_failed _
             | Runtime_claude_code.Protocol_error _
@@ -1411,7 +1422,6 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
             | Runtime_claude_code.Unsupported_control_request _
             | Runtime_claude_code.Turn_failed _
             | Runtime_claude_code.Stopped_by_host _
-            | Runtime_claude_code.Process_exited _
             | Runtime_claude_code.Unhandled_exception _
             | Runtime_claude_code.Timeout _ -> ());
            if not !state_persistence_failed

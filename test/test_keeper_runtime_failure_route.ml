@@ -532,9 +532,9 @@ let test_response_observed_through_route_of_error () =
 (* The two effect fences carry what the lane had observed. The codex lane
    fences with [Observation_unavailable] when the turn input could not be
    written ([Keeper_codex_runtime] Turn_input_write_failed) and the
-   claude-code lane sets it when the process is spawned ([on_spawned]), so a
-   spawn-only failure arrives the same way: no answer is on record. A fence
-   after a tool handler was entered is an answer. *)
+   claude-code lane sets it when the prompt is sent ([on_prompt_sent]), so a
+   post-dispatch failure before any answer arrives the same way: no answer is
+   on record. A fence after a tool handler was entered is an answer. *)
 let test_response_observed_fences_follow_the_disposition () =
   let fenced effect_disposition ~runtime_id ~diagnostic =
     internal_err

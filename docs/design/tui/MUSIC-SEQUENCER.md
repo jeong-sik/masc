@@ -15,6 +15,21 @@ Undo/redo retains complete document revisions. Saving refuses an externally chan
 file; save-as retains edits without replacing it. Standard MIDI export and SoundFont
 preview consume the same schedule, including clipped notes spanning loop boundaries.
 
+Each save first writes and syncs a private local candidate and a separate publication
+inode in a sibling `.song.json.save-*` directory. Updating an existing project moves its current inode
+to that directory's `previous.json`, checks the claimed bytes against the loaded
+revision, then publishes the publication inode with an exclusive hard link. The
+retained `local.json` is a separate inode, so writes through the live project path
+cannot alter it. An unrelated
+editor recreating the project pathname wins that pathname; saving reports a
+conflict and the retained local/claimed paths. A rejected update restores the
+claimed inode only when the project pathname is still empty. Successful saves
+also retain these files: another editor can still write through an older open file
+descriptor, and that inode must remain recoverable. These directories are retained
+history, not temporary files to remove automatically. A crash during the claim can
+leave the project pathname absent; recover from its sibling history. The lock only
+coordinates this application's writers and does not lock unrelated editors.
+
 Chord recognition presents Tonal's candidate list for notes sounding at the cursor,
 including inversions; a candidate is not a harmonic certainty. Close and drop-2
 voicings use Tonal's chord intervals. Rootless voicings use its left-hand dictionary

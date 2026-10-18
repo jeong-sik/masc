@@ -31,7 +31,11 @@ let cached_input_of_entries (entries : raw_entry list) : cached_input option =
       Some { ci_input_tokens = previous.ci_input_tokens + input;
              ci_cache_read_tokens = previous.ci_cache_read_tokens + cached;
              ci_sample_count = previous.ci_sample_count + 1 }
-    | _ -> total) None entries
+    (* Guard misses (absent or out-of-range token fields) keep the running
+       total, as does a Failed entry. Every outcome constructor is named so a
+       new one fails this match instead of silently falling through. *)
+    | Keeper_decision_outcome.(Success | Checkpoint | Input_required), _, _
+    | Keeper_decision_outcome.Failed, _, _ -> total) None entries
 
 let aggregate_by_model (entries : raw_entry list) : model_stats list =
   let tbl : raw_entry list StringMap.t =

@@ -447,13 +447,17 @@ let sweep_stale_antigravity_panel_roots ?temp_dir () =
                    && stat.Unix.st_perm land 0o7777 = 0o700
                    && Antigravity_panel_root_owner.can_remove ~root:path ->
               Runtime_antigravity_home.forget_prepared_below ~runtime_root:path;
-              (match Fs_compat.remove_tree path with
-               | () ->
+              (* try/with, not a match with an `exception` case: the handler
+                 binds the exception, and an `as` binding under an exception
+                 pattern is rejected by the compiler. *)
+              (try
+                 Fs_compat.remove_tree path;
                  Log.Runtime_agent.info
                    "removed stale Antigravity panelist HOME %s (creator %d and recorded users absent)"
                    path
                    pid
-               | exception (Sys_error _ | Unix.Unix_error _) as exn ->
+               with
+               | (Sys_error _ | Unix.Unix_error _) as exn ->
                  if Sys.file_exists path
                  then
                    Log.Runtime_agent.warn

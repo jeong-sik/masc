@@ -413,7 +413,11 @@ let coverage_reason_counts_of_entries (entries : raw_entry list)
              | None -> 0
            in
            StringMap.add reason (prev + 1) acc
-         | _ -> acc)
+         (* A counted outcome without a coverage reason, and every Failed
+            entry, stay uncounted. All constructors are named so a new
+            outcome fails this match instead of silently landing here. *)
+         | Keeper_decision_outcome.(Success | Checkpoint | Input_required), None
+         | Keeper_decision_outcome.Failed, _ -> acc)
       StringMap.empty
       entries
   in
@@ -436,7 +440,10 @@ let most_common_stage_of_entries (entries : raw_entry list) : string option =
              | None -> 0
            in
            StringMap.add stage (prev + 1) acc
-         | _ -> acc)
+         (* Stage counts need a reason too: a counted outcome missing either
+            stays uncounted, as does every Failed entry. *)
+         | Keeper_decision_outcome.(Success | Checkpoint | Input_required), _, _
+         | Keeper_decision_outcome.Failed, _, _ -> acc)
       StringMap.empty
       entries
   in

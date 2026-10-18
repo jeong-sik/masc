@@ -17828,7 +17828,11 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
               | Settings_applied receipt -> receipt.severity
               | Settings_not_sent _ | Settings_refused _ | Settings_observation_required _ | Settings_unconfirmed _ -> "error" in
             let origin = if current then "" else " (" ^ key.ksk_base_path ^ ")" in
-            report_action state severity (key.ksk_keeper ^ origin ^ " · " ^ keeper_settings_save_outcome_detail outcome);
+            let message = match outcome with
+              | Settings_applied receipt -> receipt.message ^ origin
+              | Settings_not_sent _ | Settings_refused _ | Settings_observation_required _ | Settings_unconfirmed _ ->
+                  key.ksk_keeper ^ origin ^ " · " ^ keeper_settings_save_outcome_detail outcome in
+            report_action state severity message;
             if current && state.view = Keepers Keeper_detail && state.detail_tab = Detail_instructions
                && Option.exists (fun (keeper : keeper) -> String.equal keeper.k_name key.ksk_keeper) (selected_keeper state)
             then begin

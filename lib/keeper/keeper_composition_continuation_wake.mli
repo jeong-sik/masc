@@ -66,7 +66,26 @@ val pulse : sw:Eio.Switch.t -> 'a t -> (unit, Keeper_tool_execution_journal.erro
     restart for a remaining caller after worker cleanup. Single-domain Eio caller.
     No timer, freshness interval or timeout. *)
 
+val notify_result_ready : sw:Eio.Switch.t -> 'a t -> unit
+(** Nonblocking lifecycle hint after an original job result is durable. New
+    notification workers yield back to producers before discovery; callers
+    only record demand. Notifications before the first read share
+    that read, and notifications during a read request one subsequent fresh
+    pulse. No timer, authority, cached discovery/profile or worker replacement
+    is introduced. Explicit maintenance [pulse] remains independent.
+    Cancellation/exception cleanup retires only this notification worker;
+    durable discovery and later maintenance remain the recovery source.
+    Single-domain Eio caller, using the controller's lifetime switch. *)
+
 module For_testing : sig
+  val notify_result_ready :
+    resume:(on_recovery_held:(request_id:string -> cause:recovery_hold -> unit) ->
+      profiles:Keeper_types_profile.keeper_profile_snapshot ->
+      context:'a Keeper_types_profile.context ->
+      Keeper_tool_execution_journal.continuation -> (Tool_result.result, error) result) ->
+    sw:Eio.Switch.t -> 'a t -> unit
+  (** Same notification scheduling and canonical discovery as production,
+      with only the original intake outcome controlled. *)
   val pulse :
     resume:(on_recovery_held:(request_id:string -> cause:recovery_hold -> unit) ->
       profiles:Keeper_types_profile.keeper_profile_snapshot ->

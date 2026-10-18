@@ -809,7 +809,8 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
           (Keeper_tool_execution_journal.error_to_string error)
     in
     let owned_job_completions = Keeper_owned_job_completion_wake.create ~config
-        ~on_result_ready:(fun _ -> reconcile_prepared_continuations ()) () in
+        ~on_result_ready:(fun _ ->
+          Keeper_composition_continuation_wake.notify_result_ready ~sw prepared_continuations) () in
     let reconcile_owned_job_completions () =
       match Keeper_owned_job_completion_wake.pulse ~sw owned_job_completions with
       | Error error -> Log.Server.warn "owned job completion discovery unavailable: %s"

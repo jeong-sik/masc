@@ -1495,6 +1495,7 @@ let test_original_evidence_repair_reactivates_continuation ~skill_publication ()
      publication_recovery_provider=Masc.Keeper_publication_recovery_availability.non_runtime_provider} in
   let outcomes = ref [] and reported_hold = ref None in
   let failed_preparations = ref [] and repaired_preparations = ref [] in
+  let notify_again = ref (fun () -> ()) in
   let supervisor = Wake.create ~context ~on_result:(fun candidate outcome ->
       check (option string) "recovery retains the original Task" (Some "task-A")
         (Journal.continuation_source candidate).source_task_id;
@@ -1504,12 +1505,19 @@ let test_original_evidence_repair_reactivates_continuation ~skill_publication ()
       parked.binding.request_id (Journal.continuation_request_id candidate);
     Unix.rename original_path detached_path;
     if skill_publication then (write original_path "source temporarily not a directory\n"; publish ());
-    O.capture_result ~on_report:(fun report -> failed_preparations := report :: !failed_preparations)
+    let outcome = O.capture_result ~on_report:(fun report -> failed_preparations := report :: !failed_preparations)
       (fun () -> Wake.resume ~context candidate ~on_recovery_held:(fun ~request_id ~cause ->
         reported_hold := Some (request_id, cause); on_recovery_held ~request_id ~cause)) in
+    (* A result hint at intake settlement still refers to this original
+       canonical owner; it cannot release its unavailable evidence. *)
+    !notify_again ();
+    outcome in
   let backend_before = List.length (calls fixture) in
   Eio.Switch.run (fun sw ->
-    Wake.For_testing.pulse ~resume:initial_resume ~sw supervisor |> require "original evidence fault intake");
+    let notify () = Wake.For_testing.notify_result_ready ~resume:initial_resume ~sw supervisor in
+    notify_again := notify;
+    notify ();
+    notify ());
   check int "one original intake reports the unavailable evidence" 1 (List.length !outcomes);
   (match !reported_hold with
    | Some (request_id, Wake.Original_run_unavailable _) when not skill_publication ->

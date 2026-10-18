@@ -1608,16 +1608,16 @@ let test_maintenance_reads_chat_operation_store_and_prepared_gate_checkpoint () 
             (Store.claim_next
                op_store
                ~now:5.0
-               ~batch:(fun head tail ->
-                 match tail with
-                 | member :: _ ->
+               ~batch:(fun head candidates ->
+                 match candidates with
+                 | _ :: member :: _ ->
                    Ok
                      (Some
                         { Store.members =
                             [ head.operation_id; member.operation_id ]
                         ; input = `Assoc [ "combined", `String "merged input" ]
                         })
-                 | [] -> Alcotest.fail "expected second batch candidate")
+                 | [] | [ _ ] -> Alcotest.fail "expected second batch candidate")
              |> ok);
           let observed = maintenance_ok ~base_path ~mode:M.Observe_only in
           Alcotest.(check int)

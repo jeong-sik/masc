@@ -190,6 +190,23 @@ let public_calls inputs = List.mapi (fun index input -> Agent_core.Types.ToolUse
     {id = "public-edit-" ^ string_of_int index; name = "Edit"; input}) inputs
 ;;
 
+let publish_file_skills ~source_config sw config documents =
+  List.iter (fun (name, document) -> write (Filename.concat config.Workspace.base_path
+      ("skills/" ^ name ^ "/SKILL.md")) document) documents;
+  let workspace = Skill_catalog_snapshot_service.workspace_of_base_path ~base_path:config.base_path
+      |> function Ok value -> value | Error error -> fail (Config_dir_resolver.canonical_base_path_error_to_string error) in
+  Eio.Switch.on_release sw (fun () -> Skill_catalog_snapshot_service.retire ~workspace);
+  let snapshot = match Skill_catalog_snapshot_service.refresh ~workspace ~user_home:None
+      ~read_config:(fun () -> {path = Filename.concat config.base_path ".masc/config/runtime.toml"; source_text = source_config}) with
+    | Published value | Unchanged value -> value
+    | Workspace_retired -> fail "published file Skill workspace retired" in
+  check int "exact Skill documents were published" (List.length documents)
+    (List.length (Skill_catalog_snapshot.entries snapshot));
+  check int "published documents have no source rejection" 0 (List.length (Skill_catalog_snapshot.rejections snapshot));
+  Fs_compat.mkdir_p (Keeper_fs.keeper_session_dir config "prepared-edit-trace");
+  snapshot
+;;
+
 let publish_edit_skills ?(two_nodes = false) ?(ordered = false)
     ?(third_node = false) ?(continue_independent = false) ?read_path_param sw config =
   let source_config = "[skills]\nresource-read-max-bytes = 16384\n[[skills.sources]]\nid = \"edit-fixture\"\nanchor = \"base-path\"\npath = \"skills\"\naccess = \"read-only\"\n" in
@@ -220,19 +237,36 @@ let publish_edit_skills ?(two_nodes = false) ?(ordered = false)
          "[[compositions.nodes]]\nid = \"read\"\ntool = \"Read\"\n[compositions.nodes.input]\nkind = \"object\"\n"
          ^ Printf.sprintf "[[compositions.nodes.input.fields]]\nname = \"file_path\"\n[compositions.nodes.input.fields.value]\nkind = \"param\"\nname = %S\n" param)
     ^ "```\n" in
-  List.iter (fun name -> write (Filename.concat config.Workspace.base_path
-      ("skills/" ^ name ^ "/SKILL.md")) (document name)) ["edit-left"; "edit-right"];
-  let workspace = Skill_catalog_snapshot_service.workspace_of_base_path ~base_path:config.base_path
-      |> function Ok value -> value | Error error -> fail (Config_dir_resolver.canonical_base_path_error_to_string error) in
-  Eio.Switch.on_release sw (fun () -> Skill_catalog_snapshot_service.retire ~workspace);
-  let snapshot = match Skill_catalog_snapshot_service.refresh ~workspace ~user_home:None
-      ~read_config:(fun () -> {path = Filename.concat config.base_path ".masc/config/runtime.toml"; source_text = source_config}) with
-    | Published value | Unchanged value -> value
-    | Workspace_retired -> fail "published Edit Skill workspace retired" in
-  check int "both exact Skill documents were published" 2 (List.length (Skill_catalog_snapshot.entries snapshot));
-  check int "published documents have no source rejection" 0 (List.length (Skill_catalog_snapshot.rejections snapshot));
-  Fs_compat.mkdir_p (Keeper_fs.keeper_session_dir config "prepared-edit-trace");
-  snapshot
+  publish_file_skills ~source_config sw config
+    (List.map (fun name -> name, document name) ["edit-left"; "edit-right"])
+;;
+
+let publish_write_skills ?(with_read = false) sw config =
+  let source_config = "[skills]\nresource-read-max-bytes = 16384\n[[skills.sources]]\nid = \"write-fixture\"\nanchor = \"base-path\"\npath = \"skills\"\naccess = \"read-only\"\n" in
+  let document name =
+    let node id tool bindings =
+      Printf.sprintf "[[compositions.nodes]]\nid = %S\ntool = %S\n[compositions.nodes.input]\nkind = \"object\"\n" id tool
+      ^ String.concat "" (List.map (fun (field,param) -> Printf.sprintf
+          "[[compositions.nodes.input.fields]]\nname = %S\n[compositions.nodes.input.fields.value]\nkind = \"param\"\nname = %S\n" field param) bindings) in
+    Printf.sprintf "---\nname: %s\ndescription: Preserve the original file content\n---\n```toml composition\n[[compositions]]\nname = %S\nexecution = \"inline\"\n" name name
+    ^ String.concat "" (List.map (fun param -> Printf.sprintf
+        "[[compositions.params]]\nname = %S\ntype = \"string\"\ndescription = \"Original file input\"\n" param)
+        (["file_path";"content"] @ if with_read then ["read_path"] else []))
+    ^ (if with_read then node "read" "Read" ["file_path","read_path"] else "")
+    ^ node "write" "Write" ["file_path","file_path";"content","content"]
+    ^ "```\n" in
+  publish_file_skills ~source_config sw config
+    (List.map (fun name -> name,document name) ["write-left";"write-right"])
+;;
+
+let inline_write_calls ?(prefix = "inline-write") inputs = List.mapi (fun index input ->
+  Agent_core.Types.ToolUse {id=prefix ^ "-" ^ string_of_int index;
+    name="keeper_compose_write-" ^ (if index=0 then "left" else "right");input}) inputs
+;;
+
+let public_write_args ?read_path path content =
+  `Assoc (["file_path",`String path;"content",`String content]
+    @ match read_path with Some path -> ["read_path",`String path] | None -> [])
 ;;
 
 let inline_calls bundle inputs = List.mapi (fun index input ->
@@ -589,6 +623,77 @@ let test_recipe_edits_overlap_with_original_source ?(dynamic = false) ~nested ()
     check int "exact nested Skill activations survive file overlap" 2
       (List.length (Keeper_skill_activation_ledger.activations ledger))
   end
+;;
+
+let test_published_inline_writes_share_outer_resources ~with_read ~create () =
+  fixture @@ fun env sw config meta recovery root ->
+  let snapshot = publish_write_skills ~with_read sw config in
+  public_bundle ~snapshot ~with_read ~with_write:true env sw config meta recovery
+  @@ fun meta task_id _cell causal bundle ->
+  let left = Filename.concat root "aggregate-left/new/file" in
+  let right = Filename.concat root "aggregate-right/new/file" in
+  if create then List.iter (fun name -> Fs_compat.mkdir_p (Filename.concat root name))
+      ["aggregate-left";"aggregate-right"]
+  else (write left "left-before";write right "right-before");
+  let left_source = Filename.concat root "read-left" and right_source = Filename.concat root "read-right" in
+  if with_read then (write left_source "left source";write right_source "right source");
+  let inputs =
+    [public_write_args ?read_path:(if with_read then Some left_source else None) left "left-after";
+     public_write_args ?read_path:(if with_read then Some right_source else None) right "right-after"] in
+  let both, resolve_both = Eio.Promise.create () in
+  let entered = ref 0 in
+  let rows = FS.For_testing.with_before_write_authorization (fun () ->
+      incr entered;if !entered=2 then Eio.Promise.resolve resolve_both ();
+      Eio.Promise.await both)
+    (fun () -> dispatch env bundle.tools (inline_write_calls inputs)) in
+  check int "both named Write calls reach actual authorization together" 2 !entered;
+  check string "left actual bytes are retained" "left-after" (read left);
+  check string "right actual bytes are retained" "right-after" (read right);
+  List.iter (fun (row : Agent_core.Agent_tools.tool_execution_result) ->
+    check int "outer SDK batch transfers both original aggregate resources" 2
+      (Agent_core.Tool_contract.Invocation.schedule row.invocation).batch_size) rows;
+  let leaves = physical_leaves meta in
+  check int "all original Read/Write leaf receipts remain" (if with_read then 4 else 2) (List.length leaves);
+  List.iter (fun row ->
+    check string "aggregate keeps its original Task" task_id Yojson.Safe.Util.(member "task_id" row |> to_string);
+    check string "aggregate keeps its original trace" (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+      Yojson.Safe.Util.(member "trace_id" row |> to_string)) leaves;
+  check int "leaf results still join the original Gate aggregate" (if with_read then 4 else 2)
+    Yojson.Safe.Util.(member "completed_tool_calls" (Keeper_gate_causal_context.snapshot causal).snapshot |> to_list |> List.length)
+;;
+
+let test_published_inline_write_alias_order_and_cancellation () =
+  fixture @@ fun env sw config meta recovery root ->
+  let snapshot = publish_write_skills sw config in
+  public_bundle ~snapshot ~with_write:true env sw config meta recovery
+  @@ fun _meta _task _cell _causal bundle ->
+  let owned = Filename.concat root "aggregate-owned" and alias = Filename.concat root "aggregate-alias" in
+  Fs_compat.mkdir_p owned;Unix.symlink owned alias;
+  let target = Filename.concat owned "file" in
+  write target "before";
+  ignore (dispatch env bundle.tools (inline_write_calls ~prefix:"alias-write"
+    [public_write_args target "first";public_write_args (Filename.concat alias "file") "second"]));
+  check string "physical aliases retain original outer call order" "second" (read target);
+  let other = Filename.concat root "aggregate-other/file" in
+  write other "other-before";
+  let inputs = [public_write_args target "after";public_write_args other "other-after"] in
+  let calls = inline_write_calls ~prefix:"cancelled-write" inputs in
+  let both, resolve_both = Eio.Promise.create () in
+  let entered = ref 0 in
+  (match Eio.Switch.run (fun child ->
+    FS.For_testing.with_before_write_authorization (fun () ->
+        incr entered;if !entered=2 then Eio.Promise.resolve resolve_both ();
+        Eio.Fiber.await_cancel ()) (fun () ->
+      Eio.Fiber.fork ~sw:child (fun () -> ignore (dispatch env bundle.tools calls));
+      Eio.Promise.await both;
+      Eio.Switch.fail child Exit)) with
+   | () -> fail "aggregate caller cancellation did not propagate"
+   | exception Exit -> ());
+  check string "cancelled aggregate cannot write its first target" "second" (read target);
+  check string "cancelled aggregate cannot write its independent target" "other-before" (read other);
+  ignore (dispatch env bundle.tools (inline_write_calls ~prefix:"after-cancel-write" inputs));
+  check string "later invocation reacquires the original target" "after" (read target);
+  check string "later invocation reacquires the independent target" "other-after" (read other)
 ;;
 
 let test_recipe_conflicts_consume_predecessor_bytes ?(dynamic = false) () =
@@ -1355,6 +1460,14 @@ let test_prepared_read_skips_a_long_line_and_stops_at_eof () =
 
 let () = run "prepared actual file resources"
   ["prepared Write and actual recipes", [
+    test_case "named Write aggregates overlap in the outer SDK batch" `Quick
+      (test_published_inline_writes_share_outer_resources ~with_read:false ~create:false);
+    test_case "named Read/Write aggregates keep original receipts while overlapping" `Quick
+      (test_published_inline_writes_share_outer_resources ~with_read:true ~create:false);
+    test_case "named Writes retain missing-parent ownership in the outer batch" `Quick
+      (test_published_inline_writes_share_outer_resources ~with_read:false ~create:true);
+    test_case "named Write aliases and cancellation retain original ownership" `Quick
+      test_published_inline_write_alias_order_and_cancellation;
     test_case "existing disjoint Writes overlap original authorization" `Quick
       (test_recipe_writes_overlap ~create:false ~dynamic:false);
     test_case "new targets under disjoint existing parents overlap" `Quick

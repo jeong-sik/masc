@@ -56,3 +56,18 @@ export function sourceTickAtSeconds(performance, seconds) {
   if (!after) return performance.ticks
   return before.tick + (after.tick - before.tick) * (seconds - before.seconds) / (after.seconds - before.seconds)
 }
+
+export function sourceSecondsAtTick(performance, tick) {
+  if (!performance || !Number.isFinite(tick) || tick < 0 || tick > performance.ticks) throw new Error('Seek must be within the source MIDI ticks')
+  if (tick === performance.ticks) return performance.seconds
+  const events = performance.events
+  let low = 0, high = events.length
+  while (low < high) {
+    const mid = Math.floor((low + high) / 2)
+    if (events[mid].tick <= tick) low = mid + 1
+    else high = mid
+  }
+  const before = events[low - 1] ?? { tick: 0, seconds: 0 }, after = events[low]
+  if (!after) return before.seconds
+  return before.seconds + (after.seconds - before.seconds) * (tick - before.tick) / (after.tick - before.tick)
+}

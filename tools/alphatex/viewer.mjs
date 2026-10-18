@@ -50,7 +50,7 @@ if (values.help) {
     + '  --arrange opens MIDI/WAV region editing; --project also reopens saved arrangements.\n'
     + '  --midi-file song.mid imports a source for editing/export/MIDI audition; --midi-pattern N selects an SMF2 pattern.\n'
     + '  --output UID selects sequencer audio output; :output UID changes it in the editor.\n'
-    + '  --midi-output=ID selects MIDI output; source Space plays/stops, phrase Space plays/pauses; :audio returns to audio.\n'
+    + '  --midi-output=ID selects MIDI output; Space pauses/resumes; :seek moves within a playing source; :stop ends it.\n'
     + '  --record opens audio/MIDI input selection; r begins recording, s saves WAV and UMP.\n'
     + '  --session directory opens a saved waveform/MIDI timeline; --session-root sets the take folder.\n'
     + '  --devices lists CoreAudio devices and CoreMIDI inputs/outputs on macOS.\n'

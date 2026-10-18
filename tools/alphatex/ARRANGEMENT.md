@@ -115,8 +115,9 @@ export plan is connected.
 ## Integration contract
 
 A trimmed MIDI region needs note/controller/SysEx state reconstruction at its
-source start. The one-shot source audition sender is not that reconstruction
-engine. Arrangement playback must preserve region/source ports, diagnose shared
+source start. The source sender now has channel-state reconstruction for supported pause/seek
+boundaries, with explicit unknown-state errors. Region playback still needs to
+reuse that reconstruction, preserve region/source ports, diagnose shared
 channel conflicts, and own note/pedal cleanup before claiming arbitrary MIDI
 region playback. Audio regions need native-rate conversion/mixing with frame
 bounds, selected-output ownership and long-arrangement streaming. A persisted

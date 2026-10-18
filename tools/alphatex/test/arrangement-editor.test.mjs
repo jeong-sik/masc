@@ -1,4 +1,5 @@
 import { liveMidiPlan } from '../live-midi.mjs'
+import { calibrationSelection } from '../audio-calibration.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { EventEmitter, once } from 'node:events'
@@ -69,7 +70,7 @@ test('actual IO worker preserves sources in redo history when saving to a differ
 
 const flush=()=>new Promise(resolve=>setImmediate(resolve))
 async function controller(options={}){
-  const observed={requests:[],saved:[],recovered:[],terminated:false,players:[],removed:[],takes:[],captures:[],monitors:[],live:[],liveAttempts:[],claims:[]},process=new EventEmitter()
+  const observed={requests:[],saved:[],recovered:[],terminated:false,players:[],removed:[],takes:[],captures:[],monitors:[],live:[],liveAttempts:[],claims:[],calibrations:[]},process=new EventEmitter()
   const admitLive=options.admitLive
   process.stdin=Object.assign(new EventEmitter(),{isTTY:true,isRaw:false,setRawMode(value){this.isRaw=value},resume(){},pause(){}})
   process.stdout=Object.assign(new EventEmitter(),{isTTY:true,columns:100,rows:24,write(){}});process.stderr={write(){}}
@@ -88,7 +89,11 @@ async function controller(options={}){
   const slot=`arrange-controller-${randomUUID()}`
   globalThis[slot]={process,Worker:OwnedWorker,arrangementSchedule,arrangementRoute,selectArrangementRoute,arrangementPlaybackRequest,...editorAPI,join,dirname,resolve,tmpdir,randomUUID,
     emitKeypressEvents(){},safeText:String,recordingEpoch,
-    liveMidiPlan, midiDestinations:async()=>[],
+    liveMidiPlan, calibrationSelection, midiDestinations:async()=>[],
+    measureAudioCalibration(options){
+      let finish,reject;const completion=new Promise((yes,no)=>{finish=yes;reject=no})
+      observed.calibrations.push({options,finish,reject});return completion
+    },
     backingMidiClaims:async value=>{observed.claims.push(value);await options.inspect?.(value);return options.backingClaims??[]},
     openLiveMidi:async options=>{
       observed.liveAttempts.push(options);admitLive?.(options)
@@ -691,4 +696,27 @@ test('exit cancels a queued live replacement and prepared backing without reopen
  first.finish({});await view.done
  assert.equal(view.observed.live.length,1);assert.equal(view.observed.players.length,0)
  assert.ok(view.observed.removed.includes('/owned/cancelled'));assert.equal(view.process.stdin.isRaw,false)
+})
+
+test('calibration owns its input/output operation through cancel/close without adopting a late candidate',async()=>{
+ const view=await controller();view.command('input selected-interface');view.command('calibrate selected-output 2 1 250');await flush()
+ const pending=view.observed.calibrations[0];assert.ok(pending);const job=pending.options
+ assert.equal(job.input,'selected-interface');assert.equal(job.output,'selected-output');assert.equal(job.inputChannel,2);assert.equal(job.outputChannel,1);assert.equal(job.maxLagMs,250)
+ let ended=false;view.done.then(()=>{ended=true});view.key('q');await flush()
+ assert.equal(ended,false);assert.equal(job.signal.aborted,true)
+ pending.reject(new Error('Evidence retained after cancellation'))
+ await view.done;assert.equal(view.observed.live.length,0);assert.equal(view.observed.players.length,0);assert.equal(view.process.stdin.isRaw,false)
+})
+test('calibration refuses active backing, drains a live owner and keeps the project unchanged',async()=>{
+ const view=await controller();await primeWave(view);view.command('input interface');view.key('space');await flush()
+ view.command('calibrate output 1 1 50');await flush();assert.equal(view.observed.calibrations.length,0)
+ const prepare=view.observed.requests.find(job=>job.kind==='prepare-wave');view.worker.emit('message',{id:prepare.id,ok:true,result:{path:'/owned/calibration/plan.json',format:'wave-arrangement'}});await flush()
+ view.observed.players[0].finish();await flush()
+ view.command('midi-monitor 10 42');await flush();const live=view.observed.live[0]
+ view.command('calibrate output 1 1 50');await flush();assert.ok(live.stops>0)
+ live.finish({});await flush();const pending=view.observed.calibrations[0];assert.ok(pending)
+ pending.finish({directory:pending.options.directory,matches:[{residualMs:1,correlation:.9},{residualMs:1.01,correlation:.89}]});await flush()
+ assert.equal(view.observed.live.length,2);assert.equal(view.observed.players.length,1)
+ view.key('q');await flush();view.observed.live[1].finish({});await view.done
+ assert.equal(view.observed.saved.at(-1).project.assets.length,1);assert.equal(view.observed.saved.at(-1).project.clips.length,1)
 })

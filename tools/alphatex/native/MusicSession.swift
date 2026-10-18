@@ -676,6 +676,8 @@ do {
     switch CommandLine.arguments.dropFirst().first {
     case "devices":
         try emit(["kind": "devices", "audio": try audioDevices().map(\.json), "midi": try midiSources().map(\.json)])
+    case "audio-devices":
+        try emit(["kind": "devices", "audio": try audioDevices().map(\.json), "midi": []])
     case "record", "monitor":
         let recording = CommandLine.arguments[1] == "record"
         guard let uid = option("--input"), !recording || option("--directory") != nil else {
@@ -693,7 +695,7 @@ do {
             throw SessionFailure("selected input device is unavailable")
         }
         let midiSelection = recording ? (option("--midi") ?? "all") : "none"
-        let available = try midiSources()
+        let available = midiSelection == "none" ? [] : try midiSources()
         let selected: [MidiSource]
         switch midiSelection {
         case "none": selected = []
@@ -719,7 +721,7 @@ do {
         }
         RunLoop.main.run()
     default:
-        throw SessionFailure("usage: masc-music-native devices | record --input UID --directory NEW_PATH [--midi all|none|UID] [--monitor-output UID] | monitor --input UID --monitor-output UID")
+        throw SessionFailure("usage: masc-music-native devices | audio-devices | record --input UID --directory NEW_PATH [--midi all|none|UID] [--monitor-output UID] | monitor --input UID --monitor-output UID")
     }
 } catch {
     try? emit(["kind": "error", "message": String(describing: error)])

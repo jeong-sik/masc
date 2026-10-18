@@ -189,11 +189,19 @@ let test_real_dispatch_freezes_unread_across_refusal () =
   S.save ~path snapshot |> require_snapshot;
   let saved_before=Fs_compat.load_file path in
   let keepers_dir=Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-  let archive holes=Keeper_memory_os_aggregate_lock.with_lock ~keepers_dir ~keeper_id:keeper_name
-    (fun () -> Keeper_librarian_unread_ledger.archive ~keepers_dir ~keeper_id:keeper_name holes) |> require in
-  let (_ : Unread.t list)=archive [original] in
+  (* Prepare and change valid persisted fixture evidence through the public
+     path/codec. This scenario exercises request reads, not hole publication. *)
+  let append_fixture_holes holes=Keeper_memory_os_aggregate_lock.with_lock ~keepers_dir ~keeper_id:keeper_name
+    (fun () ->
+      let previous=Keeper_memory_os_current.read_unread_messages ~keepers_dir ~keeper_id:keeper_name |> require in
+      let merged=Unread.merge previous holes |> require in
+      let ledger_path=Keeper_memory_os_current.unread_ledger_path ~keepers_dir ~keeper_id:keeper_name in
+      Fs_compat.save_file_atomic_strict ledger_path
+        (Yojson.Safe.to_string (`Assoc ["schema_version",`Int 1;
+          "unread_messages",Unread.list_to_json merged])) |> require) in
+  append_fixture_holes [original];
   let transitions=ref 0 in
-  let on_error ()=incr transitions;ignore (archive [later]) in
+  let on_error ()=incr transitions;append_fixture_holes [later] in
   (match dispatch ~on_error ~sw ~net ~base_path () with
    | ("refused.sample",Agent_core.Error.Api (Agent_core.Retry.ContextOverflow _)) :: _ -> ()
    | _ -> fail "the real first peer did not return a typed size refusal");

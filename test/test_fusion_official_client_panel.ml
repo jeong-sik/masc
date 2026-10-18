@@ -1536,9 +1536,18 @@ before = document["token"]["access_token"].split(":")[0]
 assert before in ["SELECTED_A", "SELECTED_A_REFRESHED", "SELECTED_B", "SELECTED_C", "SELECTED_C_REFRESHED"]
 document["token"]["access_token"] = before if before.endswith("_REFRESHED") else before + "_REFRESHED"
 credential.write_text(json.dumps(document))
-with (root / "selected-accounts.jsonl").open("a") as log:
-    log.write(json.dumps({"home": str(account_dir), "cwd": str(workspace)}) + "\n")
 assert sys.stdin.read()
+# Prompt EOF follows on_spawned publication. Observe the actual Fusion spawn
+# manager's group without creating or changing a process group in this CLI.
+panel_root = next(path for path in account_dir.parents
+                  if path.name.startswith("masc-antigravity-panelist-"))
+owner = json.loads((panel_root / "process-owner.json").read_text())
+pid, pgid = os.getpid(), os.getpgrp()
+assert pgid == pid
+assert owner["state"] == "process_group" and owner["pgid"] == pgid
+with (root / "selected-accounts.jsonl").open("a") as log:
+    log.write(json.dumps({"home": str(account_dir), "cwd": str(workspace),
+                         "pid": pid, "pgid": pgid}) + "\n")
 model = sys.argv[sys.argv.index("--model") + 1]
 print(json.dumps({"event": "init", "conversation_id": "panel-fixture", "init": {
     "model": model, "cwd": str(workspace), "tools": [], "permission_mode": "request-review"}}), flush=True)
@@ -1612,6 +1621,12 @@ let test_antigravity_panel_selected_account_and_refresh () =
     let rows = Fs_compat.load_file (Filename.concat base_dir "selected-accounts.jsonl")
       |> String.split_on_char '\n' |> List.filter (fun row -> row <> "")
       |> List.map Yojson.Safe.from_string in
+    List.iter
+      (fun row ->
+         let pid = Yojson.Safe.Util.(row |> member "pid" |> to_int) in
+         let pgid = Yojson.Safe.Util.(row |> member "pgid" |> to_int) in
+         check int "actual Fusion CLI leads its published foreground process group" pid pgid)
+      rows;
     let homes = List.map (fun row -> Yojson.Safe.Util.(row |> member "home" |> to_string)) rows in
     match homes with
     | [_; _; _; _; _; _] ->

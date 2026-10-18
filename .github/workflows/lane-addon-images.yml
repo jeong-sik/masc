@@ -16,6 +16,10 @@ on:
         type: choice
         options: [all, machines]
         default: all
+      package:
+        description: Optional exact package directory for an images-only build
+        type: string
+        required: false
 permissions:
   contents: read
 jobs:
@@ -45,6 +49,7 @@ jobs:
       - id: discover
         env:
           PACKAGE_SCOPE: ${{ inputs.scope }}
+          SELECTED_PACKAGE: ${{ inputs.package }}
         run: |
           python3 - <<'PY'
           import json, os, subprocess
@@ -59,6 +64,11 @@ jobs:
               packages = [package for package in packages if package in workers]
               if set(packages) != set(workers):
                   raise SystemExit('selected source must contain both machine packages')
+          selected = os.environ['SELECTED_PACKAGE']
+          if selected:
+              if selected not in packages:
+                  raise SystemExit('package must name a discovered package in the selected scope')
+              packages = [selected]
           source_sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
           matrix = {'include': [dict(package=package, arch=arch, runner=runner,
               worker_target=workers.get(package, ('', ''))[0],

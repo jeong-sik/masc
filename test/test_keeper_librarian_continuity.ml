@@ -998,9 +998,11 @@ let test_volatile_message_floor ~failure () =
   check int "one whole refusal and one request per message per wake"
     expected_calls (List.length !requests);
   let first = List.nth !requests 1 and second = List.nth !requests (expected_calls - 1) in
-  check bool "first inference carries only the call" true (contains ~sub:"[tool use omitted:" first);
-  check bool "first inference excludes the unread result" false (contains ~sub:"[tool result omitted:" first);
-  check bool "second inference carries the tool result" true (contains ~sub:"[tool result omitted:" second);
+  let call = "[tool use omitted: id=" ^ tool_call_id 1
+  and result = "[tool result omitted: id=" ^ tool_call_id 1 in
+  check bool "first inference carries only the call" true (contains ~sub:call first);
+  check bool "first inference excludes the unread result" false (contains ~sub:result first);
+  check bool "second inference carries the tool result" true (contains ~sub:result second);
   check bool "second inference carries previous volatile state" true (contains ~sub:"remembered-call" second);
   check (option int) "only the complete atom is published" (Some 1) (coverage ());
   let snapshot = P.read ~config ~keeper_name |> get |> some in

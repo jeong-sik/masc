@@ -38,6 +38,10 @@ description: "MASC TUI의 채팅·입력·로딩·진행 상태, 시작 키 인�
   명령 성공·Task 진척·paint로 부르지 않는다. 실제 no-byte read를 EOF/timeout으로 추정하지
   않는다. 중단 caller와 늦은 worker 결과, 끝까지 관측되지 않은 단계를 따로 보존한다.
   원래 capture의 사실을 먼저 저장하고 로그를 보낸다. timing은 입력/효과 허가를 고르지 않는다.
+- 시작 기록의 오프라인 비교는 `scripts/harness/perf/tui_startup_report.py`와 그 packet 계약을
+  따른다. 미수신·중단·잘못된 표본도 전체 분모에 남긴다. 파일 해시 확인과 조건 선언의 일치를
+  실행·소스 증명이나 속도 verdict로 올리지 않는다. 서로 다른 process의 monotonic 시각을
+  빼거나 같은 capture를 여러 표본에 복제하지 않는다. 이 도구는 TUI/PTY/서버를 시작하지 않는다.
 
 ## 에디터 준비 조회
 

@@ -32,8 +32,11 @@ let with_server_root_switch ~sw f =
   Eio_context.set_switch sw;
   Fun.protect ~finally:(fun () -> Eio_context.restore_state previous) f
 
-(* [Unix] has no unsetenv, and an empty value is not an absent one: the
-   timeout readers reject "" as malformed. The stub removes the variable. *)
+(* An empty value is not an absent one: timeout and config readers distinguish
+   a missing variable from [Unix.putenv key ""], which they reject as
+   malformed. OCaml 5.5 added [Unix.unsetenv], while the test suite continues
+   to bind the shared [masc_test_unsetenv] C stub so existing test binaries and
+   [with_process_env] share one variable-removal primitive. *)
 external unsetenv : string -> unit = "masc_test_unsetenv"
 
 (* Runs [f] with [key] set to [value] ([None]: absent) in the process

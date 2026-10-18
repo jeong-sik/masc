@@ -106,7 +106,7 @@ async function controller(options={}){
       const completion=new Promise((yes,no)=>{resolve=yes;reject=no})
       const event=(kind,currentTime=0)=>options.onEvent({kind,currentTime,duration:10,device:{id:'output',name:'Output',outputs:2},loop:false,
         clock:{kind:'mach-host-time',anchor:'9007199254740993123',position:0,numer:125,denom:3}})
-      const handle={completion,ready:Promise.resolve(),stop(){entry.commands.push('stop')},terminate(){entry.commands.push('terminate')},pause(){entry.commands.push('pause');event('paused')},resume(){entry.commands.push('resume');event('playing')},status(){entry.commands.push('status')},seek(seconds){entry.commands.push(['seek',seconds])}}
+      const handle={recordingEpoch:async()=>({kind:'playing',duration:10,loop:false,clock:{kind:'mach-host-time',anchor:'9007199254740993123',position:0,numer:125,denom:3}}),completion,ready:Promise.resolve(),stop(){entry.commands.push('stop')},terminate(){entry.commands.push('terminate')},pause(){entry.commands.push('pause');event('paused')},resume(){entry.commands.push('resume');event('playing')},status(){entry.commands.push('status')},seek(seconds){entry.commands.push(['seek',seconds])}}
       const entry={options,handle,commands:[],finish(){event('stopped');resolve({kind:'stopped'})},reject,event}
       observed.players.push(entry);queueMicrotask(()=>event('playing'));return handle
     },

@@ -1271,6 +1271,87 @@ let test_unordered_graph_preserves_execution ~fail_serial () =
   check int "all original executor entries settled" 0 !active
 ;;
 
+let test_reused_plan_keeps_each_execution_owner_after_interruption_and_failure () =
+  Eio_main.run @@ fun _ ->
+  let plan = fixture ~branch_failure_policy:Plan.Continue_independent () in
+  let entered, resolve_entered = Eio.Promise.create () in
+  let never, _resolve_never = Eio.Promise.create () in
+  let interrupted_calls = ref [] and interrupted_observations = ref [] in
+  let blocked_dispatch ?launch_replay:_ ~tool_use_id ~node ~descriptor:_ ~schedule:_ ~input:_ () =
+    check string "only the original producer enters before interruption" "producer" (node_name node);
+    interrupted_calls := tool_use_id :: !interrupted_calls;
+    Eio.Promise.resolve resolve_entered ();
+    Eio.Promise.await never in
+  let observe_interrupted (result : Executor.node_result) =
+    interrupted_observations := result :: !interrupted_observations; Ok () in
+  (match Eio.Switch.run (fun sw ->
+     Eio.Fiber.fork ~sw (fun () ->
+       ignore (Executor.execute ~plan ~run_id:(Plan.Run_id.fresh ()) ~dispatch:blocked_dispatch
+         ~observe_node_result:observe_interrupted ());
+       fail "interrupted producer unexpectedly settled");
+     Eio.Promise.await entered;
+     Eio.Switch.fail sw Exit) with
+   | () -> fail "caller interruption did not leave the original execution"
+   | exception Exit -> ());
+  check int "interrupted owner has no fabricated settlement" 0 (List.length !interrupted_observations);
+  let run ~marker ~reject_left =
+    let called = ref [] and observed = ref [] in
+    let dispatch ?launch_replay:_ ~tool_use_id ~node ~descriptor:_ ~schedule ~input:_ () =
+      let name = node_name node in
+      called := (name,tool_use_id) :: !called;
+      check (option int) "fresh execution retains the original ordinal"
+        (Some schedule.Agent_core.Tool_contract.planned_index)
+        (List.find_index (fun original -> original == node) (Plan.nodes plan));
+      if reject_left && name = "left" then
+        Executor.dispatch_result ~failure_effect_disposition:Tool_result.Proven_pre_effect
+          (Tool_result.make_err ~tool_name:node.Plan.tool_name ~class_:Tool_result.Workflow_rejection
+            ~effect_disposition:Tool_result.Proven_pre_effect ~start_time:(Tool_timing.start ()) "left refused")
+      else (
+        Eio.Fiber.yield ();
+        let data = match valid_data_for_node node with
+          | `Assoc fields when name = "left" || name = "right" ->
+            `Assoc (("post_count",`Int marker) :: List.remove_assoc "post_count" fields)
+          | data -> data in
+        Executor.dispatch_result (completed ~tool_name:node.Plan.tool_name ~data)) in
+    let observe_node_result (result : Executor.node_result) =
+      observed := result :: !observed; Ok () in
+    let execution = Executor.execute ~plan ~run_id:(Plan.Run_id.fresh ()) ~dispatch ~observe_node_result () in
+    let settled = match execution with
+      | Ok settled when not reject_left -> settled
+      | Error failure when reject_left ->
+        (match failure.cause with
+         | Executor.Tool_did_not_complete result ->
+           check string "current refusal owns the current cause" "left"
+             (Plan.Node_id.to_string result.node_id)
+         | Executor.Run_journal_rejected _ | Executor.Plan_execution_failed _
+         | Executor.Node_observation_failed _ | Executor.Outer_completion_mismatch _ ->
+           fail "refusal changed execution cause");
+        failure.settled
+      | Ok _ -> fail "current refusal became success"
+      | Error _ -> fail "later execution reused an interrupted or failed owner" in
+    let expected = if reject_left then ["producer";"left";"right"]
+      else ["producer";"left";"right";"final"] in
+    check (list string) "fresh owners settle in original plan order" expected
+      (List.map (fun (r : Executor.node_result) -> Plan.Node_id.to_string r.node_id) settled);
+    check (list string) "each execution dispatches its own complete admitted branch"
+      (List.sort String.compare expected) (List.map fst !called |> List.sort String.compare);
+    check (list string) "observer sees only this execution's actual dispatches"
+      (List.map snd !called |> List.sort String.compare)
+      (List.map (fun (r : Executor.node_result) -> r.tool_use_id) !observed |> List.sort String.compare);
+    let right = List.find (fun (r : Executor.node_result) ->
+        Plan.Node_id.equal r.node_id (node_id "right")) settled in
+    check int "independent result belongs to the current execution" marker
+      Yojson.Safe.Util.(Tool_result.data right.result |> member "post_count" |> to_int);
+    List.map snd !called in
+  let after_interruption = run ~marker:2 ~reject_left:true in
+  let after_failure = run ~marker:3 ~reject_left:false in
+  let uses = !interrupted_calls @ after_interruption @ after_failure in
+  check int "one interrupted producer and both later runs keep distinct original tool uses"
+    (1 + List.length after_interruption + List.length after_failure)
+    (List.length (List.sort_uniq String.compare uses));
+  check int "later results do not settle the interrupted observer" 0 (List.length !interrupted_observations)
+;;
+
 let export_pointer value =
   match Plan.Json_pointer.of_string value with
   | Ok value -> value
@@ -1864,6 +1945,8 @@ let () =
         ; test_case "Skill evidence retains execution and child artifacts" `Quick test_export_evidence_is_independent_retention_owner
         ; test_case "async status carries exports and roots execution artifacts" `Quick test_async_export_status_and_retention
         ; test_case "export storage failure never replays" `Quick test_export_storage_failure_does_not_advertise_result
+        ; test_case "reused plan keeps execution owners after interruption and refusal" `Quick
+            test_reused_plan_keeps_each_execution_owner_after_interruption_and_failure
         ; test_case "unordered graph retains typed dataflow and Serial order" `Quick
             (test_unordered_graph_preserves_execution ~fail_serial:false)
         ; test_case "unordered graph keeps independent typed work after Serial refusal" `Quick

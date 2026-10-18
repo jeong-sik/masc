@@ -184,6 +184,21 @@ The original receipt stays in session history. Confirmed account saves retain
 their sign-in command in the session log. File commit, durability and runtime
 application remain separate facts. Runtime and painted input latency are unmeasured.
 
+The runtime.toml editor also returns to the input loop before its save finishes;
+S retries a retained draft through the same owned asynchronous save. Its original
+path, source revision and complete edited text are submitted together. Repeated
+saves wait for the existing operation. Navigation keeps the draft; a late receipt
+can complete only its original editing intent, including after ordinary source
+refreshes, and cannot delete a later edit with the same text.
+
+After an unconfirmed commit or durability result, older comparisons and already
+in-flight reads cannot authorize retry. Read current with r, then explicitly use
+u to keep your text and choose that revision, or U to replace the text. Choosing
+a new base from a pre-outcome reading also cannot bypass revalidation. X discards
+only the local draft; it does not claim that a pending server write was cancelled.
+These changes do not make the external editor itself asynchronous or establish
+measured key/paint latency.
+
 ## Activity
 
 | Keys | What it does |

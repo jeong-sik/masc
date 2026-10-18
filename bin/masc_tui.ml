@@ -4013,18 +4013,24 @@ let launch_runtime_form_save state ~mailbox request =
     let result = try
       let ( let* ) = Result.bind in
       let not_sent result = Result.map_error (fun detail -> Form_not_sent detail) result in
-      let* () = not_sent (check_workspace_request state ~mailbox
-        ~authority:request.rfs_authority ~identity:(Some request.rfs_workspace) ~host ~port ()) in
-      let* json = not_sent (Masc_tui_http.fetch_runtime_config_raw ~host ~port) in
-      let* reading = not_sent (Masc_tui_response_decode.run ~name:"runtime-form-source"
-        (fun () -> Masc_tui_runtime_config_view.decode json)) in
-      (* Account declaration may resolve a client path/environment. Keep that
-         boundary out of the UI domain; it is not a pure response decoder. *)
-      let* draft = Domain_pool_ref.submit_io_or_inline
-        (fun () -> prepare_runtime_form_save request.rfs_draft reading) in
+      let* draft = match request.rfs_draft with
+        | Config_document_draft session -> Ok (prepare_runtime_document session)
+        | Model_form_draft _ | Account_form_draft _ ->
+            let* () = not_sent (check_workspace_request state ~mailbox
+              ~authority:request.rfs_authority ~identity:(Some request.rfs_workspace) ~host ~port ()) in
+            let* json = not_sent (Masc_tui_http.fetch_runtime_config_raw ~host ~port) in
+            let* reading = not_sent (Masc_tui_response_decode.run ~name:"runtime-form-source"
+              (fun () -> Masc_tui_runtime_config_view.decode json)) in
+            (* Account declaration may resolve a client path/environment. Keep
+               that boundary out of the UI domain and pure response decoder. *)
+            Domain_pool_ref.submit_io_or_inline
+              (fun () -> prepare_runtime_form_save request.rfs_draft reading) in
       prepared := Some draft;
       publish (Form_previewing draft);
-      commit_runtime_config_text ~prior_contact:Masc_tui_server_lifecycle.Server_reached state
+      let prior_contact = match request.rfs_draft with
+        | Config_document_draft _ -> None
+        | Model_form_draft _ | Account_form_draft _ -> Some Masc_tui_server_lifecycle.Server_reached in
+      commit_runtime_config_text ?prior_contact state
         ~mailbox ~authority:request.rfs_authority ~identity:(Some request.rfs_workspace)
         ~before_commit:(fun () -> sent := true; publish (Form_posting draft))
         ~expected_source_path:draft.rfp_base.path
@@ -12380,6 +12386,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.machine_activity_open <- None;
   state.machine_activity_sessions <- List.map Masc_tui_machine_activity.suspend state.machine_activity_sessions;
   state.runtime_config_view <- None;
+  state.runtime_config_observed_generation <- None;
   state.runtime_config_generation <- state.runtime_config_generation + 1;
   state.runtime_config_read <- `Idle;
   state.runtime_config_view_error <- None;
@@ -17622,6 +17629,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
       let attached = runtime_form_is_attached state request in
       let current = runtime_form_save_current state request in
       if apply_runtime_form_save state request status then begin
+        ignore (apply_runtime_document_save state request status);
         let phase = match status with
           | Form_checking -> "checking" | Form_previewing _ -> "previewing"
           | Form_posting _ -> "posting"
@@ -17638,6 +17646,11 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
         match status with
         | Form_checking | Form_previewing _ | Form_posting _ -> ()
         | Form_finished (prepared, outcome) ->
+            (match request.rfs_draft with
+             | Config_document_draft _ ->
+                 if Option.exists (fun token -> token == request.rfs_token) state.runtime_form_save_focus
+                 then state.runtime_form_save_focus <- None
+             | Model_form_draft _ | Account_form_draft _ -> ());
             if current then begin
               launch_runtime_config_load ~force:true state ~mailbox;
               (match outcome with
@@ -17649,6 +17662,8 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
             end;
             if attached && current then begin
               match request.rfs_draft, outcome with
+              | Config_document_draft _, (Form_saved _ | Form_not_sent _ | Form_invalid_account _
+                  | Form_refused _ | Form_conflict _ | Form_unconfirmed _) -> ()
               | Model_form_draft _, Form_saved _ ->
                   state.runtime_model_form <- None; state.runtime_form_save_focus <- None
               | Account_form_draft form, Form_saved _ ->
@@ -17672,7 +17687,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
             report_action state (match outcome with Form_saved _ -> "system"
               | Form_not_sent _ | Form_invalid_account _ | Form_refused _
               | Form_conflict _ | Form_unconfirmed _ -> "error")
-              ("Runtime form" ^ origin ^ " · " ^ runtime_form_outcome_detail outcome);
+              ("Runtime configuration" ^ origin ^ " · " ^ runtime_form_outcome_detail outcome);
             (match outcome, prepared with
              | Form_saved _, Some {rfp_account=Some declaration;_} ->
                  Option.iter (fun sign_in ->
@@ -18442,6 +18457,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
                  (List.map (fun (text, kind) ->
                       (Masc.Tui_terminal_text.sanitize_terminal_text text, kind)))
           in
+          state.runtime_config_observed_generation <- Some generation;
           state.runtime_config_view <- Some
              { rcv_path = path; rcv_source_text = reading.source_text; rcv_rows = rows; rcv_metadata = metadata;
                rcv_account_emails = reading.account_emails };
@@ -18488,7 +18504,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
            | Some edit ->
              let current = { Masc_tui_runtime_config_edit.path;
                source_text = reading.source_text; source_revision = metadata.source_revision } in
-             (match Masc_tui_runtime_config_edit.observe current edit.rce_session with
+             (match Masc_tui_runtime_config_edit.observe ~read_generation:generation current edit.rce_session with
               | Ok session -> Masc_tui_types.put_runtime_config_edit ~preserve_view:true state ~workspace:edit.rce_workspace session
               | Error _ -> ()));
 
@@ -22202,51 +22218,22 @@ let main
          | Error detail -> state.lane_addons <- Some {view with document_key=None;
              editor_ready=false;scroll=0;error=lane_addons_input_failure detail})
   in
-  (* The raw editor and account form share preview and guarded commit. Each
-     caller keeps the revision from the same read as the text it edits. *)
-  let save_runtime_config_text ?prior_contact ~authority ~identity ~expected_source_path ~expected_source_revision edited =
-    match save_runtime_config_text ?prior_contact state ~mailbox:async_messages
-      ~authority ~identity ~expected_source_path ~expected_source_revision edited with
-    | Ok receipt -> Ok receipt
-    | Error error ->
-      (match error with
-       | Masc_tui_http.Runtime_config_save_unconfirmed _ ->
-         launch_runtime_config_load ~force:true state ~mailbox:async_messages;
-         launch_runtime_catalog_load state ~mailbox:async_messages;
-         launch_runtime_surface_load state ~mailbox:async_messages ~force:true;
-         launch_lanes_reread state ~mailbox:async_messages
-       | Masc_tui_http.Runtime_config_conflict _ ->
-         launch_runtime_config_load ~force:true state ~mailbox:async_messages
-       | Masc_tui_http.Runtime_config_save_refused _ -> ());
-      Error error
-  in
+  (* Raw edits join the same owned operation as structured forms. Retain the
+     exact session before dispatch; neither a duplicate nor a refusal loses it. *)
   let save_runtime_config_edit_session ~workspace session =
     let module Edit = Masc_tui_runtime_config_edit in
-    let authority = state.workspace_authority in
-    let identity = state.server_identity in
     Masc_tui_types.put_runtime_config_edit state ~workspace session;
-    match save_runtime_config_text ~authority ~identity
-        ~expected_source_path:session.Edit.base.path ~expected_source_revision:session.Edit.base.source_revision session.text with
-    | Ok receipt ->
-      (match receipt.Masc_tui_runtime_config_receipt.durability with
-       | Masc_tui_runtime_config_receipt.Durable ->
-         Masc_tui_types.discard_runtime_config_edit state ~workspace ~path:session.base.path
-       | Masc_tui_runtime_config_receipt.Durability_unconfirmed ->
-         Masc_tui_types.put_runtime_config_edit state ~workspace
-           (Edit.failed "File written; durability is unconfirmed. Read the current file before retrying." session));
-      report_action state "system" (Masc_tui_runtime_config_receipt.lane_summary receipt)
-    | Error error ->
-      let message = Masc_tui_http.runtime_config_save_error_message error in
-      let session = match error with
-        | Masc_tui_http.Runtime_config_conflict current ->
-          launch_runtime_config_load ~force:true state ~mailbox:async_messages;
-          (match Edit.observe current session with
-           | Ok session -> Edit.failed message session
-           | Error detail -> Edit.failed (message ^ " " ^ detail) session)
-        | Masc_tui_http.Runtime_config_save_refused _
-        | Masc_tui_http.Runtime_config_save_unconfirmed _ -> Edit.failed message session in
-      Masc_tui_types.put_runtime_config_edit state ~workspace session;
-      report_action state "error" (message ^ " Draft retained; e to edit, r to read current.")
+    let request =
+      if Masc_tui_types.runtime_config_workspace state <> Some workspace then
+        Error "Draft belongs to another workspace; save not sent"
+      else begin_runtime_form_save state ~draft:(Config_document_draft session)
+        ~started_ns:(Mtime_clock.elapsed_ns ()) in
+    match request with
+    | Ok request -> launch_runtime_form_save state ~mailbox:async_messages request
+    | Error detail ->
+        Masc_tui_types.put_runtime_config_edit ~preserve_view:true state ~workspace
+          (Edit.failed detail session);
+        report_action state "error" (detail ^ "; draft retained")
   in
   let handle_runtime_config_edit () =
     let module Edit = Masc_tui_runtime_config_edit in
@@ -22255,7 +22242,8 @@ let main
     | Some workspace, Some reading ->
       let session = match Masc_tui_types.runtime_config_edit_session state with
         | Some edit -> edit.rce_session
-        | None -> Edit.open_document { path = reading.rcv_path;
+        | None -> Edit.open_document ?read_generation:state.runtime_config_observed_generation
+            { path = reading.rcv_path;
             source_text = reading.rcv_source_text; source_revision = reading.rcv_metadata.source_revision } in
       (match Masc_tui_editor.roundtrip ~restore:restore_terminal
           ~reenter:reenter_terminal ~suffix:".toml" session.text with
@@ -22263,6 +22251,7 @@ let main
            ~cancelled:"runtime.toml unchanged; any earlier draft is retained" abort
        | Ok edited ->
          if String.equal edited session.base.source_text then begin
+           release_runtime_document_recovery state ~workspace ~path:session.base.path;
            Masc_tui_types.discard_runtime_config_edit state ~workspace ~path:session.base.path;
            report_action state "system" "No changes from the draft base; no file was written."
          end else save_runtime_config_edit_session ~workspace (Edit.edit edited session))
@@ -22276,6 +22265,7 @@ let main
       (match key with
        | "S" -> save_runtime_config_edit_session ~workspace:edit.rce_workspace session
        | "X" ->
+         release_runtime_document_recovery state ~workspace:edit.rce_workspace ~path:session.base.path;
          Masc_tui_types.discard_runtime_config_edit state ~workspace:edit.rce_workspace ~path:session.base.path;
          launch_runtime_config_load state ~mailbox:async_messages;
          report_action state "system" "Local draft discarded; reading current runtime.toml."
@@ -22300,6 +22290,7 @@ let main
          (match result with
           | Error message -> report_action state "error" message
           | Ok session ->
+            release_runtime_document_recovery state ~workspace:edit.rce_workspace ~path:session.base.path;
             Masc_tui_types.put_runtime_config_edit state ~workspace:edit.rce_workspace session;
             state.config_scroll <- 0; state.runtime_config_cursor <- 0;
             report_action state "system"

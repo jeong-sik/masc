@@ -111,6 +111,19 @@ let test_unreadable_history_never_becomes_absence () =
       | _ -> fail "row fixture changed" in
     write_rows path [ valid; invalid_identity ];
     (match lookup query with `Service_unavailable, _ -> () | _ -> fail "invalid identity became a complete response");
+    let user_provenance : Keeper_chat_delivery_identity.delivery_provenance =
+      { delivery_key = delivery "kmsg-unreadable"; transcript_slot = Accepted_user } in
+    let invalid_provenance = match row ~provenance:user_provenance ~id:"bad-delivery"
+        ~role:"user" ~content:"unidentifiable delivery" () with
+      | `Assoc fields -> `Assoc (("delivery_key", `Int 0) :: List.remove_assoc "delivery_key" fields)
+      | _ -> fail "row fixture changed" in
+    write_rows path [ valid; invalid_provenance ];
+    (match lookup query with `Service_unavailable, _ -> () | _ -> fail "invalid delivery provenance became a complete response");
+    let duplicate_identity = match valid with
+      | `Assoc fields -> `Assoc (("turn_ref", Ids.Turn_ref.to_yojson other) :: fields)
+      | _ -> fail "row fixture changed" in
+    write_rows path [ duplicate_identity ];
+    (match lookup query with `Service_unavailable, _ -> () | _ -> fail "duplicate identities became a complete response");
     let channel = open_out_bin path in
     output_string channel "{unfinished"; close_out channel;
     (match lookup query with `Service_unavailable, _ -> () | _ -> fail "incomplete tail became absence");

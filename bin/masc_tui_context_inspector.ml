@@ -775,7 +775,8 @@ let nonnegative_float name = function
   | `Int value when value >= 0 -> Ok (Float.of_int value)
   | _ -> Error (name ^ " is not a non-negative finite number")
 
-let decode_exact_turn_transcript ~expected_keeper ~expected_turn_ref json =
+let decode_exact_turn_transcript ~expected_keeper ~expected_turn_ref json
+    : (response_turn, string) result =
   let fail detail = Error ("exact turn transcript: " ^ detail) in
   let decode_line side = function
     | `Assoc fields when exact_fields [ "role"; "content"; "ts" ] fields ->

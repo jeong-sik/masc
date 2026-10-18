@@ -77,8 +77,8 @@ admission still govern every delivered observation. Search and row navigation
 use the inspector's items even when its underlying surface is Approvals.
 
 For a known source the client starts three independent reads: exact TurnRecord,
-exact provider-input manifest, and the chat-page response joined on the complete
-Turn_ref. Each completion is published while the others remain pending. No
+exact provider-input manifest, and the retained turn-transcript response joined
+on the complete Turn_ref. Each completion is published while the others remain pending. No
 TurnRecord dependency prevents a known input read. Pending is distinct from a
 failed read, and late pending fields in the same admitted generation cannot
 erase completed observations. A refresh clears the previous generation before
@@ -95,7 +95,7 @@ pinned record or its independently retained input.
 | One observation is slow | Final combined result hides already completed reads | Completed observations publish while siblings remain pending |
 | A pending snapshot arrives late | It could erase an already observed field | Same-generation observation merge preserves completed fields |
 | Ask is being answered | Only local origin could be opened | Pinned source overlay retains the draft underneath |
-| An original response is outside the newest chat page | No exact response in that page | Still explicitly outside that page; full historical response lookup remains follow-up |
+| An original response is outside the newest chat page | No exact response in that page | Pinned inspection reads the versioned retained turn transcript |
 
 `tui_ask_source_inspect` logs the frozen origin at request time.
 `tui_context_source_read` records each component's Keeper, full Turn_ref,
@@ -114,11 +114,54 @@ without borrowing another source's data. No TUI wording, row-order, layout or
 PTY checks are added. Keyboard/HTTP scheduling and visible behavior remain
 unverified; syntax parsing does not establish them.
 
+## Retained response contract
+
+`GET /api/v1/keepers/:name/turn-transcript?turn_ref=...` requires a unique valid
+Turn_ref and returns `schema: masc.keeper.turn-transcript.v2`, `keeper`,
+`turn_ref`, `found`, `source: keeper_chat_store`, `user` and `assistant`.
+Each line carries only `role`, `content` and a finite timestamp `ts`.
+User lines have role `user`; assistant-side lines have role `assistant` or
+the distinct server-owned `request_failure`. Tool I/O retains its separate
+execution-ID store and is not fabricated from response text.
+
+The server uses the shared I/O pool to scan descriptor-bound history pages,
+without a recent-row or elapsed-time cutoff. It retains only matching turn
+rows, then selects accepted-user rows through the canonical terminal delivery
+keys. The same first page and cursor boundary start both passes, so a later
+append cannot widen the second pass. Accepted-user append order is irrelevant;
+no adjacent-row or timestamp inference joins it. Redaction is captured once.
+Memory holds the captured first page, the current page and selected rows.
+Both passes can scan the whole file, and identity validation and decoding add
+work; this layer makes no constant-time or latency-reduction claim.
+Page boundaries yield in Eio to settle cancellation of an entered read. A
+single row exceeding the existing page reader's byte window is still an
+explicit unavailable observation, never a skipped row or an empty transcript.
+
+Readable absence returns 200 with `found: false`. Storage failure, incomplete
+tail, stale cursor, malformed row/identity/provenance or ambiguous fields returns
+503; a partial positive is not called a complete transcript. Query errors return
+400. Paged errors name physical byte offsets rather than a synthetic line one.
+
+TUI and Dashboard bind v2 responses to the requested Keeper and Turn_ref,
+validate every line and require `found` to agree with the arrays. Unversioned
+responses are unavailable, not evidence that complete retained history was
+read. New client/server code therefore needs the same contract when installed.
+Only pinned TUI inspection uses this complete response read; recent browsing
+keeps its explicitly limited newest-page observation.
+
+Four authored, unexecuted store/HTTP-response-helper/TUI-decoder scenarios cover
+an original beyond the actual 4 MiB history window, accepted-user delivery join
+despite reversed append order, different traces with the same turn number,
+readable absence, unavailable/invalid history, typed request failure, malformed
+queries and version/source binding. Seven additional authored Dashboard cases
+reject unversioned/foreign/contradictory or malformed payloads. Neither suite
+has run; HTTP router, pool scheduling, UI painting, typing and speed remain
+unverified.
+
 ## Remaining user-facing work
 
-Read original response content beyond the newest chat page with explicit
-storage/read failures. The current response observation deliberately keeps that
-page boundary; it does not claim absence from all retained history.
+The request tab still shows a response preview. Add an explicit full-response
+reader without allowing a long response to consume the input list's viewport.
 
 Separately finish independent panel loading and preparation reuse, then compare
 matched before/after samples: first usable input, preparation p50/p95, repeated

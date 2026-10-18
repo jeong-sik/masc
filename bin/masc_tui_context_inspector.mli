@@ -98,15 +98,23 @@ type response_part =
   | Reply_text of string
   | Tool_steps of string list
   | Reasoning_lines of string list
+  | Request_failure of string
+
+type response_source = Newest_history_page | Exact_turn_transcript
 
 type response_turn =
   { parts : response_part list
-  ; outside_newest_page : bool
-        (** [true] when the newest history page held no row for this turn.
-            The reply exists but this fetch did not reach it -- stepping far
-            enough back outruns one page, and the pane says so rather than
-            showing another turn's answer. *)
+  ; source : response_source
+        (** An empty newest page cannot establish retained-history absence.
+            An exact transcript has read the retained source through its
+            captured boundary, including typed request-failure rows. *)
   }
+
+val decode_exact_turn_transcript :
+  expected_keeper:string -> expected_turn_ref:Ids.Turn_ref.t ->
+  Yojson.Safe.t -> (response_turn, string) result
+(** Validate both source identities, all user/assistant line schemas and the
+    found flag. A typed request failure stays distinct from Keeper speech. *)
 
 (** What the next Agent Core request would carry, as the server computes it
     from the turn's own values without a turn

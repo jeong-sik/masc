@@ -172,6 +172,29 @@ let keeper_turn_record_lookup_response ~config ~keeper_name req =
         "turn_ref must occur exactly once with one valid value"
 ;;
 
+let keeper_turn_transcript_lookup_response ~(config : Workspace.config) ~keeper_name req =
+  let error status detail = status, `Assoc [ "error", `String detail ] in
+  let parameters = Uri.query (Uri.of_string req.Httpun.Request.target)
+      |> List.filter (fun (name, _) -> String.equal name "turn_ref") in
+  if not (Keeper_config.validate_name keeper_name) then
+    error `Bad_request "invalid keeper name"
+  else match parameters with
+  | [ _, [ value ] ] ->
+      (match Ids.Turn_ref.of_string value with
+       | None -> error `Bad_request "invalid Turn_ref"
+       | Some turn_ref ->
+           let reading = Eio_guard.with_named_switch "keeper-exact-turn-transcript" (fun () ->
+             Domain_pool_ref.submit_io_or_inline (fun () ->
+               Keeper_chat_store.load_turn_transcript_result
+                 ~base_dir:config.base_path ~keeper_name ~turn_ref)) in
+           (match reading with
+            | Error error_detail -> error `Service_unavailable
+                (Keeper_chat_history_page.error_to_string error_detail)
+            | Ok transcript -> `OK,
+                Keeper_chat_store.turn_transcript_to_json ~keeper:keeper_name ~turn_ref transcript))
+  | [] | _ :: _ -> error `Bad_request "turn_ref must occur exactly once with one valid value"
+;;
+
 let cached_assoc_body_or_self cached fields =
   match List.assoc_opt "body" fields with
   | Some body -> body
@@ -1923,34 +1946,10 @@ let handle_keeper_get_subroutes state req request reqd =
         (`Assoc
            [("error", `String (Printf.sprintf "invalid keeper name: %s" name))])
         reqd
-    else (
-      match Server_utils.query_param req "turn_ref" with
-      | None ->
-        Http.Response.json_value ~status:`Bad_request
-          (`Assoc
-             [("error", `String "turn_ref query parameter is required")])
-          reqd
-      | Some turn_ref_str ->
-        (match Ids.Turn_ref.of_string turn_ref_str with
-         | None ->
-           Http.Response.json_value ~status:`Bad_request
-             (`Assoc
-                [ ( "error",
-                    `String
-                      (Printf.sprintf "invalid turn_ref: %s" turn_ref_str) )
-                ])
-             reqd
-         | Some turn_ref ->
-           let base_dir = (Mcp_server.workspace_config state).base_path in
-           let messages = Keeper_chat_store.load ~base_dir ~keeper_name:name in
-           let transcript =
-             Keeper_chat_store.transcript_of_messages messages ~turn_ref
-           in
-           let json =
-             Keeper_chat_store.turn_transcript_to_json ~keeper:name ~turn_ref
-               transcript
-           in
-           Http.Response.json_value ~compress:true ~request:req json reqd))
+    else
+      let status, json = keeper_turn_transcript_lookup_response
+          ~config:(Mcp_server.workspace_config state) ~keeper_name:name req in
+      Http.Response.json_value ~status ~compress:true ~request:req json reqd
   else if ends_with "/trajectory" then
     let name = extract_name "/trajectory" in
     if String.length name = 0 then

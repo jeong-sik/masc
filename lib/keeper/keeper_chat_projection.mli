@@ -26,5 +26,10 @@ type turn_transcript = {
 
 val transcript_of_messages :
   chat_message list -> turn_ref:Ids.Turn_ref.t -> turn_transcript
+val user_matches_turn :
+  messages:chat_message list -> turn_ref:Ids.Turn_ref.t -> (chat_message -> bool)
+(** Capture the exact terminal delivery keys once, then select User rows by
+    their own Turn_ref or those keys. Shared by list and streamed transcript
+    reads; no text, timestamp or physical append-order inference. *)
 val turn_transcript_to_json :
   keeper:string -> turn_ref:Ids.Turn_ref.t -> turn_transcript -> Yojson.Safe.t

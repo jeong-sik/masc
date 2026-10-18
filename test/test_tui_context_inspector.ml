@@ -552,7 +552,7 @@ let test_late_pending_snapshot_cannot_erase_progress () =
       ; response = Pending } in
   let incoming : Inspector.reading = Exact_read
       { turn_ref = input.turn_ref; record = Pending; provider_input = Pending
-      ; response = Observed (Ok { parts = []; outside_newest_page = true }) } in
+      ; response = Observed (Ok { parts = []; source = Inspector.Newest_history_page }) } in
   let combined = Inspector.merge_progress ~previous:(Some held) incoming in
   check bool "all observations have now settled" false (Inspector.is_loading combined);
   check bool "input remains usable after out-of-order pending fields" true

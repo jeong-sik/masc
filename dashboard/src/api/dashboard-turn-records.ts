@@ -1268,53 +1268,53 @@ export async function fetchKeeperTurnRecords(
 // on the turn_ref "<trace_id>#<absolute_turn>". Lazily fetched by the turn
 // inspector so the transcript (which can be large) never bloats the
 // turn-records list. Content is the same load-time redacted view the chat
-// history endpoint serves (RFC-0132); `found` is false when no persisted
-// row carries the requested turn_ref, in which case the inspector renders
-// explicit absence rather than a fabricated transcript.
+// history endpoint serves (RFC-0132). The v2 producer reads retained history;
+// incomplete reads are errors. `found` describes the selected user/assistant
+// arrays, with the returned source bound to this request.
 
 export type TurnTranscriptLine = {
-  role: string
+  role: 'user' | 'assistant' | 'request_failure'
   content: string
-  ts?: number
-
+  ts: number
 }
 
 export type TurnTranscript = {
+  schema: 'masc.keeper.turn-transcript.v2'
   keeper: string
   turn_ref: string
   found: boolean
-  source: string
+  source: 'keeper_chat_store'
   user: TurnTranscriptLine[]
   assistant: TurnTranscriptLine[]
 }
 
 function decodeTurnTranscriptLine(raw: unknown): TurnTranscriptLine | null {
-  if (!isRecord(raw)) return null
-  const role = asString(raw.role)
-  if (!role) return null
-  return {
-    role,
-    content: asString(raw.content) ?? '',
-    ts: asNumber(raw.ts),
-  }
+  if (!isRecord(raw) || !hasExactKeys(raw, ['role', 'content', 'ts'])) return null
+  if (raw.role !== 'user' && raw.role !== 'assistant' && raw.role !== 'request_failure') return null
+  if (typeof raw.content !== 'string' || typeof raw.ts !== 'number' || !Number.isFinite(raw.ts)) return null
+  return { role: raw.role, content: raw.content, ts: raw.ts }
 }
 
-function decodeTurnTranscript(raw: unknown): TurnTranscript | null {
-  if (!isRecord(raw)) return null
-  const keeper = asString(raw.keeper)
-  const turn_ref = asString(raw.turn_ref)
-  if (!keeper || !turn_ref) return null
-  const decodeLines = (value: unknown): TurnTranscriptLine[] =>
-    asRecordArray(value)
-      .map(decodeTurnTranscriptLine)
-      .filter((line): line is TurnTranscriptLine => line !== null)
+function decodeTurnTranscript(raw: unknown, expectedKeeper: string, expectedTurnRef: string): TurnTranscript | null {
+  if (!isRecord(raw) || !hasExactKeys(raw, ['schema', 'keeper', 'turn_ref', 'found', 'source', 'user', 'assistant'])) return null
+  if (raw.schema !== 'masc.keeper.turn-transcript.v2' || raw.source !== 'keeper_chat_store') return null
+  if (raw.keeper !== expectedKeeper || raw.turn_ref !== expectedTurnRef || typeof raw.found !== 'boolean') return null
+  const decodeLines = (value: unknown, side: 'user' | 'assistant'): TurnTranscriptLine[] | null => {
+    if (!Array.isArray(value)) return null
+    const lines: TurnTranscriptLine[] = []
+    for (const entry of value) {
+      const line = decodeTurnTranscriptLine(entry)
+      if (!line || (side === 'user' ? line.role !== 'user' : line.role === 'user')) return null
+      lines.push(line)
+    }
+    return lines
+  }
+  const user = decodeLines(raw.user, 'user')
+  const assistant = decodeLines(raw.assistant, 'assistant')
+  if (!user || !assistant || raw.found !== (user.length > 0 || assistant.length > 0)) return null
   return {
-    keeper,
-    turn_ref,
-    found: asBoolean(raw.found, false) ?? false,
-    source: asString(raw.source) ?? 'keeper_chat_store',
-    user: decodeLines(raw.user),
-    assistant: decodeLines(raw.assistant),
+    schema: raw.schema, keeper: expectedKeeper, turn_ref: expectedTurnRef,
+    found: raw.found, source: raw.source, user, assistant,
   }
 }
 
@@ -1327,7 +1327,7 @@ export function fetchKeeperTurnTranscript(
     `/api/v1/keepers/${encodeURIComponent(name)}/turn-transcript?turn_ref=${encodeURIComponent(turnRef)}`,
     { signal: opts?.signal },
   ).then((raw) => {
-    const decoded = decodeTurnTranscript(raw)
+    const decoded = decodeTurnTranscript(raw, name, turnRef)
     if (!decoded) throw new Error('유효하지 않은 keeper turn transcript payload')
     return decoded
   })

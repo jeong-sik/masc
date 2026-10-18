@@ -193,4 +193,8 @@ val exact_task_surfaces :
     {!Keeper_capability_surface.create}, which builds this projection too, so
     prompt, bundle, and preview consumers share one computation without
     breaking the turn-boundary freeze. Each task's [unprojectable] references
-    follow its projected ones as unavailable rows carrying their reason. *)
+    follow its projected ones as unavailable rows carrying their reason.
+    Within this call, project each selected/unprojectable row at most once
+    for its observed Task owners, then distribute immutable surfaces by the
+    original Task ids. Selection rows without an observed owner add no Task
+    or surface. This grouping neither rebinds pins nor grants execution. *)

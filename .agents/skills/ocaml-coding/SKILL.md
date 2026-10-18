@@ -157,6 +157,9 @@ Eio 는 협력형 스케줄러다. 취소와 시간 초과는 fiber 가 멈추�
   정확한 snapshot/descriptor 객체와 선택 authority 검증, 오류·Task 출처·retained-surface 관측을
   유지한다. 표시용 `prepare_surface`는 Task 참조를 재해석하지 않는 별도 관측 경계다.
   검사 호출 수의 감소를 준비 시간·모델 왕복·실제 실행 개선으로 바꾸어 말하지 않는다.
+  Task별 exact surface는 한 호출 안에서 원래 선택 행을 한 번 판정해 관측된 Task 소유자에게
+  나눈다. 빈 Task도 유지하고, 관측되지 않은 소유자나 뒤늦게 관측한 Task가 frozen 선택을
+  빌리지 않도록 한다. 공유 availability/실패 설명은 불변 결과이며 실행 허가나 전역 캐시가 아니다.
 
 - `.mli` 가 있으면 `.mli` 를 먼저 고치고 `.ml` 을 맞춘다. `.ml` 에만 인자를 더하면 인터페이스와
   안 맞아 컴파일이 실패한다.

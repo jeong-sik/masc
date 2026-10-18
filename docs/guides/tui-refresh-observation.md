@@ -1095,3 +1095,12 @@ to check only question ID, unlike the shared question renderer. This is a source
 ownership guard, not a reproduced stale-refresh defect or a latency result; see
 the [editor ownership comparison](../audits/2026-10-19-tui-ask-editor-owner.md)
 for normal refresh protections, unchanged save ownership and remaining evidence.
+
+Task Skill prompt preparation now groups the original frozen selection by
+observed Task owner within one `exact_task_surfaces` call. Direct and unified
+turns and dashboard prompt preview use that same function. A shared selection
+row's availability or refusal is derived once and distributed to its observed
+owners, preserving empty Tasks and withholding unrelated or late Task pins.
+See the [owner projection comparison](../audits/2026-10-19-task-skill-owner-projection.md)
+for source counts and unchanged authority. This does not measure preview
+Loading, task preparation latency, runtime resumption or first useful work.

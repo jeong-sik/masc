@@ -721,22 +721,25 @@ let%test "parse_entry parses Anthropic thinking control as typed catalog data" =
   let entry =
     Otoml.Parser.from_string
       "id_prefix = \"thinking-control-parse-fixture\"\n\
-       anthropic_thinking_control = \"adaptive_preferred\""
+       anthropic_thinking_control = \"adaptive_default\""
   in
   match parse_entry entry with
   | Ok { anthropic_thinking_control; _ } ->
-    anthropic_thinking_control = Some Capability_vocab.Adaptive_preferred
+    anthropic_thinking_control = Some Capability_vocab.Adaptive_default
   | Error _ -> false
 ;;
 
 let%test "parse_entry rejects unknown Anthropic thinking control" =
-  let entry =
-    Otoml.Parser.from_string
-      "id_prefix = \"m\"\nanthropic_thinking_control = \"guessing\""
-  in
-  match parse_entry entry with
-  | Error _ -> true
-  | Ok _ -> false
+  List.for_all
+    (fun policy ->
+       let entry =
+         Otoml.Parser.from_string
+           (Printf.sprintf
+              "id_prefix = \"m\"\nanthropic_thinking_control = %S"
+              policy)
+       in
+       Result.is_error (parse_entry entry))
+    [ "guessing"; "adaptive_only"; "adaptive_preferred" ]
 ;;
 
 let%test "parse_entry parses ignored_sampling_parameters into closed variants" =

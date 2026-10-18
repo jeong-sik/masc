@@ -109,8 +109,6 @@ type anthropic_thinking_control =
   | Anthropic_adaptive_between_tools
       (** [enable_thinking=false] selects [between_tools], not fully disabled
           thinking; only low/medium/high effort is accepted in that mode. *)
-  | Anthropic_adaptive_preferred
-  | Anthropic_adaptive_only
   | Anthropic_always_adaptive
 
 type capabilities =

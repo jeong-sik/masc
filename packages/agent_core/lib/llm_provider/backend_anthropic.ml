@@ -224,16 +224,14 @@ let thinking_config_for_config wire (config : Provider_config.t) =
      | ( Some true
        , ( Capabilities.Anthropic_adaptive_default
          | Capabilities.Anthropic_adaptive_disabled_through_high
-         | Capabilities.Anthropic_adaptive_between_tools
-         | Capabilities.Anthropic_adaptive_only
-         | Capabilities.Anthropic_adaptive_preferred ) ) ->
+         | Capabilities.Anthropic_adaptive_between_tools ) ) ->
        Some (`Assoc [ "type", `String "adaptive" ])
      | Some false, (Capabilities.Anthropic_adaptive_default
                    | Capabilities.Anthropic_adaptive_disabled_through_high) ->
        Some (`Assoc [ "type", `String "disabled" ])
      | Some false, Capabilities.Anthropic_adaptive_between_tools ->
        Some (`Assoc [ "type", `String "between_tools" ])
-     | Some false, _ | None, _ -> None)
+     | Some false, Capabilities.Anthropic_always_adaptive | None, _ -> None)
 ;;
 
 let validate_thinking_controls wire (config : Provider_config.t) =
@@ -290,8 +288,6 @@ let validate_thinking_controls wire (config : Provider_config.t) =
   | ( ( Capabilities.Anthropic_adaptive_default
       | Capabilities.Anthropic_adaptive_disabled_through_high
       | Capabilities.Anthropic_adaptive_between_tools
-      | Capabilities.Anthropic_adaptive_preferred
-      | Capabilities.Anthropic_adaptive_only
       | Capabilities.Anthropic_always_adaptive )
     , (None | Some (true | false))
     , ( None
@@ -854,8 +850,6 @@ let build_request_payload
           -> true
         | Completion _,
           ( Anthropic_control (Capabilities.Anthropic_adaptive_default
-                               | Capabilities.Anthropic_adaptive_preferred
-                               | Capabilities.Anthropic_adaptive_only
                                | Capabilities.Anthropic_always_adaptive)
           | Anthropic_no_policy
           | Kimi_flag )

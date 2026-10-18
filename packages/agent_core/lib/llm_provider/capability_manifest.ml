@@ -658,22 +658,25 @@ let%test "of_json: valid manifest parses successfully" =
 let%test "of_json: parses Anthropic thinking policy as typed declaration" =
   let json =
     Yojson.Safe.from_string
-      {|{"schema_version":1,"models":[{"id_prefix":"claude-future","anthropic_thinking_control":"adaptive_only"}]}|}
+      {|{"schema_version":1,"models":[{"id_prefix":"claude-future","anthropic_thinking_control":"adaptive_default"}]}|}
   in
   match of_json json with
   | Ok [ { anthropic_thinking_control; _ } ] ->
-    anthropic_thinking_control = Some Capability_vocab.Adaptive_only
+    anthropic_thinking_control = Some Capability_vocab.Adaptive_default
   | Ok ([] | _ :: _ :: _) | Error _ -> false
 ;;
 
 let%test "of_json: rejects unknown Anthropic thinking policy" =
-  let json =
-    Yojson.Safe.from_string
-      {|{"schema_version":1,"models":[{"id_prefix":"claude-future","anthropic_thinking_control":"guessing"}]}|}
-  in
-  match of_json json with
-  | Error _ -> true
-  | Ok _ -> false
+  List.for_all
+    (fun policy ->
+       let json =
+         Yojson.Safe.from_string
+           (Printf.sprintf
+              {|{"schema_version":1,"models":[{"id_prefix":"claude-future","anthropic_thinking_control":%S}]}|}
+              policy)
+       in
+       Result.is_error (of_json json))
+    [ "guessing"; "adaptive_only"; "adaptive_preferred" ]
 ;;
 
 let%test "of_json: wrong schema_version returns error" =

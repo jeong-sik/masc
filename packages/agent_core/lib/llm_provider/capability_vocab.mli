@@ -101,8 +101,6 @@ type anthropic_thinking_control =
   | Adaptive_between_tools
       (** Adaptive by default; disabling up-front thinking uses [between_tools],
           which still thinks between tool calls and permits low/medium/high effort. *)
-  | Adaptive_preferred
-  | Adaptive_only
   | Always_adaptive
 
 type thinking_control_format_fields =

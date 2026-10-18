@@ -47,6 +47,67 @@ end = struct
   let in_flight state = Option.is_some state.pending
 end
 
+(* Local sources keep one active read and one accumulated refresh demand.
+   Revisions order source demands; they are neither timeouts nor action limits. *)
+module Local_read_order : sig
+  type t
+  type request
+  type revision
+  val idle : t
+  val in_flight : t -> bool
+  val has_followup : t -> bool
+  val demanded_revision : t -> revision
+  val covers : t -> revision -> bool
+  val revision_to_string : revision -> string
+  val request_id : request -> int
+  val request_revision : request -> revision
+  val start : intent:Snapshot_read.intent -> t -> t * (request * Snapshot_read.intent) option
+  val settle : t -> request -> observed:bool -> t option
+  val invalidate : t -> t
+end = struct
+  type revision = int64
+  type request = { ticket : Snapshot_read.request; revision : revision }
+  type followup = No_followup | Refresh_requested
+  type t = {
+    tickets : Snapshot_read.t;
+    demanded : revision;
+    observed : revision option;
+    followup : followup;
+  }
+  let idle = { tickets = Snapshot_read.idle; demanded = 0L;
+               observed = None; followup = No_followup }
+  let in_flight state = Snapshot_read.in_flight state.tickets
+  let has_followup state = state.followup = Refresh_requested
+  let demanded_revision state = state.demanded
+  let covers state required = match state.observed with
+    | None -> false
+    | Some observed -> Int64.compare observed required >= 0
+  let revision_to_string = Int64.to_string
+  let request_id request = Snapshot_read.request_id request.ticket
+  let request_revision request = request.revision
+  let start ~intent state =
+    let state = match intent with
+      | Snapshot_read.Poll -> state
+      | Snapshot_read.Refresh ->
+          { state with demanded = Int64.succ state.demanded; followup = Refresh_requested } in
+    if in_flight state then state, None
+    else
+      let intent = match state.followup with
+        | No_followup -> Snapshot_read.Poll
+        | Refresh_requested -> Snapshot_read.Refresh in
+      let tickets, ticket = Snapshot_read.start ~intent:Snapshot_read.Poll state.tickets in
+      let next = {state with tickets; followup = No_followup} in
+      next, Option.map (fun ticket -> {ticket; revision = state.demanded}, intent) ticket
+  let settle state request ~observed =
+    Option.map (fun tickets ->
+        {state with tickets;
+          observed = if observed then Some request.revision else state.observed})
+      (Snapshot_read.settle state.tickets request.ticket)
+  let invalidate state =
+    {state with tickets = Snapshot_read.invalidate state.tickets;
+      observed = None; followup = No_followup}
+end
+
 module Surface_read_source = struct
   type t = Transport | Board | Planning | System_logs | Fleet_safety
     | Runtime_quota | Keeper_usage | Provider_history | Overview_goals | Account_emails
@@ -3734,8 +3795,13 @@ type local_workspace_request = {
   lwr_intent: Snapshot_read.intent;
   lwr_authority: workspace_authority;
   lwr_base_path: string;
-  lwr_request: Snapshot_read.request;
+  lwr_request: Local_read_order.request;
   lwr_started_ns: int64;
+}
+
+type keeper_creation_wait = {
+  kcw_keeper : string;
+  kcw_revision : Local_read_order.revision;
 }
 
 type early_keeper_roster_observation = {
@@ -7244,7 +7310,7 @@ type state = {
      editor owns a temporary file, so the declaration must survive here. *)
   mutable keeper_creation_draft: string option;
   mutable keeper_creation_return: keeper_chat_return option;
-  mutable keeper_creation_awaiting_roster: string option;
+  mutable keeper_creation_waits: keeper_creation_wait list;
   (* The live roster reading, separate from the durable one above: it answers
      whether a keepalive fiber is running each keeper, which metadata on disk
      cannot. It is typed rather than a plain list because "the roster did not
@@ -7253,8 +7319,8 @@ type state = {
   mutable keeper_roster: Masc_tui_keeper_control.roster;
   mutable keeper_roster_error: string option;
   mutable keeper_roster_read: Snapshot_read.t;
-  mutable local_workspace_read_order: Snapshot_read.t;
-  mutable local_keeper_read_order: Snapshot_read.t;
+  mutable local_workspace_read_order: Local_read_order.t;
+  mutable local_keeper_read_order: Local_read_order.t;
   mutable local_keeper_read_cancel: (unit ref * (unit -> unit)) option;
   mutable local_work_read_cancel: (unit ref * (unit -> unit)) option;
   mutable candle_observation: (Candle_observation.t, string) result option;
@@ -8539,18 +8605,18 @@ let finish_local_source_read state source token =
   | Some _ | None -> ()
 
 let invalidate_local_source_read state source =
-  set_local_source_order state source (Snapshot_read.invalidate (local_source_order state source));
+  set_local_source_order state source (Local_read_order.invalidate (local_source_order state source));
   supersede_local_source_read state source None
 
 let begin_local_workspace_read (state : state) ~intent ~source ~base_path ~started_ns =
   if state.workspace_identity <> Workspace_identity_match
      || not (String.equal base_path state.local_base_path) then None
   else
-    let reading, request = Snapshot_read.start ~intent
+    let reading, request = Local_read_order.start ~intent
         (local_source_order state source) in
     set_local_source_order state source reading;
-    Option.map (fun lwr_request ->
-        { lwr_source = source; lwr_intent = intent; lwr_authority = state.workspace_authority;
+    Option.map (fun (lwr_request, actual_intent) ->
+        { lwr_source = source; lwr_intent = actual_intent; lwr_authority = state.workspace_authority;
           lwr_base_path = base_path; lwr_request; lwr_started_ns = started_ns }) request
 
 let take_local_workspace_read (state : state) ~source request result =
@@ -8558,7 +8624,8 @@ let take_local_workspace_read (state : state) ~source request result =
      || state.workspace_identity <> Workspace_identity_match
      || request.lwr_authority <> state.workspace_authority
      || not (String.equal request.lwr_base_path state.local_base_path) then None
-  else match Snapshot_read.settle (local_source_order state source) request.lwr_request with
+  else match Local_read_order.settle (local_source_order state source) request.lwr_request
+      ~observed:(Result.is_ok result) with
     | None -> None
     | Some reading ->
         set_local_source_order state source reading;
@@ -11073,6 +11140,18 @@ let acting_pane_layout (state : state) =
       if state.view = Overview then Masc_tui_acting_pane.Hidden
       else Masc_tui_acting_pane.Narrow
 
+let keeper_creation_wait_for (state : state) keeper_name =
+  List.find_opt (fun wait -> String.equal wait.kcw_keeper keeper_name) state.keeper_creation_waits
+
+let keeper_creation_matches state keeper_name =
+  Option.is_some (keeper_creation_wait_for state keeper_name)
+
+let wait_for_created_keeper_metadata (state : state) keeper_name =
+  let wait = { kcw_keeper = keeper_name;
+    kcw_revision = Local_read_order.demanded_revision state.local_keeper_read_order } in
+  state.keeper_creation_waits <- wait :: List.filter
+    (fun held -> not (String.equal held.kcw_keeper keeper_name)) state.keeper_creation_waits
+
 (** Local metadata may retain old rows during a failed read. Remote rows are
     available to HTTP observation and lifecycle controls; chat submission still
     requires the shared workspace for attachments and spilled paste files. *)
@@ -11084,6 +11163,10 @@ let keeper_available_for_new_message (state : state) keeper_name =
     state.workspace_identity = Workspace_identity_match
     && state.local_keepers = Local_workspace_read
     && Option.is_none state.keepers_error
+    && (match keeper_creation_wait_for state keeper_name with
+        | Some wait ->
+            Local_read_order.covers state.local_keeper_read_order wait.kcw_revision
+        | None -> true)
   | Some { k_origin = Tui_decode.Remote_keeper; _ } ->
     false
 
@@ -11822,12 +11905,12 @@ let create_state
   keepers_error = None;
   keeper_creation_draft = None;
   keeper_creation_return = None;
-  keeper_creation_awaiting_roster = None;
+  keeper_creation_waits = [];
   keeper_roster = Masc_tui_keeper_control.Roster_unobserved;
   keeper_roster_error = None;
   keeper_roster_read = Snapshot_read.idle;
-  local_workspace_read_order = Snapshot_read.idle;
-  local_keeper_read_order = Snapshot_read.idle;
+  local_workspace_read_order = Local_read_order.idle;
+  local_keeper_read_order = Local_read_order.idle;
   local_keeper_read_cancel = None;
   local_work_read_cancel = None;
   candle_observation = None;

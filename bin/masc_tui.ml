@@ -8427,7 +8427,7 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
                      && not (keeper_available_for_new_message state target) ->
       report_action state "error"
         "Cannot send while the Keeper roster is unavailable"
-  | Some target when state.keeper_creation_awaiting_roster = Some target
+  | Some target when keeper_creation_matches state target
                      && not (keeper_available_for_new_message state target) ->
       report_action state "error"
         "Creation accepted; waiting for the current Keeper roster · draft retained · Esc then r to refresh"
@@ -12563,15 +12563,25 @@ let local_read_intent_name = function
 let launch_local_source state ~mailbox ~intent ~source ~read ~message base_path =
   match Masc_tui_types.begin_local_workspace_read state ~intent ~source ~base_path
           ~started_ns:(Mtime_clock.elapsed_ns ()) with
-  | None -> ()
+  | None ->
+      if intent = Snapshot_read.Refresh
+         && state.workspace_identity = Workspace_identity_match
+         && String.equal base_path state.local_base_path
+         && Local_read_order.has_followup (local_source_order state source) then
+        Log.Transport.info "tui_local_workspace_coalesced source=%s demand_revision=%s"
+          (local_read_source_name source)
+          (Local_read_order.revision_to_string
+             (Local_read_order.demanded_revision (local_source_order state source)))
   | Some request ->
       let token = ref () in
       let superseded, supersede = Eio.Promise.create () in
       supersede_local_source_read state source
         (Some (token, fun () -> ignore (Eio.Promise.try_resolve supersede ())));
-      Log.Transport.info "tui_local_workspace_started source=%s intent=%s request=%d started_ns=%Ld"
+      Log.Transport.info "tui_local_workspace_started source=%s intent=%s request=%d demand_revision=%s started_ns=%Ld"
         (local_read_source_name source) (local_read_intent_name request.lwr_intent)
-        (Snapshot_read.request_id request.lwr_request) request.lwr_started_ns;
+        (Local_read_order.request_id request.lwr_request)
+        (Local_read_order.revision_to_string (Local_read_order.request_revision request.lwr_request))
+        request.lwr_started_ns;
       let enqueue_async = workspace_enqueue state in
       let deliver result = enqueue_async mailbox (message request result) in
       let run () =
@@ -12583,13 +12593,14 @@ let launch_local_source state ~mailbox ~intent ~source ~read ~message base_path 
                 with
                 | Eio.Cancel.Cancelled _ as exn -> raise exn
                 | exn -> Error (Printexc.to_string exn) in
+              finish_local_source_read state source token;
               deliver result)
             (fun () ->
               Eio.Promise.await superseded;
               Log.Transport.info
                 "tui_local_workspace_superseded source=%s intent=%s request=%d started_ns=%Ld observed_ns=%Ld outcome=cancel_requested"
                 (local_read_source_name source) (local_read_intent_name request.lwr_intent)
-                (Snapshot_read.request_id request.lwr_request) request.lwr_started_ns
+                (Local_read_order.request_id request.lwr_request) request.lwr_started_ns
                 (Mtime_clock.elapsed_ns ()))) in
       (match Eio_context.get_switch_opt () with
        | None ->
@@ -12614,14 +12625,25 @@ let launch_local_workspace_read state ~mailbox ~intent base_path =
     ~read:Masc_tui_loader.read_local_workspace
     ~message:(fun request result -> Local_workspace_read (request, result)) base_path
 
+let launch_local_source_followup state ~mailbox source =
+  if Local_read_order.has_followup (local_source_order state source) then
+    match source with
+    | Local_keepers -> launch_local_keeper_read state ~mailbox ~intent:Snapshot_read.Poll state.local_base_path
+    | Local_work ->
+        launch_local_source state ~mailbox ~intent:Snapshot_read.Poll ~source:Local_work
+          ~read:Masc_tui_loader.read_local_workspace
+          ~message:(fun request result -> Local_workspace_read (request, result)) state.local_base_path
+
 let observe_local_source state ~source request result =
   let observation = Masc_tui_types.take_local_workspace_read state ~source request result in
   Log.Transport.info
-    "tui_local_workspace_settled source=%s intent=%s request=%d started_ns=%Ld observed_ns=%Ld outcome=%s full_refresh_running=%b"
+    "tui_local_workspace_settled source=%s intent=%s request=%d demand_revision=%s started_ns=%Ld observed_ns=%Ld outcome=%s followup_pending=%b full_refresh_running=%b"
     (local_read_source_name source) (local_read_intent_name request.lwr_intent)
-    (Snapshot_read.request_id request.lwr_request) request.lwr_started_ns
-    (Mtime_clock.elapsed_ns ())
+    (Local_read_order.request_id request.lwr_request)
+    (Local_read_order.revision_to_string (Local_read_order.request_revision request.lwr_request))
+    request.lwr_started_ns (Mtime_clock.elapsed_ns ())
     (match observation with None -> "discarded" | Some (Ok _) -> "received" | Some (Error _) -> "failed")
+    (Local_read_order.has_followup (local_source_order state source))
     (Option.is_some state.http_refresh_started_ns);
   observation
 
@@ -20275,24 +20297,28 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
   | Local_workspace_read (request, result) ->
       (match observe_local_source state ~source:Local_work request result with
        | None -> ()
-       | Some (Error detail) ->
-           report_action state "error" ("Local work read failed: " ^ detail)
-       | Some (Ok reading) -> Masc_tui_loader.apply_local_workspace state reading)
+       | Some result ->
+           (match result with
+            | Error detail -> report_action state "error" ("Local work read failed: " ^ detail)
+            | Ok reading -> Masc_tui_loader.apply_local_workspace state reading);
+           launch_local_source_followup state ~mailbox Local_work)
   | Local_keepers_read (request, result) ->
       (match observe_local_source state ~source:Local_keepers request result with
        | None -> ()
-       | Some (Error detail) ->
-           report_action state "error" ("Keeper metadata read failed: " ^ detail)
-       | Some (Ok reading) ->
-           Masc_tui_loader.apply_local_keepers state reading;
-           refresh_visible_detail_after_authority_recovery state ~mailbox
-             ~previous_authority:state.detail_read_authority;
-           resume_task_followups state ~mailbox ~refresh_inflight:http_refresh_inflight
-             ~scoped_refresh_inflight:http_scoped_refresh_inflight ~scoped_refresh_followup;
-           resolve_opening_chat state ~base_path ~mailbox;
-           (* Metadata owns this wake; optional work cannot replay it. *)
-           drain_queued_message state ~base_path ~mailbox;
-           ignore (launch_current_live_context state ~mailbox))
+       | Some result ->
+           (match result with
+            | Error detail -> report_action state "error" ("Keeper metadata read failed: " ^ detail)
+            | Ok reading ->
+                Masc_tui_loader.apply_local_keepers state reading;
+                refresh_visible_detail_after_authority_recovery state ~mailbox
+                  ~previous_authority:state.detail_read_authority;
+                resume_task_followups state ~mailbox ~refresh_inflight:http_refresh_inflight
+                  ~scoped_refresh_inflight:http_scoped_refresh_inflight ~scoped_refresh_followup;
+                resolve_opening_chat state ~base_path ~mailbox;
+                (* Metadata owns this wake; optional work cannot replay it. *)
+                drain_queued_message state ~base_path ~mailbox;
+                ignore (launch_current_live_context state ~mailbox));
+           launch_local_source_followup state ~mailbox Local_keepers)
   | Live_context_loaded (request, started_ns, result) ->
       let admitted = take_live_context_observation state request result in
       log_live_context_read ~phase:"observed" request ~started_ns
@@ -20383,10 +20409,9 @@ let drain_async_messages ?deadline_ns state ~base_path ~http_refresh_inflight
   let rec loop changed =
     match if over_budget () then None else Eio.Stream.take_nonblocking mailbox with
     | None ->
-        (match state.keeper_creation_awaiting_roster with
-         | Some keeper when keeper_available_for_new_message state keeper ->
-             state.keeper_creation_awaiting_roster <- None
-         | Some _ | None -> ());
+        state.keeper_creation_waits <- List.filter
+          (fun wait -> not (keeper_available_for_new_message state wait.kcw_keeper))
+          state.keeper_creation_waits;
         Masc_tui_home.reconcile_home_request_detail state;
         let preparation_changed = launch_keeper_preparation_load state ~mailbox in
         changed || preparation_changed
@@ -22484,9 +22509,7 @@ and is loaded on demand through keeper_skill.
                  state.keeper_creation_draft <- None;
                  state.keeper_creation_return <- None;
                  launch_local_keeper_read state ~mailbox:async_messages ~intent:Snapshot_read.Refresh base_path;
-                 state.keeper_creation_awaiting_roster <-
-                   (if keeper_available_for_new_message state declared_name then None
-                    else Some declared_name);
+                 wait_for_created_keeper_metadata state declared_name;
                  open_message_for_keeper ~return_to
                    state declared_name ~drain_queue:(fun () -> ());
                  set_msg_scroll state 0;

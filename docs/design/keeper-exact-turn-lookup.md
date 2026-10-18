@@ -158,12 +158,43 @@ reject unversioned/foreign/contradictory or malformed payloads. Neither suite
 has run; HTTP router, pool scheduling, UI painting, typing and speed remain
 unverified.
 
+## Full-response reader
+
+The response has a fourth tab, reachable with `4` or the tab strip. It renders
+all retained response parts with the existing Markdown renderer, without the
+old 14-line preview cutoff. It owns its scroll and uses the actual viewport for
+line, page, Home/End and wheel navigation. Entering it preserves the input/proof
+selection, opened item, split focus and both input scroll positions. Esc returns
+to that exact reading position. Choosing a different input tab resets the old
+selection. Closing or changing source releases the response scroll.
+
+The response observation remains independent: pending, unavailable, an empty
+newest-page observation and an empty retained transcript are distinct. Typed
+request failures remain visible in the request summary and response reader.
+Input or turn-record failure does not hide an observed pinned response.
+
+| Scenario | Before | Source change in this layer |
+|---|---|---|
+| Long response | Fourteen preview lines; remaining text inaccessible here | Explicit scrollable response tab over all retained parts |
+| Request list render | Whole response Markdown transformed before truncation | Compact response state; no response-body Markdown transform |
+| Scroll or frame row counting | Preview Markdown transformed again | One-entry immutable body projection reused at the same width/theme |
+| Reading an opened input then checking its response | No full reader in this pane | Independent response scroll; Esc restores the opened input and position |
+| Refreshing a pinned historical source | Current runtime catalogue fetched despite being unrelated | Only the immutable source reads; catalogue refresh remains on recent browsing |
+
+The projection key includes Keeper, typed target, physical immutable parts list,
+width, terminal palette generation and table-frame setting. Only the current
+response body projection is memoized. Entering or scrolling the response tab
+introduces no HTTP read; the existing independent source load owns the observations. First Markdown
+projection still runs synchronously when the response tab is opened. No elapsed
+time, responsiveness or speedup is established by these source changes.
+
+Two authored, unexecuted state scenarios cover returning to the opened request
+or proof, choosing a different tab, and cancellation/reset on close. They assert
+stored navigation and cancellation state, not screen text or layout.
+
 ## Remaining user-facing work
 
-The request tab still shows a response preview. Add an explicit full-response
-reader without allowing a long response to consume the input list's viewport.
-
-Separately finish independent panel loading and preparation reuse, then compare
+Finish independent panel loading and preparation reuse, then compare
 matched before/after samples: first usable input, preparation p50/p95, repeated
 discovery reads, resource-conflict waiting, and answer-to-original-work progress.
 Retain failed and unfinished samples. Source changes alone establish none of

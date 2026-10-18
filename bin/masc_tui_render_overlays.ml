@@ -147,22 +147,28 @@ let render_context_inspector state =
          [ ("stack", Masc_tui_context_inspector.Composition)
          ; ("request", Masc_tui_context_inspector.Exact_input)
          ; ("proof", Masc_tui_context_inspector.Input_map)
+         ; ("response", Masc_tui_context_inspector.Response)
          ])
   in
   let hints =
+    let module Inspector = Masc_tui_context_inspector in
     let turn_hint = match state.context_inspector_target with
-      | Masc_tui_context_inspector.Recent _ -> "[ / ]:turn  "
-      | Masc_tui_context_inspector.Pinned _ -> "" in
-    match state.context_inspector_exact with
-    | Some _ -> "j/k:scroll  Esc:list"
-    | None -> (
-        match
-          state.context_inspector_tab, cols >= keeper_split_threshold_cols
-        with
-        | (Masc_tui_context_inspector.Exact_input | Masc_tui_context_inspector.Input_map), true ->
-            "1/2/3 or Tab:switch  " ^ turn_hint ^ "/:search  j/k:select or scroll  h/l:pane  Enter:open exact  r:refresh  Esc:close"
-        | ((Masc_tui_context_inspector.Exact_input | Masc_tui_context_inspector.Input_map), false)
-        | (Masc_tui_context_inspector.Composition, _) -> "1/2/3 or Tab:switch  " ^ turn_hint ^ "/:search  j/k:select  Enter:open exact  r:refresh  Esc:close")
+      | Inspector.Recent _ -> "[ / ]:turn  "
+      | Inspector.Pinned _ -> "" in
+    match state.context_inspector_tab, state.context_inspector_exact with
+    | Inspector.Response, _ ->
+        "1/2/3/4 or Tab:switch  " ^ turn_hint
+        ^ "j/k:scroll  PgUp/PgDn:page  Home/End:top/bottom  r:refresh  Esc:return"
+    | (Inspector.Composition | Inspector.Exact_input | Inspector.Input_map), Some _ ->
+        "4:response  j/k:scroll  Esc:list"
+    | (Inspector.Exact_input | Inspector.Input_map), None ->
+        "1/2/3/4 or Tab:switch  " ^ turn_hint
+        ^ (if cols >= keeper_split_threshold_cols then
+             "/:search  j/k:select or scroll  h/l:pane  Enter:open exact  "
+           else "/:search  j/k:select  Enter:open exact  ")
+        ^ "r:refresh  Esc:close"
+    | Inspector.Composition, None ->
+        "1/2/3/4 or Tab:switch  " ^ turn_hint ^ "j/k:scroll  r:refresh  Esc:close"
   in
   let content = context_inspector_content_lines ~cols state in
   (* The plain shapes are one list, so the contract windows it and says which
@@ -178,16 +184,21 @@ let render_context_inspector state =
         (* The cursor names a row, the window follows it: on the single-column
            shapes nothing lives under the row, so the smallest move that keeps
            it drawn is the right one. *)
+        let response = state.context_inspector_tab = Masc_tui_context_inspector.Response in
+        let stored_scroll = if response then state.context_inspector_response_scroll
+          else state.context_inspector_scroll in
         let scroll =
           match selected with
-          | None -> state.context_inspector_scroll
+          | None -> stored_scroll
           | Some cursor ->
               Masc_tui_scroll.ensure_visible ~cursor ~height
                 (Masc_tui_scroll.normalize ~count:(List.length lines) ~height
-                   state.context_inspector_scroll)
+                   stored_scroll)
         in
         Scrolled
-          { scroll; report = (fun scroll -> Context_inspector_scroll scroll) }
+          { scroll; report = (fun scroll ->
+              if response then Context_inspector_response_scroll scroll
+              else Context_inspector_scroll scroll) }
     | Split _ -> Paged_by_cursor
   in
   surface_chrome ~overflow state ~terminal_rows ~cols

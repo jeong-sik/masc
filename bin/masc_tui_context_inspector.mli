@@ -302,6 +302,7 @@ type tab =
   | Composition
   | Exact_input
   | Input_map
+  | Response
 
 type input_source =
   | Turn_prompt_assembly

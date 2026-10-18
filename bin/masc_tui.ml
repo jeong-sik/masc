@@ -7296,6 +7296,8 @@ let open_context_inspector ?(target = Masc_tui_context_inspector.Recent 0) state
     (match target with
      | Masc_tui_context_inspector.Recent _ -> Masc_tui_context_inspector.Composition
      | Masc_tui_context_inspector.Pinned _ -> Masc_tui_context_inspector.Exact_input);
+  state.context_inspector_response_return <- state.context_inspector_tab;
+  state.context_inspector_response_scroll <- 0;
   state.context_inspector_cursor <- 0;
   state.context_inspector_scroll <- 0;
   state.context_inspector_exact <- None;
@@ -13234,15 +13236,6 @@ let enter_memory_category state category =
   state.memory_facts_category <- category;
   state.memory_facts_cursor <- 0;
   state.memory_facts_scroll <- 0
-;;
-
-let enter_context_inspector_tab state tab =
-  state.context_inspector_tab <- tab;
-  state.context_inspector_exact <- None;
-  state.context_inspector_cursor <- 0;
-  state.context_inspector_scroll <- 0;
-  state.context_inspector_detail_scroll <- 0;
-  state.context_inspector_focus <- Left_pane
 ;;
 
 (* Lanes and All runtimes are two readings of the Runtime surface, and the
@@ -20929,7 +20922,8 @@ let main
          | Some (Resource_scroll _) | Some (Metrics_scroll _) | Some (Approval_detail_scroll _)
          | Some (Patch_modal_scroll (_, _)) | Some (Link_modal_scroll _)
          | Some (Play_invite_scroll _) | Some (Voice_scroll _) | Some (Preset_detail_scroll _)
-         | Some (Keeper_list_scroll _) | Some (Context_inspector_scroll _) -> ());
+         | Some (Keeper_list_scroll _) | Some (Context_inspector_scroll _)
+         | Some (Context_inspector_response_scroll _) -> ());
         commit_presented_approval approval;
         presented_presses := presses;
         presented_reader := reader;
@@ -24778,6 +24772,8 @@ and is loaded on demand through keeper_skill.
            in
            let close () = close_context_inspector state in
            (match k with
+            | "esc" when state.context_inspector_tab = Masc_tui_context_inspector.Response ->
+                enter_context_inspector_tab state state.context_inspector_response_return
             | "esc" ->
                 (match state.context_inspector_exact with
                  | Some _ ->
@@ -24811,6 +24807,7 @@ and is loaded on demand through keeper_skill.
                      state.context_inspector_exact <- None;
                      state.context_inspector_scroll <- 0;
                      state.context_inspector_detail_scroll <- 0;
+                     state.context_inspector_response_scroll <- 0;
                      supersede_context_inspector_part_load state None;
                      state.context_inspector_part <- Masc_tui_fetched.clear state.context_inspector_part;
                      Option.iter
@@ -24829,9 +24826,11 @@ and is loaded on demand through keeper_skill.
             | "r" ->
                 Option.iter
                   (fun keeper_name ->
-                     (* The current catalogue changes independently of captured
-                        turns. Refresh it here, never for each history step. *)
-                     launch_runtime_catalog_load state ~mailbox:async_messages;
+                     (* Historical sources have no dependency on today's catalogue. *)
+                     (match state.context_inspector_target with
+                      | Masc_tui_context_inspector.Recent _ ->
+                          launch_runtime_catalog_load state ~mailbox:async_messages
+                      | Masc_tui_context_inspector.Pinned _ -> ());
                      launch_context_inspector_load state
                        ~mailbox:async_messages ~keeper_name)
                   state.context_inspector_keeper
@@ -24844,7 +24843,11 @@ and is loaded on demand through keeper_skill.
             | "3" ->
                 enter_context_inspector_tab state
                   Masc_tui_context_inspector.Input_map
-            | "\t" | "left" | "right" when Option.is_none state.context_inspector_exact ->
+            | "4" ->
+                enter_context_inspector_tab state Masc_tui_context_inspector.Response
+            | "\t" | "left" | "right"
+              when Option.is_none state.context_inspector_exact
+                   || state.context_inspector_tab = Masc_tui_context_inspector.Response ->
                 enter_context_inspector_tab state
                   (match state.context_inspector_tab with
                    | Masc_tui_context_inspector.Composition ->
@@ -24852,17 +24855,31 @@ and is loaded on demand through keeper_skill.
                    | Masc_tui_context_inspector.Exact_input ->
                        Masc_tui_context_inspector.Input_map
                    | Masc_tui_context_inspector.Input_map ->
+                       Masc_tui_context_inspector.Response
+                   | Masc_tui_context_inspector.Response ->
                        Masc_tui_context_inspector.Composition)
             | "h" | "l"
               when Option.is_none state.context_inspector_exact
                    && terminal_columns >= keeper_split_threshold_cols
-                   && state.context_inspector_tab
-                      <> Masc_tui_context_inspector.Composition ->
+                   && (state.context_inspector_tab = Masc_tui_context_inspector.Exact_input
+                       || state.context_inspector_tab = Masc_tui_context_inspector.Input_map) ->
                 (* The same caret the roster and the board carry: which pane
                    hears j/k is a question the reader answers, not the
                    layout. *)
                 state.context_inspector_focus <-
                   (if k = "h" then Left_pane else Right_pane)
+            | ("j" | "down" | "k" | "up" | "pageup" | "pagedown"
+              | "home" | "end" | "wheel-up" | "wheel-down")
+              when state.context_inspector_tab = Masc_tui_context_inspector.Response ->
+                let count, height = Masc_tui_render.context_inspector_viewport state in
+                let move = match k with
+                  | "j" | "down" | "wheel-down" -> Masc_tui_scroll.down ~count ~height
+                  | "k" | "up" | "wheel-up" -> Masc_tui_scroll.up ~count ~height
+                  | "pageup" -> Masc_tui_scroll.page_up ~count ~height
+                  | "pagedown" -> Masc_tui_scroll.page_down ~count ~height
+                  | "home" -> (fun _ -> 0)
+                  | _ -> (fun _ -> Masc_tui_scroll.maximum ~count ~height) in
+                state.context_inspector_response_scroll <- move state.context_inspector_response_scroll
             | ("j" | "down" | "k" | "up")
               when Option.is_some state.context_inspector_exact
                    || state.context_inspector_tab
@@ -24903,7 +24920,8 @@ and is loaded on demand through keeper_skill.
                       List.length (exact_input_items ())
                   | Masc_tui_context_inspector.Input_map ->
                       List.length (input_map_rows ())
-                  | Masc_tui_context_inspector.Composition -> 0
+                  | Masc_tui_context_inspector.Composition
+                  | Masc_tui_context_inspector.Response -> 0
                 in
                 let last = max 0 (count - 1) in
                 state.context_inspector_cursor <-

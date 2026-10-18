@@ -59,3 +59,28 @@ References: [MIDI Association SMF reference index](https://midi.org/standard-mid
 parser/serializer provide independent cross-checks. Focused fixtures check actual bytes and musical decisions,
 including a large vendor payload and preservation through note edits; they do not
 prove every vendor's device behavior.
+
+## Ordered source audition
+
+The source editor projects a separate schema-2 MIDI timeline. It retains all
+channel messages and F0/F7 payloads, original equal-time ordering, PPQ tempo-map
+seconds or SMPTE rational time, and explicit port-to-destination bindings.
+Meta events remain source data and drive timing/routing; they are not sent as
+wire status FF. Format-2 patterns remain an explicit selection. No phrase-schema
+reduction or SoundFont approximation occurs in this path.
+
+The native wire decoder expands running status inside F7 escapes, completes
+partial short messages at their completion time, passes real-time bytes in order,
+and retains SysEx fragment timing. Incomplete/undefined wire streams are refused
+before opening endpoints while the source document remains editable/exportable.
+Native transmission packetizes long SysEx using the [CoreMIDI packet-list API's
+65536-byte boundary](https://developer.apple.com/documentation/coremidi/midipacketlistadd(_:_:_:_:_:_:)), including ABI header offsets and checked additions.
+F0/F7 interpretation follows the [Standard MIDI Files specification](https://midi.org/standard-midi-files-specification).
+
+Audition plays once from the start and supports status/stop. Pause, resume, seek
+and looping are explicitly unavailable for source timelines. A late wake sends
+every due source message in order, including zero-length notes and note-off
+release velocity; this is semantic-stream preservation, not sample-clock timing.
+Stop sends owned key-offs and enabled hold-pedal releases. Opaque vendor SysEx
+state, shared-channel external notes, physical-device latency, MIDI 2.0 and
+external clock synchronization are not claimed.

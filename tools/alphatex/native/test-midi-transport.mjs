@@ -14,18 +14,23 @@ try {
     .replace('final class MidiTransport {', `
 var reviewPhraseFailure: UInt8?
 var reviewClock: UInt64 = 0, reviewSendCost: UInt64 = 0
-var reviewSent: [[UInt8]] = [], reviewExit: Int32?
+var reviewSent: [[UInt8]] = [], reviewWire: [(Int32, [UInt8])] = [], reviewWireFail = false, reviewExit: Int32?
 final class MidiTransport {`)
   const replaceEffect = (start, end, body) => {
     const first = source.indexOf(start), last = source.indexOf(end, first)
     assert.ok(first >= 0 && last > first)
     source = source.slice(0, first) + body + source.slice(last)
   }
-  replaceEffect('    func send(', '    func apply(', `    func send(_ bytes: [UInt8]) throws {
+  replaceEffect('    func send(', '    func sendWire(', `    func send(_ bytes: [UInt8]) throws {
         reviewSent.append(bytes); reviewClock += reviewSendCost
         if bytes.first.map({ $0 & 0xf0 }) == reviewPhraseFailure {
             reviewPhraseFailure = nil; throw MidiFailure("synthetic phrase send failure")
         }
+    }
+`)
+  replaceEffect('    func sendWire(', '    func sourceApply(', `    func sendWire(_ bytes: [UInt8], to destination: Destination) throws {
+        reviewWire.append((destination.uid, bytes))
+        if reviewWireFail { reviewWireFail = false; throw MidiFailure("synthetic send failure") }
     }
 `)
   replaceEffect('    func schedule()', '    func tick()', '    func schedule() throws {}\n')
@@ -135,6 +140,50 @@ precondition(pending.state == .prepared && reviewExit == nil && reviewSent.isEmp
 precondition(pending.snapshot("prepared")["device"] == nil)
 pending.prepared = true; pending.destinationChanged()
 precondition(pending.state == .stopped && reviewExit == 1)
+// Full source wire decisions use the same native parser/scheduler/cleanup, with
+// only OS send, endpoint lookup, deadline and exit effects replaced above.
+func wire(_ events: [[String: Any]], duration: Double = 1, bindings: [[String: Any]] = [["port":0,"destination":"1"]]) throws -> MidiTransport {
+    let path = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".json")
+    try JSONSerialization.data(withJSONObject: ["schemaVersion":2,"duration":duration,"bindings":bindings,"events":events]).write(to:path)
+    defer { try? FileManager.default.removeItem(at:path) }
+    let value = try MidiTransport(path:path.path,uid:bindings[0]["destination"] as! String,loop:false)
+    value.destination = Destination(endpoint:0,uid:1,name:"synthetic")
+    for binding in value.timeline.bindings {
+        value.sourceDestinations[binding.port] = Destination(endpoint:0,uid:Int32(binding.destination)!,name:"synthetic source")
+        value.wireStates[binding.port] = WireState()
+    }
+    value.state = .playing
+    return value
+}
+var decoder = WireState()
+let decoded1 = try decoder.feed([0xf0,0x7d,1,0xf8,2]); precondition(decoded1 == [[0xf0,0x7d,1],[0xf8],[2]])
+let decoded2 = try decoder.feed([3,0xf7,0x90,60]); precondition(decoded2 == [[3,0xf7]])
+let decoded3 = try decoder.feed([100,61,90,0xf8,62,0]); precondition(decoded3 == [[0x90,60,100],[0x90,61,90],[0xf8],[0x90,62,0]])
+try decoder.complete()
+let expression: [[String: Any]] = [
+    ["seconds":0,"port":0,"bytes":[0xb0,64,127,0xb0,66,127,0xb0,69,127,0x90,60,100,60,90]],
+    ["seconds":0.5,"port":0,"bytes":[0x80,60,77,0xe0,1,65,0xa0,60,80,0xd0,40]],
+    ["seconds":1,"port":0,"bytes":[0x80,60,45]]
+]
+reset(500_000_000);reviewWire=[]
+let stream = try wire(expression);stream.tick()
+precondition(reviewWire.map(\.1) == [[0xb0,64,127],[0xb0,66,127],[0xb0,69,127],[0x90,60,100],[0x90,60,90],[0x80,60,77],[0xe0,1,65],[0xa0,60,80],[0xd0,40]])
+try stream.silence()
+precondition(Array(reviewWire.suffix(4)).map(\.1) == [[0x80,60,0],[0xb0,64,0],[0xb0,66,0],[0xb0,69,0]])
+precondition(!reviewWire.contains { $0.1.count == 3 && $0.1[0] & 0xf0 == 0xb0 && [120,123].contains($0.1[1]) })
+reset(0);reviewWire=[]
+let zeroSource = try wire([["seconds":0,"port":0,"bytes":[0x90,60,100,0x80,60,77]]],duration:0)
+zeroSource.tick()
+precondition(reviewWire.map(\.1) == [[0x90,60,100],[0x80,60,77]] && reviewExit == 0)
+reset(0);reviewWire=[]
+let routed = try wire([["seconds":0,"port":2,"bytes":[0x90,60,100]], ["seconds":0,"port":7,"bytes":[0x91,64,90]]],bindings:[["port":2,"destination":"1"],["port":7,"destination":"2"]])
+routed.tick();precondition(reviewWire.map(\.0) == [1,2]);try routed.silence()
+precondition(Array(reviewWire.suffix(2)).map(\.0) == [1,2])
+reset(0);reviewWire=[]
+let failedExclusive = try wire([["seconds":0,"port":0,"bytes":[0xf0,0x7d,1,0xf7]]])
+reviewWireFail=true;failedExclusive.tick()
+precondition(reviewWire.map(\.1) == [[0xf0,0x7d,1,0xf7],[0xf7]] && reviewExit == 1)
+print("SOURCE_MIDI_DECISIONS_PASS: F7 running status/partial messages, realtime/SysEx order, expression/release velocity, overlapping held-key cleanup, pedals, zero duration, explicit ports, partial-send cleanup")
 print("MIDI_DECISIONS_PASS: late cycles, expired intervals, live notes, send-time epoch, inclusive seek, retrigger, one-shot end, pause/status phase, startup admission")
 `
   const swift = join(directory, 'Review.swift'), binary = join(directory, 'review')

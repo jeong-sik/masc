@@ -64,12 +64,93 @@ struct Event: Decodable, Equatable {
     }
     var key: UInt16 { UInt16(channel) << 8 | UInt16(pitch ?? controller ?? 0) }
 }
+// SMF F7 escapes can contain running status, real-time bytes or a partial
+// message. CoreMIDI receives complete short messages with explicit status;
+// SysEx fragments retain their source boundaries and timing.
+struct WireState {
+    var running: UInt8?, pending: [UInt8] = [], required = 0
+    var exclusive = false
+    mutating func feed(_ bytes: [UInt8]) throws -> [[UInt8]] {
+        var messages: [[UInt8]] = [], sysex: [UInt8] = []
+        for byte in bytes {
+            if byte >= 0xf8 {
+                if !sysex.isEmpty { messages.append(sysex); sysex = [] }
+                messages.append([byte]); continue
+            }
+            if exclusive {
+                if byte == 0xf7 { sysex.append(byte); exclusive = false; messages.append(sysex); sysex = [] }
+                else if byte < 0x80 { sysex.append(byte) }
+                else { throw MidiFailure("non-real-time status interrupts source SysEx") }
+                continue
+            }
+            if byte >= 0x80 {
+                guard pending.isEmpty else { throw MidiFailure("status interrupts an incomplete source MIDI message") }
+                if byte == 0xf0 { running = nil; exclusive = true; sysex.append(byte); continue }
+                if byte < 0xf0 {
+                    running = byte; required = [0xc0, 0xd0].contains(byte & 0xf0) ? 2 : 3
+                } else {
+                    running = nil
+                    switch byte {
+                    case 0xf1, 0xf3: required = 2
+                    case 0xf2: required = 3
+                    case 0xf6: messages.append([byte]); continue
+                    default: throw MidiFailure("undefined or unmatched source MIDI system status")
+                    }
+                }
+                pending = [byte]
+            } else {
+                if pending.isEmpty {
+                    guard let running else { throw MidiFailure("source MIDI data has no wire running status") }
+                    pending = [running]; required = [0xc0, 0xd0].contains(running & 0xf0) ? 2 : 3
+                }
+                pending.append(byte)
+                if pending.count == required { messages.append(pending); pending = [] }
+            }
+        }
+        if !sysex.isEmpty { messages.append(sysex) }
+        return messages
+    }
+    func complete() throws {
+        guard !exclusive, pending.isEmpty else { throw MidiFailure("source ends inside a MIDI wire message") }
+    }
+}
+struct WireEvent: Decodable {
+    let seconds: Double
+    let port: UInt8
+    let bytes: [UInt8]
+}
+struct Binding: Decodable {
+    let port: UInt8
+    let destination: String
+}
 struct Timeline: Decodable {
     let schemaVersion: Int
     let duration: Double
     let events: [Event]
+    let wireEvents: [WireEvent]
+    let bindings: [Binding]
+    var source: Bool { schemaVersion == 2 }
+    enum Keys: String, CodingKey { case schemaVersion, duration, events, bindings }
+    init(schemaVersion: Int, duration: Double, events: [Event]) {
+        self.schemaVersion = schemaVersion; self.duration = duration; self.events = events
+        wireEvents = []; bindings = []
+    }
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: Keys.self)
+        schemaVersion = try values.decode(Int.self, forKey: .schemaVersion)
+        duration = try values.decode(Double.self, forKey: .duration)
+        switch schemaVersion {
+        case 1:
+            events = try values.decode([Event].self, forKey: .events); wireEvents = []; bindings = []
+            guard !values.contains(.bindings) else { throw MidiFailure("phrase timeline cannot contain source bindings") }
+        case 2:
+            events = []; wireEvents = try values.decode([WireEvent].self, forKey: .events)
+            bindings = try values.decode([Binding].self, forKey: .bindings)
+        default: throw MidiFailure("unknown MIDI timeline schema")
+        }
+    }
     func validate() throws {
-        guard schemaVersion == 1, duration.isFinite, duration > 0,
+        guard duration.isFinite, source ? duration >= 0 : duration > 0,
               duration * 1e9 < Double(UInt64.max) else { throw MidiFailure("invalid MIDI timeline duration") }
         var previous = 0.0
         for event in events {
@@ -77,8 +158,31 @@ struct Timeline: Decodable {
             guard event.seconds >= previous, event.seconds <= duration else { throw MidiFailure("MIDI events must be ordered inside the timeline") }
             previous = event.seconds
         }
+        var decoders: [UInt8: WireState] = [:]
+        var destinations = Set<String>()
+        for binding in bindings {
+            guard binding.port < 128, let uid = Int32(binding.destination), String(uid) == binding.destination,
+                  decoders[binding.port] == nil, destinations.insert(binding.destination).inserted else {
+                throw MidiFailure("source ports require unique explicit destination bindings")
+            }
+            decoders[binding.port] = WireState()
+        }
+        var used = Set<UInt8>()
+        for event in wireEvents {
+            guard event.seconds.isFinite, event.seconds >= previous, event.seconds <= duration,
+                  !event.bytes.isEmpty, var decoder = decoders[event.port] else {
+                throw MidiFailure("invalid or unbound source MIDI wire event")
+            }
+            _ = try decoder.feed(event.bytes); decoders[event.port] = decoder
+            used.insert(event.port); previous = event.seconds
+        }
+        if source {
+            guard !wireEvents.isEmpty, used == Set(bindings.map(\.port)) else { throw MidiFailure("source bindings must match used MIDI ports") }
+            for decoder in decoders.values { try decoder.complete() }
+        }
     }
 }
+
 enum Command: Decodable {
     case pause, resume, seek(Double), status, stop
     enum Keys: String, CodingKey { case kind, seconds }
@@ -111,10 +215,17 @@ final class MidiTransport {
     var anchor: UInt64 = 0, offset = 0.0, index = 0
     var held: [UInt16: Event] = [:]
     var maximumLateness = 0.0
+    var sourceDestinations: [UInt8: Destination] = [:], wireStates: [UInt8: WireState] = [:]
+    var sourceExclusive = Set<UInt8>()
+    var sourceHeld: [UInt8: [UInt16: Int]] = [:], sourcePedals: [UInt8: Set<UInt16>] = [:]
 
     init(path: String, uid: String, loop: Bool) throws {
         timeline = try JSONDecoder().decode(Timeline.self, from: Data(contentsOf: URL(fileURLWithPath: path)))
         try timeline.validate()
+        if timeline.source {
+            guard !loop else { throw MidiFailure("source audition plays once; loop state reconstruction is not connected") }
+            guard timeline.bindings.first?.destination == uid else { throw MidiFailure("primary source destination differs from explicit bindings") }
+        }
         guard let value = Int32(uid), String(value) == uid else { throw MidiFailure("MIDI destination requires its exact unique ID") }
         selectedUID = uid; self.loop = loop
     }
@@ -133,6 +244,13 @@ final class MidiTransport {
                     throw MidiFailure("selected MIDI destination is unavailable: \(selectedUID)")
                 }
                 destination = found
+                for binding in timeline.bindings {
+                    guard let selected = try destinations().first(where: { String($0.uid) == binding.destination }) else {
+                        throw MidiFailure("source MIDI port \(binding.port) destination is unavailable")
+                    }
+                    sourceDestinations[binding.port] = selected
+                    wireStates[binding.port] = WireState()
+                }
                 try checked(MIDIOutputPortCreate(client, "MASC phrase output" as CFString, &port), "create MIDI output port")
                 try checkDestination()
                 prepared = true
@@ -150,30 +268,97 @@ final class MidiTransport {
         catch { finish(reason: "destination-unavailable", error: error) }
     }
     func checkDestination() throws {
-        guard let destination, try destinations().contains(where: {
-            $0.endpoint == destination.endpoint && String($0.uid) == selectedUID
-        }) else { throw MidiFailure("selected MIDI destination was removed or changed") }
-        var offline: Int32 = 0
-        let status = MIDIObjectGetIntegerProperty(destination.endpoint, kMIDIPropertyOffline, &offline)
-        if status != kMIDIUnknownProperty {
-            try checked(status, "read selected MIDI destination state")
-            guard offline == 0 else { throw MidiFailure("selected MIDI destination is offline") }
+        let available = try destinations()
+        guard let destination else { throw MidiFailure("MIDI destination has not been selected") }
+        for selected in timeline.source ? Array(sourceDestinations.values) : [destination] {
+            guard available.contains(where: { $0.endpoint == selected.endpoint && $0.uid == selected.uid }) else {
+                throw MidiFailure("selected MIDI destination was removed or changed")
+            }
+            var offline: Int32 = 0
+            let status = MIDIObjectGetIntegerProperty(selected.endpoint, kMIDIPropertyOffline, &offline)
+            if status != kMIDIUnknownProperty {
+                try checked(status, "read selected MIDI destination state")
+                guard offline == 0 else { throw MidiFailure("selected MIDI destination is offline") }
+            }
         }
     }
     func send(_ bytes: [UInt8]) throws {
         guard let destination else { throw MidiFailure("MIDI destination has not been selected") }
-        var list = MIDIPacketList()
-        let result: OSStatus = withUnsafeMutablePointer(to: &list) { pointer in
-            let packet = MIDIPacketListInit(pointer)
-            return bytes.withUnsafeBufferPointer { data in
-                // Structured project messages have at most three data bytes.
-                _ = MIDIPacketListAdd(pointer, MemoryLayout<MIDIPacketList>.size, packet, 0, data.count, data.baseAddress!)
-                // Only already-due messages enter CoreMIDI. Pause/seek/stop
-                // cannot leave this transport's future events in a shared port.
-                return MIDISend(port, destination.endpoint, pointer)
+        try sendWire(bytes, to: destination)
+    }
+    func sendWire(_ bytes: [UInt8], to destination: Destination) throws {
+        // Apple limits each MIDIPacketList to 65536 bytes. Include actual ABI
+        // header offsets, check every Add result, split only long SysEx data.
+        let capacity = 65536
+        let overhead = MemoryLayout<MIDIPacketList>.offset(of: \.packet)! + MemoryLayout<MIDIPacket>.offset(of: \.data)!
+        let storage = UnsafeMutableRawPointer.allocate(byteCount: capacity, alignment: MemoryLayout<MIDIPacketList>.alignment)
+        defer { storage.deallocate() }
+        let list = storage.assumingMemoryBound(to: MIDIPacketList.self)
+        var offset = 0
+        while offset < bytes.count {
+            let count = min(capacity - overhead, bytes.count - offset)
+            let packet = MIDIPacketListInit(list)
+            try bytes.withUnsafeBufferPointer { data in
+                let added = MIDIPacketListAdd(list, capacity, packet, 0, count, data.baseAddress!.advanced(by: offset))
+                guard UInt(bitPattern: added) != 0 else {
+                    throw MidiFailure("MIDI packet list could not hold source bytes")
+                }
+                // Due messages only: no future shared-port work survives stop.
+                try checked(MIDISend(port, destination.endpoint, list), "send MIDI event")
             }
+            offset += count
         }
-        try checked(result, "send MIDI event")
+    }
+    func sourceApply(_ event: WireEvent) throws {
+        guard var decoder = wireStates[event.port], let destination = sourceDestinations[event.port] else {
+            throw MidiFailure("source MIDI port is not prepared")
+        }
+        let messages = try decoder.feed(event.bytes)
+        // Keep decoder progress even if the endpoint fails mid-fragment, so
+        // cleanup closes an exclusive stream before sending channel note-offs.
+        wireStates[event.port] = decoder
+        for bytes in messages {
+            // Record ownership before sending: a failed OSStatus cannot prove
+            // that none of these bytes reached the endpoint.
+            if let status = bytes.first {
+                let channel = UInt16(status & 15), type = status & 0xf0
+                if status == 0xff { sourceHeld[event.port] = [:]; sourcePedals[event.port] = [] }
+                else if bytes.count == 3 && (type == 0x80 || type == 0x90) {
+                    let key = channel << 8 | UInt16(bytes[1]), count = sourceHeld[event.port]?[key] ?? 0
+                    sourceHeld[event.port, default: [:]][key] = type == 0x90 && bytes[2] > 0 ? count + 1 : max(0, count - 1)
+                } else if bytes.count == 3 && type == 0xb0 {
+                    let controller = bytes[1], key = channel << 8 | UInt16(controller)
+                    if [64, 66, 69].contains(controller) {
+                        if bytes[2] >= 64 { sourcePedals[event.port, default: []].insert(key) }
+                        else { sourcePedals[event.port]?.remove(key) }
+                    }
+                    if controller == 121 { sourcePedals[event.port] = (sourcePedals[event.port] ?? []).filter { $0 >> 8 != channel } }
+                    if [120, 123, 124, 125, 126, 127].contains(controller) {
+                        sourceHeld[event.port] = (sourceHeld[event.port] ?? [:]).filter { $0.key >> 8 != channel }
+                    }
+                }
+            }
+            if bytes.first == 0xf0 { sourceExclusive.insert(event.port) }
+            try sendWire(bytes, to: destination)
+            if bytes.contains(0xf7) { sourceExclusive.remove(event.port) }
+        }
+    }
+    func sourceSilence() throws {
+        var failure: Error?
+        for binding in timeline.bindings {
+            guard let destination = sourceDestinations[binding.port] else { continue }
+            var messages: [[UInt8]] = []
+            if sourceExclusive.contains(binding.port) { messages.append([0xf7]) }
+            for (key, count) in (sourceHeld[binding.port] ?? [:]).sorted(by: { $0.key < $1.key }) {
+                for _ in 0..<count { messages.append([0x80 | UInt8(key >> 8), UInt8(key & 127), 0]) }
+            }
+            for key in (sourcePedals[binding.port] ?? []).sorted() {
+                messages.append([0xb0 | UInt8(key >> 8), UInt8(key & 127), 0])
+            }
+            for bytes in messages { do { try sendWire(bytes, to: destination) } catch { failure = failure ?? error } }
+        }
+        sourceHeld.removeAll(); sourcePedals.removeAll(); sourceExclusive.removeAll()
+        if let failure { throw failure }
     }
     func apply(_ event: Event) throws {
         // A failed send cannot prove the destination missed the Note On, so the
@@ -183,6 +368,7 @@ final class MidiTransport {
         if event.kind == .off { held.removeValue(forKey: event.key) }
     }
     func silence() throws {
+        if timeline.source { try sourceSilence(); return }
         var failure: Error?
         for event in held.values.sorted(by: { $0.key < $1.key }) {
             do {
@@ -196,6 +382,15 @@ final class MidiTransport {
         try reconcile(at: seconds, reconstruct: true)
     }
     func reconcile(at seconds: Double, reconstruct: Bool = false) throws {
+        if timeline.source {
+            guard !reconstruct else { throw MidiFailure("source seek/resume requires expression-state reconstruction") }
+            // Expression, zero-length notes, note-off velocity and SysEx are an
+            // ordered stream. Never reduce late source events to held-key state.
+            while index < timeline.wireEvents.count && timeline.wireEvents[index].seconds <= seconds {
+                try sourceApply(timeline.wireEvents[index]); index += 1
+            }
+            return
+        }
         var programs: [UInt8: Event] = [:], controls: [UInt16: Event] = [:]
         var notes = reconstruct ? [:] : held
         if reconstruct { index = 0 }
@@ -226,7 +421,8 @@ final class MidiTransport {
     func schedule() throws {
         timer?.cancel(); timer = nil
         guard state == .playing else { return }
-        let next = index < timeline.events.count ? timeline.events[index].seconds : timeline.duration
+        let next = timeline.source ? (index < timeline.wireEvents.count ? timeline.wireEvents[index].seconds : timeline.duration)
+            : (index < timeline.events.count ? timeline.events[index].seconds : timeline.duration)
         let delay = max(0, next - offset) * 1e9
         guard delay < Double(UInt64.max) else { throw MidiFailure("MIDI event exceeds the host clock range") }
         let (deadline, overflow) = anchor.addingReportingOverflow(UInt64(delay))
@@ -241,9 +437,10 @@ final class MidiTransport {
         do {
             let host = DispatchTime.now().uptimeNanoseconds
             let now = position(at: host)
-            if index < timeline.events.count && timeline.events[index].seconds <= now {
-                maximumLateness = max(maximumLateness, now - timeline.events[index].seconds)
-            }
+            let next = timeline.source ? (index < timeline.wireEvents.count ? timeline.wireEvents[index].seconds : now)
+                : (index < timeline.events.count ? timeline.events[index].seconds : now)
+            maximumLateness = max(maximumLateness, now - next)
+            if timeline.source { try reconcile(at: min(now, timeline.duration)) }
             if now >= timeline.duration {
                 if !loop { offset = timeline.duration; finish(reason: "finished"); return }
                 // Resolve phase before replaying any pending events. Keep the
@@ -267,6 +464,7 @@ final class MidiTransport {
                 source.resume(); signals.append(source)
             }
             anchor = DispatchTime.now().uptimeNanoseconds; state = .playing
+            if timeline.source { publish() }
             tick(); publish()
         } catch { finish(reason: "start-failed", error: error) }
     }
@@ -281,6 +479,9 @@ final class MidiTransport {
         var value: [String: Any] = ["kind": kind, "currentTime": current, "duration": timeline.duration,
                                   "loop": loop, "maximumLateness": maximumLateness]
         if let destination { value["device"] = destination.json }
+        if timeline.source { value["bindings"] = timeline.bindings.compactMap { binding in
+            sourceDestinations[binding.port].map { ["port": binding.port, "device": $0.json] as [String: Any] }
+        } }
         return value
     }
     func receive(_ line: String) {
@@ -288,6 +489,12 @@ final class MidiTransport {
         do {
             let command = try JSONDecoder().decode(Command.self, from: Data(line.utf8))
             try checkDestination()
+            if timeline.source {
+                switch command {
+                case .pause, .resume, .seek: throw MidiFailure("source audition supports play/stop from the beginning; expression-state chase is not connected")
+                case .status, .stop: break
+                }
+            }
             switch command {
             case .pause:
                 if state == .playing {

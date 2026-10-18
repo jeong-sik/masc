@@ -1947,7 +1947,12 @@ let fetch_keeper_context_inspector ~(host : string) ~(port : int)
 let fetch_keeper_exact_context_inspector ~host ~port ~keeper_name ~turn_ref ~publish =
   let module Inspector = Masc_tui_context_inspector in
   let current : Inspector.exact_reading ref = ref
-    { turn_ref; record = Inspector.Pending; provider_input = Inspector.Pending; response = Inspector.Pending } in
+    { Inspector.turn_ref
+    ; record = Inspector.Pending
+    ; provider_input = Inspector.Pending
+    ; response = Inspector.Pending
+    }
+  in
   let emit () = publish (Inspector.Exact_read !current) in
   let observe read =
     try read () with
@@ -1983,14 +1988,14 @@ let fetch_keeper_exact_context_inspector ~host ~port ~keeper_name ~turn_ref ~pub
           fetch_context_json ~host ~port ~label:"exact-turn-record"
             ~path:(Printf.sprintf "/api/v1/keepers/%s/turn-records?turn_ref=%s" encoded reference)
             ~decode:(Inspector.decode_exact_turn_record ~expected_keeper:keeper_name ~expected_turn_ref:turn_ref)) in
-        current := { !current with record = Inspector.Observed result };
+        current := { !current with Inspector.record = Inspector.Observed result };
         emit ())
     ; (fun () ->
         let result = observe_part "input" (fun () ->
           fetch_context_json ~host ~port ~label:"provider-input"
             ~path:(Printf.sprintf "/api/v1/keepers/%s/provider-input?turn_ref=%s" encoded reference)
             ~decode:(Inspector.decode_provider_input ~expected_keeper:keeper_name ~expected_turn_ref:turn_ref)) in
-        current := { !current with provider_input = Inspector.Observed result };
+        current := { !current with Inspector.provider_input = Inspector.Observed result };
         emit ())
     ; (fun () ->
         let result = observe_part "response" (fun () ->
@@ -1998,7 +2003,7 @@ let fetch_keeper_exact_context_inspector ~host ~port ~keeper_name ~turn_ref ~pub
             ~path:(Printf.sprintf "/api/v1/keepers/%s/turn-transcript?turn_ref=%s" encoded reference)
             ~decode:(Inspector.decode_exact_turn_transcript
               ~expected_keeper:keeper_name ~expected_turn_ref:turn_ref)) in
-        current := { !current with response = Inspector.Observed result };
+        current := { !current with Inspector.response = Inspector.Observed result };
         emit ())
     ]
 

@@ -1984,6 +1984,7 @@
   masc_tui_types
   masc_tui_ansi
   masc_tui_theme
+  masc_tui_terminal_palette
   masc_tui_acting
   masc_tui_acting_pane
   masc_tui_message_layout

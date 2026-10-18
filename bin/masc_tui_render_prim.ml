@@ -4596,7 +4596,12 @@ let context_response_summary observation =
       Ansi.dim ^ "  No assistant response in retained transcript · 4:response" ^ Ansi.reset
   | Inspector.Observed (Ok { parts; _ }) ->
       let count, failures = List.fold_left (fun (count, failures) part ->
-          count + 1, failures + (match part with Inspector.Request_failure _ -> 1 | _ -> 0))
+          count + 1,
+          failures + (match part with
+            | Inspector.Request_failure _ -> 1
+            | Inspector.Reply_text _
+            | Inspector.Tool_steps _
+            | Inspector.Reasoning_lines _ -> 0))
           (0, 0) parts in
       let failure = if failures = 0 then "" else
           Printf.sprintf " · %d request failures" failures in

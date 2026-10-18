@@ -163,7 +163,8 @@ Eio 는 협력형 스케줄러다. 취소와 시간 초과는 fiber 가 멈추�
 
 - `Keeper_tool_plan`은 생성자의 canonicalization·중복 ID/이름·compiled operand 확인 후
   원래 노드/계약을 plan 안의 불변 index로 결속한다. 검증 단계와 첫 오류 선택은 원래
-  목록 순서를 지키고, 실행 조회는 보관한 원래 계약을 쓴다. parameter 바인딩·재구성은
+  목록 순서를 지키고, 결속도 첫 unknown/off-surface 오류에서 멈춘다. 실행 조회는 보관한
+  원래 계약을 쓴다. parameter 바인딩·재구성은
   새 plan과 index를 만들며, 이전 plan/run의 출력은 새 입력에 넘기지 않는다. 실패한
   생성자의 선행 결속 비용도 Before/After에 남기고, lookup 수를 실행 시간으로 환산하지 않는다.
 

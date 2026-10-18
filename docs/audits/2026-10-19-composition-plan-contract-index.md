@@ -15,11 +15,11 @@ schema projection reuse the immutable plan but repeat its resolution work.
 
 The abstract plan now retains one typed-ID map of original node/contract pairs.
 After canonical descriptors, compiled operands and duplicate node/tool names
-have been checked, construction resolves every original node once. The existing
-validators keep their original list order and reuse the indexed contracts.
-Only a fully validated plan publishes that map. An unresolved contract remains
-`None` while construction checks unknown/off-surface errors; it cannot become
-a successful plan through the index.
+have been checked, the original first known-tool validation binds each visited
+node's resolved contract and stops at the same unknown/off-surface error. Later
+validators keep their original list order and reuse those contracts. Only a
+fully validated plan publishes that map; every retained entry has a resolved
+contract, and unresolved nodes cannot become indexed successful operands.
 
 Runtime contract/node lookup uses the same index. Original node lists still
 drive validation, input preparation, dependency layers and effects. No map-key
@@ -56,11 +56,13 @@ insertions. The index retains `O(N)` original operand pairs and resolved
 contracts; those records previously could be temporary allocations on every
 query. Allocation, retained heap and small-plan timing remain unmeasured.
 
-An early-refused construction can now resolve later nodes' pure contracts before
-the original first validation error is reported. No later input/schema check or
-effect runs early, but that additional binding cost must remain in failed-case
-comparisons. Duplicate/canonical/compiled-operand refusal still precedes index
-creation. Graph dependency scans, cycle/terminal ancestry traversal, schema and
+Known-tool refusal resolves the same original prefix and stops before later
+nodes, while retaining map insertion cost for accepted prefix members. A later
+schema/graph/terminal/export refusal retains the known-tool phase's completed
+index until rejection. No later input/schema check or effect runs early; map
+allocation must remain in failed-case comparisons. Duplicate/canonical/compiled
+operand refusal still precedes index creation. Graph dependency scans,
+cycle/terminal ancestry traversal, schema and
 JSON work, resource conflict construction, physical preparation, dispatch and
 observations retain their own costs. This is not an overall linearity or
 end-to-end speedup claim.

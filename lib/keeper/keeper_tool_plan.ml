@@ -1001,7 +1001,7 @@ type inline_arguments =
 type t =
   { identity : int
   ; nodes : node list
-  ; operands : (node * contract option) Node_map.t
+  ; operands : (node * contract) Node_map.t
   ; descriptors : (string * Keeper_tool_descriptor.t) list
   ; children : child_nodes list
   ; arguments : inline_arguments list
@@ -1220,7 +1220,7 @@ let node_in_plan plan node_id =
   Option.map fst (Node_map.find_opt node_id plan.operands)
 
 let contract plan node_id =
-  Option.bind (Node_map.find_opt node_id plan.operands) snd
+  Option.map snd (Node_map.find_opt node_id plan.operands)
 
 let child_exports_schema plan =
   let properties = List.map (fun (export : export) ->
@@ -1255,19 +1255,19 @@ let readonly_for_input plan ~node_id ~input =
   | Some {target=Child_submission _;_} -> Some false
   | Some {target=(Child_arguments _ | Child_result _);_} -> Some true
 
-let validate_known_tools (resolve : node -> contract option) off_surface nodes =
-  List.find_map
-    (fun node ->
-       match resolve node with
-       | Some _ -> None
-       | None ->
-         (match List.assoc_opt node.tool_name off_surface with
+let bind_known_tools (resolve : node -> contract option) off_surface nodes =
+  let rec bind operands = function
+    | [] -> Ok operands
+    | node :: rest ->
+      match resolve node with
+      | Some contract -> bind (Node_map.add node.id (node,contract) operands) rest
+      | None ->
+        Error (match List.assoc_opt node.tool_name off_surface with
           | Some reason ->
-            Some
-              (Tool_off_keeper_surface
-                 { node_id = node.id; tool_name = node.tool_name; reason })
-          | None -> Some (Unknown_tool { node_id = node.id; tool_name = node.tool_name })))
-    nodes
+            Tool_off_keeper_surface { node_id = node.id; tool_name = node.tool_name; reason }
+          | None -> Unknown_tool { node_id = node.id; tool_name = node.tool_name })
+  in
+  bind Node_map.empty nodes
 ;;
 
 let validate_dependencies nodes =
@@ -1463,17 +1463,14 @@ let create_compiled ~descriptors ~children ?(arguments=[]) ?(branch_failure_poli
           (match first_repeated_name (List.map fst descriptors) with
            | Some name -> Error (Duplicate_tool_name name)
            | None ->
-             (* IDs and compiled operands are already checked. Every resolver
-                below visits these original nodes, directly or through
-                [node_for_id nodes]. Keep validation/error order list-driven;
-                retain the same resolved contracts for this plan's lifetime. *)
-             let operands = List.fold_left (fun index node ->
-               let contract = contract_for_node descriptors children arguments node in
-               Node_map.add node.id (node,contract) index) Node_map.empty nodes in
-             let resolve (node : node) = Option.bind (Node_map.find_opt node.id operands) snd in
-             (match validate_known_tools resolve off_surface nodes with
-              | Some error -> Error error
-              | None ->
+             (* Bind during the original first validation phase, stopping at
+                the same unknown/off-surface node. Later validators request
+                only these original nodes, directly or through [node_for_id].
+                Keep phase/error order list-driven and retain the contracts. *)
+             (match bind_known_tools (contract_for_node descriptors children arguments) off_surface nodes with
+              | Error error -> Error error
+              | Ok operands ->
+                let resolve (node : node) = Option.map snd (Node_map.find_opt node.id operands) in
                 (match validate_output_schemas resolve nodes with
                  | Some error -> Error error
                  | None ->

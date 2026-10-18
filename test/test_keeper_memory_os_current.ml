@@ -1650,6 +1650,8 @@ let test_purge_plan_removes_memory_sidecars () =
   let context = { Shutdown.requested_name = "keeper" } in
   let plan = Shutdown.dashboard_purge_artifact_plan ~keeper_name:"keeper" context in
   let contains artifact = List.exists (fun entry -> entry = artifact) plan in
+  check bool "plan removes cumulative unread evidence for a deleted keeper" true
+    (contains Shutdown.Keeper_librarian_unread_ledger_artifact);
   check bool "plan removes the fact snapshot" true
     (contains Shutdown.Keeper_memory_current_artifact);
   check bool "plan removes an interrupted retraction plan" true
@@ -1840,6 +1842,102 @@ let test_unread_prepared_receipts_need_the_exact_snapshot () =
     check bool "unconfirmed official coverage cannot advance recovery" true
       (Current.committed_official_coverage ~keepers_dir ~keeper_id:"keeper"
         ~receipt_scope:official.receipt_scope |> require_ok = None)) [true;false]
+;;
+
+let test_cumulative_unread_survives_receipt_replacement () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let atom, official = unread_receipt_fixture () in
+  ignore (apply_disposition ~keepers_dir ~durable_range_id:atom ~official_range_id:official () |> require_ok);
+  let module H = Masc.Keeper_librarian_unread in
+  let repeated = List.map (fun hole ->
+    H.of_json (map_field "reasons" (fun _ -> `List [`String "input_capacity"]) (H.to_json hole)) |> require_ok)
+    atom.unread_messages in
+  (* Repeated evidence for the same original adds a named cause instead of
+     replacing the original cause or creating a second source coordinate. *)
+  ignore (apply_disposition ~keepers_dir ~durable_range_id:{atom with unread_messages=repeated} () |> require_ok);
+  let all_atom_holes = H.merge atom.unread_messages repeated |> require_ok in
+  (* No coverage read first: the next writer itself must archive the old
+     interval before replacing the same scope's WAL identities. *)
+  let later_atom = {durable_range_id with trace_id="later-trace";
+    history_start_boundary_line=6;end_boundary_line=7;boundary_lines_seen=7} in
+  let later_official = {official_range_id with after_boundary_line=5;
+    turns=[8, Ids.Turn_ref.make ~trace_id:"later-official" ~absolute_turn:1]} in
+  ignore (apply_disposition ~keepers_dir ~durable_range_id:later_atom
+    ~official_range_id:later_official () |> require_ok);
+  let holes () = Current.committed_unread_messages ~keepers_dir ~keeper_id:"keeper" |> require_ok in
+  let expected = Masc.Keeper_librarian_unread.merge all_atom_holes official.unread_messages |> require_ok in
+  check bool "old trace and official records survive new same-scope intervals" true (holes () = expected);
+  check bool "the WAL now retains only the later atom interval" true
+    (Current.committed_durable_coverage ~keepers_dir ~keeper_id:"keeper"
+      ~receipt_scope:atom.receipt_scope |> require_ok = Some later_atom);
+  ignore (apply_disposition ~keepers_dir ~new_claims:[fact ~claim:"later independent fact" ()] () |> require_ok);
+  check bool "independent writes retain cumulative evidence" true (holes () = expected);
+  let path = Current.unread_ledger_path ~keepers_dir ~keeper_id:"keeper" in
+  let bytes = Fs_compat.load_file path in
+  check bool "a repeated receipt read still returns the durable ledger" true (holes () = expected);
+  check string "idempotent reads preserve ledger bytes" bytes (Fs_compat.load_file path)
+;;
+
+let test_cumulative_unread_conflict_and_corruption_preserve_stores () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let atom, _ = unread_receipt_fixture () in
+  ignore (apply_disposition ~keepers_dir ~durable_range_id:atom () |> require_ok);
+  ignore (Current.committed_unread_messages ~keepers_dir ~keeper_id:"keeper" |> require_ok);
+  let snapshot = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+  let wal = Current.durable_range_receipt_path ~keepers_dir ~keeper_id:"keeper" in
+  let ledger = Current.unread_ledger_path ~keepers_dir ~keeper_id:"keeper" in
+  let before = List.map Fs_compat.load_file [snapshot;wal;ledger] in
+  let changed_source = [Agent_core.Types.make_message ~role:Agent_core.Types.User [Agent_core.Types.Text "prefix"];
+    Agent_core.Types.make_message ~role:Agent_core.Types.User [Agent_core.Types.Text "different unread original"]] in
+  let changed = Masc.Keeper_librarian_unread.for_atom ~trace_id:atom.trace_id
+    ~history_start_boundary_line:atom.history_start_boundary_line ~atom:1 ~message_in_atom:0
+    ~messages:changed_source ~reasons:[Masc.Keeper_librarian_input_refusal.Input_capacity] |> require_ok in
+  (match apply_disposition ~keepers_dir ~durable_range_id:{atom with unread_messages=[changed]}
+    ~new_claims:[fact ~claim:"must not publish a conflicting source" ()] () with
+   | Error _ -> () | Ok _ -> fail "conflicting original was published");
+  check (list string) "source conflict preserves Memory, WAL and ledger" before
+    (List.map Fs_compat.load_file [snapshot;wal;ledger]);
+  List.iter (fun bad ->
+    Fs_compat.save_file ledger bad;
+    (match Current.committed_unread_messages ~keepers_dir ~keeper_id:"keeper" with
+     | Error _ -> () | Ok _ -> fail "corrupt ledger became an empty read");
+    (match apply_disposition ~keepers_dir ~new_claims:[fact ~claim:"must not erase an unread ledger" ()] () with
+     | Error _ -> () | Ok _ -> fail "writer ignored unread ledger corruption");
+    check string "corruption preserves snapshot" (List.nth before 0) (Fs_compat.load_file snapshot);
+    check string "corruption preserves WAL" (List.nth before 1) (Fs_compat.load_file wal);
+    check string "rejected ledger bytes remain for repair" bad (Fs_compat.load_file ledger))
+    ["{";{|{"schema_version":2,"unread_messages":[]}|};{|{"schema_version":1}|}]
+;;
+
+let test_unverified_unread_receipt_is_preserved_without_authority () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let atom, _ = unread_receipt_fixture () in
+  ignore (apply_disposition ~keepers_dir ~durable_range_id:atom () |> require_ok);
+  rewrite_receipts ~keepers_dir (map_receipts (map_field "state" (fun _ -> `String "prepared")));
+  (* A prepared WAL entry whose target snapshot is absent cannot prove a
+     committed hole. Preserve its evidence separately before removing it. *)
+  Sys.remove (Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper");
+  let ledger = Current.unread_ledger_path ~keepers_dir ~keeper_id:"keeper" in
+  if Sys.file_exists ledger then Sys.remove ledger;
+  check bool "unproved prepared source is not cumulative committed evidence" true
+    (Current.committed_unread_messages ~keepers_dir ~keeper_id:"keeper" |> require_ok = []);
+  let rejected = Sys.readdir keepers_dir |> Array.to_list |> List.filter_map (fun name ->
+    let file = Filename.concat keepers_dir name in
+    if (Unix.lstat file).Unix.st_kind <> Unix.S_REG then None else
+    match Fs_compat.load_file_opt file with
+    | Some raw ->
+      (match Yojson.Safe.from_string raw with
+       | json ->
+         (match Yojson.Safe.Util.member "receipts" json with
+          | `List entries ->
+            let preserved = List.exists (fun entry ->
+              Yojson.Safe.Util.(entry |> member "entry" |> member "range_id") =
+              Current.durable_range_id_to_json atom) entries in
+            if preserved then Some file else None
+          | _ -> None)
+       | exception Yojson.Json_error _ -> None)
+    | None -> None) in
+  check bool "unverified source and causes remain in quarantine" true (rejected <> [])
 ;;
 
 let test_atom_receipt_wire_and_exclusive_identity () =
@@ -4539,6 +4637,12 @@ let () =
             test_unread_receipt_schema_and_selected_source_validation
         ; test_case "unread prepared receipts need the exact snapshot" `Quick
             test_unread_prepared_receipts_need_the_exact_snapshot
+        ; test_case "cumulative unread survives same-scope receipt replacement" `Quick
+            test_cumulative_unread_survives_receipt_replacement
+        ; test_case "cumulative unread conflicts and corruption preserve stores" `Quick
+            test_cumulative_unread_conflict_and_corruption_preserve_stores
+        ; test_case "unverified unread WAL evidence is preserved without authority" `Quick
+            test_unverified_unread_receipt_is_preserved_without_authority
         ; test_case "atom wire and exclusive receipt identity" `Quick
             test_atom_receipt_wire_and_exclusive_identity
         ; test_case "official receipt survives other commits" `Quick

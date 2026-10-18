@@ -12,7 +12,9 @@
     ({!Keeper_librarian_official_progress}), and a consumed pass advances
     them only when [commit] reports that the Memory OS snapshot committed.
     Establishing an initial baseline writes the atom position without a
-    Memory commit. *)
+    Memory commit. Verified unread evidence is durably accumulated under the
+    Memory lock before external acknowledgements or either progress write.
+    Recovering a hole-bearing range also checks its exact source messages. *)
 
 type commit_result =
   | Memory_committed

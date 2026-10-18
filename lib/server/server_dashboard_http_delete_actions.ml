@@ -379,6 +379,10 @@ let keeper_artifact_path config keeper_name artifact =
            (Config_dir_resolver.keepers_dir_for_base_path
               ~base_path:config.Workspace.base_path)
          ~keeper_id:keeper_name)
+  | Keeper_librarian_unread_ledger_artifact ->
+    Some (Keeper_memory_os_current.unread_ledger_path
+      ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path
+        ~base_path:config.Workspace.base_path) ~keeper_id:keeper_name)
   | Keeper_memory_publication_artifact ->
     Some (Keeper_memory_os_current.publication_receipt_path
       ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path
@@ -667,6 +671,7 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
          | Keeper_runtime_directory_artifact
          | Keeper_memory_current_artifact
          | Keeper_librarian_range_receipt_artifact
+         | Keeper_librarian_unread_ledger_artifact
          | Keeper_memory_admission_queue_artifact
          | Keeper_memory_publication_artifact
          | Keeper_memory_retraction_plan_artifact
@@ -709,6 +714,7 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
             | Keeper_runtime_directory_artifact
             | Keeper_memory_current_artifact
             | Keeper_librarian_range_receipt_artifact
+            | Keeper_librarian_unread_ledger_artifact
             | Keeper_memory_admission_queue_artifact
             | Keeper_memory_publication_artifact
             | Keeper_memory_retraction_plan_artifact
@@ -740,6 +746,7 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
              | Keeper_metrics_store_artifact | Keeper_root_logs_artifact
              | Keeper_runtime_directory_artifact | Keeper_memory_current_artifact
              | Keeper_librarian_range_receipt_artifact | Keeper_memory_admission_queue_artifact
+             | Keeper_librarian_unread_ledger_artifact
              | Keeper_memory_publication_artifact | Keeper_memory_retraction_plan_artifact
              | Keeper_memory_source_current_artifact | Keeper_working_context_recall_artifact
              | Keeper_working_context_artifact | Keeper_memory_journal_artifact
@@ -761,6 +768,7 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
                | Keeper_root_logs_artifact
                | Keeper_memory_current_artifact
                | Keeper_librarian_range_receipt_artifact
+               | Keeper_librarian_unread_ledger_artifact
                | Keeper_memory_admission_queue_artifact
                | Keeper_memory_publication_artifact
             | Keeper_memory_retraction_plan_artifact

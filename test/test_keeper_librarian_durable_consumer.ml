@@ -2771,7 +2771,7 @@ let test_a_mixed_keeper_is_read_in_line_order () =
 
 (* Lines whose fragments predate turn-named history are passed without a
    model call; the position still moves so they are not asked for again. *)
-let test_official_commit_recovers_without_resynthesis ?(through_queue = false) ~mixed ~cancel_after_save () =
+let test_official_commit_recovers_without_resynthesis ?(through_queue = false) ?(with_unread = false) ~mixed ~cancel_after_save () =
   Masc_test_deps.with_process_env Env_config.KeeperMemoryOs.librarian_env_key (Some "true") @@ fun () ->
   with_workspace @@ fun config ->
   let module Current = Masc.Keeper_memory_os_current in
@@ -2787,10 +2787,29 @@ let test_official_commit_recovers_without_resynthesis ?(through_queue = false) ~
     append_boundary config ~trace_id ~turn:4 ~recorded_at:4.0 messages;
     save_checkpoint config ~trace_id messages 4);
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path in
-  let commits = ref 0 in
+  let commits = ref 0 and expected_holes = ref [] in
   let commit ~expected_revision:_ ~range_id ~official_range_id input =
     incr commits;
     check bool "official commit has a durable identity" true (Option.is_some official_range_id);
+    let range_id, official_range_id = if not with_unread then range_id,official_range_id else
+      let module H = Masc.Keeper_librarian_unread in
+      let reasons = [Masc.Keeper_librarian_input_refusal.Request_body_refused] in
+      let get = function Ok value -> value | Error detail -> fail detail in
+      let range_id = Option.map (fun (range : Current.durable_range_id) ->
+        let hole = H.for_atom ~trace_id:range.trace_id
+          ~history_start_boundary_line:range.history_start_boundary_line
+          ~atom:1 ~message_in_atom:0 ~messages:[message "t1";message "t4"] ~reasons |> get in
+        {range with unread_messages=[hole]}) range_id in
+      let official_range_id = Option.map (fun (range : Current.official_range_id) ->
+        let line,turn_ref = List.hd range.turns in
+        let messages = List.take 2 input.Masc.Keeper_librarian.messages in
+        let hole = H.for_official_turn ~turn_ref ~boundary_line:line ~message_in_turn:1
+          ~messages ~reasons |> get in
+        {range with unread_messages=[hole]}) official_range_id in
+      expected_holes := H.merge
+        (Option.fold ~none:[] ~some:(fun (r : Current.durable_range_id) -> r.unread_messages) range_id)
+        (Option.fold ~none:[] ~some:(fun (r : Current.official_range_id) -> r.unread_messages) official_range_id) |> get;
+      range_id,official_range_id in
     (match Current.apply_disposition ~revisions:[] ?durable_range_id:range_id ?official_range_id
       ~absorbed:[] ~keepers_dir ~keeper_id:keeper_name ~now:4.
       ~source:{ kind = Current.Librarian; trace_id = Ids.Turn_ref.trace_id input.Masc.Keeper_librarian.turn_ref }
@@ -2836,13 +2855,29 @@ let test_official_commit_recovers_without_resynthesis ?(through_queue = false) ~
   (match consume config no_commit with
    | Consumer.Nothing_to_read -> ()
    | _ -> fail "receipt recovery left input to read again");
+  if with_unread then (
+    let read () = match Current.committed_unread_messages ~keepers_dir ~keeper_id:keeper_name with
+      | Ok holes -> holes | Error detail -> fail detail in
+    check bool "recovery retains every accounted unread source" true (read () = !expected_holes);
+    (* A later interval can replace both WAL identities only after the old
+       holes are durable, even though the scalar positions contain no list. *)
+    let durable_range_id = {Current.receipt_scope=Workspace.keepers_runtime_dir config;
+      trace_id="later-after-recovery";history_start_boundary_line=5;start_atom=0;end_atom=1;
+      last_atom_digest=String.make 64 'a';end_boundary_line=5;boundary_lines_seen=5;unread_messages=[]} in
+    let official_range_id = {Current.receipt_scope=Workspace.keepers_runtime_dir config;
+      after_boundary_line=4;turns=[5,Ids.Turn_ref.make ~trace_id:"later-after-recovery" ~absolute_turn:1];unread_messages=[]} in
+    (match Current.apply_disposition ~revisions:[] ~durable_range_id ~official_range_id
+      ~absorbed:[] ~keepers_dir ~keeper_id:keeper_name ~now:5.
+      ~source:{kind=Current.Librarian;trace_id="later-after-recovery"} ~new_claims:[] () with
+     | Ok _ -> () | Error detail -> fail detail);
+    check bool "later same-scope commit does not erase prior holes" true (read () = !expected_holes));
   (match Current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name with
    | Ok (Some snapshot) -> check int "recovery did not rewrite Memory" 1 snapshot.revision
    | Ok None -> fail "committed Memory disappeared"
    | Error detail -> fail detail)
 ;;
 
-let test_official_receipt_rejects_replaced_history () =
+let test_official_receipt_rejects_replaced_history ~bad_message_hash () =
   with_workspace @@ fun config ->
   let module Current = Masc.Keeper_memory_os_current in
   let trace_id = "new-official-history" in
@@ -2857,6 +2892,15 @@ let test_official_receipt_rejects_replaced_history () =
     ; turns = [ 1, Ids.Turn_ref.make ~trace_id:"old-official-history" ~absolute_turn:1 ]
     }
   in
+  let official_range_id = if not bad_message_hash then official_range_id else
+    let turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1 in
+    let messages = [message "new question";Agent_core.Types.make_message
+      ~role:Agent_core.Types.Assistant [Agent_core.Types.Text "another original answer"]] in
+    let hole = match Masc.Keeper_librarian_unread.for_official_turn ~turn_ref
+      ~boundary_line:1 ~message_in_turn:1 ~messages
+      ~reasons:[Masc.Keeper_librarian_input_refusal.Request_body_refused] with
+      | Ok hole -> hole | Error detail -> fail detail in
+    {official_range_id with turns=[1,turn_ref];unread_messages=[hole]} in
   (match Current.apply_disposition ~revisions:[] ~official_range_id ~absorbed:[] ~keepers_dir
     ~keeper_id:keeper_name ~now:1. ~source:{ kind = Current.Librarian; trace_id }
     ~new_claims:[] () with
@@ -3533,8 +3577,14 @@ let () =
             (test_official_commit_recovers_without_resynthesis ~through_queue:true ~mixed:true ~cancel_after_save:true)
         ; test_case "Memory lane drain recovers partial cursor writes without synthesis" `Quick
             (test_official_commit_recovers_without_resynthesis ~through_queue:true ~mixed:true ~cancel_after_save:false)
+        ; test_case "unread mixed Memory survives official-position write failure" `Quick
+            (test_official_commit_recovers_without_resynthesis ~with_unread:true ~mixed:true ~cancel_after_save:false)
+        ; test_case "unread mixed Memory survives cancellation before positions" `Quick
+            (test_official_commit_recovers_without_resynthesis ~with_unread:true ~mixed:true ~cancel_after_save:true)
         ; test_case "official receipt cannot skip replaced history" `Quick
-            test_official_receipt_rejects_replaced_history
+            (test_official_receipt_rejects_replaced_history ~bad_message_hash:false)
+        ; test_case "official coverage cannot advance with another original message hash" `Quick
+            (test_official_receipt_rejects_replaced_history ~bad_message_hash:true)
         ; test_case "untagged fragments are passed without a commit" `Quick
             test_untagged_fragments_are_passed_without_a_commit
         ; test_case "a refused fragment line stops the pass" `Quick

@@ -68,15 +68,16 @@ let read ~memory_keepers_dir ~runtime_keepers_dir ~keeper_name =
   match state.pending with
   | None -> Ok (Offset state.after)
   | Some p ->
+    let* _ = M.committed_unread_messages ~keepers_dir:memory_keepers_dir ~keeper_id:keeper_name in
     let atom_scope = match p.atom with
       | Some (range : M.durable_range_id) -> range.receipt_scope
       | None -> runtime_keepers_dir in
     let official_scope = match p.official with
       | Some (range : M.official_range_id) -> range.receipt_scope
       | None -> runtime_keepers_dir in
-    let* atom = M.committed_durable_range ~keepers_dir:memory_keepers_dir
+    let* atom = M.committed_durable_coverage ~keepers_dir:memory_keepers_dir
       ~keeper_id:keeper_name ~receipt_scope:atom_scope in
-    let* official = M.committed_official_range ~keepers_dir:memory_keepers_dir
+    let* official = M.committed_official_coverage ~keepers_dir:memory_keepers_dir
       ~keeper_id:keeper_name ~receipt_scope:official_scope in
     let matches encode expected actual = match expected,actual with
       | None,_ -> true | Some a,Some b -> encode a = encode b | Some _,None -> false in
@@ -93,11 +94,11 @@ let prepare ~memory_keepers_dir ~runtime_keepers_dir ~keeper_name (Offset after)
   else
     let* prior_atom = match atom with
       | None -> Ok None
-      | Some (range : M.durable_range_id) -> M.committed_durable_range
+      | Some (range : M.durable_range_id) -> M.committed_durable_coverage
           ~keepers_dir:memory_keepers_dir ~keeper_id:keeper_name ~receipt_scope:range.receipt_scope in
     let* prior_official = match official with
       | None -> Ok None
-      | Some (range : M.official_range_id) -> M.committed_official_range
+      | Some (range : M.official_range_id) -> M.committed_official_coverage
           ~keepers_dir:memory_keepers_dir ~keeper_id:keeper_name ~receipt_scope:range.receipt_scope in
     let same encode requested committed = match requested,committed with
       | Some left,Some right -> encode left = encode right

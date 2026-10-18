@@ -46,3 +46,7 @@ val validate_atom_history
   : trace_id:string -> history_start_boundary_line:int -> end_atom:int
   -> messages:Agent_core.Types.message list -> t list -> (unit, string) result
 (** Also verify every exact message hash against the retained checkpoint. *)
+
+val merge : t list -> t list -> (t list, string) result
+(** Cumulative canonical union. Equal coordinates with another original hash
+    refuse the merge; identical originals union their named causes. *)

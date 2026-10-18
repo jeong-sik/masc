@@ -85,6 +85,7 @@ try checkRestore(restore([event(0,absRpn),event(0.1,rel)],0.5,footprint([event(0
 requireFailure{_ = try restore([event(0,sx)],0.5)}
 requireFailure{_ = try restore([],0.5,footprint([event(0,sx)]))}
 requireFailure{_ = try restore([event(0,on),event(0.1,[0x23953c7f])],0.5)}
+requireFailure{_ = try restore([event(0,[0x43b55400,0x78000000]),event(0.1,on),event(0.2,off),event(0.3,zeroOn)],0.5)}
 let midi1=[event(0,[0x23953c7f]),event(0.1,[0x23953c00]),event(0.2,[0x23953d7f])]
 try checkRestore(restore(midi1,0.3)==[[0x23953d7f]],"MIDI1 UMP zero velocity releases its key")
 // Real transport methods with a synthetic clock/send edge: staging releases
@@ -103,6 +104,11 @@ try phase.runCoordinated(anchorNanoseconds:3_000_000_000)
 reviewClock=2_999_999_999;phase.tick();precondition(reviewSent.count==pausedCount)
 reviewClock=3_000_000_000;phase.tick();precondition(Array(reviewSent.suffix(2)).map{$0.1}==[bend,zeroOn])
 phase.finish(reason:"test",error:nil,publish:false);precondition(phase.held.isEmpty)
+let expired=try UmpTransport(timeline:timeline([packet(24000000,"A",on)]));reviewClock=0;reviewSent=[]
+try expired.stageCoordinated(at:0.5);try expired.runCoordinated(anchorNanoseconds:1_000_000_000)
+var expiredEnds=0;expired.onCoordinatedEnd={expiredEnds+=1}
+reviewClock=3_000_000_000;expired.tick();expired.tick()
+precondition(reviewSent.isEmpty && expired.state == .ended && expiredEnds==1,"expired reconstructed interval must not acquire even an endpoint key")
 print("UMP_DECISIONS_PASS: UInt64 source clocks, no early send, complete ordered late stream, original release/expression, MIDI2 zero velocity ownership, uncertain release retry, pedals/SysEx cleanup, group/global ownership, invalid packet/binding refusal, endpoint loss; live voice/pedal/PN/bank/program/relative baseline reconstruction; silent staging, late epoch, pause/resume cleanup")
 `
   await writeFile(join(directory,'main.swift'),main)

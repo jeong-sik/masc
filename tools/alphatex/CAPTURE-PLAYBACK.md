@@ -71,7 +71,7 @@ Previously changed fields need an explicit source baseline, including before a
 surviving Note On that selected a patch or pitch. Unknown initial values are not
 invented. Unsupported reconstruction stops both owners with a diagnostic; it
 does not change the retained source. Opaque system/SysEx effects, channel-mode
-changes, Hold 2, MIDI 1.0 compound parameter controls and mixed message dialects
+changes, Hold 2, one-shot Portamento Control, MIDI 1.0 compound parameter controls and mixed message dialects
 on one output channel currently require complete-source playback. Full-source
 audition still emits every original message. Per-note management and CC121 are
 handled according to the [UMP v1.1.2 specification](https://amei-music.github.io/midi2.0-docs/amei-pdf/M2-104-UM_v1-1-2_UMP_and_MIDI_2-0_Protocol_Specification.pdf).

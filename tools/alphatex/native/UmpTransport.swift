@@ -237,6 +237,14 @@ final class UmpTransport: CoordinatedMidiTransport {
             guard host >= anchor else { schedule(); return }
             let seconds = position(at: host)
             if pendingRestore {
+                if seconds >= timeline.duration {
+                    // The reconstructed interval has already ended. This is
+                    // distinct from an original full-source audition, whose
+                    // delayed callback still delivers the original stream.
+                    pendingRestore = false; index = events.count
+                    timer?.cancel(); timer = nil; try silence()
+                    state = .ended; onCoordinatedEnd?(); return
+                }
                 // Reconstruct the current phase if the callback was delayed:
                 // notes that ended between staging and this epoch stay silent.
                 let restored = try umpRestoration(events, before: seconds, replacing: footprint)

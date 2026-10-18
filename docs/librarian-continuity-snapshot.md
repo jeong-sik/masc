@@ -54,8 +54,8 @@ masc-librarian-continuity compare \
 
 ## 한 atom 안의 메시지 처리
 
-continuity Queue에서 아직 Memory에 반영하지 않은 atom이 정상 순회에서도 읽히지 않으면,
-그 원문 메시지를 순서대로 하나씩 판단한다. 다음 판단은 앞 판단으로 계산한 Memory와 하던
+continuity Queue가 기존 용량 축소 경로로 Memory 미처리 atom 하나까지 내려온 뒤에도 정상
+순회에서 읽지 못하면, 그 원문 메시지를 순서대로 하나씩 판단한다. 다음 판단은 앞 판단으로 계산한 Memory와 하던
 일을 받지만, 중간 Memory·하던 일·읽은 위치는 저장하지 않는다. 원 atom이 끝나면 원문
 전체의 순서·좌표·해시와 단계별 판단을 보존하는 프로그램을 한 번 게시한다. 도구 호출과
 결과를 연결한 원래 관측, 외부 관측은 첫 성공한 판단에 한 번 싣는다.
@@ -76,7 +76,8 @@ continuity 입력에서 제외하고 unread 기록으로 전달하며, durable �
 누적 원장의 원인 보존을 확인한 뒤 위치를 이어받는다.
 
 이 경로는 Agent Core atom을 처리하는 continuity Queue에 연결돼 있다. 공식 클라이언트의
-durable 턴 바닥에 같은 처리를 연결하는 작업과 실제 타입·동작 검증은 #37850에 남아 있다.
+durable 턴 바닥에 같은 처리를 연결하는 작업, 측정값 없는 native CLI 용량 거절의 바닥
+진입 정책, program-aware absorption recall, 실제 타입·동작 검증은 #37850에 남아 있다.
 
 
 ## 선택 가능한 작은 입력

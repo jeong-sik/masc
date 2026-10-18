@@ -38,10 +38,11 @@ export async function midiDestinations({ executable = midiTransportPath, signal 
 // One owned child is one transport. Completion means its pipes and process have
 // closed, rather than merely receiving a stopped acknowledgement.
 export function openPlayback({ path, output, midiOutput, midiBindings, loop = false, format = 'wave', onEvent = () => {}, signal,
-  executable = ['wave-arrangement', 'mixed-arrangement', 'capture-session', 'capture-arrangement', 'capture-audio-arrangement'].includes(format) ? arrangementTransportPath : midiOutput === undefined ? transportPath : midiTransportPath, spawnProcess = spawn } = {}) {
+  executable = ['wave-arrangement', 'mixed-arrangement', 'capture-session', 'capture-arrangement', 'hybrid-arrangement', 'capture-audio-arrangement'].includes(format) ? arrangementTransportPath : midiOutput === undefined ? transportPath : midiTransportPath, spawnProcess = spawn } = {}) {
   signal?.throwIfAborted()
-  const captured = ['capture-session', 'capture-arrangement'].includes(format), mixed = format === 'mixed-arrangement' || captured
-  if (!['wave', 'wave-arrangement', 'midi-arrangement', 'mixed-arrangement', 'capture-session', 'capture-arrangement', 'capture-audio-arrangement'].includes(format) || ['wave-arrangement', 'capture-audio-arrangement'].includes(format) && (midiOutput !== undefined || loop)) throw new Error('Invalid arrangement playback route or loop')
+  const hybrid = format === 'hybrid-arrangement'
+  const captured = ['capture-session', 'capture-arrangement'].includes(format), mixed = format === 'mixed-arrangement' || captured || hybrid
+  if (!['wave', 'wave-arrangement', 'midi-arrangement', 'mixed-arrangement', 'capture-session', 'capture-arrangement', 'hybrid-arrangement', 'capture-audio-arrangement'].includes(format) || ['wave-arrangement', 'capture-audio-arrangement'].includes(format) && (midiOutput !== undefined || loop)) throw new Error('Invalid arrangement playback route or loop')
   if ((format === 'midi-arrangement' || mixed) && (midiOutput === undefined || midiBindings === undefined || loop)) throw new Error('MIDI arrangement requires explicit bindings without whole-arrangement looping')
   if (mixed && !captured && output === undefined) throw new Error('Mixed arrangement requires an explicit audio output')
   if (typeof path !== 'string' || !path) throw new Error('A playback source path is required')
@@ -53,9 +54,10 @@ export function openPlayback({ path, output, midiOutput, midiBindings, loop = fa
         || midiBindings.some(binding => !Number.isSafeInteger(binding?.port) || binding.port < 0 || binding.port > ((format === 'midi-arrangement' || mixed) ? Number.MAX_SAFE_INTEGER : 127)
           || typeof binding.destination !== 'string' || !binding.destination)
         || new Set(midiBindings.map(binding => binding.port)).size !== midiBindings.length
-        || new Set(midiBindings.map(binding => binding.destination)).size !== midiBindings.length
+        || (hybrid ? midiBindings.some(binding => ![1, 2].includes(binding.protocol)) : false)
+        || new Set(midiBindings.map(binding => hybrid ? JSON.stringify([binding.destination, binding.protocol]) : binding.destination)).size !== midiBindings.length
         || midiBindings[0].destination !== midiOutput) throw new Error('Invalid MIDI source bindings')
-    midiBindings = midiBindings.map(({ port, destination }) => ({ port, destination }))
+    midiBindings = midiBindings.map(({ port, destination, protocol }) => ({ port, destination, ...(hybrid ? { protocol } : {}) }))
   }
   if (typeof loop !== 'boolean') throw new Error('Invalid loop selection')
   const selectedID = mixed ? output : midiOutput ?? output
@@ -98,7 +100,7 @@ export function openPlayback({ path, output, midiOutput, midiBindings, loop = fa
         if (!Array.isArray(event.bindings) || event.bindings.length !== midiBindings.length
             || event.bindings.some((binding, index) => binding.port !== midiBindings[index].port
               || binding.device?.id !== midiBindings[index].destination || binding.device.kind !== 'midi'
-              || binding.device.protocol !== (captured ? 2 : 1) || typeof binding.device.name !== 'string')) {
+              || binding.device.protocol !== (hybrid ? midiBindings[index].protocol : captured ? 2 : 1) || typeof binding.device.name !== 'string')) {
           throw new Error('Playback source ports differ from the selected bindings')
         }
       }

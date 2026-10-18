@@ -205,3 +205,19 @@ test('paired captured-region playback validates the common clock and native MIDI
   wrong.event('playing', { ...values, bindings: [{ port: 0, device: { kind: 'midi', protocol: 1, id: '42', name: 'Lossy' } }] }); wrong.close(1)
   await assert.rejects(wrong.playback.completion, /bindings/)
 })
+
+
+test('hybrid playback binds each stream protocol independently, including one destination with distinct streams',async()=>{
+  const options={format:'hybrid-arrangement',midiOutput:'42',midiBindings:[{port:0,destination:'42',protocol:1},{port:1,destination:'42',protocol:2}]}
+  const bindings=[{port:0,device:{id:'42',kind:'midi',name:'SMF',protocol:1}},{port:1,device:{id:'42',kind:'midi',name:'UMP',protocol:2}}]
+  const f=fixture(options);assert.equal(f.executable,arrangementTransportPath)
+  f.event('playing',{format:options.format,clock:{kind:'mach-host-time'},bindings});await f.playback.ready
+  f.playback.pause();f.playback.seek(.5);f.playback.resume()
+  f.event('stopped',{format:options.format,clock:{kind:'mach-host-time'},bindings});f.close();await f.playback.completion
+  assert.deepEqual(f.commands,[{kind:'pause'},{kind:'seek',seconds:.5},{kind:'resume'}])
+  const g=fixture(options)
+  g.event('playing',{format:options.format,clock:{kind:'mach-host-time'},bindings:bindings.map((binding,index)=>index?{...binding,device:{...binding.device,protocol:1}}:binding)})
+  g.close(1);await assert.rejects(g.playback.completion,/selected bindings/)
+  assert.throws(()=>fixture({...options,midiBindings:options.midiBindings.map(binding=>({...binding,protocol:undefined}))}),/Invalid MIDI source bindings/)
+  assert.throws(()=>fixture({...options,midiBindings:options.midiBindings.map(binding=>({...binding,protocol:1}))}),/Invalid MIDI source bindings/)
+})

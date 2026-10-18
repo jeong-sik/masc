@@ -15,7 +15,7 @@ parentPort.on('message', async job => {
   try {
     let result
     switch (job.kind) {
-      case 'prepare-capture': result = await prepareArrangementCaptureRegions(job.project, { sourceRoot: job.sourceRoot, directory: job.directory, signal, midiOutput: job.midiOutput, sourceBindings: job.sourceBindings }); break
+      case 'prepare-capture': result = await prepareArrangementCaptureRegions(job.project, { sourceRoot: job.sourceRoot, directory: job.directory, signal, midiOutput: job.midiOutput, sourceBindings: job.sourceBindings, portBindings: job.portBindings }); break
       case 'prepare-take': result = await prepareArrangementCapture(job.project, job.asset, { sourceRoot: job.sourceRoot, directory: job.directory, signal }); break
       case 'import-take': result = await importArrangementCapture(job.project, job.path, { projectPath: job.projectPath, signal }); break
       case 'prepare-mixed': result = await prepareArrangementMixed(job.project, { sourceRoot: job.sourceRoot, directory: job.directory, signal, midiOutput: job.midiOutput, portBindings: job.portBindings }); break

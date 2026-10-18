@@ -27,6 +27,36 @@ val handle_keeper_lifecycle_completion :
   (unit, string) result
 
 module For_testing : sig
+  type official_client_purge_warning =
+    | Runtime_toml_unreadable of
+        { path : string
+        ; detail : string
+        }
+    | Keeper_not_assigned
+    | Empty_lane_candidates of { lane_id : string }
+    | Candidate_binding_missing of { runtime_id : string }
+    | Candidate_provider_missing of
+        { runtime_id : string
+        ; provider_id : string
+        }
+    | Antigravity_credentials_not_file of
+        { runtime_id : string
+        ; provider_id : string
+        }
+    | Muse_account_home_missing of
+        { runtime_id : string
+        ; provider_id : string
+        }
+
+  val official_client_purge_warning_to_string :
+    official_client_purge_warning -> string
+
+  val resolve_official_client_purge_artifacts :
+    Workspace.config ->
+    keeper_name:string ->
+    Keeper_shutdown_types.dashboard_purge_artifact list
+    * official_client_purge_warning list
+
   val purge_agent_artifacts :
     Workspace.config -> string list -> (unit, string) result
 

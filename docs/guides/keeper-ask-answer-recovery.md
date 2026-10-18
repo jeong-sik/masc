@@ -101,19 +101,26 @@ meaning and are never overwritten by execution ownership.
 The question log, creation response, operator HTTP projection and durable
 answered input preserve this typed `Ids.Turn_ref`. The source is JSON `null`
 when unobserved. Legacy Ask records that carried only an unattributed integer
-`turn_id` load with `source_turn_ref = None`, while malformed `turn_id` or
-`source_turn_ref` values are rejected by the canonical decoder. External MCP
-callers have no new argument requirement and cannot establish host provenance by
-adding a JSON field. This field provides attribution; it does not grant a Task
-claim, Gate approval or permission to replay an effect.
+`turn_id` load with `source_turn_ref = None` (and therefore appear in operator
+views as having unobserved provenance, `Original asking turn: not recorded`),
+while malformed `turn_id` or `source_turn_ref` values are rejected by the
+canonical decoder. External MCP callers have no new argument requirement and
+cannot establish host provenance by adding a JSON field. This field provides
+attribution; it does not grant a Task claim, Gate approval or permission to
+replay an effect.
 
 Resumed Composition leaves use the original journal's source observation.
 Missing trace, session or absolute Keeper turn stays absent instead of borrowing
-it from the current run. This also prevents a nested composition from freezing a
+it from the current run (and logs the resuming run's `resuming_trace_id` for
+operator correlation). This also prevents a nested composition from freezing a
 mixture of current and original coordinates as a new producer observation. The
-current operational environment still comes from the resumed run. A source-bound
-Tool may require original identity; missing evidence is not synthesized to make
-that effect executable. Asking itself remains available without provenance.
+current operational environment still comes from the resumed run. Note that the
+journal `source_observation` event is one-way across versions (older binaries
+reject `source_observation` as an unknown journal event), and pre-upgrade
+tool-call ledger rows recorded before `physical_execution_id` are excluded from
+`observed_count`. A source-bound Tool may require original identity; missing
+evidence is not synthesized to make that effect executable. Asking itself
+remains available without provenance.
 
 | Path | Before | After in source |
 | --- | --- | --- |

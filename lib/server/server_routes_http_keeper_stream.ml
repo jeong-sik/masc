@@ -4296,7 +4296,15 @@ let handle_keeper_asks_list state request reqd =
   in
   let unavailable error =
     respond_json_value_with_cors ~status:`Service_unavailable request reqd
-      (keeper_chat_stream_error_json (Keeper_ask_store.read_error_to_string error))
+      (`Assoc
+        [
+          ( "error",
+            `Assoc
+              [
+                ("message", `String (Keeper_ask_store.read_error_to_string error));
+                ("path", `String (Keeper_ask_store.read_error_path error));
+              ] );
+        ])
   in
   let project keeper_name rows =
     let open_count =
@@ -4365,10 +4373,13 @@ let handle_keeper_asks_list state request reqd =
            match discovered with
            | Error error -> unavailable error
            | Ok owners ->
+               let owners =
+                 List.sort (fun (ka, _) (kb, _) -> String.compare ka kb) owners
+               in
                let open_total, rows =
                  List.fold_left (fun (total, all) (keeper_name, rows) ->
                    let count, projected = project keeper_name rows in
-                   count + total, projected @ all)
+                   count + total, all @ projected)
                    (0, []) owners
                in
                respond_json_value_with_cors ~status:`OK request reqd

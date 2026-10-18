@@ -10,7 +10,7 @@ let ( let* ) = Result.bind
 (* Bumped when the schema below changes. A file that does not carry this
    number is deleted and rebuilt: the index is derived, so there is nothing
    to migrate. *)
-let schema_version = 8
+let schema_version = 9
 
 let database_path ~ledger_dir =
   Filename.concat ledger_dir Common.tool_call_read_index_basename
@@ -65,6 +65,8 @@ CREATE TABLE IF NOT EXISTS answer_sources (
   PRIMARY KEY (source_id, ledger_path, ledger_offset),
   FOREIGN KEY (ledger_path, ledger_offset) REFERENCES rows(ledger_path, ledger_offset) ON DELETE CASCADE
 ) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS answer_sources_by_row
+  ON answer_sources(ledger_path, ledger_offset);
 CREATE TABLE IF NOT EXISTS cursors (
   ledger_path TEXT PRIMARY KEY NOT NULL,
   boundary INTEGER NOT NULL CHECK (boundary >= 0),

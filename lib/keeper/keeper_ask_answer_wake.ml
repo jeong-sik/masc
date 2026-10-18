@@ -141,7 +141,11 @@ let observe_linked_task ~base_path (ask : Keeper_ask.ask) =
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> Error (Printexc.to_string exn) in
       match reading with
-      | Error detail -> Task_unavailable { task_id; detail }
+      | Error detail ->
+          Log.Keeper.warn ~keeper_name:ask.keeper_name
+            "ask followup linked task status unavailable ask_id=%s task_id=%s: %s"
+            ask.ask_id task_id detail;
+          Task_unavailable { task_id; detail }
       | Ok None -> Task_missing task_id
       | Ok (Some reading) -> Task_observed
           { task_id; location = reading.location; status = reading.status;

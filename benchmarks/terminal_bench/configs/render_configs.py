@@ -234,6 +234,7 @@ enabled = {fusion}
 OFFICIAL_CLIENT_RUNTIME_TOML = """\
 [runtime]
 default = "{runtime_id}"
+media_failover = [{media_candidates}]
 
 [providers.{provider}]
 display-name = "Bench official client"
@@ -243,13 +244,12 @@ is-non-interactive = true
 
 [models."{binding_id}"]
 api-name = "{model_alias}"
-max-context = 1000000
+max-context = {max_context}
 tools-support = true
 streaming = true
 reasoning-effort = "{effort}"
 turn-timeout-s = {turn_timeout_s}
-
-[{provider}."{binding_id}"]
+{media_capabilities_block}[{provider}."{binding_id}"]
 max-concurrent = {max_concurrent}
 
 [runtime.exact_output_lanes.hitl_auto_judge]
@@ -424,11 +424,52 @@ PROVIDERS = {
                         command="claude",
                         api_key_env="CLAUDE_CODE_OAUTH_TOKEN",
                         official_client=True),
+    # Codex ChatGPT subscription lane: `--model codex_subscription/gpt-6-luna`
+    # gives runtime_id codex_subscription.gpt-6-luna (masc protocol
+    # "codex-app-server", command "codex", 272k input context window).
+    # bootstrap.sh installs the standalone Codex CLI and seeds
+    # /root/.codex/auth.json from CODEX_AUTH_JSON (or ~/.codex/auth.json on
+    # the host) before starting the server.
+    "codex_subscription": dict(protocol="codex-app-server",
+                               command="codex",
+                               api_key_env="CODEX_AUTH_JSON",
+                               max_context=272000,
+                               official_client=True),
 }
 
 
 def is_official_client(provider: str) -> bool:
     return bool(PROVIDERS[provider].get("official_client"))
+
+
+def resolve_provider_credential(provider: str, get_env) -> tuple[str, str]:
+    """Resolve the container credential environment pair for `provider`.
+
+    The Codex subscription lane accepts either an inline `CODEX_AUTH_JSON`
+    payload or a file at `CODEX_AUTH_JSON_PATH` (defaulting to
+    `~/.codex/auth.json`, matching Harbor's own Codex agent) and serializes it
+    as a single-line JSON string for `driver/deps.sh`.
+    """
+    key_env = PROVIDERS[provider]["api_key_env"]
+    key = get_env(key_env)
+    if provider == "codex_subscription":
+        if not key:
+            auth_path = get_env("CODEX_AUTH_JSON_PATH")
+            path = Path(auth_path) if auth_path else (Path.home() / ".codex" / "auth.json")
+            if not path.is_file():
+                raise RuntimeError(
+                    f"{key_env} not set and Codex auth file not found at {path}")
+            key = path.read_text()
+        try:
+            parsed = json.loads(key)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"invalid {key_env} JSON: {exc.msg}") from exc
+        if not isinstance(parsed, dict):
+            raise ValueError(f"{key_env} must be a JSON object")
+        return key_env, json.dumps(parsed, separators=(",", ":"))
+    if not key:
+        raise RuntimeError(f"{key_env} not set in Harbor agent environment")
+    return key_env, key
 
 
 def candidate_runtime_ids(arm: str, runtime_id: str,
@@ -611,19 +652,25 @@ def model_media_capabilities(provider: str, alias: str) -> dict[str, bool]:
     seed = tomllib.loads((REPO_ROOT / "config" / "runtime.toml").read_text())
     fields = ("supports-image-input", "supports-multimodal-inputs",
               "supports-audio-input", "supports-video-input")
-    matches = [
-        {key: model.get("capabilities", {})[key]
-         for key in fields if key in model.get("capabilities", {})}
-        for binding, model in seed.get("models", {}).items()
-        if model.get("api-name", binding) == alias and binding in seed.get(provider, {})
-    ]
-    if not matches:
-        return {}
-    if any(m != matches[0] for m in matches[1:]):
-        raise ValueError(f"conflicting media declarations for {provider}.{alias}")
-    if any(not isinstance(value, bool) for value in matches[0].values()):
-        raise ValueError(f"invalid media declaration for {provider}.{alias}")
-    return matches[0]
+    bound = set(seed.get(provider, {}))
+    model_set = (seed.get("providers", {}).get(provider) or {}).get("model-set")
+    if isinstance(model_set, str):
+        bound.update((seed.get("model_sets", {}).get(model_set) or {}).get("models") or ())
+    merged: dict[str, bool] = {}
+    for binding, model in seed.get("models", {}).items():
+        if model.get("api-name", binding) != alias or binding not in bound:
+            continue
+        caps = model.get("capabilities", {})
+        for key in fields:
+            if key not in caps:
+                continue
+            value = caps[key]
+            if not isinstance(value, bool):
+                raise ValueError(f"invalid media declaration for {provider}.{alias}")
+            if key in merged and merged[key] != value:
+                raise ValueError(f"conflicting media declarations for {provider}.{alias}")
+            merged[key] = value
+    return merged
 
 
 def skills_block_with_task_source(*, include_seed_sources: bool) -> str:
@@ -703,7 +750,7 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
     runtime_id = f"{runtime_provider}.{binding_id}"
     if is_official_client(provider) and effort not in CLAUDE_CODE_EFFORTS:
         raise ValueError(
-            f"effort {effort!r} is not admitted by Claude Code; "
+            f"effort {effort!r} is not admitted by {provider}; "
             f"expected one of {CLAUDE_CODE_EFFORTS}")
     if is_official_client(provider) and not spec["parallel"]:
         raise ValueError(
@@ -748,9 +795,21 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
     (root / KEEPER_INSTRUCTIONS_FILE).write_text(KEEPER_INSTRUCTIONS)
 
     if is_official_client(provider):
+        media_lines = "".join(
+            f"{key} = {str(value).lower()}\n" for key, value in media[model_alias].items())
+        media_capabilities_block = (
+            f'\n[models."{binding_id}".capabilities]\n{media_lines}\n'
+            if media_lines else "\n"
+        )
         runtime_toml = OFFICIAL_CLIENT_RUNTIME_TOML.format(
-            runtime_id=runtime_id, provider=provider, model_alias=model_alias,
+            runtime_id=runtime_id, provider=runtime_provider, model_alias=model_alias,
             binding_id=binding_id,
+            max_context=pcfg.get("max_context", 1000000),
+            media_candidates=(
+                _toml_string(runtime_id)
+                if media[model_alias].get("supports-image-input") is True else ""
+            ),
+            media_capabilities_block=media_capabilities_block,
             protocol=pcfg["protocol"], command=pcfg["command"], effort=effort,
             turn_timeout_s=OFFICIAL_CLIENT_TURN_TIMEOUT_S,
             fusion=str(spec["fusion"]).lower(),

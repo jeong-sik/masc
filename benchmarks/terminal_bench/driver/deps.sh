@@ -175,4 +175,35 @@ bench_install_deps() {
       exit 1
     fi
   fi
+
+  # --- Codex subscription lane (runtime_id codex_subscription.<model>) ---
+  # The keeper's model runtime is the unmodified Codex CLI (masc protocol
+  # "codex-app-server"). Install the standalone binary via the official release
+  # installer (no node required), seed /root/.codex/auth.json from
+  # CODEX_AUTH_JSON, and verify `codex login status` before starting the server.
+  if [[ "${BENCH_RUNTIME_ID:-}" == codex_subscription.* ]]; then
+    : "${CODEX_AUTH_JSON:?codex_subscription lane requires CODEX_AUTH_JSON (or ~/.codex/auth.json on host)}"
+    if ! command -v codex >/dev/null 2>&1; then
+      CODEX_INSTALL_DIR=/usr/local/bin sh -c "$(curl -fsSL https://chatgpt.com/codex/install.sh)"
+    fi
+    codex --version
+    export CODEX_HOME=/root/.codex
+    mkdir -p "${CODEX_HOME}"
+    chmod 0700 "${CODEX_HOME}"
+    printf 'cli_auth_credentials_store = "file"\n' > "${CODEX_HOME}/config.toml"
+    if [[ "${CODEX_AUTH_JSON}" == "preflight-placeholder-no-credential" ]]; then
+      printf '{"OPENAI_API_KEY":"preflight-placeholder-no-credential"}\n' > "${CODEX_HOME}/auth.json"
+    else
+      printf '%s\n' "${CODEX_AUTH_JSON}" > "${CODEX_HOME}/auth.json"
+    fi
+    chmod 0600 "${CODEX_HOME}/auth.json"
+    if [[ "${CODEX_AUTH_JSON}" == "preflight-placeholder-no-credential" ]]; then
+      codex login status >/dev/null
+    elif ! codex login status 2>&1 | grep -Fq "Logged in using ChatGPT"; then
+      echo "codex login status does not report a ChatGPT subscription login:" >&2
+      codex login status >&2 || true
+      exit 1
+    fi
+    unset CODEX_AUTH_JSON
+  fi
 }

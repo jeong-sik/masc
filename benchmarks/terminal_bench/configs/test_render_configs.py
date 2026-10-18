@@ -4,7 +4,7 @@ import tempfile
 import tomllib
 import unittest
 
-from render_configs import render_arm
+from render_configs import render_arm, resolve_provider_credential
 
 
 class RenderReasoningPolicy(unittest.TestCase):
@@ -63,6 +63,32 @@ class RenderReasoningPolicy(unittest.TestCase):
         config = self.render("kimi_coding.unknown-model")
         self.assertEqual(config["runtime"]["media_failover"], [])
         self.assertNotIn("supports-image-input", config["models"]["unknown-model"]["capabilities"])
+
+    def test_codex_subscription_renders_official_client_with_model_set_vision(self):
+        for alias in ("gpt-6-luna", "gpt-5.6-sol"):
+            with self.subTest(model=alias):
+                runtime_id = "codex_subscription." + alias
+                config = self.render(runtime_id)
+                self.assertEqual(config["runtime"]["default"], runtime_id)
+                self.assertEqual(config["runtime"]["media_failover"], [runtime_id])
+                provider = config["providers"]["codex_subscription"]
+                self.assertEqual(provider["protocol"], "codex-app-server")
+                self.assertEqual(provider["command"], "codex")
+                model = config["models"][alias]
+                self.assertEqual(model["max-context"], 272000)
+                self.assertEqual(model["reasoning-effort"], "high")
+                self.assertTrue(model["capabilities"]["supports-image-input"])
+
+    def test_resolve_provider_credential_compacts_codex_auth_file(self):
+        with tempfile.TemporaryDirectory() as root:
+            auth_file = Path(root) / "auth.json"
+            auth_file.write_text('{\n  "auth_mode": "chatgpt",\n  "tokens": {"access_token": "tok"}\n}\n')
+            env_name, value = resolve_provider_credential(
+                "codex_subscription",
+                lambda key: str(auth_file) if key == "CODEX_AUTH_JSON_PATH" else None,
+            )
+            self.assertEqual(env_name, "CODEX_AUTH_JSON")
+            self.assertEqual(value, '{"auth_mode":"chatgpt","tokens":{"access_token":"tok"}}')
 
 
 if __name__ == "__main__":

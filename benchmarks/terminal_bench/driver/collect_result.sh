@@ -151,7 +151,7 @@ if [[ -d "$traces_dir" ]]; then
   usage_json="$(find "$traces_dir" -type f -name 'trace-*.json' -print0 2>/dev/null \
     | xargs -0 jq -c '{s:(input_filename|split("/")[-2]), u:(.usage // {}), a:(.usage.api_calls // 0)}' 2>/dev/null \
     | jq -sc '
-        if length == 0 then null
+        if length == 0 or (map(.a) | add // 0) == 0 then null
         else
           (group_by(.s) | map(max_by(.a) | .u)) as $us
           | { input_tokens: ($us | map(.total_input_tokens // 0) | add),
@@ -162,6 +162,20 @@ if [[ -d "$traces_dir" ]]; then
                 ($us | map(.total_cache_read_input_tokens // 0) | add),
               cache_tokens: ($us | map((.total_cache_creation_input_tokens // 0)
                                        + (.total_cache_read_input_tokens // 0)) | add) }
+        end' 2>/dev/null)" || usage_json='null'
+fi
+if [[ "$usage_json" == "null" && -d "$MASC_BASE_PATH/.masc/keepers" ]]; then
+  usage_json="$(find "$MASC_BASE_PATH/.masc/keepers" -type f -path '*/metrics/*/*.jsonl' -print0 2>/dev/null \
+    | xargs -0 jq -c 'select(.record_kind == "turn" and (.usage.input_tokens != null)) | .usage' 2>/dev/null \
+    | jq -sc '
+        if length == 0 then null
+        else
+          { input_tokens: (map(.input_tokens // 0) | add),
+            output_tokens: (map(.output_tokens // 0) | add),
+            cache_creation_tokens: (map(.cache_creation_tokens // 0) | add),
+            cache_read_tokens: (map(.cache_read_tokens // 0) | add),
+            cache_tokens: (map((.cache_creation_tokens // 0)
+                               + (.cache_read_tokens // 0)) | add) }
         end' 2>/dev/null)" || usage_json='null'
 fi
 if ! printf '%s' "$usage_json" | jq -e 'type == "object"' >/dev/null 2>&1; then

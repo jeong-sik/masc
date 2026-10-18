@@ -45,6 +45,12 @@ case "${provider}" in
   openrouter) key_env=OPENROUTER_API_KEY ;;
   kimi_coding) key_env=KIMI_API_KEY ;;
   claude_code) key_env=CLAUDE_CODE_OAUTH_TOKEN ;;
+  codex_subscription)
+    key_env=CODEX_AUTH_JSON
+    if [[ -z "${CODEX_AUTH_JSON:-}" && -f "${CODEX_AUTH_JSON_PATH:-${HOME}/.codex/auth.json}" ]]; then
+      CODEX_AUTH_JSON="$(jq -c . "${CODEX_AUTH_JSON_PATH:-${HOME}/.codex/auth.json}")"
+    fi
+    ;;
   *) echo "unknown provider ${provider} in ${RUNTIME_ID}" >&2; exit 2 ;;
 esac
 # Indirect expansion, not eval: `eval printf '%s' "\${VAR}"` expands the value

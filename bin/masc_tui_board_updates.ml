@@ -3,22 +3,6 @@
 open Masc_tui_types
 
 module Board_detail = Masc_tui_board_detail
-module Board_selection = Masc_tui_board_selection
-
-let replace_board_posts state posts =
-  let source =
-    match state.board_mode with
-    | Board_list | Board_compose -> Board_selection.List_cursor
-    | Board_read post_id -> Board_selection.Detail_post post_id
-  in
-  let post_ids posts = List.map (fun post -> post.bp_id) posts in
-  let cursor =
-    Board_selection.reconcile_cursor
-      ~current_ids:(post_ids state.board_posts)
-      ~cursor:state.board_cursor ~source ~next_ids:(post_ids posts)
-  in
-  state.board_posts <- posts;
-  state.board_cursor <- cursor
 
 let leave_board_detail state =
   state.board_mode <- Board_list;
@@ -29,17 +13,6 @@ let leave_board_detail state =
   state.board_comments_focused <- false;
   state.board_history_post_id <- None;
   state.board_detail <- Board_detail.clear state.board_detail
-
-let apply_board_list_load state ~remember_error = function
-  | Ok posts ->
-      replace_board_posts state posts;
-      state.board_list_reading <- Board_list_read;
-      (* A sorted/filtered page cannot establish that an exact-ID target
-         disappeared. Its own detail request owns loading and failure, even
-         when the recent page is empty or excludes this historical post. *)
-      state.board_list_error <- None
-  | Error err ->
-      remember_error err
 
 let board_detail_request_still_current state request =
   Board_detail.is_current state.board_detail request
@@ -71,11 +44,7 @@ let apply_board_post_load state ~report_error request result =
         (* A detail response enriches one list row; it does not rank the list.
            Moving the completed post to the front made rapid j/k navigation
            snap back to row zero as asynchronous responses arrived. *)
-        state.board_posts <-
-          List.map
-            (fun current ->
-              if String.equal current.bp_id post_id then post else current)
-            state.board_posts
+        enrich_board_list_post state post
     | Ok (post, _, _) ->
         fail
           (Printf.sprintf

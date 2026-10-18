@@ -215,10 +215,13 @@ let palette_entries (state : state) =
        (Printf.sprintf "hearth %s (%s%s)" name (Masc_tui_message_layout.count_noun count "post")
           (if retained then "; last observed" else ""), Palette_board_hearth (Some name)))
        (Masc_tui_types.board_census_values state))
-  @ List.map
+  @ (let retained=match board_posts_reading state with
+       | Masc_tui_fetched.Ready _,false -> false
+       | (Absent | Loading | Ready _ | Stale _ | Failed _),_ -> true in
+     List.map
       (fun (p : board_post) ->
-        ("post " ^ p.bp_title, Palette_board_post p.bp_id))
-      state.board_posts
+        ("post " ^ p.bp_title ^ (if retained then " (last observed)" else ""), Palette_board_post p.bp_id))
+      (board_posts state))
   @ (* With a file focused on the Code surface, the cursor line's names are
        askable: K/D/R pre-fill the matching prefix, and [palette_matches]
        ranks a label that starts with the query first, so these lead the

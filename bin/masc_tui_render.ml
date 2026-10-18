@@ -507,7 +507,7 @@ let render_surface (state : state) =
            match Board_detail.view_for state.board_detail ~post_id with
            | Board_detail.Ready (post, _, _) -> Masc_tui_render_board.render_board_read state post
            | Board_detail.Absent | Board_detail.Loading | Board_detail.Failed _ ->
-               (match List.find_opt (fun p -> p.bp_id = post_id) state.board_posts with
+               (match List.find_opt (fun p -> p.bp_id = post_id) (board_posts state) with
                 | Some post -> Masc_tui_render_board.render_board_read state post
                 | None ->
                     let terminal_rows, cols = get_terminal_size () in

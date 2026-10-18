@@ -6915,14 +6915,6 @@ type observed_interrupt =
   ; oi_sent_ns : int64
   ; oi_status : observed_interrupt_status }
 
-(* Whether a Board list request has answered. The posts are a plain list, and
-   an empty one is both "nothing asked yet" and "asked, and the board holds
-   nothing" -- the title said "(0)" for either, and for a failed first read
-   too. *)
-type board_list_reading =
-  | Board_list_unread
-  | Board_list_read
-
 type local_intervention =
   | Awaiting_control of { generation : int; target : Masc_tui_keeper_chat_projection.interactive_target option }
   | Retained_after_stop
@@ -7997,15 +7989,16 @@ type state = {
   mutable approval_detail_scroll: int;
   mutable approval_cursor: int;
   mutable pending_approval_action: pending_approval_action option;
-  mutable board_posts: board_post list;
+  mutable board_listing: board_post list Masc_tui_fetched.view;
+  mutable board_list_reported_error: string option;
+      (** Last emitted list-error notice, independent of availability. Internal
+          missing-result observations must not reset notification deduplication. *)
   mutable board_detail:
     (board_post * board_comment list * string option) Masc_tui_board_detail.t;
   mutable board_comment_landing: string option;
   (** Pending initial numeric-page comment identity. Cleared when a frame
       returns the ordinary wrapped-row scroll position. *)
   mutable board_history_post_id: string option;
-  mutable board_list_error: string option;
-  mutable board_list_reading: board_list_reading;
   mutable board_cursor: int;
   mutable msg_find: string;
       (** What [/find] was last given on this pane, or [""] before it is used.
@@ -8942,6 +8935,46 @@ let can_admit_early_http_read (state : state) ~ticket ~authority identity =
   Option.is_some state.http_refresh_started_ns
   && can_admit_http_read state ~ticket ~authority identity
 
+let board_posts (state : state) =
+  match Masc_tui_fetched.value state.board_listing with Some posts -> posts | None -> []
+
+let board_posts_reading (state : state) =
+  let pending=Surface_read_order.pending_dataset state.http_surface_reads Surface_read_order.Board_posts in
+  let observation=match state.board_listing with
+    | Masc_tui_fetched.Absent -> if pending then Masc_tui_fetched.Loading else Masc_tui_fetched.Absent
+    | (Masc_tui_fetched.Loading | Ready _ | Stale _ | Failed _) as observation -> observation in
+  observation,pending
+
+let board_listing_error (state : state) =
+  match state.board_listing with
+  | Masc_tui_fetched.Stale (_,detail) | Failed detail -> Some detail
+  | Absent | Loading | Ready _ -> None
+
+let apply_board_posts_load (state : state) = function
+  | Ok posts ->
+      let source=match state.board_mode with
+        | Board_list | Board_compose -> Masc_tui_board_selection.List_cursor
+        | Board_read post_id -> Masc_tui_board_selection.Detail_post post_id in
+      let ids posts=List.map (fun post -> post.bp_id) posts in
+      let cursor=Masc_tui_board_selection.reconcile_cursor
+        ~current_ids:(ids (board_posts state)) ~cursor:state.board_cursor ~source ~next_ids:(ids posts) in
+      state.board_listing <- Masc_tui_fetched.Ready posts;
+      state.board_list_reported_error <- None;
+      state.board_cursor <- cursor
+  | Error detail ->
+      state.board_listing <- (match Masc_tui_fetched.value state.board_listing with
+        | Some posts -> Masc_tui_fetched.Stale (posts,detail)
+        | None -> Masc_tui_fetched.Failed detail)
+
+(* Detail receipt enriches a matching row without certifying the entire list,
+   changing its rank, clearing its last failure or settling its pending slot. *)
+let enrich_board_list_post (state : state) post =
+  let enrich=List.map (fun current -> if String.equal current.bp_id post.bp_id then post else current) in
+  state.board_listing <- (match state.board_listing with
+    | Masc_tui_fetched.Ready posts -> Masc_tui_fetched.Ready (enrich posts)
+    | Stale (posts,detail) -> Stale (enrich posts,detail)
+    | (Absent | Loading | Failed _) as observation -> observation)
+
 let board_census_reading (state : state) =
   let pending=Surface_read_order.pending_dataset state.http_surface_reads Surface_read_order.Board_hearths in
   let observation=match state.board_census with
@@ -8978,11 +9011,15 @@ let take_http_surface_datasets (state : state) request =
      supplies this owned census. No intermediate frame is required. *)
   if List.mem Surface_read_order.Board_hearths datasets then
     apply_board_census_load state (Error "Census result was not observed at terminal application");
+  if List.mem Surface_read_order.Board_posts datasets then
+    apply_board_posts_load state (Error "Board posts result was not observed at terminal application");
   datasets
 
 let finish_http_surface_read (state : state) request =
   if Surface_read_order.owns_dataset state.http_surface_reads request Surface_read_order.Board_hearths then
     apply_board_census_load state (Error "Census result was not observed before the read ended");
+  if Surface_read_order.owns_dataset state.http_surface_reads request Surface_read_order.Board_posts then
+    apply_board_posts_load state (Error "Board posts result was not observed before the read ended");
   state.http_surface_reads <- Surface_read_order.finish state.http_surface_reads request
 
 let take_early_surface_dataset (state : state) ~ticket ~authority ~identity ~request ~dataset =
@@ -9821,6 +9858,8 @@ let suspend_workspace_readings state =
   supersede_live_context_read state None;
   state.http_surface_reads <- Surface_read_order.invalidate state.http_surface_reads;
   state.board_census <- Masc_tui_fetched.Absent;
+  state.board_listing <- Masc_tui_fetched.Absent;
+  state.board_list_reported_error <- None;
   retire_keeper_message_search state;
   state.workspace_read_authority <- ref ();
   (* Retired completions cannot release these slots. Keep observations and
@@ -13442,12 +13481,11 @@ let create_state
   approval_detail_scroll = 0;
   approval_cursor = 0;
   pending_approval_action = None;
-  board_posts = [];
+  board_listing = Masc_tui_fetched.Absent;
+  board_list_reported_error = None;
   board_detail = Masc_tui_board_detail.initial;
   board_comment_landing = None;
   board_history_post_id = None;
-  board_list_error = None;
-  board_list_reading = Board_list_unread;
   board_cursor = 0;
   msg_find = "";
   msg_search_generation = Atomic.make 0;
@@ -13967,15 +14005,6 @@ let empty_page_of ~snapshot ~error =
   | _, Some _ -> Page_failed
   | None, None -> Page_unread
   | Some _, None -> Page_empty
-
-(* The page for the Board list, whose posts are a plain list: it is empty both
-   before a list request has answered and after one that found nothing. *)
-let board_list_page (state : state) ~error =
-  empty_page_of ~error
-    ~snapshot:
-      (match state.board_list_reading with
-       | Board_list_unread -> None
-       | Board_list_read -> Some ())
 
 (* The page for a list kept from this workspace's directory, which carries no
    snapshot of its own: the list is empty both before the read and after it. *)

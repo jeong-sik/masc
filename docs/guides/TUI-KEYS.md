@@ -160,6 +160,12 @@ available for hearth navigation; the census row and palette identify them as las
 observed. Header/sidebar totals use only a received census without a pending census
 read. A collector ending without a census result records unavailability. Workspace
 withdrawal clears census values and candidates along with other Board data.
+The post list has its own typed observation and pending slot. Initial loading,
+not read, received empty and failed are distinct. Refresh/failure retains posts,
+selected identity and compose input; list/sidebar and palette qualify retained
+posts as last observed. A detail response enriches one matching row while keeping
+the list's failure and pending ownership. Missing terminal results remain
+unavailable, and workspace withdrawal clears list candidates.
 
 ## Usage
 

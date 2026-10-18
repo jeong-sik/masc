@@ -1,12 +1,12 @@
 open Alcotest
 open Masc
 
-let wire_response ?(meth=`GET) ?(body="") ~router target =
+let wire_raw_response ?(meth=`GET) ?(body="") ?(http_version="HTTP/1.1") ~router target =
   let output = Buffer.create 4096 in
   let connection = Httpun.Server_connection.create (fun reqd ->
     Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) reqd) in
-  let raw = Printf.sprintf "%s %s HTTP/1.1\r\nHost: localhost:8935\r\nContent-Length: %d\r\n\r\n%s"
-      (Httpun.Method.to_string meth) target (String.length body) body in
+  let raw = Printf.sprintf "%s %s %s\r\nHost: localhost:8935\r\nContent-Length: %d\r\n\r\n%s"
+      (Httpun.Method.to_string meth) target http_version (String.length body) body in
   let input = Bigstringaf.of_string ~off:0 ~len:(String.length raw) raw in
   ignore (Httpun.Server_connection.read_eof connection input ~off:0 ~len:(Bigstringaf.length input));
   let rec drain () = match Httpun.Server_connection.next_write_operation connection with
@@ -26,7 +26,11 @@ let wire_response ?(meth=`GET) ?(body="") ~router target =
   let raw = Buffer.contents output in
   let boundary = Str.search_forward (Str.regexp_string "\r\n\r\n") raw 0 in
   let status = int_of_string (List.nth (String.split_on_char ' ' raw) 1) in
-  status, Yojson.Safe.from_string (String.sub raw (boundary+4) (String.length raw-boundary-4))
+  status, String.sub raw (boundary+4) (String.length raw-boundary-4)
+
+let wire_response ?meth ?body ~router target =
+  let status,body = wire_raw_response ?meth ?body ~router target in
+  status,Yojson.Safe.from_string body
 
 let test_original_questions_are_bound_to_receiving_workspace () =
   let dir = Filename.temp_file "masc-asks-http-" "" in
@@ -144,6 +148,23 @@ let test_original_questions_are_bound_to_receiving_workspace () =
       check bool "HTTP and production decoder preserve absence of original Task binding" true
         (match observed.af_linked_task with Tui_decode_asks.Ask_task_unlinked -> true
          | Ask_task_unavailable _ | Ask_task_missing _ | Ask_task_observed _ -> false);
+      (* HTTP/1.0 uses close framing so this in-memory transport can inspect
+         SSE payloads without implementing an independent chunk decoder. *)
+      let status,body = wire_raw_response ~http_version:"HTTP/1.0" ~router
+          (followup_path ^ "&answer_progress_stream=true") in
+      check int "exact original followup streams through the real route" 200 status;
+      let stream = List.fold_left (fun stream payload ->
+          let event = Tui_decode_asks.decode_ask_followup_event ~expected_base_path:base
+              ~expected_masc_root:root ~keeper_name:name ~ask_id:ask.ask_id
+              (Yojson.Safe.from_string payload) |> valid Fun.id in
+          Tui_decode_asks.accept_ask_followup_event stream event |> valid Fun.id)
+          Tui_decode_asks.empty_ask_followup_stream (Sse_wire.data_payloads_of_stream body) in
+      check bool "HTTP stream completes only after each original source" true
+        (Result.is_ok (Tui_decode_asks.finish_ask_followup_stream stream));
+      List.iter (fun suffix ->
+        let status,_ = wire_response ~router (followup_path ^ suffix) in
+        check int "ambiguous stream selection is rejected" 400 status)
+        ["&answer_progress_stream=true&answer_progress_stream=true";"&answer_progress_stream=unknown"];
       let status,_ = wire_response ~router (followup_path ^ "&answer_progress_for=another") in
       check int "ambiguous question identity is rejected" 400 status;
       let status,_ = wire_response ~router (path ^ "?answer_progress_for=" ^ ask.ask_id ^ "&" ^ query) in

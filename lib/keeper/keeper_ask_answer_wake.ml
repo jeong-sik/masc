@@ -160,11 +160,22 @@ type followup = {
   linked_task : linked_task;
 }
 
-let observe_followup ~base_path ~keeper_name ~ask ~resolution =
+type followup_identity = { answered_at : float; stimulus_id : string }
+type followup_source =
+  | Reaction_evidence of (Keeper_reaction_ledger.event_queue_reaction_evidence_outcome, string) result
+  | Tool_results of (tool_actions, string) result
+  | Linked_task of linked_task
+
+let observe_followup ?on_started ?on_source ~base_path ~keeper_name ~ask ~resolution () =
   let ( let* ) = Result.bind in
   let* stimulus = answered_stimulus ~keeper_name ask resolution
       |> Result.map_error error_to_string in
   let stimulus_id = Keeper_reaction_ledger.stimulus_id_of_event_queue stimulus in
+  let identity : followup_identity = {answered_at=stimulus.arrived_at; stimulus_id} in
+  Option.iter (fun started -> started identity) on_started;
+  let publish source value =
+    Option.iter (fun observe -> observe identity (source value)) on_source;
+    value in
   let read_observation ~source read =
     let result = try read () with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -185,6 +196,9 @@ let observe_followup ~base_path ~keeper_name ~ask ~resolution =
     | Some source_id -> Domain_pool_ref.submit_io_or_inline (fun () ->
         observe_tool_actions ~base_path ~keeper_name ~source_id)) in
   let read_task () = observe_linked_task ~base_path ask in
+  let read_reactions () = publish (fun value -> Reaction_evidence value) (read_reactions ()) in
+  let read_actions () = publish (fun value -> Tool_results value) (read_actions ()) in
+  let read_task () = publish (fun value -> Linked_task value) (read_task ()) in
   let reactions, (tool_actions, linked_task) = match Eio_guard.execution_context () with
     | Eio_fiber -> Eio.Fiber.pair read_reactions (fun () -> Eio.Fiber.pair read_actions read_task)
     | Non_eio ->
@@ -193,9 +207,9 @@ let observe_followup ~base_path ~keeper_name ~ask ~resolution =
         reactions, (actions, read_task ()) in
   Ok {answered_at=stimulus.arrived_at; stimulus_id; reactions; tool_actions; linked_task}
 
-let followup_to_json followup =
+let reaction_evidence_to_json reactions =
   let clock = function None -> `Null | Some at -> `Float at in
-  let reactions = match followup.reactions with
+  match reactions with
     | Error _ -> `Assoc ["state", `String "unavailable"]
     | Ok outcome ->
       let evidence, complete, quarantine_fields = match outcome with
@@ -208,8 +222,11 @@ let followup_to_json followup =
         "turn_finished_at", clock evidence.turn_finished_recorded_at;
         "queue_settled_at", clock evidence.event_queue_ack_recorded_at;
         "queue_cancelled_at", clock evidence.event_queue_cancelled_recorded_at;
-        "evidence_complete", `Bool complete] @ quarantine_fields) in
-  let tool_actions = match followup.tool_actions with
+        "evidence_complete", `Bool complete] @ quarantine_fields)
+
+let tool_actions_to_json actions =
+  let clock = function None -> `Null | Some at -> `Float at in
+  match actions with
     | Error _ -> `Assoc ["state", `String "unavailable"]
     | Ok actions -> `Assoc ["state", `String "observed";
         "observed_count", `Int actions.observed_count;
@@ -219,8 +236,10 @@ let followup_to_json followup =
           | Some action -> `Assoc ["execution_id", `String action.execution_id;
               "physical_execution_id", `String action.physical_execution_id;
               "trace_id", `String action.trace_id; "keeper_turn_id", `Int action.keeper_turn_id;
-              "tool", `String action.tool_name; "recorded_at", `Float action.recorded_at])] in
-  let linked_task = match followup.linked_task with
+              "tool", `String action.tool_name; "recorded_at", `Float action.recorded_at])]
+
+let linked_task_to_json task =
+  match task with
     | Task_unlinked -> `Assoc ["state", `String "unlinked"]
     | Task_missing task_id -> `Assoc ["state", `String "missing"; "task_id", `String task_id]
     | Task_unavailable {task_id; detail = _} ->
@@ -229,12 +248,20 @@ let followup_to_json followup =
         `Assoc ["state", `String "observed"; "task_id", `String task_id;
           "location", `String (match location with Workspace_query.Task_backlog -> "backlog" | Task_archive -> "archive");
           "observed_at", `Float observed_at;
-          "status", Task_status_observation.to_yojson status] in
+          "status", Task_status_observation.to_yojson status]
+
+let followup_source_to_json = function
+  | Reaction_evidence evidence -> "reaction_evidence", reaction_evidence_to_json evidence
+  | Tool_results actions -> "tool_actions", tool_actions_to_json actions
+  | Linked_task task -> "linked_task", linked_task_to_json task
+
+let followup_to_json (followup : followup) =
   `Assoc (["state", `String "observed";
     "answered_at", `Float followup.answered_at;
     "stimulus_id", `String followup.stimulus_id;
-    "reaction_evidence", reactions;
-    "tool_actions", tool_actions; "linked_task", linked_task])
+    "reaction_evidence", reaction_evidence_to_json followup.reactions;
+    "tool_actions", tool_actions_to_json followup.tool_actions;
+    "linked_task", linked_task_to_json followup.linked_task])
 
 let deliver_row ~base_path ~keeper_name ~already_delivered ask resolution =
   let ( let* ) = Result.bind in

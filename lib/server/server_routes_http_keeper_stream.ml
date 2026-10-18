@@ -4247,6 +4247,51 @@ let handle_keeper_ask_answer ~actor state request reqd =
    answers through POST /api/v1/keepers/ask-answer; the choice ids it sends
    back come from the rows it was given, so no surface ever matches on label
    text and rewording a choice cannot orphan an answer. *)
+exception Ask_followup_stream_closed
+
+let stream_keeper_ask_followup ~base_path ~workspace ~state_ready ~keeper_name
+    ~(ask : Keeper_ask.ask) ~resolution request reqd =
+  let writer = ref None and closed = ref false in
+  let mutex = Eio.Mutex.create () in
+  let send phase (identity : Keeper_ask_answer_wake.followup_identity) fields =
+    let output = match !writer with
+      | Some writer -> writer
+      | None ->
+        let response = Httpun.Response.create
+            ~headers:(keeper_chat_stream_headers (get_origin request)) `OK in
+        let output = Httpun.Reqd.respond_with_streaming reqd response in
+        writer := Some output;
+        output in
+    let json = `Assoc ["workspace",workspace;"state_ready",`Bool state_ready;
+      "keeper",`String keeper_name;"answer_progress_for",`String ask.ask_id;
+      "answer_progress",`Assoc (["state",`String phase;
+        "answered_at",`Float identity.answered_at;"stimulus_id",`String identity.stimulus_id] @ fields)] in
+    if not (keeper_stream_send_raw output mutex closed
+        (Sse_wire.format_event_yojson ~event_type:"ask_followup" json))
+    then raise Ask_followup_stream_closed in
+  let close () = Option.iter (fun output ->
+      if not (Httpun.Body.Writer.is_closed output) then Httpun.Body.Writer.close output) !writer in
+  try Fun.protect ~finally:close (fun () ->
+    if not state_ready then
+      respond_json_value_with_cors ~status:`Service_unavailable request reqd
+        (keeper_chat_stream_error_json "workspace state is not ready")
+    else match Keeper_ask_answer_wake.observe_followup
+        ~on_started:(fun identity -> send "started" identity [])
+        ~on_source:(fun identity source ->
+          let name,value = Keeper_ask_answer_wake.followup_source_to_json source in
+          send "source" identity ["source",`String name;"value",value])
+        ~base_path ~keeper_name ~ask ~resolution () with
+    | Error detail ->
+      respond_json_value_with_cors ~status:`Service_unavailable request reqd
+        (keeper_chat_stream_error_json detail)
+    | Ok followup -> send "complete"
+        {answered_at=followup.answered_at;stimulus_id=followup.stimulus_id} [])
+  with
+  | Ask_followup_stream_closed -> ()
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Log.Keeper.warn ~keeper_name "ask followup stream ended ask_id=%s: %s"
+      ask.ask_id (Printexc.to_string exn)
+
 let handle_keeper_asks_list state request reqd =
   let config = Mcp_server.workspace_config state in
   let expected = Uri.query (Uri.of_string request.Httpun.Request.target)
@@ -4280,6 +4325,14 @@ let handle_keeper_asks_list state request reqd =
   | Error detail -> respond_json_value_with_cors ~status:`Bad_request request reqd
       (keeper_chat_stream_error_json detail)
   | Ok answer_progress_for ->
+  let stream_request = match List.filter (fun (key,_) -> key="answer_progress_stream") query with
+    | [] -> Ok false
+    | [_, ["true"]] when Option.is_some answer_progress_for -> Ok true
+    | _ -> Error "answer_progress_stream requires one true value and an exact answer_progress_for" in
+  match stream_request with
+  | Error detail -> respond_json_value_with_cors ~status:`Bad_request request reqd
+      (keeper_chat_stream_error_json detail)
+  | Ok stream_progress ->
   let paths =
     try
       let base_path = Unix.realpath config.base_path in
@@ -4332,13 +4385,24 @@ let handle_keeper_asks_list state request reqd =
           | Keeper_ask_store.Missing_log -> []
           | Stored_rows rows -> rows
         in
+        if stream_progress then
+          (match answer_progress_for with
+           | None -> respond_json_value_with_cors ~status:`Bad_request request reqd
+               (keeper_chat_stream_error_json "stream requires an exact original Ask")
+           | Some ask_id ->
+             match List.assoc_opt ask_id rows with
+             | None -> respond_json_value_with_cors ~status:`Not_found request reqd
+                 (keeper_chat_stream_error_json "canonical question is unavailable")
+             | Some (ask,resolution) -> stream_keeper_ask_followup
+                 ~base_path ~workspace ~state_ready ~keeper_name ~ask ~resolution request reqd)
+        else
         let progress_fields = match answer_progress_for with
           | None -> []
           | Some ask_id ->
               let progress = match List.assoc_opt ask_id rows with
                 | None -> Error "canonical question is unavailable"
                 | Some (ask, resolution) ->
-                    Keeper_ask_answer_wake.observe_followup ~base_path ~keeper_name ~ask ~resolution in
+                    Keeper_ask_answer_wake.observe_followup ~base_path ~keeper_name ~ask ~resolution () in
               let body = match progress with
                 | Ok followup -> Keeper_ask_answer_wake.followup_to_json followup
                 | Error detail -> `Assoc ["state", `String "unavailable"; "detail", `String detail] in

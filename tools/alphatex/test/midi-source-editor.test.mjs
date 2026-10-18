@@ -75,3 +75,47 @@ test('format-2 selection and ambiguous-channel note selection require explicit d
   assert.equal(selectedNote(editor).pitch,61)
   assert.equal(editorView(editor).tracks[0].notes.find(n=>n.channel===0).pitch,60)
 })
+
+test('duplication retains original source ports while ordinary insertion uses its destination region',()=>{
+  const file=new JZZ.MIDI.SMF(0,480),track=new JZZ.MIDI.SMF.MTrk()
+  track.add(0,JZZ.MIDI.smfMidiPort(1)).add(0,JZZ.MIDI.noteOn(0,60,96))
+    .add(30,JZZ.MIDI.noteOff(0,60)).add(120,JZZ.MIDI.smfMidiPort(2))
+    .add(240,JZZ.MIDI.smfEndOfTrack());file.push(track)
+  const source=importMidiSource(file.toUint8Array()),editor=newEditor(source),before=structuredClone(source)
+  for(const offset of ['0.21875','0.3125']){
+    assert.throws(()=>editorCommand(editor,`duplicate ${offset}`),/Duplicate changes the source port/)
+    assert.deepEqual(editor.project,before)
+    assert.equal(editor.undo.length,0)
+  }
+  const duplicated=editorCommand(editor,'duplicate 0.125').editor
+  assert.deepEqual(midiSourcePattern(duplicated.project).notes.map(n=>[n.start,n.duration,n.port]),[[0,30,1],[60,30,1]])
+  const inserted=editorCommand(editor,'note D4 0.3125 0.0625').editor
+  assert.deepEqual(midiSourcePattern(inserted.project).notes.map(n=>[n.start,n.port]),[[0,1],[150,2]])
+  assert.equal(midiSourcePattern(importMidiSource(projectMidi(duplicated.project))).notes[1].port,1)
+})
+
+test('endpoint zero-length notes remain selected through consecutive edits and history without extending the source',()=>{
+  const file=new JZZ.MIDI.SMF(0,480),track=new JZZ.MIDI.SMF.MTrk()
+  track.add(480,JZZ.MIDI.noteOn(0,60,96)).add(480,JZZ.MIDI.noteOff(0,60,45))
+    .add(480,JZZ.MIDI.smfEndOfTrack());file.push(track)
+  const source=importMidiSource(file.toUint8Array()),note=midiSourcePattern(source).notes[0]
+  let editor=editorCommand(newEditor(source),`select ${note.id}`).editor
+  for(const value of [100,101]){
+    editor=editorAction(editor,{kind:'velocity',value})
+    assert.equal(editor.tick,480)
+    assert.equal(selectedNote(editor).id,note.id)
+    assert.equal(selectedNote(editor).velocity,value)
+  }
+  editor=editorAction(editor,{kind:'undo'})
+  assert.equal(selectedNote(editor).velocity,100)
+  editor=editorAction(editor,{kind:'redo'})
+  assert.equal(selectedNote(editor).velocity,101)
+  assert.equal(midiSourcePattern(importMidiSource(projectMidi(editor.project))).ticks,480)
+  assert.equal(editorView(editor).displayLength,480)
+  assert.equal(editorView(editor).loop.end,480)
+  editor=editorCommand(editor,'cursor 1 C4').editor
+  assert.equal(selectedNote(editor).id,note.id)
+  editor=editorAction(editor,{kind:'move',ticks:480})
+  assert.equal(editor.tick,480)
+  assert.throws(()=>editorCommand(editor,'cursor 2 C4'),/outside MIDI source/)
+})

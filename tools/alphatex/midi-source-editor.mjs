@@ -20,10 +20,11 @@ export function sourceEditor(project, previous = {}, pattern = previous.pattern)
   const firstTempo = performance?.events.find(e => e.kind === 'meta' && e.type === 0x51 && e.tick === 0)
   const tempo = firstTempo ? 60e6 / (firstTempo.data[0]*65536+firstTempo.data[1]*256+firstTempo.data[2]) : 120
   const meter = performance?.events.find(e => e.kind === 'meta' && e.type === 0x58 && e.tick === 0 && e.data.length === 4)
-  const length = Math.max(1, performance?.ticks ?? 0) // viewport span; never changes the MIDI asset's duration
+  const end = performance?.ticks ?? 0
+  const length = end + 1 // include endpoint notes in the viewport, without extending the source performance
   const view = { title: project.name, tempo, meter: meter ? [meter.data[0], 2 ** meter.data[1]] : [4,4],
     timingLabel: info.timing.kind === 'ppq' ? 'MIDI tempo map' : `SMPTE ${info.timing.frameCode}`,
-    displayLength: performance?.ticks ?? 0, length, loop: { start: 0, end: length }, tracks }
+    displayLength: end, length, loop: { start: 0, end }, tracks }
   const steps = [per/4,per/2,per,per*2,per*4].filter(n => Number.isSafeInteger(n) && n > 0)
   return { tick: 0, pitch: 60, velocity: 96, duration: per, step: steps[0], track: 0, undo: [], redo: [], ...previous,
     project, pattern: chosen, performance, info, axis, view, steps,
@@ -134,6 +135,12 @@ export function sourceCommand(editor,line) {
     }
     case 'duplicate':{
       count(1);const offset=units(args[0])
+      // An inserted note normally takes the active port at its new position.
+      // Duplication must retain the selected source note's routing instead.
+      const portAt=(track,tick)=>editor.performance.events.filter(e=>e.track===track&&e.tick<=tick&&e.kind==='meta'&&e.type===0x21).at(-1)?.data[0]??0
+      if(notes.some(n=>portAt(n.track,n.start+offset)!==n.port||portAt(n.track,n.start+offset+n.duration)!==n.port)){
+        throw new Error('Duplicate changes the source port; explicit route edits are not supported')
+      }
       return {editor:apply(editor,notes.map(n=>({kind:'insert',track:n.track,channel:n.channel,pitch:n.pitch,start:n.start+offset,duration:n.duration,velocity:n.velocity})))}
     }
     case 'cursor':{

@@ -2966,12 +2966,61 @@ type ask_answer_mode =
 
 type ask_submission = {
   as_request: unit ref;
+  as_started_ns: int64;
   as_authority: workspace_authority;
   as_keeper_name: string;
   as_ask_id: string;
   as_answered_label: string;
   as_source_turn_ref: Ids.Turn_ref.t option;
 }
+
+module Ask_answer_observation : sig
+  type call = Workspace_check | Answer_post | Asks_reread
+  type outcome = Returned | Returned_error | Raised | Cancelled
+  type event =
+    | Submitted
+    | Call_started of call
+    | Call_finished of { call: call; started_ns: int64; outcome: outcome }
+    | Reread_admitted of outcome
+  type t = private { submission: ask_submission; at_ns: int64; event: event }
+  val make : ask_submission -> at_ns:int64 -> event -> t
+  val outcome_of_result : ('a, 'e) result -> outcome
+  val to_json : t -> Yojson.Safe.t
+  (** Original submission attribution and observed call/UI boundaries only.
+      A returned POST is not an accepted answer; a reread is not useful work.
+      Missing call finishes remain unfinished. No admission authority. *)
+end = struct
+  type call = Workspace_check | Answer_post | Asks_reread
+  type outcome = Returned | Returned_error | Raised | Cancelled
+  type event =
+    | Submitted
+    | Call_started of call
+    | Call_finished of { call: call; started_ns: int64; outcome: outcome }
+    | Reread_admitted of outcome
+  type t = { submission: ask_submission; at_ns: int64; event: event }
+  let make submission ~at_ns event = { submission; at_ns; event }
+  let outcome_of_result = function Ok _ -> Returned | Error _ -> Returned_error
+  let call_name = function
+    | Workspace_check -> "workspace_check" | Answer_post -> "answer_post" | Asks_reread -> "asks_reread"
+  let outcome_name = function
+    | Returned -> "returned" | Returned_error -> "returned_error" | Raised -> "raised" | Cancelled -> "cancelled"
+  let to_json { submission; at_ns; event } =
+    let ns value = `String (Int64.to_string value) in
+    let phase, detail = match event with
+      | Submitted -> "submitted", []
+      | Call_started call -> "call_started", ["call", `String (call_name call)]
+      | Call_finished { call; started_ns; outcome } -> "call_finished",
+          ["call", `String (call_name call); "call_started_ns", ns started_ns;
+           "call_wait_ns", ns (Int64.sub at_ns started_ns); "outcome", `String (outcome_name outcome)]
+      | Reread_admitted outcome -> "reread_admitted", ["outcome", `String (outcome_name outcome)] in
+    let Workspace_authority authority = submission.as_authority in
+    `Assoc (["phase", `String phase; "keeper", `String submission.as_keeper_name;
+      "ask_id", `String submission.as_ask_id; "workspace_authority", `Int authority;
+      "source_turn_ref", (match submission.as_source_turn_ref with
+        | None -> `Null | Some turn_ref -> `String (Ids.Turn_ref.to_string turn_ref));
+      "submission_started_ns", ns submission.as_started_ns; "observed_ns", ns at_ns;
+      "since_submission_ns", ns (Int64.sub at_ns submission.as_started_ns)] @ detail)
+end
 
 (* An answer being typed, for the questions a choice cannot answer. The slot
    is what the domain accepts a write through, and it names its own question,
@@ -8894,14 +8943,24 @@ let toggle_ask_origin (state : state) origin =
     | Some current when Masc_tui_ask_projection.same_origin current origin -> state.ask_origin <- None
     | Some _ | None -> state.ask_origin <- Some (state.workspace_authority,origin)
 
+let owns_ask_submission (state : state) submission =
+  Option.exists (fun current -> current.as_request == submission.as_request)
+    state.ask_submission_current
+  && submission.as_authority = state.workspace_authority
+  && state.workspace_identity = Workspace_identity_match
+
+let observe_ask_reread_completion (state : state) submission ~at_ns
+    (result : (Masc.Tui_decode_asks.asks_snapshot, string) result) =
+  if state.ask_submit_inflight && owns_ask_submission state submission then
+    Some (Ask_answer_observation.make submission ~at_ns
+      (Ask_answer_observation.Reread_admitted (Ask_answer_observation.outcome_of_result result)))
+  else None
+
 let retain_ask_answer_feedback (state : state) submission result =
-  let current = Option.exists (fun current -> current.as_request == submission.as_request)
-      state.ask_submission_current in
   let already_observed = match state.ask_answer_feedback with
     | Some (previous, _) -> previous.as_request == submission.as_request
     | None -> false in
-  if current && not already_observed && submission.as_authority = state.workspace_authority
-     && state.workspace_identity = Workspace_identity_match then begin
+  if not already_observed && owns_ask_submission state submission then begin
     let feedback = Masc_tui_ask_projection.answer_feedback
       ?source_turn_ref:submission.as_source_turn_ref
       ~keeper_name:submission.as_keeper_name ~ask_id:submission.as_ask_id

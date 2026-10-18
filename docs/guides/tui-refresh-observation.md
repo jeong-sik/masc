@@ -722,12 +722,33 @@ recorded canonical answer retains submitted choice labels. A pending receipt
 describes the last response; automatic recovery may subsequently change delivery.
 Observe Keeper activity to establish whether actual work has resumed.
 
-`tui_ask_answer_receipt` records the admitted phase (`post_response` or the
-terminal fallback `reread_complete`), a process-local monotonic `admitted_ns`,
-and a `receipt` object with `keeper`, `ask_id`, `recording`, and `delivery`.
+`tui_ask_answer_receipt` records `receipt_admitted` once, whether admitted early
+or as the terminal fallback, process-local monotonic `submission_started_ns` and
+`admitted_ns`, and a `receipt` object with `keeper`, `ask_id`, `recording`, and `delivery`.
 Delivery is null when no delivery fact was established. Choice/free-text bodies
 and server error details are excluded from that log. These are state-admission
 observations, not physical POST counts, first paint or Keeper action proof.
+
+Receipt deduplication does not suppress canonical-list reread completion.
+`tui_ask_answer_lifecycle` separately records `submitted`, `call_started`,
+`call_finished` and `reread_admitted`. Calls are typed workspace check, answer POST
+and asks reread; outcomes are returned, returned_error, raised or cancelled.
+Reread admission uses the actual list Result plus current opaque submission,
+workspace authority/identity and inflight gate. It neither overwrites the answer
+receipt nor settles the mutation. A successful empty list does not confirm an
+unknown answer write. An early stored receipt remains stored if reread fails.
+
+Every lifecycle row carries the original Keeper, Ask, optional source Turn_ref,
+workspace authority and submission start timestamp. `observed_ns` and
+`since_submission_ns` are monotonic process-local observations, not global ids.
+Finished calls also record `call_started_ns` and `call_wait_ns`; this interval
+includes start logging, authentication, executor waiting and interpretation as
+applicable, rather than pure HTTP RTT. Worker records use the captured submission;
+late workers gain no current UI authority. Cancellation rethrows after its own
+call observation, and missing finishes remain unfinished. No reply bodies or
+exception details are added to lifecycle rows. These records do not prove paint,
+first usable input, answer causality, useful work or reduced latency. See
+[the source Before/After](../audits/2026-10-19-ask-answer-lifecycle.md).
 
 For native Before/After, keep question bytes, backend, viewport and submission
 actions fixed; delay only the post-answer question reload. Retain actual POST

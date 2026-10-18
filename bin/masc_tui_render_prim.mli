@@ -362,11 +362,15 @@ val selected_ask_question :
 val draw_ask_question :
   Buffer.t ->
   int ->
-  Masc_tui_types.state ->
+  text_entry:Masc_tui_types.ask_text_entry option ->
   row:Masc.Tui_decode_asks.ask_row ->
   draft:Ask_projection.draft ->
   question:Masc.Tui_decode_asks.ask_question ->
   answering:bool -> selected_question:bool -> unit
+(** Render the original question with an explicit immutable editor snapshot.
+    The editor must still match both the original Ask and question slots.
+    A compact frame can defer this construction without retaining mutable UI
+    state or changing the full answer reader's data and action authority. *)
 
 val draw_ask_context : Buffer.t -> int -> row:Masc.Tui_decode_asks.ask_row -> unit
 

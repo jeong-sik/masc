@@ -661,6 +661,7 @@ let narrowing_atom_text mark = String.make narrowing_atom_chars mark
    all (#37793: one live Keeper walked 12756 -> 6378 -> 3189 ninety-six times
    in a day and committed nothing, because every pass started over). *)
 let narrowing_fixture ?(cli_slot_ids = []) ?cli_runner ?has_waiting
+    ?receipt_answer ?(body_timeouts = [])
     ?(task_context = Masc.Keeper_turn_task_context.No_task)
     ?(atoms = List.map (fun mark -> message (narrowing_atom_text mark)) narrowing_marks)
     ~slot_count ~answer f =
@@ -698,13 +699,15 @@ let narrowing_fixture ?(cli_slot_ids = []) ?cli_runner ?has_waiting
   Prompt_registry.set_markdown_dir (Filename.concat root "config/prompts");
   Prompt_defaults.init ();
   let bodies = ref [] in
-  let server = F.start_server ~sw ~net:env#net ~clock:env#clock
-    (F.Reply_with (fun index body ->
-       bodies := !bodies @ [String.length body];
-       answer index body)) in
+  let behavior = match receipt_answer with
+    | None -> F.Reply_with (fun index body ->
+        bodies := !bodies @ [String.length body]; answer index body)
+    | Some answer -> F.Reply_with_receipt (fun index body ->
+        bodies := !bodies @ [String.length body]; answer index body) in
+  let server = F.start_server ~sw ~net:env#net ~clock:env#clock behavior in
   let slot_ids = List.init slot_count (fun index -> Printf.sprintf "narrowing-slot-%d" index) in
   ignore (F.publish_registry ~cli_slot_ids ~lane_id:"librarian_exact" ~slot_ids
-    (F.resolver_snapshot ~source:"narrowing-fixture"
+    (F.resolver_snapshot ~body_timeouts ~source:"narrowing-fixture"
        (List.map (fun id -> { F.id; base_url = server.F.base_url }) slot_ids)));
   save atoms;
   append (B.Turn_ended {turn_ref=Ids.Turn_ref.make ~trace_id ~absolute_turn:1;
@@ -1101,11 +1104,17 @@ type context_hole_case =
   | Context_rewritten_source
   | Context_appended_suffix
   | Context_prior_holes
+  | Context_unreceived_only
+  | Context_unreceived_413_only
+  | Context_unreceived_then_typed
+  | Context_typed_then_unreceived
+  | Context_late_unreceived
 
 type context_fixture_answer =
   | Context_typed_refusal
   | Context_unknown_refusal
   | Context_empty_refusal_body
+  | Context_unreceived_refusal of Cohttp.Code.status_code
   | Context_invalid_json
   | Context_state of string
 
@@ -1122,13 +1131,30 @@ let test_context_only_api_holes case () =
   let original = if prior then message "prior explicitly unread source" :: selected else selected in
   let typed = Context_typed_refusal and unknown = Context_unknown_refusal in
   let state = "The refused original remains explicitly unread." in
-  let whole = [typed;typed] in
+  let missing = Context_unreceived_refusal `Bad_request in
+  let whole = match case with
+    | Context_unreceived_only -> [missing;missing]
+    | Context_unreceived_413_only ->
+      [Context_unreceived_refusal `Request_entity_too_large;
+       Context_unreceived_refusal `Request_entity_too_large]
+    | Context_unknown_then_typed | Context_typed_then_unknown | Context_all_holes
+    | Context_single_hole | Context_unknown_only | Context_cli_tail | Context_invalid_answer
+    | Context_late_unknown | Context_rewritten_source | Context_appended_suffix
+    | Context_prior_holes | Context_unreceived_then_typed | Context_typed_then_unreceived
+    | Context_late_unreceived -> [typed;typed] in
   let decisions = match case with
     | Context_unknown_then_typed -> [unknown;typed;Context_state state]
     | Context_typed_then_unknown -> [typed;unknown;Context_state state]
     | Context_all_holes -> [typed;typed;typed;typed;Context_state state]
     | Context_single_hole -> [typed;typed;Context_state state]
     | Context_unknown_only -> [unknown;Context_empty_refusal_body]
+    | Context_unreceived_only -> [missing;missing]
+    | Context_unreceived_413_only ->
+      [Context_unreceived_refusal `Request_entity_too_large;
+       Context_unreceived_refusal `Request_entity_too_large]
+    | Context_unreceived_then_typed -> [missing;typed;Context_state state]
+    | Context_typed_then_unreceived -> [typed;missing;Context_state state]
+    | Context_late_unreceived -> [typed;typed;missing;missing]
     | Context_cli_tail -> [typed;typed]
     | Context_invalid_answer -> [Context_invalid_json;typed]
     | Context_late_unknown -> [typed;typed;unknown;unknown]
@@ -1136,6 +1162,9 @@ let test_context_only_api_holes case () =
     | Context_prior_holes -> [typed;typed;typed;typed] in
   let plan = whole @ decisions in
   let requests = ref [] and cli_requests = ref [] in
+  let module Http = Llm_provider.Http_request_observer in
+  let http_events = ref [] in
+  let observer = Http.create (fun event -> http_events := event :: !http_events; Ok ()) in
   let before_dispatch = ref (fun () -> ()) and before_final = ref (fun () -> ()) in
   let last_index = List.length plan-1 in
   let cli_runner ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt =
@@ -1145,23 +1174,86 @@ let test_context_only_api_holes case () =
     if List.length !cli_requests mod 2=1 then
       Error (queue_native_failure ~claude:false ~tool_effect:false)
     else Error (Masc.Fusion_official_client.Setup_failure "opaque context-only tail") in
-  narrowing_fixture ~atoms:original ~slot_count:2 ~has_waiting:(fun () -> true)
+  (* This is the actual configured provider-body deadline, not a test elapsed
+     time assertion or a synthetic typed refusal. Both candidates use it so
+     the fixture can reverse their receipt order without changing the lane. *)
+  let body_timeouts = match case with
+    | Context_unreceived_only | Context_unreceived_413_only
+    | Context_unreceived_then_typed | Context_typed_then_unreceived | Context_late_unreceived ->
+      ["narrowing-slot-0", 0.5; "narrowing-slot-1", 0.5]
+    | Context_unknown_then_typed | Context_typed_then_unknown | Context_all_holes
+    | Context_single_hole | Context_unknown_only | Context_cli_tail | Context_invalid_answer
+    | Context_late_unknown | Context_rewritten_source | Context_appended_suffix
+    | Context_prior_holes -> [] in
+  narrowing_fixture ~atoms:original ~slot_count:2 ~has_waiting:(fun () -> true) ~body_timeouts
     ~cli_slot_ids:(if case=Context_cli_tail then [Exact_output_fixture.cli_primary_runtime] else [])
     ?cli_runner:(if case=Context_cli_tail then Some cli_runner else None)
-    ~answer:(fun index body ->
+    ~answer:(fun _ _ -> fail "receipt fixture must handle every context request")
+    ~receipt_answer:(fun index body ->
       (!before_dispatch) ();
       let position = index mod List.length plan in
       requests := !requests @ [body];
       if position=last_index then (!before_final) ();
       match List.nth plan position with
-      | Context_typed_refusal -> `Request_entity_too_large, refused "invalid_request_error"
-      | Context_unknown_refusal -> `Bad_request, refused "invalid_request_error"
-      | Context_empty_refusal_body -> `Bad_request, ""
-      | Context_invalid_json -> `OK,
-          {|{"choices":[{"index":0,"message":{"role":"assistant","content":"not JSON"},"finish_reason":"stop"}]}|}
-      | Context_state working_state -> `OK, Exact_output_fixture.openai_response
-          (`Assoc ["working_state",`String working_state]))
+      | Context_typed_refusal -> Exact_output_fixture.Complete_response
+          (`Request_entity_too_large, refused "invalid_request_error")
+      | Context_unknown_refusal -> Exact_output_fixture.Complete_response
+          (`Bad_request, refused "invalid_request_error")
+      | Context_empty_refusal_body -> Exact_output_fixture.Complete_response (`Bad_request, "")
+      | Context_unreceived_refusal status -> Exact_output_fixture.Refusal_without_body status
+      | Context_invalid_json -> Exact_output_fixture.Complete_response (`OK,
+          {|{"choices":[{"index":0,"message":{"role":"assistant","content":"not JSON"},"finish_reason":"stop"}]}|})
+      | Context_state working_state -> Exact_output_fixture.Complete_response
+          (`OK, Exact_output_fixture.openai_response
+            (`Assoc ["working_state",`String working_state])))
   @@ fun ~bodies:_ ~pass ~coverage:_ ~hide_source:_ ~restart:_ ~config ->
+  let pass () =
+    let previous_calls = List.length !requests in
+    http_events := [];
+    Http.with_observer observer pass;
+    check int "the actual HTTP observer loses no receipt" 0 (Http.delivery_failure_count observer);
+    let events = List.rev !http_events in
+    let entered = List.filter_map (fun (event : Http.event) -> match event.phase with
+      | Http.Client_entered {mode;body_bytes;body_sha256;_} ->
+        check bool "the actual provider uses the synchronous body receipt path" true
+          (match mode with Http.Synchronous -> true | Http.Streaming -> false);
+        Some (event.call_id,body_bytes,body_sha256)
+      | Http.Dispatch_entered | Http.Response_headers_received _ | Http.Client_finished _ -> None) events in
+    let ids = List.map (fun (id,_,_) -> id) entered in
+    check int "every physical HTTP call has its own observed identity"
+      (List.length ids) (List.length (List.sort_uniq Int.compare ids));
+    let current_requests = List.drop previous_calls !requests in
+    check (list (pair int string)) "every observed HTTP call binds the exact body the server received"
+      (List.map (fun body -> String.length body,Digestif.SHA256.(digest_string body |> to_hex)) current_requests)
+      (List.map (fun (_,bytes,sha256) -> bytes,sha256) entered);
+    let phases = List.map (fun (event : Http.event) -> event.call_id,
+      (match event.phase with
+       | Http.Client_entered _ -> "entered"
+       | Http.Dispatch_entered -> "dispatched"
+       | Http.Response_headers_received _ -> "headers"
+       | Http.Client_finished _ -> "finished")) events in
+    check (list (pair int string)) "each exact request receives its headers before client completion"
+      (List.concat_map (fun id -> List.map (fun phase -> id,phase)
+        ["entered";"dispatched";"headers";"finished"]) ids) phases;
+    let headers = List.filter_map (fun (event : Http.event) -> match event.phase with
+      | Http.Response_headers_received {status} -> Some (event.call_id,status)
+      | Http.Client_entered _ | Http.Dispatch_entered | Http.Client_finished _ -> None) events in
+    let expected_status = function
+      | Context_typed_refusal -> 413
+      | Context_unknown_refusal | Context_empty_refusal_body -> 400
+      | Context_unreceived_refusal status -> Cohttp.Code.code_of_status status
+      | Context_invalid_json | Context_state _ -> 200 in
+    check (list (pair int int)) "every call receives its actual planned headers before the body window closes"
+      (List.mapi (fun index id -> id,expected_status (List.nth plan (index mod List.length plan))) ids)
+      headers;
+    let finished = List.filter_map (fun (event : Http.event) -> match event.phase with
+      | Http.Client_finished completion -> Some (event.call_id,
+          (match completion with Http.Returned_ok -> true
+           | Http.Returned_error | Http.Cancelled | Http.Raised -> false))
+      | Http.Client_entered _ | Http.Dispatch_entered | Http.Response_headers_received _ -> None) events in
+    check (list (pair int bool)) "refusals return HTTP receipts, never pre-header or transport timeouts"
+      (List.map (fun id -> id,true) ids) finished
+  in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path
       ~base_path:config.Masc.Workspace.base_path in
   let runtime_keepers_dir = Masc.Workspace.keepers_runtime_dir config in
@@ -1184,8 +1276,10 @@ let test_context_only_api_holes case () =
   let new_holes = match case with
     | Context_all_holes | Context_single_hole | Context_prior_holes -> List.map hole sources
     | Context_unknown_then_typed | Context_typed_then_unknown
+    | Context_unreceived_then_typed | Context_typed_then_unreceived
     | Context_rewritten_source | Context_appended_suffix -> [hole (List.hd sources)]
-    | Context_unknown_only | Context_cli_tail | Context_invalid_answer | Context_late_unknown -> [] in
+    | Context_unknown_only | Context_cli_tail | Context_invalid_answer | Context_late_unknown
+    | Context_unreceived_only | Context_unreceived_413_only | Context_late_unreceived -> [] in
   let expected_holes = Unread.merge prior_holes new_holes |> get in
   let memory_before = Current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name |> get in
   let range = P.memory_range_id ~config ~keeper_name prepared |> get in
@@ -1237,7 +1331,9 @@ let test_context_only_api_holes case () =
       |> Result.map_error B.append_error_to_string |> get
     | Context_unknown_then_typed | Context_typed_then_unknown | Context_all_holes
     | Context_single_hole | Context_unknown_only | Context_cli_tail | Context_invalid_answer
-    | Context_late_unknown | Context_prior_holes -> ());
+    | Context_late_unknown | Context_prior_holes | Context_unreceived_only
+    | Context_unreceived_413_only | Context_unreceived_then_typed
+    | Context_typed_then_unreceived | Context_late_unreceived -> ());
   pass ();
   check int "the whole request and each exhausted message visit every declared API candidate"
     (List.length plan) (List.length !requests);
@@ -1248,8 +1344,10 @@ let test_context_only_api_holes case () =
   check_memory ();
   let committed = match case with
     | Context_unknown_only | Context_cli_tail | Context_invalid_answer | Context_late_unknown
+    | Context_unreceived_only | Context_unreceived_413_only | Context_late_unreceived
     | Context_rewritten_source -> false
     | Context_unknown_then_typed | Context_typed_then_unknown | Context_all_holes
+    | Context_unreceived_then_typed | Context_typed_then_unreceived
     | Context_single_hole | Context_appended_suffix | Context_prior_holes -> true in
   if not committed then (
     check bool "an unproven message or changed source preserves the entire original continuation" true
@@ -1286,7 +1384,8 @@ let test_context_only_api_holes case () =
         (contains ~sub:("[tool use omitted: id=" ^ tool_call_id 1) last
          || contains ~sub:("[tool result omitted: id=" ^ tool_call_id 1) last
          || contains ~sub:"single-original-message" last));
-    if case=Context_unknown_then_typed || case=Context_typed_then_unknown then (
+    if case=Context_unknown_then_typed || case=Context_typed_then_unknown
+        || case=Context_unreceived_then_typed || case=Context_typed_then_unreceived then (
       let messages index=U.member "messages" (Yojson.Safe.from_string (List.nth !requests index)) in
       check bool "both slots refused the identical one-message conversation" true (messages 2=messages 3);
       check bool "the next accepted message sees the exact preceding hole" true
@@ -2090,6 +2189,16 @@ let () = run "production continuity pair"
       (test_context_only_api_holes Context_single_hole);
     test_case "Context-only unknown-only exhaustion preserves source across wakes" `Quick
       (test_context_only_api_holes Context_unknown_only);
+    test_case "Context-only unread refusal bodies descend but never skip across wakes" `Quick
+      (test_context_only_api_holes Context_unreceived_only);
+    test_case "Context-only unread HTTP 413 bodies grant no named cause across wakes" `Quick
+      (test_context_only_api_holes Context_unreceived_413_only);
+    test_case "Context-only unread body then typed refusal records one exact hole" `Quick
+      (test_context_only_api_holes Context_unreceived_then_typed);
+    test_case "Context-only typed refusal then unread body records one exact hole" `Quick
+      (test_context_only_api_holes Context_typed_then_unreceived);
+    test_case "Context-only late unread refusal bodies discard the volatile hole" `Quick
+      (test_context_only_api_holes Context_late_unreceived);
     test_case "Context-only API exhaustion followed by an opaque CLI tail grants no skip" `Quick
       (test_context_only_api_holes Context_cli_tail);
     test_case "Context-only invalid JSON vetoes a later typed refusal" `Quick

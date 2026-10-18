@@ -143,7 +143,7 @@ struct WireState {
 // It never replays opaque device commands or invents an unknown initial value.
 struct ChaseField: Hashable {
     enum Kind: Hashable { case controller(UInt8), program, bend, pressure, poly(UInt8), parameter(UInt16, UInt8) }
-    let port: UInt8
+    let port: Int
     let channel: UInt8
     let kind: Kind
 }
@@ -184,14 +184,14 @@ enum ChaseObstacle: String, Hashable {
     case relative = "relative parameter data without an absolute baseline"
 }
 struct SourceChase {
-    var channels: [UInt16: ChaseChannel] = [:]
-    var history: [(UInt8, [UInt8])] = []
+    var channels: [Int: ChaseChannel] = [:]
+    var history: [(Int, [UInt8])] = []
     var touched = Set<ChaseField>(), known = Set<ChaseField>()
     var obstacles = Set<ChaseObstacle>()
-    mutating func observe(_ bytes: [UInt8], port: UInt8) {
+    mutating func observe(_ bytes: [UInt8], port: Int) {
         guard let status = bytes.first else { return }
         guard status < 0xf0 else { obstacles.insert(.system); return }
-        let channel = status & 15, key = UInt16(port) << 8 | UInt16(channel), type = status & 0xf0
+        let channel = status & 15, key = port << 8 | Int(channel), type = status & 0xf0
         var state = channels[key] ?? ChaseChannel()
         func field(_ kind: ChaseField.Kind) -> ChaseField { ChaseField(port: port, channel: channel, kind: kind) }
         func mark(_ kind: ChaseField.Kind) { let value = field(kind); touched.insert(value); known.insert(value) }
@@ -287,7 +287,7 @@ struct SourceChase {
         }
         channels[key] = state
     }
-    func bootstrap(replacing previous: SourceChase) throws -> [(UInt8, [UInt8])] {
+    func bootstrap(replacing previous: SourceChase) throws -> [(Int, [UInt8])] {
         let unsafe = obstacles.union(previous.obstacles)
         guard unsafe.isEmpty else {
             throw MidiFailure("source state reconstruction requires support for " + unsafe.map(\.rawValue).sorted().joined(separator: ", "))
@@ -303,7 +303,7 @@ struct SourceChase {
         }
         var result = history
         for key in channels.keys.sorted() {
-            let state = channels[key]!, port = UInt8(key >> 8), channel = UInt8(key & 15)
+            let state = channels[key]!, port = key >> 8, channel = UInt8(key & 15)
             // silence() already releases owned keys/pedals. Restore the captured
             // set before switching sostenuto on; later keys must remain outside it.
             for note in state.notes where note.captured { result.append((port, [0x90 | channel, note.pitch, note.velocity])) }
@@ -320,24 +320,107 @@ struct SourceChase {
 
 struct WireEvent: Decodable {
     let seconds: Double
-    let port: UInt8
+    let port: Int
     let bytes: [UInt8]
 }
 struct Binding: Decodable {
-    let port: UInt8
+    let port: Int
     let destination: String
 }
+
+struct MidiRegionSource: Decodable { let id: String; let timeline: Timeline }
+struct MidiRegionSpec: Decodable {
+    let id: String, source: String
+    let startSeconds: Double, sourceStart: Double, sourceEnd: Double
+    let repeatCount: Int
+}
+struct MidiRegionEntry {
+    let model: SourceChase, next: Int, safeKnown: Set<ChaseField>
+}
+func midiRegionEntry(_ events: [WireEvent], at seconds: Double) -> MidiRegionEntry {
+    var prefix = SourceChase(), next = 0
+    while next < events.count && events[next].seconds < seconds {
+        let event = events[next]; prefix.observe(event.bytes, port: event.port); next += 1
+    }
+    var through = prefix, firstSound: [Int: Set<ChaseField>] = [:], boundary = next
+    for (address, state) in prefix.channels where !state.notes.isEmpty { firstSound[address] = prefix.known }
+    while boundary < events.count && events[boundary].seconds == seconds {
+        let event = events[boundary]
+        if event.bytes[0] & 0xf0 == 0x90 && event.bytes[2] > 0 {
+            let address = event.port << 8 | Int(event.bytes[0] & 15)
+            if firstSound[address] == nil { firstSound[address] = through.known }
+        }
+        through.observe(event.bytes, port: event.port); boundary += 1
+    }
+    let safe = through.known.filter { field in
+        firstSound[field.port << 8 | Int(field.channel)].map { $0.contains(field) } ?? true
+    }
+    return MidiRegionEntry(model: prefix, next: next, safeKnown: safe)
+}
+struct MidiRegion {
+    let spec: MidiRegionSpec
+    let events: [WireEvent]
+    let addresses: Set<Int>
+    let startKnown: Set<ChaseField>, endTouched: Set<ChaseField>
+    let sourceDuration: Double
+    var duration: Double { spec.sourceEnd - spec.sourceStart }
+    var end: Double { spec.startSeconds + duration * Double(spec.repeatCount) }
+    init(spec: MidiRegionSpec, sourceDuration: Double, events: [WireEvent]) throws {
+        guard spec.startSeconds.isFinite, spec.startSeconds >= 0, spec.sourceStart.isFinite, spec.sourceStart >= 0,
+              spec.sourceEnd.isFinite, spec.sourceEnd > spec.sourceStart, spec.sourceEnd <= sourceDuration,
+              spec.repeatCount > 0, spec.repeatCount <= 9_007_199_254_740_991,
+              spec.startSeconds + (spec.sourceEnd - spec.sourceStart) > spec.startSeconds,
+              (spec.startSeconds + (spec.sourceEnd - spec.sourceStart) * Double(spec.repeatCount)).isFinite else { throw MidiFailure("MIDI regions require representable positive source spans and finite repeat counts") }
+        self.spec = spec; self.events = events; self.sourceDuration = sourceDuration
+        var end = SourceChase(), addresses = Set<Int>()
+        for event in events where event.seconds < spec.sourceEnd || event.seconds == spec.sourceEnd && spec.sourceEnd == sourceDuration {
+            end.observe(event.bytes, port: event.port)
+            if let status = event.bytes.first, status < 0xf0 { addresses.insert(event.port << 8 | Int(status & 15)) }
+        }
+        guard end.obstacles.isEmpty else { throw MidiFailure("MIDI region reconstruction requires support for " + end.obstacles.map(\.rawValue).sorted().joined(separator: ", ")) }
+        self.addresses = addresses; startKnown = midiRegionEntry(events, at: spec.sourceStart).safeKnown; endTouched = end.touched
+    }
+    func includes(_ seconds: Double) -> Bool { seconds < spec.sourceEnd || seconds == spec.sourceEnd && spec.sourceEnd == sourceDuration }
+}
+struct MidiRegionCursor {
+    var copy = 0, index = 0, active = false
+}
+struct MidiRegionAction {
+    enum Kind: Int { case endpointEvent, end, begin, event }
+    let seconds: Double, region: Int, kind: Kind
+}
+extension SourceChase {
+    func scoped(to addresses: Set<Int>) -> SourceChase {
+        var value = self
+        value.channels = channels.filter { addresses.contains($0.key) }
+        value.history = history.filter { addresses.contains($0.0 << 8 | Int($0.1[0] & 15)) }
+        value.known = known.filter { addresses.contains($0.port << 8 | Int($0.channel)) }
+        value.touched = touched.filter { addresses.contains($0.port << 8 | Int($0.channel)) }
+        return value
+    }
+    mutating func replace(_ model: SourceChase, addresses: Set<Int>) {
+        let outside = Set(channels.keys).subtracting(addresses)
+        var value = scoped(to: outside)
+        value.channels.merge(model.channels) { _, new in new }
+        value.history.append(contentsOf: model.history)
+        value.known.formUnion(model.known); value.touched.formUnion(model.touched)
+        self = value
+    }
+}
+
 struct Timeline: Decodable {
     let schemaVersion: Int
     let duration: Double
     let events: [Event]
     let wireEvents: [WireEvent]
     let bindings: [Binding]
-    var source: Bool { schemaVersion == 2 }
-    enum Keys: String, CodingKey { case schemaVersion, duration, events, bindings }
+    let regions: [MidiRegion]
+    var source: Bool { schemaVersion != 1 }
+    var arrangement: Bool { schemaVersion == 3 }
+    enum Keys: String, CodingKey { case schemaVersion, duration, events, bindings, sources, regions }
     init(schemaVersion: Int, duration: Double, events: [Event]) {
         self.schemaVersion = schemaVersion; self.duration = duration; self.events = events
-        wireEvents = []; bindings = []
+        wireEvents = []; bindings = []; regions = []
     }
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: Keys.self)
@@ -345,33 +428,80 @@ struct Timeline: Decodable {
         duration = try values.decode(Double.self, forKey: .duration)
         switch schemaVersion {
         case 1:
-            events = try values.decode([Event].self, forKey: .events); wireEvents = []; bindings = []
+            events = try values.decode([Event].self, forKey: .events); wireEvents = []; bindings = []; regions = []
             guard !values.contains(.bindings) else { throw MidiFailure("phrase timeline cannot contain source bindings") }
         case 2:
             events = []; wireEvents = try values.decode([WireEvent].self, forKey: .events)
-            bindings = try values.decode([Binding].self, forKey: .bindings)
+            bindings = try values.decode([Binding].self, forKey: .bindings); regions = []
+        case 3:
+            events = []; wireEvents = []
+            let sources = try values.decode([MidiRegionSource].self, forKey: .sources)
+            let specifications = try values.decode([MidiRegionSpec].self, forKey: .regions)
+            var outputs: [String] = []
+            for source in sources {
+                guard source.timeline.schemaVersion == 2 else { throw MidiFailure("arrangement requires retained source timelines") }
+                try source.timeline.validate()
+                for binding in source.timeline.bindings where !outputs.contains(binding.destination) { outputs.append(binding.destination) }
+            }
+            bindings = outputs.enumerated().map { Binding(port: $0.offset, destination: $0.element) }
+            var compiled: [MidiRegion] = []
+            guard Set(sources.map(\.id)).count == sources.count, Set(specifications.map(\.id)).count == specifications.count else { throw MidiFailure("duplicate MIDI arrangement identity") }
+            var sourceMessages: [String: [WireEvent]] = [:]
+            for source in sources {
+                var decoders: [Int: WireState] = [:], messages: [WireEvent] = []
+                for event in source.timeline.wireEvents {
+                    var decoder = decoders[event.port] ?? WireState()
+                    let uid = source.timeline.bindings.first(where: { $0.port == event.port })!.destination
+                    let physicalPort = outputs.firstIndex(of: uid)!
+                    for bytes in try decoder.feed(event.bytes) { messages.append(WireEvent(seconds: event.seconds, port: physicalPort, bytes: bytes)) }
+                    decoders[event.port] = decoder
+                }
+                sourceMessages[source.id] = messages
+            }
+            for spec in specifications {
+                guard let source = sources.first(where: { $0.id == spec.source }), let messages = sourceMessages[spec.source] else { throw MidiFailure("missing MIDI region source") }
+                compiled.append(try MidiRegion(spec: spec, sourceDuration: source.timeline.duration, events: messages))
+            }
+            regions = compiled
         default: throw MidiFailure("unknown MIDI timeline schema")
         }
     }
     func validate() throws {
         guard duration.isFinite, source ? duration >= 0 : duration > 0,
               duration * 1e9 < Double(UInt64.max) else { throw MidiFailure("invalid MIDI timeline duration") }
+        if arrangement {
+            guard !regions.isEmpty, regions.allSatisfy({ $0.end <= duration }) else { throw MidiFailure("invalid MIDI arrangement duration") }
+            var mutations = Set<ChaseField>()
+            for region in regions.sorted(by: { $0.spec.startSeconds < $1.spec.startSeconds }) {
+                let previous = mutations.filter { region.addresses.contains($0.port << 8 | Int($0.channel)) }
+                guard previous.isSubset(of: region.startKnown), region.spec.repeatCount == 1 || region.endTouched.isSubset(of: region.startKnown) else {
+                    throw MidiFailure("MIDI region needs an explicit source baseline for previously changed channel fields")
+                }
+                mutations.formUnion(region.endTouched)
+            }
+            for (index, first) in regions.enumerated() {
+                for second in regions.dropFirst(index + 1) where first.spec.startSeconds < second.end && second.spec.startSeconds < first.end {
+                    guard first.addresses.isDisjoint(with: second.addresses) else { throw MidiFailure("overlapping MIDI regions own the same destination/channel") }
+                }
+            }
+            return
+        }
         var previous = 0.0
         for event in events {
             _ = try event.bytes()
             guard event.seconds >= previous, event.seconds <= duration else { throw MidiFailure("MIDI events must be ordered inside the timeline") }
             previous = event.seconds
         }
-        var decoders: [UInt8: WireState] = [:]
+        var decoders: [Int: WireState] = [:]
         var destinations = Set<String>()
         for binding in bindings {
-            guard binding.port < 128, let uid = Int32(binding.destination), String(uid) == binding.destination,
+            guard binding.port >= 0, binding.port < 128, let uid = Int32(binding.destination), String(uid) == binding.destination,
                   decoders[binding.port] == nil, destinations.insert(binding.destination).inserted else {
                 throw MidiFailure("source ports require unique explicit destination bindings")
             }
             decoders[binding.port] = WireState()
         }
-        var used = Set<UInt8>()
+        var used = Set<Int>()
         for event in wireEvents {
             guard event.seconds.isFinite, event.seconds >= previous, event.seconds <= duration,
                   !event.bytes.isEmpty, var decoder = decoders[event.port] else {
@@ -419,10 +549,11 @@ final class MidiTransport {
     var anchor: UInt64 = 0, offset = 0.0, index = 0
     var held: [UInt16: Event] = [:]
     var maximumLateness = 0.0
-    var sourceDestinations: [UInt8: Destination] = [:], wireStates: [UInt8: WireState] = [:]
+    var sourceDestinations: [Int: Destination] = [:], wireStates: [Int: WireState] = [:]
     var sourceModel = SourceChase()
-    var sourceExclusive = Set<UInt8>()
-    var sourceHeld: [UInt8: [UInt16: Int]] = [:], sourcePedals: [UInt8: Set<UInt16>] = [:]
+    var regionCursors: [MidiRegionCursor] = []
+    var sourceExclusive = Set<Int>()
+    var sourceHeld: [Int: [UInt16: Int]] = [:], sourcePedals: [Int: Set<UInt16>] = [:]
 
     init(path: String, uid: String, loop: Bool) throws {
         timeline = try JSONDecoder().decode(Timeline.self, from: Data(contentsOf: URL(fileURLWithPath: path)))
@@ -433,6 +564,7 @@ final class MidiTransport {
         }
         guard let value = Int32(uid), String(value) == uid else { throw MidiFailure("MIDI destination requires its exact unique ID") }
         selectedUID = uid; self.loop = loop
+        regionCursors = timeline.regions.map { _ in MidiRegionCursor() }
     }
     // CoreMIDI's client is created on the main run loop. Transfer its ownership
     // before admitting notifications; resource selection and mutation use queue.
@@ -512,7 +644,7 @@ final class MidiTransport {
             try sourceSend(bytes, port: event.port)
         }
     }
-    func sourceSend(_ bytes: [UInt8], port sourcePort: UInt8) throws {
+    func sourceSend(_ bytes: [UInt8], port sourcePort: Int) throws {
         guard let destination = sourceDestinations[sourcePort] else { throw MidiFailure("source MIDI port is not prepared") }
         // Acquire ownership before sending: a failed OSStatus cannot prove
         // that the endpoint did not receive a note or pedal-on. Release it
@@ -545,27 +677,21 @@ final class MidiTransport {
         }
         if bytes.contains(0xf7) { sourceExclusive.remove(sourcePort) }
     }
-    func sourceSilence() throws {
+    func sourceSilence(addresses: Set<Int>? = nil) throws {
         var failure: Error?
-        // Like sourceApply, a release gives up ownership only after its send
-        // succeeds. A failed release stays owned, so the final cleanup retries it.
-        func released(_ bytes: [UInt8], to destination: Destination) -> Bool {
-            do { try sendWire(bytes, to: destination); return true } catch { failure = failure ?? error; return false }
-        }
         for binding in timeline.bindings {
-            guard let destination = sourceDestinations[binding.port] else { continue }
-            let port = binding.port
-            if sourceExclusive.contains(port) && released([0xf7], to: destination) { sourceExclusive.remove(port) }
-            for (key, count) in (sourceHeld[port] ?? [:]).sorted(by: { $0.key < $1.key }) {
-                var remaining = count
-                for _ in 0..<count {
-                    if released([0x80 | UInt8(key >> 8), UInt8(key & 127), 0], to: destination) { remaining -= 1 }
-                }
-                sourceHeld[port]?[key] = remaining > 0 ? remaining : nil
+            guard sourceDestinations[binding.port] != nil else { continue }
+            var messages: [[UInt8]] = []
+            if sourceExclusive.contains(binding.port) { messages.append([0xf7]) }
+            for (key, count) in (sourceHeld[binding.port] ?? [:]).sorted(by: { $0.key < $1.key }) where addresses == nil || addresses!.contains(binding.port << 8 | Int(key >> 8)) {
+                for _ in 0..<count { messages.append([0x80 | UInt8(key >> 8), UInt8(key & 127), 0]) }
             }
-            for key in (sourcePedals[port] ?? []).sorted() {
-                if released([0xb0 | UInt8(key >> 8), UInt8(key & 127), 0], to: destination) { sourcePedals[port]?.remove(key) }
+            for key in (sourcePedals[binding.port] ?? []).sorted() where addresses == nil || addresses!.contains(binding.port << 8 | Int(key >> 8)) {
+                messages.append([0xb0 | UInt8(key >> 8), UInt8(key & 127), 0])
             }
+            // sourceSend retains uncertain ownership on failure and releases only
+            // successfully sent note-offs, pedal-offs and exclusive terminators.
+            for bytes in messages { do { try sourceSend(bytes, port: binding.port) } catch { failure = failure ?? error } }
         }
         if let failure { throw failure }
     }
@@ -591,6 +717,7 @@ final class MidiTransport {
         try reconcile(at: seconds, reconstruct: true)
     }
     func reconcile(at seconds: Double, reconstruct: Bool = false) throws {
+        if timeline.arrangement { try reconcileRegions(at: seconds, reconstruct: reconstruct); return }
         if timeline.source {
             if reconstruct {
                 var model = SourceChase(), decoders = Dictionary(uniqueKeysWithValues: timeline.bindings.map { ($0.port, WireState()) })
@@ -635,6 +762,95 @@ final class MidiTransport {
         }
         for event in notes.values.sorted(by: { $0.key < $1.key }) where held[event.key] != event { try apply(event) }
     }
+    func regionStart(_ region: MidiRegion, copy: Int) -> Double { region.spec.startSeconds + Double(copy) * region.duration }
+    func nextRegionAction() -> MidiRegionAction? {
+        var selected: MidiRegionAction?
+        for (index, region) in timeline.regions.enumerated() {
+            let cursor = regionCursors[index]
+            guard cursor.copy < region.spec.repeatCount else { continue }
+            let start = regionStart(region, copy: cursor.copy)
+            let action: MidiRegionAction
+            if !cursor.active { action = MidiRegionAction(seconds: start, region: index, kind: .begin) }
+            else if cursor.index < region.events.count && region.includes(region.events[cursor.index].seconds) {
+                let event = region.events[cursor.index]
+                action = MidiRegionAction(seconds: start + (event.seconds - region.spec.sourceStart), region: index,
+                                          kind: event.seconds == region.spec.sourceEnd ? .endpointEvent : .event)
+            } else { action = MidiRegionAction(seconds: start + region.duration, region: index, kind: .end) }
+            if selected == nil || action.seconds < selected!.seconds
+                || action.seconds == selected!.seconds && (action.kind.rawValue < selected!.kind.rawValue
+                    || action.kind == selected!.kind && action.region < selected!.region) { selected = action }
+        }
+        return selected
+    }
+    func beginRegion(_ index: Int, at sourceSeconds: Double) throws {
+        let region = timeline.regions[index]
+        let entry = midiRegionEntry(region.events, at: sourceSeconds), prefix = entry.model, next = entry.next
+        let prior = sourceModel.scoped(to: region.addresses)
+        guard prior.touched.isSubset(of: entry.safeKnown) else { throw MidiFailure("MIDI region seek needs a source baseline before sounding keys on a previously changed channel") }
+        var permitted = prior; permitted.touched.formIntersection(prefix.known)
+        for (port, bytes) in try prefix.bootstrap(replacing: permitted) { try sourceSend(bytes, port: port) }
+        sourceModel.replace(prefix, addresses: region.addresses)
+        regionCursors[index].active = true; regionCursors[index].index = next
+    }
+    func reconcileRegions(at seconds: Double, reconstruct: Bool) throws {
+        if !reconstruct {
+            // Drain at most the one already active copy. Entirely missed copies
+            // are not audible history: skip them arithmetically to the live phase.
+            // This keeps short finite repeats from monopolizing the owner queue.
+            var phaseEntries: [(Int, Double)] = []
+            for (index, region) in timeline.regions.enumerated() {
+                let old = regionCursors[index]
+                guard old.copy < region.spec.repeatCount,
+                      seconds >= regionStart(region, copy: old.copy) + region.duration else { continue }
+                let copy = seconds >= region.end ? region.spec.repeatCount
+                    : min(region.spec.repeatCount - 1, max(0, Int(floor((seconds - region.spec.startSeconds) / region.duration))))
+                guard copy > old.copy else { continue }
+                if old.active {
+                    while regionCursors[index].index < region.events.count && region.includes(region.events[regionCursors[index].index].seconds) {
+                        let event = region.events[regionCursors[index].index]
+                        sourceModel.observe(event.bytes, port: event.port); try sourceSend(event.bytes, port: event.port)
+                        regionCursors[index].index += 1
+                    }
+                    try sourceSilence(addresses: region.addresses)
+                    for address in region.addresses { sourceModel.channels[address]?.notes.removeAll() }
+                }
+                regionCursors[index] = MidiRegionCursor(copy: copy)
+                if copy < region.spec.repeatCount && !(old.active && copy == old.copy + 1) {
+                    let source = region.spec.sourceStart + (seconds - regionStart(region, copy: copy))
+                    phaseEntries.append((index, min(source, region.spec.sourceEnd)))
+                }
+            }
+            // Every expired owner is silent before any new owner starts.
+            for (index, source) in phaseEntries { try beginRegion(index, at: source) }
+        }
+        if reconstruct {
+            regionCursors = timeline.regions.map { region in
+                if seconds >= region.end { return MidiRegionCursor(copy: region.spec.repeatCount) }
+                if seconds < region.spec.startSeconds { return MidiRegionCursor() }
+                let copy = min(region.spec.repeatCount - 1, max(0, Int(floor((seconds - region.spec.startSeconds) / region.duration))))
+                return MidiRegionCursor(copy: copy)
+            }
+            for (index, region) in timeline.regions.enumerated() where seconds >= region.spec.startSeconds && seconds < region.end {
+                let source = region.spec.sourceStart + (seconds - regionStart(region, copy: regionCursors[index].copy))
+                try beginRegion(index, at: min(source, region.spec.sourceEnd))
+            }
+        }
+        while let action = nextRegionAction(), action.seconds <= seconds {
+            let region = timeline.regions[action.region]
+            switch action.kind {
+            case .begin: try beginRegion(action.region, at: region.spec.sourceStart)
+            case .end:
+                try sourceSilence(addresses: region.addresses)
+                for address in region.addresses { sourceModel.channels[address]?.notes.removeAll() }
+                regionCursors[action.region].active = false; regionCursors[action.region].copy += 1
+            case .event, .endpointEvent:
+                let event = region.events[regionCursors[action.region].index]
+                sourceModel.observe(event.bytes, port: event.port)
+                try sourceSend(event.bytes, port: event.port)
+                regionCursors[action.region].index += 1
+            }
+        }
+    }
     func position(at host: UInt64 = DispatchTime.now().uptimeNanoseconds) -> Double {
         guard state == .playing else { return offset }
         return offset + Double(host - anchor) / 1e9
@@ -642,7 +858,7 @@ final class MidiTransport {
     func schedule() throws {
         timer?.cancel(); timer = nil
         guard state == .playing else { return }
-        let next = timeline.source ? (index < timeline.wireEvents.count ? timeline.wireEvents[index].seconds : timeline.duration)
+        let next = timeline.arrangement ? (nextRegionAction()?.seconds ?? timeline.duration) : timeline.source ? (index < timeline.wireEvents.count ? timeline.wireEvents[index].seconds : timeline.duration)
             : (index < timeline.events.count ? timeline.events[index].seconds : timeline.duration)
         let delay = max(0, next - offset) * 1e9
         guard delay < Double(UInt64.max) else { throw MidiFailure("MIDI event exceeds the host clock range") }
@@ -658,7 +874,7 @@ final class MidiTransport {
         do {
             let host = DispatchTime.now().uptimeNanoseconds
             let now = position(at: host)
-            let next = timeline.source ? (index < timeline.wireEvents.count ? timeline.wireEvents[index].seconds : now)
+            let next = timeline.arrangement ? (nextRegionAction()?.seconds ?? timeline.duration) : timeline.source ? (index < timeline.wireEvents.count ? timeline.wireEvents[index].seconds : now)
                 : (index < timeline.events.count ? timeline.events[index].seconds : now)
             maximumLateness = max(maximumLateness, now - next)
             if timeline.source { try reconcile(at: min(now, timeline.duration)) }
@@ -700,6 +916,7 @@ final class MidiTransport {
         var value: [String: Any] = ["kind": kind, "currentTime": current, "duration": timeline.duration,
                                   "loop": loop, "maximumLateness": maximumLateness]
         if let destination { value["device"] = destination.json }
+        if timeline.arrangement { value["format"] = "midi-arrangement"; value["regions"] = timeline.regions.count }
         if timeline.source { value["bindings"] = timeline.bindings.compactMap { binding in
             sourceDestinations[binding.port].map { ["port": binding.port, "device": $0.json] as [String: Any] }
         } }

@@ -438,6 +438,77 @@ mustReject { _ = try selectedDestination(uid:"2") }
 reviewObjects[20] = ReviewDestination(uid:2)
 reviewFound = 20; mustReject { _ = try selectedDestination(uid:"1") }; reviewFound = nil
 mustReject { _ = try selectedDestination(uid:"01") }
+func arrangement(_ sources: [[String: Any]], _ regions: [[String: Any]], duration: Double = 3) throws -> MidiTransport {
+    let path = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".json")
+    try JSONSerialization.data(withJSONObject: ["schemaVersion":3,"duration":duration,"sources":sources,"regions":regions]).write(to:path)
+    defer { try? FileManager.default.removeItem(at:path) }
+    let value = try MidiTransport(path:path.path,uid:"1",loop:false)
+    for binding in value.timeline.bindings { value.sourceDestinations[binding.port] = Destination(endpoint:0,uid:Int32(binding.destination)!,name:"synthetic region") }
+    value.destination = value.sourceDestinations[0]; value.state = .playing
+    return value
+}
+func asset(_ id: String, _ events: [[String: Any]], destination: String = "1") -> [String: Any] {
+    ["id":id,"timeline":["schemaVersion":2,"duration":1.0,"bindings":[["port":2,"destination":destination]],"events":events]]
+}
+func clip(_ id: String, _ source: String, start: Double = 0, from: Double = 0.1, to: Double = 0.6, repeatCount: Int = 2) -> [String: Any] {
+    ["id":id,"source":source,"startSeconds":start,"sourceStart":from,"sourceEnd":to,"repeatCount":repeatCount]
+}
+let regionSource = asset("a", [
+    ["seconds":0,"port":2,"bytes":[0xc0,33,0xb0,64,0,0xb0,66,0,0xb0,1,0]],
+    ["seconds":0.05,"port":2,"bytes":[0x90,60,100]],
+    ["seconds":0.1,"port":2,"bytes":[0x90,64,90,0x80,64,77]],
+    ["seconds":0.2,"port":2,"bytes":[0xb0,1,70]],
+    ["seconds":0.4,"port":2,"bytes":[0x80,60,45]],
+    ["seconds":1,"port":2,"bytes":[0x90,70,88,0x80,70,99]]])
+reset(0);reviewWire=[]
+let arranged = try arrangement([regionSource],[clip("r","a")]); try arranged.reconcile(at:0)
+precondition(reviewWire.map(\.1).contains([0x90,60,100]))
+precondition(Array(reviewWire.suffix(2)).map(\.1) == [[0x90,64,90],[0x80,64,77]])
+reviewWire=[];try arranged.reconcile(at:0.5)
+precondition(reviewWire.map(\.1).contains([0x80,60,45]))
+precondition(Array(reviewWire.suffix(2)).map(\.1) == [[0x90,64,90],[0x80,64,77]])
+precondition(arranged.regionCursors[0].copy==1 && arranged.regionCursors[0].active)
+try arranged.reconcile(at:1);precondition(arranged.regionCursors[0].copy==2)
+// A trimmed endpoint is exclusive; original full-source endpoint messages survive.
+reset(0);reviewWire=[]
+let whole = try arrangement([regionSource],[clip("whole","a",from:0,to:1,repeatCount:1)])
+try whole.reconcile(at:0);try whole.reconcile(at:1)
+precondition(reviewWire.map(\.1).contains([0x90,70,88]) && reviewWire.map(\.1).contains([0x80,70,99]))
+let exclusive = try arrangement([regionSource],[clip("trim","a",from:0.05,to:0.4,repeatCount:1)])
+reviewWire=[];try exclusive.reconcile(at:0);try exclusive.reconcile(at:1)
+precondition(!reviewWire.map(\.1).contains([0x80,60,45]) && reviewWire.map(\.1).contains([0x80,60,0]))
+// Same physical channel cannot overlap, including two assets/ports.
+mustReject { _ = try arrangement([regionSource],[clip("x","a"),clip("y","a",start:0.2)]) }
+let otherSame = asset("b",[["seconds":0,"port":2,"bytes":[0xc0,2,0x90,67,90]]])
+mustReject { _ = try arrangement([regionSource,otherSame],[clip("x","a"),clip("y","b",start:0.2)]) }
+let distinct = asset("b",[["seconds":0,"port":2,"bytes":[0xc1,2,0x91,67,90]]])
+let together = try arrangement([regionSource,distinct],[clip("x","a"),clip("y","b",start:0.2,repeatCount:1)])
+try together.reconcile(at:0.2);reviewWire=[];try together.reconcile(at:0.7)
+precondition(!reviewWire.map(\.1).contains([0x80,60,0])) // first owner's live repeat survives second owner cleanup
+precondition(reviewWire.map(\.1).contains([0x81,67,0]))
+// Adjacent owners must establish every previously mutated field.
+mustReject { _ = try arrangement([regionSource,otherSame],[clip("x","a",repeatCount:1),clip("y","b",start:0.5,repeatCount:1)]) }
+let regionMissingBaseline = asset("u",[["seconds":0,"port":2,"bytes":[0x90,60,100]],["seconds":0.5,"port":2,"bytes":[0xb0,1,80]]])
+mustReject { _ = try arrangement([regionMissingBaseline],[clip("u","u",from:0.1,to:0.7)]) }
+// Seeking through millions of copies uses arithmetic and one cursor.
+let huge = try arrangement([regionSource],[clip("huge","a",repeatCount:2_000_000)],duration:1_000_000)
+reviewWire=[];try huge.reconcile(at:999_999.75,reconstruct:true)
+precondition(huge.regionCursors.count==1 && huge.regionCursors[0].copy==1_999_999 && reviewWire.count<30)
+reset(250_000_000);let pausedRegion = try arrangement([regionSource],[clip("p","a")]);try pausedRegion.reconcile(at:0.25)
+pausedRegion.receive("{\"kind\":\"pause\"}");reviewWire=[]
+pausedRegion.receive("{\"kind\":\"seek\",\"seconds\":0.75}")
+precondition(reviewWire.isEmpty);pausedRegion.receive("{\"kind\":\"resume\"}")
+precondition(reviewExit == nil && reviewWire.map(\.1).contains([0x90,60,100]))
+let initialBoundary = asset("initial",[["seconds":0,"port":2,"bytes":[0x90,60,100,0xc0,20]]])
+mustReject { _ = try arrangement([asset("prior",[["seconds":0,"port":2,"bytes":[0xc0,10]]]),initialBoundary], [clip("prior","prior",from:0,to:1,repeatCount:1),clip("initial","initial",start:1,from:0,to:1,repeatCount:1)]) }
+let lateCopies = try arrangement([regionSource],[clip("late","a")])
+reviewWire=[];try lateCopies.reconcile(at:2)
+precondition(reviewWire.isEmpty && lateCopies.regionCursors[0].copy==2)
+let livePhase = try arrangement([regionSource],[clip("live","a",repeatCount:2_000_000)],duration:1_000_000)
+reviewWire=[];try livePhase.reconcile(at:999_999.75)
+precondition(livePhase.regionCursors[0].copy==1_999_999 && reviewWire.count<30)
+print("MIDI_ARRANGEMENT_DECISIONS_PASS: original boundary events, trims/full endpoints, finite repeats, overlapping physical ownership admission, distinct-channel cleanup, prior-state baselines, compressed seek, silent paused seek/resume")
+
 print("SELECTED_MIDI_DESTINATION_PASS: unrelated enumeration failure/churn isolated; selected removal, UID reuse, source type, offline and noncanonical ID rejected")
 print("SOURCE_MIDI_DECISIONS_PASS: F7 running status/partial messages, realtime/SysEx order, expression/release velocity, overlapping held-key cleanup, pedals, zero duration, explicit ports, partial-send cleanup, failed note/pedal/reset/channel-mode release retry, successful release ownership")
 print("MIDI_DECISIONS_PASS: late cycles, expired intervals, live notes, send-time epoch, inclusive seek, retrigger, one-shot end, pause/status phase, startup admission")

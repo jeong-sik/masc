@@ -44,7 +44,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
   const directory = await mkdtemp(join(tmpdir(), 'masc-sequencer-'))
   const worker = new Worker(new URL('./sequencer-worker.mjs', import.meta.url))
   const jobs = new Map(), players = new Map()
-  let jobNumber = 0, generation = 0, transport = { kind: 'stopped' }, workerFailure = null
+  let jobNumber = 0, generation = 0, transport = { kind: 'stopped' }, workerFailure = null, pendingDraw = null
   const wasRaw = process.stdin.isRaw
   let finish
   const done = new Promise(resolve => { finish = () => { accepting = false; resolve() } })
@@ -64,6 +64,12 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     return Math.min(editor.project.length - 1, start + (performance.now() - transport.since) / 60000 * editor.project.tempo * PPQ)
   }
   function draw() {
+    if (closed || suspended || pendingDraw) return
+    // A paste can deliver a whole command in one input chunk. Rendering each
+    // character fills the synchronous TTY output and delays subsequent decisions.
+    pendingDraw = setImmediate(() => { pendingDraw = null; drawNow() })
+  }
+  function drawNow() {
     if (closed || suspended) return
     const rows = process.stdout.rows || 24, cols = Math.max(1, (process.stdout.columns || 80) - 8)
     const project = editor.project, track = project.tracks[editor.track], current = selectedNote(editor)
@@ -263,6 +269,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
   let recovery = null
   try { draw(); if (signal?.aborted) finish(); await done }
   finally {
+    if (pendingDraw) clearImmediate(pendingDraw)
     closed = true; stop(); clearInterval(timer); sessionAbort.abort()
     process.stdin.off('keypress', keypress); process.stdin.off('end', onEnd)
     process.stdout.off('resize', onResize); signal?.removeEventListener('abort', onAbort)

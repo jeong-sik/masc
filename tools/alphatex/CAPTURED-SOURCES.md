@@ -89,12 +89,15 @@ MIDI with no audio frames. Audio start offsets retain the original first-audio
 delay. First/last MIDI times are verified against raw source packets during
 import, reopen, Save As and source-view preparation.
 
-## Remaining transport integration
+## Paired region playback
 
-Captured-region native playback is the next transport layer. An audible capture
-region currently returns a specific playback diagnostic, including through
-direct preparation/worker calls; it is never filtered out of a mixed plan.
-Mute the capture lane to audition other regions, or `:open-take` for its existing
-paired full-source playback and supported pause/seek. Monitoring and overdubbing
-against the arrangement remain subsequent work. Original WAV/UMP bytes and the
-existing WAV/SMF transport routes are retained.
+Space prepares captured and ordinary WAV lanes together through the IO worker.
+Choose `:midi-output MIDI_UID` and `:mixed-output AUDIO_UID`; an individual input
+can override that destination with `:midi-source ASSET SOURCE_ID MIDI_UID`.
+See [paired region transport](CAPTURE-UMP-REGIONS.md) for exact cuts, repeats,
+clock-only captures, physical ownership and reconstruction limits. The player
+owns all four copied source parts until its native process closes. `:play-audio`
+remains an explicit WAV-only audition, and `:open-take` opens paired full-source
+playback. Audible standalone SMF plus captured UMP composition currently returns
+an explicit diagnostic. Monitoring, overdubbing and latency compensation remain
+subsequent work; original WAV/UMP bytes and existing WAV/SMF routes are retained.

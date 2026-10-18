@@ -117,7 +117,7 @@ final class UmpRegionTransport: CoordinatedMidiTransport {
             guard !source.id.isEmpty else { throw MidiFailure("missing captured source identity") }
             let bound = try umpUnsigned(source.extent)
             guard bound > 0 else { throw MidiFailure("empty captured source span") }
-            let parsed = try source.timeline.timedEvents()
+            let parsed = try source.timeline.timedEvents(allowEmpty: true)
             guard parsed.allSatisfy({ UInt128($0.ticks) < bound }) else { throw MidiFailure("captured packet lies beyond its exclusive source end") }
             for binding in source.timeline.bindings where !destinations.contains(binding.destination) { destinations.append(binding.destination) }
             let timed = parsed.map { row -> UmpTimedEvent in

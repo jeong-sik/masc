@@ -354,7 +354,7 @@ async function primeCapture(view) {
   view.worker.emit('message',{id:job.id,ok:true,result:{project:editArrangement(job.project,{kind:'asset-add',asset}),asset:asset.id}});await flush()
   return asset
 }
-test('captured-region commands persist typed bounds and refuse playback until the lane is muted',async()=>{
+test('captured-region commands persist typed bounds and select paired preparation with complete project ownership',async()=>{
   const view=await controller()
   try {
     await primeWave(view);await primeCapture(view)
@@ -368,6 +368,12 @@ test('captured-region commands persist typed bounds and refuse playback until th
     const before=view.observed.requests.length;view.key('space');await flush()
     assert.equal(view.observed.requests.length,before,'no preparation or player can omit audible capture data')
     assert.equal(view.observed.players.length,0)
+    view.command('mixed-output audio');view.command('midi-source capture-1 keys 42');view.key('space');await flush()
+    const paired=view.observed.requests.at(-1);assert.equal(paired.kind,'prepare-capture')
+    assert.deepEqual(paired.sourceBindings,[{asset:'capture-1',source:'keys',destination:'42'}]);assert.deepEqual(paired.project,project)
+    view.command('stop');await flush()
+    view.worker.emit('message',{id:paired.id,ok:true,result:{path:'/owned-recovery/paired-late/plan.json',format:'capture-arrangement',midiOutput:'42',bindings:[{port:0,destination:'42'}]}});await flush()
+    assert.equal(view.observed.players.length,0);assert.ok(view.observed.removed.includes('/owned-recovery/paired-late'))
     view.command('mute');view.key('space');await flush()
     const prepare=view.observed.requests.at(-1);assert.equal(prepare.kind,'prepare-wave')
     assert.equal(prepare.project.lanes.find(lane=>lane.kind==='capture').muted,true)
@@ -469,4 +475,19 @@ test('already admitted take requests wait for the current leaf lifetime, includi
     for(const job of view.observed.requests.filter(job=>job.kind==='save'))view.worker.emit('message',{id:job.id,ok:true,result:'revision'})
     await closeController(view)
   }
+})
+
+
+test('ordinary paired capture play passes source bindings and drains native playback before removing its private snapshots',async()=>{
+  const view=await controller()
+  try {
+    await primeCapture(view);view.key('return','',{shift:true});view.command('mixed-output selected-audio');view.command('midi-source capture-1 keys -42');view.key('space');await flush()
+    const prepare=view.observed.requests.find(job=>job.kind==='prepare-capture');assert.ok(prepare)
+    assert.deepEqual(prepare.sourceBindings,[{asset:'capture-1',source:'keys',destination:'-42'}])
+    view.worker.emit('message',{id:prepare.id,ok:true,result:{path:'/owned-recovery/paired/plan.json',format:'capture-arrangement',midiOutput:'-42',bindings:[{port:0,destination:'-42'}]}});await flush()
+    const player=view.observed.players[0];assert.equal(player.options.format,'capture-arrangement');assert.equal(player.options.output,'selected-audio')
+    assert.deepEqual(player.options.midiBindings,[{port:0,destination:'-42'}])
+    view.command('stop');await flush();assert.ok(player.commands.includes('stop'));assert.ok(!view.observed.removed.includes('/owned-recovery/paired'))
+    player.finish();await flush();assert.ok(view.observed.removed.includes('/owned-recovery/paired'))
+  } finally {await closeController(view)}
 })

@@ -11048,7 +11048,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
          (match List.filter_map Fun.id
                   [ clause withdrawn "unsent cancelled"
                   ; clause on_server "in the server queue"
-                  ; clause left "left waiting (being posted, being rechecked, or already started)" ] with
+                  ; clause left "left waiting (being posted, being rechecked, already started, or already ended)" ] with
           | [] -> ()
           | _ :: _ as clauses ->
             notice ~kind:Notice_reply ("/queue clear: " ^ String.concat " · " clauses));

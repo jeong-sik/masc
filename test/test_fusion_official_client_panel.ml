@@ -1536,9 +1536,18 @@ before = document["token"]["access_token"].split(":")[0]
 assert before in ["SELECTED_A", "SELECTED_A_REFRESHED", "SELECTED_B", "SELECTED_C", "SELECTED_C_REFRESHED"]
 document["token"]["access_token"] = before if before.endswith("_REFRESHED") else before + "_REFRESHED"
 credential.write_text(json.dumps(document))
-with (root / "selected-accounts.jsonl").open("a") as log:
-    log.write(json.dumps({"home": str(account_dir), "cwd": str(workspace)}) + "\n")
 assert sys.stdin.read()
+# Prompt EOF follows on_spawned publication. Observe the actual Fusion spawn
+# manager's group without creating or changing a process group in this CLI.
+panel_root = next(path for path in account_dir.parents
+                  if path.name.startswith("masc-antigravity-panelist-"))
+owner = json.loads((panel_root / "process-owner.json").read_text())
+pid, pgid = os.getpid(), os.getpgrp()
+assert pgid == pid
+assert owner["state"] == "process_group" and owner["pgid"] == pgid
+with (root / "selected-accounts.jsonl").open("a") as log:
+    log.write(json.dumps({"home": str(account_dir), "cwd": str(workspace),
+                         "pid": pid, "pgid": pgid}) + "\n")
 model = sys.argv[sys.argv.index("--model") + 1]
 print(json.dumps({"event": "init", "conversation_id": "panel-fixture", "init": {
     "model": model, "cwd": str(workspace), "tools": [], "permission_mode": "request-review"}}), flush=True)
@@ -1612,19 +1621,372 @@ let test_antigravity_panel_selected_account_and_refresh () =
     let rows = Fs_compat.load_file (Filename.concat base_dir "selected-accounts.jsonl")
       |> String.split_on_char '\n' |> List.filter (fun row -> row <> "")
       |> List.map Yojson.Safe.from_string in
+    List.iter
+      (fun row ->
+         let pid = Yojson.Safe.Util.(row |> member "pid" |> to_int) in
+         let pgid = Yojson.Safe.Util.(row |> member "pgid" |> to_int) in
+         check int "actual Fusion CLI leads its published foreground process group" pid pgid)
+      rows;
     let homes = List.map (fun row -> Yojson.Safe.Util.(row |> member "home" |> to_string)) rows in
     match homes with
     | [_; _; _; _; _; _] ->
       check int "every call has a HOME of its own" 6
         (List.length (List.sort_uniq String.compare homes));
       List.iter
-        (fun home -> check bool "the HOME is removed with its call" false (Sys.file_exists home))
+        (fun home ->
+           let root_name =
+             home |> Filename.dirname |> Filename.dirname |> Filename.dirname |> Filename.dirname |> Filename.basename
+           in
+           check (option int) "panelist root stamps this process's pid"
+             (Some (Unix.getpid ()))
+             (Masc.Fusion_official_client.For_testing.antigravity_panel_root_owner_pid root_name);
+           check bool "the HOME is removed with its call" false (Sys.file_exists home))
         homes;
       check bool "no per-account state is kept under the runtime state directory" false
         (Sys.file_exists (Filename.concat base_dir ".masc/official-clients"));
       check (list string) "no temporary root outlives its call, refused ones included" []
         (Array.to_list (Sys.readdir panel_tmp))
     | _ -> fail "only six admitted model turns should spawn")
+;;
+
+(* One past the largest pid any supported platform allocates (Linux caps
+   pid_max at 4194304; macOS at 99999), so no process can hold it and
+   [Unix.kill] answers ESRCH. *)
+let dead_pid = 4194305
+
+let test_sweep_stale_antigravity_panel_roots () =
+  let parse = Masc.Fusion_official_client.For_testing.antigravity_panel_root_owner_pid in
+  check (option int) "decimal pid with nonce parsed"
+    (Some dead_pid)
+    (parse "masc-antigravity-panelist-4194305-a1b2c3");
+  List.iter
+    (fun name ->
+       check (option int) (name ^ " rejected") None (parse name))
+    [ "masc-antigravity-panelist-a1b2c3"
+    ; "masc-antigravity-panelist-0x10-a1b2c3"
+    ; "masc-antigravity-panelist-+123-a1b2c3"
+    ; "masc-antigravity-panelist-1_000-a1b2c3"
+    ; "masc-antigravity-panelist--5-a1b2c3"
+    ; "masc-antigravity-panelist-0-a1b2c3"
+    ; "masc-antigravity-panelist-4242-"
+    ; "masc-antigravity-panelist--a1b2c3"
+    ; "masc-muse-panelist-4194305-a1b2c3"
+    ];
+  let temp_dir = Filename.temp_dir "fusion-agy-sweep" "" |> Unix.realpath in
+  Fun.protect ~finally:(fun () -> remove_tree temp_dir) @@ fun () ->
+  let plant_root ?(perm = 0o700) name =
+    let root = Filename.concat temp_dir name in
+    Unix.mkdir root perm;
+    let oauth_dir =
+      List.fold_left Filename.concat root [ "official-clients"; "antigravity"; "panelist"; "rev"; ".gemini"; "antigravity-cli" ]
+    in
+    Fs_compat.mkdir_p oauth_dir;
+    write_file
+      ~path:(Filename.concat oauth_dir "antigravity-oauth-token")
+      ~perm:0o600
+      (Masc_test_deps.antigravity_oauth_fixture "ORPHAN_SECRET");
+    root
+  in
+  let initialized_root name =
+    let root = plant_root name in
+    (match Masc.Antigravity_panel_root_owner.initialize ~root with
+     | Ok () -> ()
+     | Error detail -> fail detail);
+    root
+  in
+  let dead_root = initialized_root (Printf.sprintf "masc-antigravity-panelist-%d-dead01" dead_pid) in
+  let live_self_root =
+    initialized_root (Printf.sprintf "masc-antigravity-panelist-%d-live01" (Unix.getpid ()))
+  in
+  let live_init_root = initialized_root "masc-antigravity-panelist-1-init01" in
+  let legacy_root = plant_root "masc-antigravity-panelist-legacy01" in
+  let non_private_dead_root =
+    let root = initialized_root (Printf.sprintf "masc-antigravity-panelist-%d-open01" dead_pid) in
+    Unix.chmod root 0o755;
+    root
+  in
+  let absent_owner = plant_root (Printf.sprintf "masc-antigravity-panelist-%d-absent01" dead_pid) in
+  let pending_owner = initialized_root (Printf.sprintf "masc-antigravity-panelist-%d-pending01" dead_pid) in
+  (match Masc.Antigravity_panel_root_owner.before_spawn ~root:pending_owner with
+   | Ok () -> ()
+   | Error detail -> fail detail);
+  let corrupt_owner = initialized_root (Printf.sprintf "masc-antigravity-panelist-%d-corrupt01" dead_pid) in
+  (* Corrupt the persisted ownership record without coupling the fixture to
+     its file name. This root contains only the record and the OAuth tree. *)
+  Array.iter
+    (fun name ->
+       let path = Filename.concat corrupt_owner name in
+       if (Unix.lstat path).Unix.st_kind = Unix.S_REG then
+         write_file ~path ~perm:0o600 "not a valid process ownership record")
+    (Sys.readdir corrupt_owner);
+  let symlink_target = Filename.concat temp_dir "outside-target" in
+  Unix.mkdir symlink_target 0o700;
+  let symlink_path =
+    Filename.concat temp_dir (Printf.sprintf "masc-antigravity-panelist-%d-link01" dead_pid)
+  in
+  Unix.symlink symlink_target symlink_path;
+  Masc.Fusion_official_client.sweep_stale_antigravity_panel_roots ~temp_dir ();
+  check bool "dead-process 0700 panelist root and OAuth copy removed" false
+    (Sys.file_exists dead_root);
+  List.iter
+    (fun (label, root) -> check bool label true (Sys.file_exists root))
+    [ "absent ownership is retained", absent_owner
+    ; "spawn pending ownership is retained", pending_owner
+    ; "malformed ownership is retained", corrupt_owner
+    ];
+  check bool "live self-process panelist root kept" true
+    (Sys.file_exists (Filename.concat live_self_root "official-clients/antigravity/panelist/rev/.gemini/antigravity-cli/antigravity-oauth-token"));
+  check bool "live other-user (pid 1 / EPERM) panelist root kept" true
+    (Sys.file_exists live_init_root);
+  check bool "unattributed legacy panelist root kept" true
+    (Sys.file_exists legacy_root);
+  check bool "non-0700 directory is not removed" true
+    (Sys.file_exists non_private_dead_root);
+  check bool "symlink target is untouched" true
+    (Sys.file_exists symlink_target);
+  check bool "symlink entry itself is untouched" true
+    (try ignore (Unix.lstat symlink_path : Unix.stats); true with Unix.Unix_error _ -> false)
+;;
+
+(* The supervisor outlives the simulated MASC creator. On Linux it adopts
+   orphaned descendants so a container's pid 1 cannot leave fixture zombies;
+   launchd performs that reaping on macOS. Commands acknowledge exact process
+   transitions rather than relying on a delay before running the sweep. *)
+let orphaned_antigravity_fixture = {|import ctypes, errno, json, os, select, signal, sys, time
+
+if sys.platform.startswith("linux"):
+    if ctypes.CDLL(None, use_errno=True).prctl(36, 1, 0, 0, 0) != 0:
+        raise OSError(ctypes.get_errno(), "PR_SET_CHILD_SUBREAPER")
+
+# Reserve descriptor 3, then explicitly close it in the CLI. Retention must
+# survive clients that do not preserve an inherited descriptor lease.
+reserved = os.open(os.devnull, os.O_RDONLY)
+if reserved != 3:
+    os.dup2(reserved, 3)
+    os.close(reserved)
+ready_read, ready_write = os.pipe()
+start_read, start_write = os.pipe()
+leader_read, leader_write = os.pipe()
+descendant_read, descendant_write = os.pipe()
+creator = os.fork()
+if creator == 0:
+    os.setpgid(0, 0)
+    root = os.path.join(sys.argv[1], "masc-antigravity-panelist-%d-orphan" % os.getpid())
+    os.mkdir(root, 0o700)
+    home = os.path.join(root, "home")
+    os.mkdir(home, 0o700)
+    credential = os.path.join(home, "antigravity-oauth-token")
+    with open(credential, "w") as handle:
+        handle.write("ORPHAN_OAUTH_COPY")
+    os.chmod(credential, 0o600)
+    leader = os.fork()
+    if leader == 0:
+        # Until the supervisor knows our PID, remain in the creator's group
+        # so startup cleanup can terminate us even without a ready message.
+        assert os.read(start_read, 1) == b"x"
+        os.setpgid(0, 0)
+        os.close(3)
+        if len(sys.argv) > 2 and sys.argv[2] == "fail-startup":
+            os._exit(71)
+        try:
+            os.fstat(3)
+            raise AssertionError("descriptor 3 stayed open")
+        except OSError as error:
+            assert error.errno == errno.EBADF
+        os.environ["HOME"] = home
+        descendant = os.fork()
+        if descendant == 0:
+            assert os.read(descendant_read, 1) == b"x"
+            assert os.path.isdir(os.environ["HOME"])
+            with open(credential) as handle:
+                assert handle.read() == "ORPHAN_OAUTH_COPY"
+            os._exit(0)
+        os.write(ready_write, (json.dumps({"descendant": descendant, "fd3_closed": True}) + "\n").encode())
+        assert os.read(leader_read, 1) == b"x"
+        assert os.path.isdir(os.environ["HOME"])
+        with open(credential) as handle:
+            assert handle.read() == "ORPHAN_OAUTH_COPY"
+        os._exit(0)
+    os.write(ready_write, (json.dumps({"creator": os.getpid(), "leader": leader,
+        "root": root, "home": home, "credential": credential}) + "\n").encode())
+    os.close(ready_write)
+    while True:
+        signal.pause()
+
+# Establish the cleanup group before any startup wait. The CLI cannot leave
+# it until its PID is published and acknowledged over start_write.
+os.setpgid(creator, creator)
+os.close(ready_write)
+creator_alive = True
+leader = None
+group_alive = True
+
+def read_line(fd):
+    deadline = time.monotonic() + 10
+    contents = bytearray()
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0 or not select.select([fd], [], [], remaining)[0]:
+            raise TimeoutError("fixture handshake did not arrive")
+        value = os.read(fd, 1)
+        if not value:
+            raise EOFError("fixture handshake closed before readiness")
+        if value == b"\n":
+            return contents.decode()
+        contents.extend(value)
+
+def emit(value):
+    print(value, flush=True)
+
+def wait_child(pid):
+    deadline = time.monotonic() + 10
+    while True:
+        if sys.platform.startswith("linux"):
+            waited, status = os.waitpid(pid, os.WNOHANG)
+            if waited:
+                assert os.waitstatus_to_exitcode(status) == 0
+                return
+        else:
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                return
+        if time.monotonic() >= deadline:
+            raise TimeoutError("fixture child was not reaped")
+        time.sleep(0.01)
+
+def group_exists():
+    try:
+        os.killpg(leader, 0)
+        return True
+    except ProcessLookupError:
+        return False
+
+def terminate_supervisor(_signal, _frame):
+    raise InterruptedError("fixture supervisor terminated")
+
+signal.signal(signal.SIGTERM, terminate_supervisor)
+try:
+    info = json.loads(read_line(ready_read))
+    leader = info["leader"]
+    if len(sys.argv) > 2:
+        print(json.dumps(info), file=sys.stderr, flush=True)
+    os.write(start_write, b"x")
+    info.update(json.loads(read_line(ready_read)))
+    emit(json.dumps(info))
+    assert read_line(0) == "kill-creator"
+    os.kill(creator, signal.SIGKILL)
+    _, status = os.waitpid(creator, 0)
+    creator_alive = False
+    assert os.WIFSIGNALED(status) and os.WTERMSIG(status) == signal.SIGKILL
+    emit("creator-reaped")
+    assert read_line(0) == "exit-leader"
+    os.write(leader_write, b"x")
+    wait_child(leader)
+    assert group_exists()
+    emit("descendant-retained")
+    assert read_line(0) == "exit-descendant"
+    os.write(descendant_write, b"x")
+    wait_child(info["descendant"])
+    assert not group_exists()
+    group_alive = False
+    emit("group-reaped")
+finally:
+    # EOF/timeout and the OCaml finalizer's SIGTERM can arrive together.
+    # Once cleanup starts, termination must not interrupt group reaping.
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    # These are only groups and PIDs created by this fixture. Killing both
+    # groups also covers a CLI failure before it establishes its own PGID.
+    for pgid in ([creator] if creator_alive else []) + ([leader] if leader and group_alive else []):
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    deadline = time.monotonic() + 10
+    while True:
+        try:
+            waited, _ = os.waitpid(-1, os.WNOHANG)
+        except ChildProcessError:
+            break
+        if not waited:
+            if time.monotonic() >= deadline:
+                raise TimeoutError("fixture cleanup did not reap its children")
+            time.sleep(0.01)
+|}
+
+let test_sweep_retains_orphaned_antigravity_process_group () =
+  let temp_dir = Filename.temp_dir "fusion-agy-orphan" "" |> Unix.realpath in
+  Fun.protect ~finally:(fun () -> remove_tree temp_dir) @@ fun () ->
+  let script = Filename.concat temp_dir "orphan-fixture.py" in
+  write_file ~path:script ~perm:0o600 orphaned_antigravity_fixture;
+  let output, input, errors =
+    Unix.open_process_args_full "python3" [| "python3"; script; temp_dir |] (Unix.environment ())
+  in
+  let status = ref None in
+  Fun.protect
+    ~finally:(fun () ->
+      match !status with
+      | Some _ -> ()
+      | None ->
+        (* SIGTERM interrupts startup as well as command waits; the helper's
+           finally block kills and reaps only its own fixture processes. *)
+        close_out_noerr input;
+        (try Unix.kill (Unix.process_full_pid (output, input, errors)) Sys.sigterm
+         with Unix.Unix_error (Unix.ESRCH, _, _) -> ());
+        ignore (Unix.close_process_full (output, input, errors)))
+    (fun () ->
+       let receive () =
+         let readable, _, _ = Unix.select [ Unix.descr_of_in_channel output ] [] [] 15.0 in
+         if readable = [] then fail "orphan fixture did not acknowledge its transition";
+         match input_line output with
+         | line -> line
+         | exception End_of_file ->
+           failf "orphan fixture exited: %s" (In_channel.input_all errors)
+       in
+       let info = Yojson.Safe.from_string (receive ()) in
+       let string_field key = Yojson.Safe.Util.(info |> member key |> to_string) in
+       let int_field key = Yojson.Safe.Util.(info |> member key |> to_int) in
+       let root = string_field "root" in
+       let home = string_field "home" in
+       let credential = string_field "credential" in
+       check bool "CLI explicitly closed descriptor 3" true
+         Yojson.Safe.Util.(info |> member "fd3_closed" |> to_bool);
+       let publish = function Ok () -> () | Error detail -> fail detail in
+       publish (Masc.Antigravity_panel_root_owner.initialize ~root);
+       publish (Masc.Antigravity_panel_root_owner.before_spawn ~root);
+       publish (Masc.Antigravity_panel_root_owner.spawned ~root ~pid:(int_field "leader"));
+       let command command expected =
+         output_string input (command ^ "\n");
+         flush input;
+         check string "fixture transition" expected (receive ())
+       in
+       let sweep () =
+         Masc.Fusion_official_client.sweep_stale_antigravity_panel_roots ~temp_dir ()
+       in
+       let retained label =
+         sweep ();
+         check bool (label ^ ": HOME retained") true (Sys.file_exists home);
+         check string (label ^ ": OAuth copy retained") "ORPHAN_OAUTH_COPY"
+           (Fs_compat.load_file credential)
+       in
+       command "kill-creator" "creator-reaped";
+       check (option int) "root names the killed creator" (Some (int_field "creator"))
+         (Masc.Fusion_official_client.For_testing.antigravity_panel_root_owner_pid
+            (Filename.basename root));
+       check bool "creator PID is absent before the sweep" true
+         (match Unix.kill (int_field "creator") 0 with
+          | () -> false
+          | exception Unix.Unix_error (Unix.ESRCH, _, _) -> true);
+       retained "creator SIGKILL with live CLI";
+       command "exit-leader" "descendant-retained";
+       retained "CLI leader exited with same-group descendant";
+       command "exit-descendant" "group-reaped";
+       sweep ();
+       check bool "root removed after the final process-group member exits" false
+         (Sys.file_exists root);
+       let result = Unix.close_process_full (output, input, errors) in
+       status := Some result;
+       check bool "fixture completed successfully" true (result = Unix.WEXITED 0))
 ;;
 
 let () =
@@ -1719,6 +2081,10 @@ let () =
             test_cancelled_muse_panel_does_not_leave_a_workspace
         ; test_case "Antigravity selected account and native refresh" `Quick
             test_antigravity_panel_selected_account_and_refresh
+        ; test_case "Antigravity orphan CLI and descendant retain HOME after creator SIGKILL" `Quick
+            test_sweep_retains_orphaned_antigravity_process_group
+        ; test_case "stale Antigravity panelist roots of dead processes are swept" `Quick
+            test_sweep_stale_antigravity_panel_roots
         ] )
     ; ( "seat routes"
       , [ test_case

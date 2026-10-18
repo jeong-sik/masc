@@ -365,9 +365,124 @@ let remove_muse_panel_root root =
    (#43256). The usage read and the context observation already work this way:
    the account's OAuth file seeds a disposable HOME. A token the call refreshes
    is not kept, so each call refreshes from the seed. *)
+let antigravity_panel_root_prefix = "masc-antigravity-panelist-"
+
+let is_decimal_digits s =
+  s <> "" && String.for_all (fun c -> c >= '0' && c <= '9') s
+;;
+
+(* Parse the decimal creator PID from [masc-antigravity-panelist-<pid>-<nonce>].
+   [int_of_string_opt] alone accepts OCaml literals such as [0x10], [+123], and
+   [1_000], so require plain decimal digits before parsing. Unattributed legacy
+   names without a [<pid>-] segment return [None] and are left alone. *)
+let antigravity_panel_root_owner_pid name =
+  let prefix_len = String.length antigravity_panel_root_prefix in
+  if not (String.starts_with ~prefix:antigravity_panel_root_prefix name)
+  then None
+  else (
+    let rest = String.sub name prefix_len (String.length name - prefix_len) in
+    match String.index_opt rest '-' with
+    | None -> None
+    | Some dash ->
+      let pid_str = String.sub rest 0 dash in
+      let suffix_len = String.length rest - dash - 1 in
+      if suffix_len <= 0 || not (is_decimal_digits pid_str)
+      then None
+      else (
+        match int_of_string_opt pid_str with
+        | Some pid when pid > 0 -> Some pid
+        | None | Some _ -> None))
+;;
+
+(* [Unix.kill pid 0] probes existence without signalling. [EPERM] means the
+   process exists under another user, and any non-[ESRCH] error fails closed by
+   treating the process as live so a sibling process's disposable HOME is never
+   removed while in use. *)
+let pid_is_live pid =
+  if pid <= 0
+  then false
+  else (
+    match Unix.kill pid 0 with
+    | () -> true
+    | exception Unix.Unix_error (Unix.ESRCH, _, _) -> false
+    | exception (Unix.Unix_error _ | Invalid_argument _) -> true)
+;;
+
+let sweep_stale_antigravity_panel_roots ?temp_dir () =
+  let raw_dir =
+    match temp_dir with
+    | Some dir -> dir
+    | None -> Filename.get_temp_dir_name ()
+  in
+  let dir = try Unix.realpath raw_dir with Unix.Unix_error _ -> raw_dir in
+  match Sys.readdir dir with
+  | exception Sys_error msg ->
+    Log.Runtime_agent.warn
+      "cannot scan %s for stale Antigravity panelist HOMEs: %s"
+      dir
+      msg
+  | entries ->
+    (* DET-OK: safety predicate on this process's own identity. *)
+    let self = Unix.getpid () in
+    let euid = Unix.geteuid () in
+    Array.sort String.compare entries;
+    Array.iter
+      (fun name ->
+         match antigravity_panel_root_owner_pid name with
+         | None -> ()
+         | Some pid when pid = self || pid_is_live pid -> ()
+         | Some pid ->
+           let path = Filename.concat dir name in
+           (match Unix.lstat path with
+            | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()
+            | exception Unix.Unix_error (error, _, _) ->
+              Log.Runtime_agent.warn
+                "cannot inspect stale Antigravity panelist HOME %s (pid %d): %s"
+                path
+                pid
+                (Unix.error_message error)
+            | stat
+              when stat.Unix.st_kind = Unix.S_DIR
+                   && stat.Unix.st_uid = euid
+                   && stat.Unix.st_perm land 0o7777 = 0o700
+                   && Antigravity_panel_root_owner.can_remove ~root:path ->
+              Runtime_antigravity_home.forget_prepared_below ~runtime_root:path;
+              (match Fs_compat.remove_tree path with
+               | () ->
+                 Log.Runtime_agent.info
+                   "removed stale Antigravity panelist HOME %s (creator %d and recorded users absent)"
+                   path
+                   pid
+               | exception (Sys_error _ | Unix.Unix_error _) as exn ->
+                 if Sys.file_exists path
+                 then
+                   Log.Runtime_agent.warn
+                     "cannot remove stale Antigravity panelist HOME %s (pid %d): %s"
+                     path
+                     pid
+                     (Printexc.to_string exn))
+            | _ -> ()))
+      entries
+;;
+
+(* DET-OK: process identity tags the disposable root so the next startup can
+   distinguish a dead creator from a live sibling process without an age
+   cutoff (#43405). *)
+let antigravity_panel_root_pid_prefix () =
+  Printf.sprintf "%s%d-" antigravity_panel_root_prefix (Unix.getpid ())
+;;
+
 let create_antigravity_panel_root () =
-  match Filename.temp_dir ~perms:0o700 "masc-antigravity-panelist-" "" |> Unix.realpath with
-  | root -> Ok root
+  sweep_stale_antigravity_panel_roots ();
+  match
+    Filename.temp_dir ~perms:0o700 (antigravity_panel_root_pid_prefix ()) ""
+    |> Unix.realpath
+  with
+  | root ->
+    Antigravity_panel_root_owner.initialize ~root
+    |> Result.map (fun () -> root)
+    |> Result.map_error (fun detail -> Setup_failure
+         ("cannot record Antigravity panelist HOME ownership: " ^ detail))
   | exception Sys_error detail ->
     Error (Setup_failure ("cannot create the Antigravity panelist HOME: " ^ detail))
   | exception Unix.Unix_error (error, _, path) ->
@@ -382,13 +497,17 @@ let create_antigravity_panel_root () =
 (* The root holds a copy of the account's OAuth file, so a removal that fails
    is said out loud. *)
 let remove_antigravity_panel_root root =
+  if not (Antigravity_panel_root_owner.can_remove ~root) then
+    Log.Runtime_agent.warn
+      "Antigravity panelist retained HOME %s: process-group ownership is live or unconfirmed" root
+  else (
   Runtime_antigravity_home.forget_prepared_below ~runtime_root:root;
   try Fs_compat.remove_tree root with
   | (Sys_error _ | Unix.Unix_error _) as exn ->
     Log.Runtime_agent.warn
       "Antigravity panelist left its disposable HOME %s behind: %s"
       root
-      (Printexc.to_string exn)
+      (Printexc.to_string exn))
 ;;
 
 let prepare_antigravity_panel_home ~runtime_root ~oauth_source =
@@ -576,6 +695,14 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
         ~runtime_root:panel_root ~oauth_source:execution.oauth_source) in
     let config = { config with Runtime_antigravity.cwd = native_cwd } in
     (match Runtime_antigravity.run_turn
+       ~before_spawn:(fun () ->
+         match Antigravity_panel_root_owner.before_spawn ~root:panel_root with
+         | Ok () -> ()
+         | Error detail -> raise (Sys_error detail))
+       ~on_spawned:(fun ~pid ->
+         match Antigravity_panel_root_owner.spawned ~root:panel_root ~pid with
+         | Ok () -> ()
+         | Error detail -> raise (Sys_error detail))
        ~on_stream_event:(function
          | Runtime_antigravity.Usage_reported {usage; _} -> on_usage (antigravity_usage usage)
          | Runtime_antigravity.Turn_started _ | Runtime_antigravity.Text_delta _
@@ -691,4 +818,5 @@ module For_testing = struct
   let bounded_claude_probe_config = bounded_claude_probe_config
   let claude_usage = claude_usage
   let codex_usage = codex_usage
+  let antigravity_panel_root_owner_pid = antigravity_panel_root_owner_pid
 end

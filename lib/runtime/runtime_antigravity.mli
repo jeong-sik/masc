@@ -202,7 +202,8 @@ val context_submission_to_json : Runtime_official_client_write.t -> Yojson.Safe.
 val run_turn :
   ?conversation_mode:conversation_mode ->
   ?home_dir:string ->
-  ?on_spawned:(unit -> unit) ->
+  ?before_spawn:(unit -> unit) ->
+  ?on_spawned:(pid:int -> unit) ->
   ?on_prompt_sent:(unit -> unit) ->
   ?on_context_submission:(Runtime_official_client_write.t -> unit) ->
   mgr:_ Eio.Process.mgr ->
@@ -213,7 +214,14 @@ val run_turn :
   config ->
   prompt:string ->
   (turn_result, error) result
-(** [on_prompt_sent] runs once after the complete prompt has been written to
+(** [before_spawn] runs after validation and spawn-slot admission, immediately
+    before creating the process. A callback failure prevents spawning.
+
+    [on_spawned] receives the actual child PID immediately after a successful
+    spawn, before any prompt is sent. The process manager determines whether
+    this PID also leads an owned foreground group.
+
+    [on_prompt_sent] runs once after the complete prompt has been written to
     the spawned client's stdin and EOF has been delivered. It does not claim
     provider acceptance or successful execution. Spawn, validation, and partial
     write failures do not call it. Callback failures fail the runtime turn.

@@ -43,7 +43,22 @@ module For_testing : sig
     -> Runtime_claude_code.config
   (** Keep Claude's login-only process bounded when its following model turn
       explicitly declares no deadline. *)
+
+  val antigravity_panel_root_owner_pid : string -> int option
+  (** Parse the decimal creator PID from a [masc-antigravity-panelist-<pid>-*]
+      directory basename, or [None] for non-panelist or unattributed names. *)
 end
+
+val sweep_stale_antigravity_panel_roots : ?temp_dir:string -> unit -> unit
+(** Remove [masc-antigravity-panelist-<pid>-*] directories in [temp_dir]
+    (defaulting to {!Filename.get_temp_dir_name}) whose creator [pid] no
+    longer exists ([Unix.ESRCH]) and whose entry is a [0700] directory owned
+    by the current effective UID. Deletion also requires a private ownership
+    record proving no spawn was attempted or that the recorded foreground
+    process group no longer exists. A surviving CLI or same-group native tool
+    keeps its HOME even after the creator exits. Pending, missing, malformed
+    or unreadable ownership, live creators ([EPERM] included), and
+    unattributed names are left untouched. *)
 
 val run_panelist
   :  base_dir:string
@@ -112,11 +127,15 @@ val run_panelist
     reaping. Selected account HOME and managed login config remain unchanged. A directory that cannot be created is
     a [Setup_failure]; one that cannot be removed is logged.
 
-    Antigravity uses the configured OAuth source in a persistent
-    account-specific HOME and spawns in its private native read workspace. It
-    does not inherit the ambient login or the Keeper bookkeeping directory as
-    its working tree. Other panelists spawn in [base_dir] unless documented
-    above.
+    Antigravity seeds a per-call disposable HOME ([masc-antigravity-panelist-<pid>-*])
+    from the configured OAuth source, spawns in its private native read
+    workspace, and removes the disposable HOME when the call ends; dead-process
+    roots left behind by an abrupt exit are swept by
+    {!sweep_stale_antigravity_panel_roots} only after its foreground process
+    group is absent. A crash before the spawned group is published leaves
+    ownership unconfirmed and retains the HOME. It does not inherit the ambient
+    login or the Keeper bookkeeping directory as its working tree. Other
+    panelists spawn in [base_dir] unless documented above.
 
     Requires the initialized Eio runtime: the process manager and clock come
     from {!Eio_context}, the same way the official-client login probe obtains

@@ -85,6 +85,7 @@ let fixture_script
     ?required_home
     ?(sleep_s = 0.0)
     ?capture_prompt
+    ?capture_pid
     ?(stdin = Read_to_end)
     ?line_delay_s
     ?(line_delays = [])
@@ -98,6 +99,10 @@ let fixture_script
   let path = Filename.temp_file "masc-antigravity-" ".sh" in
   let output = open_out_bin path in
   output_string output "#!/bin/sh\n";
+  Option.iter
+    (fun path ->
+       output_string output ("printf '%s\\n' \"$$\" >" ^ shell_quote path ^ "\n"))
+    capture_pid;
   (* A line the fixture shouts on its own stderr, so a test can pin what the
      runtime's stderr tail carried into an error detail. *)
   if stderr_line <> "" then
@@ -173,7 +178,7 @@ let fixture_script
   path
 ;;
 
-let with_fixture ?require_resume ?required_home ?sleep_s ?capture_prompt ?stdin ?line_delay_s
+let with_fixture ?require_resume ?required_home ?sleep_s ?capture_prompt ?capture_pid ?stdin ?line_delay_s
     ?line_delays ?line_gates ?pipe_holder_s ?exit_delay_s ?stderr_line ?exit_code lines f =
   let path =
     fixture_script
@@ -181,6 +186,7 @@ let with_fixture ?require_resume ?required_home ?sleep_s ?capture_prompt ?stdin 
       ?required_home
       ?sleep_s
       ?capture_prompt
+      ?capture_pid
       ?stdin
       ?line_delay_s
       ?line_delays
@@ -207,6 +213,7 @@ let run_fixture
     ?on_prompt_sent
     ?on_context_submission
     ?on_spawned
+    ?before_spawn
     ?on_stream_event
     ?(timeout_s = 2.0)
     ?admission_timeout_s
@@ -229,6 +236,7 @@ let run_fixture
       ?on_prompt_sent
       ?on_context_submission
       ?on_spawned
+      ?before_spawn
       ?on_stream_event
       ~mgr:(Eio.Stdenv.process_mgr env)
       ~clock:(Eio.Stdenv.clock env)
@@ -847,6 +855,30 @@ let test_large_prompt_streams_over_stdin () =
         | receipts -> failf "expected one receipt, got %d" (List.length receipts)))
 ;;
 
+let test_spawn_observer_receives_the_actual_child_pid () =
+  let captured = Filename.temp_file "masc-antigravity-pid-" ".txt" in
+  Fun.protect ~finally:(fun () -> Sys.remove captured) @@ fun () ->
+  let observed = ref None in
+  let transitions = ref [] in
+  with_fixture ~capture_pid:captured [ init (); result () ] (fun path ->
+    match run_fixture
+      ~before_spawn:(fun () -> transitions := `Before_spawn :: !transitions)
+      ~on_spawned:(fun ~pid ->
+        observed := Some pid;
+        transitions := `Spawned :: !transitions)
+      path with
+    | Error error -> fail (Runtime_antigravity.error_to_string error)
+    | Ok _ ->
+      let actual = In_channel.with_open_bin captured In_channel.input_all
+        |> String.trim |> int_of_string in
+      check bool "fixture PID is a child process" true
+        (actual > 0 && actual <> Unix.getpid ());
+      check (option int) "spawn observer names the actual CLI process"
+        (Some actual) !observed;
+      check bool "ownership publication brackets the actual spawn" true
+        (!transitions = [ `Spawned; `Before_spawn ]))
+;;
+
 let test_incomplete_prompt_is_not_reported () =
   let sent = ref 0 in
   let spawned = ref 0 in
@@ -860,7 +892,7 @@ let test_incomplete_prompt_is_not_reported () =
     (* Larger than the pipe buffer: the child closes stdin without consuming
        it, so a successful spawn cannot imply a complete prompt write. *)
     let result = run_fixture ~prompt:(String.make 1_100_000 'x')
-      ~on_spawned:(fun () -> incr spawned)
+      ~on_spawned:(fun ~pid:_ -> incr spawned)
       ~on_prompt_sent:(fun () -> incr sent)
       ~on_context_submission:(fun _ -> incr sent) path in
     check int "write failure occurs after real spawn" 1 !spawned;
@@ -1058,7 +1090,7 @@ let test_conversation_callback_failure_is_typed () =
 let test_unexpected_exception_is_unhandled () =
   with_fixture [ init (); result () ] (fun path ->
     match
-      run_fixture ~on_spawned:(fun () -> failwith "fixture spawn observer") path
+      run_fixture ~on_spawned:(fun ~pid:_ -> failwith "fixture spawn observer") path
     with
     | Error (Runtime_antigravity.Unhandled_exception detail) ->
       check bool "names the exception" true
@@ -1078,7 +1110,7 @@ let test_reserved_exceptions_leave_run_turn () =
            (Printexc.to_string exn ^ " leaves run_turn untyped")
            exn
            (fun () ->
-              ignore (run_fixture ~on_spawned:(fun () -> raise exn) path))))
+              ignore (run_fixture ~on_spawned:(fun ~pid:_ -> raise exn) path))))
     [ Out_of_memory; Stack_overflow; Sys.Break ]
 ;;
 
@@ -1680,10 +1712,19 @@ let test_admission_is_process_free () =
       cli_path = ""
     }
   in
-  match Runtime_antigravity.validate_turn config ~prompt:"fixture" with
+  let before_spawn_called = ref false in
+  let result = Eio_main.run (fun env ->
+    Runtime_antigravity.run_turn
+      ~before_spawn:(fun () -> before_spawn_called := true)
+      ~mgr:(Eio.Stdenv.process_mgr env)
+      ~clock:(Eio.Stdenv.clock env)
+      ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
+      config ~prompt:"fixture") in
+  check bool "invalid configuration does not publish pending ownership" false !before_spawn_called;
+  match result with
   | Error (Runtime_antigravity.Invalid_config "cli_path must not be empty") -> ()
   | Error error -> fail (Runtime_antigravity.error_to_string error)
-  | Ok () -> fail "invalid deterministic config passed admission"
+  | Ok _ -> fail "invalid deterministic config passed admission"
 ;;
 
 let test_live_start_and_resume () =
@@ -1849,6 +1890,8 @@ let () =
             "large prompt uses stdin"
             `Quick
             test_large_prompt_streams_over_stdin
+        ; test_case "spawn observer receives the actual child PID" `Quick
+            test_spawn_observer_receives_the_actual_child_pid
         ; test_case "incomplete prompt is not reported as transmitted" `Quick
             test_incomplete_prompt_is_not_reported
         ; test_case "a CLI that answers without reading the prompt does not hold the turn"

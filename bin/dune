@@ -2137,6 +2137,7 @@
   masc_tui_identity_requests
   masc_tui_github_requests
   masc_tui_image_requests
+  masc_tui_pele
   masc_tui_schedule_decode
   masc_tui_render
   masc_tui_render_board
@@ -2475,7 +2476,7 @@
  (name masc_tui_image_preview)
  (wrapped false)
  (modules masc_tui_image_preview)
- (libraries masc_tui_keeper_chat_projection masc_tui_image_ref masc.masc_tool_blob_store base64 digestif yojson uri))
+ (libraries masc_tui_keeper_chat_projection masc_tui_image_ref masc_tui_markdown masc.masc_tool_blob_store base64 digestif yojson uri))
 
 (library
  (name masc_tui_link_label)

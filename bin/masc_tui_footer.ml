@@ -760,7 +760,7 @@ let chat_hints ~enter_hint ~scroll_hint ~switch_hint ~escape_hint ~leave_hint
     ~help_hint =
   Printf.sprintf
     "%s  Ctrl-J:newline  /:commands  %s%s  %s%s  Ctrl-R:reasoning  \
-     Ctrl-D:tools  Ctrl-N:journal  Ctrl-F:metadata  Ctrl-O:image  Ctrl-U:clear  Ctrl-W:word%s"
+     Ctrl-D:tools  Ctrl-N:journal  Ctrl-F:metadata  Ctrl-O:image/diagram  Ctrl-U:clear  Ctrl-W:word%s"
     enter_hint escape_hint leave_hint scroll_hint switch_hint help_hint
 
 (** Below 120 columns the fixed set drops to what leaves room for the message

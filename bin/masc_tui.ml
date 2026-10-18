@@ -10165,9 +10165,27 @@ let open_message_image state ~mailbox ~notice ~name source =
     let view = state.view in
     state.sent_image_read <- Some {sir_generation=generation; sir_view=view;
       sir_keeper=keeper_name; sir_name=name; sir_authority=state.workspace_read_authority};
+    let _, columns = Masc_tui_ansi.get_terminal_size () in
+    (* When the terminal supplies no pixel geometry, use the half-em advance
+       of Pele's 16px default font as a logical layout width. The existing
+       image presenter still fits the resulting PNG to the actual cells. *)
+    let cell_width = match !image_cell_pixels with
+      | Some (width, _) -> width
+      | None -> 8 in
+    let diagram_width = max 1 (columns - 2) * cell_width in
+    let palette = Masc_tui_terminal_palette.snapshot () in
+    let hex color =
+      Printf.sprintf "#%02x%02x%02x"
+        (Masc_tui_terminal_palette.red color)
+        (Masc_tui_terminal_palette.green color)
+        (Masc_tui_terminal_palette.blue color) in
+    let diagram_colors = Option.map (fun palette ->
+      hex (Masc_tui_terminal_palette.foreground palette),
+      hex (Masc_tui_terminal_palette.background palette))
+      (Masc_tui_terminal_palette.snapshot_palette palette) in
     let run () =
       let result = Masc_tui_image_requests.load ~host:server_peer_host ~port
-        ~cache_dir:ensure_img_cache_dir source in
+        ~cache_dir:ensure_img_cache_dir ~diagram_width ~diagram_colors source in
       enqueue_async mailbox (Sent_image_ready { generation; view; keeper_name; name; result })
     in
     match Eio_context.get_switch_opt () with
@@ -10194,7 +10212,7 @@ let open_named_image state ~mailbox =
       notice ~kind:Notice_failure
         (Printf.sprintf "Ctrl-O %s: %s" name reason)
   | Masc_tui_image_preview.No_image ->
-      notice ~kind:Notice_reply "Ctrl-O: no image in this conversation or the composer"
+      notice ~kind:Notice_reply "Ctrl-O: no image or closed Mermaid diagram in this conversation or the composer"
 
 (* The MIDI soundfont read at boot from [tui].midi_soundfont (the same load
    that applies the theme and the saved sort). The numbered attachment keys

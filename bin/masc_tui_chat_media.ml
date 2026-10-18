@@ -5,6 +5,7 @@ type t =
   | Voice of Blocks.voice_block
   | Attach of Blocks.attach_block
   | Svg of Blocks.svg_block
+  | Mermaid of Blocks.mermaid_block
 
 let of_json json =
   match Blocks.blocks_of_yojson json with
@@ -14,8 +15,9 @@ let of_json json =
       | Blocks.Voice voice -> Some (Voice voice)
       | Blocks.Attach attachment -> Some (Attach attachment)
       | Blocks.Svg svg -> Some (Svg svg)
+      | Blocks.Mermaid diagram -> Some (Mermaid diagram)
       | Blocks.Text _ | Blocks.Heading _ | Blocks.Unordered_list _
-      | Blocks.Callout _ | Blocks.Table _ | Blocks.Code _ | Blocks.Mermaid _
+      | Blocks.Callout _ | Blocks.Table _ | Blocks.Code _
       | Blocks.Link _ | Blocks.Fusion _ | Blocks.Status _ | Blocks.Trace _
       | Blocks.Thinking _ -> None) blocks
 ;;
@@ -39,6 +41,7 @@ let source_line label = function
 let describe = function
   | Image image -> source_line (with_caption "Image" image.cap) (Some image.src)
   | Svg svg -> with_caption "SVG" svg.cap
+  | Mermaid diagram -> with_caption "Mermaid · Ctrl-O:diagram" diagram.caption
   | Attach attachment ->
     source_line (with_caption "File" (Some attachment.name)) attachment.src
   | Voice voice ->
@@ -87,6 +90,8 @@ let newest_image media =
         | Unavailable_image _ -> Some preview)
     | Svg svg -> Some (Masc_tui_image_preview.inline_svg
         ~name:(Option.value svg.cap ~default:"SVG") svg.svg)
+    | Mermaid diagram -> Some (Masc_tui_image_preview.mermaid
+        ~name:(Option.value diagram.caption ~default:"Mermaid") diagram.source)
     | Voice _ -> None)
 ;;
 
@@ -149,5 +154,5 @@ let newest_playable media =
   List.rev media |> List.find_map (function
     | Attach attachment -> playable_attach attachment
     | Voice voice -> playable_voice voice
-    | Image _ | Svg _ -> None)
+    | Image _ | Svg _ | Mermaid _ -> None)
 ;;

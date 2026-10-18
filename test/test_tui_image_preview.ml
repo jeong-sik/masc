@@ -177,11 +177,33 @@ let test_artifact_rejects_substitution_or_corruption () =
   check bool "internally consistent envelope must also match recorded bytes" true
     (Result.is_error (Preview.decode_artifact longer_reference (`Assoc forged_fields)))
 
+let test_diagram_preview_selection () =
+  let source = "pie\n  \"완료\": 8\n  \"대기\": 2" in
+  let text = "```mermaid\nflowchart TD\n A --> B\n```\n~~~mermaid\n"
+    ^ source ^ "\n~~~\n```mermaid\nunfinished" in
+  let preview = Preview.in_message ~text ~attachments:[] in
+  (match preview with
+   | Preview.Output_image { source = Preview.Inline_mermaid actual; _ } ->
+       check string "last completed source selected without parsing" source actual
+   | _ -> fail "closed chart was not offered to Pele");
+  (match Preview.in_message ~text ~attachments:[Preview.Named_path "capture.png"] with
+   | Preview.Named_path "capture.png" -> ()
+   | _ -> fail "diagram displaced an explicit attachment");
+  (match Preview.choose_preview ~conversation:preview ~staged:[attachment "draft.png"]
+      ~order:Preview.Staged_is_newer with
+   | Preview.Staged _ -> ()
+   | _ -> fail "diagram displaced a newer staged draft");
+  match Preview.in_message ~text:"```mermaid\npie\n" ~attachments:[] with
+  | Preview.No_image -> ()
+  | _ -> fail "incomplete stream was sent to the renderer"
+
 let () =
   run
     "tui_image_preview"
     [ ( "choose_preview"
-      , [ test_case "sent image uses durable reference, never its label" `Quick
+      , [ test_case "closed diagrams preserve source and draft priority" `Quick
+            test_diagram_preview_selection
+        ; test_case "sent image uses durable reference, never its label" `Quick
             test_sent_image_keeps_reference_not_filename
         ; test_case "missing or malformed payload is unavailable" `Quick
             test_missing_and_malformed_payloads_do_not_open_labels

@@ -142,7 +142,22 @@ let test_remote_http_src_is_not_played () =
   check_playable "an external http source is out of scope for now"
     [ attach_media ~src:"https://example.com/x.mp3" "x.mp3" ] None
 
+let test_canonical_mermaid_preview () =
+  let source = "classDiagram\n  Keeper <|-- Librarian" in
+  let row = read_message (message ~role:"assistant" ~autonomous:false ~text:""
+    [ image; Blocks.Mermaid { source; caption = Some "Agents" } ]) in
+  (match Media.newest_image row.media with
+   | Some (Preview.Output_image { name = "Agents"; source = Preview.Inline_mermaid actual }) ->
+       check string "canonical block retains exact source" source actual
+   | _ -> fail "canonical diagram did not replace an older image");
+  check_playable "diagram is not audio" row.media None;
+  match Media.newest_image (Media.of_json (Blocks.blocks_to_yojson
+    [ Blocks.Mermaid { source; caption = None }; image ])) with
+  | Some (Preview.Output_image { source = Preview.Inline_data _; _ }) -> ()
+  | _ -> fail "diagram displaced a later image output"
+
 let () = run "TUI retained output and playback" [ "history", [
+  test_case "canonical diagram preserves producer order and source" `Quick test_canonical_mermaid_preview;
   test_case "media-only autonomous turn" `Quick test_media_only_autonomous;
   test_case "failure retains completed outputs" `Quick test_failure_retains_outputs;
   test_case "prose and unknown block" `Quick test_prose_and_unknown_block;

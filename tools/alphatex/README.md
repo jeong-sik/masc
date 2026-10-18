@@ -38,6 +38,10 @@ the existing `[tui] midi_soundfont` when configured, otherwise the alphaTab
 package's Sonivox SoundFont. Playback uses afplay, ffplay, aplay or SoX play
 from PATH, in that order. A player failure is reported in the view. Playback
 stops when the view closes. There is no synchronized playback cursor yet.
+Track selection isolates sounding parts while preserving the full score's
+pickup/grace timing, repeats and tempo. Parts explicitly sharing a MIDI channel
+(such as percussion on channel 9) retain the official shared channel program,
+volume and controller state; solo does not create independent MIDI channels.
 
 Malformed alphaTex remains malformed: diagnostics and the original source
 are retained. In particular, `\staff {score tabs}` uses **tabs**, not `tab`.

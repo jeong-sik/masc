@@ -1,5 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { midi } from '@coderline/alphatab'
 import { readScore, renderScore, midiForScore, createAudioExporter } from '../engine.mjs'
 
 const bass = String.raw`\title "반음 연결 연습"
@@ -111,14 +112,50 @@ test('selected tracks retain global repeat and tempo order without accepting mis
 \track "Second" :4 3.3 r r r | 5.3 r r r`
   const full = midiForScore(source)
   const selected = midiForScore(source, { tracks: [1] })
-  assert.equal(selected.score.tracks.length, 1)
-  assert.equal(selected.score.tracks[0].name, 'Second')
-  assert.equal(selected.score.tracks[0].index, 0)
+  assert.equal(selected.score.tracks.length, 2)
+  assert.equal(selected.score.tracks[1].name, 'Second')
+  assert.equal(selected.score.tracks[1].index, 1)
   assert.deepEqual(
     selected.generator.tickLookup.masterBars.map(bar => [bar.start, bar.end, bar.masterBar.index, bar.tempoChanges]),
     full.generator.tickLookup.masterBars.map(bar => [bar.start, bar.end, bar.masterBar.index, bar.tempoChanges]),
   )
   for (const tracks of [[], [-1], [2], [0.5]]) {
     assert.throws(() => createAudioExporter(source, { tracks }), /existing score track indices/)
+  }
+})
+
+test('solo retains full-score pickup and grace timing plus channel/global events', () => {
+  const sources = [
+    String.raw`\tempo 80 \track "Long pickup" \ac :4 0.6 0.6 | :4 0.6 r r r |
+\track "Short pickup" :4 3.3 | :4 5.3 r r r`,
+    String.raw`\tempo 80 \track "Grace" :8 3.3{gr} 3.3 4.3 5.3 | :4 0.6 r r r |
+\track "Plain" :4 3.3 r r r | :4 5.3 r r r`,
+  ]
+  for (const source of sources) {
+    const full = midiForScore(source)
+    const selected = midiForScore(source, { tracks: [1] })
+    assert.equal(selected.midi.format, full.midi.format)
+    assert.equal(selected.midi.division, full.midi.division)
+    assert.equal(selected.midi.tickShift, full.midi.tickShift)
+    const grid = value => value.generator.tickLookup.masterBars.map(bar =>
+      [bar.start, bar.end, bar.masterBar.index, bar.tempoChanges])
+    assert.deepEqual(grid(selected), grid(full))
+    // Every retained event must keep its full-score order and original tick,
+    // including the unselected track 0's global end/tempo and channel state.
+    let cursor = 0
+    for (const event of selected.midi.events) {
+      while (cursor < full.midi.events.length
+        && JSON.stringify(full.midi.events[cursor]) !== JSON.stringify(event)) cursor++
+      assert.ok(cursor < full.midi.events.length)
+      cursor++
+    }
+    const selectedNotes = selected.midi.events.filter(event =>
+      event.type === midi.MidiEventType.NoteOn || event.type === midi.MidiEventType.NoteOff)
+    assert.ok(selectedNotes.length > 0)
+    assert.ok(selectedNotes.every(event => event.track === 1))
+    const globalTypes = new Set([midi.MidiEventType.TimeSignature, midi.MidiEventType.TempoChange,
+      midi.MidiEventType.EndOfTrack, midi.MidiEventType.ProgramChange, midi.MidiEventType.ControlChange])
+    const channelAndGlobal = events => events.filter(event => globalTypes.has(event.type))
+    assert.deepEqual(channelAndGlobal(selected.midi.events), channelAndGlobal(full.midi.events))
   }
 })

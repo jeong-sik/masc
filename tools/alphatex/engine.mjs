@@ -89,18 +89,26 @@ export function midiForScore(source, { smf1Mode = false, tracks } = {}) {
       || tracks.some(index => !Number.isInteger(index) || index < 0 || index >= score.tracks.length)) {
       throw new Error('audio track selection must contain existing score track indices')
     }
-    // Select model tracks before generation. Percussion parts share MIDI
-    // channel 9, so channel-volume muting cannot isolate those parts. Keep
-    // the global master bars (tempo/repeats) and let the official addTrack
-    // restore contiguous indices and all existing staff/voice references.
-    const selected = score.tracks.filter(track => tracks.includes(track.index))
-    score.tracks.length = 0
-    for (const track of selected) score.addTrack(track)
   }
   const midi = new alphaTab.midi.MidiFile()
   const handler = new alphaTab.midi.AlphaSynthMidiFileHandler(midi, smf1Mode)
   const generator = new alphaTab.midi.MidiFileGenerator(score, settings, handler)
   generator.generate()
+  if (tracks !== undefined) {
+    // Generate the complete score first: pickup duration and grace tickShift
+    // depend on other parts. Channel-volume muting cannot isolate percussion
+    // parts sharing channel 9. Filter their sounding events instead, keeping
+    // the official tempo/repeat grid and channel-wide program/control state.
+    const type = alphaTab.midi.MidiEventType
+    const scoped = new Set([type.NoteOn, type.NoteOff, type.AlphaTabRest,
+      type.PitchBend, type.PerNotePitchBend])
+    const selected = new Set(tracks)
+    for (const track of midi.tracks) {
+      const events = track.events.filter(event => !scoped.has(event.type) || selected.has(event.track))
+      track.events.length = 0
+      for (const event of events) track.events.push(event)
+    }
+  }
   return { score, midi, generator }
 }
 

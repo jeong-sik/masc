@@ -34,6 +34,11 @@ let guide_response () =
       ( `Conflict
       , Server_refusal.json ~code:"not_ready"
           "MASC_HTTP_BASE_URL is not set, so there is no address to join at" )
+  | Some base when not (Play_invite.is_http_public_base_url base) ->
+    Error
+      ( `Conflict
+      , Server_refusal.json ~code:"not_ready"
+          "MASC_HTTP_BASE_URL is not an http(s) base URL, so there is no address to join at" )
   | Some base ->
     (match guide ~base with
      | Ok text -> Ok text

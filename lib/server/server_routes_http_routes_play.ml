@@ -83,7 +83,7 @@ let issue_response ~config ~body =
              [ ( "missing"
                , `List (List.map (fun gap -> `String (Play_invite.readiness_gap_to_string gap)) gaps) )
              ]
-           "an invite needs auth enabled with require_token, and MASC_HTTP_BASE_URL set" )
+           "an invite needs auth enabled with require_token, and MASC_HTTP_BASE_URL set to an http(s) base URL" )
      | Error (Play_invite.Name_taken by) ->
        ( `Conflict
        , Server_refusal.json ~code:"name_taken"

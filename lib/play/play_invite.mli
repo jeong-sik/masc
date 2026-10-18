@@ -23,13 +23,19 @@ val max_name_length : int
 (** What stops the workspace from issuing an invite. With auth off every
     request is an [Admin], and without [require_token] a request with no
     bearer is a [Worker], so a narrower [Player] credential would narrow
-    nothing. Without a public base URL there is no link to hand on. *)
+    nothing. Without a public http(s) base URL there is no link to hand on. *)
 type readiness_gap =
   | Auth_disabled
   | Token_not_required
   | No_public_base_url
+  | Public_base_url_not_http
 
 val readiness_gap_to_string : readiness_gap -> string
+
+val is_http_public_base_url : string -> bool
+(** Whether a configured [MASC_HTTP_BASE_URL] is a plain [http://] or
+    [https://] origin of printable ASCII with a host, an optional valid port,
+    and no userinfo, path, query, or fragment. *)
 
 type taken_by =
   | Keeper

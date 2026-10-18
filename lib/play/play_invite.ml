@@ -26,11 +26,13 @@ type readiness_gap =
   | Auth_disabled
   | Token_not_required
   | No_public_base_url
+  | Public_base_url_not_http
 
 let readiness_gap_to_string = function
   | Auth_disabled -> "auth_disabled"
   | Token_not_required -> "token_not_required"
   | No_public_base_url -> "no_public_base_url"
+  | Public_base_url_not_http -> "public_base_url_not_http"
 
 type taken_by =
   | Keeper
@@ -56,6 +58,71 @@ type issued =
 let play_path = "/play"
 let agent_guide_path = play_path ^ "/agent.md"
 
+(* A link's base is an http(s) origin of printable ASCII with a host, an
+   optional valid port, and no userinfo, path, query, or fragment. A value
+   outside this contract cannot form [<base>/play#<token>] that a browser, a
+   QR code, and the server's root-mounted play routes agree on. *)
+let is_valid_port_suffix suffix =
+  if String.equal suffix "" then true
+  else if not (Char.equal suffix.[0] ':') then false
+  else
+    let raw_port = String.sub suffix 1 (String.length suffix - 1) in
+    raw_port <> ""
+    && String.for_all (fun c -> c >= '0' && c <= '9') raw_port
+    &&
+    match int_of_string_opt raw_port with
+    | Some port -> port >= 1 && port <= 65_535
+    | None -> false
+
+let is_valid_reg_name_char c =
+  (c >= '0' && c <= '9')
+  || (c >= 'a' && c <= 'z')
+  || (c >= 'A' && c <= 'Z')
+  || String.contains "-._~!$&'()*+,;=" c
+
+let is_valid_authority authority =
+  let len = String.length authority in
+  if len = 0 then false
+  else if Char.equal authority.[0] '[' then
+    match String.index_opt authority ']' with
+    | None | Some 1 -> false
+    | Some close ->
+      let raw_host = String.sub authority 1 (close - 1) in
+      let suffix = String.sub authority (close + 1) (len - close - 1) in
+      Result.is_ok (Ipaddr.V6.of_string raw_host) && is_valid_port_suffix suffix
+  else
+    let host, suffix =
+      match String.index_opt authority ':' with
+      | None -> authority, ""
+      | Some i ->
+        String.sub authority 0 i, String.sub authority i (len - i)
+    in
+    host <> ""
+    && String.for_all is_valid_reg_name_char host
+    && is_valid_port_suffix suffix
+
+let is_http_public_base_url base =
+  let authority_opt =
+    if String.starts_with ~prefix:"https://" base
+    then Some (String.sub base 8 (String.length base - 8))
+    else if String.starts_with ~prefix:"http://" base
+    then Some (String.sub base 7 (String.length base - 7))
+    else None
+  in
+  match authority_opt with
+  | None -> false
+  | Some authority ->
+    String.for_all (fun c -> c > ' ' && c < '\127') base
+    && is_valid_authority authority
+    &&
+    let uri = Uri.of_string base in
+    Option.is_none (Uri.userinfo uri)
+    && (match Uri.host uri with Some host -> host <> "" | None -> false)
+    && (match Uri.port uri with None -> true | Some port -> port >= 1 && port <= 65_535)
+    && String.equal (Uri.path uri) ""
+    && Uri.query uri = []
+    && Option.is_none (Uri.fragment uri)
+
 (* Every gap at once, so the operator fixes the setup in one pass. *)
 let readiness ~(auth_config : Masc_domain.auth_config) ~public_base_url =
   let auth_gaps =
@@ -65,10 +132,15 @@ let readiness ~(auth_config : Masc_domain.auth_config) ~public_base_url =
       ; Token_not_required, not auth_config.require_token
       ]
   in
-  match auth_gaps, public_base_url with
-  | [], Some base -> Ok base
-  | gaps, None -> Error (gaps @ [ No_public_base_url ])
-  | (_ :: _ as gaps), Some _ -> Error gaps
+  match public_base_url with
+  | None -> Error (auth_gaps @ [ No_public_base_url ])
+  | Some base ->
+    if not (is_http_public_base_url base)
+    then Error (auth_gaps @ [ Public_base_url_not_http ])
+    else (
+      match auth_gaps with
+      | [] -> Ok base
+      | _ :: _ as gaps -> Error gaps)
 
 (* A keeper's credential lives at its name through [Common.safe_filename],
    which lowercases, and keeper names may hold capitals. "Minsu" and "minsu"

@@ -15,12 +15,53 @@ try {
 var reviewPhraseFailure: UInt8?
 var reviewClock: UInt64 = 0, reviewSendCost: UInt64 = 0
 var reviewSent: [[UInt8]] = [], reviewWire: [(Int32, [UInt8])] = [], reviewWireFail = false, reviewExit: Int32?
+// Supply distinct property keys together with the synthetic property APIs;
+// this harness never initializes a CoreMIDI client or its resources.
+let reviewUniqueIDProperty = "review-uid" as CFString, reviewOfflineProperty = "review-offline" as CFString
+struct ReviewDestination {
+    let uid: Int32
+    var type = MIDIObjectType.destination
+    var offline: Int32? = 0
+}
+var reviewObjects: [MIDIObjectRef: ReviewDestination] = [:], reviewFound: MIDIObjectRef?
+var reviewPropertyReads: [MIDIObjectRef] = []
+func reviewFindByUniqueID(_ uid: MIDIUniqueID, _ object: UnsafeMutablePointer<MIDIObjectRef>?, _ type: UnsafeMutablePointer<MIDIObjectType>?) -> OSStatus {
+    guard let endpoint = reviewFound ?? reviewObjects.first(where: { $0.value.uid == uid })?.key,
+          let value = reviewObjects[endpoint] else { return kMIDIObjectNotFound }
+    object?.pointee = endpoint; type?.pointee = value.type; return noErr
+}
+func reviewIntegerProperty(_ object: MIDIObjectRef, _ property: CFString, _ value: UnsafeMutablePointer<Int32>) -> OSStatus {
+    reviewPropertyReads.append(object)
+    guard let found = reviewObjects[object] else { return -50 }
+    if property as String == kMIDIPropertyUniqueID as String { value.pointee = found.uid; return noErr }
+    if property as String == kMIDIPropertyOffline as String {
+        guard let offline = found.offline else { return kMIDIUnknownProperty }
+        value.pointee = offline; return noErr
+    }
+    return kMIDIUnknownProperty
+}
+func reviewStringProperty(_ object: MIDIObjectRef, _ property: CFString, _ value: UnsafeMutablePointer<Unmanaged<CFString>?>) -> OSStatus {
+    reviewPropertyReads.append(object)
+    guard reviewObjects[object] != nil else { return -50 }
+    value.pointee = Unmanaged.passRetained("synthetic selected destination" as CFString); return noErr
+}
 final class MidiTransport {`)
+    .replaceAll('MIDIObjectFindByUniqueID(', 'reviewFindByUniqueID(')
+    .replaceAll('MIDIObjectGetIntegerProperty(', 'reviewIntegerProperty(')
+    .replaceAll('MIDIObjectGetStringProperty(', 'reviewStringProperty(')
+    .replaceAll('kMIDIPropertyUniqueID', 'reviewUniqueIDProperty')
+    .replaceAll('kMIDIPropertyOffline', 'reviewOfflineProperty')
   const replaceEffect = (start, end, body) => {
     const first = source.indexOf(start), last = source.indexOf(end, first)
     assert.ok(first >= 0 && last > first)
     source = source.slice(0, first) + body + source.slice(last)
   }
+  // The real selection/identity code remains intact. Unrelated discovery always
+  // fails in this harness; selected lookup/check must never depend on it.
+  replaceEffect('func destinations()', 'func selectedDestination(', `func destinations() throws -> [Destination] {
+    throw MidiFailure("synthetic unselected enumeration failure")
+}
+`)
   replaceEffect('    func send(', '    func sendWire(', `    func send(_ bytes: [UInt8]) throws {
         reviewSent.append(bytes); reviewClock += reviewSendCost
         if bytes.first.map({ $0 & 0xf0 }) == reviewPhraseFailure {
@@ -34,11 +75,15 @@ final class MidiTransport {`)
     }
 `)
   replaceEffect('    func schedule()', '    func tick()', '    func schedule() throws {}\n')
+  const pinnedCheckStart = source.indexOf('    func checkDestination()')
+  const pinnedCheckEnd = source.indexOf('    func send(', pinnedCheckStart)
+  const pinnedCheck = source.slice(pinnedCheckStart, pinnedCheckEnd).replace('func checkDestination()', 'func reviewCheckDestination()')
   replaceEffect('    func checkDestination()', '    func send(', `    func checkDestination() throws {
         guard destination != nil else { throw MidiFailure("synthetic unavailable destination") }
     }
 `)
   source = source.replace('exit(failure == nil ? 0 : 1)', 'reviewExit = failure == nil ? 0 : 1')
+  source += `\nextension MidiTransport {\n${pinnedCheck}}\n`
   source += String.raw`
 func transport(_ events: [[String: Any]], loop: Bool = true) throws -> MidiTransport {
     let path = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".json")
@@ -226,6 +271,38 @@ reset(0); reviewWire = []
 let failedPedalOn = try wire([["seconds":0,"port":0,"bytes":[0xb0,64,127]]])
 reviewWireFail = true; failedPedalOn.tick()
 precondition(reviewWire.map(\.1) == [[0xb0,64,127],[0xb0,64,0]] && reviewExit == 1)
+// Exercise production UID lookup, object-type/name validation and the complete
+// selected-reference check against synthetic CoreMIDI property boundaries.
+func mustReject(_ operation: () throws -> Void) {
+    do { try operation(); preconditionFailure("selected destination failure was ignored") }
+    catch {}
+}
+reviewObjects = [10: ReviewDestination(uid: 1), 20: ReviewDestination(uid: 2)]
+reviewPropertyReads = []
+let selected = try selectedDestination(uid: "1")
+precondition(selected.endpoint == 10 && selected.uid == 1)
+let pinned = try wire([["seconds":0,"port":2,"bytes":[0xf8]],["seconds":0,"port":7,"bytes":[0xf8]]],
+    bindings:[["port":2,"destination":"1"],["port":7,"destination":"2"]])
+pinned.destination = selected
+pinned.sourceDestinations = [2:selected, 7:try selectedDestination(uid:"2")]
+// Unselected objects can appear and disappear without affecting either binding.
+reviewObjects[99] = ReviewDestination(uid:99)
+try pinned.reviewCheckDestination()
+reviewObjects.removeValue(forKey:99)
+try pinned.reviewCheckDestination()
+precondition(Set(reviewPropertyReads) == [10,20])
+reviewObjects[10]?.offline = nil; try pinned.reviewCheckDestination()
+reviewObjects[10]?.offline = 1; mustReject { try pinned.reviewCheckDestination() }
+reviewObjects[10]?.offline = 0
+reviewObjects.removeValue(forKey:20); mustReject { try pinned.reviewCheckDestination() }
+reviewObjects[20] = ReviewDestination(uid:3); mustReject { try pinned.reviewCheckDestination() }
+mustReject { _ = try selectedDestination(uid:"2") }
+reviewObjects[20] = ReviewDestination(uid:2,type:.source)
+mustReject { _ = try selectedDestination(uid:"2") }
+reviewObjects[20] = ReviewDestination(uid:2)
+reviewFound = 20; mustReject { _ = try selectedDestination(uid:"1") }; reviewFound = nil
+mustReject { _ = try selectedDestination(uid:"01") }
+print("SELECTED_MIDI_DESTINATION_PASS: unrelated enumeration failure/churn isolated; selected removal, UID reuse, source type, offline and noncanonical ID rejected")
 print("SOURCE_MIDI_DECISIONS_PASS: F7 running status/partial messages, realtime/SysEx order, expression/release velocity, overlapping held-key cleanup, pedals, zero duration, explicit ports, partial-send cleanup, failed note/pedal/reset/channel-mode release retry, successful release ownership")
 print("MIDI_DECISIONS_PASS: late cycles, expired intervals, live notes, send-time epoch, inclusive seek, retrigger, one-shot end, pause/status phase, startup admission")
 `

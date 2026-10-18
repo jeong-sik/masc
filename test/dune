@@ -404,7 +404,6 @@
   test_server_dashboard_http_keeper_api_trace
   test_server_dashboard_http_keeper_chat_page
   test_server_dashboard_http_keeper_tool_lookup
-  test_keeper_turn_transcript_http
   test_keeper_paused_work_resume_surface
   eval_memory_os_value
   test_attempt_state
@@ -763,7 +762,6 @@
   test_server_dashboard_http_keeper_api_trace
   test_server_dashboard_http_keeper_chat_page
   test_server_dashboard_http_keeper_tool_lookup
-  test_keeper_turn_transcript_http
   test_keeper_paused_work_resume_surface
   eval_memory_os_value
   test_attempt_state

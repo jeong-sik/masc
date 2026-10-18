@@ -115,6 +115,34 @@ Transport diagnostics record request start and applied phases using monotonic
 clock observations, excluding declaration bodies. They do not prove server
 acceptance, actual UI paint, network-only duration or current-head speedup.
 
+## Selected Keeper metrics without blocking input
+
+Detail activity summaries and Logs share one `Masc_tui_fetched` snapshot. Their
+key contains workspace authority, resolved base path, Keeper name and the
+existing physical row window. A request additionally captures the workspace
+read scope, generation, cancellation owner and monotonic start observation.
+Opening detail/logs, explicit refresh and cadence schedule the immutable read on
+the existing I/O executor. Same-key polls share the current read; explicit
+refreshes accumulate one follow-up, dispatched after success or failure.
+
+The canonical reader opens `Dated_jsonl.Store.Keeper.Metrics` from its base path.
+It does not initialize workspace configuration, writer directories or the
+Keeper writer-store cache. Valid partial rows retain their typed diagnostics;
+storage failures reject revalidation so the last observed snapshot survives.
+No rows and a failed/unrequested read are distinct in both Logs and activity
+summaries. Selection changes cannot expose the prior Keeper's rows. Suspension
+retires requests and retains observations without granting read authority;
+reconfirmation starts a new request under the new read scope. Late cleanup
+cannot clear a successor's cancellation slot.
+
+`tui_keeper_logs` records start, worker return, supersession request and UI
+admission/discard by source key/request. Those clocks include executor and
+delivery waiting; they do not prove paint or input latency. The ordinary TUI
+initializes its executor before entering the loop. The shared executor's
+pool-absent inline policy is unchanged, so source scheduling does not establish
+nonblocking behavior under every alternate embedding. Four new state/storage
+scenarios are authored and unexecuted, without wording/layout assertions.
+
 ## Before and after
 
 | Scenario | Before | Source change |
@@ -133,6 +161,9 @@ acceptance, actual UI paint, network-only duration or current-head speedup.
 | Creation after editor return | Identity probe and creation POST in input handler | Owned request fiber; phase and receipt return through mailbox |
 | Creation response lost or workspace withdrawn | Transport error flattened into one failure | Original receipt retains explicit uncertainty; no automatic resend |
 | Editing/navigation during creation | UI could not process the gesture during HTTP | New form/input owns focus; late result cannot clear or open it |
+| Detail/log opening, refresh and cadence | Four paths invoke synchronous metrics reading | One owned I/O reader; old same-key observation remains visible |
+| Metrics revalidation failure | Empty/error snapshot replaces the rows | Explicit stale observation; partial-row and latest failure diagnostics remain distinct |
+| Metrics query setup | Workspace configuration and writer-store accessor | Canonical read location without creating writer directories |
 | Explicit refresh while an earlier source read is pending | Each refresh superseded/cancelled and restarted the reader | Accumulate one follow-up; current reader makes progress without consuming later demand |
 | Cancelled/failed cached read | Exception poisons Eio write mutex | Unlock, then re-raise original exception; later readers may proceed |
 | Selected live context on metadata admission or navigation | Synchronous context store/config work | Separate owned I/O read; same-owner refresh retains its observation |
@@ -185,8 +216,9 @@ binary, visible UI or latency proof is established.
 Required Keeper metadata and optional Work now have separate source ownership.
 Explicit post-action directory reloads and selected-live-context reads now use
 owned observations. Creation HTTP now has its own operation owner and explicit
-uncertainty. Other synchronous paths, including detail logs and other editor-form
-HTTP writes, remain. Source refresh demand is now coalesced, and metadata/archive cache
+uncertainty. Selected Keeper metrics now use owned executor reads and retained
+observations. Other synchronous paths, including other editor-form HTTP writes,
+remain. Source refresh demand is now coalesced, and metadata/archive cache
 keys include their actual file paths. These source changes do not establish
 sustained-load fairness or matched timing. Reduce unneeded preparation/discovery work
 without weakening identity,

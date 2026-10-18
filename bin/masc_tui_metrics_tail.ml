@@ -164,14 +164,17 @@ let load ~store ~expected_keeper ~limit =
   resolve_with ~expected_keeper
     ~read_recent:(Dated_jsonl.read_recent_result store) ~limit
 
-let for_selection ~load = function
-  | Some keeper -> load keeper
-  | None -> empty
-
-let reconcile_selection ~current ~previous_keeper ~selected_keeper =
-  match previous_keeper, selected_keeper with
-  | Some previous, Some selected when String.equal previous selected -> current
-  | Some _, Some _ | Some _, None | None, Some _ | None, None -> empty
+let load_keeper ~base_path ~keeper_name ~limit =
+  let location = Dated_jsonl.Store.keeper
+      (Dated_jsonl.Store.root_of_base_path ~base_path)
+      ~keeper:keeper_name Dated_jsonl.Store.Keeper.Metrics in
+  let store = Dated_jsonl.open_store location in
+  let snapshot = load ~store ~expected_keeper:keeper_name ~limit in
+  match snapshot.error with
+  | Some (Storage_error _ as error)
+  | Some (Remote_workspace as error)
+  | Some (Workspace_unconfirmed as error) -> Error (error_to_string error)
+  | None | Some (Row_errors _) -> Ok snapshot
 
 let content_height ~terminal_rows ~error =
   let diagnostic_rows = if Option.is_some error then 2 else 0 in

@@ -2244,10 +2244,134 @@ let test_creation_receipt_survives_full_notification_queue_cancel () =
       Alcotest.(check bool) "only the confirmed original form is cleared" true
         (clear_created_keeper_draft state owner)))
 
+let keeper_log_fixture () =
+  let state, keeper, _ = local_keeper_source_fixture () in
+  state.keepers <- [keeper];
+  state.view <- Masc_tui_types.Keepers Masc_tui_types.Keeper_logs;
+  state, keeper
+
+let keeper_log_request state keeper intent =
+  match Masc_tui_types.begin_keeper_log_read state ~intent ~limit:4 ~started_ns:0L keeper with
+  | Some request -> request
+  | None -> Alcotest.fail "selected Keeper metrics request was not admitted"
+
+let keeper_log_snapshot_fixture ?(partial=false) name count =
+  let json = `Assoc [
+    "schema", `String Masc.Keeper_metrics_record.schema;
+    "record_kind", `String "heartbeat";
+    "ts", `String "2026-08-21T12:00:00Z"; "ts_unix", `Float 1787313600.0;
+    "channel", `String "heartbeat"; "name", `String name;
+    "trace_id", `String "fixture"; "message_count", `Int count ] in
+  Masc_tui_metrics_tail.resolve_with ~expected_keeper:name ~limit:4
+    ~read_recent:(fun _ -> Ok ([Dated_jsonl.Parsed json] @ if partial then
+      [Dated_jsonl.Malformed_json {path="fixture.jsonl"; line_number=Some 2; detail="broken row"}]
+      else []))
+
+let test_keeper_log_selection_and_late_cleanup_keep_original_owner () =
+  let open Masc_tui_types in
+  let state, first = keeper_log_fixture () in
+  let second = { first with k_name = "beta" } in
+  state.keepers <- [first; second];
+  let initial = keeper_log_request state first Snapshot_read.Poll in
+  let cancelled = ref 0 in
+  supersede_keeper_log_read state (Some (initial.klr_owner, fun () -> incr cancelled));
+  state.keeper_cursor <- 1;
+  Alcotest.(check bool) "new selection cannot borrow another Keeper's observation" true
+    (keeper_logs_view state = Masc_tui_fetched.Absent);
+  let successor = keeper_log_request state second Snapshot_read.Poll in
+  supersede_keeper_log_read state (Some (successor.klr_owner, fun () -> ()));
+  Alcotest.(check int) "selection change cancels the prior read once" 1 !cancelled;
+  finish_keeper_log_read state initial;
+  Alcotest.(check bool) "old cleanup cannot release successor cancellation ownership" true
+    (Option.exists (fun (owner, _) -> owner == successor.klr_owner) state.keeper_log_cancel);
+  Alcotest.(check bool) "late first result cannot settle successor" true
+    (Option.is_none (take_keeper_log_read state initial
+      (Ok (keeper_log_snapshot_fixture first.k_name 1))));
+  Alcotest.(check bool) "successor settles its own actual row" true
+    (Option.is_some (take_keeper_log_read state successor
+      (Ok (keeper_log_snapshot_fixture second.k_name 2))));
+  Alcotest.(check (list (option int))) "only selected Keeper data is exposed" [Some 2]
+    (List.map (fun (entry : Tui_decode.log_entry) -> entry.le_message_count)
+       (keeper_log_snapshot state).entries);
+  state.keeper_cursor <- 0;
+  let returned = keeper_log_request state first Snapshot_read.Poll in
+  Alcotest.(check bool) "returning to a Keeper does not restore the earlier ticket" true
+    (Option.is_none (take_keeper_log_read state initial (Error "late original failure")));
+  Alcotest.(check bool) "returned Keeper owns a new request" true
+    (Masc_tui_fetched.is_current ~equal:keeper_log_equal_key state.keeper_logs returned.klr_request)
+
+let test_keeper_log_refresh_coalesces_and_failed_revalidation_keeps_partial_rows () =
+  let open Masc_tui_types in
+  let state, keeper = keeper_log_fixture () in
+  let active = keeper_log_request state keeper Snapshot_read.Poll in
+  List.iter (fun intent ->
+    Alcotest.(check bool) "same source shares the active read" true
+      (Option.is_none (begin_keeper_log_read state ~intent ~limit:4 ~started_ns:1L keeper)))
+    [Snapshot_read.Poll; Refresh; Refresh; Poll];
+  let partial = keeper_log_snapshot_fixture ~partial:true keeper.k_name 3 in
+  let admission = take_keeper_log_read state active (Ok partial) in
+  Alcotest.(check bool) "refresh burst requests one followup at settlement" true
+    (Option.exists (fun admitted -> admitted.kla_followup) admission);
+  Alcotest.(check bool) "settlement consumes queued demand once" false state.keeper_log_refresh_pending;
+  let followup = keeper_log_request state keeper Snapshot_read.Poll in
+  Alcotest.(check bool) "same-source refresh retains the observed partial snapshot" true
+    (List.length (keeper_log_snapshot state).entries = 1
+     && Option.is_some (keeper_log_snapshot state).error);
+  let failed = take_keeper_log_read state followup (Error "storage is temporarily unreadable") in
+  Alcotest.(check bool) "no new demand means no repeated followup" false
+    (Option.exists (fun admitted -> admitted.kla_followup) failed);
+  (match keeper_logs_view state with
+   | Masc_tui_fetched.Stale (snapshot, _) ->
+       Alcotest.(check int) "failure preserves observed rows" 1 (List.length snapshot.entries);
+       (match snapshot.error with
+        | Some (Masc_tui_metrics_tail.Row_errors _) -> ()
+        | None | Some (Storage_error _ | Remote_workspace | Workspace_unconfirmed) ->
+            Alcotest.fail "partial-row provenance was lost")
+   | Absent | Loading | Ready _ | Failed _ -> Alcotest.fail "failed revalidation was called fresh or empty");
+  Alcotest.(check bool) "duplicate completion cannot schedule a second followup" true
+    (Option.is_none (take_keeper_log_read state followup (Ok partial)))
+
+let test_keeper_log_suspension_preserves_snapshot_without_old_authority () =
+  let open Masc_tui_types in
+  let state, keeper = keeper_log_fixture () in
+  let initial = keeper_log_request state keeper Snapshot_read.Poll in
+  ignore (take_keeper_log_read state initial (Ok (keeper_log_snapshot_fixture keeper.k_name 4)));
+  let old = keeper_log_request state keeper Snapshot_read.Refresh in
+  let cancelled = ref 0 in
+  supersede_keeper_log_read state (Some (old.klr_owner, fun () -> incr cancelled));
+  state.workspace_identity <- Workspace_identity_match_unconfirmed "probe failed";
+  suspend_workspace_readings state;
+  Alcotest.(check int) "workspace suspension cancels metrics ownership" 1 !cancelled;
+  (match keeper_logs_view state with
+   | Masc_tui_fetched.Stale (snapshot, _) -> Alcotest.(check int) "last observation remains" 1 (List.length snapshot.entries)
+   | Absent | Loading | Ready _ | Failed _ -> Alcotest.fail "withdrawal lost or promoted the old observation");
+  Alcotest.(check bool) "retired read cannot consume its successor epoch" true
+    (Option.is_none (take_keeper_log_read state old (Error "old scope failed")));
+  state.workspace_identity <- Workspace_identity_match;
+  let fresh = keeper_log_request state keeper Snapshot_read.Poll in
+  Alcotest.(check bool) "same workspace can revalidate its retained rows" true
+    (List.length (keeper_log_snapshot state).entries = 1);
+  Alcotest.(check bool) "new read scope admits its own result" true
+    (Option.is_some (take_keeper_log_read state fresh (Ok (keeper_log_snapshot_fixture keeper.k_name 5))));
+  let Workspace_authority epoch = state.workspace_authority in
+  state.workspace_authority <- Workspace_authority (epoch + 1);
+  Alcotest.(check bool) "same path in another workspace authority cannot borrow rows" true
+    (keeper_logs_view state = Masc_tui_fetched.Absent);
+  clear_keeper_logs state;
+  state.keepers <- [];
+  Alcotest.(check bool) "missing selection admits no filesystem request" true
+    (Option.is_none (begin_keeper_log_read state ~intent:Snapshot_read.Poll ~limit:4 ~started_ns:2L keeper))
+
 let () =
   Alcotest.run "tui_server_identity_refresh"
     [ ( "server-identity-refresh"
-      , [ Alcotest.test_case "creation cancellation retains receipt when notification queue is full" `Quick
+      , [ Alcotest.test_case "metrics selection and cleanup preserve request ownership" `Quick
+            test_keeper_log_selection_and_late_cleanup_keep_original_owner
+        ; Alcotest.test_case "metrics refresh shares work and retains partial observations on failure" `Quick
+            test_keeper_log_refresh_coalesces_and_failed_revalidation_keeps_partial_rows
+        ; Alcotest.test_case "metrics suspension retains data without old authority" `Quick
+            test_keeper_log_suspension_preserves_snapshot_without_old_authority
+        ; Alcotest.test_case "creation cancellation retains receipt when notification queue is full" `Quick
             test_creation_receipt_survives_full_notification_queue_cancel
         ; Alcotest.test_case "creation interleaving preserves successor draft and focus" `Quick
             test_creation_interleaving_preserves_new_draft_and_focus

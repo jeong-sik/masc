@@ -278,28 +278,6 @@ let load_goals_to_confirm (base_path : string) :
              })
            goals)
 
-(** Apply one strict bounded metrics snapshot to the mutable screen state. *)
-let apply_keeper_log_snapshot (state : state)
-    (snapshot : Metrics_tail.snapshot) =
-  state.log_entries <- snapshot.entries;
-  state.log_error <- snapshot.error;
-  let _, cols = Masc_tui_render_prim.get_terminal_size () in
-  state.log_scroll <-
-    min state.log_scroll (max 0 (List.length (keeper_log_rows state ~cols) - 1))
-
-(** Load the newest physical metrics rows across months and rotations. *)
-let load_selected_keeper_logs (state : state) (base_path : string)
-    (max_entries : int) (keeper : keeper option) =
-  let config = Workspace_core.default_config base_path in
-  Metrics_tail.for_selection
-    ~load:(fun keeper ->
-      Keeper_types_support.keeper_metrics_store config keeper.k_name
-      |> fun store ->
-      Metrics_tail.load ~store ~expected_keeper:keeper.k_name
-        ~limit:max_entries)
-    keeper
-  |> apply_keeper_log_snapshot state
-
 (** Add an event to the TUI session log, which Metrics draws. *)
 let add_event (state : state) event_type content =
   let now = Unix.localtime (Unix.gettimeofday ()) in
@@ -460,16 +438,11 @@ let replace_keeper_rows ~preserve_on_error (state : state)
 
   let selected_keeper = List.nth_opt state.keepers state.keeper_cursor in
 
-  let current_logs : Metrics_tail.snapshot =
-    { entries = state.log_entries; error = state.log_error }
-  in
   let selected_keeper_name_after_refresh =
     Option.map (fun keeper -> keeper.k_name) selected_keeper
   in
-  Metrics_tail.reconcile_selection ~current:current_logs
-    ~previous_keeper:selected_keeper_name
-    ~selected_keeper:selected_keeper_name_after_refresh
-  |> apply_keeper_log_snapshot state
+  if not (Option.equal String.equal selected_keeper_name selected_keeper_name_after_refresh)
+  then clear_keeper_logs state
 
 (** Immutable local work/agent observation. Required Keeper metadata is a
     separate source, so task/archive work cannot gate chat availability. *)
@@ -613,8 +586,7 @@ let clear_local_workspace ?(keep_keeper_rows = false) (state : state) =
     state.keeper_cursor <- 0
   end;
   state.lanes_action_error <- None;
-  state.log_entries <- [];
-  state.log_error <- None;
+  clear_keeper_logs state;
   state.live_context <- Context_state.clear state.live_context;
   supersede_live_context_read state None;
   state.local_workspace <- Local_workspace_unread;

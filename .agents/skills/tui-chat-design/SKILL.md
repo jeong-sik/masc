@@ -1,6 +1,6 @@
 ---
 name: tui-chat-design
-description: "MASC TUI 채팅·입력·진행 정보, 원래 실행의 준비 이력, Keeper·Work 독립 조회, Keeper 생성의 비동기 확인·결과 미확인·선언문 보존, 질문 원본 턴·응답 읽기, 비동기 요청 소유권과 화면 반영 규칙. 채팅 표시·입력 연속성·생성 흐름·응답 해석을 바꾸기 전에 읽는다."
+description: "MASC TUI 채팅·입력·진행 정보, 원래 준비 이력, Keeper·Work·상세 로그의 비동기 조회, Keeper 생성 결과·선언문 보존, 질문 원본 턴·응답 읽기, 요청 소유권·마지막 관측·실패 표시 규칙. 채팅 표시·입력 연속성·생성·로그·응답 해석을 바꾸기 전에 읽는다."
 ---
 
 # 대화를 먼저 읽는 채팅
@@ -167,6 +167,18 @@ description: "MASC TUI 채팅·입력·진행 정보, 원래 실행의 준비 �
   Keeper별 freshness barrier와 이름 관측을 기다린다. 미해결 선언문은 다음 editor
   진입에서 복구할 수 있으며 재시작 복구를 증명하지 않는다. 로그는 선언문을 싣지
   않고 요청 시작·phase 반영을 기록한다. 이 시각은 화면 표시·네트워크 RTT가 아니다.
+- Keeper 상세의 활동 요약과 Logs는 같은 `Masc_tui_fetched` 관측을 사용한다.
+  입력 handler와 cadence는 파일을 읽지 않고 원래 workspace authority·base path·Keeper·
+  물리 행 범위에 묶인 I/O 요청을 보낸다. 응답은 원래 read scope와 ticket도 일치해야
+  반영한다. 같은 대상의 poll은 진행 중 읽기를 공유하고, 명시적 refresh는 후속 읽기
+  하나로 모은다. 실패해도 요청한 후속 읽기는 이어간다. 새 대상은 이전 값을 빌리지 않는다.
+  같은 대상의 재조회·실패는 마지막 snapshot을 남기고 읽는 중·마지막 관측·실패·부분 행
+  진단을 구분한다. 미조회·조회 실패를 정상 빈 기록이나 활동 0으로 표시하지 않는다.
+  workspace 확인이 끊기면 소유 읽기를 retire하고 마지막 관측만 보여준다. 재확인 뒤에는
+  새 read scope에서 다시 읽는다. 늦은 worker 정리는 다음 요청의 취소 owner를 지우지 않는다.
+  읽기는 canonical metrics 위치를 직접 열며 writer 디렉터리·설정·캐시를 준비하지 않는다.
+  기존 물리 행 범위와 공통 executor 정책은 유지한다. 로그의 시작·반환·반영 시각은
+  worker 순수 IO·키 응답·화면 표시 시간과 다르다. 화면 문구/행 순서 검사는 만들지 않는다.
 - 선택된 Keeper의 live-context도 공유 I/O worker에서 읽는다. UI는 메타데이터 반영·행 이동·
   상세 열기에서 이 저장소 읽기를 기다리지 않는다. 소유권은 workspace read scope·base path·
   Keeper·trace와 요청 세대에 묶는다. 채팅에서는 roster 커서가 아니라 대화 대상이 소유한다.

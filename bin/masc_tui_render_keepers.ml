@@ -10,6 +10,13 @@ open Masc_tui_press
 
 module Message_layout = Masc_tui_message_layout
 module Metrics_tail = Masc_tui_metrics_tail
+
+let keeper_log_style = function
+  | Masc_tui_types.Keeper_log_fact -> Ansi.reset
+  | Keeper_log_notice -> Theme.recede ()
+  | Keeper_log_warning -> Theme.warn ()
+  | Keeper_log_failure -> Theme.bad ()
+
 module Rows = Masc_tui_rows
 module Observation_layout = Masc_tui_observation_layout
 module Keeper_activity = Masc_tui_keeper_activity
@@ -1208,15 +1215,20 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
          draws no zeros: the same sentence the Logs tab gives for the same
          read. *)
       add_section "Last 24h";
+      let log_snapshot = keeper_log_snapshot state in
+      let log_diagnostics = keeper_log_diagnostics state in
+      List.iter (fun (tone, detail) ->
+        add_row "Metrics:" (keeper_log_style tone ^ Terminal_text.single_line detail ^ Ansi.reset))
+        log_diagnostics;
       (match
          Keeper_activity.read
            ~since:
              (Keeper_activity.cutoff_of ~now:(Unix.gettimeofday ()) ~hours:24)
-           state.log_entries
+           log_snapshot.entries
        with
        | Keeper_activity.No_rows ->
-         add_row "Window:"
-           (Ansi.dim ^ Metrics_tail.empty_message state.log_error ^ Ansi.reset)
+         if log_diagnostics = [] then add_row "Window:"
+           (Ansi.dim ^ Metrics_tail.empty_message log_snapshot.error ^ Ansi.reset)
        | Keeper_activity.Rows activity ->
          if not activity.Keeper_activity.aw_covered then
            add_row "Window:"
@@ -2102,7 +2114,14 @@ let render_keeper_logs (state : state) =
         c.push_styled ~style:(Theme.recede ()) "  No keeper selected.")
   end else begin
     let k = List.nth state.keepers state.keeper_cursor in
-    let total_entries = List.length state.log_entries in
+    let log_snapshot = keeper_log_snapshot state in
+    let total_entries = List.length log_snapshot.entries in
+    let reading_label = match keeper_logs_view state with
+      | Masc_tui_fetched.Absent -> "not read"
+      | Loading -> "reading metrics"
+      | Failed _ -> "unavailable"
+      | Ready _ | Stale _ ->
+          Masc_tui_message_layout.count_noun ~plural:"entries" total_entries "entry" in
 
     (* Header *)
     let header =
@@ -2110,7 +2129,7 @@ let render_keeper_logs (state : state) =
         (screen_title
            (Printf.sprintf " Keepers \xe2\x96\xb8 %s \xe2\x96\xb8 logs"
               (Terminal_text.single_line k.k_name)))
-        (Masc_tui_message_layout.count_noun ~plural:"entries" total_entries "entry")
+        reading_label
         (connection_badge state)
     in
 
@@ -2135,16 +2154,11 @@ let render_keeper_logs (state : state) =
     for index = 0 to content_height - 1 do
       if row_count = 0 && index = 0 then
         box_line_styled buf cols ~style:(Theme.recede ())
-          ("  " ^ Metrics_tail.empty_message state.log_error)
+          ("  " ^ Metrics_tail.empty_message log_snapshot.error)
       else
         match Rows.at visible (scroll + index) with
         | Some (diagnostic, line) ->
-            let style = match diagnostic with
-              | None -> Ansi.reset
-              | Some (Metrics_tail.Storage_error _) -> Theme.bad ()
-              | Some (Metrics_tail.Row_errors _) -> Theme.warn ()
-              | Some (Metrics_tail.Remote_workspace | Metrics_tail.Workspace_unconfirmed) ->
-                  Theme.recede () in
+            let style = keeper_log_style diagnostic in
             box_line_styled buf cols ~style line
         | None -> box_empty buf cols
     done;

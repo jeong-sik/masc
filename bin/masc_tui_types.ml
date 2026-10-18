@@ -3804,6 +3804,28 @@ type keeper_creation_wait = {
   kcw_revision : Local_read_order.revision;
 }
 
+type keeper_log_key = {
+  klk_authority : workspace_authority;
+  klk_base_path : string;
+  klk_keeper : string;
+  klk_limit : int;
+}
+
+type keeper_log_request = {
+  klr_request : keeper_log_key Masc_tui_fetched.request;
+  klr_reading : unit ref;
+  klr_owner : unit ref;
+  klr_started_ns : int64;
+}
+
+type keeper_log_admission = { kla_followup : bool }
+
+type keeper_log_tone =
+  | Keeper_log_fact
+  | Keeper_log_notice
+  | Keeper_log_warning
+  | Keeper_log_failure
+
 type keeper_creation_outcome =
   | Creation_created
   | Creation_not_sent of string
@@ -7487,8 +7509,10 @@ type state = {
   mutable keeper_calls_refresh_pending: bool;
   mutable keeper_calls_generation: int;
   mutable keeper_calls_scroll: int;
-  mutable log_entries: log_entry list;
-  mutable log_error: Metrics_tail.load_error option;
+  mutable keeper_logs: (keeper_log_key, Metrics_tail.snapshot) Masc_tui_fetched.t;
+  mutable keeper_log_read: keeper_log_request option;
+  mutable keeper_log_cancel: (unit ref * (unit -> unit)) option;
+  mutable keeper_log_refresh_pending: bool;
   mutable log_scroll: int;
   mutable log_wrap_cols: int option;
   mutable live_context: Masc_tui_context_state.t;
@@ -8670,6 +8694,111 @@ let take_local_workspace_read (state : state) ~source request result =
               | Local_work -> state.local_workspace <- Local_workspace_failed detail));
         Some result
 
+let keeper_log_equal_key left right =
+  left.klk_authority = right.klk_authority
+  && String.equal left.klk_base_path right.klk_base_path
+  && String.equal left.klk_keeper right.klk_keeper
+  && left.klk_limit = right.klk_limit
+
+let keeper_log_target state =
+  match state.view with
+  | Keepers (Keeper_detail | Keeper_logs) -> List.nth_opt state.keepers state.keeper_cursor
+  | Keepers (Keeper_list | Keeper_calls | Keeper_message | Keeper_runtime_pick)
+  | Overview | Acting | Metrics | Memory | Lanes | Clients | Board | Approvals
+  | Planning | Schedules | Verification | Harness | Fusion | Repositories | Code
+  | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> None
+
+let keeper_log_key state ~limit keeper =
+  { klk_authority = state.workspace_authority; klk_base_path = state.local_base_path;
+    klk_keeper = keeper.k_name; klk_limit = limit }
+
+let supersede_keeper_log_read state cancel =
+  let previous = state.keeper_log_cancel in
+  state.keeper_log_cancel <- cancel;
+  Option.iter (fun (_, stop) -> stop ()) previous
+
+let finish_keeper_log_read state request =
+  match state.keeper_log_cancel with
+  | Some (owner, _) when owner == request.klr_owner -> state.keeper_log_cancel <- None
+  | Some _ | None -> ()
+
+let clear_keeper_logs state =
+  state.keeper_logs <- Masc_tui_fetched.clear state.keeper_logs;
+  state.keeper_log_read <- None;
+  state.keeper_log_refresh_pending <- false;
+  supersede_keeper_log_read state None
+
+let suspend_keeper_logs state =
+  state.keeper_logs <- Masc_tui_fetched.suspend state.keeper_logs;
+  state.keeper_log_read <- None;
+  state.keeper_log_refresh_pending <- false;
+  supersede_keeper_log_read state None
+
+let keeper_logs_view state =
+  let open Masc_tui_fetched in
+  match state.workspace_identity with
+  | Workspace_identity_mismatch _ -> Failed (Metrics_tail.error_to_string Metrics_tail.Remote_workspace)
+  | Workspace_identity_unread -> Failed (Metrics_tail.error_to_string Metrics_tail.Workspace_unconfirmed)
+  | Workspace_identity_match | Workspace_identity_match_unconfirmed _ ->
+    let view = match current_key state.keeper_logs, keeper_log_target state with
+      | Some key, Some keeper
+        when keeper_log_equal_key key (keeper_log_key state ~limit:key.klk_limit keeper) ->
+          view_for ~equal:keeper_log_equal_key state.keeper_logs ~key
+      | Some _, Some _ | Some _, None | None, Some _ | None, None -> Absent in
+    (match state.workspace_identity, view with
+     | Workspace_identity_match_unconfirmed _, (Ready snapshot | Stale (snapshot, _)) ->
+         Stale (snapshot, "Workspace identity is unconfirmed; showing the last observation.")
+     | (Workspace_identity_match | Workspace_identity_unread | Workspace_identity_mismatch _
+       | Workspace_identity_match_unconfirmed _), (Absent | Loading | Ready _ | Stale _ | Failed _) -> view)
+
+let keeper_log_snapshot state =
+  match Masc_tui_fetched.value (keeper_logs_view state) with
+  | Some snapshot -> snapshot
+  | None -> Metrics_tail.empty
+
+let begin_keeper_log_read state ~intent ~limit ~started_ns keeper =
+  match state.workspace_identity, keeper_log_target state with
+  | Workspace_identity_match, Some selected when String.equal selected.k_name keeper.k_name ->
+    (match state.keeper_log_read with
+     | Some request when request.klr_reading != state.workspace_read_authority -> suspend_keeper_logs state
+     | Some _ | None -> ());
+    let key = keeper_log_key state ~limit keeper in
+    (match Masc_tui_fetched.start ~equal:keeper_log_equal_key state.keeper_logs ~key with
+     | Already_loading ->
+         if intent = Snapshot_read.Refresh then state.keeper_log_refresh_pending <- true;
+         None
+     | Started (next, ticket) ->
+         let same = Option.exists (keeper_log_equal_key key)
+             (Masc_tui_fetched.current_key state.keeper_logs) in
+         supersede_keeper_log_read state None;
+         state.keeper_logs <- next;
+         if not same then state.log_scroll <- 0;
+         state.keeper_log_refresh_pending <- false;
+         let request = { klr_request = ticket; klr_reading = state.workspace_read_authority;
+           klr_owner = ref (); klr_started_ns = started_ns } in
+         state.keeper_log_read <- Some request;
+         Some request)
+  | (Workspace_identity_match | Workspace_identity_unread | Workspace_identity_mismatch _
+    | Workspace_identity_match_unconfirmed _), (Some _ | None) -> None
+
+let take_keeper_log_read state request result =
+  if request.klr_reading != state.workspace_read_authority
+     || not (Masc_tui_fetched.is_current ~equal:keeper_log_equal_key state.keeper_logs request.klr_request)
+  then None
+  else match state.workspace_identity, keeper_log_target state with
+    | Workspace_identity_match, Some keeper when
+        let key = Masc_tui_fetched.request_key request.klr_request in
+        keeper_log_equal_key key (keeper_log_key state ~limit:key.klk_limit keeper) ->
+        let followup = state.keeper_log_refresh_pending in
+        state.keeper_log_refresh_pending <- false;
+        state.keeper_logs <- Masc_tui_fetched.complete ~equal:keeper_log_equal_key
+            state.keeper_logs request.klr_request result;
+        Some { kla_followup = followup }
+    | (Workspace_identity_match | Workspace_identity_unread | Workspace_identity_mismatch _
+      | Workspace_identity_match_unconfirmed _), (Some _ | None) ->
+        clear_keeper_logs state;
+        None
+
 let supersede_live_context_read (state : state) cancel =
   let previous = state.live_context_cancel in
   state.live_context_cancel <- cancel;
@@ -8862,6 +8991,7 @@ let retire_keeper_message_search state =
   Atomic.incr state.msg_search_generation
 
 let suspend_workspace_readings state =
+  suspend_keeper_logs state;
   state.live_context <- Masc_tui_context_state.suspend state.live_context;
   supersede_live_context_read state None;
   state.http_surface_reads <- Surface_read_order.invalidate state.http_surface_reads;
@@ -12124,8 +12254,10 @@ let create_state
   keeper_calls_refresh_pending = false;
   keeper_calls_generation = 0;
   keeper_calls_scroll = 0;
-  log_entries = [];
-  log_error = None;
+  keeper_logs = Masc_tui_fetched.initial;
+  keeper_log_read = None;
+  keeper_log_cancel = None;
+  keeper_log_refresh_pending = false;
   log_scroll = 0;
   log_wrap_cols = None;
   live_context = Masc_tui_context_state.empty;
@@ -13556,26 +13688,51 @@ let runtime_params_viewport (state : state) ~terminal_rows =
   list_height, max 0 (content_height - list_height - 1)
 ;;
 
-(* Count the rows after wrapping, shared by the reader and every movement key.
-   Entry order is newest first; facts inside each entry keep their reading order. *)
-let keeper_log_rows (state : state) ~cols =
-  let width = Masc_tui_frame.inner_width ~cols in
-  let diagnostics =
-    match state.log_error with
+let keeper_log_diagnostics state =
+  let snapshot_diagnostics (snapshot : Metrics_tail.snapshot) =
+    match snapshot.error with
     | None -> []
     | Some error ->
-        Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (width - 2))
-          (Masc.Tui_terminal_text.sanitize_terminal_text (Metrics_tail.error_to_string error))
-        |> List.map (fun line -> Some error, "  " ^ line)
-  in
+      let tone = match error with
+        | Metrics_tail.Row_errors _ -> Keeper_log_warning
+        | Storage_error _ -> Keeper_log_failure
+        | Remote_workspace | Workspace_unconfirmed -> Keeper_log_notice in
+      [tone, Metrics_tail.error_to_string error] in
+  let reading = Option.exists (fun request ->
+    request.klr_reading == state.workspace_read_authority
+    && Masc_tui_fetched.is_current ~equal:keeper_log_equal_key state.keeper_logs request.klr_request)
+    state.keeper_log_read in
+  match keeper_logs_view state with
+  | Masc_tui_fetched.Absent -> [Keeper_log_notice, "Keeper metrics have not been read."]
+  | Loading -> [Keeper_log_notice, "Reading Keeper metrics…"]
+  | Failed detail ->
+      let tone = match state.workspace_identity with
+        | Workspace_identity_unread | Workspace_identity_mismatch _ -> Keeper_log_notice
+        | Workspace_identity_match | Workspace_identity_match_unconfirmed _ -> Keeper_log_failure in
+      [tone, detail]
+  | Ready snapshot ->
+      (if reading then [Keeper_log_notice, "Refreshing metrics; showing the last observation."] else [])
+      @ snapshot_diagnostics snapshot
+  | Stale (snapshot, detail) ->
+      [Keeper_log_failure, "Last observed metrics · " ^ detail]
+      @ (if reading then [Keeper_log_notice, "Refresh in progress."] else [])
+      @ snapshot_diagnostics snapshot
+
+(* Count after wrapping; drawing and paging share rows and source diagnostics. *)
+let keeper_log_rows (state : state) ~cols =
+  let width = Masc_tui_frame.inner_width ~cols in
+  let diagnostics = keeper_log_diagnostics state
+    |> List.concat_map (fun (tone, text) ->
+      Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (width - 2))
+        (Masc.Tui_terminal_text.sanitize_terminal_text text)
+      |> List.map (fun line -> tone, "  " ^ line)) in
   let entries =
-    List.rev state.log_entries
+    List.rev (keeper_log_snapshot state).entries
     |> List.concat_map (fun (entry : Tui_decode.log_entry) ->
-         Masc_tui_observation_layout.log_entry_rows ~width
-           ~time:(Masc.Tui_terminal_text.clock_timestamp_for_terminal ~localtime:Unix.localtime entry.le_ts)
-           entry
-         |> List.map (fun line -> None, line))
-  in
+      Masc_tui_observation_layout.log_entry_rows ~width
+        ~time:(Masc.Tui_terminal_text.clock_timestamp_for_terminal ~localtime:Unix.localtime entry.le_ts)
+        entry
+      |> List.map (fun line -> Keeper_log_fact, line)) in
   diagnostics @ entries
 
 (* The three layouts the Board read surface draws in. Both the pane split and

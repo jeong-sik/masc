@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, writeFile, readFile, open, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { readWaveMetadata } from '../wave-file.mjs'
@@ -67,5 +67,34 @@ test('WAV corruption inside a valid outer RIFF cannot become a playable take', a
     await assert.rejects(readWaveMetadata(path), /Incomplete WAV sample frame/)
     await writeFile(path, wave({ tag: 6 }))
     await assert.rejects(readWaveMetadata(path), /Unsupported WAV sample encoding/)
+  } finally { await rm(directory, { recursive: true, force: true }) }
+})
+
+test('WAV metadata cancellation stops at read boundaries and closes its file', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'masc-wave-abort-')), path = join(directory, 'audio.wav')
+  const aborted = new AbortController(); aborted.abort()
+  try {
+    await assert.rejects(readWaveMetadata(path, {}, { signal: aborted.signal }), error => error === aborted.signal.reason)
+    await writeFile(path, wave())
+    const file = await open(path, 'r'), prototype = Object.getPrototypeOf(file)
+    await file.close()
+    const read = prototype.read
+    // Abort after the RIFF header, at a later chunk, and during a partial read.
+    for (const [abortAt, partial] of [[1, false], [3, false], [1, true]]) {
+      const controller = new AbortController()
+      let reads = 0, observed
+      prototype.read = async function(buffer, offset, length, position) {
+        observed = this; reads++
+        const result = await read.call(this, buffer, offset, partial ? 1 : length, position)
+        if (reads === abortAt) controller.abort()
+        return result
+      }
+      try {
+        await assert.rejects(readWaveMetadata(path, {}, { signal: controller.signal }), error => error === controller.signal.reason)
+        assert.equal(reads, abortAt)
+        assert.equal(observed.fd, -1)
+      } finally { prototype.read = read }
+    }
+    assert.equal((await readWaveMetadata(path)).frames, 8n)
   } finally { await rm(directory, { recursive: true, force: true }) }
 })

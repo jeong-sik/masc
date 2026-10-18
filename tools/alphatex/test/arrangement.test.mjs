@@ -1,10 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, writeFile, readFile, stat, rename, mkdir, symlink, rm } from 'node:fs/promises'
+import { mkdtemp, writeFile, readFile, open, readdir, stat, rename, mkdir, symlink, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { newArrangement, editArrangement, arrangementClipTime, arrangementSchedule } from '../arrangement.mjs'
-import { importArrangementWave, importArrangementMidi, loadArrangement, saveArrangement } from '../arrangement-files.mjs'
+import { importArrangementWave, importArrangementMidi, verifyArrangementAssets, loadArrangement, saveArrangement } from '../arrangement-files.mjs'
 import { midiSourcePattern, exportMidiSource, importMidiSource } from '../midi-source.mjs'
 const PPQ=960
 const chunk=(name,bytes)=>{const h=Buffer.alloc(8);h.write(name);h.writeUInt32BE(bytes.length,4);return Buffer.concat([h,Buffer.from(bytes)])}
@@ -108,3 +108,28 @@ test('arrangement audibility and region edits retain original sources and native
  assert.equal(arrangementSchedule(muted,{all:true}).length,2)
  const removed=editArrangement(p,{kind:'region-remove',id:'region-1'});assert.deepEqual(removed.assets,p.assets);assert.deepEqual(p,before)
 })
+
+test('WAV import and asset verification stop metadata reads immediately after cancellation',async()=>workspace(async root=>{
+ const input=join(root,'input.wav'),source=wave({frames:1}),junk=Buffer.alloc(1000*8)
+ for(let i=0;i<1000;i++)junk.write('JUNK',i*8)
+ const bytes=Buffer.concat([source.subarray(0,12),junk,source.subarray(12)])
+ bytes.writeUInt32LE(bytes.length-8,4);await writeFile(input,bytes)
+ const verifyRoot=join(root,'verified'),project=(await importArrangementWave(newArrangement(),input,{projectPath:join(verifyRoot,'song.json')})).project
+ const before=structuredClone(project),file=await open(input,'r'),prototype=Object.getPrototypeOf(file)
+ await file.close();const original=prototype.read
+ const cancelAtMetadata=async operation=>{
+  const controller=new AbortController();let reads=0,observed
+  prototype.read=function(...args){observed=this;reads++;if(!controller.signal.aborted)controller.abort();return original.apply(this,args)}
+  try{
+   await assert.rejects(operation(controller.signal),error=>error===controller.signal.reason)
+   assert.equal(reads,1);assert.equal(observed.fd,-1)
+  }finally{prototype.read=original}
+ }
+ const cancelRoot=join(root,'cancelled'),empty=newArrangement()
+ await cancelAtMetadata(signal=>importArrangementWave(empty,input,{projectPath:join(cancelRoot,'song.json'),signal}))
+ assert.deepEqual(empty,newArrangement());assert.deepEqual(await readdir(join(cancelRoot,'assets')),[])
+ await cancelAtMetadata(signal=>verifyArrangementAssets(project,verifyRoot,{signal}))
+ assert.deepEqual(project,before)
+ assert.deepEqual(await readFile(input),bytes)
+ assert.equal((await verifyArrangementAssets(project,verifyRoot)).size,1)
+}))

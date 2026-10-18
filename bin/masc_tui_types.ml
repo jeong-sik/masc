@@ -3423,6 +3423,40 @@ type board_posts_receipt = {
   bpr_result : (board_post list, string) result;
 }
 
+(* Successful/failed receipts have an original query. Missing terminal data has
+   none: neither the controls nor a retained listing can manufacture that proof. *)
+type board_posts_delivery =
+  | Board_posts_received of board_query
+  | Board_posts_failed of board_query
+  | Board_posts_missing
+
+type board_posts_application = {
+  bpa_delivery : board_posts_delivery;
+  bpa_requested_query : board_query;
+  bpa_listing_query : board_query option;
+}
+
+let board_query_to_yojson query : Yojson.Safe.t =
+  `Assoc ["sort", `String (board_sort_label query.bq_sort);
+    "hearth", (match query.bq_hearth with None -> `Null | Some hearth -> `String hearth)]
+
+let board_posts_application_outcome application =
+  match application.bpa_delivery with
+  | Board_posts_received _ -> "received"
+  | Board_posts_failed _ -> "failed"
+  | Board_posts_missing -> "missing"
+
+let board_posts_application_to_yojson application : Yojson.Safe.t =
+  let delivery_query=match application.bpa_delivery with
+    | Board_posts_received query | Board_posts_failed query -> board_query_to_yojson query
+    | Board_posts_missing -> `Null in
+  `Assoc ["schema_version", `Int 1;
+    "outcome", `String (board_posts_application_outcome application);
+    "delivery_query", delivery_query;
+    "requested_query", board_query_to_yojson application.bpa_requested_query;
+    "listing_query", (match application.bpa_listing_query with
+      | Some query -> board_query_to_yojson query | None -> `Null)]
+
 let board_query_equal left right =
   left.bq_sort = right.bq_sort && Option.equal String.equal left.bq_hearth right.bq_hearth
 
@@ -8986,8 +9020,15 @@ let fail_board_posts_load (state : state) detail =
     | Some snapshot -> Masc_tui_fetched.Stale (snapshot,detail)
     | None -> Masc_tui_fetched.Failed detail)
 
+(* Snapshot only after actual application. This does not decide admission;
+   callers still own workspace/refresh/dataset checks and logging. No rows, body
+   or failure text enter this immutable diagnostic projection. *)
+let observe_board_posts_application (state : state) delivery =
+  {bpa_delivery=delivery;bpa_requested_query=board_query state;
+   bpa_listing_query=Option.map (fun snapshot -> snapshot.bl_query) (board_posts_snapshot state)}
+
 let apply_board_posts_load (state : state) receipt =
-  match receipt.bpr_result with
+  let delivery=match receipt.bpr_result with
   | Ok posts ->
       let source=match state.board_mode with
         | Board_list | Board_compose -> Masc_tui_board_selection.List_cursor
@@ -8997,8 +9038,12 @@ let apply_board_posts_load (state : state) receipt =
         ~current_ids:(ids (board_posts state)) ~cursor:state.board_cursor ~source ~next_ids:(ids posts) in
       state.board_listing <- Masc_tui_fetched.Ready {bl_query=receipt.bpr_query;bl_posts=posts};
       state.board_list_reported_error <- None;
-      state.board_cursor <- cursor
-  | Error detail -> fail_board_posts_load state detail
+      state.board_cursor <- cursor;
+      Board_posts_received receipt.bpr_query
+  | Error detail ->
+      fail_board_posts_load state detail;
+      Board_posts_failed receipt.bpr_query in
+  observe_board_posts_application state delivery
 
 (* Detail receipt enriches a matching row without certifying the entire list,
    changing its rank, clearing its last failure or settling its pending slot. *)

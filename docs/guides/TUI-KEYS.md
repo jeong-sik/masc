@@ -170,6 +170,10 @@ keeps the old listing with its original query until a new one succeeds, even if 
 old result was empty. The listing/sidebar and palette qualify that observation;
 its sort explanation, age column and census total use the observed query. Requested
 controls stay separate, and detail enrichment does not relabel the list.
+Admission diagnostics additionally keep the response's query, the controls at
+application and the retained listing's query separate for success/failure. Missing
+owned terminal data has no invented response query. These are request-linked log
+fields; actual runtime logs and visible behavior remain separate evidence.
 
 ## Usage
 

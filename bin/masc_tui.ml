@@ -11689,13 +11689,14 @@ let remember_surface_error state ~surface ~current_error ~set_error err =
 
 let apply_board_list_load state receipt =
   let previous=state.board_list_reported_error in
-  apply_board_posts_load state receipt;
-  match receipt.bpr_result with
-  | Ok _ -> ()
-  | Error detail ->
-      state.board_list_reported_error <- Some detail;
-      if not (Option.equal String.equal previous (Some detail)) then
-        add_event state "error" (Printf.sprintf "board list data unreliable: %s" detail)
+  let application=apply_board_posts_load state receipt in
+  (match receipt.bpr_result with
+   | Ok _ -> ()
+   | Error detail ->
+       state.board_list_reported_error <- Some detail;
+       if not (Option.equal String.equal previous (Some detail)) then
+         add_event state "error" (Printf.sprintf "board list data unreliable: %s" detail));
+  application
 
 let apply_transport_load state = function
   | Ok transport ->
@@ -12519,19 +12520,29 @@ let load_http_surfaces ~surface_request ~on_initial_identity ~on_progress ~on_da
 
 let apply_http_scoped_data state ~datasets results =
   let outcomes = ref [] in
+  let record dataset outcome details =
+    outcomes := `Assoc (["source", `String (Surface_read_order.source_name
+        (Surface_read_order.dataset_source dataset));
+      "dataset", `String (Surface_read_order.dataset_name dataset);
+      "outcome", `String outcome] @ details) :: !outcomes in
   let apply dataset ~received load reading =
     if List.mem dataset datasets then Option.iter (fun value ->
       load value;
-      outcomes := `Assoc ["source", `String (Surface_read_order.source_name
-          (Surface_read_order.dataset_source dataset));
-        "dataset", `String (Surface_read_order.dataset_name dataset);
-        "outcome", `String (if received value then "received" else "failed")] :: !outcomes) reading in
+      record dataset (if received value then "received" else "failed") []) reading in
   apply Surface_read_order.Transport_data ~received:Result.is_ok (apply_transport_load state) results.http_transport;
   if state.workspace_identity = Workspace_identity_match then begin
   Option.iter (apply_approval_observation state) results.http_approvals;
   Option.iter (apply_asks_observation state) results.http_asks;
-  apply Surface_read_order.Board_posts ~received:(fun receipt -> Result.is_ok receipt.bpr_result) (apply_board_list_load state)
-    results.http_board;
+  if List.mem Surface_read_order.Board_posts datasets then begin
+    (* The terminal reservation already marked missing data unavailable. Only
+       this remaining, workspace-admitted slot gets a missing observation;
+       already consumed/superseded slots contribute no fictitious result. *)
+    let application=match results.http_board with
+      | Some receipt -> apply_board_list_load state receipt
+      | None -> observe_board_posts_application state Board_posts_missing in
+    record Surface_read_order.Board_posts (board_posts_application_outcome application)
+      ["board_posts", board_posts_application_to_yojson application]
+  end;
   apply Surface_read_order.Board_hearths ~received:Result.is_ok (Masc_tui_types.apply_board_census_load state) results.http_board_hearths;
   apply Surface_read_order.Planning_data ~received:Result.is_ok (apply_planning_load state) results.http_planning;
     apply Surface_read_order.Overview_goals_data ~received:Result.is_ok (apply_overview_goals_load state) results.http_overview_goals
@@ -12552,17 +12563,17 @@ let apply_http_scoped_data state ~datasets results =
   roster_refreshed
 
 let apply_http_dataset state = function
-  | Dataset_transport result -> apply_transport_load state result
-  | Dataset_board_posts board -> apply_board_list_load state board
-  | Dataset_board_hearths hearths -> Masc_tui_types.apply_board_census_load state hearths
-  | Dataset_planning result -> apply_planning_load state result
-  | Dataset_system_logs result -> apply_system_logs_load state result
-  | Dataset_fleet_safety result -> apply_fleet_safety_load state result
-  | Dataset_runtime_quota (runtimes, quota) -> apply_runtime_quota_load state (runtimes, quota)
-  | Dataset_keeper_usage result -> apply_keeper_usage_load state result
-  | Dataset_provider_history (days, result) -> apply_provider_history_load state (days, result)
-  | Dataset_overview_goals result -> apply_overview_goals_load state result
-  | Dataset_account_emails result -> apply_account_emails_load state result
+  | Dataset_transport result -> apply_transport_load state result; None
+  | Dataset_board_posts board -> Some (apply_board_list_load state board)
+  | Dataset_board_hearths hearths -> Masc_tui_types.apply_board_census_load state hearths; None
+  | Dataset_planning result -> apply_planning_load state result; None
+  | Dataset_system_logs result -> apply_system_logs_load state result; None
+  | Dataset_fleet_safety result -> apply_fleet_safety_load state result; None
+  | Dataset_runtime_quota (runtimes, quota) -> apply_runtime_quota_load state (runtimes, quota); None
+  | Dataset_keeper_usage result -> apply_keeper_usage_load state result; None
+  | Dataset_provider_history (days, result) -> apply_provider_history_load state (days, result); None
+  | Dataset_overview_goals result -> apply_overview_goals_load state result; None
+  | Dataset_account_emails result -> apply_account_emails_load state result; None
 
 (* Revoke the whole workspace-owned detail population before any successor
    starts. Queued plain replies carry the old authority token; fetched reads
@@ -17351,9 +17362,12 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
           | Surface_read_order.Full -> "full", state.http_refresh_started_ns
           | Navigation -> "navigation", None
           | Independent -> "independent", None in
-        apply_http_dataset state early.ed_dataset;
+        let board_posts_log=match apply_http_dataset state early.ed_dataset with
+          | None -> ""
+          | Some application -> " board_posts="
+              ^ Yojson.Safe.to_string (board_posts_application_to_yojson application) in
         Log.Transport.info
-          "tui_dataset_early request=%d kind=%s started_ns=%Ld full_refresh_started_ns=%s admitted_ns=%Ld source=%s dataset=%s outcome=%s"
+          "tui_dataset_early request=%d kind=%s started_ns=%Ld full_refresh_started_ns=%s admitted_ns=%Ld source=%s dataset=%s outcome=%s%s"
           (Surface_read_order.request_id early.ed_request)
           kind (Surface_read_order.started_ns early.ed_request)
           (match full_started_ns with Some started -> Int64.to_string started | None -> "unrecorded")
@@ -17361,6 +17375,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
           (Surface_read_order.source_name source)
           (Surface_read_order.dataset_name dataset)
           (if http_dataset_received early.ed_dataset then "received" else "failed")
+          board_posts_log
       end
   | Http_initial_identity_read initial ->
       (* The initial probe is recorded before its acknowledgement message.

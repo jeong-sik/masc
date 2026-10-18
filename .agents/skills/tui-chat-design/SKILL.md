@@ -1,6 +1,6 @@
 ---
 name: tui-chat-design
-description: "MASC TUI의 채팅·입력·로딩·진행 상태, 복합 조회의 부분 수신·하위 완료 관측과 Board 독립 데이터·목록/census 가용성과 조회 조건 출처, Keeper·Work·로그·질문 원본의 비동기 조회, Runtime·Overview 목록/사용량의 공유 해석, Keeper 설정·Sandbox 단축키·Runtime 폼·원문 저장과 설정 snapshot 해석을 바꿀 때 쓴다. 원본 입력·revision·요청 소유권, 마지막 관측과 부분 실패, 준비 작업·상태 반영·paint 증거를 구분하는 규칙이다."
+description: "MASC TUI의 채팅·입력·로딩·진행 상태, 복합 조회의 부분 수신·하위 완료 관측과 Board 독립 데이터·목록/census 가용성과 요청별 조회 조건 관측, Keeper·Work·로그·질문 원본의 비동기 조회, Runtime·Overview 목록/사용량의 공유 해석, Keeper 설정·Sandbox 단축키·Runtime 폼·원문 저장과 설정 snapshot 해석을 바꿀 때 쓴다. 원본 입력·revision·요청 소유권, 마지막 관측과 부분 실패, 준비 작업·상태 반영·paint 증거를 구분하는 규칙이다."
 ---
 
 # 대화를 먼저 읽는 채팅
@@ -149,6 +149,13 @@ description: "MASC TUI의 채팅·입력·로딩·진행 상태, 복합 조회�
   요청 조건을 유지한다. query 일치는 formatted 문자열이 아니라 typed sort와 정확한
   optional hearth로 판단한다. metadata는 기존 workspace/refresh/dataset owner를 대신하지
   않으며 미수신은 정상 query 결과가 아니다. 추가 GET·owner 세대·timer·화면 행을 만들지 않는다.
+- 글 반영 진단은 실제 반영 함수가 반환한 불변 관측을 early/terminal 로그에 함께 쓴다.
+  성공·실패는 원래 응답 query, 반영 당시 요청 controls, 남은 정상 목록 query를 따로 둔다.
+  미수신은 delivery query가 없고, 최초 실패는 정상 목록 query도 없다. 정상 empty의 query와
+  모두 구분한다. terminal의 남은 소유 슬롯과 workspace admission을 통과한 경우만 missing을
+  기록하며 consumed·superseded·거절된 슬롯에 가짜 반영 기록을 만들지 않는다. 진단 JSON은
+  제어 입력으로 쓰지 않고 본문·오류 text를 복사하지 않는다. 로그 필드의 소스 구현은 실제
+  로그 발생·worker 종료·paint·실측 속도 증거가 아니며 화면 문구 검사를 추가하지 않는다.
 
 ## Runtime 폼 저장
 

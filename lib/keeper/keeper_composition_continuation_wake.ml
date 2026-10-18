@@ -40,7 +40,11 @@ let current_snapshot ~base_path =
   | Configured _ -> Ok snapshot
   | (Config_rejected _ | Config_unreadable _) as state -> Error (Snapshot_rejected state)
 
-let resume ?on_recovery_held ~context continuation =
+let read_profiles ~base_path =
+  Domain_pool_ref.submit_io_or_inline (fun () ->
+    Keeper_types_profile.read_keeper_profile_snapshot ~base_path)
+
+let resume_with_profiles ?on_recovery_held ~profiles ~context continuation =
   let source = Journal.continuation_source continuation in
   let hold_original error =
     Option.iter (fun observe ->
@@ -48,7 +52,6 @@ let resume ?on_recovery_held ~context continuation =
         ~reason:(error_to_string error)) on_recovery_held;
     error in
   let config = context.Keeper_types_profile.config in
-  let profiles = Keeper_types_profile.read_keeper_profile_snapshot ~base_path:config.base_path in
   let* defaults = Keeper_types_profile.snapshot_profile_defaults profiles source.keeper_name
     |> Result.map_error (fun error -> Profile_unavailable error) in
   (* The ordinary metadata path helper creates the directory. This uses the
@@ -146,6 +149,10 @@ let resume ?on_recovery_held ~context continuation =
       ~turn_context ~invocation
       ~clock:(context.clock :> float Eio.Time.clock_ty Eio.Resource.t) ())
 
+let resume ?on_recovery_held ~context continuation =
+  let profiles = read_profiles ~base_path:context.Keeper_types_profile.config.base_path in
+  resume_with_profiles ?on_recovery_held ~profiles ~context continuation
+
 module Run_key = struct
   type t = string * Keeper_tool_plan.Composition_run_id.t
   let compare (left_keeper,left_run) (right_keeper,right_run) =
@@ -183,6 +190,11 @@ let pulse_with_resume ~resume ~sw supervisor =
   let* pending = Journal.pending_continuations ~read_composition_result:Keeper_composition_dependency_result.readiness ~base_path:supervisor.context.config.base_path in
   List.iter (fun (identity,error) -> Log.Server.warn "prepared continuation discovery retained request=%s error=%s"
       identity (Journal.error_to_string error)) pending.failures;
+  (* One immutable declaration projection belongs to this pulse, never to the
+     supervisor. Eio.Lazy shares in-flight I/O and restarts a cancelled read for
+     a remaining caller. No eligible intake means no declaration filesystem I/O. *)
+  let profiles = Eio.Lazy.from_fun ~cancel:`Restart (fun () ->
+    read_profiles ~base_path:supervisor.context.config.base_path) in
   List.iter (fun candidate ->
     let source = Journal.continuation_source candidate in
     let key = source.keeper_name,source.composition_run_id in
@@ -202,7 +214,10 @@ let pulse_with_resume ~resume ~sw supervisor =
                 Log.Keeper.warn ~keeper_name:source.keeper_name
                   "prepared continuation held run=%s request=%s reason=%s; repair original authority and explicitly resume"
                   (Keeper_tool_plan.Composition_run_id.to_string source.composition_run_id) request_id reason in
-              try resume ~on_recovery_held ~context:supervisor.context candidate with
+              try
+                let profiles = Eio.Lazy.force profiles in
+                resume ~on_recovery_held ~profiles ~context:supervisor.context candidate
+              with
               | Eio.Cancel.Cancelled _ as exn -> raise exn
               | exn -> Error (Runtime_failed (Printexc.to_string exn))) in
 
@@ -215,8 +230,8 @@ let pulse_with_resume ~resume ~sw supervisor =
   Ok ()
 
 let pulse ~sw supervisor =
-  pulse_with_resume ~resume:(fun ~on_recovery_held ~context candidate ->
-    resume ~on_recovery_held ~context candidate) ~sw supervisor
+  pulse_with_resume ~resume:(fun ~on_recovery_held ~profiles ~context candidate ->
+    resume_with_profiles ~on_recovery_held ~profiles ~context candidate) ~sw supervisor
 
 module For_testing = struct
   let pulse = pulse_with_resume

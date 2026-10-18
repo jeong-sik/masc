@@ -1415,7 +1415,7 @@ let test_held_continuation_is_not_retried_until_restart () =
     (List.exists (fun candidate ->
        String.equal (Journal.continuation_request_id candidate) parked.binding.request_id) ready0);
   let calls = ref [] in
-  let stub ~on_recovery_held ~context:_ candidate =
+  let stub ~on_recovery_held ~profiles:_ ~context:_ candidate =
     let request_id = Journal.continuation_request_id candidate in
     calls := request_id :: !calls;
     on_recovery_held ~request_id ~reason:"hold-proof stub holds every intake";
@@ -1456,6 +1456,91 @@ let test_held_continuation_is_not_retried_until_restart () =
   check int "a restarted supervisor retries once" (first * 2) (List.length !calls);
   pulse restarted;
   check int "a restarted supervisor holds again after one retry" (first * 2) (List.length !calls)
+
+let test_continuation_pulse_shares_declarations ~invalid_initial () =
+  with_fixture @@ fun env _initialize fixture ->
+  with_environment ["MASC_CONFIG_DIR", None] @@ fun () ->
+  let module Wake = Masc.Keeper_composition_continuation_wake in
+  let module Profiles = Masc.Keeper_types_profile in
+  let module Async = Masc.Keeper_msg_async in
+  set_source fixture ~task_id:"task-A" ~turn:41;
+  Call_log.init ~base_path:fixture.base_path ();
+  let id = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"])
+    |> job_id in
+  let recipe = `Assoc ["execution", `String "async"; "nodes", `List
+      [`Assoc ["id", `String "await"; "tool", `String "keeper_job_result";
+        "input", `Assoc ["kind", `String "literal"; "value", argument id]]]] in
+  let prepared = with_bundle fixture (fun bundle -> invoke fixture bundle
+      ~tool_use_id:"prepare-profile-round" ~turn:41 "keeper_composition_prepare" recipe) in
+  let draft = prepared |> member "draft" |> composition_reference "profile round draft" in
+  let original_requests = List.map (fun suffix ->
+      let accepted = with_bundle fixture (fun bundle -> invoke fixture bundle
+          ~tool_use_id:("run-profile-round-" ^ suffix) ~turn:41
+          "keeper_composition_run" (`Assoc ["sha256", `String draft.sha256])) in
+      let ok, _, entry = await_composition env fixture accepted in
+      check bool "each original run waits for its exact job" false ok;
+      (match entry.Async.status with
+       | Async.Waiting_for_dependencies {dependencies; _} ->
+         check (list string) "both waits retain the original job" [id]
+           (List.map dependency_job_id dependencies)
+       | _ -> fail "profile round requires canonical original waits");
+      entry.request_id) ["first"; "second"] in
+  control fixture (`Assoc ["state", `String "exited"]);
+  ignore (with_bundle fixture (fun bundle -> invoke fixture bundle
+      ~tool_use_id:"collect-before-profile-round" ~turn:52 "keeper_job_status" (argument id)));
+  let discover () = Journal.pending_continuations
+      ~read_composition_result:Masc.Keeper_composition_dependency_result.readiness
+      ~base_path:fixture.base_path |> require "profile round canonical discovery" in
+  let ready_ids () = (discover ()).ready |> List.map Journal.continuation_request_id
+      |> List.sort String.compare in
+  let original_requests = List.sort String.compare original_requests in
+  check (list string) "two independent original runs become ready" original_requests (ready_ids ());
+  let declaration = Config_dir_resolver.keeper_toml_path_for_base_path
+      ~base_path:fixture.base_path keeper in
+  Fs_compat.mkdir_p (Filename.dirname declaration);
+  let write_profile instructions = write declaration (Printf.sprintf
+      "[keeper]\nactivation_mode = \"manual\"\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\nnetwork_mode = \"inherit\"\ninstructions = %S\n"
+      instructions) in
+  if invalid_initial then write declaration "[keeper\n" else write_profile "original projection";
+  let context : _ Profiles.context =
+    {config=Workspace.default_config fixture.base_path; agent_name="profile-round-maintenance";
+     sw=Async.server_background_switch () |> require "profile round background switch";
+     clock=Eio.Stdenv.clock env; proc_mgr=Some (Eio.Stdenv.process_mgr env); net=None;
+     publication_recovery_provider=Masc.Keeper_publication_recovery_availability.non_runtime_provider} in
+  let supervisor = Wake.create ~context () in
+  let backend_before = List.length (calls fixture) in
+  let pulse ~invalid ~instructions =
+    let observed = ref [] in
+    Eio.Switch.run (fun sw ->
+      Wake.For_testing.pulse ~sw supervisor
+        ~resume:(fun ~on_recovery_held:_ ~profiles ~context:_ candidate ->
+          check (option string) "shared declarations retain the original Task" (Some "task-A")
+            (Journal.continuation_source candidate).source_task_id;
+          (match Profiles.snapshot_profile_defaults profiles keeper with
+           | Error {kind=Profiles.Parse_error; _} when invalid -> ()
+           | Ok defaults when not invalid ->
+             check (option string) "each intake uses the pulse's immutable declaration"
+               (Some instructions) defaults.instructions
+           | Ok _ | Error _ -> fail "declaration error was hidden or another projection was borrowed");
+          observed := Journal.continuation_request_id candidate :: !observed;
+          (* An edit after the first intake cannot split this pulse's projection.
+             It must become visible to the next independent pulse. *)
+          if List.length !observed = 1 then write_profile "next projection";
+          Error (Wake.Runtime_failed "observation-only intake retains the canonical wait"))
+        |> require "profile projection pulse");
+    check (list string) "both original requests use this projection" original_requests
+      (List.sort String.compare !observed) in
+  pulse ~invalid:invalid_initial ~instructions:"original projection";
+  pulse ~invalid:false ~instructions:"next projection";
+  (* Explicit recovery has its own projection even after a maintenance pulse. *)
+  write declaration "[keeper\n";
+  let candidate = List.hd (discover ()).ready in
+  (match Wake.resume ~context candidate with
+   | Error (Wake.Profile_unavailable {kind=Profiles.Parse_error; _}) -> ()
+   | Ok _ | Error _ -> fail "explicit resume borrowed an earlier maintenance declaration");
+  check (list string) "projection failures preserve original canonical requests" original_requests (ready_ids ());
+  check int "declaration projections never relaunch or query the job backend"
+    backend_before (List.length (calls fixture))
 
 let test_named_producer_skill_loss_settles_run_and_ends_parent () =
   with_fixture @@ fun env _initialize fixture ->
@@ -2011,7 +2096,7 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
   let held,notify_held = Eio.Promise.create () in
   let held_wake = Wake.create ~context ~on_result:(fun _ _ -> Eio.Promise.resolve notify_held ()) () in
   let held_owner = Journal.continuation_request_id recovery_candidate in
-  let held_resume ~on_recovery_held ~context:_ candidate =
+  let held_resume ~on_recovery_held ~profiles:_ ~context:_ candidate =
     incr held_intakes;
     on_recovery_held ~request_id:(Journal.continuation_request_id candidate)
       ~reason:"original child authority requires repair";
@@ -2210,7 +2295,7 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
   (* Discover the real canonical ready owner first, then detach only its
      original draft at intake. Discovery itself refuses a missing artifact, so
      removing it before pulse would never exercise this admission boundary. *)
-  let resume_without_original ~on_recovery_held ~context candidate =
+  let resume_without_original ~on_recovery_held ~profiles:_ ~context candidate =
     Unix.rename draft_path detached_draft;
     Wake.resume ~on_recovery_held:(fun ~request_id ~reason ->
       pre_admission_hold := Some request_id; on_recovery_held ~request_id ~reason)
@@ -5861,4 +5946,8 @@ let () = match Array.to_list Sys.argv with
           (test_shared_held_presence_round ~different_endpoint:true)
       ; test_case "recovery keeps refused foreign and corrupt owner bytes intact" `Quick test_completion_recovery_preserves_refused_owner_bytes
       ; test_case "owner mismatch reports hold before readiness" `Quick test_owner_mismatch_reports_hold_before_readiness
-      ; test_case "held continuation is not retried until restart" `Quick test_held_continuation_is_not_retried_until_restart ]]
+      ; test_case "held continuation is not retried until restart" `Quick test_held_continuation_is_not_retried_until_restart
+      ; test_case "ready continuations share declarations until the next pulse" `Quick
+          (test_continuation_pulse_shares_declarations ~invalid_initial:false)
+      ; test_case "shared declaration failures remain explicit until a new projection" `Quick
+          (test_continuation_pulse_shares_declarations ~invalid_initial:true) ]]

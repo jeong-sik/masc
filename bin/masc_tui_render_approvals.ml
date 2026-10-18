@@ -275,12 +275,22 @@ let draw_ask_answer_feedback buf cols (state : state) =
       | None -> "Original asking turn: not recorded"
       | Some reference -> Printf.sprintf "Original asking turn: #%d" (Ids.Turn_ref.absolute_turn reference) in
     box_wrapped_field buf cols ~head:"  " ~style:Ansi.dim source;
-    Option.iter (fun (observed : Decode.ask_followup) ->
-      (match observed.af_reactions with
-       | Decode.Ask_reactions_unavailable ->
+    Option.iter (fun reading ->
+      let observed = Ask_projection.followup_view reading in
+      let pending source = match source.Ask_projection.fo_state with
+        | Followup_pending -> " · reading latest"
+        | Followup_received | Followup_unconfirmed -> "" in
+      let absent source label = match source.Ask_projection.fo_state with
+        | Followup_pending -> label ^ ": reading", Theme.recede ()
+        | Followup_received | Followup_unconfirmed -> label ^ ": observation unavailable", Theme.warn () in
+      (match observed.fv_reactions.fo_value with
+       | None ->
+         let text, style = absent observed.fv_reactions "Keeper wake/turn" in
+         box_wrapped_field buf cols ~head:"  " ~style text
+       | Some Decode.Ask_reactions_unavailable ->
          box_wrapped_field buf cols ~head:"  " ~style:(Theme.warn ())
            "Keeper follow-up: wake/turn observation unavailable"
-       | Ask_reactions_observed reactions ->
+       | Some (Ask_reactions_observed reactions) ->
          let facts = List.filter_map Fun.id
            [Option.map (fun _ -> "turn entry observed") reactions.ar_turn_started_at;
             Option.map (fun _ -> "turn boundary observed") reactions.ar_turn_finished_at;
@@ -293,22 +303,24 @@ let draw_ask_answer_feedback buf cols (state : state) =
          box_wrapped_field buf cols ~head:"  "
            ~style:(if reactions.ar_evidence_complete && reactions.ar_evidence_current
                then Theme.info () else Theme.warn ())
-           ("Keeper follow-up: " ^ String.concat " · " facts));
-      let action_text, action_style = match observed.af_tool_actions with
-        | Decode.Ask_tools_unavailable -> "Tool results: observation unavailable", Theme.warn ()
-        | Decode.Ask_tools_observed {at_count;at_latest;at_evidence_current;_} ->
+           ("Keeper follow-up: " ^ String.concat " · " facts ^ pending observed.fv_reactions));
+      let action_text, action_style = match observed.fv_tools.fo_value with
+        | None -> absent observed.fv_tools "Tool results"
+        | Some Decode.Ask_tools_unavailable -> "Tool results: observation unavailable", Theme.warn ()
+        | Some (Decode.Ask_tools_observed {at_count;at_latest;at_evidence_current;_}) ->
             let text = match at_latest with
              | None -> "Tool results: none observed", Theme.info ()
              | Some latest -> Printf.sprintf "Tool results: %d observed · latest %s · turn #%d"
                  at_count latest.ata_tool latest.ata_keeper_turn_id, Theme.info () in
             if at_evidence_current then text
             else fst text ^ " · retained earlier evidence", Theme.warn () in
-      box_wrapped_field buf cols ~head:"  " ~style:action_style action_text;
-      let task_text, task_style = match observed.af_linked_task with
-        | Decode.Ask_task_unlinked -> "Original question: no linked Task", Theme.recede ()
-        | Ask_task_missing id -> "Original Task " ^ id ^ ": not observed in lookup", Theme.warn ()
-        | Ask_task_unavailable id -> "Original Task " ^ id ^ ": observation unavailable", Theme.warn ()
-        | Ask_task_observed {akt_task_id;akt_location;akt_status;akt_evidence_current;akt_observed_at=_} ->
+      box_wrapped_field buf cols ~head:"  " ~style:action_style (action_text ^ pending observed.fv_tools);
+      let task_text, task_style = match observed.fv_task.fo_value with
+        | None -> absent observed.fv_task "Original Task"
+        | Some Decode.Ask_task_unlinked -> "Original question: no linked Task", Theme.recede ()
+        | Some (Ask_task_missing id) -> "Original Task " ^ id ^ ": not observed in lookup", Theme.warn ()
+        | Some (Ask_task_unavailable id) -> "Original Task " ^ id ^ ": observation unavailable", Theme.warn ()
+        | Some (Ask_task_observed {akt_task_id;akt_location;akt_status;akt_evidence_current;akt_observed_at=_}) ->
             let phase = match akt_status with
               | Masc_domain.Todo -> "to do"
               | Claimed {assignee;_} -> "claimed by " ^ assignee
@@ -322,12 +334,12 @@ let draw_ask_answer_feedback buf cols (state : state) =
               else " · last observed; latest read did not confirm" in
             "Original Task " ^ akt_task_id ^ ": " ^ phase ^ location ^ freshness,
             (if akt_evidence_current then Theme.info () else Theme.warn ()) in
-      box_wrapped_field buf cols ~head:"  " ~style:task_style task_text)
+      box_wrapped_field buf cols ~head:"  " ~style:task_style (task_text ^ pending observed.fv_task))
       followup;
     (match state.ask_followup_error with
      | None -> ()
      | Some _ -> box_wrapped_field buf cols ~head:"  " ~style:(Theme.warn ())
-         "Keeper follow-up: observation unavailable");
+         "Follow-up read incomplete · completed sources retained");
     Option.iter (fun detail ->
       box_line buf cols ("  " ^ Ansi.dim ^ Terminal_text.single_line detail ^ Ansi.reset)) detail)
     (Masc_tui_types.current_ask_answer_feedback state)

@@ -20,6 +20,7 @@ module Snapshot_read : sig
   val invalidate : t -> t
   (** Retire a pending owner without reusing its request number. *)
   val settle : t -> request -> t option
+  val is_current : t -> request -> bool
   (** Whether a request is on the wire for this source right now. *)
   val in_flight : t -> bool
 end = struct
@@ -43,6 +44,10 @@ end = struct
     match state.pending with
     | Some pending when pending = request -> Some { state with pending = None }
     | Some _ | None -> None
+
+  let is_current state request = match state.pending with
+    | Some pending -> pending = request
+    | None -> false
 
   let in_flight state = Option.is_some state.pending
 end
@@ -7562,7 +7567,8 @@ type state = {
   mutable ask_answer_feedback:
     (ask_submission * Masc_tui_ask_projection.answer_feedback) option;
   mutable ask_followup_read: Snapshot_read.t;
-  mutable ask_followup: (ask_submission * Masc.Tui_decode_asks.ask_followup) option;
+  mutable ask_followup: (ask_submission * Masc_tui_ask_projection.followup) option;
+  mutable ask_followup_cancel: (Snapshot_read.request * (string -> unit)) option;
   mutable ask_followup_error: string option;
   (* The tool calls keepers are holding, drawn above the operator actions on
      the same surface. Live registry state on the server; refreshed with the
@@ -8473,112 +8479,87 @@ let retain_ask_answer_feedback (state : state) submission result =
     Some feedback
   end else None
 
+let supersede_ask_followup_worker (state : state) replacement ~detail =
+  let previous = state.ask_followup_cancel in
+  state.ask_followup_cancel <- replacement;
+  Option.iter (fun (_, cancel) -> cancel detail) previous
+
+let finish_ask_followup_worker (state : state) request =
+  match state.ask_followup_cancel with
+  | Some (owner, _) when Snapshot_read.request_id owner = Snapshot_read.request_id request ->
+      state.ask_followup_cancel <- None
+  | Some _ | None -> ()
+
+let retire_ask_followup_read (state : state) =
+  let detail = "answer follow-up observation withdrawn" in
+  supersede_ask_followup_worker state None ~detail;
+  state.ask_followup_read <- Snapshot_read.invalidate state.ask_followup_read;
+  state.ask_followup <- Option.map (fun (owner, reading) ->
+    owner, fst (Masc_tui_ask_projection.finish_followup reading (Error detail))) state.ask_followup
+
+let ask_followup_owner_current (state : state) submission =
+  submission.as_authority = state.workspace_authority
+  && state.workspace_identity = Workspace_identity_match
+  && match state.ask_answer_feedback, state.ask_submission_current with
+    | Some (owner, _), Some current -> owner.as_request == submission.as_request
+        && current.as_request == submission.as_request
+    | None, _ | Some _, None -> false
+
 let begin_ask_followup_read (state : state) =
   match state.ask_answer_feedback with
-  | Some (submission, feedback) when submission.as_authority = state.workspace_authority
-      && state.workspace_identity = Workspace_identity_match
-      && Option.exists (fun current -> current.as_request == submission.as_request)
-           state.ask_submission_current ->
+  | Some (submission, feedback) when ask_followup_owner_current state submission ->
       (match feedback.Masc_tui_ask_projection.af_receipt with
        | Ok (Masc.Tui_decode_asks.Ask_answer_recorded _ | Ask_answer_already_recorded _) ->
            let reading, request = Snapshot_read.start ~intent:Snapshot_read.Poll state.ask_followup_read in
            state.ask_followup_read <- reading;
-           Option.map (fun request -> request, submission) request
+           Option.map (fun request ->
+             let previous = Option.bind state.ask_followup (fun (owner, reading) ->
+               if owner.as_request == submission.as_request then Some reading else None) in
+             state.ask_followup <- Some (submission, Masc_tui_ask_projection.begin_followup ~previous);
+             state.ask_followup_error <- None;
+             request, submission) request
        | Ok (Ask_answer_written_unconfirmed _ | Ask_answer_refused _) | Error _ -> None)
   | Some _ | None -> None
 
 let current_ask_followup (state : state) =
-  match state.ask_followup, state.ask_answer_feedback with
-  | Some (owner, observed), Some (current, _)
-    when owner.as_request == current.as_request
-      && owner.as_authority = state.workspace_authority
-      && state.workspace_identity = Workspace_identity_match -> Some observed
-  | _, _ -> None
+  match state.ask_followup with
+  | Some (owner, observed) when ask_followup_owner_current state owner -> Some observed
+  | Some _ | None -> None
 
-let take_ask_followup (state : state) request submission
-    (result : (Masc.Tui_decode_asks.ask_followup, string) result) =
+let take_ask_followup_event (state : state) request submission event =
+  if not (Snapshot_read.is_current state.ask_followup_read request
+          && ask_followup_owner_current state submission)
+      || Option.is_some state.ask_followup_error then None
+  else match state.ask_followup with
+  | Some (owner, reading) when owner.as_request == submission.as_request ->
+      let result = Masc_tui_ask_projection.observe_followup reading event in
+      (match result with
+       | Ok reading -> state.ask_followup <- Some (owner, reading)
+       | Error detail ->
+           state.ask_followup_error <- Some detail;
+           supersede_ask_followup_worker state None ~detail);
+      Some result
+  | Some _ | None -> None
+
+let finish_ask_followup_read (state : state) request submission result =
   match Snapshot_read.settle state.ask_followup_read request with
   | None -> None
   | Some reading ->
       state.ask_followup_read <- reading;
-      let current = match state.ask_answer_feedback, state.ask_submission_current with
-        | Some (owner, _), Some current -> owner.as_request == submission.as_request
-            && current.as_request == submission.as_request
-        | None, _ | Some _, None -> false in
-      if not (current && submission.as_authority = state.workspace_authority
-              && state.workspace_identity = Workspace_identity_match) then None
-      else begin
-        let linked_id = function
-          | Masc.Tui_decode_asks.Ask_task_unlinked -> None
-          | Ask_task_missing id | Ask_task_unavailable id -> Some id
-          | Ask_task_observed value -> Some value.akt_task_id in
-        let stale_task = function
-          | Masc.Tui_decode_asks.Ask_task_observed old ->
-              Masc.Tui_decode_asks.Ask_task_observed {old with akt_evidence_current=false}
-          | (Ask_task_unlinked | Ask_task_missing _ | Ask_task_unavailable _) as value -> value in
-        let stale_reactions = function
-          | Masc.Tui_decode_asks.Ask_reactions_observed old ->
-              Masc.Tui_decode_asks.Ask_reactions_observed {old with ar_evidence_current=false}
-          | Ask_reactions_unavailable -> Ask_reactions_unavailable in
-        let stale_tools = function
-          | Masc.Tui_decode_asks.Ask_tools_observed old ->
-              Masc.Tui_decode_asks.Ask_tools_observed {old with at_evidence_current=false}
-          | Ask_tools_unavailable -> Ask_tools_unavailable in
-        let result = match result with
-          | Error _ as error -> error
-          | Ok observed ->
-              (match state.ask_followup with
-                | Some (owner, prior) when owner.as_request == submission.as_request
-                    && (prior.Masc.Tui_decode_asks.af_stimulus_id <> observed.af_stimulus_id
-                        || prior.af_answered_at <> observed.af_answered_at
-                        || linked_id prior.af_linked_task <> linked_id observed.af_linked_task) ->
-                    Error "answer follow-up changed original answer or linked Task identity"
-                | Some (owner, prior) when owner.as_request == submission.as_request
-                    && prior.Masc.Tui_decode_asks.af_stimulus_id = observed.af_stimulus_id
-                    && prior.af_answered_at = observed.af_answered_at ->
-                    (* Missing observations cannot undo an already observed
-                       positive fact from the same immutable answer source. *)
-                    let retain fresh old = match fresh with Some _ -> fresh | None -> old in
-                    let af_reactions = match observed.af_reactions, prior.af_reactions with
-                      | Masc.Tui_decode_asks.Ask_reactions_unavailable, old -> stale_reactions old
-                      | Ask_reactions_observed fresh, Ask_reactions_unavailable -> Ask_reactions_observed fresh
-                      | Ask_reactions_observed fresh, Ask_reactions_observed old ->
-                          Ask_reactions_observed {fresh with
-                            ar_turn_started_at=retain fresh.ar_turn_started_at old.ar_turn_started_at;
-                            ar_turn_finished_at=retain fresh.ar_turn_finished_at old.ar_turn_finished_at;
-                            ar_queue_settled_at=retain fresh.ar_queue_settled_at old.ar_queue_settled_at;
-                            ar_queue_cancelled_at=retain fresh.ar_queue_cancelled_at old.ar_queue_cancelled_at} in
-                    let af_tool_actions = match observed.af_tool_actions, prior.af_tool_actions with
-                      | Masc.Tui_decode_asks.Ask_tools_unavailable, Ask_tools_observed old ->
-                          Masc.Tui_decode_asks.Ask_tools_observed {old with at_evidence_current=false}
-                      | Ask_tools_observed fresh, Ask_tools_observed old when fresh.at_count<old.at_count ->
-                          Ask_tools_observed {old with at_evidence_current=false}
-                      | Ask_tools_observed fresh, (Ask_tools_observed _ | Ask_tools_unavailable) ->
-                          Ask_tools_observed fresh
-                      | Ask_tools_unavailable, Ask_tools_unavailable -> Ask_tools_unavailable in
-                    let af_linked_task = match observed.af_linked_task with
-                      | (Ask_task_missing _ | Ask_task_unavailable _) as fresh ->
-                          (match prior.af_linked_task with
-                           | Ask_task_observed old ->
-                               Masc.Tui_decode_asks.Ask_task_observed {old with akt_evidence_current=false}
-                           | Ask_task_unlinked | Ask_task_missing _ | Ask_task_unavailable _ -> fresh)
-                      | (Ask_task_unlinked | Ask_task_observed _) as fresh -> fresh in
-                    Ok {observed with af_reactions; af_tool_actions; af_linked_task}
-                | Some _ | None -> Ok observed) in
-        (match result with
-         | Ok observed -> state.ask_followup <- Some (submission, observed); state.ask_followup_error <- None
-         | Error detail ->
-             state.ask_followup_error <- Some detail;
-             state.ask_followup <- Option.map (fun (owner, prior) ->
-               owner, {prior with Masc.Tui_decode_asks.af_reactions=stale_reactions prior.Masc.Tui_decode_asks.af_reactions;
-                 af_tool_actions=stale_tools prior.af_tool_actions;
-                 af_linked_task=stale_task prior.af_linked_task})
-               state.ask_followup);
-        Some result
-      end
+      finish_ask_followup_worker state request;
+      if not (ask_followup_owner_current state submission) then None
+      else match state.ask_followup with
+      | Some (owner, reading) when owner.as_request == submission.as_request ->
+          let result = match state.ask_followup_error with
+            | Some detail -> Error detail | None -> result in
+          let reading, result = Masc_tui_ask_projection.finish_followup reading result in
+          state.ask_followup <- Some (owner, reading);
+          state.ask_followup_error <- (match result with Ok () -> None | Error detail -> Some detail);
+          Some result
+      | Some _ | None -> None
 
 let begin_ask_submission_state ?submission (state : state) =
-  state.ask_followup_read <- Snapshot_read.invalidate state.ask_followup_read;
+  retire_ask_followup_read state;
   state.ask_followup <- None;
   state.ask_followup_error <- None;
   state.ask_submission_current <- submission;
@@ -9100,7 +9081,7 @@ let suspend_workspace_readings state =
   state.lane_addons_cached <- suspend_application state.lane_addons_cached;
   state.keeper_tool_approvals_read <- Snapshot_read.invalidate state.keeper_tool_approvals_read;
   retire_asks_read state;
-  state.ask_followup_read <- Snapshot_read.invalidate state.ask_followup_read;
+  retire_ask_followup_read state;
   state.keeper_roster_read <- Snapshot_read.invalidate state.keeper_roster_read;
   invalidate_local_source_read state Local_work;
   invalidate_local_source_read state Local_keepers;
@@ -12304,6 +12285,7 @@ let create_state
   ask_answer_feedback = None;
   ask_followup_read = Snapshot_read.idle;
   ask_followup = None;
+  ask_followup_cancel = None;
   ask_followup_error = None;
   keeper_tool_approvals = [];
   keeper_tool_approvals_error = None;

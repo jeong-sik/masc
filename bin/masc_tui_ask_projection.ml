@@ -42,6 +42,165 @@ let answer_feedback_to_json feedback =
       | None -> `Null | Some reference -> Ids.Turn_ref.to_yojson reference);
     "recording", `String recording; "delivery", delivery]
 
+type followup_source_state = Followup_pending | Followup_received | Followup_unconfirmed
+type 'a followup_observation = {
+  fo_value : 'a option;
+  fo_state : followup_source_state;
+}
+type followup_view = {
+  fv_identity : Decode.ask_followup_identity option;
+  fv_reactions : Decode.ask_reactions followup_observation;
+  fv_tools : Decode.ask_tool_actions followup_observation;
+  fv_task : Decode.ask_linked_task followup_observation;
+}
+type followup_phase = Followup_receiving | Followup_finished
+type followup = {
+  fu_view : followup_view;
+  fu_stream : Decode.ask_followup_stream;
+  fu_phase : followup_phase;
+}
+
+let stale_reactions = function
+  | Decode.Ask_reactions_observed old ->
+      Decode.Ask_reactions_observed {old with ar_evidence_current=false}
+  | Ask_reactions_unavailable -> Ask_reactions_unavailable
+
+let stale_tools = function
+  | Decode.Ask_tools_observed old -> Decode.Ask_tools_observed {old with at_evidence_current=false}
+  | Ask_tools_unavailable -> Ask_tools_unavailable
+
+let stale_task = function
+  | Decode.Ask_task_observed old -> Decode.Ask_task_observed {old with akt_evidence_current=false}
+  | (Ask_task_unlinked | Ask_task_missing _ | Ask_task_unavailable _) as old -> old
+
+let begin_followup ~previous =
+  let prior = Option.map (fun previous -> previous.fu_view) previous in
+  let source stale project = {
+    fo_value=Option.bind prior (fun view -> Option.map stale (project view).fo_value);
+    fo_state=Followup_pending;
+  } in
+  {fu_view={fv_identity=Option.bind prior (fun view -> view.fv_identity);
+     fv_reactions=source stale_reactions (fun view -> view.fv_reactions);
+     fv_tools=source stale_tools (fun view -> view.fv_tools);
+     fv_task=source stale_task (fun view -> view.fv_task)};
+   fu_stream=Decode.empty_ask_followup_stream;fu_phase=Followup_receiving}
+
+let followup_view reading = reading.fu_view
+
+let merge_reactions fresh prior = match fresh, prior with
+  | Decode.Ask_reactions_unavailable, Some old -> stale_reactions old
+  | Ask_reactions_observed fresh, Some (Ask_reactions_observed old) ->
+      let retain fresh old = match fresh with Some _ -> fresh | None -> old in
+      Decode.Ask_reactions_observed {fresh with
+        ar_turn_started_at=retain fresh.ar_turn_started_at old.ar_turn_started_at;
+        ar_turn_finished_at=retain fresh.ar_turn_finished_at old.ar_turn_finished_at;
+        ar_queue_settled_at=retain fresh.ar_queue_settled_at old.ar_queue_settled_at;
+        ar_queue_cancelled_at=retain fresh.ar_queue_cancelled_at old.ar_queue_cancelled_at}
+  | ((Ask_reactions_unavailable | Ask_reactions_observed _) as fresh),
+      (None | Some Ask_reactions_unavailable) -> fresh
+
+let merge_tools fresh prior = match fresh, prior with
+  | Decode.Ask_tools_unavailable, Some old -> stale_tools old
+  | Ask_tools_observed fresh, Some (Ask_tools_observed old) when fresh.at_count < old.at_count ->
+      Decode.Ask_tools_observed {old with at_evidence_current=false}
+  | (Ask_tools_observed _ as fresh), (None | Some (Ask_tools_observed _ | Ask_tools_unavailable)) -> fresh
+  | Ask_tools_unavailable, None -> Ask_tools_unavailable
+
+let linked_id = function
+  | Decode.Ask_task_unlinked -> None
+  | Ask_task_missing id | Ask_task_unavailable id -> Some id
+  | Ask_task_observed value -> Some value.akt_task_id
+
+let merge_task fresh prior =
+  match prior with
+  | Some old when linked_id old <> linked_id fresh ->
+      Error "answer follow-up changed original linked Task identity"
+  | Some old -> Ok (match fresh, old with
+      | (Decode.Ask_task_missing _ | Ask_task_unavailable _), Ask_task_observed _ -> stale_task old
+      | (Ask_task_unlinked | Ask_task_missing _ | Ask_task_unavailable _ | Ask_task_observed _),
+          (Ask_task_unlinked | Ask_task_missing _ | Ask_task_unavailable _ | Ask_task_observed _) -> fresh)
+  | None -> Ok fresh
+
+let observe_followup reading event =
+  match reading.fu_phase with
+  | Followup_finished -> Error "answer follow-up read has already finished"
+  | Followup_receiving ->
+    Result.bind (Decode.accept_ask_followup_event reading.fu_stream event) (fun stream ->
+      let view = reading.fu_view in
+      let identity = match event with
+        | Decode.Ask_followup_started identity | Ask_followup_source (identity, _)
+        | Ask_followup_completed identity -> identity in
+      match view.fv_identity with
+      | Some prior when prior.afi_answered_at <> identity.afi_answered_at
+          || prior.afi_stimulus_id <> identity.afi_stimulus_id ->
+          Error "answer follow-up changed original answer identity"
+      | Some _ | None ->
+        let received value = {fo_value=Some value;fo_state=Followup_received} in
+        let updated = match event with
+          | Decode.Ask_followup_started _ | Ask_followup_completed _ -> Ok view
+          | Ask_followup_source (_, Ask_followup_reactions value) ->
+              Ok {view with fv_reactions=received (merge_reactions value view.fv_reactions.fo_value)}
+          | Ask_followup_source (_, Ask_followup_tools value) ->
+              Ok {view with fv_tools=received (merge_tools value view.fv_tools.fo_value)}
+          | Ask_followup_source (_, Ask_followup_task value) ->
+              Result.map (fun value -> {view with fv_task=received value})
+                (merge_task value view.fv_task.fo_value) in
+        Result.map (fun view -> {reading with
+          fu_view={view with fv_identity=Some identity};fu_stream=stream}) updated)
+
+let finish_followup reading result =
+  let result = match result with
+    | Error _ as error -> error
+    | Ok () -> Decode.finish_ask_followup_stream reading.fu_stream in
+  let finish source = {source with fo_state=(match source.fo_state with
+    | Followup_pending -> Followup_unconfirmed
+    | (Followup_received | Followup_unconfirmed) as state -> state)} in
+  let view = reading.fu_view in
+  {reading with fu_phase=Followup_finished;fu_view={view with
+    fv_reactions=finish view.fv_reactions;fv_tools=finish view.fv_tools;fv_task=finish view.fv_task}}, result
+
+let followup_to_json reading =
+  let view = reading.fu_view in
+  let clock = function None -> `Null | Some at -> `Float at in
+  let source encode source = `Assoc [
+    "state", `String (match source.fo_state with Followup_pending -> "pending"
+      | Followup_received -> "received" | Followup_unconfirmed -> "unconfirmed");
+    "observation", (match source.fo_value with None -> `Null | Some value -> encode value)] in
+  let reactions = function
+    | Decode.Ask_reactions_unavailable -> `Assoc ["state", `String "unavailable"]
+    | Ask_reactions_observed value -> `Assoc ["state", `String "observed";
+        "evidence_current", `Bool value.ar_evidence_current;
+        "evidence_complete", `Bool value.ar_evidence_complete;
+        "turn_started_at", clock value.ar_turn_started_at;
+        "turn_finished_at", clock value.ar_turn_finished_at;
+        "queue_settled_at", clock value.ar_queue_settled_at;
+        "queue_cancelled_at", clock value.ar_queue_cancelled_at] in
+  let tools = function
+    | Decode.Ask_tools_unavailable -> `Assoc ["state", `String "unavailable"]
+    | Ask_tools_observed value -> `Assoc (["state", `String "observed";
+        "evidence_current", `Bool value.at_evidence_current;
+        "observed_tool_results", `Int value.at_count;
+        "first_tool_result_recorded_at", clock value.at_first_recorded_at]
+        @ (match value.at_latest with None -> [] | Some action ->
+          ["latest_execution_id", `String action.ata_execution_id;
+           "latest_physical_execution_id", `String action.ata_physical_execution_id;
+           "latest_trace_id", `String action.ata_trace_id;
+           "latest_keeper_turn_id", `Int action.ata_keeper_turn_id;
+           "latest_tool_result_recorded_at", `Float action.ata_recorded_at])) in
+  let task = function
+    | Decode.Ask_task_unlinked -> `Assoc ["state", `String "unlinked"]
+    | Ask_task_missing id -> `Assoc ["state", `String "missing";"id", `String id]
+    | Ask_task_unavailable id -> `Assoc ["state", `String "unavailable";"id", `String id]
+    | Ask_task_observed value -> `Assoc ["state", `String "observed";"id", `String value.akt_task_id;
+        "evidence_current", `Bool value.akt_evidence_current;
+        "phase", `String (Masc_domain.task_status_to_string value.akt_status);
+        "location", `String (match value.akt_location with Ask_task_backlog -> "backlog" | Ask_task_archive -> "archive");
+        "observed_at", `Float value.akt_observed_at] in
+  `Assoc ["identity", (match view.fv_identity with None -> `Null | Some identity ->
+      `Assoc ["answered_at", `Float identity.afi_answered_at;"stimulus_id", `String identity.afi_stimulus_id]);
+    "reaction_evidence", source reactions view.fv_reactions;
+    "tool_actions", source tools view.fv_tools;"linked_task", source task view.fv_task]
+
 type origin = {
   ao_keeper_name : string;
   ao_ask_id : string;

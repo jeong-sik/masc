@@ -1805,9 +1805,21 @@ let test_answer_receipt_has_one_original_submission_owner () =
   Alcotest.(check bool) "unconfirmed workspace grants no receipt admission" true
     (Option.is_none (retain_ask_answer_feedback state unread receipt))
 
-let test_answer_followup_retains_current_source_observations () =
-  let open Masc_tui_types in
+let original_answer_followup_identity ?(at=200.) ?(stimulus="original-source") () =
   let module Decode = Masc.Tui_decode_asks in
+  let json = `Assoc ["workspace",`Assoc ["base_path",`String "/workspace/followup";
+      "masc_root",`String "/workspace/followup/.masc"];
+    "state_ready",`Bool true;"keeper",`String "alpha";"answer_progress_for",`String "original";
+    "answer_progress",`Assoc ["state",`String "started";"answered_at",`Float at;
+      "stimulus_id",`String stimulus]] in
+  match Decode.decode_ask_followup_event ~expected_base_path:"/workspace/followup"
+      ~expected_masc_root:"/workspace/followup/.masc" ~keeper_name:"alpha" ~ask_id:"original" json with
+  | Ok (Decode.Ask_followup_started identity) -> identity
+  | Ok (Ask_followup_source _ | Ask_followup_completed _) -> Alcotest.fail "expected canonical stream start"
+  | Error detail -> Alcotest.fail detail
+
+let answer_followup_state () =
+  let open Masc_tui_types in
   let state = create_state ~workspace:"followup" ~local_base_path:"/workspace/followup"
       ~port:0 ~refresh_interval:0. () in
   state.workspace_identity <- Workspace_identity_match;
@@ -1816,117 +1828,149 @@ let test_answer_followup_retains_current_source_observations () =
       as_keeper_name="alpha";as_ask_id=name;as_source_turn_ref=None;as_answered_label="choice"} in
   let first = submission "original" in
   begin_ask_submission_state ~submission:first state;
-  ignore (retain_ask_answer_feedback state first (Ok (Decode.Ask_answer_recorded Decode.Ask_wake_stored)));
+  ignore (retain_ask_answer_feedback state first
+    (Ok (Masc.Tui_decode_asks.Ask_answer_recorded Ask_wake_stored)));
+  state, submission
+
+let test_answer_followup_retains_current_source_observations () =
+  let open Masc_tui_types in
+  let module Decode = Masc.Tui_decode_asks in
+  let module Projection = Masc_tui_ask_projection in
+  let state, _ = answer_followup_state () in
+  let original = original_answer_followup_identity () in
   let begin_read () = match begin_ask_followup_read state with
     | Some value -> value | None -> Alcotest.fail "confirmed original answer did not own a read" in
+  let admit request owner event = match take_ask_followup_event state request owner event with
+    | Some (Ok _) -> () | Some (Error detail) -> Alcotest.fail detail
+    | None -> Alcotest.fail "current source was not admitted" in
+  let source request owner value = admit request owner (Decode.Ask_followup_source (original,value)) in
+  let view () = match current_ask_followup state with
+    | Some reading -> Projection.followup_view reading | None -> Alcotest.fail "follow-up observation missing" in
+  let reactions = Decode.Ask_reactions_observed {ar_turn_started_at=Some 201.;ar_turn_finished_at=None;
+      ar_queue_settled_at=None;ar_queue_cancelled_at=None;ar_evidence_complete=true;ar_evidence_current=true}
+  and tools = Decode.Ask_tools_observed {at_count=1;at_first_recorded_at=Some 202.;at_latest=Some
+      {ata_execution_id="logical-one";ata_physical_execution_id="physical-one";ata_trace_id="original-trace";
+       ata_keeper_turn_id=17;ata_tool="Read";ata_recorded_at=202.};at_evidence_current=true} in
+  let task status = Decode.Ask_task_observed {akt_task_id="task-original";akt_location=Ask_task_backlog;
+      akt_status=status;akt_observed_at=203.;akt_evidence_current=true} in
+  let round task_value tools_value reactions_value =
+    let request, owner = begin_read () in
+    admit request owner (Decode.Ask_followup_started original);
+    List.iter (source request owner) [Decode.Ask_followup_task task_value;
+      Ask_followup_tools tools_value;Ask_followup_reactions reactions_value];
+    admit request owner (Decode.Ask_followup_completed original);
+    Alcotest.(check bool) "all sources and terminal frame settle only the read" true
+      (finish_ask_followup_read state request owner (Ok ())=Some (Ok ()) && state.ask_submit_inflight)
+  in
   let request, owner = begin_read () in
-  Alcotest.(check bool) "cadence shares one inflight observation" true
-    (Option.is_none (begin_ask_followup_read state));
-  let observed : Decode.ask_followup = {af_answered_at=200.;af_stimulus_id="original-source";
-    af_reactions=Decode.Ask_reactions_observed {ar_turn_started_at=Some 201.;ar_turn_finished_at=None;
-      ar_queue_settled_at=None;ar_queue_cancelled_at=None;ar_evidence_complete=true;ar_evidence_current=true};
-    af_tool_actions=Decode.Ask_tools_observed {at_count=1;at_first_recorded_at=Some 202.;
-      at_latest=Some {ata_execution_id="original-tool";ata_physical_execution_id="original-call";ata_trace_id="original-trace";
-        ata_keeper_turn_id=17;ata_tool="Read";ata_recorded_at=202.};at_evidence_current=true};
-    af_linked_task=Decode.Ask_task_observed {akt_task_id="task-original";akt_location=Ask_task_backlog;
-      akt_status=Masc_domain.Todo;akt_observed_at=203.;akt_evidence_current=true}} in
-  ignore (take_ask_followup state request owner (Ok observed));
-  Alcotest.(check bool) "original observation survives without releasing the POST gate" true
-    (current_ask_followup state=Some observed && state.ask_submit_inflight);
-  Alcotest.(check bool) "duplicate observation cannot replace accepted facts" true
-    (Option.is_none (take_ask_followup state request owner (Error "duplicate")));
+  let pending = view () in
+  Alcotest.(check bool) "poll shares the in-flight read and never fabricates empty peer evidence" true
+    (Option.is_none (begin_ask_followup_read state)
+      && pending.fv_reactions.fo_value=None && pending.fv_tools.fo_value=None
+      && pending.fv_task.fo_value=None
+      && pending.fv_tools.fo_state=Projection.Followup_pending);
+  admit request owner (Decode.Ask_followup_started original);
+  source request owner (Decode.Ask_followup_task (task Masc_domain.Todo));
+  let early = view () in
+  Alcotest.(check bool) "original Task is admitted while wake and Tool reads remain pending" true
+    (early.fv_task.fo_value=Some (task Masc_domain.Todo)
+      && early.fv_task.fo_state=Projection.Followup_received
+      && early.fv_tools.fo_state=Projection.Followup_pending
+      && early.fv_reactions.fo_state=Projection.Followup_pending
+      && Snapshot_read.in_flight state.ask_followup_read);
+  source request owner (Decode.Ask_followup_tools tools);
+  source request owner (Decode.Ask_followup_reactions reactions);
+  admit request owner (Decode.Ask_followup_completed original);
+  ignore (finish_ask_followup_read state request owner (Ok ()));
+  Alcotest.(check bool) "late source cannot reopen a completed reader" true
+    (Option.is_none (take_ask_followup_event state request owner (Decode.Ask_followup_started original)));
   let request, owner = begin_read () in
-  ignore (take_ask_followup state request owner (Error "read unavailable"));
-  Alcotest.(check bool) "failed reread retains prior source facts and explicit error" true
-    (Option.exists (fun value ->
-       (match value.Decode.af_reactions with
-        | Decode.Ask_reactions_observed {ar_turn_started_at=Some 201.;ar_evidence_current=false;_} -> true
-        | Ask_reactions_observed _ | Ask_reactions_unavailable -> false)
-       && (match value.af_tool_actions with
-           | Decode.Ask_tools_observed {at_evidence_current=false;_} -> true
-           | Ask_tools_observed _ | Ask_tools_unavailable -> false)
-       && match value.af_linked_task with
-          | Decode.Ask_task_observed {akt_status=Masc_domain.Todo;akt_evidence_current=false;_} -> true
-          | Ask_task_observed _ | Ask_task_unlinked | Ask_task_missing _ | Ask_task_unavailable _ -> false)
-       (current_ask_followup state) && Option.is_some state.ask_followup_error);
-  let request, owner = begin_read () in
-  ignore (take_ask_followup state request owner
-    (Ok {observed with af_reactions=Decode.Ask_reactions_unavailable;
-      af_tool_actions=Decode.Ask_tools_unavailable;af_linked_task=Decode.Ask_task_unavailable "task-original"}));
-  Alcotest.(check bool) "missing observations cannot undo a positive fact" true
-    (Option.exists (fun value ->
-       (match value.Decode.af_reactions with
-        | Decode.Ask_reactions_observed {ar_turn_started_at=Some 201.;ar_evidence_current=false;_} -> true
-        | Ask_reactions_observed _ | Ask_reactions_unavailable -> false)
-       && (match value.af_tool_actions with
-          | Decode.Ask_tools_observed {at_count=1;at_evidence_current=false;_} -> true
-          | Decode.Ask_tools_observed _ | Decode.Ask_tools_unavailable -> false)
-       && (match value.af_linked_task with
-          | Decode.Ask_task_observed {akt_evidence_current=false;_} -> true
-          | Ask_task_observed _ | Ask_task_unlinked | Ask_task_missing _ | Ask_task_unavailable _ -> false))
-      (current_ask_followup state));
-  let request, owner = begin_read () in
-  let partial = {observed with af_reactions=Decode.Ask_reactions_unavailable;
-    af_linked_task=Decode.Ask_task_observed
-      {akt_task_id="task-original";akt_location=Ask_task_backlog;
-       akt_status=Masc_domain.InProgress {assignee="original-worker";started_at="2026-10-17T00:00:00Z"};
-       akt_observed_at=204.;akt_evidence_current=true}} in
-  ignore (take_ask_followup state request owner (Ok partial));
-  Alcotest.(check bool) "unavailable wake evidence cannot hide fresh original Task progress" true
-    (Option.exists (fun value ->
-      (match value.Decode.af_reactions with
-       | Decode.Ask_reactions_observed {ar_turn_started_at=Some 201.;ar_evidence_current=false;_} -> true
-       | Ask_reactions_observed _ | Ask_reactions_unavailable -> false)
-      && (match value.af_tool_actions with
-          | Decode.Ask_tools_observed {at_count=1;at_evidence_current=true;_} -> true
-          | Ask_tools_observed _ | Ask_tools_unavailable -> false)
-      && (match value.af_linked_task with
-          | Decode.Ask_task_observed {akt_status=Masc_domain.InProgress _;akt_evidence_current=true;_} -> true
-          | Ask_task_observed _ | Ask_task_unlinked | Ask_task_missing _ | Ask_task_unavailable _ -> false))
-      (current_ask_followup state));
-  let request, owner = begin_read () in
-  let changed = {observed with af_linked_task=Decode.Ask_task_observed
-    {akt_task_id="task-original";akt_location=Ask_task_archive;akt_status=Masc_domain.Done
-      {assignee="replacement-worker";completed_at="2026-10-17T00:00:00Z";notes=None};
-     akt_observed_at=204.;akt_evidence_current=true}} in
-  ignore (take_ask_followup state request owner (Ok changed));
-  Alcotest.(check bool) "fresh canonical status replaces stale observation" true
-    (current_ask_followup state=Some changed && Option.is_none state.ask_followup_error);
-  let request, owner = begin_read () in
-  ignore (take_ask_followup state request owner
-    (Ok {changed with af_linked_task=Decode.Ask_task_missing "task-original"}));
-  Alcotest.(check bool) "missing lookup retains last status as stale" true
-    (Option.exists (fun value -> match value.Decode.af_linked_task with
-      | Decode.Ask_task_observed {akt_status=Masc_domain.Done _;akt_evidence_current=false;_} -> true
-      | Ask_task_observed _ | Ask_task_unlinked | Ask_task_missing _ | Ask_task_unavailable _ -> false)
-      (current_ask_followup state));
+  admit request owner (Decode.Ask_followup_started original);
+  source request owner (Decode.Ask_followup_tools Decode.Ask_tools_unavailable);
+  let working = task (Masc_domain.InProgress {assignee="original-worker";started_at="2026-10-17T00:00:00Z"}) in
+  source request owner (Decode.Ask_followup_task working);
+  ignore (finish_ask_followup_read state request owner (Error "connection interrupted"));
+  let partial = view () in
+  Alcotest.(check bool) "transport failure preserves fresh Task and marks only unfinished wake unconfirmed" true
+    (partial.fv_task.fo_value=Some working
+      && partial.fv_task.fo_state=Projection.Followup_received
+      && partial.fv_tools.fo_state=Projection.Followup_received
+      && partial.fv_reactions.fo_state=Projection.Followup_unconfirmed
+      && (match partial.fv_tools.fo_value with
+          | Some (Decode.Ask_tools_observed {at_count=1;at_evidence_current=false;_}) -> true
+          | Some (Ask_tools_observed _ | Ask_tools_unavailable) | None -> false)
+      && (match partial.fv_reactions.fo_value with
+          | Some (Decode.Ask_reactions_observed {ar_turn_started_at=Some 201.;ar_evidence_current=false;_}) -> true
+          | Some (Ask_reactions_observed _ | Ask_reactions_unavailable) | None -> false));
+  let absent_reactions = Decode.Ask_reactions_observed {ar_turn_started_at=None;ar_turn_finished_at=None;
+      ar_queue_settled_at=None;ar_queue_cancelled_at=None;ar_evidence_complete=false;ar_evidence_current=true} in
+  round (Decode.Ask_task_missing "task-original")
+    (Decode.Ask_tools_observed {at_count=0;at_first_recorded_at=None;at_latest=None;at_evidence_current=true})
+    absent_reactions;
+  let retained = view () in
+  Alcotest.(check bool) "missing Task, regressed Tool count and incomplete clocks retain prior evidence" true
+    ((match retained.fv_task.fo_value with
+      | Some (Decode.Ask_task_observed {akt_status=Masc_domain.InProgress _;akt_evidence_current=false;_}) -> true
+      | Some (Ask_task_observed _ | Ask_task_unlinked | Ask_task_missing _ | Ask_task_unavailable _) | None -> false)
+    && (match retained.fv_tools.fo_value with
+      | Some (Decode.Ask_tools_observed {at_count=1;at_evidence_current=false;_}) -> true
+      | Some (Ask_tools_observed _ | Ask_tools_unavailable) | None -> false)
+    && (match retained.fv_reactions.fo_value with
+      | Some (Decode.Ask_reactions_observed {ar_turn_started_at=Some 201.;_}) -> true
+      | Some (Ask_reactions_observed _ | Ask_reactions_unavailable) | None -> false));
+  List.iter (fun identity ->
+    let request, owner = begin_read () in
+    Alcotest.(check bool) "changed canonical answer is refused across refreshes" true
+      (match take_ask_followup_event state request owner (Decode.Ask_followup_started identity) with
+       | Some (Error _) -> true | Some (Ok _) | None -> false);
+    ignore (finish_ask_followup_read state request owner (Ok ())))
+    [original_answer_followup_identity ~at:300. ();original_answer_followup_identity ~stimulus:"foreign" ()];
   List.iter (fun foreign ->
     let request, owner = begin_read () in
-    Alcotest.(check bool) "changed original identity is refused" true
-      (match take_ask_followup state request owner (Ok foreign) with
-       | Some (Error _) -> true | Some (Ok _) | None -> false))
-    [{observed with af_linked_task=Decode.Ask_task_missing "task-other"};
-     {observed with af_linked_task=Decode.Ask_task_unlinked};
-     {observed with af_stimulus_id="another-source"};{observed with af_answered_at=300.}];
-  let request, owner = begin_read () in
-  ignore (take_ask_followup state request owner (Ok observed));
-  Alcotest.(check bool) "new valid observation may return to an earlier phase" true
-    (current_ask_followup state=Some observed);
+    admit request owner (Decode.Ask_followup_started original);
+    Alcotest.(check bool) "another or unlinked Task cannot replace the original Task" true
+      (match take_ask_followup_event state request owner (Decode.Ask_followup_source (original,Ask_followup_task foreign)) with
+       | Some (Error _) -> true | Some (Ok _) | None -> false);
+    ignore (finish_ask_followup_read state request owner (Ok ())))
+    [Decode.Ask_task_missing "task-other";Ask_task_unlinked];
+  round (task (Masc_domain.Done {assignee="worker";completed_at="2026-10-17T00:00:00Z";notes=None})) tools reactions;
+  round (task Masc_domain.Todo) tools reactions;
+  Alcotest.(check bool) "fresh canonical Task phase may move back without a fabricated monotonic gate" true
+    ((view ()).fv_task.fo_value=Some (task Masc_domain.Todo) && Option.is_none state.ask_followup_error)
+
+let test_answer_followup_withdraws_reader_without_borrowing_successor () =
+  let open Masc_tui_types in
+  let module Decode = Masc.Tui_decode_asks in
+  let state, submission = answer_followup_state () in
+  let begin_read () = match begin_ask_followup_read state with
+    | Some value -> value | None -> Alcotest.fail "expected current follow-up reader" in
+  let original = original_answer_followup_identity () in
   let retired, old_owner = begin_read () in
+  let old_cancelled = ref None in
+  supersede_ask_followup_worker state (Some (retired, fun detail -> old_cancelled:=Some detail)) ~detail:"superseded";
   let second = submission "new-answer" in
   begin_ask_submission_state ~submission:second state;
-  Alcotest.(check bool) "pending newer submission cannot read the older feedback" true
-    (Option.is_none (begin_ask_followup_read state));
-  ignore (retain_ask_answer_feedback state second (Ok (Decode.Ask_answer_recorded Decode.Ask_wake_stored)));
+  Alcotest.(check bool) "new answer cancels original worker and awaits its own canonical receipt" true
+    (Option.is_some !old_cancelled && Option.is_none (begin_ask_followup_read state));
+  ignore (retain_ask_answer_feedback state second (Ok (Decode.Ask_answer_recorded Ask_wake_stored)));
   let current, owner = begin_read () in
-  Alcotest.(check bool) "old reply cannot settle the successor's read" true
-    (Option.is_none (take_ask_followup state retired old_owner (Ok observed))
-     && Snapshot_read.in_flight state.ask_followup_read);
+  let successor_cancelled = ref None in
+  supersede_ask_followup_worker state (Some (current, fun detail -> successor_cancelled:=Some detail)) ~detail:"superseded";
+  finish_ask_followup_worker state retired;
+  Alcotest.(check bool) "old worker cleanup and late frames cannot consume successor ownership" true
+    (Option.is_none (take_ask_followup_event state retired old_owner (Decode.Ask_followup_started original))
+      && Option.is_none (finish_ask_followup_read state retired old_owner (Error "old transport"))
+      && Snapshot_read.is_current state.ask_followup_read current
+      && Option.exists (fun (request,_) -> Snapshot_read.request_id request=Snapshot_read.request_id current)
+          state.ask_followup_cancel);
   state.workspace_identity <- Workspace_identity_match_unconfirmed "probe unavailable";
-  Alcotest.(check bool) "uncertainty rejects publication and settles its original reader" true
-    (Option.is_none (take_ask_followup state current owner (Ok observed))
-     && not (Snapshot_read.in_flight state.ask_followup_read)
-     && Option.is_none (current_ask_followup state))
+  suspend_workspace_readings state;
+  Alcotest.(check bool) "read-authority withdrawal cancels the worker and rejects queued events" true
+    (Option.is_some !successor_cancelled && not (Snapshot_read.in_flight state.ask_followup_read)
+      && Option.is_none state.ask_followup_cancel
+      && Option.is_none (take_ask_followup_event state current owner (Decode.Ask_followup_started original))
+      && Option.is_none (finish_ask_followup_read state current owner (Ok ()))
+      && Option.is_none (current_ask_followup state))
 
 let test_datasets_settle_independently_under_original_request () =
   let open Masc_tui_types in
@@ -2425,6 +2469,8 @@ let () =
             test_dataset_admission_rejects_retired_workspace_and_refresh
         ; Alcotest.test_case "answer followup retains exact current source observations" `Quick
             test_answer_followup_retains_current_source_observations
+        ; Alcotest.test_case "answer followup withdraws original reader without borrowing successor" `Quick
+            test_answer_followup_withdraws_reader_without_borrowing_successor
         ; Alcotest.test_case "initial probe requires current cold workspace" `Quick
             test_initial_probe_requires_current_cold_workspace
         ; Alcotest.test_case "initial probe cannot revive a retired refresh" `Quick

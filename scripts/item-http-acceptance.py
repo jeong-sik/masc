@@ -65,7 +65,8 @@ def validate_portrait(png, edge):
         elif kind[:1].isupper():
             raise RuntimeError('unsupported critical PNG chunk')
         offset = end
-    require(ended and header is not None and image, 'PNG is missing image data or end')
+    if not ended or header is None or not image:
+        raise RuntimeError('PNG is missing image data or end')
     channels = 3 if header[3] == 2 else 4
     stride = edge * channels + 1
     expected = edge * stride
@@ -261,6 +262,8 @@ def rpc(method, params, notification=False):
 
 def tool(name, arguments, error_code=None, validation_reason=None):
     result = rpc('tools/call', {'name': name, 'arguments': arguments})
+    if not isinstance(result, dict):
+        raise RuntimeError(result)
     failed = result.get('isError', False)
     # Retain the whole response before validating handler or middleware fields.
     entry = {'server_generation': server_generation, 'name': name,
@@ -269,6 +272,8 @@ def tool(name, arguments, error_code=None, validation_reason=None):
     tool_records.append(entry)
     (root / 'tool-calls.json').write_text(json.dumps(tool_records, indent=2) + '\n')
     data = result['structuredContent']
+    if not isinstance(data, dict):
+        raise RuntimeError(result)
     require(failed == (error_code is not None or validation_reason is not None), result)
     if error_code is not None:
         require(data['error_code'] == error_code, data)
@@ -307,8 +312,9 @@ def start_ready(log):
         attempt_record_start = len(records)
         # Hold the ephemeral port through setup/login; native main has no
         # inherited-listener interface. Retry confirmed bind collisions.
-        reservation.close()
-        reservation = None
+        if reservation is not None:
+            reservation.close()
+            reservation = None
         server = subprocess.Popen([str(binary), '--port', str(port), '--base-path', str(base)],
                                   cwd=root, env=env, stdout=log, stderr=log)
         try:

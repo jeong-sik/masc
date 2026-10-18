@@ -102,11 +102,14 @@ struct Plan: Decodable {
     let assets: [Asset]
     let regions: [Region]
     let midi: Timeline?
+    let ump: UmpTimeline?
+    var captured: Bool { kind == "capture-session" }
     var mixed: Bool { kind == "mixed-arrangement" }
     func validate() throws {
-        guard (schemaVersion == 1 && kind == "wave-arrangement" && midi == nil
-               || schemaVersion == 2 && mixed && midi?.schemaVersion == 3), duration.isFinite, duration > 0,
-              !regions.isEmpty, Set(assets.map(\.id)).count == assets.count, Set(regions.map(\.id)).count == regions.count else { throw AudioFailure("invalid WAV arrangement plan") }
+        guard (schemaVersion == 1 && kind == "wave-arrangement" && midi == nil && ump == nil
+               || schemaVersion == 2 && mixed && midi?.schemaVersion == 3 && ump == nil
+               || schemaVersion == 3 && captured && midi == nil && ump?.schemaVersion == 4), duration.isFinite, duration > 0,
+              (!regions.isEmpty || captured && assets.isEmpty), Set(assets.map(\.id)).count == assets.count, Set(regions.map(\.id)).count == regions.count else { throw AudioFailure("invalid WAV arrangement plan") }
         for asset in assets {
             guard !asset.id.isEmpty, !asset.path.isEmpty, asset.sampleRate.isFinite, asset.sampleRate > 0,
                   asset.channels > 0, asset.frames >= 0 else { throw AudioFailure("invalid WAV source identity or format") }
@@ -127,6 +130,9 @@ struct Plan: Decodable {
             try midi.validate()
             let midiEnd = midi.regions.map(\.end).max() ?? 0
             guard midi.duration == duration, abs(max(end, midiEnd) - duration) < sample else { throw AudioFailure("mixed duration does not match its source regions") }
+        } else if let ump {
+            let events = try ump.events(), midiEnd = events.map(\.seconds).max() ?? 0
+            guard ump.duration == duration, abs(max(end, midiEnd) - duration) < (sample > 0 ? sample : 1e-9) else { throw AudioFailure("capture duration does not match its source clocks") }
         } else {
             guard abs(end - duration) < sample else { throw AudioFailure("duration does not match region sources") }
         }
@@ -263,7 +269,7 @@ final class ArrangementTransport {
     var listeners: [(AudioObjectID, AudioObjectPropertyAddress, AudioObjectPropertyListenerBlock)] = []
     var signals: [DispatchSourceSignal] = []
     var configuration: NSObjectProtocol?
-    var midi: MidiTransport?
+    var midi: (any CoordinatedMidiTransport)?
     var midiEnded = false
     init(plan: Plan, output: String?) throws {
         try plan.validate(); self.plan = plan; device = try OutputDevice(output)
@@ -291,7 +297,12 @@ final class ArrangementTransport {
             voices.append(voice); engine.attach(voice.player)
             engine.connect(voice.player, to: engine.mainMixerNode, format: voice.file.processingFormat)
         }
-        if let timeline = plan.midi {
+        if let timeline = plan.ump {
+            let transport = try UmpTransport(timeline: timeline)
+            midi = transport; try transport.prepare()
+            transport.onCoordinatedFailure = { [weak self] reason, error in self?.finish(reason: reason, error: error) }
+            transport.onCoordinatedEnd = { [weak self] in self?.midiReachedEnd() }
+        } else if let timeline = plan.midi {
             guard let uid = timeline.bindings.first?.destination else { throw AudioFailure("missing mixed MIDI destination") }
             let transport = try MidiTransport(timeline: timeline, uid: uid, coordinated: true)
             midi = transport; try transport.prepare()
@@ -322,7 +333,7 @@ final class ArrangementTransport {
             value["clock"] = ["kind": "mach-host-time", "anchor": String(anchor), "position": position,
                               "renderQuantum": renderQuantum, "sampleRate": engine.outputNode.outputFormat(forBus: 0).sampleRate,
                               "presentationLatency": engine.outputNode.presentationLatency,
-                              "midiAnchorNanoseconds": String(midi.anchor), "midiPosition": midi.position()]
+                              "midiAnchorNanoseconds": String(midi.anchor), "midiPosition": midi.position(at: DispatchTime.now().uptimeNanoseconds)]
         }
         return value
     }
@@ -400,7 +411,14 @@ final class ArrangementTransport {
         guard state != .stopped else { return }
         do {
             try checkOutput()
-            switch try JSONDecoder().decode(AudioCommand.self, from: Data(line.utf8)) {
+            let command = try JSONDecoder().decode(AudioCommand.self, from: Data(line.utf8))
+            if plan.captured {
+                switch command {
+                case .pause, .resume, .seek: throw AudioFailure("captured UMP pause/seek requires expression-state reconstruction; stop and restart the complete take")
+                default: break
+                }
+            }
+            switch command {
             case .pause: if state == .playing {
                 let time = currentTime()
                 if time >= plan.duration { position = plan.duration; finish(reason: "finished"); return }

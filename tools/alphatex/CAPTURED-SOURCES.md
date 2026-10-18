@@ -6,7 +6,8 @@ selected capture. `:open-take asset-1` selects an explicit imported capture.
 Literal paths preserve internal spaces; shell expansion is not performed.
 
 The take viewer shows the WAV waveform and MIDI source/group/channel tracks.
-Space auditions its WAV through the system default output. `e` exports one MIDI
+Space auditions its WAV; selecting a MIDI output enables [original paired WAV/UMP
+playback](CAPTURE-PLAYBACK.md). `o` selects MIDI and `a` selects audio output. `e` exports one MIDI
 2.0 Clip per source into a fresh directory under the project's `exports/` folder.
 `q` or Escape returns to the arrangement. Starting another recording with `r`
 writes a separate take under the project's `recordings/` folder; it does not
@@ -55,7 +56,7 @@ before deleting the snapshot and restoring the terminal.
 
 A captured asset is currently a source-library attachment. Enter opens its take
 viewer; `:place` explicitly refuses it. WAV+UMP region placement, MIDI 2.0 region
-state reconstruction, combined capture playback, monitoring, and overdubbing an
+state reconstruction, monitoring, and overdubbing an
 existing arrangement are subsequent work. Attaching a capture does not convert
 its UMP to SMF or silently play only its WAV as an arrangement region. Existing
 WAV/SMF region transports continue through their own explicit routes.

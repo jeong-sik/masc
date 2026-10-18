@@ -127,3 +127,22 @@ test('terminal termination gives the MIDI owner a chance to release keys and wai
   await Promise.resolve(); assert.equal(done, false)
   f.event('stopped', { device }); f.close(); await f.playback.completion
 })
+
+
+test('source playback pins every port binding and admits a zero-duration source through child completion', async () => {
+  const device = { kind: 'midi', id: '-120', name: 'Source one', protocol: 1 }
+  const second = { ...device, id: '122', name: 'Source two' }
+  const bindings = [{ port: 2, destination: '-120' }, { port: 7, destination: '122' }]
+  const f = fixture({ output: undefined, midiOutput: '-120', midiBindings: bindings })
+  bindings[1].destination = 'substituted after admission'
+  const state = { currentTime: 0, duration: 0, device,
+    bindings: [{ port: 2, device }, { port: 7, device: second }] }
+  f.event('playing', state); await f.playback.ready
+  f.event('stopped', state); f.close()
+  assert.equal((await f.playback.completion).duration, 0)
+  const g = fixture({ output: undefined, midiOutput: '-120', midiBindings: [{ port: 2, destination: '-120' }, { port: 7, destination: '122' }] })
+  g.event('playing', { ...state, bindings: [{ port: 2, device }, { port: 7, device: { ...second, id: '123' } }] }); g.close(1)
+  await assert.rejects(g.playback.ready, /source ports/)
+  await assert.rejects(g.playback.completion, /source ports/)
+  assert.throws(() => openPlayback({ path: 'source', midiOutput: '-120', midiBindings: [{ port: 2, destination: '123' }] }), /bindings/)
+})

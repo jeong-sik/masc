@@ -43,7 +43,15 @@ export function openPlayback({ path, output, midiOutput, midiBindings, loop = fa
   if (output !== undefined && (typeof output !== 'string' || !output)) throw new Error('Invalid output UID')
   if (midiOutput !== undefined && (typeof midiOutput !== 'string' || !midiOutput)) throw new Error('Invalid MIDI destination ID')
   if (output !== undefined && midiOutput !== undefined) throw new Error('Choose an audio output or a MIDI destination')
-  if (midiBindings !== undefined && (midiOutput === undefined || !Array.isArray(midiBindings) || !midiBindings.length)) throw new Error('Invalid MIDI source bindings')
+  if (midiBindings !== undefined) {
+    if (midiOutput === undefined || !Array.isArray(midiBindings) || !midiBindings.length
+        || midiBindings.some(binding => !Number.isInteger(binding?.port) || binding.port < 0 || binding.port > 127
+          || typeof binding.destination !== 'string' || !binding.destination)
+        || new Set(midiBindings.map(binding => binding.port)).size !== midiBindings.length
+        || new Set(midiBindings.map(binding => binding.destination)).size !== midiBindings.length
+        || midiBindings[0].destination !== midiOutput) throw new Error('Invalid MIDI source bindings')
+    midiBindings = midiBindings.map(({ port, destination }) => ({ port, destination }))
+  }
   if (typeof loop !== 'boolean') throw new Error('Invalid loop selection')
   const selectedID = midiOutput ?? output
   const selection = midiOutput === undefined ? (output === undefined ? [] : ['--output', output]) : ['--destination', midiOutput]

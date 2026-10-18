@@ -5884,7 +5884,8 @@
 (test
  (name test_memory_input_store)
  (modules test_memory_input_store)
- (libraries alcotest masc_server masc_tui_memory_usage masc.masc_types dated_jsonl eio_main yojson unix))
+ (libraries alcotest masc masc_server masc_tui_memory_usage masc_tui_context_inspector
+  masc.masc_types dated_jsonl eio_main httpun uri yojson unix))
 
 (test
  (name test_tui_exact_activity)

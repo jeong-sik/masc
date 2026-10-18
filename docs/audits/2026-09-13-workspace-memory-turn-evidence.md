@@ -15,6 +15,11 @@ discovery probe. URL-encode `#` in the turn reference as `%23` when making HTTP
 requests. Keep captures private: provider input can contain full historical tool
 arguments, source content and conversation text.
 
+For an original turn outside the recent page, capture
+`/turn-records?turn_ref=...` using the [exact lookup contract](../design/keeper-exact-turn-lookup.md).
+Its one-record envelope uses the same canonical record, but has no previous-turn
+diff or live freshness claim. An unavailable read is not proof of absence.
+
 ```sh
 python3 scripts/inspect-workspace-memory-turn.py \
   --keeper exhibit-editor \

@@ -116,6 +116,62 @@ let keeper_tool_call_lookup_response ~config ~keeper_name req =
       "execution_id must occur exactly once with a non-blank value"
 ;;
 
+let keeper_turn_record_lookup_response ~config ~keeper_name req =
+  let parameters =
+    Uri.query (Uri.of_string req.Httpun.Request.target)
+    |> List.filter (fun (name, _) -> String.equal name "turn_ref")
+  in
+  let error status code detail =
+    Some (status, `Assoc [ "error", `String detail; "code", `String code ])
+  in
+  let lookup turn_ref =
+    let reading =
+      Eio_guard.with_named_switch "keeper-exact-turn-record" (fun () ->
+        Domain_pool_ref.submit_io_or_inline (fun () ->
+          let location =
+            Dated_jsonl.Store.keeper (Workspace.dated_store_root config)
+              ~keeper:keeper_name Dated_jsonl.Store.Keeper.Turn_records
+          in
+          let store = Dated_jsonl.open_store location in
+          Server_keeper_turn_records.read_exact ~store ~keeper:keeper_name ~turn_ref))
+    in
+    match reading with
+    | Error error_detail ->
+        error `Service_unavailable "turn_record_unavailable"
+          (Server_keeper_turn_records.exact_error_to_string error_detail)
+    | Ok (None, _) ->
+        error `Not_found "turn_record_not_found"
+          "No turn record with this Turn_ref exists for this Keeper"
+    | Ok (Some record, skipped_rows) ->
+        Some
+          (`OK,
+           `Assoc
+             [ "keeper", `String keeper_name
+             ; "turn_ref", Ids.Turn_ref.to_yojson turn_ref
+             ; "count", `Int 1
+             ; "skipped_rows", `Int skipped_rows
+             ; "source", `String "turn_record"
+             ; "entries", `List
+                 [ `Assoc
+                     [ "record", Turn_record.to_json record
+                     ; "diff_vs_prev", `Null
+                     ] ]
+             ])
+  in
+  match parameters with
+  | [] -> None
+  | [ _, [ value ] ] ->
+      if not (Keeper_config.validate_name keeper_name) then
+        error `Bad_request "invalid_keeper_name" "invalid keeper name"
+      else
+        (match Ids.Turn_ref.of_string value with
+         | None -> error `Bad_request "invalid_turn_ref" "invalid Turn_ref"
+         | Some turn_ref -> lookup turn_ref)
+  | _ ->
+      error `Bad_request "invalid_turn_ref"
+        "turn_ref must occur exactly once with one valid value"
+;;
+
 let cached_assoc_body_or_self cached fields =
   match List.assoc_opt "body" fields with
   | Some body -> body
@@ -1733,6 +1789,10 @@ let handle_keeper_get_subroutes state req request reqd =
            [("error", `String (Printf.sprintf "invalid keeper name: %s" name))])
         reqd
     else
+      match keeper_turn_record_lookup_response
+              ~config:(Mcp_server.workspace_config state) ~keeper_name:name req with
+      | Some (status, json) -> Http.Response.json_value ~status json reqd
+      | None ->
       let limit =
         Server_utils.int_query_param req "limit" ~default:50
         |> max 1 |> min trajectory_max_limit

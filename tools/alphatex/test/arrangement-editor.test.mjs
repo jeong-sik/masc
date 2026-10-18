@@ -1,0 +1,139 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import { EventEmitter, once } from 'node:events'
+import { Worker } from 'node:worker_threads'
+import { mkdtemp, readFile, writeFile, rename, rm } from 'node:fs/promises'
+import { join, dirname, resolve } from 'node:path'
+import { tmpdir } from 'node:os'
+import { randomUUID } from 'node:crypto'
+import { newArrangement, editArrangement } from '../arrangement.mjs'
+import * as editorAPI from '../arrangement-editor.mjs'
+import { loadArrangement } from '../arrangement-files.mjs'
+import { importMidiSource, exportMidiSource } from '../midi-source.mjs'
+
+const waveAsset = { id: 'asset-1', name: 'Bass', kind: 'wave', file: `assets/${'a'.repeat(64)}.wav`, sha256: 'a'.repeat(64),
+  metadata: { encoding: 'pcm', channels: 1, sampleRate: 48000, bitsPerSample: 16, validBits: 16, blockAlign: 2, frames: 48000 } }
+const imported = project => ({ project: editArrangement(project, { kind: 'asset-add', asset: waveAsset }), asset: waveAsset.id })
+function midi() {
+  const data = [0,255,33,1,7,0,0xb0,1,88,0,0xe0,1,65,0,0x90,60,100,0x87,0x69,0x80,60,77,0,255,47,0]
+  const header = Buffer.from('4d546864000000060000000103e94d54726b00000000','hex')
+  header.writeUInt32BE(data.length, 18)
+  return Buffer.concat([header,Buffer.from(data)])
+}
+test('region editor arranges typed WAV and expressive MIDI, trims, duplicates and restores immutable revisions', () => {
+  let editor = editorAPI.arrangementImported(editorAPI.arrangementEditor(), imported(newArrangement()))
+  const command = line => { editor = editorAPI.arrangementCommand(editor,line).editor }
+  command('place asset-1 0'); command('trim 1200 4800'); command('repeat 3'); command('duplicate 4')
+  const original = editor.project
+  command('move 8'); command('undo'); assert.equal(editor.project,original)
+  command('redo'); assert.equal(editor.project.clips[1].position,8*960)
+  const source = importMidiSource(midi())
+  editor = editorAPI.arrangementImported(editor,{project:editArrangement(editor.project,{kind:'asset-add',asset:{id:'asset-2',name:'Keys',kind:'midi',source}}),asset:'asset-2'})
+  command('place asset-2 2'); assert.equal(editor.project.lanes.length,2)
+  assert.equal(editor.project.clips[2].extent,1001)
+  assert.deepEqual(Buffer.from(exportMidiSource(editor.project.assets[1].source)),midi())
+  command('mute'); assert.equal(editor.project.lanes[1].muted,true)
+  command('lane 1'); command('lane-remove'); assert.equal(editor.project.clips.length,1);assert.equal(editor.project.assets.length,2)
+  command('undo'); assert.equal(editor.project.clips.length,3)
+  const before=editor
+  for(const line of ['trim -1 1','repeat 0','region-lane 99','tempo 0','place missing 0','region asset-1 0 48000 1'])assert.throws(()=>editorAPI.arrangementCommand(editor,line))
+  assert.equal(editor,before)
+  assert.deepEqual(editorAPI.arrangementCommand(editor,'import-wave /music/My  take.wav').effect,{kind:'import-wave',path:'/music/My  take.wav'})
+})
+
+test('actual IO worker preserves sources in redo history when saving to a different asset root',async()=>{
+  const directory=await mkdtemp(join(tmpdir(),'masc-arrange-worker-')),worker=new Worker(new URL('../arrangement-worker.mjs',import.meta.url))
+  let id=0
+  const request=async value=>{const response=once(worker,'message');worker.postMessage({...value,id:++id});const [message]=await response;assert.equal(message.ok,true,message.error);return message.result}
+  try{
+    const bytes=Buffer.alloc(44+4800*2);bytes.write('RIFF');bytes.writeUInt32LE(bytes.length-8,4);bytes.write('WAVEfmt ',8);bytes.writeUInt32LE(16,16);bytes.writeUInt16LE(1,20);bytes.writeUInt16LE(1,22);bytes.writeUInt32LE(48000,24);bytes.writeUInt32LE(96000,28);bytes.writeUInt16LE(2,32);bytes.writeUInt16LE(16,34);bytes.write('data',36);bytes.writeUInt32LE(bytes.length-44,40)
+    const input=join(directory,'take.wav'),path=join(directory,'old','song.json');await writeFile(input,bytes)
+    const imported=await request({kind:'import-wave',project:newArrangement(),path:input,projectPath:path})
+    const retained=imported.project.assets,empty=newArrangement(),copy=join(directory,'copy','song.json')
+    const revision=await request({kind:'save',project:empty,path:copy,revision:null,sourceRoot:dirname(path),retainedAssets:retained})
+    await rename(dirname(path),join(directory,'old-removed'))
+    const editor=editorAPI.arrangementCommand(editorAPI.arrangementImported(editorAPI.arrangementEditor(empty),imported),'place asset-1 4').editor
+    await request({kind:'save',project:editor.project,path:copy,revision,sourceRoot:dirname(copy)})
+    assert.deepEqual((await loadArrangement(copy)).project,editor.project)
+    assert.deepEqual(await readFile(input),bytes)
+    assert.deepEqual(await readFile(join(dirname(copy),retained[0].file)),bytes)
+    const midiPath=join(directory,'source.mid');await writeFile(midiPath,midi())
+    const m=await request({kind:'import-midi',path:midiPath,project:editor.project})
+    assert.deepEqual(Buffer.from(exportMidiSource(m.project.assets[1].source)),midi())
+    assert.equal(m.project.assets[1].source.kind,'midi-source')
+  }finally{await worker.terminate();await rm(directory,{recursive:true,force:true})}
+})
+
+const flush=()=>new Promise(resolve=>setImmediate(resolve))
+async function controller(options={}){
+  const observed={requests:[],saved:[],recovered:[],terminated:false},process=new EventEmitter()
+  process.stdin=Object.assign(new EventEmitter(),{isTTY:true,isRaw:false,setRawMode(value){this.isRaw=value},resume(){},pause(){}})
+  process.stdout=Object.assign(new EventEmitter(),{isTTY:true,columns:100,rows:24,write(){}});process.stderr={write(){}}
+  let owner
+  class OwnedWorker extends EventEmitter{
+    constructor(){super();owner=this}
+    postMessage(job){
+      observed.requests.push(job)
+      if(job.kind==='save')queueMicrotask(()=>{
+        if(options.failSave)this.emit('message',{id:job.id,ok:false,error:'Publication outcome unavailable'})
+        else {observed.saved.push(job);this.emit('message',{id:job.id,ok:true,result:'revision'})}
+      })
+    }
+    async terminate(){observed.terminated=true}
+  }
+  const slot=`arrange-controller-${randomUUID()}`
+  globalThis[slot]={process,Worker:OwnedWorker,...editorAPI,join,dirname,resolve,tmpdir,randomUUID,
+    emitKeypressEvents(){},safeText:String,
+    verifyArrangementAssets:async()=>new Map(),
+    loadArrangement:async()=>{throw new Error('Unexpected load')},
+    mkdtemp:async()=>'/owned-recovery',writeFile:async()=>{},
+    saveProject:async()=>{throw new Error('Unexpected unverified recovery')},
+    saveArrangement:async(path,project,revision,extra)=>{observed.recovered.push({path,project,revision,...extra})},
+  }
+  const source=(await readFile(new URL('../arrangement-tui.mjs',import.meta.url),'utf8')).replace(/^import .*$/gm,'')
+    .replace("new URL('./arrangement-worker.mjs', import.meta.url)","new URL('file:///worker')")
+  const prefix=`const {${Object.keys(globalThis[slot]).join(',')}}=globalThis[${JSON.stringify(slot)}];\n`
+  const {viewArrangement}=await import('data:text/javascript;base64,'+Buffer.from(prefix+source).toString('base64'))
+  const abort=new AbortController(),done=viewArrangement({root:'/synthetic',signal:abort.signal}).finally(()=>{delete globalThis[slot]})
+  await flush()
+  const key=(name,text='',extra={})=>process.stdin.emit('keypress',text,{name,...extra})
+  return {observed,process,done,abort,key,worker:owner,command(line){key(undefined,':');key(undefined,line);key('return')}}
+}
+
+test('controller serializes import with admitted clip edits and saves final decisions on close',async()=>{
+  const view=await controller()
+  view.command('import-wave /music/My  take.wav');await flush()
+  const job=view.observed.requests.find(job=>job.kind==='import-wave')
+  assert.equal(job.path,'/music/My  take.wav')
+  view.command('place asset-1 2');view.command('trim 1200 4800');view.command('duplicate 8')
+  view.worker.emit('message',{id:job.id,ok:true,result:imported(job.project)});await flush()
+  view.key('q');view.command('title Too late');await view.done
+  const saved=view.observed.saved.at(-1).project
+  assert.equal(saved.clips.length,2);assert.equal(saved.clips[1].position,8*960)
+  assert.deepEqual(saved.clips.map(clip=>[clip.offset,clip.extent]),[[1200,4800],[1200,4800]])
+  assert.notEqual(saved.title,'Too late');assert.equal(view.process.stdin.isRaw,false);assert.equal(view.observed.terminated,true)
+})
+
+test('close cancels an active import, waits for its cleanup, drains admitted edits and rejects late adoption',async()=>{
+  const view=await controller()
+  view.command('import-wave /music/take.wav');await flush()
+  const job=view.observed.requests[0]
+  view.command('title Kept before close');view.key('q');await flush()
+  let returned=false;view.done.then(()=>{returned=true})
+  assert.equal(returned,false);assert.equal(view.observed.requests.at(-1).kind,'cancel')
+  view.worker.emit('message',{id:job.id,ok:false,cancelled:true,error:'Cancelled'})
+  await view.done
+  const saved=view.observed.saved.at(-1).project
+  assert.equal(saved.title,'Kept before close');assert.equal(saved.assets.length,0)
+  assert.equal(view.process.stdin.isRaw,false);assert.equal(view.observed.terminated,true)
+})
+
+test('uncertain save is retained at a different recovery path without retrying the original publication',async()=>{
+  const view=await controller({failSave:true})
+  view.command('title Keep this');view.key('s');await flush();view.key('q');await view.done
+  assert.equal(view.observed.requests.filter(job=>job.kind==='save').length,1)
+  assert.equal(view.observed.recovered.length,1)
+  assert.equal(view.observed.recovered[0].project.title,'Keep this')
+  assert.notEqual(view.observed.recovered[0].path,view.observed.requests[0].path)
+  assert.equal(view.process.stdin.isRaw,false);assert.equal(view.observed.terminated,true)
+})

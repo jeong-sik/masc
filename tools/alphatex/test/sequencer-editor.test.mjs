@@ -74,12 +74,14 @@ test('editor admission rejects arrangements, unknown kinds and malformed phrase 
   assert.throws(() => newEditor({ ...newEditor().project, tracks: undefined }), /needs a track/)
 })
 
-test('loading a saved arrangement rejects before terminal or background resource admission', async () => {
+test('loading a saved arrangement dispatches before phrase terminal or background resource admission', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'masc-arrangement-editor-admission-'))
   const slot = `sequencer-admission-${randomUUID()}`
   const ownership = { raw: [], workers: 0, temporary: 0 }
+  const dispatched = []
   const process = { stdin: { isTTY: true, setRawMode(value) { ownership.raw.push(value) } }, stdout: { isTTY: true } }
   globalThis[slot] = { process, loadProject, newEditor, join, tmpdir, randomUUID,
+    async openArrangement(options) { dispatched.push(options) },
     async mkdtemp() { ownership.temporary++; throw new Error('Unexpected terminal temporary directory') },
     Worker: class { constructor() { ownership.workers++; throw new Error('Unexpected terminal worker') } } }
   try {
@@ -87,9 +89,13 @@ test('loading a saved arrangement rejects before terminal or background resource
     await saveProject(path, newArrangement())
     assert.equal((await loadProject(path)).project.kind, 'arrangement')
     const source = (await readFile(new URL('../sequencer-tui.mjs', import.meta.url), 'utf8')).replace(/^import .*$/gm, '')
+      .replace("await import('./arrangement-tui.mjs')", 'await Promise.resolve({ viewArrangement: openArrangement })')
     const prefix = `const {${Object.keys(globalThis[slot]).join(',')}} = globalThis[${JSON.stringify(slot)}];\n`
     const { viewSequencer } = await import('data:text/javascript;base64,' + Buffer.from(prefix + source).toString('base64'))
-    await assert.rejects(viewSequencer({ path, root: directory }), /Unsupported sequencer editor document/)
+    await viewSequencer({ path, root: directory })
+    assert.equal(dispatched.length, 1)
+    assert.equal(dispatched[0].loaded.path, path)
+    assert.deepEqual(dispatched[0].loaded.project, newArrangement())
     assert.deepEqual(ownership, { raw: [], workers: 0, temporary: 0 })
   } finally { delete globalThis[slot]; await rm(directory, { recursive: true, force: true }) }
 })

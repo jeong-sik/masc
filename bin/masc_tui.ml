@@ -12271,17 +12271,19 @@ let load_http_scoped_surface_reads ~on_progress ~on_dataset ~surface_request ~as
   let read_board () =
     if not needs.needs_board then None, None
     else
-      let board, hearths = publish_bound ~source:Surface_read_order.Board
-          ~dataset:(fun (board, hearths) -> Dataset_board (board, hearths)) (fun () ->
-        observe_http_reader ~on_progress
+      let board, hearths = observe_http_reader ~on_progress
           (Http_refresh_progress.Surface_data Surface_read_order.Board)
           ~outcome:Http_refresh_progress.of_board
           (fun () -> Masc_tui_loader.read_pair
-            (fun () -> observe_http_component ~on_progress Http_refresh_progress.Board_posts
-              (fun () -> load_board_list ~host ~port ~sort_by:(board_sort_label board_sort)
-                ~hearth:board_hearth))
-            (fun () -> observe_http_component ~on_progress Http_refresh_progress.Board_hearths
-              (fun () -> load_board_hearths ~host ~port)))) in
+            (fun () -> publish_bound ~source:Surface_read_order.Board
+              ~dataset:(fun result -> Dataset_board_posts result) (fun () ->
+                observe_http_component ~on_progress Http_refresh_progress.Board_posts
+                  (fun () -> load_board_list ~host ~port ~sort_by:(board_sort_label board_sort)
+                    ~hearth:board_hearth)))
+            (fun () -> publish_bound ~source:Surface_read_order.Board
+              ~dataset:(fun result -> Dataset_board_hearths result) (fun () ->
+                observe_http_component ~on_progress Http_refresh_progress.Board_hearths
+                  (fun () -> load_board_hearths ~host ~port)))) in
       Some board, Some hearths
   in
   let read_planning () =
@@ -12505,42 +12507,44 @@ let load_http_surfaces ~surface_request ~on_initial_identity ~on_progress ~on_da
           approval_ticket }
   end
 
-let take_http_surface_reads state request =
-  let reading, sources = Surface_read_order.take state.http_surface_reads request in
+let take_http_surface_datasets state request =
+  let reading, datasets = Surface_read_order.take state.http_surface_reads request in
   state.http_surface_reads <- reading;
-  sources
+  datasets
 
-let apply_http_scoped_data state ~sources results =
+let apply_http_scoped_data state ~datasets results =
   let outcomes = ref [] in
-  let apply source ~received load reading =
-    if List.mem source sources then Option.iter (fun value ->
+  let apply dataset ~received load reading =
+    if List.mem dataset datasets then Option.iter (fun value ->
       load value;
-      outcomes := `Assoc ["source", `String (Surface_read_order.source_name source);
+      outcomes := `Assoc ["source", `String (Surface_read_order.source_name
+          (Surface_read_order.dataset_source dataset));
+        "dataset", `String (Surface_read_order.dataset_name dataset);
         "outcome", `String (if received value then "received" else "failed")] :: !outcomes) reading in
-  apply Surface_read_order.Transport ~received:Result.is_ok (apply_transport_load state) results.http_transport;
+  apply Surface_read_order.Transport_data ~received:Result.is_ok (apply_transport_load state) results.http_transport;
   if state.workspace_identity = Workspace_identity_match then begin
   Option.iter (apply_approval_observation state) results.http_approvals;
   Option.iter (apply_asks_observation state) results.http_asks;
-  apply Surface_read_order.Board ~received:Result.is_ok
+  apply Surface_read_order.Board_posts ~received:Result.is_ok
     (Masc_tui_board_updates.apply_board_list_load state
        ~remember_error:(fun err ->
          remember_surface_error state ~surface:"board list"
            ~current_error:state.board_list_error
            ~set_error:(fun value -> state.board_list_error <- value) err))
     results.http_board;
-  apply Surface_read_order.Board ~received:Result.is_ok (Masc_tui_board_updates.apply_board_hearths_load state) results.http_board_hearths;
-  apply Surface_read_order.Planning ~received:Result.is_ok (apply_planning_load state) results.http_planning;
-    apply Surface_read_order.Overview_goals ~received:Result.is_ok (apply_overview_goals_load state) results.http_overview_goals
+  apply Surface_read_order.Board_hearths ~received:Result.is_ok (Masc_tui_board_updates.apply_board_hearths_load state) results.http_board_hearths;
+  apply Surface_read_order.Planning_data ~received:Result.is_ok (apply_planning_load state) results.http_planning;
+    apply Surface_read_order.Overview_goals_data ~received:Result.is_ok (apply_overview_goals_load state) results.http_overview_goals
   end;
   let roster_refreshed = Option.fold ~none:false
     ~some:(apply_keeper_roster_observation state) results.http_keeper_roster in
-  apply Surface_read_order.System_logs ~received:Result.is_ok (apply_system_logs_load state) results.http_system_logs;
-  apply Surface_read_order.Fleet_safety ~received:Result.is_ok (apply_fleet_safety_load state) results.http_fleet_safety;
-  apply Surface_read_order.Runtime_quota
+  apply Surface_read_order.System_logs_data ~received:Result.is_ok (apply_system_logs_load state) results.http_system_logs;
+  apply Surface_read_order.Fleet_safety_data ~received:Result.is_ok (apply_fleet_safety_load state) results.http_fleet_safety;
+  apply Surface_read_order.Runtime_quota_data
     ~received:(fun (runtimes, quota) -> Result.is_ok runtimes && Result.is_ok quota) (apply_runtime_quota_load state) results.http_runtime_quota;
-  apply Surface_read_order.Keeper_usage ~received:Result.is_ok (apply_keeper_usage_load state) results.http_keeper_usage;
-  apply Surface_read_order.Provider_history ~received:(fun (_, result) -> Result.is_ok result) (apply_provider_history_load state) results.http_provider_history;
-  apply Surface_read_order.Account_emails ~received:Result.is_ok (apply_account_emails_load state) results.http_account_emails;
+  apply Surface_read_order.Keeper_usage_data ~received:Result.is_ok (apply_keeper_usage_load state) results.http_keeper_usage;
+  apply Surface_read_order.Provider_history_data ~received:(fun (_, result) -> Result.is_ok result) (apply_provider_history_load state) results.http_provider_history;
+  apply Surface_read_order.Account_emails_data ~received:Result.is_ok (apply_account_emails_load state) results.http_account_emails;
   let request = results.http_surface_request in
   Log.Transport.info "tui_surface_read_applied request=%d started_ns=%Ld applied_ns=%Ld sources=%s"
     (Surface_read_order.request_id request) (Surface_read_order.started_ns request)
@@ -12549,13 +12553,13 @@ let apply_http_scoped_data state ~sources results =
 
 let apply_http_dataset state = function
   | Dataset_transport result -> apply_transport_load state result
-  | Dataset_board (board, hearths) ->
+  | Dataset_board_posts board ->
     Masc_tui_board_updates.apply_board_list_load state
       ~remember_error:(fun err ->
         remember_surface_error state ~surface:"board list"
           ~current_error:state.board_list_error
-          ~set_error:(fun value -> state.board_list_error <- value) err) board;
-    Masc_tui_board_updates.apply_board_hearths_load state hearths
+          ~set_error:(fun value -> state.board_list_error <- value) err) board
+  | Dataset_board_hearths hearths -> Masc_tui_board_updates.apply_board_hearths_load state hearths
   | Dataset_planning result -> apply_planning_load state result
   | Dataset_system_logs result -> apply_system_logs_load state result
   | Dataset_fleet_safety result -> apply_fleet_safety_load state result
@@ -13461,7 +13465,7 @@ let apply_http_scoped_surfaces state ~mailbox ~currency_authority results =
       results.http_surface_request in
     let identity_matches = server_workspace_matches ~expected:state.server_identity
       results.http_scoped_server_identity in
-    let sources = take_http_surface_reads state results.http_surface_request in
+    let datasets = take_http_surface_datasets state results.http_surface_request in
     (* Nonlatest collectors can still own independent data. Their older probe
        cannot replace identity observed by a newer navigation request. *)
     if latest then apply_server_identity_reading state ~mailbox results.http_scoped_server_identity;
@@ -13475,7 +13479,7 @@ let apply_http_scoped_surfaces state ~mailbox ~currency_authority results =
       in
       let results = if same_workspace then results
         else { results with http_keeper_roster = None } in
-      apply_http_scoped_data state ~sources results
+      apply_http_scoped_data state ~datasets results
     end else false
   end else false
 
@@ -13505,13 +13509,13 @@ let apply_http_surfaces state ~mailbox results =
   if Http_refresh_order.is_current state.http_refresh_order
        results.http_scoped.http_refresh_ticket then begin
   let previous_items = visible_item_revision state in
-  let sources = take_http_surface_reads state results.http_scoped.http_surface_request in
+  let datasets = take_http_surface_datasets state results.http_scoped.http_surface_request in
   apply_server_identity_reading state ~mailbox results.http_server_identity;
   let roster_refreshed = if Result.is_ok results.http_server_identity then begin
     apply_overview_load state results.http_overview;
     if state.workspace_identity = Workspace_identity_match then
       Option.iter (apply_approval_observation state) results.http_approvals;
-    apply_http_scoped_data state ~sources results.http_scoped
+    apply_http_scoped_data state ~datasets results.http_scoped
   end else false in
   if roster_refreshed || Option.is_none results.http_scoped.http_keeper_roster then
     refresh_changed_keeper_items state ~mailbox ~roster_refreshed previous_items;
@@ -17346,22 +17350,24 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
           ~scoped_refresh_followup ~mailbox
       end
   | Http_dataset_loaded early ->
-      let source = http_dataset_source early.ed_dataset in
-      if Masc_tui_types.take_early_surface_read state
+      let dataset = http_dataset_key early.ed_dataset in
+      let source = Surface_read_order.dataset_source dataset in
+      if Masc_tui_types.take_early_surface_dataset state
           ~ticket:early.ed_ticket ~authority:early.ed_authority
-          ~identity:early.ed_identity ~request:early.ed_request ~source then begin
+          ~identity:early.ed_identity ~request:early.ed_request ~dataset then begin
         let kind, full_started_ns = match Surface_read_order.request_kind early.ed_request with
           | Surface_read_order.Full -> "full", state.http_refresh_started_ns
           | Navigation -> "navigation", None
           | Independent -> "independent", None in
         apply_http_dataset state early.ed_dataset;
         Log.Transport.info
-          "tui_dataset_early request=%d kind=%s started_ns=%Ld full_refresh_started_ns=%s admitted_ns=%Ld source=%s outcome=%s"
+          "tui_dataset_early request=%d kind=%s started_ns=%Ld full_refresh_started_ns=%s admitted_ns=%Ld source=%s dataset=%s outcome=%s"
           (Surface_read_order.request_id early.ed_request)
           kind (Surface_read_order.started_ns early.ed_request)
           (match full_started_ns with Some started -> Int64.to_string started | None -> "unrecorded")
           (Mtime_clock.elapsed_ns ())
           (Surface_read_order.source_name source)
+          (Surface_read_order.dataset_name dataset)
           (if http_dataset_received early.ed_dataset then "received" else "failed")
       end
   | Http_initial_identity_read initial ->
@@ -18978,9 +18984,9 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
         ~report:(fun level detail -> report_action state level detail)
         ~refresh:(fun keeper -> Masc_tui_identity_requests.launch_github_view state ~host:server_peer_host ~deliver:(workspace_enqueue state mailbox) keeper) result
   | System_logs_loaded (request, result) ->
-      let reads, sources = Surface_read_order.take state.http_surface_reads request in
+      let reads, datasets = Surface_read_order.take state.http_surface_reads request in
       state.http_surface_reads <- reads;
-      if List.mem Surface_read_order.System_logs sources then begin
+      if List.mem Surface_read_order.System_logs_data datasets then begin
         apply_system_logs_load state result;
         Log.Transport.info "tui_system_logs_read_applied request=%d started_ns=%Ld applied_ns=%Ld received=%b"
           (Surface_read_order.request_id request) (Surface_read_order.started_ns request)

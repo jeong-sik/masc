@@ -11,7 +11,7 @@ dataset. Status alone does not certify workspace admission or faster completion.
 |---|---|---|---|
 | Refresh visibility | Connection badge and one full-refresh start clock | Pending reader, failed and interrupted reader counts; native captures at 120 x 36 and 80 x 24 | Broader live-use readability |
 | Attribution | Existing endpoint and mailbox diagnostics | One terminal record with logical reader outcomes and elapsed time; controlled native comparison | Production latency distributions |
-| Partial results | Verified Dashboard preview and questions can arrive early; roster waits for the full bundle | A matching workspace's roster and owned source failures can settle before unrelated reads, once per source request | Unadmitted cold-start authority and other scoped datasets still use terminal admission |
+| Partial results | Verified Dashboard preview and questions can arrive early; roster waits for the full bundle | Matching-workspace roster and owned datasets can settle before unrelated reads; Board posts/hearths also settle independently | Cold authority before admission remains deferred; first paint is unmeasured |
 | Authority | Request tickets and workspace identity guard admission | Diagnostic observations use the same request and authority identities | These observations never grant data or action authority |
 | Keeper execution | Existing Task/Skill preparation and owned job recovery | No model or Tool execution change in this unit | Request byte attribution, redundant roundtrips, recipe concurrency and held-job reactivation |
 
@@ -44,7 +44,7 @@ Each requested source starts once and settles once. The sources are:
 | questions | Questions listing and its response-bound workspace/readiness verification |
 | keepers | Requested roster, its identity verification and Candle reading |
 | transport | Requested transport/delivery snapshot |
-| Board | Requested Board list and hearths, collected in parallel as one dataset |
+| Board | Requested Board list and hearths, collected in parallel under one logical source with two dataset slots |
 | Work | Requested planning snapshot |
 | logs | Requested system-log page |
 | fleet health | Requested fleet-safety snapshot |
@@ -176,18 +176,29 @@ waited for the entire collector and its final workspace probe before publication
 | One requested dataset returns | Wait for all independent readers and final probe | Admit that owned dataset after its request-bound workspace proof |
 | An unrelated reader is slow | Delays publication of otherwise ready scoped data | Remains pending without holding the ready dataset |
 | Owned dataset fails | Error policy runs with the terminal bundle | Same dataset-specific error policy can run immediately |
-| Board and provider windows | Each is one paired dataset | Preserve the pair and settle its shared owner once |
+| Board and provider windows | Each is one paired dataset | Board posts/hearths settle separate slots under their request; provider windows remains one paired dataset |
 | Navigation supersedes one source | Source ownership orders terminal bundles | Same ownership also rejects the old early result |
 | Final bundle arrives | Applies every still-owned dataset | Applies only sources not already settled or superseded |
 | HTTP requests | Existing dataset calls and workspace probes | Same source request count; no per-dataset health probe added |
 
 Each early dataset carries its original refresh ticket, immutable workspace
 authority, dataset request and complete typed value. Admission consumes only that
-source's ownership. Duplicate replies cannot overwrite a settled source, and an
+dataset's ownership. Duplicate replies cannot overwrite a settled dataset, and an
 older collector cannot consume a newer navigation/filter owner. Sibling sources
 and actual collector lifetimes remain pending until they finish. The same path
 covers full and navigation refreshes. Non-Eio synchronous collection retains
 terminal bundle admission.
+
+Board posts and hearths use separate typed dataset keys under the same original
+request. Each existing GET retains its request-bound workspace precondition and
+server receipt. The first returned result publishes without waiting for its sibling;
+received and failed deliveries each consume only their own slot. Board is one
+pending logical source while either slot remains. Navigation supersedes both keys;
+the terminal bundle applies only the still-owned, unconsumed datasets, so a late
+copy cannot replay already admitted posts or consume a successor's census. Taking
+data still does not finish the navigation collector. Listing selection/error policy
+and the census's last-success retention policy are unchanged. Independent results
+are not an atomic Board snapshot; census and listing already came from two reads.
 
 The HTTP/1 TUI dataset reader binds each existing JSON GET to the confirmed
 canonical base path and MASC root. Public-read, read-auth, permission-auth and
@@ -213,7 +224,7 @@ establish a current workspace for a stale request, complete the refresh, resume 
 Keeper, or prove a Tool effect. Existing Work snapshot/cursor/draft retention on
 failure remains the data application's policy.
 
-`tui_dataset_early` records the admitted dataset source, original request ID,
+`tui_dataset_early` records the logical `source` and concrete `dataset`, original request ID,
 collector kind, monotonic `started_ns` and `admitted_ns`, and
 `outcome=received|failed`. A full collector also records its own
 `full_refresh_started_ns`, which joins the terminal `tui_http_refresh` clock,
@@ -353,7 +364,7 @@ still request no new delta.
 
 Questions, approvals and roster retain their existing independent source
 requests. The other datasets use `Surface_read_order`; Board listing and hearth
-census share one owner. Full and scoped collection keep their existing initial
+census share one request with independent publication slots. Full and scoped collection keep their existing initial
 and final identity checks. Scoped results still require their dispatch workspace
 authority. Cold probe admission replaces the full pass's retired dataset request,
 and workspace withdrawal invalidates dataset owners. A late result or cleanup
@@ -390,7 +401,8 @@ record its own source clocks and received/failed UI application separately.
 whether a full pass was running and the admitted navigation collector count.
 `tui_surface_read_applied` records the same
 dataset request id and start clock, monotonic application clock, and each applied
-source's received/failed outcome. A source whose owner was retired is excluded.
+dataset's logical source, concrete dataset and received/failed outcome. A dataset
+whose owner was retired or consumed by early delivery is excluded.
 These are UI state application observations, not physical request counts,
 successful operator actions or first paint. Empty source lists grant no usable
 screen claim. `tui_surface_read_finished` records the matching start and UI

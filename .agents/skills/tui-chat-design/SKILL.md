@@ -1,6 +1,6 @@
 ---
 name: tui-chat-design
-description: "MASC TUI의 채팅·입력·로딩·진행 상태, 복합 조회의 부분 수신·하위 완료 관측, Keeper·Work·로그·질문 원본의 비동기 조회, Runtime·Overview 목록/사용량의 공유 해석, Keeper 설정·Sandbox 단축키·Runtime 폼·원문 저장과 설정 snapshot 해석을 바꿀 때 쓴다. 원본 입력·revision·요청 소유권, 마지막 관측과 부분 실패, 준비 작업·상태 반영·paint 증거를 구분하는 규칙이다."
+description: "MASC TUI의 채팅·입력·로딩·진행 상태, 복합 조회의 부분 수신·하위 완료 관측과 Board 독립 데이터 반영, Keeper·Work·로그·질문 원본의 비동기 조회, Runtime·Overview 목록/사용량의 공유 해석, Keeper 설정·Sandbox 단축키·Runtime 폼·원문 저장과 설정 snapshot 해석을 바꿀 때 쓴다. 원본 입력·revision·요청 소유권, 마지막 관측과 부분 실패, 준비 작업·상태 반영·paint 증거를 구분하는 규칙이다."
 ---
 
 # 대화를 먼저 읽는 채팅
@@ -117,6 +117,13 @@ description: "MASC TUI의 채팅·입력·로딩·진행 상태, 복합 조회�
 - header는 실패한 구성과 받은 구성을 함께 보인다. JSON/log에는 구성별 결과를 남기되 현재
   workspace/read owner·dataset 반영·후속 조회 판단을 바꾸지 않는다. 화면 문구나 배치 검사 대신
   receipt·구성·소유권·종단 상태의 연결을 확인한다.
+- Board 글과 hearth 데이터는 같은 요청의 별도 dataset 슬롯을 소유한다. 각 기존 GET의
+  workspace precondition·서버 receipt를 유지하며 먼저 반환한 데이터를 형제 조회 전에
+  보낸다. 한 쪽 수신·실패는 그 슬롯만 한 번 소비하고 다른 쪽의 결과·오류를 덮지 않는다.
+  Board 대기는 남은 슬롯이 있으면 유지하며 실제 collector 종료와 구분한다. navigation은
+  두 슬롯 모두 새 owner로 바꾸고, terminal bundle은 아직 반영하지 않은 슬롯만 처리한다.
+  기존 글 cursor·초안과 census의 마지막 정상 관측 유지 정책을 보존한다. UI 반영 로그는
+  source와 dataset을 구분하며 paint·실측 속도나 원자적 Board snapshot으로 부르지 않는다.
 
 ## Runtime 폼 저장
 

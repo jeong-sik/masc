@@ -2200,29 +2200,30 @@ let test_datasets_settle_independently_under_original_request () =
   let reads, original = Surface_read_order.dispatch ~kind:Surface_read_order.Full
       ~needs ~started_ns:0L state.http_surface_reads in
   state.http_surface_reads <- reads;
-  let take request source = take_early_surface_read state ~ticket ~authority
-      ~identity:observed ~request ~source in
+  let take request dataset = take_early_surface_dataset state ~ticket ~authority
+      ~identity:observed ~request ~dataset in
   Alcotest.(check bool) "ready Planning settles while Board and logs remain pending" true
-    (take original Surface_read_order.Planning
+    (take original Surface_read_order.Planning_data
      && Surface_read_order.pending ~needs state.http_surface_reads
         = [Surface_read_order.Board;Surface_read_order.System_logs]
      && state.http_refresh_started_ns = Some 0L);
   Alcotest.(check bool) "a second result cannot replace that settlement" false
-    (take original Surface_read_order.Planning);
+    (take original Surface_read_order.Planning_data);
   let navigation_needs = {nothing with needs_board=true} in
   let reads, navigation = Surface_read_order.dispatch ~kind:Surface_read_order.Navigation
       ~needs:navigation_needs ~started_ns:1L state.http_surface_reads in
   state.http_surface_reads <- reads;
   Alcotest.(check bool) "navigation owns Board without retiring the original logs" true
-    (not (take original Surface_read_order.Board)
-     && take navigation Surface_read_order.Board
+    (not (take original Surface_read_order.Board_posts)
+     && take navigation Surface_read_order.Board_posts
+     && take navigation Surface_read_order.Board_hearths
      && Surface_read_order.navigation_active state.http_surface_reads navigation
      && Surface_read_order.pending ~needs state.http_surface_reads = [Surface_read_order.System_logs]);
   (* Error is an owned settlement too: a later success cannot overwrite it.
      Payload application retains the existing dataset-specific error policy. *)
   Alcotest.(check bool) "the original failed logs read settles once" true
-    (take original Surface_read_order.System_logs
-     && not (take original Surface_read_order.System_logs));
+    (take original Surface_read_order.System_logs_data
+     && not (take original Surface_read_order.System_logs_data));
   let reads, remaining = Surface_read_order.take state.http_surface_reads original in
   state.http_surface_reads <- reads;
   Alcotest.(check bool) "final bundle has no dataset left to apply again" true
@@ -2230,6 +2231,100 @@ let test_datasets_settle_independently_under_original_request () =
   state.http_surface_reads <- Surface_read_order.finish state.http_surface_reads navigation;
   Alcotest.(check bool) "only its own collector completion releases navigation" false
     (Surface_read_order.navigation_in_flight state.http_surface_reads)
+
+let board_dataset_fixture kind =
+  let open Masc_tui_types in
+  let state=create_state ~workspace:"board-delivery" ~local_base_path:"/workspace/board-delivery"
+    ~port:0 ~refresh_interval:0. () in
+  let observed=identity "/workspace/board-delivery" in
+  state.server_identity <- Some observed;
+  state.workspace_identity <- Workspace_identity_match;
+  let ticket=Http_refresh_order.dispatch state.http_refresh_order in
+  (match kind with
+   | Surface_read_order.Full -> begin_http_refresh_state state ~ticket ~started_ns:0L
+   | Surface_read_order.Navigation | Surface_read_order.Independent -> state.http_refresh_order <- ticket);
+  let needs={nothing with needs_board=true;needs_planning=true} in
+  let reads,request=Surface_read_order.dispatch ~kind ~needs ~started_ns:0L state.http_surface_reads in
+  state.http_surface_reads <- reads;
+  state,observed,ticket,state.workspace_authority,needs,request
+
+let test_board_delivery_retains_sibling_and_terminal_remainder () =
+  let open Masc_tui_types in
+  List.iter (fun kind -> List.iter (fun (first,second) ->
+    let state,observed,ticket,authority,needs,request=board_dataset_fixture kind in
+    let take dataset=take_early_surface_dataset state ~ticket ~authority ~identity:observed ~request ~dataset in
+    Alcotest.(check bool) "first Board dataset is admitted without its sibling" true (take first);
+    Alcotest.(check bool) "one received dataset does not finish logical Board or Planning" true
+      (Surface_read_order.pending ~needs state.http_surface_reads=
+        [Surface_read_order.Board;Surface_read_order.Planning]);
+    Alcotest.(check bool) "duplicate early delivery cannot replace an admitted result" false (take first);
+    let reads,remaining=Surface_read_order.take state.http_surface_reads request in
+    state.http_surface_reads <- reads;
+    Alcotest.(check bool) "terminal bundle applies only the missing Board dataset and other owned data" true
+      (List.filter (fun dataset -> Surface_read_order.dataset_source dataset=Surface_read_order.Board)
+         remaining=[second]
+       && not (List.mem first remaining) && List.mem Surface_read_order.Planning_data remaining
+       && Surface_read_order.pending ~needs reads=[]);
+    Alcotest.(check bool) "terminal fallback cannot be replayed as late early delivery" false (take second);
+    (match kind with
+     | Surface_read_order.Navigation -> Alcotest.(check bool) "data application does not finish navigation collector" true
+         (Surface_read_order.navigation_active reads request)
+     | Surface_read_order.Full | Surface_read_order.Independent -> ());
+    state.http_surface_reads <- Surface_read_order.finish reads request;
+    Alcotest.(check bool) "matching terminal cleanup retires only its collector" false
+      (Surface_read_order.navigation_active state.http_surface_reads request))
+    [Surface_read_order.Board_posts,Surface_read_order.Board_hearths;
+     Surface_read_order.Board_hearths,Surface_read_order.Board_posts])
+    [Surface_read_order.Full;Surface_read_order.Navigation]
+
+let test_board_delivery_supersedes_both_parts_without_replaying_early_data () =
+  let open Masc_tui_types in
+  let state,observed,ticket,authority,needs,original=board_dataset_fixture Surface_read_order.Full in
+  let take request dataset=take_early_surface_dataset state ~ticket ~authority ~identity:observed ~request ~dataset in
+  Alcotest.(check bool) "original posts can arrive before a navigation" true
+    (take original Surface_read_order.Board_posts);
+  let reads,current=Surface_read_order.dispatch ~kind:Surface_read_order.Navigation
+    ~needs:{nothing with needs_board=true} ~started_ns:1L state.http_surface_reads in
+  state.http_surface_reads <- reads;
+  Alcotest.(check bool) "old census cannot populate the successor's Board" false
+    (take original Surface_read_order.Board_hearths);
+  let reads,remaining=Surface_read_order.take state.http_surface_reads original in
+  state.http_surface_reads <- Surface_read_order.finish reads original;
+  Alcotest.(check bool) "old terminal and cleanup preserve both successor dataset owners" true
+    (remaining=[Surface_read_order.Planning_data]
+     && Surface_read_order.navigation_active state.http_surface_reads current
+     && take current Surface_read_order.Board_posts
+     && not (take current Surface_read_order.Board_posts)
+     && Surface_read_order.pending ~needs state.http_surface_reads=[Surface_read_order.Board]
+     && take current Surface_read_order.Board_hearths
+     && not (take current Surface_read_order.Board_hearths)
+     && Surface_read_order.pending ~needs state.http_surface_reads=[]);
+  let reads,remaining=Surface_read_order.take state.http_surface_reads current in
+  Alcotest.(check bool) "two early receipts leave no Board terminal replay" true (remaining=[]);
+  state.http_surface_reads <- Surface_read_order.finish reads current;
+  Alcotest.(check bool) "only successor completion ends its navigation" false
+    (Surface_read_order.navigation_in_flight state.http_surface_reads)
+
+let test_board_delivery_preserves_workspace_and_refresh_guards () =
+  let open Masc_tui_types in
+  let withdrawals=[
+    (fun state -> state.http_refresh_order <- Http_refresh_order.dispatch state.http_refresh_order);
+    (fun state -> state.workspace_identity <- Workspace_identity_match_unconfirmed "identity unavailable");
+    (fun state -> suspend_workspace_readings state)] in
+  List.iter (fun withdraw ->
+    let state,observed,ticket,authority,needs,request=board_dataset_fixture Surface_read_order.Navigation in
+    let take identity dataset=take_early_surface_dataset state ~ticket ~authority ~identity ~request ~dataset in
+    Alcotest.(check bool) "foreign response cannot consume either Board dataset" true
+      (not (take (identity "/workspace/foreign") Surface_read_order.Board_posts)
+       && Surface_read_order.pending ~needs state.http_surface_reads=
+         [Surface_read_order.Board;Surface_read_order.Planning]);
+    Alcotest.(check bool) "matching owned posts are admitted once" true
+      (take observed Surface_read_order.Board_posts);
+    withdraw state;
+    let withdrawn=state.http_surface_reads in
+    Alcotest.(check bool) "remaining census cannot borrow withdrawn workspace or refresh authority" true
+      (not (take observed Surface_read_order.Board_hearths)
+       && state.http_surface_reads==withdrawn)) withdrawals
 
 let test_dataset_admission_rejects_retired_workspace_and_refresh () =
   let open Masc_tui_types in
@@ -2244,8 +2339,8 @@ let test_dataset_admission_rejects_retired_workspace_and_refresh () =
   let reads, request = Surface_read_order.dispatch ~kind:Surface_read_order.Navigation
       ~needs ~started_ns:0L state.http_surface_reads in
   state.http_surface_reads <- reads;
-  let take identity = take_early_surface_read state ~ticket ~authority ~identity
-      ~request ~source:Surface_read_order.Planning in
+  let take identity = take_early_surface_dataset state ~ticket ~authority ~identity
+      ~request ~dataset:Surface_read_order.Planning_data in
   Alcotest.(check bool) "foreign response leaves the real source pending" true
     (not (take (identity "/workspace/foreign"))
      && Surface_read_order.pending ~needs state.http_surface_reads=[Surface_read_order.Planning]);
@@ -2262,8 +2357,8 @@ let test_dataset_admission_rejects_retired_workspace_and_refresh () =
   state.http_surface_reads <- reads;
   suspend_workspace_readings state;
   Alcotest.(check bool) "workspace retirement rejects the original authority" false
-    (take_early_surface_read state ~ticket ~authority ~identity:observed
-       ~request:successor ~source:Surface_read_order.Planning)
+    (take_early_surface_dataset state ~ticket ~authority ~identity:observed
+       ~request:successor ~dataset:Surface_read_order.Planning_data)
 
 let with_response_decode_pool f =
   Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
@@ -2335,8 +2430,8 @@ let test_decode_completion_cannot_consume_new_navigation () = with_response_deco
         Tui_decode.decode_overview_goals (`Assoc ["tree", `List []])) in
       Alcotest.(check bool) "the original immutable response finishes normally" true (result=Ok []);
       Alcotest.(check bool) "late decoding cannot consume a successor's dataset" false
-        (take_early_surface_read state ~ticket ~authority ~identity:observed
-          ~request:original ~source:Surface_read_order.Overview_goals))
+        (take_early_surface_dataset state ~ticket ~authority ~identity:observed
+          ~request:original ~dataset:Surface_read_order.Overview_goals_data))
     (fun () ->
       Alcotest.(check bool) "UI can navigate while the actual worker is waiting" true
         (Eio.Promise.await started);
@@ -2348,8 +2443,8 @@ let test_decode_completion_cannot_consume_new_navigation () = with_response_deco
   let successor = match !successor with Some request -> request
     | None -> Alcotest.fail "navigation was not dispatched" in
   Alcotest.(check bool) "the new dataset retains its original admission authority" true
-    (take_early_surface_read state ~ticket ~authority ~identity:observed
-      ~request:successor ~source:Surface_read_order.Overview_goals))
+    (take_early_surface_dataset state ~ticket ~authority ~identity:observed
+      ~request:successor ~dataset:Surface_read_order.Overview_goals_data))
 
 exception Response_decode_failed
 
@@ -3510,6 +3605,12 @@ let () =
             test_response_decode_without_runtime_stays_synchronous
         ; Alcotest.test_case "datasets settle independently under original request ownership" `Quick
             test_datasets_settle_independently_under_original_request
+        ; Alcotest.test_case "Board delivery preserves sibling and terminal remainder" `Quick
+            test_board_delivery_retains_sibling_and_terminal_remainder
+        ; Alcotest.test_case "Board navigation supersedes both dataset owners" `Quick
+            test_board_delivery_supersedes_both_parts_without_replaying_early_data
+        ; Alcotest.test_case "Board delivery preserves workspace and refresh guards" `Quick
+            test_board_delivery_preserves_workspace_and_refresh_guards
         ; Alcotest.test_case "dataset admission rejects retired workspace and refresh" `Quick
             test_dataset_admission_rejects_retired_workspace_and_refresh
         ; Alcotest.test_case "answer followup retains exact current source observations" `Quick

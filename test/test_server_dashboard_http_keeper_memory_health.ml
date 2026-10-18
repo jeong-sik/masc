@@ -762,7 +762,7 @@ let test_context_cycle_separates_saved_and_prepared () =
   let lines = [1, Ok {B.recorded_at = test_now; event = B.Turn_ended
     { task_context = Masc.Keeper_turn_task_context.No_task;turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1;
      history_at_start = B.Fresh_history; position}}] in
-  let snapshot = S.capture ~trace_id ~lines ~messages ~working_state:"PRIVATE_WORKING_STATE"
+  let snapshot = S.capture ~unread_messages:[] ~trace_id ~lines ~messages ~working_state:"PRIVATE_WORKING_STATE"
     |> Result.map_error S.error_to_string |> get in
   let path = Masc.Keeper_librarian_continuity.path ~config ~keeper_name in
   Fs_compat.mkdir_p (Filename.dirname path);
@@ -829,7 +829,7 @@ let test_context_cycle_reads_the_librarian_position_beside_the_cut () =
   let lines = [1, Ok {B.recorded_at = test_now; event = B.Turn_ended
     { task_context = Masc.Keeper_turn_task_context.No_task;turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1;
      history_at_start = B.Fresh_history; position}}] in
-  let snapshot = S.capture ~trace_id ~lines ~messages ~working_state:"a working state"
+  let snapshot = S.capture ~unread_messages:[] ~trace_id ~lines ~messages ~working_state:"a working state"
     |> Result.map_error S.error_to_string |> get in
   let path = Masc.Keeper_librarian_continuity.path ~config ~keeper_name in
   Fs_compat.mkdir_p (Filename.dirname path);
@@ -915,7 +915,7 @@ let test_the_continuity_lag_is_measured_or_says_it_cannot_be () =
     ]
   in
   let snapshot =
-    S.capture ~trace_id ~lines ~messages ~working_state:"working state"
+    S.capture ~unread_messages:[] ~trace_id ~lines ~messages ~working_state:"working state"
     |> Result.map_error S.error_to_string
     |> get
   in

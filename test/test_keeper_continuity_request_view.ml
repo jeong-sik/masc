@@ -20,7 +20,7 @@ let capture_source source =
   let lines = [1, Ok { Boundary.recorded_at = 1.; event = Boundary.Turn_ended
     { task_context = Masc.Keeper_turn_task_context.No_task; turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1;
       history_at_start = Boundary.Fresh_history; position } }] in
-  match Snapshot.capture ~trace_id ~lines ~messages:source ~working_state with
+  match Snapshot.capture ~unread_messages:[] ~trace_id ~lines ~messages:source ~working_state with
   | Ok snapshot -> snapshot, lines | Error error -> fail (Snapshot.error_to_string error)
 ;;
 let snapshot () = fst (capture_source source)
@@ -797,7 +797,7 @@ let test_a_rewriting_snapshot_waits_for_its_target () =
         position } } in
   let lines = [turn_line 1 1 source; turn_line 2 2 messages] in
   let capture catch_up_end_atom =
-    match Snapshot.capture_checkpoint_prefix ~end_atom:2 ~catch_up_end_atom ~trace_id ~lines
+    match Snapshot.capture_checkpoint_prefix ~unread_messages:[] ~end_atom:2 ~catch_up_end_atom ~trace_id ~lines
             ~messages ~working_state () with
     | Ok snapshot -> snapshot | Error error -> fail (Snapshot.error_to_string error) in
   let digest_at = Window.atom_opening_digest messages in
@@ -881,8 +881,32 @@ let test_a_candidates_own_rendering_is_what_the_check_holds_it_to () =
            ^ Agent_core.Error.to_string error))
 ;;
 
+let test_summarized_request_carries_exact_unread_markers () =
+  let module H = Masc.Keeper_librarian_unread in
+  let prior, lines = capture_source source in
+  let hole = H.for_atom ~trace_id ~history_start_boundary_line:prior.history_start_boundary_line
+    ~atom:0 ~message_in_atom:0 ~messages:source
+    ~reasons:[Masc.Keeper_librarian_input_refusal.Input_capacity]
+    |> Result.get_ok in
+  let snapshot = Snapshot.capture ~unread_messages:[hole] ~trace_id ~lines
+    ~messages:source ~working_state |> Result.get_ok in
+  let messages = source @ [text T.User "Continue the task."] in
+  let request = wire (view snapshot messages) in
+  let carried = List.filter Window.is_working_state request in
+  (match carried with
+   | [message] ->
+     let body = Agent_core.Types.text_of_message message in
+     check bool "unread causes and exact coordinates ride the provider request" true
+       (String_util.contains_substring body
+         (Yojson.Safe.to_string (H.list_to_json [hole])));
+     check bool "the original source remains excluded under the declared coverage" false
+       (List.exists (fun message -> message = List.nth source 1) request)
+   | [] | _ :: _ :: _ -> fail "expected one pinned working-state carrier")
+;;
+
 let () = run "continuity request projection"
-  ["request", [test_case "completed boundary protects resumed work" `Quick test_completed_boundary_protects_resumed_work;
+  ["request", [test_case "summarized request carries exact unread markers" `Quick test_summarized_request_carries_exact_unread_markers;
+        test_case "completed boundary protects resumed work" `Quick test_completed_boundary_protects_resumed_work;
         test_case "small and wide actual body projection" `Quick test_small_externalizes_only_completed_bodies;
         test_case "failed blob write retains raw body" `Quick test_failed_externalization_keeps_raw_body;
         test_case "actual wire and tool append" `Quick test_actual_wire_and_tool_append;

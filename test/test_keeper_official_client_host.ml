@@ -2466,7 +2466,7 @@ let absorbed_boundary () : Boundaries.record =
 
 let absorbed_snapshot () =
   match
-    Snapshot.capture
+    Snapshot.capture ~unread_messages:[]
       ~trace_id:start_seed_trace
       ~lines:[ 1, Ok (absorbed_boundary ()) ]
       ~messages:absorbed_messages

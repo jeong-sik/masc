@@ -435,7 +435,8 @@ let continuity_saved_ranges ~config ~keeper_name ~memory_keepers_dir =
     | Error detail -> unreadable "snapshot" detail
     | Ok None -> []
     | Ok (Some (snapshot : Librarian_continuity_snapshot.t))
-      when Int.equal snapshot.end_atom snapshot.covering_end_atom ->
+      when Int.equal snapshot.end_atom snapshot.covering_end_atom
+           && snapshot.unread_messages = [] ->
       [ { saved_trace_id = snapshot.trace_id
         ; saved_history_start_boundary_line = snapshot.history_start_boundary_line
         ; saved_start_atom = 0

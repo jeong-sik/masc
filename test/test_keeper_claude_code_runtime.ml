@@ -5639,7 +5639,7 @@ let snapshot_through ~messages ~end_atom ~working_state =
         } )
   in
   match
-    Librarian_continuity_snapshot.capture ~trace_id:"trace-1" ~lines:[ line ] ~messages:covered
+    Librarian_continuity_snapshot.capture ~unread_messages:[] ~trace_id:"trace-1" ~lines:[ line ] ~messages:covered
       ~working_state
   with
   | Ok snapshot -> snapshot

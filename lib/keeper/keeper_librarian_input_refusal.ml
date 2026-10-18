@@ -7,3 +7,9 @@ let to_string = function
 ;;
 
 let union left right = List.sort_uniq compare (left @ right)
+
+let of_string = function
+  | "context_overflow" -> Some Context_overflow
+  | "input_capacity" -> Some Input_capacity
+  | "request_body_refused" -> Some Request_body_refused
+  | _ -> None

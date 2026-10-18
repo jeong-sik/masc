@@ -948,6 +948,7 @@ let tool_atoms =
    receipt already exists, but no continuity frontier exists. A body refusal
    must allow sequential inference without publishing either partial state. *)
 let test_volatile_message_floor ~failure () =
+  let module Registry = Masc.Exact_lane_run_registry in
   let requests = ref [] and before_answer = ref (fun () -> ()) in
   let atoms = List.take 2 (List.drop 1 tool_atoms) in
   let answer state = `OK, Exact_output_fixture.openai_response
@@ -985,6 +986,9 @@ let test_volatile_message_floor ~failure () =
       (Current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name |> get = memory_before);
     check bool "inference cannot change the Memory receipt" true (receipt () = receipt_before);
     check bool "inference cannot move the durable cursor" true (progress () = progress_before));
+  let registry = Registry.global () in
+  let prior_runs = List.map (fun (run : Registry.run) -> run.run_id)
+    (Registry.list_runs registry) in
   pass ();
   (match failure with
    | None -> ()
@@ -1011,7 +1015,24 @@ let test_volatile_message_floor ~failure () =
   check bool "successful continuity publication still leaves Memory unchanged" true
     (Current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name |> get = memory_before);
   check bool "successful continuity publication still leaves durable progress unchanged" true
-    (progress () = progress_before)
+    (progress () = progress_before);
+  let volatile_runs = Registry.list_runs registry
+    |> List.filter_map (fun (run : Registry.run) ->
+      if List.mem run.run_id prior_runs then None else
+      match Registry.get registry ~run_id:run.run_id with
+      | Some ({status=Registry.Completed {output;_};_} as loaded)
+        when U.member "volatile_inference" output = `Bool true -> Some loaded
+      | Some _ | None -> None) in
+  check int "every successful message has a recorded volatile outcome"
+    (match failure with None -> 2 | Some _ -> 3) (List.length volatile_runs);
+  List.iter (fun run ->
+    let decoded = Masc.Tui_decode.decode_lane_run_detail
+      (`Assoc ["run", Registry.run_to_yojson run]) |> get in
+    let reading = decoded.lrd_librarian_preflight |> some in
+    check bool "actual volatile run is readable as context-only" true reading.lp_context_only;
+    check bool "actual volatile run cannot claim continuity publication" true
+      (reading.lp_side_writes = [Masc.Tui_decode.Continuity_write, Masc.Tui_decode.Side_not_attempted]))
+    volatile_runs
 
 let check_folded_tool_request body =
   check int "no tool call argument reaches the request" 0
@@ -1401,8 +1422,29 @@ let test_reports_in_one_pass_keep_any_size_verdict () =
   check (list string) "reversing reports preserves the same named causes"
     (causes first second) (causes second first)
 
+let test_append_preserves_unread_source_records () = with_source @@ fun _env config save _append boundary ->
+  let prefix = [message "Unread request";message "Read answer"] in
+  save prefix;boundary ~fresh:true 1 prefix;
+  let hole = Masc.Keeper_librarian_unread.for_atom ~trace_id ~history_start_boundary_line:1
+    ~atom:0 ~message_in_atom:0 ~messages:prefix
+    ~reasons:[Masc.Keeper_librarian_input_refusal.Context_overflow] |> get in
+  let snapshot = S.capture ~unread_messages:[hole] ~trace_id
+    ~lines:(B.read ~keepers_dir:(Masc.Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name |> get)
+    ~messages:prefix ~working_state:"An exact request was unread." |> Result.map_error S.error_to_string |> get in
+  S.save ~path:(P.path ~config ~keeper_name) snapshot |> Result.map_error S.error_to_string |> get;
+  let messages = prefix @ [message "Later task update"] in
+  save messages;boundary ~fresh:false 2 messages;
+  let prepared = prepare config |> some in
+  check bool "valid prior holes feed the next inference" true (P.previous_unread_messages prepared = [hole]);
+  check bool "prompt never presents the prior prefix as wholly read" true
+    (U.member "unread_messages" (P.prompt_json prepared) = Masc.Keeper_librarian_unread.list_to_json [hole]);
+  let next = commit config prepared "The request remains unread; a later task update was read." in
+  check bool "a later atom commit cannot forget previous holes" true (next.unread_messages = [hole]);
+  check int "only complete atom coverage advances" 3 next.end_atom
+
 let () = run "production continuity pair"
-  ["cycle",[test_case "completed turns are work units" `Quick test_completed_turn_work_units;
+  ["cycle",[test_case "append preserves exact unread records" `Quick test_append_preserves_unread_source_records;
+    test_case "completed turns are work units" `Quick test_completed_turn_work_units;
     test_case "a rewrite from atom 0 follows its target" `Quick test_rewrite_from_zero_follows_its_target;
     test_case "the rewrite target is the Librarian's position" `Quick test_rewrite_target_is_the_librarian_position;
     test_case "an undecodable snapshot is rebuilt" `Quick test_an_undecodable_snapshot_is_rebuilt;

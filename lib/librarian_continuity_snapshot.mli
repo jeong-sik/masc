@@ -1,4 +1,5 @@
-(** Working state paired with exact conversation coverage. This value codec
+(** Working state paired with exact conversation coverage and explicit unread
+    source messages. Coverage certifies representation except for those holes. This value codec
     and projection do not choose a storage path or change a progress cursor. *)
 type origin = Witnessed_history | Captured_checkpoint_prefix
 
@@ -18,6 +19,8 @@ type t = private
   ; last_atom_digest : string
   ; prefix_sha256 : string
   ; working_state : string
+  ; unread_messages : Keeper_librarian_unread.t list
+      (** Exact messages below [end_atom] that this state does not represent. *)
   ; catch_up_end_atom : int option
       (** Set on a snapshot the Librarian is rewriting from atom 0: where a
           request starts without it, as of the round that wrote it -- the
@@ -49,11 +52,13 @@ type error =
 
 type restored =
   { working_state : string
+  ; unread_messages : Keeper_librarian_unread.t list
   ; messages : Agent_core.Types.message list
   }
 
 val capture
-  :  trace_id:string
+  :  unread_messages:Keeper_librarian_unread.t list
+  -> trace_id:string
   -> lines:(int * (Keeper_turn_boundaries.record, Keeper_turn_boundaries.read_error) result) list
   -> messages:Agent_core.Types.message list
   -> working_state:string
@@ -67,7 +72,8 @@ val checkpoint_prefix_range : trace_id:string ->
 (** Actual completed checkpoint prefix, including history predating the log.
     This is source selection, never evidence of a Memory read or cursor move. *)
 
-val capture_checkpoint_prefix : ?end_atom:int -> catch_up_end_atom:int option -> trace_id:string ->
+val capture_checkpoint_prefix : ?end_atom:int -> unread_messages:Keeper_librarian_unread.t list ->
+  catch_up_end_atom:int option -> trace_id:string ->
   lines:(int * (Keeper_turn_boundaries.record, Keeper_turn_boundaries.read_error) result) list ->
   messages:Agent_core.Types.message list -> working_state:string -> unit -> (t, error) result
 (** Explicitly capture the supplied prefix through a whole atom, covered by a
@@ -86,6 +92,8 @@ val restore
 
 val to_json : t -> Yojson.Safe.t
 val of_json : Yojson.Safe.t -> (t, error) result
+(** Schema version 2, field-exact; unversioned or other versions are rejected.
+    An empty hole list must be explicit. No unread source or cause is defaulted. *)
 val save : path:string -> t -> (unit, error) result
 val load : path:string -> (t, error) result
 val error_to_string : error -> string

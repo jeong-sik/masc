@@ -477,7 +477,7 @@ let purge_messages ~config ~trace_id ~boundary_lines ~continuity ~progress messa
            does, so it holds nothing back. *)
         let fitting_continuity =
           match continuity with
-          | None -> None
+          | None -> Ok None
           | Some snapshot ->
             (match
                Librarian_continuity_snapshot.restore
@@ -486,9 +486,14 @@ let purge_messages ~config ~trace_id ~boundary_lines ~continuity ~progress messa
                  ~messages
                  snapshot
              with
-             | Ok _ -> Some snapshot
-             | Error _ -> None)
+             | Ok _ -> Ok (Some snapshot)
+             | Error error ->
+               if snapshot.unread_messages = [] then Ok None
+               else Error (Continuity_no_longer_fits error))
         in
+        match fitting_continuity with
+        | Error error -> Error error
+        | Ok fitting_continuity ->
         Option.iter
           (fun (snapshot : Librarian_continuity_snapshot.t) ->
              let covered_until =

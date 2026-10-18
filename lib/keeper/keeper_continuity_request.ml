@@ -28,6 +28,7 @@ let selection_to_json = function
       ; "last_atom_digest", `String snapshot.last_atom_digest
       ; "catch_up_end_atom", (match snapshot.catch_up_end_atom with
           | Some atom -> `Int atom | None -> `Null)
+      ; "unread_messages", Keeper_librarian_unread.list_to_json snapshot.unread_messages
       ; "prefix_sha256", `String snapshot.prefix_sha256
       ; "working_state_sha256",
         `String Digestif.SHA256.(digest_string snapshot.working_state |> to_hex)

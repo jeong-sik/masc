@@ -964,7 +964,7 @@ let test_a_turn_end_a_line_names_is_kept () =
 (* A working state that fits is the request's front, and it holds a digest
    of the bytes it covers. The purge leaves those bytes alone and still
    rewrites the turns after them. *)
-let test_a_fitting_working_state_keeps_its_prefix () =
+let test_a_fitting_working_state_keeps_its_prefix ~with_unread () =
   let first_turn =
     [ text_message Types.User "(autonomous wake)"
     ; block_message Types.Assistant [ unsigned_thinking "look"; tool_use "a" ]
@@ -985,9 +985,9 @@ let test_a_fitting_working_state_keeps_its_prefix () =
     ; turn_ended_line ~line:2 ~absolute_turn:2 messages ~end_atom:6
     ]
   in
-  let snapshot =
+  let capture unread_messages =
     match
-      Masc.Librarian_continuity_snapshot.capture_checkpoint_prefix
+      Masc.Librarian_continuity_snapshot.capture_checkpoint_prefix ~unread_messages
         ~end_atom:3
         ~catch_up_end_atom:None
         ~trace_id:fixture_trace
@@ -999,6 +999,14 @@ let test_a_fitting_working_state_keeps_its_prefix () =
     | Ok snapshot -> snapshot
     | Error error -> Alcotest.fail (Masc.Librarian_continuity_snapshot.error_to_string error)
   in
+  let base_snapshot = capture [] in
+  let snapshot = if not with_unread then base_snapshot else
+    let hole = match Masc.Keeper_librarian_unread.for_atom ~trace_id:fixture_trace
+      ~history_start_boundary_line:base_snapshot.history_start_boundary_line
+      ~atom:1 ~message_in_atom:1 ~messages
+      ~reasons:[Masc.Keeper_librarian_input_refusal.Request_body_refused] with
+      | Ok hole -> hole | Error detail -> Alcotest.fail detail in
+    capture [hole] in
   let fits history =
     Result.is_ok
       (Masc.Librarian_continuity_snapshot.restore
@@ -1016,7 +1024,16 @@ let test_a_fitting_working_state_keeps_its_prefix () =
     (List.map Types.show_message first_turn)
     (List.map Types.show_message (List.filteri (fun index _ -> index < 4) kept));
   Alcotest.(check (pair int int)) "and the turn after it is still purged" (1, 1)
-    (report.reasoning_blocks_stripped, report.tool_results_cleared)
+    (report.reasoning_blocks_stripped, report.tool_results_cleared);
+  if with_unread then (
+    let changed = List.mapi (fun index message -> if index = 2 then
+      {message with Types.content=[tool_result ~content:"changed unread original" "a"]}
+      else message) messages in
+    match Purge.purge_messages ~config:no_tail_config ~trace_id:fixture_trace
+      ~boundary_lines:lines ~continuity:(Some snapshot) ~progress:None changed with
+    | Error (Purge.Continuity_no_longer_fits _) -> ()
+    | Error error -> Alcotest.fail (Purge.purge_error_to_string error)
+    | Ok _ -> Alcotest.fail "a nonfitting unread source was destructively purged")
 ;;
 
 (* A recovery drops the broken tail, so the last atom it keeps is the last
@@ -1366,7 +1383,11 @@ let () =
         ; Alcotest.test_case
             "a fitting working state keeps its prefix"
             `Quick
-            test_a_fitting_working_state_keeps_its_prefix
+            (test_a_fitting_working_state_keeps_its_prefix ~with_unread:false)
+        ; Alcotest.test_case
+            "unread source bytes survive purge and nonfitting source refuses rewrite"
+            `Quick
+            (test_a_fitting_working_state_keeps_its_prefix ~with_unread:true)
         ; Alcotest.test_case
             "recovery keeps the last atom it returns"
             `Quick

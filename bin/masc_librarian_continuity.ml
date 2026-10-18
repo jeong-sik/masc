@@ -499,7 +499,7 @@ let snapshot_command mode =
         try Ok (In_channel.with_open_bin state_path In_channel.input_all)
         with Sys_error detail -> Error detail
       in
-      let* value = S.capture ~trace_id ~lines ~messages ~working_state
+      let* value = S.capture ~unread_messages:[] ~trace_id ~lines ~messages ~working_state
         |> Result.map_error S.error_to_string in
       Ok (S.to_json value)
     | Restore ->

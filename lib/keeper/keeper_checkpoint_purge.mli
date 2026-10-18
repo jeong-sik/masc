@@ -219,9 +219,10 @@ type purge_error =
       (** The message opening [atom], which the history's end or a boundary
           line names, came out different. A bug in the transform. *)
   | Continuity_no_longer_fits of Librarian_continuity_snapshot.error
-      (** The Librarian working state fits the input and not the output. On a
-          sound input this is a bug in the transform; on a recovery the
-          dropped tail was part of what it covers. *)
+      (** A hole-bearing snapshot does not fit its input, or a fitting
+          working state no longer fits the output. On a sound input this is
+          a bug in the transform; on a recovery the dropped tail was part of
+          what it covers. *)
   | Recovery_end_unwitnessed of { boundary_lines_seen : int }
       (** A recovery that moves a Librarian position found no turn end ahead
           of the break that one of the position's first
@@ -249,7 +250,9 @@ val purge_messages
     state and [progress] its Librarian position, all as they are when the
     result is installed: the first two say which messages stay byte-exact,
     and on a recovery that moves the position the first and the last say
-    where the history may end.
+    where the history may end. A hole-bearing snapshot that no longer fits
+    refuses purge instead of being treated as absent. Its unread source bytes
+    remain protected along with the covered prefix.
     Exposed for tests. *)
 
 val purge

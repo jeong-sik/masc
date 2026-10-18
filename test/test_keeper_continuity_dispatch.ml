@@ -110,7 +110,7 @@ let latest_observation ~config =
 let test_real_dispatch_preserves_pair_across_refusal () =
   with_dispatch_fixture @@ fun ~sw ~net ~config ~base_path ~refused ~accepted ->
   let boundary = record_completed_turn ~config in
-  let snapshot = S.capture ~trace_id ~lines:[1, Ok boundary] ~messages:covered ~working_state
+  let snapshot = S.capture ~unread_messages:[] ~trace_id ~lines:[1, Ok boundary] ~messages:covered ~working_state
     |> require_snapshot in
   let path = Keeper_librarian_continuity.path ~config ~keeper_name in
   S.save ~path snapshot |> require_snapshot;
@@ -200,7 +200,7 @@ let test_unreadable_snapshot_dispatches_from_the_turn_start () =
 let test_changed_prefix_dispatches_from_the_turn_start () =
   with_dispatch_fixture @@ fun ~sw ~net ~config ~base_path ~refused:_ ~accepted ->
   let boundary = record_completed_turn ~config in
-  let snapshot = S.capture ~trace_id ~lines:[1, Ok boundary] ~messages:covered ~working_state
+  let snapshot = S.capture ~unread_messages:[] ~trace_id ~lines:[1, Ok boundary] ~messages:covered ~working_state
     |> require_snapshot in
   let path = Keeper_librarian_continuity.path ~config ~keeper_name in
   S.save ~path snapshot |> require_snapshot;

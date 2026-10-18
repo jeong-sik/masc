@@ -1,6 +1,6 @@
 ---
 name: tui-chat-design
-description: "MASC TUI의 채팅·입력·로딩·진행 상태, 복합 조회의 부분 수신·하위 완료 관측과 Board 독립 데이터·목록/census 가용성, Keeper·Work·로그·질문 원본의 비동기 조회, Runtime·Overview 목록/사용량의 공유 해석, Keeper 설정·Sandbox 단축키·Runtime 폼·원문 저장과 설정 snapshot 해석을 바꿀 때 쓴다. 원본 입력·revision·요청 소유권, 마지막 관측과 부분 실패, 준비 작업·상태 반영·paint 증거를 구분하는 규칙이다."
+description: "MASC TUI의 채팅·입력·로딩·진행 상태, 복합 조회의 부분 수신·하위 완료 관측과 Board 독립 데이터·목록/census 가용성과 조회 조건 출처, Keeper·Work·로그·질문 원본의 비동기 조회, Runtime·Overview 목록/사용량의 공유 해석, Keeper 설정·Sandbox 단축키·Runtime 폼·원문 저장과 설정 snapshot 해석을 바꿀 때 쓴다. 원본 입력·revision·요청 소유권, 마지막 관측과 부분 실패, 준비 작업·상태 반영·paint 증거를 구분하는 규칙이다."
 ---
 
 # 대화를 먼저 읽는 채팅
@@ -142,6 +142,13 @@ description: "MASC TUI의 채팅·입력·로딩·진행 상태, 복합 조회�
   terminal 미반영·소유 collector의 미수신은 목록도 unavailable로 남기며 이전 cleanup은
   새 관측을 낮추지 않는다. 오류 알림의 마지막 발행 기록은 관측과 별도로 두어 내부 미수신
   상태가 같은 오류 알림을 반복 발행시키지 않게 한다. workspace 철회는 목록 후보도 지운다.
+- 글 응답은 dispatch에서 고정한 정렬·hearth를 early/terminal 양쪽에 함께 운반한다.
+  정상 empty도 그 query와 묶어 저장한다. 필터 변경·실패·상세 갱신이 보존한 글의 출처를
+  현재 controls로 바꾸지 않게 한다. 목록/sidebar·팔레트는 query 불일치도 마지막 관측으로
+  밝히고 정렬 설명·시간 열·census total은 실제 목록의 query/hearth를 쓴다. 선택 controls는
+  요청 조건을 유지한다. query 일치는 formatted 문자열이 아니라 typed sort와 정확한
+  optional hearth로 판단한다. metadata는 기존 workspace/refresh/dataset owner를 대신하지
+  않으며 미수신은 정상 query 결과가 아니다. 추가 GET·owner 세대·timer·화면 행을 만들지 않는다.
 
 ## Runtime 폼 저장
 

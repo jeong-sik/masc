@@ -363,12 +363,19 @@ let board_hearth_census_line ~cols (state : state) =
 
 let board_posts_status state =
   let observation,pending=board_posts_reading state in
-  match observation with
-  | Masc_tui_fetched.Absent -> Some "posts not read"
-  | Loading -> Some "reading posts"
-  | Ready _ -> if pending then Some "refreshing posts; last observed" else None
-  | Stale _ -> Some (if pending then "refreshing posts; last failure retained" else "last observed posts; unavailable")
-  | Failed _ -> Some (if pending then "retrying posts; unavailable" else "posts unavailable")
+  let status=match observation with
+    | Masc_tui_fetched.Absent -> Some "posts not read"
+    | Loading -> Some "reading posts"
+    | Ready _ -> if pending then Some "refreshing posts; last observed" else None
+    | Stale _ -> Some (if pending then "refreshing posts; last failure retained" else "last observed posts; unavailable")
+    | Failed _ -> Some (if pending then "retrying posts; unavailable" else "posts unavailable") in
+  match board_posts_snapshot state with
+  | Some snapshot when not (board_listing_matches_requested state) ->
+      let origin=Printf.sprintf "last observed: %s; requested: %s"
+        (Terminal_text.single_line (board_query_label snapshot.bl_query))
+        (Terminal_text.single_line (board_query_label (board_query state))) in
+      Some (origin ^ (match status with None -> "" | Some status -> "; " ^ status))
+  | Some _ | None -> status
 
 let render_board_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -380,14 +387,15 @@ let render_board_list (state : state) =
   (* Read once for the whole list: the header word and every row's number name
      the same time, and they would drift the moment two readings of the sort
      disagreed. *)
-  let age_time = board_sort_time state.board_sort in
+  let query = board_posts_query state in
+  let age_time = board_sort_time query.bq_sort in
   let age_header = board_age_header age_time in
   (* Which sub-board is being read. Said only when the list is narrowed: "all
      hearths" is what a reader assumes, and 24 of them share this board with
      1550 of 2171 posts in one, so a narrowed list that did not say so would
      look like a board that had gone quiet. *)
   let hearth =
-    match state.board_hearth with
+    match query.bq_hearth with
     | None -> ""
     | Some hearth ->
         Printf.sprintf "  %shearth:%s%s" (Masc_tui_theme.tone Masc_tui_theme.Accent)
@@ -407,7 +415,7 @@ let render_board_list (state : state) =
      read that failed, "(0)" read as a board with nothing on it. A count
      already on screen stays when a later refresh fails: those posts are
      still the last reading. *)
-  let holding = board_census_holding state in
+  let holding = board_census_holding state ~hearth:query.bq_hearth in
   let header = Printf.sprintf "%s %s%s  %s  %s"
     (screen_title " MASC Board")
     (match Masc_tui_fetched.value observation with
@@ -448,9 +456,9 @@ let render_board_list (state : state) =
                sheet under [?]. *)
             c.push_styled ~style:(Theme.recede ())
               (board_heading_with_tail ~cols
-                 (Printf.sprintf "  Sort [s]: %s%s"
-                    (board_sort_explanation state.board_sort)
-                    (match board_posts_status state with None -> "" | Some status -> " · " ^ status))
+                 (Printf.sprintf "  %sSort [s]: %s"
+                    (match board_posts_status state with None -> "" | Some status -> status ^ " · ")
+                    (board_sort_explanation query.bq_sort))
                  " · H:choose hearth"))
         ; (fun () -> c.push (board_hearth_census_line ~cols state))
         ; (fun () ->
@@ -476,7 +484,9 @@ let render_board_list (state : state) =
          | Absent -> c.push (Ansi.dim ^ page_unread_note ^ Ansi.reset)
          | Loading -> c.push (Ansi.dim ^ "  (reading Board posts)" ^ Ansi.reset)
          | Ready _ -> c.push (Ansi.dim
-             ^ (if pending then "  (last listing empty; reading posts)" else "  (no board posts)") ^ Ansi.reset))
+             ^ (if pending then "  (last listing empty; reading posts)"
+                else if not (board_listing_matches_requested state) then "  (last listing empty; requested query not observed)"
+                else "  (no board posts)") ^ Ansi.reset))
       else begin
         Option.iter render_list_error list_error;
         let error_rows = if Option.is_some list_error then 1 else 0 in
@@ -1114,7 +1124,7 @@ let board_list_pane (state : state) ~(open_post : board_post) ~rows ~cols buf =
   let title=match board_posts_status state with None -> "Board" | Some status -> "Board · " ^ status in
   write_list_sidebar buf ~rows ~cols ~title
     ~focused:(state.board_focus = Left_pane)
-    ~holding:(board_census_holding state)
+    ~holding:(board_census_holding state ~hearth:(board_posts_query state).bq_hearth)
     ~labels:(List.map format_sidebar_post (board_posts state))
     ~selected
 

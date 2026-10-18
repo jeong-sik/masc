@@ -36,7 +36,7 @@ type early_approval_observation = {
    share a logical source, while neither delivery consumes its sibling. *)
 type http_dataset =
   | Dataset_transport of (Masc.Tui_decode.transport_health, string) result
-  | Dataset_board_posts of (board_post list, string) result
+  | Dataset_board_posts of board_posts_receipt
   | Dataset_board_hearths of ((string * int) list, string) result
   | Dataset_planning of (planning_snapshot, string) result
   | Dataset_system_logs of (system_log_snapshot, string) result
@@ -73,7 +73,7 @@ let http_dataset_key = function
 
 let http_dataset_received = function
   | Dataset_transport result -> Result.is_ok result
-  | Dataset_board_posts result -> Result.is_ok result
+  | Dataset_board_posts receipt -> Result.is_ok receipt.bpr_result
   | Dataset_board_hearths result -> Result.is_ok result
   | Dataset_planning result -> Result.is_ok result
   | Dataset_system_logs result -> Result.is_ok result
@@ -98,7 +98,7 @@ type 'identity http_scoped_surface_readings = {
      leaving it out keeps whatever that surface last observed rather than
      dropping it. *)
   http_asks: asks_observation option;
-  http_board: (board_post list, string) result option;
+  http_board: board_posts_receipt option;
   (* Listing and census are requested together under one Board request. Early
      delivery settles each dataset independently; the prior census remains
      available while its fresh reader is pending or failed. *)

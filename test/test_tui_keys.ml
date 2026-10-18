@@ -1042,10 +1042,10 @@ let board_post ?(author = "alpha") id title =
 let board_state () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
   state.view <- Board;
-  state.board_listing <- Masc_tui_fetched.Ready
+  apply_board_posts_load state {bpr_query=board_query state;bpr_result=Ok
     [ board_post "p-1" "release evidence sweep"
     ; board_post ~author:"beta" "p-2" "frame budget"
-    ];
+    ]};
   state
 
 let test_board_searches_the_post_list () =
@@ -1068,7 +1068,7 @@ let test_board_reading_and_writing_keep_the_key_closed () =
 
 let test_board_without_posts_offers_nothing_to_search () =
   let state = board_state () in
-  state.board_listing <- Masc_tui_fetched.Ready [];
+  apply_board_posts_load state {bpr_query=board_query state;bpr_result=Ok []};
   Alcotest.(check (option (list string))) "no rows" None
     (Masc_tui_surface_search.surface_row_texts state Board)
 

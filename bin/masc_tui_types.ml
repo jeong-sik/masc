@@ -8710,7 +8710,7 @@ let keeper_log_target state =
   | Planning | Schedules | Verification | Harness | Fusion | Repositories | Code
   | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> None
 
-let keeper_log_key state ~limit keeper =
+let keeper_log_key state ~limit (keeper : keeper) =
   { klk_authority = state.workspace_authority; klk_base_path = state.local_base_path;
     klk_keeper = keeper.k_name; klk_limit = limit }
 
@@ -8758,7 +8758,7 @@ let keeper_log_snapshot state =
   | Some snapshot -> snapshot
   | None -> Metrics_tail.empty
 
-let begin_keeper_log_read state ~intent ~limit ~started_ns keeper =
+let begin_keeper_log_read state ~intent ~limit ~started_ns (keeper : keeper) =
   match state.workspace_identity, keeper_log_target state with
   | Workspace_identity_match, Some selected when String.equal selected.k_name keeper.k_name ->
     (match state.keeper_log_read with

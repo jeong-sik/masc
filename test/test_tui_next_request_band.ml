@@ -488,12 +488,84 @@ let test_runtime_configuration_attaches_by_exact_id () =
   Alcotest.(check bool) "account/window is visible" true (says "Account codex1" rows);
   Alcotest.(check bool) "execution order remains explicit" true (says "Walks first" rows)
 
+let test_retained_forecast_reuses_recent_reading_only () =
+  let turn_ref = Ids.Turn_ref.make ~trace_id:"t" ~absolute_turn:1 in
+  let latest : Turn_record.t =
+    { execution_ids = []
+    ; keeper = "omega"
+    ; agent_name = "keeper-omega"
+    ; turn_kind = Direct
+    ; trace_id = "t"
+    ; absolute_turn = 1
+    ; turn_ref
+    ; blocks = []
+    ; input_components = None
+    ; tool_surface_ref = None
+    ; runtime_profile = "glm-coding"
+    ; selected_model = Some "glm-5.3"
+    ; finish_reason = Some "stop"
+    ; context_window = Some 200_000
+    ; provider_context_window = None
+    ; price_input_per_million = None
+    ; price_output_per_million = None
+    ; request_latency_ms = None
+    ; ttfrc_ms = None
+    ; request_wire_observation = None
+    ; model_input_window = None
+    ; response_observed_model_input = None
+    ; raw_trace_run_ref = None
+    ; sampling =
+        { temperature = None
+        ; top_p = None
+        ; max_tokens = None
+        ; enable_thinking = None
+        }
+    ; usage =
+        { input_tokens = None
+        ; output_tokens = None
+        ; cache_creation_input_tokens = None
+        ; cache_read_input_tokens = None
+        ; scope = Runtime_usage_scope.Per_request
+        }
+    ; turn_output_tokens = None
+    ; ts = 1_787_600_000.
+    }
+  in
+  let turn_read =
+    Inspector.Turn_read
+      { selection = { latest; attributed = None; recent = []; rows = [ latest ] }
+      ; provider_input = Error "absent"
+      ; response = Error "absent"
+      ; forecast = Ok measured
+      }
+  in
+  Alcotest.(check bool) "Turn_read retains its forecast" true
+    (Inspector.retained_forecast turn_read = Some (Ok measured));
+  let failed_turn =
+    Inspector.Turn_read_failed { detail = "turn-records 503"; forecast = Ok measured }
+  in
+  Alcotest.(check bool) "Turn_read_failed retains its forecast" true
+    (Inspector.retained_forecast failed_turn = Some (Ok measured));
+  Alcotest.(check bool) "Request_failed carries no forecast" true
+    (Inspector.retained_forecast (Inspector.Request_failed "offline") = None);
+  let exact : Inspector.exact_reading =
+    { turn_ref
+    ; record = Inspector.Pending
+    ; provider_input = Inspector.Pending
+    ; response = Inspector.Pending
+    }
+  in
+  Alcotest.(check bool) "Exact_read carries no forecast" true
+    (Inspector.retained_forecast (Inspector.Exact_read exact) = None)
+
 let () =
   Alcotest.run "tui_next_request_band"
     [ ( "render"
       , [ Alcotest.test_case "current account configuration follows exact runtime" `Quick test_runtime_configuration_attaches_by_exact_id
         ; Alcotest.test_case "a turn start origin decodes with its atom" `Quick
             test_a_turn_start_origin_decodes
+        ; Alcotest.test_case "retained forecast reuses recent reading only" `Quick
+            test_retained_forecast_reuses_recent_reading_only
         ;] )
     ; ( "decode"
       , [ Alcotest.test_case "the forecast decodes the server's shape" `Quick

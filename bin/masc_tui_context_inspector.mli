@@ -298,6 +298,11 @@ val inspected_record : target:target -> reading -> Turn_record.t option
 val step_recent : target -> older:bool -> count:int -> target option
 (** Recent-page navigation only. A pinned source returns [None]. *)
 
+val retained_forecast : reading -> (forecast, string) result option
+(** The next-request forecast already held by a recent-page reading, so
+    stepping between turns on the same page can reuse it without re-fetching
+    [/next-request] (#43592). *)
+
 type tab =
   | Composition
   | Exact_input

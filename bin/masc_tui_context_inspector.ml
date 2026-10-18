@@ -207,6 +207,10 @@ let step_recent target ~older ~count =
       let next = if older then min (count - 1) (turn_back + 1) else max 0 (turn_back - 1) in
       if count <= 0 || next = turn_back then None else Some (Recent next)
 
+let retained_forecast = function
+  | Turn_read { forecast; _ } | Turn_read_failed { forecast; _ } -> Some forecast
+  | Request_failed _ | Exact_read _ -> None
+
 type tab =
   | Composition
   | Exact_input

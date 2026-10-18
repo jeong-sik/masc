@@ -1298,7 +1298,7 @@ let test_early_roster_preserves_read_ownership () =
     (take_early_keeper_roster_observation state early=None)
 
 let local_workspace_request_exn state source at =
-  match Masc_tui_types.begin_local_workspace_read state ~source
+  match Masc_tui_types.begin_local_workspace_read state ~intent:Masc_tui_types.Snapshot_read.Poll ~source
           ~base_path:state.Masc_tui_types.local_base_path ~started_ns:at with
   | Some request -> request
   | None -> Alcotest.fail "local workspace read did not start"
@@ -1308,7 +1308,7 @@ let test_local_read_and_http_sources_progress_independently () =
   let state, early = early_roster_fixture () in
   let request = local_workspace_request_exn state Local_work 5L in
   Alcotest.(check bool) "cadence cannot duplicate the local worker" true
-    (begin_local_workspace_read state ~source:Local_work ~base_path:state.local_base_path ~started_ns:6L = None);
+    (begin_local_workspace_read state ~intent:Snapshot_read.Poll ~source:Local_work ~base_path:state.local_base_path ~started_ns:6L = None);
   Alcotest.(check bool) "local pending does not gate HTTP source admission" true
     (Option.is_some (take_early_keeper_roster_observation state early)
      && Snapshot_read.in_flight state.local_workspace_read_order);
@@ -1377,6 +1377,128 @@ let apply_metadata_observation state request metadata =
   match Masc_tui_types.take_local_workspace_read state ~source:Local_keepers request (Ok metadata) with
   | Some (Ok observed) -> Masc_tui_loader.apply_local_keepers state observed
   | Some (Error _) | None -> Alcotest.fail "metadata observation was not admitted"
+
+let refresh_local_source_exn state source at =
+  match Masc_tui_types.begin_local_workspace_read state ~intent:Masc_tui_types.Snapshot_read.Refresh
+          ~source ~base_path:state.Masc_tui_types.local_base_path ~started_ns:at with
+  | Some request -> request
+  | None -> Alcotest.fail "explicit local refresh was not dispatched"
+
+let test_explicit_local_refresh_supersedes_only_its_source () =
+  let open Masc_tui_types in
+  let state, _, metadata = local_keeper_source_fixture () in
+  Masc_tui_loader.apply_local_keepers state metadata;
+  let old = local_workspace_request_exn state Local_keepers 1L in
+  let work = local_workspace_request_exn state Local_work 2L in
+  let old_token = ref () and new_token = ref () and work_token = ref () in
+  let old_cancelled = ref 0 and new_cancelled = ref 0 and work_cancelled = ref 0 in
+  supersede_local_source_read state Local_keepers (Some (old_token, fun () -> incr old_cancelled));
+  supersede_local_source_read state Local_work (Some (work_token, fun () -> incr work_cancelled));
+  let fresh = refresh_local_source_exn state Local_keepers 3L in
+  supersede_local_source_read state Local_keepers (Some (new_token, fun () -> incr new_cancelled));
+  finish_local_source_read state Local_keepers old_token;
+  Alcotest.(check bool) "late cleanup cannot remove the successor owner" true
+    (match local_source_cancellation state Local_keepers with
+     | Some (held, _) -> held == new_token
+     | None -> false);
+  Alcotest.(check bool) "pre-action result cannot settle the fresh metadata request" true
+    (take_local_workspace_read state ~source:Local_keepers old (Error "pre-action result") = None
+     && Snapshot_read.in_flight state.local_keeper_read_order);
+  Alcotest.(check bool) "poll shares the explicit read" true
+    (begin_local_workspace_read state ~intent:Snapshot_read.Poll ~source:Local_keepers
+       ~base_path:state.local_base_path ~started_ns:4L = None);
+  Alcotest.(check int) "only old metadata received cancellation" 1 !old_cancelled;
+  Alcotest.(check int) "work was not cancelled" 0 !work_cancelled;
+  Alcotest.(check int) "successor was not cancelled by old cleanup" 0 !new_cancelled;
+  apply_metadata_observation state fresh metadata;
+  Alcotest.(check bool) "independent work still owns its response" true
+    (take_local_workspace_read state ~source:Local_work work (Ok ()) = Some (Ok ()));
+  Masc_tui_loader.clear_local_workspace state;
+  Alcotest.(check bool) "clear retires both cancellation owners" true
+    (local_source_cancellation state Local_keepers = None
+     && local_source_cancellation state Local_work = None);
+  Alcotest.(check int) "clear cancelled the held metadata owner" 1 !new_cancelled;
+  Alcotest.(check int) "clear cancelled the held work owner" 1 !work_cancelled
+
+let test_created_keeper_waits_for_owned_metadata_without_work () =
+  let open Masc_tui_types in
+  let state, keeper, metadata = local_keeper_source_fixture () in
+  Masc_tui_loader.apply_local_keepers state metadata;
+  let created = { keeper with k_name = "created" } in
+  state.view <- Keepers Keeper_message;
+  state.msg_target_keeper_name <- Some created.k_name;
+  state.keeper_creation_awaiting_roster <- Some created.k_name;
+  Masc_tui_message_input.insert state.msg_input "draft entered after creation";
+  let work = local_workspace_request_exn state Local_work 1L in
+  let before_creation = local_workspace_request_exn state Local_keepers 2L in
+  let after_creation = refresh_local_source_exn state Local_keepers 3L in
+  Alcotest.(check bool) "unobserved created Keeper cannot admit input" false
+    (keeper_available_for_new_message state created.k_name);
+  Alcotest.(check bool) "old metadata cannot prove absence after creation" true
+    (take_local_workspace_read state ~source:Local_keepers before_creation (Ok metadata) = None);
+  apply_metadata_observation state after_creation
+    { metadata with lkr_keepers = [ keeper; created ] };
+  Alcotest.(check bool) "new Keeper becomes available while Work remains pending" true
+    (keeper_available_for_new_message state created.k_name
+     && Snapshot_read.in_flight state.local_workspace_read_order
+     && state.msg_target_keeper_name = Some created.k_name
+     && state.view = Keepers Keeper_message);
+  Alcotest.(check string) "creation refresh retained the operator draft"
+    "draft entered after creation" (Masc_tui_message_input.contents state.msg_input);
+  ignore (take_local_workspace_read state ~source:Local_work work (Error "work unavailable"));
+  Alcotest.(check bool) "optional failure cannot revoke metadata-authorized creation" true
+    (keeper_available_for_new_message state created.k_name)
+
+let test_deleted_keeper_reconciles_after_fresh_metadata () =
+  let open Masc_tui_types in
+  let state, keeper, metadata = local_keeper_source_fixture () in
+  let survivor = { keeper with k_name = "survivor" } in
+  Masc_tui_loader.apply_local_keepers state {metadata with lkr_keepers = [keeper; survivor]};
+  state.view <- Keepers Keeper_detail;
+  state.keeper_cursor <- 0;
+  Masc_tui_message_input.insert state.msg_input "retained draft";
+  let old = local_workspace_request_exn state Local_keepers 1L in
+  let fresh = refresh_local_source_exn state Local_keepers 2L in
+  Alcotest.(check bool) "pending revalidation retains last observed identity" true
+    (state.keepers = [keeper; survivor] && state.view = Keepers Keeper_detail);
+  apply_metadata_observation state fresh {metadata with lkr_keepers = [survivor]};
+  Alcotest.(check bool) "confirmed deletion does not retarget detail to another Keeper" true
+    (state.view = Keepers Keeper_list && state.keepers = [survivor]
+     && not (keeper_available_for_new_message state keeper.k_name));
+  Alcotest.(check bool) "late pre-deletion rows cannot restore the deleted Keeper" true
+    (take_local_workspace_read state ~source:Local_keepers old (Ok metadata) = None);
+  Alcotest.(check string) "navigation reconciliation retains draft"
+    "retained draft" (Masc_tui_message_input.contents state.msg_input)
+
+let test_local_cache_cancel_releases_source_for_followup () =
+  let exception Read_replaced in
+  Eio_main.run (fun _env ->
+    let mutex = Eio.Mutex.create () in
+    let entered, signal_entered = Eio.Promise.create () in
+    let finished, signal_finished = Eio.Promise.create () in
+    let blocked, _unblock = Eio.Promise.create () in
+    let cancellation = ref None and propagated = ref false in
+    Eio.Switch.run (fun sw ->
+      Eio.Fiber.fork ~sw (fun () ->
+        (try Eio.Cancel.sub (fun context ->
+           cancellation := Some context;
+           Masc_tui_loader.with_local_read_mutex mutex (fun () ->
+             Eio.Promise.resolve signal_entered ();
+             Eio.Promise.await blocked))
+         with Eio.Cancel.Cancelled Read_replaced -> propagated := true);
+        Eio.Promise.resolve signal_finished ());
+      Eio.Promise.await entered;
+      (match !cancellation with
+       | None -> Alcotest.fail "reader never owned a cancellation scope"
+       | Some context -> Eio.Cancel.cancel context Read_replaced);
+      Eio.Promise.await finished;
+      Alcotest.(check bool) "original cancellation propagated" true !propagated;
+      let seen_failure =
+        try Masc_tui_loader.with_local_read_mutex mutex (fun () -> raise (Sys_error "source failure")); false
+        with Sys_error _ -> true in
+      Alcotest.(check bool) "read failure is still observable" true seen_failure;
+      let next = Masc_tui_loader.with_local_read_mutex mutex (fun () -> 42) in
+      Alcotest.(check int) "later source reader can use the released cache resource" 42 next))
 
 let start_live_context_exn state keeper =
   match Masc_tui_context_state.start state.Masc_tui_types.live_context
@@ -1941,6 +2063,14 @@ let () =
             test_keeper_metadata_admits_input_before_work_completes
         ; Alcotest.test_case "local source failures remain independent" `Quick
             test_local_source_failures_are_independent
+        ; Alcotest.test_case "explicit local refresh owns only its source" `Quick
+            test_explicit_local_refresh_supersedes_only_its_source
+        ; Alcotest.test_case "created Keeper waits for owned metadata without Work" `Quick
+            test_created_keeper_waits_for_owned_metadata_without_work
+        ; Alcotest.test_case "fresh metadata confirms deletion without detail retargeting" `Quick
+            test_deleted_keeper_reconciles_after_fresh_metadata
+        ; Alcotest.test_case "cancelled local cache read releases the source for follow-up" `Quick
+            test_local_cache_cancel_releases_source_for_followup
         ; Alcotest.test_case "context refuses queued prior-trace results" `Quick
             test_live_context_refuses_changed_trace_before_reconciliation
         ; Alcotest.test_case "chat target owns context independently of roster cursor" `Quick

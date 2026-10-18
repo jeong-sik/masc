@@ -12556,43 +12556,69 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
 
 (* Required metadata and optional work are separate jobs, slots and cache
    resources. Both retain the workspace observation cancellation owner. *)
-let launch_local_source state ~mailbox ~source ~read ~message base_path =
-  match Masc_tui_types.begin_local_workspace_read state ~source ~base_path
+let local_read_intent_name = function
+  | Snapshot_read.Poll -> "poll"
+  | Snapshot_read.Refresh -> "refresh"
+
+let launch_local_source state ~mailbox ~intent ~source ~read ~message base_path =
+  match Masc_tui_types.begin_local_workspace_read state ~intent ~source ~base_path
           ~started_ns:(Mtime_clock.elapsed_ns ()) with
   | None -> ()
   | Some request ->
-      Log.Transport.info "tui_local_workspace_started source=%s request=%d started_ns=%Ld"
-        (local_read_source_name source)
+      let token = ref () in
+      let superseded, supersede = Eio.Promise.create () in
+      supersede_local_source_read state source
+        (Some (token, fun () -> ignore (Eio.Promise.try_resolve supersede ())));
+      Log.Transport.info "tui_local_workspace_started source=%s intent=%s request=%d started_ns=%Ld"
+        (local_read_source_name source) (local_read_intent_name request.lwr_intent)
         (Snapshot_read.request_id request.lwr_request) request.lwr_started_ns;
+      let enqueue_async = workspace_enqueue state in
       let deliver result = enqueue_async mailbox (message request result) in
       let run () =
-        let result = try
-            Ok (Domain_pool_ref.submit_io_or_inline (fun () -> read request.lwr_base_path))
-          with
-          | Eio.Cancel.Cancelled _ as exn -> raise exn
-          | exn -> Error (Printexc.to_string exn) in
-        deliver result in
+        Fun.protect ~finally:(fun () -> finish_local_source_read state source token)
+          (fun () -> Eio.Fiber.first
+            (fun () ->
+              let result = try
+                  Ok (Domain_pool_ref.submit_io_or_inline (fun () -> read request.lwr_base_path))
+                with
+                | Eio.Cancel.Cancelled _ as exn -> raise exn
+                | exn -> Error (Printexc.to_string exn) in
+              deliver result)
+            (fun () ->
+              Eio.Promise.await superseded;
+              Log.Transport.info
+                "tui_local_workspace_superseded source=%s intent=%s request=%d started_ns=%Ld observed_ns=%Ld outcome=cancel_requested"
+                (local_read_source_name source) (local_read_intent_name request.lwr_intent)
+                (Snapshot_read.request_id request.lwr_request) request.lwr_started_ns
+                (Mtime_clock.elapsed_ns ()))) in
       (match Eio_context.get_switch_opt () with
-       | None -> deliver (Error "Eio switch is unavailable for local workspace reading")
+       | None ->
+           finish_local_source_read state source token;
+           deliver (Error "Eio switch is unavailable for local workspace reading")
        | Some sw ->
            (match fork_workspace_job ~observation:true state ~sw run with
             | () -> ()
             | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-            | exception exn -> deliver (Error (Printexc.to_string exn))))
+            | exception exn ->
+                finish_local_source_read state source token;
+                deliver (Error (Printexc.to_string exn))))
 
-let launch_local_workspace_read state ~mailbox base_path =
-  launch_local_source state ~mailbox ~source:Local_keepers
+let launch_local_keeper_read state ~mailbox ~intent base_path =
+  launch_local_source state ~mailbox ~intent ~source:Local_keepers
     ~read:Masc_tui_loader.read_local_keepers
-    ~message:(fun request result -> Local_keepers_read (request, result)) base_path;
-  launch_local_source state ~mailbox ~source:Local_work
+    ~message:(fun request result -> Local_keepers_read (request, result)) base_path
+
+let launch_local_workspace_read state ~mailbox ~intent base_path =
+  launch_local_keeper_read state ~mailbox ~intent base_path;
+  launch_local_source state ~mailbox ~intent ~source:Local_work
     ~read:Masc_tui_loader.read_local_workspace
     ~message:(fun request result -> Local_workspace_read (request, result)) base_path
 
 let observe_local_source state ~source request result =
   let observation = Masc_tui_types.take_local_workspace_read state ~source request result in
   Log.Transport.info
-    "tui_local_workspace_settled source=%s request=%d started_ns=%Ld observed_ns=%Ld outcome=%s full_refresh_running=%b"
-    (local_read_source_name source)
+    "tui_local_workspace_settled source=%s intent=%s request=%d started_ns=%Ld observed_ns=%Ld outcome=%s full_refresh_running=%b"
+    (local_read_source_name source) (local_read_intent_name request.lwr_intent)
     (Snapshot_read.request_id request.lwr_request) request.lwr_started_ns
     (Mtime_clock.elapsed_ns ())
     (match observation with None -> "discarded" | Some (Ok _) -> "received" | Some (Error _) -> "failed")
@@ -12864,7 +12890,7 @@ let apply_confirmed_server_identity_reading state ~mailbox reading =
      | Masc_tui_types.Workspace_identity_mismatch _ ->
          state.local_workspace <- Local_workspace_unread;
          state.local_keepers <- Local_workspace_unread;
-         launch_local_workspace_read state ~mailbox state.local_base_path);
+         launch_local_workspace_read state ~mailbox ~intent:Snapshot_read.Poll state.local_base_path);
     let input_workspace = workspace_input_identity_of_server state.server_identity in
     (match List.assoc_opt input_workspace state.suspended_keeper_inputs with
      | None -> ()
@@ -13046,16 +13072,6 @@ let apply_http_refresh_outcome state ~mailbox = function
   | Refresh_surfaces results -> apply_http_surfaces state ~mailbox results
   | Refresh_server_booting { refresh_ticket; identity; approval_ticket } ->
     apply_server_booting state ~mailbox ~refresh_ticket ~identity ~approval_ticket
-
-let load_local_workspace_if_safe state ~mailbox base_path =
-  match state.workspace_identity with
-  | Masc_tui_types.Workspace_identity_match ->
-      load_from_masc_dir state base_path;
-      ignore (launch_current_live_context state ~mailbox)
-  | Masc_tui_types.Workspace_identity_unread
-  | Masc_tui_types.Workspace_identity_match_unconfirmed _
-  | Masc_tui_types.Workspace_identity_mismatch _ -> ()
-;;
 
 let load_keeper_logs_if_safe state base_path limit keeper =
   match state.workspace_identity with
@@ -14956,11 +14972,10 @@ let apply_keeper_action_result state ~base_path ~mailbox keeper_name action resu
        report_action state "error"
          (Printf.sprintf "%s %s failed: %s" keeper_name
             (Keeper_control.action_label action) detail));
-  (* Both readings the row is built from moved: pause is durable metadata on
-     disk, the fiber is in the roster. Reloading the local half here shows the
-     change without waiting a refresh interval; the roster arrives with the
-     HTTP refresh the caller starts. *)
-  load_local_workspace_if_safe state ~mailbox base_path
+  (* The accepted action may change Keeper metadata and release Task work.
+     Each local source starts a fresh owned read; the HTTP roster refresh is
+     independent and no directory scan runs in this result handler. *)
+  launch_local_workspace_read state ~mailbox ~intent:Snapshot_read.Refresh base_path
 
 let start_keeper_action state ~base_path:_ ~mailbox keeper_name action =
   if not (server_authority_ready state) then begin
@@ -18400,7 +18415,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
             launch_keeper_chat_tool_details_load ~force:true state ~mailbox
               ~keeper_name:request.Keeper_chat.keeper_name
         end;
-        load_local_workspace_if_safe state ~mailbox base_path;
+        launch_local_workspace_read state ~mailbox ~intent:Snapshot_read.Refresh base_path;
         launch_waiting_keeper_input state ~mailbox
           ~keeper_name:request.Keeper_chat.keeper_name;
         drain_queued_message state ~base_path ~mailbox
@@ -22468,7 +22483,7 @@ and is loaded on demand through keeper_skill.
                  | Masc_cli_keeper_create.Created _ ->
                  state.keeper_creation_draft <- None;
                  state.keeper_creation_return <- None;
-                 load_local_workspace_if_safe state ~mailbox:async_messages base_path;
+                 launch_local_keeper_read state ~mailbox:async_messages ~intent:Snapshot_read.Refresh base_path;
                  state.keeper_creation_awaiting_roster <-
                    (if keeper_available_for_new_message state declared_name then None
                     else Some declared_name);
@@ -23799,7 +23814,7 @@ and is loaded on demand through keeper_skill.
       let refresh_shared_sources () =
         state.pending_approval_action <- None;
         Masc_tui_theme_choice.invalidate_cache ();
-        load_local_workspace_if_safe state ~mailbox:async_messages base_path;
+        launch_local_workspace_read state ~mailbox:async_messages ~intent:Snapshot_read.Refresh base_path;
         let host = server_peer_host in
         let port = state.port in
         (* Each source owns its read even while the whole-surface refresh
@@ -31173,7 +31188,7 @@ and is loaded on demand through keeper_skill.
         (* The armed approval survives the tick: the snapshot apply already
            disarms it when its token leaves the list, so clearing here only
            made the second press race a two-second clock. *)
-        launch_local_workspace_read state ~mailbox:async_messages base_path;
+        launch_local_workspace_read state ~mailbox:async_messages ~intent:Snapshot_read.Poll base_path;
         let host = server_peer_host in
         let port = state.port in
         (* The retry a closed feed waits for. *)

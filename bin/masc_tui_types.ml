@@ -3731,6 +3731,7 @@ let local_read_source_name = function
 
 type local_workspace_request = {
   lwr_source: local_read_source;
+  lwr_intent: Snapshot_read.intent;
   lwr_authority: workspace_authority;
   lwr_base_path: string;
   lwr_request: Snapshot_read.request;
@@ -7254,6 +7255,8 @@ type state = {
   mutable keeper_roster_read: Snapshot_read.t;
   mutable local_workspace_read_order: Snapshot_read.t;
   mutable local_keeper_read_order: Snapshot_read.t;
+  mutable local_keeper_read_cancel: (unit ref * (unit -> unit)) option;
+  mutable local_work_read_cancel: (unit ref * (unit -> unit)) option;
   mutable candle_observation: (Candle_observation.t, string) result option;
   mutable candle_authority_generation : int;
   mutable keeper_action_inflight:
@@ -8516,15 +8519,38 @@ let set_local_source_order (state : state) source reading =
   | Local_keepers -> state.local_keeper_read_order <- reading
   | Local_work -> state.local_workspace_read_order <- reading
 
-let begin_local_workspace_read (state : state) ~source ~base_path ~started_ns =
+let local_source_cancellation (state : state) = function
+  | Local_keepers -> state.local_keeper_read_cancel
+  | Local_work -> state.local_work_read_cancel
+
+let set_local_source_cancellation (state : state) source cancellation =
+  match source with
+  | Local_keepers -> state.local_keeper_read_cancel <- cancellation
+  | Local_work -> state.local_work_read_cancel <- cancellation
+
+let supersede_local_source_read state source cancellation =
+  let previous = local_source_cancellation state source in
+  set_local_source_cancellation state source cancellation;
+  Option.iter (fun (_, cancel) -> cancel ()) previous
+
+let finish_local_source_read state source token =
+  match local_source_cancellation state source with
+  | Some (owner, _) when owner == token -> set_local_source_cancellation state source None
+  | Some _ | None -> ()
+
+let invalidate_local_source_read state source =
+  set_local_source_order state source (Snapshot_read.invalidate (local_source_order state source));
+  supersede_local_source_read state source None
+
+let begin_local_workspace_read (state : state) ~intent ~source ~base_path ~started_ns =
   if state.workspace_identity <> Workspace_identity_match
      || not (String.equal base_path state.local_base_path) then None
   else
-    let reading, request = Snapshot_read.start ~intent:Snapshot_read.Poll
+    let reading, request = Snapshot_read.start ~intent
         (local_source_order state source) in
     set_local_source_order state source reading;
     Option.map (fun lwr_request ->
-        { lwr_source = source; lwr_authority = state.workspace_authority;
+        { lwr_source = source; lwr_intent = intent; lwr_authority = state.workspace_authority;
           lwr_base_path = base_path; lwr_request; lwr_started_ns = started_ns }) request
 
 let take_local_workspace_read (state : state) ~source request result =
@@ -8828,8 +8854,8 @@ let suspend_workspace_readings state =
   retire_asks_read state;
   state.ask_followup_read <- Snapshot_read.invalidate state.ask_followup_read;
   state.keeper_roster_read <- Snapshot_read.invalidate state.keeper_roster_read;
-  state.local_workspace_read_order <- Snapshot_read.invalidate state.local_workspace_read_order;
-  state.local_keeper_read_order <- Snapshot_read.invalidate state.local_keeper_read_order;
+  invalidate_local_source_read state Local_work;
+  invalidate_local_source_read state Local_keepers;
   state.gate_snapshot_read <- Snapshot_read.invalidate state.gate_snapshot_read;
   state.schedules_read <- Snapshot_read.invalidate state.schedules_read;
   state.keeper_sandbox_logs_inflight <- None;
@@ -11802,6 +11828,8 @@ let create_state
   keeper_roster_read = Snapshot_read.idle;
   local_workspace_read_order = Snapshot_read.idle;
   local_keeper_read_order = Snapshot_read.idle;
+  local_keeper_read_cancel = None;
+  local_work_read_cancel = None;
   candle_observation = None;
   candle_authority_generation = 0;
   keeper_action_inflight = None;

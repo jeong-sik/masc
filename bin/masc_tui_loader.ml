@@ -473,6 +473,19 @@ type local_keeper_reading =
 let local_work_read_mutex = Eio.Mutex.create ()
 let local_keeper_read_mutex = Eio.Mutex.create ()
 
+(* Cache entries are replaced atomically, so a failed/cancelled scan leaves
+   individually valid entries. Release the cache lock before propagating the
+   exception: Eio's write helper otherwise poisons the source for every future
+   read. Cancellation is re-raised with its backtrace, without retry or await. *)
+let with_local_read_mutex mutex read =
+  let outcome = Eio.Mutex.use_rw ~protect:false mutex (fun () ->
+      try Ok (read ()) with
+      | Eio.Cancel.Cancelled _ as exn -> Error (exn, Printexc.get_raw_backtrace ())
+      | exn -> Error (exn, Printexc.get_raw_backtrace ())) in
+  match outcome with
+  | Ok reading -> reading
+  | Error (exn, backtrace) -> Printexc.raise_with_backtrace exn backtrace
+
 let read_local_work_unlocked (base_path : string) : local_reading =
   let masc_dir = Filename.concat base_path Common.masc_dirname in
   (* Load agents *)
@@ -510,11 +523,11 @@ let read_local_work_unlocked (base_path : string) : local_reading =
   ; lr_goals_to_confirm = goals_to_confirm }
 
 let read_local_workspace base_path =
-  Eio.Mutex.use_rw ~protect:false local_work_read_mutex
+  with_local_read_mutex local_work_read_mutex
     (fun () -> read_local_work_unlocked base_path)
 
 let read_local_keepers base_path =
-  Eio.Mutex.use_rw ~protect:false local_keeper_read_mutex (fun () ->
+  with_local_read_mutex local_keeper_read_mutex (fun () ->
       let lkr_keepers, lkr_error = load_keepers base_path in
       { lkr_keepers; lkr_error })
 
@@ -560,18 +573,9 @@ let apply_local_keepers (state : state) (reading : local_keeper_reading) =
     ~error:reading.lkr_error;
   state.local_keepers <- Local_workspace_read
 
-(** Load state from .masc directory *)
-let load_from_masc_dir (state : state) (base_path : string) =
-  (* Post-action reads supersede both older snapshots. Metadata is applied
-     first and no work observation can replace it afterward. *)
-  state.local_keeper_read_order <- Snapshot_read.invalidate state.local_keeper_read_order;
-  state.local_workspace_read_order <- Snapshot_read.invalidate state.local_workspace_read_order;
-  apply_local_keepers state (read_local_keepers base_path);
-  apply_local_workspace state (read_local_workspace base_path)
-
 let clear_local_workspace ?(keep_keeper_rows = false) (state : state) =
-  state.local_keeper_read_order <- Snapshot_read.invalidate state.local_keeper_read_order;
-  state.local_workspace_read_order <- Snapshot_read.invalidate state.local_workspace_read_order;
+  invalidate_local_source_read state Local_keepers;
+  invalidate_local_source_read state Local_work;
   state.agents <- [];
   state.tasks <- [];
   state.tasks_domain <- [];

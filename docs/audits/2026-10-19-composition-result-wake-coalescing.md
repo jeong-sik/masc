@@ -39,6 +39,15 @@ backend presence batches and exact durable owner/node CAS are unchanged.
 Canonical ACK/cleanup retain execution phase, source and output references;
 retiring completion discovery does not retire that original result evidence.
 
+The switch is checked before reserving a notification worker: installed Eio's
+`fork` can return without launching on a cancelled switch. One debug observation
+after owned-slot retirement retains callback notifications, discovery starts,
+settlements, errors, pending follow-up and drained/cancelled/raised/unfinished
+boundary. Counts are logical calls, not distinct jobs or filesystem operations;
+starts without settlement remain incomplete. A drained observation is not
+physical worker exit, intake/effect success or paint proof. These counters never
+control scheduling or effect admission, and no per-notification log is added.
+
 The existing original-evidence repair scenario now enters through the same
 notification scheduler, with pre-read duplicate hints and an intake-settlement
 hint. It still uses canonical discovery, real original run/Task evidence,

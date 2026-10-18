@@ -75,6 +75,8 @@ val notify_result_ready : sw:Eio.Switch.t -> 'a t -> unit
     is introduced. Explicit maintenance [pulse] remains independent.
     Cancellation/exception cleanup retires only this notification worker;
     durable discovery and later maintenance remain the recovery source.
+    Debug observations retain callback count, discovery starts/settlements/errors
+    and the drain boundary, not job counts, effect success or worker-exit proof.
     Single-domain Eio caller, using the controller's lifetime switch. *)
 
 module For_testing : sig

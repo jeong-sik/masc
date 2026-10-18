@@ -1,8 +1,10 @@
-import { newProject, editProject, beats, pitch, PPQ, harmonyAt } from './sequencer-project.mjs'
+import { newProject, validateProject, editProject, beats, pitch, PPQ, harmonyAt } from './sequencer-project.mjs'
 import { sourceEditor, sourceSelected, sourceAction, sourceCommand, sourceHarmony } from './midi-source-editor.mjs'
 
 export function newEditor(project = newProject(), { pattern } = {}) {
-  if (project.kind === 'midi-source') return sourceEditor(project, {}, pattern)
+  if (project?.kind === 'midi-source') return sourceEditor(project, {}, pattern)
+  if (project?.kind !== undefined) throw new Error('Unsupported sequencer editor document')
+  validateProject(project)
   return { project, track: 0, tick: 0, pitch: 60, step: PPQ / 4, duration: PPQ, velocity: 96, undo: [], redo: [] }
 }
 export function selectedNote(editor) {

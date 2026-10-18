@@ -272,6 +272,7 @@ class Artifacts:
         expected = digest(reference["sha256"])
         name = reference["path"]
         require(type(name) is str and name, "missing artifact path")
+        require("\x00" not in name, "artifact path contains NUL")
         path = PurePosixPath(name)
         require(not path.is_absolute() and path.as_posix() == name
                 and all(part not in {".", ".."} for part in path.parts), "artifact path must be canonical and packet-relative")
@@ -282,7 +283,7 @@ class Artifacts:
                 data = actual.read_bytes()
             except FileNotFoundError as error:
                 raise MissingArtifact("artifact file missing") from error
-            except OSError as error:
+            except (OSError, UnicodeEncodeError) as error:
                 raise EvidenceError("artifact could not be read") from error
             self.blobs[name] = Blob(data, hashlib.sha256(data).hexdigest())
         blob = self.blobs[name]

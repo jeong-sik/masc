@@ -40,7 +40,9 @@ Each arm has exactly:
 A file reference is exactly `{"path": "relative/file", "sha256": "<64 lowercase hex>"}`.
 The digest placeholder is notation, not a usable value. Paths are canonical POSIX
 paths relative to the packet directory, without absolute/dot/parent components or
-nonregular files. Fill digests from frozen artifact bytes. Each declared path is
+nonregular files. Embedded NUL and unencodable filesystem paths are invalid
+artifact evidence for that arm; they do not discard the other cases. Fill digests
+from frozen artifact bytes. Each declared path is
 read once per invocation, and each distinct log digest is indexed once. This is
 a report-local input snapshot, not a persistent cache or global filesystem freeze.
 
@@ -84,9 +86,11 @@ counts. Reception is not acceptance, useful Task work or physical paint.
 
 ## Evidence status
 
-Three compound scenarios in `test/test_tui_startup_report.py` cover interrupted,
+Four compound scenarios in `test/test_tui_startup_report.py` cover interrupted,
 late and absent attempts; foreign ownership/conflicts/duplicates/bad digests; and
-Int64 precision with mismatched conditions, duplicate cases, truncation and reuse.
+Int64 precision with mismatched conditions, duplicate cases, truncation and reuse;
+and a healthy cohort mixed with NUL/unencodable log paths and an invalid candidate
+path, retaining separate valid-log and candidate-identity axes.
 They use explicit synthetic files/protocol records, not measured runs, and remain
 unexecuted. AST parsing imports/executes neither report nor tests and is not type,
 runtime or assertion evidence. No native observation or speed measurement accompanies

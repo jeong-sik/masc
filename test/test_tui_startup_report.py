@@ -87,6 +87,34 @@ class Packet:
 
 
 class StartupReportScenario(unittest.TestCase):
+    def test_invalid_file_paths_preserve_the_complete_cohort_and_independent_arms(self):
+        with tempfile.TemporaryDirectory() as directory:
+            packet = Packet(Path(directory))
+            log = packet.log("paths.jsonl", [complete(pid, 100) for pid in range(70, 78)])
+            nul_log = dict(log, path="bad\x00log")
+            unencodable_log = dict(log, path="bad\ud800log")
+            bad_binary = packet.arm(log, 74)
+            bad_binary["binary"] = dict(packet.binary, path="bad\x00candidate")
+            report = packet.report([
+                packet.case("healthy", packet.arm(log, 70), packet.arm(log, 71)),
+                packet.case("nul-log", packet.arm(nul_log, 72), packet.arm(log, 73)),
+                packet.case("nul-binary", bad_binary, packet.arm(log, 75)),
+                packet.case("unencodable-log", packet.arm(unencodable_log, 76), packet.arm(log, 77))])
+            self.assertEqual(report["declared_cases"], 4)
+            self.assertEqual(len(report["cases"]), 4)
+            self.assertEqual(report["cases"][0]["before"]["input_state"], "received")
+            self.assertEqual(report["cases"][1]["before"]["evidence_state"], "invalid")
+            self.assertEqual(report["cases"][3]["before"]["evidence_state"], "invalid")
+            self.assertTrue(all(case["after"]["evidence_state"] == "valid" for case in report["cases"]))
+            self.assertEqual(report["cases"][2]["before"]["evidence_state"], "valid")
+            self.assertFalse(report["cases"][2]["before"]["identity"]["binary_bytes_verified"])
+            self.assertEqual(report["outcomes"]["before"]["evidence_state"]["invalid"], 2)
+            self.assertEqual(report["paired_by_metric"]["dispatch_to_first_input_received_ns"], 1)
+            self.assertTrue(all(case["comparison"]["dispatch_to_first_input_received_ns"]["after_minus_before_ns"] is None
+                                for case in report["cases"][1:]))
+            self.assertFalse(report["runtime_execution_verified"])
+            self.assertIsNone(report["measured_speedup"])
+
     def test_full_denominator_retains_interrupted_late_and_absent_samples(self):
         with tempfile.TemporaryDirectory() as directory:
             packet = Packet(Path(directory))

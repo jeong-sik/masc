@@ -82,11 +82,14 @@ hashes do not prove complete event delivery or the semantics of a recorded run.
 
 ## Authored evidence and limits
 
-Three authored, unexecuted compound scenarios use explicit synthetic files and
+Four authored, unexecuted compound scenarios use explicit synthetic files and
 the actual packet reader: full-denominator interrupted/late/absent attempts;
 foreign owner isolation with corrupt/conflicting/duplicated rows and bad binary
 identity; and Int64 precision with mismatched conditions, duplicate case IDs,
-truncated data and capture reuse. They import no native TUI/OCaml runtime and
+truncated data and capture reuse; and a healthy cohort with NUL/unencodable
+artifact paths. The path boundary rejects NUL before filesystem access and
+converts specific filesystem encoding errors to invalid artifact evidence,
+retaining the full denominator and independently valid arms. They import no native TUI/OCaml runtime and
 start no network, server, PTY or model. No wording/layout/snapshot assertions are
 added. These fixtures are not measured benchmark results.
 

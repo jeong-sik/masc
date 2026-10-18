@@ -48,6 +48,16 @@ unknown baseline dependencies and mixed state dialects report diagnostics; origi
 full-source audition remains available. No default controller values or lossy
 protocol conversion are invented.
 
+A recorded region can begin with silence before its controller/program preamble.
+Admission inspects the retained due stream through the region's exclusive end
+and requires source-defined absolute values before each Note On or relative use.
+Those future messages remain scheduled at their original timestamps; validation
+does not pull them into the entry replay. This also applies when repeating a
+region or seeking into a still-silent preamble. Historical surviving voices still
+need the values that preceded their original attack. A later controller/program
+cannot repair an earlier unknown attack, and a baseline outside the cut cannot
+establish state inside it. Scoped cleanup and physical ownership stay intact.
+
 Staging releases owned notes but acquires no restored notes. All acquisition waits
 for the audio owner's common future epoch. Late callbacks reconcile the current
 phase instead of emitting skipped copies. The owner waits for every audio voice,

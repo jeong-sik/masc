@@ -23,6 +23,25 @@ func source(_ id:String,_ rows:[UmpPacket],numer:UInt32=1,denom:UInt32=1,extent:
 }
 func clip(_ id:String="clip",source:String="take",start:Double=0,offset:String="0",extent:String="1000000000",repeatCount:UInt64=1)->UmpRegion{UmpRegion(id:id,source:source,startSeconds:start,offset:offset,extent:extent,repeatCount:repeatCount)}
 func owner(_ sources:[UmpRegionSource],_ clips:[UmpRegion],duration:Double=1)throws->UmpRegionTransport{try UmpRegionTransport(timeline:UmpArrangement(schemaVersion:1,duration:duration,sources:sources,regions:clips))}
+// An optional retained real recording is supplied by the installed-runtime
+// probe. It uses the same production decoder/region owner and synthetic send
+// edge; no endpoint registration or opening is needed for this reproduction.
+if let path=CommandLine.arguments.dropFirst().first {
+ do {
+  let original=try JSONDecoder().decode(UmpArrangement.self,from:Data(contentsOf:URL(fileURLWithPath:path)))
+  let recorded=try UmpRegionTransport(timeline:original),region=recorded.clips[0]
+  host=0;sent=[];try recorded.stageCoordinated(at:0);precondition(sent.isEmpty)
+  try recorded.runCoordinated(anchorNanoseconds:10)
+  let first=region.prefix(at:region.cut,inclusive:false)
+  precondition(first<region.endIndex)
+  let deadline=region.next(copy:0,index:first)
+  host=10+deadline-1;recorded.tick();precondition(sent.isEmpty,"future recorded baseline was emitted early")
+  for index in first..<region.endIndex {host=10+region.next(copy:0,index:index);recorded.tick()}
+  precondition(sent.map{$0.1}==Array(region.events[first..<region.endIndex]).map{$0.words},"original recorded preamble order/words changed")
+  recorded.finish(reason:"test",error:nil,publish:false)
+  print("RETAINED_RECORDED_PREAMBLE_PASS")
+ }catch{FileHandle.standardError.write(Data("retained recording admission: \\(error)\\n".utf8));exit(1)}
+}
 // A clock-only capture can share a paired arrangement without fabricating UMP.
 let silent=UmpRegionSource(id:"silent",extent:"1000000000",timeline:UmpTimeline(schemaVersion:4,duration:1,clock:UmpClock(origin:"0",numer:1,denom:1),bindings:[],packets:[]))
 refuses{_ = try silent.timeline.timedEvents()}
@@ -48,6 +67,38 @@ host=0;sent=[];try attack.stageCoordinated(at:0);try attack.runCoordinated(ancho
 precondition(sent.map{$0.1}==[bend,on,off],"entry attack and original release survive the exact cut")
 attack.finish(reason:"test",error:nil,publish:false)
 refuses{_ = try owner([source("take",[packet(0,on),packet(0,bend)])],[clip()])}
+// A recorded silent preamble establishes state at its own original deadlines,
+// not eagerly at admission or at the region's first scheduler callback.
+let control:[UInt32]=[0x43b54a00,0xabcdef01]
+let preamble=source("take",[packet(50_000_000,control),packet(100_000_000,bend),packet(200_000_000,on),packet(300_000_000,off)])
+let prefaced=try owner([preamble],[clip(repeatCount:2)],duration:2)
+host=0;sent=[];try prefaced.stageCoordinated(at:0);precondition(sent.isEmpty)
+try prefaced.runCoordinated(anchorNanoseconds:10);host=10;prefaced.tick();precondition(sent.isEmpty)
+host=50_000_009;prefaced.tick();precondition(sent.isEmpty)
+host=50_000_010;prefaced.tick();precondition(sent.map{$0.1}==[control])
+host=100_000_010;prefaced.tick();precondition(sent.map{$0.1}==[control,bend])
+host=200_000_010;prefaced.tick();precondition(sent.map{$0.1}==[control,bend,on])
+host=300_000_010;prefaced.tick();precondition(sent.map{$0.1}==[control,bend,on,off])
+host=1_000_000_010;prefaced.tick();precondition(sent.count==4,"repeated preamble must not be pulled to copy entry")
+host=1_050_000_010;prefaced.tick();host=1_100_000_010;prefaced.tick();host=1_200_000_010;prefaced.tick();host=1_300_000_010;prefaced.tick()
+precondition(sent.map{$0.1}==[control,bend,on,off,control,bend,on,off])
+// Seeking within the silent preamble chases only its past controller; resume
+// retains the remaining gap before the future bend and original Note On.
+let countBeforeSeek=sent.count;try prefaced.stageCoordinated(at:0.075);precondition(sent.count==countBeforeSeek)
+try prefaced.runCoordinated(anchorNanoseconds:host+10);host+=10;prefaced.tick();precondition(Array(sent.suffix(1)).map{$0.1}==[control])
+let countBeforeBend=sent.count;host+=24_999_999;prefaced.tick();precondition(sent.count==countBeforeBend)
+host+=1;prefaced.tick();precondition(sent.last!.1==bend)
+prefaced.finish(reason:"test",error:nil,publish:false)
+// A future baseline cannot repair an already sounding historical voice or an
+// attack/relative mutation that appeared first in the original stream.
+refuses{_ = try owner([source("take",[packet(50_000_000,on),packet(100_000_000,bend)])],[clip()])}
+refuses{_ = try owner([source("take",[packet(0,on),packet(100_000_000,bend)])],[clip(offset:"150000000",extent:"50000000")],duration:0.05)}
+refuses{_ = try owner([source("take",[packet(50_000_000,[0x43450000,1]),packet(100_000_000,[0x43250000,0x12345678])])],[clip()])}
+// A mutation in another sequential owner cannot be repaired by a baseline
+// lying beyond this region's exclusive source end.
+let priorBend=source("prior",[packet(0,bend),packet(10_000_000,on)])
+let outside=source("take",[packet(50_000_000,on),packet(200_000_000,bend)])
+refuses{_ = try owner([priorBend,outside],[clip("prior",source:"prior",extent:"100000000"),clip(start:0.1,extent:"100000000")],duration:0.2)}
 let ending=try owner([source("take",[packet(0,on),packet(10_000_000,off)])],[clip(offset:"10000000",extent:"100000000")],duration:0.1)
 host=0;sent=[];try ending.stageCoordinated(at:0);try ending.runCoordinated(anchorNanoseconds:10);host=10;ending.tick()
 precondition(sent.isEmpty,"a historical note ending exactly at entry must not retrigger")
@@ -111,5 +162,5 @@ print("UMP_REGIONS_PASS: exact adjacent ticks and UInt64+1 end, original attribu
  const files=['MidiTransport.swift','UmpTransport.swift','UmpState.swift'].map(file=>new URL(file,import.meta.url).pathname)
  let result=spawnSync('xcrun',['swiftc','-D','MIDI_LIBRARY',...files,join(directory,'Output.swift'),join(directory,'Regions.swift'),join(directory,'main.swift'),'-o',join(directory,'probe'),'-framework','CoreMIDI'],{encoding:'utf8'})
  assert.equal(result.status,0,result.stderr)
- result=spawnSync(join(directory,'probe'),[],{encoding:'utf8'});assert.equal(result.status,0,result.stderr);console.log(result.stdout.trim())
+ result=spawnSync(join(directory,'probe'),process.argv[2]?[process.argv[2]]:[],{encoding:'utf8'});assert.equal(result.status,0,result.stderr);console.log(result.stdout.trim())
 }finally{await rm(directory,{recursive:true,force:true})}

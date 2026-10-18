@@ -67,7 +67,7 @@ struct UmpRegionClip {
         let before = prefix(at: time, inclusive: false), through = prefix(at: time)
         let expired = Set(expiredNotes.filter { $0.value < through }.map(\.key))
         return try umpRestoration(events, prefixCount: before, followingCount: through - before,
-                                  excludingNotes: expired, replacing: previous)
+                                  preambleEndIndex: endIndex, excludingNotes: expired, replacing: previous)
     }
     func phase(at position: UInt64) -> (copy: UInt64, time: UInt128)? {
         guard position >= start, position < end else { return nil }
@@ -156,9 +156,9 @@ final class UmpRegionTransport: CoordinatedMidiTransport {
             var previous = potential
             previous.touched = previous.touched.filter { field in clip.scope.contains { $0.contains(field.address) } }
             previous.addresses = previous.addresses.filter { address in clip.scope.contains { $0.contains(address) } }
-            // Exact-entry events remain a due stream, including a zero-duration
-            // attack/release pair. Their explicit baselines must precede each
-            // entry Note On; they cannot repair a historical live voice's patch.
+            // Entry events and silent preambles remain an original due stream.
+            // Explicit baselines must precede each attack/relative use; they
+            // cannot repair a historical live voice's patch or escape the cut.
             _ = try clip.restore(at: clip.cut, replacing: previous)
         }
         clips = admitted

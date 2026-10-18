@@ -2552,10 +2552,135 @@ let test_settings_preparation_retires_focus_and_workspace_owners () =
     (reconcile_keeper_settings_editor state ~available:true
       && not (take_keeper_settings_editor_read state active (Ok (keeper_settings_snapshot ()))))
 
+let runtime_form_source = {|[providers.codex]
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+account-home = "/tmp/masc-form-account"
+[models.example]
+api-name = "example"
+max-context = 500000
+[codex.example]
+max-context = 272000
+|}
+
+let runtime_form_reading () : Masc_tui_runtime_config_view.reading =
+  {path="/workspace/runtime.toml"; source_text=runtime_form_source;
+   metadata={source_revision="opening";
+     validation=Checked {valid=true; schema_version=1; current_schema_version=1;
+       forward_schema=false; issues=[]}; routing=Routing_active; routing_requires_restart=false;
+     keeper=Not_configured; keeper_requires_restart=false; configured_count=0;
+     pending_keys=[]; applied_keys=[]; preempted_keys=[]};
+   account_groups=Ok []; account_emails=Ok (Masc_tui_account_login.Email_rows {rows=[];unattributed=0})}
+
+let runtime_model_draft () =
+  let row = match Masc_tui_model_runtime_table.parse (String.split_on_char '\n' runtime_form_source) with
+    | Ok (row :: _) -> row | Ok [] -> Alcotest.fail "model missing" | Error detail -> Alcotest.fail detail in
+  let form = Masc_tui_model_form.create ~source_revision:"opening" Edit row in
+  let form = match Masc_tui_model_form.key form "ctrl-u" with
+    | Editing form -> Masc_tui_model_form.paste form "300000"
+    | Cancelled | Submit _ -> Alcotest.fail "context edit failed" in
+  Masc_tui_types.Model_form_draft form
+
+let runtime_form_request state draft =
+  match Masc_tui_types.begin_runtime_form_save state ~draft ~started_ns:10L with
+  | Ok request -> request | Error detail -> Alcotest.fail detail
+
+let test_runtime_form_prepares_original_revision () =
+  let open Masc_tui_types in
+  let draft = runtime_model_draft () and reading = runtime_form_reading () in
+  let prepared = match prepare_runtime_form_save draft reading with
+    | Ok prepared -> prepared | Error _ -> Alcotest.fail "original edit rejected" in
+  Alcotest.(check string) "base text is retained" runtime_form_source prepared.rfp_base.source_text;
+  Alcotest.(check string) "guard uses opening revision" "opening" prepared.rfp_base.source_revision;
+  (match Masc_tui_model_runtime_table.parse (String.split_on_char '\n' prepared.rfp_text) with
+   | Ok [row] -> Alcotest.(check (option (pair string int))) "binding changes on same source"
+       (Some ("binding",300000)) row.context
+   | Ok [] | Ok (_::_) | Error _ -> Alcotest.fail "prepared binding missing");
+  let changed = {reading with source_text="not the original source";
+    metadata={reading.metadata with source_revision="another writer"}} in
+  Alcotest.(check bool) "changed source refuses before applying original fields" true
+    (match prepare_runtime_form_save draft changed with Error (Form_not_sent _) -> true
+     | Ok _ | Error (Form_saved _ | Form_invalid_account _ | Form_refused _ | Form_conflict _ | Form_unconfirmed _) -> false)
+
+let test_runtime_form_retains_unknown_and_rejects_duplicate () =
+  let open Masc_tui_types in
+  let state,_ = keeper_settings_fixture () in
+  let draft = runtime_model_draft () in
+  let form = match draft with Model_form_draft form -> form | Account_form_draft _ -> Alcotest.fail "model required" in
+  state.runtime_model_form <- Some form;
+  let request = runtime_form_request state draft in
+  Alcotest.(check bool) "pending operation freezes input" true (runtime_form_input_locked state);
+  Alcotest.(check bool) "duplicate has no second operation" true
+    (Result.is_error (begin_runtime_form_save state ~draft ~started_ns:11L));
+  let prepared = match prepare_runtime_form_save draft (runtime_form_reading ()) with
+    | Ok prepared -> prepared | Error _ -> Alcotest.fail "prepare failed" in
+  ignore (publish_runtime_form_save request ~observed_ns:12L (Form_previewing prepared));
+  ignore (publish_runtime_form_save request ~observed_ns:13L (Form_posting prepared));
+  let latest = match pending_runtime_form_save_receipt state with
+    | Some (_,status,_) -> status | None -> Alcotest.fail "posting observation lost" in
+  Alcotest.(check bool) "coalesced posting can skip preview admission" true (apply_runtime_form_save state request latest);
+  state.runtime_model_form <- None; state.runtime_form_save_focus <- None;
+  let unknown = Form_finished (Some prepared,Form_unconfirmed "connection ended after dispatch") in
+  ignore (publish_runtime_form_save request ~observed_ns:14L unknown);
+  suspend_workspace_readings state;
+  Alcotest.(check bool) "operation receipt survives read withdrawal" true
+    (apply_runtime_form_save state request unknown);
+  Alcotest.(check bool) "no automatic or duplicate retry after unknown" true
+    (Result.is_error (begin_runtime_form_save state ~draft ~started_ns:15L));
+  Alcotest.(check bool) "original draft is manually recoverable" true (recover_runtime_form_save state ~account:false);
+  Alcotest.(check bool) "unknown input cannot be resubmitted" true (runtime_form_input_locked state);
+  Alcotest.(check bool) "late progress cannot erase terminal uncertainty" false
+    (publish_runtime_form_save request ~observed_ns:16L (Form_posting prepared));
+  release_runtime_form_recovery state;
+  state.workspace_identity <- Workspace_identity_match;
+  Alcotest.(check bool) "explicitly starting fresh admits another operation" true
+    (Result.is_ok (begin_runtime_form_save state ~draft ~started_ns:17L));
+  Alcotest.(check bool) "old terminal receipt cannot consume successor" false
+    (apply_runtime_form_save state request unknown);
+  Alcotest.(check int) "both operation records remain" 2 (List.length state.runtime_form_saves)
+
+let test_runtime_account_save_keeps_typed_form_and_workspace () =
+  let open Masc_tui_types in
+  let state,_ = keeper_settings_fixture () in
+  let form = match Masc_tui_runtime_account_form.open_on ~source_revision:"opening"
+      ~home_dir:"/tmp/operator" runtime_form_source with
+    | Ok form -> form | Error detail -> Alcotest.fail detail in
+  state.runtime_account_form <- Some form;
+  let request = runtime_form_request state (Account_form_draft form) in
+  Alcotest.(check bool) "another form cannot commit over pending source" true
+    (Result.is_error (begin_runtime_form_save state ~draft:(runtime_model_draft ()) ~started_ns:11L));
+  let refused = Masc_tui_runtime_account_form.refused form "field rejection" in
+  let terminal = Form_finished (None,Form_invalid_account refused) in
+  ignore (publish_runtime_form_save request ~observed_ns:12L terminal);
+  let Workspace_authority epoch = state.workspace_authority in
+  state.workspace_authority <- Workspace_authority (epoch+1);
+  Alcotest.(check bool) "retired authority cannot complete an on-screen successor" false
+    (runtime_form_save_current state request);
+  Alcotest.(check bool) "original refusal remains an operation receipt" true
+    (apply_runtime_form_save state request terminal);
+  state.server_identity <- Some (identity "/another-workspace");
+  Alcotest.(check bool) "another workspace cannot restore this account input" false
+    (recover_runtime_form_save state ~account:true);
+  state.server_identity <- Some request.rfs_workspace;
+  Alcotest.(check bool) "returning explicitly restores original account form" true
+    (recover_runtime_form_save state ~account:true);
+  Alcotest.(check bool) "typed field rejection is preserved" true
+    (Option.exists (fun restored -> restored == refused) state.runtime_account_form);
+  Alcotest.(check (option string)) "original source revision remains" (Some "opening")
+    (Option.bind state.runtime_account_form Masc_tui_runtime_account_form.source_revision)
+
+
 let () =
   Alcotest.run "tui_server_identity_refresh"
     [ ( "server-identity-refresh"
-      , [ Alcotest.test_case "settings preparation hands original document to one editor intent" `Quick
+      , [ Alcotest.test_case "runtime form transforms only its opening source" `Quick
+            test_runtime_form_prepares_original_revision
+        ; Alcotest.test_case "runtime form unknown save retains input and rejects duplicate" `Quick
+            test_runtime_form_retains_unknown_and_rejects_duplicate
+        ; Alcotest.test_case "runtime account form keeps typed refusal in original workspace" `Quick
+            test_runtime_account_save_keeps_typed_form_and_workspace
+        ; Alcotest.test_case "settings preparation hands original document to one editor intent" `Quick
             test_settings_preparation_hands_off_original_snapshot_once
         ; Alcotest.test_case "settings preparation withdraws focus and workspace owners" `Quick
             test_settings_preparation_retires_focus_and_workspace_owners

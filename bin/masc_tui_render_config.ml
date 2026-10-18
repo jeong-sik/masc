@@ -1026,7 +1026,8 @@ let render_config_models (state : state) =
   let content_height = max 1 (rows_avail - 5) in
   (match state.runtime_model_form with
    | Some form ->
-       let lines = Masc_tui_model_form.rows ~width:(max 1 (cols - 6)) ~height:content_height form in
+       let lines = Masc_tui_model_form.rows ~input_locked:(runtime_form_input_locked state)
+           ~width:(max 1 (cols - 6)) ~height:content_height form in
        List.iter (fun line -> box_line buf cols ("  " ^ Terminal_text.single_line line)) lines;
        for _ = List.length lines + 1 to content_height do box_empty buf cols done
    | None when Option.is_some state.runtime_model_jump ->
@@ -1734,6 +1735,8 @@ let render_config (state : state) =
          into it. It also named PgUp/PgDn, which the table did not have, so
          the two had drifted in both directions. *)
       (match state.runtime_account_form with
+       | Some _ when runtime_form_input_locked state ->
+         "Esc back · input retained · Ctrl-X closes recovery after receipt"
        | Some form when Masc_tui_runtime_account_form.is_saved form ->
          Masc_tui_keys.footer_hints_runtime_account_saved ()
        | Some _ -> Masc_tui_keys.footer_hints_runtime_account_form ()

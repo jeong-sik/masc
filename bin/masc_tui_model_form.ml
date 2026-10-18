@@ -84,7 +84,7 @@ let key t key =
   | key when String.length key > 0 && String.length key = Uchar.utf_decode_length (String.get_utf_8_uchar key 0) -> Editing (paste t key)
   | _ -> Editing t
 
-let rows ~width ~height t =
+let rows ?(input_locked=false) ~width ~height t =
   let wrap = Masc_tui_message_layout.wrap_words ~max_cells:(max 1 width) in
   let heading = (match t.mode with Edit -> "Edit model" | Copy -> "Copy model") ^ " · " ^ t.source.provider in
   let label = function Name -> "Variant name" | Context -> "Context tokens" | Effort -> "Reasoning effort" | Temperature -> "Temperature" | Output -> "Max output tokens" in
@@ -92,7 +92,8 @@ let rows ~width ~height t =
     Printf.sprintf "%s %-17s %s" (if i = t.selected then ">" else " ") (label field)
       (value t field ^ (if i = t.selected then "_" else "")
        ^ (if field=Context then (match t.context_choice with Preset _ -> " [preset]" | Custom -> " [custom]") else ""))) fields in
-  let hint = (if focused t=Context then "←/→ 272k/500k/750k/1M/custom · " else "")
+  let hint = if input_locked then "Input retained · Esc back · Ctrl-X closes recovery after receipt" else
+    (if focused t=Context then "←/→ 272k/500k/750k/1M/custom · " else "")
     ^ "Tab/↑/↓ fields · Ctrl-U clear · Enter next/save · Esc cancel" in
   let notes = (match t.mode with
     | Copy -> "Same account and API model; independent settings. Add the saved variant to a Lane to use it."
@@ -103,7 +104,7 @@ let rows ~width ~height t =
   let height = max 0 height in
   let hints = wrap hint in
   let hints = if List.length hints < height then hints
-    else List.take height (wrap "Esc cancel · Enter next/save") in
+    else List.take height (wrap (if input_locked then "Esc back · input retained" else "Esc cancel · Enter next/save")) in
   let available = max 0 (height - List.length hints) in
   let errors = match t.error with None -> [] | Some error -> wrap ("Error: " ^ error) in
   let error_room = max 0 (available - (if available > 1 then 1 else 0)) in

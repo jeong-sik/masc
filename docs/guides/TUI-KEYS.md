@@ -173,6 +173,17 @@ The command palette is `:`.
 | `Esc` | back to Dashboard |
 | `r` | reload |
 
+Runtime model and account form saves keep input and its opening revision while
+workspace checks, source reading, preview and guarded commit run outside the
+key handler. Repeated submission shares the pending operation. During a pending
+save, Esc leaves the form and keeps its operation; reopening Models with e/c or
+runtime.toml with a restores the original input. A disconnected commit remains
+unconfirmed and cannot be submitted again from that retained form. Ctrl-X closes
+a retained terminal form and rereads configuration; the next open starts fresh.
+The original receipt stays in session history. Confirmed account saves retain
+their sign-in command in the session log. File commit, durability and runtime
+application remain separate facts. Runtime and painted input latency are unmeasured.
+
 ## Activity
 
 | Keys | What it does |

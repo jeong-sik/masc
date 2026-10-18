@@ -4,7 +4,7 @@ type mode = Edit | Copy
 type t
 val create : ?source_revision:string -> mode -> Masc_tui_model_runtime_table.row -> t
 val source_revision : t -> string option
-val rows : width:int -> height:int -> t -> string list
+val rows : ?input_locked:bool -> width:int -> height:int -> t -> string list
 val paste : t -> string -> t
 type outcome = Editing of t | Cancelled | Submit of t
 val key : t -> string -> outcome

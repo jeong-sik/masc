@@ -139,7 +139,10 @@ let lines ~width =
      dimmed heading shipped as a visible "[2m"; the hierarchy lives in the
      diamond and the column instead of in colour, the way the [/help]
      catalog's plain rows do. *)
-  let column = 2 + opener_cells + 2 in
+  (* The item marker also keeps a fence name at the start of a row from
+     opening a Markdown block when this sheet is placed in a chat notice. *)
+  let prefix = "  \xe2\x80\xa2 " in
+  let column = Masc_tui_message_layout.display_width prefix + opener_cells + 2 in
   let row_lines row =
     let opener = opener_text row.opener in
     let pad =
@@ -152,7 +155,7 @@ let lines ~width =
     with
     | [] -> []
     | first :: rest ->
-      let lead = "  " ^ opener ^ String.make pad ' ' in
+      let lead = prefix ^ opener ^ String.make pad ' ' in
       (lead ^ first)
       :: List.map (fun piece -> String.make column ' ' ^ piece) rest
   in

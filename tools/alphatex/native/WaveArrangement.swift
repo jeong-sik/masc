@@ -289,9 +289,9 @@ final class Voice {
     func stop() { queue.sync { generation &+= 1 }; player.stop() }
 }
 enum AudioCommand: Decodable {
-    case pause, resume, seek(Double), status, stop
-    enum Keys: String, CodingKey { case kind, seconds }
-    enum Kind: String, Decodable { case pause, resume, seek, status, stop }
+    case pause, resume, seek(Double), status, stop, recordingEpoch(String)
+    enum Keys: String, CodingKey { case kind, seconds, request }
+    enum Kind: String, Decodable { case pause, resume, seek, status, stop, recordingEpoch }
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: Keys.self), kind = try values.decode(Kind.self, forKey: .kind)
         guard kind == .seek || !values.contains(.seconds) else { throw AudioFailure("seconds is only valid for seek") }
@@ -301,6 +301,10 @@ enum AudioCommand: Decodable {
         case .seek: self = .seek(try values.decode(Double.self, forKey: .seconds))
         case .status: self = .status
         case .stop: self = .stop
+        case .recordingEpoch:
+            let request = try values.decode(String.self, forKey: .request)
+            guard UUID(uuidString: request) != nil else { throw AudioFailure("invalid recording epoch request") }
+            self = .recordingEpoch(request)
         }
     }
 }
@@ -504,6 +508,9 @@ final class ArrangementTransport {
                     if seconds == plan.duration { position = seconds; finish(reason: "finished"); return }
                     try schedule(from: seconds, playing: state == .playing)
                 case .status: break
+                case .recordingEpoch(let request):
+                    var event = snapshot(state == .playing ? "playing" : "paused")
+                    event["recordingRequest"] = request; try audioEmit(event); return
                 case .stop: finish(reason: "stop"); return
                 }
             } catch {
@@ -513,6 +520,7 @@ final class ArrangementTransport {
                 try? audioEmit(["kind": "error", "message": String(describing: error)])
                 if state != .stopped { publish() }
                 return
+            }
             }
             if state != .stopped { publish() }
         } catch { finish(reason: "command-failed", error: error) }

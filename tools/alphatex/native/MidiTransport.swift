@@ -530,9 +530,9 @@ struct Timeline: Decodable {
 }
 
 enum Command: Decodable {
-    case pause, resume, seek(Double), status, stop
-    enum Keys: String, CodingKey { case kind, seconds }
-    enum Kind: String, Decodable { case pause, resume, seek, status, stop }
+    case pause, resume, seek(Double), status, stop, recordingEpoch(String)
+    enum Keys: String, CodingKey { case kind, seconds, request }
+    enum Kind: String, Decodable { case pause, resume, seek, status, stop, recordingEpoch }
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: Keys.self)
         let kind = try values.decode(Kind.self, forKey: .kind)
@@ -543,6 +543,10 @@ enum Command: Decodable {
         case .seek: self = .seek(try values.decode(Double.self, forKey: .seconds))
         case .status: self = .status
         case .stop: self = .stop
+        case .recordingEpoch:
+            let request = try values.decode(String.self, forKey: .request)
+            guard UUID(uuidString: request) != nil else { throw MidiFailure("invalid recording epoch request") }
+            self = .recordingEpoch(request)
         }
     }
 }
@@ -1059,6 +1063,9 @@ final class MidiTransport {
                 if state == .playing { tick() }
                 if state == .stopped { return }
             case .stop: finish(reason: "stop"); return
+            case .recordingEpoch(let request):
+                var event = snapshot(state == .playing ? "playing" : "paused")
+                event["recordingRequest"] = request; try emit(event); return
             }
             publish()
         } catch { finish(reason: "command-failed", error: error) }

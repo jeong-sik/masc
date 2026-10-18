@@ -154,6 +154,7 @@ let read_cost_entries_dated ~base_path ~since_unix
                    | Missing_ts_unix
                    | No_telemetry_object
                    | Missing_outcome
+                   | Invalid_outcome
                    | Missing_usage_reported
                    | Missing_telemetry_reported
                    | Missing_success_model
@@ -259,7 +260,6 @@ let merge_exact_inference decision cost =
         (decision.usage_anomaly_reasons @ cost.usage_anomaly_reasons)
   ; coverage_reason = decision.coverage_reason
   ; coverage_stage = decision.coverage_stage
-  ; is_error = decision.is_error
   ; streaming_ttfrc_ms = decision.streaming_ttfrc_ms
   ; streaming_inter_chunk_count = decision.streaming_inter_chunk_count
   ; streaming_inter_chunk_avg_ms = decision.streaming_inter_chunk_avg_ms
@@ -369,34 +369,34 @@ let telemetry_reported_effective (entry : raw_entry) : bool =
 ;;
 
 let coverage_reason_of_entry (entry : raw_entry) : string option =
-  if entry.is_error
-  then Some "error_turn"
-  else (
-    match entry.coverage_reason with
-    | Some _ as reason -> reason
-    | None ->
-      let usage_reported = usage_reported_effective entry in
-      let telemetry_reported = telemetry_reported_effective entry in
-      (match usage_reported, telemetry_reported with
-       | true, true -> None
-       | false, false -> Some "missing_usage_and_inference"
-       | false, true -> Some "missing_usage"
-       | true, false -> Some "missing_inference"))
+  match entry.outcome with
+  | Keeper_decision_outcome.Failed -> Some "error_turn"
+  | Keeper_decision_outcome.(Success | Checkpoint | Input_required) ->
+    (match entry.coverage_reason with
+     | Some _ as reason -> reason
+     | None ->
+       let usage_reported = usage_reported_effective entry in
+       let telemetry_reported = telemetry_reported_effective entry in
+       (match usage_reported, telemetry_reported with
+        | true, true -> None
+        | false, false -> Some "missing_usage_and_inference"
+        | false, true -> Some "missing_usage"
+        | true, false -> Some "missing_inference"))
 ;;
 
 let coverage_stage_of_entry (entry : raw_entry) : string option =
   match entry.coverage_stage with
   | Some _ as stage -> stage
   | None ->
-    if entry.is_error
-    then Some "unknown"
-    else (
-      match entry.usage_reported, entry.telemetry_reported with
-      | Some false, _ | _, Some false -> Some "agent_core"
-      | _ ->
-        (match coverage_reason_of_entry entry with
-         | Some _ -> Some "unknown"
-         | None -> None))
+    (match entry.outcome with
+     | Keeper_decision_outcome.Failed -> Some "unknown"
+     | Keeper_decision_outcome.(Success | Checkpoint | Input_required) ->
+       (match entry.usage_reported, entry.telemetry_reported with
+        | Some false, _ | _, Some false -> Some "agent_core"
+        | _ ->
+          (match coverage_reason_of_entry entry with
+           | Some _ -> Some "unknown"
+           | None -> None)))
 ;;
 
 let coverage_reason_counts_of_entries (entries : raw_entry list)
@@ -405,8 +405,8 @@ let coverage_reason_counts_of_entries (entries : raw_entry list)
   let counts =
     List.fold_left
       (fun acc entry ->
-         match coverage_reason_of_entry entry with
-         | Some reason when not entry.is_error ->
+         match entry.outcome, coverage_reason_of_entry entry with
+         | Keeper_decision_outcome.(Success | Checkpoint | Input_required), Some reason ->
            let prev =
              match StringMap.find_opt reason acc with
              | Some count -> count
@@ -428,8 +428,8 @@ let most_common_stage_of_entries (entries : raw_entry list) : string option =
   let counts =
     List.fold_left
       (fun acc entry ->
-         match coverage_stage_of_entry entry, coverage_reason_of_entry entry with
-         | Some stage, Some _ when not entry.is_error ->
+         match entry.outcome, coverage_stage_of_entry entry, coverage_reason_of_entry entry with
+         | Keeper_decision_outcome.(Success | Checkpoint | Input_required), Some stage, Some _ ->
            let prev =
              match StringMap.find_opt stage acc with
              | Some count -> count

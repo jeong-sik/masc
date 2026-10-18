@@ -68,7 +68,7 @@ test('actual IO worker preserves sources in redo history when saving to a differ
 
 const flush=()=>new Promise(resolve=>setImmediate(resolve))
 async function controller(options={}){
-  const observed={requests:[],saved:[],recovered:[],terminated:false,players:[],removed:[],takes:[],captures:[]},process=new EventEmitter()
+  const observed={requests:[],saved:[],recovered:[],terminated:false,players:[],removed:[],takes:[],captures:[],monitors:[]},process=new EventEmitter()
   process.stdin=Object.assign(new EventEmitter(),{isTTY:true,isRaw:false,setRawMode(value){this.isRaw=value},resume(){},pause(){}})
   process.stdout=Object.assign(new EventEmitter(),{isTTY:true,columns:100,rows:24,write(){}});process.stderr={write(){}}
   let owner
@@ -87,6 +87,12 @@ async function controller(options={}){
   globalThis[slot]={process,Worker:OwnedWorker,arrangementSchedule,arrangementRoute,selectArrangementRoute,arrangementPlaybackRequest,...editorAPI,join,dirname,resolve,tmpdir,randomUUID,
     emitKeypressEvents(){},safeText:String,recordingEpoch,
     mkdir:options.mkdir??(async()=>{}), devices:async()=>({audio:[],midi:[]}),
+    monitorInput(options){
+      let finish,reject
+      const completion=new Promise((yes,no)=>{finish=yes;reject=no})
+      const entry={options,stops:0,finish,reject};observed.monitors.push(entry)
+      return{completion,stop(){entry.stops++}}
+    },
     record(options){
       let finish,reject
       const completion=new Promise((yes,no)=>{finish=yes;reject=no})
@@ -550,4 +556,44 @@ test('closing an opening recording cannot open late inputs or lose admitted edit
  assert.equal(view.observed.captures.length,0);assert.equal(view.observed.terminated,false)
  release();await flush();view.observed.players[0].finish();await view.done
  assert.equal(view.observed.captures.length,0);assert.equal(view.process.stdin.isRaw,false)
+})
+
+
+test('explicit audio monitoring transfers one input owner into recording and back, then drains on exit', async () => {
+ const view=await controller(); await primeWave(view)
+ view.command('input interface'); view.command('monitor headphones'); await flush()
+ const monitor=view.observed.monitors[0]; assert.ok(monitor)
+ assert.equal(monitor.options.input,'interface'); assert.equal(monitor.options.monitorOutput,'headphones')
+ view.key('space'); await flush()
+ const prepare=view.observed.requests.find(job=>job.kind==='prepare-wave')
+ view.worker.emit('message',{id:prepare.id,ok:true,result:{path:'/owned/play/plan.json',format:'wave-arrangement'}}); await flush()
+ view.command('record'); await flush()
+ assert.ok(monitor.stops>0); assert.equal(view.observed.captures.length,0)
+ monitor.finish({state:'monitored'}); await flush()
+ const captured=view.observed.captures[0]; assert.equal(captured.options.monitorOutput,'headphones')
+ assert.equal(view.observed.monitors.length,1)
+ view.command('record-stop'); await flush(); assert.ok(captured.stops>0)
+ captured.finish({}); await flush()
+ const attach=view.observed.requests.find(job=>job.kind==='attach-recording'); assert.ok(attach)
+ view.worker.emit('message',{id:attach.id,ok:false,error:'Retained failure'}); await flush()
+ const restored=view.observed.monitors[1]; assert.ok(restored)
+ let ended=false;view.done.then(()=>{ended=true});view.key('q');await flush()
+ assert.ok(restored.stops>0);assert.equal(ended,false)
+ restored.finish({state:'monitored'});view.observed.players[0].finish();await view.done
+ assert.equal(view.process.stdin.isRaw,false);assert.equal(view.process.stdin.listenerCount('keypress'),0)
+})
+
+test('monitor output replacement waits for old close, cancellation opens no later input, and failed routes stay off', async () => {
+ const view=await controller()
+ view.command('input first');view.command('monitor first-output');await flush()
+ const first=view.observed.monitors[0]
+ view.command('monitor second-output');await flush();assert.ok(first.stops>0);assert.equal(view.observed.monitors.length,1)
+ first.finish({state:'monitored'});await flush()
+ const second=view.observed.monitors[1];assert.equal(second.options.monitorOutput,'second-output')
+ second.reject(new Error('selected output removed'));await flush()
+ view.command('title keep edit');await flush();assert.equal(view.observed.monitors.length,2)
+ view.command('monitor third-output');await flush();const third=view.observed.monitors[2];assert.ok(third)
+ view.command('input later');await flush();assert.ok(third.stops>0)
+ view.key('q');await flush();third.finish({state:'monitored'});await view.done
+ assert.equal(view.observed.monitors.length,3);assert.equal(view.process.stdin.isRaw,false)
 })

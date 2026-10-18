@@ -292,4 +292,7 @@ run_tlc_cfg "$REPO_ROOT/specs/bug-models" "LibrarianRead.tla" \
 run_tlc_cfg "$REPO_ROOT/specs/bug-models" "LibrarianRead.tla" \
   "LibrarianRead-stop-forever-live.cfg" "stop-forever-live"
 
+run_tlc_cfg "$REPO_ROOT/specs/bug-models" "LibrarianRead.tla" \
+  "LibrarianRead-recorded-messages.cfg" "recorded-messages"
+
 echo "All TLA+ checks passed."

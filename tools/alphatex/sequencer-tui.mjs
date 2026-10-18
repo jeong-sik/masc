@@ -8,11 +8,12 @@ import { Worker } from 'node:worker_threads'
 import { Note } from 'tonal'
 import { newEditor, editorCommand, editorAction, selectedNote, editorView, editorAxis, editorHarmony } from './sequencer-editor.mjs'
 import { loadProject, saveProject, projectMidi } from './sequencer-files.mjs'
-import { sourceTickAtSeconds } from './midi-source-playback.mjs'
+import { sourceTickAtSeconds, sourceSecondsAtTick } from './midi-source-playback.mjs'
 import { safeText } from './terminal.mjs'
 import { openPlayback } from './playback.mjs'
 
 const help = [
+  'Source seek/resume restores channel state; unknown initial or opaque device state is an error.',
   'Arrow keys: time/pitch; Shift+arrows: move note; Enter/x: insert/remove note',
   'Tab: track; n: new track; m: mute; o: solo; u/y: undo/redo',
   '[/]: halve/double note length; +/-: velocity; g: grid; l: loop; Space: play/pause',
@@ -178,7 +179,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
   function play() {
     if (!accepting) return
     if (transport.kind === 'playing') {
-      if (editor.project.kind === 'midi-source') { stop(); draw() } else transport.handle.pause()
+      transport.handle.pause()
       return
     }
     if (transport.kind === 'paused') { transport.handle.resume(); return }
@@ -229,9 +230,9 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       case 'midi-port': stop(); selectedMidiOutput = undefined; portBindings = [...portBindings.filter(binding => binding.port !== value.port), { port: value.port, destination: value.destination }]; status = `MIDI port ${value.port}: ${value.destination}`; break
       case 'audio': stop(); portBindings = []; selectedMidiOutput = undefined; status = `Audio output: ${selectedOutput ?? 'system default'}`; break
       case 'seek': {
-        if (editor.project.kind === 'midi-source') throw new Error('Source audition starts at the beginning; arbitrary seek requires expression-state reconstruction')
         if (!accepting) return
         if (!transport.handle) throw new Error('Start playback before seeking')
+        if (editor.project.kind === 'midi-source') { transport.handle.seek(sourceSecondsAtTick(editor.performance, value.tick)); break }
         const view = editorView(editor), per = editorAxis(editor).per
         const start = loop ? view.loop.start : 0
         const end = loop ? view.loop.end : view.length

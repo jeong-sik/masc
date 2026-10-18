@@ -25,7 +25,7 @@
     or zero window.  There is no TTL and no sweeper: a report whose
     [resets_at] has passed stays until a newer report replaces it. *)
 
-type window_kind =
+type window_kind = Runtime_provider_usage_types.window_kind =
   | Five_hour
   | Seven_day
   | Duration_minutes of int
@@ -35,14 +35,14 @@ type window_kind =
           (a Claude [unifiedWindows] key), or Codex reported a slot
           ([primary]/[secondary]) without a length. *)
 
-type utilization =
+type utilization = Runtime_provider_usage_types.utilization =
   | Fraction of float  (** Claude Code: [0.67] is 67 %. Not clamped. *)
   | Percent of int  (** Codex [usedPercent]. Not clamped. *)
   | Usd of { used : float; limit : float option }
       (** USD-denominated credit use. [None] means no key cap was reported,
           so no percentage can be calculated. *)
 
-type source =
+type source = Runtime_provider_usage_types.source =
   | Claude_code_rate_limit_event
   | Codex_account_rate_limits_updated
   | Codex_account_rate_limits_read
@@ -60,7 +60,7 @@ type source =
 
 (** What a window limits, set by each decoder from the provider's own
     shape, never from a label. *)
-type window_role =
+type window_role = Runtime_provider_usage_types.window_role =
   | Gates_model_calls
       (** Spending it refuses model calls on the account: Claude and Codex
           windows, OpenRouter's API key credit limit, Z.AI's TOKENS_LIMIT, both Kimi
@@ -78,7 +78,7 @@ type window_role =
   | Unclassified_limit
       (** A Z.AI limit type this decoder does not know. *)
 
-type window =
+type window = Runtime_provider_usage_types.window =
   { limit_id : string option
         (** Codex [limitId]; one account reports several limits.  Claude Code
             names none. *)
@@ -88,7 +88,7 @@ type window =
   ; resets_at : int option  (** Unix epoch seconds, as reported. *)
   }
 
-type report =
+type report = Runtime_provider_usage_types.report =
   { source : source
   ; windows : window list
   }
@@ -208,13 +208,13 @@ val decode_antigravity_usage : Yojson.Safe.t -> (report, decode_error) result
     {!Gates_model_calls}: both limits refuse model calls when spent. A bucket
     with [disabled: true] does not currently apply and yields no window. *)
 
-type recorded =
+type recorded = Runtime_provider_usage_types.recorded =
   { window : window
   ; source : source
   ; observed_at : float
   }
 
-type scope_state =
+type scope_state = Runtime_provider_usage_types.scope_state =
   | Not_reported_since_start
   | Reported_no_windows of { source : source; observed_at : float }
       (** A complete provider report states no applicable windows. *)
@@ -225,7 +225,9 @@ val recording_since : float
     process start).  Every {!Not_reported_since_start} means "nothing heard
     since this time". *)
 
-type report_shape = Complete_snapshot | Sparse_update
+type report_shape = Runtime_provider_usage_types.report_shape =
+  | Complete_snapshot
+  | Sparse_update
 val report_shape : source -> report_shape
 (** Whether absent windows revoke earlier observations from this source.
     Durable readers use the same contract as the live table. *)

@@ -415,12 +415,14 @@ end = struct
     | Limited { budget; started } -> Some (budget -. (now -. started))
 end
 
+let nanoseconds_per_second = 1_000_000_000.
+
+let monotonic_now () =
+  Int64.to_float (Mtime_clock.elapsed_ns ()) /. nanoseconds_per_second
+
 let remaining_timeout timeout =
   if Invocation_timeout.is_unlimited timeout then None
-  else
-    (* NDT-OK: preserve wall-clock budget arithmetic at the execution boundary;
-       an unlimited invocation does not read the clock here. *)
-    Invocation_timeout.remaining ~now:(Unix.gettimeofday ()) timeout
+  else Invocation_timeout.remaining ~now:(monotonic_now ()) timeout
 
 (* A stage's own redirections travel with it, so a pipeline that names a file
    still runs on real process pipes. Dropping to the buffered chain instead
@@ -1064,15 +1066,13 @@ and dispatch_with_timeout ?base_host_env ?stdin_content ?on_output_chunk
    retain their default epoch capture before variable rejection; general dispatch
    still rejects variables before reaching any default clock read. *)
 let dispatch_simple ?base_host_env ?timeout_sec ?stdin_content ?on_output_chunk
-    (* NDT-OK: this default captures the caller's wall-clock budget epoch. *)
-    ?(started = Unix.gettimeofday ()) (s : Shell_ir.simple) =
+    ?(started = monotonic_now ()) (s : Shell_ir.simple) =
   let timeout = Invocation_timeout.create ~timeout_sec ~started in
   dispatch_simple_with_timeout
     ?base_host_env ?stdin_content ?on_output_chunk ~timeout s
 
 let dispatch_pipeline ?base_host_env ?timeout_sec ?stdin_content ?on_output_chunk
-    (* NDT-OK: this default captures the caller's wall-clock budget epoch. *)
-    ?(started = Unix.gettimeofday ()) stages =
+    ?(started = monotonic_now ()) stages =
   let timeout = Invocation_timeout.create ~timeout_sec ~started in
   dispatch_pipeline_with_timeout
     ?base_host_env ?stdin_content ?on_output_chunk ~timeout stages
@@ -1092,8 +1092,7 @@ let dispatch ?base_host_env ?timeout_sec ?stdin_content ?on_output_chunk ?starte
     let started =
       match started with
       | Some started -> started
-      (* NDT-OK: preserve the sequence entry's wall-clock budget epoch. *)
-      | None -> Unix.gettimeofday ()
+      | None -> monotonic_now ()
     in
     let timeout = Invocation_timeout.create ~timeout_sec ~started in
     dispatch_sequence_with_timeout

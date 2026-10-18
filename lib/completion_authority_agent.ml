@@ -377,7 +377,12 @@ let evidence_images_of_snapshot ~base_path
 
 (* The request owns the durable snapshot; the judge receives its transport
    projection below. Remove every copy of that output member from this local
-   request projection so the stored bodies cannot bypass transport omissions. *)
+   request projection so the stored bodies cannot bypass transport omissions.
+   [Verification_protocol.create_submit_request] (via
+   [Tool_task_completion_review.verification_evidence_fields]) constructs
+   [request.output] in one place with ["submitted_evidence"] only at the top
+   level; if that envelope ever nests the key deeper, this filter must descend
+   to match (#43588). *)
 let completion_notes_of_evidence
       ~(request : Verification.verification_request)
       ~evidence_access

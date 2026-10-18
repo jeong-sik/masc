@@ -246,10 +246,10 @@ let test_substitution_debits_prior_elapsed_time_once () =
            original duration are already spent, leaving a generous quarter
            for these short commands. No elapsed work is simulated by sleep. *)
         let timeout_sec = 1024.0 in
-        let before = Unix.gettimeofday () in
+        let before = Exec_dispatch.monotonic_now () in
         let started = before -. (timeout_sec *. 0.75) in
         let result = Exec_dispatch.dispatch ~timeout_sec ~started ir in
-        let after = Unix.gettimeofday () in
+        let after = Exec_dispatch.monotonic_now () in
         let remaining_before = timeout_sec -. (before -. started) in
         let remaining_after = timeout_sec -. (after -. started) in
         Printf.printf

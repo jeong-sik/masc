@@ -54,6 +54,7 @@ type dashboard_purge_artifact =
   | Keeper_librarian_range_receipt_artifact
   | Keeper_librarian_unread_ledger_artifact
   | Keeper_memory_admission_queue_artifact
+  | Keeper_memory_epoch_artifact
   | Keeper_memory_publication_artifact
   | Keeper_memory_retraction_plan_artifact
   | Keeper_memory_source_current_artifact
@@ -624,6 +625,7 @@ let dashboard_purge_artifact_plan ~keeper_name context =
   ; Keeper_librarian_range_receipt_artifact
   ; Keeper_librarian_unread_ledger_artifact
   ; Keeper_memory_admission_queue_artifact
+  ; Keeper_memory_epoch_artifact
   ; Keeper_memory_publication_artifact
   ; Keeper_memory_retraction_plan_artifact
   ; Keeper_memory_source_current_artifact

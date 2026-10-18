@@ -7,6 +7,7 @@ val fact_payload : fact -> string
 val derivations_supported : Set_util.StringSet.t -> derivation list -> bool
 val missing_premises_for : Set_util.StringSet.t -> derivation list -> string list
 val support_closure_ids : fact list -> Set_util.StringSet.t
+val compute_change : previous:fact list -> next:fact list -> invalidated:support_invalidation list -> (change, string) result
 val maintain_supported_facts : fact list -> fact list * support_invalidation list
 val merge_basis : basis -> basis -> basis
 val make_snapshot_from_maintained : previous:t option -> now:float -> source:source -> facts:fact list -> invalidated:support_invalidation list -> unit -> (t, string) result

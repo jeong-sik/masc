@@ -65,6 +65,7 @@ let test_net_zero_lineage () =
 let test_concurrent_collision () =
   Program.replay (chain ()) ~current:[a;b] |> refused;
   Program.replay (chain ()) ~current:[a;{b with Memory.last_seen=50.}] |> refused;
+  Program.replay (chain ()) ~current:[{a with Memory.first_seen=5.}] |> refused;
   Program.replay (chain ()) ~current:[{a with Memory.origin={a.origin with kind=Memory.Injected}}] |> refused
 
 let test_support_loss_of_concurrent_addition () =

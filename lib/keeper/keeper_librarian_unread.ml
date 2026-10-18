@@ -53,6 +53,18 @@ let atom_messages messages =
     (None, 0, Atom_positions.empty) (fst (Window.annotate messages)) in
   indexed
 
+let sources_for_atom_range ~trace_id ~history_start_boundary_line ~start_atom ~end_atom ~messages =
+  let _, count = Window.annotate messages in
+  if start_atom < 0 || end_atom <= start_atom || end_atom > count then Error "invalid complete atom source range"
+  else
+    let sources = Atom_positions.bindings (atom_messages messages)
+      |> List.filter_map (fun ((atom,message_in_atom),message) ->
+        if atom >= start_atom && atom < end_atom then
+          Some (Atom {trace_id;history_start_boundary_line;atom;message_in_atom;
+            message_sha256=message_digest message}) else None) in
+    let* () = List.fold_left (fun result source -> let* () = result in validate_source source) (Ok ()) sources in
+    Ok sources
+
 let for_atom ~trace_id ~history_start_boundary_line ~atom ~message_in_atom ~messages ~reasons =
   match Atom_positions.find_opt (atom, message_in_atom) (atom_messages messages) with
   | None -> Error "unread atom message is absent from the selected checkpoint"

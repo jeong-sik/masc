@@ -26,6 +26,12 @@ val source_of_json : Yojson.Safe.t -> (source, string) result
 (** The shared exact source identity for processed messages and unread holes.
     Decoding validates coordinates and digest without inventing a refusal. *)
 
+val sources_for_atom_range :
+  trace_id:string -> history_start_boundary_line:int -> start_atom:int -> end_atom:int ->
+  messages:Agent_core.Types.message list -> (source list, string) result
+(** Enumerate every exact unpinned message in the original complete atom range,
+    using the same checkpoint labelling as unread holes. *)
+
 val for_atom
   : trace_id:string -> history_start_boundary_line:int -> atom:int
   -> message_in_atom:int -> messages:Agent_core.Types.message list

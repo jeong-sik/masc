@@ -82,7 +82,8 @@ val replay : t -> current:fact list -> (execution, string) result
     facts. Forged stage results or mismatched decision ownership reject.
     Permit unrelated additions and
     preserve their fields and order. Permit reobservation metadata changes
-    while requiring the same claim/category/basis/origin. Reject missing expected
+    while requiring the same claim/category/basis/origin and insertion time.
+    Observation time may only increase. Reject missing expected
     facts or any divergence of the staged semantic application; no prefix is
     returned as a successful program. Incarnation and original-boundary checks
     are the storage publisher's responsibility before this calculation. *)

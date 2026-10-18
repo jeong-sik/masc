@@ -1329,6 +1329,7 @@ let test_gated_runtime_program_binding () =
   let module Program = Masc.Keeper_memory_os_program in
   let module Adapter = Masc.Keeper_librarian_memory_program in
   let module Source = Masc.Keeper_librarian_unread in
+  let anchor = Current.capture_program_anchor ~keepers_dir ~keeper_id |> require_memory in
   let paths = inference_store_paths ~keepers_dir ~keeper_id in
   let before = List.map Fs_compat.load_file_opt paths in
   let first = infer source inference_answer in
@@ -1373,7 +1374,19 @@ let test_gated_runtime_program_binding () =
   (match Adapter.decision ~sources:[original;later] first with
    | Error _ -> () | Ok _ -> fail "adapter accepted an unjudged extra source");
   check bool "inference, adapter, codec and replay publish no Memory or receipt" true
-    (before = List.map Fs_compat.load_file_opt paths)
+    (before = List.map Fs_compat.load_file_opt paths);
+  let range : Current.official_range_id = {receipt_scope="gated-runtime-program";
+    after_boundary_line=0;turns=[1,source.turn_ref];unread_messages=[]} in
+  let original_messages=first.source_input.messages@second.source_input.messages in
+  let committed=Current.apply_program ~keepers_dir ~keeper_id ~now:2_000_000. ~anchor
+    ~source:(Current.Official_program_source {range;selected_turns=[1,source.turn_ref,original_messages]})
+    ~validate_source:(fun () -> Ok ()) program |> require_memory in
+  check_memory_payloads "actual Runtime program publishes its final gated Memory once"
+    second.new_claims committed.snapshot.facts;
+  check int "only one new durable revision despite two inferred decisions" 2 committed.snapshot.revision;
+  let coverage=Current.committed_official_coverage ~keepers_dir ~keeper_id
+    ~receipt_scope:range.receipt_scope |> require_memory in
+  check bool "original whole turn, not an intermediate source, is consumed" true (coverage=Some range)
 
 let test_ordered_memory_support_is_maintained_between_steps () =
   let premise = fact ~claim:"P supports the deployment conclusion." in

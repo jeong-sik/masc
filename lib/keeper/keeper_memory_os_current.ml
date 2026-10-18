@@ -45,6 +45,33 @@ let publication_receipt_path ~keepers_dir ~keeper_id =
   Filename.concat keepers_dir (keeper_id ^ ".memory-publication.json")
 ;;
 
+let epoch_path ~keepers_dir ~keeper_id =
+  Filename.concat keepers_dir (keeper_id ^ ".memory-epoch.json")
+
+let read_epoch ~keepers_dir ~keeper_id =
+  match Fs_compat.load_file_opt (epoch_path ~keepers_dir ~keeper_id) with
+  | None -> Ok None
+  | Some text ->
+    (match Yojson.Safe.from_string text with
+     | `Assoc fields ->
+       let* () = exact_field_names_result ["schema_version";"epoch"] fields
+         |> Result.map_error wire_error_to_string in
+       (match List.assoc "schema_version" fields, List.assoc "epoch" fields with
+        | `Int 1, `String epoch when String.trim epoch <> "" && epoch = String.trim epoch -> Ok (Some epoch)
+        | _ -> Error "invalid Memory incarnation epoch")
+     | _ -> Error "Memory incarnation epoch is not an object"
+     | exception Yojson.Json_error detail -> Error ("Memory incarnation epoch: " ^ detail))
+
+let rotate_epoch ~keepers_dir ~keeper_id =
+  let epoch = Random_id.uuid_v7 () in
+  let+ () = Fs_compat.save_file_atomic_strict (epoch_path ~keepers_dir ~keeper_id)
+    (Yojson.Safe.to_string (`Assoc ["schema_version",`Int 1;"epoch",`String epoch])) in
+  epoch
+
+let ensure_epoch ~keepers_dir ~keeper_id =
+  let* epoch = read_epoch ~keepers_dir ~keeper_id in
+  match epoch with Some epoch -> Ok epoch | None -> rotate_epoch ~keepers_dir ~keeper_id
+
 let retraction_plan_receipt_suffix = ".memory-retraction-plan.json"
 
 let retraction_plan_receipt_path ~keepers_dir ~keeper_id =
@@ -961,13 +988,24 @@ let rec publish_recall_cache path value =
 (* Forward projection matches the previous reverse reader's stopping boundary.
    Only snapshot rewrites cover revisions; unchanged observations never fill a
    missing transition. No observation rows are retained in memory. *)
+let plain_reobservation (before : fact) (after : fact) =
+  before.claim=after.claim && before.category=after.category && before.basis=after.basis
+  && before.origin=after.origin && before.first_seen=after.first_seen && after.last_seen>=before.last_seen
+
+let retired_identities (change : change) =
+  List.filter_map (fun before ->
+    let identity=memory_id before in
+    match List.find_opt (fun after -> memory_id after=identity) change.added with
+    | Some after when plain_reobservation before after -> None
+    | Some _ | None -> Some identity) change.removed
+
 let project_recall_entry ~oldest projection = function
   | Dated_jsonl.Malformed_json {detail;_} -> {projection with invalid=Some detail}
   | Dated_jsonl.Parsed json ->
     match Journal_codec.journal_entry_of_json json with
     | Error detail -> {projection with invalid=Some detail}
     | Ok (Journal_failed _ | Journal_quarantined _) -> projection
-    | Ok (Journal_committed {revision;change;_}) ->
+    | Ok (Journal_committed {revision;change;program;_}) ->
       if revision <= oldest then empty_recall_projection
       else
         let rewrote = Journal_codec.journal_line_rewrote json in
@@ -976,13 +1014,13 @@ let project_recall_entry ~oldest projection = function
           else projection.revisions in
         let rewrites_rev =
           if rewrote then json :: projection.rewrites_rev else projection.rewrites_rev in
-        let added = Set_util.StringSet.of_list (List.map memory_id change.added) in
-        let retired = List.fold_left (fun retired fact ->
-          let id = memory_id fact in
-          if Set_util.StringSet.mem id added then retired
-          else Identity_map.update id
+        let retired = List.fold_left (fun retired identity -> Identity_map.update identity
             (function None -> Some revision | Some prior -> Some (max prior revision)) retired)
-          projection.retired change.removed in
+          projection.retired (retired_identities change) in
+        let retired = Option.fold ~none:retired ~some:(fun proof ->
+          List.fold_left (fun retired identity -> Identity_map.update identity
+            (function None -> Some revision | Some prior -> Some (max prior revision)) retired)
+            retired (Keeper_memory_os_program_publication.touched_ids proof)) program in
         {projection with revisions;retired;rewrites_rev;highest=max projection.highest revision}
 
 let observe_recall_append path (observation : Fs_compat.private_jsonl_append_observation) json =
@@ -1402,6 +1440,7 @@ let reconcile_retraction_plan_receipt ~keepers_dir ~keeper_id ~snapshot =
           ; source = current.source
           ; change = current.change
           ; dropped = Some receipt.dropped_statements
+          ; program = None
           }
       in
       let* present =
@@ -1471,7 +1510,7 @@ let publication_of_json = function
         | Journal_committed entry, Ok (Some Rewritten), Some links
           when entry.revision = target_revision ->
           let canonical = Journal_codec.journal_entry_to_json ~commit_effect:Rewritten ~revision_links:links
-              ~dropped_statements:entry.dropped
+              ~dropped_statements:entry.dropped ?program:entry.program
               {revision=entry.revision; updated_at=entry.recorded_at; source=entry.source;
                change=entry.change; facts=[]} in
           if Yojson.Safe.sort canonical = Yojson.Safe.sort journal then
@@ -1529,6 +1568,7 @@ let check_publication_companions ~keepers_dir ~keeper_id receipt =
            && receipt.target_revision = removal.target_revision
            && receipt.target_sha256 = removal.target_snapshot_sha256
            && entry.dropped = Some removal.dropped_statements
+           && entry.program = None
            && (match removal.plan_id, entry.source with
                | None, _ -> true
                | Some plan_id, {kind=Explicit_retract; trace_id} -> plan_id = trace_id
@@ -1544,6 +1584,29 @@ let check_publication_companions ~keepers_dir ~keeper_id receipt =
   let* () = match skipped with
     | [] -> Ok ()
     | _ -> Error ("publication and consumption receipts conflict; unreadable range rows path=" ^ durable_range_receipt_path ~keepers_dir ~keeper_id) in
+  let* entry = Journal_codec.journal_entry_of_json receipt.journal in
+  let* () = match entry with
+    | Journal_committed {program=Some publication;_} ->
+      let matches range = match publication.boundary, range with
+        | Keeper_memory_os_program_types.Atom_boundary boundary,Atom_range range ->
+          boundary.receipt_scope=range.receipt_scope && boundary.trace_id=range.trace_id
+          && boundary.history_start_boundary_line=range.history_start_boundary_line
+          && boundary.start_atom=range.start_atom && boundary.end_atom=range.end_atom
+          && boundary.last_atom_digest=range.last_atom_digest
+          && boundary.end_boundary_line=range.end_boundary_line
+          && boundary.boundary_lines_seen=range.boundary_lines_seen
+          && range.unread_messages=publication.execution.program.unread
+        | Keeper_memory_os_program_types.Official_boundary boundary,Official_range range ->
+          boundary.receipt_scope=range.receipt_scope && boundary.after_boundary_line=range.after_boundary_line
+          && List.map (fun (line,turn_ref,_) -> line,turn_ref) boundary.turns=range.turns
+          && range.unread_messages=publication.execution.program.unread
+        | (Atom_boundary _|Official_boundary _),(Atom_range _|Official_range _|Explicit_candidate _|Explicit_candidate_with_recall _) -> false in
+      let target_ranges=List.filter (function
+        | Prepared {snapshot_revision;snapshot_sha256;_}|Committed {snapshot_revision;snapshot_sha256;_} ->
+          snapshot_revision=receipt.target_revision && snapshot_sha256=receipt.target_sha256) ranges in
+      if target_ranges<>[] && List.for_all (fun row -> matches (receipt_range_id row)) target_ranges
+      then Ok () else Error "ordered publication and original-boundary receipt conflict; stores preserved"
+    | Journal_committed {program=None;_}|Journal_failed _|Journal_quarantined _ -> Ok () in
   List.fold_left (fun result row ->
     let* () = result in
     let valid = match row with
@@ -1594,6 +1657,13 @@ let recover_publication_locked ~keepers_dir ~keeper_id =
   | None -> Ok None
   | Some receipt ->
     let* () = check_publication_companions ~keepers_dir ~keeper_id receipt in
+    let* expected = Journal_codec.journal_entry_of_json receipt.journal in
+    let* () = match expected with
+      | Journal_committed {program=Some publication;_} ->
+        let* epoch = read_epoch ~keepers_dir ~keeper_id in
+        if epoch=Some publication.locked_prior.epoch && publication.locked_prior.snapshot=receipt.prior
+        then Ok () else Error "ordered publication incarnation/prior binding changed; stores preserved"
+      | Journal_committed {program=None;_} | Journal_failed _ | Journal_quarantined _ -> Ok () in
     let path = path_for_keepers_dir ~keepers_dir ~keeper_id in
     let content = Fs_compat.load_file_opt path in
     let prior_matches = match receipt.prior, content with
@@ -1617,7 +1687,9 @@ let recover_publication_locked ~keepers_dir ~keeper_id =
         let* () = match expected with
           | Journal_committed entry when current.revision = receipt.target_revision
               && current.updated_at = entry.recorded_at && current.source = entry.source
-              && current.change = entry.change -> Ok ()
+              && current.change = entry.change
+              && Option.fold ~none:true ~some:(fun publication ->
+                   publication.Keeper_memory_os_program_types.execution.final_facts=current.facts) entry.program -> Ok ()
           | Journal_failed _ | Journal_quarantined _ | Journal_committed _ -> Error "publication target metadata conflicts; stores preserved" in
         let* () = Fs_compat.sync_file_and_parent_strict path in
         let* pending = finalize_publication_journal ~keepers_dir ~keeper_id receipt in
@@ -1647,6 +1719,18 @@ let recover_publication ~keepers_dir ~keeper_id =
     File_lock_eio.with_lock (path_for_keepers_dir ~keepers_dir ~keeper_id) (fun () ->
       recover_publication_locked ~keepers_dir ~keeper_id)) in
   match pending with None -> Ok () | Some receipt -> dispatch_publication ~keepers_dir ~keeper_id receipt
+
+let with_program_reset ~keepers_dir ~keeper_id remove =
+  Fs_compat.mkdir_p keepers_dir;
+  let* () = recover_publication ~keepers_dir ~keeper_id in
+  Keeper_memory_os_aggregate_lock.with_lock ~keepers_dir ~keeper_id (fun () ->
+    File_lock_eio.with_lock (path_for_keepers_dir ~keepers_dir ~keeper_id) (fun () ->
+      let* pending=read_publication ~keepers_dir ~keeper_id in
+      let* ()=match pending with
+        | None -> Ok ()
+        | Some _ -> Error "Memory publication became pending before reset; retry recovery" in
+      let* _ = rotate_epoch ~keepers_dir ~keeper_id in
+      remove ()))
 
 let read_with_content ~keepers_dir ~keeper_id =
   let snapshot_path = path_for_keepers_dir ~keepers_dir ~keeper_id in
@@ -1716,6 +1800,132 @@ type removal_lookup =
   | No_removal_recorded
   | Journal_unreadable of string
 
+type program_anchor =
+  { anchor_keeper : string
+  ; anchor_snapshot : t option
+  ; anchor_identity : Keeper_memory_os_program_types.store_anchor
+  }
+
+let program_anchor_snapshot anchor = anchor.anchor_snapshot
+
+let program_journal_bytes ~keepers_dir ~keeper_id =
+  let+ journal = Fs_compat.read_private_jsonl_durable_locked_result
+    (journal_path_for_keepers_dir ~keepers_dir ~keeper_id) ~after:None
+    |> Result.map_error Fs_compat.private_jsonl_transaction_error_to_string in
+  journal.Fs_compat.bytes
+
+let decode_program_journal bytes =
+  let rec decode acc = function
+    | [] -> Ok (List.rev acc)
+    | "" :: rest -> decode acc rest
+    | line :: rest ->
+      (match Yojson.Safe.from_string line with
+       | json ->
+         let* entry = Journal_codec.journal_entry_of_json json in
+         decode ((json,entry)::acc) rest
+       | exception Yojson.Json_error detail -> Error ("program journal: " ^ detail))
+  in
+  if bytes <> "" && bytes.[String.length bytes - 1] <> '\n'
+  then Error "program journal prefix is incomplete"
+  else decode [] (String.split_on_char '\n' bytes)
+
+let store_anchor ~epoch ~snapshot ~bytes =
+  ({epoch; snapshot; journal_length=String.length bytes; journal_sha256=sha256 bytes}
+    : Keeper_memory_os_program_types.store_anchor)
+
+let capture_program_anchor ~keepers_dir ~keeper_id =
+  Fs_compat.mkdir_p keepers_dir;
+  let* () = recover_publication ~keepers_dir ~keeper_id in
+  Keeper_memory_os_aggregate_lock.with_lock ~keepers_dir ~keeper_id (fun () ->
+    File_lock_eio.with_lock (path_for_keepers_dir ~keepers_dir ~keeper_id) (fun () ->
+      let* () = publication_read_guard ~keepers_dir ~keeper_id in
+      let path = path_for_keepers_dir ~keepers_dir ~keeper_id in
+      let* snapshot = match Fs_compat.load_file_opt path with
+        | None -> Ok None
+        | Some bytes -> let+ current = parse path bytes in Some (current,sha256 bytes) in
+      let* epoch = ensure_epoch ~keepers_dir ~keeper_id in
+      let* bytes = program_journal_bytes ~keepers_dir ~keeper_id in
+      let* _ = decode_program_journal bytes in
+      Ok {anchor_keeper=keeper_id; anchor_snapshot=Option.map fst snapshot;
+        anchor_identity=store_anchor ~epoch
+          ~snapshot:(Option.map (fun (current,digest) -> current.revision,digest) snapshot) ~bytes}))
+
+let verify_program_anchor ~keepers_dir ~keeper_id anchor ~snapshot_content previous program =
+  let module P = Keeper_memory_os_program_types in
+  let* epoch = read_epoch ~keepers_dir ~keeper_id in
+  let* () = if anchor.anchor_keeper=keeper_id && epoch=Some anchor.anchor_identity.epoch then Ok ()
+    else Error "Memory program incarnation changed since inference" in
+  let* () =
+    if program.P.initial_current = Option.map (fun (snapshot : t) -> snapshot.facts) anchor.anchor_snapshot
+    then Ok () else Error "Memory program did not judge its captured full snapshot" in
+  let* bytes = program_journal_bytes ~keepers_dir ~keeper_id in
+  let original = anchor.anchor_identity in
+  let* () =
+    if String.length bytes >= original.journal_length
+       && sha256 (String.sub bytes 0 original.journal_length) = original.journal_sha256 then Ok ()
+    else Error "Memory program journal prefix changed or disappeared" in
+  let* suffix = decode_program_journal
+    (String.sub bytes original.journal_length (String.length bytes-original.journal_length)) in
+  let initial_ids = Set_util.StringSet.of_list
+    (List.map memory_id (Option.fold ~none:[] ~some:Fun.id program.initial_current)) in
+  let first_revision = Option.fold ~none:0 ~some:fst original.snapshot in
+  let table facts = List.fold_left (fun values fact ->
+    Identity_map.add (memory_id fact) (fact_payload fact) values) Identity_map.empty facts in
+  let initial_facts = Option.fold ~none:[] ~some:(fun (current : t) -> current.facts) anchor.anchor_snapshot in
+  let rec verify revision values last_rewrite = function
+    | [] ->
+      let current_revision=Option.fold ~none:0 ~some:(fun (current : t) -> current.revision) previous in
+      if revision<>current_revision then Error "Memory program journal lacks the locked snapshot transition"
+      else if not (Identity_map.equal String.equal values
+        (table (Option.fold ~none:[] ~some:(fun (current : t) -> current.facts) previous)))
+      then Error "Memory program journal facts differ from the locked snapshot"
+      else
+        (match last_rewrite,previous,snapshot_content with
+         | None,_,_ ->
+           let actual=match previous,snapshot_content with
+             | None,None -> None | Some current,Some bytes -> Some (current.revision,sha256 bytes)
+             | None,Some _ | Some _,None -> None in
+           if actual=original.snapshot then Ok () else Error "captured Memory bytes changed without a rewrite"
+         | Some (recorded_at,source,change),Some current,Some _
+           when recorded_at=current.updated_at && source=current.source && change=current.change -> Ok ()
+         | Some _,(None|Some _),(None|Some _) -> Error "Memory journal endpoint metadata differs from its snapshot")
+    | (_,Journal_failed _) :: rest -> verify revision values last_rewrite rest
+    | (_,Journal_quarantined _) :: _ -> Error "Memory was quarantined after the program captured its input"
+    | (json,Journal_committed entry) :: rest ->
+      let* observed_effect = match json with
+        | `Assoc fields -> Journal_codec.journal_commit_effect fields
+        | _ -> Error "program journal commit is not an object" in
+      let* next_revision,next_values,last_rewrite = match observed_effect with
+        | Some Rewritten when entry.revision=revision+1 ->
+          let* remaining = List.fold_left (fun result fact ->
+            let* values=result in
+            let identity=memory_id fact in
+            if Identity_map.find_opt identity values=Some (fact_payload fact)
+            then Ok (Identity_map.remove identity values)
+            else Error "Memory journal removal does not match its prior payload") (Ok values) entry.change.removed in
+          let* after = List.fold_left (fun result fact ->
+            let* values=result in let identity=memory_id fact in
+            if Identity_map.mem identity values then Error "Memory journal addition overwrites an unremoved fact"
+            else Ok (Identity_map.add identity (fact_payload fact) values)) (Ok remaining) entry.change.added in
+          if entry.change.retained<>Identity_map.cardinal remaining
+          then Error "Memory journal retained count conflicts with the captured state"
+          else Ok (entry.revision,after,Some (entry.recorded_at,entry.source,entry.change))
+        | Some Unchanged when entry.revision=revision
+            && entry.change.added=[] && entry.change.removed=[] -> Ok (revision,values,last_rewrite)
+        | Some (Rewritten | Unchanged) | None -> Error "Memory program history has a gap or reused revision" in
+      let touched=Option.fold ~none:[] ~some:Keeper_memory_os_program_publication.touched_ids entry.program in
+      if List.exists (fun identity -> Set_util.StringSet.mem identity initial_ids)
+        (retired_identities entry.change@touched)
+      then Error "Memory program input identity was retired, rewritten or recreated after inference"
+      else verify next_revision next_values last_rewrite rest
+  in
+  let* () = verify first_revision (table initial_facts) None suffix in
+  let snapshot = match previous,snapshot_content with
+    | None,None -> None
+    | Some current,Some bytes -> Some (current.revision,sha256 bytes)
+    | None,Some _ | Some _,None -> None in
+  Ok (store_anchor ~epoch:original.epoch ~snapshot ~bytes)
+
 type journal_mention =
   | Mentioned_as_current
   | Mentioned_as_removed of removal
@@ -1728,22 +1938,37 @@ type journal_mention =
    would otherwise grant. An identity no line names is scanned to the start
    of the file, decoding every line, so the scan runs as one pool job, as the
    tail reader above does. *)
+let drop_reason_for ~(dropped : dropped_statement list option)
+    ~(program : Keeper_memory_os_program_types.publication option) fact =
+  let identity=memory_id fact in
+  let reason statements=List.find_map (fun (drop : dropped_statement) ->
+    if drop.memory_id=identity then Some drop.reason else None) statements in
+  match program with
+  | None -> Option.bind dropped reason
+  | Some publication ->
+    let rec original_occurrence = function
+      | [] -> None
+      | (stage : Keeper_memory_os_program_types.stage) :: rest ->
+        if List.exists (fun held -> memory_id held=identity) stage.before
+           && not (List.exists (fun held -> memory_id held=identity) stage.after)
+        then reason stage.decision.dropped
+        else original_occurrence rest
+    in
+    (* Only the first retirement of the original durable occurrence explains
+       the outer removed fact. A later virtual reincarnation's reason cannot
+       repaint it. Virtual-only facts never enter change.removed. *)
+    if List.exists (fun held -> fact_payload held=fact_payload fact) publication.execution.initial_facts
+    then original_occurrence publication.execution.stages else None
+
 let find_removal ~keepers_dir ~keeper_id target =
   let path = journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
   let is_target fact = String.equal (Keeper_memory_os_types.memory_id fact) target in
-  let reason_for dropped =
-    Option.bind dropped (fun statements ->
-      List.find_map
-        (fun (statement : Keeper_memory_os_types.dropped_statement) ->
-           if String.equal statement.memory_id target then Some statement.reason else None)
-        statements)
-  in
   let mention = function
     | Dated_jsonl.Malformed_json { path; detail; line_number = _ } ->
       Some (Mention_unreadable (Printf.sprintf "memory journal %s: %s" path detail))
     | Dated_jsonl.Parsed json ->
       (match Journal_codec.journal_entry_of_json json with
-       | Ok (Journal_committed { recorded_at; revision; source; change; dropped }) ->
+       | Ok (Journal_committed { recorded_at; revision; source; change; dropped; program }) ->
          if List.exists is_target change.added
          then Some Mentioned_as_current
          else (
@@ -1755,7 +1980,7 @@ let find_removal ~keepers_dir ~keeper_id target =
                   ; removed_at = recorded_at
                   ; removed_by = source
                   ; removed_origin = removed.origin.kind
-                  ; drop_reason = reason_for dropped
+                  ; drop_reason = drop_reason_for ~dropped ~program removed
                   })
            | None -> None)
        | Ok (Journal_failed _ | Journal_quarantined _) -> None
@@ -1802,7 +2027,7 @@ let read_dropped ~keepers_dir ~keeper_id ~current_facts =
         match Journal_codec.journal_entry_of_json json with
         | Error detail -> Some detail
         | Ok (Journal_failed _ | Journal_quarantined _) -> None
-        | Ok (Journal_committed { recorded_at; revision; source; change; dropped }) ->
+        | Ok (Journal_committed { recorded_at; revision; source; change; dropped; program }) ->
           (* Additions in the same commit win, matching find_removal. Latest
              mentions suppress older removals even when their reason is absent. *)
           List.iter (fun fact -> seen := Set_util.StringSet.add (memory_id fact) !seen)
@@ -1812,10 +2037,7 @@ let read_dropped ~keepers_dir ~keeper_id ~current_facts =
                let identity = memory_id fact in
                if not (Set_util.StringSet.mem identity !seen) then (
                  seen := Set_util.StringSet.add identity !seen;
-                 let reason = Option.bind dropped (List.find_map
-                   (fun (statement : dropped_statement) ->
-                      if String.equal statement.memory_id identity
-                      then Some statement.reason else None)) in
+                 let reason = drop_reason_for ~dropped ~program fact in
                  match reason with
                  | None -> ()
                  | Some reason ->
@@ -1900,7 +2122,7 @@ let targets_retired_since ~keepers_dir ~keeper_id ~revision ~held targets =
         if moved
         then Some (Error "a quarantine restarted Memory revisions after the admission decision")
         else None
-      | Ok (Journal_committed { revision = line_revision; change; _ }) ->
+      | Ok (Journal_committed { revision = line_revision; change; program; _ }) ->
         if not (newer line_revision) then Some (Ok ())
         else if moved && line_revision > held then
           Some (Error (Printf.sprintf
@@ -1909,12 +2131,12 @@ let targets_retired_since ~keepers_dir ~keeper_id ~revision ~held targets =
         else (
           if line_revision > decided && Journal_codec.journal_line_rewrote json then
             rewritten := Recall_revision_set.add line_revision !rewritten;
-          let added = Set_util.StringSet.of_list (List.map memory_id change.added) in
-          List.iter (fun fact ->
-            let identity = memory_id fact in
-            if Set_util.StringSet.mem identity targets
-               && not (Set_util.StringSet.mem identity added)
-            then retired := Set_util.StringSet.add identity !retired) change.removed;
+          List.iter (fun identity ->
+            if Set_util.StringSet.mem identity targets then retired := Set_util.StringSet.add identity !retired)
+            (retired_identities change);
+          Option.iter (fun proof -> List.iter (fun identity ->
+            if Set_util.StringSet.mem identity targets then retired := Set_util.StringSet.add identity !retired)
+            (Keeper_memory_os_program_publication.touched_ids proof)) program;
           None) in
   (* Lines above [held] were refused and the scan stopped at the decision, so
      the count proves each revision in between. *)
@@ -1963,6 +2185,7 @@ let quarantine_snapshot_and_receipt ~keepers_dir ~keeper_id ~snapshot_path ~now 
   let* () = match publication with
     | None -> Ok ()
     | Some _ -> Error "publication evidence is pending; snapshot quarantine refused" in
+  let* _ = rotate_epoch ~keepers_dir ~keeper_id in
   let move path =
     let rejected_path = unused_rejected_path ~snapshot_path:path ~now in
     match Fs_compat.rename_noreplace path rejected_path with
@@ -2020,6 +2243,8 @@ let update_locked_with_output
       ?(sync_snapshot = Fs_compat.sync_file_and_parent_strict)
       ?(finalize_journal = record_publication_journal)
       ?on_committed
+      ?program_of_output
+      ?observe_output
       ?clock
       ?dropped_statements
       ?before_replace
@@ -2123,6 +2348,7 @@ let update_locked_with_output
          let* () = match pending with
            | None -> Ok ()
            | Some _ -> Error (store_error "another publication is pending; retry recovery before writing") in
+         let* _ = ensure_epoch ~keepers_dir ~keeper_id |> Result.map_error store_error in
          let* previous, snapshot_content =
            match Fs_compat.load_file_opt snapshot_path with
            | None -> Ok (None, None)
@@ -2190,6 +2416,20 @@ let update_locked_with_output
            |> Result.map_error store_error
          in
          let* next, output = build ~snapshot_content previous in
+         let* program = match program_of_output with
+           | None -> Ok None
+           | Some convert ->
+             let* publication = Keeper_memory_os_program_publication.of_json
+               (Keeper_memory_os_program_publication.to_json (convert output))
+               |> Result.map_error store_error in
+             if publication.execution.final_facts=next.facts
+                && publication.execution.initial_facts=Option.fold ~none:[] ~some:(fun (prior : t) -> prior.facts) previous
+                && publication.locked_prior.snapshot=Option.map (fun (prior,bytes) -> prior.revision,sha256 bytes) snapshot
+             then Ok (Some publication)
+             else Error (store_error "ordered publication proof does not match the locked snapshot transition") in
+         let observe snapshot commit_effect =
+           Option.iter (fun notify -> notify snapshot commit_effect) on_committed;
+           Option.iter (fun notify -> notify snapshot commit_effect output) observe_output in
          let applied_revision_links = List.filter (fun link ->
            Journal_codec.links_applied_to_snapshot next [link]
            && Option.fold ~none:false ~some:(fun (prior : t) ->
@@ -2300,7 +2540,7 @@ let update_locked_with_output
          let kept =
            match equal_facts, snapshot with
            | Write_revision _, (Some _ | None) | Keep_stored, None -> None
-           | Keep_stored, Some (current, current_content) ->
+           | Keep_stored, Some (current, current_content) when program=None ->
              (* A kept fact is the stored value itself, so it compares without
                 serializing; only a different value or count needs the bytes. *)
              let same_facts =
@@ -2314,6 +2554,7 @@ let update_locked_with_output
                    next.facts)
              in
              if same_facts then Some (current, current_content) else None
+           | Keep_stored, Some _ -> None
          in
          match kept with
          | Some (current, current_content) ->
@@ -2337,7 +2578,7 @@ let update_locked_with_output
                         { range_id; snapshot_revision = current.revision; snapshot_sha256 }))
                  |> Result.map_error store_error
              in
-             Option.iter (fun observe -> observe current Unchanged) on_committed;
+             observe current Unchanged;
              (* The journal keeps one line per pass: the Librarian health view
                 reads its newest Librarian line as the last success. This line
                 names the revision that stays current. *)
@@ -2439,13 +2680,13 @@ let update_locked_with_output
            ; target_revision=next.revision
            ; target_sha256=snapshot_sha256
            ; journal=Journal_codec.journal_entry_to_json ~commit_effect:Rewritten
-               ~revision_links:applied_revision_links ~dropped_statements:publication_dropped next } in
+               ~revision_links:applied_revision_links ~dropped_statements:publication_dropped ?program next } in
          let* () = write_publication ~keepers_dir ~keeper_id publication
            |> Result.map_error store_error in
          let complete () =
              (* The snapshot is durable now. Publish the original producer's
                 commit marker before any cancellable secondary I/O. *)
-             Option.iter (fun observe -> observe next Rewritten) on_committed;
+             observe next Rewritten;
              let journal_result =
                match finalize_journal ~keepers_dir ~keeper_id publication with
                | Ok pending ->
@@ -2813,12 +3054,14 @@ let read_recall_transitions ~keepers_dir ~keeper_id ~after_revision ~through_rev
           | json :: rest ->
             let* entry = Journal_codec.journal_entry_of_json json in
             match entry, json with
-            | Journal_committed {revision;recorded_at;source;change;_}, `Assoc fields ->
+            | Journal_committed {revision;recorded_at;source;change;program;_}, `Assoc fields ->
               let* commit_effect = Journal_codec.journal_commit_effect fields in
               let* revision_links = Journal_codec.journal_revision_links fields in
               let row : Successor_recall.transition = {evidence={snapshot_revision=revision;recorded_at;source;commit_effect;
                 revision_links;removed_memory_ids=List.map memory_id change.removed;
-                added_memory_ids=List.map memory_id change.added};removed=change.removed} in
+                added_memory_ids=List.map memory_id change.added};removed=change.removed;program;
+                recreated_memory_ids=List.filter (fun identity ->
+                  List.exists (fun fact -> memory_id fact=identity) change.added) (retired_identities change)} in
               decode (row::acc) rest
             | (Journal_committed _ | Journal_failed _ | Journal_quarantined _), _ ->
               Error "cached rewrite is not a committed journal record" in
@@ -2902,6 +3145,83 @@ type disposition =
   ; claims_not_applied : Keeper_memory_os_types.fact list
   ; revisions_applied : Keeper_memory_os_types.revision list
   }
+
+type program_source =
+  | Atom_program_source of
+      { range : durable_range_id
+      ; checkpoint : Agent_core.Types.message list
+      }
+  | Official_program_source of
+      { range : official_range_id
+      ; selected_turns : (int * Ids.Turn_ref.t * Agent_core.Types.message list) list
+      }
+
+type program_commit =
+  { snapshot : t
+  ; proof : Keeper_memory_os_program_types.publication
+  }
+
+let messages_sha256 messages =
+  sha256 (Yojson.Safe.to_string (`List (List.map Agent_core.Checkpoint.message_to_json messages)))
+
+let prepare_program_source source (program : Keeper_memory_os_program.t) =
+  let module P = Keeper_memory_os_program_types in
+  let module Unread = Keeper_librarian_unread in
+  match source with
+  | Atom_program_source {range;checkpoint} ->
+    let* _ = durable_range_id_of_json (durable_range_id_to_json range)
+      |> Result.map_error wire_error_to_string in
+    let* sources = Unread.sources_for_atom_range ~trace_id:range.trace_id
+      ~history_start_boundary_line:range.history_start_boundary_line ~start_atom:range.start_atom
+      ~end_atom:range.end_atom ~messages:checkpoint in
+    if sources <> program.sources || range.unread_messages <> program.unread
+       || Runtime_model_input_tail_window.atom_opening_digest checkpoint (range.end_atom-1)
+          <> Some range.last_atom_digest
+    then Error "ordered program does not cover its exact original atom boundary"
+    else Ok (Some range,None,
+      P.Atom_boundary {receipt_scope=range.receipt_scope;trace_id=range.trace_id;
+        history_start_boundary_line=range.history_start_boundary_line;start_atom=range.start_atom;
+        end_atom=range.end_atom;last_atom_digest=range.last_atom_digest;
+        end_boundary_line=range.end_boundary_line;boundary_lines_seen=range.boundary_lines_seen;
+        checkpoint_sha256=messages_sha256 checkpoint})
+  | Official_program_source {range;selected_turns} ->
+    let* _ = official_range_id_of_json (official_range_id_to_json range)
+      |> Result.map_error wire_error_to_string in
+    let selected = List.map (fun (line,turn_ref,_) -> line,turn_ref) selected_turns in
+    let sources = List.concat_map (fun (boundary_line,turn_ref,messages) ->
+      List.mapi (fun message_in_turn message ->
+        Unread.Official_turn {turn_ref;boundary_line;message_in_turn;
+          message_sha256=Unread.message_digest message}) messages) selected_turns in
+    if selected <> range.turns || sources <> program.sources || range.unread_messages <> program.unread
+    then Error "ordered program does not cover its exact original official-turn boundary"
+    else Ok (None,Some range,P.Official_boundary {receipt_scope=range.receipt_scope;
+      after_boundary_line=range.after_boundary_line;
+      turns=List.map (fun (line,turn_ref,messages) -> line,turn_ref,messages_sha256 messages) selected_turns})
+
+let apply_program_with_io ?write_snapshot ?sync_snapshot ?finalize_journal ?on_committed ?clock ~keepers_dir ~keeper_id ~now ~anchor ~source ~validate_source program =
+  let module P = Keeper_memory_os_program_types in
+  let* () =
+    if Keeper_identity.Keeper_id.to_string program.Keeper_memory_os_program.keeper_id=keeper_id
+    then Ok () else Error "ordered Memory program Keeper differs from the store identity" in
+  let* durable_range_id,official_range_id,boundary = prepare_program_source source program in
+  update_locked_with_output ?write_snapshot ?sync_snapshot ?finalize_journal ?clock ?durable_range_id ?official_range_id
+    ~program_of_output:Fun.id
+    ?observe_output:(Option.map (fun observe snapshot (_ : commit_effect) proof ->
+      observe {snapshot;proof}) on_committed)
+    ~equal_facts:(Write_revision None) ~store_error:Fun.id ~keepers_dir ~keeper_id ~now
+    (fun ~snapshot_content previous ->
+      let* () = validate_source () in
+      let* locked_prior = verify_program_anchor ~keepers_dir ~keeper_id anchor ~snapshot_content previous program in
+      let current = Option.fold ~none:[] ~some:(fun (current : t) -> current.facts) previous in
+      let* execution = Keeper_memory_os_program.replay program ~current in
+      let source = {kind=Librarian;trace_id=Ids.Turn_ref.trace_id program.turn_ref} in
+      let* next = make_snapshot_from_maintained ~previous ~now ~source
+        ~facts:execution.final_facts ~invalidated:[] () in
+      Ok (next,({execution;captured=anchor.anchor_identity;locked_prior;boundary} : P.publication)))
+  |> Result.map (fun (snapshot,(_ : commit_effect),proof) -> {snapshot;proof})
+
+let apply_program ?on_committed ?clock ~keepers_dir ~keeper_id ~now ~anchor ~source ~validate_source program =
+  apply_program_with_io ?on_committed ?clock ~keepers_dir ~keeper_id ~now ~anchor ~source ~validate_source program
 
 let apply_disposition
       ?on_committed
@@ -3376,6 +3696,13 @@ let move_aside_for_keepers_dir ?clock ~keepers_dir ~keeper_id ~now ~rejection ()
 
 module For_testing = struct
   let decode_snapshot text = parse "captured snapshot" text
+
+  let apply_program_with_publication_io ~write_snapshot ~sync_snapshot ~before_journal ~on_committed
+      ~keepers_dir ~keeper_id ~now ~anchor ~source ~validate_source program =
+    apply_program_with_io ~write_snapshot ~sync_snapshot ~on_committed
+      ~finalize_journal:(fun ~keepers_dir ~keeper_id receipt ->
+        before_journal (); record_publication_journal ~keepers_dir ~keeper_id receipt)
+      ~keepers_dir ~keeper_id ~now ~anchor ~source ~validate_source program
 
   let replace_with_publication_io ~write_snapshot ~sync_snapshot ~on_committed ~before_journal
       ~keepers_dir ~keeper_id ~now ~source ~facts =

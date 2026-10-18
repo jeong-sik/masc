@@ -1652,6 +1652,8 @@ let test_purge_plan_removes_memory_sidecars () =
   let contains artifact = List.exists (fun entry -> entry = artifact) plan in
   check bool "plan removes cumulative unread evidence for a deleted keeper" true
     (contains Shutdown.Keeper_librarian_unread_ledger_artifact);
+  check bool "plan removes the Memory epoch of a deleted Keeper" true
+    (contains Shutdown.Keeper_memory_epoch_artifact);
   check bool "plan removes the fact snapshot" true
     (contains Shutdown.Keeper_memory_current_artifact);
   check bool "plan removes an interrupted retraction plan" true
@@ -2825,6 +2827,56 @@ let revise_into ~keepers_dir old targets =
   apply_disposition ~keepers_dir ~revisions ~new_claims:targets
     ~dropped_statements:[{Types.memory_id=Types.memory_id old; reason="verified explicit correction"}] () |> require_ok
 ;;
+
+let test_successor_recall_rejects_raw_same_identity_incarnation () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let original=fact ~claim:"original bound observation" () in
+  let binding=recall_binding 1 (fact ~claim:"original bound input" ()) original in
+  ignore (commit_recall ~keepers_dir binding [original] |> require_ok);
+  ignore (replace ~keepers_dir ~expected_revision:(current_revision ~keepers_dir)
+    ~facts:[{original with first_seen=50.}] () |> require_ok);
+  let changed=successor_recall ~keepers_dir in
+  check bool "raw incarnation replacement is never a direct recall" true
+    (changed.direct_bindings=[] && changed.successor_candidates=[] && changed.unresolved<>[]);
+  ignore (replace ~keepers_dir ~expected_revision:(current_revision ~keepers_dir)
+    ~facts:[original] () |> require_ok);
+  let restored=successor_recall ~keepers_dir in
+  check bool "restoring identical bytes cannot revive the old occurrence" true
+    (restored.direct_bindings=[] && restored.successor_candidates=[] && restored.unresolved<>[])
+
+let test_successor_recall_rejects_ordered_net_zero_incarnation () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let module Program=Masc.Keeper_memory_os_program in
+  let module Unread=Masc.Keeper_librarian_unread in
+  let original=fact ~claim:"original ordered bound observation" () in
+  let middle=fact ~claim:"virtual ordered successor" () in
+  let binding=recall_binding 1 (fact ~claim:"original ordered input" ()) original in
+  ignore (commit_recall ~keepers_dir binding [original] |> require_ok);
+  let anchor=Current.capture_program_anchor ~keepers_dir ~keeper_id:"keeper" |> require_ok in
+  let turn_ref=Ids.Turn_ref.make ~trace_id:"ordered-recall" ~absolute_turn:3 in
+  let messages=List.map (fun text -> Agent_core.Types.make_message ~role:Agent_core.Types.User
+    [Agent_core.Types.Text text]) ["intermediate observation";"restored observation"] in
+  let sources=List.mapi (fun message_in_turn message -> Unread.Official_turn
+    {turn_ref;boundary_line=1;message_in_turn;message_sha256=Unread.message_digest message}) messages in
+  let decide index held successor : Program.decision =
+    {run_id=string_of_int index;keeper_id=Masc_test_deps.keeper_id_fixture "keeper";turn_ref;
+     input_current=Some [held];sources=[List.nth sources index];input_evidence=`Null;gate_evidence=`Null;
+     working_state="ordered continuation";new_claims=[successor];absorbed=[];
+     dropped=[{Types.memory_id=Types.memory_id held;reason="The next observation revises this claim."}];
+     revisions=[{Types.superseded=Types.memory_id held;superseded_by=Types.memory_id successor}]} in
+  let program=Program.create ~transaction_id:"ordered-net-zero-recall"
+    ~keeper_id:(Masc_test_deps.keeper_id_fixture "keeper") ~turn_ref ~sources ~unread:[]
+    ~initial_current:(Some [original]) ~decisions:[decide 0 original middle;decide 1 middle original] |> require_ok in
+  let range : Current.official_range_id = {receipt_scope="ordered-net-zero";after_boundary_line=0;
+    turns=[1,turn_ref];unread_messages=[]} in
+  let committed=Current.apply_program ~keepers_dir ~keeper_id:"keeper" ~now:400. ~anchor
+    ~source:(Current.Official_program_source {range;selected_turns=[1,turn_ref,messages]})
+    ~validate_source:(fun () -> Ok ()) program |> require_ok in
+  check bool "net-zero actual snapshot has no fake durable virtual fact" true
+    (committed.snapshot.facts=[original] && committed.snapshot.change.added=[] && committed.snapshot.change.removed=[]);
+  let recalled=successor_recall ~keepers_dir in
+  check bool "unsupported step-aware recall remains explicitly unresolved" true
+    (recalled.direct_bindings=[] && recalled.successor_candidates=[] && recalled.unresolved<>[])
 
 let test_successor_recall_tracks_multistep_split_incarnations () =
   with_temp_keepers @@ fun keepers_dir ->
@@ -4598,7 +4650,10 @@ let test_generic_publication_conflict_preserves_stores () =
 let () =
   run
     "keeper_memory_os_current"
-    [ ("generic publication", [
+    [ ("ordered identity recall", [
+        test_case "raw same-ID replacement cannot revive bindings" `Quick test_successor_recall_rejects_raw_same_identity_incarnation;
+        test_case "ordered net-zero identities remain unresolved" `Quick test_successor_recall_rejects_ordered_net_zero_incarnation]);
+      ("generic publication", [
         test_case "staged first and subsequent publication recovery" `Quick test_generic_publication_staged_recovery;
         test_case "journal failure and notification cancellation recovery" `Quick test_generic_publication_journal_and_notification_recovery;
         test_case "journal cancellation retains producer commit" `Quick test_generic_publication_journal_cancellation_keeps_producer_commit;

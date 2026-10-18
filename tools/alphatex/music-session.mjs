@@ -15,7 +15,7 @@ import { safeText } from './terminal.mjs'
 export async function viewSession({ directory, root = resolve('music-sessions'), input, midi, signal, embedded = false, exportRoot, output, midiOutput, sourceBindings = [] } = {}) {
   if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error('Music sessions require a terminal')
   let destinations = [], audioOutput = output, selectedMidi = midiOutput, sourceOutputs = sourceBindings, prompt = null
-  let playbackAbort = null, playbackTask = null, paired = null
+  let playbackAbort = null, playbackTask = null, paired = null, pairedState = null
   let available = null, inputIndex = 0, midiIndex = 0, timeline = null
   let take = directory, capture = null, captureTask = null, player = null
   let captureIntent = null
@@ -56,8 +56,9 @@ export async function viewSession({ directory, root = resolve('music-sessions'),
       'i: choose the next audio input; m: choose MIDI inputs (all, none or one source)',
       'r: begin a new take using the selected inputs; s: stop and save',
       'Space: play/stop this take; o selects MIDI output, a selects audio output',
+      'p: pause/resume native playback; :seek SECONDS moves its audio and MIDI together',
       ':source SOURCE_ID MIDI_UID binds one captured input; :midi-output UID sets a default',
-      'Captured UMP replays the original complete stream; pause/seek reconstruction follows.',
+      'Stateful UMP seeks restore live voices and expression when source baselines are known.',
       'e: export one MIDI 2.0 Clip per input source (saved takes only)',
       'Up/Down: scroll tracks; Left/Right: move the time window',
       '+/-: zoom time; f: follow the end of the take',
@@ -96,7 +97,7 @@ export async function viewSession({ directory, root = resolve('music-sessions'),
     let output = '\x1b[H'
     for (let row = 1; row <= rows; row++) output += `\x1b[${row};1H\x1b[2K`
     lines.forEach((line, row) => { if (row < rows - 1) output += `\x1b[${row + 1};1H${fit(line)}` })
-    output += `\x1b[${rows};1H${fit(prompt === null ? 'r:record  s:save  Space:play/stop  o:MIDI out  a:audio out  q:back  e:export  ?:help' : `:${prompt}`)}`
+    output += `\x1b[${rows};1H${fit(prompt === null ? 'r:record  s:save  Space:play/stop  p:pause/resume  :seek SECONDS  q:back  ?:help' : `:${prompt}`)}`
     process.stdout.write(output)
   }
   function stopPlayer() {
@@ -170,12 +171,13 @@ export async function viewSession({ directory, root = resolve('music-sessions'),
           : await prepareCapturedWave(input, { directory, signal: abort.signal })
         abort.signal.throwIfAborted()
         paired = openPlayback({ ...plan, midiBindings: plan.bindings, output, signal: abort.signal, onEvent(event) {
+          if (['playing', 'paused', 'stopped'].includes(event.kind)) pairedState = event.kind
           if (!closed && !abort.signal.aborted) { status = event.kind === 'error' ? event.message : `Capture ${event.kind}`;draw() }
         } })
         await paired.completion
       } catch (error) { if (!closed && !abort.signal.aborted) status = error.message }
       finally {
-        paired = null
+        paired = null; pairedState = null
         try { if (directory) await rm(directory, { recursive: true, force: true }) }
         finally { playbackAbort = null; playbackTask = null; draw() }
       }
@@ -184,11 +186,18 @@ export async function viewSession({ directory, root = resolve('music-sessions'),
   }
   function outputCommand(line) {
     const [kind, ...args] = line.trim().split(/\s+/)
-    if (kind === 'source' && args.length === 2) {
+    if (['pause', 'resume', 'stop', 'seek'].includes(kind)) {
+      if (kind === 'stop' && args.length === 0) { stopPlayer(); return }
+      if (!paired) throw new Error('Start native playback with an audio or MIDI output selected')
+      if (kind === 'seek' && args.length === 1 && args[0] !== '') paired.seek(Number(args[0]))
+      else if (kind === 'pause' && args.length === 0) paired.pause()
+      else if (kind === 'resume' && args.length === 0) paired.resume()
+      else throw new Error('Use :pause, :resume, :seek SECONDS or :stop')
+    } else if (kind === 'source' && args.length === 2) {
       stopPlayer();sourceOutputs = [...sourceOutputs.filter(binding => binding.source !== args[0]), { source: args[0], destination: args[1] }]
     } else if (kind === 'midi-output' && args.length === 1) { stopPlayer();selectedMidi = args[0];sourceOutputs = [] }
     else if (kind === 'output' && args.length === 1) { stopPlayer();audioOutput = args[0] }
-    else throw new Error('Use :source SOURCE_ID MIDI_UID, :midi-output MIDI_UID or :output AUDIO_UID')
+    else throw new Error('Use :seek SECONDS, :pause, :resume, :stop, :source SOURCE_ID MIDI_UID, :midi-output MIDI_UID or :output AUDIO_UID')
   }
   function keypress(text, key = {}) {
     if (prompt !== null) {
@@ -203,6 +212,9 @@ export async function viewSession({ directory, root = resolve('music-sessions'),
     if (key.ctrl && key.name === 'c' || ['q', 'escape'].includes(key.name)) { finish(); return }
     if (text === '?') { helpShown = !helpShown; scroll = 0; draw(); return }
     switch (key.name) {
+      case 'p':
+        try { outputCommand(pairedState === 'paused' ? 'resume' : 'pause') } catch (error) { status = error.message }
+        draw(); return
       case 'r': startRecording(); return
       case 'o': {
         stopPlayer();const index = destinations.findIndex(device => device.id === selectedMidi) + 1

@@ -412,12 +412,6 @@ final class ArrangementTransport {
         do {
             try checkOutput()
             let command = try JSONDecoder().decode(AudioCommand.self, from: Data(line.utf8))
-            if plan.captured {
-                switch command {
-                case .pause, .resume, .seek: throw AudioFailure("captured UMP pause/seek requires expression-state reconstruction; stop and restart the complete take")
-                default: break
-                }
-            }
             switch command {
             case .pause: if state == .playing {
                 let time = currentTime()

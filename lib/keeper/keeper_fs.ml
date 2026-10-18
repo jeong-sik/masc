@@ -351,11 +351,19 @@ let save_pieces_durable_atomic_core
            (fun () ->
               List.iter (output_string oc) pieces;
               flush oc);
-         run_durable_write_stage
-           ~renamed:false
-           ~before_stage
-           Payload_fsync
-           (fun () -> Unix.fsync (Unix.descr_of_out_channel oc));
+         (* The stats of the file written, from its own descriptor: the rename
+            below keeps the inode, size and mtime, so they name the installed
+            file even when another writer replaces the path afterwards. *)
+         let written =
+           run_durable_write_stage
+             ~renamed:false
+             ~before_stage
+             Payload_fsync
+             (fun () ->
+                let fd = Unix.descr_of_out_channel oc in
+                Unix.fsync fd;
+                Unix.fstat fd)
+         in
          run_durable_write_stage
            ~renamed:false
            ~before_stage
@@ -378,7 +386,7 @@ let save_pieces_durable_atomic_core
              ~before_stage
              Temp_directory_fsync_after_rename
              (fun () -> Keeper_fs_durable_directory.fsync_directory temp_dir);
-         Ok ()))
+         Ok written))
   in
   let rec confirm_directory_lease lease =
     if Keeper_fs_durable_directory.lease_is_current lease
@@ -439,7 +447,7 @@ let observe_durable_write_success ~on_durable_commit = function
   | Error _ as error ->
     Eio_guard.check_if_ready ();
     error
-  | Ok () ->
+  | Ok (_ : Unix.stats) ->
     (* The blocking transaction and both final directory-lease confirmations
        are complete. This pure caller-fiber publication must precede the
        cooperative cancellation check: a systhread cannot stop once running,
@@ -499,6 +507,7 @@ let save_bytes_durable_atomic_with
       path
       [ bytes ])
   |> check_durable_write_completion
+  |> Result.map (fun (_ : Unix.stats) -> ())
 ;;
 
 let save_encoded_durable_atomic_from_with
@@ -553,6 +562,7 @@ let save_json_durable_atomic_with
           then Yojson.Safe.pretty_to_string json
           else Yojson.Safe.to_string json)
        ])
+  |> Result.map (fun (_ : Unix.stats) -> ())
 ;;
 
 let save_bytes_durable_atomic ?ownership_root ?temp_dir path bytes =
@@ -710,6 +720,23 @@ module For_testing = struct
       ?temp_dir
       path
       bytes
+  ;;
+
+  let save_encoded_durable_atomic_from
+        ~before_stage
+        ?before_directory_fsync
+        ?ownership_root
+        ?temp_dir
+        path
+        encoded_source
+    =
+    save_encoded_durable_atomic_from_with
+      ~before_stage
+      ?before_directory_fsync
+      ?ownership_root
+      ?temp_dir
+      path
+      encoded_source
   ;;
 
   let save_json_durable_atomic

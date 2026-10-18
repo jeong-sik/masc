@@ -1104,7 +1104,7 @@ let run_trial ~base ~experiment ~strategy ~prompt_root ~counter ~receipt ~sw ~en
           "ledger_completed_at",field "ts" row;"task_id",field "task_id" row;
           "trace_id",field "trace_id" row;"keeper_turn_id",field "keeper_turn_id" row] in
   let _,checkpoint = Keeper_context_runtime.load_context_from_checkpoint_classified
-      ~trace_id:(string "trace_id" fixture) ~base_dir:(Keeper_types_support.session_base_dir_ config) in
+      ~keeper_name:keeper ~trace_id:(string "trace_id" fixture) ~base_dir:(Keeper_types_support.session_base_dir_ config) in
   let checkpoint_last_assistant = match checkpoint with
     | Checkpoint_loaded context ->
       let messages = Keeper_context_runtime.messages_of_context context in

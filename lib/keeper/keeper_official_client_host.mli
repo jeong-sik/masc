@@ -642,6 +642,7 @@ val dynamic_tools :
     one Keeper and host resources indefinitely. *)
 
 val persist_pre_tool_rejects :
+  keeper_name:string ->
   session_dir:string ->
   session_id:string ->
   rejected_tool_call list ->

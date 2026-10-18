@@ -151,15 +151,20 @@ type checkpoint_load =
           may still hold what it held. *)
 
 (** Load the canonical AGENT_CORE checkpoint of [trace_id] and say which of the
-    three it was. Every failure is logged and counted here. *)
+    three it was. Every failure is logged and counted here. Turn execution
+    loads this way: the turn saves this lineage next, so the load is
+    {!Keeper_checkpoint_store.load_agent_core_for_save}. *)
 val load_context_from_checkpoint_classified :
+  keeper_name:string ->
   trace_id:string ->
   base_dir:string ->
   session_context * checkpoint_load
 
 (** Optional projection for callers acting only on a loaded context. [None]
     covers absence and a diagnosed failure; it cannot authorize a fresh turn.
-    Turn execution uses {!load_context_from_checkpoint_classified}. *)
+    It reads with {!Keeper_checkpoint_store.load_agent_core}, which keeps
+    nothing of what it reads. Turn execution uses
+    {!load_context_from_checkpoint_classified}. *)
 val load_context_from_checkpoint :
   trace_id:string ->
   base_dir:string ->

@@ -149,7 +149,6 @@ let finalize
     ~(acc : Keeper_run_tools.hook_accumulator)
     ~(result : Runtime_agent.run_result)
     ~last_persisted_checkpoint
-    ~checkpoint_encoding_memo
     ~final_agent_core_turn_ordinal
     ~checkpoint_persistence_error
     ~post_turn_t0
@@ -277,9 +276,9 @@ let finalize
              let save_started_at = Time_compat.now () in
              let save_started_mono = Mtime_clock.now () in
              let save_result =
-               Keeper_checkpoint_store.save_agent_core_classified_with_encoding_memo
+               Keeper_checkpoint_store.save_agent_core_for_keeper
+                 ~keeper_name:meta.name
                  ~session_dir:session.session_dir
-                 ~encoding_memo:checkpoint_encoding_memo
                  ~history_retained:
                    (Runtime_params.get Runtime_settings.keeper_checkpoint_history_retained)
                  patched
@@ -293,7 +292,7 @@ let finalize
              let outcome, canonical_bytes =
                match save_result with
                | Ok (Keeper_checkpoint_store.Saved { canonical_bytes; _ }) ->
-                 "saved", Option.fold ~none:"unknown" ~some:string_of_int canonical_bytes
+                 "saved", string_of_int canonical_bytes
                | Ok (Keeper_checkpoint_store.Stale_noop _) -> "stale_noop", "unknown"
                | Error _ -> "error", "unknown"
              in

@@ -122,13 +122,18 @@ val save_json_durable_atomic
     [encoded_source] must be a pure closure; an exception it raises becomes a
     [Payload_encode] failure. This keeps large checkpoint encodes from monopolizing the Eio
     scheduler while preserving the same atomic publication and ownership
-    contract; blocking filesystem operations still run in a systhread. *)
+    contract; blocking filesystem operations still run in a systhread.
+
+    On success it returns the stats of the file it wrote, taken from that
+    file's descriptor after the fsync. The rename keeps the inode, size and
+    mtime, so they name the installed file even when another writer replaces
+    [path] right after the rename; a stat of [path] would not. *)
 val save_encoded_durable_atomic_from
   :  ?ownership_root:string
   -> ?temp_dir:string
   -> string
   -> (unit -> string list)
-  -> (unit, durable_write_error) result
+  -> (Unix.stats, durable_write_error) result
 
 val durable_write_error_to_string : durable_write_error -> string
 
@@ -173,6 +178,15 @@ module For_testing : sig
     -> string
     -> string
     -> (unit, durable_write_error) result
+
+  val save_encoded_durable_atomic_from
+    :  before_stage:(durable_write_stage -> unit)
+    -> ?before_directory_fsync:(string -> unit)
+    -> ?ownership_root:string
+    -> ?temp_dir:string
+    -> string
+    -> (unit -> string list)
+    -> (Unix.stats, durable_write_error) result
 
   val save_json_durable_atomic
     :  before_stage:(durable_write_stage -> unit)

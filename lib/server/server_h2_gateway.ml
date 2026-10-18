@@ -1814,23 +1814,32 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
            ])
         ~status:`Forbidden
         ~extra_headers:cors
-    else
-      try dispatch_h2_route () with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | Auth.Auth_config_error _ ->
-        h2_respond_text
+    else (
+      match Server_workspace_precondition.check_current_request ~path httpun_request with
+      | Request_workspace_precondition.Refused refusal ->
+        h2_respond_json_value
           h2_reqd
-          "Authentication configuration unavailable"
-          ~status:`Service_unavailable
-          ~extra_headers:cors
-      | exn ->
-        let msg = Printexc.to_string exn in
-        Log.Http.error "Handler error: %s" msg;
-        h2_respond_text
-          h2_reqd
-          ("500 Internal Server Error: " ^ msg)
-          ~status:`Internal_server_error
-          ~extra_headers:cors
+          (Server_workspace_precondition.refusal_body refusal)
+          ~status:(Server_workspace_precondition.refusal_status refusal)
+          ~extra_headers:(Server_workspace_precondition.refusal_headers refusal @ cors)
+      | Request_workspace_precondition.No_precondition
+      | Request_workspace_precondition.Precondition_met ->
+        (try dispatch_h2_route () with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | Auth.Auth_config_error _ ->
+           h2_respond_text
+             h2_reqd
+             "Authentication configuration unavailable"
+             ~status:`Service_unavailable
+             ~extra_headers:cors
+         | exn ->
+           let msg = Printexc.to_string exn in
+           Log.Http.error "Handler error: %s" msg;
+           h2_respond_text
+             h2_reqd
+             ("500 Internal Server Error: " ^ msg)
+             ~status:`Internal_server_error
+             ~extra_headers:cors))
     in
     match
       Server_request_authority.classify_h2_request ~trust_policy h2_req

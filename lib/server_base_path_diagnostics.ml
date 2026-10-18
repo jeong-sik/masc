@@ -114,6 +114,9 @@ let current_task_warning ~path ~shape ~error =
           before starting the server."
          path shape detail)
 
+let served_paths ~cwd ~effective_base_path ~effective_masc_root =
+  normalize_path ~cwd effective_base_path, normalize_path ~cwd effective_masc_root
+
 let detect ?cwd ?env_masc_base_path ?strict ?input_base_path ?resolution_source
     ~effective_base_path ~effective_masc_root () =
   let cwd =
@@ -122,8 +125,9 @@ let detect ?cwd ?env_masc_base_path ?strict ?input_base_path ?resolution_source
     | None -> Config_dir_resolver.current_working_dir ()
   in
   let cwd_norm = normalize_path ~cwd cwd in
-  let effective_base_norm = normalize_path ~cwd effective_base_path in
-  let effective_masc_norm = normalize_path ~cwd effective_masc_root in
+  let effective_base_norm, effective_masc_norm =
+    served_paths ~cwd ~effective_base_path ~effective_masc_root
+  in
   let current_task_path, current_task_shape, current_task_error =
     inspect_current_task_path effective_masc_norm
   in

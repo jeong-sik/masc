@@ -377,7 +377,10 @@ let make_extended_handler ~trust_policy routes =
                 ~origin
                 reqd
             then ()
-            else dispatch_route ~router:routes ~request ~path ~upgrade reqd
+            else
+              Server_workspace_precondition.guard_http1 ~path request reqd
+                ~admitted:(fun () ->
+                  dispatch_route ~router:routes ~request ~path ~upgrade reqd)
           with
           (* Cancellation propagates through the connection switch without
              attempting a response from a cancelled handler. *)

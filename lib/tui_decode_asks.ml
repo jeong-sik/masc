@@ -243,38 +243,26 @@ type ask_followup = {
   af_linked_task : ask_linked_task;
 }
 
-let decode_ask_followup ~expected_base_path ~expected_masc_root ~keeper_name ~ask_id json =
-  let* () = validate_asks_workspace ~expected_base_path ~expected_masc_root json in
-  let single json name = match json with
-    | `Assoc fields ->
-        (match List.filter (fun (key,_) -> String.equal key name) fields with
-         | [_, value] -> Ok value
-         | _ -> Error ("answer follow-up field is missing or duplicated: " ^ name))
-    | _ -> Error "answer follow-up must be an object" in
-  let string json name = let* value = single json name in match value with
-    | `String value -> Ok value
-    | _ -> Error ("answer follow-up field is not a string: " ^ name) in
-  let finite = function
-    | `Float value when Float.is_finite value -> Ok value
-    | `Int value -> Ok (float_of_int value)
-    | _ -> Error "answer follow-up clock is not finite" in
-  let* keeper = string json "keeper" in
-  let* answer_id = string json "answer_progress_for" in
-  if not (String.equal keeper keeper_name && String.equal answer_id ask_id) then
-    Error "answer follow-up belongs to a different Keeper or question"
-  else
-    let* progress = single json "answer_progress" in
-    let* state = string progress "state" in
-    match state with
-    | "unavailable" -> Error "answer follow-up evidence is unavailable"
-    | "observed" ->
-        let* answered_at = single progress "answered_at" in
-        let* af_answered_at = finite answered_at in
-        let* af_stimulus_id = string progress "stimulus_id" in
-        if String.equal af_stimulus_id "" then Error "answer follow-up source identity is empty" else
-        let* reactions = single progress "reaction_evidence" in
+let followup_field json name = match json with
+  | `Assoc fields ->
+    (match List.filter (fun (key,_) -> String.equal key name) fields with
+     | [_,value] -> Ok value
+     | _ -> Error ("answer follow-up field is missing or duplicated: " ^ name))
+  | _ -> Error "answer follow-up must be an object"
+
+let followup_string json name =
+  let* value = followup_field json name in
+  match value with `String value -> Ok value | _ -> Error ("invalid answer follow-up string: " ^ name)
+
+let followup_finite = function
+  | `Float value when Float.is_finite value -> Ok value
+  | `Int value -> Ok (float_of_int value)
+  | _ -> Error "answer follow-up clock is not finite"
+
+let decode_followup_reactions reactions =
+  let single = followup_field and string = followup_string and finite = followup_finite in
         let* reaction_state = string reactions "state" in
-        let* af_reactions = match reaction_state with
+        match reaction_state with
           | "unavailable" -> Ok Ask_reactions_unavailable
           | "observed" ->
             let clock name = let* value = single reactions name in match value with
@@ -290,10 +278,12 @@ let decode_ask_followup ~expected_base_path ~expected_masc_root ~keeper_name ~as
               | _ -> Error "answer follow-up evidence completeness is invalid" in
             Ok (Ask_reactions_observed {ar_turn_started_at;ar_turn_finished_at;
               ar_queue_settled_at;ar_queue_cancelled_at;ar_evidence_complete;ar_evidence_current=true})
-          | _ -> Error "answer follow-up reaction evidence state is invalid" in
-        let* actions = single progress "tool_actions" in
+          | _ -> Error "answer follow-up reaction evidence state is invalid"
+
+let decode_followup_tools actions =
+  let single = followup_field and string = followup_string and finite = followup_finite in
         let* action_state = string actions "state" in
-        let* af_tool_actions = match action_state with
+        match action_state with
           | "unavailable" -> Ok Ask_tools_unavailable
           | "observed" ->
               let* count = single actions "observed_count" in
@@ -324,12 +314,14 @@ let decode_ask_followup ~expected_base_path ~expected_masc_root ~keeper_name ~as
                | n, Some first, Some last when n>0 && first<=last.ata_recorded_at ->
                    Ok (Ask_tools_observed {at_count;at_first_recorded_at;at_latest;at_evidence_current=true})
                | _ -> Error "answer Tool count and observation clocks disagree")
-          | _ -> Error "unknown answer Tool observation state" in
-        let* linked = single progress "linked_task" in
+          | _ -> Error "unknown answer Tool observation state"
+
+let decode_followup_task linked =
+  let single = followup_field and string = followup_string and finite = followup_finite in
         let* linked_state = string linked "state" in
         let task_id () = let* value = string linked "task_id" in
           if String.trim value = "" then Error "linked Task identity is blank" else Ok value in
-        let* af_linked_task = match linked_state with
+        match linked_state with
           | "unlinked" ->
               (match linked with
                | `Assoc [_] -> Ok Ask_task_unlinked
@@ -348,9 +340,106 @@ let decode_ask_followup ~expected_base_path ~expected_masc_root ~keeper_name ~as
               let* akt_status = Task_status_observation.of_yojson status in
               Ok (Ask_task_observed {akt_task_id; akt_location; akt_status; akt_observed_at;
                 akt_evidence_current = true})
-          | _ -> Error "unknown linked Task observation state" in
-        Ok {af_answered_at;af_stimulus_id;af_reactions;af_tool_actions;af_linked_task}
-    | _ -> Error "unknown answer follow-up state"
+          | _ -> Error "unknown linked Task observation state"
+
+type ask_followup_identity = { afi_answered_at : float; afi_stimulus_id : string }
+type ask_followup_source =
+  | Ask_followup_reactions of ask_reactions
+  | Ask_followup_tools of ask_tool_actions
+  | Ask_followup_task of ask_linked_task
+type ask_followup_event =
+  | Ask_followup_started of ask_followup_identity
+  | Ask_followup_source of ask_followup_identity * ask_followup_source
+  | Ask_followup_completed of ask_followup_identity
+
+let decode_followup_context ~expected_base_path ~expected_masc_root ~keeper_name ~ask_id json =
+  let* () = validate_asks_workspace ~expected_base_path ~expected_masc_root json in
+  let* keeper = followup_string json "keeper" in
+  let* answer_id = followup_string json "answer_progress_for" in
+  if not (String.equal keeper keeper_name && String.equal answer_id ask_id) then
+    Error "answer follow-up belongs to a different Keeper or question"
+  else followup_field json "answer_progress"
+
+let decode_followup_identity progress =
+  let* answered_at = followup_field progress "answered_at" in
+  let* afi_answered_at = followup_finite answered_at in
+  let* afi_stimulus_id = followup_string progress "stimulus_id" in
+  if String.equal afi_stimulus_id "" then Error "answer follow-up source identity is empty"
+  else Ok {afi_answered_at;afi_stimulus_id}
+
+let decode_ask_followup ~expected_base_path ~expected_masc_root ~keeper_name ~ask_id json =
+  let* progress = decode_followup_context ~expected_base_path ~expected_masc_root ~keeper_name ~ask_id json in
+  let* state = followup_string progress "state" in
+  match state with
+  | "unavailable" -> Error "answer follow-up evidence is unavailable"
+  | "observed" ->
+    let* identity = decode_followup_identity progress in
+    let* reactions = followup_field progress "reaction_evidence" in
+    let* af_reactions = decode_followup_reactions reactions in
+    let* tools = followup_field progress "tool_actions" in
+    let* af_tool_actions = decode_followup_tools tools in
+    let* task = followup_field progress "linked_task" in
+    let* af_linked_task = decode_followup_task task in
+    Ok {af_answered_at=identity.afi_answered_at;af_stimulus_id=identity.afi_stimulus_id;
+      af_reactions;af_tool_actions;af_linked_task}
+  | _ -> Error "unknown answer follow-up state"
+
+let decode_ask_followup_event ~expected_base_path ~expected_masc_root ~keeper_name ~ask_id json =
+  let* progress = decode_followup_context ~expected_base_path ~expected_masc_root ~keeper_name ~ask_id json in
+  let* identity = decode_followup_identity progress in
+  let* phase = followup_string progress "state" in
+  match phase with
+  | "started" -> Ok (Ask_followup_started identity)
+  | "complete" -> Ok (Ask_followup_completed identity)
+  | "source" ->
+    let* source = followup_string progress "source" in
+    let* value = followup_field progress "value" in
+    let* source = match source with
+      | "reaction_evidence" -> decode_followup_reactions value |> Result.map (fun value -> Ask_followup_reactions value)
+      | "tool_actions" -> decode_followup_tools value |> Result.map (fun value -> Ask_followup_tools value)
+      | "linked_task" -> decode_followup_task value |> Result.map (fun value -> Ask_followup_task value)
+      | _ -> Error "unknown answer follow-up source" in
+    Ok (Ask_followup_source (identity,source))
+  | _ -> Error "unknown answer follow-up stream phase"
+
+type ask_followup_stream =
+  | Awaiting_followup
+  | Receiving_followup of
+      { identity : ask_followup_identity; reactions_seen : bool; tools_seen : bool; task_seen : bool }
+  | Completed_followup
+
+let empty_ask_followup_stream = Awaiting_followup
+let same_followup_identity left right =
+  left.afi_answered_at=right.afi_answered_at && String.equal left.afi_stimulus_id right.afi_stimulus_id
+
+let accept_ask_followup_event stream event =
+  match stream,event with
+  | Awaiting_followup,Ask_followup_started identity ->
+    Ok (Receiving_followup {identity;reactions_seen=false;tools_seen=false;task_seen=false})
+  | Awaiting_followup,(Ask_followup_source _ | Ask_followup_completed _) -> Error "follow-up source arrived before start"
+  | Receiving_followup _,Ask_followup_started _ -> Error "follow-up start repeated"
+  | Receiving_followup reading,Ask_followup_source (identity,source) ->
+    if not (same_followup_identity reading.identity identity) then Error "follow-up source changed original answer"
+    else (match source with
+      | Ask_followup_reactions _ ->
+        if reading.reactions_seen then Error "follow-up reaction source repeated"
+        else Ok (Receiving_followup {reading with reactions_seen=true})
+      | Ask_followup_tools _ ->
+        if reading.tools_seen then Error "follow-up Tool source repeated"
+        else Ok (Receiving_followup {reading with tools_seen=true})
+      | Ask_followup_task _ ->
+        if reading.task_seen then Error "follow-up Task source repeated"
+        else Ok (Receiving_followup {reading with task_seen=true}))
+  | Receiving_followup reading,Ask_followup_completed identity ->
+    if not (same_followup_identity reading.identity identity) then Error "follow-up completion changed original answer"
+    else if reading.reactions_seen && reading.tools_seen && reading.task_seen then Ok Completed_followup
+    else Error "follow-up completed before every source settled"
+  | Completed_followup,(Ask_followup_started _ | Ask_followup_source _ | Ask_followup_completed _) ->
+    Error "follow-up event arrived after completion"
+
+let finish_ask_followup_stream = function
+  | Completed_followup -> Ok ()
+  | Awaiting_followup | Receiving_followup _ -> Error "follow-up stream ended before complete evidence delivery"
 
 type ask_answer_delivery =
   | Ask_wake_stored

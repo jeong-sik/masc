@@ -738,6 +738,50 @@ let test_already_answered_receipt_keeps_the_conflict () =
     check bool "no requesting losing actor is called winner" true (member "actor" body = `Null)) [ true; false ]
 ;;
 
+let test_followup_publishes_sources_before_join () =
+  with_persistence @@ fun config ensure_keeper ->
+  let base_path=config.Workspace.base_path and keeper_name="alpha" in
+  ensure_keeper keeper_name;
+  let task_id = match Workspace_task_create.add_task config ~agent_name:keeper_name
+      ~title:"original streamed Task" ~priority:3 ~description:"source delivery fixture" with
+    | Ok created -> created.task_id
+    | Error error -> fail (Workspace_task_create.add_task_error_to_string error) in
+  let ask = persist_answer ~base_path ~keeper_name ~ask_id:"streamed-original" ~task_id () in
+  let resolution = match Keeper_ask_store.rows_result ~base_path ~keeper_name with
+    | Ok (Keeper_ask_store.Stored_rows rows) -> snd (List.assoc ask.ask_id rows)
+    | Ok Missing_log | Error _ -> fail "stream source lost its canonical answer" in
+  let task_ready,task_resolve = Eio.Promise.create () in
+  let release,release_resolve = Eio.Promise.create () in
+  let started = ref None and joined = ref false in
+  let observed,_ = Eio.Fiber.pair
+      (fun () ->
+        let result = Wake.observe_followup ~base_path ~keeper_name ~ask ~resolution
+            ~on_started:(fun identity ->
+              check bool "one canonical answer capture starts the source stream" true (Option.is_none !started);
+              started := Some identity)
+            ~on_source:(fun identity source ->
+              (match !started with
+               | Some original -> check bool "every source retains the original answer" true
+                   (original=identity)
+               | None -> fail "source preceded canonical identity");
+              match source with
+              | Wake.Reaction_evidence _ -> Eio.Promise.await release
+              | Tool_results _ -> ()
+              | Linked_task (Wake.Task_observed value) ->
+                check string "early Task belongs to the original question" task_id value.task_id;
+                Eio.Promise.resolve task_resolve ()
+              | Linked_task (Task_unlinked | Task_missing _ | Task_unavailable _) ->
+                fail "original streamed Task was unavailable") () in
+        joined := true;
+        result)
+      (fun () ->
+        Eio.Promise.await task_ready;
+        check bool "a usable Task source arrives before the aggregate settles" false !joined;
+        Eio.Promise.resolve release_resolve ()) in
+  check bool "all source readers still settle the aggregate" true (Result.is_ok observed);
+  check int "streaming observations create no wake" 0 (List.length (pending_asks ~base_path ~keeper_name))
+;;
+
 let test_followup_reads_exact_source_without_waking () =
   with_persistence @@ fun config ensure_keeper ->
   let base_path = config.Workspace.base_path and keeper_name = "alpha" in
@@ -747,7 +791,7 @@ let test_followup_reads_exact_source_without_waking () =
     | Ok (Keeper_ask_store.Stored_rows rows) -> snd (List.assoc ask.ask_id rows)
     | Ok Missing_log -> fail "canonical answer disappeared"
     | Error error -> fail (Keeper_ask_store.read_error_to_string error) in
-  let observe () = Wake.observe_followup ~base_path ~keeper_name ~ask ~resolution
+  let observe () = Wake.observe_followup ~base_path ~keeper_name ~ask ~resolution ()
       |> function Ok value -> value | Error detail -> fail detail in
   let before = observe () |> Wake.followup_to_json in
   check bool "no turn is invented from recording the answer" true
@@ -780,7 +824,7 @@ let test_followup_reads_exact_source_without_waking () =
   check int "repeated observation never duplicates the pending source" 1
     (List.length (pending_asks ~base_path ~keeper_name));
   check bool "another Keeper cannot inherit this question's source" true
-    (Result.is_error (Wake.observe_followup ~base_path ~keeper_name:"beta" ~ask ~resolution));
+    (Result.is_error (Wake.observe_followup ~base_path ~keeper_name:"beta" ~ask ~resolution ()));
   List.iter (fun field -> check bool "followup metadata carries no human content or invented action" true
     (Yojson.Safe.Util.member field finished = `Null)) ["answers";"questions";"responder";"tool_action";"quarantine_reason"];
   Dated_jsonl.append (Dated_jsonl.open_store (Keeper_reaction_ledger.location ~base_path ~keeper_name))
@@ -818,7 +862,7 @@ let test_followup_keeps_original_task_through_archive_and_read_failure () =
     | Ok (Keeper_ask_store.Stored_rows rows) -> snd (List.assoc ask.Keeper_ask.ask_id rows)
     | Ok Missing_log -> fail "canonical answer disappeared"
     | Error error -> fail (Keeper_ask_store.read_error_to_string error) in
-  let observe ask = match Wake.observe_followup ~base_path ~keeper_name ~ask ~resolution:(resolution ask) with
+  let observe ask = match Wake.observe_followup ~base_path ~keeper_name ~ask ~resolution:(resolution ask) () with
     | Ok value -> value | Error detail -> fail detail in
   let check_status label location status = match (observe ask).linked_task with
     | Wake.Task_observed value ->
@@ -892,7 +936,7 @@ let test_followup_queue_settlement_does_not_invent_a_turn () =
   (match Queue.terminalize_pending_turn_completed_result ~base_path keeper_name ~applied_at:301. ~selection with
    | Ok (Queue.Turn_source_acked _) -> ()
    | Ok Queue.Turn_selection_withdrawn -> fail "original selection withdrawn" | Error detail -> fail detail);
-  let observed = match Wake.observe_followup ~base_path ~keeper_name ~ask ~resolution with
+  let observed = match Wake.observe_followup ~base_path ~keeper_name ~ask ~resolution () with
     | Ok observed -> Wake.followup_to_json observed | Error detail -> fail detail in
   check bool "queue settlement is an independent positive fact" true
     (Yojson.Safe.Util.member "queue_settled_at" (Yojson.Safe.Util.member "reaction_evidence" observed) <> `Null);
@@ -937,7 +981,7 @@ let test_followup_matches_committed_answer_input_tool_rows () =
   let other_source = Keeper_ask.answer_source_id ~ask_id:ask.ask_id ~answered_at:(answered_at+.1.)
       |> Option.get in
   Keeper_tool_call_log.init ~base_path ();
-  let observe () = match Wake.observe_followup ~base_path ~keeper_name ~ask ~resolution with
+  let observe () = match Wake.observe_followup ~base_path ~keeper_name ~ask ~resolution () with
     | Ok value -> value | Error detail -> fail detail in
   let actions () = match (observe ()).tool_actions with
     | Ok actions -> actions | Error detail -> fail detail in
@@ -1037,6 +1081,8 @@ let () =
             test_followup_queue_settlement_does_not_invent_a_turn
         ; test_case "followup reads exact source without waking" `Quick
             test_followup_reads_exact_source_without_waking
+        ; test_case "followup publishes original Task source before aggregate join" `Quick
+            test_followup_publishes_sources_before_join
         ; test_case "the wake survives the queue" `Quick test_the_wake_survives_the_queue
         ; test_case "the wake is keyed by the question" `Quick
             test_the_wake_is_keyed_by_the_question

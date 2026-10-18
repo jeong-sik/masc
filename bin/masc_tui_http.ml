@@ -3750,6 +3750,46 @@ let fetch_keeper_asks ?keeper_name ~(expected_workspace : Masc.Tui_decode.server
           ~expected_masc_root:(Masc_tui_types.canonical_path expected_workspace.sid_masc_root) json
       | exception Yojson.Json_error detail -> Error ("asks were not JSON: " ^ detail))
 
+exception Ask_followup_protocol_error of string
+
+let observe_keeper_ask_followup ~clock ~(expected_workspace : Masc.Tui_decode.server_identity)
+    ~keeper_name ~ask_id ~host ~port ~on_event =
+  let module Decode = Masc.Tui_decode_asks in
+  let path = Printf.sprintf
+      "/api/v1/keepers/asks?name=%s&answer_progress_for=%s&answer_progress_stream=true&%s"
+      (percent_encode_query_value keeper_name) (percent_encode_query_value ask_id)
+      (expected_workspace_query expected_workspace) in
+  let expected_base_path = Masc_tui_types.canonical_path expected_workspace.sid_base_path
+  and expected_masc_root = Masc_tui_types.canonical_path expected_workspace.sid_masc_root in
+  let decoder = Sse_wire.create_decoder () in
+  let reading = ref (Ok Decode.empty_ask_followup_stream) in
+  let reject detail = reading := Error detail; raise (Ask_followup_protocol_error detail) in
+  let on_chunk chunk =
+    List.iter (fun (frame : Sse_wire.frame) ->
+      match !reading with
+      | Error detail -> reject detail
+      | Ok prior ->
+        let event = Masc_tui_response_decode.run ~name:"ask.followup.decode_wait" (fun () ->
+          match Yojson.Safe.from_string frame.data with
+          | json -> Decode.decode_ask_followup_event ~expected_base_path ~expected_masc_root
+              ~keeper_name ~ask_id json
+          | exception Yojson.Json_error detail -> Error ("answer follow-up frame was not JSON: " ^ detail)) in
+        match event with
+        | Error detail -> reject detail
+        | Ok event ->
+          match Decode.accept_ask_followup_event prior event with
+          | Error detail -> reject detail
+          | Ok next -> reading := Ok next; on_event event)
+      (Sse_wire.feed decoder chunk) in
+  try match Masc_http_client.get_stream ~clock ~idle_timeout_sec:keeper_chat_timeout_sec
+      ~url:(url_of ~host ~port ~path)
+      ~headers:(json_headers (("Accept","text/event-stream")::auth_headers ())) ~on_chunk () with
+  | Error detail -> (match !reading with Error detail -> Error detail | Ok _ -> Error detail)
+  | Ok (Masc_http_client.Pool.Buffered {status;body;_}) -> Error (refusal ~status_code:status ~body)
+  | Ok (Masc_http_client.Pool.Streamed _) ->
+    Result.bind !reading Decode.finish_ask_followup_stream
+  with Ask_followup_protocol_error detail -> Error detail
+
 let fetch_keeper_ask_followup ~(expected_workspace : Masc.Tui_decode.server_identity)
     ~keeper_name ~ask_id ~host ~port =
   let path = Printf.sprintf "/api/v1/keepers/asks?name=%s&answer_progress_for=%s&%s"

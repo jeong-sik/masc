@@ -142,6 +142,35 @@ val decode_ask_followup :
     readiness, Keeper and Ask identities. Missing/malformed evidence is an
     error; an absent reaction clock means unobserved, not a negative verdict. *)
 
+type ask_followup_identity = private {
+  afi_answered_at : float;
+  afi_stimulus_id : string;
+}
+type ask_followup_source =
+  | Ask_followup_reactions of ask_reactions
+  | Ask_followup_tools of ask_tool_actions
+  | Ask_followup_task of ask_linked_task
+type ask_followup_event =
+  | Ask_followup_started of ask_followup_identity
+  | Ask_followup_source of ask_followup_identity * ask_followup_source
+  | Ask_followup_completed of ask_followup_identity
+
+val decode_ask_followup_event :
+  expected_base_path:string -> expected_masc_root:string ->
+  keeper_name:string -> ask_id:string -> Yojson.Safe.t ->
+  (ask_followup_event, string) result
+(** Every frame retains full workspace, original answer and Keeper/Ask identity.
+    A source frame contains only the named source, never placeholders for peers. *)
+
+type ask_followup_stream
+val empty_ask_followup_stream : ask_followup_stream
+val accept_ask_followup_event :
+  ask_followup_stream -> ask_followup_event -> (ask_followup_stream, string) result
+val finish_ask_followup_stream : ask_followup_stream -> (unit, string) result
+(** Require a single start, each typed source exactly once, then completion with
+    the unchanged answer identity. EOF alone, duplicate or missing sources,
+    changed identity and events after completion cannot establish a full read. *)
+
 type ask_answer_receipt =
   | Ask_answer_recorded of ask_answer_delivery
   | Ask_answer_already_recorded of {

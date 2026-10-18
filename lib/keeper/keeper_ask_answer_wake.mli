@@ -71,12 +71,23 @@ type followup = {
   linked_task : linked_task;
 }
 
+type followup_identity = { answered_at : float; stimulus_id : string }
+type followup_source =
+  | Reaction_evidence of (Keeper_reaction_ledger.event_queue_reaction_evidence_outcome, string) result
+  | Tool_results of (tool_actions, string) result
+  | Linked_task of linked_task
+
 val observe_followup :
+  ?on_started:(followup_identity -> unit) ->
+  ?on_source:(followup_identity -> followup_source -> unit) ->
   base_path:string -> keeper_name:string -> ask:Keeper_ask.ask ->
-  resolution:Keeper_ask.resolution -> (followup, string) result
+  resolution:Keeper_ask.resolution -> unit -> (followup, string) result
 (** Read-only evidence for the exact source of this canonical answered row.
     Reaction, Tool and linked Task reads are independent; one unavailable
     source cannot hide another source's positive observation.
+    [on_started] runs once after canonical answer validation. Each [on_source]
+    runs when that source settles, before the aggregate join; callback failure
+    cancels the read scope rather than repeating a source or hiding disconnect.
     No enqueue, wake hint or answer write. Turn entry/boundary and queue
     settlement are observations; neither a queue transfer nor an ACK proves
     answer consumption, Tool action or completion of the Keeper's work. *)
@@ -86,6 +97,10 @@ val followup_to_json : followup -> Yojson.Safe.t
     quarantine reason code, known physical Tool results and linked Task status
     metadata. No question, answer text, responder identity, Task
     title/description, completion notes or reason. *)
+
+val followup_source_to_json : followup_source -> string * Yojson.Safe.t
+(** Typed source name and the same private-content-free source projection used
+    by the aggregate response. No unavailable placeholder for another source. *)
 
 type failure = { keeper_name : string option; ask_id : string option; error : error }
 type report =

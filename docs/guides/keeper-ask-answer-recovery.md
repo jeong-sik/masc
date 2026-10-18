@@ -142,6 +142,15 @@ behavior.
 
 ## Independent follow-up sources
 
+An exact named follow-up request may opt into `answer_progress_stream=true`.
+It emits one canonical start, each source as it settles, then matching read
+completion over SSE. Every frame retains workspace, Keeper, Ask, answer time and
+stimulus identity. A missing/duplicate source or EOF without completion is not
+a successful full read. Source frames contain no placeholders for pending peers.
+The common receiver is available; the Questions pane still uses aggregate reads
+until its per-source state integration is connected. See the
+[stream source audit](../audits/2026-10-18-ask-followup-source-stream.md) for limits.
+
 The opt-in `answer_progress` response keeps canonical answer identity outside
 three independent source branches. `reaction_evidence` is either unavailable or
 observed with turn/queue clocks and evidence completeness; `tool_actions` and

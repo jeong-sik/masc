@@ -665,11 +665,46 @@ let test_followup_protocol_keeps_exact_identity_and_unknowns () =
     (Result.is_error (decode fields (with_actions (`Assoc ["state",`String "observed";
        "observed_count",`Int 1; "first_recorded_at",`Null; "latest",`Null]))))
 
+let test_followup_stream_requires_each_original_source () =
+  let module Decode = Masc.Tui_decode_asks in
+  let frame ?(at=200.) ?(keeper="alpha") phase fields =
+    `Assoc ["workspace",`Assoc ["base_path",`String "/workspace";"masc_root",`String "/workspace/.masc"];
+      "state_ready",`Bool true;"keeper",`String keeper;"answer_progress_for",`String "ask-original";
+      "answer_progress",`Assoc (["state",`String phase;"answered_at",`Float at;
+        "stimulus_id",`String "original-source"] @ fields)] in
+  let decode json = Decode.decode_ask_followup_event ~expected_base_path:"/workspace"
+      ~expected_masc_root:"/workspace/.masc" ~keeper_name:"alpha" ~ask_id:"ask-original" json in
+  let event phase fields = decode (frame phase fields) |> Result.get_ok in
+  let source name value = event "source" ["source",`String name;"value",value] in
+  let started = event "started" [] and completed = event "complete" [] in
+  let task = source "linked_task" (`Assoc ["state",`String "unlinked"])
+  and tools = source "tool_actions" (`Assoc ["state",`String "unavailable"])
+  and reactions = source "reaction_evidence" (`Assoc ["state",`String "unavailable"]) in
+  let accept stream event = Decode.accept_ask_followup_event stream event |> Result.get_ok in
+  let reading = accept Decode.empty_ask_followup_stream started |> fun reading -> accept reading task in
+  Alcotest.(check bool) "an early source does not claim a complete response" true
+    (Result.is_error (Decode.finish_ask_followup_stream reading));
+  List.iter (fun duplicate -> Alcotest.(check bool) "duplicate or premature terminal frames are refused" true
+    (Result.is_error (Decode.accept_ask_followup_event reading duplicate))) [started;task;completed];
+  let changed = decode (frame ~at:201. "source"
+      ["source",`String "tool_actions";"value",`Assoc ["state",`String "unavailable"]]) |> Result.get_ok in
+  Alcotest.(check bool) "another canonical answer time cannot finish an old source" true
+    (Result.is_error (Decode.accept_ask_followup_event reading changed));
+  Alcotest.(check bool) "another Keeper cannot borrow the stream" true
+    (Result.is_error (decode (frame ~keeper:"beta" "started" [])));
+  let complete = List.fold_left accept reading [tools;reactions;completed] in
+  Alcotest.(check bool) "all independently settled sources authorize transport completion" true
+    (Result.is_ok (Decode.finish_ask_followup_stream complete));
+  Alcotest.(check bool) "a post-completion source cannot reopen a read" true
+    (Result.is_error (Decode.accept_ask_followup_event complete task))
+
 let () =
   Alcotest.run "TUI ask projection"
     [ ( "answer receipt",
         [ Alcotest.test_case "followup protocol preserves original identity and unknown evidence" `Quick
             test_followup_protocol_keeps_exact_identity_and_unknowns
+        ; Alcotest.test_case "streamed followup requires each exact original source" `Quick
+            test_followup_stream_requires_each_original_source
         ; Alcotest.test_case "question source is explicit and unambiguous" `Quick
             test_question_source_is_explicit_and_unambiguous
         ; Alcotest.test_case "retained feedback preserves original receipt and winner" `Quick

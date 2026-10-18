@@ -139,6 +139,168 @@ struct WireState {
         guard !exclusive, pending.isEmpty else { throw MidiFailure("source ends inside a MIDI wire message") }
     }
 }
+// Reconstruction retains channel-message order for bank/program and RPN writes.
+// It never replays opaque device commands or invents an unknown initial value.
+struct ChaseField: Hashable {
+    enum Kind: Hashable { case controller(UInt8), program, bend, pressure, poly(UInt8), parameter(UInt16, UInt8) }
+    let port: UInt8
+    let channel: UInt8
+    let kind: Kind
+}
+struct ChaseNote {
+    let pitch: UInt8
+    let velocity: UInt8
+    var held = true
+    var captured = false
+    var release: UInt8 = 0
+    var releaseStatus: UInt8 = 0x80
+}
+struct ChaseChannel {
+    var notes: [ChaseNote] = []
+    var sustain: UInt8 = 0, sostenuto: UInt8 = 0
+    var pressure: UInt8?
+    var poly: [UInt8: UInt8] = [:]
+    var rpnMSB: UInt8?, rpnLSB: UInt8?
+    var nrpn = false
+    var parameters: [UInt16: Set<UInt8>] = [:]
+    mutating func prune() {
+        notes.removeAll { !$0.held && sustain < 64 && !(sostenuto >= 64 && $0.captured) }
+    }
+}
+enum ChaseObstacle: String, Hashable {
+    case system = "opaque SysEx or system messages"
+    case mode = "channel mode changes"
+    case hold2 = "Hold 2 pedal"
+    case velocity = "high resolution velocity prefix"
+    case nrpn = "device-specific NRPN data"
+    case parameter = "incomplete or unsupported RPN state"
+    case relative = "relative parameter data without an absolute baseline"
+}
+struct SourceChase {
+    var channels: [UInt16: ChaseChannel] = [:]
+    var history: [(UInt8, [UInt8])] = []
+    var touched = Set<ChaseField>(), known = Set<ChaseField>()
+    var obstacles = Set<ChaseObstacle>()
+    mutating func observe(_ bytes: [UInt8], port: UInt8) {
+        guard let status = bytes.first else { return }
+        guard status < 0xf0 else { obstacles.insert(.system); return }
+        let channel = status & 15, key = UInt16(port) << 8 | UInt16(channel), type = status & 0xf0
+        var state = channels[key] ?? ChaseChannel()
+        func field(_ kind: ChaseField.Kind) -> ChaseField { ChaseField(port: port, channel: channel, kind: kind) }
+        func mark(_ kind: ChaseField.Kind) { let value = field(kind); touched.insert(value); known.insert(value) }
+        switch type {
+        case 0x90 where bytes[2] > 0:
+            state.notes.append(ChaseNote(pitch: bytes[1], velocity: bytes[2]))
+        case 0x80, 0x90:
+            if let index = state.notes.firstIndex(where: { $0.pitch == bytes[1] && $0.held }) {
+                state.notes[index].held = false
+                state.notes[index].release = bytes[2]
+                state.notes[index].releaseStatus = status
+            }
+            state.prune()
+        case 0xa0:
+            state.poly[bytes[1]] = bytes[2]; mark(.poly(bytes[1]))
+        case 0xd0:
+            state.pressure = bytes[1]; mark(.pressure)
+        case 0xc0:
+            history.append((port, bytes)); mark(.program)
+        case 0xe0:
+            history.append((port, bytes)); mark(.bend)
+        case 0xb0:
+            let cc = bytes[1], value = bytes[2]
+            if cc < 120 && ![6, 38, 96, 97].contains(cc) { mark(.controller(cc)) }
+            switch cc {
+            case 64:
+                state.sustain = value; state.prune()
+            case 66:
+                if state.sostenuto < 64 && value >= 64 {
+                    for index in state.notes.indices where state.notes[index].held { state.notes[index].captured = true }
+                }
+                state.sostenuto = value
+                if value < 64 { for index in state.notes.indices { state.notes[index].captured = false } }
+                state.prune()
+            case 69:
+                if value >= 64 { obstacles.insert(.hold2) }
+                history.append((port, bytes))
+            case 88:
+                obstacles.insert(.velocity)
+            case 120:
+                state.notes.removeAll(); history.append((port, bytes))
+            case 121:
+                state.sustain = 0; state.sostenuto = 0
+                for index in state.notes.indices { state.notes[index].captured = false }
+                state.prune(); state.pressure = 0; state.poly.removeAll()
+                state.rpnMSB = 127; state.rpnLSB = 127; state.nrpn = false
+                // The source reset establishes these values, including pressure
+                // for every key. Parameter data, volume, pan and program persist.
+                mark(.pressure); mark(.bend)
+                for pitch: UInt8 in 0...127 { mark(.poly(pitch)) }
+                for controller: UInt8 in [1, 11, 64, 65, 66, 67, 98, 99, 100, 101] { mark(.controller(controller)) }
+                history.append((port, bytes))
+            case 123:
+                // This mode has no per-note release byte. Chase its implicit
+                // offs at neutral velocity 64, retaining earlier explicit offs.
+                for index in state.notes.indices where state.notes[index].held {
+                    state.notes[index].held = false
+                    state.notes[index].release = 64
+                    state.notes[index].releaseStatus = 0x80 | channel
+                }
+                state.prune()
+            case 122, 124...127:
+                obstacles.insert(.mode)
+            case 98, 99:
+                state.nrpn = true; history.append((port, bytes))
+            case 100, 101:
+                state.nrpn = false
+                if cc == 100 { state.rpnLSB = value } else { state.rpnMSB = value }
+                history.append((port, bytes))
+            case 6, 38, 96, 97:
+                history.append((port, bytes))
+                if state.nrpn { obstacles.insert(.nrpn) }
+                else if let high = state.rpnMSB, let low = state.rpnLSB, high == 127 && low == 127 {
+                    // Null RPN selection makes Data Entry ineffectual.
+                } else if let high = state.rpnMSB, let low = state.rpnLSB, high == 0 && low <= 5 {
+                    let id = UInt16(high) << 7 | UInt16(low)
+                    if cc == 6 || cc == 38 {
+                        state.parameters[id, default: []].insert(cc)
+                        mark(.parameter(id, cc))
+                    } else {
+                        for component: UInt8 in [6, 38] { touched.insert(field(.parameter(id, component))) }
+                        if state.parameters[id] != Set([6,38]) { obstacles.insert(.relative) }
+                    }
+                } else { obstacles.insert(.parameter) }
+            default:
+                history.append((port, bytes))
+            }
+        default: break
+        }
+        channels[key] = state
+    }
+    func bootstrap(replacing previous: SourceChase) throws -> [(UInt8, [UInt8])] {
+        let unsafe = obstacles.union(previous.obstacles)
+        guard unsafe.isEmpty else {
+            throw MidiFailure("source state reconstruction requires support for " + unsafe.map(\.rawValue).sorted().joined(separator: ", "))
+        }
+        guard previous.touched.isSubset(of: known) else {
+            throw MidiFailure("source seek cannot restore an initial channel value absent from the source prefix")
+        }
+        var result = history
+        for key in channels.keys.sorted() {
+            let state = channels[key]!, port = UInt8(key >> 8), channel = UInt8(key & 15)
+            // silence() already releases owned keys/pedals. Restore the captured
+            // set before switching sostenuto on; later keys must remain outside it.
+            for note in state.notes where note.captured { result.append((port, [0x90 | channel, note.pitch, note.velocity])) }
+            if known.contains(ChaseField(port: port, channel: channel, kind: .controller(66))) { result.append((port, [0xb0 | channel, 66, state.sostenuto])) }
+            if known.contains(ChaseField(port: port, channel: channel, kind: .controller(64))) { result.append((port, [0xb0 | channel, 64, state.sustain])) }
+            for note in state.notes where !note.captured { result.append((port, [0x90 | channel, note.pitch, note.velocity])) }
+            for note in state.notes where !note.held { result.append((port, [note.releaseStatus, note.pitch, note.release])) }
+            if let pressure = state.pressure { result.append((port, [0xd0 | channel, pressure])) }
+            for pitch in state.poly.keys.sorted() { result.append((port, [0xa0 | channel, pitch, state.poly[pitch]!])) }
+        }
+        return result
+    }
+}
+
 struct WireEvent: Decodable {
     let seconds: Double
     let port: UInt8
@@ -241,6 +403,7 @@ final class MidiTransport {
     var held: [UInt16: Event] = [:]
     var maximumLateness = 0.0
     var sourceDestinations: [UInt8: Destination] = [:], wireStates: [UInt8: WireState] = [:]
+    var sourceModel = SourceChase()
     var sourceExclusive = Set<UInt8>()
     var sourceHeld: [UInt8: [UInt16: Int]] = [:], sourcePedals: [UInt8: Set<UInt16>] = [:]
 
@@ -320,7 +483,7 @@ final class MidiTransport {
         }
     }
     func sourceApply(_ event: WireEvent) throws {
-        guard var decoder = wireStates[event.port], let destination = sourceDestinations[event.port] else {
+        guard var decoder = wireStates[event.port] else {
             throw MidiFailure("source MIDI port is not prepared")
         }
         let messages = try decoder.feed(event.bytes)
@@ -328,37 +491,42 @@ final class MidiTransport {
         // cleanup closes an exclusive stream before sending channel note-offs.
         wireStates[event.port] = decoder
         for bytes in messages {
-            // Acquire ownership before sending: a failed OSStatus cannot prove
-            // that the endpoint did not receive a note or pedal-on. Release it
-            // only after success, so failure cleanup retries uncertain releases.
-            if let status = bytes.first {
-                let channel = UInt16(status & 15), type = status & 0xf0
-                if bytes.count == 3 && type == 0x90 && bytes[2] > 0 {
-                    let key = channel << 8 | UInt16(bytes[1]), count = sourceHeld[event.port]?[key] ?? 0
-                    sourceHeld[event.port, default: [:]][key] = count + 1
-                } else if bytes.count == 3 && type == 0xb0 && [64, 66, 69].contains(bytes[1]) && bytes[2] >= 64 {
-                    sourcePedals[event.port, default: []].insert(channel << 8 | UInt16(bytes[1]))
-                }
-            }
-            if bytes.first == 0xf0 { sourceExclusive.insert(event.port) }
-            try sendWire(bytes, to: destination)
-            if let status = bytes.first {
-                let channel = UInt16(status & 15), type = status & 0xf0
-                if status == 0xff { sourceHeld[event.port] = [:]; sourcePedals[event.port] = [] }
-                else if bytes.count == 3 && (type == 0x80 || type == 0x90 && bytes[2] == 0) {
-                    let key = channel << 8 | UInt16(bytes[1]), count = sourceHeld[event.port]?[key] ?? 0
-                    sourceHeld[event.port, default: [:]][key] = max(0, count - 1)
-                } else if bytes.count == 3 && type == 0xb0 {
-                    let controller = bytes[1], key = channel << 8 | UInt16(controller)
-                    if [64, 66, 69].contains(controller) && bytes[2] < 64 { sourcePedals[event.port]?.remove(key) }
-                    if controller == 121 { sourcePedals[event.port] = (sourcePedals[event.port] ?? []).filter { $0 >> 8 != channel } }
-                    if [120, 123, 124, 125, 126, 127].contains(controller) {
-                        sourceHeld[event.port] = (sourceHeld[event.port] ?? [:]).filter { $0.key >> 8 != channel }
-                    }
-                }
-            }
-            if bytes.contains(0xf7) { sourceExclusive.remove(event.port) }
+            sourceModel.observe(bytes, port: event.port)
+            try sourceSend(bytes, port: event.port)
         }
+    }
+    func sourceSend(_ bytes: [UInt8], port sourcePort: UInt8) throws {
+        guard let destination = sourceDestinations[sourcePort] else { throw MidiFailure("source MIDI port is not prepared") }
+        // Acquire ownership before sending: a failed OSStatus cannot prove
+        // that the endpoint did not receive a note or pedal-on. Release it
+        // only after success, so failure cleanup retries uncertain releases.
+        if let status = bytes.first {
+            let channel = UInt16(status & 15), type = status & 0xf0
+            if bytes.count == 3 && type == 0x90 && bytes[2] > 0 {
+                let key = channel << 8 | UInt16(bytes[1]), count = sourceHeld[sourcePort]?[key] ?? 0
+                sourceHeld[sourcePort, default: [:]][key] = count + 1
+            } else if bytes.count == 3 && type == 0xb0 && [64, 66, 69].contains(bytes[1]) && bytes[2] >= 64 {
+                sourcePedals[sourcePort, default: []].insert(channel << 8 | UInt16(bytes[1]))
+            }
+        }
+        if bytes.first == 0xf0 { sourceExclusive.insert(sourcePort) }
+        try sendWire(bytes, to: destination)
+        if let status = bytes.first {
+            let channel = UInt16(status & 15), type = status & 0xf0
+            if status == 0xff { sourceHeld[sourcePort] = [:]; sourcePedals[sourcePort] = [] }
+            else if bytes.count == 3 && (type == 0x80 || type == 0x90 && bytes[2] == 0) {
+                let key = channel << 8 | UInt16(bytes[1]), count = sourceHeld[sourcePort]?[key] ?? 0
+                sourceHeld[sourcePort, default: [:]][key] = max(0, count - 1)
+            } else if bytes.count == 3 && type == 0xb0 {
+                let controller = bytes[1], key = channel << 8 | UInt16(controller)
+                if [64, 66, 69].contains(controller) && bytes[2] < 64 { sourcePedals[sourcePort]?.remove(key) }
+                if controller == 121 { sourcePedals[sourcePort] = (sourcePedals[sourcePort] ?? []).filter { $0 >> 8 != channel } }
+                if [120, 123, 124, 125, 126, 127].contains(controller) {
+                    sourceHeld[sourcePort] = (sourceHeld[sourcePort] ?? [:]).filter { $0.key >> 8 != channel }
+                }
+            }
+        }
+        if bytes.contains(0xf7) { sourceExclusive.remove(sourcePort) }
     }
     func sourceSilence() throws {
         var failure: Error?
@@ -407,7 +575,19 @@ final class MidiTransport {
     }
     func reconcile(at seconds: Double, reconstruct: Bool = false) throws {
         if timeline.source {
-            guard !reconstruct else { throw MidiFailure("source seek/resume requires expression-state reconstruction") }
+            if reconstruct {
+                var model = SourceChase(), decoders = Dictionary(uniqueKeysWithValues: timeline.bindings.map { ($0.port, WireState()) })
+                var next = 0
+                while next < timeline.wireEvents.count && timeline.wireEvents[next].seconds <= seconds {
+                    let event = timeline.wireEvents[next]
+                    guard var decoder = decoders[event.port] else { throw MidiFailure("source MIDI port is not prepared") }
+                    for bytes in try decoder.feed(event.bytes) { model.observe(bytes, port: event.port) }
+                    decoders[event.port] = decoder; next += 1
+                }
+                for (sourcePort, bytes) in try model.bootstrap(replacing: sourceModel) { try sourceSend(bytes, port: sourcePort) }
+                sourceModel = model; wireStates = decoders; index = next
+                return
+            }
             // Expression, zero-length notes, note-off velocity and SysEx are an
             // ordered stream. Never reduce late source events to held-key state.
             while index < timeline.wireEvents.count && timeline.wireEvents[index].seconds <= seconds {
@@ -513,16 +693,14 @@ final class MidiTransport {
         do {
             let command = try JSONDecoder().decode(Command.self, from: Data(line.utf8))
             try checkDestination()
-            if timeline.source {
-                switch command {
-                case .pause, .resume, .seek: throw MidiFailure("source audition supports play/stop from the beginning; expression-state chase is not connected")
-                case .status, .stop: break
-                }
-            }
             switch command {
             case .pause:
                 if state == .playing {
                     let elapsed = position()
+                    if timeline.source {
+                        try reconcile(at: min(elapsed, timeline.duration))
+                        if elapsed >= timeline.duration { offset = timeline.duration; finish(reason: "finished"); return }
+                    }
                     offset = loop ? elapsed.truncatingRemainder(dividingBy: timeline.duration) : min(elapsed, timeline.duration)
                     state = .paused
                     timer?.cancel(); timer = nil; try silence()

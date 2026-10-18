@@ -292,6 +292,86 @@ try cleanupDecision([0xb0,64,127,0xb0,66,127], [0xb0,64,0,0xb0,66,0], expected:[
 try cleanupDecision([0xf0,0x7d,1], [2,0xf7], expected:[[0xf7],[0xf7]])
 try cleanupDecision([0xf0,0x7d,1], [2,0xf7], expected:[[0xf7]], fail:false)
 print("SOURCE_CLEANUP_RETRY_PASS: failed note/pedal/SysEx terminator cleanup stays owned and is retried once; successful releases are not repeated")
+reset(0); reviewWire = []
+let expressiveState: [[String: Any]] = [
+    ["seconds":0,"port":0,"bytes":[0xb0,0,4,0xb0,32,2,0xc0,33,0xb0,101,0,0xb0,100,0,0xb0,6,12,0xb0,38,0,0xb0,1,80,0xe0,1,65,0xd0,40,0x90,60,100]],
+    ["seconds":0.1,"port":0,"bytes":[0xb0,66,100]],
+    ["seconds":0.2,"port":0,"bytes":[0x90,64,90,0xb0,64,90,0x80,60,77,0x80,64,45,0xa0,60,70]],
+    ["seconds":0.8,"port":0,"bytes":[0xb0,64,0,0xb0,66,0]]
+]
+let chase = try wire(expressiveState)
+chase.tick(); reviewClock = 300_000_000; chase.tick()
+chase.receive("{\"kind\":\"pause\"}")
+precondition(chase.state == .paused)
+reviewWire = []
+chase.receive("{\"kind\":\"resume\"}")
+precondition(chase.state == .playing && reviewExit == nil)
+let restored = reviewWire.map(\.1)
+let prefix: [[UInt8]] = [[0xb0,0,4],[0xb0,32,2],[0xc0,33],[0xb0,101,0],[0xb0,100,0],[0xb0,6,12],[0xb0,38,0],[0xb0,1,80],[0xe0,1,65]]
+precondition(Array(restored.prefix(prefix.count)) == prefix)
+precondition(Array(restored.suffix(8)) == [[0x90,60,100],[0xb0,66,100],[0xb0,64,90],[0x90,64,90],[0x80,60,77],[0x80,64,45],[0xd0,40],[0xa0,60,70]])
+chase.receive("{\"kind\":\"pause\"}"); reviewWire = []
+chase.receive("{\"kind\":\"seek\",\"seconds\":0.25}")
+precondition(chase.state == .paused && reviewWire.isEmpty)
+chase.receive("{\"kind\":\"resume\"}")
+precondition(chase.state == .playing && reviewWire.map(\.1) == restored)
+var parameter = SourceChase()
+for bytes: [UInt8] in [[0xb0,101,0],[0xb0,100,0],[0xb0,6,12],[0xb0,38,0],[0xb0,96,0],[0xb0,97,0]] { parameter.observe(bytes, port: 0) }
+let parameters = try parameter.bootstrap(replacing: parameter)
+precondition(parameters.map(\.1) == parameter.history.map(\.1))
+var unknown = SourceChase(); unknown.observe([0xb0,101,0],port:0);unknown.observe([0xb0,100,0],port:0);unknown.observe([0xb0,96,0],port:0)
+do { _ = try unknown.bootstrap(replacing: unknown);preconditionFailure("relative value guessed") } catch {}
+reset(0); reviewWire = []
+let missingBaseline = try wire([["seconds":0,"port":0,"bytes":[0x90,60,100]],["seconds":0.2,"port":0,"bytes":[0xb0,7,80]]])
+missingBaseline.tick();reviewClock=300_000_000;missingBaseline.tick()
+missingBaseline.receive("{\"kind\":\"seek\",\"seconds\":0}")
+precondition(missingBaseline.state == .stopped && reviewExit == 1)
+precondition(reviewWire.last!.1 == [0x80,60,0])
+for opaque: [UInt8] in [[0xf0,0x7d,1,0xf7],[0xb0,99,1,0xb0,98,2,0xb0,6,3],[0xb0,69,127],[0xb0,88,42],[0xb0,126,1]] {
+    reset(0);reviewWire=[]
+    let value=try wire([["seconds":0,"port":0,"bytes":opaque]])
+    value.tick();precondition(value.state == .playing)
+    value.receive("{\"kind\":\"pause\"}");value.receive("{\"kind\":\"resume\"}")
+    precondition(value.state == .stopped && reviewExit == 1)
+}
+reset(0);reviewWire=[]
+let split=try wire([["seconds":0,"port":0,"bytes":[0x90,60]],["seconds":0.5,"port":0,"bytes":[100]]])
+split.tick();split.receive("{\"kind\":\"pause\"}");split.receive("{\"kind\":\"resume\"}")
+reviewClock=600_000_000;split.tick()
+precondition(reviewWire.map(\.1) == [[0x90,60,100]])
+reset(0);reviewWire=[]
+let pauseDue=try wire([["seconds":0.2,"port":0,"bytes":[0x90,72,80,0x80,72,56]]])
+reviewClock=300_000_000;pauseDue.receive("{\"kind\":\"pause\"}")
+precondition(reviewWire.map(\.1) == [[0x90,72,80],[0x80,72,56]])
+reset(1_000_000_000);reviewWire=[]
+let endpointPause=try wire([["seconds":1,"port":0,"bytes":[0x90,72,80,0x80,72,56]]])
+endpointPause.receive("{\"kind\":\"pause\"}")
+precondition(endpointPause.state == .stopped && reviewExit == 0)
+
+
+var resetPressure = SourceChase()
+for bytes: [UInt8] in [[0x90,60,100],[0xa0,60,100],[0xb0,121,0]] { resetPressure.observe(bytes,port:0) }
+let resetMessages = try resetPressure.bootstrap(replacing:resetPressure).map(\.1)
+precondition(!resetMessages.contains([0xa0,60,100]))
+var laterPressure = resetPressure;laterPressure.observe([0xe0,1,70],port:0);laterPressure.observe([0xa0,61,99],port:0)
+_ = try resetPressure.bootstrap(replacing:laterPressure)
+var mixedPedals = SourceChase()
+for bytes: [UInt8] in [[0xb0,64,0],[0xb0,66,0],[0xb0,64,127],[0x90,60,100],[0x80,60,42],[0xb0,66,127],[0xb0,64,0]] { mixedPedals.observe(bytes,port:0) }
+let mixedMessages = try mixedPedals.bootstrap(replacing:mixedPedals).map(\.1)
+precondition(!mixedMessages.contains { $0[0] & 0xf0 == 0x90 })
+for release: [UInt8] in [[0x90,60,0],[0x80,60,0],[0x80,60,77]] {
+    var value = SourceChase()
+    for bytes: [UInt8] in [[0xb0,64,127],[0x90,60,100],release,[0xb0,123,0]] { value.observe(bytes,port:0) }
+    let result = try value.bootstrap(replacing:value).map(\.1)
+    precondition(result.last == release)
+}
+var coarseParameter = SourceChase()
+for bytes: [UInt8] in [[0xb0,101,0],[0xb0,100,0],[0xb0,6,12]] { coarseParameter.observe(bytes,port:0) }
+_ = try coarseParameter.bootstrap(replacing:coarseParameter)
+var laterFine = coarseParameter;laterFine.observe([0xb0,38,1],port:0)
+do { _ = try coarseParameter.bootstrap(replacing:laterFine);preconditionFailure("unknown fine parameter restored") } catch {}
+print("SOURCE_CHASE_DECISIONS_PASS: ordered expression, pedal membership, release wire forms, reset coverage, parameter components, paused seek, decoder continuation, due and endpoint pause")
+
 // Exercise production UID lookup, object-type/name validation and the complete
 // selected-reference check against synthetic CoreMIDI property boundaries.
 func mustReject(_ operation: () throws -> Void) {

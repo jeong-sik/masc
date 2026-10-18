@@ -51,6 +51,8 @@ struct UmpRegionClip {
     let events: [UmpEvent]
     let endIndex: Int
     let scope: Set<UmpChannel>
+    let releaseOwners: [Int: Int]
+    let expiredNotes: [Int: Int]
 
     func prefix(at scaledTime: UInt128, inclusive: Bool = true) -> Int {
         var low = 0, high = endIndex
@@ -60,6 +62,12 @@ struct UmpRegionClip {
             if tick < scaledTime || inclusive && tick == scaledTime { low = middle + 1 } else { high = middle }
         }
         return low
+    }
+    func restore(at time: UInt128, replacing previous: UmpFootprint) throws -> UmpRestoration {
+        let before = prefix(at: time, inclusive: false), through = prefix(at: time)
+        let expired = Set(expiredNotes.filter { $0.value < through }.map(\.key))
+        return try umpRestoration(events, prefixCount: before, followingCount: through - before,
+                                  excludingNotes: expired, replacing: previous)
     }
     func phase(at position: UInt64) -> (copy: UInt64, time: UInt128)? {
         guard position >= start, position < end else { return nil }
@@ -96,7 +104,7 @@ final class UmpRegionTransport: CoordinatedMidiTransport {
     var state = State.prepared
     var offset: UInt64 = 0
     var timer: DispatchSourceTimer?
-    struct Cursor { var copy: UInt64; var index: Int }
+    struct Cursor { var copy: UInt64; var index: Int; var acquired: Set<Int> }
     var cursors: [String: Cursor] = [:]
 
     init(timeline: UmpArrangement) throws {
@@ -136,8 +144,9 @@ final class UmpRegionTransport: CoordinatedMidiTransport {
             // Every replayed prefix is part of this physical scope, even when
             // its keys were originally acquired before the cut.
             for event in events.prefix(endIndex) { potential.observe(UmpMessage(event)) }
+            let notes = try umpRestoration(events, prefixCount: endIndex, replacing: UmpFootprint())
             admitted.append(UmpRegionClip(id: region.id, start: start, end: start + UInt64(span), repeatCount: region.repeatCount,
-                cut: scaledCut, period: period, numer: numer, denom: denom, timed: timed, events: events, endIndex: endIndex, scope: scope))
+                cut: scaledCut, period: period, numer: numer, denom: denom, timed: timed, events: events, endIndex: endIndex, scope: scope, releaseOwners: notes.releaseOwners, expiredNotes: notes.expiredNotes))
         }
         try potential.requireSupported()
         for (index, clip) in admitted.enumerated() {
@@ -150,9 +159,7 @@ final class UmpRegionTransport: CoordinatedMidiTransport {
             // Exact-entry events remain a due stream, including a zero-duration
             // attack/release pair. Their explicit baselines must precede each
             // entry Note On; they cannot repair a historical live voice's patch.
-            let prefix = clip.prefix(at: clip.cut, inclusive: false)
-            _ = try umpRestoration(clip.events, prefixCount: prefix,
-                followingCount: clip.prefix(at: clip.cut) - prefix, replacing: previous)
+            _ = try clip.restore(at: clip.cut, replacing: previous)
         }
         clips = admitted
         output = UmpOutput(bindings: destinations.map { UmpBinding(source: $0, destination: $0) })
@@ -167,8 +174,7 @@ final class UmpRegionTransport: CoordinatedMidiTransport {
         guard position < duration else { throw MidiFailure("captured region seek exceeds duration") }
         for clip in clips {
             if let phase = clip.phase(at: position) {
-                let prefix = clip.prefix(at: phase.time, inclusive: false)
-                _ = try umpRestoration(clip.events, prefixCount: prefix, followingCount: clip.prefix(at: phase.time) - prefix, replacing: output.prior(in: clip.scope))
+                _ = try clip.restore(at: phase.time, replacing: output.prior(in: clip.scope))
             }
         }
         try output.checkDestinations(); timer?.cancel(); timer = nil
@@ -218,14 +224,31 @@ final class UmpRegionTransport: CoordinatedMidiTransport {
             for clip in clips {
                 guard let phase = clip.phase(at: position) else { continue }
                 if cursors[clip.id] == nil {
-                    let prefix = clip.prefix(at: phase.time, inclusive: false)
-                    let restored = try umpRestoration(clip.events, prefixCount: prefix, followingCount: clip.prefix(at: phase.time) - prefix, replacing: output.prior(in: clip.scope))
+                    let restored = try clip.restore(at: phase.time, replacing: output.prior(in: clip.scope))
                     for event in restored.events { try output.apply(event) }
-                    cursors[clip.id] = Cursor(copy: phase.copy, index: restored.nextIndex)
+                    cursors[clip.id] = Cursor(copy: phase.copy, index: restored.nextIndex, acquired: restored.heldNotes)
                 }
                 var cursor = cursors[clip.id]!
                 let due = clip.prefix(at: phase.time)
-                while cursor.index < due { try output.apply(clip.events[cursor.index]); cursor.index += 1 }
+                while cursor.index < due {
+                    let ordinal = cursor.index, event = clip.events[ordinal], message = UmpMessage(event)
+                    switch message.action {
+                    case .on:
+                        let exact = UInt128(clip.timed[ordinal].ticks) * clip.numer == phase.time
+                        if exact || (clip.expiredNotes[ordinal].map({ $0 >= due }) ?? true) {
+                            try output.apply(event); cursor.acquired.insert(ordinal)
+                        }
+                    case .off:
+                        if let owner = clip.releaseOwners[ordinal], cursor.acquired.contains(owner) {
+                            try output.apply(event); cursor.acquired.remove(owner)
+                        }
+                    case .kill, .release:
+                        try output.apply(event)
+                        cursor.acquired = cursor.acquired.filter { UmpChannel(clip.events[$0]) != UmpChannel(event) }
+                    default: try output.apply(event)
+                    }
+                    cursor.index += 1
+                }
                 cursors[clip.id] = cursor
             }
             if position >= duration {

@@ -147,9 +147,11 @@ It emits one canonical start, each source as it settles, then matching read
 completion over SSE. Every frame retains workspace, Keeper, Ask, answer time and
 stimulus identity. A missing/duplicate source or EOF without completion is not
 a successful full read. Source frames contain no placeholders for pending peers.
-The common receiver is available; the Questions pane still uses aggregate reads
-until its per-source state integration is connected. See the
-[stream source audit](../audits/2026-10-18-ask-followup-source-stream.md) for limits.
+The Questions pane uses this stream and admits each exact-answer source before
+its peers finish. Pending sources have separate state rather than invented empty
+or unavailable values. See the [stream source audit](../audits/2026-10-18-ask-followup-source-stream.md)
+and [TUI integration audit](../audits/2026-10-18-tui-ask-partial-followup.md) for
+source scope and unexecuted behavior limits.
 
 The opt-in `answer_progress` response keeps canonical answer identity outside
 three independent source branches. `reaction_evidence` is either unavailable or
@@ -160,8 +162,12 @@ policy and join their outcomes; this does not prove physical concurrency or
 lower latency in an installed server.
 
 The TUI retains same-answer positive observations when a source becomes
-unavailable and identifies them as last observed. Whole-refresh failure marks
-all retained source observations stale. A fresh original Task phase can still
+unavailable and identifies them as last observed. Beginning another read retains
+prior facts as earlier observations until each source arrives. Transport failure
+after partial delivery leaves received sources admitted; only unfinished sources
+become unconfirmed. A failure before any source leaves all prior observations
+stale. New answer submission and workspace/read-authority withdrawal cancel the
+owned worker and reject its late events without settling a successor request. A fresh original Task phase can still
 be displayed while wake/turn evidence is unavailable. Neither this independence
 nor Task phase proves answer consumption, causation or whole-work completion.
 Server and OCaml consumer use the nested reaction shape together; removed flat

@@ -257,8 +257,9 @@ type async_msg =
   | Http_approvals_loaded of early_approval_observation
   | Ask_answer_receipt_observed of
       ask_submission * (Masc.Tui_decode_asks.ask_answer_receipt, string) result
-  | Ask_followup_loaded of Snapshot_read.request * ask_submission *
-      (Masc.Tui_decode_asks.ask_followup, string) result
+  | Ask_followup_observed of Snapshot_read.request * ask_submission *
+      Masc.Tui_decode_asks.ask_followup_event * int64
+  | Ask_followup_finished of Snapshot_read.request * ask_submission * (unit, string) result
   (** A workspace-bound roster can settle before unrelated readers. *)
   | Http_keeper_roster_loaded of early_keeper_roster_observation
   | Http_dataset_loaded of early_http_dataset

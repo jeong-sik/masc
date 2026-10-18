@@ -38,6 +38,34 @@ val answer_feedback_to_json : answer_feedback -> Yojson.Safe.t
 (** Original request identities and typed recording/delivery facts only.
     Choice/free-text bodies and server error details are not logged. *)
 
+type followup_source_state = Followup_pending | Followup_received | Followup_unconfirmed
+type 'a followup_observation = private {
+  fo_value : 'a option;
+  fo_state : followup_source_state;
+}
+(** [None] means this source has never supplied an admitted observation.
+    Pending peers are not represented by fabricated unavailable/empty values. *)
+
+type followup_view = private {
+  fv_identity : Masc.Tui_decode_asks.ask_followup_identity option;
+  fv_reactions : Masc.Tui_decode_asks.ask_reactions followup_observation;
+  fv_tools : Masc.Tui_decode_asks.ask_tool_actions followup_observation;
+  fv_task : Masc.Tui_decode_asks.ask_linked_task followup_observation;
+}
+type followup
+val begin_followup : previous:followup option -> followup
+val followup_view : followup -> followup_view
+val observe_followup :
+  followup -> Masc.Tui_decode_asks.ask_followup_event -> (followup, string) result
+val finish_followup : followup -> (unit, string) result -> followup * (unit, string) result
+(** One strict stream per read. Original answer and linked Task identities cannot
+    change across refreshes. A failed/incomplete transport retains admitted
+    sources; only unfinished sources become unconfirmed. Beginning a new read
+    retains prior facts as earlier evidence until that source arrives again. *)
+val followup_to_json : followup -> Yojson.Safe.t
+(** Observation states, canonical identities and execution facts, excluding
+    question/answer bodies, Task descriptions and error details. *)
+
 type origin = private {
   ao_keeper_name : string;
   ao_ask_id : string;

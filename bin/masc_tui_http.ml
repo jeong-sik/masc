@@ -3790,23 +3790,6 @@ let observe_keeper_ask_followup ~clock ~(expected_workspace : Masc.Tui_decode.se
     Result.bind !reading Decode.finish_ask_followup_stream
   with Ask_followup_protocol_error detail -> Error detail
 
-let fetch_keeper_ask_followup ~(expected_workspace : Masc.Tui_decode.server_identity)
-    ~keeper_name ~ask_id ~host ~port =
-  let path = Printf.sprintf "/api/v1/keepers/asks?name=%s&answer_progress_for=%s&%s"
-      (percent_encode_query_value keeper_name) (percent_encode_query_value ask_id)
-      (expected_workspace_query expected_workspace) in
-  match http_get ~host ~port ~path with
-  | Error detail -> Error detail
-  | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status) ->
-      Error (refusal ~status_code:status ~body)
-  | Ok (_, body) ->
-      match Yojson.Safe.from_string body with
-      | json -> Masc.Tui_decode_asks.decode_ask_followup
-          ~expected_base_path:(Masc_tui_types.canonical_path expected_workspace.sid_base_path)
-          ~expected_masc_root:(Masc_tui_types.canonical_path expected_workspace.sid_masc_root)
-          ~keeper_name ~ask_id json
-      | exception Yojson.Json_error detail -> Error ("answer follow-up was not JSON: " ^ detail)
-
 (** Browser Lane shares the authenticated TUI transport. Reads are POST because
     selecting the Firefox tab belongs to the request body. *)
 let fetch_browser_lane_clients ~host ~port =

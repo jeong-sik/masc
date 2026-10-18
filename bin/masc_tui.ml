@@ -12466,7 +12466,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.ask_submit_inflight <- false;
   state.ask_submission_current <- None;
   state.ask_answer_feedback <- None;
-  state.ask_followup_read <- Snapshot_read.invalidate state.ask_followup_read;
+  Masc_tui_types.retire_ask_followup_read state;
   state.ask_followup <- None;
   state.ask_followup_error <- None;
   state.runtime_pick_keeper <- None;
@@ -13343,6 +13343,19 @@ let current_surface_needs state =
       (not (Masc_tui_render.acting_pane_suppressed state))
     state.view
 
+let log_ask_followup request submission ~sources ~phase ~source ~received_ns ~outcome =
+  let facts = Option.map Masc_tui_ask_projection.followup_to_json sources in
+  Log.Transport.info "tui_ask_followup=%s" (Yojson.Safe.to_string (`Assoc [
+    "keeper", `String submission.as_keeper_name;"ask_id", `String submission.as_ask_id;
+    "request", `Int (Snapshot_read.request_id request);
+    "question_source_turn_ref", (match submission.as_source_turn_ref with
+      | None -> `Null | Some reference -> Ids.Turn_ref.to_yojson reference);
+    "phase", `String phase;"source", (match source with None -> `Null | Some source -> `String source);
+    "received_ns", (match received_ns with None -> `Null | Some ns -> `Intlit (Int64.to_string ns));
+    "admitted_ns", `Intlit (Int64.to_string (Mtime_clock.elapsed_ns ()));
+    "outcome", `String outcome;
+    "sources", (match facts with None -> `Null | Some facts -> facts)]))
+
 (* The reads a full refresh tick sends beside its surface bundle. They go out
    while the bundle is still on the wire, so a bundle that moves the read
    authority withdraws them; [resume_reads_after_authority_change] sends
@@ -13352,10 +13365,43 @@ let launch_ask_followup_load state ~mailbox =
     match state.server_identity, Masc_tui_types.begin_ask_followup_read state with
     | Some expected_workspace, Some (request, submission) ->
         let host = server_peer_host and port = state.port in
-        Masc_tui_async_read.launch
-          ~deliver:(fun result -> enqueue_async mailbox (Ask_followup_loaded (request, submission, result)))
-          (fun () -> Masc_tui_http.fetch_keeper_ask_followup ~expected_workspace
-            ~keeper_name:submission.as_keeper_name ~ask_id:submission.as_ask_id ~host ~port)
+        let enqueue_async = workspace_enqueue state in
+        let deliver result = enqueue_async mailbox (Ask_followup_finished (request, submission, result)) in
+        log_ask_followup request submission ~sources:(Masc_tui_types.current_ask_followup state)
+          ~phase:"started" ~source:None
+          ~received_ns:None ~outcome:"pending";
+        (match Eio_context.get_switch_opt (), Eio_context.get_clock_opt () with
+         | Some sw, Some clock ->
+           let superseded, resolve = Eio.Promise.create () in
+           Masc_tui_types.supersede_ask_followup_worker state
+             (Some (request, fun detail -> ignore (Eio.Promise.try_resolve resolve detail)))
+             ~detail:"answer follow-up observation superseded";
+           let run () = Fun.protect
+             ~finally:(fun () -> Masc_tui_types.finish_ask_followup_worker state request)
+             (fun () ->
+               let result = try Eio.Fiber.first
+                 (fun () -> Masc_tui_http.observe_keeper_ask_followup ~clock ~expected_workspace
+                   ~keeper_name:submission.as_keeper_name ~ask_id:submission.as_ask_id ~host ~port
+                   ~on_event:(fun event ->
+                     let received_ns = Mtime_clock.elapsed_ns () in
+                     enqueue_async mailbox (Ask_followup_observed (request, submission, event, received_ns))))
+                 (fun () -> Error (Eio.Promise.await superseded))
+                 with
+                 | Eio.Cancel.Cancelled _ as exn ->
+                     log_ask_followup request submission ~sources:None ~phase:"cancelled" ~source:None
+                       ~received_ns:None ~outcome:"cancelled";
+                     raise exn
+                 | exn -> Error (Printexc.to_string exn) in
+               Masc_tui_types.finish_ask_followup_worker state request;
+               deliver result) in
+           (match fork_workspace_job ~observation:true state ~sw run with
+            | () -> ()
+            | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+            | exception exn ->
+                Masc_tui_types.finish_ask_followup_worker state request;
+                deliver (Error (Printexc.to_string exn)))
+         | None, (Some _ | None) | Some _, None ->
+             deliver (Error "Eio switch or clock is unavailable for answer follow-up observation"))
     | None, _ | Some _, None -> ()
 
 let launch_tick_side_reads state ~mailbox ~(needs : Masc_tui_types.surface_needs) =
@@ -16410,7 +16456,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
         | Voice_wizard_saved (_, _) | Voice_agent_voices_loaded _ | Voice_agent_voice_saved _
         | Voice_wizard_probed (_, _) | Voice_wizard_reread (_, _) | Voice_config_loaded (_, _, _)
         | Voice_level _ | Voice_transcribed _ | Voice_silent _ | Voice_discarded _ | Voice_failed _
-        | (Http_keeper_roster_loaded _ | Http_dataset_loaded _ | Http_progress_observed _ | Http_surface_read_completed _ | Http_initial_identity_read _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_observed _ | Ask_followup_loaded _ | Http_refresh_done _) | Http_refresh_failed (_, _, _)
+        | (Http_keeper_roster_loaded _ | Http_dataset_loaded _ | Http_progress_observed _ | Http_surface_read_completed _ | Http_initial_identity_read _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_observed _ | Ask_followup_observed _ | Ask_followup_finished _ | Http_refresh_done _) | Http_refresh_failed (_, _, _)
         | Approvals_summary_loaded (_, _, _, _) | Http_scoped_refresh_done (_, _, _)
         | Http_scoped_refresh_failed (_, _, _, _, _, _) | Board_post_refresh_done (_, _)
         | Approval_decision_done (_, _, _, _, _) | Ask_answer_done (_, _, _)
@@ -17584,7 +17630,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
        | Goal_confirmation_submitted _, Goal_confirmation.Submitting (_, read) ->
            state.goal_confirmation <- Goal_confirmation.Inspecting read
        | (Goal_confirmation_submitted _, Goal_confirmation.Inspecting _)
-       | ((Approvals_listing_superseded | (Surface_composer_released | (Chat_search_finished (_, _, _, _) | (Workspace_scoped (_, _, _) | (Workspace_operation _ | (Chat_command_read_completed (_, _) | (Workspace_identity_unconfirmed _ | (Schedule_form_authority_refused _ | (Lane_package_catalog_loaded (_, _, _) | (Lane_package_preview_loaded (_, _, _) | (Keeper_queue_resume_confirmed (_, _, _) | (Keeper_queue_loaded (_, _, _, _) | (Lane_addons_loaded (_, _, _) | (Lane_application_loaded (_, _) | (Lane_subscriptions_loaded (_, _) | (Lane_declaration_loaded (_, _, _, _, _) | (Keeper_deletions_loaded (_, _) | (Msx_tick_withdrawn (_, _) | (Keeper_deletion_retry_done (_, _) | (Msx_frame_loaded (_, _) | (Msx_activity_loaded (_, _) | (Msx_live_loaded (_, _) | ( Dos_live_loaded (_, _) | ( Voice_wizard_saved (_, _) | ( Voice_agent_voices_loaded _ | ( Voice_agent_voice_saved _ | ( Voice_wizard_probed (_, _) | ( Voice_wizard_reread (_, _) | ( Voice_config_loaded (_, _, _) | ( Voice_level _ | ( Voice_transcribed _ | ( Voice_silent _ | ( Voice_discarded _ | ( Voice_failed _ | ( (Http_keeper_roster_loaded _ | Http_dataset_loaded _ | Http_progress_observed _ | Http_surface_read_completed _ | Http_initial_identity_read _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_observed _ | Ask_followup_loaded _ | Http_refresh_done _) | ( Http_refresh_failed (_, _, _) | ( Approvals_summary_loaded (_, _, _, _) | ( Http_scoped_refresh_done (_, _, _) | ( Http_scoped_refresh_failed (_, _, _, _, _, _) | ( Board_post_refresh_done (_, _) | ( Approval_decision_done (_, _, _, _, _) | ( Ask_answer_done (_, _, _) | ( Keeper_chat_dispatch_started (_, _, _) | ( Keeper_chat_done (_, _, _, _) | ( Keeper_chat_stream_deltas (_, _) | ( Keeper_chat_stream_unavailable (_, _) | ( Keeper_run_next_done (_, _) | ( Keeper_observed_interrupt_done (_, _, _, _) | ( Keeper_chat_interrupt_done (_, _, _) | ( Keeper_chat_history_loaded (_, _, _, _) | ( Keeper_chat_copy_loaded (_, _, _) | ( Keeper_chat_operation_loaded _ | ( Keeper_chat_journal_loaded _ | ( Keeper_native_tasks_loaded (_, _) | ( Keeper_child_content_loaded (_, _) | Keeper_preparation_loaded (_, _) | ( Context_inspector_part_loaded (_, _) | Context_inspector_loaded (_, _, _) | ( Keeper_chat_older_loaded (_, _, _, _) | ( Local_workspace_read (_, _) | Local_keepers_read (_, _) | Live_context_loaded (_, _, _) | Keeper_logs_loaded _ | ( Lanes_loaded (_, _) | ( Lane_inventory_loaded (_, _) | ( Clients_loaded (_, _) | ( Lane_runs_loaded (_, _, _, _) | ( Lane_run_detail_loaded (_, _, _) | ( Measurement_artifact_loaded (_, _, _) | ( Verification_loaded _ | ( Harness_loaded _ | ( Fusion_runs_loaded (_, _) | ( Fusion_detail_loaded (_, _, _) | ( Fusion_historical_detail_loaded (_, _, _) | ( Fusion_launch_options_loaded (_, _) | ( Fusion_launched (_, _) | ( Repositories_loaded _ | ( Workspace_activity_loaded (_, _) | ( Memory_loaded _ | ( Memory_input_loaded (_, _) | ( Memory_facts_loaded (_, _) | ( Repository_changes_loaded (_, _) | ( Repository_changes_diff_loaded (_, _) | ( File_changes_loaded (_, _) | ( Keeper_chat_file_changes_loaded (_, _, _) | ( Git_diff_loaded (_, _) | ( Browser_history_list_loaded (_, _) | ( Browser_history_page_loaded (_, _) | ( Browser_lane_clients_loaded (_, _) | ( Browser_lane_loaded (_, _) | ( Browser_lane_action_done (_, _) | ( Browser_lane_scene_loaded (_, _) | ( Browser_lane_follow_loaded (_, _) | ( Browser_lane_screenshot_ready _ | ( Connectors_loaded (_, _) | ( Connector_unbind_all_done _ | ( Runtime_surface_loaded (_, _) | ( Tools_loaded (_, _, _) | ( Skills_catalog_loaded (_, _) | ( Skill_evidence_loaded (_, _, _) | ( Tools_async_observation_loaded (_, _) | ( Runtime_lane_slots_written (_, _, _) | ( Runtime_catalog_loaded (_, _) | ( Runtime_assignment_set (_, _, _) | ( Keeper_chat_approval_answered (_, _, _, _) | ( Keeper_tool_approvals_loaded (_, _, _) | ( Sent_image_ready _ | ( Image_render_ready _ | ( Keeper_turns_loaded (_, _) | ( Keeper_chat_control_received (_, _, _) | ( Gate_snapshot_loaded (_, _, _) | ( Gate_approval_resolved (_, _, _, _, _) | ( Gate_auto_judge_retried (_, _, _, _) | ( Gate_mode_set (_, _, _) | ( Surface_tool_approval_answered (_, _, _, _, _) | ( Keeper_gate_settings_loaded _ | ( Keeper_tool_modes_loaded (_, _) | ( Keeper_tool_mode_set (_, _, _, _) | ( Keeper_chat_dispatch_blocked (_, _) | ( Keeper_creation_changed _ | Keeper_action_done (_, _, _, _) | ( Board_new_post_done _ | ( Board_vote_done _ | ( Goal_transition_done _ | ( Goal_confirmation_loaded (_, _) | ( Schedules_loaded (_, _) | ( Schedule_wake_history_loaded (_, _) | ( Keeper_schedules_loaded (_, _) | ( System_logs_loaded _ | ( Schedule_cancel_done (_, _) | ( Verification_verdict_done _ | ( Harness_label_done _ | ( Keeper_calls_loaded (_, _, _) | ( Goal_timeline_loaded (_, _) | ( Task_history_loaded (_, _) | ( Task_cancel_done (_, _, _) | ( Verification_evidence_loaded (_, _) | ( Keeper_config_view_loaded (_, _) | ( Keeper_items_loaded (_, _) | ( Keeper_sandbox_view_loaded (_, _) | ( Keeper_sandbox_logs_loaded (_, _, _) | ( Exact_activity_read (_, _) | ( Exact_activity_saved (_, _) | ( Browser_activity_read (_, _) | ( Browser_activity_saved (_, _) | ( Machine_activity_read (_, _) | ( Machine_activity_saved (_, _) | ( Runtime_config_view_loaded (_, _, _) | ( Runtime_params_loaded _ | ( Runtime_param_written (_, _) | ( Prompts_loaded (_, _) | ( Keeper_board_quarantines_loaded (_, _) | ( Board_quarantine_requeued (_, _, _) | ( Board_quarantines_bulk_progress (_, _, _, _, _, _) | ( Board_quarantines_bulk_requeued (_, _) | ( Presets_listed (_, _) | ( Preset_detail_loaded (_, _) | ( Preset_contents_shown (_, _) | ( Preset_saved (_, _) | ( Preset_restored (_, _) | ( Preset_deleted (_, _) | ( Play_room_received (_, _) | ( Play_invites_listed (_, _) | ( Play_invite_issued (_, _, _) | ( Play_invite_revoked (_, _, _, _) | ( Librarian_input_loaded (_, _) | ( Resources_listed _ | ( Code_entries_loaded (_, _) | ( Code_file_loaded (_, _, _) | ( Code_history_loaded (_, _) | ( Code_diff_loaded (_, _) | ( Acting_pane_changes_loaded (_, _) | ( Code_blame_loaded (_, _) | ( Code_lsp_answered (_, _) | ( Resource_read (_, _) | ( Github_identity_view_loaded (_, _) | ( Identity_providers_loaded (_, _, _) | ( Identity_switch_set (_, _, _, _) | ( Identity_login_started (_, _) | ( Identity_refreshed (_, _) | ( Identity_app_saved (_, _, _) | ( Account_login_event (_, _, _) | ( Account_login_json (_, _, _, _) | ( Account_login_removal (_, _, _, _, _) | ( Github_login_lines (_, _) | ( Github_login_finished (_, _) | ( Github_token_saved (_, _) | ( Observer_opened _ | ( Observer_received (_, _) | ( Observer_closed _ | ( Task_dispatched _ | Task_dispatch_failed _))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))), _) -> ());
+       | ((Approvals_listing_superseded | (Surface_composer_released | (Chat_search_finished (_, _, _, _) | (Workspace_scoped (_, _, _) | (Workspace_operation _ | (Chat_command_read_completed (_, _) | (Workspace_identity_unconfirmed _ | (Schedule_form_authority_refused _ | (Lane_package_catalog_loaded (_, _, _) | (Lane_package_preview_loaded (_, _, _) | (Keeper_queue_resume_confirmed (_, _, _) | (Keeper_queue_loaded (_, _, _, _) | (Lane_addons_loaded (_, _, _) | (Lane_application_loaded (_, _) | (Lane_subscriptions_loaded (_, _) | (Lane_declaration_loaded (_, _, _, _, _) | (Keeper_deletions_loaded (_, _) | (Msx_tick_withdrawn (_, _) | (Keeper_deletion_retry_done (_, _) | (Msx_frame_loaded (_, _) | (Msx_activity_loaded (_, _) | (Msx_live_loaded (_, _) | ( Dos_live_loaded (_, _) | ( Voice_wizard_saved (_, _) | ( Voice_agent_voices_loaded _ | ( Voice_agent_voice_saved _ | ( Voice_wizard_probed (_, _) | ( Voice_wizard_reread (_, _) | ( Voice_config_loaded (_, _, _) | ( Voice_level _ | ( Voice_transcribed _ | ( Voice_silent _ | ( Voice_discarded _ | ( Voice_failed _ | ( (Http_keeper_roster_loaded _ | Http_dataset_loaded _ | Http_progress_observed _ | Http_surface_read_completed _ | Http_initial_identity_read _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_observed _ | Ask_followup_observed _ | Ask_followup_finished _ | Http_refresh_done _) | ( Http_refresh_failed (_, _, _) | ( Approvals_summary_loaded (_, _, _, _) | ( Http_scoped_refresh_done (_, _, _) | ( Http_scoped_refresh_failed (_, _, _, _, _, _) | ( Board_post_refresh_done (_, _) | ( Approval_decision_done (_, _, _, _, _) | ( Ask_answer_done (_, _, _) | ( Keeper_chat_dispatch_started (_, _, _) | ( Keeper_chat_done (_, _, _, _) | ( Keeper_chat_stream_deltas (_, _) | ( Keeper_chat_stream_unavailable (_, _) | ( Keeper_run_next_done (_, _) | ( Keeper_observed_interrupt_done (_, _, _, _) | ( Keeper_chat_interrupt_done (_, _, _) | ( Keeper_chat_history_loaded (_, _, _, _) | ( Keeper_chat_copy_loaded (_, _, _) | ( Keeper_chat_operation_loaded _ | ( Keeper_chat_journal_loaded _ | ( Keeper_native_tasks_loaded (_, _) | ( Keeper_child_content_loaded (_, _) | Keeper_preparation_loaded (_, _) | ( Context_inspector_part_loaded (_, _) | Context_inspector_loaded (_, _, _) | ( Keeper_chat_older_loaded (_, _, _, _) | ( Local_workspace_read (_, _) | Local_keepers_read (_, _) | Live_context_loaded (_, _, _) | Keeper_logs_loaded _ | ( Lanes_loaded (_, _) | ( Lane_inventory_loaded (_, _) | ( Clients_loaded (_, _) | ( Lane_runs_loaded (_, _, _, _) | ( Lane_run_detail_loaded (_, _, _) | ( Measurement_artifact_loaded (_, _, _) | ( Verification_loaded _ | ( Harness_loaded _ | ( Fusion_runs_loaded (_, _) | ( Fusion_detail_loaded (_, _, _) | ( Fusion_historical_detail_loaded (_, _, _) | ( Fusion_launch_options_loaded (_, _) | ( Fusion_launched (_, _) | ( Repositories_loaded _ | ( Workspace_activity_loaded (_, _) | ( Memory_loaded _ | ( Memory_input_loaded (_, _) | ( Memory_facts_loaded (_, _) | ( Repository_changes_loaded (_, _) | ( Repository_changes_diff_loaded (_, _) | ( File_changes_loaded (_, _) | ( Keeper_chat_file_changes_loaded (_, _, _) | ( Git_diff_loaded (_, _) | ( Browser_history_list_loaded (_, _) | ( Browser_history_page_loaded (_, _) | ( Browser_lane_clients_loaded (_, _) | ( Browser_lane_loaded (_, _) | ( Browser_lane_action_done (_, _) | ( Browser_lane_scene_loaded (_, _) | ( Browser_lane_follow_loaded (_, _) | ( Browser_lane_screenshot_ready _ | ( Connectors_loaded (_, _) | ( Connector_unbind_all_done _ | ( Runtime_surface_loaded (_, _) | ( Tools_loaded (_, _, _) | ( Skills_catalog_loaded (_, _) | ( Skill_evidence_loaded (_, _, _) | ( Tools_async_observation_loaded (_, _) | ( Runtime_lane_slots_written (_, _, _) | ( Runtime_catalog_loaded (_, _) | ( Runtime_assignment_set (_, _, _) | ( Keeper_chat_approval_answered (_, _, _, _) | ( Keeper_tool_approvals_loaded (_, _, _) | ( Sent_image_ready _ | ( Image_render_ready _ | ( Keeper_turns_loaded (_, _) | ( Keeper_chat_control_received (_, _, _) | ( Gate_snapshot_loaded (_, _, _) | ( Gate_approval_resolved (_, _, _, _, _) | ( Gate_auto_judge_retried (_, _, _, _) | ( Gate_mode_set (_, _, _) | ( Surface_tool_approval_answered (_, _, _, _, _) | ( Keeper_gate_settings_loaded _ | ( Keeper_tool_modes_loaded (_, _) | ( Keeper_tool_mode_set (_, _, _, _) | ( Keeper_chat_dispatch_blocked (_, _) | ( Keeper_creation_changed _ | Keeper_action_done (_, _, _, _) | ( Board_new_post_done _ | ( Board_vote_done _ | ( Goal_transition_done _ | ( Goal_confirmation_loaded (_, _) | ( Schedules_loaded (_, _) | ( Schedule_wake_history_loaded (_, _) | ( Keeper_schedules_loaded (_, _) | ( System_logs_loaded _ | ( Schedule_cancel_done (_, _) | ( Verification_verdict_done _ | ( Harness_label_done _ | ( Keeper_calls_loaded (_, _, _) | ( Goal_timeline_loaded (_, _) | ( Task_history_loaded (_, _) | ( Task_cancel_done (_, _, _) | ( Verification_evidence_loaded (_, _) | ( Keeper_config_view_loaded (_, _) | ( Keeper_items_loaded (_, _) | ( Keeper_sandbox_view_loaded (_, _) | ( Keeper_sandbox_logs_loaded (_, _, _) | ( Exact_activity_read (_, _) | ( Exact_activity_saved (_, _) | ( Browser_activity_read (_, _) | ( Browser_activity_saved (_, _) | ( Machine_activity_read (_, _) | ( Machine_activity_saved (_, _) | ( Runtime_config_view_loaded (_, _, _) | ( Runtime_params_loaded _ | ( Runtime_param_written (_, _) | ( Prompts_loaded (_, _) | ( Keeper_board_quarantines_loaded (_, _) | ( Board_quarantine_requeued (_, _, _) | ( Board_quarantines_bulk_progress (_, _, _, _, _, _) | ( Board_quarantines_bulk_requeued (_, _) | ( Presets_listed (_, _) | ( Preset_detail_loaded (_, _) | ( Preset_contents_shown (_, _) | ( Preset_saved (_, _) | ( Preset_restored (_, _) | ( Preset_deleted (_, _) | ( Play_room_received (_, _) | ( Play_invites_listed (_, _) | ( Play_invite_issued (_, _, _) | ( Play_invite_revoked (_, _, _, _) | ( Librarian_input_loaded (_, _) | ( Resources_listed _ | ( Code_entries_loaded (_, _) | ( Code_file_loaded (_, _, _) | ( Code_history_loaded (_, _) | ( Code_diff_loaded (_, _) | ( Acting_pane_changes_loaded (_, _) | ( Code_blame_loaded (_, _) | ( Code_lsp_answered (_, _) | ( Resource_read (_, _) | ( Github_identity_view_loaded (_, _) | ( Identity_providers_loaded (_, _, _) | ( Identity_switch_set (_, _, _, _) | ( Identity_login_started (_, _) | ( Identity_refreshed (_, _) | ( Identity_app_saved (_, _, _) | ( Account_login_event (_, _, _) | ( Account_login_json (_, _, _, _) | ( Account_login_removal (_, _, _, _, _) | ( Github_login_lines (_, _) | ( Github_login_finished (_, _) | ( Github_token_saved (_, _) | ( Observer_opened _ | ( Observer_received (_, _) | ( Observer_closed _ | ( Task_dispatched _ | Task_dispatch_failed _))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))), _) -> ());
       match result with
       | Ok message ->
           state.goal_action_pending <- None;
@@ -18518,55 +18564,24 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
   | Approval_decision_done (approval, decision, result, generation, approvals) ->
       apply_approval_decision_completion state generation approval decision
         result approvals
-  | Ask_followup_loaded (request, submission, result) ->
+  | Ask_followup_observed (request, submission, event, received_ns) ->
       Option.iter (fun result ->
-        let clock = function None -> `Null | Some at -> `Float at in
-        let facts = match result with
-          | Error _ -> ["state", `String "unavailable"]
-          | Ok observed -> ["state", `String "observed";
-              "stimulus_id", `String observed.Masc.Tui_decode_asks.af_stimulus_id;
-              "answered_at", `Float observed.af_answered_at]
-              @ (match observed.af_reactions with
-                | Masc.Tui_decode_asks.Ask_reactions_unavailable ->
-                    ["reaction_state", `String "unavailable"]
-                | Ask_reactions_observed reactions ->
-                    ["reaction_state", `String "observed";
-                     "reaction_evidence_current", `Bool reactions.ar_evidence_current;
-                     "turn_started_at", clock reactions.ar_turn_started_at;
-                     "turn_finished_at", clock reactions.ar_turn_finished_at;
-                     "queue_settled_at", clock reactions.ar_queue_settled_at;
-                     "queue_cancelled_at", clock reactions.ar_queue_cancelled_at;
-                     "evidence_complete", `Bool reactions.ar_evidence_complete])
-              @ (match observed.af_tool_actions with
-                | Masc.Tui_decode_asks.Ask_tools_unavailable -> ["tool_evidence_current", `Bool false]
-                | Ask_tools_observed {at_count;at_first_recorded_at;at_latest;at_evidence_current} ->
-                    ["tool_evidence_current", `Bool at_evidence_current;
-                     "observed_tool_results", `Int at_count;
-                     "first_tool_result_recorded_at", clock at_first_recorded_at]
-                    @ (match at_latest with
-                      | None -> []
-                      | Some action -> ["latest_execution_id", `String action.ata_execution_id;
-                          "latest_physical_execution_id", `String action.ata_physical_execution_id;
-                          "latest_trace_id", `String action.ata_trace_id;
-                          "latest_keeper_turn_id", `Int action.ata_keeper_turn_id;
-                          "latest_tool_result_recorded_at", `Float action.ata_recorded_at]))
-              @ (match observed.af_linked_task with
-                | Masc.Tui_decode_asks.Ask_task_unlinked -> ["linked_task_state", `String "unlinked"]
-                | Ask_task_missing id -> ["linked_task_state", `String "missing"; "linked_task_id", `String id]
-                | Ask_task_unavailable id -> ["linked_task_state", `String "unavailable"; "linked_task_id", `String id]
-                | Ask_task_observed task ->
-                    ["linked_task_state", `String "observed"; "linked_task_id", `String task.akt_task_id;
-                     "linked_task_phase", `String (Masc_domain.task_status_to_string task.akt_status);
-                     "linked_task_location", `String (match task.akt_location with
-                       | Masc.Tui_decode_asks.Ask_task_backlog -> "backlog" | Ask_task_archive -> "archive");
-                     "linked_task_observed_at", `Float task.akt_observed_at;
-                     "linked_task_evidence_current", `Bool task.akt_evidence_current]) in
-        Log.Transport.info "tui_ask_followup=%s" (Yojson.Safe.to_string (`Assoc
-          (["keeper", `String submission.as_keeper_name; "ask_id", `String submission.as_ask_id;
-            "question_source_turn_ref",(match submission.as_source_turn_ref with
-              | None -> `Null | Some reference -> Ids.Turn_ref.to_yojson reference);
-            "admitted_ns", `String (Int64.to_string (Mtime_clock.elapsed_ns ()))] @ facts))))
-        (Masc_tui_types.take_ask_followup state request submission result)
+        let source = match event with
+          | Masc.Tui_decode_asks.Ask_followup_started _ -> "started"
+          | Ask_followup_completed _ -> "complete"
+          | Ask_followup_source (_, Ask_followup_reactions _) -> "reaction_evidence"
+          | Ask_followup_source (_, Ask_followup_tools _) -> "tool_actions"
+          | Ask_followup_source (_, Ask_followup_task _) -> "linked_task" in
+        log_ask_followup request submission ~sources:(Masc_tui_types.current_ask_followup state)
+          ~phase:"source_admitted" ~source:(Some source)
+          ~received_ns:(Some received_ns) ~outcome:(match result with Ok _ -> "observed" | Error _ -> "refused"))
+        (Masc_tui_types.take_ask_followup_event state request submission event)
+  | Ask_followup_finished (request, submission, result) ->
+      Option.iter (fun result ->
+        log_ask_followup request submission ~sources:(Masc_tui_types.current_ask_followup state)
+          ~phase:"finished" ~source:None
+          ~received_ns:None ~outcome:(match result with Ok () -> "complete" | Error _ -> "unconfirmed"))
+        (Masc_tui_types.finish_ask_followup_read state request submission result)
   | Ask_answer_receipt_observed (submission, result) ->
       observe_ask_answer_receipt state ~phase:Post_response submission result;
       launch_ask_followup_load state ~mailbox

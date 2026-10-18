@@ -156,6 +156,14 @@ module Identity_map = Map.Make (struct
   let compare = compare_identity
 end)
 
+module Exact_map = Map.Make (struct
+  type nonrec t = t
+  let compare left right =
+    let identity = compare_identity left.identity right.identity in
+    if identity <> 0 then identity
+    else String.compare left.content_revision right.content_revision
+end)
+
 let identity_to_yojson identity =
   `Assoc
     [ ( "source_id"

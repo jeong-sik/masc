@@ -1104,3 +1104,11 @@ owners, preserving empty Tasks and withholding unrelated or late Task pins.
 See the [owner projection comparison](../audits/2026-10-19-task-skill-owner-projection.md)
 for source counts and unchanged authority. This does not measure preview
 Loading, task preparation latency, runtime resumption or first useful work.
+
+The earlier Task Skill reference merge also has a
+[source Before/After](../audits/2026-10-19-task-skill-reference-merge.md).
+One private exact-reference index replaces repeated accumulated-list scans and
+copies at observation grouping, selection merge and retained-selection rebind.
+Its key includes content revision, and output follows first original reference
+positions. Task-owner sorting, resolution and authority checks remain separate;
+this source complexity change is not a measured preview or turn speedup.

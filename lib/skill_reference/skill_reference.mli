@@ -87,6 +87,11 @@ module Identity_map : Map.S with type key = identity
     source id, package id and name as {!equal_identity}; it grants no
     snapshot resolution or execution authority. *)
 
+module Exact_map : Map.S with type key = t
+(** Immutable exact-reference index, including content revision. Key equality
+    agrees with {!equal}; references with the same identity and different
+    pinned revisions remain distinct. No resolution or execution authority. *)
+
 val identity_to_yojson : identity -> Yojson.Safe.t
 
 val identity_of_yojson : Yojson.Safe.t -> (identity, decode_error) result

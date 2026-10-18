@@ -253,25 +253,28 @@ let empty = { selected = []; unprojectable = []; descriptor_authority = None; pr
 
 (* One row per exact reference, carrying every Task id that pinned it. *)
 let merge_rows ~reference ~task_ids ~with_task_ids rows =
-  let add merged candidate =
+  let add (next_ordinal, indexed) candidate =
+    let exact = reference candidate in
     match
-      List.find_opt
-        (fun known -> Skill_reference.equal (reference known) (reference candidate))
-        merged
+      Skill_reference.Exact_map.find_opt exact indexed
     with
-    | None -> merged @ [ candidate ]
-    | Some known ->
+    | None ->
+      next_ordinal + 1,
+      Skill_reference.Exact_map.add exact (next_ordinal, candidate) indexed
+    | Some (ordinal, known) ->
       let merged_task_ids =
         List.sort_uniq String.compare (task_ids known @ task_ids candidate)
       in
-      List.map
-        (fun existing ->
-           if Skill_reference.equal (reference existing) (reference candidate)
-           then with_task_ids known merged_task_ids
-           else existing)
-        merged
+      next_ordinal,
+      Skill_reference.Exact_map.add exact
+        (ordinal, with_task_ids known merged_task_ids) indexed
   in
-  List.fold_left add [] rows
+  let _, indexed = List.fold_left add (0, Skill_reference.Exact_map.empty) rows in
+  (* Map key order must not reorder the first original rows. Ordinals belong
+     to this fold only; enumeration needs no partial lookup or fallback row. *)
+  Skill_reference.Exact_map.fold (fun _ row ordered -> row :: ordered) indexed []
+  |> List.sort (fun (first, _) (next, _) -> Int.compare first next)
+  |> List.map snd
 ;;
 
 let same_descriptors first next =

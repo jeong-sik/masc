@@ -1,18 +1,36 @@
-import { spawn } from 'node:child_process'
+import { spawn, execFile } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
+import { promisify } from 'node:util'
 
 export const transportPath = fileURLToPath(new URL('./music-transport', import.meta.url))
+export const midiTransportPath = fileURLToPath(new URL('./music-midi', import.meta.url))
+export async function midiDestinations({ executable = midiTransportPath, signal } = {}) {
+  const { stdout } = await promisify(execFile)(executable, ['destinations'], { signal })
+  const result = JSON.parse(stdout)
+  if (result.kind !== 'destinations' || !Array.isArray(result.destinations)) throw new Error('Malformed MIDI destination list')
+  const ids = new Set()
+  for (const device of result.destinations) {
+    if (device.kind !== 'midi' || device.protocol !== 1 || typeof device.id !== 'string' || !device.id
+        || typeof device.name !== 'string' || ids.has(device.id)) throw new Error('Malformed MIDI destination identity')
+    ids.add(device.id)
+  }
+  return result.destinations
+}
 
 // One owned child is one transport. Completion means its pipes and process have
 // closed, rather than merely receiving a stopped acknowledgement.
-export function openPlayback({ path, output, loop = false, onEvent = () => {}, signal,
-  executable = transportPath, spawnProcess = spawn } = {}) {
+export function openPlayback({ path, output, midiOutput, loop = false, onEvent = () => {}, signal,
+  executable = midiOutput === undefined ? transportPath : midiTransportPath, spawnProcess = spawn } = {}) {
   signal?.throwIfAborted()
-  if (typeof path !== 'string' || !path) throw new Error('A WAV path is required')
+  if (typeof path !== 'string' || !path) throw new Error('A playback source path is required')
   if (output !== undefined && (typeof output !== 'string' || !output)) throw new Error('Invalid output UID')
+  if (midiOutput !== undefined && (typeof midiOutput !== 'string' || !midiOutput)) throw new Error('Invalid MIDI destination ID')
+  if (output !== undefined && midiOutput !== undefined) throw new Error('Choose an audio output or a MIDI destination')
   if (typeof loop !== 'boolean') throw new Error('Invalid loop selection')
-  const args = ['play', '--file', path, ...(output === undefined ? [] : ['--output', output]), ...(loop ? ['--loop'] : [])]
+  const selectedID = midiOutput ?? output
+  const selection = midiOutput === undefined ? (output === undefined ? [] : ['--output', output]) : ['--destination', midiOutput]
+  const args = ['play', '--file', path, ...selection, ...(loop ? ['--loop'] : [])]
   const child = spawnProcess(executable, args, { stdio: ['pipe', 'pipe', 'pipe'] })
   let failure = null, final = null, current = null, firstDevice = null, started = false, closed = false, stopping = false, detail = ''
   let resolveReady, rejectReady, resolveDone, rejectDone
@@ -40,10 +58,11 @@ export function openPlayback({ path, output, loop = false, onEvent = () => {}, s
           || !Number.isFinite(event.currentTime) || !Number.isFinite(event.duration)
           || event.duration <= 0 || event.currentTime < 0 || event.currentTime > event.duration
           || typeof event.device?.id !== 'string' || !event.device.id || typeof event.device.name !== 'string'
-          || !Number.isInteger(event.device.outputs) || event.device.outputs <= 0 || event.loop !== loop) {
+          || (midiOutput === undefined ? !Number.isInteger(event.device.outputs) || event.device.outputs <= 0
+            : event.device.kind !== 'midi' || event.device.protocol !== 1) || event.loop !== loop) {
         throw new Error('Malformed playback state')
       }
-      if (output !== undefined && event.device.id !== output || firstDevice !== null && event.device.id !== firstDevice) {
+      if (selectedID !== undefined && event.device.id !== selectedID || firstDevice !== null && event.device.id !== firstDevice) {
         throw new Error('Playback output differs from the selected device')
       }
       if (!current && event.kind !== 'playing' && event.kind !== 'stopped') throw new Error('Playback did not begin with a playing acknowledgement')

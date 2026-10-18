@@ -98,3 +98,20 @@ test('early stop, cancellation and native failure do not become successful playb
   const preAborted = new AbortController(); preAborted.abort()
   assert.throws(() => openPlayback({ path: 'x', signal: preAborted.signal }), /abort/i)
 })
+
+test('MIDI destination playback pins its identity and retains the same owned transport controls', async () => {
+  const f = fixture({ output: undefined, midiOutput: '-120', loop: true })
+  const device = { kind: 'midi', id: '-120', name: 'Owned virtual output', protocol: 1 }
+  assert.deepEqual(f.args, ['play', '--file', '/synthetic/phrase.wav', '--destination', '-120', '--loop'])
+  f.event('playing', { device }); await f.playback.ready
+  f.playback.pause(); f.event('paused', { device })
+  f.playback.seek(2); f.playback.resume(); f.playback.stop()
+  f.event('stopped', { device }); f.close()
+  await f.playback.completion
+  assert.deepEqual(f.commands, [{ kind: 'pause' }, { kind: 'seek', seconds: 2 }, { kind: 'resume' }, { kind: 'stop' }])
+  const bad = fixture({ output: undefined, midiOutput: '-120' })
+  bad.event('playing', { device: { ...device, id: '121' } }); bad.close(1)
+  await assert.rejects(bad.playback.ready, /selected device/)
+  await assert.rejects(bad.playback.completion, /selected device/)
+  assert.throws(() => openPlayback({ path: 'x', output: 'audio', midiOutput: '-120' }), /Choose/)
+})

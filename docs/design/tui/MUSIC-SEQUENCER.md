@@ -74,3 +74,25 @@ Library contracts: [Tonal chord](https://github.com/tonaljs/tonal/tree/main/pack
 [voicing](https://github.com/tonaljs/tonal/tree/main/packages/voicing),
 [voice leading](https://github.com/tonaljs/tonal/tree/main/packages/voice-leading),
 and [JZZ MIDI files](https://jazz-soft.net/doc/JZZ/midifile.html).
+
+## Imported-performance audition boundary
+
+The next transport connection must consume the source performance's complete
+ordered message stream, not `sequenceEvents` from the phrase schema. Its seconds
+come from the retained PPQ tempo map or SMPTE clock. Meta events remain in the
+source/export; channel data and F0/F7 wire fragments keep their ordering and
+original port identity.
+
+Source ports need explicit destination bindings. A file with several numbered
+ports must not collapse them into one selected output. The owned native sender
+must account for held notes and stateful controllers, including pedal releases,
+through pause, seek, route changes, failures and shutdown. F7 escape data may
+contain wire messages, so key ownership cannot assume that every source event
+is a pre-decoded three-byte note. Large SysEx needs packetization under CoreMIDI's
+actual packet representation, without an arbitrary vendor-message size cap.
+
+Controller/program/bank/RPN state and opaque SysEx have different replay effects.
+A seek/resume implementation must define what it restores and report unsupported
+state reconstruction; silently using the phrase sender's volume/pan chase would
+lose the source performance. Source audition does not establish MIDI clock sync,
+audio/MIDI sample alignment, hardware latency or physical-device behavior.

@@ -54,3 +54,7 @@ Captured controller/program state still follows the explicit baseline rules in
 [source state](SOURCE-STATE.md). Complete original UMP is retained even when a
 region cannot restore its unknown initial state; that case reports a diagnostic.
 Recording does not invent controller defaults to bypass playback admission.
+A recorded silent preamble can establish its source-defined values before the
+first attack, at the original event timestamps. Repeats and seek retain that gap;
+they do not send future controllers early. A baseline arriving after a dependent
+attack or relative mutation remains insufficient.

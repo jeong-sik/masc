@@ -1,6 +1,9 @@
 # Original Composition evidence recovery
 
 Source baseline: `de61e0a66b8d135576221b98864d3d7bcf2bc4e0`.
+Review base: `74383364ae996e7411d4c81510cc9c337864226e` (`main`).
+The three changed OCaml source files are identical between that base and the
+comparison baseline before this patch.
 Scope: process-local continuation scheduling hints and pre-intake evidence repair.
 
 | Boundary | Before | After |

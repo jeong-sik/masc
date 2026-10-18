@@ -20,6 +20,7 @@
   keeper_msg_async_record
   keeper_memory_os_current_types
   keeper_memory_os_support_core
+  keeper_memory_os_disposition_core
   keeper_memory_os_snapshot_codec
   keeper_memory_os_journal_codec
   keeper_memory_os_successor_recall

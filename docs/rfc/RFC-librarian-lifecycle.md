@@ -377,6 +377,10 @@ flowchart TD
 
   이 판정 자체는 다음 메시지에 쓸 Memory나 최종 저장물이 아니다. 메시지별 판정을 원래의 사실·흡수·교정·삭제와 근거 관계를 보존해 원경계에서 한 번 게시하도록 합성해야 한다. `selection.facts`는 gate 전 투영이므로 사용할 수 없다. A→B→C의 중간 원문과 판정도 단순 연결로 A→C 판정이 되지 않는다. 단계마다 premise 유효성을 유지하고, 최종 잠금 안에서 원래 사실의 의존성과 concurrent Keeper 변경을 확인하며, 필요한 최종 흡수 근거를 따로 검증해야 한다. 이 합성 계약이 완성되기 전에는 부분 Memory나 읽은 위치를 게시하지 않는다.
 
+  `Keeper_librarian_memory_plan`은 같은 Keeper·선택 batch 안에서 이 원본 판정들을 순서대로 보존한다. 첫 Memory 스냅숏은 revision·출처를 포함한 원본으로 남기며, 다음 추론에는 별도의 staged current facts만 준다. 각 단계는 실제로 판단한 current의 ID와 전체 저장 필드가 맞아야 하고, 중복 ID·다른 Keeper/batch·이미 적용한 실행 ID는 거절한다. surrogate 순서가 달라도 같은 사실 집합이면 판단을 받아들이되 원 입력 순서는 그대로 보존한다. 기존 `Current.apply_disposition`과 공유하는 순수 계산으로 새 사실과 삭제를 적용한 직후 premise closure를 수행한다. 삭제된 근거를 나중에 다시 추가해도 앞 단계에서 무효화된 파생 사실은 자동 복원하지 않는다. 이 계획은 저장 revision·읽은 위치·소비 영수증을 만들지 않는다.
+
+  원래 저장 경로의 흡수 후보 map은 support closure 전의 후보일 뿐이다. 현재 경로는 원문이 다음 사실에서 빠졌는지로 absorbed row를 쓰므로, closure가 흡수 대상까지 제거하는 경우를 최종 대상의 생존 증명으로 쓸 수 없다. 순서 계획은 이 동작을 고치거나 흡수 성공으로 승격하지 않는다. 최종 게시자는 중간 판정과 원문을 유지한 채 잠금 안에서 재검증하고 실제 남는 대상과 근거를 확인해야 한다. 단계별 독립 저장이나 최종 staged facts로의 전체 교체는 이 계약을 만족하지 않는다.
+
   이 저장·요청 계약만으로 건너뛰기를 켜지 않는다. Memory 영수증과 진행 위치의 원자적 복구, absorbed 요청, 대시보드·TUI, TLA 불변식이 같은 뜻을 갖춘 뒤 바닥의 실제 거절을 unread 기록에 연결한다. 전체 구현은 #37850에서 추적한다.
 
   이 사다리가 필요한 경우는 둘뿐이다. 자를 자리가 없는 구간과, 스냅숏을 atom 0 부터 다시 쓰는 회차다. 뒤엣것은 흔하지 않다. #37751 뒤로 purge 는 이 이력에 맞는 연속성 스냅숏이 덮은 앞부분을 바이트 그대로 두므로 `Librarian_continuity_snapshot` 의 `prefix_sha256` 이 살아남는다(`keeper_checkpoint_purge.ml` 의 `fitting_continuity` 갈래, `test_a_fitting_working_state_keeps_its_prefix` 가 고정). 0 부터 다시 쓰게 되는 길은 그 규칙 전에 지워진 이력(2026-09-22 goo-yang-bong 이 그것이다), 이미 이력과 맞지 않던 스냅숏, 이력 세대가 실제로 바뀌는 경우다. 새 도구를 만들지 않는다.

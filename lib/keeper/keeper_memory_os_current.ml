@@ -2903,16 +2903,6 @@ type disposition =
   ; revisions_applied : Keeper_memory_os_types.revision list
   }
 
-(* What one commit does with the answer, decided from the snapshot the lock
-   holds. Computed by the update and again by [before_replace] from the same
-   locked snapshot, so both see the same decision. *)
-type disposition_plan =
-  { claims_accepted : Keeper_memory_os_types.fact list
-  ; claims_refused : Keeper_memory_os_types.fact list
-  ; plan_retired : Set_util.StringSet.t
-  ; absorbed_into : string Set_util.StringMap.t
-  }
-
 let apply_disposition
       ?on_committed
       ?clock
@@ -2937,82 +2927,11 @@ let apply_disposition
       Set_util.StringSet.empty
       facts
   in
-  let retired =
-    List.fold_left
-      (fun ids (statement : Keeper_memory_os_types.dropped_statement) ->
-         Set_util.StringSet.add statement.memory_id ids)
-      Set_util.StringSet.empty
-      (Option.value dropped_statements ~default:[])
-  in
-  (* The librarian read the snapshot before its provider turn, so a memory its
-     answer continues may be gone by the time the lock is taken: the keeper
-     retracted it, or superseded it with a successor of its own (#38122).
-
-     A new claim that supersedes such a memory, or absorbs one, is not stored:
-     it would carry on content the keeper already removed or replaced, and the
-     old id would get a second successor. A memory the answer supersedes
-     leaves only when one of its successors is in the next snapshot: a stored
-     new claim, or a restated memory the locked snapshot still holds. Its only
-     reason to leave was that successor.
-
-     An absorption goes into a memory the answer names: a stored new claim, or
-     a current memory it wrote again verbatim. An absorption whose target is
-     neither held by the locked snapshot nor stored by this answer is not
-     applied: its source stays current, a removed memory is not brought back,
-     and no absorbed row points into an id no snapshot has (#38186). *)
   let plan_of (previous : t option) =
-    let current_ids =
-      match previous with
-      | None -> Set_util.StringSet.empty
-      | Some snapshot -> ids_of snapshot.facts
-    in
-    let held identity = Set_util.StringSet.mem identity current_ids in
-    let continues_a_removed_memory fact =
-      let identity = memory_id fact in
-      (not (held identity))
-      && (List.exists
-            (fun (revision : Keeper_memory_os_types.revision) ->
-               String.equal revision.superseded_by identity
-               && not (held revision.superseded))
-            revisions
-          || List.exists
-               (fun (statement : Keeper_memory_os_types.absorbed_statement) ->
-                  String.equal statement.into identity && not (held statement.absorbed))
-               absorbed)
-    in
-    let claims_refused, claims_accepted =
-      List.partition continues_a_removed_memory new_claims
-    in
-    let accepted_ids = ids_of claims_accepted in
-    let plan_retired =
-      Set_util.StringSet.filter
-        (fun identity ->
-           let successors =
-             List.filter
-               (fun (revision : Keeper_memory_os_types.revision) ->
-                  String.equal revision.superseded identity)
-               revisions
-           in
-           match successors with
-           | [] -> true
-           | _ :: _ ->
-             List.exists
-               (fun (revision : Keeper_memory_os_types.revision) ->
-                  held revision.superseded_by
-                  || Set_util.StringSet.mem revision.superseded_by accepted_ids)
-               successors)
-        retired
-    in
-    let absorbed_into =
-      List.fold_left
-        (fun into_of (statement : Keeper_memory_os_types.absorbed_statement) ->
-           if held statement.into || Set_util.StringSet.mem statement.into accepted_ids
-           then Set_util.StringMap.add statement.absorbed statement.into into_of
-           else into_of)
-        Set_util.StringMap.empty
-        absorbed
-    in
-    { claims_accepted; claims_refused; plan_retired; absorbed_into }
+    let current = match previous with None -> [] | Some snapshot -> snapshot.facts in
+    Keeper_memory_os_disposition_core.plan ~current
+      ~dropped:(Option.value dropped_statements ~default:[])
+      ~absorbed ~revisions ~new_claims
   in
   (* What the commit did: an absorption is applied when its row is written (its
      source left the snapshot into its target), a revision when its old id left
@@ -3103,34 +3022,8 @@ let apply_disposition
     ~keeper_id
     ~now
     (fun ~snapshot_content:_ previous ->
-       let current =
-         match previous with
-         | None -> []
-         | Some snapshot -> snapshot.facts
-       in
        let plan = plan_of previous in
-       let kept =
-         List.filter
-           (fun fact ->
-              let identity = memory_id fact in
-              not
-                (Set_util.StringSet.mem identity plan.plan_retired
-                 || Set_util.StringMap.mem identity plan.absorbed_into))
-           current
-       in
-       (* The store rejects a repeated identity outright, so a claim the keeper
-          already wrote during the pass is not appended a second time. *)
-       let added, _ =
-         List.fold_left
-           (fun (acc, seen) fact ->
-              let identity = memory_id fact in
-              if Set_util.StringSet.mem identity seen
-              then acc, seen
-              else fact :: acc, Set_util.StringSet.add identity seen)
-           ([], ids_of kept)
-           plan.claims_accepted
-       in
-       let* next = make_snapshot ~previous ~now ~source ~facts:(kept @ List.rev added) () in
+       let* next = make_snapshot ~previous ~now ~source ~facts:plan.facts () in
        let actual = ids_of next.facts in
        match List.find_opt (fun identity -> not (Set_util.StringSet.mem identity actual)) required_memory_ids with
        | Some identity -> Error ("explicit admission destination is not current: " ^ identity)

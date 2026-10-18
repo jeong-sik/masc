@@ -1208,6 +1208,203 @@ let test_memory_inference_retains_gated_decision () =
     (Result.is_error (Masc.Tui_decode.decode_lane_run_detail (with_field "memory_inference" (`Bool false))))
 ;;
 
+module Memory_plan = Masc.Keeper_librarian_memory_plan
+
+let require_plan = function
+  | Ok value -> value
+  | Error error -> fail (Memory_plan.error_to_string error)
+
+let require_memory = function Ok value -> value | Error detail -> fail detail
+
+let memory_answer ?(new_claims=[]) ?(dropped=[]) state =
+  `Assoc ["new_claims", `List new_claims; "dropped", `List dropped;
+    "working_contexts", `List []; "working_state", `String state]
+
+let retire_wire identity =
+  `Assoc ["memory_id", `String identity; "reason", `String "The selected message retires this claim."]
+
+(* Only the CLI completion is injected. Selection, parsing, gate policy and
+   source capture are the production inference path. The gate is explicitly
+   disabled here; these scenarios do not claim live semantic judgment. *)
+let with_memory_plan_fixture initial_facts f =
+  with_eio @@ fun ~sw:_ ~net:_ ~clock:_ ~base_path ->
+  Fixture.with_official_client_runtimes @@ fun () ->
+  Masc_test_deps.with_typesafeai_policy
+    {Runtime_schema.default_typesafeai with lane_enabled=false; absorb_gate=false} @@ fun () ->
+  Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
+  publish_unreachable_lane ~cli_only:true ~cli_slot_ids:[Fixture.cli_primary_runtime]
+    ~source:"ordered process-local Memory decisions" ();
+  let keeper_id = "cli-lane-keeper" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let snapshot = Option.map (fun facts ->
+    Current.replace ~keepers_dir ~keeper_id ~expected_revision:None ~now:1_000_000.
+      ~source:{Current.kind=Current.Explicit_write; trace_id="plan-seed"} ~facts ()
+    |> require_memory) initial_facts in
+  let source = {(input ()) with current=Option.map
+    (fun (snapshot : Current.t) -> {Librarian.facts=snapshot.facts}) snapshot} in
+  let plan = Memory_plan.create ~keeper_id:source.keeper_id ~turn_ref:source.turn_ref ~snapshot
+    |> require_plan in
+  let infer source answer =
+    let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+      Ok (Yojson.Safe.to_string answer) in
+    match Runtime.infer_memory_step ~cli_runner:runner ~base_path ~keepers_dir ~keeper_id
+      ~previous_state:None ~unread_messages:[] source with
+    | Runtime.Memory_inferred {step;_} -> step
+    | Runtime.Memory_not_inferred reports ->
+      failf "ordered Memory inference refused: %s"
+        (String.concat "; " (List.map (fun (r : Runtime.not_committed) -> r.detail) reports))
+  in
+  f ~keepers_dir ~keeper_id ~snapshot ~source ~plan ~infer
+
+let staged_facts plan =
+  match Memory_plan.current plan with None -> [] | Some current -> current.facts
+
+let check_memory_payloads label expected actual =
+  let payloads = List.map (fun fact -> Yojson.Safe.to_string (Memory.fact_to_json fact)) in
+  check (list string) label (payloads expected) (payloads actual)
+
+(* Sequential store calls are an oracle for individual step semantics, not a
+   floor publication algorithm: production must publish once at the boundary. *)
+let check_stored_plan_steps ~keepers_dir ~keeper_id plan =
+  List.iter (fun (stage : Memory_plan.stage) ->
+    let step = stage.step in
+    let stored = Current.apply_disposition ~keepers_dir ~keeper_id ~now:2_000_000.
+      ~source:{Current.kind=Current.Librarian; trace_id=Ids.Turn_ref.trace_id step.source_input.turn_ref}
+      ~dropped_statements:step.dropped ~absorbed:step.absorbed ~revisions:step.revisions
+      ~new_claims:step.new_claims () |> require_memory in
+    check_memory_payloads "staged/store facts and order agree" stage.current.facts stored.snapshot.facts;
+    check_memory_payloads "staged/store refused claims agree" stage.claims_not_applied stored.claims_not_applied;
+    check bool "staged/store support invalidations agree" true
+      (stage.invalidated = stored.snapshot.change.invalidated))
+    (Memory_plan.stages plan)
+
+let test_ordered_memory_revision_chain () =
+  with_memory_plan_fixture (Some [current_a;current_b])
+  @@ fun ~keepers_dir ~keeper_id ~snapshot ~source ~plan ~infer ->
+  let paths = inference_store_paths ~keepers_dir ~keeper_id in
+  let before = List.map Fs_compat.load_file_opt paths in
+  let first = infer source inference_answer in
+  let after_first = Memory_plan.append plan first |> require_plan in
+  check_memory_payloads "first decision replaces both original facts" first.new_claims (staged_facts after_first);
+  let second_input = {source with current=Memory_plan.current after_first;
+    messages=[Agent_core.Types.make_message ~role:Agent_core.Types.User
+      [Agent_core.Types.Text "A later observation revises the intermediate conclusion."]]} in
+  let final_claim = `Assoc ["claim", `String "Final conclusion from the second observation.";
+    "category", `String "fact"; "supersedes", `String "m1"] in
+  let second = infer second_input
+    (memory_answer ~new_claims:[final_claim] ~dropped:[retire_wire "m1"] "second continuation") in
+  let result = Memory_plan.append after_first second |> require_plan in
+  check_memory_payloads "second decision retains accepted timestamps and fields"
+    second.new_claims (staged_facts result);
+  check bool "all staging leaves stored bytes unchanged" true (before = List.map Fs_compat.load_file_opt paths);
+  check bool "initial snapshot remains the original publication identity" true
+    (Memory_plan.initial_snapshot result = snapshot);
+  check_memory_payloads "an earlier immutable plan remains reusable" [current_a;current_b] (staged_facts plan);
+  (match Memory_plan.stages result with
+   | [first_stage;second_stage] ->
+     check bool "intermediate source, gate and successor program stay ordered" true
+       (first_stage.step = first && second_stage.step = second
+         && first_stage.step.source_input = first.source_input
+         && second_stage.step.source_input = second_input)
+   | _ -> fail "expected two retained decision stages");
+  check_stored_plan_steps ~keepers_dir ~keeper_id result
+
+let test_ordered_memory_support_is_maintained_between_steps () =
+  let premise = fact ~claim:"P supports the deployment conclusion." in
+  let alternate = fact ~claim:"Q independently supports the deployment conclusion." in
+  let derived claim derivations = Memory.derived ~claim ~category:Memory.Fact ~now:1_000_000.
+    ~origin:{Memory.kind=Memory.Authored; trace_id="support-source"} ~derivations |> require_memory in
+  let dependent = derived "D relies on P."
+    [{Memory.rule_id="from_p"; premise_ids=[Memory.memory_id premise]}] in
+  let transitive = derived "F relies on D."
+    [{Memory.rule_id="from_d"; premise_ids=[Memory.memory_id dependent]}] in
+  let alternative = derived "E has two independent support paths."
+    [{Memory.rule_id="from_p"; premise_ids=[Memory.memory_id premise]};
+     {Memory.rule_id="from_q"; premise_ids=[Memory.memory_id alternate]}] in
+  with_memory_plan_fixture (Some [premise;dependent;transitive;alternate;alternative])
+  @@ fun ~keepers_dir ~keeper_id ~snapshot:_ ~source ~plan ~infer ->
+  let first = infer source (memory_answer ~dropped:[retire_wire "m1"] "P retired") in
+  let after_first = Memory_plan.append plan first |> require_plan in
+  check_memory_payloads "alternate proof survives, transitive dependents leave"
+    [alternate;alternative] (staged_facts after_first);
+  (match Memory_plan.stages after_first with
+   | [stage] ->
+     check_memory_payloads "intermediate invalidations remain evidence"
+       [dependent;transitive] (List.map (fun (i : Current.support_invalidation) -> i.fact) stage.invalidated)
+   | _ -> fail "expected one support-maintained stage");
+  let second = infer {source with current=Memory_plan.current after_first}
+    (memory_answer ~new_claims:[`Assoc ["claim", `String premise.claim; "category", `String "fact"]]
+      "P observed again") in
+  let result = Memory_plan.append after_first second |> require_plan in
+  check_memory_payloads "re-adding P cannot resurrect already invalidated D or F"
+    ([alternate;alternative] @ second.new_claims) (staged_facts result);
+  check_stored_plan_steps ~keepers_dir ~keeper_id result
+
+let test_ordered_memory_source_binding () =
+  with_memory_plan_fixture (Some [current_a;current_b])
+  @@ fun ~keepers_dir:_ ~keeper_id:_ ~snapshot ~source ~plan ~infer ->
+  let step = infer source inference_answer in
+  let make_plan ?(keeper_id=source.keeper_id) ?(turn_ref=source.turn_ref) snapshot =
+    Memory_plan.create ~keeper_id ~turn_ref ~snapshot |> require_plan in
+  (match Memory_plan.append (make_plan ~keeper_id:(Masc_test_deps.keeper_id_fixture "another-keeper") snapshot) step with
+   | Error (Memory_plan.Keeper_mismatch _) -> ()
+   | Error error -> fail (Memory_plan.error_to_string error)
+   | Ok _ -> fail "identical facts from another Keeper were accepted");
+  (match Memory_plan.append (make_plan ~turn_ref:(Ids.Turn_ref.make ~trace_id:"another-trace" ~absolute_turn:7) snapshot) step with
+   | Error (Memory_plan.Batch_turn_mismatch _) -> ()
+   | Error error -> fail (Memory_plan.error_to_string error)
+   | Ok _ -> fail "another source batch was accepted");
+  let snapshot = match snapshot with Some snapshot -> snapshot | None -> fail "seed missing" in
+  let changed = {current_a with last_seen=current_a.last_seen +. 1.} in
+  (match Memory_plan.append (make_plan (Some {snapshot with facts=[changed;current_b]})) step with
+   | Error Memory_plan.Current_input_mismatch -> ()
+   | Error error -> fail (Memory_plan.error_to_string error)
+   | Ok _ -> fail "same identities hid changed stored fact fields");
+  (match Memory_plan.create ~keeper_id:source.keeper_id ~turn_ref:source.turn_ref
+    ~snapshot:(Some {snapshot with facts=[current_a;changed;current_b]}) with
+   | Error (Memory_plan.Duplicate_current_identity identity) ->
+     check string "duplicate identity is named" (Memory.memory_id current_a) identity
+   | Error error -> fail (Memory_plan.error_to_string error)
+   | Ok _ -> fail "duplicate current identities were silently coalesced");
+  let reordered_input = {source with current=Some {Librarian.facts=[current_b;current_a]}} in
+  let reordered_answer = `Assoc ["new_claims", `List [`Assoc
+    ["claim", `String "Both original facts were judged in the opposite surrogate order.";
+     "category", `String "fact"; "supersedes", `String "m1"; "absorbs", `List [`String "m2"]]];
+    "dropped", `List [retire_wire "m1"]; "working_contexts", `List [];
+    "working_state", `String "opposite source order"] in
+  let reordered_step = infer reordered_input reordered_answer in
+  let result = Memory_plan.append plan reordered_step |> require_plan in
+  check_memory_payloads "equivalent current sets permit different surrogate order"
+    reordered_step.new_claims (staged_facts result);
+  match Memory_plan.stages result with
+  | [stage] -> check bool "source's surrogate order is retained" true
+      (stage.step.source_input.current = reordered_input.current)
+  | _ -> fail "expected one reordered stage"
+
+let test_ordered_memory_empty_and_repeated_inference () =
+  with_memory_plan_fixture None
+  @@ fun ~keepers_dir ~keeper_id ~snapshot:_ ~source ~plan ~infer ->
+  let paths = inference_store_paths ~keepers_dir ~keeper_id in
+  let before = List.map Fs_compat.load_file_opt paths in
+  let first = infer source (memory_answer "empty first step") in
+  let after_first = Memory_plan.append plan first |> require_plan in
+  check bool "accepted empty state is known, not an absent original snapshot" true
+    (Memory_plan.current plan = None && Memory_plan.current after_first = Some {Librarian.facts=[]});
+  (match Memory_plan.append after_first first with
+   | Error (Memory_plan.Duplicate_step_run run_id) -> check string "replayed run is identified" first.run_id run_id
+   | Error error -> fail (Memory_plan.error_to_string error)
+   | Ok _ -> fail "the same inference was accepted twice");
+  let stale = infer source (memory_answer "stale missing current") in
+  (match Memory_plan.append after_first stale with
+   | Error Memory_plan.Current_input_mismatch -> ()
+   | Error error -> fail (Memory_plan.error_to_string error)
+   | Ok _ -> fail "absent current was confused with a judged empty current");
+  let second = infer {source with current=Memory_plan.current after_first} (memory_answer "known empty") in
+  let result = Memory_plan.append after_first second |> require_plan in
+  check int "rejected append leaves the earlier plan usable" 2 (List.length (Memory_plan.stages result));
+  check bool "staging does not create an empty Memory publication" true
+    (before = List.map Fs_compat.load_file_opt paths)
+
 type inference_failure = Invalid_memory_answer | Gate_unavailable | Opaque_cli_failure | Cancelled_inference
 
 let test_memory_inference_failure_keeps_pending_publication failure () =
@@ -1282,7 +1479,15 @@ let () =
   run
     "keeper_librarian_cli_lane"
     [ ( "cli lane slots"
-      , [ test_case "Memory inference retains a gated decision without publishing" `Quick
+      , [ test_case "ordered Memory revisions preserve original decisions and store parity" `Quick
+            test_ordered_memory_revision_chain
+        ; test_case "ordered Memory support closure prevents later resurrection" `Quick
+            test_ordered_memory_support_is_maintained_between_steps
+        ; test_case "ordered Memory binds Keeper, source batch and complete fact fields" `Quick
+            test_ordered_memory_source_binding
+        ; test_case "ordered Memory distinguishes absent current and repeated inference" `Quick
+            test_ordered_memory_empty_and_repeated_inference
+        ; test_case "Memory inference retains a gated decision without publishing" `Quick
             test_memory_inference_retains_gated_decision
         ; test_case "invalid Memory inference preserves pending publication" `Quick
             (test_memory_inference_failure_keeps_pending_publication Invalid_memory_answer)

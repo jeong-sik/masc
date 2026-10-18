@@ -674,16 +674,30 @@ let new_goal ~now ~id ~criterion_revision ~title ~metric ~target_value ~due_date
     last_review_note = None; last_review_at = None;
     created_at = now; updated_at = now }
 
+let resolve_goal_id = function
+  | None -> Ok (gen_goal_id ())
+  | Some raw_id ->
+      let trimmed = String.trim raw_id in
+      if String.equal trimmed "" then
+        Error (Rejected "goal id cannot be blank")
+      else if not (String.equal trimmed raw_id) then
+        Error
+          (Rejected
+             (Printf.sprintf
+                "goal id %S must not have leading or trailing whitespace"
+                raw_id))
+      else Ok raw_id
+
 let upsert_goal_internal config ?actor ?id ?title ?metric ?target_value ?due_date
     ?priority () =
   let is_new_goal = id = None in
   if is_new_goal && blank_opt title then
     Error (Rejected "title required for new goal")
   else
+    let* resolved_id = resolve_goal_id id in
     match due_date_refusal due_date with
     | Some message -> Error (Rejected message)
     | None ->
-        let resolved_id = Option.value id ~default:(gen_goal_id ()) in
         commit_state config (fun state ->
           let now = Masc_domain.now_iso () in
           let* goal, action =

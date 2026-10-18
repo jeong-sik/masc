@@ -1367,7 +1367,14 @@ let add_delete_action_routes router =
              with
              | None, _ -> respond_error ~request:req reqd (invalid_request "task_id")
              | _, None -> respond_error ~request:req reqd (invalid_request "goal_id")
-             | Some task_id, Some goal_id ->
+             | Some raw_task_id, Some raw_goal_id ->
+             let task_id = String.trim raw_task_id in
+             let goal_id = String.trim raw_goal_id in
+             if String.equal task_id "" then
+               respond_error ~request:req reqd (invalid_request "task_id")
+             else if String.equal goal_id "" then
+               respond_error ~request:req reqd (invalid_request "goal_id")
+             else
              let config = (Mcp_server.workspace_config state) in
              (match Task.Goal_assignment.set_task_goal config ~task_id ~goal_id with
               | Ok () -> respond_ok ~request:req reqd

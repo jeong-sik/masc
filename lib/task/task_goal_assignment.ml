@@ -51,6 +51,8 @@ let set_task_goal_error_to_string = function
 ;;
 
 let set_task_goal config ~task_id ~goal_id : (unit, set_task_goal_error) result =
+  let task_id = String.trim task_id in
+  let goal_id = String.trim goal_id in
   match Goal_store.with_existing_goals config ~goal_ids:[goal_id] (fun () ->
     match Workspace_utils.with_file_lock_r config (Workspace_backlog.backlog_lock_path config) (fun () ->
       match Workspace_backlog.read_backlog_r config with

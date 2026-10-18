@@ -464,6 +464,22 @@ let test_delete_and_binding_share_membership_lock () =
      | _ -> fail "binding after deletion must reject the missing Goal"))
 ;;
 
+let test_whitespace_padded_ids_are_trimmed_before_lookup () =
+  with_test_env (fun config ->
+    make_goal config ~id:"goal-a";
+    let task_id = make_unassigned_task config ~title:"trimmed assignment" in
+    (match
+       Goal_assignment.set_task_goal config
+         ~task_id:("  " ^ task_id ^ "  ")
+         ~goal_id:"  goal-a  "
+     with
+     | Ok () -> ()
+     | Error err -> failf "expected trimmed IDs to link cleanly, got %s" (err_to_string err));
+    check (option (list string)) "canonical goal id resolves linked task"
+      (Some [ task_id ])
+      (List.assoc_opt "goal-a" (Workspace_goal_index.read_goal_task_links config)))
+;;
+
 let () =
   run
     "goal_task_assignment"
@@ -475,6 +491,8 @@ let () =
         ; test_case "unknown task is rejected" `Quick test_unknown_task
         ; test_case "unknown goal is rejected" `Quick test_unknown_goal
         ; test_case "goalless task links to goal" `Quick test_links_goalless_task
+        ; test_case "whitespace-padded ids are trimmed before lookup" `Quick
+            test_whitespace_padded_ids_are_trimmed_before_lookup
         ; test_case "reassignment is rejected" `Quick test_rejects_reassignment
         ; test_case "a finished task is rejected" `Quick test_rejects_finished_task
         ; test_case

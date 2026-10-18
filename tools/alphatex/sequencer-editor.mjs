@@ -89,8 +89,9 @@ export function editorCommand(editor, line) {
     }
     case 'save': case 'play': case 'stop': case 'record': case 'help':
       count(0); return { editor, effect: { kind: command } }
-    case 'save-as': case 'export': case 'wave':
+    case 'save-as': case 'export': case 'wave': case 'output':
       count(1, Number.MAX_SAFE_INTEGER); return { editor, effect: { kind: command, path: args.join(' ') } }
+    case 'seek': count(1); return { editor, effect: { kind: 'seek', tick: beats(args[0]) } }
     case 'undo': case 'redo': case 'mute': case 'solo':
       count(0); return { editor: editorAction(editor, { kind: command }) }
     default: throw new Error(`Unknown command: ${command}; use :help`)

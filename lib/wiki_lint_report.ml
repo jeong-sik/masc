@@ -21,8 +21,9 @@ let problem_to_string = function
   | Bad_cursor cursor ->
     Printf.sprintf "cursor %S is not a cursor this tool returned" cursor
   | Stale_cursor ->
-    "the wiki changed since that cursor was issued; call again without cursor to read the \
-     findings from the start"
+    "the findings behind that cursor changed (the wiki changed, or `kind`/`page` differ \
+     from the call that issued it); call again without cursor to read the findings from \
+     the start"
 ;;
 
 let schema = "masc.wiki_lint.v1"
@@ -61,8 +62,9 @@ let finding_to_json (finding : Wiki_lint.finding) : Yojson.Safe.t =
 ;;
 
 (* A cursor is [o:<offset>:<fingerprint>]. The fingerprint names the filtered
-   list the offset counts into, so a cursor from before the wiki changed is
-   refused instead of silently skipping or repeating findings. *)
+   list the offset counts into, so a cursor from before the wiki changed or from
+   a different [kind]/[page] filter is refused instead of silently skipping or
+   repeating findings. *)
 let fingerprint_length = 12
 
 let fingerprint selected =

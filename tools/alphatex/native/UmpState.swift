@@ -152,11 +152,16 @@ struct UmpRestoration {
     let nextIndex: Int
 }
 func umpRestoration(_ events: [UmpEvent], before seconds: Double, replacing previous: UmpFootprint) throws -> UmpRestoration {
+    let count = events.firstIndex(where: { $0.seconds >= seconds }) ?? events.count
+    return try umpRestoration(events, prefixCount: count, replacing: previous)
+}
+func umpRestoration(_ events: [UmpEvent], prefixCount: Int, replacing previous: UmpFootprint) throws -> UmpRestoration {
+    guard prefixCount >= 0, prefixCount <= events.count else { throw MidiFailure("invalid captured UMP prefix") }
     try previous.requireSupported()
     var footprint = UmpFootprint(), known = Set<UmpField>(), channels: [UmpAddress: UmpChannelState] = [:]
     var notes = Set<Int>(), next = 0
     for (ordinal, event) in events.enumerated() {
-        guard event.seconds < seconds else { break }
+        guard ordinal < prefixCount else { break }
         next = ordinal + 1
         let message = UmpMessage(event), address = message.address
         footprint.observe(message)

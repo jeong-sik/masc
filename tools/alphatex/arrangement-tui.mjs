@@ -36,6 +36,7 @@ const help = [
   'Space: play/pause/resume; :stop; :seek BEAT; :output AUDIO_UID',
   ':midi-output MIDI_UID    :midi-port asset-1 PORT MIDI_UID',
   ':mixed-output AUDIO_UID enables audio plus the selected MIDI routes.',
+  ':play-audio explicitly auditions WAV, including captured regions and silent gaps.',
   'Whole-arrangement looping and overdub remain under development.',
 ]
 
@@ -109,12 +110,12 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     if (next.project !== editor.project) stop()
     editor = next
   }
-  function play() {
+  function play(audioOnly = false) {
     if (!accepting) return
     if (transport.kind === 'playing') { transport.handle.pause(); return }
     if (transport.kind === 'paused') { transport.handle.resume(); return }
     if (transport.kind === 'preparing' || transport.kind === 'starting') { stop(); return }
-    const selection = arrangementPlaybackRequest(editor.project, route)
+    const selection = audioOnly ? { kind: 'prepare-audio', output: route.output } : arrangementPlaybackRequest(editor.project, route)
     const expected = ++generation, project = editor.project, output = selection.output
     transport = { kind: 'preparing' }; status = 'Preparing arrangement sources…'
     const prepared = request({ ...selection, project, sourceRoot, directory }, id => { preparing = id })
@@ -206,6 +207,9 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
       case 'open-take': openTake(value.asset); break
       case 'help': showHelp = !showHelp; break
       case 'play': play(); break
+      case 'play-audio':
+        if (['playing', 'paused', 'preparing', 'starting'].includes(transport.kind)) throw new Error('Stop current playback before choosing audio-only audition')
+        play(true); break
       case 'stop': stop(); break
       case 'seek': {
         if (!['playing', 'paused'].includes(transport.kind)) throw new Error('Playback is not ready')

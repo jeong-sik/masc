@@ -60,7 +60,7 @@ This follows the established distinction between [MIDI state chase at a new
 position](https://www.steinberg.help/r/cubase-elements/15.0/en/cubase_nuendo/topics/playback/playback_chase_c.html)
 and original sequential event delivery. Native event-list submission uses
 [CoreMIDI's MIDI2 API](https://developer.apple.com/documentation/coremidi/midisendeventlist(_:_:_:)).
-Arrangement SMF/UMP composition, monitored overdub,
+Monitored overdub,
 latency compensation and physical/visible/acoustic proof remain separate work.
 
 
@@ -74,7 +74,6 @@ physical group/channel ownership. Source IDs are in the captured source manifest
 A capture with no MIDI packets retains a clock-only region alongside paired
 sources. When all audible captures have no MIDI, ordinary play uses the native
 WAV clock without requiring a MIDI output. It never fabricates note messages.
-Audible SMF and captured UMP in the same arrangement currently receive an explicit
-composition diagnostic; no lanes are silently omitted. A muted SMF lane does not
-prevent captured/WAV playback. Failed or cancelled preparation removes the whole
+[Hybrid playback](HYBRID-ARRANGEMENT.md) combines audible SMF and captured UMP
+without omitting lanes. Muted sources do not acquire playback ownership. Failed or cancelled preparation removes the whole
 private root, and a late cancelled result cannot acquire a native player.

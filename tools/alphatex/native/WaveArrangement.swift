@@ -108,14 +108,16 @@ struct Plan: Decodable {
     var captured: Bool { kind == "capture-session" }
     var capturedAudio: Bool { kind == "capture-audio-arrangement" }
     var pairedRegions: Bool { kind == "capture-arrangement" }
-    var clocked: Bool { capturedAudio || pairedRegions }
+    var hybrid: Bool { kind == "hybrid-arrangement" }
+    var clocked: Bool { capturedAudio || pairedRegions || hybrid }
     var mixed: Bool { kind == "mixed-arrangement" }
     func validate() throws {
         guard (schemaVersion == 1 && kind == "wave-arrangement" && midi == nil && ump == nil && umpRegions == nil
                || schemaVersion == 2 && mixed && midi?.schemaVersion == 3 && ump == nil && umpRegions == nil
                || schemaVersion == 3 && captured && midi == nil && ump?.schemaVersion == 4 && umpRegions == nil
                || schemaVersion == 4 && capturedAudio && midi == nil && ump == nil && umpRegions == nil
-               || schemaVersion == 5 && pairedRegions && midi == nil && ump == nil && umpRegions?.schemaVersion == 1), duration.isFinite, duration > 0,
+               || schemaVersion == 5 && pairedRegions && midi == nil && ump == nil && umpRegions?.schemaVersion == 1
+               || schemaVersion == 6 && hybrid && midi?.schemaVersion == 3 && ump == nil && umpRegions?.schemaVersion == 1), duration.isFinite, duration > 0,
               (!regions.isEmpty || (captured || clocked) && assets.isEmpty), Set(assets.map(\.id)).count == assets.count, Set(regions.map(\.id)).count == regions.count else { throw AudioFailure("invalid WAV arrangement plan") }
         for asset in assets {
             guard !asset.id.isEmpty, !asset.path.isEmpty, asset.sampleRate.isFinite, asset.sampleRate > 0,
@@ -144,7 +146,7 @@ struct Plan: Decodable {
         }
         // Float arithmetic may differ by a final ULP, never by a source sample.
         let sample = assets.map { 1 / $0.sampleRate }.min() ?? 0
-        if let midi {
+        if !clocked, let midi {
             try midi.validate()
             let midiEnd = midi.regions.map(\.end).max() ?? 0
             guard midi.duration == duration, abs(max(end, midiEnd) - duration) < sample else { throw AudioFailure("mixed duration does not match its source regions") }
@@ -152,6 +154,10 @@ struct Plan: Decodable {
             let events = try ump.events(), midiEnd = events.map(\.seconds).max() ?? 0
             guard ump.duration == duration, abs(max(end, midiEnd) - duration) < (sample > 0 ? sample : 1e-9) else { throw AudioFailure("capture duration does not match its source clocks") }
         } else if clocked {
+            if hybrid, let midi, let umpRegions {
+                guard midi.duration == duration else { throw AudioFailure("hybrid SMF duration differs from the common clock") }
+                _ = try HybridMidiTransport(midi: midi, ump: umpRegions)
+            }
             if let umpRegions {
                 guard umpRegions.duration == duration else { throw AudioFailure("captured MIDI duration differs from the paired clock") }
                 _ = try UmpRegionTransport(timeline: umpRegions)
@@ -344,7 +350,12 @@ final class ArrangementTransport {
             voices.append(voice); engine.attach(voice.player)
             engine.connect(voice.player, to: engine.mainMixerNode, format: voice.file.processingFormat)
         }
-        if let timeline = plan.umpRegions {
+        if plan.hybrid, let notes = plan.midi, let captured = plan.umpRegions {
+            let transport = try HybridMidiTransport(midi: notes, ump: captured)
+            midi = transport; try transport.prepare()
+            transport.onCoordinatedFailure = { [weak self] reason, error in self?.finish(reason: reason, error: error) }
+            transport.onCoordinatedEnd = { [weak self] in self?.midiReachedEnd() }
+        } else if let timeline = plan.umpRegions {
             let transport = try UmpRegionTransport(timeline: timeline)
             midi = transport; try transport.prepare()
             transport.onCoordinatedFailure = { [weak self] reason, error in self?.finish(reason: reason, error: error) }

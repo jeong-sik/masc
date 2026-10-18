@@ -21,7 +21,10 @@ The source's exclusive end may be one beyond UInt64.max; it is never added to th
 absolute origin. State reconstruction takes an exact prefix ordinal rather than
 converting the cut to floating seconds. Events at the entry tick establish
 baselines and live keys in original order; the region end is exclusive. Original
-controller, note attribute and release words are retained. Fully expired keys are
+controller, note attribute and release words are retained. Events due exactly at
+entry remain an original-order batch, including zero-duration attack/release
+pairs. A delayed boundary drains releases for already acquired FIFO instances
+from its one active copy; missed Note Ons and skipped copies stay silent. Fully expired keys are
 excluded when entering or reconciling a late callback. Integer/rational arithmetic
 locates the current repeated copy without allocating its predecessors.
 

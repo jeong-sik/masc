@@ -155,6 +155,18 @@ struct Plan: Decodable {
             if let umpRegions {
                 guard umpRegions.duration == duration else { throw AudioFailure("captured MIDI duration differs from the paired clock") }
                 _ = try UmpRegionTransport(timeline: umpRegions)
+                for region in regions {
+                    guard let clock = region.captureClock else { continue }
+                    guard let notes = umpRegions.regions.first(where: { $0.id == region.id }),
+                          let source = umpRegions.sources.first(where: { $0.id == notes.source }),
+                          notes.source == region.asset, notes.startSeconds == region.startSeconds,
+                          notes.offset == clock.offset, notes.extent == clock.extent,
+                          notes.repeatCount == UInt64(region.repetitions),
+                          source.timeline.clock.origin == clock.origin,
+                          source.timeline.clock.numer == clock.numer, source.timeline.clock.denom == clock.denom else {
+                        throw AudioFailure("paired WAV and UMP regions disagree on their source identity or clock")
+                    }
+                }
             }
         } else {
             guard abs(end - duration) < sample else { throw AudioFailure("duration does not match region sources") }

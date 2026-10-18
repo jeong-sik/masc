@@ -155,8 +155,8 @@ func umpRestoration(_ events: [UmpEvent], before seconds: Double, replacing prev
     let count = events.firstIndex(where: { $0.seconds >= seconds }) ?? events.count
     return try umpRestoration(events, prefixCount: count, replacing: previous)
 }
-func umpRestoration(_ events: [UmpEvent], prefixCount: Int, replacing previous: UmpFootprint) throws -> UmpRestoration {
-    guard prefixCount >= 0, prefixCount <= events.count else { throw MidiFailure("invalid captured UMP prefix") }
+func umpRestoration(_ events: [UmpEvent], prefixCount: Int, followingCount: Int = 0, replacing previous: UmpFootprint) throws -> UmpRestoration {
+    guard prefixCount >= 0, prefixCount <= events.count, followingCount >= 0, followingCount <= events.count - prefixCount else { throw MidiFailure("invalid captured UMP prefix") }
     try previous.requireSupported()
     var footprint = UmpFootprint(), known = Set<UmpField>(), channels: [UmpAddress: UmpChannelState] = [:]
     var notes = Set<Int>(), next = 0
@@ -194,7 +194,21 @@ func umpRestoration(_ events: [UmpEvent], prefixCount: Int, replacing previous: 
         channel.prune(); channels[address] = channel
     }
     try footprint.requireSupported()
-    guard previous.touched.filter({ $0.kind.determinesAttack }).allSatisfy({ $0.covered(by: known) }) else { throw MidiFailure("captured UMP seek needs an explicit source baseline for previously changed state") }
+    var entryKnown = known
+    for event in events[prefixCount..<(prefixCount + followingCount)] {
+        let message = UmpMessage(event)
+        if case .on(let number) = message.action {
+            let required = previous.touched.filter { field in
+                field.kind.determinesAttack && field.address == message.address && (field.kind.note == nil || field.kind.note == number)
+            }
+            guard required.allSatisfy({ $0.covered(by: entryKnown) }) else { throw MidiFailure("captured UMP entry needs a source baseline before its Note On") }
+        }
+        if case .relative(let kind) = message.action, !UmpField(address: message.address, kind: kind).covered(by: entryKnown) {
+            throw MidiFailure("captured UMP relative entry needs an absolute source baseline")
+        }
+        if case .relative = message.action {} else { entryKnown.formUnion(message.fields) }
+    }
+    guard previous.touched.filter({ $0.kind.determinesAttack }).allSatisfy({ $0.covered(by: entryKnown) }) else { throw MidiFailure("captured UMP seek needs an explicit source baseline for previously changed state") }
     var live = Set<Int>()
     for channel in channels.values {
         for voice in channel.voices { live.insert(voice.on); if let off = voice.off { live.insert(off) } }

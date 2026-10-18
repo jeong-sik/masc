@@ -22,6 +22,14 @@ precondition(layout.totalFrames==28801 && layout.start(0)==4800 && layout.start(
 let regionJSON = #"{"id":"clip","asset":"audio","startSeconds":0,"offsetFrames":0,"frameCount":4800,"repeat":3,"captureClock":{"origin":"18446744073600000000","offset":"0","extent":"4800001","numer":125,"denom":3,"firstAudioHostTime":"18446744073602400000"}}"#
 let region = try JSONDecoder().decode(Region.self,from:Data(regionJSON.utf8))
 let asset = Asset(id:"audio",path:CommandLine.arguments[1],sha256:"",sampleRate:48000,channels:2,frames:4800)
+let raw=UmpPacket(kind:"midi",protocolID:2,hostTime:"18446744073600000000",source:"A",timestampOrigin:"packet",words:[0x43953c00,0x80000000])
+let source=UmpRegionSource(id:"audio",extent:"4801001",timeline:UmpTimeline(schemaVersion:4,duration:1,clock:UmpClock(origin:"18446744073600000000",numer:125,denom:3),bindings:[UmpBinding(source:"A",destination:"42")],packets:[raw]))
+func paired(_ offset:String)->Plan {
+ let notes=UmpRegion(id:"clip",source:"audio",startSeconds:0,offset:offset,extent:"4800001",repeatCount:3)
+ return Plan(schemaVersion:5,kind:"capture-arrangement",duration:1,assets:[asset],regions:[region],midi:nil,ump:nil,umpRegions:UmpArrangement(schemaVersion:1,duration:1,sources:[source],regions:[notes]))
+}
+try paired("0").validate()
+do { try paired("1").validate();preconditionFailure("mismatched paired source cut accepted") } catch {}
 let voice = try Voice(region:region,asset:asset,capacity:257)
 let buffer = AVAudioPCMBuffer(pcmFormat:voice.file.processingFormat,frameCapacity:257)!
 var verified = 0

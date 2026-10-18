@@ -84,6 +84,29 @@ final class UmpOutput {
             held = held.filter { !($0.key.source == key.source && $0.key.prefix == key.prefix) }
         }
     }
+    // Drain one already-active copy when its callback crosses a boundary. Raw
+    // releases for acquired instances retain their velocities/attributes. Notes
+    // never acquired by this owner stay silent, including FIFO overlaps on one
+    // pitch. No skipped copies or repeated message arrays are materialized.
+    func drain(_ events: ArraySlice<UmpEvent>) throws {
+        var voices = held.mapValues { Array(repeating: true, count: $0) }
+        for event in events {
+            let word = event.words[0]
+            let key = Key(source: event.source, prefix: word & 0xff0f0000, number: (word >> 8) & 127)
+            switch UmpMessage(event).action {
+            case .on:
+                voices[key, default: []].append(false)
+            case .off:
+                guard var queue = voices[key], !queue.isEmpty else { continue }
+                let acquired = queue.removeFirst(); voices[key] = queue
+                if acquired, (held[key] ?? 0) > 0 { try apply(event) }
+            case .kill, .release:
+                try apply(event)
+                voices = voices.filter { !($0.key.source == key.source && $0.key.prefix == key.prefix) }
+            default: try apply(event)
+            }
+        }
+    }
     func silence(in scope: Set<UmpChannel>? = nil) throws {
         func owns(_ key: Key) -> Bool { scope == nil || scope!.contains(UmpChannel(source: key.source, channel: key.prefix & 0x0f0f0000)) }
         var failure: Error?

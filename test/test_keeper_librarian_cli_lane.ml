@@ -1214,6 +1214,13 @@ let require_plan = function
   | Ok value -> value
   | Error error -> fail (Memory_plan.error_to_string error)
 
+let expect_plan_error expected = function
+  | Ok _ -> fail "an invalid Memory plan was accepted"
+  | Error actual ->
+    let error = testable
+      (fun fmt error -> Format.pp_print_string fmt (Memory_plan.error_to_string error)) ( = ) in
+    check error "typed plan rejection" expected actual
+
 let require_memory = function Ok value -> value | Error detail -> fail detail
 
 let memory_answer ?(new_claims=[]) ?(dropped=[]) state =
@@ -1268,7 +1275,7 @@ let check_memory_payloads label expected actual =
 let check_stored_plan_steps ~keepers_dir ~keeper_id plan =
   List.iter (fun (stage : Memory_plan.stage) ->
     let step = stage.step in
-    let stored = Current.apply_disposition ~keepers_dir ~keeper_id ~now:2_000_000.
+    let stored = Current.apply_disposition ~keepers_dir ~keeper_id ~now:(Time_compat.now ())
       ~source:{Current.kind=Current.Librarian; trace_id=Ids.Turn_ref.trace_id step.source_input.turn_ref}
       ~dropped_statements:step.dropped ~absorbed:step.absorbed ~revisions:step.revisions
       ~new_claims:step.new_claims () |> require_memory in
@@ -1346,26 +1353,19 @@ let test_ordered_memory_source_binding () =
   let step = infer source inference_answer in
   let make_plan ?(keeper_id=source.keeper_id) ?(turn_ref=source.turn_ref) snapshot =
     Memory_plan.create ~keeper_id ~turn_ref ~snapshot |> require_plan in
-  (match Memory_plan.append (make_plan ~keeper_id:(Masc_test_deps.keeper_id_fixture "another-keeper") snapshot) step with
-   | Error (Memory_plan.Keeper_mismatch _) -> ()
-   | Error error -> fail (Memory_plan.error_to_string error)
-   | Ok _ -> fail "identical facts from another Keeper were accepted");
-  (match Memory_plan.append (make_plan ~turn_ref:(Ids.Turn_ref.make ~trace_id:"another-trace" ~absolute_turn:7) snapshot) step with
-   | Error (Memory_plan.Batch_turn_mismatch _) -> ()
-   | Error error -> fail (Memory_plan.error_to_string error)
-   | Ok _ -> fail "another source batch was accepted");
+  let another_keeper = Masc_test_deps.keeper_id_fixture "another-keeper" in
+  Memory_plan.append (make_plan ~keeper_id:another_keeper snapshot) step
+  |> expect_plan_error (Memory_plan.Keeper_mismatch {expected=another_keeper; observed=source.keeper_id});
+  let another_turn = Ids.Turn_ref.make ~trace_id:"another-trace" ~absolute_turn:7 in
+  Memory_plan.append (make_plan ~turn_ref:another_turn snapshot) step
+  |> expect_plan_error (Memory_plan.Batch_turn_mismatch {expected=another_turn; observed=source.turn_ref});
   let snapshot = match snapshot with Some snapshot -> snapshot | None -> fail "seed missing" in
   let changed = {current_a with last_seen=current_a.last_seen +. 1.} in
-  (match Memory_plan.append (make_plan (Some {snapshot with facts=[changed;current_b]})) step with
-   | Error Memory_plan.Current_input_mismatch -> ()
-   | Error error -> fail (Memory_plan.error_to_string error)
-   | Ok _ -> fail "same identities hid changed stored fact fields");
-  (match Memory_plan.create ~keeper_id:source.keeper_id ~turn_ref:source.turn_ref
-    ~snapshot:(Some {snapshot with facts=[current_a;changed;current_b]}) with
-   | Error (Memory_plan.Duplicate_current_identity identity) ->
-     check string "duplicate identity is named" (Memory.memory_id current_a) identity
-   | Error error -> fail (Memory_plan.error_to_string error)
-   | Ok _ -> fail "duplicate current identities were silently coalesced");
+  Memory_plan.append (make_plan (Some {snapshot with facts=[changed;current_b]})) step
+  |> expect_plan_error Memory_plan.Current_input_mismatch;
+  Memory_plan.create ~keeper_id:source.keeper_id ~turn_ref:source.turn_ref
+    ~snapshot:(Some {snapshot with facts=[current_a;changed;current_b]})
+  |> expect_plan_error (Memory_plan.Duplicate_current_identity (Memory.memory_id current_a));
   let reordered_input = {source with current=Some {Librarian.facts=[current_b;current_a]}} in
   let reordered_answer = `Assoc ["new_claims", `List [`Assoc
     ["claim", `String "Both original facts were judged in the opposite surrogate order.";
@@ -1390,15 +1390,9 @@ let test_ordered_memory_empty_and_repeated_inference () =
   let after_first = Memory_plan.append plan first |> require_plan in
   check bool "accepted empty state is known, not an absent original snapshot" true
     (Memory_plan.current plan = None && Memory_plan.current after_first = Some {Librarian.facts=[]});
-  (match Memory_plan.append after_first first with
-   | Error (Memory_plan.Duplicate_step_run run_id) -> check string "replayed run is identified" first.run_id run_id
-   | Error error -> fail (Memory_plan.error_to_string error)
-   | Ok _ -> fail "the same inference was accepted twice");
+  Memory_plan.append after_first first |> expect_plan_error (Memory_plan.Duplicate_step_run first.run_id);
   let stale = infer source (memory_answer "stale missing current") in
-  (match Memory_plan.append after_first stale with
-   | Error Memory_plan.Current_input_mismatch -> ()
-   | Error error -> fail (Memory_plan.error_to_string error)
-   | Ok _ -> fail "absent current was confused with a judged empty current");
+  Memory_plan.append after_first stale |> expect_plan_error Memory_plan.Current_input_mismatch;
   let second = infer {source with current=Memory_plan.current after_first} (memory_answer "known empty") in
   let result = Memory_plan.append after_first second |> require_plan in
   check int "rejected append leaves the earlier plan usable" 2 (List.length (Memory_plan.stages result));

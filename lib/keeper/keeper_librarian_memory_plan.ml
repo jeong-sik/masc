@@ -61,7 +61,10 @@ let selection_payloads = function
 
 let create ~keeper_id ~turn_ref ~snapshot =
   let selection =
-    Option.map (fun (snapshot : Current.t) -> {Keeper_librarian.facts=snapshot.facts}) snapshot
+    Option.map
+      (fun (snapshot : Current.t) ->
+         ({facts=snapshot.facts} : Keeper_librarian.current_selection))
+      snapshot
   in
   let* _ = selection_payloads selection in
   Ok {keeper_id; turn_ref; snapshot; selection; stages_rev=[]; run_ids=Id_set.empty}
@@ -104,7 +107,7 @@ let append plan (step : Keeper_librarian_runtime.memory_step) =
            {Current.fact=entry.fact; missing_premise_ids=entry.missing_premise_ids})
         invalidated
     in
-    let current = {Keeper_librarian.facts} in
+    let current : Keeper_librarian.current_selection = {facts} in
     let stage = {step; current; invalidated; claims_not_applied=disposition.claims_refused} in
     Ok {plan with selection=Some current; stages_rev=stage :: plan.stages_rev;
       run_ids=Id_set.add step.run_id plan.run_ids}

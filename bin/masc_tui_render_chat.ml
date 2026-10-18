@@ -4999,7 +4999,7 @@ let render_keeper_message (state : state) =
             "  Keeper roster is unavailable; draft retained; Esc to choose another"
         | None ->
             Printf.sprintf
-              (if state.keeper_creation_awaiting_roster = Some keeper_name then
+              (if keeper_creation_matches state keeper_name then
                  "  Keeper %s: creation accepted; roster confirmation pending; draft retained; Esc then r to refresh"
                else "  Keeper %s is no longer registered; draft retained; Esc to choose another")
               display_keeper_name

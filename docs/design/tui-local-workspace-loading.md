@@ -29,9 +29,13 @@ adds dispatch/mailbox work and does not establish a total-latency improvement.
 
 A request retains source, poll/refresh intent, workspace authority, exact base
 path, source ticket and monotonic dispatch time. Cadence shares a pending request
-for that source. Explicit refresh starts a new ticket and requests cancellation
-of the previous source worker. Cancellation slots have unique worker tokens so
-late cleanup cannot clear a successor slot.
+for that source. While it is active, explicit refresh advances a source-demand
+revision and retains one follow-up demand. It does not cancel/restart the active
+read. That read can publish its observation but cannot consume later demand.
+After either success or failure, an accumulated demand starts one fresh read.
+Cancellation slots have unique worker tokens so late cleanup cannot clear a
+successor slot. Source-demand revisions order requested reads; they are not
+wall-clock timers, storage revisions, model progress or turn/token limits.
 Suspension cancels both observation jobs through the existing workspace owner
 and invalidates both tickets. Source is checked along with identity and ticket:
 local counters can legitimately coincide, so the number alone is not an owner.
@@ -40,8 +44,12 @@ request. Local clearing retires both source tickets and cancellation slots.
 Post-action reloads use the same independent worker path: creation requests only
 Keeper metadata; lifecycle results, chat completion and explicit refresh request
 Keeper and Work independently. Last observed rows and draft/queue identities
-remain during same-workspace revalidation. A new Keeper still waits until its
-own metadata appears. Metadata admission owns continuation; Work cannot replay it.
+remain during same-workspace revalidation. Each created Keeper retains its own
+required source-demand revision: only a successful metadata observation covering
+that creation request and containing its name can admit its input. Earlier
+observations may update the list but absence cannot close that pending chat.
+Multiple creations retain separate barriers. Metadata admission owns
+continuation; Work cannot replay it.
 
 Workers return an immutable reading or failure; the UI applies each source.
 An owned outer failure releases only its source request and records
@@ -60,7 +68,11 @@ keyed by workspace read scope, base path, Keeper, trace and generation; chat use
 its explicit target. Metadata/input handlers do not wait for it. Same-owner
 context revalidation retains the previous observation and failure evidence.
 
-Local cache entries are replaced individually. The write-lock callback captures
+Keeper cache entries use the resolved metadata-file path and retain only the
+observed source inventory. Archive cache identity includes its actual path as
+well as the existing mtime/size checks. Different sources with equal names/stats
+cannot borrow one another's entries. Local cache entries are replaced
+individually. The write-lock callback captures
 read exceptions solely to unlock before re-raising their original backtraces,
 including cancellation. A cancelled/failed read cannot poison that source's Eio
 mutex and thereby refuse every later refresh. This does not claim actual runtime
@@ -81,7 +93,7 @@ recovery was executed.
 | Cache lock while archive work runs | One directory-read mutex | Metadata and work caches have separate cooperative owners |
 | Equal numeric source tickets or late optional result | One source | Source tag checked; optional payload cannot carry Keeper rows |
 | Creation, lifecycle result, chat completion and explicit refresh | Synchronous local directory reload | Source-owned I/O jobs; creation requests metadata only |
-| Explicit refresh while an earlier source read is pending | Synchronous reload retired the old ticket | Fresh ticket plus cancellation request; late cleanup cannot clear a successor |
+| Explicit refresh while an earlier source read is pending | Each refresh superseded/cancelled and restarted the reader | Accumulate one follow-up; current reader makes progress without consuming later demand |
 | Cancelled/failed cached read | Exception poisons Eio write mutex | Unlock, then re-raise original exception; later readers may proceed |
 | Selected live context on metadata admission or navigation | Synchronous context store/config work | Separate owned I/O read; same-owner refresh retains its observation |
 
@@ -100,7 +112,10 @@ observation time, outcome
 (`received`, `failed`, `discarded`) and whether a full HTTP refresh remains in
 flight. The interval includes pool queueing, cache-lock waiting, disk/store
 work and mailbox delay. It is neither worker CPU time nor visible-frame latency.
-`tui_local_workspace_superseded` records cancellation requested, not worker exit.
+Dispatch/admission receipts carry the read's source-demand revision; admission
+also records whether more demand is pending. `tui_local_workspace_coalesced`
+records a later demand without inventing a dispatched request. Cancellation
+receipts record cancellation requested, not worker exit.
 Unobserved starts remain unfinished; do not drop them from comparison. Source
 receipts without `intent` do not establish whether a read was a poll or refresh.
 `received` means an immutable worker observation returned, not that all datasets
@@ -114,11 +129,15 @@ availability before Work settles, independent failures, and equal-number
 cross-source tickets plus suspension/successors. They use production admission
 and state-application functions and assert stored state, not TUI text/layout.
 Existing composer, detail-focus and metrics fixtures identify observed metadata.
-Four further authored, unexecuted cases cover explicit source supersession and
+Four further authored, unexecuted cases cover source-local refresh and
 worker cleanup, creation availability before Work, confirmed deletion without
 retargeting detail, and cancellation/exception propagation followed by another
 reader using the same cache resource.
-No typing, scenario execution, worker cancellation, router, runtime, installed
+Coalescing rewrites three lifecycle cases around current observations versus
+unconsumed demand; three more authored, unexecuted cases cover failed-read
+followup/withdrawal, separate creation coverage and physical equal-stat archive
+files with different contents. No typing, scenario execution, worker cancellation,
+router, runtime, installed
 binary, visible UI or latency proof is established.
 
 ## Remaining work and matched comparison
@@ -126,9 +145,9 @@ binary, visible UI or latency proof is established.
 Required Keeper metadata and optional Work now have separate source ownership.
 Explicit post-action directory reloads and selected-live-context reads now use
 owned observations. Other synchronous paths, including creation HTTP and detail
-logs, remain. Continue source cache base/path identity and coalescing frequent
-post-action refresh demand without losing freshness; sustained-load fairness is
-not proven by the source split. Reduce unneeded preparation/discovery work
+logs, remain. Source refresh demand is now coalesced, and metadata/archive cache
+keys include their actual file paths. These source changes do not establish
+sustained-load fairness or matched timing. Reduce unneeded preparation/discovery work
 without weakening identity,
 request ownership, original Task/Ask continuity or retained input control.
 

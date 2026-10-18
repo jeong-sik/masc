@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import JZZ from 'jzz'
 import midiFiles from 'jzz-midi-smf'
-import { importMidiSource, exportMidiSource, midiSourcePattern, midiSourceHarmony, editMidiSourceNote } from '../midi-source.mjs'
+import { importMidiSource, exportMidiSource, midiSourcePattern, midiSourceHarmony, midiSourceInfo, editMidiSourceNote, editMidiSourceNotes } from '../midi-source.mjs'
 midiFiles(JZZ)
 const chunk = (type, data, little = false) => {
   const header = Buffer.alloc(8); header.write(type)
@@ -97,4 +97,63 @@ test('editing notes does not cap a large vendor payload or normalize an untouche
   const after=midiSourcePattern(importMidiSource(output))
   assert.deepEqual(after.events.find(e=>e.kind==='sysex').data,[...payload])
   assert.equal(after.notes[0].pitch,62)
+})
+
+test('note edits retain each original port and refuse implicit rerouting transactionally', () => {
+  const source = importMidiSource(smf([[0,255,33,1,1, 0,0x90,60,100, 10,0x80,60,0,
+    10,255,33,1,2, 80,255,47,0]]))
+  const before = structuredClone(source), note = midiSourcePattern(source).notes[0]
+  assert.equal(note.port, 1)
+  for (const start of [15, 30]) {
+    assert.throws(() => editMidiSourceNote(source, { id: note.id, start }), /source port/)
+    assert.deepEqual(source, before)
+  }
+  const changed = editMidiSourceNote(source, { id: note.id, pitch: 62, velocity: 90 })
+  assert.deepEqual(midiSourcePattern(changed).notes.map(n => [n.id,n.off,n.port,n.pitch]), [[note.id,note.off,1,62]])
+  const raw = structuredClone(source)
+  raw.changes = [{ id: note.id, tick: 30, bytes: [0x90,60,100] }, { id: note.off, tick: 40, bytes: [0x80,60,0] }]
+  assert.throws(() => exportMidiSource(raw), /original source port/)
+})
+
+test('same-tick cross-track ordering cannot destroy an edited pair while valid zero-length notes survive', () => {
+  const source = importMidiSource(smf([[10,0x80,60,77,...end], [0,0x90,60,100,10,255,47,0]]))
+  const before = structuredClone(source), note = midiSourcePattern(source).notes[0]
+  assert.equal(note.id, '1:0'); assert.equal(note.off, '0:0')
+  assert.throws(() => editMidiSourceNotes(source, [{ id: note.id, duration: 0 }]), /note-off pairing/)
+  assert.deepEqual(source, before)
+  const zero = importMidiSource(smf([[0,0x90,60,100,0,0x80,60,77,...end]], { format: 0 }))
+  const paired = midiSourcePattern(zero).notes[0]
+  const changed = editMidiSourceNote(zero, { id: paired.id, pitch: 62 })
+  assert.deepEqual(midiSourcePattern(changed).notes.map(n => [n.id,n.off,n.duration,n.pitch]), [[paired.id,paired.off,0,62]])
+  assert.equal(midiSourcePattern(importMidiSource(exportMidiSource(changed))).notes[0].duration, 0)
+})
+
+test('batch edits and inserted notes retain pairing and their active source route', () => {
+  const source = importMidiSource(smf([[0,255,33,1,1, 0,0x90,60,100, 10,0x80,60,0,
+    10,255,33,1,2, 80,255,47,0]]))
+  const original = midiSourcePattern(source).notes[0]
+  assert.equal(midiSourceInfo(source).tracks.length, 1)
+  const changed = editMidiSourceNotes(source, [{ id: original.id, pitch: 62 },
+    { kind: 'insert', track: 0, channel: 0, pitch: 64, velocity: 80, start: 30, duration: 10 }])
+  const notes = midiSourcePattern(changed).notes, inserted = notes.find(note => note.pitch === 64)
+  assert.deepEqual(notes.map(n => [n.pitch,n.port]), [[62,1],[64,2]])
+  const moved = editMidiSourceNote(changed, { id: inserted.id, start: 35 })
+  assert.equal(midiSourcePattern(moved).notes.find(n => n.id === inserted.id).port, 2)
+  assert.throws(() => editMidiSourceNote(changed, { id: inserted.id, start: 0 }), /source port/)
+  assert.throws(() => editMidiSourceNotes(source, [{ kind: 'insert', track: 0, channel: 0,
+    pitch: 64, velocity: 80, start: 15, duration: 10 }]), /pairing|source port/)
+  const roundtrip = midiSourcePattern(importMidiSource(exportMidiSource(moved)))
+  assert.deepEqual(roundtrip.notes.map(n => [n.pitch,n.port,n.start]), [[62,1,0],[64,2,35]])
+})
+
+test('imported same-key overlaps retain explicit FIFO diagnostics and reject pairing swaps', () => {
+  const source = importMidiSource(smf([[0,0x90,60,100,5,0x90,60,90,5,0x80,60,1,5,0x80,60,2,...end]], { format: 0 }))
+  const before = structuredClone(source), performance = midiSourcePattern(source)
+  assert.deepEqual(performance.diagnostics, [{ kind: 'overlapping-key', event: '0:1' }])
+  const changed = editMidiSourceNotes(source, performance.notes.map(note => ({ id: note.id, pitch: 62 })))
+  const after = midiSourcePattern(changed)
+  assert.deepEqual(after.notes.map(n => [n.id,n.off,n.start,n.duration]), performance.notes.map(n => [n.id,n.off,n.start,n.duration]))
+  assert.deepEqual(after.diagnostics, performance.diagnostics)
+  assert.throws(() => editMidiSourceNote(source, { id: performance.notes[0].id, start: 6, duration: 4 }), /pairing/)
+  assert.deepEqual(source, before)
 })

@@ -4151,6 +4151,172 @@ let test_an_absorbed_fact_no_longer_current_writes_no_row () =
     (List.length (absorbed_records ~keepers_dir))
 ;;
 
+let supported_disposition ~keepers_dir ?(dropped=[]) ?(absorbed=[]) ?(revisions=[]) ?(new_claims=[]) () =
+  Current.apply_disposition ~keepers_dir ~keeper_id:"keeper" ~now:200.
+    ~source:(source Current.Librarian) ~dropped_statements:dropped
+    ~absorbed ~revisions ~new_claims () |> require_ok
+
+let test_absorption_target_lost_with_its_premise_keeps_the_source () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let original = fact ~claim:"independent observed source" () in
+  let premise = fact ~claim:"retracted external premise" () in
+  let target = derived_fact ~claim:"held derived absorption target"
+    [{Types.rule_id="requires_external_premise"; premise_ids=[Types.memory_id premise]}] in
+  ignore (replace ~keepers_dir ~facts:[original;premise;target] () |> require_ok : Current.t);
+  let absorption = {Types.absorbed=Types.memory_id original; into=Types.memory_id target} in
+  let result = supported_disposition ~keepers_dir
+    ~dropped:[{Types.memory_id=Types.memory_id premise; reason="The observation withdraws this premise."}]
+    ~absorbed:[absorption] () in
+  check bool "the independent original stays with all stored fields" true (result.snapshot.facts=[original]);
+  check bool "no absorption into an invalidated fact is reported" true
+    (result.absorbed_applied=[] && result.absorbed_not_applied=[absorption]);
+  check int "no archived row falsely names a missing target" 0 (List.length (absorbed_records ~keepers_dir));
+  check bool "the destination's actual invalidation remains recorded" true
+    (result.snapshot.change.invalidated=
+      [{Current.fact=target; missing_premise_ids=[Types.memory_id premise]}])
+
+let test_revision_target_lost_with_its_premise_keeps_the_source () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let original = fact ~claim:"original revision source" () in
+  let premise = fact ~claim:"revision premise withdrawn" () in
+  let successor = derived_fact ~claim:"proposed derived successor"
+    [{Types.rule_id="requires_revision_premise"; premise_ids=[Types.memory_id premise]}] in
+  ignore (replace ~keepers_dir ~facts:[original;premise] () |> require_ok : Current.t);
+  let retire_original = {Types.memory_id=Types.memory_id original; reason="Replaced by the proposed successor."} in
+  let retire_premise = {Types.memory_id=Types.memory_id premise; reason="The newer observation withdraws the premise."} in
+  let result = supported_disposition ~keepers_dir ~new_claims:[successor]
+    ~dropped:[retire_original;retire_premise]
+    ~revisions:[{Types.superseded=Types.memory_id original; superseded_by=Types.memory_id successor}] () in
+  check bool "a failed derived successor cannot retire the original" true (result.snapshot.facts=[original]);
+  check bool "no revision event is authorized" true (result.revisions_applied=[]);
+  let journal = List.hd (List.rev (read_journal_lines ~keepers_dir)) |> Yojson.Safe.from_string in
+  check bool "journal retires only the actual plain drop" true
+    (Yojson.Safe.Util.member "dropped" journal = `List [Types.dropped_statement_to_json retire_premise]);
+  check bool "journal invents no successor edge" true
+    (Yojson.Safe.Util.member "revision_links" journal = `List [])
+
+let test_supported_alternative_still_allows_absorption () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let original = fact ~claim:"source absorbed by supported conclusion" () in
+  let primary = fact ~claim:"primary proof withdrawn" () in
+  let fallback = fact ~claim:"independent alternate proof remains" () in
+  let target = derived_fact ~claim:"conclusion with alternative proofs"
+    [{Types.rule_id="primary"; premise_ids=[Types.memory_id primary]};
+     {Types.rule_id="alternate"; premise_ids=[Types.memory_id fallback]}] in
+  ignore (replace ~keepers_dir ~facts:[original;primary;fallback;target] () |> require_ok : Current.t);
+  let absorption = {Types.absorbed=Types.memory_id original; into=Types.memory_id target} in
+  let result = supported_disposition ~keepers_dir ~absorbed:[absorption]
+    ~dropped:[{Types.memory_id=Types.memory_id primary; reason="Primary proof withdrawn."}] () in
+  check bool "supported target and alternate keep their original fields and order" true
+    (result.snapshot.facts=[fallback;target]);
+  check bool "the valid absorption still applies" true
+    (result.absorbed_applied=[absorption] && result.absorbed_not_applied=[]);
+  match absorbed_records ~keepers_dir with
+  | [row] ->
+    check bool "the archived source names a surviving destination" true
+      (row.fact=original && row.into=Types.memory_id target)
+  | [] | _ :: _ -> fail "expected exactly the committed absorption row"
+
+let test_a_destination_requiring_its_source_does_not_oscillate () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let original = fact ~claim:"observed source needed by the derived proposal" () in
+  let target = derived_fact ~claim:"derived proposal that requires its own absorption source"
+    [{Types.rule_id="requires_absorption_source"; premise_ids=[Types.memory_id original]}] in
+  ignore (replace ~keepers_dir ~facts:[original] () |> require_ok : Current.t);
+  let absorption = {Types.absorbed=Types.memory_id original; into=Types.memory_id target} in
+  let result = supported_disposition ~keepers_dir ~new_claims:[target] ~absorbed:[absorption] () in
+  check bool "restoring the source supports the proposal without enabling its removal again" true
+    (result.snapshot.facts=[original;target]);
+  check bool "the restored destination is not authority to retry absorption" true
+    (result.absorbed_applied=[] && result.absorbed_not_applied=[absorption]);
+  check bool "no provisional support loss is journaled as a final invalidation" true
+    (result.snapshot.change.invalidated=[]);
+  check int "withdrawn absorption writes no row" 0 (List.length (absorbed_records ~keepers_dir))
+
+let test_support_retry_never_admits_a_removed_source_successor () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let original = fact ~claim:"source retained after the destination loses support" () in
+  let premise = fact ~claim:"support withdrawn during this decision" () in
+  let removed = fact ~claim:"source the keeper has already removed" () in
+  let refused = fact ~claim:"must not resurrect the keeper's removed source" () in
+  let target = derived_fact ~claim:"unsupported absorption destination triggers retry"
+    [{Types.rule_id="requires_withdrawn_support"; premise_ids=[Types.memory_id premise]}] in
+  ignore (replace ~keepers_dir ~facts:[original;premise] () |> require_ok : Current.t);
+  let result = supported_disposition ~keepers_dir ~new_claims:[target;refused]
+    ~absorbed:[{Types.absorbed=Types.memory_id original; into=Types.memory_id target};
+      {Types.absorbed=Types.memory_id removed; into=Types.memory_id refused}]
+    ~dropped:[{Types.memory_id=Types.memory_id premise; reason="The premise no longer holds."}] () in
+  check bool "only the original current source survives" true (result.snapshot.facts=[original]);
+  check bool "original missing-source refusal survives every recomputation" true
+    (result.claims_not_applied=[refused]);
+  check int "neither missing nor unsupported absorption is archived" 0 (List.length (absorbed_records ~keepers_dir))
+
+let test_restored_stored_basis_can_withdraw_another_absorption () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let premise = fact ~claim:"removed premise for the stored derived source" () in
+  let first_source = derived_fact ~claim:"stored first source"
+    [{Types.rule_id="stored_source_proof"; premise_ids=[Types.memory_id premise]}] in
+  let second_source = fact ~claim:"independent second source" () in
+  let same_identity_proposal = {first_source with basis=Types.Observed Types.Transcript} in
+  let first_target = derived_fact ~claim:"first target loses its external support"
+    [{Types.rule_id="first_target_proof"; premise_ids=[Types.memory_id premise]}] in
+  let second_target = derived_fact ~claim:"second target depends on the actual first source"
+    [{Types.rule_id="second_target_proof"; premise_ids=[Types.memory_id first_source]}] in
+  ignore (replace ~keepers_dir ~facts:[premise;first_source;second_source] () |> require_ok : Current.t);
+  (* Current's public disposition boundary can receive an already-held
+     proposal. Retaining that identity preserves its stored basis, so the
+     alternate payload must not replace it during support recomputation. *)
+  let result = supported_disposition ~keepers_dir
+    ~new_claims:[same_identity_proposal;first_target;second_target]
+    ~absorbed:[{Types.absorbed=Types.memory_id first_source; into=Types.memory_id first_target};
+      {Types.absorbed=Types.memory_id second_source; into=Types.memory_id second_target}]
+    ~dropped:[{Types.memory_id=Types.memory_id premise; reason="Both targets must use actual stored support."}] () in
+  check bool "second absorption is withdrawn after the stored basis displaces its proposed replacement" true
+    (result.snapshot.facts=[second_source]);
+  check bool "all actual unsupported facts remain in the final invalidations" true
+    (List.map (fun (i : Current.support_invalidation) -> Types.memory_id i.fact)
+      result.snapshot.change.invalidated
+      = List.map Types.memory_id [first_source;first_target;second_target]);
+  check int "no provisional absorption is archived" 0 (List.length (absorbed_records ~keepers_dir));
+  check bool "neither withdrawn absorption is reported as applied" true (result.absorbed_applied=[])
+
+let test_withdrawn_absorption_does_not_protect_an_unsupported_source () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let premise = fact ~claim:"shared premise withdrawn by a plain retirement" () in
+  let original = derived_fact ~claim:"derived source loses its own support"
+    [{Types.rule_id="source_proof"; premise_ids=[Types.memory_id premise]}] in
+  let target = derived_fact ~claim:"derived target also loses support"
+    [{Types.rule_id="target_proof"; premise_ids=[Types.memory_id premise]}] in
+  ignore (replace ~keepers_dir ~facts:[premise;original;target] () |> require_ok : Current.t);
+  let absorption = {Types.absorbed=Types.memory_id original; into=Types.memory_id target} in
+  let result = supported_disposition ~keepers_dir ~absorbed:[absorption]
+    ~dropped:[{Types.memory_id=Types.memory_id premise; reason="No supported proof remains."}] () in
+  check bool "support maintenance still removes unsupported sources" true (result.snapshot.facts=[]);
+  check bool "both actual invalidations remain evidence" true
+    (List.map (fun (i : Current.support_invalidation) -> i.fact)
+      result.snapshot.change.invalidated=[original;target]);
+  check bool "support invalidation is not reported as absorption" true
+    (result.absorbed_applied=[] && result.absorbed_not_applied=[absorption]);
+  check int "no absorption row substitutes for truth maintenance" 0 (List.length (absorbed_records ~keepers_dir))
+
+let test_withdrawn_self_support_absorption_can_keep_the_stored_snapshot () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let original = fact ~claim:"observed premise must remain under a held derived target" () in
+  let target = derived_fact ~claim:"held derived destination requires its absorption source"
+    [{Types.rule_id="still_requires_source"; premise_ids=[Types.memory_id original]}] in
+  let seeded = replace ~keepers_dir ~facts:[original;target] () |> require_ok in
+  let snapshot_path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+  let before = Fs_compat.load_file snapshot_path in
+  let absorption = {Types.absorbed=Types.memory_id original; into=Types.memory_id target} in
+  let result = supported_disposition ~keepers_dir ~absorbed:[absorption] () in
+  check bool "the settled pass keeps the existing snapshot identity" true
+    (result.commit=Current.Unchanged && result.snapshot.revision=seeded.revision);
+  check string "withdrawing the invalid removal does not rewrite stored bytes" before (Fs_compat.load_file snapshot_path);
+  check bool "both original payloads and their order remain current" true (result.snapshot.facts=[original;target]);
+  check bool "no unperformed consolidation is reported" true
+    (result.absorbed_applied=[] && result.absorbed_not_applied=[absorption]);
+  check int "the unchanged commit writes no provisional absorbed row" 0 (List.length (absorbed_records ~keepers_dir))
+
 let test_absorbed_record_codec () =
   let absorbed_fact = fact ~claim:"A" () in
   let into = Types.memory_id (fact ~claim:"A and B" ()) in
@@ -4790,6 +4956,30 @@ let () =
             "an absorbed fact no longer current writes no row"
             `Quick
             test_an_absorbed_fact_no_longer_current_writes_no_row
+        ; test_case
+            "absorption target loses support without deleting its source"
+            `Quick test_absorption_target_lost_with_its_premise_keeps_the_source
+        ; test_case
+            "revision target loses support without retiring its source"
+            `Quick test_revision_target_lost_with_its_premise_keeps_the_source
+        ; test_case
+            "alternative proof still permits absorption"
+            `Quick test_supported_alternative_still_allows_absorption
+        ; test_case
+            "a destination requiring its absorption source does not oscillate"
+            `Quick test_a_destination_requiring_its_source_does_not_oscillate
+        ; test_case
+            "support retries never resurrect a removed-source successor"
+            `Quick test_support_retry_never_admits_a_removed_source_successor
+        ; test_case
+            "restored stored basis can withdraw a second absorption"
+            `Quick test_restored_stored_basis_can_withdraw_another_absorption
+        ; test_case
+            "withdrawing absorption does not protect an unsupported source"
+            `Quick test_withdrawn_absorption_does_not_protect_an_unsupported_source
+        ; test_case
+            "withdrawn self-support absorption keeps the stored snapshot"
+            `Quick test_withdrawn_self_support_absorption_can_keep_the_stored_snapshot
         ; test_case
             "absorbed record codec"
             `Quick

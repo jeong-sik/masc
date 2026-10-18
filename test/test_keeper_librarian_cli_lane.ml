@@ -1281,8 +1281,15 @@ let check_stored_plan_steps ~keepers_dir ~keeper_id plan =
       ~new_claims:step.new_claims () |> require_memory in
     check_memory_payloads "staged/store facts and order agree" stage.current.facts stored.snapshot.facts;
     check_memory_payloads "staged/store refused claims agree" stage.claims_not_applied stored.claims_not_applied;
-    check bool "staged/store support invalidations agree" true
-      (stage.invalidated = stored.snapshot.change.invalidated))
+    let journal_result = match Current.read_journal_tail ~keepers_dir ~keeper_id ~limit:1 with
+      | [entry] -> entry
+      | [] | _ :: _ -> fail "expected one disposition journal entry" in
+    match require_memory journal_result with
+    | Current.Journal_committed {change;_} ->
+      check bool "staged/store support invalidations agree, including unchanged snapshots" true
+        (stage.invalidated = change.invalidated)
+    | Current.Journal_failed _ | Current.Journal_quarantined _ ->
+      fail "a successful store oracle did not leave a committed journal entry")
     (Memory_plan.stages plan)
 
 let test_ordered_memory_revision_chain () =
@@ -1380,6 +1387,27 @@ let test_ordered_memory_source_binding () =
   | [stage] -> check bool "source's surrogate order is retained" true
       (stage.step.source_input.current = reordered_input.current)
   | _ -> fail "expected one reordered stage"
+
+let test_ordered_memory_retains_source_when_gated_target_loses_support () =
+  let original = fact ~claim:"an independent source must not disappear into an unsupported target" in
+  let premise = fact ~claim:"the target's premise is withdrawn by this message" in
+  let target = Memory.derived ~claim:"a held derived target restated by the Librarian"
+    ~category:Memory.Fact ~now:1_000_000.
+    ~origin:{Memory.kind=Memory.Authored; trace_id="target-source"}
+    ~derivations:[{Memory.rule_id="held_target_support"; premise_ids=[Memory.memory_id premise]}]
+    |> require_memory in
+  with_memory_plan_fixture (Some [original;premise;target])
+  @@ fun ~keepers_dir ~keeper_id ~snapshot:_ ~source ~plan ~infer ->
+  let step = infer source
+    (memory_answer ~new_claims:[`Assoc ["claim", `String target.claim;
+      "category", `String "fact"; "absorbs", `List [`String "m1"]]]
+      ~dropped:[retire_wire "m2"] "the target loses support") in
+  check bool "actual parsing and gate preserve the proposed absorption" true
+    (step.absorbed=[{Memory.absorbed=Memory.memory_id original; into=Memory.memory_id target}]);
+  let result = Memory_plan.append plan step |> require_plan in
+  check_memory_payloads "staged application cannot consume its source into an invalidated destination"
+    [original] (staged_facts result);
+  check_stored_plan_steps ~keepers_dir ~keeper_id result
 
 let test_ordered_memory_empty_and_repeated_inference () =
   with_memory_plan_fixture None
@@ -1479,6 +1507,8 @@ let () =
             test_ordered_memory_support_is_maintained_between_steps
         ; test_case "ordered Memory binds Keeper, source batch and complete fact fields" `Quick
             test_ordered_memory_source_binding
+        ; test_case "ordered Memory retains a source when its gated target loses support" `Quick
+            test_ordered_memory_retains_source_when_gated_target_loses_support
         ; test_case "ordered Memory distinguishes absent current and repeated inference" `Quick
             test_ordered_memory_empty_and_repeated_inference
         ; test_case "Memory inference retains a gated decision without publishing" `Quick

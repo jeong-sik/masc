@@ -6,6 +6,7 @@ type t =
   { facts : fact list
   ; claims_refused : fact list
   ; absorbed_into : string Destinations.t
+  ; invalidated : Keeper_memory_os_current_types.support_invalidation list
   }
 
 let ids_of facts =
@@ -17,8 +18,9 @@ let plan ~current ~dropped ~absorbed ~revisions ~new_claims =
   (* A Keeper may have removed the source since the provider read it. Do not
      carry that content into a new successor, and only retire a revised source
      when one successor is held or accepted (#38122). Absorption similarly
-     requires a held or accepted candidate destination (#38186); support
-     maintenance still has to decide which candidate facts survive. *)
+     requires a held or accepted candidate destination (#38186). After the
+     initial source check, support maintenance may withdraw more removals but
+     never admits a claim already refused because its original source is gone. *)
   let continues_a_removed_memory fact =
     let identity = memory_id fact in
     (not (held identity))
@@ -61,19 +63,50 @@ let plan ~current ~dropped ~absorbed ~revisions ~new_claims =
          else into_of)
       Destinations.empty absorbed
   in
-  let kept =
-    List.filter
-      (fun fact ->
-         let identity = memory_id fact in
-         not (Ids.mem identity retired || Destinations.mem identity absorbed_into))
-      current
+  let project retired absorbed_into =
+    let kept =
+      List.filter
+        (fun fact ->
+           let identity = memory_id fact in
+           not (Ids.mem identity retired || Destinations.mem identity absorbed_into))
+        current
+    in
+    let added, _ =
+      List.fold_left
+        (fun (acc, seen) fact ->
+           let identity = memory_id fact in
+           if Ids.mem identity seen then acc, seen
+           else fact :: acc, Ids.add identity seen)
+        ([], ids_of kept) claims_accepted
+    in
+    kept @ List.rev added
   in
-  let added, _ =
-    List.fold_left
-      (fun (acc, seen) fact ->
-         let identity = memory_id fact in
-         if Ids.mem identity seen then acc, seen
-         else fact :: acc, Ids.add identity seen)
-      ([], ids_of kept) claims_accepted
+  (* Withdrawing an absorption restores its source, which can displace a new
+     same-identity proposal with a different basis. That may remove support
+     for another destination. Recompute from the original stored facts and
+     accepted proposals, monotonically withdrawing removals, until the actual
+     maintained destinations justify all remaining source removals. Never
+     re-enable a removal merely because the restored source supports it: that
+     would oscillate when a destination depends on its own source. *)
+  let rec settle retired absorbed_into =
+    let facts, invalidated =
+      Keeper_memory_os_support_core.maintain_supported_facts (project retired absorbed_into)
+    in
+    let actual_ids = ids_of facts in
+    let next_absorbed = Destinations.filter
+      (fun _ into -> Ids.mem into actual_ids) absorbed_into in
+    let next_retired = Ids.filter
+      (fun identity ->
+         let successors = List.filter
+           (fun (revision : revision) -> String.equal revision.superseded identity) revisions in
+         match successors with
+         | [] -> true
+         | _ :: _ -> List.exists
+             (fun (revision : revision) -> Ids.mem revision.superseded_by actual_ids) successors)
+      retired
+    in
+    if Ids.equal retired next_retired && Destinations.equal String.equal absorbed_into next_absorbed
+    then {facts; claims_refused; absorbed_into; invalidated}
+    else settle next_retired next_absorbed
   in
-  { facts = kept @ List.rev added; claims_refused; absorbed_into }
+  settle retired absorbed_into

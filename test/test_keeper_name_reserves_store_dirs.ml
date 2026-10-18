@@ -87,6 +87,24 @@ let test_non_portable_names_keep_their_message () =
   check bool "grammar message kept" false
     (contains ~sub:"runtime store" (Keeper_config.invalid_name_error "a/b"))
 
+let test_max_length_matches_typed_name () =
+  let max_name = String.make Keeper_id.Keeper_name.max_length 'k' in
+  let overlong_name = String.make (Keeper_id.Keeper_name.max_length + 1) 'k' in
+  check bool "128-byte name accepted by validate_name" true
+    (Keeper_config.validate_name max_name);
+  check bool "128-byte name accepted by Keeper_name.of_string" true
+    (Result.is_ok (Keeper_id.Keeper_name.of_string max_name));
+  check bool "129-byte name refused by validate_name" false
+    (Keeper_config.validate_name overlong_name);
+  check bool "129-byte name refused by Keeper_name.of_string" true
+    (Result.is_error (Keeper_id.Keeper_name.of_string overlong_name));
+  check bool "overlong refusal names length bound" true
+    (contains
+       ~sub:(Printf.sprintf "length %d exceeds %d"
+               (String.length overlong_name)
+               Keeper_id.Keeper_name.max_length)
+       (Keeper_config.invalid_name_error overlong_name))
+
 let () =
   run "keeper_name_reserves_store_dirs"
     [ ( "name"
@@ -99,4 +117,6 @@ let () =
         ; test_case "ordinary names still pass" `Quick test_ordinary_names_still_pass
         ; test_case "non-portable names keep their message" `Quick
             test_non_portable_names_keep_their_message
+        ; test_case "max length matches typed name" `Quick
+            test_max_length_matches_typed_name
         ] ) ]

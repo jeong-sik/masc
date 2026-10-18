@@ -43,7 +43,7 @@ let bool_of_env_opt name =
 let is_keepers_root_store_name = Common.is_keepers_root_store_dirname
 
 let validate_name name =
-  Safe_identifier.is_portable_name name && not (is_keepers_root_store_name name)
+  Result.is_ok (Keeper_id.Keeper_name.of_string name)
 
 let invalid_name_error name =
   if Safe_identifier.is_portable_name name && is_keepers_root_store_name name
@@ -51,6 +51,15 @@ let invalid_name_error name =
     Printf.sprintf
       "invalid keeper name %S: keepers/%s is a runtime store directory, not a keeper"
       name name
+  else if
+    Safe_identifier.is_portable_name name
+    && String.length name > Keeper_id.Keeper_name.max_length
+  then
+    Printf.sprintf
+      "invalid keeper name %S: length %d exceeds %d: the name becomes a filesystem component"
+      name
+      (String.length name)
+      Keeper_id.Keeper_name.max_length
   else
     Printf.sprintf
       "invalid keeper name %S: %s"

@@ -1663,9 +1663,10 @@ let test_no_deadline_starts_after_init () =
               run_fixture
                 ~admission_timeout_s:window_outlasting_process_start_s
                 ~no_turn_deadline:true
-                ~on_conversation_ready:(fun _ ->
+                ~on_conversation_ready:(fun ~conversation_id:_ ->
                   let output = open_out_bin gate in
-                  close_out output)
+                  close_out output;
+                  Ok ())
                 path
             with
             | Ok turn ->

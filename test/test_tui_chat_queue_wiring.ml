@@ -1250,6 +1250,48 @@ let visible_reply reply =
     { terminal_stream_scope = None; reply; turn_outcome = Masc.Keeper_turn_outcome.Visible_reply; turn_ref = "trace-1#1" }
 ;;
 
+let test_pending_delivery_keeps_full_original_identity () =
+  let module Q = Masc_tui_keeper_chat_queue in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let original = Keeper_chat.create_request ~keeper_name:"alpha" ~message:"original input" () in
+  let edited = { original with message = "different original input" } in
+  let other = { original with keeper_name = "beta" } in
+  let pending (request : Keeper_chat.request) : Tui_types.inflight =
+    { sent_request=request; submitted_at=1.; sent_at=2.; control_generation=0
+    ; phase=Tui_types.Turn_streaming
+    ; log=Tui_types.turn_log_create ~keeper_name:request.keeper_name
+        ~request_id:request.request_id ~started_at:2. } in
+  let owner = pending original in
+  state.msg_inflight <- [owner; pending edited; pending other];
+  state.msg_queued <- (match Q.push state.msg_queued ~submitted_at:1. original with
+    | Ok (queue, _) -> queue | Error detail -> fail detail);
+  let positions keeper = Tui_types.keeper_message_waiting_positions state ~keeper_name:keeper in
+  let has request position rows = List.exists (fun (observed, actual) ->
+      Keeper_chat.same_request_identity request observed && actual=position) rows in
+  let alpha = positions "alpha" in
+  check int "distinct original payloads survive a shared request ID" 2 (List.length alpha);
+  check bool "local ownership suppresses only the exact submitted original" true
+    (has original Tui_types.In_local_queue alpha);
+  check bool "a different payload retains its own posted delivery" true
+    (has edited Tui_types.Posting alpha);
+  let beta = positions "beta" in
+  check int "another Keeper retains its original delivery" 1 (List.length beta);
+  check bool "the original Keeper cannot borrow the other delivery" true
+    (has other Tui_types.Posting beta);
+  let retained, queue = match Q.take state.msg_queued ~request_id:original.request_id with
+    | Some result -> result | None -> fail "original queued input disappeared" in
+  state.msg_queued <- queue;
+  check bool "actual queue handoff retains the original request" true
+    (Keeper_chat.same_request_identity retained.request original);
+  check bool "only the original changes from local to posting" true
+    (has original Tui_types.Posting (positions "alpha"));
+  owner.phase <- Tui_types.Turn_reconciling;
+  let alpha = positions "alpha" in
+  check bool "original reconnect remains unconfirmed" true
+    (has original Tui_types.Rechecking alpha);
+  check bool "reconnect does not overwrite a colliding payload's delivery" true
+    (has edited Tui_types.Posting alpha)
+
 let test_queue_summary_follows_admission_and_execution () =
   let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
   state.msg_tool_visibility <- Tui_types.Tools_full;
@@ -6356,7 +6398,8 @@ let () =
         ; test_case "status details and fold counts reach the frame" `Quick test_status_details_and_fold_counts_reach_the_frame ] )
     ; ( "link card layout", [ test_case "a landed preview keeps the entries" `Quick test_a_landed_preview_keeps_the_entries ] )
     ; ( "wiring"
-      , [ test_case "queue summary follows admission and execution" `Quick test_queue_summary_follows_admission_and_execution
+      , [ test_case "original pending delivery identity across queue handoff" `Quick test_pending_delivery_keeps_full_original_identity
+        ; test_case "queue summary follows admission and execution" `Quick test_queue_summary_follows_admission_and_execution
         ; test_case "checkpoint watcher allows new input" `Quick test_checkpoint_watcher_allows_new_input
         ; test_case "older queued watcher cannot rearm acknowledged stop" `Quick
             test_old_queued_watcher_does_not_rearm_esc

@@ -1,5 +1,13 @@
 # TUI refresh observations and before/after comparisons
 
+Original waiting-delivery and priority-receipt observations use an immutable
+membership index with the existing exact request ID/Keeper/message identity.
+Original lists still supply chronology and multiplicity; persisted consumption
+and provisional/error/pending receipt evidence keep their original predicates.
+The [delivery membership comparison](../audits/2026-10-19-tui-original-delivery-index.md)
+records source Before/After, unmeasured index overhead and an unexecuted actual
+queue/handoff/reconnect ownership scenario. It is not a delivery or speedup verdict.
+
 The synchronous Keeper status frame also carries inflight batch diagnostics,
 Activity and observed interrupt rows, shared by menu/history measurement and
 actual display. Batch grouping uses an immutable exact-execution index and

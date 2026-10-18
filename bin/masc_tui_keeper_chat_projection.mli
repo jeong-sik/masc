@@ -200,6 +200,18 @@ val request_body :
   ?admission_intent:admission_intent ->
   since_seq:Masc.Keeper_chat_event_log.replay_position -> request -> string
 val same_request_identity : request -> request -> bool
+
+(** Immutable membership using the same exact request ID, Keeper and message
+    as [same_request_identity]. No normalization, digest, payload copy or
+    delivery authority is introduced. Callers retain original requests and
+    their order; the index supplies membership only. *)
+module Request_identity_set : sig
+  type t
+  val empty : t
+  val add : request -> t -> t
+  val mem : request -> t -> bool
+end
+
 val compact_request_id : string -> string
 val terminal_safe_text : ?preserve_newlines:bool -> string -> string
 val decode_response : request:request -> string -> (response, stream_error) result

@@ -453,7 +453,7 @@ let test_a_pane_reads_the_part_it_shows () =
   let shown ~tab ~opened ~cursor =
     Option.map
       (fun (key : Inspector.part_key) -> key.part_item.index)
-      (Inspector.shown_part ~keeper:"omega" ~tab ~turn_back:0 ~opened ~cursor
+      (Inspector.shown_part ~keeper:"omega" ~tab ~target:(Inspector.Recent 0) ~opened ~cursor
          reading)
   in
   check (option int) "the request tab reads the item under the cursor" (Some 2)
@@ -500,6 +500,70 @@ let test_every_kind_names_one_producer () =
     [ "turn prompt assembly"; "effective tool surface"; "provider message list" ]
     (List.map label Inspector.input_sources)
 
+let test_pinned_input_survives_record_failure () =
+  let input = decoded_input () in
+  let reading = Inspector.Exact_read
+      { turn_ref = input.turn_ref
+      ; record = Observed (Error "canonical history unavailable")
+      ; provider_input = Observed (Ok input)
+      ; response = Pending } in
+  let target = Inspector.Pinned input.turn_ref in
+  check bool "response remains pending" true (Inspector.is_loading reading);
+  check bool "input survives record failure" true (Option.is_some (Inspector.observed_input reading));
+  check bool "no substitute record" true (Option.is_none (Inspector.inspected_record ~target reading));
+  let shown = Inspector.shown_part ~keeper:"omega" ~tab:Inspector.Exact_input
+      ~target ~opened:None ~cursor:0 reading in
+  (match shown with
+   | None -> fail "known original input was hidden by unrelated record failure"
+   | Some key -> check bool "part names the original turn" true
+       (Ids.Turn_ref.equal key.part_turn_ref input.turn_ref));
+  check bool "a foreign pinned turn cannot borrow the part" true
+    (Option.is_none (Inspector.shown_part ~keeper:"omega" ~tab:Inspector.Exact_input
+      ~target:(Inspector.Pinned (turn_ref "other-trace" 9)) ~opened:None ~cursor:0 reading));
+  check bool "a recent target cannot borrow a pinned reading" true
+    (Option.is_none (Inspector.shown_part ~keeper:"omega" ~tab:Inspector.Exact_input
+      ~target:(Inspector.Recent 0) ~opened:None ~cursor:0 reading))
+
+let test_pinned_unattributed_record_stays_exact () =
+  let input = decoded_input () in
+  let original = record ~trace:"trace-map" ~turn:9 () in
+  let reading = Inspector.Exact_read
+      { turn_ref = input.turn_ref
+      ; record = Observed (Ok { record = original; skipped_rows = 2 })
+      ; provider_input = Observed (Ok input)
+      ; response = Observed (Error "history page unavailable") } in
+  check bool "settled failure is not an endless loading state" false (Inspector.is_loading reading);
+  (match Inspector.inspected_record ~target:(Inspector.Pinned input.turn_ref) reading with
+   | None -> fail "an unattributed original became an absent source"
+   | Some found -> check bool "no attributed/latest replacement" true
+       (Ids.Turn_ref.equal found.turn_ref original.turn_ref));
+  check bool "proof does not invent component rows" true
+    (Option.is_none (Inspector.shown_part ~keeper:"omega" ~tab:Inspector.Input_map
+      ~target:(Inspector.Pinned input.turn_ref) ~opened:None ~cursor:0 reading));
+  check bool "bracket navigation preserves pinned source" true
+    (Option.is_none (Inspector.step_recent (Inspector.Pinned input.turn_ref) ~older:true ~count:80))
+
+let test_late_pending_snapshot_cannot_erase_progress () =
+  let input = decoded_input () in
+  let held : Inspector.reading = Exact_read
+      { turn_ref = input.turn_ref
+      ; record = Observed (Error "unreadable record")
+      ; provider_input = Observed (Ok input)
+      ; response = Pending } in
+  let incoming : Inspector.reading = Exact_read
+      { turn_ref = input.turn_ref; record = Pending; provider_input = Pending
+      ; response = Observed (Ok { parts = []; outside_newest_page = true }) } in
+  let combined = Inspector.merge_progress ~previous:(Some held) incoming in
+  check bool "all observations have now settled" false (Inspector.is_loading combined);
+  check bool "input remains usable after out-of-order pending fields" true
+    (Option.is_some (Inspector.observed_input combined));
+  let foreign : Inspector.reading = Exact_read
+      { turn_ref = turn_ref "new-source" 9; record = Pending; provider_input = Pending; response = Pending } in
+  let changed = Inspector.merge_progress ~previous:(Some combined) foreign in
+  check bool "another source starts pending" true (Inspector.is_loading changed);
+  check bool "another source does not inherit original input" true
+    (Option.is_none (Inspector.observed_input changed))
+
 let () =
   run "tui_context_inspector"
     [ ( "decode"
@@ -527,6 +591,12 @@ let () =
             test_parts_must_be_numbered_without_a_gap
         ; test_case "a pane reads the part it shows" `Quick
             test_a_pane_reads_the_part_it_shows
+        ; test_case "pinned input survives record failure" `Quick
+            test_pinned_input_survives_record_failure
+        ; test_case "an unattributed pinned record stays exact" `Quick
+            test_pinned_unattributed_record_stays_exact
+        ; test_case "late pending snapshots preserve progress" `Quick
+            test_late_pending_snapshot_cannot_erase_progress
         ; Alcotest.test_case "every kind names one producer" `Quick
             test_every_kind_names_one_producer
         ] )

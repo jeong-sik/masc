@@ -17,7 +17,18 @@ let code_file_search_focused (state : state) =
    the list with text, and text has no row for a cursor to name. *)
 let surface_row_texts (state : state) : surface -> string list option =
  fun surface ->
-  if state.repository_changes_open then
+  if state.context_inspector_open then
+    if state.context_inspector_tab = Masc_tui_context_inspector.Exact_input
+       && Option.is_none state.context_inspector_exact then
+      Option.bind state.context_inspector_reading (fun (_, reading) ->
+        Option.bind (Masc_tui_context_inspector.observed_input reading) (fun input ->
+          let labels = List.map
+            (fun (item : Masc_tui_context_inspector.exact_input_item) ->
+              Masc_tui_context_inspector.exact_input_label item.kind)
+            (Masc_tui_context_inspector.exact_input_items input) in
+          match labels with [] -> None | _ -> Some labels))
+    else None
+  else if state.repository_changes_open then
     (match state.repository_changes_diff_path with
      | Some _ -> None
      | None ->
@@ -30,28 +41,6 @@ let surface_row_texts (state : state) : surface -> string list option =
   match surface with
   | Keepers Keeper_list ->
       Some (List.map (fun (k : keeper) -> k.k_name) state.keepers)
-  | Keepers Keeper_detail when state.context_inspector_open ->
-      (* The request tab's item labels, so the surface search (/) walks the
-         same rows j/k moves. Other tabs keep no searchable list. *)
-      if
-        state.context_inspector_tab = Masc_tui_context_inspector.Exact_input
-      then
-        match state.context_inspector_reading with
-        | Some
-            ( _
-            , Masc_tui_context_inspector.Turn_read
-                { provider_input = Ok input; _ } ) ->
-            let labels =
-              List.map
-                (fun (item : Masc_tui_context_inspector.exact_input_item) ->
-                   Masc_tui_context_inspector.exact_input_label item.kind)
-                (Masc_tui_context_inspector.exact_input_items input)
-            in
-            (match labels with [] -> None | _ -> Some labels)
-        | Some (_, Masc_tui_context_inspector.Turn_read { provider_input = Error _;_})
-        | Some (_, (Masc_tui_context_inspector.Request_failed _ | Masc_tui_context_inspector.Turn_read_failed _))
-        | None -> None
-      else None
   | Lanes ->
       (match state.lanes_mode with
        | Lanes_run_list _ | Lanes_run_detail _ | Lanes_measurement_detail _ | Lanes_inventory_detail _ -> None

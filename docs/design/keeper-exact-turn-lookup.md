@@ -47,7 +47,7 @@ does not select the latest attributed row as an alternative.
 | Another trace uses the same turn number | Number alone cannot identify source | Store and decoder require the complete Turn_ref |
 | Damaged rows prevent proving absence | Recent omission cannot prove absence | Exact miss remains unavailable rather than an authoritative 404 |
 | Requested row survives unrelated damage | Broad failure would hide a known positive | Return the exact row with partial-history metadata |
-| Open source directly from Ask TUI | Local source attribution only | Still pending; this layer supplies the lookup and decoder |
+| Open source directly from Ask TUI | Local source attribution only | `O` opens a pinned source inspector over the retained question draft |
 
 `test_memory_input_store.ml` authors store-to-HTTP-response-helper-to-TUI-decoder
 scenarios for an original beyond a 50-row page with 80 newer rows, same-number
@@ -60,14 +60,65 @@ Evidence for this layer is source inspection, OCaml syntax parsing and
 `git diff --check`. Type checking, scenario execution, independent approval,
 installation and runtime/UI behavior remain unverified.
 
+## Pinned Ask inspector
+
+`o` shows the immutable question origin locally. `O` opens that source in the
+inspector's request tab, using the open question or, with none open, the last
+answer receipt. A visible origin remains the selected source. A missing
+Turn_ref stays unavailable; the Keeper's current turn is never a replacement.
+The overlay preserves the question's answer draft. Esc closes an opened part
+first, then closes the inspector and returns to the question. Printable text
+entry keeps `o` and `O` as text.
+
+The state distinguishes a recent-page offset from a pinned Turn_ref. Bracket
+navigation applies only to recent pages. Closing or replacing the target
+cancels its reads and clears part ownership; workspace, generation and Keeper
+admission still govern every delivered observation. Search and row navigation
+use the inspector's items even when its underlying surface is Approvals.
+
+For a known source the client starts three independent reads: exact TurnRecord,
+exact provider-input manifest, and the chat-page response joined on the complete
+Turn_ref. Each completion is published while the others remain pending. No
+TurnRecord dependency prevents a known input read. Pending is distinct from a
+failed read, and late pending fields in the same admitted generation cannot
+erase completed observations. A refresh clears the previous generation before
+starting another. Lazy text parts keep their Keeper/Turn_ref/index/digest keys.
+
+Historical composition omits the current next-request forecast and runtime
+catalogue. Recent request tabs now use the same stepped record for the input,
+token scale and response counters. Missing attribution does not remove a known
+pinned record or its independently retained input.
+
+| Scenario | Before | Source change in this layer |
+|---|---|---|
+| Original input known, record unavailable | Record dependency prevents the input read | Input read and part access remain independent |
+| One observation is slow | Final combined result hides already completed reads | Completed observations publish while siblings remain pending |
+| A pending snapshot arrives late | It could erase an already observed field | Same-generation observation merge preserves completed fields |
+| Ask is being answered | Only local origin could be opened | Pinned source overlay retains the draft underneath |
+| An original response is outside the newest chat page | No exact response in that page | Still explicitly outside that page; full historical response lookup remains follow-up |
+
+`tui_ask_source_inspect` logs the frozen origin at request time.
+`tui_context_source_read` records each component's Keeper, full Turn_ref,
+shared `read_started_ns`, component start/observation times and decoded/unavailable
+result. Group component receipts by their captured read start and source;
+elapsed time includes client scheduling, worker wait and decoding. These are
+read observations, not painted-screen, model-adoption or Task-completion proof.
+Each component emits a `started` receipt before the read and an `observed`
+receipt after it. Cancellation need not produce an observed receipt; retain
+started components without an observation as unfinished comparison samples.
+
+Three additional authored, unexecuted scenarios in `test_tui_context_inspector`
+cover usable original input despite record failure, an unattributed pinned
+record with a settled response failure, and out-of-order partial observations
+without borrowing another source's data. No TUI wording, row-order, layout or
+PTY checks are added. Keyboard/HTTP scheduling and visible behavior remain
+unverified; syntax parsing does not establish them.
+
 ## Remaining user-facing work
 
-Connect the immutable Ask origin to an explicitly pinned inspector target.
-Keep that target distinct from relative recent-turn navigation, and preserve
-workspace, Keeper, generation and lazy-part ownership through cancellation.
-Record, exact provider input and response observations should fail independently;
-historical inspection must not present the current next-request forecast as
-evidence about the original turn.
+Read original response content beyond the newest chat page with explicit
+storage/read failures. The current response observation deliberately keeps that
+page boundary; it does not claim absence from all retained history.
 
 Separately finish independent panel loading and preparation reuse, then compare
 matched before/after samples: first usable input, preparation p50/p95, repeated

@@ -6078,7 +6078,18 @@ let row_list (state : state) : row_list option =
      that landed there moved a cursor nobody could see. The diff replaces the
      list, and what it draws follows [repository_changes_diff_scroll] rather
      than a row. *)
-  if state.repository_changes_open then
+  if state.context_inspector_open then
+    if state.context_inspector_tab = Masc_tui_context_inspector.Exact_input
+       && Option.is_none state.context_inspector_exact then
+      Option.bind state.context_inspector_reading (fun (_, reading) ->
+        Option.bind (Masc_tui_context_inspector.observed_input reading) (fun input ->
+          let count = List.length (Masc_tui_context_inspector.exact_input_items input) in
+          if count = 0 then None else
+            windowed ~count ~cursor:state.context_inspector_cursor (fun index ->
+              state.context_inspector_cursor <- index;
+              state.context_inspector_detail_scroll <- 0)))
+    else None
+  else if state.repository_changes_open then
     (match state.repository_changes_diff_path with
      | Some _ -> None
      | None ->
@@ -6092,19 +6103,6 @@ let row_list (state : state) : row_list option =
   | Keepers Keeper_list ->
       windowed ~count:(List.length state.keepers) ~cursor:state.keeper_cursor
         (fun index -> state.keeper_cursor <- index)
-  | Keepers Keeper_detail when state.context_inspector_open ->
-      (* The request tab's items, counted by the pane that draws them. A
-         landed row is a new item, so its reader starts at the top the way a
-         j/k move does. *)
-      if state.context_inspector_tab = Masc_tui_context_inspector.Exact_input
-      then
-        let count, _height = Masc_tui_render.context_inspector_viewport state in
-        if count = 0 then None
-        else
-          windowed ~count ~cursor:state.context_inspector_cursor (fun index ->
-              state.context_inspector_cursor <- index;
-              state.context_inspector_detail_scroll <- 0)
-      else None
   | Lanes ->
       (match state.lanes_mode with
        (* The run list moves [lane_runs_cursor] for j/k and the page keys, so
@@ -7170,20 +7168,28 @@ let launch_context_inspector_load state ~mailbox ~keeper_name =
   supersede_context_inspector_load state None;
   state.context_inspector_generation <- state.context_inspector_generation + 1;
   state.context_inspector_loading <- true;
+  (match state.context_inspector_target with
+   | Masc_tui_context_inspector.Recent _ -> ()
+   | Masc_tui_context_inspector.Pinned _ ->
+       state.context_inspector_reading <- None;
+       state.context_inspector_read_at <- None);
   let generation = state.context_inspector_generation in
-  let turn_back = state.context_inspector_turn_back in
+  let target = state.context_inspector_target in
   let run () =
-    let reading =
-      try
-        Masc_tui_http.fetch_keeper_context_inspector ~host ~port ~keeper_name
-          ~turn_back
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn ->
-          Masc_tui_context_inspector.Request_failed (Printexc.to_string exn)
+    let publish reading =
+      enqueue_async mailbox
+        (Context_inspector_loaded (generation, keeper_name, reading))
     in
-    enqueue_async mailbox
-      (Context_inspector_loaded (generation, keeper_name, reading))
+    try
+      match target with
+      | Masc_tui_context_inspector.Recent turn_back ->
+          publish (Masc_tui_http.fetch_keeper_context_inspector ~host ~port ~keeper_name ~turn_back)
+      | Masc_tui_context_inspector.Pinned turn_ref ->
+          Masc_tui_http.fetch_keeper_exact_context_inspector
+            ~host ~port ~keeper_name ~turn_ref ~publish
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> publish (Masc_tui_context_inspector.Request_failed (Printexc.to_string exn))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
@@ -7255,7 +7261,7 @@ let reconcile_context_inspector_part state ~mailbox =
         (match
            Masc_tui_context_inspector.shown_part ~keeper
              ~tab:state.context_inspector_tab
-             ~turn_back:state.context_inspector_turn_back
+             ~target:state.context_inspector_target
              ~opened:state.context_inspector_exact
              ~cursor:state.context_inspector_cursor reading
          with
@@ -7274,21 +7280,29 @@ let reconcile_context_inspector_part state ~mailbox =
                        launch_context_inspector_part_load state ~mailbox request)))
     | Some _, (Some _ | None) | None, (Some _ | None) -> ()
 
-let open_context_inspector state ~mailbox ~keeper_name =
-  launch_runtime_catalog_load state ~mailbox;
+let open_context_inspector ?(target = Masc_tui_context_inspector.Recent 0) state ~mailbox ~keeper_name =
+  (match target with
+   | Masc_tui_context_inspector.Recent _ -> launch_runtime_catalog_load state ~mailbox
+   | Masc_tui_context_inspector.Pinned _ -> ());
   state.context_inspector_open <- true;
   state.context_inspector_keeper <- Some keeper_name;
   (* A fresh Keeper target starts unread. Showing the previous Keeper's
      already-loaded composition under this name while the GET is in flight
-     would be a more dangerous lie than a loading row. Refreshing the same
-     target keeps its reading; opening a target does not. *)
+     would misattribute its input while the GET is in flight. Each open
+     starts unread; pinned refreshes also start a fresh observation generation. *)
   state.context_inspector_reading <- None;
   state.context_inspector_read_at <- None;
-  state.context_inspector_tab <- Masc_tui_context_inspector.Composition;
+  state.context_inspector_tab <-
+    (match target with
+     | Masc_tui_context_inspector.Recent _ -> Masc_tui_context_inspector.Composition
+     | Masc_tui_context_inspector.Pinned _ -> Masc_tui_context_inspector.Exact_input);
   state.context_inspector_cursor <- 0;
   state.context_inspector_scroll <- 0;
   state.context_inspector_exact <- None;
-  state.context_inspector_turn_back <- 0;
+  supersede_context_inspector_part_load state None;
+  state.context_inspector_part <- Masc_tui_fetched.clear state.context_inspector_part;
+  state.context_inspector_detail_scroll <- 0;
+  state.context_inspector_target <- target;
   launch_context_inspector_load state ~mailbox ~keeper_name
 
 let switch_to_next_keeper_message state ~mailbox ~drain_queue =
@@ -14436,13 +14450,19 @@ let selected_ask_row state =
       List.find_opt (fun (row : Masc.Tui_decode_asks.ask_row) -> row.ar_id = aam_ask_id)
         (open_ask_rows state)
 
+let selected_ask_origin state =
+  match current_ask_origin state with
+  | Some origin -> Some origin
+  | None ->
+      (match selected_ask_row state with
+       | Some row -> Some (Ask.origin_of_row row)
+       | None -> Option.map Ask.origin_of_feedback (current_ask_answer_feedback state))
+
 let toggle_selected_ask_origin state =
   match current_ask_origin state with
   | Some _ -> state.ask_origin <- None
   | None ->
-      let origin = match selected_ask_row state with
-        | Some row -> Some (Ask.origin_of_row row)
-        | None -> Option.map Ask.origin_of_feedback (current_ask_answer_feedback state) in
+      let origin = selected_ask_origin state in
       (match origin with
        | None -> report_action state "system" "No question source is available"
        | Some origin ->
@@ -14454,6 +14474,22 @@ let toggle_selected_ask_origin state =
                  ["opened_ns",`String (Int64.to_string (Mtime_clock.elapsed_ns ()));
                   "origin",Ask.origin_to_json origin]))) (current_ask_origin state))
 
+let inspect_selected_ask_origin state ~mailbox =
+  if not (server_authority_ready state) then
+    report_action state "system" "Confirm the workspace identity before reading the question source"
+  else match selected_ask_origin state with
+  | None -> report_action state "system" "No question source is available"
+  | Some origin ->
+      (match origin.Ask.ao_source_turn_ref with
+       | None -> report_action state "system" "The question did not record a calling turn"
+       | Some turn_ref ->
+           state.ask_origin <- Some (state.workspace_authority, origin);
+           open_context_inspector ~target:(Masc_tui_context_inspector.Pinned turn_ref)
+             state ~mailbox ~keeper_name:origin.ao_keeper_name;
+           Log.Transport.info "tui_ask_source_inspect=%s"
+             (Yojson.Safe.to_string (`Assoc
+               [ "requested_ns", `String (Int64.to_string (Mtime_clock.elapsed_ns ()))
+               ; "origin", Ask.origin_to_json origin ])))
 
 let selected_ask_question state =
   match selected_ask_row state with
@@ -19083,11 +19119,14 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
        | Some _ | None -> ())
   | Context_inspector_loaded (generation, keeper_name, reading) ->
       if
-        generation = state.context_inspector_generation
+        state.context_inspector_open
+        && generation = state.context_inspector_generation
         && Option.exists (String.equal keeper_name)
              state.context_inspector_keeper
       then begin
-        state.context_inspector_loading <- false;
+        let reading = Masc_tui_context_inspector.merge_progress
+            ~previous:(Option.map snd state.context_inspector_reading) reading in
+        state.context_inspector_loading <- Masc_tui_context_inspector.is_loading reading;
         state.context_inspector_reading <- Some (keeper_name, reading);
         state.context_inspector_read_at <- Some (Unix.gettimeofday ());
         (* A refresh reads a failed part again. A part already read stays:
@@ -24656,6 +24695,7 @@ and is loaded on demand through keeper_skill.
             | "[" -> state.home_opened_request <- None; move_ask_cursor state (-1)
             | "]" -> state.home_opened_request <- None; move_ask_cursor state 1
             | "o" -> toggle_selected_ask_origin state
+            | "O" -> inspect_selected_ask_origin state ~mailbox:async_messages
             | "s" | "S" -> skip_ask_question state
             | "c" | "C" -> clear_ask_question state
             (* Ahead of the digit arm below, which takes every one-character
@@ -24681,13 +24721,14 @@ and is loaded on demand through keeper_skill.
                 | Some _ | None -> ())
             | _ -> ());
            Render_schedule.request render_schedule Render_schedule.Force
-       | Some "o"
+       | Some ("o" | "O" as key)
          when state.view = Approvals
               && not state.context_inspector_open
               && Option.is_none (text_input_target state ~compact_viewport)
               && (not state.approval_detail_open)
               && not (modal_owns_keys state) ->
-           toggle_selected_ask_origin state;
+           (if String.equal key "o" then toggle_selected_ask_origin state
+            else inspect_selected_ask_origin state ~mailbox:async_messages);
            Render_schedule.request render_schedule Render_schedule.Force
        (* The same two keys the answering mode uses, so the walk does not
           change shape when the operator commits. j/k cannot serve here: the
@@ -24719,49 +24760,21 @@ and is loaded on demand through keeper_skill.
          when state.context_inspector_open && Option.is_none state.search ->
            let exact_input_items () =
              match state.context_inspector_reading with
-             | Some
-                 ( _
-                 , Masc_tui_context_inspector.Turn_read
-                     { provider_input = Ok input; _ }
-                 ) ->
-                 Masc_tui_context_inspector.exact_input_items input
-             | Some
-                 ( _
-                 , ( Masc_tui_context_inspector.Request_failed _
-                   | Masc_tui_context_inspector.Turn_read_failed _
-                   | Masc_tui_context_inspector.Turn_read
-                       { provider_input = Error _; _ } ) )
              | None -> []
+             | Some (_, reading) ->
+                 Option.fold ~none:[] ~some:Masc_tui_context_inspector.exact_input_items
+                   (Masc_tui_context_inspector.observed_input reading)
            in
            let input_map_rows () =
              match state.context_inspector_reading with
-             | Some
-                 ( _
-                 , Masc_tui_context_inspector.Turn_read
-                     { selection
-                   ; provider_input
-                   ; _
-                   } ) -> (
-                 (* The rows the proof tab draws: the same record, so a
-                    stepped-back turn's keys walk that turn's components. *)
-                 match
-                   Masc_tui_context_inspector.viewing_record selection
-                     ~turn_back:state.context_inspector_turn_back
-                 with
-                 | None -> []
-                 | Some record ->
-                     let provider_input =
-                       match provider_input with
-                       | Ok value -> Some value
-                       | Error _ -> None
-                     in
-                     Masc_tui_context_inspector.input_map_rows record
-                       provider_input)
-             | Some
-                 ( _
-                 , ( Masc_tui_context_inspector.Request_failed _
-                   | Masc_tui_context_inspector.Turn_read_failed _ ) )
              | None -> []
+             | Some (_, reading) ->
+                 (match Masc_tui_context_inspector.inspected_record
+                          ~target:state.context_inspector_target reading with
+                  | None -> []
+                  | Some record ->
+                      Masc_tui_context_inspector.input_map_rows record
+                        (Masc_tui_context_inspector.observed_input reading))
            in
            let close () = close_context_inspector state in
            (match k with
@@ -24784,31 +24797,30 @@ and is loaded on demand through keeper_skill.
                           { selection = { Masc_tui_context_inspector.rows; _ }
                         ; _ } ) ->
                       List.length rows
-                  | Some (_, (Masc_tui_context_inspector.Request_failed _ | Masc_tui_context_inspector.Turn_read_failed _))
+                  | Some (_, (Masc_tui_context_inspector.Request_failed _ | Masc_tui_context_inspector.Turn_read_failed _ | Masc_tui_context_inspector.Exact_read _))
                   | None -> 0
                 in
-                if count > 0 then begin
-                  let moved =
-                    if k = "[" then
-                      min (count - 1) (state.context_inspector_turn_back + 1)
-                    else max 0 (state.context_inspector_turn_back - 1)
-                  in
-                  if moved <> state.context_inspector_turn_back then begin
-                    state.context_inspector_turn_back <- moved;
-                    state.context_inspector_cursor <- 0;
-                    state.context_inspector_exact <- None;
-                    state.context_inspector_scroll <- 0;
-                    state.context_inspector_detail_scroll <- 0;
-                    Option.iter
-                      (fun keeper_name ->
-                         launch_context_inspector_load state
-                           ~mailbox:async_messages ~keeper_name)
-                      state.context_inspector_keeper
-                  end
-                end
+                (match Masc_tui_context_inspector.step_recent state.context_inspector_target
+                         ~older:(String.equal k "[") ~count with
+                 | None -> ()
+                 | Some target ->
+                     state.context_inspector_target <- target;
+                     state.context_inspector_reading <- None;
+                     state.context_inspector_read_at <- None;
+                     state.context_inspector_cursor <- 0;
+                     state.context_inspector_exact <- None;
+                     state.context_inspector_scroll <- 0;
+                     state.context_inspector_detail_scroll <- 0;
+                     supersede_context_inspector_part_load state None;
+                     state.context_inspector_part <- Masc_tui_fetched.clear state.context_inspector_part;
+                     Option.iter
+                       (fun keeper_name -> launch_context_inspector_load state
+                          ~mailbox:async_messages ~keeper_name)
+                       state.context_inspector_keeper)
             | "/" when
                 state.context_inspector_tab
                 = Masc_tui_context_inspector.Exact_input
+                && Option.is_none state.context_inspector_exact
                 && Option.is_some state.context_inspector_reading ->
                 (* The surface search's own arm sits below this modal block,
                    so the pane starts the search itself: same state, same

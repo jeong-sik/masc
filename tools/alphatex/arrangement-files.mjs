@@ -34,7 +34,7 @@ async function inspectWaveAsset(root, asset, options = {}) {
   if (!(await lstat(path)).isFile()) throw new Error('WAV source must be a regular project asset')
   const actualHash = await digestFile(path, options)
   if (actualHash !== asset.sha256) throw new Error(`WAV source content changed: ${asset.name}`)
-  const metadata = waveInfo(await readWaveMetadata(path))
+  const metadata = waveInfo(await readWaveMetadata(path, {}, options))
   if (!equalMetadata(metadata, asset.metadata)) throw new Error(`WAV source metadata changed: ${asset.name}`)
   options.signal?.throwIfAborted()
   return path
@@ -49,7 +49,7 @@ async function copyWaveAsset(input, root, { signal } = {}) {
     const hash = createHash('sha256')
     const observe = new Transform({ transform(bytes, _, done) { hash.update(bytes); done(null, bytes) } })
     await pipeline(createReadStream(input), observe, createWriteStream(candidate, { flags: 'wx', mode: 0o600 }), { signal })
-    const metadata = waveInfo(await readWaveMetadata(candidate)), sha256 = hash.digest('hex')
+    const metadata = waveInfo(await readWaveMetadata(candidate, {}, { signal })), sha256 = hash.digest('hex')
     const file = `assets/${sha256}.wav`, target = join(root, file)
     const handle = await open(candidate, 'r')
     try { await handle.sync() } finally { await handle.close() }

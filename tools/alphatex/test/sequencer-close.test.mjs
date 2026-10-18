@@ -43,7 +43,7 @@ async function controller(options = {}) {
   const prefix = `const {${Object.keys(globalThis[slot]).join(',')}} = globalThis[${JSON.stringify(slot)}];\n`
   const { viewSequencer } = await import('data:text/javascript;base64,' + Buffer.from(prefix + source).toString('base64'))
   const signal = new AbortController()
-  const done = viewSequencer({ root: '/synthetic', output: options.output, signal: signal.signal }).finally(() => { delete globalThis[slot] })
+  const done = viewSequencer({ root: '/synthetic', output: options.output, midiOutput: options.midiOutput, signal: signal.signal }).finally(() => { delete globalThis[slot] })
   await new Promise(resolve => setImmediate(resolve))
   const key = (name, text = '') => process.stdin.emit('keypress', text, { name })
   return { observed, done, signal, process, key,
@@ -134,4 +134,42 @@ test('native playback owns pause, seek, resume, output identity and terminal tea
   assert.deepEqual(calls.slice(-2), [['stop'], ['terminate']])
   assert.equal(view.process.stdin.isRaw, false)
   assert.deepEqual(pitches(view), [60])
+})
+
+test('MIDI and audio route decisions fence obsolete jobs and drain the previous key owner', async () => {
+  const requests = [], owners = []
+  const view = await controller({ midiOutput: '-120', playback(value) {
+    requests.push(value)
+    let finish
+    const completion = new Promise(resolve => { finish = resolve })
+    const owner = { stopRequested: false, finish }
+    owners.push(owner)
+    return { ready: Promise.resolve(), completion,
+      stop() { owner.stopRequested = true }, terminate() { finish() }, status() {} }
+  } })
+  const worker = view.observed.workers[0]
+  const deliver = job => worker.emit('message', { id: job.id, ok: true, result: { path: job.path, clippedSamples: 0 } })
+  view.key('return'); view.key('space'); await flush()
+  const old = worker.requests[0]
+  assert.equal(old.options.format, 'midi')
+  view.command('midi-output -121'); view.key('space'); await flush()
+  deliver(old); await flush()
+  assert.equal(requests.length, 0)
+  deliver(worker.requests[1]); await flush()
+  assert.equal(requests[0].midiOutput, '-121')
+  assert.equal(requests[0].output, undefined)
+  view.command('output audio-UID'); view.key('space'); await flush()
+  deliver(worker.requests[2]); await flush()
+  assert.equal(owners[0].stopRequested, true)
+  assert.equal(requests.length, 1)
+  owners[0].finish(); await flush()
+  assert.equal(requests[1].output, 'audio-UID')
+  assert.equal(requests[1].midiOutput, undefined)
+  assert.equal(worker.requests[2].options.format, 'wav')
+  view.command('midi-output -122'); view.command('audio'); view.key('space'); await flush()
+  deliver(worker.requests[3]); owners[1].finish(); await flush()
+  assert.equal(requests[2].output, 'audio-UID')
+  assert.equal(requests[2].midiOutput, undefined)
+  view.key('q'); await view.done
+  assert.equal(view.process.stdin.isRaw, false)
 })

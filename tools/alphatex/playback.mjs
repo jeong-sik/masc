@@ -1,13 +1,29 @@
-import { spawn, execFile } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
-import { promisify } from 'node:util'
 
 export const transportPath = fileURLToPath(new URL('./music-transport', import.meta.url))
 export const midiTransportPath = fileURLToPath(new URL('./music-midi', import.meta.url))
 export async function midiDestinations({ executable = midiTransportPath, signal } = {}) {
-  const { stdout } = await promisify(execFile)(executable, ['destinations'], { signal })
-  const result = JSON.parse(stdout)
+  signal?.throwIfAborted()
+  const child = spawn(executable, ['destinations'], { stdio: ['ignore', 'pipe', 'pipe'] })
+  let output = '', detail = '', failure = null, cancelled = false
+  child.stdout.setEncoding('utf8').on('data', text => { output += text })
+  child.stderr.setEncoding('utf8').on('data', text => { detail += text })
+  const abort = () => { cancelled = true; child.kill('SIGTERM') }
+  signal?.addEventListener('abort', abort, { once: true })
+  try {
+    await new Promise((resolve, reject) => {
+      child.once('error', error => { failure = error })
+      child.once('close', (code, exitSignal) => {
+        if (cancelled) reject(signal.reason)
+        else if (failure) reject(failure)
+        else if (code !== 0) reject(new Error(detail || `MIDI discovery ended: ${code ?? exitSignal}`))
+        else resolve()
+      })
+    })
+  } finally { signal?.removeEventListener('abort', abort) }
+  const result = JSON.parse(output)
   if (result.kind !== 'destinations' || !Array.isArray(result.destinations)) throw new Error('Malformed MIDI destination list')
   const ids = new Set()
   for (const device of result.destinations) {
@@ -106,10 +122,11 @@ export function openPlayback({ path, output, midiOutput, loop = false, onEvent =
   return { ready, completion, stop,
     pause: () => command('pause'), resume: () => command('resume'), status: () => command('status'),
     seek(seconds) {
-      if (!Number.isFinite(seconds) || seconds < 0 || !current || seconds > current.duration) throw new Error('Seek must be between zero and the WAV duration, inclusive')
+      if (!Number.isFinite(seconds) || seconds < 0 || !current || seconds > current.duration) throw new Error('Seek must be between zero and the playback duration, inclusive')
       command('seek', { seconds })
     },
-    // Terminal teardown may require immediate termination of only this child.
-    terminate() { stopping = true; if (!closed) child.kill('SIGKILL') },
+    // The native owner handles SIGTERM by releasing its held MIDI keys before
+    // closing. Completion still owns that cleanup; SIGKILL would leave notes on.
+    terminate() { stopping = true; if (!closed) child.kill('SIGTERM') },
   }
 }

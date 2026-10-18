@@ -29,13 +29,15 @@ const help = [
   ':save-as /path/song.json    :export /path/song.mid    :wave /path/song.wav',
   'Close, drop2 and rootless voicings use Tonal. Chord labels are candidates.',
   ':output device-UID selects an audio output; --devices lists device identities.',
+  ':midi-output ID sends phrases to a MIDI destination; :audio returns to audio.',
   ':seek 4 moves playback to quarter-note beat 4; :stop ends the transport.',
-  'Preview uses a SoundFont and one native player for all loop iterations.',
+  'Audio preview uses a SoundFont; MIDI output sends the project notes directly.',
 ]
 
 export async function viewSequencer({ path, root = resolve('music-projects'), embedded = false, signal,
-  soundfontPath, sessionRoot, input, midi, output } = {}) {
+  soundfontPath, sessionRoot, input, midi, output, midiOutput } = {}) {
   if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error('Sequencer requires a terminal')
+  if (output !== undefined && midiOutput !== undefined) throw new Error('Choose an audio output or a MIDI destination')
   const loaded = path ? await loadProject(path) : null
   if (signal?.aborted) return
   let editor = newEditor(loaded?.project), revision = loaded?.revision ?? null
@@ -43,6 +45,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
   let saved = loaded?.project, status = 'Enter a note or :help', prompt = null, showHelp = false
   let loop = false, accepting = true, closed = false, suspended = false, task = Promise.resolve(), sessionTask = null
   let selectedOutput = output
+  let selectedMidiOutput = midiOutput
   const sessionAbort = new AbortController()
   const directory = await mkdtemp(join(tmpdir(), 'masc-sequencer-'))
   const worker = new Worker(new URL('./sequencer-worker.mjs', import.meta.url))
@@ -108,7 +111,8 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
         if (pitch === editor.pitch) cells[cursor] = current ? '◆' : '◇'
         lines.push(`${Note.fromMidi(pitch).padStart(5)}  ${cells.join('')}`)
       }
-      lines.push(`Playhead ${(playTick() / PPQ).toFixed(2)} · loop ${project.loop.start / PPQ}–${project.loop.end / PPQ} · output ${selectedOutput ?? 'system default'} · ${path}`)
+      const destination = selectedMidiOutput === undefined ? selectedOutput ?? 'system default' : `MIDI ${selectedMidiOutput}`
+      lines.push(`Playhead ${(playTick() / PPQ).toFixed(2)} · loop ${project.loop.start / PPQ}–${project.loop.end / PPQ} · output ${destination} · ${path}`)
     }
     let output = '\x1b[H'
     for (let row = 1; row <= rows; row++) output += `\x1b[${row};1H\x1b[2K`
@@ -126,14 +130,18 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
   function render(snapshot, options = {}) {
     if (!accepting) throw new Error('Sequencer is closing')
     if (workerFailure) throw new Error(workerFailure)
-    const id = ++jobNumber, cancel = new Int32Array(new SharedArrayBuffer(4)), path = join(directory, `${id}.wav`)
+    const id = ++jobNumber, cancel = new Int32Array(new SharedArrayBuffer(4)), path = join(directory, `${id}.${options.format === 'midi' ? 'json' : 'wav'}`)
     const promise = new Promise((resolve, reject) => { jobs.set(id, { resolve, reject, cancel }) })
     worker.postMessage({ id, path, project: snapshot, cancel: cancel.buffer, options: { ...options, soundfontPath } })
     return { promise, cancel }
   }
-  function startPlayer(wave, id) {
+  async function startPlayer(wave, id) {
+    // Finish the previous owner before a new one can reuse its MIDI keys. Its
+    // final note-offs must never cut off the replacement transport's notes.
+    await Promise.allSettled([...players.values()])
     if (!accepting || closed || id !== generation) return
-    const handle = openPlayback({ path: wave.path, output: selectedOutput, loop, onEvent: event => {
+    const handle = openPlayback({ path: wave.path, output: selectedMidiOutput === undefined ? selectedOutput : undefined,
+      midiOutput: selectedMidiOutput, loop, onEvent: event => {
       if (!accepting || closed || id !== generation) return
       if (['playing', 'paused'].includes(event.kind)) {
         transport = { kind: event.kind, handle, position: event.currentTime, duration: event.duration, since: performance.now() }
@@ -150,14 +158,14 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       if (!closed && id === generation) { transport = { kind: 'stopped' }; status = error.message; draw() }
     }).finally(() => { players.delete(handle) })
     players.set(handle, settled)
-    status = wave.clippedSamples > 0 ? 'Preview clipped; lower :level' : 'SoundFont preview'; draw()
+    status = selectedMidiOutput !== undefined ? 'MIDI output' : wave.clippedSamples > 0 ? 'Preview clipped; lower :level' : 'SoundFont preview'; draw()
   }
   function play() {
     if (!accepting) return
     if (transport.kind === 'playing') { transport.handle.pause(); return }
     if (transport.kind === 'paused') { transport.handle.resume(); return }
     if (transport.kind !== 'stopped') { stop(); draw(); return }
-    const id = ++generation, result = render(editor.project, { loop })
+    const id = ++generation, result = render(editor.project, { loop, format: selectedMidiOutput === undefined ? 'wav' : 'midi' })
     transport = { kind: 'rendering', cancel: result.cancel }
     result.promise.then(wave => startPlayer(wave, id)).catch(error => {
       if (!closed && id === generation) { transport = { kind: 'stopped' }; status = error.message; draw() }
@@ -197,7 +205,9 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       }
       case 'play': play(); break
       case 'stop': stop(); break
-      case 'output': stop(); selectedOutput = value.path; status = `Output: ${selectedOutput}`; break
+      case 'output': stop(); selectedOutput = value.path; selectedMidiOutput = undefined; status = `Audio output: ${selectedOutput}`; break
+      case 'midi-output': stop(); selectedMidiOutput = value.path; status = `MIDI output: ${selectedMidiOutput}`; break
+      case 'audio': stop(); selectedMidiOutput = undefined; status = `Audio output: ${selectedOutput ?? 'system default'}`; break
       case 'seek': {
         if (!accepting) return
         if (!transport.handle) throw new Error('Start playback before seeking')

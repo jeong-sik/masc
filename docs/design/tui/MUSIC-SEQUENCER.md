@@ -107,7 +107,7 @@ and supported RPN data, current notes, sustain/sostenuto membership and original
 release wire forms. Seek uses source tick/tempo-map or SMPTE timing. Unknown
 initial values and opaque device state fail explicitly; this is partial source
 reconstruction, with its boundaries documented in tools/alphatex/SOURCE-STATE.md.
-Source looping, MIDI-region scheduling, VST routing, overdubs, shared clock and
+Source looping, VST routing, overdubs, shared clock and
 practice workflows remain separate unfinished units.
 
 ### Arrangement document boundary
@@ -123,7 +123,9 @@ import, region placement/editing, undo/redo and revision-protected save/reopen.
 IO runs in an owned worker and closes only after cancellation/cleanup and admitted
 editor decisions drain. Save-as materializes sources retained by edit history.
 WAV lanes now have streamed multi-voice playback with Space pause/resume, beat seek,
-explicit output selection and private source snapshots. Source-state chase for
-MIDI lanes and overdub remain unfinished. Active MIDI lanes fail explicitly rather
-than being silently omitted from WAV playback.
+explicit output selection and private source snapshots. MIDI lanes now reuse
+source-state reconstruction for trimmed/repeated regions and beat seek, with
+explicit asset/port outputs and physical destination/channel ownership admission.
+Finite repeat counts remain compressed; missed complete copies skip to the
+current phase. Mixed WAV/MIDI shared-clock playback and overdub remain unfinished.
 See [the core contract](../../../tools/alphatex/ARRANGEMENT.md).

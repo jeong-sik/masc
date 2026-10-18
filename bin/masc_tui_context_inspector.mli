@@ -294,6 +294,21 @@ type part_key =
   ; part_item : exact_input_item
   }
 
+type exact_turn_record =
+  { record : Turn_record.t
+  ; skipped_rows : int
+  }
+
+val decode_exact_turn_record :
+  expected_keeper:string ->
+  expected_turn_ref:Ids.Turn_ref.t ->
+  Yojson.Safe.t ->
+  (exact_turn_record, string) result
+(** Decode the exact lookup envelope, requiring one row bound to both the
+    requested Keeper and complete Turn_ref. Partial-history metadata remains
+    visible even when the known target is readable. This never selects a
+    recent/latest attributed row as a substitute. *)
+
 val decode_turn_records : Yojson.Safe.t -> (selection, string) result
 (** Strictly decode every returned row and report both the newest row and the
     newest row carrying an exact input-component observation. A malformed row

@@ -284,6 +284,53 @@ let sha256 name = function
   | `String value when String_util.is_lowercase_sha256_hex value -> Ok value
   | _ -> Error (name ^ " is not a lowercase SHA-256")
 
+type exact_turn_record =
+  { record : Turn_record.t
+  ; skipped_rows : int
+  }
+
+let decode_exact_turn_record ~expected_keeper ~expected_turn_ref json =
+  let fail detail = Error ("exact turn-records: " ^ detail) in
+  match json with
+  | `Assoc fields when
+      exact_fields [ "keeper"; "turn_ref"; "count"; "skipped_rows"; "source"; "entries" ] fields ->
+      let get name =
+        match List.assoc_opt name fields with
+        | Some value -> Ok value
+        | None -> fail ("missing " ^ name)
+      in
+      let* keeper_json = get "keeper" in
+      let* () = match keeper_json with
+        | `String keeper when String.equal keeper expected_keeper -> Ok ()
+        | _ -> fail "Keeper does not match request" in
+      let* ref_json = get "turn_ref" in
+      let* turn_ref = Ids.Turn_ref.of_yojson ref_json in
+      let* () =
+        if Ids.Turn_ref.equal turn_ref expected_turn_ref then Ok ()
+        else fail "Turn_ref does not match request" in
+      let* count = get "count" in
+      let* () = match count with
+        | `Int 1 -> Ok ()
+        | _ -> fail "count must be one" in
+      let* source = get "source" in
+      let* () = match source with
+        | `String "turn_record" -> Ok ()
+        | _ -> fail "source is not turn_record" in
+      let* skipped_json = get "skipped_rows" in
+      let* skipped_rows = nonnegative_int "skipped_rows" skipped_json in
+      let* entries = get "entries" in
+      let* record = match entries with
+        | `List [ `Assoc entry ] when exact_fields [ "record"; "diff_vs_prev" ] entry ->
+            (match List.assoc_opt "record" entry, List.assoc_opt "diff_vs_prev" entry with
+             | Some record, Some `Null -> Turn_record.of_json record
+             | _ -> fail "entry does not contain one record with no relative diff")
+        | _ -> fail "entries must contain exactly one record" in
+      if String.equal record.keeper expected_keeper
+         && Ids.Turn_ref.equal record.turn_ref expected_turn_ref
+      then Ok { record; skipped_rows }
+      else fail "record identity does not match request"
+  | _ -> fail "response fields are not exact"
+
 let manifest_schema = "masc.provider-input-manifest.v1"
 let part_schema = "masc.provider-input-part.v1"
 

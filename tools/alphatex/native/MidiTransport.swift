@@ -31,6 +31,31 @@ func destinations() throws -> [Destination] {
         return Destination(endpoint: endpoint, uid: uid, name: name.takeRetainedValue() as String)
     }
 }
+func selectedDestination(uid: String) throws -> Destination {
+    guard let identity = Int32(uid), String(identity) == uid else { throw MidiFailure("MIDI destination requires its exact unique ID") }
+    var object = MIDIObjectRef(), type = MIDIObjectType.other
+    try checked(MIDIObjectFindByUniqueID(identity, &object, &type), "find selected MIDI destination")
+    guard object != 0, type == .destination else { throw MidiFailure("selected MIDI object is not a destination") }
+    var name: Unmanaged<CFString>?
+    try checked(MIDIObjectGetStringProperty(object, kMIDIPropertyDisplayName, &name), "read selected MIDI destination name")
+    guard let name else { throw MidiFailure("selected MIDI destination name is unavailable") }
+    let selected = Destination(endpoint: object, uid: identity, name: name.takeRetainedValue() as String)
+    try checkPinnedDestination(selected)
+    return selected
+}
+func checkPinnedDestination(_ selected: Destination) throws {
+    // A lookup/listing of unrelated endpoints may race their removal. Validate
+    // only the selected reference, including reuse with a different identity.
+    var identity: Int32 = 0
+    try checked(MIDIObjectGetIntegerProperty(selected.endpoint, kMIDIPropertyUniqueID, &identity), "read selected MIDI destination identity")
+    guard identity == selected.uid else { throw MidiFailure("selected MIDI destination was removed or changed") }
+    var offline: Int32 = 0
+    let status = MIDIObjectGetIntegerProperty(selected.endpoint, kMIDIPropertyOffline, &offline)
+    if status != kMIDIUnknownProperty {
+        try checked(status, "read selected MIDI destination state")
+        guard offline == 0 else { throw MidiFailure("selected MIDI destination is offline") }
+    }
+}
 struct Event: Decodable, Equatable {
     enum Kind: String, Decodable { case program, control, on, off }
     let kind: Kind
@@ -240,15 +265,9 @@ final class MidiTransport {
         try queue.sync {
             client = createdClient
             do {
-                guard let found = try destinations().first(where: { String($0.uid) == selectedUID }) else {
-                    throw MidiFailure("selected MIDI destination is unavailable: \(selectedUID)")
-                }
-                destination = found
+                destination = try selectedDestination(uid: selectedUID)
                 for binding in timeline.bindings {
-                    guard let selected = try destinations().first(where: { String($0.uid) == binding.destination }) else {
-                        throw MidiFailure("source MIDI port \(binding.port) destination is unavailable")
-                    }
-                    sourceDestinations[binding.port] = selected
+                    sourceDestinations[binding.port] = try selectedDestination(uid: binding.destination)
                     wireStates[binding.port] = WireState()
                 }
                 try checked(MIDIOutputPortCreate(client, "MASC phrase output" as CFString, &port), "create MIDI output port")
@@ -268,18 +287,9 @@ final class MidiTransport {
         catch { finish(reason: "destination-unavailable", error: error) }
     }
     func checkDestination() throws {
-        let available = try destinations()
         guard let destination else { throw MidiFailure("MIDI destination has not been selected") }
         for selected in timeline.source ? Array(sourceDestinations.values) : [destination] {
-            guard available.contains(where: { $0.endpoint == selected.endpoint && $0.uid == selected.uid }) else {
-                throw MidiFailure("selected MIDI destination was removed or changed")
-            }
-            var offline: Int32 = 0
-            let status = MIDIObjectGetIntegerProperty(selected.endpoint, kMIDIPropertyOffline, &offline)
-            if status != kMIDIUnknownProperty {
-                try checked(status, "read selected MIDI destination state")
-                guard offline == 0 else { throw MidiFailure("selected MIDI destination is offline") }
-            }
+            try checkPinnedDestination(selected)
         }
     }
     func send(_ bytes: [UInt8]) throws {

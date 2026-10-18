@@ -1318,6 +1318,12 @@
  (modules masc_tui_alphatex)
  (libraries masc_tui_alphatex_score))
 
+(library
+ (name masc_tui_score)
+ (wrapped false)
+ (modules masc_tui_score)
+ (libraries unix yojson))
+
 ;; SMF bytes -> what the pane shows: tracks, the tempo map, time signatures,
 ;; duration. Pure; the fetch stays with the caller.
 (library
@@ -2156,6 +2162,7 @@
   masc_tui_io_domain
   masc_tui_features
   masc_tui_account_login
+  masc_tui_score
   masc_tui_play_card
   masc_tui_sgr_text
   masc_tui_emblem_screen

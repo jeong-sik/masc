@@ -1618,6 +1618,13 @@ tablature box instead of plain code - what renders, what the fallback box
 means, and how to turn it off are in the
 [alphaTex tab guide](guides/alphatex-tab.md).
 
+In Keeper chat, `/score [N]` opens a frozen alphaTex block in the same terminal
+with the official alphaTab engine for full notation, track selection, zoom,
+scroll and local synthesized playback. N counts closed scores newest first.
+Install the companion with `scripts/install-alphatex.sh`; this view requires
+Node.js 22+ and Kitty graphics with reported cell geometry. The guide above
+describes controls, SoundFont selection and current limits.
+
 A post's attachments are listed at the end of its body under `ATTACHMENTS`,
 each with a `[N]` number. On the read pane, pressing the number opens that
 attachment: audio plays locally (afplay or the next player on the chain),

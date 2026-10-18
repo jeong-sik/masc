@@ -40,6 +40,10 @@ type t =
   | Play_invite of { name : string; hours : int }
   | Play_revoke of string
   | Play_invalid of string
+  | Open_score of int
+      (** [/score [N]] opens a frozen alphaTex score in this terminal using
+          official alphaTab notation and playback; N is newest-first. *)
+  | Score_invalid_index
   | Listen
       (** [/listen] — play the newest playable attachment in this
           conversation (audio through the local player chain, MIDI through

@@ -1,4 +1,4 @@
-# alphaTex 타브 (TUI 렌더러)
+# alphaTex 악보와 재생 (TUI)
 
 > **상태: 실험 기능** — 하위 호환 약속이 없습니다. 문법·화면·동작은 v0.56.0
 > 이후에도 바뀔 수 있습니다.
@@ -8,7 +8,56 @@ TUI 어디에서든 ```alphatex 또는 ```atex 코드 펜스가 들어간 텍스
 사람이 Board에서 코드 리프나 릭(riff)을 주고받을 때, 텍스트로는 읽을 수
 없는 운지를 화면에서 바로 보려는 기능입니다.
 
-## 무엇을 그리는가
+## 전체 악보 열기와 재생
+
+Keeper 채팅에서 `/score`를 입력하면 현재 불러온 대화의 가장 최근 완결된
+`alphatex` 또는 `atex` 블록을 같은 터미널의 전체 악보 화면으로 엽니다.
+`/score 2`는 그 앞의 악보입니다. 원문을 고정한 뒤 열며, 종료하면 대화로 돌아옵니다.
+
+이 화면은 공식 **alphaTab 1.8.4 + alphaSkia 3.5.147**을 사용합니다. 다중 트랙·보표·성부,
+오선보·타브·숫자보·슬래시·타악기·연주 효과를 자체 부분 문법으로 축소하지 않습니다.
+지원 범위와 잘못된 문법의 판정은 고정된 공식 엔진 버전을 따릅니다. 단순 검사 통과를
+모든 가능한 악보의 정확성으로 보장하지는 않습니다.
+
+Node.js 22 이상과 pnpm이 있는 환경에서 `scripts/install-alphatex.sh`로 보조 프로그램을
+설치합니다. 설치 경로를 바꾸려면 `--prefix /path/to/bin`을 지정합니다. TUI를 실행한
+환경의 PATH에 `masc-alphatex`가 있어야 합니다. Ghostty·Kitty·WezTerm처럼 Kitty 그래픽을
+지원하고 셀 픽셀 크기를 응답하는 터미널이 필요합니다.
+
+| 키 | 동작 |
+|---|---|
+| ↑/↓ 또는 j/k | 현재 시스템 스크롤 |
+| PageUp/PageDown, [ / ] | 뷰포트 이동과 다음/이전 시스템 |
+| Home/End | 전체 악보 처음/끝 |
+| + / - | 기보 크기 조절 |
+| t | 전체 트랙과 개별 트랙 순환 |
+| ←/→ | 대화에 저장된 이전/다음 악보 |
+| Space | 선택 트랙 재생·일시정지·재개 |
+| s | 재생 중지 |
+| v | 원문과 공식 오류 진단 읽기 |
+| q 또는 Esc | 대화로 돌아가기 |
+
+공식 AlphaSynth가 반복·길이·음색·연주 효과를 PCM WAV로 합성하며, 로컬 afplay·ffplay·aplay·SoX
+중 가능한 플레이어로 재생합니다. 기존 `[tui] midi_soundfont`가 있으면 사용하고, 없으면
+공식 패키지의 Sonivox SoundFont를 씁니다. 닫을 때 재생과 worker를 끝내고 임시 파일을
+지웁니다. 재생 위치를 따라 움직이는 커서는 아직 없습니다.
+
+베이스는 예를 들어 다음처럼 씁니다. `tabs`는 복수형이며 `tab`은 공식 문법에서도 오류입니다.
+alphaTex 1.8에서는 메타데이터 뒤의 별도 `.` 구분자를 생략할 수 있습니다.
+
+```alphatex
+\title "반음 연결 연습"
+\instrument 34
+\tuning (G2 D2 A1 E1)
+\staff {score tabs}
+\clef bass
+\tempo 80
+\ts 4 4
+:4 5.3 7.2 7.2 :8 3.2 4.2 |
+:2 5.2 {d} :4 r
+```
+
+## 채팅 안의 ASCII 미리보기
 
 악보 펜스 안에서 지원하는 기본 문법은 다음 지시자와 노트 토큰입니다
 (masc_tui_alphatex_score.ml `directive_of_word` 직독):
@@ -57,7 +106,7 @@ B줄 3프렛, G줄 5프렛, D줄 0프렛"입니다. 띄어쓰기로 여러 노�
 
 ```
 ┌─ alphaTex 악보 ──────────────────────────────
-│ alphatex: the \subtitle directive is not in the subset
+│ ASCII preview: the \subtitle directive is not in the subset
 │ \subtitle "nope"
 └──────────────────────────────────────────────
 ```
@@ -131,8 +180,8 @@ E|8---7---5---3---:|x2|
 
 | 화면 문구 | 뜻과 처방 |
 |---|---|
-| `alphatex: the \<지시자\> directive is not in the subset` | 지원 범위 밖의 지시자를 썼습니다. 지원하는 지시자를 사용하세요. 원문과 이유는 계속 표시됩니다. |
-| `alphatex: one measure needs N cells and this pane has M` | 한 마디가 화면 폭보다 깁니다. 마디를 더 잘게 `|`로 나누거나 창을 더 넓히세요. |
+| `ASCII preview: the \<지시자\> directive is not in the subset` | ASCII 미리보기 범위 밖입니다. `/score`로 공식 엔진의 전체 악보와 재생을 엽니다. 이 문구만으로 공식 문법이 틀렸다는 뜻은 아닙니다. |
+| `ASCII preview: one measure needs N cells and this pane has M` | ASCII 미리보기 폭이 부족합니다. `/score`에서 확대·스크롤해 읽습니다. 표시를 위해 원래 마디를 바꿀 필요는 없습니다. |
 | 펜스가 그냥 텍스트로 보임 | 태그 첫 단어가 `alphatex` 또는 `atex`가 아닙니다(예: `alpha`, `tab`). 첫 단어를 고치세요. |
 
 ## 끄는 법
@@ -146,6 +195,7 @@ E|8---7---5---3---:|x2|
 - 용어: `docs/spec/00-glossary.md` "alphatex" 항목(#43108)
 - 렌더러: `bin/masc_tui_alphatex.ml`, `bin/masc_tui_alphatex_score.ml`,
   `bin/masc_tui_markdown.ml`(fence 분류)
+- 공식 전체 화면: `tools/alphatex/`, 인계: `bin/masc_tui_score.ml`
 - 공식 문법: [트랙·보표](https://alphatab.net/docs/alphatex/structural-metadata),
   [튜닝](https://alphatab.net/docs/alphatex/staff-metadata),
   [조표·섹션](https://alphatab.net/docs/alphatex/bar-metadata)

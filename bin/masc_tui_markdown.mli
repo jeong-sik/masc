@@ -69,6 +69,10 @@ val plain_palette : palette
 (** A palette whose spans are all empty and whose gutters are ASCII. What the
     reader would see with styling stripped. *)
 
+val alphatex_sources : string -> string list
+(** Closed alphaTex/atex fence bodies in document order, using this renderer's
+    fence grammar. Incomplete streaming blocks are not playable snapshots. *)
+
 val non_colliding_fence_marker : string list -> string option
 (** Choose a Markdown fence marker that none of [lines] can close under this
     renderer's own fence grammar. [None] means both supported markers collide.

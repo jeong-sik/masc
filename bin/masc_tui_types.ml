@@ -11591,10 +11591,13 @@ let apply_runtime_form_save state request status =
       {attempt with rfa_status=status;
         rfa_revalidation_floor=(match request.rfs_draft, status with
           | Config_document_draft _, Form_finished (_, Form_unconfirmed _) -> Some state.runtime_config_generation
-          | Config_document_draft _, Form_finished (_, Form_saved receipt)
-              when receipt.Masc_tui_runtime_config_receipt.durability = Durability_unconfirmed ->
-                Some state.runtime_config_generation
-          | Config_document_draft _, (Form_checking | Form_previewing _ | Form_posting _ | Form_finished _)
+          | Config_document_draft _, Form_finished (_, Form_saved receipt) ->
+              (match receipt.Masc_tui_runtime_config_receipt.durability with
+               | Durability_unconfirmed -> Some state.runtime_config_generation
+               | Durable -> attempt.rfa_revalidation_floor)
+          | Config_document_draft _, (Form_checking | Form_previewing _ | Form_posting _
+              | Form_finished (_, (Form_not_sent _ | Form_invalid_account _
+                                  | Form_refused _ | Form_conflict _)))
           | (Model_form_draft _ | Account_form_draft _),
               (Form_checking | Form_previewing _ | Form_posting _ | Form_finished _) -> attempt.rfa_revalidation_floor);
         rfa_recoverable=(match status with
@@ -11647,10 +11650,14 @@ let recover_runtime_form_save state ~account =
        | Model_form_draft form -> state.runtime_model_form <- Some
            (match detail with None -> form | Some detail -> Masc_tui_model_form.refused form detail)
        | Account_form_draft form -> state.runtime_account_form <- Some
-           (match attempt.rfa_status, detail with
-            | Form_finished (_, Form_invalid_account refused), _ -> refused
-            | _, None -> form
-            | _, Some detail -> Masc_tui_runtime_account_form.refused form detail)
+           (match attempt.rfa_status with
+            | Form_finished (_, Form_invalid_account refused) -> refused
+            | Form_checking | Form_previewing _ | Form_posting _
+            | Form_finished (_, (Form_saved _ | Form_not_sent _ | Form_refused _
+                                | Form_conflict _ | Form_unconfirmed _)) ->
+                (match detail with
+                 | None -> form
+                 | Some detail -> Masc_tui_runtime_account_form.refused form detail))
        | Config_document_draft _ -> ());
       state.runtime_form_save_focus <- Some attempt.rfa_request.rfs_token;
       true
@@ -11696,7 +11703,8 @@ let prepare_runtime_form_save draft (reading : Masc_tui_runtime_config_view.read
   | Account_form_draft form -> with_revision (Masc_tui_runtime_account_form.source_revision form) (fun () ->
       Masc_tui_runtime_account_form.declare_on
         ~inherited_home:Masc_tui_runtime_account_form.inherited_home form reading.source_text
-      |> Result.map (fun declaration -> {rfp_base=base; rfp_text=declaration.text;
+      |> Result.map (fun declaration -> {rfp_base=base;
+           rfp_text=declaration.Masc_tui_runtime_account_form.text;
            rfp_account=Some declaration})
       |> Result.map_error (fun form -> Form_invalid_account form))
 

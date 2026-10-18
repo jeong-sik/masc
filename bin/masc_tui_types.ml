@@ -3825,6 +3825,28 @@ type keeper_log_request = {
 
 type keeper_log_admission = { kla_followup : bool }
 
+(* An explicit edit intent owns its readonly preparation separately from the
+   external editor and the later guarded write. *)
+type keeper_settings_key = {
+  ksk_authority : workspace_authority;
+  ksk_base_path : string;
+  ksk_masc_root : string;
+  ksk_keeper : string;
+  ksk_surface : surface;
+  ksk_tab : keeper_detail_tab option;
+}
+type keeper_settings_request = {
+  ksr_request : keeper_settings_key Masc_tui_fetched.request;
+  ksr_reading : unit ref;
+  ksr_owner : unit ref;
+  ksr_expected : Tui_decode.server_identity;
+  ksr_started_ns : int64;
+}
+type keeper_settings_snapshot = {
+  kss_observed : Yojson.Safe.t;
+  kss_stem : string;
+}
+
 type keeper_log_tone =
   | Keeper_log_fact
   | Keeper_log_notice
@@ -7312,6 +7334,9 @@ type state = {
   mutable keeper_sandbox_logs_inflight: sandbox_logs_request option;
   mutable keeper_config_view: (string * string list) option;
   mutable keeper_config_view_error: string option;
+  mutable keeper_settings_editor : (keeper_settings_key, keeper_settings_snapshot) Masc_tui_fetched.t;
+  mutable keeper_settings_intent : keeper_settings_request option;
+  mutable keeper_settings_cancel : (unit ref * (unit -> unit)) option;
   mutable github_identity_view: (string * string list) option;
   mutable github_identity_view_error: string option;
   (* The Info tab's Board-attention rows, keyed by the Keeper they were read
@@ -8989,7 +9014,123 @@ let suspend_voice_wizard_read state =
 let retire_keeper_message_search state =
   Atomic.incr state.msg_search_generation
 
+let keeper_settings_equal_key left right =
+  left.ksk_authority = right.ksk_authority
+  && String.equal left.ksk_base_path right.ksk_base_path
+  && String.equal left.ksk_masc_root right.ksk_masc_root
+  && String.equal left.ksk_keeper right.ksk_keeper
+  && left.ksk_surface = right.ksk_surface && left.ksk_tab = right.ksk_tab
+
+let keeper_settings_target state =
+  match state.view, state.workspace_identity, state.server_identity with
+  | (Keepers (Keeper_list | Keeper_detail) as surface), Workspace_identity_match, Some expected
+      when server_authority_ready state ->
+      Option.map (fun (keeper : keeper) -> {
+        ksk_authority=state.workspace_authority;
+        ksk_base_path=canonical_path expected.Tui_decode.sid_base_path;
+        ksk_masc_root=canonical_path expected.sid_masc_root;
+        ksk_keeper=keeper.k_name;ksk_surface=surface;
+        ksk_tab=(if surface=Keepers Keeper_detail then Some state.detail_tab else None)
+      }) (List.nth_opt state.keepers state.keeper_cursor)
+  | (Overview | Acting | Metrics | Keepers (Keeper_list | Keeper_detail | Keeper_logs
+      | Keeper_calls | Keeper_message | Keeper_runtime_pick) | Memory | Lanes | Clients
+      | Board | Approvals | Planning | Schedules | Verification | Harness | Fusion
+      | Repositories | Code | Changes | Connectors | Runtime | Config | Resources
+      | Tools | System_logs),
+      (Workspace_identity_match | Workspace_identity_unread | Workspace_identity_mismatch _
+       | Workspace_identity_match_unconfirmed _), (Some _ | None) -> None
+
+let supersede_keeper_settings_read state replacement =
+  let previous = state.keeper_settings_cancel in
+  state.keeper_settings_cancel <- replacement;
+  Option.iter (fun (_, cancel) -> cancel ()) previous
+
+let finish_keeper_settings_worker state request =
+  match state.keeper_settings_cancel with
+  | Some (owner, _) when owner == request.ksr_owner -> state.keeper_settings_cancel <- None
+  | Some _ | None -> ()
+
+let retire_keeper_settings_editor state =
+  state.keeper_settings_intent <- None;
+  state.keeper_settings_editor <- Masc_tui_fetched.clear state.keeper_settings_editor;
+  supersede_keeper_settings_read state None
+
+let keeper_settings_request_current state request =
+  request.ksr_reading == state.workspace_read_authority
+  && match keeper_settings_target state with
+    | Some key -> keeper_settings_equal_key key (Masc_tui_fetched.request_key request.ksr_request)
+    | None -> false
+
+let reconcile_keeper_settings_editor state ~available =
+  match state.keeper_settings_intent with
+  | Some request when not available || not (keeper_settings_request_current state request) ->
+      retire_keeper_settings_editor state; true
+  | Some _ | None -> false
+
+let begin_keeper_settings_editor state ~available ~started_ns =
+  ignore (reconcile_keeper_settings_editor state ~available);
+  let ready_waiting = match state.keeper_settings_intent with
+    | Some request when keeper_settings_request_current state request ->
+        let key = Masc_tui_fetched.request_key request.ksr_request in
+        (match Masc_tui_fetched.view_for ~equal:keeper_settings_equal_key state.keeper_settings_editor ~key with
+         | Ready _ -> true
+         | Absent | Loading | Stale _ | Failed _ -> false)
+    | Some _ | None -> false in
+  if ready_waiting then None
+  else match available, keeper_settings_target state, state.server_identity with
+  | true, Some key, Some expected ->
+      (match Masc_tui_fetched.start ~equal:keeper_settings_equal_key state.keeper_settings_editor ~key with
+       | Already_loading -> None
+       | Started (reading, ticket) ->
+           supersede_keeper_settings_read state None;
+           let request = {ksr_request=ticket;ksr_reading=state.workspace_read_authority;
+             ksr_owner=ref ();ksr_expected=expected;ksr_started_ns=started_ns} in
+           state.keeper_settings_editor <- reading;
+           state.keeper_settings_intent <- Some request;
+           Some request)
+  | false, (Some _ | None), (Some _ | None)
+  | true, None, (Some _ | None) | true, Some _, None -> None
+
+let take_keeper_settings_editor_read state request result =
+  match state.keeper_settings_intent with
+  | Some owner when owner.ksr_owner == request.ksr_owner
+      && keeper_settings_request_current state request
+      && Masc_tui_fetched.is_current ~equal:keeper_settings_equal_key
+           state.keeper_settings_editor request.ksr_request ->
+      state.keeper_settings_editor <- Masc_tui_fetched.complete ~equal:keeper_settings_equal_key
+          state.keeper_settings_editor request.ksr_request result;
+      true
+  | Some _ | None -> false
+
+let take_ready_keeper_settings_editor state ~available ~input_pending =
+  ignore (reconcile_keeper_settings_editor state ~available);
+  match state.keeper_settings_intent with
+  | Some request when not input_pending
+      && not (Masc_tui_fetched.is_current ~equal:keeper_settings_equal_key
+           state.keeper_settings_editor request.ksr_request) ->
+      let key = Masc_tui_fetched.request_key request.ksr_request in
+      (match Masc_tui_fetched.view_for ~equal:keeper_settings_equal_key state.keeper_settings_editor ~key with
+       | Ready snapshot ->
+           retire_keeper_settings_editor state;
+           Some (request, snapshot)
+       | Absent | Loading | Stale _ | Failed _ -> None)
+  | Some _ | None -> None
+
+let keeper_settings_editor_notice state =
+  match state.keeper_settings_intent with
+  | Some request when keeper_settings_request_current state request ->
+      let key = Masc_tui_fetched.request_key request.ksr_request in
+      let prefix = key.ksk_keeper ^ " settings: " in
+      if Masc_tui_fetched.is_current ~equal:keeper_settings_equal_key state.keeper_settings_editor request.ksr_request
+      then Some (prefix ^ "reading before editor · Esc cancels")
+      else (match Masc_tui_fetched.view_for ~equal:keeper_settings_equal_key state.keeper_settings_editor ~key with
+        | Ready _ -> Some (prefix ^ "ready to edit · Esc cancels")
+        | Failed detail | Stale (_, detail) -> Some (prefix ^ detail ^ " · e retries; Esc cancels")
+        | Absent | Loading -> None)
+  | Some _ | None -> None
+
 let suspend_workspace_readings state =
+  retire_keeper_settings_editor state;
   suspend_keeper_logs state;
   state.live_context <- Masc_tui_context_state.suspend state.live_context;
   supersede_live_context_read state None;
@@ -12160,6 +12301,9 @@ let create_state
   keeper_sandbox_logs_inflight = None;
   keeper_config_view = None;
   keeper_config_view_error = None;
+  keeper_settings_editor = Masc_tui_fetched.initial;
+  keeper_settings_intent = None;
+  keeper_settings_cancel = None;
   github_identity_view = None;
   keeper_board_quarantines = Masc_tui_fetched.initial;
   board_quarantine_requeue_inflight = None;

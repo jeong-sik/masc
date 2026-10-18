@@ -2438,10 +2438,128 @@ let test_keeper_log_suspension_preserves_snapshot_without_old_authority () =
   Alcotest.(check bool) "missing selection admits no filesystem request" true
     (Option.is_none (begin_keeper_log_read state ~intent:Snapshot_read.Poll ~limit:4 ~started_ns:2L keeper))
 
+let keeper_settings_fixture () =
+  let open Masc_tui_types in
+  let state, keeper = keeper_log_fixture () in
+  state.view <- Keepers Keeper_detail;
+  state.detail_tab <- Detail_instructions;
+  state.workspace_identity <- Workspace_identity_match;
+  state.server_identity <- Some (identity state.local_base_path);
+  state, keeper
+
+let keeper_settings_request state =
+  match Masc_tui_types.begin_keeper_settings_editor state ~available:true ~started_ns:10L with
+  | Some request -> request | None -> Alcotest.fail "settings preparation did not start"
+
+let keeper_settings_snapshot () : Masc_tui_types.keeper_settings_snapshot =
+  let observed = `Assoc [
+    "config_revision", `Assoc ["manifest",`Assoc ["state",`String "sha256";"value",`String (String.make 64 'a')];
+      "runtime_assignment",`Assoc ["state",`String "runtime_config_missing"]];
+    "activation_mode",`String "autonomous";"prompt",`Assoc ["instructions",`String "original"]] in
+  {kss_observed=observed;kss_stem=Masc_tui_keeper_config.editor_stem observed}
+
+let test_settings_preparation_hands_off_original_snapshot_once () =
+  let open Masc_tui_types in
+  let state, keeper = keeper_settings_fixture () in
+  let request = keeper_settings_request state in
+  let take ~input_pending = take_ready_keeper_settings_editor state ~available:true ~input_pending in
+  Alcotest.(check bool) "explicit repeated edit shares the pending read without opening an editor" true
+    (Option.is_none (begin_keeper_settings_editor state ~available:true ~started_ns:11L)
+      && Option.is_none (take ~input_pending:false));
+  let snapshot = keeper_settings_snapshot () in
+  finish_keeper_settings_worker state request;
+  Alcotest.(check bool) "only the original request admits its frozen source" true
+    (take_keeper_settings_editor_read state request (Ok snapshot));
+  Alcotest.(check bool) "queued input defers handoff and repeated edit does not restart a ready read" true
+    (Option.is_none (take ~input_pending:true)
+      && Option.is_none (begin_keeper_settings_editor state ~available:true ~started_ns:12L)
+      && Option.exists (fun current -> current.ksr_owner==request.ksr_owner) state.keeper_settings_intent);
+  state.keeper_config_view <- Some (keeper.k_name,["later rendered observation"]);
+  let original, document = match take ~input_pending:false with
+    | Some value -> value | None -> Alcotest.fail "ready source did not reach the same editor intent" in
+  Alcotest.(check bool) "handoff consumes exactly one original intent" true
+    (original.ksr_owner==request.ksr_owner && document=snapshot
+      && Option.is_none state.keeper_settings_intent && Option.is_none (take ~input_pending:false));
+  let edited = match Yojson.Safe.from_string document.kss_stem with
+    | `Assoc fields -> `Assoc (("instructions",`String "edited")::List.remove_assoc "instructions" fields)
+    | _ -> Alcotest.fail "editor source was not an object" in
+  let patch = match Masc_tui_keeper_config.patch_of_edit ~before:document.kss_observed ~after:edited with
+    | Ok patch -> patch | Error detail -> Alcotest.fail (Masc_tui_keeper_config.edit_refusal_to_string detail) in
+  let member = Yojson.Safe.Util.member in
+  Alcotest.(check bool) "actual editor patch retains the opening revision and only the changed field" true
+    (member "expected_config_revision" patch=member "config_revision" snapshot.kss_observed
+      && member "instructions" patch=`String "edited" && member "activation_mode" patch=`Null);
+  let failed = keeper_settings_request state in
+  Alcotest.(check bool) "read failure cannot reopen the earlier successful document" true
+    (take_keeper_settings_editor_read state failed (Error "endpoint unavailable")
+      && Option.is_none (take ~input_pending:false));
+  let retry = keeper_settings_request state in
+  Alcotest.(check bool) "explicit retry owns a fresh read and late prior success cannot complete it" true
+    (Masc_tui_fetched.request_id retry.ksr_request > Masc_tui_fetched.request_id failed.ksr_request
+      && not (take_keeper_settings_editor_read state failed (Ok snapshot))
+      && Option.is_none (take ~input_pending:false));
+  Alcotest.(check bool) "fresh retry can hand off after its own result arrives" true
+    (take_keeper_settings_editor_read state retry (Ok snapshot)
+      && Option.is_some (take ~input_pending:false))
+
+let test_settings_preparation_retires_focus_and_workspace_owners () =
+  let open Masc_tui_types in
+  let state, keeper = keeper_settings_fixture () in
+  let second = {keeper with k_name="beta"} in
+  state.keepers <- [keeper;second];
+  let original = keeper_settings_request state in
+  let original_cancelled = ref 0 in
+  supersede_keeper_settings_read state (Some (original.ksr_owner,fun () -> incr original_cancelled));
+  state.keeper_cursor <- 1;
+  Alcotest.(check bool) "moving selection cancels the original preparation" true
+    (reconcile_keeper_settings_editor state ~available:true && !original_cancelled=1);
+  let successor = keeper_settings_request state in
+  let successor_cancelled = ref 0 in
+  supersede_keeper_settings_read state (Some (successor.ksr_owner,fun () -> incr successor_cancelled));
+  finish_keeper_settings_worker state original;
+  Alcotest.(check bool) "late completion and cleanup cannot consume successor cancellation or its result" true
+    (not (take_keeper_settings_editor_read state original (Ok (keeper_settings_snapshot ())))
+      && Option.exists (fun (owner,_) -> owner==successor.ksr_owner) state.keeper_settings_cancel
+      && Option.exists (fun owner -> owner.ksr_owner==successor.ksr_owner) state.keeper_settings_intent);
+  state.workspace_read_authority <- ref ();
+  state.workspace_identity <- Workspace_identity_match_unconfirmed "probe unavailable";
+  suspend_workspace_readings state;
+  Alcotest.(check bool) "workspace read withdrawal cancels the worker and clears private editor data" true
+    (!successor_cancelled=1 && Option.is_none state.keeper_settings_intent
+      && Option.is_none state.keeper_settings_cancel
+      && Option.is_none (Masc_tui_fetched.current state.keeper_settings_editor)
+      && not (take_keeper_settings_editor_read state successor (Ok (keeper_settings_snapshot ()))));
+  state.workspace_identity <- Workspace_identity_match;
+  state.keeper_cursor <- 0;
+  let active = keeper_settings_request state in
+  ignore (take_keeper_settings_editor_read state active (Ok (keeper_settings_snapshot ())));
+  Alcotest.(check bool) "another input owner withdraws a ready editor rather than opening over it" true
+    (Option.is_none (take_ready_keeper_settings_editor state ~available:false ~input_pending:false)
+      && Option.is_none state.keeper_settings_intent);
+  let active = keeper_settings_request state in
+  state.detail_tab <- Detail_info;
+  Alcotest.(check bool) "tab navigation retires the opening intent" true
+    (reconcile_keeper_settings_editor state ~available:true
+      && not (take_keeper_settings_editor_read state active (Error "old tab")));
+  let active = keeper_settings_request state in
+  state.view <- Keepers Keeper_list;
+  Alcotest.(check bool) "switching list/detail cannot restore a previous editor request" true
+    (reconcile_keeper_settings_editor state ~available:true
+      && not (take_keeper_settings_editor_read state active (Ok (keeper_settings_snapshot ()))));
+  let active = keeper_settings_request state in
+  state.server_identity <- Some {(identity state.local_base_path) with sid_masc_root="/other/.masc"};
+  Alcotest.(check bool) "same base path with different runtime root cannot borrow the document" true
+    (reconcile_keeper_settings_editor state ~available:true
+      && not (take_keeper_settings_editor_read state active (Ok (keeper_settings_snapshot ()))))
+
 let () =
   Alcotest.run "tui_server_identity_refresh"
     [ ( "server-identity-refresh"
-      , [ Alcotest.test_case "metrics selection and cleanup preserve request ownership" `Quick
+      , [ Alcotest.test_case "settings preparation hands original document to one editor intent" `Quick
+            test_settings_preparation_hands_off_original_snapshot_once
+        ; Alcotest.test_case "settings preparation withdraws focus and workspace owners" `Quick
+            test_settings_preparation_retires_focus_and_workspace_owners
+        ; Alcotest.test_case "metrics selection and cleanup preserve request ownership" `Quick
             test_keeper_log_selection_and_late_cleanup_keep_original_owner
         ; Alcotest.test_case "metrics refresh shares work and retains partial observations on failure" `Quick
             test_keeper_log_refresh_coalesces_and_failed_revalidation_keeps_partial_rows

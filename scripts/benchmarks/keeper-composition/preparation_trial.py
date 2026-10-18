@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import shutil
@@ -29,7 +30,13 @@ def save(path: Path, value: object) -> None:
     temporary.replace(path)
 
 
-def load(path: Path) -> dict:
+def decode_json(text: str):
+    def finite_float(value):
+        number = float(value)
+        if not math.isfinite(number):
+            raise ValueError("non-finite JSON number")
+        return number
+
     def unique(pairs):
         value = {}
         for key, item in pairs:
@@ -37,9 +44,12 @@ def load(path: Path) -> dict:
                 raise ValueError(f"duplicate JSON field: {key}")
             value[key] = item
         return value
-    with path.open(encoding="utf-8") as source:
-        return json.load(source, object_pairs_hook=unique,
-                         parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value)))
+    return json.loads(text, object_pairs_hook=unique, parse_float=finite_float,
+                      parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value)))
+
+
+def load(path: Path) -> dict:
+    return decode_json(path.read_text(encoding="utf-8"))
 
 
 def digest(path: Path) -> str:
@@ -48,7 +58,8 @@ def digest(path: Path) -> str:
 
 
 def validate(experiment: dict) -> None:
-    if experiment["schema_version"] != 1 or experiment["case"] not in ("upstream_inline", "named_inline"):
+    if (not isinstance(experiment, dict) or type(experiment.get("schema_version")) is not int
+            or experiment["schema_version"] != 1 or experiment.get("case") not in ("upstream_inline", "named_inline")):
         raise ValueError("schema 1 upstream_inline or named_inline required")
     if type(experiment["pairs"]) is not int or experiment["pairs"] <= 0:
         raise ValueError("pairs must be an explicit positive integer")
@@ -154,6 +165,129 @@ def invoke(driver: Path, experiment_path: Path, prompts: Path, base: Path,
     return subprocess.run(command, check=False).returncode
 
 
+def declared_attempts(pairs: int) -> list[dict]:
+    return [{"pair": pair, "strategy": arm,
+             "path": f"pair-{pair:04d}/{arm}/attempt.json"}
+            for pair in range(pairs)
+            for arm in (("direct", "exact_skill") if pair % 2 == 0 else ("exact_skill", "direct"))]
+
+
+def capture_bytes(root: Path, relative: str):
+    path = root
+    parts = Path(relative).parts
+    for index, part in enumerate(parts):
+        if part in (".", "..") or not part or Path(relative).is_absolute():
+            raise ValueError("capture path is not relative")
+        path = path / part
+        mode = path.lstat().st_mode
+        expected = stat.S_ISREG if index == len(parts) - 1 else stat.S_ISDIR
+        if not expected(mode):
+            raise ValueError("capture entry is not a regular file/directory: " + relative)
+    raw = path.read_bytes()
+    return raw, hashlib.sha256(raw).hexdigest()
+
+
+def capture_json(root: Path, relative: str):
+    raw, digest_value = capture_bytes(root, relative)
+    return decode_json(raw.decode("utf-8")), digest_value
+
+
+def same_json(first, second) -> bool:
+    # JSON true and 1 are different input declarations, despite Python equality.
+    pending = [(first, second)]
+    while pending:
+        first, second = pending.pop()
+        if type(first) is not type(second):
+            return False
+        if isinstance(first, dict):
+            if first.keys() != second.keys():
+                return False
+            pending.extend((first[key], second[key]) for key in first)
+        elif isinstance(first, list):
+            if len(first) != len(second):
+                return False
+            pending.extend(zip(first, second))
+        elif first != second:
+            return False
+    return True
+
+
+def report_capture(directory: Path) -> dict:
+    """Read a declared capture without invoking a driver or changing evidence."""
+    root = directory.resolve(strict=True)
+    if not stat.S_ISDIR(root.lstat().st_mode):
+        raise ValueError("capture root must be a directory")
+    manifest, _ = capture_json(root, "manifest.json")
+    experiment, experiment_hash = capture_json(root, "experiment.json")
+    validate(experiment)
+    attempts = declared_attempts(experiment["pairs"])
+    if (not isinstance(manifest, dict) or type(manifest.get("schema_version")) is not int
+            or manifest["schema_version"] != 1
+            or manifest.get("experiment_sha256") != experiment_hash
+            or not same_json(manifest.get("expected_attempts"), attempts)):
+        raise ValueError("capture manifest does not bind the complete declared experiment")
+    results, by_pair = [], {}
+    for attempt in attempts:
+        result, receipt_hash, state, error = {}, None, "read", None
+        try:
+            raw, receipt_hash = capture_bytes(root, attempt["path"])
+            result = decode_json(raw.decode("utf-8"))
+            if not isinstance(result, dict):
+                result = {}
+                raise ValueError("attempt receipt must be an object")
+            if (type(result.get("schema_version")) is not int or result["schema_version"] != 1
+                    or result.get("strategy") != attempt["strategy"]
+                    or ("pair" in result and not same_json(result["pair"], attempt["pair"]))
+                    or result.get("outcome") not in ("correct", "explicit_failure", "unfinished")):
+                raise ValueError("attempt receipt identity or reported outcome is invalid")
+            if result["outcome"] == "correct" and result.get("case") != experiment["case"]:
+                raise ValueError("correct receipt does not name the declared case")
+        except FileNotFoundError:
+            state, error = "missing", "attempt receipt unavailable"
+        except (OSError, ValueError, RecursionError):
+            state, error = "invalid", "attempt receipt cannot be admitted"
+        result = dict(result)
+        result.update(reported_outcome=result.get("outcome"), receipt_state=state,
+                      receipt_sha256=receipt_hash, declared_attempt=dict(attempt))
+        if state != "read":
+            result.update(outcome="unfinished", receipt_error=error)
+        results.append(result)
+        by_pair.setdefault(attempt["pair"], []).append(result)
+    matching, comparisons = [], []
+    for pair in range(experiment["pairs"]):
+        paired = by_pair[pair]
+        if not all(result["outcome"] == "correct" for result in paired):
+            comparisons.append({"pair": pair, "state": "incomplete", "mismatched_fields": []})
+            continue
+        first, second = paired
+        mismatch = [key for key in ("case", "fixture_sha256", "skill_reference", "input", "runtime",
+                                   "first_offered_tools_sha256", "common_instruction_sha256")
+                    if key not in first or key not in second or not same_json(first[key], second[key])]
+        comparisons.append({"pair": pair, "state": "mismatch" if mismatch else "matched",
+                            "mismatched_fields": mismatch})
+        if mismatch:
+            for result in paired:
+                result.update(outcome="explicit_failure", comparison_errors=mismatch)
+        else:
+            matching.append({"pair": pair, "first_offered_inventory_reported":
+                             all(result["first_offered_tools_sha256"] is not None for result in paired)})
+    counts = {name: sum(result["outcome"] == name for result in results)
+              for name in ("correct", "explicit_failure", "unfinished")}
+    synthetic = experiment["runtime"]["mode"] == "synthetic_streaming"
+    return {"case": experiment["case"], "expected": len(attempts), "outcomes": counts,
+            "strategy_compliant": sum(result.get("strategy_compliant") is True for result in results),
+            "strategy_compliant_scope": "receipt_reported",
+            "attempts": results, "synthetic_only": synthetic, "latency_percentiles": None,
+            "speedup": None, "matching": matching, "pair_comparisons": comparisons,
+            "receipt_states": {state: sum(result["receipt_state"] == state for result in results)
+                               for state in ("read", "missing", "invalid")},
+            "comparison_scope": "receipt_reported_common_inputs_only",
+            "execution_verified": False, "source_build_verified": False,
+            "reason": ("functional protocol samples, no real model performance evidence" if synthetic else
+                       "reported input agreement does not verify execution or response-reported model identity"),
+            "fixture_hashes": [result.get("fixture_sha256") for result in results if result["outcome"] == "correct"]}
+
+
 def run(args) -> None:
     experiment = load(args.experiment)
     validate(experiment)
@@ -168,16 +302,12 @@ def run(args) -> None:
     output.mkdir(mode=0o700)  # refuses an existing/live output root
     experiment_path = output / "experiment.json"
     save(experiment_path, experiment)
-    attempts = []
-    for pair in range(experiment["pairs"]):
-        order = ("direct", "exact_skill") if pair % 2 == 0 else ("exact_skill", "direct")
-        for arm in order:
-            directory = output / f"pair-{pair:04d}" / arm
-            directory.mkdir(parents=True, mode=0o700)
-            path = directory / "attempt.json"
-            save(path, {"schema_version": 1, "outcome": "unfinished", "strategy": arm,
-                        "pair": pair, "reason": "preallocated_before_fixture_setup"})
-            attempts.append({"pair": pair, "strategy": arm, "path": str(path.relative_to(output))})
+    attempts = declared_attempts(experiment["pairs"])
+    for attempt in attempts:
+        path = output / attempt["path"]
+        path.parent.mkdir(parents=True, mode=0o700)
+        save(path, {"schema_version": 1, "outcome": "unfinished", "strategy": attempt["strategy"],
+                    "pair": attempt["pair"], "reason": "preallocated_before_fixture_setup"})
     frozen_prompts = output / "prompts"
     frozen_prompts.mkdir(mode=0o700)
     # Prompt_registry scans only direct *.md entries. Copy precisely those
@@ -198,7 +328,6 @@ def run(args) -> None:
                 "claims": {"real_model": False if synthetic else None, "speedup": False, "fleet_latency": False,
                            "synthetic_docker_cli": True, "same_canonical_fixture_base": True}}
     save(output / "manifest.json", manifest)
-    matching = []
     for pair in range(experiment["pairs"]):
         pair_root = output / f"pair-{pair:04d}"
         base, snapshot = pair_root / "base", pair_root / "snapshot"
@@ -216,48 +345,31 @@ def run(args) -> None:
                 code = invoke(driver, experiment_path, prompts, base, receipt, "run", attempt["strategy"])
                 save(receipt.parent / "process.json", {"returncode": code, "observed_epoch": time.time()})
             except (OSError, ValueError) as error:
-                value = load(receipt)
-                value.update(outcome="unfinished", reason="fixture_or_driver_unavailable", detail=str(error))
-                save(receipt, value)
-    results = [load(output / attempt["path"]) for attempt in attempts]
-    for pair in range(experiment["pairs"]):
-        paired = [result for attempt, result in zip(attempts, results) if attempt["pair"] == pair]
-        completed = [result for result in paired if result["outcome"] == "correct"]
-        if len(completed) == 2:
-            matching.append({"pair": pair, "first_offered_inventory_observed":
-                             all(result.get("first_offered_tools_sha256") is not None for result in completed)})
-            for key in ("case", "fixture_sha256", "skill_reference", "input", "runtime", "first_offered_tools_sha256",
-                        "common_instruction_sha256"):
-                if completed[0][key] != completed[1][key]:
-                    for attempt, result in zip(attempts, results):
-                        if attempt["pair"] == pair:
-                            result.update(outcome="explicit_failure", error="matched input mismatch: " + key)
-                            save(output / attempt["path"], result)
-    counts = {name: sum(result["outcome"] == name for result in results)
-              for name in ("correct", "explicit_failure", "unfinished")}
-    if sum(counts.values()) != len(attempts):
-        raise ValueError("unknown outcome cannot disappear from denominator")
-    fixtures = [result.get("fixture_sha256") for result in results if result["outcome"] == "correct"]
-    save(output / "summary.json", {"case": experiment["case"], "expected": len(attempts), "outcomes": counts,
-         "strategy_compliant": sum(result.get("strategy_compliant") is True for result in results),
-         "attempts": results, "synthetic_only": synthetic, "latency_percentiles": None,
-         "speedup": None, "matching": matching,
-         "reason": ("functional protocol samples, no real model performance evidence" if synthetic else
-                    "native HTTP metadata retains explicit coverage; response-reported model identity and adequate matched samples remain required"),
-         "fixture_hashes": fixtures})
+                save(receipt.parent / "process.json", {"returncode": None,
+                     "observation": "fixture_or_driver_unavailable", "detail": str(error)})
+    save(output / "summary.json", report_capture(output))
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--driver", type=Path, required=True)
-    parser.add_argument("--source-head", required=True)
-    parser.add_argument("--experiment", type=Path, required=True)
-    parser.add_argument("--prompts", type=Path, required=True)
-    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--report-from", type=Path, help="read an existing capture; print JSON without execution or writes")
+    parser.add_argument("--driver", type=Path)
+    parser.add_argument("--source-head")
+    parser.add_argument("--experiment", type=Path)
+    parser.add_argument("--prompts", type=Path)
+    parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     try:
+        run_arguments = (args.driver, args.source_head, args.experiment, args.prompts, args.output)
+        if args.report_from is not None:
+            if any(value is not None for value in run_arguments):
+                parser.error("--report-from cannot be combined with run arguments")
+            print(json.dumps(report_capture(args.report_from), indent=2, ensure_ascii=False, allow_nan=False))
+            return 0
+        if any(value is None for value in run_arguments):
+            parser.error("run requires --driver, --source-head, --experiment, --prompts and --output")
         run(args)
-    except (OSError, ValueError, KeyError, TypeError) as error:
+    except (OSError, ValueError, KeyError, TypeError, RecursionError) as error:
         print(str(error), file=sys.stderr)
         return 1
     return 0

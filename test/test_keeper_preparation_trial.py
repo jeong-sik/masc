@@ -414,6 +414,65 @@ def named_skill_reuse(args, root, head):
         "correct": 2, "strategy_compliant": 2, "real_model": False, "speedup": None}))
 
 
+def offline_capture_comparison(coordinator: Path) -> None:
+    """One declared cohort: mismatch, cancellation, missing, valid and partial evidence."""
+    root = Path(tempfile.mkdtemp(prefix="masc-preparation-report-")).resolve()
+    experiment = {"schema_version": 1, "case": "upstream_inline", "pairs": 4,
+                  "runtime": {"mode": "synthetic_streaming", "model_id": "report-fixture",
+                              "max_context_tokens": 4096, "max_output_tokens": 1024},
+                  "synthetic_outcome": "success"}
+    encoded = json.dumps(experiment).encode()
+    (root / "experiment.json").write_bytes(encoded)
+    attempts = []
+    for pair in range(4):
+        order = ("direct", "exact_skill") if pair % 2 == 0 else ("exact_skill", "direct")
+        for arm in order:
+            relative = f"pair-{pair:04d}/{arm}/attempt.json"
+            attempts.append({"pair": pair, "strategy": arm, "path": relative})
+            path = root / relative
+            path.parent.mkdir(parents=True)
+            if pair == 1 and arm == "exact_skill":
+                continue
+            if pair == 3 and arm == "direct":
+                path.write_text('{"outcome":', encoding="utf-8")
+                continue
+            receipt = {"schema_version": 1, "case": "upstream_inline", "strategy": arm,
+                       "outcome": "cancelled" if pair == 1 else "explicit_failure" if pair == 3 else "correct",
+                       "fixture_sha256": "fixture", "skill_reference": {"revision": "original"},
+                       "input": {"count": True if pair == 0 and arm == "exact_skill" else 1},
+                       "runtime": {"model": "report-fixture"}, "first_offered_tools_sha256": None,
+                       "common_instruction_sha256": "instruction", "timing": {"original": "retained"}}
+            path.write_text(json.dumps(receipt), encoding="utf-8")
+    (root / "manifest.json").write_text(json.dumps({"schema_version": 1,
+        "experiment_sha256": hashlib.sha256(encoded).hexdigest(), "expected_attempts": attempts}), encoding="utf-8")
+    def frozen_files():
+        return {path.relative_to(root).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
+                for path in root.rglob("*") if path.is_file()}
+    before = frozen_files()
+    command = [sys.executable, str(coordinator.resolve()), "--report-from", str(root)]
+    for _ in range(2):
+        result = subprocess.run(command, capture_output=True, text=True, check=False)
+        require(result.returncode == 0, "offline capture report failed: " + result.stderr)
+        report = json.loads(result.stdout)
+        require(report["expected"] == 8 and report["outcomes"] == {
+            "correct": 2, "explicit_failure": 3, "unfinished": 3}, "declared attempts disappeared")
+        require(report["receipt_states"] == {"read": 5, "missing": 1, "invalid": 2},
+                "invalid or unavailable evidence was promoted to execution")
+        require({item["pair"] for item in report["matching"]} == {2}, "mismatched inputs entered matching")
+        require(report["matching"][0]["first_offered_inventory_reported"] is False,
+                "two unobserved inventories became an inventory match")
+        cancelled = next(item for item in report["attempts"] if item["reported_outcome"] == "cancelled")
+        require(cancelled["timing"] == {"original": "retained"} and cancelled["outcome"] == "unfinished",
+                "cancelled evidence was lost or called completed")
+        require(all(item["reported_outcome"] == "correct" for item in report["attempts"]
+                    if item.get("comparison_errors")), "comparison replaced the original reported outcome")
+        require(report["speedup"] is None and report["execution_verified"] is False
+                and report["source_build_verified"] is False, "metadata became a runtime verdict")
+        require(frozen_files() == before, "offline reporting changed capture evidence")
+    refused = subprocess.run(command + ["--driver", str(root / "must-not-run")], capture_output=True, check=False)
+    require(refused.returncode == 2 and frozen_files() == before, "report mode accepted execution arguments")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--driver", type=Path, required=True)
@@ -424,6 +483,7 @@ def main():
     parser.add_argument("--max-context-tokens", type=int, required=True)
     parser.add_argument("--max-output-tokens", type=int, required=True)
     args = parser.parse_args()
+    offline_capture_comparison(args.coordinator)
     # This is source identity, not a claim that an external binary was built
     # from it. The actual driver SHA is independently recorded by coordinator.
     head = subprocess.check_output(["git", "-C", str(args.repository_root.resolve()),

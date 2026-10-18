@@ -1114,3 +1114,12 @@ positions. Repeated owner ids accumulate in immutable sets with one canonical
 list emitted per repeated pin; unique rows remain unchanged. Resolution and
 authority checks retain their existing boundaries. Source complexity is not
 measured preview/turn speedup.
+
+Preparation trial captures can also be read without execution through
+`preparation_trial.py --report-from CAPTURE`. The same reader finalizes normal
+trials. It keeps reported outcomes and comparison assessments separate, retains
+every declared attempt and admits a matching pair only after reported inputs
+agree. It never rewrites original attempt receipts or promotes input agreement
+to execution/speedup. See the
+[capture comparison audit](../audits/2026-10-19-preparation-capture-comparison.md)
+and [harness contract](../../scripts/benchmarks/keeper-composition/PREPARATION-HARNESS.md).

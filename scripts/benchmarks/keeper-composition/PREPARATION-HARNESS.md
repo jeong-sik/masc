@@ -111,8 +111,41 @@ is the intentional prompt difference. Board IDs, clocks and loopback ports are
 physical trial metadata, so full provider prompts are not claimed byte-identical.
 Where observed, the first offered tool-schema hash must also agree across a
 successful pair. Both native configured HTTP and synthetic runs take this
-metadata from the first actual dispatch. `summary.matching` records whether it
-was observed instead of treating two nulls as proof of matched inventory.
+metadata from the first actual dispatch. `summary.matching` includes a pair
+only after all common receipt fields agree. Its
+`first_offered_inventory_reported` flag distinguishes reported inventory from
+two nulls; it does not independently verify that inventory or execution.
+
+Read an existing capture without a driver, fixtures, network or writes:
+
+```bash
+python3 scripts/benchmarks/keeper-composition/preparation_trial.py \
+  --report-from /absolute/path/to/existing-capture > /tmp/preparation-report.json
+```
+
+`--report-from` cannot be combined with run arguments. It reads the manifest,
+hash-bound experiment and every declared attempt, including unavailable or
+invalid receipts; it does not read a driver or recreate the fixture. The shell
+redirection above writes a separate report outside the capture.
+
+`outcomes` counts coordinator assessments. Each attempt separately retains
+`reported_outcome`, `receipt_state`, its original bytes' hash when readable and
+the declared pair/strategy/path. A cancelled/unsupported outcome, malformed
+receipt or missing file remains in the denominator as an unfinished assessment;
+the original reported value and available partial fields remain visible.
+`pair_comparisons` distinguishes incomplete pairs from mismatched or matched
+reported metadata. JSON booleans and numbers are different declarations.
+Mismatch assessments never overwrite either original `attempt.json`.
+Coordinator fixture/driver failures go to `process.json`, preserving any native
+receipt. Normal run finalization uses the same reader to write `summary.json`.
+
+The manifest must bind the complete expected pair/strategy/path list and exact
+experiment bytes. If that declaration is invalid, reporting refuses rather than
+inventing a denominator. Descendant symlinks/nonregular files are not followed.
+Reports are per-file reads, not an atomic snapshot of a running experiment.
+Input agreement and artifact hashes are not source/build, independent physical
+execution, model identity, Task progress or speedup proof. `speedup` and latency
+percentiles remain null, and execution/source-build verdicts remain false.
 
 Each arm actually creates an addressed Board post, verifies one exact durable
 queue selection, classifies lifecycle admission, and calls the explicit heartbeat

@@ -22,8 +22,13 @@ func encoded(_ value: [String: Any]) throws -> Data {
     return data
 }
 
-func emit(_ value: [String: Any]) {
-    if let data = try? encoded(value) { FileHandle.standardOutput.write(data) }
+// A parent can close its event pipe while recording still owns files. Convert
+// that loss into a throwing write so Capture can finalize a failed session.
+let protectOutputPipe: Void = { _ = signal(SIGPIPE, SIG_IGN) }()
+
+func emit(_ value: [String: Any]) throws {
+    _ = protectOutputPipe
+    try FileHandle.standardOutput.write(contentsOf: encoded(value))
 }
 
 func address(_ selector: AudioObjectPropertySelector,
@@ -100,11 +105,18 @@ final class Capture {
     let directory: URL
     let input: AudioDevice
     let sources: [MidiSource]
+    let hostClock: mach_timebase_info_data_t
     let engine = AVAudioEngine()
     let writer = DispatchQueue(label: "masc.music.writer")
     let state = NSLock()
+    let callbacks = DispatchGroup()
     var accepting = false
+    var stopping = false
     var finished = false
+    var createdDirectory = false
+    var tapInstalled = false
+    var configurationObserver: NSObjectProtocol?
+    var deviceAliveListener: AudioObjectPropertyListenerBlock?
     var firstFailure: String?
     var audio: AVAudioFile?
     var midi: FileHandle?
@@ -119,24 +131,116 @@ final class Capture {
     var format: AVAudioFormat?
     var pool: [AVAudioPCMBuffer] = []
     var poolIndex = 0 // one audio-tap producer
+    var nextAudioSample: AVAudioFramePosition? // same producer; reset only with a new Capture
     var slots: DispatchSemaphore?
     let midiSlots = DispatchSemaphore(value: 1024)
 
     init(directory: URL, input: AudioDevice, sources: [MidiSource]) {
+        _ = protectOutputPipe
         self.directory = directory; self.input = input; self.sources = sources
+        var clock = mach_timebase_info_data_t()
+        mach_timebase_info(&clock)
+        hostClock = clock
     }
 
-    func armed() -> Bool {
+    // Enter under the same lock that closes admission. Teardown must wait for
+    // admitted producers to enqueue their final write before draining writer.
+    func beginCallback() -> Bool {
         state.lock(); defer { state.unlock() }
-        return accepting
+        guard accepting else { return false }
+        callbacks.enter()
+        return true
     }
 
     func fail(_ message: String) {
         state.lock()
+        guard !finished else { state.unlock(); return }
         if firstFailure == nil { firstFailure = message }
         accepting = false
         state.unlock()
         DispatchQueue.main.async { self.stop() }
+    }
+
+    func publish(_ value: [String: Any]) {
+        do { try emit(value) }
+        catch { fail("capture event output failed: \(error)") }
+    }
+
+    func interrupted(_ message: String) {
+        state.lock()
+        // Notifications already queued when observers are removed must not
+        // turn an operator's ordinary stop into a hardware failure.
+        guard !stopping && !finished else { state.unlock(); return }
+        if firstFailure == nil { firstFailure = message }
+        accepting = false
+        state.unlock()
+        DispatchQueue.main.async { self.stop() }
+    }
+
+    func checkInputAlive() throws {
+        var key = address(kAudioDevicePropertyDeviceIsAlive)
+        var alive: UInt32 = 0
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        try checked(AudioObjectGetPropertyData(input.object, &key, 0, nil, &size, &alive),
+                    "read selected input device state")
+        guard alive != 0 else { throw SessionFailure("selected input device is no longer alive") }
+    }
+
+    func checkInputConfiguration() throws {
+        try checkInputAlive()
+        guard engine.isRunning else { throw SessionFailure("audio engine stopped during recording") }
+        let node = engine.inputNode
+        guard node.audioUnit != nil, node.auAudioUnit.deviceID == input.object else {
+            throw SessionFailure("audio engine changed the selected input device")
+        }
+        let hardware = node.inputFormat(forBus: 0)
+        guard let format, hardware.sampleRate == format.sampleRate,
+              hardware.channelCount == format.channelCount else {
+            throw SessionFailure("selected audio input sample rate or channel count changed")
+        }
+    }
+
+    func validateConfigurationChange() {
+        // Graph setup can notify synchronously from engine.start(). Validate
+        // its resulting state on the lifecycle queue after start returns;
+        // a notification alone does not establish that capture was interrupted.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.state.lock()
+            let active = !self.stopping && !self.finished
+            self.state.unlock()
+            guard active else { return }
+            do { try self.checkInputConfiguration() }
+            catch { self.interrupted("audio engine configuration interrupted recording: \(error)") }
+        }
+    }
+
+    func monitorInput() throws {
+        configurationObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil) { [weak self] _ in
+                self?.validateConfigurationChange()
+            }
+        let listener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+            guard let self else { return }
+            do { try self.checkInputAlive() }
+            catch { self.interrupted("selected audio input became unavailable: \(error)") }
+        }
+        var key = address(kAudioDevicePropertyDeviceIsAlive)
+        try checked(AudioObjectAddPropertyListenerBlock(input.object, &key, .main, listener),
+                    "observe selected audio input state")
+        deviceAliveListener = listener
+        try checkInputAlive()
+    }
+
+    func checkMidiSourcesOnline() throws {
+        for source in sources {
+            var offline: Int32 = 0
+            let status = MIDIObjectGetIntegerProperty(source.endpoint, kMIDIPropertyOffline, &offline)
+            // Virtual endpoints need not publish the physical-device property.
+            if status == kMIDIUnknownProperty { continue }
+            try checked(status, "read selected MIDI source state")
+            guard offline == 0 else { throw SessionFailure("selected MIDI source is offline: \(source.name)") }
+        }
     }
 
     func handle(_ name: String) throws -> FileHandle {
@@ -149,11 +253,26 @@ final class Capture {
     }
 
     func start() throws {
+        guard Thread.isMainThread else { throw SessionFailure("recording lifecycle must start on the main thread") }
+        do { try startResources() }
+        catch {
+            state.lock()
+            if firstFailure == nil { firstFailure = "cannot start recording: \(error)" }
+            state.unlock()
+            // The caller reports the start error. Finalize only resources we
+            // own, including a failed manifest for a directory we created.
+            stop(exitProcess: false)
+            throw error
+        }
+    }
+
+    private func startResources() throws {
         guard !FileManager.default.fileExists(atPath: directory.path) else {
             throw SessionFailure("session directory already exists; recordings are never overwritten")
         }
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false,
                                                attributes: [.posixPermissions: 0o700])
+        createdDirectory = true
         midi = try handle("midi.ump.jsonl")
         blocks = try handle("audio-blocks.jsonl")
         let node = engine.inputNode
@@ -193,10 +312,29 @@ final class Capture {
         node.installTap(onBus: 0, bufferSize: requestedFrames, format: captureFormat) { [weak self] buffer, time in
             self?.acceptAudio(buffer, time)
         }
+        tapInstalled = true
+        try monitorInput()
         requestedHost = mach_absolute_time()
-        state.lock(); accepting = true; state.unlock()
         if !sources.isEmpty {
-            try checked(MIDIClientCreateWithBlock("MASC music recording" as CFString, &client, nil), "create MIDI client")
+            try checked(MIDIClientCreateWithBlock("MASC music recording" as CFString, &client, { [weak self] notification in
+                guard let self else { return }
+                switch notification.pointee.messageID {
+                case .msgObjectRemoved:
+                    let removed = UnsafeRawPointer(notification).assumingMemoryBound(to: MIDIObjectAddRemoveNotification.self)
+                        .pointee.child
+                    if self.sources.contains(where: { $0.endpoint == removed }) {
+                        self.interrupted("selected MIDI source was removed; recording interrupted")
+                    }
+                case .msgPropertyChanged:
+                    let change = UnsafeRawPointer(notification).assumingMemoryBound(to: MIDIObjectPropertyChangeNotification.self)
+                        .pointee
+                    if change.propertyName.takeUnretainedValue() == kMIDIPropertyOffline {
+                        do { try self.checkMidiSourcesOnline() }
+                        catch { self.interrupted("selected MIDI input became unavailable: \(error)") }
+                    }
+                default: break
+                }
+            }), "create MIDI client")
             try checked(MIDIInputPortCreateWithProtocol(client, "MASC recording input" as CFString,
                 MIDIProtocolID._2_0, &port, { [weak self] list, connection in
                     self?.acceptMidi(list, connection)
@@ -205,21 +343,49 @@ final class Capture {
                 try checked(MIDIPortConnectSource(port, source.endpoint,
                     UnsafeMutableRawPointer(bitPattern: UInt(source.endpoint))), "connect MIDI input")
             }
+            try checkMidiSourcesOnline()
         }
+        // Publish the common clock before admission opens. Callbacks can run
+        // inside engine.start(), and must never overtake this session header.
+        writer.sync {
+            publish(["kind": "recording", "directory": directory.path, "sampleRate": captureFormat.sampleRate,
+                  "channels": captureFormat.channelCount, "input": input.json, "midiSources": sources.map(\.json),
+                  "clock": ["kind": "mach-host-time", "numer": hostClock.numer, "denom": hostClock.denom,
+                            "requestedStart": String(requestedHost)]])
+        }
+        state.lock()
+        let failure = firstFailure
+        if failure == nil { accepting = true }
+        state.unlock()
+        if let failure { throw SessionFailure(failure) }
         try engine.start()
-        emit(["kind": "recording", "directory": directory.path, "sampleRate": captureFormat.sampleRate,
-              "channels": captureFormat.channelCount, "input": input.json, "midiSources": sources.map(\.json)])
+        try checkInputConfiguration()
+        state.lock(); let startFailure = firstFailure; state.unlock()
+        if let startFailure { throw SessionFailure(startFailure) }
     }
 
     func acceptAudio(_ incoming: AVAudioPCMBuffer, _ time: AVAudioTime) {
-        guard armed(), let slots else { return }
+        guard beginCallback() else { return }
+        defer { callbacks.leave() }
+        guard let slots else { fail("audio capture buffers are unavailable"); return }
         guard time.isHostTimeValid, time.isSampleTimeValid else { fail("audio block has no hardware clock timestamp"); return }
+        if let expected = nextAudioSample, expected != time.sampleTime {
+            fail("audio device sample timeline is discontinuous: expected \(expected), received \(time.sampleTime)")
+            return
+        }
+        let (nextSample, overflow) = time.sampleTime.addingReportingOverflow(AVAudioFramePosition(incoming.frameLength))
+        guard !overflow else { fail("audio device sample timeline overflowed"); return }
         guard slots.wait(timeout: .now()) == .success else { fail("audio writer overrun; recording stopped without hiding lost input"); return }
         let buffer = pool[poolIndex]; poolIndex = (poolIndex + 1) % pool.count
-        guard incoming.frameLength <= buffer.frameCapacity,
+        guard incoming.format.sampleRate == buffer.format.sampleRate,
+              incoming.format.channelCount == buffer.format.channelCount,
+              incoming.format.commonFormat == .pcmFormatFloat32,
+              !incoming.format.isInterleaved,
+              incoming.frameLength <= buffer.frameCapacity,
               let from = incoming.floatChannelData, let to = buffer.floatChannelData else {
-            slots.signal(); fail("audio unit exceeded its advertised float-buffer capacity"); return
+            slots.signal(); fail("audio input format changed or exceeded its capture-buffer capacity"); return
         }
+        nextAudioSample = nextSample
         buffer.frameLength = incoming.frameLength
         for channel in 0..<Int(incoming.format.channelCount) {
             memcpy(to[channel], from[channel], Int(incoming.frameLength) * MemoryLayout<Float>.size)
@@ -244,68 +410,120 @@ final class Capture {
                 try self.blocks?.write(contentsOf: encoded(row))
                 self.firstAudioHost = self.firstAudioHost ?? host
                 self.frames += UInt64(count)
-                emit(row)
+                self.publish(row)
             } catch { self.fail("audio write failed: \(error)") }
         }
     }
 
     func acceptMidi(_ list: UnsafePointer<MIDIEventList>, _ connection: UnsafeMutableRawPointer?) {
-        guard armed(), let connection else { return }
+        guard beginCallback() else { return }
+        defer { callbacks.leave() }
+        guard let connection else { fail("MIDI callback has no selected source identity"); return }
         let endpoint = MIDIEndpointRef(UInt(bitPattern: connection))
         guard let source = sources.first(where: { $0.endpoint == endpoint }) else { return }
-        var packet = UnsafeRawPointer(list).advanced(by: MemoryLayout<MIDIEventList>.offset(of: \.packet)!)
-            .assumingMemoryBound(to: MIDIEventPacket.self)
-        for _ in 0..<list.pointee.numPackets {
+        let rawList = UnsafeRawPointer(list)
+        let packetCount = rawList.loadUnaligned(fromByteOffset: MemoryLayout<MIDIEventList>.offset(of: \.numPackets)!, as: UInt32.self)
+        let midiProtocol = rawList.loadUnaligned(fromByteOffset: MemoryLayout<MIDIEventList>.offset(of: \.protocol)!, as: UInt32.self)
+        var packet = rawList.advanced(by: MemoryLayout<MIDIEventList>.offset(of: \.packet)!)
+        for _ in 0..<packetCount {
             guard midiSlots.wait(timeout: .now()) == .success else { fail("MIDI writer overrun; recording stopped without hiding lost input"); return }
-            let value = packet.pointee
-            let words = UnsafeRawPointer(packet).advanced(by: MemoryLayout<MIDIEventPacket>.offset(of: \.words)!)
+            // CoreMIDI packets are variable-length despite the C declaration's
+            // words[64]. Copying packet.pointee reads past short allocations.
+            let timestamp = packet.loadUnaligned(fromByteOffset: MemoryLayout<MIDIEventPacket>.offset(of: \.timeStamp)!, as: MIDITimeStamp.self)
+            let wordCount = packet.loadUnaligned(fromByteOffset: MemoryLayout<MIDIEventPacket>.offset(of: \.wordCount)!, as: UInt32.self)
+            let words = packet.advanced(by: MemoryLayout<MIDIEventPacket>.offset(of: \.words)!)
                 .assumingMemoryBound(to: UInt32.self)
-            let copied = Array(UnsafeBufferPointer(start: words, count: Int(value.wordCount)))
+            let copied = Array(UnsafeBufferPointer(start: words, count: Int(wordCount)))
             let receivedHost = mach_absolute_time()
-            let timestamp = value.timeStamp
             let row: [String: Any] = ["kind": "midi", "source": String(source.uid),
-                "protocol": list.pointee.protocol.rawValue, "hostTime": String(timestamp == 0 ? receivedHost : timestamp),
+                "protocol": midiProtocol, "hostTime": String(timestamp == 0 ? receivedHost : timestamp),
                 "timestampOrigin": timestamp == 0 ? "received" : "packet", "words": copied]
             writer.async {
                 defer { self.midiSlots.signal() }
                 do {
                     try self.midi?.write(contentsOf: encoded(row))
                     self.midiPackets += 1
-                    emit(row)
+                    self.publish(row)
                 } catch { self.fail("MIDI write failed: \(error)") }
             }
-            packet = UnsafePointer(MIDIEventPacketNext(packet))
+            packet = UnsafeRawPointer(words.advanced(by: Int(wordCount)))
         }
     }
 
-    func stop() {
+    func stop(exitProcess: Bool = true) {
+        // Audio/MIDI callbacks and writer failures only schedule this method.
+        // Never drain a queue from itself or exit from inside a writer block.
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { self.stop(exitProcess: exitProcess) }
+            return
+        }
         state.lock()
-        if finished { state.unlock(); return }
-        finished = true; accepting = false
+        if stopping || finished { state.unlock(); return }
+        let wasAccepting = accepting
+        stopping = true; accepting = false
         state.unlock()
-        engine.inputNode.removeTap(onBus: 0)
+        if wasAccepting {
+            // A pending main-queue device notification must not let an
+            // operator stop publish an already interrupted capture as success.
+            do { try checkInputConfiguration(); try checkMidiSourcesOnline() }
+            catch { fail("capture device became unavailable: \(error)") }
+        }
+        if let observer = configurationObserver {
+            NotificationCenter.default.removeObserver(observer)
+            configurationObserver = nil
+        }
+        if let listener = deviceAliveListener {
+            var key = address(kAudioDevicePropertyDeviceIsAlive)
+            AudioObjectRemovePropertyListenerBlock(input.object, &key, .main, listener)
+            deviceAliveListener = nil
+        }
         engine.stop()
+        if tapInstalled {
+            engine.inputNode.removeTap(onBus: 0)
+            tapInstalled = false
+        }
         if port != 0 { MIDIPortDispose(port); port = 0 }
         if client != 0 { MIDIClientDispose(client); client = 0 }
+        callbacks.wait()
         writer.sync {
             audio = nil // finalize the WAVE container before publishing its manifest
+            for handle in [midi, blocks] {
+                do { try handle?.synchronize() }
+                catch { self.fail("cannot synchronize recording data: \(error)") }
+                do { try handle?.close() }
+                catch { self.fail("cannot close recording data: \(error)") }
+            }
+            midi = nil; blocks = nil
+            guard createdDirectory else { return }
             do {
-                try midi?.close(); try blocks?.close()
-                var clock = mach_timebase_info_data_t()
-                mach_timebase_info(&clock)
-                let manifest: [String: Any] = ["schemaVersion": 1, "state": firstFailure == nil ? "recorded" : "failed",
-                    "failure": firstFailure as Any? ?? NSNull(), "clock": ["kind": "mach-host-time",
-                        "numer": clock.numer, "denom": clock.denom, "requestedStart": String(requestedHost),
+                state.lock(); let failure = firstFailure; state.unlock()
+                var manifest: [String: Any] = ["schemaVersion": 1, "state": failure == nil ? "recorded" : "failed",
+                    "failure": failure as Any? ?? NSNull(), "clock": ["kind": "mach-host-time",
+                        "numer": hostClock.numer, "denom": hostClock.denom, "requestedStart": String(requestedHost),
                         "firstAudioHostTime": firstAudioHost.map(String.init) as Any? ?? NSNull()],
                     "sampleRate": format?.sampleRate ?? 0, "channels": format?.channelCount ?? 0,
                     "audioFrames": String(frames), "midiPacketCount": String(midiPackets),
                     "audio": "audio.wav", "audioBlocks": "audio-blocks.jsonl", "midi": "midi.ump.jsonl",
                     "input": input.json, "midiSources": sources.map(\.json)]
                 try encoded(manifest).write(to: directory.appendingPathComponent("session.json"), options: [.atomic])
-                emit(["kind": "stopped", "directory": directory.path, "session": manifest])
-            } catch { emit(["kind": "error", "message": "cannot finalize recording: \(error)"]) }
+                do { try emit(["kind": "stopped", "directory": directory.path, "session": manifest]) }
+                catch {
+                    self.fail("capture event output failed: \(error)")
+                    state.lock(); let failure = firstFailure; state.unlock()
+                    manifest["state"] = "failed"
+                    manifest["failure"] = failure as Any? ?? NSNull()
+                    // Do not recursively publish another event to the same
+                    // broken pipe. Preserve failure even if this was the first
+                    // output error, during the final acknowledgement itself.
+                    try encoded(manifest).write(to: directory.appendingPathComponent("session.json"), options: [.atomic])
+                }
+            } catch {
+                self.fail("cannot finalize recording manifest: \(error)")
+                try? emit(["kind": "error", "message": "cannot finalize recording: \(error)"])
+            }
         }
-        exit(firstFailure == nil ? 0 : 1)
+        state.lock(); finished = true; let failed = firstFailure != nil; state.unlock()
+        if exitProcess { exit(failed ? 1 : 0) }
     }
 }
 
@@ -317,7 +535,7 @@ func option(_ name: String) -> String? {
 do {
     switch CommandLine.arguments.dropFirst().first {
     case "devices":
-        emit(["kind": "devices", "audio": try audioDevices().map(\.json), "midi": try midiSources().map(\.json)])
+        try emit(["kind": "devices", "audio": try audioDevices().map(\.json), "midi": try midiSources().map(\.json)])
     case "record":
         guard let uid = option("--input"), let path = option("--directory") else {
             throw SessionFailure("record requires --input DEVICE_UID and --directory NEW_SESSION_DIRECTORY")
@@ -327,16 +545,22 @@ do {
         }
         let midiSelection = option("--midi") ?? "all"
         let available = try midiSources()
-        let selected = midiSelection == "all" ? available : available.filter { String($0.uid) == midiSelection }
-        if midiSelection != "all" && selected.isEmpty { throw SessionFailure("selected MIDI input is unavailable") }
+        let selected: [MidiSource]
+        switch midiSelection {
+        case "none": selected = []
+        case "all": selected = available
+        default:
+            selected = available.filter { String($0.uid) == midiSelection }
+            if selected.isEmpty { throw SessionFailure("selected MIDI input is unavailable") }
+        }
         let capture = Capture(directory: URL(fileURLWithPath: path), input: input, sources: selected)
-        try capture.start()
         for sig in [SIGINT, SIGTERM, SIGHUP] {
             signal(sig, SIG_IGN)
             let source = DispatchSource.makeSignalSource(signal: sig, queue: .main)
             source.setEventHandler { capture.stop() }
             source.resume(); capture.signalSources.append(source)
         }
+        try capture.start()
         DispatchQueue.global().async {
             while let line = readLine() {
                 if line == "stop" { DispatchQueue.main.async { capture.stop() }; return }
@@ -345,9 +569,9 @@ do {
         }
         RunLoop.main.run()
     default:
-        throw SessionFailure("usage: masc-music-native devices | record --input UID --directory NEW_PATH [--midi all|UID]")
+        throw SessionFailure("usage: masc-music-native devices | record --input UID --directory NEW_PATH [--midi all|none|UID]")
     }
 } catch {
-    emit(["kind": "error", "message": String(describing: error)])
+    try? emit(["kind": "error", "message": String(describing: error)])
     exit(1)
 }

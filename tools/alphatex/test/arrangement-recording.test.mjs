@@ -50,3 +50,40 @@ test('no floating or mismatched clock can admit arrangement recording', () => {
     { kind: 'playing', loop: true, ...epoch(origin) }, { kind: 'playing', ...epoch(origin), clock: { ...epoch(origin).clock, denom: 0 } }]) assert.throws(() => recordingEpoch(event))
   assert.throws(() => recordedRegion(newArrangement(), source(), { ...epoch(origin), clock: { ...epoch(origin).clock, numer: 1 } }), /timebases/)
 })
+
+import { EventEmitter } from 'node:events'
+import { PassThrough } from 'node:stream'
+import { openPlayback } from '../playback.mjs'
+const flush = () => new Promise(resolve => setImmediate(resolve))
+function playback() {
+ const child=Object.assign(new EventEmitter(),{stdin:new PassThrough(),stdout:new PassThrough(),stderr:new PassThrough(),kill(){}})
+ const commands=[];child.stdin.on('data',bytes=>commands.push(...bytes.toString().trim().split('\n').map(JSON.parse)))
+ const handle=openPlayback({path:'/plan.json',output:'output',format:'wave-arrangement',spawnProcess:()=>child})
+ const event=(extra={})=>child.stdout.write(JSON.stringify({kind:'playing',currentTime:0,duration:20,loop:false,device:{id:'output',name:'Output',outputs:2},...epoch(origin),...extra})+'\n')
+ const close=async()=>{event({kind:'stopped'});child.emit('close',0,null);await handle.completion}
+ event();return{handle,child,commands,event,close}
+}
+
+test('a fresh correlated recording epoch follows a seek; stale status and other request IDs cannot admit capture',async()=>{
+ const view=playback();let resolved=false
+ view.handle.seek(2)
+ const pending=view.handle.recordingEpoch().then(value=>{resolved=true;return value})
+ const request=view.commands.at(-1)
+ assert.equal(request.kind,'recordingEpoch');assert.equal(view.commands[0].kind,'seek')
+ view.event();view.event({recordingRequest:'other'});await flush();assert.equal(resolved,false)
+ view.event({recordingRequest:request.request,clock:{...epoch(origin+48000000n,2).clock}})
+ assert.equal((await pending).clock.anchor,String(origin+48000000n));await view.close()
+})
+test('recording epoch barriers reject pause, cancellation, native failure and child close',async()=>{
+ for(const outcome of ['pause','abort','error','close']){
+  const view=playback(),cancel=new AbortController(),pending=view.handle.recordingEpoch({signal:cancel.signal})
+  const rejected=assert.rejects(pending)
+  if(outcome==='pause')view.event({kind:'paused',recordingRequest:view.commands.at(-1).request})
+  if(outcome==='abort')cancel.abort()
+  if(outcome==='error')view.child.stdout.write(JSON.stringify({kind:'error',message:'Output lost'})+'\n')
+  if(outcome==='close')view.child.emit('close',1,null)
+  await rejected
+  if(outcome==='error'||outcome==='close'){view.child.emit('close',1,null);await assert.rejects(view.handle.completion)}
+  else await view.close()
+ }
+})

@@ -67,7 +67,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
   catch (error) { await rm(directory, { recursive: true, force: true }); throw error }
   const jobs = new Map(), players = new Map(), preparations = new Set(), wasRaw = process.stdin.isRaw
   let transport = { kind: 'stopped' }, generation = 0, preparing = null, route = arrangementRoute({ output, midiOutput })
-  let recording = null, input = null, midiInput = 'all', transportPending = false
+  let recording = null, input = null, midiInput = 'all', transportPending = false, inputDevices = null, discoveryTicket = 0
   const discovery = new AbortController()
   let complete
   const done = new Promise(resolve => { complete = resolve })
@@ -97,14 +97,19 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     if (recording) throw new Error('A recording is already opening or finalizing')
     if (!input) throw new Error('Select :input AUDIO_UID first; :inputs lists devices')
     if (transport.kind !== 'playing' || transportPending) throw new Error('Start arrangement playback before recording')
-    const epoch = recordingEpoch(transport.event), project = editor.project, projectPath = path, selectedInput = input, selectedMidi = midiInput
-    const owned = { controller: new AbortController(), phase: 'opening', directory: join(dirname(path), 'recordings', randomUUID()), handle: null, epoch, failure: null }
+    const project = editor.project, projectPath = path, selectedInput = input, selectedMidi = midiInput, backing = transport.handle
+    const owned = { controller: new AbortController(), phase: 'opening', directory: join(dirname(path), 'recordings', randomUUID()), handle: null, epoch: null, failure: null }
     recording = owned
     const expected = generation
     owned.completion = (async () => {
       try {
         await mkdir(dirname(owned.directory), { recursive: true, mode: 0o700 })
         if (owned.controller.signal.aborted || !accepting || generation !== expected) return
+        // This correlated barrier follows earlier native pause/seek commands.
+        // An old unsolicited status cannot supply the admission epoch.
+        const epoch = recordingEpoch(await backing.recordingEpoch({ signal: owned.controller.signal }))
+        if (owned.controller.signal.aborted || !accepting || generation !== expected || transport.handle !== backing || editor.project !== project || path !== projectPath) return
+        owned.epoch = epoch
         owned.handle = record({ input: selectedInput, midi: selectedMidi, directory: owned.directory, onEvent(event) {
           if (event.kind === 'recording') owned.phase = owned.controller.signal.aborted ? 'finalizing' : 'recording'
           if (event.kind === 'error') status = event.message
@@ -121,12 +126,17 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
         if (owned.failure) throw owned.failure
         if (editor.project !== project || path !== projectPath) throw new Error('Project changed during recording attachment')
         await writeFile(join(owned.directory, 'alignment.json'), JSON.stringify(result.alignment, null, 2), { flag: 'wx', mode: 0o600 })
+        if (owned.failure) throw owned.failure
+        if (recording !== owned || editor.project !== project || path !== projectPath) throw new Error('Recording attachment authority changed')
         recording = null
         editor = arrangementImported(editor, result)
         status = 'Recorded WAV and raw MIDI attached; original take retained'
       } catch (error) {
-        status = `${error.message}; take retained at ${owned.directory}`
-        process.stderr.write(`Recording recovery: ${owned.directory} (${error.message})\n`)
+        if (!owned.handle && owned.controller.signal.aborted && !owned.failure) status = 'Recording cancelled before opening inputs'
+        else {
+          status = `${error.message}; take retained at ${owned.directory}`
+          process.stderr.write(`Recording recovery: ${owned.directory} (${error.message})\n`)
+        }
       } finally { if (recording === owned) recording = null; draw() }
     })()
     draw()
@@ -195,7 +205,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
               recording?.controller.abort(); recording?.handle?.stop(); status = event.message; return
             }
             if (event.kind === 'stopped' && recording) {
-              recording.epoch.duration = Math.min(recording.epoch.duration, event.currentTime)
+              if (recording.epoch) recording.epoch.duration = Math.min(recording.epoch.duration, event.currentTime)
               recording.controller.abort(); recording.handle?.stop()
             }
             transportPending = false
@@ -276,9 +286,14 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
   async function effect(value) {
     switch (value.kind) {
       case 'inputs': {
+        const ticket = ++discoveryTicket
+        if (inputDevices !== null) { inputDevices = null; break }
+        inputDevices = []; status = 'Discovering input devices; :inputs returns to arrangement'
         const pending = devices({ signal: discovery.signal }).then(found => {
-          status = [...found.audio.filter(device => device.inputs > 0).map(device => `Audio ${device.id}: ${device.name}`),
-            ...found.midi.map(device => `MIDI ${device.id}: ${device.name}`)].join(' | ')
+          if (!accepting || discovery.signal.aborted || ticket !== discoveryTicket) return
+          inputDevices = [...found.audio.filter(device => device.inputs > 0).map(device => `Audio ${device.id}: ${device.name}`),
+            ...found.midi.map(device => `MIDI ${device.id}: ${device.name}`)]
+          status = 'Select :input AUDIO_UID and :midi-input all|none|MIDI_UID; :inputs returns'
           draw()
         }, error => { if (!discovery.signal.aborted) { status = error.message; draw() } })
         preparations.add(pending); pending.finally(() => preparations.delete(pending)); break
@@ -288,7 +303,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
       case 'record': startRecording(); break
       case 'record-stop': await settleRecording(); break
       case 'open-take': openTake(value.asset); break
-      case 'help': showHelp = !showHelp; break
+      case 'help': inputDevices = null; discoveryTicket++; showHelp = !showHelp; break
       case 'play': play(); break
       case 'play-audio':
         if (['playing', 'paused', 'preparing', 'starting'].includes(transport.kind)) throw new Error('Stop current playback before choosing audio-only audition')
@@ -387,7 +402,8 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
       `Cursor ${editor.tick / project.ppq} beats · grid ${editor.step / project.ppq} · ${status}`,
       `Playback ${transport.kind} · ${(transport.event?.currentTime ?? 0).toFixed(2)} s · ${transport.event?.device.name ?? route.output ?? route.midiOutput ?? 'default output'}`,
       `Recording ${recording?.phase ?? 'idle'} · input ${input ?? 'choose :input'} · MIDI ${midiInput}`]
-    if (showHelp) lines.push(...help)
+    if (inputDevices !== null) lines.push(...inputDevices)
+    else if (showHelp) lines.push(...help)
     else {
       const left = Math.floor(editor.tick / editor.step / width) * width * editor.step
       const selected = project.lanes.findIndex(lane => lane.id === editor.lane), capacity = Math.max(1, rows - 10)

@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
+import { randomUUID } from 'node:crypto'
 
 export const transportPath = fileURLToPath(new URL('./music-transport', import.meta.url))
 export const midiTransportPath = fileURLToPath(new URL('./music-midi', import.meta.url))
@@ -66,6 +67,8 @@ export function openPlayback({ path, output, midiOutput, midiBindings, loop = fa
   const child = spawnProcess(executable, args, { stdio: ['pipe', 'pipe', 'pipe'] })
   let failure = null, final = null, current = null, firstDevice = null, started = false, closed = false, stopping = false, detail = ''
   let resolveReady, rejectReady, resolveDone, rejectDone
+  const epochs = new Map()
+  function rejectEpochs(error) { for (const pending of epochs.values()) pending.reject(error); epochs.clear() }
   const ready = new Promise((resolve, reject) => { resolveReady = resolve; rejectReady = reject })
   const completion = new Promise((resolve, reject) => { resolveDone = resolve; rejectDone = reject })
   // Callers may await either phase; keep rejection observed until they attach.
@@ -73,6 +76,7 @@ export function openPlayback({ path, output, midiOutput, midiBindings, loop = fa
   function fail(error) {
     if (failure) return
     failure = error
+    rejectEpochs(error)
     rejectReady(error)
     if (!closed) child.kill('SIGTERM')
   }
@@ -110,6 +114,15 @@ export function openPlayback({ path, output, midiOutput, midiBindings, loop = fa
       if (!current && event.kind !== 'playing' && event.kind !== 'stopped') throw new Error('Playback did not begin with a playing acknowledgement')
       firstDevice ??= event.device.id
       current = event
+      if (event.recordingRequest !== undefined) {
+        const pending = epochs.get(event.recordingRequest)
+        if (pending) {
+          epochs.delete(event.recordingRequest)
+          if (event.kind === 'playing') pending.resolve(event)
+          else pending.reject(new Error('Arrangement is not playing at recording admission'))
+        }
+      }
+      if (event.kind === 'stopped') rejectEpochs(new Error('Playback stopped before recording admission'))
       if (event.kind === 'stopped') final = event
       else if (event.kind === 'playing') { started = true; resolveReady(event) }
       onEvent(event)
@@ -124,6 +137,7 @@ export function openPlayback({ path, output, midiOutput, midiBindings, loop = fa
   signal?.addEventListener('abort', abort, { once: true })
   child.once('close', (code, exitSignal) => {
     closed = true; signal?.removeEventListener('abort', abort); lines.close()
+    rejectEpochs(failure ?? new Error('Playback closed before recording admission'))
     if (failure || code !== 0 || !final) {
       const error = failure ?? new Error(detail.trim() || `Playback ended without finalization: ${code ?? exitSignal}`)
       rejectReady(error); rejectDone(error)
@@ -146,6 +160,19 @@ export function openPlayback({ path, output, midiOutput, midiBindings, loop = fa
   }
   if (signal?.aborted) abort()
   return { ready, completion, stop,
+    recordingEpoch({ signal } = {}) {
+      if (format === 'wave') return Promise.reject(new Error('Recording epochs require an arrangement'))
+      if (signal?.aborted) return Promise.reject(signal.reason)
+      const request = randomUUID()
+      return new Promise((resolve, reject) => {
+        const clear = () => { epochs.delete(request); signal?.removeEventListener('abort', abort) }
+        const abort = () => { clear(); reject(signal.reason) }
+        epochs.set(request, { resolve: event => { clear(); resolve(event) }, reject: error => { clear(); reject(error) } })
+        signal?.addEventListener('abort', abort, { once: true })
+        try { command('recordingEpoch', { request }) }
+        catch (error) { clear(); reject(error) }
+      })
+    },
     pause: () => command('pause'), resume: () => command('resume'), status: () => command('status'),
     seek(seconds) {
       if (!Number.isFinite(seconds) || seconds < 0 || !current || seconds > current.duration) throw new Error('Seek must be between zero and the playback duration, inclusive')

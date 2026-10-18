@@ -720,3 +720,13 @@ test('calibration refuses active backing, drains a live owner and keeps the proj
  view.key('q');await flush();view.observed.live[1].finish({});await view.done
  assert.equal(view.observed.saved.at(-1).project.assets.length,1);assert.equal(view.observed.saved.at(-1).project.clips.length,1)
 })
+
+test('worker failure aborts the parent-owned calibration before any monitoring successor can open',async()=>{
+ const view=await controller();view.command('input interface');view.command('monitor headphones');await flush()
+ const first=view.observed.monitors[0];view.command('calibrate output 1 1 50');await flush();assert.ok(first.stops>0)
+ first.finish({});await flush();const pending=view.observed.calibrations[0];assert.ok(pending)
+ view.worker.emit('error',new Error('Analysis worker failed'));await flush()
+ assert.equal(pending.options.signal.aborted,true);assert.equal(view.observed.monitors.length,1)
+ pending.reject(new Error('Native children drained'));await flush();assert.equal(view.observed.monitors.length,2)
+ view.key('q');await flush();view.observed.monitors[1].finish({});await view.done
+})

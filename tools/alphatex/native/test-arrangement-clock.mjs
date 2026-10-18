@@ -5,17 +5,26 @@ import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 const source=await readFile(new URL('./WaveArrangement.swift',import.meta.url),'utf8')
 const part=(first,last)=>{const a=source.indexOf(first),b=source.indexOf(last,a);assert.ok(a>=0&&b>a);return source.slice(a,b)}
-const methods=[part('    func midiReachedEnd()', '    func checkOutput()'),part('    func currentTime()', '    func snapshot('),part('    func stopVoices()', '    func monitor('),part('    func receive(', '    func finish(')].join('\n').replaceAll('mach_absolute_time()', 'reviewHost')
+const methods=[part('    var completed: Bool', '    func checkOutput()'),part('    func currentTime()', '    func snapshot('),part('    func stopVoices()', '    func monitor('),part('    func receive(', '    func finish(')].join('\n').replaceAll('mach_absolute_time()', 'reviewHost').replaceAll('DispatchSource.makeTimerSource(queue: .main)', 'reviewTimer()')
 const command=part('enum AudioCommand: Decodable', 'final class ArrangementTransport')
 const future=part('func futureHost(', 'struct Asset:')
 const swift=`import Foundation
 import AVFoundation
 import CoreAudio
 var reviewHost: UInt64 = 1_000_000_000
+final class FakeTimer {
+ var handler:(()->Void)?,cancelled=false
+ func schedule(deadline:DispatchTime,leeway:DispatchTimeInterval){}
+ func setEventHandler(handler:@escaping()->Void){self.handler=handler}
+ func resume(){}
+ func cancel(){cancelled=true}
+ func fire(){handler?()}
+}
+func reviewTimer()->FakeTimer{FakeTimer()}
 struct AudioFailure: Error { let description: String; init(_ value:String){description=value} }
 ${future}
 ${command}
-struct FakePlan { let duration=1.0;let captured=false;var capturedAudio=false }
+struct FakePlan { let duration=1.0;let captured=false;var clocked=false }
 struct FakeRegion { let id="region-1", startSeconds=0.0 }
 final class FakePlayer { var plays=0;func play(at:AVAudioTime){plays+=1} }
 final class FakeVoice {
@@ -29,7 +38,7 @@ final class FakeEngine {let outputNode=FakeOutput();var starts=0,stops=0,pauses=
 final class FakeMidi { var stages:[Double]=[], runs:[UInt64]=[];func stageCoordinated(at seconds:Double)throws{stages.append(seconds)};func runCoordinated(anchorNanoseconds:UInt64)throws{runs.append(anchorNanoseconds)} }\nfinal class Probe {
  enum State {case prepared,playing,paused,stopped}
  var plan=FakePlan();let engine=FakeEngine(),renderQuantum=1024
- var horizon:DispatchSourceTimer?;var horizonEnded=false
+ var horizon:FakeTimer?;var horizonEnded=false
  var midi:FakeMidi?;var midiEnded=false\n var state=State.prepared,voices=[FakeVoice()],active=Set<String>(),position=0.0,anchor:UInt64=0,generation:UInt64=0,finished=0,published=0
  func checkOutput()throws{}
  func publish(){published+=1}
@@ -61,7 +70,22 @@ stale();precondition(paired.finished==0 && paired.active==["region-1"])
 let waiting=Probe();waiting.midi=FakeMidi();waiting.voices[0].end=0.2;try waiting.schedule(from:0.8,playing:true)
 precondition(waiting.state == .playing && waiting.active.isEmpty && waiting.finished==0 && waiting.midi!.stages==[0.8])
 waiting.midiReachedEnd();precondition(waiting.finished==1)
-print("ARRANGEMENT_CLOCK_DECISIONS_PASS: either-part-first completion, WAV-only continuity, one stop, common anchor conversion, paired pause/seek/resume, stale callback isolation, MIDI tail without audio voices")
+let silent=Probe();silent.plan.clocked=true;silent.voices[0].end=0
+try silent.schedule(from:0,playing:true);precondition(silent.state == .playing && silent.active.isEmpty && silent.finished==0)
+silent.horizon!.fire();precondition(silent.finished==1)
+let every=Probe();every.plan.clocked=true;every.midi=FakeMidi();try every.schedule(from:0,playing:true)
+every.midiReachedEnd();every.voices[0].completion!();precondition(every.finished==0)
+every.horizon!.fire();precondition(every.finished==1)
+let horizonFirst=Probe();horizonFirst.plan.clocked=true;horizonFirst.midi=FakeMidi();try horizonFirst.schedule(from:0,playing:true)
+horizonFirst.horizon!.fire();horizonFirst.voices[0].completion!();precondition(horizonFirst.finished==0)
+horizonFirst.midiReachedEnd();precondition(horizonFirst.finished==1)
+let staleTimer=Probe();staleTimer.plan.clocked=true;try staleTimer.schedule(from:0,playing:true)
+let cancelled=staleTimer.horizon!;staleTimer.receive(#"{"kind":"pause"}"#);precondition(cancelled.cancelled)
+cancelled.fire();precondition(staleTimer.finished==0 && !staleTimer.horizonEnded)
+staleTimer.receive(#"{"kind":"seek","seconds":0.25}"#);staleTimer.receive(#"{"kind":"resume"}"#)
+cancelled.fire();precondition(staleTimer.finished==0 && !staleTimer.horizonEnded)
+let stoppedTimer=staleTimer.horizon!;staleTimer.receive(#"{"kind":"stop"}"#);stoppedTimer.fire();precondition(staleTimer.finished==1)
+print("ARRANGEMENT_CLOCK_DECISIONS_PASS: clocked silent horizon, either-order audio/MIDI/horizon completion, cancelled timer isolation across pause/seek/resume/stop; either-part-first completion, WAV-only continuity, one stop, common anchor conversion, paired pause/seek/resume, stale callback isolation, MIDI tail without audio voices")
 `
 const dir=await mkdtemp(join(process.env.TMPDIR ?? '/tmp','masc-arrangement-clock-'))
 try {

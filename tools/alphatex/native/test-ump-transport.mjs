@@ -6,7 +6,8 @@ import {join} from 'node:path'
 import {spawnSync} from 'node:child_process'
 const directory=await mkdtemp('/private/tmp/masc-ump-decisions-')
 try {
-  let source=await readFile(new URL('./UmpTransport.swift',import.meta.url),'utf8')
+  let transportSource=await readFile(new URL('./UmpTransport.swift',import.meta.url),'utf8')
+  let source=await readFile(new URL('./UmpOutput.swift',import.meta.url),'utf8')
   const replaceMethod=(first,last,replacement)=>{const a=source.indexOf(first),b=source.indexOf(last,a);assert.ok(a>=0&&b>a);source=source.slice(0,a)+replacement+'\n'+source.slice(b)}
   source=source.replaceAll('DispatchTime.now().uptimeNanoseconds','reviewClock')
   replaceMethod('    func checkDestinations()', '    func send(', '    func checkDestinations() throws {if reviewUnavailable {throw MidiFailure("removed endpoint")}}')
@@ -15,7 +16,7 @@ try {
       reviewSent.append((source,words))
     }`)
   const globals='var reviewClock:UInt64=0;var reviewSent:[(String,[UInt32])]=[];var reviewFail=false;var reviewUnavailable=false\n'
-  await writeFile(join(directory,'Ump.swift'),source+'\n'+globals)
+  await writeFile(join(directory,'Ump.swift'),source+'\n'+transportSource.replaceAll('DispatchTime.now().uptimeNanoseconds','reviewClock')+'\n'+globals)
   const main=`import Foundation
 func requireFailure(_ action:()throws->Void){do{try action();preconditionFailure("admitted invalid source")}catch{}}
 let clock=UmpClock(origin:"9007199254740993123",numer:125,denom:3)
@@ -27,20 +28,20 @@ let a=try UmpTransport(timeline:timeline([packet(2400000,"A",on),packet(3600000,
 var ended=0;a.onCoordinatedEnd={ended+=1}
 try a.stageCoordinated(at:0);try a.runCoordinated(anchorNanoseconds:1_000_000_000)
 reviewClock=999_999_999;a.tick();precondition(reviewSent.isEmpty)
-reviewClock=1_250_000_000;a.tick();precondition(reviewSent.map{$0.1}==[on,bend,off]);precondition(a.held.isEmpty)
+reviewClock=1_250_000_000;a.tick();precondition(reviewSent.map{$0.1}==[on,bend,off]);precondition(a.output.held.isEmpty)
 reviewClock=2_000_000_000;a.tick();precondition(ended==1 && a.state == .ended)
 a.tick();precondition(ended==1)
 try a.stageCoordinated(at:0.5);precondition(a.state == .staged)
 let owned=try UmpTransport(timeline:timeline([packet(0,"A",zeroOn)]));reviewSent=[]
-try owned.apply(UmpEvent(seconds:0,source:"A",words:zeroOn));precondition(owned.held.values.reduce(0,+)==1)
-try owned.silence();precondition(owned.held.isEmpty && reviewSent.last!.1==[0x43853c00,0])
-try owned.apply(UmpEvent(seconds:0,source:"A",words:on));reviewFail=true
-requireFailure{try owned.apply(UmpEvent(seconds:0,source:"A",words:off))};precondition(!owned.held.isEmpty)
-try owned.silence();precondition(owned.held.isEmpty)
-let count=reviewSent.count;try owned.silence();precondition(reviewSent.count==count)
+try owned.output.apply(UmpEvent(seconds:0,source:"A",words:zeroOn));precondition(owned.output.held.values.reduce(0,+)==1)
+try owned.output.silence();precondition(owned.output.held.isEmpty && reviewSent.last!.1==[0x43853c00,0])
+try owned.output.apply(UmpEvent(seconds:0,source:"A",words:on));reviewFail=true
+requireFailure{try owned.output.apply(UmpEvent(seconds:0,source:"A",words:off))};precondition(!owned.output.held.isEmpty)
+try owned.output.silence();precondition(owned.output.held.isEmpty)
+let count=reviewSent.count;try owned.output.silence();precondition(reviewSent.count==count)
 let pedal:[UInt32]=[0x43b54000,0xffffffff]
-try owned.apply(UmpEvent(seconds:0,source:"A",words:pedal));try owned.silence();precondition(reviewSent.last!.1==[0x43b54000,0])
-let sx:[UInt32]=[0x33120102,0];try owned.apply(UmpEvent(seconds:0,source:"A",words:sx));try owned.silence()
+try owned.output.apply(UmpEvent(seconds:0,source:"A",words:pedal));try owned.output.silence();precondition(reviewSent.last!.1==[0x43b54000,0])
+let sx:[UInt32]=[0x33120102,0];try owned.output.apply(UmpEvent(seconds:0,source:"A",words:sx));try owned.output.silence()
 precondition(reviewSent.last!.1==[0x33300000,0])
 let bindings=[UmpBinding(source:"A",destination:"42"),UmpBinding(source:"B",destination:"42")]
 requireFailure{_ = try timeline([packet(0,"A",on),packet(1,"B",on)],bindings).events()}
@@ -98,12 +99,12 @@ try phase.runCoordinated(anchorNanoseconds:1_000_000_000)
 reviewClock=999_999_999;phase.tick();precondition(reviewSent.isEmpty)
 reviewClock=1_200_000_000;phase.tick();precondition(reviewSent.map{$0.1}==[bend],"late epoch must not retrigger expired source keys")
 reviewClock=1_500_000_000;phase.tick();precondition(reviewSent.map{$0.1}==[bend,zeroOn])
-try phase.stageCoordinated(at:0.7);precondition(phase.held.isEmpty && phase.state == .staged)
+try phase.stageCoordinated(at:0.7);precondition(phase.output.held.isEmpty && phase.state == .staged)
 let pausedCount=reviewSent.count;reviewClock=2_000_000_000;phase.tick();precondition(reviewSent.count==pausedCount && phase.position(at:reviewClock)==0.7)
 try phase.runCoordinated(anchorNanoseconds:3_000_000_000)
 reviewClock=2_999_999_999;phase.tick();precondition(reviewSent.count==pausedCount)
 reviewClock=3_000_000_000;phase.tick();precondition(Array(reviewSent.suffix(2)).map{$0.1}==[bend,zeroOn])
-phase.finish(reason:"test",error:nil,publish:false);precondition(phase.held.isEmpty)
+phase.finish(reason:"test",error:nil,publish:false);precondition(phase.output.held.isEmpty)
 let expired=try UmpTransport(timeline:timeline([packet(24000000,"A",on)]));reviewClock=0;reviewSent=[]
 try expired.stageCoordinated(at:0.5);try expired.runCoordinated(anchorNanoseconds:1_000_000_000)
 var expiredEnds=0;expired.onCoordinatedEnd={expiredEnds+=1}

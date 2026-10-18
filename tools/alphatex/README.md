@@ -274,4 +274,4 @@ Saved captures also have [paired original WAV/UMP playback](CAPTURE-PLAYBACK.md)
 Select MIDI and audio outputs in the take viewer; original MIDI 2.0 words and
 capture timing survive full-source audition. Native playback also pauses/resumes
 with `p` and seeks audio and supported UMP state together with `:seek SECONDS`.
-Captured-region placement and arrangement overdub remain subsequent work.
+Paired captured-region playback and arrangement overdub remain subsequent work.

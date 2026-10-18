@@ -165,7 +165,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
         controller = new AbortController(); takeAbort = controller; takeTask = preparation
         suspended = true; process.stdin.off('keypress', keypress)
         await viewSession({ directory: result.directory, root: join(sourceRoot, 'recordings'),
-          exportRoot: join(sourceRoot, 'exports'), embedded: true, signal: controller.signal })
+          exportRoot: join(sourceRoot, 'exports'), output: route.output, midiOutput: route.midiOutput, embedded: true, signal: controller.signal })
       } catch (error) {
         if (generation === expected) { preparing = null; transport = { kind: 'stopped' }; status = error.message }
       } finally {

@@ -15,7 +15,7 @@ var reviewHost: UInt64 = 1_000_000_000
 struct AudioFailure: Error { let description: String; init(_ value:String){description=value} }
 ${future}
 ${command}
-struct FakePlan { let duration=1.0 }
+struct FakePlan { let duration=1.0;let captured=false }
 struct FakeRegion { let id="region-1", startSeconds=0.0 }
 final class FakePlayer { var plays=0;func play(at:AVAudioTime){plays+=1} }
 final class FakeVoice {

@@ -131,6 +131,24 @@ type not_committed =
             2N-1 of them during a quota or an outage. *)
   }
 
+type working_state_inference =
+  | Inferred of { working_state : string; served_by : served_slot }
+  | Not_inferred of not_committed list
+
+val infer_working_state
+  :  ?cli_runner:Keeper_lane_cli_oneshot.runner
+  -> base_path:string
+  -> keepers_dir:string
+  -> keeper_id:string
+  -> previous_state:string option
+  -> Keeper_librarian.input
+  -> working_state_inference
+(** Infer a volatile continuation from exactly the supplied conversation.
+    Uses the normal exact-output lane and strict working-state answer, but
+    writes no Memory, continuity snapshot, queued context or read cursor.
+    [Not_inferred] preserves failure reports in callback order. Cancellation
+    propagates. The caller owns source selection and any later publication. *)
+
 val fit_continuity :
   capacity:Keeper_lane_cli_oneshot.input_capacity -> base_path:string -> keeper_id:string ->
   input_for:(Keeper_librarian_continuity.prepared -> (Keeper_librarian.input, string) result) ->

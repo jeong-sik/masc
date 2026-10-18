@@ -293,6 +293,7 @@ let memory_committed ~config ~keeper_name prepared =
            (R.cut_lines ~trace_id:prepared.trace_id ~lines:prepared.lines
               ~messages:prepared.messages prepared.range)
     | None, _ | Some _, None -> false)
+let previous_working_state prepared = prepared.previous_state
 let prompt_json prepared =
   `Assoc ["previous_working_state", (match prepared.previous_state with None -> `Null | Some text -> `String text)]
 let commit ~config ~keeper_name ~prepared ~working_state =

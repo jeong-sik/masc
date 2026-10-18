@@ -944,6 +944,73 @@ let tool_atoms =
         with tool_call_id = Some call_id } ])
     tool_atom_indices
 
+(* One assistant/tool atom cannot be cut at an atom boundary. Its Memory
+   receipt already exists, but no continuity frontier exists. A body refusal
+   must allow sequential inference without publishing either partial state. *)
+let test_volatile_message_floor ~failure () =
+  let requests = ref [] and before_answer = ref (fun () -> ()) in
+  let atoms = List.take 2 (List.drop 1 tool_atoms) in
+  let answer state = `OK, Exact_output_fixture.openai_response
+      (`Assoc ["working_state", `String state]) in
+  let refusal status = status,
+      {|{"error":{"type":"invalid_request_error","message":"fixture refusal"}}|} in
+  narrowing_fixture ~atoms ~slot_count:1
+    ~answer:(fun index body ->
+      (!before_answer) ();
+      requests := !requests @ [body];
+      match index, failure with
+      | 0, _ | 3, Some _ -> refusal `Request_entity_too_large
+      | 1, _ | 4, Some _ -> answer "remembered-call"
+      | 2, Some status -> refusal status
+      | 2, None | 5, Some _ -> answer "remembered-call-and-result"
+      | _ -> fail "unexpected volatile read request")
+  @@ fun ~bodies:_ ~pass ~coverage ~hide_source:_ ~restart:_ ~config ->
+  let module Current = Masc.Keeper_memory_os_current in
+  let module Progress = Masc.Keeper_librarian_progress in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path
+      ~base_path:config.Masc.Workspace.base_path in
+  record_memory config;
+  let memory_before = Current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name |> get in
+  let prepared = prepare config |> some in
+  let receipt_scope = (P.memory_range_id ~config ~keeper_name prepared |> get).receipt_scope in
+  let receipt () = Current.committed_durable_range ~keepers_dir ~keeper_id:keeper_name
+      ~receipt_scope |> get in
+  let receipt_before = receipt () in
+  let progress () = Progress.read ~keepers_dir:(Masc.Workspace.keepers_runtime_dir config)
+      ~keeper_id:keeper_name |> Result.map_error Progress.read_error_to_string |> get in
+  let progress_before = progress () in
+  before_answer := (fun () ->
+    check (option int) "no partial continuity frontier during inference" None (coverage ());
+    check bool "inference cannot change Memory" true
+      (Current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name |> get = memory_before);
+    check bool "inference cannot change the Memory receipt" true (receipt () = receipt_before);
+    check bool "inference cannot move the durable cursor" true (progress () = progress_before));
+  pass ();
+  (match failure with
+   | None -> ()
+   | Some _ ->
+     check (option int) "a later unread message discards partial state" None (coverage ());
+     check int "the failed wake stops at that message" 3 (List.length !requests);
+     pass ();
+     check string "a new wake retries the identical first message without partial state"
+       (List.nth !requests 1) (List.nth !requests 4));
+  let expected_calls = match failure with None -> 3 | Some _ -> 6 in
+  check int "one whole refusal and one request per message per wake"
+    expected_calls (List.length !requests);
+  let first = List.nth !requests 1 and second = List.nth !requests (expected_calls - 1) in
+  check bool "first inference carries only the call" true (contains ~sub:"[tool use omitted:" first);
+  check bool "first inference excludes the unread result" false (contains ~sub:"[tool result omitted:" first);
+  check bool "second inference carries the tool result" true (contains ~sub:"[tool result omitted:" second);
+  check bool "second inference carries previous volatile state" true (contains ~sub:"remembered-call" second);
+  check (option int) "only the complete atom is published" (Some 1) (coverage ());
+  let snapshot = P.read ~config ~keeper_name |> get |> some in
+  check string "the final state is published at the original atom boundary"
+    "remembered-call-and-result" snapshot.working_state;
+  check bool "successful continuity publication still leaves Memory unchanged" true
+    (Current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name |> get = memory_before);
+  check bool "successful continuity publication still leaves durable progress unchanged" true
+    (progress () = progress_before)
+
 let check_folded_tool_request body =
   check int "no tool call argument reaches the request" 0
     (occurrences ~sub:tool_argument_marker body);
@@ -1352,6 +1419,12 @@ let () = run "production continuity pair"
       test_a_turn_too_large_with_its_counterparts_is_left_to_the_durable_pass;
     test_case "a committed range asks for the working state alone" `Quick
       test_a_committed_range_asks_for_the_working_state_alone;
+    test_case "message floor publishes only after the complete atom" `Quick
+      (test_volatile_message_floor ~failure:None);
+    test_case "unknown message refusal discards partial state and retries source" `Quick
+      (test_volatile_message_floor ~failure:(Some `Bad_request));
+    test_case "typed message refusal cannot publish before unread records exist" `Quick
+      (test_volatile_message_floor ~failure:(Some `Request_entity_too_large));
     test_case "a continuity pass carries tool turns folded once" `Quick
       test_a_continuity_pass_carries_tool_turns_folded_once;
     test_case "an API commit releases the CLI limit" `Quick test_an_api_commit_releases_the_cli_limit;

@@ -14,7 +14,7 @@
     part. Track names and short names, [\artist], [\ks] and [\section] are
     checked presentation metadata; this fret-and-string projection does not
     draw them. Key signatures do not change explicit fret numbers. Track
-    properties support a guitar or bass MIDI [instrument] (programs 24--39,
+    properties and an initial standalone [\instrument] support a guitar or bass MIDI [instrument] (programs 24--39,
     or their standard names). Its playback timbre is not drawn, and an
     explicit [\tuning] before music is required rather than guessing the
     instrument's strings. Staff properties may select [tabs] or [score tabs];
@@ -57,6 +57,7 @@ type directive_argument =
   | Artist_text
   | Section_text
   | Key_signature_name
+  | Instrument_name
   | Tempo_number
   | Time_signature_numbers
   | Tuning_notes
@@ -79,6 +80,7 @@ type failure =
   | Unsupported_staff_properties of string
   | Unsupported_instrument of string
   | Instrument_without_tuning
+  | Instrument_after_music
   | Invalid_key_signature of string
   | Key_signature_after_note
   | Section_after_note

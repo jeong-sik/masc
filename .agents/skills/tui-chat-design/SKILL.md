@@ -1,6 +1,6 @@
 ---
 name: tui-chat-design
-description: "MASC TUI 채팅·입력·진행 정보, 원래 준비 이력, Keeper·Work·상세 로그의 비동기 조회, Keeper 생성 결과·선언문 보존, 질문 원본 턴·응답 읽기와 wake·Tool·Task 독립 관측, 요청 소유권·마지막 관측·실패 표시 규칙. 채팅 표시·입력 연속성·생성·로그·응답 해석을 바꾸기 전에 읽는다."
+description: "MASC TUI의 채팅·입력·로딩·진행 상태, Keeper·Work·로그·질문 원본의 비동기 조회, Runtime 폼·원문 저장과 설정 snapshot 해석을 바꿀 때 쓴다. 원본 입력·revision·요청 소유권, 마지막 관측과 부분 실패, CPU 작업·상태 반영·paint 증거를 구분하는 규칙이다."
 ---
 
 # 대화를 먼저 읽는 채팅
@@ -59,6 +59,21 @@ description: "MASC TUI 채팅·입력·진행 정보, 원래 준비 이력, Keep
 - 비교 자료를 해제해도 나중에 편집한 본문·owner를 바꾸지 않는다. 영수증·초안은 원래
   workspace에 속하고 read authority를 부여하지 않는다. 외부 편집기 사용 시간과 저장 대기,
   parser-only 확인과 실행·paint·속도 증거를 나눈다.
+
+## Runtime 설정 snapshot
+
+- Config 조회는 같은 immutable source/metadata/account groups로 전체 source 분류·terminal
+  정제·모델 표를 공유 CPU 경로에서 만든 뒤 UI에 전달한다. CPU 함수는 UI 상태·환경·파일·
+  palette·요청 소유권을 읽거나 바꾸지 않는다. worker 예외를 caller에서 재실행하지 않는다.
+- source/model 해석 실패와 account email 실패를 나눈다. 모델 표 실패를 정상 빈 catalogue로
+  바꾸거나 원문을 숨기지 않는다. 모델 선택과 저장 revision은 같은 reading에서 온다.
+- 원문 분류는 path/full text가 같은 불변 값만 재사용한다. 재조회는 기존 초안 분류와
+  snapshot의 current 분류를 공유하되 초안 owner·base 선택·read generation을 바꾸지 않는다.
+- 원래 workspace/read authority·요청 generation·후속 read 정책이 반영을 결정한다.
+  superseded 순수 작업이 끝나도 반영 권한은 없다. pool 부재/이미 worker의 inline 정책과
+  새 편집·비 snapshot 변경의 분류는 남는다. 이 변경을 모든 CPU 작업 제거로 부르지 않는다.
+- 시작·준비 결과·UI 반영 결정 시각은 같은 generation과 시작 시각으로 연결한다.
+  pool 대기/IO/해석을 포함한 구간을 순수 CPU 시간·paint·키 응답·실제 작업 진척으로 부르지 않는다.
 
 ## 보기 전환
 

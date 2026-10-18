@@ -626,9 +626,10 @@ type async_msg =
   | Machine_activity_read of Masc_tui_machine_activity.request * (Masc_tui_machine_activity.reading, string) result
   | Machine_activity_saved of Masc_tui_machine_activity.request * Masc_tui_machine_activity.write_result
   | Runtime_config_view_loaded of
-      int * string option
-      * (Masc_tui_runtime_config_view.reading, string) result
-      (* Read generation and captured model-settings entry request. *)
+      int * string option * int64 * int64
+      * (Masc_tui_runtime_config_snapshot.t, string) result
+      (* Original read generation/model entry intent, request start and
+         prepared-result clocks; neither clock proves UI paint. *)
   | Runtime_params_loaded of
       (Masc.Tui_decode.runtime_param_row list, string) result
   | Runtime_param_written of
@@ -1065,7 +1066,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Keeper_sandbox_logs_loaded (_, _, _) | Exact_activity_read (_, _)
     | Exact_activity_saved (_, _) | Browser_activity_read (_, _)
     | Browser_activity_saved (_, _) | Machine_activity_read (_, _)
-    | Machine_activity_saved (_, _) | Runtime_config_view_loaded (_, _, _)
+    | Machine_activity_saved (_, _) | Runtime_config_view_loaded (_, _, _, _, _)
     | Runtime_params_loaded _ | Runtime_param_written (_, _)
     | Prompts_loaded (_, _) | Keeper_board_quarantines_loaded (_, _)
     | Board_quarantine_requeued (_, _, _)
@@ -1199,7 +1200,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Keeper_sandbox_logs_loaded (_, _, _) | Exact_activity_read (_, _)
   | Exact_activity_saved (_, _) | Browser_activity_read (_, _)
   | Browser_activity_saved (_, _) | Machine_activity_read (_, _)
-  | Machine_activity_saved (_, _) | Runtime_config_view_loaded (_, _, _)
+  | Machine_activity_saved (_, _) | Runtime_config_view_loaded (_, _, _, _, _)
   | Runtime_params_loaded _ | Runtime_param_written (_, _)
   | Prompts_loaded (_, _) | Keeper_board_quarantines_loaded (_, _)
   | Board_quarantine_requeued (_, _, _)

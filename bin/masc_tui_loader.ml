@@ -1752,3 +1752,15 @@ let load_runtime_config_view ~(host : string) ~(port : int) :
       match Masc_tui_runtime_config_view.decode json with
       | Error detail -> Error ("decode: " ^ detail)
       | Ok reading -> Ok reading
+
+
+(* Only the Config observation needs these full source/model projections.
+   Specialized activity readers keep their existing document-only read. *)
+let load_runtime_config_snapshot ~(host : string) ~(port : int) :
+    (Masc_tui_runtime_config_snapshot.t, string) result =
+  match Masc_tui_http.fetch_runtime_config_raw ~host ~port with
+  | Error detail -> Error ("fetch: " ^ detail)
+  | Ok json -> Masc_tui_response_decode.run ~name:"runtime-config-snapshot" (fun () ->
+      Masc_tui_runtime_config_view.decode json
+      |> Result.map_error (fun detail -> "decode: " ^ detail)
+      |> Result.map Masc_tui_runtime_config_snapshot.of_reading)

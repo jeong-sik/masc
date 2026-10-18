@@ -600,9 +600,9 @@ type async_msg =
   | Keeper_calls_loaded of
       int * string * (Masc.Tui_decode.keeper_calls_snapshot, string) result
   | Goal_timeline_loaded of
-      string * (Masc.Tui_decode.goal_timeline, string) result
+      string Masc_tui_fetched.request * (Masc.Tui_decode.goal_timeline, string) result
   | Task_history_loaded of
-      string * (Masc.Tui_decode.task_history_event list, string) result
+      string Masc_tui_fetched.request * (Masc.Tui_decode.task_history_event list, string) result
   | Task_cancel_done of string * Masc.Tui_decode.server_identity * (string, string) result
   | Verification_evidence_loaded of
       string * (Masc_tui_evidence_picture.evidence,

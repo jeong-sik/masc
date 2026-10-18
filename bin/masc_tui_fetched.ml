@@ -76,28 +76,35 @@ let is_current ~equal state request =
   | Status_absent | Status_ready _ | Status_stale _ | Status_failed _ -> false
 ;;
 
-let start ~equal state ~key =
+let in_flight state = match state.status with
+  | Status_loading _ | Status_refreshing _ -> true
+  | Status_absent | Status_ready _ | Status_stale _ | Status_failed _ -> false
+
+type intent = Poll | Refresh
+
+let start_with intent ~equal state ~key =
   let fresh status =
     let generation = Int64.succ state.latest_generation in
     let request = { key; generation } in
     Started ({ latest_generation = generation; status = status request }, request)
   in
-  match state.status with
-  | Status_loading request when equal request.key key -> Already_loading
-  | Status_refreshing (request, _, _) when equal request.key key -> Already_loading
-  | Status_ready (current, value) when equal current.key key ->
+  match intent, state.status with
+  | Poll, Status_loading request when equal request.key key -> Already_loading
+  | Poll, Status_refreshing (request, _, _) when equal request.key key -> Already_loading
+  | Refresh, Status_refreshing (current, value, error) when equal current.key key ->
+    fresh (fun request -> Status_refreshing (request, value, error))
+  | _, Status_ready (current, value) when equal current.key key ->
     (* Revalidating what is already shown: keep the last good value on screen
        under a fresh generation. *)
     fresh (fun request -> Status_refreshing (request, value, None))
-  | Status_stale (current, value, error) when equal current.key key ->
+  | _, Status_stale (current, value, error) when equal current.key key ->
     fresh (fun request -> Status_refreshing (request, value, Some error))
-  | Status_absent
-  | Status_loading _
-  | Status_ready _
-  | Status_refreshing _
-  | Status_stale _
-  | Status_failed _ -> fresh (fun request -> Status_loading request)
+  | _, (Status_absent | Status_loading _ | Status_ready _ | Status_refreshing _
+       | Status_stale _ | Status_failed _) -> fresh (fun request -> Status_loading request)
 ;;
+
+let start ~equal state ~key = start_with Poll ~equal state ~key
+let refresh ~equal state ~key = start_with Refresh ~equal state ~key
 
 let clear state = { state with status = Status_absent }
 

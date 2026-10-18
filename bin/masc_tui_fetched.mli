@@ -41,6 +41,11 @@ val start : equal:('k -> 'k -> bool) -> ('k, 'a) t -> key:'k -> ('k, 'a) start_r
     request runs, rather than flashing back to {!Loading}. *)
 
 val clear : ('k, 'a) t -> ('k, 'a) t
+val refresh : equal:('k -> 'k -> bool) -> ('k, 'a) t -> key:'k -> ('k, 'a) start_result
+(** Explicitly supersede an outstanding request, including for the same key.
+    Retain that key's last good value and refresh failure while its replacement
+    runs. Only the returned request may settle the source; {!start} keeps its
+    existing same-key sharing behavior. This does not launch any work. *)
 val suspend : ('k, 'a) t -> ('k, 'a) t
 (** Retire a pending read while retaining its key and last completed value.
     Initial reads become [Failed]; previous values become explicitly [Stale]. *)
@@ -49,6 +54,9 @@ val request_id : 'k request -> int64
 (** Diagnostic generation within this fetched source; include its key/scope. *)
 val same_request : equal:('k -> 'k -> bool) -> 'k request -> 'k request -> bool
 val is_current : equal:('k -> 'k -> bool) -> ('k, 'a) t -> 'k request -> bool
+val in_flight : ('k, 'a) t -> bool
+(** A read is pending, including a refresh that still exposes a prior value.
+    This observes retrieval, not work execution or effect admission. *)
 
 val complete
   :  equal:('k -> 'k -> bool)

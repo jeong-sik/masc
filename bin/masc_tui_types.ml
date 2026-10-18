@@ -8083,13 +8083,10 @@ type state = {
   mutable runtime_catalog_order: Local_read_order.t;
   mutable runtime_catalog_resume: bool;
   mutable runtime_catalog_reading: runtime_catalog_reading;
-  (* Lazy loads for the two detail panes; the id names which row the answer
-     belongs to so a stale load is discarded, not drawn under another item.
-     [None] doubles as "in flight" right after entry resets it. *)
-  mutable goal_timeline:
-    (string * (Tui_decode.goal_timeline, string) result) option;
-  mutable task_history:
-    (string * (Tui_decode.task_history_event list, string) result) option;
+  (* Detail histories retain their exact request and last good value. A key
+     alone cannot reject an older response after refreshing the same item. *)
+  mutable goal_timeline: (string, Tui_decode.goal_timeline_event list) Masc_tui_fetched.t;
+  mutable task_history: (string, Tui_decode.task_history_event list) Masc_tui_fetched.t;
   mutable verification_evidence:
     (string * (Masc_tui_evidence_picture.evidence, Verification_evidence_read.failure) result) option;
   (* One cache is shared by the calls surface and chat full-detail mode. The
@@ -13408,6 +13405,30 @@ let close_key_modals (state : state) =
   if state.context_inspector_open then close_context_inspector state;
   if state.repository_changes_open then close_repository_changes state
 
+let begin_goal_timeline_read (state : state) ~goal_id =
+  match Masc_tui_fetched.refresh ~equal:String.equal state.goal_timeline ~key:goal_id with
+  | Masc_tui_fetched.Already_loading -> None
+  | Masc_tui_fetched.Started (reading, request) -> state.goal_timeline <- reading; Some request
+
+let complete_goal_timeline_read (state : state) request result =
+  let result = Result.bind result (function
+    | Tui_decode.Goal_timeline_ready events -> Ok events
+    | Tui_decode.Goal_timeline_unavailable failure ->
+      Error (Masc_tui_planning_detail.timeline_unavailability_detail failure)) in
+  state.goal_timeline <- Masc_tui_fetched.complete ~equal:String.equal state.goal_timeline request result
+
+let begin_task_history_read (state : state) ~task_id =
+  match Masc_tui_fetched.refresh ~equal:String.equal state.task_history ~key:task_id with
+  | Masc_tui_fetched.Already_loading -> None
+  | Masc_tui_fetched.Started (reading, request) -> state.task_history <- reading; Some request
+
+let complete_task_history_read (state : state) request result =
+  state.task_history <- Masc_tui_fetched.complete ~equal:String.equal state.task_history request result
+
+let withdraw_detail_histories (state : state) =
+  state.goal_timeline <- Masc_tui_fetched.clear state.goal_timeline;
+  state.task_history <- Masc_tui_fetched.clear state.task_history
+
 let create_state
     ?(reasoning_visibility = Reasoning_folded)
     ?(tool_visibility = Tools_compact)
@@ -13743,8 +13764,8 @@ let create_state
   runtime_catalog_order = Local_read_order.idle;
   runtime_catalog_resume = false;
   runtime_catalog_reading = Runtime_catalog_unread;
-  goal_timeline = None;
-  task_history = None;
+  goal_timeline = Masc_tui_fetched.initial;
+  task_history = Masc_tui_fetched.initial;
   verification_evidence = None;
   keeper_calls = None;
   keeper_calls_error = None;

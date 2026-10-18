@@ -1,5 +1,6 @@
 module Message_layout = Masc_tui_message_layout
 module Tui_decode = Masc.Tui_decode
+module Terminal_text = Masc_tui_ansi.Terminal_text
 
 (* The field is one wider than the longest label ("reviewed:") so every value
    keeps one gap after its colon. *)
@@ -231,18 +232,23 @@ let headline ~subject (event : Tui_decode.goal_timeline_event) =
 (* The goal's merged event timeline, appended after [body] so it rides the
    same scroll. Loaded lazily on detail entry; every non-ready state says
    what it is instead of rendering as an empty history. *)
+let timeline_unavailability_detail = function
+  | Tui_decode.Goal_source_failure (Goal_store_unavailable view) ->
+      "Cause: " ^ Tui_decode.goal_store_unavailable_view_to_string view
+  | Tui_decode.Goal_source_failure (Goal_task_links_unavailable detail) ->
+      "Linked tasks unavailable · Cause: " ^ detail
+  | Tui_decode.Approval_queue_failure detail ->
+      "Approval queue unavailable · Cause: " ^ detail
+
 let timeline ~width ~goal_id
-    (loaded : (string * (Tui_decode.goal_timeline, string) result) option) =
+    (loaded : (string, Tui_decode.goal_timeline_event list) Masc_tui_fetched.t) =
   let header =
     { tone = Note; text = "RELATED ACTIVITY · latest state per linked item" }
   in
-  let rows =
-    match loaded with
-    | Some (id, result) when String.equal id goal_id -> (
-        match result with
-        | Ok (Tui_decode.Goal_timeline_ready []) ->
+  let observed = function
+        | [] ->
             [ { tone = Quiet; text = "  (no events recorded)" } ]
-        | Ok (Tui_decode.Goal_timeline_ready events) ->
+        | events ->
             List.concat_map
               (fun (event : Tui_decode.goal_timeline_event) ->
                 let tone = severity_tone event.gt_severity in
@@ -251,17 +257,21 @@ let timeline ~width ~goal_id
                   (Printf.sprintf "  %s  %s  %s" event.gt_ts subject
                      (headline ~subject event)))
               events
-        | Ok (Tui_decode.Goal_timeline_unavailable failure) ->
-            let message = match failure with
-              | Tui_decode.Goal_source_failure (Goal_store_unavailable view) ->
-                  "Cause: " ^ Tui_decode.goal_store_unavailable_view_to_string view
-              | Tui_decode.Goal_source_failure (Goal_task_links_unavailable detail) ->
-                  "Linked tasks unavailable · Cause: " ^ detail
-              | Tui_decode.Approval_queue_failure detail ->
-                  "Approval queue unavailable · Cause: " ^ detail in
-            wrapped ~width Unreadable ("  " ^ message)
-        | Error err ->
-            wrapped ~width Unreadable ("  timeline load failed: " ^ err))
-    | _ -> [ { tone = Quiet; text = "  loading..." } ]
   in
-  ({ tone = Quiet; text = "" } :: header :: rows)
+  let view = Masc_tui_fetched.view_for ~equal:String.equal loaded ~key:goal_id in
+  let rows =
+    match view with
+    | Masc_tui_fetched.Ready value -> observed value
+    | Masc_tui_fetched.Stale (value, detail) ->
+        wrapped ~width Unreadable
+          ("  refresh failed; previous observation: " ^ Terminal_text.single_line detail)
+        @ observed value
+    | Masc_tui_fetched.Failed detail -> wrapped ~width Unreadable
+        ("  timeline load failed: " ^ Terminal_text.single_line detail)
+    | Masc_tui_fetched.Absent -> [ { tone = Quiet; text = "  timeline not requested" } ]
+    | Masc_tui_fetched.Loading -> [ { tone = Quiet; text = "  loading..." } ]
+  in
+  let pending =
+    if Masc_tui_fetched.in_flight loaded && Option.is_some (Masc_tui_fetched.value view)
+    then [ { tone = Quiet; text = "  refreshing; previous observation" } ] else [] in
+  ({ tone = Quiet; text = "" } :: header :: (pending @ rows))

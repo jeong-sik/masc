@@ -9,7 +9,7 @@ import { safeText } from './terminal.mjs'
 
 // The score viewer lends us its terminal while suspended; standalone invocation
 // additionally owns alternate screen/raw mode and restores exactly what it acquired.
-export async function viewSession({ directory, root = resolve('music-sessions'), input, midi, signal, embedded = false } = {}) {
+export async function viewSession({ directory, root = resolve('music-sessions'), input, midi, signal, embedded = false, exportRoot } = {}) {
   if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error('Music sessions require a terminal')
   let available = null, inputIndex = 0, midiIndex = 0, timeline = null
   let take = directory, capture = null, captureTask = null, player = null
@@ -167,8 +167,12 @@ export async function viewSession({ directory, root = resolve('music-sessions'),
       case 'f': follow = !follow; break
       case 'e':
         if (phase === 'saved' && !exportTask) {
-          exportTask = exportMidiClips(timeline, take).then(paths => { status = `${paths.length} MIDI 2.0 clips exported` }, error => { status = error.message })
-            .finally(() => { exportTask = null; draw() })
+          const target = exportRoot && take === directory ? join(exportRoot, `midi-${randomUUID()}`) : take
+          exportTask = (async () => {
+            if (target !== take) await mkdir(target, { recursive: true, mode: 0o700 })
+            const paths = await exportMidiClips(timeline, target)
+            status = `${paths.length} MIDI 2.0 clips exported to ${target}`
+          })().catch(error => { status = error.message }).finally(() => { exportTask = null; draw() })
         }
         break
       default:

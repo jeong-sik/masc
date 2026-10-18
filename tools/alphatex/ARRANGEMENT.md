@@ -47,7 +47,7 @@ mute/solo, and `u`/`y` undoes/redoes document edits. `:lane-remove` retains sour
 Import and save IO run in an owned worker. Accepted commands remain ordered;
 closing refuses new input, cancels an in-progress import, waits for cleanup and
 drains already accepted editor decisions. An import finishing after close cannot
-replace the document. Save-as materializes WAVs retained by undo/redo history as
+replace the document. Save-as materializes WAVs and captured takes retained by undo/redo history as
 well as the current document, so a later redo does not depend on the old folder.
 An uncertain/failed save is not automatically retried at the same path on close;
 edits are retained at a fresh recovery location. If source corruption prevents
@@ -125,9 +125,10 @@ this does not establish sample-perfect or acoustic alignment.
 
 Capture import must retain WAV plus original UMP and capture-clock provenance;
 exported note-only SMF is insufficient for a simultaneous recorded take. The
-current import helpers accept WAV and SMF/RMID files; capture attachment,
-recording into an existing project, overdubs and VST routing remain unfinished
-integrations.
+import helpers accept WAV, SMF/RMID and complete native captured takes.
+[Captured sources](CAPTURED-SOURCES.md) preserve all four original take files and
+open their waveform/MIDI viewer. Captured WAV+UMP region playback, recording into
+an existing project, overdubs and VST routing remain unfinished integrations.
 
 
 ## WAV arrangement transport

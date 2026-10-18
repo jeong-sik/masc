@@ -85,7 +85,7 @@ export class CaptureTimeline {
       if (!Array.isArray(pair) || pair.length !== 2 || !pair.every(Number.isFinite) || pair[0] > pair[1]) throw new Error('Invalid waveform peak')
       return pair
     })
-    this.audio.push({ time, end: time + frames / this.sampleRate, offset, frames, peaks })
+    this.audio.push({ hostTime: row.hostTime, deviceSampleTime: row.deviceSampleTime, time, end: time + frames / this.sampleRate, offset, frames, peaks })
     this.frames += BigInt(frames)
     this.duration = Math.max(this.duration, time + frames / this.sampleRate)
   }
@@ -118,14 +118,18 @@ export class CaptureTimeline {
   }
 }
 
-export async function readCapture(directory, { signal } = {}) {
-  const manifest = JSON.parse(await readFile(join(directory, 'session.json'), { encoding: 'utf8', signal }))
+export async function readCapture(directory, options = {}) {
+  return readCaptureFiles({ manifest: join(directory, 'session.json'), audio: join(directory, 'audio.wav'),
+    audioBlocks: join(directory, 'audio-blocks.jsonl'), midi: join(directory, 'midi.ump.jsonl') }, options)
+}
+export async function readCaptureFiles(files, { signal } = {}) {
+  const manifest = JSON.parse(await readFile(files.manifest, { encoding: 'utf8', signal }))
   const timeline = new CaptureTimeline(manifest)
-  for await (const row of jsonLines(join(directory, 'audio-blocks.jsonl'), { signal })) timeline.addAudio(row)
-  for await (const row of jsonLines(join(directory, 'midi.ump.jsonl'), { signal })) timeline.addMidi(row)
+  for await (const row of jsonLines(files.audioBlocks, { signal })) timeline.addAudio(row)
+  for await (const row of jsonLines(files.midi, { signal })) timeline.addMidi(row)
   if (timeline.frames !== clockInteger(manifest.audioFrames, 'audio frame total')
       || timeline.packets !== clockInteger(manifest.midiPacketCount, 'MIDI packet total')) throw new Error('Capture manifest totals do not match recorded data')
-  await readWaveMetadata(join(directory, 'audio.wav'), {
+  await readWaveMetadata(files.audio, {
     sampleRate: timeline.sampleRate, channels: timeline.channels, frames: timeline.frames,
   }, { signal })
   return timeline

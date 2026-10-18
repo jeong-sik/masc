@@ -40,6 +40,7 @@ function position(value) {
 function place(editor, assetID, tick, { offset = 0, extent, repeat = 1, pattern } = {}) {
   const asset = editor.project.assets.find(asset => asset.id === assetID)
   if (!asset) throw new Error('Select an imported asset')
+  if (asset.kind === 'capture') throw new Error('Captured takes retain WAV and UMP together; use :open-take to inspect the source')
   extent ??= asset.kind === 'wave' ? asset.metadata.frames : midiSourcePattern(asset.source, { pattern }).ticks
   let project = editor.project, lane = project.lanes.find(lane => lane.id === editor.lane && lane.kind === asset.kind)
   if (!lane) {
@@ -108,9 +109,14 @@ export function arrangementCommand(editor, line) {
   }
   let value
   switch (command) {
-    case 'import-wave': case 'import-midi': case 'save-as':
+    case 'import-wave': case 'import-midi': case 'import-take': case 'save-as':
       if (!tail) throw new Error('Choose a file path')
       return { editor, effect: { kind: command, path: tail } }
+    case 'open-take': {
+      count(0, 1); const asset = args[0] ?? editor.asset
+      if (!editor.project.assets.some(item => item.id === asset && item.kind === 'capture')) throw new Error('Choose a captured take')
+      return { editor, effect: { kind: 'open-take', asset } }
+    }
     case 'save': case 'help': case 'play': case 'stop': count(0); return { editor, effect: { kind: command } }
     case 'seek': count(1); return { editor, effect: { kind: 'seek', tick: position(beats(args[0])) } }
     case 'midi-output': count(1); return { editor, effect: { kind: command, destination: args[0] } }

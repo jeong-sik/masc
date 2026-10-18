@@ -36,13 +36,14 @@ export async function midiDestinations({ executable = midiTransportPath, signal 
 
 // One owned child is one transport. Completion means its pipes and process have
 // closed, rather than merely receiving a stopped acknowledgement.
-export function openPlayback({ path, output, midiOutput, loop = false, onEvent = () => {}, signal,
+export function openPlayback({ path, output, midiOutput, midiBindings, loop = false, onEvent = () => {}, signal,
   executable = midiOutput === undefined ? transportPath : midiTransportPath, spawnProcess = spawn } = {}) {
   signal?.throwIfAborted()
   if (typeof path !== 'string' || !path) throw new Error('A playback source path is required')
   if (output !== undefined && (typeof output !== 'string' || !output)) throw new Error('Invalid output UID')
   if (midiOutput !== undefined && (typeof midiOutput !== 'string' || !midiOutput)) throw new Error('Invalid MIDI destination ID')
   if (output !== undefined && midiOutput !== undefined) throw new Error('Choose an audio output or a MIDI destination')
+  if (midiBindings !== undefined && (midiOutput === undefined || !Array.isArray(midiBindings) || !midiBindings.length)) throw new Error('Invalid MIDI source bindings')
   if (typeof loop !== 'boolean') throw new Error('Invalid loop selection')
   const selectedID = midiOutput ?? output
   const selection = midiOutput === undefined ? (output === undefined ? [] : ['--output', output]) : ['--destination', midiOutput]
@@ -72,11 +73,19 @@ export function openPlayback({ path, output, midiOutput, loop = false, onEvent =
       }
       if (!['playing', 'paused', 'stopped'].includes(event.kind) || final
           || !Number.isFinite(event.currentTime) || !Number.isFinite(event.duration)
-          || event.duration <= 0 || event.currentTime < 0 || event.currentTime > event.duration
+          || (midiBindings === undefined ? event.duration <= 0 : event.duration < 0) || event.currentTime < 0 || event.currentTime > event.duration
           || typeof event.device?.id !== 'string' || !event.device.id || typeof event.device.name !== 'string'
           || (midiOutput === undefined ? !Number.isInteger(event.device.outputs) || event.device.outputs <= 0
             : event.device.kind !== 'midi' || event.device.protocol !== 1) || event.loop !== loop) {
         throw new Error('Malformed playback state')
+      }
+      if (midiBindings !== undefined) {
+        if (!Array.isArray(event.bindings) || event.bindings.length !== midiBindings.length
+            || event.bindings.some((binding, index) => binding.port !== midiBindings[index].port
+              || binding.device?.id !== midiBindings[index].destination || binding.device.kind !== 'midi'
+              || binding.device.protocol !== 1 || typeof binding.device.name !== 'string')) {
+          throw new Error('Playback source ports differ from the selected bindings')
+        }
       }
       if (selectedID !== undefined && event.device.id !== selectedID || firstDevice !== null && event.device.id !== firstDevice) {
         throw new Error('Playback output differs from the selected device')

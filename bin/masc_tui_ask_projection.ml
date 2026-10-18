@@ -87,7 +87,8 @@ let begin_followup ~previous =
 
 let followup_view reading = reading.fu_view
 
-let merge_reactions fresh prior = match fresh, prior with
+let merge_reactions (fresh : Decode.ask_reactions) (prior : Decode.ask_reactions option) =
+  match fresh, prior with
   | Decode.Ask_reactions_unavailable, Some old -> stale_reactions old
   | Ask_reactions_observed fresh, Some (Ask_reactions_observed old) ->
       let retain fresh old = match fresh with Some _ -> fresh | None -> old in
@@ -99,7 +100,8 @@ let merge_reactions fresh prior = match fresh, prior with
   | ((Ask_reactions_unavailable | Ask_reactions_observed _) as fresh),
       (None | Some Ask_reactions_unavailable) -> fresh
 
-let merge_tools fresh prior = match fresh, prior with
+let merge_tools (fresh : Decode.ask_tool_actions) (prior : Decode.ask_tool_actions option) =
+  match fresh, prior with
   | Decode.Ask_tools_unavailable, Some old -> stale_tools old
   | Ask_tools_observed fresh, Some (Ask_tools_observed old) when fresh.at_count < old.at_count ->
       Decode.Ask_tools_observed {old with at_evidence_current=false}
@@ -111,7 +113,7 @@ let linked_id = function
   | Ask_task_missing id | Ask_task_unavailable id -> Some id
   | Ask_task_observed value -> Some value.akt_task_id
 
-let merge_task fresh prior =
+let merge_task (fresh : Decode.ask_linked_task) (prior : Decode.ask_linked_task option) =
   match prior with
   | Some old when linked_id old <> linked_id fresh ->
       Error "answer follow-up changed original linked Task identity"

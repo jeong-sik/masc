@@ -98,7 +98,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     if (!input) throw new Error('Select :input AUDIO_UID first; :inputs lists devices')
     if (transport.kind !== 'playing' || transportPending) throw new Error('Start arrangement playback before recording')
     const project = editor.project, projectPath = path, selectedInput = input, selectedMidi = midiInput, backing = transport.handle
-    const owned = { controller: new AbortController(), phase: 'opening', directory: join(dirname(path), 'recordings', randomUUID()), handle: null, epoch: null, failure: null }
+    const owned = { controller: new AbortController(), phase: 'opening', directory: join(dirname(path), 'recordings', randomUUID()), handle: null, epoch: null, failure: null, generation }
     recording = owned
     const expected = generation
     owned.completion = (async () => {
@@ -199,26 +199,27 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
         transport = { kind: 'starting' }
         const handle = openPlayback({ path: result.path, format: result.format, output, midiOutput: result.midiOutput, midiBindings: result.bindings,
           onEvent(event) {
-            if (!accepting || generation !== expected) return
+            if (generation !== expected) return
+            const captured = recording?.generation === expected ? recording : null
             if (event.kind === 'error') {
-              if (recording) recording.failure = new Error(event.message)
-              recording?.controller.abort(); recording?.handle?.stop(); status = event.message; return
+              if (captured) captured.failure = new Error(event.message)
+              captured?.controller.abort(); captured?.handle?.stop(); status = event.message; return
             }
-            if (event.kind === 'stopped' && recording) {
-              if (recording.epoch) recording.epoch.duration = Math.min(recording.epoch.duration, event.currentTime)
-              recording.controller.abort(); recording.handle?.stop()
+            if (event.kind === 'stopped' && captured) {
+              if (captured.epoch) captured.epoch.duration = Math.min(captured.epoch.duration, event.currentTime)
+              captured.controller.abort(); captured.handle?.stop()
             }
+            if (!accepting) return
             transportPending = false
             transport = { ...transport, kind: event.kind, event }
             draw()
           } })
         transport = { ...transport, handle }
         const completion = handle.completion.then(event => {
-          recording?.controller.abort(); recording?.handle?.stop()
+          if (recording?.generation === expected) { recording.controller.abort(); recording.handle?.stop() }
           if (generation === expected) { transport = { kind: 'stopped', event }; status = 'Playback stopped'; draw() }
         }, error => {
-          if (recording) recording.failure = error
-          recording?.controller.abort(); recording?.handle?.stop()
+          if (recording?.generation === expected) { recording.failure = error; recording.controller.abort(); recording.handle?.stop() }
           if (generation === expected) { transport = { kind: 'stopped' }; status = error.message; draw() }
         }).finally(() => { players.delete(handle) })
         players.set(handle, completion)
@@ -433,7 +434,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
   }
   const onEnd = () => finish(), onSignal = () => finish(), onAbort = () => finish(), onResize = () => draw()
   const ticker = setInterval(() => {
-    if (transport.kind === 'playing') { try { transport.handle.status() } catch (error) { stop(); status = error.message; draw() } }
+    if (transport.kind === 'playing') { try { transport.handle.status() } catch (error) { if (recording) recording.failure = error; stop(); status = error.message; draw() } }
   }, 100)
   async function retainRecovery() {
     const directory = await mkdtemp(join(tmpdir(), 'masc-arrangement-recovery-'))

@@ -52,11 +52,12 @@ struct UmpRegionClip {
     let endIndex: Int
     let scope: Set<UmpChannel>
 
-    func prefix(at scaledTime: UInt128) -> Int {
+    func prefix(at scaledTime: UInt128, inclusive: Bool = true) -> Int {
         var low = 0, high = endIndex
         while low < high {
             let middle = low + (high - low) / 2
-            if UInt128(timed[middle].ticks) * numer <= scaledTime { low = middle + 1 } else { high = middle }
+            let tick = UInt128(timed[middle].ticks) * numer
+            if tick < scaledTime || inclusive && tick == scaledTime { low = middle + 1 } else { high = middle }
         }
         return low
     }
@@ -146,9 +147,12 @@ final class UmpRegionTransport: CoordinatedMidiTransport {
             var previous = potential
             previous.touched = previous.touched.filter { field in clip.scope.contains { $0.contains(field.address) } }
             previous.addresses = previous.addresses.filter { address in clip.scope.contains { $0.contains(address) } }
-            // Include events exactly at the cut so their explicit baselines can
-            // precede a surviving Note On at that same tick. End remains exclusive.
-            _ = try umpRestoration(clip.events, prefixCount: clip.prefix(at: clip.cut), replacing: previous)
+            // Exact-entry events remain a due stream, including a zero-duration
+            // attack/release pair. Their explicit baselines must precede each
+            // entry Note On; they cannot repair a historical live voice's patch.
+            let prefix = clip.prefix(at: clip.cut, inclusive: false)
+            _ = try umpRestoration(clip.events, prefixCount: prefix,
+                followingCount: clip.prefix(at: clip.cut) - prefix, replacing: previous)
         }
         clips = admitted
         output = UmpOutput(bindings: destinations.map { UmpBinding(source: $0, destination: $0) })
@@ -163,7 +167,8 @@ final class UmpRegionTransport: CoordinatedMidiTransport {
         guard position < duration else { throw MidiFailure("captured region seek exceeds duration") }
         for clip in clips {
             if let phase = clip.phase(at: position) {
-                _ = try umpRestoration(clip.events, prefixCount: clip.prefix(at: phase.time), replacing: output.prior(in: clip.scope))
+                let prefix = clip.prefix(at: phase.time, inclusive: false)
+                _ = try umpRestoration(clip.events, prefixCount: prefix, followingCount: clip.prefix(at: phase.time) - prefix, replacing: output.prior(in: clip.scope))
             }
         }
         try output.checkDestinations(); timer?.cancel(); timer = nil
@@ -206,13 +211,15 @@ final class UmpRegionTransport: CoordinatedMidiTransport {
             // on the same physical channel, regardless of source array order.
             for clip in clips {
                 if let cursor = cursors[clip.id], clip.phase(at: position)?.copy != cursor.copy {
+                    try output.drain(clip.events[cursor.index..<clip.endIndex])
                     try output.silence(in: clip.scope); cursors.removeValue(forKey: clip.id)
                 }
             }
             for clip in clips {
                 guard let phase = clip.phase(at: position) else { continue }
                 if cursors[clip.id] == nil {
-                    let restored = try umpRestoration(clip.events, prefixCount: clip.prefix(at: phase.time), replacing: output.prior(in: clip.scope))
+                    let prefix = clip.prefix(at: phase.time, inclusive: false)
+                    let restored = try umpRestoration(clip.events, prefixCount: prefix, followingCount: clip.prefix(at: phase.time) - prefix, replacing: output.prior(in: clip.scope))
                     for event in restored.events { try output.apply(event) }
                     cursors[clip.id] = Cursor(copy: phase.copy, index: restored.nextIndex)
                 }

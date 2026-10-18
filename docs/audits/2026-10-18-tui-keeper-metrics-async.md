@@ -7,6 +7,7 @@ Scope: detail/Logs metrics reading, revalidation, activity summary and ownership
 | --- | --- | --- |
 | Open detail/Logs, refresh, cadence | Four paths invoke the synchronous loader | Shared owned I/O reader; UI applies immutable results |
 | Same-key poll during a read | Later UI processing waits for that handler | Current read shared |
+| Detail tabs without the activity summary | Detail opening/cadence still read metrics | No metrics request while the source is not displayed |
 | Explicit refresh during a read | Handler could not process it while waiting | One accumulated follow-up after success or failure |
 | Read setup | Construct workspace configuration and use writer-store accessor/cache | Resolve the canonical metrics location directly; no writer directory initialization |
 | Failed revalidation | New empty/error snapshot replaces previous rows | Last observed rows survive with an explicit failed refresh |

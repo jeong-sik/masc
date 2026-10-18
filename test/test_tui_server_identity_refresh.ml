@@ -2303,6 +2303,11 @@ let test_keeper_log_selection_and_late_cleanup_keep_original_owner () =
 let test_keeper_log_refresh_coalesces_and_failed_revalidation_keeps_partial_rows () =
   let open Masc_tui_types in
   let state, keeper = keeper_log_fixture () in
+  state.view <- Keepers Keeper_detail;
+  state.detail_tab <- Detail_secrets;
+  Alcotest.(check bool) "a detail tab without metrics admits no disk request" true
+    (Option.is_none (begin_keeper_log_read state ~intent:Snapshot_read.Poll ~limit:4 ~started_ns:0L keeper));
+  state.detail_tab <- Detail_info;
   let active = keeper_log_request state keeper Snapshot_read.Poll in
   List.iter (fun intent ->
     Alcotest.(check bool) "same source shares the active read" true

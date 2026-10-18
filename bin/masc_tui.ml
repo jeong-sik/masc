@@ -28896,6 +28896,7 @@ and is loaded on demand through keeper_skill.
                        keeper.k_name
                  | None -> ())
             | Keepers Keeper_detail ->
+                ignore (launch_current_keeper_logs state ~mailbox:async_messages ~intent:Snapshot_read.Refresh);
                 refresh_keeper_detail_selection state
                   ~mailbox:async_messages
             | Board ->

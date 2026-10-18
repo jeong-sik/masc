@@ -8702,8 +8702,10 @@ let keeper_log_equal_key left right =
 
 let keeper_log_target state =
   match state.view with
-  | Keepers (Keeper_detail | Keeper_logs) -> List.nth_opt state.keepers state.keeper_cursor
-  | Keepers (Keeper_list | Keeper_calls | Keeper_message | Keeper_runtime_pick)
+  | Keepers Keeper_logs -> List.nth_opt state.keepers state.keeper_cursor
+  | Keepers Keeper_detail when state.detail_tab = Detail_info ->
+      List.nth_opt state.keepers state.keeper_cursor
+  | Keepers (Keeper_detail | Keeper_list | Keeper_calls | Keeper_message | Keeper_runtime_pick)
   | Overview | Acting | Metrics | Memory | Lanes | Clients | Board | Approvals
   | Planning | Schedules | Verification | Harness | Fusion | Repositories | Code
   | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> None
@@ -8794,6 +8796,9 @@ let take_keeper_log_read state request result =
         state.keeper_logs <- Masc_tui_fetched.complete ~equal:keeper_log_equal_key
             state.keeper_logs request.klr_request result;
         Some { kla_followup = followup }
+    | Workspace_identity_match, None ->
+        suspend_keeper_logs state;
+        None
     | (Workspace_identity_match | Workspace_identity_unread | Workspace_identity_mismatch _
       | Workspace_identity_match_unconfirmed _), (Some _ | None) ->
         clear_keeper_logs state;

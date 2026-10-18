@@ -124,6 +124,9 @@ read scope, generation, cancellation owner and monotonic start observation.
 Opening detail/logs, explicit refresh and cadence schedule the immutable read on
 the existing I/O executor. Same-key polls share the current read; explicit
 refreshes accumulate one follow-up, dispatched after success or failure.
+Only the Info activity summary and Logs demand this source. Other detail tabs
+do not read metrics; Info's explicit refresh uses the same source demand. Leaving
+the reader retires pending work while keeping its last observation keyed.
 
 The canonical reader opens `Dated_jsonl.Store.Keeper.Metrics` from its base path.
 It does not initialize workspace configuration, writer directories or the

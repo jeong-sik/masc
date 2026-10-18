@@ -87,7 +87,7 @@ export function openPlayback({ path, output, loop = false, onEvent = () => {}, s
   return { ready, completion, stop,
     pause: () => command('pause'), resume: () => command('resume'), status: () => command('status'),
     seek(seconds) {
-      if (!Number.isFinite(seconds) || seconds < 0 || !current || seconds >= current.duration) throw new Error('Seek must be inside the WAV duration')
+      if (!Number.isFinite(seconds) || seconds < 0 || !current || seconds > current.duration) throw new Error('Seek must be between zero and the WAV duration, inclusive')
       command('seek', { seconds })
     },
     // Terminal teardown may require immediate termination of only this child.

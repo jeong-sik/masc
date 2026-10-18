@@ -1,7 +1,13 @@
 name: Minimal manual checks
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      native-tui-source-sha:
+        description: Optional exact source SHA for a macOS arm64 TUI artifact and focused behavior tests
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
@@ -25,3 +31,9 @@ jobs:
           bash scripts/check-toml-syntax.sh
       - name: Scan the tracked tree for credentials
         run: python3 scripts/ci/check-committed-secrets.py
+
+  native-tui:
+    if: inputs.native-tui-source-sha != ''
+    uses: ./.github/workflows/tui-native-proof.yml
+    with:
+      source-sha: ${{ inputs.native-tui-source-sha }}

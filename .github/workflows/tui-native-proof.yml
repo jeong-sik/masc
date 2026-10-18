@@ -1,0 +1,104 @@
+name: Native TUI artifact
+
+# Called only by an explicit manual Minimal manual checks dispatch. Feature
+# source and the workflow revision are recorded separately in the artifact.
+on:
+  workflow_call:
+    inputs:
+      source-sha:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  macos-tui:
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - name: Validate exact source identity
+        env:
+          SOURCE_SHA: ${{ inputs.source-sha }}
+        run: |
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'source-sha must be 40 lowercase hex characters' >&2; exit 1; }
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.source-sha }}
+          persist-credentials: false
+      - name: Bind the source tree
+        env:
+          SOURCE_SHA: ${{ inputs.source-sha }}
+        run: test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+      - uses: ./.github/actions/setup-ocaml-toolchain
+      - name: Install native dependencies
+        run: |
+          brew install flock gmp libpq openssl@3 zstd
+          libpq_prefix="$(brew --prefix libpq)"
+          openssl_prefix="$(brew --prefix openssl@3)"
+          {
+            echo "$libpq_prefix/bin"
+            echo "$openssl_prefix/bin"
+          } >> "$GITHUB_PATH"
+          {
+            echo "PKG_CONFIG_PATH=$openssl_prefix/lib/pkgconfig:$libpq_prefix/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+            echo "CPATH=$openssl_prefix/include:${CPATH:-}"
+            echo "LIBRARY_PATH=$openssl_prefix/lib:${LIBRARY_PATH:-}"
+            echo "CPPFLAGS=-I$openssl_prefix/include ${CPPFLAGS:-}"
+            echo "LDFLAGS=-L$openssl_prefix/lib ${LDFLAGS:-}"
+          } >> "$GITHUB_ENV"
+      - uses: ./.github/actions/pin-ocaml-deps
+        with:
+          pin-flags: --with-compact-protocol --with-bisect
+      - name: Install OCaml dependencies
+        run: opam install ./masc.opam --deps-only --with-test -y
+      - name: Build TUI and focused ownership tests
+        run: |
+          set -euo pipefail
+          mkdir -p proof
+          targets=(bin/masc_tui.exe test/test_tui_detail_reading.exe test/test_tui_board_successor.exe test/test_tui_usage_scope.exe)
+          printf '%s\n' "${targets[@]}" > proof/build-targets.txt
+          opam exec -- dune build "${targets[@]}" 2>&1 | tee proof/build.log
+      - name: Verify candidate and ownership behavior
+        env:
+          SOURCE_SHA: ${{ inputs.source-sha }}
+          WORKFLOW_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          while IFS= read -r target; do
+            case "$target" in
+              test/*)
+                suite="$(basename "$target" .exe)"
+                "_build/default/$target" </dev/null 2>&1 | tee "proof/$suite.log"
+                printf '%s\n' "$suite" >> proof/executed-tests.txt
+                ;;
+            esac
+          done < proof/build-targets.txt
+          test "$(_build/default/bin/masc_tui.exe --build-commit)" = "$SOURCE_SHA"
+          _build/default/bin/masc_tui.exe --help </dev/null > proof/help.txt
+          cp _build/default/bin/masc_tui.exe proof/masc-tui
+          chmod +x proof/masc-tui
+          otool -L proof/masc-tui > proof/native-dependencies.txt
+          python3 - <<'PYCODE'
+          import hashlib, json, os
+          from pathlib import Path
+          binary = Path('proof/masc-tui')
+          Path('proof/receipt.json').write_text(json.dumps({
+              'source_sha': os.environ['SOURCE_SHA'],
+              'workflow_sha': os.environ['WORKFLOW_SHA'],
+              'platform': 'macos-arm64',
+              'sha256': hashlib.sha256(binary.read_bytes()).hexdigest(),
+              'build_targets': Path('proof/build-targets.txt').read_text().splitlines(),
+              'executed_tests': Path('proof/executed-tests.txt').read_text().splitlines(),
+              'installed_runtime_verified': False,
+              'visible_ui_verified': False,
+              'packaging': 'native executable; see native-dependencies.txt for dynamic libraries'
+          }, indent=2) + '\n')
+          PYCODE
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: tui-macos-arm64-${{ inputs.source-sha }}-${{ github.run_id }}
+          path: proof/
+          if-no-files-found: warn
+          retention-days: 7

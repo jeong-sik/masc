@@ -1954,7 +1954,8 @@ let test_question_origin_survives_answer_and_workspace_change () =
   let origin = Ask.origin_of_row original in
   toggle_ask_origin state origin;
   let submission : ask_submission =
-    {as_request=ref ();as_started_ns=0L;as_receipt=Ask_answer_receipt.create ();as_authority=state.workspace_authority;
+    {as_request=ref ();as_started_ns=0L;as_receipt=Ask_answer_receipt.create ();
+     as_completion=Ask_answer_completion.create ();as_reading=Some state.workspace_read_authority;as_authority=state.workspace_authority;
      as_keeper_name=original.ar_keeper;as_ask_id=original.ar_id;as_answered_label="private choice";
      as_source_turn_ref=original.ar_source_turn_ref} in
   begin_ask_submission_state ~submission state;
@@ -1998,7 +1999,8 @@ let test_answer_receipt_has_one_original_submission_owner () =
   state.workspace_identity <- Workspace_identity_match;
   state.server_identity <- Some (identity "/workspace/a");
   let submission ask_id : ask_submission =
-    { as_request = ref (); as_started_ns = 10L; as_receipt=Ask_answer_receipt.create (); as_authority = state.workspace_authority;
+    { as_request = ref (); as_started_ns = 10L; as_receipt=Ask_answer_receipt.create ();
+      as_completion=Ask_answer_completion.create ();as_reading=Some state.workspace_read_authority; as_authority = state.workspace_authority;
       as_keeper_name = "reader"; as_ask_id = ask_id; as_source_turn_ref = None; as_answered_label = "reader: choice" } in
   let first = submission "first" in
   begin_ask_submission_state ~submission:first state;
@@ -2062,6 +2064,8 @@ let test_answer_receipt_survives_full_mailbox_and_worker_cancellation () =
   Eio.Switch.run @@ fun sw ->
   let open Masc_tui_types in
   let module R = Ask_answer_receipt in
+  let module C = Ask_answer_completion in
+  let module P = Masc_tui_async_protocol in
   let module Decode = Masc.Tui_decode_asks in
   let state = create_state ~workspace:"receipt" ~local_base_path:"/workspace/receipt"
       ~port:0 ~refresh_interval:0. () in
@@ -2070,6 +2074,7 @@ let test_answer_receipt_survives_full_mailbox_and_worker_cancellation () =
   let source = Ids.Turn_ref.make ~trace_id:"question-before-cancellation" ~absolute_turn:17 in
   let submission name : ask_submission =
     {as_request=ref ();as_started_ns=10L;as_receipt=R.create ();
+     as_completion=C.create ();as_reading=Some state.workspace_read_authority;
      as_authority=state.workspace_authority;as_keeper_name="reader";as_ask_id=name;
      as_answered_label="original choice";as_source_turn_ref=Some source} in
   let original = submission "original" in
@@ -2078,14 +2083,17 @@ let test_answer_receipt_survives_full_mailbox_and_worker_cancellation () =
   Eio.Stream.add mailbox ();
   let entered, enter = Eio.Promise.create () and cancellation, set_cancellation = Eio.Promise.create () in
   let receipt = Ok (Decode.Ask_answer_recorded Decode.Ask_wake_stored) in
+  let reread = Ok {Decode.asn_keeper=None;asn_open_count=0;asn_rows=[]} in
   let worker = Eio.Fiber.fork_promise ~sw (fun () ->
     Eio.Cancel.sub (fun context ->
       Eio.Promise.resolve set_cancellation context;
-      Fun.protect ~finally:(fun () -> R.close original.as_receipt) (fun () ->
+      Fun.protect ~finally:(fun () -> close_ask_submission original) (fun () ->
         (* The production publication primitive has no mailbox dependency.
            This fixture then advances downstream and waits on notification. *)
         Alcotest.(check bool) "first actual result is published" true
           (R.publish original.as_receipt ~observed_ns:20L receipt);
+        Alcotest.(check bool) "final pair is stored before the fixture notification" true
+          (C.publish original.as_completion ~observed_ns:30L ~receipt ~asks:reread);
         Eio.Promise.resolve enter ();
         Eio.Stream.add mailbox ()))) in
   Eio.Promise.await entered;
@@ -2100,10 +2108,49 @@ let test_answer_receipt_survives_full_mailbox_and_worker_cancellation () =
     (R.publish original.as_receipt ~observed_ns:21L (Error "late cancellation"));
   Alcotest.(check bool) "publication grants no feedback or final action settlement" true
     (state.ask_submit_inflight && Option.is_none state.ask_answer_feedback);
+  let final_owner, final_fact = match take_pending_ask_answer_completion state with
+    | Some fact -> fact | None -> Alcotest.fail "cancellation lost the completed reread" in
+  Alcotest.(check bool) "raw final result is coherent and cannot be overwritten by worker closure" true
+    (final_owner==original && final_fact.receipt=receipt && final_fact.asks=reread
+     && final_fact.observed_ns=30L
+     && not (C.publish original.as_completion ~observed_ns:31L ~receipt:(Error "late failure")
+       ~asks:(Error "late failure")));
+  let final_message = P.ask_answer_completion_message final_owner final_fact in
+  state.workspace_identity <- next_workspace_identity ~previous:state.workspace_identity
+    ~local_base_path:state.local_base_path (Error "identity temporarily unavailable");
+  suspend_workspace_readings state;
+  (match final_message with
+   | P.Workspace_scoped (authority, reading, inner) ->
+     Alcotest.(check bool) "completion carries its dispatch scope and remains an operation outcome" true
+       (authority=original.as_authority
+        && (match reading,original.as_reading with
+            | Some carried,Some captured -> carried==captured && carried!=state.workspace_read_authority
+            | None,None -> true | (Some _ | None),(Some _ | None) -> false)
+        && P.workspace_message_admitted state ~authority ~reading inner);
+     (match P.project_workspace_operation_reply state ~authority ~reading inner with
+      | P.Ask_answer_done (owner, saved, observed) ->
+        Alcotest.(check bool) "retired GET is refused without discarding confirmed POST receipt" true
+          (owner.as_request==original.as_request && saved=receipt && Result.is_error observed
+           && ask_submission_inflight state owner)
+      | _ -> Alcotest.fail "completion did not use canonical operation projection")
+   | _ -> Alcotest.fail "completion borrowed a current unscoped transport");
+  Alcotest.(check bool) "raw facts and terminal transport are distinct, each retained once" true
+    (Option.is_none (take_pending_ask_answer_completion state)
+     && match C.read original.as_completion with C.Returned fact -> fact.asks=reread
+        | C.Waiting | C.Closed_without_result -> false);
+  state.ask_submit_inflight <- false;
+  Alcotest.(check bool) "duplicate terminal delivery cannot settle the same submission again" false
+    (ask_submission_inflight state original);
+  state.workspace_identity <- Workspace_identity_match;
   let Workspace_authority generation = state.workspace_authority in
   state.workspace_authority <- Workspace_authority (generation+1);
   state.ask_submission_current <- None;
   state.ask_submit_inflight <- false;
+  (match final_message with
+   | P.Workspace_scoped (authority, reading, inner) ->
+     Alcotest.(check bool) "foreign authority cannot replay recovered completion into a replacement workspace" false
+       (P.workspace_message_admitted state ~authority ~reading inner)
+   | _ -> Alcotest.fail "original completion lost its scope");
   let pending, observed = match pending_ask_answer_receipt state with
     | Some pending -> pending | None -> Alcotest.fail "withdrawal lost the published receipt" in
   Alcotest.(check bool) "pending receipt keeps original result, timestamp and source" true
@@ -2123,10 +2170,21 @@ let test_answer_receipt_survives_full_mailbox_and_worker_cancellation () =
      && match R.read original.as_receipt with R.Returned kept -> kept.result=receipt | R.Waiting | R.Closed_without_result -> false);
   let abandoned = submission "no-observed-result" in
   begin_ask_submission_state ~submission:abandoned state;
-  R.close abandoned.as_receipt;
+  close_ask_submission abandoned;
   Alcotest.(check bool) "worker closure invents neither an answer result nor pending notification" true
     (Option.is_none (pending_ask_answer_receipt state)
-     && match R.read abandoned.as_receipt with R.Closed_without_result -> true | R.Waiting | R.Returned _ -> false);
+     && Option.is_none (take_pending_ask_answer_completion state)
+     && match R.read abandoned.as_receipt,C.read abandoned.as_completion with
+       | R.Closed_without_result,C.Closed_without_result -> true
+       | (R.Waiting | R.Returned _ | R.Closed_without_result),(C.Waiting | C.Returned _ | C.Closed_without_result) -> false);
+  let post_only = submission "cancelled-before-reread-result" in
+  begin_ask_submission_state ~submission:post_only state;
+  ignore (R.publish post_only.as_receipt ~observed_ns:35L receipt);
+  close_ask_submission post_only;
+  Alcotest.(check bool) "a known POST with no reread result does not settle the submission" true
+    (state.ask_submit_inflight && Option.is_none (take_pending_ask_answer_completion state)
+     && match take_ask_answer_receipt state post_only with
+        | Some (_, fact) -> fact.result=receipt | None -> false);
   let replacement = submission "replacement" in
   begin_ask_submission_state ~submission:replacement state;
   let unknown = Error "response unavailable" in
@@ -2135,7 +2193,21 @@ let test_answer_receipt_survives_full_mailbox_and_worker_cancellation () =
     | Some observed -> observed | None -> Alcotest.fail "replacement lost its own receipt" in
   Alcotest.(check bool) "replacement retains only its own unconfirmed answer observation" true
     (Option.is_some (retain_ask_answer_feedback state owner observed.result)
-     && observed.result=unknown && owner.as_request==replacement.as_request)
+     && observed.result=unknown && owner.as_request==replacement.as_request);
+  close_ask_submission replacement;
+  let unconfirmed = {(submission "original-unconfirmed-read") with as_reading=None} in
+  begin_ask_submission_state ~submission:unconfirmed state;
+  ignore (C.publish unconfirmed.as_completion ~observed_ns:40L ~receipt ~asks:reread);
+  let owner, fact = match take_pending_ask_answer_completion state with
+    | Some fact -> fact | None -> Alcotest.fail "original unconfirmed scope lost its completion fact" in
+  (match P.ask_answer_completion_message owner fact with
+   | P.Workspace_scoped (authority,None,inner) ->
+     (match P.project_workspace_operation_reply state ~authority ~reading:None inner with
+      | P.Ask_answer_done (_,saved,observed) ->
+        Alcotest.(check bool) "original unconfirmed reading cannot borrow a later confirmed scope" true
+          (saved=receipt && Result.is_error observed)
+      | _ -> Alcotest.fail "unconfirmed scope did not use operation projection")
+   | _ -> Alcotest.fail "completion rebuilt original read scope from current UI state")
 
 let original_answer_followup_identity ?(at=200.) ?(stimulus="original-source") () =
   let module Decode = Masc.Tui_decode_asks in
@@ -2156,7 +2228,8 @@ let answer_followup_state () =
       ~port:0 ~refresh_interval:0. () in
   state.workspace_identity <- Workspace_identity_match;
   state.server_identity <- Some (identity state.local_base_path);
-  let submission name : ask_submission = {as_request=ref ();as_started_ns=0L;as_receipt=Ask_answer_receipt.create ();as_authority=state.workspace_authority;
+  let submission name : ask_submission = {as_request=ref ();as_started_ns=0L;as_receipt=Ask_answer_receipt.create ();
+      as_completion=Ask_answer_completion.create ();as_reading=Some state.workspace_read_authority;as_authority=state.workspace_authority;
       as_keeper_name="alpha";as_ask_id=name;as_source_turn_ref=None;as_answered_label="choice"} in
   let first = submission "original" in
   begin_ask_submission_state ~submission:first state;

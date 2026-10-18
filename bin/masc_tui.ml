@@ -15460,12 +15460,13 @@ let apply_ask_answer_completion state submission result asks =
 (* TEL-OK: the TUI-local submit gate emits user-visible events here; the
    ask-answer endpoint owns the durable answer telemetry. *)
 let start_ask_answer state ~keeper_name ~ask_id ~source_turn_ref ~answered_label ~answers ~mailbox =
-  let enqueue_async = workspace_enqueue state in
   let authority = state.workspace_authority in
+  let reading = if server_authority_ready state then Some state.workspace_read_authority else None in
   let identity = state.server_identity in
   let submission = { as_request = ref (); as_started_ns = Mtime_clock.elapsed_ns ();
     as_receipt = Ask_answer_receipt.create ();
-    as_authority = authority; as_keeper_name = keeper_name;
+    as_completion = Ask_answer_completion.create ();
+    as_authority = authority; as_reading = reading; as_keeper_name = keeper_name;
     as_ask_id = ask_id; as_source_turn_ref = source_turn_ref; as_answered_label = answered_label } in
   if state.workspace_identity <> Workspace_identity_match then
     report_action state "error" "Cannot answer: workspace identity is unverified; draft retained"
@@ -15478,7 +15479,7 @@ let start_ask_answer state ~keeper_name ~ask_id ~source_turn_ref ~answered_label
   let port = state.port in
   let check = workspace_check_sequence state ~mailbox ~authority ~identity ~host ~port in
   let run_action () =
-    Fun.protect ~finally:(fun () -> Ask_answer_receipt.close submission.as_receipt) (fun () ->
+    Fun.protect ~finally:(fun () -> close_ask_submission submission) (fun () ->
     let result =
       try
         let ( let* ) = Result.bind in
@@ -15499,6 +15500,10 @@ let start_ask_answer state ~keeper_name ~ask_id ~source_turn_ref ~answered_label
        operation proceeds straight to canonical reread, even with a full mailbox. *)
     ignore (Ask_answer_receipt.publish submission.as_receipt
       ~observed_ns:(Mtime_clock.elapsed_ns ()) result);
+    let publish_completion asks =
+      ignore (Ask_answer_completion.publish submission.as_completion
+        ~observed_ns:(Mtime_clock.elapsed_ns ()) ~receipt:result ~asks);
+      asks in
     let asks =
       try
         let ( let* ) = Result.bind in
@@ -15506,16 +15511,17 @@ let start_ask_answer state ~keeper_name ~ask_id ~source_turn_ref ~answered_label
           | Some identity -> Ok identity
           | None -> Error "Server workspace identity is unavailable" in
         observe_ask_answer_call submission Ask_answer_observation.Asks_reread (fun () ->
-          Masc_tui_http.fetch_keeper_asks ~expected_workspace ~host ~port ())
+          let asks = Masc_tui_http.fetch_keeper_asks ~expected_workspace ~host ~port () in
+          publish_completion asks)
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error ("asks reload failed: " ^ Printexc.to_string exn)
     in
-    enqueue_async mailbox (Ask_answer_done (submission, result, asks)))
+    ignore (publish_completion asks))
   in
   match Eio_context.get_switch_opt () with
   | Some sw -> fork_workspace_job state ~sw
-      ~on_withdrawn:(fun () -> Ask_answer_receipt.close submission.as_receipt) run_action
+      ~on_withdrawn:(fun () -> close_ask_submission submission) run_action
   | None -> run_action ()
   end
 
@@ -19183,11 +19189,13 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
   | Ask_answer_receipt_ready submission ->
       apply_ask_answer_receipt state submission ~mailbox
   | Ask_answer_done (submission, result, asks) ->
-      apply_ask_answer_receipt state submission ~mailbox;
-      apply_ask_answer_completion state submission result asks;
-      if Option.is_none (Masc_tui_types.current_ask_followup state)
-         && Option.is_none state.ask_followup_error then
-        launch_ask_followup_load state ~mailbox
+      if ask_submission_inflight state submission then begin
+        apply_ask_answer_receipt state submission ~mailbox;
+        apply_ask_answer_completion state submission result asks;
+        if Option.is_none (Masc_tui_types.current_ask_followup state)
+           && Option.is_none state.ask_followup_error then
+          launch_ask_followup_load state ~mailbox
+      end
   | Keeper_chat_dispatch_started (request, was_replay, acknowledge) ->
       let proceed = ref false in
       Fun.protect
@@ -21235,6 +21243,10 @@ let drain_async_messages ?deadline_ns ?(input_pending = fun () -> false) state ~
           (match pending_ask_answer_receipt state with
            | Some (submission, observation) ->
                Some {ready_at_ns=observation.observed_ns; message=Ask_answer_receipt_ready submission}
+           | None -> (match take_pending_ask_answer_completion state with
+           | Some (submission, completion) ->
+               Some {ready_at_ns=completion.observed_ns;
+                 message=ask_answer_completion_message submission completion}
            | None -> (match pending_runtime_form_save_receipt state with
            | Some (request, status, ready_at_ns) ->
                Some {ready_at_ns; message=Runtime_form_save_changed (request, status, ready_at_ns)}
@@ -21246,7 +21258,7 @@ let drain_async_messages ?deadline_ns ?(input_pending = fun () -> false) state ~
                    Some {ready_at_ns;message=Runtime_assignment_changed (request,status,ready_at_ns)}
                | None -> Option.map (fun (request, status, ready_at_ns) ->
                    { ready_at_ns; message = Keeper_creation_changed (request, status) })
-                   (pending_keeper_creation_receipt state))))) in
+                   (pending_keeper_creation_receipt state)))))) in
     match ready with
     | None ->
         state.keeper_creation_waits <- List.filter

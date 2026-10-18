@@ -724,15 +724,31 @@ reread starts without publishing an early queue message. Worker cleanup closes
 an empty cell without inventing an answer outcome and leaves a returned result
 unchanged. Withdrawal before worker entry also closes its empty cell.
 
+The final receipt/reread pair is also published to its original request before
+call-observation logging. Actual errors outside that call use the same once-only
+cell. No final result message is added to the shared queue. Both empty cells
+close on worker exit or pre-entry withdrawal without fabricated outcomes; actual
+returned facts survive.
+
 The regular UI drain recovers pending cells after queued messages, preserving
-queued identity-withdrawal ordering. Final answer completion recovers its cell
-first too, so it cannot substitute a later projected Result for the original
-POST observation. Recovery consumes that pending delivery once; session owners
-keep the actual fact after consumption, supersession and withdrawal. Completed
-or closed owners leave the pending scan. This is process-local retention, not
-restart durability, immediate visibility under queue saturation or new read
-authority. Final completion still uses the existing bounded queue and operation
-admission. No extra POST, GET, retry, publication fiber or protected queue wait.
+queued identity-withdrawal ordering. It first recovers POST receipts, then final
+facts. A final fact recreates the same Workspace_scoped/Ask_answer_done transport
+from the original workspace and read scope, including an originally absent read
+scope; current UI state never fills that absence. The existing operation
+admission/projection preserves a confirmed POST receipt while refusing a retired
+GET. A foreign workspace drops UI delivery while its raw fact remains retained.
+The current/inflight submission check prevents duplicate terminal settlement;
+it adds no read authority and still permits the existing operation outcome when
+identity confirmation is temporarily unavailable.
+
+Recovery consumes each pending transport once; session owners keep raw facts
+after consumption, supersession and withdrawal. Completed/closed owners leave
+their pending scans. Neither publication nor recovery itself settles a draft or
+submission gate. This is process-local retention, not restart durability,
+immediate visibility under queue saturation or new read authority. Frame drain
+budget and shared capacity remain unchanged. No extra POST, GET, retry,
+publication fiber or protected queue wait. See the
+[final-completion source Before/After](../audits/2026-10-19-ask-completion-inbox.md).
 
 Recorded, existing-winner, delivery-pending, append-without-confirmed-winner,
 refused and recording-unconfirmed outcomes remain distinct. Only a newly

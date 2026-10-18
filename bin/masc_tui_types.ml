@@ -2992,16 +2992,53 @@ end = struct
   let close cell = ignore (Atomic.compare_and_set cell Waiting Closed_without_result)
 end
 
+module Ask_answer_completion : sig
+  type observation = private {
+    receipt: (Masc.Tui_decode_asks.ask_answer_receipt, string) result;
+    asks: (Masc.Tui_decode_asks.asks_snapshot, string) result;
+    observed_ns: int64;
+  }
+  type reading = Waiting | Returned of observation | Closed_without_result
+  type t
+  val create : unit -> t
+  val read : t -> reading
+  val publish : t -> observed_ns:int64 ->
+    receipt:(Masc.Tui_decode_asks.ask_answer_receipt, string) result ->
+    asks:(Masc.Tui_decode_asks.asks_snapshot, string) result -> bool
+  val close : t -> unit
+  (** The actual final pair, before UI authority projection. Closing without
+      it does not invent a completed reread or an answer outcome. *)
+end = struct
+  type observation = {
+    receipt: (Masc.Tui_decode_asks.ask_answer_receipt, string) result;
+    asks: (Masc.Tui_decode_asks.asks_snapshot, string) result;
+    observed_ns: int64;
+  }
+  type reading = Waiting | Returned of observation | Closed_without_result
+  type t = reading Atomic.t
+  let create () = Atomic.make Waiting
+  let read = Atomic.get
+  let publish cell ~observed_ns ~receipt ~asks =
+    Atomic.compare_and_set cell Waiting (Returned {receipt; asks; observed_ns})
+  let close cell = ignore (Atomic.compare_and_set cell Waiting Closed_without_result)
+end
+
 type ask_submission = {
   as_request: unit ref;
   as_started_ns: int64;
   as_receipt: Ask_answer_receipt.t;
+  as_completion: Ask_answer_completion.t;
   as_authority: workspace_authority;
+  as_reading: unit ref option; (* Original workspace_enqueue read scope; None was unconfirmed. *)
   as_keeper_name: string;
   as_ask_id: string;
   as_answered_label: string;
   as_source_turn_ref: Ids.Turn_ref.t option;
 }
+
+let close_ask_submission submission =
+  Ask_answer_receipt.close submission.as_receipt;
+  Ask_answer_completion.close submission.as_completion
 
 module Ask_answer_observation : sig
   type call = Workspace_check | Answer_post | Asks_reread
@@ -8069,6 +8106,7 @@ type state = {
      only owners whose receipt/worker closure has not been drained. *)
   mutable ask_answer_submissions: ask_submission list;
   mutable ask_answer_receipt_pending: ask_submission list;
+  mutable ask_answer_completion_pending: ask_submission list;
   (* A response receipt survives ordinary refreshes and transient notices.
      It belongs to its dispatch workspace and never proves Keeper action. *)
   mutable ask_answer_feedback:
@@ -8976,11 +9014,18 @@ let toggle_ask_origin (state : state) origin =
     | Some current when Masc_tui_ask_projection.same_origin current origin -> state.ask_origin <- None
     | Some _ | None -> state.ask_origin <- Some (state.workspace_authority,origin)
 
-let owns_ask_submission (state : state) submission =
+let current_ask_submission (state : state) submission =
   Option.exists (fun current -> current.as_request == submission.as_request)
     state.ask_submission_current
   && submission.as_authority = state.workspace_authority
+
+let owns_ask_submission (state : state) submission =
+  current_ask_submission state submission
   && state.workspace_identity = Workspace_identity_match
+
+(* Additional UI ownership guard after operation admission, not read authority. *)
+let ask_submission_inflight state submission =
+  state.ask_submit_inflight && current_ask_submission state submission
 
 let pending_ask_answer_receipt state =
   state.ask_answer_receipt_pending <- List.filter (fun submission ->
@@ -9003,6 +9048,25 @@ let take_ask_answer_receipt state submission =
        state.ask_answer_receipt_pending <- List.filter
          (fun pending -> pending.as_request != owner.as_request) state.ask_answer_receipt_pending;
        Some (owner, observation))
+
+let take_pending_ask_answer_completion state =
+  state.ask_answer_completion_pending <- List.filter (fun submission ->
+    match Ask_answer_completion.read submission.as_completion with
+    | Ask_answer_completion.Closed_without_result -> false
+    | Ask_answer_completion.Waiting | Ask_answer_completion.Returned _ -> true)
+      state.ask_answer_completion_pending;
+  match List.find_map (fun submission ->
+    match Ask_answer_completion.read submission.as_completion with
+    | Ask_answer_completion.Returned observation -> Some (submission, observation)
+    | Ask_answer_completion.Waiting | Ask_answer_completion.Closed_without_result -> None)
+      state.ask_answer_completion_pending with
+  | None -> None
+  | Some (owner, observation) ->
+    (* Consume only the transport offer. The raw fact remains owned; its UI
+       message must still pass the original operation/read projection. *)
+    state.ask_answer_completion_pending <- List.filter
+      (fun pending -> pending.as_request != owner.as_request) state.ask_answer_completion_pending;
+    Some (owner, observation)
 
 let observe_ask_reread_completion (state : state) submission ~at_ns
     (result : (Masc.Tui_decode_asks.asks_snapshot, string) result) =
@@ -9110,7 +9174,8 @@ let begin_ask_submission_state ?submission (state : state) =
   state.ask_submission_current <- submission;
   Option.iter (fun owner ->
     state.ask_answer_submissions <- owner :: state.ask_answer_submissions;
-    state.ask_answer_receipt_pending <- owner :: state.ask_answer_receipt_pending) submission;
+    state.ask_answer_receipt_pending <- owner :: state.ask_answer_receipt_pending;
+    state.ask_answer_completion_pending <- owner :: state.ask_answer_completion_pending) submission;
   state.ask_submit_inflight <- true;
   retire_asks_read state
 
@@ -13672,6 +13737,7 @@ let create_state
   ask_submission_current = None;
   ask_answer_submissions = [];
   ask_answer_receipt_pending = [];
+  ask_answer_completion_pending = [];
   ask_answer_feedback = None;
   ask_followup_read = Snapshot_read.idle;
   ask_followup = None;

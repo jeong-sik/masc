@@ -52,7 +52,8 @@ end = struct
   let in_flight state = Option.is_some state.pending
 end
 
-(* Local sources keep one active read and one accumulated refresh demand.
+(* In-process source ordering keeps one active read and accumulated refresh demand.
+   Local files and the shared Runtime catalogue use this same effect-free order.
    Revisions order source demands; they are neither timeouts nor action limits. *)
 module Local_read_order : sig
   type t
@@ -6936,6 +6937,17 @@ type runtime_catalog_reading =
   | Runtime_catalog_loading
   | Runtime_catalog_read
   | Runtime_catalog_failed of string
+  | Runtime_catalog_refreshing of string option
+      (* Last successful observation remains visible; optional prior refresh failure. *)
+  | Runtime_catalog_stale of string
+
+type runtime_catalog_request = {
+  rcr_request : Local_read_order.request;
+  rcr_authority : workspace_authority;
+  rcr_reading : unit ref;
+  rcr_workspace : Tui_decode.server_identity;
+  rcr_started_ns : int64;
+}
 
 (* A goal lifecycle request the detail view holds before sending it. Most
    actions arm for a second keypress. A drop instead collects the reason it
@@ -7655,7 +7667,8 @@ type state = {
   mutable overview_goals: overview_goals_reading;
   mutable runtime_lanes: Tui_decode.runtime_resolved_lane list;
   mutable runtime_assignments: Tui_decode.runtime_assignment list;
-  mutable runtime_catalog_generation: int;
+  mutable runtime_catalog_order: Local_read_order.t;
+  mutable runtime_catalog_resume: bool;
   mutable runtime_catalog_reading: runtime_catalog_reading;
   (* Lazy loads for the two detail panes; the id names which row the answer
      belongs to so a stale load is discarded, not drawn under another item.
@@ -9532,6 +9545,54 @@ let keeper_settings_editor_notice state =
         | Absent | Loading -> None)
   | Some _ | None -> None
 
+let runtime_catalog_has_observation state =
+  match state.runtime_catalog_reading with
+  | Runtime_catalog_read | Runtime_catalog_refreshing _ | Runtime_catalog_stale _ -> true
+  | Runtime_catalog_unread | Runtime_catalog_loading | Runtime_catalog_failed _ -> false
+
+let runtime_catalog_request_current state request =
+  request.rcr_authority=state.workspace_authority && request.rcr_reading==state.workspace_read_authority
+  && state.workspace_identity=Workspace_identity_match && server_authority_ready state
+  && server_workspace_matches ~expected:(Some request.rcr_workspace)
+       (match state.server_identity with Some identity -> Ok identity | None -> Error "unread")
+
+let begin_runtime_catalog_read state ~intent ~started_ns =
+  match state.server_identity with
+  | Some workspace when state.workspace_identity=Workspace_identity_match && server_authority_ready state ->
+      let order,started = Local_read_order.start ~intent state.runtime_catalog_order in
+      state.runtime_catalog_order <- order;
+      state.runtime_catalog_resume <- false;
+      Option.map (fun (request,_) ->
+        state.runtime_catalog_reading <- (match state.runtime_catalog_reading with
+          | Runtime_catalog_read -> Runtime_catalog_refreshing None
+          | Runtime_catalog_stale detail -> Runtime_catalog_refreshing (Some detail)
+          | Runtime_catalog_refreshing detail -> Runtime_catalog_refreshing detail
+          | Runtime_catalog_unread | Runtime_catalog_loading | Runtime_catalog_failed _ -> Runtime_catalog_loading);
+        {rcr_request=request;rcr_authority=state.workspace_authority;
+         rcr_reading=state.workspace_read_authority;rcr_workspace=workspace;rcr_started_ns=started_ns}) started
+  | Some _ | None -> state.runtime_catalog_resume <- true; None
+
+let suspend_runtime_catalog_read state =
+  let nested = state.view=Keepers Keeper_runtime_pick || Option.is_some state.runtime_lane_pick
+    || Option.is_some state.slot_editor || (state.context_inspector_open &&
+      match state.context_inspector_target with
+      | Masc_tui_context_inspector.Recent _ -> true | Masc_tui_context_inspector.Pinned _ -> false) in
+  state.runtime_catalog_resume <- state.runtime_catalog_resume || nested
+    || Local_read_order.in_flight state.runtime_catalog_order || Local_read_order.has_followup state.runtime_catalog_order;
+  state.runtime_catalog_order <- Local_read_order.invalidate state.runtime_catalog_order;
+  state.runtime_catalog_reading <- (match state.runtime_catalog_reading with
+    | Runtime_catalog_read | Runtime_catalog_refreshing _ | Runtime_catalog_stale _ ->
+        Runtime_catalog_stale "Workspace reading suspended; last observed catalogue retained"
+    | Runtime_catalog_loading -> Runtime_catalog_unread
+    | (Runtime_catalog_unread | Runtime_catalog_failed _) as reading -> reading)
+
+let clear_runtime_catalog_read state =
+  state.runtime_catalog_order <- Local_read_order.invalidate state.runtime_catalog_order;
+  state.runtime_catalog_resume <- false;
+  state.runtime_catalog_reading <- Runtime_catalog_unread;
+  state.runtime_catalog <- []; state.runtime_lanes <- []; state.runtime_assignments <- [];
+  state.runtime_catalog_default_route <- None
+
 let suspend_workspace_readings state =
   retire_keeper_settings_editor state;
   suspend_keeper_logs state;
@@ -9641,10 +9702,7 @@ let suspend_workspace_readings state =
   state.connectors_inflight <- false;
   state.connectors_reload_after_inflight <- false;
   state.memory_health_inflight <- false;
-  state.runtime_catalog_generation <- state.runtime_catalog_generation + 1;
-  (match state.runtime_catalog_reading with
-   | Runtime_catalog_loading -> state.runtime_catalog_reading <- Runtime_catalog_unread
-   | Runtime_catalog_unread | Runtime_catalog_failed _ | Runtime_catalog_read -> ());
+  suspend_runtime_catalog_read state;
   state.runtime_config_read <- `Idle;
   state.runtime_params_loading <- false;
   state.standalone_lanes_inflight <- false;
@@ -13075,7 +13133,8 @@ let create_state
   overview_goals = Goals_unread;
   runtime_lanes = [];
   runtime_assignments = [];
-  runtime_catalog_generation = 0;
+  runtime_catalog_order = Local_read_order.idle;
+  runtime_catalog_resume = false;
   runtime_catalog_reading = Runtime_catalog_unread;
   goal_timeline = None;
   task_history = None;
@@ -15384,6 +15443,22 @@ let apply_runtime_catalog state (runtimes, lanes, assignments, default_route) =
   state.runtime_catalog_default_route <- default_route;
   state.runtime_catalog_reading <- Runtime_catalog_read
 
+let take_runtime_catalog_read state request result =
+  if not (runtime_catalog_request_current state request) then false
+  else match Local_read_order.settle state.runtime_catalog_order request.rcr_request ~observed:(Result.is_ok result) with
+  | None -> false
+  | Some order ->
+      state.runtime_catalog_order <- order;
+      (match result with
+       | Ok catalog ->
+           apply_runtime_catalog state catalog;
+           if Local_read_order.has_followup order then
+             state.runtime_catalog_reading <- Runtime_catalog_refreshing None
+       | Error detail ->
+           state.runtime_catalog_reading <- (if runtime_catalog_has_observation state
+             then Runtime_catalog_stale detail else Runtime_catalog_failed detail));
+      true
+
 let lane_picker_existing_slots (state : state) = function
   | Pick_exact_lane lane | Pick_exact_lane_replacement (lane, _, _) ->
     (match state.standalone_lanes with
@@ -15503,11 +15578,12 @@ let runtime_picker_rows (state : state) pick =
         landing |> List.filter (fun runtime ->
           not (List.mem runtime.Tui_decode.ro_id already))
     | Pick_exact_lane_replacement _,
-      (Runtime_catalog_unread | Runtime_catalog_loading | Runtime_catalog_failed _) -> []
+      (Runtime_catalog_unread | Runtime_catalog_loading | Runtime_catalog_failed _
+       | Runtime_catalog_refreshing _ | Runtime_catalog_stale _) -> []
     | ( ( Pick_conversation_lane _ | Pick_exact_lane _ | Pick_new_lane _
         | Pick_media_failover | Pick_route_default )
       , ( Runtime_catalog_unread | Runtime_catalog_loading
-        | Runtime_catalog_read | Runtime_catalog_failed _ ) ) ->
+        | Runtime_catalog_read | Runtime_catalog_failed _ | Runtime_catalog_refreshing _ | Runtime_catalog_stale _ ) ) ->
         landing @ refused in
   let runtime_choices =
     rows
@@ -15521,6 +15597,18 @@ let runtime_picker_rows (state : state) pick =
 (* The one row the picker draws when it has no rows: the catalogue is unread,
    or it is read and the filter keeps none of it. The two need different
    actions, so they read differently. *)
+let runtime_catalog_reading_suffix = function
+  | Runtime_catalog_read -> ""
+  | Runtime_catalog_unread -> " · catalogue not read"
+  | Runtime_catalog_loading -> " · reading catalogue"
+  | Runtime_catalog_refreshing None -> " · refreshing; last observed catalogue"
+  | Runtime_catalog_refreshing (Some detail) ->
+      " · retrying; last refresh failed: " ^ Masc.Tui_terminal_text.sanitize_terminal_text detail
+  | Runtime_catalog_stale detail ->
+      " · last observed catalogue: " ^ Masc.Tui_terminal_text.sanitize_terminal_text detail
+  | Runtime_catalog_failed detail ->
+      " · catalogue read failed: " ^ Masc.Tui_terminal_text.sanitize_terminal_text detail
+
 let runtime_picker_empty_note picker =
   let noun = match picker.rlp_pick with
     | Pick_route_default -> "route"
@@ -15529,6 +15617,9 @@ let runtime_picker_empty_note picker =
   match picker.rlp_catalog_reading with
   | Runtime_catalog_unread -> Printf.sprintf "  (%s catalogue unread)" noun
   | Runtime_catalog_loading -> Printf.sprintf "  (%s catalogue loading)" noun
+  | Runtime_catalog_refreshing _ -> Printf.sprintf "  (%s catalogue refreshing; last observation retained)" noun
+  | Runtime_catalog_stale detail ->
+      "  (" ^ noun ^ " catalogue needs refresh: " ^ Masc.Tui_terminal_text.sanitize_terminal_text detail ^ ")"
   | Runtime_catalog_failed detail ->
       "  (" ^ noun ^ " catalogue read failed: "
       ^ Masc.Tui_terminal_text.sanitize_terminal_text detail ^ ")"
@@ -15582,11 +15673,7 @@ let runtime_picker_projection ?(page=runtime_picker_page) (state : state) =
       rlp_total = view.Masc_tui_pick_list.total;
       rlp_catalog_reading = state.runtime_catalog_reading;
       rlp_summary = Masc_tui_pick_list.summary view ^
-        (match state.runtime_catalog_reading with
-         | Runtime_catalog_loading -> " · refreshing catalogue"
-         | Runtime_catalog_failed detail ->
-             " · catalogue read failed: " ^ Masc.Tui_terminal_text.sanitize_terminal_text detail
-         | Runtime_catalog_unread | Runtime_catalog_read -> "");
+        runtime_catalog_reading_suffix state.runtime_catalog_reading;
       rlp_filter = view.Masc_tui_pick_list.filter })
     state.runtime_lane_pick
 
@@ -16331,9 +16418,15 @@ let keeper_runtime_picker_summary view =
 (* The row in place of the column header when there are no rows; [None]
    while there are. An unread catalogue is waited for and an empty match is
    typed away, so they read differently. *)
-let keeper_runtime_picker_empty_note view =
+let keeper_runtime_picker_empty_note ~reading view =
   if view.Masc_tui_pick_list.total = 0 then
-    Some "  (loading runtime catalogue\xe2\x80\xa6)"
+    Some (match reading with
+      | Runtime_catalog_read -> "  (runtime catalogue is empty)"
+      | Runtime_catalog_unread -> "  (runtime catalogue not read yet)"
+      | Runtime_catalog_loading -> "  (reading runtime catalogue…)"
+      | Runtime_catalog_refreshing _ -> "  (refreshing the last empty runtime catalogue)"
+      | Runtime_catalog_stale detail | Runtime_catalog_failed detail ->
+          "  (runtime catalogue needs refresh: " ^ Masc.Tui_terminal_text.sanitize_terminal_text detail ^ ")")
   else if view.Masc_tui_pick_list.shown = 0 then
     Some
       (Printf.sprintf "  (no lane or runtime among %d matches the filter)"

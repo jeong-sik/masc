@@ -1478,11 +1478,14 @@ let render_runtime_pick (state : state) =
     ~hints:(Masc_tui_keys.footer_hints (Keepers Keeper_runtime_pick))
     ~body:(fun ~budget:_ c ->
       c.push_styled ~style:(Theme.info ())
-        ("  " ^ Masc_tui_types.keeper_runtime_picker_summary view);
-      (match state.runtime_catalog_reading, Masc_tui_types.keeper_runtime_picker_empty_note view with
+        ("  " ^ Masc_tui_types.keeper_runtime_picker_summary view
+          ^ Masc_tui_types.runtime_catalog_reading_suffix state.runtime_catalog_reading);
+      (match state.runtime_catalog_reading, Masc_tui_types.keeper_runtime_picker_empty_note ~reading:state.runtime_catalog_reading view with
        | Runtime_catalog_failed err, _ -> c.push (data_unreliable_row ~cols err)
-       | (Runtime_catalog_unread | Runtime_catalog_loading | Runtime_catalog_read), Some note -> c.push (Ansi.dim ^ note ^ Ansi.reset)
-       | (Runtime_catalog_unread | Runtime_catalog_loading | Runtime_catalog_read), None ->
+       | (Runtime_catalog_unread | Runtime_catalog_loading | Runtime_catalog_read
+          | Runtime_catalog_refreshing _ | Runtime_catalog_stale _), Some note -> c.push (Ansi.dim ^ note ^ Ansi.reset)
+       | (Runtime_catalog_unread | Runtime_catalog_loading | Runtime_catalog_read
+          | Runtime_catalog_refreshing _ | Runtime_catalog_stale _), None ->
            (* The first header cell spans badge and target, as the rows
               do. *)
            let header =

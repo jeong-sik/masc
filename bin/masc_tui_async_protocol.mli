@@ -450,7 +450,7 @@ type async_msg =
       * (Masc_tui_types.slot_editor_target * Masc_tui_types.slot_editor_identity * Masc_tui_types.slot_editor_identity) option
       * (Masc_tui_runtime_config_receipt.t, string) result
   | Runtime_catalog_loaded of
-      int * ( Masc.Tui_decode.runtime_option list
+      runtime_catalog_request * ( Masc.Tui_decode.runtime_option list
         * Masc.Tui_decode.runtime_resolved_lane list
         * Masc.Tui_decode.runtime_assignment list
         * string option,

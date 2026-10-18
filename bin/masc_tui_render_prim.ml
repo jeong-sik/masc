@@ -5078,15 +5078,20 @@ let context_input_map_lines ~cols ~scale state (record : Turn_record.t)
 let context_inspector_content_lines ~cols state : context_pane_body =
   let runtime_details id =
     match state.runtime_catalog_reading with
-    | Runtime_catalog_read ->
-      (match List.find_opt (fun (r:Tui_decode.runtime_option) -> String.equal r.ro_id id) state.runtime_catalog with
+    | Runtime_catalog_read | Runtime_catalog_refreshing _ | Runtime_catalog_stale _ ->
+      let notice = match state.runtime_catalog_reading with
+        | Runtime_catalog_read -> []
+        | Runtime_catalog_refreshing _ | Runtime_catalog_stale _ ->
+            [Masc_tui_types.runtime_catalog_reading_suffix state.runtime_catalog_reading]
+        | Runtime_catalog_unread | Runtime_catalog_loading | Runtime_catalog_failed _ -> [] in
+      notice @ (match List.find_opt (fun (r:Tui_decode.runtime_option) -> String.equal r.ro_id id) state.runtime_catalog with
        | None -> ["Connection/model configuration unavailable in the current catalogue"]
        | Some runtime ->
          [ Printf.sprintf "Quota scope %s · %s" (runtime_quota_scope_label runtime) runtime.ro_provider
          ; "Connection " ^ runtime.ro_provider_id
          ; Printf.sprintf "Configured context %d tokens (%s) · model %s"
              runtime.ro_effective_max_context (Tui_decode.runtime_context_source_label runtime.ro_max_context_source) runtime.ro_model
-         ; "Current configuration; the captured turn above retains its own runtime and context." ])
+         ; "Last observed configuration; the captured turn above retains its own runtime and context." ])
     | Runtime_catalog_loading -> ["Loading connection/model configuration…"]
     | Runtime_catalog_unread | Runtime_catalog_failed _ -> ["Connection/model configuration unavailable; refresh to read it"] in
   match state.context_inspector_reading with

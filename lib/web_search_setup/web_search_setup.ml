@@ -197,24 +197,97 @@ let read_back doc = function
   | Unset key -> not (List.mem_assoc (dotted key) doc)
 ;;
 
+let index_substring_from s sub start =
+  let s_len = String.length s in
+  let sub_len = String.length sub in
+  let rec loop i =
+    if i + sub_len > s_len
+    then None
+    else if String.equal (String.sub s i sub_len) sub
+    then Some i
+    else loop (i + 1)
+  in
+  loop start
+;;
+
+let authority_end value start =
+  let len = String.length value in
+  let rec loop i =
+    if i >= len
+    then len
+    else (
+      match value.[i] with
+      | '/' | '?' | '#' -> i
+      | _ -> loop (i + 1))
+  in
+  loop start
+;;
+
+let scrub_authority value auth_start =
+  let auth_end = authority_end value auth_start in
+  if auth_end <= auth_start
+  then value
+  else (
+    match String.rindex_opt (String.sub value auth_start (auth_end - auth_start)) '@' with
+    | None -> value
+    | Some at_idx ->
+      let host_offset = auth_start + at_idx in
+      String.concat
+        ""
+        [ String.sub value 0 auth_start
+        ; "[REDACTED]"
+        ; String.sub value host_offset (String.length value - host_offset)
+        ])
+;;
+
+let authority_start value =
+  if String.starts_with ~prefix:"//" value
+  then 2
+  else (
+    let first_delim = authority_end value 0 in
+    match index_substring_from value "://" 0 with
+    | Some scheme_end
+      when scheme_end + 1 = first_delim
+           && not (String.contains (String.sub value 0 scheme_end) '@') ->
+      scheme_end + 3
+    | Some _ | None -> 0)
+;;
+
+let display_searxng_url value = scrub_authority value (authority_start value)
+;;
+
 (* The searxng URL is refused here, not left to the loader. The loader checks a
    value's type and range and not its scheme; the reader
    ([Env_config_runtime.Tools.searxng_base_url]) refuses any scheme but http
-   and https each time a search resolves it. A writer that passed a typo
-   through would leave a provider that fails on every call and reads as
-   configured. A host is required on top of the reader's scheme rule: an http
-   URL with none cannot be searched, and is a typo whichever reader sees it. *)
+   and https and any userinfo each time a search resolves it. A writer that
+   passed a typo through would leave a provider that fails on every call and
+   reads as configured. A host is required on top of the reader's scheme rule:
+   an http URL with none cannot be searched, and is a typo whichever reader
+   sees it. *)
 let change_problem = function
   | Set_searxng_url url ->
     let uri = Uri.of_string url in
-    (match Option.map String.lowercase_ascii (Uri.scheme uri), Uri.host uri with
-     | Some ("http" | "https"), Some host when not (String.equal host "") -> None
-     | Some _, _ | None, _ ->
+    let has_authority_userinfo = not (String.equal url (display_searxng_url url)) in
+    (match
+       ( Option.map String.lowercase_ascii (Uri.scheme uri)
+       , Uri.host uri
+       , Uri.userinfo uri
+       , has_authority_userinfo )
+     with
+     | Some ("http" | "https"), Some host, None, false when not (String.equal host "") ->
+       None
+     | Some ("http" | "https"), Some host, (Some _ | None), _ when not (String.equal host "") ->
+       Some
+         (Printf.sprintf
+            "%s must not contain userinfo credentials (got %S)"
+            (dotted Searxng_url)
+            (display_searxng_url url))
+     | Some _, _, _, _ | None, _, _, _ ->
        Some
          (Printf.sprintf
             "%s must be an http or https URL with a host (got %S)"
             (dotted Searxng_url)
-            url))
+            (display_searxng_url url)))
   | Set_provider _
   | Set_provider_order _
   | Set_fallbacks _

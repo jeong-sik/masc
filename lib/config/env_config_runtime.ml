@@ -348,6 +348,62 @@ module Tools = struct
 
   (* Unset or blank is the local default instance; anything else must be an
      http(s) URL. *)
+  let index_substring_from s sub start =
+    let s_len = String.length s in
+    let sub_len = String.length sub in
+    let rec loop i =
+      if i + sub_len > s_len
+      then None
+      else if String.equal (String.sub s i sub_len) sub
+      then Some i
+      else loop (i + 1)
+    in
+    loop start
+
+  let authority_end value start =
+    let len = String.length value in
+    let rec loop i =
+      if i >= len
+      then len
+      else (
+        match value.[i] with
+        | '/' | '?' | '#' -> i
+        | _ -> loop (i + 1))
+    in
+    loop start
+
+  let redact_url_userinfo value =
+    let auth_start =
+      if String.starts_with ~prefix:"//" value
+      then 2
+      else (
+        let first_delim = authority_end value 0 in
+        match index_substring_from value "://" 0 with
+        | Some scheme_end
+          when scheme_end + 1 = first_delim
+               && not (String.contains (String.sub value 0 scheme_end) '@') ->
+          scheme_end + 3
+        | Some _ | None -> 0)
+    in
+    let auth_end = authority_end value auth_start in
+    if auth_end <= auth_start
+    then value
+    else (
+      match
+        String.rindex_opt
+          (String.sub value auth_start (auth_end - auth_start))
+          '@'
+      with
+      | None -> value
+      | Some at_idx ->
+        let host_offset = auth_start + at_idx in
+        String.concat
+          ""
+          [ String.sub value 0 auth_start
+          ; "[REDACTED]"
+          ; String.sub value host_offset (String.length value - host_offset)
+          ])
+
   let searxng_base_url () =
     let url =
       match raw_value_opt "MASC_SEARXNG_URL" with
@@ -358,13 +414,26 @@ module Tools = struct
         else normalized
       | None -> Masc_network_defaults.searxng_default_url
     in
-    match Uri.scheme (Uri.of_string url) |> Option.map String.lowercase_ascii with
-    | Some ("http" | "https") -> Ok url
-    | Some _ | None ->
+    let uri = Uri.of_string url in
+    let redacted = redact_url_userinfo url in
+    let has_userinfo =
+      Option.is_some (Uri.userinfo uri) || not (String.equal url redacted)
+    in
+    match
+      ( Uri.scheme uri |> Option.map String.lowercase_ascii
+      , Uri.host uri
+      , has_userinfo )
+    with
+    | Some ("http" | "https"), Some host, false when not (String.equal host "") ->
+      Ok url
+    | Some ("http" | "https"), Some host, true when not (String.equal host "") ->
+      Error "MASC_SEARXNG_URL must not contain userinfo credentials"
+    | (Some _ | None), _, _ ->
       Error
-        (Printf.sprintf "MASC_SEARXNG_URL must use http or https scheme (got: %s)" url)
-
-end
+        (Printf.sprintf
+           "MASC_SEARXNG_URL must use http or https scheme (got: %s)"
+           redacted)
+  end
 
 (** {1 OpenTelemetry Configuration} *)
 

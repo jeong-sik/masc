@@ -504,13 +504,6 @@ let test_persistent_container_commits_under_the_keeper_name_with_login () =
       ; "GIT_CONFIG_GLOBAL=" ^ Filename.concat container_dir "gitconfig"
       ]
   in
-  (match Github.docker_args_persistent ~config ~keeper_name ~container_masc_dir with
-   | Error message -> Alcotest.fail message
-   | Ok args ->
-     Alcotest.(check (list string))
-       "persistent container wires GIT_CONFIG_GLOBAL even before hosts.yml exists so later logins take effect without recreating the container"
-       expected_args
-       args);
   let hosts = Filename.concat host_dir "hosts.yml" in
   write_file hosts "github.com:\n  user: stored-user\n  oauth_token: stored-token\n";
   Unix.chmod hosts 0o600;

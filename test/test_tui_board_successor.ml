@@ -38,12 +38,14 @@ let test_open_post_owns_target () =
 let test_detail_scope_owns_target () =
   let state = state [post ~successor:"old" "A"] in
   let loading, request = match Detail.start state.board_detail ~post_id:"A" with
-    | Started pair -> pair | Already_loading -> fail "unexpected pending request" in
+    | Started (detail, request) -> detail, request
+    | Already_loading -> fail "unexpected pending request" in
   state.board_detail <- Detail.complete loading request
       (Ok (post ~successor:"new" "A",[],None));
   check_target "current detail replaces list metadata" (Some ("A","new")) state;
   let loading, request = match Detail.start (Detail.clear state.board_detail) ~post_id:"A" with
-    | Started pair -> pair | Already_loading -> fail "unexpected pending request" in
+    | Started (detail, request) -> detail, request
+    | Already_loading -> fail "unexpected pending request" in
   state.board_detail <- Detail.complete loading request
       (Ok (post ~successor:"wrong" "B",[],None));
   check_target "different returned post cannot redirect" None state

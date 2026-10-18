@@ -1954,7 +1954,7 @@ let test_question_origin_survives_answer_and_workspace_change () =
   let origin = Ask.origin_of_row original in
   toggle_ask_origin state origin;
   let submission : ask_submission =
-    {as_request=ref ();as_started_ns=0L;as_authority=state.workspace_authority;
+    {as_request=ref ();as_started_ns=0L;as_receipt=Ask_answer_receipt.create ();as_authority=state.workspace_authority;
      as_keeper_name=original.ar_keeper;as_ask_id=original.ar_id;as_answered_label="private choice";
      as_source_turn_ref=original.ar_source_turn_ref} in
   begin_ask_submission_state ~submission state;
@@ -1998,7 +1998,7 @@ let test_answer_receipt_has_one_original_submission_owner () =
   state.workspace_identity <- Workspace_identity_match;
   state.server_identity <- Some (identity "/workspace/a");
   let submission ask_id : ask_submission =
-    { as_request = ref (); as_started_ns = 10L; as_authority = state.workspace_authority;
+    { as_request = ref (); as_started_ns = 10L; as_receipt=Ask_answer_receipt.create (); as_authority = state.workspace_authority;
       as_keeper_name = "reader"; as_ask_id = ask_id; as_source_turn_ref = None; as_answered_label = "reader: choice" } in
   let first = submission "first" in
   begin_ask_submission_state ~submission:first state;
@@ -2057,6 +2057,86 @@ let test_answer_receipt_has_one_original_submission_owner () =
   Alcotest.(check bool) "unconfirmed workspace grants no reread admission" true
     (Option.is_none (observe_ask_reread_completion state unread ~at_ns:41L (Ok empty)))
 
+let test_answer_receipt_survives_full_mailbox_and_worker_cancellation () =
+  Eio_main.run @@ fun _ ->
+  Eio.Switch.run @@ fun sw ->
+  let open Masc_tui_types in
+  let module R = Ask_answer_receipt in
+  let module Decode = Masc.Tui_decode_asks in
+  let state = create_state ~workspace:"receipt" ~local_base_path:"/workspace/receipt"
+      ~port:0 ~refresh_interval:0. () in
+  state.workspace_identity <- Workspace_identity_match;
+  state.server_identity <- Some (identity state.local_base_path);
+  let source = Ids.Turn_ref.make ~trace_id:"question-before-cancellation" ~absolute_turn:17 in
+  let submission name : ask_submission =
+    {as_request=ref ();as_started_ns=10L;as_receipt=R.create ();
+     as_authority=state.workspace_authority;as_keeper_name="reader";as_ask_id=name;
+     as_answered_label="original choice";as_source_turn_ref=Some source} in
+  let original = submission "original" in
+  begin_ask_submission_state ~submission:original state;
+  let mailbox = Eio.Stream.create 1 in
+  Eio.Stream.add mailbox ();
+  let entered, enter = Eio.Promise.create () and cancellation, set_cancellation = Eio.Promise.create () in
+  let receipt = Ok (Decode.Ask_answer_recorded Decode.Ask_wake_stored) in
+  let worker = Eio.Fiber.fork_promise ~sw (fun () ->
+    Eio.Cancel.sub (fun context ->
+      Eio.Promise.resolve set_cancellation context;
+      Fun.protect ~finally:(fun () -> R.close original.as_receipt) (fun () ->
+        (* The production publication primitive has no mailbox dependency.
+           This fixture then advances downstream and waits on notification. *)
+        Alcotest.(check bool) "first actual result is published" true
+          (R.publish original.as_receipt ~observed_ns:20L receipt);
+        Eio.Promise.resolve enter ();
+        Eio.Stream.add mailbox ()))) in
+  Eio.Promise.await entered;
+  Alcotest.(check int) "downstream fixture step was reached without consuming the full mailbox" 1
+    (Eio.Stream.length mailbox);
+  Eio.Cancel.cancel (Eio.Promise.await cancellation) Exit;
+  (match Eio.Promise.await worker with
+   | Error (Eio.Cancel.Cancelled _) -> ()
+   | Error error -> Alcotest.fail (Printexc.to_string error)
+   | Ok () -> Alcotest.fail "final notification unexpectedly entered the full mailbox");
+  Alcotest.(check bool) "worker cleanup cannot overwrite the actual result" false
+    (R.publish original.as_receipt ~observed_ns:21L (Error "late cancellation"));
+  Alcotest.(check bool) "publication grants no feedback or final action settlement" true
+    (state.ask_submit_inflight && Option.is_none state.ask_answer_feedback);
+  let Workspace_authority generation = state.workspace_authority in
+  state.workspace_authority <- Workspace_authority (generation+1);
+  state.ask_submission_current <- None;
+  state.ask_submit_inflight <- false;
+  let pending, observed = match pending_ask_answer_receipt state with
+    | Some pending -> pending | None -> Alcotest.fail "withdrawal lost the published receipt" in
+  Alcotest.(check bool) "pending receipt keeps original result, timestamp and source" true
+    (pending.as_request==original.as_request && observed.result=receipt && observed.observed_ns=20L
+     && pending.as_source_turn_ref=Some source);
+  let impostor = {original with as_receipt=R.create ()} in
+  ignore (R.publish impostor.as_receipt ~observed_ns:99L (Error "unrelated result"));
+  let owner, observed = match take_ask_answer_receipt state impostor with
+    | Some observed -> observed | None -> Alcotest.fail "registered original receipt was not recoverable" in
+  Alcotest.(check bool) "drain reads the registered owner's cell, never a replacement payload" true
+    (owner==original && observed.result=receipt);
+  Alcotest.(check bool) "foreign workspace receipt gains no current feedback" true
+    (Option.is_none (retain_ask_answer_feedback state owner observed.result));
+  Alcotest.(check bool) "a recovered receipt is consumed once but its fact remains session-owned" true
+    (Option.is_none (take_ask_answer_receipt state original)
+     && List.exists (fun held -> held==original) state.ask_answer_submissions
+     && match R.read original.as_receipt with R.Returned kept -> kept.result=receipt | R.Waiting | R.Closed_without_result -> false);
+  let abandoned = submission "no-observed-result" in
+  begin_ask_submission_state ~submission:abandoned state;
+  R.close abandoned.as_receipt;
+  Alcotest.(check bool) "worker closure invents neither an answer result nor pending notification" true
+    (Option.is_none (pending_ask_answer_receipt state)
+     && match R.read abandoned.as_receipt with R.Closed_without_result -> true | R.Waiting | R.Returned _ -> false);
+  let replacement = submission "replacement" in
+  begin_ask_submission_state ~submission:replacement state;
+  let unknown = Error "response unavailable" in
+  ignore (R.publish replacement.as_receipt ~observed_ns:30L unknown);
+  let owner, observed = match take_ask_answer_receipt state replacement with
+    | Some observed -> observed | None -> Alcotest.fail "replacement lost its own receipt" in
+  Alcotest.(check bool) "replacement retains only its own unconfirmed answer observation" true
+    (Option.is_some (retain_ask_answer_feedback state owner observed.result)
+     && observed.result=unknown && owner.as_request==replacement.as_request)
+
 let original_answer_followup_identity ?(at=200.) ?(stimulus="original-source") () =
   let module Decode = Masc.Tui_decode_asks in
   let json = `Assoc ["workspace",`Assoc ["base_path",`String "/workspace/followup";
@@ -2076,7 +2156,7 @@ let answer_followup_state () =
       ~port:0 ~refresh_interval:0. () in
   state.workspace_identity <- Workspace_identity_match;
   state.server_identity <- Some (identity state.local_base_path);
-  let submission name : ask_submission = {as_request=ref ();as_started_ns=0L;as_authority=state.workspace_authority;
+  let submission name : ask_submission = {as_request=ref ();as_started_ns=0L;as_receipt=Ask_answer_receipt.create ();as_authority=state.workspace_authority;
       as_keeper_name="alpha";as_ask_id=name;as_source_turn_ref=None;as_answered_label="choice"} in
   let first = submission "original" in
   begin_ask_submission_state ~submission:first state;
@@ -3774,6 +3854,8 @@ let () =
             test_question_origin_survives_answer_and_workspace_change
         ; Alcotest.test_case "answer receipt has one original submission owner" `Quick
             test_answer_receipt_has_one_original_submission_owner
+        ; Alcotest.test_case "answer receipt survives full mailbox and worker cancellation" `Quick
+            test_answer_receipt_survives_full_mailbox_and_worker_cancellation
         ; Alcotest.test_case "local and HTTP sources progress independently" `Quick
             test_local_read_and_http_sources_progress_independently
         ; Alcotest.test_case "local read refuses retired epochs and foreign paths" `Quick

@@ -115,6 +115,7 @@ function capturePaths(root, asset) {
 }
 function captureMatches(asset, timeline) {
   if (!isDeepStrictEqual(asset.manifest, timeline.manifest)
+      || !isDeepStrictEqual(asset.midiTime, timeline.midiTime)
       || (timeline.audio[0]?.hostTime ?? null) !== asset.manifest.clock.firstAudioHostTime
       || [...timeline.midi.values()].some(track => !asset.manifest.midiSources.some(source => source.id === track.source))) {
     throw new Error('Captured source manifest or clock provenance disagrees with its data')
@@ -141,6 +142,7 @@ export async function importArrangementCapture(project, input, { projectPath, na
   }
   const timeline = await readCaptureFiles(capturePaths(root, { parts }), { signal })
   const asset = { kind: 'capture', id: arrangementID(project.assets, 'asset'), name, parts,
+    midiTime: structuredClone(timeline.midiTime),
     manifest: structuredClone(validateCaptureManifest(timeline.manifest)) }
   captureMatches(asset, timeline); signal?.throwIfAborted()
   return { project: editArrangement(project, { kind: 'asset-add', asset }), asset: asset.id }

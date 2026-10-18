@@ -71,6 +71,7 @@ export class CaptureTimeline {
     this.midi = new Map()
     this.frames = 0n
     this.packets = 0n
+    this.midiTime = { first: null, last: null }
     this.ordinal = 0
     this.duration = 0
   }
@@ -114,6 +115,9 @@ export class CaptureTimeline {
       }
       this.duration = Math.max(this.duration, time)
     }
+    const host = clockInteger(row.hostTime, 'MIDI host time')
+    if (this.midiTime.first === null || host < BigInt(this.midiTime.first)) this.midiTime.first = row.hostTime
+    if (this.midiTime.last === null || host > BigInt(this.midiTime.last)) this.midiTime.last = row.hostTime
     this.packets++
   }
 }

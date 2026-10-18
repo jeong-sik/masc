@@ -19,7 +19,9 @@ const help = [
   ':place asset-2 4 2             MIDI format-2 pattern 2 at beat 4',
   ':region asset-1 0 1200 4800 2   asset, beat, native offset/extent, repeats',
   ':region asset-2 4 0 2002 1 2    optional final pattern starts at 1',
-  ':trim 2400 4800                whole WAV frames or original MIDI ticks',
+  ':capture-region asset-3 4 0.5 2 3  beat, source start/duration seconds, repeats',
+  ':trim-time 0.5 2              captured region source start/duration seconds',
+  ':trim 2400 4800                WAV frames, MIDI ticks or captured host ticks',
   ':move 8    :repeat 4    :duplicate 16    :remove',
   ':lane-add wave Bass    :lane-add midi Keys    :lane 2',
   ':region-lane 2    :lane-name Bass    :region-name Verse    :lane-remove',
@@ -28,6 +30,7 @@ const help = [
   ':save    :save-as /path/song.json    :undo    :redo',
   'Arrows: cursor/regions; Shift+Left/Right: move region; Tab: lane; a: asset',
   'Enter: place selected asset; d: duplicate at cursor; x/Delete: remove',
+  'Captured asset: Enter opens source; Shift+Enter or :place adds its region.',
   'u/y: undo/redo; m/o: mute/solo; s: save; q/Esc: save and return',
   'Regions run at original speed. Project tempo moves positions without warping.',
   'Space: play/pause/resume; :stop; :seek BEAT; :output AUDIO_UID',
@@ -253,7 +256,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
         case 'a': action = { kind: 'asset' }; break
         case 'tab': action = { kind: 'lane' }; break
         case 'return':
-          if (editor.project.assets.find(asset => asset.id === editor.asset)?.kind === 'capture') { openTake(editor.asset); return }
+          if (!key.shift && editor.project.assets.find(asset => asset.id === editor.asset)?.kind === 'capture') { openTake(editor.asset); return }
           action = { kind: 'place' }; break
         case 'delete': case 'backspace': case 'x': action = { kind: 'remove' }; break
         case 'd': action = { kind: 'duplicate' }; break
@@ -300,12 +303,12 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
           const endTick = region.endSeconds * project.tempo / 60 * project.ppq
           const from = Math.max(0, Math.floor((region.position - left) / editor.step)), to = Math.min(width, Math.max(from + 1, Math.ceil((endTick - left) / editor.step)))
           if (endTick < left || region.position >= left + width * editor.step) continue
-          for (let cell = from; cell < to; cell++) cells[cell] = region.id === editor.region ? '#' : lane.kind === 'wave' ? 'W' : 'M'
+          for (let cell = from; cell < to; cell++) cells[cell] = region.id === editor.region ? '#' : lane.kind === 'capture' ? 'C' : lane.kind === 'wave' ? 'W' : 'M'
         }
         lines.push(`${lane.id === editor.lane ? '>' : ' '} ${index + start + 1} ${lane.name.slice(0, 12).padEnd(12)} ${lane.muted ? 'm' : '-'}${lane.solo ? 's' : '-'} ${cells.join('')}`)
       }
       if (!project.lanes.length) lines.push('Import a source, then Enter or :place to add its first lane and region.')
-      lines.push(clip ? `${clip.id} · ${clip.name} · beat ${clip.position / project.ppq} · source ${clip.offset}+${clip.extent} · repeat ${clip.repeat}${clip.pattern === undefined ? '' : ` · pattern ${clip.pattern + 1}`}` : 'Up/Down selects a region on the current lane.')
+      lines.push(clip ? `${clip.id} · ${clip.name} · beat ${clip.position / project.ppq} · source ${clip.offset}+${clip.extent} ${project.assets.find(asset => asset.id === clip.asset).kind === 'capture' ? 'host ticks' : ''} · repeat ${clip.repeat}${clip.pattern === undefined ? '' : ` · pattern ${clip.pattern + 1}`}` : 'Up/Down selects a region on the current lane.')
       lines.push(asset ? `${asset.id} · ${asset.name} · ${asset.kind === 'wave' ? `${asset.metadata.frames} frames / ${asset.metadata.sampleRate} Hz / ${asset.metadata.channels} channels` : asset.kind === 'capture' ? `${asset.manifest.audioFrames} frames + ${asset.manifest.midiPacketCount} UMP packets; Enter opens the take` : 'original MIDI ticks; format-2 patterns require explicit selection'}` : 'No imported asset. :import-wave FILE or :import-midi FILE')
       lines.push(`Library ${project.assets.length} sources · ${project.clips.length} regions · a cycles sources · ? help`, path)
     }

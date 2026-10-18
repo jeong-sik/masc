@@ -4,6 +4,7 @@ import { importArrangementCapture, importArrangementWave } from './arrangement-f
 import { newArrangement } from './arrangement.mjs'
 import { jsonLines, unpackMidi } from './session-data.mjs'
 import { readWaveMetadata } from './wave-file.mjs'
+import { captureRange } from './capture-time.mjs'
 
 function destination(value) {
   const number = Number(value)
@@ -26,12 +27,10 @@ export async function prepareCapturedPlayback(input, { directory, midiOutput, so
   try {
     const imported = await importArrangementCapture(newArrangement(), input, { projectPath: join(temporary, 'project.json'), signal })
     const asset = imported.project.assets[0], manifest = asset.manifest, packets = [], used = new Set()
-    let origin = BigInt(manifest.clock.requestedStart)
-    if (manifest.clock.firstAudioHostTime !== null) origin = origin < BigInt(manifest.clock.firstAudioHostTime) ? origin : BigInt(manifest.clock.firstAudioHostTime)
+    const origin = BigInt(captureRange(asset).origin)
     for await (const row of jsonLines(join(temporary, asset.parts.midi.file), { signal })) {
       unpackMidi(row)
       if (typeof row.hostTime !== 'string' || !/^(0|[1-9][0-9]*)$/.test(row.hostTime) || BigInt(row.hostTime) > 0xffffffffffffffffn || !row.words.length) throw new Error('Invalid captured packet host time or empty UMP')
-      const host = BigInt(row.hostTime); origin = origin < host ? origin : host
       used.add(row.source); packets.push(row)
     }
     if (!packets.length) throw new Error('Capture has no MIDI packets; select WAV playback')

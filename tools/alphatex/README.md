@@ -268,7 +268,8 @@ Captured takes can be placed, trimmed in seconds, repeated and saved as paired
 regions. `:play-audio` explicitly auditions the WAV portions on the captured
 clock, including delayed starts, silent tails and compressed repeats; it sends
 no MIDI. Regular paired captured-region playback and arrangement overdubs remain
-unfinished. See [captured audio timing](CAPTURE-AUDIO-CLOCK.md).
+unfinished. See [captured audio timing](CAPTURE-AUDIO-CLOCK.md) and the
+[native paired-region boundary](CAPTURE-UMP-REGIONS.md).
 
 Saved captures also have [paired original WAV/UMP playback](CAPTURE-PLAYBACK.md).
 Select MIDI and audio outputs in the take viewer; original MIDI 2.0 words and

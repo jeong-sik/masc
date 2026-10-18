@@ -202,7 +202,11 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
         if (!accepting) return
         if (!transport.handle) throw new Error('Start playback before seeking')
         const start = loop ? editor.project.loop.start : 0
-        transport.handle.seek((value.tick - start) / PPQ * 60 / editor.project.tempo)
+        const end = loop ? editor.project.loop.end : editor.project.length
+        // The WAV endpoint is the player's sample-quantized duration. Preserve
+        // the musical endpoint instead of rounding it beyond the last sample.
+        const seconds = value.tick === end ? transport.duration : (value.tick - start) / PPQ * 60 / editor.project.tempo
+        transport.handle.seek(seconds)
         break
       }
       case 'help': showHelp = !showHelp; break

@@ -9,7 +9,10 @@ tracked in #43677; source/group/channel UMP and WAV remain the original take.
 The next implementation stack introduces an editable musical document and a
 piano-roll terminal editor. Quarter-note ticks (960 PPQ) are the editing authority;
 wall clock conversion happens in transport. Each MIDI track owns a channel and
-program, with notes, velocity, mute and solo. Same-key overlaps on one channel are
+program, with notes, velocity, mute, solo, level and pan. MIDI CC7/CC10 controls
+are shared by export and synthesis. Out-of-range PCM samples are counted before
+conversion so dense mixes can be adjusted instead of hiding clipping.
+Same-key overlaps on one channel are
 rejected transactionally because ordinary MIDI note-offs cannot identify voices.
 Undo/redo retains complete document revisions. Saving refuses an externally changed
 file; save-as retains edits without replacing it. Standard MIDI export and SoundFont
@@ -46,7 +49,7 @@ This stack is one step toward the full destination. Further work remains:
   sample-continuous loop playback and low-latency monitoring/recording.
 - Connect the independently developed VST instrument/preset host (#43684) to project
   playback without changing the selected instrument on an error.
-- Piano-roll selections, copy/paste, step/live recording, automation, per-track levels,
+- Piano-roll selections, copy/paste, step/live recording, automation,
   flexible tempo/meter maps, metronome/count-in and practice feedback.
 - Verify real MIDI and audio hardware and the actual Ghostty UI. Loopback/virtual
   sources, PCM files and terminal controller evidence prove narrower behaviors.

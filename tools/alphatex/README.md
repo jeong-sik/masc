@@ -164,6 +164,7 @@ notes. For example:
 progression 0 4 rootless Dm7 G7 Cmaj7
 track-add Electric bass
 program 33
+level 80
 note D2 0 4 110
 note G2 4 4 105
 note C2 8 4 100
@@ -178,5 +179,7 @@ intervals and the rootless dictionary. Candidates at the cursor include bass and
 inversions but do not assert a unique harmonic interpretation. `transpose -12`,
 `quantize 0.25` and `duplicate 8` operate on the selected track transactionally.
 `tempo 120`, `length 32` and `meter 3 4` set project timing. MIDI/WAV export refuses
-existing files. The broader destination and remaining work are recorded in
+existing files. `level 100` and `pan 64` set the selected track's MIDI volume and
+pan (0–127; pan 64 is center). Dense mixes can clip; lower track levels when the
+preview/export reports clipped samples. The broader destination and remaining work are recorded in
 [the sequencer design](../../docs/design/tui/MUSIC-SEQUENCER.md).

@@ -75,6 +75,7 @@ export function editorCommand(editor, line) {
     case 'title': count(1, Number.MAX_SAFE_INTEGER); edit = { kind: 'title', value: args.join(' ') }; break
     case 'rename': count(1, Number.MAX_SAFE_INTEGER); edit = { kind: 'track-settings', name: args.join(' ') }; break
     case 'program': count(1); edit = { kind: 'track-settings', program: Number(args[0]) }; break
+    case 'level': case 'pan': count(1); edit = { kind: 'track-settings', [command]: Number(args[0]) }; break
     case 'meter': count(2); edit = { kind: 'meter', value: args.map(Number) }; break
     case 'track': {
       count(1); const index = Number(args[0]) - 1

@@ -17,7 +17,8 @@ let candidate : Current.successor_recall_candidate =
    path=[{snapshot_revision=2;recorded_at=200.;source={kind=Current.Librarian;trace_id="revision"};
      commit_effect=Some Current.Rewritten;
      revision_links=Some [{superseded=Memory.memory_id original_target;superseded_by=Memory.memory_id target}];
-     removed_memory_ids=[Memory.memory_id original_target];added_memory_ids=[Memory.memory_id target]}]}
+     removed_memory_ids=[Memory.memory_id original_target];added_memory_ids=[Memory.memory_id target]}];
+   program_steps=[]}
 let response choice : Jev.eval_response =
   {model="fixture";usage=None;answers=["applicability",Jev.Choice_answer
     {choice;confidence=1.;probabilities=List.map (fun label -> label,if label=choice then 1. else 0.)
@@ -83,6 +84,99 @@ let test_negative_judgment_cannot_survive_changed_successor () =
     ~current:changed result in
   check int "second publication check does not duplicate unresolved evidence" 1
     (List.length checked_again.unresolved)
+
+let roundtrip_candidate : Current.successor_recall_candidate =
+  let original = candidate.original_target and intermediate = candidate.target in
+  let step stage_index from_fact into_fact relation : Current.successor_program_step =
+    {program_revision=2;transaction_id="successor-roundtrip";stage_index;
+     from_fact;into_fact;relation} in
+  {candidate with target=original;
+    path=[{snapshot_revision=2;recorded_at=200.;
+      source={kind=Current.Librarian;trace_id="ordered-roundtrip"};
+      commit_effect=Some Current.Rewritten;revision_links=Some [];
+      removed_memory_ids=[];added_memory_ids=[]}];
+    program_steps=[step 0 original intermediate Current.Program_absorption;
+      step 1 intermediate original Current.Program_revision]}
+
+let test_roundtrip_program_evidence_reaches_semantic_judgment () =
+  let original = roundtrip_candidate.original_target and intermediate = candidate.target in
+  let endpoint fact = Memory.fact_to_json fact in
+  let expected_steps = `List
+    [`Assoc ["snapshot_revision",`Int 2;"transaction_id",`String "successor-roundtrip";
+       "stage_index",`Int 0;"from_fact",endpoint original;"into_fact",endpoint intermediate;
+       "relation",`String "absorption"];
+     `Assoc ["snapshot_revision",`Int 2;"transaction_id",`String "successor-roundtrip";
+       "stage_index",`Int 1;"from_fact",endpoint intermediate;"into_fact",endpoint original;
+       "relation",`String "revision"]] in
+  List.iter (fun (choice,applies) ->
+    let calls = ref 0 in
+    let evaluate ~state ~questions:_ =
+      incr calls;
+      let member = Yojson.Safe.Util.member in
+      let evidence = member "evidence" state in
+      check bool "the actual scope request retains the original historical observation" true
+        (member "historical_source" evidence=endpoint candidate.binding.source_fact);
+      check bool "the current endpoint is the restored A, not the historical intermediate B" true
+        (member "original_target" evidence=endpoint original
+         && member "current_target" evidence=endpoint original);
+      check bool "the actual request preserves both ordered A-to-B-to-A edge witnesses" true
+        (member "ordered_program_steps" evidence=expected_steps);
+      check bool "two local stages retain only one actual durable revision" true
+        (member "committed_revision_path" evidence=
+         `List (List.map Current.revision_evidence_to_json roundtrip_candidate.path));
+      Ok (response choice) in
+    let result = Selection.select_with_evaluate ~evaluate ~query:"R-015"
+      [roundtrip_candidate] in
+    check int "one scope judgment is requested for the entire path" 1 !calls;
+    if applies then
+      check bool "an applicable roundtrip selects only the current target with its full witness" true
+        (result.selected=[roundtrip_candidate] && result.unresolved=[])
+    else
+      match result.selected,result.unresolved with
+      | [],[observed,Selection.Judgment_uncertain] ->
+        check bool "uncertainty retains the entire historical path without selecting it" true
+          (observed=roundtrip_candidate)
+      | _ -> fail "an uncertain roundtrip became current knowledge or conclusive absence")
+    ["applies_to_query",true;"uncertain",false]
+
+let test_negative_judgment_revalidates_changed_program_steps () =
+  let snapshot : Current.t =
+    {revision=2;updated_at=200.;source={kind=Current.Librarian;trace_id="ordered-roundtrip"};
+     facts=[roundtrip_candidate.target];
+     change={added=[];removed=[];retained=1;invalidated=[]}} in
+  let negative = Selection.select_with_evaluate ~query:"staging R-015" [roundtrip_candidate]
+    ~evaluate:(fun ~state:_ ~questions:_ -> Ok (response "different_scope")) in
+  let current : Current.successor_recall =
+    {receipt_verification=Ok ();snapshot=Some snapshot;direct_bindings=[];
+     successor_candidates=[roundtrip_candidate];unresolved=[]} in
+  let stable = Selection.revalidate ~snapshot:(Some snapshot) ~candidates:[roundtrip_candidate]
+    ~current negative in
+  check bool "the exact same program witness preserves the conclusive negative" true
+    (stable.selected=[] && stable.unresolved=[]);
+  let changed_intermediate = fact "Staging R-015 independently requires two approvals." in
+  let changed_steps = List.map (fun (step : Current.successor_program_step) ->
+    match step.stage_index with
+    | 0 -> {step with into_fact=changed_intermediate}
+    | 1 -> {step with from_fact=changed_intermediate}
+    | _ -> fail "roundtrip fixture acquired an unexpected stage") roundtrip_candidate.program_steps in
+  let changed_candidate = {roundtrip_candidate with program_steps=changed_steps} in
+  let changed = {current with successor_candidates=[changed_candidate]} in
+  check bool "the current snapshot, endpoints and durable revision path are unchanged" true
+    (changed.snapshot=current.snapshot
+     && changed_candidate.target=roundtrip_candidate.target
+     && changed_candidate.path=roundtrip_candidate.path);
+  let revalidated = Selection.revalidate ~snapshot:(Some snapshot) ~candidates:[roundtrip_candidate]
+    ~current:changed negative in
+  (match revalidated.selected,revalidated.unresolved with
+   | [],[old,Selection.Evidence_changed] ->
+     check bool "a negative decision belongs to the original exact program witness" true
+       (old=roundtrip_candidate)
+   | _ -> fail "changed intermediate program evidence reused an old conclusive negative");
+  let again = Selection.revalidate ~snapshot:(Some snapshot) ~candidates:[roundtrip_candidate]
+    ~current:changed revalidated in
+  check bool "repeated publication checks retain one unresolved original witness" true
+    (again.selected=[] && again.unresolved=revalidated.unresolved)
+
 (* An endpoint that accepts the judgment request and never answers. The turn
    clock passed to [run] must end that request at the HTTP request timeout;
    without it the search never returns. The mock clock is moved past any
@@ -152,4 +246,6 @@ let () = run "successor scope selection"
     test_case "one failed assessment does not erase another" `Quick test_one_provider_failure_preserves_other_judgments;
     test_case "extra answers cannot publish" `Quick test_extra_answers_never_publish;
     test_case "negative decision becomes unresolved when successor changes" `Quick test_negative_judgment_cannot_survive_changed_successor;
+    test_case "ordered roundtrip endpoints reach semantic judgment and preserve uncertainty" `Quick test_roundtrip_program_evidence_reaches_semantic_judgment;
+    test_case "negative decision cannot survive changed program steps on the same snapshot" `Quick test_negative_judgment_revalidates_changed_program_steps;
     test_case "a stalled endpoint ends at the turn clock" `Quick test_a_stalled_endpoint_ends_at_the_turn_clock]]

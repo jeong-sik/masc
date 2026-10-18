@@ -40,6 +40,12 @@ val reopen_edit_on_current : before:Yojson.Safe.t -> edited:string -> current:Yo
     revision and context-shrink confirmation behind. The caller opens an editor
     for review; this does not authorize or dispatch a save. *)
 
+val sandbox_patch : profile:Keeper_sandbox_config.sandbox_profile -> Yojson.Safe.t -> (Yojson.Safe.t option, string) result
+(** Prepare only the absolute Sandbox profile change using this snapshot's
+    composite revision. [None] proves the observed profile already matches;
+    [Some patch] contains only that profile and expected revision. Invalid
+    revision/profile observations stay errors, including the no-change case. *)
+
 val view_lines : sanitize:(string -> string) -> Yojson.Safe.t -> string list
 (** The whole Settings pane, styled. Every row carries a glyph saying whether
     [e] reaches it, and the field count in the heading comes from

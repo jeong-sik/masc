@@ -98,8 +98,13 @@ After a refusal or unconfirmed result, `e` reads current settings and restores
 only your changed values for review in the editor. Untouched fields use current
 values. The old revision and context-shrink confirmation are not reused; saving
 requires the new editor roundtrip. Original input and receipts stay with their
-operation. The external editor itself and Sandbox shortcut saves retain their
-separate interaction paths. Runtime and painted latency remain unmeasured.
+operation. Sandbox shortcuts use the same owned save operation: they read current
+settings and the required revision before sending the selected profile. Repeated
+keys share a pending same-Keeper save; selecting a new profile never rewrites it.
+An already observed matching profile sends no POST. Failed shortcuts retain their
+selection; an explicit next key rereads current before another save. Retained editor
+changes survive shortcut operations. The external editor keeps its own terminal
+interaction. Runtime and painted latency remain unmeasured.
 
 ## Usage
 

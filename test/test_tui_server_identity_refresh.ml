@@ -2552,6 +2552,11 @@ let test_settings_preparation_retires_focus_and_workspace_owners () =
     (reconcile_keeper_settings_editor state ~available:true
       && not (take_keeper_settings_editor_read state active (Ok (keeper_settings_snapshot ()))))
 
+let settings_editor_text (request : Masc_tui_types.keeper_settings_save_request) =
+  match request.ksv_input with
+  | Masc_tui_types.Settings_editor_input draft -> draft.ksd_text
+  | Sandbox_shortcut_input _ -> Alcotest.fail "editor input replaced by a shortcut"
+
 let keeper_settings_save_fixture () =
   let open Masc_tui_types in
   let state,keeper = keeper_settings_fixture () in
@@ -2565,38 +2570,38 @@ let keeper_settings_save_fixture () =
   let draft = {ksd_snapshot=snapshot;ksd_text=edited;ksd_patch=patch} in
   let request = match begin_keeper_settings_save state ~origin ~draft ~started_ns:20L with
     | Ok request -> request | Error detail -> Alcotest.fail detail in
-  state,keeper,request
+  state,keeper,origin,draft,request
 
 let test_settings_save_keeps_receipt_through_withdrawal () =
   let open Masc_tui_types in
-  let state,_,request = keeper_settings_save_fixture () in
+  let state,_,origin,draft,request = keeper_settings_save_fixture () in
   Alcotest.(check bool) "repeat edit shares the admitted save" true
     (Option.is_none (begin_keeper_settings_editor state ~available:true ~started_ns:21L));
   Alcotest.(check bool) "duplicate dispatch refused" true
-    (Result.is_error (begin_keeper_settings_save state ~origin:request.ksv_origin
-      ~draft:request.ksv_draft ~started_ns:22L));
-  ignore (publish_keeper_settings_save request ~observed_ns:23L Settings_posting);
+    (Result.is_error (begin_keeper_settings_save state ~origin
+      ~draft ~started_ns:22L));
+  ignore (publish_keeper_settings_save request ~observed_ns:23L (Settings_posting {ksp_snapshot=draft.ksd_snapshot.kss_observed;ksp_patch=Some draft.ksd_patch}));
   state.view <- Overview;
   state.workspace_read_authority <- ref ();
   let Workspace_authority epoch = state.workspace_authority in
   state.workspace_authority <- Workspace_authority (epoch+1);
   ignore (publish_keeper_settings_save request ~observed_ns:24L
-    (Settings_finished (Settings_unconfirmed "connection ended after possible dispatch")));
+    (Settings_finished (Some {ksp_snapshot=draft.ksd_snapshot.kss_observed;ksp_patch=Some draft.ksd_patch},Settings_unconfirmed "connection ended after possible dispatch")));
   let recovered = match pending_keeper_settings_save_receipt state with
     | Some (owner,status,_) -> owner.ksv_token == request.ksv_token && apply_keeper_settings_save state owner status
     | None -> false in
   Alcotest.(check bool) "receipt survives navigation and read withdrawal without a mailbox" true recovered;
   Alcotest.(check bool) "receipt grants no current workspace authority" false
     (keeper_settings_save_current state request);
-  Alcotest.(check string) "original edited bytes retained" request.ksv_draft.ksd_text
-    (List.hd state.keeper_settings_saves).ksa_request.ksv_draft.ksd_text;
+  Alcotest.(check string) "original edited bytes retained" draft.ksd_text
+    (settings_editor_text (List.hd state.keeper_settings_saves).ksa_request);
   Alcotest.(check bool) "terminal outcome cannot restart or be replaced by a late receipt" false
-    (publish_keeper_settings_save request ~observed_ns:25L Settings_posting)
+    (publish_keeper_settings_save request ~observed_ns:25L (Settings_posting {ksp_snapshot=draft.ksd_snapshot.kss_observed;ksp_patch=Some draft.ksd_patch}))
 
 let test_settings_save_recovers_changes_on_fresh_revision () =
   let open Masc_tui_types in
-  let state,_,request = keeper_settings_save_fixture () in
-  let outcome = Settings_finished (Settings_unconfirmed "write response missing") in
+  let state,_,_,draft,request = keeper_settings_save_fixture () in
+  let outcome = Settings_finished (None,Settings_unconfirmed "write response missing") in
   ignore (publish_keeper_settings_save request ~observed_ns:21L outcome);
   ignore (apply_keeper_settings_save state request outcome);
   let origin = keeper_settings_request state in
@@ -2631,29 +2636,112 @@ let test_settings_save_recovers_changes_on_fresh_revision () =
     ~draft:{ksd_snapshot=snapshot;ksd_text=edited;ksd_patch=patch} ~started_ns:30L with
     | Ok successor -> successor | Error detail -> Alcotest.fail detail in
   Alcotest.(check bool) "late original receipt cannot finish the successor" false
-    (apply_keeper_settings_save state request (Settings_finished (Settings_applied {
+    (apply_keeper_settings_save state request (Settings_finished (None,Settings_applied {
       response=`Null;severity="system";message="late"})));
   Alcotest.(check bool) "successor retains its own edited input" true
     ((List.hd state.keeper_settings_saves).ksa_request.ksv_token == successor.ksv_token
      && (List.hd state.keeper_settings_saves).ksa_status = Settings_checking);
-  Alcotest.(check string) "recovery never rewrites original request text" retained.ksd_text request.ksv_draft.ksd_text
+  Alcotest.(check string) "recovery never rewrites original request text" retained.ksd_text draft.ksd_text
 
 let test_settings_save_not_sent_preserves_origin_input () =
   let open Masc_tui_types in
-  let state,_,request = keeper_settings_save_fixture () in
-  let finished = Settings_finished (Settings_not_sent "worker not entered") in
+  let state,_,origin,draft,request = keeper_settings_save_fixture () in
+  let finished = Settings_finished (None,Settings_not_sent "worker not entered") in
   ignore (apply_keeper_settings_save state request finished);
   state.workspace_read_authority <- ref ();
   Alcotest.(check bool) "withdrawn editor authority cannot dispatch" true
-    (Result.is_error (begin_keeper_settings_save state ~origin:request.ksv_origin
-      ~draft:request.ksv_draft ~started_ns:30L));
+    (Result.is_error (begin_keeper_settings_save state ~origin
+      ~draft ~started_ns:30L));
   let retained = List.hd state.keeper_settings_saves in
   Alcotest.(check bool) "refused origin keeps a recoverable unposted operation" true
     (retained.ksa_recoverable && match retained.ksa_status with
-     | Settings_finished (Settings_not_sent _) -> true
-     | Settings_checking | Settings_posting | Settings_finished (Settings_applied _
-         | Settings_refused _ | Settings_observation_required _ | Settings_unconfirmed _) -> false);
-  Alcotest.(check string) "exact refused input survives" request.ksv_draft.ksd_text retained.ksa_request.ksv_draft.ksd_text
+     | Settings_finished (_,Settings_not_sent _) -> true
+     | Settings_checking | Settings_reading | Settings_posting _ | Settings_finished (_, (Settings_applied _
+         | Settings_unchanged | Settings_refused _ | Settings_observation_required _ | Settings_unconfirmed _)) -> false);
+  Alcotest.(check string) "exact refused input survives" draft.ksd_text (settings_editor_text retained.ksa_request)
+
+let sandbox_save_snapshot profile =
+  let observed = (keeper_settings_snapshot ()).Masc_tui_types.kss_observed in
+  match observed with
+  | `Assoc fields -> `Assoc (("sandbox_profile",`String (Keeper_sandbox_config.sandbox_profile_to_string profile)) :: fields)
+  | _ -> Alcotest.fail "invalid settings fixture"
+
+let test_sandbox_shortcut_uses_observed_revision () =
+  let snapshot = sandbox_save_snapshot Keeper_sandbox_config.Docker in
+  let patch = match Masc_tui_keeper_config.sandbox_patch ~profile:Keeper_sandbox_config.Remote_ssh snapshot with
+    | Ok (Some patch) -> patch | Ok None -> Alcotest.fail "profile change disappeared"
+    | Error detail -> Alcotest.fail detail in
+  Alcotest.(check bool) "shortcut sends only the selected profile and observed revision" true
+    (match patch with
+     | `Assoc fields -> List.length fields=2
+         && List.assoc_opt "sandbox_profile" fields = Some (`String "remote_ssh")
+         && List.assoc_opt "expected_config_revision" fields = Some (Yojson.Safe.Util.member "config_revision" snapshot)
+     | _ -> false);
+  Alcotest.(check bool) "already selected profile needs no write" true
+    (Masc_tui_keeper_config.sandbox_patch ~profile:Keeper_sandbox_config.Docker snapshot = Ok None);
+  let invalid = match snapshot with
+    | `Assoc fields -> `Assoc (("config_revision",`Assoc ["state",`String "unavailable";"detail",`String "unread"])
+        :: List.remove_assoc "config_revision" fields)
+    | _ -> Alcotest.fail "invalid fixture" in
+  Alcotest.(check bool) "no-change success cannot hide missing revision authority" true
+    (Result.is_error (Masc_tui_keeper_config.sandbox_patch ~profile:Keeper_sandbox_config.Docker invalid))
+
+let test_sandbox_and_editor_saves_share_pending_ownership () =
+  let open Masc_tui_types in
+  let state,_,_,draft,editor = keeper_settings_save_fixture () in
+  state.detail_tab <- Detail_sandbox;
+  Alcotest.(check bool) "shortcut cannot race the same Keeper's editor save" true
+    (Result.is_error (begin_keeper_sandbox_save state ~profile:Keeper_sandbox_config.Remote_ssh ~started_ns:21L));
+  let refused = Settings_finished (None,Settings_not_sent "editor write not entered") in
+  ignore (publish_keeper_settings_save editor ~observed_ns:22L refused);
+  ignore (apply_keeper_settings_save state editor refused);
+  let shortcut = match begin_keeper_sandbox_save state ~profile:Keeper_sandbox_config.Remote_ssh ~started_ns:23L with
+    | Ok request -> request | Error detail -> Alcotest.fail detail in
+  Alcotest.(check bool) "another backend key cannot rewrite pending absolute intent" true
+    (Result.is_error (begin_keeper_sandbox_save state ~profile:Keeper_sandbox_config.Micro_vm ~started_ns:24L)
+     && shortcut.ksv_input = Sandbox_shortcut_input Keeper_sandbox_config.Remote_ssh);
+  Alcotest.(check bool) "shortcut does not discard unrelated retained editor changes" true
+    (Option.map (fun draft -> draft.ksd_text) (keeper_settings_recovery state shortcut.ksv_key) = Some draft.ksd_text);
+  let observed = sandbox_save_snapshot Keeper_sandbox_config.Remote_ssh in
+  let prepared = {ksp_snapshot=observed;ksp_patch=None} in
+  ignore (publish_keeper_settings_save shortcut ~observed_ns:25L Settings_reading);
+  let unchanged = Settings_finished (Some prepared,Settings_unchanged) in
+  ignore (publish_keeper_settings_save shortcut ~observed_ns:26L unchanged);
+  ignore (apply_keeper_settings_save state shortcut unchanged);
+  Alcotest.(check bool) "read-only outcome retains its exact observation without a patch" true
+    (match (List.hd state.keeper_settings_saves).ksa_status with
+     | Settings_finished (Some frozen,Settings_unchanged) -> frozen.ksp_snapshot == observed && frozen.ksp_patch=None
+     | Settings_checking | Settings_reading | Settings_posting _ | Settings_finished _ -> false);
+  Alcotest.(check bool) "completed shortcut still cannot erase editor recovery" true
+    (Option.is_some (keeper_settings_recovery state shortcut.ksv_key))
+
+let test_sandbox_receipt_keeps_frozen_source_after_withdrawal () =
+  let open Masc_tui_types in
+  let state,_ = keeper_settings_fixture () in
+  state.detail_tab <- Detail_sandbox;
+  let request = match begin_keeper_sandbox_save state ~profile:Keeper_sandbox_config.Micro_vm ~started_ns:20L with
+    | Ok request -> request | Error detail -> Alcotest.fail detail in
+  let observed = sandbox_save_snapshot Keeper_sandbox_config.Docker in
+  let patch = match Masc_tui_keeper_config.sandbox_patch ~profile:Keeper_sandbox_config.Micro_vm observed with
+    | Ok (Some patch) -> patch | Ok None -> Alcotest.fail "missing change" | Error detail -> Alcotest.fail detail in
+  let prepared = {ksp_snapshot=observed;ksp_patch=Some patch} in
+  ignore (publish_keeper_settings_save request ~observed_ns:21L Settings_reading);
+  ignore (publish_keeper_settings_save request ~observed_ns:22L (Settings_posting prepared));
+  state.workspace_read_authority <- ref ();
+  let outcome = Settings_finished (Some prepared,Settings_unconfirmed "connection ended") in
+  ignore (publish_keeper_settings_save request ~observed_ns:23L outcome);
+  let retained = match pending_keeper_settings_save_receipt state with
+    | Some (owner,status,_) -> apply_keeper_settings_save state owner status
+    | None -> false in
+  Alcotest.(check bool) "withdrawal cannot lose an admitted shortcut receipt" true retained;
+  Alcotest.(check bool) "receipt cannot authorize a current surface refresh" false (keeper_settings_save_current state request);
+  Alcotest.(check bool) "original profile, snapshot and CAS patch stay joined" true
+    (request.ksv_input = Sandbox_shortcut_input Keeper_sandbox_config.Micro_vm
+     && match (List.hd state.keeper_settings_saves).ksa_status with
+        | Settings_finished (Some frozen,Settings_unconfirmed _) -> frozen == prepared
+        | Settings_checking | Settings_reading | Settings_posting _ | Settings_finished _ -> false);
+  Alcotest.(check bool) "terminal shortcut cannot dispatch again automatically" false
+    (publish_keeper_settings_save request ~observed_ns:24L (Settings_posting prepared))
 
 let runtime_form_source = {|[providers.codex]
 protocol = "codex-app-server"
@@ -2975,7 +3063,13 @@ let test_runtime_snapshot_refresh_reuses_draft_without_changing_ownership () =
 let () =
   Alcotest.run "tui_server_identity_refresh"
     [ ( "server-identity-refresh"
-      , [ Alcotest.test_case "settings save retains original receipt through withdrawal" `Quick
+      , [ Alcotest.test_case "Sandbox shortcut binds only selected profile to observed revision" `Quick
+            test_sandbox_shortcut_uses_observed_revision
+        ; Alcotest.test_case "Sandbox and editor saves share pending ownership without losing recovery" `Quick
+            test_sandbox_and_editor_saves_share_pending_ownership
+        ; Alcotest.test_case "Sandbox receipt retains frozen source through withdrawal" `Quick
+            test_sandbox_receipt_keeps_frozen_source_after_withdrawal
+        ; Alcotest.test_case "settings save retains original receipt through withdrawal" `Quick
             test_settings_save_keeps_receipt_through_withdrawal
         ; Alcotest.test_case "settings recovery joins changed values to a fresh revision" `Quick
             test_settings_save_recovers_changes_on_fresh_revision

@@ -115,3 +115,15 @@ test('MIDI destination playback pins its identity and retains the same owned tra
   await assert.rejects(bad.playback.completion, /selected device/)
   assert.throws(() => openPlayback({ path: 'x', output: 'audio', midiOutput: '-120' }), /Choose/)
 })
+
+test('terminal termination gives the MIDI owner a chance to release keys and waits for close', async () => {
+  const f = fixture({ output: undefined, midiOutput: '-120' })
+  const device = { kind: 'midi', id: '-120', name: 'Owned output', protocol: 1 }
+  f.event('playing', { device }); await f.playback.ready
+  let done = false
+  f.playback.completion.then(() => { done = true })
+  f.playback.terminate()
+  assert.deepEqual(f.signals, ['SIGTERM'])
+  await Promise.resolve(); assert.equal(done, false)
+  f.event('stopped', { device }); f.close(); await f.playback.completion
+})

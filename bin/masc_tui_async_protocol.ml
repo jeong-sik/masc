@@ -366,8 +366,9 @@ type async_msg =
       * (string, string) result
   | Keeper_chat_older_loaded of
       int * string * string option * (Masc_tui_keeper_chat_history.page, Masc_tui_keeper_chat_history.page_error) result
+  | Local_keepers_read of local_workspace_request * (Masc_tui_loader.local_keeper_reading, string) result
   | Local_workspace_read of local_workspace_request * (Masc_tui_loader.local_reading, string) result
-      (** Immutable directory observation, bound to its workspace epoch and source request. *)
+      (** Optional work/agent observation. Required metadata has its own typed reply. *)
   | Lanes_loaded of
       unit ref * ( Masc.Tui_decode.keeper_lanes_snapshot
         * Masc.Tui_decode.keeper_secret_projection list,
@@ -790,6 +791,7 @@ let rec workspace_message_is_read = function
   | Context_inspector_part_loaded _
   | Keeper_chat_older_loaded _
   | Local_workspace_read _
+  | Local_keepers_read _
   | Lanes_loaded _
   | Lane_inventory_loaded _
   | Clients_loaded _
@@ -1008,7 +1010,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Keeper_chat_journal_loaded _ | Keeper_native_tasks_loaded (_, _)
     | Keeper_child_content_loaded (_, _) | Keeper_preparation_loaded (_, _) | Context_inspector_loaded (_, _, _)
     | Context_inspector_part_loaded (_, _)
-    | Keeper_chat_older_loaded (_, _, _, _) | Local_workspace_read (_, _)
+    | Keeper_chat_older_loaded (_, _, _, _) | Local_workspace_read (_, _) | Local_keepers_read (_, _)
     | Lanes_loaded (_, _) | Lane_inventory_loaded (_, _) | Clients_loaded (_, _)
     | Lane_runs_loaded (_, _, _, _) | Lane_run_detail_loaded (_, _, _)
     | Measurement_artifact_loaded (_, _, _) | Verification_loaded _
@@ -1143,7 +1145,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Keeper_native_tasks_loaded (_, _) | Keeper_child_content_loaded (_, _) | Keeper_preparation_loaded (_, _)
   | Context_inspector_loaded (_, _, _)
   | Context_inspector_part_loaded (_, _) | Keeper_chat_older_loaded (_, _, _, _)
-  | Local_workspace_read (_, _) | Lanes_loaded (_, _)
+  | Local_workspace_read (_, _) | Local_keepers_read (_, _) | Lanes_loaded (_, _)
   | Lane_inventory_loaded (_, _) | Clients_loaded (_, _)
   | Lane_runs_loaded (_, _, _, _) | Lane_run_detail_loaded (_, _, _)
   | Measurement_artifact_loaded (_, _, _) | Verification_loaded _

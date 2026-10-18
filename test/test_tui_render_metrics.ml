@@ -418,7 +418,7 @@ let test_assignee_rows_capped () =
 let test_approval_source_observations () =
   let state = make_state () in
   (* A successful read of the workspace cannot establish approval source data. *)
-  state.local_workspace <- Types.Local_workspace_read;
+  state.local_keepers <- Types.Local_workspace_read;
   let kpis = Render_metrics.calculate_kpis state in
   check (option int) "unread Gate is not zero" None kpis.gate_pending_count;
   check (option int) "unread held calls are not zero" None kpis.held_approvals_count;

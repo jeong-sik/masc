@@ -21,7 +21,7 @@ let render_about (state : state) =
     Terminal_text.single_line_or ~default:"default" state.theme_choice
   in
   let keepers =
-    match state.keepers_error, state.local_workspace with
+    match state.keepers_error, state.local_keepers with
     | Some _, _ | None, Local_workspace_failed _ -> Masc_tui_emblem_screen.Keepers_unreadable
     | None, Local_workspace_unread -> Masc_tui_emblem_screen.Keepers_unread
     | None, Local_workspace_read ->

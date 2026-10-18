@@ -15,7 +15,7 @@ let keeper : Tui_types.keeper =
 let state () =
   let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
   state.workspace_identity <- Tui_types.Workspace_identity_match;
-  state.local_workspace <- Tui_types.Local_workspace_read;
+  state.local_keepers <- Tui_types.Local_workspace_read;
   state
 
 let target_testable =

@@ -17,33 +17,43 @@ module Diff = Masc_tui_diff
    what an operator needs before opening a shell or comparing another
    checkout; resolving the stored spelling again in the TUI would use the
    TUI's cwd instead of the server's base path. *)
-let repository_context_lines ~width (repo : Masc.Tui_decode.repository) =
-  let wrap label value =
-    Message_layout.wrap_words ~max_cells:(max 1 width)
-      (Printf.sprintf "  %s: %s" label (Terminal_text.single_line value))
-  in
+let repository_context_fields (repo : Masc.Tui_decode.repository) =
   let stored_path =
     if String.equal repo.rp_local_path repo.rp_resolved_local_path then []
-    else wrap "Stored as" repo.rp_local_path
+    else ["Stored as", repo.rp_local_path]
   in
-  let keepers =
-    match repo.rp_keepers with
-    | [] -> "none assigned"
-    | names -> String.concat ", " names
-  in
-  (* The status column has room for the word and not for the cause, and a
-     repository whose clone or fetch failed keeps that cause in its status.
-     The row says "error" and this says what it was; every other status has
-     nothing here to add. *)
-  let failure =
-    match Masc.Tui_decode.repository_status_reason repo.rp_status with
-    | None -> []
-    | Some reason -> wrap "Error" reason
-  in
-  failure
-  @ wrap "Path" repo.rp_resolved_local_path
-  @ stored_path
-  @ wrap "Keepers" keepers
+  let keepers = match repo.rp_keepers with
+    | [] -> "none assigned" | names -> String.concat ", " names in
+  let failure = match Masc.Tui_decode.repository_status_reason repo.rp_status with
+    | None -> [] | Some reason -> ["Error", reason] in
+  failure @ ["Path", repo.rp_resolved_local_path] @ stored_path @ ["Keepers", keepers]
+
+let repository_context_lines ~width repo =
+  repository_context_fields repo
+  |> List.concat_map (fun (label, value) ->
+      Masc_tui_text_block.rows ~max_cells:(max 1 width)
+        (Printf.sprintf "  %s: %s" label value))
+
+let selected_repository_reading (state : state) =
+  let selected = Option.bind state.repositories (fun snapshot ->
+    List.nth_opt snapshot.rs_repositories state.repositories_cursor) in
+  let errors = match state.repositories_error with
+    | None -> [] | Some reason ->
+        [(if Option.is_some state.repositories then "Refresh failed · retained reading"
+          else "Read failed"), reason] in
+  let capture ~title fields =
+    Masc_tui_detail_reading.create ~title
+      (List.map (fun (heading,body) -> {Masc_tui_detail_reading.heading;body}) fields) in
+  match selected with
+  | None ->
+      if errors=[] then None else Some (capture ~title:"Workspace / inventory" errors)
+  | Some (repo : Masc.Tui_decode.repository) ->
+      Some (capture ~title:("Workspace / " ^ repo.rp_name)
+        (errors @ ["Repository", repo.rp_name; "ID", repo.rp_id;
+          "Status", Masc.Tui_decode.repository_status_word repo.rp_status;
+          "Remote", repo.rp_url; "Default branch", repo.rp_default_branch;
+          "Auto sync", (if repo.rp_auto_sync then "on" else "off")]
+         @ repository_context_fields repo))
 
 type workspace_activity_column = Activity_date | Activity_keeper | Activity_task | Activity_result | Activity_path
 
@@ -172,7 +182,7 @@ let repository_studio_geometry (state : state) ~cols ~budget ~cursor =
       let errors =
         if List.length errors <= error_budget then errors
         else List.take (max 0 (error_budget - 1)) errors
-          @ (if error_budget > 0 then ["More error detail · enlarge terminal"] else []) in
+          @ (if error_budget > 0 then ["v:read complete error"] else []) in
       let context_budget = max 0 (if split then budget - 2 else budget - 6 - List.length errors) in
       let truncated = List.length context_lines > context_budget in
       let show_notice = truncated && context_budget >= 2 in
@@ -181,7 +191,7 @@ let repository_studio_geometry (state : state) ~cols ~budget ~cursor =
       let detail = studio_panel ~width:detail_width ~title:detail_title
           ~lines:(visible_context @
             (if show_notice
-             then ["More context · enlarge the terminal"] else [])) in
+             then ["v:read complete context"] else [])) in
       let list_budget =
         if split then budget else max 4 (budget - List.length detail) in
       let room = max 1 (list_budget - 3 - List.length errors) in

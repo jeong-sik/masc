@@ -72,6 +72,7 @@ let config_bindings =
        [e:edit] and [Enter:edit / use] would also read the pane as having one
        way to edit and no advanced one. *)
   ; b Act "c" "copy model" ~help:"same account/API model, independent variant settings", Some [Config_models]
+  ; b Navigate "v" "full details" ~help:"read complete account/model settings without editing", Some [Config_models]
   ; b Act "m" "model source", Some [Config_models]
   ; b Act "e / Enter" "edit"
       ~help:"on params: edit the selected value with a type-aware field",
@@ -878,7 +879,8 @@ let for_surface = function
       ]
       @ row_list_jumps @ listing_meta
   | Repositories ->
-      [ b Navigate "j/k" "scroll"
+      [ b Navigate "v" "full details" ~help:"read the complete selected path, Keeper assignments and errors"
+      ; b Navigate "j/k" "scroll"
       ; b Act "Enter" "browse"
           ~help:"open the repository tree, or the selected changed file"
       ; b Navigate "H" "recent activity" ~help:"recorded clone writes by Keeper and Task in the last day"

@@ -6942,6 +6942,9 @@ type state = {
   (* The [?] help overlay: open replaces the surface body until Esc/? closes
      it. The scroll survives only while it is open. *)
   mutable help_open: bool;
+  (* A read-only capture, pinned to its workspace authority and surface. It
+     never becomes an action target when selection or polling changes. *)
+  mutable detail_reading: (workspace_authority * surface * Masc_tui_detail_reading.t) option;
   mutable keeper_deletions_open: bool;
   mutable keeper_deletions_loading: bool;
   mutable keeper_deletions_retry_receipt: (int * string) option;
@@ -12233,8 +12236,22 @@ let withdraw_machine_control state =
    the composer, a surface binding, a press on a row -- may act first. Every
    place that has to stand aside for them asks this one question, so an
    overlay added later is added here once rather than to each list. *)
+let current_detail_reading (state : state) =
+  match state.detail_reading with
+  | Some (authority, surface, reading)
+    when authority = state.workspace_authority && surface = state.view -> Some reading
+  | Some _ | None -> None
+
+let reconcile_detail_reading (state : state) =
+  if Option.is_none (current_detail_reading state) then
+    state.detail_reading <- None
+
+let open_detail_reading (state : state) reading =
+  state.detail_reading <- Some (state.workspace_authority, state.view, reading)
+
 let modal_owns_keys (state : state) =
-  state.help_open || state.keeper_deletions_open || state.agenda_open
+  Option.is_some (current_detail_reading state)
+  || state.help_open || state.keeper_deletions_open || state.agenda_open
   || state.context_inspector_open || state.about_open
   || state.repository_changes_open
   || (state.view = Lanes && Option.is_some state.exact_activity_open)
@@ -12322,6 +12339,7 @@ let close_repository_changes (state : state) =
 let close_key_modals (state : state) =
   state.help_open <- false;
   state.help_scroll <- 0;
+  state.detail_reading <- None;
   state.about_open <- false;
   state.keeper_deletions_open <- false;
   state.client_detail <- None;
@@ -12364,6 +12382,7 @@ let create_state
   task_focus = Masc_tui_overview_tasks.No_task_focus;
   task_reading = Masc_tui_overview_tasks.Rows_unread;
   help_open = false;
+  detail_reading = None;
   keeper_deletions_open = false;
   keeper_deletions_loading = false;
   keeper_deletions_retry_receipt = None;

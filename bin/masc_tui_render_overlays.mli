@@ -3,6 +3,13 @@
     deletions, Cheat sheet, Agenda, Answering, Terminal-too-small, Account
     login, Collab, and Lane add-ons) and their viewport calculators. *)
 
+val detail_reading_viewport :
+  Masc_tui_types.state -> Masc_tui_detail_reading.t -> int * int
+
+val render_detail_reading :
+  Masc_tui_types.state -> Masc_tui_detail_reading.t ->
+  Masc_tui_frame_presenter.frame * Masc_tui_types.clamped_scroll option
+
 val render_about :
   Masc_tui_types.state ->
   Masc_tui_frame_presenter.frame * Masc_tui_types.clamped_scroll option

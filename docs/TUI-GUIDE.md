@@ -2625,3 +2625,14 @@ runtime quota, Keeper usage, provider history and account identity. The complete
 bundle still waits for the requested sources and the final workspace check;
 one slow source can keep that refresh pending. A source's reported failure
 remains separate from a successfully read zero value.
+
+### Complete selected details
+
+Workspace's repository list and System → Models offer `v` for a full, read-only
+capture of the selected object. Long paths, assignment lists, failure reasons,
+account names and owning TOML sections wrap without the preview's row limit.
+`j/k`, arrows, PageUp/PageDown and Home/End read the complete capture; Esc or `v`
+returns to the same selection. The capture stays fixed while background reads
+or selections change. Close, refresh and reopen for updated data. Leaving the
+surface or changing workspace revokes it. It never opens an editor or submits
+an action, and paste cannot reach a composer underneath it.

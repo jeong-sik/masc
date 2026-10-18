@@ -636,6 +636,8 @@ let frame_choice (state : state) ~terminal_rows =
   | Some view -> `Collab view
   | None -> match state.lane_addons with
   | Some view -> `Lane_addons view
+  | None -> match current_detail_reading state with
+  | Some reading -> `Detail_reading reading
   | None ->
       if state.about_open then `About
       else if state.context_inspector_open then `Context
@@ -677,6 +679,9 @@ let render (state : state) =
   | `Collab view -> let frame, clamped = render_collab state view in (frame,clamped,None,Overlay_drawn)
   | `Lane_addons view ->
     let frame, clamped = render_lane_addons state view in
+    (frame, clamped, None, Overlay_drawn)
+  | `Detail_reading reading ->
+    let frame, clamped = Masc_tui_render_overlays.render_detail_reading state reading in
     (frame, clamped, None, Overlay_drawn)
   | `About ->
     let frame, clamped = render_about state in (frame, clamped, None, Overlay_drawn)

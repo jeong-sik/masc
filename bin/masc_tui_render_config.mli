@@ -1,6 +1,11 @@
 (** System Config screens (Prompts, Presets, Themes, Runtime TOML, Models,
     Runtime Parameters, and Voice) and their viewport/scroll calculators. *)
 
+val selected_model_reading :
+  Masc_tui_types.state -> Masc_tui_detail_reading.t option
+(** Read the selected model's complete account, effective values and owning
+    sections without entering the editor. *)
+
 val config_models_scrolled : Masc_tui_types.state -> Masc_tui_types.scrolled
 (** The models pane's scroll bound: the document it actually draws (table or
     stacked items at the current width), not a row count. *)

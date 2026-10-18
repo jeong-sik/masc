@@ -1002,6 +1002,21 @@ let config_models_detail (state : state) (row : Masc_tui_model_runtime_table.row
   in
   account_notes @ Masc_tui_model_runtime_table.detail_lines ?account_email ?keepers row
 
+let selected_model_reading (state : state) =
+  Option.bind (List.nth_opt state.config_models_rows state.config_models_cursor)
+    (fun (row : Masc_tui_model_runtime_table.row) ->
+      let sections =
+        (match state.runtime_config_view_error with
+         | None -> [] | Some reason ->
+             [{Masc_tui_detail_reading.heading="Refresh failed · retained reading";body=reason}])
+        @ (match state.runtime_config_view with
+           | None -> [] | Some reading ->
+               [{Masc_tui_detail_reading.heading="Source"; body=reading.rcv_path}])
+        @ [{Masc_tui_detail_reading.heading="Account / model";
+            body=String.concat "\n" (config_models_detail state row)}] in
+      Some (Masc_tui_detail_reading.create
+        ~title:("System / Models / " ^ row.provider ^ " / " ^ row.model) sections))
+
 (* The model knobs sit in different tables -- [reasoning-effort] and
    [temperature] under [models.NAME], [max-tokens] under
    [PROVIDER.NAME] -- and runtime.toml is 2,300 lines, so reading it top to

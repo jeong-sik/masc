@@ -954,10 +954,10 @@ let test_shared_node_schema_preserves_call_shapes () =
   let ordinary = ["tool", `String "keeper_lane_status"] in
   let child = ["skill_reference", Skill_reference.to_yojson reference] in
   let args = "args", `Assoc [] in
-  let child_args = "args", `Assoc ["query", `String "exact evidence"] in
+  let child_args = "args", `Assoc ["query", `String "docker"] in
   let input = "input", `Assoc ["kind", `String "literal"; "value", `Assoc []] in
   let child_input = "input", `Assoc ["kind", `String "literal";
-    "value", `Assoc ["query", `String "exact evidence"]] in
+    "value", `Assoc ["query", `String "docker"]] in
   let check_shape expected fields =
     let args = `Assoc (base @ fields) in
     let checked = Tool_input_contract.check_arguments

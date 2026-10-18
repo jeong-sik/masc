@@ -370,6 +370,7 @@ async function viewScores(sources, initialIndex) {
     } else {
       audioState = 'stopped'
       status = message.error
+      retained({ state: 'failed', selection: instrument, render: currentRender, error: status })
       redraw()
     }
   })
@@ -379,7 +380,9 @@ async function viewScores(sources, initialIndex) {
   })
   audioWorker.on('error', error => {
     audioFailure = error.message; stop()
-    status = `Audio unavailable: ${error.message}`; redraw()
+    status = `Audio unavailable: ${error.message}`
+    retained({ state: 'failed', selection: instrument, render: currentRender, error: status })
+    redraw()
   })
   function keypress(text, key = {}) {
     if (picker.view && !(key.ctrl && key.name === 'c')) {

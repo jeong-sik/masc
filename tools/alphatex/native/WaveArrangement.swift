@@ -88,7 +88,8 @@ struct Region: Decodable {
     let offsetFrames: AVAudioFramePosition
     let frameCount: AVAudioFramePosition
     let repetitions: AVAudioFramePosition
-    enum CodingKeys: String, CodingKey { case id, asset, startSeconds, offsetFrames, frameCount; case repetitions = "repeat" }
+    let captureClock: CaptureAudioClock?
+    enum CodingKeys: String, CodingKey { case id, asset, startSeconds, offsetFrames, frameCount, captureClock; case repetitions = "repeat" }
     func totalFrames() throws -> AVAudioFramePosition {
         let (total, overflow) = frameCount.multipliedReportingOverflow(by: repetitions)
         guard frameCount > 0, repetitions > 0, !overflow, total > 0 else { throw AudioFailure("region exceeds the native frame timeline") }
@@ -104,12 +105,14 @@ struct Plan: Decodable {
     let midi: Timeline?
     let ump: UmpTimeline?
     var captured: Bool { kind == "capture-session" }
+    var capturedAudio: Bool { kind == "capture-audio-arrangement" }
     var mixed: Bool { kind == "mixed-arrangement" }
     func validate() throws {
         guard (schemaVersion == 1 && kind == "wave-arrangement" && midi == nil && ump == nil
                || schemaVersion == 2 && mixed && midi?.schemaVersion == 3 && ump == nil
-               || schemaVersion == 3 && captured && midi == nil && ump?.schemaVersion == 4), duration.isFinite, duration > 0,
-              (!regions.isEmpty || captured && assets.isEmpty), Set(assets.map(\.id)).count == assets.count, Set(regions.map(\.id)).count == regions.count else { throw AudioFailure("invalid WAV arrangement plan") }
+               || schemaVersion == 3 && captured && midi == nil && ump?.schemaVersion == 4
+               || schemaVersion == 4 && capturedAudio && midi == nil && ump == nil), duration.isFinite, duration > 0,
+              (!regions.isEmpty || (captured || capturedAudio) && assets.isEmpty), Set(assets.map(\.id)).count == assets.count, Set(regions.map(\.id)).count == regions.count else { throw AudioFailure("invalid WAV arrangement plan") }
         for asset in assets {
             guard !asset.id.isEmpty, !asset.path.isEmpty, asset.sampleRate.isFinite, asset.sampleRate > 0,
                   asset.channels > 0, asset.frames >= 0 else { throw AudioFailure("invalid WAV source identity or format") }
@@ -120,7 +123,13 @@ struct Plan: Decodable {
                   region.frameCount > 0, region.repetitions > 0,
                   let asset = assets.first(where: { $0.id == region.asset }),
                   region.frameCount <= asset.frames, region.offsetFrames <= asset.frames - region.frameCount else { throw AudioFailure("invalid region source bounds") }
-            let regionEnd = region.startSeconds + Double(try region.totalFrames()) / asset.sampleRate
+            guard region.captureClock == nil || capturedAudio else { throw AudioFailure("captured audio clock requires an explicit captured audio plan") }
+            let total: AVAudioFramePosition
+            if let clock = region.captureClock {
+                total = try clock.layout(rate: asset.sampleRate, offsetFrames: region.offsetFrames,
+                                         frameCount: region.frameCount, repetitions: region.repetitions).totalFrames
+            } else { total = try region.totalFrames() }
+            let regionEnd = region.startSeconds + Double(total) / asset.sampleRate
             guard regionEnd.isFinite, regionEnd > region.startSeconds else { throw AudioFailure("region time is not representable") }
             end = max(end, regionEnd)
         }
@@ -133,6 +142,8 @@ struct Plan: Decodable {
         } else if let ump {
             let events = try ump.events(), midiEnd = events.map(\.seconds).max() ?? 0
             guard ump.duration == duration, abs(max(end, midiEnd) - duration) < (sample > 0 ? sample : 1e-9) else { throw AudioFailure("capture duration does not match its source clocks") }
+        } else if capturedAudio {
+            guard end <= duration || end - duration < sample else { throw AudioFailure("captured audio exceeds its arrangement duration") }
         } else {
             guard abs(end - duration) < sample else { throw AudioFailure("duration does not match region sources") }
         }
@@ -149,13 +160,16 @@ final class Voice {
     let cached: AVAudioPCMBuffer?
     let capacity: AVAudioFrameCount
     let total: AVAudioFramePosition
+    let captureLayout: CaptureAudioLayout?
     var generation: UInt64 = 0 // only the stream queue accesses these fields
     var cursor: AVAudioFramePosition = 0
     var origin: AVAudioFramePosition = 0
     init(region: Region, asset: Asset, capacity: AVAudioFrameCount) throws {
         self.region = region; self.asset = asset; self.capacity = capacity
         queue = DispatchQueue(label: "music.arrangement.stream.\(region.id)", qos: .userInitiated)
-        total = try region.totalFrames()
+        captureLayout = try region.captureClock?.layout(rate: asset.sampleRate, offsetFrames: region.offsetFrames,
+                                                       frameCount: region.frameCount, repetitions: region.repetitions)
+        total = try captureLayout?.totalFrames ?? region.totalFrames()
         file = try AVAudioFile(forReading: URL(fileURLWithPath: asset.path), commonFormat: .pcmFormatFloat32, interleaved: false)
         let format = file.processingFormat
         guard file.length == asset.frames, format.sampleRate == asset.sampleRate, format.channelCount == asset.channels,
@@ -185,8 +199,15 @@ final class Voice {
         guard let output = target.floatChannelData else { throw AudioFailure("audio output is not planar float") }
         var written: AVAudioFrameCount = 0
         while written < capacity && cursor < total {
-            let local = cursor % region.frameCount
-            var count = AVAudioFrameCount(min(AVAudioFramePosition(capacity - written), min(region.frameCount - local, total - cursor)))
+            let remaining = min(AVAudioFramePosition(capacity - written), total - cursor)
+            let span = captureLayout?.span(at: cursor, maximum: remaining)
+                ?? (source: cursor % region.frameCount, count: min(remaining, region.frameCount - cursor % region.frameCount))
+            var count = AVAudioFrameCount(span.count)
+            guard count > 0 else { throw AudioFailure("captured audio clock did not advance") }
+            guard let local = span.source else {
+                for channel in 0..<Int(asset.channels) { memset(output[channel].advanced(by: Int(written)), 0, Int(count) * MemoryLayout<Float>.size) }
+                written += count; cursor += AVAudioFramePosition(count); continue
+            }
             let input: AVAudioPCMBuffer
             let offset: Int
             if let cached { input = cached; offset = Int(local) }
@@ -262,6 +283,8 @@ final class ArrangementTransport {
     let renderQuantum: AVAudioFrameCount
     var voices: [Voice] = []
     var active = Set<String>()
+    var horizon: DispatchSourceTimer?
+    var horizonEnded = false
     var state = State.prepared
     var position: Double = 0
     var anchor: UInt64 = 0
@@ -328,12 +351,13 @@ final class ArrangementTransport {
     func snapshot(_ kind: String) -> [String: Any] {
         var value: [String: Any] = ["kind": kind, "currentTime": currentTime(), "duration": plan.duration, "device": device.json,
          "loop": false, "format": plan.kind, "streamBufferFrames": capacity, "regions": voices.count]
-        if let midi {
-            value["bindings"] = midi.snapshot(kind)["bindings"]
-            value["clock"] = ["kind": "mach-host-time", "anchor": String(anchor), "position": position,
-                              "renderQuantum": renderQuantum, "sampleRate": engine.outputNode.outputFormat(forBus: 0).sampleRate,
-                              "presentationLatency": engine.outputNode.presentationLatency,
-                              "midiAnchorNanoseconds": String(midi.anchor), "midiPosition": midi.position(at: DispatchTime.now().uptimeNanoseconds)]
+        if let midi { value["bindings"] = midi.snapshot(kind)["bindings"] }
+        if midi != nil || plan.capturedAudio {
+            var clock: [String: Any] = ["kind": "mach-host-time", "anchor": String(anchor), "position": position,
+                "renderQuantum": renderQuantum, "sampleRate": engine.outputNode.outputFormat(forBus: 0).sampleRate,
+                "presentationLatency": engine.outputNode.presentationLatency]
+            if let midi { clock["midiAnchorNanoseconds"] = String(midi.anchor); clock["midiPosition"] = midi.position(at: DispatchTime.now().uptimeNanoseconds) }
+            value["clock"] = clock
         }
         return value
     }
@@ -341,7 +365,7 @@ final class ArrangementTransport {
         do { try audioEmit(snapshot(state == .playing ? "playing" : "paused")) }
         catch { finish(reason: "event-output-failed", error: error, publish: false) }
     }
-    func stopVoices() { generation &+= 1; for voice in voices { voice.stop() }; active.removeAll() }
+    func stopVoices() { horizon?.cancel(); horizon = nil; horizonEnded = false; generation &+= 1; for voice in voices { voice.stop() }; active.removeAll() }
     func schedule(from seconds: Double, playing: Bool) throws {
         guard state != .stopped else { return }
         if seconds >= plan.duration { position = plan.duration; finish(reason: "finished"); return }
@@ -352,7 +376,7 @@ final class ArrangementTransport {
             let admitted = try voice.prepare(from: seconds, finished: { [weak self] in
                 guard let self, self.generation == expected, self.state == .playing else { return }
                 self.active.remove(voice.region.id)
-                if self.active.isEmpty && (self.midi == nil || self.midiEnded) { self.finish(reason: "finished") }
+                if self.active.isEmpty && (self.midi == nil || self.midiEnded) && (!self.plan.capturedAudio || self.horizonEnded) { self.finish(reason: "finished") }
             }, failed: { [weak self] error in
                 guard let self, self.generation == expected, self.state != .stopped else { return }
                 self.finish(reason: "source-read-failed", error: error)
@@ -364,7 +388,7 @@ final class ArrangementTransport {
     }
     func run() throws {
         guard state != .stopped else { return }
-        guard position < plan.duration, !active.isEmpty || midi != nil else { position = plan.duration; finish(reason: "finished"); return }
+        guard position < plan.duration, !active.isEmpty || midi != nil || plan.capturedAudio else { position = plan.duration; finish(reason: "finished"); return }
         try checkOutput(); engine.prepare(); try engine.start()
         let rate = engine.outputNode.outputFormat(forBus: 0).sampleRate, latency = engine.outputNode.presentationLatency
         guard rate.isFinite, rate > 0, latency.isFinite, latency >= 0 else { throw AudioFailure("output clock is unavailable") }
@@ -381,6 +405,17 @@ final class ArrangementTransport {
         if let midi { try midi.runCoordinated(anchorNanoseconds: AudioConvertHostTimeToNanos(anchor)) }
         guard mach_absolute_time() < anchor else { throw AudioFailure("audio graph missed its common start deadline") }
         state = .playing; try checkOutput()
+        if plan.capturedAudio {
+            let expected = generation, end = try futureHost(plan.duration - position, from: anchor)
+            let timer = DispatchSource.makeTimerSource(queue: .main); horizon = timer
+            timer.schedule(deadline: DispatchTime(uptimeNanoseconds: AudioConvertHostTimeToNanos(end)), leeway: .nanoseconds(0))
+            timer.setEventHandler { [weak self] in
+                guard let self, self.generation == expected, self.state == .playing else { return }
+                self.horizonEnded = true; self.horizon?.cancel(); self.horizon = nil
+                if self.active.isEmpty { self.finish(reason: "finished") }
+            }
+            timer.resume()
+        }
     }
     func monitor(_ object: AudioObjectID, _ original: AudioObjectPropertyAddress) throws {
         var key = original
@@ -476,6 +511,7 @@ struct Options {
         if let output, output.isEmpty { throw AudioFailure("missing output UID") }
     }
 }
+#if !ARRANGEMENT_LIBRARY
 @main enum ArrangementCommandLine {
 static func main() {
 _ = signal(SIGPIPE, SIG_IGN)
@@ -497,3 +533,5 @@ do {
 
 }
 }
+
+#endif

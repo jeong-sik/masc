@@ -177,3 +177,18 @@ test('combined playback pins its audio device and every MIDI binding in one nati
   assert.throws(() => fixture({ ...options, output: undefined }))
   assert.throws(() => fixture({ ...options, loop: true }))
 })
+
+test('captured audio-only playback owns the native arrangement clock and refuses MIDI or whole-song loop selection', async () => {
+  const format = 'capture-audio-arrangement'
+  const f = fixture({ format })
+  assert.equal(f.executable, arrangementTransportPath)
+  const clock = { kind: 'mach-host-time' }
+  f.event('playing', { format, clock }); await f.playback.ready
+  f.playback.pause(); f.event('paused', { format, clock }); f.playback.seek(.5); f.playback.resume()
+  f.event('playing', { format, clock }); f.playback.stop(); f.event('stopped', { format, clock }); f.close()
+  await f.playback.completion
+  assert.deepEqual(f.commands.map(command => command.kind), ['pause', 'seek', 'resume', 'stop'])
+  for (const options of [{ loop: true }, { midiOutput: '12' }]) assert.throws(() => fixture({ format, ...options }), /Invalid arrangement/)
+  const invalid = fixture({ format }); invalid.event('playing'); invalid.close(1)
+  await assert.rejects(invalid.playback.completion, /captured audio arrangement clock/)
+})

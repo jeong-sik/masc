@@ -20,18 +20,34 @@ const { values, positionals } = parseArgs({
     check: { type: 'boolean' },
     render: { type: 'string' },
     audio: { type: 'string' },
+    record: { type: 'boolean' },
+    devices: { type: 'boolean' },
+    session: { type: 'string' },
+    'session-root': { type: 'string' },
+    input: { type: 'string' },
+    midi: { type: 'string' },
     help: { type: 'boolean' },
   },
 })
 
 if (values.help) {
   console.log('masc-alphatex [file.atex] [--bundle snapshot.json] [--index N]\n'
-    + '  TUI score viewer: arrows/j/k scroll, +/- zoom, t tracks, Space play/pause, s stop, q exit.\n'
+    + '  TUI score viewer: arrows/j/k scroll, +/- zoom, t tracks, Space play/pause, r recording, q exit.\n'
+    + '  --record opens audio/MIDI input selection; r begins recording, s saves WAV and UMP.\n'
+    + '  --session directory opens a saved waveform/MIDI timeline; --session-root sets the take folder.\n'
+    + '  --devices lists CoreAudio/CoreMIDI inputs on macOS.\n'
     + '  --check validates; --render output.png and --audio output.wav export using alphaTab 1.8.4.')
   process.exit(0)
 }
 
 try {
+  if (values.devices) {
+    const { devices } = await import('./capture.mjs')
+    console.log(JSON.stringify(await devices()))
+  } else if (values.record || values.session) {
+    const { viewSession } = await import('./music-session.mjs')
+    await viewSession({ directory: values.session, root: values['session-root'], input: values.input, midi: values.midi })
+  } else {
   const sources = values.bundle
     ? JSON.parse(readFileSync(values.bundle, 'utf8')).sources
     : [readFileSync(positionals[0] ?? 0, 'utf8')]
@@ -51,6 +67,7 @@ try {
     console.log(JSON.stringify({ engine: 'alphaTab', version: engineVersion, title: score.title, tracks: score.tracks.length, bars: score.masterBars.length }))
   } else {
     await viewScores(sources, index)
+  }
   }
 } catch (error) {
   console.error(`alphaTex: ${errorDetail(error).split('\n').map(safeText).join('\n')}`)
@@ -93,7 +110,10 @@ async function viewScores(sources, initialIndex) {
   let textView = false
   let elapsed = 0
   let duration = 0
-  const write = bytes => { if (!closed) process.stdout.write(bytes) }
+  let suspended = false
+  let sessionTask = null
+  const sessionAbort = new AbortController()
+  const write = bytes => { if (!closed && !suspended) process.stdout.write(bytes) }
   const tracks = () => selectedTrack < 0 ? undefined : [selectedTrack]
   let finish
   const done = new Promise(resolve => { finish = resolve })
@@ -125,7 +145,7 @@ async function viewScores(sources, initialIndex) {
     })
   }
   function redraw({ imageChanged = false } = {}) {
-    if (closed) return
+    if (closed || suspended) return
     const rows = process.stdout.rows || 24
     const columns = process.stdout.columns || 80
     // Clear text lines individually. CSI 2J can free Kitty image storage.
@@ -151,7 +171,7 @@ async function viewScores(sources, initialIndex) {
       if (imageChanged) output += retire(tmux) + transmit(image.png, tmux)
       output += `\x1b[3;2H${place(view, tmux)}`
     }
-    output += `\x1b[${rows};1H${fit('↑↓/j k:scroll PgUp/PgDn  [ ]:system  +/-:zoom  t:tracks  ←→:score  v:source  Space:play/pause  s:stop  q:back')}`
+    output += `\x1b[${rows};1H${fit('↑↓/j k:scroll PgUp/PgDn  [ ]:system  +/-:zoom  t:tracks  ←→:score  v:source  Space:play/pause  r:recording  s:stop  q:back')}`
     write(output)
   }
   function render() {
@@ -286,6 +306,24 @@ async function viewScores(sources, initialIndex) {
   function keypress(text, key = {}) {
     if (key.ctrl && key.name === 'c' || ['escape', 'q'].includes(key.name)) { finish(); return }
     switch (key.name) {
+      case 'r': {
+        if (sessionTask) return
+        stop()
+        write(retire(tmux))
+        suspended = true
+        process.stdin.off('keypress', keypress)
+        sessionTask = (async () => {
+          try {
+            const { viewSession } = await import('./music-session.mjs')
+            if (!closed) await viewSession({ root: values['session-root'], input: values.input, midi: values.midi, embedded: true, signal: sessionAbort.signal })
+          } catch (error) { status = error.message }
+          finally {
+            sessionTask = null; suspended = false
+            if (!closed) { process.stdin.on('keypress', keypress); render() }
+          }
+        })()
+        return
+      }
       case 'up': case 'k': scroll -= 3; break
       case 'down': case 'j': scroll += 3; break
       case 'pageup':
@@ -329,7 +367,7 @@ async function viewScores(sources, initialIndex) {
     }
     redraw()
   }
-  const resize = () => render()
+  const resize = () => { if (!suspended) render() }
   const onSignal = () => finish()
   const onEnd = () => finish()
   emitKeypressEvents(process.stdin)
@@ -349,6 +387,7 @@ async function viewScores(sources, initialIndex) {
   } finally {
     stop()
     closed = true
+    sessionAbort.abort()
     clearInterval(timer)
     process.stdin.off('keypress', keypress)
     process.stdin.off('end', onEnd)
@@ -356,7 +395,7 @@ async function viewScores(sources, initialIndex) {
     for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.off(signal, onSignal)
     const exits = [...children.values()]
     for (const child of children.keys()) child.kill('SIGKILL')
-    await Promise.all([renderWorker.terminate(), audioWorker.terminate(), ...exits])
+    await Promise.all([sessionTask, renderWorker.terminate(), audioWorker.terminate(), ...exits])
     process.stdout.write(retire(tmux) + '\x1b[?25h\x1b[?1049l')
     process.stdin.setRawMode(wasRaw ?? false)
     process.stdin.pause()

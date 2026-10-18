@@ -15,7 +15,7 @@ command -v pnpm >/dev/null 2>&1 || { printf '%s\n' 'pnpm is required to install 
 node -e 'if (Number(process.versions.node.split(".")[0]) < 22) process.exit(1)'
 mkdir -p "$prefix"
 prefix=$(CDPATH= cd -- "$prefix" && pwd)
-runtime_files='package.json pnpm-lock.yaml engine.mjs audio.mjs diagnostics.mjs worker.mjs terminal.mjs viewer.mjs'
+runtime_files='package.json pnpm-lock.yaml engine.mjs audio.mjs diagnostics.mjs worker.mjs terminal.mjs viewer.mjs capture.mjs session-data.mjs music-session.mjs wave-file.mjs native/MusicSession.swift native/Info.plist'
 revision=$(node --input-type=module - "$repo_root/tools/alphatex" $runtime_files <<'FINGERPRINT'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
@@ -30,6 +30,7 @@ FINGERPRINT
 support_dir="$prefix/../share/masc/alphatex/$revision"
 if [ ! -f "$support_dir/.installed" ]; then
   mkdir -p "$support_dir"
+  mkdir -p "$support_dir/native"
   for file in $runtime_files; do
     install -m 644 "$repo_root/tools/alphatex/$file" "$support_dir/$file"
   done
@@ -42,6 +43,22 @@ if [ ! -f "$support_dir/.installed" ]; then
     engine.renderScore(":4 0.6", {page: 0});
   ' "$support_dir"
   touch "$support_dir/.installed"
+fi
+# Capture uses the system CoreAudio/CoreMIDI drivers. Keep its binary in the
+# immutable runtime so updating a launcher cannot replace a running recorder.
+if [ "$(uname -s)" = Darwin ] && [ ! -x "$support_dir/music-native" ]; then
+  if xcrun --find swiftc >/dev/null 2>&1; then
+    native_binary=$(mktemp "$support_dir/.music-native.XXXXXX")
+    trap 'rm -f "$native_binary"' EXIT HUP INT TERM
+    xcrun swiftc -O "$support_dir/native/MusicSession.swift" -o "$native_binary" \
+      -framework AVFoundation -framework CoreAudio -framework CoreMIDI -framework AudioToolbox \
+      -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker "$support_dir/native/Info.plist"
+    chmod 755 "$native_binary"
+    mv -f "$native_binary" "$support_dir/music-native"
+    trap - EXIT HUP INT TERM
+  else
+    printf '%s\n' 'Audio/MIDI capture requires the Xcode command-line tools; score viewing remains available.' >&2
+  fi
 fi
 # The relative layout is shared by every prefix; no checkout or workspace path
 # is embedded in the launcher and the installed viewer survives worktree removal.

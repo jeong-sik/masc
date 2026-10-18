@@ -66,6 +66,32 @@ same-snapshot lookup and cross-Keeper interleaving separate in a matched native
 comparison, and record memory/latency overhead rather than assuming a total
 speedup from the source bounds.
 
+## Name validation without schema construction
+
+Compared with `97997af26ef5c0ada4d284af514207d578182492`, one tool setup derives
+the common descriptor/Skill name list once for its official-client and Agent
+Core membership checks. Each surface still applies its actual deferred builtin
+names and attached-tool identity projection separately. Conversation-carried
+schemas remain visible. Declared composition names, async controls and transient
+draft names use the same typed row selection as the schema projection, without
+constructing descriptions, input schemas or schema-only Tool objects.
+
+With `C` declared compositions and the default transient-draft surface, the two
+membership checks previously materialized `2 * (C + 4)` schema-only Tools; the
+name-only path materializes none. The common base-name projection changes from
+two calls to one per setup. A per-Skill composition profile now constructs only
+its declared schema instead of that schema and four discarded control schemas.
+These are source operation counts, not executed counters or latency results.
+Actual executable Tool construction, Tool calls and request bytes are unchanged
+by this unit. Profile bytes still cover the declared Tool's exact name,
+description and serialized input schema, excluding shared controls and JSON
+envelope framing. Authored scenarios compare profile bytes with the executable
+bundle and cover named async work without transient drafts; they are unexecuted.
+
+Measure cold setup and repeated same-binding setup separately. Retain the full
+failed/cancelled/unfinished cohort when comparing first useful work; this source
+reduction does not establish that interval or a current-head speedup.
+
 ## Recorded queue admission
 
 `Keeper_event_queue_state.pending_selection.first_admitted_at` records the epoch

@@ -950,8 +950,13 @@ let test_bundle_names_are_unique () =
 ;;
 
 let test_bundle_matches_expected_projection () =
-  with_bundle (fun _ names ->
-    let snapshot, skill_catalog = skill_snapshot_and_catalog () in
+  with_bundle_tools (fun _config _meta snapshot _index _surface tools ->
+    let names = List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name) tools in
+    let skill_catalog =
+      match Keeper_skill_catalog.of_snapshot snapshot with
+      | catalog, [] -> catalog
+      | _, _ :: _ -> fail "bundle Skill snapshot projection was rejected"
+    in
     (* [tools] is the official-client shape: the attached tools are in it as
        themselves, because those lanes cannot widen a running turn and a
        listing would name tools they can never make callable. The Agent Core
@@ -977,6 +982,23 @@ let test_bundle_matches_expected_projection () =
       "instruction and composition tools match the expected projection"
       expected
       (List.sort_uniq String.compare names);
+    (* Measure the executable bundle's actual schemas, built independently of
+       the schema-only profile path. Shared controls are not per-Skill bytes. *)
+    Keeper_skill_observability.of_catalog skill_catalog
+    |> List.iter (fun (profile : Keeper_skill_observability.profile) ->
+      match profile.surface with
+      | Keeper_skill_observability.Instruction_skill -> ()
+      | Composition_skill _ ->
+        let delivered =
+          match List.find_opt (fun (tool : Agent_core.Tool.t) ->
+            String.equal tool.schema.name profile.activation_tool) tools with
+          | Some tool -> tool
+          | None -> failf "profile activation tool missing: %s" profile.activation_tool
+        in
+        check (option int)
+          (profile.activation_tool ^ " exact delivered schema-component bytes")
+          (Some (Keeper_skill_observability.tool_component_bytes delivered))
+          profile.tool_schema_bytes);
     let task_reference = snapshot_reference snapshot "gate-instruction" in
     let task_selection =
       match Keeper_task_skill_turn.resolve ~snapshot [ task_reference ] with

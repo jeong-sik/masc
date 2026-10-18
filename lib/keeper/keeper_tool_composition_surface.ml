@@ -135,47 +135,61 @@ type 'evidence schema_tool_origin =
   | Transient_prepare
   | Transient_run
 
-let schema_tool_of_entry (entry : Catalog.entry) =
+let composition_schema_tool (entry : Catalog.entry) =
   schema_tool
     ~name:(Catalog.tool_name entry)
     ~description:(entry_description entry)
     ~input_schema:(Catalog.input_schema_of_params entry.params)
 ;;
 
-let schema_tool_rows ?(include_drafts = true) ?(skill_compositions = []) () =
-  let composition_tools =
-    List.map
-      (fun (entry, evidence) ->
-         Declared_composition evidence, schema_tool_of_entry entry)
-      skill_compositions
-  in
+(* Row selection and order are shared by schemas and the names-only view.
+   Retain entries beside caller evidence until the requested projection. *)
+let schema_tool_origins ~include_drafts ~skill_compositions =
+  let compositions = List.map (fun row -> Declared_composition row) skill_compositions in
   let controls =
     if include_drafts || Catalog.requires_async_controls (List.map fst skill_compositions)
-    then
-      [ ( Async_status
-        , schema_tool
-            ~name:Catalog.status_tool_name
-            ~description:Tool_schemas_composition_control.status_schema.description
-            ~input_schema:Tool_schemas_composition_control.status_schema.input_schema )
-      ; ( Async_cancel
-        , schema_tool
-            ~name:Catalog.cancel_tool_name
-            ~description:Tool_schemas_composition_control.cancel_schema.description
-            ~input_schema:Tool_schemas_composition_control.cancel_schema.input_schema )
-      ]
-    else []
-  in
-  let drafts = if include_drafts then
-    [ Transient_prepare, schema_tool
-        ~name:Catalog.prepare_tool_name
-        ~description:Keeper_composition_draft.prepare_schema.description
-        ~input_schema:Keeper_composition_draft.prepare_schema.input_schema
-    ; Transient_run, schema_tool
-        ~name:Catalog.run_tool_name
-        ~description:Keeper_composition_draft.run_schema.description
-        ~input_schema:Keeper_composition_draft.run_schema.input_schema ]
+    then [Async_status; Async_cancel]
     else [] in
-  composition_tools @ controls @ drafts
+  let drafts = if include_drafts then [Transient_prepare; Transient_run] else [] in
+  compositions @ controls @ drafts
+;;
+
+let schema_tool_name_rows ?(include_drafts = true) ?(skill_compositions = []) () =
+  schema_tool_origins ~include_drafts ~skill_compositions
+  |> List.map (function
+       | Declared_composition (entry, evidence) ->
+           Declared_composition evidence, Catalog.tool_name entry
+       | Async_status -> Async_status, Catalog.status_tool_name
+       | Async_cancel -> Async_cancel, Catalog.cancel_tool_name
+       | Transient_prepare -> Transient_prepare, Catalog.prepare_tool_name
+       | Transient_run -> Transient_run, Catalog.run_tool_name)
+;;
+
+let schema_tool_rows ?(include_drafts = true) ?(skill_compositions = []) () =
+  schema_tool_origins ~include_drafts ~skill_compositions
+  |> List.map (function
+       | Declared_composition (entry, evidence) ->
+           Declared_composition evidence, composition_schema_tool entry
+       | Async_status ->
+           Async_status, schema_tool
+             ~name:Catalog.status_tool_name
+             ~description:Tool_schemas_composition_control.status_schema.description
+             ~input_schema:Tool_schemas_composition_control.status_schema.input_schema
+       | Async_cancel ->
+           Async_cancel, schema_tool
+             ~name:Catalog.cancel_tool_name
+             ~description:Tool_schemas_composition_control.cancel_schema.description
+             ~input_schema:Tool_schemas_composition_control.cancel_schema.input_schema
+       | Transient_prepare ->
+           Transient_prepare, schema_tool
+             ~name:Catalog.prepare_tool_name
+             ~description:Keeper_composition_draft.prepare_schema.description
+             ~input_schema:Keeper_composition_draft.prepare_schema.input_schema
+       | Transient_run ->
+           Transient_run, schema_tool
+             ~name:Catalog.run_tool_name
+             ~description:Keeper_composition_draft.run_schema.description
+             ~input_schema:Keeper_composition_draft.run_schema.input_schema)
 ;;
 
 let observe_node_result

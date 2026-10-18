@@ -62,6 +62,21 @@ val make_instruction_skill_tool :
 (** Read a frozen Skill body or bundled resource without a Keeper turn or
     composition execution. Native Agent-Core invocation identity is preserved. *)
 
+val composition_schema_tool :
+  Keeper_tool_composition_catalog.entry -> Agent_core.Tool.t
+(** The single declared composition schema, without materializing async or
+    transient controls. Its schema has the same description/parameters as its
+    row in {!schema_tool_rows}; it cannot execute. *)
+
+val schema_tool_name_rows :
+  ?include_drafts:bool ->
+  ?skill_compositions:(Keeper_tool_composition_catalog.entry * 'evidence) list ->
+  unit ->
+  ('evidence schema_tool_origin * string) list
+(** Model names and typed caller provenance from the same row selection/order
+    as {!schema_tool_rows}, without constructing Tool objects, descriptions or
+    input schemas. Use this for membership checks, not schema inspection. *)
+
 val schema_tool_rows :
   ?include_drafts:bool ->
   ?skill_compositions:(Keeper_tool_composition_catalog.entry * 'evidence) list ->

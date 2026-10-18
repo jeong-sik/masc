@@ -145,6 +145,9 @@ Task Skill도 실행 projection과 prompt에서 unavailable이며 admission 전�
   - 스냅샷은 `Skill_reference.Identity_map`(`source_id`, `package_id`, `name`) 기반 exact 인덱스와 이름별 첫 source 유효 항목 인덱스를 불변 값으로 보유한다 (`O(log E)` 조회).
   - 스냅샷은 `Ephemeron.K1`, Tool descriptor 목록은 각 descriptor를 약한 키로 갖는 `Ephemeron.Kn`에 결속하여 살아 있는 입력에 대해서만 완성된 카탈로그·diagnostic·inventory 준비 결과를 공유한다.
   - Lane add-on worker는 backend 시작마다 고유 owner token을 발급하고 `Ephemeron.K2`/`K1`으로 동일 owner·Tool 객체의 export와 canonical descriptor를 재사용하되, 실제 호출 경계에서는 현재 가시성·phase·schema·owner 일치를 매번 다시 검증한다.
+- **도구 이름 투영과 Skill 크기 관측 (`Keeper_run_tools_setup`, `Keeper_tool_composition_surface`)**:
+  - official-client·Agent Core 표면의 검증은 공통 descriptor·Skill 이름 목록을 setup당 한 번 계산하고, 실제 지연 도구·대화에 유지된 스키마·연결 도구 목록은 각 표면에 맞춰 검증한다.
+  - composition 이름 검증은 스키마와 같은 typed 행 선택을 사용하되 설명·입력 스키마·임시 Tool 객체를 만들지 않는다. Skill별 크기는 선언된 composition 스키마 하나만 만들며 공유 status·cancel·prepare·run 스키마를 덧붙이지 않는다. 실행 도구의 실제 생성·요청 바이트는 이 변경으로 줄었다고 주장하지 않는다.
 - **공통 world 입력 병렬 조회와 worker 수명 (`Keeper_turn_shared_inputs.observe`, `Executor_pool`)**:
   - 직접·자율 진입 경로가 공통으로 읽는 Lane 구독 참조, workspace memory 관측, wiki 목차 조회는 Eio에서 중첩 `Eio.Fiber.pair`로 병렬 실행하고 합류 뒤 한 번 로그·gauge를 기록한다.
   - `Executor_pool` 제출은 `Awaiting_worker` / `Entered_worker` / `Cancelled_before_entry` 상태를 원자적으로 추적하며, 호출자 대기가 취소되면 진입 전 작업을 retire하거나 이미 진입한 worker의 취소 컨텍스트에 전달하고 정리 완료를 기다린 뒤 원래 취소를 전파한다(실패한 함수를 호출자에서 inline 재실행하지 않는다).

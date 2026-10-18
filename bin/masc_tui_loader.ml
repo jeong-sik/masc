@@ -976,9 +976,9 @@ let load_runtime_resolved ~(host : string) ~(port : int) :
           let snapshot = catalog.Tui_decode.rrc_snapshot in
           snapshot.rrs_runtimes, snapshot.rrs_lanes, catalog.rrc_assignments, snapshot.rrs_default_route))
 
-(** One read of [/api/v1/runtime/resolved] for the Overview: the runtime rows
-    and the provider usage windows. The two decode apart, and a failed fetch
-    fails both with one reason. *)
+(** One read of [/api/v1/runtime/resolved] for the Overview: runtime rows and
+    provider usage share interpretation while keeping independent errors.
+    A failed fetch fails both with one reason. *)
 let load_overview_runtime_resolved ~(host : string) ~(port : int) :
     (Tui_decode.runtime_option list, string) result
     * (Masc.Tui_decode_usage.provider_usage_windows, string) result =
@@ -988,10 +988,11 @@ let load_overview_runtime_resolved ~(host : string) ~(port : int) :
       (Error reason, Error reason)
   | Ok json ->
       Masc_tui_response_decode.run ~name:"runtime.quota.decode_wait" (fun () ->
+        let observation = Tui_decode.decode_runtime_resolved_observation json in
         ( Result.map
             (fun catalog -> catalog.Tui_decode.rrc_snapshot.rrs_runtimes)
-            (Tui_decode.decode_runtime_resolved_full json)
-        , Masc.Tui_decode_usage.decode_provider_usage_windows json ))
+            observation.rro_catalog
+        , observation.rro_usage ))
 
 let load_keeper_usage ~(host : string) ~(port : int) =
   match fetch_keeper_usage ~host ~port with

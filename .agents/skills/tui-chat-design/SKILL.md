@@ -1,6 +1,6 @@
 ---
 name: tui-chat-design
-description: "MASC TUI의 채팅·입력·로딩·진행 상태, Keeper·Work·로그·질문 원본의 비동기 조회, Keeper 설정·Sandbox 단축키·Runtime 폼·원문 저장과 설정 snapshot 해석을 바꿀 때 쓴다. 원본 입력·revision·요청 소유권, 마지막 관측과 부분 실패, 준비 작업·상태 반영·paint 증거를 구분하는 규칙이다."
+description: "MASC TUI의 채팅·입력·로딩·진행 상태, Keeper·Work·로그·질문 원본의 비동기 조회, Runtime·Overview 목록/사용량의 공유 해석, Keeper 설정·Sandbox 단축키·Runtime 폼·원문 저장과 설정 snapshot 해석을 바꿀 때 쓴다. 원본 입력·revision·요청 소유권, 마지막 관측과 부분 실패, 준비 작업·상태 반영·paint 증거를 구분하는 규칙이다."
 ---
 
 # 대화를 먼저 읽는 채팅
@@ -86,6 +86,11 @@ description: "MASC TUI의 채팅·입력·로딩·진행 상태, Keeper·Work·�
   runtime 중복·default 일관성 검증과 usage 관측의 독립 오류를 유지한다. 순수 catalogue 해석은
   기존 response-decode CPU 경로에서 하고, HTTP/cache·read owner·UI 반영은 caller에 둔다.
   `runtime.catalog.decode_wait`는 pool 대기와 결과 전달을 포함하며 paint·순수 CPU 시간은 아니다.
+- Overview는 같은 응답의 usage를 한 번 캡처한 typed observation으로 catalogue와 usage의
+  독립 결과를 만든다. catalogue가 snapshot의 usage 지점 전에 실패해도 읽을 수 있는 usage는
+  남기고, usage 오류는 정상 catalogue를 막거나 이전 응답의 quota identity로 대체하지 않는다.
+  snapshot/full 전용 경로는 기존 검증 순서를 유지한다. 공유하는 것은 현재 응답의 해석이며
+  HTTP reader·ETag cache·request owner까지 합쳐졌다고 주장하지 않는다.
 - 재조회·실패 중 마지막 정상 catalogue를 남기고 refreshing/stale과 마지막 실패를 함께
   보여 준다. 정상 empty 결과는 loading이 아니다. 기존 exact replacement의 fresh-read 조건은
   유지한다. 화면 문구 기대값 대신 요청·소유 상태·결정 시나리오를 작성한다.

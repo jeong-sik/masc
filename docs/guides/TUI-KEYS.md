@@ -136,6 +136,10 @@ Overview and the Runtime operator surface retain their separate readers.
 Catalogue rows, configured default route and Keeper assignments share one
 validated observation. A missing usage-window observation stays an explicit
 unknown alongside an otherwise usable catalogue.
+Overview keeps catalogue and usage availability independent: valid usage remains
+available after catalogue validation fails, and usage failure leaves healthy
+catalogue rows usable. Both observations belong to the same response; a failed
+usage read does not borrow a prior response's quota identity.
 
 ## Usage
 

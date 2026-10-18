@@ -12,6 +12,8 @@ const swift=`import Foundation
 import AVFoundation
 import CoreAudio
 var reviewHost: UInt64 = 1_000_000_000
+var epochReplies:[[String:Any]]=[]
+func audioEmit(_ event:[String:Any])throws{epochReplies.append(event)}
 final class FakeTimer {
  var handler:(()->Void)?,cancelled=false
  func schedule(deadline:DispatchTime,leeway:DispatchTimeInterval){}
@@ -42,6 +44,7 @@ final class FakeMidi { var stages:[Double]=[], runs:[UInt64]=[];func stageCoordi
  var midi:FakeMidi?;var midiEnded=false\n var state=State.prepared,voices=[FakeVoice()],active=Set<String>(),position=0.0,anchor:UInt64=0,generation:UInt64=0,finished=0,published=0
  func checkOutput()throws{}
  func publish(){published+=1}
+ func snapshot(_ kind:String)->[String:Any]{["kind":kind,"clock":["anchor":String(anchor),"position":position]]}
  func finish(reason:String,error:Error?=nil){guard state != .stopped else{return};precondition(error==nil);state = .stopped;finished+=1;stopVoices();engine.stop()}
  ${methods}
 }
@@ -66,6 +69,11 @@ paired.receive(#"{"kind":"seek","seconds":0.4}"#)
 precondition(paired.position==0.4 && paired.midi!.stages.last==0.4 && paired.midi!.runs.count==1)
 paired.receive(#"{"kind":"resume"}"#)
 precondition(paired.state == .playing && paired.midi!.runs.count==2)
+let request="9f6465e2-4acd-4df1-90cd-32c94e10db48"
+paired.receive(#"{"kind":"recordingEpoch","request":"9f6465e2-4acd-4df1-90cd-32c94e10db48"}"#)
+precondition(epochReplies.count==1 && epochReplies[0]["recordingRequest"] as? String==request)
+let acknowledged=epochReplies[0]["clock"] as! [String:Any]
+precondition(acknowledged["anchor"] as? String==String(paired.anchor) && acknowledged["position"] as? Double==0.4)
 stale();precondition(paired.finished==0 && paired.active==["region-1"])
 let waiting=Probe();waiting.midi=FakeMidi();waiting.voices[0].end=0.2;try waiting.schedule(from:0.8,playing:true)
 precondition(waiting.state == .playing && waiting.active.isEmpty && waiting.finished==0 && waiting.midi!.stages==[0.8])

@@ -44,3 +44,13 @@ loop recording remain unfinished. No input is automatically routed back to an
 output. Native MIDI-only, WAV-only, mixed and hybrid arrangements publish their
 host-clock epoch for recording admission; a pending transport change cannot admit
 a new take before its acknowledgement.
+
+An epoch request uses its own UUID and is evaluated by the native owner after
+earlier transport commands. Older status responses cannot admit a recording.
+Cancellation rejects that request without opening late inputs. Backing errors
+continue to belong to the recording owner while the view is closing.
+
+Captured controller/program state still follows the explicit baseline rules in
+[source state](SOURCE-STATE.md). Complete original UMP is retained even when a
+region cannot restore its unknown initial state; that case reports a diagnostic.
+Recording does not invent controller defaults to bypass playback admission.

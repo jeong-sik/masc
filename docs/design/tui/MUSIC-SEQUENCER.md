@@ -113,6 +113,10 @@ regions with project positions, source-native offsets/extents and repeat counts.
 MIDI assets preserve their complete source documents. WAV assets are copied into
 project-owned content-addressed files; save-as materializes verified source files
 alongside the new JSON document. Region edits and lane removal retain sources.
-This is the storage/editing boundary for a forthcoming terminal arrangement view;
-it does not deliver arrangement playback, arbitrary source-state chase or overdub.
+The terminal arrangement view now consumes this boundary through `--arrange`,
+the score view's `a` key and typed saved-document routing. It supports source
+import, region placement/editing, undo/redo and revision-protected save/reopen.
+IO runs in an owned worker and closes only after cancellation/cleanup and admitted
+editor decisions drain. Save-as materializes sources retained by edit history.
+This does not deliver arrangement playback, arbitrary source-state chase or overdub.
 See [the core contract](../../../tools/alphatex/ARRANGEMENT.md).

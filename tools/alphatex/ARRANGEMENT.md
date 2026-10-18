@@ -1,10 +1,56 @@
 # MIDI/audio region arrangements
 
-`arrangement.mjs` and `arrangement-files.mjs` supply the document and storage
-boundary for arranging sources. The terminal clip editor, arrangement playback
-and overdub integration are subsequent work; the current source/phrase editors
-and their transports remain separate. This core does not claim a delivered
-arrangement screen or simultaneous audio/MIDI transport.
+The terminal arrangement editor opens with `masc-alphatex --arrange`, the score
+view's `a` key, or `--project song.json` for a saved arrangement. It arranges
+retained WAV/MIDI sources independently of the phrase piano roll. Arrangement
+playback and overdub integration remain subsequent work; the current source and
+phrase editors retain their separate transports.
+
+## Terminal workflow
+
+Import files with `:import-wave /path/take.wav` or `:import-midi /path/song.mid`.
+Paths retain internal spaces and are literal paths, without shell expansion.
+The imported asset is selected in the library. Enter places its complete source
+at the cursor, using the current compatible lane or adding a new one.
+`a` cycles library assets; Tab cycles lanes; Up/Down cycles regions on that lane.
+Left/Right moves the cursor and Shift+Left/Right moves the selected region by
+the grid. `:grid 0.25` sets a quarter-beat grid.
+
+```text
+:place asset-1 4                 full source at quarter-note beat 4
+:place asset-2 8 2               format-2 pattern 2 at beat 8
+:region asset-1 4 1200 4800 2     asset, beat, source offset/extent, repeat
+:region asset-2 8 0 2002 1 2      optional final format-2 pattern
+:trim 2400 4800                  native source offset and extent
+:move 8
+:repeat 4
+:duplicate 16
+:lane-add wave Bass
+:lane-add midi Keys
+:lane 2
+:region-lane 2
+:asset asset-1
+:select region-1
+:save-as /path/song.json
+```
+
+Source offsets/extents use whole WAV frames or original MIDI ticks; project
+positions use quarter-note beats. Pattern numbers in commands start at 1.
+Trim rejects an out-of-bounds range rather than rounding or shortening it.
+`x`/Delete removes a region, `d` duplicates at the cursor, `m`/`o` toggles lane
+mute/solo, and `u`/`y` undoes/redoes document edits. `:lane-remove` retains sources.
+`:title`, `:tempo`, `:meter`, `:lane-name` and `:region-name` edit their named fields.
+`s` saves; `q`/Escape saves and returns; `?` or `:help` lists commands.
+
+Import and save IO run in an owned worker. Accepted commands remain ordered;
+closing refuses new input, cancels an in-progress import, waits for cleanup and
+drains already accepted editor decisions. An import finishing after close cannot
+replace the document. Save-as materializes WAVs retained by undo/redo history as
+well as the current document, so a later redo does not depend on the old folder.
+An uncertain/failed save is not automatically retried at the same path on close;
+edits are retained at a fresh recovery location. If source corruption prevents
+portable recovery, `draft.json` and `sources.json` explicitly retain the edited
+document and its original source location without claiming copied assets.
 
 A document contains immutable source assets, typed audio/MIDI lanes and regions.
 Regions identify their source and lane, a project position in quarter-note ticks,
@@ -58,9 +104,9 @@ project directory. A missing or changed asset is an error, not an empty track.
 WAV verification is a read-time observation; future playback must own its opened
 sources, not treat a returned pathname as an immutable operating-system handle.
 
-The shared musical-document save/load decoder accepts the arrangement schema.
-Opening one in the current phrase/source editor is explicitly refused before
-terminal raw mode, workers or temporary rendering resources are acquired.
+The shared musical-document entrypoint routes arrangement documents to their
+editor before acquiring phrase-editor terminal, worker or rendering resources.
+WAV assets are verified before the arrangement editor acquires raw terminal mode.
 Use the arrangement wrappers when working with referenced files: generic JSON
 shape validation does not establish that external assets are present. Existing
 phrase MIDI export explicitly refuses arrangement documents until a clip-state

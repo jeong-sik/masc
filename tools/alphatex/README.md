@@ -228,7 +228,7 @@ use note-key intervals and do not infer sustain-pedal voice durations. Shared-ke
 ambiguity and unmatched input events remain in the original source.
 
 Source audition sends the complete ordered MIDI wire stream to explicitly selected
-outputs as described below. Controller/tempo editing, clip arrangement and source
+outputs as described below. Controller/tempo editing, arrangement playback and source
 WAV synthesis remain unfinished. Existing phrase-project MIDI/WAV transport
 continues to work. See [MIDI source semantics](MIDI-SOURCE.md) for retained data,
 source-event identities and timing behavior.
@@ -254,6 +254,8 @@ Use destinations/channels owned for this audition: pedal state is shared by a
 MIDI channel, and opaque vendor SysEx can have device-specific side effects that
 cannot be reversed generically. Playback does not synthesize MIDI clock.
 
-The [arrangement document core](ARRANGEMENT.md) now retains MIDI/WAV sources and
-editable regions through save/reopen/relocation. Its terminal clip editor and
-arrangement/overdub transport are still being integrated.
+Open the [arrangement editor](ARRANGEMENT.md) with the score view's `a` key or
+`masc-alphatex --arrange`. Import WAV/MIDI sources, then place, trim, repeat,
+duplicate and remove regions without changing originals. `--project song.json`
+reopens an arrangement; save-as carries its WAV files, including sources retained
+by undo/redo. Arrangement playback and overdub transport are still being integrated.

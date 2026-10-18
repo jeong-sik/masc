@@ -98,9 +98,10 @@ export async function loadArrangement(path, options = {}) {
   await verifyArrangementAssets(loaded.project, dirname(loaded.path), options)
   return loaded
 }
-export async function saveArrangement(path, project, revision = null, { sourceRoot = dirname(resolve(path)), signal } = {}) {
+export async function materializeArrangementAssets(project, sourceRoot, targetRoot, { signal } = {}) {
   validateArrangement(project)
-  const targetRoot = dirname(resolve(path)), originalRoot = resolve(sourceRoot)
+  targetRoot = resolve(targetRoot)
+  const originalRoot = resolve(sourceRoot)
   const paths = await verifyArrangementAssets(project, originalRoot, { signal })
   if (targetRoot !== originalRoot) {
     for (const asset of project.assets) if (asset.kind === 'wave') {
@@ -109,6 +110,9 @@ export async function saveArrangement(path, project, revision = null, { sourceRo
     }
   }
   signal?.throwIfAborted()
+}
+export async function saveArrangement(path, project, revision = null, { sourceRoot = dirname(resolve(path)), signal } = {}) {
+  await materializeArrangementAssets(project, sourceRoot, dirname(resolve(path)), { signal })
   // Once the revision-protected publication starts, its existing retained-inode
   // protocol owns completion; cancellation cannot turn a committed save into failure.
   return saveProject(path, project, revision)

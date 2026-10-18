@@ -1,5 +1,7 @@
-(** Pure projections of one immutable server-owned source reading. No UI,
-    environment, filesystem, request ownership or palette state is read here. *)
+(** Projections of one immutable server-owned source reading. No UI, request
+    ownership or palette state is read here. Runtime model interpretation keeps
+    the parser's existing environment-dependent home expansion; run preparation
+    through the shared IO boundary rather than a pure response CPU callback. *)
 type rows = (string * string) list list
 
 type t = private {
@@ -13,7 +15,8 @@ val source_rows : path:string -> string -> rows
 
 val of_reading : Masc_tui_runtime_config_view.reading -> t
 (** Source text/metadata and model projection retain the same reading. A model
-    parse or account-group failure remains an error without hiding the source. *)
+    parse or account-group failure remains an error without hiding the source.
+    Runtime parsing can expand a credential path using the current environment. *)
 
 val rows_for_source : path:string -> source_text:string -> t -> rows option
 (** [None] means path or full source text differs. [Some rows] reuses the

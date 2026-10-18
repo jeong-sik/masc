@@ -1,6 +1,6 @@
 ---
 name: tui-chat-design
-description: "MASC TUI의 채팅·입력·로딩·진행 상태, Keeper·Work·로그·질문 원본의 비동기 조회, Runtime 폼·원문 저장과 설정 snapshot 해석을 바꿀 때 쓴다. 원본 입력·revision·요청 소유권, 마지막 관측과 부분 실패, CPU 작업·상태 반영·paint 증거를 구분하는 규칙이다."
+description: "MASC TUI의 채팅·입력·로딩·진행 상태, Keeper·Work·로그·질문 원본의 비동기 조회, Runtime 폼·원문 저장과 설정 snapshot 해석을 바꿀 때 쓴다. 원본 입력·revision·요청 소유권, 마지막 관측과 부분 실패, 준비 작업·상태 반영·paint 증거를 구분하는 규칙이다."
 ---
 
 # 대화를 먼저 읽는 채팅
@@ -63,17 +63,29 @@ description: "MASC TUI의 채팅·입력·로딩·진행 상태, Keeper·Work·�
 ## Runtime 설정 snapshot
 
 - Config 조회는 같은 immutable source/metadata/account groups로 전체 source 분류·terminal
-  정제·모델 표를 공유 CPU 경로에서 만든 뒤 UI에 전달한다. CPU 함수는 UI 상태·환경·파일·
-  palette·요청 소유권을 읽거나 바꾸지 않는다. worker 예외를 caller에서 재실행하지 않는다.
+  정제·모델 표를 공유 IO 경로에서 만든 뒤 UI에 전달한다. Runtime 파서의 credential home
+  확장은 환경을 읽으므로 순수 CPU decoder로 분류하지 않는다. UI·palette·요청 소유권을
+  worker에서 바꾸지 않고, 들어간 작업이 던진 예외를 caller에서 재실행하지 않는다.
 - source/model 해석 실패와 account email 실패를 나눈다. 모델 표 실패를 정상 빈 catalogue로
   바꾸거나 원문을 숨기지 않는다. 모델 선택과 저장 revision은 같은 reading에서 온다.
 - 원문 분류는 path/full text가 같은 불변 값만 재사용한다. 재조회는 기존 초안 분류와
   snapshot의 current 분류를 공유하되 초안 owner·base 선택·read generation을 바꾸지 않는다.
 - 원래 workspace/read authority·요청 generation·후속 read 정책이 반영을 결정한다.
-  superseded 순수 작업이 끝나도 반영 권한은 없다. pool 부재/이미 worker의 inline 정책과
+  superseded 준비 작업이 끝나도 반영 권한은 없다. pool 부재/이미 worker의 inline 정책과
   새 편집·비 snapshot 변경의 분류는 남는다. 이 변경을 모든 CPU 작업 제거로 부르지 않는다.
 - 시작·준비 결과·UI 반영 결정 시각은 같은 generation과 시작 시각으로 연결한다.
   pool 대기/IO/해석을 포함한 구간을 순수 CPU 시간·paint·키 응답·실제 작업 진척으로 부르지 않는다.
+
+## 서버 Runtime source 준비
+
+- raw Config 응답은 원본 source/revision을 보존하고 Keeper-normalized syntax 입력과
+  Runtime 원문 입력을 먼저 구분한다. 정확한 바이트가 같을 때만 AST를 공유한다.
+  CRLF/말미 CR 정규화로 입력이 달라지면 각각 파싱해 문자열·오류 의미를 유지한다.
+- AST를 공유해도 Keeper 문서/검증과 Runtime semantic validation은 독립이다. 한 쪽 실패를
+  다른 쪽 정상 빈 설정으로 바꾸지 않는다. 잘못된 AST root도 닫힌 오류로 거절한다.
+- 환경 확장·현재 overlay·계정 파일 관측이 포함된 JSON 준비는 기존 shared IO job이다.
+  auth 확인·HTTP 응답 쓰기·기존 commit 적용/audit/protection 경계를 옮기지 않는다.
+  이 작업을 순수 CPU나 전체 HTTP I/O 제거로 부르지 않는다.
 
 ## 보기 전환
 

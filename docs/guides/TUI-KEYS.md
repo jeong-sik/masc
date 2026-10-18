@@ -201,7 +201,8 @@ measured key/paint latency.
 
 Config source observations prepare whole-source tokenization, terminal sanitization
 and the model table together from one immutable reading before UI admission.
-The shared CPU path reads no live UI, environment, filesystem or palette state.
+Preparation uses the shared IO path: Runtime model parsing can expand credential
+homes from the environment. It reads no UI, request ownership or palette state.
 Account-group/model interpretation failure leaves the source available; email
 observation failure stays independent. Model selection and source revision come
 from that same reading.

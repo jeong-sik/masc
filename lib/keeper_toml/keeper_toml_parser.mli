@@ -17,6 +17,14 @@ type toml_value =
 
 type toml_doc = (string * toml_value) list
 
+val normalize_source : string -> string
+(** Keeper's existing CRLF-to-LF syntax-input normalization. Source bytes used
+    for editor revisions are not changed by this projection. *)
+
+val of_otoml : Otoml.t -> (toml_doc, string) result
+(** Flatten an already parsed normalized document without parsing source again.
+    A non-table root is refused. *)
+
 val parse_toml : string -> (toml_doc, string) result
 (** Parse a TOML 1.0 document with Otoml and flatten standard tables into
     canonical key paths. Quoted key segments remain quoted, so a literal key

@@ -27,6 +27,12 @@ type toml_value =
     to value. Tables are flattened with dot separators. *)
 type toml_doc = (string * toml_value) list
 
+val normalize_source : string -> string
+(** Keeper's existing CRLF-to-LF syntax-input normalization. *)
+
+val of_otoml : Otoml.t -> (toml_doc, string) result
+(** Project an already parsed normalized TOML table; refuse a non-table root. *)
+
 (** Parse a TOML 1.0 string with Otoml into a flat canonical key-value list.
     Returns [Error msg] on syntax errors. *)
 val parse_toml : string -> (toml_doc, string) result

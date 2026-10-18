@@ -266,8 +266,8 @@ let runtime_editor_protocol_json (protocol : Runtime_toml.editor_protocol) =
     ]
 ;;
 
-let keeper_setting_payload source_text =
-  match Keeper_toml_loader.parse_toml source_text with
+let keeper_setting_payload keeper_document =
+  match keeper_document with
   | Error detail ->
     ( `Assoc
         [ "valid", `Bool false
@@ -424,49 +424,59 @@ let runtime_config_raw_json
       ~routing_applied_at
       ()
   =
-  let validation, keeper_settings, overlay = keeper_setting_payload source_text in
-  (* Models identifies the accounts in this exact source observation, which
-     may differ from the providers currently loaded by the runtime. *)
-  let account_groups, account_emails =
-    match Runtime_toml.parse_string source_text with
-    | Ok config -> Runtime_wizard_inventory.account_groups_json config,
-        Runtime_account_email.inventory_json config
-    | Error _ -> `Null, `Null
-  in
-  `Assoc
-    ([ ("ok", `Bool true)
-    ; ( "source_revision"
-      , `String (Runtime.config_source_revision_to_string source_revision) )
-    ; ("path", `String path)
-    ; ("file_name", `String Config_dir_resolver.runtime_toml_filename)
-    ; ("source_text", `String source_text)
-    ; ("account_groups", account_groups)
-    ; ("account_emails", account_emails)
-    ; ( "application"
-      , runtime_config_application_json
-          ?skill_application
-          ?exact_output_registry:
-            (Option.map
-               (fun (receipt : Runtime.config_commit_receipt) ->
-                  receipt.exact_output_registry)
-               commit)
-          ~operation
-          ~routing_applied_at
-          overlay )
-    ; "validation", validation
-    ; "keeper_setting_schema", Keeper_runtime_config.setting_schema_to_yojson ()
-    ; "keeper_settings", keeper_settings
-    ; ( "provider_protocols"
-      , `List (List.map runtime_editor_protocol_json Runtime_toml.editor_protocols) )
-    ; ( "reserved_provider_ids"
-      , `List (List.map (fun id -> `String id) Runtime_toml.reserved_provider_ids) )
-    ]
-     @ match commit with
-       | None -> []
-       | Some receipt ->
-         [ "state", `String "committed"
-         ; "commit", runtime_config_commit_json receipt
-         ])
+  (* Runtime home expansion, overlay/environment observations and account
+     files make this an IO preparation job, not a pure CPU decoder. The auth
+     check and response writer remain on the HTTP fiber. *)
+  Eio_guard.with_named_switch "runtime-config-response" (fun () ->
+    Domain_pool_ref.submit_io_or_inline (fun () ->
+      let source = Server_runtime_config_source.prepare source_text in
+      Log.Dashboard.debug "runtime_config_response operation=%s syntax_inputs=%s" operation
+        (match source.syntax_inputs with
+         | Server_runtime_config_source.Shared_input -> "shared"
+         | Reader_specific_inputs -> "reader_specific");
+      let validation, keeper_settings, overlay = keeper_setting_payload source.keeper in
+      (* Models identifies the accounts in this exact source observation, which
+         may differ from the providers currently loaded by the runtime. *)
+      let account_groups, account_emails =
+        match source.runtime with
+        | Ok config -> Runtime_wizard_inventory.account_groups_json config,
+            Runtime_account_email.inventory_json config
+        | Error _ -> `Null, `Null
+      in
+      `Assoc
+        ([ ("ok", `Bool true)
+        ; ( "source_revision"
+          , `String (Runtime.config_source_revision_to_string source_revision) )
+        ; ("path", `String path)
+        ; ("file_name", `String Config_dir_resolver.runtime_toml_filename)
+        ; ("source_text", `String source.source_text)
+        ; ("account_groups", account_groups)
+        ; ("account_emails", account_emails)
+        ; ( "application"
+          , runtime_config_application_json
+              ?skill_application
+              ?exact_output_registry:
+                (Option.map
+                   (fun (receipt : Runtime.config_commit_receipt) ->
+                      receipt.exact_output_registry)
+                   commit)
+              ~operation
+              ~routing_applied_at
+              overlay )
+        ; "validation", validation
+        ; "keeper_setting_schema", Keeper_runtime_config.setting_schema_to_yojson ()
+        ; "keeper_settings", keeper_settings
+        ; ( "provider_protocols"
+          , `List (List.map runtime_editor_protocol_json Runtime_toml.editor_protocols) )
+        ; ( "reserved_provider_ids"
+          , `List (List.map (fun id -> `String id) Runtime_toml.reserved_provider_ids) )
+        ]
+         @ match commit with
+           | None -> []
+           | Some receipt ->
+             [ "state", `String "committed"
+             ; "commit", runtime_config_commit_json receipt
+             ])))
 
 let runtime_config_line_count = Server_skill_write_audit.line_count
 

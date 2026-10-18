@@ -31,7 +31,7 @@ let cached_input_of_entries (entries : raw_entry list) : cached_input option =
       Some { ci_input_tokens = previous.ci_input_tokens + input;
              ci_cache_read_tokens = previous.ci_cache_read_tokens + cached;
              ci_sample_count = previous.ci_sample_count + 1 }
-    | _ -> total) None entries
+    | Keeper_decision_outcome.(Success | Checkpoint | Input_required | Failed), _, _ -> total) None entries
 
 let aggregate_by_model (entries : raw_entry list) : model_stats list =
   let tbl : raw_entry list StringMap.t =

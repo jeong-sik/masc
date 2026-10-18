@@ -453,7 +453,7 @@ let sweep_stale_antigravity_panel_roots ?temp_dir () =
                    "removed stale Antigravity panelist HOME %s (creator %d and recorded users absent)"
                    path
                    pid
-               | exception (Sys_error _ | Unix.Unix_error _) as exn ->
+               | exception ((Sys_error _ | Unix.Unix_error _) as exn) ->
                  if Sys.file_exists path
                  then
                    Log.Runtime_agent.warn

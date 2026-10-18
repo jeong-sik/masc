@@ -1,5 +1,6 @@
-include Server_dashboard_http_composite_claims
-include Server_dashboard_http_composite_recommendations
+open Server_dashboard_http_composite_claims
+open Server_dashboard_http_composite_recommendations
+
 
 let enrich_composite_snapshot_json
       ~(config : Workspace.config)

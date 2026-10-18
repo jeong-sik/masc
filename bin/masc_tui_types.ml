@@ -13499,10 +13499,12 @@ let keeper_message_waiting_positions (state : state) ~keeper_name =
         let transcript_phase = Masc_tui_keeper_chat_transcript.phase transcript in
         let stage =
           match transcript_phase, entry.phase with
-          | Stream_failed _, _
-          | _, Turn_reconciling -> Reading_delivery_again
-          | _, Turn_preflight _ -> Before_first_post
-          | _, Turn_streaming -> Stream_open in
+          | Stream_failed _, (Turn_preflight _ | Turn_streaming | Turn_reconciling)
+          | (Waiting | Working | Stream_ended), Turn_reconciling ->
+              Reading_delivery_again
+          | (Waiting | Working | Stream_ended), Turn_preflight _ ->
+              Before_first_post
+          | (Waiting | Working | Stream_ended), Turn_streaming -> Stream_open in
         match transcript_phase,
               Masc_tui_keeper_chat_transcript.admission transcript with
         | Waiting, None

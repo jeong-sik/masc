@@ -24,6 +24,36 @@ type observation = {
 
 type entry = { at_step : int; who : string; key_name : string }
 
+type autosave_status = { program : string; steps : int; saved_by : string; saved_at : float }
+
+type autosave_lookup =
+  | No_autosave
+  | Autosave of autosave_status
+  | Autosave_unreadable of string
+
+(* What a slot holds, as far as it can be said: its status, or that the file
+   is there and will not read. *)
+type held_autosave =
+  | Held of autosave_status
+  | Held_unreadable of string
+
+(* An incarnation's first autosave copies the autosave to the previous-autosave
+   slot, so it replaces what that slot held. Starting a machine -- a load, or a
+   restore of any slot but the previous autosave itself -- is therefore the
+   act that discards the previous autosave, and it is the consent for that act
+   that is asked for. With no previous autosave nothing is discarded: the
+   autosave moves to the slot and survives there. *)
+type previous_autosave_consent =
+  | Keep_previous_autosave
+  | Discard_previous_autosave
+
+(* Both files a start would touch: [previous] is what it would discard and
+   [current] is what moves into its place. *)
+type discard =
+  { previous : held_autosave
+  ; current : held_autosave
+  }
+
 type error =
   | Activity_disabled
   | Activity_unobserved
@@ -35,11 +65,12 @@ type error =
   | Unsaveable of string
   | Checkpoint_refused of Machine_checkpoint.error
   | Other_program of { expected : string; loaded : string }
+  | Would_discard_previous_autosave of discard
 
 let error_to_string = function
   | Activity_disabled -> "machines.dos is off; enable it before new machine work"
   | Activity_unobserved -> "Machine activity configuration is unavailable"
-  | No_machine -> "no DOS machine is loaded: call masc_dos_load first"
+  | No_machine -> "no DOS machine is loaded"
   | Invalid_request message -> message
   | Unreadable message -> message
   | Held_by holder ->
@@ -54,6 +85,14 @@ let error_to_string = function
   | Checkpoint_refused e -> Machine_checkpoint.error_to_string e
   | Other_program { expected; loaded } ->
     Printf.sprintf "%s is loaded now, not %s, so nothing was pressed" loaded expected
+  | Would_discard_previous_autosave { previous = Held s; current = _ } ->
+    Printf.sprintf
+      "the previous autosave (%s, %d steps, saved by %s) would be replaced, so nothing was done"
+      s.program s.steps s.saved_by
+  | Would_discard_previous_autosave { previous = Held_unreadable reason; current = _ } ->
+    Printf.sprintf
+      "the previous autosave file cannot be read (%s) and would be replaced, so nothing was done"
+      reason
 ;;
 
 let ( let* ) = Result.bind
@@ -128,6 +167,24 @@ type ran = {
   autosave : autosave;
 }
 
+(* How a load's boot ended. The machine is installed and the loader holds the
+   controller either way, so a guest fault during boot is a result, not an
+   error: an error tells the caller nothing was loaded. *)
+type boot_fault =
+  | Unimplemented_instruction of string
+  | Core_exception of string
+
+type boot =
+  | Booted of ran
+  | Boot_faulted of boot_fault
+
+(* What a manual save found in its slot. Reads like [autosave_lookup]: a file
+   that is there and will not read is its own answer. *)
+type replaced =
+  | Fresh_slot
+  | Replaced of autosave_status
+  | Replaced_unreadable of string
+
 (* How far the machine runs between two screen readings. Measured on ZZT: the
    repaint that follows a key finishes inside one of these. *)
 let settle_chunk = 50_000
@@ -152,13 +209,16 @@ type machine = {
       (* A fresh identity per load: an observer holding an older one knows
          the machine it read was replaced, even when the step count is back
          where it was. *)
-  mutable autosaved_once : bool;
-      (* Whether this incarnation has written [autosave_slot] yet. The first
-         time it does, whatever was there belongs to a machine this
-         incarnation never touched -- the previous load's or restore's -- and
-         [autosave_after] moves it to [autosave_prev_slot] first rather than
-         overwrite it. Every write after the first is this incarnation's own
-         history and just replaces the last one, same slot. *)
+  mutable previous_kept : bool;
+      (* Whether this incarnation has kept the autosave it found. The first
+         autosave of an incarnation finds a file that belongs to a machine it
+         never touched -- the previous load's or restore's -- and
+         [autosave_after] copies it to [autosave_prev_slot] before it writes.
+         Once the copy is on disk this is true and it is not made again, even
+         if the write that follows fails: a second copy would put this
+         incarnation's own history over the one it was keeping. Every write
+         after the first is this incarnation's own history replacing the last
+         one, same slot. *)
 }
 
 let state : machine option ref = ref None
@@ -262,7 +322,7 @@ let running f =
    | Ok _ | Error (Unreadable _ | Guest_fault _) -> mark_change ()
    | Error
        ( Activity_disabled | Activity_unobserved | No_machine | Invalid_request _ | Held_by _ | Unsaveable _ | Checkpoint_refused _
-       | Other_program _ ) ->
+       | Other_program _ | Would_discard_previous_autosave _ ) ->
      publish_stable ());
   result
 ;;
@@ -283,13 +343,23 @@ let with_control ~who f =
          holder, and given back if the call is refused. *)
       let before = st.controller in
       st.controller <- Some who;
-      let result = running (fun () -> f st) in
+      let result =
+        match running (fun () -> f st) with
+        | result -> result
+        | exception exn ->
+          (* Not one of the outcomes [running] types, so nothing says the call
+             ran. The caller is about to be told it failed, and must not be
+             left holding the pad for a call it was told did nothing. *)
+          let backtrace = Printexc.get_raw_backtrace () in
+          st.controller <- before;
+          Printexc.raise_with_backtrace exn backtrace
+      in
       (match result with
        | Ok _ | Error (Unreadable _ | Guest_fault _) -> ()
          (* the call ran: the machine may have moved *)
        | Error
            ( Activity_disabled | Activity_unobserved | No_machine | Invalid_request _ | Held_by _ | Unsaveable _ | Checkpoint_refused _
-           | Other_program _ ) ->
+           | Other_program _ | Would_discard_previous_autosave _ ) ->
          st.controller <- before);
       result)
 ;;
@@ -569,6 +639,28 @@ let autosave_prev_slot =
   | Error message -> failwith message
 ;;
 
+(* A slot name is either one the lane writes itself or one a caller chose. A
+   manual save may only take the second kind: [masc_dos_save slot=autosave]
+   used to replace the file every load and restore offers back, with no
+   confirmation. Names are compared without case because a case-folding
+   filesystem maps "AUTOSAVE" onto autosave.ckpt. *)
+type named_slot = Machine_checkpoint.slot
+
+type slot =
+  | Named of named_slot
+  | Current_autosave
+  | Previous_autosave
+
+let classify_slot slot =
+  let name = String.lowercase_ascii (Machine_checkpoint.slot_to_string slot) in
+  if String.equal name (Machine_checkpoint.slot_to_string autosave_slot) then Current_autosave
+  else if String.equal name (Machine_checkpoint.slot_to_string autosave_prev_slot) then
+    Previous_autosave
+  else Named slot
+;;
+
+let named_slot_to_string = Machine_checkpoint.slot_to_string
+
 let checkpoint_meta st ~who : Yojson.Safe.t =
   `Assoc
     [ ("program", `String st.program)
@@ -615,23 +707,23 @@ let write_checkpoint st ~who ~dir ~slot =
      | Error message -> Error (Unreadable message))
 ;;
 
-(* Best-effort: move whatever is at [autosave_slot] to [autosave_prev_slot]
-   before this incarnation's first write replaces it. A missing source is not
-   an error -- a fresh checkpoint dir has nothing to preserve. A rename that
-   fails (permissions, a concurrent reader holding the old inode on some
-   filesystems) is swallowed: losing the previous incarnation's safety net is
-   better than blocking this incarnation's own progress from ever being
-   saved. *)
-let preserve_previous_autosave ~dir =
-  let source = Machine_checkpoint.path ~dir autosave_slot in
-  if Sys.file_exists source then (
-    let target = Machine_checkpoint.path ~dir autosave_prev_slot in
-    try
-      Sys.rename source target;
-      mark_checkpoint_write source;
-      mark_checkpoint_write target
+(* Copies what [autosave_slot] holds to [autosave_prev_slot], so the file an
+   incarnation's first autosave replaces survives it. A copy and not a rename:
+   the autosave stays in place until the new one replaces it atomically, so a
+   copy that fails, or a write that fails after it, leaves the autosave as it
+   was. Nothing here is swallowed. No file at [autosave_slot] means there is
+   nothing to keep. The copy is made from the lane's own file and not read as
+   a checkpoint, so one this server cannot decode is kept like any other. *)
+let keep_previous_autosave ~dir =
+  if not (Sys.file_exists (Machine_checkpoint.path ~dir autosave_slot)) then Ok ()
+  else
+    match
+      Machine_checkpoint.copy ~dir ~from:autosave_slot ~to_:autosave_prev_slot
     with
-    | Sys_error _ -> ())
+    | Ok () ->
+      mark_checkpoint_write (Machine_checkpoint.path ~dir autosave_prev_slot);
+      Ok ()
+    | Error message -> Error message
 ;;
 
 (* The autosave at the end of a call that ran the guest to an answer. It runs
@@ -645,22 +737,113 @@ let preserve_previous_autosave ~dir =
    resume. A failed write is reported in [ran.autosave] and never turns the
    call into an error, because the guest moved either way.
 
-   This incarnation's first successful write here preserves whatever
-   [autosave_slot] already held under [autosave_prev_slot] first: that file is
-   the previous incarnation's own last save, not this one's, and [load]'s or
-   [restore]'s very next call must not silently overwrite it. Every autosave
-   after the first is this incarnation's own history overwriting its own
-   history, same slot, no preservation. *)
+   This incarnation's first autosave keeps whatever [autosave_slot] already
+   held, by copying it to [autosave_prev_slot] first: that file is the previous
+   incarnation's own last save, not this one's, and [load]'s or [restore]'s
+   very next call must not silently overwrite it. If the copy fails nothing is
+   written and the reason is reported, so the old autosave stays and the next
+   call tries again. Every autosave after the copy is this incarnation's own
+   history replacing its own history. *)
 let autosave_after st ~who =
   if Dos_machine.exited st.m then Not_attempted
   else begin
-    if not st.autosaved_once then preserve_previous_autosave ~dir:st.checkpoint_dir;
-    match write_checkpoint st ~who ~dir:st.checkpoint_dir ~slot:autosave_slot with
+    let kept =
+      if st.previous_kept then Ok () else keep_previous_autosave ~dir:st.checkpoint_dir
+    in
+    match kept with
+    | Error message ->
+      Autosave_failed
+        (Printf.sprintf "the previous autosave could not be kept, so nothing was written: %s"
+           message)
     | Ok () ->
-      st.autosaved_once <- true;
-      Autosaved
-    | Error e -> Autosave_failed (error_to_string e)
+      st.previous_kept <- true;
+      (match write_checkpoint st ~who ~dir:st.checkpoint_dir ~slot:autosave_slot with
+       | Ok () -> Autosaved
+       | Error e -> Autosave_failed (error_to_string e))
   end
+;;
+
+type restored_meta = {
+  saved_program : string;
+  saved_saves : string;
+  saved_steps : int;
+  saved_by : string;
+  saved_ledger : entry list;  (* oldest first *)
+}
+
+(* Every field the lane wrote, or the checkpoint is corrupt: a missing step
+   count is not zero and a missing ledger is not empty. *)
+let meta_of_json json =
+  let corrupt message = Error (Checkpoint_refused (Machine_checkpoint.Corrupt message)) in
+  let field name =
+    match json with
+    | `Assoc fields -> List.assoc_opt name fields
+    | _ -> None
+  in
+  let entry_of = function
+    | `Assoc fields ->
+      (match
+         ( List.assoc_opt "step" fields
+         , List.assoc_opt "who" fields
+         , List.assoc_opt "key" fields )
+       with
+       | Some (`Int at_step), Some (`String who), Some (`String key_name) ->
+         Some { at_step; who; key_name }
+       | _ -> None)
+    | _ -> None
+  in
+  match field "program", field "saves", field "steps", field "ledger", field "saved_by" with
+  | ( Some (`String program)
+    , Some (`String saves)
+    , Some (`Int steps)
+    , Some (`List items)
+    , Some (`String saved_by) ) ->
+    let ledger = List.filter_map entry_of items in
+    let rec ordered previous = function
+      | [] -> true
+      | e :: rest -> e.at_step >= previous && e.at_step <= steps && ordered e.at_step rest
+    in
+    if List.length ledger <> List.length items then corrupt "a ledger line does not read"
+    else if not (ordered 0 ledger) then corrupt "the ledger does not fit the saved step count"
+    else if escapes saves || String.equal saves "" then corrupt "the saves name is a path"
+    else Ok { saved_program = program; saved_saves = saves; saved_steps = steps; saved_by; saved_ledger = ledger }
+  | _ -> corrupt "the lane's fields are missing"
+;;
+
+(* Read only, through {!Machine_checkpoint}'s header and meta -- never
+   {!Dos_snapshot.restore}, which would reconstruct the whole guest machine
+   just to say who last saved it. The meta goes through the same [meta_of_json]
+   a restore reads it with, so what this names is what a restore would find.
+   A file that is there but will not read is its own answer: reporting it as
+   "nothing there" would hide it until the next run replaced it. *)
+let lookup_slot ~dir slot =
+  match
+    Machine_checkpoint.read_meta ~dir slot ~machine:Machine_checkpoint.Dos
+      ~format:checkpoint_format
+  with
+  | Error (Machine_checkpoint.No_slot _) -> No_autosave
+  | Error
+      ((Machine_checkpoint.Unreadable _
+       | Machine_checkpoint.Other_machine _
+       | Machine_checkpoint.Other_format _
+       | Machine_checkpoint.Corrupt _) as e) ->
+    Autosave_unreadable (Machine_checkpoint.error_to_string e)
+  | Ok { Machine_checkpoint.meta; modified; header = _ } ->
+    (match meta_of_json meta with
+     | Error e -> Autosave_unreadable (error_to_string e)
+     | Ok m ->
+       Autosave
+         { program = m.saved_program
+         ; steps = m.saved_steps
+         ; saved_by = m.saved_by
+         ; saved_at = modified
+         })
+;;
+
+let lookup_autosave ~dir = lookup_slot ~dir autosave_slot
+;;
+
+let lookup_previous_autosave ~dir = lookup_slot ~dir autosave_prev_slot
 ;;
 
 (* Every call that ran the guest ends here. The guest has moved whatever the
@@ -720,6 +903,97 @@ let is_mz image =
   String.length image >= 2 && Char.equal image.[0] 'M' && Char.equal image.[1] 'Z'
 ;;
 
+(* ---------- program images ---------- *)
+
+(* The core's loaders raise [Invalid_argument] on an image they cannot place:
+   a header shorter than its fixed part, a header or relocation table that
+   runs past the file, a payload past the end of memory. An exception out of
+   [prepare_load] reaches the caller as a crash, not as the caller's mistake.
+   [image_of_bytes] checks those conditions first and returns the image as a
+   value only when the loader can take it.
+
+   For an MZ image the check is exactly the loader's: refused if and only if
+   [Dos_dos.load_exe] would raise. Two refusals are stricter than the loader
+   (ocaml-dos 323609dd, Dos_dos.load_com and load_exe), on purpose:
+
+   - A COM image of more than [max_com_bytes]. [load_com] copies any size up
+     to the end of memory, but it then writes the 2-byte return word at
+     PSP:FFFE, which lies inside such an image, and points SP there. The
+     program is placed with its tail overwritten and its stack on top of it.
+     DOS itself refuses a COM that does not fit its segment.
+   - The signature "ZM", which DOS also accepts for an EXE. [load_exe] takes
+     only "MZ", so a ZM file would be loaded as a COM and run its header as
+     code.
+
+   test_dos_lane_image runs the real loader beside the check: it compares
+   them on seeded MZ images and at the memory edge, and it shows the two
+   stricter facts above with the loader itself, so a pin bump that moves any
+   of them turns it red. *)
+
+(* The machine's address space: 20 address lines. *)
+let memory_bytes = 0x100000
+let last_address = memory_bytes - 1
+
+(* Both loaders put the image no lower than segment 0x1000 plus the 256-byte
+   PSP. *)
+let image_floor = 0x10100
+
+(* The image starts at PSP:0100 and the return word sits at PSP:FFFE, so the
+   largest image that leaves the word outside it ends at offset 0xFEFE: 65,278
+   bytes. *)
+let max_com_bytes = 0xFFFE - 0x100
+
+(* The fixed MZ header, through the relocation table offset at 0x18. *)
+let mz_fixed_header_bytes = 0x1C
+let mz_reloc_entry_bytes = 4
+
+let max_exe_payload_bytes = memory_bytes - image_floor
+
+type image =
+  | Com of string
+  | Exe of string
+
+let is_zm image =
+  String.length image >= 2 && Char.equal image.[0] 'Z' && Char.equal image.[1] 'M'
+;;
+
+let u16_at image offset = Char.code image.[offset] lor (Char.code image.[offset + 1] lsl 8)
+
+let image_of_bytes ~program_name image =
+  let refuse fmt = Printf.ksprintf (fun message -> Error (Invalid_request message)) fmt in
+  let size = String.length image in
+  if size = 0 then refuse "%s is empty" program_name
+  else if is_zm image then
+    refuse "%s starts with ZM, a DOS executable signature this machine does not load (it takes MZ)"
+      program_name
+  else if not (is_mz image) then
+    if size > max_com_bytes then
+      refuse "%s is %d bytes, more than a COM image holds (%d)" program_name size max_com_bytes
+    else Ok (Com image)
+  else if size < mz_fixed_header_bytes then
+    refuse "%s is an MZ executable cut short: %d bytes, and its fixed header is %d" program_name
+      size mz_fixed_header_bytes
+  else begin
+    let header_bytes = u16_at image 0x08 * 16 in
+    let reloc_count = u16_at image 0x06 and reloc_offset = u16_at image 0x18 in
+    if header_bytes > size then
+      refuse "%s is an MZ executable cut short: its header is %d bytes and the file is %d"
+        program_name header_bytes size
+    else if reloc_count > 0 && reloc_offset + (reloc_count * mz_reloc_entry_bytes) > size then
+      refuse "%s is an MZ executable cut short: its relocation table ends at byte %d and the file is %d"
+        program_name (reloc_offset + (reloc_count * mz_reloc_entry_bytes)) size
+    else if size - header_bytes > max_exe_payload_bytes then
+      refuse "%s holds %d bytes of program, more than fit in memory (%d)" program_name
+        (size - header_bytes) max_exe_payload_bytes
+    else Ok (Exe image)
+  end
+;;
+
+let load_image machine = function
+  | Com image -> Dos_machine.load_com machine image
+  | Exe image -> Dos_machine.load_exe machine image
+;;
+
 type prepared_load = {
   load_machine : (Dos_machine.t * (string, string) Hashtbl.t) option ref;
   load_program : string;
@@ -729,23 +1003,52 @@ type prepared_load = {
   load_change_count : int;
 }
 
-let prepare_load ~ledger_dir ~saves_dir ~checkpoint_dir ~program_name ~program_bytes ~files =
+let held_of = function
+  | No_autosave -> None
+  | Autosave status -> Some (Held status)
+  | Autosave_unreadable reason -> Some (Held_unreadable reason)
+;;
+
+(* What a machine started now would discard, if anything. Its first autosave
+   copies the autosave to [autosave_prev_slot] and replaces that slot, so the
+   previous autosave is lost exactly when both files exist; with no autosave
+   there is nothing to copy and the previous one stays, and with no previous
+   one the autosave moves into the slot and survives. An unreadable file counts
+   as there: the campaign it held may be the only copy. The files are read only
+   to name them in a refusal, after both are known to exist. *)
+let discard_at_stake ~dir =
+  let exists slot = Sys.file_exists (Machine_checkpoint.path ~dir slot) in
+  if not (exists autosave_slot && exists autosave_prev_slot) then None
+  else
+    match held_of (lookup_previous_autosave ~dir), held_of (lookup_autosave ~dir) with
+    | Some previous, Some current -> Some { previous; current }
+    | None, _ | _, None -> None (* a file vanished between the check and the read *)
+;;
+
+let check_previous_autosave_consent ~dir = function
+  | Discard_previous_autosave -> Ok ()
+  | Keep_previous_autosave ->
+    (match discard_at_stake ~dir with
+     | None -> Ok ()
+     | Some discard -> Error (Would_discard_previous_autosave discard))
+;;
+
+let prepare_load ~ledger_dir ~saves_dir ~checkpoint_dir ~previous_autosave ~program_name ~program_bytes ~files =
   let* () = require_activity () in
   (* Guest writes raise this counter. A load must not install a save overlay
      read across a concurrent run of the old machine. *)
   let load_change_count = locked (fun () -> !change_count) in
+  let* image = image_of_bytes ~program_name program_bytes in
   let* files = with_saves ~saves_dir files in
-  if String.length program_bytes = 0 then
-    Error (Invalid_request (Printf.sprintf "%s is empty" program_name))
-  else match dos_name_collision files with
+  match dos_name_collision files with
   | Some (earlier, later) ->
       Error (Invalid_request (Printf.sprintf
         "%s and %s are one name to DOS; the guest can only see one" earlier later))
   | None ->
+      let* () = check_previous_autosave_consent ~dir:checkpoint_dir previous_autosave in
       let m = Dos_machine.create () in
       List.iter (fun (name, contents) -> Dos_machine.mount_file m name contents) files;
-      if is_mz program_bytes then Dos_machine.load_exe m program_bytes
-      else Dos_machine.load_com m program_bytes;
+      load_image m image;
       let kept = Hashtbl.create (List.length files) in
       List.iter (fun (name, contents) -> Hashtbl.replace kept (String.uppercase_ascii name) contents) files;
       Ok {load_machine=ref (Some (m, kept)); load_program=program_name;
@@ -772,19 +1075,40 @@ let commit_load ~who prepared ~announce =
       | () ->
         let st = {m; steps=0; program=prepared.load_program; ledger_path; entries=[];
           saves_dir=prepared.load_saves_dir; checkpoint_dir=prepared.load_checkpoint_dir; kept;
-          controller=Some who; incarnation=Random_id.uuid_v7 (); autosaved_once=false} in
+          controller=Some who; incarnation=Random_id.uuid_v7 (); previous_kept=false} in
         state := Some st;
         mark_change ();
         note_activity ~who (Printf.sprintf "load %s" prepared.load_program);
-        let booted = running (fun () ->
-          let ran = advance st ~budget:boot_steps ~until_ready:true in
-          ran_then_kept st ~who ran) in
+        (* From here the machine is installed and the loader holds it, so
+           whatever the boot does, the answer is [Ok] with how it ended and
+           [announce] runs once: a result that said "nothing was loaded"
+           would be false, and a skipped announce would hide a machine that
+           changed. The core can raise out of a run (a malformed EXEC child);
+           that is a boot fault too. Cancellation is not a fault. *)
+        let booted =
+          match
+            running (fun () ->
+              let ran = advance st ~budget:boot_steps ~until_ready:true in
+              ran_then_kept st ~who ran)
+          with
+          | Ok settled -> Ok settled
+          | Error (Guest_fault message) -> Error (Unimplemented_instruction message)
+          | Error
+              (( Activity_disabled | Activity_unobserved | No_machine | Invalid_request _
+               | Unreadable _ | Held_by _ | Unsaveable _ | Checkpoint_refused _
+               | Other_program _ | Would_discard_previous_autosave _ ) as error) ->
+            Error (Core_exception (error_to_string error))
+          | exception (Eio.Cancel.Cancelled _ as cancelled) -> raise cancelled
+          | exception exn -> Error (Core_exception (Printexc.to_string exn))
+        in
         announce ();
-        booted)
+        (match booted with
+         | Ok (observation, ran) -> Ok (observation, Booted ran)
+         | Error fault -> Ok (observe st, Boot_faulted fault)))
 ;;
 
-let load ~who ~ledger_dir ~saves_dir ~checkpoint_dir ~program_name ~program_bytes ~files ~announce =
-  let* prepared = prepare_load ~ledger_dir ~saves_dir ~checkpoint_dir
+let load ~who ~ledger_dir ~saves_dir ~checkpoint_dir ~previous_autosave ~program_name ~program_bytes ~files ~announce =
+  let* prepared = prepare_load ~ledger_dir ~saves_dir ~checkpoint_dir ~previous_autosave
       ~program_name ~program_bytes ~files in
   commit_load ~who prepared ~announce
 ;;
@@ -996,6 +1320,10 @@ let press_into ~saves_name ~who ~keys ~steps ~until_ready =
    reacts and blocks costs no more than it needs; the up half always runs,
    whatever the down half saw, or the button would stay held for the next
    caller. A move ([buttons = 0]) sets the position and runs once. *)
+(* The core's own mask for the mouse: bit 0 left, bit 1 right, bit 2 middle
+   (Dos_machine.set_mouse). *)
+let mouse_button_mask = 0b111
+
 let click ~who ~x ~y ~buttons ~steps =
   with_control ~who (fun st ->
     let width, height = Dos_machine.frame_dims st.m in
@@ -1004,8 +1332,12 @@ let click ~who ~x ~y ~buttons ~steps =
         (Invalid_request
            (Printf.sprintf "click must land inside the %dx%d frame, got (%d,%d)"
               width height x y))
-    else if buttons < 0 || buttons > 2 then
-      Error (Invalid_request "buttons is a bitmask: 0 move, 1 left, 2 right")
+    else if buttons land lnot mouse_button_mask <> 0 then
+      Error
+        (Invalid_request
+           (Printf.sprintf
+              "buttons is a bitmask of 1 left, 2 right and 4 middle (0 only moves), got %d"
+              buttons))
     else
       match clamp_steps steps with
       | Error e -> Error e
@@ -1061,58 +1393,19 @@ let type_text ~who ~text ~steps ~until_ready =
 
 let save ~who ~dir ~slot =
   with_machine (fun st ->
+    (* Read under the lock, so what is reported replaced is what the write
+       replaces and not what was there a moment before. *)
+    let replaced =
+      match lookup_slot ~dir slot with
+      | No_autosave -> Fresh_slot
+      | Autosave status -> Replaced status
+      | Autosave_unreadable reason -> Replaced_unreadable reason
+    in
     match write_checkpoint st ~who ~dir ~slot with
     | Ok () ->
       note_activity ~who ("save " ^ Machine_checkpoint.slot_to_string slot);
-      Ok (observe st)
+      Ok (observe st, replaced)
     | Error e -> Error e)
-;;
-
-type restored_meta = {
-  saved_program : string;
-  saved_saves : string;
-  saved_steps : int;
-  saved_by : string;
-  saved_ledger : entry list;  (* oldest first *)
-}
-
-(* Every field the lane wrote, or the checkpoint is corrupt: a missing step
-   count is not zero and a missing ledger is not empty. *)
-let meta_of_json json =
-  let corrupt message = Error (Checkpoint_refused (Machine_checkpoint.Corrupt message)) in
-  let field name =
-    match json with
-    | `Assoc fields -> List.assoc_opt name fields
-    | _ -> None
-  in
-  let entry_of = function
-    | `Assoc fields ->
-      (match
-         ( List.assoc_opt "step" fields
-         , List.assoc_opt "who" fields
-         , List.assoc_opt "key" fields )
-       with
-       | Some (`Int at_step), Some (`String who), Some (`String key_name) ->
-         Some { at_step; who; key_name }
-       | _ -> None)
-    | _ -> None
-  in
-  match field "program", field "saves", field "steps", field "ledger", field "saved_by" with
-  | ( Some (`String program)
-    , Some (`String saves)
-    , Some (`Int steps)
-    , Some (`List items)
-    , Some (`String saved_by) ) ->
-    let ledger = List.filter_map entry_of items in
-    let rec ordered previous = function
-      | [] -> true
-      | e :: rest -> e.at_step >= previous && e.at_step <= steps && ordered e.at_step rest
-    in
-    if List.length ledger <> List.length items then corrupt "a ledger line does not read"
-    else if not (ordered 0 ledger) then corrupt "the ledger does not fit the saved step count"
-    else if escapes saves || String.equal saves "" then corrupt "the saves name is a path"
-    else Ok { saved_program = program; saved_saves = saves; saved_steps = steps; saved_by; saved_ledger = ledger }
-  | _ -> corrupt "the lane's fields are missing"
 ;;
 
 type restore_payload = {
@@ -1126,6 +1419,11 @@ type restore_payload = {
   restore_checkpoint_dir : string;
   restore_slot : Machine_checkpoint.slot;
   restore_slot_writes : int;
+  restore_previous_writes : int;
+      (* How many times this lane replaced the previous autosave when the
+         consent was checked. A load that lands between preparation and commit
+         copies the autosave into that slot, and the restore's own first
+         autosave would then discard what it just kept. *)
 }
 
 type prepared_restore = restore_payload option Atomic.t
@@ -1139,10 +1437,26 @@ let discard_prepared_restore prepared =
   | Some owned -> remove_restore_stage owned.restore_staged_ledger
 ;;
 
-let prepare_restore ~dir ~slot ~ledger_dir ~saves_dir_of =
+(* A restore starts a machine like a load does, so its first autosave discards
+   the previous autosave and the same consent is asked -- except for a restore
+   of the previous autosave itself, whose content the restored machine already
+   holds. A slot that is not there is not asked about: the read reports it. *)
+let check_restore_consent ~dir ~slot consent =
+  match classify_slot slot with
+  | Previous_autosave -> Ok ()
+  | Current_autosave | Named _ ->
+    if Sys.file_exists (Machine_checkpoint.path ~dir slot) then
+      check_previous_autosave_consent ~dir consent
+    else Ok ()
+;;
+
+let prepare_restore ~dir ~slot ~previous_autosave ~ledger_dir ~saves_dir_of =
   let* () = require_activity () in
-  let restore_slot_writes =
-    locked (fun () -> checkpoint_write_count (Machine_checkpoint.path ~dir slot)) in
+  let restore_slot_writes, restore_previous_writes =
+    locked (fun () ->
+      ( checkpoint_write_count (Machine_checkpoint.path ~dir slot)
+      , checkpoint_write_count (Machine_checkpoint.path ~dir autosave_prev_slot) )) in
+  let* () = check_restore_consent ~dir ~slot previous_autosave in
   let* checkpoint = match Machine_checkpoint.read ~dir slot ~machine:Machine_checkpoint.Dos
       ~format:checkpoint_format with
     | Ok checkpoint -> Ok checkpoint
@@ -1181,7 +1495,7 @@ let prepare_restore ~dir ~slot ~ledger_dir ~saves_dir_of =
           restore_machine=m;restore_kept=kept;restore_meta=meta;restore_entries=entries;
           restore_staged_ledger=temporary;restore_ledger_path=Filename.concat ledger_dir "ledger.jsonl";
           restore_saves_dir=saves_dir;restore_checkpoint_dir=dir;restore_slot=slot;
-          restore_slot_writes}) in
+          restore_slot_writes;restore_previous_writes}) in
         transferred := true;
         Ok prepared)
   with
@@ -1209,13 +1523,19 @@ let commit_restore ~who prepared ~announce =
             Error (Invalid_request (Printf.sprintf
               "DOS checkpoint %s was saved again during restore preparation; request the restore again"
               (Machine_checkpoint.slot_to_string owned.restore_slot)))
+          else if checkpoint_write_count
+                    (Machine_checkpoint.path ~dir:owned.restore_checkpoint_dir autosave_prev_slot)
+                  <> owned.restore_previous_writes
+          then
+            Error (Invalid_request
+              "the previous autosave changed during restore preparation; request the restore again")
           else
           let meta = owned.restore_meta in
           let st = {m=owned.restore_machine; steps=meta.saved_steps; program=meta.saved_program;
             ledger_path=owned.restore_ledger_path; entries=owned.restore_entries;
             saves_dir=owned.restore_saves_dir;checkpoint_dir=owned.restore_checkpoint_dir;
             kept=owned.restore_kept;controller=Some who;
-            incarnation=Random_id.uuid_v7 ();autosaved_once=false} in
+            incarnation=Random_id.uuid_v7 ();previous_kept=false} in
           match Sys.rename owned.restore_staged_ledger owned.restore_ledger_path with
           | exception Sys_error message -> Error (Unreadable message)
           | () ->
@@ -1226,8 +1546,8 @@ let commit_restore ~who prepared ~announce =
             Ok (observe st)))
 ;;
 
-let restore ~who ~dir ~slot ~ledger_dir ~saves_dir_of ~announce =
-  let* prepared = prepare_restore ~dir ~slot ~ledger_dir ~saves_dir_of in
+let restore ~who ~dir ~slot ~previous_autosave ~ledger_dir ~saves_dir_of ~announce =
+  let* prepared = prepare_restore ~dir ~slot ~previous_autosave ~ledger_dir ~saves_dir_of in
   Fun.protect ~finally:(fun () -> discard_prepared_restore prepared)
     (fun () -> commit_restore ~who prepared ~announce)
 ;;
@@ -1238,52 +1558,23 @@ let checkpoints ~dir =
   | Error message -> Error (Unreadable message)
 ;;
 
-(* ---------- autosave ---------- *)
+(* ---------- introspection ---------- *)
 
-type autosave_status = { program : string; steps : int; saved_by : string; saved_at : float }
+(* An address the machine has: 0 to [last_address]. The only way to make one
+   is [address_of_int], so [peek] cannot be handed a sentinel. *)
+type address = int
 
-type autosave_lookup =
-  | No_autosave
-  | Autosave of autosave_status
-  | Autosave_unreadable of string
-
-(* Read only, through {!Machine_checkpoint}'s header and meta -- never
-   {!Dos_snapshot.restore}, which would reconstruct the whole guest machine
-   just to say who last saved it. The meta goes through the same [meta_of_json]
-   a restore reads it with, so what this names is what a restore would find.
-   A file that is there but will not read is its own answer: reporting it as
-   "nothing there" would hide it until the next run replaced it. *)
-let lookup_autosave ~dir =
-  match
-    Machine_checkpoint.read_meta ~dir autosave_slot ~machine:Machine_checkpoint.Dos
-      ~format:checkpoint_format
-  with
-  | Error (Machine_checkpoint.No_slot _) -> No_autosave
-  | Error
-      ((Machine_checkpoint.Unreadable _
-       | Machine_checkpoint.Other_machine _
-       | Machine_checkpoint.Other_format _
-       | Machine_checkpoint.Corrupt _) as e) ->
-    Autosave_unreadable (Machine_checkpoint.error_to_string e)
-  | Ok { Machine_checkpoint.meta; modified; header = _ } ->
-    (match meta_of_json meta with
-     | Error e -> Autosave_unreadable (error_to_string e)
-     | Ok m ->
-       Autosave
-         { program = m.saved_program
-         ; steps = m.saved_steps
-         ; saved_by = m.saved_by
-         ; saved_at = modified
-         })
+let address_of_int n =
+  if n < 0 || n > last_address then
+    Error (Invalid_request (Printf.sprintf "address must be 0..0x%X, got %d" last_address n))
+  else Ok n
 ;;
 
-(* ---------- introspection ---------- *)
+let address_to_int address = address
 
 let peek ~address ~length =
   with_machine (fun st ->
-    if address < 0 || address > 0xFFFFF then
-      Error (Invalid_request (Printf.sprintf "address must be 0..0xFFFFF, got %d" address))
-    else if length < 1 || length > peek_max_bytes then
+    if length < 1 || length > peek_max_bytes then
       Error
         (Invalid_request
            (Printf.sprintf "length must be 1..%d, got %d" peek_max_bytes length))
@@ -1291,7 +1582,7 @@ let peek ~address ~length =
       let b = Buffer.create (length * 2) in
       for i = 0 to length - 1 do
         Buffer.add_string b
-          (Printf.sprintf "%02x" (Dos_machine.mem_read st.m ((address + i) land 0xFFFFF)))
+          (Printf.sprintf "%02x" (Dos_machine.mem_read st.m ((address + i) land last_address)))
       done;
       Ok (Buffer.contents b)
     end)

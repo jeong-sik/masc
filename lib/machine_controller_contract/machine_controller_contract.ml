@@ -96,3 +96,26 @@ let controller_need = function
   | Dos_restore -> Takes_controller
   | Dos_pass -> Hands_controller
   | Dos_meta | Dos_inventory | Dos_screen | Dos_peek | Dos_save -> No_controller
+
+(* The recipient of a hand-off. [to] left out (or null) frees the controller;
+   that is the only way to free it. An empty or blank [to] is an error: a
+   caller whose template left the name unset would otherwise hand the machine
+   to whoever moves it next. [parse] is the caller's agent-id rule, so the
+   host that admits the call, the worker that runs it and the in-process tool
+   all read one grammar of arguments and differ only in what a valid name is. *)
+let pass_target ~parse arguments =
+  let named = match arguments with `Assoc fields -> List.assoc_opt "to" fields | _ -> None in
+  match named with
+  | None | Some `Null -> Ok None
+  | Some (`String text) ->
+    let trimmed = String.trim text in
+    if trimmed = "" then
+      Error "to is empty: name the Keeper who takes the controller, or leave to out to free it"
+    else
+      (match parse trimmed with
+       | Ok name -> Ok (Some name)
+       | Error _ ->
+         Error
+           (Printf.sprintf "to %S is not a Keeper name: give the name alone, without @ or spaces"
+              text))
+  | Some _ -> Error "to must be a Keeper name, or left out to free the controller"

@@ -109,72 +109,207 @@ let checkpoints_dir ~base_path = Filename.concat (dos_dir ~base_path) "checkpoin
    refusal or the program-less inventory needs to decide whether to resume:
    what it is, when, by whom, and the one line that does it. A file that is
    there but does not read is said so, not left out. *)
-let autosave_status_json (s : Dos_lane.autosave_status) =
-  `Assoc
-    [ ("program", `String s.Dos_lane.program)
-    ; ("steps", `Int s.Dos_lane.steps)
-    ; ("saved_by", `String s.Dos_lane.saved_by)
-    ; ("saved_at", `String (Time_codec.rfc3339_of_unix s.Dos_lane.saved_at))
-    ; ( "resume"
-      , `String
-          (Printf.sprintf "masc_dos_restore slot=%s"
-             (Machine_checkpoint.slot_to_string Dos_lane.autosave_slot)) )
+(* What a checkpoint is, whichever slot holds it. *)
+let checkpoint_status_fields (s : Dos_lane.autosave_status) =
+  [ ("program", `String s.Dos_lane.program)
+  ; ("steps", `Int s.Dos_lane.steps)
+  ; ("saved_by", `String s.Dos_lane.saved_by)
+  ; ("saved_at", `String (Time_codec.rfc3339_of_unix s.Dos_lane.saved_at))
+  ]
+;;
+
+(* A checkpoint in one of the two slots a restart leaves behind, with the
+   command that brings it back. *)
+let slot_status_fields ~slot (s : Dos_lane.autosave_status) =
+  checkpoint_status_fields s
+  @ [ ( "resume"
+      , `String (Printf.sprintf "masc_dos_restore slot=%s" (Machine_checkpoint.slot_to_string slot)) )
     ]
 ;;
 
-(* Reads the autosave slot on a system thread: the read decompresses and
-   checksums the whole machine body, work that does not belong on the event
-   loop. *)
-let lookup_autosave ~base_path =
+let slot_status_json ~slot s = `Assoc (slot_status_fields ~slot s)
+
+let held_fields ~slot = function
+  | Dos_lane.Held s -> slot_status_fields ~slot s
+  | Dos_lane.Held_unreadable reason -> [ ("unreadable", `String reason) ]
+;;
+
+(* What the two autosave slots hold. After a restart this is all that is left of
+   a campaign: the autosave is the last state, and the previous autosave can be
+   the only copy of the one before it. *)
+type autosave_slots =
+  { current : Dos_lane.autosave_lookup
+  ; previous : Dos_lane.autosave_lookup
+  }
+
+(* Reads both slots on a system thread: each read decompresses and checksums a
+   whole machine body, work that does not belong on the event loop. *)
+let lookup_autosave_slots ~base_path =
+  let dir = checkpoints_dir ~base_path in
   let found =
-    off_domain (fun () -> Dos_lane.lookup_autosave ~dir:(checkpoints_dir ~base_path))
+    off_domain (fun () ->
+      { current = Dos_lane.lookup_autosave ~dir
+      ; previous = Dos_lane.lookup_previous_autosave ~dir
+      })
   in
-  (match found with
-   | Dos_lane.Autosave_unreadable reason -> Log.DosLog.warn "masc_dos autosave: %s" reason
-   | Dos_lane.No_autosave | Dos_lane.Autosave _ -> ());
+  let warn which = function
+    | Dos_lane.Autosave_unreadable reason -> Log.DosLog.warn "masc_dos %s: %s" which reason
+    | Dos_lane.No_autosave | Dos_lane.Autosave _ -> ()
+  in
+  warn "autosave" found.current;
+  warn "previous autosave" found.previous;
   found
 ;;
 
-let autosave_lookup_fields = function
+let lookup_fields ~key ~slot = function
   | Dos_lane.No_autosave -> []
-  | Dos_lane.Autosave s -> [ ("autosave", autosave_status_json s) ]
-  | Dos_lane.Autosave_unreadable reason ->
-    [ ("autosave", `Assoc [ ("unreadable", `String reason) ]) ]
+  | Dos_lane.Autosave s -> [ (key, slot_status_json ~slot s) ]
+  | Dos_lane.Autosave_unreadable reason -> [ (key, `Assoc [ ("unreadable", `String reason) ]) ]
+;;
+
+let autosave_slots_fields { current; previous } =
+  lookup_fields ~key:"autosave" ~slot:Dos_lane.autosave_slot current
+  @ lookup_fields ~key:"previous_autosave" ~slot:Dos_lane.autosave_prev_slot previous
 ;;
 
 (* [reject]'s [~data] defaults to [`Null], and Tool_bridge (tool_bridge.ml)
    only drops a [`Null] one from the model-facing message; a [`Null] and an
-   [`Assoc []] are not the same to it. [No_autosave] must reach [reject] as
-   the same [`Null] a plain refusal always carried, not as an empty object
-   that turns every ordinary No_machine refusal into a JSON envelope. *)
+   [`Assoc []] are not the same to it. A lookup with nothing in either slot must
+   reach [reject] as the same [`Null] a plain refusal always carried, not as an
+   empty object that turns every ordinary No_machine refusal into a JSON
+   envelope. *)
 let reject_data_of_fields = function
   | [] -> `Null
   | fields -> `Assoc fields
 ;;
 
-(* The answer to a call that needs a machine when none is loaded. It is the
-   answer a caller gets right after a restart, so it says what the autosave
-   slot holds and how to resume it. Every other refusal is unaffected. *)
-let no_machine ~base_path ~tool_name ~start_time =
+let describe_held = function
+  | Dos_lane.Held s ->
+    Printf.sprintf "%s, %d steps, saved by %s at %s" s.Dos_lane.program s.Dos_lane.steps
+      s.Dos_lane.saved_by (Time_codec.rfc3339_of_unix s.Dos_lane.saved_at)
+  | Dos_lane.Held_unreadable reason -> Printf.sprintf "a file this server cannot read (%s)" reason
+;;
+
+let held_of_lookup = function
+  | Dos_lane.No_autosave -> None
+  | Dos_lane.Autosave s -> Some (Dos_lane.Held s)
+  | Dos_lane.Autosave_unreadable reason -> Some (Dos_lane.Held_unreadable reason)
+;;
+
+(* What a caller needs next when it asks for a machine and none is loaded. The
+   lane cannot say: with no machine it holds no checkpoint directory, so the
+   slots are looked up here, where [base_path] is known. Restoring is the first
+   answer whenever something is saved, because [masc_dos_restore] works with no
+   machine loaded. A start that is not a restore of the previous autosave --
+   a load, or a restore of the autosave -- replaces the previous autosave with
+   its first save, so [discards] says what that would be: [None] when the
+   previous slot is empty, and then no consent is needed. *)
+type no_machine_guidance =
+  | Restore_autosave of
+      { autosave : Dos_lane.autosave_status
+      ; discards : Dos_lane.held_autosave option
+      }
+  | Unreadable_autosave of
+      { reason : string
+      ; discards : Dos_lane.held_autosave option
+      }
+  | Restore_previous_autosave of Dos_lane.autosave_status
+  | Unreadable_previous_autosave of string
+  | Load_a_program
+
+let no_machine_guidance { current; previous } =
+  let discards = held_of_lookup previous in
+  match current, previous with
+  | Dos_lane.Autosave autosave, _ -> Restore_autosave { autosave; discards }
+  | Dos_lane.Autosave_unreadable reason, _ -> Unreadable_autosave { reason; discards }
+  | Dos_lane.No_autosave, Dos_lane.Autosave status -> Restore_previous_autosave status
+  | Dos_lane.No_autosave, Dos_lane.Autosave_unreadable reason ->
+    Unreadable_previous_autosave reason
+  | Dos_lane.No_autosave, Dos_lane.No_autosave -> Load_a_program
+;;
+
+let no_machine_message guidance =
+  let slot = Machine_checkpoint.slot_to_string in
+  let current = slot Dos_lane.autosave_slot and previous = slot Dos_lane.autosave_prev_slot in
   let refusal = Dos_lane.error_to_string Dos_lane.No_machine in
-  let found = lookup_autosave ~base_path in
-  let message =
-    match found with
-    | Dos_lane.No_autosave -> refusal
-    | Dos_lane.Autosave s ->
-      Printf.sprintf
-        "%s (an autosave is waiting: %s, %d steps, saved by %s at %s -- resume with \
-         masc_dos_restore slot=%s)"
-        refusal s.Dos_lane.program s.Dos_lane.steps s.Dos_lane.saved_by
-        (Time_codec.rfc3339_of_unix s.Dos_lane.saved_at)
-        (Machine_checkpoint.slot_to_string Dos_lane.autosave_slot)
-    | Dos_lane.Autosave_unreadable reason ->
-      Printf.sprintf "%s (an autosave file is there but this server cannot read it: %s)" refusal
-        reason
+  let consent =
+    "discard_previous_autosave=true"
   in
+  match guidance with
+  | Load_a_program -> refusal ^ ": call masc_dos_load first"
+  | Restore_previous_autosave s ->
+    Printf.sprintf
+      "%s. There is no autosave, but %s holds %s. Resume it with masc_dos_restore slot=%s."
+      refusal previous (describe_held (Dos_lane.Held s)) previous
+  | Unreadable_previous_autosave reason ->
+    Printf.sprintf "%s. There is no autosave, and %s is a file this server cannot read (%s)."
+      refusal previous reason
+  | Restore_autosave { autosave; discards = None } ->
+    Printf.sprintf
+      "%s. An autosave is waiting: %s. Resume it with masc_dos_restore slot=%s. \
+       masc_dos_load starts a different program instead; the autosave then moves to %s \
+       and stays there."
+      refusal (describe_held (Dos_lane.Held autosave)) current previous
+  | Restore_autosave { autosave; discards = Some held } ->
+    Printf.sprintf
+      "%s. An autosave is waiting: %s. %s holds %s, which the first save of a resumed or \
+       newly loaded machine replaces. Resume the autosave with masc_dos_restore slot=%s %s, \
+       or look at %s first with masc_dos_restore slot=%s, which asks for nothing. \
+       masc_dos_load needs %s too."
+      refusal (describe_held (Dos_lane.Held autosave)) previous (describe_held held) current
+      consent previous previous consent
+  | Unreadable_autosave { reason; discards = None } ->
+    Printf.sprintf
+      "%s. An autosave file is there but this server cannot read it: %s. masc_dos_load \
+       moves it to %s and starts the program."
+      refusal reason previous
+  | Unreadable_autosave { reason; discards = Some held } ->
+    Printf.sprintf
+      "%s. An autosave file is there but this server cannot read it: %s. %s holds %s, which \
+       masc_dos_load would replace, so it needs %s."
+      refusal reason previous (describe_held held) consent
+;;
+
+(* The answer to a call that needs a machine when none is loaded. It is the
+   answer a caller gets right after a restart, so it says what the two
+   autosave slots hold and how to resume. Every other refusal is unaffected. *)
+let no_machine ~base_path ~tool_name ~start_time =
+  let found = lookup_autosave_slots ~base_path in
+  let message = no_machine_message (no_machine_guidance found) in
   Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Workflow_rejection
     ~effect_disposition:Tool_result.Proven_pre_effect
-    ~data:(reject_data_of_fields (autosave_lookup_fields found)) message
+    ~data:(reject_data_of_fields (autosave_slots_fields found)) message
+;;
+
+(* [masc_dos_load] or [masc_dos_restore] would start a machine whose first save
+   replaces the previous autosave, and the call did not consent. A refusal
+   before anything changed: it names what would be lost, what survives, and
+   both ways forward. *)
+let would_discard_previous ~tool_name ~start_time (discard : Dos_lane.discard) =
+  let slot = Machine_checkpoint.slot_to_string in
+  let current = slot Dos_lane.autosave_slot and previous = slot Dos_lane.autosave_prev_slot in
+  let message =
+    Printf.sprintf
+      "nothing was done: %s holds %s, and the first save of the new machine would replace \
+       it. The current autosave (%s) would move to %s and survive there. To keep what %s \
+       holds, restore it first with masc_dos_restore slot=%s (that asks for nothing) and \
+       save it under a name. To go on and discard it, call %s again with \
+       discard_previous_autosave=true."
+      previous (describe_held discard.Dos_lane.previous) (describe_held discard.Dos_lane.current)
+      previous previous previous tool_name
+  in
+  let data =
+    [ ( "would_discard"
+      , `Assoc
+          (("slot", `String previous)
+           :: held_fields ~slot:Dos_lane.autosave_prev_slot discard.Dos_lane.previous) )
+    ; ( "moves_to_previous"
+      , `Assoc
+          (("slot", `String current)
+           :: held_fields ~slot:Dos_lane.autosave_slot discard.Dos_lane.current) )
+    ]
+  in
+  reject ~tool_name ~start_time ~data:(`Assoc data) message
 ;;
 
 (* [png] adds the frame for a model that reads images: the observation's text,
@@ -196,6 +331,8 @@ let of_lane ?(extra = []) ?png ~base_path ~tool_name ~start_time
     in
     Tool_result.make_ok ~tool_name ~start_time ~data ?content_blocks ()
   | Error Dos_lane.No_machine -> no_machine ~base_path ~tool_name ~start_time
+  | Error (Dos_lane.Would_discard_previous_autosave discard) ->
+    would_discard_previous ~tool_name ~start_time discard
   | Error ((Dos_lane.Activity_disabled | Dos_lane.Activity_unobserved) as error) ->
     Tool_result.make_err ~tool_name ~class_:Tool_result.Workflow_rejection
       ~effect_disposition:Tool_result.Proven_pre_effect ~start_time
@@ -225,18 +362,53 @@ let of_lane_run ?(extra = []) ~base_path ~tool_name ~start_time
   | Error e -> of_lane ~base_path ~tool_name ~start_time (Error e)
 ;;
 
+(* A load answers with the machine it installed. A guest fault during boot is
+   still a load: the machine exists and the caller holds the controller, so
+   [boot] says how far it got instead of an error that reads as "nothing was
+   loaded". *)
+let boot_fields = function
+  | Dos_lane.Booted _ -> [ ("boot", `Assoc [ ("status", `String "booted") ]) ]
+  | Dos_lane.Boot_faulted fault ->
+    let kind, message =
+      match fault with
+      | Dos_lane.Unimplemented_instruction message -> ("unimplemented_instruction", message)
+      | Dos_lane.Core_exception message -> ("core_exception", message)
+    in
+    [ ( "boot"
+      , `Assoc
+          [ ("status", `String "faulted"); ("kind", `String kind); ("fault", `String message) ] )
+    ]
+;;
+
+let of_lane_load ?(extra = []) ~base_path ~tool_name ~start_time
+    (result : (Dos_lane.observation * Dos_lane.boot, Dos_lane.error) result) =
+  match result with
+  | Ok (o, (Dos_lane.Booted ran as boot)) ->
+    of_lane_run ~base_path ~tool_name ~start_time ~extra:(boot_fields boot @ extra) (Ok (o, ran))
+  | Ok (o, (Dos_lane.Boot_faulted _ as boot)) ->
+    of_lane ~base_path ~tool_name ~start_time ~extra:(boot_fields boot @ extra) (Ok o)
+  | Error e -> of_lane ~base_path ~tool_name ~start_time (Error e)
+;;
+
 (* What a program wrote on earlier machines, one directory per inventory
    name. Keyed by the inventory name, not the executable: two games may both
    boot a MAIN.EXE. *)
 let saves_dir ~base_path name = Filename.concat (Filename.concat (dos_dir ~base_path) "saves") name
 
+(* The names in [dir], or [Error] when the directory is there and will not
+   read (permissions, a vanished mount). The message carries the host path and
+   stays here: the caller says only that the inventory is unavailable. *)
 let entries_of dir =
-  if Sys.file_exists dir && Sys.is_directory dir then
-    Sys.readdir dir
-    |> Array.to_list
-    |> List.filter (fun f -> not (String.starts_with ~prefix:"." f))
-    |> List.sort String.compare
-  else []
+  match
+    if Sys.file_exists dir && Sys.is_directory dir then
+      Sys.readdir dir
+      |> Array.to_list
+      |> List.filter (fun f -> not (String.starts_with ~prefix:"." f))
+      |> List.sort String.compare
+    else []
+  with
+  | names -> Ok names
+  | exception Sys_error message -> Error message
 ;;
 
 let programs_available ~base_path = entries_of (programs_dir ~base_path)
@@ -444,6 +616,13 @@ let resolve_program ?boot ~base_path name =
         Error
           (Printf.sprintf "%s is one file, not a directory: boot names a file inside a game directory"
              trimmed)
+       | Regular when not (is_program_name trimmed) ->
+        (* The image is chosen by its bytes, but only a .exe or .com is a
+           program: a data file named in the inventory would otherwise boot as
+           a COM and run its bytes as instructions. The same test picks the
+           executable inside a directory. *)
+        Error
+          (Printf.sprintf "%s is one file but not a .exe or .com, so it is not a program" trimmed)
        | Regular ->
         (* One file boots alone, and is mounted under its own name too — a
            program that opens itself (overlays, self-reading installers)
@@ -596,6 +775,13 @@ let release_retired_keeper ~holder ~by =
          ~announce:(announce ~author:by (departure_notice holder Keeper_stopped))))
 ;;
 
+(* The wire carries a boolean; the lane takes a variant, so every call site
+   of [Dos_lane.load] and [Dos_lane.restore] states which of the two it means. *)
+let previous_autosave_consent args =
+  if get_bool args "discard_previous_autosave" false then Dos_lane.Discard_previous_autosave
+  else Dos_lane.Keep_previous_autosave
+;;
+
 let handle_load ~tool_name ~start_time ~base_path ~agent_name args =
   match get_string_opt args "program" with
   | None | Some "" ->
@@ -603,14 +789,18 @@ let handle_load ~tool_name ~start_time ~base_path ~agent_name args =
        here too: this is the first call a caller makes after a restart, and
        an autosave from before it is worth resuming rather than starting
        over. *)
-    let autosave = autosave_lookup_fields (lookup_autosave ~base_path) in
-    Tool_result.make_ok ~tool_name ~start_time
-      ~data:
-        (`Assoc
-          ([ ( "programs_available"
-             , `List (List.map (fun n -> `String n) (programs_available ~base_path)) ) ]
-           @ autosave))
-      ()
+    let autosave = autosave_slots_fields (lookup_autosave_slots ~base_path) in
+    (match programs_available ~base_path with
+     | Ok names ->
+       Tool_result.make_ok ~tool_name ~start_time
+         ~data:
+           (`Assoc
+             ([ ("programs_available", `List (List.map (fun n -> `String n) names)) ] @ autosave))
+         ()
+     | Error reason ->
+       Log.DosLog.warn "masc_dos_load: the program inventory cannot be listed: %s" reason;
+       Tool_result.make_err ~tool_name ~class_:Tool_result.Runtime_failure ~start_time
+         ~data:(reject_data_of_fields autosave) "DOS inventory is unavailable")
   | Some name ->
     let boot =
       match get_string_opt args "boot" with
@@ -625,14 +815,15 @@ let handle_load ~tool_name ~start_time ~base_path ~agent_name args =
          off_domain (fun () ->
            Dos_lane.load ~who:agent_name ~ledger_dir:(dos_dir ~base_path)
              ~saves_dir:(saves_dir ~base_path (String.trim name))
-             ~checkpoint_dir:(checkpoints_dir ~base_path) ~program_name ~program_bytes
+             ~checkpoint_dir:(checkpoints_dir ~base_path) ~previous_autosave:(previous_autosave_consent args)
+             ~program_name ~program_bytes
              ~files
              ~announce:
                (announce ~author:agent_name
                   (Printf.sprintf "%s 님이 %s 을(를) 띄웠습니다" agent_name program_name)))
        in
        after_announcing
-         (of_lane_run ~base_path ~extra:[ core_field ] ~tool_name ~start_time loaded))
+         (of_lane_load ~base_path ~extra:[ core_field ] ~tool_name ~start_time loaded))
 ;;
 
 (* masc_dos_meta — the linked core identity is a read-only lane fact. It does
@@ -810,18 +1001,7 @@ let handle_eject ~tool_name ~start_time ~agent_name _args =
    eject the machine again, and the post meant to wake the next player would
    address no one. Host admission and the worker use the same normalized
    target, which the worker verifies before changing the controller. *)
-let pass_target args =
-  match get_string_opt args "to" with
-  | None -> Ok None
-  | Some t when String.trim t = "" -> Ok None
-  | Some t ->
-    (match Host.parse_controller (String.trim t) with
-     | Ok id -> Ok (Some id)
-     | Error _ ->
-       Error
-         (Printf.sprintf
-            "to %S is not a Keeper name: give the name alone, without @ or spaces" t))
-;;
+let pass_target args = Machine_controller_contract.pass_target ~parse:Host.parse_controller args
 
 (* The hand-off is also the wake-up: the board post names the next holder
    with @, which the board delivers to that Keeper as an explicit mention, so
@@ -952,41 +1132,58 @@ let handle_type ~tool_name ~start_time ~base_path ~who args =
        ~until_ready:(get_bool args "until_ready" true))
 ;;
 
-(* Addresses arrive as hex strings ("b8000", "0xB8000") because that is how
-   memory is talked about; decimal parses too. *)
-let parse_address s =
-  let s = String.lowercase_ascii (String.trim s) in
-  let s =
-    if String.starts_with ~prefix:"0x" s then String.sub s 2 (String.length s - 2) else s
+(* Addresses arrive as hex strings ("b8000", "0xB8000"), as the schema says
+   and as memory is talked about. A number is read as hex too: "255" is 0x255.
+   Anything that is not hex digits, or is too long to be an address, is
+   refused by what the caller wrote, not by a stand-in number. *)
+let max_address_digits = 8
+
+let parse_address text =
+  let lowered = String.lowercase_ascii (String.trim text) in
+  let digits =
+    if String.starts_with ~prefix:"0x" lowered then
+      String.sub lowered 2 (String.length lowered - 2)
+    else lowered
   in
-  int_of_string_opt ("0x" ^ s)
+  let is_hex_digit = function '0' .. '9' | 'a' .. 'f' -> true | _ -> false in
+  if digits = "" || String.length digits > max_address_digits
+     || not (String.for_all is_hex_digit digits)
+  then
+    Error
+      (Printf.sprintf
+         "address %S is not hex: write the physical address as hex digits, such as b8000 or 0xB8000"
+         text)
+  else
+    Dos_lane.address_of_int (int_of_string ("0x" ^ digits))
+    |> Result.map_error Dos_lane.error_to_string
 ;;
 
 let handle_peek ~tool_name ~start_time ~base_path args =
-  let address =
-    match parse_address (get_string args "address" "") with
-    | Some a -> a
-    | None -> -1
-  in
-  match off_domain (fun () -> Dos_lane.peek ~address ~length:(get_int args "length" 16)) with
-  | Ok hex ->
-    Tool_result.make_ok ~tool_name ~start_time
-      ~data:
-        (`Assoc
-          [ ("address", `String (Printf.sprintf "%05x" address)); ("hex", `String hex) ])
-      ()
-  | Error Dos_lane.No_machine -> no_machine ~base_path ~tool_name ~start_time
-  | Error
-      (( Dos_lane.Activity_disabled
-       | Dos_lane.Activity_unobserved
-       | Dos_lane.Invalid_request _
-       | Dos_lane.Unreadable _
-       | Dos_lane.Held_by _
-       | Dos_lane.Guest_fault _
-       | Dos_lane.Unsaveable _
-       | Dos_lane.Checkpoint_refused _
-       | Dos_lane.Other_program _ ) as e) ->
-    reject ~tool_name ~start_time (Dos_lane.error_to_string e)
+  match parse_address (get_string args "address" "") with
+  | Error message -> reject ~tool_name ~start_time message
+  | Ok address ->
+    (match off_domain (fun () -> Dos_lane.peek ~address ~length:(get_int args "length" 16)) with
+     | Ok hex ->
+       Tool_result.make_ok ~tool_name ~start_time
+         ~data:
+           (`Assoc
+             [ ("address", `String (Printf.sprintf "%05x" (Dos_lane.address_to_int address)))
+             ; ("hex", `String hex)
+             ])
+         ()
+     | Error Dos_lane.No_machine -> no_machine ~base_path ~tool_name ~start_time
+     | Error
+         (( Dos_lane.Activity_disabled
+          | Dos_lane.Activity_unobserved
+          | Dos_lane.Invalid_request _
+          | Dos_lane.Unreadable _
+          | Dos_lane.Held_by _
+          | Dos_lane.Guest_fault _
+          | Dos_lane.Unsaveable _
+          | Dos_lane.Checkpoint_refused _
+          | Dos_lane.Other_program _
+          | Dos_lane.Would_discard_previous_autosave _ ) as e) ->
+       reject ~tool_name ~start_time (Dos_lane.error_to_string e))
 ;;
 
 (* ---------- checkpoints ---------- *)
@@ -1002,13 +1199,36 @@ let slot_arg ?default args =
 
 let slot_field slot = ("slot", `String (Machine_checkpoint.slot_to_string slot))
 
+(* What the save replaced, when it replaced something: the caller finds out
+   that a name it reused held a different game. *)
+let replaced_fields = function
+  | Dos_lane.Fresh_slot -> []
+  | Dos_lane.Replaced status -> [ ("replaced", `Assoc (checkpoint_status_fields status)) ]
+  | Dos_lane.Replaced_unreadable reason ->
+    [ ("replaced", `Assoc [ ("unreadable", `String reason) ]) ]
+;;
+
 let handle_save ~tool_name ~start_time ~base_path ~who args =
   match slot_arg ~default:default_slot args with
   | Error message -> reject ~tool_name ~start_time message
   | Ok None -> reject ~tool_name ~start_time "slot must name a checkpoint"
   | Ok (Some slot) ->
-    of_lane ~base_path ~extra:[ slot_field slot ] ~tool_name ~start_time
-      (off_domain (fun () -> Dos_lane.save ~who ~dir:(checkpoints_dir ~base_path) ~slot))
+    (match Dos_lane.classify_slot slot with
+     | Dos_lane.Current_autosave | Dos_lane.Previous_autosave ->
+       reject ~tool_name ~start_time
+         (Printf.sprintf
+            "%s is written by the lane after each call that runs the guest, so a save cannot \
+             take it: save under another name"
+            (Machine_checkpoint.slot_to_string slot))
+     | Dos_lane.Named named ->
+       (match
+          off_domain (fun () ->
+            Dos_lane.save ~who ~dir:(checkpoints_dir ~base_path) ~slot:named)
+        with
+        | Ok (observation, replaced) ->
+          of_lane ~base_path ~extra:(slot_field slot :: replaced_fields replaced) ~tool_name
+            ~start_time (Ok observation)
+        | Error error -> of_lane ~base_path ~tool_name ~start_time (Error error)))
 ;;
 
 let listed_json (l : Machine_checkpoint.listed) =
@@ -1048,7 +1268,8 @@ let handle_restore ~tool_name ~start_time ~base_path ~agent_name args =
   | Ok (Some slot) ->
     let restored =
       off_domain (fun () ->
-        Dos_lane.restore ~who:agent_name ~dir ~slot ~ledger_dir:(dos_dir ~base_path)
+        Dos_lane.restore ~who:agent_name ~dir ~slot
+          ~previous_autosave:(previous_autosave_consent args) ~ledger_dir:(dos_dir ~base_path)
           ~saves_dir_of:(saves_dir ~base_path)
           ~announce:
             (announce ~author:agent_name

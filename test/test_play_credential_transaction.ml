@@ -52,7 +52,7 @@ let with_machine f =
         ~ledger_dir:(Filename.concat base_path "ledger")
         ~saves_dir:(Filename.concat base_path "saves")
         ~checkpoint_dir:(Filename.concat base_path "checkpoints")
-        ~program_name:"spin.com" ~program_bytes:"\xeb\xfe" ~files:[] ~announce:ignore));
+        ~previous_autosave:Dos_lane.Keep_previous_autosave ~program_name:"spin.com" ~program_bytes:"\xeb\xfe" ~files:[] ~announce:ignore));
       let runtime_path = Filename.concat base_path "runtime.toml" in
       Out_channel.with_open_bin runtime_path (fun channel -> output_string channel {|[providers.local]
 protocol = "openai-compatible-http"
@@ -78,7 +78,7 @@ let call_failure = function
 
 let recover config =
   Machine_addon_host.call_shared ~config ~principal:(Lane_addon_call_context.Host_actor "operator")
-    ~name:"masc_dos_pass" ~arguments:(`Assoc ["to",`String ""])
+    ~name:"masc_dos_pass" ~arguments:(`Assoc [])  (* no [to] frees the controller; an empty one is refused *)
 
 let recovered ~released = function
   | Ok result -> check bool "worker return request reflects current holder authority" released (result.S.is_error <> Some true)

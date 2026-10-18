@@ -71,10 +71,53 @@ type observation = {
 
 type entry = { at_step : int; who : string; key_name : string }
 
+type autosave_status = { program : string; steps : int; saved_by : string; saved_at : float }
+
+type autosave_lookup =
+  | No_autosave
+  | Autosave of autosave_status
+  | Autosave_unreadable of string
+      (** a file is there but this server will not read it, with the reason:
+          another checkpoint format, a damaged file, a meta that does not
+          parse. Not the same as {!No_autosave}: the next call that runs the
+          guest replaces it. *)
+
+(** What a slot holds, as far as it can be said: its status, or that the file
+    is there and will not read. *)
+type held_autosave =
+  | Held of autosave_status
+  | Held_unreadable of string
+
+(** What a caller of {!load} or {!restore} agrees to. The first autosave of a
+    new machine copies [autosave_slot] to [autosave_prev_slot], replacing what
+    that slot held; so starting a machine is the act that discards the
+    previous autosave, and this is the consent for it. With no previous
+    autosave nothing is discarded: the autosave moves into the slot and
+    survives there, and no consent is asked. *)
+type previous_autosave_consent =
+  | Keep_previous_autosave
+      (** Refuse with {!error.Would_discard_previous_autosave} when starting
+          would discard the previous autosave: both files are there, readable
+          or not. *)
+  | Discard_previous_autosave
+      (** The caller was told what the previous autosave holds and lets the
+          start replace it. *)
+
+(** The two files a start would touch: [previous] is what it would discard,
+    [current] is the autosave that moves into its place. *)
+type discard =
+  { previous : held_autosave
+  ; current : held_autosave
+  }
+
 type error =
   | Activity_disabled
   | Activity_unobserved
-  | No_machine  (** nothing loaded — [masc_dos_load] first *)
+  | No_machine
+      (** nothing is loaded. With no machine the lane holds no checkpoint
+          directory, so it cannot say whether an autosave could be restored;
+          the tool layer looks that up ({!lookup_autosave}) and leads with
+          [masc_dos_restore] when one exists. *)
   | Invalid_request of string  (** the caller's arguments *)
   | Unreadable of string
       (** a file that is there and will not read. A path that does not exist
@@ -95,6 +138,10 @@ type error =
   | Other_program of { expected : string; loaded : string }
       (** {!press_into} was asked for the program kept under [expected], and
           the one loaded is kept under [loaded]; nothing was pressed. *)
+  | Would_discard_previous_autosave of discard
+      (** {!load} or {!restore} was called with {!Keep_previous_autosave} and
+          starting the machine would replace the previous autosave. Nothing
+          was done and both files are as they were. *)
 
 val error_to_string : error -> string
 
@@ -176,6 +223,22 @@ type ran = {
           machine they leave is not one worth resuming. *)
 }
 
+type boot_fault =
+  | Unimplemented_instruction of string
+      (** the program ran something the core does not implement, with the
+          core's message *)
+  | Core_exception of string
+      (** the core raised while the program ran (a malformed EXEC child, for
+          one), with the exception *)
+
+type boot =
+  | Booted of ran
+  | Boot_faulted of boot_fault
+      (** the boot stopped on a fault. The machine is installed, stopped
+          where it was, and the loader holds the controller; the screen shows
+          how far it got. No autosave was written, so the previous one stays.
+          {!load} announces and returns [Ok] whichever way the boot ends. *)
+
 val settle_chunk : int
 (** Instructions between two screen readings while waiting for {!ran.settled}. *)
 
@@ -185,16 +248,40 @@ val escapes : string -> bool
     such names, and a file the guest creates under one is never written to
     the saves directory. *)
 
+type image
+(** A program image the loaders can place: an MZ signature makes it an EXE,
+    anything else a COM, by the image's own bytes and not the file name. *)
+
+val image_of_bytes : program_name:string -> string -> (image, error) result
+(** Checks what the core's loaders would otherwise meet as an exception: an
+    empty image, an MZ header or relocation table that runs past the file, a
+    payload that does not fit in memory. For an MZ image that is exactly when
+    the loader raises. It also refuses two images the loader would accept and
+    damage: a COM longer than {!max_com_bytes}, whose tail the loader
+    overwrites with a return word, and the signature ZM, which the loader
+    would run as a COM. Anything refused is [Invalid_request] naming
+    [program_name]. *)
+
+val max_com_bytes : int
+(** 65,278: the largest COM image that leaves the return word the loader
+    plants at PSP:FFFE outside it. The loader itself accepts more and
+    overwrites the tail. *)
+
+val max_exe_payload_bytes : int
+(** The most program an MZ image may carry after its header: the memory above
+    the lowest place the loader puts an image. *)
+
 type prepared_load
 (** In-memory validated guest and save snapshot. No open file handles; discarded
     preparations are reclaimed normally. An admitted commit attempt consumes the guest. *)
 val prepare_load :
   ledger_dir:string -> saves_dir:string -> checkpoint_dir:string ->
+  previous_autosave:previous_autosave_consent ->
   program_name:string -> program_bytes:string -> files:(string * string) list ->
   (prepared_load, error) result
 val commit_load :
   who:string -> prepared_load -> announce:(unit -> unit) ->
-  (observation * ran, error) result
+  (observation * boot, error) result
 (** Rechecks activity, current controller and the save snapshot's lane counter
     under the lane lock before changing the ledger or installing the guest. *)
 
@@ -203,12 +290,18 @@ val load :
   ledger_dir:string ->
   saves_dir:string ->
   checkpoint_dir:string ->
+  previous_autosave:previous_autosave_consent ->
   program_name:string ->
   program_bytes:string ->
   files:(string * string) list ->
   announce:(unit -> unit) ->
-  (observation * ran, error) result
-(** Creates the workspace machine, replacing any previous one. The loader is
+  (observation * boot, error) result
+(** Creates the workspace machine, replacing any previous one. The new
+    machine's first autosave replaces the previous autosave in
+    [checkpoint_dir], so when both that and the autosave are there the load is
+    {!Would_discard_previous_autosave} unless [previous_autosave] is
+    {!Discard_previous_autosave}, and nothing changes. The check happens in
+    {!prepare_load}, before the machine is built. The loader is
     chosen by the image's own bytes — an MZ signature is an EXE, anything
     else is a COM — not by the file name, so a misnamed image still boots the
     way DOS would boot it.
@@ -369,7 +462,8 @@ val click :
   (observation * ran, error) result
 (** Sets the mouse and runs. The mouse is state, not a queue: the cursor and
     buttons stay where they are put until the next call moves them. A click
-    ([buttons] 1 left or 2 right) is button down, run, button up, run, in one
+    ([buttons] a mask of 1 left, 2 right and 4 middle, so 3 presses left and
+    right together) is button down, run, button up, run, in one
     call — the up half always runs so the button is never left held. A move
     ([buttons = 0]) sets the position and runs once. Coordinates are frame
     pixels and must land inside the frame; [steps] is the shared ceiling of
@@ -386,10 +480,17 @@ val type_text :
     keys. With [until_ready=false], only its first character is injected.
     For a name a program is asking for, not for menu navigation. *)
 
-val peek : address:int -> length:int -> (string, error) result
-(** Reads [length] (1..{!peek_max_bytes}) bytes at a physical address
-    (0x00000-0xFFFFF) as hex pairs. Read-only: writing is the cheat the lane
-    refuses. *)
+type address
+(** A physical address the machine has: 0x00000 to 0xFFFFF. *)
+
+val address_of_int : int -> (address, error) result
+(** [Invalid_request] outside the range. *)
+
+val address_to_int : address -> int
+
+val peek : address:address -> length:int -> (string, error) result
+(** Reads [length] (1..{!peek_max_bytes}) bytes from a physical address as hex
+    pairs. Read-only: writing is the cheat the lane refuses. *)
 
 val peek_max_bytes : int
 
@@ -405,16 +506,39 @@ val checkpoint_format : int
     carry the core's own. The core identity is written beside both, to be
     shown and never compared. *)
 
-val save : who:string -> dir:string -> slot:Machine_checkpoint.slot -> (observation, error) result
-(** Writes the machine to [slot], replacing what was there. Needs no
-    controller and does not move the machine: anyone watching may save. *)
+type named_slot
+(** A slot name a caller chose: never one the lane writes itself. *)
+
+type slot =
+  | Named of named_slot
+  | Current_autosave  (** {!autosave_slot}, in any letter case *)
+  | Previous_autosave  (** {!autosave_prev_slot}, in any letter case *)
+
+val classify_slot : Machine_checkpoint.slot -> slot
+val named_slot_to_string : named_slot -> string
+
+type replaced =
+  | Fresh_slot
+  | Replaced of autosave_status
+      (** the slot held a checkpoint: its program, steps, saver and time,
+          read just before the write replaced it *)
+  | Replaced_unreadable of string
+      (** a file was there that this server could not read, with the reason *)
+
+val save :
+  who:string -> dir:string -> slot:named_slot -> (observation * replaced, error) result
+(** Writes the machine to [slot], replacing what was there, and says what
+    that was. Needs no controller and does not move the machine: anyone
+    watching may save. The type keeps a manual save off the two slots the lane
+    writes itself. *)
 
 type prepared_restore
 (** Validated guest snapshot owning one uniquely named staged ledger file.
     The caller must scope it with {!discard_prepared_restore}, including when
     controller admission refuses. Commit and discard claim ownership atomically. *)
 val prepare_restore :
-  dir:string -> slot:Machine_checkpoint.slot -> ledger_dir:string ->
+  dir:string -> slot:Machine_checkpoint.slot ->
+  previous_autosave:previous_autosave_consent -> ledger_dir:string ->
   saves_dir_of:(string -> string) -> (prepared_restore, error) result
 val discard_prepared_restore : prepared_restore -> unit
 (** Discard an unconsumed preparation. Idempotent after commit/discard; only its
@@ -431,6 +555,7 @@ val restore :
   who:string ->
   dir:string ->
   slot:Machine_checkpoint.slot ->
+  previous_autosave:previous_autosave_consent ->
   ledger_dir:string ->
   saves_dir_of:(string -> string) ->
   announce:(unit -> unit) ->
@@ -448,6 +573,16 @@ val restore :
     save a game wrote after the checkpoint is not overwritten by restoring an
     older one.
 
+    The restored machine's first autosave replaces the previous autosave, as
+    a loaded machine's does, so the same consent is asked: with both the
+    autosave and the previous autosave on disk, restoring any slot but
+    {!autosave_prev_slot} is {!Would_discard_previous_autosave} under
+    {!Keep_previous_autosave}. A restore of {!autosave_prev_slot} is never
+    asked, because the machine it restores already holds what would be
+    replaced. A slot that does not exist is not asked about; the read reports
+    it. A commit refuses when the previous autosave was replaced since
+    {!prepare_restore}.
+
     Everything is read and checked first; on any error the current machine,
     its ledger and its controller are untouched. [announce] runs under the
     machine's lock, as {!load}'s does. *)
@@ -463,29 +598,24 @@ val autosave_slot : Machine_checkpoint.slot
     validates, so every caller shares this value instead of the string. *)
 
 val autosave_prev_slot : Machine_checkpoint.slot
-(** Where an incarnation's first autosave moves whatever {!autosave_slot}
+(** Where an incarnation's first autosave copies whatever {!autosave_slot}
     already held, before writing its own state there. That file is the
     previous incarnation's own last save -- a fresh {!load} or {!restore}'s
-    first autosave must not erase it silently. Listed and restorable like any
-    other slot ({!checkpoints}, {!restore}); nothing offers it back on its
-    own the way {!lookup_autosave} offers {!autosave_slot}. *)
-
-type autosave_status = { program : string; steps : int; saved_by : string; saved_at : float }
-
-type autosave_lookup =
-  | No_autosave
-  | Autosave of autosave_status
-  | Autosave_unreadable of string
-      (** a file is there but this server will not read it, with the reason:
-          another checkpoint format, a damaged file, a meta that does not
-          parse. Not the same as {!No_autosave}: the next call that runs the
-          guest replaces it. *)
+    first autosave must not erase it silently. The copy replaces what this
+    slot held, which is why starting a machine asks for
+    {!previous_autosave_consent} when both files exist. Listed and restorable
+    like any other slot ({!checkpoints}, {!restore}); nothing offers it back
+    on its own the way {!lookup_autosave} offers {!autosave_slot}. *)
 
 val lookup_autosave : dir:string -> autosave_lookup
 (** What the autosave slot holds, read through {!Machine_checkpoint}'s header
     and meta alone -- never through {!restore}, which would reconstruct the
     whole guest machine just to say who saved it last. This is an offer to
     resume, never a fact anything depends on. *)
+
+val lookup_previous_autosave : dir:string -> autosave_lookup
+(** {!lookup_autosave} for {!autosave_prev_slot}. After a restart this can be
+    all that is left of a campaign. *)
 
 val ledger : unit -> entry list
 (** Oldest first. Empty when no machine is loaded. *)

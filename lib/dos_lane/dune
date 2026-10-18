@@ -5,6 +5,7 @@
  (public_name masc.dos_lane)
  (libraries
   unix
+  eio
   ocaml-dos.dosmachine
   ocaml-dos.cpu86core
   ocaml-dos.core-identity

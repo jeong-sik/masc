@@ -1553,7 +1553,7 @@ status: reference
 
 **DOS Program Inventory (DOS 프로그램 인벤토리)**
 : 공유 DOS 머신에 배치된 연산자 소유 프로그램들의 정적 자산 목록 및 메타데이터 계약(#41819).
-  기본 위치는 `<base-path>/.masc/dos/programs/`이며, MASC 설치나 네트워크 다운로드로 채워지지 않고
+  위치는 DOS 애드온 워커 상태 볼륨 안의 `/state/.masc/dos/programs/`이며, MASC 설치나 네트워크 다운로드로 채워지지 않고
   연산자가 직접 배치한다. 읽기 전용 도구 `masc_dos_inventory`를 통해 머신을 기동하거나 조종권
   (`Controller`)을 획득하지 않고도 무부작용으로 기본 자산을 조회할 수 있다.
   - **기본 자산 범위 (Base Inventory Scope)**: 최상위의 단독 일반 파일(Regular)과 프로그램 디렉터리를
@@ -1660,7 +1660,10 @@ status: reference
 
 **슬롯 (Slot)**
 : 기계 체크포인트에 붙이는 이름. 영문자·숫자·`_`·`-` 로 1~64자이고, 경로가 될 수
-  없다. Keeper 끼리 같은 이름 공간을 쓴다. 같은 이름에 다시 저장하면 덮어쓴다.
+  없다. Keeper 끼리 같은 이름 공간을 쓴다. 같은 이름에 다시 저장하면 덮어쓰고, DOS Lane 은
+  덮어쓴 체크포인트가 무엇이었는지(프로그램, 실행한 명령어 수, 저장한 사람, 시각)를
+  `masc_dos_save` 응답의 `replaced` 로 알려 준다. `autosave`·`autosave-prev` 는 Lane 이
+  직접 쓰는 이름이라 `masc_dos_save` 로는 저장할 수 없다(대소문자 구분 없이 거절한다).
   → [Machine_checkpoint.slot_of_string](../../lib/machine_checkpoint/machine_checkpoint.mli)
 
 **자동 저장 (Autosave)**
@@ -1674,19 +1677,30 @@ status: reference
   `masc_dos_restore` 도 쓰지 않는다. 되살린 기계의 다음 호출부터 쓴다.
   쓰기가 실패해도(예: 디렉터리를 쓸 수 없음) 원래 호출의 결과는 그대로 돌아가고,
   결과 안에 `autosave: {"saved": false, "reason": ...}` 로만 남는다.
-  기계를 움직이는 다음 호출이 `autosave` 슬롯을 덮어쓴다. 다만 새 기계(incarnation)의
-  첫 자동 저장만은 먼저 그 자리에 있던 파일을 `autosave-prev` 슬롯으로 옮기고 나서 쓴다
-  — 그 파일은 이 기계가 아니라 이전 기계(이전 `load`·`restore`)의 것이라서다. 서버나 worker를
-  다시 켠 뒤 프로그램 이름을 넣은 `masc_dos_load` 를 첫 호출로 부르면, 재시작 전 마지막
-  자동 저장은 `autosave-prev` 로 남아 `masc_dos_restore slot=autosave-prev` 로 되살릴 수
-  있다. 같은 기계가 그 뒤 또 자동 저장할 때는 옮기지 않고 `autosave` 를 그대로 갈아 쓴다.
-  연결된 `dos-machine` worker에 기계가 올라와 있지 않을 때 — 기계가 필요한 호출의 거절(`masc_dos_screen`·`masc_dos_peek` 등)과
-  프로그램 이름 없이 부른 `masc_dos_load` 의 인벤토리 응답 — 는 이 자동 저장이 있는지,
-  무엇인지(프로그램, 실행한 명령어 수, 저장한 사람, 시각), 어떻게 되살리는지
-  (`masc_dos_restore slot=autosave`)를 `autosave` 필드로 알려 준다. 파일이 있는데 읽히지
-  않으면(다른 체크포인트 형식, 손상) `autosave: {"unreadable": 이유}` 로 그렇게 말한다.
+  슬롯은 둘이다. `autosave` 는 기계의 가장 최근 상태이고, `autosave-prev` 는 지금 도는
+  기계가 시작될 때 `autosave` 에 있던 것이다. `masc_dos_load`·`masc_dos_restore` 로 시작한
+  새 기계(incarnation)의 첫 자동 저장이 `autosave` 파일을 `autosave-prev` 로 복사하고,
+  `autosave-prev` 에 있던 것은 사라진다. 그 뒤 같은 기계의 자동 저장은 복사하지 않고
+  `autosave` 만 갈아 쓴다.
+  그래서 두 파일이 모두 있을 때만 시작에 동의가 필요하다(파일이 읽히지 않아도 있는 것으로
+  센다). 동의 없이 부르면 아무것도 바꾸지 않고 거절하며, 거절 응답의 `would_discard` 가
+  사라질 `autosave-prev` 의 내용(프로그램, 실행한 명령어 수, 저장한 사람, 시각)을,
+  `moves_to_previous` 가 그 자리로 옮겨 가는 `autosave` 를 알려 준다.
+  `masc_dos_load` 와 `masc_dos_restore`(`autosave-prev` 를 되살리는 경우는 빼고)가 같은
+  관문을 지난다. `autosave-prev` 의 내용을 지키려면 먼저
+  `masc_dos_restore slot=autosave-prev` 로 되살려 이름을 붙여 저장한다. 그래도 새로
+  시작하려면 같은 호출에 `discard_previous_autosave=true` 를 넣는다.
+  `autosave-prev` 파일이 없으면 `autosave` 가 그대로 옮겨 가 남으므로 동의가 필요 없고,
+  `autosave` 없이 `autosave-prev` 만 남았을 때도 건드리지 않으므로 묻지 않는다.
+  `autosave-prev` 를 되살리는 호출은 되살린 기계가 이미 그 내용을 들고 있어서 묻지 않는다.
+  기계가 없을 때 — 기계가 필요한 호출의 거절(`masc_dos_screen`·`masc_dos_peek` 등)과
+  프로그램 이름 없이 부른 `masc_dos_load` 의 인벤토리 응답 — 는 두 슬롯에 무엇이 있는지
+  (프로그램, 실행한 명령어 수, 저장한 사람, 시각, 되살리는 명령)를 `autosave` 와
+  `previous_autosave` 필드로 알려 준다. 파일이 있는데 읽히지 않으면(다른 체크포인트 형식,
+  손상) `{"unreadable": 이유}` 로 그렇게 말한다.
   되살리는 것은 언제나 사람의 몫이고, 서버가 스스로 되살리지 않는다.
   → [Dos_lane.lookup_autosave](../../lib/dos_lane/dos_lane.mli),
+  [Dos_lane.lookup_previous_autosave](../../lib/dos_lane/dos_lane.mli),
   [Machine_checkpoint.read_meta](../../lib/machine_checkpoint/machine_checkpoint.mli)
 
 **MSX Lane**

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key>
+  <string>io.github.jeong-sik.masc.music</string>
+  <key>CFBundleName</key>
+  <string>MASC Music</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Record the selected audio input as WAV alongside MIDI tracks when you start a take.</string>
+</dict>
+</plist>

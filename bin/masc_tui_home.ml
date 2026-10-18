@@ -110,7 +110,7 @@ let clear_ask_answering state =
   state.ask_origin <- None;
   state.ask_draft <- None;
   state.ask_text_entry <- None;
-  state.pending_ask_submit <- None
+  Masc_tui_types.disarm_ask_submit state
 
 let reconcile_home_request_detail state =
   match state.home_opened_request with

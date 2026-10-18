@@ -8629,6 +8629,30 @@ let finish_ask_followup_read (state : state) request submission result =
           Some result
       | Some _ | None -> None
 
+let armed_ask_submit_notice_prefix = "Press enter again to answer "
+
+let armed_ask_submit_notice keeper_name =
+  armed_ask_submit_notice_prefix ^ keeper_name
+
+let ask_submit_is_armed (state : state) =
+  match state.ask_answer_mode, state.ask_text_entry, state.pending_ask_submit with
+  | Ask_answering { aam_ask_id }, None, Some armed ->
+      String.equal armed aam_ask_id
+  | Ask_browsing, _, _
+  | Ask_answering _, Some _, _
+  | Ask_answering _, None, None -> false
+
+let retire_armed_ask_submit_notice (state : state) =
+  match state.last_action with
+  | Some (text, _)
+    when String.starts_with ~prefix:armed_ask_submit_notice_prefix text ->
+      state.last_action <- None
+  | Some _ | None -> ()
+
+let disarm_ask_submit (state : state) =
+  state.pending_ask_submit <- None;
+  retire_armed_ask_submit_notice state
+
 let begin_ask_submission_state ?submission (state : state) =
   retire_ask_followup_read state;
   state.ask_followup <- None;

@@ -584,7 +584,11 @@ let footer_line ?(status = []) ?position (state : state) ~max_cells ~hints =
     | None -> (match state.last_action with
     | Some (text, set_at)
       when Unix.gettimeofday () -. set_at
-           <= Masc_tui_types.last_action_window_s ->
+           <= Masc_tui_types.last_action_window_s
+           && (not
+                 (String.starts_with
+                    ~prefix:Masc_tui_types.armed_ask_submit_notice_prefix text)
+               || Masc_tui_types.ask_submit_is_armed state) ->
       Some text
     | Some _ | None -> None))
   in
@@ -2085,24 +2089,23 @@ let question_hints (state : state) =
   let open Masc_tui_keys in
   match state.ask_answer_mode with
   | Ask_browsing -> footer_hints_approvals Approval_browsing
-  | Ask_answering { aam_ask_id } ->
+  | Ask_answering _ ->
       (match state.ask_text_entry with
        | Some _ -> footer_hints_approvals Approval_writing
        | None ->
-           match state.pending_ask_submit with
-           | Some armed when String.equal armed aam_ask_id ->
-               footer_hints_approvals Approval_armed
-           | Some _ | None ->
-               let question = selected_ask_question state in
-               let has_choices =
-                 match question with
-                 | Some (q : Masc.Tui_decode_asks.ask_question) ->
-                     q.Masc.Tui_decode_asks.aq_choices <> []
-                 | None -> false
-               in
-               let takes_text = Option.is_some question in
-               footer_hints_approvals
-                 (Approval_answering { has_choices; takes_text }))
+           if Masc_tui_types.ask_submit_is_armed state then
+             footer_hints_approvals Approval_armed
+           else
+             let question = selected_ask_question state in
+             let has_choices =
+               match question with
+               | Some (q : Masc.Tui_decode_asks.ask_question) ->
+                   q.Masc.Tui_decode_asks.aq_choices <> []
+               | None -> false
+             in
+             let takes_text = Option.is_some question in
+             footer_hints_approvals
+               (Approval_answering { has_choices; takes_text }))
 let question_asks (state : state) =
   match state.asks_snapshot with
   | None -> []

@@ -12591,15 +12591,11 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.approvals_summary_read <- Snapshot_read.invalidate state.approvals_summary_read;
   state.approval_detail_open <- false;
   state.asks_snapshot <- None;
-  state.ask_origin <- None;
   state.asks_error <- None;
-  state.ask_answer_mode <- Ask_browsing;
+  Masc_tui_home.clear_ask_answering state;
   state.ask_cursor <- 0;
   state.ask_question_cursor <- 0;
   state.ask_question_scroll <- 0;
-  state.ask_draft <- None;
-  state.ask_text_entry <- None;
-  state.pending_ask_submit <- None;
   state.ask_submit_inflight <- false;
   state.ask_submission_current <- None;
   state.ask_answer_feedback <- None;
@@ -14951,7 +14947,7 @@ let enter_ask_answering state =
       state.ask_question_cursor <- 0;
       state.ask_question_scroll <- 0;
       state.ask_draft <- Some (Ask.draft_for state.ask_draft ~row);
-      state.pending_ask_submit <- None
+      Masc_tui_types.disarm_ask_submit state
 
 (* Walking to another ask starts a new draft rather than carrying the old one
    across: [draft_for] keys on the ask id, so the answer cannot land under a
@@ -14967,7 +14963,7 @@ let move_ask_cursor state delta =
       state.ask_origin <- None;
       state.ask_question_cursor <- 0;
       state.ask_question_scroll <- 0;
-      state.pending_ask_submit <- None;
+      Masc_tui_types.disarm_ask_submit state;
       match (state.ask_answer_mode, List.nth_opt rows next) with
       (* Walking the list while browsing is not answering. Opening a draft
          here would make [ and ] commit to a question the operator was only
@@ -14998,7 +14994,7 @@ let with_ask_draft state f =
       state.ask_draft <- Some (f draft question);
       (* Editing after arming means the armed answer is not the one on screen
          any more, so the next press arms again rather than sending. *)
-      state.pending_ask_submit <- None
+      Masc_tui_types.disarm_ask_submit state
   | (Some _ | None), _ -> ()
 
 let toggle_ask_choice state index =
@@ -15064,7 +15060,7 @@ let commit_ask_text_entry state =
        | Some row ->
            let draft = Ask.draft_for state.ask_draft ~row in
            state.ask_draft <- Some (Ask.set_text draft ~slot:entry.ate_slot ~text:entry.ate_text);
-           state.pending_ask_submit <- None
+           Masc_tui_types.disarm_ask_submit state
        | None ->
            report_action state "system"
              "The question you were writing to is no longer open; the text was not recorded");
@@ -15095,7 +15091,7 @@ let apply_ask_answer_completion state submission result asks =
   let answered_label = submission.as_answered_label in
   observe_ask_answer_receipt state ~phase:Reread_complete submission result;
   state.ask_submit_inflight <- false;
-  state.pending_ask_submit <- None;
+  Masc_tui_types.disarm_ask_submit state;
   let close_draft () =
     state.ask_draft <- None;
     state.ask_answer_mode <- Ask_browsing
@@ -15212,12 +15208,12 @@ let handle_ask_submit state ~mailbox =
               ~pending:state.pending_ask_submit ~ask_id:row.Masc.Tui_decode_asks.ar_id
           with
           | Ask.Ask_gate_blocked_inflight ->
-              state.pending_ask_submit <- None;
+              Masc_tui_types.disarm_ask_submit state;
               report_action state "system" "An answer is already on its way"
           | Ask.Ask_gate_arm ask_id ->
               state.pending_ask_submit <- Some ask_id;
               report_action state "system"
-                (Printf.sprintf "Press enter again to answer %s"
+                (Masc_tui_types.armed_ask_submit_notice
                    row.Masc.Tui_decode_asks.ar_keeper)
           | Ask.Ask_gate_submit ->
               (* Name the Keeper and what was chosen, not the ask's opaque id,

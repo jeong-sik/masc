@@ -24,6 +24,7 @@ const help = [
   ':tempo 120    :length 32    :meter 3 4    :loop 4 12',
   ':transpose -12    :quantize 0.25    :duplicate 8   (selected track)',
   ':track-add Bass    :track 2    :program 33    :rename Bass',
+  ':level 100    :pan 64        track level and pan, each 0–127',
   ':cursor 4 C3    :title My phrase    :undo    :redo    :mute    :solo',
   ':save-as /path/song.json    :export /path/song.mid    :wave /path/song.wav',
   'Close, drop2 and rootless voicings use Tonal. Chord labels are candidates.',
@@ -38,7 +39,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
   let editor = newEditor(loaded?.project), revision = loaded?.revision ?? null
   path = loaded?.path ?? join(root, `phrase-${randomUUID()}.json`)
   let saved = loaded?.project, status = 'Enter a note or :help', prompt = null, showHelp = false
-  let loop = false, closed = false, suspended = false, task = Promise.resolve(), sessionTask = null
+  let loop = false, accepting = true, closed = false, suspended = false, task = Promise.resolve(), sessionTask = null
   const sessionAbort = new AbortController()
   const directory = await mkdtemp(join(tmpdir(), 'masc-sequencer-'))
   const worker = new Worker(new URL('./sequencer-worker.mjs', import.meta.url))
@@ -46,7 +47,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
   let jobNumber = 0, generation = 0, transport = { kind: 'stopped' }, workerFailure = null
   const wasRaw = process.stdin.isRaw
   let finish
-  const done = new Promise(resolve => { finish = resolve })
+  const done = new Promise(resolve => { finish = () => { accepting = false; resolve() } })
   const dirty = () => editor.project !== saved
   function fit(text) {
     let used = 0, result = ''
@@ -69,7 +70,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     const at = harmonyAt(project, editor.tick)
     const lines = [
       `${project.title}${dirty() ? ' *' : ''} · ${project.tempo} BPM · ${project.meter.join('/')} · ${project.length / PPQ} beats · ${transport.kind}${loop ? ' · LOOP' : ''}`,
-      `Track ${editor.track + 1}/${project.tracks.length}: ${track.name} · ch ${track.channel + 1} · program ${track.program}${track.muted ? ' · MUTED' : ''}${track.solo ? ' · SOLO' : ''} · ${track.notes.length} notes`,
+      `Track ${editor.track + 1}/${project.tracks.length}: ${track.name} · ch ${track.channel + 1} · program ${track.program} · level ${track.level} · pan ${track.pan}${track.muted ? ' · MUTED' : ''}${track.solo ? ' · SOLO' : ''} · ${track.notes.length} notes`,
       `Cursor ${editor.tick / PPQ} · ${Note.fromMidi(editor.pitch)} · grid ${editor.step / PPQ} · length ${(current?.duration ?? editor.duration) / PPQ} · velocity ${current?.velocity ?? editor.velocity}`,
       `Chord candidates: ${at.candidates.join(' / ') || '—'} · ${at.notes.join(' ')} · ${status}`,
     ]
@@ -113,6 +114,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     transport = { kind: 'stopped' }
   }
   function render(snapshot, options = {}) {
+    if (!accepting) throw new Error('Sequencer is closing')
     if (workerFailure) throw new Error(workerFailure)
     const id = ++jobNumber, cancel = new Int32Array(new SharedArrayBuffer(4)), path = join(directory, `${id}.wav`)
     const promise = new Promise((resolve, reject) => { jobs.set(id, { resolve, reject, cancel }) })
@@ -120,7 +122,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     return { promise, cancel }
   }
   function startPlayer(wave, id) {
-    if (closed || id !== generation) return
+    if (!accepting || closed || id !== generation) return
     const child = spawn(process.platform === 'darwin' ? 'afplay' : 'ffplay',
       process.platform === 'darwin' ? [wave.path] : ['-nodisp', '-autoexit', '-loglevel', 'error', wave.path],
       { stdio: ['ignore', 'ignore', 'pipe'] })
@@ -136,9 +138,10 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       resolve()
     })))
     transport = { kind: 'playing', child, since: performance.now() }
-    status = 'SoundFont preview'; draw()
+    status = wave.clippedSamples > 0 ? 'Preview clipped; lower :level' : 'SoundFont preview'; draw()
   }
   function play() {
+    if (!accepting) return
     if (transport.kind !== 'stopped') { stop(); draw(); return }
     const id = ++generation, result = render(editor.project, { loop })
     transport = { kind: 'rendering', cancel: result.cancel }
@@ -153,16 +156,18 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     path = resolve(target); revision = nextRevision; saved = project; status = `Saved ${path}`
   }
   async function record() {
+    if (!accepting) return
     stop(); suspended = true; process.stdin.off('keypress', keypress)
     try {
       const { viewSession } = await import('./music-session.mjs')
-      if (!closed) await viewSession({ root: sessionRoot, input, midi, embedded: true, signal: sessionAbort.signal })
+      if (accepting && !closed) await viewSession({ root: sessionRoot, input, midi, embedded: true, signal: sessionAbort.signal })
     } finally {
       suspended = false
-      if (!closed) { process.stdin.on('keypress', keypress); draw() }
+      if (accepting && !closed) { process.stdin.on('keypress', keypress); draw() }
     }
   }
   async function effect(value) {
+    if (!accepting && ['play', 'record', 'wave'].includes(value.kind)) return
     switch (value.kind) {
       case 'save': await save(); break
       case 'save-as': await save(value.path); break
@@ -170,7 +175,10 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       case 'wave': {
         const job = render(editor.project)
         const wave = await job.promise
-        if (!closed) { await copyFile(wave.path, value.path, constants.COPYFILE_EXCL); status = `Exported ${value.path}` }
+        if (accepting && !closed) {
+          await copyFile(wave.path, value.path, constants.COPYFILE_EXCL)
+          status = `Exported ${value.path}${wave.clippedSamples > 0 ? ' · clipped; lower :level' : ''}`
+        }
         break
       }
       case 'play': play(); break
@@ -180,7 +188,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     }
   }
   async function keypress(text, key = {}) {
-    if (closed || suspended) return
+    if (!accepting || closed || suspended) return
     if (key.ctrl && key.name === 'c') { finish(); return }
     if (prompt !== null) {
       if (key.name === 'escape') prompt = null
@@ -188,7 +196,8 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       else if (key.name === 'return') {
         const line = prompt; prompt = null
         task = task.then(async () => {
-          if (closed) return
+          // This command was admitted before close; retain its editor decision.
+          // effect() separately refuses new playback/recording/WAV work.
           const result = editorCommand(editor, line)
           if (result.editor.project !== editor.project) stop()
           editor = result.editor
@@ -203,7 +212,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     if (text === '?') { showHelp = !showHelp; draw(); return }
     if (key.name === 'n') { prompt = 'track-add '; draw(); return }
     task = task.then(async () => {
-      if (closed) return
+      // Drain admitted editor decisions even after input admission closes.
       const original = editor.project
       switch (key.name) {
         case 'space': play(); break

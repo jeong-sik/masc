@@ -92,8 +92,9 @@ target optional work. Three more authored, unexecuted scenarios cover input
 availability before Work settles, independent failures, and equal-number
 cross-source tickets plus suspension/successors. They use production admission
 and state-application functions and assert stored state, not TUI text/layout.
-Existing composer, detail-focus and metrics fixtures identify observed metadata. No typing, scenario execution, worker cancellation,
-router, runtime, installed binary, visible UI or latency proof is established.
+Existing composer, detail-focus and metrics fixtures identify observed metadata.
+No typing, scenario execution, worker cancellation, router, runtime, installed
+binary, visible UI or latency proof is established.
 
 ## Remaining work and matched comparison
 

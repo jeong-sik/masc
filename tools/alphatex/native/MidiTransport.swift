@@ -1127,8 +1127,12 @@ final class MidiTransport {
             let region = timeline.regions[action.region]
             switch action.kind {
             case .begin:
+                // A cut enters an owner mid-region, so the prefix notes must not be re-sent:
+                // the live state at the cut is not the source's opening state. A normal start
+                // (no cut) reconstructs the prefix as before, notes included, so a note held
+                // across `sourceStart` is re-established.
                 if let cut, cycle == nil || action.seconds >= cut { regionCursors[action.region] = MidiRegionCursor(copy: region.spec.repeatCount) }
-                else { try beginRegion(action.region, at: region.spec.sourceStart, notes: false) }
+                else { try beginRegion(action.region, at: region.spec.sourceStart, notes: cut == nil) }
             case .end:
                 try sourceSilence(addresses: regionScopes[action.region])
                 for address in regionScopes[action.region] { sourceModel.channels[address]?.notes.removeAll() }

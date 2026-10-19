@@ -4084,6 +4084,8 @@ let test_detail_histories_follow_refresh_and_workspace_owners () =
   let module Fetched = Masc_tui_fetched in
   let state = create_state ~workspace:"history" ~local_base_path:"/workspace/history"
       ~port:0 ~refresh_interval:0. () in
+  state.workspace_identity <- Workspace_identity_match;
+  state.server_identity <- Some (identity state.local_base_path);
   let required = function Some request -> request | None -> Alcotest.fail "detail read did not acquire its owner" in
   let task_id = "task-original" and goal_id = "goal-original" in
   let task_rows status =
@@ -4103,12 +4105,24 @@ let test_detail_histories_follow_refresh_and_workspace_owners () =
   let task_view () = Fetched.view_for ~equal:String.equal state.task_history ~key:task_id in
   let goal_view () = Fetched.view_for ~equal:String.equal state.goal_timeline ~key:goal_id in
   let previous = task_rows "todo" and current = task_rows "in_progress" and repaired = task_rows "done" in
+  let initial = begin_task_history_read state ~task_id |> required in
+  complete_task_history_read state initial (Error "initial history source unavailable");
   let old = begin_task_history_read state ~task_id |> required in
   let owner = begin_task_history_read state ~task_id |> required in
   complete_task_history_read state old (Ok previous);
-  Alcotest.(check bool) "late same-task response cannot settle its successor" true
-    (Fetched.is_current ~equal:String.equal state.task_history owner && task_view () = Fetched.Loading);
-  complete_task_history_read state owner (Ok current);
+  Alcotest.(check bool) "no-value retry retains original failure and rejects the old success" true
+    (Fetched.is_current ~equal:String.equal state.task_history owner
+     && Fetched.in_flight state.task_history && Fetched.value (task_view ()) = None
+     && task_view () = Fetched.Failed "initial history source unavailable");
+  complete_task_history_read state owner (Error "current retry failed");
+  Alcotest.(check bool) "latest no-value failure replaces cause without inventing history" true
+    (not (Fetched.in_flight state.task_history) && task_view () = Fetched.Failed "current retry failed");
+  let recovery = begin_task_history_read state ~task_id |> required in
+  complete_task_history_read state owner (Ok previous);
+  Alcotest.(check bool) "duplicate retired completion cannot settle retry recovery" true
+    (Fetched.is_current ~equal:String.equal state.task_history recovery
+     && task_view () = Fetched.Failed "current retry failed");
+  complete_task_history_read state recovery (Ok current);
   let old_refresh = begin_task_history_read state ~task_id |> required in
   let refresh = begin_task_history_read state ~task_id |> required in
   Alcotest.(check bool) "refresh retains original observed history while pending" true
@@ -4123,8 +4137,18 @@ let test_detail_histories_follow_refresh_and_workspace_owners () =
   complete_task_history_read state retry (Ok repaired);
   Alcotest.(check bool) "current original history resumes after source repair" true
     (task_view () = Fetched.Ready repaired && not (Fetched.in_flight state.task_history));
+  let initial_goal = begin_goal_timeline_read state ~goal_id |> required in
+  complete_goal_timeline_read state initial_goal
+    (Ok (Tui_decode.Goal_timeline_unavailable (Tui_decode.Approval_queue_failure "original goal source unavailable")));
+  let initial_goal_failure = match goal_view () with
+    | Fetched.Failed cause -> cause | _ -> Alcotest.fail "typed unavailable Goal source acquired a successful value" in
   let old_goal = begin_goal_timeline_read state ~goal_id |> required in
   let goal = begin_goal_timeline_read state ~goal_id |> required in
+  complete_goal_timeline_read state old_goal (Error "retired retry failure");
+  Alcotest.(check bool) "Goal no-value retry retains original typed source cause and current owner" true
+    (goal_view () = Fetched.Failed initial_goal_failure && Fetched.value (goal_view ()) = None
+     && Fetched.is_current ~equal:String.equal state.goal_timeline goal
+     && Fetched.in_flight state.goal_timeline);
   let original_goal = goal_rows "original Task is in progress" in
   complete_goal_timeline_read state goal (Ok (Tui_decode.Goal_timeline_ready original_goal));
   complete_goal_timeline_read state old_goal (Error "late retired failure");

@@ -272,6 +272,10 @@ let timeline ~width ~goal_id
     | Masc_tui_fetched.Loading -> [ { tone = Quiet; text = "  loading..." } ]
   in
   let pending =
-    if Masc_tui_fetched.in_flight loaded && Option.is_some (Masc_tui_fetched.value view)
-    then [ { tone = Quiet; text = "  refreshing; previous observation" } ] else [] in
+    if not (Masc_tui_fetched.in_flight loaded) then []
+    else match view with
+      | Masc_tui_fetched.Ready _ | Masc_tui_fetched.Stale _ ->
+          [ { tone = Quiet; text = "  refreshing; previous observation" } ]
+      | Masc_tui_fetched.Failed _ -> [ { tone = Quiet; text = "  retrying; previous failure remains" } ]
+      | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading -> [] in
   ({ tone = Quiet; text = "" } :: header :: (pending @ rows))

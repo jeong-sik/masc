@@ -21,7 +21,10 @@ type 'a view =
           refresh does not throw away what was read; the pane keeps drawing
           it and says it is stale. A retry in flight stays [Stale] until it
           answers. *)
-  | Failed of string  (** Failed with nothing read before it. *)
+  | Failed of string
+      (** Failed with nothing read before it. Explicit refresh retains this
+          known cause until its replacement settles; {!in_flight} distinguishes
+          the pending retry from a settled failure. No value is invented. *)
 
 val value : 'a view -> 'a option
 (** What the pane draws: the value when {!Ready}, and the last good value
@@ -43,19 +46,21 @@ val start : equal:('k -> 'k -> bool) -> ('k, 'a) t -> key:'k -> ('k, 'a) start_r
 val clear : ('k, 'a) t -> ('k, 'a) t
 val refresh : equal:('k -> 'k -> bool) -> ('k, 'a) t -> key:'k -> ('k, 'a) start_result
 (** Explicitly supersede an outstanding request, including for the same key.
-    Retain that key's last good value and refresh failure while its replacement
+    Retain that key's last good value or known no-value failure while its replacement
     runs. Only the returned request may settle the source; {!start} keeps its
     existing same-key sharing behavior. This does not launch any work. *)
 val suspend : ('k, 'a) t -> ('k, 'a) t
 (** Retire a pending read while retaining its key and last completed value.
-    Initial reads become [Failed]; previous values become explicitly [Stale]. *)
+    Initial reads become [Failed]; previous values become explicitly [Stale].
+    A no-value retry retires its owner but keeps its original failure cause. *)
 val request_key : 'k request -> 'k
 val request_id : 'k request -> int64
 (** Diagnostic generation within this fetched source; include its key/scope. *)
 val same_request : equal:('k -> 'k -> bool) -> 'k request -> 'k request -> bool
 val is_current : equal:('k -> 'k -> bool) -> ('k, 'a) t -> 'k request -> bool
 val in_flight : ('k, 'a) t -> bool
-(** A read is pending, including a refresh that still exposes a prior value.
+(** A read is pending, including a refresh that still exposes a prior value
+    or a no-value retry retaining its known failure.
     This observes retrieval, not work execution or effect admission. *)
 
 val complete

@@ -156,8 +156,11 @@ let task_history_lines (state : state) ~width task_id =
     | Masc_tui_fetched.Loading -> [ "    loading..." ]
   in
   let pending =
-    if Masc_tui_fetched.in_flight state.task_history && Option.is_some (Masc_tui_fetched.value view)
-    then [ "    refreshing; previous history" ] else [] in
+    if not (Masc_tui_fetched.in_flight state.task_history) then []
+    else match view with
+      | Masc_tui_fetched.Ready _ | Masc_tui_fetched.Stale _ -> [ "    refreshing; previous history" ]
+      | Masc_tui_fetched.Failed _ -> [ "    retrying; previous failure remains" ]
+      | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading -> [] in
   ("" :: header :: (pending @ rows))
 
 let task_detail_lines (state : state) ~cols (task : Masc_domain.task) =

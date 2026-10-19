@@ -467,6 +467,32 @@ type local_reading =
   ; lr_goals_to_confirm : Masc_tui_agenda.goal_to_confirm Masc_tui_agenda.reading
   }
 
+(* The new reading owns membership/order and every supplemental observation.
+   This request-local immutable index only reuses equal Task values. Ambiguous
+   old IDs supply no reusable payload; they never collapse new source rows. *)
+module Task_payload_ids = Map.Make (String)
+
+let reuse_task_payloads previous tasks =
+  let indexed=List.fold_left (fun indexed (task : Masc_domain.task) ->
+    Task_payload_ids.update task.id (function
+      | None -> Some (Some task)
+      | Some _ -> Some None) indexed) Task_payload_ids.empty previous in
+  List.map (fun (task : Masc_domain.task) ->
+    match Task_payload_ids.find_opt task.id indexed with
+    | Some (Some previous) when previous==task || Masc_domain.equal_task previous task -> previous
+    | Some _ | None -> task) tasks
+
+(* Called after the actual IO read and its cache lock have returned. Cold reads
+   and physically identical lists need no CPU submission. Stabilized lists can
+   differ from the backlog cache's raw list, so a cache hit can still compare. *)
+let prepare_local_workspace (request : local_workspace_request) (reading : local_reading) =
+  match request.lwr_previous_tasks with
+  | [] -> reading
+  | previous when previous==reading.lr_tasks_domain -> reading
+  | previous ->
+    Masc_tui_response_decode.run ~name:"local.work.task_payloads.reuse_wait" (fun () ->
+      {reading with lr_tasks_domain=reuse_task_payloads previous reading.lr_tasks_domain})
+
 type local_keeper_reading =
   { lkr_keepers : keeper list
   ; lkr_error : string option

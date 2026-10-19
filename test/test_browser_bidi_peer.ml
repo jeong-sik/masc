@@ -734,7 +734,7 @@ let test_peer_serves_what_the_lane_table_says () =
       | Trusted_drag -> interact (Drag {from=point;to_={x=0.75;y=0.5};viewport})
       | Tab_activation -> interact Activate_tab
   | Tab_creation -> Page_act (Action.Open_tab "https://example.test/new")) in
-    (* The six names the native host forwards (Browser_host.decode_poll). *)
+    (* The names the native host forwards (Browser_host.decode_poll). *)
     let peer_verb = function
       | "tabs.list" -> Peer.Tabs_list | "page.read" -> Peer.Page_read | "page.scene" -> Peer.Page_scene
       | "page.elements" -> Peer.Page_elements | "page.capture" -> Peer.Page_capture

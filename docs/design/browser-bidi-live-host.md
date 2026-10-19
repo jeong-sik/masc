@@ -624,7 +624,7 @@ for page reads and hover; new tabs share that profile's default user context.
 Existing tabs and protected start pages are left in place. This is an explicit
 request, never an automatic response to a failed start-page read.
 
-A creation refused before dispatch is a pre-effect failure. If the reply is
+A refused creation or a command never written is a pre-effect failure. If the reply is
 lost or navigation fails after creation, the host does not create another tab
 or close the created context. Its error preserves the known created tab ID;
 list the current connections and inspect their tabs before deciding what to do

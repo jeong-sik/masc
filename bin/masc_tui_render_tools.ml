@@ -312,21 +312,21 @@ let async_source_task_lines ~cols state source =
   let content=match Masc_tui_fetched.value body with
     | None -> []
     | Some (detail : Masc.Tui_decode_task_inspection.detail) ->
-      let goals=text Ansi.dim ("  canonical goal: " ^ Option.fold ~none:"없음(기록)" ~some:Fun.id detail.canonical_goal_id)
-        |> List.map snd in
       let warnings=List.concat_map (fun (name,outcome) -> match outcome with
         | Masc_domain.Field_absent | Field_decoded -> []
         | Field_unreadable reason -> text (Theme.warn ()) (" Task " ^ name ^ " 조회 불가: " ^ reason))
         ["handoff",detail.diagnostics.handoff_context_outcome;"reclaim policy",detail.diagnostics.reclaim_policy_outcome] in
-      warnings @ (Masc_tui_task_document.body_lines ~cols ~goal_lines:goals detail.task
-        |> List.concat_map (text (Theme.info ()))) in
+      warnings @ (task_document_lines state ~cols Masc_tui_task_document.Body
+        |> List.map (fun line -> Theme.info (),line)) in
   text Ansi.bold (" 원본 Task · " ^ source.ats_task_id ^ " · r:본문·이력 재조회 · Esc:원본 요청")
   @ text Ansi.dim (Printf.sprintf " 출처 run: %s · 논리 관측 %.3f%s" source.ats_run_id source.ats_observed_at
       (if source.ats_retained then " · 이전 확인 관측에서 열림" else ""))
   @ pending @ errors @ content
-  @ (Masc_tui_task_document.history_lines ~width ~view:history
+  @ (Masc_tui_task_document.history_status_lines ~width ~view:history
        ~in_flight:(Masc_tui_fetched.in_flight state.tools_async_task_history)
       |> List.concat_map (text Ansi.dim))
+  @ (task_document_lines state ~cols Masc_tui_task_document.History
+     |> List.map (fun line -> Ansi.dim,line))
 
 let async_request_observation_lines ~cols state =
   match state.tools_async_detail_open,state.tools_async_selection,state.tools_async_task_source with
@@ -1760,12 +1760,15 @@ let tools_display_lines ?(cols = 80) (state : state) =
     | Some detail -> [Theme.bad (), "Tools read failed: " ^ Terminal_text.single_line detail]
   in
   let width = max 1 (Masc_tui_frame.inner_width ~cols) in
-  tools_selection_document state @ reading_lines @ error_lines @ explanation @ pane_lines
-  |> List.concat_map (fun (style, text) ->
+  let wrap lines = List.concat_map (fun (style, text) ->
        (* Fitted tables and usage cards already own their alignment. Only
           overlong rows need physical wrapping; never render metadata as
           Markdown or shorten its identities to fit the frame. *)
        if Masc_tui_message_layout.display_width text <= width then [style, text]
        else Masc_tui_message_layout.wrap_words ~max_cells:width text
-            |> List.map (fun line -> style, line))
+            |> List.map (fun line -> style, line)) lines in
+  let prefix=tools_selection_document state @ reading_lines @ error_lines @ explanation in
+  if state.tools_pane=Tools_async && state.tools_async_detail_open && Option.is_some state.tools_async_task_source then
+    wrap prefix @ pane_lines
+  else wrap (prefix @ pane_lines)
 ;;

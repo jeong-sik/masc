@@ -216,20 +216,33 @@ include Masc_tui_grapheme_segmentation
    2026-09-30 [take_cells] of a 9-byte row took 0.10 us split and 0.14 us
    kept. The pieces of a kept text stay until [begin_frame] has run twice
    without a layout of it; 1,000 texts of 40 Hangul syllables kept 1.6 MB.
-   Layout runs on the UI fiber, like [row_counts_memo] below, so the tables
-   take no lock. *)
+   The frame cache is domain-local. Pure document preparation uses a private
+   scope so it neither races the UI's tables nor retains task text across jobs.
+   The separate [row_counts_memo] below is still owned by the UI fiber. *)
 (* A sizing hint for one frame's texts, not a bound. *)
 let texts_per_frame = 1024
-let pieces_this_frame : (string, display_piece list) Hashtbl.t ref =
-  ref (Hashtbl.create texts_per_frame)
-let pieces_last_frame : (string, display_piece list) Hashtbl.t ref =
-  ref (Hashtbl.create texts_per_frame)
+type pieces_cache =
+  { mutable pieces_current : (string,display_piece list) Hashtbl.t
+  ; mutable pieces_previous : (string,display_piece list) Hashtbl.t }
+let create_pieces_cache () =
+  {pieces_current=Hashtbl.create texts_per_frame;pieces_previous=Hashtbl.create texts_per_frame}
+let pieces_cache_key = Domain.DLS.new_key (fun () -> None)
+let current_pieces_cache () = match Domain.DLS.get pieces_cache_key with
+  | Some cache -> cache
+  | None ->
+    let cache=create_pieces_cache () in
+    Domain.DLS.set pieces_cache_key (Some cache);cache
+let with_isolated_pieces_cache run =
+  let previous=Domain.DLS.get pieces_cache_key in
+  Domain.DLS.set pieces_cache_key (Some (create_pieces_cache ()));
+  Fun.protect ~finally:(fun () -> Domain.DLS.set pieces_cache_key previous) run
 
 let begin_frame () =
-  let finished = !pieces_this_frame in
-  pieces_this_frame := !pieces_last_frame;
-  Hashtbl.clear !pieces_this_frame;
-  pieces_last_frame := finished
+  let cache=current_pieces_cache () in
+  let finished=cache.pieces_current in
+  cache.pieces_current <- cache.pieces_previous;
+  Hashtbl.clear cache.pieces_current;
+  cache.pieces_previous <- finished
 
 (* Top level, so the scan allocates no closure on each layout. *)
 let rec ascii_from text offset =
@@ -241,15 +254,16 @@ let ascii_text text = ascii_from text 0
 let display_pieces text =
   if ascii_text text then segment_display_pieces text
   else
-    match Hashtbl.find_opt !pieces_this_frame text with
+    let cache=current_pieces_cache () in
+    match Hashtbl.find_opt cache.pieces_current text with
     | Some pieces -> pieces
     | None ->
         let pieces =
-          match Hashtbl.find_opt !pieces_last_frame text with
+          match Hashtbl.find_opt cache.pieces_previous text with
           | Some pieces -> pieces
           | None -> segment_display_pieces text
         in
-        Hashtbl.replace !pieces_this_frame text pieces;
+        Hashtbl.replace cache.pieces_current text pieces;
         pieces
 
 let pieces_width pieces =

@@ -455,6 +455,13 @@ val begin_frame : unit -> unit
     frame did not lay out is split again. The TUI calls it once per frame, a
     frame that draws a picture included. *)
 
+val with_isolated_pieces_cache : (unit -> 'a) -> 'a
+(** Private lifetime for the non-ASCII display-piece cache used by wrapping.
+    Cache storage is domain-local; this scope also restores an existing cache
+    on normal return or exception, including inline preparation on the UI
+    domain. The callback is pure wrapping work and must not yield between
+    fibers. This does not change the separate UI-only chat row-count cache. *)
+
 val display_width : string -> int
 (** Approximate the display cells of a terminal that draws extended grapheme
     clusters as indivisible layout pieces. Renderer-owned ANSI CSI and

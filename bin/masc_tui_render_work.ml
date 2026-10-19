@@ -114,40 +114,20 @@ let task_line ~cols ~ordinal ~task_ids ~use_ordinals (task : task) =
    same scroll. Loaded lazily on detail entry; the id check drops an answer
    for a task the operator already left. Rows are raw event-stream lines, so
    only the fields present are drawn. *)
-let task_history_lines (state : state) ~width task_id =
-  let view=Masc_tui_fetched.view_for ~equal:String.equal state.task_history ~key:task_id in
-  Masc_tui_task_document.history_lines ~width ~view ~in_flight:(Masc_tui_fetched.in_flight state.task_history)
-
 let task_detail_lines (state : state) ~cols (task : Masc_domain.task) =
-  let width = max 1 (framed_inner_width cols - 2) in
-  let labeled_lines label text =
-    let prefix = "  " ^ label ^ ": " in
-    let prefix_width = Message_layout.display_width prefix in
-    if prefix_width < framed_inner_width cols then
-      Masc_tui_text_block.rows ~max_cells:(framed_inner_width cols - prefix_width) text
-      |> List.mapi (fun index line ->
-           (if index = 0 then prefix else String.make prefix_width ' ') ^ line)
-    else
-      (Message_layout.wrap_words ~max_cells:width label
-       |> List.map (fun line -> "  " ^ line))
-      @ (Masc_tui_text_block.rows ~max_cells:width text
-         |> List.map (fun line -> "  " ^ line))
-  in
-  let goal_lines =
-    match task_goal_reading state ~task_id:task.id with
-    | Masc_tui_agenda.Not_read ->
-        labeled_lines "goal" "(membership unknown: links not read)"
-    | Masc_tui_agenda.Read_failed reason ->
-        labeled_lines "goal" ("(membership unknown: " ^ reason ^ ")")
-    | Masc_tui_agenda.Read [] -> labeled_lines "goal" "(not linked to a goal)"
-    | Masc_tui_agenda.Read goal_ids -> List.concat_map (fun goal_id ->
-        labeled_lines "goal" goal_id @ labeled_lines "link" (Link.reference Goal goal_id)) goal_ids
-  in
-  Masc_tui_task_document.body_lines ~cols ~goal_lines task
-  @ (task_history_lines state ~width task.id
-     |> List.concat_map (fun line ->
-          if String.equal line "" then [""]
-          else Masc_tui_text_block.rows ~max_cells:(framed_inner_width cols) line))
+  let width=max 1 (framed_inner_width cols - 2) in
+  let history=Masc_tui_fetched.view_for ~equal:String.equal state.task_history ~key:task.id in
+  let failures=Option.to_list (Option.map (fun detail -> " Task read failed · last observation: " ^ detail) state.tasks_error)
+    @ (match task_goal_reading state ~task_id:task.id with
+      | Masc_tui_agenda.Read_failed detail -> [" Goal links unavailable: " ^ detail]
+      | Not_read | Read _ -> []) in
+  (failures |> List.concat_map (Masc_tui_text_block.rows ~max_cells:(max 1 (framed_inner_width cols))))
+  @ task_document_lines state ~cols Masc_tui_task_document.Body
+  @ (Masc_tui_task_document.history_status_lines ~width ~view:history
+      ~in_flight:(Masc_tui_fetched.in_flight state.task_history)
+     |> List.concat_map (fun line -> if line="" then [""] else
+       Masc_tui_text_block.rows ~max_cells:(max 1 (framed_inner_width cols)) line))
+  @ task_document_lines state ~cols Masc_tui_task_document.History
 
 let task_detail_height ~rows ~count =
   Masc_tui_scroll.content_height ~rows ~chrome:framed_chrome_rows ~count
@@ -156,7 +136,7 @@ let task_detail_height ~rows ~count =
 let task_detail_viewport (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  let pane_cols = if cols < keeper_split_threshold_cols then cols else cols - keeper_roster_pane_cols in
+  let pane_cols = task_document_columns state ~terminal_cols:cols in
   let count = match Task_selection.detail_row ~detail_id:state.task_detail_id ~tasks:state.tasks_domain with
     | None -> 0
     | Some task -> List.length (task_detail_lines state ~cols:pane_cols task)
@@ -233,6 +213,7 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
        ~status:[ Masc_tui_footer.Refresh_interval state.refresh_interval ]
        ~hints:"j/k:scroll  PgUp/PgDn:page  Home/End  x:cancel  Left / Esc:back  r:refresh");
 
+  let offset=if task_documents_pending state then state.task_detail_scroll else offset in
   finish_surface state ~clamped:(Task_detail offset) ~surface_key:"task-detail" ~rows:terminal_rows ~cols buf
 
 let render_work_tasks (state : state) =

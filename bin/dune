@@ -1581,6 +1581,9 @@
  (wrapped false)
  (modules masc_tui_types)
  (libraries
+  masc_tui_task_document
+  masc_tui_text_block
+  masc_tui_frame
   masc_tui_detail_reading
   masc_tui_board_selection
   masc_tui_keeper_config
@@ -1829,7 +1832,7 @@
  (wrapped false)
  (modules masc_tui_task_document)
  (libraries masc masc_types masc_tui_ansi masc_tui_fetched masc_tui_message_layout
-  masc_tui_text_block masc_tui_planning_detail masc_tui_theme))
+  masc_tui_text_block masc_tui_planning_detail masc_tui_theme masc_tui_link))
 
 (library
  (name masc_tui_render_tools)

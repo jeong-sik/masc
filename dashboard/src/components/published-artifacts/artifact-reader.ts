@@ -4,7 +4,6 @@ import { artifactHref, type ArtifactDocument } from '../../api/published-artifac
 import { Markdown } from '../common/markdown'
 import { navigate } from '../../router'
 import { copyToClipboard } from '../common/copyable-code'
-import { showToast } from '../common/toast'
 
 // Opaque origin: no allow-same-origin. Keep the CSP first so the body cannot
 // load subresources before the policy applies. Scripts support self-contained
@@ -33,6 +32,7 @@ export function ArtifactReader({ doc, fixedRevision, onClose }: {
 }) {
   const dialog = useRef<HTMLDialogElement>(null)
   const [view, setView] = useState<'rendered' | 'source'>('rendered')
+  const [copyFeedback, setCopyFeedback] = useState('')
   const { artifact, content, revisions } = doc
   useLayoutEffect(() => {
     const element = dialog.current!
@@ -45,8 +45,8 @@ export function ArtifactReader({ doc, fixedRevision, onClose }: {
   })
   const copyLink = async () => {
     const href = artifactHref(artifact.id, fixedRevision ? artifact.revision : undefined)
-    const success = await copyToClipboard(new URL(href, window.location.href).href)
-    showToast(success ? '문서 링크를 복사했습니다.' : '링크를 복사하지 못했습니다.', success ? 'success' : 'error')
+    const success = await copyToClipboard(new URL(href, window.location.href).href, dialog.current ?? undefined)
+    setCopyFeedback(success ? '문서 링크를 복사했습니다.' : '링크를 복사하지 못했습니다.')
   }
   return html`
     <dialog ref=${dialog} aria-labelledby="artifact-reader-title"
@@ -80,6 +80,7 @@ export function ArtifactReader({ doc, fixedRevision, onClose }: {
             </select>
           </label>
         </div>
+        <p role="status" class="m-0 text-xs">${copyFeedback}</p>
         <details class="text-xs text-[var(--color-fg-secondary)]">
           <summary class="cursor-pointer">보고서 정보</summary>
           <p class="my-2">${artifact.summary}</p>

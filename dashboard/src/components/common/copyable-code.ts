@@ -60,7 +60,7 @@ export function summarizeCopyableCode({
   }
 }
 
-export async function copyToClipboard(text: string): Promise<boolean> {
+export async function copyToClipboard(text: string, container?: HTMLElement): Promise<boolean> {
   if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
     try {
       await navigator.clipboard.writeText(text)
@@ -75,7 +75,10 @@ export async function copyToClipboard(text: string): Promise<boolean> {
   ta.setAttribute('readonly', '')
   ta.style.position = 'absolute'
   ta.style.left = '-9999px'
-  document.body.appendChild(ta)
+  // Native modal dialogs make the rest of the document inert. A caller in
+  // a dialog keeps the fallback selection inside that active dialog.
+  const parent = container ?? document.body
+  parent.appendChild(ta)
   ta.select()
   let ok = false
   try {
@@ -83,7 +86,7 @@ export async function copyToClipboard(text: string): Promise<boolean> {
   } catch {
     ok = false
   }
-  document.body.removeChild(ta)
+  parent.removeChild(ta)
   return ok
 }
 

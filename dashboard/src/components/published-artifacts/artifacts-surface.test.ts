@@ -1,9 +1,10 @@
 import { html } from 'htm/preact'
-import { render, fireEvent, cleanup, waitFor } from '@testing-library/preact'
+import { render, fireEvent, cleanup, waitFor, within } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { get } from '../../api/core'
 import { route, navigate } from '../../router'
 import { ArtifactsSurface } from './artifacts-surface'
+import { copyToClipboard } from '../common/copyable-code'
 
 vi.mock('../../router', async () => {
   const { signal } = await import('@preact/signals')
@@ -19,6 +20,7 @@ vi.mock('../../api/token-revision', async () => {
   return { storedTokenRevision: signal(0) }
 })
 vi.mock('../common/markdown', () => ({ Markdown: ({ text }: { text: string }) => html`<div data-markdown>${text}</div>` }))
+vi.mock('../common/copyable-code', () => ({ copyToClipboard: vi.fn() }))
 
 const firstId = `artifact-${'a'.repeat(32)}`
 const secondId = `artifact-${'b'.repeat(32)}`
@@ -31,6 +33,7 @@ const document = { artifact: first, content: '# 보고서\r\n한글과 😀', re
 
 beforeEach(() => {
   vi.clearAllMocks()
+  vi.mocked(copyToClipboard).mockResolvedValue(true)
   route.value = { tab: 'workspace', params: { section: 'artifacts' }, postId: null }
   vi.mocked(get).mockImplementation(async path => {
     if (path === '/api/v1/published-artifacts') return { artifacts: [first, second], diagnostics: [] }
@@ -81,6 +84,25 @@ describe('artifact library user flow', () => {
     expect(frame.getAttribute('srcdoc')).toContain("connect-src 'none'")
     expect(frame.getAttribute('srcdoc')).toContain('<button onclick=')
     expect(frame.getAttribute('referrerpolicy')).toBe('no-referrer')
+  })
+
+  it('shows copy success inside the reader and copies the selected version link', async () => {
+    route.value = { tab: 'workspace', params: { section: 'artifacts', artifact: firstId, revision: '1' }, postId: null }
+    const view = render(html`<${ArtifactsSurface} />`)
+    const dialog = within(await view.findByRole('dialog'))
+    fireEvent.click(dialog.getByRole('button', { name: '링크 복사' }))
+    await waitFor(() => expect(dialog.getByRole('status').textContent).toBe('문서 링크를 복사했습니다.'))
+    expect(vi.mocked(copyToClipboard).mock.calls[0]?.[0]).toContain(`artifact=${firstId}&revision=1`)
+    expect(vi.mocked(copyToClipboard).mock.calls[0]?.[1]).toBe(view.getByRole('dialog'))
+  })
+
+  it('shows clipboard failure inside the reader', async () => {
+    vi.mocked(copyToClipboard).mockResolvedValue(false)
+    route.value = { tab: 'workspace', params: { section: 'artifacts', artifact: firstId }, postId: null }
+    const view = render(html`<${ArtifactsSurface} />`)
+    const dialog = within(await view.findByRole('dialog'))
+    fireEvent.click(dialog.getByRole('button', { name: '링크 복사' }))
+    await waitFor(() => expect(dialog.getByRole('status').textContent).toBe('링크를 복사하지 못했습니다.'))
   })
 
   it('keeps loading, empty and inaccessible catalogs distinct', async () => {

@@ -13,6 +13,7 @@ type directive_argument =
   | Artist_text
   | Section_text
   | Key_signature_name
+  | Clef_name
   | Instrument_name
   | Tempo_number
   | Time_signature_numbers
@@ -37,7 +38,9 @@ type failure =
   | Instrument_without_tuning
   | Instrument_after_music
   | Invalid_key_signature of string
+  | Invalid_clef of string
   | Key_signature_after_note
+  | Clef_after_note
   | Section_after_note
   | Quoted_without_metadata
   | Duration_outside_subset of string
@@ -134,6 +137,7 @@ let failure_text = function
   | Missing_argument Artist_text -> "\\artist expects a quoted string"
   | Missing_argument Section_text -> "\\section expects a quoted string"
   | Missing_argument Key_signature_name -> "\\ks expects a key signature"
+  | Missing_argument Clef_name -> "\\clef expects a clef name"
   | Missing_argument Instrument_name -> "\\instrument expects a guitar or bass program or name"
   | Missing_argument Tempo_number -> "\\tempo expects a number"
   | Missing_argument Time_signature_numbers -> "\\ts expects two numbers"
@@ -156,7 +160,10 @@ let failure_text = function
   | Instrument_after_music -> "an \\instrument after the first note cannot be drawn"
   | Invalid_key_signature name ->
       Printf.sprintf "\"%s\" is not a key signature" (quoted name)
+  | Invalid_clef name ->
+      Printf.sprintf "\"%s\" is not a clef" (quoted name)
   | Key_signature_after_note -> "\\ks requires a bar line before it after notes"
+  | Clef_after_note -> "\\clef requires a bar line before it after notes"
   | Section_after_note -> "\\section requires a bar line before it after notes"
   | Quoted_without_metadata -> "a quoted string with no metadata directive before it"
   | Duration_outside_subset what ->
@@ -213,6 +220,7 @@ type directive =
   | Staff
   | Instrument
   | Key_signature
+  | Clef
   | Section
   | Tempo
   | Time_signature
@@ -237,6 +245,7 @@ let directive_of_word = function
   | "staff" -> Some Staff
   | "instrument" -> Some Instrument
   | "ks" -> Some Key_signature
+  | "clef" -> Some Clef
   | "section" -> Some Section
   | "tempo" -> Some Tempo
   | "ts" -> Some Time_signature
@@ -715,6 +724,15 @@ let valid_key_signature name =
   | "g#minor" | "d#minor" | "a#minor" -> true
   | _ -> false
 
+(* A clef, too, changes standard notation, not the string/fret coordinates of
+   tablature. Validate alphaTab's finite clef vocabulary before leaving that
+   presentation metadata out of this projection. *)
+let valid_clef name =
+  match String.lowercase_ascii name with
+  | "neutral" | "n" | "c3" | "alto" | "c4" | "tenor"
+  | "f4" | "bass" | "g2" | "treble" -> true
+  | _ -> false
+
 (* General MIDI programs 24--39 are guitars and basses. Their timbres do not
    alter explicit fret coordinates, but their default string sets differ, so
    accepting one below also requires an explicit tuning before any beat. *)
@@ -1000,6 +1018,16 @@ let read source =
          | []
          | (Tk_directive _ | Tk_unknown_directive _ | Tk_quoted _ | Tk_effect _ | Tk_chord _ | Tk_bar) :: _ ->
              Error (Missing_argument Key_signature_name))
+    | Tk_directive Clef :: rest ->
+        if not (List.is_empty state.b_beats) then Error Clef_after_note
+        else
+        (match rest with
+         | Tk_word name :: after ->
+             if valid_clef name then step state after
+             else Error (Invalid_clef name)
+         | []
+         | (Tk_directive _ | Tk_unknown_directive _ | Tk_quoted _ | Tk_effect _ | Tk_chord _ | Tk_bar) :: _ ->
+             Error (Missing_argument Clef_name))
     | Tk_directive Track :: rest ->
         if state.b_track_declared || state.b_staff_declared || started state then
           Error Additional_track

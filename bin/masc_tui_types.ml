@@ -5723,6 +5723,7 @@ module Browser_lane_view = struct
     | Trusted_drag -> "drag"
     | Trusted_double_click -> "double click"
     | Trusted_keyboard -> "native keys"
+    | Browser_zoom -> "browser zoom"
     | Tab_activation -> "tab switch"
     | Tab_creation -> "new tab"
   (* What a live connection of this transport leaves out, read from the lane's
@@ -7091,7 +7092,7 @@ module Browser_lane_view = struct
                                           { action =
                                               Browser_lane.(
                                                 Activate_tab | Click _ | Fill _
-                                                | Double_click _ | Double_click_at _
+                                                | Set_zoom _ | Double_click _ | Double_click_at _
                                                 | Type_text _ | Press_key _
                                                 | Hover _ | Drag_to _
                                                 | Scroll _ | Hover_at _

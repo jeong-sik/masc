@@ -567,6 +567,16 @@ let test_act_that_did_not_succeed () =
      | Lane.Lane_absent | Lane.Timed_out | Lane.Refused _ | Lane.Rejected_before_effect _ -> false)
 ;;
 
+let test_zoom_requires_extension () =
+  let tabs=Executor.Tabs.create () and fake=fake [shop ()] ~active:(Some "P2") in
+  ignore (listed tabs fake);fake.sent<-[];
+  check bool "owned Chrome refuses browser zoom before native input" true
+    (rejected_before_effect (Executor.execute ~tabs ~call:(call fake)
+      (Lane.Page_interact {tab_id=0;expected_url=Some "http://127.0.0.1:1/shop";
+        action=Lane.Set_zoom {factor=1.5}})));
+  check int "unsupported zoom sends no runtime request" 0 (List.length fake.sent)
+;;
+
 let test_unserved_verbs () =
   let tabs = Executor.Tabs.create () and fake = fake [ blank ] ~active:None in
   List.iter
@@ -674,7 +684,8 @@ let () =
       test_case "observed targets resolve into native hover and drag" `Quick test_semantic_pointer_input;
       test_case "hover failure boundaries never replay input" `Quick test_hover_effect_boundary;
       test_case "attributed feedback cannot alter authoritative input" `Quick test_actor_feedback_outcomes ];
-    "refusals", [ test_case "an unserved verb sends nothing" `Quick test_unserved_verbs ];
+    "refusals", [ test_case "browser zoom requires extension" `Quick test_zoom_requires_extension;
+      test_case "an unserved verb sends nothing" `Quick test_unserved_verbs ];
     "evaluate", [
       test_case "the expression calls its body" `Quick test_evaluate_expression;
       test_case "a page script's throw keeps its reason" `Quick test_script_throw_keeps_its_reason;

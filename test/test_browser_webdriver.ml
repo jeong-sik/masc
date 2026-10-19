@@ -76,6 +76,15 @@ let test_session_observer_unknown_outcome () = Eio_main.run (fun _ ->
   closing_fails:=false;
   ignore (Driver.execute driver Lane.Session_close);
   check bool "confirmed deletion settles closed" true (!observe ()=Lane.Browser_closed))
+let test_zoom_requires_extension () = Eio_main.run (fun _ ->
+  let calls=ref 0 in
+  let request ~method_:_ ~path:_ ~body:_ = incr calls;Error (Driver.Transport "must not dispatch") in
+  let driver=Driver.create ~start_downloads ~request () in
+  (match Driver.execute driver (Lane.Page_interact {tab_id=7;expected_url=Some "https://example.org";
+      action=Lane.Set_zoom {factor=1.5}}) with
+   | Lane.Rejected_before_effect _ -> ()
+   | Lane.Answered _ | Lane.Lane_absent | Lane.Timed_out | Lane.Refused _ -> fail "unsupported zoom must be pre-effect");
+  check int "unsupported browser zoom performs no driver call" 0 !calls)
 let test_backend_failure () =
   match Driver.decode_response ~status:404
     {|{"value":{"error":"no such window","message":"tab closed"}}|} with
@@ -657,6 +666,7 @@ let test_remote_error_is_a_closed_sum () =
     | _ -> fail "status must answer after the session was lost")
 
 let () = run "native Firefox lane" ["behavior", [
+  test_case "browser zoom is refused without driver input" `Quick test_zoom_requires_extension;
   test_case "native keyboard and double click guarded release" `Quick test_native_keyboard_and_double_click;
   test_case "optional document never selects or blocks owner" `Quick test_optional_document_never_selects_or_blocks_owner;
   test_case "download setup failure rolls back session" `Quick test_download_setup_rollback;

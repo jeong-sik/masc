@@ -4,7 +4,7 @@ type request = { route : Browser_selection.preference; tab_id : int;
 let ( let* ) = Result.bind
 let parse = function
   | `Assoc fields ->
-    let allowed = ["lane"; "clientId"; "tabId"; "expectedUrl"; "action"; "selector"; "text"; "x"; "y"; "documentId"; "nodeId"; "point"; "from"; "to"; "viewport"; "source"; "destination"; "via"; "durationMs"; "key"; "modifiers"] in
+    let allowed = ["lane"; "clientId"; "tabId"; "expectedUrl"; "action"; "selector"; "text"; "x"; "y"; "documentId"; "nodeId"; "point"; "from"; "to"; "viewport"; "source"; "destination"; "via"; "durationMs"; "key"; "modifiers"; "factor"] in
     let* () = if List.for_all (fun (key, _) -> List.mem key allowed) fields
       && List.length fields = List.length (List.sort_uniq String.compare (List.map fst fields))
       then Ok () else Error "unknown or duplicate browser interaction argument" in
@@ -40,6 +40,9 @@ let parse = function
          | _ -> Error "pointer target requires selector or documentId/nodeId")
       | _ -> Error "pointer target requires selector or documentId/nodeId" in
     let excludes keys =
+      let keys = match List.assoc_opt "action" fields with
+        | Some (`String "set_zoom") -> keys
+        | _ -> "factor" :: keys in
       let keys = (match List.assoc_opt "action" fields with
         | Some (`String "press_key") -> keys
         | _ -> "key" :: "modifiers" :: keys) in
@@ -70,6 +73,16 @@ let parse = function
         | Some _ -> Error "durationMs must be a nonnegative JavaScript-safe integer" in
       Ok (via,duration_ms) in
     let* action = match List.assoc_opt "action" fields with
+      | Some (`String "set_zoom") ->
+        let* () = excludes ["selector";"text";"documentId";"nodeId";"x";"y";"point";"from";"to";"viewport"] in
+        let* () = match expected_url with Some _ -> Ok () | None -> Error "set_zoom requires expectedUrl" in
+        let* factor = match List.assoc_opt "factor" fields with
+          | Some (`Int value) -> Ok (float_of_int value)
+          | Some (`Float value) when Float.is_finite value -> Ok value
+          | Some _ | None -> Error "set_zoom requires a finite factor" in
+        let* () = if factor >= 0.3 && factor <= 5. then Ok ()
+          else Error "set_zoom factor must be between 0.3 and 5" in
+        Ok (Browser_lane.Set_zoom {factor})
       | Some (`String ("type_text" | "press_key" as action)) ->
         let* () = excludes (["selector";"nodeId";"x";"y";"point";"from";"to";"viewport"] @
           if action = "press_key" then ["text"] else []) in
@@ -172,7 +185,7 @@ let parse = function
           let* to_ = geometry Browser_lane.Pointer.point_of_json "to" in
           let* via,duration_ms = drag_options () in
           Ok (Browser_lane.Drag {from;to_;viewport;via;duration_ms})
-      | _ -> Error "action must be activate_tab, click, double_click, double_click_at, type_text, press_key, follow_link, fill, scroll, click_at, scroll_at, hover, hover_at, drag or drag_to" in
+      | _ -> Error "action must be set_zoom, activate_tab, click, double_click, double_click_at, type_text, press_key, follow_link, fill, scroll, click_at, scroll_at, hover, hover_at, drag or drag_to" in
     Ok { route = base.route; tab_id; expected_url; action }
   | _ -> Error "browser interaction arguments must be an object"
 
@@ -542,7 +555,7 @@ let resolve_pointer_action action = function
      | Browser_lane.Drag_to {via;duration_ms;_} -> let* from = point "from" in let* to_ = point "to" in
        Ok (Browser_lane.Drag {from;to_;viewport;via;duration_ms})
      | Browser_lane.Activate_tab | Browser_lane.Fill _
-     | Browser_lane.Double_click_at _ | Browser_lane.Type_text _ | Browser_lane.Press_key _
+     | Browser_lane.Set_zoom _ | Browser_lane.Double_click_at _ | Browser_lane.Type_text _ | Browser_lane.Press_key _
      | Browser_lane.Scroll _ | Browser_lane.Hover_at _ | Browser_lane.Click_at _
      | Browser_lane.Scroll_at _ | Browser_lane.Drag _ | Browser_lane.Follow_link _
      | Browser_lane.Fill_node _ -> Error "semantic pointer action required")

@@ -811,6 +811,7 @@ let test_peer_serves_what_the_lane_table_says () =
       | Trusted_drag -> interact (Drag {from=point;to_={x=0.75;y=0.5};viewport;via=[];duration_ms=0})
       | Trusted_double_click -> interact (Double_click_at {point;viewport})
       | Trusted_keyboard -> interact (Type_text {document_id=viewport.document_id;text="hello"})
+      | Browser_zoom -> interact (Set_zoom {factor=1.5})
       | Tab_activation -> interact Activate_tab
   | Tab_creation -> Page_act (Action.Open_tab "https://example.test/new")) in
     (* The names the native host forwards (Browser_host.decode_poll). *)

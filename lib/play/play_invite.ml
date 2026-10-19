@@ -80,6 +80,60 @@ let is_valid_reg_name_char c =
   || (c >= 'A' && c <= 'Z')
   || String.contains "-._~!$&'()*+,;=" c
 
+(* WHATWG special hosts ending in a number are IPv4, including shortened,
+   octal and hexadecimal forms. A generic URI reg-name check does not perform
+   these range checks: https://url.spec.whatwg.org/#concept-ipv4-parser . *)
+let ipv4_number raw =
+  let len = String.length raw in
+  let radix, offset =
+    if len >= 2 && Char.equal raw.[0] '0' then
+      if Char.equal raw.[1] 'x' || Char.equal raw.[1] 'X' then 16, 2
+      else 8, 1
+    else 10, 0
+  in
+  let rec parse i value =
+    if i = len then Some value
+    else
+      let digit = match raw.[i] with
+        | '0' .. '9' as c -> Char.code c - Char.code '0'
+        | 'a' .. 'f' as c -> Char.code c - Char.code 'a' + 10
+        | 'A' .. 'F' as c -> Char.code c - Char.code 'A' + 10
+        | _ -> radix
+      in
+      (* The IPv4 address space is 32 bits; reject before multiplication can
+         overflow, even if the input has arbitrarily many digits. *)
+      if digit >= radix || value > (0xffff_ffff - digit) / radix then None
+      else parse (i + 1) (value * radix + digit)
+  in
+  if len = 0 then None else parse offset 0
+
+let is_valid_numeric_host host =
+  let parts = String.split_on_char '.' host in
+  let reversed = match List.rev parts with
+    | "" :: (_ :: _ as rest) -> rest
+    | rest -> rest
+  in
+  match reversed with
+  | [] -> false
+  | last :: preceding ->
+    let ends_in_number =
+      (last <> "" && String.for_all (function '0' .. '9' -> true | _ -> false) last)
+      || (String.length last >= 2 && Char.equal last.[0] '0'
+          && (Char.equal last.[1] 'x' || Char.equal last.[1] 'X')
+          && String.for_all (function '0' .. '9' | 'a' .. 'f' | 'A' .. 'F' -> true | _ -> false)
+               (String.sub last 2 (String.length last - 2)))
+    in
+    if not ends_in_number then true
+    else
+      let count = List.length reversed in
+      count <= 4
+      && List.for_all (fun part -> match ipv4_number part with
+          | Some number -> number <= 255
+          | None -> false) preceding
+      && (match ipv4_number last with
+          | Some number -> number < (1 lsl (8 * (5 - count)))
+          | None -> false)
+
 let is_valid_authority authority =
   let len = String.length authority in
   if len = 0 then false
@@ -99,6 +153,7 @@ let is_valid_authority authority =
     in
     host <> ""
     && String.for_all is_valid_reg_name_char host
+    && is_valid_numeric_host host
     && is_valid_port_suffix suffix
 
 let is_http_public_base_url base =

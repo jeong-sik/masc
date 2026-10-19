@@ -24,7 +24,7 @@ export function validateCaptureManifest(manifest) {
   if ((BigInt(manifest.audioFrames) > 0n) !== (clock.firstAudioHostTime !== null)) throw new Error('Captured audio origin disagrees with frame total')
   return manifest
 }
-export function validateCapturedSource(asset) {
+export function validateCapturedSourceParts(asset) {
   if (asset?.kind !== 'capture' || !asset.parts || Object.keys(asset.parts).length !== Object.keys(capturePartNames).length) throw new Error('Invalid captured source parts')
   for (const role of Object.keys(capturePartNames)) {
     const part = asset.parts[role]
@@ -33,6 +33,10 @@ export function validateCapturedSource(asset) {
         || part.file !== `assets/${part.sha256}.${suffix}`) throw new Error('Invalid captured source identity/path')
   }
   validateCaptureManifest(asset.manifest)
+  return asset
+}
+export function validateCapturedSource(asset) {
+  validateCapturedSourceParts(asset)
   captureRange(asset)
   return asset
 }

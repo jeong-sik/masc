@@ -14,6 +14,8 @@ import { arrangementSchedule, editArrangement } from '../arrangement.mjs'
 import { arrangementPlaybackRequest, prepareArrangementWave, prepareArrangementMidi, prepareArrangementMixed } from '../arrangement-playback.mjs'
 import { Worker } from 'node:worker_threads'
 import { once } from 'node:events'
+import { loadProject } from '../sequencer-files.mjs'
+import { createHash } from 'node:crypto'
 
 async function fixture(run) {
   const root = await mkdtemp(join(tmpdir(), 'masc-captured-source-')), input = join(root, 'Original take')
@@ -161,6 +163,49 @@ test('capture timing provenance is verified against raw source packets on reopen
   await assert.rejects(prepareArrangementCapture(wrong, 'asset-1', { sourceRoot: dirname(path), directory: root }), /clock provenance/)
   const invalid = structuredClone(project); invalid.assets[0].midiTime.first = '-1'
   assert.throws(() => arrangementEditor(invalid), /first MIDI time/)
+}))
+
+for (const midi of [true, false]) test(`legacy schema-1 ${midi ? 'MIDI' : 'WAV-only'} captures reopen with verified timing and retain their original revision`, async () => fixture(async ({ root, input, manifest }) => {
+  if (!midi) {
+    await writeFile(join(input, 'session.json'), JSON.stringify({ ...manifest, midiPacketCount: '0', midiSources: [] }))
+    await writeFile(join(input, 'midi.ump.jsonl'), '')
+  }
+  const path = join(root, 'project', 'song.json')
+  const { project } = await importArrangementCapture(newArrangement(), input, { projectPath: path })
+  const legacy = structuredClone(project); delete legacy.assets[0].midiTime
+  const original = JSON.stringify(legacy, null, 2) + '\n'
+  await writeFile(path, original)
+  await rm(input, { recursive: true })
+  const loaded = await loadArrangement(path), routed = await loadProject(path)
+  assert.deepEqual(loaded.project, project); assert.deepEqual(routed, loaded)
+  assert.equal(loaded.revision, createHash('sha256').update(original).digest('hex'))
+  assert.equal(await readFile(path, 'utf8'), original)
+  const copy = join(root, 'copy', 'song.json')
+  await saveArrangement(copy, loaded.project, null, { sourceRoot: dirname(path) })
+  assert.deepEqual((await loadArrangement(copy)).project, project)
+  await saveArrangement(path, loaded.project, loaded.revision)
+  assert.deepEqual(JSON.parse(await readFile(path, 'utf8')), project)
+}))
+
+test('legacy capture upgrade rejects changed bytes, forged provenance, unsafe paths and present invalid timing', async () => fixture(async ({ root, input }) => {
+  const path = join(root, 'project', 'song.json')
+  const { project } = await importArrangementCapture(newArrangement(), input, { projectPath: path })
+  const legacy = structuredClone(project); delete legacy.assets[0].midiTime
+  const forged = structuredClone(legacy); forged.assets[0].manifest.input.name = 'Forged input'
+  await writeFile(path, JSON.stringify(forged))
+  await assert.rejects(loadArrangement(path), /clock provenance/)
+  const unsafe = structuredClone(legacy); unsafe.assets[0].parts.midi.file = '../outside.capture'
+  await writeFile(path, JSON.stringify(unsafe))
+  await assert.rejects(loadProject(path), /identity\/path/)
+  const invalid = structuredClone(legacy); invalid.assets[0].midiTime = null
+  await writeFile(path, JSON.stringify(invalid))
+  await assert.rejects(loadProject(path), /MIDI time bounds/)
+  await writeFile(path, JSON.stringify(legacy))
+  const controller = new AbortController(); controller.abort()
+  await assert.rejects(loadArrangement(path, { signal: controller.signal }), { name: 'AbortError' })
+  const changed = join(dirname(path), legacy.assets[0].parts.midi.file)
+  await chmod(changed, 0o600); await writeFile(changed, '{}\n')
+  await assert.rejects(loadArrangement(path), /content changed/)
 }))
 
 test('every arrangement playback entrypoint diagnoses audible capture regions instead of silently filtering them', async () => fixture(async ({ root, input }) => {

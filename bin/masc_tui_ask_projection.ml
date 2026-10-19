@@ -194,7 +194,7 @@ let followup_to_json reading =
            "latest_physical_execution_id", `String action.ata_physical_execution_id;
            "latest_trace_id", `String action.ata_trace_id;
            "latest_keeper_turn_id", `Int action.ata_keeper_turn_id;
-           "latest_outcome", `String (Masc.Tool_result.recorded_call_outcome_to_string action.ata_outcome);
+           "latest_outcome", `String (Tool_result.recorded_call_outcome_to_string action.ata_outcome);
            "latest_tool_result_recorded_at", `Float action.ata_recorded_at])) in
   let task = function
     | Decode.Ask_task_unlinked -> `Assoc ["state", `String "unlinked"]

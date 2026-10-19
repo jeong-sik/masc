@@ -1,0 +1,47 @@
+{
+  "scope": "OCaml 5.5.1 typing and warning checks using existing compiled dependency interfaces; no Dune rebuild, linking, test execution or binary install",
+  "include_directories": 763,
+  "results": [
+    {
+      "stage": "before",
+      "file": "bin/masc_tui_ask_projection.ml",
+      "exit_code": 2,
+      "diagnostics": "File \"masc_tui_ask_projection.ml\", line 197, characters 38-54:\n197 |            \"latest_outcome\", `String (Masc.Tool_result.recorded_call_outcome_to_string action.ata_outcome);\n                                            ^^^^^^^^^^^^^^^^\nError: Unbound module Masc.Tool_result\n"
+    },
+    {
+      "stage": "after",
+      "file": "bin/masc_tui_ask_projection.ml",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "stage": "before",
+      "file": "bin/masc_tui_preparation_details.ml",
+      "exit_code": 2,
+      "diagnostics": "File \"masc_tui_preparation_details.ml\", lines 179-183, characters 25-51:\n179 | .........................match state.cached with\n180 |     | Some (target, Ok snapshot) when String.equal keeper_name target.keeper_name ->\n181 |       None, Some (target,snapshot)\n182 |     | Some (target, Error _) when String.equal keeper_name target.keeper_name -> None, state.retained\n183 |     | Some _ | None -> state.cached, state.retained...\nError (warning 4 [fragile-match]): this pattern-matching is fragile.\n  It will remain exhaustive when constructors are added to type Stdlib.result.\n\nFile \"masc_tui_preparation_details.ml\", lines 208-213, characters 2-27:\n208 | ..match state.cached with\n209 |   | Some (cached, Ok snapshot) when equal cached target -> Some snapshot\n210 |   | Some _ | None ->\n211 |     match state.retained with\n212 |     | Some (cached, snapshot) when equal cached target -> Some snapshot\n213 |     | Some _ | None -> None\nError (warning 4 [fragile-match]): this pattern-matching is fragile.\n  It will remain exhaustive when constructors are added to type Stdlib.result.\n"
+    },
+    {
+      "stage": "after",
+      "file": "bin/masc_tui_preparation_details.ml",
+      "exit_code": 0,
+      "diagnostics": ""
+    }
+  ],
+  "source_sha256": {
+    "bin/dune": "35a0de081ae5248f09d1ddba195fda678d6634774843b8e85348a7a9ed1c7df6",
+    "bin/masc_tui_ask_projection.ml": "b686d47898755d691c5005534361b8fcac744f1e5838d66742af4c4129c4781b",
+    "bin/masc_tui_preparation_details.ml": "1fc5acd6a6bb49b7b6438b10b2781d970ef8a55b69696f9a38534192eadda9f8",
+    "test/stanzas/test_tui_ask_projection.inc": "92fe3c186d29eecb8c96e24297d843d071098c7b656e3138f219f5bcd51faacd"
+  },
+  "command": "ocamlc -w +4+32+69 -warn-error +a <existing dependency -I directories> -I <temporary interface directory> -stop-after typing -c <source.ml>",
+  "interface_basis": "Source .mli bytes equal existing build-tree .mli bytes; corresponding compiled .cmi copied to a temporary directory for the check.",
+  "independent_source_review": "tui_build_source_review subagent: no P0/P1/P2 findings in final four-file diff; not a GitHub approval",
+  "not_run": [
+    "Dune rebuild",
+    "executable linking",
+    "Alcotest execution",
+    "CI",
+    "binary install",
+    "visible TUI runtime"
+  ]
+}

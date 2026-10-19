@@ -411,7 +411,7 @@
  (name masc_tui_ask_projection)
  (wrapped false)
  (modules masc_tui_ask_projection)
- (libraries masc masc.masc_types yojson))
+ (libraries masc masc.masc_types masc.tool_types yojson))
 
 (library
  (name masc_tui_ask_layout)

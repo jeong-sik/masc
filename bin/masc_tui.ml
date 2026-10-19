@@ -13036,6 +13036,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.code_blame <- Masc_tui_fetched.clear state.code_blame;
   state.code_memos <- [];
   state.code_jump_back <- [];
+  state.code_return <- None;
   state.code_history_open <- false;
   state.code_history_expanded <- None;
   state.code_diff_open <- false;
@@ -23518,12 +23519,17 @@ and is loaded on demand through keeper_skill.
         || input_reader_has_ready_input input_reader
         || input_holds_incomplete_sequence input_reader
         || match paste_phase input_reader with No_paste -> false | Pasting _ | Draining_tail _ -> true);
-      if Code_results.take_ready_found_file state ~input_pending:(
-          Option.is_some interrupted_paste
-          || input_reader_has_ready_input input_reader
-          || input_holds_incomplete_sequence input_reader
-          || match paste_phase input_reader with No_paste -> false | Pasting _ | Draining_tail _ -> true)
-      then begin
+      let code_navigation_input_pending =
+        Option.is_some interrupted_paste
+        || input_reader_has_ready_input input_reader
+        || input_holds_incomplete_sequence input_reader
+        || match paste_phase input_reader with No_paste -> false | Pasting _ | Draining_tail _ -> true
+      in
+      let found_file = Code_results.take_ready_found_file state
+          ~input_pending:code_navigation_input_pending in
+      let returned_file = Code_results.take_ready_return_file state
+          ~input_pending:code_navigation_input_pending in
+      if found_file || returned_file then begin
         Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host
           ~deliver:(workspace_enqueue state async_messages);
         Render_schedule.request render_schedule Render_schedule.Background
@@ -23594,6 +23600,14 @@ and is loaded on demand through keeper_skill.
           Option.iter (observe_input_received input_reader) input;
           input
       in
+      (* A queued action retires a deferred return before any handler changes
+         its reading. Repeated B shares its pending request; protocol replies
+         and idle cadence are observations rather than operator actions. *)
+      (match input with
+       | Some (Key "B") when state.view = Code -> ()
+       | Some (Key _ | Pasted _ | Mouse_left_press _ | Mouse_left_release _ | Mouse_wheel _) ->
+           state.code_return <- None
+       | Some (Graphics_reply _) | None -> ());
       let input =
         if recovered_paste_send_locked state then
           match input with
@@ -28594,42 +28608,8 @@ and is loaded on demand through keeper_skill.
            Masc_tui_code_requests.launch_file_finder state ~host:server_peer_host
              ~deliver:(workspace_enqueue state async_messages)
        | Some "B" when state.view = Code ->
-           (* Walk back through the definition jumps, newest first. The
-              stack holds where each jump left from; an empty stack says so
-              instead of moving. *)
-           (match state.code_jump_back with
-            | [] -> report_action state "system" "no jump to walk back from"
-            | (scope, dir, file, cursor, scroll) :: rest ->
-                state.code_jump_back <- rest;
-                let scope_changed = state.code_scope <> scope in
-                set_code_scope state scope;
-                let dir_changed = not (String.equal state.code_dir dir) in
-                state.code_dir <- dir;
-                if scope_changed || dir_changed then begin
-                  state.code_cursor <- 0;
-                  state.code_listing <- Masc_tui_fetched.clear state.code_listing;
-                  Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages)
-                end;
-                (match file with
-                 | None ->
-                     state.code_file <- Masc_tui_fetched.clear state.code_file;
-                     state.code_file_resume_intent <- Refresh_code_file;
-                     state.code_focus_file <- Left_pane
-                 | Some path -> (
-                     match Masc_tui_fetched.current state.code_file with
-                     | Some (open_path, Masc_tui_fetched.Ready _)
-                       when String.equal open_path path ->
-                         state.code_file_cursor <- cursor;
-                         state.code_file_scroll <- scroll;
-                         state.code_focus_file <- Right_pane
-                     (* A different file, or this one not readable yet.
-                        [start] collapses a repeat of the read in flight. *)
-                     | Some (_, (Masc_tui_fetched.Ready _ | Masc_tui_fetched.Absent
-                                | Masc_tui_fetched.Loading | Masc_tui_fetched.Stale _
-                                | Masc_tui_fetched.Failed _))
-                     | None ->
-                         state.code_target_line <- Some (cursor + 1);
-                         Masc_tui_code_requests.launch_file_load state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages) ~path)))
+           Masc_tui_code_requests.return_to_reading state ~host:server_peer_host
+             ~deliver:(workspace_enqueue state async_messages)
        | Some (("K" | "D" | "R") as key_name)
          when state.view = Code && state.code_focus_file = Right_pane
               && Option.is_some (Masc_tui_fetched.current_key state.code_file)

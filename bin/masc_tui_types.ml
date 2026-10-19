@@ -4733,8 +4733,6 @@ type inflight =
    through its own query axis: a keeper's playground via [?keeper=] (where a
    Changes row's clone-relative path lives), a registered repository via
    [?repo_id=] (what a Repositories row names). *)
-type code_file_load_intent = Open_code_file | Refresh_code_file
-
 type code_workspace_scope =
   | Code_scope_project
   | Code_scope_keeper of string
@@ -5172,6 +5170,32 @@ type code_finder_origin = {
   cfo_dir : string;
   cfo_file : string Masc_tui_fetched.request option;
 }
+
+type code_jump = {
+  cj_scope : code_workspace_scope;
+  cj_dir : string;
+  cj_file : string option;
+  cj_cursor : int;
+  cj_scroll : int;
+  cj_hscroll : int;
+  cj_tree_cursor : int;
+  cj_focus : pane_focus;
+}
+
+type code_return_owner = {
+  cro_origin : code_finder_origin;
+  cro_history : code_jump list;
+}
+
+type code_return_reading = {
+  crr_owner : code_return_owner;
+  crr_file : (string, string) Masc_tui_fetched.t;
+}
+
+type code_file_load_intent =
+  | Open_code_file
+  | Refresh_code_file
+  | Return_code_file of code_return_owner
 
 type palette_mode =
   | Palette_jump
@@ -8627,11 +8651,10 @@ type state = {
      until the next question or file replaces it. *)
   mutable code_lsp_note: string option;
   mutable code_lsp_query: (code_lsp_query, unit) Masc_tui_fetched.t;
-  (* Where a definition jump left from, newest first: scope, directory,
-     open file (if any), its cursor and scroll. B walks back through it.
-     Bounded so a long session cannot grow it without limit. *)
-  mutable code_jump_back:
-    (code_workspace_scope * string * string option * int * int) list;
+  (* Where a jump left from, newest first. A pending return reads separately
+     and consumes the entry only when it commits navigation. *)
+  mutable code_jump_back: code_jump list;
+  mutable code_return: code_return_reading option;
   (* Horizontal offset in display cells, and the widest row's width -- the
      clamp. Measured once at load: measuring ten thousand rows on every
      keypress is what this field exists to avoid. *)
@@ -10284,6 +10307,7 @@ let suspend_workspace_readings state =
   state.code_listing <- Masc_tui_fetched.suspend state.code_listing;
   state.code_catalog <- Masc_tui_fetched.suspend state.code_catalog;
   state.code_finder_file <- Masc_tui_fetched.suspend state.code_finder_file;
+  state.code_return <- None;
   state.code_file <- Masc_tui_fetched.suspend state.code_file;
   state.code_history <- Masc_tui_fetched.suspend state.code_history;
   state.code_diff <- Masc_tui_fetched.suspend state.code_diff;
@@ -12427,6 +12451,7 @@ let set_code_scope state scope =
   if state.code_scope <> scope then begin
     state.code_catalog <- Masc_tui_fetched.clear state.code_catalog;
     state.code_finder_file <- Masc_tui_fetched.clear state.code_finder_file;
+    state.code_return <- None;
     state.code_lsp_query <- Masc_tui_fetched.clear state.code_lsp_query;
     state.code_file <- Masc_tui_fetched.clear state.code_file;
     state.code_file_resume_intent <- Refresh_code_file;
@@ -14092,6 +14117,7 @@ let create_state
   code_lsp_note = None;
   code_lsp_query = Masc_tui_fetched.initial;
   code_jump_back = [];
+  code_return = None;
   code_file_hscroll = 0;
   code_file_max_width = 0;
   code_memos = [];

@@ -21,6 +21,12 @@ val open_found_file :
 (** Read a selected file without replacing the original file or cursor. Only
     an admitted successful reply commits navigation through Code results. *)
 
+val return_to_reading :
+  Masc_tui_types.state -> host:string ->
+  deliver:(Masc_tui_async_protocol.async_msg -> unit) -> unit
+(** Return through jump history using the destination scope and confirmed
+    workspace identity, without replacing the current file while reading. *)
+
 val launch_file_load
   :  ?intent:Masc_tui_types.code_file_load_intent
   -> Masc_tui_types.state

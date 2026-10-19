@@ -1,0 +1,23 @@
+# Reading files in Code
+
+Open Code from a Workspace repository or with `:`, `go Code`, Enter.
+Ctrl-P lists readable tracked and nonignored files from the owning Git
+checkout, including files outside the current directory. Type to filter and
+press Enter to read a selection. Esc closes the finder. A failed selection
+keeps the original file and directory.
+
+`D` asks for a definition on the cursor line. `B` returns through the locations
+left by definition jumps and successful finder selections. A location includes
+the workspace scope, directory, file, cursor, vertical and horizontal offsets,
+tree selection and focused pane. Shift-Left and Shift-Right pan file content.
+
+Returning to another file keeps the current reading on screen until the
+destination read succeeds. A missing file or unavailable workspace leaves the
+return entry available; press B to retry. Repeating B during the read shares
+that return. Another key, paste or mouse action cancels the pending return.
+Received content waits for queued input before navigating. Leaving Code,
+changing the source reading, or losing workspace authority retires old results.
+Positions are clamped if the destination content became shorter or narrower.
+
+Returning to an already readable current file or to a directory-only location
+does not need a file request. Jump history belongs to this TUI session.

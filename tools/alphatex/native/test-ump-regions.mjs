@@ -52,6 +52,32 @@ for fractional in [false,true] {
 }
 let mismatch=exactClip("mismatch",startN:"0",startD:"1",start:1,offset:"0",extent:"1")
 refuses{_ = try owner([adjacent],[mismatch])}
+// Fractional entry and future deadlines retain original zero-length wire pairs;
+// a genuinely late callback still skips a wholly expired pair.
+for tick:UInt64 in [1,2] {
+ let pairs=source("adjacent",[packet(tick,on),packet(tick,off)],numer:125,denom:3,extent:"4800001")
+ let entry=exactClip("entry",startN:"95",startD:"3",start:95/3/1e9,offset:"1",extent:"4800000",repeats:2)
+ for late in [false,true] {
+  let owner=try owner([pairs],[entry]),c=owner.clips[0]
+  host=0;sent=[];try owner.stageCoordinated(at:0);try owner.runCoordinated(anchorNanoseconds:10)
+  let due=c.next(copy:0,index:0)
+  if tick==2 {host=10+c.start;owner.tick();precondition(sent.isEmpty)}
+  host=10+due+(late ? 1:0);owner.tick()
+  precondition(sent.map{$0.1} == (late ? []:[on,off]),"ceil-due wire pair differs from expired history")
+  if !late {let next=c.next(copy:1,index:0);host=10+next;owner.tick();precondition(Array(sent.suffix(2)).map{$0.1}==[on,off])}
+  owner.finish(reason:"test",error:nil,publish:false)
+ }
+}
+// Ordinary fractional tempos produce large exact binary denominators. Compare
+// real bounds without overflowing cross products, including unequal fractions.
+func display(_ n:UInt128,_ d:UInt128)->Double {let scale=d*1_000_000_000;return Double(n/scale)+Double(n%scale)/Double(scale)}
+let tempoN:UInt128=2_111_062_325_329_920_000_000_000,tempoD:UInt128=4_341_751_515_761_869
+for differentDenominator in [false,true] {
+ let first=exactClip("one",startN:String(tempoN),startD:String(tempoD),start:display(tempoN,tempoD),offset:"0",extent:"4800000")
+ let n=tempoN*2*(differentDenominator ? 10:1)+(differentDenominator ? tempoD:0),d=tempoD*(differentDenominator ? 10:1)
+ let second=exactClip("two",startN:String(n),startD:String(d),start:display(n,d),offset:"0",extent:"4800000")
+ _ = try owner([adjacent],[first,second],duration:2)
+}
 // An optional retained real recording is supplied by the installed-runtime
 // probe. It uses the same production decoder/region owner and synthetic send
 // edge; no endpoint registration or opening is needed for this reproduction.

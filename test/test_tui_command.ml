@@ -49,6 +49,8 @@ let describe = function
   | Command.Listen -> "listen"
   | Command.Open_score index -> Printf.sprintf "score:%d" index
   | Command.Score_invalid_index -> "score-invalid-index"
+  | Command.Open_music -> "open-music"
+  | Command.Music_invalid_arguments -> "music-invalid-arguments"
   | Command.Open_metrics -> "open-metrics"
   | Command.Account_login client -> "account-login:" ^ client
   | Command.Switch_keeper name -> "keeper:" ^ name

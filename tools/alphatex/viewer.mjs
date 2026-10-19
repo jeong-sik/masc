@@ -33,6 +33,7 @@ const { values, positionals } = parseArgs({
     'state-dir': { type: 'string' },
     sequence: { type: 'boolean' },
     arrange: { type: 'boolean' },
+    music: { type: 'boolean' },
     'midi-file': { type: 'string' },
     'midi-pattern': { type: 'string' },
     project: { type: 'string' },
@@ -47,6 +48,7 @@ if (values.help) {
     + '  i chooses instrument/preset, e opens its native sound browser, l toggles repeat.\n'
     + '  --state-dir stores native selection, saved presets, renders and Lane snapshot.\n'
     + '  --sequence opens a new phrase editor; --project song.json reopens one; --project-root sets its folder.\n'
+    + '  --music opens the terminal music library: phrases, arrangements and recorded takes.\n'
     + '  --arrange opens MIDI/WAV region editing; --project also reopens saved arrangements.\n'
     + '  --midi-file song.mid imports a source for editing/export/MIDI audition; --midi-pattern N selects an SMF2 pattern.\n'
     + '  --output UID selects sequencer audio output; :output UID changes it in the editor.\n'
@@ -60,14 +62,23 @@ if (values.help) {
 }
 
 try {
+  if (values.music && (positionals.length || [values.bundle, values.sequence, values.arrange, values.project,
+    values['midi-file'], values.record, values.session, values.devices, values.check, values.render, values.audio].some(Boolean))) {
+    throw new Error('Choose --music or another entry mode')
+  }
   if ([values.sequence, values.arrange, values.project, values['midi-file']].filter(Boolean).length > 1) throw new Error('Choose --sequence, --arrange, --project or --midi-file')
-  if (values.arrange) {
+  if (values.music) {
+    const { viewMusic } = await import('./music-workbench.mjs')
+    await viewMusic({ projectRoot: values['project-root'], sessionRoot: values['session-root'],
+      soundfontPath: values.soundfont, stateDirectory: values['state-dir'], input: values.input,
+      midi: values.midi, output: values.output, midiOutput: values['midi-output'] })
+  } else if (values.arrange) {
     const { viewArrangement } = await import('./arrangement-tui.mjs')
-    await viewArrangement({ root: values['project-root'], output: values.output, midiOutput: values['midi-output'] })
+    await viewArrangement({ root: values['project-root'], output: values.output, midiOutput: values['midi-output'], stateDirectory: values['state-dir'] })
   } else if (values.sequence || values.project || values['midi-file']) {
     const { viewSequencer } = await import('./sequencer-tui.mjs')
     const initialDocument = values['midi-file'] ? (await import('./midi-source.mjs')).importMidiSource(readFileSync(values['midi-file']), { name: basename(values['midi-file']) }) : undefined
-    await viewSequencer({ path: values.project, root: values['project-root'], soundfontPath: values.soundfont,
+    await viewSequencer({ path: values.project, root: values['project-root'], soundfontPath: values.soundfont, stateDirectory: values['state-dir'],
       sessionRoot: values['session-root'], input: values.input, midi: values.midi, output: values.output, midiOutput: values['midi-output'], initialDocument, pattern: values['midi-pattern'] === undefined ? undefined : Number(values['midi-pattern']) - 1 })
   } else if (values.devices) {
     const { devices } = await import('./capture.mjs')
@@ -437,11 +448,11 @@ async function viewScores(sources, initialIndex) {
             if (key.name === 'p') {
               const { viewSequencer } = await import('./sequencer-tui.mjs')
               if (!closed) await viewSequencer({ root: values['project-root'], sessionRoot: values['session-root'],
-                soundfontPath: values.soundfont, input: values.input, midi: values.midi, output: values.output,
+                soundfontPath: values.soundfont, stateDirectory: values['state-dir'], input: values.input, midi: values.midi, output: values.output,
                 midiOutput: values['midi-output'], embedded: true, signal: sessionAbort.signal })
             } else if (key.name === 'a') {
               const { viewArrangement } = await import('./arrangement-tui.mjs')
-              if (!closed) await viewArrangement({ root: values['project-root'], output: values.output, midiOutput: values['midi-output'], embedded: true, signal: sessionAbort.signal })
+              if (!closed) await viewArrangement({ root: values['project-root'], output: values.output, midiOutput: values['midi-output'], stateDirectory: values['state-dir'], embedded: true, signal: sessionAbort.signal })
             } else {
               const { viewSession } = await import('./music-session.mjs')
               if (!closed) await viewSession({ root: values['session-root'], input: values.input, midi: values.midi, output: values.output, midiOutput: values['midi-output'], embedded: true, signal: sessionAbort.signal })

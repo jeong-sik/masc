@@ -61,7 +61,7 @@ const help = [
   'Channel scopes filter system/SysEx. Transport/edits finalize recording; whole looping remains unfinished.',
 ]
 
-export async function viewArrangement({ path, loaded, initialDocument, root = resolve('music-projects'), embedded = false, signal, output, midiOutput, initialRoute } = {}) {
+export async function viewArrangement({ path, loaded, initialDocument, root = resolve('music-projects'), embedded = false, signal, output, midiOutput, initialRoute, stateDirectory } = {}) {
   if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error('Arrangement editor requires a terminal')
   if ((path || loaded) && initialDocument) throw new Error('Open a saved arrangement or a new one, one at a time')
   if (signal?.aborted) return
@@ -443,7 +443,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
         const edited = await viewSequencer({ initialDocument: document, root: join(sourceRoot, 'phrases'),
           embedded: true, signal: controller.signal, pattern: pattern ?? (clip?.asset === asset ? clip.pattern : undefined),
           output: midiOutput === undefined && !bindings.length ? route.output : undefined, midiOutput,
-          initialPortBindings: document.kind === 'midi-source' ? bindings : [] })
+          initialPortBindings: document.kind === 'midi-source' ? bindings : [], stateDirectory })
         if (!accepting || controller.signal.aborted || generation !== expected || editor.project !== project || !edited?.changed) return
         const imported = await request({ kind: 'import-phrase', project, document: edited.project })
         if (!accepting || controller.signal.aborted || generation !== expected || editor.project !== project) return

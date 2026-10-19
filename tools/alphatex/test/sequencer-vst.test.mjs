@@ -79,7 +79,7 @@ test('distinct source ports cannot silently share one plugin state', () => {
   assert.throws(() => projectVstMidi(multi), /separate instrument instances/)
 })
 
-test('native rendering receives the exact selection and retains both render and performed MIDI', async () => {
+for (const loop of [false, true]) test(`native rendering retains selection/MIDI and requests the correct tail (loop=${loop})`, async () => {
   await temporary(async directory => {
     const midi = join(directory, 'phrase.mid'), output = join(directory, 'render.wav'), stateDirectory = join(directory, 'state')
     const bytes = projectVstMidi(phrase()).bytes
@@ -87,13 +87,13 @@ test('native rendering receives the exact selection and retains both render and 
     const selection = { plugin_path: '/chosen.vst3', plugin_name: 'Bass', preset_path: '/chosen.vstpreset', name: 'Bass' }
     const requests = []
     const job = renderVstPhrase({ preparation: { promise: Promise.resolve({ path: midi, duration: 1 }), cancel: new Int32Array(new SharedArrayBuffer(4)) },
-      selection, outputPath: output, stateDirectory, run(request) {
+      selection, outputPath: output, stateDirectory, loop, run(request) {
         requests.push(request)
         return { cancel() {}, promise: writeFile(output, 'rendered').then(() => ({ output_path: output, duration_ms: 2000,
           midi_sha256: 'a'.repeat(64), wav_sha256: 'b'.repeat(64) })) }
       } })
     const wave = await job.promise
-    assert.deepEqual(requests, [{ operation: 'render', ...selection, midi_path: midi, output_path: output }])
+    assert.deepEqual(requests, [{ operation: 'render', ...selection, midi_path: midi, output_path: output, ...(loop ? { tail_seconds: 0 } : {}) }])
     await rm(midi); await rm(output)
     assert.deepEqual(await readFile(wave.vst.midi_path), Buffer.from(bytes))
     assert.equal(await readFile(wave.path, 'utf8'), 'rendered')

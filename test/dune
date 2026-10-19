@@ -5546,7 +5546,7 @@
 (test
  (name test_provider_admission_events)
  (modules test_provider_admission_events)
- (libraries masc_test_deps eio eio_main yojson))
+ (libraries masc_test_deps eio eio_main eio.mock yojson))
 
 (test
  (name test_runtime_setup_spec)

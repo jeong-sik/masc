@@ -95,7 +95,7 @@ Optional:
 | `is-non-interactive` | bool, default `false` | **required `true`** for every official-client protocol (`claude-code`, `codex-app-server`, `antigravity-cli`, `muse-serve`); otherwise the runtime does not materialize |
 | `timeout-s` (+ `agent`, `effort`, `add-dirs`) | positive float (string; `low`\|`medium`\|`high`; absolute paths) | `antigravity-cli` only — refused on every other protocol. `timeout-s` is **required**; `effort` and `add-dirs` are optional |
 | `account-home` | non-empty absolute path | **required** for `muse-serve`; accepted for `claude-code`/`codex-app-server`; refused elsewhere |
-| `admission-priority-run-limit` | positive int | how many judgment-lane priority permits may run consecutively before a waiting standard request is served. Refused on official-client providers and when none of the provider's bindings declares `max-concurrent` |
+| `admission-priority-run-limit` | positive int | bounds consecutive judgment-lane Priority grants while a Standard Keeper request waits, and combined Priority/Standard grants while Background Librarian work waits. Omitted means one FIFO. Refused on official-client providers and when none of the provider's bindings declares `max-concurrent`. See [provider admission fairness](guides/provider-admission-fairness.md) |
 
 ### `[providers.<id>.credentials]`
 

@@ -11,7 +11,8 @@ val wire_name : string
 
 val event : Llm_provider.Provider_admission.wait -> Agent_core.Event_bus.event
 (** Payload: [provider_id] (string or null), [kind], [model],
-    [admission_class] (["priority"] or ["standard"]), [waited_ms] (number or
+    [admission_class] (["priority"], ["standard"] or ["background"]),
+    [waited_ms] (number or
     null when no clock could measure it) and [outcome] (["granted"] or
     ["expired"]). *)
 

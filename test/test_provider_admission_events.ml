@@ -107,6 +107,73 @@ let test_an_installed_bus_receives_each_queued_wait () =
   check int "nothing is published once the switch is released" 0 (List.length (drained ()))
 ;;
 
+(* Memory and Keeper calls name different models but share one endpoint.
+   Queue memory first: the service order must retain judgment priority,
+   allow the Keeper to pass the backlog, and still complete memory work. *)
+let fleet_grant_order ~run_limit =
+  Eio_mock.Backend.run @@ fun () ->
+  let base =
+    Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.OpenAI_compat
+      ~model_id:"keeper-model"
+      ~base_url:(match run_limit with
+        | None -> "http://fleet-fifo.test:1"
+        | Some _ -> "http://fleet-fair.test:1")
+      ~max_concurrent_requests:1
+      ?admission_priority_run_limit:run_limit
+      ()
+  in
+  let librarian =
+    { base with
+      model_id = "memory-model"
+    ; admission_class = Standalone_lane.admission_class Librarian
+    }
+  in
+  let judgment =
+    { base with
+      model_id = "judgment-model"
+    ; admission_class = Standalone_lane.admission_class Verifier
+    }
+  in
+  let granted = ref [] in
+  Eio.Switch.run (fun sw ->
+    let release, resolve_release = Eio.Promise.create () in
+    Eio.Fiber.fork ~sw (fun () ->
+      Admission.with_admission ~config:base (fun () -> Eio.Promise.await release));
+    List.iter (fun (label, config) ->
+      Eio.Fiber.fork ~sw (fun () ->
+        Admission.with_admission ~config (fun () -> granted := label :: !granted)))
+      [ "memory-1", librarian; "memory-2", librarian; "memory-3", librarian
+      ; "keeper-1", base; "keeper-2", base; "keeper-3", base
+      ; "judgment-1", judgment; "judgment-2", judgment
+      ];
+    (match Admission.snapshot_for ~config:base with
+     | Some snapshot ->
+       check int "all models share the occupied endpoint queue" 8 snapshot.queue_length
+     | None -> fail "the endpoint scheduler was not created");
+    Eio.Promise.resolve resolve_release ());
+  (match Admission.snapshot_for ~config:base with
+   | Some snapshot ->
+     check int "all permits returned" 0 snapshot.active;
+     check int "all three workloads completed" 0 snapshot.queue_length
+   | None -> fail "the endpoint scheduler disappeared");
+  List.rev !granted
+;;
+
+let test_keeper_calls_pass_the_memory_backlog_without_starving_it () =
+  check (list string) "judgments, Keeper calls and memory all receive service"
+    [ "judgment-1"; "memory-1"; "keeper-1"; "memory-2"
+    ; "judgment-2"; "memory-3"; "keeper-2"; "keeper-3" ]
+    (fleet_grant_order ~run_limit:(Some 1))
+;;
+
+let test_a_provider_without_fairness_keeps_the_fleet_in_arrival_order () =
+  check (list string) "an undeclared policy keeps one FIFO"
+    [ "memory-1"; "memory-2"; "memory-3"
+    ; "keeper-1"; "keeper-2"; "keeper-3"; "judgment-1"; "judgment-2" ]
+    (fleet_grant_order ~run_limit:None)
+;;
+
 let () =
   run
     "Provider admission events"
@@ -116,6 +183,10 @@ let () =
             "an installed bus receives each queued wait"
             `Quick
             test_an_installed_bus_receives_each_queued_wait
+        ; test_case "Keeper calls pass the memory backlog without starving it"
+            `Quick test_keeper_calls_pass_the_memory_backlog_without_starving_it
+        ; test_case "a provider without fairness keeps fleet arrival order"
+            `Quick test_a_provider_without_fairness_keeps_the_fleet_in_arrival_order
         ] )
     ]
 ;;

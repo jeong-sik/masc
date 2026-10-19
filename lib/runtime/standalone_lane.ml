@@ -40,13 +40,14 @@ let obligation = function
 
 (* Other work waits on these three verdicts: a task's completion on the
    verifier, an operator's confirmation on the HITL judge, and what a Keeper
-   looks at next on board attention. The librarian's requests are large and
-   nothing waits on them; a priority permit held by one would keep the
-   judgment lanes waiting (RFC judgment-lanes-take-account-admission-before-
-   keeper-turns). *)
+   looks at next on board attention. Librarian maintenance shares provider
+   permits with the Keeper's own tool loop, but must not repeatedly put that
+   loop behind the whole fleet's memory queue. Background service remains
+   bounded by the provider's declared run limit. *)
 let admission_class : t -> Llm_provider.Admission_class.t = function
   | Verifier | Hitl_auto_judge | Board_attention -> Priority
-  | Librarian | Workspace_curator | Browser_stagehand | Candle_appraiser -> Standard
+  | Librarian -> Background
+  | Workspace_curator | Browser_stagehand | Candle_appraiser -> Standard
 ;;
 
 let required_ids =

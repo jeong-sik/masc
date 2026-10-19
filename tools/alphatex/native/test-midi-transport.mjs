@@ -9,7 +9,7 @@ import { spawnSync } from 'node:child_process'
 const directory = await mkdtemp(join(tmpdir(), 'masc-midi-decisions-'))
 try {
   let source = await readFile(new URL('./MidiTransport.swift', import.meta.url), 'utf8')
-  source = source.slice(0, source.lastIndexOf('\n_ = signal(SIGPIPE,'))
+  source = source.slice(0, source.indexOf('\n#if !MIDI_LIBRARY'))
     .replaceAll('DispatchTime.now().uptimeNanoseconds', 'reviewClock')
     .replace('final class MidiTransport {', `
 var reviewPhraseFailure: UInt8?
@@ -507,6 +507,57 @@ precondition(reviewWire.isEmpty && lateCopies.regionCursors[0].copy==2)
 let livePhase = try arrangement([regionSource],[clip("live","a",repeatCount:2_000_000)],duration:1_000_000)
 reviewWire=[];try livePhase.reconcile(at:999_999.75)
 precondition(livePhase.regionCursors[0].copy==1_999_999 && reviewWire.count<30)
+// A late first common-epoch tick skips never-started expired copies. It
+// must preserve the boundary stream for other region copies still alive.
+func sharedClock(_ template: MidiTransport, at offset: Double = 0) throws -> MidiTransport {
+    reset(0); reviewWire=[]
+    let t=try MidiTransport(timeline:template.timeline,uid:"1",coordinated:true)
+    t.prepared=true;t.sourceDestinations=template.sourceDestinations
+    t.destination=template.sourceDestinations.values.first
+    try t.stageCoordinated(at:offset);try t.runCoordinated(anchorNanoseconds:1_000_000_000)
+    return t
+}
+let heldSource=asset("held",[["seconds":0,"port":2,"bytes":[0x90,60,100]],["seconds":0.8,"port":2,"bytes":[0x80,60,42]]])
+let heldTemplate=try arrangement([heldSource],[clip("held","held",from:0,to:1,repeatCount:3)])
+let expiredInitial=try sharedClock(heldTemplate)
+reviewClock=5_000_000_000;expiredInitial.tick()
+precondition(reviewWire.isEmpty && expiredInitial.state == .paused && !expiredInitial.pendingRestore)
+let liveInitial=try sharedClock(heldTemplate)
+reviewClock=2_250_000_000;liveInitial.tick()
+precondition(reviewWire.map(\.1)==[[0x90,60,100]])
+let exactInitial=try sharedClock(heldTemplate)
+reviewClock=2_000_000_000;exactInitial.tick()
+precondition(reviewWire.map(\.1)==[[0x90,60,100]])
+let longer:[String:Any]=["id":"long","timeline":["schemaVersion":2,"duration":2,"bindings":[["port":2,"destination":"1"]],"events":[
+    ["seconds":0,"port":2,"bytes":[0xc1,1]],
+    ["seconds":0.5,"port":2,"bytes":[0x91,62,100]],
+    ["seconds":0.5,"port":2,"bytes":[0x81,62,42]],
+    ["seconds":0.5,"port":2,"bytes":[0xc1,20]]]]]
+let shortSource=asset("short",[["seconds":0.4,"port":2,"bytes":[0x90,60,100]],["seconds":0.8,"port":2,"bytes":[0x80,60,42]]])
+let partialTemplate=try arrangement([shortSource,longer],[clip("short","short",from:0,to:1,repeatCount:3),clip("long","long",from:0,to:2,repeatCount:1)])
+let partialInitial=try sharedClock(partialTemplate,at:0.5)
+reviewClock=1_800_000_000;partialInitial.tick()
+precondition(reviewWire.map(\.1)==[[0xc1,1],[0x91,62,100],[0x81,62,42],[0xc1,20]])
+let coordinatedBase = try arrangement([regionSource],[clip("clock","a",repeatCount:1)])
+let shared = try MidiTransport(timeline:coordinatedBase.timeline,uid:"1",coordinated:true)
+shared.destination=coordinatedBase.destination;shared.sourceDestinations=coordinatedBase.sourceDestinations;shared.prepared=true
+reset(1_000_000_000);reviewWire=[]
+try shared.stageCoordinated(at:0.2);precondition(reviewWire.isEmpty && shared.state == .paused)
+mustReject { try shared.runCoordinated(anchorNanoseconds:1_000_000_000) }
+precondition(reviewWire.isEmpty)
+try shared.runCoordinated(anchorNanoseconds:2_000_000_000)
+precondition(reviewWire.isEmpty && shared.pendingRestore && shared.position()==0.2)
+shared.tick();precondition(reviewWire.isEmpty && shared.pendingRestore)
+reviewClock=2_000_000_000;shared.tick();precondition(!reviewWire.isEmpty && !shared.pendingRestore)
+try shared.stageCoordinated(at:0.25);precondition(shared.state == .paused && shared.offset==0.25)
+var sharedEnded=0;shared.onCoordinatedEnd={sharedEnded+=1}
+try shared.runCoordinated(anchorNanoseconds:3_000_000_000)
+reviewClock=6_000_000_000;shared.tick()
+precondition(sharedEnded==1 && shared.state == .paused && shared.prepared)
+var sharedFinished=0;shared.onCoordinatedFailure={_,_ in sharedFinished+=1}
+shared.finish(reason:"stop",publish:false);precondition(sharedFinished==1 && shared.state == .stopped && reviewExit==nil)
+shared.finish(reason:"stop",publish:false);precondition(sharedFinished==1)
+print("COORDINATED_MIDI_DECISIONS_PASS: staged silence, late-epoch refusal, common-epoch restoration, no early sends, shared pause position, logical end and owned shutdown callback")
 print("MIDI_ARRANGEMENT_DECISIONS_PASS: original boundary events, trims/full endpoints, finite repeats, overlapping physical ownership admission, distinct-channel cleanup, prior-state baselines, compressed seek, silent paused seek/resume")
 
 print("SELECTED_MIDI_DESTINATION_PASS: unrelated enumeration failure/churn isolated; selected removal, UID reuse, source type, offline and noncanonical ID rejected")

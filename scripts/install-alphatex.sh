@@ -77,7 +77,7 @@ if [ "$(uname -s)" = Darwin ] && [ ! -x "$support_dir/music-midi" ]; then
   if xcrun --find swiftc >/dev/null 2>&1; then
     midi_binary=$(mktemp "$support_dir/.music-midi.XXXXXX")
     trap 'rm -f "$midi_binary"' EXIT HUP INT TERM
-    xcrun swiftc -O "$support_dir/native/MidiTransport.swift" -o "$midi_binary" -framework CoreMIDI
+    xcrun swiftc -parse-as-library -O "$support_dir/native/MidiTransport.swift" -o "$midi_binary" -framework CoreMIDI
     chmod 755 "$midi_binary"
     mv -f "$midi_binary" "$support_dir/music-midi"
     trap - EXIT HUP INT TERM
@@ -89,8 +89,8 @@ if [ "$(uname -s)" = Darwin ] && [ ! -x "$support_dir/music-arrangement" ]; then
   if xcrun --find swiftc >/dev/null 2>&1; then
     arrangement_binary=$(mktemp "$support_dir/.music-arrangement.XXXXXX")
     trap 'rm -f "$arrangement_binary"' EXIT HUP INT TERM
-    xcrun swiftc -O "$support_dir/native/WaveArrangement.swift" -o "$arrangement_binary" \
-      -framework AVFoundation -framework CoreAudio
+    xcrun swiftc -parse-as-library -D MIDI_LIBRARY -O "$support_dir/native/WaveArrangement.swift" "$support_dir/native/MidiTransport.swift" -o "$arrangement_binary" \
+      -framework AVFoundation -framework CoreAudio -framework CoreMIDI
     chmod 755 "$arrangement_binary"
     mv -f "$arrangement_binary" "$support_dir/music-arrangement"
     trap - EXIT HUP INT TERM

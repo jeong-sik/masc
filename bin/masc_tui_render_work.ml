@@ -114,14 +114,11 @@ let task_line ~cols ~ordinal ~task_ids ~use_ordinals (task : task) =
    same scroll. Loaded lazily on detail entry; the id check drops an answer
    for a task the operator already left. Rows are raw event-stream lines, so
    only the fields present are drawn. *)
-let task_history_lines (state : state) task_id =
+let task_history_lines (state : state) ~width task_id =
   let header = "  HISTORY" in
-  let rows =
-    match state.task_history with
-    | Some (id, result) when String.equal id task_id -> (
-        match result with
-        | Ok [] -> [ "    (no events recorded)" ]
-        | Ok events ->
+  let observed = function
+        | [] -> [ "    (no events recorded)" ]
+        | events ->
             List.concat_map
               (fun (event : Tui_decode.task_history_event) ->
                 let transition =
@@ -144,10 +141,24 @@ let task_history_lines (state : state) task_id =
                     | Some note -> [ "      " ^ note ]
                     | None -> []))
               events
-        | Error err -> [ "    load failed: " ^ err ])
-    | _ -> [ "    loading..." ]
   in
-  ("" :: header :: rows)
+  let view = Masc_tui_fetched.view_for ~equal:String.equal state.task_history ~key:task_id in
+  let rows =
+    match view with
+    | Masc_tui_fetched.Ready events -> observed events
+    | Masc_tui_fetched.Stale (events, detail) ->
+        Masc_tui_text_block.rows ~max_cells:width
+          ("    refresh failed; previous history: " ^ Terminal_text.single_line detail)
+        @ observed events
+    | Masc_tui_fetched.Failed detail -> Masc_tui_text_block.rows ~max_cells:width
+        ("    load failed: " ^ Terminal_text.single_line detail)
+    | Masc_tui_fetched.Absent -> [ "    history not requested" ]
+    | Masc_tui_fetched.Loading -> [ "    loading..." ]
+  in
+  let pending =
+    if Masc_tui_fetched.in_flight state.task_history && Option.is_some (Masc_tui_fetched.value view)
+    then [ "    refreshing; previous history" ] else [] in
+  ("" :: header :: (pending @ rows))
 
 let task_detail_lines (state : state) ~cols (task : Masc_domain.task) =
   let width = max 1 (framed_inner_width cols - 2) in
@@ -235,7 +246,7 @@ let task_detail_lines (state : state) ~cols (task : Masc_domain.task) =
          @ list_lines "inspection evidence" contract.Masc_domain.inspect_gate_evidence
          @ list_lines "verification evidence" contract.Masc_domain.verify_gate_evidence)
   @ list_lines "file" task.files
-  @ (task_history_lines state task.id
+  @ (task_history_lines state ~width task.id
      |> List.concat_map (fun line ->
           if String.equal line "" then [""]
           else Masc_tui_text_block.rows ~max_cells:(framed_inner_width cols) line))

@@ -3608,19 +3608,25 @@ let launch_keeper_calls_load ?(force = false) state ~mailbox keeper_name =
 
 let launch_goal_timeline_load state ~mailbox goal_id =
   if server_authority_ready state then begin
+  match begin_goal_timeline_read state ~goal_id with
+  | None -> ()
+  | Some request ->
   let host = server_peer_host in
   let port = state.port in
   launch_workspace_request state ~mailbox ~boundary_error:Fun.id
-    ~deliver:(fun result -> Goal_timeline_loaded (goal_id, result))
+    ~deliver:(fun result -> Goal_timeline_loaded (request, result))
     (fun () -> Masc_tui_http.fetch_goal_timeline ~host ~port ~goal_id)
   end
 
 let launch_task_history_load state ~mailbox task_id =
   if server_authority_ready state then begin
+  match begin_task_history_read state ~task_id with
+  | None -> ()
+  | Some request ->
   let host = server_peer_host in
   let port = state.port in
   launch_workspace_request state ~mailbox ~boundary_error:Fun.id
-    ~deliver:(fun result -> Task_history_loaded (task_id, result))
+    ~deliver:(fun result -> Task_history_loaded (request, result))
     (fun () -> Masc_tui_http.fetch_task_history ~host ~port ~task_id)
 
   end
@@ -12656,7 +12662,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.memory_health_scroll <- 0;
   state.task_detail_id <- None;
   state.task_detail_scroll <- 0;
-  state.task_history <- None;
+  withdraw_detail_histories state;
   state.task_focus <- Masc_tui_overview_tasks.No_task_focus;
   state.exact_activity_open <- None;
   state.exact_activity_sessions <- List.map Masc_tui_exact_activity.suspend state.exact_activity_sessions;
@@ -14481,7 +14487,6 @@ let resume_task_followups state ~mailbox ~refresh_inflight
     | Task_cancel_refresh task_id ->
         (* Only the detail that is still selected owns this follow-up read. *)
         if state.task_detail_id = Some task_id then begin
-          state.task_history <- None;
           launch_task_history_load state ~mailbox task_id
         end;
         start_http_refresh state ~host:server_peer_host ~port:state.port
@@ -15989,7 +15994,7 @@ let open_planning_detail state ~mailbox =
   | Some g ->
       state.planning_mode <- Planning_detail g.pg_id;
       state.planning_scroll <- 0;
-      state.goal_timeline <- None;
+      state.goal_timeline <- Masc_tui_fetched.clear state.goal_timeline;
       launch_goal_timeline_load state ~mailbox g.pg_id
 
 (* The list row carries one wake; the whole history comes from the exact
@@ -18271,18 +18276,10 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
            resume_task_followups state ~mailbox ~refresh_inflight:http_refresh_inflight
              ~scoped_refresh_inflight:http_scoped_refresh_inflight ~scoped_refresh_followup
        | Error err -> report_action state "error" ("task cancel failed: " ^ err))
-  | Goal_timeline_loaded (goal_id, result) ->
-      (* Drawn only while the operator still has this goal open; a stale
-         answer for a goal already left is dropped, same as the call log. *)
-      (match state.planning_mode with
-       | Planning_detail current when String.equal current goal_id ->
-           state.goal_timeline <- Some (goal_id, result)
-       | Planning_list | Planning_detail _ -> ())
-  | Task_history_loaded (task_id, result) ->
-      (match state.task_detail_id with
-       | Some current when String.equal current task_id ->
-           state.task_history <- Some (task_id, result)
-       | _ -> ())
+  | Goal_timeline_loaded (request, result) ->
+      complete_goal_timeline_read state request result
+  | Task_history_loaded (request, result) ->
+      complete_task_history_read state request result
   | Keeper_calls_loaded (generation, keeper_name, result) -> (
       let still_current =
         generation = state.keeper_calls_generation
@@ -26047,7 +26044,7 @@ and is loaded on demand through keeper_skill.
                      goto_surface state ~mailbox:async_messages Planning;
                      state.planning_mode <- Planning_detail goal_id;
                      state.planning_scroll <- 0;
-                     state.goal_timeline <- None;
+                     state.goal_timeline <- Masc_tui_fetched.clear state.goal_timeline;
                      launch_goal_timeline_load state ~mailbox:async_messages
                        goal_id
                  | Some
@@ -26062,7 +26059,7 @@ and is loaded on demand through keeper_skill.
                      state.planning_mode <- Planning_list;
                      state.task_detail_id <- Some task_id;
                      state.task_detail_scroll <- 0;
-                     state.task_history <- None;
+                     state.task_history <- Masc_tui_fetched.clear state.task_history;
                      state.task_focus <-
                        Masc_tui_overview_tasks.land_on state.tasks ~task_id;
                      launch_task_history_load state ~mailbox:async_messages
@@ -26465,7 +26462,7 @@ and is loaded on demand through keeper_skill.
                | Some tid ->
                    state.task_detail_id <- Some tid;
                    state.task_detail_scroll <- 0;
-                   state.task_history <- None;
+                   state.task_history <- Masc_tui_fetched.clear state.task_history;
                    launch_task_history_load state ~mailbox:async_messages tid;
                    state.task_focus <-
                      Masc_tui_overview_tasks.land_on state.tasks ~task_id:tid
@@ -26744,7 +26741,7 @@ and is loaded on demand through keeper_skill.
                      state.planning_mode <- Planning_list;
                      state.task_detail_id <- Some task_id;
                      state.task_detail_scroll <- 0;
-                     state.task_history <- None;
+                     state.task_history <- Masc_tui_fetched.clear state.task_history;
                      launch_task_history_load state ~mailbox:async_messages
                        task_id;
                      state.task_focus <-
@@ -28155,14 +28152,14 @@ and is loaded on demand through keeper_skill.
                      state.planning_mode <- Planning_detail goal_id;
                      Masc_tui_home.reconcile_home_request_detail state;
                      state.planning_scroll <- 0;
-                     state.goal_timeline <- None;
+                     state.goal_timeline <- Masc_tui_fetched.clear state.goal_timeline;
                      launch_goal_timeline_load state ~mailbox:async_messages goal_id
                  | Home_operator_task task_id ->
                      navigate Planning;
                      state.planning_mode <- Planning_list;
                      state.task_detail_id <- Some task_id;
                      state.task_detail_scroll <- 0;
-                     state.task_history <- None;
+                     state.task_history <- Masc_tui_fetched.clear state.task_history;
                      state.task_focus <- Masc_tui_overview_tasks.land_on state.tasks ~task_id;
                      launch_task_history_load state ~mailbox:async_messages task_id)
             | Home_agenda ->
@@ -28695,7 +28692,7 @@ and is loaded on demand through keeper_skill.
                                state.planning_mode <- Planning_list;
                                state.task_detail_id <- Some task_id;
                                state.task_detail_scroll <- 0;
-                               state.task_history <- None;
+                               state.task_history <- Masc_tui_fetched.clear state.task_history;
                                state.task_focus <-
                                  Masc_tui_overview_tasks.land_on state.tasks ~task_id;
                                launch_task_history_load state
@@ -28931,7 +28928,7 @@ and is loaded on demand through keeper_skill.
                      state.planning_mode <- Planning_list;
                      state.task_detail_id <- Some task_id;
                      state.task_detail_scroll <- 0;
-                     state.task_history <- None;
+                     state.task_history <- Masc_tui_fetched.clear state.task_history;
                      state.task_focus <-
                        Masc_tui_overview_tasks.land_on state.tasks ~task_id;
                      launch_task_history_load state ~mailbox:async_messages
@@ -28939,7 +28936,7 @@ and is loaded on demand through keeper_skill.
                  | Link.Goal, Planning, Some goal_id ->
                      state.task_focus <- Masc_tui_overview_tasks.No_task_focus;
                      state.planning_mode <- Planning_detail goal_id;
-                     state.goal_timeline <- None;
+                     state.goal_timeline <- Masc_tui_fetched.clear state.goal_timeline;
                      launch_goal_timeline_load state ~mailbox:async_messages
                        goal_id
                  | Link.Board_post, Board, Some post_id -> state.board_mode <- Board_read post_id
@@ -30780,7 +30777,7 @@ and is loaded on demand through keeper_skill.
                       | Some (Masc_tui_overview_tasks.Open task) ->
                           state.task_detail_id <- Some task.id;
                           state.task_detail_scroll <- 0;
-                          state.task_history <- None;
+                          state.task_history <- Masc_tui_fetched.clear state.task_history;
                           launch_task_history_load state
                             ~mailbox:async_messages task.id
                       | Some Masc_tui_overview_tasks.No_held_task ->

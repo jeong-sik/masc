@@ -73,12 +73,17 @@ val short_ts : string -> string
 (** "2026-07-28T03:57:38Z" -> "07-28 03:57"; anything shorter is shown as-is
     rather than guessed at. Shared with the task-history rows. *)
 
+val timeline_unavailability_detail : Tui_decode.goal_timeline_unavailability -> string
+(** Preserve the typed source failure's cause at the history read boundary. *)
+
 val timeline :
   width:int ->
   goal_id:string ->
-  (string * (Tui_decode.goal_timeline, string) result) option ->
+  (string, Tui_decode.goal_timeline_event list) Masc_tui_fetched.t ->
   line list
 (** The goal's merged event timeline, appended after [body] so it rides the
     same scroll. Loaded lazily on detail entry; every non-ready state (still
     loading, store unavailable, load failed, stale answer for another goal)
-    says what it is instead of rendering as an empty history. *)
+    says what it is instead of rendering as an empty history. Refresh failures
+    retain the last observed rows with their stale reason; they do not certify
+    the goal's current work or turn a source-unavailable result into success. *)

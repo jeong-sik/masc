@@ -43,6 +43,19 @@ description: "MASC TUI의 채팅·입력·로딩·진행 상태, 시작 키 인�
   실행·소스 증명이나 속도 verdict로 올리지 않는다. 서로 다른 process의 monotonic 시각을
   빼거나 같은 capture를 여러 표본에 복제하지 않는다. 이 도구는 TUI/PTY/서버를 시작하지 않는다.
 
+## Task·Goal 이력 조회
+
+- 같은 항목 ID를 다시 열거나 새로 읽을 수 있으므로 ID만으로 응답을 적용하지 않는다.
+  `begin_task_history_read`/`begin_goal_timeline_read`가 받은 원래 request를 완료까지 보관한다.
+  명시 재조회는 `Masc_tui_fetched.refresh`로 이전 요청을 대체하고, 일반 `start`의 공유 정책은
+  유지한다. 재조회 중 마지막 정상 관측과 조회 진행을 구분해 표시하고, 재조회 실패/재시도는
+  마지막 관측과 실패 이유를 함께 남긴다. 최초 값 없는 실패는 빈 이력이 아니다.
+- workspace 철회 시 `withdraw_detail_histories`로 두 값과 대기 소유자를 함께 철회한다.
+  재진입/다른 workspace의 같은 ID가 이전 request를 빌리지 않게 generation을 초기화하지 않는다.
+  조회 중/조회 완료는 Task 진행·효과·Goal 성공이 아니다. 상태/원래 이벤트 경계를 검사하며
+  문구·배치·행 순서·PTY 검사를 추가하지 않는다. Before/After는
+  `docs/audits/2026-10-19-tui-detail-history-ownership.md`를 따른다.
+
 ## 에디터 준비 조회
 
 - Keeper 설정의 `e`는 workspace 확인·설정 snapshot 읽기·재확인을 소유된 비동기 조회로

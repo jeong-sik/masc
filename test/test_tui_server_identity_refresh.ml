@@ -4079,10 +4079,90 @@ let test_operation_histories_keep_unfinished_and_recovery_owners () =
           && attempt.raa_status=assignment_unsent && attempt.raa_request.ras_runtime_id=None)
           (Runtime_assignment_saves.all state.runtime_assignment_saves))
 
+let test_detail_histories_follow_refresh_and_workspace_owners () =
+  let open Masc_tui_types in
+  let module Fetched = Masc_tui_fetched in
+  let state = create_state ~workspace:"history" ~local_base_path:"/workspace/history"
+      ~port:0 ~refresh_interval:0. () in
+  let required = function Some request -> request | None -> Alcotest.fail "detail read did not acquire its owner" in
+  let task_id = "task-original" and goal_id = "goal-original" in
+  let task_rows status =
+    Tui_decode.decode_task_history (`List [`Assoc
+      ["type",`String "task_transition";"task",`String task_id;"agent",`String "original-keeper";
+       "ts",`String "2026-10-19T01:00:00Z";"from_status",`String "todo";"to_status",`String status]])
+    |> function Ok rows -> rows | Error detail -> Alcotest.fail detail in
+  let goal_rows summary =
+    Tui_decode.decode_goal_detail_timeline (`Assoc
+      ["approval_queue_state",`Assoc ["state",`String "ready"];
+       "timeline",`List [`Assoc ["ts",`String "2026-10-19T01:00:00Z";"kind",`String "goal_phase";
+         "lane",`String "goal";"title",`String "Goal Phase";"summary",`String summary;"severity",`String "ok"]]])
+    |> function
+       | Ok (Tui_decode.Goal_timeline_ready rows) -> rows
+       | Ok (Tui_decode.Goal_timeline_unavailable _) -> Alcotest.fail "original goal source became unavailable"
+       | Error detail -> Alcotest.fail detail in
+  let task_view () = Fetched.view_for ~equal:String.equal state.task_history ~key:task_id in
+  let goal_view () = Fetched.view_for ~equal:String.equal state.goal_timeline ~key:goal_id in
+  let previous = task_rows "todo" and current = task_rows "in_progress" and repaired = task_rows "done" in
+  let old = begin_task_history_read state ~task_id |> required in
+  let owner = begin_task_history_read state ~task_id |> required in
+  complete_task_history_read state old (Ok previous);
+  Alcotest.(check bool) "late same-task response cannot settle its successor" true
+    (Fetched.is_current ~equal:String.equal state.task_history owner && task_view () = Fetched.Loading);
+  complete_task_history_read state owner (Ok current);
+  let old_refresh = begin_task_history_read state ~task_id |> required in
+  let refresh = begin_task_history_read state ~task_id |> required in
+  Alcotest.(check bool) "refresh retains original observed history while pending" true
+    (Fetched.in_flight state.task_history && Fetched.value (task_view ()) = Some current);
+  complete_task_history_read state refresh (Error "history source unavailable");
+  complete_task_history_read state old_refresh (Ok previous);
+  Alcotest.(check bool) "old success cannot erase latest failure or original history" true
+    (task_view () = Fetched.Stale (current,"history source unavailable"));
+  let retry = begin_task_history_read state ~task_id |> required in
+  Alcotest.(check bool) "retry retains the unrepaired source failure" true
+    (Fetched.in_flight state.task_history && task_view () = Fetched.Stale (current,"history source unavailable"));
+  complete_task_history_read state retry (Ok repaired);
+  Alcotest.(check bool) "current original history resumes after source repair" true
+    (task_view () = Fetched.Ready repaired && not (Fetched.in_flight state.task_history));
+  let old_goal = begin_goal_timeline_read state ~goal_id |> required in
+  let goal = begin_goal_timeline_read state ~goal_id |> required in
+  let original_goal = goal_rows "original Task is in progress" in
+  complete_goal_timeline_read state goal (Ok (Tui_decode.Goal_timeline_ready original_goal));
+  complete_goal_timeline_read state old_goal (Error "late retired failure");
+  Alcotest.(check bool) "goal history retains its own current observation" true
+    (goal_view () = Fetched.Ready original_goal);
+  let goal_refresh = begin_goal_timeline_read state ~goal_id |> required in
+  complete_goal_timeline_read state goal_refresh
+    (Ok (Tui_decode.Goal_timeline_unavailable (Tui_decode.Approval_queue_failure "goal source unavailable")));
+  Alcotest.(check bool) "goal refresh failure retains original observation" true
+    (match goal_view () with Fetched.Stale (rows,_) -> rows=original_goal | _ -> false);
+  let retired_task = begin_task_history_read state ~task_id |> required in
+  let retired_goal = begin_goal_timeline_read state ~goal_id |> required in
+  withdraw_detail_histories state;
+  state.server_identity <- Some (identity "/workspace/replacement");
+  complete_task_history_read state retired_task (Ok previous);
+  complete_goal_timeline_read state retired_goal (Ok (Tui_decode.Goal_timeline_ready original_goal));
+  Alcotest.(check bool) "withdrawal retires both original histories" true
+    (task_view () = Fetched.Absent && goal_view () = Fetched.Absent);
+  let replacement_task = begin_task_history_read state ~task_id |> required in
+  let replacement_goal = begin_goal_timeline_read state ~goal_id |> required in
+  complete_task_history_read state retired_task (Ok previous);
+  complete_goal_timeline_read state retired_goal (Ok (Tui_decode.Goal_timeline_ready original_goal));
+  Alcotest.(check bool) "same IDs in replacement workspace cannot borrow retired responses" true
+    (Fetched.is_current ~equal:String.equal state.task_history replacement_task
+     && Fetched.is_current ~equal:String.equal state.goal_timeline replacement_goal
+     && task_view () = Fetched.Loading && goal_view () = Fetched.Loading);
+  let replacement = goal_rows "replacement workspace observation" in
+  complete_task_history_read state replacement_task (Ok repaired);
+  complete_goal_timeline_read state replacement_goal (Ok (Tui_decode.Goal_timeline_ready replacement));
+  Alcotest.(check bool) "replacement completes only with its own observations" true
+    (task_view () = Fetched.Ready repaired && goal_view () = Fetched.Ready replacement)
+
 let () =
   Alcotest.run "tui_server_identity_refresh"
     [ ( "server-identity-refresh"
-      , [ Alcotest.test_case "operation histories retain unfinished delivery and uncertain recovery owners" `Quick
+      , [ Alcotest.test_case "detail histories retain exact refresh and workspace owners" `Quick
+            test_detail_histories_follow_refresh_and_workspace_owners
+        ; Alcotest.test_case "operation histories retain unfinished delivery and uncertain recovery owners" `Quick
             test_operation_histories_keep_unfinished_and_recovery_owners
         ; Alcotest.test_case "owned operation results progress between continuously refilled shared prefixes" `Quick
             test_owned_results_progress_between_shared_queue_prefixes

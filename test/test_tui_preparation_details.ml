@@ -96,7 +96,7 @@ let actual_source_to_selected_read () = with_source (fun config keeper_name turn
   check bool "cancelled autonomous evidence survives without a reply receipt" true
     (match reports with [report] -> report.boundary=Observation.Cancelled | _ -> false))
 
-let protocol_gaps_are_not_absence () = with_source (fun _ _ _ _ selected response ->
+let protocol_gaps_are_not_absence () = with_source (fun config keeper_name turn_ref _ selected response ->
   let rows = Yojson.Safe.Util.(member "manifest_rows" response |> to_list) in
   let duplicated = response |> replace "manifest_rows" (`List (rows@rows))
       |> replace "manifest_returned_rows" (`Int (2*List.length rows))
@@ -106,6 +106,7 @@ let protocol_gaps_are_not_absence () = with_source (fun _ _ _ _ selected respons
   check bool "duplicate evidence stays explicit" true
     (List.exists (function Details.Duplicate_report _ -> true
       | Partial_scan | Partial_return | Missing_manifest | Unsupported_rows _
+      | Scan_unsupported_events _ | Scan_invalid_manifest_rows _ | Scan_invalid_json_rows _
       | Invalid_rows _ | Invalid_report _ | Unlinked_report -> false) snapshot.issues);
   let partial = response |> replace "manifest_total_rows_exact" (`Bool false)
       |> replace "manifest_total_rows" (`Int (List.length rows+1)) in
@@ -114,10 +115,35 @@ let protocol_gaps_are_not_absence () = with_source (fun _ _ _ _ selected respons
     (List.mem Details.Partial_scan snapshot.issues && List.mem Details.Partial_return snapshot.issues);
   check int "partial coverage preserves actual reports" 1 (List.length snapshot.reports);
   let diagnostics = Yojson.Safe.Util.member "manifest_scan_diagnostics" response
-      |> replace "unsupported_event_count" (`Int 1) in
+      |> replace "unsupported_event_count" (`Int 1)
+      |> replace "invalid_manifest_row_count" (`Int 2)
+      |> replace "invalid_json_row_count" (`Int 3) in
   let unsupported = Details.decode ~target:selected
       (replace "manifest_scan_diagnostics" diagnostics response) |> ok in
-  check bool "unsupported evidence is retained" true (List.mem (Details.Unsupported_rows 1) unsupported.issues);
+  check bool "scan diagnostics retain their source scopes" true
+    (List.mem (Details.Scan_unsupported_events 1) unsupported.issues
+     && List.mem (Details.Scan_invalid_manifest_rows 2) unsupported.issues
+     && List.mem (Details.Scan_invalid_json_rows 3) unsupported.issues
+     && not (List.exists (function Details.Unsupported_rows _ | Invalid_rows _ -> true
+       | Partial_scan | Partial_return | Missing_manifest | Scan_unsupported_events _
+       | Scan_invalid_manifest_rows _ | Scan_invalid_json_rows _ | Invalid_report _
+       | Duplicate_report _ | Unlinked_report -> false) unsupported.issues));
+  check int "scan problems do not erase the original valid report" 1 (List.length unsupported.reports);
+  let path = Keeper_runtime_manifest.path_for_trace config ~keeper_name
+      ~trace_id:(Ids.Turn_ref.trace_id turn_ref) in
+  let channel = open_out_gen [Open_wronly; Open_append; Open_binary] 0o600 path in
+  Fun.protect ~finally:(fun () -> close_out channel) (fun () ->
+    output_string channel "{}\n{not-json}\n");
+  let status, damaged = Server_dashboard_http_keeper_api.keeper_runtime_trace_json config keeper_name
+      ~trace_id:(Ids.Turn_ref.trace_id turn_ref) ~turn_id:(Ids.Turn_ref.absolute_turn turn_ref) () in
+  check bool "actual trace still returns the original turn through damaged scan rows" true (status=`OK);
+  let damaged = Details.decode ~target:selected damaged |> ok in
+  check bool "actual scan preserves distinct malformed JSON and manifest evidence" true
+    (List.mem (Details.Scan_invalid_manifest_rows 1) damaged.issues
+     && List.mem (Details.Scan_invalid_json_rows 1) damaged.issues
+     && not (List.mem (Details.Invalid_rows 1) damaged.issues));
+  check int "actual damaged scan preserves the durable original preparation report" 1
+    (List.length damaged.reports);
   check bool "a foreign response is rejected before reports are projected" true
     (Result.is_error (Details.decode ~target:selected (replace "keeper" (`String "foreign") response)));
   let missing = response |> replace "manifest_rows" (`List []) |> replace "manifest_returned_rows" (`Int 0)

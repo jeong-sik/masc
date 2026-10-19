@@ -53,6 +53,8 @@ let path target =
 
 type issue =
   | Partial_scan | Partial_return | Missing_manifest
+  | Scan_unsupported_events of int
+  | Scan_invalid_manifest_rows of int | Scan_invalid_json_rows of int
   | Unsupported_rows of int | Invalid_rows of int
   | Invalid_report of string | Duplicate_report of string | Unlinked_report
 type snapshot = {observed_target : target; reports : Observation.report list; issues : issue list}
@@ -101,9 +103,9 @@ let decode ~target json =
   let issues = List.filter_map Fun.id
       [if exact then None else Some Partial_scan; if returned=total then None else Some Partial_return;
        if present then None else Some Missing_manifest;
-       if unsupported=0 then None else Some (Unsupported_rows unsupported);
-       if invalid_rows=0 then None else Some (Invalid_rows invalid_rows);
-       if invalid_json=0 then None else Some (Invalid_rows invalid_json)] in
+       if unsupported=0 then None else Some (Scan_unsupported_events unsupported);
+       if invalid_rows=0 then None else Some (Scan_invalid_manifest_rows invalid_rows);
+       if invalid_json=0 then None else Some (Scan_invalid_json_rows invalid_json)] in
   let report_matches (report : Observation.report) =
     match target.operation_id, report.execution_scope with
     | Some expected, Some scope ->

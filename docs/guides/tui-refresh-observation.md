@@ -1,5 +1,14 @@
 # TUI refresh observations and before/after comparisons
 
+Selected durable preparation details preserve three scan diagnostic categories
+(unsupported events, malformed manifest rows and malformed JSON) separately
+from returned-row decoding issues. Malformed scan rows cannot be attributed to
+the selected turn. Rejected reports retain their decoding or original-link
+reason as terminal-safe detail text. These counts are not failed Task counts;
+no timing improvement is inferred. The
+[diagnostic scope comparison](../audits/2026-10-19-tui-preparation-diagnostic-scope.md)
+records source Before/After and the unexecuted compound trace scenario.
+
 The TUI records the logical readers of a full HTTP refresh and shows which reader
 it is waiting for. Diagnostic status explains a refresh that has not finished;
 independent roster delivery also removes the unrelated-reader wait for that

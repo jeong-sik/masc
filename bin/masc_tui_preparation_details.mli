@@ -12,8 +12,15 @@ val path : target -> string
 
 type issue =
   | Partial_scan | Partial_return | Missing_manifest
+  | Scan_unsupported_events of int
+  | Scan_invalid_manifest_rows of int | Scan_invalid_json_rows of int
   | Unsupported_rows of int | Invalid_rows of int
   | Invalid_report of string | Duplicate_report of string | Unlinked_report
+(** [Scan_*] counts describe the server's scanned window, not the returned
+    page. Unsupported events have a matching turn identity; malformed JSON
+    and manifest rows cannot be attributed to the selected turn.
+    [Unsupported_rows] and [Invalid_rows] describe returned rows. Keep the
+    scopes separate; none of these counts is a failed-work count. *)
 type snapshot = private
   { observed_target : target
   ; reports : Masc.Keeper_preparation_runtime_observation.report list

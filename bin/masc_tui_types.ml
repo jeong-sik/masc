@@ -17825,14 +17825,21 @@ let keeper_message_preparation_selection (state : state) =
 let keeper_message_saved_preparation_rows state live =
   let module Details = Masc_tui_preparation_details in
   let module Transcript = Masc_tui_keeper_chat_transcript in
-  let row text = Transcript.Diagnostic, text in
+  let row text = Transcript.Diagnostic,
+    Masc_tui_keeper_chat_projection.terminal_safe_text text in
   let issue = function
     | Details.Partial_scan -> "조회한 저널 범위가 일부임"
     | Partial_return -> "반환된 기록이 일부임"
     | Missing_manifest -> "저장 저널이 확인되지 않음"
-    | Unsupported_rows count -> Printf.sprintf "지원하지 않는 기록 %d개" count
-    | Invalid_rows count -> Printf.sprintf "읽을 수 없는 기록 %d개" count
-    | Invalid_report _ -> "읽을 수 없는 준비 보고서"
+    | Scan_unsupported_events count ->
+      Printf.sprintf "저널 조회 범위 · 지원하지 않는 이벤트 %d개" count
+    | Scan_invalid_manifest_rows count ->
+      Printf.sprintf "저널 조회 범위 · 읽을 수 없는 저널 행 %d개 · 이 작업의 기록 수가 아님" count
+    | Scan_invalid_json_rows count ->
+      Printf.sprintf "저널 조회 범위 · 읽을 수 없는 JSON 행 %d개 · 이 작업의 기록 수가 아님" count
+    | Unsupported_rows count -> Printf.sprintf "반환된 행 · 지원하지 않는 기록 %d개" count
+    | Invalid_rows count -> Printf.sprintf "반환된 행 · 읽을 수 없는 기록 %d개" count
+    | Invalid_report detail -> "준비 보고서 제외 · " ^ detail
     | Duplicate_report id -> "중복된 준비 보고서 · " ^ id
     | Unlinked_report -> "실행 연결이 없는 준비 보고서" in
   match keeper_message_preparation_selection state with

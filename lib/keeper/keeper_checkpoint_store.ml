@@ -1354,16 +1354,21 @@ let canonical_source_locked
       | Some _ | None -> Result.map source_of_reference (decoded_reference ()))
 ;;
 
-let load_agent_core_exact_snapshot ~session_dir ~session_id =
+let with_agent_core_exact_snapshot ~session_dir ~session_id f =
   match Keeper_id.Trace_id.of_string session_id with
   | Error reason -> Error (Ref_identity_invalid (Session_id_invalid reason))
   | Ok expected_session_id ->
     (match
        with_session_lock ~session_dir (fun session_dir ->
-         load_ref_locked ~session_dir ~expected_session_id)
+         match load_ref_locked ~session_dir ~expected_session_id with
+         | Error _ as error -> error
+         | Ok snapshot -> Ok (f snapshot))
      with
      | Ok result -> result
      | Error detail -> Error (Ref_lock_failed detail))
+
+let load_agent_core_exact_snapshot ~session_dir ~session_id =
+  with_agent_core_exact_snapshot ~session_dir ~session_id Fun.id
 
 let load_agent_core_with_ref ~session_dir ~session_id =
   load_agent_core_exact_snapshot ~session_dir ~session_id

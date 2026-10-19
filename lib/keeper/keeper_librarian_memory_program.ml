@@ -7,6 +7,11 @@ let digest = function
 
 let decision ~sources (step : Keeper_librarian_runtime.memory_step) =
   let input = step.source_input in
+  let* () = match sources, input.messages with
+    | [], [] ->
+      if input.tool_observations <> [] || input.counterpart_observations <> [] then Ok ()
+      else Error "a message-free Memory decision requires actual host observations"
+    | [], _ :: _ | _ :: _, ([] | _ :: _) -> Ok () in
   let rec bind sources messages =
     match sources, messages with
     | [], [] -> Ok ()

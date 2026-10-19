@@ -1146,7 +1146,7 @@ let test_memory_inference_retains_gated_decision () =
   check bool "inference preserves every Memory and context store" true
     (before = List.map Fs_compat.load_file_opt paths);
   let step = match result with
-    | Runtime.Memory_not_inferred reports ->
+    | Runtime.Memory_not_inferred {reports;_} ->
       failf "Memory inference refused: %s"
         (String.concat "; " (List.map (fun (r : Runtime.not_committed) -> r.detail) reports))
     | Runtime.Memory_inferred {step;served_by} ->
@@ -1257,7 +1257,7 @@ let with_memory_plan_fixture initial_facts f =
     match Runtime.infer_memory_step ~cli_runner:runner ~base_path ~keepers_dir ~keeper_id
       ~previous_state:None ~unread_messages:[] source with
     | Runtime.Memory_inferred {step;_} -> step
-    | Runtime.Memory_not_inferred reports ->
+    | Runtime.Memory_not_inferred {reports;_} ->
       failf "ordered Memory inference refused: %s"
         (String.concat "; " (List.map (fun (r : Runtime.not_committed) -> r.detail) reports))
   in
@@ -1533,8 +1533,10 @@ let test_memory_inference_failure_keeps_pending_publication failure () =
   (match Runtime.infer_memory_step ~cli_runner:runner ~base_path ~keepers_dir ~keeper_id
       ~previous_state:None ~unread_messages:[] (input ()) with
    | Runtime.Memory_inferred _ -> fail "a failed inference was accepted"
-   | Runtime.Memory_not_inferred reports ->
+   | Runtime.Memory_not_inferred {reports;exhausted_input_refusals} ->
      check bool "classified failure remains observable" true (reports<>[]);
+     check bool "a failed CLI inference grants no API exhaustion evidence" true
+       (exhausted_input_refusals=None);
      (match failure with
       | Opaque_cli_failure -> check bool "opaque CLI grants no typed skip authority" true
           (List.for_all (fun (r : Runtime.not_committed) -> r.provider_input_refusals=[]) reports)
@@ -1562,12 +1564,108 @@ let test_memory_inference_failure_keeps_pending_publication failure () =
       && reading.lp_memory_result=None)
 ;;
 
+type memory_exhaustion_case =
+  | Named_api_only
+  | Named_and_unknown_api
+  | Unknown_api_only
+  | Domain_then_named_api
+  | Invalid_json_then_named_api
+  | Named_api_and_cli_tail
+  | Local_projection_then_named_api
+  | Local_connection_then_named_api
+
+let test_memory_inference_exhaustion case () =
+  with_eio @@ fun ~sw ~net ~clock ~base_path ->
+  Fixture.with_official_client_runtimes @@ fun () ->
+  Masc_test_deps.with_typesafeai_policy
+    {Runtime_schema.default_typesafeai with lane_enabled=false; absorb_gate=false} @@ fun () ->
+  Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
+  let refuse status = Fixture.Reply_with (fun _ _ -> status,
+    {|{"error":{"message":"fixture refusal","type":"invalid_request_error"}}|}) in
+  let named = Fixture.start_server ~sw ~net ~clock (refuse `Request_entity_too_large) in
+  let other_behavior = match case with
+    | Domain_then_named_api -> Fixture.Reply (Fixture.openai_response (`Assoc []))
+    | Invalid_json_then_named_api -> Fixture.Reply
+        {|{"choices":[{"index":0,"message":{"role":"assistant","content":"not JSON"},"finish_reason":"stop"}]}|}
+    | Named_api_only | Named_and_unknown_api | Unknown_api_only
+    | Named_api_and_cli_tail | Local_projection_then_named_api
+    | Local_connection_then_named_api -> refuse `Internal_server_error in
+  let other = Fixture.start_server ~sw ~net ~clock other_behavior in
+  let named_id = "memory-floor-named" and other_id = "memory-floor-other" in
+  let slots, other_url, excluded, cli_slots, expected, named_posts, other_posts = match case with
+    | Named_api_only -> [named_id], other.base_url, [], [], true, 1, 0
+    | Named_and_unknown_api -> [named_id;other_id], other.base_url, [], [], true, 1, 1
+    | Unknown_api_only -> [other_id], other.base_url, [], [], false, 0, 1
+    | Domain_then_named_api | Invalid_json_then_named_api ->
+      [other_id;named_id], other.base_url, [], [], false, 1, 1
+    | Named_api_and_cli_tail ->
+      [named_id], other.base_url, [], [Fixture.cli_primary_runtime], false, 1, 0
+    | Local_projection_then_named_api ->
+      [other_id;named_id], other.base_url, [other_id,true], [], false, 1, 0
+    | Local_connection_then_named_api ->
+      [other_id;named_id], "http://127.0.0.1:1", [], [], false, 1, 0 in
+  ignore (Fixture.publish_registry ~cli_slot_ids:cli_slots
+    ~lane_id:"librarian_exact" ~slot_ids:slots
+    (Fixture.resolver_snapshot ~source:"Memory inference exhaustion evidence"
+      ~enable_thinkings:excluded
+      [{Fixture.id=named_id;base_url=named.base_url};
+       {Fixture.id=other_id;base_url=other_url}]) : Runtime_exact_output_registry.t);
+  let cli_calls = ref 0 in
+  let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+    incr cli_calls;
+    Error (Masc.Fusion_official_client.Setup_failure "opaque CLI tail") in
+  let keeper_id = "memory-floor-evidence" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let paths = inference_store_paths ~keepers_dir ~keeper_id in
+  let before = List.map Fs_compat.load_file_opt paths in
+  (match Runtime.infer_memory_step ~cli_runner:runner ~base_path ~keepers_dir ~keeper_id
+      ~previous_state:None ~unread_messages:[] (input ()) with
+   | Memory_inferred _ -> fail "the failed provider walk was accepted as Memory"
+   | Memory_not_inferred failure ->
+     check bool "actual failure reports remain available" true (failure.reports<>[]);
+     check bool "only a completely exhausted API walk grants floor evidence"
+       expected (Option.is_some failure.exhausted_input_refusals);
+     (match failure.exhausted_input_refusals with
+      | None -> ()
+      | Some refusals -> check bool "the exact named provider cause is preserved" true
+          (refusals=[Masc.Keeper_librarian_input_refusal.Request_body_refused]));
+     (match case with
+      | Named_api_and_cli_tail ->
+        check bool "CLI tail vetoes authority despite the earlier typed provider refusal" true
+          (List.exists (fun (report : Runtime.not_committed) ->
+            report.provider_input_refusals<>[]) failure.reports)
+      | Named_api_only | Named_and_unknown_api | Unknown_api_only
+      | Domain_then_named_api | Invalid_json_then_named_api
+      | Local_projection_then_named_api | Local_connection_then_named_api -> ()));
+  check int "the named provider received exactly its expected visit" named_posts (Fixture.post_count named);
+  check int "the other actual HTTP provider received exactly its expected visit" other_posts (Fixture.post_count other);
+  check int "only a declared CLI tail was invoked" (List.length cli_slots) !cli_calls;
+  check bool "failed inference never writes Memory, its proof or continuation" true
+    (before=List.map Fs_compat.load_file_opt paths)
+;;
+
 let () =
   run
     "keeper_librarian_cli_lane"
     [ ( "cli lane slots"
       , [ test_case "gated Runtime decisions bind exact sources through program replay" `Quick
             test_gated_runtime_program_binding
+        ; test_case "named API exhaustion grants Memory floor evidence" `Quick
+            (test_memory_inference_exhaustion Named_api_only)
+        ; test_case "exhausted named and unknown API failures retain floor evidence" `Quick
+            (test_memory_inference_exhaustion Named_and_unknown_api)
+        ; test_case "unknown-only API exhaustion grants no Memory floor evidence" `Quick
+            (test_memory_inference_exhaustion Unknown_api_only)
+        ; test_case "domain rejection vetoes a later named API refusal" `Quick
+            (test_memory_inference_exhaustion Domain_then_named_api)
+        ; test_case "invalid JSON vetoes a later named API refusal" `Quick
+            (test_memory_inference_exhaustion Invalid_json_then_named_api)
+        ; test_case "opaque CLI tail vetoes earlier named API refusal" `Quick
+            (test_memory_inference_exhaustion Named_api_and_cli_tail)
+        ; test_case "local projection rejection vetoes later named API refusal" `Quick
+            (test_memory_inference_exhaustion Local_projection_then_named_api)
+        ; test_case "local connection failure vetoes later named API refusal" `Quick
+            (test_memory_inference_exhaustion Local_connection_then_named_api)
         ; test_case "ordered Memory revisions preserve original decisions and store parity" `Quick
             test_ordered_memory_revision_chain
         ; test_case "ordered Memory support closure prevents later resurrection" `Quick

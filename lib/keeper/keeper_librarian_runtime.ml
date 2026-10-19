@@ -49,6 +49,7 @@ type input_capacity_evidence = No_input_capacity_refusal | Input_capacity_refuse
 type exact_execution_error =
   { outward_effect : outward_effect
   ; failure_evidence : Failure_evidence.t
+  ; exhausted_input_refusals : Keeper_librarian_input_refusal.t list option
   ; detail : string
   }
 
@@ -234,11 +235,13 @@ type inference =
       { previous_state : string option
       ; unread_messages : Keeper_librarian_unread.t list
       ; observe : served_by:served_slot -> string -> unit
+      ; observe_failure : Keeper_librarian_input_refusal.t list option -> unit
       }
   | Infer_memory of
       { previous_state : string option
       ; unread_messages : Keeper_librarian_unread.t list
       ; observe : served_by:served_slot -> memory_step -> unit
+      ; observe_failure : Keeper_librarian_input_refusal.t list option -> unit
       }
 
 (* Memory inference asks the same Memory question without publishing. Context
@@ -560,6 +563,7 @@ let no_callback_error_to_string : no_callback_error -> string = function
    earlier slot sent its request, failed and advanced (#38450). A token-count
    measurement is not a generation request and is not counted. *)
 let exact_execution_error
+      ~api_walk_only
       ~semantic_rejections
       (error : no_callback_error Exact_output.flow_execution_error)
   =
@@ -568,6 +572,45 @@ let exact_execution_error
     match semantic_rejections with
     | [] -> failure_evidence
     | _ :: _ -> Failure_evidence.with_invalid_output failure_evidence
+  in
+  (* A refusal seen before a local stop is not exhaustion. Inspect the real
+     flow terminal and each prior visit, independently of the union of size
+     causes used by historical range adaptation. Other dispatched provider
+     failures remain part of an exhausted walk, even when their input cause
+     is unknown. *)
+  let dispatched_valid_output_failure = function
+    | Exact_output.Completion_failed { dispatch = No_generation_dispatch; _ }
+    | Invalid_json_output -> false
+    | Completion_failed { dispatch = Generation_dispatch_started; _ }
+    | Provider_response_refused _ | Response_body_deadline_exceeded
+    | Output_limit_reached | Incomplete_output | Missing_output
+    | Ambiguous_output _ | Unexpected_output_content -> true
+  in
+  let final_dispatched = match error with
+    | Exact_output.Flow_exact_execution_failed {cause;_} ->
+      dispatched_valid_output_failure cause.cause
+    | Flow_candidates_exhausted _ | Flow_attempt_already_started _
+    | Flow_attempt_start_failed _ | Flow_measurement_start_failed _
+    | Flow_before_measurement_dispatch_callback_failed _
+    | Flow_measurement_terminal_callback_failed _
+    | Flow_before_dispatch_callback_failed _ | Flow_before_advance_callback_failed _ -> false
+  in
+  let prior_dispatched = List.for_all
+    (fun (advance : Exact_output.flow_advance_receipt) -> match advance.failed with
+      | Flow_advance_execution_failed {cause;_} -> dispatched_valid_output_failure cause
+      | Flow_advance_candidate_rejected _ -> false)
+    flow_evidence.advances in
+  let all_candidates_visited =
+    Exact_output.candidate_visit_count_to_int flow_evidence.candidate_visit_count
+      = List.length flow_evidence.declared_candidate_snapshot in
+  let exhausted_input_refusals =
+    match Exact_output.flow_execution_terminal_kind error,
+          failure_evidence.provider_input_refusals with
+    | Advanceable_candidates_exhausted, (_ :: _ as refusals)
+        when api_walk_only && semantic_rejections = []
+          && all_candidates_visited && not failure_evidence.invalid_output
+          && final_dispatched && prior_dispatched -> Some refusals
+    | (Advanceable_candidates_exhausted | Non_advanceable_terminal), ([] | _ :: _) -> None
   in
   let outward_effect =
     match Exact_output.flow_evidence_generation_dispatch flow_evidence with
@@ -580,7 +623,7 @@ let exact_execution_error
       ~raw_response_to_string:Keeper_exact_flow_detail.raw_response_excerpt
       error
   in
-  { outward_effect; failure_evidence; detail }
+  { outward_effect; failure_evidence; exhausted_input_refusals; detail }
 ;;
 
 (* The librarian's whole prompt is one User message; the cli one-shot needs
@@ -868,7 +911,9 @@ let execute_answer
     let terminal () =
       Error
         (Exact_execution_failed
-           (exact_execution_error ~semantic_rejections:prior_rejections cause))
+           (exact_execution_error
+              ~api_walk_only:(cli_slots = [] && preflight.unusable = [])
+              ~semantic_rejections:prior_rejections cause))
     in
     (* The CLI tail follows the same advancement rule as HTTP successors;
        only masc's own failures keep their terminal. *)
@@ -890,7 +935,9 @@ let execute_answer
           Error
             (with_cli_failure
                (Exact_execution_failed
-                  (exact_execution_error ~semantic_rejections:prior_rejections cause))
+                  (exact_execution_error
+                     ~api_walk_only:(cli_slots = [] && preflight.unusable = [])
+                     ~semantic_rejections:prior_rejections cause))
                cli_failure))
      | Exact_output.Non_advanceable_terminal -> terminal ())
   | Error
@@ -1183,6 +1230,13 @@ let run_pass
       ~expected_revision
       (inp : Keeper_librarian.input)
   =
+  let on_not_committed ?(exhausted_input_refusals=None) report =
+    on_not_committed report;
+    match inference with
+    | Some (Infer_memory {observe_failure;_})
+    | Some (Infer_state {observe_failure;_}) -> observe_failure exhausted_input_refusals
+    | None -> ()
+  in
   let trace_id = input_trace_id inp in
   (* A normal failure observes authoritative Memory and its journal. An
      inference must not do that read: it can recover an unrelated pending
@@ -1602,7 +1656,7 @@ let run_pass
                   ~commit:(fun () ->
                    Keeper_librarian_continuity.commit
                      ~config:(Workspace.default_config base_path) ~keeper_name:keeper_id
-                     ~prepared ~working_state)
+                     ~prepared ~new_unread_messages:[] ~working_state)
                   ~observe:(function
                  | Ok snapshot ->
                    continuity_write := `Assoc
@@ -1898,7 +1952,12 @@ let run_pass
                 was transient, and it names the cause in its log: without the
                 cause an authorization outage and an oversized range leave
                 the same line. *)
-             on_not_committed
+             let exhausted_input_refusals = match error with
+               | Exact_execution_failed failure -> failure.exhausted_input_refusals
+               | Prompt_render_failed _ | Exact_setup_failed _ | Cli_slots_exhausted _
+               | Cli_prompt_unavailable _ | No_transport_declared | Domain_output_invalid _
+               | Absorb_judgment_failed _ | Memory_snapshot_write_failed _ -> None in
+             on_not_committed ~exhausted_input_refusals
                { detail
                ; walk_shows_size = Failure_evidence.shows_range_size evidence
                ; input_capacity_evidence = input_capacity_of_failure evidence
@@ -2053,38 +2112,47 @@ let run_pass
 
 let run_best_effort = run_pass ?inference:None
 
+type inference_failure =
+  { reports : not_committed list
+  ; exhausted_input_refusals : Keeper_librarian_input_refusal.t list option
+  }
+
 type working_state_inference =
   | Inferred of { working_state : string; served_by : served_slot }
-  | Not_inferred of not_committed list
+  | Not_inferred of inference_failure
 
 let infer_working_state ?cli_runner ~base_path ~keepers_dir ~keeper_id
     ~previous_state ~unread_messages input =
-  let inferred = ref None and reports = ref [] in
+  let inferred = ref None and reports = ref [] and exhausted_input_refusals = ref None in
   run_pass ~write_scope:Context_only
     ~inference:(Infer_state {previous_state; unread_messages;
-      observe=(fun ~served_by working_state -> inferred := Some (working_state, served_by))})
+      observe=(fun ~served_by working_state -> inferred := Some (working_state, served_by));
+      observe_failure=(fun exhausted -> exhausted_input_refusals := exhausted)})
     ~on_not_committed:(fun report -> reports := report :: !reports)
     ?cli_runner ~base_path ~keepers_dir ~keeper_id ~expected_revision:None input;
   match !inferred with
   | Some (working_state, served_by) -> Inferred { working_state; served_by }
-  | None -> Not_inferred (List.rev !reports)
+  | None -> Not_inferred {reports=List.rev !reports;
+      exhausted_input_refusals= !exhausted_input_refusals}
 ;;
 
 type memory_inference =
   | Memory_inferred of { step : memory_step; served_by : served_slot }
-  | Memory_not_inferred of not_committed list
+  | Memory_not_inferred of inference_failure
 
 let infer_memory_step ?cli_runner ~base_path ~keepers_dir ~keeper_id
     ~previous_state ~unread_messages input =
-  let inferred = ref None and reports = ref [] in
+  let inferred = ref None and reports = ref [] and exhausted_input_refusals = ref None in
   run_pass ~write_scope:Context_and_memory
     ~inference:(Infer_memory {previous_state; unread_messages;
-      observe=(fun ~served_by step -> inferred := Some (step, served_by))})
+      observe=(fun ~served_by step -> inferred := Some (step, served_by));
+      observe_failure=(fun exhausted -> exhausted_input_refusals := exhausted)})
     ~on_not_committed:(fun report -> reports := report :: !reports)
     ?cli_runner ~base_path ~keepers_dir ~keeper_id ~expected_revision:None input;
   match !inferred with
   | Some (step, served_by) -> Memory_inferred {step; served_by}
-  | None -> Memory_not_inferred (List.rev !reports)
+  | None -> Memory_not_inferred {reports=List.rev !reports;
+      exhausted_input_refusals= !exhausted_input_refusals}
 ;;
 
 module For_testing = struct

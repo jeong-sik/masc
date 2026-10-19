@@ -21,7 +21,10 @@ type decision = Keeper_memory_os_program_types.decision =
 (** Evidence documents are preserved opaque data, never interpreted as
     admission or control flags. The Runtime adapter must bind [sources] to
     the exact message bytes it actually judged. Their hashes and ordered
-    partition are checked here against the complete frozen source manifest. *)
+    partition are checked here against the complete frozen source manifest.
+    [sources=[]] retains an observation-only decision without claiming any
+    conversation message was read. The Runtime adapter must bind that decision
+    to actual host observations; opaque evidence is never parsed as authority. *)
 
 type invalidation = Keeper_memory_os_program_types.invalidation =
   { fact : fact

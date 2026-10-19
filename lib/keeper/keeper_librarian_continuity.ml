@@ -147,7 +147,7 @@ let prepare_source ?end_atom ~config ~keeper_name ~trace_id () =
       let cuts = R.cut_lines ~trace_id ~lines ~messages range
         |> List.sort (fun (left : R.atom_cut) (right : R.atom_cut) ->
           compare (left.cut_end_atom, left.cut_line) (right.cut_end_atom, right.cut_line)) in
-      let* receipt = Keeper_memory_os_current.committed_durable_range
+      let* receipt = Keeper_memory_os_current.committed_durable_coverage
         ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path)
         ~keeper_id:keeper_name ~receipt_scope:(path ~config ~keeper_name) in
       let recovery_receipt = match receipt with
@@ -178,6 +178,13 @@ let prepare_source ?end_atom ~config ~keeper_name ~trace_id () =
           | None -> cut.cut_end_atom >= end_atom) cuts with
           | Some cut -> Ok cut
           | None -> Error "continuity source has no covering completed boundary" in
+        let* previous_unread_messages = match recovery_receipt with
+          | None -> Ok previous_unread_messages
+          | Some receipt ->
+            let* () = Keeper_librarian_unread.validate_atom_history
+              ~trace_id ~history_start_boundary_line:range.history_start_boundary_line
+              ~end_atom:receipt.end_atom ~messages receipt.unread_messages in
+            Keeper_librarian_unread.merge previous_unread_messages receipt.unread_messages in
         let unread = R.slice messages {range with R.start_atom; end_atom} in
         Ok (Ready {trace_id;lines;messages;previous=stored;previous_state;previous_unread_messages;recovery_receipt;range;covering_cut;start_atom;end_atom;unread;
                   catch_up_target})
@@ -188,9 +195,21 @@ let prepare ?end_atom ~config ~keeper_name ~trace_id () =
   prepare_source ?end_atom ~config ~keeper_name ~trace_id ()
   |> Result.map (function Ready prepared -> Some prepared | No_source _ -> None)
 let messages prepared = prepared.unread
+let memory_sources prepared =
+  Keeper_librarian_unread.sources_for_atom_range ~trace_id:prepared.trace_id
+    ~history_start_boundary_line:prepared.range.history_start_boundary_line
+    ~start_atom:prepared.start_atom ~end_atom:prepared.end_atom ~messages:prepared.messages
+let unread_message prepared ~source ~reasons =
+  let* sources = memory_sources prepared in
+  if not (List.mem source sources) then Error "unread message is outside the selected original source"
+  else match source with
+    | Keeper_librarian_unread.Atom {trace_id;history_start_boundary_line;atom;message_in_atom;_} ->
+      Keeper_librarian_unread.for_atom ~trace_id ~history_start_boundary_line ~atom
+        ~message_in_atom ~messages:prepared.messages ~reasons
+    | Keeper_librarian_unread.Official_turn _ -> Error "continuity source is not an official fragment"
 (* Use all frozen cuts before clipping: a selected unit may end inside its
    covering turn, or an exact receipt may cover several turns. *)
-let source_spans prepared =
+let source_spans ?(include_unread=true) prepared =
   let module H = Keeper_librarian_task_context in
   let cuts = R.cut_lines ~trace_id:prepared.trace_id ~lines:prepared.lines
       ~messages:prepared.messages prepared.range
@@ -206,7 +225,25 @@ let source_spans prepared =
     let spans = List.map (fun scope ->
       let messages = match scope.H.source with
         | H.Atom_span {start_atom;end_atom;_} ->
-          R.slice prepared.messages {prepared.range with R.start_atom;end_atom}
+          let selected = R.slice prepared.messages {prepared.range with R.start_atom;end_atom} in
+          if include_unread then selected else
+          let labelled, _ = W.annotate prepared.messages in
+          let _, _, retained = List.fold_left (fun (last_atom, next_position, retained) (message,label) ->
+            match label with
+            | W.Pinned -> last_atom, next_position, retained
+            | W.Atom atom ->
+              let position = if last_atom=Some atom then next_position else 0 in
+              let omitted = List.exists (fun (hole : Keeper_librarian_unread.t) ->
+                match hole.source with
+                | Keeper_librarian_unread.Atom source ->
+                  source.trace_id=prepared.trace_id
+                  && source.history_start_boundary_line=prepared.range.history_start_boundary_line
+                  && source.atom=atom && source.message_in_atom=position
+                  && source.message_sha256=Keeper_librarian_unread.message_digest message
+                | Keeper_librarian_unread.Official_turn _ -> false) prepared.previous_unread_messages in
+              Some atom, position+1, if atom >= start_atom && atom < end_atom && not omitted
+                then message :: retained else retained) (None,0,[]) labelled in
+          List.rev retained
         | H.Boundary_only | H.Official_turn -> [] in
       scope, messages) scopes in
     end_atom, List.rev_append spans reversed)
@@ -269,7 +306,7 @@ let memory_range_id ~config ~keeper_name prepared =
   | None -> Error "continuity source has no covering completed boundary"
 let memory_committed ~config ~keeper_name prepared =
   let* expected = memory_range_id ~config ~keeper_name prepared in
-  let* actual = Keeper_memory_os_current.committed_durable_range
+  let* actual = Keeper_memory_os_current.committed_durable_coverage
     ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path)
     ~keeper_id:keeper_name ~receipt_scope:expected.receipt_scope in
   if actual = Some expected then Ok true else
@@ -301,9 +338,7 @@ let previous_unread_messages prepared = prepared.previous_unread_messages
 let prompt_json prepared =
   `Assoc ["previous_working_state", (match prepared.previous_state with None -> `Null | Some text -> `String text);
     "unread_messages", Keeper_librarian_unread.list_to_json prepared.previous_unread_messages]
-let commit ~config ~keeper_name ~prepared ~working_state =
-  let* covered = memory_committed ~config ~keeper_name prepared in
-  let* () = if covered then Ok () else Error "Memory has not committed this continuity source" in
+let capture_snapshot ~prepared ~unread_messages ~working_state =
   (* Capture against this work unit's actual completed turn, not a later
      backlog boundary. Keep the full frozen checkpoint in [prepared] for
      Memory coverage checks; only this capture view ends at the chosen cut. *)
@@ -311,13 +346,89 @@ let commit ~config ~keeper_name ~prepared ~working_state =
     match label with
     | W.Pinned -> Some message
     | W.Atom atom -> if atom < prepared.covering_cut.cut_end_atom then Some message else None) in
-  let* snapshot = S.capture_checkpoint_prefix ~unread_messages:prepared.previous_unread_messages ~end_atom:prepared.end_atom
+  S.capture_checkpoint_prefix ~unread_messages ~end_atom:prepared.end_atom
     ~catch_up_end_atom:prepared.catch_up_target
     ~trace_id:prepared.trace_id ~lines:prepared.lines ~messages
-    ~working_state () |> Result.map_error S.error_to_string in
+    ~working_state () |> Result.map_error S.error_to_string
+let unchanged_snapshot ~config ~keeper_name ~prepared =
+  let* current = load ~config ~keeper_name in
+  if current = prepared.previous then Ok ()
+  else Error "continuity snapshot changed during generation"
+let save_snapshot ~config ~keeper_name snapshot =
+  S.save ~path:(path ~config ~keeper_name) snapshot |> Result.map_error S.error_to_string
+let with_original_source ~config ~keeper_name ~prepared publish =
+  let session_dir = Filename.concat (Keeper_fs.session_store_path config) prepared.trace_id in
+  let locked = C.with_agent_core_exact_snapshot ~session_dir ~session_id:prepared.trace_id
+    (fun current ->
+      let current_messages = C.exact_snapshot_messages current in
+      (* Completed boundary rows only append during the serial lane. Purge
+         first cancels/awaits that lane. A suffix append cannot change this
+         prefix; reread the real log rather than reconstructing its witnesses. *)
+      let* lines = B.read ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name in
+      let prefix lines = List.filter (fun (line,_) -> line <= prepared.covering_cut.cut_line) lines in
+      let* () = if prefix lines = prefix prepared.lines then Ok ()
+        else Error "continuity boundary prefix changed during message inference" in
+      let* range_now = S.checkpoint_prefix_range ~trace_id:prepared.trace_id ~lines ~messages:current_messages
+        |> Result.map_error S.error_to_string in
+      let prefix_messages messages =
+        W.annotate messages |> fst |> List.filter_map (fun (message,label) ->
+          match label with
+          | W.Pinned -> Some (Agent_core.Checkpoint.message_to_json message)
+          | W.Atom atom -> if atom < prepared.covering_cut.cut_end_atom
+            then Some (Agent_core.Checkpoint.message_to_json message) else None) in
+      let* () =
+        if range_now.history_start_boundary_line=prepared.range.history_start_boundary_line
+           && range_now.end_atom >= prepared.end_atom
+           && prefix_messages current_messages=prefix_messages prepared.messages then Ok ()
+        else Error "continuity checkpoint prefix changed during message inference" in
+      publish ()) in
+  match locked with
+  | Ok result -> result
+  | Error C.Ref_not_found -> Error "continuity checkpoint disappeared before publication"
+  | Error (C.Ref_read_failed error) -> Error (C.checkpoint_load_error_to_string error)
+  | Error (C.Ref_identity_invalid _) -> Error "continuity checkpoint identity invalid at publication"
+  | Error (C.Ref_session_mismatch _) -> Error "continuity checkpoint trace changed at publication"
+  | Error (C.Ref_lock_failed detail) -> Error detail
+
+let commit ~config ~keeper_name ~prepared ~new_unread_messages ~working_state =
+  let* covered = memory_committed ~config ~keeper_name prepared in
+  let* () = if covered then Ok () else Error "Memory has not committed this continuity source" in
+  let* () = List.fold_left (fun result (hole : Keeper_librarian_unread.t) ->
+    let* () = result in
+    let* original = unread_message prepared ~source:hole.source ~reasons:hole.reasons in
+    if original=hole then Ok () else Error "continuity unread record differs from its original message")
+    (Ok ()) new_unread_messages in
+  let* unread_messages = Keeper_librarian_unread.merge
+    prepared.previous_unread_messages new_unread_messages in
+  let* snapshot = capture_snapshot ~prepared ~unread_messages ~working_state in
   let file = path ~config ~keeper_name in
   Fs_compat.mkdir_p (Filename.dirname file);
-  File_lock_eio.with_lock file (fun () ->
-    let* current = load ~config ~keeper_name in
-    if current <> prepared.previous then Error "continuity snapshot changed during generation"
-    else let* () = S.save ~path:file snapshot |> Result.map_error S.error_to_string in Ok snapshot)
+  with_original_source ~config ~keeper_name ~prepared (fun () ->
+    File_lock_eio.with_lock file (fun () ->
+      let* () = unchanged_snapshot ~config ~keeper_name ~prepared in
+      let* () = save_snapshot ~config ~keeper_name snapshot in Ok snapshot))
+
+let apply_memory_program ?on_memory_committed ~config ~keeper_name ~prepared ~anchor
+    ~(program : Keeper_memory_os_program.t) ~working_state () =
+  let module Current = Keeper_memory_os_current in
+  let* range = memory_range_id ~config ~keeper_name prepared in
+  let range = {range with Current.unread_messages=program.unread} in
+  let* unread_messages = Keeper_librarian_unread.merge
+    prepared.previous_unread_messages program.unread in
+  let* snapshot = capture_snapshot ~prepared ~unread_messages ~working_state in
+  let source = Current.Atom_program_source {range;checkpoint=prepared.messages} in
+  let file = path ~config ~keeper_name in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path in
+  Fs_compat.mkdir_p (Filename.dirname file);
+  with_original_source ~config ~keeper_name ~prepared (fun () ->
+    File_lock_eio.with_lock file (fun () ->
+      let* () = unchanged_snapshot ~config ~keeper_name ~prepared in
+      let* _ = Current.apply_program ~keepers_dir ~keeper_id:keeper_name ~now:(Time_compat.now ())
+        ~anchor ~source ~validate_source:(fun () -> Ok ())
+        ?on_committed:(Option.map (fun observe (_ : Current.program_commit) -> observe ()) on_memory_committed)
+        program in
+      (* The original complete range proof is now recoverable. Archive its
+         holes before exposing a continuation that omits those messages. *)
+      let* _ = Current.committed_unread_messages ~keepers_dir ~keeper_id:keeper_name in
+      let* () = save_snapshot ~config ~keeper_name snapshot in
+      Ok snapshot))

@@ -9,7 +9,9 @@ val decision
     input order. Reject malformed coordinates, missing messages, reordering or
     changed bytes. Preserve the original gated decision, working state and
     original rendered base prompt/variables (including host context);
-    opaque evidence is data and grants no publication authority. *)
+    opaque evidence is data and grants no publication authority. An empty
+    message/source list requires actual tool or counterpart observations in
+    the original Runtime input; it accounts for no conversation message. *)
 
 val create
   : transaction_id:string

@@ -329,6 +329,24 @@ val exact_snapshot_of_canonical_bytes :
   string ->
   (exact_checkpoint_snapshot, checkpoint_ref_load_error) result
 
+(** Read an exact canonical snapshot and run [f] while retaining the same
+    stable session lock used by checkpoint writers and session removal.
+    A source-read or lock-acquisition failure does not run [f]. Callback results
+    are preserved; exceptions, including Eio cancellation, propagate after
+    lock cleanup.
+
+    [f] must not re-enter checkpoint operations that acquire this session's
+    lock. Perform model inference before this call. A callback that acquires
+    Memory locks must acquire them inside this source lock and must retain
+    the existing source-before-Memory lock order. The outer error can report
+    lock-release failure after [f] completed, so an effectful callback must
+    track its own committed outcome rather than infer it from [Error]. *)
+val with_agent_core_exact_snapshot :
+  session_dir:string ->
+  session_id:string ->
+  (exact_checkpoint_snapshot -> 'a) ->
+  ('a, checkpoint_ref_load_error) result
+
 (** Load an exact canonical checkpoint snapshot under the session lock. *)
 val load_agent_core_exact_snapshot :
   session_dir:string ->

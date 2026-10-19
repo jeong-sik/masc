@@ -42,7 +42,7 @@ let record_prepared_memory config prepared =
 let record_memory config = record_prepared_memory config (prepare config |> some)
 let commit config prepared text =
   record_prepared_memory config prepared;
-  P.commit ~config ~keeper_name ~prepared ~working_state:text |> get
+  P.commit ~new_unread_messages:[] ~config ~keeper_name ~prepared ~working_state:text |> get
 let test_append_cas_and_restart () = with_source @@ fun _env config save append boundary ->
   let prefix=[message "Keep the deployment pending approval."] in
   save prefix;boundary ~fresh:true 1 prefix;
@@ -65,7 +65,7 @@ let test_append_cas_and_restart () = with_source @@ fun _env config save append 
   let newer=commit config next "Build passed; deployment is still awaiting approval." in
   check int "prefix frontier advances with saved working state" 2 newer.end_atom;
   check bool "late previous writer cannot replace newer pair" true
-    (Result.is_error (P.commit ~config ~keeper_name ~prepared ~working_state:"old"));
+    (Result.is_error (P.commit ~new_unread_messages:[] ~config ~keeper_name ~prepared ~working_state:"old"));
   let current=P.read ~config ~keeper_name |> get |> some in
   check bool "CAS preserved complete new pair" true (current=newer);
   let restored=S.restore ~trace_id ~lines:(B.read ~keepers_dir:(Masc.Workspace.keepers_runtime_dir config)
@@ -80,13 +80,13 @@ let test_failed_state_keeps_old_frontier () = with_source @@ fun _env config sav
   let prefix=[message "Unresolved request"] in save prefix;boundary ~fresh:true 1 prefix;
   let prepared=prepare config |> some in
   check bool "blank generated state rejected" true
-    (Result.is_error (P.commit ~config ~keeper_name ~prepared ~working_state:" "));
+    (Result.is_error (P.commit ~new_unread_messages:[] ~config ~keeper_name ~prepared ~working_state:" "));
   check bool "failure publishes no frontier" true (P.read ~config ~keeper_name |> get |> Option.is_none);
   let old=commit config prepared "Unresolved request remains." in
   let full=prefix@[message "Another unresolved request"] in save full;boundary ~fresh:false 2 full;
   let next=prepare config |> some in
   check bool "failure cannot replace previous valid frontier" true
-    (Result.is_error (P.commit ~config ~keeper_name ~prepared:next ~working_state:""));
+    (Result.is_error (P.commit ~new_unread_messages:[] ~config ~keeper_name ~prepared:next ~working_state:""));
   check bool "saved pair unchanged" true (P.read ~config ~keeper_name |> get=Some old)
 exception Cancel_commit
 let test_worker_cancellation_waits_for_commit () = with_source @@ fun env config save _append boundary ->
@@ -110,7 +110,7 @@ let test_worker_cancellation_waits_for_commit () = with_source @@ fun env config
             check bool "actual executor worker" true ((Domain.self () :> int)<>caller_domain);
             Eio.Promise.resolve enter ();
             Eio.Promise.await release;
-            P.commit ~config ~keeper_name ~prepared ~working_state:"Pending request remains.")
+            P.commit ~new_unread_messages:[] ~config ~keeper_name ~prepared ~working_state:"Pending request remains.")
           ~observe:(fun result -> ignore (get result);observed:=true)))) in
   let cc=Eio.Promise.await scope in Eio.Promise.await entered;
   Eio.Cancel.cancel cc Cancel_commit;
@@ -130,7 +130,7 @@ let test_memory_coverage_required () = with_source @@ fun _env config save _appe
   let first=[message "First fact"] in save first;boundary ~fresh:true 1 first;
   let prepared=prepare config |> some in
   check bool "no Memory receipt cannot authorize prefix removal" true
-    (Result.is_error (P.commit ~config ~keeper_name ~prepared ~working_state:"First fact"));
+    (Result.is_error (P.commit ~new_unread_messages:[] ~config ~keeper_name ~prepared ~working_state:"First fact"));
   record_memory config;
   check bool "exact saved Memory permits publication" true
     (P.memory_committed ~config ~keeper_name prepared |> get);
@@ -139,7 +139,7 @@ let test_memory_coverage_required () = with_source @@ fun _env config save _appe
   check int "appended turns do not expand unpublished Memory commit" 1 (P.end_atom recovered);
   check bool "old receipt is recoverable with newly appended boundary" true
     (P.memory_committed ~config ~keeper_name recovered |> get);
-  ignore (P.commit ~config ~keeper_name ~prepared:recovered ~working_state:"First fact" |> get);
+  ignore (P.commit ~new_unread_messages:[] ~config ~keeper_name ~prepared:recovered ~working_state:"First fact" |> get);
   let newer=prepare config |> some in
   check int "after publication next source advances" 2 (P.end_atom newer);
   check bool "earlier receipt cannot cover new suffix" false
@@ -157,7 +157,7 @@ let test_baseline_partial_bootstrap () = with_source @@ fun _env config save _ap
   check int "failed publication recovers the actual narrowed source" 2 (P.end_atom recovered);
   check bool "recovered Memory is not reapplied" true
     (P.memory_committed ~config ~keeper_name recovered |> get);
-  let saved=P.commit ~config ~keeper_name ~prepared:recovered ~working_state:"A and B" |> get in
+  let saved=P.commit ~new_unread_messages:[] ~config ~keeper_name ~prepared:recovered ~working_state:"A and B" |> get in
   check bool "explicit captured provenance" true (saved.origin=S.Captured_checkpoint_prefix);
   check int "recovery retains its original completed anchor" 4 saved.covering_end_atom;
   let later=prepare config |> some in
@@ -185,7 +185,7 @@ let test_ordinary_witnessed_coverage () = with_source @@ fun _env config save _a
   check int "continuity selects first turn despite later ordinary receipt" 2 (P.end_atom prepared);
   check bool "serial witnessed Memory already read this prefix" true
     (P.memory_committed ~config ~keeper_name prepared |> get);
-  ignore (P.commit ~config ~keeper_name ~prepared ~working_state:"A and B" |> get)
+  ignore (P.commit ~new_unread_messages:[] ~config ~keeper_name ~prepared ~working_state:"A and B" |> get)
 let test_ordinary_baseline_coverage () = with_source @@ fun _env config save _append boundary ->
   let baseline=[message "A";message "B"] in save baseline;boundary ~fresh:false 1 baseline;
   let full=baseline@[message "C";message "D"] in save full;boundary ~fresh:false 2 full;
@@ -320,7 +320,7 @@ let test_recovery_overrides_next_turn () = with_source @@ fun _env config save _
   check bool "pending publication keeps exact receipt" true
     ((P.memory_range_id ~config ~keeper_name recovered |> get) = receipt);
   check bool "pending publication cannot be subdivided" true (Option.is_none (P.narrow recovered));
-  let saved = P.commit ~config ~keeper_name ~prepared:recovered ~working_state:"Five atoms." |> get in
+  let saved = P.commit ~new_unread_messages:[] ~config ~keeper_name ~prepared:recovered ~working_state:"Five atoms." |> get in
   check int "recovery retains actual covering turn" 6 saved.covering_end_atom;
   check int "recovery retains exact boundary line" 3 saved.end_boundary_line;
   let next = prepare config |> some in
@@ -633,7 +633,7 @@ let test_a_rebuild_does_not_overwrite_a_valid_snapshot () = with_source @@ fun _
   let bytes () = In_channel.with_open_bin file In_channel.input_all in
   let valid = bytes () in
   check bool "the late rebuild is refused" true
-    (Result.is_error (P.commit ~config ~keeper_name ~prepared:late ~working_state:"the late pass"));
+    (Result.is_error (P.commit ~new_unread_messages:[] ~config ~keeper_name ~prepared:late ~working_state:"the late pass"));
   check string "the valid snapshot is unchanged" valid (bytes ())
 
 (* A snapshot path that cannot be read is an I/O failure, not a decode
@@ -839,26 +839,34 @@ let test_a_memory_pass_carries_the_counterparts_of_its_turn () =
 
 (* The CLI slot reports a limit the turn fits without its counterpart and not
    with it, and the turn is one atom, so no smaller unit can leave the
-   counterpart out. After the refusal this round leaves the turn's Memory to
-   the durable pass rather than reading the refusal as a disagreement with
-   its own measurement. The durable pass reads the turn with the counterpart,
-   and the next continuity pass, now Context-only, publishes the turn. *)
+   counterpart out. Both the whole-turn request and the single-message floor
+   must retain that counterpart. Their CLI refusals grant no skip authority,
+   so this round leaves Memory to the durable pass. The durable pass reads
+   the turn with the counterpart, and the next continuity pass, now
+   Context-only, publishes the turn. *)
 let test_a_turn_too_large_with_its_counterparts_is_left_to_the_durable_pass () =
   let module Codex = Runtime_codex_app_server in
   let module O = Masc.Keeper_continuity_observation in
   let module Current = Masc.Keeper_memory_os_current in
   let counterpart = "counterpart-marker-" ^ String.make 4000 'x' in
   with_counterpart_turn ~counterpart @@ fun ~config ~continuity ->
-  let calls = ref 0 in
+  let refused_prompts = ref [] in
   continuity (fun ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt ->
-    incr calls;
+    refused_prompts := !refused_prompts @ [prompt];
     let actual_chars = Codex.prompt_char_count prompt |> get in
     Error (Masc.Fusion_official_client.Codex_failure (Codex.Rpc_error
       {method_="turn/start"; code=Some (-32602); message="fixture capacity";
        data=Some (`Assoc ["input_error_code", `String "input_too_large";
          "actual_chars", `Int actual_chars;
          "max_chars", `Int (actual_chars - String.length counterpart)])})));
-  check int "the slot refuses once" 1 !calls;
+  (match !refused_prompts with
+   | [whole; single] ->
+     List.iter (fun prompt ->
+       check int "each refusal retains the original turn exactly once" 1
+         (occurrences ~sub:"turn-1" prompt);
+       check int "message descent cannot omit or duplicate the counterpart" 1
+         (occurrences ~sub:counterpart prompt)) [whole; single]
+   | _ -> fail "expected the whole-turn refusal followed by its original single-message floor");
   check bool "no snapshot is published" true (P.read ~config ~keeper_name |> get = None);
   check bool "the turn's Memory is left to the durable pass" true
     ((O.latest_synthesis ~config ~keeper_name |> some).state = O.Not_committed);
@@ -991,14 +999,16 @@ let test_volatile_message_floor ~failure () =
     (Registry.list_runs registry) in
   pass ();
   (match failure with
-   | None -> ()
+   | None | Some `Request_entity_too_large -> ()
    | Some _ ->
      check (option int) "a later unread message discards partial state" None (coverage ());
      check int "the failed wake stops at that message" 3 (List.length !requests);
      pass ();
      check string "a new wake retries the identical first message without partial state"
        (List.nth !requests 1) (List.nth !requests 4));
-  let expected_calls = match failure with None -> 3 | Some _ -> 6 in
+  let expected_calls = match failure with
+    | None | Some `Request_entity_too_large -> 3
+    | Some _ -> 6 in
   check int "one whole refusal and one request per message per wake"
     expected_calls (List.length !requests);
   let first = List.nth !requests 1 and second = List.nth !requests (expected_calls - 1) in
@@ -1011,7 +1021,19 @@ let test_volatile_message_floor ~failure () =
   check (option int) "only the complete atom is published" (Some 1) (coverage ());
   let snapshot = P.read ~config ~keeper_name |> get |> some in
   check string "the final state is published at the original atom boundary"
-    "remembered-call-and-result" snapshot.working_state;
+    (if failure=Some `Request_entity_too_large then "remembered-call"
+     else "remembered-call-and-result") snapshot.working_state;
+  let expected_holes = if failure=Some `Request_entity_too_large then
+      let source = match P.memory_sources prepared |> get with
+        | [_; source] -> source
+        | _ -> fail "the selected atom must retain both exact message bindings" in
+      [P.unread_message prepared ~source
+        ~reasons:[Masc.Keeper_librarian_input_refusal.Request_body_refused] |> get]
+    else [] in
+  check bool "typed exhaustion preserves the exact skipped result and its cause" true
+    (snapshot.unread_messages=expected_holes);
+  check bool "continuity holes cannot rewrite the existing Memory receipt" true
+    (receipt ()=receipt_before);
   check bool "successful continuity publication still leaves Memory unchanged" true
     (Current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name |> get = memory_before);
   check bool "successful continuity publication still leaves durable progress unchanged" true
@@ -1024,15 +1046,334 @@ let test_volatile_message_floor ~failure () =
         when U.member "volatile_inference" output = `Bool true -> Some loaded
       | Some _ | None -> None) in
   check int "every successful message has a recorded volatile outcome"
-    (match failure with None -> 2 | Some _ -> 3) (List.length volatile_runs);
+    (match failure with
+     | None -> 2
+     | Some `Request_entity_too_large -> 1
+     | Some _ -> 3) (List.length volatile_runs);
   List.iter (fun run ->
     let decoded = Masc.Tui_decode.decode_lane_run_detail
-      (`Assoc ["run", Registry.run_to_yojson run]) |> get in
+      (Exact_output_fixture.lane_run_detail run) |> get in
     let reading = decoded.lrd_librarian_preflight |> some in
     check bool "actual volatile run is readable as context-only" true (reading.lp_memory_scope = Masc.Tui_decode.Context_only_scope);
     check bool "actual volatile run cannot claim continuity publication" true
       (reading.lp_side_writes = [Masc.Tui_decode.Continuity_write, Masc.Tui_decode.Side_not_attempted]))
     volatile_runs
+
+type memory_floor_case =
+  | Complete_memory_floor
+  | Late_memory_failure
+  | Rewritten_memory_source
+  | Appended_memory_suffix
+
+(* Drive the production Queue -> Runtime CLI lane -> parsed/gated Memory
+   inference path. One assistant/tool exchange is one indivisible atom,
+   so a whole-request refusal must stage each exact message before publishing. *)
+let test_uncommitted_memory_message_floor case () =
+  let module Current = Masc.Keeper_memory_os_current in
+  let module Program = Masc.Keeper_memory_os_program in
+  let module Progress = Masc.Keeper_librarian_progress in
+  let module Unread = Masc.Keeper_librarian_unread in
+  let module Queue = Masc.Keeper_librarian_queue_refresh in
+  let claim = "Memory floor project Meridian waits for operator approval." in
+  let source = match List.take 2 (List.drop 1 tool_atoms) with
+    | [call; result] ->
+      (* Leave room for the staged fact's real metadata in the next single-
+         message prompt while the original atom exceeds the measured bound. *)
+      [{call with Agent_core.Types.content=
+          Agent_core.Types.Text (claim ^ "\n" ^ String.make 2048 'x') :: call.content}; result]
+    | [] | [_] | _ :: _ :: _ -> fail "fixture must contain the assistant and its tool result" in
+  check int "the two source messages form one indivisible atom" 1
+    (snd (Runtime_model_input_tail_window.annotate source));
+  let requests = ref [] and before_answer = ref (fun _ -> ()) in
+  let fail_late = ref (case=Late_memory_failure) in
+  let observed_limit = ref None in
+  let stage_answer ~first = Yojson.Safe.to_string (`Assoc
+    ["new_claims", (if first then `List [`Assoc
+       ["claim", `String claim; "category", `String "fact";
+        "board_post_id", `Null; "board_comment_id", `Null;
+        "supersedes", `Null; "absorbs", `List []]] else `List []);
+     "dropped", `List []; "working_contexts", `List [];
+     "working_state", `String (if first then "volatile-call-read" else "complete-call-and-result")]) in
+  let runner ~runtime_id ~system_prompt:_ ~output_schema ~prompt =
+    check string "the actual CLI fallback serves every stage"
+      Exact_output_fixture.cli_primary_runtime runtime_id;
+    check bool "each stage uses the Memory output contract" true
+      (U.member "new_claims" (U.member "properties" output_schema) <> `Null);
+    let position = List.length !requests mod 3 in
+    requests := !requests @ [prompt];
+    (!before_answer) position;
+    let actual_chars = Runtime_codex_app_server.prompt_char_count prompt |> get in
+    (if position<>0 then
+       check bool "each staged request fits the CLI's actual reported character bound" true
+         (actual_chars <= Option.get !observed_limit));
+    match position with
+    | 0 ->
+      (* This is the same measured CLI refusal boundary used by the existing
+         Queue fitting fixture, rather than a native admission-only verdict. *)
+      let max_chars = actual_chars-1 in
+      observed_limit := Some max_chars;
+      Error (Masc.Fusion_official_client.Codex_failure (Runtime_codex_app_server.Rpc_error
+        {method_="turn/start";code=Some (-32602);message="fixture measured input capacity";
+         data=Some (`Assoc ["input_error_code",`String "input_too_large";
+           "actual_chars",`Int actual_chars;"max_chars",`Int max_chars])}))
+    | 1 -> Ok (stage_answer ~first:true)
+    | 2 when !fail_late -> Error (Masc.Fusion_official_client.Setup_failure
+        "fixture unavailable after the first accepted Memory step")
+    | 2 -> Ok (stage_answer ~first:false)
+    | _ -> fail "unexpected message-floor phase" in
+  narrowing_fixture ~atoms:source ~cli_slot_ids:[Exact_output_fixture.cli_primary_runtime]
+    ~cli_runner:runner ~slot_count:0
+    ~answer:(fun _ _ -> fail "a CLI-only fixture must not dispatch HTTP")
+  @@ fun ~bodies:_ ~pass:_ ~coverage ~hide_source:_ ~restart:_ ~config ->
+  let base_path = config.Masc.Workspace.base_path in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let runtime_keepers_dir = Masc.Workspace.keepers_runtime_dir config in
+  let session_dir = Filename.concat (Masc.Keeper_fs.session_store_path config) trace_id in
+  let prepared = prepare config |> some in
+  check bool "the original atom has no Memory receipt" false
+    (P.memory_committed ~config ~keeper_name prepared |> get);
+  let expected_receipt = P.memory_range_id ~config ~keeper_name prepared |> get in
+  let expected_sources = Unread.sources_for_atom_range ~trace_id
+    ~history_start_boundary_line:expected_receipt.history_start_boundary_line
+    ~start_atom:0 ~end_atom:1 ~messages:source |> get in
+  let memory_before = Current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name |> get |> some in
+  let stores =
+    [Current.path_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name;
+     Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name;
+     Current.publication_receipt_path ~keepers_dir ~keeper_id:keeper_name;
+     Current.durable_range_receipt_path ~keepers_dir ~keeper_id:keeper_name;
+     Current.unread_ledger_path ~keepers_dir ~keeper_id:keeper_name;
+     Masc.Keeper_librarian_context.path ~keepers_dir ~keeper_id:keeper_name;
+     Progress.path_for_keepers_dir ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name;
+     P.path ~config ~keeper_name] in
+  let bytes () = List.map Fs_compat.load_file_opt stores in
+  let before_steps = ref None in
+  let save_source messages =
+    match C.save_agent_core_classified ~session_dir ~history_retained:0 (checkpoint messages) with
+    | Ok (C.Saved _) -> ()
+    | Ok (C.Stale_noop _) -> fail "source mutation was not saved"
+    | Error detail -> fail detail in
+  before_answer := (fun position ->
+    if position=1 then before_steps := Some (bytes ());
+    if position<>0 then (
+      check bool "no staged fact, journal, receipt, context or cursor is published" true
+        (bytes () = Option.get !before_steps);
+      check (option int) "no partial continuity frontier is visible" None (coverage ()));
+    if position=2 then match case with
+      | Rewritten_memory_source ->
+        let changed = match source with
+          | first :: rest -> {first with Agent_core.Types.content=
+              Agent_core.Types.Text "A different completed source replaced the original." :: first.content} :: rest
+          | [] -> fail "source was empty" in
+        save_source changed
+      | Appended_memory_suffix ->
+        let extended = source @ [message "A newly completed suffix must remain unread."] in
+        save_source extended;
+        B.append ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name
+          {B.recorded_at=1001.; event=B.Turn_ended
+            {turn_ref=Ids.Turn_ref.make ~trace_id ~absolute_turn:2;
+             task_context=Masc.Keeper_turn_task_context.No_task;
+             history_at_start=B.Continued_history;
+             position=B.position_of_messages extended |> get}}
+          |> Result.map_error B.append_error_to_string |> get
+      | Complete_memory_floor | Late_memory_failure -> ());
+  let pass () = Queue.For_testing.run_continuity ~cli_runner:runner
+    ~has_waiting:(fun () -> true) ~base_path ~keeper_name () in
+  pass ();
+  (match case with
+   | Late_memory_failure ->
+     check int "late opaque refusal stops after the exact second message" 3 (List.length !requests);
+     check bool "late failure preserves every authoritative store byte" true
+       (bytes () = Option.get !before_steps);
+     check (option int) "late failure publishes no frontier or unread-hole authority" None (coverage ());
+     fail_late := false;
+     pass ();
+     check string "a new wake restarts at the identical original first message"
+       (List.nth !requests 1) (List.nth !requests 4)
+   | Rewritten_memory_source ->
+     check bool "a rewritten source prefix leaves every authoritative store byte unchanged" true
+       (bytes () = Option.get !before_steps);
+     check (option int) "a rewritten source prefix grants no coverage" None (coverage ())
+   | Complete_memory_floor | Appended_memory_suffix -> ());
+  let expected_calls = if case=Late_memory_failure then 6 else 3 in
+  check int "one whole refusal and one real CLI inference for each message"
+    expected_calls (List.length !requests);
+  let first_prompt = List.nth !requests (expected_calls-2)
+  and second_prompt = List.nth !requests (expected_calls-1) in
+  let call_marker = "[tool use omitted: id=" ^ tool_call_id 1
+  and result_marker = "[tool result omitted: id=" ^ tool_call_id 1 in
+  check bool "first step carries only the assistant's call" true
+    (contains ~sub:call_marker first_prompt && not (contains ~sub:result_marker first_prompt));
+  check bool "second step carries only the tool result" true
+    (contains ~sub:result_marker second_prompt && not (contains ~sub:call_marker second_prompt));
+  check bool "second step receives the actual staged Memory claim" true (contains ~sub:claim second_prompt);
+  check bool "second step receives the separate volatile continuation" true
+    (contains ~sub:"volatile-call-read" second_prompt);
+  List.iter (fun prompt ->
+    check bool "neither tool argument nor raw tool-result payload is rendered" false
+      (contains ~sub:tool_argument_marker prompt || contains ~sub:tool_result_marker prompt))
+    [first_prompt;second_prompt];
+  let publications = Current.read_journal_tail ~keepers_dir ~keeper_id:keeper_name ~limit:(List.length !requests+1)
+    |> List.map get |> List.filter_map (function
+      | Current.Journal_committed {program=Some proof;_} -> Some proof
+      | Current.Journal_committed {program=None;_} | Current.Journal_failed _
+      | Current.Journal_quarantined _ -> None) in
+  match case, publications with
+  | Rewritten_memory_source, [] -> ()
+  | (Complete_memory_floor | Late_memory_failure | Appended_memory_suffix), [proof] ->
+    let program = proof.Masc.Keeper_memory_os_program_types.execution.program in
+    check bool "every original message coordinate and full-byte hash is accounted exactly once" true
+      (program.Program.sources = expected_sources && program.unread=[]);
+    (match program.stages, source, expected_sources with
+     | [first; second], [call; result], [call_source; result_source] ->
+       check bool "the ordered decisions partition the original atom" true
+         (first.decision.sources=[call_source] && second.decision.sources=[result_source]);
+       check bool "the next input uses the exact prior computed Memory" true
+         (second.decision.input_current=Some first.after);
+       List.iter (fun (stage, original, tools) ->
+         let evidence = stage.Program.decision.input_evidence in
+         check bool "proof preserves the complete original message bytes" true
+           (U.member "messages" evidence=`List [Agent_core.Checkpoint.message_to_json original]);
+         let variables = U.member "prompt_variables" evidence in
+         check bool "the joined tool outcome is judged by the first accepted step only" true
+           (U.member "turn_tool_observations" variables |> U.to_string |> Yojson.Safe.from_string = tools);
+         let context = U.member "historical_task_contexts" variables |> U.to_string
+           |> Yojson.Safe.from_string |> U.to_list |> List.hd in
+         check int "message attribution resets to the one judged message" 0
+           (U.member "first_message" context |> U.to_int);
+         check int "message attribution covers exactly one message" 1
+           (U.member "after_message" context |> U.to_int))
+         [first,call,`List [`Assoc ["tool_name",`String tool_name;"outcome",`String "succeeded"]];
+          second,result,`List []]
+     | _ -> fail "the Memory publication lost its two real inference stages");
+    let after = Current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name |> get |> some in
+    check int "the complete program publishes one Memory revision" (memory_before.revision+1) after.revision;
+    check (list string) "only the accepted staged claim becomes current Memory" [claim]
+      (List.map (fun (fact : Masc.Keeper_memory_os_types.fact) -> fact.claim) after.facts);
+    let receipt = Current.committed_durable_range ~keepers_dir ~keeper_id:keeper_name
+      ~receipt_scope:expected_receipt.receipt_scope |> get in
+    check bool "one receipt certifies only the original indivisible atom" true
+      (receipt=Some expected_receipt);
+    let snapshot = P.read ~config ~keeper_name |> get |> some in
+    check int "continuity publishes only the original atom" 1 snapshot.end_atom;
+    check string "continuity publishes only the final state" "complete-call-and-result" snapshot.working_state;
+    check bool "program publication does not advance the ordinary consumer cursor" true
+      (Progress.read ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name
+       |> Result.map_error Progress.read_error_to_string |> get |> Option.is_none);
+    check int "the durable consumer advances across the proved atom without another Memory call" 1
+      (durable_reads config ~commit:(fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ ->
+        fail "the durable consumer sent an atom already covered by the real Memory program"));
+    (match case with
+     | Appended_memory_suffix ->
+       let remaining = prepare config |> some in
+       check int "a concurrent suffix remains outside the committed prefix" 1 (P.start_atom remaining);
+       check int "the next source still includes the newly completed suffix" 2 (P.end_atom remaining)
+     | Complete_memory_floor | Late_memory_failure | Rewritten_memory_source -> ())
+  | _, _ -> fail "unexpected number of canonical Memory program publications"
+
+(* Only a completely exhausted real API walk grants unread-hole authority.
+   The Queue still judges the next exact message and publishes the original
+   atom once, retaining the skipped message's full source identity. *)
+let test_queue_memory_floor_retains_proven_api_holes ~all_refused () =
+  let module Current = Masc.Keeper_memory_os_current in
+  let module Unread = Masc.Keeper_librarian_unread in
+  let module Program = Masc.Keeper_memory_os_program in
+  let source = List.take 2 (List.drop 1 tool_atoms) in
+  let requests = ref [] in
+  let accepted_at = if all_refused then 3 else 2 in
+  narrowing_fixture ~atoms:source ~slot_count:1
+    ~answer:(fun index body ->
+      requests := !requests @ [body];
+      if index < accepted_at then
+        `Request_entity_too_large, refused "invalid_request_error"
+      else if index=accepted_at then
+        `OK, Exact_output_fixture.openai_response
+          (`Assoc ["new_claims",`List [];"dropped",`List [];"working_contexts",`List [];
+                   "working_state",`String "Original refused messages remain explicitly unread."])
+      else if index=accepted_at+1 then
+        `OK, Exact_output_fixture.openai_response
+          (`Assoc ["working_state",`String "Original refused messages remain explicitly unread."])
+      else fail "unexpected API visit after the atom was accounted")
+  @@ fun ~bodies:_ ~pass ~coverage ~hide_source:_ ~restart:_ ~config ->
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path
+      ~base_path:config.Masc.Workspace.base_path in
+  let prepared = prepare config |> some in
+  let original_receipt = P.memory_range_id ~config ~keeper_name prepared |> get in
+  let sources = P.memory_sources prepared |> get in
+  let hole position = Unread.for_atom ~trace_id
+    ~history_start_boundary_line:original_receipt.history_start_boundary_line
+    ~atom:0 ~message_in_atom:position ~messages:source
+    ~reasons:[Masc.Keeper_librarian_input_refusal.Request_body_refused] |> get in
+  let holes = if all_refused then [hole 0;hole 1] else [hole 0] in
+  pass ();
+  check int "each source is attempted before one real Memory judgment completes the atom"
+    (accepted_at+1) (List.length !requests);
+  check (option int) "the original complete atom is accounted" (Some 1) (coverage ());
+  let expected_receipt = {original_receipt with Current.unread_messages=holes} in
+  check bool "the receipt retains exactly the proven original unread message" true
+    (Current.committed_durable_coverage ~keepers_dir ~keeper_id:keeper_name
+       ~receipt_scope:original_receipt.receipt_scope |> get = Some expected_receipt);
+  check bool "accounted coverage never claims the entire atom was read" true
+    (Current.committed_durable_range ~keepers_dir ~keeper_id:keeper_name
+       ~receipt_scope:original_receipt.receipt_scope |> get = None);
+  check bool "the cumulative ledger keeps that same source hash and named refusal" true
+    (Current.committed_unread_messages ~keepers_dir ~keeper_id:keeper_name |> get = holes);
+  let snapshot = P.read ~config ~keeper_name |> get |> some in
+  check bool "the working-state snapshot cannot erase the skipped source" true
+    (snapshot.unread_messages=holes);
+  let publications = Current.read_journal_tail ~keepers_dir ~keeper_id:keeper_name
+      ~limit:(List.length !requests+1)
+    |> List.map get |> List.filter_map (function
+      | Current.Journal_committed {program=Some proof;_} -> Some proof
+      | Current.Journal_committed {program=None;_} | Current.Journal_failed _
+      | Current.Journal_quarantined _ -> None) in
+  (match publications, sources, source with
+   | [proof], [_call_source;result_source], [_call;result] ->
+     let program = proof.Masc.Keeper_memory_os_program_types.execution.program in
+     check bool "the original ordered manifest partitions into exactly accepted sources and proven holes" true
+       (program.Program.sources=sources && program.unread=holes);
+     (match program.stages with
+      | [stage] ->
+        check bool "only actually judged source messages receive a decision" true
+          (stage.decision.sources=(if all_refused then [] else [result_source]));
+        check bool "accepted evidence distinguishes a result read from host-only judgment" true
+          (U.member "messages" stage.decision.input_evidence=
+           `List (if all_refused then [] else [Agent_core.Checkpoint.message_to_json result]));
+        (if all_refused then
+           check bool "an all-hole program still contains an actual host-observation judgment" true
+             (U.member "observations" stage.decision.input_evidence <> `List []));
+        let variables = U.member "prompt_variables" stage.decision.input_evidence in
+        check bool "skipping a message does not discard the joined host tool outcome" true
+          (U.member "turn_tool_observations" variables |> U.to_string |> Yojson.Safe.from_string =
+           `List [`Assoc ["tool_name",`String tool_name;"outcome",`String "succeeded"]]);
+        check bool "the accepted step is explicitly told about the earlier unread message" true
+          (contains ~sub:(Unread.message_digest (List.hd source))
+             (U.member "continuity" variables |> U.to_string))
+      | [] | _ :: _ :: _ -> fail "a refused message was turned into a successful Memory stage")
+   | _ -> fail "missing original-boundary Memory program proof");
+  (* Recover a Memory commit whose continuation needs regeneration. The
+     Context-only request must carry the hole as evidence, not reread it as
+     a conversation message or silently declare it processed. *)
+  let memory = Current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name |> get in
+  Sys.remove (P.path ~config ~keeper_name);
+  pass ();
+  check int "recovery makes exactly one Context-only request" (accepted_at+2) (List.length !requests);
+  let recovered_request = List.nth !requests (accepted_at+1) in
+  check bool "recovery excludes the unread tool call from conversation" false
+    (contains ~sub:("[tool use omitted: id=" ^ tool_call_id 1) recovered_request);
+  check bool "recovery retains a tool result only when its source was actually read" (not all_refused)
+    (contains ~sub:("[tool result omitted: id=" ^ tool_call_id 1) recovered_request);
+  check bool "recovery keeps the original hole hash visible" true
+    (contains ~sub:(Unread.message_digest (List.hd source)) recovered_request);
+  check bool "Context-only recovery does not reapply Memory" true
+    (Current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name |> get = memory);
+  check bool "Context-only regeneration retains exactly the same hole" true
+    ((P.read ~config ~keeper_name |> get |> some).unread_messages=holes);
+  check int "durable recovery advances without sending either accounted source again" 1
+    (durable_reads config ~commit:(fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ ->
+      fail "durable recovery duplicated the Memory program's accounted atom"));
+  check bool "advancing the consumer cannot erase unread evidence" true
+    (Current.committed_unread_messages ~keepers_dir ~keeper_id:keeper_name |> get = holes)
 
 let check_folded_tool_request body =
   check int "no tool call argument reaches the request" 0
@@ -1467,8 +1808,20 @@ let () = run "production continuity pair"
       (test_volatile_message_floor ~failure:None);
     test_case "unknown message refusal discards partial state and retries source" `Quick
       (test_volatile_message_floor ~failure:(Some `Bad_request));
-    test_case "typed message refusal cannot publish before unread records exist" `Quick
+    test_case "typed message exhaustion publishes an exact Context-only hole" `Quick
       (test_volatile_message_floor ~failure:(Some `Request_entity_too_large));
+    test_case "uncommitted Memory message floor publishes one complete program" `Quick
+      (test_uncommitted_memory_message_floor Complete_memory_floor);
+    test_case "uncommitted Memory late failure preserves all stores and retries source" `Quick
+      (test_uncommitted_memory_message_floor Late_memory_failure);
+    test_case "uncommitted Memory rejects a changed original source prefix" `Quick
+      (test_uncommitted_memory_message_floor Rewritten_memory_source);
+    test_case "uncommitted Memory accepts append while leaving the suffix unread" `Quick
+      (test_uncommitted_memory_message_floor Appended_memory_suffix);
+    test_case "actual API exhaustion records an exact hole and recovers without rereading it" `Quick
+      (test_queue_memory_floor_retains_proven_api_holes ~all_refused:false);
+    test_case "all proven API holes still judge host observations before one publication" `Quick
+      (test_queue_memory_floor_retains_proven_api_holes ~all_refused:true);
     test_case "a continuity pass carries tool turns folded once" `Quick
       test_a_continuity_pass_carries_tool_turns_folded_once;
     test_case "an API commit releases the CLI limit" `Quick test_an_api_commit_releases_the_cli_limit;

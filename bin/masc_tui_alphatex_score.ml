@@ -10,6 +10,7 @@ type unclosed =
 
 type directive_argument =
   | Title_text
+  | Subtitle_text
   | Artist_text
   | Section_text
   | Key_signature_name
@@ -97,6 +98,7 @@ type t = {
   tuning : string list;
   measures : measure list;
   title : string option;
+  subtitle : string option;
   tempo : int option;
   time_signature : (int * int) option;
 }
@@ -134,6 +136,7 @@ let failure_text = function
   | Unknown_directive name ->
       Printf.sprintf "the \\%s directive is not in the subset" (quoted name)
   | Missing_argument Title_text -> "\\title expects a quoted string"
+  | Missing_argument Subtitle_text -> "\\subtitle expects a quoted string"
   | Missing_argument Artist_text -> "\\artist expects a quoted string"
   | Missing_argument Section_text -> "\\section expects a quoted string"
   | Missing_argument Key_signature_name -> "\\ks expects a key signature"
@@ -215,6 +218,7 @@ let is_letter char = (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z'
 
 type directive =
   | Title
+  | Subtitle
   | Artist
   | Track
   | Staff
@@ -240,6 +244,7 @@ type token =
 
 let directive_of_word = function
   | "title" -> Some Title
+  | "subtitle" -> Some Subtitle
   | "artist" -> Some Artist
   | "track" -> Some Track
   | "staff" -> Some Staff
@@ -576,6 +581,7 @@ type builder = {
   b_beats : sounding list;  (* the open measure, newest beat first *)
   b_marks : marks;  (* the signs of the open measure *)
   b_title : string option;  (* the last [\title] said *)
+  b_subtitle : string option;  (* the last [\subtitle] said *)
   b_tempo : int option;  (* the last [\tempo] that fit an int *)
   b_ts : (int * int) option;  (* the last [\ts] whose numbers fit *)
 }
@@ -985,6 +991,7 @@ let read source =
                  { tuning
                  ; measures
                  ; title = state.b_title
+                 ; subtitle = state.b_subtitle
                  ; tempo = state.b_tempo
                  ; time_signature = state.b_ts
                  })
@@ -992,6 +999,11 @@ let read source =
         let* text, after = text_argument Title_text rest in
         (* The latest title wins, the way the latest tempo does. *)
         step { state with b_title = Some text } after
+    | Tk_directive Subtitle :: rest ->
+        let* text, after = text_argument Subtitle_text rest in
+        (* The latest subtitle wins, the way the latest title does. It rides
+           the header behind the title. *)
+        step { state with b_subtitle = Some text } after
     | Tk_directive Artist :: rest ->
         let* _, after = text_argument Artist_text rest in
         step state after
@@ -1174,6 +1186,7 @@ let read source =
     ; b_beats = []
     ; b_marks = no_marks
     ; b_title = None
+    ; b_subtitle = None
     ; b_tempo = None
     ; b_ts = None
     }

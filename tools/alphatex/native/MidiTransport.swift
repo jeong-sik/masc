@@ -155,6 +155,7 @@ struct ChaseNote {
     let pitch: UInt8
     let velocity: UInt8
     let program: ChaseProgram?
+    var origin: Int? = nil
     var held = true
     var captured = false
     var release: UInt8 = 0
@@ -188,7 +189,7 @@ struct SourceChase {
     var history: [(Int, [UInt8])] = []
     var touched = Set<ChaseField>(), known = Set<ChaseField>()
     var obstacles = Set<ChaseObstacle>()
-    mutating func observe(_ bytes: [UInt8], port: Int) {
+    mutating func observe(_ bytes: [UInt8], port: Int, origin: Int? = nil) {
         guard let status = bytes.first else { return }
         guard status < 0xf0 else { obstacles.insert(.system); return }
         let channel = status & 15, key = port << 8 | Int(channel), type = status & 0xf0
@@ -197,7 +198,7 @@ struct SourceChase {
         func mark(_ kind: ChaseField.Kind) { let value = field(kind); touched.insert(value); known.insert(value) }
         switch type {
         case 0x90 where bytes[2] > 0:
-            state.notes.append(ChaseNote(pitch: bytes[1], velocity: bytes[2], program: state.program))
+            state.notes.append(ChaseNote(pitch: bytes[1], velocity: bytes[2], program: state.program, origin: origin))
         case 0x80, 0x90:
             if let index = state.notes.firstIndex(where: { $0.pitch == bytes[1] && $0.held }) {
                 state.notes[index].held = false
@@ -337,20 +338,21 @@ struct MidiRegionSpec: Decodable {
 struct MidiRegionEntry {
     let model: SourceChase, next: Int, safeKnown: Set<ChaseField>
 }
-func midiRegionEntry(_ events: [WireEvent], at seconds: Double) -> MidiRegionEntry {
+func midiRegionEntry(_ events: [WireEvent], at seconds: Double, boundary: (before: Int, through: Int)? = nil) -> MidiRegionEntry {
     var prefix = SourceChase(), next = 0
-    while next < events.count && events[next].seconds < seconds {
-        let event = events[next]; prefix.observe(event.bytes, port: event.port); next += 1
+    while next < events.count && (boundary.map { next < $0.before } ?? (events[next].seconds < seconds)) {
+        let event = events[next]; prefix.observe(event.bytes, port: event.port, origin: next); next += 1
     }
+    let entryBoundary = boundary
     var through = prefix, firstSound: [Int: Set<ChaseField>] = [:], boundary = next
     for (address, state) in prefix.channels where !state.notes.isEmpty { firstSound[address] = prefix.known }
-    while boundary < events.count && events[boundary].seconds == seconds {
+    while boundary < events.count && (entryBoundary.map { boundary < $0.through } ?? (events[boundary].seconds == seconds)) {
         let event = events[boundary]
         if event.bytes[0] & 0xf0 == 0x90 && event.bytes[2] > 0 {
             let address = event.port << 8 | Int(event.bytes[0] & 15)
             if firstSound[address] == nil { firstSound[address] = through.known }
         }
-        through.observe(event.bytes, port: event.port); boundary += 1
+        through.observe(event.bytes, port: event.port, origin: boundary); boundary += 1
     }
     let safe = through.known.filter { field in
         firstSound[field.port << 8 | Int(field.channel)].map { $0.contains(field) } ?? true
@@ -594,9 +596,12 @@ struct MidiCycle {
         let value = try add(multiply(UInt128(elapsed), divisor), base(offset))
         return (value / period, min(duration.nextDown, Double(value % period) / Double(divisor) / 1e9))
     }
+    private func local(_ position: Double) throws -> UInt128 {
+        position >= end ? period : min(period, try multiply(nanos(max(0, position - start), up: true), divisor))
+    }
+    func beforeOffset(position: Double, offset: Double) throws -> Bool { try local(position) < base(offset) }
     func deadline(position: Double, index: UInt128, offset: Double, anchor: UInt64) throws -> UInt64 {
-        let local = position >= end ? period : min(period, try multiply(nanos(max(0, position - start), up: true), divisor))
-        let target = try add(multiply(index, period), local), initial = try base(offset)
+        let target = try add(multiply(index, period), local(position)), initial = try base(offset)
         let distance = target > initial ? target - initial : 0
         let delay = distance / divisor + (distance % divisor == 0 ? 0 : 1)
         guard delay <= UInt128(UInt64.max - anchor) else { throw MidiFailure("common MIDI deadline exceeds the host clock range") }
@@ -645,6 +650,8 @@ final class MidiTransport {
     let coordinated: Bool
     let cycle: MidiCycle?
     var cycleIndex: UInt128 = 0
+    var cycleHost: UInt64?
+    var cycleLive: [Int: (copy: Int, attacks: Set<Int>)] = [:]
     var onCoordinatedFailure: ((String, Error?) -> Void)?
     var onCoordinatedEnd: (() -> Void)?
     var terminalFailure: Error?
@@ -927,9 +934,41 @@ final class MidiTransport {
         }
         return selected
     }
+    func regionEntry(_ index: Int, at sourceSeconds: Double) throws -> MidiRegionEntry {
+        let region = timeline.regions[index]
+        guard let cycle, let host = cycleHost else { return midiRegionEntry(region.events, at: sourceSeconds) }
+        let start = regionStart(region, copy: regionCursors[index].copy)
+        var before = 0, through = 0
+        for event in region.events {
+            let position = start + (event.seconds - region.spec.sourceStart)
+            // Original trim/window prefixes are history even when their
+            // clamped deadline equals the first common epoch. For actual
+            // sounding events, classify the whole native host-deadline batch.
+            let beforeEntry = cycleIndex == 0 ? try cycle.beforeOffset(position: position, offset: offset - cycle.start) : false
+            let history = event.seconds < region.spec.sourceStart || position < cycle.start || beforeEntry
+            let deadline = try cycle.deadline(position: position, index: cycleIndex, offset: offset - cycle.start, anchor: anchor)
+            if history || deadline < host { before += 1; through += 1 }
+            else if deadline == host { through += 1 }
+            else { break }
+        }
+        return midiRegionEntry(region.events, at: sourceSeconds, boundary: (before, through))
+    }
+    func liveRegionAttacks(_ index: Int) throws -> Set<Int> {
+        let copy = regionCursors[index].copy
+        if let cached = cycleLive[index], cached.copy == copy { return cached.attacks }
+        let entry = try regionEntry(index, at: timeline.regions[index].spec.sourceStart)
+        let attacks = Set(entry.model.channels.values.flatMap { $0.notes.compactMap(\.origin) })
+        cycleLive[index] = (copy, attacks)
+        return attacks
+    }
+    func regionActionDue(_ action: MidiRegionAction, at seconds: Double, cut: Double?) throws -> Bool {
+        if action.seconds <= seconds { return true }
+        guard cut == nil, let cycle, let host = cycleHost, action.seconds < cycle.end else { return false }
+        return try cycle.deadline(position: action.seconds, index: cycleIndex, offset: offset - cycle.start, anchor: anchor) <= host
+    }
     func beginRegion(_ index: Int, at sourceSeconds: Double) throws {
         let region = timeline.regions[index]
-        let entry = midiRegionEntry(region.events, at: sourceSeconds), prefix = entry.model, next = entry.next
+        let entry = try regionEntry(index, at: sourceSeconds), prefix = entry.model, next = entry.next
         let prior = sourceModel.scoped(to: region.addresses)
         guard prior.touched.isSubset(of: entry.safeKnown) else { throw MidiFailure("MIDI region seek needs a source baseline before sounding keys on a previously changed channel") }
         var permitted = prior; permitted.touched.formIntersection(prefix.known)
@@ -994,7 +1033,7 @@ final class MidiTransport {
                 try beginRegion(index, at: min(source, region.spec.sourceEnd))
             }
         }
-        while let action = nextRegionAction(), action.seconds <= seconds {
+        while let action = nextRegionAction(), try regionActionDue(action, at: seconds, cut: cut) {
             let region = timeline.regions[action.region]
             switch action.kind {
             case .begin:
@@ -1012,9 +1051,14 @@ final class MidiTransport {
                     let attack = type == 0x90 && event.bytes[2] > 0
                     let release = type == 0x80 || type == 0x90 && event.bytes[2] == 0
                     let key = UInt16(event.bytes[0] & 15) << 8 | UInt16(event.bytes[1])
-                    if cut == nil || (attack ? action.seconds >= (observedAt ?? seconds) : !release || (sourceHeld[event.port]?[key] ?? 0) > 0) {
-                        try sourceSend(event.bytes, port: event.port)
+                    var send = true
+                    if cut != nil { send = attack ? action.seconds >= (observedAt ?? seconds) : !release || (sourceHeld[event.port]?[key] ?? 0) > 0 }
+                    else if let cycle, let host = cycleHost {
+                        let deadline = try cycle.deadline(position: action.seconds, index: cycleIndex, offset: offset - cycle.start, anchor: anchor)
+                        if attack && deadline < host { send = try liveRegionAttacks(action.region).contains(regionCursors[action.region].index) }
+                        if release { send = (sourceHeld[event.port]?[key] ?? 0) > 0 }
                     }
+                    if send { try sourceSend(event.bytes, port: event.port) }
                 }
                 regionCursors[action.region].index += 1
             }
@@ -1070,6 +1114,7 @@ final class MidiTransport {
             let host = DispatchTime.now().uptimeNanoseconds
             if coordinated && host < anchor { try schedule(); return }
             if let cycle {
+                cycleHost = host; cycleLive.removeAll(); defer { cycleHost = nil; cycleLive.removeAll() }
                 let phase = try cycle.phase(elapsed: host > anchor ? host - anchor : 0, offset: offset - cycle.start)
                 let now = min(cycle.end.nextDown, cycle.start + phase.seconds)
                 if phase.index != cycleIndex {

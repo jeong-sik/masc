@@ -675,6 +675,37 @@ for missed in [false,true] {
     precondition(reviewWire.map(\.1).contains([0x80,72,77]) == !missed)
 }
 print("COMMON_MIDI_MULTICYCLE_PASS: exact next endpoint batch retained, stale endpoint attack skipped after multiple missed cycles")
+let zeroBase=try arrangement([asset("zero",[
+    ["seconds":0,"port":2,"bytes":[0xc0,0]],
+    ["seconds":0.3,"port":2,"bytes":[0x90,74,80,0x80,74,77]]])],[clip("zero","zero",from:0,to:1,repeatCount:1)],duration:1)
+for initial in [true,false] {
+    let owner=try MidiTransport(timeline:zeroBase.timeline,uid:"1",loop:true,coordinated:true,cycle:commonClock)
+    owner.prepared=true;owner.destination=zeroBase.destination;owner.sourceDestinations=zeroBase.sourceDestinations
+    reset(0);reviewWire=[];try owner.stageCoordinated(at:0);try owner.runCoordinated(anchorNanoseconds:1_000_000_000)
+    if !initial { reviewClock=1_000_000_000;owner.tick();reviewWire=[] }
+    reviewClock=try commonClock.deadline(position:0.3,index:initial ? 0:1,offset:0,anchor:1_000_000_000)
+    owner.tick()
+    precondition(reviewWire.map(\.1).contains([0x90,74,80]) && reviewWire.map(\.1).contains([0x80,74,77]),"native exactly-due zero pair consumed as floating history")
+}
+print("COMMON_MIDI_HOST_BOUNDARY_PASS: original zero pair retained at exact native deadlines for first entry and after a wrap without epsilon")
+let activeLate=try MidiTransport(timeline:commonBase.timeline,uid:"1",loop:true,coordinated:true,cycle:commonClock)
+activeLate.prepared=true;activeLate.destination=commonBase.destination;activeLate.sourceDestinations=commonBase.sourceDestinations
+reset(0);reviewWire=[];try activeLate.stageCoordinated(at:0);try activeLate.runCoordinated(anchorNanoseconds:1_000_000_000)
+reviewClock=1_000_000_000;activeLate.tick();reviewWire=[]
+reviewClock=1_250_000_000;activeLate.tick()
+precondition(!reviewWire.map(\.1).contains { $0[0]&0xf0==0x90 },"active late callback replayed expired interval")
+let liveLate=try MidiTransport(timeline:commonBase.timeline,uid:"1",loop:true,coordinated:true,cycle:commonClock)
+liveLate.prepared=true;liveLate.destination=commonBase.destination;liveLate.sourceDestinations=commonBase.sourceDestinations
+reset(0);reviewWire=[];try liveLate.stageCoordinated(at:0);try liveLate.runCoordinated(anchorNanoseconds:1_000_000_000)
+reviewClock=1_000_000_000;liveLate.tick();reviewWire=[]
+reviewClock=1_125_000_000;liveLate.tick();precondition(reviewWire.map(\.1).contains([0x90,62,90]),"still-live late note lost")
+reviewClock=1_150_000_000;liveLate.tick();precondition(reviewWire.map(\.1).contains([0x80,62,73]),"owned late note original release lost")
+print("COMMON_MIDI_ACTIVE_LATE_PASS: expired unacquired interval skipped, still-live attack and its original release retained")
+let seekZero=try MidiTransport(timeline:zeroBase.timeline,uid:"1",loop:true,coordinated:true,cycle:commonClock)
+seekZero.prepared=true;seekZero.destination=zeroBase.destination;seekZero.sourceDestinations=zeroBase.sourceDestinations
+reset(0);reviewWire=[];try seekZero.stageCoordinated(at:0.1);try seekZero.runCoordinated(anchorNanoseconds:1_000_000_000)
+reviewClock=1_000_000_000;seekZero.tick()
+precondition(reviewWire.map(\.1).contains([0x90,74,80]) && reviewWire.map(\.1).contains([0x80,74,77]),"seek boundary swallowed exactly-due zero pair")
 let fractional=try MidiCycle(start:0,end:48.0/247,duration:48.0/247,period:48_000_000_000,divisor:247)
 for index in UInt128(0)..<10_000 {
     let expected=(index+1)*48_000_000_000/247+(((index+1)*48_000_000_000)%247==0 ? 0:1)

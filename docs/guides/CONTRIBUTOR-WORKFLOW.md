@@ -209,6 +209,10 @@ PR creation, pushes and ready transitions do not automatically start CI.
 
 [pr-check.yml](../../.github/workflows/pr-check.yml) provides explicit source,
 configuration and credential checks.
+An optional exact-source native TUI dispatch also has a `workspace-files`
+scenario for a matching server/TUI pair and focused file-read checks. Follow
+[native TUI proof](NATIVE-TUI-PROOF.md); an artifact is not installation or
+visible UI evidence.
 [ci.yml](../../.github/workflows/ci.yml) builds only Core for the bottom PR,
 with a focused build. Request these only when needed. The constitution's
 "about two minutes" describes the intended scale, not a timeout or a pass/fail

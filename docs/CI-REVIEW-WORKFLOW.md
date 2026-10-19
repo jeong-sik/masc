@@ -59,8 +59,12 @@ result.
 Native GitHub Stacks use REST `stack` metadata and the [stack workflow](guides/NATIVE-GITHUB-STACKS.md). Merge a native stack whole, once, through its top PR; never merge it layer by layer from the bottom. The asynchronous merge endpoint on the top PR includes every open PR below it. Inspect and approve every included head; do not treat a non-main direct base as a blocker or manually retarget a native stack. A leaf source-review PASS does not certify its downstack.
 
 `pr-check.yml` offers optional explicit `workflow_dispatch` source/config syntax
-and committed-credential checks. It has no PR, push or scheduled trigger and does
-not compile the Core library or run behavior suites. Request it deliberately
+and committed-credential checks. With `native-tui-source-sha`, it also offers an
+exact-source macOS TUI artifact and focused behavior checks. The default native
+scenario is `detail-ownership`; `workspace-files` packages its matching server
+and checks Git file discovery, workspace ownership and file confidentiality.
+See [native TUI proof](guides/NATIVE-TUI-PROOF.md) for the exact targets and
+receipt scope. It has no PR, push or scheduled trigger. Request it deliberately
 when that coverage is needed; it is separate from leader-selected candidate
 verification and does not grant merge permission.
 

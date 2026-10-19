@@ -193,7 +193,10 @@ diff와 증거가 준비되면 ready for review로 바꿉니다. PR 생성, push
 CI를 자동으로 시작하지 않습니다.
 
 [pr-check.yml](../../.github/workflows/pr-check.yml)은 소스·설정 문법과 credential 검사를
-명시적 요청으로 실행합니다. [ci.yml](../../.github/workflows/ci.yml)은 스택
+명시적 요청으로 실행합니다. 선택한 정확한 소스의 native TUI 검사에는 같은 소스의
+서버·TUI와 파일 읽기 검사를 함께 만드는 `workspace-files` 시나리오도 있습니다.
+[native TUI 검증 안내](NATIVE-TUI-PROOF.md)를 따르며, artifact만으로 설치나 실제
+화면 검증을 주장하지 않습니다. [ci.yml](../../.github/workflows/ci.yml)은 스택
 맨 아래 PR의 Core만 빌드합니다. 필요할 때만 짧고 가벼운 검사를 요청하세요.
 헌법의 "2분 정도"는 검사 규모의 예시이며 강제 종료 시간이나 성공·실패 기준이 아닙니다.
 의존성 캐시가 준비되지 않으면 더 오래 걸릴 수 있습니다. 실제로 성공한 완료 결과만

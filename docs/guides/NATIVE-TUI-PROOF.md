@@ -1,0 +1,65 @@
+# Exact-source native TUI proof
+
+Use this explicit development check when a native terminal scenario requires
+an executable from a particular source commit. It does not approve a PR, merge
+a stack, install the operator's runtime or replace full Release/Tag checks.
+No push, PR or scheduled trigger is added.
+
+`pr-check.yml` accepts `native-tui-source-sha` (exactly 40 lowercase hexadecimal
+characters) and `native-tui-scenario`:
+
+| Scenario | Native build targets | Executed suites |
+| --- | --- | --- |
+| `detail-ownership` (default) | TUI and the three test executables | `test_tui_detail_reading`, `test_tui_board_successor`, `test_tui_usage_scope` |
+| `workspace-files` | TUI, server and the three test executables | `test_repo_git`, `test_tui_workspace_entries`, `test_workspace_file_confidentiality` |
+
+The server target is `bin/main_eio.exe`; the TUI is `bin/masc_tui.exe`.
+Each test target is `test/<suite>.exe`. Unknown scenarios are refused before
+source checkout and again before selecting build targets. With no native source
+SHA, only the existing source/config/credential checks run.
+
+For a workspace file-finder candidate:
+
+```sh
+gh workflow run pr-check.yml --repo jeong-sik/masc --ref WORKFLOW_REF \
+  -f native-tui-source-sha=SOURCE_COMMIT_40_HEX \
+  -f native-tui-scenario=workspace-files
+```
+
+Replace both placeholders with the selected workflow ref and full feature
+commit. Before the workflow changes reach main, select the reviewed CI branch
+explicitly. Record the returned run identity. Continue independent work; do not
+watch, wait for or repeatedly poll CI. At a real work boundary, read the actual
+result. An accepted request or running job is not a passing result.
+
+## Artifact and receipt
+
+The artifact is named `tui-macos-arm64-<source SHA>-<run ID>`. It retains build
+targets, logs, completed suite names, native dependency lists and `receipt.json`.
+The TUI's embedded `--build-commit` must equal the selected source. The workspace
+scenario also checks the server's `build-commit` and includes it as `masc`, with
+its own digest and dependency list. The receipt records source SHA, workflow
+SHA, scenario and both binary digests; the existing TUI `sha256` field remains.
+The default scenario records no server digest.
+
+The workflow revision chooses the checks, while checkout and dependency setup
+use the selected feature tree. Validate both identities before reusing the
+artifact. A missing receipt, failed suite or partial artifact is not success.
+These are native executables with the dynamic libraries listed in the artifact;
+this is not a portable release package.
+
+## Actual workspace behavior
+
+Use a separate workspace, port and terminal. Keep the operator's server,
+installation and drafts intact. Verify downloaded hashes and embedded commits,
+then run the matching server and TUI against that same isolated workspace.
+Do not pair a new TUI with an older server lacking its workspace endpoint and
+call that a feature verdict.
+
+For file discovery, observe Code Ctrl-P, filtering, selecting and opening a
+file outside the current directory, and returning through Code history. Include
+unavailable scopes and failed reads, checking that the original file and reading
+state remain available. Record saved state, actual requests and manual terminal
+captures separately from the build/suite receipt. Do not add screen wording,
+layout, row-order or PTY assertion tests. The artifact receipt deliberately
+leaves installed-runtime and visible-UI verification false.

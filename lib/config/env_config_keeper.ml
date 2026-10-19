@@ -648,7 +648,7 @@ module KeeperKeepalive = struct
       @category Thresholds
       @ops_class operator *)
   let sleep_chunk_sec () =
-    Float.max 0.1 (Float.min 10.0 (get_float ~default:0.5 "MASC_KEEPER_SLEEP_CHUNK_SEC"))
+    get_float_clamped ~default:0.5 ~min_v:0.1 ~max_v:10.0 "MASC_KEEPER_SLEEP_CHUNK_SEC"
   ;;
 
   (* How long a path rests after a throttle that stated no usable
@@ -669,9 +669,11 @@ module KeeperKeepalive = struct
       @category Thresholds
       @ops_class operator *)
   let rate_limit_backoff_cap_sec =
-    Float.max
-      rate_limit_backoff_floor_sec
-      (Float.min 3600.0 (get_float ~default:900.0 "MASC_KEEPER_RATE_LIMIT_BACKOFF_CAP_SEC"))
+    get_float_clamped
+      ~default:900.0
+      ~min_v:rate_limit_backoff_floor_sec
+      ~max_v:3600.0
+      "MASC_KEEPER_RATE_LIMIT_BACKOFF_CAP_SEC"
   ;;
 
   let parse_timeout_seconds raw =

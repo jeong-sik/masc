@@ -184,6 +184,43 @@ let test_non_strict_malformed_does_not_raise () =
   check_int "non-strict malformed int → default, no raise" 9
     (C.get_int ~default:9 "MASC_TEST_PARSE_NONSTRICT_INT")
 
+let test_float_clamped_nan_falls_back () =
+  (* Regression for #38685: Float.min/Float.max propagate NaN in OCaml,
+     so get_float_clamped must reject non-finite parses before clamping. *)
+  with_env "MASC_TEST_CLAMPED_FLOAT_NAN" "nan" @@ fun () ->
+  check_float "NaN → clamped default 900.0" 900.0
+    (C.get_float_clamped ~default:900.0 ~min_v:60.0 ~max_v:3600.0
+       "MASC_TEST_CLAMPED_FLOAT_NAN")
+
+let test_float_clamped_inf_falls_back () =
+  with_env "MASC_TEST_CLAMPED_FLOAT_PINF" "inf" @@ fun () ->
+  check_float "+inf → clamped default 900.0" 900.0
+    (C.get_float_clamped ~default:900.0 ~min_v:60.0 ~max_v:3600.0
+       "MASC_TEST_CLAMPED_FLOAT_PINF");
+  with_env "MASC_TEST_CLAMPED_FLOAT_NINF" "-inf" @@ fun () ->
+  check_float "-inf → clamped default 900.0" 900.0
+    (C.get_float_clamped ~default:900.0 ~min_v:60.0 ~max_v:3600.0
+       "MASC_TEST_CLAMPED_FLOAT_NINF")
+
+let test_float_clamped_bounds () =
+  with_env "MASC_TEST_CLAMPED_FLOAT_LOW" "10.0" @@ fun () ->
+  check_float "below min_v → min_v 60.0" 60.0
+    (C.get_float_clamped ~default:900.0 ~min_v:60.0 ~max_v:3600.0
+       "MASC_TEST_CLAMPED_FLOAT_LOW");
+  with_env "MASC_TEST_CLAMPED_FLOAT_HIGH" "7200.0" @@ fun () ->
+  check_float "above max_v → max_v 3600.0" 3600.0
+    (C.get_float_clamped ~default:900.0 ~min_v:60.0 ~max_v:3600.0
+       "MASC_TEST_CLAMPED_FLOAT_HIGH");
+  with_env "MASC_TEST_CLAMPED_FLOAT_MID" "300.0" @@ fun () ->
+  check_float "in range → 300.0" 300.0
+    (C.get_float_clamped ~default:900.0 ~min_v:60.0 ~max_v:3600.0
+       "MASC_TEST_CLAMPED_FLOAT_MID")
+
+let test_sleep_chunk_sec_nan_uses_default () =
+  with_env "MASC_KEEPER_SLEEP_CHUNK_SEC" "nan" @@ fun () ->
+  check_float "MASC_KEEPER_SLEEP_CHUNK_SEC=nan → default 0.5" 0.5
+    (Env_config_keeper.KeeperKeepalive.sleep_chunk_sec ())
+
 (* ── runner ───────────────────────────────────────────────────────── *)
 
 let () =
@@ -220,6 +257,17 @@ let () =
             test_float_nonneg_unset_uses_default;
           Alcotest.test_case "garbage → default" `Quick
             test_float_nonneg_garbage_uses_default;
+        ] );
+      ( "get_float_clamped",
+        [
+          Alcotest.test_case "NaN → default" `Quick
+            test_float_clamped_nan_falls_back;
+          Alcotest.test_case "±inf → default" `Quick
+            test_float_clamped_inf_falls_back;
+          Alcotest.test_case "min/max bounds" `Quick
+            test_float_clamped_bounds;
+          Alcotest.test_case "MASC_KEEPER_SLEEP_CHUNK_SEC=nan → default" `Quick
+            test_sleep_chunk_sec_nan_uses_default;
         ] );
       ( "production_knob_regression",
         [

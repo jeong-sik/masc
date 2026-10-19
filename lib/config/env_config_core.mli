@@ -65,7 +65,9 @@ val get_int_clamped : default:int -> min_v:int -> max_v:int -> string -> int
     as local copies. *)
 
 val get_float_clamped : default:float -> min_v:float -> max_v:float -> string -> float
-(** {!get_float} clamped into [[min_v, max_v]]. *)
+(** {!get_float} clamped into [[min_v, max_v]]. Non-finite parses
+    ([NaN], [+∞], [-∞]) fall back to [default] before clamping so
+    [NaN] cannot propagate through {!Float.min} / {!Float.max}. *)
 
 val get_int_nonneg : default:int -> string -> int
 (** Like {!get_int} but floors negative parses at [default].  Use

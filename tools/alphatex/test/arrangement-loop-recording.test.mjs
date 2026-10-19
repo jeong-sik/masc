@@ -239,3 +239,21 @@ test('saved take metadata rejects invalid cycles and stays exact beyond numeric 
  }
  const missing=structuredClone(a.project);missing.clips[0].takeCycle='99999';assert.throws(()=>validateArrangement(missing),/missing/)
 })
+
+
+test('choosing or browsing captured takes clears the previous MIDI pattern before ordinary placement',async()=>{
+ const {importMidiSource}=await import('../midi-source.mjs')
+ const p=project(),asset=source(),attached=attachRecordedTake(p,{project:{...p,assets:[asset]},asset:asset.id},epoch(p))
+ const chunk=pitch=>{const data=Buffer.from([0,0x90,pitch,100,0x83,0x60,0x80,pitch,77,0,0xff,0x2f,0]);const h=Buffer.alloc(8);h.write('MTrk');h.writeUInt32BE(data.length,4);return Buffer.concat([h,data])}
+ const bytes=Buffer.concat([Buffer.from('4d546864000000060002000201e0','hex'),chunk(60),chunk(62)])
+ let view=arrangementImported(arrangementEditor(p),attached)
+ view=arrangementImported(view,{project:editArrangement(view.project,{kind:'asset-add',asset:{kind:'midi',id:'asset-2',name:'Patterns',source:importMidiSource(bytes)}}),asset:'asset-2'})
+ view=arrangementCommand(view,'place asset-2 0 2').editor
+ assert.equal(view.asset,'asset-2');assert.equal(view.pattern,1)
+ for(const line of ['take 1 asset-1','takes asset-1']){
+  const selected=arrangementCommand(view,line).editor
+  assert.equal(selected.asset,'asset-1');assert.equal(selected.pattern,undefined)
+  const placed=arrangementAction(selected,{kind:'place'})
+  assert.equal(placed.project.clips.at(-1).asset,'asset-1');assert.equal(placed.project.clips.at(-1).pattern,undefined)
+ }
+})

@@ -117,7 +117,7 @@ export function arrangementTakeSelected(editor, { asset, cycle }) {
   if (!group.takes.some(take => take.cycle === cycle)) throw new Error('Take has no remaining regions')
   const project = group.selectedCycle === cycle ? editor.project : editArrangement(editor.project, { kind: 'take-select', asset, cycle })
   const clip = project.clips.find(clip => clip.asset === asset && clip.takeCycle === cycle)
-  return { ...(project === editor.project ? editor : commit(editor, project)), asset, lane: clip.lane, region: clip.id, tick: clip.position }
+  return { ...(project === editor.project ? editor : commit(editor, project)), asset, pattern: clip.pattern, lane: clip.lane, region: clip.id, tick: clip.position }
 }
 export function arrangementCommand(editor, line) {
   line = line.trim()
@@ -150,7 +150,7 @@ export function arrangementCommand(editor, line) {
     case 'takes': {
       count(0, 1); const asset = args[0] ?? editor.asset
       arrangementTakes(editor.project, asset)
-      return { editor: { ...editor, asset }, effect: { kind: 'takes', asset } }
+      return { editor: { ...editor, asset, pattern: undefined }, effect: { kind: 'takes', asset } }
     }
     case 'take': {
       count(1, 2); const asset = args[1] ?? editor.asset, group = arrangementTakes(editor.project, asset)

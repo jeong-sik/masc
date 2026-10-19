@@ -197,7 +197,7 @@ let initialize_session client ~port =
   let session_id=match H2.Headers.get init_response.response.headers "mcp-session-id" with
     | Some value -> value
     | None -> fail "initialize returned no mcp-session-id header" in
-  ignore (read_complete response);
+  ignore (read_complete init_response);
   session_id
 
 let subscribe ?(notifications=tools_notifications) ~session_id client ~port id =

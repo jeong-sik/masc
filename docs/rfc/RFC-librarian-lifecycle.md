@@ -357,7 +357,7 @@ flowchart TD
 
   잃는 것을 적어 둔다. "건너뛰는 코드 경로가 없다"는 보장이 사라지고 "손실은 typed 로 기록된다"가 그 자리를 대신한다. 일시적인 거절을 비일시로 잘못 읽는 결함이 생기면 조용히 내용을 잃는다. 그래서 지나가는 자리를 바닥의 메시지 하나로, 그것도 크기 거절이 있을 때로만 좁힌다.
 
-  모델도 같이 바뀐다. `NoAtomPassedUnread` 는 지금 `progress.end` 까지의 atom 이 모두 `readIds` 에 있기를 요구한다(`specs/bug-models/LibrarianRead.tla`). 기록하고 지나간 조각을 담을 집합이 더해져야 한다. 그 뒤에 버그 모델 cfg 들이 여전히 위반하는지 다시 확인한다 — 약해진 불변식이 버그 모델까지 통과시키면 하네스가 판별력을 잃는다.
+  `specs/bug-models/LibrarianRead.tla`는 실제 읽은 atom의 `readIds`와 메시지별 `readMessages`, 정확한 원문 ID·메시지 번호·명명된 원인·전 슬롯 거절 증거를 가진 `unreadRecords`를 구분한다. `NoAtomPassedUnread`는 atom 안의 모든 메시지가 실제로 읽혔거나 자기 기록을 가질 때만 그 atom을 지난 위치를 허용한다. 두 메시지는 탐색 범위이며 제품의 메시지 수 제한이 아니다. 기존 로그·restart·진행 위치 규칙과 실제 읽기 liveness는 유지한다. 정상 cfg 6개는 완전 탐색하고 기존 버그 cfg 8개와 새 버그 cfg 5개는 계속 위반해야 한다. 새 반례는 무기록 진행, unknown/CLI 원인, 미소진 슬롯, 다른 원문 ID, atom 안 한 기록으로 여러 메시지를 덮는 오류를 구분한다. 실행 범위와 명령은 [모델 검증 기록](../../specs/bug-models/LibrarianRead.md)에 둔다. 이 모델의 새 전이는 원경계 게시가 성공했다는 추상화이며, 회차 메모리의 부분 상태·Memory 판정 합성·실제 저장 I/O·공급자 전달의 구현 증명은 아니다.
 
   CLI 로 끝난 걸음에는 typed cause 가 없어 일시인지 아닌지 가를 수 없다. 그 갈래가 생길 때까지 CLI 실패는 지나가는 근거로 쓰지 않는다(#37848).
 

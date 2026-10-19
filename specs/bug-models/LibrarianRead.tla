@@ -9,7 +9,8 @@
 \* A finished Keeper turn appends a line saying where the saved history ended.
 \* A round of the Librarian reads the lines, loads the checkpoint, picks the
 \* atoms it has not read, and writes back where it got to. The rules must leave
-\* no atom behind: a read position may not pass an atom no round delivered.
+\* no atom behind: a read position may pass an undelivered message only with
+\* its exact durable, exhausted, named size-refusal record.
 \*
 \* Every atom digest is taken to collide, which is the worst case for the rules
 \* that compare a line against the loaded checkpoint (4.4 rows 2a and 5): with
@@ -57,13 +58,15 @@ VARIABLES
     log,        \* the turn-boundary lines, in the order they reached the file
     turn,       \* the running turn, or NoTurn (turns of one keeper are serial)
     progress,   \* the read position [end, seen], or NoProgress
-    readIds,    \* atom ids some round delivered to the Librarian
+    readIds,    \* atom ids some round delivered in full to the Librarian
+    readMessages, \* exact messages delivered by the message-floor abstraction
+    unreadRecords, \* durable exact source + refusal evidence; never readIds
     nextId,
     budget,     \* [turns, clears, bad]
     clearHalf,  \* a clear emptied the history and owes its line
     snap        \* the line count the running round took, or -1 when none runs
 
-vars == << hist, ckTurns, log, turn, progress, readIds, nextId,
+vars == << hist, ckTurns, log, turn, progress, readIds, readMessages, unreadRecords, nextId,
            budget, clearHalf, snap >>
 
 Max(S) == CHOOSE x \in S : \A y \in S : y <= x
@@ -157,12 +160,35 @@ Choose(lines, ck, prog, refusedMode, restartFirst) ==
                        THEN [kind |-> "nothing", start |-> prog.end, end |-> prog.end]
                        ELSE [kind |-> "read", start |-> prog.end, end |-> Max(beyond)]
 
+\* Two messages per atom are a finite exploration bound, not a runtime limit.
+\* They make a record for one refused message insufficient to cover its sibling.
+MessageIndices == {1, 2}
+MessagesOf(id) == {[atom |-> id, message |-> m] : m \in MessageIndices}
+MessagesOfAtoms(ids) == UNION {MessagesOf(id) : id \in ids}
+SizeCauses == {"Context_overflow", "Input_capacity", "Request_body_refused"}
+UnknownCauses == {"Invalid_request", "Refusal_body_not_received", "Opaque_cli_failure"}
+RefusalCauses == SizeCauses \cup UnknownCauses
+
+\* Evidence is a bounded abstraction of a completed step, not a capacity oracle.
+\* exhausted says every slot refused this exact message; cause is one witness
+\* among those refusals. Seeing a named cause before exhaustion is insufficient.
+ValidUnread(r) == r.cause \in SizeCauses /\ r.exhausted
+MessageAccounted(m) ==
+    m \in readMessages \/ \E r \in unreadRecords : r.source = m /\ ValidUnread(r)
+AtomAccounted(id) ==
+    id \in readIds \/ \A m \in MessagesOf(id) : MessageAccounted(m)
+UnreadEvidenceTyped ==
+    \A r \in unreadRecords : ValidUnread(r)
+
 \* ---------------------------------------------------------------- invariants
 
 TypeOK ==
     /\ ckTurns \in Nat
     /\ nextId \in Nat
     /\ clearHalf \in BOOLEAN
+    /\ readMessages \subseteq MessagesOfAtoms(1..(nextId - 1))
+    /\ unreadRecords \subseteq
+          [source : MessagesOfAtoms(1..nextId), cause : RefusalCauses, exhausted : BOOLEAN]
     /\ snap \in -1..MaxTurns * MaxSaves + MaxTurns + MaxClears + MaxBad + 1
     /\ progress = NoProgress \/ (progress.end \in Nat /\ progress.seen \in Nat)
 
@@ -189,7 +215,7 @@ NoAtomPassedUnread ==
     \/ progress = NoProgress
     \/ Len(log) > progress.seen
     \/ \E j \in (progress.seen + 1)..Len(log) : IsRestart(log[j])
-    \/ \A i \in 1..Min({progress.end, Len(hist)}) : hist[i] \in readIds
+    \/ \A i \in 1..Min({progress.end, Len(hist)}) : AtomAccounted(hist[i])
 
 \* ---------------------------------------------------------------- writers
 
@@ -205,7 +231,7 @@ StartTurn(loaded, fresh, tc, blind, line) ==
               ELSE Append(log, RefusedLine)
     /\ budget' = [budget EXCEPT !.turns = @ - 1,
                                 !.bad = IF line = "refused" THEN @ - 1 ELSE @]
-    /\ UNCHANGED << hist, ckTurns, progress, readIds, nextId, clearHalf, snap >>
+    /\ UNCHANGED << hist, ckTurns, progress, readIds, readMessages, unreadRecords, nextId, clearHalf, snap >>
 
 \* A turn that starts from no atom and knows the saved history holds none says
 \* so before it runs; nothing of its own can be saved ahead of the line.
@@ -243,7 +269,7 @@ TurnSave ==
           \* says the history restarted: it may die before its own end line.
           /\ log' = IF first THEN Append(log, RestartLine) ELSE log
     /\ nextId' = nextId + 1
-    /\ UNCHANGED << progress, readIds, budget, clearHalf, snap >>
+    /\ UNCHANGED << progress, readIds, readMessages, unreadRecords, budget, clearHalf, snap >>
 
 \* The same save with its restart line landing as bytes the decoder refuses.
 \* This is the append that matters most: it is the only line saying the history
@@ -265,7 +291,7 @@ TurnSaveRefusedRestart ==
           /\ log' = Append(log, RefusedLine)
     /\ budget' = [budget EXCEPT !.bad = @ - 1]
     /\ nextId' = nextId + 1
-    /\ UNCHANGED << progress, readIds, clearHalf, snap >>
+    /\ UNCHANGED << progress, readIds, readMessages, unreadRecords, clearHalf, snap >>
 
 \* The end line carries the position the turn started from ([start]), so a later
 \* line answers what an unreadable line before it was (RFC 4.6, masc#37061).
@@ -283,7 +309,7 @@ TurnEnd ==
     /\ turn.saves > 0
     /\ log' = Append(log, EndLine(turn))
     /\ turn' = NoTurn
-    /\ UNCHANGED << hist, ckTurns, progress, readIds, nextId, budget,
+    /\ UNCHANGED << hist, ckTurns, progress, readIds, readMessages, unreadRecords, nextId, budget,
                     clearHalf, snap >>
 
 TurnEndRefused ==
@@ -293,13 +319,13 @@ TurnEndRefused ==
     /\ log' = Append(log, RefusedLine)
     /\ turn' = NoTurn
     /\ budget' = [budget EXCEPT !.bad = @ - 1]
-    /\ UNCHANGED << hist, ckTurns, progress, readIds, nextId,
+    /\ UNCHANGED << hist, ckTurns, progress, readIds, readMessages, unreadRecords, nextId,
                     clearHalf, snap >>
 
 TurnDie ==
     /\ turn # NoTurn
     /\ turn' = NoTurn
-    /\ UNCHANGED << hist, ckTurns, log, progress, readIds, nextId,
+    /\ UNCHANGED << hist, ckTurns, log, progress, readIds, readMessages, unreadRecords, nextId,
                     budget, clearHalf, snap >>
 
 \* A clear empties the history and then says so, in two steps, so that a round
@@ -310,13 +336,13 @@ ClearSave ==
     /\ hist' = << >>
     /\ clearHalf' = TRUE
     /\ budget' = [budget EXCEPT !.clears = @ - 1]
-    /\ UNCHANGED << ckTurns, log, turn, progress, readIds, nextId, snap >>
+    /\ UNCHANGED << ckTurns, log, turn, progress, readIds, readMessages, unreadRecords, nextId, snap >>
 
 ClearLine ==
     /\ clearHalf
     /\ log' = Append(log, RestartLine)
     /\ clearHalf' = FALSE
-    /\ UNCHANGED << hist, ckTurns, turn, progress, readIds, nextId,
+    /\ UNCHANGED << hist, ckTurns, turn, progress, readIds, readMessages, unreadRecords, nextId,
                     budget, snap >>
 
 \* ---------------------------------------------------------------- the round
@@ -326,7 +352,7 @@ ClearLine ==
 RoundSnap ==
     /\ snap = -1
     /\ snap' = Len(log)
-    /\ UNCHANGED << hist, ckTurns, log, turn, progress, readIds,
+    /\ UNCHANGED << hist, ckTurns, log, turn, progress, readIds, readMessages, unreadRecords,
                     nextId, budget, clearHalf >>
 
 Apply(refusedMode, restartFirst) ==
@@ -347,7 +373,7 @@ Apply(refusedMode, restartFirst) ==
        IN /\ readIds' = readIds \cup read
           /\ progress' = IF moves THEN [end |-> sel.end, seen |-> snap] ELSE progress
     /\ snap' = -1
-    /\ UNCHANGED << hist, ckTurns, log, turn, nextId, budget, clearHalf >>
+    /\ UNCHANGED << hist, ckTurns, log, turn, readMessages, unreadRecords, nextId, budget, clearHalf >>
 
 RoundApply == Apply("block", TRUE)
 
@@ -355,8 +381,52 @@ RoundApply == Apply("block", TRUE)
 RoundFailed ==
     /\ snap >= 0
     /\ snap' = -1
-    /\ UNCHANGED << hist, ckTurns, log, turn, progress, readIds,
+    /\ UNCHANGED << hist, ckTurns, log, turn, progress, readIds, readMessages, unreadRecords,
                     nextId, budget, clearHalf >>
+
+\* Message-floor publication abstraction (#37850). The entire selected range
+\* publishes at one original atom boundary. Successful siblings and omissions
+\* are disjoint within this publication; omitted messages never enter readIds.
+\* Volatile per-message inference, Memory disposition composition, provider
+\* delivery and receipt I/O are outside this model and remain implementation
+\* obligations. This action assumes their final publication boundary succeeded.
+ApplyMessageFloor(omitted, cause, exhausted, mode) ==
+    /\ snap >= 0
+    /\ LET lines == SubSeq(log, 1, Min({snap, Len(log)}))
+           sel == Choose(lines, hist, progress, "block", TRUE)
+           stalled == /\ progress # NoProgress
+                      /\ ~StatesPosition(lines, progress.seen, progress.end)
+           ids == {hist[i] : i \in (sel.start + 1)..sel.end}
+           messages == MessagesOfAtoms(ids)
+           recorded == CASE mode = "unrecorded" -> {}
+                         [] mode = "one-record" -> {CHOOSE m \in omitted : TRUE}
+                         [] OTHER -> omitted
+           source(m) == IF mode = "foreign-source"
+                        THEN [m EXCEPT !.atom = @ + 1] ELSE m
+       IN /\ sel.kind = "read" /\ ~stalled
+          /\ omitted # {} /\ omitted \subseteq messages
+          /\ cause \in RefusalCauses
+          /\ mode # "recorded" \/ (cause \in SizeCauses /\ exhausted)
+          /\ readIds' = readIds \cup
+                {id \in ids : MessagesOf(id) \cap omitted = {}}
+          /\ readMessages' = readMessages \cup (messages \ omitted)
+          /\ unreadRecords' = unreadRecords \cup
+                {[source |-> source(m), cause |-> cause, exhausted |-> exhausted] :
+                    m \in recorded}
+          /\ progress' = [end |-> sel.end, seen |-> snap]
+    /\ snap' = -1
+    /\ UNCHANGED << hist, ckTurns, log, turn, nextId, budget, clearHalf >>
+
+FloorApply(mode, causes, exhausted) ==
+    \E omitted \in SUBSET MessagesOfAtoms({hist[i] : i \in 1..Len(hist)}),
+       cause \in causes : ApplyMessageFloor(omitted, cause, exhausted, mode)
+
+RoundRecorded == FloorApply("recorded", RefusalCauses, TRUE)
+RoundUnrecorded == FloorApply("unrecorded", SizeCauses, TRUE)
+RoundUnknown == FloorApply("unknown", UnknownCauses, TRUE)
+RoundUnexhausted == FloorApply("unexhausted", SizeCauses, FALSE)
+RoundForeignSource == FloorApply("foreign-source", SizeCauses, TRUE)
+RoundOneRecord == FloorApply("one-record", SizeCauses, TRUE)
 
 \* ---------------------------------------------------------------- spec
 
@@ -367,6 +437,8 @@ Init ==
     /\ turn = NoTurn
     /\ progress = NoProgress
     /\ readIds = {}
+    /\ readMessages = {}
+    /\ unreadRecords = {}
     /\ nextId = 1
     /\ budget = [turns |-> MaxTurns, clears |-> MaxClears, bad |-> MaxBad]
     /\ clearHalf = FALSE
@@ -379,6 +451,14 @@ Next ==
     \/ RoundSnap \/ RoundApply \/ RoundFailed
 
 Spec == Init /\ [][Next]_vars
+
+NextRecorded == Next \/ RoundRecorded
+SpecRecorded == Init /\ [][NextRecorded]_vars
+SpecUnrecorded == Init /\ [][NextRecorded \/ RoundUnrecorded]_vars
+SpecUnknown == Init /\ [][NextRecorded \/ RoundUnknown]_vars
+SpecUnexhausted == Init /\ [][NextRecorded \/ RoundUnexhausted]_vars
+SpecForeignSource == Init /\ [][NextRecorded \/ RoundForeignSource]_vars
+SpecOneRecord == Init /\ [][NextRecorded \/ RoundOneRecord]_vars
 
 \* Bug witness 1: a round drops the line the decoder refused instead of standing
 \* on it. The refused line may have been the one saying the history restarted,
@@ -411,7 +491,7 @@ PurgeTrimGuard ==
 PurgeTrimKeepingProgress ==
     /\ PurgeTrimGuard
     /\ \E k \in 1..(Len(hist) - 1) : TrimTo(k)
-    /\ UNCHANGED << ckTurns, log, turn, progress, readIds, nextId, budget,
+    /\ UNCHANGED << ckTurns, log, turn, progress, readIds, readMessages, unreadRecords, nextId, budget,
                     clearHalf, snap >>
 
 NextPurgeTrim ==
@@ -433,7 +513,7 @@ PurgeTrimGuardedByTurns ==
     /\ \E k \in 1..(Len(hist) - 1) :
          /\ TrimTo(k)
          /\ progress' = [end |-> k, seen |-> Len(log)]
-    /\ UNCHANGED << ckTurns, log, turn, readIds, nextId, budget, clearHalf, snap >>
+    /\ UNCHANGED << ckTurns, log, turn, readIds, readMessages, unreadRecords, nextId, budget, clearHalf, snap >>
 
 NextPurgeTrimGuardedByTurns ==
     \/ Next
@@ -455,7 +535,7 @@ PurgeTrimAtEndCountingLines ==
          /\ StatesPosition(log, progress.seen, k)
          /\ TrimTo(k)
          /\ progress' = [end |-> k, seen |-> Len(log)]
-    /\ UNCHANGED << ckTurns, log, turn, readIds, nextId, budget, clearHalf, snap >>
+    /\ UNCHANGED << ckTurns, log, turn, readIds, readMessages, unreadRecords, nextId, budget, clearHalf, snap >>
 
 NextPurgeTrimAtEndCountingLines ==
     \/ Next
@@ -478,13 +558,13 @@ PurgeTrimAtEnd ==
          /\ StatesPosition(log, progress.seen, k)
          /\ TrimTo(k)
          /\ progress' = [end |-> k, seen |-> progress.seen]
-    /\ UNCHANGED << ckTurns, log, turn, readIds, nextId, budget, clearHalf, snap >>
+    /\ UNCHANGED << ckTurns, log, turn, readIds, readMessages, unreadRecords, nextId, budget, clearHalf, snap >>
 
 PurgeTrimWithoutProgress ==
     /\ PurgeTrimGuard
     /\ progress = NoProgress
     /\ \E k \in 1..(Len(hist) - 1) : TrimTo(k)
-    /\ UNCHANGED << ckTurns, log, turn, progress, readIds, nextId, budget,
+    /\ UNCHANGED << ckTurns, log, turn, progress, readIds, readMessages, unreadRecords, nextId, budget,
                     clearHalf, snap >>
 
 NextPurgeTrimAtEnd ==
@@ -507,7 +587,7 @@ PurgeTrimAtEndAnywhere ==
     /\ \E k \in 1..(Len(hist) - 1) :
          /\ TrimTo(k)
          /\ progress' = [end |-> k, seen |-> progress.seen]
-    /\ UNCHANGED << ckTurns, log, turn, readIds, nextId, budget, clearHalf, snap >>
+    /\ UNCHANGED << ckTurns, log, turn, readIds, readMessages, unreadRecords, nextId, budget, clearHalf, snap >>
 
 NextPurgeTrimAtEndAnywhere ==
     \/ Next
@@ -525,7 +605,7 @@ PurgeBoundariesKeepingProgress ==
     /\ snap = -1
     /\ log # << >>
     /\ log' = << >>
-    /\ UNCHANGED << hist, ckTurns, turn, progress, readIds, nextId, budget,
+    /\ UNCHANGED << hist, ckTurns, turn, progress, readIds, readMessages, unreadRecords, nextId, budget,
                     clearHalf, snap >>
 
 NextPurgeSplit ==

@@ -26,6 +26,7 @@ let choose ?(snapshot=Ok None) ?(lines=fun () -> Ok []) memory =
   Driver.choose_continuity ~trace_id ~messages ~snapshot ~lines
     ~progress:(fun () -> Ok (Some position)) ~memory_unread:(fun () -> memory) |> fst
 let measure message=String.length (Yojson.Safe.to_string (Agent_core.Checkpoint.message_to_json message))
+let measure_native=Host.measure_message_bytes
 let carrier messages=match List.filter Window.is_unread_context messages with
   | [message] -> message | [] | _ :: _ :: _ -> fail "expected exactly one unread carrier"
 let carried_json message =
@@ -35,6 +36,9 @@ let carried_json message =
 let check_carrier expected messages =
   check bool "exact frozen source coordinates, hashes and causes" true
     (carried_json (carrier messages)=Frozen.to_json expected)
+let resume_has_carrier (delivery : Host.resume_delivery) messages =
+  String_util.contains_substring delivery.prompt
+    (Host.encode_history_message (carrier messages))
 let compose ?accepted continuity history =
   Driver.For_testing.compose_carried_model_input ~continuity ~measure_message_bytes:measure
     ~front:None ~accepted ~history_digest_at:(Window.atom_opening_digest history)
@@ -105,7 +109,7 @@ let test_candidate_baseline_keeps_original_source () =
 let official_front continuity = Driver.librarian_position ~messages continuity
   |> Result.map_error Agent_core.Error.to_string |> require
 let start_projection front ~capacity history =
-  Host.start_range_projection ~measure_message_bytes:measure ~capacity_bytes:capacity
+  Host.start_range_projection ~measure_message_bytes:measure_native ~capacity_bytes:capacity
     ~unbounded_capacity_bytes:max_int ~reserved_bytes:0 ~librarian_front:(fun _ -> Ok front)
     ~turn_start:(Front.Turn_boundary {end_atom=2}) ~keeper_name:"frozen-fixture"
     ~runtime_id:"fixture.native" history
@@ -113,14 +117,14 @@ let start_projection front ~capacity history =
 let test_capacity_floor_keeps_evidence () =
   let front=official_front (choose (Ok [hole])) in
   let pinned=Frozen.attach ~role:T.System front.unread messages in
-  let empty,capacity=Window.project_from_atom ~allow_empty_history:true ~measure_message_bytes:measure
+  let empty,capacity=Window.project_from_atom ~allow_empty_history:true ~measure_message_bytes:measure_native
     ~first_atom:(snd (Window.annotate messages)) pinned in
   let sent=start_projection front ~capacity messages |> Result.map_error Agent_core.Error.to_string |> require in
   check_carrier front.unread sent;
   check bool "zero-history floor stays empty while evidence remains" true
     (List.for_all (fun message -> not (List.mem message messages)) sent
      && empty.dropped_atoms=empty.atom_count);
-  let required=measure (carrier pinned) in
+  let required=measure_native (carrier pinned) in
   match start_projection front ~capacity:(required-1) messages with
   | Error _ -> () | Ok _ -> fail "capacity cut silently discarded mandatory unread evidence"
 
@@ -131,24 +135,40 @@ let test_summary_fallback_and_resume () =
   let range front=Host.carried_start_range ~keeper_name:"frozen-fixture" ~runtime_id:"fixture.native"
     ~carried_front_seed:None ~librarian_front:front ~own_first_atom:0
     ~turn_start:(Front.Turn_boundary {end_atom=2}) messages in
-  let budget=List.fold_left (fun count message -> count+measure message) 0 (range plain).messages in
+  let plain_range=range plain in
+  let labelled,atom_count=Window.annotate plain_range.messages in
+  let _,floor_bytes=Window.project_from_atom ~allow_empty_history:true
+    ~measure_message_bytes:measure_native ~first_atom:atom_count plain_range.messages in
+  let atom_bytes=List.fold_left (fun count (message,label) ->
+    match label with Window.Pinned -> count
+    | Window.Atom _ -> count+measure_native message) 0 labelled in
+  (* The public window reserves its omission preamble before considering
+     history, even when this User-first range ultimately needs no preamble. *)
+  let budget=floor_bytes+atom_bytes in
   let compose front =
     let carried=range front in
-    Window.project_with_drop ~measure_message_bytes:measure ~capacity_bytes:budget ~reserved_bytes:0 carried.messages
+    Window.project_with_drop ~measure_message_bytes:measure_native ~capacity_bytes:budget ~reserved_bytes:0 carried.messages
     |> Result.map_error Window.budget_error_to_core_error
     |> Result.map (fun (projection : Window.projection) -> {Host.carried;sent=projection.messages;
       atoms_kept=projection.atom_count-projection.dropped_atoms}) in
+  let plain_composed=compose plain |> Result.map_error Agent_core.Error.to_string |> require in
+  check int "the admissible budget retains every atom without the summary" atom_count plain_composed.atoms_kept;
+  check_carrier front.unread plain_composed.sent;
+  check bool "the same budget cannot carry the oversized working state" true
+    (Result.is_error (compose front));
   let composed=Host.compose_librarian_range ~keeper_name:"frozen-fixture" ~runtime_id:"fixture.native"
     ~compose front |> Result.map_error Agent_core.Error.to_string |> require in
   check_carrier front.unread composed.sent;
   check bool "summary may be left out without losing unread evidence" false
     (List.exists Window.is_working_state composed.sent);
+  check int "summary omission retains the same original atoms" plain_composed.atoms_kept composed.atoms_kept;
   let start=Host.resume_prompt ~goal:"current goal" ~held:[] composed.sent in
   let changed=Frozen.of_results ~snapshot:(Ok [hole]) ~memory:(Ok [hole;later_hole]) in
   let changed_messages=Frozen.attach ~role:T.System changed composed.sent in
+  check_carrier changed changed_messages;
   let next=Host.resume_prompt ~goal:"current goal" ~held:start.held_context changed_messages in
   check bool "a new unread record is sent to the resumed native session" true
-    (String_util.contains_substring next.prompt (Option.get (Frozen.text changed)));
+    (resume_has_carrier next changed_messages);
   let unchanged=Host.resume_prompt ~goal:"current goal" ~held:next.held_context changed_messages in
   check string "an unchanged held context is acknowledged once" "current goal" unchanged.prompt;
   Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
@@ -202,9 +222,8 @@ let test_native_empty_replaces_held_evidence () =
     |> Result.map_error Agent_core.Error.to_string |> require in
   check_carrier Frozen.empty cleared;
   let next=Host.resume_prompt ~goal:"current goal" ~held:started.held_context cleared in
-  let clearing_text=Frozen.text ~include_empty:true Frozen.empty |> Option.get in
   check bool "a resumed thread receives an explicit latest empty observation" true
-    (String_util.contains_substring next.prompt clearing_text);
+    (resume_has_carrier next cleared);
   check bool "the stale held unread digest is replaced" false
     (next.held_context=started.held_context);
   let unchanged=Host.resume_prompt ~goal:"current goal" ~held:next.held_context cleared in
@@ -217,8 +236,8 @@ let test_native_empty_replaces_held_evidence () =
   check_carrier expected unknown;
   let resumed=Host.resume_prompt ~goal:"current goal" ~held:next.held_context unknown in
   check bool "missing observation updates the native session to unknown, never empty" true
-    (String_util.contains_substring resumed.prompt (Frozen.text expected |> Option.get));
-  let carrier_bytes=measure (carrier cleared) in
+    (resume_has_carrier resumed unknown);
+  let carrier_bytes=measure_native (carrier cleared) in
   match start_projection empty ~capacity:(carrier_bytes-1) messages with
   | Error _ -> ()
   | Ok _ -> fail "the clearing carrier was inserted after input capacity accounting"

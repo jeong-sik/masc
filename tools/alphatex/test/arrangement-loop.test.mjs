@@ -79,6 +79,23 @@ test('decimal loop cuts prepare source-preserving regions inside the actual norm
  }finally{await c.worker.terminate();await rm(directory,{recursive:true,force:true})}
 })
 
+test('adjacent original clips share their normalized native boundary across different source periods',async()=>{
+ const directory=await mkdtemp(join(tmpdir(),'masc-loop-adjacent-')),c=client()
+ try{
+  const initial=project(),p={...initial,clips:initial.clips.map(clip=>({...clip,extent:96,repeat:9}))}
+  const joined=editArrangement(p,{kind:'region-add',lane:p.lanes[0].id,asset:'asset-1',name:'Adjacent',position:1728,offset:0,extent:192,repeat:1})
+  const selected=arrangementCommand(arrangementEditor(joined),'loop 0.5 2.2').editor.project
+  const prepared=ok(await c.request({kind:'prepare-midi',project:selected,directory,midiOutput:'123'}))
+  const plan=JSON.parse(await readFile(prepared.path,'utf8'))
+  const ends=plan.regions.map(r=>r.startSeconds+(r.sourceEnd-r.sourceStart)*r.repeatCount)
+  for(let n=1;n<plan.regions.length;n++)assert.ok(ends[n-1]<=plan.regions[n].startSeconds)
+  assert.equal(ends[1],plan.regions[2].startSeconds)
+  assert.ok(ends.at(-1)<=plan.duration)
+  assert.deepEqual(plan.regions.map(r=>r.repeatCount),[1,6,1])
+  assert.deepEqual(selected.assets,initial.assets)
+ }finally{await c.worker.terminate();await rm(directory,{recursive:true,force:true})}
+})
+
 test('invalid or silent loop ranges refuse and pending audio, UMP, click and recording paths cannot silently play one-shot',async()=>{
  const p=project(),before=structuredClone(p),e=arrangementEditor(p),c=client(),directory=await mkdtemp(join(tmpdir(),'masc-loop-refusal-'))
  try{

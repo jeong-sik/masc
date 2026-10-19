@@ -772,8 +772,8 @@ final class MidiTransport {
     func restore(at seconds: Double) throws {
         try reconcile(at: seconds, reconstruct: true)
     }
-    func reconcile(at seconds: Double, reconstruct: Bool = false) throws {
-        if timeline.arrangement { try reconcileRegions(at: seconds, reconstruct: reconstruct); return }
+    func reconcile(at seconds: Double, reconstruct: Bool = false, observedAt: Double? = nil) throws {
+        if timeline.arrangement { try reconcileRegions(at: seconds, reconstruct: reconstruct, observedAt: observedAt); return }
         if timeline.source {
             if reconstruct {
                 var model = SourceChase(), decoders = Dictionary(uniqueKeysWithValues: timeline.bindings.map { ($0.port, WireState()) })
@@ -848,7 +848,7 @@ final class MidiTransport {
         sourceModel.replace(prefix, addresses: region.addresses)
         regionCursors[index].active = true; regionCursors[index].index = next
     }
-    func reconcileRegions(at seconds: Double, reconstruct: Bool) throws {
+    func reconcileRegions(at seconds: Double, reconstruct: Bool, observedAt: Double? = nil) throws {
         if !reconstruct {
             // Drain at most the one already active copy. Entirely missed copies
             // are not audible history: skip them arithmetically to the live phase.
@@ -865,7 +865,7 @@ final class MidiTransport {
                     while regionCursors[index].index < region.events.count && region.includes(region.events[regionCursors[index].index].seconds) {
                         let event = region.events[regionCursors[index].index]
                         sourceModel.observe(event.bytes, port: event.port)
-                        // The remaining attacks belong to an expired copy.
+                        // Past attacks belong to an expired loop copy.
                         // Existing acquired notes form the FIFO prefix for each
                         // key: preserve only their original releases, along with
                         // the ordered expression/pedal history. sourceSend keeps
@@ -874,7 +874,9 @@ final class MidiTransport {
                         let attack = type == 0x90 && event.bytes[2] > 0
                         let release = type == 0x80 || type == 0x90 && event.bytes[2] == 0
                         let key = UInt16(event.bytes[0] & 15) << 8 | UInt16(event.bytes[1])
-                        if !attack && (!release || (sourceHeld[event.port]?[key] ?? 0) > 0) {
+                        let deadline = regionStart(region, copy: old.copy) + (event.seconds - region.spec.sourceStart)
+                        let expired = loop && deadline < (observedAt ?? seconds)
+                        if !loop || (attack ? !expired : !release || (sourceHeld[event.port]?[key] ?? 0) > 0) {
                             try sourceSend(event.bytes, port: event.port)
                         }
                         regionCursors[index].index += 1
@@ -965,7 +967,7 @@ final class MidiTransport {
             let next = pendingRestore ? offset : timeline.arrangement ? (nextRegionAction()?.seconds ?? timeline.duration) : timeline.source ? (index < timeline.wireEvents.count ? timeline.wireEvents[index].seconds : now)
                 : (index < timeline.events.count ? timeline.events[index].seconds : now)
             maximumLateness = max(maximumLateness, now - next)
-            if timeline.source { try reconcile(at: min(now, timeline.duration)) }
+            if timeline.source { try reconcile(at: min(now, timeline.duration), observedAt: now) }
             if now >= timeline.duration {
                 if coordinated {
                     offset = timeline.duration; state = .paused; timer?.cancel(); timer = nil

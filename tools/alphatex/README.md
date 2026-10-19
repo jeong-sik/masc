@@ -659,6 +659,11 @@ the admitted playback before adopting the new document.
 Preparation clips regions to one cycle without rewriting source files or
 expanding repeated copies. A leading/trailing partial repeat and the compressed
 whole copies keep original source seconds, release messages and port bindings.
+All clips share projected loop boundaries; the native cycle may include a
+representable silent tail from floating-point rounding without widening source
+trims. A late callback skips unacquired attacks from an expired loop copy,
+preserves owned key releases and expression history, and resumes at the current
+cycle phase. Exactly due endpoint events retain their original order.
 Native admission checks controller/bend/program/pressure baselines across the
 last-to-first transition as well as between regions. An unspecified value is
 refused instead of leaking the previous cycle's state or guessing a device

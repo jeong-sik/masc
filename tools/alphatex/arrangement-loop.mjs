@@ -21,7 +21,7 @@ export function requireLoopTransport(project) {
 // Original source timelines are retained; no musical messages are flattened.
 export function loopMidiRegions(regions, range) {
   if (!range) return regions
-  const result = []
+  const pieces = []
   for (const region of regions) {
     const period = region.sourceEnd - region.sourceStart
     const end = region.startSeconds + period * region.repeatCount
@@ -33,19 +33,10 @@ export function loopMidiRegions(regions, range) {
     if (position(copy) > from) copy--
     if (copy + 1 < region.repeatCount && position(copy + 1) <= from) copy++
     if (copy < 0 || !(position(copy) <= from && position(copy + 1) > from)) throw new Error('Loop boundary loses source repeat precision')
-    let previous
     const add = (label, start, stop, sourceStart, sourceEnd, repeatCount) => {
-      // Cut membership uses the original absolute boundaries. Native playback
-      // evaluates start + span * count after subtracting the loop origin; that
-      // reassociation can round differently. Join adjacent pieces using exactly
-      // the preceding native endpoint, without changing the source selection.
-      const normalizedStart = previous?.stop === start ? previous.end : start - range.start
-      const normalizedEnd = normalizedStart + (sourceEnd - sourceStart) * repeatCount
       if (!(sourceStart >= region.sourceStart && sourceEnd <= region.sourceEnd && sourceEnd > sourceStart)
-          || !Number.isSafeInteger(repeatCount) || repeatCount <= 0 || start < range.start || stop > range.end || stop <= start
-          || !Number.isFinite(normalizedEnd) || normalizedStart < 0 || normalizedEnd <= normalizedStart) throw new Error('Loop trim is not representable at source precision')
-      result.push({ ...region, id: JSON.stringify([region.id, label]), startSeconds: normalizedStart, sourceStart, sourceEnd, repeatCount })
-      previous = { stop, end: normalizedEnd }
+          || !Number.isSafeInteger(repeatCount) || repeatCount <= 0 || start < range.start || stop > range.end || stop <= start) throw new Error('Loop trim is not representable at source precision')
+      pieces.push({ start, stop, spec: { ...region, id: JSON.stringify([region.id, label]), sourceStart, sourceEnd, repeatCount } })
     }
     if (from > position(copy)) {
       const stop = Math.min(to, position(copy + 1))
@@ -60,6 +51,26 @@ export function loopMidiRegions(regions, range) {
     if (count > 0) { add('whole', start, position(copy + count), region.sourceStart, region.sourceEnd, count); copy += count }
     if (position(copy) < to) add('trailing', position(copy), to, region.sourceStart, region.sourceStart + (to - position(copy)), 1)
   }
-  if (!result.length) throw new Error('Loop range has no audible MIDI regions')
-  return result
+  if (!pieces.length) throw new Error('Loop range has no audible MIDI regions')
+  // Cut membership uses original absolute boundaries. Native playback instead
+  // evaluates normalizedStart + span * count, which can round differently.
+  // Project every boundary once, after all incoming native ends are known.
+  // Shared boundaries stay shared across different original regions/sources;
+  // originally disjoint intervals cannot acquire a rounding-induced overlap.
+  const starts = new Map(), incoming = new Map(), projected = new Map()
+  for (const piece of pieces) {
+    if (!starts.has(piece.start)) starts.set(piece.start, [])
+    starts.get(piece.start).push(piece)
+  }
+  let previous = 0
+  for (const boundary of [...new Set(pieces.flatMap(piece => [piece.start, piece.stop]))].sort((a, b) => a - b)) {
+    const startSeconds = Math.max(boundary - range.start, previous, incoming.get(boundary) ?? 0)
+    projected.set(boundary, startSeconds); previous = startSeconds
+    for (const piece of starts.get(boundary) ?? []) {
+      const end = startSeconds + (piece.spec.sourceEnd - piece.spec.sourceStart) * piece.spec.repeatCount
+      if (!Number.isFinite(end) || end <= startSeconds) throw new Error('Loop trim is not representable at native precision')
+      incoming.set(piece.stop, Math.max(incoming.get(piece.stop) ?? 0, end))
+    }
+  }
+  return pieces.map(piece => ({ ...piece.spec, startSeconds: projected.get(piece.start) }))
 }

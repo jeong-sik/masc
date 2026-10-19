@@ -245,15 +245,12 @@ let create ~context ?(on_result=log_result) () =
 
 let pulse_with_resume ~resume ~sw supervisor =
   Eio.Switch.check sw;
-  let* pending = Journal.pending_continuations ~read_composition_result:Keeper_composition_dependency_result.readiness ~base_path:supervisor.context.config.base_path in
-  List.iter (fun (identity,error) -> Log.Server.warn "prepared continuation discovery retained request=%s error=%s"
-      identity (Journal.error_to_string error)) pending.failures;
   (* One immutable declaration projection belongs to this pulse, never to the
      supervisor. Eio.Lazy shares in-flight I/O and restarts a cancelled read for
      a remaining caller. No eligible intake means no declaration filesystem I/O. *)
   let profiles = Eio.Lazy.from_fun ~cancel:`Restart (fun () ->
     read_profiles ~base_path:supervisor.context.config.base_path) in
-  List.iter (fun candidate ->
+  let on_ready candidate =
     let source = Journal.continuation_source candidate in
     let key = source.keeper_name,source.composition_run_id in
     let held = match Run_map.find_opt key supervisor.held with
@@ -306,7 +303,12 @@ let pulse_with_resume ~resume ~sw supervisor =
           | exn -> Log.Server.warn "prepared continuation observer failed: %s" (Printexc.to_string exn)) outcome)
       with exn ->
         supervisor.active <- Run_set.remove key supervisor.active;
-        raise exn)) pending.ready;
+        raise exn) in
+  let* pending = Journal.discover_pending_continuations ~on_ready
+      ~read_composition_result:Keeper_composition_dependency_result.readiness
+      ~base_path:supervisor.context.config.base_path in
+  List.iter (fun (identity,error) -> Log.Server.warn "prepared continuation discovery retained request=%s error=%s"
+      identity (Journal.error_to_string error)) pending.failures;
   Ok ()
 
 let pulse ~sw supervisor =

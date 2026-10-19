@@ -256,6 +256,18 @@ type pending_continuations =
   ; failures : (string * error) list
   }
 
+val discover_pending_continuations :
+  on_ready:(continuation -> unit) -> read_composition_result:read_composition_result ->
+  base_path:string -> (pending_continuations, error) result
+(** Publish each originally validated ready candidate before inspecting later
+    pending names. [on_ready] runs in the calling context after the original
+    journal/terminal/dependency reads, outside filesystem exception conversion
+    and marker transactions. Its exceptions and cancellation propagate; later
+    discovery failures cannot retract earlier callbacks. The final report
+    records observations in original order, not callback admission or execution
+    outcomes. Every intake must still validate the captured original authority.
+    Directory acquisition and exact terminal-bound retirement remain unchanged. *)
+
 val pending_continuations :
   read_composition_result:read_composition_result -> base_path:string -> (pending_continuations, error) result
 (** Discover only per-request pending markers published before journal

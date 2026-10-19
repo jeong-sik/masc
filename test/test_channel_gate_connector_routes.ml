@@ -126,12 +126,12 @@ let connector_read_ready state base_path =
     }
   in
   state.Tui.server_identity <- Some identity;
-  state.workspace_identity <-
+  state.Tui.workspace_identity <-
     Tui.workspace_identity_of_refresh ~local_base_path:state.local_base_path (Ok identity)
 
 let connector_read_uncertain state =
   state.Tui.workspace_identity <- Tui.next_workspace_identity
-      ~previous:state.workspace_identity ~local_base_path:state.local_base_path
+      ~previous:state.Tui.workspace_identity ~local_base_path:state.local_base_path
       (Error "identity observation interrupted");
   Tui.suspend_workspace_readings state
 

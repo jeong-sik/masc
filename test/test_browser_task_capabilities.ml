@@ -4,7 +4,7 @@ module Cap = Masc.Browser_capabilities
 module Selection = Masc.Browser_selection
 module Tools = Masc.Tool_misc_browser_lane
 module U = Yojson.Safe.Util
-let data = Masc.Tool_result.data
+let data = Tool_result.data
 let argument actions = `Assoc ["requiredActions",`List (List.map (fun s -> `String s) actions)]
 let tabs args = Tools.handle_tabs ~base_path:"/nonexistent/browser-capability-fixture"
   ~tool_name:"BrowserTabs" ~start_time:(Masc.Tool_timing.start ()) args
@@ -58,7 +58,7 @@ let test_zoom_and_impossible () = fixture (fun ~chrome ~gecko ~live ~extension ~
     U.(data impossible |> member "code" |> to_string);
   check bool "no dispatch on impossible task" true (before=(!chrome,!gecko,!live));
   check bool "raw model output retains recovery candidates" true
-    (Yojson.Safe.from_string (Masc.Tool_result.message impossible)=data impossible);
+    (Yojson.Safe.from_string (Tool_result.message impossible)=data impossible);
   check int "recovery lists actual connected/registered browsers" 4
     U.(data impossible |> member "candidates" |> to_list |> List.length);
   let explicit=tabs (`Assoc ["lane",`String "live";"clientId",`String (Lane.client_id_to_string extension.client_id);

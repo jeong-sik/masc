@@ -29,7 +29,7 @@ let scenario ok () = with_base @@ fun base_path -> Eio_main.run @@ fun _env -> E
         let channel=open_out_bin effect_path in output_string channel "original resource mutation\n";close_out channel;
         Eio.Promise.resolve resolve_entered ();Eio.Promise.await release;
         if ok then Masc.Keeper_types_profile.tool_result_ok "original result"
-        else Masc.Keeper_types_profile.tool_result_error ~class_:Masc.Tool_result.Runtime_failure "original failure") () with
+        else Masc.Keeper_types_profile.tool_result_error ~class_:Tool_result.Runtime_failure "original failure") () with
     | Ok {acceptance=Async.Durably_accepted;request_id} -> request_id
     | Ok _ | Error _ -> fail "original request not durably admitted" in
   Eio.Promise.await entered;

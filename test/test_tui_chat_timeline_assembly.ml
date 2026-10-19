@@ -450,7 +450,7 @@ let test_an_empty_conversation_has_no_edges () =
 let test_source_scoped_row_check_matches_full_held_scan () =
   let autonomous_source =
     Masc_tui_keeper_chat_log.Autonomous_turn
-      { trace_id = "trace-auto-1"; turn_generation = 2 }
+      (Ids.Turn_ref.make ~trace_id:"trace-auto-1" ~absolute_turn:2)
   in
   let with_source source (entry : Tui_types.msg_entry) =
     { entry with me_execution_source = source }

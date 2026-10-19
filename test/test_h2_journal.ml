@@ -906,7 +906,7 @@ let test_first_loss_retains_unproven_effects mode () =
       reject (Journal.waiting_continuation prepared.journal);
       check string "manual refusal preserves pending marker" marker_bytes (read marker_path);
       check string "discovery and manual refusal preserve original occurrences" original (read path);
-      let module Command = Masc.Operator_composition_resolution_command in
+      let module Command = Operator_composition_resolution_command in
       let target = ["keeper_name",`String keeper;"request_id",`String request_id;
         "composition_run_id",`String (Plan.Composition_run_id.to_string prepared.source.composition_run_id)] in
       let command name fields = Command.parse_tool_command (`Assoc (("command",`String name)::target @ fields))

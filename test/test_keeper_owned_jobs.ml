@@ -1908,7 +1908,7 @@ let test_operator_resolves_permanent_continuation_mismatch () = with_fixture @@ 
   let report = pending () in
   (match report.failures with [_,Journal.Invalid_result _] -> ()
    | _ -> fail "canonical dependency mismatch was not retained as Invalid_result");
-  let module Command = Masc.Operator_composition_resolution_command in
+  let module Command = Operator_composition_resolution_command in
   let command name fields = Command.parse_tool_command (`Assoc
     (["command",`String name;"keeper_name",`String keeper;"composition_run_id",`String run_id;
       "request_id",`String entry.request_id] @ fields)) |> require "operator resolution command" in

@@ -1,10 +1,9 @@
 import { html } from 'htm/preact'
-import { useState } from 'preact/hooks'
+import { useLayoutEffect, useRef, useState } from 'preact/hooks'
 import { artifactHref, type ArtifactDocument } from '../../api/published-artifacts'
 import { Markdown } from '../common/markdown'
 import { navigate } from '../../router'
 import { copyToClipboard } from '../common/copyable-code'
-import { showToast } from '../common/toast'
 
 // Opaque origin: no allow-same-origin. Keep the CSP first so the body cannot
 // load subresources before the policy applies. Scripts support self-contained
@@ -28,42 +27,52 @@ function downloadSource(doc: ArtifactDocument): void {
   URL.revokeObjectURL(url)
 }
 
-export function ArtifactReader({ doc, fixedRevision }: { doc: ArtifactDocument; fixedRevision: boolean }) {
+export function ArtifactReader({ doc, fixedRevision, onClose }: {
+  doc: ArtifactDocument; fixedRevision: boolean; onClose: () => void
+}) {
+  const dialog = useRef<HTMLDialogElement>(null)
   const [view, setView] = useState<'rendered' | 'source'>('rendered')
+  const [copyFeedback, setCopyFeedback] = useState('')
   const { artifact, content, revisions } = doc
+  useLayoutEffect(() => {
+    const element = dialog.current!
+    element.showModal()
+    return () => element.close()
+  }, [])
   const changeRevision = (revision: string) => navigate('workspace', {
     section: 'artifacts', artifact: artifact.id,
     ...(revision === 'latest' ? {} : { revision }),
   })
   const copyLink = async () => {
     const href = artifactHref(artifact.id, fixedRevision ? artifact.revision : undefined)
-    const success = await copyToClipboard(new URL(href, window.location.href).href)
-    showToast(success ? '문서 링크를 복사했습니다.' : '링크를 복사하지 못했습니다.', success ? 'success' : 'error')
+    const success = await copyToClipboard(new URL(href, window.location.href).href, dialog.current ?? undefined)
+    setCopyFeedback(success ? '문서 링크를 복사했습니다.' : '링크를 복사하지 못했습니다.')
   }
   return html`
-    <article class="min-w-0 rounded-lg border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]" aria-label="아티팩트 본문">
-      <header class="border-b border-[var(--color-border-default)] p-4 space-y-3">
+    <dialog ref=${dialog} aria-labelledby="artifact-reader-title"
+      class="fixed inset-0 m-0 h-dvh max-h-none w-full max-w-none overflow-hidden border-0 bg-[var(--color-bg-surface)] p-0 text-[var(--color-fg-default)]"
+      onKeyDown=${(event: KeyboardEvent) => {
+        // Let the native dialog handle Escape before the shell's chat shortcut.
+        if (event.key === 'Escape') event.stopPropagation()
+      }}
+      onCancel=${(event: Event) => { event.preventDefault(); onClose() }}>
+    <article class="flex h-full min-w-0 flex-col" aria-label="아티팩트 본문">
+      <header class="shrink-0 border-b border-[var(--color-border-default)] px-4 py-3 space-y-2">
         <div class="flex flex-wrap items-center justify-between gap-2">
-          <span class="text-xs uppercase tracking-wider text-[var(--color-fg-muted)]">${artifact.format} · v${artifact.revision}</span>
+          <button type="button" aria-label="목록으로" onClick=${onClose}>← <span class="hidden sm:inline">목록으로</span></button>
+          <h2 id="artifact-reader-title" class="m-0 min-w-0 flex-1 truncate text-base font-semibold">${artifact.title}</h2>
           <div class="flex flex-wrap gap-3 text-xs">
-            <button type="button" onClick=${copyLink}>링크 복사</button>
-            <button type="button" onClick=${() => downloadSource(doc)}>원본 다운로드</button>
+            <button type="button" aria-label="링크 복사" onClick=${copyLink}><span class="sm:hidden">복사</span><span class="hidden sm:inline">링크 복사</span></button>
+            <button type="button" aria-label="원본 다운로드" onClick=${() => downloadSource(doc)}><span class="sm:hidden">저장</span><span class="hidden sm:inline">원본 다운로드</span></button>
           </div>
         </div>
-        <h2 class="m-0 break-words text-xl font-semibold">${artifact.title}</h2>
-        <p class="m-0 text-sm text-[var(--color-fg-secondary)]">${artifact.summary}</p>
-        <div class="flex flex-wrap items-center gap-3 text-xs text-[var(--color-fg-secondary)]">
-          <a href=${`#/keepers?keeper=${encodeURIComponent(artifact.author)}`}>${artifact.author}</a>
-          <time dateTime=${artifact.created_at}>${new Date(artifact.created_at).toLocaleString()}</time>
-          ${artifact.task_id ? html`<a href=${`#/workspace?section=planning&task=${encodeURIComponent(artifact.task_id)}`}>${artifact.task_id}</a>` : null}
-          ${artifact.goal_id ? html`<a href=${`#/workspace?section=planning&goal=${encodeURIComponent(artifact.goal_id)}`}>${artifact.goal_id}</a>` : null}
-        </div>
         <div class="flex flex-wrap items-center justify-between gap-3">
-          <div class="flex gap-3" aria-label="본문 표시 방식">
+          <div class="flex items-center gap-3" aria-label="본문 표시 방식">
+            <span class="text-xs uppercase text-[var(--color-fg-muted)]">${artifact.format} · v${artifact.revision}</span>
             <button type="button" aria-pressed=${view === 'rendered'} onClick=${() => setView('rendered')}>미리보기</button>
             <button type="button" aria-pressed=${view === 'source'} onClick=${() => setView('source')}>원본</button>
           </div>
-          <label class="text-xs">버전 ${' '}
+          <label class="flex min-w-0 items-center gap-1 text-xs">버전 ${' '}
             <select aria-label="문서 버전" value=${fixedRevision ? String(artifact.revision) : 'latest'}
               onChange=${(event: Event) => changeRevision((event.target as HTMLSelectElement).value)}>
               <option value="latest">최신 버전</option>
@@ -71,15 +80,27 @@ export function ArtifactReader({ doc, fixedRevision }: { doc: ArtifactDocument; 
             </select>
           </label>
         </div>
+        <p role="status" class="m-0 text-xs">${copyFeedback}</p>
+        <details class="text-xs text-[var(--color-fg-secondary)]">
+          <summary class="cursor-pointer">보고서 정보</summary>
+          <p class="my-2">${artifact.summary}</p>
+          <div class="flex flex-wrap items-center gap-3">
+            <a href=${`#/keepers?keeper=${encodeURIComponent(artifact.author)}`}>${artifact.author}</a>
+            <time dateTime=${artifact.created_at}>${new Date(artifact.created_at).toLocaleString()}</time>
+            ${artifact.task_id ? html`<a href=${`#/workspace?section=planning&task=${encodeURIComponent(artifact.task_id)}`}>${artifact.task_id}</a>` : null}
+            ${artifact.goal_id ? html`<a href=${`#/workspace?section=planning&goal=${encodeURIComponent(artifact.goal_id)}`}>${artifact.goal_id}</a>` : null}
+          </div>
+        </details>
       </header>
-      <div class="min-w-0 p-4">
+      <div class="flex min-h-0 min-w-0 flex-1 flex-col overflow-auto">
         ${view === 'source'
-          ? html`<pre tabIndex=${0} aria-label="문서 원본" class="m-0 max-h-[75vh] overflow-auto whitespace-pre-wrap break-words text-xs">${content}</pre>`
+          ? html`<pre tabIndex=${0} aria-label="문서 원본" class="m-0 flex-1 whitespace-pre-wrap break-words p-6 text-xs">${content}</pre>`
           : artifact.format === 'markdown'
-            ? html`<${Markdown} text=${content} />`
+            ? html`<div class="mx-auto w-full max-w-[80ch] p-6 sm:p-10"><${Markdown} text=${content} /></div>`
             : html`<iframe title=${artifact.title} sandbox="allow-scripts" referrerPolicy="no-referrer"
-                class="h-[75vh] min-h-96 w-full rounded border-0 bg-white" srcDoc=${artifactHtmlDocument(content)} />`}
+                class="min-h-0 w-full flex-1 border-0 bg-white" srcDoc=${artifactHtmlDocument(content)} />`}
       </div>
     </article>
+    </dialog>
   `
 }

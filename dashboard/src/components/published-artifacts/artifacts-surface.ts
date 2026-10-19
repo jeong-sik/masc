@@ -56,17 +56,17 @@ export function ArtifactsSurface() {
           <p class="mt-1 text-sm text-[var(--color-fg-secondary)]">Keeper가 작성한 보고서와 결과물을 다시 읽어보세요.</p></div>
         <button type="button" onClick=${() => setRefresh(n => n + 1)}>새로고침</button>
       </header>
-      <div class="grid min-w-0 items-start gap-4 lg:grid-cols-[20rem_minmax(0,1fr)]">
+      <div class="min-w-0 space-y-4">
         <aside class="min-w-0 space-y-3" aria-label="아티팩트 목록">
           <input type="search" aria-label="아티팩트 검색" placeholder="제목, 요약, 작성자 검색"
-            class="w-full rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-2 text-sm"
+            class="w-full max-w-lg rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-2 text-sm"
             value=${query} onInput=${(event: Event) => setQuery((event.target as HTMLInputElement).value)} />
           ${list === null ? html`<p role="status">목록을 불러오고 있습니다.</p>`
             : list.kind === 'error' ? html`<p role="alert">${list.message}</p>`
             : html`
               ${list.data.diagnostics.length ? html`<p role="alert" class="text-xs">일부 문서를 읽지 못했습니다. ${list.data.diagnostics.map(d => `${d.id}: ${d.error}`).join(' · ')}</p>` : null}
               ${artifacts.length === 0 ? html`<p role="status" class="text-sm text-[var(--color-fg-secondary)]">${search ? '검색 결과가 없습니다.' : '아직 게시된 아티팩트가 없습니다. Keeper가 보고서를 게시하면 여기에 표시됩니다.'}</p>` : null}
-              <ul class="m-0 list-none space-y-2 p-0">
+              <ul class="m-0 grid list-none gap-3 p-0 md:grid-cols-2 xl:grid-cols-3">
                 ${artifacts.map(a => html`<li key=${a.id}>
                   <button type="button" aria-current=${a.id === selectedId ? 'true' : undefined}
                     class="w-full rounded-lg border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 text-left hover:bg-[var(--color-bg-hover)]"
@@ -82,7 +82,8 @@ export function ArtifactsSurface() {
         ${!selectedId ? html`<div class="rounded-lg border border-dashed border-[var(--color-border-default)] p-8 text-sm text-[var(--color-fg-secondary)]">목록에서 문서를 선택하면 본문이 열립니다.</div>`
           : doc === null ? html`<p role="status">문서를 불러오고 있습니다.</p>`
           : doc.kind === 'error' ? html`<p role="alert">${doc.message}</p>`
-          : html`<${ArtifactReader} key=${selectedId} doc=${doc.data} fixedRevision=${revision !== undefined} />`}
+          : html`<${ArtifactReader} key=${selectedId} doc=${doc.data} fixedRevision=${revision !== undefined}
+              onClose=${() => navigate('workspace', { section: 'artifacts' })} />`}
       </div>
     </section>
   `

@@ -1,9 +1,10 @@
 import { html } from 'htm/preact'
-import { render, fireEvent, cleanup, waitFor } from '@testing-library/preact'
+import { render, fireEvent, cleanup, waitFor, within } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { get } from '../../api/core'
 import { route, navigate } from '../../router'
 import { ArtifactsSurface } from './artifacts-surface'
+import { copyToClipboard } from '../common/copyable-code'
 
 vi.mock('../../router', async () => {
   const { signal } = await import('@preact/signals')
@@ -19,6 +20,7 @@ vi.mock('../../api/token-revision', async () => {
   return { storedTokenRevision: signal(0) }
 })
 vi.mock('../common/markdown', () => ({ Markdown: ({ text }: { text: string }) => html`<div data-markdown>${text}</div>` }))
+vi.mock('../common/copyable-code', () => ({ copyToClipboard: vi.fn() }))
 
 const firstId = `artifact-${'a'.repeat(32)}`
 const secondId = `artifact-${'b'.repeat(32)}`
@@ -31,6 +33,7 @@ const document = { artifact: first, content: '# 보고서\r\n한글과 😀', re
 
 beforeEach(() => {
   vi.clearAllMocks()
+  vi.mocked(copyToClipboard).mockResolvedValue(true)
   route.value = { tab: 'workspace', params: { section: 'artifacts' }, postId: null }
   vi.mocked(get).mockImplementation(async path => {
     if (path === '/api/v1/published-artifacts') return { artifacts: [first, second], diagnostics: [] }
@@ -46,6 +49,7 @@ describe('artifact library user flow', () => {
     const view = render(html`<${ArtifactsSurface} />`)
     fireEvent.click(await view.findByRole('button', { name: /주간 조사 보고서/ }))
     expect(await view.findByRole('heading', { name: first.title })).toBeTruthy()
+    fireEvent.click(view.getByText('보고서 정보'))
     expect(view.getByRole('link', { name: 'task-42' }).getAttribute('href')).toContain('task=task-42')
     fireEvent.click(view.getByRole('button', { name: '원본', exact: true }))
     expect(view.getByLabelText('문서 원본').textContent).toBe(document.content)
@@ -54,6 +58,9 @@ describe('artifact library user flow', () => {
     expect(await view.findByRole('heading', { name: '조사 초안' })).toBeTruthy()
     fireEvent.click(view.getByRole('button', { name: '원본', exact: true }))
     expect(view.getByLabelText('문서 원본').textContent).toBe('# 이전 원본')
+    fireEvent.click(view.getByRole('button', { name: '목록으로' }))
+    expect(navigate).toHaveBeenLastCalledWith('workspace', { section: 'artifacts' })
+    expect(view.queryByRole('dialog')).toBeNull()
     fireEvent.input(view.getByRole('searchbox'), { target: { value: 'designer' } })
     expect(view.queryByRole('button', { name: /주간 조사 보고서/ })).toBeNull()
     expect(view.getByRole('button', { name: /동작하는 차트/ })).toBeTruthy()
@@ -64,6 +71,9 @@ describe('artifact library user flow', () => {
     const view = render(html`<${ArtifactsSurface} />`)
     expect(await view.findByRole('heading', { name: '조사 초안' })).toBeTruthy()
     expect((view.getByLabelText('문서 버전') as HTMLSelectElement).value).toBe('1')
+    fireEvent(view.getByRole('dialog'), new Event('cancel', { cancelable: true }))
+    expect(navigate).toHaveBeenLastCalledWith('workspace', { section: 'artifacts' })
+    expect(view.queryByRole('dialog')).toBeNull()
   })
 
   it('opens HTML in an opaque sandbox with a restrictive resource policy', async () => {
@@ -74,6 +84,25 @@ describe('artifact library user flow', () => {
     expect(frame.getAttribute('srcdoc')).toContain("connect-src 'none'")
     expect(frame.getAttribute('srcdoc')).toContain('<button onclick=')
     expect(frame.getAttribute('referrerpolicy')).toBe('no-referrer')
+  })
+
+  it('shows copy success inside the reader and copies the selected version link', async () => {
+    route.value = { tab: 'workspace', params: { section: 'artifacts', artifact: firstId, revision: '1' }, postId: null }
+    const view = render(html`<${ArtifactsSurface} />`)
+    const dialog = within(await view.findByRole('dialog'))
+    fireEvent.click(dialog.getByRole('button', { name: '링크 복사' }))
+    await waitFor(() => expect(dialog.getByRole('status').textContent).toBe('문서 링크를 복사했습니다.'))
+    expect(vi.mocked(copyToClipboard).mock.calls[0]?.[0]).toContain(`artifact=${firstId}&revision=1`)
+    expect(vi.mocked(copyToClipboard).mock.calls[0]?.[1]).toBe(view.getByRole('dialog'))
+  })
+
+  it('shows clipboard failure inside the reader', async () => {
+    vi.mocked(copyToClipboard).mockResolvedValue(false)
+    route.value = { tab: 'workspace', params: { section: 'artifacts', artifact: firstId }, postId: null }
+    const view = render(html`<${ArtifactsSurface} />`)
+    const dialog = within(await view.findByRole('dialog'))
+    fireEvent.click(dialog.getByRole('button', { name: '링크 복사' }))
+    await waitFor(() => expect(dialog.getByRole('status').textContent).toBe('링크를 복사하지 못했습니다.'))
   })
 
   it('keeps loading, empty and inaccessible catalogs distinct', async () => {

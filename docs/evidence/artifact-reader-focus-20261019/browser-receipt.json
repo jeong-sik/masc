@@ -1,0 +1,40 @@
+{
+  "status": "passed",
+  "checkedAt": "2026-10-19T05:15:58.759Z",
+  "scope": "Changed Vite frontend with real isolated artifact API; no production deployment or same-commit backend claim",
+  "url": "http://127.0.0.1:52701/dashboard/#workspace?section=artifacts&artifact=artifact-193a7c23c60bd8eef24956f5ffd40284",
+  "dimensions": {
+    "width": 1440,
+    "height": 1000,
+    "innerWidth": 1440,
+    "innerHeight": 1000,
+    "x": 0,
+    "y": 0,
+    "frameWidth": 1440,
+    "frameHeight": 876.25,
+    "modal": true,
+    "overflow": false
+  },
+  "mobile": {
+    "width": 390,
+    "height": 844,
+    "overflow": false
+  },
+  "checks": [
+    "Desktop native modal fills viewport; HTML fills remaining height and responds; Escape from reader controls returns to preserved search.",
+    "Markdown rendering, source and version selection remain available; direct revision reload reopens modal; Back returns to list.",
+    "Mobile viewport filled without horizontal overflow; HTML button works and Back returns to list."
+  ],
+  "pageErrors": [],
+  "frontendSourceSha256": {
+    "dashboard/src/components/published-artifacts/artifact-reader.ts": "a65ea5cad347886591072d123ff6287317342a595efa3943830af9249b6cd86e",
+    "dashboard/src/components/published-artifacts/artifacts-surface.ts": "a07256fdcd31435b889a4fb6713461c3a7ef3ea0ab0b506197f461fa25744d96",
+    "dashboard/src/components/common/copyable-code.ts": "5a53738d7946b57c21a4aa96ecae004f0f62194947d63b2fa746f18f8c4f2c47"
+  },
+  "backendCommit": "5e2483c8857a18c0e7e8391a8fa5f7b77b1bf748",
+  "sourceBase": "24951b0e80f2e8b4ecb09a9cda3b7d6411eb4f55",
+  "limits": [
+    "Escape verified with focus on reader controls; sandboxed iframe key events do not reach the parent. Back remains available.",
+    "Development frontend uses an unchanged real isolated backend; not same-commit release or deployment proof."
+  ]
+}

@@ -22,10 +22,13 @@ workspace, identity and dashboard. It does not require another hosting service.
    conversation. The Keeper includes the returned link in its report to users
    of other channels.
 4. Work → Artifacts shows title, author, summary and update time. Selecting a
-   result opens the reader beside the list. Search filters title, summary and
+   result opens a viewport-filling reader above the dashboard. Back to list or
+   Escape in the reader controls returns to the searchable catalog. Search filters title, summary and
    author. Empty, loading, missing and failed states remain distinguishable.
 5. The reader provides rendered/source views, revision selection, copy-link and
-   exact-source download. It links to the author and any Task or Goal.
+   exact-source download. HTML uses the remaining viewport; Markdown has a
+   centered reading column. Expand report information for the author, summary
+   and any Task or Goal links. A native modal keeps background controls inert.
 6. Updating an artifact requires its ID and expected latest revision. A stale
    revision produces a conflict without overwriting another publication. The
    stable link follows the latest version; a version link is immutable.

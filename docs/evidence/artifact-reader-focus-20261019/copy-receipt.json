@@ -1,0 +1,9 @@
+{
+  "status": "passed",
+  "checkedAt": "2026-10-19T05:16:15.404Z",
+  "scope": "Actual browser clipboard for native success and execCommand fallback exact revision URL; deterministic platform denial for failure feedback, no HTTP response mocks",
+  "latest": "http://127.0.0.1:52701/dashboard/#/workspace?section=artifacts&artifact=artifact-193a7c23c60bd8eef24956f5ffd40284",
+  "fallback": "http://127.0.0.1:52701/dashboard/#/workspace?section=artifacts&artifact=artifact-193a7c23c60bd8eef24956f5ffd40284&revision=1",
+  "fallbackPreservedRevision": true,
+  "deniedFeedback": "링크를 복사하지 못했습니다."
+}

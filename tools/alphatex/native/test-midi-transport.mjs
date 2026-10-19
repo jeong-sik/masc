@@ -742,6 +742,33 @@ reviewClock=1_100_000_000;scoped.tick()
 precondition(scoped.sourceHeld[0]?[60]==1 && scoped.sourceHeld[0]?[UInt16(1<<8|64)]==1)
 reviewWire=[];try scoped.sourceSilence(addresses:scoped.regionScopes[0])
 precondition(reviewWire.map(\.1)==[[0x80,60,0]] && scoped.sourceHeld[0]?[UInt16(1<<8|64)]==1,"one window scope silenced a disjoint owner")
+// An ended prefix key has no restoration effect and must not reserve its
+// channel or erase the state of another, genuinely audible region owner.
+let deadPrefix=asset("deadPrefix",[
+    ["seconds":0.01,"port":2,"bytes":[0x91,62,90]], ["seconds":0.1,"port":2,"bytes":[0x81,62,45]],
+    ["seconds":0.25,"port":2,"bytes":[0x90,60,100]], ["seconds":0.35,"port":2,"bytes":[0x80,60,77]]])
+let deadPath=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString+".json")
+var delayedClip=clip("deadPrefix","deadPrefix",from:0.2,to:1,repeatCount:1);delayedClip["startSeconds"]=0.3
+let otherPrefix=asset("otherPrefix",[["seconds":0.25,"port":2,"bytes":[0x91,64,90]],["seconds":0.5,"port":2,"bytes":[0x81,64,77]]])
+try JSONSerialization.data(withJSONObject:["schemaVersion":3,"duration":1.1,"sources":[deadPrefix,otherPrefix],"regions":[delayedClip,clip("otherPrefix","otherPrefix",from:0,to:1,repeatCount:1)]]).write(to:deadPath)
+let deadTimeline=try JSONDecoder().decode(Timeline.self,from:Data(contentsOf:deadPath));try FileManager.default.removeItem(at:deadPath)
+let deadOwner=try MidiTransport(timeline:deadTimeline,uid:"1",loop:true,coordinated:true,cycle:commonClock)
+precondition(deadOwner.regionScopes==[Set([0]),Set([1])])
+deadOwner.prepared=true;deadOwner.destination=fifoBase.destination;deadOwner.sourceDestinations=fifoBase.sourceDestinations
+reset(0);reviewWire=[];try deadOwner.stageCoordinated(at:0);try deadOwner.runCoordinated(anchorNanoseconds:1_000_000_000)
+reviewClock=1_060_000_000;deadOwner.tick();precondition(deadOwner.sourceModel.channels[1]?.notes.first?.pitch==64)
+reviewClock=1_150_000_000;deadOwner.tick()
+precondition(deadOwner.sourceModel.channels[1]?.notes.first?.pitch==64 && deadOwner.sourceHeld[0]?[UInt16(1<<8|64)]==1,"dead prefix replacement erased another region's state")
+// A range can span only the suffix and prefix of adjacent copies. Its absent
+// middle channel is not audible merely because the region repeats.
+let partialCopies=try arrangement([asset("partialCopies",[
+    ["seconds":0.05,"port":2,"bytes":[0x90,60,90]],["seconds":0.1,"port":2,"bytes":[0x80,60,77]],
+    ["seconds":0.4,"port":2,"bytes":[0x91,62,90]],["seconds":0.5,"port":2,"bytes":[0x81,62,77]],
+    ["seconds":0.85,"port":2,"bytes":[0x90,60,90]],["seconds":0.9,"port":2,"bytes":[0x80,60,77]]])],
+    [clip("partialCopies","partialCopies",from:0,to:1,repeatCount:2)],duration:2)
+let partialClock=try MidiCycle(start:0.8,end:1.2,duration:0.4,period:400_000_000,divisor:1)
+let partialWindow=try partialClock.window(partialCopies.timeline.regions[0])
+precondition(partialWindow.scope==Set([0]),"unreachable repeated-copy middle reserved a channel")
 let earlyBase=try arrangement([asset("early",[["seconds":0,"port":2,"bytes":[0xc0,0]],["seconds":0.2+0.1,"port":2,"bytes":[0x90,74,80,0x80,74,77]]])],[clip("early","early",from:0,to:1,repeatCount:1)],duration:1)
 let early=try MidiTransport(timeline:earlyBase.timeline,uid:"1",loop:true,coordinated:true,cycle:commonClock)
 early.prepared=true;early.destination=earlyBase.destination;early.sourceDestinations=earlyBase.sourceDestinations

@@ -645,9 +645,12 @@ and external MIDI clock editing are separate features.
 `:loop START END` stores an enabled loop range in arrangement beats; `:loop off`
 restores one-shot playback. These are immutable document edits with undo/redo and
 portable save/reopen. Original WAV, SMF and mixed WAV/SMF arrangements can loop
-without count-in/metronome. Captured audio/UMP and practice-click looping
-still require their shared cycle-state integration; those routes refuse the
-loop explicitly. Loop recording likewise requires cycle-aware take placement and is
+without count-in/metronome. Captured audio loops through `:play-audio`, or normal
+playback when only audio components are audible. Original host-clock gaps,
+source trims, channel routing and fractional placement corrections remain intact.
+Paired captured UMP and practice-click looping still require their shared
+cycle-state integration; those routes refuse the loop explicitly.
+Loop recording likewise requires cycle-aware take placement and is
 not admitted yet. Disabling the loop restores their existing one-shot workflows.
 
 For example, `:loop 4 12` repeats that passage continuously on the selected audio

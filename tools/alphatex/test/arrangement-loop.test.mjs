@@ -96,17 +96,19 @@ test('adjacent original clips share their normalized native boundary across diff
  }finally{await c.worker.terminate();await rm(directory,{recursive:true,force:true})}
 })
 
-test('invalid or silent loop ranges refuse and pending audio, UMP, click and recording paths cannot silently play one-shot',async()=>{
+test('invalid or silent loop ranges refuse and pending UMP, click and recording paths cannot silently play one-shot',async()=>{
  const p=project(),before=structuredClone(p),e=arrangementEditor(p),c=client(),directory=await mkdtemp(join(tmpdir(),'masc-loop-refusal-'))
  try{
   for(const command of ['loop -1 1','loop 1 1','loop 2 1','loop 0','loop 0 1 2'])assert.throws(()=>arrangementCommand(e,command))
   for(const playbackLoop of [null,{start:0,end:960,unknown:true},{start:0,end:Infinity},{start:.5,end:960}])assert.throws(()=>validateArrangement({...p,playbackLoop}))
   assert.deepEqual(p,before)
   const selected=arrangementCommand(e,'loop 1 2').editor.project
-  for(const kind of ['prepare-audio','prepare-capture']){
+  for(const kind of ['prepare-capture']){
    const r=await c.request({kind,project:selected,sourceRoot:directory,directory,midiOutput:'123'})
    assert.equal(r.ok,false);assert.match(r.error,/loop playback/)
   }
+  const audio=await c.request({kind:'prepare-audio',project:selected,sourceRoot:directory,directory})
+  assert.equal(audio.ok,false);assert.match(audio.error,/MIDI assets/)
   const clicks={...selected,practice:{countInBars:1,metronome:true}}
   const r=await c.request({kind:'prepare-midi',project:clicks,directory,midiOutput:'123'});assert.equal(r.ok,false);assert.match(r.error,/count-in or metronome/)
   const silent=arrangementCommand(e,'loop 100 101').editor.project

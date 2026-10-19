@@ -1,4 +1,5 @@
 module Node_map = Map.Make (Keeper_tool_plan.Node_id)
+module Node_set = Set.Make (Keeper_tool_plan.Node_id)
 
 type scheduled_node =
   { node : Keeper_tool_plan.node
@@ -16,7 +17,7 @@ type unscheduled_batch =
 
 type resource_ordering =
   | Descriptor_order
-  | Prepared_order of (Keeper_tool_plan.Node_id.t * Keeper_tool_plan.Node_id.t list) list
+  | Prepared_order of Keeper_tool_plan.Node_id.t list Node_map.t
   | Ready_order
 
 let contract_exn plan node =
@@ -50,24 +51,31 @@ let unscheduled_layer plan nodes =
 ;;
 
 let predecessors dependencies node_id =
-  match List.find_opt (fun (id, _) -> Keeper_tool_plan.Node_id.equal id node_id) dependencies with
-  | Some (_, predecessors) -> predecessors
+  match Node_map.find_opt node_id dependencies with
+  | Some predecessors -> predecessors
   | None -> invalid_arg "prepared Inline file lost its resource ordering"
 ;;
 
 let prepared_layer plan dependencies nodes =
-  let rec waves = function
+  (* Lists retain the original partition and group order. This layer-local set
+     answers membership only; a following wave removes the ready partition. *)
+  let pending_ids = List.fold_left (fun ids (node : Keeper_tool_plan.node) ->
+      Node_set.add node.id ids) Node_set.empty nodes in
+  let rec waves pending_ids = function
     | [] -> []
     | pending ->
       let ready, waiting = List.partition (fun (node : Keeper_tool_plan.node) ->
         let earlier = predecessors dependencies node.id in
-        not (List.exists (fun (other : Keeper_tool_plan.node) ->
-          List.exists (Keeper_tool_plan.Node_id.equal other.id) earlier) pending)) pending in
+        not (List.exists (fun predecessor -> Node_set.mem predecessor pending_ids) earlier)) pending in
       if ready = [] then invalid_arg "prepared Inline file resource ordering contains a cycle";
+      let waiting_ids = match waiting with
+        | [] -> Node_set.empty
+        | _ :: _ -> List.fold_left (fun ids (node : Keeper_tool_plan.node) ->
+            Node_set.remove node.id ids) pending_ids ready in
       Unscheduled_concurrent (List.map (fun node -> node, contract_exn plan node) ready)
-      :: waves waiting
+      :: waves waiting_ids waiting
   in
-  waves nodes
+  waves pending_ids nodes
 ;;
 
 let schedule_layers ~resource_ordering plan layers =
@@ -590,7 +598,10 @@ let execute_with_tool_use_id
     | None ->
       (match Option.bind prepared_files (Keeper_prepared_inline_files.resource_dependencies ~plan) with
        | None -> Descriptor_order
-       | Some dependencies -> Prepared_order dependencies)
+       | Some dependencies ->
+         (* The exact producer supplies one row per validated original ID.
+            Keep its predecessor lists unchanged for wave and outcome waits. *)
+         Prepared_order (Node_map.of_list dependencies))
     | Some ready ->
       if not (Keeper_prepared_inline_files.Ready.plan ready.files == plan) then
         invalid_arg "ready Inline files belong to a different plan";

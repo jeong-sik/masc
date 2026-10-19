@@ -301,6 +301,42 @@ status: reference
   → [Dashboard_event_slices](../../lib/dashboard_event_slices.mli),
   [Activity scope](../../bin/masc_tui_acting.ml), [TUI 안내](../TUI-GUIDE.md)
 
+**SearXNG**
+: 웹 검색 제공자 가운데 하나. 런타임 `web_search` 절이 어디를 검색할지와 순서를
+  정하는데, SearXNG 위치는 `MASC_SEARXNG_URL`이 가리고 unset·빈 값이면 기본 URL을
+  쓴다. provider API 키는 서버 프로세스 환경에서만 읽고 runtime.toml에 쓰지 않는다
+  — 이 파일은 커밋되기 때문이다. 카탈로그는 SearXNG를 Docker 컨테이너로 띄우는
+  전제조건을 검사하고(#43168), 설치 마법사는 웹 검색을 z.ai나 SearXNG로 고르게
+  한다(#43184). 설정 디렉터리는 호스트 전역이라 컨테이너 이름과 설정 경로를 설치,
+  전제조건 검사, 로컬 기동 스크립트가 같은 규칙으로 잡는다.
+  → [masc web-search-setup](../../bin/masc_cli_web_search_setup.mli) ·
+  [Prerequisites](../../bin/masc_cli_prerequisites.ml) ·
+  [scripts/searxng-local.sh](../../scripts/searxng-local.sh)
+
+**Request Wire Observation (요청 회선 관측)**
+: Agent Core가 provider 직렬화와 스트림 필드 주입을 모두 끝낸 뒤, 발송 직전의
+  직렬화된 요청 본문에서 남기는 관측 증거. 관측값은 구조적 신원·바이트 길이·
+  SHA-256 해시뿐이고 본문·프롬프트·도구 인자·헤더·자격 증명은 절대 노출하지
+  않는다. 발송이 시작됐다는 뜻이 아니라 그 경계에서 Agent Core가 준비한 바이트를
+  증명하는 것이며, 관측은 진단용일 뿐 provider 결과를 고치지 않는다(#43388).
+  → [Request_wire_observer](../../packages/agent_core/lib/llm_provider/request_wire_observer.mli)
+
+**Attribution (귀속)**
+: "무엇이 어느 근거에서 왔는지"를 남기는 기록이지만, masc에는 방향이 다른 셋이
+  살아서 한 단어를 공유한다. 문장에 어느 것인지 함께 적는다.
+  (1) 요청 구성요소 귀속: provider 요청 본문의 구성요소가 어느 준비 단계에서
+  들어갔는지를 준비 영수증이 함께 남기는 것(#43389).
+  (2) 게이트 판정 귀속: 검증 게이트가 내린 pass/fail 판정 하나에 who/where/
+  what/why를 싣는 구조화 봉투(`lib/attribution`) — 판정 성격(`det`은 규칙 기반
+  논리라 같은 입력이면 같은 판정)과 결과가 합타입이라 불법 상태를 표현할 수 없다.
+  (3) 문맥 바이트 귀속: 한 턴의 입력을 세그먼트별로 재어 어디가 얼마를 차지했는지
+  재는 것(`Keeper_agent_prompt_metrics`) — 바이트 귀속 계산 근거가 없으면 재지
+  않고 그 이유를 타입으로 남긴다. 이름에 '귀속'이 들어가는 항목이 더 있지만
+  (Candidate Fault 등) 이 항목은 위 셋만 다룬다.
+  → [Attribution](../../lib/attribution/attribution.mli) ·
+  [Request_wire_observer](../../packages/agent_core/lib/llm_provider/request_wire_observer.mli) ·
+  [Keeper_agent_prompt_metrics](../../lib/keeper/keeper_agent_prompt_metrics.mli)
+
 **Harness (하네스)**
 : 이 저장소에서 서로 다른 넷을 가리킨다. 문장에 어느 것인지 함께 적는다.
   (1) TUI Harness 화면: 평가자 판정을 읽는 TUI 표면. 코드의 화면 이름은 `Harness`지만
@@ -3019,6 +3055,38 @@ status: reference
     비동기(`merge-async`)로 일괄 접수되는 외부 플랫폼 기능인 반면, ROLL은 복수 작업의 커밋/트리를 단일 PR로 묶어 착지시키고
     원본을 닫는 내부 운영 규약이다.
   → [docs/constitution.xml](../constitution.xml) ·
+  [scripts/review/merge-guard.sh](../../scripts/review/merge-guard.sh)
+
+**가이드 없음 표기 (guideless marker)**
+: 릴리스 노트의 Added 불릿 끝에 달아, 그 기능을 다루는 사용 가이드가 아직 없음을
+  숨기지 않고 남기는 표식이다. `가이드 없음(` 으로 열고 두 갈래로 닫는다.
+  - 형식: 고치려는 대상 문서가 정해져 있으면 `가이드 없음(대상 문서:
+    docs/design/browser-bidi-live-host.md)` 처럼 경로를 적고, 그런 문서 자체가
+    없으면 `가이드 없음(문서 없음)` 이라고 적는다. 줄이 72칸쯤에 접혀도
+    계수는 불릿 전체에서 표기를 찾는다. 계수기는 표기가 들었는지를 세는
+    도구지, 두 형식의 문법 검증기는 아니다.
+  - 계수와 증거: 노트 작성이 끝나면 `scripts/release/count-guideless-added.py`가
+    이 표기를 세어 `docs/releases/guide-metrics-<tag>.md`에 남긴다. 표기는
+    규칙상 허용되지만, 계수 결과는 receipt 묶음에 포함해 다음 게이트화 판단
+    재료로 삼는다(규약 제안 #1).
+  - 다른 것: 가이드 1장이 과하면 같은 내용을 조각 첫 불릿의 `Usage:` 하위
+    항목으로 대신한다(헌법 `a-dababc7`). 표기는 "가이드가 아예 없다"가 아니라
+    "이번 노트 기준으로 가이드를 아직 만들지 않았다"를 말한다.
+  → [docs/RELEASE-EVIDENCE.md](../RELEASE-EVIDENCE.md) ·
+  [scripts/release/count-guideless-added.py](../../scripts/release/count-guideless-added.py)
+
+**Merge-compile Record (병합 컴파일 기록)**
+: 착지하려는 정확한 병합 head SHA를, 기본으로는 그 SHA의 트리와 main 툴체인이
+  바이트까지 같은지 대조한 뒤 컴파일해 커밋 상태(commit status)로 남기는 기록.
+  `trust-head-toolchain=true`면 이 대조를 생략하고 override를 영수증에 남긴다.
+  `merge-compile.yml`은 workflow_dispatch로만 돌고 sha·pr 입력을 받는다(pr=0은
+  PR 없는 도달 가능 SHA, live-proof dispatch). merge-guard는 이 기록을
+  `ADVISORY #N: ...` 조언 줄로 기본 읽는데, `MASC_MERGE_COMPILE_ENFORCE=1`이면
+  fail-closed로 바뀐다. 기록이 승인을 대신하지도, 병합을 보증하지도 않는다.
+  비-main ref proof run은 status를 쓰지 않는다. 병합자가 착지 보고에 남기는
+  Main minimal build(main ref 제품 빌드)는 다른 검사다.
+  → [.github/workflows/merge-compile.yml](../../.github/workflows/merge-compile.yml) ·
+  [scripts/review/README.md](../../scripts/review/README.md) ·
   [scripts/review/merge-guard.sh](../../scripts/review/merge-guard.sh)
 
 **Disposable Build Volume (일회용 빌드 볼륨)**

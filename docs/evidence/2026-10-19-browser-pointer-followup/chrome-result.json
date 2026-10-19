@@ -1,0 +1,206 @@
+{
+  "feedback": {
+    "actor": "owned-chrome-proof",
+    "phase": "finished",
+    "action": "drag_to",
+    "pointer": {
+      "x": 570,
+      "y": 340,
+      "buttons": 1,
+      "source": "drop"
+    },
+    "requestId": "25d65bc0-4993-43d8-9928-2914b0867788",
+    "inert": true,
+    "ariaHidden": "true",
+    "badge": "MASC \u00b7 owned-chrome-proof\nFinished \u00b7 drag_to",
+    "connected": true
+  },
+  "workingFrames": [
+    {
+      "actor": "owned-chrome-proof",
+      "phase": "working",
+      "action": "hover",
+      "requestId": "862b71c7-2620-4fdb-a808-c87ca47d0ce5"
+    },
+    {
+      "actor": "owned-chrome-proof",
+      "phase": "working",
+      "action": "click",
+      "requestId": "d4ffe30b-0fb3-4138-ab86-a2d325261721"
+    },
+    {
+      "actor": "owned-chrome-proof",
+      "phase": "working",
+      "action": "click",
+      "requestId": "13e47850-7b1f-4c06-8a3a-c1fe8e754970"
+    },
+    {
+      "actor": "owned-chrome-proof",
+      "phase": "working",
+      "action": "drag_to",
+      "requestId": "58dc6b30-3b6e-447c-abd4-2f3f8f0e7ee9"
+    },
+    {
+      "actor": "owned-chrome-proof",
+      "phase": "working",
+      "action": "drag_to",
+      "requestId": "4ee4f272-2cf7-47ca-8efc-2f4e988ebacd"
+    },
+    {
+      "actor": "owned-chrome-proof",
+      "phase": "working",
+      "action": "drag_to",
+      "requestId": "25d65bc0-4993-43d8-9928-2914b0867788"
+    }
+  ],
+  "runtimeMarker": {
+    "receiver": "function",
+    "marker": {
+      "protocolVersion": "2.0.0",
+      "serverInfo": {
+        "name": "stagehand",
+        "version": "1.0.2"
+      }
+    }
+  },
+  "candidateExecutorAndWire": true,
+  "hovered": {
+    "answer": {
+      "ok": true,
+      "data": {
+        "tabId": 0,
+        "urlBefore": "http://127.0.0.1:53892/fixture.html",
+        "action": "hover",
+        "url": "http://127.0.0.1:53892/fixture.html",
+        "title": "Trusted semantic click fixture",
+        "scrollX": 0,
+        "scrollY": 0
+      }
+    }
+  },
+  "menuOpened": {
+    "value": {
+      "opened": true
+    }
+  },
+  "selected": {
+    "value": {
+      "selected": "trusted selection",
+      "events": [
+        {
+          "type": "pointerdown",
+          "trusted": true,
+          "target": "more"
+        },
+        {
+          "type": "mousedown",
+          "trusted": true,
+          "target": "more"
+        },
+        {
+          "type": "click",
+          "trusted": true,
+          "target": "more"
+        },
+        {
+          "type": "pointerdown",
+          "trusted": true,
+          "target": "select"
+        },
+        {
+          "type": "mousedown",
+          "trusted": true,
+          "target": "select"
+        },
+        {
+          "type": "click",
+          "trusted": true,
+          "target": "select"
+        }
+      ]
+    }
+  },
+  "pointerDrag": {
+    "value": "drag-accepted:true"
+  },
+  "customDrag": {
+    "value": "drag-accepted:true"
+  },
+  "html5Reply": {
+    "answer": {
+      "ok": true,
+      "data": {
+        "tabId": 0,
+        "urlBefore": "http://127.0.0.1:53892/drag.html",
+        "action": "drag_to",
+        "url": "http://127.0.0.1:53892/drag.html",
+        "title": "Pointer drag activation fixture",
+        "scrollX": 0,
+        "scrollY": 0
+      }
+    }
+  },
+  "html5Result": {
+    "value": "html5:true"
+  },
+  "calls": [
+    "stagehand.init",
+    "context.pages",
+    "context.active_page",
+    "page.evaluate",
+    "context.pages",
+    "page.evaluate",
+    "page.evaluate",
+    "page.evaluate",
+    "page.evaluate",
+    "page.hover",
+    "page.evaluate",
+    "page.evaluate",
+    "page.evaluate",
+    "page.evaluate",
+    "page.evaluate",
+    "page.evaluate",
+    "page.evaluate",
+    "page.click",
+    "page.evaluate",
+    "page.evaluate",
+    "page.evaluate",
+    "page.evaluate",
+    "page.evaluate",
+    "page.evaluate",
+    "page.evaluate",
+    "page.evaluate",
+    "page.click",
+    "page.evaluate",
+    "page.evaluate",
+    "page.evaluate",
+    "page.goto",
+    "page.evaluate",
+    "page.evaluate",
+    "page.evaluate",
+    "page.evaluate",
+    "page.drag_and_drop",
+    "page.evaluate",
+    "page.evaluate",
+    "page.evaluate",
+    "page.evaluate",
+    "page.evaluate",
+    "page.evaluate",
+    "page.evaluate",
+    "page.drag_and_drop",
+    "page.evaluate",
+    "page.evaluate",
+    "page.evaluate",
+    "page.evaluate",
+    "page.evaluate",
+    "page.evaluate",
+    "page.evaluate",
+    "page.evaluate",
+    "page.drag_and_drop",
+    "page.evaluate",
+    "page.evaluate",
+    "page.evaluate",
+    "page.evaluate",
+    "page.evaluate"
+  ]
+}

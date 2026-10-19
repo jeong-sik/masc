@@ -1,0 +1,17 @@
+{
+  "candidate_source_commit": "565e806bd4c76fd7ccb4e6b8c573b6ac19b0d544",
+  "proof": "fresh isolated Chrome, candidate compiled executor and wire, installed pinned Stagehand 4.1.0 runtime",
+  "sha256": {
+    "lib/browser_lane/browser_lane.ml": "47a0b195c13bcd929ea4d805709d269772fd65d30a3d77e3ddcc75ca7db1fec0",
+    "lib/browser_interaction.ml": "01f352f3a942faa2d571c3d9b23407815e19dcb4bfe0f07fc2e81e36532e77ff",
+    "lib/browser_stagehand_wire.ml": "518710fa5963e8a991109a770532b24cfa1abd435ce2750412aee9fcb2726b7d",
+    "lib/browser_stagehand_executor.ml": "26a3eda607d181fa52e6451d02361e94534f0cf1feeb08e2ef0513764a7318aa",
+    "lib/browser_stagehand_executor.mli": "c5d8e0abd9f659100f6c0d6c8a97a75f23801fb8b5d471a43f6207a20c7ff189",
+    "lib/browser_stagehand_backend.ml": "e1c9850d18633e2839d56d319d69f9ab9daeef3709cb0a42eda30c9c64c329a0",
+    "lib/browser_stagehand_backend.mli": "4a623a149dbd6f32642b2d997cd293cb2b3fbf834f197bc1b9bc44490d7fb3d2",
+    "lib/browser_pointer_feedback.ml": "38bc1a74fb3212e1c501f28fc43609613a745f0b0b768fd168ae6daf79cc6d6a",
+    "lib/browser_pointer_feedback.mli": "5e2b9e54b6f098c3d4638888c000d538a540adf9608b5aec7c69d466c9e2ace0",
+    "lib/browser_page_script.ml": "6c5ab482af80b958c43cf37946fe12e97525a80b610577c9dd4c2ab2f66adf6c",
+    "lib/browser_scene_script.ml": "8f1ff2b389cb7ece615832d9f41b5b1398da8c37a81774487b9f3a6b88dd6ffb"
+  }
+}

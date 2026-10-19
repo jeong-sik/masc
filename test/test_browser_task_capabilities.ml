@@ -7,7 +7,7 @@ module U = Yojson.Safe.Util
 let data = Tool_result.data
 let argument actions = `Assoc ["requiredActions",`List (List.map (fun s -> `String s) actions)]
 let tabs args = Tools.handle_tabs ~base_path:"/nonexistent/browser-capability-fixture"
-  ~tool_name:"BrowserTabs" ~start_time:(Masc.Tool_timing.start ()) args
+  ~tool_name:"BrowserTabs" ~start_time:(Tool_timing.start ()) args
 let client _digit transport : Lane.client_info =
   let client_id = Uuidm.v4_gen (Random.State.make_self_init ()) () in
   {client_id;transport;browser=Lane.Firefox;version="0.8.0";engine_version="fixture"}
@@ -69,7 +69,7 @@ let test_zoom_and_impossible () = fixture (fun ~chrome ~gecko ~live ~extension ~
 let test_open_and_boundary () = fixture (fun ~chrome ~gecko ~live ~extension:_ ~bidi:_ ->
   List.iter (fun lane -> Lane.install_server_session_observer lane (Some (fun () -> Lane.Browser_closed)))
     [Lane.Server_stagehand;Lane.Server_automation];
-  let open_ actions = Tools.handle_session ~tool_name:"BrowserSession" ~start_time:(Masc.Tool_timing.start ())
+  let open_ actions = Tools.handle_session ~tool_name:"BrowserSession" ~start_time:(Tool_timing.start ())
     (`Assoc ["action",`String "open";"requiredActions",`List (List.map (fun s -> `String s) actions)]) in
   ignore (open_ ["read_frames"]);check int "required frames opens Gecko, not configured Chromium" 1 !gecko;
   check int "Chromium not opened" 0 !chrome;
@@ -80,7 +80,7 @@ let test_open_and_boundary () = fixture (fun ~chrome ~gecko ~live ~extension:_ ~
     [`String "hover";`List [`String "typo"];`List [`String "hover";`String "hover"];`List [`Int 1]];
   ignore (tabs (`Assoc ["requiredActions",`List [];"requiredActions",`List [`String "hover"]]));
   check bool "duplicate requirement fields never dispatch" true (before=(!chrome,!gecko,!live));
-  ignore (Tools.handle_session ~tool_name:"BrowserSession" ~start_time:(Masc.Tool_timing.start ())
+  ignore (Tools.handle_session ~tool_name:"BrowserSession" ~start_time:(Tool_timing.start ())
     (`Assoc ["action",`String "status";"requiredActions",`List []]));
   check bool "requirements cannot redirect lifecycle inspection" true (before=(!chrome,!gecko,!live));
   check bool "bound automatic request cannot be reselected by capabilities" true

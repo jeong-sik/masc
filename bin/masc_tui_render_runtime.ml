@@ -1173,6 +1173,7 @@ let usage_lines ~cols (state : state) =
     match Overview_providers.section
             ~providers:(usage_providers_reading state) ~runtimes:state.overview_quota
             ~account_emails:state.overview_account_emails
+            ~show_unusable:state.usage_show_unusable
             ~now:(Unix.gettimeofday ()) ~width:(max 20 (cols - 4)) with
     | Some section -> section.title :: section.lines
     (* [section] answers [None] only before the first read. *)

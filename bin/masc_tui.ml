@@ -28509,6 +28509,9 @@ and is loaded on demand through keeper_skill.
         | Some "a" when state.view = Metrics && not state.usage_telemetry_open ->
             state.usage_scope_id <- None;
             state.metrics_scroll <- 0
+        | Some "x" when state.view = Metrics && not state.usage_telemetry_open ->
+            state.usage_show_unusable <- not state.usage_show_unusable;
+            state.metrics_scroll <- 0
         | Some "v" when state.view = Metrics && not state.usage_telemetry_open ->
             state.usage_section <- next_usage_section state.usage_section;
             state.metrics_scroll <- 0

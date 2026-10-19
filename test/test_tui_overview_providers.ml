@@ -213,7 +213,7 @@ let section_lines ?(runtimes = Types.Quota_unread) ?(account_emails = Types.Acco
     ~width accounts =
   match
     Providers.section ~providers:(Types.Providers_read (decode_accounts accounts))
-      ~runtimes ~account_emails ~now ~width
+      ~runtimes ~account_emails ~now ~width ~show_unusable:true
   with
   | Some section -> section.lines
   | None -> fail "a read draws a section"
@@ -241,7 +241,7 @@ let test_section_draws_one_line_per_window () =
   let section =
     match
       Providers.section ~account_emails:Types.Account_emails_unread ~providers:(Types.Providers_read windows) ~runtimes ~now
-        ~width
+        ~width ~show_unusable:true
     with
     | Some section -> section
     | None -> fail "a read draws a section"
@@ -294,7 +294,7 @@ let test_silent_account_draws_only_its_exhaustion () =
     Types.Quota_read [ runtime ~scope:"provider:codex" ~exhausted:true "codex.gpt" ]
   in
   match
-    Providers.section ~account_emails:Types.Account_emails_unread ~providers:(Types.Providers_read windows) ~runtimes ~now ~width
+    Providers.section ~account_emails:Types.Account_emails_unread ~providers:(Types.Providers_read windows) ~runtimes ~now ~width ~show_unusable:true
   with
   | None -> fail "a read draws a section"
   | Some section ->
@@ -343,7 +343,7 @@ let reported_section ?(current = now) ?(kimi_observed_at = 1790170000.0)
       ]
   in
   match
-    Providers.section ~account_emails:Types.Account_emails_unread ~providers:(Types.Providers_read windows) ~runtimes ~now:current
+    Providers.section ~account_emails:Types.Account_emails_unread ~providers:(Types.Providers_read windows) ~runtimes ~now:current ~show_unusable:true
       ~width
   with
   | Some section -> List.map plain section.lines
@@ -391,7 +391,7 @@ let test_reset_clock_follows_local_dates () =
     in
     match Providers.section ~providers:(Types.Providers_read reading)
             ~runtimes:Types.Quota_unread ~account_emails:Types.Account_emails_unread
-            ~now:current ~width:160 with
+            ~now:current ~width:160 ~show_unusable:true with
     | Some section -> String.concat "\n" (List.map plain section.lines)
     | None -> fail "a read draws a section"
   in
@@ -498,7 +498,7 @@ let test_window_that_gates_nothing_is_not_an_alarm () =
   let section =
     match
       Providers.section ~account_emails:Types.Account_emails_unread ~providers:(Types.Providers_read windows)
-        ~runtimes:Types.Quota_unread ~now ~width
+        ~runtimes:Types.Quota_unread ~now ~width ~show_unusable:true
     with
     | Some section -> section
     | None -> fail "a read draws a section"
@@ -547,7 +547,7 @@ let test_account_emails_name_their_accounts () =
   let section account_emails =
     match
       Providers.section ~providers:(Types.Providers_read windows)
-        ~runtimes:Types.Quota_unread ~account_emails ~now ~width
+        ~runtimes:Types.Quota_unread ~account_emails ~now ~width ~show_unusable:true
     with
     | Some section -> section
     | None -> fail "a read draws a section"
@@ -723,7 +723,7 @@ let test_unread_catalogue_is_not_zero_blocked () =
     | Ok windows -> windows | Error reason -> fail reason in
   let section = match Providers.section
     ~providers:(Types.Providers_read windows) ~runtimes:Types.Quota_unread
-    ~account_emails:Types.Account_emails_unread ~now ~width:80 with
+    ~account_emails:Types.Account_emails_unread ~now ~width:80 ~show_unusable:true with
     | Some section -> section | None -> fail "expected plan rows" in
   let text = String.concat "\n" (List.map plain section.lines) in
   check bool "catalogue absence is not reported as no blocked accounts" true
@@ -736,7 +736,7 @@ let test_plan_preserves_unknown_reports () =
   let draw windows =
     match Providers.section
       ~providers:(Types.Providers_read windows) ~runtimes:Types.Quota_unread
-      ~account_emails:Types.Account_emails_unread ~now ~width:100 with
+      ~account_emails:Types.Account_emails_unread ~now ~width:100 ~show_unusable:true with
     | Some section -> String.concat "\n" (List.map plain section.lines)
     | None -> fail "expected plan summary" in
   let silent = { windows with puws_accounts = List.map (fun account ->
@@ -781,7 +781,7 @@ let test_usd_rows_do_not_invent_a_percentage () =
     | Ok reading -> reading | Error detail -> fail detail in
   List.iter (fun width ->
     let section = match Providers.section ~providers:(Types.Providers_read reading)
-        ~runtimes:Types.Quota_unread ~account_emails:Types.Account_emails_unread ~now ~width with
+        ~runtimes:Types.Quota_unread ~account_emails:Types.Account_emails_unread ~now ~width ~show_unusable:true with
       | Some section -> section | None -> fail "USD accounts disappeared" in
     let lines = List.map plain section.lines in
     let text = String.concat " " lines in

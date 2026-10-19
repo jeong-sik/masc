@@ -470,8 +470,8 @@ let account_email ~account_emails (account : Masc.Tui_decode_usage.provider_usag
 
 (* ---- one line per window ------------------------------------------------ *)
 
-let indent = "  "
-let indent_cells = 2
+let indent = " "
+let indent_cells = 1
 
 (* "100%" is the widest reading a gauge normally shows. *)
 let percent_cells = 4
@@ -676,7 +676,7 @@ let style tone text =
 let clip width line =
   if cells_of line <= width then line else Masc_tui_message_layout.fit_width line width
 
-let draw_groups ~width groups =
+let draw_groups ~show_unusable ~width groups =
   let module Text = Masc_tui_message_layout in
   let budget = max 1 (width - indent_cells) in
   let widest cells_of_item items = List.fold_left (fun w item -> max w (cells_of_item item)) 0 items in
@@ -795,10 +795,16 @@ let draw_groups ~width groups =
   in
   let draw_group (section, entries) =
     let tone = section_tone section in
-    (" " ^ Ansi.bold ^ tone
-     ^ Printf.sprintf "%s (%d)" (section_title section) (List.length entries)
-     ^ Ansi.reset)
-    :: separated_entries (List.map (draw_entry tone) entries)
+    let heading =
+      " " ^ Ansi.bold ^ tone
+      ^ Printf.sprintf "%s (%d)" (section_title section) (List.length entries)
+      ^ Ansi.reset
+    in
+    match section with
+    | Unusable_now when not show_unusable ->
+        [ heading ^ Theme.recede () ^ " \xc2\xb7 hidden \xc2\xb7 x:show" ^ Ansi.reset ]
+    | Unusable_now | Usable | No_report ->
+        heading :: separated_entries (List.map (draw_entry tone) entries)
   in
   let rec separated = function
     | [] -> []
@@ -848,7 +854,7 @@ let counts ~runtimes (accounts : Masc.Tui_decode_usage.provider_usage_account li
 let title_text () = Printf.sprintf " %sPlan usage%s" Ansi.bold Ansi.reset
 
 let section ~(providers : Types.overview_providers_reading) ~runtimes ~account_emails ~now
-    ~width =
+    ~show_unusable ~width =
   match providers with
   | Types.Providers_unread -> None
   | Types.Providers_failed reason ->
@@ -861,7 +867,7 @@ let section ~(providers : Types.overview_providers_reading) ~runtimes ~account_e
         }
   | Types.Providers_read { Masc.Tui_decode_usage.puws_since = _; puws_accounts } ->
       let rows =
-        draw_groups ~width
+        draw_groups ~show_unusable ~width
           (drawn_groups ~now ~account_emails (plan ~now ~runtimes puws_accounts))
       in
       (* Without the runtime rows the exhausted tag cannot be drawn; the

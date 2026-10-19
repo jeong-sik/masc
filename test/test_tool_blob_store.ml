@@ -338,7 +338,9 @@ let test_put_then_fetch_bounded_ranges () =
 let test_fetch_range_revalidates_changed_snapshot () =
   with_temp_dir (fun dir ->
       let store = B.create ~base_path:dir in
-      let payload = String.make 8_192 'x' in
+      let payload =
+        String.init 8_192 (fun index -> Char.chr (index mod 251))
+      in
       match B.put store ~bytes:payload ~mime:"text/plain" with
       | O.Stored { sha256; _ } ->
         (match B.fetch_range store ~sha256 ~offset:0 ~max_bytes:64 with
@@ -348,26 +350,88 @@ let test_fetch_range_revalidates_changed_snapshot () =
            Alcotest.failf
              "initial fetch_range failed: %s"
              (B.fetch_error_to_string error));
+        let initial_snapshot =
+          match B.For_testing.validated_snapshot store ~sha256 with
+          | Some snapshot -> snapshot
+          | None -> Alcotest.fail "expected warm snapshot after initial fetch_range"
+        in
         let path =
           Filename.concat
             (Filename.concat (B.root_dir store) (String.sub sha256 0 2))
             sha256
         in
+        (* Rewriting the valid payload produces a new inode/snapshot. A
+           range read must revalidate via the streaming digest path (invoking
+           after_window_read), update the cached snapshot, and return the
+           exact window. *)
+        (match Fs_compat.save_file_atomic path payload with
+         | Ok () -> ()
+         | Error error ->
+           Alcotest.failf "failed to rewrite valid fixture: %s" error);
+        let streaming_passes = ref 0 in
+        let after_window_read () = incr streaming_passes in
+        (match
+           B.For_testing.fetch_range
+             ~after_window_read
+             store
+             ~sha256
+             ~offset:128
+             ~max_bytes:64
+         with
+         | Ok (Some range) ->
+           Alcotest.(check string)
+             "changed valid snapshot returns exact window"
+             (String.sub payload 128 64)
+             range.content;
+           Alcotest.(check int)
+             "changed valid snapshot used streaming digest path"
+             1
+             !streaming_passes
+         | Ok None -> Alcotest.fail "changed valid snapshot returned None"
+         | Error error ->
+           Alcotest.failf
+             "changed valid snapshot failed: %s"
+             (B.fetch_error_to_string error));
+        (match B.For_testing.validated_snapshot store ~sha256 with
+         | Some refreshed ->
+           Alcotest.(check bool)
+             "cached snapshot updated to rewritten inode"
+             false
+             (Fs_compat.equal_owned_regular_file_snapshot
+                initial_snapshot
+                refreshed)
+         | None ->
+           Alcotest.fail "expected cached snapshot after streaming revalidation");
         (match
            Fs_compat.save_file_atomic path (String.make 8_192 'y')
          with
          | Ok () -> ()
          | Error error ->
            Alcotest.failf "failed to corrupt fixture: %s" error);
-        match B.fetch_range store ~sha256 ~offset:64 ~max_bytes:64 with
-        | Error (B.Integrity_mismatch _) -> ()
-        | Error error ->
-          Alcotest.failf
-            "changed snapshot returned wrong error: %s"
-            (B.fetch_error_to_string error)
-        | Ok _ ->
-          Alcotest.fail
-            "changed snapshot bypassed content-address validation")
+        (match
+           B.For_testing.fetch_range
+             ~after_window_read
+             store
+             ~sha256
+             ~offset:64
+             ~max_bytes:64
+         with
+         | Error (B.Integrity_mismatch _) ->
+           Alcotest.(check int)
+             "corrupted snapshot also used streaming digest path"
+             2
+             !streaming_passes;
+           Alcotest.(check bool)
+             "corrupted snapshot evicted from cache"
+             true
+             (Option.is_none (B.For_testing.validated_snapshot store ~sha256))
+         | Error error ->
+           Alcotest.failf
+             "changed snapshot returned wrong error: %s"
+             (B.fetch_error_to_string error)
+         | Ok _ ->
+           Alcotest.fail
+             "changed snapshot bypassed content-address validation"))
 
 let test_fetch_miss () =
   with_temp_dir (fun dir ->

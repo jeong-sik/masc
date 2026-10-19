@@ -177,6 +177,10 @@ Eio 는 협력형 스케줄러다. 취소와 시간 초과는 fiber 가 멈추�
   Ready producer가 성공한 준비에서 만든 불변 의존 계층은 같은 원래 plan인지 물리 확인한
   executor가 재사용한다. 일반 plan의 `dependency_layers` 호출 계약은 바꾸지 않는다.
   보관한 그래프를 동적 입력·binding·결과·실행 허가로 쓰거나 다른 plan에 넘기지 않는다.
+  executor의 descriptor·준비된 파일·Ready 순서는 닫힌 타입으로 구분한다. Ready의 원래
+  병렬 정적 그룹을 만들려고 빈 자원 선행조건 표나 pending 전체 탐색을 만들지 않는다.
+  일반 descriptor 스케줄로 대신 보내면 공유가 달라진다. 실제 binding의 충돌·배타 실행과
+  Require_success 선행 settlement의 실패/ticket 반영은 Ready runner에 그대로 둔다.
   Ready 실행의 선행 binding 순회는 같은 실행의 원래 위상 목록을 직접 방문한다.
   typed ID로 보관한 suffix의 물리 비교는 그 불변 목록 안의 정지 위치만 뜻한다.
   선언 순서의 index로 대체하거나 다른 목록·실행에 넘기지 않고, 실제 선행 binding 대기와

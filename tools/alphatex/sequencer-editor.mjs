@@ -5,7 +5,11 @@ export function newEditor(project = newProject(), { pattern } = {}) {
   if (project?.kind === 'midi-source') return sourceEditor(project, {}, pattern)
   if (project?.kind !== undefined) throw new Error('Unsupported sequencer editor document')
   validateProject(project)
-  return { project, track: 0, tick: 0, pitch: 60, step: PPQ / 4, duration: PPQ, velocity: 96, undo: [], redo: [] }
+  const track = Math.max(0, project.tracks.findIndex(track => track.notes.length))
+  const first = project.tracks[track].notes.reduce((first, note) =>
+    first === null || note.start < first.start ? note : first, null)
+  return { project, track, tick: first?.start ?? 0, pitch: first?.pitch ?? 60,
+    step: PPQ / 4, duration: PPQ, velocity: 96, undo: [], redo: [] }
 }
 export function selectedNote(editor) {
   if (editor.project.kind === 'midi-source') return sourceSelected(editor)

@@ -27,13 +27,17 @@ export function sourceEditor(project, previous = {}, pattern = previous.pattern)
     timingLabel: info.timing.kind === 'ppq' ? 'MIDI tempo map' : `SMPTE ${info.timing.frameCode}`,
     displayLength: end, length, loop: { start: 0, end }, tracks }
   const steps = [per/4,per/2,per,per*2,per*4].filter(n => Number.isSafeInteger(n) && n > 0)
-  return { tick: 0, pitch: 60, velocity: 96, duration: per, step: steps[0], track: 0, undo: [], redo: [], ...previous,
+  const track = Math.min(previous.track ?? Math.max(0, tracks.findIndex(t => t.notes.length)), tracks.length-1)
+  const first = tracks[track].notes.reduce((first, note) =>
+    first === null || note.start < first.start ? note : first, null)
+  return { velocity: 96, duration: per, step: steps[0], undo: [], redo: [], ...previous,
     project, pattern: chosen, performance, info, axis, view, steps,
     selectedID: performance?.notes.some(n=>n.id===previous.selectedID) ? previous.selectedID : undefined,
     selectedExpressionID: performance?.events.some(event=>event.id===previous.selectedExpressionID && expressionEvent(event)) ? previous.selectedExpressionID : undefined,
     selectedTempoID: performance?.events.some(event=>event.id===previous.selectedTempoID && tempoEvent(event)) ? previous.selectedTempoID : undefined,
-    track: Math.min(previous.track ?? Math.max(0, tracks.findIndex(t => t.notes.length)), tracks.length-1),
-    tick: Math.min(previous.tick ?? 0, length-1) }
+    track,
+    tick: Math.min(previous.tick ?? first?.start ?? 0, length-1),
+    pitch: previous.pitch ?? first?.pitch ?? 60 }
 }
 function atCursor(editor) {
   return editor.view.tracks[editor.track].notes.filter(n => n.pitch === editor.pitch
@@ -224,7 +228,7 @@ export function sourceCommand(editor,line) {
     case 'pattern':{
       count(1);const pattern=Number(args[0])-1
       if(!Number.isSafeInteger(pattern)||pattern<0||pattern>=editor.info.patterns)throw new Error('Unknown MIDI pattern')
-      return {editor:sourceEditor(editor.project,{...editor,track:0,tick:0,channel:undefined,selectedExpressionID:undefined,selectedTempoID:undefined},pattern)}
+      return {editor:sourceEditor(editor.project,{...editor,track:0,tick:undefined,pitch:undefined,selectedID:undefined,channel:undefined,selectedExpressionID:undefined,selectedTempoID:undefined},pattern)}
     }
     case 'select':{
       count(1);const note=editor.performance?.notes.find(n=>n.id===args[0]);if(!note)throw new Error('Unknown MIDI note event ID')

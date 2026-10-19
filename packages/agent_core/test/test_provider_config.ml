@@ -1699,7 +1699,8 @@ let test_openai_chat_catalog_reasoning_and_output_field () =
 let test_openai_chat_catalog_endpoint_identity () =
   with_repository_model_catalog (fun () ->
     let catalog = Model_catalog.global () |> Option.get in
-    let provider = Model_catalog.provider_entry_for_label catalog "openai" |> Option.get in
+    let provider = Model_catalog.provider_entry_for_reference catalog
+      (Model_catalog.Declared_provider "openai") |> Option.get in
     check_string "Chat declares its exact endpoint" "/chat/completions" provider.request_path;
     check_string "Chat declares its exact base" "https://api.openai.com/v1" provider.base_url;
     let registered =
@@ -2630,6 +2631,149 @@ let test_patch_telemetry_reports_the_request_window () =
     (Option.bind patched.telemetry (fun t -> t.Types.effective_context_window))
 ;;
 
+(* Declared provider identity and an anonymous wire label may have the same
+   spelling, but only the former carries catalog provider authority. *)
+let resolved_capabilities config =
+  match Provider_config.capabilities_for_config_model config with
+  | Some caps -> caps
+  | None -> Alcotest.fail "expected model capabilities"
+;;
+
+let test_declared_native_catalog_facts kind provider_id model_id context =
+  with_repository_model_catalog (fun () ->
+    let config = Provider_config.make ~kind ~provider_id ~model_id
+      ~base_url:"https://example.invalid" () in
+    let caps = resolved_capabilities config in
+    Alcotest.(check (option int)) "declared native model context"
+      (Some context) caps.max_context_tokens;
+    (match kind with
+     | Provider_kind.Gemini ->
+       Alcotest.(check (option (list string))) "model effort ladder"
+         (Some ["low"; "medium"; "high"])
+         (Option.map (List.map Reasoning_effort.to_string) caps.accepted_reasoning_efforts)
+     | Provider_kind.Kimi ->
+       check_bool "native Kimi model thinking policy" true
+         (caps.thinking_control_format = Capabilities.Thinking_object_only);
+       check_bool "native model omits unsupported sampling" true
+         (List.mem Capability_vocab.Temperature caps.ignored_sampling_parameters)
+     | Provider_kind.Anthropic | OpenAI_compat | Ollama | Glm ->
+       Alcotest.fail "unexpected native fixture wire");
+    let frozen = Provider_config.freeze_for_request config in
+    Model_catalog.set_global Model_catalog.empty;
+    check_bool "frozen request retains the resolved native facts" true
+      (Provider_config.capabilities_for_config_model frozen = Some caps);
+    check_bool "unfrozen request sees the replaced catalog" true
+      (Provider_config.capabilities_for_config_model config = None))
+;;
+
+let identity_catalog ~verbatim ~row_base ~wire_base =
+  Printf.sprintf {|[[providers]]
+id = "proxy"
+aliases = ["gemini"]
+kind = "gemini"
+identity_kinds = ["gemini", "openai_compat"]
+base_url = "https://example.invalid"
+request_path = ""
+auth = "none"
+capabilities_base = "openai_chat_extended"
+serves_bare_rows = true
+%s
+[[models]]
+id_prefix = "identity-model"
+base = "gemini"
+max_context_tokens = 22222
+
+[[models]]
+id_prefix = "identity-model"
+provider_name = "proxy"
+max_context_tokens = 77777
+%s
+|}
+    (if wire_base then
+       "capabilities_base_by_identity_kind = { gemini = \"openai_chat_extended\" }"
+     else "")
+    (if verbatim then Printf.sprintf {|[[models]]
+id_prefix = "identity-model"
+provider_name = "gemini"
+max_context_tokens = 33333
+%s
+|} (if row_base then "base = \"gemini\"" else "") else "")
+;;
+
+let identity_config ?provider_id ?(kind=Provider_kind.Gemini) model_id =
+  Provider_config.make ~kind ?provider_id ~model_id
+    ~base_url:"https://example.invalid" ()
+;;
+
+let test_declared_wire_alias_preserves_anonymous_isolation () =
+  with_model_catalog_toml (identity_catalog ~verbatim:false ~row_base:false ~wire_base:false)
+    (fun () ->
+      Alcotest.(check (option int)) "declared wire-name alias resolves canonical row"
+        (Some 77777)
+        (resolved_capabilities (identity_config ~provider_id:"gemini" "identity-model")).max_context_tokens;
+      Alcotest.(check (option int)) "anonymous native wire still reads the bare row"
+        (Some 22222)
+        (resolved_capabilities (identity_config "identity-model")).max_context_tokens;
+      check_bool "anonymous compatible endpoint does not borrow bare facts" true
+        (Provider_config.capabilities_for_config_model
+          (identity_config ~kind:Provider_kind.OpenAI_compat "identity-model") = None);
+      check_bool "unknown declaration does not borrow a bare row" true
+        (Provider_config.capabilities_for_config_model
+          (identity_config ~provider_id:"unknown" "identity-model") = None))
+;;
+
+let test_anonymous_verbatim_row_keeps_its_own_base ~row_base ~wire_base () =
+  with_model_catalog_toml (identity_catalog ~verbatim:true ~row_base ~wire_base)
+    (fun () ->
+      let anonymous = resolved_capabilities (identity_config "identity-model") in
+      let declared = resolved_capabilities
+        (identity_config ~provider_id:"gemini" "identity-model") in
+      Alcotest.(check (option int)) "anonymous exact scoped row retains precedence"
+        (Some 33333) anonymous.max_context_tokens;
+      Alcotest.(check (option int)) "declared verbatim row outranks canonical alias row"
+        (Some 33333) declared.max_context_tokens;
+      check_bool "anonymous row does not acquire proxy reasoning base" true
+        (anonymous.thinking_control_format = Capabilities.No_thinking_control);
+      check_bool "anonymous row retains only its own base" row_base
+        anonymous.supports_image_input;
+      check_bool "declared identity resolves the provider base" true
+        (declared.thinking_control_format = Capabilities.Reasoning_effort))
+;;
+
+let test_manifest_authority_and_frozen_missing_policy () =
+  with_model_catalog_toml (identity_catalog ~verbatim:false ~row_base:false ~wire_base:false)
+    (fun () ->
+      let previous = Capability_manifest.global () in
+      Fun.protect ~finally:(fun () -> match previous with
+        | Some manifest -> Capability_manifest.set_global manifest
+        | None -> Capability_manifest.clear_global ()) (fun () ->
+        let manifest = Capability_manifest.of_json (Yojson.Safe.from_string
+          {|{"schema_version":1,"models":[{"id_prefix":"manifest-only","max_context_tokens":44444}]}|})
+          |> Result.get_ok in
+        Capability_manifest.set_global manifest;
+        Alcotest.(check (option int)) "anonymous native wire retains manifest facts"
+          (Some 44444)
+          (resolved_capabilities (identity_config "manifest-only")).max_context_tokens;
+        let declared = resolved_capabilities
+          (identity_config ~provider_id:"gemini" "manifest-only") in
+        check_bool "bare-row declaration does not grant manifest authority" true
+          (declared = Capabilities.openai_compat_chat_extended_capabilities);
+        let unknown = identity_config ~provider_id:"unknown" "manifest-only" in
+        check_bool "unknown declared provider cannot borrow manifest facts" true
+          (Provider_config.capabilities_for_config_model unknown = None);
+        let frozen = Provider_config.freeze_for_request unknown in
+        Model_catalog.set_global (Model_catalog.of_toml_string ~source:"later"
+          {|[[models]]
+id_prefix = "manifest-only"
+provider_name = "unknown"
+max_context_tokens = 55555
+|} |> Result.get_ok);
+        check_bool "frozen missing policy remains missing" true
+          (Provider_config.capabilities_for_config_model frozen = None);
+        Alcotest.(check (option int)) "unfrozen request sees the new exact row"
+          (Some 55555) (resolved_capabilities unknown).max_context_tokens))
+;;
+
 let () =
   Alcotest.run
     "provider_config"
@@ -2930,6 +3074,22 @@ let () =
             "structured output names"
             `Quick
             test_structured_output_name_of_schema
+        ] )
+    ; ( "declared provider capability authority"
+      , [ Alcotest.test_case "declared native Gemini reads model facts" `Quick
+            (fun () -> test_declared_native_catalog_facts Provider_kind.Gemini
+              "gemini" "gemini-3.8-flash" 1048576)
+        ; Alcotest.test_case "declared native Kimi reads model facts" `Quick
+            (fun () -> test_declared_native_catalog_facts Provider_kind.Kimi
+              "kimi" "kimi-k2.6" 256000)
+        ; Alcotest.test_case "declared wire alias and anonymous wire stay distinct" `Quick
+            test_declared_wire_alias_preserves_anonymous_isolation
+        ; Alcotest.test_case "anonymous row does not inherit a proxy wire base" `Quick
+            (test_anonymous_verbatim_row_keeps_its_own_base ~row_base:true ~wire_base:true)
+        ; Alcotest.test_case "anonymous row does not inherit a proxy default base" `Quick
+            (test_anonymous_verbatim_row_keeps_its_own_base ~row_base:false ~wire_base:false)
+        ; Alcotest.test_case "manifest authority and frozen missing policy" `Quick
+            test_manifest_authority_and_frozen_missing_policy
         ] )
     ; ( "provider_name"
       , [ Alcotest.test_case "glm general" `Quick test_provider_name_of_config_glm_general

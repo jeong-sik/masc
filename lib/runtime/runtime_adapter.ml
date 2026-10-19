@@ -549,8 +549,7 @@ let declared_capabilities_override_of_model_spec
   match
     Llm_provider.Capabilities.for_provider_model_id
       ~wire:(Some wire)
-      ~allow_bare_fallback:false
-      ~provider_label:provider_id
+      ~provider:(Llm_provider.Model_catalog.Declared_provider provider_id)
       ~model_id:spec.api_name
   with
   | Some catalog_caps ->
@@ -656,8 +655,7 @@ let with_client_history_replay
       | None ->
         Llm_provider.Capabilities.for_provider_model_id
           ~wire:(Some wire)
-          ~allow_bare_fallback:false
-          ~provider_label:provider_id
+          ~provider:(Llm_provider.Model_catalog.Declared_provider provider_id)
           ~model_id:api_name
     in
     (match capabilities with
@@ -723,8 +721,7 @@ let effective_max_context_of_model_spec
         | None ->
           Llm_provider.Capabilities.for_provider_model_id
             ~wire:(Some wire)
-            ~allow_bare_fallback:false
-            ~provider_label:provider_id
+            ~provider:(Llm_provider.Model_catalog.Declared_provider provider_id)
             ~model_id:spec.api_name
       in
       match capabilities with
@@ -754,7 +751,8 @@ let validate_parallel_tool_policy (provider : Runtime_schema.provider)
   | (Messages_api | Chat_completions_api), true ->
     let declared =
       Option.bind (Llm_provider.Model_catalog.global ()) (fun catalog ->
-        Llm_provider.Model_catalog.provider_entry_for_label catalog provider.id)
+        Llm_provider.Model_catalog.provider_entry_for_reference catalog
+          (Llm_provider.Model_catalog.Declared_provider provider.id))
     in
     (match declared with
      | Some entry when entry.supports_parallel_tool_suppression -> Ok ()

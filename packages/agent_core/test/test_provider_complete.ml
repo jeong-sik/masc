@@ -27,8 +27,7 @@ let catalog_capabilities ?provider_label model_id =
     | Some provider_label ->
       Llm_provider.Capabilities.for_provider_model_id
         ~wire:None
-        ~allow_bare_fallback:false
-        ~provider_label
+        ~provider:(Llm_provider.Model_catalog.Declared_provider provider_label)
         ~model_id
   in
   match capabilities with

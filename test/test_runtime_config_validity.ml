@@ -276,8 +276,7 @@ let test_deployment_agent_core_model_catalog_covers_live_runpod_mtp () =
        match
          Llm_provider.Capabilities.for_provider_model_id
            ~wire:None
-           ~allow_bare_fallback:false
-           ~provider_label
+           ~provider:(Llm_provider.Model_catalog.Declared_provider provider_label)
            ~model_id:runpod_model_id
        with
        | None ->
@@ -292,8 +291,7 @@ let test_deployment_agent_core_model_catalog_covers_live_runpod_mtp () =
        match
          Llm_provider.Capabilities.for_provider_model_id
            ~wire:None
-           ~allow_bare_fallback:false
-           ~provider_label
+           ~provider:(Llm_provider.Model_catalog.Declared_provider provider_label)
            ~model_id:runpod_model_id
        with
        | None ->
@@ -333,8 +331,7 @@ let test_deployment_agent_core_model_catalog_covers_glm_streaming_reasoning () =
        match
          Llm_provider.Capabilities.for_provider_model_id
            ~wire:None
-           ~allow_bare_fallback:false
-           ~provider_label
+           ~provider:(Llm_provider.Model_catalog.Declared_provider provider_label)
            ~model_id
        with
        | None -> failf "expected deployment GLM capability for %s" label
@@ -378,8 +375,7 @@ let test_deployment_agent_core_model_catalog_covers_live_runpod_rtxa6000_gemma (
   match
     Llm_provider.Capabilities.for_provider_model_id
       ~wire:None
-      ~allow_bare_fallback:false
-      ~provider_label:"runpod_rtxa6000"
+      ~provider:(Llm_provider.Model_catalog.Declared_provider "runpod_rtxa6000")
       ~model_id
   with
   | None ->
@@ -427,8 +423,7 @@ let test_deployment_agent_core_model_catalog_covers_local_gemma4_e2b_qat () =
   match
     Llm_provider.Capabilities.for_provider_model_id
       ~wire:None
-      ~allow_bare_fallback:false
-      ~provider_label:"ollama"
+      ~provider:(Llm_provider.Model_catalog.Declared_provider "ollama")
       ~model_id
   with
   | None -> failf "local Gemma4 E2B QAT must resolve via strict Ollama gate path"
@@ -483,8 +478,7 @@ let test_deployment_agent_core_model_catalog_preserve_axes_resolve () =
     match
       Llm_provider.Capabilities.for_provider_model_id
         ~wire:None
-        ~allow_bare_fallback:false
-        ~provider_label:provider_name
+        ~provider:(Llm_provider.Model_catalog.Declared_provider provider_name)
         ~model_id
     with
     | None ->
@@ -505,8 +499,7 @@ let test_deployment_agent_core_model_catalog_preserve_axes_resolve () =
     match
       Llm_provider.Capabilities.for_provider_model_id
         ~wire:None
-        ~allow_bare_fallback:false
-        ~provider_label:provider_name
+        ~provider:(Llm_provider.Model_catalog.Declared_provider provider_name)
         ~model_id
     with
     | None ->
@@ -926,8 +919,7 @@ let test_deployment_agent_core_model_catalog_modality_priorities_resolve () =
            | Some provider_label ->
              Llm_provider.Capabilities.for_provider_model_id
                ~wire:None
-               ~allow_bare_fallback:false
-               ~provider_label
+               ~provider:(Llm_provider.Model_catalog.Declared_provider provider_label)
                ~model_id:
                  (Llm_provider.Model_identifiers.Id_prefix.to_string entry.id_prefix)
          in
@@ -1567,8 +1559,7 @@ let test_kimi_for_coding_declares_the_reasoning_it_returns () =
   match
     Llm_provider.Capabilities.for_provider_model_id
       ~wire:None
-      ~allow_bare_fallback:false
-      ~provider_label:"kimi_coding"
+      ~provider:(Llm_provider.Model_catalog.Declared_provider "kimi_coding")
       ~model_id:"kimi-for-coding"
   with
   | None -> fail "kimi-for-coding missing from the deployment catalog"
@@ -1687,8 +1678,7 @@ let test_seed_catalog_decided_capability_keys_agree_with_the_catalog () =
          (match
             Llm_provider.Capabilities.for_provider_model_id
               ~wire:(Some config.Llm_provider.Provider_config.kind)
-              ~allow_bare_fallback:false
-              ~provider_label
+              ~provider:(Llm_provider.Model_catalog.Declared_provider provider_label)
               ~model_id:config.Llm_provider.Provider_config.model_id
           with
           | None -> ()

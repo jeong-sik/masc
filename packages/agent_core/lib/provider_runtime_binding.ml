@@ -246,8 +246,9 @@ let capabilities_for_provider_config (cfg : PConfig.t) =
           with, not in which of the provider's wires it resolved to. *)
        Llm_provider.Capabilities.for_provider_model_id
          ~wire:(Some cfg.kind)
-         ~allow_bare_fallback:false
-         ~provider_label:(provider_id_of_provider_config cfg)
+         ~provider:(match canonical_explicit_provider_id cfg with
+           | Some id -> Llm_provider.Model_catalog.Declared_provider id
+           | None -> Llm_provider.Model_catalog.Anonymous_wire cfg.kind)
          ~model_id:cfg.model_id
      with
      | Some model_caps -> model_caps
@@ -282,8 +283,7 @@ let to_provider_config ?model binding =
          match
            Llm_provider.Capabilities.for_provider_model_id
              ~wire:None
-             ~allow_bare_fallback:false
-             ~provider_label:binding.id
+             ~provider:(Llm_provider.Model_catalog.Declared_provider binding.id)
              ~model_id
          with
          | Some _ -> None

@@ -102,9 +102,16 @@ val of_model_entries : model_entry list -> t
 val model_entries : t -> model_entry list
 val provider_entries : t -> provider_entry list
 
-val provider_entry_for_label : t -> string -> provider_entry option
-(** Resolve a provider id or alias to its canonical catalog entry. Wire-kind
-    labels are not aliases and never resolve through this function. *)
+type provider_reference =
+  | Declared_provider of string
+  | Anonymous_wire of Provider_kind.t
+(** Whether the caller has an explicit provider identity or only a wire kind.
+    A declared id may equal a wire-kind label. Anonymous wires never resolve
+    a provider entry or its aliases. *)
+
+val provider_entry_for_reference :
+  t -> provider_reference -> provider_entry option
+(** Resolve a declared provider id or alias in declaration order. *)
 
 (** Parse and validate a model catalog from an in-memory TOML value. [source]
     is included in syntax-error diagnostics. This is the typed boundary for
@@ -155,6 +162,16 @@ val lookup : t -> Model_identifiers.Model_id.t -> model_entry option
 val lookup_for_provider
   :  t
   -> provider_name:string
+  -> model_id:Model_identifiers.Model_id.t
+  -> model_entry option
+
+(** Exact scoped lookup with the caller's provider authority. Verbatim rows
+    retain precedence. Declared ids and aliases may equal a wire-kind label;
+    anonymous wires try only their verbatim wire label and never resolve a
+    catalog provider or its aliases. Model identities still match exactly. *)
+val lookup_for_provider_reference
+  :  t
+  -> provider:provider_reference
   -> model_id:Model_identifiers.Model_id.t
   -> model_entry option
 

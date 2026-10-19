@@ -107,8 +107,7 @@ let integrations_json ~include_credential_references (config : Runtime_schema.co
         | None -> entry.capabilities.task
         | Some model_id ->
           (match Llm_provider.Capabilities.for_provider_model_id
-                   ~wire:(Some entry.kind) ~allow_bare_fallback:false
-                   ~provider_label:entry.id ~model_id with
+                   ~wire:(Some entry.kind) ~provider:(Llm_provider.Model_catalog.Declared_provider entry.id) ~model_id with
            | None -> entry.capabilities.task
            | Some capabilities -> capabilities.task)
       in
@@ -356,8 +355,7 @@ let provider_model_rows (provider_id : string) : (Yojson.Safe.t, string) result 
                 (match
                    Llm_provider.Capabilities.for_provider_model_id
                      ~wire:(Some provider.kind)
-                     ~allow_bare_fallback:false
-                     ~provider_label:provider.id
+                     ~provider:(Llm_provider.Model_catalog.Declared_provider provider.id)
                      ~model_id:
                        (Llm_provider.Model_identifiers.Id_prefix.to_string
                           entry.id_prefix)

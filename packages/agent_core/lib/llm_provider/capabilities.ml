@@ -1405,8 +1405,8 @@ let overrides_of_catalog_entry (entry : Model_catalog.model_entry) =
   }
 ;;
 
-let provider_base_label ~catalog ~wire provider_label =
-  match Model_catalog.provider_entry_for_label catalog provider_label with
+let provider_base_label ~catalog ~wire provider =
+  match Model_catalog.provider_entry_for_reference catalog provider with
   | None -> None
   | Some provider ->
     (match Option.bind wire (fun kind -> List.assoc_opt kind provider.capabilities_base_by_identity_kind) with
@@ -1414,24 +1414,18 @@ let provider_base_label ~catalog ~wire provider_label =
      | None -> provider.capabilities_base)
 ;;
 
-let apply_catalog_entry ~catalog ~wire (entry : Model_catalog.model_entry) : capabilities =
+let apply_catalog_entry ~provider_entry ~wire
+    (entry : Model_catalog.model_entry) : capabilities =
   let overrides = overrides_of_catalog_entry entry in
-  let base_label =
-    match entry.provider_name with
-    | None -> overrides.base_label
-    | Some provider_label ->
-      (match
-         Option.bind wire (fun kind ->
-           Option.bind
-             (Model_catalog.provider_entry_for_label catalog provider_label)
-             (fun provider ->
-                List.assoc_opt kind provider.capabilities_base_by_identity_kind))
-       with
-       | Some _ as wire_base -> wire_base
-       | None ->
-         (match overrides.base_label with
-          | Some _ as model_base -> model_base
-          | None -> provider_base_label ~catalog ~wire:None provider_label))
+  let wire_base = Option.bind provider_entry
+    (fun (provider : Model_catalog.provider_entry) ->
+      Option.bind wire (fun kind ->
+        List.assoc_opt kind provider.capabilities_base_by_identity_kind)) in
+  let base_label = match wire_base, overrides.base_label with
+    | (Some _ as base), _ -> base
+    | None, (Some _ as base) -> base
+    | None, None -> Option.bind provider_entry
+        (fun (provider : Model_catalog.provider_entry) -> provider.capabilities_base)
   in
   apply_declarative_capability_overrides { overrides with base_label }
 ;;
@@ -1452,7 +1446,7 @@ let for_model_id_from_catalog catalog model_id =
   match catalog with
   | Some catalog ->
     (match Model_catalog.lookup catalog model_id with
-     | Some entry -> Some (apply_catalog_entry ~catalog ~wire:None entry)
+     | Some entry -> Some (apply_catalog_entry ~provider_entry:None ~wire:None entry)
      | None -> None)
   | None -> None
 ;;
@@ -1484,7 +1478,7 @@ let for_model_id_from_sources ~catalog ~manifest model_id =
   match catalog with
   | Some catalog ->
     (match Model_catalog.lookup catalog model_id with
-     | Some entry -> Some (apply_catalog_entry ~catalog ~wire:None entry)
+     | Some entry -> Some (apply_catalog_entry ~provider_entry:None ~wire:None entry)
      | None ->
        (match manifest with
         | Some manifest -> for_model_id_with_manifest_from_catalog ~catalog:(Some catalog) manifest model_id
@@ -1501,98 +1495,61 @@ let for_model_id model_id =
        ~catalog:(Model_catalog.global ()) ~manifest:(Capability_manifest.global ()))
 ;;
 
-(* The provider-scoped row, and nothing else. Split from the provider-wide
-   base below so a caller can put the model's own row between them. *)
-let for_provider_model_id_row
-      ~catalog
-      ~wire
-      ~(provider_label : string)
-      ~(model_id : Model_identifiers.Model_id.t)
-  =
+let for_provider_model_id_row ~catalog ~wire ~provider ~model_id =
   match catalog with
   | None -> None
   | Some catalog ->
-    (match Model_catalog.lookup_for_provider catalog ~provider_name:provider_label ~model_id with
-     | Some entry -> Some (apply_catalog_entry ~catalog ~wire entry)
+    (match Model_catalog.lookup_for_provider_reference catalog ~provider ~model_id with
+     | Some entry ->
+       let provider_entry = Model_catalog.provider_entry_for_reference catalog provider in
+       Some (apply_catalog_entry ~provider_entry ~wire entry)
      | None -> None)
 ;;
 
-(* The provider's own [capabilities_base] -- what every model of that provider
-   gets when no row names it. *)
-let for_provider_label_base ~catalog ~wire ~(provider_label : string) =
+let for_provider_reference_base ~catalog ~wire ~provider =
   match catalog with
   | None -> None
   | Some catalog ->
     Option.bind
-      (provider_base_label ~catalog ~wire provider_label)
+      (provider_base_label ~catalog ~wire provider)
       capabilities_for_provider_label
 ;;
 
-(* Whether the [[providers]] entry [provider_label] names declares
-   [serves_bare_rows]: it is the vendor's own endpoint for the models the bare
-   rows describe. A label the catalog does not know serves none. *)
-let provider_serves_bare_rows ~catalog ~(provider_label : string) =
+let provider_serves_bare_rows ~catalog ~provider =
   match catalog with
   | None -> false
   | Some catalog ->
-    (match Model_catalog.provider_entry_for_label catalog provider_label with
-     | Some provider -> provider.Model_catalog.serves_bare_rows
+    (match Model_catalog.provider_entry_for_reference catalog provider with
+     | Some entry -> entry.Model_catalog.serves_bare_rows
      | None -> false)
 ;;
 
-(* [wire] is the caller's resolved provider kind, passed when it knows one. It
-   selects the base a matched row is laid over for labels whose two wires
-   differ; the row lookup itself is unaffected. Callers that omit it get the
-   wire the provider entry names, which is what every caller did before the
-   argument existed. *)
-let for_provider_model_id_from_sources
-      ~catalog
-      ~manifest
-      ~wire
-      ~(allow_bare_fallback : bool)
-      ~(provider_label : string)
-      ~(model_id : Model_identifiers.Model_id.t)
-  =
-    (match for_provider_model_id_row ~catalog ~wire ~provider_label ~model_id with
+let for_provider_model_id_from_sources ~catalog ~manifest ~wire ~provider ~model_id =
+  match for_provider_model_id_row ~catalog ~wire ~provider ~model_id with
+  | Some _ as caps -> caps
+  | None ->
+    let bare = match provider with
+      | Model_catalog.Anonymous_wire Provider_kind.OpenAI_compat -> None
+      | Model_catalog.Anonymous_wire
+          (Provider_kind.Anthropic | Kimi | Ollama | Gemini | Glm) ->
+        for_model_id_from_sources ~catalog ~manifest model_id
+      | Model_catalog.Declared_provider _ ->
+        (* This declaration applies only to the catalog's own bare rows,
+           never to a replacement capability manifest. *)
+        if provider_serves_bare_rows ~catalog ~provider
+        then for_model_id_from_catalog catalog model_id
+        else None
+    in
+    (match bare with
      | Some _ as caps -> caps
-     | None ->
-    (* The model's own bare row before the provider-wide base. Every
-       [[providers]] entry declares a [capabilities_base], so the base always
-       answered and [for_model_id] was unreachable: 44 of the catalog's 125
-       bare rows -- glm 21, gemini 11, kimi 7, ollama 5 -- could not be read
-       by an anonymous config of their own wire, because those four wire-kind
-       labels also name a [[providers]] entry. `anthropic` and `openai_compat`
-       name none, which is why only glm (#34126) and gemini (#34301) were ever
-       seen. A row that names the model is more specific than the provider's
-       base for every model it has.
-
-       Gated on [allow_bare_fallback], so this reorders nothing for a config
-       that declared a [provider_id]: a bare row must not answer for a scoped
-       provider whose base deliberately differs.
-
-       A provider that declares [serves_bare_rows] is the vendor's own
-       endpoint for those models, so the bare rows answer for it too, matched
-       by prefix like any bare lookup. Without it the native Claude provider
-       read no Claude row, fell to the Anthropic preset, which declares no
-       effort ladder, and refused every reasoning effort (#37849). Only the
-       catalog is read on this path, not the capability manifest: the
-       declaration is about this file's bare rows. *)
-       (match
-          if allow_bare_fallback
-          then for_model_id_from_sources ~catalog ~manifest model_id
-          else if provider_serves_bare_rows ~catalog ~provider_label
-          then for_model_id_from_catalog catalog model_id
-          else None
-        with
-        | Some _ as caps -> caps
-        | None -> for_provider_label_base ~catalog ~wire ~provider_label))
+     | None -> for_provider_reference_base ~catalog ~wire ~provider)
 ;;
 
-let for_provider_model_id ~wire ~allow_bare_fallback ~provider_label ~model_id =
+let for_provider_model_id ~wire ~provider ~model_id =
   with_model_id model_id (fun model_id ->
     for_provider_model_id_from_sources
       ~catalog:(Model_catalog.global ()) ~manifest:(Capability_manifest.global ())
-      ~wire ~allow_bare_fallback ~provider_label ~model_id)
+      ~wire ~provider ~model_id)
 ;;
 
 type request_policy =
@@ -1600,20 +1557,22 @@ type request_policy =
   ; anthropic_thinking_control : anthropic_thinking_control option
   }
 
-let resolve_request_policy ~wire ~allow_bare_fallback ~provider_label
-      ~anthropic_provider_label ~model_id =
+let resolve_request_policy ~wire ~provider ~model_id =
   match Model_identifiers.Model_id.of_string model_id with
   | Error _ -> { model_capabilities = None; anthropic_thinking_control = None }
   | Ok model_id ->
   let catalog = Model_catalog.global () in
   let manifest = Capability_manifest.global () in
   let model_capabilities = for_provider_model_id_from_sources
-      ~catalog ~manifest ~wire:(Some wire) ~allow_bare_fallback ~provider_label ~model_id in
+      ~catalog ~manifest ~wire:(Some wire) ~provider ~model_id in
   let anthropic_thinking_control =
     match wire with
     | Provider_kind.Anthropic ->
-      let scoped = Option.bind anthropic_provider_label (fun provider_label ->
-        anthropic_thinking_control_for_provider_from_catalog ~catalog ~provider_label ~model_id) in
+      let scoped = match provider with
+        | Model_catalog.Declared_provider provider_label ->
+          anthropic_thinking_control_for_provider_from_catalog
+            ~catalog ~provider_label ~model_id
+        | Model_catalog.Anonymous_wire _ -> None in
       (match scoped with
        | Some _ -> scoped
        | None -> anthropic_thinking_control_from_sources ~catalog ~manifest model_id)
@@ -1661,8 +1620,7 @@ let%test "for_provider_model_id glm-4-flash basic" =
   match
     for_provider_model_id
       ~wire:None
-      ~allow_bare_fallback:true
-      ~provider_label:"glm"
+      ~provider:(Model_catalog.Anonymous_wire Provider_kind.Glm)
       ~model_id:"glm-4-flash"
   with
   | Some c -> c.supports_tools && c.max_output_tokens = Some 4_096
@@ -1834,7 +1792,7 @@ let%test "named tool choice needs its own declaration, not a sibling override" =
     ; supports_tool_choice = Some true
     }
   in
-  let derived = apply_catalog_entry ~catalog:Model_catalog.empty ~wire:None entry in
+  let derived = apply_catalog_entry ~provider_entry:None ~wire:None entry in
   let base =
     match capabilities_for_provider_label "openai_chat" with
     | Some c -> c
@@ -1853,7 +1811,7 @@ let%test "named tool choice honours an explicit declaration" =
     ; supports_named_tool_choice = Some true
     }
   in
-  (apply_catalog_entry ~catalog:Model_catalog.empty ~wire:None entry).supports_named_tool_choice
+  (apply_catalog_entry ~provider_entry:None ~wire:None entry).supports_named_tool_choice
 ;;
 
 let%test "named tool choice cannot outlive tool choice" =
@@ -1868,7 +1826,7 @@ let%test "named tool choice cannot outlive tool choice" =
     }
   in
   not
-    (apply_catalog_entry ~catalog:Model_catalog.empty ~wire:None entry).supports_named_tool_choice
+    (apply_catalog_entry ~provider_entry:None ~wire:None entry).supports_named_tool_choice
 ;;
 
 let qwen3_family_test_entry id_prefix : Model_catalog.model_entry =

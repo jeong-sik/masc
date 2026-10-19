@@ -227,17 +227,15 @@ let matching_request_policy (config : t) =
   | Some _ | None -> None
 ;;
 
-let allow_bare_capability_fallback (config : t) =
-  match config.provider_id, config.kind with
-  | Some _, _ | None, OpenAI_compat -> false
-  | None, (Anthropic | Kimi | Ollama | Gemini | Glm) -> true
+let capability_provider_reference (config : t) =
+  match config.provider_id with
+  | Some id -> Model_catalog.Declared_provider id
+  | None -> Model_catalog.Anonymous_wire config.kind
 ;;
 
 let resolve_request_policy (config : t) =
-  Capabilities.resolve_request_policy
-    ~wire:config.kind ~allow_bare_fallback:(allow_bare_capability_fallback config)
-    ~provider_label:(capability_provider_label config)
-    ~anthropic_provider_label:config.provider_id ~model_id:config.model_id
+  Capabilities.resolve_request_policy ~wire:config.kind
+    ~provider:(capability_provider_reference config) ~model_id:config.model_id
 ;;
 
 let freeze_for_request (config : t) =
@@ -257,16 +255,13 @@ let capabilities_for_config_model (config : t) =
     (match matching_request_policy config with
      | Some policy -> Capabilities.request_policy_capabilities policy
      | None ->
-       let provider_label = capability_provider_label config in
-       let allow_bare_fallback = allow_bare_capability_fallback config in
-       (* The label says which provider; [kind] says which of that provider's
+       (* The typed reference preserves provider authority; [kind] says which of its
           wires this config resolved to. Both are needed: a provider that admits
           two wires ([[providers]] identity_kinds) can differ between them in what
-          a request can express, and the label alone cannot tell them apart. *)
+          a request can express, and identity alone cannot tell them apart. *)
        Capabilities.for_provider_model_id
          ~wire:(Some config.kind)
-         ~allow_bare_fallback
-         ~provider_label
+         ~provider:(capability_provider_reference config)
          ~model_id:config.model_id)
 ;;
 

@@ -1362,7 +1362,7 @@ let test_for_model_id_llama4_alt () =
 ;;
 
 let provider_model_capabilities provider_label model_id =
-  Capabilities.for_provider_model_id ~wire:None ~allow_bare_fallback:false ~provider_label ~model_id
+  Capabilities.for_provider_model_id ~wire:None ~provider:(Llm_provider.Model_catalog.Declared_provider provider_label) ~model_id
 ;;
 
 let test_for_provider_model_deepseek_v4_flash () =

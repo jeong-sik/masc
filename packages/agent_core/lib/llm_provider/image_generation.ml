@@ -369,8 +369,7 @@ let[@warning "-32"] catalog_declares_image_task provider_label model_id =
   match
     Capabilities.for_provider_model_id
       ~wire:None
-      ~allow_bare_fallback:false
-      ~provider_label
+      ~provider:(Model_catalog.Declared_provider provider_label)
       ~model_id
   with
   | Some { task = Some Capabilities.Image_generation; _ } -> true

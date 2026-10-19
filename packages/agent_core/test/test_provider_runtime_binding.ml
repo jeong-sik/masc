@@ -905,11 +905,44 @@ let test_unregistered_openai_compat_identity_remains_typed () =
     (Provider_runtime_binding.provider_id_of_provider_config cfg)
 ;;
 
+let test_registry_fallback_preserves_provider_authority () =
+  with_model_catalog
+    {|[[providers]]
+id = "proxy"
+aliases = ["gemini"]
+kind = "gemini"
+base_url = "https://example.invalid"
+request_path = ""
+auth = "none"
+capabilities_base = "openai_chat_extended"
+|}
+    (fun () ->
+      let config ?provider_id () = Llm_provider.Provider_config.make
+        ~kind:Llm_provider.Provider_kind.Gemini ?provider_id
+        ~model_id:"no-model-row" ~base_url:"https://example.invalid" () in
+      let anonymous = config () in
+      Alcotest.(check bool) "primary anonymous lookup has no scoped or bare fact" true
+        (Llm_provider.Provider_config.capabilities_for_config_model anonymous = None);
+      Alcotest.(check bool) "registry fallback retains anonymous wire base" true
+        (Provider_runtime_binding.capabilities_for_provider_config anonymous
+          = Llm_provider.Capabilities.gemini_capabilities);
+      Alcotest.(check bool) "declared wire alias resolves its provider base" true
+        (Provider_runtime_binding.capabilities_for_provider_config
+          (config ~provider_id:"gemini" ())
+          = Llm_provider.Capabilities.openai_compat_chat_extended_capabilities);
+      Alcotest.(check bool) "unknown declaration never acquires proxy authority" true
+        (Provider_runtime_binding.capabilities_for_provider_config
+          (config ~provider_id:"unknown" ())
+          = Llm_provider.Capabilities.gemini_capabilities))
+;;
+
 let () =
   Alcotest.run
     "Provider_runtime_binding"
     [ ( "catalog"
-      , [ Alcotest.test_case
+      , [ Alcotest.test_case "registry fallback preserves provider authority" `Quick
+            test_registry_fallback_preserves_provider_authority
+        ; Alcotest.test_case
             "alias default capabilities"
             `Quick
             test_catalog_alias_default_and_capabilities

@@ -280,49 +280,29 @@ val anthropic_thinking_control_for_provider_model_id
     prefix-matches [model_id]; there is no in-code fallback table. *)
 val for_model_id_catalog : string -> capabilities option
 
-(** Look up capabilities for the explicit provider/model pair. A
-    provider-scoped catalog row matches only when its normalized
-    [provider_name] and complete normalized [id_prefix] equal [provider_label]
-    and [model_id], respectively. AGENT_CORE never rewrites either value into slash,
-    colon, or dot-qualified candidates, and does not apply family/prefix
-    matching inside the provider scope. When the exact pair is absent and
-    [allow_bare_fallback] is set, the provider-independent {!for_model_id}
-    row is tried next -- it does apply prefix matching, so it is what reads a
-    catalog row that names a model family. The catalog-declared provider base
-    for [wire] answers last, being what every model of that provider gets
-    when no row names it.
+(** Resolve an explicit provider/model pair while preserving whether the
+    caller declared an identity or knows only a wire kind. Exact scoped rows
+    win. A declared provider reads bare catalog rows only when its catalog
+    entry declares [serves_bare_rows]; it never borrows capability-manifest
+    facts. Anonymous native wires retain model/manifest fallback; anonymous
+    OpenAI-compatible endpoints do not borrow bare model facts. Provider bases
+    answer last. Anonymous wire labels never resolve catalog provider aliases.
 
-    Until 2026-09-09 the base came before that row. Every [[providers]] entry
-    declares a base, so it always answered and the bare row was unreachable:
-    44 of the catalog's 125 bare rows could not be read by an anonymous config
-    of their own wire (#34301). With [allow_bare_fallback] false -- a config
-    that named a [provider_id] -- a bare row answers only when that provider
-    declares [serves_bare_rows], being the vendor's own endpoint for the models
-    the bare rows describe. That read is catalog-only and skips the capability
-    manifest (#37849). For any other provider the order is unchanged, because a
-    bare row must not answer for a scoped provider whose base deliberately
-    differs.
-
-    [wire] is the caller's resolved {!Provider_kind.t}, supplied when it knows
-    one. It selects the base a matched row is laid over for a provider whose
-    wires differ in what a request can express; the row lookup is unaffected.
-    Passing [None] resolves against the provider entry's default base. *)
+    [wire] selects the base for providers with multiple wire kinds. [None]
+    uses the provider's default base. *)
 val for_provider_model_id
   :  wire:Provider_kind.t option
-  -> allow_bare_fallback:bool
-  -> provider_label:string
+  -> provider:Model_catalog.provider_reference
   -> model_id:string
   -> capabilities option
 
-(** Immutable resolution for one request. A missing model or thinking policy
-    remains missing even if the process catalogs are replaced later. *)
+(** Immutable resolution for one request. Missing facts remain missing even
+    if process catalogs are replaced later. *)
 type request_policy
 
 val resolve_request_policy
   :  wire:Provider_kind.t
-  -> allow_bare_fallback:bool
-  -> provider_label:string
-  -> anthropic_provider_label:string option
+  -> provider:Model_catalog.provider_reference
   -> model_id:string
   -> request_policy
 

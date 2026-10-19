@@ -46,9 +46,9 @@ description: "MASC TUI의 채팅·입력·로딩·진행 상태, 시작 키 인�
 ## Task·Goal 이력 조회
 
 - Goal timeline·Task history·Keeper Calls·저장된 브라우저 이력 목록은
-  `launch_workspace_history_read`에서 원래
-  workspace identity를 캡처하고 공통 요청·취소 소유권을 쓴다. endpoint 사전 확인만으로
-  뒤의 GET을 허가하지 않는다. 세 HTTP consumer 모두 공통 `get_json`을 통해 실제 GET에
+  `launch_workspace_history_read`에서 원래 workspace identity·endpoint·authority·read epoch를
+  캡처하고 공통 요청·취소 소유권을 쓴다. 시작 직전 로컬 소유권·확인 상태를 검사하며
+  별도 identity GET을 직렬로 먼저 보내지 않는다. 세 HTTP consumer 모두 공통 `get_json`을 통해 실제 GET에
   expected base/root를 붙이고 서버 영수증을 확인한다. raw `http_get`으로 우회하지 않는다.
   `Masc_tui_workspace_read`가 기존 world collector와 같은 fiber binding·JSON/cache 경계를
   소유한다. 병렬 child는 원래 binding을 상속하고 형제 collector의 identity를 빌리지 않는다.
@@ -56,6 +56,12 @@ description: "MASC TUI의 채팅·입력·로딩·진행 상태, 시작 키 인�
   캐시 주소는 expected root를 포함한다. 관측 확인은 효과·재전송 허가가 아니며 기존
   항목 ID·조회 generation·workspace authority의 응답 적용 조건도 유지한다. 비교와
   미실행 protocol 시나리오는 `docs/audits/2026-10-19-tui-history-workspace-admission.md`를 따른다.
+  이력 GET 거절은 해당 source의 실패이며 마지막 정상 관측을 보존한다. 그 실패를 전역
+  identity 관측으로 만들지 않고 기존 공유 refresh가 실제 identity를 관측한다. 일반
+  `launch_workspace_request`와 효과의 사전 확인은 유지한다. 명시적 read chain의 HTTP는
+  identity+history 두 GET에서 history 한 GET으로 줄지만 auth 갱신·연결·재조회·화면 시간은
+  별도이며 속도 50% 개선을 뜻하지 않는다. 후속 비교는
+  `docs/audits/2026-10-19-tui-history-single-admitted-read.md`를 따른다.
 - 같은 항목 ID를 다시 열거나 새로 읽을 수 있으므로 ID만으로 응답을 적용하지 않는다.
   `begin_task_history_read`/`begin_goal_timeline_read`가 받은 원래 request를 완료까지 보관한다.
   명시 재조회는 `Masc_tui_fetched.refresh`로 이전 요청을 대체하고, 일반 `start`의 공유 정책은

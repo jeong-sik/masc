@@ -467,29 +467,67 @@ let test_history_read_keeps_original_workspace_through_replacement () =
     Masc_tui_workspace_read.with_binding ~host ~port ~expected
       ~proof:Masc_tui_workspace_read.Request_precondition load
   in
-  let expect_context context result =
-    let events = match Result.bind result Masc.Tui_decode.decode_task_history with
-      | Ok events -> events
-      | Error detail -> failf "original task history unavailable: %s" detail in
+  let decode_history result = Result.bind result Masc.Tui_decode.decode_task_history in
+  let expect_events context events =
     check bool "decoded original handoff and actor survive the read" true
       (List.exists (fun (event : Masc.Tui_decode.task_history_event) ->
         event.th_note=Some context && event.th_actor=Some "original-keeper"
         && event.th_from_status=Some "todo" && event.th_to_status=Some "in_progress") events)
+  in
+  let expect_context context result =
+    match decode_history result with
+    | Ok events -> expect_events context events
+    | Error detail -> failf "original task history unavailable: %s" detail
   in
   let expect_refusal result =
     match result with
     | Error _ -> ()
     | Ok _ -> fail "unadmitted or foreign history became observable"
   in
-  expect_context "A original handoff" (bound identity_a (read ~send));
+  let original = bound identity_a (read ~send) in
+  expect_context "A original handoff" original;
+  let state = Masc_tui_types.create_state ~workspace:"history-protocol"
+      ~local_base_path:base_a ~port ~refresh_interval:0. () in
+  state.workspace_identity <- Masc_tui_types.Workspace_identity_match;
+  state.server_identity <- Some identity_a;
+  let begin_read () = match Masc_tui_types.begin_task_history_read state ~task_id:"task-original" with
+    | Some request -> request
+    | None -> fail "original history did not acquire its read owner" in
+  let complete owner result =
+    Masc_tui_types.complete_task_history_read state owner (decode_history result) in
+  let initial_owner = begin_read () in
+  complete initial_owner original;
+  let old_refresh = begin_read () in
   served := config_b;
   response := frame "B independent handoff";
-  expect_refusal (bound identity_a (read ~send));
+  let refused = bound identity_a (read ~send) in
+  expect_refusal refused;
+  complete old_refresh refused;
+  (match Masc_tui_fetched.view_for ~equal:String.equal state.task_history ~key:"task-original" with
+   | Masc_tui_fetched.Stale (events, _) -> expect_events "A original handoff" events
+   | Absent | Loading | Ready _ | Failed _ -> fail "refused GET lost its original history or failure");
+  check bool "refused actual GET settles the read without a health result" false
+    (Masc_tui_fetched.in_flight state.task_history);
   (* Even the same ETag at the same endpoint cannot borrow another root's body. *)
   response := frame ~status:304 "B independent handoff";
   expect_refusal (bound identity_b (read ~send));
   response := frame "B independent handoff";
-  expect_context "B independent handoff" (bound identity_b (read ~send));
+  let recovered = bound identity_b (read ~send) in
+  expect_context "B independent handoff" recovered;
+  Masc_tui_types.withdraw_detail_histories state;
+  state.workspace_identity <- Masc_tui_types.Workspace_identity_mismatch
+    {local_base_path=base_a; server_base_path=base_b};
+  state.server_identity <- Some identity_b;
+  let replacement_owner = begin_read () in
+  complete old_refresh original;
+  check bool "late original result cannot settle replacement workspace" true
+    (Masc_tui_fetched.is_current ~equal:String.equal state.task_history replacement_owner
+     && Masc_tui_fetched.in_flight state.task_history);
+  complete replacement_owner recovered;
+  complete initial_owner original;
+  (match Masc_tui_fetched.view_for ~equal:String.equal state.task_history ~key:"task-original" with
+   | Masc_tui_fetched.Ready events -> expect_events "B independent handoff" events
+   | Absent | Loading | Stale _ | Failed _ -> fail "admitted replacement did not keep its own history");
   response := frame ~status:304 "B independent handoff";
   expect_context "B independent handoff" (bound identity_b (read ~send));
   response := frame ~status:304 ~receipts:[] "unattested reuse";

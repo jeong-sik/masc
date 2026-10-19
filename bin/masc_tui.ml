@@ -1914,14 +1914,10 @@ let fork_workspace_job ?(observation = false) ?(on_withdrawn = fun () -> ()) sta
     Printexc.raise_with_backtrace exn backtrace
 
 
-(* A request owns both its cancellation context and its completion. Recheck the
-   endpoint before dispatch: an unchanged port can now serve another root. *)
-let launch_workspace_request ?(operation = false) state ~mailbox ~boundary_error ~deliver read =
+(* Dispatch owns cancellation, error conversion and the original completion
+   envelope. Each caller supplies its own admission before doing its work. *)
+let launch_workspace_result ?(operation = false) state ~mailbox ~boundary_error ~deliver perform =
   let enqueue_async = workspace_enqueue state in
-  let authority = state.workspace_authority in
-  let identity = state.server_identity in
-  let host = server_peer_host in
-  let port = state.port in
   let deliver_result result =
     let message = deliver result in
     enqueue_async mailbox (if operation then Workspace_operation message else message)
@@ -1929,9 +1925,7 @@ let launch_workspace_request ?(operation = false) state ~mailbox ~boundary_error
   let run () =
     let result =
       try
-        match check_workspace_request state ~mailbox ~authority ~identity ~host ~port () with
-        | Error detail -> Error (boundary_error detail)
-        | Ok () -> read ()
+        perform ()
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (boundary_error (Printexc.to_string exn))
@@ -1947,18 +1941,37 @@ let launch_workspace_request ?(operation = false) state ~mailbox ~boundary_error
            deliver_result (Error (boundary_error (Printexc.to_string exn))))
   | None -> deliver_result (Error (boundary_error "Eio switch is unavailable"))
 
-(* Detail histories carry the expected root through the actual JSON read,
-   including the server's admission receipt. A health probe alone cannot bind
-   a later request if the same endpoint changes workspace in between. *)
+(* Existing request/effect callers still recheck the endpoint before dispatch. *)
+let launch_workspace_request ?(operation = false) state ~mailbox ~boundary_error ~deliver read =
+  let authority = state.workspace_authority in
+  let identity = state.server_identity in
+  let host = server_peer_host and port = state.port in
+  launch_workspace_result ~operation state ~mailbox ~boundary_error ~deliver (fun () ->
+    match check_workspace_request state ~mailbox ~authority ~identity ~host ~port () with
+    | Error detail -> Error (boundary_error detail)
+    | Ok () -> read ())
+
+(* These read-only consumers carry their expected roots through the actual GET
+   and require the server's admission receipt, including for cache reuse. Local
+   ownership is checked before dispatch; a separate health GET adds no binding. *)
 let launch_workspace_history_read state ~mailbox ~deliver read =
   let expected = state.server_identity in
+  let authority = state.workspace_authority in
+  let reading = state.workspace_read_authority in
   let host = server_peer_host and port = state.port in
-  launch_workspace_request state ~mailbox ~boundary_error:Fun.id ~deliver (fun () ->
+  launch_workspace_result state ~mailbox ~boundary_error:Fun.id ~deliver (fun () ->
     match expected with
     | None -> Error "Workspace identity is unavailable for this history read"
     | Some expected ->
-        Masc_tui_workspace_read.with_binding ~host ~port ~expected
-          ~proof:Masc_tui_workspace_read.Request_precondition read)
+        if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
+        else if reading != state.workspace_read_authority || not (server_authority_ready state)
+        then Error "Workspace identity is unconfirmed"
+        else if port <> state.port
+          || not (same_workspace_identity (Some expected) state.server_identity)
+        then Error "Workspace identity changed before this history read"
+        else
+          Masc_tui_workspace_read.with_binding ~host ~port ~expected
+            ~proof:Masc_tui_workspace_read.Request_precondition read)
 
 (* A creation keeps its operation receipt even after its workspace withdraws.
    Only the result handler may use current authority to refresh or open chat. *)

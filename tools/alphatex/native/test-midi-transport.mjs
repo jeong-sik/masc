@@ -560,6 +560,51 @@ shared.finish(reason:"stop",publish:false);precondition(sharedFinished==1)
 print("COORDINATED_MIDI_DECISIONS_PASS: staged silence, late-epoch refusal, common-epoch restoration, no early sends, shared pause position, logical end and owned shutdown callback")
 print("MIDI_ARRANGEMENT_DECISIONS_PASS: original boundary events, trims/full endpoints, finite repeats, overlapping physical ownership admission, distinct-channel cleanup, prior-state baselines, compressed seek, silent paused seek/resume")
 
+func loopArrangement(_ source: [String: Any]) throws -> MidiTransport {
+    let template = try arrangement([source],[clip("loop",source["id"] as! String,from:0,to:1,repeatCount:1)],duration:1)
+    let value = try MidiTransport(timeline:template.timeline,uid:"1",loop:true)
+    value.destination=template.destination;value.sourceDestinations=template.sourceDestinations;value.state = .playing
+    return value
+}
+let loopEvents = asset("loop-events",[
+    ["seconds":0,"port":2,"bytes":[0xb0,1,0]],
+    ["seconds":0.1,"port":2,"bytes":[0x90,60,100]],
+    ["seconds":0.2,"port":2,"bytes":[0x80,60,77]],
+    ["seconds":1,"port":2,"bytes":[0x90,70,88,0x80,70,99]]])
+reset(0);reviewWire=[]
+let missedLoop=try loopArrangement(loopEvents);missedLoop.tick()
+reviewWire=[];reviewClock=1_250_000_000;missedLoop.tick()
+precondition(!reviewWire.contains { $0.1[0] & 0xf0 == 0x90 })
+precondition(!reviewWire.contains { $0.1[0] & 0xf0 == 0x80 })
+near(missedLoop.offset,0.25)
+// Exactly due full-source endpoint pairs survive, including on a loop.
+reset(0);reviewWire=[]
+let onTimeLoop=try loopArrangement(loopEvents);onTimeLoop.tick()
+reviewWire=[];reviewClock=1_000_000_000;onTimeLoop.tick()
+precondition(reviewWire.map(\.1).contains([0x90,70,88]) && reviewWire.map(\.1).contains([0x80,70,99]))
+// All acquired keys precede missed attacks of that pitch in the source FIFO.
+let fifoEvents=asset("fifo",[
+    ["seconds":0,"port":2,"bytes":[0xb0,64,0,0x90,60,100]],
+    ["seconds":0.1,"port":2,"bytes":[0xb0,64,127,0x90,60,90]],
+    ["seconds":0.2,"port":2,"bytes":[0x80,60,77]],
+    ["seconds":0.3,"port":2,"bytes":[0x80,60,45]],
+    ["seconds":0.4,"port":2,"bytes":[0xb0,64,0]]])
+reset(0);reviewWire=[]
+let fifoLoop=try loopArrangement(fifoEvents);fifoLoop.tick()
+reviewWire=[];try fifoLoop.reconcile(at:1,observedAt:1.25)
+precondition(reviewWire.map(\.1) == [[0xb0,64,127],[0x80,60,77],[0xb0,64,0]])
+let failureEvents=asset("failure",[
+    ["seconds":0,"port":2,"bytes":[0x90,60,100]],
+    ["seconds":0.2,"port":2,"bytes":[0x80,60,77]]])
+reset(0);reviewWire=[]
+let failingLoop=try loopArrangement(failureEvents);failingLoop.tick()
+reviewWire=[];reviewWireFail=true
+mustReject { try failingLoop.reconcile(at:1,observedAt:1.25) }
+precondition(failingLoop.sourceHeld[0]?[60] == 1)
+try failingLoop.silence()
+precondition(failingLoop.sourceHeld[0]?[60] == 0 && reviewWire.map(\.1) == [[0x80,60,77],[0x80,60,0]])
+print("MIDI_LOOP_DECISIONS_PASS: late wrap skips expired unacquired attacks, exact endpoints survive, FIFO releases retain velocity, pedals and uncertain release cleanup remain owned")
+
 print("SELECTED_MIDI_DESTINATION_PASS: unrelated enumeration failure/churn isolated; selected removal, UID reuse, source type, offline and noncanonical ID rejected")
 print("SOURCE_MIDI_DECISIONS_PASS: F7 running status/partial messages, realtime/SysEx order, expression/release velocity, overlapping held-key cleanup, pedals, zero duration, explicit ports, partial-send cleanup, failed note/pedal/reset/channel-mode release retry, successful release ownership")
 print("MIDI_DECISIONS_PASS: late cycles, expired intervals, live notes, send-time epoch, inclusive seek, retrigger, one-shot end, pause/status phase, startup admission")

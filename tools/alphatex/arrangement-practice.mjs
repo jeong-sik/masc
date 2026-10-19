@@ -48,6 +48,7 @@ function clickWave() {
 export async function preparePractice(project, prepared, { signal } = {}) {
   if (!practiceEnabled(project)) return prepared
   try {
+    if (project.playbackLoop !== undefined) throw new Error('Continuous looping with count-in or metronome is not connected yet; use :loop off for practice clicks')
     signal?.throwIfAborted()
     const clock = practiceClock(project), original = JSON.parse(await readFile(prepared.path, { encoding: 'utf8', signal }))
     const countIn = clock.countInSeconds

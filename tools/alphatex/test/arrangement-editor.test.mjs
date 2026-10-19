@@ -959,3 +959,24 @@ test('stop fences a late phrase preparation before child keyboard or input owner
   assert.equal(view.observed.phrases.length,0);assert.equal(view.process.stdin.listenerCount('keypress'),1)
  }finally{await closeController(view)}
 })
+
+test('loop decisions preserve project range and source ticks, map global seek to prepared phase and stop the old owner when edited',async()=>{
+ const view=await controller()
+ try{
+  view.command('import-midi /music/loop.mid');await flush();const job=view.observed.requests.find(job=>job.kind==='import-midi')
+  const asset={id:'asset-1',name:'Keys',kind:'midi',source:importMidiSource(midi())}
+  view.worker.emit('message',{id:job.id,ok:true,result:{project:editArrangement(job.project,{kind:'asset-add',asset}),asset:asset.id}});await flush()
+  view.command('place asset-1 0');view.command('repeat 8');view.command('loop 1 3');view.command('midi-output 123');view.key('space');await flush()
+  const prepared=view.observed.requests.find(job=>job.kind==='prepare-midi');assert.deepEqual(prepared.project.playbackLoop,{start:960,end:2880})
+  view.worker.emit('message',{id:prepared.id,ok:true,result:{path:'/owned-recovery/loop/plan.json',format:'midi-arrangement',loop:true,originSeconds:.6,midiOutput:'123',bindings:[{port:0,destination:'123'}]}});await flush()
+  const player=view.observed.players[0];assert.equal(player.options.loop,true)
+  view.key('space');await flush();view.command('seek 2');await flush();view.key('space');await flush()
+  assert.deepEqual(player.commands.slice(0,3),['pause',['seek',.6],'resume'])
+  view.command('seek 3');await flush();assert.deepEqual(player.commands.at(-1),['seek',0])
+  view.command('input audio-in');view.command('record');await flush();assert.equal(view.observed.captures.length,0)
+  view.command('loop off');await flush();assert.ok(player.commands.includes('stop'))
+  view.command('undo');view.key('q');player.finish();await view.done
+  const saved=view.observed.saved.at(-1).project;assert.deepEqual(saved.playbackLoop,{start:960,end:2880});assert.deepEqual(saved.assets[0].source,asset.source)
+ }finally{await closeController(view)}
+ assert.equal(view.process.stdin.isRaw,false)
+})

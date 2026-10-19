@@ -6,6 +6,7 @@ import { validateCapturePlacement, capturePlacementStart, projectCapturedPlaceme
 import { validateCalibrationCapture } from './calibration-profile.mjs'
 import { validatePractice } from './arrangement-practice.mjs'
 import { validateRecordingCorrection } from './recording-correction.mjs'
+import { arrangementLoop } from './arrangement-loop.mjs'
 
 const integer = (value, name, minimum = 0) => {
   if (!Number.isSafeInteger(value) || value < minimum) throw new Error(`Invalid ${name}`)
@@ -133,6 +134,7 @@ export function validateArrangement(project) {
   if (project?.schemaVersion !== 1 || project.kind !== 'arrangement' || project.ppq !== PPQ) throw new Error('Unsupported arrangement document')
   text(project.title, 'arrangement title')
   if (!Number.isFinite(project.tempo) || project.tempo <= 0) throw new Error('Invalid arrangement tempo')
+  arrangementLoop(project)
   if (!Array.isArray(project.meter) || project.meter.length !== 2) throw new Error('Invalid arrangement meter')
   integer(project.meter[0], 'meter numerator', 1)
   integer(project.meter[1], 'meter denominator', 1)
@@ -206,6 +208,10 @@ export function editArrangement(project, edit) {
     }
     case 'practice': next.practice = structuredClone(validatePractice(edit.practice)); break
     case 'recording-correction': next.recordingCorrection = structuredClone(validateRecordingCorrection(edit.correction)); break
+    case 'loop':
+      if (edit.range === null) delete next.playbackLoop
+      else next.playbackLoop = structuredClone(edit.range)
+      break
     case 'title': next.title = edit.title; break
     case 'tempo': next.tempo = edit.tempo; break
     case 'meter': next.meter = [...edit.meter]; break
@@ -231,5 +237,7 @@ export function arrangementPlaybackSchedule(project) {
       reserved.push({ id }); result.push({ ...part, id })
     }
   }
-  return result.sort((a, b) => a.startSeconds - b.startSeconds)
+  const loop = arrangementLoop(project)
+  return result.filter(clip => !loop || clip.endSeconds > loop.start && clip.startSeconds < loop.end)
+    .sort((a, b) => a.startSeconds - b.startSeconds)
 }

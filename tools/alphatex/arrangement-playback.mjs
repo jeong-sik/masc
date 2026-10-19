@@ -184,6 +184,8 @@ async function snapshotAudio(project, schedule, { sourceRoot, temporary, signal 
       offsetFrames: frame(clip.audio.offsetFrames), frameCount: frame(clip.audio.frameCount), repeat: clip.repeat,
       captureClock: { ...clip.sourceClock, firstAudioHostTime: asset.manifest.clock.firstAudioHostTime },
       ...(clip.component ? { component: clip.component } : {}),
+      ...(clip.placement?.kind === 'calibrated' ? { calibrationOutput: { id: clip.placement.profile.output.id,
+        sampleRate: clip.placement.profile.output.sampleRate, renderQuantum: clip.placement.profile.output.renderQuantum } } : {}),
       ...(clip.audioChannel ? { audioChannel: { ...clip.audioChannel } } : {}) })
   }
   const used = new Set(regions.map(region => region.asset)), duration = schedule.reduce((end, clip) => Math.max(end, clip.endSeconds), 0)

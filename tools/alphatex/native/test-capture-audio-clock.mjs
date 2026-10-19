@@ -97,6 +97,15 @@ do {try Plan(schemaVersion:4,kind:"capture-audio-arrangement",duration:1,assets:
 invalid=separateAudio;invalid.audioChannel=CaptureAudioChannel(input:1,output:3)
 do {_ = try Voice(region:invalid,asset:asset,capacity:257,outputChannels:2);preconditionFailure("missing physical output channel admitted")}catch{}
 let monoAsset=Asset(id:"audio",path:CommandLine.arguments[2],sha256:"",sampleRate:48000,channels:1,frames:4800)
+let calibration=CalibrationOutput(id:"measured-output",sampleRate:48000,renderQuantum:256)
+try calibration.validate(deviceUID:"measured-output",rate:48000,quantum:256)
+for (uid,rate,quantum):(String,Double,UInt32) in [("other",48000,256),("measured-output",44100,256),("measured-output",48000,512)] {
+ do {try calibration.validate(deviceUID:uid,rate:rate,quantum:quantum);preconditionFailure("stale measured output configuration admitted")}catch{}
+}
+var calibrated=separateAudio;calibrated.audioChannel=CaptureAudioChannel(input:1,output:2);calibrated.calibrationOutput=calibration
+try Plan(schemaVersion:4,kind:"capture-audio-arrangement",duration:1,assets:[asset],regions:[calibrated],midi:nil,ump:nil,umpRegions:nil).validate()
+calibrated.audioChannel=nil
+do {try Plan(schemaVersion:4,kind:"capture-audio-arrangement",duration:1,assets:[asset],regions:[calibrated],midi:nil,ump:nil,umpRegions:nil).validate();preconditionFailure("unrouted calibration admitted")}catch{}
 for capacity:UInt32 in [257,8192] {
  var routed=separateAudio;routed.audioChannel=CaptureAudioChannel(input:1,output:2)
  let mono=try Voice(region:routed,asset:monoAsset,capacity:capacity,outputChannels:2,outputLayout:AVAudioChannelLayout(layoutTag:kAudioChannelLayoutTag_Stereo))

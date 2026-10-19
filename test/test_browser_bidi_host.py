@@ -111,9 +111,12 @@ def run(host, firefox, out=None):
 #message{position:fixed;left:600px;top:100px;width:300px;height:60px;background:#eee}
 #react{display:none;position:absolute;left:10px;top:10px;width:140px;height:30px}
 #message:hover #react{display:block}#reactions{position:fixed;left:600px;top:200px}
-#long{position:fixed;left:0;top:400px;width:500px;height:20px;overflow:hidden;white-space:nowrap}</style>
+#long{position:fixed;left:0;top:400px;width:500px;height:20px;overflow:hidden;white-space:nowrap}
+#drag-source{position:fixed;left:600px;top:300px;width:100px;height:60px;background:orange}
+#drop-target{position:fixed;left:800px;top:300px;width:100px;height:60px;background:lightgreen}</style>
 <a href="#followed">Observed destination</a><div id="pad">untouched</div><span id="hover-result"></span>
 <div id="message"><button id="react" type="button">Add reaction</button></div><span id="reactions"></span>
+<div id="drag-source">Drag source</div><div id="drop-target">Drag destination</div><span id="drop-result"></span>
 <button id="long" type="button">''' + "a" * 499 + "\U0001F600tail" + '''</button><script>
 document.querySelector('#react').addEventListener('click',e=>{
   document.querySelector('#reactions').textContent+=' reaction:'+e.isTrusted});
@@ -123,12 +126,18 @@ pad.addEventListener('pointerdown',()=>{presses++});
 pad.addEventListener('pointermove',e=>{document.querySelector('#hover-result').textContent='hover:'+e.isTrusted+':'+presses});
 pad.onpointerdown=e=>{down=e.isTrusted;pad.setPointerCapture(e.pointerId)};
 pad.onpointerup=e=>{pad.textContent='drag:'+down+':'+e.isTrusted+':'+e.clientX};
+const dragSource=document.querySelector('#drag-source'),dropTarget=document.querySelector('#drop-target');
+let dragTrusted=false;
+dragSource.onpointerdown=e=>{dragTrusted=e.isTrusted;dragSource.setPointerCapture(e.pointerId)};
+dragSource.onpointerup=e=>{const box=dropTarget.getBoundingClientRect();
+  const inside=e.clientX>=box.left&&e.clientX<box.right&&e.clientY>=box.top&&e.clientY<box.bottom;
+  document.querySelector('#drop-result').textContent='pointer-drag:'+dragTrusted+':'+e.isTrusted+':'+inside};
 </script>''', encoding="utf-8")
         fixture_url = f"http://127.0.0.1:{server.server_port}/fixture"
         # A document whose source passes the helper's 1 MiB bound.
         oversized = root / "oversized.html"
         oversized.write_text('<!doctype html><meta charset="utf-8"><title>Oversized fixture</title><p>'
-            + "x" * (1100 * 1024), encoding="utf-8")
+            + "x" * (3 * 1024 * 1024), encoding="utf-8")
         oversized_url = f"http://127.0.0.1:{server.server_port}/oversized"
         # A control whose value alone is larger than one BiDi socket message.
         huge_control = root / "huge-control.html"
@@ -246,6 +255,14 @@ pad.onpointerup=e=>{pad.textContent='drag:'+down+':'+e.isTrusted+':'+e.clientX};
             assert bounded_out["data"]["html"] is None and bounded_out["data"]["htmlComplete"] is False, bounded_out
             assert bounded_out["data"]["htmlUnavailableReason"] == "document_html_exceeds_1_mib", bounded_out
             assert bounded_out["data"]["documentId"] and bounded_out["data"]["tabId"] == large[0], bounded_out
+            # Screenshot and gesture receipts must not serialize the 3 MiB
+            # body. A successful input must leave this client usable.
+            large_shot = capture(large[0])
+            large_hover = call("page.interact", {"tabId": large[0], "action": "hover_at",
+                "expectedUrl": oversized_url, "viewport": large_shot["data"]["viewport"],
+                "point": {"x": .5, "y": .5}})
+            assert large_hover["ok"] and "text" not in large_hover["data"], large_hover
+            assert call("tabs.list", {})["ok"]
             # An inventory too large for one socket message is refused in the
             # page with its size. The same connection then answers the next
             # read: nothing over the limit reached the socket.
@@ -349,6 +366,23 @@ pad.onpointerup=e=>{pad.textContent='drag:'+down+':'+e.isTrusted+':'+e.clientX};
             assert scripted["ok"], scripted
             both = call("page.read", {"tabId": first})
             assert "reaction:true reaction:false" in both["data"]["text"], both
+            # Native pointer-capture drag is supported. HTML draggable/drop
+            # remains a Firefox limitation (Mozilla bug 1515879); do not
+            # treat an accepted input sequence as proof of an HTML drop.
+            drag_scene = call("page.scene", {"tabId": first, "view": "content", "maxChars": 50000})
+            assert drag_scene["ok"], drag_scene
+            frame = capture(first)["data"]["viewport"]
+            def center_named(text):
+                nodes = [node for node in drag_scene["data"]["nodes"] if node.get("text") == text]
+                assert len(nodes) == 1 and nodes[0]["rects"], nodes
+                box = nodes[0]["rects"][0]
+                return {"x": (box["x"] + box["width"] / 2) / frame["width"],
+                        "y": (box["y"] + box["height"] / 2) / frame["height"]}
+            dropped = call("page.interact", {"tabId": first, "action": "drag", "expectedUrl": here,
+                "viewport": frame, "from": center_named("Drag source"), "to": center_named("Drag destination")})
+            assert dropped["ok"], dropped
+            drop_read = call("page.read", {"tabId": first})
+            assert drop_read["ok"] and "pointer-drag:true:true:true" in drop_read["data"]["text"], drop_read
             other = call("page.read", {"tabId": second})
             assert other["ok"] and other["data"] == before["data"]
             assert len({row[0] for row in metadata}) == 1 and all(row[1] for row in metadata)

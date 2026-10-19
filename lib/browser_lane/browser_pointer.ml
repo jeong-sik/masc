@@ -27,3 +27,37 @@ let point_to_json point = `Assoc ["x",`Float point.x;"y",`Float point.y]
 let viewport_to_json viewport = `Assoc ["documentId",`String viewport.document_id;
   "width",`Float viewport.width;"height",`Float viewport.height;
   "scrollX",`Float viewport.scroll_x;"scrollY",`Float viewport.scroll_y]
+
+type gesture =
+  | Hover
+  | Click
+  | Drag of { via : point list; destination : point; duration_ms : int }
+  | Wheel of { x : int; y : int }
+
+let input_sources ~pointer_id ~wheel_id ~viewport ~start gesture =
+  let coords (point : point) =
+    [ "x", `Int (int_of_float (point.x *. viewport.width))
+    ; "y", `Int (int_of_float (point.y *. viewport.height)) ] in
+  let move ~duration_ms point = `Assoc
+    ([ "type", `String "pointerMove"; "origin", `String "viewport"
+     ; "duration", `Int duration_ms ] @ coords point) in
+  let button kind = `Assoc ["type", `String kind; "button", `Int 0] in
+  let pointer actions = `Assoc
+    [ "type", `String "pointer"; "id", `String pointer_id
+    ; "parameters", `Assoc ["pointerType", `String "mouse"]
+    ; "actions", `List actions ] in
+  let source = match gesture with
+    | Hover -> pointer [move ~duration_ms:0 start]
+    | Click -> pointer [move ~duration_ms:0 start; button "pointerDown"; button "pointerUp"]
+    | Drag {via;destination;duration_ms} ->
+      pointer
+        ([move ~duration_ms:0 start; button "pointerDown"]
+         @ List.map (move ~duration_ms) (via @ [destination])
+         @ [move ~duration_ms:0 destination; button "pointerUp"])
+    | Wheel {x;y} -> `Assoc
+        [ "type", `String "wheel"; "id", `String wheel_id
+        ; "actions", `List [`Assoc
+            ([ "type", `String "scroll"; "duration", `Int 0
+             ; "origin", `String "viewport"; "deltaX", `Int x; "deltaY", `Int y ]
+             @ coords start)] ] in
+  `List [source]

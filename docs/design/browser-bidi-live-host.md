@@ -500,6 +500,16 @@ Screenshot coordinate input uses the existing document/viewport guard followed
 by BiDi pointer or wheel actions. `hover_at` uses one `pointerMove`, with no
 button press, on the selected live BiDi tab or the automation lane. Copy the
 observed `expectedUrl`, `viewport` and normalized `point` from a fresh capture.
+BiDi and WebDriver share the native pointer action encoder. A drag moves to its
+destination twice before releasing, so dragover handlers can observe it where
+the browser supports HTML drag-and-drop. An accepted gesture receipt proves
+the input sequence, not an application drop. Firefox's native HTML draggable
+drop is affected by [Mozilla bug 1515879](https://bugzilla.mozilla.org/show_bug.cgi?id=1515879);
+pointer-capture drags are a separate supported interaction. MASC does not replay
+the gesture with synthetic DOM events when a drop is absent.
+Pointer receipts read only the URL, title and scroll position. Screenshot
+validation also reads tab metadata instead of the document body, so a large
+page does not turn completed input or capture into a body-size failure.
 The server refuses `hover_at` and `drag` on a WebExtension connection before
 it queues a command, as `live_transport_unsupported`; the operator must
 explicitly attach the already-enabled loopback Remote Agent with `--bidi-url`.
@@ -563,7 +573,8 @@ Validation: `test_browser_bidi_peer` exercises opaque identity, the element
 inventory, the document source and the lane table against the peer.
 `python3 test/test_browser_bidi_host.py HOST FIREFOX` uses an owned temporary
 profile and actual Firefox to exercise native HTTP poll/result, screenshot,
-trusted drag, stale viewport rejection, and two identical-URL contexts.
+trusted pointer-capture drag, stale viewport rejection, large-document pointer
+receipts, and two identical-URL contexts.
 The latter requires the CI-built host and Firefox; no local build is needed.
 
 Protocol references: [Mozilla direct connection](https://developer.mozilla.org/en-US/docs/Web/WebDriver/How_to/Create_BiDi_connection),

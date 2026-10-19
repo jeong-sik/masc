@@ -1380,9 +1380,9 @@ let test_maintenance_skips_atomic_staging_files () =
                          ] ) ]
              )])
         ^ "\n");
-      (* A concurrent atomic replace stages its bytes inside the scanned
-         directory before renaming them into place. Staging bytes caught
-         mid-write are not JSONL rows and are not yet reference carriers. *)
+      (* An interrupted atomic replace can leave an incomplete staging
+         payload beside the authoritative ledger. Offline maintenance skips
+         the unpublished payload and still reads the ledger reference. *)
       let staging_path = Filename.concat month_dir ".atomic_42.tmp" in
       Fs_compat.save_file staging_path "{\"half-written\":";
       let observed = maintenance_ok ~base_path ~mode:M.Observe_only in

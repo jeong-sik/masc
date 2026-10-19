@@ -463,13 +463,11 @@ let live_references ~base_path ~board_posts_file =
       | Unix.S_DIR -> scan_directory path references
       | Unix.S_REG ->
         let basename = Filename.basename path in
-        (* A directory-scoped atomic replace stages its bytes in
-           [<dir>/.atomic_*.tmp] and renames them into place. A staging file
-           is owned by its single writer and holds no blob references yet;
-           the rename target enters the scan through the directory snapshot
-           re-read, so skipping the staged bytes cannot hide a reference.
-           A staging file caught mid-write would otherwise fail the JSONL
-           durable-source parse. *)
+        (* Offline maintenance holds the exclusive BasePath writer lease.
+           Leftover [.atomic_*.tmp] staging bytes are unpublished, rather
+           than authoritative durable-source rows; an incomplete payload
+           must not fail their JSONL scan. This skip does not synchronize
+           online writers or rescan a target renamed after [read_directory]. *)
         if Fs_compat.is_atomic_orphan_name basename
         then Ok references
         else if Common.is_tool_call_read_index_file basename

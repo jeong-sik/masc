@@ -39,6 +39,13 @@ type completed_arguments
 (** Frozen argument occurrences from cycles already closed in the raw seed,
     bound to the immutable blocks of one provider attempt's first request. *)
 
+val prepend_argument_messages :
+  prefix:Agent_core.Types.message list -> completed_arguments -> completed_arguments
+(** Shift frozen message coordinates by a caller-owned prefix. This adds no
+    eligible occurrence and keeps every immutable block guard. The caller must
+    verify that these exact prefix messages were prepended; a pinned official
+    context prefix must not change the completed atom boundary. *)
+
 type argument_binding_error =
   | Invalid_argument_seed of Keeper_transcript_unit.structural_error
   | Argument_seed_prefix_mismatch of Keeper_replay_prefix.prefix_mismatch

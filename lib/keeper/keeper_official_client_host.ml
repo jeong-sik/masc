@@ -412,7 +412,8 @@ type range_plan =
       ; working_state : string
       }
 
-let carried_start_range
+let carried_start_range_on_source
+      ~source_messages
       ~keeper_name
       ~runtime_id
       ~carried_front_seed
@@ -428,8 +429,8 @@ let carried_start_range
   in
   let digest_at, history_atom_count =
     Domain_pool_ref.submit_cpu_or_inline (fun () ->
-      ( Runtime_model_input_tail_window.atom_opening_digest messages
-      , snd (Runtime_model_input_tail_window.annotate messages) ))
+      ( Runtime_model_input_tail_window.atom_opening_digest source_messages
+      , snd (Runtime_model_input_tail_window.annotate source_messages) ))
   in
   Keeper_carried_front.warn_seed_read_failures ~keeper_name ~runtime_id seed_read;
   let admitted_seed =
@@ -604,6 +605,12 @@ let carried_start_range
   ; front
   ; accepted_front
   }
+;;
+
+let carried_start_range ~keeper_name ~runtime_id ~carried_front_seed
+    ~librarian_front ~own_first_atom ~turn_start messages =
+  carried_start_range_on_source ~source_messages:messages ~keeper_name ~runtime_id
+    ~carried_front_seed ~librarian_front ~own_first_atom ~turn_start messages
 ;;
 
 (* A carried range as a lane's declared window left it: the list that goes
@@ -820,31 +827,115 @@ let compose_librarian_range ~keeper_name ~runtime_id ~compose librarian_front =
         | Error error -> leave_out (Does_not_fit error)))
 ;;
 
+type argument_binding =
+  | Arguments_unbound
+  | Arguments_bound of Keeper_model_input_demotion.completed_arguments option
+
+type argument_source =
+  { base_path : string
+  ; keeper_name : string
+  ; raw_seed : Agent_core.Types.message list
+  ; replay_prefix : Keeper_replay_prefix.projection
+  ; completed_before : int
+  ; addresses : Keeper_model_input_demotion.address_memo
+  ; mutable binding : argument_binding
+  }
+
+let create_argument_source ~input_policy ~base_path ~keeper_name ~seed
+    ~replay_prefix ~turn_start =
+  match input_policy with
+  | Keeper_input_policy.Wide -> None
+  | Keeper_input_policy.Small ->
+    match seed,turn_start with
+    | Some raw_seed,Keeper_carried_front.Turn_boundary {end_atom}
+      when base_path<>"" && end_atom>0 ->
+      Some {base_path;keeper_name;raw_seed;replay_prefix;completed_before=end_atom;
+            addresses=Keeper_model_input_demotion.create_address_memo ();
+            binding=Arguments_unbound}
+    | None,(Keeper_carried_front.Turn_boundary _ | Turn_boundary_unknown _)
+    | Some _,(Keeper_carried_front.Turn_boundary _ | Turn_boundary_unknown _) -> None
+;;
+
+type argument_projection =
+  { source : argument_source
+  ; history_prefix : Agent_core.Types.message list
+  }
+
+let argument_projection source ~tools ~history_prefix =
+  let _, prefix_atoms = Runtime_model_input_tail_window.annotate history_prefix in
+  if prefix_atoms<>0 || Result.is_error (Keeper_recovery_transmission.require_reader tools)
+  then None
+  else Some {source;history_prefix}
+;;
+
+let plan_arguments argument_projection ~measure_message_bytes messages =
+  let no_plan () : Keeper_model_input_demotion.plan_result = {messages;pending=[]} in
+  match argument_projection with
+  | None -> no_plan ()
+  | Some {source;history_prefix} ->
+    (* The prefix is supplied by its producer, never discovered by text, tool
+       ID or metadata scanning. Only pinned messages may shift coordinates. *)
+    match Keeper_replay_prefix.split ~prefix:history_prefix messages with
+    | Error _ -> no_plan ()
+    | Ok history ->
+      let arguments = match source.binding with
+        | Arguments_bound arguments -> arguments
+        | Arguments_unbound ->
+          let arguments = Domain_pool_ref.submit_cpu_or_inline (fun () ->
+            Keeper_model_input_demotion.bind_completed_arguments
+              ~completed_before:source.completed_before ~seed:source.raw_seed
+              ~replay_prefix:source.replay_prefix history) in
+          let arguments = match arguments with
+            | Ok arguments -> Some arguments
+            | Error _ ->
+              Log.Keeper.warn ~keeper_name:source.keeper_name
+                "official input kept original arguments: completed raw source did not bind";
+              None in
+          source.binding <- Arguments_bound arguments;
+          arguments in
+      Domain_pool_ref.submit_cpu_or_inline (fun () ->
+        let completed_arguments = Option.map
+          (Keeper_model_input_demotion.prepend_argument_messages ~prefix:history_prefix) arguments in
+        Keeper_model_input_demotion.plan ?completed_arguments
+          ~measure_message_bytes ~demote_before:0 messages)
+;;
+
+type selected_start_range =
+  { selected_messages : Agent_core.Types.message list
+  ; selected_projection : Runtime_model_input_tail_window.projection
+  ; selected_front : carried_start_front option
+  }
+
 (* Claude Code and a fresh Codex thread apply their capacity before choosing
    a carried front. The zero-history floor must survive that choice: a seed
    would otherwise restore an atom the provider just refused. A resumed Codex
    thread sends no history and never enters this function. Antigravity and
    Muse Code cut nothing, so they compose with [carried_start_range] and
    [compose_librarian_range] directly. *)
-let start_range_projection
+let start_range_projection ?argument_projection
     ~measure_message_bytes ~capacity_bytes ~unbounded_capacity_bytes
     ~reserved_bytes ?on_model_input_window_observation ?carried_front_seed
     ?librarian_front ?on_carried_front ~turn_start ~keeper_name ~runtime_id
     messages =
   let* librarian_front = read_librarian_front librarian_front messages in
-  let messages=Keeper_librarian_request_unread.attach ~include_empty:true ~role:Agent_core.Types.System
-    librarian_front.Keeper_turn_driver_try_provider.unread messages in
-  let _, history_atom_count = Runtime_model_input_tail_window.annotate messages in
+  let plan = plan_arguments argument_projection ~measure_message_bytes messages in
+  let attach messages = Keeper_librarian_request_unread.attach ~include_empty:true
+    ~role:Agent_core.Types.System librarian_front.Keeper_turn_driver_try_provider.unread messages in
+  let source_messages = attach messages in
+  let planned_messages = attach plan.messages in
+  let _, history_atom_count = Runtime_model_input_tail_window.annotate source_messages in
   let observe_window projection =
     Option.iter
       (fun observe ->
          Option.iter observe
            (Runtime_model_input_tail_window.observe
-              ~digest_at:(Runtime_model_input_tail_window.atom_opening_digest messages)
+              ~digest_at:(Runtime_model_input_tail_window.atom_opening_digest source_messages)
               ~history_atom_count projection))
       on_model_input_window_observation
   in
-  let* capacity_cut =
+  let carried_front_seed = read_seed_once carried_front_seed in
+  let select messages =
+    let* capacity_cut =
     if capacity_bytes = unbounded_capacity_bytes then Ok None
     else
       Domain_pool_ref.submit_cpu_or_inline (fun () ->
@@ -857,18 +948,17 @@ let start_range_projection
   match capacity_cut with
   | Some projection
     when projection.Runtime_model_input_tail_window.dropped_atoms >= history_atom_count ->
-    observe_window projection;
-    Ok projection.Runtime_model_input_tail_window.messages
+    Ok {selected_messages=projection.Runtime_model_input_tail_window.messages;
+        selected_projection=projection;selected_front=None}
   | Some _ | None ->
     let own_first_atom =
       match capacity_cut with
       | Some projection -> projection.Runtime_model_input_tail_window.dropped_atoms
       | None -> 0
     in
-    let carried_front_seed = read_seed_once carried_front_seed in
     let compose librarian_front =
       let carried =
-        carried_start_range ~keeper_name ~runtime_id ~carried_front_seed
+        carried_start_range_on_source ~source_messages ~keeper_name ~runtime_id ~carried_front_seed
           ~librarian_front ~own_first_atom ~turn_start messages
       in
       match capacity_cut with
@@ -881,16 +971,38 @@ let start_range_projection
     let* windowed =
       compose_librarian_range ~keeper_name ~runtime_id ~compose librarian_front
     in
-    observe_window (windowed_projection windowed);
+    Ok {selected_messages=windowed.sent;selected_projection=windowed_projection windowed;
+        selected_front=Some windowed.carried.front}
+  in
+  let* selected = select planned_messages in
+  let* selected = match argument_projection,plan.pending with
+    | None,_ | Some _,[] -> Ok selected
+    | Some {source;history_prefix=_},_::_ ->
+      let outcome = Keeper_model_input_demotion.materialize
+        ~store:(Tool_blob_store.create ~base_path:source.base_path)
+        ~addresses:source.addresses ~pending:plan.pending selected.selected_messages in
+      if outcome.reverted>0 then
+        Log.Keeper.warn ~keeper_name:source.keeper_name
+          "official input restored %d arguments after blob storage failure" outcome.reverted;
+      let actual_messages = Domain_pool_ref.submit_cpu_or_inline (fun () ->
+        let captured = Keeper_model_input_demotion.capture_materialized
+          ~pending:plan.pending ~before:selected.selected_messages ~after:outcome.messages in
+        Keeper_model_input_demotion.replay_materialized captured
+          ~pending:plan.pending planned_messages) in
+      (* Failed and unselected slots are raw again. Repeat the whole summary
+         and range decision, with no second materialization or invented refs. *)
+      select actual_messages in
+  observe_window selected.selected_projection;
+  Option.iter (fun front ->
     Option.iter
       (fun observe ->
-         observe windowed.carried.front
+         observe front
            ~transmitted_bytes:
              (List.fold_left
                 (fun total message -> total + measure_message_bytes message)
-                0 windowed.sent))
-      on_carried_front;
-    Ok windowed.sent
+                0 selected.selected_messages))
+      on_carried_front) selected.selected_front;
+  Ok selected.selected_messages
 ;;
 
 let prepare_turn ~runtime_label ~keeper_name ~turn_count ~system_prompt ~tools

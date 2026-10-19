@@ -301,5 +301,6 @@ destination/group/channel state, including replayed source prefixes. Native
 preflight uses the actual playback parsers, not track names; conflicting routes
 fail before a new backing/live combination is admitted. Route replacement,
 backing restart, source-view suspension and exit wait for owned live process
-closure and scoped cleanup. A failed route stays off until explicitly selected.
+closure and scoped cleanup. A live-owner failure closes every live route until
+they are explicitly selected again.
 See [native MIDI transport](native/MIDI-TRANSPORT.md) for protocol details.

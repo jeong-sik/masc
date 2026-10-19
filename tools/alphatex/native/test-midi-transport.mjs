@@ -605,6 +605,59 @@ try failingLoop.silence()
 precondition(failingLoop.sourceHeld[0]?[60] == 0 && reviewWire.map(\.1) == [[0x80,60,77],[0x80,60,0]])
 print("MIDI_LOOP_DECISIONS_PASS: late wrap skips expired unacquired attacks, exact endpoints survive, FIFO releases retain velocity, pedals and uncertain release cleanup remain owned")
 
+// Shared audio/MIDI cycles retain original project/source regions, and their
+// fractional host deadlines derive from the original epoch even after a stall.
+let commonSource=asset("common",[
+    ["seconds":0,"port":2,"bytes":[0xc0,0]],
+    ["seconds":0.05,"port":2,"bytes":[0x90,60,100]],
+    ["seconds":0.1,"port":2,"bytes":[0x80,60,71]],
+    ["seconds":0.3,"port":2,"bytes":[0x90,62,90]],
+    ["seconds":0.35,"port":2,"bytes":[0x80,62,73]],
+    ["seconds":0.6,"port":2,"bytes":[0x90,65,110]],
+    ["seconds":0.8,"port":2,"bytes":[0x80,65,74]]])
+let commonBase=try arrangement([commonSource],[clip("common","common",from:0,to:1,repeatCount:1)],duration:1)
+let commonClock=try MidiCycle(start:0.2,end:0.6,duration:0.4,period:400_000_000,divisor:1)
+reset(0);reviewWire=[]
+let common=try MidiTransport(timeline:commonBase.timeline,uid:"1",loop:true,coordinated:true,cycle:commonClock)
+common.prepared=true;common.destination=commonBase.destination;common.sourceDestinations=commonBase.sourceDestinations
+try common.stageCoordinated(at:0);try common.runCoordinated(anchorNanoseconds:1_000_000_000)
+reviewClock=1_000_000_000;common.tick()
+precondition(!reviewWire.map(\.1).contains { $0[0]&0xf0==0x90 })
+reviewClock=1_100_000_000;common.tick();precondition(reviewWire.map(\.1).contains([0x90,62,90]))
+reviewClock=1_150_000_000;common.tick();precondition(reviewWire.map(\.1).contains([0x80,62,73]))
+reviewWire=[];reviewClock=1_400_000_000;common.tick()
+precondition(common.cycleIndex==1 && common.state == .playing && common.anchor==1_000_000_000)
+precondition(!reviewWire.map(\.1).contains { $0[0]&0xf0==0x90 })
+reviewWire=[];reviewClock=4_001_100_000_000;common.tick()
+precondition(common.cycleIndex==10_000 && common.anchor==1_000_000_000)
+precondition(reviewWire.map(\.1).contains([0x90,62,90]) && !reviewWire.map(\.1).contains([0x90,65,110]))
+try common.stageCoordinated(at:0.15);precondition(common.state == .paused && abs(common.offset-0.35)<1e-12)
+let beforeResume=reviewWire.count;try common.runCoordinated(anchorNanoseconds:reviewClock+1_000_000_000)
+precondition(reviewWire.count==beforeResume)
+mustReject { try common.stageCoordinated(at:0.4) }
+try common.silence()
+let fractional=try MidiCycle(start:0,end:48.0/247,duration:48.0/247,period:48_000_000_000,divisor:247)
+for index in UInt128(0)..<10_000 {
+    let expected=(index+1)*48_000_000_000/247+(((index+1)*48_000_000_000)%247==0 ? 0:1)
+    let deadline=try fractional.deadline(position:fractional.end,index:index,offset:0,anchor:0)
+    precondition(UInt128(deadline)==expected)
+    let earlier=try fractional.phase(elapsed:deadline-1,offset:0),due=try fractional.phase(elapsed:deadline,offset:0)
+    precondition(earlier.index==index && due.index==index+1)
+}
+// A controller outside the cut must not invent a cross-cycle baseline need.
+let outsideBase=try arrangement([asset("outside",[
+    ["seconds":0.3,"port":2,"bytes":[0x90,60,100]],
+    ["seconds":0.4,"port":2,"bytes":[0x80,60,45]],
+    ["seconds":0.8,"port":2,"bytes":[0xb0,1,70]]])],[clip("outside","outside",from:0,to:1,repeatCount:1)],duration:1)
+_ = try MidiTransport(timeline:outsideBase.timeline,uid:"1",loop:true,coordinated:true,cycle:commonClock)
+let badCommon=try arrangement([asset("unknown",[
+    ["seconds":0.3,"port":2,"bytes":[0x90,60,100]],
+    ["seconds":0.4,"port":2,"bytes":[0x80,60,45]],
+    ["seconds":0.5,"port":2,"bytes":[0xb0,1,70]]])],[clip("unknown","unknown",from:0,to:1,repeatCount:1)],duration:1)
+mustReject { _ = try MidiTransport(timeline:badCommon.timeline,uid:"1",loop:true,coordinated:true,cycle:commonClock) }
+mustReject { _ = try MidiTransport(timeline:commonBase.timeline,uid:"1",loop:true,coordinated:true) }
+print("COMMON_MIDI_CYCLE_PASS: original absolute regions, half-open cuts, source phase, 10000 fractional deadlines without epoch drift, missed cycles, staged controls and audible-window baseline admission")
+
 print("SELECTED_MIDI_DESTINATION_PASS: unrelated enumeration failure/churn isolated; selected removal, UID reuse, source type, offline and noncanonical ID rejected")
 print("SOURCE_MIDI_DECISIONS_PASS: F7 running status/partial messages, realtime/SysEx order, expression/release velocity, overlapping held-key cleanup, pedals, zero duration, explicit ports, partial-send cleanup, failed note/pedal/reset/channel-mode release retry, successful release ownership")
 print("MIDI_DECISIONS_PASS: late cycles, expired intervals, live notes, send-time epoch, inclusive seek, retrigger, one-shot end, pause/status phase, startup admission")

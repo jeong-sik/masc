@@ -58,6 +58,22 @@ test('combined preparation failure or cancellation removes both subplans and nev
   assert.deepEqual(await readdir(root), before)
 }))
 
+test('mixed looping retains original absolute MIDI regions and the one authored rational audio cycle', async () => workspace(async ({ root, project, wav, bytes }) => {
+  project = editArrangement(project, { kind: 'loop', range: { start: 1200, end: 1680 } })
+  const before = structuredClone(project)
+  const result = await prepareArrangementMixed(project, { sourceRoot: root, directory: root, midiOutput: '-42' })
+  const plan = JSON.parse(await readFile(result.path))
+  assert.equal(result.loop, true); assert.equal(result.originSeconds, .625)
+  assert.deepEqual(plan.loop, { start: 1200, end: 1680, ppq: 960, tempo: 120 })
+  assert.equal(plan.duration, .25)
+  assert.equal(plan.midi.duration, 1.5)
+  assert.deepEqual(plan.midi.regions.map(c => [c.startSeconds, c.sourceStart, c.sourceEnd, c.repeatCount]), [[.5, 0, .5, 2]])
+  assert.deepEqual(plan.regions.map(c => [c.projectTick, c.offsetFrames, c.frameCount, c.repeat]), [[0, 12000, 24000, 3]])
+  assert.deepEqual(await readFile(plan.assets[0].path), wav)
+  assert.deepEqual(Buffer.from(project.assets.find(a => a.id === 'm').source.original, 'base64'), bytes)
+  assert.deepEqual(project, before)
+}))
+
 test('explicit mixed routing preserves each output intent while audible mute/solo selects the required native plan', async () => workspace(async ({ project }) => {
   let route = arrangementRoute({ midiOutput: '-42' })
   assert.throws(() => arrangementPlaybackRequest(project, route), /mixed-output/)

@@ -145,20 +145,24 @@ export function arrangementPlaybackRequest(project, route) {
 }
 
 export async function prepareArrangementMixed(project, options = {}) {
-  requireLoopTransport(project)
   options.signal?.throwIfAborted()
-  requireRegionTransport(project)
+  const schedule = requireRegionTransport(project), audible = new Set(schedule.map(clip => clip.id))
   const kinds = new Map(project.assets.map(asset => [asset.id, asset.kind]))
-  const part = kind => ({ ...project, clips: project.clips.filter(clip => kinds.get(clip.asset) === kind) })
-  const midi = await prepareArrangementMidi(part('midi'), options)
+  const part = kind => ({ ...project, clips: project.clips.filter(clip => audible.has(clip.id) && kinds.get(clip.asset) === kind) })
+  // The mixed owner samples original MIDI regions in absolute project time.
+  // It shares the authored WAV cycle instead of repeating an outward-projected
+  // MIDI trim envelope, which could otherwise acquire a different period.
+  const midiProject = part('midi')
+  delete midiProject.playbackLoop
+  const midi = await prepareArrangementMidi(midiProject, options)
   let wave
   try {
     wave = await prepareArrangementWave(part('wave'), options)
     const [audioPlan, midiPlan] = await Promise.all([readFile(wave.path, { encoding: 'utf8', signal: options.signal }),
       readFile(midi.path, { encoding: 'utf8', signal: options.signal })])
     const audio = JSON.parse(audioPlan), notes = JSON.parse(midiPlan)
-    const duration = Math.max(audio.duration, notes.duration)
-    notes.duration = duration
+    const duration = audio.loop ? audio.duration : Math.max(audio.duration, notes.duration)
+    if (!audio.loop) notes.duration = duration
     options.signal?.throwIfAborted()
     await writeFile(wave.path, JSON.stringify({ ...audio, schemaVersion: 2, kind: 'mixed-arrangement', duration, midi: notes }),
       { mode: 0o600, signal: options.signal })

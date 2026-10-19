@@ -12,6 +12,12 @@ struct WaveLoopClock: Decodable {
               tempo.isFinite, tempo > 0, duration.isFinite, duration > 0,
               duration * 1e9 < Double(UInt64.max) else { throw AudioFailure("invalid audio loop clock") }
     }
+    func midiCycle() throws -> MidiCycle {
+        let clock = try layout(rate: 1e9, projectTick: start, frameCount: 1, repetitions: 1)
+        return try MidiCycle(start: Double(start) / Double(ppq) * 60 / tempo,
+                             end: Double(end) / Double(ppq) * 60 / tempo,
+                             duration: duration, period: clock.period, divisor: clock.divisor)
+    }
     func layout(rate: Double, projectTick: Int64, frameCount: Int64, repetitions: Int64) throws -> WaveLoopLayout {
         try validate()
         guard projectTick >= 0, projectTick <= 9_007_199_254_740_991,

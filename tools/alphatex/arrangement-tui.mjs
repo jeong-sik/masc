@@ -38,7 +38,7 @@ const help = [
   ':trim-time 0.5 2              captured region source start/duration seconds',
   ':trim 2400 4800                WAV frames, MIDI ticks or captured host ticks',
   ':move 8    :repeat 4    :duplicate 16    :remove',
-  ':loop START END continuously repeats a WAV or SMF range; :loop off restores one-shot playback',
+  ':loop START END continuously repeats a WAV/SMF range, including mixed backing; :loop off restores one-shot playback',
   ':lane-add wave Bass    :lane-add midi Keys    :lane 2',
   ':region-lane 2    :lane-name Bass    :region-name Verse    :lane-remove',
   ':asset asset-1    :select region-1    :cursor 4    :grid 0.25',
@@ -59,7 +59,7 @@ const help = [
   ':monitor AUDIO_OUTPUT_UID enables input monitoring; :monitor off disables it.',
   ':midi-monitor SOURCE_UID DEST_UID [GROUP CHANNEL ...] (1–16); omit pairs for all messages.',
   'Repeat for more routes; :midi-monitor remove SOURCE_UID DEST_UID; :midi-monitor off.',
-  'Channel scopes filter system/SysEx. Transport/edits finalize recording; captured/mixed/click looping and loop recording remain unfinished.',
+  'Channel scopes filter system/SysEx. Transport/edits finalize recording; captured/click looping and loop recording remain unfinished.',
 ]
 
 export async function viewArrangement({ path, loaded, initialDocument, root = resolve('music-projects'), embedded = false, signal, output, midiOutput, initialRoute, stateDirectory } = {}) {

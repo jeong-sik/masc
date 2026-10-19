@@ -478,22 +478,26 @@ struct Timeline: Decodable {
         default: throw MidiFailure("unknown MIDI timeline schema")
         }
     }
-    func validate(looping: Bool = false) throws {
+    func validate(looping: Bool = false, cycle: MidiCycle? = nil) throws {
         guard duration.isFinite, source ? duration >= 0 : duration > 0,
               duration * 1e9 < Double(UInt64.max) else { throw MidiFailure("invalid MIDI timeline duration") }
         if arrangement {
             guard !regions.isEmpty, regions.allSatisfy({ $0.end <= duration }) else { throw MidiFailure("invalid MIDI arrangement duration") }
-            var mutations = Set<ChaseField>()
-            if looping { for region in regions { mutations.formUnion(region.endTouched) } }
-            for region in regions.sorted(by: { $0.spec.startSeconds < $1.spec.startSeconds }) {
-                let previous = mutations.filter { region.addresses.contains($0.port << 8 | Int($0.channel)) }
-                guard previous.isSubset(of: region.startKnown), region.spec.repeatCount == 1 || region.endTouched.isSubset(of: region.startKnown) else {
-                    throw MidiFailure("MIDI region needs an explicit source baseline for previously changed channel fields")
+            if let cycle { try cycle.validate(timeline: self) } else {
+                var mutations = Set<ChaseField>()
+                if looping { for region in regions { mutations.formUnion(region.endTouched) } }
+                for region in regions.sorted(by: { $0.spec.startSeconds < $1.spec.startSeconds }) {
+                    let previous = mutations.filter { region.addresses.contains($0.port << 8 | Int($0.channel)) }
+                    guard previous.isSubset(of: region.startKnown), region.spec.repeatCount == 1 || region.endTouched.isSubset(of: region.startKnown) else {
+                        throw MidiFailure("MIDI region needs an explicit source baseline for previously changed channel fields")
+                    }
+                    mutations.formUnion(region.endTouched)
                 }
-                mutations.formUnion(region.endTouched)
             }
             for (index, first) in regions.enumerated() {
-                for second in regions.dropFirst(index + 1) where first.startNanoseconds < second.endNanoseconds && second.startNanoseconds < first.endNanoseconds {
+                let cycleStart = Int64(((cycle?.start ?? 0) * 1e9).rounded())
+                let cycleEnd = Int64(((cycle?.end ?? duration) * 1e9).rounded())
+                for second in regions.dropFirst(index + 1) where max(first.startNanoseconds, second.startNanoseconds, cycleStart) < min(first.endNanoseconds, second.endNanoseconds, cycleEnd) {
                     guard first.addresses.isDisjoint(with: second.addresses) else { throw MidiFailure("overlapping MIDI regions own the same destination/channel") }
                 }
             }
@@ -551,6 +555,82 @@ enum Command: Decodable {
         }
     }
 }
+// The audio owner supplies the same authored rational period used by its PCM
+// streams, expressed in nanoseconds. Original MIDI regions remain in project
+// time; only the repeating clock is normalized. Deadlines always derive from
+// the common epoch, never from the previous (possibly late) callback.
+struct MidiCycle {
+    let start: Double, end: Double, duration: Double
+    let period: UInt128, divisor: UInt128
+    init(start: Double, end: Double, duration: Double, period: UInt128, divisor: UInt128) throws {
+        guard start.isFinite, start >= 0, end.isFinite, end > start,
+              duration.isFinite, duration > 0, duration * 1e9 < Double(UInt64.max),
+              divisor > 0, period >= divisor else { throw MidiFailure("invalid common MIDI cycle") }
+        self.start = start; self.end = end; self.duration = duration
+        self.period = period; self.divisor = divisor
+    }
+    private func multiply(_ a: UInt128, _ b: UInt128) throws -> UInt128 {
+        let result = a.multipliedReportingOverflow(by: b)
+        guard !result.overflow else { throw MidiFailure("common MIDI cycle exceeds the host clock range") }
+        return result.partialValue
+    }
+    private func add(_ a: UInt128, _ b: UInt128) throws -> UInt128 {
+        let result = a.addingReportingOverflow(b)
+        guard !result.overflow else { throw MidiFailure("common MIDI cycle exceeds the host clock range") }
+        return result.partialValue
+    }
+    private func nanos(_ seconds: Double, up: Bool = false) throws -> UInt128 {
+        let value = (seconds * 1e9).rounded(up ? .up : .down)
+        guard value.isFinite, value >= 0, value < Double(UInt64.max) else { throw MidiFailure("invalid common MIDI phase") }
+        return UInt128(UInt64(value))
+    }
+    private func base(_ offset: Double) throws -> UInt128 {
+        min(period - 1, try multiply(nanos(offset), divisor))
+    }
+    func phase(elapsed: UInt64, offset: Double) throws -> (index: UInt128, seconds: Double) {
+        let value = try add(multiply(UInt128(elapsed), divisor), base(offset))
+        return (value / period, min(duration.nextDown, Double(value % period) / Double(divisor) / 1e9))
+    }
+    func deadline(position: Double, index: UInt128, offset: Double, anchor: UInt64) throws -> UInt64 {
+        let local = position >= end ? period : min(period, try multiply(nanos(max(0, position - start), up: true), divisor))
+        let target = try add(multiply(index, period), local), initial = try base(offset)
+        let distance = target > initial ? target - initial : 0
+        let delay = distance / divisor + (distance % divisor == 0 ? 0 : 1)
+        guard delay <= UInt128(UInt64.max - anchor) else { throw MidiFailure("common MIDI deadline exceeds the host clock range") }
+        return anchor + UInt64(delay)
+    }
+    func validate(timeline: Timeline) throws {
+        guard timeline.arrangement, !timeline.regions.isEmpty,
+              timeline.regions.allSatisfy({ $0.end > start && $0.spec.startSeconds < end }) else {
+            throw MidiFailure("common cycle requires intersecting original MIDI regions")
+        }
+        var entries: [(MidiRegion, MidiRegionEntry, Bool)] = [], mutations = Set<ChaseField>()
+        for region in timeline.regions {
+            let from = max(start, region.spec.startSeconds), to = min(end, region.end)
+            var copy = min(region.spec.repeatCount - 1, max(0, Int(floor((from - region.spec.startSeconds) / region.duration))))
+            func position(_ value: Int) -> Double { region.spec.startSeconds + Double(value) * region.duration }
+            if position(copy) > from { copy -= 1 }
+            if copy + 1 < region.spec.repeatCount && position(copy + 1) <= from { copy += 1 }
+            guard copy >= 0, position(copy) <= from, position(copy + 1) > from else { throw MidiFailure("common MIDI source loses repeat precision") }
+            let source = min(region.spec.sourceEnd, region.spec.sourceStart + (from - position(copy)))
+            let repeated = to > position(copy + 1)
+            let limit = to >= position(copy + 1) ? region.spec.sourceEnd : min(region.spec.sourceEnd, region.spec.sourceStart + (to - position(copy)))
+            var touched = SourceChase()
+            for event in region.events where event.seconds < limit || event.seconds == limit && limit == region.sourceDuration {
+                touched.observe(event.bytes, port: event.port)
+            }
+            mutations.formUnion(touched.touched)
+            entries.append((region, midiRegionEntry(region.events, at: source), repeated))
+        }
+        for (region, entry, repeated) in entries {
+            let previous = mutations.filter { region.addresses.contains($0.port << 8 | Int($0.channel)) }
+            guard previous.isSubset(of: entry.safeKnown), !repeated || previous.isSubset(of: region.startKnown) else {
+                throw MidiFailure("common cycle needs an explicit source baseline before sounding keys")
+            }
+        }
+    }
+}
+
 final class MidiTransport {
     enum State { case prepared, playing, paused, stopped }
     let timeline: Timeline
@@ -559,6 +639,8 @@ final class MidiTransport {
     let queue: DispatchQueue
     let groupZeroUMP: Bool
     let coordinated: Bool
+    let cycle: MidiCycle?
+    var cycleIndex: UInt128 = 0
     var onCoordinatedFailure: ((String, Error?) -> Void)?
     var onCoordinatedEnd: (() -> Void)?
     var terminalFailure: Error?
@@ -582,16 +664,19 @@ final class MidiTransport {
         let timeline = try JSONDecoder().decode(Timeline.self, from: Data(contentsOf: URL(fileURLWithPath: path)))
         try self.init(timeline: timeline, uid: uid, loop: loop)
     }
-    init(timeline: Timeline, uid: String, loop: Bool = false, coordinated: Bool = false, groupZeroUMP: Bool = false) throws {
+    init(timeline: Timeline, uid: String, loop: Bool = false, coordinated: Bool = false, groupZeroUMP: Bool = false, cycle: MidiCycle? = nil) throws {
         self.timeline = timeline; self.coordinated = coordinated; self.groupZeroUMP = groupZeroUMP
         queue = coordinated ? .main : DispatchQueue(label: "masc.music.midi.transport", qos: .userInteractive)
-        try timeline.validate(looping: loop)
-        guard !coordinated || timeline.arrangement && !loop else { throw MidiFailure("coordinated playback requires a MIDI region arrangement") }
+        try timeline.validate(looping: loop && cycle == nil, cycle: cycle)
+        guard !coordinated || timeline.arrangement else { throw MidiFailure("coordinated playback requires a MIDI region arrangement") }
         if timeline.source {
             guard timeline.arrangement || !loop else { throw MidiFailure("source audition plays once; loop state reconstruction is not connected") }
             guard timeline.bindings.first?.destination == uid else { throw MidiFailure("primary source destination differs from explicit bindings") }
         }
         guard let value = Int32(uid), String(value) == uid else { throw MidiFailure("MIDI destination requires its exact unique ID") }
+        guard cycle == nil || coordinated && loop else { throw MidiFailure("a shared cycle requires coordinated MIDI looping") }
+        guard !coordinated || !loop || cycle != nil else { throw MidiFailure("coordinated MIDI looping requires the authored common clock") }
+        self.cycle = cycle
         selectedUID = uid; self.loop = loop
         regionCursors = timeline.regions.map { _ in MidiRegionCursor() }
     }
@@ -848,7 +933,7 @@ final class MidiTransport {
         sourceModel.replace(prefix, addresses: region.addresses)
         regionCursors[index].active = true; regionCursors[index].index = next
     }
-    func reconcileRegions(at seconds: Double, reconstruct: Bool, observedAt: Double? = nil) throws {
+    func reconcileRegions(at seconds: Double, reconstruct: Bool, observedAt: Double? = nil, cut: Double? = nil) throws {
         if !reconstruct {
             // Drain at most the one already active copy. Entirely missed copies
             // are not audible history: skip them arithmetically to the live phase.
@@ -885,7 +970,7 @@ final class MidiTransport {
                     for address in region.addresses { sourceModel.channels[address]?.notes.removeAll() }
                 }
                 regionCursors[index] = MidiRegionCursor(copy: copy)
-                if copy < region.spec.repeatCount && !(old.active && copy == old.copy + 1) {
+                if cut == nil && copy < region.spec.repeatCount && !(old.active && copy == old.copy + 1) {
                     let source = region.spec.sourceStart + (seconds - regionStart(region, copy: copy))
                     phaseEntries.append((index, min(source, region.spec.sourceEnd)))
                 }
@@ -908,15 +993,25 @@ final class MidiTransport {
         while let action = nextRegionAction(), action.seconds <= seconds {
             let region = timeline.regions[action.region]
             switch action.kind {
-            case .begin: try beginRegion(action.region, at: region.spec.sourceStart)
+            case .begin:
+                if cut != nil { regionCursors[action.region] = MidiRegionCursor(copy: region.spec.repeatCount) }
+                else { try beginRegion(action.region, at: region.spec.sourceStart) }
             case .end:
                 try sourceSilence(addresses: region.addresses)
                 for address in region.addresses { sourceModel.channels[address]?.notes.removeAll() }
                 regionCursors[action.region].active = false; regionCursors[action.region].copy += 1
             case .event, .endpointEvent:
                 let event = region.events[regionCursors[action.region].index]
-                sourceModel.observe(event.bytes, port: event.port)
-                try sourceSend(event.bytes, port: event.port)
+                if cut == nil || action.seconds < cut! || action.kind == .endpointEvent {
+                    sourceModel.observe(event.bytes, port: event.port)
+                    let type = event.bytes[0] & 0xf0
+                    let attack = type == 0x90 && event.bytes[2] > 0
+                    let release = type == 0x80 || type == 0x90 && event.bytes[2] == 0
+                    let key = UInt16(event.bytes[0] & 15) << 8 | UInt16(event.bytes[1])
+                    if cut == nil || (attack ? action.seconds >= (observedAt ?? seconds) : !release || (sourceHeld[event.port]?[key] ?? 0) > 0) {
+                        try sourceSend(event.bytes, port: event.port)
+                    }
+                }
                 regionCursors[action.region].index += 1
             }
         }
@@ -949,6 +1044,14 @@ final class MidiTransport {
         let next = pendingRestore ? offset : timeline.arrangement ? (nextRegionAction()?.seconds ?? timeline.duration) : timeline.source ? (index < timeline.wireEvents.count ? timeline.wireEvents[index].seconds : timeline.duration)
             : (index < timeline.events.count ? timeline.events[index].seconds : timeline.duration)
         let delay = max(0, next - offset) * 1e9
+        if let cycle {
+            let target = pendingRestore ? offset : min(nextRegionAction()?.seconds ?? cycle.end, cycle.end)
+            let deadline = try cycle.deadline(position: target, index: cycleIndex, offset: offset - cycle.start, anchor: anchor)
+            let source = DispatchSource.makeTimerSource(queue: queue)
+            source.schedule(deadline: DispatchTime(uptimeNanoseconds: deadline), leeway: .nanoseconds(0))
+            source.setEventHandler { [weak self] in self?.tick() }
+            source.resume(); timer = source; return
+        }
         guard delay < Double(UInt64.max) else { throw MidiFailure("MIDI event exceeds the host clock range") }
         let (deadline, overflow) = anchor.addingReportingOverflow(UInt64(delay))
         guard !overflow, deadline < UInt64.max else { throw MidiFailure("MIDI event exceeds the host clock range") }
@@ -962,6 +1065,20 @@ final class MidiTransport {
         do {
             let host = DispatchTime.now().uptimeNanoseconds
             if coordinated && host < anchor { try schedule(); return }
+            if let cycle {
+                let phase = try cycle.phase(elapsed: host > anchor ? host - anchor : 0, offset: offset - cycle.start)
+                let now = min(cycle.end.nextDown, cycle.start + phase.seconds)
+                if phase.index != cycleIndex {
+                    pendingRestore = false
+                    try reconcileRegions(at: cycle.end, reconstruct: false, observedAt: cycle.end + phase.seconds, cut: cycle.end)
+                    try silence(); cycleIndex = phase.index
+                    try restore(at: now)
+                } else {
+                    if pendingRestore { pendingRestore = false; try restorePending(at: now) }
+                    try reconcileRegions(at: now, reconstruct: false)
+                }
+                try schedule(); return
+            }
             let now = position(at: host)
             if pendingRestore { pendingRestore = false; try restorePending(at: now) }
             let next = pendingRestore ? offset : timeline.arrangement ? (nextRegionAction()?.seconds ?? timeline.duration) : timeline.source ? (index < timeline.wireEvents.count ? timeline.wireEvents[index].seconds : now)
@@ -988,9 +1105,11 @@ final class MidiTransport {
     // sent by admission/staging; restoration is deferred to the common epoch.
     func stageCoordinated(at seconds: Double) throws {
         guard coordinated, Thread.isMainThread, prepared, state != .stopped,
-              seconds.isFinite, seconds >= 0, seconds < timeline.duration else { throw MidiFailure("invalid coordinated MIDI position or owner") }
+              seconds.isFinite, seconds >= 0, seconds < (cycle?.duration ?? timeline.duration) else { throw MidiFailure("invalid coordinated MIDI position or owner") }
         timer?.cancel(); timer = nil; state = .paused; pendingRestore = false
-        try checkDestination(); try silence(); offset = seconds
+        try checkDestination(); try silence(); cycleIndex = 0
+        let seconds = seconds + (cycle?.start ?? 0)
+        offset = seconds
         for region in timeline.regions where seconds >= region.spec.startSeconds && seconds < region.end {
             let copy = min(region.spec.repeatCount - 1, max(0, Int(floor((seconds - region.spec.startSeconds) / region.duration))))
             let source = min(region.spec.sourceEnd, region.spec.sourceStart + seconds - regionStart(region, copy: copy))

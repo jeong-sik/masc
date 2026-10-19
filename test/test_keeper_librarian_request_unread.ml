@@ -63,13 +63,16 @@ let test_absorbed_freeze_and_forecast () =
     (match Window.annotate [carrier result.projection.messages] with [_,Window.Pinned],0 -> true
      | _,_ -> false)
 
-let capture () =
+let capture ?(snapshot_trace_id=trace_id) ?(working_state="Completed context.") () =
+  let trace_id=snapshot_trace_id in
+  let unread=Unread.for_atom ~trace_id ~history_start_boundary_line:1 ~atom:0 ~message_in_atom:0
+    ~messages:source ~reasons:[Masc.Keeper_librarian_input_refusal.Input_capacity] |> require in
   let position=Boundary.position_of_messages source |> require in
   let lines=[1,Ok {Boundary.recorded_at=1.;event=Boundary.Turn_ended
     {task_context=Masc.Keeper_turn_task_context.No_task;
      turn_ref=Ids.Turn_ref.make ~trace_id ~absolute_turn:1;history_at_start=Boundary.Fresh_history;position}}] in
-  let snapshot=Snapshot.capture ~unread_messages:[hole] ~trace_id ~lines ~messages:source
-    ~working_state:"Completed context." |> Result.map_error Snapshot.error_to_string |> require in
+  let snapshot=Snapshot.capture ~unread_messages:[unread] ~trace_id ~lines ~messages:source
+    ~working_state |> Result.map_error Snapshot.error_to_string |> require in
   snapshot,lines
 
 let test_independent_unknown_and_stale_snapshot () =
@@ -77,9 +80,12 @@ let test_independent_unknown_and_stale_snapshot () =
   let summarized=choose ~snapshot:(Ok (Some snapshot)) ~lines:(fun () -> Ok lines) (Error "ledger unreadable") in
   let expected=Frozen.of_results ~snapshot:(Ok [hole]) ~memory:(Error "ledger unreadable") in
   check_carrier expected (compose summarized messages).projection.messages;
-  let stale=choose ~snapshot:(Ok (Some {snapshot with trace_id="previous-trace"}))
+  let stale_snapshot,_=capture ~snapshot_trace_id:"previous-trace" () in
+  check bool "a valid foreign snapshot cannot restore this trace" true
+    (Result.is_error (Snapshot.restore ~trace_id ~lines ~messages:source stale_snapshot));
+  let stale=choose ~snapshot:(Ok (Some stale_snapshot))
     ~lines:(fun () -> Ok lines) (Ok [later_hole]) in
-  check_carrier (Frozen.of_results ~snapshot:(Ok [hole]) ~memory:(Ok [later_hole]))
+  check_carrier (Frozen.of_results ~snapshot:(Ok stale_snapshot.unread_messages) ~memory:(Ok [later_hole]))
     (compose stale messages).projection.messages;
   let unavailable=choose ~snapshot:(Error "snapshot unreadable") (Ok [hole]) in
   check_carrier (Frozen.of_results ~snapshot:(Error "snapshot unreadable") ~memory:(Ok [hole]))
@@ -119,8 +125,7 @@ let test_capacity_floor_keeps_evidence () =
   | Error _ -> () | Ok _ -> fail "capacity cut silently discarded mandatory unread evidence"
 
 let test_summary_fallback_and_resume () =
-  let snapshot,lines=capture () in
-  let snapshot={snapshot with working_state=String.make 10000 's'} in
+  let snapshot,lines=capture ~working_state:(String.make 10000 's') () in
   let front=official_front (choose ~snapshot:(Ok (Some snapshot)) ~lines:(fun () -> Ok lines) (Ok [hole])) in
   let plain={front with Driver.point=Driver.Librarian_progress {end_atom=snapshot.end_atom}} in
   let range front=Host.carried_start_range ~keeper_name:"frozen-fixture" ~runtime_id:"fixture.native"

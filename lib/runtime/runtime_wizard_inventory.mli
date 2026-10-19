@@ -37,10 +37,12 @@ val binding_for_provider
     the same rule from here. *)
 
 val provider_model_rows : string -> (Yojson.Safe.t, string) result
-(** Curated catalog rows for one named provider, for the setup wizard's named
+(** Catalog rows served by one named provider, for the setup wizard's named
     catalog sources: id, label, declared context, accepted reasoning efforts
     with a default rung, and capabilities resolved against the provider's own
-    wire kind. Rows without a positive declared context are omitted — the
+    wire kind. Scoped rows shadow permitted bare rows with the same whole id.
+    Bare rows require the provider's [serves_bare_rows] declaration.
+    Rows without a positive declared context are omitted — the
     wizard cannot pin a runtime entry for them. An unknown provider id is an
     [Error] naming the installed providers. *)
 

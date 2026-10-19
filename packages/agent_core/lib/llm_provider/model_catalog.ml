@@ -73,7 +73,7 @@ type provider_entry = Model_provider_catalog.entry =
   ; capabilities_base_by_identity_kind : (Provider_kind.t * string) list
   ; identity_hosts : string list
   ; supports_parallel_tool_suppression : bool
-  ; serves_bare_rows : bool
+  ; serves_bare_rows : Model_identifiers.Id_prefix.t list
   }
 
 module String_map = Map.Make (String)
@@ -942,6 +942,51 @@ let lookup_for_provider_reference t ~provider ~model_id =
        let canonical = normalize_label entry.id in
        if String.equal canonical requested then None else find_exact canonical
      | None -> None)
+;;
+
+let serves_bare_row t provider (row : model_entry) =
+  match row.provider_name with
+  | Some _ -> false
+  | None ->
+    (match provider with
+     | Declared_provider _ ->
+       (match provider_entry_for_reference t provider with
+        | Some entry -> List.exists (fun family ->
+            Model_identifiers.Id_prefix.starts_with ~prefix:family row.id_prefix)
+            entry.serves_bare_rows
+        | None -> false)
+     | Anonymous_wire Provider_kind.OpenAI_compat -> false
+     | Anonymous_wire (Provider_kind.Anthropic | Kimi | Ollama | Gemini | Glm) -> true)
+;;
+
+let lookup_model_for_provider t ~provider ~model_id =
+  match lookup_for_provider_reference t ~provider ~model_id with
+  | Some _ as entry -> entry
+  | None ->
+    (match lookup t model_id with
+     | Some row when serves_bare_row t provider row -> Some row
+     | Some _ | None -> None)
+;;
+
+let model_entries_for_provider t ~provider ~model_entries =
+  let requested = normalize_label (match provider with
+    | Declared_provider id -> id
+    | Anonymous_wire kind -> Provider_kind.to_string kind) in
+  let scoped label = List.filter (fun (entry : model_entry) ->
+    match entry.provider_name with
+    | Some name -> String.equal (normalize_label name) label
+    | None -> false) model_entries in
+  let canonical = match provider_entry_for_reference t provider with
+    | Some entry when not (String.equal (normalize_label entry.id) requested) ->
+      scoped (normalize_label entry.id)
+    | Some _ | None -> [] in
+  let bare = List.filter (serves_bare_row t provider) model_entries in
+  let _, reversed = List.fold_left (fun (seen, rows) (entry : model_entry) ->
+    let key = Model_identifiers.Id_prefix.equality_key entry.id_prefix in
+    if Row_key_map.mem key seen then seen, rows
+    else Row_key_map.add key entry seen, entry :: rows)
+    (Row_key_map.empty, []) (scoped requested @ canonical @ bare) in
+  List.rev reversed
 ;;
 
 (* Label-only readers do not possess declaration authority. Preserve their

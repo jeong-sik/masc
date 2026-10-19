@@ -341,8 +341,13 @@ val clear_thinking_object_request_field
     model-id syntax never participate. *)
 val capability_provider_label : t -> string
 
+val provider_reference : t -> Model_catalog.provider_reference
+(** Preserve explicit provider identity, including ids that equal a wire label;
+    an absent identity remains an anonymous wire. *)
+
 (** Resolve model capabilities using the explicit provider/model pair. A
-    config with [provider_id] only accepts an exact provider-scoped row. Without
+    config with [provider_id] accepts an exact scoped row or a bare catalog row
+    when that provider declares [serves_bare_rows]. Without
     [provider_id], native typed provider kinds may use a provider-independent
     model row; [OpenAI_compat] never does, because its wire kind alone cannot
     select a vendor/model dialect. Generic compatibility callers can provide
@@ -356,8 +361,9 @@ val freeze_for_request : t -> t
     overrides. Idempotent while provider/model identity is unchanged. *)
 
 val anthropic_thinking_control : t -> Capabilities.anthropic_thinking_control option
-(** Provider-scoped policy first, then the bare model/manifest policy. Request
-    snapshots preserve an absent policy as well as a present one. *)
+(** Policy from the same authoritative row as capabilities. Missing scoped
+    policy stays absent. Bare rows require provider permission; only anonymous
+    native wires can consult a manifest. Request snapshots preserve absence. *)
 
 (** Context window, in tokens, that a request with [config] is sized against:
     the caller's [max_context] when set, otherwise the window of the model row

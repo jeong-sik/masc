@@ -227,7 +227,7 @@ let matching_request_policy (config : t) =
   | Some _ | None -> None
 ;;
 
-let capability_provider_reference (config : t) =
+let provider_reference (config : t) =
   match config.provider_id with
   | Some id -> Model_catalog.Declared_provider id
   | None -> Model_catalog.Anonymous_wire config.kind
@@ -235,7 +235,7 @@ let capability_provider_reference (config : t) =
 
 let resolve_request_policy (config : t) =
   Capabilities.resolve_request_policy ~wire:config.kind
-    ~provider:(capability_provider_reference config) ~model_id:config.model_id
+    ~provider:(provider_reference config) ~model_id:config.model_id
 ;;
 
 let freeze_for_request (config : t) =
@@ -261,7 +261,7 @@ let capabilities_for_config_model (config : t) =
           a request can express, and identity alone cannot tell them apart. *)
        Capabilities.for_provider_model_id
          ~wire:(Some config.kind)
-         ~provider:(capability_provider_reference config)
+         ~provider:(provider_reference config)
          ~model_id:config.model_id)
 ;;
 
@@ -271,12 +271,8 @@ let anthropic_thinking_control (config : t) =
     (match matching_request_policy config with
      | Some policy -> Capabilities.request_policy_anthropic_thinking_control policy
      | None ->
-       let scoped = Option.bind config.provider_id (fun provider_label ->
-         Capabilities.anthropic_thinking_control_for_provider_model_id
-           ~provider_label ~model_id:config.model_id) in
-       (match scoped with
-        | Some _ -> scoped
-        | None -> Capabilities.anthropic_thinking_control_for_model_id config.model_id))
+       resolve_request_policy config
+       |> Capabilities.request_policy_anthropic_thinking_control)
   | Kimi | OpenAI_compat | Ollama | Gemini | Glm -> None
 ;;
 

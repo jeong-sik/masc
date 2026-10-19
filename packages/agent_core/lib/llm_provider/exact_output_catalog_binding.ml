@@ -190,13 +190,14 @@ let resolve_exact ~catalog ~model_entries ~provider_ref ~model_id =
   | None -> Error Provider_missing
   | Some provider ->
     (match
+       Model_catalog.model_entries_for_provider catalog
+         ~provider:(Model_catalog.Declared_provider provider.id) ~model_entries
+       |>
        List.find_opt
          (fun (entry : Model_catalog.model_entry) ->
-            entry.provider_name = Some provider.id
-            && String.equal
+            String.equal
                  (Model_identifiers.Id_prefix.to_string entry.id_prefix)
                  model_id)
-         model_entries
      with
      | None -> Error Model_missing
      | Some model -> Ok (provider, model))
@@ -436,13 +437,19 @@ let capabilities_of_catalog_binding
       (model : Model_catalog.model_entry)
   =
   let wire_base =
-    Option.bind wire (fun kind ->
-      List.assoc_opt kind provider.Model_catalog.capabilities_base_by_identity_kind)
+    match model.provider_name with
+    | None -> None
+    | Some _ ->
+      Option.bind wire (fun kind ->
+        List.assoc_opt kind provider.Model_catalog.capabilities_base_by_identity_kind)
   in
   let base_label =
     match wire_base with
     | Some _ -> wire_base
-    | None -> prefer_overlay model.base_label provider.capabilities_base
+    | None ->
+      (match model.provider_name with
+       | None -> model.base_label
+       | Some _ -> prefer_overlay model.base_label provider.capabilities_base)
   in
   let base =
     match Option.bind base_label Caps.capabilities_for_provider_label with

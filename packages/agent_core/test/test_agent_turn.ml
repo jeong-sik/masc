@@ -7,7 +7,8 @@ open Agent_core
    Read the catalog instead, the way test_provider declared_pricing does. *)
 let declared_deepseek_price_sum () =
   Model_catalog_test_support.install_embedded_model_catalog ~suite:"agent_turn";
-  match Llm_provider.Pricing.pricing_for_model_opt ~provider_id:"deepseek" "deepseek-v4-pro" with
+  match Llm_provider.Pricing.pricing_for_model_opt
+    ~provider:(Llm_provider.Model_catalog.Declared_provider "deepseek") "deepseek-v4-pro" with
   | Some pricing -> pricing.input_per_million +. pricing.output_per_million
   | None -> Alcotest.failf "expected catalog pricing for deepseek/deepseek-v4-pro"
 

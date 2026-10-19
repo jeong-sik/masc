@@ -314,7 +314,7 @@ let binding_for_provider (cfg : Runtime_schema.config)
 ;;
 
 (* Rows the setup wizard can offer for one named catalog provider. The entries
-   come from the embedded catalog scoped to [provider_name]; capabilities are
+   come from the provider's scoped rows and its permitted bare rows; capabilities are
    resolved against the provider's own wire kind, so a row that only inherits
    from the provider base still reports the capabilities it will actually run
    with. A row without a positive declared context is not wizard-offerable —
@@ -344,11 +344,9 @@ let provider_model_rows (provider_id : string) : (Yojson.Safe.t, string) result 
             provider_id (String.concat ", " available))
      | Some provider ->
        let rows =
-         Llm_provider.Model_catalog.model_entries catalog
-         |> List.filter (fun (entry : Llm_provider.Model_catalog.model_entry) ->
-              match entry.provider_name with
-              | Some name -> String.equal name provider_id
-              | None -> false)
+         Llm_provider.Model_catalog.model_entries_for_provider catalog
+           ~provider:(Llm_provider.Model_catalog.Declared_provider provider.id)
+           ~model_entries:(Llm_provider.Model_catalog.model_entries catalog)
          |> List.filter_map (fun (entry : Llm_provider.Model_catalog.model_entry) ->
               match entry.max_context_tokens with
               | Some context when context > 0 ->

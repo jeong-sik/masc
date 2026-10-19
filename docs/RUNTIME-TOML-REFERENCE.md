@@ -36,8 +36,10 @@ different questions. Knowing which side owns a fact decides what you write.
 
 A provider whose `id` equals a catalog `[[providers]]` `id` is *catalogued*:
 the catalog row answers its dialect, request path, and default credential env,
-and — when the row declares `serves_bare_rows = true` — the catalog's bare
-model rows also answer capability lookups for it (the native `claude` provider
+and — when the row declares served bare families such as
+`serves_bare_rows = ["claude-"]` — matching bare model rows also answer lookups
+for it. The original row's `id_prefix` must belong to a declared family; a
+requested model name alone does not grant authority (the native `claude` provider
 reads the `claude-*` rows this way; before that declaration it fell to the
 Anthropic preset and refused every reasoning effort, #37849).
 
@@ -240,7 +242,7 @@ budget.
 
 The catalog already has a `[[providers]] id = "claude"` row (dialect
 `anthropic`, request path `/v1/messages`, env `ANTHROPIC_API_KEY`,
-`serves_bare_rows = true`), so the runtime side declares only what the catalog
+`serves_bare_rows = ["claude-"]`), so the runtime side declares only what the catalog
 cannot:
 
 ```toml

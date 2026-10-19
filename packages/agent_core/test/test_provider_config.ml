@@ -2676,7 +2676,7 @@ base_url = "https://example.invalid"
 request_path = ""
 auth = "none"
 capabilities_base = "openai_chat_extended"
-serves_bare_rows = true
+serves_bare_rows = ["identity-model"]
 %s
 [[models]]
 id_prefix = "identity-model"
@@ -2772,6 +2772,132 @@ max_context_tokens = 55555
           (Provider_config.capabilities_for_config_model frozen = None);
         Alcotest.(check (option int)) "unfrozen request sees the new exact row"
           (Some 55555) (resolved_capabilities unknown).max_context_tokens))
+;;
+
+let test_catalog_policy_native_and_proxy () =
+  with_repository_model_catalog (fun () ->
+    let config ?provider_id () = Provider_config.make ~kind:Anthropic
+      ?provider_id ~model_id:"claude-fable-5" ~max_tokens:4096
+      ~base_url:"https://example.invalid" () in
+    let check label expected config =
+      check_bool (label ^ " price presence") expected
+        (Option.is_some (Pricing.pricing_for_model_opt
+          ~provider:(Provider_config.provider_reference config) config.model_id));
+      check_bool (label ^ " policy presence") expected
+        (Option.is_some (Provider_config.anthropic_thinking_control config));
+      let body = Backend_anthropic.build_request ~config ~messages:[] () in
+      check_bool (label ^ " serialized thinking presence") expected
+        (List.mem_assoc "thinking" (Yojson.Safe.Util.to_assoc body))
+    in
+    check "declared native" true (config ~provider_id:"claude" ());
+    let proxy = config ~provider_id:"deepseek-anthropic" () in
+    check "declared proxy" false proxy;
+    let usage : Types.api_usage =
+      {input_tokens = 100; output_tokens = 10; cache_creation_input_tokens = 0;
+       cache_read_input_tokens = 0; cost_usd = None} in
+    let annotate usage = Pricing.annotate_usage_cost
+      ~provider:(Provider_config.provider_reference proxy) ~model_id:proxy.model_id usage in
+    Alcotest.(check (option (float 0.000001))) "missing proxy price remains unknown"
+      None (annotate usage).cost_usd;
+    Alcotest.(check (option (float 0.000001))) "provider-observed cost is retained"
+      (Some 0.25) (annotate {usage with cost_usd = Some 0.25}).cost_usd;
+    check "unknown declared provider" false (config ~provider_id:"unknown" ());
+    check "anonymous native" true (config ());
+    check_bool "proxy cannot claim an undeclared thinking control" true
+      (Result.is_error (Backend_anthropic.validate_nonexact_thinking_controls
+        {proxy with enable_thinking = Some true}));
+    let frozen = Provider_config.freeze_for_request proxy in
+    Model_catalog.set_global (Model_catalog.of_toml_string ~source:"replacement"
+      {|[[models]]
+id_prefix = "claude-fable-5"
+provider_name = "deepseek-anthropic"
+anthropic_thinking_control = "always_adaptive"
+|} |> Result.get_ok);
+    check_bool "unfrozen proxy sees later explicit policy" true
+      (Option.is_some (Provider_config.anthropic_thinking_control proxy));
+    check_bool "frozen absent proxy policy stays absent" true
+      (Provider_config.anthropic_thinking_control frozen = None))
+;;
+
+let test_scoped_absence_shadows_bare_policy_and_price () =
+  let catalog = {|[[providers]]
+id = "native"
+kind = "anthropic"
+base_url = "https://example.invalid"
+request_path = "/v1/messages"
+auth = "none"
+serves_bare_rows = ["shared"]
+[[models]]
+id_prefix = "shared"
+base = "anthropic"
+anthropic_thinking_control = "always_adaptive"
+input_per_million = 10.0
+output_per_million = 50.0
+[[models]]
+id_prefix = "shared"
+provider_name = "native"
+max_context_tokens = 7777
+|} in
+  with_model_catalog_toml catalog (fun () ->
+    let config = Provider_config.make ~kind:Anthropic ~provider_id:"native"
+      ~model_id:"shared" ~base_url:"https://example.invalid" () in
+    Alcotest.(check (option int)) "scoped capabilities" (Some 7777)
+      (resolved_capabilities config).max_context_tokens;
+    check_bool "missing scoped policy is authoritative" true
+      (Provider_config.anthropic_thinking_control config = None);
+    check_bool "missing scoped price is authoritative" true
+      (Pricing.pricing_for_model_opt
+        ~provider:(Provider_config.provider_reference config) "shared" = None))
+;;
+
+let test_pricing_preserves_declared_wire_authority () =
+  let catalog = {|[[providers]]
+id = "native"
+aliases = ["openai_compat"]
+kind = "openai_compat"
+base_url = "https://example.invalid"
+request_path = "/v1/chat/completions"
+auth = "none"
+serves_bare_rows = ["shared"]
+[[models]]
+id_prefix = "shared"
+input_per_million = 1.0
+output_per_million = 2.0
+|} in
+  with_model_catalog_toml catalog (fun () ->
+    let config ?provider_id kind = Provider_config.make ~kind ?provider_id
+      ~model_id:"shared" ~base_url:"https://example.invalid" () in
+    let priced config = Option.is_some (Pricing.pricing_for_model_opt
+      ~provider:(Provider_config.provider_reference config) "shared") in
+    check_bool "declared wire-label alias can read permitted bare price" true
+      (priced (config ~provider_id:"openai_compat" OpenAI_compat));
+    check_bool "anonymous compat cannot inherit alias permission" false
+      (priced (config OpenAI_compat));
+    check_bool "anonymous native retains bare price" true
+      (priced (config Anthropic)))
+;;
+
+let test_thinking_manifest_is_anonymous_native_only () =
+  with_repository_model_catalog (fun () ->
+    let previous = Capability_manifest.global () in
+    Fun.protect ~finally:(fun () -> match previous with
+      | Some manifest -> Capability_manifest.set_global manifest
+      | None -> Capability_manifest.clear_global ()) (fun () ->
+      let manifest = Capability_manifest.of_json (Yojson.Safe.from_string
+        {|{"schema_version":1,"models":[{"id_prefix":"manifest-only","anthropic_thinking_control":"adaptive_default"}]}|})
+        |> Result.get_ok in
+      Capability_manifest.set_global manifest;
+      let policy provider = Capabilities.anthropic_thinking_control_for_provider_model_id
+        ~provider ~model_id:"manifest-only" in
+      check_bool "anonymous native retains manifest policy" true
+        (policy (Model_catalog.Anonymous_wire Provider_kind.Anthropic)
+         = Some Capabilities.Anthropic_adaptive_default);
+      List.iter (fun provider ->
+        check_bool "non-authoritative manifest policy stays absent" true (policy provider = None))
+        [Model_catalog.Declared_provider "claude";
+         Model_catalog.Declared_provider "deepseek-anthropic";
+         Model_catalog.Declared_provider "unknown";
+         Model_catalog.Anonymous_wire Provider_kind.OpenAI_compat]))
 ;;
 
 let () =
@@ -3076,7 +3202,15 @@ let () =
             test_structured_output_name_of_schema
         ] )
     ; ( "declared provider capability authority"
-      , [ Alcotest.test_case "declared native Gemini reads model facts" `Quick
+      , [ Alcotest.test_case "native/proxy pricing, thinking wire and frozen absence" `Quick
+            test_catalog_policy_native_and_proxy
+        ; Alcotest.test_case "missing scoped fields shadow bare facts" `Quick
+            test_scoped_absence_shadows_bare_policy_and_price
+        ; Alcotest.test_case "pricing preserves declared wire authority" `Quick
+            test_pricing_preserves_declared_wire_authority
+        ; Alcotest.test_case "thinking manifest authority stays anonymous-native" `Quick
+            test_thinking_manifest_is_anonymous_native_only
+        ; Alcotest.test_case "declared native Gemini reads model facts" `Quick
             (fun () -> test_declared_native_catalog_facts Provider_kind.Gemini
               "gemini" "gemini-3.8-flash" 1048576)
         ; Alcotest.test_case "declared native Kimi reads model facts" `Quick

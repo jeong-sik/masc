@@ -26,11 +26,13 @@ type cost_estimate =
 
 (** Return the price declared by the active model catalog.
 
-    When [provider_id] is present, an exact provider/model row takes
-    precedence.  A provider-independent row is consulted only when no exact
-    provider row exists.  Provider identity is never inferred from the model
-    id or endpoint.  Missing cache multipliers remain [None]. *)
-val pricing_for_model_opt : ?provider_id:string -> string -> pricing option
+    When [provider] is present, the authoritative scoped row takes precedence;
+    bare rows are consulted only when that provider permits them. Omitting
+    [provider] explicitly requests provider-independent pricing. Provider
+    identity is never inferred from a model id or endpoint. Unknown providers,
+    absent rates and missing cache multipliers remain unknown. *)
+val pricing_for_model_opt
+  : ?provider:Model_catalog.provider_reference -> string -> pricing option
 
 (** Estimate USD cost from an explicit pricing value and provider token usage.
     This function never synthesizes a missing cache multiplier. *)
@@ -46,13 +48,13 @@ val estimate_cost
 (** Fill [usage.cost_usd] only when catalog pricing is available and exact for
     the observed usage.  An absent or incomplete price remains absent. *)
 val annotate_usage_cost
-  :  ?provider_id:string
+  :  ?provider:Model_catalog.provider_reference
   -> model_id:string
   -> Types.api_usage
   -> Types.api_usage
 
 (** Apply {!annotate_usage_cost} to a response usage record. *)
 val annotate_response_cost
-  :  ?provider_id:string
+  :  ?provider:Model_catalog.provider_reference
   -> Types.api_response
   -> Types.api_response

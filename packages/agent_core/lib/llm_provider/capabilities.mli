@@ -257,13 +257,12 @@ val effective_disable_parallel_tool_use
     lookup skips provider-qualified rows. *)
 val anthropic_thinking_control_for_model_id : string -> anthropic_thinking_control option
 
-(** Same resolution scoped to a provider label: the provider-qualified row is
-    consulted first, so a model declared under a provider (deepseek on the
-    Anthropic-compatible surface) resolves its policy on the non-exact path
-    too. [None] when the provider row declares no policy; the caller decides
-    whether to fall back to the bare reading. *)
+(** Resolve the request's authoritative row with the same provider policy as
+    capabilities. A scoped row without a policy stays [None]. Declared
+    providers read bare catalog rows only when permitted and never a manifest;
+    anonymous native wires retain bare catalog/manifest lookup. *)
 val anthropic_thinking_control_for_provider_model_id
-  :  provider_label:string
+  :  provider:Model_catalog.provider_reference
   -> model_id:string
   -> anthropic_thinking_control option
 

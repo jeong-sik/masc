@@ -24,7 +24,7 @@ type entry =
   ; capabilities_base_by_identity_kind : (Provider_kind.t * string) list
   ; identity_hosts : string list
   ; supports_parallel_tool_suppression : bool
-  ; serves_bare_rows : bool
+  ; serves_bare_rows : Model_identifiers.Id_prefix.t list
   }
 
 let find_string_field ~entry_id key toml =
@@ -324,11 +324,17 @@ let parse_entry provider_toml =
         "provider entry %S field \"supports_parallel_tool_suppression\" expected bool" id)
   in
   let* serves_bare_rows =
-    match Otoml.find_opt provider_toml Otoml.get_boolean [ "serves_bare_rows" ] with
-    | Some serves -> Ok serves
-    | None -> Ok false
-    | exception Otoml.Type_error _ ->
-      Error (Printf.sprintf "provider entry %S field \"serves_bare_rows\" expected bool" id)
+    let* families = string_list_field ~entry_id:id "serves_bare_rows" provider_toml in
+    let rec parse acc = function
+      | [] -> Ok (List.rev acc)
+      | raw :: rest ->
+        let* family = Model_identifiers.Id_prefix.of_string raw in
+        if List.exists (Model_identifiers.Id_prefix.equal family) acc
+        then Error (Printf.sprintf
+          "provider entry %S field \"serves_bare_rows\" must not contain duplicate families" id)
+        else parse (family :: acc) rest
+    in
+    parse [] (Option.value families ~default:[])
   in
   let* aliases = string_list_field ~entry_id:id "aliases" provider_toml in
   let* identity_hosts = string_list_field ~entry_id:id "identity_hosts" provider_toml in

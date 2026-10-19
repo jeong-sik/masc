@@ -31,20 +31,17 @@ let pricing_of_catalog_entry (entry : Model_catalog.model_entry) =
   | None, _ | _, None -> None
 ;;
 
-let catalog_entry_for_model catalog ?provider_id model_id =
-  match provider_id with
+let catalog_entry_for_model catalog ?provider model_id =
+  match provider with
   | None -> Model_catalog.lookup catalog model_id
-  | Some provider_id ->
-    (match Model_catalog.lookup_for_provider catalog ~provider_name:provider_id ~model_id with
-     | Some _ as exact -> exact
-     | None -> Model_catalog.lookup catalog model_id)
+  | Some provider -> Model_catalog.lookup_model_for_provider catalog ~provider ~model_id
 ;;
 
-let pricing_for_model_opt ?provider_id model_id =
+let pricing_for_model_opt ?provider model_id =
   match Model_catalog.global (), Model_identifiers.Model_id.of_string model_id with
   | None, _ | _, Error _ -> None
   | Some catalog, Ok model_id ->
-    Option.bind (catalog_entry_for_model catalog ?provider_id model_id) pricing_of_catalog_entry
+    Option.bind (catalog_entry_for_model catalog ?provider model_id) pricing_of_catalog_entry
 ;;
 
 let estimate_cost
@@ -92,11 +89,11 @@ let estimate_cost
     Estimated (input_cost +. cache_write_cost +. cache_read_cost +. output_cost)
 ;;
 
-let annotate_usage_cost ?provider_id ~model_id (usage : Types.api_usage) =
+let annotate_usage_cost ?provider ~model_id (usage : Types.api_usage) =
   match usage.cost_usd with
   | Some _ -> usage
   | None ->
-    (match pricing_for_model_opt ?provider_id model_id with
+    (match pricing_for_model_opt ?provider model_id with
      | None -> usage
      | Some pricing ->
        (match
@@ -112,12 +109,12 @@ let annotate_usage_cost ?provider_id ~model_id (usage : Types.api_usage) =
         | Incomplete _ -> usage))
 ;;
 
-let annotate_response_cost ?provider_id (response : Types.api_response) =
+let annotate_response_cost ?provider (response : Types.api_response) =
   match response.usage with
   | None -> response
   | Some usage ->
     { response with
-      usage = Some (annotate_usage_cost ?provider_id ~model_id:response.model usage)
+      usage = Some (annotate_usage_cost ?provider ~model_id:response.model usage)
     }
 ;;
 
@@ -261,7 +258,7 @@ let%test "exact provider pricing precedes provider-independent pricing" =
     (fun () ->
        match
          ( pricing_for_model_opt "shared-model"
-         , pricing_for_model_opt ~provider_id:"deepseek" "shared-model" )
+         , pricing_for_model_opt ~provider:(Model_catalog.Declared_provider "deepseek") "shared-model" )
        with
        | Some generic, Some exact ->
          close_enough generic.input_per_million 9.0
@@ -279,10 +276,10 @@ let%test "an exact incomplete provider row does not fall through to generic pric
         "shared-model"
     ; test_catalog_entry ~provider_name:"ollama_cloud" ~input:0.0 "shared-model"
     ]
-    (fun () -> pricing_for_model_opt ~provider_id:"ollama_cloud" "shared-model" = None)
+    (fun () -> pricing_for_model_opt ~provider:(Model_catalog.Declared_provider "ollama_cloud") "shared-model" = None)
 ;;
 
-let%test "unknown provider can use provider-independent pricing" =
+let%test "unknown declared provider cannot borrow provider-independent pricing" =
   with_catalog
     [ test_catalog_entry
         ~input:9.0
@@ -292,9 +289,7 @@ let%test "unknown provider can use provider-independent pricing" =
         "shared-model"
     ]
     (fun () ->
-       match pricing_for_model_opt ~provider_id:"unknown" "shared-model" with
-       | Some pricing -> close_enough pricing.input_per_million 9.0
-       | None -> false)
+       pricing_for_model_opt ~provider:(Model_catalog.Declared_provider "unknown") "shared-model" = None)
 ;;
 
 let%test "explicit catalog zero is distinguishable from absence" =

@@ -87,7 +87,7 @@ type provider_entry = Model_provider_catalog.entry =
   ; capabilities_base_by_identity_kind : (Provider_kind.t * string) list
   ; identity_hosts : string list
   ; supports_parallel_tool_suppression : bool
-  ; serves_bare_rows : bool
+  ; serves_bare_rows : Model_identifiers.Id_prefix.t list
   }
 
 type t
@@ -174,6 +174,33 @@ val lookup_for_provider_reference
   -> provider:provider_reference
   -> model_id:Model_identifiers.Model_id.t
   -> model_entry option
+
+val serves_bare_row : t -> provider_reference -> model_entry -> bool
+(** Whether this original bare catalog row describes the provider. A declared
+    provider must list a family covering the row's [id_prefix], rather than
+    only the requested model id. Anonymous native wires permit bare rows;
+    anonymous OpenAI-compatible endpoints do not. Scoped rows return [false].
+    This grants no authority to read a replacement capability manifest. *)
+
+val lookup_model_for_provider
+  :  t
+  -> provider:provider_reference
+  -> model_id:Model_identifiers.Model_id.t
+  -> model_entry option
+(** Exact scoped rows first, then the original longest-matching bare row only
+    when {!serves_bare_row} permits it. A denied bare row does not fall back to
+    a shorter row. A scoped row shadows the entire bare row, including fields
+    that it leaves undeclared. *)
+
+val model_entries_for_provider
+  :  t
+  -> provider:provider_reference
+  -> model_entries:model_entry list
+  -> model_entry list
+(** Visible rows from the supplied immutable model snapshot. Verbatim scoped
+    rows precede canonical scoped rows, then permitted bare rows; a row with
+    the same whole id in an earlier scope shadows the later row. Model ids
+    remain verbatim. Enumeration does not turn family rows into exact ids. *)
 
 (** Return the catalog-declared provider identity for a concrete endpoint.
 

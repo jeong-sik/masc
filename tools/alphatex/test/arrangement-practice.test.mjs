@@ -71,3 +71,23 @@ test('actual preparation worker preserves original MIDI/audio, shifts backing on
     await assert.rejects(readFile(join(dirname(prepared.path),'plan.json')))
   } finally {await worker.terminate();await rm(directory,{recursive:true,force:true})}
 })
+
+
+test('practice shifts exact captured placement and its display together without rewriting source clocks',async()=>{
+ const directory=await mkdtemp(join(tmpdir(),'masc-practice-exact-'))
+ try {
+  const path=join(directory,'plan.json'), exact={numerator:'1',denominator:'3'}
+  const source={clock:{origin:'9007199254740993123',numer:125,denom:3},packets:[{hostTime:'9007199254740993124',words:[0x40903c00,0x90000000]}]}
+  const notes={id:'paired',source:'take',startSeconds:1/3e9,startNanoseconds:exact,offset:'0',extent:'1000000',repeatCount:1}
+  await writeFile(path,JSON.stringify({schemaVersion:5,kind:'capture-arrangement',duration:1,assets:[],regions:[{id:'paired',startSeconds:notes.startSeconds}],umpRegions:{duration:1,sources:[source],regions:[notes]}}))
+  const {preparePractice}=await import('../arrangement-practice.mjs')
+  const project={...newArrangement({tempo:137}),meter:[7,8],practice:{countInBars:2,metronome:true}}
+  await preparePractice(project,{path,duration:1,format:'capture-arrangement'})
+  const plan=JSON.parse(await readFile(path,'utf8')), shifted=plan.umpRegions.regions[0], fraction=shifted.startNanoseconds
+  assert.equal(BigInt(fraction.numerator)*411n,(1n*137n+420_000_000_000n*3n)*BigInt(fraction.denominator))
+  assert.equal(plan.regions[0].startSeconds,shifted.startSeconds)
+  const n=BigInt(fraction.numerator),d=BigInt(fraction.denominator)*1_000_000_000n
+  assert.equal(shifted.startSeconds,Number(n/d)+Number(n%d)/Number(d))
+  assert.deepEqual(plan.umpRegions.sources,[source]);assert.equal(notes.startNanoseconds,exact)
+ }finally{await rm(directory,{recursive:true,force:true})}
+})

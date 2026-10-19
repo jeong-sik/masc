@@ -1157,6 +1157,12 @@ let add_routes router =
          (fun state _req reqd ->
            let uri = Uri.of_string request.target in
            let base, source = resolve_workspace_base ~state ~uri in
+           match source with
+           | `RepositoryMissing _ | `RepositoryUnknown _
+           | `PlaygroundMissing _ | `KeeperUnknown _ ->
+             json_response ~status:`Not_found request reqd
+               (json_error "The selected workspace is unavailable")
+           | `Project | `Repository _ | `Playground _ ->
            match Uri.get_query_param uri "path" with
            | None -> json_response ~status:`Bad_request request reqd (json_error "Missing path parameter")
            | Some p ->

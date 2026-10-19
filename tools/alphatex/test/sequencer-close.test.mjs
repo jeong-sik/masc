@@ -11,7 +11,6 @@ import * as editor from '../sequencer-editor.mjs'
 import { sourceExpressions, selectedExpression } from '../midi-source-editor.mjs'
 import { importMidiSource, midiSourcePattern } from '../midi-source.mjs'
 import { harmonyAt, PPQ } from '../sequencer-project.mjs'
-import { importMidiSource } from '../midi-source.mjs'
 
 // Exercise actual controller decisions with owned IO substitutes. No terminal
 // output, layout, audio hardware or player behavior is asserted.

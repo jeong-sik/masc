@@ -446,6 +446,11 @@ val validate_read_workspace_precondition :
     An absent pair leaves an ordinary read unchanged; partial, repeated or
     foreign values fail before the handler runs. Other methods retain their
     own operation preconditions. *)
+val with_read_workspace_precondition :
+  Mcp_server.server_state ->
+  (Mcp_server.server_state ->
+   Httpun.Request.t -> Httpun.Reqd.t -> unit) ->
+  Httpun.Request.t -> Httpun.Reqd.t -> unit
 
 val with_public_read :
   (Mcp_server.server_state ->

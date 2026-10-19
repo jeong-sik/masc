@@ -1,4 +1,5 @@
 import { Chord, Note } from 'tonal'
+import { expressionMessage, expressionEvent } from './midi-expression.mjs'
 
 // The original file is immutable provenance. Edits address source events, rather
 // than reducing a MIDI performance to the phrase editor's note-only schema.
@@ -284,25 +285,9 @@ export function editMidiSourceNote(source, edit = {}) { return editMidiSourceNot
 export function editMidiSourceNotes(source, edits, { pattern } = {}) {
   const performance = midiSourcePattern(source, { pattern }), info = midiSourceInfo(source)
   const notes = new Map(performance.notes.map(note => [note.id, note]))
-  const next = structuredClone(source)
+  const { next, insert, place } = sourcePatch(source)
   const events = new Map(performance.events.map(event => [event.id, event]))
-  const used = new Set(next.insertions.map(event => event.id)), targets = new Map()
-  let number = 1
-  const insert = (track, tick, bytes) => {
-    while (used.has(`new:${number}`)) number++
-    const id = `new:${number++}`; used.add(id)
-    next.insertions.push({ id, track, tick, bytes }); return id
-  }
-  const place = (event, value) => {
-    const added = next.insertions.findIndex(item => item.id === event.id)
-    if (added >= 0) {
-      if (value.removed) next.insertions.splice(added, 1)
-      else next.insertions[added] = { id: event.id, track: event.track, ...value }
-    } else {
-      next.changes = next.changes.filter(item => item.id !== event.id)
-      next.changes.push({ id: event.id, ...value })
-    }
-  }
+  const targets = new Map()
   for (const edit of edits) {
     const { id, kind = 'change', pitch, velocity, start, duration } = edit
     if (kind === 'insert') {
@@ -338,6 +323,56 @@ export function editMidiSourceNotes(source, edits, { pattern } = {}) {
   for (const [on, expected] of targets) {
     if (expected !== null && (pairs.get(on)?.off !== expected.off || pairs.get(on)?.port !== expected.port)) {
       throw new Error('MIDI edit changes note-off pairing or source port')
+    }
+  }
+  return next
+}
+
+function sourcePatch(source) {
+  const next = structuredClone(source), used = new Set(next.insertions.map(event => event.id))
+  let number = 1
+  const insert = (track, tick, bytes) => {
+    while (used.has(`new:${number}`)) number++
+    const id = `new:${number++}`; used.add(id)
+    next.insertions.push({ id, track, tick, bytes }); return id
+  }
+  const place = (event, value) => {
+    const added = next.insertions.findIndex(item => item.id === event.id)
+    if (added >= 0) {
+      if (value.removed) next.insertions.splice(added, 1)
+      else next.insertions[added] = { id: event.id, track: event.track, ...value }
+    } else {
+      next.changes = next.changes.filter(item => item.id !== event.id)
+      next.changes.push({ id: event.id, ...value })
+    }
+  }
+  return { next, insert, place }
+}
+
+export function editMidiSourceExpressions(source, edits, { pattern } = {}) {
+  const performance = midiSourcePattern(source, { pattern }), info = midiSourceInfo(source)
+  const events = new Map(performance.events.map(event => [event.id, event]))
+  const { next, insert, place } = sourcePatch(source), targets = new Map()
+  for (const edit of edits) {
+    const { id, kind } = edit
+    if (kind === 'insert') {
+      const track = integer(edit.track, 'MIDI insertion track', 0, info.tracks.length - 1)
+      if (info.format === 2 && track !== performance.pattern) throw new Error('Insert into the selected MIDI pattern')
+      insert(track, integer(edit.tick, 'expression tick'), expressionMessage(edit.message)); continue
+    }
+    const event = events.get(id), message = expressionEvent(event)
+    if (!message || targets.has(id)) throw new Error('Select a unique expression event in this pattern')
+    if (kind === 'remove') { place(event, { removed: true }); targets.set(id, null) }
+    else if (kind === 'change') {
+      place(event, { tick: integer(edit.tick ?? event.tick, 'expression tick'), bytes: expressionMessage(edit.message ?? message) })
+      targets.set(id, event.port)
+    } else throw new Error('Unknown MIDI expression edit')
+  }
+  exportMidiSource(next)
+  const changed = new Map(midiSourcePattern(next, { pattern }).events.map(event => [event.id, event]))
+  for (const [id, port] of targets) {
+    if (port !== null && changed.get(id)?.port !== port) {
+      throw new Error('MIDI expression move changes its source port')
     }
   }
   return next

@@ -29784,8 +29784,18 @@ and is loaded on demand through keeper_skill.
                      launch_keeper_chat_tool_details_load ~force:true state
                        ~mailbox:async_messages ~keeper_name
                  | None -> ())
-            | Planning | Verification ->
+            | Verification ->
                 launch_verification_load state ~mailbox:async_messages
+            | Planning ->
+                launch_verification_load state ~mailbox:async_messages;
+                (* The open Task's history asks for its first page again.
+                   The drawn observation stays until the answer replaces
+                   it; nothing else re-reads it while the authority holds. *)
+                (match state.planning_mode with
+                 | Planning_list ->
+                     Option.iter (launch_task_history_load state ~mailbox:async_messages)
+                       state.task_detail_id
+                 | Planning_detail _ -> ())
              | Clients ->
                  launch_clients_load state ~mailbox:async_messages
              | Lanes ->

@@ -18,9 +18,10 @@ val resolve_workspace_base :
     it was resolved.
 
     This is the anchor for every repo-relative path the dashboard sends. The
-    IDE LSP proxy resolves its connection anchor through the same function so
-    a document named over the LSP socket and the same document named over
-    [/api/v1/workspace/file] cannot resolve against different roots. *)
+    IDE LSP proxy resolves its connection anchor through the same function.
+    Missing/unknown scoped sources retain the project base for tree fallback;
+    [/api/v1/workspace/file] rejects those source tags before resolving or
+    reading a file, rather than serving a same-named project file. *)
 
 (** Pure dispatch logic for the [?keeper=<name>] query param. Exposed
     for unit testing — production code goes through {!add_routes}. *)

@@ -446,6 +446,130 @@ let test_catalog_distinguishes_empty_from_unavailable () =
     | Error (W.Catalog_scan_failed _) -> ()
     | Ok _ | Error _ -> Alcotest.fail "Git failure became empty or missing checkout")
 
+(* Use the production router and file reader: a surviving project file must
+   never stand in for the selected scope after its catalog was accepted. *)
+let workspace_http_response ~router target =
+  let output = Buffer.create 1024 in
+  let connection = Httpun.Server_connection.create (fun reqd ->
+    Masc.Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) reqd) in
+  let raw = Printf.sprintf "GET %s HTTP/1.0\r\nHost: localhost\r\n\r\n" target in
+  let input = Bigstringaf.of_string ~off:0 ~len:(String.length raw) raw in
+  ignore (Httpun.Server_connection.read_eof connection input ~off:0
+            ~len:(Bigstringaf.length input));
+  let rec drain () =
+    match Httpun.Server_connection.next_write_operation connection with
+    | `Write iovecs ->
+        let written = List.fold_left (fun total (iov : Bigstringaf.t Httpun.IOVec.t) ->
+          Buffer.add_string output (Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len);
+          total + iov.len) 0 iovecs in
+        Httpun.Server_connection.report_write_result connection (`Ok written);
+        drain ()
+    | `Yield when Buffer.length output = 0 ->
+        let ready, resolve = Eio.Promise.create () in
+        Httpun.Server_connection.yield_writer connection
+          (fun () -> Eio.Promise.resolve resolve ());
+        Eio.Promise.await ready;
+        drain ()
+    | `Yield | `Close _ -> ()
+  in
+  drain ();
+  let raw = Buffer.contents output in
+  let boundary = Str.search_forward (Str.regexp_string "\r\n\r\n") raw 0 in
+  let status = int_of_string (List.nth (String.split_on_char ' ' raw) 1) in
+  status, Yojson.Safe.from_string
+    (String.sub raw (boundary + 4) (String.length raw - boundary - 4))
+
+type lost_file_scope =
+  | Repository_scope of [ `Registration | `Directory ]
+  | Keeper_scope of [ `Metadata | `Directory ]
+
+let test_file_read_rejects_lost_scope lost () =
+  let old_state = Server_auth.For_testing.snapshot_server_state () in
+  let old_startup = Masc.Server_startup_state.snapshot () in
+  let old_fs = Fs_compat.get_fs_opt () in
+  Fun.protect
+    ~finally:(fun () ->
+      Server_auth.For_testing.restore_server_state old_state;
+      Masc.Server_startup_state.For_testing.restore old_startup;
+      match old_fs with
+      | Some fs -> Fs_compat.set_fs fs
+      | None -> Fs_compat.clear_fs ())
+    (fun () ->
+      Masc_test_deps.with_process_env "MASC_HTTP_AUTH_STRICT" (Some "0") (fun () ->
+        Eio_main.run @@ fun env ->
+        Eio.Switch.run @@ fun sw ->
+        Fs_compat.set_fs (Eio.Stdenv.fs env);
+        Eio_context.with_test_env ~net:(Eio.Stdenv.net env)
+          ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw
+          (fun () -> with_temp_dir (fun base_path ->
+            let valid = function Ok value -> value | Error detail -> fail detail in
+            let state = Masc.Mcp_server.For_testing.create_state ~base_path in
+            let config = Masc.Mcp_server.workspace_config state in
+            ignore (Masc.Workspace.init config ~agent_name:None);
+            Server_auth.For_testing.restore_server_state (Some state);
+            (match Masc.Server_startup_state.mark_state_ready () with
+             | Ok () -> ()
+             | Error error -> fail (Masc.Server_startup_state.state_ready_error_to_string error));
+            let path = "src/selected.ml" in
+            let project_content = "let project_file = true\n" in
+            let selected_content = "let selected_scope = true\n" in
+            write_file (Filename.concat base_path path) project_content;
+            let root, scope, withdraw =
+              match lost with
+              | Repository_scope removed ->
+                  let root = Filename.concat base_path "checkout" in
+                  mkdir_p root;
+                  let repository : Repo_manager_types.repository =
+                    { id = "selected"; name = "selected"; url = root; local_path = root;
+                      aliases = []; default_branch = "main"; keepers = [];
+                      status = Repo_manager_types.Active; auto_sync = false;
+                      sync_interval = 0; created_at = Int64.zero; updated_at = Int64.zero } in
+                  valid (Repo_store.save_all ~base_path [repository]);
+                  let withdraw () = match removed with
+                    | `Registration -> valid (Repo_store.remove ~base_path repository.id)
+                    | `Directory -> rm_rf root in
+                  root, "repo_id=selected", withdraw
+              | Keeper_scope removed ->
+                  let meta = valid (Masc_test_deps.meta_of_json_fixture
+                      (`Assoc ["name", `String "selected"])) in
+                  let meta = { meta with Masc.Keeper_meta_contract.sandbox_profile = Keeper_types_profile_sandbox.Docker } in
+                  valid (Masc.Keeper_meta_store.replace_snapshot config meta);
+                  let root = Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta in
+                  mkdir_p root;
+                  let withdraw () = match removed with
+                    | `Metadata -> valid (Masc.Keeper_meta_store.remove_snapshot config ~name:meta.name)
+                    | `Directory -> rm_rf root in
+                  root, "keeper=selected", withdraw
+            in
+            catalog_git ~cwd:root ["init"; "-b"; "main"];
+            write_file (Filename.concat root path) selected_content;
+            let encode = Uri.pct_encode ~component:`Query_value in
+            let binding = "expected_base_path=" ^ encode (Unix.realpath base_path)
+              ^ "&expected_masc_root=" ^ encode (Unix.realpath (Masc.Workspace.masc_dir config)) in
+            let router = W.add_routes (Masc.Http_server_eio.Router.create ()) in
+            let request route path = workspace_http_response ~router
+                (route ^ "?path=" ^ encode path ^ "&" ^ scope ^ "&" ^ binding) in
+            let status, catalog = request "/api/v1/workspace/files" "" in
+            check int "selected scope catalog succeeds" 200 status;
+            check (list string) "catalog preserves selected file path" [path]
+              Yojson.Safe.Util.(catalog |> member "files" |> to_list |> List.map to_string);
+            let status, body = request "/api/v1/workspace/file" path in
+            check int "selected scope file succeeds" 200 status;
+            check string "reads the selected scope, not its project namesake" selected_content
+              Yojson.Safe.Util.(body |> member "content" |> to_string);
+            withdraw ();
+            let status, body = request "/api/v1/workspace/file" path in
+            check int "lost scope cannot read its project namesake" 404 status;
+            check bool "scope refusal carries no file content" true
+              (Yojson.Safe.Util.member "content" body = `Null);
+            let status, _ = request "/api/v1/workspace/files" "" in
+            check int "catalog and selected file agree on unavailable scope" 404 status;
+            let status, body = workspace_http_response ~router
+                ("/api/v1/workspace/file?path=" ^ encode path ^ "&" ^ binding) in
+            check int "explicit project reading remains available" 200 status;
+            check string "the same-named project file really exists" project_content
+              Yojson.Safe.Util.(body |> member "content" |> to_string)))))
+
 let () =
   run
     "workspace_file_confidentiality"
@@ -489,6 +613,16 @@ let () =
             test_catalog_never_searches_above_workspace
         ; test_case "distinguishes empty checkout and unavailable directory" `Quick
             test_catalog_distinguishes_empty_from_unavailable
+        ] )
+    ; ( "selected file scope"
+      , [ test_case "removed repository registration cannot read project file" `Quick
+            (test_file_read_rejects_lost_scope (Repository_scope `Registration))
+        ; test_case "removed repository directory cannot read project file" `Quick
+            (test_file_read_rejects_lost_scope (Repository_scope `Directory))
+        ; test_case "removed Keeper metadata cannot read project file" `Quick
+            (test_file_read_rejects_lost_scope (Keeper_scope `Metadata))
+        ; test_case "removed Keeper directory cannot read project file" `Quick
+            (test_file_read_rejects_lost_scope (Keeper_scope `Directory))
         ] )
     ; ( "SSOT consistency"
       , [ test_case "denylist matches tree hidden" `Quick test_denylist_matches_tree_hidden

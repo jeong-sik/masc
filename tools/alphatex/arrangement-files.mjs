@@ -1,3 +1,4 @@
+import { verifyPhraseSnapshot } from './phrase-arrangement.mjs'
 import { capturePartNames, validateCaptureManifest } from './captured-source.mjs'
 import { readCaptureFiles, readCapture } from './session-data.mjs'
 import { capturePaths, captureMatches, inspectCaptureAsset } from './captured-source-files.mjs'
@@ -150,6 +151,7 @@ export async function verifyArrangementAssets(project, root, options = {}) {
   validateArrangement(project)
   const paths = new Map()
   for (const asset of project.assets) {
+    verifyPhraseSnapshot(asset)
     if (asset.kind === 'wave') paths.set(asset.id, await inspectWaveAsset(resolve(root), asset, options))
     else if (asset.kind === 'capture') paths.set(asset.id, await inspectCaptureAsset(resolve(root), asset, options))
   }

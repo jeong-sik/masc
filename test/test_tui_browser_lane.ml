@@ -191,7 +191,7 @@ let cells = Masc_tui_message_layout.display_width
 let test_pointer_decision () =
   let shot ?(source="live") client = success (decode_screenshot (screenshot_response ~source ~client ())) in
   let drag (shot : screenshot) =
-    Browser_lane.Drag {from={x=0.1;y=0.1}; to_={x=0.2;y=0.2}; viewport=shot.viewport} in
+    Browser_lane.Drag {from={x=0.1;y=0.1}; to_={x=0.2;y=0.2}; viewport=shot.viewport;via=[];duration_ms=0} in
   let click (shot : screenshot) = Browser_lane.Click_at {point={x=0.1;y=0.1}; viewport=shot.viewport} in
   let wheel (shot : screenshot) =
     Browser_lane.Scroll_at {point={x=0.5;y=0.5}; viewport=shot.viewport; x=0; y=120} in

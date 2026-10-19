@@ -327,7 +327,10 @@ let interact ~tabs ~call ~tab_id ~expected_url action =
       (Wire.Page_scroll
          { page_id; x = viewport_x viewport point; y = viewport_y viewport point
          ; delta_x = float_of_int x; delta_y = float_of_int y })
-  | Browser_lane.Drag { from; to_; viewport } ->
+  | Browser_lane.Drag { from; to_; viewport; via; duration_ms } ->
+    if via <> [] || duration_ms <> 0 then
+      Error (Browser_lane.Rejected_before_effect "drag paths and timing require automation or a live BiDi connection")
+    else
     pointer ~call ~tab_id ~page_id ~args ~name:"drag"
       (Wire.Page_drag_and_drop
          { page_id; from_x = viewport_x viewport from; from_y = viewport_y viewport from

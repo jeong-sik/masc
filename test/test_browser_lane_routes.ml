@@ -307,7 +307,7 @@ let test_owned_pointer_poll_retains_command_and_settles_waiter () =
   let hovered = Browser_lane.Page_interact {tab_id=4;expected_url=Some "https://example.test/";
     action=Hover_at {point=point 0.3 0.4;viewport}} in
   let dragged = Browser_lane.Page_interact {tab_id=4;expected_url=Some "https://example.test/";
-    action=Drag {from=point 0.3 0.4;to_=point 0.7 0.8;viewport}} in
+    action=Drag {from=point 0.3 0.4;to_=point 0.7 0.8;viewport;via=[];duration_ms=0}} in
   List.iter (fun (actor,verb) ->
     let waiting = Eio.Fiber.fork_promise ~sw (fun () ->
       Browser_lane.issue_live_with ~activity_check:(fun _ -> None) ?actor client ~verb ~timeout_sec:1.) in

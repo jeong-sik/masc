@@ -28,11 +28,11 @@ type pointer_target = Selector of string | Scene_node of node_ref
 type interaction = Activate_tab | Click of string | Fill of { selector : string; text : string }
   | Scroll of { x : int; y : int }
   | Hover of pointer_target
-  | Drag_to of { source : pointer_target; destination : pointer_target }
+  | Drag_to of { source : pointer_target; destination : pointer_target; via : Pointer.point list; duration_ms : int }
   | Hover_at of { point : Pointer.point; viewport : Pointer.viewport }
   | Click_at of { point : Pointer.point; viewport : Pointer.viewport }
   | Scroll_at of { point : Pointer.point; viewport : Pointer.viewport; x : int; y : int }
-  | Drag of { from : Pointer.point; to_ : Pointer.point; viewport : Pointer.viewport }
+  | Drag of { from : Pointer.point; to_ : Pointer.point; viewport : Pointer.viewport; via : Pointer.point list; duration_ms : int }
   | Follow_link of node_ref | Click_node of node_ref | Fill_node of { target : node_ref; text : string }
 
 type verb =
@@ -96,6 +96,10 @@ let interaction_verb = function
   | Scroll _ -> "scroll"
 ;;
 
+let drag_fields via duration_ms =
+  (match via with [] -> [] | _::_ -> ["via", `List (List.map Pointer.point_to_json via)])
+  @ (if duration_ms = 0 then [] else ["durationMs", `Int duration_ms])
+
 let interaction_args ~tab_id ~expected_url action =
   let node_fields target = ["documentId",`String target.document_id; "nodeId",`String target.node_id] in
   let target_fields = function Selector selector -> ["selector",`String selector]
@@ -104,8 +108,8 @@ let interaction_args ~tab_id ~expected_url action =
   let fields = match action with
     | Activate_tab -> [verb]
     | Hover target -> verb :: target_fields target
-    | Drag_to {source;destination} -> [verb; "source",`Assoc (target_fields source);
-        "destination",`Assoc (target_fields destination)]
+    | Drag_to {source;destination;via;duration_ms} -> [verb; "source",`Assoc (target_fields source);
+        "destination",`Assoc (target_fields destination)] @ drag_fields via duration_ms
     | Scroll_at {point;viewport;x;y} -> [verb;
         "point", Pointer.point_to_json point; "viewport", Pointer.viewport_to_json viewport;
         "x",`Int x; "y",`Int y]
@@ -113,9 +117,9 @@ let interaction_args ~tab_id ~expected_url action =
         "point", Pointer.point_to_json point; "viewport", Pointer.viewport_to_json viewport]
     | Click_at {point;viewport} -> [verb;
         "point", Pointer.point_to_json point; "viewport", Pointer.viewport_to_json viewport]
-    | Drag {from;to_;viewport} -> [verb;
+    | Drag {from;to_;viewport;via;duration_ms} -> [verb;
         "from", Pointer.point_to_json from; "to", Pointer.point_to_json to_;
-        "viewport", Pointer.viewport_to_json viewport]
+        "viewport", Pointer.viewport_to_json viewport] @ drag_fields via duration_ms
     | Click selector -> [verb; "selector", `String selector]
     | Fill {selector; text} -> [verb; "selector", `String selector; "text", `String text]
     | Follow_link target -> verb :: node_fields target

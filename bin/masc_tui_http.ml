@@ -678,88 +678,12 @@ let http_get_response ~(host : string) ~(port : int) ~(path : string) ~headers :
   | Ok response -> Ok response
   | Error e -> Error (Masc.Tui_decode.http_transport_error ~verb:"GET" ~url ~detail:e)
 
-type workspace_read_proof = Request_precondition | Health_identity
-
-type workspace_read_binding = {
-  wr_host: string;
-  wr_port: int;
-  wr_expected: Masc.Tui_decode.server_identity;
-  wr_proof: workspace_read_proof;
-}
-
-let workspace_read_key : workspace_read_binding Eio.Fiber.key = Eio.Fiber.create_key ()
-
-(* The asking fiber owns the binding, including parallel child reads. The
-   concrete URL is built before the transport crosses to the IO domain.
-   No global mutable workspace setting can leak into a sibling collector. *)
-let with_workspace_read ~host ~port ~expected ~proof load =
-  Eio.Fiber.with_binding workspace_read_key
-    {wr_host=host;wr_port=port;wr_expected=expected;wr_proof=proof} load
-
-let current_workspace_read () =
-  match Fs_compat.execution_context () with
-  | Fs_compat.Non_eio -> None
-  | Eio_fiber -> Eio.Fiber.get workspace_read_key
-
-let workspace_read_path ~host ~port ~path =
-  match current_workspace_read () with
-  | None -> Ok path
-  | Some binding when binding.wr_host <> host || binding.wr_port <> port ->
-    Error "Workspace-bound read changed its server endpoint"
-  | Some {wr_proof=Health_identity; _} -> Ok path
-  | Some {wr_expected;wr_proof=Request_precondition;_} ->
-    let uri = Uri.of_string path in
-    let fields = Uri.query uri in
-    if List.exists (fun (key, _) ->
-        key = "expected_base_path" || key = "expected_masc_root") fields then
-      Error "Workspace-bound read already supplies a workspace precondition"
-    else
-      Ok (Uri.to_string (Uri.with_query uri
-        (fields @ ["expected_base_path", [Masc_tui_types.canonical_path wr_expected.sid_base_path];
-                   "expected_masc_root", [Masc_tui_types.canonical_path wr_expected.sid_masc_root]])))
-
-let validate_workspace_read_json json =
-  match current_workspace_read () with
-  | None | Some {wr_proof=Request_precondition;_} -> Ok json
-  | Some {wr_expected;wr_proof=Health_identity;_} ->
-    let ( let* ) = Result.bind in
-    let* observed = Masc.Tui_decode.decode_server_identity json in
-    if Masc_tui_types.server_workspace_matches ~expected:(Some wr_expected) (Ok observed)
-    then Ok json
-    else Error "Health reading belongs to another or unavailable workspace"
-
-let validate_workspace_read_response (response : Masc_http_client.response) =
-  match current_workspace_read () with
-  | None | Some {wr_proof=Health_identity;_} -> Ok response
-  | Some {wr_proof=Request_precondition;_} ->
-    if response.status = 304 || (response.status >= 200 && response.status < 300) then
-      let name, expected = Masc.Workspace.read_precondition_admission_header in
-      let receipts = List.filter_map (fun (key, value) ->
-        if String.equal (String.lowercase_ascii key) name then Some value else None) response.headers in
-      (match receipts with
-       | [value] when String.equal value expected -> Ok response
-       | _ -> Error "Server did not attest the requested workspace read")
-    else Ok response
-
-(** GET a JSON response from a dashboard endpoint. The answer kept from the
-    last read of the same address goes out as [If-None-Match], and a 304
-    answers with the value decoded from it. *)
 let get_json_decoded ~decode ~(host : string) ~(port : int) ~(path : string) :
     (Yojson.Safe.t, string) result =
-  let ( let* ) = Result.bind in
-  let* path = workspace_read_path ~host ~port ~path in
-  let* json =
-  Masc_tui_kept_reads.read kept_reads
-    ~address:(url_of ~host ~port ~path)
-    ~send:(fun headers ->
-      http_get_response ~host ~port ~path ~headers
-      |> (fun result -> Result.bind result validate_workspace_read_response)
-      |> Result.map (fun { Masc_http_client.status; headers; body } ->
-             { Masc_tui_kept_reads.status; headers; body }))
-    ~decode:(fun { Masc_tui_kept_reads.status; body; _ } ->
-      decode ~allow_empty:false ~status_code:status ~body)
-  in
-  validate_workspace_read_json json
+  Masc_tui_workspace_read.read_json ~kept_reads
+    ~address_of:(fun ~path -> url_of ~host ~port ~path)
+    ~send:(fun ~path ~headers -> http_get_response ~host ~port ~path ~headers)
+    ~decode ~host ~port ~path
 
 let get_json ~host ~port ~path = get_json_decoded ~decode:decode_json ~host ~port ~path
 let get_msx_json ~host ~port ~path = get_json_decoded ~decode:decode_msx_json ~host ~port ~path
@@ -1217,63 +1141,40 @@ let fetch_verification_evidence ~(host : string) ~(port : int)
     detail payload stays server-side until a surface needs it. *)
 let fetch_goal_timeline ~(host : string) ~(port : int) ~(goal_id : string) :
     (Masc.Tui_decode.goal_timeline, string) result =
+  let ( let* ) = Result.bind in
   let path =
     Printf.sprintf "/api/v1/dashboard/goals/detail?goal_id=%s"
       (percent_encode_path_segment goal_id)
   in
-  match http_get ~host ~port ~path with
-  | Error detail -> Error detail
-  | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
-    ->
-      Error (named_refusal "goal detail" ~status ~body)
-  | Ok (_, body) -> (
-      match Yojson.Safe.from_string body with
-      | json -> Masc.Tui_decode.decode_goal_detail_timeline json
-      | exception Yojson.Json_error detail ->
-          Error ("goal detail was not JSON: " ^ detail))
+  let* json = get_json ~host ~port ~path
+    |> Result.map_error (fun detail -> "goal detail: " ^ detail) in
+  Masc.Tui_decode.decode_goal_detail_timeline json
 
 (** Fetch one task's event history
     ([GET /api/v1/dashboard/tasks/history]). *)
 let fetch_task_history ~(host : string) ~(port : int) ~(task_id : string) :
     (Masc.Tui_decode.task_history_event list, string) result =
+  let ( let* ) = Result.bind in
   let path =
     Printf.sprintf "/api/v1/dashboard/tasks/history?task_id=%s&limit=50"
       (percent_encode_path_segment task_id)
   in
-  match http_get ~host ~port ~path with
-  | Error detail -> Error detail
-  | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
-    ->
-      (* The Task detail pane owns the HISTORY label and its failure verdict.
-         This result carries only the HTTP cause. *)
-      Error (refusal ~status_code:status ~body)
-  | Ok (_, body) -> (
-      match Yojson.Safe.from_string body with
-      | json -> Masc.Tui_decode.decode_task_history json
-      | exception Yojson.Json_error detail ->
-          Error ("response was not JSON: " ^ detail))
+  let* json = get_json ~host ~port ~path in
+  Masc.Tui_decode.decode_task_history json
 
 (** Fetch a keeper's durable tool-call log
     ([GET /api/v1/keepers/:name/tool-calls]). *)
 let fetch_keeper_calls ~(host : string) ~(port : int) ~(keeper_name : string)
     ~(limit : int) : (Masc.Tui_decode.keeper_calls_snapshot, string) result =
+  let ( let* ) = Result.bind in
   let path =
     Printf.sprintf "/api/v1/keepers/%s/tool-calls?limit=%d"
       (percent_encode_path_segment keeper_name)
       (max 1 limit)
   in
-  match http_get ~host ~port ~path with
-  | Error detail -> Error detail
-  | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
-    ->
-      Error (named_refusal "tool calls" ~status ~body)
-  | Ok (_, body) -> (
-      match Yojson.Safe.from_string body with
-      | json ->
-          Masc.Tui_decode.decode_keeper_calls_snapshot
-            ~requested_keeper:keeper_name json
-      | exception Yojson.Json_error detail ->
-          Error ("tool calls were not JSON: " ^ detail))
+  let* json = get_json ~host ~port ~path
+    |> Result.map_error (fun detail -> "tool calls: " ^ detail) in
+  Masc.Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:keeper_name json
 
 (** Fetch exact, previously retained bytes. This never talks to the browser. *)
 let fetch_browser_observation ~host ~port (reference : Tool_output.artifact_ref) =

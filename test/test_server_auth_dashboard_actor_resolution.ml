@@ -411,6 +411,114 @@ let test_workspace_bound_read_preconditions () =
   check bool "POST retains its operation-owned precondition" true
     (read ~meth:`POST "/api/v1/board" ["expected_base_path",[base]]=Ok Server_auth.Workspace_read_unbound)
 
+(* Use the actual admission validator, JSON/cache pipeline and history decoder.
+   Response frames are controlled protocol input, not a wire/server fixture. *)
+let test_history_read_keeps_original_workspace_through_replacement () =
+  with_temp_base_path @@ fun base_a ->
+  with_temp_base_path @@ fun base_b ->
+  List.iter (fun base -> Unix.mkdir (Filename.concat base ".masc") 0o700)
+    [base_a; base_b];
+  let config_a = Masc.Workspace.default_config base_a in
+  let config_b = Masc.Workspace.default_config base_b in
+  let identity base : Masc.Tui_decode.server_identity =
+    { sid_version = "0.24.0"; sid_binary_commit = "original-history"
+    ; sid_binary_commit_age_s = None; sid_base_path = Unix.realpath base
+    ; sid_masc_root = Unix.realpath (Filename.concat base ".masc")
+    ; sid_executable_in_worktree = None; sid_state_ready = Some true
+    ; sid_uptime = None; sid_sse_clients = None; sid_gc = None; sid_scheduler = None }
+  in
+  let identity_a = identity base_a and identity_b = identity base_b in
+  let history context =
+    `List [`Assoc ["type", `String "task_transition";
+      "task", `String "task-original"; "agent", `String "original-keeper";
+      "ts", `String "2026-10-19T01:00:00Z";
+      "from_status", `String "todo"; "to_status", `String "in_progress";
+      "handoff_context", `Assoc ["summary", `String context]]]
+  in
+  let receipt = Masc.Workspace.read_precondition_admission_header in
+  let tag = "\"same-history-tag\"" in
+  let frame ?(status=200) ?(receipts=[receipt]) context : Masc_http_client.response =
+    { status; headers=("ETag", tag)::receipts
+    ; body=(if status=304 then "" else Yojson.Safe.to_string (history context)) }
+  in
+  let served = ref config_a and response = ref (frame "A original handoff") in
+  let send_for config response ~path ~headers =
+    Eio.Fiber.yield ();
+    let request = Httpun.Request.create
+        ~headers:(Httpun.Headers.of_list headers) `GET path in
+    match Server_auth.validate_read_workspace_precondition ~config request with
+    | Ok Server_auth.Workspace_read_matched -> Ok response
+    | Ok Server_auth.Workspace_read_unbound
+    | Error (Masc.Workspace.Invalid_workspace_precondition
+            | Masc.Workspace.Workspace_precondition_failed) ->
+        Ok { Masc_http_client.status=409; headers=[]
+           ; body="{\"error\":\"workspace_precondition_failed\"}" }
+  in
+  let send ~path ~headers = send_for !served !response ~path ~headers in
+  let kept_reads = Masc_tui_kept_reads.create () in
+  let host = "127.0.0.1" and port = 8935 in
+  let path = "/api/v1/dashboard/tasks/history?task_id=task-original&limit=50" in
+  let read ?(port=port) ~send () =
+    Masc_tui_workspace_read.read_json ~kept_reads
+      ~address_of:(fun ~path -> Printf.sprintf "http://%s:%d%s" host port path)
+      ~send ~decode:Masc.Tui_decode.decode_json_response_body ~host ~port ~path
+  in
+  let bound ?(port=port) expected load =
+    Masc_tui_workspace_read.with_binding ~host ~port ~expected
+      ~proof:Masc_tui_workspace_read.Request_precondition load
+  in
+  let expect_context context result =
+    let events = match Result.bind result Masc.Tui_decode.decode_task_history with
+      | Ok events -> events
+      | Error detail -> failf "original task history unavailable: %s" detail in
+    check bool "decoded original handoff and actor survive the read" true
+      (List.exists (fun (event : Masc.Tui_decode.task_history_event) ->
+        event.th_note=Some context && event.th_actor=Some "original-keeper"
+        && event.th_from_status=Some "todo" && event.th_to_status=Some "in_progress") events)
+  in
+  let expect_refusal result =
+    match result with
+    | Error _ -> ()
+    | Ok _ -> fail "unadmitted or foreign history became observable"
+  in
+  expect_context "A original handoff" (bound identity_a (read ~send));
+  served := config_b;
+  response := frame "B independent handoff";
+  expect_refusal (bound identity_a (read ~send));
+  (* Even the same ETag at the same endpoint cannot borrow another root's body. *)
+  response := frame ~status:304 "B independent handoff";
+  expect_refusal (bound identity_b (read ~send));
+  response := frame "B independent handoff";
+  expect_context "B independent handoff" (bound identity_b (read ~send));
+  response := frame ~status:304 "B independent handoff";
+  expect_context "B independent handoff" (bound identity_b (read ~send));
+  response := frame ~status:304 ~receipts:[] "unattested reuse";
+  expect_refusal (bound identity_b (read ~send));
+  List.iter (fun receipts ->
+    response := frame ~receipts "unadmitted replacement";
+    expect_refusal (bound identity_b (read ~send));
+    response := frame ~status:304 "B independent handoff";
+    expect_context "B independent handoff" (bound identity_b (read ~send)))
+    [[]; [receipt; receipt]; [fst receipt, "wrong-workspace-receipt"]];
+  response := frame "B independent handoff";
+  expect_context "B independent handoff" (bound identity_b (read ~send));
+  expect_refusal (bound identity_b (read ~port:(port+1) ~send));
+  (* A child retains its asking fiber's identity after the parent leaves that
+     binding, while a different collector is reading another endpoint/root. *)
+  Eio.Switch.run @@ fun sw ->
+  let start, release = Eio.Promise.create () in
+  let child, completed = Eio.Promise.create () in
+  let send_a = send_for config_a (frame "A original handoff") in
+  let send_b = send_for config_b (frame "B independent handoff") in
+  bound ~port:(port+1) identity_a (fun () ->
+    Eio.Fiber.fork ~sw (fun () ->
+      Eio.Promise.await start;
+      Eio.Promise.resolve completed (read ~port:(port+1) ~send:send_a ())));
+  bound identity_b (fun () ->
+    Eio.Promise.resolve release ();
+    expect_context "B independent handoff" (read ~send:send_b ()));
+  expect_context "A original handoff" (Eio.Promise.await child)
+
 let () =
   Eio_main.run @@ fun _env ->
   Server_request_authority.with_current
@@ -420,6 +528,8 @@ let () =
          [ ( "resolution"
            , [ test_case "workspace-bound reads preserve exact query authority" `Quick
                  test_workspace_bound_read_preconditions
+             ; test_case "original history survives workspace replacement and parallel reads" `Quick
+                 test_history_read_keeps_original_workspace_through_replacement
              ; test_case "anonymous public hint is preserved" `Quick
                  test_anonymous_public_read_preserves_hint
              ; test_case "rejected credential fails closed" `Quick

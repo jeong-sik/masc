@@ -725,6 +725,20 @@ type 'a mailed = {
   message : 'a;
 }
 
+val collect_owned_results : state -> async_msg mailed list
+(** Capture one finite observation of the pending owners. Newly published
+    results belong to a later round; original receipts remain request-owned. *)
+
+module Delivery_round : sig
+  type 'a t
+  val empty : 'a t
+  (** Drain the captured shared FIFO prefix before collecting a finite set of
+      owned results. A paused round retains that prefix or result remainder. *)
+  val take : 'a t -> can_take:(unit -> bool) -> queued:(unit -> int) ->
+    take_shared:(unit -> 'a option) -> collect_owned:(unit -> 'a list) ->
+    'a option * 'a t
+end
+
 val workspace_message_is_read : async_msg -> bool
 val workspace_message_admitted :
   state -> authority:workspace_authority -> reading:unit ref option -> async_msg -> bool

@@ -405,6 +405,13 @@ for bytes: [UInt8] in [[0xb0,101,0],[0xb0,100,0],[0xb0,6,12]] { coarseParameter.
 _ = try coarseParameter.bootstrap(replacing:coarseParameter)
 var laterFine = coarseParameter;laterFine.observe([0xb0,38,1],port:0)
 do { _ = try coarseParameter.bootstrap(replacing:laterFine);preconditionFailure("unknown fine parameter restored") } catch {}
+// A cut entry replays with `notes: false`, but the pedal position is physical
+// state and must be re-established anyway, after the events it replaces.
+var cutPedals = SourceChase()
+for bytes: [UInt8] in [[0xb0,64,127],[0x90,60,100],[0xb0,66,127]] { cutPedals.observe(bytes,port:0) }
+let cutMessages = try cutPedals.bootstrap(replacing:cutPedals,notes:false).map(\\.1)
+precondition(Array(cutMessages.suffix(2)) == [[0xb0,66,127],[0xb0,64,127]],"cut entry did not re-establish the pedal position")
+precondition(!cutMessages.contains { $0[0] & 0xf0 == 0x90 },"cut entry replayed note events")
 print("SOURCE_CHASE_DECISIONS_PASS: ordered expression, pedal membership, release wire forms, reset coverage, parameter components, paused seek, decoder continuation, due and endpoint pause")
 
 // Exercise production UID lookup, object-type/name validation and the complete

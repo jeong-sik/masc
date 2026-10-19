@@ -303,14 +303,18 @@ struct SourceChase {
             throw MidiFailure("source state reconstruction cannot restore held notes across program or bank changes")
         }
         var result = history
-        if notes {
-            for key in channels.keys.sorted() {
-                let state = channels[key]!, port = key >> 8, channel = UInt8(key & 15)
+        for key in channels.keys.sorted() {
+            let state = channels[key]!, port = key >> 8, channel = UInt8(key & 15)
+            if notes {
                 // silence() already releases owned keys/pedals. Restore the captured
                 // set before switching sostenuto on; later keys must remain outside it.
                 for note in state.notes where note.captured { result.append((port, [0x90 | channel, note.pitch, note.velocity])) }
-                if known.contains(ChaseField(port: port, channel: channel, kind: .controller(66))) { result.append((port, [0xb0 | channel, 66, state.sostenuto])) }
-                if known.contains(ChaseField(port: port, channel: channel, kind: .controller(64))) { result.append((port, [0xb0 | channel, 64, state.sustain])) }
+            }
+            // Pedal position is physical state a mid-region entry has to re-establish,
+            // not an event of the source prefix, so it survives `notes: false`.
+            if known.contains(ChaseField(port: port, channel: channel, kind: .controller(66))) { result.append((port, [0xb0 | channel, 66, state.sostenuto])) }
+            if known.contains(ChaseField(port: port, channel: channel, kind: .controller(64))) { result.append((port, [0xb0 | channel, 64, state.sustain])) }
+            if notes {
                 for note in state.notes where !note.captured { result.append((port, [0x90 | channel, note.pitch, note.velocity])) }
                 for note in state.notes where !note.held { result.append((port, [note.releaseStatus, note.pitch, note.release])) }
                 if let pressure = state.pressure { result.append((port, [0xd0 | channel, pressure])) }

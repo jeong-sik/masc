@@ -164,7 +164,7 @@ print("CAPTURE_AUDIO_CLOCK_PASS: 28801 stereo PCM frames, delayed starts, ration
 }
 `
   await writeFile(join(directory, 'Probe.swift'), swift)
-  const files = ['WaveArrangement.swift','CaptureAudioClock.swift','PulseAudioClock.swift','MidiTransport.swift','UmpTransport.swift','UmpOutput.swift','UmpRegions.swift','HybridMidiTransport.swift','UmpState.swift'].map(file=>new URL(file,import.meta.url).pathname)
+  const files = ['WaveArrangement.swift','WaveLoopClock.swift','CaptureAudioClock.swift','PulseAudioClock.swift','MidiTransport.swift','UmpTransport.swift','UmpOutput.swift','UmpRegions.swift','HybridMidiTransport.swift','UmpState.swift'].map(file=>new URL(file,import.meta.url).pathname)
   let result = spawnSync('xcrun', ['swiftc','-parse-as-library','-D','MIDI_LIBRARY','-D','ARRANGEMENT_LIBRARY',...files,join(directory,'Probe.swift'),'-o',join(directory,'probe'),'-framework','AVFoundation','-framework','CoreAudio','-framework','CoreMIDI'], { encoding:'utf8' })
   assert.equal(result.status,0,result.stderr)
   result=spawnSync(join(directory,'probe'),[join(directory,'audio.wav'),join(directory,'mono.wav')],{encoding:'utf8'})

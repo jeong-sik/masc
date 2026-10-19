@@ -27,11 +27,11 @@ struct AudioFailure: Error { let description: String; init(_ value:String){descr
 ${future}
 ${command}
 struct FakePractice {let countInSeconds:Double;let duration:Double}
-struct FakePlan { let duration=1.0;let captured=false;var clocked=false;var practice:FakePractice?=nil }
-struct FakeRegion { let id="region-1", startSeconds=0.0 }
-final class FakePlayer { var lastRenderTime:AVAudioTime?=AVAudioTime(hostTime:reviewHost);var plays=0;func play(at:AVAudioTime){plays+=1} }
+struct FakePlan { let duration=1.0;let captured=false;var clocked=false;var practice:FakePractice?=nil;var loop:Bool?=nil }
+struct FakeRegion { let id="region-1";var startSeconds=0.0 }
+final class FakePlayer { var lastRenderTime:AVAudioTime?=AVAudioTime(hostTime:reviewHost);var plays=0;var whens:[UInt64]=[];func play(at:AVAudioTime){plays+=1;whens.append(at.hostTime)} }
 final class FakeVoice {
- let region=FakeRegion(), player=FakePlayer();var end=1.0, prepares=0, stops=0;var completion:(()->Void)?
+ var region=FakeRegion();let player=FakePlayer();var end=1.0, prepares=0, stops=0;var completion:(()->Void)?
  func prepare(from seconds:Double,finished:@escaping()->Void,failed:@escaping(Error)->Void)throws->Bool{prepares+=1;completion=finished;return seconds<end}
  func stop(){stops+=1}
 }
@@ -115,6 +115,15 @@ beforePause();precondition(practice.finished==0)
 practice.receive(#"{"kind":"seek","seconds":0.1}"#)
 precondition(abs(practice.position-0.7)<1e-6 && practice.musicalAnchor==practice.anchor)
 practice.receive(#"{"kind":"stop"}"#);precondition(practice.finished==1)
+let looping=Probe();looping.plan.loop=true;looping.voices[0].region.startSeconds=0.8
+try looping.schedule(from:0,playing:true)
+precondition(looping.voices[0].player.whens==[looping.anchor])
+looping.engine.outputNode.lastRenderTime=AVAudioTime(hostTime:try futureHost(3.25,from:looping.anchor))
+precondition(abs(looping.currentTime()-0.25)<1e-6 && looping.engine.starts==1 && looping.voices[0].prepares==1)
+looping.receive(#"{"kind":"pause"}"#);precondition(looping.state == .paused && abs(looping.position-0.25)<1e-6)
+looping.receive(#"{"kind":"seek","seconds":1}"#);precondition(looping.position==0 && looping.finished==0)
+looping.receive(#"{"kind":"resume"}"#);precondition(looping.state == .playing)
+looping.receive(#"{"kind":"stop"}"#);precondition(looping.finished==1)
 print("ARRANGEMENT_CLOCK_DECISIONS_PASS: clocked silent horizon, either-order audio/MIDI/horizon completion, cancelled timer isolation across pause/seek/resume/stop; either-part-first completion, WAV-only continuity, one stop, common anchor conversion, paired pause/seek/resume, stale callback isolation, MIDI tail without audio voices")
 `
 const dir=await mkdtemp(join(process.env.TMPDIR ?? '/tmp','masc-arrangement-clock-'))

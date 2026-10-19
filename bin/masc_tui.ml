@@ -5514,7 +5514,10 @@ let refresh_browser_lane state ~mailbox =
   | Some view when not (Browser_lane_view.busy view) ->
       state.browser_lane <- Some (Browser_lane_view.refresh view);
       launch_browser_lane state ~mailbox
-        (match view.source with Live -> Discover Read_after_discovery | Automation | Stagehand -> Read)
+        (match view.selection, view.source with
+         | Live_unbound, _ -> Discover Choose_client
+         | (Unbound | Work_unbound), _ | (Bound_automatic | Bound_explicit), Live -> Discover Read_after_discovery
+         | (Bound_automatic | Bound_explicit), (Automation | Stagehand) -> Read)
   | Some _ | None -> ()
 
 let open_browser_lane state ~mailbox =
@@ -10732,7 +10735,14 @@ let draw_browser_viewport state (shot : Browser_lane_view.screenshot) bytes =
     | _ -> "wheel:center" in
   draw_image state ~refuse ~title:("Browser viewport · " ^ shot.title)
     ~caption:[Printf.sprintf "%s · tab %d · %.1f ms"
-        (Browser_lane_view.source_name shot.source) shot.tab_id shot.elapsed_ms; shot.url]
+        (match shot.source, state.browser_lane with
+         | Live, Some view ->
+             (match Browser_lane_view.screenshot_client view shot with
+              | Some client -> Browser_lane_view.browser_identity client
+              | None -> "Selected browser")
+         | Stagehand, _ -> "Chromium work browser"
+         | Automation, _ -> "Work browser"
+         | Live, None -> "Selected browser") shot.tab_id shot.elapsed_ms; shot.url]
     ~footer:("  Esc: back  r:refresh  " ^ wheel_hint ^ "  j/k:center  " ^ pointer_hint) bytes;
   if not !failed then state.browser_viewport <- Some (shot, bytes)
 
@@ -14219,7 +14229,9 @@ let open_lane_inventory_selection state ~mailbox =
       | Browser lane ->
           show_browser_lane state;
           state.browser_lane <- Option.map (fun view ->
-            if view.Browser_lane_view.source = lane then view
+            if view.Browser_lane_view.source = lane
+               && (match view.selection with Bound_automatic | Bound_explicit -> true
+                   | Unbound | Work_unbound | Live_unbound -> false) then view
             else Browser_lane_view.switch_source lane view) state.browser_lane;
           release_composer_for_browser_reader state;
           refresh_browser_lane state ~mailbox
@@ -20713,8 +20725,9 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
        | None -> ()
        | Some view ->
            let next, read = Browser_lane_view.accept_clients ~generation result view in
-           state.browser_lane <- Some next;
-           if read then launch_browser_lane state ~mailbox Browser_lane_view.Read)
+           let operation = Browser_lane_view.discovery_continuation next in
+           state.browser_lane <- Some (if read then Browser_lane_view.finish_discovery next else next);
+           if read then launch_browser_lane state ~mailbox operation)
   | Browser_lane_loaded (generation, result) ->
       state.browser_lane <- Option.map
         (Browser_lane_view.accept ~generation result) state.browser_lane
@@ -27406,10 +27419,12 @@ and is loaded on demand through keeper_skill.
                                     | Viewport_pointer _ ))) as other -> other) }
                  | "r" when not (busy view) ->
                      launch_browser_lane state ~mailbox:async_messages (Discover Choose_client)
-                 | "a" when not (busy view) ->
+                 | "A" when not (busy view) ->
+                     state.browser_lane <- Some {view with advanced_choices = not view.advanced_choices; client_picker=Some 0}
+                 | "a" when view.advanced_choices && not (busy view) ->
                      state.browser_lane <- Some (switch_source Automation view);
                      refresh_browser_lane state ~mailbox:async_messages
-                 | "c" when not (busy view) ->
+                 | "c" when view.advanced_choices && not (busy view) ->
                      state.browser_lane <- Some (switch_source Stagehand view);
                      refresh_browser_lane state ~mailbox:async_messages
                  | "j" | "down" | "k" | "up" when not (busy view) ->
@@ -27420,11 +27435,10 @@ and is loaded on demand through keeper_skill.
                      (match List.nth_opt (browser_choices view) cursor with
                       | None -> ()
                       | Some choice ->
-                          state.browser_lane <- Some (choose_browser choice view);
-                          if not (browser_choice_selected view choice) then
-                            (match choice with
-                             | Connected_browser _ -> launch_browser_lane state ~mailbox:async_messages Read
-                             | Stagehand_browser | Automation_browser -> refresh_browser_lane state ~mailbox:async_messages))
+                          let selected = choose_browser choice view in
+                          state.browser_lane <- Some selected;
+                          Option.iter (launch_browser_lane state ~mailbox:async_messages)
+                            (browser_choice_operation choice ~before:view selected))
                  | _ -> ()))
        | Some key when String.length key = 1 && Char.code key.[0] = 15
                        && Option.is_none (browser_history_on_screen state)
@@ -27505,7 +27519,7 @@ and is loaded on demand through keeper_skill.
                 launch_browser_history state ~mailbox:async_messages ~reload:true)
        | Some "B" when state.view = Connectors ->
            open_browser_lane state ~mailbox:async_messages
-       | Some (("esc" | "left" | "l" | "a" | "c" | "[" | "]" | "j" | "k" | "J" | "K" | "N" | "P"
+       | Some (("esc" | "left" | "l" | "a" | "c" | "A" | "[" | "]" | "j" | "k" | "J" | "K" | "N" | "P"
                | "up" | "down" | "pageup" | "pagedown" | "home" | "r"
                | "o" | "x" | "g" | "b" | "m" | "s" | "v" | "n" | "p" | "y" | "tab" | "\t" | "shift-tab" | "\r" | "\n" | "enter"
                | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9") as key)
@@ -27546,9 +27560,12 @@ and is loaded on demand through keeper_skill.
                      hide_browser_lane state;
                      if state.view = Connectors then
                        launch_connectors_load state ~mailbox:async_messages
-                 | "l" -> switch_to Live
-                 | "a" -> switch_to Automation
-                 | "c" -> switch_to Stagehand
+                 | "A" when not (busy view) ->
+                     state.browser_lane <- Some {view with advanced_choices = true; client_picker=Some 0};
+                     launch_browser_lane state ~mailbox:async_messages (Discover Choose_client)
+                 | "l" when view.advanced_choices -> switch_to Live
+                 | "a" when view.advanced_choices -> switch_to Automation
+                 | "c" when view.advanced_choices -> switch_to Stagehand
                  | "b" when not (busy view) ->
                      state.browser_lane <- Some { view with client_picker = Some 0 };
                      launch_browser_lane state ~mailbox:async_messages (Discover Choose_client)
@@ -27658,12 +27675,14 @@ and is loaded on demand through keeper_skill.
                  | "g" when Option.is_some (Browser_lane.server_lane_of_name view.source) && not (busy view) ->
                      state.browser_lane <- Some { view with url_draft = Some "" }
                  | "g" when view.source = Live ->
-                     report_action state "system" "Select automation (a) or stagehand (c) to navigate a browser the server owns"
-                 | "o" | "x" when Option.is_some (Browser_lane.server_lane_of_name view.source) ->
-                     launch_browser_lane state ~mailbox:async_messages
-                       (if key = "o" then Open_session else Close_session)
-                 | "o" | "x" ->
-                     report_action state "system" "Select automation (a) or stagehand (c) to open or close a browser the server owns"
+                     report_action state "system" "Use o:work browser to open a separate session, then g:URL"
+                 | "o" when not (busy view) ->
+                     let selected, operation = prepare_open view in
+                     state.browser_lane <- Some selected;
+                     launch_browser_lane state ~mailbox:async_messages operation
+                 | "x" when Option.is_some (Browser_lane.server_lane_of_name view.source) ->
+                     launch_browser_lane state ~mailbox:async_messages Close_session
+                 | "x" -> report_action state "system" "The selected browser is not a work session owned by MASC"
                  | "j" | "down" -> scroll 1
                  | "k" | "up" -> scroll (-1)
                  | "pagedown" | "pageup" ->

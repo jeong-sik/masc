@@ -137,7 +137,7 @@ let task_detail_viewport (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let pane_cols = task_document_columns state ~terminal_cols:cols in
-  let count = match Task_selection.detail_row ~detail_id:state.task_detail_id ~tasks:state.tasks_domain with
+  let count = match Task_selection.detail_row ~detail_id:state.task_detail_id ~tasks:(Masc_tui_types.task_domain_values state) with
     | None -> 0
     | Some task -> List.length (task_detail_lines state ~cols:pane_cols task)
   in
@@ -2076,7 +2076,7 @@ let render_planning (state : state) =
   match state.task_detail_id, state.task_focus, state.planning_mode with
   | Some _, Overview_tasks.Task_focus _, Planning_list ->
       (match Task_selection.detail_row
-               ~detail_id:state.task_detail_id ~tasks:state.tasks_domain with
+               ~detail_id:state.task_detail_id ~tasks:(Masc_tui_types.task_domain_values state) with
        | Some task -> render_task_detail state task
        | None -> render_work_tasks state)
   | None, Overview_tasks.Task_focus _, Planning_list -> render_work_tasks state

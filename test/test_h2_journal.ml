@@ -1180,8 +1180,8 @@ let test_first_loss_retains_unproven_effects mode () =
       let original_detail=match Masc_tui_fetched.view_for ~equal:Ui.equal_tools_async_task_source ui.tools_async_task_body ~key:source with
         | Ready detail | Stale (detail,_) -> detail
         | _ -> fail "exact original Task body disappeared before consumer switch" in
-      ui.tasks_domain <- [original_detail.task];
-      ui.tasks <- Masc.Tui_decode.active_tasks_of_domain ui.tasks_domain;
+      ui.task_payloads <- Ui.Task_payloads.observe [original_detail.task];
+      ui.tasks <- Masc.Tui_decode.active_tasks_of_domain (Ui.task_domain_values ui);
       ui.view <- Ui.Planning;ui.planning_mode <- Ui.Planning_list;
       ui.task_detail_id <- Some source.ats_task_id;
       ui.task_focus <- Masc_tui_overview_tasks.land_on ui.tasks ~task_id:source.ats_task_id;
@@ -1214,7 +1214,27 @@ let test_first_loss_retains_unproven_effects mode () =
          | Some (_,Observation.Applied) -> true | _ -> false);
       check bool "the same read still applies the changed other Task" true
         (List.exists (fun (task : Masc_domain.task) -> task.id="different-current-task"
-          && task.description="Other Task changed its authoritative evidence") ui.tasks_domain);
+          && task.description="Other Task changed its authoritative evidence") (Ui.task_domain_values ui));
+      (* The actual raw backlog snapshot remains cached on another Work read.
+         Its stable observation stays intact while an independent authoritative
+         Goal-link read fails; no old supplemental result may be borrowed. *)
+      let retained_payloads=ui.task_payloads in
+      let links=Workspace_goal_index.read_goal_task_links_authoritative_r config
+        |> require "original Goal links before independent read failure" in
+      Workspace_goal_index.write_goal_task_links_result config links
+        |> require "persist original Goal links before corruption";
+      let links_path=Workspace_goal_index.goal_task_links_path config in
+      let original_links=read links_path in
+      let write_links bytes = let oc=open_out_bin links_path in
+        Fun.protect ~finally:(fun () -> close_out oc) (fun () -> output_string oc bytes) in
+      write_links "{}";
+      Fun.protect ~finally:(fun () -> write_links original_links) (fun () ->
+        read_work ();
+        check bool "an actual cached Task snapshot retains its immutable source/value observation" true
+          (ui.task_payloads==retained_payloads);
+        check bool "same Task snapshot does not hide a fresh Goal-link source failure" true
+          (match Ui.task_goal_reading ui ~task_id:source.ats_task_id with
+           | Masc_tui_agenda.Read_failed _ -> true | Read _ | Not_read -> false));
       (* A change to the selected Task itself must not borrow that payload.
          Its new pending owner continues through the existing scope replay. *)
       let backlog=Workspace_backlog.read_backlog_r config |> require "backlog before Work Task update" in
@@ -1225,7 +1245,7 @@ let test_first_loss_retains_unproven_effects mode () =
       read_work ();
       check bool "selected Work Task content is newly observed under the same identity" true
         (List.exists (fun (task : Masc_domain.task) -> task.id=source.ats_task_id
-          && task.description=work_description) ui.tasks_domain);
+          && task.description=work_description) (Ui.task_domain_values ui));
       let changed_work=Ui.sync_task_documents ui ~cols:72 in
       let work_body=find Document.Body changed_work in
       Ui.suspend_workspace_readings ui;
@@ -1234,11 +1254,11 @@ let test_first_loss_retains_unproven_effects mode () =
       check bool "retired preparation cannot settle a reentered same-ID document" true
         (Masc_tui_fetched.in_flight ui.task_document_body.tds_reading);
       List.iter (fun request -> Ui.complete_task_document ui ~cols:72 request (prepare request)) replacement_documents;
-      ui.view <- Ui.Tools;ui.tasks_domain <- [];
+      ui.view <- Ui.Tools;ui.task_payloads <- Ui.Task_payloads.empty;
       let refresh=Ui.begin_tools_async_task_body ui ~force:true |> Option.get in
       Ui.complete_tools_async_task_body ui refresh (Error "Task storage unavailable");
       check bool "body failure retains full original Task independently of list membership" true
-        (ui.tasks_domain=[] && match Masc_tui_fetched.view_for ~equal:Ui.equal_tools_async_task_source ui.tools_async_task_body ~key:source with
+        ((Ui.task_domain_values ui)=[] && match Masc_tui_fetched.view_for ~equal:Ui.equal_tools_async_task_source ui.tools_async_task_body ~key:source with
          | Stale (detail,_) -> detail.task.id=source.ats_task_id && detail.task.description=description
          | _ -> false);
       check bool "current Task cannot replace original Task detail" true (Result.is_error (read_body "different-current-task"));

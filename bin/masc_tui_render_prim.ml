@@ -2957,7 +2957,7 @@ let resolve_change_context (state : state) ~(path_opt : string option) : change_
     | Some tid ->
         List.find_opt
           (fun (t : Masc_domain.task) -> String.equal t.id tid)
-          state.tasks_domain
+          (Masc_tui_types.task_domain_values state)
     | None -> None
   in
   let task_title =

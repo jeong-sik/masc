@@ -817,7 +817,7 @@ let harness_goal_lines (state : state) (verdict : Masc.Tui_decode.harness_verdic
     let known_task =
       List.exists
         (fun (row : Masc_domain.task) -> String.equal row.id verdict.hv_task_id)
-        state.tasks_domain
+        (Masc_tui_types.task_domain_values state)
     in
     if known_task then
       [ Ansi.dim, "  Towards      this task is not linked to a goal" ]

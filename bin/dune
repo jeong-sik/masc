@@ -1589,11 +1589,18 @@
  (libraries masc masc.masc_core masc_tui_task_document masc_tui_response_decode mtime.clock.os uuidm unix eio masc_log yojson))
 
 (library
+ (name masc_tui_task_payloads)
+ (wrapped false)
+ (modules masc_tui_task_payloads)
+ (libraries masc_types))
+
+(library
  (name masc_tui_types)
  (wrapped false)
  (modules masc_tui_types)
  (libraries
   masc_tui_chat_call_reader
+  masc_tui_task_payloads
   masc_tui_task_document_observation
   masc_tui_task_document
   masc_tui_text_block
@@ -2193,6 +2200,7 @@
  (modules masc_tui_loader masc_tui_http masc_tui_schedule_decode)
  (libraries
   masc_tui_chat_call_reader
+  masc_tui_task_payloads
   masc
   masc.masc_core
   masc.masc_types

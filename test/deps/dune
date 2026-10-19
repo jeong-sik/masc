@@ -172,6 +172,7 @@
   (re_export masc.masc_exec_bash_parser)
   (re_export masc_tui_msx_tick)
   (re_export masc_tui_types)
+  (re_export masc_tui_task_payloads)
   (re_export masc_workspace)
   ;; Goal domain extracted to lib/goal/ (masc_goal). Re-export so test code
   ;; using bare Goal_store.X / Goal_phase.X resolves after decoupling.

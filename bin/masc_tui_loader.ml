@@ -459,7 +459,7 @@ let replace_keeper_rows ~preserve_on_error (state : state)
 type local_reading =
   { lr_agents : agent list
   ; lr_rows : Masc_tui_overview_tasks.rows_reading
-  ; lr_tasks_domain : Masc_domain.task list
+  ; lr_task_payloads : Masc_tui_task_payloads.t
   ; lr_tasks_error : string option
   ; lr_task_flow : Masc_tui_task_flow.t option
   ; lr_operator_stalled : Masc_tui_agenda.stalled Masc_tui_agenda.reading
@@ -467,31 +467,15 @@ type local_reading =
   ; lr_goals_to_confirm : Masc_tui_agenda.goal_to_confirm Masc_tui_agenda.reading
   }
 
-(* The new reading owns membership/order and every supplemental observation.
-   This request-local immutable index only reuses equal Task values. Ambiguous
-   old IDs supply no reusable payload; they never collapse new source rows. *)
-module Task_payload_ids = Map.Make (String)
-
-let reuse_task_payloads previous tasks =
-  let indexed=List.fold_left (fun indexed (task : Masc_domain.task) ->
-    Task_payload_ids.update task.id (function
-      | None -> Some (Some task)
-      | Some _ -> Some None) indexed) Task_payload_ids.empty previous in
-  List.map (fun (task : Masc_domain.task) ->
-    match Task_payload_ids.find_opt task.id indexed with
-    | Some (Some previous) when previous==task || Masc_domain.equal_task previous task -> previous
-    | Some _ | None -> task) tasks
-
-(* Called after the actual IO read and its cache lock have returned. Cold reads
-   and physically identical lists need no CPU submission. Stabilized lists can
-   differ from the backlog cache's raw list, so a cache hit can still compare. *)
+(* Planning is constant-time and the opaque observation keeps raw source and
+   stable values together. Full comparisons run only for a new producer list,
+   after the actual I/O submission and cache lock have returned. *)
 let prepare_local_workspace (request : local_workspace_request) (reading : local_reading) =
-  match request.lwr_previous_tasks with
-  | [] -> reading
-  | previous when previous==reading.lr_tasks_domain -> reading
-  | previous ->
+  match Masc_tui_task_payloads.prepare ~previous:request.lwr_previous_tasks reading.lr_task_payloads with
+  | Immediate payloads -> {reading with lr_task_payloads=payloads}
+  | Compare comparison ->
     Masc_tui_response_decode.run ~name:"local.work.task_payloads.reuse_wait" (fun () ->
-      {reading with lr_tasks_domain=reuse_task_payloads previous reading.lr_tasks_domain})
+      {reading with lr_task_payloads=Masc_tui_task_payloads.finish comparison})
 
 type local_keeper_reading =
   { lkr_keepers : keeper list
@@ -547,7 +531,7 @@ let read_local_work_unlocked (base_path : string) : local_reading =
     load_active_tasks base_path
   in
   let goals_to_confirm = load_goals_to_confirm base_path in
-  { lr_agents = agents; lr_rows = rows; lr_tasks_domain = tasks_domain
+  { lr_agents = agents; lr_rows = rows; lr_task_payloads = Masc_tui_task_payloads.observe tasks_domain
   ; lr_tasks_error = tasks_error; lr_task_flow = task_flow
   ; lr_operator_stalled = operator_stalled; lr_goal_task_links = goal_task_links
   ; lr_goals_to_confirm = goals_to_confirm }
@@ -567,7 +551,7 @@ let apply_local_workspace (state : state) (reading : local_reading) =
      its row even when the task just turned terminal, because the projection
      below drops exactly those. *)
   let rows = reading.lr_rows in
-  state.tasks_domain <- reading.lr_tasks_domain;
+  state.task_payloads <- reading.lr_task_payloads;
   state.goal_task_links <- reading.lr_goal_task_links;
   state.task_reading <- rows;
   state.tasks <-
@@ -608,7 +592,7 @@ let clear_local_workspace ?(keep_keeper_rows = false) (state : state) =
   invalidate_local_source_read state Local_work;
   state.agents <- [];
   state.tasks <- [];
-  state.tasks_domain <- [];
+  state.task_payloads <- Masc_tui_task_payloads.empty;
   state.goal_task_links <- Goal_links_not_read;
   state.task_focus <- Masc_tui_overview_tasks.No_task_focus;
   state.task_reading <- Masc_tui_overview_tasks.Rows_unread;

@@ -6560,7 +6560,7 @@ type row_list = {
    into a scroll nothing was drawing while the visible list refused them. *)
 let task_detail_on_screen (state : state) =
   Masc_tui_task_selection.detail_row ~detail_id:state.task_detail_id
-    ~tasks:state.tasks_domain
+    ~tasks:(Masc_tui_types.task_domain_values state)
 
 (* A removed Goal renders the list, so its stale detail id owns no commands. *)
 let goal_detail_on_screen (state : state) =
@@ -28949,7 +28949,7 @@ and is loaded on demand through keeper_skill.
                            report_action state "error" ("Tasks unavailable: " ^ detail)
                        | Masc_tui_overview_tasks.Rows_read _ ->
                            match Masc_tui_task_selection.detail_row
-                             ~detail_id:(Some task_id) ~tasks:state.tasks_domain with
+                             ~detail_id:(Some task_id) ~tasks:(Masc_tui_types.task_domain_values state) with
                            | None -> report_action state "system"
                                ("Task not in backlog: " ^ task_id)
                            | Some _ ->

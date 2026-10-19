@@ -461,3 +461,29 @@ calibration settings remain unchanged. The shared playback horizon rounds outwar
 to contain exact MIDI ends; its final representable tail is silence. Physical input readiness still depends on
 the selected device; a short count-in cannot guarantee a slow interface opens
 before the downbeat.
+
+### Move phrase experiments into backing
+
+In the phrase editor, `:arrange` opens a backing arrangement with the current
+phrase placed at beat zero. Its tempo, meter, audible MIDI and editable draft
+travel together. `q` saves that arrangement and returns to the same phrase draft,
+including its cursor and undo history. Later phrase edits create a new snapshot;
+existing backing does not change silently.
+
+In an arrangement, `:phrase` opens a new phrase laboratory. `:edit-midi ASSET`
+opens a generated asset's editable phrase or an imported asset's original MIDI
+editor. For an independent SMF2 pattern, use `:edit-midi ASSET PATTERN` (starting
+at 1), or select a region that already names the pattern. On return after edits,
+the arrangement receives a new MIDI asset in one undoable transaction. Existing
+assets and regions keep their original data. Enter places the new asset at the
+cursor; choose another position or output when comparing variants that share
+MIDI channels. No edits means no extra asset.
+
+Generated assets store the complete editable phrase beside the existing MIDI
+export. Save, reopen, editing and playback preparation verify that both agree.
+Their child draft is also saved in `phrases/` beside the arrangement, and the
+portable arrangement remains editable if that separate file is later moved.
+Original MIDI variants preserve the full source document and expression events;
+they are not reduced to generated phrase notes. Input monitoring and backing
+owners close before another editor takes the keyboard; close/cancel cannot open
+a late child or import a stale variant.

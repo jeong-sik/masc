@@ -94,7 +94,7 @@ export function editorCommand(editor, line) {
       if (tick >= editor.project.length) throw new Error('Cursor outside project')
       return { editor: { ...editor, tick, pitch: pitch(args[1]) } }
     }
-    case 'save': case 'play': case 'stop': case 'record': case 'help':
+    case 'save': case 'play': case 'stop': case 'record': case 'help': case 'arrange':
       count(0); return { editor, effect: { kind: command } }
     case 'save-as': case 'export': case 'wave': case 'output': case 'midi-output':
       count(1, Number.MAX_SAFE_INTEGER); return { editor, effect: { kind: command, path: args.join(' ') } }

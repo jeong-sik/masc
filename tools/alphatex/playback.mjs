@@ -3,16 +3,50 @@ import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
 
 export const transportPath = fileURLToPath(new URL('./music-transport', import.meta.url))
+export const midiTransportPath = fileURLToPath(new URL('./music-midi', import.meta.url))
+export async function midiDestinations({ executable = midiTransportPath, signal } = {}) {
+  signal?.throwIfAborted()
+  const child = spawn(executable, ['destinations'], { stdio: ['ignore', 'pipe', 'pipe'] })
+  let output = '', detail = '', failure = null, cancelled = false
+  child.stdout.setEncoding('utf8').on('data', text => { output += text })
+  child.stderr.setEncoding('utf8').on('data', text => { detail += text })
+  const abort = () => { cancelled = true; child.kill('SIGTERM') }
+  signal?.addEventListener('abort', abort, { once: true })
+  try {
+    await new Promise((resolve, reject) => {
+      child.once('error', error => { failure = error })
+      child.once('close', (code, exitSignal) => {
+        if (cancelled) reject(signal.reason)
+        else if (failure) reject(failure)
+        else if (code !== 0) reject(new Error(detail || `MIDI discovery ended: ${code ?? exitSignal}`))
+        else resolve()
+      })
+    })
+  } finally { signal?.removeEventListener('abort', abort) }
+  const result = JSON.parse(output)
+  if (result.kind !== 'destinations' || !Array.isArray(result.destinations)) throw new Error('Malformed MIDI destination list')
+  const ids = new Set()
+  for (const device of result.destinations) {
+    if (device.kind !== 'midi' || device.protocol !== 1 || typeof device.id !== 'string' || !device.id
+        || typeof device.name !== 'string' || ids.has(device.id)) throw new Error('Malformed MIDI destination identity')
+    ids.add(device.id)
+  }
+  return result.destinations
+}
 
 // One owned child is one transport. Completion means its pipes and process have
 // closed, rather than merely receiving a stopped acknowledgement.
-export function openPlayback({ path, output, loop = false, onEvent = () => {}, signal,
-  executable = transportPath, spawnProcess = spawn } = {}) {
+export function openPlayback({ path, output, midiOutput, loop = false, onEvent = () => {}, signal,
+  executable = midiOutput === undefined ? transportPath : midiTransportPath, spawnProcess = spawn } = {}) {
   signal?.throwIfAborted()
-  if (typeof path !== 'string' || !path) throw new Error('A WAV path is required')
+  if (typeof path !== 'string' || !path) throw new Error('A playback source path is required')
   if (output !== undefined && (typeof output !== 'string' || !output)) throw new Error('Invalid output UID')
+  if (midiOutput !== undefined && (typeof midiOutput !== 'string' || !midiOutput)) throw new Error('Invalid MIDI destination ID')
+  if (output !== undefined && midiOutput !== undefined) throw new Error('Choose an audio output or a MIDI destination')
   if (typeof loop !== 'boolean') throw new Error('Invalid loop selection')
-  const args = ['play', '--file', path, ...(output === undefined ? [] : ['--output', output]), ...(loop ? ['--loop'] : [])]
+  const selectedID = midiOutput ?? output
+  const selection = midiOutput === undefined ? (output === undefined ? [] : ['--output', output]) : ['--destination', midiOutput]
+  const args = ['play', '--file', path, ...selection, ...(loop ? ['--loop'] : [])]
   const child = spawnProcess(executable, args, { stdio: ['pipe', 'pipe', 'pipe'] })
   let failure = null, final = null, current = null, firstDevice = null, started = false, closed = false, stopping = false, detail = ''
   let resolveReady, rejectReady, resolveDone, rejectDone
@@ -40,10 +74,11 @@ export function openPlayback({ path, output, loop = false, onEvent = () => {}, s
           || !Number.isFinite(event.currentTime) || !Number.isFinite(event.duration)
           || event.duration <= 0 || event.currentTime < 0 || event.currentTime > event.duration
           || typeof event.device?.id !== 'string' || !event.device.id || typeof event.device.name !== 'string'
-          || !Number.isInteger(event.device.outputs) || event.device.outputs <= 0 || event.loop !== loop) {
+          || (midiOutput === undefined ? !Number.isInteger(event.device.outputs) || event.device.outputs <= 0
+            : event.device.kind !== 'midi' || event.device.protocol !== 1) || event.loop !== loop) {
         throw new Error('Malformed playback state')
       }
-      if (output !== undefined && event.device.id !== output || firstDevice !== null && event.device.id !== firstDevice) {
+      if (selectedID !== undefined && event.device.id !== selectedID || firstDevice !== null && event.device.id !== firstDevice) {
         throw new Error('Playback output differs from the selected device')
       }
       if (!current && event.kind !== 'playing' && event.kind !== 'stopped') throw new Error('Playback did not begin with a playing acknowledgement')
@@ -87,10 +122,11 @@ export function openPlayback({ path, output, loop = false, onEvent = () => {}, s
   return { ready, completion, stop,
     pause: () => command('pause'), resume: () => command('resume'), status: () => command('status'),
     seek(seconds) {
-      if (!Number.isFinite(seconds) || seconds < 0 || !current || seconds > current.duration) throw new Error('Seek must be between zero and the WAV duration, inclusive')
+      if (!Number.isFinite(seconds) || seconds < 0 || !current || seconds > current.duration) throw new Error('Seek must be between zero and the playback duration, inclusive')
       command('seek', { seconds })
     },
-    // Terminal teardown may require immediate termination of only this child.
-    terminate() { stopping = true; if (!closed) child.kill('SIGKILL') },
+    // The native owner handles SIGTERM by releasing its held MIDI keys before
+    // closing. Completion still owns that cleanup; SIGKILL would leave notes on.
+    terminate() { stopping = true; if (!closed) child.kill('SIGTERM') },
   }
 }

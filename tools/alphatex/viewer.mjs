@@ -28,6 +28,7 @@ const { values, positionals } = parseArgs({
     'session-root': { type: 'string' },
     input: { type: 'string' },
     output: { type: 'string' },
+    'midi-output': { type: 'string' },
     midi: { type: 'string' },
     'state-dir': { type: 'string' },
     sequence: { type: 'boolean' },
@@ -44,9 +45,10 @@ if (values.help) {
     + '  --state-dir stores native selection, saved presets, renders and Lane snapshot.\n'
     + '  --sequence opens a new phrase editor; --project song.json reopens one; --project-root sets its folder.\n'
     + '  --output UID selects sequencer audio output; :output UID changes it in the editor.\n'
+    + '  --midi-output=ID sends sequencer notes to that MIDI destination; :audio returns to audio.\n'
     + '  --record opens audio/MIDI input selection; r begins recording, s saves WAV and UMP.\n'
     + '  --session directory opens a saved waveform/MIDI timeline; --session-root sets the take folder.\n'
-    + '  --devices lists CoreAudio/CoreMIDI inputs on macOS.\n'
+    + '  --devices lists CoreAudio devices and CoreMIDI inputs/outputs on macOS.\n'
     + '  --check validates; --render output.png and --audio output.wav export using alphaTab 1.8.4.')
   process.exit(0)
 }
@@ -55,10 +57,14 @@ try {
   if (values.sequence || values.project) {
     const { viewSequencer } = await import('./sequencer-tui.mjs')
     await viewSequencer({ path: values.project, root: values['project-root'], soundfontPath: values.soundfont,
-      sessionRoot: values['session-root'], input: values.input, midi: values.midi, output: values.output })
+      sessionRoot: values['session-root'], input: values.input, midi: values.midi, output: values.output, midiOutput: values['midi-output'] })
   } else if (values.devices) {
     const { devices } = await import('./capture.mjs')
-    console.log(JSON.stringify(await devices()))
+    const { midiDestinations } = await import('./playback.mjs')
+    const [inputs, outputs] = await Promise.allSettled([devices(), midiDestinations()])
+    if (inputs.status === 'rejected') throw inputs.reason
+    console.log(JSON.stringify({ ...inputs.value, ...(outputs.status === 'fulfilled'
+      ? { midiOutputs: outputs.value } : { midiOutputError: outputs.reason.message }) }))
   } else if (values.record || values.session) {
     const { viewSession } = await import('./music-session.mjs')
     await viewSession({ directory: values.session, root: values['session-root'], input: values.input, midi: values.midi })
@@ -420,7 +426,8 @@ async function viewScores(sources, initialIndex) {
             if (key.name === 'p') {
               const { viewSequencer } = await import('./sequencer-tui.mjs')
               if (!closed) await viewSequencer({ root: values['project-root'], sessionRoot: values['session-root'],
-                soundfontPath: values.soundfont, input: values.input, midi: values.midi, output: values.output, embedded: true, signal: sessionAbort.signal })
+                soundfontPath: values.soundfont, input: values.input, midi: values.midi, output: values.output,
+                midiOutput: values['midi-output'], embedded: true, signal: sessionAbort.signal })
             } else {
               const { viewSession } = await import('./music-session.mjs')
               if (!closed) await viewSession({ root: values['session-root'], input: values.input, midi: values.midi, embedded: true, signal: sessionAbort.signal })

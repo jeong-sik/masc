@@ -158,7 +158,18 @@ quarter-note beat 4. Select an audio output with `--output UID` or `:output UID`
 read back, and unavailable outputs fail without substituting another device.
 The decoded WAV must fit the native PCM buffer resources. See the
 [transport protocol](native/TRANSPORT.md) for lifecycle and resource limits.
-This transport plays rendered WAV; it does not yet send external MIDI. `s` saves,
+For external MIDI, use `--midi-output=ID` or `:midi-output ID`; `--devices` lists
+CoreMIDI destinations separately from recording sources. Use the equals form
+for signed IDs, for example `--midi-output=-1234`. Space, pause/resume,
+seek and looping then send the project's notes, programs, level and pan directly
+to that pinned destination without synthesizing a WAV. Missing or removed ports
+fail without switching devices. Pausing and closing release this transport's
+held keys; resuming recreates notes still sounding at the target position.
+Resumed envelopes retrigger. `:audio` returns to the previous audio output,
+and `:output UID` selects an audio route. Changing routes waits for the previous
+player to release its keys. See the [MIDI protocol](native/MIDI-TRANSPORT.md).
+This is MIDI 1.0 project playback; MIDI import, arbitrary expression and external
+clock synchronization remain separate work. `s` saves,
 and q/Esc saves edits before returning. If the original file
 changed externally, closing retains edits in a private recovery document and prints
 its path rather than replacing the changed file.

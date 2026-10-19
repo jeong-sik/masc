@@ -57,6 +57,7 @@ try {
   if (mode === 'resume') {
     const created = JSON.parse(await readFile(join(output, 'create-receipt.json'), 'utf8'))
     assert.equal(created.status, 'passed', 'create proof must pass before restart verification')
+    assert.ok(Number.isSafeInteger(created.servicePid) && created.servicePid > 0, 'create proof must identify its service process')
     assert.notEqual(evidence.servicePid, created.servicePid, 'stop and restart the isolated service before resume')
     notes.push('service PID changed since successful create proof')
   }

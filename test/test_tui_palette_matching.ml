@@ -94,7 +94,7 @@ let test_the_palette_lists_tasks_and_posts () =
       ; priority = 2
       ; goal_ids = []
       } ];
-  state.board_posts <-
+  state.board_listing <- Masc_tui_fetched.Ready
     [ { bp_id = "p-1"
       ; bp_author = "alpha"
       ; bp_title = "release evidence sweep"
@@ -337,7 +337,7 @@ let test_a_label_starting_with_the_query_leads () =
     ; bp_attachments = []
     }
   in
-  state.board_posts <-
+  state.board_listing <- Masc_tui_fetched.Ready
     [ post "p-1" "deferred wakeup evidence"; post "p-2" "head 7def9c review" ];
   state.code_file <-
     landed ~path:"lib/a.ml"

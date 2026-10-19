@@ -180,7 +180,7 @@ let surface_row_texts (state : state) : surface -> string list option =
       (match state.board_mode with
        | Board_read _ | Board_compose -> None
        | Board_list ->
-           (match state.board_posts with
+           (match (board_posts state) with
             | [] -> None
             | posts ->
                 Some

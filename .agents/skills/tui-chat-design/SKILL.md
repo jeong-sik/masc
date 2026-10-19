@@ -1,6 +1,6 @@
 ---
 name: tui-chat-design
-description: "MASC TUI의 채팅·입력·로딩·진행 상태, 복합 조회의 부분 수신·하위 완료 관측과 Board 독립 데이터·census 가용성, Keeper·Work·로그·질문 원본의 비동기 조회, Runtime·Overview 목록/사용량의 공유 해석, Keeper 설정·Sandbox 단축키·Runtime 폼·원문 저장과 설정 snapshot 해석을 바꿀 때 쓴다. 원본 입력·revision·요청 소유권, 마지막 관측과 부분 실패, 준비 작업·상태 반영·paint 증거를 구분하는 규칙이다."
+description: "MASC TUI의 채팅·입력·로딩·진행 상태, 복합 조회의 부분 수신·하위 완료 관측과 Board 독립 데이터·목록/census 가용성, Keeper·Work·로그·질문 원본의 비동기 조회, Runtime·Overview 목록/사용량의 공유 해석, Keeper 설정·Sandbox 단축키·Runtime 폼·원문 저장과 설정 snapshot 해석을 바꿀 때 쓴다. 원본 입력·revision·요청 소유권, 마지막 관측과 부분 실패, 준비 작업·상태 반영·paint 증거를 구분하는 규칙이다."
 ---
 
 # 대화를 먼저 읽는 채팅
@@ -133,6 +133,15 @@ description: "MASC TUI의 채팅·입력·로딩·진행 상태, 복합 조회�
   끝나면 미수신을 unavailable로 남긴다. 이전 collector가 현재 슬롯을 소유하지 않으면
   새 관측을 실패로 바꾸지 않는다. workspace 철회는 census 값과 후보도 지워 다른 Board
   데이터와 같은 경계를 지킨다. 이 상태·문구는 worker 종료나 paint·속도 증거가 아니다.
+- 글 목록도 Fetched 관측 하나에 실제 글과 상태를 함께 둔다. 초기 글 조회 중과 미조회·정상
+  empty·실패를 구분하고, 대기는 Board_posts 슬롯에서 읽는다. census 대기를 글 조회로
+  표시하지 않는다. 같은 관측을 목록·검색·팔레트·상세 sidebar·키 입력 대상에 쓴다.
+  재조회·실패 중 글과 선택·작성 초안을 유지하고 마지막 관측임을 표시한다.
+- 상세 응답은 일치하는 글만 갱신하며 목록의 실패·진행 슬롯·순서를 바꾸지 않는다. 새 목록은
+  기존 identity 기반 선택 규칙을 사용하고, filtered 목록의 부재로 원본 detail을 닫지 않는다.
+  terminal 미반영·소유 collector의 미수신은 목록도 unavailable로 남기며 이전 cleanup은
+  새 관측을 낮추지 않는다. 오류 알림의 마지막 발행 기록은 관측과 별도로 두어 내부 미수신
+  상태가 같은 오류 알림을 반복 발행시키지 않게 한다. workspace 철회는 목록 후보도 지운다.
 
 ## Runtime 폼 저장
 

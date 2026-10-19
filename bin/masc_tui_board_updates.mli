@@ -4,13 +4,6 @@
 val leave_board_detail : Masc_tui_types.state -> unit
 (** Clear detail selection, history and both reading scroll positions. *)
 
-val apply_board_list_load :
-  Masc_tui_types.state -> remember_error:(string -> unit) ->
-  (Masc_tui_types.board_post list, string) result -> unit
-(** Success reconciles list selection. [remember_error] records the list error
-    and reports it using the caller's existing deduplication policy. A filtered
-    list cannot establish that an exact-ID detail target disappeared. *)
-
 val apply_board_post_load :
   Masc_tui_types.state -> report_error:(string -> unit) ->
   Masc_tui_board_detail.request ->

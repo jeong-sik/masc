@@ -6556,7 +6556,7 @@ let row_list (state : state) : row_list option =
       (match state.board_mode with
        | Board_read _ | Board_compose -> None
        | Board_list ->
-           windowed ~count:(List.length state.board_posts)
+           windowed ~count:(List.length (board_posts state))
              ~cursor:state.board_cursor (fun index ->
                state.board_cursor <- index))
   | Planning ->
@@ -9879,7 +9879,7 @@ let selected_surface_reference state =
     | Board_list ->
         Option.map
           (fun post -> Link.reference Board_post post.bp_id)
-          (List.nth_opt state.board_posts state.board_cursor)
+          (List.nth_opt (board_posts state) state.board_cursor)
     | Board_compose -> None
   in
   let planning () =
@@ -11687,6 +11687,16 @@ let remember_surface_error state ~surface ~current_error ~set_error err =
     add_event state "error"
       (Printf.sprintf "%s data unreliable: %s" surface err)
 
+let apply_board_list_load state result =
+  let previous=state.board_list_reported_error in
+  apply_board_posts_load state result;
+  match result with
+  | Ok _ -> ()
+  | Error detail ->
+      state.board_list_reported_error <- Some detail;
+      if not (Option.equal String.equal previous (Some detail)) then
+        add_event state "error" (Printf.sprintf "board list data unreliable: %s" detail)
+
 let apply_transport_load state = function
   | Ok transport ->
       state.transport <- Some transport;
@@ -12520,12 +12530,7 @@ let apply_http_scoped_data state ~datasets results =
   if state.workspace_identity = Workspace_identity_match then begin
   Option.iter (apply_approval_observation state) results.http_approvals;
   Option.iter (apply_asks_observation state) results.http_asks;
-  apply Surface_read_order.Board_posts ~received:Result.is_ok
-    (Masc_tui_board_updates.apply_board_list_load state
-       ~remember_error:(fun err ->
-         remember_surface_error state ~surface:"board list"
-           ~current_error:state.board_list_error
-           ~set_error:(fun value -> state.board_list_error <- value) err))
+  apply Surface_read_order.Board_posts ~received:Result.is_ok (apply_board_list_load state)
     results.http_board;
   apply Surface_read_order.Board_hearths ~received:Result.is_ok (Masc_tui_types.apply_board_census_load state) results.http_board_hearths;
   apply Surface_read_order.Planning_data ~received:Result.is_ok (apply_planning_load state) results.http_planning;
@@ -12548,12 +12553,7 @@ let apply_http_scoped_data state ~datasets results =
 
 let apply_http_dataset state = function
   | Dataset_transport result -> apply_transport_load state result
-  | Dataset_board_posts board ->
-    Masc_tui_board_updates.apply_board_list_load state
-      ~remember_error:(fun err ->
-        remember_surface_error state ~surface:"board list"
-          ~current_error:state.board_list_error
-          ~set_error:(fun value -> state.board_list_error <- value) err) board
+  | Dataset_board_posts board -> apply_board_list_load state board
   | Dataset_board_hearths hearths -> Masc_tui_types.apply_board_census_load state hearths
   | Dataset_planning result -> apply_planning_load state result
   | Dataset_system_logs result -> apply_system_logs_load state result
@@ -12703,11 +12703,10 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.board_compose_reply_to <- None;
   state.board_compose_attach_input <- None;
   state.board_post_inflight <- false;
-  state.board_posts <- [];
+  state.board_listing <- Masc_tui_fetched.Absent;
+  state.board_list_reported_error <- None;
   state.board_census <- Masc_tui_fetched.Absent;
   state.board_detail <- Board_detail.clear state.board_detail;
-  state.board_list_reading <- Board_list_unread;
-  state.board_list_error <- None;
   state.board_mode <- Board_list;
   state.goal_action_pending <- None;
   state.goal_action_error <- None;
@@ -13241,11 +13240,10 @@ let apply_confirmed_server_identity_reading state ~mailbox reading =
        Home. A later matching Metrics read cannot revive foreign/stale tokens. *)
     let reason = "workspace identity is unverified; decisions require a fresh matching read" in
     apply_approvals_load state (Error reason);
-    state.board_posts <- [];
+    state.board_listing <- Masc_tui_fetched.Failed reason;
+    state.board_list_reported_error <- None;
     state.board_census <- Masc_tui_fetched.Absent;
     state.board_detail <- Board_detail.clear state.board_detail;
-    state.board_list_reading <- Board_list_unread;
-    state.board_list_error <- Some reason;
     state.board_vote_armed <- None;
     state.keeper_roster <- Keeper_control.Roster_unobserved;
     state.keeper_roster_error <- Some reason;
@@ -14925,13 +14923,13 @@ let move_board_read_scroll state ~by =
   else state.board_scroll <- next
 
 let move_board_posts_pane state ~mailbox ~delta =
-  let count = List.length state.board_posts in
+  let count = List.length (board_posts state) in
   let next = max 0 (min (count - 1) (state.board_cursor + delta)) in
   if count > 0 && next <> state.board_cursor then begin
     state.board_cursor <- next;
     Option.iter
       (open_board_post state ~mailbox ~focus:Left_pane)
-      (List.nth_opt state.board_posts next)
+      (List.nth_opt (board_posts state) next)
   end
 
 (* The next post without leaving the one being read. Reading a board meant
@@ -14943,13 +14941,13 @@ let step_board_read state ~mailbox ~delta =
   match state.board_mode with
   | Board_list | Board_compose -> ()
   | Board_read _ ->
-      let count = List.length state.board_posts in
+      let count = List.length (board_posts state) in
       let next = max 0 (min (count - 1) (state.board_cursor + delta)) in
       if count > 0 && next <> state.board_cursor then begin
         state.board_cursor <- next;
         Option.iter
           (open_board_post state ~mailbox ~focus:state.board_focus)
-          (List.nth_opt state.board_posts next)
+          (List.nth_opt (board_posts state) next)
       end
 
 let board_attachment_digit_of_key = function
@@ -14978,7 +14976,7 @@ let open_board_attachment state ~digit ~host ~port =
         | Board_detail.Absent | Board_detail.Loading | Board_detail.Failed _ ->
             List.find_opt
               (fun (candidate : board_post) -> String.equal candidate.bp_id post_id)
-              state.board_posts
+              (board_posts state)
       in
       (match post with
        | None -> ()
@@ -15758,7 +15756,7 @@ let handle_goal_action_key state ~mailbox ~(action : Goal_phase.Public_action.t)
 let handle_board_vote_key state ~mailbox ~(up : bool) =
   match state.board_mode with
   | Board_list -> (
-      match List.nth_opt state.board_posts state.board_cursor with
+      match List.nth_opt (board_posts state) state.board_cursor with
       | None -> ()
       | Some post -> (
           match state.board_vote_armed with
@@ -26689,7 +26687,7 @@ and is loaded on demand through keeper_skill.
                            if String.equal p.bp_id post_id then Some (i, p)
                            else find (i + 1) rest
                      in
-                     (match find 0 state.board_posts with
+                     (match find 0 (board_posts state) with
                       | Some (index, post) ->
                           state.board_cursor <- index;
                           open_board_post state ~mailbox:async_messages
@@ -28981,7 +28979,7 @@ and is loaded on demand through keeper_skill.
                   | Board_read _ -> true
                   | Board_list | Board_compose -> false)
               && state.board_focus = Left_pane ->
-           let count = List.length state.board_posts in
+           let count = List.length (board_posts state) in
            let target = if key = Some "end" then count - 1 else 0 in
            step_board_read state ~mailbox:async_messages
              ~delta:(target - state.board_cursor)
@@ -29077,7 +29075,7 @@ and is loaded on demand through keeper_skill.
             | Board ->
                 (match state.board_mode with
                  | Board_list ->
-                     let count = List.length state.board_posts in
+                     let count = List.length (board_posts state) in
                      state.board_cursor <-
                        max 0
                          (min (count - 1) (state.board_cursor + (direction * page)))
@@ -29990,7 +29988,7 @@ and is loaded on demand through keeper_skill.
             | Board ->
                 (match state.board_mode with
                  | Board_list ->
-                     if state.board_cursor < List.length state.board_posts - 1 then
+                     if state.board_cursor < List.length (board_posts state) - 1 then
                        state.board_cursor <- state.board_cursor + 1
                  | Board_read _ ->
                      (match state.board_focus with
@@ -30672,7 +30670,7 @@ and is loaded on demand through keeper_skill.
             | Board ->
                 (match state.board_mode with
                  | Board_list ->
-                     (match List.nth_opt state.board_posts state.board_cursor with
+                     (match List.nth_opt (board_posts state) state.board_cursor with
                       | Some p ->
                           open_board_post state ~mailbox:async_messages
                             ~focus:Right_pane p

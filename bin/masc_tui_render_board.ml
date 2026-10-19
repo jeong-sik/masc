@@ -361,13 +361,22 @@ let board_hearth_census_line ~cols (state : state) =
          | Some note -> Printf.sprintf "%s%s%s" Ansi.dim note Ansi.reset)
         (Printf.sprintf "%s%s%s" Ansi.dim tail Ansi.reset)
 
+let board_posts_status state =
+  let observation,pending=board_posts_reading state in
+  match observation with
+  | Masc_tui_fetched.Absent -> Some "posts not read"
+  | Loading -> Some "reading posts"
+  | Ready _ -> if pending then Some "refreshing posts; last observed" else None
+  | Stale _ -> Some (if pending then "refreshing posts; last failure retained" else "last observed posts; unavailable")
+  | Failed _ -> Some (if pending then "retrying posts; unavailable" else "posts unavailable")
+
 let render_board_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
 
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
     now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
-  let count = List.length state.board_posts in
+  let count = List.length (board_posts state) in
   (* Read once for the whole list: the header word and every row's number name
      the same time, and they would drift the moment two readings of the sort
      disagreed. *)
@@ -384,8 +393,9 @@ let render_board_list (state : state) =
         Printf.sprintf "  %shearth:%s%s" (Masc_tui_theme.tone Masc_tui_theme.Accent)
           (Terminal_text.single_line hearth) Ansi.reset
   in
-  let board_list_error =
-    Terminal_text.optional_single_line state.board_list_error
+  let observation,pending=board_posts_reading state in
+  let list_error =
+    Terminal_text.optional_single_line (board_listing_error state)
   in
   (* No sort here. The row under this one says it in the words that answer
      what the order is -- "latest changed first" rather than "updated" -- and
@@ -400,11 +410,10 @@ let render_board_list (state : state) =
   let holding = board_census_holding state in
   let header = Printf.sprintf "%s %s%s  %s  %s"
     (screen_title " MASC Board")
-    (match state.board_posts, board_list_page state ~error:board_list_error with
-     | _ :: _, _ | [], Page_empty ->
+    (match Masc_tui_fetched.value observation with
+     | Some _ ->
          list_count_text ~loaded:count ~holding
-     | [], (Page_unread | Page_failed) ->
-         title_missing_reading ~error:board_list_error)
+     | None -> if pending then "(reading posts)" else title_missing_reading ~error:list_error)
     hearth timestamp
     (connection_badge state) in
 
@@ -439,12 +448,13 @@ let render_board_list (state : state) =
                sheet under [?]. *)
             c.push_styled ~style:(Theme.recede ())
               (board_heading_with_tail ~cols
-                 (Printf.sprintf "  Sort [s]: %s"
-                    (board_sort_explanation state.board_sort))
+                 (Printf.sprintf "  Sort [s]: %s%s"
+                    (board_sort_explanation state.board_sort)
+                    (match board_posts_status state with None -> "" | Some status -> " · " ^ status))
                  " · H:choose hearth"))
         ; (fun () -> c.push (board_hearth_census_line ~cols state))
         ; (fun () ->
-            match List.nth_opt state.board_posts
+            match List.nth_opt (board_posts state)
                 (max 0 (min state.board_cursor (count - 1))) with
             | None -> c.push_empty ()
             | Some post ->
@@ -461,14 +471,15 @@ let render_board_list (state : state) =
       List.iter (fun draw -> draw ()) heading;
       let render_list_error err = c.push (data_unreliable_row ~cols err) in
       if count = 0 then
-        (match board_list_page state ~error:board_list_error with
-         | Page_failed -> Option.iter render_list_error board_list_error
-         | Page_unread -> c.push (Ansi.dim ^ page_unread_note ^ Ansi.reset)
-         | Page_empty ->
-             c.push (Ansi.dim ^ "  (no board posts)" ^ Ansi.reset))
+        (match observation with
+         | Masc_tui_fetched.Failed _ | Stale _ -> Option.iter render_list_error list_error
+         | Absent -> c.push (Ansi.dim ^ page_unread_note ^ Ansi.reset)
+         | Loading -> c.push (Ansi.dim ^ "  (reading Board posts)" ^ Ansi.reset)
+         | Ready _ -> c.push (Ansi.dim
+             ^ (if pending then "  (last listing empty; reading posts)" else "  (no board posts)") ^ Ansi.reset))
       else begin
-        Option.iter render_list_error board_list_error;
-        let error_rows = if Option.is_some board_list_error then 1 else 0 in
+        Option.iter render_list_error list_error;
+        let error_rows = if Option.is_some list_error then 1 else 0 in
         let content_height =
           max 0 (budget - List.length heading - error_rows)
         in
@@ -482,7 +493,7 @@ let render_board_list (state : state) =
         let now_unix = Unix.gettimeofday () in
         let board_posts_window =
           Rows.of_list ~first:scroll_offset ~height:content_height
-            state.board_posts
+            (board_posts state)
         in
         for i = 0 to content_height - 1 do
           let idx = i + scroll_offset in
@@ -733,7 +744,7 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
   in
 
   let source : Board_read_layout.source =
-    { post; detail; related_posts = state.board_posts;
+    { post; detail; related_posts = (board_posts state);
       keeper_names = List.map (fun (k : Tui_decode.keeper) -> k.k_name) state.keepers;
       columns = cols;
       styles = [ Theme.info (); Theme.warn (); Theme.bad (); Theme.recede ();
@@ -773,7 +784,7 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
         match referenced with
         | [] -> []
         | referenced ->
-          state.board_posts
+          (board_posts state)
           |> List.filter (fun (other : board_post) ->
             (not (String.equal other.bp_id post.bp_id))
             && List.exists
@@ -1084,7 +1095,7 @@ let board_list_pane (state : state) ~(open_post : board_post) ~rows ~cols buf =
           if String.equal post.bp_id open_post.bp_id then i
           else find (i + 1) rest
     in
-    find 0 state.board_posts
+    find 0 (board_posts state)
   in
   let format_sidebar_post (post : board_post) =
     let hearth_prefix =
@@ -1100,10 +1111,11 @@ let board_list_pane (state : state) ~(open_post : board_post) ~rows ~cols buf =
     Printf.sprintf "%s%s%s" hearth_prefix vote_prefix
       (Terminal_text.single_line post.bp_title)
   in
-  write_list_sidebar buf ~rows ~cols ~title:"Board"
+  let title=match board_posts_status state with None -> "Board" | Some status -> "Board · " ^ status in
+  write_list_sidebar buf ~rows ~cols ~title
     ~focused:(state.board_focus = Left_pane)
     ~holding:(board_census_holding state)
-    ~labels:(List.map format_sidebar_post state.board_posts)
+    ~labels:(List.map format_sidebar_post (board_posts state))
     ~selected
 
 let render_board_read (state : state) (list_post : board_post) =

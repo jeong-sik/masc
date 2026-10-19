@@ -216,6 +216,19 @@ physical worker cancellation. Late cleanup cannot downgrade a successor. Workspa
 withdrawal clears census values/candidates with the other Board presentation data.
 These UI state transitions add no HTTP, clock, retry or independent request owner.
 
+The post listing likewise stores its rows and availability in one Fetched view.
+Pending derives from `Board_posts`, independently of the census slot. Initial
+loading differs from unread/failed/received empty; a reread keeps its previous rows
+and failure. List, sidebar, palette, search and input selection use that same
+observation. Existing identity-based cursor reconciliation remains; a detail
+response enriches a matching row without reranking or making a failed/pending list
+received. A missing terminal result/owned collector exit records unavailability
+and old cleanup cannot downgrade a successor. The separate last-emitted-error
+record preserves notification deduplication across internal terminal reservations.
+Workspace withdrawal clears the listing and its candidates. No generic empty-page
+state or other surface's rendering contract changes here. Query-origin provenance
+for retained rows after changing sort/hearth still requires separate inspection.
+
 The HTTP/1 TUI dataset reader binds each existing JSON GET to the confirmed
 canonical base path and MASC root. Public-read, read-auth, permission-auth and
 token-permission-auth combinators validate the optional query pair before their

@@ -13,6 +13,7 @@
   "dependencies": {
     "@coderline/alphaskia": "3.5.147",
     "@coderline/alphatab": "1.8.4",
+    "cli-truncate": "^6.1.1",
     "jzz": "1.9.6",
     "jzz-midi-smf": "1.9.9",
     "tonal": "6.5.1"

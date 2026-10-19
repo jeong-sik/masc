@@ -139,6 +139,33 @@ alphaTab is MPL-2.0, Bravura is OFL-1.1, alphaSkia is BSD-3-Clause. Their notice
 with the locked dependencies. The Sonivox license is in alphaTab's
 `dist/soundfont/LICENSE` and must remain with a redistributed installation.
 JZZ and JZZ MIDI SMF are MIT-licensed; their notices ship with the pinned packages.
+## Music library
+
+`masc-alphatex --music` opens a plain terminal library for new phrases,
+arrangements and audio/MIDI recordings. It also lists JSON projects under
+`--project-root` and take directories under `--session-root`. Choose with arrows
+and Enter; `q` returns from an editor to the library, then back to its caller.
+Returning refreshes the library so a newly saved phrase can be continued.
+Use `r` to refresh, `:open PATH` for a saved project, `:midi PATH` to import MIDI,
+or `:session PATH` for an existing recorded take. Paths may contain spaces.
+Missing library directories are empty; other source failures stay visible
+alongside available entries. Closing waits for the active editor's cleanup.
+
+Selecting a saved item reads its details in a separate worker. Phrase details
+show the saved title, tempo, meter, duration and tracks; imported MIDI retains
+independent pattern durations. Arrangement details describe the document and
+its sources, without asserting that external assets can play. Take details
+validate the capture files and retain a failed recording's reason. A damaged
+item stays selectable with its read failure visible. Moving away cancels the
+old inspection and waits for its worker to exit before reading the new item;
+opening an editor and closing the library also join that cleanup.
+
+The MASC entry is Dashboard **s** or chat `/music`. It supplies
+`<base-path>/.masc/music/projects` and `<base-path>/.masc/music/sessions` as the
+workspace library roots. The companion must be updated together with that entry.
+This library and its editors do not need Kitty graphics or a score block.
+Graphical notation still uses `/score` or the ordinary score-viewer entry.
+
 # Phrase sequencer
 
 From `/score`, press **p** to open the piano-roll editor. It also opens directly
@@ -150,14 +177,33 @@ screen and returns to the same phrase. It does not yet overdub into the project.
 Move the cursor with arrows; Enter inserts or removes a note. Shift+arrows moves
 the selected note. `[`/`]` changes its length, `+`/`-` changes velocity, and `g`
 cycles the musical grid. Tab changes track, `n` adds one, `m` mutes it and `o`
-solos it. `u`/`y` undo/redo. On macOS, Space starts, pauses or resumes a preview of
-the audible tracks with the bundled SoundFont; `:stop` ends playback. `l` toggles
+solos it. `u`/`y` undo/redo. On macOS, the first audio Space opens the existing
+instrument/preset picker. Choose a verified VST instrument or the explicit
+SoundFont entry; **i** stops playback and reopens the picker. In the preset view,
+**e** opens the native editor and **p** selects a preset file. The selected VST
+preset owns the sound; MIDI program/bank messages do not replace it. Instrument,
+sample-library or license failures remain visible without a SoundFont fallback.
+Subsequent Space starts, pauses or resumes the preview; `:stop` ends playback. `l` toggles
 repetition of the loop region inside one native AVAudioEngine/PlayerNode. `:seek 4` moves to
 quarter-note beat 4. Select an audio output with `--output UID` or `:output UID`;
 `--devices` lists CoreAudio device identities. An explicit output is pinned and
 read back, and unavailable outputs fail without substituting another device.
 The decoded WAV must fit the native PCM buffer resources. See the
 [transport protocol](native/TRANSPORT.md) for lifecycle and resource limits.
+VST playback retains its performed MIDI, WAV and render hashes under `--state-dir`
+(the same default as the score picker), and publishes the latest local state for
+the Lane observer. Player acknowledgement is not proof of audible output or a
+Lane action receipt. Loop rendering omits the release tail so repetition does
+not insert an extra tail interval. Nonloop playback includes the instrument tail;
+the musical playhead stays at the phrase end during that tail. `:wave PATH`
+exports the currently selected audio instrument.
+
+Imported single-port MIDI can use the same VST route, including the chosen SMF2
+pattern and SMPTE timing. The original source document is retained; a synchronous
+PPQ performance copy is rendered. Independent source ports require separate VST
+instances, which are not connected yet; use their explicit MIDI output bindings.
+Source clip looping still requires expression-state reconstruction. These
+remaining routes are part of the broader music/TUI work.
 For external MIDI, use `--midi-output=ID` or `:midi-output ID`; `--devices` lists
 CoreMIDI destinations separately from recording sources. Use the equals form
 for signed IDs, for example `--midi-output=-1234`. Space, pause/resume,
@@ -227,10 +273,11 @@ multi-channel track; `:select event-ID` chooses a specific paired note. Chord la
 use note-key intervals and do not infer sustain-pedal voice durations. Shared-key
 ambiguity and unmatched input events remain in the original source.
 
-Source audition sends the complete ordered MIDI wire stream to explicitly selected
-outputs as described below. Controller/tempo editing and source WAV synthesis
-remain unfinished. Existing phrase-project MIDI/WAV transport
-continues to work. See [MIDI source semantics](MIDI-SOURCE.md) for retained data,
+Source audition can render a selected single-port performance through a VST or
+send the complete ordered MIDI wire stream to explicit outputs as described below.
+Choose a VST with `i`; `:wave PATH` exports its rendered performance. Source
+controller/tempo editing and SoundFont synthesis remain unfinished.
+See [MIDI source semantics](MIDI-SOURCE.md) for retained data,
 source-event identities and timing behavior.
 
 ### Imported performance audition
@@ -247,8 +294,9 @@ Source audition sends ordered MIDI 1.0 channel expression and F0/F7 wire data
 using the source tempo map or SMPTE clock. It plays once from the beginning.
 Pause/resume and seek restore supported channel state; unknown initial values
 and opaque device effects report errors as described in [Source state](SOURCE-STATE.md).
-Source looping and source WAV/VST synthesis remain unfinished. Existing
-phrase projects retain their pause/resume/seek/loop and SoundFont routes. Stop
+Source clip looping remains unfinished. The VST route instead pauses and seeks
+within its rendered audio; its `:wave` export uses the selected source pattern.
+Editable phrase projects retain their loop and SoundFont routes. Stop
 closes an in-flight SysEx stream, releases each owned held key and disables hold
 controllers 64/66/69 that this source enabled. It never broadcasts all-notes-off.
 Use destinations/channels owned for this audition: pedal state is shared by a

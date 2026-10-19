@@ -1049,3 +1049,24 @@ Handoff, a capability observation, UI application and actual paint/input respons
 are separate boundaries. No startup speedup is measured by this source change.
 See the [startup source comparison](../audits/2026-10-19-tui-probe-input-handoff.md)
 for authored protocol cases and the Before/After evidence limits.
+
+The `tui_startup_observation` structured records now distinguish probe dispatch,
+worker entry, capture end, caller observation, decoder installation, actual
+capability application, first decoded input and first input received by the
+main loop. They use one process's monotonic clock. PID and original probe
+dispatch time are diagnostic correlation, not execution authority.
+
+Capture end is not physical worker cleanup. A no-byte read is recorded as
+`read_returned_no_byte`, without inventing EOF or timeout. Caller interruption
+and a later capture result stay separate. Decoder installation is not a running
+input loop; decoded/received input is not an accepted action, useful Task work
+or paint. Synthetic paste recovery and graphics replies do not create new
+user-input observations.
+
+Facts enter each original capture's atomic state before diagnostic emission.
+An exit snapshot retains missing phases as null and never marks an unobserved
+worker finished. Snapshot reads are per capture, not a global atomic session
+freeze; abrupt process loss can prevent the snapshot. Existing frame/present
+timing remains separate. No key, paste, raw reply/refusal text or credential is
+added to these records. See the
+[lifecycle source comparison](../audits/2026-10-19-tui-startup-observation.md).

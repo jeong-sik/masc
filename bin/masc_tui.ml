@@ -21962,6 +21962,7 @@ let main
          state.view)
   in
   let input_reader = create_input_reader () in
+  at_exit (fun () -> report_startup_observations input_reader);
   let paste_pause_notified = ref false in
   let paste_quiet_notified = ref false in
   (* The notice this loop last set for a held sequence, kept as the exact
@@ -21975,7 +21976,7 @@ let main
      NO_COLOR omits OSC 10/11; the independent graphics query still runs. *)
   let palette_requested = Masc_tui_theme.colors_enabled in
   write_to_terminal (Masc_tui_terminal_probe.query ~palette:palette_requested);
-  let terminal_probe_decoder, _ =
+  let terminal_probe_decoder =
     read_terminal_probe input_reader ~palette_requested
   in
   (* Do not finish the decoder at early input handoff or the startup deadline.
@@ -22010,7 +22011,8 @@ let main
     terminal_draws_images := Some (match proto with
       | Masc_tui_graphics.Kitty_protocol | Masc_tui_graphics.ITerm2_protocol -> true
       | Masc_tui_graphics.Unsupported_protocol -> false);
-    request_full_repaint 0 in
+    request_full_repaint 0;
+    observe_capabilities_applied input_reader observation in
   (* One original observation owner survives early key handoff and byte-filter
      completion. Late replies update every existing terminal capability consumer. *)
   install_terminal_probe_publisher input_reader ~publish:apply_terminal_observation;
@@ -23567,7 +23569,10 @@ and is loaded on demand through keeper_skill.
         match interrupted_paste with
         | Some paste -> Some (Pasted paste)
         | None when !skip_input_after_interrupt -> None
-        | None -> read_input ~timeout:input_timeout input_reader ()
+        | None ->
+          let input = read_input ~timeout:input_timeout input_reader () in
+          Option.iter (observe_input_received input_reader) input;
+          input
       in
       let input =
         if recovered_paste_send_locked state then

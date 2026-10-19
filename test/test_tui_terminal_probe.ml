@@ -598,6 +598,75 @@ let test_no_color_handoff_retains_refusal_and_late_geometry () =
     (match !observations with latest::_ -> latest == observed | [] -> false)
 ;;
 
+let test_startup_caller_interrupt_does_not_replace_late_worker_facts () =
+  let module O = Masc_tui_startup_observation in
+  let note at_ns event facts = fst (O.record facts ~at_ns event) in
+  let probe = fed ~palette_requested:true "x" in
+  let initial = O.create ~pid:7 ~dispatched_ns:10L in
+  let interrupted = initial |> note 12L O.Worker_started
+      |> note 14L (O.Caller_observed (O.Call_failed O.Interrupted)) in
+  let late = interrupted |> note 20L (O.Capture_finished (O.Captured
+      {reason=O.User_input_ready;bytes_read=1;replies=Masc_tui_terminal_probe.observation probe})) in
+  check bool "late real worker result does not convert caller interruption" true
+    (late.caller_observed = Some (14L,O.Call_failed O.Interrupted));
+  check bool "worker's actual captured input remains distinct" true
+    (match late.capture_finished with Some (_,O.Captured {reason=O.User_input_ready;bytes_read=1;_}) -> true | _ -> false);
+  check bool "earlier missing worker result stays missing in immutable history" true
+    (Option.is_none interrupted.capture_finished);
+  check bool "worker result alone creates no main handoff" true (Option.is_none late.decoder_installed_ns);
+  check bool "capture bytes alone create no decoded or received input" true
+    (Option.is_none late.first_input_decoded && Option.is_none late.first_input_received)
+;;
+
+let test_startup_failure_and_unobserved_input_are_retained () =
+  let module O = Masc_tui_startup_observation in
+  let note at_ns event facts = fst (O.record facts ~at_ns event) in
+  let failed = O.create ~pid:8 ~dispatched_ns:10L |> note 12L O.Worker_started
+      |> note 15L (O.Capture_finished (O.Capture_failed {failure=O.Raised;bytes_read=5}))
+      |> note 18L (O.Caller_observed (O.Call_failed O.Raised)) in
+  let after,emitted = O.record failed ~at_ns:20L (O.First_input_received O.Key) in
+  check bool "missing decoder result is not fabricated by a receive observation" false emitted;
+  check bool "original failed sample remains intact" true (after == failed);
+  check bool "actual failure retains consumed count" true
+    (match after.capture_finished with Some (_,O.Capture_failed {failure=O.Raised;bytes_read=5}) -> true | _ -> false);
+  let absent = O.create ~pid:9 ~dispatched_ns:30L in
+  check bool "never-observed worker does not become a failed or successful worker" true
+    (Option.is_none absent.worker_started_ns && Option.is_none absent.capture_finished);
+  check bool "failed capture has no handoff or input result" true
+    (Option.is_none after.decoder_installed_ns && Option.is_none after.first_input_received)
+;;
+
+let test_startup_input_delivery_and_late_capabilities_are_independent () =
+  let module O = Masc_tui_startup_observation in
+  let module P = Masc_tui_terminal_probe in
+  let note at_ns event facts = fst (O.record facts ~at_ns event) in
+  let probe = fed ~palette_requested:true "q" in
+  let captured = P.observation probe in
+  let before = O.create ~pid:10 ~dispatched_ns:10L |> note 12L O.Worker_started
+      |> note 14L (O.Capture_finished (O.Captured {reason=O.User_input_ready;bytes_read=1;replies=captured}))
+      |> note 16L (O.Caller_observed O.Returned_to_caller) |> note 18L O.Decoder_installed
+      |> note 20L (O.Capabilities_applied captured)
+      |> note 22L (O.First_input_decoded O.Key) in
+  check bool "decoded input alone does not imply main reception" true
+    (Option.is_none before.first_input_received);
+  let received = before |> note 24L (O.First_input_received O.Key) in
+  String.iter (P.feed probe) (foreground ^ background ^ graphics_ok);
+  P.observe_cell_pixels probe (15,34);
+  let current = P.observation probe in
+  let after = received |> note 30L (O.Capabilities_applied current)
+      |> note 32L (O.First_input_decoded O.Pointer) |> note 34L (O.First_input_received O.Pointer) in
+  check bool "later gestures do not overwrite the original input pair" true
+    (after.first_input_decoded=Some (22L,O.Key) && after.first_input_received=Some (24L,O.Key));
+  check bool "late capabilities retain their actual application time and value" true
+    (match after.capabilities_applied with Some (30L,replies) -> replies == current | _ -> false);
+  check bool "capture never borrows late graphics or geometry" true
+    (Option.is_none captured.graphics && Option.is_none captured.cell_pixels);
+  check bool "actual late graphics and geometry remain available" true
+    (current.graphics=Some Masc_tui_graphics.Supported && current.cell_pixels=Some (15,34));
+  check bool "earlier input history remains independent of late replies" true
+    (before.first_input_decoded=Some (22L,O.Key) && Option.is_none before.first_input_received)
+;;
+
 let test_byte_cap_is_fixed () =
   check int "64 KiB" (64 * 1024) Masc_tui_terminal_probe.max_bytes
 ;;
@@ -648,6 +717,14 @@ let () =
             test_unknown_and_incomplete_sequences_replay
         ; test_case "NO_COLOR does not claim OSC" `Quick
             test_no_color_does_not_claim_osc_replies
+        ] )
+    ; ( "startup observation"
+      , [ test_case "caller interruption remains distinct from late worker completion" `Quick
+            test_startup_caller_interrupt_does_not_replace_late_worker_facts
+        ; test_case "failed and unobserved samples retain missing input" `Quick
+            test_startup_failure_and_unobserved_input_are_retained
+        ; test_case "input delivery remains independent of late capabilities" `Quick
+            test_startup_input_delivery_and_late_capabilities_are_independent
         ] )
     ; ( "stream"
       , [ test_case "early key keeps split replies, UTF-8 and opaque paste" `Quick

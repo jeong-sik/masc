@@ -33,6 +33,11 @@ description: "MASC TUI의 채팅·입력·로딩·진행 상태, 시작 키 인�
 - 이미지·portrait·MSX·악보는 현재 기능 관측을 사용한다. 악보 실행 closure에 초기값을
   붙들지 않는다. 키 인계와 기능 반영은 첫 paint·실제 입력 반응·속도 개선 증거와 구분한다.
   검사는 실제 바이트·프로토콜·관측 소유권을 보고 화면 문구·배치·PTY 검사를 만들지 않는다.
+- `tui_startup_observation`은 probe dispatch·worker 진입·수집 종료·caller 관측·decoder 설치·
+  기능 적용·첫 입력 decode/loop 수신을 구분한다. 수집 종료를 worker 정리로, 입력 수신을
+  명령 성공·Task 진척·paint로 부르지 않는다. 실제 no-byte read를 EOF/timeout으로 추정하지
+  않는다. 중단 caller와 늦은 worker 결과, 끝까지 관측되지 않은 단계를 따로 보존한다.
+  원래 capture의 사실을 먼저 저장하고 로그를 보낸다. timing은 입력/효과 허가를 고르지 않는다.
 
 ## 에디터 준비 조회
 

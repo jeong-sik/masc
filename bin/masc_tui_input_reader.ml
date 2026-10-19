@@ -1,6 +1,7 @@
 (** Terminal input effect boundary. The byte decoder remains pure and separate. *)
 
 module Render_schedule = Masc_tui_render_schedule
+module Startup = Masc_tui_startup_observation
 
 let nanoseconds_per_second = 1_000_000_000.0
 
@@ -34,6 +35,11 @@ type paste_phase =
   | Pasting of paste_clock
   | Draining_tail of paste_clock
 
+type startup_capture = {
+  facts : Startup.t Atomic.t;
+  decoder : Masc_tui_terminal_probe.decoder option Atomic.t;
+}
+
 type input_reader = {
   bytes : Bytes.t;
   mutable filled : int;
@@ -42,6 +48,7 @@ type input_reader = {
   mutable terminal_publisher :
     (Masc_tui_terminal_probe.observation -> unit) option;
   mutable published_terminal_observation : Masc_tui_terminal_probe.observation option;
+  mutable startup_captures : startup_capture list;
   mutable last_source : input_source option;
   decoder : Masc_tui_input_decoder.t;
   queued : Masc_tui_input_decoder.event Queue.t;
@@ -62,11 +69,52 @@ let create_input_reader () =
     terminal_probe = None;
     terminal_publisher = None;
     published_terminal_observation = None;
+    startup_captures = [];
     last_source = None;
     decoder = Masc_tui_input_decoder.create ();
     queued = Queue.create ();
     paste_clock = { last_byte_ns = 0L; cancel_armed = false };
   }
+
+let log_startup json =
+  try Log.Transport.info "tui_startup_observation=%s" (Yojson.Safe.to_string json) with
+  | Eio.Cancel.Cancelled _ as error -> raise error
+  | _ -> () (* A diagnostic sink failure must not discard input. *)
+
+let observe_capture capture ~at_ns event =
+  let rec update () =
+    let previous = Atomic.get capture.facts in
+    let next,changed = Startup.record previous ~at_ns event in
+    if not changed then None
+    else if Atomic.compare_and_set capture.facts previous next then Some next
+    else update () in
+  Option.iter (fun facts -> log_startup (Startup.event_json facts ~at_ns event)) (update ())
+
+let installed_capture reader = match reader.terminal_probe with
+  | None -> None
+  | Some decoder -> List.find_opt (fun (capture : startup_capture) -> match Atomic.get capture.decoder with
+      | Some original -> original == decoder | None -> false) reader.startup_captures
+
+let observe_installed reader event =
+  Option.iter (fun capture ->
+    let facts = Atomic.get capture.facts in
+    let pending = match event with
+      | Startup.First_input_decoded _ -> Option.is_none facts.first_input_decoded
+      | Startup.First_input_received _ ->
+        Option.is_some facts.first_input_decoded && Option.is_none facts.first_input_received
+      | Dispatched | Worker_started | Capture_finished _ | Caller_observed _
+      | Decoder_installed | Capabilities_applied _ -> true in
+    if pending then observe_capture capture ~at_ns:(Mtime_clock.elapsed_ns ()) event)
+    (installed_capture reader)
+
+let observe_capabilities_applied reader replies =
+  observe_installed reader (Startup.Capabilities_applied replies)
+
+let startup_observations reader = List.rev_map (fun capture -> Atomic.get capture.facts) reader.startup_captures
+
+let report_startup_observations reader =
+  List.iter (fun facts -> log_startup (Startup.snapshot_json facts ~at_ns:(Mtime_clock.elapsed_ns ())))
+    (startup_observations reader)
 
 let paste_phase reader =
   match Masc_tui_input_decoder.pending reader.decoder with
@@ -338,6 +386,14 @@ type input_event =
           other one into the [wheel-up] / [wheel-down] key the surfaces bind,
           so no surface learned a new key when the pane appeared. *)
 
+let input_kind = function
+  | Key _ -> Some Startup.Key | Pasted _ -> Some Startup.Paste
+  | Mouse_left_press _ | Mouse_left_release _ | Mouse_wheel _ -> Some Startup.Pointer
+  | Graphics_reply _ -> None
+
+let observe_input_received reader event =
+  Option.iter (fun kind -> observe_installed reader (Startup.First_input_received kind)) (input_kind event)
+
 (* How long a started sequence or character waits for its next byte inside
    one read. A lone ESC is the Escape key once this passes; anything longer
    stays held in the decoder and the next read resumes it. *)
@@ -437,7 +493,10 @@ let read_input ?(timeout = 0.1) reader () : input_event option =
               None
             else read ()
       in
-      serve ())
+      let event = serve () in
+      Option.iter (fun event -> Option.iter
+        (fun kind -> observe_installed reader (Startup.First_input_decoded kind)) (input_kind event)) event;
+      event)
 
 (* How long to wait for the combined palette and graphics answers. A terminal
    replies as soon as it has parsed a supported query; an unsupported query
@@ -446,43 +505,72 @@ let read_input ?(timeout = 0.1) reader () : input_event option =
 let terminal_probe_wait_seconds = 0.2
 
 let read_terminal_probe reader ~palette_requested =
-  Eio_guard.run_in_systhread ~label:"tui-terminal-probe" (fun () ->
+  let dispatched_ns = Mtime_clock.elapsed_ns () in
+  let capture = {facts=Atomic.make (Startup.create ~pid:(Unix.getpid ()) ~dispatched_ns);
+                 decoder=Atomic.make None} in
+  reader.startup_captures <- capture :: reader.startup_captures;
+  let observe event = observe_capture capture ~at_ns:(Mtime_clock.elapsed_ns ()) event in
+  let observe_failure event =
+    if Eio_guard.is_eio_fiber () then Eio.Cancel.protect (fun () -> observe event)
+    else observe event in
+  let failure = function Eio.Cancel.Cancelled _ -> Startup.Interrupted | _ -> Startup.Raised in
+  match
+    observe Startup.Dispatched;
+    Eio_guard.run_in_systhread ~label:"tui-terminal-probe" (fun () ->
+      let bytes_read = ref 0 in
+      match
+      observe Startup.Worker_started;
       let decoder =
         Masc_tui_terminal_probe.create ~palette_requested
       in
+      Atomic.set capture.decoder (Some decoder);
       let timeout_ns =
         Int64.of_float
           (terminal_probe_wait_seconds *. nanoseconds_per_second)
       in
       let deadline_ns = Int64.add (Mtime_clock.elapsed_ns ()) timeout_ns in
-      let bytes_read = ref 0 in
-      let finished = ref false in
-      while
-        (not !finished)
-        && !bytes_read < Masc_tui_terminal_probe.max_bytes
-        && (match Masc_tui_terminal_probe.startup_status decoder with
-            | Awaiting_replies -> true
-            | Input_ready | Replies_ready -> false)
-      do
+      let rec read () =
+        if !bytes_read >= Masc_tui_terminal_probe.max_bytes then Startup.Byte_cap_reached
+        else match Masc_tui_terminal_probe.startup_status decoder with
+        | Input_ready -> Startup.User_input_ready
+        | Replies_ready -> Startup.Replies_ready
+        | Awaiting_replies ->
         let remaining_ns =
           Int64.sub deadline_ns (Mtime_clock.elapsed_ns ())
         in
-        if Int64.compare remaining_ns 0L <= 0 then finished := true
+        if Int64.compare remaining_ns 0L <= 0 then Startup.Deadline_reached
         else
           match
             take_terminal_buffer_byte reader
               ~timeout:(Int64.to_float remaining_ns /. nanoseconds_per_second)
           with
-          | None -> finished := true
+          | None -> Startup.Read_returned_no_byte
           | Some byte ->
             incr bytes_read;
-            Masc_tui_terminal_probe.feed decoder byte
-      done;
-      decoder, Masc_tui_terminal_probe.snapshot decoder)
+            Masc_tui_terminal_probe.feed decoder byte;
+            read () in
+      let reason = read () in
+      decoder,reason
+      with
+      | decoder,reason ->
+        observe (Startup.Capture_finished (Startup.Captured
+          {reason;bytes_read= !bytes_read;replies=Masc_tui_terminal_probe.observation decoder}));
+        decoder
+      | exception error ->
+        let backtrace = Printexc.get_raw_backtrace () in
+        observe_failure (Startup.Capture_finished (Startup.Capture_failed {failure=failure error;bytes_read= !bytes_read}));
+        Printexc.raise_with_backtrace error backtrace)
+  with
+  | decoder -> observe (Startup.Caller_observed Startup.Returned_to_caller); decoder
+  | exception error ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    observe_failure (Startup.Caller_observed (Startup.Call_failed (failure error)));
+    Printexc.raise_with_backtrace error backtrace
 ;;
 
 let install_terminal_probe reader decoder =
-  reader.terminal_probe <- Some decoder
+  reader.terminal_probe <- Some decoder;
+  observe_installed reader Startup.Decoder_installed
 
 let abandon_draining reader =
   Masc_tui_input_decoder.abandon_draining reader.decoder

@@ -161,7 +161,7 @@ func stop(_ owner:UmpLoopTransport){owner.finish(reason:"test",error:nil,publish
 }}
 `
  await writeFile(join(root,'Probe.swift'),swift)
- const files=['WaveArrangement.swift','WaveLoopClock.swift','CaptureAudioClock.swift','PulseAudioClock.swift','PulseLoopClock.swift','MidiTransport.swift','UmpTransport.swift','UmpRegions.swift','HybridMidiTransport.swift','UmpState.swift'].map(n=>new URL(n,import.meta.url).pathname)
+ const files=['WaveArrangement.swift','WaveLoopClock.swift','SourceAudioClock.swift','CaptureAudioClock.swift','PulseAudioClock.swift','PulseLoopClock.swift','MidiTransport.swift','UmpTransport.swift','UmpRegions.swift','HybridMidiTransport.swift','UmpState.swift'].map(n=>new URL(n,import.meta.url).pathname)
  let r=spawnSync('xcrun',['swiftc','-parse-as-library','-D','MIDI_LIBRARY','-D','ARRANGEMENT_LIBRARY',...files,join(root,'Output.swift'),join(root,'Loop.swift'),join(root,'Probe.swift'),'-o',join(root,'probe'),'-framework','AVFoundation','-framework','CoreAudio','-framework','CoreMIDI'],{encoding:'utf8'})
  assert.equal(r.status,0,r.stderr)
  r=spawnSync(join(root,'probe'),[],{encoding:'utf8'});assert.equal(r.status,0,r.stderr);console.log(r.stdout.trim())

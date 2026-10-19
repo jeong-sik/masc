@@ -104,7 +104,8 @@ let test_active_tab_after_unreadable_tab () =
     let open Yojson.Safe.Util in
     check int "implicit read reaches the readable active tab" 2 (data |> member "tabId" |> to_int);
     check string "the selected tab is read" "readable" (data |> member "text" |> to_string)
-  | Error (Peer.Before_effect detail) | Error (Peer.Outcome_unknown detail) -> fail detail
+  | Error (Peer.Before_effect detail | Peer.Outcome_unknown detail
+          | Peer.Partial_failure {message=detail;_}) -> fail detail
 
 let test_capture_guards () =
   let viewport document = obj ["documentId", `String document; "width", `Int 800;
@@ -127,7 +128,8 @@ let test_capture_guards () =
     | Error (Peer.Before_effect detail), false ->
       check string name "viewport_changed_during_capture" detail
     | Ok _, false -> failf "%s accepted a stale screenshot" name
-    | Error (Peer.Before_effect detail), true | Error (Peer.Outcome_unknown detail), _ -> fail detail)
+    | Error (Peer.Before_effect detail), true
+    | Error (Peer.Outcome_unknown detail | Peer.Partial_failure {message=detail;_}), _ -> fail detail)
     ["stable capture", state url "before", true;
      "navigation", state "https://example.test/elsewhere" "before", false;
      "same-URL document replacement", state url "after", false;
@@ -405,7 +407,7 @@ let test_the_session_is_ended_after_a_command_got_no_reply () =
     (match Peer.dispatch peer ~verb:Peer.Tabs_list (obj []) with
      | Error (Peer.Before_effect detail) ->
        check string "a command that got no reply ends the connection for page commands"
-         "BiDi transport deadline exceeded" detail
+         "browsingContext.getTree: BiDi transport deadline exceeded" detail
      | Error (Peer.Outcome_unknown detail | Peer.Partial_failure {message=detail;_}) -> fail detail
      | Ok _ -> fail "an unanswered command produced an answer");
     check (option string) "its holder is told" (Some "BiDi transport deadline exceeded")
@@ -637,7 +639,7 @@ let test_peer_close_frame_ends_a_pending_command () =
       let result=Peer.dispatch peer ~verb:Peer.Tabs_list (obj []) in
       check bool "the close callback ends the holder" true (Eio.Promise.peek ended <> None);
       match result with
-      | Error (Peer.Before_effect "BiDi peer closed") -> Ok ()
+      | Error (Peer.Before_effect "browsingContext.getTree: BiDi peer closed") -> Ok ()
       | Error (Peer.Before_effect detail) -> Error detail
       | Error (Peer.Outcome_unknown detail | Peer.Partial_failure {message=detail;_}) -> Error detail
       | Ok _ -> Error "a pending command survived the close frame") in
@@ -653,7 +655,7 @@ let test_malformed_json_ends_a_pending_command () =
       let result=Peer.dispatch peer ~verb:Peer.Tabs_list (obj []) in
       check bool "invalid text disconnects the holder" true (Eio.Promise.peek ended <> None);
       match result with
-      | Error (Peer.Before_effect "invalid BiDi JSON") -> Ok ()
+      | Error (Peer.Before_effect "browsingContext.getTree: invalid BiDi JSON") -> Ok ()
       | Error (Peer.Before_effect detail) -> Error detail
       | Error (Peer.Outcome_unknown detail | Peer.Partial_failure {message=detail;_}) -> Error detail
       | Ok _ -> Error "invalid JSON produced an answer") in

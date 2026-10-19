@@ -373,6 +373,10 @@ A failed roster read or unreadable provider declaration does not imply deletion.
 Workspace recovery keeps the waits that belong to the recovered workspace, but
 does not bring back their consent URLs.
 
+Code's Ctrl-P finder and B return preserve the source reading while a file is
+being fetched. See [Code navigation](guides/tui-code-navigation.md) for failure,
+cancellation and reading-position behavior.
+
 Reading a board post on a wide terminal keeps the post list beside it.
 `Ctrl-W` toggles focus; `h` selects the list and `l` selects the post. `j`/`k`
 then move the focused pane, while `PgUp`/`PgDn` move it by a page. The open post

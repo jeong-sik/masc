@@ -634,7 +634,7 @@ let git_run_lines_or_error ~cwd args =
    [base] is the far edge because it is where the caller's authority ends: a
    query names a keeper or a repository, and an answer from outside that is
    not an answer to the question asked. *)
-let repository_owning ~base ~path =
+let repository_containing ~base ~directory =
   let normalise dir =
     let n = String.length dir in
     if n > 1 && dir.[n - 1] = '/' then String.sub dir 0 (n - 1) else dir
@@ -642,14 +642,72 @@ let repository_owning ~base ~path =
   let base = normalise base in
   let rec walk dir =
     let dir = normalise dir in
-    if not (String.equal dir base || String.starts_with ~prefix:(base ^ "/") dir)
+    if not (path_within ~base dir)
     then None
     else if Sys.file_exists (Filename.concat dir ".git") then Some dir
     else
       let parent = Filename.dirname dir in
       if String.equal parent dir then None else walk parent
   in
-  walk (Filename.dirname path)
+  walk directory
+
+let repository_owning ~base ~path =
+  repository_containing ~base ~directory:(Filename.dirname path)
+
+type workspace_file_catalog = {
+  catalog_root : string;
+  catalog_paths : string list;
+}
+
+type workspace_file_catalog_error =
+  | Catalog_invalid_path
+  | Catalog_directory_unavailable
+  | Catalog_repository_unavailable
+  | Catalog_scan_failed of string
+
+let workspace_file_catalog ~base ~path =
+  let ( let* ) = Result.bind in
+  let* directory =
+    resolve_workspace_file base path
+    |> Result.map_error (fun _ -> Catalog_invalid_path)
+  in
+  try
+    if (Unix.stat directory.resolved_path).Unix.st_kind <> Unix.S_DIR then
+      Error Catalog_directory_unavailable
+    else
+      match repository_containing ~base ~directory:directory.lexical_path with
+      | None -> Error Catalog_repository_unavailable
+      | Some root ->
+          let* paths =
+            Repo_git.file_paths_at ~local_path:root ()
+            |> Result.map_error (fun detail -> Catalog_scan_failed detail)
+          in
+          let catalog_paths =
+            List.filter_map
+              (fun path ->
+                let lexical_path = Filename.concat root path in
+                let relative = rel_under base lexical_path in
+                match resolve_workspace_file base relative with
+                | Error _ -> None
+                | Ok file ->
+                    (* The file reader accepts backslashes as separators. A
+                       literal POSIX backslash name must not become a different
+                       file when the operator opens the catalog selection. *)
+                    if not (String.equal file.lexical_path lexical_path) then None
+                    else
+                      match (Unix.stat file.resolved_path).Unix.st_kind = Unix.S_REG with
+                      | true -> Some relative
+                      | false -> None
+                      | exception Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) ->
+                          None)
+              paths
+          in
+          Ok { catalog_root = rel_under base root; catalog_paths }
+  with
+  | Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) ->
+      Error Catalog_directory_unavailable
+  | (Unix.Unix_error _ | Sys_error _ | Invalid_argument _) as ex ->
+      Error (Catalog_scan_failed (Printexc.to_string ex))
 
 let git_status_file_json (change : Repo_git.status_file) =
   `Assoc
@@ -667,6 +725,7 @@ module For_testing = struct
   type safe_workspace_file = workspace_file
   let resolve_workspace_file = resolve_workspace_file
   let repository_owning = repository_owning
+  let workspace_file_catalog = workspace_file_catalog
   let load_workspace_file_content = load_workspace_file_content
 end
 
@@ -939,6 +998,47 @@ let add_routes router =
              reqd payload)
          request reqd)
 
+  |> Http.Router.get "/api/v1/workspace/files" (fun request reqd ->
+       with_public_read
+         (fun state _req reqd ->
+           let uri = Uri.of_string request.target in
+           let base, source = resolve_workspace_base ~state ~uri in
+           match source with
+           | `RepositoryMissing _ | `RepositoryUnknown _
+           | `PlaygroundMissing _ | `KeeperUnknown _ ->
+               json_response ~status:`Not_found request reqd
+                 (json_error "The selected workspace is unavailable")
+           | `Project | `Repository _ | `Playground _ ->
+               match Uri.get_query_param uri "path" with
+               | None ->
+                   json_response ~status:`Bad_request request reqd
+                     (json_error "Missing path parameter")
+               | Some path ->
+                   let result =
+                     Domain_pool_ref.submit_io_or_inline (fun () ->
+                       workspace_file_catalog ~base ~path)
+                   in
+                   match result with
+                   | Ok catalog ->
+                       json_response_with_source ~status:`OK ~source request reqd
+                         (`Assoc
+                            [ ("root", `String catalog.catalog_root)
+                            ; ("files", `List (List.map (fun path -> `String path)
+                                               catalog.catalog_paths))
+                            ])
+                   | Error error ->
+                       let status, message =
+                         match error with
+                         | Catalog_invalid_path -> `Bad_request, "Invalid path"
+                         | Catalog_directory_unavailable ->
+                             `Not_found, "The selected directory is unavailable"
+                         | Catalog_repository_unavailable ->
+                             `Not_found, "Open a Git repository directory to find files"
+                         | Catalog_scan_failed detail -> `Internal_server_error, detail
+                       in
+                       json_response ~status request reqd (json_error message))
+         request reqd)
+
   |> Http.Router.get "/api/v1/git/status" (fun request reqd ->
        with_public_read
          (fun state _req reqd ->
@@ -1057,6 +1157,12 @@ let add_routes router =
          (fun state _req reqd ->
            let uri = Uri.of_string request.target in
            let base, source = resolve_workspace_base ~state ~uri in
+           match source with
+           | `RepositoryMissing _ | `RepositoryUnknown _
+           | `PlaygroundMissing _ | `KeeperUnknown _ ->
+             json_response ~status:`Not_found request reqd
+               (json_error "The selected workspace is unavailable")
+           | `Project | `Repository _ | `Playground _ ->
            match Uri.get_query_param uri "path" with
            | None -> json_response ~status:`Bad_request request reqd (json_error "Missing path parameter")
            | Some p ->

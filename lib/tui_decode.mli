@@ -2229,6 +2229,16 @@ type workspace_tree_node = {
 val decode_workspace_tree :
   Yojson.Safe.t -> (workspace_tree_node list, string) result
 
+type workspace_file_catalog = {
+  wfc_root : string;
+  wfc_files : string list;
+}
+
+val decode_workspace_file_catalog :
+  Yojson.Safe.t -> (workspace_file_catalog, string) result
+(** Strict catalog response from [/api/v1/workspace/files]. Exact path strings
+    are retained for selection; terminal escaping belongs to rendering. *)
+
 (** The whole file from [/api/v1/workspace/file]'s [{ok, content}]. *)
 val decode_workspace_file : Yojson.Safe.t -> (string, string) result
 

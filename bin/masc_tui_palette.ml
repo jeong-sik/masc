@@ -55,6 +55,7 @@ type palette_action =
      Code pane's cursor line — the K/D candidates ride the palette as
      entries so one keypress can also be a choice among several names. *)
   | Palette_lsp of string * string
+  | Palette_code_file of string
 
 (* The identifier names on the file pane's cursor line, in reading order,
    first occurrence only. The open file already carries its lexed segments,
@@ -268,7 +269,7 @@ let palette_action_words = function
   | Palette_collab | Palette_msx | Palette_dos
   | Palette_lane_addons | Palette_usage_scope None | Palette_config _ | Palette_gate_mode _
   | Palette_chat _ | Palette_task _ | Palette_board_hearth _
-  | Palette_board_post _ | Palette_lsp _ ->
+  | Palette_board_post _ | Palette_lsp _ | Palette_code_file _ ->
       []
 
 let palette_matches (state : state) =
@@ -289,12 +290,18 @@ let palette_matches (state : state) =
                    | Palette_dos | Palette_lane_addons | Palette_goto _
                    | Palette_usage_scope _ | Palette_config _ | Palette_gate_mode _ | Palette_chat _
                    | Palette_task _ | Palette_board_hearth _
-                   | Palette_board_post _ ) ) -> false) entries
+                   | Palette_board_post _ | Palette_code_file _ ) ) -> false) entries
          | Some (_, Some _) -> [])
     | Palette_choice { choice_question; _ } ->
         List.map
           (fun name -> (name, Palette_lsp (choice_question, name)))
           (code_cursor_line_symbols state)
+    | Palette_files _ ->
+        (match code_finder_catalog state with
+         | Masc_tui_fetched.Ready catalog ->
+             List.map (fun path -> path, Palette_code_file path) catalog.Tui_decode.wfc_files
+         | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
+         | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _ -> [])
   in
   (* Three ranks, entry order kept inside each: a label that starts with the
      query, then one that contains it, then one that only has its characters
@@ -312,3 +319,14 @@ let palette_matches (state : state) =
          Option.map (fun r -> (r, entry)) (rank entry))
   |> List.stable_sort (fun (a, _) (b, _) -> Int.compare a b)
   |> List.map snd
+
+let selected_file state =
+  let matches = palette_matches state in
+  let cursor = max 0 (min state.palette_cursor (List.length matches - 1)) in
+  match List.nth_opt matches cursor with
+  | Some (_, Palette_code_file path) -> Some path
+  | Some (_, (Palette_browser_lane | Palette_hide_browser_lane | Palette_connectors
+    | Palette_collab | Palette_msx | Palette_dos | Palette_lane_addons | Palette_goto _
+    | Palette_usage_scope _ | Palette_config _ | Palette_gate_mode _ | Palette_chat _
+    | Palette_task _ | Palette_board_hearth _ | Palette_board_post _ | Palette_lsp _))
+  | None -> None

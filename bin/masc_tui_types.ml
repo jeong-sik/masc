@@ -4898,8 +4898,6 @@ type inflight =
    through its own query axis: a keeper's playground via [?keeper=] (where a
    Changes row's clone-relative path lives), a registered repository via
    [?repo_id=] (what a Repositories row names). *)
-type code_file_load_intent = Open_code_file | Refresh_code_file
-
 type code_workspace_scope =
   | Code_scope_project
   | Code_scope_keeper of string
@@ -5330,8 +5328,47 @@ let metrics_section_label = function
    cursor line for one language-server question and nothing else -- a
    task whose title happens to spell h-o-v-e-r in order is not an answer
    to "which name?" (RFC-0429 §1.4). *)
+type code_finder_origin = {
+  cfo_workspace : workspace_authority;
+  cfo_reading : unit ref;
+  cfo_scope : code_workspace_scope;
+  cfo_dir : string;
+  cfo_file : string Masc_tui_fetched.request option;
+}
+
+type code_jump = {
+  cj_scope : code_workspace_scope;
+  cj_dir : string;
+  cj_file : string option;
+  cj_cursor : int;
+  cj_scroll : int;
+  cj_hscroll : int;
+  cj_tree_cursor : int;
+  cj_focus : pane_focus;
+}
+
+type code_navigation_action = Return_to_history | Follow_location
+
+type code_navigation_owner = {
+  cno_origin : code_finder_origin;
+  cno_history : code_jump list;
+  cno_destination : code_jump;
+  cno_action : code_navigation_action;
+}
+
+type code_navigation_reading = {
+  cnr_owner : code_navigation_owner;
+  cnr_file : (string, string) Masc_tui_fetched.t;
+}
+
+type code_file_load_intent =
+  | Open_code_file
+  | Refresh_code_file
+  | Navigate_code_file of code_navigation_owner
+
 type palette_mode =
   | Palette_jump
+  | Palette_files of code_finder_origin
   | Palette_choice of {
       choice_question : string;  (* "hover", "definition", "references" *)
       choice_line : int;  (* 1-based, what the title says *)
@@ -8755,6 +8792,10 @@ type state = {
           before the last one answered left it unrequested and drawn as
           "(loading…)" until [r]. The same two cells also drew a directory
           that answered with no entries as "(loading…)". *)
+  mutable code_catalog:
+    (code_workspace_scope * string, Tui_decode.workspace_file_catalog) Masc_tui_fetched.t;
+  mutable code_finder_file:
+    (code_workspace_scope * string, string) Masc_tui_fetched.t;
   mutable code_cursor: int;
   (* The open file's lexed rows, keyed by its path. One value rather than a
      pair of options: the pair could not say "reading", so a file being
@@ -8776,11 +8817,10 @@ type state = {
      until the next question or file replaces it. *)
   mutable code_lsp_note: string option;
   mutable code_lsp_query: (code_lsp_query, unit) Masc_tui_fetched.t;
-  (* Where a definition jump left from, newest first: scope, directory,
-     open file (if any), its cursor and scroll. B walks back through it.
-     Bounded so a long session cannot grow it without limit. *)
-  mutable code_jump_back:
-    (code_workspace_scope * string * string option * int * int) list;
+  (* Where a jump left from, newest first. A pending return reads separately
+     and consumes the entry only when it commits navigation. *)
+  mutable code_jump_back: code_jump list;
+  mutable code_navigation: code_navigation_reading option;
   (* Horizontal offset in display cells, and the widest row's width -- the
      clamp. Measured once at load: measuring ten thousand rows on every
      keypress is what this field exists to avoid. *)
@@ -10547,6 +10587,9 @@ let suspend_workspace_readings state =
   state.memory_input <- Masc_tui_fetched.suspend state.memory_input;
   state.memory_facts <- Masc_tui_fetched.suspend state.memory_facts;
   state.code_listing <- Masc_tui_fetched.suspend state.code_listing;
+  state.code_catalog <- Masc_tui_fetched.suspend state.code_catalog;
+  state.code_finder_file <- Masc_tui_fetched.suspend state.code_finder_file;
+  state.code_navigation <- None;
   state.code_file <- Masc_tui_fetched.suspend state.code_file;
   state.code_history <- Masc_tui_fetched.suspend state.code_history;
   state.code_diff <- Masc_tui_fetched.suspend state.code_diff;
@@ -12687,6 +12730,9 @@ let apply_workspace_activity_read state request result =
 
 let set_code_scope state scope =
   if state.code_scope <> scope then begin
+    state.code_catalog <- Masc_tui_fetched.clear state.code_catalog;
+    state.code_finder_file <- Masc_tui_fetched.clear state.code_finder_file;
+    state.code_navigation <- None;
     state.code_lsp_query <- Masc_tui_fetched.clear state.code_lsp_query;
     state.code_file <- Masc_tui_fetched.clear state.code_file;
     state.code_file_resume_intent <- Refresh_code_file;
@@ -14341,6 +14387,8 @@ let create_state
   link_previews_mode = `Rich;
   code_dir = "";
   code_listing = Masc_tui_fetched.initial;
+  code_catalog = Masc_tui_fetched.initial;
+  code_finder_file = Masc_tui_fetched.initial;
   code_cursor = 0;
   code_file = Masc_tui_fetched.initial;
   code_file_resume_intent = Refresh_code_file;
@@ -14349,6 +14397,7 @@ let create_state
   code_lsp_note = None;
   code_lsp_query = Masc_tui_fetched.initial;
   code_jump_back = [];
+  code_navigation = None;
   code_file_hscroll = 0;
   code_file_max_width = 0;
   code_memos = [];
@@ -14643,6 +14692,30 @@ type empty_page =
    answered for another key, one still loading, and a first read that failed
    hold no rows for this key; a failed refresh keeps the rows it read last. *)
 let code_listing_key (state : state) = (state.code_scope, state.code_dir)
+
+let code_finder_current (state : state) origin =
+  server_authority_ready state && state.view = Code
+  && state.workspace_authority = origin.cfo_workspace
+  && state.workspace_read_authority == origin.cfo_reading
+  && state.code_scope = origin.cfo_scope
+  && String.equal state.code_dir origin.cfo_dir
+  && Option.equal (Masc_tui_fetched.same_request ~equal:String.equal)
+       origin.cfo_file (Masc_tui_fetched.current_request state.code_file)
+
+let close_code_finder (state : state) =
+  state.code_catalog <- Masc_tui_fetched.clear state.code_catalog;
+  state.code_finder_file <- Masc_tui_fetched.clear state.code_finder_file;
+  state.palette_open <- false;
+  state.palette_mode <- Palette_jump;
+  state.palette_query <- "";
+  state.palette_cursor <- 0
+
+let code_finder_catalog (state : state) =
+  match state.palette_mode with
+  | Palette_files origin when code_finder_current state origin ->
+      Masc_tui_fetched.view_for ~equal:code_scope_path_equal state.code_catalog
+        ~key:(origin.cfo_scope, origin.cfo_dir)
+  | Palette_files _ | Palette_jump | Palette_choice _ -> Masc_tui_fetched.Absent
 
 let code_listing_view (state : state) =
   Masc_tui_fetched.view_for ~equal:code_scope_path_equal state.code_listing

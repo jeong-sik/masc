@@ -383,6 +383,31 @@ let test_status_files_preserve_paths_and_axes () =
                Alcotest.(check bool) "new path is not conflicted" false
                  row.conflicted))
 
+let test_file_paths_preserve_exact_names_and_ignore_policy () =
+  with_temp_dir (fun tmp ->
+      let source = Filename.concat tmp "source" in
+      init_local_repo source;
+      let tracked = "tracked ignored.tmp" in
+      write_file (Filename.concat source ".gitignore") "*.tmp\n";
+      write_file (Filename.concat source tracked) "tracked\n";
+      (match run_cmd ~cwd:source [ "git"; "add"; "--force"; "--"; tracked ] with
+       | Ok () -> ()
+       | Error e -> Alcotest.fail e);
+      let fresh = [ "-leading.ml"; "space name.ml"; "새 파일.ml"; "line\nbreak.ml" ] in
+      List.iter (fun path -> write_file (Filename.concat source path) "new\n") fresh;
+      write_file (Filename.concat source "hidden.tmp") "ignored\n";
+      match Repo_git.file_paths_at ~local_path:source () with
+      | Error detail -> Alcotest.fail detail
+      | Ok paths ->
+          Alcotest.(check (list string)) "exact tracked and nonignored paths"
+            (List.sort String.compare (".gitignore" :: tracked :: fresh)) paths)
+
+let test_file_paths_report_git_failure () =
+  with_temp_dir (fun local_path ->
+      match Repo_git.file_paths_at ~local_path () with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.fail "a nonrepository must not become an empty catalog")
+
 let test_origin_head_branch_preserves_slash_branch () =
   with_temp_dir (fun tmp ->
       let source = Filename.concat tmp "source" in
@@ -438,6 +463,12 @@ let () =
             test_get_origin_url_uses_read_only_git_env
         ] );
       ( "fetch", [ Alcotest.test_case "returns remotes" `Quick test_fetch ] );
+      ( "file_paths",
+        [ Alcotest.test_case "preserves exact names and ignore policy" `Quick
+            test_file_paths_preserve_exact_names_and_ignore_policy
+        ; Alcotest.test_case "reports Git failure" `Quick
+            test_file_paths_report_git_failure
+        ] );
       ( "get_recent_commits",
         [ Alcotest.test_case "returns commits" `Quick test_get_recent_commits ] );
 	      ( "status_summary",

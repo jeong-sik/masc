@@ -968,6 +968,8 @@ let for_surface = function
          not advertise a key nothing handles. *)
       [ b Navigate "j/k" "move"
       ; b Navigate "h/l" "pane" ~help:"focus the tree or open file"
+      ; b Search "Ctrl-P" "file finder"
+          ~help:"filter all tracked and nonignored files in the owning Git checkout; Enter opens, Esc returns"
       ; b Act "Right / Enter" "open" ~help:"drill in, or open the file"
         (* Esc walks back out the way Enter came in: it closes an open file
            first, and only climbs a directory once no file is open. From the

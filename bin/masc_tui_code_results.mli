@@ -1,12 +1,39 @@
 (** Applies Code surface replies. These functions perform no terminal or
     network IO; the caller executes layout and file-read followups. *)
 
-type followup = No_followup | Reveal_cursor | Load_file of string
+type followup =
+  | No_followup
+  | Reveal_cursor
+  | Read_location_file of Masc_tui_types.code_navigation_owner * string Masc_tui_fetched.request
 
 val push_code_jump : Masc_tui_types.state -> unit
+type return_followup =
+  | No_return
+  | Return_committed
+  | Read_navigation_file of Masc_tui_types.code_navigation_owner * string Masc_tui_fetched.request
+
+val start_return : Masc_tui_types.state -> return_followup
+(** Keep history and the current reading until the destination is available.
+    Repeated requests share the pending return. A readable current destination
+    or a tree-only destination commits immediately. *)
+val take_ready_navigation_file : Masc_tui_types.state -> input_pending:bool -> bool
+(** Commit an owned return or different-file LSP location after queued input.
+    Return consumes an entry; a location records the source only on success.
+    Failure, cancellation and superseded owners preserve the source/history. *)
 val apply_entries : Masc_tui_types.state ->
   (Masc_tui_types.code_workspace_scope * string) Masc_tui_fetched.request ->
   (Masc.Tui_decode.workspace_tree_node list, string) result -> unit
+val apply_catalog : Masc_tui_types.state ->
+  (Masc_tui_types.code_workspace_scope * string) Masc_tui_fetched.request ->
+  (Masc.Tui_decode.workspace_file_catalog, string) result -> unit
+val apply_found_file : ?input_pending:bool -> Masc_tui_types.state ->
+  (Masc_tui_types.code_workspace_scope * string) Masc_tui_fetched.request ->
+  (string, string) result -> bool
+(** [true] only when successful navigation was committed. Failure and stale
+    replies preserve the original file, sibling panes, cursor and directory. *)
+val take_ready_found_file : Masc_tui_types.state -> input_pending:bool -> bool
+(** Commit a deferred successful reading only after queued input, paste and
+    incomplete terminal sequences have had the opportunity to retire it. *)
 val apply_file : ?intent:Masc_tui_types.code_file_load_intent ->
   Masc_tui_types.state -> string Masc_tui_fetched.request ->
   (string, string) result -> unit

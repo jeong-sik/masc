@@ -11,6 +11,28 @@ val launch_entries_load
   -> unit
 
 (** Start the path request and deliver its whole-file response with its request key. *)
+val launch_file_finder :
+  Masc_tui_types.state -> host:string ->
+  deliver:(Masc_tui_async_protocol.async_msg -> unit) -> unit
+
+val open_found_file :
+  Masc_tui_types.state -> host:string ->
+  deliver:(Masc_tui_async_protocol.async_msg -> unit) -> path:string -> unit
+(** Read a selected file without replacing the original file or cursor. Only
+    an admitted successful reply commits navigation through Code results. *)
+
+val return_to_reading :
+  Masc_tui_types.state -> host:string ->
+  deliver:(Masc_tui_async_protocol.async_msg -> unit) -> unit
+(** Return through jump history using the destination scope and confirmed
+    workspace identity, without replacing the current file while reading. *)
+
+val launch_navigation_read :
+  Masc_tui_types.state -> host:string ->
+  deliver:(Masc_tui_async_protocol.async_msg -> unit) ->
+  Masc_tui_types.code_navigation_owner -> string Masc_tui_fetched.request -> unit
+(** Send an already-owned return/location read under its destination scope. *)
+
 val launch_file_load
   :  ?intent:Masc_tui_types.code_file_load_intent
   -> Masc_tui_types.state

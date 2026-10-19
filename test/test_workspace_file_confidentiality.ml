@@ -359,6 +359,230 @@ let test_noise_dirs_not_confidential () =
     [ "node_modules"; "_build"; "dist"; "build"; ".worktrees"; ".cache" ]
 ;;
 
+let catalog_git ~cwd args =
+  match Repo_git.run_git ~cwd args with
+  | Ok _ -> ()
+  | Error detail -> Alcotest.fail detail
+
+let catalog_or_fail ~base ~path =
+  match W.For_testing.workspace_file_catalog ~base ~path with
+  | Ok catalog -> catalog
+  | Error W.Catalog_invalid_path -> Alcotest.fail "unexpected invalid catalog path"
+  | Error W.Catalog_directory_unavailable -> Alcotest.fail "catalog directory unavailable"
+  | Error W.Catalog_repository_unavailable -> Alcotest.fail "catalog repository unavailable"
+  | Error (W.Catalog_scan_failed detail) -> Alcotest.fail detail
+
+let test_catalog_lists_checkout_with_file_read_guards () =
+  with_temp_dir (fun base ->
+    with_temp_dir (fun outside ->
+      catalog_git ~cwd:base [ "init"; "-b"; "main" ];
+      write_file (Filename.concat base "src/selected.ml") "selected\n";
+      write_file (Filename.concat base "elsewhere/새 파일\n이름.ml") "other\n";
+      write_file (Filename.concat base ".gitignore") "*.ignored\n";
+      write_file (Filename.concat base "hidden.ignored") "ignored\n";
+      write_file (Filename.concat base "tracked.ignored") "tracked\n";
+      write_file (Filename.concat base "deleted.ml") "gone\n";
+      catalog_git ~cwd:base [ "add"; "--force"; "--"; "tracked.ignored"; "deleted.ml" ];
+      Sys.remove (Filename.concat base "deleted.ml");
+      write_file (Filename.concat base ".env") "secret\n";
+      write_file (Filename.concat base "keys/credentials.json") "secret\n";
+      write_file (Filename.concat base ".masc/state") "internal\n";
+      write_file (Filename.concat outside "secret") "outside\n";
+      Unix.symlink (Filename.concat outside "secret") (Filename.concat base "escape");
+      Unix.symlink ".env" (Filename.concat base "alias-secret");
+      Unix.symlink "src/selected.ml" (Filename.concat base "alias-source");
+      (* Both files exist: a POSIX backslash name must not open the slash name. *)
+      write_file (Filename.concat base "src\\selected.ml") "different\n";
+      let catalog = catalog_or_fail ~base ~path:"src" in
+      check string "root stays workspace relative" "" catalog.catalog_root;
+      check (list string) "whole checkout obeys file read policy"
+        (List.sort String.compare
+           [ ".gitignore"; "alias-source"; "elsewhere/새 파일\n이름.ml"
+           ; "src/selected.ml"; "tracked.ignored" ])
+        catalog.catalog_paths;
+      List.iter
+        (fun path ->
+          match W.For_testing.resolve_workspace_file base path with
+          | Error _ -> Alcotest.fail "catalog selection cannot resolve for file reading"
+          | Ok file ->
+              match W.For_testing.load_workspace_file_content file with
+              | Ok _ -> ()
+              | Error _ -> Alcotest.fail "catalog selection cannot be read")
+        catalog.catalog_paths))
+
+let test_catalog_never_searches_above_workspace () =
+  with_temp_dir (fun parent ->
+    catalog_git ~cwd:parent [ "init"; "-b"; "main" ];
+    let base = Filename.concat parent "keeper" in
+    mkdir_p base;
+    (match W.For_testing.workspace_file_catalog ~base ~path:"" with
+     | Error W.Catalog_repository_unavailable -> ()
+     | Ok _ -> Alcotest.fail "catalog borrowed the enclosing checkout"
+     | Error _ -> Alcotest.fail "expected absence of an owned repository");
+    let repo = Filename.concat base "repos/example" in
+    mkdir_p (Filename.concat repo "src");
+    catalog_git ~cwd:repo [ "init"; "-b"; "main" ];
+    write_file (Filename.concat repo "src/one.ml") "one\n";
+    write_file (Filename.concat repo "two.ml") "two\n";
+    let catalog = catalog_or_fail ~base ~path:"repos/example/src" in
+    check string "owning nested checkout" "repos/example" catalog.catalog_root;
+    check (list string) "paths retain Keeper bundle prefix"
+      [ "repos/example/src/one.ml"; "repos/example/two.ml" ] catalog.catalog_paths)
+
+let test_catalog_distinguishes_empty_from_unavailable () =
+  with_temp_dir (fun base ->
+    catalog_git ~cwd:base [ "init"; "-b"; "main" ];
+    let catalog = catalog_or_fail ~base ~path:"" in
+    check (list string) "a genuine empty checkout" [] catalog.catalog_paths;
+    (match W.For_testing.workspace_file_catalog ~base ~path:".env" with
+     | Error W.Catalog_invalid_path -> ()
+     | Ok _ | Error _ -> Alcotest.fail "confidential catalog directory was not rejected");
+    (match W.For_testing.workspace_file_catalog ~base ~path:"missing" with
+     | Error W.Catalog_directory_unavailable -> ()
+     | Ok _ | Error _ -> Alcotest.fail "missing directory became an empty catalog");
+    rm_rf (Filename.concat base ".git");
+    write_file (Filename.concat base ".git") "gitdir: missing-git-dir\n";
+    match W.For_testing.workspace_file_catalog ~base ~path:"" with
+    | Error (W.Catalog_scan_failed _) -> ()
+    | Ok _ | Error _ -> Alcotest.fail "Git failure became empty or missing checkout")
+
+(* Use the production router and file reader: a surviving project file must
+   never stand in for the selected scope after its catalog was accepted. *)
+let workspace_http_response ~router target =
+  let output = Buffer.create 1024 in
+  let connection = Httpun.Server_connection.create (fun reqd ->
+    Masc.Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) reqd) in
+  let raw = Printf.sprintf "GET %s HTTP/1.0\r\nHost: localhost\r\n\r\n" target in
+  let input = Bigstringaf.of_string ~off:0 ~len:(String.length raw) raw in
+  ignore (Httpun.Server_connection.read_eof connection input ~off:0
+            ~len:(Bigstringaf.length input));
+  let rec drain () =
+    match Httpun.Server_connection.next_write_operation connection with
+    | `Write iovecs ->
+        let written = List.fold_left (fun total (iov : Bigstringaf.t Httpun.IOVec.t) ->
+          Buffer.add_string output (Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len);
+          total + iov.len) 0 iovecs in
+        Httpun.Server_connection.report_write_result connection (`Ok written);
+        drain ()
+    | `Yield when Buffer.length output = 0 ->
+        let ready, resolve = Eio.Promise.create () in
+        Httpun.Server_connection.yield_writer connection
+          (fun () -> Eio.Promise.resolve resolve ());
+        Eio.Promise.await ready;
+        drain ()
+    | `Yield | `Close _ -> ()
+  in
+  drain ();
+  let raw = Buffer.contents output in
+  let boundary = Str.search_forward (Str.regexp_string "\r\n\r\n") raw 0 in
+  let status = int_of_string (List.nth (String.split_on_char ' ' raw) 1) in
+  status, Yojson.Safe.from_string
+    (String.sub raw (boundary + 4) (String.length raw - boundary - 4))
+
+type lost_file_scope =
+  | Repository_scope of [ `Registration | `Directory ]
+  | Keeper_scope of [ `Metadata | `Directory ]
+
+let check_workspace_http_status label expected status body =
+  if status <> expected then
+    failf "%s: expected HTTP %d, received HTTP %d; body: %s"
+      label expected status (Yojson.Safe.to_string body)
+
+let test_file_read_rejects_lost_scope lost () =
+  let old_state = Server_auth.For_testing.snapshot_server_state () in
+  let old_startup = Masc.Server_startup_state.snapshot () in
+  let old_fs = Fs_compat.get_fs_opt () in
+  Fun.protect
+    ~finally:(fun () ->
+      Server_auth.For_testing.restore_server_state old_state;
+      Masc.Server_startup_state.For_testing.restore old_startup;
+      match old_fs with
+      | Some fs -> Fs_compat.set_fs fs
+      | None -> Fs_compat.clear_fs ())
+    (fun () ->
+      Masc_test_deps.with_process_env "MASC_HTTP_AUTH_STRICT" (Some "0") (fun () ->
+        Eio_main.run @@ fun env ->
+        Eio.Switch.run @@ fun sw ->
+        Fs_compat.set_fs (Eio.Stdenv.fs env);
+        Eio_context.with_test_env ~net:(Eio.Stdenv.net env)
+          ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw
+          (fun () -> with_temp_dir (fun base_path ->
+            let valid = function Ok value -> value | Error detail -> fail detail in
+            let state = Masc.Mcp_server.For_testing.create_state ~base_path in
+            let config = Masc.Mcp_server.workspace_config state in
+            ignore (Masc.Workspace.init config ~agent_name:None);
+            Server_auth.For_testing.restore_server_state (Some state);
+            (match Masc.Server_startup_state.mark_state_ready () with
+             | Ok () -> ()
+             | Error error -> fail (Masc.Server_startup_state.state_ready_error_to_string error));
+            let path = "src/selected.ml" in
+            let project_content = "let project_file = true\n" in
+            let selected_content = "let selected_scope = true\n" in
+            write_file (Filename.concat base_path path) project_content;
+            let root, scope, withdraw =
+              match lost with
+              | Repository_scope removed ->
+                  let root = Filename.concat base_path "checkout" in
+                  mkdir_p root;
+                  let repository : Repo_manager_types.repository =
+                    { id = "selected"; name = "selected"; url = root; local_path = root;
+                      aliases = []; default_branch = "main"; keepers = [];
+                      status = Repo_manager_types.Active; auto_sync = false;
+                      sync_interval = 0; created_at = Int64.zero; updated_at = Int64.zero } in
+                  valid (Repo_store.save_all ~base_path [repository]);
+                  let withdraw () = match removed with
+                    | `Registration -> valid (Repo_store.remove ~base_path repository.id)
+                    | `Directory -> rm_rf root in
+                  root, "repo_id=selected", withdraw
+              | Keeper_scope removed ->
+                  let meta = valid (Masc_test_deps.meta_of_json_fixture
+                      (`Assoc ["name", `String "selected"])) in
+                  let declaration = Config_dir_resolver.keeper_toml_path_for_base_path
+                      ~base_path meta.name in
+                  write_file declaration
+                    "[keeper]\ninstructions = \"Scoped file read fixture\"\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\n";
+                  valid (Masc.Keeper_meta_store.replace_snapshot config meta);
+                  let meta =
+                    match Masc.Keeper_meta_store.read_effective_meta config meta.name with
+                    | Ok (Some effective) -> effective
+                    | Ok None -> fail "fixture Keeper metadata is unavailable"
+                    | Error detail -> failf "fixture Keeper configuration: %s" detail in
+                  let root = Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta in
+                  mkdir_p root;
+                  let withdraw () = match removed with
+                    | `Metadata -> valid (Masc.Keeper_meta_store.remove_snapshot config ~name:meta.name)
+                    | `Directory -> rm_rf root in
+                  root, "keeper=selected", withdraw
+            in
+            catalog_git ~cwd:root ["init"; "-b"; "main"];
+            write_file (Filename.concat root path) selected_content;
+            let encode = Uri.pct_encode ~component:`Query_value in
+            let binding = "expected_base_path=" ^ encode (Unix.realpath base_path)
+              ^ "&expected_masc_root=" ^ encode (Unix.realpath (Masc.Workspace.masc_dir config)) in
+            let router = W.add_routes (Masc.Http_server_eio.Router.create ()) in
+            let request route path = workspace_http_response ~router
+                (route ^ "?path=" ^ encode path ^ "&" ^ scope ^ "&" ^ binding) in
+            let status, catalog = request "/api/v1/workspace/files" "" in
+            check_workspace_http_status "selected scope catalog succeeds" 200 status catalog;
+            check (list string) "catalog preserves selected file path" [path]
+              Yojson.Safe.Util.(catalog |> member "files" |> to_list |> List.map to_string);
+            let status, body = request "/api/v1/workspace/file" path in
+            check_workspace_http_status "selected scope file succeeds" 200 status body;
+            check string "reads the selected scope, not its project namesake" selected_content
+              Yojson.Safe.Util.(body |> member "content" |> to_string);
+            withdraw ();
+            let status, body = request "/api/v1/workspace/file" path in
+            check_workspace_http_status "lost scope cannot read its project namesake" 404 status body;
+            check bool "scope refusal carries no file content" true
+              (Yojson.Safe.Util.member "content" body = `Null);
+            let status, body = request "/api/v1/workspace/files" "" in
+            check_workspace_http_status "catalog and selected file agree on unavailable scope" 404 status body;
+            let status, body = workspace_http_response ~router
+                ("/api/v1/workspace/file?path=" ^ encode path ^ "&" ^ binding) in
+            check_workspace_http_status "explicit project reading remains available" 200 status body;
+            check string "the same-named project file really exists" project_content
+              Yojson.Safe.Util.(body |> member "content" |> to_string)))))
+
 let () =
   run
     "workspace_file_confidentiality"
@@ -394,6 +618,24 @@ let () =
             "file read enforces size cap"
             `Quick
             test_read_size_cap_rejects_large_file
+        ] )
+    ; ( "file catalog"
+      , [ test_case "whole checkout shares file read guards" `Quick
+            test_catalog_lists_checkout_with_file_read_guards
+        ; test_case "stops at selected workspace and retains nested scope" `Quick
+            test_catalog_never_searches_above_workspace
+        ; test_case "distinguishes empty checkout and unavailable directory" `Quick
+            test_catalog_distinguishes_empty_from_unavailable
+        ] )
+    ; ( "selected file scope"
+      , [ test_case "removed repository registration cannot read project file" `Quick
+            (test_file_read_rejects_lost_scope (Repository_scope `Registration))
+        ; test_case "removed repository directory cannot read project file" `Quick
+            (test_file_read_rejects_lost_scope (Repository_scope `Directory))
+        ; test_case "removed Keeper metadata cannot read project file" `Quick
+            (test_file_read_rejects_lost_scope (Keeper_scope `Metadata))
+        ; test_case "removed Keeper directory cannot read project file" `Quick
+            (test_file_read_rejects_lost_scope (Keeper_scope `Directory))
         ] )
     ; ( "SSOT consistency"
       , [ test_case "denylist matches tree hidden" `Quick test_denylist_matches_tree_hidden

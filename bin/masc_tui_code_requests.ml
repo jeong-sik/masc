@@ -17,6 +17,54 @@ let code_scope_axes_of = function
 
 let code_scope_axes state = code_scope_axes_of state.code_scope
 
+let launch_file_finder state ~host ~deliver =
+  if not (server_authority_ready state) then
+    Masc_tui_loader.report_action state "error" "File finder needs a confirmed workspace"
+  else begin
+    state.code_navigation <- None;
+    close_code_finder state;
+    let origin = { cfo_workspace = state.workspace_authority;
+      cfo_reading = state.workspace_read_authority;
+      cfo_scope = state.code_scope; cfo_dir = state.code_dir;
+      cfo_file = Masc_tui_fetched.current_request state.code_file } in
+    state.palette_open <- true;
+    state.palette_mode <- Palette_files origin;
+    let expected_workspace = state.server_identity in
+    match Masc_tui_fetched.start ~equal:code_scope_path_equal state.code_catalog
+            ~key:(origin.cfo_scope, origin.cfo_dir) with
+    | Masc_tui_fetched.Already_loading -> ()
+    | Masc_tui_fetched.Started (catalog, request) ->
+        state.code_catalog <- catalog;
+        let port = state.port in
+        let keeper, repo = code_scope_axes_of origin.cfo_scope in
+        Masc_tui_async_read.launch
+          ~deliver:(fun result -> deliver (Code_catalog_loaded (request, result)))
+          (fun () -> match expected_workspace with
+             | None -> Error "File finder has no workspace identity"
+             | Some expected_workspace -> Masc_tui_http.fetch_workspace_file_catalog
+                 ?keeper ?repo ~expected_workspace ~host ~port ~path:origin.cfo_dir ())
+  end
+
+let open_found_file state ~host ~deliver ~path =
+  match state.palette_mode, code_finder_catalog state, state.server_identity with
+  | Palette_files origin, Masc_tui_fetched.Ready catalog, Some expected_workspace
+      when state.palette_open && code_finder_current state origin
+           && List.mem path catalog.Masc.Tui_decode.wfc_files ->
+      (match Masc_tui_fetched.start ~equal:code_scope_path_equal state.code_finder_file
+               ~key:(origin.cfo_scope, path) with
+       | Masc_tui_fetched.Already_loading -> ()
+       | Masc_tui_fetched.Started (reading, request) ->
+           state.code_finder_file <- reading;
+           let port = state.port in
+           let keeper, repo = code_scope_axes_of origin.cfo_scope in
+           Masc_tui_async_read.launch
+             ~deliver:(fun result -> deliver (Code_finder_file_loaded (request, result)))
+             (fun () -> Masc_tui_http.fetch_workspace_file ?keeper ?repo
+                 ~expected_workspace ~host ~port ~path ()))
+  | (Palette_files _ | Palette_jump | Palette_choice _),
+    (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Ready _
+    | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _), (Some _ | None) -> ()
+
 let launch_entries_load state ~host ~deliver =
   if server_authority_ready state then begin
   (* Read here, not inside the daemon. The daemon runs later, and the scope it
@@ -46,11 +94,33 @@ let launch_entries_load state ~host ~deliver =
 
 ;;
 
+let launch_navigation_read state ~host ~deliver owner request =
+  let expected_workspace = state.server_identity in
+  let port = state.port in
+  let keeper, repo = code_scope_axes_of owner.cno_destination.cj_scope in
+  let path = Masc_tui_fetched.request_key request in
+  Masc_tui_async_read.launch
+    ~deliver:(fun result -> deliver (Code_file_loaded (Navigate_code_file owner, request, result)))
+    (fun () -> match expected_workspace with
+       | None -> Error "Navigation has no workspace identity"
+       | Some expected_workspace ->
+           Masc_tui_http.fetch_workspace_file ?keeper ?repo
+             ~expected_workspace ~host ~port ~path ())
+
+let return_to_reading state ~host ~deliver =
+  match Masc_tui_code_results.start_return state with
+  | Masc_tui_code_results.No_return -> ()
+  | Masc_tui_code_results.Return_committed -> launch_entries_load state ~host ~deliver
+  | Masc_tui_code_results.Read_navigation_file (owner, request) ->
+      launch_navigation_read state ~host ~deliver owner request
+
 let launch_file_load ?(intent = Open_code_file) state ~host ~deliver ~path =
   if not (server_authority_ready state) then
     Masc_tui_loader.report_action state "error"
       "Cannot open Code file while workspace identity is unconfirmed; retry after reconnecting"
   else begin
+  state.code_navigation <- None;
+  let scope = state.code_scope in
   match Masc_tui_fetched.start ~equal:String.equal state.code_file ~key:path with
   | Masc_tui_fetched.Already_loading -> ()
   | Masc_tui_fetched.Started (next, request) ->
@@ -60,7 +130,7 @@ let launch_file_load ?(intent = Open_code_file) state ~host ~deliver ~path =
     Masc_tui_async_read.launch
       ~deliver:(fun result -> deliver (Code_file_loaded (intent, request, result)))
       (fun () ->
-         let keeper, repo = code_scope_axes state in
+         let keeper, repo = code_scope_axes_of scope in
          Masc_tui_http.fetch_workspace_file ?keeper ?repo ~host ~port ~path ())
   end
 

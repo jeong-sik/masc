@@ -18,9 +18,10 @@ val resolve_workspace_base :
     it was resolved.
 
     This is the anchor for every repo-relative path the dashboard sends. The
-    IDE LSP proxy resolves its connection anchor through the same function so
-    a document named over the LSP socket and the same document named over
-    [/api/v1/workspace/file] cannot resolve against different roots. *)
+    IDE LSP proxy resolves its connection anchor through the same function.
+    Missing/unknown scoped sources retain the project base for tree fallback;
+    [/api/v1/workspace/file] rejects those source tags before resolving or
+    reading a file, rather than serving a same-named project file. *)
 
 (** Pure dispatch logic for the [?keeper=<name>] query param. Exposed
     for unit testing — production code goes through {!add_routes}. *)
@@ -99,6 +100,19 @@ type workspace_file_read_error =
     [File_changed_during_open] means the lstat/open/fstat identity check
     did not match, so the route rejects the path without reading it. *)
 
+type workspace_file_catalog = {
+  catalog_root : string;
+  catalog_paths : string list;
+}
+(** Checkout root and exact file paths, both relative to the selected workspace.
+    Paths obey the same confidentiality and symlink policy as file reads. *)
+
+type workspace_file_catalog_error =
+  | Catalog_invalid_path
+  | Catalog_directory_unavailable
+  | Catalog_repository_unavailable
+  | Catalog_scan_failed of string
+
 (** [tree_node_limit_of_query value] applies the workspace tree route's
     [limit] query parameter defaulting and [1, max_tree_node_limit] clamp.
     Invalid or missing values fall back to the route default. Exposed for
@@ -155,6 +169,14 @@ module For_testing : sig
       [base] is the far edge because it is where the caller's authority ends:
       the query named a keeper or a repository, and an answer from outside
       that is not an answer to the question asked. *)
+
+  val workspace_file_catalog :
+    base:string ->
+    path:string ->
+    (workspace_file_catalog, workspace_file_catalog_error) result
+  (** List the checkout containing directory [path], stopping at [base].
+      Includes tracked and nonignored untracked regular files across that
+      checkout, rather than only the directory's immediate children. *)
 
   type safe_workspace_file
 

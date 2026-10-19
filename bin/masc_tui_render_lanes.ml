@@ -1264,11 +1264,15 @@ let lane_run_output_lines ~details ~width (detail : Tui_decode.lane_run_detail) 
       let model = match reading.lp_model with None -> [] | Some model -> ["Model " ^ model] in
       let rejection = match reading.lp_domain_rejection with
         | None -> [] | Some reason -> ["검증 거절 → 생성 Lane · " ^ reason] in
-      let memory = match reading.lp_memory_result with
-        | None -> "기억 snapshot: 적용 결과가 기록되지 않음"
-        | Some (Tui_decode.Librarian_memory_unchanged (revision, facts)) ->
+      let memory = match reading.lp_memory_scope, reading.lp_memory_result with
+        | Tui_decode.Memory_inference_scope, _ -> "기억 판정: 회차 메모리에만 보관 · 저장하지 않음"
+        | Tui_decode.Context_only_scope, None -> "기억 snapshot: Context 전용 · 저장하지 않음"
+        | Tui_decode.Memory_disposition_scope, None -> "기억 snapshot: 적용 결과가 기록되지 않음"
+        | (Tui_decode.Memory_disposition_scope | Tui_decode.Context_only_scope),
+          Some (Tui_decode.Librarian_memory_unchanged (revision, facts)) ->
           Printf.sprintf "기억 snapshot: 변경 없음 · revision %d · %d facts" revision facts
-        | Some (Tui_decode.Librarian_memory_rewritten {revision;facts;added;removed}) ->
+        | (Tui_decode.Memory_disposition_scope | Tui_decode.Context_only_scope),
+          Some (Tui_decode.Librarian_memory_rewritten {revision;facts;added;removed}) ->
           Printf.sprintf "기억 snapshot: +%d / -%d · revision %d · %d facts" added removed revision facts in
       let side_writes = List.map (fun (kind, status) ->
         let label = match kind with
@@ -1300,8 +1304,8 @@ let lane_run_output_lines ~details ~width (detail : Tui_decode.lane_run_detail) 
           |> List.map (fun line -> Theme.info (), line))
   in
   let fold_memory_evidence = match detail.lrd_librarian_preflight with
-    | Some {lp_context_only=false;_} -> true
-    | _ -> false in
+    | Some {lp_memory_scope=Tui_decode.Memory_disposition_scope;_} -> true
+    | Some {lp_memory_scope=(Tui_decode.Context_only_scope | Tui_decode.Memory_inference_scope);_} | None -> false in
   preflight_lines @ (if not details && fold_memory_evidence then [] else
   match detail.lrd_output_availability, detail.lrd_output with
   | None, _ -> [ Theme.muted (), "실행 중 · 아직 출력이 기록되지 않았습니다" ]

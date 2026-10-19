@@ -5600,6 +5600,10 @@ type librarian_side_write_status =
   | Side_not_attempted | Side_answer_missing | Side_withheld | Side_outcome_unconfirmed
   | Side_committed | Side_answer_refused of string | Side_failed of string
 type librarian_side_write_kind = Context_write | Continuity_write
+type librarian_memory_scope =
+  | Memory_disposition_scope
+  | Context_only_scope
+  | Memory_inference_scope
 type librarian_preflight_reading =
   { lp_status : librarian_preflight_status
   ; lp_generation_path : librarian_generation_path
@@ -5608,7 +5612,7 @@ type librarian_preflight_reading =
   ; lp_model : string option
   ; lp_domain_rejection : string option
   ; lp_memory_result : librarian_memory_result option
-  ; lp_context_only : bool
+  ; lp_memory_scope : librarian_memory_scope
   ; lp_side_writes : (librarian_side_write_kind * librarian_side_write_status) list
   }
 
@@ -5760,10 +5764,16 @@ let decode_librarian_preflight output =
       | (Preflight_judged { choice = (Typesafeai_librarian_preflight.Needs_generation | Typesafeai_librarian_preflight.Uncertain);_}, _, None)
       | ((Preflight_awaiting | (Preflight_not_called _ | (Preflight_failed _ | Preflight_invalid _))), _, None) -> Ok ()
     in
-    let* lp_context_only = match Json_util.assoc_member_opt "memory_write" output with
+    let* memory_inference = match Json_util.assoc_member_opt "memory_inference" output with
       | None -> Ok false
-      | Some (`String "skipped_context_only") -> Ok true
-      | Some _ -> Error "unknown Librarian memory write scope" in
+      | Some (`Bool true) -> Ok true
+      | Some _ -> Error "invalid Librarian memory inference marker" in
+    let* lp_memory_scope =
+      match Json_util.assoc_member_opt "memory_write" output, memory_inference with
+      | None, false -> Ok Memory_disposition_scope
+      | Some (`String "skipped_context_only"), false -> Ok Context_only_scope
+      | Some (`String "not_attempted"), true -> Ok Memory_inference_scope
+      | (None | Some _), _ -> Error "unknown Librarian memory write scope" in
     let* lp_memory_result = match Json_util.assoc_member_opt "after" output with
       | None -> Ok None
       | Some after ->
@@ -5779,9 +5789,11 @@ let decode_librarian_preflight output =
          | "unchanged" when added = 0 && removed = 0 -> Ok (Some (Librarian_memory_unchanged (revision, facts)))
          | "rewritten" -> Ok (Some (Librarian_memory_rewritten {revision;facts;added;removed}))
          | _ -> Error "unknown or inconsistent Librarian snapshot result") in
-    let* () = if lp_context_only && Option.is_some lp_memory_result
-      then Error "context-only Librarian output cannot contain a Memory snapshot"
-      else Ok () in
+    let* () = match lp_memory_scope, lp_memory_result with
+      | (Context_only_scope | Memory_inference_scope), Some _ ->
+        Error "nonpublishing Librarian output cannot contain a Memory snapshot"
+      | (Context_only_scope | Memory_inference_scope), None
+      | Memory_disposition_scope, (None | Some _) -> Ok () in
     let decode_side_write kind key =
       match Json_util.assoc_member_opt key output with
       | None -> Ok None
@@ -5813,7 +5825,12 @@ let decode_librarian_preflight output =
     let* context_write = decode_side_write Context_write "context_write" in
     let* continuity_write = decode_side_write Continuity_write "continuity_write" in
     let lp_side_writes = List.filter_map Fun.id [context_write; continuity_write] in
-    Ok (Some {lp_status;lp_generation_path;lp_full_llm_skipped;lp_elapsed_s;lp_model;lp_domain_rejection;lp_memory_result;lp_context_only;lp_side_writes})
+    let* () = match lp_memory_scope with
+      | Memory_disposition_scope | Context_only_scope -> Ok ()
+      | Memory_inference_scope ->
+        if List.for_all (fun (_, status) -> status = Side_not_attempted) lp_side_writes
+        then Ok () else Error "Memory inference cannot publish side writes" in
+    Ok (Some {lp_status;lp_generation_path;lp_full_llm_skipped;lp_elapsed_s;lp_model;lp_domain_rejection;lp_memory_result;lp_memory_scope;lp_side_writes})
 
 type lane_run_detail =
   { lrd_run_id : string

@@ -150,6 +150,42 @@ val infer_working_state
     [Not_inferred] preserves failure reports in callback order. Cancellation
     propagates. The caller owns source selection and any later publication. *)
 
+type memory_step = private
+  { run_id : string
+  ; source_input : Keeper_librarian.input
+  ; absorb_gate : Keeper_librarian_absorb_gate.run_result
+  ; new_claims : Keeper_memory_os_types.fact list
+  ; dropped : Keeper_memory_os_types.dropped_statement list
+  ; absorbed : Keeper_memory_os_types.absorbed_statement list
+  ; revisions : Keeper_memory_os_types.revision list
+  ; working_state : string
+  }
+(** A parsed Memory decision after the normal absorption/copy gate. Original
+    fact fields, retirement reasons and exact revision/absorption identities
+    are retained. This is not a stored snapshot or a consumption receipt.
+    It must be composed against its original current facts before it can
+    become the current input of another step; a working-state summary is
+    never substituted for Memory evidence. *)
+
+type memory_inference =
+  | Memory_inferred of { step : memory_step; served_by : served_slot }
+  | Memory_not_inferred of not_committed list
+
+val infer_memory_step
+  :  ?cli_runner:Keeper_lane_cli_oneshot.runner
+  -> base_path:string
+  -> keepers_dir:string
+  -> keeper_id:string
+  -> previous_state:string option
+  -> unread_messages:Keeper_librarian_unread.t list
+  -> Keeper_librarian.input
+  -> memory_inference
+(** Judge exactly this input using the Memory prompt, strict Memory/continuity
+    answer and the ordinary absorption gate, without publishing Memory,
+    continuity, working contexts or range receipts. Inference/failure evidence
+    is recorded by the existing lane observer. A gate failure leaves the
+    whole step unaccepted. Cancellation propagates. *)
+
 val fit_continuity :
   capacity:Keeper_lane_cli_oneshot.input_capacity -> base_path:string -> keeper_id:string ->
   input_for:(Keeper_librarian_continuity.prepared -> (Keeper_librarian.input, string) result) ->

@@ -528,3 +528,18 @@ let status_files_at ?(timeout_sec = inspection_timeout_sec) ~local_path () =
 
 let status_files ?timeout_sec ~repository () =
   status_files_at ?timeout_sec ~local_path:repository.local_path ()
+
+let file_paths_at ?(timeout_sec = inspection_timeout_sec) ~local_path () =
+  match
+    run_git_raw ~cwd:local_path ~env:read_only_git_env ~timeout_sec
+      [ "--no-optional-locks"; "ls-files"; "--cached"; "--others"
+      ; "--exclude-standard"; "--full-name"; "-z"; "--"
+      ]
+  with
+  | Stdlib.Error detail -> Stdlib.Error detail
+  | Stdlib.Ok "" -> Stdlib.Ok []
+  | Stdlib.Ok output ->
+      (match List.rev (String.split_on_char '\000' output) with
+       | "" :: records when not (List.exists (String.equal "") records) ->
+           Stdlib.Ok (List.sort_uniq String.compare records)
+       | _ -> Stdlib.Error "git ls-files returned malformed NUL-delimited paths")

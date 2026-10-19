@@ -703,8 +703,8 @@ val apply_disposition
     in [claims_not_applied]: it would carry on content the keeper already
     removed or replaced, and give the old id a second successor. A memory
     [revisions] supersedes stays current, even if [dropped_statements] retires
-    it, unless one of its successors is a stored new claim or a memory the
-    locked snapshot holds. Only the absorptions passed in [absorbed] are
+    it, unless one of its successors survives premise support maintenance.
+    Only the absorptions passed in [absorbed] are
     checked: when a caller leaves an absorption out (the absorb gate declined
     it), the claim is stored even if the memory that absorption named is
     gone. [revisions] is required for the same
@@ -713,10 +713,15 @@ val apply_disposition
 
     An absorption goes into a memory the answer names: a stored new claim, or
     a current memory the answer wrote again verbatim. An absorption whose
-    target the locked snapshot does not hold and this commit does not store is
-    not applied and is returned in [absorbed_not_applied]; its source stays
-    current, the removed memory is not brought back, and no absorbed row
-    points into an id no snapshot has (#38186). *)
+    target does not survive this commit's premise support maintenance is
+    not applied and is returned in [absorbed_not_applied]; the absorption no
+    longer removes its source. Plain drops and support maintenance still
+    apply to that source. A removed memory is not brought back, and no absorbed row
+    points into an id no snapshot has (#38186). If retaining one source makes
+    another destination unsupported, support and removal checks repeat until
+    every remaining absorption and successor-linked retirement has a current
+    destination. A withdrawn removal stays withdrawn for this decision.
+    Plain retirements remain unconditional. *)
 
 val replace
   :  ?clock:float Eio.Time.clock_ty Eio.Resource.t

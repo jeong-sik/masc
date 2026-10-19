@@ -100,14 +100,13 @@ let append plan (step : Keeper_librarian_runtime.memory_step) =
     let current_facts = match plan.selection with None -> [] | Some selection -> selection.facts in
     let disposition = Disposition.plan ~current:current_facts ~dropped:step.dropped
       ~absorbed:step.absorbed ~revisions:step.revisions ~new_claims:step.new_claims in
-    let facts, invalidated = Support.maintain_supported_facts disposition.facts in
     let invalidated =
       List.map
         (fun (entry : Keeper_memory_os_current_types.support_invalidation) ->
            {Current.fact=entry.fact; missing_premise_ids=entry.missing_premise_ids})
-        invalidated
+        disposition.invalidated
     in
-    let current : Keeper_librarian.current_selection = {facts} in
+    let current : Keeper_librarian.current_selection = {facts=disposition.facts} in
     let stage = {step; current; invalidated; claims_not_applied=disposition.claims_refused} in
     Ok {plan with selection=Some current; stages_rev=stage :: plan.stages_rev;
       run_ids=Id_set.add step.run_id plan.run_ids}

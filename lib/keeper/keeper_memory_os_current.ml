@@ -3023,7 +3023,8 @@ let apply_disposition
     ~now
     (fun ~snapshot_content:_ previous ->
        let plan = plan_of previous in
-       let* next = make_snapshot ~previous ~now ~source ~facts:plan.facts () in
+       let* next = make_snapshot_from_maintained ~previous ~now ~source ~facts:plan.facts
+         ~invalidated:plan.invalidated () in
        let actual = ids_of next.facts in
        match List.find_opt (fun identity -> not (Set_util.StringSet.mem identity actual)) required_memory_ids with
        | Some identity -> Error ("explicit admission destination is not current: " ^ identity)

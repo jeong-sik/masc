@@ -1,13 +1,13 @@
-(** Pure application of a Librarian decision to the facts current at that step.
-    Support maintenance and all publication effects belong to the caller. *)
+(** Pure application and support maintenance of one Librarian decision.
+    All publication effects belong to the caller. *)
 open Keeper_memory_os_types
 
 type t = private
   { facts : fact list
   ; claims_refused : fact list
   ; absorbed_into : string Set_util.StringMap.t
-    (** Candidate absorption destinations, before support maintenance. A target
-        in this map is not a guarantee that it survives in the next facts. *)
+    (** Only absorptions whose destinations survive support maintenance. *)
+  ; invalidated : Keeper_memory_os_current_types.support_invalidation list
   }
 
 val plan
@@ -19,5 +19,11 @@ val plan
   -> t
 (** Preserve current fact fields/order and first accepted new-claim order.
     A new successor of a no-longer-current source is refused. Successor-linked
-    retirements and absorptions require a held or accepted destination, as in
-    the store. Plain drops have no destination. *)
+    retirements and absorptions require a destination in the maintained facts.
+    A removal whose destination disappears is withdrawn before recomputing
+    support; ordinary support invalidation can still remove its source.
+    Withdrawn removals are never enabled
+    again in this decision, even if retaining a source restores support for the
+    destination. Each retry strictly shrinks the removal sets. Plain drops have
+    no destination and remain unconditional. Claimed successors of missing
+    original sources remain refused through every retry. *)

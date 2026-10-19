@@ -123,6 +123,22 @@ test('stop and MIDI route selection retire a pending snapshot while editor decis
   view.key('q'); await view.done
 })
 
+test('preview failure after sound adoption does not discard the next admitted edit', async () => {
+  let complete
+  const selection = { plugin_path: '/synth.vst3', plugin_name: null, preset_path: null, name: 'Bass' }
+  const view = await controller({ autoSoundfont: false, capture() {
+    return { promise: new Promise(resolve => { complete = resolve }), cancel() {} }
+  } })
+  view.key('return'); view.key('i'); await flush()
+  view.observed.pickers[0].close(); view.observed.pickers[0].selected(selection); await flush()
+  view.observed.workers[0].emit('error', new Error('worker failed during snapshot'))
+  complete(frozenSound(selection)); await flush()
+  view.command('title Admitted after preview failure'); view.key('q'); await view.done
+  assert.equal(view.observed.saved.at(-1).title, 'Admitted after preview failure')
+  assert.deepEqual(view.observed.saved.at(-1).sound, frozenSound(selection))
+  assert.equal(view.observed.players, 0)
+})
+
 test('close drains admitted note edits and refuses keys arriving after close', async () => {
   const view = await controller()
   for (const name of ['return', 'up', 'return', 'q', 'up', 'return']) view.key(name)

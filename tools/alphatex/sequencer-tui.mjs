@@ -106,7 +106,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
             if (cancelled || pendingSound !== owned || !accepting || closed || suspended) return
             pendingSound = null
             adoptSound(sound)
-          })
+          }).catch(error => { status = error.message }).finally(draw)
           return task
         }).catch(error => {
           if (!cancelled && pendingSound === owned && accepting && !closed) status = error.message

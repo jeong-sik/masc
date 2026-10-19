@@ -151,17 +151,17 @@ let test_summary_fallback_and_resume () =
     (String_util.contains_substring next.prompt (Option.get (Frozen.text changed)));
   let unchanged=Host.resume_prompt ~goal:"current goal" ~held:next.held_context changed_messages in
   check string "an unchanged held context is acknowledged once" "current goal" unchanged.prompt;
-  Masc_test_deps.with_process_env Masc.Env_config_core.base_path_env_key None @@ fun () ->
-  Masc_test_deps.with_process_env Masc.Env_config_core.config_dir_env_key None @@ fun () ->
-  Masc.Config_dir_resolver.reset ();
+  Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
+  Masc_test_deps.with_process_env Env_config_core.config_dir_env_key None @@ fun () ->
+  Config_dir_resolver.reset ();
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   Masc_test_deps.init_eio_clock ~sw env;
-  Masc.Fs_compat.set_fs env#fs;
+  Fs_compat.set_fs env#fs;
   let base_path=Filename.temp_dir "frozen-unread-session-" "" in
   Eio.Switch.on_release sw (fun () ->
-    Masc.Config_dir_resolver.reset ();
-    Masc.Fs_compat.remove_tree base_path);
+    Config_dir_resolver.reset ();
+    Fs_compat.remove_tree base_path);
   let module Store=Masc.Keeper_official_client_session_store in
   let snapshot_sha256=Digestif.SHA256.(digest_string "native canonical context" |> to_hex) in
   let frontier : Store.context_frontier={snapshot_sha256;message_count=List.length composed.sent;

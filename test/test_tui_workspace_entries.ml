@@ -878,11 +878,49 @@ let test_location_cannot_borrow_changed_authority () =
         state.workspace_identity <- Workspace_identity_match)
     ]
 
+let test_locations_retire_ordinary_source_callbacks () =
+  List.iter (fun same_file ->
+    List.iter (fun late_result ->
+      let state, _ = finder_fixture () in
+      close_code_finder state;
+      state.code_file_hscroll <- 4;
+      let next, ordinary = start_read ~equal:String.equal state.code_file "src/old.ml" in
+      state.code_file <- next;
+      state.code_file_resume_intent <- Open_code_file;
+      let query = match Code_results.start_lsp_question state ~question:"definition" ~symbol:"target" with
+        | Some request -> request | None -> Alcotest.fail "question did not start" in
+      let location : Decode.lsp_location = {
+        ll_path=(if same_file then "src/old.ml" else "lib/target.ml"); ll_inside=true; ll_line=1 } in
+      let followup = Code_results.apply_lsp_answer state query (Ok (Decode.Lsp_locations [location])) in
+      let before = state.code_file, state.code_file_cursor, state.code_file_scroll,
+        state.code_file_hscroll, state.code_focus_file, state.code_jump_back in
+      Code_results.apply_file ~intent:Open_code_file state ordinary late_result;
+      Alcotest.(check bool) "late ordinary source cannot reset location or pending source" true
+        (before = (state.code_file, state.code_file_cursor, state.code_file_scroll,
+          state.code_file_hscroll, state.code_focus_file, state.code_jump_back));
+      Alcotest.(check bool) "recovery retains Refresh rather than obsolete Open" true
+        (state.code_file_resume_intent = Refresh_code_file);
+      match followup with
+      | Code_results.Reveal_cursor ->
+          Alcotest.(check bool) "same file selects the destination and resets pan" true
+            (same_file && state.code_file_cursor = 0 && state.code_file_hscroll = 0)
+      | Code_results.Read_location_file (owner, request) ->
+          Alcotest.(check bool) "different file uses a distinct owner" false same_file;
+          Code_results.apply_file ~intent:(Navigate_code_file owner) state request (Ok "target");
+          ignore (Code_results.take_ready_navigation_file state ~input_pending:false);
+          Alcotest.(check (option string)) "owned location still completes" (Some "lib/target.ml")
+            (Fetched.current_key state.code_file)
+      | Code_results.No_followup -> Alcotest.fail "location unexpectedly refused")
+      [Ok "late reset"; Error "late failure"])
+    [true; false]
+
 let () =
   Alcotest.run
     "masc-tui-workspace-entries"
     [ ( "owned locations"
-      , [ Alcotest.test_case "history and destination commit only on success" `Quick
+      , [ Alcotest.test_case "ordinary callbacks cannot reset a location" `Quick
+            test_locations_retire_ordinary_source_callbacks
+        ; Alcotest.test_case "history and destination commit only on success" `Quick
             test_location_commits_history_only_on_success
         ; Alcotest.test_case "failure cancellation and same-path retry preserve source" `Quick
             test_location_failure_cancel_and_replacement_preserve_source

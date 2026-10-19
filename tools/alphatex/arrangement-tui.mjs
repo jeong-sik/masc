@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto'
 import { Worker } from 'node:worker_threads'
 import { emitKeypressEvents } from 'node:readline'
 import { arrangementRoute, selectArrangementRoute, arrangementPlaybackRequest } from './arrangement-playback.mjs'
-import { arrangementEditor, arrangementAction, arrangementCommand, arrangementImported, arrangementCalibrated, selectedRegion } from './arrangement-editor.mjs'
+import { arrangementEditor, arrangementAction, arrangementCommand, arrangementImported, arrangementCalibrated, arrangementRecordingCorrection, selectedRegion } from './arrangement-editor.mjs'
 import { loadArrangement, verifyArrangementAssets, saveArrangement } from './arrangement-files.mjs'
 import { saveProject } from './sequencer-files.mjs'
 import { safeText } from './terminal.mjs'
@@ -15,10 +15,12 @@ import { devices, record, monitorInput } from './capture.mjs'
 import { openLiveMidi, backingMidiClaims, liveMidiPlan } from './live-midi.mjs'
 import { midiDestinations } from './playback.mjs'
 import { recordingEpoch } from './arrangement-recording.mjs'
+import { recordingCorrectionContext, recordingCorrectionCapture } from './recording-correction.mjs'
 import { measureAudioCalibration } from './audio-calibration.mjs'
-import { calibrationMilliseconds, validateCalibrationCapture } from './calibration-profile.mjs'
+import { calibrationMilliseconds, calibrationResidual, validateCalibrationCapture } from './calibration-profile.mjs'
 
 const help = [
+  ':record-calibration DIRECTORY   inspect next-take measurement; :record-correction pulse N | manual MS IN OUT | none',
   ':calibration-open DIRECTORY   inspect saved samples/clocks; :calibration-apply PULSE_NUMBER adopts one displayed residual',
   ':capture-channel IN_CH OUT_CH   route one captured audio channel; :capture-channel all restores every source channel',
   ':split-take   separate selected captured audio/MIDI; :capture-offset MS (positive advances, negative delays)',
@@ -83,7 +85,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
   const playerPlans = new Map(), planInspections = new Map()
   let recording = null, input = null, midiInput = 'all', transportPending = false, inputDevices = null, discoveryTicket = 0
   let calibration = null
-  let calibrationInspection = null
+  let calibrationInspection = null, recordingInspection = null
   const discovery = new AbortController()
   let complete
   const done = new Promise(resolve => { complete = resolve })
@@ -189,6 +191,9 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     if (!input) throw new Error('Select :input AUDIO_UID first; :inputs lists devices')
     if (transport.kind !== 'playing' || transportPending) throw new Error('Start arrangement playback before recording')
     const project = editor.project, projectPath = path, selectedInput = input, selectedMidi = midiInput, selectedMonitor = monitorOutput, backing = transport.handle
+    const correction = structuredClone(project.recordingCorrection ?? { kind: 'none' })
+    recordingCorrectionContext(correction, { input: selectedInput, output: route.output, monitorOutput: selectedMonitor })
+    const selectedOutput = route.output
     const owned = { controller: new AbortController(), phase: 'opening', directory: join(dirname(path), 'recordings', randomUUID()), handle: null, epoch: null, failure: null, generation }
     recording = owned
     const expected = generation
@@ -200,23 +205,34 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
         if (owned.controller.signal.aborted || !accepting || generation !== expected) return
         // This correlated barrier follows earlier native pause/seek commands.
         // An old unsolicited status cannot supply the admission epoch.
-        const epoch = recordingEpoch(await backing.recordingEpoch({ signal: owned.controller.signal }))
+        const playback = await backing.recordingEpoch({ signal: owned.controller.signal })
+        recordingCorrectionContext(correction, { input: selectedInput, output: selectedOutput, monitorOutput: selectedMonitor, playback })
+        const epoch = recordingEpoch(playback)
         if (owned.controller.signal.aborted || !accepting || generation !== expected || transport.handle !== backing || editor.project !== project || path !== projectPath) return
         owned.epoch = epoch
+        // The native recorder creates a fresh take directory itself. Retain the
+        // chosen policy beside it before opening inputs, including failed takes.
+        await writeFile(owned.directory + '.request.json', JSON.stringify({ projectPath, epoch, correction }, null, 2), { flag: 'wx', mode: 0o600 })
+        if (owned.controller.signal.aborted || !accepting || generation !== expected || transport.handle !== backing || editor.project !== project || path !== projectPath) return
         owned.handle = record({ input: selectedInput, midi: selectedMidi, directory: owned.directory, monitorOutput: selectedMonitor, onEvent(event) {
-          if (event.kind === 'recording') owned.phase = owned.controller.signal.aborted ? 'finalizing' : 'recording'
+          if (event.kind === 'recording') {
+            if (correction.kind === 'audio' && (event.input?.id !== correction.input || correction.audioChannel.input > event.channels
+                || correction.placement.kind === 'calibrated' && event.sampleRate !== correction.placement.profile.input.sampleRate)) throw new Error('Capture opened with a different correction input/channel/rate')
+            owned.phase = owned.controller.signal.aborted ? 'finalizing' : 'recording'
+          }
           if (event.kind === 'monitoring') owned.monitoring = event.monitoring
           if (event.kind === 'error') status = event.message
           draw()
         } })
-        await owned.handle.completion
+        const captured = await owned.handle.completion
         owned.phase = 'attaching'; draw()
         // Import is separate from recording success. A failed/late import must
         // preserve the complete finalized source and its recovery coordinates.
-        await writeFile(join(owned.directory, 'arrangement-recording.json'), JSON.stringify({ projectPath, epoch }, null, 2), { flag: 'wx', mode: 0o600 })
+        await writeFile(join(owned.directory, 'arrangement-recording.json'), JSON.stringify({ projectPath, epoch, correction }, null, 2), { flag: 'wx', mode: 0o600 })
+        recordingCorrectionCapture(correction, captured.manifest)
         if (owned.failure) throw owned.failure
         if (editor.project !== project || path !== projectPath) throw new Error('Project changed before recording attachment')
-        const result = await request({ kind: 'attach-recording', project, projectPath, path: owned.directory, epoch })
+        const result = await request({ kind: 'attach-recording', project, projectPath, path: owned.directory, epoch, correction })
         if (owned.failure) throw owned.failure
         if (editor.project !== project || path !== projectPath) throw new Error('Project changed during recording attachment')
         await writeFile(join(owned.directory, 'alignment.json'), JSON.stringify(result.alignment, null, 2), { flag: 'wx', mode: 0o600 })
@@ -272,7 +288,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     draw()
   }
   function adopt(next) {
-    if (next.project !== editor.project || next.region !== editor.region) calibrationInspection = null
+    if (next.project !== editor.project || next.region !== editor.region) calibrationInspection = recordingInspection = null
     if (next.project !== editor.project) stop()
     editor = next
   }
@@ -398,6 +414,42 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
   }
   async function effect(value) {
     switch (value.kind) {
+      case 'record-calibration': {
+        recordingInspection = null
+        if (!input || !route.output) throw new Error('Select :input and :mixed-output before inspecting a recording calibration')
+        const project = editor.project, selectedInput = input, selectedOutput = route.output, selectedMonitor = monitorOutput
+        status = 'Verifying next-take calibration samples and clocks'; draw()
+        const profile = await request({ kind: 'inspect-calibration', path: value.path })
+        if (!accepting || editor.project !== project || input !== selectedInput || route.output !== selectedOutput || monitorOutput !== selectedMonitor) return
+        const correction = { kind: 'audio', input, output: route.output,
+          audioChannel: { input: profile.input.channel, output: profile.output.channel },
+          placement: { kind: 'calibrated', profile, match: 0, advanceNanoseconds: calibrationResidual(profile, profile.pulses[0]) } }
+        recordingCorrectionContext(correction, { input, output: route.output, monitorOutput })
+        recordingInspection = { profile, project, input, output: route.output, monitorOutput }
+        status = 'Inspect both pulses; :record-correction pulse N selects one for future takes'
+        break
+      }
+      case 'record-correction': {
+        let correction
+        switch (value.action) {
+          case 'clear': correction = { kind: 'none' }; break
+          case 'manual': correction = { kind: 'audio', input, output: route.output, audioChannel: value.audioChannel, placement: value.placement }; break
+          case 'measured': {
+            const owned = recordingInspection
+            if (!owned || owned.project !== editor.project || owned.input !== input || owned.output !== route.output || owned.monitorOutput !== monitorOutput) throw new Error('Inspect calibration for the current recording input/output before selecting a pulse')
+            const profile = owned.profile, pulse = profile.pulses[value.match]
+            if (!pulse) throw new Error('Choose one inspected calibration pulse')
+            correction = { kind: 'audio', input, output: route.output, audioChannel: { input: profile.input.channel, output: profile.output.channel },
+              placement: { kind: 'calibrated', profile, match: value.match, advanceNanoseconds: calibrationResidual(profile, pulse) } }
+            break
+          }
+          default: throw new Error('Unknown recording correction action')
+        }
+        recordingCorrectionContext(correction, { input, output: route.output, monitorOutput })
+        adopt(arrangementRecordingCorrection(editor, correction))
+        status = 'Recording correction selected; original take files and MIDI remain unchanged'
+        break
+      }
       case 'calibration-open': {
         calibrationInspection = null
         const project = editor.project, region = editor.region, output = route.output
@@ -591,12 +643,13 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     const monitorInfo = recording?.monitoring ?? monitoring?.info
     const reportedLatency = monitorInfo ? ` · ${((monitorInfo.latency.inputSeconds + monitorInfo.latency.outputSeconds) * 1000).toFixed(2)} ms reported I/O` : ''
     const rows = process.stdout.rows || 24, width = Math.max(1, (process.stdout.columns || 80) - 24)
-    const profile = calibrationInspection?.profile ?? clip?.placement?.profile
+    const policy = project.recordingCorrection ?? { kind: 'none' }
+    const profile = recordingInspection?.profile ?? calibrationInspection?.profile ?? clip?.placement?.profile
     const residuals = profile?.pulses.map(pulse => calibrationMilliseconds(profile, pulse))
     const lines = [`Arrangement · ${project.title}${project !== saved ? ' *' : ''} · ${project.tempo} BPM · ${project.meter.join('/')}`,
       `Cursor ${editor.tick / project.ppq} beats · grid ${editor.step / project.ppq} · ${status}`,
       `Playback ${transport.kind} · ${(transport.event?.currentTime ?? 0).toFixed(2)} s · ${transport.event?.device.name ?? route.output ?? route.midiOutput ?? 'default output'}`,
-      `Recording ${recording?.phase ?? 'idle'} · input ${input ?? 'choose :input'} · MIDI ${midiInput}`,
+      `Recording ${recording?.phase ?? 'idle'} · input ${input ?? 'choose :input'} · MIDI ${midiInput} · correction ${policy.kind === 'none' ? 'none' : policy.placement.kind + ' ' + Number(policy.placement.advanceNanoseconds.numerator) / Number(policy.placement.advanceNanoseconds.denominator) / 1e6 + ' ms'}`,
       `Monitor ${recording?.monitoring ? 'active to ' + recording.monitoring.output.id : monitoring ? monitoring.phase + ' to ' + monitorOutput : 'off'}${reportedLatency}`,
       `MIDI monitor ${liveMidi?.phase ?? 'off'}${liveMidi?.info ? ' · ' + liveMidi.info.bindings.map(binding => binding.device.name + ' ← ' + binding.source).join(', ') : ''}`]
     if (profile) lines.push(`Calibration ${profile.input.id}:${profile.input.channel} → ${profile.output.id}:${profile.output.channel} · ${profile.input.sampleRate}/${profile.output.sampleRate} Hz`,

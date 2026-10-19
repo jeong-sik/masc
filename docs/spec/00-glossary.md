@@ -3063,7 +3063,8 @@ status: reference
   - 형식: 고치려는 대상 문서가 정해져 있으면 `가이드 없음(대상 문서:
     docs/design/browser-bidi-live-host.md)` 처럼 경로를 적고, 그런 문서 자체가
     없으면 `가이드 없음(문서 없음)` 이라고 적는다. 줄이 72칸쯤에 접혀도
-    계수는 불릿 전체에서 표기를 찾는다.
+    계수는 불릿 전체에서 표기를 찾는다. 계수기는 표기가 들었는지를 세는
+    도구지, 두 형식의 문법 검증기는 아니다.
   - 계수와 증거: 노트 작성이 끝나면 `scripts/release/count-guideless-added.py`가
     이 표기를 세어 `docs/releases/guide-metrics-<tag>.md`에 남긴다. 표기는
     규칙상 허용되지만, 계수 결과는 receipt 묶음에 포함해 다음 게이트화 판단
@@ -3075,12 +3076,15 @@ status: reference
   [scripts/release/count-guideless-added.py](../../scripts/release/count-guideless-added.py)
 
 **Merge-compile Record (병합 컴파일 기록)**
-: 착지하려는 정확한 병합 head SHA를, 그 SHA의 트리와 main과 바이트가 같은 툴체인으로
-  컴파일해 커밋 상태(commit status)로 남기는 기록. `merge-compile.yml`은
-  workflow_dispatch로만 돌고 sha·pr 입력을 받는다(pr=0은 PR 없는 도달 가능 SHA,
-  live-proof dispatch). merge-guard는 이 기록을 `ADVISORY #N: ...` 조언 줄로 읽을
-  뿐 CI를 발화하지 않는다 — 기록이 승인을 대신하지도, 병합을 보증하지도 않는다.
-  병합자가 착지 보고에 남기는 Main minimal build(main ref 제품 빌드)는 다른 검사다.
+: 착지하려는 정확한 병합 head SHA를, 기본으로는 그 SHA의 트리와 main 툴체인이
+  바이트까지 같은지 대조한 뒤 컴파일해 커밋 상태(commit status)로 남기는 기록.
+  `trust-head-toolchain=true`면 이 대조를 생략하고 override를 영수증에 남긴다.
+  `merge-compile.yml`은 workflow_dispatch로만 돌고 sha·pr 입력을 받는다(pr=0은
+  PR 없는 도달 가능 SHA, live-proof dispatch). merge-guard는 이 기록을
+  `ADVISORY #N: ...` 조언 줄로 기본 읽는데, `MASC_MERGE_COMPILE_ENFORCE=1`이면
+  fail-closed로 바뀐다. 기록이 승인을 대신하지도, 병합을 보증하지도 않는다.
+  비-main ref proof run은 status를 쓰지 않는다. 병합자가 착지 보고에 남기는
+  Main minimal build(main ref 제품 빌드)는 다른 검사다.
   → [.github/workflows/merge-compile.yml](../../.github/workflows/merge-compile.yml) ·
   [scripts/review/README.md](../../scripts/review/README.md) ·
   [scripts/review/merge-guard.sh](../../scripts/review/merge-guard.sh)

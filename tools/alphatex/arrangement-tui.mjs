@@ -85,7 +85,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
   let monitoring = null, monitorOutput = null
   let liveMidi = null, liveRoutes = [], liveTransitions = Promise.resolve()
   const playerPlans = new Map(), planInspections = new Map()
-  let recording = null, input = null, midiInput = 'all', transportPending = false, inputDevices = null, discoveryTicket = 0
+  let recordStart = null, recording = null, input = null, midiInput = 'all', transportPending = false, inputDevices = null, discoveryTicket = 0
   let calibration = null
   let calibrationInspection = null, recordingInspection = null
   const discovery = new AbortController()
@@ -183,6 +183,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     return owned
   }
   async function settleRecording() {
+    if (recordStart) { stop(); return }
     const owned = recording
     if (!owned) return
     owned.phase = 'finalizing'; owned.controller.abort(); owned.handle?.stop(); draw()
@@ -282,6 +283,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
   worker.on('exit', code => { if (!terminatingWorker) fail(new Error(`Arrangement worker exited ${code}`)) })
   function stop() {
     recording?.controller.abort(); recording?.handle?.stop()
+    recordStart = null
     generation++; transportPending = false
     if (preparing !== null && !workerFailure) worker.postMessage({ kind: 'cancel', request: preparing })
     preparing = null
@@ -307,7 +309,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     transport = { kind: 'preparing' }; status = 'Preparing arrangement sources…'
     const prepared = request({ ...selection, project, sourceRoot, directory }, id => { preparing = id })
     const preparation = (async () => {
-      let result, playbackCompletion
+      let result, playbackCompletion, playbackHandle
       try {
         result = await prepared
         if (generation === expected) preparing = null
@@ -337,6 +339,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
               transport = { ...transport, kind: event.kind, event }
               draw()
             } })
+          playbackHandle = handle
           transport = { ...transport, handle }
           playerPlans.set(handle, result)
           const completion = handle.completion.then(event => {
@@ -358,6 +361,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
         }
       } catch (error) {
         rejectStart(error)
+        playbackHandle?.stop()
         if (generation === expected) { preparing = null; transport = { kind: 'stopped' }; status = error.message; draw() }
       } finally {
         rejectStart(new Error('Playback start was cancelled'))
@@ -557,12 +561,20 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
         break
       }
       case 'midi-input': midiInput = value.input; status = 'MIDI input selected'; break
-      case 'record':
+      case 'record': {
+        if (recordStart) throw new Error('Recording backing is already opening')
         if (transport.kind === 'stopped' && practiceEnabled(editor.project)) {
           if (!input) throw new Error('Select :input AUDIO_UID first; :inputs lists devices')
-          await play()
-        }
-        startRecording(); break
+          const started = play(), owned = { generation }
+          recordStart = owned
+          started.then(() => {
+            if (recordStart !== owned || !accepting || generation !== owned.generation) return
+            recordStart = null; startRecording()
+          }).catch(error => { if (accepting && generation === owned.generation) { status = error.message; draw() } })
+            .finally(() => { if (recordStart === owned) recordStart = null })
+        } else startRecording()
+        break
+      }
       case 'record-stop': await settleRecording(); break
       case 'open-take': openTake(value.asset); break
       case 'help': inputDevices = null; discoveryTicket++; showHelp = !showHelp; break

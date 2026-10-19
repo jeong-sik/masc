@@ -74,7 +74,7 @@ test('actual IO worker preserves sources in redo history when saving to a differ
 const flush=()=>new Promise(resolve=>setImmediate(resolve))
 async function controller(options={}){
   const observed={requests:[],saved:[],recovered:[],terminated:false,players:[],removed:[],takes:[],captures:[],monitors:[],live:[],liveAttempts:[],claims:[],calibrations:[],writes:[]},process=new EventEmitter()
-  const admitLive=options.admitLive
+  const admitLive=options.admitLive, heldPlaybackReady=options.playbackReady
   process.stdin=Object.assign(new EventEmitter(),{isTTY:true,isRaw:false,setRawMode(value){this.isRaw=value},resume(){},pause(){}})
   process.stdout=Object.assign(new EventEmitter(),{isTTY:true,columns:100,rows:24,write(){}});process.stderr={write(){}}
   let owner
@@ -131,7 +131,7 @@ async function controller(options={}){
       const completion=new Promise((yes,no)=>{resolve=yes;reject=no})
       const event=(kind,currentTime=0)=>{const value={kind,currentTime,duration:10,device:{id:'output',name:'Output',outputs:2},loop:false,
         clock:{kind:'mach-host-time',anchor:'9007199254740993123',position:0,numer:125,denom:3}};options.onEvent(value);return value}
-      const handle={recordingEpoch:async()=>({kind:'playing',duration:10,loop:false,device:{id:'output',outputs:2},clock:{kind:'mach-host-time',anchor:'9007199254740993123',position:0,numer:125,denom:3}}),completion,ready:Promise.resolve(),stop(){entry.commands.push('stop')},terminate(){entry.commands.push('terminate')},pause(){entry.commands.push('pause');event('paused')},resume(){entry.commands.push('resume');event('playing')},status(){entry.commands.push('status')},seek(seconds){entry.commands.push(['seek',seconds])}}
+      const handle={recordingEpoch:async()=>({kind:'playing',duration:10,loop:false,device:{id:'output',outputs:2},clock:{kind:'mach-host-time',anchor:'9007199254740993123',position:0,numer:125,denom:3}}),completion,ready:heldPlaybackReady??Promise.resolve(),stop(){entry.commands.push('stop')},terminate(){entry.commands.push('terminate')},pause(){entry.commands.push('pause');event('paused')},resume(){entry.commands.push('resume');event('playing')},status(){entry.commands.push('status')},seek(seconds){entry.commands.push(['seek',seconds])}}
       const entry={options,handle,commands:[],finish(){resolve(event('stopped'))},reject,event}
       observed.players.push(entry);queueMicrotask(()=>event('playing'));return handle
     },
@@ -844,4 +844,33 @@ test('closing a record-triggered preparation rejects late playback and late inpu
  await view.done
  assert.equal(view.observed.players.length,0);assert.equal(view.observed.captures.length,0)
  assert.ok(view.observed.removed.includes('/owned/practice/late'));assert.equal(view.process.stdin.isRaw,false)
+})
+
+
+test('stop cancels a record-triggered preparation without waiting for the worker and cannot open late inputs',async()=>{
+ const view=await controller();await primeWave(view)
+ try {
+  view.command('practice 1 on');view.command('input interface');view.command('record');await flush()
+  const prepare=view.observed.requests.find(job=>job.kind==='prepare-wave');assert.ok(prepare)
+  view.command('stop');await flush()
+  assert.ok(view.observed.requests.some(job=>job.kind==='cancel'&&job.request===prepare.id))
+  view.worker.emit('message',{id:prepare.id,ok:true,result:{path:'/owned/practice/stopped/plan.json',format:'wave-arrangement'}});await flush()
+  assert.equal(view.observed.players.length,0);assert.equal(view.observed.captures.length,0)
+  assert.ok(view.observed.removed.includes('/owned/practice/stopped'))
+ }finally{await closeController(view)}
+})
+
+test('a rejected playing acknowledgement stops its child and retains private sources until child closure',async()=>{
+ let rejectReady;const playbackReady=new Promise((yes,no)=>{rejectReady=no})
+ playbackReady.catch(()=>{})
+ const view=await controller({playbackReady});await primeWave(view)
+ try {
+  view.key('space');await flush();const prepare=view.observed.requests.find(job=>job.kind==='prepare-wave')
+  view.worker.emit('message',{id:prepare.id,ok:true,result:{path:'/owned/practice/rejected/plan.json',format:'wave-arrangement'}});await flush()
+  rejectReady(new Error('native acknowledgement failed'));await flush()
+  assert.ok(view.observed.players[0].commands.includes('stop'))
+  assert.ok(!view.observed.removed.includes('/owned/practice/rejected'))
+  view.observed.players[0].finish();await flush()
+  assert.ok(view.observed.removed.includes('/owned/practice/rejected'))
+ }finally{await closeController(view)}
 })

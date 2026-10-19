@@ -185,19 +185,23 @@ test('combined playback pins its audio device and every MIDI binding in one nati
   await loop.playback.completion
 })
 
-test('captured audio-only playback owns the native arrangement clock and refuses MIDI or whole-song loop selection', async () => {
+test('captured audio-only playback owns its one-shot or authored-loop clock and refuses MIDI selection', async () => {
+ for(const loop of [false,true]){
   const format = 'capture-audio-arrangement'
-  const f = fixture({ format })
+  const f = fixture({ format,loop })
   assert.equal(f.executable, arrangementTransportPath)
+  assert.equal(f.args.includes('--loop'),loop)
   const clock = { kind: 'mach-host-time' }
   f.event('playing', { format, clock }); await f.playback.ready
   f.playback.pause(); f.event('paused', { format, clock }); f.playback.seek(.5); f.playback.resume()
   f.event('playing', { format, clock }); f.playback.stop(); f.event('stopped', { format, clock }); f.close()
   await f.playback.completion
   assert.deepEqual(f.commands.map(command => command.kind), ['pause', 'seek', 'resume', 'stop'])
-  for (const options of [{ loop: true }, { midiOutput: '12' }]) assert.throws(() => fixture({ format, ...options }), /Invalid arrangement/)
+  assert.throws(() => fixture({ format,loop,midiOutput:'12' }), /Invalid arrangement/)
+  if(loop)await assert.rejects(f.playback.recordingEpoch(),/cycle-aware/)
   const invalid = fixture({ format }); invalid.event('playing'); invalid.close(1)
   await assert.rejects(invalid.playback.completion, /captured audio arrangement clock/)
+ }
 })
 
 test('paired captured-region playback validates the common clock and native MIDI2 endpoint binding', async () => {

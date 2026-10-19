@@ -11,9 +11,10 @@
 
     Tuning accepts either bare note names or a parenthesized list, with every
     member checked. A single initial [\track] and [\staff] may describe the
-    part. Track names and short names, [\artist], [\ks] and [\section] are
-    checked presentation metadata; this fret-and-string projection does not
-    draw them. Key signatures do not change explicit fret numbers. Track
+    part. Track names and short names, [\artist], [\ks], [\clef] and [\section]
+    are checked presentation metadata; this fret-and-string projection does not
+    draw them. Key signatures and clefs do not change explicit fret numbers.
+    Track
     properties and an initial standalone [\instrument] support a guitar or bass MIDI [instrument] (programs 24--39,
     or their standard names). Its playback timbre is not drawn, and an
     explicit [\tuning] before music is required rather than guessing the
@@ -21,8 +22,11 @@
     a staff with no properties uses the default that includes tabs. Additional
     tracks/staves, structure after music, percussion, unknown properties and
     staff modes without tabs fail instead of flattening independent parts.
-    [\ks] and [\section] require the start of a bar (initially or after [|]);
-    their implicit bar-boundary form after notes is outside this subset.
+    [\ks], [\clef] and [\section] require the start of a bar (initially or
+    after [|]); their implicit bar-boundary form after notes is outside this
+    subset. A [\clef] names alphaTab's clefs -- [treble], [bass], [alto],
+    [tenor], [neutral] or their sign forms [g2], [f4], [c3], [c4], [n] -- and
+    is not drawn.
 
     Repeat signs stand in the bar they mark: [\ro] opens the repeat, [\rc N]
     closes it with the count of total plays, and [\ae n …] names the ending
@@ -57,6 +61,7 @@ type directive_argument =
   | Artist_text
   | Section_text
   | Key_signature_name
+  | Clef_name
   | Instrument_name
   | Tempo_number
   | Time_signature_numbers
@@ -82,7 +87,9 @@ type failure =
   | Instrument_without_tuning
   | Instrument_after_music
   | Invalid_key_signature of string
+  | Invalid_clef of string
   | Key_signature_after_note
+  | Clef_after_note
   | Section_after_note
   | Quoted_without_metadata
   | Duration_outside_subset of string  (** the duration as written *)

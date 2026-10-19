@@ -73,9 +73,11 @@ alphaTex 1.8에서는 메타데이터 뒤의 별도 `.` 구분자를 생략할 �
 | `\rc 2` | 반복 횟수 | 도돌이표 끝 `:|x2|` |
 | `\ae (1 2)` | 괄호 숫자 목록 | 대체 엔딩 브래킷 `1,2|` |
 
-`\artist "…"`, `\ks C#minor`, `\section "…"`도 읽습니다. 이 메타데이터는
+`\artist "…"`, `\ks C#minor`, `\clef bass`, `\section "…"`도 읽습니다. 이 메타데이터는
 프렛·줄·길이를 바꾸지 않으며 ASCII 탭에는 따로 표시하지 않습니다.
-`\ks`와 `\section`은 첫 음표 앞이나 명시적인 마디선 `|` 다음에 적습니다.
+`\clef`는 `treble` `bass` `alto` `tenor` `neutral`(또는 `g2` `f4` `c3` `c4` `n`)만 받고,
+오선보 기호일 뿐 TAB 줄에는 영향이 없습니다.
+`\ks`, `\clef`, `\section`은 첫 음표 앞이나 명시적인 마디선 `|` 다음에 적습니다.
 음표 앞의 단일 `\track "Bass" { instrument "Electric Bass Finger" }`와
 `\staff { tabs }`도 읽습니다. 악기를 지정하면 `\tuning`을 명시해야 합니다.
 두 번째 트랙·보표, 음표 뒤의 트랙·보표 선언, 지원하지 않는 속성은 원문과 이유를

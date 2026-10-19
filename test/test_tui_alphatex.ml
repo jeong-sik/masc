@@ -121,6 +121,7 @@ let documented_bass_score =
 \track "Bass" { instrument "Electric Bass Finger" }
 \staff { tabs }
 \tuning (G2 D2 A1 E1)
+\clef bass
 \ks C#minor
 \tempo 116 // estimated tempo
 \ts 11 8
@@ -243,10 +244,19 @@ let test_metadata_arguments_and_bar_boundaries () =
     (Missing_argument Key_signature_name);
   check_failure "unknown key signatures are not skipped" "\\ks Hminor :8 0.3"
     (Invalid_key_signature "Hminor");
+  check_failure "a clef needs a name" "\\clef \\ts 4 4 :8 0.3"
+    (Missing_argument Clef_name);
+  check_failure "unknown clefs are not skipped" "\\clef soprano :8 0.3"
+    (Invalid_clef "soprano");
+  check_music "a clef names the staff and changes no fret"
+    "\\clef bass :8 4.3 | \\clef treble 7.3"
+    [ 48, [ 0, 48, (false, [ "4@3" ]) ]; 48, [ 0, 48, (false, [ "7@3" ]) ] ];
   check_failure "a section cannot silently erase an implicit bar boundary"
     ":8 4.3 \\section \"Solo\" 7.3" Section_after_note;
   check_failure "a key change cannot silently erase an implicit bar boundary"
-    ":8 4.3 \\ks Emajor 7.3" Key_signature_after_note
+    ":8 4.3 \\ks Emajor 7.3" Key_signature_after_note;
+  check_failure "a clef change cannot silently erase an implicit bar boundary"
+    ":8 4.3 \\clef bass 7.3" Clef_after_note
 
 (* {1 Repeats}
 

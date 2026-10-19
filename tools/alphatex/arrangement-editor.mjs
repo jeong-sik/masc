@@ -123,6 +123,11 @@ export function arrangementCommand(editor, line) {
   let value
   switch (command) {
     case 'split-take': count(0); value = { kind: 'capture-split', id: regionID(editor) }; break
+    case 'capture-channel':
+      if (selectedRegion(editor)?.component !== 'audio') throw new Error('Choose a separated audio component for channel routing')
+      if (args.length === 1 && args[0] === 'all') value = { kind: 'region-change', id: regionID(editor), audioChannel: undefined }
+      else { count(2); value = { kind: 'region-change', id: regionID(editor), audioChannel: { input: Number(args[0]), output: Number(args[1]) } } }
+      break
     case 'capture-offset': count(1); value = { kind: 'region-change', id: regionID(editor), placement: manualCapturePlacement(args[0]) }; break
     case 'calibrate':
       count(4)

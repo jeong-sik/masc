@@ -81,6 +81,10 @@ struct Asset: Decodable {
     let channels: AVAudioChannelCount
     let frames: AVAudioFramePosition
 }
+struct CaptureAudioChannel: Decodable {
+    let input: AVAudioChannelCount
+    let output: AVAudioChannelCount
+}
 struct Region: Decodable {
     let id: String
     let asset: String
@@ -90,7 +94,8 @@ struct Region: Decodable {
     let repetitions: AVAudioFramePosition
     let captureClock: CaptureAudioClock?
     var component: CaptureRegionComponent? = nil
-    enum CodingKeys: String, CodingKey { case id, asset, startSeconds, offsetFrames, frameCount, captureClock, component; case repetitions = "repeat" }
+    var audioChannel: CaptureAudioChannel? = nil
+    enum CodingKeys: String, CodingKey { case id, asset, startSeconds, offsetFrames, frameCount, captureClock, component, audioChannel; case repetitions = "repeat" }
     func totalFrames() throws -> AVAudioFramePosition {
         let (total, overflow) = frameCount.multipliedReportingOverflow(by: repetitions)
         guard frameCount > 0, repetitions > 0, !overflow, total > 0 else { throw AudioFailure("region exceeds the native frame timeline") }
@@ -132,6 +137,11 @@ struct Plan: Decodable {
                   region.frameCount <= asset.frames, region.offsetFrames <= asset.frames - region.frameCount else { throw AudioFailure("invalid region source bounds") }
             guard region.captureClock == nil || clocked else { throw AudioFailure("captured audio clock requires an explicit captured audio plan") }
             guard region.component == nil || region.component == .audio && region.captureClock != nil else { throw AudioFailure("invalid captured audio component") }
+            if let channel = region.audioChannel {
+                guard region.component == .audio, channel.input > 0, channel.input <= asset.channels, channel.output > 0 else {
+                    throw AudioFailure("invalid captured audio channel routing")
+                }
+            }
             let total: AVAudioFramePosition
             if let clock = region.captureClock {
                 total = try clock.layout(rate: asset.sampleRate, offsetFrames: region.offsetFrames,
@@ -194,6 +204,7 @@ final class Voice {
     let region: Region
     let asset: Asset
     let file: AVAudioFile
+    let format: AVAudioFormat
     let player = AVAudioPlayerNode()
     let queue: DispatchQueue
     let buffers: [AVAudioPCMBuffer]
@@ -205,23 +216,36 @@ final class Voice {
     var generation: UInt64 = 0 // only the stream queue accesses these fields
     var cursor: AVAudioFramePosition = 0
     var origin: AVAudioFramePosition = 0
-    init(region: Region, asset: Asset, capacity: AVAudioFrameCount) throws {
+    init(region: Region, asset: Asset, capacity: AVAudioFrameCount, outputChannels: AVAudioChannelCount) throws {
         self.region = region; self.asset = asset; self.capacity = capacity
         queue = DispatchQueue(label: "music.arrangement.stream.\(region.id)", qos: .userInitiated)
         captureLayout = try region.captureClock?.layout(rate: asset.sampleRate, offsetFrames: region.offsetFrames,
                                                        frameCount: region.frameCount, repetitions: region.repetitions)
         total = try captureLayout?.totalFrames ?? region.totalFrames()
         file = try AVAudioFile(forReading: URL(fileURLWithPath: asset.path), commonFormat: .pcmFormatFloat32, interleaved: false)
-        let format = file.processingFormat
-        guard file.length == asset.frames, format.sampleRate == asset.sampleRate, format.channelCount == asset.channels,
+        let sourceFormat = file.processingFormat
+        guard file.length == asset.frames, sourceFormat.sampleRate == asset.sampleRate, sourceFormat.channelCount == asset.channels,
               capacity > 0 else { throw AudioFailure("WAV source format changed") }
-        func buffer(_ count: AVAudioFrameCount) throws -> AVAudioPCMBuffer {
+        if let channel = region.audioChannel {
+            guard region.component == .audio, channel.input > 0, channel.input <= asset.channels,
+                  channel.output > 0, channel.output <= outputChannels else {
+                throw AudioFailure("selected captured channel is unavailable on source or output")
+            }
+            // Count-only AVAudioFormat initializers support at most stereo.
+            // DiscreteInOrder encodes its channel count in the low UInt16 bits.
+            guard outputChannels <= UInt32(UInt16.max) else { throw AudioFailure("output channel count exceeds the native discrete layout range") }
+            let tag = outputChannels == 1 ? kAudioChannelLayoutTag_Mono : outputChannels == 2 ? kAudioChannelLayoutTag_Stereo : kAudioChannelLayoutTag_DiscreteInOrder | outputChannels
+            guard let layout = AVAudioChannelLayout(layoutTag: tag) else { throw AudioFailure("selected output channel layout is unavailable") }
+            format = AVAudioFormat(standardFormatWithSampleRate: asset.sampleRate, channelLayout: layout)
+        } else { format = sourceFormat }
+        func buffer(_ count: AVAudioFrameCount, format: AVAudioFormat) throws -> AVAudioPCMBuffer {
             guard let value = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: count) else { throw AudioFailure("cannot allocate audio stream buffer") }
             return value
         }
-        buffers = try [buffer(capacity), buffer(capacity)]; scratch = try buffer(capacity)
+        buffers = try [buffer(capacity, format: format), buffer(capacity, format: format)]
+        scratch = try buffer(capacity, format: sourceFormat)
         if region.frameCount <= AVAudioFramePosition(capacity) {
-            let period = try buffer(AVAudioFrameCount(region.frameCount))
+            let period = try buffer(AVAudioFrameCount(region.frameCount), format: sourceFormat)
             file.framePosition = region.offsetFrames
             var written: AVAudioFrameCount = 0
             while written < AVAudioFrameCount(region.frameCount) {
@@ -246,7 +270,7 @@ final class Voice {
             var count = AVAudioFrameCount(span.count)
             guard count > 0 else { throw AudioFailure("captured audio clock did not advance") }
             guard let local = span.source else {
-                for channel in 0..<Int(asset.channels) { memset(output[channel].advanced(by: Int(written)), 0, Int(count) * MemoryLayout<Float>.size) }
+                for channel in 0..<Int(format.channelCount) { memset(output[channel].advanced(by: Int(written)), 0, Int(count) * MemoryLayout<Float>.size) }
                 written += count; cursor += AVAudioFramePosition(count); continue
             }
             let input: AVAudioPCMBuffer
@@ -260,7 +284,13 @@ final class Voice {
                 input = scratch; offset = 0
             }
             guard let samples = input.floatChannelData else { throw AudioFailure("WAV decoder is not planar float") }
-            for channel in 0..<Int(asset.channels) { memcpy(output[channel].advanced(by: Int(written)), samples[channel].advanced(by: offset), Int(count) * MemoryLayout<Float>.size) }
+            for channel in 0..<Int(format.channelCount) {
+                if let selected = region.audioChannel {
+                    if channel == Int(selected.output) - 1 {
+                        memcpy(output[channel].advanced(by: Int(written)), samples[Int(selected.input) - 1].advanced(by: offset), Int(count) * MemoryLayout<Float>.size)
+                    } else { memset(output[channel].advanced(by: Int(written)), 0, Int(count) * MemoryLayout<Float>.size) }
+                } else { memcpy(output[channel].advanced(by: Int(written)), samples[channel].advanced(by: offset), Int(count) * MemoryLayout<Float>.size) }
+            }
             written += count; cursor += AVAudioFramePosition(count)
         }
         target.frameLength = written
@@ -359,11 +389,12 @@ final class ArrangementTransport {
             let digest = hash.finalize().map { String(format: "%02x", $0) }.joined()
             guard digest == asset.sha256 else { throw AudioFailure("WAV source changed before native admission") }
         }
+        guard let deviceChannels = AVAudioChannelCount(exactly: device.channels) else { throw AudioFailure("output channel count exceeds the native format range") }
         for region in plan.regions {
             guard let asset = plan.assets.first(where: { $0.id == region.asset }) else { throw AudioFailure("missing WAV source") }
-            let voice = try Voice(region: region, asset: asset, capacity: capacity)
+            let voice = try Voice(region: region, asset: asset, capacity: capacity, outputChannels: deviceChannels)
             voices.append(voice); engine.attach(voice.player)
-            engine.connect(voice.player, to: engine.mainMixerNode, format: voice.file.processingFormat)
+            engine.connect(voice.player, to: engine.mainMixerNode, format: voice.format)
         }
         if plan.hybrid, let notes = plan.midi, let captured = plan.umpRegions {
             let transport = try HybridMidiTransport(midi: notes, ump: captured)

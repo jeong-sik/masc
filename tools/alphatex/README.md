@@ -475,8 +475,8 @@ opens a generated asset's editable phrase or an imported asset's original MIDI
 editor. For an independent SMF2 pattern, use `:edit-midi ASSET PATTERN` (starting
 at 1), or select a region that already names the pattern. On return after edits,
 the arrangement receives a new MIDI asset in one undoable transaction. Existing
-assets and regions keep their original data. Enter places the new asset at the
-cursor; choose another position or output when comparing variants that share
+assets and regions keep their original data. Enter places the new asset and its
+edited pattern at the cursor; choose another position or output when comparing variants that share
 MIDI channels. No edits means no extra asset.
 
 Generated assets store the complete editable phrase beside the existing MIDI

@@ -143,12 +143,11 @@ let resource_ordering ~plan t =
       | [] -> []
       | leaf :: rest ->
         let scopes = operation_scopes leaf.operation in
-        let predecessors = List.filter_map (fun prior ->
-          let prior_scopes = operation_scopes prior.operation in
+        let predecessors = List.filter_map (fun (prior_id, prior_scopes) ->
           if List.exists (fun scope ->
             List.exists (Agent_core.Tool_contract.Resource_scope.conflicts scope) prior_scopes) scopes
-          then Some prior.node.Plan.id else None) earlier in
-        (leaf.node.id, predecessors) :: collect (leaf :: earlier) rest
+          then Some prior_id else None) earlier in
+        (leaf.node.id, predecessors) :: collect ((leaf.node.id, scopes) :: earlier) rest
     in
     let predecessors = collect [] leaves in
     Some {dependency_layers; predecessors}
@@ -180,7 +179,10 @@ module Ready = struct
     | Pure_arguments
     | Ordinary of Keeper_tool_descriptor.ordinary_execution_mode
     | Unprepared_file of Keeper_tool_descriptor.ordinary_execution_mode
-    | Prepared_file of operation
+    | Prepared_file of
+        { operation : operation
+        ; scopes : Agent_core.Tool_contract.Resource_scope.t list
+        }
 
   let preparation_orders dependency_layers (members : (Plan.node * Plan.contract option) Node_map.t) =
     let before_prepare prior current = match prior.Keeper_tool_descriptor.execution,current.Keeper_tool_descriptor.execution with
@@ -259,47 +261,51 @@ module Ready = struct
          if not (is_file descriptor) then Ordinary mode
          else match prepare_operation ~sw:t.sw ~config:t.config ~meta:t.meta
              ~tool_name:node.tool_name descriptor ~input with
-           | Some operation -> Prepared_file operation
+           | Some operation -> Prepared_file {operation; scopes = operation_scopes operation}
            | None -> Unprepared_file mode)
     | Some {target = (Plan.Child_submission _ | Plan.Child_result _); _} | None ->
       invalid_arg "ready Inline file lost its original producer"
   ;;
 
   let operation = function
-    | Prepared_file operation -> Some operation
+    | Prepared_file {operation; scopes = _} -> Some operation
     | Pure_arguments | Ordinary _ | Unprepared_file _ -> None
 
   let exclusive = function
     | Unprepared_file _ | Ordinary Keeper_tool_descriptor.Serial -> true
-    | Pure_arguments | Prepared_file _ | Ordinary Keeper_tool_descriptor.Concurrent -> false
+    | Pure_arguments | Ordinary Keeper_tool_descriptor.Concurrent
+    | Prepared_file {operation = (Read _ | Edit _ | Write _); scopes = _} -> false
 
   let originally_serial = function
     | Ordinary Keeper_tool_descriptor.Serial | Unprepared_file Keeper_tool_descriptor.Serial
-    | Prepared_file (Edit _ | Write _) -> true
+    | Prepared_file {operation = (Edit _ | Write _); scopes = _} -> true
     | Pure_arguments | Ordinary Keeper_tool_descriptor.Concurrent
-    | Unprepared_file Keeper_tool_descriptor.Concurrent | Prepared_file (Read _) -> false
+    | Unprepared_file Keeper_tool_descriptor.Concurrent
+    | Prepared_file {operation = Read _; scopes = _} -> false
 
   let ordering left right =
     let open Keeper_tool_descriptor in
     match left, right with
     | Pure_arguments, _ | _, Pure_arguments -> No_order
-    | Prepared_file ((Read _ | Edit _ | Write _) as left),
-      Prepared_file ((Read _ | Edit _ | Write _) as right) ->
+    | Prepared_file {operation = (Read _ | Edit _ | Write _); scopes = left_scopes},
+      Prepared_file {operation = (Read _ | Edit _ | Write _); scopes = right_scopes} ->
       if List.exists (fun scope ->
         List.exists (Agent_core.Tool_contract.Resource_scope.conflicts scope)
-          (operation_scopes right)) (operation_scopes left)
+          right_scopes) left_scopes
       then Require_success else No_order
     | Unprepared_file (Serial | Concurrent),
-      (Unprepared_file (Serial | Concurrent) | Prepared_file (Read _ | Edit _ | Write _))
-    | Prepared_file (Read _ | Edit _ | Write _), Unprepared_file (Serial | Concurrent) ->
+      (Unprepared_file (Serial | Concurrent)
+        | Prepared_file {operation = (Read _ | Edit _ | Write _); scopes = _})
+    | Prepared_file {operation = (Read _ | Edit _ | Write _); scopes = _}, Unprepared_file (Serial | Concurrent) ->
       Require_success
     | Ordinary Concurrent, Ordinary Concurrent
-    | Ordinary Concurrent, Prepared_file (Read _)
-    | Prepared_file (Read _), Ordinary Concurrent -> No_order
+    | Ordinary Concurrent, Prepared_file {operation = Read _; scopes = _}
+    | Prepared_file {operation = Read _; scopes = _}, Ordinary Concurrent -> No_order
     | Ordinary (Serial | Concurrent),
       (Ordinary (Serial | Concurrent) | Unprepared_file (Serial | Concurrent)
-        | Prepared_file (Read _ | Edit _ | Write _))
-    | (Unprepared_file (Serial | Concurrent) | Prepared_file (Read _ | Edit _ | Write _)),
+        | Prepared_file {operation = (Read _ | Edit _ | Write _); scopes = _})
+    | (Unprepared_file (Serial | Concurrent)
+        | Prepared_file {operation = (Read _ | Edit _ | Write _); scopes = _}),
       Ordinary (Serial | Concurrent) ->
       (* Unknown footprint: preserve execution ordering, without claiming a
          shared file. Only an original Serial-to-Serial chain carries the

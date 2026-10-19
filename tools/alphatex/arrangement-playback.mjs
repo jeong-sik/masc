@@ -6,6 +6,7 @@ import { sourceMidiTimeline } from './midi-source-playback.mjs'
 import { importArrangementWave, prepareArrangementCapture } from './arrangement-files.mjs'
 import { readWaveMetadata } from './wave-file.mjs'
 import { captureRange, captureRegionTime } from './capture-time.mjs'
+import { projectCapturedPlacement } from './capture-placement.mjs'
 import { jsonLines, unpackMidi } from './session-data.mjs'
 
 import { practiceEnabled } from './arrangement-practice.mjs'
@@ -133,6 +134,10 @@ export function arrangementPlaybackRequest(project, route) {
   if (practiceEnabled(project) && kinds.has('midi') && (route.kind !== 'mixed' || !route.output)) throw new Error('Choose :mixed-output AUDIO_UID for the practice click and MIDI backing')
   if (kinds.has('capture')) {
     const notes = schedule.some(clip => clip.component !== 'audio' && assets.some(asset => asset.id === clip.asset && asset.kind === 'capture' && BigInt(asset.manifest.midiPacketCount) > 0n))
+    if (project.playbackLoop && !notes && !kinds.has('midi')) {
+      if (route.kind === 'midi') throw new Error('Choose an audio output for audible captured audio')
+      return { kind: 'prepare-audio', output: route.output }
+    }
     if (route.kind === 'midi' || (notes || kinds.has('midi')) && route.kind !== 'mixed') throw new Error('Select :mixed-output AUDIO_UID and MIDI destinations for paired captures')
     return { kind: 'prepare-capture', output: route.output, midiOutput: route.midiOutput, sourceBindings: route.sourceBindings ?? [], ...(kinds.has('midi') ? { portBindings: route.portBindings ?? [] } : {}) }
   }
@@ -194,9 +199,10 @@ async function snapshotAudio(project, schedule, { sourceRoot, temporary, signal 
       assets.push(...plan.assets); regions.push(...plan.regions)
     }
   }
-  for (const clip of schedule) {
+  for (let clip of schedule) {
     const asset = byID.get(clip.asset)
     if (asset.kind !== 'capture' || clip.component === 'midi' || !clip.audio) continue
+    if (project.playbackLoop && !clip.startNanoseconds) clip = projectCapturedPlacement(project, asset, clip)[0]
     const frame = text => {
       const value = Number(text)
       if (!Number.isSafeInteger(value)) throw new Error('Captured WAV exceeds exact native plan frame precision')
@@ -205,6 +211,7 @@ async function snapshotAudio(project, schedule, { sourceRoot, temporary, signal 
     regions.push({ id: clip.id, asset: clip.asset, startSeconds: clip.startSeconds,
       offsetFrames: frame(clip.audio.offsetFrames), frameCount: frame(clip.audio.frameCount), repeat: clip.repeat,
       captureClock: { ...clip.sourceClock, firstAudioHostTime: asset.manifest.clock.firstAudioHostTime },
+      ...(project.playbackLoop ? { startNanoseconds: clip.startNanoseconds } : {}),
       ...(clip.component ? { component: clip.component } : {}),
       ...(clip.placement?.kind === 'calibrated' ? { calibrationOutput: { id: clip.placement.profile.output.id,
         sampleRate: clip.placement.profile.output.sampleRate, bufferFrames: clip.placement.profile.output.bufferFrames } } : {}),
@@ -214,18 +221,21 @@ async function snapshotAudio(project, schedule, { sourceRoot, temporary, signal 
   return { assets: assets.filter(asset => used.has(asset.id)), regions, duration, captures }
 }
 export async function prepareArrangementAudio(project, { sourceRoot, directory, signal } = {}) {
-  requireLoopTransport(project)
   signal?.throwIfAborted()
+  const loop = arrangementLoop(project)
+  if (loop && practiceEnabled(project)) throw new Error('Continuous looping with count-in or metronome is not connected yet; use :loop off for practice clicks')
   const schedule = arrangementPlaybackSchedule(project)
   if (!schedule.length) throw new Error('No audible arrangement regions')
   if (schedule.some(clip => project.assets.find(asset => asset.id === clip.asset).kind === 'midi')) throw new Error('Audio-only audition cannot synthesize MIDI assets; mute those lanes')
   const temporary = await mkdtemp(join(directory, 'audio-play-'))
   try {
-    const { assets, regions, duration } = await snapshotAudio(project, schedule, { sourceRoot, temporary, signal })
+    const { assets, regions, duration: sourceDuration } = await snapshotAudio(project, schedule, { sourceRoot, temporary, signal })
+    const duration = loop ? (project.playbackLoop.end - project.playbackLoop.start) / project.ppq * 60 / project.tempo : sourceDuration
     const path = join(temporary, 'plan.json')
-    await writeFile(path, JSON.stringify({ schemaVersion: 4, kind: 'capture-audio-arrangement', duration, assets, regions }), { flag: 'wx', mode: 0o600, signal })
+    await writeFile(path, JSON.stringify({ schemaVersion: 4, kind: 'capture-audio-arrangement', duration, assets, regions,
+      ...(loop ? { loop: { ...project.playbackLoop, ppq: project.ppq, tempo: project.tempo } } : {}) }), { flag: 'wx', mode: 0o600, signal })
     signal?.throwIfAborted()
-    return { path, duration, format: 'capture-audio-arrangement' }
+    return { path, duration, format: 'capture-audio-arrangement', ...(loop ? { loop: true, originSeconds: loop.start } : {}) }
   } catch (error) { await rm(temporary, { recursive: true, force: true }); throw error }
 }
 

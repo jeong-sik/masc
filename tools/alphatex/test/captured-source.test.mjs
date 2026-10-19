@@ -248,6 +248,43 @@ test('explicit audio-only region audition preserves original clock gaps, compres
   assert.deepEqual(await readFile(plan.assets[0].path), bytes.audio)
 }))
 
+test('captured audio loops retain exact placement, original source clock gaps and compressed repeats without discarding paired MIDI',async()=>fixture(async({root,input,bytes})=>{
+ const {prepareArrangementAudio}=await import('../arrangement-playback.mjs')
+ const path=join(root,'song.json'),imported=await importArrangementCapture(newArrangement({tempo:123.5}),input,{projectPath:path})
+ let editor=arrangementCommand(arrangementEditor(imported.project),'place asset-1 0.1').editor
+ for(const command of ['repeat 2000000','loop 0 1'])editor=arrangementCommand(editor,command).editor
+ const selected=editor.project,before=structuredClone(selected),route=arrangementRoute({output:'audio',midiOutput:'42'})
+ assert.equal(arrangementPlaybackRequest(selected,route).kind,'prepare-capture')
+ await assert.rejects(prepareArrangementCaptureRegions(selected,{sourceRoot:root,directory:root,midiOutput:'42'}),/loop playback/)
+ const prepared=await prepareArrangementAudio(selected,{sourceRoot:root,directory:root}),plan=JSON.parse(await readFile(prepared.path,'utf8'))
+ assert.equal(prepared.loop,true);assert.equal(prepared.originSeconds,0);assert.equal(plan.duration,960/960*60/123.5)
+ assert.deepEqual(plan.loop,{start:0,end:960,ppq:960,tempo:123.5})
+ assert.equal(plan.regions.length,1);assert.equal(plan.regions[0].repeat,2000000)
+ assert.deepEqual(plan.regions[0].startNanoseconds,{numerator:'12000000000',denominator:'247'})
+ assert.equal(plan.regions[0].captureClock.extent,'4800000');assert.equal(plan.regions[0].frameCount,4800)
+ const snapshot=dirname(plan.assets[0].path)
+ for(const[role,file]of Object.entries(capturePartNames))assert.deepEqual(await readFile(join(snapshot,file)),bytes[role])
+ assert.deepEqual(selected,before)
+ const audio=editArrangement(selected,{kind:'region-change',id:selected.clips[0].id,component:'audio'})
+ assert.deepEqual(arrangementPlaybackRequest(audio,route),{kind:'prepare-audio',output:'audio'})
+ const adjusted=editArrangement(audio,{kind:'region-change',id:audio.clips[0].id,placement:{kind:'manual',advanceNanoseconds:{numerator:'10000000',denominator:'1'}}})
+ const moved=await prepareArrangementAudio(adjusted,{sourceRoot:root,directory:root}),movedPlan=JSON.parse(await readFile(moved.path,'utf8'))
+ assert.deepEqual(movedPlan.regions[0].startNanoseconds,{numerator:'9530000000',denominator:'247'})
+ assert.deepEqual(movedPlan.regions[0].captureClock,plan.regions[0].captureClock)
+ assert.deepEqual(adjusted.assets,selected.assets)
+ const cropped=editArrangement(audio,{kind:'region-change',id:audio.clips[0].id,position:0,
+  placement:{kind:'manual',advanceNanoseconds:{numerator:'450000000',denominator:'1'}}})
+ const croppedBefore=structuredClone(cropped),cut=await prepareArrangementAudio(cropped,{sourceRoot:root,directory:root})
+ const cutPlan=JSON.parse(await readFile(cut.path,'utf8'))
+ assert.equal(cutPlan.regions.length,2)
+ assert.deepEqual(cutPlan.regions.map(region=>({start:region.startNanoseconds,offset:region.captureClock.offset,
+  extent:region.captureClock.extent,repeat:region.repeat,frameCount:region.frameCount})),[
+  {start:{numerator:'0',denominator:'1'},offset:'1200000',extent:'3600000',repeat:1,frameCount:4800},
+  {start:{numerator:'150000000',denominator:'1'},offset:'0',extent:'4800000',repeat:1999997,frameCount:4800}])
+ assert.deepEqual(cropped,croppedBefore)
+ for(const[role,file]of Object.entries(capturePartNames))assert.deepEqual(await readFile(join(dirname(cutPlan.assets[0].path),file)),bytes[role])
+}))
+
 test('a captured subframe cut keeps its silent timeline and cancelled audio preparation leaves no snapshots', async () => fixture(async ({ root, input }) => {
   const { prepareArrangementAudio } = await import('../arrangement-playback.mjs')
   const imported = await importArrangementCapture(newArrangement(), input, { projectPath: join(root, 'song.json') })

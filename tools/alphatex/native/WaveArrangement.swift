@@ -109,7 +109,21 @@ struct Region: Decodable {
     var audioChannel: CaptureAudioChannel? = nil
     var calibrationOutput: CalibrationOutput? = nil
     var projectTick: Int64? = nil
-    enum CodingKeys: String, CodingKey { case id, asset, startSeconds, offsetFrames, frameCount, captureClock, pulseClock, component, audioChannel, calibrationOutput, projectTick; case repetitions = "repeat" }
+    var startNanoseconds: CaptureStartNanoseconds? = nil
+    enum CodingKeys: String, CodingKey { case id, asset, startSeconds, offsetFrames, frameCount, captureClock, pulseClock, component, audioChannel, calibrationOutput, projectTick, startNanoseconds; case repetitions = "repeat" }
+    func loopLayout(_ loop: WaveLoopClock, rate: Double) throws -> WaveLoopLayout {
+        guard pulseClock == nil else { throw AudioFailure("practice pulse looping is not connected") }
+        if let captureClock {
+            guard let startNanoseconds, projectTick == nil else { throw AudioFailure("captured loop needs its exact source placement") }
+            let capture = try captureClock.layout(rate: rate, offsetFrames: offsetFrames, frameCount: frameCount, repetitions: repetitions)
+            return try loop.layout(rate: rate, start: startNanoseconds, startSeconds: startSeconds, capture: capture)
+        }
+        guard startNanoseconds == nil, let tick = projectTick, tick >= 0, tick <= 9_007_199_254_740_991,
+              startSeconds == Double(tick) / Double(loop.ppq) * 60 / loop.tempo else {
+            throw AudioFailure("audio loop placement differs from its project clock")
+        }
+        return try loop.layout(rate: rate, projectTick: tick, frameCount: frameCount, repetitions: repetitions)
+    }
     func totalFrames() throws -> AVAudioFramePosition {
         let (total, overflow) = frameCount.multipliedReportingOverflow(by: repetitions)
         guard frameCount > 0, repetitions > 0, !overflow, total > 0 else { throw AudioFailure("region exceeds the native frame timeline") }
@@ -143,7 +157,7 @@ struct Plan: Decodable {
               (!regions.isEmpty || (captured || clocked) && assets.isEmpty), Set(assets.map(\.id)).count == assets.count, Set(regions.map(\.id)).count == regions.count else { throw AudioFailure("invalid WAV arrangement plan") }
         if let loop {
             try loop.validate()
-            guard (kind == "wave-arrangement" || mixed), practice == nil, duration == loop.duration else { throw AudioFailure("audio looping requires an original WAV or mixed arrangement and its authored clock") }
+            guard (kind == "wave-arrangement" || mixed || capturedAudio), practice == nil, duration == loop.duration else { throw AudioFailure("audio looping requires a WAV, captured audio or mixed arrangement and its authored clock") }
         }
         if let practice {
             guard !captured, practice.countInSeconds.isFinite, practice.countInSeconds >= 0,
@@ -191,10 +205,7 @@ struct Plan: Decodable {
                 throw AudioFailure("captured audio exceeds its arrangement duration")
             }
             if let loop {
-                guard let tick = region.projectTick, tick >= 0, tick <= 9_007_199_254_740_991,
-                      region.startSeconds == Double(tick) / Double(loop.ppq) * 60 / loop.tempo,
-                      region.captureClock == nil, region.pulseClock == nil else { throw AudioFailure("audio loop placement differs from its project clock") }
-                _ = try loop.layout(rate: asset.sampleRate, projectTick: tick, frameCount: region.frameCount, repetitions: region.repetitions)
+                _ = try region.loopLayout(loop, rate: asset.sampleRate)
             }
             end = max(end, regionEnd)
         }
@@ -274,8 +285,7 @@ final class Voice {
                                                        frameCount: region.frameCount, repetitions: region.repetitions)
         pulseLayout = try region.pulseClock?.layout(rate: asset.sampleRate, frameCount: region.frameCount)
         if let loop {
-            guard let tick = region.projectTick else { throw AudioFailure("missing audio loop project placement") }
-            loopLayout = try loop.layout(rate: asset.sampleRate, projectTick: tick, frameCount: region.frameCount, repetitions: region.repetitions)
+            loopLayout = try region.loopLayout(loop, rate: asset.sampleRate)
         } else { loopLayout = nil }
         total = try pulseLayout?.totalFrames ?? captureLayout?.totalFrames ?? region.totalFrames()
         file = try AVAudioFile(forReading: URL(fileURLWithPath: asset.path), commonFormat: .pcmFormatFloat32, interleaved: false)
@@ -328,9 +338,9 @@ final class Voice {
         while written < capacity && (loopLayout != nil || cursor < total) {
             let available = Int64(capacity - written)
             let remaining = loopLayout == nil ? min(available, total - cursor) : available
-            let base = captureLayout?.span(at: cursor, maximum: remaining)
-                ?? (source: cursor % region.frameCount, count: min(remaining, region.frameCount - cursor % region.frameCount))
             let loopSpan = try loopLayout?.span(at: cursor, maximum: remaining)
+            let base = loopSpan ?? captureLayout?.span(at: cursor, maximum: remaining)
+                ?? (source: cursor % region.frameCount, count: min(remaining, region.frameCount - cursor % region.frameCount))
             let span = loopSpan.map { (source: $0.source, count: $0.count, gain: Float(1)) }
                 ?? pulseLayout?.span(at: cursor, maximum: remaining) ?? (source: base.source, count: base.count, gain: Float(1))
             var count = AVAudioFrameCount(span.count)
@@ -502,7 +512,7 @@ final class ArrangementTransport {
             transport.onCoordinatedEnd = { [weak self] in self?.midiReachedEnd() }
         }
     }
-    var completed: Bool { active.isEmpty && (midi == nil || midiEnded) && (!plan.clocked || horizonEnded) }
+    var completed: Bool { plan.loop == nil && active.isEmpty && (midi == nil || midiEnded) && (!plan.clocked || horizonEnded) }
     func midiReachedEnd() {
         guard state != .stopped else { return }
         midiEnded = true
@@ -604,7 +614,7 @@ final class ArrangementTransport {
         if let midi { try midi.runCoordinated(anchorNanoseconds: AudioConvertHostTimeToNanos(anchor)) }
         guard mach_absolute_time() < anchor else { throw AudioFailure("audio graph missed its common start deadline") }
         state = .playing; try checkOutput()
-        if plan.clocked {
+        if plan.clocked && plan.loop == nil {
             let expected = generation, end = try futureHost(plan.duration - position, from: anchor)
             let timer = DispatchSource.makeTimerSource(queue: .main); horizon = timer
             timer.schedule(deadline: DispatchTime(uptimeNanoseconds: AudioConvertHostTimeToNanos(end)), leeway: .nanoseconds(0))

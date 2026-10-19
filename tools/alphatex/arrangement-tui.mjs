@@ -53,13 +53,13 @@ const help = [
   ':midi-output MIDI_UID    :midi-port asset-1 PORT MIDI_UID',
   ':midi-source asset-2 SOURCE_ID MIDI_UID overrides one captured input.',
   ':mixed-output AUDIO_UID enables audio plus the selected MIDI routes.',
-  ':play-audio explicitly auditions WAV, including captured regions and silent gaps.',
+  ':play-audio explicitly auditions WAV, including captured regions, silent gaps and saved loops.',
   ':inputs lists audio/MIDI inputs; :input AUDIO_UID; :midi-input all|none|UID',
   ':record starts simultaneous WAV + raw MIDI against playing backing; :record-stop',
   ':monitor AUDIO_OUTPUT_UID enables input monitoring; :monitor off disables it.',
   ':midi-monitor SOURCE_UID DEST_UID [GROUP CHANNEL ...] (1–16); omit pairs for all messages.',
   'Repeat for more routes; :midi-monitor remove SOURCE_UID DEST_UID; :midi-monitor off.',
-  'Channel scopes filter system/SysEx. Transport/edits finalize recording; captured/click looping and loop recording remain unfinished.',
+  'Channel scopes filter system/SysEx. Transport/edits finalize recording; paired UMP/click looping and loop recording remain unfinished.',
 ]
 
 export async function viewArrangement({ path, loaded, initialDocument, root = resolve('music-projects'), embedded = false, signal, output, midiOutput, initialRoute, stateDirectory } = {}) {

@@ -26,7 +26,8 @@ func reviewTimer()->FakeTimer{FakeTimer()}
 struct AudioFailure: Error { let description: String; init(_ value:String){description=value} }
 ${future}
 ${command}
-struct FakePlan { let duration=1.0;let captured=false;var clocked=false }
+struct FakePractice {let countInSeconds:Double;let duration:Double}
+struct FakePlan { let duration=1.0;let captured=false;var clocked=false;var practice:FakePractice?=nil }
 struct FakeRegion { let id="region-1", startSeconds=0.0 }
 final class FakePlayer { var lastRenderTime:AVAudioTime?=AVAudioTime(hostTime:reviewHost);var plays=0;func play(at:AVAudioTime){plays+=1} }
 final class FakeVoice {
@@ -41,7 +42,7 @@ final class FakeMidi { var stages:[Double]=[], runs:[UInt64]=[];func stageCoordi
  enum State {case prepared,playing,paused,stopped}
  var plan=FakePlan();let engine=FakeEngine(),renderQuantum=1024
  var horizon:FakeTimer?;var horizonEnded=false
- var midi:FakeMidi?;var midiEnded=false\n var state=State.prepared,voices=[FakeVoice()],active=Set<String>(),position=0.0,anchor:UInt64=0,generation:UInt64=0,finished=0,published=0
+ var midi:FakeMidi?;var midiEnded=false\n var state=State.prepared,voices=[FakeVoice()],active=Set<String>(),position=0.0,anchor:UInt64=0,musicalAnchor:UInt64=0,generation:UInt64=0,finished=0,published=0
  func checkOutput()throws{}
  func publish(){published+=1}
  func snapshot(_ kind:String)->[String:Any]{["kind":kind,"clock":["anchor":String(anchor),"position":position]]}
@@ -101,6 +102,19 @@ cancelled.fire();precondition(staleTimer.finished==0 && !staleTimer.horizonEnded
 staleTimer.receive(#"{"kind":"seek","seconds":0.25}"#);staleTimer.receive(#"{"kind":"resume"}"#)
 cancelled.fire();precondition(staleTimer.finished==0 && !staleTimer.horizonEnded)
 let stoppedTimer=staleTimer.horizon!;staleTimer.receive(#"{"kind":"stop"}"#);stoppedTimer.fire();precondition(staleTimer.finished==1)
+let practice=Probe();practice.plan.practice=FakePractice(countInSeconds:0.6,duration:0.4);practice.plan.clocked=true
+try practice.schedule(from:0,playing:true)
+let downbeat = try futureHost(0.6,from:practice.anchor)
+precondition(practice.musicalAnchor == downbeat)
+let beforePause=practice.voices[0].completion!
+practice.engine.outputNode.lastRenderTime=AVAudioTime(hostTime:try futureHost(0.2,from:practice.anchor))
+practice.receive(#"{"kind":"pause"}"#);precondition(abs(practice.position-0.2)<1e-6)
+practice.receive(#"{"kind":"resume"}"#)
+precondition(abs(AVAudioTime.seconds(forHostTime:practice.musicalAnchor-practice.anchor)-0.4)<1e-6)
+beforePause();precondition(practice.finished==0)
+practice.receive(#"{"kind":"seek","seconds":0.1}"#)
+precondition(abs(practice.position-0.7)<1e-6 && practice.musicalAnchor==practice.anchor)
+practice.receive(#"{"kind":"stop"}"#);precondition(practice.finished==1)
 print("ARRANGEMENT_CLOCK_DECISIONS_PASS: clocked silent horizon, either-order audio/MIDI/horizon completion, cancelled timer isolation across pause/seek/resume/stop; either-part-first completion, WAV-only continuity, one stop, common anchor conversion, paired pause/seek/resume, stale callback isolation, MIDI tail without audio voices")
 `
 const dir=await mkdtemp(join(process.env.TMPDIR ?? '/tmp','masc-arrangement-clock-'))

@@ -8,7 +8,7 @@ type ended_because =
 
 type ending = { at : float; reason : string; session : session; because : ended_because }
 
-type outcome = Succeeded | Not_started | Unknown
+type outcome = Succeeded | Not_started | Failed | Unknown
 
 type cause = Refused | Not_sent | Unconfirmed
 
@@ -92,11 +92,13 @@ let session_of_wire = function
 let outcome_to_wire = function
   | Succeeded -> "succeeded"
   | Not_started -> "not_started"
+  | Failed -> "failed"
   | Unknown -> "unknown"
 
 let outcome_of_wire = function
   | "succeeded" -> Some Succeeded
   | "not_started" -> Some Not_started
+  | "failed" -> Some Failed
   | "unknown" -> Some Unknown
   | _ -> None
 

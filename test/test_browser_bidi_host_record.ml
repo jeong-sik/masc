@@ -121,6 +121,7 @@ let test_an_entry_reads_back_as_written () =
             [ noted
             ; { noted with outcome = Succeeded; cause = Refused; verb = Some Peer.Tabs_list }
             ; { noted with outcome = Not_started; cause = Not_sent; request_id = None; verb = None }
+            ; { noted with outcome = Failed; cause = Refused; verb = Some Peer.Page_act }
             ]
         } )
     ]

@@ -154,3 +154,7 @@ module For_testing : sig
       finished, even as the deadline passed; [None] only when it had not. *)
   val within : clock:_ Eio.Time.clock -> float -> (unit -> 'a) -> 'a option
 end
+
+(** Whether another command may use the same BiDi connection. Confirmed
+    partial failures retain their created tab IDs; unknown outcomes retire it. *)
+val bidi_connection_can_continue : ('a, Masc.Browser_bidi_peer.failure) result -> bool

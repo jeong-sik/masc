@@ -49,6 +49,14 @@ let route_of ~default ~tool_name ~start_time args =
 ;;
 
 
+(* Decode the host's effect receipt at the wire boundary. A created tab is
+   a confirmed effect even when navigation or its page summary failed. *)
+let backend_failure_phase fields =
+  match List.assoc_opt "effectPhase" fields with
+  | Some (`String "not_started") -> Tool_result.Proven_pre_effect
+  | Some (`String "partial") -> Tool_result.Proven_post_effect
+  | Some _ | None -> Tool_result.Effect_outcome_unknown
+
 let answer_to_result ~lane ~tool_name ~start_time = function
   | Browser_lane.Answered (`Assoc fields) ->
     (match List.assoc_opt "ok" fields, List.assoc_opt "data" fields with
@@ -57,7 +65,17 @@ let answer_to_result ~lane ~tool_name ~start_time = function
        let message = match List.assoc_opt "error" fields with
          | Some (`String message) -> message
          | _ -> "browser backend failed without an error message" in
-       make_workflow_err ~tool_name ~start_time message
+       let effect_disposition = backend_failure_phase fields in
+       let data = List.assoc_opt "data" fields in
+       (* Keeper raw output is the failure message. Carry the recovery receipt
+          there too, so its exact connection and tab IDs reach the model. *)
+       let message = match effect_disposition,data with
+         | Tool_result.Proven_post_effect,Some receipt ->
+           Yojson.Safe.to_string (`Assoc ["error",`String message;"data",receipt])
+         | (Tool_result.Proven_pre_effect | Tool_result.Effect_outcome_unknown), (Some _ | None)
+         | Tool_result.Proven_post_effect,None -> message in
+       Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Workflow_rejection
+         ?data ~effect_disposition message
      | _ -> Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Runtime_failure
          "invalid browser backend response")
   | Browser_lane.Answered _ ->
@@ -596,8 +614,7 @@ let handle_act_with_phase ?upload_paths ~base_path ~tool_name ~start_time args =
         | Browser_lane.Refused _, Browser_lane.Live_route _ -> Tool_result.Proven_pre_effect
         | Browser_lane.Refused _, (Browser_lane.Automation_route | Browser_lane.Stagehand_route) -> Tool_result.Effect_outcome_unknown
         | Browser_lane.Answered (`Assoc fields), _ when
-            List.assoc_opt "ok" fields = Some (`Bool false) &&
-            List.assoc_opt "effectPhase" fields = Some (`String "not_started") -> Tool_result.Proven_pre_effect
+            List.assoc_opt "ok" fields = Some (`Bool false) -> backend_failure_phase fields
         | (Browser_lane.Timed_out | Browser_lane.Answered _), _ -> Tool_result.Effect_outcome_unknown in
       answer_to_result ~lane:(Browser_lane.route_lane_name route) ~tool_name ~start_time (add_client target answer), phase
 ;;

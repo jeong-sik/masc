@@ -5,7 +5,8 @@ let string name json = match field name json with
 let obj xs = `Assoc xs
 let str s = `String s
 let required name json = match field name json with Some v -> Ok v | None -> Error ("missing " ^ name)
-type failure = Before_effect of string | Outcome_unknown of string
+type created_tab_failure = { tab_id : int; message : string }
+type failure = Before_effect of string | Partial_failure of created_tab_failure | Outcome_unknown of string
 (* The error codes Firefox answers that this host acts on, read once where
    the answer arrives; any other code is kept as Firefox wrote it.
    "session not created": Firefox will not serve a [session.new]. It takes
@@ -106,16 +107,17 @@ let script_answer_limit_units = reply_limit_bytes / 4
 let answer_too_large units =
   Printf.sprintf "page_answer_exceeds_bidi_reply_limit: %d UTF-16 units, at most %d cross this connection"
     units script_answer_limit_units
-let evaluate t context body args =
+type evaluation_failure = Rpc_failed of refusal | Page_failed of string
+let evaluate_typed t context body args =
   let declaration = "function(args) { " ^ Browser_scene_script.runtime
     ^ "\nconst answer = JSON.stringify((function(){" ^ body ^ "}).call(null,args));"
     ^ Printf.sprintf "\nreturn typeof answer === 'string' && answer.length > %d ? answer.length : answer; }"
         script_answer_limit_units in
-  let* result = command t "script.callFunction" (obj [
+  let* result = Result.map_error (fun reason -> Rpc_failed reason) (t.ask "script.callFunction" (obj [
     "functionDeclaration",str declaration;"target",obj ["context",str context];
-    "awaitPromise",`Bool false;"arguments",`List [obj ["type",str "string";"value",str (Yojson.Safe.to_string args)]]]) in
+    "awaitPromise",`Bool false;"arguments",`List [obj ["type",str "string";"value",str (Yojson.Safe.to_string args)]]])) in
   (* Arguments cross the protocol as a JSON string, decoded by the fixed body. *)
-  match field "type" result with
+  Result.map_error (fun message -> Page_failed message) (match field "type" result with
   | Some (`String "success") ->
     let* value = required "result" result in
     (match field "type" value, field "value" value with
@@ -128,7 +130,12 @@ let evaluate t context body args =
       | Some details -> (match field "text" details with Some (`String text) -> Some text | _ -> None)
       | None -> None in
     Error ("Firefox rejected the fixed page script" ^ (match detail with Some text -> ": " ^ text | None -> ""))
-  | _ -> Error "invalid BiDi script result"
+  | _ -> Error "invalid BiDi script result")
+let evaluation_failure_message = function
+  | Rpc_failed refusal -> "script.callFunction: " ^ refusal_message refusal
+  | Page_failed message -> message
+let evaluate t context body args =
+  Result.map_error evaluation_failure_message (evaluate_typed t context body args)
 let script t context body args = evaluate t context ("arguments[0]=JSON.parse(arguments[0]);\n" ^ body) args
 let scene t context args = script t context "return browserScene(arguments[0]);" args
 let tab_metadata t context = script t context
@@ -171,14 +178,25 @@ let open_tab t url =
   let* context = string "context" created |> Result.map_error (fun reason ->
     Outcome_unknown (reason ^ "; tab creation was dispatched; inspect the connection before opening another tab")) in
   let id = remember_context t context in
-  let after_creation result = Result.map_error (fun reason -> Outcome_unknown
-    (Printf.sprintf "New tab was created as tabId %d on this connection. %s. Do not open another tab to retry; re-list connections and inspect the created tab." id reason)) result in
-  let* _ = after_creation (command t "browsingContext.navigate"
+  let message reason =
+    Printf.sprintf "New tab was created as tabId %d on this connection. %s. Do not open another tab to retry." id reason in
+  let partial reason = Partial_failure {tab_id=id;message=message reason ^
+    " Inspect it using this same clientId and tabId."} in
+  let rpc_failure = function
+    | Rejected (Other_error _) as refusal -> partial (refusal_message refusal)
+    | Rejected (Session_not_created | Invalid_session_id) | Unanswered _ | Unsent _ as refusal ->
+      Outcome_unknown (message (refusal_message refusal) ^
+        " This connection cannot be reused. Re-list connections and tabs, then use newly observed IDs to inspect it; the old tabId does not identify a tab on a replacement connection.") in
+  let* _ = Result.map_error rpc_failure (t.ask "browsingContext.navigate"
     (obj ["context",str context;"url",str url;"wait",str "complete"])) in
-  let* summary = after_creation (tab_metadata t context) in
+  let* summary = Result.map_error (function
+    | Rpc_failed refusal -> rpc_failure refusal
+    | Page_failed reason -> partial reason)
+    (evaluate_typed t context
+      "arguments[0]=JSON.parse(arguments[0]);\nreturn {url:location.href,title:document.title,active:document.visibilityState==='visible'};" (obj [])) in
   match summary with
   | `Assoc fields -> Ok (obj (("tabId",`Int id)::("action",str "open_tab")::("created",`Bool true)::fields))
-  | _ -> after_creation (Error "invalid new-tab summary")
+  | _ -> Error (partial "invalid new-tab summary")
 
 let tree t =
   let* result = command t "browsingContext.getTree" (obj []) in
@@ -266,7 +284,7 @@ let dispatch ?actor ?request_id t ~verb args =
           let _ = script t context Browser_pointer_feedback.finish_script
             (obj (("phase",Browser_pointer_feedback.outcome_to_json !phase)::metadata)) in ());
         let result = use context id in
-        phase := (match result with Ok _ -> Browser_pointer_feedback.Finished | Error (Before_effect _) -> Browser_pointer_feedback.Refused | Error (Outcome_unknown _) -> Browser_pointer_feedback.Unknown);
+        phase := (match result with Ok _ -> Browser_pointer_feedback.Finished | Error (Before_effect _) -> Browser_pointer_feedback.Refused | Error (Partial_failure _ | Outcome_unknown _) -> Browser_pointer_feedback.Unknown);
         result)
     | (Browser_info|Tabs_list|Page_read|Page_elements|Page_capture|Page_scene|Page_act), (None|Some _)
     | Page_interact,None -> use context id in

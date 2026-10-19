@@ -1,8 +1,10 @@
 # Preserve the original Connector reread demand
 
-Source comparison base: `9cc3f56eb452ff183aba2dddd2a436d5a2deae4f`
-(merged main). The preceding 53-member stack, ending at #43862, was merged
-externally. This unit starts a new local `gh stack` from that main; it does
+Source comparison base: `6869ba3f24c` (merged main; full SHA in the PR identity).
+The preceding 53-member stack, ending at #43862, was merged externally at
+`9cc3f56eb452ff183aba2dddd2a436d5a2deae4f`. The subsequent main build repairs and
+Tools status changes are retained. This unit starts a new local `gh stack` from
+main and rebases that whole active stack with the official CLI; it does
 not push the merged branches. Merge does not prove installation or runtime.
 
 ## As-Is / To-Be

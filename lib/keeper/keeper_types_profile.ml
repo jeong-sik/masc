@@ -273,7 +273,14 @@ let index_keeper_profile_declarations declarations =
            | Error { kind = Invalid_name; _ } as refused
              when not (String.equal keeper_name file_name) ->
              [ file_name, path, refused; keeper_name, path, refused ]
-           | result -> [ file_name, path, result ])
+           | (Ok _
+             | Error
+                 { kind =
+                     (Read_error | Parse_error | Profile_error | Invalid_name
+                     | Declaration_not_found _ | Unknown_deny_tool _)
+                 ; _
+                 }) as result ->
+             [ file_name, path, result ])
         | Invalid { error; _ } -> [ file_name, path, Error error ])
       declarations
   in

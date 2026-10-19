@@ -3021,6 +3021,23 @@ status: reference
   → [docs/constitution.xml](../constitution.xml) ·
   [scripts/review/merge-guard.sh](../../scripts/review/merge-guard.sh)
 
+**가이드 없음 표기 (guideless marker)**
+: 릴리스 노트의 Added 불릿 끝에 달아, 그 기능을 다루는 사용 가이드가 아직 없음을
+  숨기지 않고 남기는 표식이다. `가이드 없음(` 으로 열고 두 갈래로 닫는다.
+  - 형식: 고치려는 대상 문서가 정해져 있으면 `가이드 없음(대상 문서:
+    docs/design/browser-bidi-live-host.md)` 처럼 경로를 적고, 그런 문서 자체가
+    없으면 `가이드 없음(문서 없음)` 이라고 적는다. 줄이 72칸쯤에 접혀도
+    계수는 불릿 전체에서 표기를 찾는다.
+  - 계수와 증거: 노트 작성이 끝나면 `scripts/release/count-guideless-added.py`가
+    이 표기를 세어 `docs/releases/guide-metrics-<tag>.md`에 남긴다. 표기는
+    규칙상 허용되지만, 계수 결과는 receipt 묶음에 포함해 다음 게이트화 판단
+    재료로 삼는다(규약 제안 #1).
+  - 다른 것: 가이드 1장이 과하면 같은 내용을 조각 첫 불릿의 `Usage:` 하위
+    항목으로 대신한다(헌법 `a-dababc7`). 표기는 "가이드가 아예 없다"가 아니라
+    "이번 노트 기준으로 가이드를 아직 만들지 않았다"를 말한다.
+  → [docs/RELEASE-EVIDENCE.md](../RELEASE-EVIDENCE.md) ·
+  [scripts/release/count-guideless-added.py](../../scripts/release/count-guideless-added.py)
+
 **Disposable Build Volume (일회용 빌드 볼륨)**
 : Apple container 샌드박스에서 Keeper의 `_build` 출력이 놓이는, Keeper마다 하나씩
   할당되는 일회용(disposable) 볼륨(RFC-keeper-build-output-returns-to-a-disposable-volume,

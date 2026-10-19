@@ -4747,28 +4747,25 @@ let launch_board_quarantines_bulk_requeue state ~mailbox ~keeper_name items =
              items ))
 
 let launch_connectors_load state ~mailbox =
-  if server_authority_ready state then
-  let authority = state.detail_read_authority in
-  if state.connectors_inflight then ()
-  else begin
-    state.connectors_inflight <- true;
+  match begin_connectors_read state with
+  | None -> ()
+  | Some request ->
     let host = server_peer_host in
     let port = state.port in
     launch_workspace_json_read state ~mailbox
-      ~on_not_run:(fun () -> if authority == state.detail_read_authority then state.connectors_inflight <- false)
+      ~on_not_run:(fun () -> connector_read_not_started state request)
       ~deliver:(fun result ->
-        Connectors_loaded (authority,
+        Connectors_loaded (request,
           Masc_tui_async_read.attribute Masc_tui_async_read.Connectors result))
       (fun () -> Masc_tui_loader.load_connectors ~host ~port)
-  end
 
 (* A binding write changed what the server holds. A load already in flight
    may have read before the write landed, so it cannot stand in for this
    read: mark one more to run when it answers, and the pane does not keep
    showing bindings that are gone. *)
 let reload_connectors_after_write state ~mailbox =
-  if state.connectors_inflight then state.connectors_reload_after_inflight <- true
-  else launch_connectors_load state ~mailbox
+  queue_connectors_after_write state;
+  launch_connectors_load state ~mailbox
 
 (* One fiber sends the unbinds in order and reports them together: each
    binding's answer is its own line, so a partial success cannot read as a
@@ -12606,8 +12603,7 @@ let revoke_detail_readings state =
   state.lanes <- None;
   state.keeper_secrets <- [];
   state.lanes_error <- None;
-  state.connectors_inflight <- false;
-  state.connectors_reload_after_inflight <- false;
+  clear_connectors_read state;
   state.connectors <- None;
   state.connectors_error <- None;
   state.connector_unbind_offer <- None;
@@ -12904,8 +12900,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.board_quarantine_requeue_inflight <- None;
   state.connectors <- None;
   state.connectors_error <- None;
-  state.connectors_inflight <- false;
-  state.connectors_reload_after_inflight <- false;
+  clear_connectors_read state;
   state.connectors_scroll <- 0;
   state.connectors_cursor <- 0;
   state.connectors_binding_cursor <- 0;
@@ -14583,6 +14578,12 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
     (* Under the same condition the tick sends them: a server that is not
        booting, whether or not its workspace is this checkout's. *)
     launch_tick_side_reads state ~mailbox ~needs:(current_surface_needs state);
+    (* An explicit binding-write reread also survives while its surface is
+       hidden. Recovery is one authority transition, not a retry timer. A read
+       already started (or unable to start) above must not be launched again. *)
+    (match Connector_read.view state.connectors_read with
+     | Connector_read.Waiting_after_write -> launch_connectors_load state ~mailbox
+     | Quiet | Reading _ | Failed_to_start -> ());
     let activations = state.account_login_activation_resume in
     state.account_login_activation_resume <- [];
     List.iter (fun ((view : Masc_tui_account_login.t), generation, saved) ->
@@ -20597,13 +20598,13 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
          else "system")
         (Masc_tui_connector_unbind.summary ~keeper_name results);
       reload_connectors_after_write state ~mailbox
-  | Connectors_loaded (authority, result) ->
-      if authority == state.detail_read_authority && server_authority_ready state then begin
-        state.connectors_inflight <- false;
-        if state.connectors_reload_after_inflight then begin
-          state.connectors_reload_after_inflight <- false;
-          launch_connectors_load state ~mailbox
-        end;
+  | Connectors_loaded (request, result) ->
+      (match complete_connectors_read state request result with
+       | None -> ()
+       | Some follow_up -> begin
+        (match follow_up with
+         | Connector_read.No_follow_up -> ()
+         | Read_after_write -> launch_connectors_load state ~mailbox);
         (match result with
         | Ok snapshot ->
             let previous_id =
@@ -20695,7 +20696,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
                    (Masc_tui_connector_unbind.offer_read_failed ~keeper_name
                       ~detail))
               pending)
-      end
+      end)
   | Runtime_surface_loaded (generation, result) ->
       let is_current = generation = state.runtime_surface_generation in
       (match state.runtime_surface_inflight with

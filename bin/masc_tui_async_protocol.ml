@@ -451,7 +451,7 @@ type async_msg =
       generation : int; image_generation : int;
       result : (Browser_lane_view.screenshot * string, string) result;
     }
-  | Connectors_loaded of unit ref * (Masc.Tui_decode_connectors.connector_snapshot, string) result
+  | Connectors_loaded of Connector_read.request * (Masc.Tui_decode_connectors.connector_snapshot, string) result
   | Connector_unbind_all_done of {
       keeper_name : string;
       results :

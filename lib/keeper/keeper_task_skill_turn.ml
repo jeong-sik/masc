@@ -542,6 +542,8 @@ let executable_selection ~projection selection =
   { selection with selected }
 ;;
 
+module Task_surface_map = Map.Make (String)
+
 (* One computation feeds every surface that advertises a turn's per-task
    Skills: the unified turn prompt, the direct turn prompt, and the dashboard
    prompt preview. The preview regression that motivated this (#31076 review
@@ -577,7 +579,7 @@ let exact_task_surfaces
       ~task_skills:(skills selection)
     |> Keeper_capability_surface.skill_projection
   in
-  let task_ids =
+  let task_ids, by_task =
     let current =
       match current_task with
       | Keeper_world_observation_inputs.Current_task task
@@ -592,28 +594,48 @@ let exact_task_surfaces
            entry.held_task_id)
         held_task_skills
     in
-    List.fold_left
-      (fun seen task_id ->
-         if List.mem task_id seen then seen else seen @ [ task_id ])
-      []
+    let reversed, by_task = List.fold_left
+      (fun ((seen, by_task) as previous) task_id ->
+         if Task_surface_map.mem task_id by_task then previous
+         else task_id :: seen, Task_surface_map.add task_id [] by_task)
+      ([], Task_surface_map.empty)
       (current @ held)
+    in
+    List.rev reversed, by_task
   in
-  List.map
-    (fun task_id ->
-       let task =
-         selection.selected
-         |> List.filter (fun (selected : selected) ->
-              List.mem task_id selected.task_ids)
-         |> List.map (fun (selected : selected) -> selected.skill)
-       in
-       let unavailable =
-         selection.unprojectable
-         |> List.filter (fun (row : unprojectable) -> List.mem task_id row.task_ids)
-         |> List.map (fun (row : unprojectable) ->
-              Keeper_skill_catalog.unprojectable_exact_surface
-                row.reference
-                ~diagnostic:(unavailable_reason_to_string row.reason))
-       in
-       task_id, Keeper_skill_catalog.exact_surfaces projection ~task @ unavailable)
-    task_ids
+  match task_ids with
+  | [] -> []
+  | _ :: _ ->
+    (* A shared exact pin has one immutable surface in this projection, not
+       one catalog lookup/diagnostic rendering per Task that pinned it. Only
+       observed owners receive it; selection provenance cannot add a Task. *)
+    let add_owned_surfaces by_task task_ids make_surfaces =
+      let owners = List.sort_uniq String.compare task_ids
+        |> List.filter (fun task_id -> Task_surface_map.mem task_id by_task) in
+      match owners with
+      | [] -> by_task
+      | _ :: _ ->
+        let surfaces = make_surfaces () in
+        List.fold_left
+          (fun by_task task_id ->
+             Task_surface_map.update task_id
+               (Option.map (List.rev_append surfaces)) by_task)
+          by_task owners
+    in
+    let by_task = List.fold_left
+      (fun by_task (row : selected) ->
+         add_owned_surfaces by_task row.task_ids (fun () ->
+           Keeper_skill_catalog.exact_surfaces projection ~task:[row.skill]))
+      by_task selection.selected in
+    let by_task = List.fold_left
+      (fun by_task (row : unprojectable) ->
+         add_owned_surfaces by_task row.task_ids (fun () ->
+           [Keeper_skill_catalog.unprojectable_exact_surface row.reference
+              ~diagnostic:(unavailable_reason_to_string row.reason)]))
+      by_task selection.unprojectable in
+    List.map
+      (fun task_id ->
+         task_id, Option.fold ~none:[] ~some:List.rev
+           (Task_surface_map.find_opt task_id by_task))
+      task_ids
 ;;

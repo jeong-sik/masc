@@ -1096,7 +1096,11 @@ let test_stale_pin_is_listed_unavailable_on_the_prompt_surface () =
   let snapshot, guide, other = two_skill_snapshot () in
   let stale = Reference.make ~identity:guide.identity ~content_revision:stale_revision in
   let held_task_skills =
-    [ { Inputs.held_task_id = "task-held"; held_skills = [ stale; other ] } ]
+    [ { Inputs.held_task_id = "task-held"; held_skills = [ stale; other ] }
+    ; { Inputs.held_task_id = "task-shared"; held_skills = [ other; stale ] }
+    ; { Inputs.held_task_id = "task-empty"; held_skills = [] }
+    ; { Inputs.held_task_id = "task-held"; held_skills = [] }
+    ]
   in
   let selection =
     match
@@ -1110,21 +1114,33 @@ let test_stale_pin_is_listed_unavailable_on_the_prompt_surface () =
       failf "a stale pin failed the turn's Task Skill resolution: %s"
         (Selection.error_to_string error)
   in
-  let surfaces =
-    match
-      Selection.exact_task_surfaces
+  (* The frozen selection may outlive a different Task observation. Its extra
+     owner must not create a prompt Task, while shared pins retain every
+     actual owner and a late Task cannot borrow another Task's exact pin. *)
+  let selection = Selection.merge
+      [selection; resolve_ok ~snapshot ~task_id:"task-outside" [guide]] in
+  let project ~skill_names held_task_skills =
+    Selection.exact_task_surfaces
         ~snapshot
         ~tool_deny:[]
         ~sandbox_profile:Masc.Keeper_types_profile.Docker
-        ~skill_names:None
+        ~skill_names
         ~selection
         ~current_task:Inputs.No_current_task
         ~held_task_skills
-    with
-    | [ ("task-held", surfaces) ] -> surfaces
-    | tasks -> failf "expected one held Task surface, got %d" (List.length tasks)
   in
-  let availability_of reference =
+  let tasks = project ~skill_names:None held_task_skills in
+  check int "repeated observations do not duplicate a Task owner" 3 (List.length tasks);
+  check bool "a frozen owner absent from observation cannot add a prompt Task" true
+    (Option.is_none (List.assoc_opt "task-outside" tasks));
+  let surfaces_for tasks task_id =
+    match List.assoc_opt task_id tasks with
+    | Some surfaces -> surfaces
+    | None -> failf "missing original Task %s" task_id
+  in
+  check int "an observed Task without pins cannot borrow a shared pin" 0
+    (List.length (surfaces_for tasks "task-empty"));
+  let availability_of surfaces reference =
     List.find_map
       (fun (surface : Masc.Keeper_skill_catalog.exact_surface) ->
          if Reference.equal surface.reference reference
@@ -1132,12 +1148,30 @@ let test_stale_pin_is_listed_unavailable_on_the_prompt_surface () =
          else None)
       surfaces
   in
-  (match availability_of other with
-   | Some Masc.Keeper_skill_catalog.Instruction_tool -> ()
-   | Some _ | None -> fail "the current pin is not offered through keeper_skill");
-  match availability_of stale with
-  | Some (Masc.Keeper_skill_catalog.Exact_unavailable _) -> ()
-  | Some _ | None -> fail "the stale pin is not listed as unavailable"
+  let check_shared_owner tasks task_id ~withheld =
+    let surfaces = surfaces_for tasks task_id in
+    check int "one exact pin and one stale pin belong to each original Task" 2
+      (List.length surfaces);
+    check bool "a different Task's readable pin is not inherited" true
+      (Option.is_none (availability_of surfaces guide));
+    (match availability_of surfaces other, withheld with
+     | Some Masc.Keeper_skill_catalog.Instruction_tool, false
+     | Some (Masc.Keeper_skill_catalog.Exact_unavailable _), true -> ()
+     | (Some _ | None), _ -> fail "shared pin ignored its executable turn policy");
+    match availability_of surfaces stale with
+    | Some (Masc.Keeper_skill_catalog.Exact_unavailable _) -> ()
+    | Some _ | None -> fail "an original Task lost its stale-pin refusal"
+  in
+  List.iter (fun task_id -> check_shared_owner tasks task_id ~withheld:false)
+    ["task-held"; "task-shared"];
+  let withheld = project ~skill_names:(Some []) held_task_skills in
+  List.iter (fun task_id -> check_shared_owner withheld task_id ~withheld:true)
+    ["task-held"; "task-shared"];
+  let later = project ~skill_names:None
+      [{Inputs.held_task_id="task-later"; held_skills=[other]}] in
+  check int "a later observation keeps only its own Task" 1 (List.length later);
+  check int "a late Task reference is not resolved by the frozen surface projection" 0
+    (List.length (surfaces_for later "task-later"))
 ;;
 
 let test_deleted_skill_pin_does_not_stop_resolution () =

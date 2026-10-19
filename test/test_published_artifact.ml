@@ -247,6 +247,93 @@ let test_publication_discovery () =
   check_json "discovery reports mutation policy" (`Bool false)
     (json_member "policy" discovery |> json_member "readonly_hint")
 
+let test_keeper_model_publication_receipt () = with_base (fun base_path ->
+  let base_path = Unix.realpath base_path in
+  Masc_test_deps.with_process_env "MASC_BASE_PATH" (Some base_path) (fun () ->
+    Config_dir_resolver.reset ();
+    Fun.protect ~finally:Config_dir_resolver.reset (fun () ->
+      ignore (Masc_test_deps.init_unified_tool_registry ());
+      let author = "published-receipt" in
+      let meta = match Masc_test_deps.meta_of_json_fixture
+          (`Assoc ["name", `String author]) with
+        | Ok meta -> meta | Error detail -> Alcotest.fail detail in
+      let descriptor = match Masc.Keeper_tool_descriptor.find_id "keeper.artifact.publish" with
+        | Some descriptor -> descriptor | None -> Alcotest.fail "publication descriptor missing" in
+      let publication_recovery = Masc.Keeper_publication_recovery_availability.
+          {provider=non_runtime_provider; keeper_name=author} in
+      let handler = Masc.Keeper_tools_agent_core_handler.make_keeper_tool_handler_from_meta
+          ~name:descriptor.internal_name ~descriptor ~model_name:"keeper_artifact_publish"
+          ~input_schema:descriptor.input_schema ~config:(Masc.Workspace.default_config base_path)
+          ~meta ~publication_recovery
+          ~ctx_snapshot:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"publication receipt fixture")
+          ~keeper_turn_id:(fun () -> None) () in
+      List.iter (fun (format, content) ->
+        let result = handler (request_json ~format content) in
+        let output = match Tool_bridge.to_agent_core_typed_result ~base_path
+            ~model_projection:descriptor.model_output_projection result with
+          | Ok output -> output | Error error -> Alcotest.fail error.message in
+        let envelope = Yojson.Safe.from_string output.content in
+        let data = json_member "structured_content" envelope in
+        let summary = json_member "artifact" data in
+        let id = json_member "id" summary |> json_string in
+        check_json "model sees the immutable open link" (`String (A.url ~revision:1 id))
+          (json_member "revision_url" data);
+        check_json "model sees the committed version" (`Int 1) (json_member "revision" summary);
+        let reference, projection = match Tool_bridge.artifact_manifest_reference result with
+          | Ok value -> value | Error detail -> Alcotest.fail detail in
+        Alcotest.(check bool) "publication opts into inline receipt delivery" true
+          (projection = Tool_output.Inline_with_reference);
+        let manifest = match Tool_blob_store.fetch (Tool_blob_store.create ~base_path)
+            ~sha256:reference.sha256 with
+          | Ok (Some bytes) -> Yojson.Safe.from_string bytes
+          | Ok None -> Alcotest.fail "receipt manifest is missing"
+          | Error error -> Alcotest.fail (Tool_blob_store.fetch_error_to_string error) in
+        (match Tool_output.artifact_manifest_of_json manifest with
+         | Tool_output.Decoded_artifact_manifest {structured_content; artifact_refs=[body]; _} ->
+           check_json "manifest retains the exact publication receipt" data structured_content;
+           Alcotest.(check string) "manifest roots the original body"
+             Digestif.SHA256.(digest_string content |> to_hex) body.sha256
+         | Tool_output.Decoded_artifact_manifest _ | Tool_output.Not_artifact_manifest
+         | Tool_output.Invalid_artifact_manifest _ -> Alcotest.fail "invalid publication receipt manifest");
+        let _, _, stored = S.read ~base_path ~id ~revision:(Some 1) |> store_ok in
+        Alcotest.(check string) "model receipt points to the original content" content stored)
+        ["markdown", "probe"; "html", "<!doctype html><html lang=\"ko\"><body>음악 보고서 ✅</body></html>"];
+      let listing = S.list ~base_path |> store_ok in
+      Alcotest.(check int) "each successful call publishes once" 2 (List.length listing.artifacts))))
+
+let test_publication_manifest_failure_recovery () = with_base (fun base_path ->
+  let content = "<!doctype html><html><body>committed report</body></html>" in
+  let persist_manifest ~base_path result =
+    let id = Tool_result.data result |> json_member "artifact" |> json_member "id" |> json_string in
+    let _, _, stored = S.read ~base_path ~id ~revision:(Some 1) |> store_ok in
+    Alcotest.(check string) "fault occurs after the actual publication" content stored;
+    Error {Tool_bridge.kind=Artifact_storage_failure; message="injected receipt storage failure"} in
+  let result = Masc.Keeper_artifact_publish.For_testing.handle_with_manifest
+      ~persist_manifest ~base_path ~author:"published-recovery" ~args:(request_json ~format:"html" content) in
+  Alcotest.(check bool) "manifest failure is a typed runtime failure" true
+    (result.disposition = Tool_result.Failed Tool_result.Runtime_failure);
+  Alcotest.(check bool) "producer proves that publication committed" true
+    (result.failure_effect_disposition = Tool_result.Proven_post_effect);
+  let data = match result.data with Some data -> data | None -> Alcotest.fail "recovery receipt missing" in
+  let id = data |> json_member "artifact" |> json_member "id" |> json_string in
+  let failed = Tool_result.make_err ~tool_name:"keeper_artifact_publish"
+      ~start_time:(Tool_timing.start ()) ~class_:Tool_result.Runtime_failure
+      ~effect_disposition:result.failure_effect_disposition ~data result.raw_output in
+  (match Tool_bridge.to_agent_core_typed_result ~base_path failed with
+   | Ok _ -> Alcotest.fail "receipt failure was projected as success"
+   | Error error ->
+     Alcotest.(check bool) "publication must not be retried automatically" false error.recoverable;
+     let recovery = Yojson.Safe.from_string error.message |> json_member "data" in
+     check_json "model can recover the committed publication" data recovery;
+     check_json "model sees the immutable recovery link" (`String (A.url ~revision:1 id))
+       (json_member "revision_url" recovery));
+  let listing = S.list ~base_path |> store_ok in
+  Alcotest.(check int) "a failed receipt leaves exactly one publication" 1 (List.length listing.artifacts);
+  let _, revision, stored = S.read ~base_path ~id ~revision:(Some 1) |> store_ok in
+  Alcotest.(check string) "publication body survives receipt failure" content stored;
+  Alcotest.(check bool) "failure retains the committed body reference" true
+    (result.retained_artifacts = [revision.body]))
+
 let test_http_publication_errors () =
   let module Routes = Server_routes_http_routes_published_artifacts in
   let check_error expected_status expected_code error =
@@ -284,5 +371,7 @@ let () = Eio_main.run (fun _ ->
       Alcotest.test_case "metadata symlink is unavailable" `Quick test_metadata_symlink];
      "Keeper and HTTP publication", [
       Alcotest.test_case "producer persists exact content, identity and CAS" `Quick test_keeper_publication;
+      Alcotest.test_case "model-facing receipt preserves links and durable manifests" `Quick test_keeper_model_publication_receipt;
+      Alcotest.test_case "manifest failure preserves committed publication recovery" `Quick test_publication_manifest_failure_recovery;
       Alcotest.test_case "publish discovery preserves schema and mutation policy" `Quick test_publication_discovery;
       Alcotest.test_case "HTTP errors carry status and recovery identity" `Quick test_http_publication_errors]])

@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 const source=await readFile(new URL('./WaveArrangement.swift',import.meta.url),'utf8')
 const part=(first,last)=>{const a=source.indexOf(first),b=source.indexOf(last,a);assert.ok(a>=0&&b>a);return source.slice(a,b)}
-const methods=[part('    var completed: Bool', '    func checkOutput()'),part('    func currentTime()', '    func snapshot('),part('    func stopVoices()', '    func monitor('),part('    func receive(', '    func finish(')].join('\n').replaceAll('mach_absolute_time()', 'reviewHost').replaceAll('DispatchSource.makeTimerSource(queue: .main)', 'reviewTimer()')
+const methods=[part('    var completed: Bool', '    func checkOutput()'),part('    func backingTime()', '    func snapshot('),part('    func stopVoices()', '    func monitor('),part('    func receive(', '    func finish(')].join('\n').replaceAll('mach_absolute_time()', 'reviewHost').replaceAll('DispatchSource.makeTimerSource(queue: .main)', 'reviewTimer()')
 const command=part('enum AudioCommand: Decodable', 'final class ArrangementTransport')
 const future=part('func futureHost(', 'struct Asset:')
 const swift=`import Foundation
@@ -14,6 +14,7 @@ import CoreAudio
 var reviewHost: UInt64 = 1_000_000_000
 var epochReplies:[[String:Any]]=[]
 func audioEmit(_ event:[String:Any])throws{epochReplies.append(event)}
+func report(_ value:String){FileHandle.standardError.write(Data((value+"\\n").utf8))}
 final class FakeTimer {
  var handler:(()->Void)?,cancelled=false
  func schedule(deadline:DispatchTime,leeway:DispatchTimeInterval){}
@@ -43,7 +44,8 @@ final class FakeMidi { var stages:[Double]=[], runs:[UInt64]=[];func stageCoordi
  enum State {case prepared,playing,paused,stopped}
  var plan=FakePlan();let engine=FakeEngine(),renderQuantum=1024
  var horizon:FakeTimer?;var horizonEnded=false
- var midi:FakeMidi?;var midiEnded=false\n var state=State.prepared,voices=[FakeVoice()],active=Set<String>(),position=0.0,anchor:UInt64=0,musicalAnchor:UInt64=0,generation:UInt64=0,introRemainingHost:UInt64?=nil,finished=0,published=0
+ var midi:FakeMidi?;var midiEnded=false\n var state=State.prepared,voices=[FakeVoice()],active=Set<String>(),position=0.0,anchor:UInt64=0,musicalAnchor:UInt64=0,generation:UInt64=0,finished=0,published=0
+ var loopPosition=PracticeLoopPosition.introduction(nil)
  func checkOutput()throws{}
  func publish(){published+=1}
  func snapshot(_ kind:String)->[String:Any]{["kind":kind,"clock":["anchor":String(anchor),"position":position]]}
@@ -140,7 +142,7 @@ let loopClock=LoopPracticePlan(period:.init(numerator:"1000000000",denominator:"
 // A sub-second introduction followed by the independent one-second backing.
 practiceLoop.plan.duration=4.0/3
 practiceLoop.plan.practice=FakePractice(countInSeconds:1.0/3,duration:1,loop:loopClock)
-let intro=FakeVoice();intro.region.pulseClock=true;intro.end=1.0/3
+let intro=FakeVoice();intro.region.pulseClock=true;intro.end=1.0/3+1.0/48000
 let click=FakeVoice();click.region.pulseClock=true;click.region.pulseLoopUnit=4
 // The harness IDs are distinct just as admitted production regions are.
 intro.region.id="intro";click.region.id="click"
@@ -154,7 +156,8 @@ precondition(intro.player.whens==[practiceLoop.anchor] && click.player.whens==[p
 let introRender=practiceLoop.anchor+ticks/3
 practiceLoop.engine.outputNode.lastRenderTime=AVAudioTime(hostTime:introRender)
 practiceLoop.receive(#"{"kind":"pause"}"#)
-precondition(practiceLoop.introRemainingHost==ticks-ticks/3 && practiceLoop.midi!.stages.last==0)
+if case .introduction(let retained)=practiceLoop.loopPosition {precondition(retained==ticks-ticks/3)} else {preconditionFailure("lost intro")}
+precondition(practiceLoop.midi!.stages.last==0)
 practiceLoop.receive(#"{"kind":"resume"}"#)
 precondition(practiceLoop.musicalAnchor-practiceLoop.anchor==ticks-ticks/3)
 practiceLoop.engine.outputNode.lastRenderTime=AVAudioTime(hostTime:try futureHost(3.25,from:practiceLoop.musicalAnchor))
@@ -162,7 +165,7 @@ precondition(abs(practiceLoop.currentTime()-(1.0/3+0.25))<1e-6)
 practiceLoop.receive(#"{"kind":"pause"}"#)
 precondition(abs(practiceLoop.midi!.stages.last!-0.25)<1e-6)
 practiceLoop.receive(#"{"kind":"seek","seconds":1}"#)
-precondition(practiceLoop.position==1.0/3 && practiceLoop.introRemainingHost==0 && practiceLoop.midi!.stages.last==0)
+precondition(practiceLoop.position==1.0/3 && practiceLoop.loopPosition.backing==0 && practiceLoop.midi!.stages.last==0)
 practiceLoop.receive(#"{"kind":"resume"}"#)
 precondition(practiceLoop.musicalAnchor==practiceLoop.anchor && !practiceLoop.active.contains("intro"))
 practiceLoop.receive(#"{"kind":"seek","seconds":0.4}"#)
@@ -170,6 +173,17 @@ precondition(abs(practiceLoop.midi!.stages.last!-0.4)<1e-6 && practiceLoop.music
 practiceLoop.receive(#"{"kind":"stop"}"#);precondition(practiceLoop.finished==1)
 // A coarser native timebase requires a single outward projection, not ceil(ns)
 // followed by truncation to ticks (1/3ns on a125/3 clock is one host tick).
+let huge=Probe();huge.plan.clocked=true;huge.plan.loop=FakeLoop();huge.midi=FakeMidi()
+let hugeIntro=pow(2.0,30.0)
+huge.plan.duration=hugeIntro+1;huge.plan.practice=FakePractice(countInSeconds:hugeIntro,duration:1,loop:loopClock)
+huge.receive(#"{"kind":"seek","seconds":0}"#)
+try huge.schedule(from:hugeIntro,playing:true)
+huge.engine.outputNode.lastRenderTime=AVAudioTime(hostTime:try futureHost(0.99999999,from:huge.musicalAnchor))
+let exactPhase=huge.backingTime();precondition(exactPhase>0.99 && exactPhase<1)
+huge.receive(#"{"kind":"pause"}"#)
+precondition(huge.state == .paused && huge.finished==0 && huge.midi!.stages.last==exactPhase)
+huge.receive(#"{"kind":"resume"}"#);precondition(huge.state == .playing && huge.finished==0)
+huge.receive(#"{"kind":"stop"}"#)
 let fine=LoopPracticePlan(period:.init(numerator:"1",denominator:"3"),countInBeats:"1",beatsPerBar:1,unit:4,metronome:true)
 let outward=try fine.hostTicks(numer:125,denom:3);precondition(outward==1)
 print("ARRANGEMENT_CLOCK_DECISIONS_PASS: clocked silent horizon, either-order audio/MIDI/horizon completion, cancelled timer isolation across pause/seek/resume/stop; either-part-first completion, WAV-only continuity, one stop, common anchor conversion, paired pause/seek/resume, stale callback isolation, MIDI tail without audio voices")

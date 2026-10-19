@@ -37,7 +37,7 @@ export async function inspectCalibration(directory, { signal } = {}) {
     measurement: bytes.measurement.toString('utf8'),
     experiment: Object.fromEntries(Object.entries(bytes).map(([role, value]) => [role, hash(value)])),
     input: { id: manifest.input.id, channel: selection.inputChannel, sampleRate: manifest.sampleRate, monitoring: 'off' },
-    output: { id: playback.device.id, channel: selection.outputChannel, sampleRate: playback.clock.sampleRate, renderQuantum: playback.clock.renderQuantum },
+    output: { id: playback.device.id, channel: selection.outputChannel, sampleRate: playback.clock.sampleRate, bufferFrames: playback.clock.bufferFrames },
     clock: { anchor: playback.clock.anchor, numer: playback.clock.numer, denom: playback.clock.denom },
     pulses: candidate.matches.map((match, index) => ({ pulseFrame: reference.pulseFrames[index], frame: match.frame,
       blockHostTime: match.blockHostTime, blockFrameOffset: match.blockFrameOffset, localFrame: match.localFrame, correlation: match.correlation })) })

@@ -216,7 +216,8 @@ let test_file_reply_and_lsp_navigation_share_current_content () =
   let answer location =
     let request = match Code_results.start_lsp_question state ~question:"definition" ~symbol:"first" with
       | Some request -> request | None -> Alcotest.fail "question did not start" in
-    Code_results.apply_lsp_answer state request (Ok (Decode.Lsp_locations [location]))
+    Code_results.apply_lsp_answer state request (Ok (Decode.Lsp_locations [location]));
+    Code_results.take_ready_lsp_locations state ~input_pending:false
   in
   Alcotest.(check bool) "same-file definition requests reveal, not another load" true
     (answer (location "new.ml" true 1) = Code_results.Reveal_cursor);
@@ -230,7 +231,7 @@ let test_file_reply_and_lsp_navigation_share_current_content () =
    | Code_results.Read_location_file (owner, request) ->
        check_string "different file request" "other.ml" (Fetched.request_key request);
        Alcotest.(check int) "owned destination keeps its requested line" 6 owner.cno_destination.cj_cursor
-   | Code_results.No_followup | Code_results.Reveal_cursor ->
+   | Code_results.No_followup | Code_results.Choose_location | Code_results.Reveal_cursor ->
        Alcotest.fail "different-file location did not request an owned read");
   Alcotest.(check (option int)) "source has no premature jump target" None state.code_target_line;
   Alcotest.(check int) "pending location has not added a history entry" jumps
@@ -240,6 +241,7 @@ let test_file_reply_and_lsp_navigation_share_current_content () =
 let test_file_recovery_preserves_nested_readers () =
   List.iter (fun (had_content, nested_first) ->
     let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+    confirm_code_workspace state;
     let initial, opened = start_read ~equal:String.equal state.code_file "source.ml" in
     state.code_file <- initial;
     if had_content then
@@ -308,6 +310,7 @@ let test_file_recovery_preserves_nested_readers () =
 
 let test_lsp_replies_belong_to_their_source_reading () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  confirm_code_workspace state;
   let read path =
     let next, request = start_read ~equal:String.equal state.code_file path in
     state.code_file <- next;
@@ -323,8 +326,9 @@ let test_lsp_replies_belong_to_their_source_reading () =
   let rejected request result =
     let before = state.code_file_cursor, state.code_target_line, state.code_lsp_note,
                  state.code_jump_back, state.code_lsp_query in
-    Alcotest.(check bool) "stale reply has no followup" true
-      (Code_results.apply_lsp_answer state request result = Code_results.No_followup);
+    Code_results.apply_lsp_answer state request result;
+    Alcotest.(check bool) "stale reply has no deferred location" true
+      (Option.is_none state.code_location_offer);
     Alcotest.(check bool) "stale reply changes no note, jump, target or query" true
       (before = (state.code_file_cursor, state.code_target_line, state.code_lsp_note,
                  state.code_jump_back, state.code_lsp_query))
@@ -376,9 +380,9 @@ let test_lsp_replies_belong_to_their_source_reading () =
   let latest = ask "hover" in
   rejected first (Error "superseded server error");
   rejected first (Ok (Decode.Lsp_locations [location]));
-  Alcotest.(check bool) "latest answer settles its own query" true
-    (Code_results.apply_lsp_answer state latest (Ok (Decode.Lsp_hover (Some "current hover")))
-     = Code_results.No_followup);
+  Code_results.apply_lsp_answer state latest (Ok (Decode.Lsp_hover (Some "current hover")));
+  Alcotest.(check bool) "latest answer settles its own query" false
+    (Fetched.in_flight state.code_lsp_query);
   Alcotest.(check (option string)) "only current hover is shown" (Some "first: current hover")
     state.code_lsp_note;
   let repeated = ask "hover" in
@@ -780,9 +784,10 @@ let start_location_read state path line =
   let request = match Code_results.start_lsp_question state ~question:"definition" ~symbol:"target" with
     | Some request -> request | None -> Alcotest.fail "location question did not start" in
   let location : Decode.lsp_location = {ll_path=path; ll_inside=true; ll_line=line} in
-  match Code_results.apply_lsp_answer state request (Ok (Decode.Lsp_locations [location])) with
+  Code_results.apply_lsp_answer state request (Ok (Decode.Lsp_locations [location]));
+  match Code_results.take_ready_lsp_locations state ~input_pending:false with
   | Code_results.Read_location_file (owner, request) -> owner, request
-  | Code_results.No_followup | Code_results.Reveal_cursor ->
+  | Code_results.No_followup | Code_results.Choose_location | Code_results.Reveal_cursor ->
       Alcotest.fail "expected an owned different-file location read"
 
 let test_location_commits_history_only_on_success () =
@@ -891,7 +896,8 @@ let test_locations_retire_ordinary_source_callbacks () =
         | Some request -> request | None -> Alcotest.fail "question did not start" in
       let location : Decode.lsp_location = {
         ll_path=(if same_file then "src/old.ml" else "lib/target.ml"); ll_inside=true; ll_line=1 } in
-      let followup = Code_results.apply_lsp_answer state query (Ok (Decode.Lsp_locations [location])) in
+      Code_results.apply_lsp_answer state query (Ok (Decode.Lsp_locations [location]));
+      let followup = Code_results.take_ready_lsp_locations state ~input_pending:false in
       let before = state.code_file, state.code_file_cursor, state.code_file_scroll,
         state.code_file_hscroll, state.code_focus_file, state.code_jump_back in
       Code_results.apply_file ~intent:Open_code_file state ordinary late_result;
@@ -910,14 +916,197 @@ let test_locations_retire_ordinary_source_callbacks () =
           ignore (Code_results.take_ready_navigation_file state ~input_pending:false);
           Alcotest.(check (option string)) "owned location still completes" (Some "lib/target.ml")
             (Fetched.current_key state.code_file)
-      | Code_results.No_followup -> Alcotest.fail "location unexpectedly refused")
+      | Code_results.No_followup | Code_results.Choose_location -> Alcotest.fail "location unexpectedly refused")
       [Ok "late reset"; Error "late failure"])
     [true; false]
+
+let offered_locations state locations =
+  let query = match Code_results.start_lsp_question state ~question:"references" ~symbol:"target" with
+    | Some query -> query | None -> Alcotest.fail "location question did not start" in
+  Code_results.apply_lsp_answer state query (Ok (Decode.Lsp_locations locations));
+  let offer = match state.code_location_offer with
+    | Some offer -> offer | None -> Alcotest.fail "current locations were not staged" in
+  query, offer
+
+let location path line : Decode.lsp_location =
+  {ll_path=path; ll_line=line; ll_inside=true}
+
+let test_multiple_locations_choose_the_filtered_destination () =
+  let state, _ = finder_fixture () in
+  close_code_finder state;
+  state.code_file_hscroll <- 4;
+  let current = state.code_file in
+  let target = location "lib/한글 two.ml" 2 in
+  let _, offer = offered_locations state [location "lib/first.ml" 7; target] in
+  Alcotest.(check bool) "answer stages without choosing a destination or creating history" true
+    (not state.palette_open && state.code_file == current
+     && state.code_jump_back = [] && Option.is_none state.code_navigation);
+  Alcotest.(check bool) "queued input defers the selection modal" true
+    (Code_results.take_ready_lsp_locations state ~input_pending:true = Code_results.No_followup
+     && not state.palette_open);
+  Alcotest.(check bool) "idle presents the owned choices" true
+    (Code_results.take_ready_lsp_locations state ~input_pending:false = Code_results.Choose_location);
+  Code_results.retire_lsp_input state;
+  state.palette_query <- "한글 two.ml";
+  let chosen_offer, chosen = match Masc_tui_palette.selected_location state with
+    | Some selection -> selection | None -> Alcotest.fail "filtered location missing" in
+  Alcotest.(check bool) "filtering keeps the original offer and exact destination object" true
+    (chosen_offer == offer && chosen == target);
+  let owner, request = match Code_results.choose_lsp_location state chosen_offer chosen with
+    | Code_results.Read_location_file (owner, request) -> owner, request
+    | Code_results.No_followup | Code_results.Reveal_cursor | Code_results.Choose_location ->
+        Alcotest.fail "chosen destination did not request a read" in
+  check_string "request uses the literal path with Korean and spaces" target.ll_path
+    (Fetched.request_key request);
+  Alcotest.(check bool) "selection keeps source and history until successful read" true
+    (state.code_file == current && state.code_jump_back = [] && not state.palette_open);
+  Code_results.apply_file ~intent:(Navigate_code_file owner) state request (Ok "first\nsecond\nthird");
+  Alcotest.(check bool) "destination commits through the existing input-priority boundary" true
+    (Code_results.take_ready_navigation_file state ~input_pending:false);
+  Alcotest.(check bool) "destination directory and selected line commit together" true
+    (state.code_dir = "lib" && state.code_file_cursor = 1
+     && Fetched.current_key state.code_file = Some target.ll_path);
+  (match state.code_jump_back with
+   | [source] ->
+       Alcotest.(check bool) "B retains the source reading and pan" true
+         (source.cj_file=Some "src/old.ml" && source.cj_cursor=2
+          && source.cj_scroll=2 && source.cj_hscroll=4)
+   | [] | _ :: _ -> Alcotest.fail "successful choice lost its source history")
+
+let test_single_location_yields_before_moving_the_reading () =
+  let state, _ = finder_fixture () in
+  close_code_finder state;
+  state.code_file_hscroll <- 4;
+  ignore (offered_locations state [location "src/old.ml" 1]);
+  Alcotest.(check bool) "a same-file answer has not moved the reading" true
+    (state.code_file_cursor=2 && state.code_file_scroll=2
+     && state.code_file_hscroll=4 && state.code_jump_back=[]);
+  Alcotest.(check bool) "pending paste or partial input keeps the single answer staged" true
+    (Code_results.take_ready_lsp_locations state ~input_pending:true = Code_results.No_followup
+     && state.code_file_cursor=2);
+  Alcotest.(check bool) "idle follows a single answer without opening a picker" true
+    (Code_results.take_ready_lsp_locations state ~input_pending:false = Code_results.Reveal_cursor
+     && not state.palette_open && state.code_file_cursor=0 && state.code_file_hscroll=0);
+  let history = state.code_jump_back in
+  Alcotest.(check bool) "the ready answer is consumed once" true
+    (Code_results.take_ready_lsp_locations state ~input_pending:false = Code_results.No_followup
+     && state.code_jump_back == history)
+
+let test_location_answers_yield_to_later_input () =
+  List.iter (fun locations ->
+    List.iter (fun received ->
+      let state, _ = finder_fixture () in
+      close_code_finder state;
+      let current = state.code_file in
+      let query = match Code_results.start_lsp_question state ~question:"references" ~symbol:"target" with
+        | Some request -> request | None -> Alcotest.fail "question did not start" in
+      if received then Code_results.apply_lsp_answer state query (Ok (Decode.Lsp_locations locations));
+      ignore (Code_results.take_ready_lsp_locations state ~input_pending:true);
+      Code_results.retire_lsp_input state;
+      state.code_file_cursor <- 1;
+      state.palette_open <- true;
+      state.palette_mode <- Palette_jump;
+      state.palette_query <- "unfinished unrelated command";
+      if not received then Code_results.apply_lsp_answer state query (Ok (Decode.Lsp_locations locations));
+      Alcotest.(check bool) "later input owns its source and draft before or after reply receipt" true
+        (Code_results.take_ready_lsp_locations state ~input_pending:false = Code_results.No_followup
+         && state.code_file == current && state.code_file_cursor=1
+         && state.code_jump_back=[] && Option.is_none state.code_navigation
+         && Option.is_none state.code_location_offer && state.palette_open
+         && state.palette_mode=Palette_jump
+         && state.palette_query="unfinished unrelated command"))
+      [false; true])
+    [[location "src/old.ml" 1]; [location "one.ml" 1; location "two.ml" 2]]
+
+let test_location_offers_do_not_borrow_other_owners () =
+  let changes =
+    [ (fun state -> state.workspace_authority <-
+         (let Workspace_authority generation = state.workspace_authority in
+          Workspace_authority (generation + 1)))
+    ; (fun state -> state.workspace_read_authority <- ref ())
+    ; (fun state -> state.server_identity <- None)
+    ; (fun state -> state.code_dir <- "other-directory")
+    ; (fun state -> state.view <- Repositories)
+    ; (fun state -> set_code_scope state Code_scope_project)
+    ; (fun state ->
+        let next, request = start_read ~equal:String.equal state.code_file "src/old.ml" in
+        state.code_file <- next;
+        Code_results.apply_file state request (Ok "same-path replacement"))
+    ; suspend_workspace_readings
+    ] in
+  List.iter (fun change ->
+    List.iter (fun received ->
+      let state, _ = finder_fixture () in
+      close_code_finder state;
+      let query = match Code_results.start_lsp_question state ~question:"definition" ~symbol:"target" with
+        | Some request -> request | None -> Alcotest.fail "question did not start" in
+      let locations = [location "one.ml" 1; location "two.ml" 2] in
+      if received then Code_results.apply_lsp_answer state query (Ok (Decode.Lsp_locations locations));
+      change state;
+      if not received then Code_results.apply_lsp_answer state query (Ok (Decode.Lsp_locations locations));
+      let source = state.code_file in
+      Alcotest.(check bool) "changed source, view or authority cannot present a late selection" true
+        (Code_results.take_ready_lsp_locations state ~input_pending:false = Code_results.No_followup
+         && not state.palette_open && state.code_file == source
+         && state.code_jump_back=[] && Option.is_none state.code_navigation))
+      [false; true]) changes
+
+let test_cancelled_and_invented_location_selections_are_refused () =
+  let state, _ = finder_fixture () in
+  close_code_finder state;
+  let selected = location "lib/selected.ml" 3 in
+  let _, offer = offered_locations state [location "lib/other.ml" 1; selected] in
+  ignore (Code_results.take_ready_lsp_locations state ~input_pending:false);
+  let source = state.code_file in
+  let invented = {selected with ll_line=selected.ll_line+1} in
+  Alcotest.(check bool) "a location not in the returned list cannot start a read" true
+    (Code_results.choose_lsp_location state offer invented = Code_results.No_followup
+     && Option.is_none state.code_navigation && state.code_file == source);
+  let copied_offer = {offer with clo_locations=[selected]} in
+  Alcotest.(check bool) "structural source similarity does not grant offer ownership" true
+    (Code_results.choose_lsp_location state copied_offer selected = Code_results.No_followup);
+  close_code_finder state;
+  Alcotest.(check bool) "Escape retires selection ownership" true
+    (Code_results.choose_lsp_location state offer selected = Code_results.No_followup
+     && state.code_file == source && state.code_jump_back=[]);
+  let _, replacement = offered_locations state [location "lib/new.ml" 1; selected] in
+  ignore (Code_results.take_ready_lsp_locations state ~input_pending:false);
+  Alcotest.(check bool) "an older same-path offer cannot borrow the replacement picker" true
+    (replacement != offer
+     && Code_results.choose_lsp_location state offer selected = Code_results.No_followup
+     && code_location_offer_current state replacement)
+
+let test_outside_location_is_an_address_without_a_workspace_read () =
+  let state, _ = finder_fixture () in
+  close_code_finder state;
+  let outside : Decode.lsp_location = {ll_path="/external/package.py"; ll_line=8; ll_inside=false} in
+  let _, offer = offered_locations state [location "src/old.ml" 1; outside] in
+  ignore (Code_results.take_ready_lsp_locations state ~input_pending:false);
+  let source = state.code_file in
+  Alcotest.(check bool) "an outside selection reports its address without loading or history" true
+    (Code_results.choose_lsp_location state offer outside = Code_results.No_followup
+     && state.code_file == source && state.code_jump_back=[]
+     && Option.is_none state.code_navigation && Option.is_some state.code_lsp_note
+     && not state.palette_open)
 
 let () =
   Alcotest.run
     "masc-tui-workspace-entries"
-    [ ( "owned locations"
+    [ ( "location choices"
+      , [ Alcotest.test_case "filter chooses a non-first location and retains B history" `Quick
+            test_multiple_locations_choose_the_filtered_destination
+        ; Alcotest.test_case "single same-file answer waits for queued input" `Quick
+            test_single_location_yields_before_moving_the_reading
+        ; Alcotest.test_case "later input wins before and after reply receipt" `Quick
+            test_location_answers_yield_to_later_input
+        ; Alcotest.test_case "source and authority ownership before and after reply" `Quick
+            test_location_offers_do_not_borrow_other_owners
+        ; Alcotest.test_case "cancelled and invented selections cannot borrow an offer" `Quick
+            test_cancelled_and_invented_location_selections_are_refused
+        ; Alcotest.test_case "outside locations never start a workspace file read" `Quick
+            test_outside_location_is_an_address_without_a_workspace_read
+        ] )
+    ; ( "owned locations"
       , [ Alcotest.test_case "ordinary callbacks cannot reset a location" `Quick
             test_locations_retire_ordinary_source_callbacks
         ; Alcotest.test_case "history and destination commit only on success" `Quick

@@ -4,6 +4,7 @@
 type followup =
   | No_followup
   | Reveal_cursor
+  | Choose_location
   | Read_location_file of Masc_tui_types.code_navigation_owner * string Masc_tui_fetched.request
 
 val push_code_jump : Masc_tui_types.state -> unit
@@ -45,9 +46,19 @@ val start_lsp_question : ?line:int -> Masc_tui_types.state -> question:string ->
     suppressed; a different question owns a new request identity. *)
 val apply_lsp_answer : Masc_tui_types.state ->
   Masc_tui_types.code_lsp_query Masc_tui_fetched.request ->
-  (Masc.Tui_decode.lsp_answer, string) result -> followup
+  (Masc.Tui_decode.lsp_answer, string) result -> unit
 (** Admit only the latest question for the still-current source reading and
-    scope. A stale success or failure changes neither state nor followups. *)
+    scope. Location answers are staged until input has had priority. *)
+val retire_lsp_input : Masc_tui_types.state -> unit
+(** Retire an in-flight answer and an unopened location offer before handling
+    operator input. An already open owned location picker keeps its filter. *)
+val take_ready_lsp_locations : Masc_tui_types.state -> input_pending:bool -> followup
+(** Open a multiple-location picker or follow a single location only after
+    queued input. Another modal, source or authority cannot borrow the offer. *)
+val choose_lsp_location : Masc_tui_types.state ->
+  Masc_tui_types.code_location_offer -> Masc.Tui_decode.lsp_location -> followup
+(** Follow only an actual member of the current owned offer. Selection closes
+    the picker; unsuccessful navigation still preserves the source/history. *)
 val apply_diff : Masc_tui_types.state -> string Masc_tui_fetched.request ->
   (Masc.Tui_decode.git_diff, string) result -> unit
 val apply_history : Masc_tui_types.state ->

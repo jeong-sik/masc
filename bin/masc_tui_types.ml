@@ -4739,7 +4739,10 @@ type code_workspace_scope =
   | Code_scope_repo of string
 
 type code_lsp_query = {
+  clq_workspace : workspace_authority;
+  clq_reading : unit ref;
   clq_scope : code_workspace_scope;
+  clq_dir : string;
   clq_file : string Masc_tui_fetched.request;
   clq_question : string;
   clq_symbol : string;
@@ -4747,7 +4750,10 @@ type code_lsp_query = {
 }
 
 let code_lsp_query_equal left right =
-  left.clq_scope = right.clq_scope
+  left.clq_workspace = right.clq_workspace
+  && left.clq_reading == right.clq_reading
+  && left.clq_scope = right.clq_scope
+  && String.equal left.clq_dir right.clq_dir
   && Masc_tui_fetched.same_request ~equal:String.equal left.clq_file right.clq_file
   && String.equal left.clq_question right.clq_question
   && String.equal left.clq_symbol right.clq_symbol
@@ -5201,9 +5207,16 @@ type code_file_load_intent =
   | Refresh_code_file
   | Navigate_code_file of code_navigation_owner
 
+type code_location_offer = {
+  clo_origin : code_finder_origin;
+  clo_query : code_lsp_query Masc_tui_fetched.request;
+  clo_locations : Masc.Tui_decode.lsp_location list;
+}
+
 type palette_mode =
   | Palette_jump
   | Palette_files of code_finder_origin
+  | Palette_locations of code_location_offer
   | Palette_choice of {
       choice_question : string;  (* "hover", "definition", "references" *)
       choice_line : int;  (* 1-based, what the title says *)
@@ -8655,6 +8668,7 @@ type state = {
      until the next question or file replaces it. *)
   mutable code_lsp_note: string option;
   mutable code_lsp_query: (code_lsp_query, unit) Masc_tui_fetched.t;
+  mutable code_location_offer: code_location_offer option;
   (* Where a jump left from, newest first. A pending return reads separately
      and consumes the entry only when it commits navigation. *)
   mutable code_jump_back: code_jump list;
@@ -10317,6 +10331,7 @@ let suspend_workspace_readings state =
   state.code_diff <- Masc_tui_fetched.suspend state.code_diff;
   state.code_blame <- Masc_tui_fetched.suspend state.code_blame;
   state.code_lsp_query <- Masc_tui_fetched.suspend state.code_lsp_query;
+  state.code_location_offer <- None;
   state.fusion_runs <- Masc_tui_fetched.suspend state.fusion_runs;
   (match state.goal_confirmation with
    | Masc_tui_planning_detail.Inspecting reading ->
@@ -12457,6 +12472,7 @@ let set_code_scope state scope =
     state.code_finder_file <- Masc_tui_fetched.clear state.code_finder_file;
     state.code_navigation <- None;
     state.code_lsp_query <- Masc_tui_fetched.clear state.code_lsp_query;
+    state.code_location_offer <- None;
     state.code_file <- Masc_tui_fetched.clear state.code_file;
     state.code_file_resume_intent <- Refresh_code_file;
     state.code_lsp_note <- None;
@@ -14120,6 +14136,7 @@ let create_state
   code_file_cursor = 0;
   code_lsp_note = None;
   code_lsp_query = Masc_tui_fetched.initial;
+  code_location_offer = None;
   code_jump_back = [];
   code_navigation = None;
   code_file_hscroll = 0;
@@ -14426,9 +14443,19 @@ let code_finder_current (state : state) origin =
   && Option.equal (Masc_tui_fetched.same_request ~equal:String.equal)
        origin.cfo_file (Masc_tui_fetched.current_request state.code_file)
 
+let code_location_offer_current (state : state) offer =
+  code_finder_current state offer.clo_origin
+  && Option.equal
+       (Masc_tui_fetched.same_request ~equal:code_lsp_query_equal)
+       (Some offer.clo_query) (Masc_tui_fetched.current_request state.code_lsp_query)
+  && (match state.code_location_offer with
+      | Some current -> current == offer
+      | None -> false)
+
 let close_code_finder (state : state) =
   state.code_catalog <- Masc_tui_fetched.clear state.code_catalog;
   state.code_finder_file <- Masc_tui_fetched.clear state.code_finder_file;
+  state.code_location_offer <- None;
   state.palette_open <- false;
   state.palette_mode <- Palette_jump;
   state.palette_query <- "";
@@ -14439,7 +14466,7 @@ let code_finder_catalog (state : state) =
   | Palette_files origin when code_finder_current state origin ->
       Masc_tui_fetched.view_for ~equal:code_scope_path_equal state.code_catalog
         ~key:(origin.cfo_scope, origin.cfo_dir)
-  | Palette_files _ | Palette_jump | Palette_choice _ -> Masc_tui_fetched.Absent
+  | Palette_files _ | Palette_locations _ | Palette_jump | Palette_choice _ -> Masc_tui_fetched.Absent
 
 let code_listing_view (state : state) =
   Masc_tui_fetched.view_for ~equal:code_scope_path_equal state.code_listing

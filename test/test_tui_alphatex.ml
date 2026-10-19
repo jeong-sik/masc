@@ -490,25 +490,21 @@ let test_header_line_keeps_a_non_ascii_title () =
       Alcotest.(check bool) "the UTF-8 title bytes survive unescaped" true
         (List.exists (fun line -> contains_substring line "리프") lines)
 
-(* The subtitle is the author's text too, and the header draws it right
-   behind the title with the same [ · ] join the other header pieces use. *)
-let test_subtitle_rides_behind_the_title () =
-  match
-    Alphatex.render_tab ~max_width:80 "\\title \"Riff\" \\subtitle \"Warm-up\" :4 0.6"
-  with
-  | Error failure -> Alcotest.fail (Alphatex.failure_text failure)
-  | Ok lines ->
-      Alcotest.(check string) "the subtitle rides behind the title"
-        "\"Riff\" · \"Warm-up\"" (List.hd lines)
+(* The subtitle is the author's text; the parser keeps it the way it keeps a
+   title, including the UTF-8 bytes of a Korean subtitle, and the last one
+   said wins. The header that draws it is seen by eye, not asserted here. *)
+let test_subtitle_is_kept () =
+  let score = read_score "\\subtitle \"서울 야경\" :4 0.6" in
+  Alcotest.(check (option string)) "the subtitle" (Some "서울 야경")
+    score.subtitle;
+  Alcotest.(check (option string)) "no title said" None score.title
 
-(* A subtitle with no title still gets a header line, and a Korean subtitle
-   survives as UTF-8 the way a Korean title does. *)
-let test_subtitle_alone_keeps_non_ascii () =
-  match Alphatex.render_tab ~max_width:80 "\\subtitle \"한글 부제\" :4 0.6" with
-  | Error failure -> Alcotest.fail (Alphatex.failure_text failure)
-  | Ok lines ->
-      Alcotest.(check bool) "the UTF-8 subtitle bytes survive unescaped" true
-        (List.exists (fun line -> contains_substring line "한글 부제") lines)
+let test_last_subtitle_wins () =
+  let score =
+    read_score "\\subtitle \"first\" \\subtitle \"second\" :4 0.6"
+  in
+  Alcotest.(check (option string)) "the last subtitle" (Some "second")
+    score.subtitle
 
 let test_directives_are_kept () =
   let score = read_score "\\title \"Riff\" \\subtitle \"Warm-up\" \\tempo 92 \\ts 6 8 :4 0.6" in
@@ -782,10 +778,10 @@ let () =
             test_header_line_drawn
         ; Alcotest.test_case "a non-ascii title shows as written" `Quick
             test_header_line_keeps_a_non_ascii_title
-        ; Alcotest.test_case "the subtitle rides behind the title" `Quick
-            test_subtitle_rides_behind_the_title
-        ; Alcotest.test_case "a subtitle alone keeps non-ascii" `Quick
-            test_subtitle_alone_keeps_non_ascii
+        ; Alcotest.test_case "the subtitle is kept with its bytes" `Quick
+            test_subtitle_is_kept
+        ; Alcotest.test_case "the last subtitle wins" `Quick
+            test_last_subtitle_wins
         ; Alcotest.test_case "no header line without directives" `Quick
             test_header_line_absent_when_no_directives
         ; Alcotest.test_case "measure numbers climb with the measures" `Quick

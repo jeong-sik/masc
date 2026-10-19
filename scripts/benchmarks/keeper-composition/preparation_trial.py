@@ -384,6 +384,45 @@ def attempt_timing(root: Path, attempt: dict, receipt: dict) -> dict:
             "intervals": intervals, "wall_clock_arithmetic": False, "execution_verified": False}
 
 
+def record_observation(root: Path, relative: str) -> dict:
+    """Read one declared artifact without interpreting execution or liveness."""
+    record, record_hash, state, reason = None, None, "read", None
+    try:
+        raw, record_hash = capture_bytes(root, relative)
+        record = decode_json(raw.decode("utf-8"))
+        if not isinstance(record, dict):
+            raise ValueError("record must be an object")
+    except FileNotFoundError:
+        state, reason = "missing", "record_unavailable"
+    except (OSError, ValueError, RecursionError):
+        state, reason = "invalid", "record_cannot_be_admitted"
+    return {"path": relative, "state": state, "sha256": record_hash,
+            "reported_record": record, "reason": reason,
+            "current_liveness_verified": False, "execution_verified": False}
+
+
+def process_observation(root: Path, attempt: dict) -> dict:
+    """Preserve recorded closeout separately from native outcome/current liveness."""
+    relative = Path(attempt["path"]).with_name("process.json").as_posix()
+    observation = record_observation(root, relative)
+    observation["kind"] = None
+    if observation["state"] != "read":
+        return observation
+    record = observation["reported_record"]
+    if (set(record) == {"returncode", "observed_epoch"}
+            and type(record["returncode"]) is int
+            and type(record["observed_epoch"]) in (int, float)):
+        observation["kind"] = "driver_returned"
+    elif (set(record) == {"returncode", "observation", "detail"}
+            and record["returncode"] is None
+            and record["observation"] == "fixture_or_driver_unavailable"
+            and type(record["detail"]) is str):
+        observation["kind"] = "fixture_or_driver_unavailable"
+    else:
+        observation.update(state="invalid", reason="process_record_shape_unrecognized")
+    return observation
+
+
 def reported_pair_timing(paired: list[dict], mismatched_fields: list[str], declared_case: str) -> dict:
     """Compare reported durations, never absolute counters or verified latency."""
     arms = {result["declared_attempt"]["strategy"]: result for result in paired}
@@ -432,7 +471,8 @@ def reported_pair_timing(paired: list[dict], mismatched_fields: list[str], decla
             "arms": {name: {"receipt_state": result["receipt_state"],
                             "reported_outcome": result["reported_outcome"],
                             "receipt_sha256": result["receipt_sha256"],
-                            "clock_ref": result.get("clock_ref")}
+                            "clock_ref": result.get("clock_ref"),
+                            "process_observation": result["process_observation"]}
                      for name, result in arms.items()},
             "blockers": blockers, "intervals": intervals,
             "wall_clock_arithmetic": False, "cross_owner_counter_subtraction": False,
@@ -453,6 +493,8 @@ def report_capture(directory: Path) -> dict:
             or manifest.get("experiment_sha256") != experiment_hash
             or not same_json(manifest.get("expected_attempts"), attempts)):
         raise ValueError("capture manifest does not bind the complete declared experiment")
+    setup = {pair: record_observation(root, f"pair-{pair:04d}/setup.json")
+             for pair in range(experiment["pairs"])}
     results, by_pair = [], {}
     for attempt in attempts:
         result, receipt_hash, state, error = {}, None, "read", None
@@ -478,6 +520,7 @@ def report_capture(directory: Path) -> dict:
                       receipt_sha256=receipt_hash, declared_attempt=dict(attempt))
         if state != "read":
             result.update(outcome="unfinished", receipt_error=error)
+        result["process_observation"] = process_observation(root, attempt)
         result["timing_report"] = attempt_timing(root, attempt, result)
         results.append(result)
         by_pair.setdefault(attempt["pair"], []).append(result)
@@ -491,10 +534,11 @@ def report_capture(directory: Path) -> dict:
         timing = reported_pair_timing(paired, mismatch, experiment["case"])
         if not all(result["outcome"] == "correct" for result in paired):
             comparisons.append({"pair": pair, "state": "incomplete", "mismatched_fields": [],
-                                "reported_timing": timing})
+                                "reported_timing": timing, "setup_observation": setup[pair]})
             continue
         comparisons.append({"pair": pair, "state": "mismatch" if mismatch else "matched",
-                            "mismatched_fields": mismatch, "reported_timing": timing})
+                            "mismatched_fields": mismatch, "reported_timing": timing,
+                            "setup_observation": setup[pair]})
         if mismatch:
             for result in paired:
                 result.update(outcome="explicit_failure", comparison_errors=mismatch)
@@ -511,6 +555,10 @@ def report_capture(directory: Path) -> dict:
             "speedup": None, "matching": matching, "pair_comparisons": comparisons,
             "receipt_states": {state: sum(result["receipt_state"] == state for result in results)
                                for state in ("read", "missing", "invalid")},
+            "process_states": {state: sum(result["process_observation"]["state"] == state for result in results)
+                               for state in ("read", "missing", "invalid")},
+            "setup_states": {state: sum(observation["state"] == state for observation in setup.values())
+                             for state in ("read", "missing", "invalid")},
             "comparison_scope": "receipt_reported_common_inputs_only",
             "execution_verified": False, "source_build_verified": False,
             "reason": ("functional protocol samples, no real model performance evidence" if synthetic else
@@ -573,10 +621,12 @@ def run(args) -> None:
             try:
                 restore(base, snapshot, frozen, pair_root)
                 code = invoke(driver, experiment_path, prompts, base, receipt, "run", attempt["strategy"])
-                save(receipt.parent / "process.json", {"returncode": code, "observed_epoch": time.time()})
             except (OSError, ValueError) as error:
                 save(receipt.parent / "process.json", {"returncode": None,
                      "observation": "fixture_or_driver_unavailable", "detail": str(error)})
+            else:
+                # A failure persisting a known return is not an invocation failure.
+                save(receipt.parent / "process.json", {"returncode": code, "observed_epoch": time.time()})
     save(output / "summary.json", report_capture(output))
 
 

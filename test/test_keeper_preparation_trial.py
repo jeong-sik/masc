@@ -424,13 +424,33 @@ def offline_capture_comparison(coordinator: Path) -> None:
     encoded = json.dumps(experiment).encode()
     (root / "experiment.json").write_bytes(encoded)
     attempts = []
+    process_records = {
+        (0, "direct"): {"returncode": 0, "observed_epoch": 1000.0},
+        (0, "exact_skill"): {"returncode": 7, "observed_epoch": 1001.0},
+        (1, "direct"): {"returncode": -15, "observed_epoch": 1002.0},
+        (1, "exact_skill"): {"returncode": 0, "observed_epoch": 1003.0},
+        (2, "direct"): {"returncode": None, "observation": "fixture_or_driver_unavailable",
+                        "detail": "recorded fixture unavailable"},
+        (3, "exact_skill"): {"returncode": True, "observed_epoch": 1004.0}}
     for pair in range(4):
         order = ("direct", "exact_skill") if pair % 2 == 0 else ("exact_skill", "direct")
+        setup_path = root / f"pair-{pair:04d}" / "setup.json"
+        setup_path.parent.mkdir(parents=True)
+        if pair == 0:
+            setup_path.write_text(json.dumps({"outcome": "setup_complete", "fixture": {"reported": True}}), encoding="utf-8")
+        elif pair == 1:
+            setup_path.write_text(json.dumps({"outcome": "unfinished", "reason": "before_setup"}), encoding="utf-8")
+        elif pair == 3:
+            setup_path.write_text('{"outcome":', encoding="utf-8")
         for arm in order:
             relative = f"pair-{pair:04d}/{arm}/attempt.json"
             attempts.append({"pair": pair, "strategy": arm, "path": relative})
             path = root / relative
             path.parent.mkdir(parents=True)
+            if (pair, arm) in process_records:
+                path.with_name("process.json").write_text(json.dumps(process_records[pair, arm]), encoding="utf-8")
+            elif pair == 3 and arm == "direct":
+                path.with_name("process.json").write_text('{"returncode":', encoding="utf-8")
             if pair == 1 and arm == "exact_skill":
                 continue
             if pair == 3 and arm == "direct":
@@ -458,6 +478,49 @@ def offline_capture_comparison(coordinator: Path) -> None:
             "correct": 2, "explicit_failure": 3, "unfinished": 3}, "declared attempts disappeared")
         require(report["receipt_states"] == {"read": 5, "missing": 1, "invalid": 2},
                 "invalid or unavailable evidence was promoted to execution")
+        require(report["process_states"] == {"read": 5, "missing": 1, "invalid": 2},
+                "recorded process observations left the full declared cohort")
+        require(report["setup_states"] == {"read": 2, "missing": 1, "invalid": 1},
+                "shared setup observations used the attempt denominator or disappeared")
+        setups = {item["pair"]: item["setup_observation"] for item in report["pair_comparisons"]}
+        require(setups[1]["reported_record"] == {"outcome": "unfinished", "reason": "before_setup"}
+                and setups[2]["state"] == "missing" and setups[3]["state"] == "invalid"
+                and setups[3]["sha256"] == hashlib.sha256((root / "pair-0003/setup.json").read_bytes()).hexdigest(),
+                "shared preparation failure context was erased or promoted to completion")
+        by_attempt = {(item["declared_attempt"]["pair"], item["declared_attempt"]["strategy"]): item
+                      for item in report["attempts"]}
+        absent = by_attempt[1, "exact_skill"]
+        require(absent["receipt_state"] == "missing" and absent["outcome"] == "unfinished"
+                and absent["process_observation"]["kind"] == "driver_returned"
+                and absent["process_observation"]["reported_record"]["returncode"] == 0,
+                "recorded zero returncode fabricated a missing native success")
+        interrupted = by_attempt[1, "direct"]
+        require(interrupted["reported_outcome"] == "cancelled" and interrupted["outcome"] == "unfinished"
+                and interrupted["process_observation"]["reported_record"]["returncode"] == -15,
+                "recorded interruption replaced the original native result")
+        unavailable = by_attempt[2, "direct"]
+        require(unavailable["outcome"] == "correct"
+                and unavailable["process_observation"]["kind"] == "fixture_or_driver_unavailable"
+                and unavailable["process_observation"]["reported_record"]["returncode"] is None,
+                "process metadata overwrote the separate native receipt")
+        require(by_attempt[2, "exact_skill"]["process_observation"]["state"] == "missing"
+                and by_attempt[2, "exact_skill"]["outcome"] == "correct",
+                "missing process metadata erased a received native result")
+        malformed = by_attempt[3, "direct"]["process_observation"]
+        require(malformed["state"] == "invalid" and malformed["reported_record"] is None
+                and malformed["sha256"] == hashlib.sha256(
+                    (root / "pair-0003/direct/process.json").read_bytes()).hexdigest(),
+                "malformed process bytes lost their exact artifact identity")
+        boolean = by_attempt[3, "exact_skill"]["process_observation"]
+        require(boolean["state"] == "invalid" and boolean["kind"] is None
+                and boolean["reported_record"]["returncode"] is True,
+                "JSON boolean became an integer process return code")
+        require(all(item["process_observation"]["current_liveness_verified"] is False
+                    and item["process_observation"]["execution_verified"] is False for item in report["attempts"]),
+                "recorded files gained current liveness or execution authority")
+        paired_process = report["pair_comparisons"][1]["reported_timing"]["arms"]["exact_skill"]["process_observation"]
+        require(paired_process == absent["process_observation"],
+                "pair projection borrowed a different attempt's process record")
         require({item["pair"] for item in report["matching"]} == {2}, "mismatched inputs entered matching")
         require(report["matching"][0]["first_offered_inventory_reported"] is False,
                 "two unobserved inventories became an inventory match")

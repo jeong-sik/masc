@@ -15,6 +15,15 @@ let start_read ~equal fetched key =
   | Fetched.Started (next, request) -> next, request
   | Fetched.Already_loading -> Alcotest.fail "fixture already loading"
 
+let confirm_code_workspace state =
+  state.server_identity <- Some
+    { Decode.sid_version = "test"; sid_binary_commit = "test";
+      sid_binary_commit_age_s = None; sid_base_path = "/workspace";
+      sid_masc_root = "/workspace/.masc"; sid_executable_in_worktree = None;
+      sid_state_ready = Some true; sid_uptime = None; sid_sse_clients = None;
+      sid_gc = None; sid_scheduler = None };
+  state.view <- Code
+
 let activity_change index : Decode.file_change =
   { fc_at = float_of_int index
   ; fc_keeper = "alpha"
@@ -190,6 +199,7 @@ let test_moving_before_the_listing_answers_asks_for_the_new_directory () =
 
 let test_file_reply_and_lsp_navigation_share_current_content () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  confirm_code_workspace state;
   let old, old_request = start_read ~equal:String.equal state.code_file "old.ml" in
   let current, request = start_read ~equal:String.equal old "new.ml" in
   state.code_file <- current;
@@ -216,10 +226,15 @@ let test_file_reply_and_lsp_navigation_share_current_content () =
     (answer (location "stdlib.ml" false 4) = Code_results.No_followup);
   Alcotest.(check int) "outside definition does not add a back entry" jumps
     (List.length state.code_jump_back);
-  Alcotest.(check bool) "different file requests its own load" true
-    (answer (location "other.ml" true 7) = Code_results.Load_file "other.ml");
-  Alcotest.(check (option int)) "new read keeps the destination line" (Some 7)
-    state.code_target_line
+  (match answer (location "other.ml" true 7) with
+   | Code_results.Read_location_file (owner, request) ->
+       check_string "different file request" "other.ml" (Fetched.request_key request);
+       Alcotest.(check int) "owned destination keeps its requested line" 6 owner.cno_destination.cj_cursor
+   | Code_results.No_followup | Code_results.Reveal_cursor ->
+       Alcotest.fail "different-file location did not request an owned read");
+  Alcotest.(check (option int)) "source has no premature jump target" None state.code_target_line;
+  Alcotest.(check int) "pending location has not added a history entry" jumps
+    (List.length state.code_jump_back)
 ;;
 
 let test_file_recovery_preserves_nested_readers () =
@@ -407,13 +422,7 @@ let test_interrupted_new_file_open_resets_old_readers () =
 
 let finder_fixture () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
-  state.server_identity <- Some
-    { Decode.sid_version = "test"; sid_binary_commit = "test";
-      sid_binary_commit_age_s = None; sid_base_path = "/workspace";
-      sid_masc_root = "/workspace/.masc"; sid_executable_in_worktree = None;
-      sid_state_ready = Some true; sid_uptime = None; sid_sse_clients = None;
-      sid_gc = None; sid_scheduler = None };
-  state.view <- Code;
+  confirm_code_workspace state;
   state.code_scope <- Code_scope_repo "example";
   state.code_dir <- "src";
   let file, request = start_read ~equal:String.equal state.code_file "src/old.ml" in
@@ -572,7 +581,7 @@ let return_fixture () =
 
 let start_return_read state =
   match Code_results.start_return state with
-  | Code_results.Read_return_file (owner, request) -> owner, request
+  | Code_results.Read_navigation_file (owner, request) -> owner, request
   | Code_results.No_return | Code_results.Return_committed ->
       Alcotest.fail "expected an owned historical file read"
 
@@ -582,21 +591,21 @@ let test_return_restores_reading_after_success () =
   let owner, request = start_return_read state in
   check_string "request names the historical file" "src/old.ml" (Fetched.request_key request);
   Alcotest.(check bool) "destination retains its own repository scope" true
-    ((List.hd owner.cro_history).cj_scope = Code_scope_repo "example");
+    ((List.hd owner.cno_history).cj_scope = Code_scope_repo "example");
   Alcotest.(check bool) "pending read preserves current location and history" true
     (state.code_file == current && state.code_jump_back == history
      && state.code_scope = Code_scope_keeper "other" && state.code_dir = "lib");
   Alcotest.(check bool) "repeated B shares pending return" true
     (match Code_results.start_return state with
      | Code_results.No_return -> true
-     | Code_results.Return_committed | Code_results.Read_return_file _ -> false);
-  Code_results.apply_file ~intent:(Return_code_file owner) state request
+     | Code_results.Return_committed | Code_results.Read_navigation_file _ -> false);
+  Code_results.apply_file ~intent:(Navigate_code_file owner) state request
     (Ok "let first_line = 1\nlet second_line = 2\nlet third_line = 3");
   Alcotest.(check bool) "publication leaves current file intact" true (state.code_file == current);
   Alcotest.(check bool) "queued input defers navigation" false
-    (Code_results.take_ready_return_file state ~input_pending:true);
+    (Code_results.take_ready_navigation_file state ~input_pending:true);
   Alcotest.(check bool) "idle commits success" true
-    (Code_results.take_ready_return_file state ~input_pending:false);
+    (Code_results.take_ready_navigation_file state ~input_pending:false);
   Alcotest.(check bool) "historical reading and all position axes restored" true
     (Fetched.current_key state.code_file = Some "src/old.ml"
      && state.code_scope = Code_scope_repo "example" && state.code_dir = "src"
@@ -604,24 +613,24 @@ let test_return_restores_reading_after_success () =
      && state.code_file_hscroll = 6 && state.code_cursor = 7
      && state.code_focus_file = Left_pane && state.code_jump_back = []);
   Alcotest.(check bool) "success is consumed only once" false
-    (Code_results.take_ready_return_file state ~input_pending:false)
+    (Code_results.take_ready_navigation_file state ~input_pending:false)
 
 let test_return_failure_retry_and_cancel () =
   let state = return_fixture () in
   let current = state.code_file and history = state.code_jump_back in
   let old_owner, old_request = start_return_read state in
-  Code_results.apply_file ~intent:(Return_code_file old_owner) state old_request (Error "gone");
+  Code_results.apply_file ~intent:(Navigate_code_file old_owner) state old_request (Error "gone");
   Alcotest.(check bool) "failure retains reading and unconsumed history" true
     (state.code_file == current && state.code_jump_back == history
-     && state.code_dir = "lib" && Option.is_none state.code_return);
+     && state.code_dir = "lib" && Option.is_none state.code_navigation);
   let owner, request = start_return_read state in
-  Code_results.apply_file ~intent:(Return_code_file old_owner) state old_request (Ok "stale");
+  Code_results.apply_file ~intent:(Navigate_code_file old_owner) state old_request (Ok "stale");
   Alcotest.(check bool) "old same-path generation cannot satisfy retry" false
-    (Code_results.take_ready_return_file state ~input_pending:false);
-  Code_results.apply_file ~intent:(Return_code_file owner) state request (Ok "retry");
-  state.code_return <- None;
+    (Code_results.take_ready_navigation_file state ~input_pending:false);
+  Code_results.apply_file ~intent:(Navigate_code_file owner) state request (Ok "retry");
+  state.code_navigation <- None;
   Alcotest.(check bool) "cancellation wins over an already published success" false
-    (Code_results.take_ready_return_file state ~input_pending:false);
+    (Code_results.take_ready_navigation_file state ~input_pending:false);
   Alcotest.(check bool) "cancel leaves reading and history available" true
     (state.code_file == current && state.code_jump_back == history)
 
@@ -629,11 +638,11 @@ let test_return_owners_cannot_be_borrowed () =
   List.iter (fun change ->
     let state = return_fixture () in
     let owner, request = start_return_read state in
-    Code_results.apply_file ~intent:(Return_code_file owner) state request (Ok "late content");
+    Code_results.apply_file ~intent:(Navigate_code_file owner) state request (Ok "late content");
     change state;
     let current = state.code_file and history = state.code_jump_back in
     Alcotest.(check bool) "ready old return cannot navigate under a new owner" false
-      (Code_results.take_ready_return_file state ~input_pending:false);
+      (Code_results.take_ready_navigation_file state ~input_pending:false);
     Alcotest.(check bool) "replacement reading and history are preserved" true
       (state.code_file == current && state.code_jump_back == history))
     [ (fun state -> state.view <- Repositories)
@@ -653,8 +662,8 @@ let test_return_owners_cannot_be_borrowed () =
 let test_return_clamps_changed_content_and_restores_current_file () =
   let state = return_fixture () in
   let owner, request = start_return_read state in
-  Code_results.apply_file ~intent:(Return_code_file owner) state request (Ok "ab");
-  ignore (Code_results.take_ready_return_file state ~input_pending:false);
+  Code_results.apply_file ~intent:(Navigate_code_file owner) state request (Ok "ab");
+  ignore (Code_results.take_ready_navigation_file state ~input_pending:false);
   Alcotest.(check bool) "shorter file clamps cursor and both offsets" true
     (state.code_file_cursor = 0 && state.code_file_scroll = 0 && state.code_file_hscroll = 1);
   state.code_file_hscroll <- 1;
@@ -664,7 +673,7 @@ let test_return_clamps_changed_content_and_restores_current_file () =
   Alcotest.(check bool) "readable current file restores without a read" true
     (match Code_results.start_return state with
      | Code_results.Return_committed -> true
-     | Code_results.No_return | Code_results.Read_return_file _ -> false);
+     | Code_results.No_return | Code_results.Read_navigation_file _ -> false);
   Alcotest.(check bool) "current file restores pan and focus" true
     (state.code_file_hscroll = 1 && state.code_focus_file = Left_pane)
 
@@ -681,7 +690,7 @@ let test_return_to_tree_needs_no_file () =
   Alcotest.(check bool) "tree history commits without a file request" true
     (match Code_results.start_return state with
      | Code_results.Return_committed -> true
-     | Code_results.No_return | Code_results.Read_return_file _ -> false);
+     | Code_results.No_return | Code_results.Read_navigation_file _ -> false);
   Alcotest.(check bool) "tree cursor and directory restored" true
     (state.code_dir = "src" && state.code_cursor = 1 && state.code_focus_file = Left_pane
      && Fetched.current_key state.code_file = None && state.code_jump_back = [])
@@ -712,7 +721,7 @@ let test_same_file_return_retires_an_ordinary_open_refresh () =
     Alcotest.(check bool) "return uses visible reading without another file request" true
       (match Code_results.start_return state with
        | Code_results.Return_committed -> true
-       | Code_results.No_return | Code_results.Read_return_file _ -> false);
+       | Code_results.No_return | Code_results.Read_navigation_file _ -> false);
     let returned = state.code_file in
     Alcotest.(check bool) "return retires the old ordinary callback" false
       (Fetched.is_current ~equal:String.equal state.code_file ordinary);
@@ -723,7 +732,7 @@ let test_same_file_return_retires_an_ordinary_open_refresh () =
       (state.code_file == returned && state.code_file_cursor = 2
        && state.code_file_scroll = 1 && state.code_file_hscroll = 6
        && state.code_cursor = 7 && state.code_focus_file = Left_pane
-       && state.code_jump_back = [] && Option.is_none state.code_return);
+       && state.code_jump_back = [] && Option.is_none state.code_navigation);
     Alcotest.(check bool) "authority recovery resumes the reading without an open reset" true
       (state.code_file_resume_intent = Refresh_code_file))
     [Ok "late replacement"; Error "late failure"]
@@ -760,17 +769,129 @@ let test_pending_return_retires_other_ordinary_file_reads () =
       Code_results.apply_file ~intent:Open_code_file state ordinary late_result;
       Alcotest.(check bool) "late ordinary callback cannot alter the pending return's source" true
         (state.code_file == current && state.code_jump_back == history
-         && Option.is_some state.code_return && state.code_dir = "lib");
-      Code_results.apply_file ~intent:(Return_code_file owner) state request (Ok "returned");
+         && Option.is_some state.code_navigation && state.code_dir = "lib");
+      Code_results.apply_file ~intent:(Navigate_code_file owner) state request (Ok "returned");
       Alcotest.(check bool) "the separately owned return can still commit" true
-        (Code_results.take_ready_return_file state ~input_pending:false))
+        (Code_results.take_ready_navigation_file state ~input_pending:false))
       [Ok "late replacement"; Error "late failure"])
     [false; true]
+
+let start_location_read state path line =
+  let request = match Code_results.start_lsp_question state ~question:"definition" ~symbol:"target" with
+    | Some request -> request | None -> Alcotest.fail "location question did not start" in
+  let location : Decode.lsp_location = {ll_path=path; ll_inside=true; ll_line=line} in
+  match Code_results.apply_lsp_answer state request (Ok (Decode.Lsp_locations [location])) with
+  | Code_results.Read_location_file (owner, request) -> owner, request
+  | Code_results.No_followup | Code_results.Reveal_cursor ->
+      Alcotest.fail "expected an owned different-file location read"
+
+let test_location_commits_history_only_on_success () =
+  let state, _ = finder_fixture () in
+  close_code_finder state;
+  state.code_file_hscroll <- 4;
+  let current = state.code_file and history = state.code_jump_back in
+  let owner, request = start_location_read state "lib/target.ml" 2 in
+  Alcotest.(check bool) "pending location retains original file and history" true
+    (state.code_file == current && state.code_jump_back == history && state.code_dir = "src");
+  Alcotest.(check bool) "destination retains repository scope" true
+    (owner.cno_destination.cj_scope = Code_scope_repo "example");
+  Code_results.apply_file ~intent:(Navigate_code_file owner) state request
+    (Ok "let first = 0\nlet target = 1\nlet last = 2");
+  Alcotest.(check bool) "queued input precedes location success" false
+    (Code_results.take_ready_navigation_file state ~input_pending:true);
+  Alcotest.(check bool) "source still displayed while success is deferred" true (state.code_file == current);
+  Alcotest.(check bool) "idle commits destination" true
+    (Code_results.take_ready_navigation_file state ~input_pending:false);
+  Alcotest.(check bool) "destination line and containing directory agree" true
+    (Fetched.current_key state.code_file = Some "lib/target.ml" && state.code_dir = "lib"
+     && state.code_file_cursor = 1 && state.code_file_scroll = 1 && state.code_file_hscroll = 0);
+  Alcotest.(check bool) "successful location records the source position once" true
+    (match state.code_jump_back with
+     | [target] -> target.cj_file = Some "src/old.ml" && target.cj_cursor = 2
+         && target.cj_scroll = 2 && target.cj_hscroll = 4 && target.cj_dir = "src"
+     | [] | _ :: _ -> false);
+  let owner, request = start_return_read state in
+  Code_results.apply_file ~intent:(Navigate_code_file owner) state request
+    (Ok "let a = 1\nlet b = 2\nlet c = 3");
+  ignore (Code_results.take_ready_navigation_file state ~input_pending:false);
+  Alcotest.(check bool) "B returns through the successfully recorded location" true
+    (Fetched.current_key state.code_file = Some "src/old.ml" && state.code_file_cursor = 2
+     && state.code_file_scroll = 2 && state.code_file_hscroll = 4 && state.code_jump_back = [])
+
+let test_location_failure_cancel_and_replacement_preserve_source () =
+  let state, _ = finder_fixture () in
+  close_code_finder state;
+  let current = state.code_file and history = state.code_jump_back in
+  let old_owner, old_request = start_location_read state "lib/target.ml" 99 in
+  Code_results.apply_file ~intent:(Navigate_code_file old_owner) state old_request (Error "missing file");
+  Alcotest.(check bool) "failed location retains source and creates no history" true
+    (state.code_file == current && state.code_jump_back == history && state.code_dir = "src");
+  let owner, request = start_location_read state "lib/target.ml" 99 in
+  Code_results.apply_file ~intent:(Navigate_code_file old_owner) state old_request (Ok "late old read");
+  Alcotest.(check bool) "old same-path location cannot complete the retry" false
+    (Code_results.take_ready_navigation_file state ~input_pending:false);
+  Code_results.apply_file ~intent:(Navigate_code_file owner) state request (Ok "short");
+  state.code_navigation <- None;
+  Alcotest.(check bool) "cancelled ready location cannot navigate" false
+    (Code_results.take_ready_navigation_file state ~input_pending:false);
+  Alcotest.(check bool) "cancel retains source and history" true
+    (state.code_file == current && state.code_jump_back == history);
+  let owner, request = start_location_read state "lib/target.ml" 99 in
+  Code_results.apply_file ~intent:(Navigate_code_file owner) state request (Ok "short");
+  ignore (Code_results.take_ready_navigation_file state ~input_pending:false);
+  Alcotest.(check int) "destination beyond new EOF clamps to actual content" 0 state.code_file_cursor
+
+let test_return_replaces_pending_location_without_consuming_history () =
+  let state = return_fixture () in
+  let location_owner, location_request = start_location_read state "lib/target.ml" 3 in
+  let current = state.code_file and history = state.code_jump_back in
+  let return_owner, _ = start_return_read state in
+  Alcotest.(check bool) "B owns a return rather than sharing an unrelated location" true
+    (return_owner.cno_action = Return_to_history);
+  Code_results.apply_file ~intent:(Navigate_code_file location_owner) state location_request (Ok "obsolete");
+  Alcotest.(check bool) "late location cannot replace B's request" true
+    (match state.code_navigation with
+     | Some reading -> reading.cnr_owner == return_owner
+     | None -> false);
+  Alcotest.(check bool) "replacement keeps reading and return history" true
+    (state.code_file == current && state.code_jump_back == history)
+
+let test_location_cannot_borrow_changed_authority () =
+  List.iter (fun change ->
+    let state, _ = finder_fixture () in
+    close_code_finder state;
+    let owner, request = start_location_read state "lib/target.ml" 3 in
+    Code_results.apply_file ~intent:(Navigate_code_file owner) state request (Ok "destination");
+    change state;
+    let current = state.code_file and history = state.code_jump_back in
+    Alcotest.(check bool) "changed owner refuses an already received location" false
+      (Code_results.take_ready_navigation_file state ~input_pending:false);
+    Alcotest.(check bool) "changed source and history remain intact" true
+      (state.code_file == current && state.code_jump_back == history))
+    [ (fun state -> state.view <- Repositories)
+    ; (fun state -> set_code_scope state (Code_scope_repo "other"))
+    ; (fun state -> ignore (Code_results.start_lsp_question state ~question:"hover" ~symbol:"another"))
+    ; (fun state ->
+        let identity = state.server_identity in
+        suspend_workspace_readings state;
+        state.server_identity <- identity;
+        state.workspace_identity <- Workspace_identity_match)
+    ]
 
 let () =
   Alcotest.run
     "masc-tui-workspace-entries"
-    [ ( "reading return"
+    [ ( "owned locations"
+      , [ Alcotest.test_case "history and destination commit only on success" `Quick
+            test_location_commits_history_only_on_success
+        ; Alcotest.test_case "failure cancellation and same-path retry preserve source" `Quick
+            test_location_failure_cancel_and_replacement_preserve_source
+        ; Alcotest.test_case "B replaces an unrelated pending location" `Quick
+            test_return_replaces_pending_location_without_consuming_history
+        ; Alcotest.test_case "locations cannot borrow changed authority" `Quick
+            test_location_cannot_borrow_changed_authority
+        ] )
+    ; ( "reading return"
       , [ Alcotest.test_case "owned success restores every reading position" `Quick
             test_return_restores_reading_after_success
         ; Alcotest.test_case "failure retry and cancellation preserve history" `Quick

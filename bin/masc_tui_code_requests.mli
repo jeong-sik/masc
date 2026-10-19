@@ -27,6 +27,12 @@ val return_to_reading :
 (** Return through jump history using the destination scope and confirmed
     workspace identity, without replacing the current file while reading. *)
 
+val launch_navigation_read :
+  Masc_tui_types.state -> host:string ->
+  deliver:(Masc_tui_async_protocol.async_msg -> unit) ->
+  Masc_tui_types.code_navigation_owner -> string Masc_tui_fetched.request -> unit
+(** Send an already-owned return/location read under its destination scope. *)
+
 val launch_file_load
   :  ?intent:Masc_tui_types.code_file_load_intent
   -> Masc_tui_types.state

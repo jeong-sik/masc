@@ -4,10 +4,13 @@
 open Masc_tui_types
 module Message_layout = Masc_tui_message_layout
 
-type followup = No_followup | Reveal_cursor | Load_file of string
+type followup =
+  | No_followup
+  | Reveal_cursor
+  | Read_location_file of code_navigation_owner * string Masc_tui_fetched.request
 
 let push_code_jump state =
-  state.code_return <- None;
+  state.code_navigation <- None;
   state.code_jump_back <-
     { cj_scope = state.code_scope; cj_dir = state.code_dir;
       cj_file = Masc_tui_fetched.current_key state.code_file;
@@ -18,11 +21,11 @@ let push_code_jump state =
 type return_followup =
   | No_return
   | Return_committed
-  | Read_return_file of code_return_owner * string Masc_tui_fetched.request
+  | Read_navigation_file of code_navigation_owner * string Masc_tui_fetched.request
 
-let return_owner_current state owner =
-  code_finder_current state owner.cro_origin
-  && state.code_jump_back == owner.cro_history
+let navigation_owner_current state owner =
+  code_finder_current state owner.cno_origin
+  && state.code_jump_back == owner.cno_history
 
 let restore_position state target =
   let last_line = match Masc_tui_fetched.current state.code_file with
@@ -38,23 +41,40 @@ let restore_position state target =
   state.code_focus_file <- target.cj_focus;
   state.code_target_line <- None
 
-let commit_return_location state target rest =
+let commit_navigation_location state target rest =
   let changed = state.code_scope <> target.cj_scope
     || not (String.equal state.code_dir target.cj_dir) in
-  state.code_return <- None;
+  state.code_navigation <- None;
   set_code_scope state target.cj_scope;
   state.code_dir <- target.cj_dir;
   state.code_jump_back <- rest;
   if changed then state.code_listing <- Masc_tui_fetched.clear state.code_listing
 
+let start_navigation state ~action ~target ~path =
+  if not (server_authority_ready state) || state.view <> Code then None
+  else
+    let owner = { cno_origin = {
+      cfo_workspace = state.workspace_authority;
+      cfo_reading = state.workspace_read_authority;
+      cfo_scope = state.code_scope; cfo_dir = state.code_dir;
+      cfo_file = Masc_tui_fetched.current_request state.code_file };
+      cno_history = state.code_jump_back; cno_destination = target;
+      cno_action = action } in
+    match Masc_tui_fetched.start ~equal:String.equal Masc_tui_fetched.initial ~key:path with
+    | Masc_tui_fetched.Already_loading -> None
+    | Masc_tui_fetched.Started (file, request) ->
+        state.code_navigation <- Some { cnr_owner = owner; cnr_file = file };
+        Some (owner, request)
+
 let start_return state =
   if not (server_authority_ready state) then begin
     state.code_lsp_note <- Some "Cannot return until the workspace is confirmed";
     No_return
-  end else match state.code_return with
-  | Some reading when return_owner_current state reading.crr_owner -> No_return
+  end else match state.code_navigation with
+  | Some reading when navigation_owner_current state reading.cnr_owner
+      && reading.cnr_owner.cno_action = Return_to_history -> No_return
   | Some _ | None ->
-    state.code_return <- None;
+    state.code_navigation <- None;
     match state.code_jump_back with
     | [] -> state.code_lsp_note <- Some "No jump to return from"; No_return
     | target :: rest ->
@@ -66,7 +86,7 @@ let start_return state =
       state.code_file_resume_intent <- Refresh_code_file;
       match target.cj_file with
       | None ->
-          commit_return_location state target rest;
+          commit_navigation_location state target rest;
           state.code_file <- Masc_tui_fetched.clear state.code_file;
           state.code_file_resume_intent <- Refresh_code_file;
           restore_position state target;
@@ -76,38 +96,31 @@ let start_return state =
         match Masc_tui_fetched.current state.code_file with
         | Some (current, Masc_tui_fetched.Ready _)
             when state.code_scope = target.cj_scope && String.equal current path ->
-            commit_return_location state target rest;
+            commit_navigation_location state target rest;
             restore_position state target;
             Return_committed
         | None | Some (_, (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
                          | Masc_tui_fetched.Ready _ | Masc_tui_fetched.Stale _
                          | Masc_tui_fetched.Failed _)) ->
-          let owner = { cro_origin = {
-            cfo_workspace = state.workspace_authority;
-            cfo_reading = state.workspace_read_authority;
-            cfo_scope = state.code_scope; cfo_dir = state.code_dir;
-            cfo_file = Masc_tui_fetched.current_request state.code_file };
-            cro_history = state.code_jump_back } in
-          match Masc_tui_fetched.start ~equal:String.equal Masc_tui_fetched.initial ~key:path with
-          | Masc_tui_fetched.Already_loading -> No_return
-          | Masc_tui_fetched.Started (file, request) ->
-              state.code_return <- Some { crr_owner = owner; crr_file = file };
+          match start_navigation state ~action:Return_to_history ~target ~path with
+          | None -> No_return
+          | Some (owner, request) ->
               state.code_lsp_note <- Some ("Returning to "
                 ^ Masc.Tui_terminal_text.sanitize_terminal_text path);
-              Read_return_file (owner, request)
+              Read_navigation_file (owner, request)
 
-let apply_return_file state owner request result =
-  match state.code_return with
-  | Some reading when reading.crr_owner == owner && return_owner_current state owner
-      && Masc_tui_fetched.is_current ~equal:String.equal reading.crr_file request ->
+let apply_navigation_file state owner request result =
+  match state.code_navigation with
+  | Some reading when reading.cnr_owner == owner && navigation_owner_current state owner
+      && Masc_tui_fetched.is_current ~equal:String.equal reading.cnr_file request ->
       (match result with
        | Error detail ->
-           state.code_return <- None;
-           state.code_lsp_note <- Some ("Return failed: "
+           state.code_navigation <- None;
+           state.code_lsp_note <- Some ("Navigation failed: "
              ^ Masc.Tui_terminal_text.sanitize_terminal_text detail)
        | Ok _ ->
-           state.code_return <- Some { reading with crr_file =
-             Masc_tui_fetched.complete ~equal:String.equal reading.crr_file request result })
+           state.code_navigation <- Some { reading with cnr_file =
+             Masc_tui_fetched.complete ~equal:String.equal reading.cnr_file request result })
   | Some _ | None -> ()
 
 let apply_entries (state : state) request result =
@@ -240,15 +253,25 @@ let apply_file ?(intent = Open_code_file) state request result =
   match intent with
   | Open_code_file -> apply_open_file ~preserve_view:false state request result
   | Refresh_code_file -> apply_open_file ~preserve_view:true state request result
-  | Return_code_file owner -> apply_return_file state owner request result
+  | Navigate_code_file owner -> apply_navigation_file state owner request result
 
-let take_ready_return_file state ~input_pending =
+let take_ready_navigation_file state ~input_pending =
   if input_pending then false
-  else match state.code_return with
-  | Some reading when return_owner_current state reading.crr_owner ->
-      (match reading.crr_owner.cro_history, Masc_tui_fetched.current reading.crr_file with
-       | target :: rest, Some (path, Masc_tui_fetched.Ready content) ->
-           commit_return_location state target rest;
+  else match state.code_navigation with
+  | Some reading when navigation_owner_current state reading.cnr_owner ->
+      (match Masc_tui_fetched.current reading.cnr_file with
+       | Some (path, Masc_tui_fetched.Ready content) ->
+         let history = match reading.cnr_owner.cno_action, reading.cnr_owner.cno_history with
+           | Return_to_history, [] -> None
+           | Return_to_history, _ :: rest -> Some rest
+           | Follow_location, ([] | _ :: _) ->
+               push_code_jump state;
+               Some state.code_jump_back in
+         (match history with
+          | None -> false
+          | Some history ->
+           let target = reading.cnr_owner.cno_destination in
+           commit_navigation_location state target history;
            state.code_file <- Masc_tui_fetched.clear state.code_file;
            (match Masc_tui_fetched.start ~equal:String.equal state.code_file ~key:path with
             | Masc_tui_fetched.Already_loading -> false
@@ -257,11 +280,10 @@ let take_ready_return_file state ~input_pending =
                 state.code_target_line <- None;
                 apply_open_file ~preserve_view:false state request (Ok content);
                 restore_position state target;
-                true)
-       | ([] | _ :: _), (None | Some (_, (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
-                        | Masc_tui_fetched.Ready _ | Masc_tui_fetched.Stale _
-                        | Masc_tui_fetched.Failed _))) -> false)
-  | Some _ -> state.code_return <- None; false
+                true))
+       | None | Some (_, (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
+                        | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _)) -> false)
+  | Some _ -> state.code_navigation <- None; false
   | None -> false
 
 let take_ready_found_file (state : state) ~input_pending =
@@ -314,6 +336,7 @@ let apply_blame (state : state) request result =
 ;;
 
 let start_lsp_question ?line (state : state) ~question ~symbol =
+  state.code_navigation <- None;
   match Masc_tui_fetched.current_request state.code_file with
   | None -> None
   | Some file ->
@@ -360,10 +383,6 @@ let apply_lsp_answer (state : state) request result =
    | Ok (Masc.Tui_decode.Lsp_locations (location :: _)) ->
        let open Masc.Tui_decode in
        if location.ll_inside then begin
-         (* Jump there: same file just moves the cursor, another file
-            opens with the line as its target. Either way the place the
-            jump left from goes on the back stack first. *)
-         push_code_jump state;
          state.code_lsp_note <-
            Some
              (Printf.sprintf "%s: %s:%d" symbol location.ll_path
@@ -371,6 +390,7 @@ let apply_lsp_answer (state : state) request result =
          match Masc_tui_fetched.current state.code_file with
          | Some (open_path, Masc_tui_fetched.Ready rows)
            when String.equal open_path location.ll_path ->
+             push_code_jump state;
              let cursor =
                max 0
                  (min (location.ll_line - 1) (Array.length rows - 1))
@@ -388,8 +408,17 @@ let apply_lsp_answer (state : state) request result =
                | Masc_tui_fetched.Ready _ | Masc_tui_fetched.Stale _
                | Masc_tui_fetched.Failed _ ) )
          | None ->
-             state.code_target_line <- Some location.ll_line;
-             Load_file location.ll_path
+             let parent = Filename.dirname location.ll_path in
+             let target = { cj_scope = state.code_scope;
+               cj_dir = (if String.equal parent "." then "" else parent);
+               cj_file = Some location.ll_path;
+               cj_cursor = max 0 (location.ll_line - 1);
+               cj_scroll = max 0 (location.ll_line - 1);
+               cj_hscroll = 0; cj_tree_cursor = 0; cj_focus = Right_pane } in
+             (match start_navigation state ~action:Follow_location
+                  ~target ~path:location.ll_path with
+              | Some (owner, request) -> Read_location_file (owner, request)
+              | None -> No_followup)
        end
        else begin
          (* Outside the workspace (stdlib, a package): say where rather

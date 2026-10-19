@@ -1,21 +1,25 @@
 (** Applies Code surface replies. These functions perform no terminal or
     network IO; the caller executes layout and file-read followups. *)
 
-type followup = No_followup | Reveal_cursor | Load_file of string
+type followup =
+  | No_followup
+  | Reveal_cursor
+  | Read_location_file of Masc_tui_types.code_navigation_owner * string Masc_tui_fetched.request
 
 val push_code_jump : Masc_tui_types.state -> unit
 type return_followup =
   | No_return
   | Return_committed
-  | Read_return_file of Masc_tui_types.code_return_owner * string Masc_tui_fetched.request
+  | Read_navigation_file of Masc_tui_types.code_navigation_owner * string Masc_tui_fetched.request
 
 val start_return : Masc_tui_types.state -> return_followup
 (** Keep history and the current reading until the destination is available.
     Repeated requests share the pending return. A readable current destination
     or a tree-only destination commits immediately. *)
-val take_ready_return_file : Masc_tui_types.state -> input_pending:bool -> bool
-(** Commit an owned success after queued input has had priority. Failure,
-    cancellation and superseded owners leave the history entry available. *)
+val take_ready_navigation_file : Masc_tui_types.state -> input_pending:bool -> bool
+(** Commit an owned return or different-file LSP location after queued input.
+    Return consumes an entry; a location records the source only on success.
+    Failure, cancellation and superseded owners preserve the source/history. *)
 val apply_entries : Masc_tui_types.state ->
   (Masc_tui_types.code_workspace_scope * string) Masc_tui_fetched.request ->
   (Masc.Tui_decode.workspace_tree_node list, string) result -> unit

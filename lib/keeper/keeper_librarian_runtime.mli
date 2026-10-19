@@ -153,6 +153,8 @@ val infer_working_state
 type memory_step = private
   { run_id : string
   ; source_input : Keeper_librarian.input
+  ; prompt_variables : (string * string) list
+  ; rendered_prompt : string
   ; absorb_gate : Keeper_librarian_absorb_gate.run_result
   ; new_claims : Keeper_memory_os_types.fact list
   ; dropped : Keeper_memory_os_types.dropped_statement list
@@ -162,7 +164,8 @@ type memory_step = private
   }
 (** A parsed Memory decision after the normal absorption/copy gate. Original
     fact fields, retirement reasons and exact revision/absorption identities
-    are retained. This is not a stored snapshot or a consumption receipt.
+    are retained. The original rendered base prompt and variables preserve the
+    host context actually used, without re-rendering later under changed config. This is not a stored snapshot or a consumption receipt.
     It must be composed against its original current facts before it can
     become the current input of another step; a working-state summary is
     never substituted for Memory evidence. *)

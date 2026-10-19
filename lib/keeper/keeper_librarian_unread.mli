@@ -20,6 +20,12 @@ type t = private
       (** Nonempty canonical set of actual named provider refusals. *)
   }
 
+val message_digest : Agent_core.Types.message -> string
+val source_to_json : source -> Yojson.Safe.t
+val source_of_json : Yojson.Safe.t -> (source, string) result
+(** The shared exact source identity for processed messages and unread holes.
+    Decoding validates coordinates and digest without inventing a refusal. *)
+
 val for_atom
   : trace_id:string -> history_start_boundary_line:int -> atom:int
   -> message_in_atom:int -> messages:Agent_core.Types.message list

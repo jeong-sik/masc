@@ -1323,6 +1323,58 @@ let test_ordered_memory_revision_chain () =
    | _ -> fail "expected two retained decision stages");
   check_stored_plan_steps ~keepers_dir ~keeper_id result
 
+let test_gated_runtime_program_binding () =
+  with_memory_plan_fixture (Some [current_a;current_b])
+  @@ fun ~keepers_dir ~keeper_id ~snapshot:_ ~source ~plan ~infer ->
+  let module Program = Masc.Keeper_memory_os_program in
+  let module Adapter = Masc.Keeper_librarian_memory_program in
+  let module Source = Masc.Keeper_librarian_unread in
+  let paths = inference_store_paths ~keepers_dir ~keeper_id in
+  let before = List.map Fs_compat.load_file_opt paths in
+  let first = infer source inference_answer in
+  let staged = Memory_plan.append plan first |> require_plan in
+  let later_input = {source with current=Memory_plan.current staged;
+    messages=[Agent_core.Types.make_message ~role:Agent_core.Types.User
+      [Agent_core.Types.Text "A later observation revises the intermediate conclusion."]]} in
+  let final_claim = `Assoc ["claim", `String "Final program conclusion.";
+    "category", `String "fact"; "supersedes", `String "m1"] in
+  let second = infer later_input
+    (memory_answer ~new_claims:[final_claim] ~dropped:[retire_wire "m1"] "final program state") in
+  let source_of_step index (step : Runtime.memory_step) =
+    match step.source_input.messages with
+    | [message] -> Source.Official_turn {turn_ref=source.turn_ref;boundary_line=1;
+        message_in_turn=index;message_sha256=Source.message_digest message}
+    | [] | _ :: _ :: _ -> fail "fixture requires one exact source per decision" in
+  let original = source_of_step 0 first and later = source_of_step 1 second in
+  let program = Adapter.create ~transaction_id:"gated-runtime-program"
+    ~keeper_id:source.keeper_id ~turn_ref:source.turn_ref ~sources:[original;later] ~unread:[]
+    ~initial_current:(Some [current_a;current_b]) ~steps:[([original],first);([later],second)]
+    |> require_memory in
+  let decoded = Program.of_json (Program.to_json program) |> require_memory in
+  let execution = Program.replay decoded ~current:[current_a;current_b] |> require_memory in
+  check_memory_payloads "actual gated Runtime successors survive both codec and replay"
+    second.new_claims execution.final_facts;
+  (match decoded.stages with
+   | [one;two] ->
+     let field key json = match json with
+       | `Assoc fields -> List.assoc key fields
+       | _ -> fail "expected preserved input evidence" in
+     check bool "original rendered base prompt stays with the first inference" true
+       (field "rendered_base_prompt" one.decision.input_evidence = `String first.rendered_prompt);
+     check bool "host context variables stay original rather than being rerendered" true
+       (field "prompt_variables" one.decision.input_evidence
+         = `Assoc (List.map (fun (key,value) -> key,`String value) first.prompt_variables));
+     check bool "actual gate evidence and final working state survive" true
+       (two.decision.gate_evidence = Masc.Keeper_librarian_absorb_gate.run_result_to_yojson second.absorb_gate
+         && two.decision.working_state = second.working_state)
+   | [] | [_] | _ :: _ :: _ :: _ -> fail "expected two actual Runtime decisions");
+  (match Adapter.decision ~sources:[later] first with
+   | Error _ -> () | Ok _ -> fail "adapter accepted another message's source hash");
+  (match Adapter.decision ~sources:[original;later] first with
+   | Error _ -> () | Ok _ -> fail "adapter accepted an unjudged extra source");
+  check bool "inference, adapter, codec and replay publish no Memory or receipt" true
+    (before = List.map Fs_compat.load_file_opt paths)
+
 let test_ordered_memory_support_is_maintained_between_steps () =
   let premise = fact ~claim:"P supports the deployment conclusion." in
   let alternate = fact ~claim:"Q independently supports the deployment conclusion." in
@@ -1501,7 +1553,9 @@ let () =
   run
     "keeper_librarian_cli_lane"
     [ ( "cli lane slots"
-      , [ test_case "ordered Memory revisions preserve original decisions and store parity" `Quick
+      , [ test_case "gated Runtime decisions bind exact sources through program replay" `Quick
+            test_gated_runtime_program_binding
+        ; test_case "ordered Memory revisions preserve original decisions and store parity" `Quick
             test_ordered_memory_revision_chain
         ; test_case "ordered Memory support closure prevents later resurrection" `Quick
             test_ordered_memory_support_is_maintained_between_steps

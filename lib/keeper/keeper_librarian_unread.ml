@@ -23,9 +23,7 @@ let message_digest message =
   Agent_core.Checkpoint.message_to_json message |> Yojson.Safe.to_string
   |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex
 
-let validate {source;reasons} =
-  let* () = if reasons <> [] && reasons = Refusal.union reasons [] then Ok ()
-    else Error "unread message requires a nonempty canonical named refusal set" in
+let validate_source source =
   let valid_digest = String_util.is_lowercase_sha256_hex in
   match source with
   | Atom {trace_id;history_start_boundary_line;atom;message_in_atom;message_sha256} ->
@@ -37,6 +35,11 @@ let validate {source;reasons} =
        || Ids.Turn_ref.absolute_turn turn_ref < 1 || boundary_line < 1
        || message_in_turn < 0 || not (valid_digest message_sha256)
     then Error "invalid unread official-turn message identity" else Ok ()
+
+let validate {source;reasons} =
+  let* () = if reasons <> [] && reasons = Refusal.union reasons [] then Ok ()
+    else Error "unread message requires a nonempty canonical named refusal set" in
+  validate_source source
 
 module Atom_positions = Map.Make (struct type t = int * int let compare = compare end)
 
@@ -67,8 +70,7 @@ let for_official_turn ~turn_ref ~boundary_line ~message_in_turn ~messages ~reaso
       message_sha256=message_digest message};reasons=Refusal.union reasons []} in
     let* () = validate value in Ok value
 
-let to_json {source;reasons} =
-  let source = match source with
+let source_to_json = function
     | Atom {trace_id;history_start_boundary_line;atom;message_in_atom;message_sha256} ->
       `Assoc ["kind", `String "atom"; "trace_id", `String trace_id;
         "history_start_boundary_line", `Int history_start_boundary_line;
@@ -77,8 +79,10 @@ let to_json {source;reasons} =
     | Official_turn {turn_ref;boundary_line;message_in_turn;message_sha256} ->
       `Assoc ["kind", `String "official_turn"; "turn_ref", Ids.Turn_ref.to_yojson turn_ref;
         "boundary_line", `Int boundary_line; "message_in_turn", `Int message_in_turn;
-        "message_sha256", `String message_sha256] in
-  `Assoc ["source", source;
+        "message_sha256", `String message_sha256]
+
+let to_json {source;reasons} =
+  `Assoc ["source", source_to_json source;
     "reasons", `List (List.map (fun cause -> `String (Refusal.to_string cause)) reasons)]
 
 let exact keys fields =
@@ -89,7 +93,7 @@ let string key fields = match List.assoc_opt key fields with
 let integer key fields = match List.assoc_opt key fields with
   | Some (`Int value) -> Ok value | _ -> Error ("unread message field is not an integer: " ^ key)
 
-let source_of_json = function
+let decode_source = function
   | `Assoc fields ->
     let* kind = string "kind" fields in
     (match kind with
@@ -111,6 +115,11 @@ let source_of_json = function
        Ok (Official_turn {turn_ref;boundary_line;message_in_turn;message_sha256})
      | _ -> Error "unknown unread source kind")
   | _ -> Error "unread source must be an object"
+
+let source_of_json json =
+  let* source = decode_source json in
+  let* () = validate_source source in
+  Ok source
 
 let of_json = function
   | `Assoc fields ->

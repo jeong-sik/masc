@@ -24,8 +24,9 @@ Attachment copies all four original files, preserving their bytes:
 | `audio-blocks.jsonl` | Audio host times, device sample times, frame offsets and peaks |
 | `midi.ump.jsonl` | Original UMP words, source identities, timestamps and timestamp origins |
 
-The project stores a typed capture asset with four SHA-256 identities and the
-complete decoded manifest. Audio uses `assets/<sha256>.wav`; the other parts use
+The project stores a typed capture asset with four SHA-256 identities, the
+complete decoded manifest and the minimum/maximum original MIDI host timestamps.
+Audio uses `assets/<sha256>.wav`; the other parts use
 `assets/<sha256>.capture`. Copies have independent inodes from the input files
 and are made read-only. Original recording files are never changed. Identical
 content may share one project-owned file. Failed or cancelled attachment removes
@@ -52,11 +53,48 @@ finishes before the viewer borrows terminal input. Returning restores the parent
 input owner. Root cancellation aborts the viewer and waits for its owned work
 before deleting the snapshot and restoring the terminal.
 
+## Place and edit a paired region
+
+`:place asset-1 4` places a complete captured take at quarter-note beat 4, on a
+capture lane that retains WAV and MIDI together. `:place` places the selected
+capture; Enter still opens its original source viewer. Use seconds to choose a
+source window:
+
+```text
+:capture-region asset-1 4 0.5 2 3
+:trim-time 0.75 1.5
+:repeat 4
+:duplicate 16
+```
+
+The first command places the two seconds starting at source second 0.5 at beat 4,
+repeated three times. Move, duplicate, remove, rename, mute/solo, undo/redo and
+Save As work as for other regions. Repeats remain one compressed record. Project
+tempo moves beat positions without stretching source audio or MIDI.
+
+Source second zero is the earliest of requested capture start, first audio and
+first MIDI, including MIDI pre-roll. Captured `offset`/`extent` persist as decimal
+integer host-tick strings; `:region ASSET BEAT OFFSET EXTENT [REPEAT]` and `:trim`
+also accept these exact native units. Decimal seconds are rounded inward to
+host ticks. Original timestamps and frame counts never pass through a floating
+point clock origin. This retains the two time representations described by
+[Apple's AVAudioTime documentation](https://developer.apple.com/documentation/avfaudio/avaudiotime).
+
+Regions select MIDI timestamps in `[start, end)`. A complete-source bound includes
+one host tick after the final MIDI packet and rounds the WAV end upward, so the
+final event and all complete audio frames fit. Audio intersects the chosen
+interval by rounding its first frame upward and its end frame downward; only
+whole frames fully inside the cut are admitted. A subframe interval can contain
+MIDI with no audio frames. Audio start offsets retain the original first-audio
+delay. First/last MIDI times are verified against raw source packets during
+import, reopen, Save As and source-view preparation.
+
 ## Remaining transport integration
 
-A captured asset is currently a source-library attachment. Enter opens its take
-viewer; `:place` explicitly refuses it. WAV+UMP region placement, MIDI 2.0 region
-state reconstruction, monitoring, and overdubbing an
-existing arrangement are subsequent work. Attaching a capture does not convert
-its UMP to SMF or silently play only its WAV as an arrangement region. Existing
-WAV/SMF region transports continue through their own explicit routes.
+Captured-region native playback is the next transport layer. An audible capture
+region currently returns a specific playback diagnostic, including through
+direct preparation/worker calls; it is never filtered out of a mixed plan.
+Mute the capture lane to audition other regions, or `:open-take` for its existing
+paired full-source playback and supported pause/seek. Monitoring and overdubbing
+against the arrangement remain subsequent work. Original WAV/UMP bytes and the
+existing WAV/SMF transport routes are retained.

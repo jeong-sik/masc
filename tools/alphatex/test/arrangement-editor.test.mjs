@@ -348,12 +348,32 @@ async function primeCapture(view) {
   assert.equal(job.path,'/music/My  capture')
   const asset={id:'capture-1',name:'Take',kind:'capture',parts:Object.fromEntries(['manifest','audio','audioBlocks','midi'].map((role,index)=>{
     const sha256=String(index+1).repeat(64);return [role,{file:`assets/${sha256}.${role==='audio'?'wav':'capture'}`,sha256}]
-  })),manifest:{schemaVersion:1,state:'recorded',failure:null,audio:'audio.wav',audioBlocks:'audio-blocks.jsonl',midi:'midi.ump.jsonl',
+  })),midiTime:{first:'200',last:'200'},manifest:{schemaVersion:1,state:'recorded',failure:null,audio:'audio.wav',audioBlocks:'audio-blocks.jsonl',midi:'midi.ump.jsonl',
     sampleRate:48000,channels:1,audioFrames:'4800',midiPacketCount:'1',input:{id:'audio',name:'Interface'},midiSources:[{id:'keys',name:'Keys'}],
     clock:{kind:'mach-host-time',numer:1,denom:1,requestedStart:'100',firstAudioHostTime:'200'}}}
   view.worker.emit('message',{id:job.id,ok:true,result:{project:editArrangement(job.project,{kind:'asset-add',asset}),asset:asset.id}});await flush()
   return asset
 }
+test('captured-region commands persist typed bounds and refuse playback until the lane is muted',async()=>{
+  const view=await controller()
+  try {
+    await primeWave(view);await primeCapture(view)
+    view.key('return','',{shift:true});await flush()
+    assert.equal(view.observed.takes.length,0)
+    view.command('trim-time .0000001 .05');view.command('repeat 2000000');view.command('duplicate 8');view.command('undo');view.command('redo')
+    view.command('save');await flush()
+    const project=view.observed.saved.at(-1).project,captured=project.clips.filter(clip=>clip.asset==='capture-1')
+    assert.equal(captured.length,2);assert.deepEqual(captured.map(clip=>[clip.offset,clip.extent,clip.repeat]),[['100','50000000',2000000],['100','50000000',2000000]])
+    assert.equal(project.lanes.find(lane=>lane.id===captured[0].lane).kind,'capture')
+    const before=view.observed.requests.length;view.key('space');await flush()
+    assert.equal(view.observed.requests.length,before,'no preparation or player can omit audible capture data')
+    assert.equal(view.observed.players.length,0)
+    view.command('mute');view.key('space');await flush()
+    const prepare=view.observed.requests.at(-1);assert.equal(prepare.kind,'prepare-wave')
+    assert.equal(prepare.project.lanes.find(lane=>lane.kind==='capture').muted,true)
+    view.worker.emit('message',{id:prepare.id,ok:false,cancelled:true,error:'Cancelled'});await flush()
+  } finally {await closeController(view)}
+})
 test('captured source viewer waits for playback, borrows input and returns ownership before removing its snapshot',async()=>{
   const view=await controller()
   try {

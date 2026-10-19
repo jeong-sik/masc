@@ -1,6 +1,6 @@
-import { isDeepStrictEqual } from 'node:util'
-import { capturePartNames, validateCapturedSource, validateCaptureManifest } from './captured-source.mjs'
+import { capturePartNames, validateCaptureManifest } from './captured-source.mjs'
 import { readCaptureFiles, readCapture } from './session-data.mjs'
+import { capturePaths, captureMatches, inspectCaptureAsset } from './captured-source-files.mjs'
 import { readFile, open, mkdir, mkdtemp, lstat, link, rm, chmod } from 'node:fs/promises'
 import { createReadStream, createWriteStream } from 'node:fs'
 import { Transform } from 'node:stream'
@@ -110,26 +110,6 @@ async function copyCapturePart(input, root, { signal } = {}) {
     return { file, sha256 }
   } finally { await rm(temporary, { recursive: true, force: true }) }
 }
-function capturePaths(root, asset) {
-  return Object.fromEntries(Object.entries(asset.parts).map(([role, part]) => [role, join(root, part.file)]))
-}
-function captureMatches(asset, timeline) {
-  if (!isDeepStrictEqual(asset.manifest, timeline.manifest)
-      || (timeline.audio[0]?.hostTime ?? null) !== asset.manifest.clock.firstAudioHostTime
-      || [...timeline.midi.values()].some(track => !asset.manifest.midiSources.some(source => source.id === track.source))) {
-    throw new Error('Captured source manifest or clock provenance disagrees with its data')
-  }
-}
-async function inspectCaptureAsset(root, asset, { signal } = {}) {
-  validateCapturedSource(asset)
-  if (!(await lstat(join(root, 'assets'))).isDirectory()) throw new Error('Project assets must be a directory, not a symlink')
-  const files = capturePaths(root, asset)
-  for (const [role, file] of Object.entries(files)) {
-    if (!(await lstat(file)).isFile() || await digestFile(file, { signal }) !== asset.parts[role].sha256) throw new Error(`Captured source content changed: ${asset.name}`)
-  }
-  const timeline = await readCaptureFiles(files, { signal }); captureMatches(asset, timeline)
-  signal?.throwIfAborted(); return files
-}
 export async function importArrangementCapture(project, input, { projectPath, name = basename(input), signal } = {}) {
   validateArrangement(project)
   if (typeof projectPath !== 'string' || !projectPath) throw new Error('Choose a project path before importing a captured take')
@@ -141,6 +121,7 @@ export async function importArrangementCapture(project, input, { projectPath, na
   }
   const timeline = await readCaptureFiles(capturePaths(root, { parts }), { signal })
   const asset = { kind: 'capture', id: arrangementID(project.assets, 'asset'), name, parts,
+    midiTime: structuredClone(timeline.midiTime),
     manifest: structuredClone(validateCaptureManifest(timeline.manifest)) }
   captureMatches(asset, timeline); signal?.throwIfAborted()
   return { project: editArrangement(project, { kind: 'asset-add', asset }), asset: asset.id }

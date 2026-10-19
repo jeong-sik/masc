@@ -6,6 +6,7 @@ import midiFiles from 'jzz-midi-smf'
 import { validateProject, sequenceEvents, PPQ } from './sequencer-project.mjs'
 import { validateArrangement } from './arrangement.mjs'
 import { validateMidiSource, exportMidiSource } from './midi-source.mjs'
+import { restoreArrangementCaptureTimes } from './captured-source-files.mjs'
 midiFiles(JZZ)
 const hash = data => createHash('sha256').update(data).digest('hex')
 const validateDocument = document => {
@@ -17,7 +18,8 @@ const validateDocument = document => {
 
 export async function loadProject(path, { signal } = {}) {
   const data = await readFile(path, { signal })
-  return { project: validateDocument(JSON.parse(data)), revision: hash(data), path: resolve(path) }
+  const project = await restoreArrangementCaptureTimes(JSON.parse(data), dirname(resolve(path)), { signal })
+  return { project: validateDocument(project), revision: hash(data), path: resolve(path) }
 }
 async function syncDirectory(path) {
   const directory = await open(path, 'r')

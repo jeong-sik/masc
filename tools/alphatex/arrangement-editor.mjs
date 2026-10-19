@@ -1,5 +1,6 @@
 import { newArrangement, validateArrangement, editArrangement, arrangementSchedule } from './arrangement.mjs'
 import { midiSourcePattern } from './midi-source.mjs'
+import { captureRange, captureRegionFromSeconds } from './capture-time.mjs'
 import { beats, PPQ } from './sequencer-project.mjs'
 
 function reconcile(editor, project) {
@@ -37,11 +38,11 @@ function position(value) {
   if (!Number.isSafeInteger(value) || value < 0) throw new Error('Invalid arrangement cursor position')
   return value
 }
-function place(editor, assetID, tick, { offset = 0, extent, repeat = 1, pattern } = {}) {
+function place(editor, assetID, tick, { offset, extent, repeat = 1, pattern } = {}) {
   const asset = editor.project.assets.find(asset => asset.id === assetID)
   if (!asset) throw new Error('Select an imported asset')
-  if (asset.kind === 'capture') throw new Error('Captured takes retain WAV and UMP together; use :open-take to inspect the source')
-  extent ??= asset.kind === 'wave' ? asset.metadata.frames : midiSourcePattern(asset.source, { pattern }).ticks
+  offset ??= asset.kind === 'capture' ? '0' : 0
+  extent ??= asset.kind === 'capture' ? captureRange(asset).extent : asset.kind === 'wave' ? asset.metadata.frames : midiSourcePattern(asset.source, { pattern }).ticks
   let project = editor.project, lane = project.lanes.find(lane => lane.id === editor.lane && lane.kind === asset.kind)
   if (!lane) {
     project = editArrangement(project, { kind: 'lane-add', sourceKind: asset.kind, name: asset.name })
@@ -107,6 +108,16 @@ export function arrangementCommand(editor, line) {
     if (!Number.isSafeInteger(number) || number < 1) throw new Error('Pattern number starts at 1')
     return number - 1
   }
+  const sourceRange = (assetID, offset, extent) => {
+    const asset = editor.project.assets.find(asset => asset.id === assetID)
+    if (!asset) throw new Error('Select an imported asset')
+    return asset.kind === 'capture' ? { offset, extent } : { offset: Number(offset), extent: Number(extent) }
+  }
+  const timeRange = (assetID, start, duration) => {
+    const asset = editor.project.assets.find(asset => asset.id === assetID && asset.kind === 'capture')
+    if (!asset) throw new Error('Choose a captured source for a time-based trim')
+    return captureRegionFromSeconds(asset, start, duration)
+  }
   let value
   switch (command) {
     case 'import-wave': case 'import-midi': case 'import-take': case 'save-as':
@@ -148,9 +159,12 @@ export function arrangementCommand(editor, line) {
       return { editor: { ...editor, step } }
     }
     case 'place': count(2, 3); return { editor: place(editor, args[0], beats(args[1]), { pattern: pattern(args[2]) }) }
+    case 'capture-region': count(4, 5); return { editor: place(editor, args[0], beats(args[1]), {
+      ...timeRange(args[0], args[2], args[3]), repeat: args[4] === undefined ? 1 : Number(args[4]) }) }
     case 'region': count(4, 6); return { editor: place(editor, args[0], beats(args[1]), {
-      offset: Number(args[2]), extent: Number(args[3]), repeat: args[4] === undefined ? 1 : Number(args[4]), pattern: pattern(args[5]) }) }
-    case 'trim': count(2); value = { kind: 'region-change', id: regionID(editor), offset: Number(args[0]), extent: Number(args[1]) }; break
+      ...sourceRange(args[0], args[2], args[3]), repeat: args[4] === undefined ? 1 : Number(args[4]), pattern: pattern(args[5]) }) }
+    case 'trim': count(2); value = { kind: 'region-change', id: regionID(editor), ...sourceRange(selectedRegion(editor)?.asset, args[0], args[1]) }; break
+    case 'trim-time': count(2); value = { kind: 'region-change', id: regionID(editor), ...timeRange(selectedRegion(editor)?.asset, args[0], args[1]) }; break
     case 'repeat': count(1); value = { kind: 'region-change', id: regionID(editor), repeat: Number(args[0]) }; break
     case 'move': count(1); value = { kind: 'region-change', id: regionID(editor), position: beats(args[0]) }; break
     case 'region-lane': count(1); value = { kind: 'region-change', id: regionID(editor), lane: ordinalLane(args[0]) }; break

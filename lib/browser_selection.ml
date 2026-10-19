@@ -103,7 +103,9 @@ let choose ~verb ~bound ~snapshot preference =
       if info.transport=transport && Lane.live_transport_serves info.transport capability
       then Some (Lane.Live_route (Some info.client_id)) else None) snapshot.live_clients in
   match preference with
-  | Exact route -> Ok {route;reason=Explicit_browser}
+  | Exact (Lane.Live_route None) when bound -> Error Binding_required
+  | Exact ((Lane.Live_route (Some _ | None) | Lane.Automation_route | Lane.Stagehand_route) as route) ->
+      Ok {route;reason=Explicit_browser}
   | Automatic when bound -> Error Binding_required
   | Automatic -> match verb with
     | Lane.Session_open _ | Lane.Session_status -> (match owned with [] -> configured () | _::_ -> one Existing_work_session owned)
@@ -117,6 +119,8 @@ let choose ~verb ~bound ~snapshot preference =
         | _::_ -> one Existing_work_session owned
         | [] -> one Available_connected_browser (connected Lane.Web_extension)
 let resolve ~verb ~bound preference = match preference with
-  | Exact route -> Ok {route;reason=Explicit_browser}
+  | Exact (Lane.Live_route None) when bound -> Error Binding_required
+  | Exact ((Lane.Live_route (Some _ | None) | Lane.Automation_route | Lane.Stagehand_route) as route) ->
+      Ok {route;reason=Explicit_browser}
   | Automatic when bound -> Error Binding_required
   | Automatic -> choose ~verb ~bound ~snapshot:(snapshot ()) preference

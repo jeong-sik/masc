@@ -36,6 +36,18 @@ let test_explicit_binding () =
     (Selection.choose ~verb:Lane.Tabs_list ~bound:true ~snapshot:empty (Selection.Exact explicit));
   selected {route=explicit;reason=Selection.Explicit_browser}
     (Selection.resolve ~verb:Lane.Tabs_list ~bound:true (Selection.Exact explicit));
+  let unnamed=Selection.Exact (Lane.Live_route None) in
+  List.iter (fun info ->
+    check bool "an unbound live lane cannot adopt a different client's observed tab" true
+      (Selection.choose ~verb:(Lane.Page_read {tab_id=Some 0;max_chars=None}) ~bound:true
+        ~snapshot:{empty with live_clients=[info]} unnamed=Error Selection.Binding_required))
+    [client "1" Lane.Webdriver_bidi;client "2" Lane.Webdriver_bidi];
+  check bool "bound live lane requires client identity before runtime observation" true
+    (Selection.resolve ~verb:Lane.Tabs_list ~bound:true unnamed=Error Selection.Binding_required);
+  selected {route=Lane.Live_route None;reason=Selection.Explicit_browser}
+    (Selection.choose ~verb:Lane.Tabs_list ~bound:false ~snapshot:empty unnamed);
+  selected {route=Lane.Live_route None;reason=Selection.Explicit_browser}
+    (Selection.resolve ~verb:Lane.Tabs_list ~bound:false unnamed);
   check bool "bound automatic selection refuses before observing runtime" true
     (Selection.resolve ~verb:Lane.Tabs_list ~bound:true Selection.Automatic=Error Selection.Binding_required)
 let test_work_lifecycle () =

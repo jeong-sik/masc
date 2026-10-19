@@ -69,11 +69,50 @@ let test_every_gap_is_named () =
     refused "auth off, token optional, no base URL"
       "not_ready auth_disabled,token_not_required,no_public_base_url"
       (issue ~public_base_url:None base_path "minsu");
+    refused "auth off, token optional, non-http base URL"
+      "not_ready auth_disabled,token_not_required,public_base_url_not_http"
+      (issue ~public_base_url:(Some "masc.example.com") base_path "minsu");
     set_auth base_path ~enabled:true ~require_token:false;
     refused "token optional" "not_ready token_not_required" (issue base_path "minsu");
     ready base_path;
     refused "no base URL" "not_ready no_public_base_url" (issue ~public_base_url:None base_path "minsu");
+    List.iter
+      (fun (why, bad) ->
+        refused why "not_ready public_base_url_not_http"
+          (issue ~public_base_url:(Some bad) base_path "minsu"))
+      [ ("scheme missing", "masc.example.com")
+      ; ("non-http scheme", "ftp://masc.example.com")
+      ; ("uppercase scheme", "HTTP://masc.example.com")
+      ; ("host missing", "http://")
+      ; ("empty host with path", "http:///play")
+      ; ("path present", "https://masc.example.com/subpath")
+      ; ("trailing slash", "https://masc.example.com/")
+      ; ("query present", "https://masc.example.com?x=1")
+      ; ("fragment present", "https://masc.example.com#frag")
+      ; ("userinfo present", "https://user@masc.example.com")
+      ; ("out-of-range IPv4 octets", "http://256.256.256.256")
+      ; ("too many IPv4 parts", "http://1.2.3.4.5")
+      ; ("numeric TLD needs IPv4", "http://example.42")
+      ; ("invalid octal IPv4", "http://09")
+      ; ("overflowing IPv4", "http://4294967296")
+      ; ("bad port", "https://masc.example.com:99999")
+      ; ("blank in base URL", "https://masc.example.com /play")
+      ];
     check (list string) "no refusal wrote a credential" [] (players base_path))
+
+let test_valid_hosts_issue_credentials () =
+  List.iter (fun public_base ->
+    with_workspace (fun base_path ->
+      ready base_path;
+      match issue ~public_base_url:(Some public_base) base_path "minsu" with
+      | Error err -> failf "%s: %s" public_base (issue_error_to_string err)
+      | Ok issued ->
+        check bool "issued credential resolves" true
+          (Result.is_ok (Auth.find_credential_by_token base_path
+             ~token:(token_of_link issued.I.link)))))
+    [ "http://127.0.0.1"; "http://[::1]:8935"; "https://masc.example.com"
+    ; "http://127.1"; "http://0177.0.0.1"; "http://0x7f000001"
+    ; "http://127.0.0.1." ]
 
 let test_issue_mints_an_expiring_player () =
   with_workspace (fun base_path ->
@@ -210,6 +249,7 @@ let () =
     [ ( "invite"
       , [ test_case "names are lowercase letters and digits" `Quick test_name_grammar
         ; test_case "every missing setting is named" `Quick test_every_gap_is_named
+        ; test_case "valid browser hosts issue credentials" `Quick test_valid_hosts_issue_credentials
         ; test_case "an invite is an expiring player credential" `Quick
             test_issue_mints_an_expiring_player
         ; test_case "a taken name, an unlisted fleet or a bad window is refused" `Quick

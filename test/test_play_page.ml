@@ -268,6 +268,14 @@ let test_the_guide_names_this_servers_doors () =
         check bool "the refusal explains why" true
           (member "error" (Yojson.Safe.from_string (snd (split_response response)))
            = Some (`String "MASC_HTTP_BASE_URL is not set, so there is no address to join at")));
+      Masc_test_deps.with_process_env "MASC_HTTP_BASE_URL" (Some "masc.example.com") (fun () ->
+        let response = get () in
+        check int "schemeless public base URL is not ready" 409 (status_of response);
+        let json = Yojson.Safe.from_string (snd (split_response response)) in
+        check bool "named as not ready" true (member "code" json = Some (`String "not_ready"));
+        check bool "the refusal explains that an http(s) base URL is needed" true
+          (member "error" json
+           = Some (`String "MASC_HTTP_BASE_URL is not an http(s) base URL, so there is no address to join at")));
       Masc_test_deps.with_process_env "MASC_HTTP_BASE_URL" (Some public_base) (fun () ->
         let response = get () in
         check int "the guide needs no bearer" 200 (status_of response);

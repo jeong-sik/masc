@@ -154,6 +154,18 @@ let test_invite_routes () =
         let foreign_issue = {|{"name":"minsu","hours":2,"expected_workspace":{"base_path":"/foreign","masc_root":"/foreign/.masc"}}|} in
         check int "foreign workspace cannot issue credential" 409
           (status_of (call ~token:operator "POST" invites ~body:foreign_issue));
+        List.iter (fun invalid_base ->
+        Masc_test_deps.with_process_env "MASC_HTTP_BASE_URL" (Some invalid_base) (fun () ->
+          let unready = call ~token:operator "POST" invites ~body:issue_body in
+          check int "invalid MASC_HTTP_BASE_URL is not ready" 409 (status_of unready);
+          let unready_json = body_of unready in
+          check string "not_ready code" "not_ready" (string_member "code" unready_json);
+          check bool "missing names public_base_url_not_http" true
+            (member "missing" unready_json = Some (`List [ `String "public_base_url_not_http" ]));
+          check (option string) "no credential was created on refusal" None
+            (Option.map (fun (c : Masc_domain.agent_credential) -> c.agent_name)
+               (Auth.load_credential base_path "minsu"))))
+          [ "masc.example.com"; "http://256.256.256.256" ];
         let issued = call ~token:operator "POST" invites ~body:issue_body in
         check int "the operator issues" 201 (status_of issued);
         let issued = body_of issued in

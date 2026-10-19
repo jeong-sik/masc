@@ -976,8 +976,11 @@ let test_first_loss_retains_unproven_effects mode () =
           |> Server_dashboard_task_detail.response with
         | `OK,json -> Task_read.detail ~task_id:source.ats_task_id json
         | _ -> Error "source Task producer unavailable" in
-      let read_history task_id = Masc.Task.Tool.task_history_events_json config ~task_id ~limit:50
-        |> Task_read.history ~task_id:source.ats_task_id in
+      let read_history ?task_id (request : Task_read.history_request) =
+        let task_id=Option.value task_id ~default:request.hr_task_id in
+        let status,json=Server_dashboard_task_history_page.read ~config ~task_id:(Some task_id)
+          ~limit:(Some (string_of_int request.hr_limit)) ~cursor:request.hr_cursor in
+        if status=`OK then Task_read.history_page ~request json else Error "original history page refused" in
       (* Continue the same original resource history through the production
          dated-page protocol. Later appends and another Task cannot replace
          the captured prefix; replacement refuses cursor advancement. *)
@@ -1058,22 +1061,49 @@ let test_first_loss_retains_unproven_effects mode () =
         | _ -> fail "replacement event store became an exhausted original history");
       ui.tools_async_task_source <- Some source;
       let old_body=Ui.begin_tools_async_task_body ui ~force:false |> Option.get in
-      let old_history=Ui.begin_tools_async_task_history ui ~force:false |> Option.get in
+      let old_history=Ui.begin_tools_async_task_history ui ~force:false ~limit:1 |> Option.get in
       Ui.suspend_workspace_readings ui;
       let current_body=Ui.begin_tools_async_task_body ui ~force:false |> Option.get in
-      let current_history=Ui.begin_tools_async_task_history ui ~force:false |> Option.get in
+      let current_history=Ui.begin_tools_async_task_history ui ~force:true ~limit:1 |> Option.get in
       Ui.complete_tools_async_task_body ui old_body (read_body source.ats_task_id);
-      Ui.complete_tools_async_task_history ui old_history (read_history source.ats_task_id);
+      Ui.complete_tools_async_task_history ui old_history (read_history old_history.thr_page);
       check bool "retired Task reads cannot settle replacement reads" true
         (Masc_tui_fetched.in_flight ui.tools_async_task_body && Masc_tui_fetched.in_flight ui.tools_async_task_history);
-      Ui.complete_tools_async_task_history ui current_history (read_history source.ats_task_id);
+      Ui.complete_tools_async_task_history ui current_history (read_history current_history.thr_page);
       check bool "history is observed while the body remains pending" true
         (Masc_tui_fetched.in_flight ui.tools_async_task_body &&
          match Masc_tui_fetched.view_for ~equal:Ui.equal_tools_async_task_source ui.tools_async_task_history ~key:source with
-         | Ready events -> List.exists (fun (event : Masc.Tui_decode.task_history_event) ->
-             event.th_actor=Some keeper && event.th_from_status=Some "todo"
-             && event.th_to_status=Some "claimed") events
+         | Ready history -> List.exists (fun (event : Masc.Tui_decode.task_history_event) ->
+             event.th_actor=Some keeper && event.th_label="newer-after-capture") history.history_events
          | Absent | Loading | Failed _ | Stale _ -> false);
+      let observed ()=Masc_tui_fetched.view_for ~equal:Ui.equal_tools_async_task_source ui.tools_async_task_history ~key:source in
+      let prefix=Masc_tui_fetched.value (observed ()) |> Option.get in
+      let failed=Ui.begin_tools_async_task_history ~older:true ui ~force:false ~limit:1 |> Option.get in
+      Ui.complete_tools_async_task_history ui failed (Error "older original store unavailable");
+      check bool "failed older read retains exact observed prefix and retry cursor" true
+        (match observed () with Stale (retained,_) -> retained==prefix | _ -> false);
+      check bool "cadence cannot replace the failed original continuation" true
+        (Ui.begin_tools_async_task_history ui ~force:false ~limit:1=None);
+      let retry=Ui.begin_tools_async_task_history ~older:true ui ~force:false ~limit:1 |> Option.get in
+      check bool "explicit retry captures the same older boundary" true
+        (retry.thr_page.hr_cursor=failed.thr_page.hr_cursor);
+      Ui.complete_tools_async_task_history ui failed (read_history failed.thr_page);
+      check bool "late success cannot settle the replacement continuation" true
+        (Masc_tui_fetched.is_current ~equal:Ui.equal_tools_async_task_source ui.tools_async_task_history retry.thr_ticket);
+      Ui.complete_tools_async_task_history ui retry (read_history retry.thr_page);
+      let rec read_earlier ()=match Ui.begin_tools_async_task_history ~older:true ui ~force:false ~limit:1 with
+        | None -> ()
+        | Some request ->
+          let result=read_history request.thr_page in
+          (match result with Ok _ -> () | Error detail -> fail detail);
+          Ui.complete_tools_async_task_history ui request result;read_earlier () in
+      read_earlier ();
+      let retained=Masc_tui_fetched.value (observed ()) |> Option.get in
+      check bool "TUI continuation retains original transition evidence with its prefix" true
+        (retained.history_next_cursor=None &&
+         List.exists (fun (event : Masc.Tui_decode.task_history_event) ->
+           event.th_actor=Some keeper && event.th_from_status=Some "todo"
+           && event.th_to_status=Some "claimed") retained.history_events);
       Ui.complete_tools_async_task_body ui current_body (read_body source.ats_task_id);
       let module Document = Masc_tui_task_document in
       let module Observation = Masc_tui_task_document_observation in
@@ -1152,7 +1182,7 @@ let test_first_loss_retains_unproven_effects mode () =
          | Stale (detail,_) -> detail.task.id=source.ats_task_id && detail.task.description=description
          | _ -> false);
       check bool "current Task cannot replace original Task detail" true (Result.is_error (read_body "different-current-task"));
-      check bool "current Task events cannot replace original history" true (Result.is_error (read_history "different-current-task"));
+      check bool "current Task events cannot replace original history" true (Result.is_error (read_history ~task_id:"different-current-task" current_history.thr_page));
       let late=Ui.begin_tools_async_task_body ui ~force:true |> Option.get in
       Ui.withdraw_tools_async_details ui;
       ui.tools_async_selection <- Some target;ui.tools_async_detail_open <- true;ui.tools_async_task_source <- Some source;

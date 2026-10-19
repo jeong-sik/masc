@@ -5022,6 +5022,27 @@ type tools_async_task_request =
   { atr_ticket : tools_async_task_source Masc_tui_fetched.request
   ; atr_reading : unit ref; atr_job : unit ref }
 
+type 'key task_history_request =
+  { thr_ticket : 'key Masc_tui_fetched.request
+  ; thr_reading : unit ref; thr_job : unit ref
+  ; thr_page : Masc.Tui_decode_task_inspection.history_request }
+
+(* A continuation captures the immutable prefix before it enters the worker.
+   Refresh replaces that prefix; an older read can only extend a known cursor. *)
+let begin_history_page ~task_id ~limit ~older ~equal ~key ~authority fetched =
+  let module History = Masc.Tui_decode_task_inspection in
+  if older && Masc_tui_fetched.in_flight fetched then None else
+  let page = if older then
+      Option.bind (Masc_tui_fetched.value (Masc_tui_fetched.view_for ~equal fetched ~key))
+        (History.history_earlier ~task_id ~limit)
+    else Some (History.history_first ~task_id ~limit) in
+  Option.bind page (fun thr_page ->
+    let start=if older then Masc_tui_fetched.start else Masc_tui_fetched.refresh in
+    match start ~equal fetched ~key with
+    | Already_loading -> None
+    | Started (reading,thr_ticket) ->
+      Some (reading,{thr_ticket;thr_reading=authority;thr_job=ref ();thr_page}))
+
 let equal_tools_async_task_source a b =
   Masc.Tui_decode_async_request.equal_source a.ats_request b.ats_request
   && a.ats_run_id=b.ats_run_id && a.ats_task_id=b.ats_task_id
@@ -8519,7 +8540,8 @@ type state = {
   (* Detail histories retain their exact request and last good value. A key
      alone cannot reject an older response after refreshing the same item. *)
   mutable goal_timeline: (string, Tui_decode.goal_timeline_event list) Masc_tui_fetched.t;
-  mutable task_history: (string, Tui_decode.task_history_event list) Masc_tui_fetched.t;
+  mutable task_history: (string, Masc.Tui_decode_task_inspection.history) Masc_tui_fetched.t;
+  mutable task_history_request: string task_history_request option;
   mutable task_document_body: task_document_slot;
   mutable task_document_history: task_document_slot;
   mutable verification_evidence:
@@ -8875,9 +8897,9 @@ type state = {
   mutable tools_async_last_logical: (Masc.Tui_decode_async_request.source * Masc.Tui_decode_async_request.logical_value) option;
   mutable tools_async_task_source: tools_async_task_source option;
   mutable tools_async_task_body: (tools_async_task_source, Masc.Tui_decode_task_inspection.detail) Masc_tui_fetched.t;
-  mutable tools_async_task_history: (tools_async_task_source, Tui_decode.task_history_event list) Masc_tui_fetched.t;
+  mutable tools_async_task_history: (tools_async_task_source, Masc.Tui_decode_task_inspection.history) Masc_tui_fetched.t;
   mutable tools_async_task_body_request: tools_async_task_request option;
-  mutable tools_async_task_history_request: tools_async_task_request option;
+  mutable tools_async_task_history_request: tools_async_task_source task_history_request option;
   mutable lane_addons: Masc_tui_lane_addons.t option;
   mutable lane_addons_cached: Masc_tui_lane_addons.t;
   mutable lane_addons_generation: int;
@@ -10876,16 +10898,23 @@ let begin_tools_async_task_body state ~force =
       let request={atr_ticket;atr_reading=state.workspace_read_authority;atr_job=ref ()} in
       state.tools_async_task_body_request <- Some request;Some request
 
-let begin_tools_async_task_history state ~force =
+let begin_tools_async_task_history ?(older=false) state ~force ~limit =
   match state.tools_async_task_source with
   | None -> None
   | Some key ->
-    let start=if force then Masc_tui_fetched.refresh else Masc_tui_fetched.start in
-    match start ~equal:equal_tools_async_task_source state.tools_async_task_history ~key with
-    | Already_loading -> None
-    | Started (reading,atr_ticket) ->
+    let view=Masc_tui_fetched.view_for ~equal:equal_tools_async_task_source
+      state.tools_async_task_history ~key in
+    (* Cadence shares the initial read and never replaces a paged prefix or
+       retries a failed older read. H continues; explicit refresh starts anew. *)
+    let initial=match view with Masc_tui_fetched.Absent -> true
+      | Loading | Ready _ | Stale _ | Failed _ -> false in
+    if not older && not force && not initial then None else
+    match begin_history_page ~task_id:key.ats_task_id ~limit ~older
+      ~equal:equal_tools_async_task_source ~key ~authority:state.workspace_read_authority
+      state.tools_async_task_history with
+    | None -> None
+    | Some (reading,request) ->
       state.tools_async_task_history <- reading;
-      let request={atr_ticket;atr_reading=state.workspace_read_authority;atr_job=ref ()} in
       state.tools_async_task_history_request <- Some request;Some request
 
 let tools_async_task_request_current state request pending fetched =
@@ -10904,10 +10933,16 @@ let complete_tools_async_task_body state request result =
   end
 
 let complete_tools_async_task_history state request result =
-  if tools_async_task_request_current state request state.tools_async_task_history_request state.tools_async_task_history then begin
+  let source=Masc_tui_fetched.request_key request.thr_ticket in
+  if request.thr_reading==state.workspace_read_authority
+    && Option.exists (fun current -> current==request) state.tools_async_task_history_request
+    && Option.exists (equal_tools_async_task_source source) state.tools_async_task_source
+    && Option.exists (Masc.Tui_decode_async_request.equal_target source.ats_request.target) state.tools_async_selection
+    && Masc_tui_fetched.is_current ~equal:equal_tools_async_task_source state.tools_async_task_history request.thr_ticket
+  then begin
     state.tools_async_task_history_request <- None;
     state.tools_async_task_history <- Masc_tui_fetched.complete ~equal:equal_tools_async_task_source
-      state.tools_async_task_history request.atr_ticket result
+      state.tools_async_task_history request.thr_ticket result
   end
 
 let tools_async_targets state = match state.tools_async_observation with
@@ -10972,6 +11007,8 @@ let complete_tools_async_detail state request result =
 let suspend_workspace_readings state =
   state.chat_call_reader <- None;
   state.chat_call_pending <- None;
+  state.task_history <- Masc_tui_fetched.suspend state.task_history;
+  state.task_history_request <- None;
   suspend_task_documents state;
   suspend_tools_async_detail state;
   retire_keeper_settings_editor state;
@@ -14214,18 +14251,28 @@ let complete_goal_timeline_read (state : state) request result =
       Error (Masc_tui_planning_detail.timeline_unavailability_detail failure)) in
   state.goal_timeline <- Masc_tui_fetched.complete ~equal:String.equal state.goal_timeline request result
 
-let begin_task_history_read (state : state) ~task_id =
-  match Masc_tui_fetched.refresh ~equal:String.equal state.task_history ~key:task_id with
-  | Masc_tui_fetched.Already_loading -> None
-  | Masc_tui_fetched.Started (reading, request) -> state.task_history <- reading; Some request
+let begin_task_history_read ?(older=false) (state : state) ~task_id ~limit =
+  match begin_history_page ~task_id ~limit ~older ~equal:String.equal ~key:task_id
+    ~authority:state.workspace_read_authority state.task_history with
+  | None -> None
+  | Some (reading,request) ->
+    state.task_history <- reading;
+    state.task_history_request <- Some request;Some request
 
 let complete_task_history_read (state : state) request result =
-  state.task_history <- Masc_tui_fetched.complete ~equal:String.equal state.task_history request result
+  if request.thr_reading==state.workspace_read_authority
+    && Option.exists (fun current -> current==request) state.task_history_request
+    && Masc_tui_fetched.is_current ~equal:String.equal state.task_history request.thr_ticket
+  then begin
+    state.task_history_request <- None;
+    state.task_history <- Masc_tui_fetched.complete ~equal:String.equal state.task_history request.thr_ticket result
+  end
 
 let withdraw_detail_histories (state : state) =
   clear_task_documents state;
   state.goal_timeline <- Masc_tui_fetched.clear state.goal_timeline;
-  state.task_history <- Masc_tui_fetched.clear state.task_history
+  state.task_history <- Masc_tui_fetched.clear state.task_history;
+  state.task_history_request <- None
 
 let create_state
     ?(reasoning_visibility = Reasoning_folded)
@@ -14566,6 +14613,7 @@ let create_state
   runtime_catalog_reading = Runtime_catalog_unread;
   goal_timeline = Masc_tui_fetched.initial;
   task_history = Masc_tui_fetched.initial;
+  task_history_request = None;
   task_document_body = initial_task_document_slot;
   task_document_history = initial_task_document_slot;
   verification_evidence = None;
@@ -16026,7 +16074,8 @@ let task_document_inputs state ~cols =
        let history=Masc_tui_fetched.view_for ~equal:String.equal state.task_history ~key:id in
        let target=Work_task_document id in
        Some (make target (Document.body ~cols ~goals task)),
-       Option.map (fun events -> make target (Document.history ~cols events)) (Masc_tui_fetched.value history))
+       Option.map (fun (history : Masc.Tui_decode_task_inspection.history) ->
+         make target (Document.history ~cols history.history_events)) (Masc_tui_fetched.value history))
   | Tools,_,_,_ when state.tools_pane=Tools_async && state.tools_async_detail_open ->
     (match state.tools_async_task_source,state.tools_async_selection with
      | Some source,Some selection when Masc.Tui_decode_async_request.equal_target selection source.ats_request.target ->
@@ -16035,7 +16084,8 @@ let task_document_inputs state ~cols =
        let target=Async_task_document source in
        Option.map (fun (detail : Masc.Tui_decode_task_inspection.detail) ->
          make target (Document.body ~cols ~goals:(Document.Canonical detail.canonical_goal_id) detail.task)) (Masc_tui_fetched.value body),
-       Option.map (fun events -> make target (Document.history ~cols events)) (Masc_tui_fetched.value history)
+       Option.map (fun (history : Masc.Tui_decode_task_inspection.history) ->
+         make target (Document.history ~cols history.history_events)) (Masc_tui_fetched.value history)
      | Some _,Some _ | Some _,None | None,_ -> None,None)
   | Planning,Planning_list,None,Masc_tui_overview_tasks.Task_focus _
   | Planning,Planning_list,_,Masc_tui_overview_tasks.No_task_focus

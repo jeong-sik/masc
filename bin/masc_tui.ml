@@ -3408,14 +3408,26 @@ let launch_keeper_approval state ~mailbox (request : Keeper_chat.request)
 (* Automatic polling shares a pending reading for the same Keeper. Explicit
    refresh and selection changes supersede it, retaining the generation guard. *)
 let close_tools_async_task state =
-  List.iter (Option.iter (fun request ->
-    Masc_tui_workspace_job.cancel_observation state ~key:request.atr_job))
-    [state.tools_async_task_body_request;state.tools_async_task_history_request];
+  Option.iter (fun request -> Masc_tui_workspace_job.cancel_observation state ~key:request.atr_job)
+    state.tools_async_task_body_request;
+  Option.iter (fun request -> Masc_tui_workspace_job.cancel_observation state ~key:request.thr_job)
+    state.tools_async_task_history_request;
   suspend_tools_async_task state;
   state.tools_async_task_source <- None;
   state.tools_scroll <- 0
 
 let reconcile_task_documents state ~mailbox =
+  (match state.task_history_request with
+   | None -> ()
+   | Some request ->
+     let current=state.view=Planning && state.planning_mode=Planning_list
+       && state.task_detail_id=Some (Masc_tui_fetched.request_key request.thr_ticket)
+       && Masc_tui_fetched.is_current ~equal:String.equal state.task_history request.thr_ticket in
+     if not current then begin
+       Masc_tui_workspace_job.cancel_observation state ~key:request.thr_job;
+       state.task_history <- Masc_tui_fetched.suspend state.task_history;
+       state.task_history_request <- None
+     end);
   let previous=List.filter_map Fun.id
     [state.task_document_body.tds_request;state.task_document_history.tds_request] in
   let _,terminal_cols=get_terminal_size () in
@@ -3465,6 +3477,21 @@ let launch_tools_async_detail ?(force=false) state ~mailbox =
         (fun () -> Masc_tui_http.fetch_async_request_detail ~host ~port ~target)
   end
 
+let launch_tools_async_task_history ?(force=false) ?(older=false) state ~mailbox =
+  if server_authority_ready state && state.view=Tools && state.tools_pane=Tools_async
+      && state.tools_async_detail_open && Option.is_some state.tools_async_task_source then begin
+    let previous=state.tools_async_task_history_request in
+    let limit,_=get_terminal_size () in
+    match begin_tools_async_task_history ~older state ~force ~limit with
+    | None -> ()
+    | Some request ->
+      Option.iter (fun old -> Masc_tui_workspace_job.cancel_observation state ~key:old.thr_job) previous;
+      let host=server_peer_host and port=state.port in
+      launch_workspace_json_read ~key:request.thr_job state ~mailbox
+        ~deliver:(fun result -> Tools_async_task_history_loaded (request,result))
+        (fun () -> Masc_tui_http.fetch_task_history_page ~host ~port ~request:request.thr_page)
+  end
+
 let launch_tools_async_task ?(force=false) state ~mailbox =
   if server_authority_ready state && state.view=Tools && state.tools_pane=Tools_async
       && state.tools_async_detail_open && Option.is_some state.tools_async_task_source then begin
@@ -3478,15 +3505,7 @@ let launch_tools_async_task ?(force=false) state ~mailbox =
        launch_workspace_json_read ~key:request.atr_job state ~mailbox
          ~deliver:(fun result -> Tools_async_task_body_loaded (request,result))
          (fun () -> Masc_tui_http.fetch_original_task_detail ~host ~port ~task_id:source.ats_task_id));
-    let previous=state.tools_async_task_history_request in
-    match begin_tools_async_task_history state ~force with
-    | None -> ()
-    | Some request ->
-      Option.iter (fun old -> Masc_tui_workspace_job.cancel_observation state ~key:old.atr_job) previous;
-      let source=Masc_tui_fetched.request_key request.atr_ticket in
-      launch_workspace_json_read ~key:request.atr_job state ~mailbox
-        ~deliver:(fun result -> Tools_async_task_history_loaded (request,result))
-        (fun () -> Masc_tui_http.fetch_original_task_history ~host ~port ~task_id:source.ats_task_id)
+    launch_tools_async_task_history ~force state ~mailbox
   end
 
 let open_tools_async_source_task state ~mailbox =
@@ -3499,7 +3518,7 @@ let open_tools_async_source_task state ~mailbox =
       suspend_tools_async_detail state;
       state.tools_async_task_source <- Some source;
       state.tools_scroll <- 0;
-      launch_tools_async_task state ~mailbox
+      launch_tools_async_task ~force:true state ~mailbox
     | Async_source_has_no_task -> report_action state "system" "The original run records no source Task"
     | Async_source_not_composition -> report_action state "system" "This request is not a Composition source"
     | Async_source_unavailable detail -> report_action state "error" ("Original Task source unavailable: " ^ detail)
@@ -3736,17 +3755,18 @@ let launch_goal_timeline_load state ~mailbox goal_id =
     (fun () -> Masc_tui_http.fetch_goal_timeline ~host ~port ~goal_id)
   end
 
-let launch_task_history_load state ~mailbox task_id =
+let launch_task_history_load ?(older=false) state ~mailbox task_id =
   if server_authority_ready state then begin
-  match begin_task_history_read state ~task_id with
-  | None -> ()
-  | Some request ->
-  let host = server_peer_host in
-  let port = state.port in
-  launch_workspace_json_read state ~mailbox
-    ~deliver:(fun result -> Task_history_loaded (request, result))
-    (fun () -> Masc_tui_http.fetch_task_history ~host ~port ~task_id)
-
+    let previous=state.task_history_request in
+    let limit,_=get_terminal_size () in
+    match begin_task_history_read ~older state ~task_id ~limit with
+    | None -> ()
+    | Some request ->
+      Option.iter (fun old -> Masc_tui_workspace_job.cancel_observation state ~key:old.thr_job) previous;
+      let host=server_peer_host and port=state.port in
+      launch_workspace_json_read ~key:request.thr_job state ~mailbox
+        ~deliver:(fun result -> Task_history_loaded (request,result))
+        (fun () -> Masc_tui_http.fetch_task_history_page ~host ~port ~request:request.thr_page)
   end
 
 (* Cancel one task through the same MCP tool the keepers use
@@ -14871,7 +14891,7 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
           | Planning_list -> ())
      | Tools ->
          launch_tools_async_detail state ~mailbox;
-         launch_tools_async_task state ~mailbox;
+         launch_tools_async_task ~force:true state ~mailbox;
          (match state.tools_evidence_reference, selected_tools_skill_profile state with
           | Some reference, Some profile when Skill_reference.equal reference profile.esp_reference ->
               launch_skill_evidence_read state ~mailbox reference
@@ -28165,6 +28185,12 @@ and is loaded on demand through keeper_skill.
              Masc_tui_types.scroll_down_from state.resource_scroll ~by:1
        | Some "K" when state.view = Resources ->
            state.resource_scroll <- max 0 (state.resource_scroll - 1)
+       | Some "H" when state.view=Planning && state.planning_mode=Planning_list
+           && Option.is_some state.task_detail_id ->
+           Option.iter (launch_task_history_load ~older:true state ~mailbox:async_messages) state.task_detail_id
+       | Some "H" when state.view=Tools && state.tools_pane=Tools_async
+           && state.tools_async_detail_open && Option.is_some state.tools_async_task_source ->
+           launch_tools_async_task_history ~older:true state ~mailbox:async_messages
        | Some ("J" | "K") when state.view = Tools && state.tools_pane = Tools_async ->
            if not state.tools_async_detail_open then
              move_tools_async_selection state (if key = Some "J" then 1 else -1)

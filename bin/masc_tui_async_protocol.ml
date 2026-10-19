@@ -468,7 +468,7 @@ type async_msg =
   | Tools_async_detail_loaded of Masc_tui_types.tools_async_detail_request * (Masc.Tui_decode_async_request.reading, string) result
   | Task_document_prepared of Masc_tui_types.task_document_request * (string list, string) result
   | Tools_async_task_body_loaded of Masc_tui_types.tools_async_task_request * (Masc.Tui_decode_task_inspection.detail, string) result
-  | Tools_async_task_history_loaded of Masc_tui_types.tools_async_task_request * (Masc.Tui_decode.task_history_event list, string) result
+  | Tools_async_task_history_loaded of Masc_tui_types.tools_async_task_source Masc_tui_types.task_history_request * (Masc.Tui_decode_task_inspection.history, string) result
   | Runtime_lane_slots_written of
       Masc_tui_types.runtime_lane_list
       * (Masc_tui_types.slot_editor_target * Masc_tui_types.slot_editor_identity * Masc_tui_types.slot_editor_identity) option
@@ -608,7 +608,7 @@ type async_msg =
   | Goal_timeline_loaded of
       string Masc_tui_fetched.request * (Masc.Tui_decode.goal_timeline, string) result
   | Task_history_loaded of
-      string Masc_tui_fetched.request * (Masc.Tui_decode.task_history_event list, string) result
+      string Masc_tui_types.task_history_request * (Masc.Tui_decode_task_inspection.history, string) result
   | Task_cancel_done of string * Masc.Tui_decode.server_identity * (string, string) result
   | Verification_evidence_loaded of
       string * (Masc_tui_evidence_picture.evidence,

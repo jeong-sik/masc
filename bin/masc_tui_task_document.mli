@@ -11,5 +11,5 @@ val part : input -> part
 val columns : input -> int
 val prepare : input -> string list
 (** Wrap and sanitize all content once on the CPU worker. No truncation. *)
-val history_status_lines : width:int -> view:Masc.Tui_decode.task_history_event list Masc_tui_fetched.view -> in_flight:bool -> string list
+val history_status_lines : width:int -> view:Masc.Tui_decode_task_inspection.history Masc_tui_fetched.view -> in_flight:bool -> string list
 (** Current read/pending/failure metadata only; contains no event-body work. *)

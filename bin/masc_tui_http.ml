@@ -1150,28 +1150,21 @@ let fetch_goal_timeline ~(host : string) ~(port : int) ~(goal_id : string) :
     |> Result.map_error (fun detail -> "goal detail: " ^ detail) in
   Masc.Tui_decode.decode_goal_detail_timeline json
 
-(** Fetch one task's event history
-    ([GET /api/v1/dashboard/tasks/history]). *)
-let task_history_path ~task_id =
-    Printf.sprintf "/api/v1/dashboard/tasks/history?task_id=%s&limit=50"
-      (percent_encode_path_segment task_id)
-
-let fetch_task_history ~(host : string) ~(port : int) ~(task_id : string) :
-    (Masc.Tui_decode.task_history_event list, string) result =
-  let ( let* ) = Result.bind in
-  let* json = get_json ~host ~port ~path:(task_history_path ~task_id) in
-  Masc.Tui_decode.decode_task_history json
+(** Read one exact continuation page. The response demand comes from the
+    caller's viewport; older pages carry their captured prefix on the CPU path. *)
+let fetch_task_history_page ~host ~port ~(request : Masc.Tui_decode_task_inspection.history_request) =
+  let query=["task_id",[request.hr_task_id];"limit",[string_of_int request.hr_limit]]
+    @ (match request.hr_cursor with None -> [] | Some cursor -> ["cursor",[cursor]]) in
+  let path=Uri.make ~path:"/api/v1/dashboard/tasks/history/page" ~query () |> Uri.to_string in
+  Result.bind (get_json ~host ~port ~path) (fun json ->
+    Masc_tui_response_decode.run ~name:"task.history.page.decode_wait" (fun () ->
+      Masc.Tui_decode_task_inspection.history_page ~request json))
 
 let fetch_original_task_detail ~host ~port ~task_id =
   let path=Uri.make ~path:"/api/v1/dashboard/tasks/detail" ~query:["task_id",[task_id]] () |> Uri.to_string in
   Result.bind (get_json ~host ~port ~path) (fun json ->
     Masc_tui_response_decode.run ~name:"tools.original_task.decode_wait" (fun () ->
       Masc.Tui_decode_task_inspection.detail ~task_id json))
-
-let fetch_original_task_history ~host ~port ~task_id =
-  Result.bind (get_json ~host ~port ~path:(task_history_path ~task_id)) (fun json ->
-    Masc_tui_response_decode.run ~name:"tools.original_task_history.decode_wait" (fun () ->
-      Masc.Tui_decode_task_inspection.history ~task_id json))
 
 (** Fetch a keeper's durable tool-call log
     ([GET /api/v1/keepers/:name/tool-calls]). *)

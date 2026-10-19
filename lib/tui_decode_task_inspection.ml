@@ -34,3 +34,36 @@ let history ~task_id json =
       if id=task_id then Ok () else Error "Task history row differs from the original source Task") (Ok ()) identities
   ) (Ok ()) rows in
   Tui_decode.decode_task_history json
+
+type history =
+  { history_task_id : string; history_events : Tui_decode.task_history_event list
+  ; history_next_cursor : string option; history_cursors : string list }
+type history_request =
+  { hr_task_id : string; hr_limit : int; hr_cursor : string option; hr_prefix : history option }
+let history_first ~task_id ~limit =
+  {hr_task_id=task_id;hr_limit=max 1 limit;hr_cursor=None;hr_prefix=None}
+let history_earlier ~task_id ~limit prefix =
+  if prefix.history_task_id<>task_id then None else match prefix.history_next_cursor with
+  | None -> None
+  | Some cursor -> Some {hr_task_id=task_id;hr_limit=max 1 limit;hr_cursor=Some cursor;hr_prefix=Some prefix}
+let history_page ~request json =
+  let* ()=validate json in
+  let* fields=Agent_core.Execution_json.object_fields ~context:"original Task history page"
+    ~required:["schema";"task_id";"cursor";"events";"next_cursor"] ~optional:[] json in
+  let* ()=match List.assoc "schema" fields with
+    | `String "masc.task-history.page/v1" -> Ok () | _ -> Error "Unsupported Task history page schema" in
+  let* id=nonblank (List.assoc "task_id" fields) in
+  let* ()=if id=request.hr_task_id then Ok () else Error "Task history page differs from its original Task" in
+  let cursor name = match List.assoc name fields with
+    | `Null -> Ok None | json -> Result.map Option.some (nonblank json) in
+  let* echo=cursor "cursor" in
+  let* ()=if echo=request.hr_cursor then Ok () else Error "Task history page differs from its original cursor" in
+  let* next=cursor "next_cursor" in
+  let seen=match request.hr_prefix with None -> [] | Some prefix -> prefix.history_cursors in
+  let seen=match echo with None -> seen | Some cursor -> cursor::seen in
+  let* ()=match next with Some cursor when List.mem cursor seen -> Error "Task history cursor did not advance"
+    | Some _ | None -> Ok () in
+  let* events=history ~task_id:id (List.assoc "events" fields) in
+  let* ()=if List.length events<=request.hr_limit then Ok () else Error "Task history page exceeds its requested demand" in
+  let events=match request.hr_prefix with None -> events | Some prefix -> prefix.history_events @ events in
+  Ok {history_task_id=id;history_events=events;history_next_cursor=next;history_cursors=seen}

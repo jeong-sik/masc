@@ -429,11 +429,12 @@ let test_history_read_keeps_original_workspace_through_replacement () =
   in
   let identity_a = identity base_a and identity_b = identity base_b in
   let history context =
-    `List [`Assoc ["type", `String "task_transition";
+    `Assoc ["schema",`String "masc.task-history.page/v1";"task_id",`String "task-original";
+      "cursor",`Null;"next_cursor",`Null;"events",`List [`Assoc ["type", `String "task_transition";
       "task", `String "task-original"; "agent", `String "original-keeper";
       "ts", `String "2026-10-19T01:00:00Z";
       "from_status", `String "todo"; "to_status", `String "in_progress";
-      "handoff_context", `Assoc ["summary", `String context]]]
+      "handoff_context", `Assoc ["summary", `String context]]]]
   in
   let receipt = Masc.Workspace.read_precondition_admission_header in
   let tag = "\"same-history-tag\"" in
@@ -457,7 +458,7 @@ let test_history_read_keeps_original_workspace_through_replacement () =
   let send ~path ~headers = send_for !served !response ~path ~headers in
   let kept_reads = Masc_tui_kept_reads.create () in
   let host = "127.0.0.1" and port = 8935 in
-  let path = "/api/v1/dashboard/tasks/history?task_id=task-original&limit=50" in
+  let path = "/api/v1/dashboard/tasks/history/page?task_id=task-original&limit=1" in
   let read ?(port=port) ~send () =
     Masc_tui_workspace_read.read_json ~kept_reads
       ~address_of:(fun ~path -> Printf.sprintf "http://%s:%d%s" host port path)
@@ -467,12 +468,14 @@ let test_history_read_keeps_original_workspace_through_replacement () =
     Masc_tui_workspace_read.with_binding ~host ~port ~expected
       ~proof:Masc_tui_workspace_read.Request_precondition load
   in
-  let decode_history result = Result.bind result Masc.Tui_decode.decode_task_history in
-  let expect_events context events =
+  let decode_history result = Result.bind result
+      (Masc.Tui_decode_task_inspection.history_page
+        ~request:(Masc.Tui_decode_task_inspection.history_first ~task_id:"task-original" ~limit:1)) in
+  let expect_events context (history : Masc.Tui_decode_task_inspection.history) =
     check bool "decoded original handoff and actor survive the read" true
       (List.exists (fun (event : Masc.Tui_decode.task_history_event) ->
         event.th_note=Some context && event.th_actor=Some "original-keeper"
-        && event.th_from_status=Some "todo" && event.th_to_status=Some "in_progress") events)
+        && event.th_from_status=Some "todo" && event.th_to_status=Some "in_progress") history.history_events)
   in
   let expect_context context result =
     match decode_history result with
@@ -490,11 +493,12 @@ let test_history_read_keeps_original_workspace_through_replacement () =
       ~local_base_path:base_a ~port ~refresh_interval:0. () in
   state.workspace_identity <- Masc_tui_types.Workspace_identity_match;
   state.server_identity <- Some identity_a;
-  let begin_read () = match Masc_tui_types.begin_task_history_read state ~task_id:"task-original" with
+  let begin_read () = match Masc_tui_types.begin_task_history_read state ~task_id:"task-original" ~limit:1 with
     | Some request -> request
     | None -> fail "original history did not acquire its read owner" in
   let complete owner result =
-    Masc_tui_types.complete_task_history_read state owner (decode_history result) in
+    Masc_tui_types.complete_task_history_read state owner
+      (Result.bind result (Masc.Tui_decode_task_inspection.history_page ~request:owner.thr_page)) in
   let initial_owner = begin_read () in
   complete initial_owner original;
   let old_refresh = begin_read () in
@@ -521,7 +525,7 @@ let test_history_read_keeps_original_workspace_through_replacement () =
   let replacement_owner = begin_read () in
   complete old_refresh original;
   check bool "late original result cannot settle replacement workspace" true
-    (Masc_tui_fetched.is_current ~equal:String.equal state.task_history replacement_owner
+    (Masc_tui_fetched.is_current ~equal:String.equal state.task_history replacement_owner.thr_ticket
      && Masc_tui_fetched.in_flight state.task_history);
   complete replacement_owner recovered;
   complete initial_owner original;

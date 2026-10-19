@@ -1006,18 +1006,18 @@ let test_followup_matches_committed_answer_input_tool_rows () =
       ~tool_use_id:"repeated-provider-id" ~turn:1
       ~schedule:{planned_index=0;batch_index=0;batch_size=1;execution_mode=Serial}
       ~completion:Agent_core.Tool_contract.Continue_after_success in
-  let emit ~invocation ~cell ~keeper_name ~execution_id ~wire_outcome =
+  let emit ?disposition ~invocation ~cell ~keeper_name ~execution_id ~wire_outcome () =
     let context = Keeper_tool_call_log_context.get_turn_context_record ~cell () in
     Keeper_tool_call_log.log_call ~keeper_name ~tool_name:"Read"
-      ~input:(`Assoc []) ~output_text:"private result" ~duration_ms:1. ~wire_outcome
+      ~input:(`Assoc []) ~output_text:"private result" ~duration_ms:1. ~wire_outcome ?disposition
       ~execution_id:(Ids.Execution_id.of_string execution_id)
       ~physical_execution_id:(Keeper_tool_call_log.invocation_execution_id ~invocation)
       ?trace_id:context.trace_id ?keeper_turn_id:context.keeper_turn_id
       ~answer_source_ids:context.answer_source_ids ~on_committed:(fun () -> ()) () in
   let original_invocation = invocation () in
-  emit ~invocation:original_invocation ~cell:original ~keeper_name ~execution_id:"original-tool" ~wire_outcome:Tool_result.Ok;
-  emit ~invocation:(invocation ()) ~cell:interleaved ~keeper_name ~execution_id:"other-answer-time" ~wire_outcome:Tool_result.Ok;
-  emit ~invocation:(invocation ()) ~cell:original ~keeper_name:"beta" ~execution_id:"other-keeper" ~wire_outcome:Tool_result.Ok;
+  emit ~invocation:original_invocation ~cell:original ~keeper_name ~execution_id:"original-tool" ~wire_outcome:Tool_result.Ok ();
+  emit ~invocation:(invocation ()) ~cell:interleaved ~keeper_name ~execution_id:"other-answer-time" ~wire_outcome:Tool_result.Ok ();
+  emit ~invocation:(invocation ()) ~cell:original ~keeper_name:"beta" ~execution_id:"other-keeper" ~wire_outcome:Tool_result.Ok ();
   let observed = actions () in
   check int "only the original canonical answer input supplies a Tool result" 1 observed.observed_count;
   (match observed.latest with
@@ -1052,23 +1052,57 @@ let test_followup_matches_committed_answer_input_tool_rows () =
     check int "partial evidence observation does not enqueue a wake" 0
       (List.length (pending_asks ~base_path ~keeper_name)));
   let failed_invocation = invocation () in
-  emit ~invocation:failed_invocation ~cell:original ~keeper_name ~execution_id:"failed-tool" ~wire_outcome:Tool_result.Error;
+  emit ~invocation:failed_invocation ~cell:original ~keeper_name ~execution_id:"failed-tool" ~wire_outcome:Tool_result.Error ();
   check int "observed errors are results, not proof of successful effects" 2 (actions ()).observed_count;
-  emit ~invocation:(invocation ()) ~cell:original ~keeper_name ~execution_id:"failed-tool" ~wire_outcome:Tool_result.Ok;
+  emit ~invocation:(invocation ()) ~cell:original ~keeper_name ~execution_id:"failed-tool" ~wire_outcome:Tool_result.Ok ();
   check int "a fresh recheck of one logical node is a distinct physical result" 3 (actions ()).observed_count;
+  emit ~disposition:(Tool_result.Completed ()) ~invocation:(invocation ()) ~cell:original
+    ~keeper_name ~execution_id:"typed-completed" ~wire_outcome:Tool_result.Error ();
+  emit ~disposition:(Tool_result.Deferred ()) ~invocation:(invocation ()) ~cell:original
+    ~keeper_name ~execution_id:"typed-deferred" ~wire_outcome:Tool_result.Error ();
+  emit ~disposition:(Tool_result.Failed Tool_result.Runtime_failure) ~invocation:(invocation ()) ~cell:original
+    ~keeper_name ~execution_id:"typed-failed" ~wire_outcome:Tool_result.Ok ();
+  emit ~invocation:(invocation ()) ~cell:original ~keeper_name ~execution_id:"unknown-result"
+    ~wire_outcome:Tool_result.Unknown ();
+  (* Append a structurally valid physical observation whose outcome field is
+     damaged. Its original answer/turn identity stays in the cohort. *)
+  let path = Keeper_tool_call_log.current_log_path () |> Option.get in
+  let template = Fs_compat.load_file path |> String.split_on_char '\n'
+    |> List.filter_map (fun line -> if String.trim line="" then None else Some (Yojson.Safe.from_string line))
+    |> List.find (fun row -> Yojson.Safe.Util.member "execution_id" row = `String "original-tool") in
+  let malformed_id = Keeper_tool_call_log.invocation_execution_id ~invocation:(invocation ()) |> Ids.Execution_id.to_string in
+  let malformed = match template with
+    | `Assoc fields -> `Assoc (("physical_execution_id",`String malformed_id)
+        :: ("execution_id",`String "malformed-result") :: ("disposition",`Bool true)
+        :: List.filter (fun (key,_) -> not (List.mem key ["physical_execution_id";"execution_id";"disposition"])) fields)
+    | _ -> fail "committed fixture result was not an object" in
+  let channel = open_out_gen [Open_wronly;Open_append;Open_binary] 0o600 path in
+  Fun.protect ~finally:(fun () -> close_out channel) (fun () ->
+    output_string channel (Yojson.Safe.to_string malformed ^ "\n"));
+  let classified = actions () in
+  check int "every original physical result remains observed" 8 classified.observed_count;
+  check int "typed completion wins over a failed wire delivery" 3 classified.outcomes.succeeded;
+  check int "typed and wire failures remain failures" 2 classified.outcomes.failed;
+  check int "typed deferral is not flattened into wire failure" 1 classified.outcomes.deferred;
+  check int "unknown outcome remains separate" 1 classified.outcomes.unsettled;
+  check int "malformed outcome retains its physical observation" 1 classified.outcomes.malformed;
+  check bool "Tool outcomes cannot advance the original Task" true
+    (match (observe ()).linked_task with
+     | Wake.Task_observed value -> value.task_id=task_id && value.status=Masc_domain.Todo
+     | Task_unlinked | Task_missing _ | Task_unavailable _ -> false);
   Keeper_tool_call_log.log_call ~keeper_name ~tool_name:"native-operand"
     ~input:(`Assoc []) ~output_text:"logical value" ~duration_ms:0. ~wire_outcome:Tool_result.Ok
     ~execution_id:(Ids.Execution_id.of_string "logical-only")
     ~answer_source_ids:[source] ~on_committed:(fun () -> ()) ();
-  check int "a logical-only row neither invents a call nor hides known physical results" 3 (actions ()).observed_count;
+  check int "a logical-only row neither invents a call nor hides known physical results" 8 (actions ()).observed_count;
   check int "observing Tool rows does not enqueue an answer again" 0
     (List.length (pending_asks ~base_path ~keeper_name));
-  emit ~invocation:failed_invocation ~cell:original ~keeper_name ~execution_id:"failed-tool" ~wire_outcome:Tool_result.Error;
+  emit ~invocation:failed_invocation ~cell:original ~keeper_name ~execution_id:"failed-tool" ~wire_outcome:Tool_result.Error ();
   check bool "duplicate execution evidence cannot become a confident count" true
     (Result.is_error (observe ()).tool_actions);
   let path = Keeper_tool_call_log.current_log_path () |> Option.get in
   Fs_compat.save_file path "";
-  emit ~invocation:(invocation ()) ~cell:interleaved ~keeper_name ~execution_id:"replacement-unrelated" ~wire_outcome:Tool_result.Ok;
+  emit ~invocation:(invocation ()) ~cell:interleaved ~keeper_name ~execution_id:"replacement-unrelated" ~wire_outcome:Tool_result.Ok ();
   check int "ledger shrink rebuilds source membership instead of inheriting stale offsets" 0
     (actions ()).observed_count;
   Keeper_tool_call_log.init ~base_path:(Filename.concat base_path "other-workspace") ();

@@ -112,6 +112,10 @@ type recorded_call_outcome =
   | Recorded_malformed
 
 val recorded_call_outcome : Yojson.Safe.t -> recorded_call_outcome
+val recorded_call_outcome_to_string : recorded_call_outcome -> string
+val recorded_call_outcome_of_string : string -> (recorded_call_outcome, string) Stdlib.Result.t
+(** Canonical observation tags; decoding an unknown tag is a protocol error.
+    These observations do not certify Task completion or useful work. *)
 
 (** Payload carried by a completed or deferred tool invocation.  [metadata]
     is an opaque one-way boundary projection; MASC consumers must branch on

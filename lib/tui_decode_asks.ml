@@ -200,12 +200,18 @@ type ask_tool_action = {
   ata_keeper_turn_id : int;
   ata_tool : string;
   ata_recorded_at : float;
+  ata_outcome : Tool_result.recorded_call_outcome;
 }
 
+type ask_tool_outcomes = {
+  ato_succeeded : int; ato_deferred : int; ato_failed : int;
+  ato_unsettled : int; ato_malformed : int;
+}
 type ask_tool_actions =
   | Ask_tools_unavailable
   | Ask_tools_observed of {
       at_count : int;
+      at_outcomes : ask_tool_outcomes;
       at_first_recorded_at : float option;
       at_latest : ask_tool_action option;
       at_evidence_current : bool;
@@ -290,6 +296,22 @@ let decode_followup_tools actions =
               let* at_count = match count with
                 | `Int value when value>=0 -> Ok value
                 | _ -> Error "answer Tool observation count is invalid" in
+              let* outcomes = single actions "outcomes" in
+              let outcome_count key = let* value = single outcomes key in match value with
+                | `Int value when value>=0 -> Ok value
+                | _ -> Error "answer Tool outcome count is invalid" in
+              let* ato_succeeded = outcome_count "succeeded" in
+              let* ato_deferred = outcome_count "deferred" in
+              let* ato_failed = outcome_count "failed" in
+              let* ato_unsettled = outcome_count "unsettled" in
+              let* ato_malformed = outcome_count "malformed" in
+              let* remaining = List.fold_left (fun remaining value ->
+                  let* remaining = remaining in
+                  if value>remaining then Error "answer Tool outcome counts exceed observations"
+                  else Ok (remaining-value)) (Ok at_count)
+                [ato_succeeded;ato_deferred;ato_failed;ato_unsettled;ato_malformed] in
+              let* () = if remaining=0 then Ok () else Error "answer Tool outcome counts omit observations" in
+              let at_outcomes = {ato_succeeded;ato_deferred;ato_failed;ato_unsettled;ato_malformed} in
               let* first = single actions "first_recorded_at" in
               let* at_first_recorded_at = match first with
                 | `Null -> Ok None | value -> finite value |> Result.map Option.some in
@@ -308,11 +330,20 @@ let decode_followup_tools actions =
                       | `Int n when n>=0 -> Ok n | _ -> Error "answer Tool turn identity is invalid" in
                     let* recorded = single value "recorded_at" in
                     let* ata_recorded_at = finite recorded in
-                    Ok (Some {ata_execution_id;ata_physical_execution_id;ata_trace_id;ata_keeper_turn_id;ata_tool;ata_recorded_at}) in
+                    let* outcome = string value "outcome" in
+                    let* ata_outcome = Tool_result.recorded_call_outcome_of_string outcome in
+                    let bucket = match ata_outcome with
+                      | Tool_result.Recorded_succeeded -> ato_succeeded
+                      | Recorded_deferred -> ato_deferred
+                      | Recorded_failed -> ato_failed
+                      | Recorded_unsettled -> ato_unsettled
+                      | Recorded_malformed -> ato_malformed in
+                    let* () = if bucket>0 then Ok () else Error "latest Tool outcome is absent from counts" in
+                    Ok (Some {ata_execution_id;ata_physical_execution_id;ata_trace_id;ata_keeper_turn_id;ata_tool;ata_recorded_at;ata_outcome}) in
               (match at_count, at_first_recorded_at, at_latest with
-               | 0, None, None -> Ok (Ask_tools_observed {at_count;at_first_recorded_at;at_latest;at_evidence_current=true})
+               | 0, None, None -> Ok (Ask_tools_observed {at_count;at_outcomes;at_first_recorded_at;at_latest;at_evidence_current=true})
                | n, Some first, Some last when n>0 && first<=last.ata_recorded_at ->
-                   Ok (Ask_tools_observed {at_count;at_first_recorded_at;at_latest;at_evidence_current=true})
+                   Ok (Ask_tools_observed {at_count;at_outcomes;at_first_recorded_at;at_latest;at_evidence_current=true})
                | _ -> Error "answer Tool count and observation clocks disagree")
           | _ -> Error "unknown answer Tool observation state"
 

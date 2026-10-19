@@ -60,10 +60,15 @@ type tool_action = {
   keeper_turn_id : int;
   tool_name : string;
   recorded_at : float;
+  outcome : Tool_result.recorded_call_outcome;
 }
 
+type tool_outcomes = {
+  succeeded : int; deferred : int; failed : int; unsettled : int; malformed : int;
+}
 type tool_actions = {
   observed_count : int;
+  outcomes : tool_outcomes;
   first_recorded_at : float option;
   latest : tool_action option;
 }
@@ -73,7 +78,9 @@ let observe_tool_actions ~base_path ~keeper_name ~source_id =
   match Keeper_tool_call_log.configured_masc_root (), Keeper_tool_call_log.store () with
   | Some root, Some store when String.equal root (Common.masc_dir_from_base_path ~base_path) ->
       let* summary, _ = Keeper_tool_call_index.fold_by_answer_source ~store ~keeper_name ~source_id
-        ~init:({observed_count=0;first_recorded_at=None;latest=None}, Set_util.StringSet.empty)
+        ~init:({observed_count=0;
+          outcomes={succeeded=0;deferred=0;failed=0;unsettled=0;malformed=0};
+          first_recorded_at=None;latest=None}, Set_util.StringSet.empty)
         ~f:(fun (summary, seen) row ->
           let field key = match row with
             | `Assoc fields -> (match List.filter (fun (name,_) -> name=key) fields with
@@ -107,13 +114,21 @@ let observe_tool_actions ~base_path ~keeper_name ~source_id =
             let* recorded_at = match clock with
               | `Float value when Float.is_finite value -> Ok value
               | `Int value -> Ok (float_of_int value) | _ -> Error "Tool observation clock is invalid" in
-            let action = {execution_id;physical_execution_id;trace_id;keeper_turn_id;tool_name;recorded_at} in
+            let outcome = Tool_result.recorded_call_outcome row in
+            let old = summary.outcomes in
+            let outcomes = match outcome with
+              | Tool_result.Recorded_succeeded -> {old with succeeded=old.succeeded+1}
+              | Recorded_deferred -> {old with deferred=old.deferred+1}
+              | Recorded_failed -> {old with failed=old.failed+1}
+              | Recorded_unsettled -> {old with unsettled=old.unsettled+1}
+              | Recorded_malformed -> {old with malformed=old.malformed+1} in
+            let action = {execution_id;physical_execution_id;trace_id;keeper_turn_id;tool_name;recorded_at;outcome} in
             let first_recorded_at = Some (match summary.first_recorded_at with
               | None -> recorded_at | Some prior -> Float.min prior recorded_at) in
             let latest = match summary.latest with
               | Some prior when prior.recorded_at > recorded_at -> Some prior
               | Some _ | None -> Some action in
-            Ok ({observed_count=summary.observed_count+1;first_recorded_at;latest},
+            Ok ({observed_count=summary.observed_count+1;outcomes;first_recorded_at;latest},
                 Set_util.StringSet.add physical_execution_id seen)) in
       Ok summary
   | Some _, Some _ | None, _ | _, None -> Error "Tool ledger workspace is unavailable or different"
@@ -231,13 +246,17 @@ let tool_actions_to_json actions =
     | Error _ -> `Assoc ["state", `String "unavailable"]
     | Ok actions -> `Assoc ["state", `String "observed";
         "observed_count", `Int actions.observed_count;
+        "outcomes", `Assoc ["succeeded", `Int actions.outcomes.succeeded;
+          "deferred", `Int actions.outcomes.deferred; "failed", `Int actions.outcomes.failed;
+          "unsettled", `Int actions.outcomes.unsettled; "malformed", `Int actions.outcomes.malformed];
         "first_recorded_at", clock actions.first_recorded_at;
         "latest", (match actions.latest with
           | None -> `Null
           | Some action -> `Assoc ["execution_id", `String action.execution_id;
               "physical_execution_id", `String action.physical_execution_id;
               "trace_id", `String action.trace_id; "keeper_turn_id", `Int action.keeper_turn_id;
-              "tool", `String action.tool_name; "recorded_at", `Float action.recorded_at])]
+              "tool", `String action.tool_name; "recorded_at", `Float action.recorded_at;
+              "outcome", `String (Tool_result.recorded_call_outcome_to_string action.outcome)])]
 
 let linked_task_to_json task =
   match task with

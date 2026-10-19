@@ -86,16 +86,25 @@ type ask_tool_action = {
   ata_keeper_turn_id : int;
   ata_tool : string;
   ata_recorded_at : float;
+  ata_outcome : Tool_result.recorded_call_outcome;
 }
 
+type ask_tool_outcomes = {
+  ato_succeeded : int; ato_deferred : int; ato_failed : int;
+  ato_unsettled : int; ato_malformed : int;
+}
 type ask_tool_actions =
   | Ask_tools_unavailable
   | Ask_tools_observed of {
       at_count : int;
+      at_outcomes : ask_tool_outcomes;
       at_first_recorded_at : float option;
       at_latest : ask_tool_action option;
       at_evidence_current : bool;
     }
+(** All five nonnegative outcome buckets sum to the physical result count.
+    A latest result must belong to a nonempty corresponding bucket. These
+    recorded call outcomes do not establish useful work or Task completion. *)
 
 type ask_task_location = Ask_task_backlog | Ask_task_archive
 type ask_linked_task =

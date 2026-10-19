@@ -307,14 +307,30 @@ let draw_ask_answer_feedback buf cols (state : state) =
       let action_text, action_style = match observed.fv_tools.fo_value with
         | None -> absent observed.fv_tools "Tool results"
         | Some Decode.Ask_tools_unavailable -> "Tool results: observation unavailable", Theme.warn ()
-        | Some (Decode.Ask_tools_observed {at_count;at_latest;at_evidence_current;_}) ->
-            let text = match at_latest with
-             | None -> "Tool results: none observed", Theme.info ()
-             | Some latest -> Printf.sprintf "Tool results: %d observed · latest %s · turn #%d"
-                 at_count latest.ata_tool latest.ata_keeper_turn_id, Theme.info () in
-            if at_evidence_current then text
-            else fst text ^ " · retained earlier evidence", Theme.warn () in
+        | Some (Decode.Ask_tools_observed {at_count;at_outcomes;at_evidence_current;_}) ->
+            let counts = List.filter_map (fun (label,count) ->
+                if count=0 then None else Some (Printf.sprintf "%s %d" label count))
+              ["succeeded",at_outcomes.ato_succeeded;"failed",at_outcomes.ato_failed;
+               "deferred",at_outcomes.ato_deferred;"unsettled",at_outcomes.ato_unsettled;
+               "malformed",at_outcomes.ato_malformed] in
+            let text = if at_count=0 then "Tool results: none observed"
+              else Printf.sprintf "Tool results: %d observed · %s" at_count (String.concat " · " counts) in
+            let uncertain = at_outcomes.ato_failed>0 || at_outcomes.ato_unsettled>0 || at_outcomes.ato_malformed>0 in
+            if at_evidence_current then text, (if uncertain then Theme.warn () else Theme.info ())
+            else text ^ " · retained earlier evidence", Theme.warn () in
       box_wrapped_field buf cols ~head:"  " ~style:action_style (action_text ^ pending observed.fv_tools);
+      (match observed.fv_tools.fo_value with
+       | Some (Decode.Ask_tools_observed {at_latest=Some latest;at_evidence_current;_}) ->
+         let style = match latest.ata_outcome with
+           | Masc.Tool_result.Recorded_failed when at_evidence_current -> Theme.bad ()
+           | Recorded_succeeded | Recorded_deferred when at_evidence_current -> Theme.info ()
+           | Recorded_failed | Recorded_succeeded | Recorded_deferred
+           | Recorded_unsettled | Recorded_malformed -> Theme.warn () in
+         box_wrapped_field buf cols ~head:"  " ~style
+           (Printf.sprintf "Latest Tool result: %s · %s · turn #%d"
+             (Masc.Tool_result.recorded_call_outcome_to_string latest.ata_outcome)
+             (Terminal_text.single_line latest.ata_tool) latest.ata_keeper_turn_id)
+       | None | Some Decode.Ask_tools_unavailable | Some (Ask_tools_observed {at_latest=None;_}) -> ());
       let task_text, task_style = match observed.fv_task.fo_value with
         | None -> absent observed.fv_task "Original Task"
         | Some Decode.Ask_task_unlinked -> "Original question: no linked Task", Theme.recede ()

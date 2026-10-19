@@ -33,10 +33,15 @@ type tool_action = {
   keeper_turn_id : int;
   tool_name : string;
   recorded_at : float;
+  outcome : Tool_result.recorded_call_outcome;
 }
 
+type tool_outcomes = {
+  succeeded : int; deferred : int; failed : int; unsettled : int; malformed : int;
+}
 type tool_actions = {
   observed_count : int;
+  outcomes : tool_outcomes;
   first_recorded_at : float option;
   latest : tool_action option;
 }
@@ -46,7 +51,9 @@ type tool_actions = {
     uniqueness; multiple fresh rechecks may share a logical [execution_id].
     Rows without physical identity do not supply an observation. Malformed or
     duplicate physical identities leave evidence unavailable. No start or
-    unfinished native-action claim. *)
+    unfinished native-action claim. Every observed result remains in exactly
+    one canonical outcome bucket, including unsettled/malformed outcomes.
+    The bucket sum equals [observed_count]; Task progress remains independent. *)
 
 type linked_task =
   | Task_unlinked

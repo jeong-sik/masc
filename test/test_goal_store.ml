@@ -664,6 +664,19 @@ let test_upsert_refuses_a_blank_title_and_a_past_due_date_at_creation () =
   rejected_naming "non-blank title"
     (Goal_store.upsert_goal config ~id:"goal-explicit-no-title" ~metric:"m"
        ~target_value:"1" ());
+  (* Blank or whitespace-padded Goal IDs are refused so Goal store rows and
+     trimmed goal_task_links keys cannot diverge (#39964). *)
+  List.iter
+    (fun bad_id ->
+       match
+         Goal_store.upsert_goal config ~id:bad_id ~title:"Padded id" ~metric:"m"
+           ~target_value:"1" ()
+       with
+       | Error (Goal_store.Rejected _) -> ()
+       | Error other ->
+         fail (Printf.sprintf "id %S was not Rejected: %s" bad_id (write_error_msg other))
+       | Ok _ -> fail (Printf.sprintf "a goal with id %S was accepted" bad_id))
+    [ ""; "   "; " goal-x"; "goal-x "; "\tgoal-x\n" ];
   (* A past due date is unreachable by construction. *)
   rejected_naming "already past"
     (Goal_store.upsert_goal config ~title:"Late" ~metric:"m" ~target_value:"1"

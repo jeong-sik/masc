@@ -464,11 +464,29 @@ try:
   js("delete document.body.innerText;")
  # A hover toolbar can occur late in DOM order even while its message is
  # visible. Short text rows must not consume a separate hidden node quota.
- js("document.body.innerHTML='<section id=history style=\"display:grid;grid-template-columns:repeat(25,30px);font:8px sans-serif\">'+Array.from({length:240},(_,i)=>'<span>row '+i+'</span>').join('')+'</section><button id=late-reaction>Add reaction after history</button>';")
+ js("scrollTo(0,0);document.body.innerHTML='<section id=history style=\"display:grid;grid-template-columns:repeat(25,30px);font:8px sans-serif\">'+Array.from({length:240},(_,i)=>'<span>row '+i+'</span>').join('')+'</section><button id=late-reaction>Add reaction after history</button>';")
  late_scene=observe()
- late_control=control(late_scene,'Add reaction after history')
- check('late toolbar is observed within requested text budget',not late_scene['truncated'] and late_control['nodeId'])
  (a.out/'late-toolbar-scene.json').write_text(json.dumps(late_scene,ensure_ascii=False,indent=2))
+ late_controls=[node for node in late_scene['nodes'] if node['kind']=='control' and node['text']=='Add reaction after history']
+ check('late toolbar follows more than 200 observed nodes without truncation',
+  len(late_scene['nodes'])>200 and not late_scene['truncated'] and len(late_controls)==1,
+  {'nodes':len(late_scene['nodes']),'truncated':late_scene['truncated'],'lateControls':len(late_controls)})
+ (a.out/'late-toolbar.png').write_bytes(base64.b64decode(call('GET','/session/'+sid+'/screenshot'),validate=True))
+ # Dense visible short controls reach the JSON byte ceiling before the text budget.
+ js("scrollTo(0,0);document.body.innerHTML='<div id=dense>'+Array.from({length:6000},()=>'<button style=\"position:absolute;left:0;top:0;width:20px;height:20px;font:8px sans-serif;padding:0\">X</button>').join('')+'</div>';document.title='Dense node budget';")
+ dense_scene=observe()
+ dense_bytes=len(json.dumps(dense_scene,ensure_ascii=False,separators=(',',':')).encode())
+ dense_count=js("return document.querySelectorAll('#dense button').length;")
+ check('dense short nodes return usable partial JSON within one MiB',
+  dense_scene['truncated'] and 0<len(dense_scene['nodes'])<dense_count and dense_bytes<=1024*1024,
+  {'nodes':len(dense_scene['nodes']),'available':dense_count,'bytes':dense_bytes})
+ check('dense partial read retains complete page identity',
+  dense_scene['url']==js('return location.href;') and dense_scene['title']=='Dense node budget'
+  and dense_scene['documentId']==observe()['documentId'])
+ first_dense=dense_scene['nodes'][0]
+ check('dense partial scene keeps its observed node reference usable',
+  act(dense_scene,first_dense,action='click')['action']=='click')
+ (a.out/'dense-byte-budget-scene.json').write_text(json.dumps(dense_scene,ensure_ascii=False,indent=2))
  png=base64.b64decode(call('GET','/session/'+sid+'/screenshot'),validate=True);(a.out/'fixture.png').write_bytes(png)
  report={'checks':checks,'scene_elapsed_ms':elapsed,'scene_json_utf8_bytes':len(json.dumps(s,ensure_ascii=False,separators=(',',':')).encode()),'png_bytes':len(png),'png_sha256':hashlib.sha256(png).hexdigest(),'scene_runtime_sha256':hashlib.sha256(scene.encode()).hexdigest(),'browser_capabilities':caps['capabilities'],'scope':'real Gecko executes shared scripts; OCaml HTTP/TUI binary not measured by this probe'}
  (a.out/'proof.json').write_text(json.dumps(report,indent=2));print(json.dumps({k:v for k,v in report.items() if k!='browser_capabilities'}))

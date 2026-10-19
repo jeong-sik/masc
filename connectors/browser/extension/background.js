@@ -128,13 +128,24 @@ function browserScene(args) {
   const maxChars = args.maxChars;
   if (!Number.isSafeInteger(maxChars) || maxChars < 1 || maxChars > 100000)
     throw new Error('invalid_scene_max_chars');
-  // A scene has its own 1 MiB JSON/UTF-8 resource ceiling, below the native
-  // host's 8 MiB incoming reply bound. Text/node limits alone do not bound
-  // page metadata or rectangle arrays; the complete payload is checked below.
+  // Admit nodes by the complete scene's 1 MiB JSON/UTF-8 resource ceiling,
+  // below the native host's 8 MiB incoming reply bound. Count metadata and
+  // geometry as well as text, without imposing a separate node quota.
   const responseByteLimit = 1024 * 1024;
-  const nodeLimit = 200;
   const nodes = [], styles = new WeakMap();
-  let chars = 0, truncated = false;
+  let chars = 0, truncated = false, nodeBytes = 0;
+  const view = args.view === undefined ? 'content' : args.view;
+  if (view !== 'content' && view !== 'regions') throw new Error('unknown_scene_view');
+  const scene = {schema:'masc.browser.scene.v1',documentId:state.id,url:location.href,title:document.title,
+    viewport:{width:innerWidth,height:innerHeight,scrollX,scrollY},nodes,chars:0,truncated:false,
+    scope:args.scope || null,view,
+    coverage:'top-document DOM geometry; no paint-order, occlusion, pseudo-element or shadow-tree completeness'};
+  const encoder = new TextEncoder();
+  const jsonBytes = value => encoder.encode(JSON.stringify(value)).byteLength;
+  // The empty envelope includes both array brackets, chars:0 and false.
+  // Only the nodes, decimal chars digits and boolean spelling change below.
+  const envelopeBytes = jsonBytes(scene);
+  if (envelopeBytes > responseByteLimit) throw new Error('scene_response_exceeds_1_mib');
   const css = element => {
     if (!styles.has(element)) styles.set(element,getComputedStyle(element));
     return styles.get(element);
@@ -308,19 +319,22 @@ function browserScene(args) {
   };
   const describe = (kind, element, rawText, rects, extra={}) => {
     if (!rects.length) return;
-    if (nodes.length >= nodeLimit || chars >= maxChars) { truncated=true; return; }
+    if (chars >= maxChars) { truncated=true; return; }
     const style=css(element), points=Array.from(rawText);
     const text=points.slice(0,maxChars-chars).join('');
-    if (text.length !== rawText.length) truncated=true;
-    chars+=Array.from(text).length;
-    nodes.push({kind,nodeId:nodeId(element),tag:element.localName,text,rects,sourceContext:sourceContext(element),
+    const nextTruncated = text.length !== rawText.length;
+    const nextChars = chars + Array.from(text).length;
+    const observation = {kind,nodeId:nodeId(element),tag:element.localName,text,rects,sourceContext:sourceContext(element),
       ancestorRegion:kind === 'region' ? null : ancestorRegion(element),
       color:style.color,fontSize:Number.parseFloat(style.fontSize),
-      fontWeight:style.fontWeight,whiteSpace:style.whiteSpace,...extra});
+      fontWeight:style.fontWeight,whiteSpace:style.whiteSpace,...extra};
+    const addedBytes = jsonBytes(observation) + (nodes.length ? 1 : 0);
+    const nextBytes = envelopeBytes + nodeBytes + addedBytes
+      + String(nextChars).length - 1 + (nextTruncated ? -1 : 0);
+    if (nextBytes > responseByteLimit) { truncated=true; return; }
+    nodes.push(observation); nodeBytes+=addedBytes; chars=nextChars; truncated=nextTruncated;
   };
   const root = args.scope ? browserScene({...args.scope,mode:'resolve'}) : document.body;
-  const view = args.view === undefined ? 'content' : args.view;
-  if (view !== 'content' && view !== 'regions') throw new Error('unknown_scene_view');
   if (view === 'regions' && root) {
     const selector = 'main,nav,aside,section,article,header,footer,search,form[aria-label],form[aria-labelledby],[role~=main],[role~=navigation],[role~=complementary],[role~=region],[role~=log],[role~=banner],[role~=contentinfo],[role~=search],[role~=form]';
     const regions = [...(root.matches(selector) ? [root] : []),...root.querySelectorAll(selector)];
@@ -421,15 +435,10 @@ function browserScene(args) {
     }
     for (let i=node.childNodes.length-1;i>=0;i--) stack.push(node.childNodes[i]);
   }
-  const scene = {schema:'masc.browser.scene.v1',documentId:state.id,url:location.href,title:document.title,
-    viewport:{width:innerWidth,height:innerHeight,scrollX,scrollY},nodes,chars,truncated,
-    scope:args.scope || null,view,
-    coverage:'top-document DOM geometry; no paint-order, occlusion, pseudo-element or shadow-tree completeness'};
-  // Refuse rather than shorten URL/document identity or return partial JSON.
-  if (new TextEncoder().encode(JSON.stringify(scene)).byteLength > responseByteLimit)
-    throw new Error('scene_response_exceeds_1_mib');
+  scene.chars=chars; scene.truncated=truncated;
   return scene;
 }
+
 
 function browserDocument() {
   if (window !== window.top) throw new Error('document_observation_requires_top_document');

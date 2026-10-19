@@ -577,12 +577,15 @@ struct MidiCycleRegion {
 struct MidiCycle {
     let start: Double, end: Double, duration: Double
     let period: UInt128, divisor: UInt128
-    init(start: Double, end: Double, duration: Double, period: UInt128, divisor: UInt128) throws {
+    let exactStart: (numerator: UInt128, divisor: UInt128)?
+    init(start: Double, end: Double, duration: Double, period: UInt128, divisor: UInt128,
+         exactStart: (numerator: UInt128, divisor: UInt128)? = nil) throws {
         guard start.isFinite, start >= 0, end.isFinite, end > start,
               duration.isFinite, duration > 0, duration * 1e9 < Double(UInt64.max),
-              divisor > 0, period >= divisor else { throw MidiFailure("invalid common MIDI cycle") }
+              divisor > 0, period >= divisor, exactStart == nil || exactStart!.divisor > 0 else { throw MidiFailure("invalid common MIDI cycle") }
         self.start = start; self.end = end; self.duration = duration
         self.period = period; self.divisor = divisor
+        self.exactStart = exactStart
     }
     private func multiply(_ a: UInt128, _ b: UInt128) throws -> UInt128 {
         let result = a.multipliedReportingOverflow(by: b)
@@ -603,8 +606,16 @@ struct MidiCycle {
         min(period - 1, try multiply(nanos(offset), divisor))
     }
     func phase(elapsed: UInt64, offset: Double) throws -> (index: UInt128, seconds: Double) {
-        let value = try add(multiply(UInt128(elapsed), divisor), base(offset))
-        return (value / period, min(duration.nextDown, Double(value % period) / Double(divisor) / 1e9))
+        let parts = try phaseParts(elapsed: elapsed, offset: offset)
+        return (parts.index, min(duration.nextDown, Double(parts.remainder) / Double(divisor) / 1e9))
+    }
+    func phaseParts(elapsed: UInt64, offset: Double) throws -> (index: UInt128, remainder: UInt128) {
+        let product = UInt128(elapsed).multipliedFullWidth(by: divisor)
+        let low = product.low.addingReportingOverflow(try base(offset))
+        let high = product.high.addingReportingOverflow(low.overflow ? 1 : 0)
+        guard !high.overflow, high.partialValue < period else { throw MidiFailure("common MIDI phase exceeds the host clock range") }
+        let result = period.dividingFullWidth((high: high.partialValue, low: low.partialValue))
+        return (result.quotient, result.remainder)
     }
     private func local(_ position: Double) throws -> UInt128 {
         position >= end ? period : min(period, try multiply(nanos(max(0, position - start), up: true), divisor))

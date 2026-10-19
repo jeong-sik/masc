@@ -19,7 +19,7 @@ assert.ok(token)
 const digest = text => createHash('sha256').update(text).digest('hex')
 const notes = []
 const evidence = { scope: 'real isolated HTTP service and browser; no semantic model or production deployment claim',
-  binaryCommit: expectedCommit, mode, checks: notes }
+  binaryCommit: expectedCommit, checkedAt: new Date().toISOString(), mode, checks: notes }
 
 async function http(path, value, expectedStatus = 200, authenticated = true) {
   const response = await fetch(new URL(path, baseUrl), {
@@ -41,7 +41,7 @@ const htmlSource = `<!doctype html><html lang="ko"><meta charset="utf-8">
 let count=0;document.getElementById('counter').onclick=()=>{count++;document.getElementById('counter').textContent='확인 '+count+'회';document.getElementById('bar').style.width=(80+count*40)+'px'};
 try{void parent.document.body;document.body.dataset.parentAccess='allowed'}catch{document.body.dataset.parentAccess='blocked'}
 try{void localStorage.length;document.body.dataset.storageAccess='allowed'}catch{document.body.dataset.storageAccess='blocked'}
-document.addEventListener('securitypolicyviolation',event=>{if(event.effectiveDirective==='connect-src'&&event.blockedURI==='https://example.invalid/report-probe')document.body.dataset.connectPolicy='blocked'});
+document.addEventListener('securitypolicyviolation',event=>{if(event.effectiveDirective==='connect-src'&&new URL(event.blockedURI).origin==='https://example.invalid')document.body.dataset.connectPolicy='blocked'});
 fetch('https://example.invalid/report-probe').then(()=>document.body.dataset.fetch='allowed',()=>document.body.dataset.fetch='blocked');
 document.getElementById('boundary').textContent='대시보드 접근: '+document.body.dataset.parentAccess;
 </script></html>`
@@ -52,6 +52,14 @@ try {
   assert.equal(health.build.binary_commit, expectedCommit)
   assert.equal(resolve(health.paths.effective_base_path), resolve(expectedBase))
   assert.notEqual(resolve(expectedBase), resolve(process.cwd()), 'proof must use an isolated runtime workspace')
+  assert.ok(Number.isSafeInteger(health.process_memory.pid) && health.process_memory.pid > 0)
+  evidence.servicePid = health.process_memory.pid
+  if (mode === 'resume') {
+    const created = JSON.parse(await readFile(join(output, 'create-receipt.json'), 'utf8'))
+    assert.equal(created.status, 'passed', 'create proof must pass before restart verification')
+    assert.notEqual(evidence.servicePid, created.servicePid, 'stop and restart the isolated service before resume')
+    notes.push('service PID changed since successful create proof')
+  }
   notes.push('actual binary commit and isolated workspace match')
   let records
   if (mode === 'create') {

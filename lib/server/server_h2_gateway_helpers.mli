@@ -73,11 +73,19 @@ val h2_respond_empty :
   ?extra_headers:(string * string) list ->
   H2.Reqd.t -> unit
 
+val h2_read_body_with_limit :
+  sw:Eio.Switch.t ->
+  max_bytes:int ->
+  on_too_large:(unit -> unit) ->
+  on_bad_request:(unit -> unit) ->
+  H2.Reqd.t -> (string -> unit) -> unit
+(** Deliver a valid, complete body within the route's HTTP size limit.
+    A declared or streamed excess discards the reader and schedules
+    [on_too_large]; malformed length schedules [on_bad_request]. Completion
+    and refusal callbacks run through [dispatch_request]. Completion is
+    checked again after deferral, so an intervening error or reset cannot
+    deliver a partial body. Aborted readers never reach the body callback. *)
+
 val h2_read_body : sw:Eio.Switch.t -> H2.Reqd.t -> (string -> unit) -> unit
-(** Reads the request body and hands the bytes read to the callback when the
-    body reader reports end of input. The completion callback and 413 response
-    run through [dispatch_request], outside the connection reader. h2 also reports end of input when it
-    closes the reader because the stream failed, so a failed stream can hand
-    the callback a partial body. A body over
-    [Http_server_eio.Request.max_body_bytes], the HTTP/1 ceiling, is answered
-    with 413 and the callback never runs. *)
+(** {!h2_read_body_with_limit} with the HTTP/1 body ceiling, a 413 response for
+    excess and a 400 response for malformed length. *)

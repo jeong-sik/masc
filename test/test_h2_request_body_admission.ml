@@ -24,6 +24,10 @@ let max_bytes = Masc.Http_server_eio.Request.max_body_bytes
 
 type reply = { status : int; body : string }
 
+type response_failure =
+  | Stream_failure of H2.Client_connection.error
+  | Incomplete_response_body
+
 (* Bytes one side wrote that the other side's [read] has not taken yet. h2
    reads whole frames, and a frame can be split across iovecs or writes, so
    the unconsumed tail is offered again together with the next bytes. *)
@@ -70,84 +74,103 @@ let transfer lane next_write report_write read =
   in
   drain false
 
-(* [send] writes the request body. A [send] that leaves the writer open is a
-   client still uploading: the exchange then completes only if the server
-   answers without waiting for the end of the body. A server that waits stops
-   making progress, and the pump fails instead of hanging once
-   [exchange_stall_timeout_s] passes without server output. *)
-let exchange ~clock ~handler ?(meth = `POST) ?(headers = []) ~send target =
-  let status = ref None in
-  let body = Buffer.create 256 in
-  let complete = ref false in
-  let client =
-    H2.Client_connection.create
-      ~error_handler:(fun _ -> fail "H2 connection error") ()
-  in
-  let request =
-    H2.Request.create ~scheme:"http" meth target
-      ~headers:(H2.Headers.of_list ((":authority", authority) :: headers))
-  in
-  (* h2 holds HEADERS back until the first body write unless told otherwise,
-     and a case that sends no body would never reach the server. *)
-  let writer =
-    H2.Client_connection.request client ~flush_headers_immediately:true request
-      ~error_handler:(fun _ -> fail "H2 stream error")
-      ~response_handler:(fun response reader ->
-        status := Some (H2.Status.to_code response.H2.Response.status);
-        let rec consume () =
-          H2.Body.Reader.schedule_read reader
-            ~on_eof:(fun () -> complete := true)
-            ~on_read:(fun buffer ~off ~len ->
-              Buffer.add_string body (Bigstringaf.substring buffer ~off ~len);
-              consume ())
-        in
-        consume ())
-  in
-  send writer;
-  let server = H2.Server_connection.create handler in
-  let to_server = { pending = "" } in
-  let to_client = { pending = "" } in
-  (* h2's Eio runtime waits the same way: [yield_writer] runs its callback
-     once a response, a body chunk or a stream end is queued. The server's
-     [yield_reader] resumes at once in h2 0.13, so reads never wait. *)
-  let await_server_output () =
+type session =
+  { client : H2.Client_connection.t
+  ; server : H2.Server_connection.t
+  ; to_server : lane
+  ; to_client : lane
+  ; await_output : unit -> unit
+  }
+
+let create_session ~clock ~handler ?(config = H2.Config.default) () =
+  let client = H2.Client_connection.create
+    ~error_handler:(fun _ -> fail "H2 connection error") () in
+  let server = H2.Server_connection.create ~config
+    ~error_handler:(Server_h2_gateway.make_error_handler ()
+      (`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321))) handler in
+  let await_output () =
     let ready, wake = Eio.Promise.create () in
-    H2.Server_connection.yield_writer server (fun () ->
-      Eio.Promise.resolve wake ());
-    Eio.Promise.await ready
+    H2.Server_connection.yield_writer server (fun () -> Eio.Promise.resolve wake ());
+    match Eio.Time.with_timeout clock exchange_stall_timeout_s
+      (fun () -> Eio.Promise.await ready; Ok ()) with
+    | Ok () -> ()
+    | Error `Timeout -> fail "H2 exchange stalled before the response completed"
   in
-  let stalled () = fail "H2 exchange stalled before the response completed" in
-  let rec pump () =
-    let sent =
-      transfer to_server
-        (fun () -> H2.Client_connection.next_write_operation client)
-        (H2.Client_connection.report_write_result client)
-        (H2.Server_connection.read server)
-    in
-    let received =
-      transfer to_client
-        (fun () -> H2.Server_connection.next_write_operation server)
-        (H2.Server_connection.report_write_result server)
-        (H2.Client_connection.read client)
-    in
-    if !complete then ()
-    else
-      match sent, received with
-      | Moved, _ | _, Moved -> pump ()
-      | (Waiting | Closed), Waiting ->
-        await_server_output ();
-        pump ()
-      | (Waiting | Closed), Closed -> stalled ()
+  { client; server; to_server = { pending = "" }; to_client = { pending = "" }; await_output }
+
+let flush_upload session =
+  transfer session.to_server
+    (fun () -> H2.Client_connection.next_write_operation session.client)
+    (H2.Client_connection.report_write_result session.client)
+    (H2.Server_connection.read session.server)
+
+let rec pump_until session finished =
+  if not (finished ()) then (
+    let sent = flush_upload session in
+    let received = transfer session.to_client
+      (fun () -> H2.Server_connection.next_write_operation session.server)
+      (H2.Server_connection.report_write_result session.server)
+      (H2.Client_connection.read session.client) in
+    if not (finished ()) then (
+      (match sent, received with
+       | Moved, _ | _, Moved -> ()
+       | (Waiting | Closed), Waiting -> session.await_output ()
+       | (Waiting | Closed), Closed -> fail "H2 connection closed before response");
+      pump_until session finished))
+
+let open_request session ?(meth = `POST) ?(headers = [])
+    ?(on_response_headers = fun _ -> ()) target =
+  let reply, resolve = Eio.Promise.create () in
+  let finish result =
+    if not (Eio.Promise.is_resolved reply) then Eio.Promise.resolve resolve result
   in
-  (match
-     Eio.Time.with_timeout clock exchange_stall_timeout_s (fun () ->
-       Ok (pump ()))
-   with
-   | Ok () -> ()
-   | Error `Timeout -> stalled ());
-  match !status with
-  | Some status -> { status; body = Buffer.contents body }
-  | None -> fail "the response carried no headers"
+  let request = H2.Request.create ~scheme:"http" meth target
+    ~headers:(H2.Headers.of_list ((":authority", authority) :: headers)) in
+  let writer = H2.Client_connection.request session.client
+    ~flush_headers_immediately:true request
+    ~error_handler:(fun error -> finish (Error (Stream_failure error)))
+    ~response_handler:(fun response reader ->
+      on_response_headers response;
+      let body = Buffer.create 256 in
+      let rec read () = H2.Body.Reader.schedule_read reader
+        ~on_eof:(fun () -> match H2.Body.Reader.completion reader with
+          | Complete -> finish (Ok { status = H2.Status.to_code response.status; body = Buffer.contents body })
+          | Pending | Aborted -> finish (Error Incomplete_response_body))
+        ~on_read:(fun bytes ~off ~len ->
+          Buffer.add_string body (Bigstringaf.substring bytes ~off ~len); read ()) in
+      read ()) in
+  writer, reply
+
+let await_reply session reply =
+  pump_until session (fun () -> Eio.Promise.is_resolved reply);
+  match Eio.Promise.await reply with
+  | Ok response -> response
+  | Error (Stream_failure _ | Incomplete_response_body) ->
+    fail "H2 stream failed before a complete response"
+
+let exchange_on session ?meth ?headers ~send target =
+  let writer, reply = open_request session ?meth ?headers target in
+  send writer;
+  await_reply session reply
+
+(* Existing individual admission cases and continuity cases use the same wire
+   pump. A session keeps the actual client/server connection for later POSTs. *)
+let exchange ~clock ~handler ?meth ?headers ~send target =
+  exchange_on (create_session ~clock ~handler ()) ?meth ?headers ~send target
+
+let reset_stream session stream_id =
+  let frame = Bytes.make 13 '\000' in
+  Bytes.set frame 2 '\004';
+  Bytes.set frame 3 '\003';
+  Bytes.set_int32_be frame 5 stream_id;
+  (* RFC7540 RST_STREAM CANCEL. This is the real server parser input. *)
+  Bytes.set_int32_be frame 9 8l;
+  let bytes = session.to_server.pending ^ Bytes.to_string frame in
+  let len = String.length bytes in
+  let consumed = H2.Server_connection.read session.server
+    (Bigstringaf.of_string bytes ~off:0 ~len) ~off:0 ~len in
+  check int "complete reset frame consumed" len consumed;
+  session.to_server.pending <- ""
 
 (* Closes the writer only once every byte has been handed to the connection.
    h2 sends END_STREAM for a closed writer whenever its send window is empty,
@@ -157,6 +180,18 @@ let exchange ~clock ~handler ?(meth = `POST) ?(headers = []) ~send target =
 let send_whole payload writer =
   H2.Body.Writer.write_string writer payload;
   H2.Body.Writer.flush writer (fun _ -> H2.Body.Writer.close writer)
+
+(* Use RFC7540's initial window rather than h2's enlarged default. Two unread
+   40000-byte bodies would exhaust the connection's 65535-byte credit. The
+   following POST must deliver its body, not merely return a headers-only GET. *)
+let continuity_config = { H2.Config.default with initial_window_size = 65535l }
+let continuity_body = String.make 40000 'x'
+
+let check_next_body session delivered =
+  let reply = exchange_on session ~send:(send_whole continuity_body) "/next" in
+  check int "next POST completes on the same connection" 200 reply.status;
+  check (option int) "next body is delivered whole"
+    (Some (String.length continuity_body)) !delivered
 
 (* Records what the body reader handed over and answers 200, so a case tells a
    delivered body from a refused one and checks how much arrived. *)
@@ -212,6 +247,126 @@ let test_declared_length_at_the_ceiling_is_delivered_whole ~clock sw =
   check int "admitted" 200 reply.status;
   check (option int) "every byte reached the callback" (Some max_bytes)
     !delivered
+
+let test_declared_refusals_preserve_connection_credit ~clock sw =
+  let delivered = ref None in
+  let session = create_session ~clock ~config:continuity_config
+    ~handler:(ceiling_handler ~sw delivered) () in
+  for _ = 1 to 3 do
+    let reply = exchange_on session
+      ~headers:[ "content-length", string_of_int (max_bytes + 1) ]
+      (* Keep the request open: rejection must not wait for its declared body. *)
+      ~send:(fun writer -> H2.Body.Writer.write_string writer continuity_body)
+      "/upload" in
+    check int "declared oversize refused" 413 reply.status;
+    check (option int) "oversize callback never ran" None !delivered
+  done;
+  check_next_body session delivered
+
+let test_streamed_refusal_preserves_connection_credit ~clock sw =
+  let delivered = ref None in
+  let session = create_session ~clock ~config:continuity_config
+    ~handler:(ceiling_handler ~sw delivered) () in
+  let reply = exchange_on session
+    ~send:(send_whole (String.make (max_bytes + 1) 'x')) "/upload" in
+  check int "streamed oversize refused" 413 reply.status;
+  check (option int) "oversize callback never ran" None !delivered;
+  check_next_body session delivered
+
+let test_malformed_body_preserves_next_post headers payload ~clock sw =
+  let delivered = ref None in
+  let session = create_session ~clock ~config:continuity_config
+    ~handler:(ceiling_handler ~sw delivered) () in
+  let reply = exchange_on session ~headers ~send:(send_whole payload) "/upload" in
+  check int "malformed body refused" 400 reply.status;
+  check (option int) "malformed body never reached the application" None !delivered;
+  check_next_body session delivered
+
+let test_malformed_headers_preserve_next_post headers ~clock sw =
+  let delivered = ref None in
+  let deliveries = ref 0 in
+  let seen_status = ref None in
+  let handler reqd = Helpers.h2_read_body ~sw reqd (fun body ->
+    incr deliveries;
+    delivered := Some (String.length body);
+    Helpers.h2_respond_text reqd "delivered") in
+  let session = create_session ~clock ~config:continuity_config ~handler () in
+  let writer, reply = open_request session ~headers
+    ~on_response_headers:(fun response -> seen_status := Some (H2.Status.to_code response.status))
+    "/upload" in
+  (* Invalid HEADERS are refused before the request handler. This upload is
+     already in flight: the pinned H2 parser then resets the closed stream.
+     Keep both the 400 headers and the precise reset visible; a completed HTTP
+     error body is not promised for DATA arriving after malformed HEADERS. *)
+  send_whole continuity_body writer;
+  pump_until session (fun () -> Eio.Promise.is_resolved reply);
+  check (option int) "malformed headers produced HTTP 400" (Some 400) !seen_status;
+  (match Eio.Promise.await reply with
+   | Error (Stream_failure (`Protocol_error (code, _))) ->
+     check bool "in-flight DATA produced the pinned StreamClosed reset" true
+       (code = H2.Error_code.StreamClosed)
+   | Error (Stream_failure (`Malformed_response _ | `Invalid_response_body_length _ | `Exn _))
+   | Error Incomplete_response_body -> fail "unexpected malformed-upload failure"
+   | Ok _ -> fail "expected the pinned parser's reset after in-flight DATA");
+  check int "malformed upload never reached the application" 0 !deliveries;
+  check_next_body session delivered;
+  check int "only the next valid body was delivered" 1 !deliveries
+
+let test_stream_error_prevents_body_delivery ~at_eof ~clock sw =
+  let delivered = ref None in
+  let deliveries = ref 0 in
+  let current = ref None in
+  let handler reqd =
+    current := Some reqd;
+    Helpers.h2_read_body ~sw reqd (fun body ->
+      incr deliveries;
+      delivered := Some (String.length body);
+      Helpers.h2_respond_text reqd "delivered") in
+  let session = create_session ~clock ~config:continuity_config ~handler () in
+  let writer, reply = open_request session "/upload" in
+  if at_eof then send_whole continuity_body writer
+  else H2.Body.Writer.write_string writer continuity_body;
+  ignore (flush_upload session);
+  let reqd = match !current with
+    | Some reqd -> reqd
+    | None -> fail "request headers did not reach the server" in
+  check bool "injection occurs at the intended body boundary" at_eof
+    (match H2.Body.Reader.completion (H2.Reqd.request_body reqd) with
+     | Complete -> true
+     | Pending | Aborted -> false);
+  check (option int) "application work is deferred" None !delivered;
+  H2.Reqd.report_exn reqd (Failure "injected request stream error");
+  check int "stream error response" 500 (await_reply session reply).status;
+  check (option int) "failed body never reached the application" None !delivered;
+  check_next_body session delivered;
+  check int "only the next valid body was delivered" 1 !deliveries
+
+let test_reset_after_eof_prevents_body_delivery ~clock sw =
+  let delivered = ref None in
+  let deliveries = ref 0 in
+  let current = ref None in
+  let handler reqd =
+    current := Some reqd;
+    Helpers.h2_read_body ~sw reqd (fun body ->
+      incr deliveries;
+      delivered := Some (String.length body);
+      Helpers.h2_respond_text reqd "delivered") in
+  let session = create_session ~clock ~config:continuity_config
+    ~handler () in
+  let writer, _reply = open_request session "/upload" in
+  send_whole continuity_body writer;
+  ignore (flush_upload session);
+  check (option int) "EOF only schedules application work" None !delivered;
+  let reqd = match !current with
+    | Some reqd -> reqd
+    | None -> fail "request headers did not reach the server" in
+  check bool "EOF was parsed before the reset" true
+    (match H2.Body.Reader.completion (H2.Reqd.request_body reqd) with
+     | Complete -> true
+     | Pending | Aborted -> false);
+  reset_stream session 1l;
+  check_next_body session delivered;
+  check int "only the next valid body was delivered" 1 !deliveries
 
 let rec rm_rf path =
   if Sys.file_exists path then
@@ -383,6 +538,46 @@ max_reply_bytes=4096
 let write_file path text = Out_channel.with_open_bin path (fun out -> output_string out text)
 let reader_token base_path = match Auth.create_token base_path ~agent_name:"catalog-reader" ~role:Masc_domain.Worker with
   | Ok (token,_) -> token | Error error -> fail (Masc_domain.masc_error_to_string error)
+
+let test_auth_refusals_preserve_next_authenticated_post () =
+  with_gateway @@ fun ~base_path ~clock handler ->
+  let token = reader_token base_path in
+  let session = create_session ~clock ~config:continuity_config ~handler () in
+  for _ = 1 to 3 do
+    let reply = exchange_on session
+      ~headers:[ "content-type", "application/json" ]
+      ~send:(send_whole continuity_body) "/graphql" in
+    check int "tokenless upload refused" 401 reply.status
+  done;
+  let reply = exchange_on session
+    ~headers:[ "content-type", "application/json"; "authorization", "Bearer " ^ token ]
+    ~send:(send_whole (String.make 40000 ' ' ^ graphql_body)) "/graphql" in
+  check int "authenticated POST completes on the same connection" 200 reply.status;
+  let project = Yojson.Safe.Util.(Yojson.Safe.from_string reply.body
+    |> member "data" |> member "status" |> member "project") in
+  check bool "the next POST's query was executed" true (project <> `Null)
+
+let test_oauth_refusals_preserve_next_registration () =
+  Masc_test_deps.with_process_env "MASC_OAUTH_ENABLED" (Some "1") @@ fun () ->
+  with_gateway @@ fun ~base_path:_ ~clock handler ->
+  let session = create_session ~clock ~config:continuity_config ~handler () in
+  let headers = [ "content-type", "application/json" ] in
+  for _ = 1 to 3 do
+    let reply = exchange_on session ~headers
+      ~send:(send_whole continuity_body) "/oauth/register" in
+    check int "OAuth oversize refused" 400 reply.status;
+    check string "OAuth body limit produced the refusal" "request body is too large"
+      Yojson.Safe.Util.(Yojson.Safe.from_string reply.body
+        |> member "error_description" |> to_string)
+  done;
+  let body = String.make 10000 ' ' ^
+    {|{"redirect_uris":["http://127.0.0.1:48765/callback"]}|} in
+  let reply = exchange_on session ~headers ~send:(send_whole body) "/oauth/register" in
+  check int "next registration completes on the same connection" 201 reply.status;
+  let client_id = Yojson.Safe.Util.(Yojson.Safe.from_string reply.body
+    |> member "client_id" |> to_string) in
+  check bool "registration body was executed" true (String.length client_id > 0)
+
 let get_h2 ~clock ~handler ?token path =
   let headers = Option.fold ~none:[] ~some:(fun token -> ["authorization","Bearer " ^ token]) token in
   exchange ~clock ~handler ~meth:`GET ~headers ~send:H2.Body.Writer.close path
@@ -479,6 +674,35 @@ let () =
             test_unauthenticated_graphql_post_is_refused_before_its_body
         ; test_case "an authenticated POST still reads its body" `Quick
             test_authenticated_graphql_post_reads_its_body
+        ] )
+    ; ( "body lifecycle and connection continuity"
+      , [ test_case "repeated declared 413 uploads preserve the next POST" `Quick
+            (with_request_scope test_declared_refusals_preserve_connection_credit)
+        ; test_case "streamed 413 preserves the next POST" `Quick
+            (with_request_scope test_streamed_refusal_preserves_connection_credit)
+        ; test_case "non-decimal Content-Length is refused without delivery" `Quick
+            (with_request_scope
+              (test_malformed_headers_preserve_next_post [ "content-length", "0x10" ]))
+        ; test_case "conflicting Content-Length is refused without delivery" `Quick
+            (with_request_scope
+              (test_malformed_headers_preserve_next_post
+                [ "content-length", "2"; "content-length", "3" ]))
+        ; test_case "short fixed body is refused without delivery" `Quick
+            (with_request_scope
+              (test_malformed_body_preserves_next_post [ "content-length", "10" ] "abc"))
+        ; test_case "missing fixed body is refused without delivery" `Quick
+            (with_request_scope
+              (test_malformed_body_preserves_next_post [ "content-length", "10" ] ""))
+        ; test_case "stream error after a prefix prevents delivery" `Quick
+            (with_request_scope (test_stream_error_prevents_body_delivery ~at_eof:false))
+        ; test_case "stream error after EOF before dispatch prevents delivery" `Quick
+            (with_request_scope (test_stream_error_prevents_body_delivery ~at_eof:true))
+        ; test_case "reset after EOF before dispatch prevents delivery" `Quick
+            (with_request_scope test_reset_after_eof_prevents_body_delivery)
+        ; test_case "repeated 401 uploads preserve authenticated GraphQL POST" `Quick
+            test_auth_refusals_preserve_next_authenticated_post
+        ; test_case "repeated OAuth oversize uploads preserve registration POST" `Quick
+            test_oauth_refusals_preserve_next_registration
         ] )
     ; ( "board read gate"
       , [ test_case "strict auth refuses token-less Board reads" `Quick

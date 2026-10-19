@@ -46,6 +46,7 @@ let h2_respond_body
     ~content_type
     h2_reqd
     body =
+  H2.Body.Reader.discard (H2.Reqd.request_body h2_reqd);
   let final_body, compression_headers = maybe_compress ~compress h2_reqd body in
   let headers = H2.Headers.of_list ([
     ("content-type", content_type);
@@ -131,6 +132,7 @@ let h2_respond_bytes
   h2_respond_body ~status ~extra_headers ~compress ~content_type h2_reqd body
 
 let h2_respond_empty ?(status = `No_content) ?(extra_headers = []) h2_reqd =
+  H2.Body.Reader.discard (H2.Reqd.request_body h2_reqd);
   (* A 304 has no body, but Content-Length: 0 would falsely describe the
      selected 200 representation. Omit the field on conditional responses. *)
   let headers = H2.Headers.of_list
@@ -141,37 +143,46 @@ let h2_respond_empty ?(status = `No_content) ?(extra_headers = []) h2_reqd =
   let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
   h2_close_after_flush writer
 
-(* The ceiling is the one HTTP/1 applies, so a route admits the same bodies
-   whichever transport the client negotiated. A declared length over it is
-   refused before any byte is read; a streamed body is refused at the chunk
-   that crosses it. Closing the reader makes h2 drop the DATA frames still
-   arriving on this stream instead of buffering them. *)
-let h2_read_body ~sw h2_reqd callback =
+let h2_read_body_with_limit ~sw ~max_bytes ~on_too_large ~on_bad_request
+    h2_reqd callback =
   let body = H2.Reqd.request_body h2_reqd in
-  let max_bytes = Http_server_eio.Request.max_body_bytes in
-  let respond_too_large () =
-    H2.Body.Reader.close body;
-    dispatch_request ~sw h2_reqd (fun () ->
-      h2_respond_text
-        h2_reqd
-        (Http_server_eio.Request.too_large_body max_bytes)
-        ~status:`Payload_too_large)
+  let reject respond =
+    H2.Body.Reader.discard body;
+    dispatch_request ~sw h2_reqd respond
   in
   match H2.Request.body_length (H2.Reqd.request h2_reqd) with
+  | `Error `Bad_request -> reject on_bad_request
   | `Fixed declared when Int64.compare declared (Int64.of_int max_bytes) > 0 ->
-    respond_too_large ()
-  | `Fixed _ | `Unknown | `Error `Bad_request ->
+    reject on_too_large
+  | `Fixed _ | `Unknown ->
     let buf = Http_body_buffer.create 4096 in
     let rec read_loop () =
       H2.Body.Reader.schedule_read body
         ~on_eof:(fun () ->
-          dispatch_request ~sw h2_reqd (fun () ->
-            callback (Http_body_buffer.contents buf)))
+          match H2.Body.Reader.completion body with
+          | H2.Body.Reader.Pending | Aborted -> ()
+          | Complete ->
+              dispatch_request ~sw h2_reqd (fun () ->
+                (* The parser can observe a reset after EOF, before the
+                   request fiber gets its deferred turn. *)
+                match H2.Body.Reader.completion body with
+                | Pending | Aborted -> ()
+                | Complete -> callback (Http_body_buffer.contents buf)))
         ~on_read:(fun bigstring ~off ~len ->
           if Http_body_buffer.length buf + len > max_bytes
-          then respond_too_large ()
+          then reject on_too_large
           else (
             Http_body_buffer.add_bigstring buf bigstring ~off ~len;
             read_loop ()))
     in
     read_loop ()
+
+let h2_read_body ~sw h2_reqd callback =
+  let max_bytes = Http_server_eio.Request.max_body_bytes in
+  h2_read_body_with_limit ~sw ~max_bytes
+    ~on_too_large:(fun () ->
+      h2_respond_text h2_reqd (Http_server_eio.Request.too_large_body max_bytes)
+        ~status:`Payload_too_large)
+    ~on_bad_request:(fun () ->
+      h2_respond_text h2_reqd "Malformed request body length" ~status:`Bad_request)
+    h2_reqd callback

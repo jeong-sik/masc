@@ -1171,6 +1171,13 @@ let run_turn
     Keeper_turn_boundaries.history_at_start_of_messages
       (Keeper_context_runtime.messages_of_context ctx.ctx_work)
   in
+  (* Capture before prompt/Gate/provider admission can synthesize a missing
+     ToolResult. Native journal recovery starts from its retained initial seed,
+     not the latest checkpoint that may already contain replayed settlements. *)
+  let argument_demotion_seed = match native_resume with
+    | Some resumed -> Keeper_direct_native_continuation.initial_messages resumed
+    | None -> Keeper_context_runtime.messages_of_context ctx.ctx_work
+  in
   (* RFC librarian-lifecycle 4.6: a restart line must not be ahead of the
      restart. A turn that knows the saved history holds no atom says so now; a
      turn whose checkpoint version was superseded says so after the first stage
@@ -1938,6 +1945,7 @@ let run_turn
                       ~agent_core_tools
                       ~checkpoint_sink
                       ~initial_messages
+                      ~argument_demotion_seed
                       ~model_input_projection
                       ~hooks
                       ?approval_gate

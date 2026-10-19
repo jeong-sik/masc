@@ -10,6 +10,10 @@ end)
 type completed_arguments =
   (Agent_core.Types.content_block * string) Occurrences.t
 
+let protect_argument_prefix ~through_message arguments =
+  Occurrences.filter (fun (message_index, _) _ -> message_index > through_message) arguments
+;;
+
 type argument_binding_error =
   | Invalid_argument_seed of Keeper_transcript_unit.structural_error
   | Argument_seed_prefix_mismatch of Keeper_replay_prefix.prefix_mismatch
@@ -259,10 +263,7 @@ type address_memo = (occurrence, memo_entry) Hashtbl.t
 
 let create_address_memo () = Hashtbl.create 64
 
-let materialize ~store ~addresses ~pending messages =
-  if pending = []
-  then { messages; reverted = 0 }
-  else (
+let pending_lookup pending =
     let placeholders = Hashtbl.create (List.length pending) in
     List.iter
       (fun (entry : pending) ->
@@ -291,6 +292,57 @@ let materialize ~store ~addresses ~pending messages =
         | Some entry when block == entry.placeholder -> Some entry
         | Some _ | None -> None)
     in
+    planned_entry
+;;
+
+type materialized_replay =
+  (Agent_core.Types.content_block * Agent_core.Types.content_block) Occurrences.t
+
+let capture_materialized ~pending ~before ~after =
+  let lookup = pending_lookup pending in
+  let rec blocks outcomes before after =
+    match before, after with
+    | [], [] -> Some outcomes
+    | block :: before, replacement :: after ->
+      (match lookup block with
+       | Some entry ->
+         blocks (Occurrences.add entry.occurrence (entry.original, replacement) outcomes) before after
+       | None -> if block = replacement then blocks outcomes before after else None)
+    | [], _ :: _ | _ :: _, [] -> None
+  in
+  let rec messages outcomes before after =
+    match before, after with
+    | [], [] -> Some outcomes
+    | (original : Agent_core.Types.message) :: before,
+      (materialized : Agent_core.Types.message) :: after ->
+      if original.role <> materialized.role || original.name <> materialized.name
+         || original.tool_call_id <> materialized.tool_call_id
+         || original.metadata <> materialized.metadata then None
+      else Option.bind (blocks outcomes original.content materialized.content)
+        (fun outcomes -> messages outcomes before after)
+    | [], _ :: _ | _ :: _, [] -> None
+  in
+  messages Occurrences.empty before after
+;;
+
+let replay_materialized captured ~pending messages =
+  let lookup = pending_lookup pending in
+  List.map (fun (message : Agent_core.Types.message) ->
+    let content = List.map (fun block ->
+      match lookup block with
+      | None -> block
+      | Some entry ->
+        (match Option.bind captured (Occurrences.find_opt entry.occurrence) with
+         | Some (original, replacement) when original == entry.original -> replacement
+         | Some _ | None -> entry.original)) message.content in
+    {message with content}) messages
+;;
+
+let materialize ~store ~addresses ~pending messages =
+  if pending = []
+  then { messages; reverted = 0 }
+  else (
+    let planned_entry = pending_lookup pending in
     let address_of (entry : pending) =
       match Hashtbl.find_opt addresses entry.occurrence with
       | Some memo when memo.original == entry.original -> Some memo.address

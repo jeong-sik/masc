@@ -170,7 +170,10 @@ candidates = ["overflow.sample", "fixture.sample"]
       latest.Turn_record.runtime_profile
   | [] -> fail "the fallback response observation is missing"
 
-let test_historical_tool_results ~completed ~reader_available () =
+type argument_seed = Completed_seed | Open_seed | No_seed
+
+let test_historical_tool_results ?(argument_seed = Completed_seed)
+    ?(input_policy = Keeper_input_policy.Small) ~completed ~reader_available () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   Masc_test_deps.init_eio_clock ~sw env;
@@ -185,8 +188,12 @@ let test_historical_tool_results ~completed ~reader_available () =
      | None -> Llm_provider.Model_catalog.clear_global ()
      | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
     remove base_path);
+  let historical_input = `Assoc ["command", `String (String.make 4000 'h')] in
+  let active_input = `Assoc ["command", `String (String.make 4000 'a')] in
   let tool_call_reply =
-    {|{"id":"tool-call-1","model":"fixture","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"active-call-1","type":"function","function":{"name":"fixture_tool","arguments":"{}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}|}
+    Printf.sprintf
+      {|{"id":"tool-call-1","model":"fixture","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"active-call-1","type":"function","function":{"name":"fixture_tool","arguments":%s}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}|}
+      (Yojson.Safe.to_string (`String (Yojson.Safe.to_string active_input)))
   in
   let final_reply =
     Exact_output_fixture.openai_response (`Assoc ["answer", `String "accepted"])
@@ -221,13 +228,18 @@ streaming = false
    | Ok (Runtime.Initialized_degraded _) -> fail "fixture catalog unexpectedly unavailable"
    | Error error -> fail (Runtime.strict_init_error_to_string error));
   let active_payload = String.make 4000 'w' in
+  let executed_inputs = ref [] in
+  let command_param : Agent_core.Types.tool_param =
+    { name = "command"; description = "Command supplied by this fixture."
+    ; param_type = Agent_core.Types.String; required = true } in
   let active_tool =
     Agent_core.Tool.create
       ~descriptor:(Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Concurrent)
       ~name:"fixture_tool"
       ~description:"Callable tool for current turn."
-      ~parameters:[]
-      (fun _ ->
+      ~parameters:[command_param]
+      (fun input ->
+         executed_inputs := input :: !executed_inputs;
          Ok
            { Agent_core.Types.content = active_payload
            ; content_blocks = None
@@ -249,7 +261,7 @@ streaming = false
       }
     ; { role = Agent_core.Types.Assistant
       ; content = [ Agent_core.Types.ToolUse
-          { id = "call-demote-1"; name = "fixture_tool"; input = `Assoc [] } ]
+          { id = "call-demote-1"; name = "fixture_tool"; input = historical_input } ]
       ; name = None
       ; tool_call_id = None
       ; metadata = []
@@ -270,6 +282,13 @@ streaming = false
       }
     ]
   in
+  let argument_demotion_seed = match argument_seed with
+    | Completed_seed -> Some initial_messages
+    | No_seed -> None
+    | Open_seed ->
+      (* The dispatch view already has a closer, but the raw pre-admission
+         seed ends at the call. That closer cannot grant argument authority. *)
+      Some (List.take 2 initial_messages) in
   let trace_id = "demote-proof-trace" in
   if completed then (
     let position = match Keeper_turn_boundaries.position_of_messages initial_messages with
@@ -291,11 +310,9 @@ streaming = false
       { position = { trace_id; end_atom = 1; last_atom_digest }; boundary_lines_seen = 1 } with
     | Ok () -> ()
     | Error error -> fail (Keeper_librarian_progress.write_error_to_string error));
-  let tools =
-    if not reader_available then [active_tool]
-    else
-      let schema = Keeper_runtime_schemas_toml.artifact_read in
-      let reader = Tool_bridge.agent_core_tool_of_masc_with_execution_env
+  let reader =
+    let schema = Keeper_runtime_schemas_toml.artifact_read in
+    Tool_bridge.agent_core_tool_of_masc_with_execution_env
         ~base_path
         ~descriptor:(Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Concurrent)
         ~model_projection:(fun () -> Tool_output.bounded_inline_model_projection)
@@ -309,13 +326,18 @@ streaming = false
           | Tool_result.Failed class_ ->
             Tool_result.make_err ~tool_name:schema.name ~class_
               ~start_time:(Tool_timing.start ()) execution.raw_output
-          | Tool_result.Deferred () -> fail "artifact read unexpectedly deferred") in
-      [active_tool; reader]
+          | Tool_result.Deferred () -> fail "artifact read unexpectedly deferred")
   in
-  let expect_demoted = completed && reader_available in
+  let tools = if reader_available then [active_tool; reader] else [active_tool] in
+  check bool "only the canonical offered reader grants retrieval" reader_available
+    (Result.is_ok (Keeper_recovery_transmission.require_reader tools));
+  let expect_demoted = completed && reader_available
+    && (match input_policy with Keeper_input_policy.Small -> true | Wide -> false) in
+  let expect_arguments_demoted = expect_demoted
+    && (match argument_seed with Completed_seed -> true | Open_seed | No_seed -> false) in
   let result =
     Keeper_turn_driver.run_named ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
-      ~input_policy:Keeper_input_policy.Small
+      ~input_policy ?argument_demotion_seed
       ~session_id:trace_id
       ~system_prompt:"Demotion fixture."
       ~runtime_id:"fixture.sample"
@@ -332,12 +354,51 @@ streaming = false
    | Error error -> fail (Agent_core.Error.to_string error));
   check int "the Keeper completed 2 requests" 2
     (Exact_output_fixture.post_count server);
+  check bool "the active tool executes once with the exact long original input" true
+    (!executed_inputs = [active_input]);
   let second_body = List.nth (Exact_output_fixture.request_bodies server) 1 in
   check bool "historical body is replaced only with completion and reader" (not expect_demoted)
     (String_util.contains_substring second_body historical_payload);
   check bool "current-turn tool body remained verbatim inline" true
     (String_util.contains_substring second_body active_payload);
   let messages = Yojson.Safe.Util.(Yojson.Safe.from_string second_body |> member "messages" |> to_list) in
+  let wire_arguments messages id =
+    let calls = List.concat_map (fun message ->
+      match Yojson.Safe.Util.member "tool_calls" message with
+      | `List calls -> calls
+      | `Null -> []
+      | _ -> fail "tool_calls must be an array") messages in
+    let call = List.find (fun call -> Yojson.Safe.Util.member "id" call = `String id) calls in
+    Yojson.Safe.Util.(member "function" call |> member "arguments" |> to_string)
+    |> Yojson.Safe.from_string in
+  let historical_arguments = wire_arguments messages "call-demote-1" in
+  check bool "current-turn arguments remain exact on the second HTTP request" true
+    (wire_arguments messages "active-call-1" = active_input);
+  let first_messages = Yojson.Safe.Util.(
+    List.hd (Exact_output_fixture.request_bodies server)
+    |> Yojson.Safe.from_string |> member "messages" |> to_list) in
+  check bool "historical argument binding remains frozen across actual requests" true
+    (wire_arguments first_messages "call-demote-1" = historical_arguments);
+  (match Tool_output.normalized_artifact_ref_of_json historical_arguments with
+   | Tool_output.Not_normalized_artifact_ref
+   | Tool_output.Invalid_normalized_artifact_ref _ ->
+     check bool "unproven or unreadable historical arguments stay exact" false expect_arguments_demoted;
+     check bool "historical original JSON remains inline" true
+       (historical_arguments = historical_input)
+   | Tool_output.Decoded_normalized_artifact_ref reference ->
+     check bool "only proven completed arguments become references" true expect_arguments_demoted;
+     check string "argument artifact MIME" "application/json" reference.mime;
+     let page = match Agent_core.Tool.execute reader
+         (`Assoc ["sha256", `String reference.sha256]) with
+       | Error error -> fail error.Agent_core.Types.message
+       | Ok result -> Yojson.Safe.from_string result.content in
+     check bool "canonical bridged reader returns the complete argument artifact" true
+       Yojson.Safe.Util.(member "eof" page |> to_bool);
+     let fetched = Yojson.Safe.Util.(member "content" page |> to_string) in
+     check string "canonical reader restores exact original argument bytes"
+       (Yojson.Safe.to_string historical_input) fetched;
+     check bool "the retrieved argument JSON is reusable without loss" true
+       (Yojson.Safe.from_string fetched = historical_input));
   let tool_messages =
     List.filter
       (fun msg -> Yojson.Safe.Util.member "role" msg = `String "tool")
@@ -390,5 +451,11 @@ let () =
           (test_historical_tool_results ~completed:false ~reader_available:true)
       ; test_case "without a reader historical bodies stay inline" `Quick
           (test_historical_tool_results ~completed:true ~reader_available:false)
+      ; test_case "without a raw seed historical arguments stay inline" `Quick
+          (test_historical_tool_results ~argument_seed:No_seed ~completed:true ~reader_available:true)
+      ; test_case "a dispatch closer cannot complete raw open arguments" `Quick
+          (test_historical_tool_results ~argument_seed:Open_seed ~completed:true ~reader_available:true)
+      ; test_case "Wide keeps historical arguments and results inline" `Quick
+          (test_historical_tool_results ~input_policy:Keeper_input_policy.Wide ~completed:true ~reader_available:true)
       ]
     ]

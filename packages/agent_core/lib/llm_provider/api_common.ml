@@ -682,7 +682,7 @@ let message_has_tool_result (msg : message) =
     msg.content
 ;;
 
-let merge_tool_result_followup_user_messages messages =
+let merge_tool_result_followup_user_messages_with_source_indices messages =
   let mergeable_followup (msg : message) =
     msg.role = User
     && msg.name = None
@@ -690,7 +690,7 @@ let merge_tool_result_followup_user_messages messages =
     && Conversation_metadata.is_mergeable_followup msg.metadata
   in
   let rec aux acc = function
-    | ({ role = Tool; _ } as tool_msg) :: (followup : message) :: rest
+    | (({ role = Tool; _ } as tool_msg), tool_indices) :: ((followup : message), followup_indices) :: rest
       when message_has_tool_result tool_msg && mergeable_followup followup ->
       let merged =
         { tool_msg with
@@ -698,12 +698,16 @@ let merge_tool_result_followup_user_messages messages =
         ; metadata = tool_msg.metadata @ followup.metadata
         }
       in
-      aux (merged :: acc) rest
-    | ({ role = System | User | Assistant | Tool; _ } as msg) :: rest ->
-      aux (msg :: acc) rest
+      aux ((merged, tool_indices @ followup_indices) :: acc) rest
+    | (({ role = System | User | Assistant | Tool; _ } as msg), indices) :: rest ->
+      aux ((msg, indices) :: acc) rest
     | [] -> List.rev acc
   in
-  aux [] messages
+  aux [] (List.mapi (fun index message -> message, [index]) messages)
+;;
+
+let merge_tool_result_followup_user_messages messages =
+  List.map fst (merge_tool_result_followup_user_messages_with_source_indices messages)
 ;;
 
 let message_to_json (msg : message) =

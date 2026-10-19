@@ -45,6 +45,11 @@ type argument_binding_error =
   | Argument_replay_prefix_mismatch of Keeper_replay_prefix.restore_error
   | Argument_occurrence_mismatch
 
+val protect_argument_prefix : through_message:int -> completed_arguments -> completed_arguments
+(** Keep arguments after this original request message occurrence eligible.
+    Earlier arguments stay verbatim when a signed reasoning replay depends on
+    their exact prefix. This can only narrow an already frozen set. *)
+
 val bind_completed_arguments :
   completed_before:int ->
   seed:Agent_core.Types.message list ->
@@ -138,6 +143,23 @@ type materialize_outcome =
             restored. Non-zero means the list is larger than the plan the cut
             was chosen against, so the caller must run the cut again. *)
   }
+
+type materialized_replay
+
+val capture_materialized :
+  pending:pending list -> before:Agent_core.Types.message list ->
+  after:Agent_core.Types.message list -> materialized_replay option
+(** Capture the actual retained slot replacements, including failed writes
+    restored to their originals. [None] rejects a changed message/block shape
+    or changes outside planned placeholders. Pure; no store retry. *)
+
+val replay_materialized :
+  materialized_replay option -> pending:pending list ->
+  Agent_core.Types.message list -> Agent_core.Types.message list
+(** Apply exactly the captured outcomes to another plan over the same source
+    occurrences, guarded by immutable original identity. Missing entries or
+    [None] restore original blocks. This lets reasoning comparisons vary only
+    arguments, without retrying a failed Result write inside the comparison. *)
 
 type address_memo
 (** The content addresses {!materialize} has already computed in one provider

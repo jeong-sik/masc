@@ -478,6 +478,14 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 | `PgUp/PgDn` | page |
 | `Home/End` | top/bottom |
 
+When a selected question is too tall for the compact Approvals panel, it keeps
+a short preview from the original question instead of disappearing behind a
+hidden-question count. Where space permits, the preview points to `a` for the
+complete Ask and its answers. The preview does not select or submit an answer;
+the existing answer reader keeps the full prompt, choices and draft. With only
+one content row, the selected preview takes that row; with none, no extra hidden
+count is drawn beyond the available space.
+
 ## Work / Task Review
 
 | Keys | What it does |

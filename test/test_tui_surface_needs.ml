@@ -246,14 +246,14 @@ let test_navigation_settles_while_a_full_reader_is_pending () =
     (Order.pending_scoped ~needs:(needs Types.Board) reads = [Order.Board]);
   let reads, accepted = Order.take reads navigation in
   check bool "Board can be admitted before the unrelated full read finishes" true
-    (List.mem Order.Board accepted);
+    (List.mem Order.Board (List.map Order.dataset_source accepted));
   check bool "the provider history still has its original pending owner" true
     (List.mem Order.Provider_history (Order.pending ~needs:(needs Types.Metrics) reads));
   check bool "settled navigation is not kept pending by full publication ownership" true
     (Order.pending_scoped ~needs:(needs Types.Board) reads = []);
   let _, accepted = Order.take reads full in
   check bool "the full read retains its independent provider result" true
-    (List.mem Order.Provider_history accepted);
+    (List.mem Order.Provider_history (List.map Order.dataset_source accepted));
   let successor = Types.Http_refresh_order.for_navigation
     ~collection_inflight:false full_ticket in
   check bool "navigation without a full pass starts a new interval" false
@@ -267,13 +267,13 @@ let test_navigation_owns_overlapping_data_and_cleanup () =
     ~started_ns:2L reads in
   let reads, accepted = Order.take reads full in
   check bool "late full accounts do not replace the newer request" false
-    (List.mem Order.Account_emails accepted);
+    (List.mem Order.Account_emails (List.map Order.dataset_source accepted));
   check bool "full completion does not release the newer accounts owner" true
     (List.mem Order.Account_emails (Order.pending ~needs:(needs Types.Config) reads));
   let reads = Order.finish reads full in
   let reads, accepted = Order.take reads navigation in
   check bool "original navigation admits its accounts" true
-    (List.mem Order.Account_emails accepted);
+    (List.mem Order.Account_emails (List.map Order.dataset_source accepted));
   let _, duplicate = Order.take reads navigation in
   check bool "a repeated completion cannot apply again" true (duplicate = [])
 
@@ -289,7 +289,7 @@ let test_withdrawn_surface_source_cannot_settle_its_successor () =
   let reads = Order.finish reads old in
   let _, accepted = Order.take reads current in
   check bool "old completion and cleanup leave the successor intact" true
-    (List.mem Order.Board accepted)
+    (List.mem Order.Board (List.map Order.dataset_source accepted))
 
 let test_navigation_collectors_settle_independently_and_revalidate_once () =
   let module Order = Types.Surface_read_order in
@@ -305,7 +305,7 @@ let test_navigation_collectors_settle_independently_and_revalidate_once () =
   check int "both collectors are tracked" 2 (Order.navigation_count reads);
   let reads, accepted = Order.take reads board in
   check bool "the destination can apply before the old collector finishes" true
-    (List.mem Order.Board accepted);
+    (List.mem Order.Board (List.map Order.dataset_source accepted));
   check bool "application alone does not complete its collector" true
     (Order.navigation_active reads board);
   let reads = Order.finish reads board in
@@ -318,7 +318,7 @@ let test_navigation_collectors_settle_independently_and_revalidate_once () =
   check bool "a retained revalidation still sees the real remaining collector" false launch;
   let reads, accepted = Order.take reads work in
   check bool "the first collector retains its independent source" true
-    (List.mem Order.Planning accepted);
+    (List.mem Order.Planning (List.map Order.dataset_source accepted));
   let reads = Order.finish reads work in
   let followup, launch = Types.take_scoped_refresh_followup
     ~full_refresh_inflight:false ~scoped_refresh_inflight:(Order.navigation_in_flight reads)
@@ -343,9 +343,9 @@ let test_completed_newer_navigation_does_not_restore_old_identity_authority () =
     ~started_ns:3L reads in
   let reads, accepted = Order.take reads usage in
   check bool "the old collector cannot overwrite newer shared accounts" false
-    (List.mem Order.Account_emails accepted);
+    (List.mem Order.Account_emails (List.map Order.dataset_source accepted));
   check bool "the old collector keeps independent history" true
-    (List.mem Order.Provider_history accepted);
+    (List.mem Order.Provider_history (List.map Order.dataset_source accepted));
   let reads = Order.finish reads usage in
   check bool "old cleanup leaves the current collector active" true
     (Order.navigation_active reads config);
@@ -398,7 +398,7 @@ let test_log_filter_read_supersedes_old_collectors_without_releasing_them () =
   check bool "a late full page cannot replace the filtered page" true (old_full_sources = []);
   let _, current_filter_sources = Order.take full_reads current_filter in
   check bool "the filter retains its source against full completion" true
-    (List.mem Order.System_logs current_filter_sources);
+    (List.mem Order.System_logs (List.map Order.dataset_source current_filter_sources));
   let reads, navigation = Order.dispatch ~kind:Order.Navigation ~needs:(needs Types.System_logs)
     ~started_ns:1L Order.initial in
   let reads, filter = Order.dispatch ~kind:Order.Independent ~needs:(needs Types.System_logs)
@@ -416,7 +416,7 @@ let test_log_filter_read_supersedes_old_collectors_without_releasing_them () =
     (Order.navigation_in_flight reads);
   let _, current_sources = Order.take reads newer_filter in
   check bool "the newest filter keeps the log data owner" true
-    (List.mem Order.System_logs current_sources)
+    (List.mem Order.System_logs (List.map Order.dataset_source current_sources))
 
 let () =
   run "tui_surface_needs"

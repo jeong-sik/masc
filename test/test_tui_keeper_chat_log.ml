@@ -908,7 +908,7 @@ let test_golden_journal_equals_wire () =
     (wire_tagged_deltas failed) (journal_tagged_deltas failed);
   check bool "the failed turn ends in the public run_failed message" true
     (match List.rev (journal_tagged_deltas failed) with
-     | (Some 4, Live.Run_failed { message = E.public_error_message }) :: _ -> true
+     | (Some 4, Live.Run_failed { message }) :: _ -> String.equal message E.public_error_message
      | _ -> false)
 
 let test_golden_journal_equals_wire_in_chunks () =

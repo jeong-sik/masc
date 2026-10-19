@@ -1054,6 +1054,9 @@
  ;; Fs_compat (tree/file helpers) and Agent_core directly from the unwrapped libs.
  masc.keeper_runtime
  masc.fs_compat
+ ;; test_tool_blob_store clears the durable tool-call index between cases; the
+ ;; index library is unwrapped, so its module is referenced bare.
+ masc.keeper_tool_call_index
  masc.agent_core))
 
 (test
@@ -3485,7 +3488,7 @@
 (test
  (name test_tui_context_inspector_supersede)
  (modules test_tui_context_inspector_supersede)
- (libraries masc_tui_image_preview alcotest masc_tui_types))
+ (libraries masc_tui_image_preview alcotest masc_tui_types masc_tui_context_inspector))
 
 (test
  (name test_tui_chat_timeline_assembly)
@@ -3758,7 +3761,7 @@
 (test
  (name test_tui_server_identity_refresh)
  (modules test_tui_server_identity_refresh)
- (libraries masc.config masc_tui_runtime_config_snapshot masc_tui_runtime_config_edit masc_tui_runtime_config_receipt masc_tui_model_form masc_tui_model_runtime_table masc_tui_runtime_account_form masc_tui_runtime_config_view masc_tui_keeper_config masc_tui_metrics_tail masc.dated_jsonl masc_tui_ask_projection masc_tui_response_decode masc_tui_kept_reads masc.masc_core masc.masc_types eio eio_main masc_tui_child_content masc_tui_native_tasks alcotest masc masc.browser_lane masc_tui_lane_subscriptions masc_tui_lane_addons masc_tui_types masc_workspace masc_tui_context_state masc_tui_fetched masc_tui_keeper_control masc_tui_board_detail masc_tui_message_input masc_tui_lane_installer masc_tui_voice_wizard_session masc_tui_account_login masc.voice_setup masc.voice_wizard unix yojson))
+ (libraries masc.config masc_tui_runtime_config_snapshot masc_tui_runtime_config_edit masc_tui_runtime_config_receipt masc_tui_model_form masc_tui_model_runtime_table masc_tui_runtime_account_form masc_tui_runtime_config_view masc_tui_keeper_config masc_tui_metrics_tail masc.dated_jsonl masc_tui_ask_projection masc_tui_response_decode masc_tui_kept_reads masc.masc_core masc.masc_types eio eio_main masc_tui_child_content masc_tui_native_tasks alcotest masc masc.browser_lane masc_tui_lane_subscriptions masc_tui_lane_addons masc_tui_types masc_workspace masc_tui_context_state masc_tui_fetched masc_tui_loader masc_tui_overview_tasks masc_tui_task_flow masc_tui_agenda masc_tui_keeper_control masc_tui_board_detail masc_tui_message_input masc_tui_lane_installer masc_tui_voice_wizard_session masc_tui_account_login masc.voice_setup masc.voice_wizard unix yojson masc.runtime masc_tui_async_protocol masc_tui_context_inspector))
 
 (test
  (name test_tool_transport_prefix)
@@ -6183,4 +6186,4 @@
 (test
  (name test_keeper_turn_transcript_http)
  (modules test_keeper_turn_transcript_http)
- (libraries alcotest masc masc_server masc_tui_context_inspector eio_main httpun uri yojson unix))
+ (libraries alcotest masc masc.masc_types masc.fs_compat masc_keeper_chat_delivery_identity masc_server masc_tui_context_inspector eio eio_main httpun uri yojson unix))

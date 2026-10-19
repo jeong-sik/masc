@@ -268,6 +268,15 @@ let test_a_searxng_url_the_reader_would_refuse_is_not_written () =
     | Ok _ -> Alcotest.fail "searxng_url with userinfo must be refused"
     | Error error -> Alcotest.fail (Web_search_setup.error_message error))
 
+(* Credentials are process environment here; a blank value is absent, which is
+   how a variable is "unset" from OCaml. The previous value comes back. *)
+let with_env name value f =
+  let previous = Sys.getenv_opt name in
+  Unix.putenv name value;
+  Fun.protect
+    ~finally:(fun () -> Unix.putenv name (Option.value previous ~default:""))
+    f
+
 let test_display_searxng_url_redacts_userinfo () =
   Alcotest.(check string)
     "url without userinfo is unchanged"
@@ -464,15 +473,6 @@ let test_the_default_order_leaves_out_the_grounded_provider () =
     "the chain a call starts from, before credentials filter it"
     [ "searxng"; "brave"; "tavily"; "exa"; "bing_api"; "ollama" ]
     (List.map Web_search_provider.label Web_search_provider.default_order)
-
-(* Credentials are process environment here; a blank value is absent, which is
-   how a variable is "unset" from OCaml. The previous value comes back. *)
-let with_env name value f =
-  let previous = Sys.getenv_opt name in
-  Unix.putenv name value;
-  Fun.protect
-    ~finally:(fun () -> Unix.putenv name (Option.value previous ~default:""))
-    f
 
 let test_a_blank_credential_is_absent_and_a_set_one_is_read_trimmed () =
   with_env "TAVILY_API_KEY" "   " (fun () ->

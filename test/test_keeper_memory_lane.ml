@@ -692,8 +692,11 @@ let test_durable_drain_publishes_scoped_health () =
       (match (observed ()).last_pass, (observed ()).unread with
        | Queue_refresh.Drained, Some { atoms = 0; official = 0 } -> ()
        | _ -> Alcotest.fail "empty real source must publish drained with zero lag");
-      Unix.unlink (Masc.Keeper_types.keeper_meta_path config keeper_name);
-      Masc.Keeper_meta_store.invalidate_cached_snapshot config keeper_name;
+      Unix.unlink (Masc.Keeper_types_profile.keeper_meta_path config keeper_name);
+      (* Keeper_meta_store keeps no read cache (its only table is the
+         problem-report dedup), so the next pass reads the absence from
+         disk. The pre-merge draft called an invalidate_cached_snapshot
+         that never existed in the store. *)
       let seq2 = log_cursor () in
       run ();
       Alcotest.(check (list string))

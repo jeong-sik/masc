@@ -752,7 +752,7 @@ let test_followup_publishes_sources_before_join () =
   with_persistence @@ fun config ensure_keeper ->
   let base_path=config.Workspace.base_path and keeper_name="alpha" in
   ensure_keeper keeper_name;
-  let task_id = match Workspace_task_create.add_task config ~agent_name:keeper_name
+  let task_id = match Workspace_task_create.add_task_with_result config ~created_by:keeper_name
       ~title:"original streamed Task" ~priority:3 ~description:"source delivery fixture" with
     | Ok created -> created.task_id
     | Error error -> fail (Workspace_task_create.add_task_error_to_string error) in
@@ -965,7 +965,7 @@ let test_followup_matches_committed_answer_input_tool_rows () =
     Keeper_tool_call_log.reset_for_testing ());
   let base_path = config.Workspace.base_path and keeper_name = "alpha" in
   ensure_keeper keeper_name;
-  let task_id = match Workspace_task_create.add_task config ~agent_name:keeper_name
+  let task_id = match Workspace_task_create.add_task_with_result config ~created_by:keeper_name
       ~title:"original followup Task" ~priority:3 ~description:"independent observation fixture" with
     | Ok created -> created.task_id
     | Error error -> fail (Workspace_task_create.add_task_error_to_string error) in

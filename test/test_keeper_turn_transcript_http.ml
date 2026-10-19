@@ -30,7 +30,7 @@ let with_workspace fn =
       let target = Uri.make ~path:("/api/v1/keepers/" ^ keeper ^ "/turn-transcript") ~query ()
           |> Uri.to_string in
       Api.keeper_turn_transcript_lookup_response ~config ~keeper_name:keeper
-        (Httpun.Request.create ~meth:`GET target) in
+        (Httpun.Request.create `GET target) in
     fn path lookup)
 
 let query = [ "turn_ref", [ Ids.Turn_ref.to_string original ] ]

@@ -4,6 +4,7 @@ import { captureRange, captureRegionFromSeconds } from './capture-time.mjs'
 import { beats, PPQ } from './sequencer-project.mjs'
 import { calibrationSelection } from './audio-calibration.mjs'
 import { manualCapturePlacement } from './capture-placement.mjs'
+import { validateCalibrationCapture, calibrationResidual } from './calibration-profile.mjs'
 
 function reconcile(editor, project) {
   const selected = project.clips.find(clip => clip.id === editor.region)
@@ -28,6 +29,13 @@ export function arrangementImported(editor, { project, asset }) {
   return { ...commit(editor, project), asset }
 }
 function edit(editor, value) { return commit(editor, editArrangement(editor.project, value)) }
+export function arrangementCalibrated(editor, { profile, match, output }) {
+  const clip = selectedRegion(editor), asset = editor.project.assets.find(asset => asset.id === clip?.asset)
+  validateCalibrationCapture(profile, asset, clip ?? {}, output ?? null)
+  if (!Number.isSafeInteger(match) || !profile.pulses[match]) throw new Error('Choose one inspected calibration pulse')
+  return edit(editor, { kind: 'region-change', id: clip.id, placement: { kind: 'calibrated', match,
+    advanceNanoseconds: calibrationResidual(profile, profile.pulses[match]), profile } })
+}
 function laneID(editor) {
   if (!editor.lane) throw new Error('Select an arrangement lane')
   return editor.lane
@@ -122,6 +130,13 @@ export function arrangementCommand(editor, line) {
   }
   let value
   switch (command) {
+    case 'calibration-open':
+      if (!tail) throw new Error('Choose a saved calibration experiment directory')
+      return { editor, effect: { kind: command, path: tail } }
+    case 'calibration-apply':
+      count(1)
+      if (!Number.isSafeInteger(Number(args[0])) || Number(args[0]) < 1) throw new Error('Choose a displayed calibration pulse number')
+      return { editor, effect: { kind: command, match: Number(args[0]) - 1 } }
     case 'split-take': count(0); value = { kind: 'capture-split', id: regionID(editor) }; break
     case 'capture-channel':
       if (selectedRegion(editor)?.component !== 'audio') throw new Error('Choose a separated audio component for channel routing')

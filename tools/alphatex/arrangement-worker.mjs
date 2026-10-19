@@ -4,6 +4,7 @@ import { importArrangementWave, importArrangementMidi, importArrangementCapture,
 import { prepareArrangementWave, prepareArrangementMidi, prepareArrangementMixed, prepareArrangementAudio, prepareArrangementCaptureRegions } from './arrangement-playback.mjs'
 import { attachRecordedTake } from './arrangement-recording.mjs'
 import { analyzeCalibration } from './audio-calibration.mjs'
+import { inspectCalibration } from './calibration-files.mjs'
 
 const active = new Map()
 parentPort.on('message', async job => {
@@ -17,6 +18,7 @@ parentPort.on('message', async job => {
   try {
     let result
     switch (job.kind) {
+      case 'inspect-calibration': result = await inspectCalibration(job.path, { signal }); break
       case 'analyze-calibration': result = await analyzeCalibration({ ...job, signal }); break
       case 'attach-recording': {
         const imported = await importArrangementCapture(job.project, job.path, { projectPath: job.projectPath, signal })

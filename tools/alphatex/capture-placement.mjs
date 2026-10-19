@@ -1,14 +1,21 @@
 import { captureRegionTime } from './capture-time.mjs'
+import { validateCalibrationProfile, calibrationResidual } from './calibration-profile.mjs'
 
 function gcd(a, b) { a = a < 0n ? -a : a; while (b) [a, b] = [b, a % b]; return a }
 function fraction(n, d) { const factor = gcd(n, d); return { numerator: String(n / factor), denominator: String(d / factor) } }
 export function validateCapturePlacement(value) {
-  if (value?.kind !== 'manual' || Object.keys(value).length !== 2 || !value.advanceNanoseconds
+  if (!['manual', 'calibrated'].includes(value?.kind) || Object.keys(value).length !== (value.kind === 'manual' ? 2 : 4) || !value.advanceNanoseconds
       || Object.keys(value.advanceNanoseconds).length !== 2) throw new Error('Unknown captured placement correction')
   const { numerator, denominator } = value.advanceNanoseconds
   if (typeof numerator !== 'string' || !/^(0|-?[1-9][0-9]*)$/.test(numerator)
       || typeof denominator !== 'string' || !/^[1-9][0-9]*$/.test(denominator)
       || gcd(BigInt(numerator), BigInt(denominator)) !== 1n) throw new Error('Invalid canonical captured placement fraction')
+  if (value.kind === 'calibrated') {
+    validateCalibrationProfile(value.profile)
+    if (!Number.isSafeInteger(value.match) || !value.profile.pulses[value.match]) throw new Error('Choose one inspected calibration pulse')
+    const measured = calibrationResidual(value.profile, value.profile.pulses[value.match])
+    if (measured.numerator !== numerator || measured.denominator !== denominator) throw new Error('Calibrated placement disagrees with its selected measured pulse')
+  }
   return value
 }
 export function manualCapturePlacement(milliseconds) {

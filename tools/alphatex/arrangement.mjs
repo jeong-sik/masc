@@ -3,6 +3,7 @@ import { captureRegionTime } from './capture-time.mjs'
 import { validateMidiSource, midiSourcePattern } from './midi-source.mjs'
 import { PPQ } from './sequencer-project.mjs'
 import { validateCapturePlacement, capturePlacementStart, projectCapturedPlacement } from './capture-placement.mjs'
+import { validateCalibrationCapture } from './calibration-profile.mjs'
 
 const integer = (value, name, minimum = 0) => {
   if (!Number.isSafeInteger(value) || value < minimum) throw new Error(`Invalid ${name}`)
@@ -80,6 +81,7 @@ export function arrangementClipTime(project, clip) {
     if (clip.placement !== undefined) {
       if (!clip.component) throw new Error('Split captured audio and MIDI before correcting one component')
       validateCapturePlacement(clip.placement)
+      if (clip.placement.kind === 'calibrated') validateCalibrationCapture(clip.placement.profile, asset, clip)
     }
     if (clip.audioChannel !== undefined) {
       if (clip.component !== 'audio' || !clip.audioChannel || Object.keys(clip.audioChannel).length !== 2) throw new Error('Choose a separated audio component for channel routing')

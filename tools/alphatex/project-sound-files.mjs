@@ -18,7 +18,7 @@ export function renderBoundVst(sound, request, { run = nativeJob } = {}) {
     try {
       await writeFile(path, Buffer.from(sound.preset.data, 'base64'), { flag: 'wx', mode: 0o400 }); created = true
       check()
-      child = run({ ...request, ...sound.selection, preset_path: path, expected_instrument: sound.instrument, operation: 'render' })
+      child = run({ ...request, ...validateVstSelection(sound.selection), preset_path: path, expected_instrument: sound.instrument, operation: 'render' })
       const result = await child.promise
       check()
       if (result.preset_sha256 !== sound.preset.sha256) throw new Error('Rendered VST preset does not match the project sound')

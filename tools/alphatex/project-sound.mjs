@@ -15,7 +15,8 @@ export function validateVstSelection(value) {
 export function validateSound(sound) {
   if (sound?.kind === 'soundfont' && Object.keys(sound).length === 1) return sound
   if (sound?.kind !== 'vst' || Object.keys(sound).some(key => !['kind', 'selection', 'preset', 'instrument'].includes(key))) throw new Error('Invalid project sound')
-  validateVstSelection(sound.selection)
+  const selection = validateVstSelection(sound.selection)
+  if (Object.keys(sound.selection).some(key => !(key in selection))) throw new Error('Invalid project VST selection fields')
   const bytes = Buffer.from(sound.preset?.data ?? '', 'base64')
   if (!bytes.length || bytes.toString('base64') !== sound.preset?.data
       || createHash('sha256').update(bytes).digest('hex') !== sound.preset.sha256) throw new Error('Project VST preset content changed')

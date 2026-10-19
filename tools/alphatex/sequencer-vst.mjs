@@ -3,6 +3,7 @@ import { sequenceEvents } from './sequencer-project.mjs'
 import { midiSourcePattern, exportMidiSourcePattern } from './midi-source.mjs'
 import { nativeJob, retainRender } from './vst.mjs'
 import { renderBoundVst } from './project-sound-files.mjs'
+import { validateVstSelection } from './project-sound.mjs'
 
 export function projectVstMidi(project, options = {}) {
   if (project?.kind === 'midi-source') {
@@ -26,7 +27,7 @@ export function renderVstPhrase({ preparation, selection, sound, outputPath, sta
   const promise = (async () => {
     const midi = await preparation.promise
     check()
-    const request = { operation: 'render', ...selection, midi_path: midi.path, output_path: outputPath,
+    const request = { operation: 'render', ...validateVstSelection(selection), midi_path: midi.path, output_path: outputPath,
       ...(loop ? { tail_seconds: 0 } : {}) }
     native = sound ? renderBoundVst(sound, request, { run }) : run(request)
     const result = await native.promise

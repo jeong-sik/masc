@@ -131,6 +131,10 @@ export function arrangementCommand(editor, line) {
   }
   let value
   switch (command) {
+    case 'practice':
+      count(2)
+      if (!['on', 'off'].includes(args[1])) throw new Error('Choose metronome on or off')
+      value = { kind: 'practice', practice: { countInBars: Number(args[0]), metronome: args[1] === 'on' } }; break
     case 'record-calibration':
     case 'calibration-open':
       if (!tail) throw new Error('Choose a saved calibration experiment directory')

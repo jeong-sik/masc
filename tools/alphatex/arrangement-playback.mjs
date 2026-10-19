@@ -7,6 +7,8 @@ import { readWaveMetadata } from './wave-file.mjs'
 import { captureRange, captureRegionTime } from './capture-time.mjs'
 import { jsonLines, unpackMidi } from './session-data.mjs'
 
+import { practiceEnabled } from './arrangement-practice.mjs'
+
 function requireRegionTransport(project) {
   const schedule = arrangementPlaybackSchedule(project)
   if (schedule.some(clip => project.assets.find(asset => asset.id === clip.asset).kind === 'capture')) {
@@ -114,6 +116,7 @@ export function arrangementPlaybackRequest(project, route) {
   const schedule = arrangementPlaybackSchedule(project), audible = new Set(schedule.map(clip => clip.asset))
   const assets = project.assets.filter(asset => audible.has(asset.id)), kinds = new Set(assets.map(asset => asset.kind))
   if (!kinds.size) throw new Error('No audible arrangement regions')
+  if (practiceEnabled(project) && kinds.has('midi') && (route.kind !== 'mixed' || !route.output)) throw new Error('Choose :mixed-output AUDIO_UID for the practice click and MIDI backing')
   if (kinds.has('capture')) {
     const notes = schedule.some(clip => clip.component !== 'audio' && assets.some(asset => asset.id === clip.asset && asset.kind === 'capture' && BigInt(asset.manifest.midiPacketCount) > 0n))
     if (route.kind === 'midi' || (notes || kinds.has('midi')) && route.kind !== 'mixed') throw new Error('Select :mixed-output AUDIO_UID and MIDI destinations for paired captures')
@@ -123,7 +126,7 @@ export function arrangementPlaybackRequest(project, route) {
   if (kinds.has('wave') && route.kind === 'midi') throw new Error('Choose an audio output for audible WAV regions')
   if (kinds.has('midi') && route.kind === 'audio') throw new Error('Choose a MIDI destination for audible MIDI regions')
   return { kind: kinds.size > 1 ? 'prepare-mixed' : kinds.has('wave') ? 'prepare-wave' : 'prepare-midi',
-    ...(kinds.has('wave') ? { output: route.output } : {}),
+    ...(kinds.has('wave') || practiceEnabled(project) ? { output: route.output } : {}),
     ...(kinds.has('midi') ? { midiOutput: route.midiOutput, portBindings: route.portBindings } : {}) }
 }
 

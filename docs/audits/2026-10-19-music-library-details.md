@@ -69,7 +69,24 @@ music library with the correct `.masc/music/projects` and `sessions` roots.
 A new phrase accepted C4 and the title `MASC terminal round trip`; `q` saved
 one note and returned to the library, and another `q` restored Dashboard.
 In music-sensei chat, `/music` opened the same library without graphics support.
-The server remained the separately deployed older build. This executable was
-not installed over the operator's MASC binary. Native entry and companion
-details are separate source revisions; the following integration proof records
-their actual pairing rather than extending the CI receipt to new JS code.
+The server remained the separately deployed older build. The downloaded
+executable remained separate from the operator's installed MASC binary. Its
+native CI receipt does not cover the later JavaScript details worker.
+
+A subsequent manual pairing is recorded in `verification.json.native_pairing`:
+native source `201941f220b53022ca02dee64648c95b225aebbe` used companion source
+`db1d68e559995971b8c893ef4fcaa5d73c3c79e8` with installed payload
+`cb8d2b25b0d3c968bfbbb46bb6f0a8445d1473825a61509f37439c344f1f3e07`.
+The recorded Dashboard `s` entry led to the capture
+`04-native-selected-phrase.txt`, which shows `MASC terminal round trip`, 100 BPM,
+4/4, 9.60 seconds and one note under the live workspace's music roots. Exiting
+returned to Dashboard, retained in `05-native-returned-dashboard.txt`.
+
+The separate native entry audition also retained an unsent chat draft through
+Keeper detail, Dashboard, the music library and return to music-sensei chat.
+Its `verification.json.draft_round_trip` records the original and returned
+captures. The first numeric-tab attempt remained in Keeper detail and was not
+counted as music entry; Escape to the list and then Dashboard preceded the
+successful handoff. The draft was cleared afterward without submitting it.
+This used the earlier companion payload, so it proves parent MASC draft
+retention and does not extend the new worker's CI coverage.

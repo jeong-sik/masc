@@ -34,6 +34,12 @@ val reopened_stem : reason:string -> string -> string
     refusal line a previous round put there. It parses to the same JSON as
     the edited text. *)
 
+val reopen_edit_on_current : before:Yojson.Safe.t -> edited:string -> current:Yojson.Safe.t -> (string, edit_refusal) result
+(** Explicit recovery after a new authoritative read: retain changed values,
+    use current values for untouched fields, and leave the prior composite
+    revision and context-shrink confirmation behind. The caller opens an editor
+    for review; this does not authorize or dispatch a save. *)
+
 val view_lines : sanitize:(string -> string) -> Yojson.Safe.t -> string list
 (** The whole Settings pane, styled. Every row carries a glyph saying whether
     [e] reaches it, and the field count in the heading comes from

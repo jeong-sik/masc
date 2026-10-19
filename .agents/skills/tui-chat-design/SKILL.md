@@ -1,6 +1,6 @@
 ---
 name: tui-chat-design
-description: "MASC TUI의 채팅·입력·로딩·진행 상태, Keeper·Work·로그·질문 원본의 비동기 조회, Runtime 폼·원문 저장과 설정 snapshot 해석을 바꿀 때 쓴다. 원본 입력·revision·요청 소유권, 마지막 관측과 부분 실패, 준비 작업·상태 반영·paint 증거를 구분하는 규칙이다."
+description: "MASC TUI의 채팅·입력·로딩·진행 상태, Keeper·Work·로그·질문 원본의 비동기 조회, Keeper 설정·Runtime 폼·원문 저장과 설정 snapshot 해석을 바꿀 때 쓴다. 원본 입력·revision·요청 소유권, 마지막 관측과 부분 실패, 준비 작업·상태 반영·paint 증거를 구분하는 규칙이다."
 ---
 
 # 대화를 먼저 읽는 채팅
@@ -31,9 +31,24 @@ description: "MASC TUI의 채팅·입력·로딩·진행 상태, Keeper·Work·�
 - snapshot이 도착해도 대기 중인 키·붙여넣기·미완성 terminal sequence가 있으면 먼저 처리한다.
   같은 편집 intent만 한 번 에디터에 넘긴다. 늦은 응답·worker 정리는 후속 요청을 바꾸지 않는다.
 - 편집 text와 patch 기준은 같은 원본 snapshot이다. 저장 전 workspace 확인과 revision 충돌
-  처리는 유지한다. 비동기 준비는 외부 에디터·저장까지 비동기라는 뜻이 아니다.
+  처리는 유지한다. 외부 에디터의 terminal interaction과 아래의 비동기 저장 작업을 구분한다.
 - 준비 시작·읽기 완료·상태 반영·에디터 인계는 별도 시각으로 관측한다. 인계 시각을 에디터
   실제 표시·키 응답·실제 작업 진척으로 부르지 않는다. 화면 문구·배치 검사를 추가하지 않는다.
+
+## Keeper 설정 저장
+
+- 외부 에디터가 돌려준 원래 text·snapshot·composite revision·patch를 소유된 저장 작업에
+  둔다. workspace 재확인과 설정 POST를 키 처리에서 기다리지 않는다. 같은 Keeper의
+  pending `e`는 원래 작업을 공유하고, 다른 Keeper의 저장은 별도로 소유한다.
+- navigation은 저장 취소 선언이 아니다. authority 철회·중단 전후를 미전송과 결과 미확인으로
+  나누고 영수증은 bounded mailbox 없이 남긴다. 알려진 미적용 거절·revision 충돌·조정 필요·
+  적용 후 runtime sync 실패를 따로 보존한다. 늦은 영수증은 다른 Keeper 화면을 갱신하지 않는다.
+- 실패 뒤 `e`는 current snapshot을 새로 읽고 변경했던 값만 편집기에 복원한다. 손대지 않은
+  필드는 current 값을 쓰고, 이전 revision과 context 축소 확인은 재사용하지 않는다. 편집기에서
+  다시 확인하기 전 재전송하지 않는다. 원래 작업의 입력·응답은 후속 복구가 덮어쓰지 않는다.
+- 시작·worker 관측·UI 반영 시각과 phase를 연결한다. 화면의 진행/복구 안내와 이 로그는
+  실제 paint·키 응답·작업 완료·속도 향상 증거가 아니다. 외부 에디터의 terminal interaction과
+  Sandbox 단축키의 저장은 별도 경로이며 이 비동기 저장 범위에 포함하지 않는다.
 
 ## Runtime 폼 저장
 

@@ -6,6 +6,10 @@ including the retained-browser list that reuses the Keeper Calls consumer.
 It does not establish the cause of the reported live Loading screen or measure
 input, paint, preparation or useful-work latency.
 
+This records the admission layer at #43848. The subsequent source change in
+`2026-10-19-tui-history-single-admitted-read.md` removes these histories' separate
+identity preflight while retaining actual GET admission and completion ownership.
+
 ## As-Is / To-Be
 
 Task/Goal history launchers already use workspace-owned request completion and

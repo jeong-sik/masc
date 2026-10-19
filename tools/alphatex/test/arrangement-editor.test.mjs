@@ -698,14 +698,54 @@ test('exit cancels a queued live replacement and prepared backing without reopen
  assert.ok(view.observed.removed.includes('/owned/cancelled'));assert.equal(view.process.stdin.isRaw,false)
 })
 
-test('calibration owns its input/output operation through cancel/close without adopting a late candidate',async()=>{
+test('calibration cancellation retains the arrangement and admits queued edits only after owned cleanup',async()=>{
+ for(const key of ['q','escape']){
  const view=await controller();view.command('input selected-interface');view.command('calibrate selected-output 2 1 250');await flush()
  const pending=view.observed.calibrations[0];assert.ok(pending);const job=pending.options
  assert.equal(job.input,'selected-interface');assert.equal(job.output,'selected-output');assert.equal(job.inputChannel,2);assert.equal(job.outputChannel,1);assert.equal(job.maxLagMs,250)
- let ended=false;view.done.then(()=>{ended=true});view.key('q');await flush()
+ let ended=false;view.done.then(()=>{ended=true});view.key(key);view.key(key);await flush()
  assert.equal(ended,false);assert.equal(job.signal.aborted,true)
+ assert.equal(view.process.stdin.listenerCount('keypress'),1);assert.equal(view.observed.terminated,false)
+ view.key(undefined,':');for(const char of 'title A quiet take')view.key(char,char);view.key('return')
+ view.command('save');await flush();assert.equal(view.observed.saved.length,0)
  pending.reject(new Error('Evidence retained after cancellation'))
+ await flush();assert.equal(ended,false);assert.equal(view.observed.saved.at(-1).project.title,'A quiet take')
+ view.key('q')
  await view.done;assert.equal(view.observed.live.length,0);assert.equal(view.observed.players.length,0);assert.equal(view.process.stdin.isRaw,false)
+ }
+})
+test('cancelled calibration drains audio and MIDI owners before restoring each route once',async()=>{
+ const view=await controller();view.command('input interface');view.command('monitor headphones');view.command('midi-monitor 10 42');await flush()
+ const monitor=view.observed.monitors[0],live=view.observed.live[0]
+ view.command('calibrate output 1 1 50');await flush();assert.ok(monitor.stops>0)
+ view.key('escape');view.key('q');monitor.finish({});await flush();assert.ok(live.stops>0)
+ assert.equal(view.observed.monitors.length,1);assert.equal(view.observed.live.length,1)
+ live.finish({});await flush()
+ assert.equal(view.observed.calibrations.length,0);assert.equal(view.observed.monitors.length,2);assert.equal(view.observed.live.length,2)
+ view.command('title Still editing');view.command('save');await flush();assert.equal(view.observed.saved.at(-1).project.title,'Still editing')
+ view.key('q');await flush();view.observed.monitors[1].finish({});view.observed.live[1].finish({});await view.done
+})
+test('calibration cancel targets its analysis request and waits for worker settlement before restoring monitoring',async()=>{
+ const view=await controller();view.command('input interface');view.command('monitor headphones');await flush()
+ view.command('calibrate output 1 1 50');await flush();view.observed.monitors[0].finish({});await flush()
+ const pending=view.observed.calibrations[0]
+ const analysis=pending.options.analyze({signal:pending.options.signal,directory:pending.options.directory})
+ const settled=analysis.then(pending.finish,pending.reject)
+ const request=view.observed.requests.find(job=>job.kind==='analyze-calibration')
+ view.key('q');view.key('escape');await flush()
+ assert.deepEqual(view.observed.requests.filter(job=>job.kind==='cancel'),[{kind:'cancel',request:request.id}])
+ assert.equal(view.observed.monitors.length,1);assert.equal(view.observed.terminated,false)
+ view.worker.emit('message',{id:request.id,ok:false,cancelled:true,error:'Analysis cancelled'})
+ await settled;await flush();assert.equal(view.observed.monitors.length,2)
+ view.key('q');await flush();view.observed.monitors[1].finish({});await view.done
+})
+test('Ctrl-C exits during calibration and never opens a monitoring successor',async()=>{
+ const view=await controller();view.command('input interface');view.command('monitor headphones');await flush()
+ view.command('calibrate output 1 1 50');await flush();view.observed.monitors[0].finish({});await flush()
+ const pending=view.observed.calibrations[0];view.key('c','',{ctrl:true});await flush()
+ assert.equal(pending.options.signal.aborted,true)
+ pending.reject(new Error('Native children drained'));await view.done
+ assert.equal(view.observed.monitors.length,1);assert.equal(view.observed.terminated,true)
 })
 test('calibration refuses active backing, drains a live owner and keeps the project unchanged',async()=>{
  const view=await controller();await primeWave(view);view.command('input interface');view.key('space');await flush()
@@ -742,6 +782,7 @@ test('a failed analysis worker cannot admit calibration before or after draining
   if(duringDrain)view.observed.live[0].finish({})
   else view.command('calibrate output 1 1 50')
   await flush();assert.equal(view.observed.calibrations.length,0)
-  view.key('q');await view.done;assert.equal(view.process.stdin.isRaw,false)
+  view.key('q');await flush();for(const live of view.observed.live)live.finish({})
+  await view.done;assert.equal(view.process.stdin.isRaw,false)
  }
 })

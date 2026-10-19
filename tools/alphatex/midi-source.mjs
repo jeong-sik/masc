@@ -182,6 +182,17 @@ function chunk(type, data, littleEndian = false, padded = false) {
   else header.writeUInt32BE(data.length, 4)
   return Buffer.concat([header, data, ...(padded && data.length % 2 ? [Buffer.from([0])] : [])])
 }
+function encodeTrack(events) {
+  let previous = 0
+  const bytes = []
+  for (const event of events) {
+    bytes.push(Buffer.from(vlq(event.tick - previous))); previous = event.tick
+    if (event.kind === 'channel') bytes.push(Buffer.from(event.bytes))
+    else if (event.kind === 'meta') bytes.push(Buffer.from([0xff, event.type, ...vlq(event.data.length)]), Buffer.from(event.data))
+    else bytes.push(Buffer.from([event.status, ...vlq(event.data.length)]), Buffer.from(event.data))
+  }
+  return chunk('MTrk', Buffer.concat(bytes))
+}
 export function exportMidiSource(source) {
   const parsed = materialize(source)
   if (!source.changes.length && !source.insertions.length) return Uint8Array.from(parsed.bytes)
@@ -192,21 +203,34 @@ export function exportMidiSource(source) {
     if (part.type !== 'MTrk') return part.bytes
     const track = index++
     if (!touched.has(track)) return part.bytes
-    let previous = 0
-    const bytes = []
-    for (const event of parsed.tracks[track]) {
-      bytes.push(Buffer.from(vlq(event.tick - previous))); previous = event.tick
-      if (event.kind === 'channel') bytes.push(Buffer.from(event.bytes))
-      else if (event.kind === 'meta') bytes.push(Buffer.from([0xff, event.type, ...vlq(event.data.length)]), Buffer.from(event.data))
-      else bytes.push(Buffer.from([event.status, ...vlq(event.data.length)]), Buffer.from(event.data))
-    }
-    return chunk('MTrk', Buffer.concat(bytes))
+    return encodeTrack(parsed.tracks[track])
   })
   const smf = Buffer.concat(parts)
   if (!parsed.container) return Uint8Array.from(smf)
   const wrapped = Buffer.concat([Buffer.from('RMID'), ...parsed.container.map(part => part.type === 'data' ? chunk('data', smf, true, true) : part.bytes)])
   const header = Buffer.alloc(8); header.write('RIFF'); header.writeUInt32LE(integer(wrapped.length, 'RIFF MIDI length', 0, 0xffffffff), 4)
   return Uint8Array.from(Buffer.concat([header, wrapped]))
+}
+// A selected performance for synchronous PPQ hosts. Original bytes and
+// provenance remain in the document and exportMidiSource().
+export function exportMidiSourcePattern(source, options = {}) {
+  const parsed = materialize(source), performance = midiSourcePattern(source, options)
+  let tracks = parsed.format === 2 ? [parsed.tracks[performance.pattern]] : parsed.tracks
+  let division = parsed.timing.ppq
+  if (parsed.timing.kind === 'smpte') {
+    const timing = parsed.timing
+    // One quarter per second (1001/1000 for drop-frame) preserves every
+    // source tick. SMPTE ignores the source tempo events.
+    division = (timing.frameCode === 29 ? 30 : timing.frameCode) * timing.ticksPerFrame
+    const tempo = timing.frameCode === 29 ? 1001000 : 1000000
+    tracks = tracks.map(events => events.filter(event => event.kind !== 'meta' || event.type !== 0x51))
+    tracks = [[{ tick: 0, kind: 'meta', type: 0x51, data: [tempo >> 16, (tempo >> 8) & 255, tempo & 255] },
+      { tick: performance.ticks, kind: 'meta', type: 0x2f, data: [] }], ...tracks]
+  }
+  const header = Buffer.alloc(6)
+  header.writeUInt16BE(tracks.length === 1 ? 0 : 1)
+  header.writeUInt16BE(tracks.length, 2); header.writeUInt16BE(division, 4)
+  return Uint8Array.from(Buffer.concat([chunk('MThd', header), ...tracks.map(encodeTrack)]))
 }
 export function midiSourcePattern(source, { pattern } = {}) {
   const parsed = materialize(source)

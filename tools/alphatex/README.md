@@ -146,6 +146,15 @@ or `:session PATH` for an existing recorded take. Paths may contain spaces.
 Missing library directories are empty; other source failures stay visible
 alongside available entries. Closing waits for the active editor's cleanup.
 
+Selecting a saved item reads its details in a separate worker. Phrase details
+show the saved title, tempo, meter, duration and tracks; imported MIDI retains
+independent pattern durations. Arrangement details describe the document and
+its sources, without asserting that external assets can play. Take details
+validate the capture files and retain a failed recording's reason. A damaged
+item stays selectable with its read failure visible. Moving away cancels the
+old inspection and waits for its worker to exit before reading the new item;
+opening an editor and closing the library also join that cleanup.
+
 The MASC entry is Dashboard **s** or chat `/music`. It supplies
 `<base-path>/.masc/music/projects` and `<base-path>/.masc/music/sessions` as the
 workspace library roots. The companion must be updated together with that entry.

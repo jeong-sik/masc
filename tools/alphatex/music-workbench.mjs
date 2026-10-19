@@ -4,6 +4,7 @@ import { homedir } from 'node:os'
 import { emitKeypressEvents } from 'node:readline'
 import cliTruncate from 'cli-truncate'
 import { safeText } from './terminal.mjs'
+import { inspectMusicEntry } from './music-library-info.mjs'
 
 const actions = [
   { kind: 'phrase', name: 'New phrase' },
@@ -61,10 +62,38 @@ export async function openMusicEntry(entry, options) {
 // child keeps its own drafts and transport; home never substitutes a new one.
 export class MusicWorkbench {
   constructor({ projectRoot = resolve('music-projects'), sessionRoot = resolve('music-sessions'),
-    open = openMusicEntry, read = musicLibrary, changed = () => {}, ...options } = {}) {
-    Object.assign(this, { projectRoot: resolve(projectRoot), sessionRoot: resolve(sessionRoot), open, read, changed, options })
+    open = openMusicEntry, read = musicLibrary, inspect = inspectMusicEntry, changed = () => {}, ...options } = {}) {
+    Object.assign(this, { projectRoot: resolve(projectRoot), sessionRoot: resolve(sessionRoot), open, read, inspect, changed, options })
     this.entries = [...actions]; this.errors = []; this.cursor = 0
     this.status = ''; this.closed = false; this.child = null; this.reads = new Set(); this.loading = false
+    this.inspection = null; this.inspectionOwner = null; this.inspections = new Map()
+  }
+  inspectSelected() {
+    this.inspectionOwner?.job?.cancel()
+    this.inspectionOwner = null; this.inspection = null
+    const entry = this.entries[this.cursor]
+    if (this.closed || this.child || !entry || !['project', 'session'].includes(entry.kind)) return
+    const previous = [...this.inspections.values()], owner = { entry, job: null }
+    this.inspectionOwner = owner; this.inspection = { kind: 'loading', entry }
+    const pending = (async () => {
+      // Retire the old worker before creating its replacement. Intermediate
+      // selections can be superseded while cleanup runs; they do not read files.
+      await Promise.allSettled(previous)
+      if (this.inspectionOwner !== owner || this.closed || this.child) return
+      try {
+        const job = this.inspect(entry); owner.job = job
+        try {
+          const info = await job.promise
+          if (this.inspectionOwner === owner && !this.closed && !this.child) this.inspection = { kind: 'ready', entry, info }
+        } finally { await job.completion }
+      } catch (error) {
+        if (this.inspectionOwner === owner && !this.closed && !this.child) this.inspection = { kind: 'failed', entry, error: error.message }
+      } finally {
+        if (this.inspectionOwner === owner) this.changed()
+      }
+    })()
+    this.inspections.set(owner, pending)
+    pending.finally(() => this.inspections.delete(owner)).catch(() => {})
   }
   async refresh() {
     if (this.closed || this.child) return
@@ -79,6 +108,7 @@ export class MusicWorkbench {
       const selected = identity(this.entries[this.cursor])
       this.entries = result.entries; this.errors = result.errors
       this.cursor = Math.max(0, this.entries.findIndex(entry => identity(entry) === selected))
+      this.inspectSelected()
     } catch (error) {
       if (!this.closed && this.reader === reader && !reader.signal.aborted) this.status = error.message
     } finally {
@@ -88,14 +118,18 @@ export class MusicWorkbench {
   }
   move(step) {
     if (this.closed || this.child) return
-    this.cursor = Math.max(0, Math.min(this.entries.length - 1, this.cursor + step)); this.changed()
+    const cursor = Math.max(0, Math.min(this.entries.length - 1, this.cursor + step))
+    if (cursor !== this.cursor) { this.cursor = cursor; this.inspectSelected() }
+    this.changed()
   }
   activate(entry = this.entries[this.cursor]) {
     if (this.closed || this.child || !entry) return this.child?.promise ?? Promise.resolve()
     this.reader?.abort()
     const controller = new AbortController(), child = { controller, promise: null }
     this.child = child
-    child.promise = Promise.resolve().then(() => {
+    this.inspectionOwner = null
+    for (const owner of this.inspections.keys()) owner.job?.cancel()
+    child.promise = Promise.allSettled([...this.inspections.values()]).then(() => {
       controller.signal.throwIfAborted()
       return this.open(entry, { ...this.options, projectRoot: this.projectRoot, sessionRoot: this.sessionRoot,
         embedded: true, signal: controller.signal })
@@ -109,7 +143,9 @@ export class MusicWorkbench {
   }
   async close() {
     this.closed = true; this.reader?.abort(); this.child?.controller.abort()
-    await Promise.allSettled([...this.reads, this.child?.promise])
+    this.inspectionOwner = null
+    for (const owner of this.inspections.keys()) owner.job?.cancel()
+    await Promise.allSettled([...this.reads, this.child?.promise, ...this.inspections.values()])
   }
 }
 
@@ -119,14 +155,44 @@ export async function viewMusic(options = {}) {
   let finish, prompt = null
   const done = new Promise(resolve => { finish = resolve })
   const model = new MusicWorkbench({ ...options, changed: draw })
+  function details() {
+    const selected = model.inspection
+    if (!selected) return []
+    switch (selected.kind) {
+      case 'loading': return ['Selected item', 'Reading project / take details…']
+      case 'failed': return ['Selected item unavailable', selected.error]
+      case 'ready': {
+        const { info } = selected
+        const seconds = value => `${value.toFixed(2)} s`
+        switch (info.kind) {
+          case 'phrase': return [info.title, `Phrase · ${info.tempo} BPM · ${info.meter.join('/')}`,
+            `${info.quarterNotes} quarter notes · ${seconds(info.durationSeconds)}`,
+            `${info.tracks.length} tracks · ${info.tracks.reduce((sum, track) => sum + track.notes, 0)} notes`,
+            info.tracks.map(track => track.name).join(' · ')]
+          case 'arrangement': return [info.title, `Arrangement · ${info.tempo} BPM · ${info.meter.join('/')}`,
+            `${seconds(info.durationSeconds)} · ${info.lanes} lanes · ${info.clips} clips`,
+            `${info.assets.length} sources · document metadata`, info.assets.map(asset => asset.name).join(' · ')]
+          case 'midi-source': return [info.title, `Imported MIDI · format ${info.format} · ${info.tracks} tracks`,
+            `${info.patterns.length} independent pattern(s)`,
+            info.patterns.map(pattern => `${pattern.index + 1}: ${seconds(pattern.durationSeconds)}, ${pattern.notes} notes`).join(' · ')]
+          case 'session': return [info.title, `Recorded take · ${info.state} · ${seconds(info.durationSeconds)}`,
+            `${info.channels} audio channels · ${info.sampleRate} Hz · ${info.frames} frames`,
+            `${info.midiTracks} MIDI tracks · ${info.midiPackets} packets`, info.failure ?? '']
+        }
+      }
+    }
+    return []
+  }
   function draw() {
     if (model.closed || model.child) return
     const rows = process.stdout.rows || 24, columns = process.stdout.columns || 80
-    const available = Math.max(1, rows - 9), first = Math.max(0, model.cursor - available + 1)
+    const detail = details()
+    const available = Math.max(1, rows - 9 - (detail.length ? detail.length + 1 : 0))
+    const first = Math.max(0, model.cursor - available + 1)
     const lines = ['Music', 'Phrase · arrangement · audio / MIDI recording', '',
       ...model.entries.slice(first, first + available).map((entry, index) =>
         `${first + index === model.cursor ? '›' : ' '} ${entry.name}${entry.kind === 'project' ? '  · project' : entry.kind === 'session' ? '  · take' : ''}`),
-      '', model.loading ? 'Reading library…' : model.status,
+      ...(detail.length ? ['', ...detail] : []), '', model.loading ? 'Reading library…' : model.status,
       ...model.errors.map(error => `${error.root}: ${error.message}`),
       `Projects: ${model.projectRoot}`, `Takes: ${model.sessionRoot}`]
     let output = '\x1b[H'

@@ -46,10 +46,13 @@ let unobserved result = Result.map_error (fun detail -> Unobserved detail) resul
 let choose_browser ~verb (request : request) =
   Browser_selection.resolve ~verb ~bound:(Option.is_some request.tab_id) request.route
   |> Result.map_error (fun error -> Unchosen error)
-let resolve_target ~verb request =
-  let* selected = choose_browser ~verb request in
+let resolve_target ?(required_actions=[]) ~verb request =
+  let* selected = Browser_selection.resolve ~required_actions ~verb ~bound:(Option.is_some request.tab_id) request.route
+    |> Result.map_error (fun error -> Unchosen error) in
   let* target = Browser_lane.resolve_target ~verb selected.route
     |> Result.map_error (fun error -> Unselected error) in
+  let* () = Browser_selection.require_target required_actions target
+    |> Result.map_error (fun error -> Unchosen error) in
   Ok (Browser_selection.bind_target selected target, target)
 let decode_answer ~lane = function
   | Browser_lane.Lane_absent -> Error (Browser_lane.lane_absent_message lane)

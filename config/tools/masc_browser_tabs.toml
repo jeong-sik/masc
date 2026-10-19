@@ -1,6 +1,6 @@
 name = "masc_browser_tabs"
 description = """
-Discover an available browser without opening one. Omit lane/clientId for automatic selection; retain the returned browserSelection.lane and clientId on all subsequent calls. List {clientId,transport,tabs:[{id,active,title,url}]} and live index/windowId. Carry clientId/tabId into reads/actions. A partial BiDi inventory sets complete=false and lists unavailableTabs with their IDs and errors; other tabs remain usable, and unavailable does not mean closed. Live transport says what that connection serves: webdriver_bidi takes hover_at and drag, web_extension takes activate_tab. Ambiguous or stale live selection returns clients without dispatch: select explicitly and retry. Automation and stagehand clientId is null, with no transport."""
+Discover a browser implementing optional requiredActions without opening one. The receipt includes browserCapabilities, with implemented operations, invocation tools and constraints. Omit lane/clientId for automatic selection; retain the returned browserSelection.lane and clientId on all subsequent calls. List {clientId,transport,tabs:[{id,active,title,url}]} and live index/windowId. Carry clientId/tabId into reads/actions. A partial BiDi inventory sets complete=false and lists unavailableTabs with their IDs and errors; other tabs remain usable, and unavailable does not mean closed. Live transport says what that connection serves: webdriver_bidi takes hover_at and drag, web_extension takes activate_tab. Ambiguous or stale live selection returns clients without dispatch: select explicitly and retry. Automation and stagehand clientId is null, with no transport."""
 additional_properties = false
 
 [[params]]
@@ -13,3 +13,9 @@ description = "Optional advanced browser override. Omit only for initial discove
 name = "clientId"
 type = "string"
 description = "Retain the observed live clientId on every subsequent tab read/action; stale IDs fail. Omit for a work browser."
+
+[[params]]
+name = "requiredActions"
+type = "array"
+items = { type = "string", enum = ["list_tabs", "open_tab", "close_tab", "activate_tab", "list_windows", "create_window", "close_window", "navigate", "follow_link", "back", "forward", "reload", "session_lifecycle", "read_text", "read_html", "read_elements", "read_scene", "read_regions", "screenshot", "click", "double_click", "right_click", "middle_click", "pointer_down", "pointer_up", "hover", "pointer_drag", "html5_drop", "scroll_page", "scroll_at", "fill", "type_text", "press_key", "key_chord", "select_option", "read_frames", "frame_interaction", "read_dialog", "accept_dialog", "dismiss_dialog", "upload_file", "list_downloads", "page_zoom", "resize_viewport", "touch", "read_clipboard", "write_clipboard", "read_network", "intercept_network", "read_console", "read_storage", "write_storage", "sentence_action"] }
+description = "Optional public operations needed by the task, only for initial discovery or action=open. Automatic choice requires one browser implementing all operations; impossible combinations fail before any browser command. Explicit browser owners never change. Inspect browserCapabilities constraints and retain browserSelection for later calls."

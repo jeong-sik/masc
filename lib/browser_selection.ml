@@ -4,6 +4,9 @@ type reason = Explicit_browser | Existing_login | Existing_work_session
   | Preferred_work_browser | Compatible_work_browser | Available_connected_browser
 type selected = { route : Lane.route; reason : reason }
 type error = Binding_required | No_available_browser | Ambiguous_browsers of Lane.route list
+  | Required_actions_unavailable of { required : Browser_capabilities.operation list;
+      candidates : (Lane.route * Browser_capabilities.operation list) list }
+  | Unsupported_required_actions of { route : Lane.route; missing : Browser_capabilities.operation list }
 type work_browser = { activity : Lane.activity; registered : bool; session : Lane.session_observation }
 type snapshot = { live_activity : Lane.activity; live_clients : Lane.client_info list
   ; automation : work_browser; stagehand : work_browser }
@@ -23,19 +26,27 @@ let route_fields = function
   | Lane.Automation_route -> ["lane",`String "automation";"clientId",`Null]
   | Lane.Stagehand_route -> ["lane",`String "stagehand";"clientId",`Null]
 let to_json selected = `Assoc (route_fields selected.route @ ["reason",`String (reason_to_wire selected.reason)])
-let bind_target selected target =
-  let route = match target with
+let route_of_target = function
     | Lane.Automation -> Lane.Automation_route | Lane.Stagehand -> Lane.Stagehand_route
-    | Lane.Live_client client -> Lane.Live_route (Some client.info.client_id) in
-  {selected with route}
+    | Lane.Live_client client -> Lane.Live_route (Some client.info.client_id)
+let bind_target selected target = {selected with route=route_of_target target}
+let operations_json actions = `List (List.map (fun action -> `String (Browser_capabilities.operation_name action)) actions)
 let error_message = function
   | Binding_required -> "This tab or document belongs to a browser. Repeat its observed lane and clientId."
   | No_available_browser -> "No compatible browser is available. Connect a browser or explicitly open a work session."
   | Ambiguous_browsers _ -> "More than one browser is available. Select its lane and, for a connected browser, clientId."
+  | Required_actions_unavailable _ -> "No available browser implements all requiredActions. Inspect candidates and their missingActions; explicitly open a compatible work session or change the task requirements."
+  | Unsupported_required_actions _ -> "The selected browser does not implement all requiredActions. Its owner was preserved and no command was dispatched."
 let error_to_json error = `Assoc (["code",`String (match error with
   | Binding_required -> "browser_binding_required" | No_available_browser -> "no_available_browser"
-  | Ambiguous_browsers _ -> "ambiguous_browsers");"message",`String (error_message error)]
+  | Ambiguous_browsers _ -> "ambiguous_browsers"
+  | Required_actions_unavailable _ -> "required_browser_actions_unavailable"
+  | Unsupported_required_actions _ -> "unsupported_required_browser_actions");"message",`String (error_message error)]
   @ match error with Ambiguous_browsers routes -> ["browsers",`List (List.map (fun route -> `Assoc (route_fields route)) routes)]
+    | Required_actions_unavailable {required;candidates} ->
+        ["requiredActions",operations_json required;"candidates",`List (List.map (fun (route,missing) ->
+          `Assoc (route_fields route @ ["missingActions",operations_json missing])) candidates)]
+    | Unsupported_required_actions {route;missing} -> route_fields route @ ["missingActions",operations_json missing]
     | Binding_required | No_available_browser -> [])
 
 let snapshot () =
@@ -66,7 +77,7 @@ let automation_serves verb = Lane.verb_allowed_on_automation verb && match verb 
       | Lane.Hover_at _ | Lane.Click_at _ | Lane.Scroll_at _ | Lane.Drag _ | Lane.Follow_link _
       | Lane.Click_node _ | Lane.Fill_node _);_} -> true
 
-let choose ~verb ~bound ~snapshot preference =
+let choose_candidates ~verb ~bound ~snapshot preference =
   let lifecycle_inspection_or_cleanup = match verb with
     | Lane.Session_status | Lane.Session_close -> true
     | Lane.Session_open _ | Lane.Page_goto _ | Lane.Tabs_list | Lane.Page_read _
@@ -118,9 +129,32 @@ let choose ~verb ~bound ~snapshot preference =
       | [] -> match owned with
         | _::_ -> one Existing_work_session owned
         | [] -> one Available_connected_browser (connected Lane.Web_extension)
-let resolve ~verb ~bound preference = match preference with
+let choose ?(required_actions=[]) ~verb ~bound ~snapshot preference =
+  match preference with
+  | Exact _ -> choose_candidates ~verb ~bound ~snapshot preference
+  | Automatic when bound || required_actions=[] -> choose_candidates ~verb ~bound ~snapshot preference
+  | Automatic ->
+    let missing backend = Browser_capabilities.missing_operations backend required_actions in
+    let candidates = List.map (fun (info : Lane.client_info) ->
+        Lane.Live_route (Some info.client_id),missing (Browser_capabilities.Connected info.transport)) snapshot.live_clients
+      @ List.filter_map (fun (route,backend,state) -> if state.registered then Some (route,missing backend) else None)
+          [Lane.Stagehand_route,Browser_capabilities.Owned_chromium,snapshot.stagehand;
+           Lane.Automation_route,Browser_capabilities.Owned_gecko,snapshot.automation] in
+    let filter_work backend state = {state with registered=state.registered && missing backend=[]} in
+    let filtered = {snapshot with
+      live_clients=List.filter (fun (info : Lane.client_info) -> missing (Browser_capabilities.Connected info.transport)=[]) snapshot.live_clients;
+      stagehand=filter_work Browser_capabilities.Owned_chromium snapshot.stagehand;
+      automation=filter_work Browser_capabilities.Owned_gecko snapshot.automation} in
+    (match choose_candidates ~verb ~bound ~snapshot:filtered preference with
+     | Error No_available_browser -> Error (Required_actions_unavailable {required=required_actions;candidates})
+     | (Ok _ | Error (Binding_required | Ambiguous_browsers _ | Required_actions_unavailable _ | Unsupported_required_actions _)) as result -> result)
+let require_target required target =
+  match Browser_capabilities.missing_operations (Browser_capabilities.backend_of_target target) required with
+  | [] -> Ok ()
+  | missing -> Error (Unsupported_required_actions {route=route_of_target target;missing})
+let resolve ?(required_actions=[]) ~verb ~bound preference = match preference with
   | Exact (Lane.Live_route None) when bound -> Error Binding_required
   | Exact ((Lane.Live_route (Some _ | None) | Lane.Automation_route | Lane.Stagehand_route) as route) ->
       Ok {route;reason=Explicit_browser}
   | Automatic when bound -> Error Binding_required
-  | Automatic -> choose ~verb ~bound ~snapshot:(snapshot ()) preference
+  | Automatic -> choose ~required_actions ~verb ~bound ~snapshot:(snapshot ()) preference

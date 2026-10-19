@@ -1,6 +1,6 @@
 ---
 name: tui-chat-design
-description: "MASC TUI의 채팅·입력·로딩·진행 상태, 시작 키 인계와 늦은 터미널 응답, 비동기 조회·설정 저장·긴 질문의 요약과 전체 읽기·Ask 답변과 재조회를 바꿀 때 쓴다. Keeper·Work·로그·Board·Runtime·Overview의 원본 요청·입력·revision·소유권, 상세 이력의 workspace 검증과 캐시 영수증, 공유 조회와 부분 실패, worker 관측·UI 반영·paint 증거를 구분한다."
+description: "MASC TUI의 채팅·입력·로딩·진행 상태, 시작 키 인계와 늦은 터미널 응답, 비동기 조회·설정 저장·긴 질문의 요약과 전체 읽기·Ask 답변과 재조회를 바꿀 때 쓴다. Keeper·Work·로그·Board·Runtime·Overview의 원본 요청·입력·revision·소유권, 준비 상세·이력의 workspace 검증과 캐시 영수증, 공유 조회와 부분 실패, worker 관측·UI 반영·paint 증거를 구분한다."
 ---
 
 # 대화를 먼저 읽는 채팅
@@ -46,7 +46,7 @@ description: "MASC TUI의 채팅·입력·로딩·진행 상태, 시작 키 인�
 ## Task·Goal 이력 조회
 
 - Goal timeline·Task history·Keeper Calls·저장된 브라우저 이력 목록은
-  `launch_workspace_history_read`에서 원래 workspace identity·endpoint·authority·read epoch를
+  `launch_workspace_json_read`에서 원래 workspace identity·endpoint·authority·read epoch를
   캡처하고 공통 요청·취소 소유권을 쓴다. 시작 직전 로컬 소유권·확인 상태를 검사하며
   별도 identity GET을 직렬로 먼저 보내지 않는다. 세 HTTP consumer 모두 공통 `get_json`을 통해 실제 GET에
   expected base/root를 붙이고 서버 영수증을 확인한다. raw `http_get`으로 우회하지 않는다.
@@ -345,6 +345,14 @@ description: "MASC TUI의 채팅·입력·로딩·진행 상태, 시작 키 인�
   조회 범위의 지원하지 않는 이벤트·잘못된 저널 행·잘못된 JSON 행은 별도 종류로 보존한다.
   잘못된 행은 선택 턴에 귀속할 수 없으며, 조회 범위 수와 반환 행 수를 실패 작업 수로 합치지
   않는다. 제외된 준비 보고서의 실제 해석·연결 거절 이유를 상세에 남기고 단일 행으로 정제한다.
+- 준비 상세 GET도 `launch_workspace_json_read`와 공통 `get_json`을 쓴다. 로컬 authority·
+  read epoch·identity·endpoint를 확인하고 실제 GET에 expected roots를 붙인다. 2xx와 304의
+  서버 영수증 검증·캐시 갱신은 호출 fiber가 소유하며 별도 identity GET을 먼저 보내지 않는다.
+  기존 target의 journal/revision·Turn_ref·operation 연결은 그대로 검증한다. JSON과 순수 report
+  해석만 공통 CPU 경로에 넘기고 worker에서 workspace binding·HTTP/cache·선택을 바꾸지 않는다.
+  `keeper.preparation.decode_wait`는 pool 대기·해석·반환 관측이며 순수 CPU·paint·유용한 작업
+  완료 시간이 아니다. source 비교와 미실행 복합 시나리오는
+  `docs/audits/2026-10-19-tui-preparation-workspace-admission.md`를 따른다.
 - Lane·공유 메모리·Wiki 확인의 시간은 풀 대기와 취소 정리를 포함한 호출자 대기다.
   순수 IO 시간이라고 표시하지 않는다. 출처 조회 실패는 `조회 불가`이며 Tool 실행
   권한 거절과 다르다. world 준비 완료도 모든 출처가 정상이라는 판정이 아니다.

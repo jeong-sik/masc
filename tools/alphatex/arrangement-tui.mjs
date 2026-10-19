@@ -334,7 +334,10 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
                 captured?.controller.abort(); captured?.handle?.stop(); status = event.message; return
               }
               if (event.kind === 'stopped' && captured) {
-                if (captured.epoch) captured.epoch.duration = Math.min(captured.epoch.duration, event.currentTime)
+                if (captured.epoch?.loop) {
+                  if (typeof event.clock?.end === 'string') captured.epoch.end = event.clock.end
+                  else captured.failure = new Error('Loop backing stopped without its recording end clock')
+                } else if (captured.epoch) captured.epoch.duration = Math.min(captured.epoch.duration, event.currentTime)
                 captured.controller.abort(); captured.handle?.stop()
               }
               if (!accepting) return

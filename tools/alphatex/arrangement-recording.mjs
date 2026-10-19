@@ -33,7 +33,8 @@ export function recordingEpoch(event) {
           || (cycle.end - cycle.start) / cycle.ppq * 60 / cycle.tempo !== event.duration) throw new Error('Recording cycle differs from playback duration')
     } else if (cycle?.kind !== 'seconds' || cycle.duration !== event.duration) throw new Error('Missing recording cycle clock')
   }
-  return { clock: structuredClone(clock), duration: event.duration, ...(event.loop ? { loop: true } : {}) }
+  if (event.end !== undefined) uint64(event.end)
+  return { clock: structuredClone(clock), duration: event.duration, ...(event.loop ? { loop: true } : {}), ...(event.end === undefined ? {} : { end: event.end }) }
 }
 
 // Inward placement on the document's quarter-note tick lattice. The complete
@@ -90,9 +91,15 @@ export function recordedLoopRegions(project, asset, epoch, correction = { kind: 
   if (cycle.kind === 'project' && (cycle.start !== loop.start || cycle.end !== loop.end || cycle.ppq !== project.ppq || cycle.tempo !== project.tempo)) throw new Error('Project changed its recording cycle')
   if (clock.kind === 'mach-host-time' && (clock.numer !== source.numer || clock.denom !== source.denom)) throw new Error('Recording and playback timebases disagree')
   validateRecordingCorrection(correction); recordingCorrectionCapture(correction, asset.manifest)
-  const range = captureRange(asset), origin = BigInt(range.origin), extent = BigInt(range.extent)
+  const range = captureRange(asset), origin = BigInt(range.origin)
+  let extent = BigInt(range.extent)
   const nativeTick = ratio(BigInt(source.numer), BigInt(source.denom))
   const anchor = clock.kind === 'mach-host-time' ? multiply([uint64(clock.anchor), 1n], nativeTick) : [uint64(clock.anchor), 1n]
+  if (checked.end !== undefined) {
+    const end = clock.kind === 'mach-host-time' ? multiply([uint64(checked.end), 1n], nativeTick) : [uint64(checked.end), 1n]
+    const stop = divide(subtract(end, multiply([origin, 1n], nativeTick)), nativeTick)
+    const bound = ceil(...stop); if (bound < extent) extent = bound
+  }
   const elapsed = subtract(multiply([origin, 1n], nativeTick), anchor)
   const tick = divide([60_000_000_000n, 1n], multiply(rational(project.tempo), [BigInt(project.ppq), 1n]))
   const period = cycle.kind === 'project' ? multiply(tick, [BigInt(loop.end - loop.start), 1n]) : multiply(rational(cycle.duration), [1_000_000_000n, 1n])

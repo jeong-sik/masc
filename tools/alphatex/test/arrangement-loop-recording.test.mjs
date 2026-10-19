@@ -122,3 +122,16 @@ test('a loop recording uses a correlated native epoch barrier and retains the cy
  const rejected=handle.recordingEpoch();send({kind:'paused',recordingRequest:commands.at(-1).request});await assert.rejects(rejected,/not playing/)
  send({kind:'stopped'});child.emit('close',0,null);await handle.completion
 })
+
+test('an absolute successful backing-stop fence trims source ticks without changing the repeating period',()=>{
+ const p=project(),asset=source(),e={...epoch(p),end:String(origin+15600001n)}
+ const result=recordedLoopRegions(p,asset,e),last=result.regions.at(-1)
+ assert.equal(result.alignment.epoch.duration,.25)
+ assert.equal(BigInt(last.offset)+BigInt(last.extent),15600001n)
+ assert.equal(result.regions.length,3)
+ for(const r of result.regions)correctPosition(p,asset,e,r)
+ const start=240000000000000n,ns=start*125n/3n
+ const midi=recordingEpoch({kind:'playing',loop:true,duration:.25,end:String(ns+650000001n),clock:{kind:'mach-nanoseconds',anchor:String(ns),position:0,cycle:{kind:'seconds',duration:.25}}})
+ const cut=recordedLoopRegions(p,source(start),midi).regions.at(-1)
+ assert.equal(BigInt(cut.offset)+BigInt(cut.extent),15600001n)
+})

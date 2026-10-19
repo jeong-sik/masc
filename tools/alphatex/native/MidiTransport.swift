@@ -1333,6 +1333,9 @@ final class MidiTransport {
         if timeline.arrangement, loop, var clock = value["clock"] as? [String: Any] {
             clock["cycle"] = ["kind": "seconds", "duration": timeline.duration]; value["clock"] = clock
         }
+        if timeline.arrangement, kind == "stopped", var clock = value["clock"] as? [String: Any] {
+            clock["end"] = String(DispatchTime.now().uptimeNanoseconds); value["clock"] = clock
+        }
         if timeline.source { value["bindings"] = timeline.bindings.compactMap { binding in
             sourceDestinations[binding.port].map { ["port": binding.port, "device": $0.json] as [String: Any] }
         } }

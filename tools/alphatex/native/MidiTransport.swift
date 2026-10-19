@@ -416,9 +416,10 @@ extension SourceChase {
     mutating func replace(_ model: SourceChase, addresses: Set<Int>) {
         let outside = Set(channels.keys).subtracting(addresses)
         var value = scoped(to: outside)
-        value.channels.merge(model.channels) { _, new in new }
-        value.history.append(contentsOf: model.history)
-        value.known.formUnion(model.known); value.touched.formUnion(model.touched)
+        let replacement = model.scoped(to: addresses)
+        value.channels.merge(replacement.channels) { _, new in new }
+        value.history.append(contentsOf: replacement.history)
+        value.known.formUnion(replacement.known); value.touched.formUnion(replacement.touched)
         self = value
     }
 }
@@ -643,7 +644,21 @@ struct MidiCycle {
             touched.observe(event.bytes, port: event.port)
         }
         guard touched.obstacles.isEmpty else { throw MidiFailure("common MIDI reconstruction requires support for " + touched.obstacles.map(\.rawValue).sorted().joined(separator: ", ")) }
-        return MidiCycleRegion(scope: Set(touched.channels.keys), entry: midiRegionEntry(region.events, at: source),
+        let entry = midiRegionEntry(region.events, at: source)
+        // A pruned historical note leaves an empty channel dictionary entry.
+        // Reserve only actual reconstruction effects and reachable wire events.
+        var scope = Set(try entry.model.bootstrap(replacing: SourceChase()).map { $0.0 << 8 | Int($0.1[0] & 15) })
+        let laterLimit = repeated ? min(region.spec.sourceEnd, region.spec.sourceStart + to - position(copy + 1)) : region.spec.sourceStart
+        if repeated {
+            let restart = midiRegionEntry(region.events, at: region.spec.sourceStart)
+            scope.formUnion(try restart.model.bootstrap(replacing: SourceChase()).map { $0.0 << 8 | Int($0.1[0] & 15) })
+        }
+        for event in region.events {
+            let first = event.seconds >= source && (event.seconds < limit || event.seconds == limit && limit == region.sourceDuration)
+            let later = repeated && event.seconds >= region.spec.sourceStart && (event.seconds < laterLimit || event.seconds == laterLimit && laterLimit == region.sourceDuration)
+            if (first || later), event.bytes[0] < 0xf0 { scope.insert(event.port << 8 | Int(event.bytes[0] & 15)) }
+        }
+        return MidiCycleRegion(scope: scope, entry: entry,
                                repeated: repeated, touched: touched.touched)
     }
 }
@@ -982,7 +997,7 @@ final class MidiTransport {
         return action.seconds <= seconds
     }
     func beginRegion(_ index: Int, at sourceSeconds: Double) throws {
-        let entry = try regionEntry(index, at: sourceSeconds), prefix = entry.model, next = entry.next
+        let entry = try regionEntry(index, at: sourceSeconds), prefix = entry.model.scoped(to: regionScopes[index]), next = entry.next
         let prior = sourceModel.scoped(to: regionScopes[index])
         guard prior.touched.isSubset(of: entry.safeKnown) else { throw MidiFailure("MIDI region seek needs a source baseline before sounding keys on a previously changed channel") }
         var permitted = prior; permitted.touched.formIntersection(prefix.known)

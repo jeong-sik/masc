@@ -234,7 +234,15 @@ let protocol_error_detail (error : E.stream_protocol_error) =
   | Some _ | None -> kind
 ;;
 
+(* The journal's bytes are the public projection: the server applies
+   [public_content] inside [on_publish] before appending
+   (server_routes_http_keeper_stream.ml), so a reloaded turn reads the same
+   safe copy a watched turn streamed. Applying it here again is idempotent,
+   and the published copy replaces a terminal diagnostic without removing
+   the frame that carries it, so ending/holding semantics keyed on the
+   frame's shape are unchanged. *)
 let delta_of_journaled (event : E.keeper_chat_event) : Live.delta option =
+  let event = E.public_content ~redact_text:Fun.id event in
   match event with
   | E.Batch_bound {operation_id; execution_id} -> Some (Live.Batch_bound
       {operation_id = Keeper_chat_operation.Operation_id.to_string operation_id;

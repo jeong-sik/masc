@@ -1277,8 +1277,15 @@ let with_read_workspace_precondition state handler request reqd =
         "expected_base_path and expected_masc_root must each occur once"
       | Workspace.Workspace_precondition_failed ->
         `Conflict, "workspace_precondition_failed", "workspace precondition failed" in
+    (* [Server_refusal.json]'s [code] is the documented refusal vocabulary
+       (routes_play/msx read [code]; tests assert it). [error_code] stays for
+       the existing envelopes so current readers keep working. *)
     Http_server_eio.Response.json_value ~status ~request
-      (`Assoc ["error_code", `String code; "error", `String message]) reqd
+      (`Assoc
+        [ "error_code", `String code
+        ; "error", `String message
+        ; "code", `String code ])
+      reqd
 
 let rec with_public_read handler request reqd =
   match ready_server_state () with

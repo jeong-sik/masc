@@ -906,9 +906,9 @@ let test_golden_journal_equals_wire () =
   let failed = List.mapi (fun seq event -> (seq, event)) failed_turn in
   check (list tagged) "a failed turn decodes the same on both sides"
     (wire_tagged_deltas failed) (journal_tagged_deltas failed);
-  check bool "the failed turn ends in run_failed" true
+  check bool "the failed turn ends in the public run_failed message" true
     (match List.rev (journal_tagged_deltas failed) with
-     | (Some 4, Live.Run_failed { message = "boom" }) :: _ -> true
+     | (Some 4, Live.Run_failed { message = E.public_error_message }) :: _ -> true
      | _ -> false)
 
 let test_golden_journal_equals_wire_in_chunks () =

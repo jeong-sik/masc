@@ -207,8 +207,13 @@ let test_projection_redacts_content_without_rewriting_protocol () =
     let diagnostic = value (E.Agent_core_stream_protocol_error
       {kind=E.Sse_error; quarantined_occurrence=Some tool.occurrence; index=None;
        tool_call_id=tool.tool_call_id; event_type=Some "private-note"; reason=None; raw_bytes=None}) in
-    Alcotest.(check yojson_testable) "provider diagnostic is content, not a closed enum"
-      (`String "[REDACTED]") (Yojson.Safe.Util.member "event_type" diagnostic);
+    (* The key is absent entirely (json_opt omits it), not present with null. *)
+    let fields =
+      match diagnostic with
+      | `Assoc fields -> fields
+      | _ -> Alcotest.fail "the public diagnostic is not a JSON object" in
+    Alcotest.(check bool) "the public copy omits the provider diagnostic key entirely"
+      false (List.mem_assoc "event_type" fields);
     Alcotest.(check yojson_testable) "closed error kind survives content redaction"
       (`String "sse_error") (Yojson.Safe.Util.member "kind" diagnostic))
 ;;

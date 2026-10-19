@@ -295,12 +295,44 @@ let async_request_detail_lines state target =
             | Some _ | None -> [Ansi.dim," 확인된 이전 논리 관측 없음"]) in
       physical @ Option.to_list (Option.map (fun notice -> Theme.warn (),
         " 물리 사유: " ^ Terminal_text.single_line notice) snapshot.notice) @ dependencies @ logical in
-  [Ansi.bold," 원본 비동기 요청 · o:원본 ID 조회 · r:재조회 · Esc:목록"] @ reading @ failures @ snapshot
+  [Ansi.bold," 원본 비동기 요청 · t:원본 Task · o:원본 ID 조회 · r:재조회 · Esc:목록"] @ reading @ failures @ snapshot
 
-let async_request_observation_lines state =
-  match state.tools_async_detail_open,state.tools_async_selection with
-  | true,Some target -> async_request_detail_lines state target
-  | true,None | false,_ -> async_request_inventory_lines state
+let async_source_task_lines ~cols state source =
+  let width=max 1 (Masc_tui_frame.inner_width ~cols) in
+  let text tone value = Masc_tui_text_block.rows ~max_cells:width value |> List.map (fun row -> tone,row) in
+  let body=Masc_tui_fetched.view_for ~equal:equal_tools_async_task_source state.tools_async_task_body ~key:source in
+  let history=Masc_tui_fetched.view_for ~equal:equal_tools_async_task_source state.tools_async_task_history ~key:source in
+  let pending = if Masc_tui_fetched.in_flight state.tools_async_task_body then
+      text Ansi.dim " Task 본문 조회 중 · 기존 관측·실패 유지" else [] in
+  let errors=match body with
+    | Masc_tui_fetched.Absent -> text Ansi.dim " Task 본문 미조회"
+    | Loading | Ready _ -> []
+    | Failed detail -> text (Theme.bad ()) (" Task 본문 조회 실패: " ^ detail)
+    | Stale (_,detail) -> text (Theme.warn ()) (" Task 본문 재확인 실패 · 마지막 관측: " ^ detail) in
+  let content=match Masc_tui_fetched.value body with
+    | None -> []
+    | Some (detail : Masc.Tui_decode_task_inspection.detail) ->
+      let goals=text Ansi.dim ("  canonical goal: " ^ Option.fold ~none:"없음(기록)" ~some:Fun.id detail.canonical_goal_id)
+        |> List.map snd in
+      let warnings=List.concat_map (fun (name,outcome) -> match outcome with
+        | Masc_domain.Field_absent | Field_decoded -> []
+        | Field_unreadable reason -> text (Theme.warn ()) (" Task " ^ name ^ " 조회 불가: " ^ reason))
+        ["handoff",detail.diagnostics.handoff_context_outcome;"reclaim policy",detail.diagnostics.reclaim_policy_outcome] in
+      warnings @ (Masc_tui_task_document.body_lines ~cols ~goal_lines:goals detail.task
+        |> List.concat_map (text (Theme.info ()))) in
+  text Ansi.bold (" 원본 Task · " ^ source.ats_task_id ^ " · r:본문·이력 재조회 · Esc:원본 요청")
+  @ text Ansi.dim (Printf.sprintf " 출처 run: %s · 논리 관측 %.3f%s" source.ats_run_id source.ats_observed_at
+      (if source.ats_retained then " · 이전 확인 관측에서 열림" else ""))
+  @ pending @ errors @ content
+  @ (Masc_tui_task_document.history_lines ~width ~view:history
+       ~in_flight:(Masc_tui_fetched.in_flight state.tools_async_task_history)
+      |> List.concat_map (text Ansi.dim))
+
+let async_request_observation_lines ~cols state =
+  match state.tools_async_detail_open,state.tools_async_selection,state.tools_async_task_source with
+  | true,Some _,Some source -> async_source_task_lines ~cols state source
+  | true,Some target,None -> async_request_detail_lines state target
+  | true,None,_ | false,_,_ -> async_request_inventory_lines state
 
 (* The Tools sections, named where the reader is standing. Same shape as
    {!config_pane_strip}: a reader who has seen one has seen the other. *)
@@ -1664,7 +1696,7 @@ let tools_display_lines ?(cols = 80) (state : state) =
         ]
     | Masc_tui_types.Tools_async ->
         [ Theme.info (), " 워크스페이스의 비동기 요청·복구 상태입니다."
-        ; Theme.info (), "   J/K:요청 선택 · Enter:상세 · o:원본 ID 조회 · r:재조회 · Esc:목록"
+        ; Theme.info (), "   J/K:요청 선택 · Enter:상세 · t:원본 Task · o:원본 ID · r:재조회 · Esc:뒤로"
         ; Ansi.dim, "   active=활성 원장 요청 수 · runtime-owned=현재 런타임 소유"
         ; Ansi.dim, "   ownership-unknown=소유 확인 안 됨 · 성공 여부는 개별 상태 확인"
         ]
@@ -1687,7 +1719,7 @@ let tools_display_lines ?(cols = 80) (state : state) =
   let pane_lines =
     match state.tools_pane with
     | Masc_tui_types.Tools_surface -> Lazy.force effective_lines
-    | Masc_tui_types.Tools_async -> async_request_observation_lines state
+    | Masc_tui_types.Tools_async -> async_request_observation_lines ~cols state
     | Masc_tui_types.Tools_activations -> Lazy.force activation_lines
     | Masc_tui_types.Tools_usage -> Lazy.force usage_matrix_lines
     | Masc_tui_types.Tools_catalog -> Lazy.force catalog_lines

@@ -2107,6 +2107,18 @@ logical evidence stays separate from a successful physical read. Refresh
 failures retain the last observation with its failure; retained logical data is
 marked as an earlier reading. Status observations do not authorize replay.
 
+From request detail, `t` opens the original source Task and its event history.
+The source comes from the confirmed original run, including an explicitly
+retained earlier reading when the same source cannot be revalidated. Its run
+and observation time stay visible. A run without a source Task reports that
+fact; it never substitutes the current Keeper's Task.
+
+Task body and history load independently through their exact endpoints, so
+the Task need not be present in the current list. A failure retains that
+component's last reading and leaves the sibling component available. `r`
+refreshes both; `Esc` returns to the original request. This is read-only
+inspection and does not declare the Task complete or resume the Composition.
+
 The Skill Usage pane opens with a summary box: observed catalog entries,
 distinct Keepers, and separate `TRIGGERED`, `DELIVERED`, and `ACTIONS` totals.
 These are observations from current Keeper sessions at exact Skill revisions,

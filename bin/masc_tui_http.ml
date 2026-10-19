@@ -1152,15 +1152,26 @@ let fetch_goal_timeline ~(host : string) ~(port : int) ~(goal_id : string) :
 
 (** Fetch one task's event history
     ([GET /api/v1/dashboard/tasks/history]). *)
+let task_history_path ~task_id =
+    Printf.sprintf "/api/v1/dashboard/tasks/history?task_id=%s&limit=50"
+      (percent_encode_path_segment task_id)
+
 let fetch_task_history ~(host : string) ~(port : int) ~(task_id : string) :
     (Masc.Tui_decode.task_history_event list, string) result =
   let ( let* ) = Result.bind in
-  let path =
-    Printf.sprintf "/api/v1/dashboard/tasks/history?task_id=%s&limit=50"
-      (percent_encode_path_segment task_id)
-  in
-  let* json = get_json ~host ~port ~path in
+  let* json = get_json ~host ~port ~path:(task_history_path ~task_id) in
   Masc.Tui_decode.decode_task_history json
+
+let fetch_original_task_detail ~host ~port ~task_id =
+  let path=Uri.make ~path:"/api/v1/dashboard/tasks/detail" ~query:["task_id",[task_id]] () |> Uri.to_string in
+  Result.bind (get_json ~host ~port ~path) (fun json ->
+    Masc_tui_response_decode.run ~name:"tools.original_task.decode_wait" (fun () ->
+      Masc.Tui_decode_task_inspection.detail ~task_id json))
+
+let fetch_original_task_history ~host ~port ~task_id =
+  Result.bind (get_json ~host ~port ~path:(task_history_path ~task_id)) (fun json ->
+    Masc_tui_response_decode.run ~name:"tools.original_task_history.decode_wait" (fun () ->
+      Masc.Tui_decode_task_inspection.history ~task_id json))
 
 (** Fetch a keeper's durable tool-call log
     ([GET /api/v1/keepers/:name/tool-calls]). *)

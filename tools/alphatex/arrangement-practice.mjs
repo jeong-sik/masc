@@ -51,12 +51,28 @@ export async function preparePractice(project, prepared, { signal } = {}) {
     signal?.throwIfAborted()
     const clock = practiceClock(project), original = JSON.parse(await readFile(prepared.path, { encoding: 'utf8', signal }))
     const countIn = clock.countInSeconds, duration = original.duration + countIn
-    if (!Number.isFinite(duration) || duration <= countIn || duration - countIn !== original.duration && Math.abs(duration - countIn - original.duration) > original.duration * Number.EPSILON) throw new Error('Count-in loses the arrangement duration')
-    const shift = timeline => ({ ...timeline, duration, regions: timeline.regions.map(region => ({ ...region, startSeconds: region.startSeconds + countIn })) })
+    if (!Number.isFinite(duration) || duration <= countIn || Math.abs(duration - countIn - original.duration) >= 1 / (original.assets ?? []).reduce((rate, asset) => Math.max(rate, asset.sampleRate), 48000)) throw new Error('Count-in loses the arrangement duration')
+    const shiftRegion = region => {
+      if (!region.startNanoseconds) return { ...region, startSeconds: region.startSeconds + countIn }
+      const original = region.startNanoseconds, d = BigInt(original.denominator), n = BigInt(original.numerator)
+      const cn = BigInt(clock.period.numerator) * BigInt(project.practice.countInBars) * BigInt(clock.beatsPerBar)
+      const cd = BigInt(clock.period.denominator)
+      let numerator = n * cd + cn * d, denominator = d * cd
+      const factor = gcd(numerator, denominator); numerator /= factor; denominator /= factor
+      if (numerator > (1n << 128n) - 1n || denominator * 1_000_000_000n > (1n << 128n) - 1n) throw new Error('Practice placement exceeds the native rational clock range')
+      const secondsDenom = denominator * 1_000_000_000n
+      const startSeconds = Number(numerator / secondsDenom) + Number(numerator % secondsDenom) / Number(secondsDenom)
+      return { ...region, startSeconds, startNanoseconds: { numerator: String(numerator), denominator: String(denominator) } }
+    }
+    const shift = timeline => ({ ...timeline, duration, regions: timeline.regions.map(shiftRegion) })
     const plan = prepared.format === 'midi-arrangement'
       ? { schemaVersion: 2, kind: 'mixed-arrangement', assets: [], regions: [], midi: shift(original) }
       : { ...original, regions: original.regions.map(region => ({ ...region, startSeconds: region.startSeconds + countIn })),
         ...(original.midi ? { midi: shift(original.midi) } : {}), ...(original.umpRegions ? { umpRegions: shift(original.umpRegions) } : {}) }
+    if (plan.umpRegions) for (const region of plan.regions) {
+      const paired = plan.umpRegions.regions.find(notes => notes.id === region.id && notes.component === undefined)
+      if (paired?.startNanoseconds) region.startSeconds = paired.startSeconds
+    }
     const { bytes, ...metadata } = clickWave(), id = randomUUID(), path = join(dirname(prepared.path), id + '.wav')
     await writeFile(path, bytes, { flag: 'wx', mode: 0o600, signal })
     plan.assets.push({ id, path, sha256: createHash('sha256').update(bytes).digest('hex'), ...metadata })

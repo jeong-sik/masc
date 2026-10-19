@@ -8,6 +8,9 @@ val script : string
 (** Fixed DOM implementation. WebDriver supplies the parsed action as argument
     zero; the live extension uses the same function with JSON-encoded data. *)
 val pointer_guard_script : string
+val keyboard_guard_script : string
+(** Read-only URL, observed document and focus guard for native keyboard
+    input. Typing additionally requires an enabled editable focus target. *)
 
 (** What a pointer action reports once the browser has taken it: url, title
     and scroll offsets. *)

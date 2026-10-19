@@ -155,6 +155,9 @@ type call =
   | Page_evaluate of { page_id : string; expression : string }
   | Page_hover of { page_id : string; x : float; y : float }
   | Page_click of { page_id : string; x : float; y : float }
+  | Page_double_click of { page_id : string; x : float; y : float }
+  | Page_type of { page_id : string; text : string }
+  | Page_key_press of { page_id : string; key : Browser_lane.Keyboard.t }
   | Page_scroll of { page_id : string; x : float; y : float; delta_x : float; delta_y : float }
   | Page_drag_and_drop of { page_id : string; from_x : float; from_y : float; to_x : float; to_y : float; route : css_point list }
 
@@ -170,6 +173,9 @@ let method_name = function
   | Page_evaluate _ -> "page.evaluate"
   | Page_hover _ -> "page.hover"
   | Page_click _ -> "page.click"
+  | Page_double_click _ -> "page.click"
+  | Page_type _ -> "page.type"
+  | Page_key_press _ -> "page.key_press"
   | Page_scroll _ -> "page.scroll"
   | Page_drag_and_drop _ -> "page.drag_and_drop"
 ;;
@@ -181,7 +187,7 @@ let sentence_options timeout = [ "options", `Assoc [ "timeout", `Int (timeout_ms
 let sentence_timeout_of_call = function
   | Act { timeout; _ } | Observe { timeout; _ } | Extract { timeout; _ } -> Some timeout
   | Close | Context_pages | Context_active_page | Page_goto _ | Page_screenshot _ | Page_evaluate _ | Page_click _
-  | Page_hover _ | Page_scroll _ | Page_drag_and_drop _ -> None
+  | Page_hover _ | Page_scroll _ | Page_drag_and_drop _ | Page_double_click _ | Page_type _ | Page_key_press _ -> None
 ;;
 
 let call_params = function
@@ -197,6 +203,12 @@ let call_params = function
   | Page_evaluate { page_id; expression } -> `Assoc (page page_id @ [ "expression", `String expression ])
   | Page_hover { page_id; x; y } -> `Assoc (page page_id @ [ "x", `Float x; "y", `Float y ])
   | Page_click { page_id; x; y } -> `Assoc (page page_id @ [ "x", `Float x; "y", `Float y ])
+  | Page_double_click { page_id; x; y } ->
+    `Assoc (page page_id @ [ "x", `Float x; "y", `Float y; "options", `Assoc ["click_count", `Int 2] ])
+  | Page_type {page_id;text} -> `Assoc (page page_id @ ["text", `String text])
+  | Page_key_press {page_id;key} ->
+    let chord = List.map Browser_lane.Keyboard.modifier_name key.modifiers @ [Browser_lane.Keyboard.key_text key.key] in
+    `Assoc (page page_id @ ["key", `String (String.concat "+" chord)])
   | Page_scroll { page_id; x; y; delta_x; delta_y } ->
     `Assoc (page page_id @ [ "x", `Float x; "y", `Float y; "delta_x", `Float delta_x; "delta_y", `Float delta_y ])
   | Page_drag_and_drop { page_id; from_x; from_y; to_x; to_y; route } ->
@@ -208,7 +220,7 @@ let call_params = function
 let uses_model = function
   | Act _ | Observe _ | Extract _ -> true
   | Close | Context_pages | Context_active_page | Page_goto _ | Page_screenshot _ | Page_evaluate _ | Page_click _
-  | Page_hover _ | Page_scroll _ | Page_drag_and_drop _ -> false
+  | Page_hover _ | Page_scroll _ | Page_drag_and_drop _ | Page_double_click _ | Page_type _ | Page_key_press _ -> false
 ;;
 
 let jsonrpc = "jsonrpc", `String "2.0"

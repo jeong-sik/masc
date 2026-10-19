@@ -294,10 +294,10 @@ let viewport_y (viewport : Browser_lane.Pointer.viewport) (point : Browser_lane.
 (* A pointer action is native input, as on the automation lane: the guard
    checks the page is the one observed, the browser takes the input, and the
    receipt reads where the page is afterwards. *)
-let pointer ~call ~tab_id ~page_id ~args ~name input =
+let pointer ?(guard=Browser_interaction.pointer_guard_script) ~call ~tab_id ~page_id ~args ~name input =
   let* url_before =
     Result.bind
-      (evaluate ~runtime:Scene_runtime ~send:(send_guard call) ~args page_id Browser_interaction.pointer_guard_script)
+      (evaluate ~runtime:Scene_runtime ~send:(send_guard call) ~args page_id guard)
       (string_field ~method_:"page.evaluate" "url")
     |> guard_result
   in
@@ -318,7 +318,7 @@ let interact ~tabs ~call ~tab_id ~expected_url action =
   let* action, expected_url = match (action : Browser_lane.interaction) with
     | Browser_lane.Drag_to {duration_ms;_} when duration_ms <> 0 ->
       Error (Browser_lane.Rejected_before_effect "drag movement timing requires automation or a live BiDi connection")
-    | Browser_lane.Hover _ | Browser_lane.Drag_to _ | Browser_lane.Click _ | Browser_lane.Click_node _ ->
+    | Browser_lane.Double_click _ | Browser_lane.Hover _ | Browser_lane.Drag_to _ | Browser_lane.Click _ | Browser_lane.Click_node _ ->
       let* resolved = evaluate ~runtime:Scene_runtime ~send:(send_guard call) ~args
           page_id Browser_interaction.pointer_target_script |> guard_result in
       let* action = Browser_interaction.resolve_pointer_action action resolved
@@ -338,12 +338,14 @@ let interact ~tabs ~call ~tab_id ~expected_url action =
                 | _::_ -> via in
               path @ [arrival] in
           Ok (Browser_lane.Drag {from;to_;viewport;via;duration_ms})
+        | Browser_lane.Double_click _ | Browser_lane.Double_click_at _ | Browser_lane.Type_text _ | Browser_lane.Press_key _
         | Browser_lane.Activate_tab | Browser_lane.Click _ | Browser_lane.Fill _
         | Browser_lane.Scroll _ | Browser_lane.Hover _ | Browser_lane.Drag_to _
         | Browser_lane.Hover_at _ | Browser_lane.Click_at _ | Browser_lane.Scroll_at _
         | Browser_lane.Follow_link _ | Browser_lane.Click_node _ | Browser_lane.Fill_node _ -> Ok action in
       let* url = string_field ~method_:"page.evaluate" "url" resolved |> guard_result in
       Ok (action, Some url)
+    | Browser_lane.Double_click_at _ | Browser_lane.Type_text _ | Browser_lane.Press_key _
     | Browser_lane.Activate_tab | Browser_lane.Fill _
     | Browser_lane.Scroll _ | Browser_lane.Hover_at _ | Browser_lane.Click_at _
     | Browser_lane.Scroll_at _ | Browser_lane.Drag _ | Browser_lane.Follow_link _
@@ -351,8 +353,23 @@ let interact ~tabs ~call ~tab_id ~expected_url action =
   let args = Browser_lane.interaction_args ~tab_id ~expected_url action in
   match (action : Browser_lane.interaction) with
   | Browser_lane.Activate_tab -> Error (Browser_lane.Rejected_before_effect "activate_tab requires live lane")
-  | Browser_lane.Hover _ | Browser_lane.Drag_to _ | Browser_lane.Click _ | Browser_lane.Click_node _ ->
+  | Browser_lane.Double_click _ | Browser_lane.Hover _ | Browser_lane.Drag_to _ | Browser_lane.Click _ | Browser_lane.Click_node _ ->
     Error (Browser_lane.Rejected_before_effect "unresolved semantic pointer target")
+  | Browser_lane.Double_click_at {point;viewport} ->
+    pointer ~call ~tab_id ~page_id ~args ~name
+      (Wire.Page_double_click {page_id;x=viewport_x viewport point;y=viewport_y viewport point})
+  | Browser_lane.Type_text {text;_} ->
+    let* () = Browser_lane.Keyboard.validate_text text
+      |> Result.map_error (fun detail -> Browser_lane.Rejected_before_effect detail) in
+    pointer ~guard:Browser_interaction.keyboard_guard_script ~call ~tab_id ~page_id ~args ~name
+      (Wire.Page_type {page_id;text})
+  | Browser_lane.Press_key {key;_} ->
+    let* () = match key.key with
+      | Browser_lane.Keyboard.Character value when Uchar.to_int value > 0xffff ->
+        Error (Browser_lane.Rejected_before_effect "Stagehand cannot press a supplementary Unicode scalar as a key; use type_text for Unicode text")
+      | Browser_lane.Keyboard.Character _ | Browser_lane.Keyboard.Named _ -> Ok () in
+    pointer ~guard:Browser_interaction.keyboard_guard_script ~call ~tab_id ~page_id ~args ~name
+      (Wire.Page_key_press {page_id;key})
   | Browser_lane.Hover_at {point;viewport} ->
     pointer ~call ~tab_id ~page_id ~args ~name
       (Wire.Page_hover {page_id;x=viewport_x viewport point;y=viewport_y viewport point})

@@ -25,23 +25,23 @@ minimum = 0
 [[params]]
 name = "expectedUrl"
 type = "string"
-description = "Observed URL guard; required for explicit pointer actions, hover/drag_to, follow_link and activate_tab. Semantic click may omit it; the native backend captures and guards the resolved page URL."
+description = "Observed URL guard; required for explicit pointer actions, hover/drag_to, follow_link and activate_tab. Required also for double_click/type_text/press_key. Semantic click may omit it; the native backend captures and guards the resolved page URL."
 
 [[params]]
 name = "action"
 type = "string"
 required = true
-enum = ["activate_tab", "follow_link", "click", "fill", "scroll", "click_at", "scroll_at", "hover", "drag_to", "hover_at", "drag"]
+enum = ["activate_tab", "follow_link", "double_click", "double_click_at", "type_text", "press_key", "click", "fill", "scroll", "click_at", "scroll_at", "hover", "drag_to", "hover_at", "drag"]
 
 [[params]]
 name = "selector"
 type = "string"
-description = "click/fill/hover: one visible top-document element; alternative to documentId/nodeId."
+description = "click/double_click/fill/hover: one visible top-document element; alternative to documentId/nodeId."
 
 [[params]]
 name = "text"
 type = "string"
-description = "fill replacement; empty clears, never echoed."
+description = "fill replaces; type_text sends native Unicode text to the currently focused enabled editable control. Empty fill clears. Control characters require explicit press_key, so text cannot navigate focus or submit. Text is never echoed."
 
 [[params]]
 name = "x"
@@ -61,7 +61,7 @@ description = "Retain the observed live clientId on every subsequent tab read/ac
 [[params]]
 name = "documentId"
 type = "string"
-description = "Scene document with nodeId; required for follow_link. Reload fails."
+description = "Scene document with nodeId; required for follow_link. type_text/press_key require the observed documentId with expectedUrl and retain current focus. Reload fails."
 
 [[params]]
 name = "nodeId"
@@ -232,3 +232,14 @@ type = "integer"
 minimum = 0
 maximum = 9007199254740991
 description = "drag/drag_to: duration of each intermediate and destination move in milliseconds; default 0. Requires automation or live webdriver_bidi when nonzero."
+
+[[params]]
+name = "key"
+type = "string"
+description = "press_key: Enter, Tab, Escape, Backspace, Delete, ArrowUp/Down/Left/Right, Home, End, or one Unicode scalar. Stagehand refuses supplementary scalar keys; use type_text for Unicode text. Sends native down/up to current focus; no guessed selector or synthetic events."
+
+[[params]]
+name = "modifiers"
+type = "array"
+items = { type = "string", enum = ["Control", "Meta", "Alt", "Shift"] }
+description = "press_key: explicit distinct modifiers, e.g. [Meta] with key a selects all on macOS; [Control] on other systems. Native keys and double clicks require Stagehand, automation, or live webdriver_bidi. WebExtension and browser zoom are unsupported."

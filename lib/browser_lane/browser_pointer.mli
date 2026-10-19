@@ -10,6 +10,7 @@ val viewport_to_json : viewport -> Yojson.Safe.t
 type gesture =
   | Hover
   | Click
+  | Double_click
   | Drag of { via : point list; destination : point; duration_ms : int }
   | Wheel of { x : int; y : int }
 

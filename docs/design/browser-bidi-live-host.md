@@ -697,7 +697,9 @@ replay after native input. The WebExtension's DOM-click behavior is unchanged.
 WebDriver visit the midpoint before the destination so controls that activate
 on initial movement receive another changed position before release. Custom
 paths must come from the observed viewport; stale geometry fails before input.
-Stagehand refuses custom paths or timing before input rather than ignoring them.
+Stagehand forwards custom paths through its native route option. Nonzero movement
+timing is refused before input because the runtime's delay is a pause after a
+move rather than the duration of that movement.
 A successful native input receipt proves dispatch and release, not that a page
 accepted a drop. Re-read the application result before reporting success or
 retrying. HTML5 `draggable`/`DataTransfer` requires separate verification from
@@ -716,3 +718,39 @@ page identity with `truncated:true`. An identity envelope that cannot fit by
 itself is refused rather than shortened. Check `truncated` and use an observed
 region scope or the element inventory when a text or byte budget is exhausted.
 A missing control in a truncated observation is not evidence that hover failed.
+
+### Native double clicks, text, and key chords
+
+`masc_browser_interact` supports `double_click` on an observed selector or scene
+node, and `double_click_at` on a captured viewport point. Stagehand sends native
+`page.click` with `click_count: 2`; WebDriver and BiDi send two native button
+press/release pairs in one owned input sequence. These actions use the same
+visibility, disabled-control, document, viewport, and URL guards as native click.
+
+`type_text` sends Unicode text into the currently focused editable control.
+`press_key` sends one named key or Unicode scalar, optionally with explicit
+`Control`, `Meta`, `Alt`, and `Shift` modifiers. Both require the observed
+`documentId` and `expectedUrl`; a reload of the same URL fails the document guard.
+Typing additionally requires enabled editable focus. Control characters are
+refused as text: use an explicit `press_key` for Enter or Tab so a text request
+cannot silently change focus or submit a form. The guard never focuses a
+control or dispatches events: first use an observed native click to focus it.
+Use `Meta` with `a` for select-all on macOS and `Control` with `a` where appropriate.
+
+Stagehand uses its real `page.type` and `page.key_press` methods. WebDriver and
+BiDi use native key down/up input sources and release all held input even after
+cancellation or an unanswered dispatch. Unicode scalars stay intact. W3C's
+reserved special-key scalars U+E000 through U+E05D are refused as text instead of
+becoming commands. An unanswered input remains uncertain and is never replayed.
+Stagehand refuses supplementary Unicode scalars in `press_key` before input;
+use `type_text` for such text. If native Stagehand keyboard input may have
+started without confirmed key release, the backend quarantines that exact owned
+session without closing its pages. Status remains available; explicitly close
+and reopen before further work. Input is never replayed for cleanup.
+Receipts report the original action and page identity without echoing typed text.
+
+WebExtension does not serve these native actions. Browser zoom remains
+unsupported; resizing CSS or the viewport does not implement browser zoom.
+`test/fixtures/browser-native-input.html` records trusted double-click and keyboard
+input for isolated native browser probes. Source tests and protocol fixtures do
+not establish that an installed browser has completed these interactions.

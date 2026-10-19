@@ -756,6 +756,40 @@ let test_hover_without_click () =
    browser that answers every protocol command. The peer completes exactly
    the work the table says BiDi serves and refuses the rest before it sends a
    script or an input. *)
+let test_native_keyboard_release_and_failure () = Eio_main.run (fun _ ->
+  let sent=ref 0 and released=ref 0 and guard_failure=ref false and lost=ref false in
+  let command method_ _ = match method_ with
+    | "browsingContext.getTree" -> Ok (obj ["contexts",`List [obj ["context",`String "owned"]]])
+    | "script.callFunction" -> if !guard_failure then Error (Peer.Rejected (Peer.error_code_of_wire "stale document"))
+      else Ok (script_value (obj ["url",`String "https://example.org";"title",`String "native"]))
+    | "input.performActions" -> incr sent;if !lost then Error (Peer.Unanswered "input reply missing") else Ok `Null
+    | "input.releaseActions" -> incr released;Ok `Null
+    | _ -> fail ("unexpected native command " ^ method_) in
+  let peer=peer_of command in
+  List.iter (fun (action,extra) ->
+    let args=obj (["tabId",`Int 1;"expectedUrl",`String "https://example.org";"action",`String action;
+      "documentId",`String "d1"] @ extra) in
+    sent:=0;released:=0;
+    (match Peer.dispatch peer ~verb:Peer.Page_interact args with Ok _->()|Error _->fail "native keyboard failed");
+    check int "native input once" 1 !sent;check int "keyboard cleanup" 1 !released;
+    guard_failure:=true;sent:=0;released:=0;
+    (match Peer.dispatch peer ~verb:Peer.Page_interact args with Error (Peer.Before_effect _)->()|_->fail "stale guard must reject");
+    check int "stale guard cannot press keys" 0 !sent;
+    guard_failure:=false;lost:=true;sent:=0;released:=0;
+    (match Peer.dispatch peer ~verb:Peer.Page_interact args with Error (Peer.Outcome_unknown _)->()|_->fail "lost input stays unknown");
+    check int "unknown input never retried" 1 !sent;check int "unknown input still released" 1 !released;
+    lost:=false)
+    ["type_text",["text",`String "한🙂"];
+     "press_key",["key",`String "a";"modifiers",`List [`String "Meta"]]];
+  List.iter (fun text -> sent:=0;released:=0;
+    (match Peer.dispatch peer ~verb:Peer.Page_interact (obj ["tabId",`Int 1;
+      "expectedUrl",`String "https://example.org";"action",`String "type_text";
+      "documentId",`String "d1";"text",`String text]) with
+     | Error (Peer.Before_effect _) -> () | _ -> fail "text controls/reserved scalars must reject before input");
+    check int "rejected text sends no native input" 0 !sent;
+    check int "rejected text sends no native release" 0 !released) ["a\tb";"a\nb";"a\rb";"\xee\x80\x89"])
+
+
 let test_peer_serves_what_the_lane_table_says () =
   Eio_main.run (fun _ ->
     let module Lane = Browser_lane in
@@ -775,6 +809,8 @@ let test_peer_serves_what_the_lane_table_says () =
       | Point_scroll -> interact (Scroll_at {point;viewport;x=0;y=120})
       | Trusted_hover -> interact (Hover_at {point;viewport})
       | Trusted_drag -> interact (Drag {from=point;to_={x=0.75;y=0.5};viewport;via=[];duration_ms=0})
+      | Trusted_double_click -> interact (Double_click_at {point;viewport})
+      | Trusted_keyboard -> interact (Type_text {document_id=viewport.document_id;text="hello"})
       | Tab_activation -> interact Activate_tab
   | Tab_creation -> Page_act (Action.Open_tab "https://example.test/new")) in
     (* The names the native host forwards (Browser_host.decode_poll). *)
@@ -936,7 +972,8 @@ let test_live_act_rejects_other_actions_before_effect () =
      obj ["action",`String "open_tab";"url",`String "about:newtab"];
      obj ["action",`String "open_tab";"url",`String "javascript:alert(1)"]]
 
-let () = run "BiDi live peer" ["identity",[test_case "opaque contexts" `Quick test_context_identity;
+let () = run "BiDi live peer" ["identity",[test_case "native keyboard release and uncertainty" `Quick test_native_keyboard_release_and_failure;
+      test_case "opaque contexts" `Quick test_context_identity;
     test_case "one unreadable tab leaves other tabs visible" `Quick test_unreadable_tab_does_not_hide_other_tabs;
     test_case "implicit read skips an unreadable tab" `Quick test_active_tab_after_unreadable_tab;
     test_case "an error code is read once and written back" `Quick test_an_error_code_is_read_once_and_written_back;

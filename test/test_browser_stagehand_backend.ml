@@ -91,7 +91,7 @@ let with_backend ?(configure = ignore) ?(call_hook = fun _ -> None) f =
                 { method_ = "stagehand.act"; rejected = false });
             raise exn)
        | Wire.Observe _ | Wire.Extract _ | Wire.Page_goto _ | Wire.Page_screenshot _ | Wire.Page_hover _ | Wire.Page_click _
-       | Wire.Page_scroll _ | Wire.Page_drag_and_drop _ ->
+       | Wire.Page_scroll _ | Wire.Page_drag_and_drop _ | Wire.Page_double_click _ | Wire.Page_type _ | Wire.Page_key_press _ ->
          failf "the backend sent %s" (Wire.method_name request))
 
   in
@@ -433,7 +433,8 @@ let test_pointer_guard_and_input_keep_the_verb_slot () =
       Some (Ok (`Assoc [ "page", page ]))
     | Wire.Close | Wire.Act _ | Wire.Observe _ | Wire.Extract _ | Wire.Context_pages
     | Wire.Context_active_page | Wire.Page_goto _ | Wire.Page_screenshot _ | Wire.Page_evaluate _
-    | Wire.Page_hover _ | Wire.Page_click _ | Wire.Page_scroll _ | Wire.Page_drag_and_drop _ -> None
+    | Wire.Page_hover _ | Wire.Page_click _ | Wire.Page_scroll _ | Wire.Page_drag_and_drop _
+    | Wire.Page_double_click _ | Wire.Page_type _ | Wire.Page_key_press _ -> None
   in
   with_backend ~call_hook
   @@ fun h ->
@@ -513,6 +514,45 @@ let test_an_ended_session_is_let_go () =
     (Yojson.Safe.Util.member "ended" (data (Backend.execute h.backend Lane.Session_status)) = `Null)
 ;;
 
+let test_native_keyboard_quarantine () =
+  let key=match Lane.Keyboard.of_wire ~key:"a" ~modifiers:["Meta"] with Ok key->key|Error detail->fail detail in
+  List.iter (fun failure ->
+    let inputs=ref 0 in
+    with_backend ~call_hook:(function Wire.Page_key_press _ -> incr inputs;Some (Error failure)|_->None) (fun h ->
+      ignore (data (Backend.execute h.backend open_));ignore (data (Backend.execute h.backend Lane.Tabs_list));
+      let verb=Lane.Page_interact {tab_id=0;expected_url=Some "http://127.0.0.1:1/";
+        action=Lane.Press_key {document_id="d1";key}} in
+      (match Backend.execute h.backend verb with Lane.Refused _->()|_->fail "failed native keys must remain uncertain");
+      let status=data (Backend.execute h.backend Lane.Session_status) in
+      check bool "unconfirmed native key release quarantines" true (Yojson.Safe.Util.(status |> member "quarantined" |> to_bool));
+      check bool "quarantine is not an available open browser" true (Backend.session_observation h.backend=Lane.Browser_unknown);
+      check bool "quarantine preserves the unsaved browser" false (the_session h).stopped;
+      List.iter (fun verb -> match Backend.execute h.backend verb with Lane.Rejected_before_effect _ -> ()
+        | _ -> fail "quarantined session must refuse work and reuse") [verb;open_;Lane.Tabs_list];
+      check int "unknown chord is never replayed" 1 !inputs;
+      ignore (data (Backend.execute h.backend Lane.Session_close));
+      check bool "explicit close ends the exact quarantined browser" true (the_session h).stopped;
+      ignore (data (Backend.execute h.backend open_));
+      check int "explicit reopen creates fresh owned session" 2 (List.length !(h.sessions))))
+    [Session.Lost "native key reply missing";Session.Rejected {code= -32603;message="keyDown failed"}];
+  with_backend ~call_hook:(function Wire.Page_key_press _ -> Some (Error (Session.Not_delivered "never written"))|_->None) (fun h ->
+    ignore (data (Backend.execute h.backend open_));ignore (data (Backend.execute h.backend Lane.Tabs_list));
+    ignore (Backend.execute h.backend (Lane.Page_interact {tab_id=0;expected_url=Some "http://127.0.0.1:1/";
+      action=Lane.Press_key {document_id="d1";key}}));
+    check bool "proven unsent keyboard input does not quarantine" true (Backend.session_observation h.backend=Lane.Browser_open))
+
+let test_cancelled_native_keyboard_quarantines () =
+  let entered,enter=Eio.Promise.create () and never,_=Eio.Promise.create () in
+  with_backend ~call_hook:(function Wire.Page_type _ -> Eio.Promise.resolve enter ();Eio.Promise.await never | _->None) (fun h ->
+    ignore (data (Backend.execute h.backend open_));ignore (data (Backend.execute h.backend Lane.Tabs_list));
+    Eio.Fiber.first (fun () -> ignore (Backend.execute h.backend (Lane.Page_interact {tab_id=0;
+      expected_url=Some "http://127.0.0.1:1/";action=Lane.Type_text {document_id="d1";text="owned"}})))
+      (fun () -> Eio.Promise.await entered);
+    h.settle ();
+    check bool "cancelled dispatched native input quarantines" true (Backend.session_observation h.backend=Lane.Browser_unknown);
+    check bool "cancellation never silently closes unsaved page" false (the_session h).stopped;
+    ignore (data (Backend.execute h.backend Lane.Session_close)))
+
 let test_status_reports_an_ended_session () =
   with_backend
   @@ fun h ->
@@ -535,6 +575,8 @@ let test_status_reports_an_undelivered_answer () =
 let () =
   run "browser_stagehand_backend" [
     "lifecycle", [
+      test_case "uncertain keyboard release quarantines without closing" `Quick test_native_keyboard_quarantine;
+      test_case "cancelled keyboard dispatch quarantines" `Quick test_cancelled_native_keyboard_quarantines;
       test_case "open, reuse, list, close" `Quick test_lifecycle;
       test_case "lifecycle observations never wait on browser I/O" `Quick test_nonblocking_lifecycle_observation;
       test_case "a page verb needs a session" `Quick test_page_verb_without_a_session;

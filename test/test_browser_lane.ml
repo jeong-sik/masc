@@ -121,6 +121,8 @@ let verb_asking_for : Lane.live_capability -> Lane.verb = Lane.(function
   | Point_scroll -> interact (Scroll_at {point;viewport;x=0;y=120})
   | Trusted_hover -> interact (Hover_at {point;viewport})
   | Trusted_drag -> interact (Drag {from=point;to_=point;viewport;via=[];duration_ms=0})
+  | Trusted_double_click -> interact (Double_click_at {point;viewport})
+  | Trusted_keyboard -> interact (Type_text {document_id=viewport.document_id;text="hello"})
   | Tab_activation -> interact Activate_tab
   | Tab_creation -> Page_act (Action.Open_tab "https://example.test/new"))
 
@@ -131,7 +133,7 @@ let test_transport_table () =
   let unserved transport = List.filter (fun capability ->
     not (Lane.live_transport_serves transport capability)) Lane.all_of_live_capability in
   check (list capability) "the extension has no pointer the browser trusts"
-    Lane.[Trusted_hover; Trusted_drag; Tab_creation] (unserved Lane.Web_extension);
+    Lane.[Trusted_hover; Trusted_drag; Trusted_double_click; Trusted_keyboard; Tab_creation] (unserved Lane.Web_extension);
   check (list capability) "the BiDi peer has no tab activation"
     Lane.[Tab_activation] (unserved Lane.Webdriver_bidi);
   List.iter (fun capability ->

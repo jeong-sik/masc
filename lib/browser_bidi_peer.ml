@@ -243,7 +243,7 @@ let read t context args =
   | None | Some (`Bool false) -> script t context
       "const chars=Array.from(document.body?.innerText??''); const cap=arguments[0].cap; return {url:location.href,title:document.title,text:chars.slice(0,cap).join(''),chars:chars.length,truncated:chars.length>cap};" (obj ["cap",`Int cap])
   | _ -> Error "invalid includeHtml"
-type pointer_motion = Hover_pointer | Click_pointer | Drag_pointer of { destination : Browser_lane.Pointer.point; via : Browser_lane.Pointer.point list; duration_ms : int }
+type pointer_motion = Hover_pointer | Click_pointer | Double_click_pointer | Drag_pointer of { destination : Browser_lane.Pointer.point; via : Browser_lane.Pointer.point list; duration_ms : int }
   | Wheel_pointer of { x : int; y : int }
 let pointer t context args ~(viewport : Browser_lane.Pointer.viewport) ~start motion =
   let before result = Result.map_error (fun e -> Before_effect e) result in
@@ -252,6 +252,7 @@ let pointer t context args ~(viewport : Browser_lane.Pointer.viewport) ~start mo
   let gesture = match motion with
     | Hover_pointer -> Browser_lane.Pointer.Hover
     | Click_pointer -> Browser_lane.Pointer.Click
+    | Double_click_pointer -> Browser_lane.Pointer.Double_click
     | Drag_pointer {destination;via;duration_ms} -> Browser_lane.Pointer.Drag {via;destination;duration_ms}
     | Wheel_pointer {x;y} -> Browser_lane.Pointer.Wheel {x;y} in
   let sources = Browser_lane.Pointer.input_sources ~pointer_id:"masc-pointer"
@@ -263,16 +264,32 @@ let pointer t context args ~(viewport : Browser_lane.Pointer.viewport) ~start mo
   let applied=Eio.Switch.run (fun sw ->
     (match motion with
     | Hover_pointer | Wheel_pointer _ -> ()
-    | Click_pointer | Drag_pointer _ -> Eio.Switch.on_release sw (fun ()->
+    | Click_pointer | Double_click_pointer | Drag_pointer _ -> Eio.Switch.on_release sw (fun ()->
       released:=Result.map (fun _->()) (command t "input.releaseActions" (obj ["context",str context]))));
     command t "input.performActions" (obj ["context",str context;"actions",sources])) in
   let* _=unknown applied in
   let* ()=unknown !released in
   let* after = unknown (script t context Browser_interaction.pointer_receipt_script (obj [])) in
   let* old_url = unknown (string "url" observed) in
-  let action=match motion with Hover_pointer->"hover_at"|Click_pointer->"click_at"|Drag_pointer _->"drag"|Wheel_pointer _->"scroll_at" in
+  let action=match motion with Hover_pointer->"hover_at"|Click_pointer->"click_at"|Double_click_pointer->"double_click_at"|Drag_pointer _->"drag"|Wheel_pointer _->"scroll_at" in
   match after with `Assoc fields -> Ok (obj (("action",str action)::("urlBefore",str old_url)::fields))
   | _ -> Error (Outcome_unknown "invalid post-input observation")
+let keyboard t context args ~sources ~name =
+  let pre result = Result.map_error (fun detail -> Before_effect detail) result in
+  let unknown result = Result.map_error (fun detail -> Outcome_unknown detail) result in
+  let* observed = pre (script t context Browser_interaction.keyboard_guard_script args) in
+  let released = ref (Ok ()) in
+  let applied = Eio.Switch.run (fun sw ->
+    Eio.Switch.on_release sw (fun () -> released := Result.map (fun _ -> ())
+      (command t "input.releaseActions" (obj ["context",str context])));
+    command t "input.performActions" (obj ["context",str context;"actions",sources])) in
+  let* _ = unknown applied in
+  let* () = unknown !released in
+  let* after = unknown (script t context Browser_interaction.pointer_receipt_script (obj [])) in
+  let* old_url = unknown (string "url" observed) in
+  match after with
+  | `Assoc fields -> Ok (obj (("action",str name)::("urlBefore",str old_url)::fields))
+  | _ -> Error (Outcome_unknown "invalid post-keyboard observation")
 let dispatch ?actor ?request_id t ~verb args =
   let pre r = Result.map_error (fun e -> Before_effect e) r in
   let on_tab use =
@@ -346,19 +363,26 @@ let dispatch ?actor ?request_id t ~verb args =
       let* fields=pre (match args with `Assoc xs->Ok xs|_->Error "invalid interaction") in
       let* request=pre (Browser_interaction.parse (obj (("lane",str Browser_lane.Lane_name.(to_wire Live))::fields))) in
       let* expected_url,action = match request.action with
-        | Browser_lane.Hover _ | Browser_lane.Drag_to _ | Browser_lane.Click _ | Browser_lane.Click_node _ ->
+        | Browser_lane.Double_click _ | Browser_lane.Hover _ | Browser_lane.Drag_to _ | Browser_lane.Click _ | Browser_lane.Click_node _ ->
           let* resolved = pre (script t context Browser_interaction.pointer_target_script args) in
           let* action = pre (Browser_interaction.resolve_pointer_action request.action resolved) in
           let* url = pre (string "url" resolved) in
           Ok (Some url,action)
+        | Browser_lane.Double_click_at _ | Browser_lane.Type_text _ | Browser_lane.Press_key _
         | Browser_lane.Activate_tab | Browser_lane.Fill _
         | Browser_lane.Scroll _ | Browser_lane.Hover_at _ | Browser_lane.Click_at _
         | Browser_lane.Scroll_at _ | Browser_lane.Drag _ | Browser_lane.Follow_link _
         | Browser_lane.Fill_node _ -> Ok (request.expected_url,request.action) in
       let args = Browser_lane.interaction_args ~tab_id:id ~expected_url action in
       let* receipt = match action with
-      | Browser_lane.Hover _ | Browser_lane.Drag_to _ | Browser_lane.Click _ | Browser_lane.Click_node _ ->
+      | Browser_lane.Double_click _ | Browser_lane.Hover _ | Browser_lane.Drag_to _ | Browser_lane.Click _ | Browser_lane.Click_node _ ->
         Error (Before_effect "unresolved semantic pointer target")
+      | Browser_lane.Double_click_at {point;viewport} -> pointer t context args ~viewport ~start:point Double_click_pointer
+      | Browser_lane.Type_text {text;_} ->
+        let* sources = pre (Browser_lane.Keyboard.text_source ~id:"masc-keyboard" text) in
+        keyboard t context args ~sources ~name:"type_text"
+      | Browser_lane.Press_key {key;_} ->
+        keyboard t context args ~sources:(Browser_lane.Keyboard.input_source ~id:"masc-keyboard" key) ~name:"press_key"
       | Browser_lane.Hover_at {point;viewport} -> pointer t context args ~viewport ~start:point Hover_pointer
       | Browser_lane.Click_at {point;viewport} -> pointer t context args ~viewport ~start:point Click_pointer
       | Browser_lane.Scroll_at {point;viewport;x;y} -> pointer t context args ~viewport ~start:point (Wheel_pointer {x;y})

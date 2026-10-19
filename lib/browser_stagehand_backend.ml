@@ -18,6 +18,7 @@ type 'session opened =
   }
 
 type 'session state = Closed | Opening | Open of 'session opened | Closing
+  | Quarantined of 'session opened
 
 type request =
   { verb : Browser_lane.verb
@@ -49,6 +50,7 @@ let set_state t state =
   Atomic.set t.observed_session (match state with
     | Closed -> Browser_lane.Browser_closed
     | Opening | Closing -> Browser_lane.Browser_changing
+    | Quarantined _ -> Browser_lane.Browser_unknown
     | Open opened -> match !(opened.ended) with
       | None -> Browser_lane.Browser_open | Some _ -> Browser_lane.Browser_unknown)
 
@@ -70,6 +72,9 @@ let in_transition =
 let no_session =
   Browser_lane.Rejected_before_effect "no stagehand session is open: open one with BrowserSession lane=stagehand"
 ;;
+
+let keyboard_quarantined = Browser_lane.Rejected_before_effect
+  "native keyboard release is unconfirmed; this browser is quarantined without closing its pages; explicitly close and reopen the stagehand session before new work"
 
 (* See [run_session]: an ended session may already be let go; a later release then does nothing. *)
 let release_session release = ignore (Eio.Promise.try_resolve release ())
@@ -164,6 +169,7 @@ let run_session t ~headless ~opened ~resolve_opened =
 
 let open_session t ~headless =
   match t.state with
+  | Quarantined _ -> keyboard_quarantined
   (* An ended session is being let go; the next open after that starts anew. *)
   | Open { ended = { contents = Some _ }; _ } | Opening | Closing -> in_transition
   | Open { ended = { contents = None }; _ } ->
@@ -181,7 +187,7 @@ let close_session t =
   match t.state with
   | Closed -> answered (`Assoc [ "closed", `Bool true ])
   | Opening | Closing -> in_transition
-  | Open opened ->
+  | Open opened | Quarantined opened ->
     set_state t Closing;
     (* The browser stops whatever the runtime answers: a close that raised
        would otherwise leave the backend Closing, and every later open and
@@ -212,6 +218,9 @@ let status t =
     | Closed -> [ "open", `Bool false ] @ (match t.last_end with Some reason -> [ "ended", `String reason ] | None -> [])
     | Opening -> [ "open", `Bool false; "opening", `Bool true ]
     | Closing -> [ "open", `Bool true; "closing", `Bool true ]
+    | Quarantined opened -> ["open",`Bool true;"quarantined",`Bool true;
+        "backend",`String backend_name;"pid",`Int (t.pid opened.session);
+        "reason",`String "native keyboard release is unconfirmed; explicitly close and reopen before new work"]
     | Open opened ->
       [ "open", `Bool true; "backend", `String backend_name; "pid", `Int (t.pid opened.session) ]
       @ (match !(opened.ended) with Some reason -> [ "ended", `String reason ] | None -> [])
@@ -233,7 +242,30 @@ let page t ~began ~actor verb =
     match t.state with
     | Open opened ->
       began opened;
-      Executor.execute ~tabs:t.tabs ~call:(t.call opened.session) ?actor verb
+      Eio.Switch.run (fun sw ->
+        let keyboard_pending = ref false in
+        Eio.Switch.on_release sw (fun () ->
+          if !keyboard_pending then match t.state with
+            | Open current when current == opened -> set_state t (Quarantined current)
+            | Closed | Opening | Closing | Quarantined _ | Open _ -> ());
+        let call request =
+          let keyboard = match request with
+            | Wire.Page_key_press _ | Wire.Page_type _ -> true
+            | Wire.Close | Wire.Act _ | Wire.Observe _ | Wire.Extract _ | Wire.Context_pages
+            | Wire.Context_active_page | Wire.Page_goto _ | Wire.Page_screenshot _ | Wire.Page_evaluate _
+            | Wire.Page_hover _ | Wire.Page_click _ | Wire.Page_double_click _ | Wire.Page_scroll _
+            | Wire.Page_drag_and_drop _ -> false in
+          if keyboard then keyboard_pending := true;
+          let result = t.call opened.session request in
+          (match result with
+           | Ok _ -> if keyboard then keyboard_pending := false
+           | Error (Session.Not_attached | Session.Detached | Session.Connection_gone _
+               | Session.Abandoned_call_pending | Session.Not_delivered _) ->
+             if keyboard then keyboard_pending := false
+           | Error (Session.Rejected _ | Session.Lost _) -> ());
+          result in
+        Executor.execute ~tabs:t.tabs ~call ?actor verb)
+    | Quarantined _ -> keyboard_quarantined
     | Closed | Opening | Closing -> no_session)
 ;;
 
@@ -272,7 +304,7 @@ let retire_sentence_session t expected =
     set_state t Closing;
     release_session current.release;
     Eio.Promise.await current.stopped
-  | Closed | Opening | Closing | Open _ -> ()
+  | Closed | Opening | Closing | Quarantined _ | Open _ -> ()
 ;;
 
 let retire_unanswered_sentence t ~expected ~answers_before =

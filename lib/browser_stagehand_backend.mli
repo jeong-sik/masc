@@ -11,7 +11,10 @@
     has passed is the session retired, so a later open can start a fresh
     browser. Callers may run on any fiber or domain. Page verbs are
     serialized for the whole verb, including guard, input and receipt; a
-    caller cancelled before its turn does not close the session. *)
+    caller cancelled before its turn does not close the session. Native
+    keyboard input whose release was not confirmed quarantines the session
+    without closing its browser. Status and explicit close remain available;
+    page work and reuse require explicit close and reopen. *)
 
 (** Starts one session whose browser lives on [sw]: releasing [sw] stops it.
     Answers the session and the [stagehand.init] result. *)

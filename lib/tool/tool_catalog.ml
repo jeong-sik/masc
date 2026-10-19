@@ -393,6 +393,7 @@ let explicit_metadata : (string * metadata) list =
     ("masc_runtime_verify", local_runtime_tool Local_runtime_tool_policy.Verify);
     ( "masc_runtime_ollama_probe"
     , local_runtime_tool Local_runtime_tool_policy.Ollama_probe );
+    ("masc_decide", local_runtime_tool Local_runtime_tool_policy.Systemone_decide);
     ("masc_board_hearths", read_state_tool);
     ("masc_board_search", read_state_tool);
     ("masc_board_profile", read_state_tool);

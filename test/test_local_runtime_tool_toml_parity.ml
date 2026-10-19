@@ -20,6 +20,7 @@ open Alcotest
 let expected =
   [ "masc_runtime_verify"
   ; "masc_runtime_ollama_probe"
+  ; "masc_decide"
   ]
 ;;
 

@@ -1,6 +1,7 @@
 type operation = Local_runtime_tool_policy.operation =
   | Verify
   | Ollama_probe
+  | Systemone_decide
 [@@deriving enumerate]
 
 type definition =

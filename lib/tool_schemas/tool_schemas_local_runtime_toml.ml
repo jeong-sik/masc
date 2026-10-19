@@ -24,3 +24,4 @@ let schema_of_name name : Masc_domain.tool_schema =
 
 let verify = schema_of_name "masc_runtime_verify"
 let ollama_probe = schema_of_name "masc_runtime_ollama_probe"
+let systemone_decide = schema_of_name "masc_decide"

@@ -138,3 +138,46 @@ test('inspection derives evidence from samples and clocks instead of trusting ed
   const abort=new AbortController();abort.abort();await assert.rejects(inspectCalibration(f.directory,{signal:abort.signal}),{name:'AbortError'})
  }finally{await rm(f.directory,{recursive:true,force:true})}
 })
+
+import { attachRecordedTake } from '../arrangement-recording.mjs'
+import { recordingCorrectionContext } from '../recording-correction.mjs'
+import { calibrationResidual } from '../calibration-profile.mjs'
+
+test('measured recording policy attaches through the real worker, survives portable reopen and keeps raw-source playback MIDI uncorrected',async()=>{
+ const f=await fixture(),portable=await mkdtemp(join(tmpdir(),'masc-record-policy-'))
+ let worker
+ try {
+  await retainExperiment(f);const profile=await inspectCalibration(f.directory)
+  const correction={kind:'audio',input:'input',output:'output',audioChannel:{input:2,output:2},
+   placement:{kind:'calibrated',profile,match:1,advanceNanoseconds:calibrationResidual(profile,profile.pulses[1])}}
+  const context={input:'input',output:'output',monitorOutput:null,playback:f.playback}
+  recordingCorrectionContext(correction,context)
+  for(const change of [{monitorOutput:'output'},{playback:{...f.playback,clock:{...f.playback.clock,sampleRate:44100}}},{playback:{...f.playback,clock:{...f.playback.clock,bufferFrames:512}}}])assert.throws(()=>recordingCorrectionContext(correction,{...context,...change}))
+  const take=join(f.directory,'instrument-take');await mkdir(take)
+  const manifest={...f.manifest,midiPacketCount:'2',midiSources:[{id:'keys',name:'Keys'}]}
+  const packets=[{kind:'midi',protocol:2,hostTime:String(BigInt(f.manifest.clock.requestedStart)+240000n),source:'keys',timestampOrigin:'packet',words:[0x43953c00,0x90010000]},
+   {kind:'midi',protocol:2,hostTime:String(BigInt(f.manifest.clock.requestedStart)+480000n),source:'keys',timestampOrigin:'packet',words:[0x43853c00,0x12340000]}]
+  for(const name of ['audio.wav','audio-blocks.jsonl'])await writeFile(join(take,name),await readFile(join(f.directory,'capture',name)))
+  await writeFile(join(take,'session.json'),JSON.stringify(manifest));await writeFile(join(take,'midi.ump.jsonl'),packets.map(JSON.stringify).join('\n')+'\n')
+  const project={...newArrangement({tempo:120}),recordingCorrection:correction},projectPath=join(portable,'song.json')
+  const epoch={duration:2,clock:{...f.playback.clock,anchor:String(BigInt(f.playback.clock.anchor)-24000000n)}}
+  worker=new Worker(new URL('../arrangement-worker.mjs',import.meta.url));const done=once(worker,'message')
+  worker.postMessage({id:1,kind:'attach-recording',project,projectPath,path:take,epoch,correction})
+  const [response]=await done;assert.equal(response.ok,true,response.error)
+  const result=response.result,audio=result.project.clips.find(c=>c.component==='audio'),midi=result.project.clips.find(c=>c.component==='midi')
+  assert.deepEqual(audio.placement,correction.placement);assert.equal(midi.placement,undefined)
+  assert.deepEqual(result.project.assets[0].manifest,manifest);assert.deepEqual(result.alignment.correction,correction)
+  const plain=attachRecordedTake(project,{project:{...project,assets:result.project.assets.map(({recording,...asset})=>asset)},asset:result.asset},epoch)
+  const options={sourceRoot:portable,directory:portable,midiOutput:'42'}
+  const originalPlan=JSON.parse(await readFile((await prepareArrangementCaptureRegions(plain.project,options)).path))
+  const correctedPlan=JSON.parse(await readFile((await prepareArrangementCaptureRegions(result.project,options)).path))
+  assert.deepEqual(correctedPlan.umpRegions,originalPlan.umpRegions)
+  assert.deepEqual(correctedPlan.umpRegions.sources[0].timeline.packets,packets)
+  assert.ok(Math.abs(originalPlan.regions[0].startSeconds-correctedPlan.regions[0].startSeconds-37/48000)<1e-12)
+  await saveArrangement(projectPath,result.project,null,{sourceRoot:portable});await rm(f.directory,{recursive:true,force:true})
+  const loaded=await loadArrangement(projectPath);assert.deepEqual(loaded.project,result.project)
+  assert.deepEqual(loaded.project.recordingCorrection,correction)
+  const changed=structuredClone(loaded.project);changed.assets[0].recording.correction.placement.profile.output.bufferFrames++
+  assert.throws(()=>arrangementEditor(changed))
+ }finally{await worker?.terminate();await rm(f.directory,{recursive:true,force:true});await rm(portable,{recursive:true,force:true})}
+})

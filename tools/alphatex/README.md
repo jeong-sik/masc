@@ -408,3 +408,34 @@ monitoring configuration remain unchanged: remeasure after changing that setup.
 This is explicit captured-component playback placement; recording correction
 policy and count-in remain separate work. No audio measurement is reused as a
 MIDI or acoustic latency guarantee.
+
+### Choose correction for new arrangement recordings
+
+Select `:input AUDIO_UID` and `:mixed-output OUTPUT_UID`, then choose a next-take
+policy before starting playback and `:record`:
+
+- `:record-correction none` retains paired audio/MIDI placement with no correction.
+- `:record-correction manual MS IN_CH OUT_CH` selects an exact signed audio
+  advance and one input/output channel route. Positive values advance audio.
+- `:record-calibration DIRECTORY` verifies a retained experiment and displays
+  both pulses. `:record-correction pulse 1` or `2` explicitly selects one measured
+  residual and its channel route. This requires matching input/output devices
+  and monitoring off. The actual backing output rate/buffer and opened capture
+  input/channel/rate are checked again when recording starts.
+
+The selection is an undoable project setting, saved with the arrangement. Input
+or output changes require a matching selection or `none`; existing regions keep
+their placements. Each recording freezes its own policy and fresh native playback
+epoch. A request record beside the take directory preserves that choice before
+inputs open; finalized take/alignment records retain it for recovery. Changing a
+policy finalizes the current recording before adopting the next choice.
+
+On successful attachment, a corrected take creates separate audio and MIDI
+regions in one undoable transaction. Its existing inward-aligned recorded
+interval receives the audio placement once; raw WAV, UMP, manifests and clocks
+remain unchanged, and MIDI keeps its original alignment. The complete take stays
+available for later trimming. Undo/redo and SaveAs/reopen preserve both the chosen
+next-take setting and each take's historical decision. Reattaching an already
+attached recorded asset is refused. This changes recorded-region placement;
+monitoring latency, physical interface timing and MIDI input timing still require
+separate measurement. Native-clock count-in/practice remains unfinished.

@@ -30,6 +30,14 @@ otherwise the sender reports failure and performs cleanup. It does not keep a
 later volume/program/parameter value while claiming the earlier state was restored.
 The sender does not query the external instrument for its pre-playback state.
 
+Each sounding note retains the program and bank selected when its Note On was
+sent. If that patch differs from the channel's current patch, seek/resume reports
+an error before replay rather than restarting the note under a different voice.
+This includes notes retained by sustain or sostenuto. Bank selectors take effect
+for this comparison at Program Change; a pending bank selection alone does not
+change a held note's patch. Once those notes are released, reconstruction can
+resume within the other supported state boundaries.
+
 Opaque SysEx/system effects, device-specific NRPN data, Hold 2, high-resolution
 velocity-prefix state, unsupported/incomplete RPN state and channel-mode changes
 still require more reconstruction support. Their original ordered messages

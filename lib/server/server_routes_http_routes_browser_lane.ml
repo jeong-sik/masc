@@ -103,6 +103,18 @@ let poll_answer_json (issued : Browser_lane.issued) : Yojson.Safe.t =
       ]
 ;;
 
+(* Preserve only known effect receipts at the HTTP boundary. *)
+let result_payload fields =
+  let phase = match List.assoc_opt "ok" fields, List.assoc_opt "effectPhase" fields with
+    | Some (`Bool false), Some (`String ("not_started" | "partial" as phase)) ->
+      ["effectPhase", `String phase]
+    | _ -> [] in
+  `Assoc
+    ([ "ok", (match List.assoc_opt "ok" fields with Some (`Bool v) -> `Bool v | _ -> `Bool false)
+     ; "data", Option.value (List.assoc_opt "data" fields) ~default:`Null
+     ; "error", Option.value (List.assoc_opt "error" fields) ~default:`Null
+     ] @ phase)
+
 let add_routes router =
   let refuse request reqd =
     respond_json_value_with_cors ~status:`Forbidden request reqd
@@ -144,16 +156,7 @@ let add_routes router =
                | Ok client_info -> (
                  match List.assoc_opt "id" fields with
                  | Some (`String id) ->
-                   let phase = match List.assoc_opt "ok" fields, List.assoc_opt "effectPhase" fields with
-                     | Some (`Bool false), Some (`String "not_started") -> ["effectPhase", `String "not_started"]
-                     | _ -> [] in
-                   let payload =
-                     `Assoc
-                       ([ ("ok", match List.assoc_opt "ok" fields with Some (`Bool v) -> `Bool v | _ -> `Bool false)
-                       ; ("data", Option.value (List.assoc_opt "data" fields) ~default:`Null)
-                       ; ("error", Option.value (List.assoc_opt "error" fields) ~default:`Null)
-                       ] @ phase)
-                   in
+                   let payload = result_payload fields in
                    (match Browser_lane.deliver_result ~client_id:client_info.client_id ~id ~payload with
                     | Ok () -> respond ~status:`OK []
                     | Error message ->

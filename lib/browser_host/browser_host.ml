@@ -7,8 +7,15 @@ let ( let* ) = Result.bind
    have a separate 8 MiB resource bound: this admits a 5 MiB Vision PNG after
    base64 encoding plus its JSON envelope, without admitting a 4 GiB frame.
    https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Native_messaging#app_side *)
+
 let command_frame_limit = 1024 * 1024
 let reply_frame_limit = 8 * 1024 * 1024
+
+(* Confirmed partial effects keep their connection and stable tab IDs. Only
+   an unobserved outcome retires it, preventing replay after uncertain input. *)
+let bidi_connection_can_continue = function
+  | Ok _ | Error (Masc.Browser_bidi_peer.Before_effect _ | Masc.Browser_bidi_peer.Partial_failure _) -> true
+  | Error (Masc.Browser_bidi_peer.Outcome_unknown _) -> false
 
 (* The server's long-poll window is 25 seconds. These transport deadlines
    leave it room to finish and bound a dead extension or HTTP connection. *)
@@ -20,7 +27,7 @@ let reconnect_delay_sec = 5.
 let leaving_window_sec = 0.25
 
 type verb = Masc.Browser_bidi_peer.verb =
-  | Browser_info | Tabs_list | Page_read | Page_elements | Page_capture | Page_scene | Page_interact
+  | Browser_info | Tabs_list | Page_read | Page_elements | Page_capture | Page_scene | Page_interact | Page_act
 type command = { id : string; verb : verb; args : Yojson.Safe.t; actor : string option }
 type poll = Empty | Forward of command | Reject of string
 type exchange_phase = Writing_frame | Awaiting_reply
@@ -65,6 +72,7 @@ let decode_poll json =
       | "page.elements" -> Ok (Forward { id; verb = Page_elements; args; actor })
       | "page.capture" -> Ok (Forward { id; verb = Page_capture; args; actor })
       | "page.interact" -> Ok (Forward { id; verb = Page_interact; args; actor })
+      | "page.act" -> Ok (Forward { id; verb = Page_act; args; actor })
       | _ -> Ok (Reject id)
 
 let command_json ~deadline_ms command =
@@ -787,6 +795,11 @@ let run_bidi env config url ~firefox_profile ~stop =
                 `Assoc
                   [ "id", `String id; "ok", `Bool false; "error", `String message
                   ; "effectPhase", `String "not_started" ] }
+        | Error (Masc.Browser_bidi_peer.Partial_failure {tab_id;message}) ->
+            { id; verb; outcome = Record.Failed
+            ; payload = `Assoc ["id", `String id; "ok", `Bool false;
+                "error", `String message; "effectPhase", `String "partial"; "data", `Assoc ["action", `String "open_tab";
+                  "created", `Bool true; "tabId", `Int tab_id]] }
         | Error (Masc.Browser_bidi_peer.Outcome_unknown message) ->
             { id; verb; outcome = Record.Unknown; payload = failure id message }
       in
@@ -846,14 +859,11 @@ let run_bidi env config url ~firefox_profile ~stop =
               | None -> Error (Masc.Browser_bidi_peer.Outcome_unknown "BiDi command deadline exceeded")
             in
             let owed = answer command result in
-            (match result with
-             (* Any unknown outcome ends this client, preventing pointer
-                replay or a next gesture while a previous button may remain
-                pressed. *)
-             | Error (Masc.Browser_bidi_peer.Outcome_unknown _) ->
+            (match bidi_connection_can_continue result with
+             | false ->
                  settle owed (publish_once link owed.payload);
                  Error "BiDi client stopped after an unknown command outcome"
-             | Ok _ | Error (Masc.Browser_bidi_peer.Before_effect _) ->
+             | true ->
                  (match publish_answer owed with
                   | Ok () -> serve ()
                   | Error leaving -> left leaving))

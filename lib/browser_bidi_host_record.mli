@@ -66,6 +66,7 @@ type ending =
 type outcome =
   | Succeeded
   | Not_started  (** Refused before any effect on the page. *)
+  | Failed  (** Some effect completed, then the browser confirmed a failure. *)
   | Unknown
 
 (** Why the host holds no acknowledgement. Only [Refused] and [Not_sent] say

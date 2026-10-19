@@ -11,7 +11,7 @@
 
 (** The verbs the server may forward; the BiDi peer's own. *)
 type verb = Masc.Browser_bidi_peer.verb =
-  | Browser_info | Tabs_list | Page_read | Page_elements | Page_capture | Page_scene | Page_interact
+  | Browser_info | Tabs_list | Page_read | Page_elements | Page_capture | Page_scene | Page_interact | Page_act
 
 type command = { id : string; verb : verb; args : Yojson.Safe.t; actor : string option }
 
@@ -154,3 +154,7 @@ module For_testing : sig
       finished, even as the deadline passed; [None] only when it had not. *)
   val within : clock:_ Eio.Time.clock -> float -> (unit -> 'a) -> 'a option
 end
+
+(** Whether another command may use the same BiDi connection. Confirmed
+    partial failures retain their created tab IDs; unknown outcomes retire it. *)
+val bidi_connection_can_continue : ('a, Masc.Browser_bidi_peer.failure) result -> bool

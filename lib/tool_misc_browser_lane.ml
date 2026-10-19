@@ -49,6 +49,14 @@ let route_of ~default ~tool_name ~start_time args =
 ;;
 
 
+(* Decode the host's effect receipt at the wire boundary. A created tab is
+   a confirmed effect even when navigation or its page summary failed. *)
+let backend_failure_phase fields =
+  match List.assoc_opt "effectPhase" fields with
+  | Some (`String "not_started") -> Tool_result.Proven_pre_effect
+  | Some (`String "partial") -> Tool_result.Proven_post_effect
+  | Some _ | None -> Tool_result.Effect_outcome_unknown
+
 let answer_to_result ~lane ~tool_name ~start_time = function
   | Browser_lane.Answered (`Assoc fields) ->
     (match List.assoc_opt "ok" fields, List.assoc_opt "data" fields with
@@ -57,7 +65,17 @@ let answer_to_result ~lane ~tool_name ~start_time = function
        let message = match List.assoc_opt "error" fields with
          | Some (`String message) -> message
          | _ -> "browser backend failed without an error message" in
-       make_workflow_err ~tool_name ~start_time message
+       let effect_disposition = backend_failure_phase fields in
+       let data = List.assoc_opt "data" fields in
+       (* Keeper raw output is the failure message. Carry the recovery receipt
+          there too, so its exact connection and tab IDs reach the model. *)
+       let message = match effect_disposition,data with
+         | Tool_result.Proven_post_effect,Some receipt ->
+           Yojson.Safe.to_string (`Assoc ["error",`String message;"data",receipt])
+         | (Tool_result.Proven_pre_effect | Tool_result.Effect_outcome_unknown), (Some _ | None)
+         | Tool_result.Proven_post_effect,None -> message in
+       Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Workflow_rejection
+         ?data ~effect_disposition message
      | _ -> Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Runtime_failure
          "invalid browser backend response")
   | Browser_lane.Answered _ ->
@@ -544,10 +562,24 @@ let handle_read_with_retention ~base_path ?keeper_name ~tool_name ~start_time ar
   |> retain_read_result ~base_path ~tool_name ~start_time args
 ;;
 
+let act_route ~tool_name ~start_time args =
+  match route_of ~default:Browser_lane.Lane_name.Automation ~tool_name ~start_time args with
+  | Error error -> Error error
+  | Ok route ->
+    let failure detail = Error (make_input_err ~tool_name ~start_time detail) in
+    (match Browser_surface.parse_client_id args with
+     | Error detail -> failure detail
+     | Ok (Some client_id) -> (match route with
+         | Browser_lane.Live_route _ -> Ok (Browser_lane.Live_route (Some client_id))
+         | Browser_lane.Automation_route | Browser_lane.Stagehand_route -> failure "clientId requires live lane")
+     | Ok None -> (match route with
+         | Browser_lane.Live_route _ -> failure "live open_tab requires an explicit observed clientId"
+         | Browser_lane.Automation_route | Browser_lane.Stagehand_route -> Ok route))
+
 let handle_act_with_phase ?upload_paths ~base_path ~tool_name ~start_time args =
   let pre_error detail =
     make_workflow_err ~tool_name ~start_time detail, Tool_result.Proven_pre_effect in
-  match route_of ~default:Browser_lane.Lane_name.Automation ~tool_name ~start_time args, Browser_lane.Action.parse args with
+  match act_route ~tool_name ~start_time args, Browser_lane.Action.parse args with
   | Error error, _ -> error, Tool_result.Proven_pre_effect
   | _, Error detail -> make_input_err ~tool_name ~start_time detail, Tool_result.Proven_pre_effect
   | Ok _, Ok (Browser_lane.Action.On_tab {interaction=Upload _;_}) when upload_paths = None ->
@@ -571,17 +603,20 @@ let handle_act_with_phase ?upload_paths ~base_path ~tool_name ~start_time args =
           ; _ }, (None | Some _) -> action in
     let verb = Browser_lane.Page_act action in
     let issued = Result.bind (Browser_lane.resolve_target ~verb route) (fun target ->
-      Browser_lane.issue_for ~target ~verb ~timeout_sec:60.) in
+      Browser_lane.issue_for ~target ~verb ~timeout_sec:60.
+      |> Result.map (fun answer -> target,answer)) in
     match issued with
     | Error error ->
       selection_error ~base_path ~tool_name ~start_time error, Tool_result.Proven_pre_effect
-    | Ok answer ->
+    | Ok (target,answer) ->
       let phase = match answer, route with
         | (Browser_lane.Rejected_before_effect _ | Browser_lane.Lane_absent), _ -> Tool_result.Proven_pre_effect
         | Browser_lane.Refused _, Browser_lane.Live_route _ -> Tool_result.Proven_pre_effect
-        | Browser_lane.Refused _, (Browser_lane.Automation_route | Browser_lane.Stagehand_route)
+        | Browser_lane.Refused _, (Browser_lane.Automation_route | Browser_lane.Stagehand_route) -> Tool_result.Effect_outcome_unknown
+        | Browser_lane.Answered (`Assoc fields), _ when
+            List.assoc_opt "ok" fields = Some (`Bool false) -> backend_failure_phase fields
         | (Browser_lane.Timed_out | Browser_lane.Answered _), _ -> Tool_result.Effect_outcome_unknown in
-      answer_to_result ~lane:(Browser_lane.route_lane_name route) ~tool_name ~start_time answer, phase
+      answer_to_result ~lane:(Browser_lane.route_lane_name route) ~tool_name ~start_time (add_client target answer), phase
 ;;
 let handle_act ~base_path ~tool_name ~start_time args =
   fst (handle_act_with_phase ~base_path ~tool_name ~start_time args)

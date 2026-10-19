@@ -1,8 +1,15 @@
 (** An explicitly attached Firefox. Closing the peer never closes its tabs or
     browser. Context IDs are owned by BiDi, not extension tab IDs. *)
-type failure = Before_effect of string | Outcome_unknown of string
+type created_tab_failure = { tab_id : int; message : string }
+type failure =
+  | Before_effect of string
+  | Partial_failure of created_tab_failure
+      (** Creation was confirmed, then Firefox refused navigation or answered
+          with an unusable page summary. The connection remains usable and
+          [tab_id] remains owned by it; inspect this tab, never replay create. *)
+  | Outcome_unknown of string
 (** Native host verbs, decoded once from the MASC poll wire. *)
-type verb = Browser_info | Tabs_list | Page_read | Page_elements | Page_capture | Page_scene | Page_interact
+type verb = Browser_info | Tabs_list | Page_read | Page_elements | Page_capture | Page_scene | Page_interact | Page_act
 (** The name a verb goes by on the wire and in the host's record. *)
 val verb_to_wire : verb -> string
 val verb_of_wire : string -> verb option

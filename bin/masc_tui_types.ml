@@ -5638,6 +5638,7 @@ module Browser_lane_view = struct
     | Trusted_hover -> "hover"
     | Trusted_drag -> "drag"
     | Tab_activation -> "tab switch"
+    | Tab_creation -> "new tab"
   (* What a live connection of this transport leaves out, read from the lane's
      table, and the transports that serve all of it. *)
   let transport_lacks transport =
@@ -5874,7 +5875,7 @@ module Browser_lane_view = struct
           | Some verb -> Masc.Browser_bidi_peer.verb_to_wire verb
           | None -> "unknown verb" in
         let outcome = match last.outcome with
-          | Succeeded -> "ran" | Not_started -> "not started" | Unknown -> "outcome unknown" in
+          | Succeeded -> "ran" | Not_started -> "not started" | Failed -> "partially failed" | Unknown -> "outcome unknown" in
         let cause = match last.cause with
           | Refused -> ", refused" | Not_sent -> ", not sent" | Unconfirmed -> "" in
         let request = match last.request_id with

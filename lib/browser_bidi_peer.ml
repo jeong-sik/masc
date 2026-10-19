@@ -5,7 +5,8 @@ let string name json = match field name json with
 let obj xs = `Assoc xs
 let str s = `String s
 let required name json = match field name json with Some v -> Ok v | None -> Error ("missing " ^ name)
-type failure = Before_effect of string | Outcome_unknown of string
+type created_tab_failure = { tab_id : int; message : string }
+type failure = Before_effect of string | Partial_failure of created_tab_failure | Outcome_unknown of string
 (* The error codes Firefox answers that this host acts on, read once where
    the answer arrives; any other code is kept as Firefox wrote it.
    "session not created": Firefox will not serve a [session.new]. It takes
@@ -29,15 +30,15 @@ type refusal = Rejected of error_code | Unanswered of string | Unsent of string
 let refusal_message = function
   | Rejected code -> "BiDi command rejected: " ^ error_code_to_wire code
   | Unanswered why | Unsent why -> why
-type verb = Browser_info | Tabs_list | Page_read | Page_elements | Page_capture | Page_scene | Page_interact
+type verb = Browser_info | Tabs_list | Page_read | Page_elements | Page_capture | Page_scene | Page_interact | Page_act
 let verb_to_wire = function
   | Browser_info -> "browser.info" | Tabs_list -> "tabs.list" | Page_read -> "page.read"
   | Page_scene -> "page.scene" | Page_elements -> "page.elements" | Page_capture -> "page.capture"
-  | Page_interact -> "page.interact"
+  | Page_interact -> "page.interact" | Page_act -> "page.act"
 let verb_of_wire = function
   | "browser.info" -> Some Browser_info | "tabs.list" -> Some Tabs_list | "page.read" -> Some Page_read
   | "page.scene" -> Some Page_scene | "page.elements" -> Some Page_elements
-  | "page.capture" -> Some Page_capture | "page.interact" -> Some Page_interact
+  | "page.capture" -> Some Page_capture | "page.interact" -> Some Page_interact | "page.act" -> Some Page_act
   | _ -> None
 type session_end_failure = Connection_gone of string | Not_confirmed of string
 let session_end_failure_message = function Connection_gone why | Not_confirmed why -> why
@@ -106,16 +107,17 @@ let script_answer_limit_units = reply_limit_bytes / 4
 let answer_too_large units =
   Printf.sprintf "page_answer_exceeds_bidi_reply_limit: %d UTF-16 units, at most %d cross this connection"
     units script_answer_limit_units
-let evaluate t context body args =
+type evaluation_failure = Rpc_failed of refusal | Page_failed of string
+let evaluate_typed t context body args =
   let declaration = "function(args) { " ^ Browser_scene_script.runtime
     ^ "\nconst answer = JSON.stringify((function(){" ^ body ^ "}).call(null,args));"
     ^ Printf.sprintf "\nreturn typeof answer === 'string' && answer.length > %d ? answer.length : answer; }"
         script_answer_limit_units in
-  let* result = command t "script.callFunction" (obj [
+  let* result = Result.map_error (fun reason -> Rpc_failed reason) (t.ask "script.callFunction" (obj [
     "functionDeclaration",str declaration;"target",obj ["context",str context];
-    "awaitPromise",`Bool false;"arguments",`List [obj ["type",str "string";"value",str (Yojson.Safe.to_string args)]]]) in
+    "awaitPromise",`Bool false;"arguments",`List [obj ["type",str "string";"value",str (Yojson.Safe.to_string args)]]])) in
   (* Arguments cross the protocol as a JSON string, decoded by the fixed body. *)
-  match field "type" result with
+  Result.map_error (fun message -> Page_failed message) (match field "type" result with
   | Some (`String "success") ->
     let* value = required "result" result in
     (match field "type" value, field "value" value with
@@ -128,7 +130,12 @@ let evaluate t context body args =
       | Some details -> (match field "text" details with Some (`String text) -> Some text | _ -> None)
       | None -> None in
     Error ("Firefox rejected the fixed page script" ^ (match detail with Some text -> ": " ^ text | None -> ""))
-  | _ -> Error "invalid BiDi script result"
+  | _ -> Error "invalid BiDi script result")
+let evaluation_failure_message = function
+  | Rpc_failed refusal -> "script.callFunction: " ^ refusal_message refusal
+  | Page_failed message -> message
+let evaluate t context body args =
+  Result.map_error evaluation_failure_message (evaluate_typed t context body args)
 let script t context body args = evaluate t context ("arguments[0]=JSON.parse(arguments[0]);\n" ^ body) args
 let scene t context args = script t context "return browserScene(arguments[0]);" args
 let tab_metadata t context = script t context
@@ -147,6 +154,50 @@ let parsed_document t context body args =
   if Option.is_some (field "documentLoading" answer)
   then Error "the document is still loading; read it again"
   else Ok answer
+let remember_context t context =
+  match List.assoc_opt context t.contexts with
+  | Some id -> id
+  | None -> t.next_tab <- t.next_tab + 1;
+    t.contexts <- (context,t.next_tab)::t.contexts; t.next_tab
+
+let open_tab t url =
+  let invalid () = Error (Before_effect "open_tab requires an absolute HTTP(S) URL") in
+  let* () = match Uri.of_string url with
+    | uri -> (match Uri.scheme uri,Uri.host uri with
+        | Some ("http"|"https"),Some host when host <> "" -> Ok ()
+        | _ -> invalid ())
+    | exception Failure _ -> invalid () in
+  (* Only a fresh context is navigated. A protected existing start page does
+     not need a script realm and is never replaced to make this work. *)
+  let* created = match t.ask "browsingContext.create" (obj ["type",str "tab";"background",`Bool true]) with
+    | Ok created -> Ok created
+    | Error (Rejected _ | Unsent _ as refusal) ->
+      Error (Before_effect ("browsingContext.create: " ^ refusal_message refusal))
+    | Error (Unanswered _ as refusal) ->
+      Error (Outcome_unknown ("browsingContext.create: " ^ refusal_message refusal ^ "; inspect this connection before opening another tab")) in
+  let* context = string "context" created |> Result.map_error (fun reason ->
+    Outcome_unknown (reason ^ "; tab creation was dispatched; inspect the connection before opening another tab")) in
+  let id = remember_context t context in
+  let message reason =
+    Printf.sprintf "New tab was created as tabId %d on this connection. %s. Do not open another tab to retry." id reason in
+  let partial reason = Partial_failure {tab_id=id;message=message reason ^
+    " Inspect it using this same clientId and tabId."} in
+  let rpc_failure = function
+    | Rejected (Other_error _) as refusal -> partial (refusal_message refusal)
+    | Rejected (Session_not_created | Invalid_session_id) | Unanswered _ | Unsent _ as refusal ->
+      Outcome_unknown (message (refusal_message refusal) ^
+        " This connection cannot be reused. Re-list connections and tabs, then use newly observed IDs to inspect it; the old tabId does not identify a tab on a replacement connection.") in
+  let* _ = Result.map_error rpc_failure (t.ask "browsingContext.navigate"
+    (obj ["context",str context;"url",str url;"wait",str "complete"])) in
+  let* summary = Result.map_error (function
+    | Rpc_failed refusal -> rpc_failure refusal
+    | Page_failed reason -> partial reason)
+    (evaluate_typed t context
+      "arguments[0]=JSON.parse(arguments[0]);\nreturn {url:location.href,title:document.title,active:document.visibilityState==='visible'};" (obj [])) in
+  match summary with
+  | `Assoc fields -> Ok (obj (("tabId",`Int id)::("action",str "open_tab")::("created",`Bool true)::fields))
+  | _ -> Error (partial "invalid new-tab summary")
+
 let tree t =
   let* result = command t "browsingContext.getTree" (obj []) in
   match field "contexts" result with
@@ -154,9 +205,7 @@ let tree t =
     let rec collect acc = function
       | [] -> Ok (List.rev acc)
       | row::rest -> let* context = string "context" row in
-        let id = match List.assoc_opt context t.contexts with Some id -> id | None ->
-          t.next_tab <- t.next_tab + 1;
-          t.contexts <- (context,t.next_tab)::t.contexts; t.next_tab in
+        let id = remember_context t context in
         collect ((context,id)::acc) rest in
     collect [] rows
   | _ -> Error "invalid BiDi context tree"
@@ -235,11 +284,16 @@ let dispatch ?actor ?request_id t ~verb args =
           let _ = script t context Browser_pointer_feedback.finish_script
             (obj (("phase",Browser_pointer_feedback.outcome_to_json !phase)::metadata)) in ());
         let result = use context id in
-        phase := (match result with Ok _ -> Browser_pointer_feedback.Finished | Error (Before_effect _) -> Browser_pointer_feedback.Refused | Error (Outcome_unknown _) -> Browser_pointer_feedback.Unknown);
+        phase := (match result with Ok _ -> Browser_pointer_feedback.Finished | Error (Before_effect _) -> Browser_pointer_feedback.Refused | Error (Partial_failure _ | Outcome_unknown _) -> Browser_pointer_feedback.Unknown);
         result)
-    | (Browser_info|Tabs_list|Page_read|Page_elements|Page_capture|Page_scene), (None|Some _)
+    | (Browser_info|Tabs_list|Page_read|Page_elements|Page_capture|Page_scene|Page_act), (None|Some _)
     | Page_interact,None -> use context id in
   match verb with
+  | Page_act ->
+    let* action = pre (Browser_lane.Action.parse args) in
+    (match action with
+     | Browser_lane.Action.Open_tab url -> open_tab t url
+     | Browser_lane.Action.On_tab _ -> Error (Before_effect "live BiDi page.act supports open_tab only"))
   | Browser_info ->
     (match t.version with Some version->Ok (obj ["name",str "Firefox";"version",str version])
      | None->Error (Before_effect "BiDi session metadata is unavailable"))

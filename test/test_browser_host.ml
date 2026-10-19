@@ -184,10 +184,44 @@ let test_a_frame_still_being_written_when_the_window_closes_stops_the_host () =
       (Yojson.Safe.to_string envelope)
 ;;
 
+let test_partial_tab_failure_keeps_connection_but_unknown_stops_it () =
+  let module Peer = Masc.Browser_bidi_peer in
+  let obj fields = `Assoc fields in
+  let commands = ref [] in
+  let peer = Peer.create ~session_end:(fun () -> Ok ()) ~command:(fun method_ _ ->
+    commands := method_ :: !commands;
+    match method_ with
+    | "browsingContext.create" -> Ok (obj ["context",`String "created"])
+    | "browsingContext.navigate" -> Error (Peer.Rejected (Peer.error_code_of_wire "unknown error"))
+    | "browsingContext.getTree" -> Ok (obj ["contexts",`List [obj ["context",`String "created"]]])
+    | "script.callFunction" -> Ok (obj ["type",`String "success";"result",obj ["type",`String "string";
+        "value",`String (Yojson.Safe.to_string (obj ["url",`String "https://example.test/";
+          "title",`String "created";"active",`Bool true;"text",`String "still readable"]))]])
+    | other -> failf "unexpected command %s" other) in
+  let partial = Peer.dispatch peer ~verb:Peer.Page_act
+    (obj ["action",`String "open_tab";"url",`String "https://example.test/"]) in
+  check bool "host continues after confirmed partial failure" true (Host.bidi_connection_can_continue partial);
+  let tab_id = match partial with
+    | Error (Peer.Partial_failure {tab_id;_}) -> tab_id
+    | Ok _ | Error (Peer.Before_effect _ | Peer.Outcome_unknown _) -> fail "missing created-tab receipt" in
+  check bool "same peer can list tabs" true (Result.is_ok (Peer.dispatch peer ~verb:Peer.Tabs_list (obj [])));
+  check bool "same peer can read the created tab" true
+    (Result.is_ok (Peer.dispatch peer ~verb:Peer.Page_read (obj ["tabId",`Int tab_id])));
+  check int "host did not replay creation" 1
+    (List.length (List.filter (String.equal "browsingContext.create") !commands));
+  let unanswered = Peer.create ~session_end:(fun () -> Ok ())
+    ~command:(fun _ _ -> Error (Peer.Unanswered "lost reply")) in
+  let unknown = Peer.dispatch unanswered ~verb:Peer.Page_act
+    (obj ["action",`String "open_tab";"url",`String "https://example.test/"]) in
+  check bool "host stops after a dispatched unanswered command" false (Host.bidi_connection_can_continue unknown)
+;;
+
 let () =
   Alcotest.run
     "browser_host"
-    [ ( "forward"
+    [ ( "bidi recovery", [test_case "partial tab failure keeps connection; unanswered stops it" `Quick
+          test_partial_tab_failure_keeps_connection_but_unknown_stops_it] )
+    ; ( "forward"
       , [ test_case
             "a reply that lands as the window closes is the reply"
             `Quick

@@ -121,12 +121,13 @@ let test_an_entry_reads_back_as_written () =
             [ noted
             ; { noted with outcome = Succeeded; cause = Refused; verb = Some Peer.Tabs_list }
             ; { noted with outcome = Not_started; cause = Not_sent; request_id = None; verb = None }
+            ; { noted with outcome = Failed; cause = Refused; verb = Some Peer.Page_act }
             ]
         } )
     ]
 
 let all_verbs =
-  Peer.[ Browser_info; Tabs_list; Page_read; Page_elements; Page_capture; Page_scene; Page_interact ]
+  Peer.[ Browser_info; Tabs_list; Page_read; Page_elements; Page_capture; Page_scene; Page_interact; Page_act ]
 
 let test_a_verb_is_read_by_the_name_it_was_written_under () =
   List.iter

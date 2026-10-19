@@ -609,3 +609,30 @@ An inventory with only these pages has no readable tabs and reports them in
 read the connection again. MASC does not expand Firefox system-page permissions.
 BiDi errors retain the rejected command name; fixed-script exceptions retain the
 browser's reason, including stale-document/viewport refusals.
+
+## Open a tab on the selected BiDi connection
+
+Use `masc_browser_act` with `action:"open_tab"`, `lane:"live"`, the exact
+observed `clientId`, and an absolute HTTP(S) `url`. Live `page.act` serves only
+this action; other automation actions remain outside its capability. The
+WebExtension connection does not serve new-tab creation.
+
+The host creates a background tab in the selected Firefox profile, navigates
+only that new context, and returns `tabId`, `created:true`, `url`, and `title`
+with the server's connection identity. Use this returned tab ID and client ID
+for page reads and hover; new tabs share that profile's default user context.
+Existing tabs and protected start pages are left in place. This is an explicit
+request, never an automatic response to a failed start-page read.
+
+A refused creation or a command never written is a pre-effect failure. When
+creation is confirmed but navigation is refused or the page summary fails,
+the response remains a failure with `effectPhase:"partial"` and a structured
+`created:true`/`tabId` receipt. The server adds the selected connection identity
+and keeps that receipt in the Keeper's error output. The host keeps serving
+this connection, so the caller can list or read the same tab before deciding
+what to do next. This is a confirmed effect, never permission to replay creation.
+
+A lost reply or broken session remains an unknown outcome and ends the
+connection. The host never creates another tab or closes the created context
+to recover. List current connections and observe their tabs again; old
+connection tab IDs must not be reused on a replacement connection.

@@ -104,7 +104,8 @@ let test_active_tab_after_unreadable_tab () =
     let open Yojson.Safe.Util in
     check int "implicit read reaches the readable active tab" 2 (data |> member "tabId" |> to_int);
     check string "the selected tab is read" "readable" (data |> member "text" |> to_string)
-  | Error (Peer.Before_effect detail) | Error (Peer.Outcome_unknown detail) -> fail detail
+  | Error (Peer.Before_effect detail | Peer.Outcome_unknown detail
+          | Peer.Partial_failure {message=detail;_}) -> fail detail
 
 let test_capture_guards () =
   let viewport document = obj ["documentId", `String document; "width", `Int 800;
@@ -127,7 +128,8 @@ let test_capture_guards () =
     | Error (Peer.Before_effect detail), false ->
       check string name "viewport_changed_during_capture" detail
     | Ok _, false -> failf "%s accepted a stale screenshot" name
-    | Error (Peer.Before_effect detail), true | Error (Peer.Outcome_unknown detail), _ -> fail detail)
+    | Error (Peer.Before_effect detail), true
+    | Error (Peer.Outcome_unknown detail | Peer.Partial_failure {message=detail;_}), _ -> fail detail)
     ["stable capture", state url "before", true;
      "navigation", state "https://example.test/elsewhere" "before", false;
      "same-URL document replacement", state url "after", false;
@@ -159,7 +161,7 @@ let test_document_source () =
          (String_util.contains_substring declaration Browser_lane.Document.runtime
           && String_util.contains_substring declaration "return browserDocument();")
      | _ -> fail "the document read ran other than one script")
-  | Error (Peer.Before_effect detail) | Error (Peer.Outcome_unknown detail) ->
+  | Error (Peer.Before_effect detail) | Error (Peer.Outcome_unknown detail | Peer.Partial_failure {message=detail;_}) ->
     failf "the peer refused a document-source read: %s" detail
 (* The two reads that answer for the whole document, its source and its
    element inventory. *)
@@ -182,7 +184,7 @@ let test_document_still_loading () =
      | Error (Peer.Before_effect detail) ->
        check string (name ^ ": the refusal says to read again")
          "the document is still loading; read it again" detail
-     | Error (Peer.Outcome_unknown detail) -> failf "%s was reported as an unknown outcome: %s" name detail
+     | Error (Peer.Outcome_unknown detail | Peer.Partial_failure {message=detail;_}) -> failf "%s was reported as an unknown outcome: %s" name detail
      | Ok _ -> failf "%s was answered for a document still loading" name);
     match !ran with
     | [declaration] ->
@@ -208,7 +210,7 @@ let test_answer_too_large_for_the_socket () =
        check string (name ^ ": the refusal names the size and the bound")
          (Printf.sprintf "page_answer_exceeds_bidi_reply_limit: %d UTF-16 units, at most %d cross this connection"
             measured Peer.script_answer_limit_units) detail
-     | Error (Peer.Outcome_unknown detail) -> failf "%s was reported as an unknown outcome: %s" name detail
+     | Error (Peer.Outcome_unknown detail | Peer.Partial_failure {message=detail;_}) -> failf "%s was reported as an unknown outcome: %s" name detail
      | Ok _ -> failf "%s accepted a length as its answer" name);
     match !ran with
     | [declaration] ->
@@ -247,7 +249,7 @@ let test_element_inventory () =
        check bool "and it is the shared element script" true
          (String_util.contains_substring declaration Masc.Browser_page_script.elements)
      | _ -> fail "the inventory ran other than one script")
-  | Error (Peer.Before_effect detail) | Error (Peer.Outcome_unknown detail) ->
+  | Error (Peer.Before_effect detail) | Error (Peer.Outcome_unknown detail | Peer.Partial_failure {message=detail;_}) ->
     failf "the peer refused an element inventory: %s" detail
 let test_pointer_validation () =
   let calls=ref [] in
@@ -405,8 +407,8 @@ let test_the_session_is_ended_after_a_command_got_no_reply () =
     (match Peer.dispatch peer ~verb:Peer.Tabs_list (obj []) with
      | Error (Peer.Before_effect detail) ->
        check string "a command that got no reply ends the connection for page commands"
-         "BiDi transport deadline exceeded" detail
-     | Error (Peer.Outcome_unknown detail) -> fail detail
+         "browsingContext.getTree: BiDi transport deadline exceeded" detail
+     | Error (Peer.Outcome_unknown detail | Peer.Partial_failure {message=detail;_}) -> fail detail
      | Ok _ -> fail "an unanswered command produced an answer");
     check (option string) "its holder is told" (Some "BiDi transport deadline exceeded")
       (Eio.Promise.peek ended);
@@ -455,7 +457,7 @@ let test_a_socket_closing_under_session_end_is_told_at_once () =
       (match metadata peer with Ok _ -> () | Error detail -> fail detail);
       (match Peer.dispatch peer ~verb:Peer.Tabs_list (obj []) with
        | Error (Peer.Before_effect _) -> ()
-       | Error (Peer.Outcome_unknown detail) -> fail detail
+       | Error (Peer.Outcome_unknown detail | Peer.Partial_failure {message=detail;_}) -> fail detail
        | Ok _ -> fail "an unanswered command produced an answer");
       ended_session peer) in
   check (result unit string) "the socket's end, not the window's" (Error "BiDi EOF") outcome
@@ -637,9 +639,9 @@ let test_peer_close_frame_ends_a_pending_command () =
       let result=Peer.dispatch peer ~verb:Peer.Tabs_list (obj []) in
       check bool "the close callback ends the holder" true (Eio.Promise.peek ended <> None);
       match result with
-      | Error (Peer.Before_effect "BiDi peer closed") -> Ok ()
+      | Error (Peer.Before_effect "browsingContext.getTree: BiDi peer closed") -> Ok ()
       | Error (Peer.Before_effect detail) -> Error detail
-      | Error (Peer.Outcome_unknown detail) -> Error detail
+      | Error (Peer.Outcome_unknown detail | Peer.Partial_failure {message=detail;_}) -> Error detail
       | Ok _ -> Error "a pending command survived the close frame") in
   check (result unit string) "close frame is delivered" (Ok ()) outcome
 let test_malformed_json_ends_a_pending_command () =
@@ -653,9 +655,9 @@ let test_malformed_json_ends_a_pending_command () =
       let result=Peer.dispatch peer ~verb:Peer.Tabs_list (obj []) in
       check bool "invalid text disconnects the holder" true (Eio.Promise.peek ended <> None);
       match result with
-      | Error (Peer.Before_effect "invalid BiDi JSON") -> Ok ()
+      | Error (Peer.Before_effect "browsingContext.getTree: invalid BiDi JSON") -> Ok ()
       | Error (Peer.Before_effect detail) -> Error detail
-      | Error (Peer.Outcome_unknown detail) -> Error detail
+      | Error (Peer.Outcome_unknown detail | Peer.Partial_failure {message=detail;_}) -> Error detail
       | Ok _ -> Error "invalid JSON produced an answer") in
   check (result unit string) "malformed JSON is reported" (Ok ()) outcome
 let test_invalid_websocket_frame_ends_a_pending_command () =
@@ -670,7 +672,7 @@ let test_invalid_websocket_frame_ends_a_pending_command () =
       let result=Peer.dispatch peer ~verb:Peer.Tabs_list (obj []) in
       check bool "the protocol error reaches the closed callback" true (Eio.Promise.peek ended <> None);
       match result with
-      | Error (Peer.Before_effect _) | Error (Peer.Outcome_unknown _) -> Ok ()
+      | Error (Peer.Before_effect _ | Peer.Outcome_unknown _ | Peer.Partial_failure _) -> Ok ()
       | Ok _ -> Error "an invalid websocket frame produced an answer") in
   check (result unit string) "invalid frame ends the connection" (Ok ()) outcome
 let test_hover_without_click () =
@@ -732,12 +734,13 @@ let test_peer_serves_what_the_lane_table_says () =
       | Point_scroll -> interact (Scroll_at {point;viewport;x=0;y=120})
       | Trusted_hover -> interact (Hover_at {point;viewport})
       | Trusted_drag -> interact (Drag {from=point;to_={x=0.75;y=0.5};viewport})
-      | Tab_activation -> interact Activate_tab) in
-    (* The six names the native host forwards (Browser_host.decode_poll). *)
+      | Tab_activation -> interact Activate_tab
+  | Tab_creation -> Page_act (Action.Open_tab "https://example.test/new")) in
+    (* The names the native host forwards (Browser_host.decode_poll). *)
     let peer_verb = function
       | "tabs.list" -> Peer.Tabs_list | "page.read" -> Peer.Page_read | "page.scene" -> Peer.Page_scene
       | "page.elements" -> Peer.Page_elements | "page.capture" -> Peer.Page_capture
-      | "page.interact" -> Peer.Page_interact
+      | "page.interact" -> Peer.Page_interact | "page.act" -> Peer.Page_act
       | other -> failf "the lane put a verb on the wire that the host does not forward: %s" other in
     let calls = ref [] in
     let command method_ _ =
@@ -746,6 +749,8 @@ let test_peer_serves_what_the_lane_table_says () =
       | "browsingContext.getTree" -> Ok (obj ["contexts",`List [obj ["context",`String "owned"]]])
       | "script.callFunction" -> Ok (script_value (obj ["url",`String "https://example.test/";
           "title",`String "fixture";"active",`Bool true;"viewport",obj []]))
+      | "browsingContext.create" -> Ok (obj ["context",`String "created"])
+      | "browsingContext.navigate" -> Ok `Null
       | "browsingContext.captureScreenshot" -> Ok (obj ["data",`String "png"])
       | "input.performActions" | "input.releaseActions" -> Ok `Null
       | other -> failf "unexpected protocol command: %s" other in
@@ -772,7 +777,7 @@ let test_peer_serves_what_the_lane_table_says () =
         check bool (name ^ " is refused before any script or input") true
           (List.for_all (String.equal "browsingContext.getTree") !calls)
       | Ok _, false -> failf "the peer served %s, which the lane table says BiDi does not" name
-      | Error (Peer.Before_effect detail), true | Error (Peer.Outcome_unknown detail), _ ->
+      | Error (Peer.Before_effect detail), true | Error (Peer.Outcome_unknown detail | Peer.Partial_failure {message=detail;_}), _ ->
         failf "the peer did not serve %s (%s), which the lane table says BiDi does" name detail)
       Lane.all_of_live_capability)
 (* Firefox's error codes are read once where the answer arrives. The two
@@ -791,6 +796,104 @@ let test_an_error_code_is_read_once_and_written_back () =
   List.iter (fun code ->
       check string ("written back: " ^ code) code (Peer.error_code_to_wire (Peer.error_code_of_wire code)))
     [ "session not created"; "invalid session id"; "no such frame"; "" ]
+let test_open_tab_preserves_existing_context () =
+  let created = ref false and calls = ref [] in
+  let peer = peer_of (fun method_ args ->
+    calls := method_ :: !calls;
+    match method_ with
+    | "browsingContext.getTree" -> Ok (obj ["contexts",`List (List.map
+        (fun context -> obj ["context",`String context])
+        (if !created then ["existing";"new"] else ["existing"]))])
+    | "browsingContext.create" ->
+      check bool "new tab starts in background" true Yojson.Safe.Util.(args |> member "background" |> to_bool);
+      created := true; Ok (obj ["context",`String "new"])
+    | "browsingContext.navigate" ->
+      check string "only new context is navigated" "new" Yojson.Safe.Util.(args |> member "context" |> to_string);
+      Ok `Null
+    | "script.callFunction" ->
+      let context = Yojson.Safe.Util.(args |> member "target" |> member "context" |> to_string) in
+      Ok (script_value (obj ["url",`String ("https://example.test/"^context);
+        "title",`String context;"active",`Bool true;"text",`String context;"chars",`Int (String.length context);"truncated",`Bool false]))
+    | other -> failf "unexpected new-tab command %s" other) in
+  let succeeded = function Ok data -> data | Error _ -> fail "new tab failed" in
+  ignore (succeeded (Peer.dispatch peer ~verb:Peer.Tabs_list (obj [])));
+  let opened = succeeded (Peer.dispatch peer ~verb:Peer.Page_act
+    (obj ["action",`String "open_tab";"url",`String "https://example.test/new"])) in
+  check int "new context has its own stable tab ID" 2 Yojson.Safe.Util.(opened |> member "tabId" |> to_int);
+  List.iter (fun (id,name) ->
+    let page = succeeded (Peer.dispatch peer ~verb:Peer.Page_read (obj ["tabId",`Int id])) in
+    check string "reads stay with the requested context" name Yojson.Safe.Util.(page |> member "text" |> to_string))
+    [1,"existing";2,"new"];
+  check int "one creation" 1 (List.length (List.filter (String.equal "browsingContext.create") !calls))
+
+let test_open_tab_failure_does_not_replay () =
+  let input = obj ["action",`String "open_tab";"url",`String "https://example.test/new"] in
+  let refused = Peer.Rejected (Peer.error_code_of_wire "unsupported operation") in
+  List.iter (fun failure ->
+    let calls = ref [] in
+    let peer = peer_of (fun method_ _ -> calls := method_ :: !calls; Error failure) in
+    (match Peer.dispatch peer ~verb:Peer.Page_act input,failure with
+     | Error (Peer.Before_effect _), (Peer.Rejected _ | Peer.Unsent _)
+     | Error (Peer.Outcome_unknown _), Peer.Unanswered _ -> ()
+     | (Ok _ | Error (Peer.Partial_failure _)), (Peer.Rejected _ | Peer.Unsent _ | Peer.Unanswered _)
+     | Error (Peer.Before_effect _), Peer.Unanswered _
+     | Error (Peer.Outcome_unknown _), (Peer.Rejected _ | Peer.Unsent _) ->
+       fail "incorrect create failure effect boundary");
+    check (list string) "creation is never replayed" ["browsingContext.create"] !calls)
+    [refused;Peer.Unsent "closed";Peer.Unanswered "lost reply"];
+  List.iter (fun (name,failed_command,reply) ->
+    let calls = ref [] and failed = ref false in
+    let peer = peer_of (fun method_ _ ->
+      calls := method_ :: !calls;
+      if String.equal method_ failed_command && not !failed then (failed := true; reply)
+      else match method_ with
+      | "browsingContext.create" -> Ok (obj ["context",`String "created"])
+      | "browsingContext.navigate" -> Ok `Null
+      | "browsingContext.getTree" -> Ok (obj ["contexts",`List [obj ["context",`String "created"]]])
+      | "script.callFunction" -> Ok (script_value (obj ["url",`String "https://example.test/new";
+          "title",`String "created";"active",`Bool true;"text",`String "created";
+          "chars",`Int 7;"truncated",`Bool false]))
+      | other -> failf "post-failure command %s" other) in
+    let id = match Peer.dispatch peer ~verb:Peer.Page_act input with
+      | Error (Peer.Partial_failure {tab_id;_}) -> tab_id
+      | Ok _ | Error (Peer.Before_effect _ | Peer.Outcome_unknown _) -> failf "%s did not retain a known-created tab" name in
+    (match Peer.dispatch peer ~verb:Peer.Tabs_list (obj []) with
+     | Ok _ -> () | Error _ -> failf "%s prevented listing on the same connection" name);
+    (match Peer.dispatch peer ~verb:Peer.Page_read (obj ["tabId",`Int id]) with
+     | Ok data -> check string "created tab can still be read" "created" Yojson.Safe.Util.(data |> member "text" |> to_string)
+     | Error _ -> failf "%s prevented recovery read on the same connection" name);
+    check int "no second create after partial failure" 1
+      (List.length (List.filter (String.equal "browsingContext.create") !calls));
+    check bool "no close after partial failure" false (List.mem "browsingContext.close" !calls))
+    ["navigation rejected","browsingContext.navigate",Error refused;
+     "metadata rejected","script.callFunction",Error refused;
+     "metadata script failed","script.callFunction",Ok (obj ["type",`String "exception"]);
+     "metadata malformed","script.callFunction",Ok (script_value `Null)];
+  List.iter (fun refusal -> List.iter (fun failed_command ->
+    let calls = ref [] in
+    let peer = peer_of (fun method_ _ -> calls := method_ :: !calls;
+      if String.equal method_ failed_command then Error refusal
+      else match method_ with
+      | "browsingContext.create" -> Ok (obj ["context",`String "created"])
+      | "browsingContext.navigate" -> Ok `Null
+      | other -> failf "unexpected lost-connection command %s" other) in
+    (match Peer.dispatch peer ~verb:Peer.Page_act input with
+     | Error (Peer.Outcome_unknown _) -> ()
+     | Ok _ | Error (Peer.Before_effect _ | Peer.Partial_failure _) -> fail "lost connection after creation must remain terminal/unknown");
+    check int "lost connection does not replay creation" 1
+      (List.length (List.filter (String.equal "browsingContext.create") !calls)))
+    ["browsingContext.navigate";"script.callFunction"])
+    [Peer.Unanswered "lost reply";Peer.Unsent "closed";
+     Peer.Rejected (Peer.error_code_of_wire "invalid session id")]
+
+let test_live_act_rejects_other_actions_before_effect () =
+  let peer = peer_of (fun _ _ -> fail "invalid live action reached browser") in
+  List.iter (fun args -> match Peer.dispatch peer ~verb:Peer.Page_act args with
+    | Error (Peer.Before_effect _) -> () | Ok _ | Error (Peer.Partial_failure _ | Peer.Outcome_unknown _) -> fail "invalid action was not refused before input")
+    [obj ["action",`String "close_tab";"tabId",`Int 1];
+     obj ["action",`String "open_tab";"url",`String "about:newtab"];
+     obj ["action",`String "open_tab";"url",`String "javascript:alert(1)"]]
+
 let () = run "BiDi live peer" ["identity",[test_case "opaque contexts" `Quick test_context_identity;
     test_case "one unreadable tab leaves other tabs visible" `Quick test_unreadable_tab_does_not_hide_other_tabs;
     test_case "implicit read skips an unreadable tab" `Quick test_active_tab_after_unreadable_tab;
@@ -817,7 +920,10 @@ let () = run "BiDi live peer" ["identity",[test_case "opaque contexts" `Quick te
     test_case "close frame ends a pending command" `Quick test_peer_close_frame_ends_a_pending_command;
     test_case "malformed JSON ends a pending command" `Quick test_malformed_json_ends_a_pending_command;
     test_case "invalid websocket frame reaches the error path" `Quick test_invalid_websocket_frame_ends_a_pending_command];
-  "effect",[test_case "hover moves without clicking" `Quick test_hover_without_click; test_case "element inventory is the shared page script" `Quick test_element_inventory;
+  "effect",[test_case "open tab preserves existing context" `Quick test_open_tab_preserves_existing_context;
+    test_case "open tab failure does not replay" `Quick test_open_tab_failure_does_not_replay;
+    test_case "live act rejects other actions" `Quick test_live_act_rejects_other_actions_before_effect;
+    test_case "hover moves without clicking" `Quick test_hover_without_click; test_case "element inventory is the shared page script" `Quick test_element_inventory;
     test_case "capture retains URL and document/viewport guards" `Quick test_capture_guards;
     test_case "document source is the shared document helper" `Quick test_document_source;
     test_case "a document still loading is not answered for" `Quick test_document_still_loading;

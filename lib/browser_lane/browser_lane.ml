@@ -218,6 +218,7 @@ type live_capability =
   | Trusted_hover
   | Trusted_drag
   | Tab_activation
+  | Tab_creation
 [@@deriving enumerate]
 
 let live_capability_to_wire = function
@@ -233,6 +234,7 @@ let live_capability_to_wire = function
   | Trusted_hover -> "trusted_hover"
   | Trusted_drag -> "trusted_drag"
   | Tab_activation -> "tab_activation"
+  | Tab_creation -> "tab_creation"
 ;;
 
 let live_capability_of_wire raw =
@@ -258,10 +260,12 @@ let live_capability = function
   | Page_capture _ -> Some Viewport_capture
   | Page_scene _ -> Some Scene_read
   | Page_interact { action; _ } -> Some (live_capability_of_interaction action)
+  | Page_act (Action.Open_tab _) -> Some Tab_creation
   | Page_context _ | Page_downloads _ -> None
   (* The operator's browser owns itself, so it has no session to report on.
      Answering here would describe something the automation backend holds. *)
-  | Session_open _ | Session_close | Session_status | Page_goto _ | Page_act _ -> None
+  | Session_open _ | Session_close | Session_status | Page_goto _
+  | Page_act (Action.On_tab _) -> None
   | Page_instruct _ | Page_locate _ | Page_extract _ -> None
 ;;
 
@@ -367,8 +371,8 @@ let live_transport_serves transport capability =
     , ( Tab_listing | Text_read | Document_source | Element_inventory | Viewport_capture
       | Scene_read | Dom_interaction | Point_click | Point_scroll ) ) -> true
   | Web_extension, Tab_activation -> true
-  | Web_extension, (Trusted_hover | Trusted_drag) -> false
-  | Webdriver_bidi, (Trusted_hover | Trusted_drag) -> true
+  | Web_extension, (Trusted_hover | Trusted_drag | Tab_creation) -> false
+  | Webdriver_bidi, (Trusted_hover | Trusted_drag | Tab_creation) -> true
   | Webdriver_bidi, Tab_activation -> false
 ;;
 

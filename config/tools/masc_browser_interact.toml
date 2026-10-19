@@ -1,6 +1,6 @@
 name = "masc_browser_interact"
 description = """
-Click, fill, scroll, hover, drag, follow a link or activate a browser tab. hover_at (no click) and drag move a trusted pointer: automation serves both, and on live a webdriver_bidi connection does. Stagehand rejects hover_at before input. activate_tab is live-only, on a web_extension connection (>=0.6.0): it verifies active=true without window focus or navigation. A live request its connection cannot serve is refused before input as live_transport_unsupported; servingClients are the connected browsers that can. List that connection's tabs first: tab IDs are per connection.
+Click, fill, scroll, hover, drag, follow a link or activate a browser tab. hover/drag_to accept observed elements (selector or scene reference) without guessing screenshot coordinates. They resolve visible, unobstructed targets in the current viewport; scroll and re-read offscreen targets first. These actions require automation or live webdriver_bidi. hover_at (no click) and drag move a trusted pointer: automation serves both, and on live a webdriver_bidi connection does. Stagehand rejects hover_at before input. activate_tab is live-only, on a web_extension connection (>=0.6.0): it verifies active=true without window focus or navigation. A live request its connection cannot serve is refused before input as live_transport_unsupported; servingClients are the connected browsers that can. List that connection's tabs first: tab IDs are per connection.
 The tab is explicit; no arbitrary JavaScript. Read again after success or failure before retrying: page handlers can change external state. click/fill require one visible inspected element; fill targets text inputs/textarea and sends input/change without Enter or submit. scroll_at scrolls the pane under the point. follow_link bypasses click handlers for observed same-tab HTTP(S) HTML/SVG anchors (_self/_top/_parent); rejects downloads, new-window targets, noreferrer and explicit referrerpolicy. destinationUrl is intent, not loaded-page evidence."""
 additional_properties = false
 # 2026-09-24 측정: agent-core 레인 요청 5,047건(09-23)이 이 정의
@@ -31,12 +31,12 @@ description = "Observed URL guard; required for pointer actions, follow_link and
 name = "action"
 type = "string"
 required = true
-enum = ["activate_tab", "follow_link", "click", "fill", "scroll", "click_at", "scroll_at", "hover_at", "drag"]
+enum = ["activate_tab", "follow_link", "click", "fill", "scroll", "click_at", "scroll_at", "hover", "drag_to", "hover_at", "drag"]
 
 [[params]]
 name = "selector"
 type = "string"
-description = "click/fill: one visible top-document element; alternative to documentId/nodeId."
+description = "click/fill/hover: one visible top-document element; alternative to documentId/nodeId."
 
 [[params]]
 name = "text"
@@ -90,7 +90,7 @@ minimum = 0.0
 [[params]]
 name = "from"
 type = "object"
-description = "Automation drag start; normalized x/y in [0,1)."
+description = "Native drag start; normalized x/y in [0,1)."
 
 additional_properties = false
 
@@ -109,7 +109,7 @@ minimum = 0.0
 [[params]]
 name = "to"
 type = "object"
-description = "Automation drag end; normalized x/y in [0,1)."
+description = "Native drag end; normalized x/y in [0,1)."
 
 additional_properties = false
 
@@ -160,3 +160,39 @@ type = "number"
 required = true
 
 # follow_link uses documentId/nodeId and expectedUrl already declared above.
+
+[[params]]
+name = "source"
+type = "object"
+description = "drag_to source: one selector OR observed documentId/nodeId. Must be visible and unobstructed."
+additional_properties = false
+
+[[params.params]]
+name = "selector"
+type = "string"
+
+[[params.params]]
+name = "documentId"
+type = "string"
+
+[[params.params]]
+name = "nodeId"
+type = "string"
+
+[[params]]
+name = "destination"
+type = "object"
+description = "drag_to destination: one selector OR observed documentId/nodeId, in the same current document."
+additional_properties = false
+
+[[params.params]]
+name = "selector"
+type = "string"
+
+[[params.params]]
+name = "documentId"
+type = "string"
+
+[[params.params]]
+name = "nodeId"
+type = "string"

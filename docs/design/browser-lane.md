@@ -73,6 +73,8 @@ checking rendered application state, and gathering evidence across tabs.
 | `click`, `fill` | `documentId`/`nodeId`, or one visible CSS `selector`; fill adds `text` | live or automation |
 | `follow_link` | `documentId`/`nodeId` for a same-tab HTTP(S) anchor | live or automation |
 | `scroll` | relative CSS pixels `x`/`y` | live or automation |
+| `hover` | `documentId`/`nodeId` or a unique `selector`, plus `expectedUrl`; resolves the current visible, unobstructed element without clicking | live BiDi or automation |
+| `drag_to` | `source` and `destination`, each `{documentId,nodeId}` or `{selector}`, plus `expectedUrl` | live BiDi or automation |
 | `hover_at` | normalized `point`, captured `viewport`, and `expectedUrl`; moves the trusted pointer without clicking | live BiDi or automation |
 | `click_at`, `scroll_at` | normalized `point` and captured `viewport`; scroll adds `x`/`y` | live or automation |
 | `drag` | normalized `from`/`to` and captured `viewport`; trusted pointer press, move and release | live BiDi or automation |
@@ -85,7 +87,7 @@ Use those observations rather than inventing selectors or node IDs. A node
 reference and a CSS selector are alternative targets and cannot be combined.
 
 Set `expectedUrl` to the observed URL to refuse an action after navigation.
-Point actions also check the captured document and viewport. The result is an
+Point actions also check the captured document and viewport. Semantic hover and drag resolve current rectangles and hit-test before any pointer input; they reject hidden, offscreen or obstructed targets without scrolling. Scroll and read again before retrying. Scene references reject replacement or a different document. Both drag targets must be in the same top document and current viewport. The result is an
 action receipt; read or capture again to verify the site's resulting state.
 On a WebExtension connection a click is DOM activation, not a trusted
 hardware input event. Changing sources would select a different browser
@@ -109,8 +111,8 @@ build their rejection from it.
 | `dom_interaction` | `click`, `fill`, `scroll`, `follow_link` | yes | yes |
 | `point_click` | `click_at` | yes, the element's own `click()` | yes, a trusted pointer |
 | `point_scroll` | `scroll_at` | yes | yes, a trusted wheel |
-| `trusted_hover` | `hover_at` | no | yes |
-| `trusted_drag` | `drag` | no | yes |
+| `trusted_hover` | `hover`, `hover_at` | no | yes |
+| `trusted_drag` | `drag_to`, `drag` | no | yes |
 | `tab_activation` | `activate_tab` | yes | no |
 
 The extension acts through DOM calls inside the page and has no pointer the

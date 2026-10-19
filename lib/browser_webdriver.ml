@@ -388,7 +388,24 @@ let execute_unlocked t = function
     let* session = session t in
     with_tab t session (Some tab_id) (fun () ->
       let args = Browser_lane.interaction_args ~tab_id ~expected_url action in
-      let* result = match action with
+      let action_name = Browser_lane.interaction_verb action in
+      let native_action = match action with
+        | Browser_lane.Hover _ | Browser_lane.Drag_to _ ->
+          let* resolved = script t session (Browser_scene_script.runtime ^ Browser_interaction.pointer_target_script) [args] in
+          Result.map_error (fun message -> Protocol message)
+            (Browser_interaction.resolve_pointer_action action resolved)
+        | Browser_lane.Activate_tab | Browser_lane.Click _ | Browser_lane.Fill _
+        | Browser_lane.Scroll _ | Browser_lane.Hover_at _ | Browser_lane.Click_at _
+        | Browser_lane.Scroll_at _ | Browser_lane.Drag _ | Browser_lane.Follow_link _
+        | Browser_lane.Click_node _ | Browser_lane.Fill_node _ -> Ok action in
+      let* result = match native_action with
+        | Error error -> Ok (`Assoc ["interactionFailure",`Assoc
+            ["message",`String (error_message error);"effectStarted",`Bool false]])
+        | Ok action ->
+        let args = Browser_lane.interaction_args ~tab_id ~expected_url action in
+        match action with
+        | Browser_lane.Hover _ | Browser_lane.Drag_to _ ->
+          Error (Protocol "unresolved semantic pointer target")
         | Browser_lane.Hover_at {point;viewport}
         | Browser_lane.Click_at {point;viewport}
         | Browser_lane.Scroll_at {point;viewport;_}
@@ -405,6 +422,7 @@ let execute_unlocked t = function
             | Browser_lane.Hover_at _ -> Browser_lane.Pointer.Hover
             | Browser_lane.Drag {to_;_} -> Browser_lane.Pointer.Drag {via=[];destination=to_;duration_ms=0}
             | Browser_lane.Scroll_at {x;y;_} -> Browser_lane.Pointer.Wheel {x;y}
+            | Browser_lane.Hover _ | Browser_lane.Drag_to _
             | Browser_lane.Activate_tab | Browser_lane.Click _ | Browser_lane.Fill _
             | Browser_lane.Scroll _ | Browser_lane.Click_at _ | Browser_lane.Follow_link _
             | Browser_lane.Click_node _ | Browser_lane.Fill_node _ -> Browser_lane.Pointer.Click in
@@ -418,6 +436,7 @@ let execute_unlocked t = function
                 (* Hover and wheel actions do not press buttons. Session acquisition
                    already recovers any older pending pointer release. *)
                 call t session `POST "/actions" (Some actions), Ok ()
+            | Browser_lane.Hover _ | Browser_lane.Drag_to _
             | Browser_lane.Activate_tab | Browser_lane.Click _ | Browser_lane.Fill _
             | Browser_lane.Scroll _ | Browser_lane.Click_at _ | Browser_lane.Drag _
             | Browser_lane.Follow_link _ | Browser_lane.Click_node _ | Browser_lane.Fill_node _ -> let released = ref None in
@@ -436,7 +455,7 @@ let execute_unlocked t = function
           let* url_before = string_field "url" before in
           (match after with
            | `Assoc fields -> Ok (`Assoc (("urlBefore",`String url_before) ::
-               ("action",`String (Browser_lane.interaction_verb action)) :: fields))
+               ("action",`String action_name) :: fields))
            | _ -> Error (Protocol "invalid pointer receipt")))
         | Browser_lane.Activate_tab | Browser_lane.Click _ | Browser_lane.Fill _
         | Browser_lane.Scroll _ | Browser_lane.Follow_link _ | Browser_lane.Click_node _
@@ -520,6 +539,7 @@ let execute t verb =
     | Browser_lane.Page_interact
         { action =
             ( Browser_lane.Click _ | Browser_lane.Fill _ | Browser_lane.Scroll _
+            | Browser_lane.Hover _ | Browser_lane.Drag_to _
             | Browser_lane.Hover_at _ | Browser_lane.Click_at _
             | Browser_lane.Scroll_at _ | Browser_lane.Drag _
             | Browser_lane.Follow_link _ | Browser_lane.Click_node _

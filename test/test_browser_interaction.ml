@@ -41,6 +41,25 @@ let test_scene_reference () =
      fields "click" @ ["nodeId",`String "node"];
      fields "click" @ ["documentId",`String "doc"];
      fields "scroll" @ reference @ ["x",`Int 0;"y",`Int 10]]
+let test_semantic_pointer_actions () =
+  let observed = ["documentId",`String "doc";"nodeId",`String "source"] in
+  let base = ["expectedUrl",`String "https://example.org"] in
+  let hover = parsed (fields "hover" @ base @ observed) in
+  check bool "hover pins observed node" true
+    (hover.action = Browser_lane.Hover (Browser_lane.Scene_node {document_id="doc";node_id="source"}));
+  let drag = parsed (fields "drag_to" @ base @ ["source",`Assoc observed;
+    "destination",`Assoc ["selector",`String "#target"]]) in
+  let wire = Browser_lane.interaction_args ~tab_id:7 ~expected_url:drag.expected_url drag.action in
+  check bool "semantic drag round trips typed targets" true
+    ((match Interaction.parse wire with Ok request -> request.action = drag.action | Error _ -> false));
+  List.iter (fun input -> check bool "semantic target rejects mixed, missing and unrelated fields" true
+    (Result.is_error (Interaction.parse (`Assoc input))))
+    [fields "hover" @ observed;
+     fields "hover" @ base @ observed @ ["selector",`String "#source"];
+     fields "drag_to" @ base @ ["source",`Assoc observed];
+     fields "drag_to" @ base @ ["source",`Assoc (observed @ ["selector",`String "#source"]);
+       "destination",`Assoc ["selector",`String "#target"]];
+     fields "click" @ ["selector",`String "button";"source",`Assoc observed]]
 let test_invalid_actions () =
   List.iter (fun input -> check bool "invalid action rejected before dispatch" true
     (Result.is_error (Interaction.parse (`Assoc input))))
@@ -90,6 +109,7 @@ let test_pointer_actions () =
      `Assoc ["x",`Float nan;"y",`Float 0.];
      `Assoc ["x",`Int 0;"y",`Int 0;"x",`Int 0]]
 let () = run "browser interaction" ["typed boundary", [
+  test_case "observed semantic pointer targets" `Quick test_semantic_pointer_actions;
   test_case "explicit live tab activation" `Quick test_activate_tab;
   test_case "screenshot pointer actions" `Quick test_pointer_actions;
   test_case "source hints preserve scope and reject malformed paths" `Quick test_source_context;

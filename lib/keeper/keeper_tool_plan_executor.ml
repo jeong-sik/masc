@@ -594,18 +594,23 @@ let execute_with_tool_use_id
       ?observe_node_result
       ()
   =
-  let resource_ordering = match ready_files with
+  (* Each preparation supplies its original immutable graph after checking
+     plan identity. Share it with scheduling rather than rebuilding it after
+     resource ordering. Ordinary execution still builds its own graph. Inputs
+     still resolve per node; run bindings/resources/results are not cached here. *)
+  let resource_ordering, dependency_layers = match ready_files with
     | None ->
-      (match Option.bind prepared_files (Keeper_prepared_inline_files.resource_dependencies ~plan) with
-       | None -> Descriptor_order
-       | Some dependencies ->
+      (match Option.bind prepared_files (Keeper_prepared_inline_files.resource_ordering ~plan) with
+       | None -> Descriptor_order, Keeper_tool_plan.dependency_layers plan
+       | Some ordering ->
          (* The exact producer supplies one row per validated original ID.
             Keep its predecessor lists unchanged for wave and outcome waits. *)
-         Prepared_order (Node_map.of_list dependencies))
+         Prepared_order (Node_map.of_list ordering.Keeper_prepared_inline_files.predecessors),
+         ordering.dependency_layers)
     | Some ready ->
       if not (Keeper_prepared_inline_files.Ready.plan ready.files == plan) then
         invalid_arg "ready Inline files belong to a different plan";
-      Ready_order in
+      Ready_order, Keeper_prepared_inline_files.Ready.dependency_layers ready.files in
   let node_effect_disposition (result : node_result) =
     match result.result with
     | Tool_result.Deferred _ | Tool_result.Failed _ ->
@@ -632,13 +637,6 @@ let execute_with_tool_use_id
       Tool_result.Proven_pre_effect
       settled
   in
-  (* Ready's original plan identity was checked before selecting its retained
-     immutable graph. Share it with scheduling and ready binding order rather
-     than rebuilding it after preparation. Inputs, producer resources and
-     outcomes still resolve in their own node fibers, never from this value. *)
-  let dependency_layers = match ready_files with
-    | Some ready -> Keeper_prepared_inline_files.Ready.dependency_layers ready.files
-    | None -> Keeper_tool_plan.dependency_layers plan in
   (* Dynamic ready-wave runner: every node owns one fiber that starts when all
      of its dependencies have settled, instead of waiting for a static batch
      barrier. Ordinary serial and terminal nodes additionally follow the static

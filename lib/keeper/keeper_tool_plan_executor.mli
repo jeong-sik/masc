@@ -209,14 +209,17 @@ val execute
     Static prepared waves partition the original node lists while checking
     membership in an immutable pending-ID set local to each dependency layer;
     index/set order never selects nodes, predecessors, batches or failures.
+    The resource producer returns the immutable dependency layers already used
+    to derive those predecessors, and scheduling shares that original value.
     [ready_files] additionally binds producer resources after upstream outputs
     validate the actual input. Nodes publish binding before waiting for earlier
     bindings in topological order. The original Ready producer retains its
     immutable dependency layers; after checking physical plan identity, the
     executor reuses them for scheduling and stable ready binding order. Without
-    Ready files, the executor constructs its own dependency layers. The value
-    contains only the original immutable plan nodes, never inputs, resources,
-    settlements or permission to execute. Ready layers directly retain their
+    file preparation, the executor constructs its own dependency layers. The value
+    retains the original immutable plan nodes and their templates; it adds no
+    run-input, binding, resource, settlement or execution-permission fields.
+    Ready layers directly retain their
     concurrent static grouping without synthetic empty resource-edge rows or
     pending-node scans. Actual binding conflicts, exclusive execution and
     settlement ordering remain in the Ready runner. Descriptor-only and exact

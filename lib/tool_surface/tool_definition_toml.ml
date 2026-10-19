@@ -312,6 +312,14 @@ let rec param_of_pairs ~context pairs =
       let* () = only_for ~context:key_context ~declared Ptype_number in
       let* v = as_float ~context:key_context value in
       Ok (Some ("exclusiveMinimum", `Float v))
+    | "exclusive_maximum" ->
+      (* The upper end of the same [number] bound. masc_browser_interact's
+         pointer coordinates are viewport fractions in [0,1), and
+         Browser_pointer.point_of_json refuses 1.0 itself; [maximum] would
+         advertise 1.0 as valid. *)
+      let* () = only_for ~context:key_context ~declared Ptype_number in
+      let* v = as_float ~context:key_context value in
+      Ok (Some ("exclusiveMaximum", `Float v))
     | "max_length" ->
       let* () = only_for ~context:key_context ~declared Ptype_string in
       let* v = as_int ~context:key_context value in

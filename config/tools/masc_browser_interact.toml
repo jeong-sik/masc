@@ -80,12 +80,14 @@ name = "x"
 type = "number"
 required = true
 minimum = 0.0
+exclusive_maximum = 1.0
 
 [[params.params]]
 name = "y"
 type = "number"
 required = true
 minimum = 0.0
+exclusive_maximum = 1.0
 
 [[params]]
 name = "from"
@@ -99,12 +101,14 @@ name = "x"
 type = "number"
 required = true
 minimum = 0.0
+exclusive_maximum = 1.0
 
 [[params.params]]
 name = "y"
 type = "number"
 required = true
 minimum = 0.0
+exclusive_maximum = 1.0
 
 [[params]]
 name = "to"
@@ -118,12 +122,14 @@ name = "x"
 type = "number"
 required = true
 minimum = 0.0
+exclusive_maximum = 1.0
 
 [[params.params]]
 name = "y"
 type = "number"
 required = true
 minimum = 0.0
+exclusive_maximum = 1.0
 
 [[params]]
 name = "viewport"
@@ -200,8 +206,25 @@ type = "string"
 [[params]]
 name = "via"
 type = "array"
-items = { type = "object", additionalProperties = false, required = ["x", "y"], properties = { x = { type = "number", minimum = 0.0, exclusiveMaximum = 1.0 }, y = { type = "number", minimum = 0.0, exclusiveMaximum = 1.0 } } }
 description = "drag/drag_to: observed intermediate viewport fractions, in order. Omit for a straight drag through its midpoint. Stagehand also supports these paths through native CSS-pixel runtime routes."
+
+[params.items]
+type = "object"
+additional_properties = false
+
+[[params.items.params]]
+name = "x"
+type = "number"
+required = true
+minimum = 0.0
+exclusive_maximum = 1.0
+
+[[params.items.params]]
+name = "y"
+type = "number"
+required = true
+minimum = 0.0
+exclusive_maximum = 1.0
 
 [[params]]
 name = "durationMs"

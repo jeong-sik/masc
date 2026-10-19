@@ -185,6 +185,10 @@ readonly OCAML_DOS_SHA="323609dd3c4d9f4f9d678290b36e88a8b9b8f488"
 # malformed HTTP (answered, do not replay). Keep this pin until both changes
 # are in a release or the upstream branch.
 readonly COHTTP_EIO_SHA="9963da4c028b5681ff96eeeaa9b276d6be60c507"
+# H2 0.13.0 with typed body completion and connection credit recovery for
+# discarded request/response DATA. Keep core and Eio adapter on one source.
+# https://github.com/jeong-sik/ocaml-h2/pull/1
+readonly H2_SHA="38293f3bb2d79121a6d5c68bb472cee1f350af93"
 # ocaml-protoc-plugin 6.2.0 + one commit: protoc-gen-ocaml reads its request
 # until end of input. 6.2.0 stops at the first read shorter than its 1024-byte
 # buffer, and a macOS pipe hands over 512 bytes first, so every local build of
@@ -376,6 +380,10 @@ opam_pin_add ocaml-dos "https://github.com/jeong-sik/ocaml-dos.git#${OCAML_DOS_S
 pinned_pkgs+=("ocaml-dos")
 opam_pin_add cohttp-eio.6.2.1 "https://github.com/anyang-keepers/ocaml-cohttp.git#${COHTTP_EIO_SHA}" -n -y
 pinned_pkgs+=("cohttp-eio")
+opam_pin_add h2.0.13.0 "https://github.com/jeong-sik/ocaml-h2.git#${H2_SHA}" -n -y
+pinned_pkgs+=("h2")
+opam_pin_add h2-eio.0.13.0 "https://github.com/jeong-sik/ocaml-h2.git#${H2_SHA}" -n -y
+pinned_pkgs+=("h2-eio")
 opam_pin_add ocaml-protoc-plugin.6.2.0 "https://github.com/jeong-sik/ocaml-protoc-plugin.git#${OCAML_PROTOC_PLUGIN_SHA}" -n -y
 pinned_pkgs+=("ocaml-protoc-plugin")
 opam_pin_add eio_posix.1.3 "https://github.com/jeong-sik/eio.git#${EIO_POSIX_SHA}" -n -y

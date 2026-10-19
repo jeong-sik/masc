@@ -77,6 +77,19 @@ The files are not touched. Two ways forward:
    repair the store and re-verify with `validate-stores --base-path <base>`
    before starting.
 
+For an event queue, the snapshot and transition WAL move together. Before
+either move, quarantine writes `event-queue-quarantine-v1.json` in that Keeper's
+runtime directory with both original identities and their rejected sibling
+paths. If a move fails or the process stops, boot, preflight and queue access
+continue to refuse at this record, including when both originals have moved.
+Keep the record and both rejected files. After repairing the reported filesystem
+obstacle, explicitly start with `--accept-store-quarantine` again to finish the
+recorded moves. The retry verifies identities and bytes and reuses the same
+destinations; it does not discard or overwrite a conflicting entry. Malformed
+records or replaced entries require owner repair before retrying. Only a fully
+completed and directory-synced quarantine clears the record and permits a new
+empty queue.
+
 `scripts/deploy.sh` never reaches this refusal: its `validate-stores` preflight
 stops the deploy on the same files before the executable starts. A refusal
 after a `deploy.sh` start means the preflight and boot disagree, which is a

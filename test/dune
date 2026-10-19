@@ -6041,7 +6041,7 @@
 (test
  (name test_h2_journal)
  (modules test_h2_journal)
- (libraries masc_test_deps masc.operator masc.skill_config masc.skill_reference masc_tui_types masc_tui_task_document masc_tui_task_document_observation masc_tui_workspace_job masc_tui_fetched masc_tui_overview_tasks))
+ (libraries masc_test_deps masc.operator masc.skill_config masc.skill_reference masc_tui_types masc_tui_task_document masc_tui_task_document_observation masc_tui_workspace_job masc_tui_fetched masc_tui_overview_tasks masc_tui_loader))
 
 (test
  (name test_keeper_owned_jobs)

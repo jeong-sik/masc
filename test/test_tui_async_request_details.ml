@@ -34,12 +34,12 @@ let scenario ok () = with_base @@ fun base_path -> Eio_main.run @@ fun _env -> E
     | Ok _ | Error _ -> fail "original request not durably admitted" in
   Eio.Promise.await entered;
   let target : Detail.target={submitted_by="original-submitter";keeper_name="different-target";request_id} in
-  let wire () = Masc.Server_async_request_observability.project_request ~base_path
+  let wire () = Server_async_request_observability.project_request ~base_path
       ~submitted_by:target.submitted_by ~request_id in
   let read () = Detail.decode ~target (wire ()) in
   let state=create_state ~workspace:"fixture" ~local_base_path:base_path ~port:0 ~refresh_interval:0. () in
   state.view <- Tools;state.tools_pane <- Tools_async;
-  state.tools_async_observation <- Some (Masc.Server_async_request_observability.project ~base_path
+  state.tools_async_observation <- Some (Server_async_request_observability.project ~base_path
     |> Masc.Tui_decode.decode_async_request_observation |> value);
   sync_tools_async_selection state;
   check bool "selection keeps original submitter and different target" true
@@ -72,7 +72,7 @@ let scenario ok () = with_base @@ fun base_path -> Eio_main.run @@ fun _env -> E
   check bool "last confirmed logical source is retained separately" true
     (match state.tools_async_last_logical with Some (_,Detail.Not_composition) -> true | _ -> false);
   Eio.Promise.resolve resolve_release ();ignore (Eio.Promise.await terminal);
-  state.tools_async_observation <- Some (Masc.Server_async_request_observability.project ~base_path
+  state.tools_async_observation <- Some (Server_async_request_observability.project ~base_path
     |> Masc.Tui_decode.decode_async_request_observation |> value);
   sync_tools_async_selection state;
   check bool "retired active row cannot replace an open original target" true

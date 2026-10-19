@@ -3494,7 +3494,7 @@
 (test
  (name test_tui_chat_timeline_assembly)
  (modules test_tui_chat_timeline_assembly)
- (libraries masc_tui_keeper_chat_log masc_tui_image_preview alcotest masc_tui_keeper_chat_transcript
+ (libraries masc masc.masc_types masc_tui_keeper_chat_log masc_tui_image_preview alcotest masc_tui_keeper_chat_transcript
   masc_tui_message_layout masc_tui_types))
 
 (test
@@ -6041,12 +6041,12 @@
 (test
  (name test_h2_journal)
  (modules test_h2_journal)
- (libraries masc_test_deps masc.skill_config masc.skill_reference masc_tui_types masc_tui_task_document masc_tui_task_document_observation masc_tui_workspace_job masc_tui_fetched))
+ (libraries masc_test_deps masc.operator masc.skill_config masc.skill_reference masc_tui_types masc_tui_task_document masc_tui_task_document_observation masc_tui_workspace_job masc_tui_fetched masc_tui_overview_tasks masc_tui_loader masc_tui_agenda))
 
 (test
  (name test_keeper_owned_jobs)
  (modules test_keeper_owned_jobs)
- (libraries masc_test_deps masc.skill_config masc.skill_reference masc.skill_snapshot_service mtime.clock.os keeper_owned_job_fixture_transport))
+ (libraries masc_test_deps masc.operator masc.server masc.skill_config masc.skill_reference masc.skill_snapshot_service mtime.clock.os keeper_owned_job_fixture_transport))
 
 (test
  (name test_h5_media_failover_continuity)

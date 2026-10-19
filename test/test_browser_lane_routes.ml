@@ -363,9 +363,9 @@ let test_partial_failure_receipt_reaches_keeper_output () =
       "tabId",`Int 2;"clientId",`String "spoofed";"transport",`String "web_extension"] in
     let payload = Server_routes_http_routes_browser_lane.result_payload
       ["ok",`Bool false;"effectPhase",`String "partial";"error",`String "navigation rejected";"data",receipt] in
-    let answer = Tool_misc_browser_lane.add_client target (Browser_lane.Answered payload) in
-    let result = Tool_misc_browser_lane.answer_to_result ~lane:Browser_lane.Lane_name.Live
-      ~tool_name:"masc_browser_act" ~start_time:(Time_compat.now ()) answer in
+    let answer = Masc.Tool_misc_browser_lane.add_client target (Browser_lane.Answered payload) in
+    let result = Masc.Tool_misc_browser_lane.answer_to_result ~lane:Browser_lane.Lane_name.Live
+      ~tool_name:"masc_browser_act" ~start_time:(Tool_timing.start ()) answer in
     (match result with
      | Tool_result.Failed failed ->
        check bool "creation is a confirmed effect" true (failed.effect_disposition = Tool_result.Proven_post_effect)

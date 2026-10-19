@@ -2787,7 +2787,7 @@ let test_catalog_policy_native_and_proxy () =
         (Option.is_some (Provider_config.anthropic_thinking_control config));
       let body = Backend_anthropic.build_request ~config ~messages:[] () in
       check_bool (label ^ " serialized thinking presence") expected
-        (List.mem_assoc "thinking" (Yojson.Safe.Util.to_assoc body))
+        (List.mem_assoc "thinking" (Yojson.Safe.Util.to_assoc (Yojson.Safe.from_string body)))
     in
     check "declared native" true (config ~provider_id:"claude" ());
     let proxy = config ~provider_id:"deepseek-anthropic" () in

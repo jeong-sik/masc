@@ -1908,7 +1908,7 @@ let test_operator_resolves_permanent_continuation_mismatch () = with_fixture @@ 
   let report = pending () in
   (match report.failures with [_,Journal.Invalid_result _] -> ()
    | _ -> fail "canonical dependency mismatch was not retained as Invalid_result");
-  let module Command = Masc.Operator_composition_resolution_command in
+  let module Command = Operator_composition_resolution_command in
   let command name fields = Command.parse_tool_command (`Assoc
     (["command",`String name;"keeper_name",`String keeper;"composition_run_id",`String run_id;
       "request_id",`String entry.request_id] @ fields)) |> require "operator resolution command" in
@@ -1935,13 +1935,13 @@ let test_operator_resolves_permanent_continuation_mismatch () = with_fixture @@ 
   check bool "old logical snapshot is not current authority" false (Journal.same_request_observation captured current);
   check_json "captured observation was not mutated by resolution" `Null
     (Journal.request_observation_to_json captured |> member "resolution");
-  let http_status = Masc.Server_async_request_observability.project_request
+  let http_status = Server_async_request_observability.project_request
     ~base_path:fixture.base_path ~submitted_by:keeper ~request_id:entry.request_id in
   check_json "HTTP exact observation finds a terminal attempt outside active inventory" (`String "observed")
     (member "status" http_status);
   check_json "HTTP status exposes the original logical decision" (`String "rejected")
     (http_status |> member "request" |> member "continuation" |> member "observation" |> member "resolution" |> member "decision");
-  let foreign_status = Masc.Server_async_request_observability.project_request
+  let foreign_status = Server_async_request_observability.project_request
     ~base_path:fixture.base_path ~submitted_by:"foreign-status-owner" ~request_id:entry.request_id in
   check_json "wrong Keeper cannot inspect another owner's status" (`String "rejected") (member "status" foreign_status);
   check_json "wrong Keeper gets no physical request payload" `Null (member "request" foreign_status);

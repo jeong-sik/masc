@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 const source=await readFile(new URL('./WaveArrangement.swift',import.meta.url),'utf8')
 const part=(first,last)=>{const a=source.indexOf(first),b=source.indexOf(last,a);assert.ok(a>=0&&b>a);return source.slice(a,b)}
-const methods=[part('    var completed: Bool', '    func checkOutput()'),part('    func backingTime()', '    func snapshot('),part('    func stopVoices()', '    func monitor('),part('    func receive(', '    func finish(')].join('\n').replaceAll('mach_absolute_time()', 'reviewHost').replaceAll('DispatchSource.makeTimerSource(queue: .main)', 'reviewTimer()')
+const methods=[part('    var completed: Bool', '    func checkOutput()'),part('    func backingTime()', '    func snapshot('),part('    func clearRenderStart()', '    func monitor('),part('    func receive(', '    func finish(')].join('\n').replaceAll('mach_absolute_time()', 'reviewHost').replaceAll('DispatchSource.makeTimerSource(queue: .main)', 'reviewTimer()').replaceAll('DispatchSource.makeUserDataAddSource(queue: .main)', 'reviewDataSource()')
 const command=part('enum AudioCommand: Decodable', 'final class ArrangementTransport')
 const future=part('func futureHost(', 'struct Asset:')
 const swift=`import Foundation
@@ -24,6 +24,26 @@ final class FakeTimer {
  func fire(){handler?()}
 }
 func reviewTimer()->FakeTimer{FakeTimer()}
+final class FakeDataSource {
+ var handler:(()->Void)?,cancelled=false
+ func setEventHandler(handler:@escaping()->Void){self.handler=handler}
+ func resume(){}
+ func cancel(){cancelled=true}
+ func add(data:UInt){if !cancelled {handler?()}}
+ // Deliberately deliver an already queued event after cancellation.
+ func fire(){handler?()}
+}
+func reviewDataSource()->FakeDataSource{FakeDataSource()}
+final class FakeAU {
+ var observers:[Int:AURenderObserver]=[:],next=0
+ func token(byAddingRenderObserver observer:@escaping AURenderObserver)->Int{next+=1;observers[next]=observer;return next}
+ func removeRenderObserver(_ token:Int){observers.removeValue(forKey:token)}
+ func render(host:UInt64=reviewHost,flags:AudioUnitRenderActionFlags = .unitRenderAction_PostRender){
+  var stamp=AudioTimeStamp();stamp.mHostTime=host;stamp.mFlags = .hostTimeValid
+  for callback in Array(observers.values){withUnsafePointer(to:&stamp){callback(flags,$0,512,0)}}
+ }
+}
+final class FakeMixer {let auAudioUnit=FakeAU()}
 
 ${future}
 ${command}
@@ -39,17 +59,25 @@ final class FakeVoice {
 }
 struct FakeFormat {let sampleRate=48000.0}
 final class FakeOutput {var lastRenderTime:AVAudioTime?=AVAudioTime(hostTime:reviewHost);let presentationLatency=0.0;func outputFormat(forBus:Int)->FakeFormat{FakeFormat()}}
-final class FakeEngine {let outputNode=FakeOutput();var starts=0,stops=0,pauses=0;func prepare(){};func start()throws{starts+=1};func pause(){pauses+=1};func stop(){stops+=1}}
+final class FakeEngine {
+ let outputNode=FakeOutput(),mainMixerNode=FakeMixer()
+ var starts=0,stops=0,pauses=0,autoRender=true,isRunning=false
+ func prepare(){}
+ func start()throws{starts+=1;isRunning=true;if autoRender{mainMixerNode.auAudioUnit.render()}}
+ func pause(){pauses+=1;isRunning=false}
+ func stop(){stops+=1;isRunning=false}
+}
 final class FakeMidi { var stages:[Double]=[], runs:[UInt64]=[];func stageCoordinated(at seconds:Double)throws{stages.append(seconds)};func runCoordinated(anchorNanoseconds:UInt64)throws{runs.append(anchorNanoseconds)} }\nfinal class Probe {
- enum State {case prepared,playing,paused,stopped}
+ enum State {case prepared,starting,playing,paused,stopped}
  var plan=FakePlan();let engine=FakeEngine(),renderQuantum=1024
  var horizon:FakeTimer?;var horizonEnded=false
- var midi:FakeMidi?;var midiEnded=false\n var state=State.prepared,voices=[FakeVoice()],active=Set<String>(),position=0.0,anchor:UInt64=0,musicalAnchor:UInt64=0,generation:UInt64=0,finished=0,published=0
+ var renderStartSource:FakeDataSource?;var renderObserver:Int?
+ var midi:FakeMidi?;var midiEnded=false\n var state=State.prepared,voices=[FakeVoice()],active=Set<String>(),position=0.0,anchor:UInt64=0,musicalAnchor:UInt64=0,generation:UInt64=0,finished=0,published=0,failures=0
  var loopPosition=PracticeLoopPosition.introduction(nil)
  func checkOutput()throws{}
  func publish(){published+=1}
  func snapshot(_ kind:String)->[String:Any]{["kind":kind,"clock":["anchor":String(anchor),"position":position]]}
- func finish(reason:String,error:Error?=nil){guard state != .stopped else{return};precondition(error==nil);state = .stopped;finished+=1;stopVoices();engine.stop()}
+ func finish(reason:String,error:Error?=nil){guard state != .stopped else{return};if error != nil {failures+=1};state = .stopped;finished+=1;stopVoices();engine.stop()}
  ${methods}
 }
 let ahead=Probe();ahead.midi=FakeMidi()
@@ -60,8 +88,39 @@ ahead.voices[0].player.preparation={ahead.voices[0].player.lastRenderTime=AVAudi
 try ahead.schedule(from:0,playing:true)
 precondition(ahead.anchor>preparedRender && ahead.midi!.runs==[AudioConvertHostTimeToNanos(ahead.anchor)],"one common anchor must follow the prepared active render frontier")
 let missing=Probe();missing.voices[0].player.lastRenderTime=nil
-do {try missing.schedule(from:0,playing:true);preconditionFailure("missing active render clock admitted")}catch{}
-precondition(missing.voices[0].player.plays==0)
+try missing.schedule(from:0,playing:true)
+precondition(missing.voices[0].player.plays==0 && missing.failures==1 && missing.state == .stopped)
+// No player/MIDI may start until a successful render from this generation.
+let pending=Probe();pending.plan.practice=FakePractice(countInSeconds:0.6,duration:0.4)
+pending.midi=FakeMidi();pending.engine.autoRender=false
+try pending.schedule(from:0,playing:true)
+let oldSource=pending.renderStartSource!,oldObservers=Array(pending.engine.mainMixerNode.auAudioUnit.observers.values)
+precondition(pending.state == .starting && pending.published==0 && pending.midi!.runs.isEmpty && pending.voices[0].player.plays==0)
+pending.engine.mainMixerNode.auAudioUnit.render(host:reviewHost-1)
+pending.engine.mainMixerNode.auAudioUnit.render(flags:[.unitRenderAction_PostRender,.unitRenderAction_PostRenderError])
+precondition(pending.state == .starting && pending.midi!.runs.isEmpty)
+pending.receive(#"{"kind":"status"}"#);precondition(pending.published==0)
+pending.receive(#"{"kind":"pause"}"#)
+precondition(pending.state == .paused && pending.position==0 && oldSource.cancelled && pending.renderObserver==nil)
+pending.receive(#"{"kind":"resume"}"#)
+oldSource.fire();precondition(pending.state == .starting && pending.midi!.runs.isEmpty)
+var oldStamp=AudioTimeStamp();oldStamp.mHostTime=reviewHost;oldStamp.mFlags = .hostTimeValid
+for callback in oldObservers{withUnsafePointer(to:&oldStamp){callback(.unitRenderAction_PostRender,$0,512,0)}}
+precondition(pending.state == .starting && pending.midi!.runs.isEmpty)
+pending.engine.mainMixerNode.auAudioUnit.render()
+precondition(pending.state == .playing && pending.midi!.runs.count==1 && pending.renderStartSource==nil && pending.renderObserver==nil)
+precondition(abs(AVAudioTime.seconds(forHostTime:pending.musicalAnchor-pending.anchor)-0.6)<1e-6)
+pending.receive(#"{"kind":"seek","seconds":0.1}"#)
+let seekingSource=pending.renderStartSource!
+precondition(pending.state == .starting && pending.midi!.runs.count==1)
+pending.receive(#"{"kind":"seek","seconds":0.2}"#)
+seekingSource.fire();precondition(pending.state == .starting && pending.midi!.runs.count==1)
+pending.engine.mainMixerNode.auAudioUnit.render()
+precondition(pending.state == .playing && abs(pending.position-0.8)<1e-6 && pending.midi!.runs.count==2)
+pending.receive(#"{"kind":"pause"}"#);pending.receive(#"{"kind":"resume"}"#)
+let stoppedSource=pending.renderStartSource!
+pending.receive(#"{"kind":"stop"}"#);stoppedSource.fire()
+precondition(pending.state == .stopped && pending.finished==1 && pending.midi!.runs.count==2 && pending.renderObserver==nil)
 let audioFirst=Probe();audioFirst.midi=FakeMidi();try audioFirst.schedule(from:0,playing:true)
 audioFirst.voices[0].completion!()
 precondition(audioFirst.active.isEmpty && audioFirst.state == .playing && audioFirst.finished==0)
@@ -188,7 +247,7 @@ huge.receive(#"{"kind":"resume"}"#);precondition(huge.state == .playing && huge.
 huge.receive(#"{"kind":"stop"}"#)
 let fine=LoopPracticePlan(period:.init(numerator:"1",denominator:"3"),countInBeats:"1",beatsPerBar:1,unit:4,metronome:true)
 let outward=try fine.hostTicks(numer:125,denom:3);precondition(outward==1)
-print("ARRANGEMENT_CLOCK_DECISIONS_PASS: clocked silent horizon, either-order audio/MIDI/horizon completion, cancelled timer isolation across pause/seek/resume/stop; either-part-first completion, WAV-only continuity, one stop, common anchor conversion, paired pause/seek/resume, stale callback isolation, MIDI tail without audio voices")
+print("ARRANGEMENT_CLOCK_DECISIONS_PASS: fresh successful render fence, stale/error render rejection, pending pause/seek/stop and old callback isolation, clocked silent horizon, either-order audio/MIDI/horizon completion, cancelled timer isolation across pause/seek/resume/stop; either-part-first completion, WAV-only continuity, one stop, common anchor conversion, paired pause/seek/resume, stale callback isolation, MIDI tail without audio voices")
 `
 const dir=await mkdtemp(join(process.env.TMPDIR ?? '/tmp','masc-arrangement-clock-'))
 try {

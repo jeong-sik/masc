@@ -463,7 +463,7 @@ enum PracticeLoopPosition {
     var backing: Double { if case .backing(let phase) = self { return phase }; return 0 }
 }
 final class ArrangementTransport {
-    enum State { case prepared, playing, paused, stopped }
+    enum State { case prepared, starting, playing, paused, stopped }
     let plan: Plan
     let device: OutputDevice
     let engine = AVAudioEngine()
@@ -475,6 +475,8 @@ final class ArrangementTransport {
     var active = Set<String>()
     var horizon: DispatchSourceTimer?
     var horizonEnded = false
+    var renderStartSource: DispatchSourceUserDataAdd?
+    var renderObserver: Int?
     var state = State.prepared
     var position: Double = 0
     var anchor: UInt64 = 0
@@ -559,7 +561,7 @@ final class ArrangementTransport {
         guard alive != 0, try outputChannels(device.object) >= Int(renderChannels),
               engine.outputNode.outputFormat(forBus: 0).channelCount == renderChannels, try deviceString(device.object, kAudioDevicePropertyDeviceUID) == device.uid,
               engine.outputNode.auAudioUnit.deviceID == device.object else { throw AudioFailure("selected output is unavailable or changed") }
-        if state == .playing && !engine.isRunning { throw AudioFailure("audio engine stopped after output configuration changed") }
+        if (state == .playing || state == .starting) && !engine.isRunning { throw AudioFailure("audio engine stopped after output configuration changed") }
         for region in plan.regions {
             try region.calibrationOutput?.validate(deviceUID: device.uid, rate: engine.outputNode.outputFormat(forBus: 0).sampleRate,
                                                   frames: currentBufferFrames)
@@ -622,7 +624,12 @@ final class ArrangementTransport {
         do { try audioEmit(snapshot(state == .playing ? "playing" : "paused")) }
         catch { finish(reason: "event-output-failed", error: error, publish: false) }
     }
-    func stopVoices() { horizon?.cancel(); horizon = nil; horizonEnded = false; generation &+= 1; for voice in voices { voice.stop() }; active.removeAll() }
+    func clearRenderStart() {
+        renderStartSource?.cancel(); renderStartSource = nil
+        if let observer = renderObserver { engine.mainMixerNode.auAudioUnit.removeRenderObserver(observer) }
+        renderObserver = nil
+    }
+    func stopVoices() { horizon?.cancel(); horizon = nil; horizonEnded = false; generation &+= 1; clearRenderStart(); for voice in voices { voice.stop() }; active.removeAll() }
     func schedule(from seconds: Double, playing: Bool) throws {
         guard state != .stopped else { return }
         if plan.loop == nil && seconds >= plan.duration { position = plan.duration; finish(reason: "finished"); return }
@@ -651,14 +658,34 @@ final class ArrangementTransport {
     func run() throws {
         guard state != .stopped else { return }
         guard (plan.loop != nil || position < plan.duration), !active.isEmpty || midi != nil || plan.clocked else { position = plan.duration; finish(reason: "finished"); return }
-        try checkOutput()
-        // Prime each scheduled player's native buffers before reserving the
-        // shared epoch. play(at:) must not pay first-use preparation while
-        // later voices are still waiting to receive that same deadline.
+        try checkOutput(); clearRenderStart()
         for voice in voices where active.contains(voice.region.id) {
             voice.player.prepare(withFrameCount: voice.capacity)
         }
+        let expected = generation, earliest = mach_absolute_time()
+        let source = DispatchSource.makeUserDataAddSource(queue: .main)
+        renderStartSource = source
+        source.setEventHandler { [weak self] in
+            guard let self, self.state == .starting, self.generation == expected else { return }
+            self.clearRenderStart()
+            do { try self.beginPlayback(); self.publish() }
+            catch { self.finish(reason: "start-failed", error: error) }
+        }
+        source.resume()
+        // A restarted engine may still expose its previous lastRenderTime.
+        // Observe a real new render before reserving any audio/MIDI deadline.
+        // The render callback only merges a notification; ownership and all
+        // graph/control work remain on main, with no wait or startup timeout.
+        renderObserver = engine.mainMixerNode.auAudioUnit.token(byAddingRenderObserver: { flags, timestamp, _, _ in
+            if flags.contains(.unitRenderAction_PostRender), !flags.contains(.unitRenderAction_PostRenderError),
+               timestamp.pointee.mFlags.contains(.hostTimeValid),
+               timestamp.pointee.mHostTime >= earliest { source.add(data: 1) }
+        })
+        state = .starting
         engine.prepare(); try engine.start()
+    }
+    func beginPlayback() throws {
+        try checkOutput()
         let rate = engine.outputNode.outputFormat(forBus: 0).sampleRate, latency = engine.outputNode.presentationLatency
         guard rate.isFinite, rate > 0, latency.isFinite, latency >= 0 else { throw AudioFailure("output clock is unavailable") }
         // A node may already have rendered beyond wall-clock now. Apple defines
@@ -738,7 +765,7 @@ final class ArrangementTransport {
             let source = DispatchSource.makeSignalSource(signal: number, queue: .main)
             source.setEventHandler { [weak self] in self?.finish(reason: "signal") }; source.resume(); signals.append(source)
         }
-        try schedule(from: 0, playing: true); publish()
+        try schedule(from: 0, playing: true)
     }
     func receive(_ line: String) {
         guard state != .stopped else { return }
@@ -747,10 +774,10 @@ final class ArrangementTransport {
             let command = try JSONDecoder().decode(AudioCommand.self, from: Data(line.utf8))
             do {
                 switch command {
-                case .pause: if state == .playing {
+                case .pause: if state == .playing || state == .starting {
                     let time = currentTime()
                     if plan.loop == nil && time >= plan.duration { position = plan.duration; finish(reason: "finished"); return }
-                    if plan.practice?.loop != nil {
+                    if plan.practice?.loop != nil && state == .playing {
                         let backing = backingTime()
                         let render = engine.outputNode.lastRenderTime
                         let frontier = render?.isHostTimeValid == true ? max(anchor, render!.hostTime) : anchor
@@ -768,7 +795,7 @@ final class ArrangementTransport {
                         loopPosition = .backing(seconds == duration && plan.loop != nil ? 0 : seconds)
                     }
                     if seconds == duration && plan.loop == nil { position = plan.duration; finish(reason: "finished"); return }
-                    try schedule(from: raw, playing: state == .playing)
+                    try schedule(from: raw, playing: state == .playing || state == .starting)
                 case .status: break
                 case .recordingEpoch(let request):
                     guard plan.loop == nil else { throw AudioFailure("loop recording requires cycle-aware placement") }
@@ -784,7 +811,7 @@ final class ArrangementTransport {
                 if state != .stopped { publish() }
                 return
             }
-            if state != .stopped { publish() }
+            if state != .stopped && state != .starting { publish() }
         } catch { finish(reason: "command-failed", error: error) }
     }
     func finish(reason: String, error: Error? = nil, publish: Bool = true) {

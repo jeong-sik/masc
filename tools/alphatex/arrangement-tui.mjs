@@ -1,5 +1,5 @@
 import { viewSession } from './music-session.mjs'
-import { mkdtemp, writeFile, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { join, dirname, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
@@ -11,6 +11,8 @@ import { loadArrangement, verifyArrangementAssets, saveArrangement } from './arr
 import { saveProject } from './sequencer-files.mjs'
 import { safeText } from './terminal.mjs'
 import { openPlayback } from './playback.mjs'
+import { devices, record } from './capture.mjs'
+import { recordingEpoch } from './arrangement-recording.mjs'
 
 const help = [
   ':import-wave /path/take.wav     :import-midi /path/song.mid',
@@ -38,7 +40,9 @@ const help = [
   ':midi-source asset-2 SOURCE_ID MIDI_UID overrides one captured input.',
   ':mixed-output AUDIO_UID enables audio plus the selected MIDI routes.',
   ':play-audio explicitly auditions WAV, including captured regions and silent gaps.',
-  'Whole-arrangement looping and overdub remain under development.',
+  ':inputs lists audio/MIDI inputs; :input AUDIO_UID; :midi-input all|none|UID',
+  ':record starts simultaneous WAV + raw MIDI against playing backing; :record-stop',
+  'Transport/edits finalize recording first. Whole looping and monitoring remain unfinished.',
 ]
 
 export async function viewArrangement({ path, loaded, initialDocument, root = resolve('music-projects'), embedded = false, signal, output, midiOutput } = {}) {
@@ -63,16 +67,79 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
   catch (error) { await rm(directory, { recursive: true, force: true }); throw error }
   const jobs = new Map(), players = new Map(), preparations = new Set(), wasRaw = process.stdin.isRaw
   let transport = { kind: 'stopped' }, generation = 0, preparing = null, route = arrangementRoute({ output, midiOutput })
+  let recording = null, input = null, midiInput = 'all', transportPending = false, inputDevices = null, discoveryTicket = 0
+  const discovery = new AbortController()
   let complete
   const done = new Promise(resolve => { complete = resolve })
   function finish() {
     if (!accepting) return
     accepting = false
     takeAbort?.abort()
-    stop()
-    for (const handle of players.keys()) handle.terminate()
-    if (!workerFailure) worker.postMessage({ kind: 'cancel' })
-    complete()
+    discovery.abort()
+    // Recording owns finalization and source import through child close. Keep
+    // the backing epoch continuous until that boundary, even on view exit.
+    const release = () => {
+      stop()
+      for (const handle of players.keys()) handle.terminate()
+      if (!workerFailure) worker.postMessage({ kind: 'cancel' })
+      complete()
+    }
+    if (recording) settleRecording().finally(release)
+    else release()
+  }
+  async function settleRecording() {
+    const owned = recording
+    if (!owned) return
+    owned.phase = 'finalizing'; owned.controller.abort(); owned.handle?.stop(); draw()
+    await owned.completion
+  }
+  function startRecording() {
+    if (recording) throw new Error('A recording is already opening or finalizing')
+    if (!input) throw new Error('Select :input AUDIO_UID first; :inputs lists devices')
+    if (transport.kind !== 'playing' || transportPending) throw new Error('Start arrangement playback before recording')
+    const project = editor.project, projectPath = path, selectedInput = input, selectedMidi = midiInput, backing = transport.handle
+    const owned = { controller: new AbortController(), phase: 'opening', directory: join(dirname(path), 'recordings', randomUUID()), handle: null, epoch: null, failure: null, generation }
+    recording = owned
+    const expected = generation
+    owned.completion = (async () => {
+      try {
+        await mkdir(dirname(owned.directory), { recursive: true, mode: 0o700 })
+        if (owned.controller.signal.aborted || !accepting || generation !== expected) return
+        // This correlated barrier follows earlier native pause/seek commands.
+        // An old unsolicited status cannot supply the admission epoch.
+        const epoch = recordingEpoch(await backing.recordingEpoch({ signal: owned.controller.signal }))
+        if (owned.controller.signal.aborted || !accepting || generation !== expected || transport.handle !== backing || editor.project !== project || path !== projectPath) return
+        owned.epoch = epoch
+        owned.handle = record({ input: selectedInput, midi: selectedMidi, directory: owned.directory, onEvent(event) {
+          if (event.kind === 'recording') owned.phase = owned.controller.signal.aborted ? 'finalizing' : 'recording'
+          if (event.kind === 'error') status = event.message
+          draw()
+        } })
+        await owned.handle.completion
+        owned.phase = 'attaching'; draw()
+        // Import is separate from recording success. A failed/late import must
+        // preserve the complete finalized source and its recovery coordinates.
+        await writeFile(join(owned.directory, 'arrangement-recording.json'), JSON.stringify({ projectPath, epoch }, null, 2), { flag: 'wx', mode: 0o600 })
+        if (owned.failure) throw owned.failure
+        if (editor.project !== project || path !== projectPath) throw new Error('Project changed before recording attachment')
+        const result = await request({ kind: 'attach-recording', project, projectPath, path: owned.directory, epoch })
+        if (owned.failure) throw owned.failure
+        if (editor.project !== project || path !== projectPath) throw new Error('Project changed during recording attachment')
+        await writeFile(join(owned.directory, 'alignment.json'), JSON.stringify(result.alignment, null, 2), { flag: 'wx', mode: 0o600 })
+        if (owned.failure) throw owned.failure
+        if (recording !== owned || editor.project !== project || path !== projectPath) throw new Error('Recording attachment authority changed')
+        recording = null
+        editor = arrangementImported(editor, result)
+        status = 'Recorded WAV and raw MIDI attached; original take retained'
+      } catch (error) {
+        if (!owned.handle && owned.controller.signal.aborted && !owned.failure) status = 'Recording cancelled before opening inputs'
+        else {
+          status = `${error.message}; take retained at ${owned.directory}`
+          process.stderr.write(`Recording recovery: ${owned.directory} (${error.message})\n`)
+        }
+      } finally { if (recording === owned) recording = null; draw() }
+    })()
+    draw()
   }
   function request(value, issued) {
     if (workerFailure) return Promise.reject(workerFailure)
@@ -85,6 +152,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     })
   }
   function fail(error) {
+    if (recording) recording.failure = error
     stop()
     workerFailure = error
     for (const job of jobs.values()) job.reject(error)
@@ -100,7 +168,8 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
   worker.on('error', fail)
   worker.on('exit', code => { if (!terminatingWorker) fail(new Error(`Arrangement worker exited ${code}`)) })
   function stop() {
-    generation++
+    recording?.controller.abort(); recording?.handle?.stop()
+    generation++; transportPending = false
     if (preparing !== null && !workerFailure) worker.postMessage({ kind: 'cancel', request: preparing })
     preparing = null
     transport.handle?.stop()
@@ -113,8 +182,8 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
   }
   function play(audioOnly = false) {
     if (!accepting) return
-    if (transport.kind === 'playing') { transport.handle.pause(); return }
-    if (transport.kind === 'paused') { transport.handle.resume(); return }
+    if (transport.kind === 'playing') { transportPending = true; transport.handle.pause(); return }
+    if (transport.kind === 'paused') { transportPending = true; transport.handle.resume(); return }
     if (transport.kind === 'preparing' || transport.kind === 'starting') { stop(); return }
     const selection = audioOnly ? { kind: 'prepare-audio', output: route.output } : arrangementPlaybackRequest(editor.project, route)
     const expected = ++generation, project = editor.project, output = selection.output
@@ -130,15 +199,27 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
         transport = { kind: 'starting' }
         const handle = openPlayback({ path: result.path, format: result.format, output, midiOutput: result.midiOutput, midiBindings: result.bindings,
           onEvent(event) {
-            if (!accepting || generation !== expected) return
-            if (event.kind === 'error') { status = event.message; return }
+            if (generation !== expected) return
+            const captured = recording?.generation === expected ? recording : null
+            if (event.kind === 'error') {
+              if (captured) captured.failure = new Error(event.message)
+              captured?.controller.abort(); captured?.handle?.stop(); status = event.message; return
+            }
+            if (event.kind === 'stopped' && captured) {
+              if (captured.epoch) captured.epoch.duration = Math.min(captured.epoch.duration, event.currentTime)
+              captured.controller.abort(); captured.handle?.stop()
+            }
+            if (!accepting) return
+            transportPending = false
             transport = { ...transport, kind: event.kind, event }
             draw()
           } })
         transport = { ...transport, handle }
         const completion = handle.completion.then(event => {
+          if (recording?.generation === expected) { recording.controller.abort(); recording.handle?.stop() }
           if (generation === expected) { transport = { kind: 'stopped', event }; status = 'Playback stopped'; draw() }
         }, error => {
+          if (recording?.generation === expected) { recording.failure = error; recording.controller.abort(); recording.handle?.stop() }
           if (generation === expected) { transport = { kind: 'stopped' }; status = error.message; draw() }
         }).finally(() => { players.delete(handle) })
         players.set(handle, completion)
@@ -205,8 +286,25 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
   }
   async function effect(value) {
     switch (value.kind) {
+      case 'inputs': {
+        const ticket = ++discoveryTicket
+        if (inputDevices !== null) { inputDevices = null; break }
+        inputDevices = []; status = 'Discovering input devices; :inputs returns to arrangement'
+        const pending = devices({ signal: discovery.signal }).then(found => {
+          if (!accepting || discovery.signal.aborted || ticket !== discoveryTicket) return
+          inputDevices = [...found.audio.filter(device => device.inputs > 0).map(device => `Audio ${device.id}: ${device.name}`),
+            ...found.midi.map(device => `MIDI ${device.id}: ${device.name}`)]
+          status = 'Select :input AUDIO_UID and :midi-input all|none|MIDI_UID; :inputs returns'
+          draw()
+        }, error => { if (!discovery.signal.aborted) { status = error.message; draw() } })
+        preparations.add(pending); pending.finally(() => preparations.delete(pending)); break
+      }
+      case 'input': input = value.input; status = 'Audio input selected'; break
+      case 'midi-input': midiInput = value.input; status = 'MIDI input selected'; break
+      case 'record': startRecording(); break
+      case 'record-stop': await settleRecording(); break
       case 'open-take': openTake(value.asset); break
-      case 'help': showHelp = !showHelp; break
+      case 'help': inputDevices = null; discoveryTicket++; showHelp = !showHelp; break
       case 'play': play(); break
       case 'play-audio':
         if (['playing', 'paused', 'preparing', 'starting'].includes(transport.kind)) throw new Error('Stop current playback before choosing audio-only audition')
@@ -214,6 +312,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
       case 'stop': stop(); break
       case 'seek': {
         if (!['playing', 'paused'].includes(transport.kind)) throw new Error('Playback is not ready')
+        transportPending = true
         transport.handle.seek(value.tick / editor.project.ppq * 60 / editor.project.tempo)
         break
       }
@@ -247,7 +346,13 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
       else if (key.name === 'backspace') prompt = [...prompt].slice(0, -1).join('')
       else if (key.name === 'return') {
         const line = prompt; prompt = null
-        enqueue(async () => { const result = arrangementCommand(editor, line); adopt(result.editor); if (result.effect) await effect(result.effect); else status = 'Edited' })
+        enqueue(async () => {
+          let result = arrangementCommand(editor, line)
+          if (result.editor.project !== editor.project || result.effect && !['record', 'record-stop', 'inputs', 'input', 'midi-input', 'help'].includes(result.effect.kind)) {
+            await settleRecording(); result = arrangementCommand(editor, line)
+          }
+          adopt(result.editor); if (result.effect) await effect(result.effect); else status = 'Edited'
+        })
       } else if (text && !key.ctrl && !key.meta) prompt += safeText(text)
       draw(); return
     }
@@ -257,11 +362,11 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     enqueue(async () => {
       let action
       switch (key.name) {
-        case 's': await save(); return
+        case 's': await settleRecording(); await save(); return
         case 'a': action = { kind: 'asset' }; break
         case 'tab': action = { kind: 'lane' }; break
         case 'return':
-          if (!key.shift && editor.project.assets.find(asset => asset.id === editor.asset)?.kind === 'capture') { openTake(editor.asset); return }
+          if (!key.shift && editor.project.assets.find(asset => asset.id === editor.asset)?.kind === 'capture') { await settleRecording(); openTake(editor.asset); return }
           action = { kind: 'place' }; break
         case 'delete': case 'backspace': case 'x': action = { kind: 'remove' }; break
         case 'd': action = { kind: 'duplicate' }; break
@@ -271,9 +376,10 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
         case 'o': action = { kind: 'solo' }; break
         case 'left': case 'right': action = { kind: key.shift ? 'move' : 'cursor', ticks: editor.step * (key.name === 'left' ? -1 : 1) }; break
         case 'up': case 'down': action = { kind: 'region', direction: key.name === 'down' ? 1 : -1 }; break
-        case 'space': play(); return
+        case 'space': await settleRecording(); play(); return
         default: return
       }
+      if (arrangementAction(editor, action).project !== editor.project) await settleRecording()
       adopt(arrangementAction(editor, action)); status = 'Edited'
     })
   }
@@ -295,8 +401,10 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     const rows = process.stdout.rows || 24, width = Math.max(1, (process.stdout.columns || 80) - 24)
     const lines = [`Arrangement · ${project.title}${project !== saved ? ' *' : ''} · ${project.tempo} BPM · ${project.meter.join('/')}`,
       `Cursor ${editor.tick / project.ppq} beats · grid ${editor.step / project.ppq} · ${status}`,
-      `Playback ${transport.kind} · ${(transport.event?.currentTime ?? 0).toFixed(2)} s · ${transport.event?.device.name ?? route.output ?? route.midiOutput ?? 'default output'}`]
-    if (showHelp) lines.push(...help)
+      `Playback ${transport.kind} · ${(transport.event?.currentTime ?? 0).toFixed(2)} s · ${transport.event?.device.name ?? route.output ?? route.midiOutput ?? 'default output'}`,
+      `Recording ${recording?.phase ?? 'idle'} · input ${input ?? 'choose :input'} · MIDI ${midiInput}`]
+    if (inputDevices !== null) lines.push(...inputDevices)
+    else if (showHelp) lines.push(...help)
     else {
       const left = Math.floor(editor.tick / editor.step / width) * width * editor.step
       const selected = project.lanes.findIndex(lane => lane.id === editor.lane), capacity = Math.max(1, rows - 10)
@@ -326,7 +434,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
   }
   const onEnd = () => finish(), onSignal = () => finish(), onAbort = () => finish(), onResize = () => draw()
   const ticker = setInterval(() => {
-    if (transport.kind === 'playing') { try { transport.handle.status() } catch (error) { stop(); status = error.message; draw() } }
+    if (transport.kind === 'playing') { try { transport.handle.status() } catch (error) { if (recording) recording.failure = error; stop(); status = error.message; draw() } }
   }, 100)
   async function retainRecovery() {
     const directory = await mkdtemp(join(tmpdir(), 'masc-arrangement-recovery-'))

@@ -14,7 +14,7 @@ let state posts =
   let state = create_state ~workspace:"board-successor-test" ~port:8935 ~refresh_interval:2. () in
   state.view <- Board;
   state.board_mode <- Board_read "A";
-  state.board_posts <- posts;
+  ignore (apply_board_posts_load state {bpr_query=board_query state;bpr_result=Ok posts});
   state
 
 let check_target label expected state =

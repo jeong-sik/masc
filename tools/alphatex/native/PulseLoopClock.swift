@@ -27,6 +27,9 @@ struct PulseLoopLayout {
             } }
             return (try top.reduce(1, multiply), try bottom.reduce(1, multiply))
         }
+        // Validate before deriving duration: an untrusted end-start can itself
+        // overflow even though the eventual layout would reject that clock.
+        try loop.validate()
         guard unit > 0, unit & (unit - 1) == 0, pulse.duration == loop.duration else {
             throw AudioFailure("loop pulse disagrees with the authored meter or duration")
         }

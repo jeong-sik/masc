@@ -31,6 +31,13 @@ struct Case:Decodable{let tempo:Double;let unit:Int64,beats:Int64,rate:Double,st
 @main enum Probe{static func main()throws{
  let root=CommandLine.arguments[1],cases=try JSONDecoder().decode([Case].self,from:Data(contentsOf:URL(fileURLWithPath:root+"/cases.json")))
  var rows:[[String:Any]]=[]
+ let boundaryPulse=PulseAudioClock(period:.init(numerator:"1000000000",denominator:"1"),beatsPerBar:4,duration:1)
+ for (start,end):(Int64,Int64) in [(Int64.min,Int64.max),(-1,960),(960,960),(961,960),(0,Int64.max)] {
+  do{
+   _ = try PulseLoopLayout(loop:WaveLoopClock(start:start,end:end,ppq:960,tempo:120),pulse:boundaryPulse,unit:4,rate:48000,frameCount:576)
+   preconditionFailure("invalid loop admitted")
+  }catch{}
+ }
  for (index,c) in cases.enumerated(){
   let loop=WaveLoopClock(start:c.start,end:c.end,ppq:960,tempo:c.tempo)
   let pulse=PulseAudioClock(period:c.period,beatsPerBar:c.beats,duration:loop.duration)

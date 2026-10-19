@@ -298,6 +298,25 @@ proof that no relevant policy exists. An optional positive `limit` applies after
 assessment and reports truncated selections separately. Calling the tool retrieves
 memory for that request; it does not turn on automatic prompt injection.
 
+## Publish a report as an artifact
+
+Ask a Keeper to publish a report when you want to reopen it outside the
+conversation. `keeper_artifact_publish` accepts `title`, `summary`, `format`
+(`markdown` or `html`) and the complete `content`. Optional `task_id` and
+`goal_id` link it to the work. The running Keeper supplies the author identity.
+
+Open **Work → Artifacts** in the dashboard to search the published list and
+read a document. The reader offers preview, source, version selection, copy-link
+and source download. Self-contained HTML can use inline JavaScript and CSS;
+external scripts and fetch are blocked in the preview.
+
+To revise a report, supply its `id` and latest `expected_revision` together with
+the replacement fields. A stale revision is rejected. Previous versions remain
+readable through their version links. Existing workspace files appear only when
+a Keeper or authenticated operator explicitly publishes their content.
+
+See the [artifact design and HTTP contract](design/report-artifacts.md).
+
 ## Where the numbers here came from
 
 Every count in this document was read from one live runtime on 2026-08-25 —

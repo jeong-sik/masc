@@ -1,0 +1,11 @@
+test suite	Test	2026-10-19T03:23:51.4920483Z [targeted] EIO_BACKEND=<unset> timeout=600s per suite
+test suite	Test	2026-10-19T03:23:51.6707489Z [targeted] dune build test/test_published_artifact.exe test/test_keeper_runtime_schemas_toml_parity.exe test/test_keeper_tool_descriptor_registry_integrity.exe
+test suite	Test	2026-10-19T03:27:15.6717372Z [targeted] test/test_published_artifact: start 2026-10-19T03:27:15Z
+test suite	Test	2026-10-19T03:27:15.7822529Z Test Successful in 0.036s. 7 tests run.
+test suite	Test	2026-10-19T03:27:15.7877973Z [targeted] test/test_published_artifact: OK in 0s
+test suite	Test	2026-10-19T03:27:15.8848845Z [targeted] test/test_keeper_runtime_schemas_toml_parity: start 2026-10-19T03:27:15Z
+test suite	Test	2026-10-19T03:27:15.9311743Z Test Successful in 0.000s. 3 tests run.
+test suite	Test	2026-10-19T03:27:15.9356990Z [targeted] test/test_keeper_runtime_schemas_toml_parity: OK in 0s
+test suite	Test	2026-10-19T03:27:16.0341158Z [targeted] test/test_keeper_tool_descriptor_registry_integrity: start 2026-10-19T03:27:16Z
+test suite	Test	2026-10-19T03:27:16.1645743Z Test Successful in 0.021s. 59 tests run.
+test suite	Test	2026-10-19T03:27:16.1646784Z [targeted] test/test_keeper_tool_descriptor_registry_integrity: OK in 0s

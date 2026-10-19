@@ -35,14 +35,18 @@ import { showToast } from './common/toast'
 import { errorToString } from '../lib/format-string'
 import type { Goal, GoalTreeNode, GoalTreeTask, Task, Keeper } from '../types'
 
-type WorkSection = 'work' | 'board' | 'sub-boards' | 'planning' | 'repositories' | 'verification'
+type WorkSection = 'work' | 'board' | 'sub-boards' | 'planning' | 'repositories' | 'verification' | 'artifacts'
+
+const LazyArtifactsSurface = lazy(async () => ({
+  default: (await import('./published-artifacts/artifacts-surface')).ArtifactsSurface,
+}))
 
 const LazyRepositoryManagement = lazy(async () => ({
   default: (await import('./repository-management')).RepositoryManagement,
 }))
 
 function isWorkSection(v: string | undefined): v is WorkSection {
-  return v === 'work' || v === 'board' || v === 'sub-boards' || v === 'planning' || v === 'repositories' || v === 'verification'
+  return v === 'work' || v === 'board' || v === 'sub-boards' || v === 'planning' || v === 'repositories' || v === 'verification' || v === 'artifacts'
 }
 
 // ── Task state mapping ──────────────────────────────────────────────────────
@@ -1767,7 +1771,11 @@ export function Work() {
     <div class="v2-workspace-surface flex min-w-0 flex-col gap-3">
       <${SectionNav} tab="workspace" current=${current} />
       <${ErrorBoundary} label=${current}>
-        ${current === 'work' ? html`<${WorkSurfaceV2} />`
+        ${current === 'artifacts' ? html`
+            <${Suspense} fallback=${html`<${LoadingState}>아티팩트 불러오는 중...<//>`}>
+              <${LazyArtifactsSurface} />
+            <//>`
+          : current === 'work' ? html`<${WorkSurfaceV2} />`
           : current === 'board' ? html`<${BoardSurface} />`
           : current === 'sub-boards' ? html`<${SubBoardSurface} />`
           : current === 'planning' ? html`<${PlanningPanel} />`

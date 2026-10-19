@@ -76,6 +76,7 @@ type SurfaceSectionId =
   | 'planning'       // Phase 1: absorbs goals
   | 'repositories'   // Multi-repository cockpit and keeper access mapping
   | 'verification'   // Contract follow-up (#7531): Mission detail verification table
+  | 'artifacts'
   // lab
   | 'tools'
   | 'harness'
@@ -423,6 +424,12 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: 'Work',
       description: 'Goal/job breakdown and keeper assignment board.',
       params: { section: 'work' },
+    },
+    {
+      id: 'artifacts',
+      label: 'Artifacts',
+      description: 'Reports and documents published by Keepers.',
+      params: { section: 'artifacts' },
     },
     {
       id: 'board',

@@ -2,6 +2,7 @@ import { validateCapturedSource } from './captured-source.mjs'
 import { captureRegionTime } from './capture-time.mjs'
 import { validateMidiSource, midiSourcePattern } from './midi-source.mjs'
 import { PPQ } from './sequencer-project.mjs'
+import { validateCapturePlacement, capturePlacementStart, projectCapturedPlacement } from './capture-placement.mjs'
 
 const integer = (value, name, minimum = 0) => {
   if (!Number.isSafeInteger(value) || value < minimum) throw new Error(`Invalid ${name}`)
@@ -75,6 +76,11 @@ export function arrangementClipTime(project, clip) {
   switch (asset.kind) {
   case 'capture': {
     if (clip.pattern !== undefined) throw new Error('Captured regions do not have MIDI patterns')
+    if (clip.component !== undefined && !['audio', 'midi'].includes(clip.component)) throw new Error('Unknown captured region component')
+    if (clip.placement !== undefined) {
+      if (!clip.component) throw new Error('Split captured audio and MIDI before correcting one component')
+      validateCapturePlacement(clip.placement)
+    }
     capture = captureRegionTime(asset, clip)
     sourceStart = capture.sourceStartSeconds; sourceEnd = capture.sourceEndSeconds; duration = capture.durationSeconds
     break
@@ -98,7 +104,8 @@ export function arrangementClipTime(project, clip) {
   }
   default: throw new Error('Unknown region source kind')
   }
-  const position = clip.position / project.ppq * 60 / project.tempo
+  if (asset.kind !== 'capture' && (clip.component !== undefined || clip.placement !== undefined)) throw new Error('Component correction requires a captured source')
+  const position = asset.kind === 'capture' && clip.placement ? capturePlacementStart(project, clip) : clip.position / project.ppq * 60 / project.tempo
   duration ??= sourceEnd - sourceStart
   const end = position + duration * clip.repeat
   if (![position, sourceStart, sourceEnd, duration, end].every(Number.isFinite)) throw new Error('Region time is not representable')
@@ -152,12 +159,22 @@ export function editArrangement(project, edit) {
     case 'lane-solo': lane(edit.id).solo = !lane(edit.id).solo; break
     case 'region-add': next.clips.push({ id: arrangementID(next.clips, 'region'), name: edit.name,
       asset: edit.asset, lane: edit.lane, position: edit.position, offset: edit.offset, extent: edit.extent,
-      repeat: edit.repeat ?? 1, ...(edit.pattern === undefined ? {} : { pattern: edit.pattern }) }); break
+      repeat: edit.repeat ?? 1, ...(edit.pattern === undefined ? {} : { pattern: edit.pattern }),
+      ...(edit.component === undefined ? {} : { component: edit.component }), ...(edit.placement === undefined ? {} : { placement: structuredClone(edit.placement) }) }); break
+    case 'capture-split': {
+      const original = region(edit.id), asset = next.assets.find(asset => asset.id === original.asset)
+      if (asset?.kind !== 'capture' || original.component !== undefined) throw new Error('Choose a paired captured region to split')
+      const id = arrangementID(next.lanes, 'lane')
+      next.lanes.push({ id, name: `${original.name} MIDI`, kind: 'capture', muted: false, solo: false })
+      original.component = 'audio'
+      next.clips.push({ ...original, id: arrangementID(next.clips, 'region'), component: 'midi', lane: id, name: `${original.name} MIDI` })
+      break
+    }
     case 'region-change': {
       const clip = region(edit.id)
       for (const key of Object.keys(edit)) {
         if (['kind', 'id'].includes(key)) continue
-        if (!['name', 'lane', 'position', 'offset', 'extent', 'repeat', 'pattern'].includes(key)) throw new Error('Unknown region edit field')
+        if (!['name', 'lane', 'position', 'offset', 'extent', 'repeat', 'pattern', 'component', 'placement'].includes(key)) throw new Error('Unknown region edit field')
         clip[key] = edit[key]
       }
       break
@@ -180,4 +197,17 @@ export function arrangementSchedule(project, { all = false } = {}) {
   const lanes = new Set(project.lanes.filter(lane => all || !lane.muted && (!solo || lane.solo)).map(lane => lane.id))
   return project.clips.filter(clip => lanes.has(clip.lane)).map(clip => ({ ...clip, ...arrangementClipTime(project, clip) }))
     .sort((a, b) => a.startSeconds - b.startSeconds)
+}
+
+export function arrangementPlaybackSchedule(project) {
+  const reserved = [...project.clips], result = []
+  for (const clip of arrangementSchedule(project)) {
+    const asset = project.assets.find(asset => asset.id === clip.asset)
+    const parts = asset.kind === 'capture' && clip.placement ? projectCapturedPlacement(project, asset, clip) : [clip]
+    for (const [index, part] of parts.entries()) {
+      const id = index ? arrangementID(reserved, 'projection') : clip.id
+      reserved.push({ id }); result.push({ ...part, id })
+    }
+  }
+  return result.sort((a, b) => a.startSeconds - b.startSeconds)
 }

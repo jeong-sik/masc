@@ -3,6 +3,7 @@ import { midiSourcePattern } from './midi-source.mjs'
 import { captureRange, captureRegionFromSeconds } from './capture-time.mjs'
 import { beats, PPQ } from './sequencer-project.mjs'
 import { calibrationSelection } from './audio-calibration.mjs'
+import { manualCapturePlacement } from './capture-placement.mjs'
 
 function reconcile(editor, project) {
   const selected = project.clips.find(clip => clip.id === editor.region)
@@ -121,6 +122,8 @@ export function arrangementCommand(editor, line) {
   }
   let value
   switch (command) {
+    case 'split-take': count(0); value = { kind: 'capture-split', id: regionID(editor) }; break
+    case 'capture-offset': count(1); value = { kind: 'region-change', id: regionID(editor), placement: manualCapturePlacement(args[0]) }; break
     case 'calibrate':
       count(4)
       return { editor, effect: { kind: command, ...calibrationSelection({ output: args[0], inputChannel: Number(args[1]), outputChannel: Number(args[2]), maxLagMs: Number(args[3]) }) } }

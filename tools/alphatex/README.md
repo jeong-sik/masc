@@ -335,3 +335,28 @@ latency remains separate from this measurement. Virtual loopback validates the
 measurement path; it does not prove physical/acoustic roundtrip, sub-sample
 accuracy, MIDI latency or calibrated compensation. Explicit compensation and
 clock-based practice/count-in remain subsequent work.
+
+### Separate captured audio and MIDI placement
+
+Select a paired captured region and run `:split-take`. One undoable edit keeps the
+audio in its lane and adds a MIDI lane/region using the same original immutable
+WAV, manifest and UMP source. Select either separated region and run
+`:capture-offset SIGNED_MS`: positive values advance that component; negative
+values delay it. For example `:capture-offset 15.25` advances only the selected
+component by 15.25 ms. This is an explicit **manual** correction, not an adopted
+calibration result. Repeat the command to replace the offset, or use `0` to clear
+its timing effect. Undo/redo, duplicate, trim and portable save/load retain it.
+
+The other component and original raw source remain unchanged. Playback clips at
+project zero: complete negative copies are skipped arithmetically, the first
+partial copy is cut inward on original host ticks, and remaining repetitions stay
+compressed. Source material is retained in the asset. A delay can extend the
+arrangement end; moving an entire component before zero can leave nothing to
+play. Separated audio needs no MIDI route; separated MIDI opens no WAV voice.
+The native plan explicitly marks separated components while original paired
+clock/source checks remain strict. Source viewing still shows the original take.
+
+Measured candidate adoption with compatible device/channel/sample-rate evidence,
+recording-wide correction settings and native-clock practice/count-in remain
+subsequent work. An audio loopback measurement must not silently shift paired
+MIDI or be reused across unmeasured channels/devices.

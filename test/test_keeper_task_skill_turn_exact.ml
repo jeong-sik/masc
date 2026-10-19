@@ -721,12 +721,46 @@ let test_task_binding_reuses_only_exact_frozen_inputs () =
     (prepared == later_preparation);
   check bool "a new observation does not overwrite the original turn preparation" true
     (prepared == Selection.prepare_surface ~snapshot:first ~descriptors bound);
-  let mixed = Selection.merge [bound;later_selection] in
+  let original_again = match Selection.resolve_for_task ~snapshot:first ~descriptors
+      ~task_id:"task-original-again" [reference] with
+    | Ok selection -> selection | Error error -> fail (Selection.error_to_string error) in
+  let refused_again,_ = bind ~snapshot:later descriptors original_again in
+  let mixed = Selection.merge
+      [bound; later_selection; original_again; bound;
+       changed_source; refused_again; changed_source] in
+  let check_owners label expected actual =
+    check (list string) label (List.sort String.compare expected) (List.sort String.compare actual) in
+  let original_owners = ["task-a"; "task-b"; "task-original-again"] in
+  check int "different frozen revisions of one Skill stay distinct" 2 (List.length mixed.selected);
+  check_owners "all original owners stay on their original pinned revision" original_owners
+    (Selection.task_ids_for_reference mixed reference);
+  check_owners "the later Task owns only its later pin" ["task-later"]
+    (Selection.task_ids_for_reference mixed later_reference);
+  (match List.find_opt (fun (row : Selection.selected) -> Reference.equal row.reference reference)
+           mixed.selected with
+   | Some original ->
+     check bool "duplicate selection retains the first frozen Skill object" true
+       (original.skill == (one_selected bound).skill)
+   | None -> fail "the original pinned Skill disappeared while combining Task owners");
+  (match mixed.unprojectable with
+   | [row] ->
+     check bool "selected and refused evidence keep their own original pin" true
+       (Reference.equal row.reference reference);
+     check_owners "repeated refusals retain all exact original Task owners" original_owners row.task_ids
+   | rows -> failf "expected one original refusal, got %d" (List.length rows));
   check bool "mixed source selections have no single reusable projection input" true
     (Option.is_none mixed.preparation);
   let restored,restored_preparation = bind ~snapshot:first descriptors mixed in
   check int "mixed sources reproject instead of borrowing the first binding" 1 (List.length restored.selected);
   check int "the later revision cannot be offered from the original snapshot" 1 (List.length restored.unprojectable);
+  check_owners "source repair does not drop owners from previously refused evidence" original_owners
+    (Selection.task_ids_for_reference restored reference);
+  (match restored.unprojectable with
+   | [row] ->
+     check bool "source repair cannot retarget the later Task to the original revision" true
+       (Reference.equal row.reference later_reference);
+     check_owners "only the later Task retains the later-pin refusal" ["task-later"] row.task_ids
+   | rows -> failf "expected one later-pin refusal after repair, got %d" (List.length rows));
   check bool "restored exact pins share the original preparation without borrowing the later source" true
     (restored_preparation == prepared);
   let unreadable = Snapshot.config_unreadable ~detail:"source unavailable after the original selection" in

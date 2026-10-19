@@ -144,8 +144,12 @@ val resolve_live_observations :
 
 val empty : t
 val merge : t list -> t
-(** Preserve Task order while deduplicating identical exact references, in
-    both [selected] and [unprojectable]. *)
+(** Preserve first original reference order while deduplicating identical
+    exact references separately in [selected] and [unprojectable]. Keep the
+    first row's data and accumulate repeated Task owners in an immutable set,
+    emitting its canonical list once; a unique row stays unchanged. Identity
+    alone cannot merge distinct pinned content revisions. Indexing is private to each row merge;
+    descriptor-authority and preparation reuse checks remain unchanged. *)
 
 val unavailable_reason_code : unavailable_reason -> string
 val unavailable_reason_to_string : unavailable_reason -> string

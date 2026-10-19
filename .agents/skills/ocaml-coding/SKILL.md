@@ -160,6 +160,10 @@ Eio 는 협력형 스케줄러다. 취소와 시간 초과는 fiber 가 멈추�
   Task별 exact surface는 한 호출 안에서 원래 선택 행을 한 번 판정해 관측된 Task 소유자에게
   나눈다. 빈 Task도 유지하고, 관측되지 않은 소유자나 뒤늦게 관측한 Task가 frozen 선택을
   빌리지 않도록 한다. 공유 availability/실패 설명은 불변 결과이며 실행 허가나 전역 캐시가 아니다.
+  exact 참조를 합칠 때는 identity와 content revision을 함께 구분하는 `Skill_reference.Exact_map`을
+  쓴다. 첫 원래 행과 Task 출처를 유지하고, identity만 같다는 이유로 다른 pin을 합치지 않는다.
+  반복 pin의 Task ID는 불변 집합에 누적해 정렬된 목록을 마지막에 한 번 만든다. 유일한 행은
+  원래 객체를 유지하고, 중간 합집합을 외부로 노출하거나 전역 캐시로 넘기지 않는다.
 
 - `.mli` 가 있으면 `.mli` 를 먼저 고치고 `.ml` 을 맞춘다. `.ml` 에만 인자를 더하면 인터페이스와
   안 맞아 컴파일이 실패한다.

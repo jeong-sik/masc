@@ -92,8 +92,40 @@ let test_source_account_emails () =
         rows=["codex_a", Email "source-b@example.org";
               "codex_b", Not_read Login_file_unreadable]; unattributed=0}))
 
+let test_source_model_projection () =
+  let source = {|[models.shared]
+max-context = 8192
+[providers.local]
+protocol = "openai-compatible-http"
+kind = "openai_compat"
+endpoint = "http://localhost:9000/v1"
+[local.shared]
+|} in
+  let config = match Runtime_toml.parse_string source with
+    | Ok config -> config | Error _ -> failwith "invalid synthetic source" in
+  let projection = Runtime_config_models.of_config config |> success in
+  let wire = Runtime_config_models.to_json ~path:"/workspace/runtime.toml"
+    ~source_revision:"revision-a" (Ok projection) in
+  let original = fixture () |> replace "source_text" (`String source)
+    |> replace "account_groups" (`List []) in
+  let observed = original |> replace "model_bindings" wire |> decode |> success in
+  expect "same-source model projection accepted" (observed.model_bindings = Ok projection);
+  expect "model result does not hide missing email evidence" (Result.is_error observed.account_emails);
+  List.iter (fun response ->
+    let observed = response |> decode |> success in
+    expect "failed projection retains original repairable source" (observed.source_text = source);
+    expect "failed model evidence is not reparsed locally" (Result.is_error observed.model_bindings);
+    expect "model failure does not suppress account membership" (observed.account_groups = Ok []))
+    [original;
+     original |> replace "model_bindings" (wire |> replace "path" (`String "/foreign/runtime.toml"));
+     original |> replace "model_bindings" (wire |> replace "source_revision" (`String "older"));
+     original |> replace "model_bindings" (Runtime_config_models.to_json
+       ~path:"/workspace/runtime.toml" ~source_revision:"revision-a" (Error "Runtime validation failed"));
+     original |> replace "model_bindings" `Null]
+
 let () = List.iter (fun (name, test) -> test (); Printf.printf "PASS %s\n%!" name)
-  ["source-owned account email evidence", test_source_account_emails;
+  ["same-source model evidence and independent failures", test_source_model_projection;
+   "source-owned account email evidence", test_source_account_emails;
    "server-owned account group evidence", test_account_groups;
    "atomic GET source and metadata", test_atomic_read;
    "pending and preempted settings", test_pending_and_preempted;

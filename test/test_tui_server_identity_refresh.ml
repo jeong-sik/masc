@@ -2564,6 +2564,12 @@ max-context = 500000
 max-context = 272000
 |}
 
+let runtime_form_models source =
+  Runtime_toml.parse_string source
+  |> Result.map_error (fun errors -> String.concat "; "
+       (List.map (fun (e : Runtime_toml.parse_error) -> e.path ^ ": " ^ e.message) errors))
+  |> fun parsed -> Result.bind parsed Runtime_config_models.of_config
+
 let runtime_form_reading () : Masc_tui_runtime_config_view.reading =
   {path="/workspace/runtime.toml"; source_text=runtime_form_source;
    metadata={source_revision="opening";
@@ -2571,6 +2577,7 @@ let runtime_form_reading () : Masc_tui_runtime_config_view.reading =
        forward_schema=false; issues=[]}; routing=Routing_active; routing_requires_restart=false;
      keeper=Not_configured; keeper_requires_restart=false; configured_count=0;
      pending_keys=[]; applied_keys=[]; preempted_keys=[]};
+   model_bindings=runtime_form_models runtime_form_source;
    account_groups=Ok []; account_emails=Ok (Masc_tui_account_login.Email_rows {rows=[];unattributed=0})}
 
 let runtime_model_draft () =
@@ -2793,7 +2800,8 @@ let test_runtime_snapshot_preserves_source_when_models_unavailable () =
     (match snapshot.models with Error _ -> true | Ok _ -> false);
   Alcotest.(check bool) "failed model interpretation does not hide the original source" true
     (Option.is_some (Snapshot.rows_for_source ~path:reading.path ~source_text:reading.source_text snapshot));
-  let malformed = { reading with source_text="[not closed"; account_groups=Ok [] } in
+  let malformed = { reading with source_text="[not closed"; account_groups=Ok [];
+    model_bindings=Error "server Runtime interpretation unavailable" } in
   let snapshot = Snapshot.of_reading malformed in
   Alcotest.(check string) "operator can retain malformed source to repair it" malformed.source_text snapshot.reading.source_text;
   Alcotest.(check bool) "malformed model parse stays unavailable" true
@@ -2810,6 +2818,7 @@ account-home = "/tmp/another-account"
 [second.example]
 |} in
   let reading = { (runtime_form_reading ()) with source_text=source;
+    model_bindings=runtime_form_models source;
     account_groups=Ok [["codex";"second"]]; account_emails=Error "emails unavailable" } in
   let snapshot = Snapshot.of_reading reading in
   let rows = match snapshot.models with Ok rows -> rows | Error detail -> Alcotest.fail detail in
@@ -2833,6 +2842,7 @@ let test_runtime_snapshot_refresh_reuses_draft_without_changing_ownership () =
   let initial = List.hd state.runtime_config_edits in
   state.runtime_config_edits <- [{initial with rce_view=Config_edit_current []}];
   let reading = { (runtime_form_reading ()) with path=session.base.path; source_text="value = 4\n";
+    model_bindings=runtime_form_models "value = 4\n";
     metadata={ (runtime_form_reading ()).metadata with source_revision="fresh"} } in
   let snapshot = Snapshot.of_reading reading in
   let current : Edit.document = {path=reading.path; source_text=reading.source_text;

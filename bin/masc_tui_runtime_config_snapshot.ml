@@ -14,9 +14,9 @@ let source_rows ~path source =
 
 let of_reading (reading : Masc_tui_runtime_config_view.reading) =
   let rows = source_rows ~path:reading.path reading.source_text in
-  let models = Result.bind reading.account_groups (fun account_groups ->
-    Masc_tui_model_runtime_table.parse ~account_groups
-      (String.split_on_char '\n' reading.source_text)) in
+  let models = Result.bind reading.model_bindings (fun projection ->
+    Result.bind reading.account_groups (fun account_groups ->
+      Masc_tui_model_runtime_table.of_projection ~account_groups projection)) in
   {reading; rows; models}
 
 let rows_for_source ~path ~source_text snapshot =

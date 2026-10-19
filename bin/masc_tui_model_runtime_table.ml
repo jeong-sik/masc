@@ -14,60 +14,51 @@ type row =
 
 let models_table = Runtime_toml_namespace.(key Models)
 
-let parse ?(account_groups = []) lines =
-  let text = String.concat "\n" lines in
-  let ( let* ) = Result.bind in
-  let* config = Runtime_toml.parse_string text
-    |> Result.map_error (fun errors -> String.concat "; "
-      (List.map (fun (e : Runtime_toml.parse_error) -> e.path ^ ": " ^ e.message) errors)) in
-  (* Membership was resolved beside this source on the server, whose client
-     environment owns inherited homes. Never infer it from the TUI's HOME. *)
-  let* () =
-    if List.exists (List.exists (fun id ->
-      Option.is_none (Runtime_schema.provider_of_id config id))) account_groups
-    then Error "account groups name a provider absent from this source" else Ok () in
-  let same_login (provider : Runtime_schema.provider) =
-    match List.find_opt (List.mem provider.id) account_groups with
+let of_projection ?(account_groups = []) (projection : Runtime_config_models.t) =
+  let ids = List.concat account_groups in
+  if List.exists (fun id -> not (List.mem id projection.provider_ids)) ids
+     || List.exists (fun group -> group = []) account_groups
+     || List.length ids <> List.length (List.sort_uniq String.compare ids)
+  then Error "account groups do not identify disjoint providers in this source"
+  else
+  let same_login provider =
+    match List.find_opt (List.mem provider) account_groups with
     | None -> []
-    | Some ids -> List.filter (fun id -> not (String.equal id provider.id)) ids
+    | Some ids -> List.filter (fun id -> not (String.equal id provider)) ids
         |> List.sort_uniq String.compare in
-  (* A login is named by its smallest provider id. Rows sort by that name, so
-     the ids of one login sit next to each other; a login with one id keeps
-     its own id as the name and its old place. *)
-  let login_name (provider : Runtime_schema.provider) =
-    List.fold_left min provider.id (same_login provider) in
-  let shared_logins =
-    List.filter_map (fun (provider : Runtime_schema.provider) ->
-      match same_login provider with
-      | [] -> None
-      | _ :: _ -> Some (login_name provider)) config.providers
+  let login_name provider = List.fold_left min provider (same_login provider) in
+  let shared_logins = List.filter_map (fun provider ->
+    match same_login provider with
+    | [] -> None | _ :: _ -> Some (login_name provider)) projection.provider_ids
     |> List.sort_uniq String.compare in
   let login_group provider =
     List.find_index (String.equal (login_name provider)) shared_logins
     |> Option.map (fun index -> index + 1) in
-  let rows = List.filter_map (fun (binding : Runtime_schema.binding) ->
-    match List.find_opt (fun (model : Runtime_schema.model_spec) ->
-      String.equal model.id binding.model_id) config.models,
-      Runtime_schema.provider_of_id config binding.provider_id with
-    | Some model, Some provider ->
-      let context = match binding.max_context, provider.max_context, model.max_context with
-        | Some n, _, _ -> Some ("binding", n)
-        | None, Some n, _ -> Some ("provider", n)
-        | None, None, Some n -> Some ("model", n)
-        | None, None, None -> None in
-      Some { model = model.id; provider = provider.id;
-        api_name = Some model.api_name;
-        reasoning_effort = Option.map Llm_provider.Reasoning_effort.to_string model.reasoning_effort;
-        temperature = Option.map (Printf.sprintf "%.15g") model.temperature;
-        max_tokens = binding.max_tokens; context; model_context = model.max_context;
-        same_login = same_login provider; login_group = login_group provider;
-        account_label = None }
-    | None, _ | _, None -> None) config.bindings in
+  let context_source = function
+    | Runtime_config_models.Binding -> "binding"
+    | Provider -> "provider"
+    | Model -> "model" in
+  let rows = List.map (fun (binding : Runtime_config_models.binding) ->
+    {model=binding.model; provider=binding.provider; api_name=Some binding.api_name;
+     reasoning_effort=Option.map Llm_provider.Reasoning_effort.to_string binding.reasoning_effort;
+     temperature=Option.map (Printf.sprintf "%.15g") binding.temperature;
+     context=Option.map (fun (source,n) -> context_source source,n) binding.context;
+     model_context=binding.model_context; max_tokens=binding.max_tokens;
+     same_login=same_login binding.provider; login_group=login_group binding.provider;
+     account_label=None}) projection.bindings in
   let login_of row = List.fold_left min row.provider row.same_login in
   Ok (List.sort (fun a b -> match String.compare (login_of a) (login_of b) with
     | 0 -> (match String.compare a.provider b.provider with
       | 0 -> String.compare a.model b.model | c -> c)
     | c -> c) rows)
+
+let parse ?(account_groups = []) lines =
+  let ( let* ) = Result.bind in
+  let* config = Runtime_toml.parse_string (String.concat "\n" lines)
+    |> Result.map_error (fun errors -> String.concat "; "
+      (List.map (fun (e : Runtime_toml.parse_error) -> e.path ^ ": " ^ e.message) errors)) in
+  let* projection = Runtime_config_models.of_config config in
+  of_projection ~account_groups projection
 
 (* ASCII, not an em dash: padding counts bytes, and a multi-byte dash makes
    every column after it hang one cell short of where the header sits. *)

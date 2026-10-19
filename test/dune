@@ -1284,6 +1284,11 @@
 ; Focused CI gate for runtime TOML validity.
 
 (test
+ (name test_runtime_config_models)
+ (modules test_runtime_config_models)
+ (libraries alcotest masc.runtime yojson masc.agent_core.llm_provider))
+
+(test
  (name test_server_runtime_config_source)
  (modules test_server_runtime_config_source)
  (libraries masc_test_deps otoml))
@@ -5176,7 +5181,7 @@
 (test
  (name test_tui_runtime_config_view)
  (modules test_tui_runtime_config_view)
- (libraries masc_tui_runtime_config_view masc_tui_account_login))
+ (libraries masc.runtime masc_tui_runtime_config_view masc_tui_account_login))
 
 (test
  (name test_tui_runtime_listing)

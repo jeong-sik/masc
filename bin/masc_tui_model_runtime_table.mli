@@ -1,6 +1,6 @@
-(** Account/model settings projected from the same typed TOML parser as the
-    runtime. Shared model sets expand to one row per account binding; quoted
-    paths and comments follow TOML syntax rather than line heuristics. *)
+(** Account/model settings from the server's typed declaration projection.
+    Source-only form interpretation uses the same declaration projection after
+    Runtime parsing. Presentation never resolves client credential membership. *)
 
 type row =
   { model : string
@@ -22,19 +22,25 @@ type row =
         (** [Some n] when the login is shared: the same [n] on every id of one
             login, counted from 1 in the order of each login's smallest id. *)
   ; account_label : string option
-        (** Short name of the account, drawn beside the provider id. [parse]
+        (** Short name of the account, drawn beside the provider id. Projection
             leaves it [None]; the pane sets it from the account-email reading
             with {!account_label_of_email}. *)
   }
+
+val of_projection : ?account_groups:string list list -> Runtime_config_models.t -> (row list, string) result
+(** Pure presentation of already interpreted declarations and server-owned group
+    evidence. No source parsing, catalog or environment observation. *)
 
 val parse : ?account_groups:string list list -> string list -> (row list, string) result
 (** [parse lines] reads the runtime.toml source the TUI already fetches for
     the raw config pane. Rows come back sorted by login, then provider, then
     model. A login is named by the smallest provider id on it, so ids that
     share a server-resolved account scope are adjacent. [account_groups] must
-    accompany this exact source read; the parser never resolves client-local
-    environment defaults. Omitted groups leave each provider isolated (for
-    form-only parsing, without claiming observed account membership).
+    accompany this exact source read; account membership is never inferred
+    from client-local environment defaults. Omitted groups leave each provider isolated (for
+    form-only parsing, without claiming observed account membership). This source
+    parser retains Runtime's environment-dependent credential expansion; Config
+    observations use [of_projection] instead.
 
     A model with a [\[models.NAME\]] table but no provider binding is
     skipped: it names no lane and has no [max-tokens] column to show. *)

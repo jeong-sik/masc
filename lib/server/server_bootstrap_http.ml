@@ -203,6 +203,8 @@ exception Request_without_header_block
 
 let serve_h2_connection
       ?(streams = Server_h2_stream_registry.create ())
+      ?(resources = Server_h2_response_resources.create
+          ~max_pending_bytes:(H2_response_limits.max_pending_bytes ()))
       ~sw
       ~h2_request_handler
       ~h2_error_handler
@@ -225,17 +227,26 @@ let serve_h2_connection
         Eio.Fiber.await_cancel ()))
     (fun () ->
       let request_sw = Eio.Promise.await request_scope in
-      H2_eio.Server.create_connection_handler ~sw
+      let config = {H2.Config.default with max_concurrent_streams=
+        Int32.of_int (H2_response_limits.max_concurrent_streams ())} in
+      H2_eio.Server.create_connection_handler ~sw ~config
         ~request_handler:(fun addr reqd ->
           match Server_h2_frame_tap.request_stream frames with
           | Some stream_id ->
             Server_h2_stream_registry.dispatch streams ~sw:request_sw ~stream_id reqd
-              (fun stream_sw -> h2_request_handler ~request_sw:stream_sw addr reqd)
+              (fun stream_sw ->
+                Server_h2_response_resources.with_request resources ~sw:stream_sw
+                  (fun () ->
+                    try h2_request_handler ~request_sw:stream_sw addr reqd with
+                    | Eio.Cancel.Cancelled _ as exn -> raise exn
+                    | exn -> H2.Reqd.report_exn reqd exn))
           | None -> H2.Reqd.report_exn reqd Request_without_header_block)
         ~error_handler:h2_error_handler client_addr (Server_h2_frame_tap.socket frames))
 ;;
 
 let serve_h2 ~sw ~clock ~socket ~addr_label ~h2_request_handler ~h2_error_handler =
+  let resources = Server_h2_response_resources.create
+    ~max_pending_bytes:(H2_response_limits.max_pending_bytes ()) in
   let mode = "h2" in
   let listener_tag = Printf.sprintf "%s %s" mode addr_label in
   let mark_stopped = register_listener_lifecycle ~sw ~mode in
@@ -258,6 +269,7 @@ let serve_h2 ~sw ~clock ~socket ~addr_label ~h2_request_handler ~h2_error_handle
           on_connection_release conn_sw ~mode ~listener_tag flow;
           try
             serve_h2_connection
+              ~resources
               ~sw:conn_sw
               ~h2_request_handler
               ~h2_error_handler
@@ -294,6 +306,8 @@ let serve_h2 ~sw ~clock ~socket ~addr_label ~h2_request_handler ~h2_error_handle
     Detection suspends until the stream identifies a protocol. The returned
     socket replays the inspected prefix to httpun-eio or h2-eio. *)
 let serve_auto ~sw ~clock ~socket ~addr_label ~request_handler ~h2_request_handler ~h2_error_handler =
+  let resources = Server_h2_response_resources.create
+    ~max_pending_bytes:(H2_response_limits.max_pending_bytes ()) in
   let mode = "auto" in
   let listener_tag = Printf.sprintf "%s %s" mode addr_label in
   let mark_stopped = register_listener_lifecycle ~sw ~mode in
@@ -329,6 +343,7 @@ let serve_auto ~sw ~clock ~socket ~addr_label ~request_handler ~h2_request_handl
             | Ok (Http_protocol_detect.Http2, detected_flow) ->
               ignore (Atomic.fetch_and_add h2_count 1);
               serve_h2_connection
+                ~resources
                 ~sw:conn_sw
                 ~h2_request_handler
                 ~h2_error_handler

@@ -23,7 +23,17 @@ let make_error_handler () =
     Log.Http.error "Error: %s" message;
     let headers = H2.Headers.of_list [("content-type", "text/plain")] in
     let body = respond headers in
-    H2.Body.Writer.write_string body message;
+    (match Server_h2_response_resources.current () with
+     | Some context ->
+       (match Server_h2_response_resources.reserve context ~bytes:(String.length message) with
+        | Error (Capacity_exhausted | Request_closed) -> ()
+        | Ok lease -> Server_h2_response_resources.write_reserved lease body message)
+     | None ->
+       (* Parser failures have no admitted application scope. Their fixed
+          diagnostic is bounded separately from application payloads. *)
+       H2.Body.Writer.write_string body (match error with
+         | `Bad_request -> "Bad request"
+         | `Internal_server_error | `Exn _ -> "Internal server error"));
     h2_close_after_flush body
   in
 
@@ -31,6 +41,8 @@ let make_error_handler () =
   h2_error_handler
 
 let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
+  let embedded_resources = Server_h2_response_resources.create
+    ~max_pending_bytes:(H2_response_limits.max_pending_bytes ()) in
   let mcp_eio_profile_of_transport_profile = function
     | Server_mcp_transport_http.Full -> Mcp_eio.Full
     | Server_mcp_transport_http.Managed_agent -> Mcp_eio.Managed_agent
@@ -59,10 +71,10 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
   (* ═══════════════════════════════════════════════════════════════════════
      HTTP/2 Request Handler - Full implementation
      ═══════════════════════════════════════════════════════════════════════ *)
-  (* subscriptions/listen over h2c. The HTTP/1 side parks on the SSE
-   connection's stop promise; there is no such record here, so this keeps its
-   own: a write that fails means the peer is gone, and a keepalive comment is
-   what makes a silent departure fail a write instead of never being noticed.
+  (* subscriptions/listen over h2c. Publisher callbacks only reserve and enqueue
+   immutable frames. A separate request fiber drains them with flow control;
+   exhausted payload capacity resets this stream without holding the shared
+   publisher lock. Peer reset and transport closure release the request scope.
 
    The acknowledgement, the honoured filter, and the closure result come from
    [Mcp_subscriptions] rather than being rebuilt -- the two transports wrote
@@ -87,25 +99,8 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
       H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd
         (H2.Response.create ~headers `OK)
     in
-    let stop, resolve_stop = Eio.Promise.create () in
-    let closed = Atomic.make false in
-    let stop_once () =
-      if Atomic.compare_and_set closed false true then
-        Eio.Promise.resolve resolve_stop ()
-    in
-    let write_frame text =
-      if Atomic.get closed then false
-      else
-        try
-          H2.Body.Writer.write_string writer text;
-          H2.Body.Writer.flush writer (fun _ -> ());
-          true
-        with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | _ ->
-          stop_once ();
-          false
-    in
+    let stream = Server_h2_response_resources.stream writer in
+    let write_frame = Server_h2_response_resources.offer stream in
     let send json =
       write_frame (Printf.sprintf "data: %s\n\n" (Yojson.Safe.to_string json))
     in
@@ -116,22 +111,20 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
     in
     if send (Mcp_subscriptions.acknowledgement ~subscription_id filter) then (
       let token = Mcp_subscriptions.register ~subscription_id ~filter ~send in
-      Eio.Fiber.fork ~sw (fun () ->
+      Eio.Switch.on_release sw (fun () -> Mcp_subscriptions.unregister token);
+      Eio.Fiber.fork_daemon ~sw (fun () ->
         let rec beat () =
-          if not (Atomic.get closed) then (
+          if not (Server_h2_response_resources.is_closed stream) then (
             Eio.Time.sleep clock 15.0;
             if write_frame ": keepalive\n\n" then beat ())
         in
-        beat ());
-      Eio.Promise.await stop;
-      Mcp_subscriptions.unregister token;
-      (* The stop signal fires on a failed write, so by the time this runs the
-         peer is usually already gone and a closure that does not land is the
-         ordinary case rather than an error. *)
-      (* fire-and-forget: best effort on a stream that is already closing. *)
-      ignore
-        (send (Mcp_subscriptions.graceful_closure ~subscription_id) : bool));
-    stop_once ();
+        beat (); `Stop_daemon);
+      (* This drain runs outside [Mcp_subscriptions]' shared publisher lock.
+         Overflow interrupts a flush blocked by flow control and raises to the
+         request boundary, producing a reset instead of a successful short SSE. *)
+      (try Server_h2_response_resources.run stream with
+       | Server_h2_response_resources.Response_writer_closed -> ()))
+    else raise Server_h2_response_resources.Response_capacity_exhausted;
     (* Cancellation travels as an exception in Eio, so a wildcard that ate it
        here would report a clean exit from a fiber the switch had cancelled. *)
     (try h2_close_after_flush writer with
@@ -155,6 +148,11 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
   in
 
   let h2_request_handler ~request_sw client_addr h2_reqd =
+    let within_request work = match Server_h2_response_resources.current () with
+      | Some context -> Server_h2_response_resources.with_current context work
+      | None -> Server_h2_response_resources.with_request embedded_resources
+          ~sw:request_sw work in
+    within_request (fun () ->
     let h2_req = H2.Reqd.request h2_reqd in
     let h2_headers = h2_req.headers in
     (* Convert H2.Request to Httpun.Request for compatibility with existing code *)
@@ -1547,13 +1545,12 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                        response
                    in
                    let send_event event json =
-                     H2.Body.Writer.write_string
+                     Server_h2_response_resources.write_and_flush
                        writer
                        (Printf.sprintf
                           "event: %s\ndata: %s\n\n"
                           event
-                          (Yojson.Safe.to_string json));
-                     H2.Body.Writer.flush writer (fun _ -> ())
+                          (Yojson.Safe.to_string json))
                    in
                    Fun.protect
                      ~finally:(fun () -> h2_close_after_flush writer)
@@ -1808,7 +1805,18 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
       | Request_workspace_precondition.No_precondition
       | Request_workspace_precondition.Precondition_met ->
         (try dispatch_h2_route () with
+         | Eio.Cancel.Cancelled
+             ((Server_h2_response_resources.Response_capacity_exhausted
+              | Server_h2_response_resources.Response_writer_closed) as resource_error) ->
+           (* GitHub login wraps a failed [send_event] in [Cancelled]. Only
+              unwrap these typed writer failures; an actually cancelled
+              request must still propagate its cancellation. *)
+           Eio.Fiber.check ();
+           H2.Reqd.report_exn h2_reqd resource_error
          | Eio.Cancel.Cancelled _ as e -> raise e
+         | (Server_h2_response_resources.Response_capacity_exhausted
+           | Server_h2_response_resources.Response_writer_closed) as resource_error ->
+           H2.Reqd.report_exn h2_reqd resource_error
          | Auth.Auth_config_error _ ->
            h2_respond_text
              h2_reqd
@@ -1867,6 +1875,6 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
       h2_request_authority_bad_request
         ~error_code:"request_target_asterisk_unsupported"
         ~message:"MASC does not support authority-free OPTIONS *"
-        h2_reqd
+        h2_reqd)
   in
   h2_request_handler

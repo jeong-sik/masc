@@ -20,7 +20,7 @@ let default_window = 65535
    has to wait for the client's WINDOW_UPDATE. *)
 let response_size = 2 * default_window
 
-type reply = { status : int; body : string }
+type reply = { status : int; headers : H2.Headers.t; body : string }
 
 (* Bytes one side wrote that the other side's [read] has not taken yet. h2
    reads whole frames, and a frame can be split across iovecs or writes, so
@@ -57,8 +57,14 @@ let transfer lane next_write report_write read =
    WINDOW_UPDATE. A server that ends the stream early completes the exchange
    with a short body; a server that never sends the rest, or never ends the
    stream, stops making progress and the pump fails instead of hanging. *)
-let exchange ?error_handler ~handler target =
+let exchange ?error_handler
+    ?(capacity=H2_response_limits.default_max_pending_bytes) ~handler target =
+  Eio_main.run (fun _ -> Eio.Switch.run (fun sw ->
+  let resources=Server_h2_response_resources.create
+    ~max_pending_bytes:capacity in
+  Server_h2_response_resources.with_request resources ~sw (fun () ->
   let status = ref None in
+  let headers = ref H2.Headers.empty in
   let body = Buffer.create response_size in
   let complete = ref false in
   let client =
@@ -79,6 +85,7 @@ let exchange ?error_handler ~handler target =
       ~error_handler:(fun _ -> fail "H2 stream error")
       ~response_handler:(fun response reader ->
         status := Some (H2.Status.to_code response.H2.Response.status);
+        headers := response.headers;
         let rec consume () =
           H2.Body.Reader.schedule_read reader
             ~on_eof:(fun () -> complete := true)
@@ -111,8 +118,8 @@ let exchange ?error_handler ~handler target =
   in
   pump ();
   match !status with
-  | Some status -> { status; body = Buffer.contents body }
-  | None -> fail "the response carried no headers"
+  | Some status -> { status; headers = !headers; body = Buffer.contents body }
+  | None -> fail "the response carried no headers")))
 
 (* A repeating alphabet rather than one byte over and over, so a body pasted
    together in the wrong order shows up in the comparison unless the pieces
@@ -144,6 +151,39 @@ let test_empty_response_still_ends_its_stream () =
   in
   check int "answered" 200 reply.status;
   check string "no body" "" reply.body
+
+let test_capacity_refusal_precedes_success_headers () =
+  let reply = exchange ~capacity:3
+    ~handler:(fun reqd -> Helpers.h2_respond_bytes
+      ~content_type:"application/javascript" ~compress:false
+      ~extra_headers:["content-encoding","gzip";"etag","source-revision";
+        "cache-control","public, max-age=31536000";
+        "access-control-allow-origin","*"] reqd "four") "/asset.js" in
+  check int "capacity refusal is explicit" 503 reply.status;
+  check string "no unreserved payload" "" reply.body;
+  check (option string) "no source encoding" None (H2.Headers.get reply.headers "content-encoding");
+  check (option string) "no source validator" None (H2.Headers.get reply.headers "etag");
+  check (option string) "refusal is not cached" (Some "no-store")
+    (H2.Headers.get reply.headers "cache-control");
+  check (option string) "CORS preserved" (Some "*")
+    (H2.Headers.get reply.headers "access-control-allow-origin")
+
+let test_exact_capacity_preserves_whole_body () =
+  let reply = exchange ~capacity:response_size
+    ~handler:(fun reqd -> Helpers.h2_respond_bytes
+      ~content_type:"application/octet-stream" reqd payload) "/exact" in
+  check int "exact capacity admitted" 200 reply.status;
+  check string "whole body survives flow control" payload reply.body
+
+let test_error_payload_cannot_exceed_capacity () =
+  Console_sink.For_testing.reset ();
+  Console_sink.For_testing.set_writer (Some (fun _line -> ()));
+  let reply = Fun.protect ~finally:Console_sink.For_testing.reset (fun () ->
+    exchange ~capacity:1
+      ~error_handler:(Server_h2_gateway.make_error_handler () ())
+      ~handler:(fun reqd -> H2.Reqd.report_exn reqd (Failure payload)) "/over-capacity") in
+  check int "error status preserved" 500 reply.status;
+  check string "no unreserved diagnostic" "" reply.body
 
 (* The gateway's error handler writes its message and closes the body the same
    way, and it is the one site where h2 has already set the stream's error
@@ -177,5 +217,11 @@ let () =
             test_empty_response_still_ends_its_stream
         ; test_case "an error handler's body arrives whole" `Quick
             test_error_handler_body_arrives_whole
+        ; test_case "capacity refusal precedes asset success headers" `Quick
+            test_capacity_refusal_precedes_success_headers
+        ; test_case "exact capacity preserves the complete body" `Quick
+            test_exact_capacity_preserves_whole_body
+        ; test_case "application error payload obeys the same capacity" `Quick
+            test_error_payload_cannot_exceed_capacity
         ] )
     ]

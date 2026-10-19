@@ -1,11 +1,17 @@
 let dispatch_request ~sw reqd work =
+  let context = Server_h2_response_resources.current () in
   Eio.Fiber.fork_daemon ~sw (fun () ->
     (* fork starts its child immediately. Return to h2's parser before any
        request computation, pool wait, or response mutation starts. *)
     Eio.Fiber.yield ();
-    (try work () with
-     | Eio.Cancel.Cancelled _ as exn -> raise exn
-     | exn -> H2.Reqd.report_exn reqd exn);
+    let run () =
+      try work () with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> H2.Reqd.report_exn reqd exn
+    in
+    (match context with
+     | Some context -> Server_h2_response_resources.with_current context run
+     | None -> run ());
     `Stop_daemon)
 
 let maybe_compress ?(compress = true) h2_reqd body =
@@ -48,14 +54,30 @@ let h2_respond_body
     body =
   H2.Body.Reader.discard (H2.Reqd.request_body h2_reqd);
   let final_body, compression_headers = maybe_compress ~compress h2_reqd body in
+  match Server_h2_response_resources.reserve
+    (Server_h2_response_resources.current_exn ()) ~bytes:(String.length final_body) with
+  | Error (Capacity_exhausted | Request_closed) ->
+    let extra_headers = List.filter (fun (name,_) ->
+      match String.lowercase_ascii name with
+      | "content-encoding" | "content-length" | "content-type" | "etag"
+      | "last-modified" | "cache-control" -> false
+      | _ -> true) extra_headers in
+    let headers=H2.Headers.of_list
+      (("content-length","0") :: ("cache-control","no-store") :: extra_headers) in
+    let writer=H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd
+      (H2.Response.create ~headers `Service_unavailable) in
+    h2_close_after_flush writer
+  | Ok lease ->
   let headers = H2.Headers.of_list ([
     ("content-type", content_type);
     ("content-length", string_of_int (String.length final_body));
   ] @ compression_headers @ extra_headers) in
   let response = H2.Response.create ~headers status in
-  let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
-  H2.Body.Writer.write_string writer final_body;
-  h2_close_after_flush writer
+  (try
+     let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
+     Server_h2_response_resources.write_reserved lease writer final_body;
+     h2_close_after_flush writer
+   with exn -> Server_h2_response_resources.release lease; raise exn)
 
 let h2_respond_json_string ?status ?extra_headers ?(compress = true) h2_reqd body =
   h2_respond_body
@@ -145,10 +167,13 @@ let h2_respond_empty ?(status = `No_content) ?(extra_headers = []) h2_reqd =
 
 let h2_read_body_with_limit ~sw ~max_bytes ~on_too_large ~on_bad_request
     h2_reqd callback =
+  let context = Server_h2_response_resources.current_exn () in
+  let dispatch work = Server_h2_response_resources.with_current context
+    (fun () -> dispatch_request ~sw h2_reqd work) in
   let body = H2.Reqd.request_body h2_reqd in
   let reject respond =
     H2.Body.Reader.discard body;
-    dispatch_request ~sw h2_reqd respond
+    dispatch respond
   in
   match H2.Request.body_length (H2.Reqd.request h2_reqd) with
   | `Error `Bad_request -> reject on_bad_request
@@ -162,7 +187,7 @@ let h2_read_body_with_limit ~sw ~max_bytes ~on_too_large ~on_bad_request
           match H2.Body.Reader.completion body with
           | H2.Body.Reader.Pending | Aborted -> ()
           | Complete ->
-              dispatch_request ~sw h2_reqd (fun () ->
+              dispatch (fun () ->
                 (* The parser can observe a reset after EOF, before the
                    request fiber gets its deferred turn. *)
                 match H2.Body.Reader.completion body with

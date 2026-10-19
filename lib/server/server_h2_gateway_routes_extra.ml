@@ -225,28 +225,14 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~with_public_read
   | `GET, "/static/css/middleware.css" ->
       (match Option.map read_file (playground_asset_path "static/css/middleware.css") with
        | Some (Ok body) ->
-           let headers = H2.Headers.of_list [
-             ("content-type", "text/css; charset=utf-8");
-             ("content-length", string_of_int (String.length body));
-           ] in
-           let response = H2.Response.create ~headers `OK in
-           let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
-           H2.Body.Writer.write_string writer body;
-           h2_close_after_flush writer
+           h2_respond_bytes ~content_type:"text/css; charset=utf-8" h2_reqd body
        | None | Some (Error _) -> h2_respond_text h2_reqd "404 Not Found" ~status:`Not_found);
       true
 
   | `GET, "/static/js/middleware.js" ->
       (match Option.map read_file (playground_asset_path "static/js/middleware.js") with
        | Some (Ok body) ->
-           let headers = H2.Headers.of_list [
-             ("content-type", "application/javascript; charset=utf-8");
-             ("content-length", string_of_int (String.length body));
-           ] in
-           let response = H2.Response.create ~headers `OK in
-           let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
-           H2.Body.Writer.write_string writer body;
-           h2_close_after_flush writer
+           h2_respond_bytes ~content_type:"application/javascript; charset=utf-8" h2_reqd body
        | None | Some (Error _) -> h2_respond_text h2_reqd "404 Not Found" ~status:`Not_found);
       true
 
@@ -276,16 +262,9 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~with_public_read
                       "accept-encoding")
                  body
              in
-             let base_headers = [
-               ("content-type", ct);
-               ("content-length", string_of_int (String.length final_body));
-               ("cache-control", "public, max-age=31536000, immutable");
-             ] in
-             let headers = H2.Headers.of_list (base_headers @ encoding_headers) in
-             let response = H2.Response.create ~headers `OK in
-             let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
-             H2.Body.Writer.write_string writer final_body;
-             h2_close_after_flush writer
+             h2_respond_bytes ~compress:false ~content_type:ct
+               ~extra_headers:(("cache-control", "public, max-age=31536000, immutable")
+                 :: encoding_headers) h2_reqd final_body
          | Error error ->
            (match Web_dashboard.asset_error_http_status error with
             | `Not_found ->

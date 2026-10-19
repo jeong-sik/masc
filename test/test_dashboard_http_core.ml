@@ -4961,7 +4961,9 @@ let tools_h2_wire_response ~handler ~headers target =
    produced it: the cache (origin [Timeout]) or a builder whose envelope the
    cache keeps as a computed page. *)
 let test_h2_cached_payload_timeout_is_504 () =
-  with_test_env @@ fun ~env:_ ~sw:_ ~config:_ ->
+  with_test_env @@ fun ~env:_ ~sw ~config:_ ->
+  let resources=Server_h2_response_resources.create
+    ~max_pending_bytes:H2_response_limits.default_max_pending_bytes in
   let payload origin json =
     { Dashboard_cache.json
     ; raw_json = Yojson.Safe.to_string json
@@ -4971,10 +4973,11 @@ let test_h2_cached_payload_timeout_is_504 () =
     }
   in
   let read payload =
+    Server_h2_response_resources.with_request resources ~sw (fun () ->
     tools_h2_wire_response
       ~handler:(fun reqd ->
         Server_h2_gateway_helpers.h2_respond_cached_payload reqd payload)
-      ~headers:[] "/cached"
+      ~headers:[] "/cached")
   in
   let envelope =
     `Assoc [ "error", `String Dashboard_cache.timeout_error_code; "key", `String "k" ]

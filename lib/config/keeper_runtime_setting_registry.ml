@@ -681,6 +681,26 @@ let all =
       ~category:Media
       "Maximum generated-media artifact age in seconds"
   ; setting
+      ~range:(int_range ~min:1 ~max:0x7fffffff ())
+      ~effective:(Reader (fun () -> display_int (H2_response_limits.max_concurrent_streams ())))
+      ~env_name:"MASC_H2_MAX_CONCURRENT_STREAMS"
+      ~exposure:(Toml_and_env "transport.h2_max_concurrent_streams")
+      ~value_kind:Integer
+      ~default:(display_int H2_response_limits.default_max_concurrent_streams)
+      ~consumers:["Server_bootstrap_http H2 and Auto listeners"]
+      ~category:Transport
+      "Maximum peer request streams per H2 connection"
+  ; setting
+      ~range:(int_range ~min:1 ~max:max_int ())
+      ~effective:(Reader (fun () -> display_int (H2_response_limits.max_pending_bytes ())))
+      ~env_name:"MASC_H2_MAX_PENDING_RESPONSE_BYTES"
+      ~exposure:(Toml_and_env "transport.h2_max_pending_response_bytes")
+      ~value_kind:Integer
+      ~default:(display_int H2_response_limits.default_max_pending_bytes)
+      ~consumers:["Server_h2_response_resources listener payload admission"]
+      ~category:Transport
+      "Maximum retained application response payload bytes across one listener"
+  ; setting
       ~range:(float_range ~min:1.0 ~max:60.0 ())
       ~effective:(Reader (fun () -> display_float Env_config_keeper.KeeperGrpc.reconnect_backoff_sec))
       ~env_name:"MASC_KEEPER_GRPC_RECONNECT_BACKOFF_SEC"

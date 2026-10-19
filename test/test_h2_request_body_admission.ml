@@ -660,7 +660,10 @@ let with_request_scope test () =
   Eio_main.run (fun env ->
     let clock = Eio.Stdenv.clock env in
     Eio.Time.with_timeout_exn clock case_timeout_s (fun () ->
-      Eio.Switch.run (test ~clock)))
+      Eio.Switch.run (fun sw ->
+        let resources=Server_h2_response_resources.create
+          ~max_pending_bytes:H2_response_limits.default_max_pending_bytes in
+        Server_h2_response_resources.with_request resources ~sw (fun () -> test ~clock sw))))
 
 let () =
   run "H2 request body admission"

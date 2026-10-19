@@ -3,8 +3,10 @@ import CoreMIDI
 
 @main enum LiveMidiMain {
     struct Command: Decodable {
-        enum Kind: String, Decodable { case status, stop }
+        enum Kind: String, Decodable { case status, stop, set }
         let kind: Kind
+        let routes: [UmpLiveRoute]?
+        let active: [String]?
     }
     static func main() {
         _ = signal(SIGPIPE, SIG_IGN)
@@ -46,6 +48,9 @@ import CoreMIDI
                             case .status:
                                 guard owner.state == .running else { return }
                                 try emit(owner.snapshot("monitoring"))
+                            case .set:
+                                guard owner.state == .running else { return }
+                                try owner.set(routes: command.routes ?? [], active: command.active ?? [])
                             }
                         } catch { owner.stop(error: error) }
                     }

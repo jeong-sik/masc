@@ -27,7 +27,10 @@ function claims(values) {
 }
 export function liveMidiPlan(routes, reserved) {
   if (!Array.isArray(routes) || !routes.length) throw new Error('Select a live MIDI route')
-  return { schemaVersion: 1, routes: routes.map(route => ({ source: uid(route?.source), destination: uid(route?.destination), scope: liveMidiScope(route?.scope) })), reserved: claims(reserved) }
+  return { schemaVersion: 1, routes: routes.map(route => {
+    const source = uid(route?.source), destination = uid(route?.destination)
+    return { key: `${source}:${destination}`, source, destination, scope: liveMidiScope(route?.scope) }
+  }), reserved: claims(reserved) }
 }
 // One read-only native parse uses the actual transport's compiled prefix scopes.
 export async function backingMidiClaims({ path, format, signal, executable = liveMidiPath, spawnProcess = spawn }) {

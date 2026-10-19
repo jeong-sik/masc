@@ -13,7 +13,7 @@ export function arrangementLoop(project) {
   return { start, end, duration: end - start }
 }
 export function requireLoopTransport(project) {
-  if (project.playbackLoop !== undefined) throw new Error('Continuous loop playback for audio, captured UMP and practice clicks is not connected yet; use :loop off for this route')
+  if (project.playbackLoop !== undefined) throw new Error('Continuous loop playback for captured audio, UMP, mixed backing and practice clicks is not connected yet; use :loop off for this route')
 }
 
 // Intersect finite source repeats with one loop window. At most a leading

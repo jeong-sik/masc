@@ -148,12 +148,12 @@ test('source playback pins every port binding and admits a zero-duration source 
 })
 
 
-test('WAV arrangement route uses its native helper and refuses unsupported MIDI or whole-project looping',async()=>{
+test('WAV arrangement route uses its native helper and refuses MIDI selection',async()=>{
   const f=fixture({format:'wave-arrangement'})
   assert.equal(f.executable,arrangementTransportPath)
   assert.deepEqual(f.args,['play','--file','/synthetic/phrase.wav','--output','test-output'])
   f.event('playing');await f.playback.ready;f.playback.stop();f.event('stopped');f.close();await f.playback.completion
-  for(const options of [{format:'unknown'},{format:'wave-arrangement',loop:true},{format:'wave-arrangement',midiOutput:'midi'}]){
+  for(const options of [{format:'unknown'},{format:'wave-arrangement',midiOutput:'midi'}]){
     assert.throws(()=>fixture(options))
   }
 })
@@ -231,4 +231,15 @@ test('SMF arrangement loop retains exact bindings, owns one child through contro
  f.playback.pause();f.event('paused',state);f.playback.seek(2);f.playback.resume();f.event('playing',{...state,currentTime:0})
  f.playback.stop();f.event('stopped',state);f.close();await f.playback.completion
  assert.deepEqual(f.commands,[{kind:'pause'},{kind:'seek',seconds:2},{kind:'resume'},{kind:'stop'}])
+})
+
+test('WAV arrangement loop keeps its native owner, audio selection and explicit loop flag through controls',async()=>{
+ const f=fixture({format:'wave-arrangement',midiOutput:undefined,output:'audio-1',loop:true})
+ assert.ok(f.args.includes('--loop'));assert.ok(f.args.includes('audio-1'))
+ const state={format:'wave-arrangement',loop:true,device:{id:'audio-1',name:'Output',outputs:2}}
+ f.event('playing',state);await f.playback.ready
+ await assert.rejects(f.playback.recordingEpoch(),/cycle-aware/)
+ f.playback.pause();f.event('paused',state);f.playback.seek(0);f.playback.resume();f.event('playing',state)
+ f.playback.stop();f.event('stopped',state);f.close();await f.playback.completion
+ assert.deepEqual(f.commands,[{kind:'pause'},{kind:'seek',seconds:0},{kind:'resume'},{kind:'stop'}])
 })

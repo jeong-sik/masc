@@ -221,3 +221,14 @@ test('hybrid playback binds each stream protocol independently, including one de
   assert.throws(()=>fixture({...options,midiBindings:options.midiBindings.map(binding=>({...binding,protocol:undefined}))}),/Invalid MIDI source bindings/)
   assert.throws(()=>fixture({...options,midiBindings:options.midiBindings.map(binding=>({...binding,protocol:1}))}),/Invalid MIDI source bindings/)
 })
+
+test('SMF arrangement loop retains exact bindings, owns one child through control and refuses non-cycle-aware recording epochs',async()=>{
+ const bindings=[{port:0,destination:'123'}],f=fixture({format:'midi-arrangement',midiOutput:'123',output:undefined,midiBindings:bindings,loop:true})
+ assert.ok(f.args.includes('--loop'))
+ const state={format:'midi-arrangement',device:{id:'123',kind:'midi',protocol:1,name:'Keys'},bindings:[{port:0,device:{id:'123',kind:'midi',protocol:1,name:'Keys'}}]}
+ f.event('playing',state);await f.playback.ready
+ await assert.rejects(f.playback.recordingEpoch(),/cycle-aware/)
+ f.playback.pause();f.event('paused',state);f.playback.seek(2);f.playback.resume();f.event('playing',{...state,currentTime:0})
+ f.playback.stop();f.event('stopped',state);f.close();await f.playback.completion
+ assert.deepEqual(f.commands,[{kind:'pause'},{kind:'seek',seconds:2},{kind:'resume'},{kind:'stop'}])
+})

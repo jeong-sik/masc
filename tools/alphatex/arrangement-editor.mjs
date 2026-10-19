@@ -258,6 +258,10 @@ export function arrangementCommand(editor, line) {
     case 'region-name': if (!tail) throw new Error('Choose a region name'); value = { kind: 'region-change', id: regionID(editor), name: tail }; break
     case 'title': if (!tail) throw new Error('Choose a title'); value = { kind: 'title', title: tail }; break
     case 'tempo': count(1); value = { kind: 'tempo', tempo: Number(args[0]) }; break
+    case 'loop':
+      if (args.length === 1 && args[0] === 'off') value = { kind: 'loop', range: null }
+      else { count(2); value = { kind: 'loop', range: { start: beats(args[0]), end: beats(args[1]) } } }
+      break
     case 'meter': count(2); value = { kind: 'meter', meter: args.map(Number) }; break
     default: throw new Error(`Unknown arrangement command: ${command}; use :help`)
   }

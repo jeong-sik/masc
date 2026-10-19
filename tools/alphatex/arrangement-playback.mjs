@@ -9,6 +9,7 @@ import { captureRange, captureRegionTime } from './capture-time.mjs'
 import { jsonLines, unpackMidi } from './session-data.mjs'
 
 import { practiceEnabled } from './arrangement-practice.mjs'
+import { arrangementLoop, loopMidiRegions, requireLoopTransport } from './arrangement-loop.mjs'
 
 function requireRegionTransport(project) {
   const schedule = arrangementPlaybackSchedule(project)
@@ -21,6 +22,7 @@ function requireRegionTransport(project) {
 // One compressed region record retains whole source frames. Preparation owns
 // private copies, so editing/moving project files cannot change admitted audio.
 export async function prepareArrangementWave(project, { sourceRoot, directory, signal } = {}) {
+  requireLoopTransport(project)
   signal?.throwIfAborted()
   const schedule = requireRegionTransport(project)
   if (!schedule.length) throw new Error('No audible arrangement regions')
@@ -83,15 +85,18 @@ export async function prepareArrangementMidi(project, { directory, signal, midiO
   }
   const bindings = [...new Set(sources.flatMap(source => source.timeline.bindings.map(binding => binding.destination)))]
     .map((destination, port) => ({ port, destination }))
-  const duration = schedule.reduce((end, clip) => Math.max(end, clip.endSeconds), 0)
+  const loop = arrangementLoop(project), selected = loopMidiRegions(regions, loop)
+  const selectedSources = sources.filter(source => selected.some(region => region.source === source.id))
+  const duration = loop?.duration ?? schedule.reduce((end, clip) => Math.max(end, clip.endSeconds), 0)
   if (!Number.isFinite(duration) || duration <= 0) throw new Error('Arrangement has no representable MIDI duration')
   const temporary = await mkdtemp(join(directory, 'play-'))
   try {
     signal?.throwIfAborted()
     const path = join(temporary, 'plan.json')
-    await writeFile(path, JSON.stringify({ schemaVersion: 3, duration, sources, regions }), { flag: 'wx', mode: 0o600, signal })
+    await writeFile(path, JSON.stringify({ schemaVersion: 3, duration, sources: selectedSources, regions: selected }), { flag: 'wx', mode: 0o600, signal })
     signal?.throwIfAborted()
-    return { path, duration, format: 'midi-arrangement', bindings, midiOutput: bindings[0].destination }
+    return { path, duration, format: 'midi-arrangement', bindings, midiOutput: bindings[0].destination,
+      ...(loop ? { loop: true, originSeconds: loop.start } : {}) }
   } catch (error) { await rm(temporary, { recursive: true, force: true }); throw error }
 }
 
@@ -133,6 +138,7 @@ export function arrangementPlaybackRequest(project, route) {
 }
 
 export async function prepareArrangementMixed(project, options = {}) {
+  requireLoopTransport(project)
   options.signal?.throwIfAborted()
   requireRegionTransport(project)
   const kinds = new Map(project.assets.map(asset => [asset.id, asset.kind]))
@@ -197,6 +203,7 @@ async function snapshotAudio(project, schedule, { sourceRoot, temporary, signal 
   return { assets: assets.filter(asset => used.has(asset.id)), regions, duration, captures }
 }
 export async function prepareArrangementAudio(project, { sourceRoot, directory, signal } = {}) {
+  requireLoopTransport(project)
   signal?.throwIfAborted()
   const schedule = arrangementPlaybackSchedule(project)
   if (!schedule.length) throw new Error('No audible arrangement regions')
@@ -212,6 +219,7 @@ export async function prepareArrangementAudio(project, { sourceRoot, directory, 
 }
 
 export async function prepareArrangementCaptureRegions(project, { sourceRoot, directory, signal, midiOutput, sourceBindings = [], portBindings = [] } = {}) {
+  requireLoopTransport(project)
   signal?.throwIfAborted()
   const schedule = arrangementPlaybackSchedule(project), byID = new Map(project.assets.map(asset => [asset.id, asset]))
   if (!schedule.length) throw new Error('No audible arrangement regions')

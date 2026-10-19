@@ -478,12 +478,13 @@ struct Timeline: Decodable {
         default: throw MidiFailure("unknown MIDI timeline schema")
         }
     }
-    func validate() throws {
+    func validate(looping: Bool = false) throws {
         guard duration.isFinite, source ? duration >= 0 : duration > 0,
               duration * 1e9 < Double(UInt64.max) else { throw MidiFailure("invalid MIDI timeline duration") }
         if arrangement {
             guard !regions.isEmpty, regions.allSatisfy({ $0.end <= duration }) else { throw MidiFailure("invalid MIDI arrangement duration") }
             var mutations = Set<ChaseField>()
+            if looping { for region in regions { mutations.formUnion(region.endTouched) } }
             for region in regions.sorted(by: { $0.spec.startSeconds < $1.spec.startSeconds }) {
                 let previous = mutations.filter { region.addresses.contains($0.port << 8 | Int($0.channel)) }
                 guard previous.isSubset(of: region.startKnown), region.spec.repeatCount == 1 || region.endTouched.isSubset(of: region.startKnown) else {
@@ -584,10 +585,10 @@ final class MidiTransport {
     init(timeline: Timeline, uid: String, loop: Bool = false, coordinated: Bool = false, groupZeroUMP: Bool = false) throws {
         self.timeline = timeline; self.coordinated = coordinated; self.groupZeroUMP = groupZeroUMP
         queue = coordinated ? .main : DispatchQueue(label: "masc.music.midi.transport", qos: .userInteractive)
-        try timeline.validate()
+        try timeline.validate(looping: loop)
         guard !coordinated || timeline.arrangement && !loop else { throw MidiFailure("coordinated playback requires a MIDI region arrangement") }
         if timeline.source {
-            guard !loop else { throw MidiFailure("source audition plays once; loop state reconstruction is not connected") }
+            guard timeline.arrangement || !loop else { throw MidiFailure("source audition plays once; loop state reconstruction is not connected") }
             guard timeline.bindings.first?.destination == uid else { throw MidiFailure("primary source destination differs from explicit bindings") }
         }
         guard let value = Int32(uid), String(value) == uid else { throw MidiFailure("MIDI destination requires its exact unique ID") }
@@ -1033,8 +1034,11 @@ final class MidiTransport {
             switch command {
             case .pause:
                 if state == .playing {
+                    // Resolve a late loop boundary before pausing so a cycle
+                    // cannot turn into a natural end or emit an expired phase.
+                    if loop { tick(); guard state == .playing else { return } }
                     let elapsed = position()
-                    if timeline.source {
+                    if timeline.source && !loop {
                         try reconcile(at: min(elapsed, timeline.duration))
                         if elapsed >= timeline.duration { offset = timeline.duration; finish(reason: "finished"); return }
                     }

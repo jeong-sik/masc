@@ -164,6 +164,30 @@ let ending=try owner([source("take",[packet(0,on),packet(10_000_000,off)])],[cli
 host=0;sent=[];try ending.stageCoordinated(at:0);try ending.runCoordinated(anchorNanoseconds:10);host=10;ending.tick()
 precondition(sent.isEmpty,"a historical note ending exactly at entry must not retrigger")
 ending.finish(reason:"test",error:nil,publish:false)
+// A historical voice with positive exact overlap at a fractional entry
+// restores before its same-deadline original Off. Zero overlap and a genuinely
+// expired callback must remain silent, with no invented release attributes.
+for release:UInt64 in [1,2] { for late in [false,true] {
+ let take=source("adjacent",[packet(0,on),packet(release,off)],numer:1,denom:10,extent:"1000")
+ let region=exactClip("fractionalVoice",startN:"1",startD:"10",start:0.1/1e9,offset:"1",extent:"100")
+ let retained=try owner([take],[region],duration:20e-9)
+ host=0;sent=[];try retained.stageCoordinated(at:0);try retained.runCoordinated(anchorNanoseconds:100)
+ host=101+(late ? 1:0);retained.tick()
+ precondition(sent.map{$0.1} == (release==2 && !late ? [on,off]:[]),"fractional entry confused positive overlap, zero overlap or expired history")
+ precondition(retained.output.held.isEmpty && retained.terminalFailure==nil)
+ retained.finish(reason:"test",error:nil,publish:false)
+}}
+// An original/virtual attack due in a previous batch cannot be recreated
+// merely because its final Off shares the current late callback deadline.
+for historical in [false,true] {
+ let take=source("adjacent",[packet(historical ? 0:1,on),packet(12,off)],numer:1,denom:10,extent:"1000")
+ let region=exactClip("lateVoice",startN:historical ? "1":"0",startD:"10",start:historical ? 0.1/1e9:0,offset:historical ? "1":"0",extent:"100")
+ let retained=try owner([take],[region],duration:20e-9)
+ host=0;sent=[];try retained.stageCoordinated(at:0);try retained.runCoordinated(anchorNanoseconds:100)
+ host=102;retained.tick();precondition(sent.isEmpty && retained.output.held.isEmpty,"past acquisition was recreated by exactly-due Off")
+ retained.finish(reason:"test",error:nil,publish:false)
+}
+print("UMP_FRACTIONAL_VOICE_ENTRY_PASS: positive virtual overlap retains original same-deadline On/Off; zero overlap and late history stay silent")
 // The final host stamp belongs to a half-open bound one past UInt64max.
 let endpoint=source("take",[packet(UInt64.max,on)],extent:"18446744073709551616")
 let last=try owner([endpoint],[clip(offset:String(UInt64.max),extent:"1")],duration:1e-9)

@@ -405,6 +405,13 @@ for bytes: [UInt8] in [[0xb0,101,0],[0xb0,100,0],[0xb0,6,12]] { coarseParameter.
 _ = try coarseParameter.bootstrap(replacing:coarseParameter)
 var laterFine = coarseParameter;laterFine.observe([0xb0,38,1],port:0)
 do { _ = try coarseParameter.bootstrap(replacing:laterFine);preconditionFailure("unknown fine parameter restored") } catch {}
+// A cut entry replays with notes:false, but the pedal position is physical
+// state and must be re-established anyway, after the events it replaces.
+var cutPedals = SourceChase()
+for bytes: [UInt8] in [[0xb0,64,127],[0x90,60,100],[0xb0,66,127],[0xd0,77]] { cutPedals.observe(bytes,port:0) }
+let cutMessages = try cutPedals.bootstrap(replacing:cutPedals,notes:false).map(\.1)
+precondition(Array(cutMessages.suffix(3)) == [[0xb0,66,127],[0xb0,64,127],[0xd0,77]],"cut entry did not re-establish the pedal and pressure state")
+precondition(!cutMessages.contains { $0[0] & 0xf0 == 0x90 },"cut entry replayed note events")
 print("SOURCE_CHASE_DECISIONS_PASS: ordered expression, pedal membership, release wire forms, reset coverage, parameter components, paused seek, decoder continuation, due and endpoint pause")
 
 // Exercise production UID lookup, object-type/name validation and the complete
@@ -675,6 +682,72 @@ for missed in [false,true] {
     precondition(reviewWire.map(\.1).contains([0x80,72,77]) == !missed)
 }
 print("COMMON_MIDI_MULTICYCLE_PASS: exact next endpoint batch retained, stale endpoint attack skipped after multiple missed cycles")
+// A callback may cross the virtual wrap while outgoing packets still share
+// its exact native host deadline. Preserve that complete original wire batch.
+for tiny in [false,true] {
+    let on:Double=tiny ? 1.4e-9:0.4995836801, off:Double=tiny ? 1.45e-9:0.4995836802
+    let duration:Double=tiny ? 25.0/16/1e9:60/120.1
+    let period:UInt128=tiny ? 25:UInt128("703687441776640000000000")!
+    let divisor:UInt128=tiny ? 16:UInt128("1408547695956241")!
+    let base=try arrangement([asset("wrapBatch",[
+        ["seconds":0,"port":2,"bytes":[0xc0,0]],
+        ["seconds":on,"port":2,"bytes":[0x90,78,100]],
+        ["seconds":off,"port":2,"bytes":[0x80,78,75]]])],
+        [clip("wrapBatch","wrapBatch",from:0,to:1,repeatCount:1)],duration:1)
+    let clock=try MidiCycle(start:0,end:duration,duration:duration,period:period,divisor:divisor)
+    for initial in [false,true] { for late in [false,true] {
+        let owner=try MidiTransport(timeline:base.timeline,uid:"1",loop:true,coordinated:true,cycle:clock)
+        owner.prepared=true;owner.destination=base.destination;owner.sourceDestinations=base.sourceDestinations
+        reset(0);reviewWire=[];try owner.stageCoordinated(at:0);try owner.runCoordinated(anchorNanoseconds:1_000_000_000)
+        if !initial { reviewClock=1_000_000_000;owner.tick();reviewWire=[] }
+        let due=try clock.deadline(position:on,index:0,offset:0,anchor:1_000_000_000)
+        reviewClock=due+(late ? 1:0);owner.tick()
+        let notes=reviewWire.map(\.1).filter { $0[0]&0xe0==0x80 }
+        precondition(notes == (late ? []:[[0x90,78,100],[0x80,78,75]]),"wrap lost exactly-due original pair or replayed expired history")
+        precondition(owner.state == .playing && owner.anchor==1_000_000_000)
+    }}
+}
+print("COMMON_MIDI_OUTGOING_BATCH_PASS: ordinary fractional tempo and short cycles retain due outgoing pairs on initial/active callbacks and skip genuinely expired pairs")
+let lateOutside=asset("lateOutside",[
+ ["seconds":0,"port":2,"bytes":[0xc0,0]],
+ ["seconds":0.3,"port":2,"bytes":[0x90,80,100]],
+ ["seconds":0.4,"port":2,"bytes":[0x80,80,73]],
+ ["seconds":0.8,"port":2,"bytes":[0xf0,0x7d,1,0xf7]]])
+let lateOutsidePath=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString+".json")
+try JSONSerialization.data(withJSONObject:["schemaVersion":3,"duration":1,"sources":[lateOutside],"regions":[clip("lateOutside","lateOutside",from:0,to:1,repeatCount:1)]]).write(to:lateOutsidePath)
+let lateOutsideTimeline=try JSONDecoder().decode(Timeline.self,from:Data(contentsOf:lateOutsidePath))
+try FileManager.default.removeItem(at:lateOutsidePath)
+let lateOutsideBase=commonBase
+let lateOutsideCycle=try MidiCycle(start:0.2,end:0.6,duration:0.4,period:400_000_000,divisor:1)
+let lateOutsideOwner=try MidiTransport(timeline:lateOutsideTimeline,uid:"1",loop:true,coordinated:true,cycle:lateOutsideCycle)
+lateOutsideOwner.prepared=true;lateOutsideOwner.destination=lateOutsideBase.destination;lateOutsideOwner.sourceDestinations=lateOutsideBase.sourceDestinations
+reset(0);reviewWire=[];try lateOutsideOwner.stageCoordinated(at:0);try lateOutsideOwner.runCoordinated(anchorNanoseconds:1_000_000_000)
+reviewClock=1_450_000_001;lateOutsideOwner.tick()
+print("LATE_FIRST_WRAP_OUTSIDE_OPAQUE",lateOutsideOwner.state,"FAILURE",String(describing:lateOutsideOwner.terminalFailure),"WIRE",reviewWire.map(\.1))
+precondition(lateOutsideOwner.state == .playing && lateOutsideOwner.terminalFailure==nil && !reviewWire.map(\.1).contains { $0[0]==0xf0 },"late wrap included unreachable opaque suffix")
+
+
+let missedSource=asset("missedSource",[
+ ["seconds":0,"port":2,"bytes":[0xc0,0]],
+ ["seconds":0.1249999991,"port":2,"bytes":[0x90,81,100]],
+ ["seconds":0.1249999992,"port":2,"bytes":[0x80,81,79]]])
+let missedBase=try arrangement([missedSource],[clip("missedSource","missedSource",from:0,to:0.125,repeatCount:8)],duration:1)
+let missedCycle=try MidiCycle(start:0,end:0.625,duration:0.625,period:625_000_000,divisor:1)
+for initial in [false,true] { for late in [false,true] {
+ let owner=try MidiTransport(timeline:missedBase.timeline,uid:"1",loop:true,coordinated:true,cycle:missedCycle)
+ owner.prepared=true;owner.destination=missedBase.destination;owner.sourceDestinations=missedBase.sourceDestinations
+ reset(0);reviewWire=[];try owner.stageCoordinated(at:0);try owner.runCoordinated(anchorNanoseconds:1_000_000_000)
+ if !initial {reviewClock=1_000_000_000;owner.tick();reviewWire=[]}
+ reviewClock=1_625_000_000+(late ? 1:0);owner.tick()
+ let deadline=try missedCycle.deadline(position:0.5+0.1249999991,index:0,offset:0,anchor:1_000_000_000)
+ print("COMPRESSED_OLD_DUE_COPY_INITIAL",initial,"DEADLINE",deadline,"HOST",reviewClock,"WIRE",reviewWire.map(\.1))
+ precondition(deadline==1_625_000_000)
+ let notes=reviewWire.map(\.1).filter { $0[0]&0xe0==0x80 }
+ precondition(notes == (late ? []:[[0x90,81,100],[0x80,81,79]]),"compressed skip lost exactly-due old copy or replayed late history")
+ }
+}
+
+print("COMMON_MIDI_COMPRESSED_BATCH_PASS: arithmetic missed-copy lookup retains earliest native batch copy; late first wrap ignores unreachable opaque suffix")
 let zeroBase=try arrangement([asset("zero",[
     ["seconds":0,"port":2,"bytes":[0xc0,0]],
     ["seconds":0.3,"port":2,"bytes":[0x90,74,80,0x80,74,77]]])],[clip("zero","zero",from:0,to:1,repeatCount:1)],duration:1)
@@ -813,6 +886,19 @@ let badCommon=try arrangement([asset("unknown",[
     ["seconds":0.5,"port":2,"bytes":[0xb0,1,70]]])],[clip("unknown","unknown",from:0,to:1,repeatCount:1)],duration:1)
 mustReject { _ = try MidiTransport(timeline:badCommon.timeline,uid:"1",loop:true,coordinated:true,cycle:commonClock) }
 mustReject { _ = try MidiTransport(timeline:commonBase.timeline,uid:"1",loop:true,coordinated:true) }
+// A normal start (no cut) reconstructs the region's prefix, notes included, so a
+// note held across sourceStart is re-established. Only a cut entry drops the
+// prefix notes, because the live state at the cut is not the source's.
+let prefixSource=asset("prefixSource",[
+    ["seconds":0,"port":2,"bytes":[0x90,60,100]],
+    ["seconds":2,"port":2,"bytes":[0x80,60,64]]])
+let prefixBase=try arrangement([prefixSource],[clip("prefixSource","prefixSource",from:0.5,to:1.5,repeatCount:1)],duration:2)
+let prefixCommon=try MidiTransport(timeline:prefixBase.timeline,uid:"1",loop:true,coordinated:true,cycle:commonClock)
+prefixCommon.prepared=true;prefixCommon.destination=prefixBase.destination;prefixCommon.sourceDestinations=prefixBase.sourceDestinations
+reset(0);reviewWire=[];try prefixCommon.runCoordinated(anchorNanoseconds:1_000_000_000)
+reviewClock=1_000_000_000;reviewWire=[];prefixCommon.tick()
+reviewClock=1_500_000_000;prefixCommon.tick();reviewClock=1_600_000_000;prefixCommon.tick()
+precondition(reviewWire.map(\.1).contains([0x90,60,100]),"normal start dropped the prefix note")
 print("COMMON_MIDI_CYCLE_PASS: original absolute regions, half-open cuts, source phase, 10000 fractional deadlines without epoch drift, missed cycles, staged controls and audible-window baseline admission")
 
 print("SELECTED_MIDI_DESTINATION_PASS: unrelated enumeration failure/churn isolated; selected removal, UID reuse, source type, offline and noncanonical ID rejected")

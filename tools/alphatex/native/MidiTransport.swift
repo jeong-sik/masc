@@ -288,7 +288,7 @@ struct SourceChase {
         }
         channels[key] = state
     }
-    func bootstrap(replacing previous: SourceChase) throws -> [(Int, [UInt8])] {
+    func bootstrap(replacing previous: SourceChase, notes: Bool = true) throws -> [(Int, [UInt8])] {
         let unsafe = obstacles.union(previous.obstacles)
         guard unsafe.isEmpty else {
             throw MidiFailure("source state reconstruction requires support for " + unsafe.map(\.rawValue).sorted().joined(separator: ", "))
@@ -305,13 +305,21 @@ struct SourceChase {
         var result = history
         for key in channels.keys.sorted() {
             let state = channels[key]!, port = key >> 8, channel = UInt8(key & 15)
-            // silence() already releases owned keys/pedals. Restore the captured
-            // set before switching sostenuto on; later keys must remain outside it.
-            for note in state.notes where note.captured { result.append((port, [0x90 | channel, note.pitch, note.velocity])) }
+            if notes {
+                // silence() already releases owned keys/pedals. Restore the captured
+                // set before switching sostenuto on; later keys must remain outside it.
+                for note in state.notes where note.captured { result.append((port, [0x90 | channel, note.pitch, note.velocity])) }
+            }
+            // Pedal position is physical state a mid-region entry has to re-establish,
+            // not an event of the source prefix, so it survives `notes: false`.
             if known.contains(ChaseField(port: port, channel: channel, kind: .controller(66))) { result.append((port, [0xb0 | channel, 66, state.sostenuto])) }
             if known.contains(ChaseField(port: port, channel: channel, kind: .controller(64))) { result.append((port, [0xb0 | channel, 64, state.sustain])) }
-            for note in state.notes where !note.captured { result.append((port, [0x90 | channel, note.pitch, note.velocity])) }
-            for note in state.notes where !note.held { result.append((port, [note.releaseStatus, note.pitch, note.release])) }
+            if notes {
+                for note in state.notes where !note.captured { result.append((port, [0x90 | channel, note.pitch, note.velocity])) }
+                for note in state.notes where !note.held { result.append((port, [note.releaseStatus, note.pitch, note.release])) }
+            }
+            // Channel pressure and poly aftertouch are captured values too; silence()
+            // does not clear them, so every entry re-sends them after the pedals.
             if let pressure = state.pressure { result.append((port, [0xd0 | channel, pressure])) }
             for pitch in state.poly.keys.sorted() { result.append((port, [0xa0 | channel, pitch, state.poly[pitch]!])) }
         }
@@ -635,6 +643,8 @@ struct MidiCycle {
         var before = 0, through = 0
         for event in region.events {
             let position = start + (event.seconds - region.spec.sourceStart)
+            let endpoint = event.seconds == region.spec.sourceEnd && region.spec.sourceEnd == region.sourceDuration
+            guard region.includes(event.seconds), position < end || endpoint && position == end else { break }
             // Original trim/window prefixes are history even when their
             // clamped deadline equals the first common epoch. For actual
             // sounding events, classify the whole native host-deadline batch.
@@ -1006,12 +1016,12 @@ final class MidiTransport {
         }
         return action.seconds <= seconds
     }
-    func beginRegion(_ index: Int, at sourceSeconds: Double) throws {
+    func beginRegion(_ index: Int, at sourceSeconds: Double, notes: Bool = true) throws {
         let entry = try regionEntry(index, at: sourceSeconds), prefix = entry.model.scoped(to: regionScopes[index]), next = entry.next
         let prior = sourceModel.scoped(to: regionScopes[index])
         guard prior.touched.isSubset(of: entry.safeKnown) else { throw MidiFailure("MIDI region seek needs a source baseline before sounding keys on a previously changed channel") }
         var permitted = prior; permitted.touched.formIntersection(prefix.known)
-        for (port, bytes) in try prefix.bootstrap(replacing: permitted) { try sourceSend(bytes, port: port) }
+        for (port, bytes) in try prefix.bootstrap(replacing: permitted, notes: notes) { try sourceSend(bytes, port: port) }
         if cycle != nil {
             for address in regionScopes[index] {
                 cycleAcquired[address] = Set((prefix.channels[address]?.notes ?? []).filter(\.held).compactMap(\.origin))
@@ -1042,8 +1052,30 @@ final class MidiTransport {
                 let old = regionCursors[index]
                 guard old.copy < region.spec.repeatCount,
                       seconds >= regionStart(region, copy: old.copy) + region.duration else { continue }
-                let copy = seconds >= region.end ? region.spec.repeatCount
+                if let cycle, let host = cycleHost,
+                   try cycle.deadline(position: regionStart(region, copy: old.copy) + region.duration,
+                                      index: cycleIndex, offset: offset - cycle.start, anchor: anchor) >= host {
+                    // A copy that ends in this native batch is still an
+                    // ordered stream, even when its virtual end is earlier
+                    // than the observed fractional phase. Drain it below.
+                    continue
+                }
+                var copy = seconds >= region.end ? region.spec.repeatCount
                     : min(region.spec.repeatCount - 1, max(0, Int(floor((seconds - region.spec.startSeconds) / region.duration))))
+                if let cycle, let host = cycleHost {
+                    // The latest virtual copy is not necessarily the first
+                    // copy in this integer host batch. Locate its earliest
+                    // intersecting end without visiting expired copies.
+                    var low = old.copy, high = copy
+                    while low < high {
+                        let middle = low + (high - low) / 2
+                        let end = regionStart(region, copy: middle) + region.duration
+                        if try cycle.deadline(position: end, index: cycleIndex,
+                            offset: offset - cycle.start, anchor: anchor) < host { low = middle + 1 }
+                        else { high = middle }
+                    }
+                    copy = low
+                }
                 guard copy > old.copy else { continue }
                 if old.active {
                     while regionCursors[index].index < region.events.count && region.includes(region.events[regionCursors[index].index].seconds) {
@@ -1058,7 +1090,11 @@ final class MidiTransport {
                         let release = type == 0x80 || type == 0x90 && event.bytes[2] == 0
                         let key = UInt16(event.bytes[0] & 15) << 8 | UInt16(event.bytes[1])
                         let deadline = regionStart(region, copy: old.copy) + (event.seconds - region.spec.sourceStart)
-                        let expired = loop && deadline < (observedAt ?? seconds)
+                        let expired: Bool
+                        if let cycle, let host = cycleHost {
+                            expired = try cycle.deadline(position: deadline, index: cycleIndex,
+                                offset: offset - cycle.start, anchor: anchor) < host
+                        } else { expired = loop && deadline < (observedAt ?? seconds) }
                         if cycle != nil {
                             try applyCycleEvent(event, origin: regionCursors[index].index, attackAllowed: !expired)
                         } else {
@@ -1097,8 +1133,16 @@ final class MidiTransport {
             let region = timeline.regions[action.region]
             switch action.kind {
             case .begin:
-                if cut != nil { regionCursors[action.region] = MidiRegionCursor(copy: region.spec.repeatCount) }
-                else { try beginRegion(action.region, at: region.spec.sourceStart) }
+                // A cut enters an owner mid-region, so the prefix notes must not be re-sent:
+                // the live state at the cut is not the source's opening state. A normal start
+                // (no cut) reconstructs the prefix as before, notes included, so a note held
+                // across `sourceStart` is re-established.
+                if let cut {
+                    if cycle == nil || action.seconds >= cut { regionCursors[action.region] = MidiRegionCursor(copy: region.spec.repeatCount) }
+                    else { try beginRegion(action.region, at: region.spec.sourceStart, notes: false) }
+                } else {
+                    try beginRegion(action.region, at: region.spec.sourceStart, notes: true)
+                }
             case .end:
                 try sourceSilence(addresses: regionScopes[action.region])
                 for address in regionScopes[action.region] { sourceModel.channels[address]?.notes.removeAll() }
@@ -1112,10 +1156,11 @@ final class MidiTransport {
                     let key = UInt16(event.bytes[0] & 15) << 8 | UInt16(event.bytes[1])
                     var send = true
                     if cycle != nil {
-                        if cut != nil { send = !attack || action.seconds >= (observedAt ?? seconds) }
-                        else if let cycle, let host = cycleHost {
+                        if let cycle, let host = cycleHost {
                             let deadline = try cycle.deadline(position: action.seconds, index: cycleIndex, offset: offset - cycle.start, anchor: anchor)
-                            if attack && deadline < host { send = try liveRegionAttacks(action.region).contains(regionCursors[action.region].index) }
+                            if attack && deadline < host {
+                                send = cut == nil ? try liveRegionAttacks(action.region).contains(regionCursors[action.region].index) : false
+                            }
                         }
                         try applyCycleEvent(event, origin: regionCursors[action.region].index, attackAllowed: send)
                     } else {
@@ -1183,8 +1228,7 @@ final class MidiTransport {
                 let now = min(cycle.end.nextDown, cycle.start + phase.seconds)
                 if phase.index != cycleIndex {
                     pendingRestore = false
-                    let observed = phase.index > cycleIndex && phase.index - cycleIndex == 1 ? cycle.end + phase.seconds : Double.infinity
-                    try reconcileRegions(at: cycle.end, reconstruct: false, observedAt: observed, cut: cycle.end)
+                    try reconcileRegions(at: cycle.end, reconstruct: false, cut: cycle.end)
                     try silence(); cycleIndex = phase.index
                     try restore(at: now)
                 } else {

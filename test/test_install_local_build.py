@@ -857,7 +857,10 @@ class LocalBuildInstall(unittest.TestCase):
                                      "--base-path", str(workspace(root))],
                                     capture_output=True, text=True)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("helper failed to resolve the workspace", result.stderr)
+            self.assertIn("resolve-workspace exited with status 42", result.stderr)
+            # The helper's own error is the cause; the install names it instead
+            # of reporting a missing workspace.
+            self.assertIn("fixture workspace lookup failed", result.stderr)
             self.assertFalse(prefix.exists(), "a failed new helper skipped validation and installed binaries")
 
     # A named workspace that does not exist yet has no runtime.toml to judge;

@@ -148,7 +148,15 @@ else
   if [ -n "$base_path" ]; then
     resolve_args+=(--base-path "$base_path")
   fi
-  if resolution=$("$preflight_helper" "${resolve_args[@]}" 2>/dev/null); then
+  # The helper's stderr is kept apart from its key=value answer and shown only
+  # when the lookup fails. An old helper's "unknown command" is expected noise,
+  # but a helper that dies at start is not a missing workspace: every main
+  # build exited at start on an undecodable tool TOML (#44049), and this branch
+  # reported only that the workspace was not resolved.
+  resolve_stderr=$(mktemp "${TMPDIR:-/tmp}/masc-resolve-workspace.XXXXXX")
+  resolve_status=0
+  resolution=$("$preflight_helper" "${resolve_args[@]}" 2>"$resolve_stderr") || resolve_status=$?
+  if [ "$resolve_status" -eq 0 ]; then
     :
   elif "$preflight_helper" build-commit >/dev/null 2>&1 \
        && ! "$preflight_helper" resolve-workspace --help >/dev/null 2>&1; then
@@ -156,9 +164,12 @@ else
     # A newer helper that fails to resolve must not silently skip validation.
     resolution="workspace=old_helper"
   else
-    echo "install-local-build: runtime.toml not checked: helper failed to resolve the workspace; nothing installed" >&2
+    echo "install-local-build: runtime.toml not checked: $preflight_helper resolve-workspace exited with status $resolve_status; nothing installed. Its error output:" >&2
+    cat "$resolve_stderr" >&2
+    rm -f "$resolve_stderr"
     exit 1
   fi
+  rm -f "$resolve_stderr"
   workspace_state=""
   workspace_source=""
   while IFS='=' read -r key value; do

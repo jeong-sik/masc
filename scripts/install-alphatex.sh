@@ -15,7 +15,7 @@ command -v pnpm >/dev/null 2>&1 || { printf '%s\n' 'pnpm is required to install 
 node -e 'if (Number(process.versions.node.split(".")[0]) < 22) process.exit(1)'
 mkdir -p "$prefix"
 prefix=$(CDPATH= cd -- "$prefix" && pwd)
-runtime_files='package.json pnpm-lock.yaml engine.mjs audio.mjs diagnostics.mjs worker.mjs terminal.mjs viewer.mjs capture.mjs session-data.mjs capture-time.mjs captured-source.mjs captured-source-files.mjs capture-playback.mjs music-session.mjs wave-file.mjs sequencer-project.mjs arrangement.mjs arrangement-files.mjs arrangement-editor.mjs arrangement-worker.mjs arrangement-tui.mjs arrangement-playback.mjs arrangement-recording.mjs sequencer-files.mjs sequencer-audio.mjs sequencer-midi.mjs midi-source.mjs midi-source-editor.mjs midi-source-playback.mjs sequencer-editor.mjs sequencer-worker.mjs sequencer-tui.mjs playback.mjs native/MusicSession.swift native/MusicTransport.swift native/MidiTransport.swift native/WaveArrangement.swift native/CaptureAudioClock.swift native/UmpTransport.swift native/UmpOutput.swift native/UmpRegions.swift native/HybridMidiTransport.swift native/UmpState.swift native/Info.plist vst.mjs instruments.mjs'
+runtime_files='package.json pnpm-lock.yaml engine.mjs audio.mjs diagnostics.mjs worker.mjs terminal.mjs viewer.mjs capture.mjs session-data.mjs capture-time.mjs captured-source.mjs captured-source-files.mjs capture-playback.mjs music-session.mjs wave-file.mjs sequencer-project.mjs arrangement.mjs arrangement-files.mjs arrangement-editor.mjs arrangement-worker.mjs arrangement-tui.mjs arrangement-playback.mjs arrangement-recording.mjs sequencer-files.mjs sequencer-audio.mjs sequencer-midi.mjs midi-source.mjs midi-source-editor.mjs midi-source-playback.mjs sequencer-editor.mjs sequencer-worker.mjs sequencer-tui.mjs playback.mjs native/MusicSession.swift native/MusicTransport.swift native/MidiTransport.swift native/WaveArrangement.swift native/CaptureAudioClock.swift native/UmpTransport.swift native/UmpOutput.swift native/UmpRegions.swift native/HybridMidiTransport.swift native/UmpState.swift native/Info.plist native/UmpLiveInput.swift native/LiveMidiMain.swift vst.mjs instruments.mjs'
 revision=$(node --input-type=module - "$repo_root/tools/alphatex" $runtime_files <<'FINGERPRINT'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
@@ -96,6 +96,18 @@ if [ "$(uname -s)" = Darwin ] && [ ! -x "$support_dir/music-arrangement" ]; then
     trap - EXIT HUP INT TERM
   else
     printf '%s\n' 'WAV arrangement playback requires the Xcode command-line tools.' >&2
+  fi
+fi
+if [ "$(uname -s)" = Darwin ] && [ ! -x "$support_dir/music-midi-live" ]; then
+  if xcrun --find swiftc >/dev/null 2>&1; then
+    live_binary=$(mktemp "$support_dir/.music-midi-live.XXXXXX")
+    trap 'rm -f "$live_binary"' EXIT HUP INT TERM
+    xcrun swiftc -parse-as-library -D MIDI_LIBRARY -O "$support_dir/native/MidiTransport.swift" "$support_dir/native/UmpTransport.swift" "$support_dir/native/UmpOutput.swift" "$support_dir/native/UmpState.swift" "$support_dir/native/UmpLiveInput.swift" "$support_dir/native/LiveMidiMain.swift" -o "$live_binary" -framework CoreMIDI
+    chmod 755 "$live_binary"
+    mv -f "$live_binary" "$support_dir/music-midi-live"
+    trap - EXIT HUP INT TERM
+  else
+    printf '%s\n' 'Live MIDI input requires the Xcode command-line tools.' >&2
   fi
 fi
 # The relative layout is shared by every prefix; no checkout or workspace path

@@ -1,7 +1,7 @@
 (test
  (name test_browser_interaction)
  (modules test_browser_interaction)
- (libraries masc masc.browser_lane alcotest))
+ (libraries masc masc.browser_lane alcotest yojson))
 
 (rule
  (alias runtest-test_browser_interact_extension)

@@ -274,6 +274,30 @@ let test_ensure_help_item_appends_once () =
     "?:help  q:quit"
     (Masc_tui_footer.ensure_help_item "?:help  q:quit")
 
+let test_armed_ask_submit_notice_retires_when_answering_is_cleared () =
+  let state = plain_surface_state Masc_tui_types.Approvals in
+  let notice = Masc_tui_types.armed_ask_submit_notice "alpha" in
+  state.ask_answer_mode <- Masc_tui_types.Ask_answering { aam_ask_id = "ask-1" };
+  state.pending_ask_submit <- Some "ask-1";
+  state.last_action <- Some (notice, Unix.gettimeofday ());
+  check_bool "armed confirmation notice renders while ask submit is armed" true
+    (contains ~needle:notice (render_action state 140));
+  Masc_tui_home.clear_ask_answering state;
+  check_bool "clearing ask answering retires the armed notice from state" true
+    (Option.is_none state.last_action);
+  check_bool "withdrawn ask answering no longer draws confirmation hint" false
+    (contains ~needle:notice (render_action state 140));
+  (* Even if a caller leaves the notice tuple in last_action while ask submit
+     is disarmed, footer_line must not draw the obsolete confirmation hint. *)
+  state.last_action <- Some (notice, Unix.gettimeofday ());
+  check_bool "disarmed state suppresses stale ask confirmation notice" false
+    (contains ~needle:notice (render_action state 140));
+  let unrelated = "Cannot answer: workspace identity is unverified; draft retained" in
+  state.last_action <- Some (unrelated, Unix.gettimeofday ());
+  Masc_tui_home.clear_ask_answering state;
+  check_bool "clearing ask answering preserves unrelated action notices" true
+    (contains ~needle:unrelated (render_action state 140))
+
 let tests =
   [ ( "tui-footer-status-items"
     , [ Alcotest.test_case "action text is not dropped as a key" `Quick
@@ -294,6 +318,8 @@ let tests =
           test_chat_rows_carry_the_door_only_while_the_draft_is_empty
       ; Alcotest.test_case "ensure_help_item appends once" `Quick
           test_ensure_help_item_appends_once
+      ; Alcotest.test_case "armed ask submit notice retires when answering is cleared" `Quick
+          test_armed_ask_submit_notice_retires_when_answering_is_cleared
       ;] )
   ; ( "voice meter"
     , [] )

@@ -42,6 +42,7 @@ type read_error =
   | Missing_file of string
   | Not_a_file of string
   | Read_failed of string
+  | Read_refused of string
 
 val read_error_to_string : read_error -> string
 
@@ -171,8 +172,11 @@ val read_complete_file : ?turn_sandbox_factory:Keeper_sandbox_factory.t -> confi
   host_path:string -> timeout_sec:float -> unit -> (string, string) result
 
 (** Raw binary prefix. The command limits its output before transport capture;
-    it is never projected as UTF-8 text. *)
+    it is never projected as UTF-8 text. A path that does not exist or is not a
+    regular file is classified like {!read_file}'s window: the sentinel exit
+    codes say so, so a caller can distinguish a missing path from a transport
+    or capture fault. *)
 val read_raw_prefix : ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
   config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta ->
   host_path:string -> max_bytes:int -> timeout_sec:float -> unit ->
-  (string, string) result
+  (string, read_error) result

@@ -27,7 +27,13 @@ let handle ~config ~meta ~turn_sandbox_factory ~write ~args =
     let ceiling = Env_config_keeper.KeeperPeerArtifact.max_bytes () in
     (match Keeper_tool_filesystem_runtime.read_sandbox_raw_prefix ?turn_sandbox_factory
         ~config ~meta ~path ~max_bytes:(ceiling + 1) () with
-     | Error detail -> fail Tool_result.Runtime_failure detail
+     | Error (Keeper_sandbox_read_backend.Missing_file detail)
+     | Error (Keeper_sandbox_read_backend.Not_a_file detail) ->
+       fail Tool_result.Workflow_rejection detail
+     | Error (Keeper_sandbox_read_backend.Read_refused detail) ->
+       fail Tool_result.Workflow_rejection detail
+     | Error (Keeper_sandbox_read_backend.Read_failed detail) ->
+       fail Tool_result.Runtime_failure detail
      | Ok bytes when String.length bytes > ceiling ->
        fail Tool_result.Policy_rejection
          (Printf.sprintf

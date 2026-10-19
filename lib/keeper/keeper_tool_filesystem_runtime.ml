@@ -240,11 +240,13 @@ let read_sandbox_raw_prefix ?turn_sandbox_factory ~config ~meta ~path ?cwd ~max_
   let args = `Assoc (match cwd with None -> [] | Some cwd -> [ "cwd", `String cwd ]) in
   let* read_target =
     resolve_read_file_target ~config ~meta ~args ~raw_path:path
-    |> Result.map_error (function Read_path_error refusal -> refusal.Keeper_alerting_path.message)
+    |> Result.map_error (fun (Read_path_error refusal) ->
+           Keeper_sandbox_read_backend.Read_refused refusal.Keeper_alerting_path.message)
   in
   let* () =
     check_read_file_target ~config ~meta read_target
-    |> Result.map_error (fun (refusal : Keeper_alerting_path.path_refusal) -> refusal.message)
+    |> Result.map_error (fun (refusal : Keeper_alerting_path.path_refusal) ->
+           Keeper_sandbox_read_backend.Read_refused refusal.message)
   in
   Keeper_sandbox_read_backend.read_raw_prefix ?turn_sandbox_factory ~config ~meta
     ~host_path:(read_file_target_path read_target) ~max_bytes
@@ -451,6 +453,8 @@ let handle_read_file_with_preparation
          with
          | Error (Keeper_sandbox_read_backend.Missing_file error) -> missing_file error
          | Error (Keeper_sandbox_read_backend.Not_a_file detail) ->
+           refused Tool_result.Policy_rejection detail
+         | Error (Keeper_sandbox_read_backend.Read_refused detail) ->
            refused Tool_result.Policy_rejection detail
          | Error (Keeper_sandbox_read_backend.Read_failed detail) ->
            refused Tool_result.Runtime_failure detail

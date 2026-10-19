@@ -481,16 +481,32 @@ let media_result t tool ~name ~args ~start_time =
            (match Keeper_tool_filesystem_runtime.read_owned_bytes
              ~ownership_root:t.ownership_root ~path ?cwd ~max_bytes:(limit + 1) () with
             | Ok probe when Verification_media_inspection.is_pdf path probe || Verification_media_inspection.is_presentation path || Verification_media_inspection.is_mp4 path probe ->
-              Keeper_tool_filesystem_runtime.read_owned_bytes
-                ~ownership_root:t.ownership_root ~path ?cwd
-                ~max_bytes:(max_media_source_bytes + 1) ()
-            | (Ok _ | Error _) as result -> result)
+              (match Keeper_tool_filesystem_runtime.read_owned_bytes
+                 ~ownership_root:t.ownership_root ~path ?cwd
+                 ~max_bytes:(max_media_source_bytes + 1) () with
+               | Error detail -> Error (Keeper_sandbox_read_backend.Read_failed detail)
+               | Ok whole -> Ok whole)
+            | (Ok _ | Error _) as result ->
+              Result.map_error
+                (fun detail -> Keeper_sandbox_read_backend.Read_failed detail)
+                result)
        in
        (match bytes with
-        | Error detail when Verification_media_inspection.is_pdf path "" || Verification_media_inspection.is_presentation path || Verification_media_inspection.is_mp4 path "" ->
+        | Error (Keeper_sandbox_read_backend.Missing_file detail)
+        | Error (Keeper_sandbox_read_backend.Not_a_file detail) ->
+          Some (Tool_result.error ~failure_class:Tool_result.Workflow_rejection
+            ~tool_name:name ~start_time detail)
+        | Error (Keeper_sandbox_read_backend.Read_failed detail)
+          when Verification_media_inspection.is_pdf path ""
+               || Verification_media_inspection.is_presentation path
+               || Verification_media_inspection.is_mp4 path "" ->
           Some (Tool_result.error ~failure_class:Tool_result.Runtime_failure
             ~tool_name:name ~start_time detail)
-        | Error _ -> None (* The ordinary Read preserves its own error contract. *)
+        | Error (Keeper_sandbox_read_backend.Read_failed _) ->
+          None (* The ordinary Read preserves its own error contract. *)
+        | Error (Keeper_sandbox_read_backend.Read_refused detail) ->
+          Some (Tool_result.error ~failure_class:Tool_result.Workflow_rejection
+            ~tool_name:name ~start_time detail)
         (* Only an escalated whole-file read can reach this length: every other
            path here is already capped at the image byte limit or below. PPTX,
            MP4 and PDF all escalate to the same ceiling, so the check sits ahead

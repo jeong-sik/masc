@@ -1360,7 +1360,8 @@ let test_undeclared_endpoint_root_stays_refused () =
   | Ok _ -> Alcotest.fail "an undeclared endpoint path was read"
   | Error message ->
     Alcotest.(check bool) "Read names the refusal" true
-      (String.starts_with ~prefix:"path_outside_sandbox" message)
+      (String.starts_with ~prefix:"path_outside_sandbox"
+         (Keeper_sandbox_read_backend.read_error_to_string message))
 
 (* The keeper names no remote_endpoint, so whether /app is a declared root
    cannot be known. That is the operator's to fix and leads the refusal; the
@@ -1387,6 +1388,7 @@ sandbox_profile = "remote_ssh"
   with
   | Ok _ -> Alcotest.fail "a path no endpoint could declare was read"
   | Error message ->
+    let message = Keeper_sandbox_read_backend.read_error_to_string message in
     Alcotest.(check bool) "the endpoint error leads" false
       (String.starts_with ~prefix:"path_outside_sandbox" message);
     Alcotest.(check bool) "the tree refusal follows" true
@@ -1454,7 +1456,7 @@ let test_read_of_a_declared_path_asks_the_endpoint_for_that_path () =
       Masc.Keeper_tool_filesystem_runtime.read_sandbox_raw_prefix ?cwd ~config ~meta ~path
         ~max_bytes:4096 ()
     with
-    | Error message -> Alcotest.fail message
+    | Error message -> Alcotest.fail (Keeper_sandbox_read_backend.read_error_to_string message)
     | Ok content ->
       Alcotest.(check string) "content comes from the endpoint" "remote-file-content" content;
       (match Exec_ssh_protocol.decode_request (read_file frame_path) with
@@ -1496,7 +1498,8 @@ let test_raw_prefix_keeps_remote_bytes_that_spell_the_workspace_root () =
     Masc.Keeper_tool_filesystem_runtime.read_sandbox_raw_prefix ~config ~meta
       ~path:"shot.png" ~max_bytes:4096 ()
   with
-  | Error message -> Alcotest.fail message
+  | Error message ->
+    Alcotest.fail (Keeper_sandbox_read_backend.read_error_to_string message)
   | Ok content -> Alcotest.(check string) "the endpoint's bytes, unchanged" bytes content
 
 let test_sandbox_container_label_args_include_owner_scope () =
@@ -2929,7 +2932,8 @@ esac
       match Keeper_sandbox_read_backend.read_raw_prefix ~config ~meta ~host_path:path
           ~max_bytes:4 ~timeout_sec:5. () with
       | Ok bytes -> Alcotest.(check string) "binary prefix unchanged" "\255PNG" bytes
-      | Error detail -> Alcotest.fail detail))
+      | Error detail ->
+        Alcotest.fail (Keeper_sandbox_read_backend.read_error_to_string detail)))
 
 (* The read window command runs as-is inside the backend. Running the same
    argv here checks the shell text itself: the line a window starts at, the

@@ -2327,7 +2327,15 @@ let handle_analyze_image_with_outcome ?complete ?config ?turn_sandbox_factory
                  ?turn_sandbox_factory ~config ~meta ~path
                  ~max_bytes:(Keeper_vision_tool.max_image_bytes () + 1)
                  ()
-                 |> Result.map_error (fun detail -> Tool_result.Runtime_failure, "sandbox_image_read_failed", detail) in
+                 |> Result.map_error (function
+                      | Keeper_sandbox_read_backend.Missing_file detail ->
+                        Tool_result.Workflow_rejection, "path_not_found", detail
+                      | Keeper_sandbox_read_backend.Not_a_file detail ->
+                        Tool_result.Workflow_rejection, "path_not_a_file", detail
+                      | Keeper_sandbox_read_backend.Read_refused detail ->
+                        Tool_result.Workflow_rejection, "path_read_refused", detail
+                      | Keeper_sandbox_read_backend.Read_failed detail ->
+                        Tool_result.Runtime_failure, "sandbox_image_read_failed", detail) in
              let* () = Keeper_vision_tool.validate_image_size bytes
                  |> Result.map_error (fun detail -> Tool_result.Policy_rejection, "image_too_large", detail) in
              let* _ = Keeper_vision_tool.sniff_image_media_type bytes

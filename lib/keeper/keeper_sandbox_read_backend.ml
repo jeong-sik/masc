@@ -448,9 +448,13 @@ type read_error =
   | Missing_file of string
   | Not_a_file of string
   | Read_failed of string
+  | Read_refused of string
 
 let read_error_to_string = function
-  | Missing_file detail | Not_a_file detail | Read_failed detail -> detail
+  | Missing_file detail
+  | Not_a_file detail
+  | Read_failed detail
+  | Read_refused detail -> detail
 
 (* A window that starts past line 1 streams from that line, so the byte bound
    applies to the window and not to the file's prefix. Bounding the prefix
@@ -576,13 +580,82 @@ let read_complete_file ?turn_sandbox_factory ~config ~(meta : keeper_meta) ~host
 
 let read_raw_prefix ?turn_sandbox_factory ~config ~(meta : keeper_meta)
     ~host_path ~max_bytes ~timeout_sec () =
-  let ( let* ) = Result.bind in
-  if max_bytes <= 0 then Error "Raw prefix byte limit must be positive" else
-  let* path = container_path_of_host ~config ~meta ~host_path in
+  if max_bytes <= 0 then
+    Error (Read_failed "Raw prefix byte limit must be positive")
+  else
   (* Binary capture must retain exact bytes; limiting its text projection would
-     corrupt media. Bound the producing command instead, including endpoint
-     reads where the host cannot stat the source. *)
-  let* _, bytes = run_command_with_capture ?turn_sandbox_factory ~config ~meta
-      ~command_argv:["head"; "-c"; string_of_int max_bytes; path]
-      ~max_bytes:None ~timeout_sec () in
-  Ok bytes
+     corrupt media. Bound the producing command instead. [read_file] classifies
+     a missing path with sentinel exit codes from the read script; the raw
+     prefix is the same classification without the line window, including the
+     host [Unix.stat] pre-check for shared trees. *)
+  match container_path_of_host ~config ~meta ~host_path with
+  | Error detail -> Error (Read_failed detail)
+  | Ok backend_path ->
+    let profile_label =
+      Keeper_types_profile.sandbox_profile_to_string meta.sandbox_profile
+    in
+    let read_with_sentinels () =
+      let missing_exit = read_window_missing_exit
+      and not_a_file_exit = read_window_not_a_file_exit in
+      match
+        run_command_with_status ?turn_sandbox_factory ~config ~meta
+          ~ok_exit_codes:[ 0; missing_exit; not_a_file_exit ]
+          ~command_argv:
+            [ "sh"
+            ; "-c"
+            ; Printf.sprintf
+                {|if [ ! -e "$1" ]; then exit %d; fi; if [ ! -f "$1" ]; then exit %d; fi; exec < "$1" || exit 1; head -c "$2"|}
+                missing_exit not_a_file_exit
+            ; "sh"
+            ; backend_path
+            ; string_of_int (max 0 max_bytes)
+            ]
+          ~max_bytes ~timeout_sec ()
+      with
+      | Error detail -> Error (Read_failed detail)
+      | Ok (Unix.WEXITED 0, bytes) -> Ok bytes
+      | Ok (Unix.WEXITED code, _) when code = missing_exit ->
+        Error
+          (Missing_file
+             (Printf.sprintf "%s_read_failed: path_not_found: %s" profile_label
+                host_path))
+      | Ok (Unix.WEXITED code, _) when code = not_a_file_exit ->
+        Error
+          (Not_a_file
+             (Printf.sprintf
+                "%s_read_failed: path_is_not_a_file: %s (Read requires a regular \
+                 file; to list a directory use Execute with ls, e.g. \
+                 argv=['ls','-la','%s'])"
+                profile_label host_path host_path))
+      (* [ok_exit_codes] admits only the codes above. *)
+      | Ok ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _) ->
+        Error
+          (Read_failed
+             (Printf.sprintf "%s_read_failed: unexpected status for %s"
+                profile_label host_path))
+    in
+    if
+      Keeper_types_profile_sandbox.tree_location_of_profile meta.sandbox_profile
+      = Keeper_types_profile_sandbox.Endpoint_owned
+    then read_with_sentinels ()
+    else
+      (* A shared tree is also on this host, so a missing path is refused
+         before a sandbox process is spent on it. *)
+      match Unix.stat host_path with
+      | { Unix.st_kind = Unix.S_DIR; _ } ->
+        Error
+          (Not_a_file
+             (Printf.sprintf
+                "%s_read_failed: path_is_directory: %s (Read requires a file; to \
+                 list a directory use Execute with ls, e.g. argv=['ls','-la','%s'])"
+                profile_label host_path host_path))
+      | { Unix.st_kind =
+            ( Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO
+            | Unix.S_SOCK )
+          ; _
+          } -> read_with_sentinels ()
+      | exception Unix.Unix_error (error, operation, argument) ->
+        Error
+          (Read_failed
+             (Printf.sprintf "%s_read_failed: %s(%s): %s" profile_label
+                operation argument (Unix.error_message error)))

@@ -298,12 +298,15 @@ let selection_error ?bidi_start ~base_path ~tool_name ~start_time error =
       ~listing:["servingClients", `List (List.map Browser_lane.client_json serving_clients);
                 "clients", `List (List.map Browser_lane.client_json listed)]
 
+let browser_choice_error ~tool_name ~start_time error =
+  let data = Browser_selection.error_to_json error in
+  Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Workflow_rejection
+    ~effect_disposition:Tool_result.Proven_pre_effect ~data (Yojson.Safe.to_string data)
+
 let read_failure ~base_path ~tool_name ~start_time = function
   | Browser_surface.Unselected error -> selection_error ~base_path ~tool_name ~start_time error
   | Browser_surface.Unchosen error ->
-      Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Workflow_rejection
-        ~effect_disposition:Tool_result.Proven_pre_effect
-        ~data:(Browser_selection.error_to_json error) (Browser_selection.error_message error)
+      browser_choice_error ~tool_name ~start_time error
   | Browser_surface.Unobserved detail -> make_workflow_err ~tool_name ~start_time detail
   | Browser_surface.Unavailable detail ->
     Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Dependency_unavailable detail
@@ -337,9 +340,7 @@ let issue_on_server_lane ~tool_name ~start_time args ~verb ~timeout_sec =
         Option.is_some request.tab_id in
     match Browser_selection.resolve ~verb ~bound request.route with
     | Error error ->
-      Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Workflow_rejection
-        ~effect_disposition:Tool_result.Proven_pre_effect
-        ~data:(Browser_selection.error_to_json error) (Browser_selection.error_message error)
+      browser_choice_error ~tool_name ~start_time error
     | Ok selected ->
       let owned = match selected.route with
         | Browser_lane.Automation_route -> Some (Browser_lane.Server_automation, Browser_lane.Automation)
@@ -582,9 +583,7 @@ let act_route ~tool_name ~start_time args action =
     let bound = match action with Browser_lane.Action.Open_tab _ -> false | On_tab _ -> true in
     match Browser_selection.resolve ~verb:(Browser_lane.Page_act action) ~bound request.route with
     | Error error ->
-        Error (Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Workflow_rejection
-          ~effect_disposition:Tool_result.Proven_pre_effect
-          ~data:(Browser_selection.error_to_json error) (Browser_selection.error_message error))
+        Error (browser_choice_error ~tool_name ~start_time error)
     | Ok selected ->
       match selected.route with
       | Browser_lane.Live_route None -> Error (make_input_err ~tool_name ~start_time

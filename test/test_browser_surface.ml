@@ -105,16 +105,13 @@ let test_tool_input_recovery () =
         Yojson.Safe.Util.(data |> member "clientId" |> to_string);
       check string "and a supplied transport by the route's" "web_extension"
         Yojson.Safe.Util.(data |> member "transport" |> to_string);
-      let occurrences needle text =
-        let limit = String.length text - String.length needle in
-        let rec count index found =
-          if index > limit then found
-          else count (index + 1)
-            (if String.sub text index (String.length needle) = needle then found + 1 else found) in
-        count 0 0 in
-      let recorded = Yojson.Safe.to_string data in
-      check int "each name appears once in what the Keeper is told" 2
-        (occurrences {|"clientId":|} recorded + occurrences {|"transport":|} recorded)))
+      let fields = Yojson.Safe.Util.to_assoc data in
+      check int "one authoritative top-level connection ID" 1
+        (List.length (List.filter (fun (key,_) -> key="clientId") fields));
+      check int "one authoritative top-level transport" 1
+        (List.length (List.filter (fun (key,_) -> key="transport") fields));
+      check string "selection receipt binds that same connection" valid_id
+        Yojson.Safe.Util.(data |> member "browserSelection" |> member "clientId" |> to_string)))
 (* The scene and the screenshot are rebuilt around the route's connection
    fields, so each names the live connection once, whatever the browser sent
    under those names. *)
@@ -384,7 +381,7 @@ let test_keeper_discovers_clients_without_dispatch () =
           ignore (Browser_lane.disconnect_client ~client_id:info.Browser_lane.client_id));
         ignore (Browser_lane.take_command ~client_info:info ~window_sec:0.001)) clients;
       let result = Masc.Tool_misc_browser_lane.handle_tabs
-        ~base_path:no_workspace ~tool_name:"BrowserTabs" ~start_time:(Tool_timing.start ()) (`Assoc []) in
+        ~base_path:no_workspace ~tool_name:"BrowserTabs" ~start_time:(Tool_timing.start ()) (`Assoc ["lane",`String "live"]) in
       let data = Tool_result.data result in
       check bool "ambiguous failure stays actionable" true
         (Yojson.Safe.Util.member "error" data = `String "ambiguous_browser_clients");
@@ -515,7 +512,7 @@ let test_keeper_hears_why_no_browser_is_connected () =
       Tool_result.data result
     | _ -> fail "a browser tool succeeded with no browser connected" in
   let tabs () = rejected (Masc.Tool_misc_browser_lane.handle_tabs ~base_path:base
-    ~tool_name:"BrowserTabs" ~start_time:(Tool_timing.start ()) (`Assoc [])) in
+    ~tool_name:"BrowserTabs" ~start_time:(Tool_timing.start ()) (`Assoc ["lane",`String "live"])) in
   let host_field data key = U.(data |> member "host" |> member key) in
   let data = tabs () in
   check string "the case is named" "no_live_client" U.(data |> member "error" |> to_string);
@@ -1165,7 +1162,45 @@ let test_automatic_selection_keeps_observed_browser () =
         (Result.is_error (Masc.Browser_interaction.perform request));
       check int "lost-owner mutation is never dispatched elsewhere" before (List.length !calls)))
 
+let test_automatic_recovery_reaches_keeper () =
+  Eio_main.run (fun env ->
+    Time_compat.set_clock env#clock;
+    Eio.Switch.run (fun sw ->
+      let dispatched = ref 0 in
+      let execute _ = incr dispatched; fail "ambiguous or unbound request reached a browser" in
+      Browser_lane.install_automation_executor (Some execute);
+      Browser_lane.install_stagehand_executor (Some (fun ~actor:_ verb -> execute verb));
+      List.iter (fun lane -> Browser_lane.install_server_session_observer lane
+        (Some (fun () -> Browser_lane.Browser_open)))
+        [Browser_lane.Server_automation;Browser_lane.Server_stagehand];
+      Eio.Switch.on_release sw (fun () ->
+        Browser_lane.install_automation_executor None; Browser_lane.install_stagehand_executor None;
+        List.iter (fun lane -> Browser_lane.install_server_session_observer lane None)
+          [Browser_lane.Server_automation;Browser_lane.Server_stagehand]);
+      let module Tools = Masc.Tool_misc_browser_lane in
+      let run handler fields = handler ~tool_name:"Browser" ~start_time:(Tool_timing.start ()) (`Assoc fields) in
+      let inspect result =
+        check bool "request is refused" true (Tool_result.is_failed result);
+        let execution = Masc.Keeper_tool_execution.of_tool_result result in
+        Yojson.Safe.from_string execution.raw_output in
+      List.iter (fun result ->
+        let raw = inspect result in
+        check string "Keeper sees why a selection is needed" "ambiguous_browsers"
+          Yojson.Safe.Util.(raw |> member "code" |> to_string);
+        check int "Keeper receives concrete candidates for recovery" 2
+          Yojson.Safe.Util.(raw |> member "browsers" |> to_list |> List.length))
+        [run (Tools.handle_tabs ~base_path:no_workspace) [];
+         run Tools.handle_session ["action",`String "open"]];
+      List.iter (fun result ->
+        let raw = inspect result in
+        check string "continuing mutations require their observed owner" "browser_binding_required"
+          Yojson.Safe.Util.(raw |> member "code" |> to_string))
+        [run Tools.handle_session ["action",`String "close"];
+         run Tools.handle_goto ["url",`String "https://example.org/"]];
+      check int "recovery and missing-identity requests have no side effects" 0 !dispatched))
+
 let () = run "browser surface" ["behavior",[
+  test_case "automatic refusals provide Keeper recovery without dispatch" `Quick test_automatic_recovery_reaches_keeper;
   test_case "automatic discovery binds subsequent observations and input" `Quick test_automatic_selection_keeps_observed_browser;
   test_case "unreadable tabs do not block the requested readable tab" `Quick test_partial_inventory_preserves_requested_work;
   test_case "partial inventories remain incomplete without unavailable tabs" `Quick test_partial_inventory_without_unavailable_tabs;

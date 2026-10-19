@@ -1580,7 +1580,7 @@
  (name masc_tui_task_document_observation)
  (wrapped false)
  (modules masc_tui_task_document_observation)
- (libraries masc masc.masc_core masc_tui_task_document masc_tui_response_decode mtime.clock.os uuidm unix eio))
+ (libraries masc masc.masc_core masc_tui_task_document masc_tui_response_decode mtime.clock.os uuidm unix eio masc_log yojson))
 
 (library
  (name masc_tui_types)
@@ -1838,7 +1838,7 @@
  (wrapped false)
  (modules masc_tui_task_document)
  (libraries masc masc_types masc_tui_ansi masc_tui_fetched masc_tui_message_layout
-  masc_tui_text_block masc_tui_planning_detail masc_tui_theme masc_tui_link))
+  masc_tui_text_block masc_tui_planning_detail masc_tui_theme masc_tui_link masc_skill_reference yojson))
 
 (library
  (name masc_tui_render_tools)

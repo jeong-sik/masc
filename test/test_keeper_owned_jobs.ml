@@ -1885,6 +1885,15 @@ let test_operator_resolves_permanent_continuation_mismatch () = with_fixture @@ 
   let continuation = match Journal.waiting_continuation journal with
     | Ok (Some continuation) -> continuation
     | Ok None | Error _ -> fail "original job did not suspend the Composition" in
+  let captured = Journal.observe_request ~base_path:fixture.base_path ~composition_run_id entry
+    |> require "original logical status before resolution" in
+  let status tool_use_id = with_bundle fixture (fun bundle -> invoke fixture bundle
+      ~tool_use_id ~turn:41 "keeper_composition_status" (`Assoc ["request_id",`String entry.request_id])) in
+  let before_status = status "status-before-permanent-resolution" in
+  check_json "unresolved status keeps the physical wait" (`String "waiting_for_dependencies")
+    (member "status" before_status);
+  check_json "unresolved logical observation is explicit" `Null
+    (before_status |> member "continuation" |> member "observation" |> member "resolution");
   let terminal_path = Async.For_testing.terminal_record_path ~base_path:fixture.base_path ~request_id:entry.request_id
     |> Option.get in
   let foreign = Store.Job_id.fresh () |> Store.Job_id.to_string in
@@ -1911,6 +1920,31 @@ let test_operator_resolves_permanent_continuation_mismatch () = with_fixture @@ 
     "reason",`String "permanently mismatched original dependency"] in
   let resolved = execute 101. decision in
   check_json "explicit rejection retires the exact pending marker" (`Bool true) (member "marker_retired" resolved);
+  let after_status = status "status-after-permanent-resolution" in
+  check_json "resolved status still retains physical waiting outcome" (`String "waiting_for_dependencies")
+    (member "status" after_status);
+  let logical = after_status |> member "continuation" |> member "observation" in
+  check_json "status carries the explicit logical rejection" (`String "rejected")
+    (logical |> member "resolution" |> member "decision");
+  check_json "logical status keeps the original source Task" (`String "original-resolution-task")
+    (member "source_task_id" logical);
+  let canonical = Async.load_canonical_durable_terminal ~base_path:fixture.base_path ~caller:keeper entry.request_id
+    |> require "resolved canonical physical status" |> Async.durable_terminal_entry in
+  let current = Journal.observe_request ~base_path:fixture.base_path ~composition_run_id canonical
+    |> require "resolved logical snapshot" in
+  check bool "old logical snapshot is not current authority" false (Journal.same_request_observation captured current);
+  check_json "captured observation was not mutated by resolution" `Null
+    (Journal.request_observation_to_json captured |> member "resolution");
+  let http_status = Masc.Server_async_request_observability.project_request
+    ~base_path:fixture.base_path ~submitted_by:keeper ~request_id:entry.request_id in
+  check_json "HTTP exact observation finds a terminal attempt outside active inventory" (`String "observed")
+    (member "status" http_status);
+  check_json "HTTP status exposes the original logical decision" (`String "rejected")
+    (http_status |> member "request" |> member "continuation" |> member "observation" |> member "resolution" |> member "decision");
+  let foreign_status = Masc.Server_async_request_observability.project_request
+    ~base_path:fixture.base_path ~submitted_by:"foreign-status-owner" ~request_id:entry.request_id in
+  check_json "wrong Keeper cannot inspect another owner's status" (`String "rejected") (member "status" foreign_status);
+  check_json "wrong Keeper gets no physical request payload" `Null (member "request" foreign_status);
   check string "operator preserves the original physical mismatch for audit" malformed (read terminal_path);
   check (option string) "retained sibling remains available" (Some "retained sibling before explicit resolution\n")
     (Tool_blob_store.fetch blob ~sha256:sibling.sha256 |> require "retained sibling after resolution");

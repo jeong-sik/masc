@@ -443,6 +443,9 @@ type state =
   ; children : child_link Nodes.t; resolution : resolution option }
 type t = {base_path : string; root : string; path : string; immutable_source : source; source_sha : string;
           immutable_observation : source_observation option}
+type request_observation =
+  { journal : t; request_entry : Async.entry; observed_owner : binding
+  ; observed_resolution : resolution option; journal_version : string; observed_at : float }
 type worker = {journal : t; binding : binding}
 type attempt = {worker : worker; occurrence : occurrence}
 type child_submission = {attempt : attempt; link : child_link}
@@ -496,6 +499,23 @@ let resolution_observation_to_json (observation : resolution_observation) = `Ass
 let resolution_report_to_json (report : resolution_report) = `Assoc
   ["resolution", resolution_to_json report.resolution; "marker_retired", `Bool report.marker_retired;
    "retirement_error", option_json error_to_json report.retirement_error]
+
+let request_observation_to_json (observation : request_observation) =
+  let source = observation.journal.immutable_source in
+  `Assoc ["composition_run_id",`String (Plan.Composition_run_id.to_string source.composition_run_id);
+    "source_task_id",(match source.source_task_id with None -> `Null | Some id -> `String id);
+    "owner",binding_json observation.observed_owner;
+    "journal_version",`String observation.journal_version;
+    "observed_at",`Float observation.observed_at;
+    "resolution",(match observation.observed_resolution with
+      | None -> `Null | Some resolution -> resolution_to_json resolution)]
+
+let request_observation_resolution observation = observation.observed_resolution
+
+let same_request_observation (left : request_observation) (right : request_observation) =
+  String.equal left.journal.base_path right.journal.base_path
+  && Async.same_entry_record left.request_entry right.request_entry
+  && String.equal left.journal_version right.journal_version
 let occurrence_of_record = function Attempting occurrence | Settled (occurrence, _, _, _) -> occurrence
 let launch_invocation_json (invocation : launch_invocation) =
   `Assoc ["trace_id", `String invocation.trace_id;
@@ -1221,6 +1241,39 @@ let resolve_continuation ~base_path ~keeper_name ~composition_run_id ~request_id
     let retirement_error = match retire_resolution_marker ~root:journal.root ~path ~snapshot resolution with
       | Ok () -> None | Error error -> Some error in
     Ok {resolution;marker_retired=Option.is_none retirement_error;retirement_error}))
+
+let observe_request ~base_path ~composition_run_id (request_entry : Async.entry) = filesystem (fun () ->
+  let* journal = load_authority ~base_path ~keeper_name:request_entry.keeper_name ~composition_run_id in
+  let* () = if String.equal (Fs_compat.realpath request_entry.base_path) journal.base_path
+    then Ok () else Error Source_conflict in
+  let* () = entry_matches_source journal.immutable_source request_entry
+    |> Result.map_error (fun detail -> Invalid_source detail) in
+  let* observation = update_existing_with_bytes journal (fun bytes state -> None,
+    let belongs (binding : binding) = String.equal binding.request_id request_entry.request_id in
+    let* owner = match state.owner with
+      | Some owner when belongs owner || List.exists (fun (prior,_) -> belongs prior) state.prior_owners -> Ok owner
+      | None | Some _ -> Error Ownership_changed in
+    Ok {journal;request_entry;observed_owner=owner;observed_resolution=state.resolution;
+      journal_version=sha bytes;observed_at=Time_compat.now ()}) in
+  let* () = match request_entry.status with
+    | Async.Queued | Running | Cancelling _ ->
+      (match Async.load_canonical_request ~base_path:journal.base_path
+          ~caller:request_entry.keeper_name request_entry.request_id with
+       | Found current when Async.same_entry_record current request_entry -> Ok ()
+       | Found _ | Absent -> Error Ownership_changed
+       | Unreadable detail -> Error (Invalid_result detail)
+       | Rejected rejection -> Error (Invalid_result (Yojson.Safe.to_string (Async.access_rejection_to_json rejection))))
+    | Done _ | Lost _ | Cancelled _ | Persistence_failed _ | Waiting_for_dependencies _ ->
+      let* proof = Async.load_canonical_durable_terminal ~base_path:journal.base_path
+          ~caller:request_entry.keeper_name request_entry.request_id
+        |> Result.map_error (fun error -> Prior_owner_not_terminal
+            {request_id=request_entry.request_id;reason=Async.canonical_terminal_error_to_string error}) in
+      if Async.same_entry_record request_entry (Async.durable_terminal_entry proof)
+      then Ok () else Error Ownership_changed in
+  let* () = match observation.observed_resolution with
+    | None -> Ok ()
+    | Some resolution -> with_resolution_terminal journal resolution.owner.request_id (fun _ -> Ok ()) in
+  Ok observation)
 
 let canonical_entry journal request_id =
   let* entry = match Async.load_canonical_request ~base_path:journal.base_path

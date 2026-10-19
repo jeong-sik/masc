@@ -71,6 +71,19 @@ let test_reads_disk_only_entry () =
       |> accepted_request_id
     in
     Eio.Promise.await started;
+    let exact = Server_async_request_observability.project_request ~base_path ~submitted_by:caller ~request_id in
+    let member = Yojson.Safe.Util.member in
+    check string "exact read uses original submitter rather than target Keeper" "observed"
+      (member "status" exact |> Yojson.Safe.Util.to_string);
+    check string "exact read preserves the different target Keeper" "inventory-keeper"
+      (exact |> member "request" |> member "keeper_name" |> Yojson.Safe.Util.to_string);
+    check string "ordinary async request has no invented Composition" "not_composition"
+      (exact |> member "request" |> member "continuation" |> member "kind" |> Yojson.Safe.Util.to_string);
+    let wrong_owner = Server_async_request_observability.project_request
+        ~base_path ~submitted_by:"inventory-keeper" ~request_id in
+    check string "target Keeper cannot replace the original submitter" "rejected"
+      (member "status" wrong_owner |> Yojson.Safe.Util.to_string);
+    check bool "ownership rejection exposes no request payload" true (member "request" wrong_owner = `Null);
     check
       string
       "current process owns worker"

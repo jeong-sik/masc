@@ -27,6 +27,7 @@ type binding =
   ; manifest : Tool_output.artifact_ref
   ; inline_bytes : int
   ; inline_sha256 : string
+  ; logical_observation : Journal.request_observation
   }
 
 type presentation = Inline_result | Manifest_reference
@@ -72,14 +73,17 @@ let invocation_to_json invocation =
       "execution_mode",Agent_core.Tool_contract.execution_mode_to_yojson schedule.execution_mode];
     "completion",Agent_core.Tool_contract.completion_to_yojson (Invocation.completion invocation)]
 
-let status_payload ?invocation entry =
-  (* The canonical entry serializer owns this object shape. This is generated
-     data, not a wire parser or a fallback for malformed external input. *)
-  let fields = Async.entry_to_json entry |> Yojson.Safe.Util.to_assoc in
-  let fields = fields @ Option.to_list (Option.map (fun invocation ->
-    "status_invocation",invocation_to_json invocation) invocation) in
-  Keeper_tool_composition_projection.with_tool_kind_field
-    Keeper_tool_composition_catalog.status_tool_kind (`Assoc fields)
+type continuation_status =
+  | Not_a_composition
+  | Continuation_observed of Journal.request_observation
+  | Continuation_unavailable of error
+
+type status_snapshot =
+  { entry : Async.entry; invocation : Invocation.t option
+  ; continuation : continuation_status; payload : Yojson.Safe.t; request_payload : Yojson.Safe.t }
+
+let status_payload (snapshot : status_snapshot) = snapshot.payload
+let request_payload (snapshot : status_snapshot) = snapshot.request_payload
 
 let error_to_string = function
   | Invalid_context detail -> "invalid prepared result context: " ^ detail
@@ -116,11 +120,42 @@ let prepared_run_id (entry : Async.entry) =
     | [],(_::_) | (_::_),[] | (_::_::_),(_::_) | [_],(_::_::_) ->
       Error (Invalid_context "missing or duplicate prepared artifact identity")
 
+let observe_status ~base_path ?invocation entry =
+  (* Capture physical serialization once: active elapsed time is a projection,
+     not a new physical outcome or a reason to rebuild an admitted manifest. *)
+  let fields = Async.entry_to_json entry |> Yojson.Safe.Util.to_assoc in
+  let continuation = match prepared_run_id entry with
+    | Error error -> Continuation_unavailable error
+    | Ok None -> Not_a_composition
+    | Ok (Some composition_run_id) ->
+      match Journal.observe_request ~base_path ~composition_run_id entry with
+      | Ok observation -> Continuation_observed observation
+      | Error error -> Continuation_unavailable (Journal_failed error) in
+  let logical = match continuation with
+    | Not_a_composition -> `Assoc ["kind",`String "not_composition"]
+    | Continuation_observed observation -> `Assoc ["kind",`String "observed";
+        "observation",Journal.request_observation_to_json observation]
+    | Continuation_unavailable error -> `Assoc ["kind",`String "unavailable";
+        "detail",`String (error_to_string error)] in
+  let fields = fields @ ["continuation",logical] @ Option.to_list (Option.map (fun invocation ->
+    "status_invocation",invocation_to_json invocation) invocation) in
+  let request_payload = `Assoc fields in
+  let payload = Keeper_tool_composition_projection.with_tool_kind_field
+      Keeper_tool_composition_catalog.status_tool_kind request_payload in
+  {entry;invocation;continuation;payload;request_payload}
+
 let canonical_entry ~base_path (entry : Async.entry) =
   let* proof = Async.load_canonical_durable_terminal ~base_path
       ~caller:entry.keeper_name entry.request_id
     |> Result.map_error (fun error -> Canonical_request_failed error) in
   if Async.same_entry_record entry (Async.durable_terminal_entry proof)
+  then Ok () else Error Request_changed
+
+let validate_logical_observation ~base_path ~composition_run_id ~entry observation =
+  let* current = Journal.observe_request ~base_path ~composition_run_id entry
+    |> Result.map_error (fun error -> Journal_failed error) in
+  if Journal.same_request_observation observation current
+      && Option.is_none (Journal.request_observation_resolution current)
   then Ok () else Error Request_changed
 
 let manifest_matches ~base_path ~expected result =
@@ -148,16 +183,29 @@ let manifest_matches ~base_path ~expected result =
     | Invalid_artifact_manifest {detail} -> Error (Invalid_manifest detail) in
   Ok manifest
 
-let resolve ~base_path ~entry ~invocation ~(result : Tool_result.result) =
+let resolve ~base_path ~(snapshot : status_snapshot) ~invocation ~(result : Tool_result.result) =
+  let entry = snapshot.entry in
   match entry.Async.status with
   | Async.Queued | Running | Cancelling _ | Lost _ | Cancelled _
   | Persistence_failed _ | Waiting_for_dependencies _ -> Ok None
   | Done _ ->
+    let* () = match snapshot.invocation with
+      | Some captured when equal_invocation captured invocation -> Ok ()
+      | Some _ | None -> Error (Invalid_result "status snapshot has no exact SDK occurrence") in
+    let* logical = match snapshot.continuation with
+      | Not_a_composition -> Ok None
+      | Continuation_unavailable error -> Error error
+      | Continuation_observed observation ->
+        (match Journal.request_observation_resolution observation with
+         | Some _ -> Ok None | None -> Ok (Some observation)) in
+    match logical with
+    | None -> Ok None
+    | Some logical_observation ->
     let* run_id = prepared_run_id entry in
     match run_id with
     | None -> Ok None
     | Some composition_run_id ->
-      let* () = canonical_entry ~base_path entry in
+      let* () = validate_logical_observation ~base_path ~composition_run_id ~entry logical_observation in
       let* journal = Journal.load ~base_path ~keeper_name:entry.keeper_name ~composition_run_id
         |> Result.map_error (fun error -> Journal_failed error) in
       let* () = Journal.validate_request journal entry
@@ -168,7 +216,7 @@ let resolve ~base_path ~entry ~invocation ~(result : Tool_result.result) =
       match activation with
       | None -> Ok None
       | Some activation ->
-        let expected = status_payload ~invocation entry in
+        let expected = status_payload snapshot in
         let* () = match result with
           | Tool_result.Completed payload
             when String.equal payload.tool_name Keeper_tool_composition_catalog.status_tool_name
@@ -178,21 +226,21 @@ let resolve ~base_path ~entry ~invocation ~(result : Tool_result.result) =
         let* manifest = manifest_matches ~base_path ~expected result in
         let inline = Tool_bridge.artifact_result_envelope ~reference:manifest
           ~structured_content:expected () in
-        Ok (Some {entry;source;activation;invocation;manifest;
+        Ok (Some {entry;source;activation;invocation;manifest;logical_observation;
           inline_bytes=String.length inline;inline_sha256=sha256 inline})
 
 let discard_status state ~invocation =
   state.bindings <- List.filter (fun known -> not (String.equal
     (Invocation.tool_use_id invocation) (Invocation.tool_use_id known.invocation))) state.bindings
 
-let record_status state ~entry ~invocation ~result =
+let record_status state ~snapshot ~invocation ~result =
   let id = Invocation.tool_use_id invocation in
   let previous = List.find_opt (fun known -> String.equal id (Invocation.tool_use_id known.invocation)) state.bindings in
   (* The typed producer owns a new occurrence even when the provider reuses
      its ID. An ineligible or failed new lookup cannot inherit an older seal.
      There is no tombstone: a later valid occurrence may bind the same ID. *)
   discard_status state ~invocation;
-  let* binding = resolve ~base_path:state.base_path ~entry ~invocation ~result in
+  let* binding = resolve ~base_path:state.base_path ~snapshot ~invocation ~result in
   match binding with
   | None -> Ok ()
   | Some binding ->
@@ -238,6 +286,8 @@ let observe_result state ~binding ~runtime_id ~boundary ~content ~presentation ~
     let* () = if String.trim runtime_id <> "" then Ok ()
       else Error (Invalid_result "physical delivery has no runtime identity") in
     let* () = canonical_entry ~base_path:state.base_path binding.entry in
+    let* () = validate_logical_observation ~base_path:state.base_path
+        ~composition_run_id:binding.source.composition_run_id ~entry:binding.entry binding.logical_observation in
     let* journal = Journal.load ~base_path:state.base_path ~keeper_name:binding.source.keeper_name
         ~composition_run_id:binding.source.composition_run_id
       |> Result.map_error (fun error -> Journal_failed error) in
@@ -274,6 +324,7 @@ let observe_official_result state ~runtime_id ~invocation ~content ~observe ~on_
 let observation_to_json observation =
   let binding = observation.binding and source = observation.binding.source in
   `Assoc ["request_id",`String binding.entry.request_id;
+    "logical_observation",Journal.request_observation_to_json binding.logical_observation;
     "composition_run_id",`String (Keeper_tool_plan.Composition_run_id.to_string source.composition_run_id);
     "original_parent_tool_use_id",`String source.parent_tool_use_id;
     "original_source_turn",`Int source.source_turn;
@@ -295,6 +346,8 @@ let observation_to_json observation =
 let persist ~(config : Workspace.config) (observation : observation) =
   let binding = observation.binding in
   let* () = canonical_entry ~base_path:config.base_path binding.entry in
+  let* () = validate_logical_observation ~base_path:config.base_path
+      ~composition_run_id:binding.source.composition_run_id ~entry:binding.entry binding.logical_observation in
   let* journal = Journal.load ~base_path:config.base_path ~keeper_name:binding.source.keeper_name
       ~composition_run_id:binding.source.composition_run_id
     |> Result.map_error (fun error -> Journal_failed error) in

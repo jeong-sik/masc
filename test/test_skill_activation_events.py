@@ -260,7 +260,7 @@ class SkillActivationEventsTest(unittest.TestCase):
     # step, so bytes with no newline at all are not a log it wrote.
     def test_a_log_whose_first_row_has_no_newline_is_refused(self):
         with self.assertRaises(events.SkillLedgerError) as caught:
-            events.fold_event_log(b'{"schema":"masc.skill-activation-events/v1"')
+            events.fold_event_log(b'{"schema":"masc.skill-activation-events/v2"')
 
         self.assertIs(caught.exception.fault, Fault.UNTERMINATED_HEADER_ROW)
 

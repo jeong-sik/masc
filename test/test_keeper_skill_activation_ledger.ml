@@ -360,7 +360,7 @@ let header_row config trace_id =
   let workspace_root = Keeper_fs.session_base_dir config |> Unix.realpath in
   Yojson.Safe.to_string
     (`Assoc
-        [ "schema", `String "masc.skill-activation-events/v1"
+        [ "schema", `String "masc.skill-activation-events/v2"
         ; "kind", `String "opened"
         ; ( "workspace_key"
           , `String (Ledger.workspace_key (Ledger.empty ~workspace_root ~trace_id)) )
@@ -412,6 +412,33 @@ let test_legacy_composition_reports_exact_row_without_appending () =
    | Error error -> check_error (Error error)
    | Ok _ -> fail "later instruction silently skipped the undecodable composition");
   check string "diagnosis neither skips nor rewrites original evidence" bytes (read_file file)
+;;
+
+(* A log of the previous row generation is refused at its header. Its rows
+   are not decoded one by one, and nothing is appended after them. *)
+let test_previous_generation_log_is_refused_at_its_header () =
+  with_session @@ fun config trace_id session_dir ->
+  let previous = match Yojson.Safe.from_string (header_row config trace_id) with
+    | `Assoc fields ->
+      Yojson.Safe.to_string
+        (`Assoc (("schema", `String "masc.skill-activation-events/v1")
+                 :: List.remove_assoc "schema" fields))
+    | _ -> fail "header object" in
+  let file = events_file session_dir in
+  let bytes = previous ^ "\n" ^ activation_row (activation ()) ^ "\n" in
+  write_file file bytes;
+  let check_error = function
+    | Error (Ledger.Decode_failed (Ledger.Unsupported_schema observed) as error) ->
+      check string "the previous generation is named" "masc.skill-activation-events/v1" observed;
+      check string "stable failure class" "decode_failed.unsupported_schema"
+        (Ledger.store_error_code error)
+    | Error error -> fail (Ledger.store_error_to_string error)
+    | Ok _ -> fail "a previous-generation log was accepted" in
+  check_error (Ledger.load ~config ~trace_id);
+  (match Ledger.record ~config ~trace_id (activation ~revision:'b' ()) with
+   | Error error -> check_error (Error error)
+   | Ok _ -> fail "a record was appended to a previous-generation log");
+  check string "the previous-generation log is left as it was" bytes (read_file file)
 ;;
 
 (* A crash while appending leaves the last row without its newline. A reader
@@ -1477,6 +1504,8 @@ let () =
     [ ( "session ledger"
       , [ test_case "legacy composition identifies its row and refuses later append" `Quick
             test_legacy_composition_reports_exact_row_without_appending
+        ; test_case "a previous-generation log is refused at its header" `Quick
+            test_previous_generation_log_is_refused_at_its_header
         ; test_case "nested dispatch identities use exact parent result delivery" `Quick
             test_nested_dispatch_identity_and_parent_delivery_survive_reload
         ; test_case "nested provenance rejects tampering and invocation rebinding" `Quick

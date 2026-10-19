@@ -13,7 +13,7 @@ import json
 from typing import Any
 
 # The header schema the server's writer puts on row 1.
-EVENTS_SCHEMA = "masc.skill-activation-events/v1"
+EVENTS_SCHEMA = "masc.skill-activation-events/v2"
 COMPACT = (",", ":")
 
 

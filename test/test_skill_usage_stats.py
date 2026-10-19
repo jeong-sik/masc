@@ -34,6 +34,7 @@ def _activation(name, kind, at, runtime="r1", source="project-masc"):
             "kind": kind,
             "origin": {"kind": "session_composition"},
             "tool_name": f"keeper_compose_{name}",
+            "execution_id": f"execution-{name}-{at}",
         }
     else:
         invocation = {
@@ -158,7 +159,7 @@ class SkillUsageStatsTest(unittest.TestCase):
             d = os.path.join(base, ".masc", "traces", "trace-x")
             os.makedirs(d, exist_ok=True)
             with open(os.path.join(d, "skill-activation-events.jsonl"), "wb") as fh:
-                fh.write(b'{"schema":"masc.skill-activation-events/v1"')
+                fh.write(b'{"schema":"masc.skill-activation-events/v2"')
             per_skill, total, sessions = stats.rollup(base)
             self.assertEqual(total, 0)
             self.assertEqual(dict(per_skill), {})

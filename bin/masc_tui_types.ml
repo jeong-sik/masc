@@ -17916,14 +17916,14 @@ let keeper_message_status_projection (state : state) live ~now =
   { kmsp_rows=visible; kmsp_folded_count=folded_count; kmsp_details_hint=details_hint
   ; kmsp_row_count=visible_count + if details_hint then 1 else 0 }
 
-type keeper_message_status_frame =
+type keeper_message_status_source =
   | No_message_status
   | Message_status of turn_log * keeper_message_status_projection
 
 (* One synchronous draw may pass this value through menu measurement, history
    budgeting and status drawing. The frame adds no cache or worker handoff;
    the next draw observes the current selection again. *)
-let keeper_message_status_frame (state : state) ~now =
+let keeper_message_status_source (state : state) ~now =
   match keeper_message_status_log state with
   | None -> No_message_status
   | Some live when state.msg_target_keeper_name <> Some (turn_log_keeper_name live) ->
@@ -18303,39 +18303,40 @@ let keeper_message_inflight_drawn (state : state) =
     | Tools_full -> List.filter (fun entry ->
         state.msg_target_keeper_name = Some entry.sent_request.keeper_name) uncovered
     | Tools_compact | Tools_results -> [] in
-  List.fold_left
-    (fun groups entry ->
-      let execution_id = turn_log_execution_id entry.log in
-      let same_execution group =
-        String.equal
-          (turn_log_execution_id group.representative.log)
-          execution_id
-      in
-      let reconciling =
-        match entry.phase with
-        | Turn_reconciling -> 1
-        | Turn_preflight _ | Turn_streaming -> 0
-      in
-      if List.exists same_execution groups then
-        List.map
-          (fun group ->
-            if same_execution group then
-              { representative =
-                  (if entry.sent_at < group.representative.sent_at then entry
-                   else group.representative)
-              ; count = group.count + 1
-              ; reconciling_count = group.reconciling_count + reconciling
-              }
-            else group)
-          groups
-      else
-        groups
-        @ [ { representative = entry; count = 1; reconciling_count = reconciling } ])
-    [] uncovered
+  match uncovered with
+  | [] -> []
+  | _ :: _ ->
+    let module Executions = Map.Make (String) in
+    let _, groups = List.fold_left
+      (fun (next, groups) entry ->
+        let execution_id = turn_log_execution_id entry.log in
+        let reconciling =
+          match entry.phase with
+          | Turn_reconciling -> 1
+          | Turn_preflight _ | Turn_streaming -> 0
+        in
+        let ordinal, group, next = match Executions.find_opt execution_id groups with
+          | Some (ordinal, group) ->
+              ordinal,
+                { representative =
+                    (if entry.sent_at < group.representative.sent_at then entry
+                     else group.representative)
+                ; count = group.count + 1
+                ; reconciling_count = group.reconciling_count + reconciling
+                }, next
+          | None -> next,
+              { representative = entry; count = 1; reconciling_count = reconciling }, next + 1 in
+        next, Executions.add execution_id (ordinal, group) groups)
+      (0, Executions.empty) uncovered in
+    (* The index key is the exact execution ID; only first appearance chooses
+       display order. Keep the original strict timestamp comparison for ties. *)
+    Executions.bindings groups
+    |> List.sort (fun (_, (left, _)) (_, (right, _)) -> Int.compare left right)
+    |> List.map (fun (_, (_, group)) -> group)
 
 (* The current conversation's extra request diagnostics, shared by the
    renderer and its row budget. Background work stays on the Activity pane. *)
-let keeper_message_inflight_rows (state : state) ~chat_cols:_ ~now =
+let keeper_message_inflight_rows (state : state) ~now =
   let batch_label group =
     if group.count = 1 then ""
     else Printf.sprintf "%d messages in one turn · " group.count
@@ -18369,23 +18370,37 @@ let keeper_message_inflight_rows (state : state) ~chat_cols:_ ~now =
   List.map (fun group -> true, summary group)
     (keeper_message_inflight_drawn state)
 
-let keeper_message_status_rows ?status_frame ?scroll (state : state) ~terminal_cols =
+type keeper_message_status_frame =
+  { kmsf_source : keeper_message_status_source
+  ; kmsf_inflight_rows : (bool * string) list
+  ; kmsf_activity_rows : Masc_tui_answering.chat_activity_row list
+  ; kmsf_interrupt_rows : string list
+  }
+
+(* These are the same original rows used by the budget and the draw. The
+   frame is local to that synchronous call, never a state or worker cache. *)
+let keeper_message_status_frame state ~now =
+  { kmsf_source = keeper_message_status_source state ~now
+  ; kmsf_inflight_rows = keeper_message_inflight_rows state ~now
+  ; kmsf_activity_rows = keeper_message_activity_rows state
+  ; kmsf_interrupt_rows = keeper_observed_interrupt_rows state
+  }
+
+let keeper_message_status_rows ?status_frame ?scroll (state : state) =
   let status_frame = match status_frame with
     | Some frame -> frame
     | None -> keeper_message_status_frame state ~now:(Unix.gettimeofday ()) in
-  let chat_cols = Masc_tui_roster_pane.content_cols
-      ~hidden:(roster_pane_hidden state) ~cols:terminal_cols in
   let unavailable_target =
     match state.msg_target_keeper_name with
     | Some keeper_name when keeper_available_for_new_message state keeper_name
       -> 0
     | Some _ | None -> 1
   in
-  List.length (keeper_message_inflight_rows state ~chat_cols ~now:0.)
-  + List.length (keeper_message_activity_rows state)
-  + List.length (keeper_observed_interrupt_rows state)
+  List.length status_frame.kmsf_inflight_rows
+  + List.length status_frame.kmsf_activity_rows
+  + List.length status_frame.kmsf_interrupt_rows
   + unavailable_target
-  + (match status_frame with
+  + (match status_frame.kmsf_source with
      | No_message_status -> 0
      | Message_status (_, status) -> status.kmsp_row_count)
   (* The promoted line and the queued ones are entries in the history now --
@@ -18427,7 +18442,7 @@ let keeper_message_command_window ?status_frame ?scroll state ~terminal_rows ~te
         (Masc_tui_message_input.contents state.msg_input) with
      | None -> None
      | Some menu ->
-       let status_rows = keeper_message_status_rows ?status_frame ?scroll state ~terminal_cols + 1 in
+       let status_rows = keeper_message_status_rows ?status_frame ?scroll state + 1 in
        let chat_cols = Masc_tui_roster_pane.content_cols
            ~hidden:(roster_pane_hidden state) ~cols:terminal_cols in
        let history_rows = Masc_tui_message_layout.message_history_height

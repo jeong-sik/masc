@@ -938,12 +938,12 @@ let clear_current_message_draft state =
    so the jump is a screenful on every window; a page smaller than the pane
    would leave rows the reader has to catch with the arrow keys anyway. *)
 let keeper_message_page_rows state =
-  let rows, cols = get_terminal_size () in
+  let rows, _ = get_terminal_size () in
   (* The pane's fixed chrome is shared with [render_keeper_message];
      composer growth is already inside [keeper_message_status_rows]. Adding
      composer_max_rows here counted it twice, and every PgUp jumped four
      rows short of the screenful the comment promises. *)
-  let status_rows = keeper_message_status_rows state ~terminal_cols:cols in
+  let status_rows = keeper_message_status_rows state in
   (* PgUp creates the reading-back notice and PgDn removes it. Reserve that
      possible row on both sides of the transition: using only the rows drawn
      right now made a 46-row pane move 38 up, then only 37 down, leaving the
@@ -1236,7 +1236,7 @@ let submit_chat_draft (state : state) ~(submit_message : string -> unit)
 
 let keeper_message_input_supported state =
   let rows, cols = get_terminal_size () in
-  let status_rows = keeper_message_status_rows state ~terminal_cols:cols in
+  let status_rows = keeper_message_status_rows state in
   Masc_tui_message_layout.message_viewport_supported ~terminal_rows:rows
     ~terminal_cols:cols
     ~status_rows:(keeper_message_support_status_rows state ~status_rows)

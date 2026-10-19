@@ -1,5 +1,14 @@
 # TUI refresh observations and before/after comparisons
 
+The synchronous Keeper status frame also carries inflight batch diagnostics,
+Activity and observed interrupt rows, shared by menu/history measurement and
+actual display. Batch grouping uses an immutable exact-execution index and
+first-appearance ordinals, preserving original representative inputs and
+reconciliation counts. The
+[inflight grouping comparison](../audits/2026-10-19-tui-inflight-execution-groups.md)
+records conditional source costs, unchanged scope and unmeasured small-case
+allocation overhead. There is no cross-frame cache or measured speedup claim.
+
 Keeper chat status now prepares one immutable projection in a synchronous draw
 for command-menu measurement, history budgeting, Activity expansion keys and
 actual display. The original selected log (or explicit absence), visible rows,

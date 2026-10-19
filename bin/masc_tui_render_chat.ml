@@ -4437,8 +4437,7 @@ let render_keeper_message (state : state) =
     let command_window = keeper_message_command_window ~status_frame ~scroll:requested state
       ~terminal_rows:rows ~terminal_cols:cols in
     let command_rows = match command_window with None -> 0 | Some (_, entries) -> 2 + List.length entries in
-    let status_rows = keeper_message_status_rows ~status_frame ~scroll:requested state
-      ~terminal_cols:cols + command_rows in
+    let status_rows = keeper_message_status_rows ~status_frame ~scroll:requested state + command_rows in
     let support_status_rows =
       keeper_message_support_status_rows ~scroll:requested state ~status_rows
     in
@@ -4693,8 +4692,7 @@ let render_keeper_message (state : state) =
       (fun (mine, line) ->
         box_line_styled chat_buf chat_cols
           ~style:(if mine then Theme.warn () else Theme.recede ()) line)
-      (Masc_tui_types.keeper_message_inflight_rows state ~chat_cols
-         ~now:(Unix.gettimeofday ()));
+      status_frame.kmsf_inflight_rows;
     (* The lead -- the mark, the lane, the age -- in the status colour; the
        detail after it receded. Drawn whole in the status colour, five rows of
        band read as five warnings and none stood out. *)
@@ -4702,7 +4700,7 @@ let render_keeper_message (state : state) =
        long preview status loses its tail rather than the keys after it. *)
     List.iter
       (fun (row : Masc_tui_answering.chat_activity_row) ->
-        let keys = match state.msg_tool_visibility, status_frame with
+        let keys = match state.msg_tool_visibility, status_frame.kmsf_source with
           | (Tools_compact | Tools_results), Message_status (_, status)
             when status.kmsp_folded_count > 0 ->
               row.keys ^ " · " ^ Masc_tui_keys.expand_turn_label
@@ -4724,9 +4722,9 @@ let render_keeper_message (state : state) =
                   if Masc_tui_types.keeper_message_activity_needs_attention state
                   then Theme.warn () else Theme.recede ()) lead Ansi.reset
              (Theme.recede ()) rest keys Ansi.reset))
-      (Masc_tui_types.keeper_message_activity_rows state);
+      status_frame.kmsf_activity_rows;
     List.iter (fun text -> box_line_styled chat_buf chat_cols ~style:(Theme.warn ()) ("  " ^ text))
-      (Masc_tui_types.keeper_observed_interrupt_rows state);
+      status_frame.kmsf_interrupt_rows;
     (match state.msg_loaded_error with
      | Some _ ->
          box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
@@ -4784,7 +4782,7 @@ let render_keeper_message (state : state) =
            box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
              "  Older load failed · /errors"
        | None -> ());
-    (match status_frame with
+    (match status_frame.kmsf_source with
      | Message_status (live, status) ->
          let live = live.tl_transcript in
          (* The streaming turn is the row the eye waits on: drawn in the

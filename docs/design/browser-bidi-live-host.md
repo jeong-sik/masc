@@ -540,7 +540,10 @@ URL/viewport checks. It sends the runtime's native `page.hover` or
 `page.drag_and_drop` calls, without a model or synthetic DOM input. Observed
 selector and scene-node clicks resolve into native `page.click` with the
 resolver's current URL and viewport guarded before input. Custom drag
-paths and timing remain unsupported on this lane and are refused before input.
+paths are forwarded as CSS-pixel runtime routes. An omitted path visits the
+midpoint before the destination, so pointer-capture handlers can activate
+before the destination move. Nonzero `durationMs` is refused before input:
+the runtime pause after a move does not express movement duration.
 This is not an atomic snapshot/input
 transaction: the operator can still change the page after validation. There is
 no write replay. An unknown outcome stops this live client. Reads and interactions

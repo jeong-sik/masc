@@ -141,6 +141,8 @@ type sentence_timeout_ms = Sentence_timeout_ms of int
 let sentence_timeout = Sentence_timeout_ms 120_000
 let timeout_ms (Sentence_timeout_ms timeout) = timeout
 
+type css_point = { x : float; y : float }
+
 type call =
   | Close
   | Act of { page_id : string; instruction : string; timeout : sentence_timeout_ms }
@@ -154,7 +156,7 @@ type call =
   | Page_hover of { page_id : string; x : float; y : float }
   | Page_click of { page_id : string; x : float; y : float }
   | Page_scroll of { page_id : string; x : float; y : float; delta_x : float; delta_y : float }
-  | Page_drag_and_drop of { page_id : string; from_x : float; from_y : float; to_x : float; to_y : float }
+  | Page_drag_and_drop of { page_id : string; from_x : float; from_y : float; to_x : float; to_y : float; route : css_point list }
 
 let method_name = function
   | Close -> "stagehand.close"
@@ -197,8 +199,10 @@ let call_params = function
   | Page_click { page_id; x; y } -> `Assoc (page page_id @ [ "x", `Float x; "y", `Float y ])
   | Page_scroll { page_id; x; y; delta_x; delta_y } ->
     `Assoc (page page_id @ [ "x", `Float x; "y", `Float y; "delta_x", `Float delta_x; "delta_y", `Float delta_y ])
-  | Page_drag_and_drop { page_id; from_x; from_y; to_x; to_y } ->
-    `Assoc (page page_id @ [ "from_x", `Float from_x; "from_y", `Float from_y; "to_x", `Float to_x; "to_y", `Float to_y ])
+  | Page_drag_and_drop { page_id; from_x; from_y; to_x; to_y; route } ->
+    `Assoc (page page_id @ [ "from_x", `Float from_x; "from_y", `Float from_y; "to_x", `Float to_x; "to_y", `Float to_y;
+      "options", `Assoc ["route", `List (List.map (fun (point : css_point) ->
+        `Assoc ["x", `Float point.x; "y", `Float point.y]) route)] ])
 ;;
 
 let uses_model = function

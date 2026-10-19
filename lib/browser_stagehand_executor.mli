@@ -44,7 +44,9 @@ val evaluate_expression : runtime:page_runtime -> body:string -> args:Yojson.Saf
     so observations have one shape), interactions, and the sentence verbs.
     Semantic click, hover and drag resolve observed targets without scrolling, then
     recheck their URL and viewport before native Stagehand pointer input.
-    Custom drag paths and timing are refused before any input.
+    Custom drag paths become CSS-pixel runtime routes; the default visits the
+    midpoint before the destination. Nonzero movement duration is refused
+    before any input: the runtime's delay option is not movement duration.
     Every other verb, sessions included, is refused before any call: the
     backend answers sessions itself, and
     {!Browser_lane.verb_allowed_on_stagehand} keeps the rest from arriving.

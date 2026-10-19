@@ -266,7 +266,12 @@ let test_hover_wire () =
     {|{"page_id":"P2","x":400.0,"y":150.0}|}
     Yojson.Safe.Util.(member "params" encoded |> to_s);
   check bool "native hover never asks a model" false (Wire.uses_model request);
-  check bool "native hover has no sentence timeout" true (Option.is_none (Wire.sentence_timeout_of_call request))
+  check bool "native hover has no sentence timeout" true (Option.is_none (Wire.sentence_timeout_of_call request));
+  let drag = Wire.Page_drag_and_drop {page_id="P2";from_x=400.;from_y=150.;to_x=600.;to_y=300.;
+    route=[{x=500.;y=225.}]} in
+  check string "native drag forwards its CSS-pixel route in runtime options"
+    {|{"page_id":"P2","from_x":400.0,"from_y":150.0,"to_x":600.0,"to_y":300.0,"options":{"route":[{"x":500.0,"y":225.0}]}}|}
+    (Wire.call_params drag |> to_s)
 ;;
 
 let test_semantic_pointer_input () =
@@ -299,7 +304,8 @@ let test_semantic_pointer_input () =
     "to",Lane.Pointer.point_to_json {x=0.75;y=0.5};"viewport",viewport])));
   (match List.rev fake.sent with
    | [Wire.Page_evaluate _;Wire.Page_evaluate _;
-      Wire.Page_drag_and_drop {page_id="P2";from_x=400.;from_y=150.;to_x=600.;to_y=300.};Wire.Page_evaluate _] -> ()
+      Wire.Page_drag_and_drop {page_id="P2";from_x=400.;from_y=150.;to_x=600.;to_y=300.;
+        route=[{x=500.;y=225.}]};Wire.Page_evaluate _] -> ()
    | _ -> fail "resolved semantic drag must use one native runtime drag");
   List.iter (fun action ->
     ignore (served (execute ~expected_url:None action
@@ -322,12 +328,29 @@ let test_semantic_pointer_input () =
     (rejected_before_effect (execute (Lane.Hover (Lane.Selector "#menu")) (`Assoc [])));
   check int "malformed target sends no native input" 1 (List.length fake.sent);
   fake.sent <- [];
+  let path = [{Lane.Pointer.x=0.6;y=0.1};{Lane.Pointer.x=0.7;y=0.4}] in
   let custom = Lane.Drag_to {source=Lane.Selector "#source";destination=Lane.Selector "#destination";
-    via=[point];duration_ms=0} in
-  check bool "unsupported custom path is before input" true
-    (rejected_before_effect (Executor.execute ~tabs ~call:(call fake)
-      (Lane.Page_interact {tab_id=0;expected_url;action=custom})));
-  check int "custom path is refused before resolution too" 0 (List.length fake.sent)
+    via=path;duration_ms=0} in
+  ignore (served (execute custom (`Assoc ["url",`String "http://127.0.0.1:1/shop";"from",resolved_point;
+    "to",Lane.Pointer.point_to_json {x=0.75;y=0.5};"viewport",viewport])));
+  (match List.rev fake.sent with
+   | [Wire.Page_evaluate _;Wire.Page_evaluate _;
+      Wire.Page_drag_and_drop {route=[{x=480.;y=60.};{x=560.;y=240.}];_};Wire.Page_evaluate _] -> ()
+   | _ -> fail "semantic custom path must reach the runtime in CSS pixels, in order");
+  fake.sent <- [];
+  let raw = Lane.Drag {from=point;to_={x=0.75;y=0.5};viewport=observed_viewport;via=path;duration_ms=0} in
+  ignore (served (Executor.execute ~tabs ~call:(call fake)
+    (Lane.Page_interact {tab_id=0;expected_url;action=raw})));
+  check bool "coordinate drags forward the same observed path" true
+    (List.exists (function Wire.Page_drag_and_drop {route=[{x=480.;y=60.};{x=560.;y=240.}];_}->true|_->false) fake.sent);
+  List.iter (fun action ->
+    fake.sent <- [];
+    check bool "movement duration is refused before input" true
+      (rejected_before_effect (Executor.execute ~tabs ~call:(call fake)
+        (Lane.Page_interact {tab_id=0;expected_url;action})));
+    check int "timing is refused before resolution too" 0 (List.length fake.sent))
+    [Lane.Drag_to {source=Lane.Selector "#source";destination=Lane.Selector "#destination";via=path;duration_ms=10};
+     Lane.Drag {from=point;to_={x=0.75;y=0.5};viewport=observed_viewport;via=path;duration_ms=10}]
 ;;
 
 let test_hover_effect_boundary () =

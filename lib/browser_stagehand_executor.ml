@@ -315,8 +315,8 @@ let interact ~tabs ~call ~tab_id ~expected_url action =
   let* page_id = page_of ~tabs tab_id in
   let args = Browser_lane.interaction_args ~tab_id ~expected_url action in
   let* action, expected_url = match (action : Browser_lane.interaction) with
-    | Browser_lane.Drag_to {via;duration_ms;_} when via <> [] || duration_ms <> 0 ->
-      Error (Browser_lane.Rejected_before_effect "drag paths and timing require automation or a live BiDi connection")
+    | Browser_lane.Drag_to {duration_ms;_} when duration_ms <> 0 ->
+      Error (Browser_lane.Rejected_before_effect "drag movement timing requires automation or a live BiDi connection")
     | Browser_lane.Hover _ | Browser_lane.Drag_to _ | Browser_lane.Click _ | Browser_lane.Click_node _ ->
       let* resolved = evaluate ~runtime:Scene_runtime ~send:(send_guard call) ~args
           page_id Browser_interaction.pointer_target_script |> guard_result in
@@ -345,13 +345,17 @@ let interact ~tabs ~call ~tab_id ~expected_url action =
          { page_id; x = viewport_x viewport point; y = viewport_y viewport point
          ; delta_x = float_of_int x; delta_y = float_of_int y })
   | Browser_lane.Drag { from; to_; viewport; via; duration_ms } ->
-    if via <> [] || duration_ms <> 0 then
-      Error (Browser_lane.Rejected_before_effect "drag paths and timing require automation or a live BiDi connection")
+    if duration_ms <> 0 then
+      Error (Browser_lane.Rejected_before_effect "drag movement timing requires automation or a live BiDi connection")
     else
+    let from_x = viewport_x viewport from and from_y = viewport_y viewport from in
+    let to_x = viewport_x viewport to_ and to_y = viewport_y viewport to_ in
+    let route = match via with
+      | [] -> [Wire.{x=(from_x +. to_x) /. 2.;y=(from_y +. to_y) /. 2.}]
+      | _::_ -> List.map (fun point -> Wire.{x=viewport_x viewport point;y=viewport_y viewport point}) via in
     pointer ~call ~tab_id ~page_id ~args ~name:"drag"
       (Wire.Page_drag_and_drop
-         { page_id; from_x = viewport_x viewport from; from_y = viewport_y viewport from
-         ; to_x = viewport_x viewport to_; to_y = viewport_y viewport to_ })
+         {page_id;from_x;from_y;to_x;to_y;route})
   | Browser_lane.Fill _ | Browser_lane.Scroll _ | Browser_lane.Follow_link _ | Browser_lane.Fill_node _ ->
     let* receipt = evaluate ~runtime:Scene_runtime ~send:(send call) ~args page_id Browser_interaction.script in
     interaction_receipt ~tab_id receipt

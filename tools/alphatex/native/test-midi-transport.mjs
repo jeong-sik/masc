@@ -675,6 +675,32 @@ for missed in [false,true] {
     precondition(reviewWire.map(\.1).contains([0x80,72,77]) == !missed)
 }
 print("COMMON_MIDI_MULTICYCLE_PASS: exact next endpoint batch retained, stale endpoint attack skipped after multiple missed cycles")
+// A callback may cross the virtual wrap while outgoing packets still share
+// its exact native host deadline. Preserve that complete original wire batch.
+for tiny in [false,true] {
+    let on:Double=tiny ? 1.4e-9:0.4995836801, off:Double=tiny ? 1.45e-9:0.4995836802
+    let duration:Double=tiny ? 25.0/16/1e9:60/120.1
+    let period:UInt128=tiny ? 25:UInt128("703687441776640000000000")!
+    let divisor:UInt128=tiny ? 16:UInt128("1408547695956241")!
+    let base=try arrangement([asset("wrapBatch",[
+        ["seconds":0,"port":2,"bytes":[0xc0,0]],
+        ["seconds":on,"port":2,"bytes":[0x90,78,100]],
+        ["seconds":off,"port":2,"bytes":[0x80,78,75]]])],
+        [clip("wrapBatch","wrapBatch",from:0,to:1,repeatCount:1)],duration:1)
+    let clock=try MidiCycle(start:0,end:duration,duration:duration,period:period,divisor:divisor)
+    for initial in [false,true] { for late in [false,true] {
+        let owner=try MidiTransport(timeline:base.timeline,uid:"1",loop:true,coordinated:true,cycle:clock)
+        owner.prepared=true;owner.destination=base.destination;owner.sourceDestinations=base.sourceDestinations
+        reset(0);reviewWire=[];try owner.stageCoordinated(at:0);try owner.runCoordinated(anchorNanoseconds:1_000_000_000)
+        if !initial { reviewClock=1_000_000_000;owner.tick();reviewWire=[] }
+        let due=try clock.deadline(position:on,index:0,offset:0,anchor:1_000_000_000)
+        reviewClock=due+(late ? 1:0);owner.tick()
+        let notes=reviewWire.map(\.1).filter { $0[0]&0xe0==0x80 }
+        precondition(notes == (late ? []:[[0x90,78,100],[0x80,78,75]]),"wrap lost exactly-due original pair or replayed expired history")
+        precondition(owner.state == .playing && owner.anchor==1_000_000_000)
+    }}
+}
+print("COMMON_MIDI_OUTGOING_BATCH_PASS: ordinary fractional tempo and short cycles retain due outgoing pairs on initial/active callbacks and skip genuinely expired pairs")
 let zeroBase=try arrangement([asset("zero",[
     ["seconds":0,"port":2,"bytes":[0xc0,0]],
     ["seconds":0.3,"port":2,"bytes":[0x90,74,80,0x80,74,77]]])],[clip("zero","zero",from:0,to:1,repeatCount:1)],duration:1)

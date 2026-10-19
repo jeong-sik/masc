@@ -1274,12 +1274,16 @@ let load_tools ~(host : string) ~(port : int) ?keeper () :
     (Masc.Tui_decode_tools.tool_snapshot, string) result =
   match fetch_dashboard_tools ~host ~port ?keeper () with
   | Error err -> Error ("tool inventory load failed: " ^ err)
-  | Ok json -> Masc.Tui_decode_tools.decode_tool_snapshot json
+  | Ok json ->
+      Masc_tui_response_decode.run ~name:"tools.inventory.decode_wait" (fun () ->
+        Masc.Tui_decode_tools.decode_tool_snapshot json)
 
 (** Load the workspace skills catalog for the Tools screen tracking views. *)
 let load_skills_catalog ~(host : string) ~(port : int) :
     (Masc.Tui_decode_tools.skills_catalog, string) result =
-  Result.bind (fetch_skills_catalog ~host ~port) Masc.Tui_decode_tools.decode_skills_catalog
+  Result.bind (fetch_skills_catalog ~host ~port) (fun json ->
+    Masc_tui_response_decode.run ~name:"skills.catalog.decode_wait" (fun () ->
+      Masc.Tui_decode_tools.decode_skills_catalog json))
 
 (** Load connector status from /api/v1/gate/connectors *)
 let load_connectors ~(host : string) ~(port : int) :

@@ -3362,8 +3362,9 @@ let post_skill_evidence ~host ~port reference =
 ;;
 
 let fetch_async_request_observation ~host ~port =
-  Result.bind (get_json ~host ~port ~path:"/api/v1/async-requests")
-    Masc.Tui_decode.decode_async_request_observation
+  Result.bind (get_json ~host ~port ~path:"/api/v1/async-requests") (fun json ->
+    Masc_tui_response_decode.run ~name:"tools.async_observation.decode_wait" (fun () ->
+      Masc.Tui_decode.decode_async_request_observation json))
 ;;
 
 (** GET /api/v1/prompts — every prompt the registry serves, with the file

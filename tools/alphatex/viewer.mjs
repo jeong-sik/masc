@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { readFileSync, mkdtempSync, rmSync, writeFileSync, chmodSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, basename } from 'node:path'
 import { parseArgs } from 'node:util'
 import { Worker } from 'node:worker_threads'
 import { spawn } from 'node:child_process'
@@ -32,6 +32,8 @@ const { values, positionals } = parseArgs({
     midi: { type: 'string' },
     'state-dir': { type: 'string' },
     sequence: { type: 'boolean' },
+    'midi-file': { type: 'string' },
+    'midi-pattern': { type: 'string' },
     project: { type: 'string' },
     'project-root': { type: 'string' },
     help: { type: 'boolean' },
@@ -44,6 +46,7 @@ if (values.help) {
     + '  i chooses instrument/preset, e opens its native sound browser, l toggles repeat.\n'
     + '  --state-dir stores native selection, saved presets, renders and Lane snapshot.\n'
     + '  --sequence opens a new phrase editor; --project song.json reopens one; --project-root sets its folder.\n'
+    + '  --midi-file song.mid imports an expressive source for editing/export; --midi-pattern N selects an SMF2 pattern.\n'
     + '  --output UID selects sequencer audio output; :output UID changes it in the editor.\n'
     + '  --midi-output=ID sends sequencer notes to that MIDI destination; :audio returns to audio.\n'
     + '  --record opens audio/MIDI input selection; r begins recording, s saves WAV and UMP.\n'
@@ -54,10 +57,11 @@ if (values.help) {
 }
 
 try {
-  if (values.sequence || values.project) {
+  if (values.sequence || values.project || values['midi-file']) {
     const { viewSequencer } = await import('./sequencer-tui.mjs')
+    const initialDocument = values['midi-file'] ? (await import('./midi-source.mjs')).importMidiSource(readFileSync(values['midi-file']), { name: basename(values['midi-file']) }) : undefined
     await viewSequencer({ path: values.project, root: values['project-root'], soundfontPath: values.soundfont,
-      sessionRoot: values['session-root'], input: values.input, midi: values.midi, output: values.output, midiOutput: values['midi-output'] })
+      sessionRoot: values['session-root'], input: values.input, midi: values.midi, output: values.output, midiOutput: values['midi-output'], initialDocument, pattern: values['midi-pattern'] === undefined ? undefined : Number(values['midi-pattern']) - 1 })
   } else if (values.devices) {
     const { devices } = await import('./capture.mjs')
     const { midiDestinations } = await import('./playback.mjs')

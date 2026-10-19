@@ -53,8 +53,10 @@ This stack is one step toward the full destination. Further work remains:
 
 - Retain editable arrangements of MIDI clips and WAV regions with repeat/offset,
   recording into existing projects and overdubs; retain raw expression provenance.
-- MIDI import and MIDI 2.0 editing/export without losing controllers, expression,
-  program/tempo changes, SysEx or original source identity.
+- Connect the MIDI source-asset editor to full-message audition and arrangements,
+  then support MIDI 2.0 source assets and expression/event editing. Source import
+  and note edit/export preserve controllers, program/tempo maps, SysEx and original
+  bytes; this is not yet an imported-performance playback path.
 - External MIDI clock and a shared sample clock for live scheduling, audio/MIDI
   arrangement playback, and low-latency monitoring/recording.
 - Connect the independently developed VST instrument/preset host (#43684) to project
@@ -72,3 +74,25 @@ Library contracts: [Tonal chord](https://github.com/tonaljs/tonal/tree/main/pack
 [voicing](https://github.com/tonaljs/tonal/tree/main/packages/voicing),
 [voice leading](https://github.com/tonaljs/tonal/tree/main/packages/voice-leading),
 and [JZZ MIDI files](https://jazz-soft.net/doc/JZZ/midifile.html).
+
+## Imported-performance audition boundary
+
+The next transport connection must consume the source performance's complete
+ordered message stream, not `sequenceEvents` from the phrase schema. Its seconds
+come from the retained PPQ tempo map or SMPTE clock. Meta events remain in the
+source/export; channel data and F0/F7 wire fragments keep their ordering and
+original port identity.
+
+Source ports need explicit destination bindings. A file with several numbered
+ports must not collapse them into one selected output. The owned native sender
+must account for held notes and stateful controllers, including pedal releases,
+through pause, seek, route changes, failures and shutdown. F7 escape data may
+contain wire messages, so key ownership cannot assume that every source event
+is a pre-decoded three-byte note. Large SysEx needs packetization under CoreMIDI's
+actual packet representation, without an arbitrary vendor-message size cap.
+
+Controller/program/bank/RPN state and opaque SysEx have different replay effects.
+A seek/resume implementation must define what it restores and report unsupported
+state reconstruction; silently using the phrase sender's volume/pan chase would
+lose the source performance. Source audition does not establish MIDI clock sync,
+audio/MIDI sample alignment, hardware latency or physical-device behavior.

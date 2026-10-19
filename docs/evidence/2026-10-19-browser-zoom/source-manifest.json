@@ -1,0 +1,7 @@
+{
+  "function": "pageZoom",
+  "sha256": "557c883ba2553de808d6d2e0881af2574f6068699b5564ef7f603556a955b027",
+  "candidate_file_sha256": "d2efdcad4a14effb857fcd87948ac1514ec8d49956f1f9a1c75957032e9f449c",
+  "native_execution": "Exact function text in isolated temporary addon; browser.tabs APIs are real",
+  "whole_server_or_host": "not built or run"
+}

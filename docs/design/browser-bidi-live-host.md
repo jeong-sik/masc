@@ -749,8 +749,38 @@ session without closing its pages. Status remains available; explicitly close
 and reopen before further work. Input is never replayed for cleanup.
 Receipts report the original action and page identity without echoing typed text.
 
-WebExtension does not serve these native actions. Browser zoom remains
-unsupported; resizing CSS or the viewport does not implement browser zoom.
+WebExtension does not serve these native actions. Actual browser zoom is a
+separate WebExtension-only action described below.
 `test/fixtures/browser-native-input.html` records trusted double-click and keyboard
 input for isolated native browser probes. Source tests and protocol fixtures do
 not establish that an installed browser has completed these interactions.
+
+
+### Actual browser zoom
+
+`masc_browser_interact` action `set_zoom` requires the observed WebExtension
+`clientId`, `tabId`, `expectedUrl`, and an explicit numeric `factor` from 0.3
+through 5. The extension must be version 0.8.0 or later. BiDi, owned WebDriver
+and Stagehand refuse this action before input; the server does not switch
+browsers to perform it.
+
+The extension reads the tab URL, current zoom, and zoom settings, checks the URL
+again immediately before one `tabs.setZoom` call, then reads the resulting zoom
+and URL. The receipt reports `requestedFactor`, measured `zoomBefore` and
+`zoomFactor`, plus actual `zoomScope` and `zoomMode`. Manual or disabled zoom
+modes are refused because this action requires the browser to apply the zoom.
+It never changes zoom settings or uses CSS zoom or viewport resizing.
+
+Firefox normally uses automatic, per-origin zoom. Thus the explicit tab selects
+the origin being changed, but the change can affect other same-origin tabs and
+persist for the site. The receipt retains this scope instead of promising a
+per-tab effect. See [MDN setZoom](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/tabs/setZoom),
+[zoom settings](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/tabs/getZoomSettings),
+and [Firefox zoom behavior](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Working_with_the_Tabs_API).
+
+After zoom, obtain a fresh scene or screenshot before using viewport geometry.
+A failure after dispatch, including failed measurement or navigation during the
+command, leaves an unknown outcome and is never automatically replayed. The
+API's zero-to-reset shorthand is deliberately excluded: callers supply an
+explicit factor. [Isolated native evidence](../evidence/2026-10-19-browser-zoom/README.md)
+records actual 150% and 75% browser zoom and the exact execution boundary.

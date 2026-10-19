@@ -79,7 +79,11 @@ TUI Browser Lane에 여러 관측 탭이 보이면 `1`–`9`로 표시된 탭을
 
 live 조작은 BrowserInteract로 관측한 clientId·tabId·expectedUrl을 유지한다.
 click은 같은 scene의 documentId/nodeId를 쓸 수 있고 selector와 섞지 않는다.
-좌표 조작에는 현재 viewport 관측이 필요하다. 클릭·입력·이동·스크롤 등 조작 뒤에는
+좌표 조작에는 현재 viewport 관측이 필요하다. 확대·축소는 WebExtension 0.8.0 이상의
+`set_zoom`에 관측한 clientId·tabId·expectedUrl과 factor(0.3–5)를 전달한다.
+반환된 zoomFactor·zoomScope를 확인한다. per-origin이면 같은 사이트의 다른 탭에도
+영향이 갈 수 있다. 배율을 바꾼 뒤에는 scene이나 screenshot을 새로 읽고 좌표를 갱신한다.
+다른 브라우저 연결로 자동 전환해 이 동작을 이어가지 않는다. 클릭·입력·이동·스크롤 등 조작 뒤에는
 새 관측으로 실제 결과를 확인한다. 제목·본문·사이트별 대상을 요청과 대조하고, 요청된
 각 단계의 수행 여부를 구분한다. 재사용하는 것은 동선이며, 다른 문서의 참조가 아니다.
 TUI에서 href가 관측된 control의 Enter는 일반 click이 아니라 관찰된 same-tab

@@ -27,5 +27,18 @@ until reading succeeds. The containing directory changes with the destination,
 and B records the source position only after that success. A failed or
 cancelled location creates no extra history entry. B can replace an unfinished
 location read with a return. A new language-server question cancels pending
-navigation. Same-file locations move directly to their line and focus file
-content; B restores the source position and pan.
+navigation. A single location follows after queued input has priority and
+focuses file content; B restores the source position and pan.
+
+When a definition or references answer contains several locations, choose the
+file and line in the result picker. Type to filter, move with Up/Down and press
+Enter to open the selected result. Esc keeps the original reading. Results
+outside the workspace show their address without requesting a workspace file.
+An answer arriving after another key, paste or mouse action cannot take over
+that newer input. A different source reading, question or workspace retires
+the original choices. A cancelled question or closed picker stays cancelled
+when the workspace reconnects.
+
+Definition, hover and references requests keep the selected name's position
+when Korean text, emoji or other Unicode characters precede it on the line.
+Malformed source encoding is reported as a failed question.

@@ -327,7 +327,15 @@ let issue_on_server_lane ~tool_name ~start_time args ~verb ~timeout_sec =
   match tool_request args with
   | Error detail -> make_input_err ~tool_name ~start_time detail
   | Ok request ->
-    match Browser_selection.resolve ~verb ~bound:(Option.is_some request.tab_id) request.route with
+    let bound = match verb with
+      | Browser_lane.Session_close | Browser_lane.Page_goto _ -> true
+      | Browser_lane.Session_open _ | Browser_lane.Session_status | Browser_lane.Tabs_list
+      | Browser_lane.Page_read _ | Browser_lane.Page_document _ | Browser_lane.Page_downloads _
+      | Browser_lane.Page_capture _ | Browser_lane.Page_scene _ | Browser_lane.Page_interact _
+      | Browser_lane.Page_elements _ | Browser_lane.Page_act _ | Browser_lane.Page_context _
+      | Browser_lane.Page_instruct _ | Browser_lane.Page_locate _ | Browser_lane.Page_extract _ ->
+        Option.is_some request.tab_id in
+    match Browser_selection.resolve ~verb ~bound request.route with
     | Error error ->
       Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Workflow_rejection
         ~effect_disposition:Tool_result.Proven_pre_effect

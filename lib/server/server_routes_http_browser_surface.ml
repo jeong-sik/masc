@@ -15,7 +15,15 @@ let read_body request reqd f =
 let server_selection ~verb fields =
   let input = `Assoc (List.filter (fun (key,_) -> List.mem key ["lane";"clientId";"tabId"]) fields) in
   Result.bind (Browser_surface.parse_request input) (fun request ->
-    Result.bind (Browser_selection.resolve ~verb ~bound:(Option.is_some request.tab_id) request.route
+    let bound = match verb with
+      | Browser_lane.Session_close | Browser_lane.Page_goto _ -> true
+      | Browser_lane.Session_open _ | Browser_lane.Session_status | Browser_lane.Tabs_list
+      | Browser_lane.Page_read _ | Browser_lane.Page_document _ | Browser_lane.Page_downloads _
+      | Browser_lane.Page_capture _ | Browser_lane.Page_scene _ | Browser_lane.Page_interact _
+      | Browser_lane.Page_elements _ | Browser_lane.Page_act _ | Browser_lane.Page_context _
+      | Browser_lane.Page_instruct _ | Browser_lane.Page_locate _ | Browser_lane.Page_extract _ ->
+        Option.is_some request.tab_id in
+    Result.bind (Browser_selection.resolve ~verb ~bound request.route
       |> Result.map_error Browser_selection.error_message) (fun selected ->
       match selected.route with
       | Browser_lane.Automation_route -> Ok (selected, Browser_lane.Server_automation)

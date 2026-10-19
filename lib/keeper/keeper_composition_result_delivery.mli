@@ -46,6 +46,10 @@ val status_payload : status_snapshot -> Yojson.Safe.t
     never rewrites the physical outcome. Serialization and manifest admission use
     this exact snapshot, including the actual SDK occurrence when present. *)
 
+val request_payload : status_snapshot -> Yojson.Safe.t
+(** The same captured request/continuation data without a status-Tool kind
+    marker. HTTP observation is not an SDK Tool invocation. *)
+
 type t
 val create : base_path:string -> physical_turn_ref:Ids.Turn_ref.t -> t
 

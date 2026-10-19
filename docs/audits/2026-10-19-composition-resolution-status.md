@@ -22,7 +22,9 @@ exactly once. The persisted submitter is distinct from the target Keeper and
 from the authenticated operator. The response schema is
 `masc.async-request-status/v1`; outer states are `observed`, `absent`,
 `unavailable`, and `rejected`. `observed.request` is the same status projection
-used by the actual Keeper status tool, without inventing an SDK invocation.
+used by the actual Keeper status tool. Its HTTP projection omits the status-Tool
+kind marker and does not invent an SDK invocation or classify an ordinary async
+request as a Composition.
 Absence and rejected/unavailable evidence grant no replay right.
 
 ## Original authority and observation lifetime

@@ -80,9 +80,10 @@ type continuation_status =
 
 type status_snapshot =
   { entry : Async.entry; invocation : Invocation.t option
-  ; continuation : continuation_status; payload : Yojson.Safe.t }
+  ; continuation : continuation_status; payload : Yojson.Safe.t; request_payload : Yojson.Safe.t }
 
 let status_payload (snapshot : status_snapshot) = snapshot.payload
+let request_payload (snapshot : status_snapshot) = snapshot.request_payload
 
 let error_to_string = function
   | Invalid_context detail -> "invalid prepared result context: " ^ detail
@@ -138,9 +139,10 @@ let observe_status ~base_path ?invocation entry =
         "detail",`String (error_to_string error)] in
   let fields = fields @ ["continuation",logical] @ Option.to_list (Option.map (fun invocation ->
     "status_invocation",invocation_to_json invocation) invocation) in
+  let request_payload = `Assoc fields in
   let payload = Keeper_tool_composition_projection.with_tool_kind_field
-      Keeper_tool_composition_catalog.status_tool_kind (`Assoc fields) in
-  {entry;invocation;continuation;payload}
+      Keeper_tool_composition_catalog.status_tool_kind request_payload in
+  {entry;invocation;continuation;payload;request_payload}
 
 let canonical_entry ~base_path (entry : Async.entry) =
   let* proof = Async.load_canonical_durable_terminal ~base_path

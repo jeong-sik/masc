@@ -196,7 +196,7 @@ let project_request ~base_path ~submitted_by ~request_id =
   | Found entry ->
     let snapshot = Keeper_composition_result_delivery.observe_status ~base_path entry in
     envelope ["status",`String "observed";
-      "request",Keeper_composition_result_delivery.status_payload snapshot]
+      "request",Keeper_composition_result_delivery.request_payload snapshot]
   | Absent -> envelope ["status",`String "absent"]
   | Unreadable detail -> envelope ["status",`String "unavailable";"detail",`String detail]
   | Rejected rejection -> envelope ["status",`String "rejected";

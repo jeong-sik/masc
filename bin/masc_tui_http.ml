@@ -1160,11 +1160,11 @@ let fetch_task_history_page ~host ~port ~(request : Masc.Tui_decode_task_inspect
     Masc_tui_response_decode.run ~name:"task.history.page.decode_wait" (fun () ->
       Masc.Tui_decode_task_inspection.history_page ~request json))
 
-let fetch_original_task_detail ~host ~port ~task_id =
+let fetch_original_task_detail ~host ~port ~task_id ~previous =
   let path=Uri.make ~path:"/api/v1/dashboard/tasks/detail" ~query:["task_id",[task_id]] () |> Uri.to_string in
   Result.bind (get_json ~host ~port ~path) (fun json ->
     Masc_tui_response_decode.run ~name:"tools.original_task.decode_wait" (fun () ->
-      Masc.Tui_decode_task_inspection.detail ~task_id json))
+      Masc.Tui_decode_task_inspection.detail ?previous ~task_id json))
 
 (** Fetch a keeper's durable tool-call log
     ([GET /api/v1/keepers/:name/tool-calls]). *)

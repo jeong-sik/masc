@@ -972,9 +972,9 @@ let test_first_loss_retains_unproven_effects mode () =
         ["type",`String "task_transition";"task_id",`String task_id;"ts",`String "2026-10-19T00:00:01Z";
          "from_status",`String "todo";"to_status",`String "claimed";"actor",`String keeper]))
         [source.ats_task_id;"different-current-task"];
-      let read_body task_id = match Server_dashboard_task_detail.read ~config ~task_id:(Some task_id)
+      let read_body ?previous task_id = match Server_dashboard_task_detail.read ~config ~task_id:(Some task_id)
           |> Server_dashboard_task_detail.response with
-        | `OK,json -> Task_read.detail ~task_id:source.ats_task_id json
+        | `OK,json -> Task_read.detail ?previous ~task_id:source.ats_task_id json
         | _ -> Error "source Task producer unavailable" in
       let read_history ?task_id (request : Task_read.history_request) =
         let task_id=Option.value task_id ~default:request.hr_task_id in
@@ -1152,7 +1152,29 @@ let test_first_loss_retains_unproven_effects mode () =
       check bool "history preparation settles independently of body preparation" true
         (Masc_tui_fetched.in_flight ui.task_document_body.tds_reading
          && not (Masc_tui_fetched.in_flight ui.task_document_history.tds_reading));
-      let old_document=find Document.Body resized in
+      (* A real fresh body read must not revoke a pending preparation when
+         all decoded Task facts are unchanged. Admission/freshness still use
+         the new physical read owner, not the retained immutable payload. *)
+      let unchanged_document=find Document.Body resized in
+      let reread=Ui.begin_tools_async_task_body ui ~force:false |> Option.get in
+      Ui.complete_tools_async_task_body ui reread
+        (read_body ?previous:reread.atr_previous source.ats_task_id);
+      Ui.complete_task_document ui ~cols:72 unchanged_document (prepare unchanged_document);
+      check bool "fresh identical original Task observations keep the actual preparation owner admissible" true
+        (match (Observation.facts unchanged_document.tdr_observation).ui_disposition with
+         | Some (_,Observation.Applied) -> true | _ -> false);
+      (* Same Task/status/run but changed authoritative content must invalidate
+         that reuse. Write through the actual backlog producer and read again. *)
+      let description=description ^ "\nFresh original source evidence" in
+      let backlog=Workspace_backlog.read_backlog_r config |> require "backlog before original content update" in
+      Workspace_backlog.write_backlog config {backlog with tasks=List.map
+        (fun (task : Masc_domain.task) -> if task.id=source.ats_task_id then {task with description} else task)
+        backlog.tasks};
+      let changed=Ui.begin_tools_async_task_body ui ~force:false |> Option.get in
+      Ui.complete_tools_async_task_body ui changed
+        (read_body ?previous:changed.atr_previous source.ats_task_id);
+      let changed_documents=Ui.sync_task_documents ui ~cols:72 in
+      let old_document=find Document.Body changed_documents in
       (* The same authoritative Task object, under another actual consumer,
          cannot borrow an async-source preparation owner's late reply. *)
       let original_detail=match Masc_tui_fetched.view_for ~equal:Ui.equal_tools_async_task_source ui.tools_async_task_body ~key:source with

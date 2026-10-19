@@ -5020,7 +5020,8 @@ type tools_async_task_link =
 
 type tools_async_task_request =
   { atr_ticket : tools_async_task_source Masc_tui_fetched.request
-  ; atr_reading : unit ref; atr_job : unit ref }
+  ; atr_reading : unit ref; atr_job : unit ref
+  ; atr_previous : Masc.Tui_decode_task_inspection.detail option }
 
 type 'key task_history_request =
   { thr_ticket : 'key Masc_tui_fetched.request
@@ -10743,8 +10744,10 @@ let begin_tools_async_task_body state ~force =
     match start ~equal:equal_tools_async_task_source state.tools_async_task_body ~key with
     | Already_loading -> None
     | Started (reading,atr_ticket) ->
+      let atr_previous=Masc_tui_fetched.value
+        (Masc_tui_fetched.view_for ~equal:equal_tools_async_task_source state.tools_async_task_body ~key) in
       state.tools_async_task_body <- reading;
-      let request={atr_ticket;atr_reading=state.workspace_read_authority;atr_job=ref ()} in
+      let request={atr_ticket;atr_reading=state.workspace_read_authority;atr_job=ref ();atr_previous} in
       state.tools_async_task_body_request <- Some request;Some request
 
 let begin_tools_async_task_history ?(older=false) state ~force ~limit =

@@ -128,6 +128,12 @@ description: "MASC TUI의 원본 비동기 요청·Task·이력 상세와 파일
   현재 조회 상태에서 계속 읽고, 준비한 행을 조회 freshness·효과/완료 허가로 쓰지 않는다.
   준비 완료 전 임시 행 수로 Work의 저장된 스크롤을 초기화하지 않는다. CPU 대기·정리·UI
   반영과 실제 input/paint·속도 증거를 구분하며 화면/문구/행 순서/snapshot/PTY 검사를 추가하지 않는다.
+- Tools 원본 Task 본문은 실제 재조회의 GET·workspace admission·새 ticket을 유지한다.
+  요청 시 같은 source의 마지막 불변 Task를 캡처하고, 새 응답을 검증·해석한 뒤 공유 CPU에서
+  전체 typed Task equality를 확인했을 때만 이전 Task 객체를 재사용한다. canonical Goal과
+  해석 진단은 항상 새 응답에서 가져온다. 이 불변 값 재사용은 이전 조회 권한·freshness를
+  빌리지 않으며, UI frame에서 본문을 비교·해시하지 않는다. 같은 ID/status여도 본문·계약·
+  handoff·실행 링크·정확한 Skill revision 등이 바뀌면 기존 표시 준비를 빌려주지 않는다.
 - Task 표시 준비는 원래 consumer/요청/run/Task·workspace·폭·ticket에 귀속해 시작, worker
   진입/반환, caller 관측, UI 적용/거절, 소유권 철회, 취소 요청과 실제 등록 해제를 별도로 남긴다.
   같은 요청의 원자적 사실만 준비 단계 안내에 쓰며, 미관측 단계는 null로 남긴다. worker 반환을

@@ -33,15 +33,23 @@ export function loopMidiRegions(regions, range) {
     if (position(copy) > from) copy--
     if (copy + 1 < region.repeatCount && position(copy + 1) <= from) copy++
     if (copy < 0 || !(position(copy) <= from && position(copy + 1) > from)) throw new Error('Loop boundary loses source repeat precision')
-    const add = (label, start, sourceStart, sourceEnd, repeatCount) => {
+    let previous
+    const add = (label, start, stop, sourceStart, sourceEnd, repeatCount) => {
+      // Cut membership uses the original absolute boundaries. Native playback
+      // evaluates start + span * count after subtracting the loop origin; that
+      // reassociation can round differently. Join adjacent pieces using exactly
+      // the preceding native endpoint, without changing the source selection.
+      const normalizedStart = previous?.stop === start ? previous.end : start - range.start
+      const normalizedEnd = normalizedStart + (sourceEnd - sourceStart) * repeatCount
       if (!(sourceStart >= region.sourceStart && sourceEnd <= region.sourceEnd && sourceEnd > sourceStart)
-          || !Number.isSafeInteger(repeatCount) || repeatCount <= 0 || start - range.start < 0
-          || start + (sourceEnd - sourceStart) * repeatCount > range.end) throw new Error('Loop trim is not representable at source precision')
-      result.push({ ...region, id: JSON.stringify([region.id, label]), startSeconds: start - range.start, sourceStart, sourceEnd, repeatCount })
+          || !Number.isSafeInteger(repeatCount) || repeatCount <= 0 || start < range.start || stop > range.end || stop <= start
+          || !Number.isFinite(normalizedEnd) || normalizedStart < 0 || normalizedEnd <= normalizedStart) throw new Error('Loop trim is not representable at source precision')
+      result.push({ ...region, id: JSON.stringify([region.id, label]), startSeconds: normalizedStart, sourceStart, sourceEnd, repeatCount })
+      previous = { stop, end: normalizedEnd }
     }
     if (from > position(copy)) {
       const stop = Math.min(to, position(copy + 1))
-      add('leading', from, region.sourceStart + (from - position(copy)), stop === position(copy + 1) ? region.sourceEnd : region.sourceStart + (stop - position(copy)), 1)
+      add('leading', from, stop, region.sourceStart + (from - position(copy)), stop === position(copy + 1) ? region.sourceEnd : region.sourceStart + (stop - position(copy)), 1)
       if (stop === to) continue
       copy++
     }
@@ -49,8 +57,8 @@ export function loopMidiRegions(regions, range) {
     let count = Math.min(region.repeatCount - copy, Math.max(0, Math.floor((to - start) / period)))
     if (position(copy + count) > to) count--
     if (copy + count < region.repeatCount && position(copy + count + 1) <= to) count++
-    if (count > 0) { add('whole', start, region.sourceStart, region.sourceEnd, count); copy += count }
-    if (position(copy) < to) add('trailing', position(copy), region.sourceStart, region.sourceStart + (to - position(copy)), 1)
+    if (count > 0) { add('whole', start, position(copy + count), region.sourceStart, region.sourceEnd, count); copy += count }
+    if (position(copy) < to) add('trailing', position(copy), to, region.sourceStart, region.sourceStart + (to - position(copy)), 1)
   }
   if (!result.length) throw new Error('Loop range has no audible MIDI regions')
   return result

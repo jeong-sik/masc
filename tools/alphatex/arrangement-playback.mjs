@@ -87,7 +87,12 @@ export async function prepareArrangementMidi(project, { directory, signal, midiO
     .map((destination, port) => ({ port, destination }))
   const loop = arrangementLoop(project), selected = loopMidiRegions(regions, loop)
   const selectedSources = sources.filter(source => selected.some(region => region.source === source.id))
-  const duration = loop?.duration ?? schedule.reduce((end, clip) => Math.max(end, clip.endSeconds), 0)
+  // The cycle contains the native arithmetic endpoints of the selected spans.
+  // Outward projection may add a representable silent tail; it never broadens
+  // the source trims or admits events outside the requested loop window.
+  const duration = loop ? selected.reduce((end, region) => Math.max(end, region.startSeconds
+    + (region.sourceEnd - region.sourceStart) * region.repeatCount), loop.duration)
+    : schedule.reduce((end, clip) => Math.max(end, clip.endSeconds), 0)
   if (!Number.isFinite(duration) || duration <= 0) throw new Error('Arrangement has no representable MIDI duration')
   const temporary = await mkdtemp(join(directory, 'play-'))
   try {

@@ -54,6 +54,31 @@ test('one loop window retains a compressed run even for a long finite source reg
  assert.deepEqual(loopMidiRegions([weird],{start:.5,end:1})[0],{...weird,id:JSON.stringify(['a','leading']),startSeconds:0,sourceStart:.5,sourceEnd:1})
 })
 
+test('decimal loop cuts prepare source-preserving regions inside the actual normalized native horizon',async()=>{
+ const directory=await mkdtemp(join(tmpdir(),'masc-loop-decimal-')),c=client()
+ try{
+  const initial=project()
+  for(const [extent,repeat,tempo,command]of [[96,100,120,'loop 0.5 1.8'],[960,1,100,'loop 0.25 0.75']]){
+   const p={...initial,tempo,clips:initial.clips.map(clip=>({...clip,extent,repeat}))}
+   const selected=arrangementCommand(arrangementEditor(p),command).editor.project
+   const before=structuredClone(selected),range=arrangementLoop(selected)
+   const prepared=ok(await c.request({kind:'prepare-midi',project:selected,directory,midiOutput:'123'}))
+   const plan=JSON.parse(await readFile(prepared.path,'utf8'))
+   assert.equal(prepared.loop,true);assert.equal(prepared.originSeconds,range.start)
+   assert.ok(plan.duration>=range.duration)
+   let priorEnd=0
+   for(const region of plan.regions){
+    const end=region.startSeconds+(region.sourceEnd-region.sourceStart)*region.repeatCount
+    assert.ok(region.startSeconds>=priorEnd);assert.ok(end<=plan.duration)
+    assert.ok(region.sourceStart>=0&&region.sourceEnd<=extent/480*60/120)
+    priorEnd=end
+   }
+   assert.deepEqual(selected,before)
+   assert.deepEqual(plan.sources[0].timeline.events.map(e=>e.bytes),[[0xb0,1,0],[0x90,60,96],[0x80,60,45]])
+  }
+ }finally{await c.worker.terminate();await rm(directory,{recursive:true,force:true})}
+})
+
 test('invalid or silent loop ranges refuse and pending audio, UMP, click and recording paths cannot silently play one-shot',async()=>{
  const p=project(),before=structuredClone(p),e=arrangementEditor(p),c=client(),directory=await mkdtemp(join(tmpdir(),'masc-loop-refusal-'))
  try{

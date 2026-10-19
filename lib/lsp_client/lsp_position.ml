@@ -36,7 +36,11 @@ let columns_of ~line ~symbol =
 ;;
 
 let column_of ~line ~symbol ~occurrence ~line_number =
-  match columns_of ~line ~symbol with
+  if not (String.is_valid_utf_8 line) then
+    Error (Printf.sprintf "line %d is not valid UTF-8" line_number)
+  else if not (String.is_valid_utf_8 symbol) then
+    Error "symbol is not valid UTF-8"
+  else match columns_of ~line ~symbol with
   | [] ->
     Error
       (Printf.sprintf
@@ -46,7 +50,20 @@ let column_of ~line ~symbol ~occurrence ~line_number =
          (String.trim line))
   | columns ->
     (match List.nth_opt columns (occurrence - 1) with
-     | Some column -> Ok column
+     | Some column ->
+       (* The pool advertises no alternative position encoding, so LSP uses
+          UTF-16. Search literal UTF-8 bytes, then count the selected prefix
+          in protocol code units. Supplementary scalars use a surrogate pair;
+          combining marks and tabs each remain one code unit. *)
+       let rec count offset units =
+         if offset = column then units
+         else
+           let decoded = String.get_utf_8_uchar line offset in
+           let scalar = Uchar.to_int (Uchar.utf_decode_uchar decoded) in
+           count (offset + Uchar.utf_decode_length decoded)
+             (units + if scalar > 0xffff then 2 else 1)
+       in
+       Ok (count 0 0)
      | None ->
        Error
          (Printf.sprintf

@@ -1,9 +1,11 @@
 # Native MIDI/WAV arrangement clock
 
 `music-arrangement` can own WAV voices and expressive MIDI regions in one native
-process. This is the native contract for the terminal's forthcoming mixed-lane
-route. The arrangement editor still uses its separate WAV and MIDI transports;
-Space on mixed audible lanes does not yet use this contract.
+process. The arrangement editor uses this contract for mixed audible lanes.
+Select `:mixed-output AUDIO_UID`, choose a MIDI destination or per-asset source
+ports, and press Space. Both output flags also select the combined route when
+opening new or saved arrangements. Pause, seek, resume and stop control the same
+native process; imports, edits and closing retain their owned cleanup boundary.
 
 ## Plan and ownership
 

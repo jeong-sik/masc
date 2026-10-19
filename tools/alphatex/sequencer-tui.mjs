@@ -43,7 +43,6 @@ const help = [
 export async function viewSequencer({ path, root = resolve('music-projects'), embedded = false, signal,
   soundfontPath, sessionRoot, input, midi, output, midiOutput, initialDocument, pattern } = {}) {
   if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error('Sequencer requires a terminal')
-  if (output !== undefined && midiOutput !== undefined) throw new Error('Choose an audio output or a MIDI destination')
   if (path && initialDocument) throw new Error('Open a saved document or import MIDI, one at a time')
   const loaded = path ? await loadProject(path, { signal }) : null
   if (signal?.aborted) return
@@ -51,6 +50,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     const { viewArrangement } = await import('./arrangement-tui.mjs')
     return viewArrangement({ loaded, root, embedded, signal, output, midiOutput })
   }
+  if (output !== undefined && midiOutput !== undefined) throw new Error('Choose an audio output or a MIDI destination')
   let editor = newEditor(initialDocument ?? loaded?.project, { pattern }), revision = loaded?.revision ?? null
   path = loaded?.path ?? join(root, `phrase-${randomUUID()}.json`)
   let saved = loaded?.project, status = 'Enter a note or :help', prompt = null, showHelp = false

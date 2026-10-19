@@ -7,6 +7,7 @@ import { join, dirname, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 import { newArrangement, editArrangement, arrangementSchedule } from '../arrangement.mjs'
+import { arrangementRoute, selectArrangementRoute, arrangementPlaybackRequest } from '../arrangement-playback.mjs'
 import * as editorAPI from '../arrangement-editor.mjs'
 import { loadArrangement } from '../arrangement-files.mjs'
 import { importMidiSource, exportMidiSource } from '../midi-source.mjs'
@@ -82,7 +83,7 @@ async function controller(options={}){
     async terminate(){observed.terminated=true}
   }
   const slot=`arrange-controller-${randomUUID()}`
-  globalThis[slot]={process,Worker:OwnedWorker,arrangementSchedule,...editorAPI,join,dirname,resolve,tmpdir,randomUUID,
+  globalThis[slot]={process,Worker:OwnedWorker,arrangementSchedule,arrangementRoute,selectArrangementRoute,arrangementPlaybackRequest,...editorAPI,join,dirname,resolve,tmpdir,randomUUID,
     emitKeypressEvents(){},safeText:String,
     verifyArrangementAssets:async()=>new Map(),
     loadArrangement:async()=>{throw new Error('Unexpected load')},
@@ -203,8 +204,15 @@ test('worker exit with no active job rejects an already admitted save after inpu
 })
 
 
+async function primeWave(view) {
+  view.command('import-wave /music/take.wav'); await flush()
+  const job=view.observed.requests.find(job=>job.kind==='import-wave')
+  view.worker.emit('message',{id:job.id,ok:true,result:imported(job.project)}); await flush()
+  view.command('place asset-1 0'); await flush()
+}
+
 test('WAV preparation stays cancellable and a late result cannot launch playback',async()=>{
-  const view=await controller()
+  const view=await controller();await primeWave(view)
   view.key('space');await flush()
   const request=view.observed.requests.find(job=>job.kind==='prepare-wave')
   assert.ok(request)
@@ -217,7 +225,7 @@ test('WAV preparation stays cancellable and a late result cannot launch playback
 })
 
 test('arrangement owns one player through pause, seek, resume and close cleanup',async()=>{
-  const view=await controller()
+  const view=await controller();await primeWave(view)
   view.key('space');await flush()
   const request=view.observed.requests.find(job=>job.kind==='prepare-wave')
   view.worker.emit('message',{id:request.id,ok:true,result:{path:'/owned-recovery/play-1/plan.json',format:'wave-arrangement'}})
@@ -236,7 +244,7 @@ test('arrangement owns one player through pause, seek, resume and close cleanup'
 })
 
 test('document mutation stops the admitted playback revision while cursor motion keeps it',async()=>{
-  const view=await controller();view.key('space');await flush()
+  const view=await controller();await primeWave(view);view.key('space');await flush()
   const job=view.observed.requests.find(job=>job.kind==='prepare-wave')
   view.worker.emit('message',{id:job.id,ok:true,result:{path:'/owned-recovery/play-1/plan.json',format:'wave-arrangement'}})
   await flush();const player=view.observed.players[0]
@@ -248,7 +256,7 @@ test('document mutation stops the admitted playback revision while cursor motion
 
 async function closeController(view) {
   view.abort.abort()
-  for (const job of view.observed.requests.filter(job=>['prepare-wave','prepare-midi','import-wave','import-midi'].includes(job.kind))) {
+  for (const job of view.observed.requests.filter(job=>['prepare-wave','prepare-midi','prepare-mixed','import-wave','import-midi'].includes(job.kind))) {
     view.worker.emit('message',{id:job.id,ok:false,cancelled:true,error:'Cancelled'})
   }
   for (const player of view.observed.players) player.finish()
@@ -285,5 +293,45 @@ test('MIDI asset bindings survive prepare and own pause/seek/resume; route chang
     view.key('space');await flush();view.command('seek .5');await flush();view.key('space');await flush()
     assert.deepEqual(player.commands.slice(0,3),['pause',['seek',.3],'resume'])
     view.command('midi-output 43');await flush();assert.ok(player.commands.includes('stop'))
+  } finally { await closeController(view) }
+})
+
+async function primeMixed(view) {
+  await primeWave(view)
+  view.command('import-midi /music/keys.mid'); await flush()
+  const job=view.observed.requests.find(job=>job.kind==='import-midi')
+  const asset={id:'asset-2',name:'Keys',kind:'midi',source:importMidiSource(midi())}
+  view.worker.emit('message',{id:job.id,ok:true,result:{project:editArrangement(job.project,{kind:'asset-add',asset}),asset:asset.id}}); await flush()
+  view.command('place asset-2 0'); await flush()
+  view.command('mixed-output explicit-audio');view.command('midi-port asset-2 7 42'); await flush()
+}
+test('mixed controller pins paired outputs and owns one player through pause, seek, resume and output replacement',async()=>{
+  const view=await controller()
+  try {
+    await primeMixed(view);view.key('space');await flush()
+    const job=view.observed.requests.find(job=>job.kind==='prepare-mixed');assert.ok(job)
+    assert.equal(job.output,'explicit-audio');assert.deepEqual(job.portBindings,[{asset:'asset-2',port:7,destination:'42'}])
+    const result={path:'/owned-recovery/play-mixed/plan.json',format:'mixed-arrangement',midiOutput:'42',bindings:[{port:0,destination:'42'}]}
+    view.worker.emit('message',{id:job.id,ok:true,result});await flush()
+    const player=view.observed.players[0]
+    assert.equal(player.options.output,'explicit-audio');assert.equal(player.options.midiOutput,'42');assert.equal(player.options.format,'mixed-arrangement')
+    view.key('space');await flush();view.command('seek .5');await flush();view.key('space');await flush()
+    assert.deepEqual(player.commands.slice(0,3),['pause',['seek',.3],'resume'])
+    view.command('midi-output 43');await flush();assert.ok(player.commands.includes('stop'))
+    player.finish();view.key('space');await flush()
+    const next=view.observed.requests.filter(job=>job.kind==='prepare-mixed').at(-1)
+    assert.equal(next.output,'explicit-audio');assert.equal(next.midiOutput,'43');assert.deepEqual(next.portBindings,[])
+  } finally { await closeController(view) }
+})
+test('mixed preparation cancellation refuses a late combined plan and cleans its complete source root',async()=>{
+  const view=await controller()
+  try {
+    await primeMixed(view);view.key('space');await flush()
+    const job=view.observed.requests.find(job=>job.kind==='prepare-mixed');assert.ok(job)
+    view.command('stop');await flush()
+    assert.ok(view.observed.requests.some(value=>value.kind==='cancel'&&value.request===job.id))
+    view.worker.emit('message',{id:job.id,ok:true,result:{path:'/owned-recovery/mixed-late/plan.json',format:'mixed-arrangement',midiOutput:'42',bindings:[{port:0,destination:'42'}]}})
+    await flush();assert.equal(view.observed.players.length,0)
+    assert.ok(view.observed.removed.includes('/owned-recovery/mixed-late'))
   } finally { await closeController(view) }
 })

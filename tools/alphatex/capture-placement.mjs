@@ -35,6 +35,18 @@ function seconds(n, d) {
   if (!Number.isFinite(result)) throw new Error('Captured placement time is not representable')
   return result
 }
+function deadlineSeconds(n, d) {
+  const ns = n / d + (n % d === 0n ? 0n : 1n)
+  let result = Number(ns) / 1e9
+  if (!Number.isFinite(result)) throw new Error('Captured placement deadline is not representable')
+  // The display conversion must cover the exact native ceil deadline, even
+  // when binary64 multiplication would otherwise lose its last nanosecond.
+  const view = new DataView(new ArrayBuffer(8))
+  while (BigInt(Math.ceil(result * 1e9)) < ns) {
+    view.setFloat64(0, result); view.setBigUint64(0, view.getBigUint64(0) + 1n); result = view.getFloat64(0)
+  }
+  return result
+}
 export function capturePlacementStart(project, clip) { return seconds(...startNanoseconds(project, clip)) }
 
 // Keep editor/document identities and source cuts unchanged. Only the prepared
@@ -47,7 +59,7 @@ export function projectCapturedPlacement(project, asset, clip) {
     const absoluteN = startN * d + delta * n * startD, absoluteD = startD * d
     const startSeconds = seconds(absoluteN, absoluteD), startNanoseconds = fraction(absoluteN, absoluteD)
     return { ...clip, offset: String(offset), extent: String(extent), repeat: Number(repeat), ...source, startSeconds, startNanoseconds,
-      endSeconds: startSeconds + source.durationSeconds * Number(repeat) }
+      endSeconds: deadlineSeconds(absoluteN + extent * repeat * n * startD, absoluteD) }
   }
   const offset = BigInt(clip.offset)
   if (startN >= 0n) return [emit(offset, length, count, 0n)]

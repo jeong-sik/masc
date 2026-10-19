@@ -450,3 +450,15 @@ test('a cropped MIDI repeat carries exact absolute rational starts through the n
   ['0','4799999',2,{numerator:'449999875',denominator:'3'}]])
  assert.equal(editor.project.clips[1].extent,'4799999');assert.equal(editor.project.clips[1].repeat,3)
 }))
+
+
+test('a long decimal-tempo placement horizon covers its exact native final deadline',async()=>fixture(async({root,input})=>{
+ let editor=arrangementEditor((await importArrangementCapture(newArrangement({tempo:120.1}),input,{projectPath:join(root,'song.json')})).project)
+ for(const line of ['capture-region asset-1 2402 0 .2','split-take','select region-2','capture-offset -50'])editor=arrangementCommand(editor,line).editor
+ const project=editArrangement(editor.project,{kind:'lane-mute',id:'lane-1'})
+ const plan=JSON.parse(await readFile((await prepareArrangementCaptureRegions(project,{sourceRoot:root,directory:root,midiOutput:'42'})).path,'utf8'))
+ const clip=plan.umpRegions.regions[0],n=BigInt(clip.startNanoseconds.numerator),d=BigInt(clip.startNanoseconds.denominator)
+ const endN=n*3n+BigInt(clip.extent)*125n*d*BigInt(clip.repeatCount),endD=d*3n,deadline=endN/endD+(endN%endD?1n:0n)
+ assert.ok(BigInt(Math.ceil(plan.duration*1e9))>=deadline);assert.equal(plan.umpRegions.duration,plan.duration)
+ assert.equal(clip.startSeconds,1200.05)
+}))

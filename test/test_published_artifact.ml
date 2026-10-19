@@ -33,7 +33,7 @@ let request ?id ?expected_revision ?title ?format content =
   | Error message -> Alcotest.fail message
 
 let publish ~base_path request = S.publish ~base_path ~author:"keeper-연구" request |> store_ok
-let masc_dir base = Masc.Common.masc_dir_from_base_path ~base_path:base
+let masc_dir base = Common.masc_dir_from_base_path ~base_path:base
 let catalog_dir base = Filename.concat (masc_dir base) "published_artifacts"
 let metadata_path base id = Filename.concat (catalog_dir base) (id ^ ".json")
 

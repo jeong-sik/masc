@@ -88,6 +88,10 @@ type sentence_timeout_ms = private Sentence_timeout_ms of int
 val sentence_timeout : sentence_timeout_ms
 val timeout_ms : sentence_timeout_ms -> int
 
+(** Viewport coordinates in CSS pixels, as required by Stagehand's native
+    pointer protocol. These are not Browser Lane viewport fractions. *)
+type css_point = { x : float; y : float }
+
 (** The calls an attached session sends. *)
 type call =
   | Close
@@ -99,9 +103,10 @@ type call =
   | Page_goto of { page_id : string; url : string }
   | Page_screenshot of { page_id : string }
   | Page_evaluate of { page_id : string; expression : string }
+  | Page_hover of { page_id : string; x : float; y : float }
   | Page_click of { page_id : string; x : float; y : float }
   | Page_scroll of { page_id : string; x : float; y : float; delta_x : float; delta_y : float }
-  | Page_drag_and_drop of { page_id : string; from_x : float; from_y : float; to_x : float; to_y : float }
+  | Page_drag_and_drop of { page_id : string; from_x : float; from_y : float; to_x : float; to_y : float; route : css_point list }
 
 val method_name : call -> string
 val call_params : call -> Yojson.Safe.t

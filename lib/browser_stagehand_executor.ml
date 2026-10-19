@@ -314,11 +314,47 @@ let pointer ~call ~tab_id ~page_id ~args ~name input =
 let interact ~tabs ~call ~tab_id ~expected_url action =
   let* page_id = page_of ~tabs tab_id in
   let args = Browser_lane.interaction_args ~tab_id ~expected_url action in
+  let* action, expected_url = match (action : Browser_lane.interaction) with
+    | Browser_lane.Drag_to {duration_ms;_} when duration_ms <> 0 ->
+      Error (Browser_lane.Rejected_before_effect "drag movement timing requires automation or a live BiDi connection")
+    | Browser_lane.Hover _ | Browser_lane.Drag_to _ | Browser_lane.Click _ | Browser_lane.Click_node _ ->
+      let* resolved = evaluate ~runtime:Scene_runtime ~send:(send_guard call) ~args
+          page_id Browser_interaction.pointer_target_script |> guard_result in
+      let* action = Browser_interaction.resolve_pointer_action action resolved
+        |> Result.map_error (fun detail -> Browser_lane.Rejected_before_effect detail) in
+      let* action = match action with
+        | Browser_lane.Drag {from;to_;viewport;via;duration_ms} ->
+          let* arrival = match field "arrival" resolved with
+            | None -> Ok None
+            | Some value -> Browser_lane.Pointer.point_of_json value
+              |> Result.map Option.some
+              |> Result.map_error (fun detail -> Browser_lane.Rejected_before_effect detail) in
+          let via = match arrival with
+            | None -> via
+            | Some arrival ->
+              let path = match via with
+                | [] -> [Browser_lane.Pointer.{x=(from.x +. to_.x) /. 2.;y=(from.y +. to_.y) /. 2.}]
+                | _::_ -> via in
+              path @ [arrival] in
+          Ok (Browser_lane.Drag {from;to_;viewport;via;duration_ms})
+        | Browser_lane.Activate_tab | Browser_lane.Click _ | Browser_lane.Fill _
+        | Browser_lane.Scroll _ | Browser_lane.Hover _ | Browser_lane.Drag_to _
+        | Browser_lane.Hover_at _ | Browser_lane.Click_at _ | Browser_lane.Scroll_at _
+        | Browser_lane.Follow_link _ | Browser_lane.Click_node _ | Browser_lane.Fill_node _ -> Ok action in
+      let* url = string_field ~method_:"page.evaluate" "url" resolved |> guard_result in
+      Ok (action, Some url)
+    | Browser_lane.Activate_tab | Browser_lane.Fill _
+    | Browser_lane.Scroll _ | Browser_lane.Hover_at _ | Browser_lane.Click_at _
+    | Browser_lane.Scroll_at _ | Browser_lane.Drag _ | Browser_lane.Follow_link _
+    | Browser_lane.Fill_node _ -> Ok (action, expected_url) in
+  let args = Browser_lane.interaction_args ~tab_id ~expected_url action in
   match (action : Browser_lane.interaction) with
   | Browser_lane.Activate_tab -> Error (Browser_lane.Rejected_before_effect "activate_tab requires live lane")
-  | Browser_lane.Hover _ | Browser_lane.Drag_to _ ->
-    Error (Browser_lane.Rejected_before_effect "semantic pointer targets require automation or a live BiDi connection")
-  | Browser_lane.Hover_at _ -> Error (Browser_lane.Rejected_before_effect "trusted hover requires automation or a live BiDi connection")
+  | Browser_lane.Hover _ | Browser_lane.Drag_to _ | Browser_lane.Click _ | Browser_lane.Click_node _ ->
+    Error (Browser_lane.Rejected_before_effect "unresolved semantic pointer target")
+  | Browser_lane.Hover_at {point;viewport} ->
+    pointer ~call ~tab_id ~page_id ~args ~name:"hover_at"
+      (Wire.Page_hover {page_id;x=viewport_x viewport point;y=viewport_y viewport point})
   | Browser_lane.Click_at { point; viewport } ->
     pointer ~call ~tab_id ~page_id ~args ~name:"click_at"
       (Wire.Page_click { page_id; x = viewport_x viewport point; y = viewport_y viewport point })
@@ -328,15 +364,18 @@ let interact ~tabs ~call ~tab_id ~expected_url action =
          { page_id; x = viewport_x viewport point; y = viewport_y viewport point
          ; delta_x = float_of_int x; delta_y = float_of_int y })
   | Browser_lane.Drag { from; to_; viewport; via; duration_ms } ->
-    if via <> [] || duration_ms <> 0 then
-      Error (Browser_lane.Rejected_before_effect "drag paths and timing require automation or a live BiDi connection")
+    if duration_ms <> 0 then
+      Error (Browser_lane.Rejected_before_effect "drag movement timing requires automation or a live BiDi connection")
     else
+    let from_x = viewport_x viewport from and from_y = viewport_y viewport from in
+    let to_x = viewport_x viewport to_ and to_y = viewport_y viewport to_ in
+    let route = match via with
+      | [] -> [Wire.{x=(from_x +. to_x) /. 2.;y=(from_y +. to_y) /. 2.}]
+      | _::_ -> List.map (fun point -> Wire.{x=viewport_x viewport point;y=viewport_y viewport point}) via in
     pointer ~call ~tab_id ~page_id ~args ~name:"drag"
       (Wire.Page_drag_and_drop
-         { page_id; from_x = viewport_x viewport from; from_y = viewport_y viewport from
-         ; to_x = viewport_x viewport to_; to_y = viewport_y viewport to_ })
-  | Browser_lane.Click _ | Browser_lane.Fill _ | Browser_lane.Scroll _ | Browser_lane.Follow_link _
-  | Browser_lane.Click_node _ | Browser_lane.Fill_node _ ->
+         {page_id;from_x;from_y;to_x;to_y;route})
+  | Browser_lane.Fill _ | Browser_lane.Scroll _ | Browser_lane.Follow_link _ | Browser_lane.Fill_node _ ->
     let* receipt = evaluate ~runtime:Scene_runtime ~send:(send call) ~args page_id Browser_interaction.script in
     interaction_receipt ~tab_id receipt
 ;;

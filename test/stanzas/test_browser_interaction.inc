@@ -44,3 +44,13 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_browser_navigation_readiness)))
+
+(rule
+ (alias runtest-test_browser_semantic_arrival)
+ (deps test_browser_semantic_arrival.cjs
+       ../lib/browser_interaction.ml)
+ (action (run node %{dep:test_browser_semantic_arrival.cjs})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_browser_semantic_arrival)))

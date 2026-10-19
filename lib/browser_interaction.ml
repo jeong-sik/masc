@@ -368,7 +368,7 @@ let pointer_target_script = {js|
 const args = arguments[0];
 try {
   if (args.expectedUrl !== undefined && args.expectedUrl !== location.href) throw new Error('page_url_changed');
-  const target = spec => {
+  const target = (spec, withArrival = false) => {
     let element;
     if (spec.selector !== undefined) {
       let found;
@@ -409,11 +409,7 @@ try {
         rects.push(...Array.from(range.getClientRects()).filter(rect => rect.width > 0 && rect.height > 0));
       }
     }
-    for (const rect of rects) {
-      const left = Math.max(0,rect.left), right = Math.min(innerWidth,rect.right);
-      const top = Math.max(0,rect.top), bottom = Math.min(innerHeight,rect.bottom);
-      if (right <= left || bottom <= top) continue;
-      const x = Math.floor((left+right)/2), y = Math.floor((top+bottom)/2);
+    const containsPointer = (x,y) => {
       let hit = document.elementFromPoint(x,y);
       while (hit?.shadowRoot?.elementFromPoint) {
         const next = hit.shadowRoot.elementFromPoint(x,y);
@@ -421,16 +417,40 @@ try {
         hit = next;
       }
       for (let node = hit; node; node = node.parentElement || node.getRootNode().host)
-        if (node === element) return {x:x/innerWidth,y:y/innerHeight};
+        if (node === element) return true;
+      return false;
+    };
+    const point = (x,y) => ({x:x/innerWidth,y:y/innerHeight});
+    for (const rect of rects) {
+      const left = Math.max(0,rect.left), right = Math.min(innerWidth,rect.right);
+      const top = Math.max(0,rect.top), bottom = Math.min(innerHeight,rect.bottom);
+      if (right <= left || bottom <= top) continue;
+      const x = Math.floor((left+right)/2), y = Math.floor((top+bottom)/2);
+      if (!containsPointer(x,y)) continue;
+      const resolved = {point:point(x,y)};
+      if (withArrival) {
+        // Enter the observed drop rectangle before its center, so a later
+        // native move can deliver dragover after dragenter on this target.
+        const candidates = [[Math.floor((left+x)/2),y],[Math.floor((x+right)/2),y],
+          [x,Math.floor((top+y)/2)],[x,Math.floor((y+bottom)/2)]];
+        const arrival = candidates.find(([ax,ay]) => (ax !== x || ay !== y)
+          && ax >= left && ax < right && ay >= top && ay < bottom && containsPointer(ax,ay));
+        if (arrival) resolved.arrival = point(...arrival);
+      }
+      return resolved;
     }
     if (!rects.some(rect =>
       rect.right > 0 && rect.bottom > 0 && rect.left < innerWidth && rect.top < innerHeight))
       throw new Error('element_outside_viewport');
     throw new Error('element_pointer_obstructed');
   };
-  const geometry = args.action === 'hover' || args.action === 'click'
-    ? {point:target(args)}
-    : {from:target(args.source),to:target(args.destination)};
+  let geometry;
+  if (args.action === 'hover' || args.action === 'click') geometry = {point:target(args).point};
+  else {
+    const source = target(args.source), destination = target(args.destination,true);
+    geometry = {from:source.point,to:destination.point,
+      ...(destination.arrival ? {arrival:destination.arrival} : {})};
+  }
   return {...geometry,url:location.href,viewport:browserScene({mode:'viewport'})};
 } catch (error) {
   return {interactionFailure:{message:String(error?.message ?? error),effectStarted:false}};

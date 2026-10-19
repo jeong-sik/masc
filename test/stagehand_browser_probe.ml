@@ -260,6 +260,30 @@ let () =
        (let* data = read "elements" in
         if contains ~sub:"Submit order" (Yojson.Safe.to_string data) then Ok data
         else Error ("the elements read answered " ^ Yojson.Safe.to_string data));
+     record "trusted hover reveals a menu, native click opens it, and observed selection takes effect"
+       (let* _ = interact ["action",`String "hover";"tabId",`Int tab_id;
+          "expectedUrl",`String fixture_url;"selector",`String "#hover-message"] in
+        let* revealed = read "elements" in
+        if not (contains ~sub:"Open trusted menu" (Yojson.Safe.to_string revealed))
+        then Error "hover menu control was absent from the fresh inventory"
+        else
+          let* _ = interact ["action",`String "click";"tabId",`Int tab_id;
+            "selector",`String "#menu-trigger"] in
+          let* opened = read "scene" in
+          let open Yojson.Safe.Util in
+          let selected = match member "nodes" opened with
+            | `List nodes -> List.find_opt (fun node -> member "text" node = `String "Select trusted item") nodes
+            | _ -> None in
+          match selected with
+          | None -> Error "trusted pointerdown menu did not expose its selection"
+          | Some node ->
+            let* _ = interact ["action",`String "click";"tabId",`Int tab_id;
+              "documentId",member "documentId" opened;"nodeId",member "nodeId" node] in
+            let* _ = title_at tab_id "trusted-menu-picked" in
+            let* selected = read "text" in
+            if contains ~sub:"Trusted menu selected" (Yojson.Safe.to_string selected) then Ok selected
+            else Error "trusted menu selection was not observed");
+     record "reset after trusted hover menu" (goto_fixture ());
      (* A scope from another document makes the scene script throw
         scene_document_changed. Stagehand words an uncaught throw as
         "Uncaught", so this shows the page script's own reason survives. *)
@@ -329,8 +353,9 @@ let () =
      record "reset after BrowserInteract scroll_at" (goto_fixture ());
      record "BrowserInteract drag sends native Stagehand pointer input"
        (let* viewport, geometry = observed_viewport () in
-        (* Source and target are fixed boxes with distinct centres. The page
-           changes title only after a drop or a pointer release on target. *)
+        (* Raw pointer input is proved independently of HTML5 drag-and-drop.
+           This source captures a trusted press and requires movement followed
+           by a trusted release inside the distinct observed destination. *)
         let from_x = 0.2 +. (35. /. geometry.width)
         and from_y = 0.55 +. (20. /. geometry.height)
         and to_x = 0.45 +. (50. /. geometry.width)
@@ -345,12 +370,23 @@ let () =
             ; "to", `Assoc [ "x", `Float to_x; "y", `Float to_y ]
             ]
           in
-          let* _ = title_at tab_id "dragged" in
+          let* _ = title_at tab_id "pointer-dragged" in
           let* data = read "text" in
           match string_at [ "text" ] data with
-          | Some text when contains ~sub:"Drag completed" text -> Ok data
+          | Some text when contains ~sub:"Pointer drag completed" text -> Ok data
           | _ -> Error ("the drag was absent from BrowserRead: " ^ Yojson.Safe.to_string data));
      record "reset after BrowserInteract drag" (goto_fixture ());
+     record "semantic drag_to accepts a trusted HTML5 drop"
+       (let* _ = interact ["action",`String "drag_to";"tabId",`Int tab_id;
+          "expectedUrl",`String fixture_url;
+          "source",`Assoc ["selector",`String "#html5-source"];
+          "destination",`Assoc ["selector",`String "#html5-target"]] in
+        let* _ = title_at tab_id "html5-dragged" in
+        let* data = read "text" in
+        match string_at ["text"] data with
+        | Some text when contains ~sub:"HTML5 drag completed" text -> Ok data
+        | _ -> Error ("the HTML5 drop was absent from BrowserRead: " ^ Yojson.Safe.to_string data));
+     record "reset after semantic HTML5 drag" (goto_fixture ());
      record "observe locates the button the model chose"
        (let* data =
           instruct [ "action", `String "observe"; "instruction", `String "the Submit order button"; "tabId", `Int tab_id ]

@@ -397,21 +397,35 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
         if (!input) throw new Error('Select :input AUDIO_UID before calibration')
         if (recording || transport.kind !== 'stopped' || players.size || preparations.size) throw new Error('Stop and drain arrangement playback before calibration')
         const selectedInput = input, target = join(dirname(path), 'calibrations', randomUUID())
-        await mkdir(dirname(target), { recursive: true, mode: 0o700 })
-        await settleMonitoring()
-        await transitionLiveMidi(() => settleLiveMidi())
-        if (!accepting) return
-        if (workerFailure) throw workerFailure
         const owned = new AbortController(); calibration = owned
-        status = 'Measuring selected audio loopback; Esc/q cancels and returns'; draw()
         try {
+          await mkdir(dirname(target), { recursive: true, mode: 0o700 })
+          await settleMonitoring()
+          await transitionLiveMidi(() => settleLiveMidi())
+          owned.signal.throwIfAborted()
+          if (!accepting) return
+          if (workerFailure) throw workerFailure
+          status = 'Measuring selected audio loopback; Esc/q cancels and returns'; draw()
           const result = await measureAudioCalibration({ ...value, input: selectedInput, directory: target, signal: owned.signal,
-            analyze: ({ signal, ...job }) => request({ kind: 'analyze-calibration', ...job }) })
+            analyze: async ({ signal, ...job }) => {
+              signal.throwIfAborted()
+              let cancel
+              try {
+                return await request({ kind: 'analyze-calibration', ...job }, id => {
+                  cancel = () => { if (!workerFailure) worker.postMessage({ kind: 'cancel', request: id }) }
+                  signal.addEventListener('abort', cancel, { once: true })
+                })
+              } finally { signal.removeEventListener('abort', cancel) }
+            } })
+          owned.signal.throwIfAborted()
           if (accepting) status = `Unapplied calibration: ${result.matches.map(m => `${m.residualMs.toFixed(3)} ms (correlation ${m.correlation.toFixed(3)})`).join(', ')}; saved ${result.directory}`
         } finally {
-          if (calibration === owned) calibration = null
-          startMonitoring()
-          await transitionLiveMidi(async () => { const live = startLiveMidi(); if (live) await live.ready })
+          // Keep ownership through cleanup and route restoration. Repeated
+          // cancel keys must not turn a draining measurement into a view exit.
+          try {
+            startMonitoring()
+            await transitionLiveMidi(async () => { const live = startLiveMidi(); if (live) await live.ready })
+          } finally { if (calibration === owned) calibration = null }
         }
         break
       }
@@ -505,6 +519,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
       } else if (text && !key.ctrl && !key.meta) prompt += safeText(text)
       draw(); return
     }
+    if (calibration && ['escape', 'q'].includes(key.name)) { calibration.abort(); return }
     if (['escape', 'q'].includes(key.name)) { finish(); return }
     if (text === ':') { prompt = ''; draw(); return }
     if (text === '?') { showHelp = !showHelp; draw(); return }

@@ -241,10 +241,11 @@ multi-channel track; `:select event-ID` chooses a specific paired note. Chord la
 use note-key intervals and do not infer sustain-pedal voice durations. Shared-key
 ambiguity and unmatched input events remain in the original source.
 
-Source audition sends the complete ordered MIDI wire stream to explicitly selected
-outputs as described below. Controller/tempo editing and source WAV synthesis
-remain unfinished. Existing phrase-project MIDI/WAV transport
-continues to work. See [MIDI source semantics](MIDI-SOURCE.md) for retained data,
+Source audition can render a selected single-port performance through a VST or
+send the complete ordered MIDI wire stream to explicit outputs as described below.
+Choose a VST with `i`; `:wave PATH` exports its rendered performance. Source
+controller/tempo editing and SoundFont synthesis remain unfinished.
+See [MIDI source semantics](MIDI-SOURCE.md) for retained data,
 source-event identities and timing behavior.
 
 ### Imported performance audition
@@ -261,8 +262,9 @@ Source audition sends ordered MIDI 1.0 channel expression and F0/F7 wire data
 using the source tempo map or SMPTE clock. It plays once from the beginning.
 Pause/resume and seek restore supported channel state; unknown initial values
 and opaque device effects report errors as described in [Source state](SOURCE-STATE.md).
-Source looping and source WAV/VST synthesis remain unfinished. Existing
-phrase projects retain their pause/resume/seek/loop and SoundFont routes. Stop
+Source clip looping remains unfinished. The VST route instead pauses and seeks
+within its rendered audio; its `:wave` export uses the selected source pattern.
+Editable phrase projects retain their loop and SoundFont routes. Stop
 closes an in-flight SysEx stream, releases each owned held key and disables hold
 controllers 64/66/69 that this source enabled. It never broadcasts all-notes-off.
 Use destinations/channels owned for this audition: pedal state is shared by a

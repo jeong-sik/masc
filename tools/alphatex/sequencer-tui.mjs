@@ -43,7 +43,7 @@ const help = [
   'Use :channel 1–16 or :select event-ID for source notes sharing a cursor.',
   'Source: choose a VST or :midi-output ID; selected SMF2 and SMPTE performances are supported.',
   'Multiple source ports: :midi-port PORT ID for each port (0–127).',
-  'Source pause/seek/loop and WAV synthesis require expression-state reconstruction.',
+  'Source VST audio supports pause/seek and :wave; source clip looping is unfinished.',
 ]
 
 export async function viewSequencer({ path, root = resolve('music-projects'), embedded = false, signal,

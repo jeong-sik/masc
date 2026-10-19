@@ -2,7 +2,7 @@ import { validateCapturedSource } from './captured-source.mjs'
 import { captureRegionTime } from './capture-time.mjs'
 import { validateMidiSource, midiSourcePattern } from './midi-source.mjs'
 import { PPQ, validateProject } from './sequencer-project.mjs'
-import { validateCapturePlacement, capturePlacementStart, projectCapturedPlacement } from './capture-placement.mjs'
+import { validateCapturePlacement, validateClockOffset, capturePlacementStart, projectCapturedPlacement } from './capture-placement.mjs'
 import { validateCalibrationCapture } from './calibration-profile.mjs'
 import { validatePractice } from './arrangement-practice.mjs'
 import { validateRecordingCorrection } from './recording-correction.mjs'
@@ -87,6 +87,7 @@ export function arrangementClipTime(project, clip) {
   case 'capture': {
     if (clip.pattern !== undefined) throw new Error('Captured regions do not have MIDI patterns')
     if (clip.component !== undefined && !['audio', 'midi'].includes(clip.component)) throw new Error('Unknown captured region component')
+    if (clip.clockOffsetNanoseconds !== undefined) validateClockOffset(clip.clockOffsetNanoseconds)
     if (clip.placement !== undefined) {
       if (!clip.component) throw new Error('Split captured audio and MIDI before correcting one component')
       validateCapturePlacement(clip.placement)
@@ -120,8 +121,8 @@ export function arrangementClipTime(project, clip) {
   }
   default: throw new Error('Unknown region source kind')
   }
-  if (asset.kind !== 'capture' && (clip.component !== undefined || clip.placement !== undefined || clip.audioChannel !== undefined)) throw new Error('Component correction requires a captured source')
-  const position = asset.kind === 'capture' && clip.placement ? capturePlacementStart(project, clip) : clip.position / project.ppq * 60 / project.tempo
+  if (asset.kind !== 'capture' && (clip.component !== undefined || clip.placement !== undefined || clip.audioChannel !== undefined || clip.clockOffsetNanoseconds !== undefined)) throw new Error('Component correction requires a captured source')
+  const position = asset.kind === 'capture' && (clip.placement || clip.clockOffsetNanoseconds) ? capturePlacementStart(project, clip) : clip.position / project.ppq * 60 / project.tempo
   duration ??= sourceEnd - sourceStart
   const end = position + duration * clip.repeat
   if (![position, sourceStart, sourceEnd, duration, end].every(Number.isFinite)) throw new Error('Region time is not representable')
@@ -179,6 +180,7 @@ export function editArrangement(project, edit) {
     case 'region-add': next.clips.push({ id: arrangementID(next.clips, 'region'), name: edit.name,
       asset: edit.asset, lane: edit.lane, position: edit.position, offset: edit.offset, extent: edit.extent,
       repeat: edit.repeat ?? 1, ...(edit.pattern === undefined ? {} : { pattern: edit.pattern }),
+      ...(edit.clockOffsetNanoseconds === undefined ? {} : { clockOffsetNanoseconds: structuredClone(edit.clockOffsetNanoseconds) }),
       ...(edit.audioChannel === undefined ? {} : { audioChannel: structuredClone(edit.audioChannel) }),
       ...(edit.component === undefined ? {} : { component: edit.component }), ...(edit.placement === undefined ? {} : { placement: structuredClone(edit.placement) }) }); break
     case 'capture-split': {
@@ -195,7 +197,7 @@ export function editArrangement(project, edit) {
       const clip = region(edit.id)
       for (const key of Object.keys(edit)) {
         if (['kind', 'id'].includes(key)) continue
-        if (!['name', 'lane', 'position', 'offset', 'extent', 'repeat', 'pattern', 'component', 'placement', 'audioChannel'].includes(key)) throw new Error('Unknown region edit field')
+        if (!['name', 'lane', 'position', 'offset', 'extent', 'repeat', 'pattern', 'component', 'placement', 'audioChannel', 'clockOffsetNanoseconds'].includes(key)) throw new Error('Unknown region edit field')
         if (key === 'audioChannel' && edit[key] === undefined) delete clip[key]
         else clip[key] = structuredClone(edit[key])
       }
@@ -231,7 +233,7 @@ export function arrangementPlaybackSchedule(project) {
   const reserved = [...project.clips], result = []
   for (const clip of arrangementSchedule(project)) {
     const asset = project.assets.find(asset => asset.id === clip.asset)
-    const parts = asset.kind === 'capture' && clip.placement ? projectCapturedPlacement(project, asset, clip) : [clip]
+    const parts = asset.kind === 'capture' && (clip.placement || clip.clockOffsetNanoseconds) ? projectCapturedPlacement(project, asset, clip) : [clip]
     for (const [index, part] of parts.entries()) {
       const id = index ? arrangementID(reserved, 'projection') : clip.id
       reserved.push({ id }); result.push({ ...part, id })

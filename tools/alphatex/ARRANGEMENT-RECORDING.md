@@ -31,21 +31,39 @@ The playback epoch and captured host timestamps share the system clock described
 by [Apple AVAudioTime](https://developer.apple.com/documentation/avfaudio/avaudiotime).
 Absolute timestamps remain integer strings. Playback positions and tempo use the
 exact binary64 values admitted by the scheduler, decoded to rational arithmetic.
-The source begins at the next representable quarter-note project tick; the source
+For one-shot backing, the source begins at the next representable quarter-note project tick; the source
 cut then rounds inward by less than one host tick. Thus at most one project tick
 of leading material is excluded from the region, while the full source remains
 retained. Startup pre-roll and material beyond the backing endpoint are retained
 in the original source and excluded from the placed interval. Placement provenance
 and the rational rounding error are stored on the captured asset.
 
+With `:loop START END`, recording continues across loop boundaries. Finalizing
+creates one take lane per pass, with the last pass unmuted and earlier passes
+muted. Lane mute/solo lets you audition an earlier pass. Every pass refers to the
+same complete imported WAV/UMP; undo/redo removes/restores the whole recording
+transaction. Partial first/last passes keep their original position inside the
+range. Count-in is excluded from placement, without deleting its captured source.
+
+Loop placement uses the native owner's acknowledged cycle and the original
+integer host ticks. Adjacent cuts share a boundary; fractional project placement
+is retained separately from the displayed tick. This avoids dropping a project
+tick at every wrap or accumulating a rounded period. Standalone MIDI backing
+publishes its actual binary64 cycle duration, including its existing outward
+silent tail. Common audio/MIDI backing publishes its authored project cycle.
+Audio correction is applied before choosing pass boundaries; MIDI keeps its
+original clock. The selected correction and all pass coordinates remain in the
+recording alignment record. New takes become available after finalization;
+this is not live overdub monitoring or a comping editor.
+
 [Audio input monitoring](INPUT-MONITORING.md) is explicit: select an input and
 `:monitor AUDIO_OUTPUT_UID`, or `:monitor off`. It also works before recording.
 Recording waits for the standalone monitor to close and opens the selected monitor
 inside the recorder's own input engine. After finalization, standalone monitoring
 resumes while the view remains open. These ownership transfers can have a gap;
-they are not gapless punch-in/out. MIDI input monitoring, count-in, measured
-roundtrip latency/compensation, physical-device alignment and whole-arrangement
-loop recording remain unfinished. No monitoring output is selected automatically. Native MIDI-only, WAV-only, mixed and hybrid arrangements publish their
+they are not gapless punch-in/out. Physical-device alignment and acoustic latency
+still require actual equipment measurements. No monitoring output is selected
+automatically. Native MIDI-only, WAV-only, mixed and hybrid arrangements publish their
 host-clock epoch for recording admission; a pending transport change cannot admit
 a new take before its acknowledgement.
 

@@ -662,7 +662,11 @@ The click follows the original meter denominator and bar accents inside the
 chosen range, including a partial bar. Pause/resume retains the remaining intro;
 seeking goes directly to the backing, and seeking the range end wraps to its
 start without another count-in. Stop/new play starts a fresh intro.
-Loop recording still requires cycle-aware take placement and is refused.
+`:record` also works while looping. `:record-stop` retains every pass on a
+separate take lane at its original loop position; only the last pass is unmuted.
+The complete captured WAV/UMP is retained once. Choose a different take with
+ordinary lane mute/solo controls. Count-in material is excluded from the placed
+passes, and audio correction is applied before determining their cycle cuts.
 
 For example, `:loop 4 12` repeats that passage continuously on the selected audio
 or MIDI output until stopped. It starts at beat 4. Pause/resume and `:seek BEAT` retain

@@ -41,7 +41,7 @@ def retain_fixture_receipt(refs, terminal):
 
 
 def upstream(output, *, complete=True, sequence=1, instance_id="projection-1",
-             installation_id="fusion-results", output_id=None, selected_lanes=None):
+             installation_id: str | None = "fusion-results", output_id=None, selected_lanes=None):
     output = copy.deepcopy(output)
     for item in output["rows"]:
         item["id"] = f"{instance_id}/{sequence}/" + item["id"]

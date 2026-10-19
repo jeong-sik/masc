@@ -67,7 +67,14 @@ let automation_serves verb = Lane.verb_allowed_on_automation verb && match verb 
       | Lane.Click_node _ | Lane.Fill_node _);_} -> true
 
 let choose ~verb ~bound ~snapshot preference =
-  let ready state = enabled state.activity && state.registered in
+  let lifecycle_inspection_or_cleanup = match verb with
+    | Lane.Session_status | Lane.Session_close -> true
+    | Lane.Session_open _ | Lane.Page_goto _ | Lane.Tabs_list | Lane.Page_read _
+    | Lane.Page_document _ | Lane.Page_downloads _ | Lane.Page_capture _ | Lane.Page_scene _
+    | Lane.Page_interact _ | Lane.Page_elements _ | Lane.Page_act _ | Lane.Page_context _
+    | Lane.Page_instruct _ | Lane.Page_locate _ | Lane.Page_extract _ -> false in
+  let ready state = state.registered &&
+    (enabled state.activity || lifecycle_inspection_or_cleanup) in
   let eligible route state = ready state && match route with
     | Lane.Stagehand_route -> stagehand_serves verb
     | Lane.Automation_route -> automation_serves verb
@@ -81,7 +88,7 @@ let choose ~verb ~bound ~snapshot preference =
     | [route] -> Ok {route;reason}
     | routes -> Error (Ambiguous_browsers routes) in
   let configured () =
-    let idle state = match state.session with Lane.Browser_closed -> true
+    let idle state = enabled state.activity && match state.session with Lane.Browser_closed -> true
       | Lane.Browser_open | Lane.Browser_changing | Lane.Browser_unknown -> false in
     if eligible Lane.Stagehand_route snapshot.stagehand && idle snapshot.stagehand
     then Ok {route=Lane.Stagehand_route;reason=Preferred_work_browser}

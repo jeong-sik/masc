@@ -64,6 +64,28 @@ let test_eligibility () =
     (choose ~verb:timing {empty with stagehand=work Lane.Browser_open;automation=work Lane.Browser_open});
   check bool "bound timing request still requires its exact browser" true
     (choose ~verb:timing ~bound:true {empty with automation=work Lane.Browser_open}=Error Selection.Binding_required)
+let test_inactive_session_cleanup () =
+  List.iter (fun activity ->
+    let inactive : Selection.work_browser = {activity;registered=true;session=Lane.Browser_open} in
+    let sole = {empty with stagehand=inactive} in
+    List.iter (fun verb ->
+      selected {route=Lane.Stagehand_route;reason=Selection.Existing_work_session}
+        (choose ~verb sole);
+      check bool "cleanup still refuses ambiguous owned browsers" true
+        (choose ~verb {sole with automation=inactive} =
+         Error (Selection.Ambiguous_browsers [Lane.Stagehand_route;Lane.Automation_route])))
+      [Lane.Session_status;Lane.Session_close];
+    List.iter (fun verb -> check bool "inactive owned browser cannot receive new work" true
+      (choose ~verb sole=Error Selection.No_available_browser))
+      [Lane.Tabs_list;Lane.Page_goto {url="https://example.org";tab_id=None}];
+    selected {route=Lane.Automation_route;reason=Selection.Compatible_work_browser}
+      (choose ~verb:(Lane.Session_open {headless=None}) sole);
+    check bool "closed inactive backend is not a ready status default" true
+      (choose ~verb:Lane.Session_status {empty with stagehand={inactive with session=Lane.Browser_closed};
+        automation={inactive with session=Lane.Browser_closed}} = Error Selection.No_available_browser);
+    check bool "unregistered backend cannot be inspected or closed" true
+      (choose ~verb:Lane.Session_close {sole with stagehand={inactive with registered=false}}=
+       Error Selection.No_available_browser)) [Lane.Disabled;Lane.Unobserved]
 let test_observation_is_not_dispatch () = Eio_main.run (fun _ ->
   let dispatched=ref 0 in
   Lane.install_activity_observer (Some (fun _ -> Lane.Enabled));
@@ -99,6 +121,7 @@ let () = run "browser selection" ["policy",[
   test_case "exact browser binding" `Quick test_explicit_binding;
   test_case "work session lifecycle" `Quick test_work_lifecycle;
   test_case "capability and activity eligibility" `Quick test_eligibility;
+  test_case "inactive owned session inspection and cleanup" `Quick test_inactive_session_cleanup;
   test_case "observation sends no command" `Quick test_observation_is_not_dispatch;
   test_case "selection wire contract" `Quick test_wire;
   test_case "receipts retain the actual admitted client" `Quick test_bind_admitted_identity]]

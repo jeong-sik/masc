@@ -38,7 +38,10 @@ type firefox_failure =
           port answered. Firefox 157.0.1 exits with status 0 this way when
           another Firefox has the profile open, and says so only in the
           system's language (measured 2026-10-09); the message names that
-          case for status 0 alone. [None]: the status was not known here. *)
+          case for status 0 alone. A clean exit waits until the existing
+          startup deadline for a replacement process to open the port;
+          this failure is reported only if no port answers by then.
+          [None]: the status was not known here. *)
   | Not_listening of float
       (** The port did not answer within these seconds; at the last check a
           connect to it was refused. *)

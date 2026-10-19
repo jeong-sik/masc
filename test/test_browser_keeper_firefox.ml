@@ -504,24 +504,27 @@ let free_port () =
    case can stop it. It takes and closes each connection, as Firefox answers
    one, so checks of the port never fill its backlog. [own_group]: first it
    leaves the process group it was started in. *)
-let listener ~own_group =
+let listener ~own_group ~delay_s =
   Printf.sprintf
     "python3 -c 'import os,select,socket,sys,time\n\
      %sopen(sys.argv[2], \"w\").write(str(os.getpid()))\n\
+     time.sleep(%g)\n\
      s=socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)\n\
      s.bind((\"127.0.0.1\", int(sys.argv[1]))); s.listen(4); end=time.time()+30\n\
      while time.time() < end: r=select.select([s],[],[],1)[0]; r and s.accept()[0].close()'"
-    (if own_group then "os.setpgid(0, 0)\n" else "")
+    (if own_group then "os.setpgid(0, 0)\n" else "") delay_s
 
-let listener_command = listener ~own_group:false
+let listener_command = listener ~own_group:false ~delay_s:0.
 
-type fake = Listens | Listens_apart | Exits | Relaunches | Never_listens
+type fake = Listens | Listens_apart | Exits | Fails | Relaunches | Relaunches_apart | Never_listens
 
 (* A Firefox that records its pid and what it was given, then behaves as
    [fake] says: [Exits] at once, as Firefox does on a profile another
    Firefox holds; [Relaunches], leaving a process in its group that opens
    the port half a second later, as a Firefox applying an update does;
-   [Listens_apart], running on while a process it started holds the port
+   [Relaunches_apart], exiting after its replacement leaves the original
+   group and before that replacement opens the port; [Listens_apart],
+   running on while a process it started holds the port
    from a group of its own, which a stop of its group does not reach. *)
 let fake_firefox base ~marker fake =
   let path = Filename.concat base "firefox" in
@@ -529,9 +532,14 @@ let fake_firefox base ~marker fake =
   let tail = match fake with
     | Listens -> Printf.sprintf "exec %s \"$port\" %s\n" listener_command pidfile
     | Listens_apart ->
-      Printf.sprintf "%s \"$port\" %s &\nexec %s\n" (listener ~own_group:true) pidfile (sleeper_command marker)
+      Printf.sprintf "%s \"$port\" %s &\nexec %s\n" (listener ~own_group:true ~delay_s:0.) pidfile (sleeper_command marker)
     | Exits -> "exit 0\n"
+    | Fails -> "exit 17\n"
     | Relaunches -> Printf.sprintf "( sleep 0.5; exec %s \"$port\" %s ) &\nexit 0\n" listener_command pidfile
+    | Relaunches_apart ->
+      Printf.sprintf
+        "%s \"$port\" %s &\nwhile [ ! -s %s ]; do sleep 0.01; done\nexit 0\n"
+        (listener ~own_group:true ~delay_s:0.5) pidfile pidfile
     | Never_listens -> Printf.sprintf "exec %s\n" (sleeper_command marker) in
   write ~mode:0o700 path
     (Printf.sprintf
@@ -686,12 +694,39 @@ let a_firefox_that_exits_first_starts_no_host () =
     let firefox = fake_firefox base ~marker:firefox_marker Exits in
     with_children ~base [ firefox_marker; host_marker ] (fun () ->
       let began = Unix.gettimeofday () in
-      started ~base ~configuration:(configured ~firefox ~port:(free_port ()) base) ();
-      check bool "its exit ends the wait, not the timeout" true
-        (Unix.gettimeofday () -. began < Keeper_firefox.firefox_ready_timeout_s /. 3.);
+      started ~ready_timeout_s:1. ~base ~configuration:(configured ~firefox ~port:(free_port ()) base) ();
+      check bool "a clean exit waits for a replacement until the startup deadline" true
+        (Unix.gettimeofday () -. began >= 1.);
       check bool "firefox ran" true (Sys.file_exists firefox_marker);
       check bool "no host for a Firefox that is not there" false (host_started base);
       check bool "not recorded" true (recorded base = None)))
+
+let a_firefox_that_fails_first_starts_no_host () =
+  with_workspace (fun base ->
+    let firefox_marker, host_marker = markers base in
+    install_lane base ~marker:host_marker;
+    let firefox = fake_firefox base ~marker:firefox_marker Fails in
+    with_children ~base [ firefox_marker; host_marker ] (fun () ->
+      let began = Unix.gettimeofday () in
+      started ~base ~configuration:(configured ~firefox ~port:(free_port ()) base) ();
+      check bool "an unsuccessful exit still ends the wait" true
+        (Unix.gettimeofday () -. began < Keeper_firefox.firefox_ready_timeout_s /. 3.);
+      check bool "no host" false (host_started base);
+      check bool "not recorded" true (recorded base = None)))
+
+let a_firefox_that_relaunches_outside_its_group_gets_its_host () =
+  with_workspace (fun base ->
+    let firefox_marker, host_marker = markers base in
+    install_lane base ~marker:host_marker;
+    let firefox = fake_firefox base ~marker:firefox_marker Relaunches_apart in
+    with_children ~base [ firefox_marker; host_marker ] (fun () ->
+      started ~base ~configuration:(configured ~firefox ~port:(free_port ()) base) ();
+      await_file host_marker;
+      check bool "the replacement's port gets its host" true (host_started base);
+      check bool "the old process group is no longer claimed" true (recorded base = None);
+      started ~base ~configuration:(Some Browser_configuration.none) ();
+      check bool "the replacement outside the recorded group is left running" false
+        (not_running ~base (firefox_marker ^ ".listener"))))
 
 let a_firefox_that_goes_on_in_another_process_gets_its_host () =
   with_workspace (fun base ->
@@ -831,7 +866,7 @@ let the_host_is_not_given_the_servers_address () =
 let each_start_keeps_the_last_runs_log () =
   with_workspace (fun base ->
     let firefox_marker, _ = markers base in
-    let firefox = fake_firefox base ~marker:firefox_marker Exits in
+    let firefox = fake_firefox base ~marker:firefox_marker Fails in
     let configuration = configured ~firefox ~port:(free_port ()) base in
     let log = Keeper_firefox.firefox_log_path ~base_path:base in
     with_children ~base [ firefox_marker ] (fun () ->
@@ -1644,6 +1679,9 @@ let () =
         ; test_case "a running host and no Firefox" `Quick a_running_host_with_no_firefox_starts_nothing
         ; test_case "a host whose address cannot be read" `Quick a_host_whose_address_cannot_be_read_starts_nothing
         ; test_case "a Firefox that exits first" `Quick a_firefox_that_exits_first_starts_no_host
+        ; test_case "a Firefox that exits unsuccessfully" `Quick a_firefox_that_fails_first_starts_no_host
+        ; test_case "a Firefox that relaunches outside its process group" `Quick
+            a_firefox_that_relaunches_outside_its_group_gets_its_host
         ; test_case "a Firefox that goes on in another process" `Quick
             a_firefox_that_goes_on_in_another_process_gets_its_host
         ; test_case "a Firefox that never opens its port" `Quick a_firefox_that_never_opens_its_port_starts_no_host

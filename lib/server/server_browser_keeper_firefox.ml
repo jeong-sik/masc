@@ -190,11 +190,13 @@ let record_started ~clock ~base_path (config : Browser_configuration.live_bidi) 
          (Firefox_record.write_failure_message failure))
 
 (* A Firefox may end its first process and go on in another. Applying a
-   staged update, it starts the updater, which starts Firefox again; whether
-   those stay in the group of the one started here was not measured
-   (RFC-browser-keeper-firefox §3.2). So the wait ends at an exit only once
-   nothing is left in that group. A Firefox still there at the deadline is
-   stopped. *)
+   staged update, it starts the updater, which starts Firefox again;
+   the replacement may leave the original process group. A clean exit
+   therefore keeps waiting for the port within the same startup deadline.
+   The host verifies the configured profile before attaching; a process
+   outside the recorded group is never claimed or stopped as ours. Other
+   exits end the wait once the group is empty. A Firefox still in that
+   group at the deadline is stopped. *)
 let await_port ~net ~clock ~ready_timeout_s ~base_path (config : Browser_configuration.live_bidi)
     ~leader (firefox : Posix_spawn_detached.t) =
   let deadline = Monotonic_deadline.after ~seconds:ready_timeout_s in
@@ -212,8 +214,13 @@ let await_port ~net ~clock ~ready_timeout_s ~base_path (config : Browser_configu
   and not_yet ~timed_out =
     match Eio.Promise.peek firefox.exited with
     | Some status when not (Posix_spawn_detached.group_has_members firefox) ->
-      forget ~base_path;
-      Error (Keeper_firefox.Exited_before_listening status, None)
+      (match status with
+       | Some (Unix.WEXITED 0) when not (Monotonic_deadline.passed deadline) ->
+         Eio.Time.sleep clock firefox_ready_poll_s;
+         await ()
+       | None | Some (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) ->
+         forget ~base_path;
+         Error (Keeper_firefox.Exited_before_listening status, None))
     | Some _ | None when Monotonic_deadline.passed deadline ->
       let stopped = stop_started ~clock ~leader firefox in
       forget_once_empty ~base_path firefox.pid;

@@ -402,8 +402,11 @@ val nodes : t -> node list
 val exports : t -> export list
 val dependencies : node -> Node_id.t list
 
-(** Stable topological layers only. This is not an execution schedule: serial,
-    concurrent, and terminal descriptor semantics are applied by the executor. *)
+(** Stable topological layers of the validated plan. Each layer retains the
+    relative order in [nodes] and the original node objects, including compiled
+    operands. A call builds an immutable dependency frontier without retaining
+    state across calls. This is not an execution schedule: serial, concurrent,
+    terminal and resource semantics are applied by the executor. *)
 val dependency_layers : t -> node list list
 
 val descriptor : t -> Node_id.t -> Keeper_tool_descriptor.t option

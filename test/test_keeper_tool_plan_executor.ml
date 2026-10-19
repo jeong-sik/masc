@@ -1163,6 +1163,114 @@ let test_serial_nodes_run_alone_in_schedule_order () =
     check int "no two nodes ever overlapped" 1 (Atomic.get max_active)
 ;;
 
+(* Declaration order deliberately differs from dependency and lexical order.
+   Exercise the public plan and executor, including repeated explicit/output
+   edges, serial failure propagation and independent typed dataflow. *)
+let test_unordered_graph_preserves_execution ~fail_serial () =
+  Eio_main.run @@ fun _ ->
+  let json = testable Yojson.Safe.pretty_print Yojson.Safe.equal in
+  let pointer value = match Plan.Json_pointer.of_string value with
+    | Ok pointer -> pointer
+    | Error _ -> fail "fixture output pointer" in
+  let source_path = "/keeper/probe/a.ml" in
+  let source = make_node ~tool_name:"keeper_lane_status" ~after:[] ~input:empty_input "z-source" in
+  let independent = make_node ~tool_name:"keeper_lane_status" ~after:[] ~input:empty_input "independent" in
+  let session_input = Plan.Json_template.literal (`Assoc ["action",`String "status"]) in
+  let serial_before = make_node ~tool_name:"BrowserSession" ~after:["z-source"]
+      ~input:session_input "z-serial" in
+  let serial_after = make_node ~tool_name:"BrowserSession" ~after:["z-source"]
+      ~input:session_input "a-serial" in
+  let join = make_node ~tool_name:"Read" ~after:["z-source";"z-source"]
+      ~input:(object_template ["file_path", Plan.Json_template.output
+        ~node_id:source.id ~pointer:(pointer "/profile")]) "a-join" in
+  let sink = make_node ~tool_name:"Grep" ~after:["a-join";"a-join"]
+      ~input:(object_template ["pattern",Plan.Json_template.literal (`String "probe");
+        "path",Plan.Json_template.output ~node_id:join.id ~pointer:(pointer "/path")]) "a-final" in
+  let nodes = [sink;serial_before;join;serial_after;source;independent] in
+  let plan = match Plan.create ~descriptors:(Descriptor.all_descriptors ())
+      ~branch_failure_policy:Plan.Continue_independent nodes with
+    | Ok plan -> plan
+    | Error error -> fail (Plan.error_to_string error) in
+  check (list (list string)) "stable semantic dependency layers"
+    [["z-source";"independent"];["z-serial";"a-join";"a-serial"];["a-final"]]
+    (Plan.dependency_layers plan |> List.map (List.map node_name));
+  check int "explicit and output references form one semantic edge" 1
+    (List.length (Plan.dependencies join));
+  let roots_entered = ref 0 and active = ref 0 and calls = ref [] in
+  let both, release = Eio.Promise.create () in
+  let dispatch ?launch_replay:_ ~tool_use_id ~node ~descriptor:_ ~schedule ~input () =
+    let name = node_name node in
+    let ordinal = List.find_index (fun original -> original == node) nodes in
+    check (option int) "dispatch retains original plan operand and ordinal"
+      (Some schedule.Agent_core.Tool_contract.planned_index) ordinal;
+    let batch_index,batch_size,execution_mode = match name with
+      | "z-source" | "independent" -> 0,2,Agent_core.Tool_contract.Concurrent
+      | "z-serial" -> 1,1,Agent_core.Tool_contract.Serial
+      | "a-join" -> 2,1,Agent_core.Tool_contract.Concurrent
+      | "a-serial" -> 3,1,Agent_core.Tool_contract.Serial
+      | "a-final" -> 4,1,Agent_core.Tool_contract.Concurrent
+      | other -> failf "unexpected fixture node %s" other in
+    check int "original batch index" batch_index schedule.batch_index;
+    check int "original batch size" batch_size schedule.batch_size;
+    check bool "descriptor execution mode retained" true (execution_mode = schedule.execution_mode);
+    if execution_mode = Agent_core.Tool_contract.Serial then
+      check int "serial entry owns the executor exclusively" 0 !active;
+    incr active;
+    Fun.protect ~finally:(fun () -> decr active) (fun () ->
+      calls := (name,tool_use_id) :: !calls;
+      if name = "z-source" || name = "independent" then (
+        incr roots_entered;
+        if !roots_entered = 2 then Eio.Promise.resolve release ();
+        Eio.Promise.await both);
+      Eio.Fiber.yield ();
+      if name = "z-serial" && fail_serial then
+        Executor.dispatch_result ~failure_effect_disposition:Tool_result.Proven_pre_effect
+          (Tool_result.make_err ~tool_name:node.Plan.tool_name ~class_:Tool_result.Workflow_rejection
+            ~effect_disposition:Tool_result.Proven_pre_effect ~start_time:(Tool_timing.start ())
+            "original serial predecessor refused")
+      else (
+        let data = match name with
+          | "z-source" -> `Assoc ["profile",`String source_path;"lane",`Null;"endpoint",`Null;
+              "probe",`Null;"last_dispatch",`Null;"operator_action",`Null]
+          | "independent" -> lane_status_data
+          | "z-serial" -> `Assoc []
+          | "a-serial" ->
+            check bool "failed original serial predecessor prevents its successor" false fail_serial;
+            `Assoc []
+          | "a-join" ->
+            check json "upstream output binds the Read input" (`Assoc ["file_path",`String source_path]) input;
+            `Assoc ["ok",`Bool true;"path",`String source_path;"bytes",`Int 5;"truncated",`Bool false;
+              "offset",`Int 1;"returned_lines",`Int 1;"content",`String "probe"]
+          | "a-final" ->
+            check json "Read output reaches the original consumer"
+              (`Assoc ["pattern",`String "probe";"path",`String source_path]) input;
+            `Assoc ["ok",`Bool true;"op",`String "rg";"path",`String source_path;"pattern",`String "probe";
+              "via",`String "host";"status",`Assoc ["kind",`String "exit";"code",`Int 0];"matches",`List []]
+          | other -> failf "unexpected fixture result %s" other in
+        Executor.dispatch_result (completed ~tool_name:node.Plan.tool_name ~data))) in
+  let results = match Executor.execute ~plan ~run_id:(Plan.Run_id.fresh ()) ~dispatch () with
+    | Ok results when not fail_serial -> results
+    | Error failure when fail_serial ->
+      (match failure.cause with
+       | Executor.Tool_did_not_complete result ->
+         check string "original serial node owns the failure" "z-serial"
+           (Plan.Node_id.to_string result.node_id)
+       | Executor.Run_journal_rejected _ | Executor.Plan_execution_failed _
+       | Executor.Node_observation_failed _ | Executor.Outer_completion_mismatch _ ->
+         fail "serial refusal lost its execution cause");
+      failure.settled
+    | Ok _ -> fail "serial refusal became success"
+    | Error _ -> fail "valid unordered dataflow failed" in
+  let expected = if fail_serial then [sink;serial_before;join;source;independent] else nodes in
+  check (list string) "settlements retain canonical plan order including independent work"
+    (List.map node_name expected) (List.map (fun (r : Executor.node_result) -> Plan.Node_id.to_string r.node_id) results);
+  let uses = List.map snd !calls in
+  check int "every admitted dispatch keeps a distinct original tool use" (List.length expected)
+    (List.length (List.sort_uniq String.compare uses));
+  check int "both unrelated roots were actually admitted" 2 !roots_entered;
+  check int "all original executor entries settled" 0 !active
+;;
+
 let export_pointer value =
   match Plan.Json_pointer.of_string value with
   | Ok value -> value
@@ -1756,6 +1864,10 @@ let () =
         ; test_case "Skill evidence retains execution and child artifacts" `Quick test_export_evidence_is_independent_retention_owner
         ; test_case "async status carries exports and roots execution artifacts" `Quick test_async_export_status_and_retention
         ; test_case "export storage failure never replays" `Quick test_export_storage_failure_does_not_advertise_result
+        ; test_case "unordered graph retains typed dataflow and Serial order" `Quick
+            (test_unordered_graph_preserves_execution ~fail_serial:false)
+        ; test_case "unordered graph keeps independent typed work after Serial refusal" `Quick
+            (test_unordered_graph_preserves_execution ~fail_serial:true)
         ; test_case "parallel dataflow schedule" `Quick test_schedule_and_parallel_dataflow
         ; test_case
             "failed sibling stops downstream"

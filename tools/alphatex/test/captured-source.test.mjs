@@ -424,3 +424,16 @@ test('an isolated audio component requires no MIDI route, while an isolated MIDI
  assert.deepEqual(midi.regions,[]);assert.deepEqual(midi.assets,[]);assert.equal(midi.umpRegions.regions[0].component,'midi')
  assert.deepEqual(midi.umpRegions.sources[0].timeline.packets,bytes.midi.toString().trim().split('\n').map(JSON.parse))
 }))
+
+test('splitting a captured take preserves mute and solo audibility before independent lane edits',async()=>fixture(async({root,input})=>{
+ const imported=await importArrangementCapture(newArrangement(),input,{projectPath:join(root,'song.json')})
+ for(const muted of [false,true])for(const solo of [false,true]){
+  let editor=arrangementCommand(arrangementEditor(imported.project),'capture-region asset-1 0 0 .2').editor
+  if(muted)editor=arrangementCommand(editor,'mute').editor
+  if(solo)editor=arrangementCommand(editor,'solo').editor
+  const before=arrangementSchedule(editor.project).length
+  editor=arrangementCommand(editor,'split-take').editor
+  assert.deepEqual(editor.project.lanes.map(l=>[l.muted,l.solo]),[[muted,solo],[muted,solo]])
+  assert.equal(arrangementSchedule(editor.project).length,before*2)
+ }
+}))

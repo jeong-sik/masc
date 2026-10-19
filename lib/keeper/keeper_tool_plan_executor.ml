@@ -1,3 +1,5 @@
+module Node_map = Map.Make (Keeper_tool_plan.Node_id)
+
 type scheduled_node =
   { node : Keeper_tool_plan.node
   ; contract : Keeper_tool_plan.contract
@@ -67,14 +69,11 @@ let schedule_layers ?resource_dependencies plan layers =
   let planned_indexes =
     Keeper_tool_plan.nodes plan
     |> List.mapi (fun index node -> node.Keeper_tool_plan.id, index)
+    |> Node_map.of_list
   in
   let planned_index node =
-    match
-      List.find_opt
-        (fun (id, _) -> Keeper_tool_plan.Node_id.equal id node.Keeper_tool_plan.id)
-        planned_indexes
-    with
-    | Some (_, index) -> index
+    match Node_map.find_opt node.Keeper_tool_plan.id planned_indexes with
+    | Some index -> index
     | None -> invalid_arg "validated composition plan lost a canonical node"
   in
   layers
@@ -627,6 +626,9 @@ let execute_with_tool_use_id
   let run_wave ~prepared_inputs batches =
     let policy = Keeper_tool_plan.branch_failure_policy plan in
     let nodes = Keeper_tool_plan.nodes plan in
+    (* Indexes only refer to the original schedules and owner pairs below.
+       The original lists still own iteration/order; promise cells are created
+       once per node here, never on lookup or retained across executions. *)
     let scheduled_nodes =
       List.concat_map
         (fun batch ->
@@ -634,14 +636,11 @@ let execute_with_tool_use_id
           | Serial_batch scheduled -> [ scheduled ]
           | Concurrent_batch scheduled -> scheduled)
         batches
+      |> List.map (fun (scheduled : scheduled_node) -> scheduled.node.Keeper_tool_plan.id, scheduled)
+      |> Node_map.of_list
     in
     let find_scheduled node_id =
-      match
-        List.find_opt
-          (fun (scheduled : scheduled_node) ->
-            Keeper_tool_plan.Node_id.equal scheduled.node.Keeper_tool_plan.id node_id)
-          scheduled_nodes
-      with
+      match Node_map.find_opt node_id scheduled_nodes with
       | Some scheduled -> scheduled
       | None ->
         invalid_arg
@@ -649,23 +648,23 @@ let execute_with_tool_use_id
              "validated composition plan lost the schedule of node %s"
              (Keeper_tool_plan.Node_id.to_string node_id))
     in
-    let serial_chain =
-      List.filter_map
-        (fun batch ->
+    (* Only Serial batches participate. An absent entry (ordinary concurrent
+       work) and the first Serial entry both have no Serial predecessor. *)
+    let _, serial_predecessors =
+      List.fold_left
+        (fun (previous, index) batch ->
           match batch with
-          | Serial_batch scheduled -> Some scheduled.node.Keeper_tool_plan.id
-          | Concurrent_batch _ -> None)
+          | Serial_batch scheduled ->
+            let id = scheduled.node.Keeper_tool_plan.id in
+            Some id, Node_map.add id previous index
+          | Concurrent_batch _ -> previous, index)
+        (None, Node_map.empty)
         batches
     in
     let serial_predecessor node_id =
-      let rec previous predecessor = function
-        | [] -> None
-        | candidate :: rest ->
-          if Keeper_tool_plan.Node_id.equal candidate node_id
-          then predecessor
-          else previous (Some candidate) rest
-      in
-      previous None serial_chain
+      match Node_map.find_opt node_id serial_predecessors with
+      | Some predecessor -> predecessor
+      | None -> None
     in
     let ordering_predecessors node_id = match resource_dependencies with
       | Some dependencies -> predecessors dependencies node_id
@@ -675,14 +674,13 @@ let execute_with_tool_use_id
       List.map
         (fun node ->
           let promise, resolve = Eio.Promise.create () in
-          (node.Keeper_tool_plan.id, promise, resolve))
+          node.Keeper_tool_plan.id, (promise, resolve))
         nodes
+      |> Node_map.of_list
     in
     let find_outcome node_id =
-      match
-        List.find_opt (fun (id, _, _) -> Keeper_tool_plan.Node_id.equal id node_id) outcomes
-      with
-      | Some (_, promise, resolve) -> (promise, resolve)
+      match Node_map.find_opt node_id outcomes with
+      | Some owner -> owner
       | None ->
         invalid_arg
           (Printf.sprintf
@@ -719,15 +717,16 @@ let execute_with_tool_use_id
     in
     let gate = Exclusive_gate.create () in
     let bindings = match ready_files with
-      | None -> []
+      | None -> Node_map.empty
       | Some _ -> List.map (fun (node : Keeper_tool_plan.node) ->
-          let promise, resolve = Eio.Promise.create () in node.id, promise, resolve) nodes in
+          let promise, resolve = Eio.Promise.create () in node.id, (promise, resolve)) nodes
+          |> Node_map.of_list in
     let ready_order = match ready_files with
       | None -> []
       | Some _ -> List.concat dependency_layers in
     let find_binding node_id =
-      match List.find_opt (fun (id, _, _) -> Keeper_tool_plan.Node_id.equal id node_id) bindings with
-      | Some (_, promise, resolve) -> promise, resolve
+      match Node_map.find_opt node_id bindings with
+      | Some owner -> owner
       | None -> invalid_arg "ready Inline file lost its binding promise" in
     let earlier_nodes node_id =
       let rec before = function

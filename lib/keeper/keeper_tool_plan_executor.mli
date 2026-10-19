@@ -17,7 +17,8 @@ type batch = private
   | Concurrent_batch of scheduled_node list
 
 (** Exact immutable schedule derived from dependency edges and descriptor
-    execution declarations. *)
+    execution declarations. A private index local to the call resolves original
+    plan ordinals; table ordering never determines node or batch order. *)
 val schedule : Keeper_tool_plan.t -> batch list
 
 (** Completion declaration for the outer composite tool. Nested actions always
@@ -134,7 +135,10 @@ type compiled_dispatch =
     node runs, every node input that reads no producer output is validated
     ({!Keeper_tool_plan.prepare_inputs}); a rejection there ends the plan with
     [Plan_execution_failed], no settled node and [Proven_pre_effect]. Inputs
-    that read a producer output are validated when their node runs. Each node
+    that read a producer output are validated when their node runs. Private
+    immutable lookup indexes refer to this execution's original schedules and
+    outcome/preparation promise pairs. They never share cells across executions
+    or replace plan-order iteration, settlement or resource ownership. Each node
     dispatches as soon as its dependencies have settled instead of waiting
     for a static batch barrier; serial and terminal nodes additionally run
     alone in static schedule order, and a serial or terminal node whose serial

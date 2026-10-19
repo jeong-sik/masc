@@ -224,6 +224,14 @@ dependency frontier grants no admission or replay authority. This reduces repeat
 graph scanning in source, with no measured timing claim. See the
 [source Before/After audit](../audits/2026-10-19-composition-dependency-frontier.md).
 
+Scheduling and ready-wave lookup also use immutable indexes local to their
+original call/execution. These refer to original ordinals, scheduled nodes,
+Serial predecessors and the same execution's outcome/file-binding promise pairs.
+The original node and batch lists still determine iteration and result order;
+no promise, prepared resource or settlement is shared between executions. See
+the [lookup source audit](../audits/2026-10-19-composition-execution-index.md)
+for the bounded operation-count change and unexecuted owner-lifetime scenario.
+
 When the current Task pins an exact executable composition, its callable schema
 and declared ordinary node Tool schemas are supplied on the first request. Their
 deferrable declarations still apply when that exact Task selection is absent.

@@ -226,7 +226,8 @@ let composition_resolution_result ~tool_name ~start_time (ctx : _ context) args 
       Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Runtime_failure
         ~data:(Command.outcome_to_json outcome)
         ("resolution committed; marker retirement unconfirmed: " ^ Keeper_tool_execution_journal.error_to_string error)
-    | Ok outcome -> Tool_result.make_ok ~tool_name ~start_time ~data:(Command.outcome_to_json outcome) ()
+    | Ok ((Command.Observed _ | Command.Resolved {retirement_error=None;_}) as outcome) ->
+      Tool_result.make_ok ~tool_name ~start_time ~data:(Command.outcome_to_json outcome) ()
 
 let dispatch (ctx : 'a context) ~name ~args : Tool_result.result option =
   let start = Tool_timing.start () in

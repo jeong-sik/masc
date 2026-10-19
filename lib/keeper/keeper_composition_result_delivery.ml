@@ -230,12 +230,12 @@ let resolve ~base_path ~(snapshot : status_snapshot) ~invocation ~(result : Tool
           inline_bytes=String.length inline;inline_sha256=sha256 inline})
 
 let discard_status state ~invocation =
-  state.bindings <- List.filter (fun known -> not (String.equal
+  state.bindings <- List.filter (fun (known : binding) -> not (String.equal
     (Invocation.tool_use_id invocation) (Invocation.tool_use_id known.invocation))) state.bindings
 
 let record_status state ~snapshot ~invocation ~result =
   let id = Invocation.tool_use_id invocation in
-  let previous = List.find_opt (fun known -> String.equal id (Invocation.tool_use_id known.invocation)) state.bindings in
+  let previous = List.find_opt (fun (known : binding) -> String.equal id (Invocation.tool_use_id known.invocation)) state.bindings in
   (* The typed producer owns a new occurrence even when the provider reuses
      its ID. An ineligible or failed new lookup cannot inherit an older seal.
      There is no tombstone: a later valid occurrence may bind the same ID. *)
@@ -252,7 +252,7 @@ let record_status state ~snapshot ~invocation ~result =
            && String.equal known.inline_sha256 binding.inline_sha256
         then Ok () else Error (Invocation_collision id)
       | Some _ | None -> Ok () in
-    state.bindings <- binding :: List.filter (fun known ->
+    state.bindings <- binding :: List.filter (fun (known : binding) ->
       not (String.equal id (Invocation.tool_use_id known.invocation))) state.bindings;
     Ok ()
 
@@ -268,12 +268,12 @@ let presentation binding content =
 
 let stage_provider state ~runtime_id ~agent_core_turn ~tool_results =
   let results = List.filter_map (fun (id,content) ->
-    match List.find_opt (fun binding -> String.equal id (Invocation.tool_use_id binding.invocation)) state.bindings with
+    match List.find_opt (fun (binding : binding) -> String.equal id (Invocation.tool_use_id binding.invocation)) state.bindings with
     | None -> None
     | Some binding -> Option.map (fun presentation -> binding,content,presentation) (presentation binding content)) tool_results in
   state.pending <- Some {runtime_id;agent_core_turn;results}
 
-let observe_result state ~binding ~runtime_id ~boundary ~content ~presentation ~observe ~on_error =
+let observe_result state ~(binding : binding) ~runtime_id ~boundary ~content ~presentation ~observe ~on_error =
   let tool_use_id = Invocation.tool_use_id binding.invocation in
   let valid =
     let* () = match boundary with
@@ -309,7 +309,7 @@ let commit_provider_response state ~agent_core_turn ~observe ~on_error =
   | Some _ -> ()
 
 let observe_official_result state ~runtime_id ~invocation ~content ~observe ~on_error =
-  match List.find_opt (fun binding -> String.equal (Invocation.tool_use_id binding.invocation)
+  match List.find_opt (fun (binding : binding) -> String.equal (Invocation.tool_use_id binding.invocation)
       (Invocation.tool_use_id invocation)) state.bindings with
   | None -> ()
   | Some binding when not (equal_invocation binding.invocation invocation) ->

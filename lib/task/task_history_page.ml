@@ -47,7 +47,7 @@ let cursor_of_string encoded =
      | exception Yojson.Json_error _ -> Error Invalid_cursor)
 
 type file = { relative : string; path : string; snapshot : Fs_compat.owned_regular_file_snapshot }
-let owned = Result.map_error (fun _ -> Source_unavailable)
+let owned result = Result.map_error (fun _ -> Source_unavailable) result
 let inventory ~root ~held =
   let events=Filename.concat root "events" in
   let* months=Fs_compat.read_owned_directory ~inventory_root:held ~ownership_root:root events |> owned in
@@ -146,7 +146,7 @@ let matches_task ~task_id ~file ~offset line =
 let read ~config ~task_id ~max_events ?cursor () =
   if task_id="" || task_id<>String.trim task_id || max_events<=0 then Error Invalid_request
   else
-    Fs_compat.with_owned_inventory_root (Workspace.masc_dir config) (fun held ->
+    Fs_compat.with_owned_inventory_root (Workspace_core.masc_dir config) (fun held ->
       let root=Fs_compat.owned_inventory_root_path held in
       let run () =
         let* workspace=match Fs_compat.inspect_owned_directory_chain ~ownership_root:root root with

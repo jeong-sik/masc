@@ -95,7 +95,9 @@ TUI를 엽니다. 결과를 바로 확인할 수 있는 작은 부탁부터 해 
 
 Keeper 대화에서 답변과 도구 결과를 읽고, Board에서 글을 찾아보세요.
 [첫 대화 가이드](docs/INSTALL.md#first-conversation-with-imp)에는 Task와 웹 접근을
-확인하는 순서도 있습니다. macOS에서는 [음성으로 imp와 대화](docs/INSTALL.md#talking-to-imp-by-voice-macos)할 수도 있습니다.
+확인하는 순서도 있습니다. [처음 30분](docs-site/src/content/docs/ko/getting-started/first-30-minutes.md)
+장은 그다음 단계 — 일 맡기기, Keeper 하나 더 두기, Board 읽고 쓰기 — 를 다룹니다.
+macOS에서는 [음성으로 imp와 대화](docs/INSTALL.md#talking-to-imp-by-voice-macos)할 수도 있습니다.
 
 설정 도중 멈추면 같은 작업 공간에서 `masc doctor`로 준비 상태를 확인하세요.
 Keeper가 답변이나 승인을 기다리고 있다면 TUI의 [승인 대기열](docs/TUI-GUIDE.md#approvals)을

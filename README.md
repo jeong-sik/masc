@@ -94,7 +94,10 @@ workspace server and `imp`, and opens the TUI. Try a small, observable request:
 
 Read the reply and tool results in Keeper chat, then find the post on the Board.
 The [first-conversation guide](docs/INSTALL.md#first-conversation-with-imp)
-walks through Tasks and web access too. On macOS, you can also
+walks through Tasks and web access too. The
+[first 30 minutes](docs-site/src/content/docs/getting-started/first-30-minutes.md)
+chapter takes the next steps: hand off a Task, add a second Keeper, and read the
+Board. On macOS, you can also
 [talk to imp by voice](docs/INSTALL.md#talking-to-imp-by-voice-macos).
 
 If setup stops, run `masc doctor` for a readiness report on the same workspace.

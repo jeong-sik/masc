@@ -1,7 +1,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { midi } from '@coderline/alphatab'
 import { readScore, renderScore, midiForScore, createAudioExporter } from '../engine.mjs'
+import { errorDetail } from '../diagnostics.mjs'
 
 const bass = String.raw`\title "반음 연결 연습"
 \tempo 80
@@ -62,6 +64,37 @@ test('official synthesizer produces audible PCM, including the score duration', 
 
 test('rejects the screenshot singular staff tab, preserving the actual syntax error', () => {
   assert.throws(() => readScore(String.raw`\instrument 34 \tuning (G2 D2 A1 E1) \staff {score tab} :4 5.3`))
+})
+
+test('tie effects sit between note and duration, ahead of the beat length dot', () => {
+  const source = readFileSync(new URL('./fixtures/bamseom-solo.atex', import.meta.url), 'utf8')
+  const { score } = readScore(source)
+  assert.equal(score.title, 'Bamseom Solo')
+  assert.equal(score.masterBars.length, 2)
+  const ties = []
+  for (const track of score.tracks) {
+    for (const staff of track.staves) {
+      for (const bar of staff.bars) {
+        for (const voice of bar.voices) {
+          for (const beat of voice.beats) {
+            for (const note of beat.notes) {
+              if (note.isTieDestination) ties.push(note.fret)
+            }
+          }
+        }
+      }
+    }
+  }
+  assert.deepEqual(ties, [7, 5, 3])
+  assert.ok(renderScore(source, { page: 0 }).pages[0].png.length > 0)
+  try {
+    readScore('3.5.8 7.4.8{t} |')
+    assert.fail('a tie after the duration was accepted')
+  } catch (error) {
+    const detail = errorDetail(error)
+    assert.match(detail, /AT205/)
+    assert.match(detail, /Unrecognized property 't'/)
+  }
 })
 
 test('official renderer supports independent piano voices and guitar effects', () => {

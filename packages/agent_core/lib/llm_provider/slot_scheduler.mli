@@ -18,10 +18,15 @@ type t
 (** Create a scheduler with [max_slots] concurrent permits.
 
     With [priority_run_limit = Some limit], a freed slot goes to the oldest
-    [Priority] waiter. Once [Priority] has taken [limit] slots in a row while
-    a [Standard] waiter was queued, the next slot goes to the oldest
-    [Standard] waiter, so [Standard] gets at least one slot in every
-    [limit + 1] while both classes wait. With [None] there is one queue.
+    [Priority] waiter ahead of [Standard]. After [limit] priority grants
+    while [Standard] waits, the next foreground grant goes to [Standard].
+    Independently, after [limit] foreground ([Priority] or [Standard])
+    grants while [Background] waits, the next slot goes to [Background].
+    A background grant does not reset the priority grants owed to a waiting
+    [Standard] request. Each class keeps arrival order; both lower classes
+    receive bounded service while higher classes keep arriving. The bound
+    counts permit grants, not elapsed time, and does not preempt holders.
+    With [None] there is one queue.
 
     @raise Invalid_argument if [max_slots < 1] or [limit < 1]. *)
 val create : max_slots:int -> priority_run_limit:int option -> t
@@ -30,8 +35,12 @@ val create : max_slots:int -> priority_run_limit:int option -> t
     A raised [max_slots] hands the new slots to waiters at once. A lowered
     one takes effect as holders return slots: no slot is handed on while
     more than [max_slots] are held. A waiter keeps the queue it joined; a
-    request queued after the change joins by the new run limit, and waiters
-    a removed limit left in the [Priority] queue are granted first.
+    request queued after the change joins by the new run limit. After
+    removing a limit, old [Priority] waiters drain first, then old
+    [Background] waiters, then the shared [Standard] queue. That temporarily
+    promotes the finite old background queue; global arrival order is not
+    preserved across reconfiguration. A waiter's cancellation still removes
+    it from its original queue.
 
     @raise Invalid_argument if [max_slots < 1] or [limit < 1]. *)
 val reconfigure : t -> max_slots:int -> priority_run_limit:int option -> unit

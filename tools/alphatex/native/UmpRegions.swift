@@ -14,6 +14,18 @@ func umpAdd(_ a: UInt128, _ b: UInt128) throws -> UInt128 {
     guard !value.overflow else { throw MidiFailure("captured region exceeds the native rational clock range") }
     return value.partialValue
 }
+// Continued-fraction comparison avoids cross products: ordinary fractional
+// tempos can have exact binary denominators large enough to overflow UInt128.
+func umpRationalLess(_ a: UInt128, _ b: UInt128, _ c: UInt128, _ d: UInt128) -> Bool {
+    var a = a, b = b, c = c, d = d, reversed = false
+    while true {
+        let left = a / b, right = c / d
+        if left != right { return reversed ? left > right : left < right }
+        let ar = a % b, cr = c % d
+        if ar == 0 || cr == 0 { return reversed ? ar > cr : ar < cr }
+        a = b; b = ar; c = d; d = cr; reversed.toggle()
+    }
+}
 func umpNanoseconds(_ seconds: Double) throws -> UInt64 {
     let value = (seconds * 1e9).rounded(.up)
     guard seconds.isFinite, seconds >= 0, value < Double(UInt64.max) else { throw MidiFailure("captured region exceeds the native host timeline") }
@@ -82,8 +94,21 @@ struct UmpRegionClip {
         }
         return low
     }
-    func restore(at time: UInt128, replacing previous: UmpFootprint) throws -> UmpRestoration {
-        let before = prefix(at: time, inclusive: false), through = prefix(at: time)
+    func restore(at time: UInt128, deadline: (position: UInt64, copy: UInt64)? = nil, replacing previous: UmpFootprint) throws -> UmpRestoration {
+        var before = prefix(at: time, inclusive: false)
+        let through = prefix(at: time)
+        if let deadline {
+            // Source events in the current integer due batch are not history,
+            // even when their exact rational timestamps lie between two ns.
+            var low = 0, high = through
+            while low < high {
+                let middle = low + (high - low) / 2
+                let tick = UInt128(timed[middle].ticks) * numer
+                if tick < cut || next(copy: deadline.copy, index: middle) < deadline.position { low = middle + 1 }
+                else { high = middle }
+            }
+            before = low
+        }
         let expired = Set(expiredNotes.filter { $0.value < through }.map(\.key))
         return try umpRestoration(events, prefixCount: before, followingCount: through - before,
                                   preambleEndIndex: endIndex, excludingNotes: expired, replacing: previous)
@@ -182,8 +207,8 @@ final class UmpRegionTransport: CoordinatedMidiTransport {
         try potential.requireSupported()
         for (index, clip) in admitted.enumerated() {
             for other in admitted.prefix(index) where !clip.scope.isDisjoint(with: other.scope) {
-                let entersBeforeEnd = try umpMultiply(clip.lowerBound, other.denom) < umpMultiply(other.upperBound, clip.denom)
-                let otherEntersBeforeEnd = try umpMultiply(other.lowerBound, clip.denom) < umpMultiply(clip.upperBound, other.denom)
+                let entersBeforeEnd = umpRationalLess(clip.lowerBound, clip.denom, other.upperBound, other.denom)
+                let otherEntersBeforeEnd = umpRationalLess(other.lowerBound, other.denom, clip.upperBound, clip.denom)
                 guard !entersBeforeEnd || !otherEntersBeforeEnd else { throw MidiFailure("overlapping captured regions share physical MIDI channels; select independent outputs") }
             }
             // The first copy enters an empty physical output, so it is admitted
@@ -255,7 +280,7 @@ final class UmpRegionTransport: CoordinatedMidiTransport {
             for clip in clips {
                 guard let phase = clip.phase(at: position) else { continue }
                 if cursors[clip.id] == nil {
-                    let restored = try clip.restore(at: phase.time, replacing: output.prior(in: clip.scope))
+                    let restored = try clip.restore(at: phase.time, deadline: (position, phase.copy), replacing: output.prior(in: clip.scope))
                     for event in restored.events { try output.apply(event) }
                     cursors[clip.id] = Cursor(copy: phase.copy, index: restored.nextIndex, acquired: restored.heldNotes)
                 }
@@ -265,7 +290,7 @@ final class UmpRegionTransport: CoordinatedMidiTransport {
                     let ordinal = cursor.index, event = clip.events[ordinal], message = UmpMessage(event)
                     switch message.action {
                     case .on:
-                        let exact = UInt128(clip.timed[ordinal].ticks) * clip.numer == phase.time
+                        let exact = clip.next(copy: phase.copy, index: ordinal) == position
                         if exact || (clip.expiredNotes[ordinal].map({ $0 >= due }) ?? true) {
                             try output.apply(event); cursor.acquired.insert(ordinal)
                         }

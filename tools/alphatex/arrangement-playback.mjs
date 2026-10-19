@@ -183,7 +183,8 @@ async function snapshotAudio(project, schedule, { sourceRoot, temporary, signal 
     regions.push({ id: clip.id, asset: clip.asset, startSeconds: clip.startSeconds,
       offsetFrames: frame(clip.audio.offsetFrames), frameCount: frame(clip.audio.frameCount), repeat: clip.repeat,
       captureClock: { ...clip.sourceClock, firstAudioHostTime: asset.manifest.clock.firstAudioHostTime },
-      ...(clip.component ? { component: clip.component } : {}) })
+      ...(clip.component ? { component: clip.component } : {}),
+      ...(clip.audioChannel ? { audioChannel: { ...clip.audioChannel } } : {}) })
   }
   const used = new Set(regions.map(region => region.asset)), duration = schedule.reduce((end, clip) => Math.max(end, clip.endSeconds), 0)
   return { assets: assets.filter(asset => used.has(asset.id)), regions, duration, captures }

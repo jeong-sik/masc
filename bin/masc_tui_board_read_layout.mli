@@ -15,6 +15,11 @@ type source = {
 
 type rows
 type t
+
+val close_time : float -> (string, float) result
+(** UTC close time inside Ptime's supported calendar, or the original seconds
+    when the supplied number is non-finite or outside that calendar. *)
+
 val create : unit -> t
 val get : t -> source:source -> render:(unit -> string list * string list * (string * int) option) -> rows
 (** Exact immutable source equality; refreshed equal data can reuse rows, while

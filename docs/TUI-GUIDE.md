@@ -2636,3 +2636,12 @@ returns to the same selection. The capture stays fixed while background reads
 or selections change. Close, refresh and reopen for updated data. Leaving the
 surface or changing workspace revokes it. It never opens an editor or submits
 an action, and paste cannot reach a composer underneath it.
+
+### Continuing a closed Board discussion
+
+A closed post's resolution is part of its scrollable body: the closer, supplied
+close time, complete summary and recorded successor remain readable at narrow
+widths. `S` opens the successor named by that post's metadata, including posts
+outside the loaded list. Esc returns to the original post. A missing successor
+read remains an explicit failure; the TUI does not choose another post from
+body text or the current list cursor.

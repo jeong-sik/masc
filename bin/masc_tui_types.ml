@@ -12236,6 +12236,27 @@ let withdraw_machine_control state =
    the composer, a surface binding, a press on a row -- may act first. Every
    place that has to stand aside for them asks this one question, so an
    overlay added later is added here once rather than to each list. *)
+let board_post_on_screen (state : state) =
+  match state.view, state.board_mode with
+  | Board, Board_read post_id ->
+      (match Masc_tui_board_detail.view_for state.board_detail ~post_id with
+       | Ready (post, _, _) ->
+           if String.equal post.bp_id post_id then Some post else None
+       | Absent | Loading | Failed _ ->
+           List.find_opt (fun (post : board_post) -> String.equal post.bp_id post_id)
+             state.board_posts)
+  | (Overview | Acting | Metrics | Keepers _ | Memory | Lanes | Clients | Approvals
+    | Planning | Schedules | Verification | Harness | Fusion | Repositories | Changes
+    | Connectors | Runtime | Config | Resources | Tools | Code | System_logs), _
+  | Board, (Board_list | Board_compose) -> None
+
+let board_successor (state : state) =
+  Option.bind (board_post_on_screen state) (fun post ->
+    Option.bind post.bp_closed (fun closed ->
+      Option.bind closed.bpc_successor_id (fun successor ->
+        if String.trim successor="" || String.equal successor post.bp_id then None
+        else Some (post.bp_id, successor))))
+
 let current_detail_reading (state : state) =
   match state.detail_reading with
   | Some (authority, surface, reading)

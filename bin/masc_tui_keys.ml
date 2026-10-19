@@ -680,6 +680,8 @@ let for_surface = function
          the dispatcher refused all three there: [[ / ]] steps the open post
          ([step_board_read] returns on [Board_list]), [z] and [h/l] want a
          detail pane beside the list. *)
+      ; b Navigate "S" "successor" ~detail:Detail_only
+          ~help:"follow the closed post's recorded successor; Esc returns to this post"
       ; b Navigate "[ / ]" "previous / next post" ~detail:Detail_only
           ~help:"while reading, open the post before or after this one"
       ; b Navigate "s" "sort" ~help:"cycle hot / trending / recent / updated / discussed"
@@ -1502,7 +1504,7 @@ let cancels_two_press ~input_seen ~key ~second_press =
    matches them under [Fusion_detail]); the footer left them out, and a body
    row said "K Keeper · B Board" in its own notation instead. *)
 let footer_hints_board_read ~focus_posts ~focus_comments ~full_history
-    ~(layout : board_read_layout) ~has_attachments =
+    ~(layout : board_read_layout) ~has_attachments ~has_successor =
   let pane_keys =
     match layout with
     | Board_read_split -> [ b Navigate "h/l" "pane"; b Navigate "Ctrl-W" "switch" ]
@@ -1526,6 +1528,7 @@ let footer_hints_board_read ~focus_posts ~focus_comments ~full_history
      ; b Navigate "[/]" "post"
      ; b Navigate "PgUp/PgDn" "page"
      ]
+     @ (if has_successor then [b Navigate "S" "successor"] else [])
      @ pane_keys @ width_key
      (* [o] goes after the pane and width keys. The fitter gives up the last
         droppable hint first, so a key placed ahead of them pushes them off:

@@ -706,31 +706,6 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
        Ansi.dim
        (Link.reference Board_post (Terminal_text.single_line post.bp_id))
        Ansi.reset);
-  (* task-1758/#39356: a closed post's detail shows who closed it and,
-     when named, the successor to keep reading in and the summary the
-     closer left -- the same information the dashboard's detail badge
-     carries, drawn as its own line rather than a badge this renderer has
-     no widget for. *)
-  (match post.bp_closed with
-   | None -> ()
-   | Some c ->
-     let successor_text =
-       match c.bpc_successor_id with
-       | Some sid -> Printf.sprintf ", successor: %s" sid
-       | None -> ""
-     in
-     box_line buf cols
-       (Printf.sprintf "  %sclosed by %s%s%s"
-          (Theme.warn ())
-          (Terminal_text.single_line c.bpc_closed_by)
-          successor_text
-          Ansi.reset);
-     (match c.bpc_summary with
-      | Some summary ->
-        box_line buf cols
-          (Printf.sprintf "  %ssummary: %s%s" Ansi.dim
-             (Terminal_text.single_line summary) Ansi.reset)
-      | None -> ()));
   box_divider buf cols;
 
   (* The thread sits beside the post, not under it, when the pane is wide
@@ -868,8 +843,35 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
                    Ansi.reset)
                attachments
       in
+      let closure_lines = match post.bp_closed with
+        | None -> []
+        | Some closed ->
+            let field label value =
+              Masc_tui_text_block.rows ~max_cells:(max 1 text_width) (label ^ value)
+              |> List.map (fun line -> "  " ^ line) in
+            [Ansi.bold ^ "  Resolution" ^ Ansi.reset]
+            @ field "Closed by " closed.bpc_closed_by
+            @ (match closed.bpc_closed_at with
+               | None -> []
+               | Some at ->
+                   (match Board_read_layout.close_time at with
+                    | Ok time -> field "Closed at " time
+                    | Error raw -> field "Close time unavailable · raw Unix seconds "
+                        (Printf.sprintf "%.17g" raw)))
+            @ (match closed.bpc_successor_id with
+               | None -> []
+               | Some successor ->
+                   field (if String.trim successor<>"" && not (String.equal successor post.bp_id)
+                          then "Successor · S:open · " else "Successor · ")
+                     (Link.reference Board_post successor))
+            @ (match closed.bpc_summary with
+               | None -> []
+               | Some summary ->
+                   Message_layout.wrap_body ~markdown:board_document_markdown
+                     ~max_cells:(max 1 text_width) ~sanitize:Terminal_text.single_line summary)
+            @ [""] in
       let body_lines =
-        body_lines @ attachment_lines @ reference_lines @ related_lines
+        closure_lines @ body_lines @ attachment_lines @ reference_lines @ related_lines
       in
       let initial_comment_offset = ref None in
       let detail_lines =
@@ -1126,7 +1128,8 @@ let render_board_read (state : state) (list_post : board_post) =
            ~focus_comments:state.board_comments_focused
            ~full_history:(state.board_history_post_id = Some list_post.bp_id)
            ~layout
-           ~has_attachments:(List.length list_post.bp_attachments > 0))
+           ~has_attachments:(List.length list_post.bp_attachments > 0)
+           ~has_successor:(Option.is_some (board_successor state)))
   in
   Masc_tui_frame_timing.finish_stage ~name:"board.render_prep" prep_started;
   match layout with

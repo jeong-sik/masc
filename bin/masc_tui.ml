@@ -12477,6 +12477,7 @@ let withdraw_currency_authority state =
    match reloads it, so a screen never shows rows from a workspace the server
    just stopped serving. *)
 let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigation =
+  state.followed_from <- None;
   withdraw_voice_capture state;
   (* Retire action authority immediately. A missing identity quarantines its
      cards; only a confirmed different workspace discards them. Old replies
@@ -14756,8 +14757,8 @@ let start_scoped_refresh_followup state ~host ~port ~refresh_inflight
     start_http_refresh state ~host ~port ~intent:Revalidate ~refresh_inflight
       ~scoped_refresh_inflight ~scoped_refresh_followup ~mailbox
 
-let open_board_post state ~mailbox ~focus (post : board_post) =
-  state.board_mode <- Board_read post.bp_id;
+let open_board_post_id state ~mailbox ~focus post_id =
+  state.board_mode <- Board_read post_id;
   state.board_detail <- Board_detail.clear state.board_detail;
   state.board_history_post_id <- None;
   state.board_focus <- focus;
@@ -14767,7 +14768,10 @@ let open_board_post state ~mailbox ~focus (post : board_post) =
   state.board_comments_focused <- false;
   state.board_attachment_status <- None;
   Masc_tui_board_requests.start_board_post_refresh state ~host:server_peer_host
-    ~port:state.port ~post_id:post.bp_id ~launch:(launch_workspace_request state ~mailbox ~boundary_error:Fun.id)
+    ~port:state.port ~post_id ~launch:(launch_workspace_request state ~mailbox ~boundary_error:Fun.id)
+
+let open_board_post state ~mailbox ~focus (post : board_post) =
+  open_board_post_id state ~mailbox ~focus post.bp_id
 
 let move_board_read_scroll state ~by =
   let current =
@@ -25631,6 +25635,17 @@ and is loaded on demand through keeper_skill.
                   Option.iter (fun movement ->
                     open_detail_reading state
                       (Masc_tui_detail_reading.move ~count ~height movement reading)) movement)
+       | Some "S"
+         when state.view=Board && not compact_viewport && not state.composer_focused
+              && not (modal_owns_keys state) && not state.palette_open
+              && not state.answering_open && not state.patch_modal_open && not state.link_modal_open
+              && Option.is_none (text_input_target state ~compact_viewport)
+              && (match state.board_mode with Board_read _ -> true | Board_list | Board_compose -> false) ->
+           (match board_successor state with
+            | None -> report_action state "info" "This post has no recorded successor"
+            | Some (origin, successor) ->
+                state.followed_from <- Some (Board, Some origin);
+                open_board_post_id state ~mailbox:async_messages ~focus:Right_pane successor)
        | Some "v"
          when not compact_viewport && not state.composer_focused
               && not (modal_owns_keys state) && not state.palette_open
@@ -29382,9 +29397,16 @@ and is loaded on demand through keeper_skill.
        | Some "esc" when Option.is_some state.followed_from ->
            (match state.followed_from with
             | None -> ()
-            | Some (origin, _) ->
+            | Some (origin, opened) ->
                 state.followed_from <- None;
                 goto_surface state ~mailbox:async_messages origin;
+                (match origin, opened with
+                 | Board, Some post_id ->
+                     open_board_post_id state ~mailbox:async_messages ~focus:Right_pane post_id
+                 | (Overview | Acting | Metrics | Keepers _ | Memory | Lanes | Clients | Approvals
+                   | Planning | Schedules | Verification | Harness | Fusion | Repositories | Changes
+                   | Connectors | Runtime | Config | Resources | Tools | Code | System_logs), _
+                 | Board, None -> ());
                 (* A Home return must retain the decision's receipt or
                    failure notice; navigation is not its replacement. *)
                 if origin <> Overview then report_action state "system" "back")

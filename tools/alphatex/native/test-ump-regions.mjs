@@ -238,7 +238,10 @@ let sequence=try owner([first,second],[clip("second",source:"other",start:0.1,ex
 host=0;sent=[];try sequence.stageCoordinated(at:0);try sequence.runCoordinated(anchorNanoseconds:10);host=10;sequence.tick();host=100_000_010;sequence.tick()
 precondition(Array(sent.suffix(3)).map{$0.1}==[[0x43853c00,0],p1,on],"outgoing scoped cleanup precedes incoming patch and key")
 sequence.finish(reason:"test",error:nil,publish:false)
-refuses{_ = try owner([source("take",[packet(0,on),packet(1,p0)])],[clip(repeatCount:2)],duration:2)}
+// A repeat copy no longer has to prove the source can re-establish its own baseline:
+// the first copy enters with no previous state and the copy boundary carries the live
+// output's prior footprint.
+_ = try owner([source("take",[packet(0,on),packet(1,p0)])],[clip(repeatCount:2)],duration:2)
 refuses{_ = try owner([source("take",[packet(0,[0x30120102,0])])],[clip()])}
 let lost=try owner([a],[clip()]);host=0;try lost.stageCoordinated(at:0);try lost.runCoordinated(anchorNanoseconds:10);unavailable=true;host=10;lost.tick();precondition(lost.state == .stopped && lost.terminalFailure != nil)
 print("UMP_REGIONS_PASS: exact adjacent ticks and UInt64+1 end, original attributes/releases and active-copy FIFO drain, exact-entry attacks, silent staging, 2M compressed late-copy lookup, pause/seek/resume, independent overlapping scopes, sequential physical baselines, uncertain acquisition cleanup, unsupported/overlap admission and endpoint loss")

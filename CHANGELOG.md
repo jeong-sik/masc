@@ -403,6 +403,9 @@
   implementation and expose its already-used delivery-round API, and use the
   direct filesystem compatibility module (#43869).
 - Distinguish missing dashboard tool results from failed, denied, ambiguous, and pending exact lookups. Share exact evidence between rows and timeline counts and preserve request ownership across hydration, retries, and credential changes. ([#43920](https://github.com/jeong-sik/masc/pull/43920))
+- Keep the durable confirmations this process recorded when a test resets the event-queue snapshot cache, so a same-binding replay stays a no-op instead of re-publishing and notifying twice. (#44034)
+- Drop two unused imports from the dashboard turn-record reader so the dashboard typecheck passes again. (#44076)
+- Make the test tree compile again under `dune build @check` after the 2026-10-18 batch, including the `masc_tui_loader` library split, so the release type checks can run. (#43765)
 
 ### Performance
 

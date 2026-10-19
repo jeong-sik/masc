@@ -47,12 +47,12 @@ let () =
           | None, Some b -> b
           | None, None -> "?"
         in
-        let resolved =
-          Capabilities.for_provider_model_id
-            ~wire:None
-            ~allow_bare_fallback:true
-            ~provider_label:label
-            ~model_id:(Llm_provider.Model_identifiers.Id_prefix.to_string row.id_prefix)
+        let model_id = Llm_provider.Model_identifiers.Id_prefix.to_string row.id_prefix in
+        let resolved = match row.provider_name with
+          | Some provider_id ->
+            Capabilities.for_provider_model_id ~wire:None
+              ~provider:(Model_catalog.Declared_provider provider_id) ~model_id
+          | None -> Capabilities.for_model_id model_id
         in
         Printf.printf
           "%s\t%s\t%s\t%s\n"

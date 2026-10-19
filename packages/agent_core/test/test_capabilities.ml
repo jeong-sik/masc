@@ -127,8 +127,7 @@ let test_claude_provider_reads_claude_bare_rows () =
   let lookup provider_label model_id =
     Capabilities.for_provider_model_id
       ~wire:(Some Provider_kind.Anthropic)
-      ~allow_bare_fallback:false
-      ~provider_label
+      ~provider:(Llm_provider.Model_catalog.Declared_provider provider_label)
       ~model_id
   in
   (* What claude answered for every model before: its base. Comparing with the
@@ -174,8 +173,7 @@ let test_lookup_mimo_v25_pro () =
   match
     Capabilities.for_provider_model_id
       ~wire:None
-      ~allow_bare_fallback:false
-      ~provider_label:"mimo"
+      ~provider:(Llm_provider.Model_catalog.Declared_provider "mimo")
       ~model_id:"mimo-v2.5-pro"
   with
   | Some c ->
@@ -219,8 +217,7 @@ let test_lookup_mimo_v25_multimodal () =
   match
     Capabilities.for_provider_model_id
       ~wire:None
-      ~allow_bare_fallback:false
-      ~provider_label:"mimo"
+      ~provider:(Llm_provider.Model_catalog.Declared_provider "mimo")
       ~model_id:"mimo-v2.5"
   with
   | Some c ->
@@ -472,8 +469,7 @@ let test_lookup_kimi_k2_native_cloud_suffix () =
     (match
        Capabilities.for_provider_model_id
          ~wire:(Some Provider_kind.OpenAI_compat)
-         ~allow_bare_fallback:false
-         ~provider_label:"ollama_cloud"
+         ~provider:(Llm_provider.Model_catalog.Declared_provider "ollama_cloud")
          ~model_id:"kimi-k2.7-code"
      with
      | Some cloud ->
@@ -532,8 +528,7 @@ let test_lookup_provider_m_qwen3_mtp_explicit_provider () =
   match
     Capabilities.for_provider_model_id
       ~wire:None
-      ~allow_bare_fallback:false
-      ~provider_label:"vllm-qwen3-mtp"
+      ~provider:(Llm_provider.Model_catalog.Declared_provider "vllm-qwen3-mtp")
       ~model_id:"qwen36-35b-a3b-mtp"
   with
   | Some c ->
@@ -595,8 +590,7 @@ let test_lookup_runpod_rtxa6000_gemma4_coder_catalog () =
   (match
      Capabilities.for_provider_model_id
        ~wire:None
-       ~allow_bare_fallback:false
-       ~provider_label:"runpod_rtxa6000"
+       ~provider:(Llm_provider.Model_catalog.Declared_provider "runpod_rtxa6000")
        ~model_id:"gemma4-coder-fable5-q4km"
    with
    | Some c -> check_gemma4_coder "runpod_rtxa6000 gemma4 coder" c
@@ -639,8 +633,7 @@ let test_lookup_local_ollama_gemma4_e2b_qat_catalog () =
   (match
      Capabilities.for_provider_model_id
        ~wire:None
-       ~allow_bare_fallback:true
-       ~provider_label:"ollama"
+       ~provider:(Model_catalog.Anonymous_wire Provider_kind.Ollama)
        ~model_id
    with
    | Some c -> check_gemma4_e2b "ollama Gemma4 E2B QAT via bare fallback" c
@@ -654,8 +647,7 @@ let test_lookup_deepseek_v4_flash () =
   match
     Capabilities.for_provider_model_id
       ~wire:None
-      ~allow_bare_fallback:false
-      ~provider_label:"deepseek"
+      ~provider:(Llm_provider.Model_catalog.Declared_provider "deepseek")
       ~model_id:"deepseek-v4-flash"
   with
   | Some c ->
@@ -677,8 +669,7 @@ let test_lookup_deepseek_v4_pro () =
   match
     Capabilities.for_provider_model_id
       ~wire:None
-      ~allow_bare_fallback:false
-      ~provider_label:"deepseek"
+      ~provider:(Llm_provider.Model_catalog.Declared_provider "deepseek")
       ~model_id:"deepseek-v4-pro"
   with
   | Some c ->
@@ -750,8 +741,7 @@ let test_lookup_grok () =
   match
     Capabilities.for_provider_model_id
       ~wire:None
-      ~allow_bare_fallback:false
-      ~provider_label:"xai"
+      ~provider:(Llm_provider.Model_catalog.Declared_provider "xai")
       ~model_id:"grok-4.3"
   with
   | Some c ->
@@ -860,8 +850,7 @@ let test_ollama_cloud_current_catalog_resolves () =
        match
          Capabilities.for_provider_model_id
            ~wire:None
-           ~allow_bare_fallback:false
-           ~provider_label:"ollama_cloud"
+           ~provider:(Llm_provider.Model_catalog.Declared_provider "ollama_cloud")
            ~model_id
        with
        | None -> failf "ollama_cloud/%s should resolve" model_id
@@ -894,8 +883,7 @@ let test_deepseek_replay_contract_differs_by_who_serves_it () =
     match
       Capabilities.for_provider_model_id
         ~wire:None
-        ~allow_bare_fallback:false
-        ~provider_label
+        ~provider:(Llm_provider.Model_catalog.Declared_provider provider_label)
         ~model_id
     with
     | None -> failf "%s/%s should resolve" provider_label model_id
@@ -924,8 +912,7 @@ let test_ollama_cloud_v1_vendor_models_resolve_exact_capabilities () =
        match
          Capabilities.for_provider_model_id
            ~wire:(Some Provider_kind.OpenAI_compat)
-           ~allow_bare_fallback:false
-           ~provider_label:"ollama_cloud"
+           ~provider:(Llm_provider.Model_catalog.Declared_provider "ollama_cloud")
            ~model_id
        with
        | None -> failf "ollama_cloud/%s should resolve exactly" model_id
@@ -975,8 +962,7 @@ let test_ollama_cloud_grouped_rows_have_required_axes () =
        match
          Capabilities.for_provider_model_id
            ~wire:None
-           ~allow_bare_fallback:false
-           ~provider_label:"ollama_cloud"
+           ~provider:(Llm_provider.Model_catalog.Declared_provider "ollama_cloud")
            ~model_id
        with
        | None -> failf "ollama_cloud/%s should resolve" model_id
@@ -1011,8 +997,7 @@ let test_ollama_cloud_kimi_deepseek_minimax_have_no_control_wire () =
        match
          Capabilities.for_provider_model_id
            ~wire:(Some Provider_kind.OpenAI_compat)
-           ~allow_bare_fallback:false
-           ~provider_label:"ollama_cloud"
+           ~provider:(Llm_provider.Model_catalog.Declared_provider "ollama_cloud")
            ~model_id
        with
        | None -> failf "ollama_cloud/%s should resolve" model_id
@@ -1047,8 +1032,7 @@ let test_ollama_cloud_v1_wire_resolves_the_effort_control () =
        match
          Capabilities.for_provider_model_id
            ~wire:(Some Provider_kind.OpenAI_compat)
-           ~allow_bare_fallback:false
-           ~provider_label:"ollama_cloud"
+           ~provider:(Llm_provider.Model_catalog.Declared_provider "ollama_cloud")
            ~model_id
        with
        | None -> failf "ollama_cloud/%s should resolve on the /v1 wire" model_id
@@ -1073,8 +1057,7 @@ let test_ollama_cloud_v1_unknown_model_uses_the_provider_wire_base () =
   match
     Capabilities.for_provider_model_id
       ~wire:(Some Provider_kind.OpenAI_compat)
-      ~allow_bare_fallback:false
-      ~provider_label:"ollama_cloud"
+      ~provider:(Llm_provider.Model_catalog.Declared_provider "ollama_cloud")
       ~model_id:"not-yet-catalogued-model"
   with
   | None -> fail "known provider wire lost its provider-level capability base"
@@ -1097,8 +1080,7 @@ let test_ollama_cloud_v1_non_reasoning_row_drops_the_effort_ladder () =
   match
     Capabilities.for_provider_model_id
       ~wire:(Some Provider_kind.OpenAI_compat)
-      ~allow_bare_fallback:false
-      ~provider_label:"ollama_cloud"
+      ~provider:(Llm_provider.Model_catalog.Declared_provider "ollama_cloud")
       ~model_id:"mistral-large-3:675b"
   with
   | None -> fail "ollama_cloud/mistral-large-3:675b should resolve"
@@ -1120,15 +1102,13 @@ let test_ollama_cloud_native_wire_is_unchanged () =
        let native =
          Capabilities.for_provider_model_id
            ~wire:(Some Provider_kind.Ollama)
-           ~allow_bare_fallback:false
-           ~provider_label:"ollama_cloud"
+           ~provider:(Llm_provider.Model_catalog.Declared_provider "ollama_cloud")
            ~model_id
        in
        let unspecified =
          Capabilities.for_provider_model_id
            ~wire:None
-           ~allow_bare_fallback:false
-           ~provider_label:"ollama_cloud"
+           ~provider:(Llm_provider.Model_catalog.Declared_provider "ollama_cloud")
            ~model_id
        in
        match native, unspecified with
@@ -1160,8 +1140,7 @@ let test_ollama_cloud_grouped_rows_follow_exact_output_contract () =
        match
          Capabilities.for_provider_model_id
            ~wire:None
-           ~allow_bare_fallback:false
-           ~provider_label:"ollama_cloud"
+           ~provider:(Llm_provider.Model_catalog.Declared_provider "ollama_cloud")
            ~model_id
        with
        | None -> failf "ollama_cloud/%s should resolve" model_id
@@ -1179,8 +1158,7 @@ let test_ollama_cloud_kimi_preserves_historical_reasoning () =
   match
     Capabilities.for_provider_model_id
       ~wire:None
-      ~allow_bare_fallback:false
-      ~provider_label:"ollama_cloud"
+      ~provider:(Llm_provider.Model_catalog.Declared_provider "ollama_cloud")
       ~model_id:"kimi-k2.7-code"
   with
   | None -> fail "ollama_cloud/kimi-k2.7-code should resolve"
@@ -1208,8 +1186,7 @@ let test_ollama_cloud_structured_output_is_disabled_by_provider_contract () =
        match
          Capabilities.for_provider_model_id
            ~wire:None
-           ~allow_bare_fallback:false
-           ~provider_label:"ollama_cloud"
+           ~provider:(Llm_provider.Model_catalog.Declared_provider "ollama_cloud")
            ~model_id
        with
        | None -> failf "ollama_cloud/%s should resolve" model_id
@@ -1244,8 +1221,7 @@ let test_ollama_cloud_provider_qualified_preserves_shared_bare_family () =
     match
       for_provider_model_id
         ~wire:None
-        ~allow_bare_fallback:false
-        ~provider_label:"ollama_cloud"
+        ~provider:(Llm_provider.Model_catalog.Declared_provider "ollama_cloud")
         ~model_id:"glm-5.2"
     with
     | Some c -> c
@@ -1268,8 +1244,7 @@ let test_ollama_cloud_provider_qualified_preserves_shared_bare_family () =
     match
       for_provider_model_id
         ~wire:(Some Provider_kind.OpenAI_compat)
-        ~allow_bare_fallback:false
-        ~provider_label:"ollama_cloud"
+        ~provider:(Llm_provider.Model_catalog.Declared_provider "ollama_cloud")
         ~model_id:"kimi-k2.7-code"
     with
     | Some c -> c
@@ -1355,8 +1330,7 @@ let frontier_capabilities route model_id =
   | Provider_qualified provider_label ->
     Capabilities.for_provider_model_id
       ~wire:None
-      ~allow_bare_fallback:false
-      ~provider_label
+      ~provider:(Llm_provider.Model_catalog.Declared_provider provider_label)
       ~model_id
   | Native_provider _ -> Capabilities.for_model_id model_id
 ;;
@@ -1984,8 +1958,7 @@ thinking_control_token = "<|provider|>"
            (match
               Capabilities.for_provider_model_id
                 ~wire:None
-                ~allow_bare_fallback:false
-                ~provider_label:"acme"
+                ~provider:(Llm_provider.Model_catalog.Declared_provider "acme")
                 ~model_id:"EXACT-MODEL"
             with
             | Some caps ->
@@ -1997,8 +1970,7 @@ thinking_control_token = "<|provider|>"
              None
              (Capabilities.for_provider_model_id
                 ~wire:None
-                ~allow_bare_fallback:false
-                ~provider_label:" ACME "
+                ~provider:(Llm_provider.Model_catalog.Declared_provider " ACME ")
                 ~model_id:" EXACT-MODEL ");
            check
              (option reject)
@@ -2006,8 +1978,7 @@ thinking_control_token = "<|provider|>"
              None
              (Capabilities.for_provider_model_id
                 ~wire:None
-                ~allow_bare_fallback:false
-                ~provider_label:"acme"
+                ~provider:(Llm_provider.Model_catalog.Declared_provider "acme")
                 ~model_id:"exact-model-preview");
            (match Capabilities.for_model_id "exact-model-preview" with
             | Some caps ->
@@ -2949,15 +2920,13 @@ let test_openai_compat_reasoning_records_have_explicit_control () =
     ; ( "mimo-v2.5-pro"
       , Capabilities.for_provider_model_id
           ~wire:None
-          ~allow_bare_fallback:false
-          ~provider_label:"mimo"
+          ~provider:(Llm_provider.Model_catalog.Declared_provider "mimo")
           ~model_id:"mimo-v2.5-pro" )
     ; "qwen3.5", Capabilities.for_model_id "qwen3.5-35b-a3b"
     ; ( "deepseek-v4-flash"
       , Capabilities.for_provider_model_id
           ~wire:None
-          ~allow_bare_fallback:false
-          ~provider_label:"deepseek"
+          ~provider:(Llm_provider.Model_catalog.Declared_provider "deepseek")
           ~model_id:"deepseek-v4-flash" )
     ; "nvidia-ultra", Capabilities.for_model_id "nvidia-ultra-253b"
     ]
@@ -2995,13 +2964,10 @@ let test_openai_compat_reasoning_records_have_explicit_control () =
    the only lookup that applies prefix matching, so a base that answered first
    would make it unreachable.
 
-   The two tests below need a label the base actually answers for.
-   [provider_base_label] goes through [Model_catalog.provider_entry_for_label],
-   which returns [None] for every wire-kind label ([anthropic], [kimi],
-   [openai_compat], [ollama], [gemini], [glm]), so the ordering is observable
-   only for a label that names a [[providers]] entry. That is what
-   [with_precedence_catalog] declares. The discriminator is a field the row
-   sets and the base leaves [None]: [accepted_reasoning_efforts]. *)
+   Both cases declare a provider base. Only the first grants catalog bare-row
+   authority, so the row and base actually compete there. The discriminator
+   is a field the row sets and the base leaves [None]:
+   [accepted_reasoning_efforts]. *)
 (* The two halves of the assembly step #34743 removed, one test each, because
    restoring either without the other is a round trip: the erasing form broke
    #34301, and its absence broke the eleven non-reasoning ollama_cloud rows
@@ -3037,8 +3003,7 @@ let test_a_non_reasoning_row_inherits_no_effort_ladder () =
   match
     Capabilities.for_provider_model_id
       ~wire:(Some Provider_kind.OpenAI_compat)
-      ~allow_bare_fallback:false
-      ~provider_label:"ollama_cloud"
+      ~provider:(Llm_provider.Model_catalog.Declared_provider "ollama_cloud")
       ~model_id:"mistral-large-3:675b"
   with
   | None -> fail "ollama_cloud/mistral-large-3:675b should resolve"
@@ -3053,9 +3018,10 @@ let test_a_non_reasoning_row_inherits_no_effort_ladder () =
 
 (* Keep the row/base distinction local: production catalogs may add scoped
    rows or omit providers, neither of which tests the fallback branch. *)
-let with_precedence_catalog f =
+let with_precedence_catalog ~serves_bare_rows f =
   with_temp_model_catalog
-    {|[[providers]]
+    (Printf.sprintf {|[[providers]]
+serves_bare_rows = %b
 id = "precedence-provider"
 kind = "gemini"
 base_url = "https://example.invalid"
@@ -3068,7 +3034,7 @@ id_prefix = "precedence-model"
 base = "gemini"
 supports_reasoning = true
 accepted_reasoning_efforts = ["high"]
-|}
+|} serves_bare_rows)
     (fun path ->
       let previous = Model_catalog.global () in
       Fun.protect
@@ -3082,9 +3048,10 @@ accepted_reasoning_efforts = ["high"]
 ;;
 
 let test_a_bare_row_outranks_the_provider_base () =
-  with_precedence_catalog (fun () ->
-    match Capabilities.for_provider_model_id ~wire:None ~allow_bare_fallback:true
-      ~provider_label:"precedence-provider" ~model_id:"precedence-model" with
+  with_precedence_catalog ~serves_bare_rows:true (fun () ->
+    match Capabilities.for_provider_model_id ~wire:None
+      ~provider:(Model_catalog.Declared_provider "precedence-provider")
+      ~model_id:"precedence-model" with
     | None -> fail "declared model must resolve"
     | Some capabilities ->
       check (option (list string)) "bare row outranks provider base"
@@ -3092,9 +3059,8 @@ let test_a_bare_row_outranks_the_provider_base () =
 ;;
 
 let test_a_named_provider_still_refuses_the_bare_row () =
-  with_precedence_catalog (fun () ->
-    match Capabilities.for_provider_model_id ~wire:None ~allow_bare_fallback:false
-      ~provider_label:"precedence-provider" ~model_id:"precedence-model" with
+  with_precedence_catalog ~serves_bare_rows:false (fun () ->
+    match Capabilities.for_provider_model_id ~wire:None ~provider:(Llm_provider.Model_catalog.Declared_provider "precedence-provider") ~model_id:"precedence-model" with
     | None -> fail "explicitly declared provider base must resolve"
     | Some capabilities ->
       check (option (list string)) "scoped lookup does not borrow a bare row"

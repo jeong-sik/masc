@@ -907,43 +907,14 @@ let lookup t model_id =
   |> fun entries -> lookup_entries entries model_id
 ;;
 
-(* Wire-kind labels ("openai_compat", "gemini", ...) are what
-   [capability_provider_label] synthesizes when a config declares no
-   [provider_id]. They stay opaque to alias canonicalization: letting a
-   catalog entry claim one as an alias would route every anonymous config of
-   that wire kind onto that provider's scoped capabilities/pricing. *)
-let wire_kind_labels =
-  List.map (fun kind -> Provider_kind.to_string kind) Provider_kind.all
-;;
+type provider_reference =
+  | Declared_provider of string
+  | Anonymous_wire of Provider_kind.t
 
-(* Canonical provider label per the catalog's own [[providers]] alias data.
-   This applies the alias-to-canonical-id policy the binding registry already
-   uses ([Provider_runtime_binding.provider_id_of_provider_config]); the
-   capability path previously compared the raw label only, so the same config
-   could resolve capabilities on one path and miss on the other. The first
-   declaring entry wins and resolution is single-step (a canonical id is
-   never re-resolved). Wire-kind labels are never canonicalized. *)
-let canonical_provider_name t provider_name =
-  let provider_name = normalize_label provider_name in
-  if List.mem provider_name wire_kind_labels
-  then provider_name
-  else (
-    let matches (entry : provider_entry) =
-      String.equal provider_name (normalize_label entry.id)
-      || List.exists
-           (fun alias -> String.equal provider_name (normalize_label alias))
-           entry.aliases
-    in
-    match List.find_opt matches t.providers with
-    | Some entry -> normalize_label entry.id
-    | None -> provider_name)
-;;
-
-let provider_entry_for_label t provider_name =
-  let requested = normalize_label provider_name in
-  if List.mem requested wire_kind_labels
-  then None
-  else
+let provider_entry_for_reference t = function
+  | Anonymous_wire _ -> None
+  | Declared_provider provider_name ->
+    let requested = normalize_label provider_name in
     List.find_opt
       (fun (entry : provider_entry) ->
          String.equal requested (normalize_label entry.id)
@@ -953,19 +924,34 @@ let provider_entry_for_label t provider_name =
       t.providers
 ;;
 
-let lookup_for_provider t ~provider_name ~model_id =
+let lookup_for_provider_reference t ~provider ~model_id =
   let key = Model_identifiers.Model_id.equality_key model_id in
   let find_exact label =
     match String_map.find_opt label t.scoped_rows with
     | Some rows -> Row_key_map.find_opt key rows
     | None -> None
   in
-  let requested = normalize_label provider_name in
+  let requested = normalize_label (match provider with
+    | Declared_provider id -> id
+    | Anonymous_wire kind -> Provider_kind.to_string kind) in
   match find_exact requested with
   | Some _ as hit -> hit
   | None ->
-    let canonical = canonical_provider_name t requested in
-    if String.equal canonical requested then None else find_exact canonical
+    (match provider_entry_for_reference t provider with
+     | Some entry ->
+       let canonical = normalize_label entry.id in
+       if String.equal canonical requested then None else find_exact canonical
+     | None -> None)
+;;
+
+(* Label-only readers do not possess declaration authority. Preserve their
+   wire-label protection; capability callers carry the typed reference above. *)
+let lookup_for_provider t ~provider_name ~model_id =
+  let provider =
+    match Provider_kind.of_canonical_string (normalize_label provider_name) with
+    | Some kind -> Anonymous_wire kind
+    | None -> Declared_provider provider_name in
+  lookup_for_provider_reference t ~provider ~model_id
 ;;
 
 let provider_label_for_base_url ?getenv t ~kind ~base_url =

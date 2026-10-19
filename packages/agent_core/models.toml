@@ -2338,6 +2338,9 @@ cache_read_multiplier = 0.1
 
 [[providers]]
 id = "gemini"
+# These provider-independent model rows describe this native endpoint. The
+# declaration applies only to catalog rows, not capability-manifest overrides.
+serves_bare_rows = true
 kind = "gemini"
 base_url = "https://generativelanguage.googleapis.com/v1beta"
 request_path = ""
@@ -2399,6 +2402,8 @@ identity_hosts = ["api.deepseek.com"]
 
 [[providers]]
 id = "kimi"
+# Native Kimi model facts are declared in the provider-independent rows above.
+serves_bare_rows = true
 kind = "kimi"
 identity_kinds = ["kimi", "openai_compat"]
 base_url = "https://api.kimi.com/coding"

@@ -784,8 +784,7 @@ let test_catalog_only_runtime_projects_serving_constraint () =
     match
       Capabilities.for_provider_model_id
         ~wire:None
-        ~allow_bare_fallback:false
-        ~provider_label:"evidence-runtime"
+        ~provider:(Llm_provider.Model_catalog.Declared_provider "evidence-runtime")
         ~model_id:"evidence-model"
     with
     | Some { Capabilities.serving_constraint = Some constraint_; _ } ->
@@ -834,8 +833,7 @@ let test_glm_vision_rows_reach_a_runtime_lookup () =
         match
           Capabilities.for_provider_model_id
             ~wire:(Some Llm_provider.Provider_kind.Glm)
-            ~allow_bare_fallback:false
-            ~provider_label
+            ~provider:(Llm_provider.Model_catalog.Declared_provider provider_label)
             ~model_id:"glm-4.6v"
         with
         | Some caps ->
@@ -877,8 +875,7 @@ let test_kimi_coding_rows_leave_temperature_out () =
         match
           Capabilities.for_provider_model_id
             ~wire:None
-            ~allow_bare_fallback:false
-            ~provider_label:"kimi_coding"
+            ~provider:(Llm_provider.Model_catalog.Declared_provider "kimi_coding")
             ~model_id
         with
         | None -> fail ("kimi_coding resolves no capabilities for " ^ model_id)

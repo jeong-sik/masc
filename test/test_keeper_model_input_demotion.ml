@@ -522,7 +522,7 @@ let completed_arguments_restore_through_reader () =
   let details = Types.ReasoningDetails {reasoning_content = Some "retained reasoning"; details = []} in
   let seed = match seed with
     | first :: rest -> {first with content = thought :: redacted :: details :: first.content;
-        metadata = ["origin", "retained"]} :: rest
+        metadata = ["origin", `String "retained"]} :: rest
     | [] -> Alcotest.fail "nonempty fixture" in
   (* Core can deserialize the request separately from its retained raw seed. *)
   let request = List.map (fun message ->

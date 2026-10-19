@@ -58,6 +58,12 @@ let start_return state =
     match state.code_jump_back with
     | [] -> state.code_lsp_note <- Some "No jump to return from"; No_return
     | target :: rest ->
+      (* Ordinary opens can still own this source, including same-key refreshes
+         that expose Ready. Retire them before capturing the return owner so a
+         late callback cannot reset the current or restored reading. *)
+      state.code_file <- Masc_tui_fetched.cancel_pending
+          ~reason:"File read cancelled by return navigation" state.code_file;
+      state.code_file_resume_intent <- Refresh_code_file;
       match target.cj_file with
       | None ->
           commit_return_location state target rest;

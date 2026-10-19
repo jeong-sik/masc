@@ -115,6 +115,18 @@ let refresh ~equal state ~key = start_with Refresh ~equal state ~key
 
 let clear state = { state with status = Status_absent }
 
+let cancel_pending ~reason state =
+  match state.status with
+  | Status_loading request ->
+      { state with status = Status_failed (request, reason) }
+  | Status_retrying (request, error) ->
+      { state with status = Status_failed (request, error) }
+  | Status_refreshing (request, value, None) ->
+      { state with status = Status_ready (request, value) }
+  | Status_refreshing (request, value, Some error) ->
+      { state with status = Status_stale (request, value, error) }
+  | Status_absent | Status_ready _ | Status_stale _ | Status_failed _ -> state
+
 let suspend state =
   let status = match state.status with
     | Status_loading request ->

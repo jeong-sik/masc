@@ -111,10 +111,46 @@ let test_suspension_keeps_reader_key_and_refuses_retired_answers () =
   | _ -> fail "interrupted refresh was not marked stale"
 ;;
 
+let test_cancellation_keeps_the_existing_observation () =
+  let loading, first = started (F.start ~equal F.initial ~key:"source.ml") in
+  let cancelled = F.cancel_pending ~reason:"cancelled" loading in
+  check bool "an initial cancelled read invents no completed value" true
+    (view cancelled ~key:"source.ml" = F.Failed "cancelled");
+  check bool "late initial answer no longer owns the source" false
+    (F.is_current ~equal cancelled first);
+  let failed = F.complete ~equal loading first (Error "original failure") in
+  let retrying_failure, retry_failure = started (F.refresh ~equal failed ~key:"source.ml") in
+  let cancelled_retry = F.cancel_pending ~reason:"cancelled" retrying_failure in
+  check bool "cancellation keeps the retry's known failure" true
+    (view cancelled_retry ~key:"source.ml" = F.Failed "original failure");
+  check bool "late retry no longer owns the source" false
+    (F.is_current ~equal cancelled_retry retry_failure);
+  let ready = F.complete ~equal loading first (Ok "original") in
+  let refreshing, old = started (F.start ~equal ready ~key:"source.ml") in
+  let retained = F.cancel_pending ~reason:"cancelled" refreshing in
+  check bool "retained value keeps its existing ready observation" true
+    (view retained ~key:"source.ml" = F.Ready "original");
+  check bool "refresh admission ends" false (F.in_flight retained);
+  check bool "late refresh no longer owns the source" false
+    (F.is_current ~equal retained old);
+  check bool "late success cannot replace the retained observation" true
+    (F.complete ~equal retained old (Ok "late") == retained);
+  let retrying, retry = started (F.start ~equal retained ~key:"source.ml") in
+  let stale = F.complete ~equal retrying retry (Error "unavailable") in
+  let refreshing_stale, old_stale = started (F.start ~equal stale ~key:"source.ml") in
+  let retained_stale = F.cancel_pending ~reason:"cancelled" refreshing_stale in
+  check bool "cancelling a retry does not make stale data fresh" true
+    (view retained_stale ~key:"source.ml" = F.Stale ("original", "unavailable"));
+  check bool "late failure cannot change the retained stale cause" true
+    (F.complete ~equal retained_stale old_stale (Error "late failure") == retained_stale)
+;;
+
 let () =
   run "tui_fetched"
     [ ( "states"
       , [ test_case "suspended reader retains its key" `Quick test_suspension_keeps_reader_key_and_refuses_retired_answers
+        ; test_case "cancelled refresh retains the existing observation" `Quick
+            test_cancellation_keeps_the_existing_observation
         ; test_case "the four states are distinguishable" `Quick
             test_the_four_states_are_distinguishable
         ; test_case "a pane asks once per key" `Quick test_a_pane_asks_once_per_key

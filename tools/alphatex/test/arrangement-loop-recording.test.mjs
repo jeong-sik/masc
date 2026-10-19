@@ -135,3 +135,14 @@ test('an absolute successful backing-stop fence trims source ticks without chang
  const cut=recordedLoopRegions(p,source(start),midi).regions.at(-1)
  assert.equal(BigInt(cut.offset)+BigInt(cut.extent),15600001n)
 })
+
+test('latency correction crossing a boundary never auto-selects audio and MIDI from different performances',()=>{
+ for(const [seconds,ms,component] of [[.994,'-12.345','audio'],[1.004,'12.345','midi']]){
+  const p=project(),asset=source();asset.manifest.audioFrames=String(Math.round((seconds-.1)*48000))
+  const correction={kind:'audio',input:'input',output:'output',audioChannel:{input:1,output:2},placement:manualCapturePlacement(ms)}
+  const result=attachRecordedTake(p,{project:{...p,assets:[asset]},asset:asset.id},epoch(p),correction)
+  const selected=result.project.clips.flatMap((clip,index)=>result.project.lanes.find(l=>l.id===clip.lane).muted?[]:[result.alignment.passes[index]])
+  assert.equal(selected.length,1);assert.equal(selected[0].cycle,'4');assert.equal(selected[0].component,component)
+  assert.ok(result.alignment.passes.some(r=>r.cycle==='3' && r.component!==component))
+ }
+})

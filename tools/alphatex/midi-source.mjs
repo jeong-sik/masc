@@ -16,6 +16,24 @@ const channelBytes = bytes => {
       || bytes.slice(1).some(byte => byte >= 128)) throw new Error('Invalid MIDI channel message')
   return bytes
 }
+const tempoData = data => {
+  if (!Array.isArray(data) || data.length !== 3) throw new Error('MIDI tempo needs three bytes')
+  data.forEach(byte => integer(byte, 'tempo byte', 0, 255))
+  if (!(data[0] * 65536 + data[1] * 256 + data[2])) throw new Error('MIDI tempo must be positive')
+  return data
+}
+export function tempoEvent(event) {
+  if (event?.kind !== 'meta' || event.type !== 0x51) return null
+  const data = tempoData(event.data), micros = data[0] * 65536 + data[1] * 256 + data[2]
+  return { kind: 'tempo', id: event.id, track: event.track, tick: event.tick, micros, value: 60e6 / micros }
+}
+function tempoBytes(value) {
+  if (!Number.isFinite(value) || value <= 0) throw new Error('Tempo BPM must be positive and finite')
+  // SMF Set Tempo stores positive 24-bit microseconds per quarter note.
+  // Round to the nearest representable microsecond, as JZZ.MIDI.smfBPM does.
+  const micros = integer(Math.round(60e6 / value), 'tempo microseconds', 1, 0xffffff)
+  return [micros >> 16, (micros >> 8) & 255, micros & 255]
+}
 const tag = (bytes, offset) => bytes.toString('latin1', offset, offset + 4)
 function chunks(bytes, start, end, littleEndian = false, padded = false) {
   const result = []
@@ -140,23 +158,28 @@ function materialize(source) {
   const changed = new Map()
   for (const patch of source.changes) {
     const event = byID.get(patch?.id)
-    if (!event || event.kind !== 'channel' || changed.has(patch.id)) throw new Error('Invalid or duplicate MIDI source edit')
+    if (!event || !(event.kind === 'channel' || tempoEvent(event)) || changed.has(patch.id)) throw new Error('Invalid or duplicate MIDI source edit')
     if (patch.removed === true) {
       if (Object.keys(patch).some(key => !['id', 'removed'].includes(key))) throw new Error('Removed MIDI event cannot also change')
       changed.set(patch.id, null)
     } else {
-      if (Object.keys(patch).some(key => !['id', 'tick', 'bytes'].includes(key))) throw new Error('Unknown MIDI source edit field')
-      changed.set(patch.id, { ...event, tick: integer(patch.tick, 'edited MIDI tick'), bytes: [...channelBytes(patch.bytes)] })
+      const field = event.kind === 'channel' ? 'bytes' : 'data'
+      if (Object.keys(patch).some(key => !['id', 'tick', field].includes(key))) throw new Error('Unknown MIDI source edit field')
+      const payload = event.kind === 'channel' ? channelBytes(patch.bytes) : tempoData(patch.data)
+      changed.set(patch.id, { ...event, tick: integer(patch.tick, 'edited MIDI tick'), [field]: [...payload] })
     }
   }
   const tracks = parsed.tracks.map(track => track.flatMap(event => changed.has(event.id) ? changed.get(event.id) === null ? [] : [changed.get(event.id)] : [event]))
   const ids = new Set(byID.keys())
   for (const event of source.insertions) {
+    const meta = event?.kind === 'meta'
     if (typeof event?.id !== 'string' || !event.id.startsWith('new:') || ids.has(event.id)
-        || Object.keys(event).some(key => !['id', 'track', 'tick', 'bytes'].includes(key))) throw new Error('Invalid inserted MIDI event')
+        || Object.keys(event).some(key => !(meta ? ['id', 'track', 'tick', 'kind', 'type', 'data'] : ['id', 'track', 'tick', 'bytes']).includes(key))) throw new Error('Invalid inserted MIDI event')
     ids.add(event.id)
     integer(event.track, 'inserted MIDI track', 0, tracks.length - 1)
-    tracks[event.track].push({ ...event, tick: integer(event.tick, 'inserted MIDI tick'), kind: 'channel', bytes: [...channelBytes(event.bytes)], port: 0 })
+    if (meta && event.type !== 0x51) throw new Error('Only Set Tempo metadata can be inserted')
+    const payload = meta ? { kind: 'meta', data: [...tempoData(event.data)] } : { kind: 'channel', bytes: [...channelBytes(event.bytes)] }
+    tracks[event.track].push({ ...event, ...payload, tick: integer(event.tick, 'inserted MIDI tick'), port: 0 })
   }
   // Stable ordering retains original same-tick controller/note order. Inserted
   // events follow existing events at that tick and precede the end marker.
@@ -193,7 +216,7 @@ function materialize(source) {
       if (event.kind === 'meta' && event.type === 0x21) port = event.data[0]
       event.port = port
       if (event.kind === 'channel' && event.port !== baselinePorts.get(event.id)) throw new Error('MIDI event order changes its source port')
-      if (changed.has(event.id) && event.port !== byID.get(event.id).port) {
+      if (event.kind === 'channel' && changed.has(event.id) && event.port !== byID.get(event.id).port) {
         throw new Error('MIDI edit changes the original source port; explicit route edits are not supported')
       }
     }
@@ -282,13 +305,10 @@ export function midiSourcePattern(source, { pattern } = {}) {
   let tick = 0, seconds = 0, micros = 500000
   const diagnostics = [], active = new Map(), notes = []
   for (const event of events) {
-    seconds += parsed.timing.kind === 'ppq' ? (event.tick - tick) / parsed.timing.ppq * micros / 1e6
-      : (event.tick - tick) * parsed.timing.denominator / parsed.timing.numerator / parsed.timing.ticksPerFrame
+    seconds = parsed.timing.kind === 'ppq' ? seconds + (event.tick - tick) / parsed.timing.ppq * micros / 1e6
+      : event.tick * parsed.timing.denominator / parsed.timing.numerator / parsed.timing.ticksPerFrame
     event.seconds = seconds; tick = event.tick
-    if (event.kind === 'meta' && event.type === 0x51) {
-      if (event.data.length !== 3 || !(event.data[0] * 65536 + event.data[1] * 256 + event.data[2])) throw new Error('Invalid MIDI tempo event')
-      micros = event.data[0] * 65536 + event.data[1] * 256 + event.data[2]
-    }
+    if (event.kind === 'meta' && event.type === 0x51) micros = tempoEvent(event).micros
     if (event.kind !== 'channel') continue
     const [status, key, velocity] = event.bytes, type = status & 0xf0, channel = status & 15
     const identity = `${event.port}:${channel}:${key}`
@@ -379,11 +399,13 @@ function sourcePatch(source) {
     const order = next.orders?.find(order => order.track === track && order.tick === tick)
     if (order) order.events.push(id)
   }
-  const insert = (track, tick, bytes) => {
+  const add = (track, tick, payload) => {
     while (used.has(`new:${number}`)) number++
     const id = `new:${number++}`; used.add(id)
-    next.insertions.push({ id, track, tick, bytes }); append(id, track, tick); return id
+    next.insertions.push({ id, track, tick, ...payload }); append(id, track, tick); return id
   }
+  const insert = (track, tick, bytes) => add(track, tick, { bytes })
+  const insertTempo = (track, tick, data) => add(track, tick, { kind: 'meta', type: 0x51, data })
   const place = (event, value) => {
     if (value.removed || value.tick !== event.tick) {
       detach(event.id)
@@ -392,7 +414,8 @@ function sourcePatch(source) {
     const added = next.insertions.findIndex(item => item.id === event.id)
     if (added >= 0) {
       if (value.removed) next.insertions.splice(added, 1)
-      else next.insertions[added] = { id: event.id, track: event.track, ...value }
+      else next.insertions[added] = { id: event.id, track: event.track,
+        ...(event.kind === 'meta' ? { kind: 'meta', type: event.type } : {}), ...value }
     } else {
       next.changes = next.changes.filter(item => item.id !== event.id)
       next.changes.push({ id: event.id, ...value })
@@ -411,7 +434,27 @@ function sourcePatch(source) {
       order.events = order.events.map(id => expressionEvent(byID.get(id)) ? id : protectedIDs[index++])
     }
   }
-  return { next, insert, place, finish }
+  return { next, insert, insertTempo, place, finish }
+}
+
+export function editMidiSourceTempos(source, edits, { pattern } = {}) {
+  const performance = midiSourcePattern(source, { pattern }), events = new Map(performance.events.map(event => [event.id, event]))
+  const { next, insertTempo, place, finish } = sourcePatch(source), used = new Set()
+  for (const edit of edits) {
+    if (edit.kind === 'insert') {
+      const track = performance.format === 2 ? performance.pattern : 0
+      insertTempo(track, integer(edit.tick, 'tempo tick'), tempoBytes(edit.value))
+      continue
+    }
+    const event = events.get(edit.id), value = tempoEvent(event)
+    if (!value || used.has(edit.id)) throw new Error('Select a unique tempo event in this pattern')
+    used.add(edit.id)
+    if (edit.kind === 'remove') place(event, { removed: true })
+    else if (edit.kind === 'change') place(event, { tick: integer(edit.tick ?? event.tick, 'tempo tick'), data: edit.value === undefined ? [...event.data] : tempoBytes(edit.value) })
+    else throw new Error('Unknown MIDI tempo edit')
+  }
+  finish(); exportMidiSource(next); midiSourcePattern(next, { pattern })
+  return next
 }
 
 // A complete same-tick permutation has no dangling anchors or cycles. Edits

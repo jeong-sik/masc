@@ -1,5 +1,5 @@
 import { Chord, Note } from 'tonal'
-import { midiSourceInfo, midiSourcePattern, editMidiSourceNotes, editMidiSourceExpressions, orderMidiSourceExpression } from './midi-source.mjs'
+import { midiSourceInfo, midiSourcePattern, editMidiSourceNotes, editMidiSourceExpressions, orderMidiSourceExpression, tempoEvent, editMidiSourceTempos } from './midi-source.mjs'
 import { expressionEvent } from './midi-expression.mjs'
 import { pitch, chordVoicing } from './sequencer-project.mjs'
 
@@ -18,8 +18,8 @@ export function sourceEditor(project, previous = {}, pattern = previous.pattern)
       detail: `${channels.map(c => c+1).join(', ') || 'no'} MIDI channels · source track ${index+1}`, muted: false, solo: false }
   })
   if (!tracks.length) tracks.push({ id: 'pattern-choice', name: `Choose :pattern 1–${info.patterns}`, detail: 'Independent SMF patterns', notes: [], channels: [], muted: false, solo: false })
-  const firstTempo = performance?.events.find(e => e.kind === 'meta' && e.type === 0x51 && e.tick === 0)
-  const tempo = firstTempo ? 60e6 / (firstTempo.data[0]*65536+firstTempo.data[1]*256+firstTempo.data[2]) : 120
+  const firstTempo = performance?.events.filter(e => e.kind === 'meta' && e.type === 0x51 && e.tick === 0).at(-1)
+  const tempo = firstTempo ? tempoEvent(firstTempo).value : 120
   const meter = performance?.events.find(e => e.kind === 'meta' && e.type === 0x58 && e.tick === 0 && e.data.length === 4)
   const end = performance?.ticks ?? 0
   const length = end + 1 // include endpoint notes in the viewport, without extending the source performance
@@ -31,6 +31,7 @@ export function sourceEditor(project, previous = {}, pattern = previous.pattern)
     project, pattern: chosen, performance, info, axis, view, steps,
     selectedID: performance?.notes.some(n=>n.id===previous.selectedID) ? previous.selectedID : undefined,
     selectedExpressionID: performance?.events.some(event=>event.id===previous.selectedExpressionID && expressionEvent(event)) ? previous.selectedExpressionID : undefined,
+    selectedTempoID: performance?.events.some(event=>event.id===previous.selectedTempoID && tempoEvent(event)) ? previous.selectedTempoID : undefined,
     track: Math.min(previous.track ?? Math.max(0, tracks.findIndex(t => t.notes.length)), tracks.length-1),
     tick: Math.min(previous.tick ?? 0, length-1) }
 }
@@ -55,6 +56,20 @@ export function sourceExpressions(editor) {
   })
 }
 export const selectedExpression = editor => sourceExpressions(editor).find(event => event.id === editor.selectedExpressionID)
+export const sourceTempos = editor => (editor.performance?.events ?? []).flatMap(event => {
+  const tempo = tempoEvent(event)
+  return tempo ? [tempo] : []
+})
+export const selectedTempo = editor => sourceTempos(editor).find(event => event.id === editor.selectedTempoID)
+function applyTempos(editor, edits) {
+  const project = editMidiSourceTempos(editor.project, edits, { pattern: editor.pattern })
+  return sourceEditor(project, { ...editor, undo: [...editor.undo, editor.project], redo: [] })
+}
+function tempoSelection(editor) {
+  const event = selectedTempo(editor)
+  if (!event) throw new Error('Select a tempo event with :tempos, Up/Down or :tempo-event ID')
+  return event
+}
 function applyExpressions(editor, edits) {
   const project = editMidiSourceExpressions(editor.project, edits, { pattern: editor.pattern })
   return sourceEditor(project, { ...editor, undo: [...editor.undo, editor.project], redo: [] })
@@ -74,6 +89,22 @@ export function sourceAction(editor, action) {
   const note = sourceSelected(editor)
   if (['toggle-note','remove','move-note','duration','velocity'].includes(action.kind) && !note && atCursor(editor).length>1) throw new Error('Several source notes share the cursor; use :channel or :select event-ID')
   switch (action.kind) {
+    case 'tempo-next': {
+      const events = sourceTempos(editor)
+      if (!events.length) return { ...editor, selectedTempoID: undefined }
+      const index = events.findIndex(event => event.id === editor.selectedTempoID)
+      const event = events[index < 0 ? action.direction > 0 ? 0 : events.length - 1 : (index + action.direction + events.length) % events.length]
+      return { ...editor, selectedTempoID: event.id, tick: event.tick, track: editor.view.tracks.findIndex(track => track.sourceTrack === event.track) }
+    }
+    case 'tempo-remove': return applyTempos(editor, [{ kind: 'remove', id: tempoSelection(editor).id }])
+    case 'tempo-move': {
+      const event = tempoSelection(editor), tick = event.tick + action.ticks
+      return { ...applyTempos(editor, [{ kind: 'change', id: event.id, tick }]), tick }
+    }
+    case 'tempo-value': {
+      const event = tempoSelection(editor)
+      return applyTempos(editor, [{ kind: 'change', id: event.id, value: action.value ?? event.value + action.delta }])
+    }
     case 'expression-next': {
       const events = sourceExpressions(editor)
       if (!events.length) return { ...editor, selectedExpressionID: undefined }
@@ -91,7 +122,7 @@ export function sourceAction(editor, action) {
       return applyExpressions(editor, [{ kind: 'change', id: event.id, message: { ...event, value: action.value ?? event.value + action.delta } }])
     }
     case 'move': return { ...editor, selectedID:undefined, tick:Math.max(0,Math.min(editor.view.length-1,editor.tick+(action.ticks??0))),pitch:Math.max(0,Math.min(127,editor.pitch+(action.pitches??0))) }
-    case 'track': return { ...editor,track:(editor.track+1)%editor.view.tracks.length,channel:undefined,selectedID:undefined,selectedExpressionID:undefined }
+    case 'track': return { ...editor,track:(editor.track+1)%editor.view.tracks.length,channel:undefined,selectedID:undefined,selectedExpressionID:undefined,selectedTempoID:undefined }
     case 'toggle-note': return apply(editor,[note ? {id:note.id,kind:'remove'} : insertion(editor,{pitch:editor.pitch,start:editor.tick,duration:editor.duration,velocity:editor.velocity})])
     case 'remove': if (!note) throw new Error('No MIDI note at cursor'); return apply(editor,[{id:note.id,kind:'remove'}])
     case 'move-note': {
@@ -128,14 +159,35 @@ export function sourceCommand(editor,line) {
       ...(kind === 'poly-pressure' ? { pitch: pitch(values[0]) } : {}) }
   }
   switch(command){
+    case 'tempos': {
+      count(0); const next = { ...editor, eventView: editor.eventView === 'tempo' ? undefined : 'tempo' }
+      return { editor: next.eventView && !selectedTempo(next) ? sourceAction(next, { kind: 'tempo-next', direction: 1 }) : next }
+    }
+    case 'tempo-event': {
+      count(1); const value = sourceTempos(editor).find(event => event.id === args[0])
+      if (!value) throw new Error('Choose a tempo event in the selected pattern')
+      return { editor: { ...editor, eventView: 'tempo', selectedTempoID: value.id, tick: value.tick,
+        track: editor.view.tracks.findIndex(track => track.sourceTrack === value.track) } }
+    }
+    case 'tempo-value': count(1); return { editor: sourceAction(editor, { kind: 'tempo-value', value: Number(args[0]) }) }
+    case 'tempo-move': count(1); return { editor: sourceAction(editor, { kind: 'tempo-move', ticks: units(args[0]) - tempoSelection(editor).tick }) }
+    case 'tempo-remove': count(0); return { editor: sourceAction(editor, { kind: 'tempo-remove' }) }
+    case 'tempo': {
+      count(1,2); const tick = args[1] === undefined ? editor.tick : units(args[1])
+      const existing = sourceTempos(editor).filter(event => event.tick === tick)
+      if (existing.length > 1) throw new Error('Several tempo events share this tick; select :tempo-event ID and use :tempo-value')
+      const next = applyTempos(editor, [existing.length ? { kind: 'change', id: existing[0].id, value: Number(args[0]) }
+        : { kind: 'insert', tick, value: Number(args[0]) }])
+      return { editor: { ...next, eventView: 'tempo', selectedTempoID: existing[0]?.id ?? next.project.insertions.at(-1).id, tick } }
+    }
     case 'events': {
-      count(0); const next = { ...editor, eventView: !editor.eventView }
+      count(0); const next = { ...editor, eventView: editor.eventView === 'expression' ? undefined : 'expression' }
       return { editor: next.eventView && !selectedExpression(next) ? sourceAction(next, { kind: 'expression-next', direction: 1 }) : next }
     }
     case 'event': {
       count(1); const event = editor.performance?.events.find(event => event.id === args[0]), value = expressionEvent(event)
       if (!value) throw new Error('Choose an expression event in the selected pattern')
-      return { editor: { ...editor, eventView: true, selectedExpressionID: value.id, tick: value.tick,
+      return { editor: { ...editor, eventView: 'expression', selectedExpressionID: value.id, tick: value.tick,
         track: editor.view.tracks.findIndex(track => track.sourceTrack === value.track), channel: value.channel } }
     }
     case 'event-value': count(1); return { editor: sourceAction(editor, { kind: 'expression-value', value: Number(args[0]) }) }
@@ -167,17 +219,17 @@ export function sourceCommand(editor,line) {
       if (channel === undefined) throw new Error('Select :channel 1–16 before inserting expression events')
       const tick = args[values] === undefined ? editor.tick : units(args[values])
       const next = applyExpressions(editor, [{ kind:'insert',track:track.sourceTrack,tick,message:message(command,args.slice(0,values),channel) }])
-      return { editor: { ...next, eventView:true, selectedExpressionID:next.project.insertions.at(-1).id,tick } }
+      return { editor: { ...next, eventView:'expression', selectedExpressionID:next.project.insertions.at(-1).id,tick } }
     }
     case 'pattern':{
       count(1);const pattern=Number(args[0])-1
       if(!Number.isSafeInteger(pattern)||pattern<0||pattern>=editor.info.patterns)throw new Error('Unknown MIDI pattern')
-      return {editor:sourceEditor(editor.project,{...editor,track:0,tick:0,channel:undefined,selectedExpressionID:undefined},pattern)}
+      return {editor:sourceEditor(editor.project,{...editor,track:0,tick:0,channel:undefined,selectedExpressionID:undefined,selectedTempoID:undefined},pattern)}
     }
     case 'select':{
       count(1);const note=editor.performance?.notes.find(n=>n.id===args[0]);if(!note)throw new Error('Unknown MIDI note event ID')
       const track=editor.view.tracks.findIndex(t=>t.sourceTrack===note.track)
-      return {editor:{...editor,eventView:false,selectedID:note.id,track,tick:note.start,pitch:note.pitch,channel:note.channel,selectedExpressionID:undefined}}
+      return {editor:{...editor,eventView:undefined,selectedID:note.id,track,tick:note.start,pitch:note.pitch,channel:note.channel,selectedExpressionID:undefined,selectedTempoID:undefined}}
     }
     case 'channel':{
       count(1);const channel=Number(args[0])-1
@@ -187,7 +239,7 @@ export function sourceCommand(editor,line) {
     case 'track':{
       count(1);const track=Number(args[0])-1
       if(!Number.isSafeInteger(track)||track<0||track>=editor.view.tracks.length)throw new Error('Unknown MIDI track')
-      return {editor:{...editor,track,channel:undefined,selectedID:undefined,selectedExpressionID:undefined}}
+      return {editor:{...editor,track,channel:undefined,selectedID:undefined,selectedExpressionID:undefined,selectedTempoID:undefined}}
     }
     case 'note':{
       count(3,4)
@@ -238,7 +290,7 @@ export function sourceCommand(editor,line) {
       return {editor,effect:{kind:'midi-port',port,destination:args[1]}}
     }
     case 'seek':count(1);return {editor,effect:{kind:'seek',tick:units(args[0])}}
-    default:throw new Error('Unsupported source command; controller and tempo data remain in the original performance')
+    default:throw new Error('Unsupported source command; use :help for source note, expression and tempo editing')
   }
 }
 export function sourceHarmony(editor) {

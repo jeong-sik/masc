@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto'
 import { Worker } from 'node:worker_threads'
 import { emitKeypressEvents } from 'node:readline'
 import { arrangementRoute, selectArrangementRoute, arrangementPlaybackRequest } from './arrangement-playback.mjs'
-import { arrangementEditor, arrangementAction, arrangementCommand, arrangementImported, arrangementCalibrated, arrangementRecordingCorrection, selectedRegion, arrangementTakes } from './arrangement-editor.mjs'
+import { arrangementEditor, arrangementAction, arrangementCommand, arrangementImported, arrangementCalibrated, arrangementRecordingCorrection, selectedRegion, arrangementTakes, arrangementTakeSelected } from './arrangement-editor.mjs'
 import { loadArrangement, verifyArrangementAssets, saveArrangement } from './arrangement-files.mjs'
 import { saveProject } from './sequencer-files.mjs'
 import { safeText } from './terminal.mjs'
@@ -248,6 +248,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
         if (recording !== owned || editor.project !== project || path !== projectPath) throw new Error('Recording attachment authority changed')
         recording = null
         editor = arrangementImported(editor, result)
+        showTakes = null
         status = 'Recorded WAV and raw MIDI attached; original take retained'
       } catch (error) {
         if (!owned.handle && owned.controller.signal.aborted && !owned.failure) status = 'Recording cancelled before opening inputs'
@@ -300,7 +301,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     if (next.project !== editor.project || next.region !== editor.region) calibrationInspection = recordingInspection = null
     if (next.project !== editor.project) stop()
     editor = next
-    if (showTakes !== null && !editor.project.assets.some(asset => asset.id === showTakes && asset.selectedTake !== undefined)) showTakes = null
+    if (showTakes !== null && (editor.asset !== showTakes || !editor.project.assets.some(asset => asset.id === showTakes && asset.selectedTake !== undefined))) showTakes = null
   }
   function play(audioOnly = false) {
     if (!accepting) return
@@ -684,7 +685,11 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
         enqueue(async () => {
           let result = arrangementCommand(editor, line)
           if (result.editor.project !== editor.project || result.effect && !['record', 'record-stop', 'inputs', 'input', 'midi-input', 'midi-monitor', 'help', 'takes'].includes(result.effect.kind)) {
-            await settleRecording(); result = arrangementCommand(editor, line)
+            await settleRecording()
+            // Finalization may select a newly imported asset. Retain the take
+            // the user chose before waiting; never reinterpret it on that asset.
+            result = result.selection?.kind === 'take-selection'
+              ? { editor: arrangementTakeSelected(editor, result.selection) } : arrangementCommand(editor, line)
           }
           adopt(result.editor); if (result.effect) await effect(result.effect); else status = 'Edited'
         })

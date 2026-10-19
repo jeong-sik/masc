@@ -1087,3 +1087,36 @@ test('take browsing preserves the active owner and selection stops it before a n
  }finally{await closeController(view)}
  assert.equal(view.process.stdin.isRaw,false);assert.equal(view.observed.terminated,true)
 })
+
+
+test('implicit take admission retains its asset and resolved cycle across successful new recording attachment',async()=>{
+ for(const [selection,cycle] of [['2','1'],['next','0'],['previous','3']]){
+  const e={kind:'playing',loop:true,duration:.025,clock:{kind:'mach-host-time',anchor:'100',position:0,numer:1,denom:1,cycle:{kind:'project',start:0,end:48,ppq:960,tempo:120}}}
+  const view=await controller()
+  try{
+   view.command('tempo 120');view.command('loop 0 .05');await flush()
+   const original=await primeCapture(view,(project,asset)=>attachRecordedTake(project,{project,asset:asset.id},recordingEpoch(e)))
+   view.command('mixed-output audio');view.command('midi-source capture-1 keys 42');view.command('input audio');view.command('play');await flush()
+   const prep=view.observed.requests.find(job=>job.kind==='prepare-capture')
+   view.worker.emit('message',{id:prep.id,ok:true,result:{path:'/owned/current/plan.json',format:'capture-arrangement',loop:true,midiOutput:'42',bindings:[{port:0,destination:'42'}]}});await flush()
+   const player=view.observed.players[0];player.handle.recordingEpoch=async()=>({...e,device:{id:'audio',outputs:2}})
+   view.command('record');await flush();const capture=view.observed.captures[0];assert.ok(capture)
+   view.command('take '+selection);await flush();assert.ok(capture.stops>0)
+   capture.finish({manifest:original.manifest});await flush()
+   const job=view.observed.requests.find(job=>job.kind==='attach-recording');assert.ok(job)
+   const asset={...original,id:'capture-2',name:'New recording'}
+   const attached=attachRecordedTake(job.project,{project:editArrangement(job.project,{kind:'asset-add',asset}),asset:asset.id},job.epoch)
+   view.worker.emit('message',{id:job.id,ok:true,result:attached});await flush()
+   view.command('save');await flush();const saved=view.observed.saved.at(-1).project
+   assert.equal(saved.assets.find(asset=>asset.id==='capture-1').selectedTake,cycle)
+   assert.equal(saved.assets.find(asset=>asset.id==='capture-2').selectedTake,'4')
+   assert.ok(player.commands.includes('stop'))
+   view.command('undo');view.command('save');await flush()
+   assert.deepEqual(view.observed.saved.at(-1).project,attached.project)
+  }finally{
+   for(const capture of view.observed.captures)capture.finish()
+   for(const job of view.observed.requests.filter(job=>job.kind==='attach-recording'))view.worker.emit('message',{id:job.id,ok:false,error:'Fixture closed'})
+   await closeController(view)
+  }
+ }
+})

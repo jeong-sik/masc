@@ -42,7 +42,10 @@ With `:loop START END`, recording continues across loop boundaries. Finalizing
 creates one take lane per pass and selects the last pass. `:takes` opens the
 selected asset's take list; repeat `:takes` to return. `:take 2` chooses original
 pass 2, and `:take next` / `:take previous` cycle the remaining takes. Add an asset
-ID after the selection to compare a different recording. Space starts its new
+ID after the selection to compare a different recording. `:takes ASSET` also
+selects that source for subsequent implicit `:take` commands. An admitted take
+choice retains both its asset and resolved cycle while an active recording
+finalizes, even if finalization adds a newly selected source. Space starts its new
 playback plan. Changing takes stops the current backing, finalizing an active
 recording first; switching is not a seamless live crossfade.
 

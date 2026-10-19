@@ -1026,7 +1026,7 @@ let test_a_fitting_working_state_keeps_its_prefix ~with_unread () =
   Alcotest.(check (pair int int)) "and the turn after it is still purged" (1, 1)
     (report.reasoning_blocks_stripped, report.tool_results_cleared);
   if with_unread then (
-    let changed = List.mapi (fun index message -> if index = 2 then
+    let changed = List.mapi (fun index (message : Types.message) -> if index = 2 then
       {message with Types.content=[tool_result ~content:"changed unread original" "a"]}
       else message) messages in
     match Purge.purge_messages ~config:no_tail_config ~trace_id:fixture_trace

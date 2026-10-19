@@ -1,6 +1,6 @@
 name = "masc_browser_session"
 description = """
-Manage a server-owned browser. lane=automation: Gecko (configure [browser.automation] geckodriver, optional binary e.g. Zen). lane=stagehand: Chromium with the Stagehand runtime (configure [browser.stagehand]). Each backend's enabled flag controls new requests; status and close remain available while off. The server starts and stops it; operator live sessions are not managed. After open, use BrowserGoto with the same lane."""
+Open or manage a work browser. Omit lane to reuse a single open work session, or start the configured Chrome backend before the Gecko backend when no session is open. Multiple open work sessions require a choice. Visible by default. The receipt reports browserSelection; retain its lane for later work. lane=automation: Gecko (configure [browser.automation] geckodriver, optional binary e.g. Zen). lane=stagehand: Chromium with the Stagehand runtime (configure [browser.stagehand]). Each backend's enabled flag controls new requests; status and close remain available while off. The server starts and stops it; operator live sessions are not managed. After open, use BrowserGoto with the same lane."""
 additional_properties = false
 
 [[params]]
@@ -14,9 +14,9 @@ description = "open launches; close stops; status observes the session. With non
 name = "lane"
 type = "string"
 enum = ["automation", "stagehand"]
-default = "automation"
+description = "Optional advanced browser override. Omit only for initial discovery or opening a work browser; MASC selects an eligible browser and reports browserSelection. For every observed tab, retain browserSelection.lane and its clientId on subsequent calls; tab IDs are local to a browser."
 
 [[params]]
 name = "headless"
 type = "boolean"
-default = true
+default = false

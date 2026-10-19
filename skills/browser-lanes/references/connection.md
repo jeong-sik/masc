@@ -1,5 +1,14 @@
 # 연결과 복구
 
+## 자동 선택과 고정된 작업
+
+처음 BrowserTabs 또는 BrowserSession open에서 lane을 생략하면 서버가 사용 가능한
+브라우저를 선택한다. browserSelection의 lane과 clientId를 이후 호출에 복사한다.
+browser_binding_required는 tabId가 어느 브라우저의 것인지 빠졌다는 뜻이다.
+원래 관측의 lane/clientId를 넣어 고친다. ambiguous_browsers이면 browsers 목록에서
+작업 대상을 확인해 명시한다. no_available_browser이면 연결 또는 설정된 작업 세션이
+필요하다. 이 오류들은 브라우저 명령을 보내기 전에 반환된다.
+
 ## 레인 오류
 
 - live의 연결 부재는 브라우저 프로세스, 확장, native host, 서버 연결 중 어디서나
@@ -36,7 +45,7 @@
   `webdriver_bidi` 연결이 있는지 먼저 확인한다. automation과 stagehand 응답에는
   `transport`가 없다.
 - 닫힌 automation 세션에서 작업해야 한다면 자신의 새 세션을 연다.
-  `BrowserSession`에는 현재 `open`/`close`가 있고 `status`는 없다.
+  `BrowserSession status`로 상태를 읽고 `open`/`close`는 작업 소유권을 확인해 사용한다.
 - 이미 시작된 세션이라는 응답은 소유권 증명이 아니다. 그 세션이 자신의 진행 중인
   작업인지 확인하고, 확인할 수 없다면 takeover나 close 후 reopen을 하지 않는다.
 - 특정 탭의 확장 권한이 없으면 그 권한 문제를 알린다. 요청된 탭 대신 무관한

@@ -1,15 +1,15 @@
 name = "masc_browser_tabs"
 description = """
-List {clientId,transport,tabs:[{id,active,title,url}]} and live index/windowId. Carry clientId/tabId into reads/actions. A partial BiDi inventory sets complete=false and lists unavailableTabs with their IDs and errors; other tabs remain usable, and unavailable does not mean closed. Live transport says what that connection serves: webdriver_bidi takes hover_at and drag, web_extension takes activate_tab. Ambiguous or stale live selection returns clients without dispatch: select explicitly and retry. Automation and stagehand clientId is null, with no transport."""
+Discover an available browser without opening one. Omit lane/clientId for automatic selection; retain the returned browserSelection.lane and clientId on all subsequent calls. List {clientId,transport,tabs:[{id,active,title,url}]} and live index/windowId. Carry clientId/tabId into reads/actions. A partial BiDi inventory sets complete=false and lists unavailableTabs with their IDs and errors; other tabs remain usable, and unavailable does not mean closed. Live transport says what that connection serves: webdriver_bidi takes hover_at and drag, web_extension takes activate_tab. Ambiguous or stale live selection returns clients without dispatch: select explicitly and retry. Automation and stagehand clientId is null, with no transport."""
 additional_properties = false
 
 [[params]]
 name = "lane"
 type = "string"
 enum = ["live", "automation", "stagehand"]
-default = "live"
+description = "Optional advanced browser override. Omit only for initial discovery or opening a work browser; MASC selects an eligible browser and reports browserSelection. For every observed tab, retain browserSelection.lane and its clientId on subsequent calls; tab IDs are local to a browser."
 
 [[params]]
 name = "clientId"
 type = "string"
-description = "Live UUID from BrowserTabs/Read; required for multiple clients, stale fails. Omit on automation."
+description = "Retain the observed live clientId on every subsequent tab read/action; stale IDs fail. Omit for a work browser."

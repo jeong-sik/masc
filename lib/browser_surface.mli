@@ -1,6 +1,6 @@
 (** Read-only browser page observations from the selected source. *)
 type source = Browser_lane.Lane_name.t = Live | Automation | Stagehand
-type request = { route : Browser_lane.route; tab_id : int option }
+type request = { route : Browser_selection.preference; tab_id : int option }
 val parse_request : Yojson.Safe.t -> (request, string) result
 type tab = { id : int; title : string; url : string; active : bool }
 
@@ -13,8 +13,15 @@ val select : tab_id:int option -> tab list -> (selection, string) result
     reports it names the connected browsers and the host configuration.
     [Unobserved] is an answer that is not the observation asked for.
     [Unavailable] is an absent or timed-out browser transport. *)
-type failure = Unselected of Browser_lane.selection_error | Unobserved of string | Unavailable of string
+type failure = Unselected of Browser_lane.selection_error | Unchosen of Browser_selection.error
+  | Unobserved of string | Unavailable of string
 val failure_message : failure -> string
+
+val choose_browser : verb:Browser_lane.verb -> request -> (Browser_selection.selected, failure) result
+val resolve_target : verb:Browser_lane.verb -> request ->
+  (Browser_selection.selected * Browser_lane.target, failure) result
+(** Selection performs no browser command; resolution binds a concrete connection.
+    An observed tab requires its original explicit browser identity. *)
 
 val observe_answer : lane:Browser_lane.Lane_name.t -> Browser_lane.answer -> (Yojson.Safe.t, failure) result
 (** Typed observation boundary: absent and timed-out transports remain

@@ -164,7 +164,7 @@ let test_capture_passes_the_surface () =
   Lane.install_stagehand_executor (Some (fun ~actor verb -> Executor.execute ~tabs ~call:(call fake) ?actor verb));
   let captured = Fun.protect ~finally:(fun () ->
     Lane.install_activity_observer None; Lane.install_stagehand_executor None) (fun () ->
-    Masc.Browser_surface.capture { Masc.Browser_surface.route = Lane.Stagehand_route; tab_id = Some 1 }) in
+    Masc.Browser_surface.capture { Masc.Browser_surface.route = Masc.Browser_selection.Exact Lane.Stagehand_route; tab_id = Some 1 }) in
   match captured with
   | Ok data ->
     check string "source" "stagehand" Yojson.Safe.Util.(member "source" data |> to_string);

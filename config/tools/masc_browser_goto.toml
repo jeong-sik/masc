@@ -13,7 +13,7 @@ description = "HTTP(S) URL."
 name = "lane"
 type = "string"
 enum = ["automation", "stagehand"]
-default = "automation"
+description = "Optional advanced browser override. Omit only for initial discovery or opening a work browser; MASC selects an eligible browser and reports browserSelection. For every observed tab, retain browserSelection.lane and its clientId on subsequent calls; tab IDs are local to a browser."
 
 [[params]]
 name = "tabId"

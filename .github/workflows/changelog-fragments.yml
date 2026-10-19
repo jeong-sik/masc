@@ -1,12 +1,18 @@
 name: Changelog fragments
 
-# Check the fragments of the selected ref only when explicitly requested.
-# scripts/bump-version.sh runs the same check before it assembles a release.
+# Pull requests that touch a fragment are checked on every push. The whole
+# directory is checked only when explicitly requested: scripts/bump-version.sh
+# runs the same check before it assembles a release.
 on:
   workflow_dispatch: {}
+  pull_request:
+    paths:
+      - "changelog.d/**"
+      - "scripts/changelog-fragments.py"
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
   check:
@@ -15,5 +21,18 @@ jobs:
     timeout-minutes: 2
     steps:
       - uses: actions/checkout@v7
+      - name: Check the fragments this pull request changes
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_URL: ${{ github.event.pull_request.url }}
+        run: |
+          set -eu
+          # Only the fragments this PR adds or edits: a stacked PR must not be
+          # refused for a lower fragment it does not carry.
+          files=$(gh api --paginate --jq '.[].filename | select(. != "changelog.d/README.md")' \
+            "$PR_URL/files?per_page=100" | grep '^changelog\.d/' || true)
+          python3 scripts/changelog-fragments.py check-files $files
       - name: Check every fragment cites its own pull request
+        if: github.event_name == 'workflow_dispatch'
         run: python3 scripts/changelog-fragments.py check --dir changelog.d

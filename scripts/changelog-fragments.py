@@ -24,6 +24,11 @@ Modes:
                                        writing a fragment (a release PR, which
                                        bumps the version or assembles
                                        fragments, may)
+  check-files [FRAGMENT ...]           refuse a listed fragment that misses
+                                       its citation. The CI workflow lists the
+                                       fragments a pull request changes, so a
+                                       stacked pull request is not refused for
+                                       a lower fragment it does not carry
 """
 
 import argparse
@@ -350,6 +355,42 @@ def missing(base: str, head: str, directory: pathlib.Path) -> int:
     return 0
 
 
+def check_files(names: list[str]) -> int:
+    """Refuse a listed fragment that misses its own citation.
+
+    A pull request carries only the fragments it adds or edits — stacked
+    pull requests keep the lower fragments on their base branch — so the
+    caller (the CI workflow) lists this change's fragments instead of
+    checking the whole tree. `check` without a list remains what a release
+    fold runs over every fragment.
+    """
+    errors: list[str] = []
+    checked = 0
+    for name in names:
+        rel = pathlib.PurePosixPath(name)
+        if len(rel.parts) != 2 or rel.parts[0] != FRAGMENT_DIR:
+            errors.append(f"{name}: not a {FRAGMENT_DIR}/<PR number>.md path")
+            continue
+        if rel.name == "README.md":
+            continue
+        if not pathlib.Path(name).is_file():
+            errors.append(f"{name}: not in the tree (deleted or renamed away?)")
+            continue
+        try:
+            parse_fragment(pathlib.Path(name))
+        except FragmentError as err:
+            errors.append(str(err))
+            continue
+        checked += 1
+    if errors:
+        raise FragmentError("\n".join(errors))
+    if checked == 0:
+        print("no fragment to check")
+    else:
+        print(f"{checked} changed fragment(s) OK")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Per-PR changelog fragments.")
     sub = parser.add_subparsers(dest="mode", required=True)
@@ -365,12 +406,16 @@ def main() -> int:
     guard = sub.add_parser("pr-guard")
     guard.add_argument("--base", required=True)
     guard.add_argument("--head", default="HEAD")
+    listed = sub.add_parser("check-files")
+    listed.add_argument("files", nargs="*", metavar="FRAGMENT")
     args = parser.parse_args()
     try:
         if args.mode == "check":
             loaded = load_all(pathlib.Path(args.dir))
             print(f"{len(loaded)} changelog fragment(s) OK")
             return 0
+        if args.mode == "check-files":
+            return check_files(args.files)
         if args.mode == "assemble":
             return assemble(pathlib.Path(args.dir), pathlib.Path(args.changelog))
         if args.mode == "missing":

@@ -1,6 +1,6 @@
 # Compose the Tools reads within their original workspace
 
-Source comparison base: `104deddfcb36b54d8832b6511e6f6adfab5f3fe1`
+Source comparison base: `14d8898411b587e30c26a722095b62f54663a41c`
 (#43853). This unit changes the Tools inventory, Skills catalog and async-request
 observation reads as one user-visible load. It does not change tool execution,
 Skill activation, Composition effect admission or Keeper scheduling.

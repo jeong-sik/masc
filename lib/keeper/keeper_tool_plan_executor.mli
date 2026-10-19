@@ -210,7 +210,10 @@ val execute
     bindings in topological order. One execution-local dependency-layer value
     supplies both scheduling and the stable ready binding order. The value
     contains only the original immutable plan nodes, never inputs, resources,
-    settlements or permission to execute. Earlier opaque ordinary operations settle
+    settlements or permission to execute. An execution-local index points into
+    that same immutable order; earlier bindings are visited directly without
+    reconstructing each node's predecessor list. Every earlier binding is still
+    awaited and classified in topological order. Earlier opaque ordinary operations settle
     before a later file mutation captures its physical bindings. Real file
     conflicts and original Serial-to-Serial chains require success; ordering
     barriers alone do not propagate failure under Continue_independent.

@@ -926,10 +926,14 @@ let test_dynamic_failed_conflict_keeps_independent_branch () =
   let shared = Filename.concat root "dynamic-failure/shared" in
   let other = Filename.concat root "dynamic-failure/other" in
   write shared "before"; write other "before";
-  let nodes = [recipe_read "shared-source" shared; recipe_read "other-source" other;
-    recipe_dynamic_edit "failed" "shared-source" "absent" "after";
+  (* Consumers precede their producers in declaration order. Ready binding
+     must follow the resolved graph while preserving conflict failure and
+     the independent branch's actual effect. *)
+  let nodes = [recipe_dynamic_edit "failed" "shared-source" "absent" "after";
+    recipe_read "shared-source" shared;
     recipe_dynamic_edit "blocked" "shared-source" "before" "must-not-run";
-    recipe_dynamic_edit "independent" "other-source" "before" "after"] in
+    recipe_dynamic_edit "independent" "other-source" "before" "after";
+    recipe_read "other-source" other] in
   let call = Agent_core.Types.ToolUse {id = "failed-dynamic"; name = Keeper_composition_draft.run_tool_name;
     input = `Assoc ["recipe", `Assoc ["execution", `String "inline";
       "branch_failure_policy", `String "continue_independent"; "nodes", `List nodes]]} in

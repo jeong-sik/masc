@@ -724,16 +724,31 @@ let execute_with_tool_use_id
     let ready_order = match ready_files with
       | None -> []
       | Some _ -> List.concat dependency_layers in
+    (* Each stop is an original suffix of this invocation's immutable order,
+       not a copied prefix or resource authority. Physical equality is local
+       to traversal of that exact list; declaration order is not topological. *)
+    let ready_stops =
+      let rec index stops = function
+        | [] -> stops
+        | ((node : Keeper_tool_plan.node) :: rest as suffix) ->
+            index (Node_map.add node.id suffix stops) rest in
+      index Node_map.empty ready_order in
     let find_binding node_id =
       match Node_map.find_opt node_id bindings with
       | Some owner -> owner
       | None -> invalid_arg "ready Inline file lost its binding promise" in
-    let earlier_nodes node_id =
-      let rec before = function
-        | [] -> invalid_arg "ready Inline file lost its topological position"
-        | (node : Keeper_tool_plan.node) :: rest ->
-          if Keeper_tool_plan.Node_id.equal node.id node_id then []
-          else node.id :: before rest in
+    let filter_earlier node_id classify =
+      let stop = match Node_map.find_opt node_id ready_stops with
+        | Some suffix -> suffix
+        | None -> invalid_arg "ready Inline file lost its topological position" in
+      let[@tail_mod_cons] rec before remaining =
+        if remaining == stop then []
+        else match remaining with
+          | [] -> invalid_arg "ready Inline file lost its topological prefix"
+          | (node : Keeper_tool_plan.node) :: rest ->
+              match classify node.id with
+              | None -> before rest
+              | Some result -> result :: before rest in
       before ready_order in
     let stopped = function
       | Wave_skipped -> true
@@ -793,14 +808,14 @@ let execute_with_tool_use_id
       let predecessors = match ready_files with
         | None -> List.map (fun id -> id, Keeper_prepared_inline_files.Ready.Require_success)
             (ordering_predecessors node_id)
-        | Some _ -> List.filter_map (fun earlier ->
+        | Some _ -> filter_earlier node_id (fun earlier ->
             let promise, _ = find_binding earlier in
             match binding, Eio.Promise.await promise with
             | Some current, Some prior ->
                 (match Keeper_prepared_inline_files.Ready.ordering prior current with
                  | Keeper_prepared_inline_files.Ready.No_order -> None
                  | (Wait_for_settlement | Require_success) as order -> Some (earlier,order))
-            | None, _ | Some _, None -> None) (earlier_nodes node_id) in
+            | None, _ | Some _, None -> None) in
       let ordered_outcomes = List.map (fun (predecessor,order) ->
           let promise, _ = find_outcome predecessor in
           predecessor, order, Eio.Promise.await promise) predecessors in

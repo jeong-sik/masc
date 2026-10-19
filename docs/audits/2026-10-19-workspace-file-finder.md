@@ -69,3 +69,23 @@ guide describes building and packaging the matching server/TUI plus
 The workflow revision is separate from that source. A completed artifact and
 an actual isolated same-source server/TUI round trip are still required;
 request acceptance, source review and prepared fixtures do not prove them.
+
+## First same-source native execution and fixture repair
+
+Run [39199283047](https://github.com/jeong-sik/masc/actions/runs/39199283047)
+used feature source `b88cb422c38a6a269ab5c82949d194a9bb1d5ea6` and workflow
+`b2bfd720065d87538d5aed6918297b9eb6f3ac95`. The server, TUI and all three
+selected test executables compiled. `test_repo_git` and
+`test_tui_workspace_entries` passed. The confidentiality suite failed two
+Keeper cases at the initial catalog read, before scope removal; both
+repository cases passed. The run is a failed verification, not a native
+behavior PASS or a deployable artifact receipt.
+
+The Keeper fixture had saved only a snapshot sandbox profile. Production
+`read_effective_meta` requires the Keeper TOML declaration, so that initial
+fixture was already unknown. The test now writes the canonical declaration
+and reads effective metadata before deriving its root. Initial 200, scope-loss
+404 and explicit-project 200 assertions remain; status failures include the
+actual response body. This is a test-fixture repair, with product code unchanged.
+The repaired exact source still requires the same focused native check and
+an isolated matching server/TUI round trip. No local Dune build was run.

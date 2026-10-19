@@ -39,6 +39,13 @@ that newer input. A different source reading, question or workspace retires
 the original choices. A cancelled question or closed picker stays cancelled
 when the workspace reconnects.
 
+A question shows progress only while its original request is still pending for
+the current file and workspace. Receiving a reply or cancelling the question
+ends that progress indication. Asking another question clears the previous
+answer note only when the new request is accepted. Refreshing or retrying the
+same question also has its own pending request; a retained answer or failure
+does not mean the refresh has already finished.
+
 Definition, hover and references requests keep the selected name's position
 when Korean text, emoji or other Unicode characters precede it on the line.
 Malformed source encoding is reported as a failed question.

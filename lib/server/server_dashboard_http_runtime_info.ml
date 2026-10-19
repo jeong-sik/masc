@@ -1761,6 +1761,7 @@ let runtime_inventory_entry_json ~default_id (rt : Runtime_instance.t) =
     ; "supports_audio_input", Json_util.bool_opt_to_json caps.supports_audio_input
     ; "supports_video_input", Json_util.bool_opt_to_json caps.supports_video_input
     ; "thinking_control_format", `String (thinking_control_format_wire caps.thinking_control_format)
+    ; "anthropic_thinking_control", anthropic_thinking_control_json caps.anthropic_thinking_control
     ; "supports_response_format_json", Json_util.bool_opt_to_json caps.supports_response_format_json
     ; "supports_structured_output", Json_util.bool_opt_to_json caps.supports_structured_output
     ; "supports_system_prompt", Json_util.bool_opt_to_json caps.supports_system_prompt

@@ -109,6 +109,18 @@ type t =
         [None] uses the normal provider/model catalog resolution policy.
 
         @since 0.208.4 *)
+  ; model_anthropic_thinking_control_override : Capabilities.anthropic_thinking_control option
+    (** Deployment-declared Anthropic thinking-control policy for this concrete
+        provider endpoint. This is the operator-own counterpart of the catalog's
+        [anthropic_thinking_control] row: an endpoint the model catalog answers
+        no policy for cannot read one from it, so the deployment states the
+        policy its endpoint speaks and [{!anthropic_thinking_control}] answers
+        with it instead of resolving the catalog. A deployment must not restate
+        a policy the catalog already declares; MASC refuses such a declaration
+        at load, so the two never rival.
+
+        [None] uses the normal provider/model catalog resolution policy. Read
+        only on the Anthropic wire; other wires ignore it. *)
   ; request_policy_snapshot : request_policy_snapshot option
     (** Set by request preparation, never a caller capability override or
         configuration option. [None] resolves the current process catalogs. *)
@@ -238,6 +250,7 @@ val make
   -> ?cache_system_prompt:bool
   -> ?cache_extended_ttl:bool
   -> ?model_capabilities_override:Capabilities.capabilities
+  -> ?model_anthropic_thinking_control_override:Capabilities.anthropic_thinking_control
   -> ?keep_alive:string
   -> ?return_progress:bool
   -> ?internal_model_rotation_count:int
@@ -363,7 +376,11 @@ val freeze_for_request : t -> t
 val anthropic_thinking_control : t -> Capabilities.anthropic_thinking_control option
 (** Policy from the same authoritative row as capabilities. Missing scoped
     policy stays absent. Bare rows require provider permission; only anonymous
-    native wires can consult a manifest. Request snapshots preserve absence. *)
+    native wires can consult a manifest. Request snapshots preserve absence.
+    A [model_anthropic_thinking_control_override] answers first: it is the
+    deployment's own declaration for an endpoint the catalog has no row for,
+    and the loader refuses it wherever the catalog already declares a policy,
+    so an override never rivals a catalog row. *)
 
 (** Context window, in tokens, that a request with [config] is sized against:
     the caller's [max_context] when set, otherwise the window of the model row

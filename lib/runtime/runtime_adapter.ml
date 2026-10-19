@@ -694,6 +694,61 @@ let model_capabilities_override_of_model_spec
   |> with_client_history_replay ~wire ~provider_id ~api_name:spec.api_name
 ;;
 
+(* A deployment-declared Anthropic thinking-control policy is read only where
+   the catalog answers no policy: an operator-own endpoint with no readable
+   row, or a row that carries no policy. Anywhere else the declaration is
+   either unread (a non-Anthropic wire never consults it) or a rival
+   restatement of a catalog row, and the loader refuses it instead of ignoring
+   it ([refuse_unread_declaration] above works the same way for [kind]). The
+   catalog check runs the request path's resolution against the load-time
+   catalog, so a declaration the loader admits is one the catalog provably
+   leaves unanswered at load; a post-load catalog swap is out of scope
+   (production fixes the catalog at boot). *)
+let anthropic_thinking_control_override_of_model_spec
+      ~(wire : Llm_provider.Provider_kind.t)
+      ~(provider_id : string)
+      (spec : Runtime_schema.model_spec)
+  : (Llm_provider.Capabilities.anthropic_thinking_control option, string) result
+  =
+  let declared =
+    Option.bind spec.Runtime_schema.capabilities (fun caps ->
+      caps.Runtime_schema.anthropic_thinking_control)
+  in
+  match declared with
+  | None -> Ok None
+  | Some _ as policy ->
+    (match wire with
+     | Llm_provider.Provider_kind.Anthropic ->
+       (match
+          Llm_provider.Capabilities.anthropic_thinking_control_for_provider_model_id
+            ~provider:(Llm_provider.Model_catalog.Declared_provider provider_id)
+            ~model_id:spec.Runtime_schema.api_name
+        with
+        | Some _ ->
+          Error
+            (Printf.sprintf
+               "binding %s.%s declares anthropic-thinking-control, but the AGENT_CORE \
+                catalog already declares a policy for model %S on provider %S; remove \
+                the deployment restatement"
+               provider_id
+               spec.Runtime_schema.id
+               spec.Runtime_schema.api_name
+               provider_id)
+        | None -> Ok policy)
+     | Llm_provider.Provider_kind.Kimi
+     | Llm_provider.Provider_kind.OpenAI_compat
+     | Llm_provider.Provider_kind.Ollama
+     | Llm_provider.Provider_kind.Gemini
+     | Llm_provider.Provider_kind.Glm ->
+       Error
+         (Printf.sprintf
+            "binding %s.%s declares anthropic-thinking-control, but only the Anthropic \
+             wire reads it (this binding resolves to %s)"
+            provider_id
+            spec.Runtime_schema.id
+            (Llm_provider.Provider_kind.to_string wire)))
+;;
+
 (* The window handed to AGENT_CORE is MASC's effective window, not the raw
    runtime.toml override (#36540). Keeper turns are budgeted with the override
    clamped by the capability catalog cap
@@ -816,6 +871,12 @@ let provider_config_from_declared_provider ?binding_max_context ?keep_alive ?num
            ~provider_id:provider.id
            spec
        in
+       let* model_anthropic_thinking_control_override =
+         anthropic_thinking_control_override_of_model_spec
+           ~wire:kind
+           ~provider_id:provider.id
+           spec
+       in
        let max_context =
          effective_max_context_of_model_spec
            ~wire:kind
@@ -866,6 +927,7 @@ let provider_config_from_declared_provider ?binding_max_context ?keep_alive ?num
             ~disable_parallel_tool_use
             ?max_context
             ?model_capabilities_override
+            ?model_anthropic_thinking_control_override
             ?temperature:spec.temperature
             ?top_p:spec.top_p
             ?top_k:spec.top_k
@@ -1176,6 +1238,34 @@ let muse_serve_execution (provider : Runtime_schema.provider)
             }))
 ;;
 
+let refuse_anthropic_thinking_control_on_official_client
+      (provider : Runtime_schema.provider)
+      (spec : Runtime_schema.model_spec)
+  =
+  match provider.Runtime_schema.api_format with
+  | Runtime_schema.Codex_app_server_runtime
+  | Runtime_schema.Antigravity_cli_runtime
+  | Runtime_schema.Claude_code_runtime
+  | Runtime_schema.Muse_serve_runtime ->
+    (match
+       Option.bind spec.Runtime_schema.capabilities (fun caps ->
+         caps.Runtime_schema.anthropic_thinking_control)
+     with
+     | None -> Ok ()
+     | Some _ ->
+       Error
+         (Printf.sprintf
+            "binding %s.%s declares anthropic-thinking-control, but only the Anthropic \
+             wire reads it (this binding is an official-client runtime)"
+            provider.Runtime_schema.id
+            spec.Runtime_schema.id))
+  | Runtime_schema.Messages_api
+  | Runtime_schema.Chat_completions_api
+  | Runtime_schema.Ollama_api
+  | Runtime_schema.Gemini_api
+  | Runtime_schema.Vertex_gemini_api -> Ok ()
+;;
+
 let binding_to_execution (cfg : Runtime_schema.config) (binding : Runtime_schema.binding)
     : (Runtime_execution.t, string) result =
   match Runtime_schema.model_of_id cfg binding.model_id with
@@ -1187,6 +1277,7 @@ let binding_to_execution (cfg : Runtime_schema.config) (binding : Runtime_schema
        let ( let* ) = Result.bind in
        let* () = validate_parallel_tool_policy provider ~model_id:binding.model_id
            ~disable_parallel_tool_use:binding.disable_parallel_tool_use in
+       let* () = refuse_anthropic_thinking_control_on_official_client provider spec in
        (match provider.api_format with
         | Runtime_schema.Codex_app_server_runtime ->
           codex_app_server_execution provider spec

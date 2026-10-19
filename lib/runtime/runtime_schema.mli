@@ -201,6 +201,14 @@ type reasoning_streaming_format =
   | Template_reasoning_streaming
 [@@deriving show, eq]
 
+type anthropic_thinking_control =
+  Llm_provider.Capabilities.anthropic_thinking_control =
+  | Anthropic_adaptive_default
+  | Anthropic_adaptive_disabled_through_high
+  | Anthropic_adaptive_between_tools
+  | Anthropic_always_adaptive
+[@@deriving show, eq]
+
 type model_capabilities =
   { max_output_tokens : int option
   ; supports_tool_choice : bool option
@@ -210,6 +218,12 @@ type model_capabilities =
   ; thinking_control_format : thinking_control_format
   ; declared_thinking_control_format : thinking_control_format option
       (** Exact TOML presence. [None] preserves an Agent Core catalog value. *)
+  ; anthropic_thinking_control : anthropic_thinking_control option
+      (** Deployment-declared Anthropic thinking-control policy, for a binding
+          the Agent Core catalog answers no policy for (operator-own pattern).
+          [None] preserves catalog resolution. The loader refuses this key
+          where the catalog already declares a policy for the binding's model,
+          and where the binding's wire is not Anthropic. *)
   ; reasoning_streaming_format : reasoning_streaming_format option
       (** Exact streaming side-channel for this transport binding. *)
   ; supports_image_input : bool option

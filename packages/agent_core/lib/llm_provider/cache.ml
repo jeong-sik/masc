@@ -57,6 +57,7 @@ let request_fingerprint
                      ; cache_system_prompt
                      ; cache_extended_ttl
                      ; model_capabilities_override
+                     ; model_anthropic_thinking_control_override
                      ; request_policy_snapshot
                      ; keep_alive
                      ; return_progress
@@ -80,7 +81,8 @@ let request_fingerprint
      limits and queueing enforced on this side;
      [return_progress] and [tool_stream] select how the answer is delivered,
      not what is asked; [internal_model_rotation_count] is a local attempt
-     counter; capability overrides and the request policy snapshot are
+     counter; capability overrides (including the Anthropic
+     thinking-control override) and the request policy snapshot are
      reflected in the exact body bound by [http_request_fingerprint];
      [credential_source] is where the credential came from
      rather than what it is, and a refreshable one has no stable account
@@ -100,6 +102,7 @@ let request_fingerprint
   ignore tool_stream;
   ignore internal_model_rotation_count;
   ignore model_capabilities_override;
+  ignore model_anthropic_thinking_control_override;
   ignore request_policy_snapshot;
   ignore reasoning_uncontrolled;
   let json =

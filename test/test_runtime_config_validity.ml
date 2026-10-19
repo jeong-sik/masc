@@ -1589,6 +1589,7 @@ let catalog_decided_capability_pairs
       ; supports_parallel_tool_calls
       ; thinking_control_format = _
       ; declared_thinking_control_format = _
+      ; anthropic_thinking_control = _
       ; reasoning_streaming_format = _
       ; supports_image_input = _
       ; supports_audio_input = _
@@ -3981,6 +3982,250 @@ let test_anthropic_catalog_row_replay_stays_authoritative () =
   check bool "a row that states preserve_always keeps replaying every turn" true
     (anthropic_replay_policy_of_loaded_runtime ()
      = Llm_provider.Reasoning_replay_contract.All_assistant_messages)
+
+(* Seen live 2026-10-19: an operator-own Anthropic endpoint (a second account
+   id the catalog answers no policy for) reads no thinking-control policy, so
+   every Keeper turn on it failed before dispatch with "has no
+   catalog-declared Anthropic thinking-control policy" once the binding
+   stated thinking-support. The deployment now states the policy its endpoint
+   speaks; the catalog stays the authority wherever it answers. *)
+let anthropic_operator_own_policy_runtime_toml ~policy_line =
+  "[providers.my_claude]\n\
+   kind = \"anthropic\"\n\
+   request-path = \"/v1/messages\"\n\
+   protocol = \"messages-http\"\n\
+   endpoint = \"https://api.anthropic.com\"\n\
+   \n\
+   [providers.my_claude.credentials]\n\
+   type = \"env\"\n\
+   key = \"MY_CLAUDE_API_KEY\"\n\
+   \n\
+   [models.probe]\n\
+   api-name = \"claude-sonnet-5-5\"\n\
+   max-context = 200000\n\
+   tools-support = true\n\
+   thinking-support = true\n\
+   streaming = true\n\
+   \n\
+   [models.probe.capabilities]\n\
+   max-output-tokens = 64000\n\
+   " ^ policy_line ^ "\n\
+   \n\
+   [my_claude.probe]\n\
+   \n\
+   [runtime]\n\
+   default = \"my_claude.probe\"\n"
+
+(* A bare row the provider cannot read: the policy below differs from every
+   declaration in these tests on purpose, so a resolved value proves the
+   deployment override answered rather than a leaked bare row. *)
+let bare_sonnet_row_without_a_readable_provider =
+  "[[models]]\n\
+   id_prefix = \"claude-sonnet-5-5\"\n\
+   base = \"anthropic\"\n\
+   anthropic_thinking_control = \"adaptive_between_tools\"\n\
+   max_context_tokens = 1000000\n"
+
+let catalog_answers_no_policy_for_my_claude () =
+  check bool "the catalog answers no policy for this provider" true
+    (Option.is_none
+       (Llm_provider.Capabilities.anthropic_thinking_control_for_provider_model_id
+          ~provider:(Llm_provider.Model_catalog.Declared_provider "my_claude")
+          ~model_id:"claude-sonnet-5-5"))
+
+let test_operator_own_anthropic_policy_admits_explicit_thinking () =
+  let runtime_toml =
+    anthropic_operator_own_policy_runtime_toml
+      ~policy_line:"anthropic-thinking-control = \"always_adaptive\""
+  in
+  with_model_catalog_content bare_sonnet_row_without_a_readable_provider @@ fun () ->
+  catalog_answers_no_policy_for_my_claude ();
+  with_temp_runtime_toml runtime_toml (fun path ->
+    match load_list_text ~config_path:path with
+    | Error error -> failf "operator-own anthropic runtime should load: %s" error
+    | Ok (_, default, _, _, _) ->
+      let config = agent_core_provider_config default in
+      check bool "the declaration reaches the config override" true
+        (config.Llm_provider.Provider_config.model_anthropic_thinking_control_override
+         = Some Llm_provider.Capabilities.Anthropic_always_adaptive);
+      check bool "the declared policy resolves on the config" true
+        (Llm_provider.Provider_config.anthropic_thinking_control config
+         = Some Llm_provider.Capabilities.Anthropic_always_adaptive);
+      (match
+         Llm_provider.Backend_anthropic.validate_nonexact_thinking_controls
+           { config with Llm_provider.Provider_config.enable_thinking = Some true }
+       with
+       | Ok () -> ()
+       | Error reason -> failf "explicit thinking should be admitted: %s" reason))
+
+let test_operator_own_anthropic_without_policy_still_refuses_explicit_thinking () =
+  with_model_catalog_content bare_sonnet_row_without_a_readable_provider @@ fun () ->
+  with_temp_runtime_toml anthropic_messages_runtime_toml (fun path ->
+    match load_list_text ~config_path:path with
+    | Error error -> failf "operator-own anthropic runtime should load: %s" error
+    | Ok (_, default, _, _, _) ->
+      let config = agent_core_provider_config default in
+      check bool "no policy resolves without a declaration" true
+        (Option.is_none (Llm_provider.Provider_config.anthropic_thinking_control config));
+      (match
+         Llm_provider.Backend_anthropic.validate_nonexact_thinking_controls
+           { config with Llm_provider.Provider_config.enable_thinking = Some true }
+       with
+       | Ok () -> fail "explicit thinking without a policy must still be refused"
+       | Error _ -> ()))
+
+let test_operator_own_anthropic_policy_admitted_without_a_catalog_policy () =
+  let catalog =
+    "[[models]]\n\
+     id_prefix = \"claude-sonnet-5-5\"\n\
+     provider_name = \"my_claude\"\n\
+     base = \"anthropic\"\n\
+     max_context_tokens = 200000\n"
+  in
+  let runtime_toml =
+    anthropic_operator_own_policy_runtime_toml
+      ~policy_line:"anthropic-thinking-control = \"always_adaptive\""
+  in
+  with_model_catalog_content catalog @@ fun () ->
+  catalog_answers_no_policy_for_my_claude ();
+  with_temp_runtime_toml runtime_toml (fun path ->
+    match load_list_text ~config_path:path with
+    | Error error -> failf "a row without a policy must not block the declaration: %s" error
+    | Ok (_, default, _, _, _) ->
+      let config = agent_core_provider_config default in
+      check bool "the declared policy resolves on the config" true
+        (Llm_provider.Provider_config.anthropic_thinking_control config
+         = Some Llm_provider.Capabilities.Anthropic_always_adaptive))
+
+let test_operator_own_anthropic_policy_restatement_is_refused () =
+  let catalog =
+    "[[models]]\n\
+     id_prefix = \"claude-sonnet-5-5\"\n\
+     provider_name = \"my_claude\"\n\
+     base = \"anthropic\"\n\
+     anthropic_thinking_control = \"adaptive_default\"\n\
+     max_context_tokens = 200000\n"
+  in
+  let runtime_toml =
+    anthropic_operator_own_policy_runtime_toml
+      ~policy_line:"anthropic-thinking-control = \"adaptive_between_tools\""
+  in
+  with_model_catalog_content catalog @@ fun () ->
+  with_temp_runtime_toml runtime_toml (fun path ->
+    match load_list_text ~config_path:path with
+    | Ok _ -> fail "restating a catalog-declared policy must fail the load"
+    | Error error ->
+      check bool "the refusal names the catalog row" true
+        (String_util.contains_substring error "already declares a policy"))
+
+let test_anthropic_thinking_control_on_foreign_wire_is_refused () =
+  let catalog =
+    "[[models]]\n\
+     id_prefix = \"probe-model\"\n\
+     provider_name = \"local\"\n\
+     base = \"openai_chat\"\n\
+     max_context_tokens = 1024\n"
+  in
+  let runtime_toml =
+    "[providers.local]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:1/v1\"\n\
+     \n\
+     [models.probe]\n\
+     api-name = \"probe-model\"\n\
+     max-context = 1024\n\
+     \n\
+     [models.probe.capabilities]\n\
+     anthropic-thinking-control = \"adaptive_default\"\n\
+     \n\
+     [local.probe]\n\
+     \n\
+     [runtime]\n\
+     default = \"local.probe\"\n"
+  in
+  with_model_catalog_content catalog @@ fun () ->
+  with_temp_runtime_toml runtime_toml (fun path ->
+    match load_list_text ~config_path:path with
+    | Ok _ -> fail "an Anthropic-only declaration on another wire must fail the load"
+    | Error error ->
+      check bool "the refusal names the Anthropic wire" true
+        (String_util.contains_substring error "only the Anthropic wire"))
+
+let test_anthropic_thinking_control_rejects_unknown_value () =
+  let runtime_toml =
+    anthropic_operator_own_policy_runtime_toml
+      ~policy_line:"anthropic-thinking-control = \"always\""
+  in
+  match Runtime_toml.parse_string runtime_toml with
+  | Ok _ -> fail "an unknown policy value must fail the load"
+  | Error errors ->
+    check bool "the refusal names the bad key" true
+      (List.exists
+         (fun (error : Runtime_toml.parse_error) ->
+            String_util.contains_substring error.message "unknown anthropic-thinking-control")
+         errors)
+
+let parsed_probe_policy ~policy_line =
+  let runtime_toml = anthropic_operator_own_policy_runtime_toml ~policy_line in
+  match Runtime_toml.parse_string runtime_toml with
+  | Error errors ->
+    failf "policy line %S should parse: %s" policy_line
+      (errors
+       |> List.map (fun (error : Runtime_toml.parse_error) -> error.message)
+       |> String.concat "; ")
+  | Ok cfg ->
+    (match Runtime_schema.model_of_id cfg "probe" with
+     | None -> fail "probe model should parse"
+     | Some spec ->
+       (match spec.Runtime_schema.capabilities with
+        | None -> fail "probe capabilities should parse"
+        | Some caps -> caps.Runtime_schema.anthropic_thinking_control))
+
+let test_anthropic_thinking_control_accepts_both_spellings () =
+  List.iter
+    (fun policy_line ->
+       check bool (Printf.sprintf "%S parses" policy_line) true
+         (parsed_probe_policy ~policy_line
+          = Some Runtime_schema.Anthropic_always_adaptive))
+    [ "anthropic-thinking-control = \"always_adaptive\""
+    ; "anthropic-thinking-control = \"always-adaptive\""
+    ; "anthropic-thinking-control = \" Always_Adaptive \""
+    ]
+
+let test_anthropic_thinking_control_on_official_client_is_refused () =
+  let content =
+    "[providers.subscription]\n\
+     protocol = \"claude-code\"\n\
+     command = \"/usr/bin/true\"\n\
+     is-non-interactive = true\n\
+     \n\
+     [models.seeded]\n\
+     api-name = \"seeded\"\n\
+     max-context = 1024\n\
+     \n\
+     [models.seeded.capabilities]\n\
+     anthropic-thinking-control = \"adaptive_default\"\n\
+     \n\
+     [subscription.seeded]\n\
+     \n\
+     [runtime]\n\
+     default = \"subscription.seeded\"\n"
+  in
+  match Runtime_toml.parse_string content with
+  | Error errors ->
+    failf "official-client runtime should parse: %s"
+      (errors
+       |> List.map (fun (error : Runtime_toml.parse_error) -> error.message)
+       |> String.concat "; ")
+  | Ok cfg ->
+    (match cfg.Runtime_schema.bindings with
+     | [ binding ] ->
+       (match Runtime_adapter.binding_to_execution cfg binding with
+        | Ok _ -> fail "an unread declaration on an official client must be refused"
+        | Error reason ->
+          check bool "the refusal names the official client" true
+            (String_util.contains_substring reason "official-client runtime"))
+     | bindings -> failf "expected one binding, got %d" (List.length bindings))
 
 let test_runtime_toml_enabled_defaults_true () =
   let runtime_toml =
@@ -6971,6 +7216,30 @@ let () =
           test_case
             "anthropic catalog row's own replay stays authoritative"
             `Quick test_anthropic_catalog_row_replay_stays_authoritative;
+          test_case
+            "operator-own anthropic policy admits explicit thinking"
+            `Quick test_operator_own_anthropic_policy_admits_explicit_thinking;
+          test_case
+            "operator-own anthropic without policy still refuses explicit thinking"
+            `Quick test_operator_own_anthropic_without_policy_still_refuses_explicit_thinking;
+          test_case
+            "operator-own anthropic policy restatement is refused"
+            `Quick test_operator_own_anthropic_policy_restatement_is_refused;
+          test_case
+            "anthropic thinking control on a foreign wire is refused"
+            `Quick test_anthropic_thinking_control_on_foreign_wire_is_refused;
+          test_case
+            "anthropic thinking control rejects an unknown value"
+            `Quick test_anthropic_thinking_control_rejects_unknown_value;
+          test_case
+            "operator-own anthropic policy admitted without a catalog policy"
+            `Quick test_operator_own_anthropic_policy_admitted_without_a_catalog_policy;
+          test_case
+            "anthropic thinking control accepts both spellings"
+            `Quick test_anthropic_thinking_control_accepts_both_spellings;
+          test_case
+            "anthropic thinking control on an official client is refused"
+            `Quick test_anthropic_thinking_control_on_official_client_is_refused;
           test_case "runtime locality uses provider schema" `Quick
             test_runtime_locality_uses_provider_schema;
           test_case

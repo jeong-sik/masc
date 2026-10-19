@@ -194,6 +194,7 @@ type fixture_step =
   | Close_transport
 
 let fixture_script ?system_marker ?prompt_marker ?(remove_after_auth = false) ?(forbid_mcp = false)
+    ?(exit_before_turn_admitted = false) ?(block_user_write = false)
     ?(auth_body = auth_subscription) ?(auth_exit = 0) ?auth_stderr ?auth_first_body
     lines =
   let path = Filename.temp_file "masc-keeper-claude-code-" ".sh" in
@@ -238,11 +239,19 @@ let fixture_script ?system_marker ?prompt_marker ?(remove_after_auth = false) ?(
   output_string output
     "emit() { printf '%s\\n' \"$1\" | sed \"s/__SESSION__/$session/g\"; }\n";
   output_string output "IFS= read -r initialize\n";
+  if exit_before_turn_admitted
+  then (
+    output_string output "printf 'client died before turn admission\\n' >&2\n";
+    output_string output "exit 1\n");
   output_string output
     "request_id=$(printf '%s' \"$initialize\" | sed -n 's/.*\"request_id\":\"\\([^\"]*\\)\".*/\\1/p')\n";
   output_string output "[ -n \"$request_id\" ] || exit 95\n";
   output_string output
     "printf '{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"%s\",\"response\":{}}}\\n' \"$request_id\"\n";
+  if block_user_write then
+    (* Consume a real byte, then stop reading before the complete user line.
+       The host's write deadline, rather than a provider response, ends it. *)
+    output_string output "dd bs=1 count=1 >/dev/null 2>/dev/null\nexec sleep 30\n";
   output_string output "IFS= read -r user_message\n";
   Option.iter
     (fun marker ->
@@ -268,10 +277,10 @@ let fixture_script ?system_marker ?prompt_marker ?(remove_after_auth = false) ?(
   path
 ;;
 
-let with_fixture ?system_marker ?prompt_marker ?remove_after_auth ?forbid_mcp ?auth_body ?auth_exit
+let with_fixture ?system_marker ?prompt_marker ?remove_after_auth ?forbid_mcp ?exit_before_turn_admitted ?block_user_write ?auth_body ?auth_exit
     ?auth_stderr ?auth_first_body lines f =
   let path =
-    fixture_script ?system_marker ?prompt_marker ?remove_after_auth ?forbid_mcp ?auth_body ?auth_exit
+    fixture_script ?system_marker ?prompt_marker ?remove_after_auth ?forbid_mcp ?exit_before_turn_admitted ?block_user_write ?auth_body ?auth_exit
       ?auth_stderr ?auth_first_body lines
   in
   Fun.protect
@@ -3078,6 +3087,7 @@ let test_spawn_failure_fences_claim () =
 ;;
 
 let run_direct_attempt
+      ?admission_timeout_s
       ?on_memory_capacity_refusal
       ?required_native_posture ?on_native_task_observation ?on_child_content_observation ?on_event
       ?hooks
@@ -3119,6 +3129,10 @@ let run_direct_attempt
                         } ->
                       config
                     | Some _ | None -> fail "Claude runtime fixture did not resolve"
+                  in
+                  let config = match admission_timeout_s with
+                    | None -> config
+                    | Some timeout_s -> { config with Runtime_execution.timeout_s }
                   in
                   Keeper_claude_code_runtime.run
                     ?argument_source ?librarian_front
@@ -5370,6 +5384,186 @@ let test_a_closed_client_connection_is_typed () =
       (Agent_core.Error.to_string other)
 ;;
 
+(* A real partial user-message write must retain uncertainty on timeout. *)
+let test_incomplete_user_write_timeout_fences_retry () =
+  let base_path = temp_workspace () in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    with_fixture ~block_user_write:true [] (fun cli_path ->
+      let attempt = run_direct_attempt ~admission_timeout_s:2.0
+          ~base_path ~cli_path ~goal:(String.make (512 * 1024) 'x') ~tools:[] () in
+      (match attempt.result with
+       | Error (Agent_core.Error.Api (Llm_provider.Retry.Timeout _)) -> ()
+       | Error error -> fail (Agent_core.Error.to_string error)
+       | Ok _ -> fail "incomplete user-message write unexpectedly completed");
+      check string "unknown delivery is recorded without native task observers"
+        "observation_unavailable"
+        (Keeper_provider_attempt_effect.to_string attempt.effect_disposition);
+      check bool "the driver's effect admission forbids candidate rotation" false
+        (Keeper_provider_attempt_effect.allows_same_turn_retry attempt.effect_disposition)))
+;;
+
+(* #42212: when a Claude Code child exits before the turn prompt is sent
+   ([turn_admitted = false]), no turn was submitted, so [effect_disposition]
+   stays [No_effect_observed] and the lane walk rotates to the next candidate.
+   Once the prompt is sent ([turn_admitted = true]), an exit before a terminal
+   result fences the turn with [Observation_unavailable]. *)
+let test_exit_before_turn_admission_rotates_to_next_candidate () =
+  let run_failover_lane ~base_path ~first_cli ~second_cli =
+    Masc_test_deps.declare_fixture_keeper
+      ~base_path ~sandbox_profile:None "claude-fixture";
+    let runtime_snapshot = Runtime.For_testing.snapshot () in
+    let config_path = Filename.temp_file "masc-keeper-claude-failover-" ".toml" in
+    let toml =
+      Printf.sprintf
+        "[providers.claude_first]\n\
+         protocol = \"claude-code\"\n\
+         command = %S\n\
+         is-non-interactive = true\n\
+         \n\
+         [providers.claude_second]\n\
+         protocol = \"claude-code\"\n\
+         command = %S\n\
+         is-non-interactive = true\n\
+         \n\
+         [models.claude]\n\
+         api-name = \"claude-fixture\"\n\
+         max-context = 200000\n\
+         tools-support = true\n\
+         \n\
+         [claude_first.claude]\n\
+         \n\
+         [claude_second.claude]\n\
+         \n\
+         [runtime.lanes.claude_failover]\n\
+         candidates = [\"claude_first.claude\", \"claude_second.claude\"]\n\
+         \n\
+         [runtime]\n\
+         default = \"claude_failover\"\n"
+        first_cli
+        second_cli
+    in
+    let attempted = ref [] in
+    Fun.protect
+      ~finally:(fun () ->
+        if Sys.file_exists config_path then Sys.remove config_path;
+        Keeper_tool_call_log.reset_for_testing ();
+        Runtime.For_testing.restore runtime_snapshot)
+      (fun () ->
+         Out_channel.with_open_bin config_path (fun oc -> output_string oc toml);
+         Eio_main.run (fun env ->
+           Eio.Switch.run (fun sw ->
+             Eio_context.set_env env;
+             Eio_context.with_test_env
+               ~net:(Eio.Stdenv.net env)
+               ~clock:(Eio.Stdenv.clock env)
+               ~mono_clock:(Eio.Stdenv.mono_clock env)
+               ~sw
+               (fun () ->
+                  Runtime.init_default ~config_path |> Result.get_ok;
+                  let outcome =
+                    Keeper_turn_driver.run_named
+                      ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
+                      ~runtime_id:"claude_failover"
+                      ~keeper_name:"claude-fixture"
+                      ~base_path
+                      ~goal:"FAILOVER_GOAL"
+                      ~system_prompt:"pre-dispatch fixture system prompt"
+                      ~tools:[]
+                      ~agent_core_tools:[]
+                      ~initial_messages:[]
+                      ~raw_trace:None
+                      ~on_runtime_attempt:(fun (attempt : Keeper_turn_driver.runtime_attempt) ->
+                        attempted := !attempted @ [ attempt.runtime_id ])
+                      ~sw
+                      ~net:(Eio.Stdenv.net env)
+                      ()
+                  in
+                  !attempted, outcome))))
+  in
+  let base_path = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture ~exit_before_turn_admitted:true [] (fun pre_admission_cli ->
+         with_fixture
+           [ Emit (assistant ~turn_id:"turn-fallback" "MASC_CLAUDE_FAILOVER_OK")
+           ; Emit (result ~turn_id:"turn-fallback" "MASC_CLAUDE_FAILOVER_OK")
+           ]
+           (fun fallback_cli ->
+              let direct =
+                run_direct_attempt
+                  ~base_path
+                  ~cli_path:pre_admission_cli
+                  ~goal:"PRE_ADMISSION_DIRECT"
+                  ~tools:[]
+                  ()
+              in
+              check string
+                "pre-admission exit leaves effect disposition unobserved"
+                "no_effect_observed"
+                (Keeper_provider_attempt_effect.to_string direct.effect_disposition);
+              (match direct.result with
+               | Error error ->
+                 (match Keeper_internal_error.classify_masc_internal_error error with
+                  | Some
+                      (Keeper_internal_error.Runtime_connection_closed
+                         { runtime_id = "claude_code"; detail; turn_accepted = false }) ->
+                    check string "stderr detail preserved"
+                      "client died before turn admission" detail
+                  | _ -> fail (Agent_core.Error.to_string error))
+               | Ok _ -> fail "pre-admission exit completed the direct attempt");
+              let attempted, outcome =
+                run_failover_lane
+                  ~base_path
+                  ~first_cli:pre_admission_cli
+                  ~second_cli:fallback_cli
+              in
+              check (list string)
+                "pre-admission exit rotates to second candidate"
+                [ "claude_first.claude"; "claude_second.claude" ]
+                attempted;
+              match outcome with
+              | Error error -> fail (Agent_core.Error.to_string error)
+              | Ok selected ->
+                check string "selected fallback candidate"
+                  "claude_second.claude" selected.selected_runtime_id;
+                check string "fallback answer"
+                  "MASC_CLAUDE_FAILOVER_OK"
+                  (keeper_response_text selected.run_result))));
+  let post_admission_base = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree post_admission_base)
+    (fun () ->
+       with_fixture [ Close_transport ] (fun post_admission_cli ->
+         with_fixture
+           [ Emit (assistant ~turn_id:"turn-never" "NEVER_REACHED")
+           ; Emit (result ~turn_id:"turn-never" "NEVER_REACHED")
+           ]
+           (fun fallback_cli ->
+              let attempted, outcome =
+                run_failover_lane
+                  ~base_path:post_admission_base
+                  ~first_cli:post_admission_cli
+                  ~second_cli:fallback_cli
+              in
+              check (list string)
+                "post-admission exit fences at first candidate"
+                [ "claude_first.claude" ]
+                attempted;
+              match outcome with
+              | Ok _ -> fail "post-admission exit rotated and completed"
+              | Error error ->
+                match Keeper_internal_error.classify_masc_internal_error error with
+                | Some
+                    (Keeper_internal_error.Provider_attempt_effect_fenced
+                       { runtime_id = "claude_first.claude"
+                       ; effect_disposition =
+                           Keeper_provider_attempt_effect.Observation_unavailable
+                       ; _
+                       }) -> ()
+                | _ -> fail (Agent_core.Error.to_string error))))
+;;
+
 (* #39768: an exception nothing in the runtime expected -- here the refused
    process-group signal that ended a finished turn -- is a masc internal
    failure. As a protocol error it read "Parse error" although nothing was
@@ -6410,6 +6604,12 @@ let () =
             "a closed client connection is typed"
             `Quick
             test_a_closed_client_connection_is_typed
+        ; test_case "incomplete user write timeout fences retry" `Quick
+            test_incomplete_user_write_timeout_fences_retry
+        ; test_case
+            "a process exit before turn admission rotates to the next lane candidate"
+            `Quick
+            test_exit_before_turn_admission_rotates_to_next_candidate
         ; test_case
             "an unhandled runtime exception is a masc internal error"
             `Quick

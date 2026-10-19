@@ -1,13 +1,35 @@
 type outcome = Resumed of { exact_output_available : bool } | Refused of string
 
+let bounded_cause text =
+  let max_bytes = 240 in
+  let len = String.length text in
+  if len <= max_bytes then text
+  else
+    let rec cut index =
+      if index >= len then len
+      else
+        let step = Uchar.utf_decode_length (String.get_utf_8_uchar text index) in
+        if index + step > max_bytes then index else cut (index + step)
+    in
+    String.sub text 0 (cut 0) ^ "..."
+
 let response ~status body =
+  let decoded = try Some (Yojson.Safe.from_string body) with Yojson.Json_error _ -> None in
+  let one key fields = match List.filter (fun (name, _) -> name = key) fields with
+    | [(_, value)] -> Some value | _ -> None in
+  let server_error () =
+    match decoded with
+    | Some (`Assoc fields) ->
+      (match one "error" fields with
+       | Some (`String raw) ->
+         let cleaned = String.trim (Masc.Tui_terminal_text.sanitize_terminal_text raw) in
+         if cleaned = "" then None else Some (bounded_cause cleaned)
+       | _ -> None)
+    | _ -> None in
   match status with
   | 401 | 403 -> Refused "Local operator access was rejected. Sign in again and resume setup."
   | 404 -> Refused "This running server needs an upgrade before model setup can resume. Restart this workspace with the installed MASC version."
   | 200 ->
-    let decoded = try Some (Yojson.Safe.from_string body) with Yojson.Json_error _ -> None in
-    let one key fields = match List.filter (fun (name, _) -> name = key) fields with
-      | [(_, value)] -> Some value | _ -> None in
     (match decoded with
      | Some (`Assoc fields) ->
        (match one "runtime_ready" fields, one "exact_output_authority_available" fields,
@@ -16,7 +38,9 @@ let response ~status body =
             when one "status" setup = Some (`String "available") -> Resumed {exact_output_available}
         | _ -> Refused "The server did not confirm that model setup resumed. Retry setup.")
      | _ -> Refused "The server returned an unreadable model setup result.")
-  | _ -> Refused "Saved model settings could not be activated. Review the selected connection and retry setup."
+  | _ ->
+    let fallback = "Saved model settings could not be activated. Review the selected connection and retry setup." in
+    Refused (match server_error () with None -> fallback | Some cause -> fallback ^ " " ^ cause)
 
 let run ~base_path ~port ~agent =
   try

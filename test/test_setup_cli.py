@@ -565,6 +565,8 @@ sys.exit(int(open(exit_code).read()) if os.path.exists(exit_code) else 0)
             elif reject_resume:
                 self.assertNotEqual(result.returncode, 0)
                 self.assertEqual(posted, [('/api/v1/runtime/setup/resume', {})])
+                self.assertIn('Saved model settings could not be activated.', result.stderr)
+                self.assertIn('fixture resume unavailable', result.stderr)
                 self.assertIn('Activating saved model settings', result.stderr)
             else:
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)

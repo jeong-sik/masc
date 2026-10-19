@@ -2231,10 +2231,6 @@ let fetch_runtime_probe ~(host : string) ~(port : int) ~(force : bool) :
   get_json ~host ~port ~path
 
 type runtime_config_commit_receipt = Masc_tui_runtime_config_receipt.t
-type runtime_assignment_write_result =
-  | Runtime_assignment_committed of runtime_config_commit_receipt
-  | Runtime_assignment_unchanged
-
 let decode_runtime_config_commit_receipt = Masc_tui_runtime_config_receipt.decode
 let runtime_config_commit_receipt_summary = Masc_tui_runtime_config_receipt.summary
 
@@ -2243,7 +2239,8 @@ let runtime_config_commit_receipt_summary = Masc_tui_runtime_config_receipt.summ
 let post_runtime_assignment ~(host : string) ~(port : int)
     ~(keeper_name : string) ~(runtime_id : string option)
     ~(expected_assignment_revision : Yojson.Safe.t) :
-    (runtime_assignment_write_result, string) result =
+    (Masc_tui_keeper_config.runtime_assignment_write,
+     Masc_tui_keeper_config.runtime_assignment_post_error) result =
   let body =
     Yojson.Safe.to_string
       (`Assoc
@@ -2255,18 +2252,10 @@ let post_runtime_assignment ~(host : string) ~(port : int)
           @ [ "expected_assignment_revision", expected_assignment_revision ]))
   in
   match
-    post_json ~host ~port ~path:"/api/v1/runtime/config/assignment" ~body
+    http_post ~headers:(auth_headers ()) ~host ~port ~path:"/api/v1/runtime/config/assignment" ~body
   with
-  | Error detail -> Error detail
-  | Ok (`Assoc fields as json) ->
-    (match List.assoc_opt "applied" fields with
-     | Some (`Bool false) ->
-       Masc_tui_keeper_config.decode_unchanged_runtime_assignment_response json
-       |> Result.map (fun _revision -> Runtime_assignment_unchanged)
-     | Some _ | None ->
-       decode_runtime_config_commit_receipt json
-       |> Result.map (fun receipt -> Runtime_assignment_committed receipt))
-  | Ok _ -> Error "runtime assignment response must be an object"
+  | Error detail -> Error (Masc_tui_keeper_config.Assignment_outcome_unconfirmed detail)
+  | Ok (status,body) -> Masc_tui_keeper_config.decode_runtime_assignment_answer ~status ~body
 
 (** POST /api/v1/runtime/config/routing — set one lane's candidate order.
 

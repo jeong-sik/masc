@@ -474,12 +474,7 @@ type async_msg =
         * string option,
         string )
       result
-  | Runtime_assignment_set of
-      string
-      * string option
-      * (Masc_tui_http.runtime_assignment_write_result, string) result
-      (** keeper, the runtime it was pointed at ([None] = back to default),
-          and whether the server took it. *)
+  | Runtime_assignment_changed of runtime_assignment_request * runtime_assignment_status * int64
   | Keeper_chat_approval_answered of
       Masc_tui_keeper_chat_projection.request
       * string
@@ -922,7 +917,7 @@ let rec workspace_message_is_read = function
   | Browser_lane_follow_loaded _
   | Connector_unbind_all_done _
   | Runtime_lane_slots_written _
-  | Runtime_assignment_set _
+  | Runtime_assignment_changed _
   | Keeper_chat_approval_answered _
   | Keeper_chat_control_received _
   | Gate_approval_resolved _
@@ -1044,7 +1039,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Tools_loaded (_, _, _) | Skills_catalog_loaded (_, _)
     | Skill_evidence_loaded (_, _, _) | Tools_async_observation_loaded (_, _)
     | Runtime_lane_slots_written (_, _, _) | Runtime_catalog_loaded (_, _)
-    | Runtime_assignment_set (_, _, _)
+    | Runtime_assignment_changed (_, _, _)
     | Keeper_chat_approval_answered (_, _, _, _)
     | Keeper_tool_approvals_loaded (_, _, _) | Sent_image_ready _
     | Image_render_ready _ | Keeper_turns_loaded (_, _)
@@ -1178,7 +1173,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Tools_loaded (_, _, _) | Skills_catalog_loaded (_, _)
   | Skill_evidence_loaded (_, _, _) | Tools_async_observation_loaded (_, _)
   | Runtime_lane_slots_written (_, _, _) | Runtime_catalog_loaded (_, _)
-  | Runtime_assignment_set (_, _, _)
+  | Runtime_assignment_changed (_, _, _)
   | Keeper_chat_approval_answered (_, _, _, _)
   | Keeper_tool_approvals_loaded (_, _, _) | Sent_image_ready _
   | Image_render_ready _ | Keeper_turns_loaded (_, _)

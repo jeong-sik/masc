@@ -3890,6 +3890,35 @@ type keeper_settings_save_attempt = {
   ksa_recoverable : bool;
 }
 
+type runtime_assignment_prepared = {
+  rap_snapshot : Yojson.Safe.t;
+  rap_expected_revision : Yojson.Safe.t;
+}
+type runtime_assignment_outcome =
+  | Assignment_answered of Masc_tui_keeper_config.runtime_assignment_write
+  | Assignment_not_sent of string
+  | Assignment_refused of string
+  | Assignment_conflict of Yojson.Safe.t
+  | Assignment_unconfirmed of string
+type runtime_assignment_status =
+  | Assignment_checking
+  | Assignment_reading
+  | Assignment_posting of runtime_assignment_prepared
+  | Assignment_finished of runtime_assignment_prepared option * runtime_assignment_outcome
+type runtime_assignment_request = {
+  ras_token : unit ref;
+  ras_key : keeper_settings_key;
+  ras_reading : unit ref;
+  ras_workspace : Tui_decode.server_identity;
+  ras_runtime_id : string option; (* None clears the explicit assignment. *)
+  ras_started_ns : int64;
+  ras_observation : (runtime_assignment_status * int64) Atomic.t;
+}
+type runtime_assignment_attempt = {
+  raa_request : runtime_assignment_request;
+  raa_status : runtime_assignment_status;
+}
+
 type keeper_log_tone =
   | Keeper_log_fact
   | Keeper_log_notice
@@ -7444,6 +7473,7 @@ type state = {
   mutable keeper_settings_intent : keeper_settings_request option;
   mutable keeper_settings_cancel : (unit ref * (unit -> unit)) option;
   mutable keeper_settings_saves : keeper_settings_save_attempt list;
+  mutable runtime_assignment_saves : runtime_assignment_attempt list;
   mutable github_identity_view: (string * string list) option;
   mutable github_identity_view_error: string option;
   (* The Info tab's Board-attention rows, keyed by the Keeper they were read
@@ -9177,6 +9207,119 @@ let keeper_settings_save_pending state key =
        | Settings_checking | Settings_reading | Settings_posting _ -> true
        | Settings_finished _ -> false) state.keeper_settings_saves
 
+let runtime_assignment_save_pending state key =
+  List.exists (fun attempt -> keeper_settings_same_origin key attempt.raa_request.ras_key
+    && match attempt.raa_status with
+       | Assignment_checking | Assignment_reading | Assignment_posting _ -> true
+       | Assignment_finished _ -> false) state.runtime_assignment_saves
+
+let runtime_assignment_target_key state =
+  match state.view,state.runtime_pick_keeper,state.server_identity with
+  | Keepers Keeper_runtime_pick,Some keeper,Some workspace
+      when state.workspace_identity=Workspace_identity_match && server_authority_ready state ->
+      Some {ksk_authority=state.workspace_authority;
+        ksk_base_path=canonical_path workspace.sid_base_path;ksk_masc_root=canonical_path workspace.sid_masc_root;
+        ksk_keeper=keeper;ksk_surface=state.view;ksk_tab=None}
+  | Keepers Keeper_runtime_pick,_,_ -> None
+  | _,_,_ -> keeper_settings_target state
+
+let begin_runtime_assignment_save state ~keeper_name ~runtime_id ~started_ns =
+  match runtime_assignment_target_key state,state.server_identity with
+  | Some key,Some workspace when state.view=Keepers Keeper_runtime_pick && String.equal key.ksk_keeper keeper_name ->
+      if keeper_settings_save_pending state key || runtime_assignment_save_pending state key then
+        Error "A configuration change for this Keeper is pending; original selection retained"
+      else
+        let request = {ras_token=ref ();ras_key=key;ras_reading=state.workspace_read_authority;
+          ras_workspace=workspace;ras_runtime_id=runtime_id;ras_started_ns=started_ns;
+          ras_observation=Atomic.make (Assignment_checking,started_ns)} in
+        state.runtime_assignment_saves <- {raa_request=request;raa_status=Assignment_checking}
+          :: state.runtime_assignment_saves;
+        Ok request
+  | (Some _ | None),(Some _ | None) -> Error "Runtime assignment requires its original picker and verified workspace"
+
+let runtime_assignment_current state request =
+  request.ras_key.ksk_authority=state.workspace_authority
+  && request.ras_reading == state.workspace_read_authority
+  && state.workspace_identity=Workspace_identity_match && server_authority_ready state
+  && server_workspace_matches ~expected:(Some request.ras_workspace)
+       (match state.server_identity with Some identity -> Ok identity | None -> Error "unread")
+
+let runtime_assignment_advances before after =
+  match before,after with
+  | Assignment_checking,(Assignment_reading | Assignment_posting _ | Assignment_finished _)
+  | Assignment_reading,(Assignment_posting _ | Assignment_finished _)
+  | Assignment_posting _,Assignment_finished _ -> true
+  | Assignment_finished _,(Assignment_checking | Assignment_reading | Assignment_posting _ | Assignment_finished _)
+  | (Assignment_checking | Assignment_reading | Assignment_posting _),Assignment_checking
+  | (Assignment_reading | Assignment_posting _),Assignment_reading
+  | Assignment_posting _,Assignment_posting _ -> false
+
+let publish_runtime_assignment request ~observed_ns status =
+  let rec publish () =
+    let before = Atomic.get request.ras_observation in
+    if not (runtime_assignment_advances (fst before) status) then false
+    else if Atomic.compare_and_set request.ras_observation before (status,observed_ns)
+    then true else publish () in
+  publish ()
+
+let pending_runtime_assignment_receipt state =
+  List.find_map (fun attempt ->
+    let status,observed_ns = Atomic.get attempt.raa_request.ras_observation in
+    if runtime_assignment_advances attempt.raa_status status
+    then Some (attempt.raa_request,status,observed_ns) else None) state.runtime_assignment_saves
+
+let apply_runtime_assignment state request status =
+  let applied = ref false in
+  state.runtime_assignment_saves <- List.map (fun attempt ->
+    if attempt.raa_request.ras_token == request.ras_token && runtime_assignment_advances attempt.raa_status status
+    then (applied := true; {attempt with raa_status=status}) else attempt) state.runtime_assignment_saves;
+  !applied
+
+let runtime_assignment_phase = function
+  | Assignment_checking -> "checking" | Assignment_reading -> "reading_current"
+  | Assignment_posting _ -> "posting"
+  | Assignment_finished (_,Assignment_answered (Masc_tui_keeper_config.Assignment_committed _)) -> "committed"
+  | Assignment_finished (_,Assignment_answered (Masc_tui_keeper_config.Assignment_unchanged _)) -> "unchanged"
+  | Assignment_finished (_,Assignment_not_sent _) -> "not_sent"
+  | Assignment_finished (_,Assignment_refused _) -> "refused"
+  | Assignment_finished (_,Assignment_conflict _) -> "conflict"
+  | Assignment_finished (_,Assignment_unconfirmed _) -> "unconfirmed"
+
+let runtime_assignment_choice request = Option.value ~default:"workspace default" request.ras_runtime_id
+
+let runtime_assignment_outcome_detail = function
+  | Assignment_answered (Masc_tui_keeper_config.Assignment_committed receipt) ->
+      Masc_tui_runtime_config_receipt.lane_summary receipt
+  | Assignment_answered (Masc_tui_keeper_config.Assignment_unchanged reply) ->
+      (match reply.warnings with
+       | [] -> "Assignment already configured; no write applied"
+       | warnings -> "Assignment unchanged; lock warnings: " ^ String.concat ", "
+           (List.map (fun (w : Masc_tui_runtime_config_receipt.lock_warning) -> w.code) warnings))
+  | Assignment_not_sent detail -> "Assignment not sent; selection retained: " ^ detail
+  | Assignment_refused detail -> "Assignment refused; selection retained: " ^ detail
+  | Assignment_conflict _ -> "Assignment revision changed; selection retained. Read current before choosing again"
+  | Assignment_unconfirmed detail -> "Assignment outcome unconfirmed; selection retained: " ^ detail
+
+let runtime_assignment_needs_attention = function
+  | Assignment_answered (Masc_tui_keeper_config.Assignment_committed receipt) ->
+      Masc_tui_runtime_config_receipt.lane_needs_attention receipt
+  | Assignment_answered (Masc_tui_keeper_config.Assignment_unchanged reply) -> reply.warnings <> []
+  | Assignment_not_sent _ | Assignment_refused _ | Assignment_conflict _ | Assignment_unconfirmed _ -> true
+
+let runtime_assignment_notice state =
+  Option.bind (runtime_assignment_target_key state) (fun key ->
+    Option.bind (List.find_opt (fun attempt -> keeper_settings_same_origin key attempt.raa_request.ras_key)
+      state.runtime_assignment_saves) (fun attempt ->
+      let prefix = key.ksk_keeper ^ " assignment → " ^ runtime_assignment_choice attempt.raa_request ^ " · " in
+      match attempt.raa_status with
+      | Assignment_checking -> Some (prefix ^ "checking original workspace")
+      | Assignment_reading -> Some (prefix ^ "reading current assignment revision")
+      | Assignment_posting _ -> Some (prefix ^ "awaiting assignment receipt; navigation stays available")
+      | Assignment_finished (_,outcome) ->
+          if runtime_assignment_needs_attention outcome then
+            Some (prefix ^ runtime_assignment_outcome_detail outcome ^ " · Runtime picker: choose again to reread current")
+          else None))
+
 let keeper_settings_save_advances before after =
   match before, after with
   | Settings_checking, (Settings_reading | Settings_posting _ | Settings_finished _)
@@ -9203,8 +9346,8 @@ let keeper_settings_same_input_kind left right =
   | Sandbox_shortcut_input _, Settings_editor_input _ -> false
 
 let admit_keeper_settings_save state ~key ~reading ~expected ~input ~current ~started_ns =
-  if keeper_settings_save_pending state key then
-    Error "Another settings save is pending; original operation retained"
+  if keeper_settings_save_pending state key || runtime_assignment_save_pending state key then
+    Error "Another configuration change for this Keeper is pending; original operation retained"
   else
     let refusal = "Settings origin changed; save not sent, input retained" in
     let status = if current then Settings_checking else Settings_finished (None,Settings_not_sent refusal) in
@@ -9337,7 +9480,7 @@ let begin_keeper_settings_editor state ~available ~started_ns =
     | Some _ | None -> false in
   if ready_waiting then None
   else match available, keeper_settings_target state, state.server_identity with
-  | true, Some key, _ when keeper_settings_save_pending state key -> None
+  | true, Some key, _ when keeper_settings_save_pending state key || runtime_assignment_save_pending state key -> None
   | true, Some key, Some expected ->
       (match Masc_tui_fetched.start ~equal:keeper_settings_equal_key state.keeper_settings_editor ~key with
        | Already_loading -> None
@@ -12850,6 +12993,7 @@ let create_state
   keeper_settings_intent = None;
   keeper_settings_cancel = None;
   keeper_settings_saves = [];
+  runtime_assignment_saves = [];
   github_identity_view = None;
   keeper_board_quarantines = Masc_tui_fetched.initial;
   board_quarantine_requeue_inflight = None;

@@ -359,19 +359,25 @@ let test_unchanged_runtime_assignment_response_decoder () =
       ; "applied", `Bool false
       ; ( "assignment_revision"
         , `Assoc [ "state", `String "runtime_config_missing" ] )
-      ; "warnings", `List []
+      ; "warnings", `List [ `Assoc ["code",`String "lock_release_unconfirmed";"detail",`String "unlock failed"] ]
       ]
   in
-  (match decode_unchanged_runtime_assignment_response valid with
-   | Ok _ -> ()
-   | Error detail -> Alcotest.fail detail);
+  let decode json = decode_runtime_assignment_answer ~status:200 ~body:(Yojson.Safe.to_string json) in
+  (match decode valid with
+   | Ok (Assignment_unchanged reply) ->
+       Alcotest.(check bool) "unchanged receipt keeps original revision, warning and response" true
+         (reply.revision = `Assoc ["state",`String "runtime_config_missing"]
+          && reply.response=valid
+          && match reply.warnings with
+             | [{Masc_tui_runtime_config_receipt.code="lock_release_unconfirmed";detail="unlock failed"}] -> true
+             | _ -> false)
+   | Ok (Assignment_committed _) | Error _ -> Alcotest.fail "unchanged response was not retained");
   List.iter
     (fun malformed ->
-      match decode_unchanged_runtime_assignment_response malformed with
-      | Error _ -> ()
-      | Ok revision ->
-        Alcotest.failf "accepted malformed unchanged revision: %s"
-          (Yojson.Safe.to_string revision))
+      match decode malformed with
+      | Error (Assignment_outcome_unconfirmed _) -> ()
+      | Error (Assignment_revision_conflict _ | Assignment_auth_refused _) | Ok _ ->
+        Alcotest.fail "malformed success response was accepted or classified as known refusal")
     [ `Assoc [ "ok", `Bool true; "applied", `Bool false ]
     ; `Assoc
         [ "ok", `Bool true
@@ -396,6 +402,30 @@ let test_unchanged_runtime_assignment_response_decoder () =
         ; "extra", `Bool true
         ]
     ]
+
+let test_runtime_assignment_refusal_and_uncertain_response () =
+  List.iter (fun status ->
+    match decode_runtime_assignment_answer ~status ~body:"authorization refused" with
+    | Error (Assignment_auth_refused refusal) ->
+        Alcotest.(check int) "before-route authorization status retained" status refusal.status
+    | _ -> Alcotest.fail "authorization refusal was not recognized") [401;403];
+  let conflict = `Assoc ["ok",`Bool false;"error",`Assoc [
+    "code",`String "runtime_assignment_revision_conflict";
+    "expected",`Assoc ["state",`String "runtime_config_missing"];
+    "observed",`Assoc ["state",`String "runtime_config_present";
+      "source_revision",`String (String.make 64 'b');
+      "assignment",`Assoc ["state",`String "assigned";"runtime_id",`String "other.runtime"]]]] in
+  (match decode_runtime_assignment_answer ~status:409 ~body:(Yojson.Safe.to_string conflict) with
+   | Error (Assignment_revision_conflict retained) ->
+       Alcotest.(check bool) "conflict retains both original revision observations" true (retained=conflict)
+   | _ -> Alcotest.fail "known assignment conflict was lost");
+  List.iter (fun (status,body) ->
+    match decode_runtime_assignment_answer ~status ~body with
+    | Error (Assignment_outcome_unconfirmed _) -> ()
+    | _ -> Alcotest.fail "a response that cannot prove no write became a definitive outcome")
+    [400,{|{"error":"atomic replace failed"}|};409,{|{"error":{"code":"other_conflict"}}|};
+     409,{|{"ok":false,"error":{"code":"runtime_assignment_revision_conflict"}}|};
+     200,{|{"ok":true}|};200,"connection closed before receipt"]
 
 let test_runtime_config_warning_names_its_authority () =
   let revision =
@@ -526,6 +556,8 @@ let () =
             test_runtime_picker_revision_decoder
         ; Alcotest.test_case "strict unchanged assignment revision" `Quick
             test_unchanged_runtime_assignment_response_decoder
+        ; Alcotest.test_case "assignment refusals and uncertain responses retain distinct outcomes" `Quick
+            test_runtime_assignment_refusal_and_uncertain_response
         ; Alcotest.test_case "runtime config warning authority" `Quick
             test_runtime_config_warning_names_its_authority
         ; Alcotest.test_case "deferred runtime sync status" `Quick

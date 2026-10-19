@@ -189,33 +189,70 @@ let expected_runtime_assignment_revision before =
       | Some runtime_assignment -> Ok runtime_assignment
       | None -> Error "keeper runtime assignment revision was not observed")
 
-let decode_unchanged_runtime_assignment_response = function
-  | `Assoc fields
-    when exact_keys [ "ok"; "applied"; "assignment_revision"; "warnings" ] fields ->
-    (match
-       List.assoc_opt "ok" fields,
-       List.assoc_opt "applied" fields,
-       List.assoc_opt "assignment_revision" fields,
-       List.assoc_opt "warnings" fields
-     with
-     | Some (`Bool true), Some (`Bool false), Some revision, Some (`List warnings)
-       when List.for_all
-              (function
-                | `Assoc warning_fields
-                  when exact_keys [ "code"; "detail" ] warning_fields ->
-                  (match
-                     List.assoc_opt "code" warning_fields,
-                     List.assoc_opt "detail" warning_fields
-                   with
-                   | Some (`String _), Some (`String _) -> true
-                   | _ -> false)
-                | _ -> false)
-              warnings ->
-       Result.map
-         (fun (_ : runtime_assignment_revision) -> revision)
-         (runtime_assignment_revision_of_json revision)
-     | _ -> Error "runtime assignment response is not an unchanged write")
+type runtime_assignment_unchanged = {
+  revision : Yojson.Safe.t;
+  warnings : Masc_tui_runtime_config_receipt.lock_warning list;
+  response : Yojson.Safe.t;
+}
+
+type runtime_assignment_write =
+  | Assignment_committed of Masc_tui_runtime_config_receipt.t
+  | Assignment_unchanged of runtime_assignment_unchanged
+
+let decode_unchanged_runtime_assignment_response json =
+  let ( let* ) = Result.bind in
+  match json with
+  | `Assoc fields when exact_keys ["ok";"applied";"assignment_revision";"warnings"] fields ->
+      (match List.assoc_opt "ok" fields, List.assoc_opt "applied" fields,
+             List.assoc_opt "assignment_revision" fields, List.assoc_opt "warnings" fields with
+       | Some (`Bool true), Some (`Bool false), Some revision, Some (`List warnings) ->
+           let* _ = runtime_assignment_revision_of_json revision in
+           let rec decode acc = function
+             | [] -> Ok (List.rev acc)
+             | `Assoc fields :: rest when exact_keys ["code";"detail"] fields ->
+                 (match List.assoc_opt "code" fields,List.assoc_opt "detail" fields with
+                  | Some (`String code),Some (`String detail) ->
+                      decode ({Masc_tui_runtime_config_receipt.code;detail} :: acc) rest
+                  | _ -> Error "malformed assignment lock warning")
+             | _ -> Error "malformed assignment lock warning" in
+           let* warnings = decode [] warnings in
+           Ok {revision;warnings;response=json}
+       | _ -> Error "runtime assignment response is not an unchanged write")
   | _ -> Error "runtime assignment response must be an object"
+
+type runtime_assignment_post_error =
+  | Assignment_revision_conflict of Yojson.Safe.t
+  | Assignment_auth_refused of { status : int; body : string }
+  | Assignment_outcome_unconfirmed of string
+
+let decode_runtime_assignment_answer ~status ~body =
+  let unknown detail = Error (Assignment_outcome_unconfirmed detail) in
+  if status = 401 || status = 403 then Error (Assignment_auth_refused {status;body})
+  else match Yojson.Safe.from_string body with
+  | exception Yojson.Json_error detail -> unknown (Printf.sprintf "HTTP %d: invalid assignment response: %s" status detail)
+  | json when status >= 200 && status < 300 ->
+      let decoded = match member "applied" json with
+        | Some (`Bool false) ->
+            decode_unchanged_runtime_assignment_response json
+            |> Result.map (fun unchanged -> Assignment_unchanged unchanged)
+        | None -> Masc_tui_runtime_config_receipt.decode json |> Result.map (fun receipt -> Assignment_committed receipt)
+        | Some _ -> Error "unexpected assignment applied discriminator" in
+      decoded |> Result.map_error (fun detail -> Assignment_outcome_unconfirmed detail)
+  | json when status = 409 ->
+      let uncertain () = unknown (Printf.sprintf "HTTP %d: %s" status body) in
+      (match json with
+       | `Assoc fields when exact_keys ["ok";"error"] fields ->
+           (match member "ok" json,member "error" json with
+            | Some (`Bool false),Some (`Assoc error) when exact_keys ["code";"expected";"observed"] error ->
+                (match List.assoc_opt "code" error,List.assoc_opt "expected" error,List.assoc_opt "observed" error with
+                 | Some (`String "runtime_assignment_revision_conflict"),Some expected,Some observed ->
+                     (match runtime_assignment_revision_of_json expected,runtime_assignment_revision_of_json observed with
+                      | Ok _,Ok _ -> Error (Assignment_revision_conflict json)
+                      | Error _,_ | _,Error _ -> uncertain ())
+                 | _ -> uncertain ())
+            | _ -> uncertain ())
+       | _ -> uncertain ())
+  | _ -> unknown (Printf.sprintf "HTTP %d: %s" status body)
 
 let config_write_warning_codes json =
   match member "config_write" json with

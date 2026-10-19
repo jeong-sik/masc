@@ -579,6 +579,8 @@ let footer_line ?(status = []) ?position (state : state) ~max_cells ~hints =
   let action_text =
     match Masc_tui_types.runtime_form_save_notice state with
     | Some notice -> Some (Terminal_text.single_line notice)
+    | None -> (match Masc_tui_types.runtime_assignment_notice state with
+    | Some notice -> Some (Terminal_text.single_line notice)
     | None -> (match Masc_tui_types.keeper_settings_editor_notice state with
     | Some notice -> Some (Terminal_text.single_line notice)
     | None -> (match Masc_tui_types.keeper_settings_save_notice state with
@@ -588,7 +590,7 @@ let footer_line ?(status = []) ?position (state : state) ~max_cells ~hints =
       when Unix.gettimeofday () -. set_at
            <= Masc_tui_types.last_action_window_s ->
       Some text
-    | Some _ | None -> None)))
+    | Some _ | None -> None))))
   in
   let identity =
     match state.server_identity with

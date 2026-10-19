@@ -106,6 +106,23 @@ selection; an explicit next key rereads current before another save. Retained ed
 changes survive shortcut operations. The external editor keeps its own terminal
 interaction. Runtime and painted latency remain unmeasured.
 
+Keeper Runtime picker assignments also retain an owned operation: original
+Keeper, workspace, concrete Runtime or clear-to-default choice, current snapshot,
+and assignment revision. Navigation stays available; a pending same-Keeper
+Settings, Sandbox or assignment save prevents another dispatch without closing
+the picker. Different Keepers retain independent operations. The existing config
+read and assignment POST remain the two logical save requests. Local workspace
+and read authority are checked again before POST; server assignment CAS remains
+the write precondition. This adds no atomic server workspace precondition.
+
+Progress, warnings, conflicts and uncertain outcomes stay with the original
+operation for this TUI session. Cancellation before possible dispatch is not-sent;
+after possible dispatch it is unconfirmed. HTTP 400 can include an IO failure,
+so it does not prove that no write happened. Explicitly choosing again reads
+current revision; the old request never resends itself. A committed receipt proves
+configured assignment and the application results it reports, not which Runtime
+is executing a current Keeper turn. Execution and painted latency remain unmeasured.
+
 ## Usage
 
 | Keys | What it does |

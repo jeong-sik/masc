@@ -153,13 +153,11 @@ final class UmpRegionTransport: CoordinatedMidiTransport {
             for other in admitted.prefix(index) where clip.start < other.end && other.start < clip.end {
                 guard clip.scope.isDisjoint(with: other.scope) else { throw MidiFailure("overlapping captured regions share physical MIDI channels; select independent outputs") }
             }
-            var previous = potential
-            previous.touched = previous.touched.filter { field in clip.scope.contains { $0.contains(field.address) } }
-            previous.addresses = previous.addresses.filter { address in clip.scope.contains { $0.contains(address) } }
-            // Exact-entry events remain a due stream, including a zero-duration
-            // attack/release pair. Their explicit baselines must precede each
-            // entry Note On; they cannot repair a historical live voice's patch.
-            _ = try clip.restore(at: clip.cut, replacing: previous)
+            // The first copy enters an empty physical output, so it is admitted
+            // with no previous state rather than with the source prefix footprint.
+            // Only a repeat copy boundary carries a previous footprint (the live
+            // output's state), which playback supplies via `output.prior`.
+            _ = try clip.restore(at: clip.cut, replacing: UmpFootprint())
         }
         clips = admitted
         output = UmpOutput(bindings: destinations.map { UmpBinding(source: $0, destination: $0) })

@@ -154,6 +154,12 @@ Ready posts do not wait for the census; a pending or failed census retains its
 last successful value. One dataset does not consume its sibling's result, and a
 terminal bundle does not replay early data. Board remains pending while either
 dataset is outstanding. These are UI-state rules; actual paint latency is unmeasured.
+Census now distinguishes not read, initial reading, received (including empty),
+unavailable and a retained observation after failure. Refreshing/stale values stay
+available for hearth navigation; the census row and palette identify them as last
+observed. Header/sidebar totals use only a received census without a pending census
+read. A collector ending without a census result records unavailability. Workspace
+withdrawal clears census values and candidates along with other Board data.
 
 ## Usage
 

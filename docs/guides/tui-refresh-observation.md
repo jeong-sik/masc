@@ -200,6 +200,22 @@ data still does not finish the navigation collector. Listing selection/error pol
 and the census's last-success retention policy are unchanged. Independent results
 are not an atomic Board snapshot; census and listing already came from two reads.
 
+The census uses the existing `Fetched` view states instead of a raw list. Initial
+absence, an owned first read, received empty/nonempty, unavailable without a value
+and a retained value plus failure are distinct. Pending comes from the existing
+hearth dataset slot, so a census that already arrived is not marked loading merely
+because posts are pending. Retry keeps the previous failure and value. The existing
+census row and palette mark retained/refreshing counts as last observed. Header
+and reader-index totals require received data with no pending census slot.
+
+Terminal ownership reservation marks a still-owned census unavailable until its
+actual result is applied; rejected/omitted terminal data cannot silently make an
+old value current. Collector completion does the same only if that collector still
+owns an unconsumed census slot. Missing result means unavailability, not proven
+physical worker cancellation. Late cleanup cannot downgrade a successor. Workspace
+withdrawal clears census values/candidates with the other Board presentation data.
+These UI state transitions add no HTTP, clock, retry or independent request owner.
+
 The HTTP/1 TUI dataset reader binds each existing JSON GET to the confirmed
 canonical base path and MASC root. Public-read, read-auth, permission-auth and
 token-permission-auth combinators validate the optional query pair before their

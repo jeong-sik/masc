@@ -30,14 +30,6 @@ let leave_board_detail state =
   state.board_history_post_id <- None;
   state.board_detail <- Board_detail.clear state.board_detail
 
-let apply_board_hearths_load state = function
-  | Ok census -> state.board_hearths <- census
-  | Error _ ->
-      (* The census is what [f] walks. A failed read keeps the last one rather
-         than emptying it: a cycle that has gone quiet because one request
-         failed is worse than a cycle one refresh out of date. *)
-      ()
-
 let apply_board_list_load state ~remember_error = function
   | Ok posts ->
       replace_board_posts state posts;

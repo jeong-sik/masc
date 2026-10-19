@@ -3805,6 +3805,8 @@ module Surface_read_order : sig
   val take_dataset : t -> request -> dataset -> t * bool
   (** Admit one owned dataset once without settling its sibling readers or
       the enclosing collector. A superseded dataset leaves the state intact. *)
+  val owns_dataset : t -> request -> dataset -> bool
+  val pending_dataset : t -> dataset -> bool
   val finish : t -> request -> t
   val invalidate : t -> t
   val pending : needs:surface_needs -> t -> source list
@@ -3884,8 +3886,10 @@ end = struct
   (* Taking data is distinct from settling its collector. Result application
      can schedule followups before the owning mailbox item finishes. *)
   let take current request = release_datasets current request, owned current request
+  let owns_dataset current request dataset = List.mem dataset (owned current request)
+  let pending_dataset current dataset = List.mem_assoc dataset current.owners
   let take_dataset current request dataset =
-    if List.mem dataset (owned current request) then
+    if owns_dataset current request dataset then
       {current with owners=List.filter (fun (candidate, _) -> candidate <> dataset) current.owners}, true
     else current, false
   (* Withdrawal retires publication and identity authority. Actual collectors
@@ -8021,17 +8025,9 @@ type state = {
           and 1550 of this workspace's 2171 posts sit in [verification] alone,
           so a filter over one page would show a handful of rows and call them
           the hearth. *)
-  mutable board_hearths: (string * int) list;
-      (** Every hearth on the board and how many posts it holds, busiest
-          first, as [/api/v1/board/hearths] counts them.
-
-          This was read off whichever listing had last arrived, which made it
-          two things at once and both of them wrong. It could not offer a
-          hearth whose posts all fell outside the page, and it had to be
-          refreshed only from unnarrowed loads or the cycle collapsed to the
-          one hearth already chosen. The board's own census has neither
-          problem, and it carries the counts -- so [f] stops being a walk
-          through names a reader cannot see the size of. *)
+  mutable board_census: (string * int) list Masc_tui_fetched.view;
+      (** Last census result, including failure and a retained successful value.
+          Pending ownership comes from the existing census dataset slot. *)
   mutable board_scroll: int;
   mutable board_comment_scroll: int;
   mutable board_comments_focused: bool;
@@ -8946,6 +8942,49 @@ let can_admit_early_http_read (state : state) ~ticket ~authority identity =
   Option.is_some state.http_refresh_started_ns
   && can_admit_http_read state ~ticket ~authority identity
 
+let board_census_reading (state : state) =
+  let pending=Surface_read_order.pending_dataset state.http_surface_reads Surface_read_order.Board_hearths in
+  let observation=match state.board_census with
+    | Masc_tui_fetched.Absent -> if pending then Masc_tui_fetched.Loading else Masc_tui_fetched.Absent
+    | (Masc_tui_fetched.Loading | Ready _ | Stale _ | Failed _) as observation -> observation in
+  observation,pending
+
+(* Navigation has no candidates without an observation. Rendering separately
+   distinguishes unavailable/unread from a successfully received empty census. *)
+let board_census_values (state : state) =
+  match Masc_tui_fetched.value state.board_census with
+  | Some census -> census | None -> []
+
+let board_census_holding (state : state) =
+  match board_census_reading state with
+  | Masc_tui_fetched.Ready census,false ->
+      (match state.board_hearth with
+       | Some hearth -> List.assoc_opt hearth census
+       | None -> Some (List.fold_left (fun total (_,count) -> total+count) 0 census))
+  | (Masc_tui_fetched.Absent | Loading | Ready _ | Stale _ | Failed _),_ -> None
+
+let apply_board_census_load (state : state) = function
+  | Ok census -> state.board_census <- Masc_tui_fetched.Ready census
+  | Error detail ->
+      state.board_census <- (match Masc_tui_fetched.value state.board_census with
+        | Some census -> Masc_tui_fetched.Stale (census,detail)
+        | None -> Masc_tui_fetched.Failed detail)
+
+let take_http_surface_datasets (state : state) request =
+  let reads,datasets=Surface_read_order.take state.http_surface_reads request in
+  state.http_surface_reads <- reads;
+  (* The terminal bundle may still fail identity admission or omit a result.
+     Keep the old value explicitly unavailable unless actual application below
+     supplies this owned census. No intermediate frame is required. *)
+  if List.mem Surface_read_order.Board_hearths datasets then
+    apply_board_census_load state (Error "Census result was not observed at terminal application");
+  datasets
+
+let finish_http_surface_read (state : state) request =
+  if Surface_read_order.owns_dataset state.http_surface_reads request Surface_read_order.Board_hearths then
+    apply_board_census_load state (Error "Census result was not observed before the read ended");
+  state.http_surface_reads <- Surface_read_order.finish state.http_surface_reads request
+
 let take_early_surface_dataset (state : state) ~ticket ~authority ~identity ~request ~dataset =
   if can_admit_http_read state ~ticket ~authority identity then
     let readings, accepted = Surface_read_order.take_dataset state.http_surface_reads request dataset in
@@ -9781,6 +9820,7 @@ let suspend_workspace_readings state =
   state.live_context <- Masc_tui_context_state.suspend state.live_context;
   supersede_live_context_read state None;
   state.http_surface_reads <- Surface_read_order.invalidate state.http_surface_reads;
+  state.board_census <- Masc_tui_fetched.Absent;
   retire_keeper_message_search state;
   state.workspace_read_authority <- ref ();
   (* Retired completions cannot release these slots. Keep observations and
@@ -13414,7 +13454,7 @@ let create_state
   msg_find_at = None;
   board_sort = Board_hot;
   board_hearth = None;
-  board_hearths = [];
+  board_census = Masc_tui_fetched.Absent;
   board_scroll = 0;
   board_comment_scroll = 0;
   board_comments_focused = false;

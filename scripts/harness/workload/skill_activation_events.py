@@ -29,7 +29,7 @@ from typing import TypeAlias, Union, assert_never
 
 
 EVENTS_FILENAME = "skill-activation-events.jsonl"
-EVENTS_SCHEMA = "masc.skill-activation-events/v1"
+EVENTS_SCHEMA = "masc.skill-activation-events/v2"
 LEDGER_SCHEMA = "masc.skill-activations/v8"
 
 JsonValue: TypeAlias = Union[

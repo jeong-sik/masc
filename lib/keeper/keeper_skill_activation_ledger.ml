@@ -1656,12 +1656,16 @@ let of_projection_yojson json =
    A mutation appends one row. This process keeps each session's applied
    ledger with the file cursor it was read to, and the next read under the
    session lock takes only the rows written after that cursor.
-   [events_schema] stays "masc.skill-activation-events/v1" so upgraded readers
-   keep decoding existing v1 session logs; once [Async_result_delivered] or
-   [Async_action_observed] rows are appended, rollback to earlier binaries is
-   unsupported (see Upgrade notes in changelog.d/43188.md). *)
+   [events_schema] names the row shape of the whole log. A change that makes
+   an existing row undecodable bumps it, so a log of another generation is
+   refused at its header as [Unsupported_schema] instead of at the first row
+   the new decoder cannot read. v2 begins where a composition invocation
+   carries its physical [execution_id]; v1 composition rows have none. A log
+   of another generation is retired by the operator while the server is
+   stopped, and no reader converts it. Rollback to a binary of an earlier
+   generation is unsupported for the same reason. *)
 
-let events_schema = "masc.skill-activation-events/v1"
+let events_schema = "masc.skill-activation-events/v2"
 let events_filename = "skill-activation-events.jsonl"
 let events_path session_dir = Filename.concat session_dir events_filename
 

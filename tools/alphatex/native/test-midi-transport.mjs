@@ -769,6 +769,21 @@ let partialCopies=try arrangement([asset("partialCopies",[
 let partialClock=try MidiCycle(start:0.8,end:1.2,duration:0.4,period:400_000_000,divisor:1)
 let partialWindow=try partialClock.window(partialCopies.timeline.regions[0])
 precondition(partialWindow.scope==Set([0]),"unreachable repeated-copy middle reserved a channel")
+// Original project mapping owns due membership; inverse source arithmetic
+// rounds .02 upward here and would wrongly discard the zero pair's channel.
+let boundarySource=asset("boundarySource",[
+    ["seconds":0.02,"port":2,"bytes":[0x91,64,90,0x81,64,77]],
+    ["seconds":0.04,"port":2,"bytes":[0x90,60,90,0x80,60,77]]])
+var boundaryClip=clip("boundarySource","boundarySource",from:0.01,to:0.2,repeatCount:1);boundaryClip["startSeconds"]=0.03
+let boundaryBase=try arrangement([boundarySource],[boundaryClip],duration:1)
+let boundaryCycle=try MidiCycle(start:0.04,end:0.1,duration:0.06,period:60_000_000,divisor:1)
+let boundaryWindow=try boundaryCycle.window(boundaryBase.timeline.regions[0])
+precondition(boundaryWindow.scope==Set([0,1]),"native-due channel disappeared through inverse source phase")
+let conflictSource=asset("conflict",[["seconds":0.04,"port":2,"bytes":[0x91,64,100]],["seconds":0.08,"port":2,"bytes":[0x81,64,77]]])
+let conflictPath=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString+".json")
+try JSONSerialization.data(withJSONObject:["schemaVersion":3,"duration":1,"sources":[boundarySource,conflictSource],"regions":[boundaryClip,clip("conflict","conflict",from:0,to:1,repeatCount:1)]]).write(to:conflictPath)
+let conflictTimeline=try JSONDecoder().decode(Timeline.self,from:Data(contentsOf:conflictPath));try FileManager.default.removeItem(at:conflictPath)
+mustReject { _ = try MidiTransport(timeline:conflictTimeline,uid:"1",loop:true,coordinated:true,cycle:boundaryCycle) }
 let earlyBase=try arrangement([asset("early",[["seconds":0,"port":2,"bytes":[0xc0,0]],["seconds":0.2+0.1,"port":2,"bytes":[0x90,74,80,0x80,74,77]]])],[clip("early","early",from:0,to:1,repeatCount:1)],duration:1)
 let early=try MidiTransport(timeline:earlyBase.timeline,uid:"1",loop:true,coordinated:true,cycle:commonClock)
 early.prepared=true;early.destination=earlyBase.destination;early.sourceDestinations=earlyBase.sourceDestinations

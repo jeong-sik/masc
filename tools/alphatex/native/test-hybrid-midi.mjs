@@ -46,10 +46,20 @@ func capture(_ group:UInt32,_ channel:UInt32,_ uid:String="42") -> UmpArrangemen
 }
 _ = try HybridMidiTransport(midi:midi,ump:capture(3,0));_ = try HybridMidiTransport(midi:midi,ump:capture(0,1));_ = try HybridMidiTransport(midi:midi,ump:capture(0,0,"43"))
 refuses{_ = try HybridMidiTransport(midi:midi,ump:capture(0,0))}
+let cycle=try MidiCycle(start:0.1,end:0.4,duration:0.3,period:300000000,divisor:1,exactStart:(100000000,1))
+let retained=try HybridMidiTransport(midi:midi,ump:capture(3,0),cycle:cycle)
+precondition(retained.duration==0.3 && retained.cycle != nil && retained.owners[1] is UmpLoopTransport)
+refuses{_ = try HybridMidiTransport(midi:midi,ump:capture(0,0),cycle:cycle)}
+let left=Edge("42",1),right=Edge("43",2),looped=HybridMidiTransport(owners:[left,right],duration:0.3,cycle:cycle)
+try looped.stageCoordinated(at:0.1);try looped.runCoordinated(anchorNanoseconds:100)
+var loopEnds=0;looped.onCoordinatedEnd={loopEnds+=1};left.onCoordinatedEnd?();right.onCoordinatedEnd?()
+precondition(looped.state == .playing && loopEnds==0 && abs(looped.position(at:1_000_000_100)-0.2)<1e-8)
+try looped.stageCoordinated(at:0);precondition(left.stages==[0.1,0] && right.stages==left.stages)
+looped.finish(reason:"stop-loop",error:nil,publish:false);precondition(left.closes==1 && right.closes==1)
 print("HYBRID_MIDI_PASS: actual physical group/channel admission, shared UID streams, common epoch, both completion orders, silent stage, prepare/stage/start failure unwind, reentrant and cleanup error drain")
 `
  await writeFile(join(directory,'main.swift'),swift)
- const files=['MidiTransport.swift','UmpTransport.swift','UmpOutput.swift','UmpRegions.swift','UmpState.swift','HybridMidiTransport.swift'].map(file=>new URL(file,import.meta.url).pathname)
+ const files=['MidiTransport.swift','UmpTransport.swift','UmpOutput.swift','UmpRegions.swift','UmpState.swift','HybridMidiTransport.swift','UmpLoopTransport.swift'].map(file=>new URL(file,import.meta.url).pathname)
  const compiled=spawnSync('xcrun',['swiftc','-D','MIDI_LIBRARY',...files,join(directory,'main.swift'),'-o',join(directory,'probe'),'-framework','CoreMIDI'],{encoding:'utf8'})
  assert.equal(compiled.status,0,compiled.stderr)
  const run=spawnSync(join(directory,'probe'),[],{encoding:'utf8'});assert.equal(run.status,0,run.stdout+run.stderr);process.stdout.write(run.stdout)

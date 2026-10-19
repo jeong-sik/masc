@@ -12,10 +12,6 @@ export function arrangementLoop(project) {
   if (![start, end].every(Number.isFinite) || end <= start || end * 1e9 >= 2 ** 64) throw new Error('Arrangement loop exceeds the native clock precision or range')
   return { start, end, duration: end - start }
 }
-export function requireLoopTransport(project) {
-  if (project.playbackLoop !== undefined) throw new Error('Continuous loop playback for paired captured UMP and practice clicks is not connected yet; use :loop off for this route')
-}
-
 // Intersect finite source repeats with one loop window. At most a leading
 // partial copy, a compressed block of whole copies and a trailing copy remain.
 // Original source timelines are retained; no musical messages are flattened.

@@ -831,8 +831,9 @@ let check_snapshot_header machine_bytes =
 (* Read only, through {!Machine_checkpoint}'s header, meta and {!Dos_snapshot.header}
    -- never {!Dos_snapshot.restore}, which would reconstruct the whole guest
    machine just to say who last saved it. The snapshot header and [meta_of_json]
-   use the same format and schema checks a restore reads with, so what this
-   names is what a restore would accept. A file that is there but will not read
+   use the same format and metadata schema checks as restore. This lookup does
+   not validate payload checksums, decoding, or guest consistency. A file that
+   is there but will not read
    is its own answer: reporting it as "nothing there" would hide it until the
    next run replaced it. *)
 let lookup_slot ~dir slot =

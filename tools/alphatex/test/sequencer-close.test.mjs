@@ -9,6 +9,7 @@ import { arrangementRoute, selectArrangementRoute } from '../arrangement-playbac
 import { arrangementFromPhrase } from '../phrase-arrangement.mjs'
 import * as editor from '../sequencer-editor.mjs'
 import { harmonyAt, PPQ } from '../sequencer-project.mjs'
+import { importMidiSource } from '../midi-source.mjs'
 
 // Exercise actual controller decisions with owned IO substitutes. No terminal
 // output, layout, audio hardware or player behavior is asserted.
@@ -61,7 +62,8 @@ async function controller(options = {}) {
   const prefix = `const {${Object.keys(globalThis[slot]).join(',')}} = globalThis[${JSON.stringify(slot)}];\n`
   const { viewSequencer } = await import('data:text/javascript;base64,' + Buffer.from(prefix + source).toString('base64'))
   const signal = new AbortController()
-  const done = viewSequencer({ root: '/synthetic', output: options.output, midiOutput: options.midiOutput, signal: signal.signal }).finally(() => { delete globalThis[slot] })
+  const done = viewSequencer({ root: '/synthetic', output: options.output, midiOutput: options.midiOutput,
+    initialDocument: options.initialDocument, signal: signal.signal }).finally(() => { delete globalThis[slot] })
   await new Promise(resolve => setImmediate(resolve))
   const key = (name, text = '') => process.stdin.emit('keypress', text, { name })
   return { observed, done, signal, process, key,
@@ -287,4 +289,35 @@ test('close cancels an owned VST and waits for its late completion without openi
   complete({ path: '/late.wav', vst: {} }); await view.done
   assert.equal(view.observed.players, 0)
   assert.equal(view.process.stdin.isRaw, false)
+})
+
+test('WAV export prepares the selected SMF2 pattern with the chosen VST', async t => {
+  const chunk = (name, data) => {
+    const header = Buffer.alloc(8); header.write(name); header.writeUInt32BE(data.length, 4)
+    return Buffer.concat([header, data])
+  }
+  const track = pitch => chunk('MTrk', Buffer.from([0, 0x90, pitch, 100, 0x83, 0x60, 0x80, pitch, 0, 0, 255, 47, 0]))
+  const source = importMidiSource(Buffer.concat([
+    chunk('MThd', Buffer.from([0, 2, 0, 2, 1, 224])), track(60), track(67),
+  ]))
+  const selection = { plugin_path: '/chosen.vst3', plugin_name: null, preset_path: null, name: 'Chosen' }
+  const view = await controller({ initialDocument: source, autoSoundfont: false,
+    native({ preparation }) {
+      return { promise: preparation.promise.then(() => ({ path: '/retained/pattern-2.wav', clippedSamples: 0 })), cancel() {} }
+    } })
+  t.after(async () => { view.signal.abort(); await view.done })
+  view.command('pattern 2'); view.key('i'); await flush()
+  const picker = view.observed.pickers[0]
+  picker.close(); picker.selected(selection); await flush()
+  view.command('stop'); view.command('wave /synthetic/pattern-2.wav'); await flush()
+  const worker = view.observed.workers[0], job = worker.requests.at(-1)
+  assert.equal(worker.requests.length, 2)
+  assert.equal(job.options.format, 'vst-midi')
+  assert.equal(job.options.pattern, 1)
+  assert.deepEqual(job.project, source)
+  assert.deepEqual(view.observed.native.at(-1).selection, selection)
+  worker.emit('message', { id: job.id, ok: true, result: { path: job.path, duration: 0.5 } })
+  await flush()
+  assert.deepEqual(view.observed.copies, [['/retained/pattern-2.wav', '/synthetic/pattern-2.wav']])
+  assert.equal(view.observed.players, 0)
 })

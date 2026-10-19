@@ -315,7 +315,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       case 'save-as': await save(value.path); break
       case 'export': await writeFile(value.path, projectMidi(editor.project), { flag: 'wx', mode: 0o600 }); status = `Exported ${value.path}`; break
       case 'wave': {
-        const job = renderAudio(editor.project)
+        const job = renderAudio(editor.project, { pattern: editor.pattern })
         const wave = await job.promise
         if (accepting && !closed) {
           await copyFile(wave.path, value.path, constants.COPYFILE_EXCL)

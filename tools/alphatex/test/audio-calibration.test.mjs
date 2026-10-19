@@ -24,7 +24,7 @@ async function fixture({ shift=37, polarity=1, silent=false, numer=125, denom=3 
  const blocks=[]
  for(let offset=0;offset<frames;offset+=512)blocks.push({kind:'audio',frameOffset:String(offset),frameCount:Math.min(512,frames-offset),hostTime:String(origin+BigInt(offset)*1000000000n*BigInt(denom)/(BigInt(rate)*BigInt(numer))),deviceSampleTime:String(offset),peaks:[[0,0],[0,0]]})
  await Promise.all([writeFile(join(capture,'audio.wav'),bytes),writeFile(join(capture,'session.json'),JSON.stringify(manifest)),writeFile(join(capture,'audio-blocks.jsonl'),blocks.map(JSON.stringify).join('\n')+'\n'),writeFile(join(capture,'midi.ump.jsonl'),'')])
- const playback={kind:'playing',device:{id:'output',name:'Output',outputs:2},clock:{kind:'mach-host-time',anchor:String(origin),position:0,numer,denom,sampleRate:48000,renderQuantum:256,presentationLatency:.01}}
+ const playback={kind:'playing',device:{id:'output',name:'Output',outputs:2},clock:{kind:'mach-host-time',anchor:String(origin),position:0,numer,denom,sampleRate:48000,renderQuantum:256,bufferFrames:256,presentationLatency:.01}}
  return {directory,selection,reference,playback,bytes,shift,numer,denom,manifest}
 }
 
@@ -94,7 +94,7 @@ test('worker-inspected measured audio placement is explicit, undoable, portable 
   assert.equal(arrangementCommand(arrangementCommand(applied,'undo').editor,'redo').editor.project,applied.project)
   const plan=JSON.parse(await readFile((await prepareArrangementCaptureRegions(applied.project,options)).path))
   assert.ok(plan.regions[0].startSeconds<baseline.regions[0].startSeconds)
-  assert.deepEqual(plan.regions[0].calibrationOutput,{id:'output',sampleRate:48000,renderQuantum:256})
+  assert.deepEqual(plan.regions[0].calibrationOutput,{id:'output',sampleRate:48000,bufferFrames:256})
   assert.deepEqual(plan.umpRegions,baseline.umpRegions)
   assert.deepEqual(plan.umpRegions.sources[0].timeline.packets,packets)
   for(const change of [{input:{...profile.input,id:'other'}},{input:{...profile.input,sampleRate:44100}},{input:{...profile.input,channel:1}}]) {

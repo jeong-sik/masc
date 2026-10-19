@@ -10,39 +10,61 @@ let read_body request reqd f =
     match Yojson.Safe.from_string body with
     | exception Yojson.Json_error detail -> reply request reqd (Error detail)
     | json -> reply request reqd (f json))
-(* Sessions and navigation belong to the lanes the server owns. The request
-   names one; the live browser belongs to the operator. *)
-let server_lane fields =
-  match List.assoc_opt "lane" fields with
-  | Some (`String raw) -> Browser_lane.parse_server_lane raw
-  | Some _ | None -> Error Browser_lane.server_lane_refused
+(* The same choice policy serves the UI and Keeper tools. Selection itself
+   never opens, navigates or closes a browser. *)
+let server_selection ~verb fields =
+  let input = `Assoc (List.filter (fun (key,_) -> List.mem key ["lane";"clientId";"tabId"]) fields) in
+  Result.bind (Browser_surface.parse_request input) (fun request ->
+    let bound = match verb with
+      | Browser_lane.Session_close | Browser_lane.Page_goto _ -> true
+      | Browser_lane.Session_open _ | Browser_lane.Session_status | Browser_lane.Tabs_list
+      | Browser_lane.Page_read _ | Browser_lane.Page_document _ | Browser_lane.Page_downloads _
+      | Browser_lane.Page_capture _ | Browser_lane.Page_scene _ | Browser_lane.Page_interact _
+      | Browser_lane.Page_elements _ | Browser_lane.Page_act _ | Browser_lane.Page_context _
+      | Browser_lane.Page_instruct _ | Browser_lane.Page_locate _ | Browser_lane.Page_extract _ ->
+        Option.is_some request.tab_id in
+    Result.bind (Browser_selection.resolve ~verb ~bound request.route
+      |> Result.map_error Browser_selection.error_message) (fun selected ->
+      match selected.route with
+      | Browser_lane.Automation_route -> Ok (selected, Browser_lane.Server_automation)
+      | Browser_lane.Stagehand_route -> Ok (selected, Browser_lane.Server_stagehand)
+      | Browser_lane.Live_route _ -> Error ("Use a work browser for session management or navigation; " ^ Browser_lane.server_lane_refused)))
+let server_command ~verb ~timeout_sec fields =
+  Result.bind (server_selection ~verb fields) (fun (selected,lane) ->
+    Browser_lane.issue_server_lane lane ~verb ~timeout_sec
+    |> Browser_surface.decode_answer ~lane:(Browser_lane.server_lane_name lane)
+    |> Result.map (function
+      | `Assoc data -> `Assoc (["browserSelection",Browser_selection.to_json selected;
+          "lane",`String (Browser_lane.Lane_name.to_wire (Browser_lane.server_lane_name lane))]
+          @ List.filter (fun (key,_) -> not (List.mem key ["browserSelection";"lane"])) data)
+      | value -> value))
 let session = function
   | `Assoc fields ->
     let headless = match List.assoc_opt "headless" fields with
-      | None -> Ok None | Some (`Bool value) -> Ok (Some value)
+      | None -> Ok (Some false) | Some (`Bool value) -> Ok (Some value)
       | _ -> Error "headless must be boolean" in
-    (match headless, server_lane fields, List.assoc_opt "action" fields with
-     | Error detail, _, _ | Ok _, Error detail, _ -> Error detail
-     | Ok headless, Ok lane, Some (`String "open") ->
-       Browser_lane.issue_server_lane lane ~verb:(Browser_lane.Session_open {headless}) ~timeout_sec:60.
-       |> Browser_surface.decode_answer ~lane:(Browser_lane.server_lane_name lane)
-     | Ok _, Ok lane, Some (`String "close") ->
-       Browser_lane.issue_server_lane lane ~verb:Browser_lane.Session_close ~timeout_sec:60.
-       |> Browser_surface.decode_answer ~lane:(Browser_lane.server_lane_name lane)
-     | Ok _, Ok _, _ -> Error "action must be open or close")
+    (match headless, List.assoc_opt "action" fields with
+     | Error detail, _ -> Error detail
+     | Ok headless, Some (`String "open") ->
+       server_command ~verb:(Browser_lane.Session_open {headless}) ~timeout_sec:60. fields
+     | Ok _, Some (`String "close") ->
+       server_command ~verb:Browser_lane.Session_close ~timeout_sec:60. fields
+     | Ok _, _ -> Error "action must be open or close")
   | _ -> Error "body must be an object"
 let goto = function
   | `Assoc fields ->
-    (match server_lane fields, List.assoc_opt "url" fields with
-     | Error detail, _ -> Error detail
-     | Ok lane, Some (`String url) ->
-       let uri = Uri.of_string url in
-       (match Uri.scheme uri, Uri.host uri with
-        | Some ("http" | "https"), Some host when host <> "" ->
-          Browser_lane.issue_server_lane lane ~verb:(Browser_lane.Page_goto { url; tab_id = None }) ~timeout_sec:60.
-          |> Browser_surface.decode_answer ~lane:(Browser_lane.server_lane_name lane)
-        | _ -> Error "url must be an absolute HTTP(S) URL")
-     | Ok _, _ -> Error "url is required")
+    (match List.assoc_opt "url" fields, List.assoc_opt "tabId" fields with
+     | Some (`String url), tab ->
+       let tab_id = match tab with
+         | None -> Ok None | Some (`Int id) when id >= 0 -> Ok (Some id)
+         | Some _ -> Error "tabId must be a nonnegative integer" in
+       Result.bind tab_id (fun tab_id ->
+         let uri = Uri.of_string url in
+         match Uri.scheme uri, Uri.host uri with
+         | Some ("http" | "https"), Some host when host <> "" ->
+           server_command ~verb:(Browser_lane.Page_goto {url;tab_id}) ~timeout_sec:60. fields
+         | _ -> Error "url must be an absolute HTTP(S) URL")
+     | (Some _ | None), _ -> Error "url is required")
   | _ -> Error "body must be an object"
 (* What the connection list answers. The connected clients are this server's
    own list. The BiDi host's state is that host's record on disk, which also
@@ -50,10 +72,16 @@ let goto = function
 let clients_listing ~base_path =
   let host = Browser_bidi_host_status.observe ~base_path ~configuration:(Runtime.browser_configuration ()) in
   (* The list the report was made from, so the two say of one list. *)
+  let clients = Browser_bidi_host_status.listed_clients host in
+  let snapshot = { (Browser_selection.snapshot ()) with live_clients=clients } in
+  let decision verb = match Browser_selection.choose ~verb ~bound:false ~snapshot Browser_selection.Automatic with
+    | Ok selected -> `Assoc ["ok",`Bool true;"data",Browser_selection.to_json selected]
+    | Error error -> `Assoc ["ok",`Bool false;"error",Browser_selection.error_to_json error] in
   `Assoc
-    [ "clients"
-    , `List (List.map Browser_lane.client_json (Browser_bidi_host_status.listed_clients host))
-    ; "bidiHost", Browser_bidi_host_status.to_json host ]
+    [ "clients", `List (List.map Browser_lane.client_json clients)
+    ; "bidiHost", Browser_bidi_host_status.to_json host
+    ; "automatic", `Assoc ["browse",decision Browser_lane.Tabs_list;
+        "work",decision (Browser_lane.Session_open {headless=Some false})] ]
 let add_routes router =
   router
   |> Http.Router.get "/api/v1/dashboard/browser-lane/clients"

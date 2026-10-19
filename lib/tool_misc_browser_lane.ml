@@ -29,26 +29,6 @@ let make_workflow_err ~tool_name ~start_time message =
     message
 ;;
 
-(* The lane names are the closed set the state module admits; anything else
-   is refused here rather than queued into a lane that cannot exist. *)
-(* [default] is the lane a missing [lane] means, the one each tool declares. *)
-let route_of ~default ~tool_name ~start_time args =
-  match args with
-  | `Assoc fields ->
-    let lane = match List.assoc_opt "lane" fields with
-      | None -> Some default
-      | Some (`String raw) -> Browser_lane.Lane_name.of_wire raw
-      | Some _ -> None in
-    (match lane with
-     | Some Browser_lane.Lane_name.Live -> Ok (Browser_lane.Live_route None)
-     | Some Browser_lane.Lane_name.Automation -> Ok Browser_lane.Automation_route
-     | Some Browser_lane.Lane_name.Stagehand -> Ok Browser_lane.Stagehand_route
-     | None ->
-       Error (make_input_err ~tool_name ~start_time ("lane must be " ^ Browser_lane.Lane_name.expected)))
-  | _ -> Error (make_input_err ~tool_name ~start_time "browser arguments must be an object")
-;;
-
-
 (* Decode the host's effect receipt at the wire boundary. A created tab is
    a confirmed effect even when navigation or its page summary failed. *)
 let backend_failure_phase fields =
@@ -98,11 +78,15 @@ let tool_request args =
     | `Assoc fields -> `Assoc (List.filter (fun (key, _) -> List.mem key ["lane"; "tabId"; "clientId"]) fields)
     | other -> other in
   Browser_surface.parse_request input
-let add_client target = function
+let add_client ?selection target = function
   | Browser_lane.Answered (`Assoc envelope) ->
+    let binding = ["lane", `String (Browser_lane.Lane_name.to_wire (Browser_lane.target_lane target))]
+      @ (match selection with None -> [] | Some selected ->
+          ["browserSelection", Browser_selection.to_json selected]) in
     let data = match List.assoc_opt "data" envelope with
-      | Some (`Assoc fields) -> `Assoc (Browser_lane.with_connection_fields target fields)
-      | Some (`List tabs) -> `Assoc (Browser_lane.target_connection_fields target @ ["tabs", `List tabs])
+      | Some (`Assoc fields) -> `Assoc (binding @ Browser_lane.with_connection_fields target
+          (List.filter (fun (key,_) -> not (List.mem key ["lane";"browserSelection"])) fields))
+      | Some (`List tabs) -> `Assoc (binding @ Browser_lane.target_connection_fields target @ ["tabs", `List tabs])
       | Some other -> other | None -> `Null in
     Browser_lane.Answered (`Assoc (("data", data) :: List.remove_assoc "data" envelope))
   | ( Browser_lane.Answered _ | Browser_lane.Timed_out
@@ -314,8 +298,15 @@ let selection_error ?bidi_start ~base_path ~tool_name ~start_time error =
       ~listing:["servingClients", `List (List.map Browser_lane.client_json serving_clients);
                 "clients", `List (List.map Browser_lane.client_json listed)]
 
+let browser_choice_error ~tool_name ~start_time error =
+  let data = Browser_selection.error_to_json error in
+  Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Workflow_rejection
+    ~effect_disposition:Tool_result.Proven_pre_effect ~data (Yojson.Safe.to_string data)
+
 let read_failure ~base_path ~tool_name ~start_time = function
   | Browser_surface.Unselected error -> selection_error ~base_path ~tool_name ~start_time error
+  | Browser_surface.Unchosen error ->
+      browser_choice_error ~tool_name ~start_time error
   | Browser_surface.Unobserved detail -> make_workflow_err ~tool_name ~start_time detail
   | Browser_surface.Unavailable detail ->
     Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Dependency_unavailable detail
@@ -324,39 +315,50 @@ let handle_tabs ~base_path ~tool_name ~start_time args : Tool_result.result =
   match tool_request args with
   | Error error -> make_input_err ~tool_name ~start_time error
   | Ok request ->
-    match Browser_lane.resolve_target ~verb:Browser_lane.Tabs_list request.route with
-    | Error error -> selection_error ~base_path ~tool_name ~start_time error
-    | Ok target ->
+    match Browser_surface.resolve_target ~verb:Browser_lane.Tabs_list request with
+    | Error error -> read_failure ~base_path ~tool_name ~start_time error
+    | Ok (selected, target) ->
       match Browser_lane.issue_for ~target ~verb:Browser_lane.Tabs_list ~timeout_sec:default_timeout_sec with
       | Error error -> selection_error ~base_path ~tool_name ~start_time error
       | Ok answer ->
-        answer_to_result ~lane:(Browser_lane.target_lane target) ~tool_name ~start_time (add_client target answer)
+        answer_to_result ~lane:(Browser_lane.target_lane target) ~tool_name ~start_time (add_client ~selection:selected target answer)
 ;;
 
-(* Sessions and navigations belong to the lanes the server owns; the live
-   browser belongs to the operator, and its lane refuses them too
-   (verb_allowed_on_live). A missing lane is automation, as both tools
-   declare. *)
+(* Initial work-session selection shares the discovery policy. Once a tab
+   is observed, its concrete lane/client must accompany every later action. *)
 let issue_on_server_lane ~tool_name ~start_time args ~verb ~timeout_sec =
-  let lane = match args with
-    | `Assoc fields ->
-      (match List.assoc_opt "lane" fields with
-       | None -> Ok Browser_lane.Server_automation
-       | Some (`String raw) -> Browser_lane.parse_server_lane raw
-       | Some _ -> Error Browser_lane.server_lane_refused)
-    | _ -> Error "browser arguments must be an object" in
-  match lane with
+  match tool_request args with
   | Error detail -> make_input_err ~tool_name ~start_time detail
-  | Ok lane ->
-    answer_to_result ~lane:(Browser_lane.server_lane_name lane) ~tool_name ~start_time
-      (Browser_lane.issue_server_lane lane ~verb ~timeout_sec)
+  | Ok request ->
+    let bound = match verb with
+      | Browser_lane.Session_close | Browser_lane.Page_goto _ -> true
+      | Browser_lane.Session_open _ | Browser_lane.Session_status | Browser_lane.Tabs_list
+      | Browser_lane.Page_read _ | Browser_lane.Page_document _ | Browser_lane.Page_downloads _
+      | Browser_lane.Page_capture _ | Browser_lane.Page_scene _ | Browser_lane.Page_interact _
+      | Browser_lane.Page_elements _ | Browser_lane.Page_act _ | Browser_lane.Page_context _
+      | Browser_lane.Page_instruct _ | Browser_lane.Page_locate _ | Browser_lane.Page_extract _ ->
+        Option.is_some request.tab_id in
+    match Browser_selection.resolve ~verb ~bound request.route with
+    | Error error ->
+      browser_choice_error ~tool_name ~start_time error
+    | Ok selected ->
+      let owned = match selected.route with
+        | Browser_lane.Automation_route -> Some (Browser_lane.Server_automation, Browser_lane.Automation)
+        | Browser_lane.Stagehand_route -> Some (Browser_lane.Server_stagehand, Browser_lane.Stagehand)
+        | Browser_lane.Live_route _ -> None in
+      match owned with
+      | None -> make_input_err ~tool_name ~start_time
+          ("Use an owned work browser for session management or navigation; " ^ Browser_lane.server_lane_refused)
+      | Some (lane, target) ->
+        answer_to_result ~lane:(Browser_lane.server_lane_name lane) ~tool_name ~start_time
+          (Browser_lane.issue_server_lane lane ~verb ~timeout_sec |> add_client ~selection:selected target)
 ;;
 
 let handle_session ~tool_name ~start_time args : Tool_result.result =
   let action = get_string args "action" "" in
   match action with
   | "open" ->
-    let headless = Some (get_bool args "headless" true) in
+    let headless = Some (get_bool args "headless" false) in
     issue_on_server_lane ~tool_name ~start_time args ~verb:(Browser_lane.Session_open { headless }) ~timeout_sec:60.0
   | "close" -> issue_on_server_lane ~tool_name ~start_time args ~verb:Browser_lane.Session_close ~timeout_sec:60.0
   | "status" ->
@@ -427,9 +429,16 @@ let handle_read ?keeper_name ~base_path ~tool_name ~start_time args : Tool_resul
   match tool_request args with
   | Error error -> make_input_err ~tool_name ~start_time error
   | Ok request ->
+    let missing_binding = match request.route,request.tab_id with
+      | Browser_selection.Automatic,Some _ -> true
+      | Browser_selection.Automatic,None | Browser_selection.Exact _,_ -> false in
+    if missing_binding then
+      read_failure ~base_path ~tool_name ~start_time (Browser_surface.Unchosen Browser_selection.Binding_required)
+    else
     let automation = match request.route with
-      | Browser_lane.Automation_route -> true
-      | Browser_lane.Live_route _ | Browser_lane.Stagehand_route -> false in
+      | Browser_selection.Exact Browser_lane.Automation_route -> true
+      | Browser_selection.Automatic
+      | Browser_selection.Exact (Browser_lane.Live_route _ | Browser_lane.Stagehand_route) -> false in
     match Browser_lane.Action.parse_frame_path args with
     | Error detail -> make_input_err ~tool_name ~start_time detail
     | Ok frame_path ->
@@ -460,9 +469,15 @@ let handle_read ?keeper_name ~base_path ~tool_name ~start_time args : Tool_resul
               Error "framePath supports text, elements and frames; dialogs belong to the top-level tab" in
           match mode with
           | Error detail -> make_input_err ~tool_name ~start_time detail
-          | Ok mode -> answer_to_result ~lane:Browser_lane.Lane_name.Automation ~tool_name ~start_time
-              (Browser_lane.issue_automation
-                ~verb:(Browser_lane.Page_context {tab_id;frame_path;mode}) ~timeout_sec:default_timeout_sec))
+          | Ok mode ->
+            let verb = Browser_lane.Page_context {tab_id;frame_path;mode} in
+            (match Browser_surface.resolve_target ~verb request with
+             | Error error -> read_failure ~base_path ~tool_name ~start_time error
+             | Ok (selected,target) ->
+               match Browser_lane.issue_for ~target ~verb ~timeout_sec:default_timeout_sec with
+               | Error error -> selection_error ~base_path ~tool_name ~start_time error
+               | Ok answer -> answer_to_result ~lane:(Browser_lane.target_lane target) ~tool_name ~start_time
+                   (add_client ~selection:selected target answer)))
     in
     if frame_path <> [] then contextual_read ()
     else
@@ -506,13 +521,13 @@ let handle_read ?keeper_name ~base_path ~tool_name ~start_time args : Tool_resul
        | _ -> make_input_err ~tool_name ~start_time "scene requires an observed tabId")
     in
     let read_top_level verb =
-      match Browser_lane.resolve_target ~verb request.route with
-      | Error error -> selection_error ~base_path ~tool_name ~start_time error
-      | Ok target ->
+      match Browser_surface.resolve_target ~verb request with
+      | Error error -> read_failure ~base_path ~tool_name ~start_time error
+      | Ok (selected, target) ->
         match Browser_lane.issue_for ~target ~verb ~timeout_sec:default_timeout_sec with
         | Error error -> selection_error ~base_path ~tool_name ~start_time error
         | Ok answer ->
-          answer_to_result ~lane:(Browser_lane.target_lane target) ~tool_name ~start_time (add_client target answer)
+          answer_to_result ~lane:(Browser_lane.target_lane target) ~tool_name ~start_time (add_client ~selection:selected target answer)
     in
     match top with
     | `Scene -> read_scene Browser_lane.Content
@@ -520,8 +535,7 @@ let handle_read ?keeper_name ~base_path ~tool_name ~start_time args : Tool_resul
     | `Downloads ->
       if not automation then make_input_err ~tool_name ~start_time "downloads require automation"
       else (match get_int_opt args "tabId" with
-        | Some tab_id when tab_id >= 0 -> answer_to_result ~lane:Browser_lane.Lane_name.Automation ~tool_name ~start_time
-            (Browser_lane.issue_automation ~verb:(Browser_lane.Page_downloads {tab_id}) ~timeout_sec:default_timeout_sec)
+        | Some tab_id when tab_id >= 0 -> read_top_level (Browser_lane.Page_downloads {tab_id})
         | _ -> make_input_err ~tool_name ~start_time "downloads require an observed nonnegative tabId")
     | `Screenshot ->
       (match keeper_name, get_int_opt args "tabId" with
@@ -562,35 +576,33 @@ let handle_read_with_retention ~base_path ?keeper_name ~tool_name ~start_time ar
   |> retain_read_result ~base_path ~tool_name ~start_time args
 ;;
 
-let act_route ~tool_name ~start_time args =
-  match route_of ~default:Browser_lane.Lane_name.Automation ~tool_name ~start_time args with
-  | Error error -> Error error
-  | Ok route ->
-    let failure detail = Error (make_input_err ~tool_name ~start_time detail) in
-    (match Browser_surface.parse_client_id args with
-     | Error detail -> failure detail
-     | Ok (Some client_id) -> (match route with
-         | Browser_lane.Live_route _ -> Ok (Browser_lane.Live_route (Some client_id))
-         | Browser_lane.Automation_route | Browser_lane.Stagehand_route -> failure "clientId requires live lane")
-     | Ok None -> (match route with
-         | Browser_lane.Live_route _ -> failure "live open_tab requires an explicit observed clientId"
-         | Browser_lane.Automation_route | Browser_lane.Stagehand_route -> Ok route))
+let act_route ~tool_name ~start_time args action =
+  match tool_request args with
+  | Error detail -> Error (make_input_err ~tool_name ~start_time detail)
+  | Ok request ->
+    let bound = match action with Browser_lane.Action.Open_tab _ -> false | On_tab _ -> true in
+    match Browser_selection.resolve ~verb:(Browser_lane.Page_act action) ~bound request.route with
+    | Error error ->
+        Error (browser_choice_error ~tool_name ~start_time error)
+    | Ok selected ->
+      match selected.route with
+      | Browser_lane.Live_route None -> Error (make_input_err ~tool_name ~start_time
+          "live open_tab requires an explicit observed clientId")
+      | Browser_lane.Live_route (Some _) | Browser_lane.Automation_route | Browser_lane.Stagehand_route -> Ok selected
 
 let handle_act_with_phase ?upload_paths ~base_path ~tool_name ~start_time args =
   let pre_error detail =
     make_workflow_err ~tool_name ~start_time detail, Tool_result.Proven_pre_effect in
-  match act_route ~tool_name ~start_time args, Browser_lane.Action.parse args with
-  | Error error, _ -> error, Tool_result.Proven_pre_effect
-  | _, Error detail -> make_input_err ~tool_name ~start_time detail, Tool_result.Proven_pre_effect
-  | Ok _, Ok (Browser_lane.Action.On_tab {interaction=Upload _;_}) when upload_paths = None ->
+  match Browser_lane.Action.parse args with
+  | Error detail -> make_input_err ~tool_name ~start_time detail, Tool_result.Proven_pre_effect
+  | Ok action ->
+  match act_route ~tool_name ~start_time args action with
+  | Error error -> error, Tool_result.Proven_pre_effect
+  | Ok _ when (match action with Browser_lane.Action.On_tab {interaction=Upload _;_} -> upload_paths=None
+        | Open_tab _ | On_tab {interaction=(Click _|Fill _|Press _|Select _|Scroll _|Accept_dialog _|Dismiss_dialog|Back|Forward|Reload|Close_tab);_} -> false) ->
     pre_error "upload requires an authoritative Keeper file context"
-  | Ok route, Ok (( Browser_lane.Action.Open_tab _
-                  | Browser_lane.Action.On_tab
-                      { interaction =
-                          ( Click _ | Fill _ | Press _ | Select _ | Scroll _ | Upload _
-                          | Accept_dialog _ | Dismiss_dialog | Back | Forward | Reload
-                          | Close_tab )
-                      ; _ } ) as action) ->
+  | Ok selected ->
+    let route = selected.Browser_selection.route in
     let action = match action, upload_paths with
       | Browser_lane.Action.On_tab ({interaction=Upload {selector;_};_} as target), Some paths ->
         Browser_lane.Action.On_tab {target with interaction=Upload {selector;paths}}
@@ -616,7 +628,9 @@ let handle_act_with_phase ?upload_paths ~base_path ~tool_name ~start_time args =
         | Browser_lane.Answered (`Assoc fields), _ when
             List.assoc_opt "ok" fields = Some (`Bool false) -> backend_failure_phase fields
         | (Browser_lane.Timed_out | Browser_lane.Answered _), _ -> Tool_result.Effect_outcome_unknown in
-      answer_to_result ~lane:(Browser_lane.route_lane_name route) ~tool_name ~start_time (add_client target answer), phase
+      let selected = Browser_selection.bind_target selected target in
+      answer_to_result ~lane:(Browser_lane.target_lane target) ~tool_name ~start_time
+        (add_client ~selection:selected target answer), phase
 ;;
 let handle_act ~base_path ~tool_name ~start_time args =
   fst (handle_act_with_phase ~base_path ~tool_name ~start_time args)
@@ -652,22 +666,26 @@ let handle_interact_with_phase ?actor ~base_path ~tool_name ~start_time args =
   | Ok request ->
     let verb = Browser_lane.Page_interact {tab_id=request.tab_id;
       expected_url=request.expected_url; action=request.action} in
-    let issued = Result.bind (Browser_lane.resolve_target ~verb request.route) (fun target ->
+    let surface_request : Browser_surface.request = {route=request.route;tab_id=Some request.tab_id} in
+    let issued = Result.bind (Browser_surface.resolve_target ~verb surface_request) (fun (selected, target) ->
       Browser_lane.issue_for_actor ~actor ~target ~verb
         ~timeout_sec:default_timeout_sec
-      |> Result.map (fun answer -> target, answer)) in
+      |> Result.map_error (fun error -> Browser_surface.Unselected error)
+      |> Result.map (fun answer -> selected, target, answer)) in
     (match issued with
-     | Error error ->
+     | Error (Browser_surface.Unselected error) ->
        selection_error ?bidi_start:(bidi_start_for verb error) ~base_path ~tool_name ~start_time error,
        Tool_result.Proven_pre_effect
-     | Ok (target, answer) ->
+     | Error ((Browser_surface.Unchosen _ | Browser_surface.Unobserved _ | Browser_surface.Unavailable _) as error) ->
+       read_failure ~base_path ~tool_name ~start_time error, Tool_result.Proven_pre_effect
+     | Ok (selected, target, answer) ->
        let phase = match answer with
          | Browser_lane.Rejected_before_effect _ | Browser_lane.Lane_absent -> Tool_result.Proven_pre_effect
          | Browser_lane.Answered (`Assoc fields) when
              List.assoc_opt "ok" fields = Some (`Bool false)
              && List.assoc_opt "effectPhase" fields = Some (`String "not_started") -> Tool_result.Proven_pre_effect
          | Browser_lane.Answered _ | Browser_lane.Refused _ | Browser_lane.Timed_out -> Tool_result.Effect_outcome_unknown in
-       answer_to_result ~lane:(Browser_lane.target_lane target) ~tool_name ~start_time (add_client target answer), phase)
+       answer_to_result ~lane:(Browser_lane.target_lane target) ~tool_name ~start_time (add_client ~selection:selected target answer), phase)
 ;;
 let handle_interact ?actor ~base_path ~tool_name ~start_time args =
   fst (handle_interact_with_phase ?actor ~base_path ~tool_name ~start_time args)

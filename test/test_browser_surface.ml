@@ -1,3 +1,4 @@
+module Browser_selection = Masc.Browser_selection
 (* This standalone fixture explicitly enables new Browser work. *)
 let () = Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled))
 
@@ -104,16 +105,13 @@ let test_tool_input_recovery () =
         Yojson.Safe.Util.(data |> member "clientId" |> to_string);
       check string "and a supplied transport by the route's" "web_extension"
         Yojson.Safe.Util.(data |> member "transport" |> to_string);
-      let occurrences needle text =
-        let limit = String.length text - String.length needle in
-        let rec count index found =
-          if index > limit then found
-          else count (index + 1)
-            (if String.sub text index (String.length needle) = needle then found + 1 else found) in
-        count 0 0 in
-      let recorded = Yojson.Safe.to_string data in
-      check int "each name appears once in what the Keeper is told" 2
-        (occurrences {|"clientId":|} recorded + occurrences {|"transport":|} recorded)))
+      let fields = Yojson.Safe.Util.to_assoc data in
+      check int "one authoritative top-level connection ID" 1
+        (List.length (List.filter (fun (key,_) -> key="clientId") fields));
+      check int "one authoritative top-level transport" 1
+        (List.length (List.filter (fun (key,_) -> key="transport") fields));
+      check string "selection receipt binds that same connection" valid_id
+        Yojson.Safe.Util.(data |> member "browserSelection" |> member "clientId" |> to_string)))
 (* The scene and the screenshot are rebuilt around the route's connection
    fields, so each names the live connection once, whatever the browser sent
    under those names. *)
@@ -128,7 +126,7 @@ let test_live_scene_and_capture_state_their_connection () =
          engine_version="fixture"} in
       Eio.Switch.on_release sw (fun () -> ignore (Browser_lane.disconnect_client ~client_id));
       ignore (Browser_lane.take_command ~client_info:info ~window_sec:0.001);
-      let request : Surface.request = {route=Browser_lane.Live_route (Some client_id);tab_id=Some 7} in
+      let request : Surface.request = {route=Browser_selection.Exact (Browser_lane.Live_route (Some client_id));tab_id=Some 7} in
       let forged = ["clientId",`String "forged";"transport",`String "carrier_pigeon"] in
       let viewport = `Assoc ["documentId",`String "fixture";"width",`Int 800;"height",`Int 600;
         "scrollX",`Int 0;"scrollY",`Int 0] in
@@ -191,7 +189,7 @@ let with_browser ?unavailable tabs f =
         | _ -> fail "unexpected browser command"));
       Eio.Switch.on_release sw (fun () -> Browser_lane.install_automation_executor None);
       f reads))
-let request tab_id : Surface.request = { route = Browser_lane.Automation_route; tab_id }
+let request tab_id : Surface.request = { route = Browser_selection.Exact Browser_lane.Automation_route; tab_id }
 let read_ok request = match Surface.read request with
   | Ok data -> data | Error failure -> fail (Surface.failure_message failure)
 let selection data = Yojson.Safe.Util.member "selection" data
@@ -339,7 +337,7 @@ let test_live_read_pins_client_between_hops () =
         ignore (Browser_lane.disconnect_client ~client_id:info.Browser_lane.client_id))) [first;second];
       ignore (Browser_lane.take_command ~client_info:first ~window_sec:0.001);
       let pending = Eio.Fiber.fork_promise ~sw (fun () ->
-        Surface.read {route=Browser_lane.Live_route None; tab_id=Some 1}) in
+        Surface.read {route=Browser_selection.Exact (Browser_lane.Live_route None); tab_id=None}) in
       let take info = match Browser_lane.take_command ~client_info:info ~window_sec:1. with
         | Ok (Some command) -> command | _ -> fail "selected client command missing" in
       let tabs_command = take first in
@@ -357,7 +355,7 @@ let test_live_read_pins_client_between_hops () =
       match Eio.Promise.await pending with
       | Ok (Ok data) ->
         check bool "new live read is refused after off" true
-          (Result.is_error (Surface.read {route=Browser_lane.Live_route (Some first.client_id);tab_id=Some 1}));
+          (Result.is_error (Surface.read {route=Browser_selection.Exact (Browser_lane.Live_route (Some first.client_id));tab_id=Some 1}));
         check bool "reply identifies the original single client" true
           (Yojson.Safe.Util.member "clientId" data = `String (Browser_lane.client_id_to_string first.client_id));
         check bool "and how that browser is reached" true
@@ -383,7 +381,7 @@ let test_keeper_discovers_clients_without_dispatch () =
           ignore (Browser_lane.disconnect_client ~client_id:info.Browser_lane.client_id));
         ignore (Browser_lane.take_command ~client_info:info ~window_sec:0.001)) clients;
       let result = Masc.Tool_misc_browser_lane.handle_tabs
-        ~base_path:no_workspace ~tool_name:"BrowserTabs" ~start_time:(Tool_timing.start ()) (`Assoc []) in
+        ~base_path:no_workspace ~tool_name:"BrowserTabs" ~start_time:(Tool_timing.start ()) (`Assoc ["lane",`String "live"]) in
       let data = Tool_result.data result in
       check bool "ambiguous failure stays actionable" true
         (Yojson.Safe.Util.member "error" data = `String "ambiguous_browser_clients");
@@ -514,7 +512,7 @@ let test_keeper_hears_why_no_browser_is_connected () =
       Tool_result.data result
     | _ -> fail "a browser tool succeeded with no browser connected" in
   let tabs () = rejected (Masc.Tool_misc_browser_lane.handle_tabs ~base_path:base
-    ~tool_name:"BrowserTabs" ~start_time:(Tool_timing.start ()) (`Assoc [])) in
+    ~tool_name:"BrowserTabs" ~start_time:(Tool_timing.start ()) (`Assoc ["lane",`String "live"])) in
   let host_field data key = U.(data |> member "host" |> member key) in
   let data = tabs () in
   check string "the case is named" "no_live_client" U.(data |> member "error" |> to_string);
@@ -887,7 +885,7 @@ let test_keeper_hears_why_the_bidi_host_is_gone () =
       let host_client_id = match Lane.client_id_of_string host_id with
         | Ok id -> id | Error detail -> fail detail in
       let tabs () = Tools.handle_tabs ~base_path:workspace ~tool_name:"BrowserTabs"
-        ~start_time:(Tool_timing.start ()) (`Assoc []) in
+        ~start_time:(Tool_timing.start ()) (`Assoc ["lane",`String "live"]) in
       let selected = ["clientId",`String host_id] in
       let rejected result =
         match result with
@@ -1099,7 +1097,7 @@ let test_compound_read_keeps_admission () =
               "url",`String "https://example.org/";"title",`String "accepted";
               "text",`String "accepted page";"chars",`Int 13;"truncated",`Bool false]])
           | _ -> fail "compound read sent a different command"));
-        let request : Surface.request = {route;tab_id=None} in
+        let request : Surface.request = {route=Browser_selection.Exact route;tab_id=None} in
         let result = match Surface.read request with Ok value -> value | Error failure -> fail (Surface.failure_message failure) in
         check string "accepted page survives activity publication between hops" "accepted page"
           Yojson.Safe.Util.(member "page" result |> member "text" |> to_string);
@@ -1110,7 +1108,100 @@ let test_compound_read_keeps_admission () =
          Browser_lane.Stagehand_route,(fun executor -> Browser_lane.install_stagehand_executor
            (Option.map (fun execute ~actor:_ verb -> execute verb) executor))]))
 
+let test_automatic_selection_keeps_observed_browser () =
+  Eio_main.run (fun env ->
+    Time_compat.set_clock env#clock;
+    Eio.Switch.run (fun sw ->
+      let calls = ref [] in
+      let opened = ref true in
+      let execute verb =
+        calls := verb :: !calls;
+        match verb with
+        | Browser_lane.Tabs_list -> answer (`List [tab 7 "https://example.org/" true])
+        | Browser_lane.Page_read _ -> answer (`Assoc ["tabId",`Int 7;"url",`String "https://example.org/";
+            "title",`String "Page";"text",`String "original browser";"chars",`Int 16;"truncated",`Bool false])
+        | Browser_lane.Page_interact _ -> answer (`Assoc ["tabId",`Int 7;"url",`String "https://example.org/"])
+        | Browser_lane.Page_document _ | Browser_lane.Page_downloads _ | Browser_lane.Page_capture _
+        | Browser_lane.Page_scene _ | Browser_lane.Session_open _ | Browser_lane.Session_close
+        | Browser_lane.Session_status | Browser_lane.Page_goto _ | Browser_lane.Page_elements _
+        | Browser_lane.Page_act _ | Browser_lane.Page_context _ | Browser_lane.Page_instruct _
+        | Browser_lane.Page_locate _ | Browser_lane.Page_extract _ ->
+          fail "unexpected command during automatic browser scenario" in
+      Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled));
+      Browser_lane.install_stagehand_executor (Some (fun ~actor:_ verb -> execute verb));
+      Browser_lane.install_server_session_observer Browser_lane.Server_stagehand
+        (Some (fun () -> if !opened then Browser_lane.Browser_open else Browser_lane.Browser_closed));
+      Eio.Switch.on_release sw (fun () ->
+        Browser_lane.install_stagehand_executor None;
+        Browser_lane.install_server_session_observer Browser_lane.Server_stagehand None;
+        Browser_lane.install_automation_executor None;
+        Browser_lane.install_server_session_observer Browser_lane.Server_automation None);
+      let initial = read_ok {route=Browser_selection.Automatic;tab_id=None} in
+      check string "discovery binds its actual browser" "stagehand"
+        Yojson.Safe.Util.(initial |> member "browserSelection" |> member "lane" |> to_string);
+      check string "the active page is read on that browser" "original browser"
+        Yojson.Safe.Util.(initial |> member "page" |> member "text" |> to_string);
+      let before = List.length !calls in
+      check bool "a browser-local tab cannot be automatically rerouted" true
+        (Surface.read {route=Browser_selection.Automatic;tab_id=Some 7}
+          = Error (Surface.Unchosen Browser_selection.Binding_required));
+      check int "missing binding dispatches nothing" before (List.length !calls);
+      let request = match Masc.Browser_interaction.parse (`Assoc ["lane",`String "stagehand";
+          "tabId",`Int 7;"action",`String "scroll";"x",`Int 0;"y",`Int 100]) with
+        | Ok request -> request | Error detail -> fail detail in
+      let receipt = match Masc.Browser_interaction.perform request with
+        | Ok receipt -> receipt | Error detail -> fail detail in
+      check string "mutation receipt retains exact observed browser" "stagehand"
+        Yojson.Safe.Util.(receipt |> member "browserSelection" |> member "lane" |> to_string);
+      opened := false;
+      Browser_lane.install_stagehand_executor None;
+      Browser_lane.install_automation_executor (Some execute);
+      Browser_lane.install_server_session_observer Browser_lane.Server_automation (Some (fun () -> Browser_lane.Browser_open));
+      let before = List.length !calls in
+      check bool "a lost owner does not fall back to another open browser" true
+        (Result.is_error (Masc.Browser_interaction.perform request));
+      check int "lost-owner mutation is never dispatched elsewhere" before (List.length !calls)))
+
+let test_automatic_recovery_reaches_keeper () =
+  Eio_main.run (fun env ->
+    Time_compat.set_clock env#clock;
+    Eio.Switch.run (fun sw ->
+      let dispatched = ref 0 in
+      let execute _ = incr dispatched; fail "ambiguous or unbound request reached a browser" in
+      Browser_lane.install_automation_executor (Some execute);
+      Browser_lane.install_stagehand_executor (Some (fun ~actor:_ verb -> execute verb));
+      List.iter (fun lane -> Browser_lane.install_server_session_observer lane
+        (Some (fun () -> Browser_lane.Browser_open)))
+        [Browser_lane.Server_automation;Browser_lane.Server_stagehand];
+      Eio.Switch.on_release sw (fun () ->
+        Browser_lane.install_automation_executor None; Browser_lane.install_stagehand_executor None;
+        List.iter (fun lane -> Browser_lane.install_server_session_observer lane None)
+          [Browser_lane.Server_automation;Browser_lane.Server_stagehand]);
+      let module Tools = Masc.Tool_misc_browser_lane in
+      let run handler fields = handler ~tool_name:"Browser" ~start_time:(Tool_timing.start ()) (`Assoc fields) in
+      let inspect result =
+        check bool "request is refused" true (Tool_result.is_failed result);
+        let execution = Masc.Keeper_tool_execution.of_tool_result result in
+        Yojson.Safe.from_string execution.raw_output in
+      List.iter (fun result ->
+        let raw = inspect result in
+        check string "Keeper sees why a selection is needed" "ambiguous_browsers"
+          Yojson.Safe.Util.(raw |> member "code" |> to_string);
+        check int "Keeper receives concrete candidates for recovery" 2
+          Yojson.Safe.Util.(raw |> member "browsers" |> to_list |> List.length))
+        [run (Tools.handle_tabs ~base_path:no_workspace) [];
+         run Tools.handle_session ["action",`String "open"]];
+      List.iter (fun result ->
+        let raw = inspect result in
+        check string "continuing mutations require their observed owner" "browser_binding_required"
+          Yojson.Safe.Util.(raw |> member "code" |> to_string))
+        [run Tools.handle_session ["action",`String "close"];
+         run Tools.handle_goto ["url",`String "https://example.org/"]];
+      check int "recovery and missing-identity requests have no side effects" 0 !dispatched))
+
 let () = run "browser surface" ["behavior",[
+  test_case "automatic refusals provide Keeper recovery without dispatch" `Quick test_automatic_recovery_reaches_keeper;
+  test_case "automatic discovery binds subsequent observations and input" `Quick test_automatic_selection_keeps_observed_browser;
   test_case "unreadable tabs do not block the requested readable tab" `Quick test_partial_inventory_preserves_requested_work;
   test_case "partial inventories remain incomplete without unavailable tabs" `Quick test_partial_inventory_without_unavailable_tabs;
   test_case "transport availability keeps its failure class" `Quick test_transport_unavailability_is_not_a_workflow_refusal;

@@ -28,7 +28,7 @@ default = 50000
 name = "lane"
 type = "string"
 enum = ["live", "automation", "stagehand"]
-default = "live"
+description = "Optional advanced browser override. Omit only for initial discovery or opening a work browser; MASC selects an eligible browser and reports browserSelection. For every observed tab, retain browserSelection.lane and its clientId on subsequent calls; tab IDs are local to a browser."
 
 [[params]]
 name = "mode"
@@ -46,7 +46,7 @@ description = "Automation text/elements/frames only, explicit tabId: observed ou
 [[params]]
 name = "clientId"
 type = "string"
-description = "Live UUID from BrowserTabs/Read; required for multiple clients, never falls back when stale. Omit on automation."
+description = "Retain the observed live clientId on every subsequent tab read/action; stale IDs fail without fallback. Omit for a work browser."
 
 [[params]]
 name = "scope"

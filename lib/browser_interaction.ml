@@ -1,5 +1,5 @@
 (** Closed browser interactions. Caller strings are values, never script source. *)
-type request = { route : Browser_lane.route; tab_id : int;
+type request = { route : Browser_selection.preference; tab_id : int;
   expected_url : string option; action : Browser_lane.interaction }
 let ( let* ) = Result.bind
 let parse = function
@@ -91,8 +91,11 @@ let parse = function
       | Some (`String "activate_tab") ->
         let* () = excludes ["selector";"text";"x";"y";"documentId";"nodeId";"point";"from";"to";"viewport"] in
         let* () = match expected_url with Some _ -> Ok () | None -> Error "activate_tab requires expectedUrl" in
-        let* () = match base.route with Browser_lane.Live_route _ -> Ok ()
-          | Browser_lane.Automation_route | Browser_lane.Stagehand_route -> Error "activate_tab requires live lane" in
+        let* () = match base.route with
+          | Browser_selection.Exact (Browser_lane.Live_route _) -> Ok ()
+          | Browser_selection.Automatic
+          | Browser_selection.Exact (Browser_lane.Automation_route | Browser_lane.Stagehand_route) ->
+              Error "activate_tab requires an observed live clientId or lane" in
         Ok Browser_lane.Activate_tab
       | Some (`String "click") ->
         let* () = excludes ["text"; "x"; "y"; "point"; "from"; "to"; "viewport"] in
@@ -143,13 +146,22 @@ let parse = function
 let perform request =
   let verb = Browser_lane.Page_interact {tab_id=request.tab_id;
     expected_url=request.expected_url; action=request.action} in
-  let* target = Browser_lane.resolve_target ~verb request.route
+  let* selected = Browser_selection.resolve ~verb ~bound:true request.route
+    |> Result.map_error Browser_selection.error_message in
+  let* target = Browser_lane.resolve_target ~verb selected.route
     |> Result.map_error Browser_lane.selection_error_message in
   let* answer = Browser_lane.issue_for ~target
     ~verb
     ~timeout_sec:20.
     |> Result.map_error Browser_lane.selection_error_message in
+  let selected = Browser_selection.bind_target selected target in
   Browser_surface.decode_answer ~lane:(Browser_lane.target_lane target) answer
+  |> Result.map (function
+    | `Assoc fields -> `Assoc (["browserSelection",Browser_selection.to_json selected;
+        "lane",`String (Browser_lane.Lane_name.to_wire (Browser_lane.target_lane target))]
+        @ Browser_lane.with_connection_fields target
+            (List.filter (fun (key,_) -> not (List.mem key ["lane";"browserSelection"])) fields))
+    | value -> value)
 
 let script = {js|function interactInPage(args) {
   let effectStarted = false;

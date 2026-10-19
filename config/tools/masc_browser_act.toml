@@ -1,6 +1,6 @@
 name = "masc_browser_act"
 description = """
-Run one automation action in a Firefox/Zen tab, or open a new tab on an explicitly selected live BiDi connection. Only open_tab supports live; use the returned tabId to read and interact. If creation succeeds but navigation fails, inspect that tab before opening another.
+Run one action in a Firefox/Zen work tab, or open a new tab on a live BiDi connection. Omit browser identity only for initial open_tab discovery; otherwise retain the exact browserSelection lane/clientId returned by the observation. Only open_tab supports live; use the returned tabId to read and interact. If creation succeeds but navigation fails, inspect that tab before opening another.
 Read elements in the same tab/frame for selectors; preserve decoded CSS escapes exactly. After no match, re-read. Actions can change external state: observe again after success or failure before retrying."""
 additional_properties = false
 # 2026-09-24 측정: agent-core 레인 요청 5,047건(09-23)이 이 정의
@@ -21,7 +21,7 @@ description = "fill replaces text; select uses exact option value."
 name = "lane"
 type = "string"
 enum = ["automation", "live"]
-default = "automation"
+description = "Optional advanced browser override. Omit only for initial discovery or opening a work browser; MASC selects an eligible browser and reports browserSelection. For every observed tab, retain browserSelection.lane and its clientId on subsequent calls; tab IDs are local to a browser."
 
 [[params]]
 name = "tabId"

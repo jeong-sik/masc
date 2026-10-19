@@ -1,5 +1,5 @@
 type source = Browser_lane.Lane_name.t = Live | Automation | Stagehand
-type request = { route : Browser_lane.route; tab_id : int option }
+type request = { route : Browser_selection.preference; tab_id : int option }
 type tab = { id : int; title : string; url : string; active : bool }
 type selection = Requested of tab | Active of tab | None_active
 let ( let* ) = Result.bind
@@ -15,8 +15,9 @@ let parse_request = function
   | `Assoc fields ->
     let lane_error = "lane must be " ^ Browser_lane.Lane_name.expected in
     let* source = match List.assoc_opt "lane" fields with
-      | None -> Ok Live
+      | None -> Ok None
       | Some (`String raw) -> Option.to_result ~none:lane_error (Browser_lane.Lane_name.of_wire raw)
+          |> Result.map Option.some
       | Some _ -> Error lane_error in
     let* tab_id = match List.assoc_opt "tabId" fields with
       | None -> Ok None
@@ -24,19 +25,32 @@ let parse_request = function
       | _ -> Error "tabId must be a nonnegative integer" in
     let* client_id = parse_client_id (`Assoc fields) in
     let* route = match source, client_id with
-      | Live, selected -> Ok (Browser_lane.Live_route selected)
-      | Automation, None -> Ok Browser_lane.Automation_route
-      | Stagehand, None -> Ok Browser_lane.Stagehand_route
-      | (Automation | Stagehand), Some _ -> Error "client_id_requires_live" in
+      | None, None -> Ok Browser_selection.Automatic
+      | (None | Some Live), Some selected ->
+          Ok (Browser_selection.Exact (Browser_lane.Live_route (Some selected)))
+      | Some Live, None -> Ok (Browser_selection.Exact (Browser_lane.Live_route None))
+      | Some Automation, None -> Ok (Browser_selection.Exact Browser_lane.Automation_route)
+      | Some Stagehand, None -> Ok (Browser_selection.Exact Browser_lane.Stagehand_route)
+      | Some (Automation | Stagehand), Some _ -> Error "client_id_requires_live" in
     let* () = if List.for_all (fun (key, _) -> List.mem key ["lane";"tabId";"clientId"]) fields
       then Ok () else Error "unknown browser read argument" in
     Ok {route; tab_id}
   | _ -> Error "body must be a JSON object"
-type failure = Unselected of Browser_lane.selection_error | Unobserved of string | Unavailable of string
+type failure = Unselected of Browser_lane.selection_error | Unchosen of Browser_selection.error
+  | Unobserved of string | Unavailable of string
 let failure_message = function
   | Unselected error -> Browser_lane.selection_error_message error
+  | Unchosen error -> Browser_selection.error_message error
   | Unobserved detail | Unavailable detail -> detail
 let unobserved result = Result.map_error (fun detail -> Unobserved detail) result
+let choose_browser ~verb (request : request) =
+  Browser_selection.resolve ~verb ~bound:(Option.is_some request.tab_id) request.route
+  |> Result.map_error (fun error -> Unchosen error)
+let resolve_target ~verb request =
+  let* selected = choose_browser ~verb request in
+  let* target = Browser_lane.resolve_target ~verb selected.route
+    |> Result.map_error (fun error -> Unselected error) in
+  Ok (Browser_selection.bind_target selected target, target)
 let decode_answer ~lane = function
   | Browser_lane.Lane_absent -> Error (Browser_lane.lane_absent_message lane)
   | Browser_lane.Timed_out -> Error "browser lane timed out"
@@ -99,10 +113,12 @@ let exchange ~admission ~command =
   | Ok answer -> observe_answer ~lane:(Browser_lane.target_lane target) answer
 let read request =
   let started = Mtime_clock.elapsed_ns () in
-  let lane_name = source_name request.route in
-  let* admission = Browser_lane.Read_admission.acquire request.route
+  let* selected = choose_browser ~verb:Browser_lane.Tabs_list request in
+  let* admission = Browser_lane.Read_admission.acquire selected.route
     |> Result.map_error (fun error -> Unselected error) in
   let target = Browser_lane.Read_admission.target admission in
+  let selected = Browser_selection.bind_target selected target in
+  let lane_name = Browser_lane.Lane_name.to_wire (Browser_lane.target_lane target) in
   let issue command = exchange ~admission ~command in
   let* raw_tabs = issue Browser_lane.Read_admission.Tabs in
   let* inventory = decode_inventory raw_tabs |> unobserved in
@@ -137,7 +153,8 @@ let read request =
        | _ -> Error (Unobserved "browser page lacks URL/title/text/length metadata; update the browser connector")) in
   let elapsed_ms = Int64.to_float (Int64.sub (Mtime_clock.elapsed_ns ()) started) /. 1e6 in
   Ok (`Assoc (["tabs",`List (List.map tab_json tabs);"selection",selection_json selection;"page",page;
-    "source",`String lane_name] @ Browser_lane.target_connection_fields target
+    "source",`String lane_name; "browserSelection", Browser_selection.to_json selected]
+    @ Browser_lane.target_connection_fields target
     @ (match inventory.completeness with Complete -> [] | Partial unavailable ->
         ["complete",`Bool false;"unavailableTabs",`List unavailable])
     @ ["elapsed_ms",`Float elapsed_ms]))
@@ -155,10 +172,12 @@ let capture request =
   let* tab_id = match request.tab_id with
     | Some id -> Ok id | None -> Error (Unobserved "tabId is required for a screenshot") in
   let started = Mtime_clock.elapsed_ns () in
-  let lane_name = source_name request.route in
-  let* admission = Browser_lane.Read_admission.acquire request.route
+  let* selected = choose_browser ~verb:(Browser_lane.Page_capture {tab_id}) request in
+  let* admission = Browser_lane.Read_admission.acquire selected.route
     |> Result.map_error (fun error -> Unselected error) in
   let target = Browser_lane.Read_admission.target admission in
+  let selected = Browser_selection.bind_target selected target in
+  let lane_name = Browser_lane.Lane_name.to_wire (Browser_lane.target_lane target) in
   let* data = exchange ~admission ~command:(Browser_lane.Read_admission.Capture {tab_id}) in
   unobserved @@
   match field "tabId" data, field "url" data, field "title" data,
@@ -178,7 +197,8 @@ let capture request =
     if String.length bytes = 0 then Error "empty screenshot"
     else
       let elapsed_ms = Int64.to_float (Int64.sub (Mtime_clock.elapsed_ns ()) started) /. 1e6 in
-      Ok (`Assoc (["source", `String lane_name] @ Browser_lane.target_connection_fields target
+      Ok (`Assoc (["source", `String lane_name; "browserSelection", Browser_selection.to_json selected]
+        @ Browser_lane.target_connection_fields target
         @ ["tabId", `Int tab_id;
            "title", `String title; "url", `String url; "mimeType", `String "image/png";
            "data", `String image; "viewport", Browser_lane.Pointer.viewport_to_json viewport;

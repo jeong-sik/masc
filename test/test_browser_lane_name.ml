@@ -30,7 +30,7 @@ let lane_param (schema : Masc_domain.tool_schema) =
   Yojson.Safe.Util.(schema.input_schema |> member "properties" |> member "lane")
 
 let lane_enum schema = Yojson.Safe.Util.(lane_param schema |> member "enum" |> to_list |> List.map to_string)
-let lane_default schema = Yojson.Safe.Util.(lane_param schema |> member "default" |> to_string)
+let lane_default schema = Yojson.Safe.Util.(lane_param schema |> member "default")
 
 let decode_all tool names =
   List.map (fun raw -> match Lane_name.of_wire raw with
@@ -56,29 +56,18 @@ let tool_verbs = Browser_lane.[
     [ Page_goto { url = "https://example.org/"; tab_id = None } ];
 ]
 
-(* The declared default is the lane a missing [lane] means in code: live for
-   the reads ([Browser_surface.parse_request]), automation for the tools that
-   only the server's lanes serve ([issue_on_server_lane], [route_of] for
-   BrowserAct). *)
-let declared_default = [
-  "masc_browser_tabs", Lane_name.Live;
-  "masc_browser_read", Lane_name.Live;
-  "masc_browser_interact", Lane_name.Live;
-  "masc_browser_session", Lane_name.Automation;
-  "masc_browser_goto", Lane_name.Automation;
-]
-
+(* Omission now selects from observed browser state. Schemas must leave it
+   absent so callers do not accidentally pin a backend before discovery. *)
 let test_tool_enums () =
   List.iter (fun (tool, schema, verbs) ->
     check (list lane) (tool ^ " offers the lanes that serve it") (sorted (serving verbs))
       (sorted (decode_all tool (lane_enum schema)));
-    check (list lane) (tool ^ " default") [ List.assoc tool declared_default ] (decode_all tool [ lane_default schema ]))
+    check bool (tool ^ " leaves automatic selection available") true (lane_default schema = `Null))
     tool_verbs;
   let act = Tool_schemas_misc_toml.browser_act in
-  check (list lane) "masc_browser_act offers automation only" [ Lane_name.Automation ]
+  check (list lane) "masc_browser_act offers automation and live tab creation" [ Lane_name.Automation; Lane_name.Live ]
     (decode_all "masc_browser_act" (lane_enum act));
-  check (list lane) "masc_browser_act defaults to automation" [ Lane_name.Automation ]
-    (decode_all "masc_browser_act" [ lane_default act ])
+  check bool "masc_browser_act leaves automatic selection available" true (lane_default act = `Null)
 
 let () =
   run "browser_lane_name" [

@@ -260,7 +260,7 @@ let () =
      let observed_viewport () =
        let* capture =
          match Masc.Browser_surface.capture
-                 { Masc.Browser_surface.route = Browser_lane.Stagehand_route
+                 { Masc.Browser_surface.route = Masc.Browser_selection.Exact Browser_lane.Stagehand_route
                  ; tab_id = Some tab_id }
          with
          | Ok data -> Ok data
@@ -426,7 +426,7 @@ let () =
         | Some title -> Error ("the page title after act is " ^ title)
         | None -> Error "the tab has no title after act");
      record "screenshot passes the surface"
-       (match Masc.Browser_surface.capture { Masc.Browser_surface.route = Browser_lane.Stagehand_route; tab_id = Some tab_id } with
+       (match Masc.Browser_surface.capture { Masc.Browser_surface.route = Masc.Browser_selection.Exact Browser_lane.Stagehand_route; tab_id = Some tab_id } with
         | Error failure -> Error (Masc.Browser_surface.failure_message failure)
         | Ok data ->
           (match string_at [ "data" ] data with

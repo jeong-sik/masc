@@ -31,8 +31,9 @@
     materialization. *)
 
 type pending
-(** A demotion chosen by {!plan} and not yet stored. Keyed internally by
-    [tool_use_id], which is stable across the cut. *)
+(** A demotion chosen by {!plan}, retaining its exact original block and
+    placeholder. Tool IDs can recur in distinct closed protocol cycles and
+    do not identify a payload. *)
 
 type plan_result =
   { messages : Agent_core.Types.message list
@@ -97,14 +98,13 @@ type materialize_outcome =
 
 type address_memo
 (** The content addresses {!materialize} has already computed in one provider
-    attempt, keyed by tool_use_id. *)
+    attempt, keyed by original message/block position and guarded by physical
+    identity of the immutable original block. *)
 
 val create_address_memo : unit -> address_memo
-(** One memo per provider attempt. The demotion boundary is pinned to the
-    turn's seed, so every request of an attempt demotes the same aged results,
-    and a durable tool result's body never changes under its id — the address
-    is therefore the same every time. It is not safe to share across attempts
-    of different keepers. *)
+(** One memo per provider attempt and blob store. Repeated requests reuse the
+    address only for the same original block at the same position. A changed
+    history or reused tool ID cannot reuse another payload's address. *)
 
 val materialize
   :  store:Tool_blob_store.t
@@ -114,7 +114,10 @@ val materialize
   -> materialize_outcome
 (** Store the bodies of the demotions still present in [messages] and swap
     their placeholders for real markers. Demotions the cut removed are not
-    stored.
+    stored. Between {!plan} and this call, the projection must retain the
+    physical identity of surviving content blocks. It may remove messages or
+    add unrelated blocks, but must not clone planned placeholders. Existing
+    markers are never matched by their text or tool ID alone.
 
     A body's address is computed once per attempt and reused by every later
     request in it ([addresses]); an address this call has not seen is computed

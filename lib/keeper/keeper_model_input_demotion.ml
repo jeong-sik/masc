@@ -6,8 +6,13 @@
    placeholder stops bounding the marker it is standing in for. *)
 let demoted_mime = "text/plain"
 
+type occurrence = int * int
+
 type pending =
-  { tool_use_id : string
+  { occurrence : occurrence
+  ; original : Agent_core.Types.content_block
+  ; placeholder : Agent_core.Types.content_block
+  ; placeholder_sha256 : string
   ; bytes : string
   }
 
@@ -31,10 +36,10 @@ type materialize_outcome =
    permanent content address, so it is left untouched and stays visible. *)
 let demotable_body (block : Agent_core.Types.content_block) =
   match block with
-  | Agent_core.Types.ToolResult { tool_use_id; content; content_blocks = None; _ }
+  | Agent_core.Types.ToolResult { content; content_blocks = None; _ }
     ->
     (match Tool_output.decode_from_agent_core content with
-     | Tool_output.Not_marker -> Some (tool_use_id, content)
+     | Tool_output.Not_marker -> Some content
      | Tool_output.Decoded _ | Tool_output.Invalid_marker _ -> None)
   | Agent_core.Types.ToolResult { content_blocks = Some _; _ }
   | Agent_core.Types.Text _
@@ -58,10 +63,10 @@ let with_content (block : Agent_core.Types.content_block) replacement =
    equal encoded width, so the digest placeholder needs no body hashing.
    Measuring the store's real preview avoids rejecting useful demotions due
    to a worst-case preview that this body will never produce. *)
-let planned_marker ~bytes =
+let planned_marker ~sha256 ~bytes =
   match
     Tool_output.make_artifact_ref
-      ~sha256:(String.make 64 'f')
+      ~sha256
       ~bytes:(String.length bytes)
       ~preview:(Tool_blob_store.make_preview bytes)
       ~mime:demoted_mime
@@ -82,8 +87,8 @@ let plan ?(demote_from = 0) ~measure_message_bytes ~demote_before messages =
     let pending = ref [] in
     let changed = ref false in
     let rewritten =
-      List.map
-        (fun ((message : Agent_core.Types.message), label) ->
+      List.mapi
+        (fun message_index ((message : Agent_core.Types.message), label) ->
            let aged =
              match label with
              | Runtime_model_input_tail_window.Pinned -> false
@@ -98,16 +103,27 @@ let plan ?(demote_from = 0) ~measure_message_bytes ~demote_before messages =
                 pending entry behind. *)
              let staged = ref [] in
              let content =
-               List.map
-                 (fun block ->
+               List.mapi
+                 (fun block_index block ->
                     match demotable_body block with
                     | None -> block
-                    | Some (tool_use_id, body) ->
-                      (match planned_marker ~bytes:body with
+                    | Some body ->
+                      (* A bounded, distinct lookup token for this plan, not a
+                         content address. All digest hex digits encode with
+                         equal width. Physical block identity remains the
+                         authority when materializing the token. *)
+                      let placeholder_sha256 =
+                        Printf.sprintf "%032x%032x" message_index block_index
+                      in
+                      (match planned_marker ~sha256:placeholder_sha256 ~bytes:body with
                        | None -> block
-                       | Some placeholder ->
-                         staged := { tool_use_id; bytes = body } :: !staged;
-                         with_content block placeholder))
+                       | Some marker ->
+                         let placeholder = with_content block marker in
+                         staged :=
+                           { occurrence = message_index, block_index
+                           ; original = block; placeholder; placeholder_sha256
+                           ; bytes = body } :: !staged;
+                         placeholder))
                  message.content
              in
              if !staged = []
@@ -131,11 +147,15 @@ let plan ?(demote_from = 0) ~measure_message_bytes ~demote_before messages =
     else { messages; pending = [] })
 ;;
 
-(* Keyed by tool_use_id, not by the body: hashing a string key would read the
-   whole body, which is the cost this memo exists to remove. The id names the
-   body — [bodies] below already treats id -> body as a function — and a
-   durable tool result's body never changes under its id. *)
-type address_memo = (string, Tool_blob_store.addressed) Hashtbl.t
+(* Positions keep memo lookup independent of body size and of how often a
+   provider reuses a tool ID. The original immutable block guards each hit:
+   a rewritten prefix at the same position must be addressed again. *)
+type memo_entry =
+  { original : Agent_core.Types.content_block
+  ; address : Tool_blob_store.addressed
+  }
+
+type address_memo = (occurrence, memo_entry) Hashtbl.t
 
 let create_address_memo () = Hashtbl.create 64
 
@@ -143,23 +163,21 @@ let materialize ~store ~addresses ~pending messages =
   if pending = []
   then { messages; reverted = 0 }
   else (
-    (* [pending] holds one entry per aged tool result of the whole history,
-       thousands on a long-lived keeper, and every surviving marker looks up
-       its body. One table built per call keeps that lookup constant. The
-       first entry for an id wins, as a scan in plan order would. *)
-    let bodies = Hashtbl.create (List.length pending) in
+    let placeholders = Hashtbl.create (List.length pending) in
     List.iter
-      (fun entry ->
-         if not (Hashtbl.mem bodies entry.tool_use_id)
-         then Hashtbl.add bodies entry.tool_use_id entry.bytes)
+      (fun (entry : pending) ->
+         Hashtbl.add placeholders entry.placeholder_sha256 entry)
       pending;
-    let body_of id = Hashtbl.find_opt bodies id in
-    let demoted_marker (block : Agent_core.Types.content_block) =
+    let planned_entry (block : Agent_core.Types.content_block) =
       match block with
-      | Agent_core.Types.ToolResult
-          { tool_use_id; content; content_blocks = None; _ }
-        when Tool_output.is_marker content -> Some tool_use_id
-      | Agent_core.Types.ToolResult _
+      | Agent_core.Types.ToolResult { content; content_blocks = None; _ } ->
+        (match Tool_output.decode_from_agent_core content with
+         | Tool_output.Not_marker | Tool_output.Invalid_marker _ -> None
+         | Tool_output.Decoded reference ->
+           (match Hashtbl.find_opt placeholders reference.Tool_output.sha256 with
+            | Some entry when block == entry.placeholder -> Some entry
+            | Some _ | None -> None))
+      | Agent_core.Types.ToolResult { content_blocks = Some _; _ }
       | Agent_core.Types.Text _
       | Agent_core.Types.Thinking _
       | Agent_core.Types.RedactedThinking _
@@ -169,48 +187,39 @@ let materialize ~store ~addresses ~pending messages =
       | Agent_core.Types.Document _
       | Agent_core.Types.Audio _ -> None
     in
-    (* The bodies this cut still carries, named once so the pass below finds
-       each by its tool_use_id rather than by position, and paired with the
-       address that names them.
-
-       Addressing one is a sha256 over the whole body and nothing else — the
-       store skips writing an address this process already wrote — and a
-       long-lived keeper carries thousands of them. The attempt runs 62 to 83
-       provider requests over one pinned demotion boundary, so every body but
-       the first request's is already in [addresses]; what is left goes to the
-       CPU pool in one job. The rare write stays on this fiber, where the blob
-       store's filesystem contract belongs. *)
-    let addressed = Hashtbl.create 64 in
+    let address_of (entry : pending) =
+      match Hashtbl.find_opt addresses entry.occurrence with
+      | Some memo when memo.original == entry.original -> Some memo.address
+      | Some _ | None -> None
+    in
+    (* Only retained placeholders need addressing. The queue is keyed by
+       occurrence, so even repeated IDs with equal previews stay independent.
+       Hashing stays in the CPU pool; writes remain on the owning fiber. *)
     let queued = Hashtbl.create 16 in
     List.iter
       (fun (message : Agent_core.Types.message) ->
          List.iter
            (fun block ->
-              match demoted_marker block with
+              match planned_entry block with
               | None -> ()
-              | Some tool_use_id ->
-                if (not (Hashtbl.mem addressed tool_use_id))
-                   && not (Hashtbl.mem queued tool_use_id)
-                then (
-                  match body_of tool_use_id with
-                  | None -> ()
-                  | Some body ->
-                    (match Hashtbl.find_opt addresses tool_use_id with
-                     | Some address -> Hashtbl.add addressed tool_use_id address
-                     | None -> Hashtbl.add queued tool_use_id body)))
+              | Some entry ->
+                (match address_of entry with
+                 | Some _ -> ()
+                 | None -> Hashtbl.replace queued entry.occurrence entry))
            message.content)
       messages;
     List.iter
-      (fun (tool_use_id, address) ->
-         Hashtbl.add addresses tool_use_id address;
-         Hashtbl.add addressed tool_use_id address)
-      (match Hashtbl.fold (fun id body acc -> (id, body) :: acc) queued [] with
+      (fun (occurrence, memo) -> Hashtbl.replace addresses occurrence memo)
+      (match Hashtbl.fold (fun _ entry acc -> entry :: acc) queued [] with
        | [] -> []
        | _ :: _ as to_address ->
          Domain_pool_ref.submit_cpu_or_inline (fun () ->
            List.map
-             (fun (tool_use_id, body) ->
-                tool_use_id, Tool_blob_store.address store ~bytes:body ~mime:demoted_mime)
+             (fun (entry : pending) ->
+                entry.occurrence,
+                { original = entry.original
+                ; address = Tool_blob_store.address store ~bytes:entry.bytes ~mime:demoted_mime
+                })
              to_address));
     let reverted = ref 0 in
     let messages =
@@ -219,28 +228,20 @@ let materialize ~store ~addresses ~pending messages =
            let content =
              List.map
                (fun block ->
-                  match demoted_marker block with
+                  match planned_entry block with
                   | None -> block
-                  | Some tool_use_id ->
-                    (match Hashtbl.find_opt addressed tool_use_id with
-                     | None -> block
+                  | Some entry ->
+                    (match address_of entry with
+                     | None ->
+                       incr reverted;
+                       entry.original
                      | Some address ->
-                       (* The body put back is the one [put_addressed] would
-                          have written, read from the address itself: on a memo
-                          hit those bytes were captured by an earlier request,
-                          and a copy carried alongside could disagree with
-                          them. *)
-                       let body () = Tool_blob_store.addressed_bytes address in
                        (match Tool_blob_store.put_addressed address with
                         | Tool_output.Stored _ as stored ->
                           with_content block (Tool_output.encode_for_agent_core stored)
-                        (* [put_addressed] documents Sys_error as its failure
-                           mode (disk full, EACCES). Anything else is not a
-                           storage outcome and must not be turned into one
-                           here. *)
                         | exception Sys_error _ ->
                           incr reverted;
-                          with_content block (body ()))))
+                          entry.original)))
                message.content
            in
            { message with content })

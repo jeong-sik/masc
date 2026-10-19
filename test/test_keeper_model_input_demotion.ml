@@ -331,8 +331,8 @@ let stored_results_are_not_demoted_again () =
     (List.length planned.Demotion.pending)
 ;;
 
-(* [materialize] finds each marker's body by its tool_use_id among every
-   pending demotion. A lookup that answered with another entry would still
+(* [materialize] binds each retained placeholder to its original occurrence.
+   A lookup that answered with another entry would still
    write a well-formed marker, pointing at another result's bytes, so each
    stored blob is read back and compared with the body its message held. *)
 let each_marker_stores_its_own_body () =
@@ -371,6 +371,113 @@ let each_marker_stores_its_own_body () =
   Alcotest.(check (list string)) "each marker stores its own body" bodies stored
 ;;
 
+(* A tool ID is local to a closed cycle, not a history-wide content key. *)
+let closed_cycle ~id body =
+  [ { (assistant "") with
+      content = [Types.ToolUse {id; name = "echo"; input = `Assoc []}] }
+  ; tool_message ~id body
+  ]
+;;
+
+let fetch_body store marker =
+  match Tool_output.decode_from_agent_core marker with
+  | Tool_output.Not_marker | Tool_output.Invalid_marker _ ->
+    Alcotest.fail "expected a stored result reference"
+  | Tool_output.Decoded reference ->
+    (match Tool_blob_store.fetch store ~sha256:reference.Tool_output.sha256 with
+     | Ok (Some bytes) -> bytes
+     | Ok None -> Alcotest.fail "reference has no stored body"
+     | Error error -> Alcotest.fail (Tool_blob_store.fetch_error_to_string error))
+;;
+
+let with_demotion_store f =
+  let base_path = Filename.temp_dir "demote-occurrences" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path)
+    (fun () -> f (Tool_blob_store.create ~base_path))
+;;
+
+let repeated_id_bodies () =
+  let prefix = String.make Tool_blob_store.preview_max 'p' in
+  [prefix ^ String.make 4000 'a'; prefix ^ String.make 4000 'b']
+;;
+
+let repeated_ids_keep_distinct_payloads () = with_demotion_store @@ fun store ->
+  let bodies = repeated_id_bodies () in
+  let messages = List.concat_map (closed_cycle ~id:"reused") bodies in
+  (match Masc.Keeper_transcript_unit.validate_provider_transcript messages with
+   | Ok () -> ()
+   | Error error ->
+     Alcotest.fail (Masc.Keeper_transcript_unit.show_provider_transcript_error error));
+  let planned = Demotion.plan ~measure_message_bytes ~demote_before:2 messages in
+  let outcome = Demotion.materialize ~store ~addresses:(Demotion.create_address_memo ())
+      ~pending:planned.pending planned.messages in
+  Alcotest.(check int) "both occurrences were planned" 2 (List.length planned.pending);
+  Alcotest.(check (list string)) "each repeated ID opens its exact body" bodies
+    (List.map (fetch_body store) (markers outcome.messages));
+  Alcotest.(check (list string)) "durable source remains verbatim" bodies (markers messages);
+  let bytes = List.fold_left (fun n m -> n + measure_message_bytes m) 0 in
+  Alcotest.(check bool) "distinct placeholders still bound stored references" true
+    (bytes outcome.messages <= bytes planned.messages)
+;;
+
+let cut_repeated_id_stores_only_retained_payload () = with_demotion_store @@ fun store ->
+  let bodies = repeated_id_bodies () in
+  let messages = List.concat_map (closed_cycle ~id:"reused") bodies in
+  let planned = Demotion.plan ~measure_message_bytes ~demote_before:2 messages in
+  let projection, _ = Window.project_from_atom ~measure_message_bytes ~first_atom:1 planned.messages in
+  let outcome = Demotion.materialize ~store ~addresses:(Demotion.create_address_memo ())
+      ~pending:planned.pending projection.messages in
+  Alcotest.(check (list string)) "cut retains the second occurrence's body"
+    [List.nth bodies 1] (List.map (fetch_body store) (markers outcome.messages));
+  Alcotest.(check int) "removed occurrence was never written" 1
+    (List.length (Tool_blob_store.list_all store))
+;;
+
+let memo_revalidates_rewritten_source () = with_demotion_store @@ fun store ->
+  let addresses = Demotion.create_address_memo () in
+  let project body =
+    let source = closed_cycle ~id:"reused" body in
+    let planned = Demotion.plan ~measure_message_bytes ~demote_before:1 source in
+    Demotion.materialize ~store ~addresses ~pending:planned.pending planned.messages
+  in
+  let bodies = repeated_id_bodies () in
+  let first = project (List.nth bodies 0) in
+  let second = project (List.nth bodies 1) in
+  Alcotest.(check (list string)) "memo never rebinds a rewritten occurrence"
+    bodies (List.map (fetch_body store) (markers first.messages @ markers second.messages))
+;;
+
+let unplanned_marker_does_not_bind_by_text () = with_demotion_store @@ fun store ->
+  let source = closed_cycle ~id:"reused" (String.make 4000 'a') in
+  let planned = Demotion.plan ~measure_message_bytes ~demote_before:1 source in
+  let marker = List.hd (markers planned.messages) in
+  (* This is a distinct block with byte-identical marker text and the same
+     tool ID, not the placeholder owned by the plan. *)
+  let unrelated = tool_message ~id:"reused" marker in
+  let outcome = Demotion.materialize ~store ~addresses:(Demotion.create_address_memo ())
+      ~pending:planned.pending [unrelated] in
+  Alcotest.(check (list string)) "unplanned marker remains byte-exact" [marker]
+    (markers outcome.messages);
+  Alcotest.(check int) "foreign marker causes no write" 0
+    (List.length (Tool_blob_store.list_all store))
+;;
+
+let failed_write_restores_each_original_block () =
+  let base_path = Filename.temp_file "demote-blocked" "" in
+  Fun.protect ~finally:(fun () -> Sys.remove base_path) @@ fun () ->
+  let messages = List.concat_map (closed_cycle ~id:"reused") (repeated_id_bodies ()) in
+  let planned = Demotion.plan ~measure_message_bytes ~demote_before:2 messages in
+  let outcome = Demotion.materialize ~store:(Tool_blob_store.create ~base_path)
+      ~addresses:(Demotion.create_address_memo ()) ~pending:planned.pending planned.messages in
+  Alcotest.(check int) "both failed writes are counted" 2 outcome.reverted;
+  List.iter2
+    (fun (original : Types.message) (restored : Types.message) ->
+       List.iter2 (fun before after ->
+         Alcotest.(check bool) "exact original block restored" true (before == after))
+         original.content restored.content)
+    messages outcome.messages
+;;
+
 (* Addressing a body is a sha256 over the whole of it; the write is skipped for
    an address this process already wrote, so on a long-lived keeper the hashing
    is all [materialize] does, and doing it on the calling fiber held the main
@@ -387,9 +494,6 @@ let materialize_addresses_each_body_once_per_attempt () =
   let store = Tool_blob_store.create ~base_path:(Filename.temp_dir "demote" "") in
   let bodies = List.init 8 (fun i -> Printf.sprintf "body %d:" i ^ String.make 4000 'a') in
   let messages = history_with_tool_bodies bodies in
-  let planned =
-    Demotion.plan ~measure_message_bytes ~demote_before:(List.length bodies) messages
-  in
   Eio_main.run
   @@ fun env ->
   Eio.Switch.run
@@ -411,6 +515,9 @@ let materialize_addresses_each_body_once_per_attempt () =
   Eio.Promise.await occupied;
   let addresses = Demotion.create_address_memo () in
   let materialize () =
+    let planned =
+      Demotion.plan ~measure_message_bytes ~demote_before:(List.length bodies) messages
+    in
     Demotion.materialize
       ~store
       ~addresses
@@ -1285,7 +1392,17 @@ let () =
             measurement_hash_reads_content
         ] )
     ; ( "materialize"
-      , [ Alcotest.test_case
+      , [ Alcotest.test_case "reused IDs retain distinct exact payloads" `Quick
+            repeated_ids_keep_distinct_payloads
+        ; Alcotest.test_case "cut stores only the retained repeated-ID payload" `Quick
+            cut_repeated_id_stores_only_retained_payload
+        ; Alcotest.test_case "memo revalidates rewritten source" `Quick
+            memo_revalidates_rewritten_source
+        ; Alcotest.test_case "unplanned identical marker causes no write" `Quick
+            unplanned_marker_does_not_bind_by_text
+        ; Alcotest.test_case "write failures restore exact original blocks" `Quick
+            failed_write_restores_each_original_block
+        ; Alcotest.test_case
             "each body is addressed once per attempt, off this domain"
             `Quick
             materialize_addresses_each_body_once_per_attempt

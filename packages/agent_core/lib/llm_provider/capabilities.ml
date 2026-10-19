@@ -354,36 +354,30 @@ let anthropic_thinking_control_for_model_id model_id =
        ~catalog:(Model_catalog.global ()) ~manifest:(Capability_manifest.global ()))
 ;;
 
-(* [anthropic_thinking_control_for_model_id] reads only bare rows: the bare
-   lookup filters out every provider-qualified row (model_catalog.ml filters on
-   [Option.is_none entry.provider_name]). A provider-scoped model — deepseek on
-   the Anthropic-compatible surface is the live case — declares its policy on a
-   provider-qualified row, so the non-exact path never saw it and an explicit
-   enable_thinking then failed with "no catalog-declared policy" while the row
-   carried one. This variant resolves the row the same way the capability path
-   ([for_provider_model_id]) does, by provider label first; callers without a
-   provider label keep the bare-only reading. Found by adversarial review
-   (2026-09-06), F1. *)
-let anthropic_thinking_control_for_provider_from_catalog
-      ~catalog
-      ~(provider_label : string)
-      ~(model_id : Model_identifiers.Model_id.t)
-  =
+let anthropic_thinking_control_for_provider_from_sources
+      ~catalog ~manifest ~provider model_id =
+  let manifest_value () = match provider with
+    | Model_catalog.Anonymous_wire
+        (Provider_kind.Anthropic | Kimi | Ollama | Gemini | Glm) ->
+      anthropic_thinking_control_from_sources ~catalog:None ~manifest model_id
+    | Model_catalog.Anonymous_wire Provider_kind.OpenAI_compat
+    | Model_catalog.Declared_provider _ -> None in
   match catalog with
-  | None -> None
+  | None -> manifest_value ()
   | Some catalog ->
-    (match Model_catalog.lookup_for_provider catalog ~provider_name:provider_label ~model_id with
+    (match Model_catalog.lookup_model_for_provider catalog ~provider ~model_id with
      | Some entry ->
        Option.map
          anthropic_thinking_control_of_vocab_value
          entry.anthropic_thinking_control
-     | None -> None)
+     | None -> manifest_value ())
 ;;
 
-let anthropic_thinking_control_for_provider_model_id ~provider_label ~model_id =
+let anthropic_thinking_control_for_provider_model_id ~provider ~model_id =
   with_model_id model_id (fun model_id ->
-    anthropic_thinking_control_for_provider_from_catalog
-      ~catalog:(Model_catalog.global ()) ~provider_label ~model_id)
+    anthropic_thinking_control_for_provider_from_sources
+      ~catalog:(Model_catalog.global ()) ~manifest:(Capability_manifest.global ())
+      ~provider model_id)
 ;;
 
 let anthropic_capabilities =
@@ -1495,17 +1489,6 @@ let for_model_id model_id =
        ~catalog:(Model_catalog.global ()) ~manifest:(Capability_manifest.global ()))
 ;;
 
-let for_provider_model_id_row ~catalog ~wire ~provider ~model_id =
-  match catalog with
-  | None -> None
-  | Some catalog ->
-    (match Model_catalog.lookup_for_provider_reference catalog ~provider ~model_id with
-     | Some entry ->
-       let provider_entry = Model_catalog.provider_entry_for_reference catalog provider in
-       Some (apply_catalog_entry ~provider_entry ~wire entry)
-     | None -> None)
-;;
-
 let for_provider_reference_base ~catalog ~wire ~provider =
   match catalog with
   | None -> None
@@ -1515,32 +1498,26 @@ let for_provider_reference_base ~catalog ~wire ~provider =
       capabilities_for_provider_label
 ;;
 
-let provider_serves_bare_rows ~catalog ~provider =
-  match catalog with
-  | None -> false
-  | Some catalog ->
-    (match Model_catalog.provider_entry_for_reference catalog provider with
-     | Some entry -> entry.Model_catalog.serves_bare_rows
-     | None -> false)
-;;
-
 let for_provider_model_id_from_sources ~catalog ~manifest ~wire ~provider ~model_id =
-  match for_provider_model_id_row ~catalog ~wire ~provider ~model_id with
-  | Some _ as caps -> caps
+  let row = Option.bind catalog (fun catalog ->
+    Option.map (fun entry -> catalog, entry)
+      (Model_catalog.lookup_model_for_provider catalog ~provider ~model_id)) in
+  match row with
+  | Some (catalog, entry) ->
+    (match entry.Model_catalog.provider_name with
+     | None -> Some (apply_catalog_entry ~provider_entry:None ~wire:None entry)
+     | Some _ ->
+       let provider_entry = Model_catalog.provider_entry_for_reference catalog provider in
+       Some (apply_catalog_entry ~provider_entry ~wire entry))
   | None ->
-    let bare = match provider with
-      | Model_catalog.Anonymous_wire Provider_kind.OpenAI_compat -> None
+    let manifest_caps = match provider with
+      | Model_catalog.Anonymous_wire Provider_kind.OpenAI_compat
+      | Model_catalog.Declared_provider _ -> None
       | Model_catalog.Anonymous_wire
           (Provider_kind.Anthropic | Kimi | Ollama | Gemini | Glm) ->
-        for_model_id_from_sources ~catalog ~manifest model_id
-      | Model_catalog.Declared_provider _ ->
-        (* This declaration applies only to the catalog's own bare rows,
-           never to a replacement capability manifest. *)
-        if provider_serves_bare_rows ~catalog ~provider
-        then for_model_id_from_catalog catalog model_id
-        else None
+        for_model_id_from_sources ~catalog:None ~manifest model_id
     in
-    (match bare with
+    (match manifest_caps with
      | Some _ as caps -> caps
      | None -> for_provider_reference_base ~catalog ~wire ~provider)
 ;;
@@ -1568,14 +1545,8 @@ let resolve_request_policy ~wire ~provider ~model_id =
   let anthropic_thinking_control =
     match wire with
     | Provider_kind.Anthropic ->
-      let scoped = match provider with
-        | Model_catalog.Declared_provider provider_label ->
-          anthropic_thinking_control_for_provider_from_catalog
-            ~catalog ~provider_label ~model_id
-        | Model_catalog.Anonymous_wire _ -> None in
-      (match scoped with
-       | Some _ -> scoped
-       | None -> anthropic_thinking_control_from_sources ~catalog ~manifest model_id)
+      anthropic_thinking_control_for_provider_from_sources
+        ~catalog ~manifest ~provider model_id
     | Provider_kind.Kimi | Provider_kind.OpenAI_compat | Provider_kind.Ollama
     | Provider_kind.Gemini | Provider_kind.Glm -> None
   in
@@ -2129,7 +2100,7 @@ let%test "Anthropic thinking policy on a provider-qualified row resolves by prov
        ]);
   Fun.protect ~finally:Model_catalog.clear_global (fun () ->
     anthropic_thinking_control_for_provider_model_id
-      ~provider_label:"deepseek-anthropic"
+      ~provider:(Model_catalog.Declared_provider "deepseek-anthropic")
       ~model_id:"provider-scoped-anthropic-model"
     = Some Anthropic_always_adaptive
     && Option.is_none

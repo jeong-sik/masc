@@ -848,11 +848,113 @@ let test_collision_and_input_hardening () =
     [ "../target"; "target?key=secret"; "target\nheader"; "target/child" ]
 ;;
 
+let bare_target_catalog ~serves ~model_id ~scoped ~row_base =
+  Printf.sprintf {|[[providers]]
+id = "native"
+kind = "anthropic"
+base_url = "https://example.invalid"
+request_path = "/v1/messages"
+auth = "none"
+capabilities_base = "anthropic"
+capabilities_base_by_identity_kind = { anthropic = "openai_chat_extended" }
+serves_bare_rows = %s
+[[models]]
+id_prefix = "shared"
+%s
+max_context_tokens = 8192
+max_output_tokens = 1024
+anthropic_thinking_control = "always_adaptive"
+input_per_million = 10.0
+output_per_million = 50.0
+%s
+[[models]]
+id_prefix = "gpt-foreign"
+base = "openai_chat_extended"
+max_context_tokens = 8192
+max_output_tokens = 1024
+[[targets]]
+id = "bare-target"
+provider_ref = "native"
+model_id = %S
+connect_timeout_s = 30.0
+body_timeout_s = 30.0
+|} (if serves then {|["shared"]|} else "[]")
+    (if row_base then "base = \"anthropic\"" else "")
+    (if scoped then {|[[models]]
+id_prefix = "shared"
+provider_name = "native"
+max_context_tokens = 4096
+max_output_tokens = 1024
+|} else "") model_id
+;;
+
+let test_native_bare_target_binds_and_freezes () =
+  let frozen = snapshot (bare_target_catalog ~serves:true ~model_id:"shared" ~scoped:false ~row_base:true) in
+  let admitted = admit frozen "bare-target" in
+  let projection = EO.projection_target admitted in
+  check (option int) "native target gets the declared bare context"
+    (Some 8192) projection.capabilities.max_context_tokens;
+  check bool "native target gets the bare thinking policy" true
+    (projection.anthropic_thinking_control = Some Capabilities.Anthropic_always_adaptive);
+  ignore (ready (resolve_admitted admitted));
+  ignore (snapshot (bare_target_catalog ~serves:true ~model_id:"shared" ~scoped:true ~row_base:true));
+  let retained = EO.projection_target admitted in
+  check (option int) "later snapshot does not change frozen bare binding"
+    (Some 8192) retained.capabilities.max_context_tokens
+;;
+
+let test_bare_target_permission_and_exact_identity () =
+  List.iter (fun (serves, model_id) ->
+    let io : EO.resolver_io = {getenv = fun _ -> Ok None} in
+    let catalog = EO.Full_replacement {source = "bare target refusal";
+      contents = bare_target_catalog ~serves ~model_id ~scoped:false ~row_base:true} in
+    match EO.load_resolver_snapshot ~io ~catalog () with
+    | Error (EO.Target_binding_missing {component = EO.Target_model; target_ref}) ->
+      check string "exact refusal target" "bare-target" target_ref
+    | Error _ -> fail "expected a typed missing-model refusal"
+    | Ok _ -> fail "unserved or prefix-only model must not bind")
+    [false, "shared"; true, "shared-undeclared-suffix"; true, "gpt-foreign"]
+;;
+
+let test_scoped_target_absence_shadows_bare_policy () =
+  let frozen = snapshot (bare_target_catalog ~serves:true ~model_id:"shared" ~scoped:true ~row_base:true) in
+  let projection = EO.projection_target (admit frozen "bare-target") in
+  check (option int) "scoped row wins" (Some 4096)
+    projection.capabilities.max_context_tokens;
+  check bool "exact output does not borrow the shadowed bare policy" true
+    (projection.anthropic_thinking_control = None)
+;;
+
+let test_bare_target_does_not_inherit_provider_capability_base () =
+  let contents = bare_target_catalog ~serves:true ~model_id:"shared" ~scoped:false ~row_base:false in
+  let frozen = snapshot contents in
+  let projection = EO.projection_target (admit frozen "bare-target") in
+  let previous = Model_catalog.global () in
+  Fun.protect ~finally:(fun () -> match previous with
+    | Some catalog -> Model_catalog.set_global catalog
+    | None -> Model_catalog.clear_global ()) (fun () ->
+    Model_catalog.set_global
+      (Model_catalog.of_toml_string ~source:"same bare target" contents |> Result.get_ok);
+    let config = Provider_config.make ~kind:Anthropic ~provider_id:"native"
+      ~model_id:"shared" ~base_url:"https://example.invalid" () in
+    check bool "bare target never borrows provider tools support" false
+      projection.capabilities.supports_tools;
+    check bool "exact and ordinary request use the same bare capabilities" true
+      (Provider_config.capabilities_for_config_model config = Some projection.capabilities))
+;;
+
 let () =
   run
     "exact-output-resolver-snapshot"
     [ ( "resolver"
-      , [ test_case "exact id only" `Quick test_exact_target_id_has_no_alias_or_default
+      , [ test_case "native bare binding is frozen" `Quick test_native_bare_target_binds_and_freezes
+        ; test_case "bare permission never relaxes exact model identity" `Quick
+            test_bare_target_permission_and_exact_identity
+        ; test_case "scoped target absence shadows bare policy" `Quick
+            test_scoped_target_absence_shadows_bare_policy
+        ; test_case "bare target does not inherit provider base" `Quick
+            test_bare_target_does_not_inherit_provider_capability_base
+        ; test_case "exact id only" `Quick test_exact_target_id_has_no_alias_or_default
         ; test_case
             "full replacement path suppresses embedded"
             `Quick

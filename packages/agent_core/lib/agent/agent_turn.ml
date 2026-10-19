@@ -143,15 +143,15 @@ let provider_config_with_agent_config
 (* ── Usage accumulation ───────────────────────────────────────── *)
 
 let pricing_identity ~provider_config ~response_model =
-  let provider_id, configured_model =
+  let provider, configured_model =
     match provider_config with
     | Some config ->
-      ( config.Llm_provider.Provider_config.provider_id
+      ( Some (Llm_provider.Provider_config.provider_reference config)
       , Util.trim_non_empty_opt (Some config.Llm_provider.Provider_config.model_id) )
     | None -> None, None
   in
   let response_model = Util.trim_non_empty_opt response_model in
-  provider_id, Util.first_some response_model configured_model
+  provider, Util.first_some response_model configured_model
 ;;
 
 let with_pricing_gap usage model_id =
@@ -174,11 +174,11 @@ let accumulate_usage ~current_usage ~provider_config ~response_model ~response_u
     (match u.cost_usd with
      | Some cost -> { base with estimated_cost_usd = base.estimated_cost_usd +. cost }
      | None ->
-       let provider_id, model_id = pricing_identity ~provider_config ~response_model in
+       let provider, model_id = pricing_identity ~provider_config ~response_model in
        (match model_id with
         | None -> with_pricing_gap base None
         | Some model_id ->
-          (match Llm_provider.Pricing.pricing_for_model_opt ?provider_id model_id with
+          (match Llm_provider.Pricing.pricing_for_model_opt ?provider model_id with
            | None -> with_pricing_gap base (Some model_id)
            | Some pricing ->
              (match

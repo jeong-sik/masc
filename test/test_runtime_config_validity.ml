@@ -6816,6 +6816,30 @@ enabled = %b
     check_published "restart loads saved off instead of restored old state" off)
 ;;
 
+let test_wizard_provider_models_share_catalog_authority () =
+  let previous = Llm_provider.Model_catalog.global () in
+  Fun.protect ~finally:(fun () -> match previous with
+    | Some catalog -> Llm_provider.Model_catalog.set_global catalog
+    | None -> Llm_provider.Model_catalog.clear_global ()) (fun () ->
+    let rows provider = match Runtime_wizard_inventory.provider_model_rows provider with
+      | Ok value -> Yojson.Safe.Util.to_list value
+      | Error detail -> failf "wizard model inventory: %s" detail in
+    let model_id row = Yojson.Safe.Util.(row |> member "id" |> to_string) in
+    let native = rows "claude" in
+    check bool "Claude wizard cannot offer a foreign bare GPT model" false
+      (List.exists (fun row -> model_id row = "gpt-6-sol") native);
+    (match List.find_opt (fun row -> model_id row = "claude-fable-5") native with
+     | None -> fail "native Claude model must be offerable from its bare row"
+     | Some row ->
+       check int "wizard pins the declared native context" 1000000
+         Yojson.Safe.Util.(row |> member "max_context" |> to_int));
+    let proxy = rows "deepseek-anthropic" in
+    check bool "proxy must not offer bare Claude identities" false
+      (List.exists (fun row -> model_id row = "claude-fable-5") proxy);
+    check bool "proxy retains its scoped DeepSeek model" true
+      (List.exists (fun row -> model_id row = "deepseek-v4-pro") proxy))
+;;
+
 let () =
   run "runtime_config_validity"
     [ ( "runtime TOML gate",
@@ -7163,6 +7187,9 @@ let () =
         ; test_case
             "every wizard choice has a seed exact-output target"
             `Quick test_repo_seed_wizard_choices_have_an_exact_output_target
+        ; test_case
+            "wizard model rows use provider catalog authority"
+            `Quick test_wizard_provider_models_share_catalog_authority
         ] )
     ; ( "lsp servers"
       , [ test_case "reads a command per language" `Quick test_lsp_servers_reads_a_command_per_language

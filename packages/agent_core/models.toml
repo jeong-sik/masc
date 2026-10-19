@@ -2164,7 +2164,7 @@ supports_parallel_tool_suppression = true
 # preset and was refused any reasoning effort (#37849). deepseek-anthropic
 # below takes the same wire but answers claude-* ids with its own models, so it
 # does not declare this.
-serves_bare_rows = true
+serves_bare_rows = ["claude-"]
 kind = "anthropic"
 base_url = "https://api.anthropic.com"
 request_path = "/v1/messages"
@@ -2340,7 +2340,7 @@ cache_read_multiplier = 0.1
 id = "gemini"
 # These provider-independent model rows describe this native endpoint. The
 # declaration applies only to catalog rows, not capability-manifest overrides.
-serves_bare_rows = true
+serves_bare_rows = ["gemini-"]
 kind = "gemini"
 base_url = "https://generativelanguage.googleapis.com/v1beta"
 request_path = ""
@@ -2403,7 +2403,7 @@ identity_hosts = ["api.deepseek.com"]
 [[providers]]
 id = "kimi"
 # Native Kimi model facts are declared in the provider-independent rows above.
-serves_bare_rows = true
+serves_bare_rows = ["kimi-"]
 kind = "kimi"
 identity_kinds = ["kimi", "openai_compat"]
 base_url = "https://api.kimi.com/coding"

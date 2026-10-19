@@ -77,9 +77,10 @@ val resolve_exact
        , exact_binding_error )
        result
 (** Exact identity binding: the provider is found by [provider.id =
-    provider_ref] and the model by [entry.provider_name = provider.id] and
-    [entry.id_prefix = model_id] — the id is compared whole, despite the
-    field name. Callers holding a display or api_name (the label a gateway
+    provider_ref]. Its scoped rows precede bare rows only when the provider
+    declares [serves_bare_rows]. The model's [id_prefix = model_id] is compared
+    whole, despite the field name; family-prefix hits never admit a target.
+    Callers holding a display or api_name (the label a gateway
     shows) must not pass it here; resolve that label to the catalog id
     first. Fails with {!Provider_missing} or {!Model_missing}. *)
 
@@ -113,7 +114,9 @@ val capabilities_of_catalog_binding
   -> Model_catalog.provider_entry
   -> Model_catalog.model_entry
   -> Capabilities.capabilities
-(** [wire] is the provider wire the caller's binding reaches. A provider row
+(** A bare model row uses only its own base, like ordinary capability lookup.
+    Provider and binding-wire bases apply only to provider-scoped rows.
+    [wire] is the provider wire the caller's binding reaches. A provider row
     can name a different capability base per wire
     ([[providers]] capabilities_base_by_identity_kind), and only a binding
     knows which one this deployment speaks. Omitting it keeps the row's own

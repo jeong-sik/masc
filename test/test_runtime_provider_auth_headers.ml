@@ -3095,13 +3095,30 @@ accepted_reasoning_efforts = ["low", "high"]
           serves
           (Result.is_ok
              (Llm_provider.Provider_config.validate_reasoning_effort_request config)))
-  ) [ "", false; "serves_bare_rows = false", false; "serves_bare_rows = true", true ];
-  match Llm_provider.Model_catalog.of_toml_string ~source:"serves-bare-rows-type"
-      (catalog "serves_bare_rows = \"true\"") with
-  | Error error -> check string "the declaration rejects a string"
-      "provider entry \"fixture-provider\" field \"serves_bare_rows\" expected bool"
-      error
-  | Ok _ -> fail "serves_bare_rows silently accepted a string"
+  ) [ "", false; "serves_bare_rows = []", false;
+      "serves_bare_rows = [\"foreign-model\"]", false;
+      "serves_bare_rows = [\"fixture-model\"]", true ];
+  List.iter (fun declaration ->
+    match Llm_provider.Model_catalog.of_toml_string ~source:"serves-bare-rows-type"
+        (catalog declaration) with
+    | Error error -> check string "the declaration requires a family array"
+        "provider entry \"fixture-provider\" field \"serves_bare_rows\" expected string array"
+        error
+    | Ok _ -> fail "serves_bare_rows silently accepted a non-array")
+    ["serves_bare_rows = true"; "serves_bare_rows = false";
+     "serves_bare_rows = \"fixture-model\""; "serves_bare_rows = [1]"];
+  List.iter (fun (declaration, expected) ->
+    match Llm_provider.Model_catalog.of_toml_string ~source:"serves-bare-rows-family"
+        (catalog declaration) with
+    | Error error -> check string "invalid family declaration is rejected" expected error
+    | Ok _ -> fail "serves_bare_rows accepted an invalid family")
+    [ "serves_bare_rows = [\"\"]",
+      "provider entry \"fixture-provider\" field \"serves_bare_rows\" must not contain empty strings"
+    ; "serves_bare_rows = [\" fixture-model\"]",
+      "provider entry \"fixture-provider\" field \"serves_bare_rows\" must not contain padded strings"
+    ; "serves_bare_rows = [\"fixture-model\", \"FIXTURE-MODEL\"]",
+      "provider entry \"fixture-provider\" field \"serves_bare_rows\" must not contain duplicate families"
+    ]
 
 (* #37086. The fixture above proves the mechanism; this proves the shipped
    declarations. With the embedded catalog, the Terminal-Bench anthropic lane

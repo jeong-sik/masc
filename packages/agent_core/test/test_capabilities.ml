@@ -3021,7 +3021,7 @@ let test_a_non_reasoning_row_inherits_no_effort_ladder () =
 let with_precedence_catalog ~serves_bare_rows f =
   with_temp_model_catalog
     (Printf.sprintf {|[[providers]]
-serves_bare_rows = %b
+serves_bare_rows = %s
 id = "precedence-provider"
 kind = "gemini"
 base_url = "https://example.invalid"
@@ -3034,7 +3034,7 @@ id_prefix = "precedence-model"
 base = "gemini"
 supports_reasoning = true
 accepted_reasoning_efforts = ["high"]
-|} serves_bare_rows)
+|} (if serves_bare_rows then {|["precedence-model"]|} else "[]"))
     (fun path ->
       let previous = Model_catalog.global () in
       Fun.protect
@@ -3065,6 +3065,45 @@ let test_a_named_provider_still_refuses_the_bare_row () =
     | Some capabilities ->
       check (option (list string)) "scoped lookup does not borrow a bare row"
         None (accepted_reasoning_effort_strings capabilities))
+;;
+
+let test_declared_bare_families_bind_original_rows () =
+  let catalog = Model_catalog.of_toml_string ~source:"served bare families"
+    {|[[providers]]
+id = "native"
+aliases = ["gemini"]
+kind = "anthropic"
+base_url = "https://example.invalid"
+request_path = "/v1/messages"
+auth = "none"
+serves_bare_rows = ["claude-"]
+[[models]]
+id_prefix = "claude"
+[[models]]
+id_prefix = "claude-declared"
+[[models]]
+id_prefix = "gpt-foreign"
+[[models]]
+id_prefix = "gpt-explicit"
+provider_name = "native"
+|} |> Result.get_ok in
+  let provider = Model_catalog.Declared_provider "gemini" in
+  let lookup name = Model_catalog.lookup_model_for_provider catalog ~provider
+    ~model_id:(Model_identifiers.Model_id.of_string_exn name) in
+  check bool "a declared alias retains its family's row" true
+    (Option.is_some (lookup "claude-declared-20261019"));
+  check bool "request spelling cannot grant a broader original row" true
+    (Option.is_none (lookup "claude-unlisted"));
+  check bool "another vendor's bare row is not served" true
+    (Option.is_none (lookup "gpt-foreign"));
+  check bool "an explicit scoped row remains authoritative" true
+    (Option.is_some (lookup "gpt-explicit"));
+  let visible = Model_catalog.model_entries_for_provider catalog ~provider
+    ~model_entries:(Model_catalog.model_entries catalog) in
+  check (list string) "enumeration uses the same original-row authority"
+    ["gpt-explicit"; "claude-declared"]
+    (List.map (fun (entry : Model_catalog.model_entry) ->
+      Model_identifiers.Id_prefix.to_string entry.id_prefix) visible)
 ;;
 
 let test_prefix_ordering_invariant () =
@@ -3627,6 +3666,8 @@ let () =
             "claude reads the Claude bare rows, deepseek-anthropic does not"
             `Quick
             test_claude_provider_reads_claude_bare_rows
+        ; test_case "served families bind original rows, not request names" `Quick
+            test_declared_bare_families_bind_original_rows
         ] )
     ]
 ;;

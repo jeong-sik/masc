@@ -31,9 +31,9 @@ struct FakePractice {let countInSeconds:Double;let duration:Double;var loop:Loop
 struct FakeLoop {let duration=1.0}
 struct FakePlan { var duration=1.0;let captured=false;var clocked=false;var practice:FakePractice?=nil;var loop:FakeLoop?=nil }
 struct FakeRegion { var id="region-1";var startSeconds=0.0;var pulseClock:Bool?=nil;var pulseLoopUnit:Int64?=nil }
-final class FakePlayer { var lastRenderTime:AVAudioTime?=AVAudioTime(hostTime:reviewHost);var plays=0;var whens:[UInt64]=[];func play(at:AVAudioTime){plays+=1;whens.append(at.hostTime)} }
+final class FakePlayer { var lastRenderTime:AVAudioTime?=AVAudioTime(hostTime:reviewHost);var preparation:(()->Void)?;var plays=0;var whens:[UInt64]=[];func prepare(withFrameCount:UInt32){preparation?()};func play(at:AVAudioTime){plays+=1;whens.append(at.hostTime)} }
 final class FakeVoice {
- var region=FakeRegion();let player=FakePlayer();var end=1.0, prepares=0, stops=0;var positions:[Double]=[];var completion:(()->Void)?
+ var region=FakeRegion();let player=FakePlayer();let capacity:UInt32=257;var end=1.0, prepares=0, stops=0;var positions:[Double]=[];var completion:(()->Void)?
  func prepare(from seconds:Double,finished:@escaping()->Void,failed:@escaping(Error)->Void)throws->Bool{prepares+=1;positions.append(seconds);completion=finished;return seconds<end}
  func stop(){stops+=1}
 }
@@ -55,8 +55,10 @@ final class FakeMidi { var stages:[Double]=[], runs:[UInt64]=[];func stageCoordi
 let ahead=Probe();ahead.midi=FakeMidi()
 let futureRender=try futureHost(0.1,from:reviewHost)
 ahead.voices[0].player.lastRenderTime=AVAudioTime(hostTime:futureRender)
+let preparedRender=try futureHost(0.1,from:futureRender)
+ahead.voices[0].player.preparation={ahead.voices[0].player.lastRenderTime=AVAudioTime(hostTime:preparedRender)}
 try ahead.schedule(from:0,playing:true)
-precondition(ahead.anchor>futureRender && ahead.midi!.runs==[AudioConvertHostTimeToNanos(ahead.anchor)],"one common anchor must follow the active render frontier")
+precondition(ahead.anchor>preparedRender && ahead.midi!.runs==[AudioConvertHostTimeToNanos(ahead.anchor)],"one common anchor must follow the prepared active render frontier")
 let missing=Probe();missing.voices[0].player.lastRenderTime=nil
 do {try missing.schedule(from:0,playing:true);preconditionFailure("missing active render clock admitted")}catch{}
 precondition(missing.voices[0].player.plays==0)

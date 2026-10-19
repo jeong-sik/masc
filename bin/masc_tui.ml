@@ -4073,29 +4073,53 @@ let save_runtime_config_text ?prior_contact state ~mailbox ~authority ~identity
 
 let launch_keeper_settings_save state ~mailbox request =
   let host = server_peer_host and port = state.port in
-  let origin = request.ksv_origin in
-  let key = Masc_tui_fetched.request_key origin.ksr_request in
-  let sent = ref false in
+  let key = request.ksv_key in
+  let sent = ref false and prepared = ref None in
   let publish status =
     let observed_ns = Mtime_clock.elapsed_ns () in
     if publish_keeper_settings_save request ~observed_ns status then
-      Log.Transport.info "tui_keeper_settings_save keeper=%s started_ns=%Ld observed_ns=%Ld worker_phase=%s"
-        key.ksk_keeper request.ksv_started_ns observed_ns (keeper_settings_save_phase status) in
-  let finish outcome = publish (Settings_finished outcome) in
+      Log.Transport.info "tui_keeper_settings_save keeper=%s intent=%s started_ns=%Ld observed_ns=%Ld worker_phase=%s"
+        key.ksk_keeper (keeper_settings_save_intent_name request)
+        request.ksv_started_ns observed_ns (keeper_settings_save_phase status) in
+  let finish outcome = publish (Settings_finished (!prepared,outcome)) in
   let interrupted detail = if !sent then Settings_unconfirmed detail else Settings_not_sent detail in
+  let check_workspace = workspace_check_sequence state ~mailbox ~authority:key.ksk_authority
+    ~identity:(Some request.ksv_expected) ~host ~port in
+  let check () =
+    if request.ksv_reading != state.workspace_read_authority then
+      Error "Settings read authority withdrew before dispatch"
+    else check_workspace () in
   let run () =
     let outcome = try
-      match check_workspace_request state ~mailbox ~authority:key.ksk_authority
-        ~identity:(Some origin.ksr_expected) ~host ~port () with
+      let ( let* ) = Result.bind in
+      let prepare () =
+        let* () = check () in
+        let* snapshot = match request.ksv_input with
+          | Settings_editor_input draft ->
+              Ok {ksp_snapshot=draft.ksd_snapshot.kss_observed;ksp_patch=Some draft.ksd_patch}
+          | Sandbox_shortcut_input profile ->
+              publish Settings_reading;
+              let* json = Masc_tui_http.fetch_keeper_config_snapshot ~host ~port ~keeper_name:key.ksk_keeper in
+              let* patch = Masc_tui_response_decode.run ~name:"keeper.sandbox_save.decode_wait"
+                (fun () -> Masc_tui_keeper_config.sandbox_patch ~profile json) in
+              Ok {ksp_snapshot=json;ksp_patch=patch} in
+        prepared := Some snapshot;
+        let* () = match request.ksv_input with
+          | Settings_editor_input _ -> Ok ()
+          | Sandbox_shortcut_input _ -> check () in
+        if request.ksv_reading != state.workspace_read_authority then
+          Error "Settings read authority withdrew before dispatch"
+        else Ok snapshot in
+      match prepare () with
       | Error detail -> Settings_not_sent detail
-      | Ok () ->
-          if origin.ksr_reading != state.workspace_read_authority then
-            Settings_not_sent "Settings read authority withdrew before dispatch"
-          else begin
+      | Ok snapshot ->
+          match snapshot.ksp_patch with
+          | None -> Settings_unchanged
+          | Some patch ->
             sent := true;
-            publish Settings_posting;
+            publish (Settings_posting snapshot);
             match Masc_tui_http.post_keeper_config ~host ~port ~keeper_name:key.ksk_keeper
-              ~patch_json:(Yojson.Safe.to_string request.ksv_draft.ksd_patch) with
+              ~patch_json:(Yojson.Safe.to_string patch) with
             | Ok response ->
                 (match Masc_tui_keeper_config.config_write_status_message ~keeper_name:key.ksk_keeper response with
                  | Ok (severity,message) -> Settings_applied {response;severity;message}
@@ -4110,14 +4134,13 @@ let launch_keeper_settings_save state ~mailbox request =
                 Settings_refused (refusal.response,refusal.detail)
             | Error ((Keeper_config_transport_error _ | Keeper_config_http_error _) as error) ->
                 Settings_unconfirmed (Masc_tui_http.keeper_config_post_error_to_string error)
-          end
     with
     | Eio.Cancel.Cancelled _ as exn -> finish (interrupted "Settings save worker interrupted"); raise exn
     | exn -> interrupted (Printexc.to_string exn) in
     finish outcome
   in
-  Log.Transport.info "tui_keeper_settings_save keeper=%s started_ns=%Ld phase=checking"
-    key.ksk_keeper request.ksv_started_ns;
+  Log.Transport.info "tui_keeper_settings_save keeper=%s intent=%s started_ns=%Ld phase=checking"
+    key.ksk_keeper (keeper_settings_save_intent_name request) request.ksv_started_ns;
   match Eio_context.get_switch_opt () with
   | None -> finish (Settings_not_sent "Eio switch is unavailable")
   | Some sw ->
@@ -17814,31 +17837,40 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
          && Option.is_some state.keeper_deletions_retry_receipt then
         launch_keeper_deletions state ~mailbox ()
   | Keeper_settings_save_changed (request,status,observed_ns) ->
-      let key = Masc_tui_fetched.request_key request.ksv_origin.ksr_request in
+      let key = request.ksv_key in
       let current = keeper_settings_save_current state request in
       if apply_keeper_settings_save state request status then begin
         let phase = keeper_settings_save_phase status in
         Log.Transport.info
-          "tui_keeper_settings_save keeper=%s started_ns=%Ld observed_ns=%Ld admitted_ns=%Ld phase=%s current_origin=%b"
-          key.ksk_keeper request.ksv_started_ns observed_ns (Mtime_clock.elapsed_ns ()) phase current;
+          "tui_keeper_settings_save keeper=%s intent=%s started_ns=%Ld observed_ns=%Ld admitted_ns=%Ld phase=%s current_origin=%b"
+          key.ksk_keeper (keeper_settings_save_intent_name request)
+          request.ksv_started_ns observed_ns (Mtime_clock.elapsed_ns ()) phase current;
         match status with
-        | Settings_checking | Settings_posting -> ()
-        | Settings_finished outcome ->
+        | Settings_checking | Settings_reading | Settings_posting _ -> ()
+        | Settings_finished (_,outcome) ->
             let severity = match outcome with
-              | Settings_applied receipt -> receipt.severity
+              | Settings_applied receipt -> receipt.severity | Settings_unchanged -> "system"
               | Settings_not_sent _ | Settings_refused _ | Settings_observation_required _ | Settings_unconfirmed _ -> "error" in
             let origin = if current then "" else " (" ^ key.ksk_base_path ^ ")" in
-            let message = match outcome with
-              | Settings_applied receipt -> receipt.message ^ origin
-              | Settings_not_sent _ | Settings_refused _ | Settings_observation_required _ | Settings_unconfirmed _ ->
-                  key.ksk_keeper ^ origin ^ " · " ^ keeper_settings_save_outcome_detail outcome in
+            let message = match request.ksv_input,outcome with
+              | Settings_editor_input _,Settings_applied receipt -> receipt.message ^ origin
+              | (Sandbox_shortcut_input _ | Settings_editor_input _),
+                  (Settings_applied _ | Settings_unchanged | Settings_not_sent _ | Settings_refused _
+                   | Settings_observation_required _ | Settings_unconfirmed _) ->
+                  keeper_settings_save_label request ^ origin ^ " · " ^ keeper_settings_save_outcome_detail outcome in
             report_action state severity message;
-            if current && state.view = Keepers Keeper_detail && state.detail_tab = Detail_instructions
+            if current && state.view = Keepers Keeper_detail
                && Option.exists (fun (keeper : keeper) -> String.equal keeper.k_name key.ksk_keeper) (selected_keeper state)
-            then begin
-              state.keeper_config_view <- None; state.keeper_config_view_error <- None;
-              launch_keeper_config_view state ~mailbox key.ksk_keeper
-            end
+            then
+              match state.detail_tab with
+              | Detail_instructions ->
+                  state.keeper_config_view <- None; state.keeper_config_view_error <- None;
+                  launch_keeper_config_view state ~mailbox key.ksk_keeper
+              | Detail_sandbox ->
+                  state.keeper_sandbox_view <- None; state.keeper_sandbox_view_error <- None;
+                  launch_keeper_sandbox_view state ~mailbox key.ksk_keeper
+              | Detail_info | Detail_items | Detail_secrets | Detail_github | Detail_identity
+              | Detail_channels | Detail_automation | Detail_runs -> ()
       end
   | Runtime_form_save_changed (request, status, observed_ns) ->
       let attached = runtime_form_is_attached state request in
@@ -23010,49 +23042,12 @@ and is loaded on demand through keeper_skill.
         log_keeper_settings_read ~phase:"editor_opened" request ~outcome:"snapshot_handed_off";
         open_prepared_keeper_settings_editor request snapshot
   in
-  (* Set the sandbox backend (sandbox_profile) in place from the Sandbox tab,
-     without the $EDITOR JSON round-trip. Each key names an absolute backend, so
-     no current-value read is needed; the server validates the profile (e.g.
-     remote_ssh without a bound endpoint is rejected as reconciliation-required)
-     and the reply is surfaced. Reuses the same config POST the Settings edit
-     uses, then refreshes the Sandbox view so the new backend shows. *)
+  (* An absolute shortcut owns its profile immediately. The worker reads a
+     fresh composite revision before preparing the single-field CAS patch. *)
   let set_sandbox_backend ~profile =
-    let check = capture_workspace_check state ~mailbox:async_messages in
-    match check () with
+    match begin_keeper_sandbox_save state ~profile ~started_ns:(Mtime_clock.elapsed_ns ()) with
+    | Ok request -> launch_keeper_settings_save state ~mailbox:async_messages request
     | Error detail -> report_action state "error" detail
-    | Ok () -> match selected_keeper state with
-    | None -> report_action state "system" no_keeper_under_cursor
-    | Some keeper -> (
-      let patch = `Assoc [ ("sandbox_profile", `String profile) ] in
-      match
-        Masc_tui_http.post_keeper_config ~host ~port ~keeper_name:keeper.k_name
-          ~patch_json:(Yojson.Safe.to_string patch)
-      with
-      | Error error ->
-          report_action state "error"
-            (Masc_tui_http.keeper_config_post_error_to_string error);
-          state.keeper_sandbox_view <- None;
-          state.keeper_sandbox_view_error <- None;
-          launch_keeper_sandbox_view state ~mailbox:async_messages keeper.k_name
-      | Ok response ->
-          (match
-             Masc_tui_keeper_config.config_write_status_message
-               ~keeper_name:keeper.k_name response
-           with
-           | Error detail ->
-               report_action state "error"
-                 (keeper.k_name ^ ": invalid config write receipt: " ^ detail)
-           (* Name the backend the key selected, not just the server's write
-              receipt: pressing the key for the backend a keeper already runs is
-              a no-op the receipt reports blandly, and the operator is left
-              unsure the key did anything. *)
-           | Ok (severity, message) ->
-               report_action state severity
-                 (Printf.sprintf "%s: sandbox backend \xe2\x86\x92 %s (%s)"
-                    keeper.k_name profile message));
-          state.keeper_sandbox_view <- None;
-          state.keeper_sandbox_view_error <- None;
-          launch_keeper_sandbox_view state ~mailbox:async_messages keeper.k_name)
   in
   let handle_keeper_create ?(return_to = Keeper_chat_return_list) () =
     if state.workspace_identity <> Workspace_identity_match then
@@ -28700,19 +28695,13 @@ and is loaded on demand through keeper_skill.
               state.keeper_sandbox_logs_error <- None;
               launch_keeper_sandbox_logs state ~mailbox:async_messages
                 keeper.k_name)
-       (* Set the sandbox backend in place from the Sandbox tab. Each key is an
-          absolute backend so no current-value read is needed; the server
-          validates (remote_ssh without a bound endpoint is rejected). Guarded to
-          the Sandbox tab, so d/m/s keep their other-surface meanings elsewhere. *)
-       | Some (("d" | "m" | "s") as backend_key)
-         when state.view = Keepers Keeper_detail
-              && state.detail_tab = Detail_sandbox ->
-           set_sandbox_backend
-             ~profile:
-               (match backend_key with
-                | "d" -> "docker"
-                | "m" -> "microvm"
-                | _ -> "remote_ssh")
+       (* Absolute Sandbox intent; the owned save supplies a fresh revision. *)
+       | Some "d" when state.view = Keepers Keeper_detail && state.detail_tab = Detail_sandbox ->
+           set_sandbox_backend ~profile:Keeper_sandbox_config.Docker
+       | Some "m" when state.view = Keepers Keeper_detail && state.detail_tab = Detail_sandbox ->
+           set_sandbox_backend ~profile:Keeper_sandbox_config.Micro_vm
+       | Some "s" when state.view = Keepers Keeper_detail && state.detail_tab = Detail_sandbox ->
+           set_sandbox_backend ~profile:Keeper_sandbox_config.Remote_ssh
        | Some ("h" | "l")
          (* The width belongs to the screen that needs two panes, not to the
             key. Keeper detail below the threshold draws the detail alone and

@@ -1,6 +1,6 @@
 ---
 name: tui-chat-design
-description: "MASC TUI의 채팅·입력·로딩·진행 상태, Keeper·Work·로그·질문 원본의 비동기 조회, Keeper 설정·Runtime 폼·원문 저장과 설정 snapshot 해석을 바꿀 때 쓴다. 원본 입력·revision·요청 소유권, 마지막 관측과 부분 실패, 준비 작업·상태 반영·paint 증거를 구분하는 규칙이다."
+description: "MASC TUI의 채팅·입력·로딩·진행 상태, Keeper·Work·로그·질문 원본의 비동기 조회, Keeper 설정·Sandbox 단축키·Runtime 폼·원문 저장과 설정 snapshot 해석을 바꿀 때 쓴다. 원본 입력·revision·요청 소유권, 마지막 관측과 부분 실패, 준비 작업·상태 반영·paint 증거를 구분하는 규칙이다."
 ---
 
 # 대화를 먼저 읽는 채팅
@@ -35,7 +35,7 @@ description: "MASC TUI의 채팅·입력·로딩·진행 상태, Keeper·Work·�
 - 준비 시작·읽기 완료·상태 반영·에디터 인계는 별도 시각으로 관측한다. 인계 시각을 에디터
   실제 표시·키 응답·실제 작업 진척으로 부르지 않는다. 화면 문구·배치 검사를 추가하지 않는다.
 
-## Keeper 설정 저장
+## Keeper 설정·Sandbox 저장
 
 - 외부 에디터가 돌려준 원래 text·snapshot·composite revision·patch를 소유된 저장 작업에
   둔다. workspace 재확인과 설정 POST를 키 처리에서 기다리지 않는다. 같은 Keeper의
@@ -46,9 +46,16 @@ description: "MASC TUI의 채팅·입력·로딩·진행 상태, Keeper·Work·�
 - 실패 뒤 `e`는 current snapshot을 새로 읽고 변경했던 값만 편집기에 복원한다. 손대지 않은
   필드는 current 값을 쓰고, 이전 revision과 context 축소 확인은 재사용하지 않는다. 편집기에서
   다시 확인하기 전 재전송하지 않는다. 원래 작업의 입력·응답은 후속 복구가 덮어쓰지 않는다.
+- Sandbox `d/m/s`는 SSOT의 typed profile을 같은 저장 작업에 캡처한다. worker가 최신 config
+  snapshot과 composite revision을 읽고 workspace/read owner를 재확인한 뒤 그 profile만 CAS로
+  보낸다. 현재 profile이 같아도 revision을 검증한 뒤 미전송 결과로 남긴다. key handler에서
+  HTTP를 기다리거나 cached pane의 revision으로 대체하지 않는다.
+- 같은 Keeper의 editor/shortcut pending은 직렬화한다. 다른 profile 키가 원래 요청을 바꾸지
+  않는다. 종료 뒤 명시적 새 키만 다시 current를 읽는다. shortcut은 남아 있는 editor 초안을
+  지우지 않으며 `e` 복구에 섞이지 않는다. 읽은 snapshot·patch는 원래 영수증과 같이 보존한다.
 - 시작·worker 관측·UI 반영 시각과 phase를 연결한다. 화면의 진행/복구 안내와 이 로그는
-  실제 paint·키 응답·작업 완료·속도 향상 증거가 아니다. 외부 에디터의 terminal interaction과
-  Sandbox 단축키의 저장은 별도 경로이며 이 비동기 저장 범위에 포함하지 않는다.
+  실제 paint·키 응답·작업 완료·속도 향상 증거가 아니다. 외부 에디터의 terminal interaction은
+  별도다. shortcut의 최신 조회 때문에 총 논리 HTTP 수가 늘어도 입력 처리 대기와 구분한다.
 
 ## Runtime 폼 저장
 

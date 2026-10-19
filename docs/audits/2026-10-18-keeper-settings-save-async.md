@@ -83,3 +83,10 @@ The complete preparation/first-usable-input/readability/visibility/observability
 Ask-to-original-Task-to-useful-work, resource-owned ordinary/nested/dynamic/effectful
 Composition, held-job/shared-backend and matched Before/After goal remains open.
 Future comparisons retain failed, cancelled, interrupted and unfinished samples.
+
+## Subsequent Sandbox shortcut layer
+
+The following layer includes Sandbox shortcuts in this owned save model. The
+historical shortcut above omitted the composite revision required by the server;
+the follow-up obtains a fresh snapshot before constructing its profile-only CAS
+patch. See [the Sandbox audit](2026-10-18-sandbox-shortcut-owned-save.md).

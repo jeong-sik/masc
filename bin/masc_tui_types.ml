@@ -3852,24 +3852,35 @@ type keeper_settings_save_draft = {
   ksd_text : string;
   ksd_patch : Yojson.Safe.t;
 }
+type keeper_settings_save_input =
+  | Settings_editor_input of keeper_settings_save_draft
+  | Sandbox_shortcut_input of Keeper_sandbox_config.sandbox_profile
+type keeper_settings_save_prepared = {
+  ksp_snapshot : Yojson.Safe.t;
+  ksp_patch : Yojson.Safe.t option; (* None: observed Sandbox profile already matches. *)
+}
 type keeper_settings_save_observation =
   | Settings_revision_conflict
   | Settings_reconciliation_required
   | Settings_runtime_sync_failed
 type keeper_settings_save_outcome =
   | Settings_applied of { response : Yojson.Safe.t; severity : string; message : string }
+  | Settings_unchanged
   | Settings_not_sent of string
   | Settings_refused of Yojson.Safe.t * string
   | Settings_observation_required of keeper_settings_save_observation * Yojson.Safe.t
   | Settings_unconfirmed of string
 type keeper_settings_save_status =
   | Settings_checking
-  | Settings_posting
-  | Settings_finished of keeper_settings_save_outcome
+  | Settings_reading
+  | Settings_posting of keeper_settings_save_prepared
+  | Settings_finished of keeper_settings_save_prepared option * keeper_settings_save_outcome
 type keeper_settings_save_request = {
   ksv_token : unit ref;
-  ksv_origin : keeper_settings_request;
-  ksv_draft : keeper_settings_save_draft;
+  ksv_key : keeper_settings_key;
+  ksv_reading : unit ref;
+  ksv_expected : Tui_decode.server_identity;
+  ksv_input : keeper_settings_save_input;
   ksv_started_ns : int64;
   ksv_observation : (keeper_settings_save_status * int64) Atomic.t;
 }
@@ -9161,19 +9172,20 @@ let keeper_settings_same_origin left right =
 
 let keeper_settings_save_pending state key =
   List.exists (fun attempt ->
-    keeper_settings_same_origin key
-      (Masc_tui_fetched.request_key attempt.ksa_request.ksv_origin.ksr_request)
+    keeper_settings_same_origin key attempt.ksa_request.ksv_key
     && match attempt.ksa_status with
-       | Settings_checking | Settings_posting -> true
+       | Settings_checking | Settings_reading | Settings_posting _ -> true
        | Settings_finished _ -> false) state.keeper_settings_saves
 
 let keeper_settings_save_advances before after =
   match before, after with
-  | Settings_checking, (Settings_posting | Settings_finished _)
-  | Settings_posting, Settings_finished _ -> true
-  | Settings_finished _, (Settings_checking | Settings_posting | Settings_finished _)
-  | (Settings_checking | Settings_posting), Settings_checking
-  | Settings_posting, Settings_posting -> false
+  | Settings_checking, (Settings_reading | Settings_posting _ | Settings_finished _)
+  | Settings_reading, (Settings_posting _ | Settings_finished _)
+  | Settings_posting _, Settings_finished _ -> true
+  | Settings_finished _, (Settings_checking | Settings_reading | Settings_posting _ | Settings_finished _)
+  | (Settings_checking | Settings_reading | Settings_posting _), Settings_checking
+  | (Settings_reading | Settings_posting _), Settings_reading
+  | Settings_posting _, Settings_posting _ -> false
 
 let publish_keeper_settings_save request ~observed_ns status =
   let rec publish () =
@@ -9183,22 +9195,39 @@ let publish_keeper_settings_save request ~observed_ns status =
     then true else publish () in
   publish ()
 
-let begin_keeper_settings_save state ~origin ~draft ~started_ns =
-  let key = Masc_tui_fetched.request_key origin.ksr_request in
+let keeper_settings_same_input_kind left right =
+  match left,right with
+  | Settings_editor_input _, Settings_editor_input _
+  | Sandbox_shortcut_input _, Sandbox_shortcut_input _ -> true
+  | Settings_editor_input _, Sandbox_shortcut_input _
+  | Sandbox_shortcut_input _, Settings_editor_input _ -> false
+
+let admit_keeper_settings_save state ~key ~reading ~expected ~input ~current ~started_ns =
   if keeper_settings_save_pending state key then
     Error "Another settings save is pending; original operation retained"
   else
-    let current = keeper_settings_request_current state origin in
     let refusal = "Settings origin changed; save not sent, input retained" in
-    let status = if current then Settings_checking else Settings_finished (Settings_not_sent refusal) in
-    let request = {ksv_token=ref ();ksv_origin=origin;ksv_draft=draft;ksv_started_ns=started_ns;
-      ksv_observation=Atomic.make (status,started_ns)} in
+    let status = if current then Settings_checking else Settings_finished (None,Settings_not_sent refusal) in
+    let request = {ksv_token=ref ();ksv_key=key;ksv_reading=reading;ksv_expected=expected;
+      ksv_input=input;ksv_started_ns=started_ns;ksv_observation=Atomic.make (status,started_ns)} in
     state.keeper_settings_saves <- {ksa_request=request;ksa_status=status;ksa_recoverable=true}
       :: List.map (fun attempt ->
-        if keeper_settings_same_origin key
-             (Masc_tui_fetched.request_key attempt.ksa_request.ksv_origin.ksr_request)
+        if keeper_settings_same_origin key attempt.ksa_request.ksv_key
+           && keeper_settings_same_input_kind input attempt.ksa_request.ksv_input
         then {attempt with ksa_recoverable=false} else attempt) state.keeper_settings_saves;
     if current then Ok request else Error refusal
+
+let begin_keeper_settings_save state ~origin ~draft ~started_ns =
+  admit_keeper_settings_save state ~key:(Masc_tui_fetched.request_key origin.ksr_request)
+    ~reading:origin.ksr_reading ~expected:origin.ksr_expected ~input:(Settings_editor_input draft)
+    ~current:(keeper_settings_request_current state origin) ~started_ns
+
+let begin_keeper_sandbox_save state ~profile ~started_ns =
+  match keeper_settings_target state,state.server_identity with
+  | Some key,Some expected when state.view=Keepers Keeper_detail && state.detail_tab=Detail_sandbox ->
+      admit_keeper_settings_save state ~key ~reading:state.workspace_read_authority ~expected
+        ~input:(Sandbox_shortcut_input profile) ~current:true ~started_ns
+  | (Some _ | None),(Some _ | None) -> Error "Sandbox save requires a verified workspace and selected Keeper"
 
 let pending_keeper_settings_save_receipt state =
   List.find_map (fun attempt ->
@@ -9214,63 +9243,80 @@ let apply_keeper_settings_save state request status =
       applied := true;
       {attempt with ksa_status=status;
         ksa_recoverable=(match status with
-          | Settings_finished (Settings_applied _) -> false
-          | Settings_checking | Settings_posting
-          | Settings_finished (Settings_not_sent _ | Settings_refused _ | Settings_observation_required _
-              | Settings_unconfirmed _) -> attempt.ksa_recoverable)}
+          | Settings_finished (_, (Settings_applied _ | Settings_unchanged)) -> false
+          | Settings_checking | Settings_reading | Settings_posting _
+          | Settings_finished (_, (Settings_not_sent _ | Settings_refused _ | Settings_observation_required _
+              | Settings_unconfirmed _)) -> attempt.ksa_recoverable)}
     end else attempt) state.keeper_settings_saves;
   !applied
 
 let keeper_settings_save_current state request =
-  let origin = request.ksv_origin in
-  let key = Masc_tui_fetched.request_key origin.ksr_request in
-  key.ksk_authority = state.workspace_authority
-  && origin.ksr_reading == state.workspace_read_authority
+  request.ksv_key.ksk_authority = state.workspace_authority
+  && request.ksv_reading == state.workspace_read_authority
   && state.workspace_identity = Workspace_identity_match && server_authority_ready state
-  && server_workspace_matches ~expected:(Some origin.ksr_expected)
+  && server_workspace_matches ~expected:(Some request.ksv_expected)
        (match state.server_identity with Some identity -> Ok identity | None -> Error "unread")
 
 let keeper_settings_recovery state key =
   List.find_map (fun attempt ->
-    if attempt.ksa_recoverable && keeper_settings_same_origin key
-        (Masc_tui_fetched.request_key attempt.ksa_request.ksv_origin.ksr_request)
-    then match attempt.ksa_status with
-      | Settings_finished _ -> Some attempt.ksa_request.ksv_draft
-      | Settings_checking | Settings_posting -> None
+    if attempt.ksa_recoverable && keeper_settings_same_origin key attempt.ksa_request.ksv_key
+    then match attempt.ksa_status,attempt.ksa_request.ksv_input with
+      | Settings_finished _, Settings_editor_input draft -> Some draft
+      | (Settings_checking | Settings_reading | Settings_posting _), Settings_editor_input _
+      | (Settings_checking | Settings_reading | Settings_posting _ | Settings_finished _), Sandbox_shortcut_input _ -> None
     else None) state.keeper_settings_saves
 
 let keeper_settings_save_phase = function
-  | Settings_checking -> "checking" | Settings_posting -> "posting"
-  | Settings_finished (Settings_applied _) -> "applied"
-  | Settings_finished (Settings_not_sent _) -> "not_sent"
-  | Settings_finished (Settings_refused _) -> "refused"
-  | Settings_finished (Settings_observation_required (Settings_revision_conflict,_)) -> "conflict"
-  | Settings_finished (Settings_observation_required (Settings_reconciliation_required,_)) -> "reconciliation_required"
-  | Settings_finished (Settings_observation_required (Settings_runtime_sync_failed,_)) -> "runtime_sync_failed"
-  | Settings_finished (Settings_unconfirmed _) -> "unconfirmed"
+  | Settings_checking -> "checking" | Settings_reading -> "reading_current"
+  | Settings_posting _ -> "posting"
+  | Settings_finished (_,Settings_applied _) -> "applied"
+  | Settings_finished (_,Settings_unchanged) -> "unchanged"
+  | Settings_finished (_,Settings_not_sent _) -> "not_sent"
+  | Settings_finished (_,Settings_refused _) -> "refused"
+  | Settings_finished (_,Settings_observation_required (Settings_revision_conflict,_)) -> "conflict"
+  | Settings_finished (_,Settings_observation_required (Settings_reconciliation_required,_)) -> "reconciliation_required"
+  | Settings_finished (_,Settings_observation_required (Settings_runtime_sync_failed,_)) -> "runtime_sync_failed"
+  | Settings_finished (_,Settings_unconfirmed _) -> "unconfirmed"
 
 let keeper_settings_save_outcome_detail = function
   | Settings_applied receipt -> receipt.message
+  | Settings_unchanged -> "Selected sandbox profile already observed; no write sent"
   | Settings_not_sent detail -> "Settings not sent; input retained: " ^ detail
   | Settings_refused (_,detail) -> "Settings refused before write; input retained: " ^ detail
   | Settings_unconfirmed detail -> "Settings outcome unconfirmed; input retained: " ^ detail
   | Settings_observation_required (cause, _) ->
       match cause with
-      | Settings_revision_conflict -> "Settings changed before save; edited values retained"
-      | Settings_reconciliation_required -> "Settings reconciliation required; edited values retained"
-      | Settings_runtime_sync_failed -> "Settings applied but runtime sync failed; edited values retained"
+      | Settings_revision_conflict -> "Settings changed before save; input retained"
+      | Settings_reconciliation_required -> "Settings reconciliation required; input retained"
+      | Settings_runtime_sync_failed -> "Settings applied but runtime sync failed; input retained"
+
+let keeper_settings_save_intent_name request =
+  match request.ksv_input with
+  | Settings_editor_input _ -> "editor"
+  | Sandbox_shortcut_input profile -> "sandbox:" ^ Keeper_sandbox_config.sandbox_profile_to_string profile
+
+let keeper_settings_save_label request =
+  match request.ksv_input with
+  | Settings_editor_input _ -> request.ksv_key.ksk_keeper ^ " settings"
+  | Sandbox_shortcut_input profile -> request.ksv_key.ksk_keeper ^ " sandbox "
+      ^ Keeper_sandbox_config.sandbox_profile_to_string profile
 
 let keeper_settings_save_notice state =
   Option.bind (keeper_settings_target state) (fun key ->
     List.find_map (fun attempt ->
-      if keeper_settings_same_origin key
-          (Masc_tui_fetched.request_key attempt.ksa_request.ksv_origin.ksr_request)
-      then match attempt.ksa_status with
-        | Settings_checking -> Some (key.ksk_keeper ^ " settings: checking save; navigation stays available")
-        | Settings_posting -> Some (key.ksk_keeper ^ " settings: awaiting save receipt; navigation stays available")
-        | Settings_finished (Settings_applied _) -> None
-        | Settings_finished outcome when attempt.ksa_recoverable ->
-            Some (keeper_settings_save_outcome_detail outcome ^ " · e reloads current and restores changed values")
+      if keeper_settings_same_origin key attempt.ksa_request.ksv_key
+      then
+        let label = keeper_settings_save_label attempt.ksa_request in
+        match attempt.ksa_status with
+        | Settings_checking -> Some (label ^ ": checking save; navigation stays available")
+        | Settings_reading -> Some (label ^ ": reading current settings; navigation stays available")
+        | Settings_posting _ -> Some (label ^ ": awaiting save receipt; navigation stays available")
+        | Settings_finished (_, (Settings_applied _ | Settings_unchanged)) -> None
+        | Settings_finished (_,outcome) when attempt.ksa_recoverable ->
+            let recovery = match attempt.ksa_request.ksv_input with
+              | Settings_editor_input _ -> "e reloads current and restores changed values"
+              | Sandbox_shortcut_input _ -> "Sandbox d/m/s reads current and saves the selected profile" in
+            Some (label ^ " · " ^ keeper_settings_save_outcome_detail outcome ^ " · " ^ recovery)
         | Settings_finished _ -> None
       else None) state.keeper_settings_saves)
 

@@ -379,6 +379,18 @@ let reopened_stem ~reason edited =
   let body = String.split_on_char '\n' edited |> drop_refusals |> String.concat "\n" in
   "// " ^ one_line ^ "\n" ^ body
 
+let sandbox_patch ~profile snapshot =
+  let ( let* ) = Result.bind in
+  let* revision = expected_config_revision snapshot in
+  let* current = match member "sandbox_profile" snapshot with
+    | Some (`String value) ->
+        (match Keeper_sandbox_config.sandbox_profile_of_string value with
+         | Some profile -> Ok profile | None -> Error "unknown observed sandbox profile")
+    | Some _ | None -> Error "sandbox profile was not observed" in
+  if current = profile then Ok None
+  else Ok (Some (`Assoc ["expected_config_revision",revision;
+    "sandbox_profile",`String (Keeper_sandbox_config.sandbox_profile_to_string profile)]))
+
 let reopen_edit_on_current ~before ~edited ~current =
   let ( let* ) = Result.bind in
   let* after = match Yojson.Safe.from_string edited with

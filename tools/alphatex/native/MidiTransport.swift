@@ -317,9 +317,11 @@ struct SourceChase {
             if notes {
                 for note in state.notes where !note.captured { result.append((port, [0x90 | channel, note.pitch, note.velocity])) }
                 for note in state.notes where !note.held { result.append((port, [note.releaseStatus, note.pitch, note.release])) }
-                if let pressure = state.pressure { result.append((port, [0xd0 | channel, pressure])) }
-                for pitch in state.poly.keys.sorted() { result.append((port, [0xa0 | channel, pitch, state.poly[pitch]!])) }
             }
+            // Channel pressure and poly aftertouch are captured values too; silence()
+            // does not clear them, so every entry re-sends them after the pedals.
+            if let pressure = state.pressure { result.append((port, [0xd0 | channel, pressure])) }
+            for pitch in state.poly.keys.sorted() { result.append((port, [0xa0 | channel, pitch, state.poly[pitch]!])) }
         }
         return result
     }

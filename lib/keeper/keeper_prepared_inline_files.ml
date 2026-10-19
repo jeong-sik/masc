@@ -269,20 +269,28 @@ module Ready = struct
     | Pure_arguments | Ordinary Keeper_tool_descriptor.Concurrent
     | Unprepared_file Keeper_tool_descriptor.Concurrent | Prepared_file (Read _) -> false
 
-  let ordering left right = match left, right with
+  let ordering left right =
+    let open Keeper_tool_descriptor in
+    match left, right with
     | Pure_arguments, _ | _, Pure_arguments -> No_order
-    | Prepared_file left, Prepared_file right ->
+    | Prepared_file ((Read _ | Edit _ | Write _) as left),
+      Prepared_file ((Read _ | Edit _ | Write _) as right) ->
       if List.exists (fun scope ->
         List.exists (Agent_core.Tool_contract.Resource_scope.conflicts scope)
           (operation_scopes right)) (operation_scopes left)
       then Require_success else No_order
-    | Unprepared_file _, (Unprepared_file _ | Prepared_file _)
-    | Prepared_file _, Unprepared_file _ -> Require_success
-    | Ordinary Keeper_tool_descriptor.Concurrent, Ordinary Keeper_tool_descriptor.Concurrent
-    | Ordinary Keeper_tool_descriptor.Concurrent, Prepared_file (Read _)
-    | Prepared_file (Read _), Ordinary Keeper_tool_descriptor.Concurrent -> No_order
-    | Ordinary _, (Ordinary _ | Unprepared_file _ | Prepared_file _)
-    | (Unprepared_file _ | Prepared_file _), Ordinary _ ->
+    | Unprepared_file (Serial | Concurrent),
+      (Unprepared_file (Serial | Concurrent) | Prepared_file (Read _ | Edit _ | Write _))
+    | Prepared_file (Read _ | Edit _ | Write _), Unprepared_file (Serial | Concurrent) ->
+      Require_success
+    | Ordinary Concurrent, Ordinary Concurrent
+    | Ordinary Concurrent, Prepared_file (Read _)
+    | Prepared_file (Read _), Ordinary Concurrent -> No_order
+    | Ordinary (Serial | Concurrent),
+      (Ordinary (Serial | Concurrent) | Unprepared_file (Serial | Concurrent)
+        | Prepared_file (Read _ | Edit _ | Write _))
+    | (Unprepared_file (Serial | Concurrent) | Prepared_file (Read _ | Edit _ | Write _)),
+      Ordinary (Serial | Concurrent) ->
       (* Unknown footprint: preserve execution ordering, without claiming a
          shared file. Only an original Serial-to-Serial chain carries the
          legacy failure dependency; a concurrent lookup is just a barrier. *)

@@ -648,10 +648,15 @@ portable save/reopen. Original WAV, SMF and mixed WAV/SMF arrangements can loop
 without count-in/metronome. Captured audio loops through `:play-audio`, or normal
 playback when only audio components are audible. Original host-clock gaps,
 source trims, channel routing and fractional placement corrections remain intact.
-Paired captured UMP and practice-click looping still require their shared
-cycle-state integration; those routes refuse the loop explicitly.
-Loop recording likewise requires cycle-aware take placement and is
-not admitted yet. Disabling the loop restores their existing one-shot workflows.
+Normal paired captured MIDI/WAV and hybrid SMF/captured arrangements also loop
+on that same authored clock. Raw MIDI 1.0/2.0 UMP words, source host ticks,
+finite source copies and exact placement remain intact. Only reached MIDI
+channel state is reserved against live inputs; silent destinations are omitted.
+Pause, seek, resume and stop retain the audio/MIDI owner and private source files
+until its child closes. MIDI destinations must support native MIDI 2.0 for
+captured UMP; reachable unsupported reconstruction state is refused explicitly.
+Practice-click looping and loop recording still require cycle-aware integration
+and are not admitted yet. Disabling the loop restores their one-shot workflows.
 
 For example, `:loop 4 12` repeats that passage continuously on the selected audio
 or MIDI output until stopped. It starts at beat 4. Pause/resume and `:seek BEAT` retain

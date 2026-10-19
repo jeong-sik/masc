@@ -1,0 +1,71 @@
+name: Alphatex native harnesses
+
+# tools/alphatex/native holds the macOS audio/MIDI Swift sources. They are
+# compiled by their own Node harnesses, which invoke `xcrun swiftc`; nothing
+# else in CI compiles them, so this macOS job is the only place those sources
+# are built and exercised. It is not a required check for unrelated pull
+# requests: only changes under tools/alphatex/** (or to this workflow itself)
+# trigger it.
+on:
+  workflow_dispatch: {}
+  pull_request:
+    paths:
+      - "tools/alphatex/**"
+      # Run when this workflow itself changes, so a pull request that adds or
+      # edits it is exercised before merge.
+      - ".github/workflows/alphatex-native.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: alphatex-native-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native:
+    name: Compile and run the alphatex native harnesses
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - name: Swift toolchain
+        run: xcrun swiftc --version
+      - name: Native Swift harnesses
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          harnesses=(tools/alphatex/native/test-*.mjs)
+          if (( ${#harnesses[@]} == 0 )); then
+            echo "::warning::No test-*.mjs harness under tools/alphatex/native on this ref."
+            echo "SKIP native harnesses: none on this ref."
+            echo "The alphatex native Swift transport harnesses are carried by the"
+            echo "#43719 music stack; this step runs them as soon as they are on the ref."
+            exit 0
+          fi
+          status=0
+          for harness in "${harnesses[@]}"; do
+            name="$(basename "$harness")"
+            echo "::group::$name"
+            if node "$harness"; then
+              echo "PASS $name"
+            else
+              echo "FAIL $name" >&2
+              status=1
+            fi
+            echo "::endgroup::"
+          done
+          exit "$status"
+      - name: Install the terminal package dependencies
+        working-directory: tools/alphatex
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack prepare pnpm@10.31.0 --activate
+          pnpm install --frozen-lockfile
+      - name: Alphatex JavaScript suite
+        working-directory: tools/alphatex
+        run: node --test test/*.test.mjs

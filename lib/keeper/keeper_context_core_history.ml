@@ -75,9 +75,9 @@ let not_recorded ~keeper_name ~turn_ref ~path ~site detail =
    primitive creates the parent, as it does for the turn-boundary log. Past
    the cancellation arm every exception is reported and swallowed: the turn
    that called has its checkpoint and owes the reader nothing here. *)
-let append_line ~keeper_name ~turn_ref ~path line =
+let append_line ~keeper_name ~turn_ref ~session_dir ~path line =
   let failed = not_recorded ~keeper_name ~turn_ref ~path ~site:"append" in
-  match Fs_compat.append_private_jsonl_durable_locked_result path line with
+  let report = function
   | Fs_compat.Private_file_succeeded () -> ()
   | Fs_compat.Private_file_succeeded_with_cleanup_failure { value = (); cleanup_failure } ->
       Log.Keeper.warn
@@ -93,6 +93,29 @@ let append_line ~keeper_name ~turn_ref ~path line =
            "%s; descriptor settlement also failed: %s"
            (Fs_compat.private_jsonl_append_error_to_string error)
            (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure))
+  in
+  (* The stable sibling session lock also owns subtree deletion and the
+     official Librarian's source capture. Keep the existing file append
+     protocol inside it, using the configured pathname shared by readers:
+     Fs_compat keys its same-process file mutex by that exact spelling.
+     The outer session owner still uses its canonical lock identity.
+     Preserve a completed outcome if releasing the outer lock fails. *)
+  let completed = ref None in
+  match
+    Keeper_checkpoint_store.with_session_lock ~session_dir (fun _canonical_session_dir ->
+      let outcome = Fs_compat.append_private_jsonl_durable_locked_result path line in
+      completed := Some outcome;
+      outcome)
+  with
+  | Ok outcome -> report outcome
+  | Error detail ->
+    (match !completed with
+     | None -> failed detail
+     | Some outcome ->
+       report outcome;
+       Log.Keeper.warn ~keeper_name
+         "history session lock settlement failed after completed append path=%s: %s"
+         path detail)
   | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
   | exception Sys_error message -> failed message
   | exception Unix.Unix_error (code, fn, arg) ->
@@ -127,7 +150,8 @@ let persist_message ~keeper_name ~turn_ref ?source session msg =
           :: (key_kind, `String kind_message)
           :: fields
         in
-        append_line ~keeper_name ~turn_ref ~path (line_of_fields fields)
+        append_line ~keeper_name ~turn_ref ~session_dir:session.session_dir
+          ~path (line_of_fields fields)
     | json ->
         not_recorded
           ~keeper_name
@@ -149,4 +173,5 @@ let persist_tool_observation ~keeper_name ~turn_ref session ~tool_name
     ; (key_outcome, `String (Tool_result.string_of_tool_call_outcome outcome))
     ]
   in
-  append_line ~keeper_name ~turn_ref ~path (line_of_fields fields)
+  append_line ~keeper_name ~turn_ref ~session_dir:session.session_dir
+    ~path (line_of_fields fields)

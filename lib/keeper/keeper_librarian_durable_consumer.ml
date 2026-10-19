@@ -654,6 +654,90 @@ let read_fragments ~config (official : R.official_line list) =
     official
 ;;
 
+type message_floor =
+  | No_message_floor
+  | Runtime_message_floor of Keeper_lane_cli_oneshot.runner option
+
+let floor_refusal detail : Keeper_librarian_runtime.not_committed =
+  {input_capacity_evidence=No_input_capacity_refusal;provider_input_refusals=[];
+   detail;walk_shows_size=false;smaller_range_meets_same_failure=false}
+
+let official_message_floor ?cli_runner ~config ~keeper_name ~lines ~progress ~official_cursor
+    ~fragments ~(selected : R.official_line) ~(range : Keeper_memory_os_current.official_range_id)
+    ~external_cursor ~external_through reports
+    (input : Keeper_librarian.input) =
+  let module Current = Keeper_memory_os_current in
+  let module Unread = Keeper_librarian_unread in
+  let module Floor = Keeper_librarian_message_floor in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path in
+  let runtime_keepers_dir = Workspace.keepers_runtime_dir config in
+  let trace_id = Ids.Turn_ref.trace_id selected.turn_ref in
+  let selected_turns = [selected.line,selected.turn_ref,input.messages] in
+  let sources = List.mapi (fun message_in_turn message ->
+    Unread.Official_turn {turn_ref=selected.turn_ref;boundary_line=selected.line;
+      message_in_turn;message_sha256=Unread.message_digest message}) input.messages in
+  let unread_message source ~reasons = match source with
+    | Unread.Official_turn {turn_ref;boundary_line;message_in_turn;_}
+        when Ids.Turn_ref.equal turn_ref selected.turn_ref && boundary_line=selected.line ->
+      Unread.for_official_turn ~turn_ref ~boundary_line ~message_in_turn ~messages:input.messages ~reasons
+    | Unread.Atom _ | Unread.Official_turn _ -> Error "message is outside the selected official turn" in
+  let failure detail extra = Memory_refused (reports @ extra @ [floor_refusal detail]) in
+  let inferred =
+    let ( let* ) = Result.bind in
+    let* unread_messages = Domain_pool_ref.submit_io_or_inline (fun () ->
+      Current.read_unread_messages ~keepers_dir ~keeper_id:keeper_name)
+      |> Result.map_error (fun detail -> detail,[]) in
+    Floor.infer ?cli_runner ~base_path:config.Workspace.base_path ~keepers_dir ~keeper_name
+      ~sources ~unread_message ~previous_state:None ~unread_messages input
+      |> Result.map_error (fun (error : Floor.error) -> error.detail,error.reports) in
+  match inferred with
+  | Error (detail,extra) -> failure detail extra
+  | Ok inferred ->
+    let range = {range with Current.unread_messages=inferred.program.unread} in
+    let source = Current.Official_program_source {range;selected_turns} in
+    let committed = ref false in
+    let publication = Eio.Cancel.protect (fun () ->
+      Domain_pool_ref.submit_io_or_inline (fun () ->
+        let session_dir = Filename.concat (Keeper_fs.session_store_path config) trace_id in
+        Keeper_checkpoint_store.with_session_lock ~session_dir (fun _ ->
+          (* The same session lock excludes both real history writers. Keep
+             it through Memory durability; no inference runs under this lock. *)
+          let ( let* ) = Result.bind in
+          let* current_lines = B.read ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name in
+          let prefix = List.filter (fun (line,_) -> line <= selected.line) in
+          let* () = if prefix current_lines=prefix lines then Ok ()
+            else Error "official boundary prefix changed during message inference" in
+          let* current_progress = P.read ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name
+            |> Result.map_error P.read_error_to_string in
+          let* current_official = O.read ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name
+            |> Result.map_error O.read_error_to_string in
+          let* () = if current_progress=progress && current_official=official_cursor then Ok ()
+            else Error "Librarian cursor changed during official message inference" in
+          let* current_fragments = read_fragments ~config [selected] |> Result.map_error error_to_string in
+          let* () = match String_map.find_opt trace_id fragments,
+              String_map.find_opt trace_id current_fragments with
+            | Some original, Some current ->
+              if Keeper_turn_fragments.of_turn selected.turn_ref current
+                 = Keeper_turn_fragments.of_turn selected.turn_ref original then Ok ()
+              else Error "official messages or host observations changed during message inference"
+            | None, (None | Some _) | Some _, None -> Error "official source capture is unavailable" in
+          let* () = Keeper_external_read_cursor.prepare ~memory_keepers_dir:keepers_dir
+            ~runtime_keepers_dir ~keeper_name external_cursor ~through:external_through
+            ~atom:None ~official:(Some range) in
+          let* _ = Current.apply_program ~keepers_dir ~keeper_id:keeper_name ~now:(Time_compat.now ())
+            ~anchor:inferred.anchor ~source ~validate_source:(fun () -> Ok ())
+            ~on_committed:(fun _ -> committed := true) inferred.program in
+          Ok ()))) in
+    (match publication with
+     | Ok (Ok ()) -> Memory_committed
+     | Error detail | Ok (Error detail) ->
+       if !committed then (
+         Log.Keeper.warn ~keeper_name
+           "official Memory program is durable; later settlement failed and WAL recovery is required: %s" detail;
+         Memory_committed)
+       else failure detail [])
+;;
+
 let official_cursor_recorded_at ~lines (cursor : Keeper_librarian_official_progress.t) =
   match
     List.find_map
@@ -868,6 +952,7 @@ let consume_one_with_extent
       ~write_progress_store
       ~write_official_progress_store
       ~extent
+      ~message_floor
       ~config
       ~keeper_name
       ~commit
@@ -1444,7 +1529,17 @@ let consume_one_with_extent
         ; counterpart_observations
         }
       in
-      match commit ~expected_revision ~range_id:atom_next ~official_range_id input with
+      let result = commit ~expected_revision ~range_id:atom_next ~official_range_id input in
+      let result = match result, message_floor, atom_next, official_lines, official_range_id with
+        | Memory_refused reports, Runtime_message_floor cli_runner, None, [selected], Some range
+            when input.messages <> [] && List.exists
+              (fun (report : Keeper_librarian_runtime.not_committed) -> report.walk_shows_size) reports ->
+          official_message_floor ?cli_runner ~config ~keeper_name ~lines ~progress ~official_cursor
+            ~fragments ~selected ~range ~external_cursor ~external_through reports input
+        | (Memory_committed | Memory_refused _),
+            (No_message_floor | Runtime_message_floor _), (None | Some _),
+            ([] | [_] | _ :: _ :: _), (None | Some _) -> result in
+      match result with
       | Memory_refused reports -> Ok (Memory_not_committed reports)
       | Memory_committed ->
         let* _ = Domain_pool_ref.submit_io_or_inline (fun () ->
@@ -1457,12 +1552,13 @@ let consume_one_with_extent
         advance ())
 ;;
 
-let consume_one_with_progress_writer
+let consume_one_with_progress_writer_and_floor
       ~write_progress_store
       ~write_official_progress_store
       ~config
       ~keeper_name
       ~commit
+      ~message_floor
   =
   let runtime_keepers_dir = Workspace.keepers_runtime_dir config in
   let key = range_key ~runtime_keepers_dir ~keeper_name in
@@ -1477,6 +1573,7 @@ let consume_one_with_progress_writer
       ~write_progress_store
       ~write_official_progress_store
       ~extent
+      ~message_floor
       ~config
       ~keeper_name
       ~commit
@@ -1505,15 +1602,23 @@ let consume_one_with_progress_writer
 ;;
 
 let consume_one ~config ~keeper_name ~commit =
-  consume_one_with_progress_writer
+  consume_one_with_progress_writer_and_floor
     ~write_progress_store:P.write
     ~write_official_progress_store:O.write
     ~config
     ~keeper_name
     ~commit
+    ~message_floor:No_message_floor
 ;;
 
-let commit_with_runtime
+let consume_one_with_progress_writer ~write_progress_store ~write_official_progress_store
+    ~config ~keeper_name ~commit =
+  consume_one_with_progress_writer_and_floor ~write_progress_store ~write_official_progress_store
+    ~config ~keeper_name ~commit ~message_floor:No_message_floor
+;;
+
+let commit_with_runtime_runner
+      ?cli_runner
       ~base_path
       ~keepers_dir
       ~keeper_id
@@ -1524,6 +1629,7 @@ let commit_with_runtime
   =
   let committed = ref false and reports = ref [] in
   Keeper_librarian_runtime.run_best_effort
+    ?cli_runner
     ~on_memory_committed:(fun () -> committed := true)
     ~on_not_committed:(fun report -> reports := report :: !reports)
     ?durable_range_id:range_id
@@ -1536,8 +1642,31 @@ let commit_with_runtime
   if !committed then Memory_committed else Memory_refused (List.rev !reports)
 ;;
 
+let commit_with_runtime ~base_path ~keepers_dir ~keeper_id ~expected_revision ~range_id
+    ~official_range_id input =
+  commit_with_runtime_runner ~base_path ~keepers_dir ~keeper_id ~expected_revision ~range_id
+    ~official_range_id input
+;;
+
+let consume_one_with_runtime_and_progress_writers ?cli_runner ~write_progress_store
+    ~write_official_progress_store ~config ~keeper_name () =
+  let base_path = config.Workspace.base_path in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let commit ~expected_revision ~range_id ~official_range_id input =
+    commit_with_runtime_runner ?cli_runner ~base_path ~keepers_dir ~keeper_id:keeper_name
+      ~expected_revision ~range_id ~official_range_id input in
+  consume_one_with_progress_writer_and_floor ~write_progress_store ~write_official_progress_store
+    ~config ~keeper_name ~commit ~message_floor:(Runtime_message_floor cli_runner)
+;;
+
+let consume_one_with_runtime ?cli_runner ~config ~keeper_name () =
+  consume_one_with_runtime_and_progress_writers ?cli_runner ~write_progress_store:P.write
+    ~write_official_progress_store:O.write ~config ~keeper_name ()
+;;
+
 module For_testing = struct
   let consume_one_with_progress_writer = consume_one_with_progress_writer
+  let consume_one_with_runtime_and_progress_writers = consume_one_with_runtime_and_progress_writers
 
   let reset_process_state () =
     Stdlib.Mutex.protect failed_ranges_mu (fun () -> Hashtbl.clear failed_ranges)

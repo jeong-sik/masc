@@ -265,13 +265,13 @@ let disconnect (state : state) ~unbind ~report =
        then (
          state.identity_disconnect_armed <- None;
          report "system" "nothing is attached to disconnect here")
-       else if Option.equal String.equal state.identity_disconnect_armed (Some provider_id)
+       else if state.identity_disconnect_armed = Some (keeper.k_name, provider_id)
        then (
          state.identity_disconnect_armed <- None;
          state.identity_attempt_error <- None;
          unbind ~keeper_name:keeper.k_name ~provider_id)
        else (
-         state.identity_disconnect_armed <- Some provider_id;
+         state.identity_disconnect_armed <- Some (keeper.k_name, provider_id);
          (* The arm is written where the pane already shows its one notice, so
             it stays on screen while the operator decides, instead of a status
             line that has scrolled away by the time they press again. *)

@@ -1042,7 +1042,7 @@ let test_detaching_takes_two_presses_on_the_same_row () =
   in
   disconnect ();
   check (Alcotest.list Alcotest.string) "the first press sends nothing" [] (List.map snd !sent);
-  check (Alcotest.option Alcotest.string) "it arms the row" (Some "slack")
+  check Alcotest.(option (pair string string)) "it arms the row" (Some ("A", "slack"))
     state.identity_disconnect_armed;
   check Alcotest.bool "and says the second press is what sends it" true
     (match state.identity_attempt_error with
@@ -1051,7 +1051,7 @@ let test_detaching_takes_two_presses_on_the_same_row () =
   disconnect ();
   check (Alcotest.list Alcotest.string) "the second press detaches it" [ "slack" ]
     (List.map snd !sent);
-  check (Alcotest.option Alcotest.string) "and leaves nothing armed" None
+  check Alcotest.(option (pair string string)) "and leaves nothing armed" None
     state.identity_disconnect_armed
 
 let test_detaching_a_service_that_is_not_attached_arms_nothing () =
@@ -1062,7 +1062,8 @@ let test_detaching_a_service_that_is_not_attached_arms_nothing () =
   Masc_tui_identity_input.disconnect state
     ~unbind:(fun ~keeper_name ~provider_id -> sent := (keeper_name, provider_id) :: !sent)
     ~report:(fun _ _ -> ());
-  check (Alcotest.option Alcotest.string) "nothing armed" None state.identity_disconnect_armed;
+  check Alcotest.(option (pair string string)) "nothing armed" None
+    state.identity_disconnect_armed;
   check (Alcotest.list Alcotest.string) "nothing sent" [] (List.map snd !sent)
 
 let test_the_arm_does_not_move_to_another_row () =
@@ -1078,14 +1079,34 @@ let test_the_arm_does_not_move_to_another_row () =
   let unbind ~keeper_name ~provider_id = sent := (keeper_name, provider_id) :: !sent in
   state.identity_cursor <- 1;
   Masc_tui_identity_input.disconnect state ~unbind ~report:(fun _ _ -> ());
-  check (Alcotest.option Alcotest.string) "slack armed" (Some "slack")
+  check Alcotest.(option (pair string string)) "slack armed" (Some ("A", "slack"))
     state.identity_disconnect_armed;
   state.identity_cursor <- 0;
   Masc_tui_identity_input.disconnect state ~unbind ~report:(fun _ _ -> ());
   check (Alcotest.list Alcotest.string) "moving to another row detaches nothing" []
     (List.map snd !sent);
-  check (Alcotest.option Alcotest.string) "and arms the row now under the cursor"
-    (Some "atlassian") state.identity_disconnect_armed
+  check Alcotest.(option (pair string string)) "and arms the row now under the cursor"
+    (Some ("A", "atlassian")) state.identity_disconnect_armed
+
+let test_the_arm_belongs_to_the_keeper_it_was_made_on () =
+  (* Arming Slack on Keeper A and walking to Keeper B, which also holds
+     Slack, must not detach B's Slack on one press: the arm names the Keeper
+     as well as the service, so the same provider id on another Keeper is a
+     different row. *)
+  let state = detach_state [ declared ~tools:[ "sendMessage" ] "slack" "Slack" ] in
+  let sent = ref [] in
+  let unbind ~keeper_name ~provider_id = sent := (keeper_name, provider_id) :: !sent in
+  Masc_tui_identity_input.disconnect state ~unbind ~report:(fun _ _ -> ());
+  check Alcotest.(option (pair string string)) "A's slack armed" (Some ("A", "slack"))
+    state.identity_disconnect_armed;
+  state.keepers <- [ keeper_fixture "B" ];
+  state.keeper_cursor <- 0;
+  state.identity_view <- Some ("B", [ declared ~tools:[ "sendMessage" ] "slack" "Slack" ]);
+  Masc_tui_identity_input.disconnect state ~unbind ~report:(fun _ _ -> ());
+  check (Alcotest.list Alcotest.string) "B's slack is not detached on one press" []
+    (List.map snd !sent);
+  check Alcotest.(option (pair string string)) "it is B's slack that is armed now"
+    (Some ("B", "slack")) state.identity_disconnect_armed
 
 let () =
   Alcotest.run "tui_identity_tab"
@@ -1125,6 +1146,8 @@ let () =
             test_detaching_a_service_that_is_not_attached_arms_nothing;
           Alcotest.test_case "the arm does not move to another row" `Quick
             test_the_arm_does_not_move_to_another_row;
+          Alcotest.test_case "the arm belongs to the Keeper it was made on" `Quick
+            test_the_arm_belongs_to_the_keeper_it_was_made_on;
         ] );
       ( "the app form",
         [ Alcotest.test_case "the secret is never drawn" `Quick

@@ -1879,7 +1879,7 @@ let fork_workspace_job = Masc_tui_workspace_job.fork
 (* Dispatch owns cancellation, error conversion and the original completion
    envelope. Each caller supplies its own admission before doing its work. *)
 let launch_workspace_result ?key ?(operation = false) ?(observation = false)
-    ?(on_not_run = fun () -> ()) state ~mailbox ~boundary_error ~deliver perform =
+    ?observe_job ?(on_not_run = fun () -> ()) state ~mailbox ~boundary_error ~deliver perform =
   let enqueue_async = workspace_enqueue state in
   let deliver_result result =
     let message = deliver result in
@@ -1901,7 +1901,7 @@ let launch_workspace_result ?key ?(operation = false) ?(observation = false)
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
-      (match fork_workspace_job ?key ~observation state ~sw run with
+      (match fork_workspace_job ?key ~observation ?observe:observe_job state ~sw run with
        | () -> ()
        | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
        | exception exn ->
@@ -3426,14 +3426,20 @@ let reconcile_task_documents state ~mailbox =
   List.iter (fun request -> if not (List.exists (fun active -> active==request) current) then
     Masc_tui_workspace_job.cancel_observation state ~key:request.tdr_job) previous;
   List.iter (fun request ->
+    let module Observation = Masc_tui_task_document_observation in
+    let observe=Observation.observe request.tdr_observation in
     let key=Masc_tui_fetched.request_key request.tdr_ticket in
     let name=match Masc_tui_task_document.part key.tdk_input with
       | Masc_tui_task_document.Body -> "task.document.body.prepare_wait"
       | History -> "task.document.history.prepare_wait" in
-    launch_workspace_result ~key:request.tdr_job ~observation:true state ~mailbox
+    launch_workspace_result ~key:request.tdr_job ~observation:true
+      ~observe_job:(function
+        | Masc_tui_workspace_job.Cancellation_requested -> observe Cancellation_requested
+        | Registration_released -> observe Registration_released)
+      ~on_not_run:(fun () -> observe (Caller_observed Not_started)) state ~mailbox
       ~boundary_error:Fun.id ~deliver:(fun result -> Task_document_prepared (request,result))
-      (fun () -> Masc_tui_response_decode.run ~name (fun () ->
-        Ok (Masc_tui_task_document.prepare key.tdk_input)))) started;
+      (fun () -> Ok (Observation.run request.tdr_observation ~name (fun () ->
+        Masc_tui_task_document.prepare key.tdk_input)))) started;
   started<>[] || List.length previous<>List.length current
 
 let close_tools_async_detail state =

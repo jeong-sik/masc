@@ -682,6 +682,12 @@ count is drawn beyond the available space.
 | `e` | open the selected SKILL.md in $EDITOR, validate, CAS-save, and publish |
 | `Esc` | return from original Task to request, then request to list; otherwise back to the System surface it hangs off |
 
+Task body and history prepare independently. Their notices distinguish waiting
+to start, arranging the text, waiting for the prepared result, and waiting for
+the display state to update. An earlier display stays labelled while a newer
+one is prepared. These stages describe display preparation, not Task progress
+or completion.
+
 ## System / Logs
 
 | Keys | What it does |

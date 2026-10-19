@@ -6033,7 +6033,7 @@
 (test
  (name test_h2_journal)
  (modules test_h2_journal)
- (libraries masc_test_deps masc.skill_config masc.skill_reference masc_tui_types masc_tui_task_document masc_tui_fetched))
+ (libraries masc_test_deps masc.skill_config masc.skill_reference masc_tui_types masc_tui_task_document masc_tui_task_document_observation masc_tui_workspace_job masc_tui_fetched))
 
 (test
  (name test_keeper_owned_jobs)

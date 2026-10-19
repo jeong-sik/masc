@@ -1,6 +1,6 @@
 ---
 name: tui-chat-design
-description: "MASC TUI의 원본 비동기 요청·Task·이력 상세와 표시 준비·물리/논리 관측, 채팅·입력·로딩·진행 상태, 시작 키 인계와 늦은 터미널 응답, 비동기 조회·설정 저장·긴 질문의 요약과 전체 읽기·Ask 답변과 재조회를 바꿀 때 쓴다. Keeper·Work·로그·Board·Runtime·Overview·Tools·Connectors의 원본 요청·입력·revision·소유권, 준비 상세·현재 턴·이력·구성 조회·디렉터리 페이지의 workspace 검증과 캐시 영수증, 공유 조회와 부분 실패, worker 관측·UI 반영·paint 증거를 구분한다."
+description: "MASC TUI의 원본 비동기 요청·Task·이력 상세와 소스별 표시 준비 단계·물리/논리 관측, 채팅·입력·로딩·진행 상태, 시작 키 인계와 늦은 터미널 응답, 비동기 조회·설정 저장·긴 질문의 요약과 전체 읽기·Ask 답변과 재조회를 바꿀 때 쓴다. Keeper·Work·로그·Board·Runtime·Overview·Tools·Connectors의 원본 요청·입력·revision·소유권, 준비 상세·현재 턴·이력·구성 조회·디렉터리 페이지의 workspace 검증과 캐시 영수증, 공유 조회와 부분 실패, worker·caller·UI 반영·취소·등록 해제와 paint 증거를 구분한다."
 ---
 
 # 대화를 먼저 읽는 채팅
@@ -119,6 +119,12 @@ description: "MASC TUI의 원본 비동기 요청·Task·이력 상세와 표시
   현재 조회 상태에서 계속 읽고, 준비한 행을 조회 freshness·효과/완료 허가로 쓰지 않는다.
   준비 완료 전 임시 행 수로 Work의 저장된 스크롤을 초기화하지 않는다. CPU 대기·정리·UI
   반영과 실제 input/paint·속도 증거를 구분하며 화면/문구/행 순서/snapshot/PTY 검사를 추가하지 않는다.
+- Task 표시 준비는 원래 consumer/요청/run/Task·workspace·폭·ticket에 귀속해 시작, worker
+  진입/반환, caller 관측, UI 적용/거절, 소유권 철회, 취소 요청과 실제 등록 해제를 별도로 남긴다.
+  같은 요청의 원자적 사실만 준비 단계 안내에 쓰며, 미관측 단계는 null로 남긴다. worker 반환을
+  executor 정리 완료로, 등록 해제를 Task 완료나 paint로 바꾸지 않는다. 진단 비용도 비교에 포함한다.
+  종단 결과를 거절할 때 그 요청이 아직 소유한 대기 표식만 정리해 같은 입력의 재진입을 막지 않는다.
+  교체 요청의 표식·실패·이전 표시는 건드리지 않는다. 원문·context·경로를 진단 로그에 넣지 않는다.
 - `t`로 여는 원본 Task는 확인된 run의 `source_task_id`에서만 가져온다. 같은 요청/context의
   이전 논리 관측을 쓸 때는 그 사실과 관측 시각을 남긴다. 현재 Keeper Task나 목록 행으로
   대신 채우지 않는다. 정확한 Task 본문·이력 API를 독립 조회하고 목록에 없는 Task도 읽는다.

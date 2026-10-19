@@ -995,6 +995,7 @@ let test_first_loss_retains_unproven_effects mode () =
          | Ready [_] -> true | _ -> false);
       Ui.complete_tools_async_task_body ui current_body (read_body source.ats_task_id);
       let module Document = Masc_tui_task_document in
+      let module Observation = Masc_tui_task_document_observation in
       ui.view <- Ui.Tools;ui.tools_pane <- Ui.Tools_async;
       let started=Ui.sync_task_documents ui ~cols:96 in
       let find part requests = List.find (fun request ->
@@ -1002,14 +1003,41 @@ let test_first_loss_retains_unproven_effects mode () =
         Document.part key.tdk_input=part) requests in
       let prepare request =
         let key=Masc_tui_fetched.request_key request.Ui.tdr_ticket in
-        Ok (Document.prepare key.tdk_input) in
+        Ok (Observation.run request.tdr_observation ~name:"task.document.fixture.prepare_wait"
+          (fun () -> Document.prepare key.tdk_input)) in
       let old_document=find Document.Body started in
+      Ui.complete_task_document ui ~cols:72 old_document (prepare old_document);
+      check bool "a terminal rejected owner cannot remain loading until reconciliation" false
+        (Masc_tui_fetched.in_flight ui.task_document_body.tds_reading);
+      check bool "source/width rejection retains its actual disposition" true
+        (match (Observation.facts old_document.tdr_observation).ui_disposition with
+         | Some (_,Observation.Rejected Source_or_width_changed) -> true | _ -> false);
+      let restarted=Ui.sync_task_documents ui ~cols:96 in
+      let old_document=find Document.Body restarted in
+      check bool "returning to the old width starts a live replacement owner" true
+        (Masc_tui_fetched.in_flight ui.task_document_body.tds_reading);
       let resized=Ui.sync_task_documents ui ~cols:72 in
       Ui.complete_task_document ui ~cols:72 old_document (prepare old_document);
       check bool "old-width preparation cannot settle the original Task's new width" true
         (Masc_tui_fetched.in_flight ui.task_document_body.tds_reading);
       let history_document=find Document.History resized in
-      Ui.complete_task_document ui ~cols:72 history_document (prepare history_document);
+      let delivered,resolve_delivered=Eio.Promise.create () and released,resolve_released=Eio.Promise.create () in
+      Masc_tui_workspace_job.fork ~key:history_document.tdr_job ~observation:true
+        ~observe:(function
+          | Masc_tui_workspace_job.Cancellation_requested ->
+            Observation.observe history_document.tdr_observation Cancellation_requested
+          | Registration_released ->
+            Observation.observe history_document.tdr_observation Registration_released;
+            Eio.Promise.resolve resolve_released ()) ui ~sw
+        (fun () -> Eio.Promise.resolve resolve_delivered (prepare history_document));
+      let history_result=Eio.Promise.await delivered in
+      Eio.Promise.await released;
+      Ui.complete_task_document ui ~cols:72 history_document history_result;
+      check bool "actual worker/caller/registry/UI facts remain separate" true
+        (let facts=Observation.facts history_document.tdr_observation in
+         facts.worker_entered<>None && facts.worker_returned<>None
+         && facts.caller_observed<>None && facts.registration_released_ns<>None
+         && match facts.ui_disposition with Some (_,Observation.Applied) -> true | _ -> false);
       check bool "history preparation settles independently of body preparation" true
         (Masc_tui_fetched.in_flight ui.task_document_body.tds_reading
          && not (Masc_tui_fetched.in_flight ui.task_document_history.tds_reading));

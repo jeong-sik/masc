@@ -5030,7 +5030,8 @@ type task_document_target = Work_task_document of string | Async_task_document o
 type task_document_key = { tdk_target : task_document_target; tdk_input : Masc_tui_task_document.input }
 type task_document_request =
   { tdr_ticket : task_document_key Masc_tui_fetched.request
-  ; tdr_reading : unit ref; tdr_job : unit ref }
+  ; tdr_reading : unit ref; tdr_job : unit ref
+  ; tdr_observation : Masc_tui_task_document_observation.t }
 type task_document_slot =
   { tds_reading : (task_document_key,string list) Masc_tui_fetched.t
   ; tds_request : task_document_request option
@@ -10597,10 +10598,14 @@ let set_task_document_slot state part slot = match part with
   | History -> state.task_document_history <- slot
 let clear_task_documents state =
   List.iter (fun part -> let slot=task_document_slot state part in
+    Option.iter (fun request -> Masc_tui_task_document_observation.observe request.tdr_observation
+      (Retired Workspace_withdrawn)) slot.tds_request;
     set_task_document_slot state part {tds_reading=Masc_tui_fetched.clear slot.tds_reading;tds_request=None;tds_previous=None})
     [Masc_tui_task_document.Body;History]
 let suspend_task_documents state =
   List.iter (fun part -> let slot=task_document_slot state part in
+    Option.iter (fun request -> Masc_tui_task_document_observation.observe request.tdr_observation
+      (Retired Reading_suspended)) slot.tds_request;
     (* A cancelled preparation has no replacement result. Preserve completed
        rows; clear only its unfinished owner so this input can be prepared again. *)
     let reading=if Masc_tui_fetched.in_flight slot.tds_reading then Masc_tui_fetched.clear slot.tds_reading
@@ -15814,11 +15819,14 @@ let task_document_inputs state ~cols =
     | Runtime | Config | Resources | System_logs),_,_,_ -> None,None
 
 let sync_task_documents state ~cols =
+  let module Observation = Masc_tui_task_document_observation in
   let body,history=task_document_inputs state ~cols in
   List.filter_map (fun (part,key) ->
     let slot=task_document_slot state part in
     match key with
     | None ->
+      Option.iter (fun request -> Observation.observe request.tdr_observation
+        (Retired Source_unavailable)) slot.tds_request;
       if Option.is_some (Masc_tui_fetched.current_key slot.tds_reading)
           || Option.is_some slot.tds_previous || Option.is_some slot.tds_request then
         set_task_document_slot state part {tds_reading=Masc_tui_fetched.clear slot.tds_reading;tds_request=None;tds_previous=None};
@@ -15830,22 +15838,51 @@ let sync_task_documents state ~cols =
         match Masc_tui_fetched.start ~equal:equal_task_document_key slot.tds_reading ~key with
         | Already_loading -> None
         | Started (reading,tdr_ticket) ->
-          let request={tdr_ticket;tdr_reading=state.workspace_read_authority;tdr_job=ref ()} in
+          Option.iter (fun request -> Observation.observe request.tdr_observation (Retired Replaced)) slot.tds_request;
+          let source=match key.tdk_target with
+            | Work_task_document id -> Observation.Work id
+            | Async_task_document source ->
+              let target=source.ats_request.target in
+              Observation.Async {submitted_by=target.submitted_by;request_id=target.request_id;
+                keeper_name=target.keeper_name;run_id=source.ats_run_id;task_id=source.ats_task_id} in
+          let Workspace_authority workspace_revision=state.workspace_authority in
+          let workspace_fingerprint=Option.map (fun (identity : Tui_decode.server_identity) ->
+            Digestif.SHA256.(digest_string (Yojson.Safe.to_string (`List
+              [`String identity.sid_base_path;`String identity.sid_masc_root])) |> to_hex)) state.server_identity in
+          let tdr_observation=Observation.create {source;part;columns=cols;
+            generation=Masc_tui_fetched.request_id tdr_ticket;workspace_revision;workspace_fingerprint} in
+          let request={tdr_ticket;tdr_reading=state.workspace_read_authority;tdr_job=ref ();tdr_observation} in
           set_task_document_slot state part {slot with tds_reading=reading;tds_request=Some request};Some request)
     [Masc_tui_task_document.Body,body;History,history]
 
 let complete_task_document state ~cols request result =
+  let module Observation = Masc_tui_task_document_observation in
   let key=Masc_tui_fetched.request_key request.tdr_ticket in
   let part=Masc_tui_task_document.part key.tdk_input in
   let body,history=task_document_inputs state ~cols in
   let current=match part with Masc_tui_task_document.Body -> body | History -> history in
   let slot=task_document_slot state part in
-  if request.tdr_reading==state.workspace_read_authority
-      && Option.exists (fun current -> current==request) slot.tds_request
-      && Option.exists (equal_task_document_key key) current then
+  let owns_slot=Option.exists (fun current -> current==request) slot.tds_request in
+  let rejection =
+    if request.tdr_reading!=state.workspace_read_authority then Some Observation.Reading_withdrawn
+    else if not owns_slot || not (Masc_tui_fetched.is_current ~equal:equal_task_document_key slot.tds_reading request.tdr_ticket)
+    then Some Observation.Superseded
+    else if not (Option.exists (equal_task_document_key key) current) then Some Observation.Source_or_width_changed
+    else None in
+  match rejection with
+  | Some reason ->
+    (* A rejected terminal reply must not leave its own dead ticket loading.
+       Only that exact owner is retired; a replacement remains untouched. *)
+    if owns_slot then begin
+      set_task_document_slot state part {slot with tds_request=None;tds_reading=Masc_tui_fetched.clear slot.tds_reading};
+      Observation.observe request.tdr_observation (Retired Rejected_owner)
+    end;
+    Observation.observe request.tdr_observation (Ui_disposition (Rejected reason))
+  | None ->
     set_task_document_slot state part {tds_request=None;
       tds_previous=(match result with Ok rows -> Some (key,rows) | Error _ -> slot.tds_previous);
-      tds_reading=Masc_tui_fetched.complete ~equal:equal_task_document_key slot.tds_reading request.tdr_ticket result}
+      tds_reading=Masc_tui_fetched.complete ~equal:equal_task_document_key slot.tds_reading request.tdr_ticket result};
+    Observation.observe request.tdr_observation (Ui_disposition (match result with Ok _ -> Applied | Error _ -> Applied_failure))
 
 let task_document_lines state ~cols part =
   let body,history=task_document_inputs state ~cols in
@@ -15865,8 +15902,17 @@ let task_document_lines state ~cols part =
     | Stale (rows,detail) -> notice (" Task 표시 재확인 실패: " ^ detail) @ rows
     | Failed detail -> notice (" Task 표시를 준비하지 못했습니다: " ^ detail
         ^ if previous=[] then "" else " · 이전 표시 유지") @ previous
-    | Absent | Loading -> notice (if previous=[] then " Task 내용을 준비 중입니다"
-        else " 최신 Task 내용을 준비 중 · 이전 표시 유지") @ previous
+    | Absent | Loading ->
+      let phase=match slot.tds_request with
+        | Some request when equal_task_document_key key (Masc_tui_fetched.request_key request.tdr_ticket) ->
+          let facts=Masc_tui_task_document_observation.facts request.tdr_observation in
+          (match facts.caller_observed,facts.worker_returned,facts.worker_entered with
+           | Some _,_,_ -> " Task 표시 반영 대기"
+           | None,Some _,_ -> " Task 준비 결과 전달 대기"
+           | None,None,Some _ -> " Task 내용을 정리 중"
+           | None,None,None -> " Task 준비 시작 대기")
+        | Some _ | None -> " Task 내용을 준비 중입니다" in
+      notice (phase ^ if previous=[] then "" else " · 이전 표시 유지") @ previous
 
 let task_documents_pending state =
   Masc_tui_fetched.in_flight state.task_document_body.tds_reading

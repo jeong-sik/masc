@@ -1660,12 +1660,18 @@ let chat_timeline_rows timeline =
 let string_mem needle haystack = List.exists (String.equal needle) haystack
 ;;
 
+let string_set_of_list (ids : string list) : (string, unit) Hashtbl.t =
+  let set = Hashtbl.create (Int.max 8 (List.length ids)) in
+  List.iter (fun id -> Hashtbl.replace set id ()) ids;
+  set
+;;
+
 let chat_request_timeline_at ?(member_ids = []) ~request_id messages =
+  let request_id_set = string_set_of_list (request_id :: member_ids) in
   let request_rows =
     List.filter
       (fun (message : msg_entry) ->
-        String.equal message.me_request_id request_id
-        || string_mem message.me_request_id member_ids)
+        Hashtbl.mem request_id_set message.me_request_id)
       messages
   in
   match List.rev (chat_projected_timeline_ats request_rows) with
@@ -1706,11 +1712,12 @@ let chat_live_timeline_at ?(member_ids = []) ~request_id ~started_at ~request_me
    frontier instead. *)
 let chat_block_insertion_index ~member_ids ~bounds ~request_id ~timeline_at
     positioned_messages =
+  let request_id_set = string_set_of_list (request_id :: member_ids) in
   let lower_bound =
     List.fold_left
       (fun (index, lower_bound) ((row : msg_entry), _) ->
         ( index + 1
-        , if (String.equal row.me_request_id request_id || string_mem row.me_request_id member_ids) && bounds row
+        , if Hashtbl.mem request_id_set row.me_request_id && bounds row
           then index + 1
           else lower_bound ))
       (0, 0) positioned_messages
@@ -1865,6 +1872,7 @@ type chat_log_timeline_context =
 
 let chat_log_timeline_context index ~member_ids ~request_id ~started_at =
   let ids = List.sort_uniq String.compare (request_id :: member_ids) in
+  let member_id_set = string_set_of_list member_ids in
   let own_messages =
     List.concat_map (fun id -> Hashtbl.find_all index.cti_by_request id) ids
     |> List.sort (fun (left, _) (right, _) -> Int.compare left right)
@@ -1873,7 +1881,8 @@ let chat_log_timeline_context index ~member_ids ~request_id ~started_at =
   let clt_committed_error =
     List.exists
       (fun (message : msg_entry) ->
-        message.me_role = Message_error && string_mem message.me_request_id member_ids)
+        message.me_role = Message_error
+        && Hashtbl.mem member_id_set message.me_request_id)
       own_messages
   in
   let request_messages =
@@ -1903,7 +1912,7 @@ let chat_log_timeline_context index ~member_ids ~request_id ~started_at =
             let scan () =
               Array.fold_left
                 (fun latest ((message : msg_entry), at) ->
-                  if string_mem message.me_request_id member_ids
+                  if Hashtbl.mem member_id_set message.me_request_id
                      && message.me_turn_phase <> Turn_input
                   then latest
                   else

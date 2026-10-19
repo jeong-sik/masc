@@ -3351,9 +3351,10 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
     in
     (* Requests whose turn has not closed: the live block's and every
        observed block's. Their last row continues until the stream ends. *)
-    let open_request_ids =
-      List.map (fun block -> block.lb_request_id) open_blocks
-    in
+    let open_request_set = Hashtbl.create 16 in
+    List.iter
+      (fun block -> Hashtbl.replace open_request_set block.lb_request_id ())
+      open_blocks;
     (* The first block that lists a request id among its members owns it. *)
     let block_of_member = Hashtbl.create 16 in
     List.iter
@@ -3388,7 +3389,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
     in
     let edges = Hashtbl.create 16 in
     let close_run ~at_tail request_id indices =
-      let remains_open = at_tail && Masc_tui_types.string_mem request_id open_request_ids in
+      let remains_open = at_tail && Hashtbl.mem open_request_set request_id in
       match List.rev indices with
       | [] -> ()
       | [only] -> Hashtbl.replace edges only (if remains_open then Turn_opens else Turn_alone)

@@ -977,6 +977,7 @@ function interactInPage(args) {
 }
 
 async function pageInteract(args, deadlineMs, signal) {
+  if (args?.action === 'set_zoom') return pageZoom(args, signal);
   if (args?.action === 'activate_tab') {
     let effectStarted = false;
     try {
@@ -1035,6 +1036,48 @@ async function pageInteract(args, deadlineMs, signal) {
     return {tabId: args.tabId, ...result};
   } catch (error) {
     navigation?.cancel('follow_observation_unavailable');
+    throw error;
+  }
+}
+
+async function pageZoom(args, signal) {
+  let effectStarted = false;
+  try {
+    if (!Number.isSafeInteger(args?.tabId) || args.tabId < 0) throw new Error('tab_id_required');
+    if (typeof args.expectedUrl !== 'string' || !args.expectedUrl.trim()) throw new Error('set_zoom_requires_expected_url');
+    // MDN tabs.setZoom/getZoom: explicit factors range from 0.3 to 5.
+    // Zero's browser-default reset is deliberately not an implicit factor.
+    if (!Number.isFinite(args.factor) || args.factor < 0.3 || args.factor > 5)
+      throw new Error('zoom_factor_out_of_range');
+    const before = await browser.tabs.get(args.tabId);
+    if (before.id !== args.tabId || before.url !== args.expectedUrl) throw new Error('page_url_changed');
+    signal?.throwIfAborted();
+    const zoomBefore = await browser.tabs.getZoom(args.tabId);
+    const settings = await browser.tabs.getZoomSettings(args.tabId);
+    if (!Number.isFinite(zoomBefore) || zoomBefore < 0.3 || zoomBefore > 5)
+      throw new Error('zoom_observation_invalid');
+    if (settings?.mode !== 'automatic') throw new Error('automatic_browser_zoom_required');
+    if (!['per-origin','per-tab'].includes(settings.scope)) throw new Error('zoom_scope_unknown');
+    // Reads above can yield while a navigation occurs. Check the exact tab
+    // again immediately before dispatch; no active-tab fallback is allowed.
+    const guarded = await browser.tabs.get(args.tabId);
+    if (guarded.id !== args.tabId || guarded.url !== args.expectedUrl) throw new Error('page_url_changed');
+    signal?.throwIfAborted();
+    effectStarted = true;
+    await browser.tabs.setZoom(args.tabId, args.factor);
+    signal?.throwIfAborted();
+    const zoomFactor = await browser.tabs.getZoom(args.tabId);
+    const after = await browser.tabs.get(args.tabId);
+    if (after.id !== args.tabId || after.url !== args.expectedUrl) throw new Error('zoomed_tab_observation_changed');
+    if (!Number.isFinite(zoomFactor) || zoomFactor < 0.3 || zoomFactor > 5)
+      throw new Error('zoom_observation_invalid');
+    signal?.throwIfAborted();
+    return {tabId:args.tabId,action:'set_zoom',urlBefore:before.url,url:after.url,
+      title:after.title,requestedFactor:args.factor,zoomBefore,zoomFactor,
+      zoomScope:settings.scope,zoomMode:settings.mode};
+  } catch (cause) {
+    const error = new Error(String(cause?.message ?? cause));
+    error.effectStarted = effectStarted;
     throw error;
   }
 }

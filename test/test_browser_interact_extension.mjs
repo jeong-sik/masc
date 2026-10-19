@@ -261,3 +261,58 @@ browser.tabs.update=async(...args)=>{const result=await updateTab(...args);brows
 assert.equal((await command(activationArgs)).effectPhase,undefined,'post-activation verification failure is not pre-effect');
 browser.tabs.get=getTab;browser.tabs.update=updateTab;
 console.log('PASS: native dispatch distinguishes activation pre-effect failures from unknown effect outcomes');
+
+// Exercise the actual native-host dispatcher with browser zoom APIs, not page
+// JavaScript, active-tab selection or a CSS/viewport scaling approximation.
+let actualZoom=1, requestedZoom=[], zoomReads=0;
+const zoomArgs={tabId:7,action:'set_zoom',expectedUrl:activeTab.url,factor:1.35};
+browser.tabs.getZoom=async id=>{assert.equal(id,7);zoomReads++;return actualZoom;};
+browser.tabs.getZoomSettings=async id=>{assert.equal(id,7);return {mode:'automatic',scope:'per-origin',defaultZoomFactor:1};};
+browser.tabs.setZoom=async(id,factor)=>{assert.equal(id,7);requestedZoom.push(factor);actualZoom=4/3;};
+const beforeZoomExecutions=executions;
+const zoomed=await command(zoomArgs);
+assert.equal(zoomed.ok,true,JSON.stringify(zoomed));
+assert.equal(zoomed.data.tabId,7);assert.equal(zoomed.data.url,zoomArgs.expectedUrl);
+assert.equal(zoomed.data.requestedFactor,1.35);assert.equal(zoomed.data.zoomFactor,4/3,'receipt reports measured browser zoom, not the requested factor');
+assert.equal(zoomed.data.zoomBefore,1);assert.equal(zoomed.data.zoomScope,'per-origin');
+assert.equal(zoomed.data.zoomMode,'automatic');assert.equal(zoomReads,2);
+assert.deepEqual(requestedZoom,[1.35]);assert.equal(executions,beforeZoomExecutions,'browser zoom never injects a page script');
+for (const factor of [0,0.29,5.01,-1,Infinity,NaN,'1.5',undefined]) {
+  const reply=await command({...zoomArgs,factor});
+  assert.equal(reply.error,'zoom_factor_out_of_range');assert.equal(reply.effectPhase,'not_started');
+}
+assert.equal((await command({...zoomArgs,tabId:undefined})).effectPhase,'not_started');
+assert.equal((await command({...zoomArgs,expectedUrl:undefined})).effectPhase,'not_started');
+assert.equal((await command({...zoomArgs,expectedUrl:'https://example.org/stale'})).effectPhase,'not_started');
+assert.equal(requestedZoom.length,1,'invalid geometry or missing identity never reaches setZoom');
+let readsBeforeInput=0;
+browser.tabs.get=async id=>{assert.equal(id,7);readsBeforeInput++;return {...activeTab,url:readsBeforeInput===2?'https://example.org/new':activeTab.url};};
+assert.equal((await command(zoomArgs)).effectPhase,'not_started','navigation during zoom preflight cannot change the new page');
+assert.equal(requestedZoom.length,1);
+browser.tabs.get=getTab;
+const zoomSettings=browser.tabs.getZoomSettings;
+browser.tabs.getZoomSettings=async()=>({mode:'manual',scope:'per-tab'});
+assert.equal((await command(zoomArgs)).error,'automatic_browser_zoom_required');
+assert.equal(requestedZoom.length,1,'manual extension zoom is not browser page zoom');
+browser.tabs.getZoomSettings=zoomSettings;
+const setZoom=browser.tabs.setZoom,getZoom=browser.tabs.getZoom;
+browser.tabs.getZoom=async()=>{throw new Error('unreadable zoom before dispatch');};
+assert.equal((await command(zoomArgs)).effectPhase,'not_started');
+browser.tabs.getZoom=getZoom;
+browser.tabs.setZoom=async(id,factor)=>{await setZoom(id,factor);throw new Error('zoom applied but reply lost');};
+assert.equal((await command(zoomArgs)).effectPhase,undefined,'applied zoom with lost response stays unknown');
+assert.equal(requestedZoom.length,2,'unknown zoom is dispatched once and never replayed');
+browser.tabs.setZoom=async(id,factor)=>{await setZoom(id,factor);browser.tabs.getZoom=async()=>{throw new Error('post-zoom read failed');};};
+assert.equal((await command(zoomArgs)).effectPhase,undefined,'post-dispatch measurement failure stays unknown');
+assert.equal(requestedZoom.length,3);browser.tabs.getZoom=getZoom;
+browser.tabs.setZoom=async(id,factor)=>{await setZoom(id,factor);browser.tabs.get=async()=>({...activeTab,url:'https://example.org/navigated'});};
+assert.equal((await command(zoomArgs)).effectPhase,undefined,'navigation after zoom is not a pre-effect rejection');
+assert.equal(requestedZoom.length,4);browser.tabs.get=getTab;browser.tabs.setZoom=setZoom;
+// Cancellation while a native API settles cannot undo it or authorize a retry.
+const abortZoom=new AbortController();
+browser.tabs.setZoom=async(id,factor)=>{await setZoom(id,factor);abortZoom.abort();};
+context.zoomArgs=zoomArgs;context.zoomSignal=abortZoom.signal;
+await assert.rejects(vm.runInContext('pageZoom(zoomArgs,zoomSignal)',context),error=>error.effectStarted===true);
+assert.equal(requestedZoom.length,5);
+browser.tabs.setZoom=setZoom;
+console.log('PASS: actual extension dispatcher uses exact-tab browser zoom, measures scale/scope, guards navigation, and never replays unknown zoom');

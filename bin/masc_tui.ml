@@ -798,7 +798,7 @@ let place_spilled_paste state ~base_path ~keeper_name text =
                             spill.Masc_tui_paste_spill.file_name
                             spill.Masc_tui_paste_spill.bytes
                             (Keeper_chat.terminal_safe_text keeper_name))
-                   | Keeper_sandbox_config.Micno_vm
+                   | Keeper_sandbox_config.Micro_vm
                    | Keeper_sandbox_config.Remote_ssh ->
                        report_action state "system"
                          (Printf.sprintf
@@ -28854,7 +28854,7 @@ and is loaded on demand through keeper_skill.
        | Some "d" when state.view = Keepers Keeper_detail && state.detail_tab = Detail_sandbox ->
            set_sandbox_backend ~profile:Keeper_sandbox_config.Docker
        | Some "m" when state.view = Keepers Keeper_detail && state.detail_tab = Detail_sandbox ->
-           set_sandbox_backend ~profile:Keeper_sandbox_config.Micno_vm
+           set_sandbox_backend ~profile:Keeper_sandbox_config.Micro_vm
        | Some "s" when state.view = Keepers Keeper_detail && state.detail_tab = Detail_sandbox ->
            set_sandbox_backend ~profile:Keeper_sandbox_config.Remote_ssh
        | Some ("h" | "l")

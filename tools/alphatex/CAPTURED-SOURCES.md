@@ -56,7 +56,7 @@ before deleting the snapshot and restoring the terminal.
 ## Place and edit a paired region
 
 `:place asset-1 4` places a complete captured take at quarter-note beat 4, on a
-capture lane that retains WAV and MIDI together. Shift+Enter places the selected
+capture lane that retains WAV and MIDI together. `:place` places the selected
 capture; Enter still opens its original source viewer. Use seconds to choose a
 source window:
 

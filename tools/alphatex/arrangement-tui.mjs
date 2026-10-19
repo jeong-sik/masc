@@ -30,7 +30,7 @@ const help = [
   ':save    :save-as /path/song.json    :undo    :redo',
   'Arrows: cursor/regions; Shift+Left/Right: move region; Tab: lane; a: asset',
   'Enter: place selected asset; d: duplicate at cursor; x/Delete: remove',
-  'Captured asset: Enter opens source; Shift+Enter or :place adds its region.',
+  'Captured asset: Enter opens source; :place adds its region.',
   'u/y: undo/redo; m/o: mute/solo; s: save; q/Esc: save and return',
   'Regions run at original speed. Project tempo moves positions without warping.',
   'Space: play/pause/resume; :stop; :seek BEAT; :output AUDIO_UID',

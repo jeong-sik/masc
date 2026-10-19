@@ -2260,7 +2260,7 @@ let test_answer_followup_retains_current_source_observations () =
       at_outcomes={ato_succeeded=1;ato_deferred=0;ato_failed=0;ato_unsettled=0;ato_malformed=0};
       at_first_recorded_at=Some 202.;at_latest=Some
       {ata_execution_id="logical-one";ata_physical_execution_id="physical-one";ata_trace_id="original-trace";
-       ata_keeper_turn_id=17;ata_tool="Read";ata_recorded_at=202.;ata_outcome=Masc.Tool_result.Recorded_succeeded};at_evidence_current=true} in
+       ata_keeper_turn_id=17;ata_tool="Read";ata_recorded_at=202.;ata_outcome=Tool_result.Recorded_succeeded};at_evidence_current=true} in
   let task status = Decode.Ask_task_observed {akt_task_id="task-original";akt_location=Ask_task_backlog;
       akt_status=status;akt_observed_at=203.;akt_evidence_current=true} in
   let round task_value tools_value reactions_value =
@@ -2309,7 +2309,7 @@ let test_answer_followup_retains_current_source_observations () =
       && (match partial.fv_tools.fo_value with
           | Some (Decode.Ask_tools_observed {at_count=1;at_evidence_current=false;
               at_outcomes={ato_succeeded=1;ato_failed=0;_};
-              at_latest=Some {ata_outcome=Masc.Tool_result.Recorded_succeeded;_};_}) -> true
+              at_latest=Some {ata_outcome=Tool_result.Recorded_succeeded;_};_}) -> true
           | Some (Ask_tools_observed _ | Ask_tools_unavailable) | None -> false)
       && (match partial.fv_reactions.fo_value with
           | Some (Decode.Ask_reactions_observed {ar_turn_started_at=Some 201.;ar_evidence_current=false;_}) -> true
@@ -2329,7 +2329,7 @@ let test_answer_followup_retains_current_source_observations () =
     && (match retained.fv_tools.fo_value with
       | Some (Decode.Ask_tools_observed {at_count=1;at_evidence_current=false;
           at_outcomes={ato_succeeded=1;ato_failed=0;_};
-          at_latest=Some {ata_outcome=Masc.Tool_result.Recorded_succeeded;_};_}) -> true
+          at_latest=Some {ata_outcome=Tool_result.Recorded_succeeded;_};_}) -> true
       | Some (Ask_tools_observed _ | Ask_tools_unavailable) | None -> false)
     && (match retained.fv_reactions.fo_value with
       | Some (Decode.Ask_reactions_observed {ar_turn_started_at=Some 201.;_}) -> true

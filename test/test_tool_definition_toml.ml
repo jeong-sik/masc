@@ -951,10 +951,8 @@ let test_an_exclusive_minimum_must_be_a_float () =
 ;;
 
 (* The upper end, excluded. masc_browser_interact's pointer coordinates are
-   viewport fractions in [0,1), and the pointer refuses 1.0 itself. #44011
-   wrote that bound as JSON Schema's [exclusiveMaximum] inside a [via] item;
-   the loader had no key for it, so the module that decodes the browser tools
-   failed at initialization and every masc executable exited at start. The
+   viewport fractions in [0,1), and the pointer refuses 1.0 itself, so
+   [maximum = 1.0] would advertise a value the call is then refused for. The
    bound sits on an item's child here because that is where [via] needs it. *)
 let test_a_number_carries_an_exclusive_maximum () =
   let schema =
@@ -983,14 +981,26 @@ let test_a_number_carries_an_exclusive_maximum () =
       (member x "minimum" = Some (`Float 0.0))
 ;;
 
-(* Only a number takes it, for the same reason as the lower end. *)
+(* Only a number takes it, for the same reason as the lower end. The needle
+   names the type rule: an unknown key would also mention exclusive_maximum. *)
 let test_an_exclusive_maximum_needs_a_number () =
   check_rejects
     ~name:"t"
     ~contents:
       (minimal "t"
        ^ "[[params]]\nname = \"n\"\ntype = \"integer\"\nexclusive_maximum = 1.0\n")
-    "exclusive_maximum"
+    "exclusive_maximum is only valid for type number"
+;;
+
+(* An integer where a float is meant is a declaration error, as for the lower
+   end: 1 and 1.0 serialize differently. *)
+let test_an_exclusive_maximum_must_be_a_float () =
+  check_rejects
+    ~name:"t"
+    ~contents:
+      (minimal "t"
+       ^ "[[params]]\nname = \"n\"\ntype = \"number\"\nexclusive_maximum = 1\n")
+    "must be a float"
 ;;
 
 (* An integer parameter enumerates integers. tool_execute's [fd] offers 1 and
@@ -1329,6 +1339,10 @@ let () =
             "an exclusive maximum needs a number"
             `Quick
             test_an_exclusive_maximum_needs_a_number
+        ; test_case
+            "an exclusive maximum must be a float"
+            `Quick
+            test_an_exclusive_maximum_must_be_a_float
         ; test_case
             "an integer param enumerates integers"
             `Quick

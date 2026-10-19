@@ -112,12 +112,14 @@ val load
     of which must be present).
     Accepted param keys: [name], [type] (string | integer | number |
     boolean | object | array), [required] (bool), [description], [enum]
-    (non-empty string list, string params only), [default] (matching the
-    declared scalar type), [minimum] / [maximum] (integer params only),
-    [min_length] / [max_length] / [pattern] (string params only),
+    (non-empty list of the param's own type, string or integer params only),
+    [default] (string, integer or boolean params, of that type),
+    [minimum] / [maximum] (integer params take an integer, number params a
+    float), [exclusive_minimum] / [exclusive_maximum] (number params only,
+    a float), [min_length] / [max_length] / [pattern] (string params only),
     [min_items] / [max_items] / [unique_items] (array params only),
-    [additional_properties] (object params
-    only), [params] (object params only) and [items] (array params only).
+    [additional_properties] / [min_properties] / [max_properties] /
+    [params] (object params only) and [items] (array params only).
     Everything else is an [Error] naming the offending key or value.
 
     [params] and an object [items] table take the same parameter grammar,

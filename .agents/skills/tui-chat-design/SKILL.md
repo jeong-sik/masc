@@ -124,9 +124,15 @@ description: "MASC TUI의 채팅·입력·로딩·진행 상태, 시작 키 인�
   취소 요청·UI의 대기 해제·worker 종료를 같은 시점으로 기록하지 않는다. Connector의
   시작 실패는 원래 요청의 활성 상태를 즉시 해제하고 source 실패를 한 번 전달한다.
   일반 요청·효과의 observation 기본값은 바꾸지 않는다.
+- 상태 snapshot은 같은 원래 요청의 `Connectors_status_loaded`로 먼저 전달한다. 실제 상태와
+  바인딩은 이름 체인 완료를 기다리지 않고 적용할 수 있으며, 읽는 중인 이름은 별도 단계로
+  표시한다. 요청/읽기 epoch/authority를 캡처한 원래 envelope를 사용하고 두 번째 worker를
+  만들지 않는다. 중간 상태는 조회 완료나 나중 write의 수요 해소가 아니다.
 - 정상 Error 결과는 해당 체인의 앞서 받은 페이지·형제 결과와 함께 남긴다. 예외·부모 취소는
-  structured scope를 따르고, 모든 체인을 합친 결과를 기존 UI handler가 받는다. 빠른 child가
-  먼저 끝났다는 사실을 즉시 UI 반영·paint로 부르지 않는다. 순수 snapshot/page 해석과 이름
+  structured scope를 따르고, 모든 체인을 합친 최종 결과도 같은 원래 요청이 받는다.
+  중간 상태 뒤 준비한 binding 조작과 선택은 최종 이름 enrichment가 초기화하지 않는다.
+  중복/철회된 상태와 늦은 최종 결과는 적용하지 않는다. source 단계 전달을 실제 UI
+  paint·worker cleanup으로 부르지 않는다. 순수 snapshot/page 해석과 이름
   projection만 공용 CPU 경로를 사용한다. `connectors.snapshot.decode_wait`·
   `connectors.names.decode_wait`·`connectors.names.project_wait`는 pool 대기와 반환도 포함한다.
 - Connector 조회 제어는 `Connector_read`의 불변 상태와 opaque 원래 요청을 사용한다.
@@ -140,6 +146,8 @@ description: "MASC TUI의 채팅·입력·로딩·진행 상태, 시작 키 인�
   원래 composition 경계는 `docs/audits/2026-10-19-tui-connectors-composed-workspace-reads.md`,
   후속 수요의 As-Is/To-Be와 미실행 시나리오는
   `docs/audits/2026-10-19-tui-connectors-held-reread-owner.md`를 따른다.
+  상태 우선 전달과 바인딩 조작 연속성은
+  `docs/audits/2026-10-19-tui-connectors-early-status.md`를 따른다.
 
 ## 에디터 준비 조회
 

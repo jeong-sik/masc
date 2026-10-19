@@ -259,7 +259,17 @@ let result_json = function
   | Ok (named : Keeper_turn_driver.named_run_result) -> `Assoc
       ["ok", `Bool true; "selected_runtime", `String named.selected_runtime_id;
        "lane_attempt", `Int named.lane_attempt_index;
-       "response", Agent_core.Execution_provider_response_snapshot.to_yojson named.run_result.response]
+       "response",
+       (* [Execution_provider_response_snapshot] is private to agent_core; serialize
+          the same api_response fields through the public provider codecs. *)
+       (let r = named.run_result.response in
+        `Assoc
+          [ "id", `String r.Agent_core.Llm_provider.Types.id
+          ; "model", `String r.model
+          ; "stop_reason",
+            `String (Agent_core.Llm_provider.Types.stop_reason_to_string r.stop_reason)
+          ; "content",
+            `List (List.map Agent_core.Llm_provider.Api_common.content_block_to_json r.content) ])]
 
 let observation_json (observed : observation) = `Assoc
   ["arm", `String (arm_name observed.arm); "task", `String (task_name observed.task);

@@ -23,19 +23,27 @@ export function exportWave(source, path, { soundfontPath, tracks, cancelled = ()
   const sampleRate = 44100
   const soundfont = soundfontPath ? readFileSync(soundfontPath) : undefined
   const exporter = createAudioExporter(source, { soundfont, tracks, sampleRate })
+  return writeExporterWave(exporter, path, { sampleRate, cancelled })
+}
+
+export function writeExporterWave(exporter, path, { sampleRate = 44100, cancelled = () => false, frames } = {}) {
   const fd = openSync(path, 'wx', 0o600)
   let dataBytes = 0
   let peak = 0
+  let clippedSamples = 0
   let complete = false
   try {
     writeSync(fd, waveHeader(0, sampleRate))
     for (let chunk; (chunk = exporter.render(500));) {
       if (cancelled()) throw new Error('audio synthesis cancelled')
-      const pcm = Buffer.alloc(chunk.samples.length * 2)
-      for (let i = 0; i < chunk.samples.length; i++) {
+      const samples = frames === undefined ? chunk.samples.length : Math.min(chunk.samples.length, frames * 2 - dataBytes / 2)
+      if (samples <= 0) break
+      const pcm = Buffer.alloc(samples * 2)
+      for (let i = 0; i < samples; i++) {
         const sample = chunk.samples[i]
         if (!Number.isFinite(sample)) throw new Error('synthesizer produced a non-finite sample')
         peak = Math.max(peak, Math.abs(sample))
+        if (sample < -1 || sample > 1) clippedSamples++
         pcm.writeInt16LE(Math.round(Math.max(-1, Math.min(1, sample)) * 32767), i * 2)
       }
       writeSync(fd, pcm)
@@ -44,7 +52,7 @@ export function exportWave(source, path, { soundfontPath, tracks, cancelled = ()
     }
     writeSync(fd, waveHeader(dataBytes, sampleRate), 0, 44, 0)
     complete = true
-    return { path, durationMs: dataBytes / (sampleRate * 4) * 1000, peak }
+    return { path, durationMs: dataBytes / (sampleRate * 4) * 1000, peak, clippedSamples }
   } finally {
     closeSync(fd)
     if (!complete) unlinkSync(path)

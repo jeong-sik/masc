@@ -3,20 +3,25 @@ import { open } from 'node:fs/promises'
 // Inspect the RIFF structure without loading recorded samples into memory.
 // Chunk lengths exclude their header and WORD padding (Microsoft RIFF contract).
 // This reader deliberately accepts uncompressed PCM/IEEE float WAVE only.
-export async function readWaveMetadata(path, expected = {}) {
+export async function readWaveMetadata(path, expected = {}, { signal } = {}) {
+  signal?.throwIfAborted()
   const file = await open(path, 'r')
   const read = async (position, length) => {
     const bytes = Buffer.alloc(length)
     let filled = 0
     while (filled < length) {
+      signal?.throwIfAborted()
       const { bytesRead } = await file.read(bytes, filled, length - filled, position + filled)
+      signal?.throwIfAborted()
       if (!bytesRead) throw new Error('Truncated WAV chunk')
       filled += bytesRead
     }
     return bytes
   }
   try {
+    signal?.throwIfAborted()
     const { size } = await file.stat()
+    signal?.throwIfAborted()
     if (size < 12) throw new Error('Truncated WAV header')
     const header = await read(0, 12)
     if (header.toString('ascii', 0, 4) !== 'RIFF' || header.toString('ascii', 8, 12) !== 'WAVE') {
@@ -26,6 +31,7 @@ export async function readWaveMetadata(path, expected = {}) {
     if (end !== size || end < 12) throw new Error('WAV RIFF size does not match file size')
     let format = null, data = null
     for (let offset = 12; offset < end;) {
+      signal?.throwIfAborted()
       if (end - offset < 8) throw new Error('Truncated WAV chunk header')
       const chunk = await read(offset, 8)
       const kind = chunk.toString('ascii', 0, 4)

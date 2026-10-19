@@ -1330,6 +1330,9 @@ final class MidiTransport {
         if let destination { value["device"] = destination.json }
         if timeline.arrangement { value["format"] = "midi-arrangement"; value["regions"] = timeline.regions.count }
         if timeline.arrangement { value["clock"] = ["kind": "mach-nanoseconds", "anchor": String(anchor), "position": offset] }
+        if timeline.arrangement, loop, var clock = value["clock"] as? [String: Any] {
+            clock["cycle"] = ["kind": "seconds", "duration": timeline.duration]; value["clock"] = clock
+        }
         if timeline.source { value["bindings"] = timeline.bindings.compactMap { binding in
             sourceDestinations[binding.port].map { ["port": binding.port, "device": $0.json] as [String: Any] }
         } }

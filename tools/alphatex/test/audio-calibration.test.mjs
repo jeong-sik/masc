@@ -171,7 +171,13 @@ test('measured recording policy attaches through the real worker, survives porta
   const options={sourceRoot:portable,directory:portable,midiOutput:'42'}
   const originalPlan=JSON.parse(await readFile((await prepareArrangementCaptureRegions(plain.project,options)).path))
   const correctedPlan=JSON.parse(await readFile((await prepareArrangementCaptureRegions(result.project,options)).path))
-  assert.deepEqual(correctedPlan.umpRegions,originalPlan.umpRegions)
+  // Splitting gives MIDI a fresh region identity; compare its scheduling
+  // contract and original source independently of the editor identity.
+  assert.equal(correctedPlan.umpRegions.duration,originalPlan.umpRegions.duration)
+  assert.deepEqual(correctedPlan.umpRegions.sources,originalPlan.umpRegions.sources)
+  const schedule=plan=>plan.umpRegions.regions.map(({id,component,...timing})=>timing)
+  assert.deepEqual(schedule(correctedPlan),schedule(originalPlan))
+  assert.equal(correctedPlan.umpRegions.regions[0].component,'midi')
   assert.deepEqual(correctedPlan.umpRegions.sources[0].timeline.packets,packets)
   assert.ok(Math.abs(originalPlan.regions[0].startSeconds-correctedPlan.regions[0].startSeconds-37/48000)<1e-12)
   await saveArrangement(projectPath,result.project,null,{sourceRoot:portable});await rm(f.directory,{recursive:true,force:true})

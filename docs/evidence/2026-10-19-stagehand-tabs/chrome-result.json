@@ -1,0 +1,128 @@
+{
+  "runtimeMarker": {
+    "receiver": "function",
+    "marker": {
+      "protocolVersion": "2.0.0",
+      "serverInfo": {
+        "name": "stagehand",
+        "version": "1.0.2"
+      }
+    }
+  },
+  "actualCandidateExecutor": "standalone owned_stagehand_bridge using source-manifest.json",
+  "opened": {
+    "tabId": 1,
+    "action": "open_tab",
+    "created": true,
+    "url": "http://127.0.0.1:60537/first.html",
+    "title": "first"
+  },
+  "back": {
+    "tabId": 1,
+    "action": "back",
+    "url": "http://127.0.0.1:60537/first.html",
+    "title": "first"
+  },
+  "forward": {
+    "tabId": 1,
+    "action": "forward",
+    "url": "http://127.0.0.1:60537/second.html",
+    "title": "second"
+  },
+  "reload": {
+    "tabId": 1,
+    "action": "reload",
+    "url": "http://127.0.0.1:60537/second.html",
+    "title": "second"
+  },
+  "reloadChangedDocument": true,
+  "closed": {
+    "tabId": 1,
+    "action": "close_tab",
+    "closed": true
+  },
+  "retiredTabRejectedWithoutCalls": {
+    "rejected": "unknown tab id; list tabs again"
+  },
+  "nextMonotonicTab": {
+    "tabId": 2,
+    "action": "open_tab",
+    "created": true,
+    "url": "http://127.0.0.1:60537/third.html",
+    "title": "third"
+  },
+  "realNavigationPartialFailure": {
+    "answer": {
+      "ok": false,
+      "effectPhase": "partial",
+      "error": "A new tab was created as tabId 3 on lane stagehand, but navigation or observation failed: created tab did not reach an HTTP(S) page after navigation. List this same owned browser's tabs and inspect the created tab before deciding what to do next; do not open another tab to retry.",
+      "data": {
+        "lane": "stagehand",
+        "clientId": null,
+        "tabId": 3,
+        "action": "open_tab",
+        "created": true
+      }
+    }
+  },
+  "partialCalls": [
+    "context.new_page",
+    "page.goto",
+    "page.evaluate"
+  ],
+  "sameOwnerTabsAfterPartial": [
+    {
+      "id": 0,
+      "active": false,
+      "title": "Original tab",
+      "url": "http://127.0.0.1:60537/fixture.html"
+    },
+    {
+      "id": 2,
+      "active": false,
+      "title": "third",
+      "url": "http://127.0.0.1:60537/third.html"
+    },
+    {
+      "id": 3,
+      "active": true,
+      "title": "127.0.0.1",
+      "url": "chrome-error://chromewebdata/"
+    }
+  ],
+  "calls": [
+    "stagehand.init",
+    "context.pages",
+    "context.active_page",
+    "page.evaluate",
+    "context.new_page",
+    "page.goto",
+    "page.evaluate",
+    "context.pages",
+    "page.goto",
+    "page.go_back",
+    "page.evaluate",
+    "page.go_forward",
+    "page.evaluate",
+    "page.evaluate",
+    "page.reload",
+    "page.evaluate",
+    "page.evaluate",
+    "page.close",
+    "context.pages",
+    "context.active_page",
+    "page.evaluate",
+    "context.new_page",
+    "page.goto",
+    "page.evaluate",
+    "context.new_page",
+    "page.goto",
+    "page.evaluate",
+    "context.pages",
+    "context.active_page",
+    "page.evaluate",
+    "page.evaluate",
+    "page.evaluate",
+    "context.pages"
+  ]
+}

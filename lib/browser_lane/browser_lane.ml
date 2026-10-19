@@ -311,13 +311,20 @@ let verb_allowed_on_automation = function
 (* What the Stagehand backend serves once its executor is installed
    (RFC-browser-lane-stagehand §7 step 7): its session, tabs, navigation,
    screenshots, text, element and scene reads, interaction, and the three
-   sentence verbs. Frames, dialogs, downloads, the idle document observer and
-   actions are not served. *)
+   sentence verbs. Native tab creation and top-level history/close actions
+   are served; frames, dialogs, downloads, the idle document observer and
+   other BrowserAct actions are not served. *)
 let verb_allowed_on_stagehand = function
   | Session_open _ | Session_close | Session_status | Tabs_list | Page_goto _ | Page_capture _
   | Page_read _ | Page_elements _ | Page_scene _ | Page_interact _ | Page_instruct _ | Page_locate _
   | Page_extract _ -> true
-  | Page_document _ | Page_context _ | Page_downloads _ | Page_act _ -> false
+  | Page_act (Action.Open_tab _) -> true
+  | Page_act (Action.On_tab {frame_path;interaction;_}) ->
+    (match interaction with
+     | Action.Back | Forward | Reload | Close_tab -> frame_path = []
+     | Action.Click _ | Fill _ | Press _ | Select _ | Scroll _ | Upload _
+     | Accept_dialog _ | Dismiss_dialog -> false)
+  | Page_document _ | Page_context _ | Page_downloads _ -> false
 ;;
 
 let verb_allowed (lane : Lane_name.t) verb =

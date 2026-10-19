@@ -100,6 +100,11 @@ type call =
   | Extract of { page_id : string; instruction : string; schema : Yojson.Safe.t option; timeout : sentence_timeout_ms }
   | Context_pages
   | Context_active_page
+  | Context_new_page
+  | Page_close of { page_id : string }
+  | Page_reload of { page_id : string }
+  | Page_go_back of { page_id : string }
+  | Page_go_forward of { page_id : string }
   | Page_goto of { page_id : string; url : string }
   | Page_screenshot of { page_id : string }
   | Page_evaluate of { page_id : string; expression : string }

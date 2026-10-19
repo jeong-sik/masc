@@ -784,3 +784,27 @@ command, leaves an unknown outcome and is never automatically replayed. The
 API's zero-to-reset shorthand is deliberately excluded: callers supply an
 explicit factor. [Isolated native evidence](../evidence/2026-10-19-browser-zoom/README.md)
 records actual 150% and 75% browser zoom and the exact execution boundary.
+
+### Owned Chrome tab and history actions
+
+On `lane=stagehand`, BrowserAct serves `open_tab` and top-level `back`,
+`forward`, `reload`, and `close_tab` using the runtime's native
+`context.new_page`, `page.go_back`, `page.go_forward`, `page.reload`, and
+`page.close` methods. These actions do not call a model or simulate navigation
+through page JavaScript. Retain the observed lane and tab ID for all subsequent
+work. Frame actions, dialogs, uploads, and other BrowserAct actions remain
+unsupported on this lane and fail before dispatch.
+
+Creation and initial navigation are separate calls. If the new page is known
+but navigation or metadata fails, the failed answer carries `effectPhase:
+partial` and a receipt with `created:true`, the created `tabId`, and owning
+`lane:stagehand`. A runtime navigation success that exposes a browser error page
+instead of an HTTP(S) page is also partial. The same receipt reaches the tool's
+failed data and model-facing output. Inspect the same owned browser before
+choosing recovery; the executor never creates a replacement automatically.
+An unanswered creation has unknown effect and never invents a tab ID.
+
+A close retires its tab ID only after native `closed:true` confirmation.
+Malformed close replies retain the identity with uncertain outcome, without
+replaying close. IDs increase across closing and reopening pages and across
+owned sessions, so an old tab ID cannot select a newly created page.

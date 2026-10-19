@@ -307,7 +307,40 @@ let test_interact_production_failure_phase () =
     check bool "error wording alone never establishes pre-effect" true
       (phase (invoke args) = Tool_result.Effect_outcome_unknown))))
 
+let test_stagehand_partial_open_tool_outcome () = Eio_main.run (fun env ->
+  Time_compat.set_clock (Eio.Stdenv.clock env);
+  let tabs = Masc.Browser_stagehand_executor.Tabs.create () in
+  let creates = ref 0 and navigations = ref 0 in
+  let call = function
+    | Masc.Browser_stagehand_wire.Context_new_page ->
+      incr creates; Ok (`Assoc ["page_id",`String "created-page"])
+    | Masc.Browser_stagehand_wire.Page_goto _ ->
+      incr navigations; Error (Masc.Browser_stagehand_session.Rejected {code = -32000;message="navigation rejected"})
+    | _ -> fail "partial creation unexpectedly sent another command" in
+  Lane.install_stagehand_executor (Some (fun ~actor verb ->
+    Masc.Browser_stagehand_executor.execute ~tabs ~call ?actor verb));
+  Fun.protect ~finally:(fun () -> Lane.install_stagehand_executor None) (fun () ->
+    let result,phase = Masc.Tool_misc_browser_lane.handle_act_with_phase ~base_path:"/fixture"
+      ~tool_name:"masc_browser_act" ~start_time:(Tool_timing.start ())
+      (`Assoc ["lane",`String "stagehand";"action",`String "open_tab";"url",`String "https://example.org/new"]) in
+    check bool "production action adapter retains confirmed creation phase" true
+      (phase=Tool_result.Proven_post_effect);
+    (match result with
+     | Tool_result.Failed failed -> check bool "failed result agrees with returned phase" true
+         (failed.effect_disposition=phase)
+     | Tool_result.Completed _ | Tool_result.Deferred _ -> fail "partial create became successful tool result");
+    let receipt = Tool_result.data result in
+    check bool "owning lane is authoritative" true (field "lane" receipt=Some (`String "stagehand"));
+    check bool "owned browser has no live client ID" true (field "clientId" receipt=Some `Null);
+    check bool "created tab stays in failure data" true
+      (field "tabId" receipt=Some (`Int 0) && field "created" receipt=Some (`Bool true));
+    let raw = Yojson.Safe.from_string (Tool_result.message result) in
+    check bool "Keeper model-facing output receives same recovery receipt" true (field "data" raw=Some receipt);
+    check int "tool path creates exactly once" 1 !creates;
+    check int "tool path navigates exactly once" 1 !navigations))
+
 let () = run "Firefox controls" ["behavior",[
+  test_case "Stagehand partial creation survives production tool boundary" `Quick test_stagehand_partial_open_tool_outcome;
   test_case "production interact preserves failure phase" `Quick test_interact_production_failure_phase;
   test_case "download result reaches provider manifest" `Quick test_download_result_reaches_provider;
   test_case "navigation uses requested tab" `Quick test_targeted_goto;

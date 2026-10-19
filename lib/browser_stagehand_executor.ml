@@ -23,6 +23,12 @@ module Tabs = struct
 
   let page_of_id t id = Hashtbl.find_opt t.by_id id
 
+  let forget_page t page_id =
+    match Hashtbl.find_opt t.by_page page_id with
+    | None -> ()
+    | Some id -> Hashtbl.remove t.by_page page_id; Hashtbl.remove t.by_id id
+  ;;
+
   (* [next] is kept: an id handed out for a page of an earlier session is
      never handed out again. *)
   let forget_pages t =
@@ -193,6 +199,74 @@ let goto ~tabs ~call ~url ~tab_id =
     Result.bind (evaluate ~runtime:No_runtime ~send:(send_after_effect call) page_id summary_body) summary_of
   in
   Ok (`Assoc [ "url", `String summary.url; "title", `String summary.title ])
+;;
+
+(* Creation and navigation are separate native calls: after creation, every
+   failure retains the known tab receipt and can never become a create retry. *)
+let created_tab_failure tab_id answer =
+  let detail = match answer with
+    | Browser_lane.Refused detail | Browser_lane.Rejected_before_effect detail -> detail
+    | Browser_lane.Lane_absent -> "Stagehand is unavailable"
+    | Browser_lane.Timed_out -> "Stagehand did not answer"
+    | Browser_lane.Answered _ -> "invalid created-tab observation" in
+  Browser_lane.Answered (`Assoc ["ok",`Bool false;"effectPhase",`String "partial";
+    "error",`String (Printf.sprintf
+      "A new tab was created as tabId %d on lane stagehand, but navigation or observation failed: %s. List this same owned browser's tabs and inspect the created tab before deciding what to do next; do not open another tab to retry."
+      tab_id detail);
+    "data",`Assoc ["lane",`String "stagehand";"clientId",`Null;
+      "tabId",`Int tab_id;"action",`String "open_tab";"created",`Bool true]])
+
+let open_tab ~tabs ~call url =
+  let* () = absolute_http url in
+  let* created = send call Wire.Context_new_page in
+  let* page_id = page_id_of ~method_:"context.new_page" created in
+  let* () = if page_id = "" then Error (malformed "context.new_page" "a nonempty page_id") else Ok () in
+  let tab_id = Tabs.id_of_page tabs page_id in
+  Result.map_error (created_tab_failure tab_id) (
+    let* _ = send_after_effect call (Wire.Page_goto {page_id;url}) in
+    let* summary = Result.bind
+      (evaluate ~runtime:No_runtime ~send:(send_after_effect call) page_id summary_body) summary_of in
+    let* () = match absolute_http summary.url with
+      | Ok () -> Ok ()
+      | Error _ -> Error (Browser_lane.Refused "created tab did not reach an HTTP(S) page after navigation") in
+    Ok (`Assoc ["tabId",`Int tab_id;"action",`String "open_tab";"created",`Bool true;
+      "url",`String summary.url;"title",`String summary.title]))
+;;
+
+let navigate_tab ~tabs ~call ~tab_id ~name request =
+  let* page_id = page_of ~tabs tab_id in
+  let* _ = send call (request page_id) in
+  let* summary = Result.bind
+    (evaluate ~runtime:No_runtime ~send:(send_after_effect call) page_id summary_body) summary_of in
+  Ok (`Assoc ["tabId",`Int tab_id;"action",`String name;
+    "url",`String summary.url;"title",`String summary.title])
+;;
+
+let tab_action ~tabs ~call =
+  let unsupported () = Error (Browser_lane.Rejected_before_effect
+    "Stagehand BrowserAct serves only open_tab and top-level back, forward, reload, close_tab; use BrowserInteract for supported native input") in
+  function
+  | Browser_lane.Action.Open_tab url -> open_tab ~tabs ~call url
+  | Browser_lane.Action.On_tab {tab_id;frame_path;interaction} ->
+    match frame_path with
+    | _::_ -> unsupported ()
+    | [] -> match interaction with
+      | Browser_lane.Action.Back ->
+        navigate_tab ~tabs ~call ~tab_id ~name:"back" (fun page_id -> Wire.Page_go_back {page_id})
+      | Browser_lane.Action.Forward ->
+        navigate_tab ~tabs ~call ~tab_id ~name:"forward" (fun page_id -> Wire.Page_go_forward {page_id})
+      | Browser_lane.Action.Reload ->
+        navigate_tab ~tabs ~call ~tab_id ~name:"reload" (fun page_id -> Wire.Page_reload {page_id})
+      | Browser_lane.Action.Close_tab ->
+        let* page_id = page_of ~tabs tab_id in
+        let* closed = send call (Wire.Page_close {page_id}) in
+        let* () = match field "closed" closed with
+          | Some (`Bool true) -> Ok ()
+          | Some _ | None -> Error (malformed "page.close" "closed=true") in
+        Tabs.forget_page tabs page_id;
+        Ok (`Assoc ["tabId",`Int tab_id;"action",`String "close_tab";"closed",`Bool true])
+      | Browser_lane.Action.Click _ | Fill _ | Press _ | Select _ | Scroll _ | Upload _
+      | Accept_dialog _ | Dismiss_dialog -> unsupported ()
 ;;
 
 let capture ~tabs ~call ~tab_id =
@@ -460,6 +534,7 @@ let execute ~tabs ~call ?actor verb =
     match verb with
     | Browser_lane.Tabs_list -> list_tabs ~tabs ~call
     | Browser_lane.Page_goto { url; tab_id } -> goto ~tabs ~call ~url ~tab_id
+    | Browser_lane.Page_act action -> tab_action ~tabs ~call action
     | Browser_lane.Page_capture { tab_id } -> capture ~tabs ~call ~tab_id
     | Browser_lane.Page_read { tab_id; max_chars } -> read_text ~tabs ~call ~tab_id ~max_chars
     | Browser_lane.Page_elements { tab_id } -> read_elements ~tabs ~call ~tab_id
@@ -472,7 +547,7 @@ let execute ~tabs ~call ?actor verb =
     | Browser_lane.Page_extract { tab_id; instruction; schema } ->
       sentence ~tabs ~call ~tab_id ~outcome:reported_as_data (fun page_id -> Wire.Extract { page_id; instruction; schema; timeout = Wire.sentence_timeout })
     | Browser_lane.Session_open _ | Browser_lane.Session_close | Browser_lane.Session_status
-    | Browser_lane.Page_document _ | Browser_lane.Page_downloads _ | Browser_lane.Page_act _
+    | Browser_lane.Page_document _ | Browser_lane.Page_downloads _
     | Browser_lane.Page_context _ ->
       Error
         (Browser_lane.Rejected_before_effect

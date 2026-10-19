@@ -228,8 +228,8 @@ use note-key intervals and do not infer sustain-pedal voice durations. Shared-ke
 ambiguity and unmatched input events remain in the original source.
 
 Source audition sends the complete ordered MIDI wire stream to explicitly selected
-outputs as described below. Controller/tempo editing, arrangement playback and source
-WAV synthesis remain unfinished. Existing phrase-project MIDI/WAV transport
+outputs as described below. Controller/tempo editing and source WAV synthesis
+remain unfinished. Existing phrase-project MIDI/WAV transport
 continues to work. See [MIDI source semantics](MIDI-SOURCE.md) for retained data,
 source-event identities and timing behavior.
 
@@ -259,4 +259,6 @@ Open the [arrangement editor](ARRANGEMENT.md) with the score view's `a` key or
 `masc-alphatex --arrange`. Import WAV/MIDI sources, then place, trim, repeat,
 duplicate and remove regions without changing originals. `--project song.json`
 reopens an arrangement; save-as carries its WAV files, including sources retained
-by undo/redo. Arrangement playback and overdub transport are still being integrated.
+by undo/redo. WAV lanes stream overlapping regions; MIDI lanes retain expressive
+source playback with trims, finite repeats, pause/resume, beat seek and explicit
+asset/port outputs. Shared WAV/MIDI clock alignment and overdubs remain unfinished.

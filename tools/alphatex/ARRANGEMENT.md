@@ -2,9 +2,10 @@
 
 The terminal arrangement editor opens with `masc-alphatex --arrange`, the score
 view's `a` key, or `--project song.json` for a saved arrangement. It arranges
-retained WAV/MIDI sources independently of the phrase piano roll. WAV regions have a streamed multi-voice transport. MIDI region state reconstruction
-and overdub integration remain subsequent work; the source and phrase editors
-retain their separate transports.
+retained WAV/MIDI sources independently of the phrase piano roll. WAV regions have
+a streamed multi-voice transport, and MIDI regions have an expressive source-state
+transport. Shared WAV/MIDI clock alignment and overdub integration remain
+subsequent work; source and phrase editors retain their separate transports.
 
 ## Terminal workflow
 
@@ -114,14 +115,11 @@ export plan is connected.
 
 ## Integration contract
 
-A trimmed MIDI region needs note/controller/SysEx state reconstruction at its
-source start. The source sender now has channel-state reconstruction for supported pause/seek
-boundaries, with explicit unknown-state errors. Region playback still needs to
-reuse that reconstruction, preserve region/source ports, diagnose shared
-channel conflicts, and own note/pedal cleanup before claiming arbitrary MIDI
-region playback. Audio regions need native-rate conversion/mixing with frame
-bounds, selected-output ownership and long-arrangement streaming. A persisted
-region arrangement alone proves none of those transport scenarios.
+MIDI regions reuse the supported source channel-state reconstruction boundary,
+retain original source clocks/ports and diagnose physical destination/channel
+ownership conflicts before opening outputs. WAV regions use native-rate
+conversion/mixing with frame bounds, selected-output ownership and streaming.
+These separate transports do not establish shared MIDI/audio clock alignment.
 
 Capture import must retain WAV plus original UMP and capture-clock provenance;
 exported note-only SMF is insufficient for a simultaneous recorded take. The
@@ -136,9 +134,10 @@ Space plays, pauses or resumes the audible WAV lanes. `:stop` stops the owned
 player; `:seek 8` seeks to quarter-note beat 8, including when paused. `:output UID`
 selects an explicit CoreAudio output and stops the previous route. Command-line
 `--output UID` is forwarded through both new and saved arrangement entrypoints.
-An active MIDI lane is explicitly refused until source expression-state chase is
-connected. Mute that lane or solo the WAV lanes for WAV-only audition. An explicitly
-selected MIDI output never silently switches to the default audio device.
+Mixed audible WAV/MIDI lanes require the shared-clock integration. Mute the MIDI
+lanes or solo WAV lanes for WAV-only audition. An explicitly selected MIDI output
+never silently switches to the default audio device; select :output explicitly
+to change to audio playback.
 
 Preparation runs in the IO worker. It verifies and copies only audible sources
 into private read-only files, preserving compressed region repetition counts and
@@ -165,3 +164,46 @@ source IO failure and malformed commands stop with failure. This path does not
 claim audio/MIDI sample alignment, external clock, physical-device latency,
 monitoring, whole-arrangement looping, VST routing or overdub recording.
 The scheduling contract follows [Apple AVAudioPlayerNode](https://developer.apple.com/documentation/avfaudio/avaudioplayernode).
+
+
+## Expressive MIDI arrangement transport
+
+Space plays, pauses and resumes audible MIDI lanes. Select an exact destination
+with :midi-output ID for single-port sources, or bind each retained source port
+with :midi-port asset-1 PORT ID. Bindings are per asset and session; format-2
+regions retain their explicit pattern. :output switches to audio and clears MIDI
+selections; selecting MIDI clears the previous audio route. :stop and :seek BEAT
+have the same ownership semantics as WAV playback. Mixed audible source kinds
+are explicitly refused until the shared-clock coordinator is connected.
+
+Native preparation decodes each retained source once. One region cursor retains
+its start, native source offset/extent and finite repeat count. Source tempo maps
+and SMPTE clocks determine native elapsed time; arrangement tempo only places
+region starts. Trims have an inclusive start and exclusive end, except that a
+full-source endpoint retains its original final messages. Exact-boundary events
+keep their wire order, including zero-length notes and note-off release velocity.
+Positive source spans are required for this repeating transport.
+
+Trim, repeat, resume and seek restore supported channel state using the
+[SOURCE-STATE contract](SOURCE-STATE.md). A new owner must establish previously
+changed fields before sounding keys: a program change after a note at the same
+source time cannot provide that note's initial program. Unknown baselines and
+opaque system/SysEx or unsupported parameter state fail explicitly. The original
+full-source audition remains available separately. Envelopes retrigger.
+
+A physical destination/channel has one active region owner, including its prefix
+state. Overlapping ownership is rejected before sending; different channels may
+play concurrently on one destination. Region-end cleanup releases only that
+owner's keys and pedals. Failed releases retain ownership for final cleanup;
+successful releases are not repeated. No all-notes-off broadcast is synthesized.
+The source destinations remain pinned and selected removal stops the owner.
+
+When the scheduler misses complete repetitions, it skips never-started expired
+copies arithmetically and restores the current phase. It drains at most one
+already active copy before releasing it, preserving that copy's pending releases.
+Seek also jumps directly to the current copy. Storage and missed-copy processing
+do not grow with the finite repeat count. This phase policy differs from the
+original full-source audition's complete ordered-stream delivery. Maximum
+observed lateness is reported; sample-clock timing and physical latency are not
+claimed. Whole-arrangement looping, shared WAV/MIDI clocks, MIDI2/UMP, VST,
+monitoring and recording/overdub remain unfinished integrations.

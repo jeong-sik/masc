@@ -2853,6 +2853,22 @@ status: reference
   의존 관계를 따르며, 노드 사이의 새 모델 판단을 대신하지 않는다. 필요한 노드
   도구가 Keeper의 현재 표면에 없으면 합성 도구도 그 턴에 제공하지 않는다.
 
+**result_wait (결과 대기 바인딩)**
+: 이름 붙은 비동기(named async) Composition 제출이 접수 응답으로 돌려주는 읽기
+  바인딩이다. 접수 응답은 완료가 아니며, 이 바인딩이 접수된 요청과 실행, Skill
+  리비전, 원래 호출, 원래 턴, 있거나 없던 Task를 그대로 묶는다. 결과를 읽을
+  때는 바인딩을 고치지 않고 `keeper_composition_result`의 `binding`에 그대로
+  넣는다. 결과 읽기는 제출·재시작·수거·취소를 하지 않고, 확정된 결과 하나와
+  완전한 내구 결과 artifact만 준다. 읽기는 요청 출처와 함께 이름 붙은 생산자
+  멤버십(durable producer membership)을 검증하므로, 같은 원문 맥락만 베낀
+  일반 worker에는 멤버십이 없고 결과 소비가 거절된다. 호출자가 잃어버린 응답을
+  원래 프레임 안에서 다시 받으면 같은 첫 요청과 `result_wait`가 돌아오고 두
+  번째 worker는 시작하지 않는다 — 단, 정확한 Skill·묶인 인자·원래 Task가
+  같아야 한다.
+  → [keeper_composition_result 도구 정의](../../config/tools/keeper_composition_result.toml) ·
+  [Keeper_composition_named_run](../../lib/keeper/keeper_composition_named_run.mli) ·
+  [가이드: named async 대기](../guides/keeper-owned-jobs.md)
+
 **Isolated Job (격리 Job)**
 : `keeper_job_start`가 argv를 Docker 안에서 따로 돌리는 작업. 작업은 전용 작업 공간을 쓰고
   네트워크·자격증명·Keeper 신원·호스트 작업 공간 마운트가 없다. 복사되는 것은 체크섬을

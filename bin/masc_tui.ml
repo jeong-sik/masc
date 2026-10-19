@@ -798,7 +798,7 @@ let place_spilled_paste state ~base_path ~keeper_name text =
                             spill.Masc_tui_paste_spill.file_name
                             spill.Masc_tui_paste_spill.bytes
                             (Keeper_chat.terminal_safe_text keeper_name))
-                   | Keeper_sandbox_config.Micro_vm
+                   | Keeper_sandbox_config.Micno_vm
                    | Keeper_sandbox_config.Remote_ssh ->
                        report_action state "system"
                          (Printf.sprintf
@@ -13058,7 +13058,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.code_blame <- Masc_tui_fetched.clear state.code_blame;
   state.code_memos <- [];
   state.code_jump_back <- [];
-  state.code_return <- None;
+  state.code_navigation <- None;
   state.code_history_open <- false;
   state.code_history_expanded <- None;
   state.code_diff_open <- false;
@@ -18961,7 +18961,9 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
              Masc_tui_scroll.ensure_visible ~cursor:state.code_file_cursor
                ~height:(Masc_tui_render_code.code_pane_content_height state)
                state.code_file_scroll
-       | Code_results.Load_file path -> Masc_tui_code_requests.launch_file_load state ~host:server_peer_host ~deliver:(workspace_enqueue state mailbox) ~path)
+       | Code_results.Read_location_file (owner, request) ->
+           Masc_tui_code_requests.launch_navigation_read state ~host:server_peer_host
+             ~deliver:(workspace_enqueue state mailbox) owner request)
   | Code_diff_loaded (request, result) ->
       Code_results.apply_diff state request result
   | Code_history_loaded (request, result) ->
@@ -23486,9 +23488,9 @@ and is loaded on demand through keeper_skill.
       in
       let found_file = Code_results.take_ready_found_file state
           ~input_pending:code_navigation_input_pending in
-      let returned_file = Code_results.take_ready_return_file state
+      let navigated_file = Code_results.take_ready_navigation_file state
           ~input_pending:code_navigation_input_pending in
-      if found_file || returned_file then begin
+      if found_file || navigated_file then begin
         Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host
           ~deliver:(workspace_enqueue state async_messages);
         Render_schedule.request render_schedule Render_schedule.Background
@@ -23565,7 +23567,7 @@ and is loaded on demand through keeper_skill.
       (match input with
        | Some (Key "B") when state.view = Code -> ()
        | Some (Key _ | Pasted _ | Mouse_left_press _ | Mouse_left_release _ | Mouse_wheel _) ->
-           state.code_return <- None
+           state.code_navigation <- None
        | Some (Graphics_reply _) | None -> ());
       let input =
         if recovered_paste_send_locked state then
@@ -28811,7 +28813,7 @@ and is loaded on demand through keeper_skill.
        | Some "d" when state.view = Keepers Keeper_detail && state.detail_tab = Detail_sandbox ->
            set_sandbox_backend ~profile:Keeper_sandbox_config.Docker
        | Some "m" when state.view = Keepers Keeper_detail && state.detail_tab = Detail_sandbox ->
-           set_sandbox_backend ~profile:Keeper_sandbox_config.Micro_vm
+           set_sandbox_backend ~profile:Keeper_sandbox_config.Micno_vm
        | Some "s" when state.view = Keepers Keeper_detail && state.detail_tab = Detail_sandbox ->
            set_sandbox_backend ~profile:Keeper_sandbox_config.Remote_ssh
        | Some ("h" | "l")

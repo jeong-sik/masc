@@ -5347,20 +5347,24 @@ type code_jump = {
   cj_focus : pane_focus;
 }
 
-type code_return_owner = {
-  cro_origin : code_finder_origin;
-  cro_history : code_jump list;
+type code_navigation_action = Return_to_history | Follow_location
+
+type code_navigation_owner = {
+  cno_origin : code_finder_origin;
+  cno_history : code_jump list;
+  cno_destination : code_jump;
+  cno_action : code_navigation_action;
 }
 
-type code_return_reading = {
-  crr_owner : code_return_owner;
-  crr_file : (string, string) Masc_tui_fetched.t;
+type code_navigation_reading = {
+  cnr_owner : code_navigation_owner;
+  cnr_file : (string, string) Masc_tui_fetched.t;
 }
 
 type code_file_load_intent =
   | Open_code_file
   | Refresh_code_file
-  | Return_code_file of code_return_owner
+  | Navigate_code_file of code_navigation_owner
 
 type palette_mode =
   | Palette_jump
@@ -8816,7 +8820,7 @@ type state = {
   (* Where a jump left from, newest first. A pending return reads separately
      and consumes the entry only when it commits navigation. *)
   mutable code_jump_back: code_jump list;
-  mutable code_return: code_return_reading option;
+  mutable code_navigation: code_navigation_reading option;
   (* Horizontal offset in display cells, and the widest row's width -- the
      clamp. Measured once at load: measuring ten thousand rows on every
      keypress is what this field exists to avoid. *)
@@ -10585,7 +10589,7 @@ let suspend_workspace_readings state =
   state.code_listing <- Masc_tui_fetched.suspend state.code_listing;
   state.code_catalog <- Masc_tui_fetched.suspend state.code_catalog;
   state.code_finder_file <- Masc_tui_fetched.suspend state.code_finder_file;
-  state.code_return <- None;
+  state.code_navigation <- None;
   state.code_file <- Masc_tui_fetched.suspend state.code_file;
   state.code_history <- Masc_tui_fetched.suspend state.code_history;
   state.code_diff <- Masc_tui_fetched.suspend state.code_diff;
@@ -12728,7 +12732,7 @@ let set_code_scope state scope =
   if state.code_scope <> scope then begin
     state.code_catalog <- Masc_tui_fetched.clear state.code_catalog;
     state.code_finder_file <- Masc_tui_fetched.clear state.code_finder_file;
-    state.code_return <- None;
+    state.code_navigation <- None;
     state.code_lsp_query <- Masc_tui_fetched.clear state.code_lsp_query;
     state.code_file <- Masc_tui_fetched.clear state.code_file;
     state.code_file_resume_intent <- Refresh_code_file;
@@ -14393,7 +14397,7 @@ let create_state
   code_lsp_note = None;
   code_lsp_query = Masc_tui_fetched.initial;
   code_jump_back = [];
-  code_return = None;
+  code_navigation = None;
   code_file_hscroll = 0;
   code_file_max_width = 0;
   code_memos = [];

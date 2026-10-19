@@ -120,6 +120,15 @@ val acknowledge_completion : record -> (record, error) result
 type pending_delivery = { job_id : Job_id.t; keeper_name : string }
 type pending_deliveries =
   { entries : pending_delivery list; failures : (string * error) list }
+val discover_pending_deliveries :
+  base_path:string -> on_entry:(pending_delivery -> unit) ->
+  (pending_deliveries, error) result
+(** Read the same private pending partition, publishing each validated marker
+    before reading the next. [on_entry] runs in the calling context, outside
+    filesystem exception conversion; its exceptions and cancellation propagate.
+    A later discovery error cannot retract earlier callbacks. The final report
+    retains original entry/failure order. Each callback is only a discovery
+    hint: the canonical owner must still be recovered before any effect. *)
 val pending_deliveries : base_path:string -> (pending_deliveries, error) result
 (** Only the pending discovery partition. Markers do not authorize any effect;
     the exact canonical job journal owns source, channel and delivery state. *)

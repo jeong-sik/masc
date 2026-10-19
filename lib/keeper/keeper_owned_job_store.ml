@@ -466,38 +466,48 @@ let prepare_delivery_marker ~base_path ~keeper_name job_id =
         Error (Io_failed (Fs_compat.durable_append_error_to_string error ^ "; " ^
           Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure)))
 
-let pending_deliveries ~base_path =
+let discover_pending_deliveries ~base_path ~on_entry =
   let* base_path = canonical_base_path base_path in
   let directory = delivery_directory ~base_path in
-  protect_io (fun () ->
+  let* names = protect_io (fun () ->
     let* inspection = Fs_compat.inspect_owned_directory_chain
         ~ownership_root:(Common.masc_dir_from_base_path ~base_path) directory
         |> Result.map_error (fun error -> Invalid_authority
           (Fs_compat.owned_directory_chain_rejection_to_string error)) in
-    let* names = match inspection with
+    match inspection with
       | Fs_compat.Owned_directory_missing -> Ok []
       | Owned_directory _ -> Fs_compat.read_owned_directory ~owner_uid:(Unix.getuid ())
           ~ownership_root:(Common.masc_dir_from_base_path ~base_path) directory
-          |> Result.map_error (fun _ -> Invalid_authority "completion discovery directory refused") in
-    let read_marker name =
-      let path = Filename.concat directory name in
-      let* job_id = if Filename.extension name <> ".json" then Error (Corrupt "invalid pending marker name")
-        else Job_id.of_string (Filename.remove_extension name) |> Result.map_error (fun detail -> Corrupt detail) in
-      let* () = validate_owned_file ~base_path ~path ~create:false in
-      let* bytes = Fs_compat.load_owned_regular_file_with_snapshot ~owner_uid:(Unix.getuid ())
-          ~ownership_root:(Common.masc_dir_from_base_path ~base_path) path
-          |> Result.map_error (fun error -> Io_failed (Fs_compat.owned_regular_file_read_error_to_string error)) in
-      let* () = validate_owned_file ~base_path ~path ~create:false in
-      match bytes with
-      | None -> Error Missing
-      | Some bytes -> let* marker = decode_marker bytes.content in
-          if marker.job_id = job_id then Ok marker
-          else Error (Invalid_authority "completion marker does not match its filename") in
-    let report = List.fold_left (fun report name -> match read_marker name with
-      | Ok entry -> {report with entries=entry :: report.entries}
-      | Error error -> {report with failures=(name,error) :: report.failures})
-        {entries=[];failures=[]} names in
-    Ok {entries=List.rev report.entries;failures=List.rev report.failures})
+          |> Result.map_error (fun _ -> Invalid_authority "completion discovery directory refused")) in
+  let read_marker name =
+    let path = Filename.concat directory name in
+    let* job_id = if Filename.extension name <> ".json" then Error (Corrupt "invalid pending marker name")
+      else Job_id.of_string (Filename.remove_extension name) |> Result.map_error (fun detail -> Corrupt detail) in
+    let* () = validate_owned_file ~base_path ~path ~create:false in
+    let* bytes = Fs_compat.load_owned_regular_file_with_snapshot ~owner_uid:(Unix.getuid ())
+        ~ownership_root:(Common.masc_dir_from_base_path ~base_path) path
+        |> Result.map_error (fun error -> Io_failed (Fs_compat.owned_regular_file_read_error_to_string error)) in
+    let* () = validate_owned_file ~base_path ~path ~create:false in
+    match bytes with
+    | None -> Error Missing
+    | Some bytes -> let* marker = decode_marker bytes.content in
+        if marker.job_id = job_id then Ok marker
+        else Error (Invalid_authority "completion marker does not match its filename") in
+  let rec collect report = function
+    | [] -> Ok {entries=List.rev report.entries;failures=List.rev report.failures}
+    | name :: rest ->
+      (* Keep an explicit marker refusal in the report, but preserve the
+         original whole-read error for an unexpected filesystem exception.
+         The scheduling callback must not be misclassified as file I/O. *)
+      let* marker = protect_io (fun () -> Ok (read_marker name)) in
+      let report = match marker with
+        | Ok entry -> on_entry entry; {report with entries=entry :: report.entries}
+        | Error error -> {report with failures=(name,error) :: report.failures} in
+      collect report rest in
+  collect {entries=[];failures=[]} names
+
+let pending_deliveries ~base_path =
+  discover_pending_deliveries ~base_path ~on_entry:ignore
 
 let create ~base_path ~keeper_name ~job_id ~source ~completion_channel ~preparation ~inputs =
   let* base_path = canonical_base_path base_path in

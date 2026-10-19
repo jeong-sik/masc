@@ -100,16 +100,8 @@ let create ~config ?(on_result_ready=ignore) () =
 let pulse ~sw supervisor =
   Eio.Switch.check sw;
   let base_path = supervisor.config.Workspace.base_path in
-  let* pending = Store.pending_deliveries ~base_path in
   let presence_round = Keeper_owned_job_backend.create_presence_round () in
-  let pending_ids = List.fold_left (fun ids (marker : Store.pending_delivery) ->
-      Job_set.add marker.job_id ids) Job_set.empty pending.entries in
-  supervisor.held_absent <- Job_map.filter (fun job_id _ -> Job_set.mem job_id pending_ids)
-      supervisor.held_absent;
-  List.iter (fun (identity,error) ->
-    Log.Server.warn "owned job completion discovery retained job=%s error=%s"
-      identity (Store.error_to_string error)) pending.failures;
-  List.iter (fun (marker : Store.pending_delivery) ->
+  let on_entry (marker : Store.pending_delivery) =
     if not (Job_set.mem marker.job_id supervisor.active) then (
       Eio.Switch.check sw;
       (* Single-domain Eio reservations do not yield. This set suppresses
@@ -131,5 +123,13 @@ let pulse ~sw supervisor =
                 (Store.Job_id.to_string marker.job_id)))
       with exn ->
         supervisor.active <- Job_set.remove marker.job_id supervisor.active;
-        raise exn)) pending.entries;
+        raise exn) in
+  let* pending = Store.discover_pending_deliveries ~base_path ~on_entry in
+  let pending_ids = List.fold_left (fun ids (marker : Store.pending_delivery) ->
+      Job_set.add marker.job_id ids) Job_set.empty pending.entries in
+  supervisor.held_absent <- Job_map.filter (fun job_id _ -> Job_set.mem job_id pending_ids)
+      supervisor.held_absent;
+  List.iter (fun (identity,error) ->
+    Log.Server.warn "owned job completion discovery retained job=%s error=%s"
+      identity (Store.error_to_string error)) pending.failures;
   Ok ()

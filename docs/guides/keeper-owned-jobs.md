@@ -357,7 +357,15 @@ retry authorization from this receipt. A direct pending result read lets the
 Keeper continue other work while the original job remains pending.
 
 The server reconciles pending jobs on startup and its existing maintenance
-pulse. Each job has its own lifecycle fiber; a blocked backend does not hold
+pulse. Each validated pending marker can reserve its own lifecycle fiber before
+later marker bodies are read. The private directory-name listing still completes
+first; this removes the later-marker read barrier, not directory enumeration.
+A late discovery error can coexist with already-reserved workers. Their original
+owner checks and switch cleanup remain in force, and automatic held hints are
+pruned only after a complete successful scan. A marker grants no effect authority;
+each worker recovers the exact original journal before reconciliation/delivery.
+The report-only pending read and explicit round reconciliation still collect
+their full selected scope. A blocked backend does not hold
 the shared maintenance pulse or newly pending jobs. Separate original jobs
 perform their recovery I/O concurrently. An
 unconfirmed create/start is observed, never replayed. Complete results already

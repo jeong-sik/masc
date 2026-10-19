@@ -112,6 +112,13 @@ export function arrangementAction(editor, action) {
     default: throw new Error('Unknown arrangement action')
   }
 }
+export function arrangementTakeSelected(editor, { asset, cycle }) {
+  const group = arrangementTakes(editor.project, asset)
+  if (!group.takes.some(take => take.cycle === cycle)) throw new Error('Take has no remaining regions')
+  const project = group.selectedCycle === cycle ? editor.project : editArrangement(editor.project, { kind: 'take-select', asset, cycle })
+  const clip = project.clips.find(clip => clip.asset === asset && clip.takeCycle === cycle)
+  return { ...(project === editor.project ? editor : commit(editor, project)), asset, lane: clip.lane, region: clip.id, tick: clip.position }
+}
 export function arrangementCommand(editor, line) {
   line = line.trim()
   const boundary = line.search(/\s/), command = boundary < 0 ? line : line.slice(0, boundary)
@@ -143,7 +150,7 @@ export function arrangementCommand(editor, line) {
     case 'takes': {
       count(0, 1); const asset = args[0] ?? editor.asset
       arrangementTakes(editor.project, asset)
-      return { editor, effect: { kind: 'takes', asset } }
+      return { editor: { ...editor, asset }, effect: { kind: 'takes', asset } }
     }
     case 'take': {
       count(1, 2); const asset = args[1] ?? editor.asset, group = arrangementTakes(editor.project, asset)
@@ -157,10 +164,8 @@ export function arrangementCommand(editor, line) {
         if (!/^[1-9][0-9]*$/.test(args[0])) throw new Error('Choose a positive original take number, next or previous')
         cycle = String(BigInt(args[0]) - 1n)
       }
-      if (!group.takes.some(take => take.cycle === cycle)) throw new Error('Take has no remaining regions')
-      const project = group.selectedCycle === cycle ? editor.project : editArrangement(editor.project, { kind: 'take-select', asset, cycle })
-      const clip = project.clips.find(clip => clip.asset === asset && clip.takeCycle === cycle)
-      return { editor: { ...(project === editor.project ? editor : commit(editor, project)), asset, lane: clip.lane, region: clip.id, tick: clip.position } }
+      const selection = { kind: 'take-selection', asset, cycle }
+      return { editor: arrangementTakeSelected(editor, selection), selection }
     }
     case 'practice':
       count(2)

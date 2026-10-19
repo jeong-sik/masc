@@ -180,6 +180,11 @@ test('take selection preserves independent lane choices and does not activate un
  const second=attachRecordedTake(doc,{project:editArrangement(doc,{kind:'asset-add',asset:other}),asset:other.id},e)
  doc=editArrangement(second.project,{kind:'take-select',asset:asset.id,cycle:'1'})
  assert.equal(doc.assets[1].selectedTake,second.project.assets[1].selectedTake)
+ const browsing=arrangementCommand({...arrangementEditor(doc),asset:asset.id},'takes asset-2')
+ assert.equal(browsing.editor.asset,'asset-2');assert.equal(browsing.effect.asset,'asset-2')
+ const compare=arrangementCommand(browsing.editor,'take next').editor
+ assert.equal(compare.project.assets[0].selectedTake,'1');assert.equal(compare.project.assets[1].selectedTake,'0')
+
  const c=doc.clips.find(c=>c.asset===asset.id&&c.takeCycle==='1')
  doc=editArrangement(doc,{kind:'lane-mute',id:c.lane})
  const muted=doc.lanes.find(l=>l.id===c.lane)

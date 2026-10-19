@@ -55,7 +55,7 @@ def run(host, firefox, out=None):
                 pass
 
             def do_GET(self):
-                data = {"/oversized": oversized, "/huge-control": huge_control}.get(self.path, fixture).read_bytes()
+                data = {"/oversized": oversized, "/huge-control": huge_control, "/path-drag": path_drag}.get(self.path, fixture).read_bytes()
                 self.send_response(200)
                 self.send_header("Content-Length", str(len(data)))
                 self.end_headers()
@@ -134,6 +134,8 @@ dragSource.onpointerup=e=>{const box=dropTarget.getBoundingClientRect();
   document.querySelector('#drop-result').textContent='pointer-drag:'+dragTrusted+':'+e.isTrusted+':'+inside};
 </script>''', encoding="utf-8")
         fixture_url = f"http://127.0.0.1:{server.server_port}/fixture"
+        path_drag = Path(__file__).parent / "fixtures/browser_pointer_drag.html"
+        path_drag_url = f"http://127.0.0.1:{server.server_port}/path-drag"
         # A document whose source passes the helper's 1 MiB bound.
         oversized = root / "oversized.html"
         oversized.write_text('<!doctype html><meta charset="utf-8"><title>Oversized fixture</title><p>'
@@ -240,6 +242,19 @@ dragSource.onpointerup=e=>{const box=dropTarget.getBoundingClientRect();
             assert new_elements["ok"] and named(new_elements["data"]["elements"], "Add reaction"), new_elements
             other = call("page.read", {"tabId": second})
             assert other["ok"] and other["data"] == before["data"]
+            # First changed movement activates dragging; a second changed
+            # position must reach the target before release. A repeated endpoint
+            # alone cannot satisfy this control.
+            drag_tab = call("page.act", {"action":"open_tab", "url":path_drag_url})
+            assert drag_tab["ok"], drag_tab
+            drag_id = drag_tab["data"]["tabId"]
+            for options in ({}, {"via":[{"x":.25,"y":.2},{"x":.4,"y":.2}],"durationMs":80}):
+                moved_path = call("page.interact", {"tabId":drag_id,"action":"drag_to",
+                    "expectedUrl":path_drag_url,"source":{"selector":"#source"},
+                    "destination":{"selector":"#drop"},**options})
+                assert moved_path["ok"], moved_path
+                accepted_path = call("page.read", {"tabId":drag_id})
+                assert accepted_path["ok"] and "drag-accepted:true" in accepted_path["data"]["text"], accepted_path
             bounded = call("page.read", {"tabId": first, "maxChars": 5})
             assert bounded["ok"] and len(bounded["data"]["text"]) == 5 and bounded["data"]["truncated"]
             source = call("page.read", {"tabId": first, "includeHtml": True})

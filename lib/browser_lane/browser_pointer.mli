@@ -14,7 +14,9 @@ type gesture =
   | Wheel of { x : int; y : int }
 
 (** Native WebDriver/BiDi input sources. Drag visits every supplied waypoint
-    and moves over the destination twice before releasing. This lets dragover
+    and moves over the destination twice before releasing. An empty path
+    visits the midpoint first, so activation and destination movement occur
+    at distinct positions when their CSS-pixel coordinates differ. This lets dragover
     handlers observe the destination where the browser supports native HTML
     drag-and-drop; it does not prove that the application accepted a drop. [duration_ms] applies to each drag move;
     the initial positioning and the final repeated move have zero duration.

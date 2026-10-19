@@ -422,7 +422,7 @@ let execute_unlocked t = function
           | Ok before ->
           let gesture = match action with
             | Browser_lane.Hover_at _ -> Browser_lane.Pointer.Hover
-            | Browser_lane.Drag {to_;_} -> Browser_lane.Pointer.Drag {via=[];destination=to_;duration_ms=0}
+            | Browser_lane.Drag {to_;via;duration_ms;_} -> Browser_lane.Pointer.Drag {via;destination=to_;duration_ms}
             | Browser_lane.Scroll_at {x;y;_} -> Browser_lane.Pointer.Wheel {x;y}
             | Browser_lane.Hover _ | Browser_lane.Drag_to _
             | Browser_lane.Activate_tab | Browser_lane.Click _ | Browser_lane.Fill _

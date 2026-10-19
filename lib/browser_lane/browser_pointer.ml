@@ -50,6 +50,9 @@ let input_sources ~pointer_id ~wheel_id ~viewport ~start gesture =
     | Hover -> pointer [move ~duration_ms:0 start]
     | Click -> pointer [move ~duration_ms:0 start; button "pointerDown"; button "pointerUp"]
     | Drag {via;destination;duration_ms} ->
+      let via = match via with
+        | [] -> [{x=(start.x +. destination.x) /. 2.; y=(start.y +. destination.y) /. 2.}]
+        | _::_ -> via in
       pointer
         ([move ~duration_ms:0 start; button "pointerDown"]
          @ List.map (move ~duration_ms) (via @ [destination])

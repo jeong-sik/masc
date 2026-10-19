@@ -243,7 +243,7 @@ let read t context args =
   | None | Some (`Bool false) -> script t context
       "const chars=Array.from(document.body?.innerText??''); const cap=arguments[0].cap; return {url:location.href,title:document.title,text:chars.slice(0,cap).join(''),chars:chars.length,truncated:chars.length>cap};" (obj ["cap",`Int cap])
   | _ -> Error "invalid includeHtml"
-type pointer_motion = Hover_pointer | Click_pointer | Drag_pointer of Browser_lane.Pointer.point
+type pointer_motion = Hover_pointer | Click_pointer | Drag_pointer of { destination : Browser_lane.Pointer.point; via : Browser_lane.Pointer.point list; duration_ms : int }
   | Wheel_pointer of { x : int; y : int }
 let pointer t context args ~(viewport : Browser_lane.Pointer.viewport) ~start motion =
   let before result = Result.map_error (fun e -> Before_effect e) result in
@@ -252,7 +252,7 @@ let pointer t context args ~(viewport : Browser_lane.Pointer.viewport) ~start mo
   let gesture = match motion with
     | Hover_pointer -> Browser_lane.Pointer.Hover
     | Click_pointer -> Browser_lane.Pointer.Click
-    | Drag_pointer destination -> Browser_lane.Pointer.Drag {via=[];destination;duration_ms=0}
+    | Drag_pointer {destination;via;duration_ms} -> Browser_lane.Pointer.Drag {via;destination;duration_ms}
     | Wheel_pointer {x;y} -> Browser_lane.Pointer.Wheel {x;y} in
   let sources = Browser_lane.Pointer.input_sources ~pointer_id:"masc-pointer"
     ~wheel_id:"masc-wheel" ~viewport ~start gesture in
@@ -362,7 +362,7 @@ let dispatch ?actor ?request_id t ~verb args =
       | Browser_lane.Hover_at {point;viewport} -> pointer t context args ~viewport ~start:point Hover_pointer
       | Browser_lane.Click_at {point;viewport} -> pointer t context args ~viewport ~start:point Click_pointer
       | Browser_lane.Scroll_at {point;viewport;x;y} -> pointer t context args ~viewport ~start:point (Wheel_pointer {x;y})
-      | Browser_lane.Drag {from;to_;viewport} -> pointer t context args ~viewport ~start:from (Drag_pointer to_)
+      | Browser_lane.Drag {from;to_;viewport;via;duration_ms} -> pointer t context args ~viewport ~start:from (Drag_pointer {destination=to_;via;duration_ms})
       | Browser_lane.Fill _ | Fill_node _ | Scroll _ | Follow_link _ ->
         (match script t context Browser_interaction.script args with
         | Error e -> Error (Outcome_unknown e)

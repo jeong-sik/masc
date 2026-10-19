@@ -4,7 +4,7 @@ type request = { route : Browser_lane.route; tab_id : int;
 let ( let* ) = Result.bind
 let parse = function
   | `Assoc fields ->
-    let allowed = ["lane"; "clientId"; "tabId"; "expectedUrl"; "action"; "selector"; "text"; "x"; "y"; "documentId"; "nodeId"; "point"; "from"; "to"; "viewport"; "source"; "destination"] in
+    let allowed = ["lane"; "clientId"; "tabId"; "expectedUrl"; "action"; "selector"; "text"; "x"; "y"; "documentId"; "nodeId"; "point"; "from"; "to"; "viewport"; "source"; "destination"; "via"; "durationMs"] in
     let* () = if List.for_all (fun (key, _) -> List.mem key allowed) fields
       && List.length fields = List.length (List.sort_uniq String.compare (List.map fst fields))
       then Ok () else Error "unknown or duplicate browser interaction argument" in
@@ -42,7 +42,8 @@ let parse = function
     let excludes keys =
       let keys = match List.assoc_opt "action" fields with
         | Some (`String "drag_to") -> keys
-        | _ -> "source" :: "destination" :: keys in
+        | Some (`String "drag") -> "source" :: "destination" :: keys
+        | _ -> "source" :: "destination" :: "via" :: "durationMs" :: keys in
       if List.exists (fun key -> List.mem_assoc key fields) keys
       then Error "arguments do not match the selected interaction action" else Ok () in
     let required key = match List.assoc_opt key fields with
@@ -51,6 +52,20 @@ let parse = function
     let geometry parser key =
       let* value = required key in
       parser value in
+    let drag_options () =
+      let* via = match List.assoc_opt "via" fields with
+        | None -> Ok []
+        | Some (`List points) ->
+          let rec parse acc = function
+            | [] -> Ok (List.rev acc)
+            | raw::rest -> let* point = Browser_lane.Pointer.point_of_json raw in parse (point::acc) rest in
+          parse [] points
+        | Some _ -> Error "via must be a list of normalized viewport points" in
+      let* duration_ms = match List.assoc_opt "durationMs" fields with
+        | None -> Ok 0
+        | Some (`Int value) when value >= 0 && Int64.of_int value <= 9007199254740991L -> Ok value
+        | Some _ -> Error "durationMs must be a nonnegative JavaScript-safe integer" in
+      Ok (via,duration_ms) in
     let* action = match List.assoc_opt "action" fields with
       | Some (`String "hover") ->
         let* () = excludes ["text";"x";"y";"point";"from";"to";"viewport"] in
@@ -65,7 +80,8 @@ let parse = function
           | Some (`Assoc fields) -> pointer_target fields
           | _ -> Error ("drag_to requires " ^ key ^ " target") in
         let* source = target "source" in let* destination = target "destination" in
-        Ok (Browser_lane.Drag_to {source;destination})
+        let* via,duration_ms = drag_options () in
+        Ok (Browser_lane.Drag_to {source;destination;via;duration_ms})
       | Some (`String "follow_link") ->
         let* () = excludes ["selector";"text";"x";"y";"point";"from";"to";"viewport"] in
         let* () = match expected_url with Some _ -> Ok () | None -> Error "follow_link requires expectedUrl" in
@@ -118,7 +134,8 @@ let parse = function
         else
           let* from = geometry Browser_lane.Pointer.point_of_json "from" in
           let* to_ = geometry Browser_lane.Pointer.point_of_json "to" in
-          Ok (Browser_lane.Drag {from;to_;viewport})
+          let* via,duration_ms = drag_options () in
+          Ok (Browser_lane.Drag {from;to_;viewport;via;duration_ms})
       | _ -> Error "action must be activate_tab, click, follow_link, fill, scroll, click_at, scroll_at, hover, hover_at, drag or drag_to" in
     Ok { route = base.route; tab_id; expected_url; action }
   | _ -> Error "browser interaction arguments must be an object"
@@ -435,8 +452,8 @@ let resolve_pointer_action action = function
      | Browser_lane.Hover _ -> let* point = point "point" in Ok (Browser_lane.Hover_at {point;viewport})
      | Browser_lane.Click _ | Browser_lane.Click_node _ ->
        let* point = point "point" in Ok (Browser_lane.Click_at {point;viewport})
-     | Browser_lane.Drag_to _ -> let* from = point "from" in let* to_ = point "to" in
-       Ok (Browser_lane.Drag {from;to_;viewport})
+     | Browser_lane.Drag_to {via;duration_ms;_} -> let* from = point "from" in let* to_ = point "to" in
+       Ok (Browser_lane.Drag {from;to_;viewport;via;duration_ms})
      | Browser_lane.Activate_tab | Browser_lane.Fill _
      | Browser_lane.Scroll _ | Browser_lane.Hover_at _ | Browser_lane.Click_at _
      | Browser_lane.Scroll_at _ | Browser_lane.Drag _ | Browser_lane.Follow_link _

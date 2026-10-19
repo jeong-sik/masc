@@ -664,3 +664,17 @@ fresh observation first.
 captures the current URL and the native input guard checks that URL and the
 resolved viewport before dispatch. There is no DOM-click fallback or automatic
 replay after native input. The WebExtension's DOM-click behavior is unchanged.
+
+### Drag movement and acceptance
+
+`drag` and `drag_to` accept `via` (ordered normalized viewport points) and
+`durationMs` (milliseconds for each move). Without a path, native BiDi and
+WebDriver visit the midpoint before the destination so controls that activate
+on initial movement receive another changed position before release. Custom
+paths must come from the observed viewport; stale geometry fails before input.
+Stagehand refuses custom paths or timing before input rather than ignoring them.
+A successful native input receipt proves dispatch and release, not that a page
+accepted a drop. Re-read the application result before reporting success or
+retrying. HTML5 `draggable`/`DataTransfer` requires separate verification from
+pointer-capture dragging; Firefox's upstream issue is
+[Bug 1515879](https://bugzilla.mozilla.org/show_bug.cgi?id=1515879).

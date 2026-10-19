@@ -705,6 +705,73 @@ let mixed_descriptor serial =
   | Some descriptor -> descriptor | None -> fail "mixed ordinary descriptor is absent"
 ;;
 
+let test_inline_preparation_keeps_original_members ~ready () =
+  fixture @@ fun env sw config meta recovery root ->
+  let module Plan = Keeper_tool_plan in
+  let module Prepared = Keeper_prepared_inline_files in
+  let frozen = ref None in
+  public_bundle ~on_surface:(fun surface -> frozen := Some surface) env sw config meta recovery
+  @@ fun meta task_id cell causal _bundle ->
+  let capability_surface = match !frozen with Some surface -> surface | None -> fail "frozen surface absent" in
+  let descriptor = match Keeper_tool_descriptor.find_id "agent.edit_file" with
+    | Some value -> value | None -> fail "canonical Edit descriptor absent" in
+  let path = Filename.concat root "original-members/file" in
+  write path "before";
+  let id value = match Plan.Node_id.make value with Ok value -> value | Error _ -> fail "invalid fixture node ID" in
+  let first_input = public_args path "before" "middle" in
+  let first = Plan.node ~id:(id "z-first") ~tool_name:"Edit"
+      ~input:(Plan.Json_template.literal first_input) () in
+  let second = Plan.node ~id:(id "a-second") ~tool_name:"Edit" ~after:[first.id]
+      ~input:(Plan.Json_template.literal (public_args path "middle" "after")) () in
+  let make_plan () = match Plan.create ~descriptors:[descriptor] [first;second] with
+    | Ok plan -> plan | Error error -> fail (Plan.error_to_string error) in
+  let plan = make_plan () in
+  let source = Keeper_tool_call_log_context.get_turn_context_record ~cell () in
+  let impostor = Plan.node ~id:first.id ~tool_name:first.tool_name
+      ~input:(Plan.Json_template.literal first_input) () in
+  let prepared_files,ready_files =
+    if ready then begin
+      let files = match Prepared.Ready.create ~sw ~config ~meta ~source:(Some source) plan with
+        | Some files -> files | None -> fail "original plan lost ready binding" in
+      (match Prepared.Ready.bind files ~node:impostor ~input:first_input with
+       | _ -> fail "a copied node acquired the original member's file binding"
+       | exception Invalid_argument _ -> ());
+      None,Some files
+    end else begin
+      let files = match Prepared.prepare ~sw ~config ~meta ~source:(Some source) plan with
+        | Some files -> files | None -> fail "original plan lost aggregate binding" in
+      let refused = function
+        | Error _ -> () | Ok _ -> fail "foreign plan, copied node or changed input borrowed the original capability" in
+      Prepared.for_node ~plan:(make_plan ()) ~node:first ~input:first_input files |> refused;
+      Prepared.for_node ~plan ~node:impostor ~input:first_input files |> refused;
+      Prepared.for_node ~plan ~node:first ~input:(public_args path "before" "foreign") files |> refused;
+      Some files,None
+    end in
+  check string "rejected transfers leave original bytes intact" "before" (read path);
+  let parent = if ready then "original-ready-members" else "original-aggregate-members" in
+  let invocation = Agent_core.Tool_contract.Invocation.create ~tool_use_id:parent ~turn:2
+      ~schedule:{planned_index=0;batch_index=0;batch_size=1;execution_mode=Agent_core.Tool_contract.Serial}
+      ~completion:Agent_core.Tool_contract.Continue_after_success in
+  (match Keeper_tool_plan_executor.execute_keeper ~capability_surface ~plan ~run_id:(Plan.Run_id.fresh ())
+      ~composition_run_id:(Plan.Composition_run_id.fresh ()) ~parent_invocation:invocation
+      ~config ~meta ~publication_recovery:recovery
+      ~ctx_snapshot:(Keeper_context_runtime.create ~eio:false ~system_prompt:"original member scenario")
+      ~keeper_turn_id:(fun () -> Some 13) ~source_context:source ?prepared_files ?ready_files ~clock:env#clock
+      ~gate_context:(fun () -> Keeper_gate_causal_context.snapshot causal)
+      ~record_gate_result:(fun ~operation ~input result -> Keeper_gate_causal_context.record_tool_result causal ~operation ~input result)
+      ~observe_node_result:(fun _ -> Ok ()) () with
+   | Ok _ -> () | Error _ -> fail "original plan failed after rejected transfers");
+  check string "original successor consumes committed predecessor bytes" "after" (read path);
+  let leaves = physical_leaves meta in
+  check int "only the two original effects have physical receipts" 2 (List.length leaves);
+  List.iter (fun row ->
+    check string "original effects retain their Task" task_id Yojson.Safe.Util.(member "task_id" row |> to_string);
+    check string "original effects retain their parent invocation" parent
+      Yojson.Safe.Util.(member "parent_tool_use_id" row |> to_string)) leaves;
+  check int "only original results reach the original Gate state" 2
+    Yojson.Safe.Util.(member "completed_tool_calls" (Keeper_gate_causal_context.snapshot causal).snapshot |> to_list |> List.length)
+;;
+
 let test_mixed_public_recipe_keeps_file_overlap () =
   fixture @@ fun env sw config meta recovery root ->
   let ordinary = mixed_descriptor false in
@@ -1616,6 +1683,10 @@ let () = run "prepared actual file resources"
     test_case "untransferred preparation releases without an effect" `Quick test_untransferred_preparation_releases_without_effect;
     test_case "release closes the pinned directories" `Quick test_release_closes_the_pinned_directories];
     "actual public bundle and SDK", [
+      test_case "rejected aggregate transfers preserve original effects and receipts" `Quick
+        (test_inline_preparation_keeps_original_members ~ready:false);
+      test_case "rejected ready transfer preserves original effects and receipts" `Quick
+        (test_inline_preparation_keeps_original_members ~ready:true);
       test_case "hard-link entries retain backend mutation order" `Quick
         (test_object_aliases_retain_backend_mutation_order ~spelling_alias:false);
       test_case "filesystem spelling aliases retain backend mutation order" `Quick

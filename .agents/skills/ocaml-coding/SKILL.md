@@ -161,6 +161,13 @@ Eio 는 협력형 스케줄러다. 취소와 시간 초과는 fiber 가 멈추�
 
 ## 8. API 를 바꿀 때는 .mli 먼저
 
+- Composition 파일 준비의 노드·계약·선행조건은 원래 plan 안의 불변 index를 재사용한다.
+  `prepare_inputs`의 원래 노드 순서와 ID를 함께 확인하고, capability 조회는 typed ID를
+  찾은 뒤에도 원래 노드의 물리 identity와 입력을 검사한다. Ready binding은 원래 멤버를
+  확인한 뒤 보관한 계약을 쓰며, 동적 입력의 실제 해석·검증과 consumer의 owner·경로 검사는
+  유지한다. 충돌·실패·해제 순서를 map 순서로 바꾸거나 이 lookup 감소를 실행 시간으로
+  환산하지 않는다. index는 해당 plan의 수명에만 속하며 재개·재구성한 plan에 넘기지 않는다.
+
 - Keeper 실행 setup·effective surface·Composition 재개는 `(selection, preparation)`을 함께 사용한다.
   기존 선택은 `Keeper_task_skill_turn.bind_surface`로 검증하고, 새 exact 참조는
   `resolve_surface`에서 해석과 준비를 함께 받는다. fresh 결과를 곧바로 다시 바인딩하지 않는다.

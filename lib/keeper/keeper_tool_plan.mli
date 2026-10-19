@@ -505,7 +505,8 @@ type prepared_input = private
     order and the first rejection is returned with its node, so a plan whose
     later node carries a bad literal or parameter fails without running the
     nodes before it. Each node is validated at most once: a
-    [Checked_before_run] value is dispatched as is. *)
+    [Checked_before_run] value is dispatched as is. A successful result contains
+    exactly one entry per node, in the order returned by {!nodes}. *)
 val prepare_inputs
   :  t
   -> ((Node_id.t * prepared_input) list, Node_id.t * execution_error) result

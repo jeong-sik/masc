@@ -177,6 +177,13 @@ its exact returned `sha256`. Preparing a draft performs no node effect.
 
 ## Before/After evidence
 
+File preparation retains the original plan's leaves, member contracts and
+preparation predecessor lists in private immutable ID indexes. Lookup still
+requires the original physical member; aggregate consumption also checks the
+exact input and plan. Dynamic inputs and physical resource/owner checks keep
+their existing validation boundaries. See the [source comparison](../audits/2026-10-19-composition-file-preparation-index.md)
+for lookup costs, unchanged pairwise conflict work and unexecuted scenarios.
+
 The feature scenarios extend `test_keeper_composition_nested` and
 `test_keeper_prepared_edit`. They exercise the real public run Tool, actual
 filesystem authorization/write handlers, frozen child Skill references, Task and

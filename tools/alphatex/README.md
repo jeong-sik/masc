@@ -457,6 +457,7 @@ recording's acknowledged future downbeat trims only the placed region's pre-roll
 The complete recorded WAV/MIDI remains available. Pause/resume retains the
 remaining count-in; `:seek BEAT` goes directly to that musical position. Stop and
 a fresh play restart the count-in. Source notes, capture timestamps, offsets and
-calibration settings remain unchanged. Physical input readiness still depends on
+calibration settings remain unchanged. The shared playback horizon rounds outward
+to contain exact MIDI ends; its final representable tail is silence. Physical input readiness still depends on
 the selected device; a short count-in cannot guarantee a slow interface opens
 before the downbeat.

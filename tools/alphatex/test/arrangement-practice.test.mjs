@@ -77,7 +77,7 @@ test('practice shifts exact captured placement and its display together without 
  const directory=await mkdtemp(join(tmpdir(),'masc-practice-exact-'))
  try {
   const path=join(directory,'plan.json'), exact={numerator:'1',denominator:'3'}
-  const source={clock:{origin:'9007199254740993123',numer:125,denom:3},packets:[{hostTime:'9007199254740993124',words:[0x40903c00,0x90000000]}]}
+  const source={id:'take',timeline:{clock:{origin:'9007199254740993123',numer:125,denom:3},packets:[{hostTime:'9007199254740993124',words:[0x40903c00,0x90000000]}]}}
   const notes={id:'paired',source:'take',startSeconds:1/3e9,startNanoseconds:exact,offset:'0',extent:'1000000',repeatCount:1}
   await writeFile(path,JSON.stringify({schemaVersion:5,kind:'capture-arrangement',duration:1,assets:[],regions:[{id:'paired',startSeconds:notes.startSeconds}],umpRegions:{duration:1,sources:[source],regions:[notes]}}))
   const {preparePractice}=await import('../arrangement-practice.mjs')
@@ -89,5 +89,26 @@ test('practice shifts exact captured placement and its display together without 
   const n=BigInt(fraction.numerator),d=BigInt(fraction.denominator)*1_000_000_000n
   assert.equal(shifted.startSeconds,Number(n/d)+Number(n%d)/Number(d))
   assert.deepEqual(plan.umpRegions.sources,[source]);assert.equal(notes.startNanoseconds,exact)
+ }finally{await rm(directory,{recursive:true,force:true})}
+})
+
+
+test('practice common horizon contains the outward exact UMP end at fractional tempos',async()=>{
+ const directory=await mkdtemp(join(tmpdir(),'masc-practice-horizon-'))
+ try {
+  const {preparePractice}=await import('../arrangement-practice.mjs')
+  for(const tempo of [153.6,137,153.60000000000002]) {
+   const path=join(directory,'plan.json'),region={id:'clip',source:'capture',startSeconds:0,startNanoseconds:{numerator:'0',denominator:'1'},offset:'0',extent:'24000000',repeatCount:1,component:'midi'}
+   const source={id:'capture',extent:'24000000',timeline:{clock:{numer:125,denom:3}}}
+   await writeFile(path,JSON.stringify({schemaVersion:5,kind:'capture-arrangement',duration:1,assets:[],regions:[],umpRegions:{schemaVersion:1,duration:1,sources:[source],regions:[region]}}))
+   await preparePractice({tempo,meter:[3,4],practice:{countInBars:1,metronome:true}},{path,format:'capture-arrangement'})
+   const plan=JSON.parse(await readFile(path,'utf8')),start=plan.umpRegions.regions[0].startNanoseconds
+   const n=BigInt(start.numerator)+1_000_000_000n*BigInt(start.denominator),d=BigInt(start.denominator)
+   const end=n/d+(n%d ? 1n:0n)
+   assert.ok(BigInt(Math.ceil(plan.duration*1e9))>=end)
+   assert.equal(plan.duration,plan.umpRegions.duration)
+   assert.ok(Math.abs(plan.practice.countInSeconds+plan.practice.duration-plan.duration)<=plan.duration*Number.EPSILON)
+   assert.deepEqual(plan.umpRegions.sources,[source]);assert.equal(plan.umpRegions.regions[0].extent,region.extent)
+  }
  }finally{await rm(directory,{recursive:true,force:true})}
 })

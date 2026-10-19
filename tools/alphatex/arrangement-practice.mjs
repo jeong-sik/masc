@@ -50,7 +50,8 @@ export async function preparePractice(project, prepared, { signal } = {}) {
   try {
     signal?.throwIfAborted()
     const clock = practiceClock(project), original = JSON.parse(await readFile(prepared.path, { encoding: 'utf8', signal }))
-    const countIn = clock.countInSeconds, duration = original.duration + countIn
+    const countIn = clock.countInSeconds
+    let duration = original.duration + countIn
     if (!Number.isFinite(duration) || duration <= countIn || Math.abs(duration - countIn - original.duration) >= 1 / (original.assets ?? []).reduce((rate, asset) => Math.max(rate, asset.sampleRate), 48000)) throw new Error('Count-in loses the arrangement duration')
     const shiftRegion = region => {
       if (!region.startNanoseconds) return { ...region, startSeconds: region.startSeconds + countIn }
@@ -73,12 +74,36 @@ export async function preparePractice(project, prepared, { signal } = {}) {
       const paired = plan.umpRegions.regions.find(notes => notes.id === region.id && notes.component === undefined)
       if (paired?.startNanoseconds) region.startSeconds = paired.startSeconds
     }
+    if (plan.umpRegions) {
+      // Native UMP admission rounds an exact exclusive end outward to whole
+      // nanoseconds. A nearest Double sum can be one nanosecond too short.
+      let after = BigInt(Math.ceil(duration * 1e9))
+      for (const region of plan.umpRegions.regions) {
+        const source = plan.umpRegions.sources.find(source => source.id === region.source)
+        const clock = source.timeline.clock
+        const start = region.startNanoseconds ?? { numerator: String(Math.floor(region.startSeconds * 1e9)), denominator: '1' }
+        const d = BigInt(start.denominator) * BigInt(clock.denom)
+        const n = BigInt(start.numerator) * BigInt(clock.denom)
+          + BigInt(region.extent) * BigInt(region.repeatCount) * BigInt(clock.numer) * BigInt(start.denominator)
+        const end = n / d + (n % d ? 1n : 0n)
+        if (end > after) after = end
+      }
+      if (after >= 1n << 64n) throw new Error('Practice exceeds the native nanosecond timeline')
+      let seconds = Number(after / 1_000_000_000n) + Number(after % 1_000_000_000n) / 1e9
+      const bits = new DataView(new ArrayBuffer(8))
+      while (BigInt(Math.ceil(seconds * 1e9)) < after) {
+        bits.setFloat64(0, seconds); bits.setBigUint64(0, bits.getBigUint64(0) + 1n); seconds = bits.getFloat64(0)
+      }
+      duration = Math.max(duration, seconds)
+      plan.umpRegions.duration = duration
+      if (plan.midi) plan.midi.duration = duration
+    }
     const { bytes, ...metadata } = clickWave(), id = randomUUID(), path = join(dirname(prepared.path), id + '.wav')
     await writeFile(path, bytes, { flag: 'wx', mode: 0o600, signal })
     plan.assets.push({ id, path, sha256: createHash('sha256').update(bytes).digest('hex'), ...metadata })
     plan.regions.push({ id, asset: id, startSeconds: 0, offsetFrames: 0, frameCount: metadata.frames, repeat: 1,
       pulseClock: { period: clock.period, beatsPerBar: clock.beatsPerBar, duration: project.practice.metronome ? duration : countIn } })
-    plan.practice = { countInSeconds: countIn, duration: original.duration }
+    plan.practice = { countInSeconds: countIn, duration: duration - countIn }
     plan.duration = duration
     signal?.throwIfAborted()
     await writeFile(prepared.path, JSON.stringify(plan), { mode: 0o600, signal })

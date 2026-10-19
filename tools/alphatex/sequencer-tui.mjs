@@ -116,6 +116,9 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     }).catch(error => { status = error.message }).finally(draw)
   }
   function adoptSound(sound) {
+      // Stop the previous sound's preview while its selection still describes
+      // it, so play() renders the adopted sound instead of pausing the old one.
+      stopPlayback()
       editor = editorSound(editor, sound)
       selectedMidiOutput = undefined; portBindings = []
       status = sound.kind === 'vst' ? `Selected ${sound.selection.name}` : 'Selected SoundFont'
@@ -222,8 +225,13 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     process.stdout.write(output)
   }
   function stop() {
-    generation++
     pendingSound?.cancel(); pendingSound = null
+    stopPlayback()
+  }
+  // Edits, loop and Space end playback only. A pending sound capture is
+  // retired by stop: :stop, route changes, reselection, record, arrange, close.
+  function stopPlayback() {
+    generation++
     if (transport.cancel) Atomics.store(transport.cancel, 0, 1)
     transport.native?.cancel()
     transport.handle?.stop()
@@ -292,7 +300,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       return
     }
     if (transport.kind === 'paused') { transport.handle.resume(); return }
-    if (transport.kind !== 'stopped') { stop(); draw(); return }
+    if (transport.kind !== 'stopped') { stopPlayback(); draw(); return }
     const midiRoute = selectedMidiOutput !== undefined || portBindings.length > 0
     if (!midiRoute && audioInstrument().kind === 'unselected') { picker.open(); return }
     const id = ++generation, options = { loop, pattern: editor.pattern, midiOutput: selectedMidiOutput, portBindings }
@@ -409,7 +417,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
           // This command was admitted before close; retain its editor decision.
           // effect() separately refuses new playback/recording/WAV work.
           const result = editorCommand(editor, line)
-          if (result.editor.project !== editor.project || result.editor.pattern !== editor.pattern) stop()
+          if (result.editor.project !== editor.project || result.editor.pattern !== editor.pattern) stopPlayback()
           editor = result.editor
           if (result.effect) await effect(result.effect)
           else status = 'Edited'
@@ -430,7 +438,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
         case 'i': if (accepting && !suspended && !childTask) { stop(); picker.open() }; break
         case 's': await save(); break
         case 'r': await effect({ kind: 'record' }); break
-        case 'l': if (editor.project.kind === 'midi-source') throw new Error('MIDI source clip looping requires the arrangement transport'); stop(); loop = !loop; break
+        case 'l': if (editor.project.kind === 'midi-source') throw new Error('MIDI source clip looping requires the arrangement transport'); stopPlayback(); loop = !loop; break
         case 'tab': editor = editorAction(editor, { kind: 'track' }); break
         case 'return':
           if (editor.eventView) {
@@ -455,7 +463,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
           } else if (text === '[' || text === ']') editor = editorAction(editor, { kind: 'duration', value: (selectedNote(editor)?.duration ?? editor.duration) * (text === '[' ? 0.5 : 2) })
           else if (['+', '=', '-'].includes(text)) editor = editorAction(editor, { kind: 'velocity', value: (selectedNote(editor)?.velocity ?? editor.velocity) + (text === '-' ? -1 : 1) })
       }
-      if (original !== editor.project) { stop(); status = 'Edited' }
+      if (original !== editor.project) { stopPlayback(); status = 'Edited' }
     }).catch(error => { status = error.message }).finally(draw)
   }
   worker.on('message', message => {

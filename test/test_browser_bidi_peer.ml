@@ -677,6 +677,45 @@ let test_invalid_websocket_frame_ends_a_pending_command () =
       | Error (Peer.Before_effect _ | Peer.Outcome_unknown _ | Peer.Partial_failure _) -> Ok ()
       | Ok _ -> Error "an invalid websocket frame produced an answer") in
   check (result unit string) "invalid frame ends the connection" (Ok ()) outcome
+let test_semantic_click_uses_native_input () =
+  Eio_main.run (fun _ ->
+    let viewport = obj ["documentId",`String "observed";"width",`Int 800;"height",`Int 600;
+      "scrollX",`Int 0;"scrollY",`Int 0] in
+    let point = obj ["x",`Float 0.25;"y",`Float 0.5] in
+    List.iter (fun target ->
+      let scripts = ref 0 and inputs = ref 0 and releases = ref 0 in
+      let peer = peer_of (fun method_ args -> match method_ with
+        | "browsingContext.getTree" -> Ok (obj ["contexts",`List [obj ["context",`String "owned"]]])
+        | "script.callFunction" ->
+          incr scripts;
+          let passed = Yojson.Safe.Util.(args |> member "arguments" |> index 0 |> member "value" |> to_string)
+            |> Yojson.Safe.from_string in
+          (match !scripts with
+           | 1 -> Ok (script_value (obj ["url",`String "https://example.test/";"point",point;"viewport",viewport]))
+           | 2 ->
+             check string "native guard uses captured URL when caller omitted it" "https://example.test/"
+               Yojson.Safe.Util.(passed |> member "expectedUrl" |> to_string);
+             Ok (script_value (obj ["url",`String "https://example.test/"]))
+           | _ -> Ok (script_value (obj ["url",`String "https://example.test/";"title",`String "fixture"])))
+        | "input.performActions" ->
+          incr inputs;
+          let steps = Yojson.Safe.Util.(args |> member "actions" |> index 0 |> member "actions" |> to_list) in
+          check (list string) "native click emits trusted pointer sequence" ["pointerMove";"pointerDown";"pointerUp"]
+            (List.map Yojson.Safe.Util.(fun row -> row |> member "type" |> to_string) steps);
+          Ok `Null
+        | "input.releaseActions" -> incr releases; Ok `Null
+        | other -> failf "unexpected click command %s" other) in
+      let result = Peer.dispatch peer ~verb:Peer.Page_interact
+        (obj (["tabId",`Int 1;"action",`String "click"] @ target)) in
+      (match result with
+       | Ok receipt -> check string "receipt keeps semantic action" "click" Yojson.Safe.Util.(receipt |> member "action" |> to_string)
+       | Error _ -> fail "semantic native click failed");
+      check int "one native click only" 1 !inputs;
+      check int "native input released" 1 !releases;
+      check int "resolver, guard, receipt; no DOM click script" 3 !scripts)
+      [["selector",`String "#menu"];
+       ["documentId",`String "observed";"nodeId",`String "menu"]])
+
 let test_hover_without_click () =
   Eio_main.run (fun _ ->
     let hovered = ref false in
@@ -750,7 +789,8 @@ let test_peer_serves_what_the_lane_table_says () =
       match method_ with
       | "browsingContext.getTree" -> Ok (obj ["contexts",`List [obj ["context",`String "owned"]]])
       | "script.callFunction" -> Ok (script_value (obj ["url",`String "https://example.test/";
-          "title",`String "fixture";"active",`Bool true;"viewport",obj []]))
+          "title",`String "fixture";"active",`Bool true;
+          "point",Lane.Pointer.point_to_json point;"viewport",Lane.Pointer.viewport_to_json viewport]))
       | "browsingContext.create" -> Ok (obj ["context",`String "created"])
       | "browsingContext.navigate" -> Ok `Null
       | "browsingContext.captureScreenshot" -> Ok (obj ["data",`String "png"])
@@ -925,6 +965,7 @@ let () = run "BiDi live peer" ["identity",[test_case "opaque contexts" `Quick te
   "effect",[test_case "open tab preserves existing context" `Quick test_open_tab_preserves_existing_context;
     test_case "open tab failure does not replay" `Quick test_open_tab_failure_does_not_replay;
     test_case "live act rejects other actions" `Quick test_live_act_rejects_other_actions_before_effect;
+    test_case "semantic clicks use trusted native input" `Quick test_semantic_click_uses_native_input;
     test_case "hover moves without clicking" `Quick test_hover_without_click; test_case "element inventory is the shared page script" `Quick test_element_inventory;
     test_case "capture retains URL and document/viewport guards" `Quick test_capture_guards;
     test_case "document source is the shared document helper" `Quick test_document_source;

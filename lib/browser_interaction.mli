@@ -15,8 +15,9 @@ val pointer_receipt_script : string
 (** Validate screenshot identity and geometry before native WebDriver pointer input. *)
 
 val pointer_target_script : string
-(** Resolve visible, unobstructed semantic targets to current viewport geometry.
-    Does not scroll, move the pointer or dispatch page events. *)
+(** Resolve visible, unobstructed semantic click/hover/drag targets to current
+    viewport geometry and URL. Click checks disabled/ARIA-disabled activation
+    targets, including labels. Does not scroll or dispatch page events. *)
 val resolve_pointer_action : Browser_lane.interaction -> Yojson.Safe.t ->
   (Browser_lane.interaction, string) result
 (** Decode one pre-input semantic resolution into native pointer input. *)

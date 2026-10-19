@@ -110,13 +110,14 @@ struct UmpRegionClip {
             before = low
         }
         let expired = Set(expiredNotes.filter { _, ordinal in
-            guard let deadline else { return ordinal < through }
+            guard ordinal < through else { return false }
+            guard let deadline else { return true }
             // A historical voice that overlaps the entry is audible in this
             // native batch even if its original release shares the deadline.
             // An expiry at the exact cut has zero overlap; a deadline before
             // this callback is genuinely expired history.
             return UInt128(timed[ordinal].ticks) * numer <= cut
-                || next(copy: deadline.copy, index: ordinal) < deadline.position
+                || self.deadline(copy: deadline.copy, delta: 0) != deadline.position
         }.map(\.key))
         return try umpRestoration(events, prefixCount: before, followingCount: through - before,
                                   preambleEndIndex: endIndex, excludingNotes: expired, replacing: previous)

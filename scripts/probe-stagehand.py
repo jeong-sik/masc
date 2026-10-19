@@ -52,11 +52,25 @@ FIXTURE = b"""<!doctype html><html><head><meta charset="utf-8"><title>Stagehand 
 <div id="drop-target"
   style="position:fixed;left:45vw;top:55vh;width:100px;height:60px;background:#9b8"
   ondragover="event.preventDefault()"
-  ondrop="event.preventDefault();if(event.dataTransfer.getData('text/plain')==='stagehand-probe'){document.title='dragged';document.getElementById('drag-result').textContent='Drag completed'}"
-  onpointerup="if(document.body.dataset.dragStarted==='yes'){document.title='dragged';document.getElementById('drag-result').textContent='Drag completed'}">Drop target</div>
+  ondrop="event.preventDefault();if(event.isTrusted && event.dataTransfer.getData('text/plain')==='stagehand-probe'){document.title='dragged';document.getElementById('drag-result').textContent='Drag completed'}"
+>Drop target</div>
+<style>#hover-message{position:fixed;left:70vw;top:20vh;width:250px;height:70px;background:#ddd}
+#menu-trigger{opacity:0}#hover-message:hover #menu-trigger{opacity:1}
+#trusted-menu{position:fixed;left:70vw;top:35vh}</style>
+<div id="hover-message">Observed message <button id="menu-trigger">Open trusted menu</button></div>
+<div id="trusted-menu" hidden><button id="menu-pick">Select trusted item</button></div>
+<p id="trusted-result">Menu waiting</p>
 <p id="scroll-result">Scroll not observed</p><p id="drag-result">Drag not observed</p>
 <div style="height:220vh" aria-hidden="true"></div>
 <script>
+let trustedDown = false;
+document.querySelector('#menu-trigger').onpointerdown = event => { trustedDown = event.isTrusted; };
+document.querySelector('#menu-trigger').onmousedown = event => {
+  if (trustedDown && event.isTrusted) document.querySelector('#trusted-menu').hidden = false;
+};
+document.querySelector('#menu-pick').onclick = event => {
+  if (event.isTrusted) { document.title='trusted-menu-picked'; document.querySelector('#trusted-result').textContent='Trusted menu selected'; }
+};
 // Registered before input: the probe observes this promise without producing
 // a wheel event or changing scroll position. Resolve only after the page saw it.
 window.stagehandProbeScrollObserved = new Promise(resolve => {

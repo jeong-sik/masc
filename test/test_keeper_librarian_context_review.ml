@@ -75,7 +75,7 @@ let test_case ~base_path ~registry scenario () =
   let seeded = if scenario = Context_only then
       Current.apply_disposition ~revisions:[] ~keepers_dir ~keeper_id ~now:101.
         ~source:{kind = Current.Librarian; trace_id = keeper_id}
-        ~official_range_id:{receipt_scope = keepers_dir; after_boundary_line = 0;
+        ~official_range_id:{unread_messages=[];receipt_scope = keepers_dir; after_boundary_line = 0;
           turns = [1, Ids.Turn_ref.make ~trace_id:keeper_id ~absolute_turn:1]}
         ~absorbed:[] ~new_claims:[] () |> require
       |> fun (d : Current.disposition) -> d.snapshot

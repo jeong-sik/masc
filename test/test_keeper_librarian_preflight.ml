@@ -115,7 +115,7 @@ let run_case ~base_path ~registry ?(enabled = true) ?(excluded = false)
        [Agent_core.Types.user_msg "The already remembered constraint still holds."]);
      tool_observations=[];counterpart_observations=[]} in
   let range : Current.durable_range_id =
-    {receipt_scope="preflight-fixture";trace_id=name;history_start_boundary_line=1;
+    {unread_messages=[];receipt_scope="preflight-fixture";trace_id=name;history_start_boundary_line=1;
      start_atom=0;end_atom=1;last_atom_digest=String.make 64 'a';
      end_boundary_line=2;boundary_lines_seen=2} in
   let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =

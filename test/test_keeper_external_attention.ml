@@ -459,7 +459,7 @@ let test_external_cursor_recovers_memory_receipt () =
   let initial = read () in
   Alcotest.(check int) "missing cursor replays rather than skips" 0 (Cursor.offset initial);
   let range : Current.durable_range_id =
-    {receipt_scope=Filename.concat runtime_keepers_dir "continuity";
+    {unread_messages=[];receipt_scope=Filename.concat runtime_keepers_dir "continuity";
      trace_id="cursor-trace";history_start_boundary_line=1;start_atom=0;end_atom=1;
      last_atom_digest=String.make 64 'a';end_boundary_line=2;boundary_lines_seen=2} in
   Cursor.prepare ~memory_keepers_dir ~runtime_keepers_dir ~keeper_name initial ~through:2

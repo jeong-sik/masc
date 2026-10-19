@@ -58,12 +58,14 @@ type durable_range_id =
   ; last_atom_digest : string
   ; end_boundary_line : int
   ; boundary_lines_seen : int
+  ; unread_messages : Keeper_librarian_unread.t list
   }
 
 type official_range_id =
   { receipt_scope : string
   ; after_boundary_line : int
   ; turns : (int * Ids.Turn_ref.t) list
+  ; unread_messages : Keeper_librarian_unread.t list
   }
 
 type admission_recall =
@@ -91,7 +93,9 @@ type durable_range_receipt =
 
 let durable_range_id_to_json (range_id : durable_range_id) =
   `Assoc
-    [ "receipt_scope", `String range_id.receipt_scope
+    [ "schema_version", `Int 2
+    ; "unread_messages", Keeper_librarian_unread.list_to_json range_id.unread_messages
+    ; "receipt_scope", `String range_id.receipt_scope
     ; "trace_id", `String range_id.trace_id
     ; "history_start_boundary_line", `Int range_id.history_start_boundary_line
     ; "start_atom", `Int range_id.start_atom
@@ -102,11 +106,23 @@ let durable_range_id_to_json (range_id : durable_range_id) =
     ]
 ;;
 
+let unread_receipt_fields fields =
+  let* version = wire_int_field "schema_version" fields in
+  let* () = if version = 2 then Ok ()
+    else wire_fail [Wire_field "schema_version"] (Unknown_token (string_of_int version)) in
+  let* json = wire_json_field "unread_messages" fields in
+  Keeper_librarian_unread.list_of_json json
+  |> Result.map_error (fun detail ->
+    {path=[Wire_field "unread_messages"];reason=Unknown_token detail})
+;;
+
 let durable_range_id_of_json = function
   | `Assoc fields ->
     let* () =
       exact_field_names_result
-        [ "receipt_scope"
+        [ "schema_version"
+        ; "unread_messages"
+        ; "receipt_scope"
         ; "trace_id"
         ; "history_start_boundary_line"
         ; "start_atom"
@@ -117,6 +133,7 @@ let durable_range_id_of_json = function
         ]
         fields
     in
+    let* unread_messages = unread_receipt_fields fields in
     let* receipt_scope = wire_string_field "receipt_scope" fields in
     let* trace_id = wire_string_field "trace_id" fields in
     let* history_start_boundary_line =
@@ -162,12 +179,21 @@ let durable_range_id_of_json = function
       then Ok ()
       else wire_fail [ Wire_field "end_boundary_line" ] Not_positive
     in
-    let+ () =
+    let* () =
       if boundary_lines_seen >= end_boundary_line
       then Ok ()
       else wire_fail [ Wire_field "boundary_lines_seen" ] Not_positive
     in
-    { receipt_scope
+    let* () = Keeper_librarian_unread.validate_atom_bounds ~trace_id
+      ~history_start_boundary_line ~end_atom unread_messages
+      |> Result.map_error (fun detail ->
+        {path=[Wire_field "unread_messages"];reason=Unknown_token detail}) in
+    let* () = if List.for_all (fun (hole : Keeper_librarian_unread.t) ->
+      match hole.source with
+      | Atom {atom;_} -> atom >= start_atom
+      | Official_turn _ -> false) unread_messages then Ok ()
+      else wire_fail [Wire_field "unread_messages"] (Unknown_token "unread source precedes receipt interval") in
+    Ok { receipt_scope
     ; trace_id
     ; history_start_boundary_line
     ; start_atom
@@ -175,6 +201,7 @@ let durable_range_id_of_json = function
     ; last_atom_digest
     ; end_boundary_line
     ; boundary_lines_seen
+    ; unread_messages
     }
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
     wire_here Expected_object
@@ -182,7 +209,9 @@ let durable_range_id_of_json = function
 
 let official_range_id_to_json (range_id : official_range_id) =
   `Assoc
-    [ "receipt_scope", `String range_id.receipt_scope
+    [ "schema_version", `Int 2
+    ; "unread_messages", Keeper_librarian_unread.list_to_json range_id.unread_messages
+    ; "receipt_scope", `String range_id.receipt_scope
     ; "after_boundary_line", `Int range_id.after_boundary_line
     ; "turns", `List (List.map (fun (line, turn_ref) ->
         `Assoc [ "line", `Int line; "turn_ref", Ids.Turn_ref.to_yojson turn_ref ]) range_id.turns)
@@ -191,7 +220,9 @@ let official_range_id_to_json (range_id : official_range_id) =
 
 let official_range_id_of_json = function
   | `Assoc fields ->
-    let* () = exact_field_names_result [ "receipt_scope"; "after_boundary_line"; "turns" ] fields in
+    let* () = exact_field_names_result
+      [ "schema_version"; "unread_messages"; "receipt_scope"; "after_boundary_line"; "turns" ] fields in
+    let* unread_messages = unread_receipt_fields fields in
     let* receipt_scope = wire_string_field "receipt_scope" fields in
     let* after_boundary_line = wire_int_field "after_boundary_line" fields in
     let* turns = wire_list_field "turns" fields in
@@ -230,7 +261,14 @@ let official_range_id_of_json = function
       | [] -> wire_fail [ Wire_field "turns" ] Empty_list
       | _ :: _ -> parse after_boundary_line 0 turns
     in
-    Ok { receipt_scope; after_boundary_line; turns }
+    let* () = if List.for_all (fun (hole : Keeper_librarian_unread.t) ->
+      match hole.source with
+      | Official_turn {turn_ref;boundary_line;_} ->
+        List.exists (fun (line, selected_turn) ->
+          line = boundary_line && Ids.Turn_ref.equal selected_turn turn_ref) turns
+      | Atom _ -> false) unread_messages then Ok ()
+      else wire_fail [Wire_field "unread_messages"] (Unknown_token "unread source is not a selected official turn") in
+    Ok { receipt_scope; after_boundary_line; turns; unread_messages }
   | _ -> wire_here Expected_object
 ;;
 
@@ -1976,6 +2014,14 @@ let update_locked_with_output
     | None -> []
     | Some recall -> recall.bindings in
   let* () =
+    match durable_range_id with
+    | None -> Ok ()
+    | Some range ->
+      durable_range_id_of_json (durable_range_id_to_json range)
+      |> Result.map (fun _ -> ())
+      |> Result.map_error (fun error -> store_error (wire_error_to_string error))
+  in
+  let* () =
     match official_range_id with
     | None -> Ok ()
     | Some range ->
@@ -2756,16 +2802,30 @@ let read_successor_recall_for_keepers_dir ~keepers_dir ~keeper_id =
       Ok (Successor_recall.project current bindings history))
 ;;
 
-let committed_durable_range ~keepers_dir ~keeper_id ~receipt_scope =
+let committed_durable_coverage ~keepers_dir ~keeper_id ~receipt_scope =
   committed_range ~keepers_dir ~keeper_id (function
     | Atom_range range when String.equal range.receipt_scope receipt_scope -> Some range
     | Atom_range _ | Official_range _ | Explicit_candidate _ | Explicit_candidate_with_recall _ -> None)
 ;;
 
-let committed_official_range ~keepers_dir ~keeper_id ~receipt_scope =
+let committed_official_coverage ~keepers_dir ~keeper_id ~receipt_scope =
   committed_range ~keepers_dir ~keeper_id (function
     | Official_range range when String.equal range.receipt_scope receipt_scope -> Some range
     | Atom_range _ | Official_range _ | Explicit_candidate _ | Explicit_candidate_with_recall _ -> None)
+;;
+
+let committed_durable_range ~keepers_dir ~keeper_id ~receipt_scope =
+  committed_durable_coverage ~keepers_dir ~keeper_id ~receipt_scope
+  |> Result.map (function
+    | Some (range : durable_range_id) when range.unread_messages = [] -> Some range
+    | Some _ | None -> None)
+;;
+
+let committed_official_range ~keepers_dir ~keeper_id ~receipt_scope =
+  committed_official_coverage ~keepers_dir ~keeper_id ~receipt_scope
+  |> Result.map (function
+    | Some (range : official_range_id) when range.unread_messages = [] -> Some range
+    | Some _ | None -> None)
 ;;
 
 (* Apply a librarian's disposition to whatever the snapshot holds when the

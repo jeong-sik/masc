@@ -2851,7 +2851,8 @@ let test_official_receipt_rejects_replaced_history () =
   append_official_boundary config ~trace_id ~turn:1 ~recorded_at:1.;
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path in
   let official_range_id : Current.official_range_id =
-    { receipt_scope = Workspace.keepers_runtime_dir config
+    { unread_messages = []
+    ; receipt_scope = Workspace.keepers_runtime_dir config
     ; after_boundary_line = 0
     ; turns = [ 1, Ids.Turn_ref.make ~trace_id:"old-official-history" ~absolute_turn:1 ]
     }

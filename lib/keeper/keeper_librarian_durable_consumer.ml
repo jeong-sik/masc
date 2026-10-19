@@ -253,6 +253,7 @@ let range_id_for_selection
   : Keeper_memory_os_current.durable_range_id
   =
   { receipt_scope
+  ; unread_messages = []
   ; trace_id
   ; history_start_boundary_line = range.history_start_boundary_line
   ; start_atom = range.start_atom
@@ -1284,6 +1285,7 @@ let consume_one_with_extent
       | _ :: _ ->
         Some
           { Keeper_memory_os_current.receipt_scope = runtime_keepers_dir
+          ; unread_messages = []
           ; after_boundary_line =
               (match official_cursor with None -> 0 | Some cursor -> cursor.O.boundary_line)
           ; turns = List.map (fun (turn : R.official_line) -> turn.line, turn.turn_ref) official_lines

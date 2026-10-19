@@ -154,6 +154,7 @@ type durable_range_id =
   ; last_atom_digest : string
   ; end_boundary_line : int
   ; boundary_lines_seen : int
+  ; unread_messages : Keeper_librarian_unread.t list
   }
 
 (** Exact official-client boundaries consumed by one Memory commit. [turns]
@@ -163,14 +164,19 @@ type official_range_id =
   { receipt_scope : string
   ; after_boundary_line : int
   ; turns : (int * Ids.Turn_ref.t) list
+  ; unread_messages : Keeper_librarian_unread.t list
   }
 
 val durable_range_id_to_json : durable_range_id -> Yojson.Safe.t
 val official_range_id_to_json : official_range_id -> Yojson.Safe.t
 val durable_range_id_of_json : Yojson.Safe.t -> (durable_range_id, Keeper_memory_os_types.wire_error) result
 val official_range_id_of_json : Yojson.Safe.t -> (official_range_id, Keeper_memory_os_types.wire_error) result
-(** Canonical receipt identities, also used to recover the external read cursor
-    from the same committed Memory transaction. *)
+(** Mandatory schema 2 receipt identities. Exact unread records are part of
+    the Memory transaction identity, including unchanged-fact commits.
+    Atom holes must belong to this generation and interval; official holes
+    must name a selected turn/boundary. The inference caller must verify
+    message hashes against the exact selected source before publication.
+    Missing schema/unread fields and unknown causes are rejected. *)
 
 (** One explicit input, independent of a contiguous range. Generation and
     request ID are nonblank canonical strings; sequence is positive and input
@@ -427,7 +433,8 @@ val committed_durable_range
   -> keeper_id:string
   -> receipt_scope:string
   -> (durable_range_id option, string) result
-(** Return this receipt scope's last completed-turn range whose receipt is still proved by the
+(** Return this receipt scope's last committed completed-turn range only when
+    its unread list is empty and its receipt is still proved by the
     current Memory snapshot. A prepared receipt requires its exact snapshot
     revision and SHA-256. A committed receipt accepts that same snapshot or a
     higher parsed revision written later under the same store lock. Missing,
@@ -440,8 +447,18 @@ val committed_official_range
   -> keeper_id:string
   -> receipt_scope:string
   -> (official_range_id option, string) result
-(** Same snapshot proof as [committed_durable_range], independently retained
+(** Same fully read condition and snapshot proof as [committed_durable_range], independently retained
     for official-client input in the shared receipt sidecar. *)
+
+val committed_durable_coverage
+  : keepers_dir:string -> keeper_id:string -> receipt_scope:string
+  -> (durable_range_id option, string) result
+val committed_official_coverage
+  : keepers_dir:string -> keeper_id:string -> receipt_scope:string
+  -> (official_range_id option, string) result
+(** Same committed snapshot proof, retaining unread records. These certify
+    accounted coverage, never that every source message was read. Consumers
+    must retain those records when advancing any external position. *)
 
 type disposition =
   { snapshot : t

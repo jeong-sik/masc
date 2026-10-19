@@ -14453,6 +14453,10 @@ let code_location_offer_current (state : state) offer =
       | None -> false)
 
 let close_code_finder (state : state) =
+  (match state.palette_mode with
+   | Palette_locations _ ->
+       state.code_lsp_query <- Masc_tui_fetched.clear state.code_lsp_query
+   | Palette_files _ | Palette_jump | Palette_choice _ -> ());
   state.code_catalog <- Masc_tui_fetched.clear state.code_catalog;
   state.code_finder_file <- Masc_tui_fetched.clear state.code_finder_file;
   state.code_location_offer <- None;

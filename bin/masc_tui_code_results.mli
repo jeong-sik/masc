@@ -50,8 +50,9 @@ val apply_lsp_answer : Masc_tui_types.state ->
 (** Admit only the latest question for the still-current source reading and
     scope. Location answers are staged until input has had priority. *)
 val retire_lsp_input : Masc_tui_types.state -> unit
-(** Retire an in-flight answer and an unopened location offer before handling
-    operator input. An already open owned location picker keeps its filter. *)
+(** Retire an in-flight answer, its recovery key and an unopened location offer
+    before handling operator input. An already open owned location picker
+    keeps its query ticket and filter until selection or close. *)
 val take_ready_lsp_locations : Masc_tui_types.state -> input_pending:bool -> followup
 (** Open a multiple-location picker or follow a single location only after
     queued input. Another modal, source or authority cannot borrow the offer. *)

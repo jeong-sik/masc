@@ -474,12 +474,12 @@ let apply_lsp_answer (state : state) request result =
 ;;
 
 let retire_lsp_input state =
-  state.code_lsp_query <- Masc_tui_fetched.cancel_pending
-      ~reason:"Language-server answer cancelled by input" state.code_lsp_query;
   match state.palette_mode with
   | Palette_locations offer when state.palette_open
       && code_location_offer_current state offer -> ()
   | Palette_locations _ | Palette_jump | Palette_choice _ | Palette_files _ ->
+      (* Workspace recovery reissues the current key, including settled ones. *)
+      state.code_lsp_query <- Masc_tui_fetched.clear state.code_lsp_query;
       state.code_location_offer <- None
 ;;
 

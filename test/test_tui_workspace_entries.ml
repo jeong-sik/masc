@@ -931,6 +931,94 @@ let offered_locations state locations =
 let location path line : Decode.lsp_location =
   {ll_path=path; ll_line=line; ll_inside=true}
 
+let resume_question_after_workspace_confirmation state =
+  let identity = state.server_identity in
+  state.server_identity <- None;
+  suspend_workspace_readings state;
+  state.server_identity <- identity;
+  state.workspace_identity <- Workspace_identity_match;
+  (* Code recovery captures the question key before starting the file refresh,
+     then reissues the question against that refresh's source ticket. *)
+  let question = Fetched.current_key state.code_lsp_query in
+  let path = match Fetched.current_key state.code_file with
+    | Some path -> path | None -> Alcotest.fail "recovery lost the source file" in
+  let file, file_request = start_read ~equal:String.equal state.code_file path in
+  state.code_file <- file;
+  let resumed = Option.bind question (fun query ->
+    Code_results.start_lsp_question ~line:query.clq_line state
+      ~question:query.clq_question ~symbol:query.clq_symbol) in
+  Code_results.apply_file ~intent:Refresh_code_file state file_request
+    (Ok "let a = 1\nlet b = 2\nlet c = 3");
+  resumed
+
+let test_cancelled_questions_do_not_resume_after_workspace_recovery () =
+  List.iter (fun received ->
+    let state, _ = finder_fixture () in
+    close_code_finder state;
+    let query = match Code_results.start_lsp_question state ~question:"references" ~symbol:"target" with
+      | Some query -> query | None -> Alcotest.fail "question did not start" in
+    let answer = Ok (Decode.Lsp_locations [location "one.ml" 1; location "two.ml" 2]) in
+    if received then Code_results.apply_lsp_answer state query answer;
+    state.code_lsp_note <- Some "retained observation";
+    Code_results.retire_lsp_input state;
+    Alcotest.(check bool) "input removes both admission and recovery intent" true
+      (Option.is_none (Fetched.current_key state.code_lsp_query)
+       && Option.is_none state.code_location_offer);
+    Alcotest.(check bool) "cancelled question is not dispatched by recovery" true
+      (Option.is_none (resume_question_after_workspace_confirmation state));
+    Code_results.apply_lsp_answer state query answer;
+    Alcotest.(check bool) "old answer cannot reopen choices after reconfirmation" true
+      (Code_results.take_ready_lsp_locations state ~input_pending:false = Code_results.No_followup
+       && not state.palette_open && Option.is_none state.code_navigation
+       && state.code_jump_back=[] && state.code_file_cursor=2 && state.code_file_scroll=2
+       && state.code_lsp_note=Some "retained observation"))
+    [false; true]
+
+let test_location_picker_keeps_ticket_until_close_without_resuming () =
+  let state, _ = finder_fixture () in
+  close_code_finder state;
+  let query, offer = offered_locations state [location "one.ml" 1; location "two.ml" 2] in
+  ignore (Code_results.take_ready_lsp_locations state ~input_pending:false);
+  state.palette_query <- "two";
+  Code_results.retire_lsp_input state;
+  Alcotest.(check bool) "picker input retains the actual offer and query ticket" true
+    (code_location_offer_current state offer && state.palette_query="two"
+     && Option.equal (Fetched.same_request ~equal:code_lsp_query_equal)
+          (Some query) (Fetched.current_request state.code_lsp_query));
+  close_code_finder state;
+  Alcotest.(check bool) "closing choices retires recovery as well as the offer" true
+    (Option.is_none (Fetched.current_key state.code_lsp_query)
+     && Option.is_none state.code_location_offer);
+  Alcotest.(check bool) "closed choices cannot be reissued by recovery" true
+    (Option.is_none (resume_question_after_workspace_confirmation state));
+  Code_results.apply_lsp_answer state query
+    (Ok (Decode.Lsp_locations [location "one.ml" 1; location "two.ml" 2]));
+  Alcotest.(check bool) "Esc remains effective after workspace reconfirmation" true
+    (Code_results.take_ready_lsp_locations state ~input_pending:false = Code_results.No_followup
+     && not state.palette_open && state.code_jump_back=[] && Option.is_none state.code_navigation)
+
+let test_uncancelled_question_resumes_with_file_refresh () =
+  let state, _ = finder_fixture () in
+  close_code_finder state;
+  let old = match Code_results.start_lsp_question ~line:2 state ~question:"references" ~symbol:"target" with
+    | Some query -> query | None -> Alcotest.fail "question did not start" in
+  close_code_finder state;
+  let resumed = match resume_question_after_workspace_confirmation state with
+    | Some query -> query | None -> Alcotest.fail "uncancelled question lost recovery intent" in
+  let key = Fetched.request_key resumed in
+  Alcotest.(check bool) "normal Refresh reissues the question against the current owner" true
+    (key.clq_question="references" && key.clq_symbol="target" && key.clq_line=2
+     && key.clq_reading == state.workspace_read_authority
+     && state.code_file_cursor=2 && state.code_file_scroll=2);
+  let answer = Ok (Decode.Lsp_locations [location "one.ml" 1; location "two.ml" 2]) in
+  Code_results.apply_lsp_answer state old answer;
+  Alcotest.(check bool) "pre-recovery response has no offer ownership" true
+    (Option.is_none state.code_location_offer);
+  Code_results.apply_lsp_answer state resumed answer;
+  Alcotest.(check bool) "fresh resumed answer still opens choices" true
+    (Code_results.take_ready_lsp_locations state ~input_pending:false = Code_results.Choose_location
+     && not (Code_results.take_ready_found_file state ~input_pending:false))
+
 let test_location_picker_survives_finder_idle_and_late_replies () =
   List.iter (fun late_result ->
     let state, origin = finder_fixture () in
@@ -1133,7 +1221,13 @@ let () =
   Alcotest.run
     "masc-tui-workspace-entries"
     [ ( "location choices"
-      , [ Alcotest.test_case "location picker survives finder idle and late callbacks" `Quick
+      , [ Alcotest.test_case "cancelled questions do not resume after workspace recovery" `Quick
+            test_cancelled_questions_do_not_resume_after_workspace_recovery
+        ; Alcotest.test_case "picker keeps its query ticket only until close" `Quick
+            test_location_picker_keeps_ticket_until_close_without_resuming
+        ; Alcotest.test_case "uncancelled question resumes with normal Refresh" `Quick
+            test_uncancelled_question_resumes_with_file_refresh
+        ; Alcotest.test_case "location picker survives finder idle and late callbacks" `Quick
             test_location_picker_survives_finder_idle_and_late_replies
         ; Alcotest.test_case "filter chooses a non-first location and retains B history" `Quick
             test_multiple_locations_choose_the_filtered_destination

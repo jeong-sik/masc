@@ -28,21 +28,52 @@ remains available on other terminals. In the score view:
   systems; `[`/`]` select a system; Home/End jump to the start/end of the score.
 - +/- change notation size; `t` cycles all tracks and individual tracks.
 - Left/Right select a frozen score from the current conversation snapshot.
-- Space synthesizes and plays the selected tracks, then pauses/resumes.
+- Space opens instrument selection before rendering the selected tracks, then
+  pauses/resumes playback. `i` stops the current phrase and opens the picker.
+- Select a VST3 candidate to verify it is an instrument, then choose its default
+  sound or a saved `.vstpreset`. `/` searches, Enter selects, Escape cancels.
+  In the preset menu, `e` opens the instrument's native editor and sound browser;
+  close that window to save the complete sound. `p` accepts a preset file path.
+- `l` toggles repeat, using the same rendered audio for each repetition.
 - `r` opens audio/MIDI input selection and the recording timeline on macOS.
 - `v` shows the source and complete official diagnostics; `s` stops playback;
   `q` or Escape returns to the conversation.
 
-Audio is synthesized to a private temporary PCM WAV by the official engine,
+Install `scripts/install-vst-host.sh` with Python 3.12+ to use installed VST3
+instruments. The host runs natively so vendor libraries and licensing stay on
+the user's machine. The picker remembers the exact instrument and preset.
+Loading, licensing, rendering and silent-output failures are reported without
+substituting another instrument. Cubase-bundled instruments such as Retrologue
+and HALion Sonic appear when installed; usable sounds still depend on the user's
+installed content and license. Native factory sounds are selected in their own
+editor, rather than inferred from plug-in parameters.
+
+For VST playback, the official engine generates MIDI, including track selection,
+repeat order, effects and tempo events. The native host retains note timing and
+expression, excluding MIDI bank/program messages so the explicitly selected VST
+sound remains authoritative. This does not synchronize a plug-in's internal
+arpeggiator or effect transport. See `tools/vst/README.md` for the render contract.
+
+The explicit SoundFont entry synthesizes a private temporary PCM WAV by the official engine,
 including its repeat order, instrument changes and note effects. It uses
 the existing `[tui] midi_soundfont` when configured, otherwise the alphaTab
 package's Sonivox SoundFont. Playback uses afplay, ffplay, aplay or SoX play
 from PATH, in that order. A player failure is reported in the view. Playback
-stops when the view closes. There is no synchronized playback cursor yet.
+stops when the view closes. VST renders and their exact MIDI inputs remain in
+the native state directory with SHA-256 metadata for later comparison; temporary
+playback files are removed. There is no synchronized playback cursor yet.
 Track selection isolates sounding parts while preserving the full score's
 pickup/grace timing, repeats and tempo. Parts explicitly sharing a MIDI channel
 (such as percussion on channel 9) retain the official shared channel program,
 volume and controller state; solo does not create independent MIDI channels.
+
+Native preferences, presets, retained renders and `snapshot.json` default to
+`~/Library/Application Support/masc/vst` on macOS, or
+`${XDG_STATE_HOME:-~/.local/state}/masc/vst` elsewhere. `--state-dir` overrides this
+host-local directory. The `vst-phrase` Lane observer can consume that exact snapshot
+through a separately configured `snapshot_file` source. It retains local process
+events and render evidence; it does not establish device audibility, a complete
+playback history, or a Lane action receipt.
 
 Malformed alphaTex remains malformed: diagnostics and the original source
 are retained. In particular, `\staff {score tabs}` uses **tabs**, not `tab`.

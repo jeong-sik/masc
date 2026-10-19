@@ -8,6 +8,8 @@ import { spawn } from 'node:child_process'
 import { emitKeypressEvents } from 'node:readline'
 import { safeText, transmit, viewport, place, retire } from './terminal.mjs'
 import { errorDetail } from './diagnostics.mjs'
+import { InstrumentPicker } from './instruments.mjs'
+import { nativeJob, defaultStateDirectory, snapshotWriter, retainRender } from './vst.mjs'
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
@@ -26,13 +28,16 @@ const { values, positionals } = parseArgs({
     'session-root': { type: 'string' },
     input: { type: 'string' },
     midi: { type: 'string' },
+    'state-dir': { type: 'string' },
     help: { type: 'boolean' },
   },
 })
 
 if (values.help) {
   console.log('masc-alphatex [file.atex] [--bundle snapshot.json] [--index N]\n'
-    + '  TUI score viewer: arrows/j/k scroll, +/- zoom, t tracks, Space play/pause, r recording, q exit.\n'
+    + '  TUI score viewer: arrows/j/k scroll, +/- zoom, t tracks, Space choose/play/pause, s stop, q exit.\n'
+    + '  i chooses instrument/preset, e opens its native sound browser, l toggles repeat.\n'
+    + '  --state-dir stores native selection, saved presets, renders and Lane snapshot.\n'
     + '  --record opens audio/MIDI input selection; r begins recording, s saves WAV and UMP.\n'
     + '  --session directory opens a saved waveform/MIDI timeline; --session-root sets the take folder.\n'
     + '  --devices lists CoreAudio/CoreMIDI inputs on macOS.\n'
@@ -113,6 +118,20 @@ async function viewScores(sources, initialIndex) {
   let suspended = false
   let sessionTask = null
   const sessionAbort = new AbortController()
+  let instrument = null
+  let repeating = false
+  let nativeRender = null
+  let currentRender = null
+  const nativeRenders = new Set()
+  const stateDirectory = values['state-dir'] ?? defaultStateDirectory()
+  const record = snapshotWriter(stateDirectory)
+  const retained = fields => record(fields).catch(error => {
+    if (!closed) { status = `Lane state could not be saved: ${error.message}`; redraw() }
+  })
+  const picker = new InstrumentPicker({ directory: stateDirectory, notify: () => redraw({ imageChanged: !picker.view }),
+    failed: error => { status = `VST: ${error.message}`; redraw() },
+    selected: selection => { instrument = selection; synthesize() },
+    soundfont: () => { instrument = null; synthesize() } })
   const write = bytes => { if (!closed && !suspended) process.stdout.write(bytes) }
   const tracks = () => selectedTrack < 0 ? undefined : [selectedTrack]
   let finish
@@ -154,8 +173,22 @@ async function viewScores(sources, initialIndex) {
     output += `\x1b[1;1H${fit(`alphaTex · ${document?.title || 'Score'} · score ${index + 1}/${sources.length} · system ${(document?.page ?? 0) + 1}/${document?.pageCount ?? 1} · ${Math.round(scale * 100)}%`)}`
     const track = selectedTrack < 0 ? 'all tracks' : document?.tracks.find(t => t.index === selectedTrack)?.name
     const time = audioState === 'playing' ? elapsed + Date.now() - playingSince : elapsed
-    output += `\x1b[2;1H${fit(`${track ?? ''} · ${audioState} ${Math.floor(time / 1000)} / ${Math.floor(duration / 1000)}s · ${status}`)}`
-    if (textView) {
+    output += `\x1b[2;1H${fit(`${track ?? ''} · ${instrument?.name ?? 'SoundFont'} · ${audioState}${repeating ? ' · repeat' : ''} ${Math.floor(time / 1000)} / ${Math.floor(duration / 1000)}s · ${status}`)}`
+    if (picker.view) {
+      output += retire(tmux)
+      const menu = picker.view
+      output += `\x1b[4;2H${fit(menu.title)}`
+      if (menu.kind === 'preset_path') output += `\x1b[6;2H${fit(menu.query)}▌`
+      else if (menu.items) {
+        const items = picker.items()
+        const available = Math.max(1, rows - 9)
+        const top = Math.max(0, menu.cursor - available + 1)
+        items.slice(top, top + available).forEach((item, offset) => {
+          output += `\x1b[${offset + 6};2H${fit(`${top + offset === menu.cursor ? '› ' : '  '}${item.name}`)}`
+        })
+        output += `\x1b[${rows - 2};2H${fit(`Search: ${menu.query}${menu.searching ? '▌' : ''}`)}`
+      }
+    } else if (textView) {
       output += retire(tmux)
       const lines = wrapped([diagnostics, 'alphaTex source:', sources[index]].join('\n'))
       const available = Math.max(1, rows - 4)
@@ -171,7 +204,9 @@ async function viewScores(sources, initialIndex) {
       if (imageChanged) output += retire(tmux) + transmit(image.png, tmux)
       output += `\x1b[3;2H${place(view, tmux)}`
     }
-    output += `\x1b[${rows};1H${fit('↑↓/j k:scroll PgUp/PgDn  [ ]:system  +/-:zoom  t:tracks  ←→:score  v:source  Space:play/pause  r:recording  s:stop  q:back')}`
+    output += `\x1b[${rows};1H${fit(picker.view
+      ? '↑↓/j k:choose  /:search  Enter:select/play  e:native sound browser  p:preset file  Esc:cancel  s:stop'
+      : '↑↓/j k:scroll  [ ]:system  +/-:zoom  t:tracks  ←→:score  v:source  Space:choose/play/pause  i:instrument  l:repeat  r:recording  s:stop  q:back')}`
     write(output)
   }
   function render() {
@@ -188,6 +223,8 @@ async function viewScores(sources, initialIndex) {
     ++audioGeneration
     if (cancellation) Atomics.store(cancellation, 0, 1)
     cancellation = null
+    nativeRender?.cancel()
+    nativeRender = null
     if (player) {
       // A stopped child must be continued before SIGTERM can be handled.
       if (audioState === 'paused') player.kill('SIGCONT')
@@ -197,6 +234,7 @@ async function viewScores(sources, initialIndex) {
     audioState = 'stopped'
     elapsed = 0
     duration = 0
+    retained({ state: 'stop_requested', selection: instrument, render: currentRender })
   }
   function startPlayer(path, id, candidate = 0, lastError = '') {
     if (id !== audioGeneration || closed) return
@@ -209,6 +247,7 @@ async function viewScores(sources, initialIndex) {
     if (candidate === choices.length) {
       audioState = 'stopped'
       status = `Audio unavailable: ${lastError}`
+      retained({ state: 'failed', selection: instrument, render: currentRender, error: status })
       redraw()
       return
     }
@@ -223,6 +262,7 @@ async function viewScores(sources, initialIndex) {
       audioState = 'playing'
       playingSince = Date.now()
       status = `Playing with ${command}`
+      retained({ state: 'player_started', selection: instrument, render: currentRender })
       redraw()
     })
     child.once('error', error => {
@@ -233,10 +273,15 @@ async function viewScores(sources, initialIndex) {
       if (id !== audioGeneration || closed) return
       if (player === child) player = null
       if (code !== 0 && signal === null) startPlayer(path, id, candidate + 1, detail || `${command} exited ${code}`)
-      else {
+      else if (code === 0 && repeating) {
+        elapsed = 0
+        startPlayer(path, id)
+      } else {
         audioState = 'stopped'
         elapsed = 0
         status = code === 0 ? 'Playback finished' : `Player ended: ${signal}`
+        retained({ state: code === 0 ? 'player_finished' : 'player_ended', selection: instrument,
+          render: currentRender, exit_code: code, signal })
         redraw()
       }
     })
@@ -247,18 +292,25 @@ async function viewScores(sources, initialIndex) {
       player.kill('SIGSTOP')
       elapsed += Date.now() - playingSince
       audioState = 'paused'
+      retained({ state: 'pause_requested', selection: instrument, render: currentRender })
     } else if (audioState === 'paused' && player) {
       player.kill('SIGCONT')
       playingSince = Date.now()
       audioState = 'playing'
-    } else if (audioState === 'stopped') {
-      const id = ++audioGeneration
-      audioState = 'synthesizing'
-      status = 'Synthesizing score…'
-      cancellation = new Int32Array(new SharedArrayBuffer(4))
-      audioWorker.postMessage({ id, kind: 'audio', source: sources[index], path: join(directory, `${id}.wav`),
-        cancel: cancellation.buffer, options: { soundfontPath: values.soundfont, tracks: tracks() } })
-    }
+      retained({ state: 'resume_requested', selection: instrument, render: currentRender })
+    } else if (audioState === 'stopped') { picker.open(); return }
+    redraw()
+  }
+  function synthesize() {
+    const id = ++audioGeneration
+    audioState = 'synthesizing'
+    status = instrument ? `Rendering ${instrument.name}…` : 'Synthesizing score…'
+    currentRender = null
+    cancellation = new Int32Array(new SharedArrayBuffer(4))
+    retained({ state: 'rendering', selection: instrument, render: null, score_index: index, tracks: tracks() ?? null })
+    audioWorker.postMessage({ id, kind: instrument ? 'midi' : 'audio', source: sources[index],
+      path: join(directory, `${id}.${instrument ? 'mid' : 'wav'}`),
+      cancel: cancellation.buffer, options: { soundfontPath: values.soundfont, tracks: tracks() } })
     redraw()
   }
   renderWorker.on('message', message => {
@@ -287,6 +339,32 @@ async function viewScores(sources, initialIndex) {
   audioWorker.on('message', message => {
     if (closed || message.id !== audioGeneration) return
     if (message.ok) {
+      if (message.result.kind === 'midi') {
+        const selected = instrument
+        const job = nativeJob({ operation: 'render', ...selected,
+          midi_path: message.result.path, output_path: join(directory, `${message.id}.wav`) })
+        nativeRender = job
+        const completion = job.promise.then(async result => {
+          if (closed || message.id !== audioGeneration) return
+          const saved = await retainRender(stateDirectory, result, message.result.path)
+          if (closed || message.id !== audioGeneration) { await saved.discard(); return }
+          currentRender = saved.result
+          duration = currentRender.duration_ms
+          retained({ state: 'rendered', selection: selected, render: currentRender })
+          startPlayer(currentRender.output_path, message.id)
+        }).catch(error => {
+          if (closed || message.id !== audioGeneration) return
+          audioState = 'stopped'
+          status = `VST: ${error.message}`
+          retained({ state: 'failed', selection: selected, error: error.message })
+          redraw()
+        }).finally(() => {
+          nativeRenders.delete(completion)
+          if (nativeRender === job) nativeRender = null
+        })
+        nativeRenders.add(completion)
+        return
+      }
       duration = message.result.durationMs
       startPlayer(message.result.path, message.id)
     } else {
@@ -304,6 +382,15 @@ async function viewScores(sources, initialIndex) {
     status = `Audio unavailable: ${error.message}`; redraw()
   })
   function keypress(text, key = {}) {
+    if (picker.view && !(key.ctrl && key.name === 'c')) {
+      if (key.name === 's' && !picker.view.searching && picker.view.kind !== 'preset_path') {
+        stop(); status = 'Stopped'; redraw(); return
+      }
+      const hadMenu = picker.view
+      picker.keypress(text, key).catch(error => { status = `VST: ${error.message}`; redraw() })
+      if (hadMenu && !picker.view) redraw({ imageChanged: true })
+      return
+    }
     if (key.ctrl && key.name === 'c' || ['escape', 'q'].includes(key.name)) { finish(); return }
     switch (key.name) {
       case 'r': {
@@ -354,10 +441,12 @@ async function viewScores(sources, initialIndex) {
         stop(); selectedTrack = selectedTrack + 1 >= document.tracks.length ? -1 : selectedTrack + 1
         scroll = 0; page = 0; render(); return
       case 'space': togglePlayback(); return
+      case 'i': stop(); picker.open(); return
+      case 'l': repeating = !repeating; break
       case 'v':
         textView = !textView; scroll = 0
         redraw({ imageChanged: !textView }); return
-      case 's': stop(); status = 'Stopped'; break
+      case 's': stop(); status = 'Stop requested'; break
       default:
         if (text === '[' && document && page > 0) { page--; scroll = 0; render(); return }
         if (text === ']' && document && page + 1 < document.pageCount) { page++; scroll = 0; render(); return }
@@ -386,6 +475,7 @@ async function viewScores(sources, initialIndex) {
     await done
   } finally {
     stop()
+    picker.close()
     closed = true
     sessionAbort.abort()
     clearInterval(timer)
@@ -395,7 +485,8 @@ async function viewScores(sources, initialIndex) {
     for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.off(signal, onSignal)
     const exits = [...children.values()]
     for (const child of children.keys()) child.kill('SIGKILL')
-    await Promise.all([sessionTask, renderWorker.terminate(), audioWorker.terminate(), ...exits])
+    await Promise.all([sessionTask, renderWorker.terminate(), audioWorker.terminate(), picker.settled(),
+      Promise.allSettled([...nativeRenders]), ...exits])
     process.stdout.write(retire(tmux) + '\x1b[?25h\x1b[?1049l')
     process.stdin.setRawMode(wasRaw ?? false)
     process.stdin.pause()

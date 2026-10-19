@@ -1,5 +1,6 @@
 import { KeeperToolOutputScope, ToolOutputLookupNotice, useToolOutputLookup } from './tool-output-lookup'
 import { ChatEditEvidence } from './edit-evidence'
+import { PublishedArtifactCard } from './published-artifact-card'
 import { ChatFailureCard } from './failure-message'
 import { html } from 'htm/preact'
 import type { ComponentChildren, VNode } from 'preact'
@@ -3314,6 +3315,7 @@ function ToolCallBubble({ entry }: { entry: KeeperConversationEntry }) {
       </button>
       <${ToolOutputLookupNotice} lookup=${lookup} />
       <${ChatEditEvidence} output=${outputEntry} />
+      <${PublishedArtifactCard} output=${outputEntry} />
       ${expanded
         ? html`
             <div class="flex flex-col gap-2 border-t border-[var(--color-border-default)] px-3 py-2">
@@ -3545,6 +3547,7 @@ function ToolTraceStep({
         </div>
         <${ToolOutputLookupNotice} lookup=${lookup} />
         <${ChatEditEvidence} output=${output} />
+        ${structuralSummary ? null : html`<${PublishedArtifactCard} output=${output} />`}
         ${open && hasBody
           ? html`
             <div class="chat-block-tool-body">

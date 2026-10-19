@@ -377,6 +377,7 @@ describe('workspace navigation labels', () => {
 
     expect(visibleIds).toEqual([
       'work',
+      'artifacts',
       'planning',
       'repositories',
       'verification',

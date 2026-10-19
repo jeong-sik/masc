@@ -59,7 +59,7 @@ const help = [
   ':monitor AUDIO_OUTPUT_UID enables input monitoring; :monitor off disables it.',
   ':midi-monitor SOURCE_UID DEST_UID [GROUP CHANNEL ...] (1–16); omit pairs for all messages.',
   'Repeat for more routes; :midi-monitor remove SOURCE_UID DEST_UID; :midi-monitor off.',
-  'Channel scopes filter system/SysEx. Transport/edits finalize recording; count-in runs once before loops. Loop recording remains unfinished.',
+  'Channel scopes filter system/SysEx. Transport/edits finalize recording; loop passes become separate take lanes, with the last take unmuted.',
 ]
 
 export async function viewArrangement({ path, loaded, initialDocument, root = resolve('music-projects'), embedded = false, signal, output, midiOutput, initialRoute, stateDirectory } = {}) {
@@ -193,7 +193,6 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     await owned.completion
   }
   function startRecording() {
-    if (editor.project.playbackLoop !== undefined) throw new Error('Loop recording requires cycle-aware take placement; use :loop off first')
     if (recording) throw new Error('A recording is already opening or finalizing')
     if (!input) throw new Error('Select :input AUDIO_UID first; :inputs lists devices')
     if (transport.kind !== 'playing' || transportPending) throw new Error('Start arrangement playback before recording')
@@ -335,7 +334,10 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
                 captured?.controller.abort(); captured?.handle?.stop(); status = event.message; return
               }
               if (event.kind === 'stopped' && captured) {
-                if (captured.epoch) captured.epoch.duration = Math.min(captured.epoch.duration, event.currentTime)
+                if (captured.epoch?.loop) {
+                  if (typeof event.clock?.end === 'string') captured.epoch.end = event.clock.end
+                  else captured.failure = new Error('Loop backing stopped without its recording end clock')
+                } else if (captured.epoch) captured.epoch.duration = Math.min(captured.epoch.duration, event.currentTime)
                 captured.controller.abort(); captured.handle?.stop()
               }
               if (!accepting) return

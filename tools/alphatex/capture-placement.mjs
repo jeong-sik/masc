@@ -3,6 +3,12 @@ import { validateCalibrationProfile, calibrationResidual } from './calibration-p
 
 function gcd(a, b) { a = a < 0n ? -a : a; while (b) [a, b] = [b, a % b]; return a }
 function fraction(n, d) { const factor = gcd(n, d); return { numerator: String(n / factor), denominator: String(d / factor) } }
+export function validateClockOffset(value) {
+  if (!value || Object.keys(value).length !== 2 || typeof value.numerator !== 'string' || !/^(0|-?[1-9][0-9]*)$/.test(value.numerator)
+      || typeof value.denominator !== 'string' || !/^[1-9][0-9]*$/.test(value.denominator)
+      || gcd(BigInt(value.numerator), BigInt(value.denominator)) !== 1n) throw new Error('Invalid captured clock placement offset')
+  return value
+}
 export function validateCapturePlacement(value) {
   if (!['manual', 'calibrated'].includes(value?.kind) || Object.keys(value).length !== (value.kind === 'manual' ? 2 : 4) || !value.advanceNanoseconds
       || Object.keys(value.advanceNanoseconds).length !== 2) throw new Error('Unknown captured placement correction')
@@ -33,8 +39,10 @@ function binary(value) {
 function startNanoseconds(project, clip) {
   const [tempoN, tempoD] = binary(project.tempo), baseN = BigInt(clip.position) * 60n * 1_000_000_000n * tempoD, baseD = BigInt(project.ppq) * tempoN
   const shift = clip.placement ? validateCapturePlacement(clip.placement).advanceNanoseconds : { numerator: '0', denominator: '1' }
-  const shiftD = BigInt(shift.denominator)
-  return [baseN * shiftD - BigInt(shift.numerator) * baseD, baseD * shiftD]
+  const offset = clip.clockOffsetNanoseconds ? validateClockOffset(clip.clockOffsetNanoseconds) : { numerator: '0', denominator: '1' }
+  const shiftD = BigInt(shift.denominator), offsetD = BigInt(offset.denominator)
+  return [(baseN * shiftD - BigInt(shift.numerator) * baseD) * offsetD + BigInt(offset.numerator) * baseD * shiftD,
+    baseD * shiftD * offsetD]
 }
 function seconds(n, d) {
   d *= 1_000_000_000n

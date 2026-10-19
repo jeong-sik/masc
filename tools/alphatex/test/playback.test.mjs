@@ -180,7 +180,6 @@ test('combined playback pins its audio device and every MIDI binding in one nati
   loop.event('playing', { ...state, loop: true }); await loop.playback.ready
   loop.playback.pause(); loop.event('paused', { ...state, loop: true })
   loop.playback.seek(.4); loop.playback.resume()
-  await assert.rejects(loop.playback.recordingEpoch(), /cycle-aware/)
   loop.playback.stop(); loop.event('stopped', { ...state, loop: true }); loop.close()
   await loop.playback.completion
 })
@@ -198,7 +197,7 @@ test('captured audio-only playback owns its one-shot or authored-loop clock and 
   await f.playback.completion
   assert.deepEqual(f.commands.map(command => command.kind), ['pause', 'seek', 'resume', 'stop'])
   assert.throws(() => fixture({ format,loop,midiOutput:'12' }), /Invalid arrangement/)
-  if(loop)await assert.rejects(f.playback.recordingEpoch(),/cycle-aware/)
+  if(loop)await assert.rejects(f.playback.recordingEpoch(),/stopping or closed/)
   const invalid = fixture({ format }); invalid.event('playing'); invalid.close(1)
   await assert.rejects(invalid.playback.completion, /captured audio arrangement clock/)
  }
@@ -260,12 +259,11 @@ test('paired and hybrid loops pin only selected acquired streams through control
  }
 })
 
-test('SMF arrangement loop retains exact bindings, owns one child through control and refuses non-cycle-aware recording epochs',async()=>{
+test('SMF arrangement loop retains exact bindings and owns one child through controls',async()=>{
  const bindings=[{port:0,destination:'123'}],f=fixture({format:'midi-arrangement',midiOutput:'123',output:undefined,midiBindings:bindings,loop:true})
  assert.ok(f.args.includes('--loop'))
  const state={format:'midi-arrangement',device:{id:'123',kind:'midi',protocol:1,name:'Keys'},bindings:[{port:0,device:{id:'123',kind:'midi',protocol:1,name:'Keys'}}]}
  f.event('playing',state);await f.playback.ready
- await assert.rejects(f.playback.recordingEpoch(),/cycle-aware/)
  f.playback.pause();f.event('paused',state);f.playback.seek(2);f.playback.resume();f.event('playing',{...state,currentTime:0})
  f.playback.stop();f.event('stopped',state);f.close();await f.playback.completion
  assert.deepEqual(f.commands,[{kind:'pause'},{kind:'seek',seconds:2},{kind:'resume'},{kind:'stop'}])
@@ -276,7 +274,6 @@ test('WAV arrangement loop keeps its native owner, audio selection and explicit 
  assert.ok(f.args.includes('--loop'));assert.ok(f.args.includes('audio-1'))
  const state={format:'wave-arrangement',loop:true,device:{id:'audio-1',name:'Output',outputs:2}}
  f.event('playing',state);await f.playback.ready
- await assert.rejects(f.playback.recordingEpoch(),/cycle-aware/)
  f.playback.pause();f.event('paused',state);f.playback.seek(0);f.playback.resume();f.event('playing',state)
  f.playback.stop();f.event('stopped',state);f.close();await f.playback.completion
  assert.deepEqual(f.commands,[{kind:'pause'},{kind:'seek',seconds:0},{kind:'resume'},{kind:'stop'}])

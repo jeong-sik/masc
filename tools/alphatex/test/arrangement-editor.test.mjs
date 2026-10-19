@@ -1030,3 +1030,27 @@ test('ordinary paired captured loop retains its plan owner through controls and 
  }finally{await closeController(view)}
  assert.equal(view.process.stdin.isRaw,false)
 })
+
+test('successful native loop stop retains the cycle period and passes its absolute capture end fence',async()=>{
+ for(const ending of ['9007199254746993123',undefined]){
+  const view=await controller()
+  try{
+   await primeWave(view);view.command('tempo 120');view.command('loop 0 .5');view.command('input input');await flush()
+   view.key('space');await flush()
+   const prepared=view.observed.requests.find(job=>job.kind==='prepare-wave')
+   view.worker.emit('message',{id:prepared.id,ok:true,result:{path:'/owned/loop/plan.json',format:'wave-arrangement',loop:true}});await flush()
+   const player=view.observed.players[0],clock={kind:'mach-host-time',anchor:'9007199254740993123',position:0,numer:125,denom:3,
+    cycle:{kind:'project',start:0,end:480,ppq:960,tempo:120}}
+   player.handle.recordingEpoch=async()=>({kind:'playing',loop:true,duration:.25,device:{id:'output',outputs:2},clock})
+   view.command('record');await flush();const capture=view.observed.captures[0];assert.ok(capture)
+   player.options.onEvent({kind:'stopped',loop:true,currentTime:.125,duration:.25,reason:'signal',success:true,device:{id:'output',name:'Output',outputs:2},clock:{...clock,...(ending===undefined?{}:{end:ending})}})
+   assert.ok(capture.stops>0);capture.finish({manifest:{}});await flush()
+   const attach=view.observed.requests.find(job=>job.kind==='attach-recording')
+   if(ending===undefined)assert.equal(attach,undefined)
+   else{
+    assert.equal(attach.epoch.duration,.25);assert.equal(attach.epoch.end,ending);assert.deepEqual(attach.epoch.clock.cycle,clock.cycle)
+    view.worker.emit('message',{id:attach.id,ok:false,error:'retained fixture source'});await flush()
+   }
+  }finally{await closeController(view)}
+ }
+})

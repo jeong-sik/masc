@@ -179,7 +179,6 @@ export function openPlayback({ path, output, midiOutput, midiBindings, loop = fa
   if (signal?.aborted) abort()
   return { ready, completion, stop,
     recordingEpoch({ signal } = {}) {
-      if (loop) return Promise.reject(new Error('Loop recording requires cycle-aware take placement'))
       if (format === 'wave') return Promise.reject(new Error('Recording epochs require an arrangement'))
       if (signal?.aborted) return Promise.reject(signal.reason)
       const request = randomUUID()

@@ -611,6 +611,10 @@ final class ArrangementTransport {
                 "numer": timebase.numer, "denom": timebase.denom,
                 "renderQuantum": renderQuantum, "bufferFrames": bufferFrames, "sampleRate": engine.outputNode.outputFormat(forBus: 0).sampleRate,
                 "presentationLatency": engine.outputNode.presentationLatency]
+            if let loop = plan.loop {
+                clock["cycle"] = ["kind": "project", "start": loop.start, "end": loop.end, "ppq": loop.ppq, "tempo": loop.tempo]
+            }
+            if kind == "stopped" { clock["end"] = String(mach_absolute_time()) }
             if let midi {
                 clock["midiAnchorNanoseconds"] = String(AudioConvertHostTimeToNanos(musicalAnchor))
                 clock["midiPosition"] = max(0, midi.position(at: DispatchTime.now().uptimeNanoseconds)
@@ -798,7 +802,6 @@ final class ArrangementTransport {
                     try schedule(from: raw, playing: state == .playing || state == .starting)
                 case .status: break
                 case .recordingEpoch(let request):
-                    guard plan.loop == nil else { throw AudioFailure("loop recording requires cycle-aware placement") }
                     var event = snapshot(state == .playing ? "playing" : "paused")
                     event["recordingRequest"] = request; try audioEmit(event); return
                 case .stop: finish(reason: "stop"); return

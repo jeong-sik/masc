@@ -288,7 +288,7 @@ struct SourceChase {
         }
         channels[key] = state
     }
-    func bootstrap(replacing previous: SourceChase) throws -> [(Int, [UInt8])] {
+    func bootstrap(replacing previous: SourceChase, notes: Bool = true) throws -> [(Int, [UInt8])] {
         let unsafe = obstacles.union(previous.obstacles)
         guard unsafe.isEmpty else {
             throw MidiFailure("source state reconstruction requires support for " + unsafe.map(\.rawValue).sorted().joined(separator: ", "))
@@ -303,17 +303,19 @@ struct SourceChase {
             throw MidiFailure("source state reconstruction cannot restore held notes across program or bank changes")
         }
         var result = history
-        for key in channels.keys.sorted() {
-            let state = channels[key]!, port = key >> 8, channel = UInt8(key & 15)
-            // silence() already releases owned keys/pedals. Restore the captured
-            // set before switching sostenuto on; later keys must remain outside it.
-            for note in state.notes where note.captured { result.append((port, [0x90 | channel, note.pitch, note.velocity])) }
-            if known.contains(ChaseField(port: port, channel: channel, kind: .controller(66))) { result.append((port, [0xb0 | channel, 66, state.sostenuto])) }
-            if known.contains(ChaseField(port: port, channel: channel, kind: .controller(64))) { result.append((port, [0xb0 | channel, 64, state.sustain])) }
-            for note in state.notes where !note.captured { result.append((port, [0x90 | channel, note.pitch, note.velocity])) }
-            for note in state.notes where !note.held { result.append((port, [note.releaseStatus, note.pitch, note.release])) }
-            if let pressure = state.pressure { result.append((port, [0xd0 | channel, pressure])) }
-            for pitch in state.poly.keys.sorted() { result.append((port, [0xa0 | channel, pitch, state.poly[pitch]!])) }
+        if notes {
+            for key in channels.keys.sorted() {
+                let state = channels[key]!, port = key >> 8, channel = UInt8(key & 15)
+                // silence() already releases owned keys/pedals. Restore the captured
+                // set before switching sostenuto on; later keys must remain outside it.
+                for note in state.notes where note.captured { result.append((port, [0x90 | channel, note.pitch, note.velocity])) }
+                if known.contains(ChaseField(port: port, channel: channel, kind: .controller(66))) { result.append((port, [0xb0 | channel, 66, state.sostenuto])) }
+                if known.contains(ChaseField(port: port, channel: channel, kind: .controller(64))) { result.append((port, [0xb0 | channel, 64, state.sustain])) }
+                for note in state.notes where !note.captured { result.append((port, [0x90 | channel, note.pitch, note.velocity])) }
+                for note in state.notes where !note.held { result.append((port, [note.releaseStatus, note.pitch, note.release])) }
+                if let pressure = state.pressure { result.append((port, [0xd0 | channel, pressure])) }
+                for pitch in state.poly.keys.sorted() { result.append((port, [0xa0 | channel, pitch, state.poly[pitch]!])) }
+            }
         }
         return result
     }
@@ -1008,12 +1010,12 @@ final class MidiTransport {
         }
         return action.seconds <= seconds
     }
-    func beginRegion(_ index: Int, at sourceSeconds: Double) throws {
+    func beginRegion(_ index: Int, at sourceSeconds: Double, notes: Bool = true) throws {
         let entry = try regionEntry(index, at: sourceSeconds), prefix = entry.model.scoped(to: regionScopes[index]), next = entry.next
         let prior = sourceModel.scoped(to: regionScopes[index])
         guard prior.touched.isSubset(of: entry.safeKnown) else { throw MidiFailure("MIDI region seek needs a source baseline before sounding keys on a previously changed channel") }
         var permitted = prior; permitted.touched.formIntersection(prefix.known)
-        for (port, bytes) in try prefix.bootstrap(replacing: permitted) { try sourceSend(bytes, port: port) }
+        for (port, bytes) in try prefix.bootstrap(replacing: permitted, notes: notes) { try sourceSend(bytes, port: port) }
         if cycle != nil {
             for address in regionScopes[index] {
                 cycleAcquired[address] = Set((prefix.channels[address]?.notes ?? []).filter(\.held).compactMap(\.origin))
@@ -1126,7 +1128,7 @@ final class MidiTransport {
             switch action.kind {
             case .begin:
                 if let cut, cycle == nil || action.seconds >= cut { regionCursors[action.region] = MidiRegionCursor(copy: region.spec.repeatCount) }
-                else { try beginRegion(action.region, at: region.spec.sourceStart) }
+                else { try beginRegion(action.region, at: region.spec.sourceStart, notes: false) }
             case .end:
                 try sourceSilence(addresses: regionScopes[action.region])
                 for address in regionScopes[action.region] { sourceModel.channels[address]?.notes.removeAll() }

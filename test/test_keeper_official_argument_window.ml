@@ -60,11 +60,12 @@ let projection ?(history_prefix=[]) ?tools source base_path =
   let tools = match tools with None -> [reader base_path] | Some tools -> tools in
   Option.bind source (fun source -> Host.argument_projection source ~tools ~history_prefix)
 let project ?argument_projection ?(capacity_bytes=max_int) ?carried_front_seed
-    ?(librarian_front=progress) ?on_carried_front messages =
+    ?(librarian_front=progress) ?on_carried_front ?on_model_input_window_observation messages =
   Host.start_range_projection ?argument_projection ~measure_message_bytes:measure
     ~capacity_bytes ~unbounded_capacity_bytes:max_int ~reserved_bytes:0
     ?carried_front_seed ~librarian_front:(fun _ -> Ok librarian_front)
-    ?on_carried_front ~turn_start ~keeper_name:"official-arguments" ~runtime_id:"official.sample" messages
+    ?on_carried_front ?on_model_input_window_observation
+    ~turn_start ~keeper_name:"official-arguments" ~runtime_id:"official.sample" messages
   |> Result.map_error Agent_core.Error.to_string |> require
 let inputs messages = List.concat_map (fun (message : T.message) ->
   List.filter_map (function
@@ -179,7 +180,10 @@ let test_storage_failure_restores_raw_and_recuts_to_actual_capacity () = with_ba
     | Tool_output.Invalid_normalized_artifact_ref _ | Decoded_normalized_artifact_ref _ -> false) (inputs bounded))
 
 let snapshot () =
-  let messages = [List.hd raw_seed] in
+  (* Cover alpha's complete exchange. The raw capacity cut reaches beta at
+     atom 2, so a snapshot ending at atom 1 would lose authority before the
+     summary-versus-position comparison this scenario is meant to exercise. *)
+  let messages = List.take 3 raw_seed in
   let position = Keeper_turn_boundaries.position_of_messages messages |> require in
   let boundary : Keeper_turn_boundaries.record = {recorded_at=1.;event=Turn_ended
     {task_context=Keeper_turn_task_context.No_task;turn_ref=Ids.Turn_ref.make ~trace_id:"argument-summary" ~absolute_turn:1;
@@ -200,16 +204,33 @@ let test_failed_materialization_repeats_summary_choice_without_displacing_atoms 
   check bool "a fitting state was present before failure" true (has_state good);
   check bool "failed large raw arguments must not be displaced by the state" false (has_state sent);
   check bool "actual final capacity is respected" true (size sent<=capacity_bytes);
-  check bool "position-only keeps a raw command the state would evict" true (List.mem_assoc "beta" (inputs sent))
+  check bool "position-only keeps a raw command the state would evict" true (List.mem_assoc "beta" (inputs sent));
+  check bool "the retained command is its exact original JSON" true (input "beta" sent=beta)
 
 let test_zero_history_floor_does_not_write_dropped_slots () = with_base @@ fun base ->
   let attached = Keeper_librarian_request_unread.attach ~include_empty:true ~role:T.System
     Keeper_librarian_request_unread.empty raw_history in
   let _, atom_count = Runtime_model_input_tail_window.annotate raw_history in
-  let _, capacity_bytes = Runtime_model_input_tail_window.project_from_atom
+  let floor, capacity_bytes = Runtime_model_input_tail_window.project_from_atom
     ~allow_empty_history:true ~measure_message_bytes:measure ~first_atom:atom_count attached in
-  let sent = project ?argument_projection:(projection (source base) base) ~capacity_bytes raw_history in
-  check int "the explicit capacity floor remains empty" 0 (snd (Runtime_model_input_tail_window.annotate sent));
+  let observed = ref None in
+  let sent = project ?argument_projection:(projection (source base) base) ~capacity_bytes
+    ~on_model_input_window_observation:(fun observation -> observed := Some observation) raw_history in
+  check (list string) "the floor carries exactly its omission and frozen unread evidence"
+    (List.map Host.encode_history_message floor.messages)
+    (List.map Host.encode_history_message sent);
+  (* The synthetic User preamble explains omitted history; it is not a
+     durable source atom. The observation uses the source's coordinates. *)
+  (match !observed with
+   | None -> fail "the empty floor did not publish its window"
+   | Some observation ->
+     check int "the explicit capacity floor carries no durable atom" 0 observation.transmitted_atoms;
+     check int "the floor retains the source denominator" atom_count observation.total_atoms;
+     match observation.model_input_front with
+     | Model_input_front.After_history digest ->
+       check (option string) "the floor witnesses the exact end of the raw source"
+         (Runtime_model_input_tail_window.atom_opening_digest raw_history (atom_count-1)) (Some digest)
+     | Model_input_front.At_atom _ | Empty_history -> fail "the floor lost its raw history end");
   check bool "dropped slots caused no writes" false
     (Sys.file_exists (Tool_blob_store.root_dir (Tool_blob_store.create ~base_path:base)))
 

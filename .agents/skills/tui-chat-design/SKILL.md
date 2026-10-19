@@ -1,6 +1,6 @@
 ---
 name: tui-chat-design
-description: "MASC TUI의 채팅·입력·로딩·진행 상태, 비동기 조회·설정 저장·Ask 답변과 재조회를 바꿀 때 쓴다. Keeper·Work·로그·Board·Runtime·Overview의 원본 요청·입력·revision·소유권, 공유 조회와 부분 실패, worker 관측·UI 반영·paint 증거를 구분한다."
+description: "MASC TUI의 채팅·입력·로딩·진행 상태, 시작 키 인계와 늦은 터미널 응답, 비동기 조회·설정 저장·Ask 답변과 재조회를 바꿀 때 쓴다. Keeper·Work·로그·Board·Runtime·Overview의 원본 요청·입력·revision·소유권, 공유 조회와 부분 실패, worker 관측·UI 반영·paint 증거를 구분한다."
 ---
 
 # 대화를 먼저 읽는 채팅
@@ -21,6 +21,18 @@ description: "MASC TUI의 채팅·입력·로딩·진행 상태, 비동기 조�
   그룹 키·인과 관계·검색과 스크롤의 원본 identity는 그대로 유지한다.
 - 아직 처리되지 않은 입력은 `전송 대기`·`전송 중`·`처리 대기`·`전송 확인 중` 상태를 계속 표시한다. 접수를 턴 반영으로 바꾸어 말하지 않는다.
 - 글꼴 크기·자간·행간은 터미널 에뮬레이터의 설정이다. 앱은 셀 배치와 여백을 제어한다.
+
+## 시작 입력과 터미널 응답
+
+- 시작 probe에 실제 replay 바이트가 생기면 기능 응답을 더 기다리지 않고 같은 디코더와
+  입력 버퍼를 입력 루프에 넘긴다. 미완성 OSC/CSI·UTF-8·paste를 finish하거나 버리지 않는다.
+  기존 무입력 deadline/byte cap을 줄이거나 새 reader·timer를 추가하지 않는다.
+- probe의 원래 관측 소유자는 byte filter 완료 뒤에도 남는다. 일반 입력 디코더가 읽은 늦은
+  palette·theme·query graphics·cell size도 그 소유자에 반영하고, 바뀐 불변 관측만 전달한다.
+  NO_COLOR·실제 graphics 거절·첫 유효 응답 정책을 유지하며 theme은 실제 후속 통지를 따른다.
+- 이미지·portrait·MSX·악보는 현재 기능 관측을 사용한다. 악보 실행 closure에 초기값을
+  붙들지 않는다. 키 인계와 기능 반영은 첫 paint·실제 입력 반응·속도 개선 증거와 구분한다.
+  검사는 실제 바이트·프로토콜·관측 소유권을 보고 화면 문구·배치·PTY 검사를 만들지 않는다.
 
 ## 에디터 준비 조회
 

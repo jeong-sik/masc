@@ -1,3 +1,10 @@
+type observation =
+  { palette : Masc_tui_terminal_palette.t option
+  ; theme_mode : Masc_tui_terminal_palette.theme_mode option
+  ; graphics : Masc_tui_graphics.query_reply option
+  ; cell_pixels : (int * int) option
+  }
+
 type result =
   { palette : Masc_tui_terminal_palette.t option
   ; theme_mode : Masc_tui_terminal_palette.theme_mode option
@@ -60,16 +67,7 @@ type decoder =
             as the OSC 4 answers arrive. Nothing waits on them: a terminal
             that answers 10 and 11 but not 4 leaves them all [None] and the
             probe still completes. *)
-  ; mutable theme_mode : Masc_tui_terminal_palette.theme_mode option
-        (** What the terminal last said about its own page. Set by the reply
-            to DECSET 996 and again, unasked, by 2031 whenever the reader
-            switches theme. Nothing waits on it: a terminal that answers
-            neither leaves it [None]. *)
-  ; mutable graphics : Masc_tui_graphics.query_reply option
-  ; mutable cell_pixels : (int * int) option
-        (** Width and height of one character cell, as the terminal
-            reported them. Nothing waits on it: a terminal that does not
-            answer CSI 16 t leaves it [None]. *)
+  ; mutable observed : observation
   }
 
 let create ~palette_requested =
@@ -82,9 +80,7 @@ let create ~palette_requested =
   ; background = None
   ; ansi =
       Array.make Masc_tui_terminal_palette.ansi_slot_count None
-  ; theme_mode = None
-  ; graphics = None
-  ; cell_pixels = None
+  ; observed = {palette=None; theme_mode=None; graphics=None; cell_pixels=None}
   }
 ;;
 
@@ -110,19 +106,42 @@ let flush_pending decoder =
   Buffer.clear decoder.pending
 ;;
 
-let record_palette decoder slot color =
-  match slot with
-  | Masc_tui_terminal_palette.Foreground ->
-    if Option.is_none decoder.foreground then decoder.foreground <- color
-  | Masc_tui_terminal_palette.Background ->
-    if Option.is_none decoder.background then decoder.background <- color
-  | Masc_tui_terminal_palette.Ansi index ->
-    if
-      index >= 0
-      && index < Masc_tui_terminal_palette.ansi_slot_count
-      && Option.is_none decoder.ansi.(index)
-    then decoder.ansi.(index) <- color
+let observe_palette decoder slot color =
+  if decoder.palette_requested then begin
+    (match slot with
+     | Masc_tui_terminal_palette.Foreground ->
+       if Option.is_none decoder.foreground then decoder.foreground <- color
+     | Masc_tui_terminal_palette.Background ->
+       if Option.is_none decoder.background then decoder.background <- color
+     | Masc_tui_terminal_palette.Ansi index ->
+       if
+         index >= 0
+         && index < Masc_tui_terminal_palette.ansi_slot_count
+         && Option.is_none decoder.ansi.(index)
+       then decoder.ansi.(index) <- color);
+    let palette = Masc_tui_terminal_palette.of_responses
+        ~foreground:decoder.foreground ~background:decoder.background ~ansi:decoder.ansi in
+    if palette <> decoder.observed.palette then
+      decoder.observed <- {decoder.observed with palette}
+  end
 ;;
+
+let observe_theme_mode decoder mode =
+  if decoder.observed.theme_mode <> Some mode then
+    decoder.observed <- {decoder.observed with theme_mode=Some mode}
+;;
+
+let observe_graphics decoder reply =
+  if Option.is_none decoder.observed.graphics then
+    decoder.observed <- {decoder.observed with graphics=Some reply}
+;;
+
+let observe_cell_pixels decoder ((width,height) as size) =
+  if width > 0 && height > 0 && Option.is_none decoder.observed.cell_pixels then
+    decoder.observed <- {decoder.observed with cell_pixels=Some size}
+;;
+
+let observation decoder = decoder.observed
 
 (* [ESC \[] is two bytes, and the paste matcher counts them before it starts
    comparing. A private-parameter reply puts [?] at exactly that point. *)
@@ -161,7 +180,7 @@ let finish_csi_window decoder =
     else None
   in
   (match size with
-   | Some size -> if Option.is_none decoder.cell_pixels then decoder.cell_pixels <- Some size
+   | Some size -> observe_cell_pixels decoder size
    | None ->
      (* PageDown, or a report this did not ask for. It was held while it might
         have been the reply, so it goes on whole rather than being dropped. *)
@@ -182,7 +201,7 @@ let finish_csi_private decoder =
     else None
   in
   (match mode with
-   | Some mode -> if Option.is_none decoder.theme_mode then decoder.theme_mode <- Some mode
+   | Some mode -> observe_theme_mode decoder mode
    | None ->
      (* Not the reply. It was held while it might have been, so it goes on
         whole rather than being dropped. *)
@@ -200,7 +219,7 @@ let finish_osc decoder terminator_bytes =
   in
   (match response with
    | Masc_tui_terminal_palette.Palette_response { slot; color }
-     when decoder.palette_requested -> record_palette decoder slot color
+     when decoder.palette_requested -> observe_palette decoder slot color
    | Masc_tui_terminal_palette.Palette_response _
    | Masc_tui_terminal_palette.Not_palette_response -> flush_pending decoder);
   Buffer.clear decoder.pending;
@@ -214,8 +233,7 @@ let finish_apc decoder =
     Masc_tui_graphics.parse_query_reply (String.sub sequence 3 body_length)
   in
   (match reply with
-   | Some reply ->
-     if Option.is_none decoder.graphics then decoder.graphics <- Some reply
+   | Some reply -> observe_graphics decoder reply
    | None -> flush_pending decoder);
   Buffer.clear decoder.pending;
   decoder.mode <- Normal
@@ -276,7 +294,7 @@ let rec feed decoder byte =
     else if
       matched = csi_introducer_length
       && Char.equal byte cell_size_report_code.[0]
-      && Option.is_none decoder.cell_pixels
+      && Option.is_none decoder.observed.cell_pixels
     then begin
       (* [ESC \[ 6] heads the cell-size reply and also PageDown. Held until
          the final byte tells them apart; once the size is known this stops
@@ -367,15 +385,13 @@ let rec feed decoder byte =
     else decoder.mode <- Apc_passthrough (byte = escape)
 ;;
 
-let theme_mode decoder = decoder.theme_mode
+let theme_mode decoder = decoder.observed.theme_mode
 
-let palette decoder =
-  Masc_tui_terminal_palette.of_responses ~foreground:decoder.foreground
-    ~background:decoder.background ~ansi:decoder.ansi
+let palette decoder = decoder.observed.palette
 ;;
 
 let complete decoder =
-  Option.is_some decoder.graphics
+  Option.is_some decoder.observed.graphics
   && ((not decoder.palette_requested)
       || (Option.is_some decoder.foreground
           && Option.is_some decoder.background))
@@ -405,16 +421,24 @@ let unread_replay decoder =
     (String.length replay - decoder.replay_position)
 ;;
 
-let snapshot decoder =
+let snapshot decoder : result =
   { palette = palette decoder
-  ; theme_mode = decoder.theme_mode
-  ; graphics = decoder.graphics
-  ; cell_pixels = decoder.cell_pixels
+  ; theme_mode = decoder.observed.theme_mode
+  ; graphics = decoder.observed.graphics
+  ; cell_pixels = decoder.observed.cell_pixels
   ; replay = unread_replay decoder
   }
 ;;
 
 let has_replay decoder = decoder.replay_position < Buffer.length decoder.replay
+
+type startup_status = Awaiting_replies | Input_ready | Replies_ready
+
+let startup_status decoder =
+  if has_replay decoder then Input_ready
+  else if complete decoder then Replies_ready
+  else Awaiting_replies
+;;
 
 let take_replay decoder =
   if not (has_replay decoder) then None

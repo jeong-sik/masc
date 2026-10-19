@@ -1030,3 +1030,22 @@ call a source-only change a measured improvement. For future Keeper execution
 changes, retain the same task/provider/Tool semantics and compare preparation
 time, model POST count, actual request bytes and final outcome separately from
 these TUI refresh observations.
+
+## Startup terminal input handoff
+
+The combined terminal probe hands its original decoder and unread input buffer
+to the input loop when decided user replay is available. Missing capability
+answers do not keep that replay inside the startup wait. The existing no-input
+capture deadline and byte cap remain; no second reader or timer is introduced.
+Partial replies and paste/UTF-8 bytes keep their original decoding state.
+
+The original reply owner remains after its byte filter completes. Late typed
+replies from the normal input decoder update the same immutable observation.
+Changed observations reach palette/theme, graphics, image geometry, portraits
+and MSX; score launch consults the current graphics and cell dimensions. Initial
+fallbacks, NO_COLOR and actual graphics refusal remain distinct from support.
+
+Handoff, a capability observation, UI application and actual paint/input response
+are separate boundaries. No startup speedup is measured by this source change.
+See the [startup source comparison](../audits/2026-10-19-tui-probe-input-handoff.md)
+for authored protocol cases and the Before/After evidence limits.

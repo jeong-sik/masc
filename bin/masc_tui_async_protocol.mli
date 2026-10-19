@@ -725,6 +725,11 @@ type 'a mailed = {
   message : 'a;
 }
 
+val ask_answer_completion_message :
+  ask_submission -> Ask_answer_completion.observation -> async_msg
+(** The outcome [collect_owned_results] mails for one finished Ask answer,
+    scoped to the workspace authority and reading that sent it. *)
+
 val collect_owned_results : state -> async_msg mailed list
 (** Capture one finite observation of the pending owners. Newly published
     results belong to a later round; original receipts remain request-owned. *)

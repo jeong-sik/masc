@@ -1128,7 +1128,7 @@ let render_tools (state : state) =
 
 
 let provider_history_lines ~cols (state : state) =
-  match state.provider_history with
+  match usage_history_reading state with
   | Provider_history_unread ->
       [ Printf.sprintf " Quota scope trend (%d UTC days) · not observed"
           state.provider_history_days ]
@@ -1209,16 +1209,18 @@ let provider_history_lines ~cols (state : state) =
       :: " ↓ below zero · ↑ above limit"
       :: (match trend.unreadable_reports with
           | 0 -> []
-          | count -> [Printf.sprintf "   %d stored reports could not be read; missing days stay absent" count])
+          | count -> [Printf.sprintf "   %d stored reports could not be read%s; missing days stay absent" count
+              (if Option.is_some state.usage_scope_id then " (whole history)" else "")])
       @ (match trend.rows with
-         | [] -> [ "   No reports recorded in this window" ]
+         | [] -> [if Option.is_some state.usage_scope_id then "   No reports for the selected account in this window"
+                  else "   No reports recorded in this window"]
          | rows -> arrange rows)
 
 let usage_lines ~cols (state : state) =
   let open Masc.Tui_decode_usage in
   let scopes =
     match Overview_providers.section
-            ~providers:state.overview_providers ~runtimes:state.overview_quota
+            ~providers:(usage_providers_reading state) ~runtimes:state.overview_quota
             ~account_emails:state.overview_account_emails
             ~now:(Unix.gettimeofday ()) ~width:(max 20 (cols - 4)) with
     | Some section -> section.title :: section.lines
@@ -1342,10 +1344,26 @@ let usage_lines ~cols (state : state) =
           |> List.map (fun text -> indent ^ text))
       lines
   in
+  let selection_lines = match state.usage_scope_id, state.usage_section with
+    | None, (Usage_plan | Usage_trend) -> []
+    | (None | Some _), Usage_keepers -> []
+    | Some scope_id, (Usage_plan | Usage_trend) ->
+        let accounts = match state.overview_providers with
+          | Providers_unread | Providers_failed _ -> []
+          | Providers_read reading -> reading.puws_accounts in
+        let account = List.find_opt (fun account -> String.equal account.pua_scope_id scope_id) accounts in
+        let label = Option.fold ~none:("scope " ^ scope_id)
+            ~some:Overview_providers.scope_name account in
+        let missing = match state.overview_providers, account with
+          | Providers_read _, None -> ["Account absent from the current inventory; selection retained."]
+          | Providers_read _, Some _ | (Providers_unread | Providers_failed _), _ -> [] in
+        Masc_tui_text_block.rows ~max_cells:(max 1 (cols - 6))
+          (String.concat "\n" (("Account · " ^ label ^ " · f:choose · a:all accounts") :: missing))
+        @ [""] in
   match state.usage_section with
   (* Plan cards already have a cell-sized border and wrapped contents. *)
-  | Usage_plan -> scopes
-  | Usage_trend -> wrap_evidence (provider_history_lines ~cols state)
+  | Usage_plan -> selection_lines @ scopes
+  | Usage_trend -> selection_lines @ wrap_evidence (provider_history_lines ~cols state)
   | Usage_keepers ->
       let currency = match Masc_tui_candle.summary_lines state.candle_observation with
         | [] -> []

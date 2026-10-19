@@ -45,7 +45,8 @@ description: "MASC TUI의 채팅·입력·로딩·진행 상태, 시작 키 인�
 
 ## Task·Goal 이력 조회
 
-- Goal timeline·Task history·Keeper Calls는 `launch_workspace_history_read`에서 원래
+- Goal timeline·Task history·Keeper Calls·저장된 브라우저 이력 목록은
+  `launch_workspace_history_read`에서 원래
   workspace identity를 캡처하고 공통 요청·취소 소유권을 쓴다. endpoint 사전 확인만으로
   뒤의 GET을 허가하지 않는다. 세 HTTP consumer 모두 공통 `get_json`을 통해 실제 GET에
   expected base/root를 붙이고 서버 영수증을 확인한다. raw `http_get`으로 우회하지 않는다.

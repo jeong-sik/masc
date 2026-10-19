@@ -5143,7 +5143,6 @@ let launch_lane_addons ?initial_detail state ~mailbox request =
   end
 
 let launch_browser_history state ~mailbox ~reload =
-  let enqueue_async = workspace_enqueue state in
   if server_authority_ready state then begin
   match state.browser_history with
   | None -> ()
@@ -5155,22 +5154,26 @@ let launch_browser_history state ~mailbox ~reload =
       let history = Browser_history.start_read ~reload history in
       state.browser_history <- Some history;
       let host = server_peer_host and port = state.port in
-      let fetch () =
-        if reload then Browser_history_list_loaded (generation,
-          Masc_tui_http.fetch_keeper_calls ~host ~port ~keeper_name:history.keeper_name ~limit:100)
-        else Browser_history_page_loaded (generation,
+      if reload then
+        launch_workspace_history_read state ~mailbox
+          ~deliver:(fun result -> Browser_history_list_loaded (generation, result))
+          (fun () -> Masc_tui_http.fetch_keeper_calls ~host ~port
+            ~keeper_name:history.keeper_name ~limit:100)
+      else begin
+        let enqueue_async = workspace_enqueue state in
+        let fetch () = Browser_history_page_loaded (generation,
           match Browser_history.selected history with
           | None -> Error "No retained observations in these 100 recent tool calls"
           | Some entry -> Masc_tui_http.fetch_browser_observation ~host ~port entry.artifact) in
-      let perform () =
-        try fetch () with
-        | Eio.Cancel.Cancelled _ as error -> raise error
-        | error -> if reload then Browser_history_list_loaded (generation,Error (Printexc.to_string error))
-                   else Browser_history_page_loaded (generation,Error (Printexc.to_string error)) in
-      (match Eio_context.get_switch_opt () with
-       | None -> state.browser_history <- Some {history with content=List_failed "Eio switch is unavailable"}
-       | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () ->
-           enqueue_async mailbox (perform ()); `Stop_daemon))
+        let perform () =
+          try fetch () with
+          | Eio.Cancel.Cancelled _ as error -> raise error
+          | error -> Browser_history_page_loaded (generation,Error (Printexc.to_string error)) in
+        (match Eio_context.get_switch_opt () with
+         | None -> state.browser_history <- Some {history with content=List_failed "Eio switch is unavailable"}
+         | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () ->
+             enqueue_async mailbox (perform ()); `Stop_daemon))
+      end
   end else begin
     (* Opening or changing history can own a loading state after the last
        identity failure already retired reads. Keep this unsent selection

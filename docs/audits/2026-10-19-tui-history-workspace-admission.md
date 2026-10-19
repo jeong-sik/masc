@@ -1,7 +1,8 @@
 # Bind detail-history reads through request admission and cache reuse
 
 Source comparison base: `fddf8855a201306cdf3b529dbe7112913628237e`
-(#43845). This unit covers Goal timeline, Task history and Keeper Calls reads.
+(#43845). This unit covers Goal timeline, Task history and Keeper Calls reads,
+including the retained-browser list that reuses the Keeper Calls consumer.
 It does not establish the cause of the reported live Loading screen or measure
 input, paint, preparation or useful-work latency.
 
@@ -9,7 +10,8 @@ input, paint, preparation or useful-work latency.
 
 Task/Goal history launchers already use workspace-owned request completion and
 an endpoint identity probe. Keeper Calls uses a raw daemon and workspace-wrapped
-completion. All three HTTP consumers still use raw `http_get`: their actual GET
+completion. Retained-browser list reload also uses that consumer from a raw
+daemon. All three HTTP consumers still use raw `http_get`: their actual GET
 does not carry the expected workspace pair or validate the server's admission
 receipt. A probe cannot bind a later GET when the same endpoint changes roots.
 The normal world collector already has this protocol through `get_json_decoded`.
@@ -19,6 +21,7 @@ The normal world collector already has this protocol through `get_json_decoded`.
 | Three detail-history GET consumers | Raw GET after caller-specific checks | Common JSON reader; expected base/root and server receipt |
 | Task/Goal dispatch | Common launcher with endpoint probe | Same owner plus original-identity binding around actual read |
 | Keeper Calls dispatch | Raw daemon with scoped completion | Common launcher, endpoint probe, cancellation registration and binding |
+| Retained-browser list reload | Keeper Calls consumer in another raw daemon | Same common history launcher and binding; original browser generation retained |
 | Parallel collectors | Existing world-collector fiber-local binding | Same shared implementation used by detail reads; no global mutable identity |
 | Conditional reuse | These three consumers do not use common ETag cache | Same cache as JSON reads, address includes expected roots; receipt required on 304 |
 | Failed/missing/duplicate/wrong receipt | Not examined by raw consumers | Refused before decoded body publication or cached-value reuse |
@@ -31,6 +34,9 @@ The three consumers retain their original query grammar, limits and typed
 history decoders. Goal and Calls errors retain source attribution. Common JSON
 parsing now uses the existing response-decode worker path; the callback still
 owns HTTP credentials, cache changes and applying the decoded observation.
+The four dispatch call sites use the bound helper. Opening an individual retained
+artifact still uses the existing exact-content reader; this unit does not change
+that separate non-JSON transport or claim workspace receipt coverage for it.
 
 The extracted module prepares the concrete path on the calling fiber, before
 the transport crosses an IO boundary. It rejects a changed endpoint and existing
@@ -45,11 +51,12 @@ continue to decide whether a returned result can update the screen.
 ## Source quantification and evidence
 
 Three detail-history consumers move from the raw path to the existing workspace
-admission/JSON/cache path. One raw daemon launcher moves to the existing common
-request lifecycle. This is a source inventory and protocol invariant, not a
+admission/JSON/cache path. Two raw daemon list-dispatch paths move to the existing
+common request lifecycle. This is a source inventory and protocol invariant, not a
 measured failure rate, HTTP reduction, Loading duration or throughput gain.
-Keeper Calls now performs the common preflight identity check; fewer HTTP calls
-are not promised. No timer, timeout, retry policy, cap or configuration knob is
+Keeper Calls and retained-browser list reload now perform the common preflight
+identity check; fewer HTTP calls are not promised. No timer, timeout, retry policy,
+cap or configuration knob is
 added. Server admission semantics and its existing wire receipt are reused.
 
 An **unexecuted** compound scenario in
@@ -67,7 +74,7 @@ Those frames are protocol input: the scenario does not run real HTTP, the
 production history route/store, the main-loop launcher or transport/CPU workers.
 Existing `test_http_server_eio` source separately covers server receipt emission
 through JSON/conditional responders; it is not executed or promoted to wire proof
-here. All three actual consumer/launcher connections are inspected in source.
+here. All three consumers and four actual dispatch connections are inspected in source.
 
 Only OCaml parsing, source/interface inspection, diff and changelog checks are
 performed. Typing, executed scenarios, CI, installation and visible UI proof

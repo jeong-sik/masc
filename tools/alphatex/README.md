@@ -32,6 +32,11 @@ remains available on other terminals. In the score view:
   pauses/resumes playback. `i` stops the current phrase and opens the picker.
 - Select a VST3 candidate to verify it is an instrument, then choose its default
   sound or a saved `.vstpreset`. `/` searches, Enter selects, Escape cancels.
+  The second line always names the live choice (`Retrologue · Warm Pad`, or
+  `Retrologue · default state`); the picker marks that row with `●`, so the
+  cursor (`›`) and the sounding instrument never read alike. The footer lists
+  only the keys the open menu answers: `Enter:play` and `e`/`p` appear in the
+  preset menu, `Enter:select` in the plug-in list.
   In the preset menu, `e` opens the instrument's native editor and sound browser;
   close that window to save the complete sound. `p` accepts a preset file path.
 - `l` toggles repeat, using the same rendered audio for each repetition.

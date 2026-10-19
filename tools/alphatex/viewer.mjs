@@ -8,7 +8,7 @@ import { spawn } from 'node:child_process'
 import { emitKeypressEvents } from 'node:readline'
 import { safeText, transmit, viewport, place, retire } from './terminal.mjs'
 import { errorDetail } from './diagnostics.mjs'
-import { InstrumentPicker } from './instruments.mjs'
+import { InstrumentPicker, selectionLabel, pickerFooter } from './instruments.mjs'
 import { nativeJob, defaultStateDirectory, snapshotWriter, retainRender } from './vst.mjs'
 
 const { values, positionals } = parseArgs({
@@ -131,7 +131,8 @@ async function viewScores(sources, initialIndex) {
   const picker = new InstrumentPicker({ directory: stateDirectory, notify: () => redraw({ imageChanged: !picker.view }),
     failed: error => { status = `VST: ${error.message}`; redraw() },
     selected: selection => { instrument = selection; synthesize() },
-    soundfont: () => { instrument = null; synthesize() } })
+    soundfont: () => { instrument = null; synthesize() },
+    active: () => instrument })
   const write = bytes => { if (!closed && !suspended) process.stdout.write(bytes) }
   const tracks = () => selectedTrack < 0 ? undefined : [selectedTrack]
   let finish
@@ -173,7 +174,7 @@ async function viewScores(sources, initialIndex) {
     output += `\x1b[1;1H${fit(`alphaTex · ${document?.title || 'Score'} · score ${index + 1}/${sources.length} · system ${(document?.page ?? 0) + 1}/${document?.pageCount ?? 1} · ${Math.round(scale * 100)}%`)}`
     const track = selectedTrack < 0 ? 'all tracks' : document?.tracks.find(t => t.index === selectedTrack)?.name
     const time = audioState === 'playing' ? elapsed + Date.now() - playingSince : elapsed
-    output += `\x1b[2;1H${fit(`${track ?? ''} · ${instrument?.name ?? 'SoundFont'} · ${audioState}${repeating ? ' · repeat' : ''} ${Math.floor(time / 1000)} / ${Math.floor(duration / 1000)}s · ${status}`)}`
+    output += `\x1b[2;1H${fit(`${track ?? ''} · ${selectionLabel(instrument)} · ${audioState}${repeating ? ' · repeat' : ''} ${Math.floor(time / 1000)} / ${Math.floor(duration / 1000)}s · ${status}`)}`
     if (picker.view) {
       output += retire(tmux)
       const menu = picker.view
@@ -184,7 +185,9 @@ async function viewScores(sources, initialIndex) {
         const available = Math.max(1, rows - 9)
         const top = Math.max(0, menu.cursor - available + 1)
         items.slice(top, top + available).forEach((item, offset) => {
-          output += `\x1b[${offset + 6};2H${fit(`${top + offset === menu.cursor ? '› ' : '  '}${item.name}`)}`
+          const cursor = top + offset === menu.cursor ? '›' : ' '
+          const active = picker.isActive(item) ? '●' : ' '
+          output += `\x1b[${offset + 6};2H${fit(`${cursor}${active} ${item.name}`)}`
         })
         output += `\x1b[${rows - 2};2H${fit(`Search: ${menu.query}${menu.searching ? '▌' : ''}`)}`
       }
@@ -205,7 +208,7 @@ async function viewScores(sources, initialIndex) {
       output += `\x1b[3;2H${place(view, tmux)}`
     }
     output += `\x1b[${rows};1H${fit(picker.view
-      ? '↑↓/j k:choose  /:search  Enter:select/play  e:native sound browser  p:preset file  Esc:cancel  s:stop'
+      ? pickerFooter(picker.view)
       : '↑↓/j k:scroll  [ ]:system  +/-:zoom  t:tracks  ←→:score  v:source  Space:choose/play/pause  i:instrument  l:repeat  r:recording  s:stop  q:back')}`
     write(output)
   }

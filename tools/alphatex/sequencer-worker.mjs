@@ -11,6 +11,12 @@ parentPort.on('message', async job => {
     if (job.options.format === 'arrangement') {
       result = arrangementFromPhrase(job.project)
       if (cancelled()) throw new Error('Arrangement preparation cancelled')
+    } else if (job.options.format === 'vst-midi') {
+      const { projectVstMidi } = await import('./sequencer-vst.mjs')
+      const midi = projectVstMidi(job.project, job.options)
+      if (cancelled()) throw new Error('VST MIDI preparation cancelled')
+      writeFileSync(job.path, midi.bytes, { flag: 'wx', mode: 0o600 })
+      result = { path: job.path, duration: midi.duration, format: 'vst-midi' }
     } else if (job.options.format === 'midi') {
       const timeline = job.project.kind === 'midi-source' ? sourceMidiTimeline(job.project, job.options) : projectMidiTimeline(job.project, job.options)
       if (cancelled()) throw new Error('MIDI preparation cancelled')

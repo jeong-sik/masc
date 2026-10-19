@@ -163,7 +163,7 @@ type fixture_step =
   | Close_transport
 
 let fixture_script ?system_marker ?prompt_marker ?(remove_after_auth = false) ?(forbid_mcp = false)
-    ?(exit_before_turn_admitted = false)
+    ?(exit_before_turn_admitted = false) ?(block_user_write = false)
     ?(auth_body = auth_subscription) ?(auth_exit = 0) ?auth_stderr ?auth_first_body
     lines =
   let path = Filename.temp_file "masc-keeper-claude-code-" ".sh" in
@@ -217,6 +217,10 @@ let fixture_script ?system_marker ?prompt_marker ?(remove_after_auth = false) ?(
   output_string output "[ -n \"$request_id\" ] || exit 95\n";
   output_string output
     "printf '{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"%s\",\"response\":{}}}\\n' \"$request_id\"\n";
+  if block_user_write then
+    (* Consume a real byte, then stop reading before the complete user line.
+       The host's write deadline, rather than a provider response, ends it. *)
+    output_string output "dd bs=1 count=1 >/dev/null 2>/dev/null\nexec sleep 30\n";
   output_string output "IFS= read -r user_message\n";
   Option.iter
     (fun marker ->
@@ -242,10 +246,10 @@ let fixture_script ?system_marker ?prompt_marker ?(remove_after_auth = false) ?(
   path
 ;;
 
-let with_fixture ?system_marker ?prompt_marker ?remove_after_auth ?forbid_mcp ?exit_before_turn_admitted ?auth_body ?auth_exit
+let with_fixture ?system_marker ?prompt_marker ?remove_after_auth ?forbid_mcp ?exit_before_turn_admitted ?block_user_write ?auth_body ?auth_exit
     ?auth_stderr ?auth_first_body lines f =
   let path =
-    fixture_script ?system_marker ?prompt_marker ?remove_after_auth ?forbid_mcp ?exit_before_turn_admitted ?auth_body ?auth_exit
+    fixture_script ?system_marker ?prompt_marker ?remove_after_auth ?forbid_mcp ?exit_before_turn_admitted ?block_user_write ?auth_body ?auth_exit
       ?auth_stderr ?auth_first_body lines
   in
   Fun.protect
@@ -3039,6 +3043,7 @@ let test_spawn_failure_fences_claim () =
 ;;
 
 let run_direct_attempt
+      ?admission_timeout_s
       ?on_memory_capacity_refusal
       ?required_native_posture ?on_native_task_observation ?on_child_content_observation ?on_event
       ?hooks
@@ -3076,6 +3081,10 @@ let run_direct_attempt
                         } ->
                       config
                     | Some _ | None -> fail "Claude runtime fixture did not resolve"
+                  in
+                  let config = match admission_timeout_s with
+                    | None -> config
+                    | Some timeout_s -> { config with Runtime_execution.timeout_s }
                   in
                   Keeper_claude_code_runtime.run
                     ?on_memory_capacity_refusal
@@ -5326,6 +5335,24 @@ let test_a_closed_client_connection_is_typed () =
       (Agent_core.Error.to_string other)
 ;;
 
+(* A real partial user-message write must retain uncertainty on timeout. *)
+let test_incomplete_user_write_timeout_fences_retry () =
+  let base_path = temp_workspace () in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    with_fixture ~block_user_write:true [] (fun cli_path ->
+      let attempt = run_direct_attempt ~admission_timeout_s:2.0
+          ~base_path ~cli_path ~goal:(String.make (512 * 1024) 'x') ~tools:[] () in
+      (match attempt.result with
+       | Error (Agent_core.Error.Api (Llm_provider.Retry.Timeout _)) -> ()
+       | Error error -> fail (Agent_core.Error.to_string error)
+       | Ok _ -> fail "incomplete user-message write unexpectedly completed");
+      check string "unknown delivery is recorded without native task observers"
+        "observation_unavailable"
+        (Keeper_provider_attempt_effect.to_string attempt.effect_disposition);
+      check bool "the driver's effect admission forbids candidate rotation" false
+        (Keeper_provider_attempt_effect.allows_same_turn_retry attempt.effect_disposition)))
+;;
+
 (* #42212: when a Claude Code child exits before the turn prompt is sent
    ([turn_admitted = false]), no turn was submitted, so [effect_disposition]
    stays [No_effect_observed] and the lane walk rotates to the next candidate.
@@ -6390,6 +6417,8 @@ let () =
             "a closed client connection is typed"
             `Quick
             test_a_closed_client_connection_is_typed
+        ; test_case "incomplete user write timeout fences retry" `Quick
+            test_incomplete_user_write_timeout_fences_retry
         ; test_case
             "a process exit before turn admission rotates to the next lane candidate"
             `Quick

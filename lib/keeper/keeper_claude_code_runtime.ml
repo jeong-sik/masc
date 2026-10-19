@@ -1270,8 +1270,22 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
       let task_binding = match on_native_task_observation, on_child_content_observation with
         | None, None -> None
         | Some _, _ | _, Some _ -> Some (Keeper_claude_task_binding.create ()) in
-      let on_input_observation = Option.map
-          Keeper_claude_task_binding.observe_input task_binding in
+      let on_input_observation
+          (observation : Runtime_claude_input_attribution.observation) =
+        (* An interrupted user-message write has unknown delivery even when
+           its timeout escapes before [on_prompt_sent]. This safety evidence
+           is needed even when no native task/child observer is installed. *)
+        (match observation.phase with
+         | Runtime_claude_input_attribution.Write_unknown ->
+           note_transport_uncertainty effect_disposition
+         | Runtime_claude_input_attribution.Prepared
+         | Runtime_claude_input_attribution.Written
+         | Runtime_claude_input_attribution.Consumed
+         | Runtime_claude_input_attribution.Settled _ -> ());
+        Option.iter
+          (fun binding -> Keeper_claude_task_binding.observe_input binding observation)
+          task_binding
+      in
       let on_bound_task = match task_binding, on_native_task_observation with
         | Some binding, Some observe -> Some (fun observation ->
             match Keeper_claude_task_binding.bind_task binding observation with
@@ -1340,7 +1354,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
                    ~turn_id
                    ~turn_count
                    ~updated_at:(Time_compat.now ())))
-             ?on_stream_event ?on_input_observation
+             ?on_stream_event ~on_input_observation
              client_config
              ~prompt
              ~images

@@ -10,7 +10,7 @@ import { Note } from 'tonal'
 import { newEditor, editorCommand, editorAction, selectedNote, editorView, editorAxis, editorHarmony } from './sequencer-editor.mjs'
 import { loadProject, saveProject, projectMidi } from './sequencer-files.mjs'
 import { sourceTickAtSeconds, sourceSecondsAtTick } from './midi-source-playback.mjs'
-import { sourceExpressions, selectedExpression } from './midi-source-editor.mjs'
+import { sourceExpressions, selectedExpression, sourceTempos, selectedTempo } from './midi-source-editor.mjs'
 import { safeText } from './terminal.mjs'
 import { openPlayback } from './playback.mjs'
 import { InstrumentPicker } from './instruments.mjs'
@@ -22,6 +22,7 @@ const help = [
   ':cc CTRL VALUE [AT] :bend VALUE [AT] :program VALUE [AT] :pressure VALUE [AT] :poly-pressure KEY VALUE [AT]',
   ':event ID; :event-value VALUE; :event-move AT; :event-set KIND VALUES; :event-channel CH; :event-remove',
   ':event-before first-note|EVENT_ID orders this expression at the same tick; :event-order-reset restores natural order',
+  'Source :tempos lists tempo events; :tempo BPM [AT]; :tempo-event ID; :tempo-value BPM; :tempo-move AT; :tempo-remove',
   ':arrange snapshots this phrase into backing; q returns to this draft',
   'Source seek/resume restores channel state; unknown initial or opaque device state is an error.',
   'Arrow keys: time/pitch; Shift+arrows: move note; Enter/x: insert/remove note',
@@ -144,6 +145,16 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       const start = Math.max(0, picker.view.cursor - height + 1)
       for (let i = start; i < Math.min(items.length, start + height); i++) lines.push(`${i === picker.view.cursor ? '›' : ' '} ${items[i].name}`)
     } else if (showHelp) lines.push(...help)
+    else if (editor.project.kind === 'midi-source' && editor.eventView === 'tempo') {
+      const events = sourceTempos(editor), capacity = Math.max(1, rows - 9)
+      const selected = events.findIndex(event => event.id === editor.selectedTempoID)
+      const first = Math.max(0, selected - capacity + 1)
+      lines.push('Tempo map · Up/Down selects · Shift+Left/Right moves · Enter edits BPM · :tempos returns to notes')
+      for (const event of events.slice(first, first + capacity)) lines.push(
+        `${event.id === editor.selectedTempoID ? '>' : ' '} ${event.id} · track ${event.track + 1} · ${event.tick / per} ${axis.label} · ${event.value} BPM · ${event.micros} µs/quarter`)
+      if (!events.length) lines.push('No explicit tempo events. :tempo BPM AT inserts one; source default is 120 BPM.')
+      if (editor.info.timing.kind === 'smpte') lines.push('SMPTE frame timing is independent of this tempo metadata.')
+    }
     else if (editor.project.kind === 'midi-source' && editor.eventView) {
       const events = sourceExpressions(editor), capacity = Math.max(1, rows - 9)
       const selected = events.findIndex(event => event.id === editor.selectedExpressionID)
@@ -390,6 +401,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     task = task.then(async () => {
       // Drain admitted editor decisions even after input admission closes.
       const original = editor.project
+      const tempoView = editor.eventView === 'tempo'
       switch (key.name) {
         case 'space': play(); break
         case 'i': if (accepting && !suspended && !childTask) { stop(); picker.open() }; break
@@ -399,24 +411,24 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
         case 'tab': editor = editorAction(editor, { kind: 'track' }); break
         case 'return':
           if (editor.eventView) {
-            const event = selectedExpression(editor)
-            if (!event) throw new Error('Select an expression event first')
-            prompt = 'event-value ' + event.value
+            const event = tempoView ? selectedTempo(editor) : selectedExpression(editor)
+            if (!event) throw new Error('Select an event first')
+            prompt = (tempoView ? 'tempo-value ' : 'event-value ') + event.value
           } else editor = editorAction(editor, { kind: 'toggle-note' })
           break
-        case 'x': editor = editorAction(editor, { kind: editor.eventView ? 'expression-remove' : 'toggle-note' }); break
-        case 'delete': case 'backspace': editor = editorAction(editor, { kind: editor.eventView ? 'expression-remove' : 'remove' }); break
+        case 'x': editor = editorAction(editor, { kind: editor.eventView ? tempoView ? 'tempo-remove' : 'expression-remove' : 'toggle-note' }); break
+        case 'delete': case 'backspace': editor = editorAction(editor, { kind: editor.eventView ? tempoView ? 'tempo-remove' : 'expression-remove' : 'remove' }); break
         case 'u': editor = editorAction(editor, { kind: 'undo' }); break
         case 'y': editor = editorAction(editor, { kind: 'redo' }); break
         case 'm': editor = editorAction(editor, { kind: 'mute' }); break
         case 'o': editor = editorAction(editor, { kind: 'solo' }); break
         case 'g': editor = editorAction(editor, { kind: 'grid' }); break
-        case 'left': case 'right': editor = editorAction(editor, { kind: key.shift ? editor.eventView ? 'expression-move' : 'move-note' : 'move', ticks: editor.step * (key.name === 'left' ? -1 : 1) }); break
-        case 'up': case 'down': editor = editorAction(editor, editor.eventView ? { kind: 'expression-next', direction: key.name === 'down' ? 1 : -1 }
+        case 'left': case 'right': editor = editorAction(editor, { kind: key.shift ? editor.eventView ? tempoView ? 'tempo-move' : 'expression-move' : 'move-note' : 'move', ticks: editor.step * (key.name === 'left' ? -1 : 1) }); break
+        case 'up': case 'down': editor = editorAction(editor, editor.eventView ? { kind: tempoView ? 'tempo-next' : 'expression-next', direction: key.name === 'down' ? 1 : -1 }
           : { kind: key.shift ? 'move-note' : 'move', pitches: key.name === 'up' ? 1 : -1 }); break
         default:
           if (editor.eventView) {
-            if (['+', '=', '-'].includes(text)) editor = editorAction(editor, { kind: 'expression-value', delta: text === '-' ? -1 : 1 })
+            if (['+', '=', '-'].includes(text)) editor = editorAction(editor, { kind: tempoView ? 'tempo-value' : 'expression-value', delta: text === '-' ? -1 : 1 })
           } else if (text === '[' || text === ']') editor = editorAction(editor, { kind: 'duration', value: (selectedNote(editor)?.duration ?? editor.duration) * (text === '[' ? 0.5 : 2) })
           else if (['+', '=', '-'].includes(text)) editor = editorAction(editor, { kind: 'velocity', value: (selectedNote(editor)?.velocity ?? editor.velocity) + (text === '-' ? -1 : 1) })
       }

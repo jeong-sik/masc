@@ -8,7 +8,7 @@ import { constants } from 'node:fs'
 import { arrangementRoute, selectArrangementRoute } from '../arrangement-playback.mjs'
 import { arrangementFromPhrase } from '../phrase-arrangement.mjs'
 import * as editor from '../sequencer-editor.mjs'
-import { sourceExpressions, selectedExpression } from '../midi-source-editor.mjs'
+import { sourceExpressions, selectedExpression, sourceTempos, selectedTempo } from '../midi-source-editor.mjs'
 import { importMidiSource, midiSourcePattern } from '../midi-source.mjs'
 import { harmonyAt, PPQ } from '../sequencer-project.mjs'
 
@@ -48,7 +48,7 @@ async function controller(options = {}) {
     copyFile: async (from, to) => { observed.copies.push([from, to]) },
     arrangementRoute, selectArrangementRoute, dirname, constants, join, resolve, tmpdir: () => '/synthetic', randomUUID, emitKeypressEvents() {},
     openPlayback(value) { observed.players++; if (options.playback) return options.playback(value); throw new Error('Unexpected playback') }, Worker,
-    Note: { fromMidi: String }, ...editor, harmonyAt, PPQ, sourceExpressions, selectedExpression,
+    Note: { fromMidi: String }, ...editor, harmonyAt, PPQ, sourceExpressions, selectedExpression, sourceTempos, selectedTempo,
     loadProject: async () => { throw new Error('Unexpected load') },
     saveProject: async (path, project) => { observed.saved.push(structuredClone(project)); return 'revision' },
     projectMidi() { throw new Error('Unexpected MIDI export') }, safeText: String,
@@ -350,4 +350,19 @@ test('an admitted event-before command drains into the saved source on close wit
  assert.deepEqual(performance.events.slice(0,2).map(event=>event.bytes),[[0xb0,1,0],[0x90,60,96]])
  assert.deepEqual(performance.notes,midiSourcePattern(source).notes)
  assert.equal(saved.original,source.original);assert.equal(view.process.stdin.isRaw,false)
+})
+
+test('tempo keyboard decisions and an admitted tempo edit drain into close without changing source note ticks',async()=>{
+ const bytes=Buffer.from('4d546864000000060000000101e04d54726b0000000000ff510307a12000903c608360803c2d00ff2f00','hex')
+ bytes.writeUInt32BE(bytes.length-22,18);const source=importMidiSource(bytes),view=await controller({initialDocument:source})
+ try{
+  view.command('tempos');await flush();view.key(undefined,'+');view.key('s');await flush()
+  assert.ok(midiSourcePattern(view.observed.saved.at(-1)).seconds<.5)
+  view.key('return');await flush();for(const char of String(sourceTempos(editor.newEditor(view.observed.saved.at(-1)))[0].value))view.key('backspace');view.key(undefined,'60');view.key('return');await flush()
+  view.command('tempo 120 0.5');view.key('q');await view.done
+  const saved=view.observed.saved.at(-1),after=midiSourcePattern(saved)
+  assert.equal(after.seconds,.75);assert.equal(saved.original,source.original)
+  assert.deepEqual(after.notes.map(n=>[n.id,n.off,n.start,n.duration]),midiSourcePattern(source).notes.map(n=>[n.id,n.off,n.start,n.duration]))
+ }finally{view.key('q');await view.done}
+ assert.equal(view.process.stdin.isRaw,false)
 })

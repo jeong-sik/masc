@@ -2,7 +2,7 @@
 
 A MIDI file is a source asset, not a conversion into the phrase document's reduced
 note schema. `midi-source.mjs` keeps its original bytes as canonical base64 plus
-source-event edits and inserted channel messages. Source IDs address a track and
+source-event edits, inserted channel messages and Set Tempo events. Source IDs address a track and
 its original event index; opaque chunks and events retain their provenance. A JSON
 save/reopen preserves this document. Persist the source asset, not a derived piano
 roll or floating-point schedule.
@@ -48,11 +48,20 @@ than making an imported performance invalid. `midiSourceHarmony` returns Tonal c
 note-key intervals at a second position, with optional channel/pattern selection.
 It does not extend key intervals through sustain/sostenuto or infer pedal voices.
 
-This module supplies the source-asset core for import/edit/export and arrangement
-integration. Its tests do not establish a delivered import screen or full MIDI
-support. The source editor connects note experiments and explicit-output MIDI
-audition with source-state-aware pause/resume and seek. Event/expression editing, clip arrangement, overdub and UMP/MIDI 2.0
-source assets require further integration.
+`editMidiSourceTempos` inserts, changes, retimes or removes Set Tempo (FF51)
+events in the selected performance. Original event IDs and tracks remain stable;
+new events use track zero for SMF0/1 or the selected SMF2 pattern. The existing
+overlay, export and expression-order membership code carries these edits.
+Only this supported metadata type is editable; port, end markers and opaque
+metadata remain preserved source data. Positive BPM is rounded to SMF's positive
+24-bit microsecond representation. PPQ seconds follow the edited map, while
+SMPTE seconds derive directly from absolute frame ticks, independently of tempo
+event placement. Notes retain their ticks, pairing and release data.
+
+The source editor connects note, expression and tempo experiments to explicit-output
+audition, source-state-aware pause/resume/seek and immutable arrangement variants.
+Its tests do not establish full MIDI or physical-device support. General metadata,
+source-loop state, overdub and MIDI 2.0 conversion remain separate work.
 See [the sequencer design](../../docs/design/tui/MUSIC-SEQUENCER.md).
 
 References: [MIDI Association SMF reference index](https://midi.org/standard-midi-files-specification),

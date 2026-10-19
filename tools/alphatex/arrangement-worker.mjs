@@ -1,3 +1,4 @@
+import { phraseDocument, importPhraseDocument } from './phrase-arrangement.mjs'
 import { parentPort } from 'node:worker_threads'
 import { dirname } from 'node:path'
 import { importArrangementWave, importArrangementMidi, importArrangementCapture, prepareArrangementCapture, saveArrangement, materializeArrangementAssets } from './arrangement-files.mjs'
@@ -20,6 +21,8 @@ parentPort.on('message', async job => {
   try {
     let result
     switch (job.kind) {
+      case 'prepare-phrase': result = phraseDocument(job.project, job.asset); break
+      case 'import-phrase': result = importPhraseDocument(job.project, job.document); break
       case 'inspect-calibration': result = await inspectCalibration(job.path, { signal }); break
       case 'analyze-calibration': result = await analyzeCalibration({ ...job, signal }); break
       case 'attach-recording': {

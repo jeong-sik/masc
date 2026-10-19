@@ -73,3 +73,8 @@ Goal, workspace, history payloads, failures and refresh order; keep cancelled,
 interrupted and unfinished reads. Record actual issued/settled/applied and
 visible paint clocks separately from useful task effects. No runtime speedup
 or verified screen is claimed by this source layer.
+
+The subsequent [retry observation layer](2026-10-19-tui-retry-failure-observation.md)
+extends the no-value explicit-retry policy above: it retains the known failure
+while exposing the new pending owner. This document's source comparison remains
+bound to its recorded baseline and layer.

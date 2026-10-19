@@ -24,6 +24,9 @@ type 'k request =
 type ('k, 'a) status =
   | Status_absent
   | Status_loading of 'k request
+  | Status_retrying of 'k request * string
+      (** Explicit retry with no successful value. The known failure remains
+          observed while this new request owns settlement. *)
   | Status_ready of 'k request * 'a
   | Status_refreshing of 'k request * 'a * string option
       (** A revalidation of what is already on screen: the request is in
@@ -50,7 +53,7 @@ type 'a view =
   | Ready of 'a
   | Stale of 'a * string
       (** The last good value, and why the refresh after it failed. *)
-  | Failed of string  (** Failed with nothing read before it. *)
+  | Failed of string  (** Known failure without a value; a retry may be pending. *)
 
 let value = function
   | Ready value | Stale (value, _) -> Some value
@@ -71,13 +74,13 @@ let same_request ~equal left right =
 
 let is_current ~equal state request =
   match state.status with
-  | Status_loading current -> same_request ~equal current request
+  | Status_loading current | Status_retrying (current, _) -> same_request ~equal current request
   | Status_refreshing (current, _, _) -> same_request ~equal current request
   | Status_absent | Status_ready _ | Status_stale _ | Status_failed _ -> false
 ;;
 
 let in_flight state = match state.status with
-  | Status_loading _ | Status_refreshing _ -> true
+  | Status_loading _ | Status_retrying _ | Status_refreshing _ -> true
   | Status_absent | Status_ready _ | Status_stale _ | Status_failed _ -> false
 
 type intent = Poll | Refresh
@@ -90,16 +93,20 @@ let start_with intent ~equal state ~key =
   in
   match intent, state.status with
   | Poll, Status_loading request when equal request.key key -> Already_loading
+  | Poll, Status_retrying (request, _) when equal request.key key -> Already_loading
   | Poll, Status_refreshing (request, _, _) when equal request.key key -> Already_loading
   | Refresh, Status_refreshing (current, value, error) when equal current.key key ->
     fresh (fun request -> Status_refreshing (request, value, error))
+  | Refresh, (Status_failed (current, error) | Status_retrying (current, error))
+      when equal current.key key ->
+    fresh (fun request -> Status_retrying (request, error))
   | _, Status_ready (current, value) when equal current.key key ->
     (* Revalidating what is already shown: keep the last good value on screen
        under a fresh generation. *)
     fresh (fun request -> Status_refreshing (request, value, None))
   | _, Status_stale (current, value, error) when equal current.key key ->
     fresh (fun request -> Status_refreshing (request, value, Some error))
-  | _, (Status_absent | Status_loading _ | Status_ready _ | Status_refreshing _
+  | _, (Status_absent | Status_loading _ | Status_retrying _ | Status_ready _ | Status_refreshing _
        | Status_stale _ | Status_failed _) -> fresh (fun request -> Status_loading request)
 ;;
 
@@ -112,6 +119,7 @@ let suspend state =
   let status = match state.status with
     | Status_loading request ->
         Status_failed (request, "Reading suspended; waiting for workspace identity.")
+    | Status_retrying (request, error) -> Status_failed (request, error)
     | Status_refreshing (request, value, _) ->
         Status_stale (request, value, "Reading suspended; waiting for workspace identity.")
     | (Status_absent | Status_ready _ | Status_stale _ | Status_failed _) as status -> status
@@ -129,7 +137,7 @@ let complete ~equal state request result =
       match result, state.status with
       | Ok value, _ -> Status_ready (request, value)
       | Error error, Status_refreshing (_, value, _) -> Status_stale (request, value, error)
-      | Error error, (Status_absent | Status_loading _ | Status_ready _ | Status_stale _ | Status_failed _)
+      | Error error, (Status_absent | Status_loading _ | Status_retrying _ | Status_ready _ | Status_stale _ | Status_failed _)
         -> Status_failed (request, error)
     in
     { state with status })
@@ -148,7 +156,7 @@ let current state =
   | Status_refreshing (request, value, None) -> about request (Ready value)
   | Status_refreshing (request, value, Some error) | Status_stale (request, value, error) ->
     about request (Stale (value, error))
-  | Status_failed (request, error) -> about request (Failed error)
+  | Status_retrying (request, error) | Status_failed (request, error) -> about request (Failed error)
 ;;
 
 let current_key state = Option.map fst (current state)
@@ -157,6 +165,7 @@ let current_request state =
   match state.status with
   | Status_absent -> None
   | Status_loading request | Status_ready (request, _)
+  | Status_retrying (request, _)
   | Status_refreshing (request, _, _) | Status_stale (request, _, _)
   | Status_failed (request, _) -> Some request
 ;;
@@ -172,9 +181,10 @@ let view_for ~equal state ~key =
     Ready value
   | Status_refreshing (request, value, Some error) when matches request -> Stale (value, error)
   | Status_stale (request, value, error) when matches request -> Stale (value, error)
-  | Status_failed (request, error) when matches request -> Failed error
+  | Status_retrying (request, error) | Status_failed (request, error) when matches request -> Failed error
   | Status_absent
   | Status_loading _
+  | Status_retrying _
   | Status_ready _
   | Status_refreshing _
   | Status_stale _

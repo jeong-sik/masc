@@ -50,6 +50,10 @@ description: "MASC TUI의 채팅·입력·로딩·진행 상태, 시작 키 인�
   명시 재조회는 `Masc_tui_fetched.refresh`로 이전 요청을 대체하고, 일반 `start`의 공유 정책은
   유지한다. 재조회 중 마지막 정상 관측과 조회 진행을 구분해 표시하고, 재조회 실패/재시도는
   마지막 관측과 실패 이유를 함께 남긴다. 최초 값 없는 실패는 빈 이력이 아니다.
+  값 없는 실패의 명시 재시도도 알려진 원인을 유지한다. 이때 view는 `Failed`이며
+  `in_flight`가 새 요청의 대기를 구분한다. 재시도만으로 복구됐다고 표시하거나 빈 값을 만들지
+  않는다. suspension은 재시도 소유자만 철회하고 원인은 보존한다. 상세 비교는
+  `docs/audits/2026-10-19-tui-retry-failure-observation.md`를 따른다.
 - workspace 철회 시 `withdraw_detail_histories`로 두 값과 대기 소유자를 함께 철회한다.
   재진입/다른 workspace의 같은 ID가 이전 request를 빌리지 않게 generation을 초기화하지 않는다.
   조회 중/조회 완료는 Task 진행·효과·Goal 성공이 아니다. 상태/원래 이벤트 경계를 검사하며

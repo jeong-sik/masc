@@ -663,9 +663,10 @@ chosen range, including a partial bar. Pause/resume retains the remaining intro;
 seeking goes directly to the backing, and seeking the range end wraps to its
 start without another count-in. Stop/new play starts a fresh intro.
 `:record` also works while looping. `:record-stop` retains every pass on a
-separate take lane at its original loop position; only the last pass is unmuted.
-The complete captured WAV/UMP is retained once. Choose a different take with
-ordinary lane mute/solo controls. Count-in material is excluded from the placed
+separate take lane at its original loop position; only the last pass is selected.
+The complete captured WAV/UMP is retained once. `:takes` lists the available passes;
+`:take N|next|previous` switches their audio and MIDI together. Lane mute/solo
+remain independent. Count-in material is excluded from the placed
 passes, and audio correction is applied before determining their cycle cuts.
 
 For example, `:loop 4 12` repeats that passage continuously on the selected audio

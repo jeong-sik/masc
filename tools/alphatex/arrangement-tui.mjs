@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto'
 import { Worker } from 'node:worker_threads'
 import { emitKeypressEvents } from 'node:readline'
 import { arrangementRoute, selectArrangementRoute, arrangementPlaybackRequest } from './arrangement-playback.mjs'
-import { arrangementEditor, arrangementAction, arrangementCommand, arrangementImported, arrangementCalibrated, arrangementRecordingCorrection, selectedRegion } from './arrangement-editor.mjs'
+import { arrangementEditor, arrangementAction, arrangementCommand, arrangementImported, arrangementCalibrated, arrangementRecordingCorrection, selectedRegion, arrangementTakes } from './arrangement-editor.mjs'
 import { loadArrangement, verifyArrangementAssets, saveArrangement } from './arrangement-files.mjs'
 import { saveProject } from './sequencer-files.mjs'
 import { safeText } from './terminal.mjs'
@@ -26,6 +26,7 @@ const help = [
   ':record-calibration DIRECTORY   inspect next-take measurement; :record-correction pulse N | manual MS IN OUT | none',
   ':calibration-open DIRECTORY   inspect saved samples/clocks; :calibration-apply PULSE_NUMBER adopts one displayed residual',
   ':capture-channel IN_CH OUT_CH   route one captured audio channel; :capture-channel all restores every source channel',
+  ':takes [ASSET] lists loop takes; :take N|next|previous [ASSET] selects paired audio/MIDI; Space auditions',
   ':split-take   separate selected captured audio/MIDI; :capture-offset MS (positive advances, negative delays)',
   ':calibrate OUTPUT_UID IN_CH OUT_CH MAX_LAG_MS  audio loopback candidates; Esc/q cancels and returns',
   ':import-wave /path/take.wav     :import-midi /path/song.mid',
@@ -59,7 +60,7 @@ const help = [
   ':monitor AUDIO_OUTPUT_UID enables input monitoring; :monitor off disables it.',
   ':midi-monitor SOURCE_UID DEST_UID [GROUP CHANNEL ...] (1–16); omit pairs for all messages.',
   'Repeat for more routes; :midi-monitor remove SOURCE_UID DEST_UID; :midi-monitor off.',
-  'Channel scopes filter system/SysEx. Transport/edits finalize recording; loop passes become separate take lanes, with the last take unmuted.',
+  'Channel scopes filter system/SysEx. Transport/edits finalize recording; loop passes become separate take lanes, with the last take selected.',
 ]
 
 export async function viewArrangement({ path, loaded, initialDocument, root = resolve('music-projects'), embedded = false, signal, output, midiOutput, initialRoute, stateDirectory } = {}) {
@@ -89,6 +90,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
   let liveMidi = null, liveRoutes = [], liveTransitions = Promise.resolve()
   const playerPlans = new Map(), planInspections = new Map()
   let recordStart = null, recording = null, input = null, midiInput = 'all', transportPending = false, inputDevices = null, discoveryTicket = 0
+  let showTakes = null
   let calibration = null
   let calibrationInspection = null, recordingInspection = null
   const discovery = new AbortController()
@@ -298,6 +300,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     if (next.project !== editor.project || next.region !== editor.region) calibrationInspection = recordingInspection = null
     if (next.project !== editor.project) stop()
     editor = next
+    if (showTakes !== null && !editor.project.assets.some(asset => asset.id === showTakes && asset.selectedTake !== undefined)) showTakes = null
   }
   function play(audioOnly = false) {
     if (!accepting) return
@@ -631,6 +634,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
         break
       }
       case 'record-stop': await settleRecording(); break
+      case 'takes': inputDevices = null; showHelp = false; showTakes = showTakes === value.asset ? null : value.asset; break
       case 'open-take': openTake(value.asset); break
       case 'help': inputDevices = null; discoveryTicket++; showHelp = !showHelp; break
       case 'play': play(); break
@@ -679,7 +683,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
         const line = prompt; prompt = null
         enqueue(async () => {
           let result = arrangementCommand(editor, line)
-          if (result.editor.project !== editor.project || result.effect && !['record', 'record-stop', 'inputs', 'input', 'midi-input', 'midi-monitor', 'help'].includes(result.effect.kind)) {
+          if (result.editor.project !== editor.project || result.effect && !['record', 'record-stop', 'inputs', 'input', 'midi-input', 'midi-monitor', 'help', 'takes'].includes(result.effect.kind)) {
             await settleRecording(); result = arrangementCommand(editor, line)
           }
           adopt(result.editor); if (result.effect) await effect(result.effect); else status = 'Edited'
@@ -748,6 +752,19 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
       `Spread ${(Math.max(...residuals) - Math.min(...residuals)).toFixed(3)} ms · sample resolution ${(1000 / profile.input.sampleRate).toFixed(6)} ms`)
     if (inputDevices !== null) lines.push(...inputDevices)
     else if (showHelp) lines.push(...help)
+    else if (showTakes !== null) {
+      const group = arrangementTakes(project, showTakes), source = project.assets.find(asset => asset.id === group.asset)
+      const selected = group.takes.findIndex(take => take.cycle === group.selectedCycle), capacity = Math.max(1, rows - lines.length - 5)
+      const start = Math.max(0, selected - capacity + 1)
+      lines.push(`${source.id} · ${source.name} · selected take ${BigInt(group.selectedCycle) + 1n}`,
+        ':take NUMBER|next|previous selects audio and MIDI together; Space plays; :takes returns')
+      for (const take of group.takes.slice(start, start + capacity)) {
+        const audible = take.clips.filter(clip => !project.lanes.find(lane => lane.id === clip.lane).muted)
+        lines.push(`${take.cycle === group.selectedCycle ? '>' : ' '} Take ${BigInt(take.cycle) + 1n} · ${take.clips.map(clip => clip.component ?? 'audio+MIDI').join(', ')} · ${audible.length}/${take.clips.length} regions unmuted`)
+      }
+      if (!group.takes.length || selected < 0) lines.push('Selected take has no remaining regions; choose another take.')
+      lines.push('Lane mute and solo still apply. Take selection stops backing; Space starts the selected performance.')
+    }
     else {
       const left = Math.floor(editor.tick / editor.step / width) * width * editor.step
       const selected = project.lanes.findIndex(lane => lane.id === editor.lane), capacity = Math.max(1, rows - 10 - (profile ? 4 : 0))
@@ -765,7 +782,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
       }
       if (!project.lanes.length) lines.push('Import a source, then Enter or :place to add its first lane and region.')
       lines.push(clip ? `${clip.id} · ${clip.name}${clip.audioChannel ? ` [input ${clip.audioChannel.input} → output ${clip.audioChannel.output}]` : ''}${clip.component ? ` (${clip.component}${clip.placement ? `, ${clip.placement.kind === 'calibrated' ? 'measured' : 'manual'} advance ${Number(clip.placement.advanceNanoseconds.numerator) / Number(clip.placement.advanceNanoseconds.denominator) / 1e6} ms` : ''})` : ''} · beat ${clip.position / project.ppq} · source ${clip.offset}+${clip.extent} ${project.assets.find(asset => asset.id === clip.asset).kind === 'capture' ? 'host ticks' : ''} · repeat ${clip.repeat}${clip.pattern === undefined ? '' : ` · pattern ${clip.pattern + 1}`}` : 'Up/Down selects a region on the current lane.')
-      lines.push(asset ? `${asset.id} · ${asset.name} · ${asset.kind === 'wave' ? `${asset.metadata.frames} frames / ${asset.metadata.sampleRate} Hz / ${asset.metadata.channels} channels` : asset.kind === 'capture' ? `${asset.manifest.audioFrames} frames + ${asset.manifest.midiPacketCount} UMP packets; Enter opens the take` : 'original MIDI ticks; format-2 patterns require explicit selection'}` : 'No imported asset. :import-wave FILE or :import-midi FILE')
+      lines.push(asset ? `${asset.id} · ${asset.name}${asset.selectedTake === undefined ? '' : ` · take ${BigInt(asset.selectedTake) + 1n} (:takes)`} · ${asset.kind === 'wave' ? `${asset.metadata.frames} frames / ${asset.metadata.sampleRate} Hz / ${asset.metadata.channels} channels` : asset.kind === 'capture' ? `${asset.manifest.audioFrames} frames + ${asset.manifest.midiPacketCount} UMP packets; Enter opens the take` : 'original MIDI ticks; format-2 patterns require explicit selection'}` : 'No imported asset. :import-wave FILE or :import-midi FILE')
       lines.push(`Library ${project.assets.length} sources · ${project.clips.length} regions · a cycles sources · ? help`, path)
     }
     let output = '\x1b[H'

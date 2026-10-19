@@ -144,12 +144,13 @@ function attachLoopTake(project, result, asset, epoch, correction) {
   // Select one performance, never the last audio from one pass and MIDI from
   // another. A missing component in the latest partial pass stays silent.
   const latest = regions.reduce((last, region) => BigInt(region.cycle) > last ? BigInt(region.cycle) : last, 0n)
+  next.assets.find(item => item.id === asset.id).selectedTake = String(latest)
   for (const region of regions) {
     const name = `${asset.name} · Take ${BigInt(region.cycle) + 1n}${region.component ? ' ' + region.component : ''}`
-    const lane = { id: fresh('lane'), name, kind: 'capture', muted: BigInt(region.cycle) !== latest, solo: false }
+    const lane = { id: fresh('lane'), name, kind: 'capture', muted: false, solo: false }
     next.lanes.push(lane)
     const { cycle, ...clip } = region
-    next.clips.push({ ...clip, id: fresh('region'), name, lane: lane.id, asset: asset.id })
+    next.clips.push({ ...clip, takeCycle: cycle, id: fresh('region'), name, lane: lane.id, asset: asset.id })
   }
   validateArrangement(next)
   return { project: next, asset: asset.id, alignment }

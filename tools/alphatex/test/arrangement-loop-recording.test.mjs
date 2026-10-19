@@ -1,10 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { recordingEpoch, recordedLoopRegions, attachRecordedTake } from '../arrangement-recording.mjs'
-import { newArrangement, editArrangement } from '../arrangement.mjs'
+import { newArrangement, editArrangement, arrangementSchedule, arrangementTakes, validateArrangement } from '../arrangement.mjs'
 import { captureRange } from '../capture-time.mjs'
 import { projectCapturedPlacement, manualCapturePlacement } from '../capture-placement.mjs'
-import { arrangementEditor, arrangementImported, arrangementAction } from '../arrangement-editor.mjs'
+import { arrangementEditor, arrangementImported, arrangementAction, arrangementCommand } from '../arrangement-editor.mjs'
 
 const origin = 9007199254740993123n
 function source(start = origin) {
@@ -66,11 +66,12 @@ test('nonintegral cycle boundaries make adjacent cuts without per-pass rounding 
  }
 })
 
-test('take lanes retain every pass, last pass unmuted, one import undo and redo, and immutable source',()=>{
+test('take lanes retain every pass, last pass selected, one import undo and redo, and immutable source',()=>{
  const p=project(),asset=source(),e=epoch(p)
  const result=attachRecordedTake(p,{project:{...p,assets:[asset]},asset:asset.id},e)
  assert.ok(result.project.lanes.length>1)
- assert.ok(result.project.lanes.slice(0,-1).every(l=>l.muted));assert.equal(result.project.lanes.at(-1).muted,false)
+ assert.ok(result.project.lanes.every(l=>!l.muted));assert.equal(arrangementSchedule(result.project).length,1)
+ assert.equal(arrangementSchedule(result.project)[0].takeCycle,result.project.assets[0].selectedTake)
  assert.equal(result.project.clips.length,result.project.lanes.length)
  assert.deepEqual(result.project.assets[0].manifest,asset.manifest);assert.deepEqual(result.project.assets[0].parts,asset.parts)
  const view=arrangementImported(arrangementEditor(p),result)
@@ -90,7 +91,7 @@ test('audio correction is applied before cycle partition while MIDI keeps the or
   for(const r of audio)correctPosition(p,asset,e,r,advance)
   for(const r of midi)correctPosition(p,asset,e,r)
   const result=attachRecordedTake(p,{project:{...p,assets:[asset]},asset:asset.id},e,correction)
-  assert.equal(result.project.lanes.filter(l=>!l.muted).length,2)
+  assert.equal(arrangementSchedule(result.project).length,2)
   assert.deepEqual(result.alignment.correction,correction)
  }
 })
@@ -141,8 +142,95 @@ test('latency correction crossing a boundary never auto-selects audio and MIDI f
   const p=project(),asset=source();asset.manifest.audioFrames=String(Math.round((seconds-.1)*48000))
   const correction={kind:'audio',input:'input',output:'output',audioChannel:{input:1,output:2},placement:manualCapturePlacement(ms)}
   const result=attachRecordedTake(p,{project:{...p,assets:[asset]},asset:asset.id},epoch(p),correction)
-  const selected=result.project.clips.flatMap((clip,index)=>result.project.lanes.find(l=>l.id===clip.lane).muted?[]:[result.alignment.passes[index]])
-  assert.equal(selected.length,1);assert.equal(selected[0].cycle,'4');assert.equal(selected[0].component,component)
+  const selected=arrangementSchedule(result.project)
+  assert.equal(selected.length,1);assert.equal(selected[0].takeCycle,'4');assert.equal(selected[0].component,component)
   assert.ok(result.alignment.passes.some(r=>r.cycle==='3' && r.component!==component))
  }
+})
+
+
+test('one take command selects the paired original pass, undo/redo and renamed reordered lanes retain identity',()=>{
+ const p=project(),asset=source(),e=epoch(p),correction={kind:'audio',input:'input',output:'output',audioChannel:{input:1,output:2},placement:manualCapturePlacement('-12.345')}
+ const attached=attachRecordedTake(p,{project:{...p,assets:[asset]},asset:asset.id},e,correction)
+ let view=arrangementImported(arrangementEditor(p),attached)
+ const original=view.project,sourceFiles=structuredClone(original.assets[0].parts),passes=structuredClone(original.assets[0].recording)
+ const command=line=>{view=arrangementCommand(view,line).editor}
+ command('take 2')
+ const selected=view.project
+ assert.equal(selected.assets[0].selectedTake,'1')
+ assert.deepEqual(arrangementSchedule(selected).map(c=>[c.takeCycle,c.component]).sort(),[['1','audio'],['1','midi']])
+ assert.equal(view.undo.length,2)
+ command('take 2');assert.equal(view.project,selected);assert.equal(view.undo.length,2)
+ command('undo');assert.equal(view.project,original)
+ command('redo');assert.equal(view.project,selected)
+ command('lane-name arbitrary label')
+ command('take next');assert.equal(view.project.assets[0].selectedTake,'2')
+ command('take previous');assert.equal(view.project.assets[0].selectedTake,'1')
+ assert.deepEqual(view.project.assets[0].parts,sourceFiles);assert.deepEqual(view.project.assets[0].recording,passes)
+ const reordered={...view.project,clips:[...view.project.clips].reverse(),lanes:[...view.project.lanes].reverse()}
+ view=arrangementEditor(reordered);view={...view,asset:asset.id}
+ command('take 1');assert.ok(arrangementSchedule(view.project).every(c=>c.takeCycle==='0'))
+ assert.deepEqual(arrangementCommand(view,'takes').effect,{kind:'takes',asset:asset.id})
+})
+
+test('take selection preserves independent lane choices and does not activate unrelated assets or manually placed regions',()=>{
+ const p=project(),asset=source(),e=epoch(p),a=attachRecordedTake(p,{project:{...p,assets:[asset]},asset:asset.id},e)
+ let doc=a.project
+ const other={...source(),id:'asset-2',name:'Another recording'}
+ const second=attachRecordedTake(doc,{project:editArrangement(doc,{kind:'asset-add',asset:other}),asset:other.id},e)
+ doc=editArrangement(second.project,{kind:'take-select',asset:asset.id,cycle:'1'})
+ assert.equal(doc.assets[1].selectedTake,second.project.assets[1].selectedTake)
+ const c=doc.clips.find(c=>c.asset===asset.id&&c.takeCycle==='1')
+ doc=editArrangement(doc,{kind:'lane-mute',id:c.lane})
+ const muted=doc.lanes.find(l=>l.id===c.lane)
+ doc=editArrangement(doc,{kind:'take-select',asset:asset.id,cycle:'2'})
+ assert.deepEqual(doc.lanes.find(l=>l.id===c.lane),muted)
+ // Normal copied source placement is independent; duplication keeps take identity.
+ doc=editArrangement(doc,{kind:'region-duplicate',id:c.id,position:4000})
+ assert.equal(doc.clips.at(-1).takeCycle,'1')
+ assert.ok(!arrangementSchedule(doc).some(active=>active.id===doc.clips.at(-1).id))
+ doc=editArrangement(doc,{kind:'region-add',asset:asset.id,lane:c.lane,name:'Independent placement',position:8000,offset:'0',extent:'2400000'})
+ assert.equal(doc.clips.at(-1).takeCycle,undefined)
+ doc=editArrangement(doc,{kind:'lane-mute',id:c.lane})
+ assert.ok(arrangementSchedule(doc).some(active=>active.id===doc.clips.at(-1).id))
+ assert.equal(arrangementSchedule(doc,{all:true}).length,doc.clips.length)
+})
+
+test('partial corrected passes stay paired through selection, splitting, duplication and removal; unavailable numbers fail closed',()=>{
+ const p=project(),asset=source();asset.manifest.audioFrames='42912'
+ const e=epoch(p),correction={kind:'audio',input:'input',output:'output',audioChannel:{input:1,output:2},placement:manualCapturePlacement('-12.345')}
+ const a=attachRecordedTake(p,{project:{...p,assets:[asset]},asset:asset.id},e,correction)
+ let view=arrangementImported(arrangementEditor(p),a)
+ assert.deepEqual(arrangementSchedule(view.project).map(c=>[c.takeCycle,c.component]),[['4','audio']])
+ view=arrangementCommand(view,'take previous').editor
+ assert.deepEqual(arrangementSchedule(view.project).map(c=>[c.takeCycle,c.component]).sort(),[['3','audio'],['3','midi']])
+ for(const clip of view.project.clips.filter(c=>c.takeCycle==='3'))view={...view,project:editArrangement(view.project,{kind:'region-remove',id:clip.id})}
+ assert.equal(arrangementSchedule(view.project).length,0)
+ assert.throws(()=>arrangementCommand(view,'take 4'),/no remaining/)
+ view=arrangementCommand(view,'take next').editor;assert.equal(view.project.assets[0].selectedTake,'4')
+ view=arrangementCommand(view,'take next').editor;assert.equal(view.project.assets[0].selectedTake,'0')
+ for(const bad of ['take 0','take -1','take 01','take 1.5','take 9007199254740993','take next missing'])assert.throws(()=>arrangementCommand(view,bad))
+ const paired=attachRecordedTake(p,{project:{...p,assets:[source()]},asset:asset.id},e).project
+ const original=paired.clips[0]
+ const split=editArrangement(paired,{kind:'capture-split',id:original.id})
+ assert.equal(split.clips.at(-1).takeCycle,original.takeCycle)
+ const chosen=editArrangement(split,{kind:'take-select',asset:asset.id,cycle:original.takeCycle})
+ assert.deepEqual(arrangementSchedule(chosen).map(c=>c.component).sort(),['audio','midi'])
+})
+
+test('saved take metadata rejects invalid cycles and stays exact beyond numeric tick precision',()=>{
+ const p=project(),asset=source(),a=attachRecordedTake(p,{project:{...p,assets:[asset]},asset:asset.id},epoch(p))
+ const doc=structuredClone(a.project),huge='9007199254740993000001'
+ doc.assets[0].recording.passes[0].cycle=huge;doc.clips[0].takeCycle=huge
+ doc.assets[0].selectedTake=huge
+ validateArrangement(doc)
+ const view=arrangementCommand({...arrangementEditor(doc),asset:asset.id},`take ${BigInt(huge)+1n}`).editor
+ assert.equal(view.project.assets[0].selectedTake,huge)
+ assert.equal(arrangementTakes(view.project,asset.id).takes.at(-1).cycle,huge)
+ assert.deepEqual(JSON.parse(JSON.stringify(view.project)),view.project)
+ for(const invalid of [-1,1,'01','-0','1.5','']){
+  const broken=structuredClone(a.project);broken.clips[0].takeCycle=invalid;assert.throws(()=>validateArrangement(broken))
+  const selection=structuredClone(a.project);selection.assets[0].selectedTake=invalid;assert.throws(()=>validateArrangement(selection))
+ }
+ const missing=structuredClone(a.project);missing.clips[0].takeCycle='99999';assert.throws(()=>validateArrangement(missing),/missing/)
 })

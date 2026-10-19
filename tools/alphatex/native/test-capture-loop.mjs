@@ -58,6 +58,16 @@ struct Case:Decodable{let name:String;let rate:Double;let loop:WaveLoopClock;let
  let capture=try CaptureAudioClock(origin:"0",offset:"0",extent:"1000000000000000",numer:1,denom:4294967291,firstAudioHostTime:"1000").layout(rate:48000,offsetFrames:0,frameCount:7,repetitions:3)
  let huge=try WaveLoopClock(start:0,end:960,ppq:960,tempo:120.1).layout(rate:48000,start:CaptureStartNanoseconds(numerator:"1",denominator:"7"),startSeconds:1/7e9,capture:capture)
  let span=try huge.span(at:4_000_000_000,maximum:257);precondition(span.count>0)
+ // Translating both exact origins must not overflow before cancellation.
+ let n:UInt128=15393162788864004225643087868723,d:UInt128=29579501615081061
+ let secondsD=d*1_000_000_000
+ let translated=try WaveLoopClock(start:1_000_000_000,end:1_000_000_960,ppq:960,tempo:120.1).layout(rate:48000,
+  start:CaptureStartNanoseconds(numerator:String(n),denominator:String(d)),
+  startSeconds:Double(n/secondsD)+Double(n%secondsD)/Double(secondsD),capture:capture)
+ for frame:Int64 in [0,1,24,48,256,4_000_000_000]{
+  let original=try huge.span(at:frame,maximum:257),shifted=try translated.span(at:frame,maximum:257)
+  precondition(original.source==shifted.source && original.count==shifted.count)
+ }
  print("CAPTURE_LOOP_PCM_PASS")
 }}
 `

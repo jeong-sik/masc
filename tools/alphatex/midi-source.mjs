@@ -135,6 +135,14 @@ function parse(bytes) {
 function original(source) {
   if (source?.schemaVersion !== 1 || source.kind !== 'midi-source' || typeof source.name !== 'string' || !source.name.trim()
       || typeof source.original !== 'string' || !Array.isArray(source.changes) || !Array.isArray(source.insertions)) throw new Error('Invalid MIDI source document')
+  if (source.notation !== undefined) {
+    const notation = source.notation
+    if (notation?.kind !== 'alphatex' || typeof notation.source !== 'string' || !notation.source.trim()
+        || Object.keys(notation).some(key => !['kind', 'source', 'tracks'].includes(key))) throw new Error('Invalid original score notation')
+    if (notation.tracks !== undefined && (!Array.isArray(notation.tracks) || !notation.tracks.length
+        || new Set(notation.tracks).size !== notation.tracks.length
+        || notation.tracks.some(index => !Number.isSafeInteger(index) || index < 0))) throw new Error('Invalid original score track selection')
+  }
   const bytes = Buffer.from(source.original, 'base64')
   if (bytes.toString('base64') !== source.original) throw new Error('Invalid canonical MIDI source bytes')
   return parse(bytes)
@@ -224,9 +232,9 @@ function materialize(source) {
   if (orderedGroups.size) throw new Error('MIDI order has no matching source events')
   return { ...parsed, tracks }
 }
-export function importMidiSource(bytes, { name = 'Imported MIDI' } = {}) {
+export function importMidiSource(bytes, { name = 'Imported MIDI', notation } = {}) {
   if (!(bytes instanceof Uint8Array)) throw new Error('MIDI import requires bytes')
-  const source = { schemaVersion: 1, kind: 'midi-source', name, original: Buffer.from(bytes).toString('base64'), changes: [], insertions: [] }
+  const source = { schemaVersion: 1, kind: 'midi-source', name, original: Buffer.from(bytes).toString('base64'), changes: [], insertions: [], ...(notation === undefined ? {} : { notation: structuredClone(notation) }) }
   materialize(source)
   return source
 }

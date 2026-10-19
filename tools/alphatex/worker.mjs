@@ -1,4 +1,5 @@
 import { parentPort } from 'node:worker_threads'
+import { importMidiSource } from './midi-source.mjs'
 import { renderScore, midiForScore } from './engine.mjs'
 import { writeFileSync } from 'node:fs'
 import { exportWave } from './audio.mjs'
@@ -12,6 +13,12 @@ parentPort.on('message', job => {
       case 'audio': result = exportWave(job.source, job.path, {
         ...job.options, cancelled: () => Atomics.load(new Int32Array(job.cancel), 0) !== 0,
       }); break
+      case 'source': {
+        const { score, midi } = midiForScore(job.source, { ...job.options, smf1Mode: true })
+        result = importMidiSource(midi.toBinary(), { name: score.title || 'Score',
+          notation: { kind: 'alphatex', source: job.source, ...(job.options?.tracks === undefined ? {} : { tracks: job.options.tracks }) } })
+        break
+      }
       case 'midi': {
         const { midi } = midiForScore(job.source, { ...job.options, smf1Mode: true })
         writeFileSync(job.path, Buffer.from(midi.toBinary()), { flag: 'wx', mode: 0o600 })

@@ -1,4 +1,4 @@
-import { arrangementFromPhrase } from './phrase-arrangement.mjs'
+import { arrangementFromPhrase, arrangementFromMidiSource } from './phrase-arrangement.mjs'
 import { parentPort } from 'node:worker_threads'
 import { writeFileSync } from 'node:fs'
 import { sourceMidiTimeline } from './midi-source-playback.mjs'
@@ -9,7 +9,7 @@ parentPort.on('message', async job => {
     let result
     if (cancelled()) throw new Error('Preparation cancelled')
     if (job.options.format === 'arrangement') {
-      result = arrangementFromPhrase(job.project)
+      result = job.project.kind === 'midi-source' ? arrangementFromMidiSource(job.project, job.options) : arrangementFromPhrase(job.project)
       if (cancelled()) throw new Error('Arrangement preparation cancelled')
     } else if (job.options.format === 'vst-midi') {
       const { projectVstMidi } = await import('./sequencer-vst.mjs')

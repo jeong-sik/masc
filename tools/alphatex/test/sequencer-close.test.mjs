@@ -6,7 +6,7 @@ import { join, resolve, dirname } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { constants } from 'node:fs'
 import { arrangementRoute, selectArrangementRoute } from '../arrangement-playback.mjs'
-import { arrangementFromPhrase } from '../phrase-arrangement.mjs'
+import { arrangementFromPhrase, arrangementFromMidiSource } from '../phrase-arrangement.mjs'
 import * as editor from '../sequencer-editor.mjs'
 import { sourceExpressions, selectedExpression, sourceTempos, selectedTempo } from '../midi-source-editor.mjs'
 import { importMidiSource, midiSourcePattern } from '../midi-source.mjs'
@@ -223,6 +223,28 @@ test('closing pending arrangement preparation cancels it and rejects a late hand
  assert.equal(Atomics.load(new Int32Array(job.cancel),0),1)
  worker.emit('message',{id:job.id,ok:true,result:arrangementFromPhrase(job.project)});await flush()
  assert.equal(view.observed.arrangements.length,0);assert.equal(view.process.stdin.isRaw,false)
+})
+
+test('source-to-arrangement handoff retains the chosen independent pattern and MIDI destinations',async t=>{
+ const chunk=p=>{const b=Buffer.from([0,0x90,p,100,0x83,0x60,0x80,p,77,0,0xff,0x2f,0]);const h=Buffer.alloc(8);h.write('MTrk');h.writeUInt32BE(b.length,4);return Buffer.concat([h,b])}
+ const source=importMidiSource(Buffer.concat([Buffer.from('4d546864000000060002000201e0','hex'),chunk(60),chunk(62)]))
+ let release;const pending=new Promise(resolve=>{release=resolve})
+ const view=await controller({initialDocument:source,midiOutput:'-123',arrangement:()=>pending})
+ t.after(async()=>{release();view.signal.abort();await view.done})
+ view.command('pattern 2');view.command('midi-port 0 -124');view.command('arrange');await flush()
+ const worker=view.observed.workers[0],job=worker.requests[0]
+ assert.equal(job.options.format,'arrangement');assert.equal(job.options.pattern,1)
+ assert.deepEqual(job.project,source)
+ worker.emit('message',{id:job.id,ok:true,result:arrangementFromMidiSource(job.project,job.options)});await flush()
+ const handoff=view.observed.arrangements[0]
+ assert.deepEqual(handoff.initialDocument.assets[0].source,source)
+ assert.equal(handoff.initialDocument.clips[0].pattern,1)
+ assert.equal(handoff.initialRoute.kind,'midi');assert.equal(handoff.initialRoute.midiOutput,undefined)
+ assert.deepEqual(handoff.initialRoute.portBindings,[{asset:handoff.initialDocument.assets[0].id,port:0,destination:'-124'}])
+ assert.equal(view.process.stdin.listenerCount('keypress'),0)
+ release();await flush();assert.equal(view.process.stdin.listenerCount('keypress'),1)
+ view.key('q');await view.done
+ assert.deepEqual(view.observed.saved.at(-1),source);assert.equal(view.process.stdin.isRaw,false)
 })
 
 test('parent shutdown aborts an active arrangement and waits for its child lifetime',async()=>{

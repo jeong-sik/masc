@@ -211,7 +211,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
   function render(snapshot, options = {}) {
     if (!accepting) throw new Error('Sequencer is closing')
     if (workerFailure) throw new Error(workerFailure)
-    if (snapshot.kind === 'midi-source' && !['midi', 'vst-midi'].includes(options.format)) throw new Error('Source audition requires a VST instrument or MIDI output')
+    if (snapshot.kind === 'midi-source' && !['midi', 'vst-midi', 'arrangement'].includes(options.format)) throw new Error('Source audition requires a VST instrument or MIDI output')
     const id = ++jobNumber, cancel = new Int32Array(new SharedArrayBuffer(4)), path = join(directory, `${id}.${options.format === 'midi' ? 'json' : options.format === 'vst-midi' ? 'mid' : 'wav'}`)
     const promise = new Promise((resolve, reject) => { jobs.set(id, { resolve, reject, cancel }) })
     worker.postMessage({ id, path, project: snapshot, cancel: cancel.buffer, options: { ...options, soundfontPath } })
@@ -299,12 +299,11 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
   }
   function arrange() {
     if (!accepting || childTask) return
-    if (editor.project.kind === 'midi-source') throw new Error('Create an arrangement from an editable phrase; import original MIDI in the arrangement editor')
     stop()
     const expected = generation, snapshot = editor.project
     const route = arrangementRoute({ output: selectedOutput, midiOutput: selectedMidiOutput })
     const bindings = structuredClone(portBindings)
-    const job = render(snapshot, { format: 'arrangement' })
+    const job = render(snapshot, { format: 'arrangement', ...(editor.project.kind === 'midi-source' ? { pattern: editor.pattern } : {}) })
     transport = { kind: 'rendering', cancel: job.cancel }; status = 'Preparing phrase for arrangement'
     let entered = false
     const owned = (async () => {

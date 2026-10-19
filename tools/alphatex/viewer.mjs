@@ -8,6 +8,7 @@ import { spawn } from 'node:child_process'
 import { emitKeypressEvents } from 'node:readline'
 import { safeText, transmit, viewport, place, retire } from './terminal.mjs'
 import { errorDetail } from './diagnostics.mjs'
+import { scoreDocument } from './score-handoff.mjs'
 import { InstrumentPicker, selectionLabel, pickerFooter } from './instruments.mjs'
 import { nativeJob, defaultStateDirectory, snapshotWriter, retainRender } from './vst.mjs'
 
@@ -436,23 +437,29 @@ async function viewScores(sources, initialIndex) {
       return
     }
     if (key.ctrl && key.name === 'c' || ['escape', 'q'].includes(key.name)) { finish(); return }
+    if (sessionTask) return
     switch (key.name) {
       case 'p': case 'a': case 'r': {
-        if (sessionTask) return
+        const snapshot = { source: sources[index], tracks: tracks() }
         stop()
         write(retire(tmux))
         suspended = true
-        process.stdin.off('keypress', keypress)
         sessionTask = (async () => {
           try {
+            const converted = key.name === 'r' ? null : scoreDocument(snapshot, { signal: sessionAbort.signal })
+            const [initialDocument] = await Promise.all([converted, Promise.allSettled([...children.values(), ...nativeRenders])])
+            if (closed || sessionAbort.signal.aborted) return
+            process.stdin.off('keypress', keypress)
             if (key.name === 'p') {
               const { viewSequencer } = await import('./sequencer-tui.mjs')
               if (!closed) await viewSequencer({ root: values['project-root'], sessionRoot: values['session-root'],
                 soundfontPath: values.soundfont, stateDirectory: values['state-dir'], input: values.input, midi: values.midi, output: values.output,
-                midiOutput: values['midi-output'], embedded: true, signal: sessionAbort.signal })
+                midiOutput: values['midi-output'], initialDocument, embedded: true, signal: sessionAbort.signal })
             } else if (key.name === 'a') {
               const { viewArrangement } = await import('./arrangement-tui.mjs')
-              if (!closed) await viewArrangement({ root: values['project-root'], output: values.output, midiOutput: values['midi-output'], stateDirectory: values['state-dir'], embedded: true, signal: sessionAbort.signal })
+              const { arrangementFromMidiSource } = await import('./phrase-arrangement.mjs')
+              const arranged = arrangementFromMidiSource(initialDocument)
+              if (!closed) await viewArrangement({ initialDocument: arranged.project, root: values['project-root'], output: values.output, midiOutput: values['midi-output'], stateDirectory: values['state-dir'], embedded: true, signal: sessionAbort.signal })
             } else {
               const { viewSession } = await import('./music-session.mjs')
               if (!closed) await viewSession({ root: values['session-root'], input: values.input, midi: values.midi, output: values.output, midiOutput: values['midi-output'], embedded: true, signal: sessionAbort.signal })
@@ -460,6 +467,7 @@ async function viewScores(sources, initialIndex) {
           } catch (error) { status = error.message }
           finally {
             sessionTask = null; suspended = false
+            process.stdin.off('keypress', keypress)
             if (!closed) { process.stdin.on('keypress', keypress); render() }
           }
         })()

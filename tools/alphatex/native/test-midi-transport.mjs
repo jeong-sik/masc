@@ -271,6 +271,26 @@ reset(0); reviewWire = []
 let failedPedalOn = try wire([["seconds":0,"port":0,"bytes":[0xb0,64,127]]])
 reviewWireFail = true; failedPedalOn.tick()
 precondition(reviewWire.map(\.1) == [[0xb0,64,127],[0xb0,64,0]] && reviewExit == 1)
+// Cleanup keeps a failed release owned, so the next cleanup retries only that
+// message. Each held count, pedal and open SysEx is released exactly once.
+func cleanupDecision(_ setup: [UInt8], _ ending: [UInt8], expected: [[UInt8]], fail: Bool = true) throws {
+    reset(0); reviewWire = []; reviewWireFail = false
+    let value = try wire([["seconds":0,"port":0,"bytes":setup], ["seconds":1,"port":0,"bytes":ending]])
+    value.tick()
+    reviewWire = []; reviewWireFail = fail
+    do { try value.silence(); precondition(!fail) } catch { precondition(fail) }
+    if fail { try value.silence() }
+    precondition(reviewWire.map(\.1) == expected, "unexpected cleanup: \(reviewWire.map(\.1))")
+    precondition((value.sourceHeld[0] ?? [:]).isEmpty && (value.sourcePedals[0] ?? []).isEmpty && value.sourceExclusive.isEmpty)
+}
+let pressed: [UInt8] = [0x90,60,100,0x90,60,90,0x90,62,100,0xb0,64,127]
+let lifted: [UInt8] = [0x80,60,0,0x80,60,0,0x80,62,0,0xb0,64,0]
+try cleanupDecision(pressed, lifted, expected:[[0x80,60,0],[0x80,60,0],[0x80,62,0],[0xb0,64,0],[0x80,60,0]])
+try cleanupDecision(pressed, lifted, expected:[[0x80,60,0],[0x80,60,0],[0x80,62,0],[0xb0,64,0]], fail:false)
+try cleanupDecision([0xb0,64,127,0xb0,66,127], [0xb0,64,0,0xb0,66,0], expected:[[0xb0,64,0],[0xb0,66,0],[0xb0,64,0]])
+try cleanupDecision([0xf0,0x7d,1], [2,0xf7], expected:[[0xf7],[0xf7]])
+try cleanupDecision([0xf0,0x7d,1], [2,0xf7], expected:[[0xf7]], fail:false)
+print("SOURCE_CLEANUP_RETRY_PASS: failed note/pedal/SysEx terminator cleanup stays owned and is retried once; successful releases are not repeated")
 // Exercise production UID lookup, object-type/name validation and the complete
 // selected-reference check against synthetic CoreMIDI property boundaries.
 func mustReject(_ operation: () throws -> Void) {

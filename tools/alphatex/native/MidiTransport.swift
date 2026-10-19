@@ -362,19 +362,26 @@ final class MidiTransport {
     }
     func sourceSilence() throws {
         var failure: Error?
+        // Like sourceApply, a release gives up ownership only after its send
+        // succeeds. A failed release stays owned, so the final cleanup retries it.
+        func released(_ bytes: [UInt8], to destination: Destination) -> Bool {
+            do { try sendWire(bytes, to: destination); return true } catch { failure = failure ?? error; return false }
+        }
         for binding in timeline.bindings {
             guard let destination = sourceDestinations[binding.port] else { continue }
-            var messages: [[UInt8]] = []
-            if sourceExclusive.contains(binding.port) { messages.append([0xf7]) }
-            for (key, count) in (sourceHeld[binding.port] ?? [:]).sorted(by: { $0.key < $1.key }) {
-                for _ in 0..<count { messages.append([0x80 | UInt8(key >> 8), UInt8(key & 127), 0]) }
+            let port = binding.port
+            if sourceExclusive.contains(port) && released([0xf7], to: destination) { sourceExclusive.remove(port) }
+            for (key, count) in (sourceHeld[port] ?? [:]).sorted(by: { $0.key < $1.key }) {
+                var remaining = count
+                for _ in 0..<count {
+                    if released([0x80 | UInt8(key >> 8), UInt8(key & 127), 0], to: destination) { remaining -= 1 }
+                }
+                sourceHeld[port]?[key] = remaining > 0 ? remaining : nil
             }
-            for key in (sourcePedals[binding.port] ?? []).sorted() {
-                messages.append([0xb0 | UInt8(key >> 8), UInt8(key & 127), 0])
+            for key in (sourcePedals[port] ?? []).sorted() {
+                if released([0xb0 | UInt8(key >> 8), UInt8(key & 127), 0], to: destination) { sourcePedals[port]?.remove(key) }
             }
-            for bytes in messages { do { try sendWire(bytes, to: destination) } catch { failure = failure ?? error } }
         }
-        sourceHeld.removeAll(); sourcePedals.removeAll(); sourceExclusive.removeAll()
         if let failure { throw failure }
     }
     func apply(_ event: Event) throws {

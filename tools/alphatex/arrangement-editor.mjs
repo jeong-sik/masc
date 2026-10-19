@@ -29,6 +29,7 @@ export function arrangementImported(editor, { project, asset }) {
   return { ...commit(editor, project), asset }
 }
 function edit(editor, value) { return commit(editor, editArrangement(editor.project, value)) }
+export function arrangementRecordingCorrection(editor, correction) { return edit(editor, { kind: 'recording-correction', correction }) }
 export function arrangementCalibrated(editor, { profile, match, output }) {
   const clip = selectedRegion(editor), asset = editor.project.assets.find(asset => asset.id === clip?.asset)
   validateCalibrationCapture(profile, asset, clip ?? {}, output ?? null)
@@ -130,6 +131,7 @@ export function arrangementCommand(editor, line) {
   }
   let value
   switch (command) {
+    case 'record-calibration':
     case 'calibration-open':
       if (!tail) throw new Error('Choose a saved calibration experiment directory')
       return { editor, effect: { kind: command, path: tail } }
@@ -137,6 +139,20 @@ export function arrangementCommand(editor, line) {
       count(1)
       if (!Number.isSafeInteger(Number(args[0])) || Number(args[0]) < 1) throw new Error('Choose a displayed calibration pulse number')
       return { editor, effect: { kind: command, match: Number(args[0]) - 1 } }
+    case 'record-correction':
+      if (args[0] === 'none') { count(1); return { editor, effect: { kind: command, action: 'clear' } } }
+      if (args[0] === 'pulse') {
+        count(2)
+        if (!Number.isSafeInteger(Number(args[1])) || Number(args[1]) < 1) throw new Error('Choose a displayed calibration pulse number')
+        return { editor, effect: { kind: command, action: 'measured', match: Number(args[1]) - 1 } }
+      }
+      if (args[0] === 'manual') {
+        count(4)
+        const audioChannel = { input: Number(args[2]), output: Number(args[3]) }
+        if (!Object.values(audioChannel).every(n => Number.isSafeInteger(n) && n > 0 && n <= 0xffffffff)) throw new Error('Choose positive native input/output channel numbers')
+        return { editor, effect: { kind: command, action: 'manual', audioChannel, placement: manualCapturePlacement(args[1]) } }
+      }
+      throw new Error('Choose record-correction none, manual MS IN OUT or pulse N')
     case 'split-take': count(0); value = { kind: 'capture-split', id: regionID(editor) }; break
     case 'capture-channel':
       if (selectedRegion(editor)?.component !== 'audio') throw new Error('Choose a separated audio component for channel routing')

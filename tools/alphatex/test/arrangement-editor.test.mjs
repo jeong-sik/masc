@@ -14,6 +14,8 @@ import * as editorAPI from '../arrangement-editor.mjs'
 import { loadArrangement } from '../arrangement-files.mjs'
 import { importMidiSource, exportMidiSource } from '../midi-source.mjs'
 import { recordingEpoch } from '../arrangement-recording.mjs'
+import { recordingCorrectionContext, recordingCorrectionCapture } from '../recording-correction.mjs'
+import { calibrationMilliseconds, calibrationResidual, validateCalibrationCapture } from '../calibration-profile.mjs'
 
 const waveAsset = { id: 'asset-1', name: 'Bass', kind: 'wave', file: `assets/${'a'.repeat(64)}.wav`, sha256: 'a'.repeat(64),
   metadata: { encoding: 'pcm', channels: 1, sampleRate: 48000, bitsPerSample: 16, validBits: 16, blockAlign: 2, frames: 48000 } }
@@ -70,7 +72,7 @@ test('actual IO worker preserves sources in redo history when saving to a differ
 
 const flush=()=>new Promise(resolve=>setImmediate(resolve))
 async function controller(options={}){
-  const observed={requests:[],saved:[],recovered:[],terminated:false,players:[],removed:[],takes:[],captures:[],monitors:[],live:[],liveAttempts:[],claims:[],calibrations:[]},process=new EventEmitter()
+  const observed={requests:[],saved:[],recovered:[],terminated:false,players:[],removed:[],takes:[],captures:[],monitors:[],live:[],liveAttempts:[],claims:[],calibrations:[],writes:[]},process=new EventEmitter()
   const admitLive=options.admitLive
   process.stdin=Object.assign(new EventEmitter(),{isTTY:true,isRaw:false,setRawMode(value){this.isRaw=value},resume(){},pause(){}})
   process.stdout=Object.assign(new EventEmitter(),{isTTY:true,columns:100,rows:24,write(){}});process.stderr={write(){}}
@@ -88,7 +90,7 @@ async function controller(options={}){
   }
   const slot=`arrange-controller-${randomUUID()}`
   globalThis[slot]={process,Worker:OwnedWorker,arrangementSchedule,arrangementRoute,selectArrangementRoute,arrangementPlaybackRequest,...editorAPI,join,dirname,resolve,tmpdir,randomUUID,
-    emitKeypressEvents(){},safeText:String,recordingEpoch,
+    emitKeypressEvents(){},safeText:String,recordingEpoch,recordingCorrectionContext,recordingCorrectionCapture,calibrationMilliseconds,calibrationResidual,validateCalibrationCapture,
     liveMidiPlan, calibrationSelection, midiDestinations:async()=>[],
     measureAudioCalibration(options){
       let finish,reject;const completion=new Promise((yes,no)=>{finish=yes;reject=no})
@@ -112,7 +114,7 @@ async function controller(options={}){
     record(options){
       let finish,reject
       const completion=new Promise((yes,no)=>{finish=yes;reject=no})
-      const entry={options,stops:0,finish,reject}
+      const entry={options,stops:0,finish(value){finish(value?.manifest ? value : {manifest:{input:{id:options.input},channels:2,sampleRate:48000,monitoring:{state:options.monitorOutput ? 'active':'off'}}})},reject}
       observed.captures.push(entry)
       return{completion,stop(){entry.stops++}}
     },
@@ -123,12 +125,12 @@ async function controller(options={}){
     },
     verifyArrangementAssets:async()=>new Map(),
     loadArrangement:async()=>{throw new Error('Unexpected load')},
-    mkdtemp:async()=>'/owned-recovery',writeFile:async()=>{},rm:async path=>{observed.removed.push(path)},openPlayback(options){
+    mkdtemp:async()=>'/owned-recovery',writeFile:async(path,data,options)=>{observed.writes.push({path,data,options})},rm:async path=>{observed.removed.push(path)},openPlayback(options){
       let resolve,reject
       const completion=new Promise((yes,no)=>{resolve=yes;reject=no})
       const event=(kind,currentTime=0)=>{const value={kind,currentTime,duration:10,device:{id:'output',name:'Output',outputs:2},loop:false,
         clock:{kind:'mach-host-time',anchor:'9007199254740993123',position:0,numer:125,denom:3}};options.onEvent(value);return value}
-      const handle={recordingEpoch:async()=>({kind:'playing',duration:10,loop:false,clock:{kind:'mach-host-time',anchor:'9007199254740993123',position:0,numer:125,denom:3}}),completion,ready:Promise.resolve(),stop(){entry.commands.push('stop')},terminate(){entry.commands.push('terminate')},pause(){entry.commands.push('pause');event('paused')},resume(){entry.commands.push('resume');event('playing')},status(){entry.commands.push('status')},seek(seconds){entry.commands.push(['seek',seconds])}}
+      const handle={recordingEpoch:async()=>({kind:'playing',duration:10,loop:false,device:{id:'output',outputs:2},clock:{kind:'mach-host-time',anchor:'9007199254740993123',position:0,numer:125,denom:3}}),completion,ready:Promise.resolve(),stop(){entry.commands.push('stop')},terminate(){entry.commands.push('terminate')},pause(){entry.commands.push('pause');event('paused')},resume(){entry.commands.push('resume');event('playing')},status(){entry.commands.push('status')},seek(seconds){entry.commands.push(['seek',seconds])}}
       const entry={options,handle,commands:[],finish(){resolve(event('stopped'))},reject,event}
       observed.players.push(entry);queueMicrotask(()=>event('playing'));return handle
     },
@@ -785,4 +787,30 @@ test('a failed analysis worker cannot admit calibration before or after draining
   view.key('q');await flush();for(const live of view.observed.live)live.finish({})
   await view.done;assert.equal(view.process.stdin.isRaw,false)
  }
+})
+
+test('selected next-take correction is frozen before opening input, retained for failed attachment and restored with undo',async()=>{
+ const view=await controller();await primeWave(view)
+ view.command('input interface');view.command('mixed-output output');view.command('record-correction manual 12.5 1 2');await flush()
+ view.command('play');await flush();const prepare=view.observed.requests.find(j=>j.kind==='prepare-wave')
+ view.worker.emit('message',{id:prepare.id,ok:true,result:{path:'/owned/play/plan.json',format:'wave-arrangement'}});await flush()
+ view.command('record');await flush();const capture=view.observed.captures[0];assert.ok(capture)
+ const intent=view.observed.writes.find(w=>w.path===capture.options.directory+'.request.json')
+ assert.ok(intent);assert.equal(JSON.parse(intent.data).correction.placement.advanceNanoseconds.numerator,'12500000')
+ view.command('record-correction none');await flush();assert.ok(capture.stops>0)
+ capture.finish({});await flush();const job=view.observed.requests.find(j=>j.kind==='attach-recording')
+ assert.equal(job.correction.kind,'audio');assert.equal(job.correction.input,'interface');assert.deepEqual(job.correction.audioChannel,{input:1,output:2})
+ view.worker.emit('message',{id:job.id,ok:false,error:'Preserved failed attachment'});await flush()
+ view.command('undo');await flush();view.key('q');await flush();view.observed.players[0].finish();await view.done
+ const saved=view.observed.saved.at(-1).project;assert.equal(saved.recordingCorrection.kind,'audio')
+ assert.deepEqual(JSON.parse(intent.data).correction,saved.recordingCorrection)
+ assert.ok(!view.observed.removed.includes(capture.options.directory));assert.equal(view.process.stdin.isRaw,false)
+})
+test('stale recording input selection refuses correction before opening a recorder',async()=>{
+ const view=await controller();await primeWave(view)
+ view.command('input interface');view.command('mixed-output output');view.command('record-correction manual 3 1 1');view.command('input changed');await flush()
+ view.command('play');await flush();const prepare=view.observed.requests.find(j=>j.kind==='prepare-wave')
+ view.worker.emit('message',{id:prepare.id,ok:true,result:{path:'/owned/play/plan.json',format:'wave-arrangement'}});await flush()
+ view.command('record');await flush();assert.equal(view.observed.captures.length,0)
+ view.key('q');await flush();view.observed.players[0].finish();await view.done;assert.equal(view.process.stdin.isRaw,false)
 })

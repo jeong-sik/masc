@@ -1,4 +1,5 @@
 import { captureRange } from './capture-time.mjs'
+import { recordingCorrectionCapture } from './recording-correction.mjs'
 
 // A captured source keeps the complete native take, including opaque UMP and
 // its timestamp origin. It is not a note-only MIDI source or an audio region.
@@ -33,6 +34,7 @@ export function validateCapturedSourceParts(asset) {
         || part.file !== `assets/${part.sha256}.${suffix}`) throw new Error('Invalid captured source identity/path')
   }
   validateCaptureManifest(asset.manifest)
+  if (asset.recording?.correction !== undefined) recordingCorrectionCapture(asset.recording.correction, asset.manifest)
   return asset
 }
 export function validateCapturedSource(asset) {

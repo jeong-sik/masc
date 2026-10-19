@@ -4,6 +4,7 @@ import { validateMidiSource, midiSourcePattern } from './midi-source.mjs'
 import { PPQ } from './sequencer-project.mjs'
 import { validateCapturePlacement, capturePlacementStart, projectCapturedPlacement } from './capture-placement.mjs'
 import { validateCalibrationCapture } from './calibration-profile.mjs'
+import { validateRecordingCorrection } from './recording-correction.mjs'
 
 const integer = (value, name, minimum = 0) => {
   if (!Number.isSafeInteger(value) || value < minimum) throw new Error(`Invalid ${name}`)
@@ -120,6 +121,7 @@ export function arrangementClipTime(project, clip) {
     ...(capture ? { sourceClock: capture.sourceClock, audio: capture.audio } : {}) }
 }
 export function validateArrangement(project) {
+  if (project?.recordingCorrection !== undefined) validateRecordingCorrection(project.recordingCorrection)
   if (project?.schemaVersion !== 1 || project.kind !== 'arrangement' || project.ppq !== PPQ) throw new Error('Unsupported arrangement document')
   text(project.title, 'arrangement title')
   if (!Number.isFinite(project.tempo) || project.tempo <= 0) throw new Error('Invalid arrangement tempo')
@@ -194,6 +196,7 @@ export function editArrangement(project, edit) {
       const original = region(edit.id)
       next.clips.push({ ...original, id: arrangementID(next.clips, 'region'), position: edit.position }); break
     }
+    case 'recording-correction': next.recordingCorrection = structuredClone(validateRecordingCorrection(edit.correction)); break
     case 'title': next.title = edit.title; break
     case 'tempo': next.tempo = edit.tempo; break
     case 'meter': next.meter = [...edit.meter]; break

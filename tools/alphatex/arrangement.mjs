@@ -34,6 +34,24 @@ function unique(items, name) {
     ids.add(item.id)
   }
 }
+function validateTakeCycle(cycle) {
+  if (typeof cycle !== 'string' || !/^(0|[1-9][0-9]*)$/.test(cycle)) throw new Error('Invalid recorded take cycle')
+  return cycle
+}
+// Cycle identity belongs to the original recording, independent of lane names,
+// clip order, edits or the displayed tick lattice.
+export function arrangementTakes(project, assetID) {
+  const asset = project.assets.find(asset => asset.id === assetID)
+  if (asset?.selectedTake === undefined) throw new Error('Choose an asset recorded against a loop')
+  const groups = new Map()
+  for (const clip of project.clips) {
+    if (clip.asset !== assetID || clip.takeCycle === undefined) continue
+    if (!groups.has(clip.takeCycle)) groups.set(clip.takeCycle, { cycle: clip.takeCycle, clips: [] })
+    groups.get(clip.takeCycle).clips.push(clip)
+  }
+  return { asset: assetID, selectedCycle: asset.selectedTake,
+    takes: [...groups.values()].sort((a, b) => BigInt(a.cycle) < BigInt(b.cycle) ? -1 : 1) }
+}
 export function validateArrangementAsset(asset) {
   text(asset?.id, 'asset identity'); text(asset.name, 'asset name')
   switch (asset.kind) {
@@ -58,6 +76,12 @@ export function validateArrangementAsset(asset) {
       break
     }
     default: throw new Error('Unknown arrangement asset kind')
+  }
+  if (asset.selectedTake !== undefined) {
+    validateTakeCycle(asset.selectedTake)
+    if (asset.kind !== 'capture' || asset.recording?.epoch?.loop !== true || !Array.isArray(asset.recording.passes)) throw new Error('Take selection requires a loop recording')
+    for (const pass of asset.recording.passes) validateTakeCycle(pass.cycle)
+    if (!asset.recording.passes.some(pass => pass.cycle === asset.selectedTake)) throw new Error('Selected take is missing from its recording')
   }
   return asset
 }
@@ -148,10 +172,15 @@ export function validateArrangement(project) {
     text(lane.name, 'lane name')
     if (!['wave', 'midi', 'capture'].includes(lane.kind) || typeof lane.muted !== 'boolean' || typeof lane.solo !== 'boolean') throw new Error('Invalid arrangement lane')
   }
+  const recordedCycles = new Map(project.assets.filter(asset => asset.selectedTake !== undefined).map(asset => [asset.id, new Set(asset.recording.passes.map(pass => pass.cycle))]))
   for (const clip of project.clips) {
     text(clip.name, 'region name')
     const asset = assets.get(clip.asset), lane = lanes.get(clip.lane)
     if (!asset || !lane || lane.kind !== asset.kind) throw new Error('Region source and lane kinds must match')
+    if (clip.takeCycle !== undefined) {
+      validateTakeCycle(clip.takeCycle)
+      if (!recordedCycles.get(asset.id)?.has(clip.takeCycle)) throw new Error('Region take is missing from its loop recording')
+    }
     arrangementClipTime(project, clip)
   }
   return project
@@ -170,6 +199,13 @@ export function editArrangement(project, edit) {
     return found
   }
   switch (edit.kind) {
+    case 'take-select': {
+      validateTakeCycle(edit.cycle)
+      const group = arrangementTakes(next, edit.asset)
+      if (!group.takes.some(take => take.cycle === edit.cycle)) throw new Error('Take has no remaining regions')
+      next.assets.find(asset => asset.id === edit.asset).selectedTake = edit.cycle
+      break
+    }
     case 'asset-add': next.assets.push(structuredClone(edit.asset)); break
     case 'lane-add': next.lanes.push({ id: arrangementID(next.lanes, 'lane'), name: edit.name,
       kind: edit.sourceKind, muted: false, solo: false }); break
@@ -179,7 +215,7 @@ export function editArrangement(project, edit) {
     case 'lane-solo': lane(edit.id).solo = !lane(edit.id).solo; break
     case 'region-add': next.clips.push({ id: arrangementID(next.clips, 'region'), name: edit.name,
       asset: edit.asset, lane: edit.lane, position: edit.position, offset: edit.offset, extent: edit.extent,
-      repeat: edit.repeat ?? 1, ...(edit.pattern === undefined ? {} : { pattern: edit.pattern }),
+      repeat: edit.repeat ?? 1, ...(edit.takeCycle === undefined ? {} : { takeCycle: edit.takeCycle }), ...(edit.pattern === undefined ? {} : { pattern: edit.pattern }),
       ...(edit.clockOffsetNanoseconds === undefined ? {} : { clockOffsetNanoseconds: structuredClone(edit.clockOffsetNanoseconds) }),
       ...(edit.audioChannel === undefined ? {} : { audioChannel: structuredClone(edit.audioChannel) }),
       ...(edit.component === undefined ? {} : { component: edit.component }), ...(edit.placement === undefined ? {} : { placement: structuredClone(edit.placement) }) }); break
@@ -225,7 +261,8 @@ export function arrangementSchedule(project, { all = false } = {}) {
   validateArrangement(project)
   const solo = project.lanes.some(lane => lane.solo)
   const lanes = new Set(project.lanes.filter(lane => all || !lane.muted && (!solo || lane.solo)).map(lane => lane.id))
-  return project.clips.filter(clip => lanes.has(clip.lane)).map(clip => ({ ...clip, ...arrangementClipTime(project, clip) }))
+  const selected = new Map(project.assets.map(asset => [asset.id, asset.selectedTake]))
+  return project.clips.filter(clip => lanes.has(clip.lane) && (all || clip.takeCycle === undefined || clip.takeCycle === selected.get(clip.asset))).map(clip => ({ ...clip, ...arrangementClipTime(project, clip) }))
     .sort((a, b) => a.startSeconds - b.startSeconds)
 }
 

@@ -17,7 +17,7 @@ import { arrangementRoute, selectArrangementRoute, arrangementPlaybackRequest } 
 import * as editorAPI from '../arrangement-editor.mjs'
 import { loadArrangement } from '../arrangement-files.mjs'
 import { importMidiSource, exportMidiSource, midiSourcePattern } from '../midi-source.mjs'
-import { recordingEpoch } from '../arrangement-recording.mjs'
+import { recordingEpoch, attachRecordedTake } from '../arrangement-recording.mjs'
 import { recordingCorrectionContext, recordingCorrectionCapture } from '../recording-correction.mjs'
 import { calibrationMilliseconds, calibrationResidual, validateCalibrationCapture } from '../calibration-profile.mjs'
 
@@ -386,7 +386,7 @@ test('mixed preparation cancellation refuses a late combined plan and cleans its
   } finally { await closeController(view) }
 })
 
-async function primeCapture(view) {
+async function primeCapture(view, assemble = (project, asset) => ({ project, asset: asset.id })) {
   view.command('import-take /music/My  capture');await flush()
   const job=view.observed.requests.find(job=>job.kind==='import-take')
   assert.equal(job.path,'/music/My  capture')
@@ -395,7 +395,7 @@ async function primeCapture(view) {
   })),midiTime:{first:'200',last:'200'},manifest:{schemaVersion:1,state:'recorded',failure:null,audio:'audio.wav',audioBlocks:'audio-blocks.jsonl',midi:'midi.ump.jsonl',
     sampleRate:48000,channels:1,audioFrames:'4800',midiPacketCount:'1',input:{id:'audio',name:'Interface'},midiSources:[{id:'keys',name:'Keys'}],
     clock:{kind:'mach-host-time',numer:1,denom:1,requestedStart:'100',firstAudioHostTime:'200'}}}
-  view.worker.emit('message',{id:job.id,ok:true,result:{project:editArrangement(job.project,{kind:'asset-add',asset}),asset:asset.id}});await flush()
+  view.worker.emit('message',{id:job.id,ok:true,result:assemble(editArrangement(job.project,{kind:'asset-add',asset}),asset)});await flush()
   return asset
 }
 test('captured-region commands persist typed bounds and select paired preparation with complete project ownership',async()=>{
@@ -1052,5 +1052,71 @@ test('successful native loop stop retains the cycle period and passes its absolu
     view.worker.emit('message',{id:attach.id,ok:false,error:'retained fixture source'});await flush()
    }
   }finally{await closeController(view)}
+ }
+})
+
+
+test('take browsing preserves the active owner and selection stops it before a new immutable playback plan',async()=>{
+ const view=await controller()
+ try{
+  view.command('tempo 120');view.command('loop 0 .05');await flush()
+  await primeCapture(view,(project,asset)=>attachRecordedTake(project,{project,asset:asset.id},recordingEpoch({kind:'playing',loop:true,duration:.025,
+   clock:{kind:'mach-host-time',anchor:'100',position:0,numer:1,denom:1,cycle:{kind:'project',start:0,end:48,ppq:960,tempo:120}}})))
+  view.command('mixed-output audio');view.command('midi-source capture-1 keys 42');view.command('play');await flush()
+  const initial=view.observed.requests.find(job=>job.kind==='prepare-capture');assert.ok(initial)
+  view.worker.emit('message',{id:initial.id,ok:true,result:{path:'/owned/takes/first/plan.json',format:'capture-arrangement',loop:true,midiOutput:'42',bindings:[{port:0,destination:'42'}]}});await flush()
+  const old=view.observed.players[0];assert.ok(old)
+  const snapshot=structuredClone(initial.project),selection=snapshot.assets[0].selectedTake
+  view.command('takes');await flush();assert.ok(!old.commands.includes('stop'))
+  view.command('take 2');await flush();assert.ok(old.commands.includes('stop'))
+  assert.deepEqual(initial.project,snapshot)
+  view.command('save');await flush()
+  const chosen=view.observed.saved.at(-1).project
+  assert.equal(chosen.assets[0].selectedTake,'1');assert.notEqual(selection,'1')
+  assert.ok(arrangementSchedule(chosen).every(clip=>clip.takeCycle==='1'))
+  old.finish();await flush()
+  view.command('play');await flush()
+  const next=view.observed.requests.findLast(job=>job.kind==='prepare-capture');assert.notEqual(next.id,initial.id)
+  assert.equal(next.project.assets[0].selectedTake,'1');assert.deepEqual(initial.project,snapshot)
+  view.worker.emit('message',{id:next.id,ok:false,error:'Fixture end'});await flush()
+  view.command('undo');view.command('save');await flush()
+  assert.equal(view.observed.saved.at(-1).project.assets[0].selectedTake,selection)
+  // Remove the whole imported recording while its take view is open. Draw must
+  // follow adoption authority rather than retain a dangling asset identity.
+  view.command('undo');await flush()
+ }finally{await closeController(view)}
+ assert.equal(view.process.stdin.isRaw,false);assert.equal(view.observed.terminated,true)
+})
+
+
+test('implicit take admission retains its asset and resolved cycle across successful new recording attachment',async()=>{
+ for(const [selection,cycle] of [['2','1'],['next','0'],['previous','3']]){
+  const e={kind:'playing',loop:true,duration:.025,clock:{kind:'mach-host-time',anchor:'100',position:0,numer:1,denom:1,cycle:{kind:'project',start:0,end:48,ppq:960,tempo:120}}}
+  const view=await controller()
+  try{
+   view.command('tempo 120');view.command('loop 0 .05');await flush()
+   const original=await primeCapture(view,(project,asset)=>attachRecordedTake(project,{project,asset:asset.id},recordingEpoch(e)))
+   view.command('mixed-output audio');view.command('midi-source capture-1 keys 42');view.command('input audio');view.command('play');await flush()
+   const prep=view.observed.requests.find(job=>job.kind==='prepare-capture')
+   view.worker.emit('message',{id:prep.id,ok:true,result:{path:'/owned/current/plan.json',format:'capture-arrangement',loop:true,midiOutput:'42',bindings:[{port:0,destination:'42'}]}});await flush()
+   const player=view.observed.players[0];player.handle.recordingEpoch=async()=>({...e,device:{id:'audio',outputs:2}})
+   view.command('record');await flush();const capture=view.observed.captures[0];assert.ok(capture)
+   view.command('take '+selection);await flush();assert.ok(capture.stops>0)
+   capture.finish({manifest:original.manifest});await flush()
+   const job=view.observed.requests.find(job=>job.kind==='attach-recording');assert.ok(job)
+   const asset={...original,id:'capture-2',name:'New recording'}
+   const attached=attachRecordedTake(job.project,{project:editArrangement(job.project,{kind:'asset-add',asset}),asset:asset.id},job.epoch)
+   view.worker.emit('message',{id:job.id,ok:true,result:attached});await flush()
+   view.command('save');await flush();const saved=view.observed.saved.at(-1).project
+   assert.equal(saved.assets.find(asset=>asset.id==='capture-1').selectedTake,cycle)
+   assert.equal(saved.assets.find(asset=>asset.id==='capture-2').selectedTake,'4')
+   assert.ok(player.commands.includes('stop'))
+   view.command('undo');view.command('save');await flush()
+   assert.deepEqual(view.observed.saved.at(-1).project,attached.project)
+  }finally{
+   for(const capture of view.observed.captures)capture.finish()
+   for(const job of view.observed.requests.filter(job=>job.kind==='attach-recording'))view.worker.emit('message',{id:job.id,ok:false,error:'Fixture closed'})
+   await closeController(view)
+  }
  }
 })

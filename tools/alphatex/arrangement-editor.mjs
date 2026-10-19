@@ -1,10 +1,12 @@
-import { newArrangement, validateArrangement, editArrangement, arrangementSchedule } from './arrangement.mjs'
+import { newArrangement, validateArrangement, editArrangement, arrangementSchedule, arrangementTakes } from './arrangement.mjs'
 import { midiSourcePattern } from './midi-source.mjs'
 import { captureRange, captureRegionFromSeconds } from './capture-time.mjs'
 import { beats, PPQ } from './sequencer-project.mjs'
 import { calibrationSelection } from './audio-calibration.mjs'
 import { manualCapturePlacement } from './capture-placement.mjs'
 import { validateCalibrationCapture, calibrationResidual } from './calibration-profile.mjs'
+
+export { arrangementTakes }
 
 function reconcile(editor, project) {
   const selected = project.clips.find(clip => clip.id === editor.region)
@@ -110,6 +112,13 @@ export function arrangementAction(editor, action) {
     default: throw new Error('Unknown arrangement action')
   }
 }
+export function arrangementTakeSelected(editor, { asset, cycle }) {
+  const group = arrangementTakes(editor.project, asset)
+  if (!group.takes.some(take => take.cycle === cycle)) throw new Error('Take has no remaining regions')
+  const project = group.selectedCycle === cycle ? editor.project : editArrangement(editor.project, { kind: 'take-select', asset, cycle })
+  const clip = project.clips.find(clip => clip.asset === asset && clip.takeCycle === cycle)
+  return { ...(project === editor.project ? editor : commit(editor, project)), asset, pattern: clip.pattern, lane: clip.lane, region: clip.id, tick: clip.position }
+}
 export function arrangementCommand(editor, line) {
   line = line.trim()
   const boundary = line.search(/\s/), command = boundary < 0 ? line : line.slice(0, boundary)
@@ -138,6 +147,26 @@ export function arrangementCommand(editor, line) {
   }
   let value
   switch (command) {
+    case 'takes': {
+      count(0, 1); const asset = args[0] ?? editor.asset
+      arrangementTakes(editor.project, asset)
+      return { editor: { ...editor, asset, pattern: undefined }, effect: { kind: 'takes', asset } }
+    }
+    case 'take': {
+      count(1, 2); const asset = args[1] ?? editor.asset, group = arrangementTakes(editor.project, asset)
+      let cycle
+      if (args[0] === 'next' || args[0] === 'previous') {
+        const takes = group.takes, selected = BigInt(group.selectedCycle)
+        if (!takes.length) throw new Error('Take has no remaining regions')
+        cycle = args[0] === 'next' ? (takes.find(take => BigInt(take.cycle) > selected) ?? takes[0]).cycle
+          : (takes.findLast(take => BigInt(take.cycle) < selected) ?? takes.at(-1)).cycle
+      } else {
+        if (!/^[1-9][0-9]*$/.test(args[0])) throw new Error('Choose a positive original take number, next or previous')
+        cycle = String(BigInt(args[0]) - 1n)
+      }
+      const selection = { kind: 'take-selection', asset, cycle }
+      return { editor: arrangementTakeSelected(editor, selection), selection }
+    }
     case 'practice':
       count(2)
       if (!['on', 'off'].includes(args[1])) throw new Error('Choose metronome on or off')

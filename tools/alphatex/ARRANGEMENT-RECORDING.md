@@ -39,8 +39,25 @@ in the original source and excluded from the placed interval. Placement provenan
 and the rational rounding error are stored on the captured asset.
 
 With `:loop START END`, recording continues across loop boundaries. Finalizing
-creates one take lane per pass, with the last pass unmuted and earlier passes
-muted. Lane mute/solo lets you audition an earlier pass. Every pass refers to the
+creates one take lane per pass and selects the last pass. `:takes` opens the
+selected asset's take list; repeat `:takes` to return. `:take 2` chooses original
+pass 2, and `:take next` / `:take previous` cycle the remaining takes. Add an asset
+ID after the selection to compare a different recording. `:takes ASSET` also
+selects that source for subsequent implicit `:take` commands. An admitted take
+choice retains both its asset and resolved cycle while an active recording
+finalizes, even if finalization adds a newly selected source. Space starts its new
+playback plan. Changing takes stops the current backing, finalizing an active
+recording first; switching is not a seamless live crossfade.
+
+Audio and MIDI switch together, independently of lane labels, region order,
+trims, moves or duplication. Each capture asset stores its selected original
+cycle; each recorded region retains its cycle identity. Selection and its undo
+or redo are one transaction and survive Save As/reopen. Lane mute/solo still
+apply independently and can silence part or all of a chosen take. Other assets
+and manually placed source regions stay independent. Splitting or duplicating a
+recorded region retains its take membership. Deleting all regions of the chosen
+pass leaves it silent; next/previous skip removed passes. Take numbers refer to
+original recording cycles, so a deleted pass does not renumber later takes. Every pass refers to the
 same complete imported WAV/UMP; undo/redo removes/restores the whole recording
 transaction. Partial first/last passes keep their original position inside the
 range. Count-in is excluded from placement, without deleting its captured source.

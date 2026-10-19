@@ -53,8 +53,8 @@ This stack is one step toward the full destination. Further work remains:
 
 - Retain editable arrangements of MIDI clips and WAV regions with repeat/offset,
   recording into existing projects and overdubs; retain raw expression provenance.
-- Extend one-shot full-message source audition into arrangement playback and
-  pause/resume/seek/loop with expression-state reconstruction; support MIDI 2.0
+- Extend full-message source state reconstruction into arrangement playback and
+  looping, with port/channel ownership; support MIDI 2.0
   source assets and expression/event editing. Source import and note edit/export
   retain controllers, program/tempo maps, SysEx and original bytes.
 - External MIDI clock and a shared sample clock for live scheduling, audio/MIDI
@@ -101,10 +101,14 @@ audio/MIDI sample alignment, hardware latency or physical-device behavior.
 
 Imported source performances now have an ordered external MIDI 1.0 audition
 path: explicit source-port bindings, full channel expression, F0/F7 wire decode,
-tempo/SMPTE scheduling and held-key/hold-pedal stop cleanup. It is a one-shot
-play/stop path from the pattern beginning. The reconstruction requirements above
-remain planned for source pause/resume/seek/loop; WAV/VST arrangement, overdubs,
-shared clock and practice workflows remain separate unfinished units.
+tempo/SMPTE scheduling and held-key/hold-pedal stop cleanup. Source pause/resume
+and seek now reconstruct retained channel state: ordered bank/program/controller
+and supported RPN data, current notes, sustain/sostenuto membership and original
+release wire forms. Seek uses source tick/tempo-map or SMPTE timing. Unknown
+initial values and opaque device state fail explicitly; this is partial source
+reconstruction, with its boundaries documented in tools/alphatex/SOURCE-STATE.md.
+Source looping, MIDI-region scheduling, VST routing, overdubs, shared clock and
+practice workflows remain separate unfinished units.
 
 ### Arrangement document boundary
 

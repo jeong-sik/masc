@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { importMidiSource, midiSourcePattern } from '../midi-source.mjs'
-import { sourceMidiTimeline, sourceTickAtSeconds } from '../midi-source-playback.mjs'
+import { sourceMidiTimeline, sourceTickAtSeconds, sourceSecondsAtTick } from '../midi-source-playback.mjs'
 import { newEditor, editorCommand } from '../sequencer-editor.mjs'
 const chunk = (type, bytes) => {
   const head = Buffer.alloc(8); head.write(type); head.writeUInt32BE(bytes.length, 4)
@@ -56,4 +56,13 @@ test('source audition preserves SMPTE clock and zero-length messages, and refuse
   assert.throws(()=>sourceMidiTimeline(zero),/every source MIDI port/)
   assert.throws(()=>sourceMidiTimeline(zero,{midiOutput:'01'}),/exact signed/)
   assert.throws(()=>sourceMidiTimeline(zero,{midiOutput:'123',loop:true}),/once/)
+})
+
+test('source seek converts original ticks through tempo and SMPTE clocks without phrase tempo defaults',()=>{
+  const doc=source([[0,255,81,3,7,161,32,0x83,0x60,255,81,3,15,66,64,0x83,0x60,255,47,0]],0)
+  const performance=midiSourcePattern(doc)
+  for(const [tick,seconds] of [[240,.25],[480,.5],[720,1],[960,1.5]])assert.equal(sourceSecondsAtTick(performance,tick),seconds)
+  for(const tick of [-1,961,NaN,Infinity])assert.throws(()=>sourceSecondsAtTick(performance,tick))
+  const smpte=midiSourcePattern(source([[0x92,0x60,0x90,60,100,0,0x80,60,0,...end]],0,0xe350))
+  assert.equal(sourceSecondsAtTick(smpte,1200),.5005)
 })

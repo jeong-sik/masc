@@ -42,7 +42,10 @@ does not depend on UI state, I/O, a scheduler or a global cache.
 ## Before/After limits
 
 Only Task-payload planning for an unchanged raw snapshot becomes O(1), with
-no full Task comparison or Task-comparison CPU submission on that path. The
+no full Task comparison or Task-comparison CPU submission on that path. The observation retains both raw and stable list references; their Task objects
+can differ, so raw data can remain alive until the observation is replaced.
+That retention and GC cost belongs in actual comparisons; lower memory use is
+not claimed. The
 whole Work read still performs its existing I/O, supplemental reads, projections
 and diagnostics. New snapshots still build the index and compare Task content.
 No total-CPU, Loading, input/paint or useful-work speedup is measured or claimed.

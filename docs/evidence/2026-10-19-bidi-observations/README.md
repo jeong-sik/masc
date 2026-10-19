@@ -1,7 +1,7 @@
 # BiDi observation work
 
 The source hashes and check results are in [proof.json](proof.json).
-[elements.log](elements.log) records four passing Node tests, including current
+[elements.txt](elements.txt) records four passing Node tests, including current
 control state, sensitive input exclusion, Unicode text, visibility changes and
 parity with the unchanged WebExtension inventory. In its eight-control fixture,
 computed-style API reads decreased from 40 to 10; this is not a latency result.

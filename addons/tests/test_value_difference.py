@@ -165,9 +165,12 @@ class ValueDifference(unittest.TestCase):
         for layer in ("missing", "deleted", "source", "producer_status", "upstream"):
             with self.subTest(layer=layer):
                 sample = supplied(2, 4)
-                if layer == "source": sample["complete"] = False
-                elif layer == "producer_status": sample["observations"][0]["producer_status"]["complete"] = False
-                elif layer == "upstream": sample["observations"][0]["output"]["coverage"][0]["complete"] = False
+                if layer == "source":
+                    sample["complete"] = False
+                elif layer == "producer_status":
+                    sample["observations"][0]["producer_status"]["complete"] = False
+                elif layer == "upstream":
+                    sample["observations"][0]["output"]["coverage"][0]["complete"] = False
                 gap = [] if layer == "deleted" else [missing] if layer == "missing" else [sample]
                 outputs = self.outputs([[supplied(1, 2)], gap, [supplied(3, 7)], [supplied(4, 8)]])
                 self.assertFalse(outputs[1]["coverage"][0]["complete"])
@@ -308,17 +311,28 @@ class ValueDifference(unittest.TestCase):
                 sample = supplied(2, 7)
                 observation = sample["observations"][0]
                 value_row = observation["output"]["rows"][0]
-                if fault == "source_cursor": sample["cursor"] = "1"
-                elif fault == "source_incarnation": sample["incarnation"] = "other"
-                elif fault == "producer_status": observation["producer_status"]["incarnation"] = "other"
-                elif fault == "event_id": observation["id"] = "other/output/2"
-                elif fault == "row_id": value_row["id"] = "dos-worker/1/value"
-                elif fault == "row_lane": value_row["lane_id"] = "other/value"
-                elif fault == "row_kind": value_row["kind"] = "event"
-                elif fault == "clock": value_row["clock"] = {"domain": "dos/capture"}
-                elif fault == "ambiguous": observation["output"]["rows"].append(copy.deepcopy(value_row))
-                elif fault == "duplicate_coverage": observation["output"]["coverage"] *= 2
-                else: observation["output"]["rows"] = []
+                if fault == "source_cursor":
+                    sample["cursor"] = "1"
+                elif fault == "source_incarnation":
+                    sample["incarnation"] = "other"
+                elif fault == "producer_status":
+                    observation["producer_status"]["incarnation"] = "other"
+                elif fault == "event_id":
+                    observation["id"] = "other/output/2"
+                elif fault == "row_id":
+                    value_row["id"] = "dos-worker/1/value"
+                elif fault == "row_lane":
+                    value_row["lane_id"] = "other/value"
+                elif fault == "row_kind":
+                    value_row["kind"] = "event"
+                elif fault == "clock":
+                    value_row["clock"] = {"domain": "dos/capture"}
+                elif fault == "ambiguous":
+                    observation["output"]["rows"].append(copy.deepcopy(value_row))
+                elif fault == "duplicate_coverage":
+                    observation["output"]["coverage"] *= 2
+                else:
+                    observation["output"]["rows"] = []
                 outputs = self.outputs([[supplied(1, 2)], [sample], [supplied(3, 7)]])
                 self.assertEqual(outputs[1]["rows"], [])
                 self.assertFalse(outputs[1]["coverage"][0]["complete"])

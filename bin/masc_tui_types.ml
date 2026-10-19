@@ -15829,7 +15829,10 @@ let task_document_inputs state ~cols =
          make target (Document.body ~cols ~goals:(Document.Canonical detail.canonical_goal_id) detail.task)) (Masc_tui_fetched.value body),
        Option.map (fun events -> make target (Document.history ~cols events)) (Masc_tui_fetched.value history)
      | Some _,Some _ | Some _,None | None,_ -> None,None)
-  | Planning,_,_,_ | Tools,_,_,_ -> None,None
+  | Planning,Planning_list,None,Masc_tui_overview_tasks.Task_focus _
+  | Planning,Planning_list,_,Masc_tui_overview_tasks.No_task_focus
+  | Planning,Planning_detail _,_,_
+  | Tools,_,_,_ -> None,None
   | (Overview | Acting | Metrics | Keepers _ | Memory | Lanes | Clients | Board | Approvals
     | Schedules | Verification | Harness | Fusion | Repositories | Changes | Code | Connectors
     | Runtime | Config | Resources | System_logs),_,_,_ -> None,None

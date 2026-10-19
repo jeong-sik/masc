@@ -8,10 +8,11 @@ import { validateCalibrationCapture, calibrationResidual } from './calibration-p
 
 function reconcile(editor, project) {
   const selected = project.clips.find(clip => clip.id === editor.region)
+  const asset = project.assets.some(asset => asset.id === editor.asset) ? editor.asset : project.assets[0]?.id ?? null
   return { ...editor, project, schedule: arrangementSchedule(project, { all: true }),
     lane: selected?.lane ?? (project.lanes.some(lane => lane.id === editor.lane) ? editor.lane : project.lanes[0]?.id ?? null),
     region: selected?.id ?? null,
-    asset: project.assets.some(asset => asset.id === editor.asset) ? editor.asset : project.assets[0]?.id ?? null }
+    asset, pattern: asset === editor.asset ? editor.pattern : undefined }
 }
 export function arrangementEditor(project = newArrangement()) {
   validateArrangement(project)
@@ -23,10 +24,15 @@ function commit(editor, project) {
 }
 // File IO supplies a complete immutable import result. Adoption happens once,
 // after its owning controller has accepted completion, and is undoable.
-export function arrangementImported(editor, { project, asset }) {
+export function arrangementImported(editor, { project, asset, pattern }) {
   validateArrangement(project)
-  if (!project.assets.some(item => item.id === asset)) throw new Error('Imported asset is missing')
-  return { ...commit(editor, project), asset }
+  const source = project.assets.find(item => item.id === asset)
+  if (!source) throw new Error('Imported asset is missing')
+  if (pattern !== undefined) {
+    if (source.kind !== 'midi') throw new Error('Only MIDI assets have patterns')
+    midiSourcePattern(source.source, { pattern })
+  }
+  return { ...commit(editor, project), asset, pattern }
 }
 function edit(editor, value) { return commit(editor, editArrangement(editor.project, value)) }
 export function arrangementRecordingCorrection(editor, correction) { return edit(editor, { kind: 'recording-correction', correction }) }
@@ -62,14 +68,15 @@ function place(editor, assetID, tick, { offset, extent, repeat = 1, pattern } = 
   project = editArrangement(project, { kind: 'region-add', asset: asset.id, lane: lane.id, name: asset.name,
     position: tick, offset, extent, repeat, ...(pattern === undefined ? {} : { pattern }) })
   const next = commit(editor, project)
-  return { ...next, asset: asset.id, lane: lane.id, region: project.clips.at(-1).id, tick }
+  return { ...next, asset: asset.id, pattern, lane: lane.id, region: project.clips.at(-1).id, tick }
 }
 export function arrangementAction(editor, action) {
   switch (action.kind) {
     case 'asset': {
       const assets = editor.project.assets
       if (!assets.length) return editor
-      return { ...editor, asset: assets[(assets.findIndex(asset => asset.id === editor.asset) + 1) % assets.length].id }
+      const asset = assets[(assets.findIndex(asset => asset.id === editor.asset) + 1) % assets.length].id
+      return { ...editor, asset, pattern: asset === editor.asset ? editor.pattern : undefined }
     }
     case 'cursor': return { ...editor, tick: position(Math.max(0, editor.tick + action.ticks)) }
     case 'lane': {
@@ -85,9 +92,9 @@ export function arrangementAction(editor, action) {
       index = index < 0 ? action.direction > 0 ? 0 : regions.length - 1
         : (index + action.direction + regions.length) % regions.length
       const clip = regions[index]
-      return { ...editor, region: clip.id, asset: clip.asset, tick: clip.position }
+      return { ...editor, region: clip.id, asset: clip.asset, pattern: clip.pattern, tick: clip.position }
     }
-    case 'place': return place(editor, editor.asset, editor.tick)
+    case 'place': return place(editor, editor.asset, editor.tick, { pattern: editor.pattern })
     case 'remove': return edit(editor, { kind: 'region-remove', id: regionID(editor) })
     case 'move': return edit(editor, { kind: 'region-change', id: regionID(editor), position: position(selectedRegion(editor).position + action.ticks) })
     case 'duplicate': {
@@ -139,7 +146,7 @@ export function arrangementCommand(editor, line) {
     case 'edit-midi': {
       count(0, 2); const asset = args[0] ?? editor.asset
       if (!editor.project.assets.some(item => item.id === asset && item.kind === 'midi')) throw new Error('Choose a MIDI asset to edit')
-      return { editor, effect: { kind: command, asset, ...(args[1] === undefined ? {} : { pattern: pattern(args[1]) }) } }
+      return { editor, effect: { kind: command, asset, pattern: args[1] === undefined ? asset === editor.asset ? editor.pattern : undefined : pattern(args[1]) } }
     }
     case 'record-calibration':
     case 'calibration-open':
@@ -220,13 +227,13 @@ export function arrangementCommand(editor, line) {
     case 'asset': {
       count(1)
       if (!editor.project.assets.some(asset => asset.id === args[0])) throw new Error('Unknown arrangement asset')
-      return { editor: { ...editor, asset: args[0] } }
+      return { editor: { ...editor, asset: args[0], pattern: args[0] === editor.asset ? editor.pattern : undefined } }
     }
     case 'lane': count(1); return { editor: { ...editor, lane: ordinalLane(args[0]), region: null } }
     case 'select': {
       count(1); const clip = editor.project.clips.find(clip => clip.id === args[0])
       if (!clip) throw new Error('Unknown arrangement region')
-      return { editor: { ...editor, region: clip.id, lane: clip.lane, asset: clip.asset, tick: clip.position } }
+      return { editor: { ...editor, region: clip.id, lane: clip.lane, asset: clip.asset, pattern: clip.pattern, tick: clip.position } }
     }
     case 'cursor': count(1); return { editor: { ...editor, tick: position(beats(args[0])) } }
     case 'grid': {

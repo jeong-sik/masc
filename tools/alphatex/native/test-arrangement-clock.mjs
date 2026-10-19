@@ -28,14 +28,14 @@ ${future}
 ${command}
 struct FakePlan { let duration=1.0;let captured=false;var clocked=false }
 struct FakeRegion { let id="region-1", startSeconds=0.0 }
-final class FakePlayer { var plays=0;func play(at:AVAudioTime){plays+=1} }
+final class FakePlayer { var lastRenderTime:AVAudioTime?=AVAudioTime(hostTime:reviewHost);var plays=0;func play(at:AVAudioTime){plays+=1} }
 final class FakeVoice {
  let region=FakeRegion(), player=FakePlayer();var end=1.0, prepares=0, stops=0;var completion:(()->Void)?
  func prepare(from seconds:Double,finished:@escaping()->Void,failed:@escaping(Error)->Void)throws->Bool{prepares+=1;completion=finished;return seconds<end}
  func stop(){stops+=1}
 }
 struct FakeFormat {let sampleRate=48000.0}
-final class FakeOutput {var lastRenderTime:AVAudioTime?;let presentationLatency=0.0;func outputFormat(forBus:Int)->FakeFormat{FakeFormat()}}
+final class FakeOutput {var lastRenderTime:AVAudioTime?=AVAudioTime(hostTime:reviewHost);let presentationLatency=0.0;func outputFormat(forBus:Int)->FakeFormat{FakeFormat()}}
 final class FakeEngine {let outputNode=FakeOutput();var starts=0,stops=0,pauses=0;func prepare(){};func start()throws{starts+=1};func pause(){pauses+=1};func stop(){stops+=1}}
 final class FakeMidi { var stages:[Double]=[], runs:[UInt64]=[];func stageCoordinated(at seconds:Double)throws{stages.append(seconds)};func runCoordinated(anchorNanoseconds:UInt64)throws{runs.append(anchorNanoseconds)} }\nfinal class Probe {
  enum State {case prepared,playing,paused,stopped}
@@ -48,6 +48,14 @@ final class FakeMidi { var stages:[Double]=[], runs:[UInt64]=[];func stageCoordi
  func finish(reason:String,error:Error?=nil){guard state != .stopped else{return};precondition(error==nil);state = .stopped;finished+=1;stopVoices();engine.stop()}
  ${methods}
 }
+let ahead=Probe();ahead.midi=FakeMidi()
+let futureRender=try futureHost(0.1,from:reviewHost)
+ahead.voices[0].player.lastRenderTime=AVAudioTime(hostTime:futureRender)
+try ahead.schedule(from:0,playing:true)
+precondition(ahead.anchor>futureRender && ahead.midi!.runs==[AudioConvertHostTimeToNanos(ahead.anchor)],"one common anchor must follow the active render frontier")
+let missing=Probe();missing.voices[0].player.lastRenderTime=nil
+do {try missing.schedule(from:0,playing:true);preconditionFailure("missing active render clock admitted")}catch{}
+precondition(missing.voices[0].player.plays==0)
 let audioFirst=Probe();audioFirst.midi=FakeMidi();try audioFirst.schedule(from:0,playing:true)
 audioFirst.voices[0].completion!()
 precondition(audioFirst.active.isEmpty && audioFirst.state == .playing && audioFirst.finished==0)
@@ -75,10 +83,10 @@ precondition(epochReplies.count==1 && epochReplies[0]["recordingRequest"] as? St
 let acknowledged=epochReplies[0]["clock"] as! [String:Any]
 precondition(acknowledged["anchor"] as? String==String(paired.anchor) && acknowledged["position"] as? Double==0.4)
 stale();precondition(paired.finished==0 && paired.active==["region-1"])
-let waiting=Probe();waiting.midi=FakeMidi();waiting.voices[0].end=0.2;try waiting.schedule(from:0.8,playing:true)
+let waiting=Probe();waiting.midi=FakeMidi();waiting.voices[0].end=0.2;waiting.engine.outputNode.lastRenderTime=nil;waiting.voices[0].player.lastRenderTime=nil;try waiting.schedule(from:0.8,playing:true)
 precondition(waiting.state == .playing && waiting.active.isEmpty && waiting.finished==0 && waiting.midi!.stages==[0.8])
 waiting.midiReachedEnd();precondition(waiting.finished==1)
-let silent=Probe();silent.plan.clocked=true;silent.voices[0].end=0
+let silent=Probe();silent.plan.clocked=true;silent.voices[0].end=0;silent.engine.outputNode.lastRenderTime=nil;silent.voices[0].player.lastRenderTime=nil
 try silent.schedule(from:0,playing:true);precondition(silent.state == .playing && silent.active.isEmpty && silent.finished==0)
 silent.horizon!.fire();precondition(silent.finished==1)
 let every=Probe();every.plan.clocked=true;every.midi=FakeMidi();try every.schedule(from:0,playing:true)

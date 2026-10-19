@@ -98,6 +98,15 @@ let handle_dashboard_task_history state req reqd =
         Task.Tool.task_history_events_json (Mcp_server.workspace_config state)
           ~task_id ~limit)
 
+let handle_dashboard_task_history_page state req reqd =
+  let status,json=Domain_pool_ref.submit_io_or_inline (fun () ->
+    Server_dashboard_task_history_page.read ~config:(Mcp_server.workspace_config state)
+      ~task_id:(Server_utils.query_param req "task_id")
+      ~limit:(Server_utils.query_param req "limit")
+      ~cursor:(Server_utils.query_param req "cursor")) in
+  Http.Response.json_value ~status:(status :> Httpun.Status.t)
+    ~compress:true ~request:req json reqd
+
 let handle_dashboard_workspace state req reqd =
   let limit =
     Server_utils.int_query_param req "limit" ~default:50

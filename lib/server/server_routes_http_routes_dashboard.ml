@@ -3338,6 +3338,10 @@ let add_routes ~sw ~clock router =
          Http.Response.json_value ~status:(status :> Httpun.Status.t)
            ~compress:true ~request:req json reqd
        ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/tasks/history/page" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         Server_routes_http_dashboard_handlers.handle_dashboard_task_history_page state req reqd
+       ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/tasks/history" (fun request reqd ->
        with_public_read (fun state req reqd ->
          handle_dashboard_task_history state req reqd

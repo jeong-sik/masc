@@ -937,7 +937,7 @@ let test_first_loss_retains_unproven_effects mode () =
         |> Command.outcome_to_json in
       let module Detail = Masc.Tui_decode_async_request in
       let target : Detail.target={submitted_by=keeper;request_id;keeper_name=keeper} in
-      let projected = Masc.Server_async_request_observability.project_request ~base_path ~submitted_by:keeper ~request_id in
+      let projected = Server_async_request_observability.project_request ~base_path ~submitted_by:keeper ~request_id in
       (match Detail.decode ~target projected with
        | Ok (Detail.Observed {phase=Detail.Lost;logical=Detail.Confirmed (Detail.Original_run run);_}) ->
          check (option string) "typed TUI observation keeps original Task" (Some "original-source-task") run.source_task_id;
@@ -972,12 +972,53 @@ let test_first_loss_retains_unproven_effects mode () =
         ["type",`String "task_transition";"task_id",`String task_id;"ts",`String "2026-10-19T00:00:01Z";
          "from_status",`String "todo";"to_status",`String "claimed";"actor",`String keeper]))
         [source.ats_task_id;"different-current-task"];
-      let read_body task_id = match Masc.Server_dashboard_task_detail.read ~config ~task_id:(Some task_id)
-          |> Masc.Server_dashboard_task_detail.response with
+      let read_body task_id = match Server_dashboard_task_detail.read ~config ~task_id:(Some task_id)
+          |> Server_dashboard_task_detail.response with
         | `OK,json -> Task_read.detail ~task_id:source.ats_task_id json
         | _ -> Error "source Task producer unavailable" in
       let read_history task_id = Masc.Task.Tool.task_history_events_json config ~task_id ~limit:50
         |> Task_read.history ~task_id:source.ats_task_id in
+      (* Continue the same original resource history through the production
+         dated-page protocol. Later appends and another Task cannot replace
+         the captured prefix; replacement refuses cursor advancement. *)
+      let module History = Masc.Task.History_page in
+      let page result = match result with Ok page -> page | Error _ -> fail "original history page unavailable" in
+      let append action = Workspace_utils_ops.log_event config (`Assoc
+        ["task_id",`String source.ats_task_id;"type",`String "task_transition";
+         "action",`String action;"ts",`String "2026-10-19T00:00:02Z";
+         "actor",`String keeper]) in
+      append "original-before-a";append "original-before-b";
+      let first=History.read ~config ~task_id:source.ats_task_id ~max_events:1 () |> page in
+      let cursor=match first.next_cursor with Some cursor -> cursor | None -> fail "original prefix lost its older boundary" in
+      let encoded=History.cursor_to_string cursor in
+      let cursor=match History.cursor_of_string encoded with Ok cursor -> cursor | Error _ -> fail "producer cursor did not roundtrip" in
+      append "newer-after-capture";
+      (match History.read ~config ~task_id:"different-current-task" ~max_events:1 ~cursor () with
+       | Error History.Source_changed -> () | _ -> fail "a foreign Task borrowed the original history cursor");
+      let rec earlier cursor collected =
+        let next=History.read ~config ~task_id:source.ats_task_id ~max_events:1 ~cursor () |> page in
+        let collected=collected @ next.events in
+        match next.next_cursor with None -> collected | Some cursor -> earlier cursor collected in
+      let complete=first.events @ earlier cursor [] in
+      let action name = List.exists (fun row -> Json_util.get_string row "action"=Some name) complete in
+      check bool "older original records survive contiguous page traversal" true
+        (action "original-before-a" && action "original-before-b");
+      check bool "post-capture appends do not enter its older prefix" false (action "newer-after-capture");
+      (match Task_read.history ~task_id:source.ats_task_id (`List complete) with
+       | Ok _ -> () | Error detail -> fail detail);
+      let status,json=Server_dashboard_task_history_page.read ~config
+        ~task_id:(Some source.ats_task_id) ~limit:(Some "1") ~cursor:(Some encoded) in
+      check bool "shared HTTP/H2 producer echoes the exact original cursor" true
+        (status=`OK && Json_util.get_string json "cursor"=Some encoded
+         && Json_util.get_string json "task_id"=Some source.ats_task_id);
+      let events=Filename.concat (Workspace.masc_dir config) "events" in
+      let parked=Filename.concat base_path "original-event-prefix" in
+      Unix.rename events parked;
+      Fun.protect ~finally:(fun () -> if Sys.file_exists events then Unix.rmdir events;Unix.rename parked events) (fun () ->
+        Unix.mkdir events 0o700;
+        match History.read ~config ~task_id:source.ats_task_id ~max_events:1 ~cursor () with
+        | Error History.Source_changed -> ()
+        | _ -> fail "replacement event store became an exhausted original history");
       ui.tools_async_task_source <- Some source;
       let old_body=Ui.begin_tools_async_task_body ui ~force:false |> Option.get in
       let old_history=Ui.begin_tools_async_task_history ui ~force:false |> Option.get in
@@ -992,7 +1033,10 @@ let test_first_loss_retains_unproven_effects mode () =
       check bool "history is observed while the body remains pending" true
         (Masc_tui_fetched.in_flight ui.tools_async_task_body &&
          match Masc_tui_fetched.view_for ~equal:Ui.equal_tools_async_task_source ui.tools_async_task_history ~key:source with
-         | Ready [_] -> true | _ -> false);
+         | Ready events -> List.exists (fun (event : Masc.Tui_decode.task_history_event) ->
+             event.th_actor=Some keeper && event.th_from_status=Some "todo"
+             && event.th_to_status=Some "claimed") events
+         | Absent | Loading | Failed _ | Stale _ -> false);
       Ui.complete_tools_async_task_body ui current_body (read_body source.ats_task_id);
       let module Document = Masc_tui_task_document in
       let module Observation = Masc_tui_task_document_observation in

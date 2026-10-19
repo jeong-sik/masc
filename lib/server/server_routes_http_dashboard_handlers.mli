@@ -11,6 +11,9 @@ val handle_dashboard_link_previews :
 val handle_dashboard_task_history :
   Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** Handle dashboard task-history requests. *)
+val handle_dashboard_task_history_page :
+  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+(** Read one source-bound continuation page without the legacy slice cache. *)
 
 val handle_dashboard_workspace :
   Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit

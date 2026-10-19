@@ -228,7 +228,7 @@ type librarian_prompt_material =
 type pass =
   | Memory_pass of Keeper_librarian_continuity.prepared option
   | Continuity_state_pass of Keeper_librarian_continuity.prepared
-  | Volatile_state_pass of string option
+  | Volatile_state_pass of string option * Keeper_librarian_unread.t list
   | Working_context_pass
 
 let prompt_key_of_pass = function
@@ -255,10 +255,11 @@ let prompt_variables_of_pass pass input =
   | Continuity_state_pass prepared ->
     Keeper_librarian.continuity_prompt_variables input
       ~continuity:(Keeper_librarian_continuity.prompt_json prepared)
-  | Volatile_state_pass previous_state ->
+  | Volatile_state_pass (previous_state, unread_messages) ->
     Keeper_librarian.continuity_prompt_variables input
       ~continuity:(`Assoc ["previous_working_state",
-        (match previous_state with None -> `Null | Some state -> `String state)])
+        (match previous_state with None -> `Null | Some state -> `String state);
+        "unread_messages", Keeper_librarian_unread.list_to_json unread_messages])
   | Working_context_pass -> Keeper_librarian.working_context_prompt_variables input
 ;;
 
@@ -1202,7 +1203,8 @@ let run_pass
         in
         let pass =
           match volatile_state, write_scope, continuity with
-          | Some (previous_state, _), _, _ -> Volatile_state_pass previous_state
+          | Some (previous_state, unread_messages, _), _, _ ->
+            Volatile_state_pass (previous_state, unread_messages)
           | None, Context_and_memory, continuity -> Memory_pass continuity
           | None, Memory_maintenance, _ -> Memory_pass None
           | None, Context_only, Some prepared -> Continuity_state_pass prepared
@@ -1746,11 +1748,12 @@ let run_pass
            | Ok (`Volatile_state (working_state, exact_output, served_slot)) ->
              complete ?selected_slot:(Option.map served_slot_id served_slot)
                ?usage:!observed_usage Exact_lane_run_registry.Succeeded
-               (`Assoc ["memory_write", `String "not_requested";
-                        "continuity_write", `String "volatile_only";
+               (`Assoc ["memory_write", `String "skipped_context_only";
+                        "continuity_write", `Assoc ["status", `String "not_attempted"];
+                        "volatile_inference", `Bool true;
                         "exact_output", exact_output]);
              (match volatile_state, served_slot with
-              | Some (_, observe), Some served_by -> observe ~served_by working_state
+              | Some (_, _, observe), Some served_by -> observe ~served_by working_state
               | Some _, None | None, _ -> ());
              Eio.Fiber.check ()
            | Ok (`Context_organized (exact_output, selected_slot)) ->
@@ -1961,10 +1964,10 @@ type working_state_inference =
   | Not_inferred of not_committed list
 
 let infer_working_state ?cli_runner ~base_path ~keepers_dir ~keeper_id
-    ~previous_state input =
+    ~previous_state ~unread_messages input =
   let inferred = ref None and reports = ref [] in
   run_pass ~write_scope:Context_only
-    ~volatile_state:(previous_state, (fun ~served_by working_state ->
+    ~volatile_state:(previous_state, unread_messages, (fun ~served_by working_state ->
       inferred := Some (working_state, served_by)))
     ~on_not_committed:(fun report -> reports := report :: !reports)
     ?cli_runner ~base_path ~keepers_dir ~keeper_id ~expected_revision:None input;

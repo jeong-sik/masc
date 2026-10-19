@@ -141,6 +141,7 @@ val infer_working_state
   -> keepers_dir:string
   -> keeper_id:string
   -> previous_state:string option
+  -> unread_messages:Keeper_librarian_unread.t list
   -> Keeper_librarian.input
   -> working_state_inference
 (** Infer a volatile continuation from exactly the supplied conversation.

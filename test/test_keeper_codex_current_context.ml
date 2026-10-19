@@ -875,7 +875,7 @@ let test_empty_history_keeps_a_fitting_summary () =
         { task_context = Masc.Keeper_turn_task_context.No_task; turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1
         ; history_at_start = Fresh_history; position }
     } ] in
-  let snapshot = match Librarian_continuity_snapshot.capture
+  let snapshot = match Librarian_continuity_snapshot.capture ~unread_messages:[]
     ~trace_id ~lines ~messages:large_history ~working_state with
     | Ok snapshot -> snapshot
     | Error error -> fail (Librarian_continuity_snapshot.error_to_string error) in

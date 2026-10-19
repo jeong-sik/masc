@@ -25,6 +25,7 @@ type prepared =
   ; messages : Agent_core.Types.message list
   ; previous : stored
   ; previous_state : string option
+  ; previous_unread_messages : Keeper_librarian_unread.t list
   ; recovery_receipt : Keeper_memory_os_current.durable_range_id option
   ; range : R.range
   ; covering_cut : R.atom_cut
@@ -111,9 +112,10 @@ let prepare_source ?end_atom ~config ~keeper_name ~trace_id () =
             | Ok restored -> Some (snapshot, restored.working_state)
             | Error _ -> None)
         | None -> None in
-      let previous_state, start_atom = match fitting_previous with
-        | Some ((snapshot : S.t), working_state) -> Some working_state, snapshot.end_atom
-        | None -> None, 0 in
+      let previous_state, previous_unread_messages, start_atom = match fitting_previous with
+        | Some ((snapshot : S.t), working_state) ->
+          Some working_state, snapshot.unread_messages, snapshot.end_atom
+        | None -> None, [], 0 in
       (* A rewrite from atom 0 must not move a request's start back
          (RFC keeper-context-window-in-tokens §13.4). While it catches up,
          the snapshot carries where a request starts without it -- the
@@ -177,7 +179,7 @@ let prepare_source ?end_atom ~config ~keeper_name ~trace_id () =
           | Some cut -> Ok cut
           | None -> Error "continuity source has no covering completed boundary" in
         let unread = R.slice messages {range with R.start_atom; end_atom} in
-        Ok (Ready {trace_id;lines;messages;previous=stored;previous_state;recovery_receipt;range;covering_cut;start_atom;end_atom;unread;
+        Ok (Ready {trace_id;lines;messages;previous=stored;previous_state;previous_unread_messages;recovery_receipt;range;covering_cut;start_atom;end_atom;unread;
                   catch_up_target})
 
 (* The reason an empty source was empty is dropped here: a caller that only
@@ -294,8 +296,10 @@ let memory_committed ~config ~keeper_name prepared =
               ~messages:prepared.messages prepared.range)
     | None, _ | Some _, None -> false)
 let previous_working_state prepared = prepared.previous_state
+let previous_unread_messages prepared = prepared.previous_unread_messages
 let prompt_json prepared =
-  `Assoc ["previous_working_state", (match prepared.previous_state with None -> `Null | Some text -> `String text)]
+  `Assoc ["previous_working_state", (match prepared.previous_state with None -> `Null | Some text -> `String text);
+    "unread_messages", Keeper_librarian_unread.list_to_json prepared.previous_unread_messages]
 let commit ~config ~keeper_name ~prepared ~working_state =
   let* covered = memory_committed ~config ~keeper_name prepared in
   let* () = if covered then Ok () else Error "Memory has not committed this continuity source" in
@@ -306,7 +310,7 @@ let commit ~config ~keeper_name ~prepared ~working_state =
     match label with
     | W.Pinned -> Some message
     | W.Atom atom -> if atom < prepared.covering_cut.cut_end_atom then Some message else None) in
-  let* snapshot = S.capture_checkpoint_prefix ~end_atom:prepared.end_atom
+  let* snapshot = S.capture_checkpoint_prefix ~unread_messages:prepared.previous_unread_messages ~end_atom:prepared.end_atom
     ~catch_up_end_atom:prepared.catch_up_target
     ~trace_id:prepared.trace_id ~lines:prepared.lines ~messages
     ~working_state () |> Result.map_error S.error_to_string in

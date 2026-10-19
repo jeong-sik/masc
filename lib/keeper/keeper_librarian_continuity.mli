@@ -43,12 +43,14 @@ val prepare : ?end_atom:int -> config:Workspace.config -> keeper_name:string -> 
     [None] means no new complete coverage, whatever the reason. *)
 
 val prompt_json : prepared -> Yojson.Safe.t
-(** The prior working state alone. The range's conversation reaches the
+(** The prior working state and its exact unread records. The range's conversation reaches the
     prompt once, as the folded [conversation_history] rendered from
     {!messages}; tool payloads and reasoning blocks are not part of it. *)
 val previous_working_state : prepared -> string option
 (** The same validated prior state carried by {!prompt_json}, for volatile
     message-by-message inference. This does not grant publication authority. *)
+val previous_unread_messages : prepared -> Keeper_librarian_unread.t list
+(** Exact prior holes retained only when the previous snapshot fits. *)
 val commit : config:Workspace.config -> keeper_name:string -> prepared:prepared ->
   working_state:string -> (Librarian_continuity_snapshot.t, string) result
 (** Publication requires an exact continuity-owned Memory receipt, or coverage

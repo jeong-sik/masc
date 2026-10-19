@@ -16,6 +16,7 @@ type t =
   ; last_atom_digest : string
   ; prefix_sha256 : string
   ; working_state : string
+  ; unread_messages : Keeper_librarian_unread.t list
   ; catch_up_end_atom : int option
   }
 
@@ -32,6 +33,7 @@ type error =
 
 type restored =
   { working_state : string
+  ; unread_messages : Keeper_librarian_unread.t list
   ; messages : Agent_core.Types.message list
   }
 
@@ -57,6 +59,10 @@ let valid_sha256 text =
 ;;
 
 let validate (snapshot : t) =
+  let* () = Keeper_librarian_unread.validate_atom_bounds
+    ~trace_id:snapshot.trace_id ~history_start_boundary_line:snapshot.history_start_boundary_line
+    ~end_atom:snapshot.end_atom snapshot.unread_messages
+    |> Result.map_error (fun detail -> Invalid_snapshot detail) in
   if String.trim snapshot.trace_id = "" then Error (Invalid_snapshot "blank trace_id")
   else if snapshot.history_start_boundary_line < 1 || snapshot.end_atom < 1
   then Error (Invalid_snapshot "history positions must be positive")
@@ -80,7 +86,9 @@ let validate (snapshot : t) =
 
 let to_json (snapshot : t) =
   `Assoc
-    ([ "origin", `String (match snapshot.origin with Witnessed_history -> "witnessed_history" | Captured_checkpoint_prefix -> "captured_checkpoint_prefix")
+    ([ "schema_version", `Int 2
+    ; "unread_messages", Keeper_librarian_unread.list_to_json snapshot.unread_messages
+    ; "origin", `String (match snapshot.origin with Witnessed_history -> "witnessed_history" | Captured_checkpoint_prefix -> "captured_checkpoint_prefix")
     ; "covering_end_atom", `Int snapshot.covering_end_atom
     ; "covering_last_atom_digest", `String snapshot.covering_last_atom_digest
     ; "trace_id", `String snapshot.trace_id
@@ -99,7 +107,7 @@ let to_json (snapshot : t) =
 
 let of_json = function
   | `Assoc fields ->
-    let keys = ["origin"; "covering_end_atom"; "covering_last_atom_digest"; "trace_id"; "history_start_boundary_line"; "end_boundary_line"; "end_turn_ref"; "end_atom";
+    let keys = ["schema_version"; "unread_messages"; "origin"; "covering_end_atom"; "covering_last_atom_digest"; "trace_id"; "history_start_boundary_line"; "end_boundary_line"; "end_turn_ref"; "end_atom";
       "last_atom_digest"; "prefix_sha256"; "working_state"] in
     (* [catch_up_end_atom] is written only while a rewrite is catching up. *)
     let catch_up_key = "catch_up_end_atom" in
@@ -109,6 +117,11 @@ let of_json = function
     if List.sort String.compare present <> List.sort String.compare expected
     then Error (Invalid_snapshot "unexpected, duplicate or missing fields")
     else (
+      let* () = match List.assoc "schema_version" fields with
+        | `Int 2 -> Ok () | _ -> Error (Invalid_snapshot "unsupported snapshot schema") in
+      let* unread_messages = Keeper_librarian_unread.list_of_json
+        (List.assoc "unread_messages" fields)
+        |> Result.map_error (fun detail -> Invalid_snapshot detail) in
       let* catch_up_end_atom =
         match List.assoc_opt catch_up_key fields with
         | None -> Ok None
@@ -130,7 +143,7 @@ let of_json = function
       | `Int end_boundary_line, `String trace_id, `Int history_start_boundary_line, `Int end_atom,
         `String last_atom_digest, `String prefix_sha256, `String working_state ->
         validate { origin; covering_end_atom; covering_last_atom_digest; trace_id; history_start_boundary_line; end_boundary_line; end_turn_ref; end_atom;
-                   last_atom_digest; prefix_sha256; working_state; catch_up_end_atom }
+                   last_atom_digest; prefix_sha256; working_state; unread_messages; catch_up_end_atom }
       | _ -> Error (Invalid_snapshot "field type mismatch"))
   | _ -> Error (Invalid_snapshot "expected object")
 ;;
@@ -207,7 +220,7 @@ let generation_lines ~history_start_boundary_line lines =
   List.filter (fun (line, _) -> line >= history_start_boundary_line) lines
 ;;
 
-let capture_range ~origin ?end_atom ~catch_up_end_atom ~trace_id ~lines ~messages ~working_state range =
+let capture_range ~origin ?end_atom ~unread_messages ~catch_up_end_atom ~trace_id ~lines ~messages ~working_state range =
   let end_atom = Option.value end_atom ~default:range.R.end_atom in
   let catch_up_end_atom =
     match catch_up_end_atom with
@@ -229,6 +242,9 @@ let capture_range ~origin ?end_atom ~catch_up_end_atom ~trace_id ~lines ~message
     | Some (line, _recorded_at, turn_ref) -> Ok (line, turn_ref)
     | None -> Error Uncovered_history
   in
+  let* () = Keeper_librarian_unread.validate_atom_history ~trace_id
+    ~history_start_boundary_line:range.history_start_boundary_line ~end_atom ~messages unread_messages
+    |> Result.map_error (fun detail -> Invalid_snapshot detail) in
   validate
     { origin
     ; covering_end_atom = range.end_atom
@@ -241,18 +257,19 @@ let capture_range ~origin ?end_atom ~catch_up_end_atom ~trace_id ~lines ~message
     ; last_atom_digest
     ; prefix_sha256 = prefix_sha256 messages {range with R.end_atom; last_atom_digest}
     ; working_state
+    ; unread_messages
     ; catch_up_end_atom
     }
 ;;
 
-let capture ~trace_id ~lines ~messages ~working_state =
+let capture ~unread_messages ~trace_id ~lines ~messages ~working_state =
   let* range = source_range ~trace_id ~lines ~messages in
-  capture_range ~origin:Witnessed_history ~catch_up_end_atom:None ~trace_id ~lines ~messages ~working_state range
+  capture_range ~origin:Witnessed_history ~unread_messages ~catch_up_end_atom:None ~trace_id ~lines ~messages ~working_state range
 ;;
 
-let capture_checkpoint_prefix ?end_atom ~catch_up_end_atom ~trace_id ~lines ~messages ~working_state () =
+let capture_checkpoint_prefix ?end_atom ~unread_messages ~catch_up_end_atom ~trace_id ~lines ~messages ~working_state () =
   let* range = checkpoint_prefix_range ~trace_id ~lines ~messages in
-  capture_range ~origin:Captured_checkpoint_prefix ?end_atom ~catch_up_end_atom ~trace_id ~lines ~messages ~working_state range
+  capture_range ~origin:Captured_checkpoint_prefix ?end_atom ~unread_messages ~catch_up_end_atom ~trace_id ~lines ~messages ~working_state range
 ;;
 
 let restore ~trace_id ~lines ~messages (snapshot : t) =
@@ -284,12 +301,16 @@ let restore ~trace_id ~lines ~messages (snapshot : t) =
       if not (String.equal (prefix_sha256 messages covered) snapshot.prefix_sha256)
       then Error Prefix_changed
       else
+        let* () = Keeper_librarian_unread.validate_atom_history ~trace_id
+          ~history_start_boundary_line:snapshot.history_start_boundary_line ~end_atom:snapshot.end_atom
+          ~messages snapshot.unread_messages
+          |> Result.map_error (fun detail -> Invalid_snapshot detail) in
         let labelled, _ = Window.annotate messages in
         let messages = List.filter_map (fun (message, label) ->
           match label with
           | Window.Pinned -> Some message
           | Window.Atom atom -> if atom >= snapshot.end_atom then Some message else None) labelled in
-        Ok { working_state = snapshot.working_state; messages }
+        Ok { working_state = snapshot.working_state; unread_messages = snapshot.unread_messages; messages }
 ;;
 
 let save ~path snapshot =

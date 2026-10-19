@@ -599,7 +599,8 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
         let selected_input = {input with messages=[message]; historical_task_contexts;
           tool_observations=[];counterpart_observations=[]} in
         match Runtime.infer_working_state ?cli_runner ~base_path ~keepers_dir
-          ~keeper_id:keeper_name ~previous_state:state selected_input with
+          ~keeper_id:keeper_name ~previous_state:state
+          ~unread_messages:(P.previous_unread_messages selected) selected_input with
         | Runtime.Inferred {working_state;served_by} ->
           read (Some working_state) (Some served_by) (position + 1) remaining
         | Runtime.Not_inferred reports -> Error (position, reports)

@@ -36,7 +36,7 @@ let official_client_turn ?(turn = 2) messages =
     fail "history states no atom position"
 ;;
 let require = function Ok value -> value | Error error -> fail (S.error_to_string error)
-let capture () = S.capture ~trace_id ~lines ~messages:history ~working_state:state |> require
+let capture () = S.capture ~unread_messages:[] ~trace_id ~lines ~messages:history ~working_state:state |> require
 let restore ?(trace_id = trace_id) ?(lines = lines) messages snapshot =
   S.restore ~trace_id ~lines ~messages snapshot
 ;;
@@ -100,7 +100,7 @@ let test_digest_matches_checkpoint_array () =
     Digestif.SHA256.(digest_string (Yojson.Safe.to_string json) |> to_hex) in
   let check_prefix end_atom prefix remaining =
     let expected = array_digest prefix in
-    let snapshot = S.capture_checkpoint_prefix ~end_atom ~catch_up_end_atom:None
+    let snapshot = S.capture_checkpoint_prefix ~unread_messages:[] ~end_atom ~catch_up_end_atom:None
       ~trace_id ~lines ~messages ~working_state:state () |> require in
     check string "stored digest matches checkpoint array bytes" expected snapshot.prefix_sha256;
     let saved = match S.to_json snapshot with
@@ -114,7 +114,7 @@ let test_digest_matches_checkpoint_array () =
   in
   check_prefix 1 [request] [pinned; call; injected; answer];
   check_prefix 2 [request; call; answer] [pinned; injected];
-  let snapshot = S.capture ~trace_id ~lines ~messages ~working_state:state |> require in
+  let snapshot = S.capture ~unread_messages:[] ~trace_id ~lines ~messages ~working_state:state |> require in
   (match S.restore ~trace_id ~lines
      ~messages:[pinned; request; call; injected; result "changed result"] snapshot with
    | Error S.Prefix_changed -> ()
@@ -123,12 +123,12 @@ let test_digest_matches_checkpoint_array () =
 
 let test_capture_requires_witness () =
   expect_error "baseline substituted for captured work"
-    (S.capture ~trace_id ~lines:[1, boundary ~fresh:false history]
+    (S.capture ~unread_messages:[] ~trace_id ~lines:[1, boundary ~fresh:false history]
        ~messages:history ~working_state:state);
   expect_error "empty boundary log admitted"
-    (S.capture ~trace_id ~lines:[] ~messages:history ~working_state:state);
+    (S.capture ~unread_messages:[] ~trace_id ~lines:[] ~messages:history ~working_state:state);
   expect_error "malformed boundary admitted"
-    (S.capture ~trace_id ~lines:(lines @ [2, Error (B.Not_json "bad")])
+    (S.capture ~unread_messages:[] ~trace_id ~lines:(lines @ [2, Error (B.Not_json "bad")])
        ~messages:history ~working_state:state)
 ;;
 
@@ -162,7 +162,7 @@ let test_file_pair () =
     check bool "frontier and work are read from one file" true (snapshot = loaded);
     let next = msg T.User "Approval received." in
     let messages = history @ [next] in
-    let newer = S.capture ~trace_id ~lines:(lines @ [2, boundary ~fresh:false messages])
+    let newer = S.capture ~unread_messages:[] ~trace_id ~lines:(lines @ [2, boundary ~fresh:false messages])
       ~messages ~working_state:"Publish the already built artifact." |> require in
     S.save ~path newer |> require;
     check bool "replacement does not mix revisions" true ((S.load ~path |> require) = newer);
@@ -172,7 +172,7 @@ let test_file_pair () =
 
 let test_captured_partial_prefix () =
   let lines=[1, boundary ~fresh:false history] in
-  let snapshot=S.capture_checkpoint_prefix ~end_atom:1 ~catch_up_end_atom:None ~trace_id ~lines ~messages:history
+  let snapshot=S.capture_checkpoint_prefix ~unread_messages:[] ~end_atom:1 ~catch_up_end_atom:None ~trace_id ~lines ~messages:history
     ~working_state:state () |> require in
   check int "real completed anchor" 2 snapshot.covering_end_atom;
   check int "cut at whole first atom" 1 snapshot.end_atom;
@@ -185,8 +185,8 @@ let test_captured_partial_prefix () =
     (S.restore ~trace_id ~lines:[1,boundary ~fresh:false ~turn:2 history] ~messages:history snapshot);
   check bool "explicit source survives codec" true ((S.of_json (S.to_json snapshot) |> require) = snapshot);
   expect_error "cut outside completed prefix accepted"
-    (S.capture_checkpoint_prefix ~end_atom:3 ~catch_up_end_atom:None ~trace_id ~lines ~messages:history ~working_state:state ());
-  let whole=S.capture_checkpoint_prefix ~catch_up_end_atom:None ~trace_id ~lines ~messages:history ~working_state:state () |> require in
+    (S.capture_checkpoint_prefix ~unread_messages:[] ~end_atom:3 ~catch_up_end_atom:None ~trace_id ~lines ~messages:history ~working_state:state ());
+  let whole=S.capture_checkpoint_prefix ~unread_messages:[] ~catch_up_end_atom:None ~trace_id ~lines ~messages:history ~working_state:state () |> require in
   check bool "whole assistant atom includes tool result" true
     ((S.restore ~trace_id ~lines ~messages:history whole |> require).messages=[pinned])
 ;;
@@ -194,7 +194,7 @@ let test_captured_partial_prefix () =
 let test_official_client_start_state_is_the_covering_line () =
   let lines = [1, official_client_turn history] in
   let snapshot =
-    S.capture_checkpoint_prefix ~catch_up_end_atom:None ~trace_id ~lines ~messages:history
+    S.capture_checkpoint_prefix ~unread_messages:[] ~catch_up_end_atom:None ~trace_id ~lines ~messages:history
       ~working_state:state ()
     |> require in
   check int "the start state of the turn is the covering line" 1 snapshot.end_boundary_line;
@@ -219,7 +219,7 @@ let test_earlier_generation_end_does_not_hide_the_current_start_state () =
   let earlier = [1, boundary history] in
   let current = [1, boundary history; 2, restarted; 3, official_client_turn history] in
   let snapshot =
-    S.capture_checkpoint_prefix ~catch_up_end_atom:None ~trace_id ~lines:current ~messages:history
+    S.capture_checkpoint_prefix ~unread_messages:[] ~catch_up_end_atom:None ~trace_id ~lines:current ~messages:history
       ~working_state:state ()
     |> require in
   check int "the current generation's start state is the covering line" 3 snapshot.end_boundary_line;
@@ -227,7 +227,7 @@ let test_earlier_generation_end_does_not_hide_the_current_start_state () =
   check bool "covered atoms removed, pinned retained" true
     ((restore ~lines:current history snapshot |> require).messages = [pinned]);
   let before_restart =
-    S.capture_checkpoint_prefix ~catch_up_end_atom:None ~trace_id ~lines:earlier ~messages:history
+    S.capture_checkpoint_prefix ~unread_messages:[] ~catch_up_end_atom:None ~trace_id ~lines:earlier ~messages:history
       ~working_state:state ()
     |> require in
   (match restore ~lines:current history before_restart with
@@ -240,7 +240,7 @@ let test_earlier_generation_end_does_not_hide_the_current_start_state () =
    snapshot keeps the shape it always had. *)
 let test_catch_up_target_codec () =
   let lines=[1, boundary ~fresh:false history] in
-  let capture target = S.capture_checkpoint_prefix ~end_atom:1 ~catch_up_end_atom:target
+  let capture target = S.capture_checkpoint_prefix ~unread_messages:[] ~end_atom:1 ~catch_up_end_atom:target
     ~trace_id ~lines ~messages:history ~working_state:state () |> require in
   let catching_up = capture (Some 2) in
   check (option int) "a target past the end is kept" (Some 2) catching_up.catch_up_end_atom;
@@ -277,7 +277,7 @@ let test_prefix_hash_leaves_the_callers_domain () =
   in
   let long_lines = [ 1, boundary long_history ] in
   let capture_long () =
-    S.capture ~trace_id ~lines:long_lines ~messages:long_history ~working_state:state |> require
+    S.capture ~unread_messages:[] ~trace_id ~lines:long_lines ~messages:long_history ~working_state:state |> require
   in
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -314,8 +314,78 @@ let test_prefix_hash_leaves_the_callers_domain () =
           check bool "restore lets the fiber beside it run" true (during_restore > 0)))
 ;;
 
+let test_unread_snapshot_source_binding () =
+  let module H = Masc.Keeper_librarian_unread in
+  let get = function Ok value -> value | Error detail -> fail detail in
+  let hole = H.for_atom ~trace_id ~history_start_boundary_line:1 ~atom:1
+    ~message_in_atom:1 ~messages:history
+    ~reasons:[Masc.Keeper_librarian_input_refusal.Request_body_refused] |> get in
+  let holes = [hole] in
+  let captured = S.capture ~unread_messages:holes ~trace_id ~lines ~messages:history
+    ~working_state:state |> require in
+  let decoded = S.of_json (S.to_json captured) |> require in
+  let restored = restore history decoded |> require in
+  check bool "the pair restores exact unread records" true (restored.unread_messages = holes);
+  check bool "only pinned messages remain after the declared end" true (restored.messages = [pinned]);
+  (match hole.source with
+   | H.Atom {message_sha256;_} -> check string "hash covers the exact tool message, not its atom opener"
+       Digestif.SHA256.(digest_string (Yojson.Safe.to_string (Agent_core.Checkpoint.message_to_json tool)) |> to_hex)
+       message_sha256
+   | H.Official_turn _ -> fail "wrong source identity");
+  let fields = match S.to_json decoded with `Assoc fields -> fields | _ -> fail "snapshot object" in
+  List.iter (fun key -> expect_error "missing schema or unread list became all-read"
+    (S.of_json (`Assoc (List.remove_assoc key fields)))) ["schema_version";"unread_messages"];
+  expect_error "another schema silently became current"
+    (S.of_json (`Assoc (("schema_version", `Int 1) :: List.remove_assoc "schema_version" fields)));
+  let hole_fields = match H.to_json hole with `Assoc fields -> fields | _ -> fail "hole object" in
+  List.iter (fun reasons ->
+    check bool "unknown, empty or duplicate causes cannot authorize omission" true
+      (Result.is_error (H.of_json (`Assoc (("reasons", reasons) :: List.remove_assoc "reasons" hole_fields)))))
+    [`List []; `List [`String "invalid_request"]; `List [`String "request_body_refused";`String "request_body_refused"]];
+  check bool "no named size refusal cannot record a hole" true
+    (Result.is_error (H.for_atom ~trace_id ~history_start_boundary_line:1 ~atom:1
+      ~message_in_atom:1 ~messages:history ~reasons:[]));
+  expect_error "duplicate coordinates cannot become two holes"
+    (S.capture ~unread_messages:[hole;hole] ~trace_id ~lines ~messages:history ~working_state:state);
+  let foreign = H.for_atom ~trace_id ~history_start_boundary_line:2 ~atom:1
+    ~message_in_atom:1 ~messages:history ~reasons:hole.reasons |> get in
+  expect_error "another history generation cannot supply a hole"
+    (S.capture ~unread_messages:[foreign] ~trace_id ~lines ~messages:history ~working_state:state);
+  expect_error "a hole beyond a partial snapshot end cannot be stored"
+    (S.capture_checkpoint_prefix ~unread_messages:holes ~end_atom:1 ~catch_up_end_atom:None
+      ~trace_id ~lines ~messages:history ~working_state:state ());
+  let wrong_hash = match H.to_json hole with
+    | `Assoc fields ->
+      let source = match List.assoc "source" fields with
+        | `Assoc source -> `Assoc (("message_sha256", `String (String.make 64 '0')) ::
+            List.remove_assoc "message_sha256" source)
+        | _ -> fail "source object" in
+      `Assoc (("source", source) :: List.remove_assoc "source" fields)
+    | _ -> fail "hole object" in
+  let forged = S.of_json (`Assoc (("unread_messages", `List [wrong_hash]) ::
+    List.remove_assoc "unread_messages" fields)) |> require in
+  expect_error "valid prefix hash cannot certify a hole naming another message"
+    (restore history forged);
+  let official = H.for_official_turn ~turn_ref:(Ids.Turn_ref.make ~trace_id ~absolute_turn:3)
+    ~boundary_line:4 ~message_in_turn:1 ~messages:[user;assistant]
+    ~reasons:hole.reasons |> get in
+  check bool "official source has a strict distinct identity" true
+    (H.of_json (H.to_json official) |> get = official);
+  expect_error "official source cannot be laundered into atom coverage"
+    (S.capture ~unread_messages:[official] ~trace_id ~lines ~messages:history ~working_state:state);
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs env#fs;
+  let dir = Filename.temp_dir "continuity-unread-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree dir) @@ fun () ->
+  let path = Filename.concat dir "state.json" in
+  S.save ~path decoded |> require;
+  let loaded = S.load ~path |> require in
+  check bool "one durable replacement preserves state, coverage and exact holes" true (loaded = decoded)
+;;
+
 let () = run "offline continuity snapshot"
-  ["pair", [test_case "captured partial prefix" `Quick test_captured_partial_prefix;
+  ["pair", [test_case "unread source binding and atomic pair" `Quick test_unread_snapshot_source_binding;
+            test_case "captured partial prefix" `Quick test_captured_partial_prefix;
             test_case "official-client start state" `Quick test_official_client_start_state_is_the_covering_line;
             test_case "earlier generation end vs current start state" `Quick test_earlier_generation_end_does_not_hide_the_current_start_state;
             test_case "append and complete prefix" `Quick test_restore_append_and_all_covered;

@@ -161,6 +161,7 @@ module Ready = struct
 
   type t =
     { plan : Plan.t
+    ; dependency_layers : Plan.node list list
     ; sw : Eio.Switch.t
     ; config : Workspace.config
     ; meta : Keeper_meta_contract.keeper_meta
@@ -174,7 +175,7 @@ module Ready = struct
     | Unprepared_file of Keeper_tool_descriptor.ordinary_execution_mode
     | Prepared_file of operation
 
-  let preparation_orders plan (members : (Plan.node * Plan.contract option) Node_map.t) =
+  let preparation_orders dependency_layers (members : (Plan.node * Plan.contract option) Node_map.t) =
     let before_prepare prior current = match prior.Keeper_tool_descriptor.execution,current.Keeper_tool_descriptor.execution with
       | Ordinary Serial, Ordinary Serial -> Require_success
       | Ordinary Concurrent, Ordinary Concurrent -> No_order
@@ -195,7 +196,7 @@ module Ready = struct
               |> List.rev in
             let orders = match predecessors with [] -> orders | _ :: _ -> (node.id,predecessors) :: orders in
             collect earlier orders rest in
-    collect [] [] (List.concat (Plan.dependency_layers plan))
+    collect [] [] (List.concat dependency_layers)
   ;;
 
   let create ~sw ~config ~meta ~source plan =
@@ -223,13 +224,15 @@ module Ready = struct
       (match collect Node_map.empty false (Plan.nodes plan) with
        | None -> None
        | Some members ->
-         let preparation_orders = preparation_orders plan members
+         let dependency_layers = Plan.dependency_layers plan in
+         let preparation_orders = preparation_orders dependency_layers members
            |> List.fold_left (fun index (id, orders) -> Node_map.add id orders index) Node_map.empty in
-         Some {plan; sw; config; meta; members; preparation_orders})
+         Some {plan; dependency_layers; sw; config; meta; members; preparation_orders})
     | Some _ | None -> None
   ;;
 
   let plan t = t.plan
+  let dependency_layers t = t.dependency_layers
 
   let preparation_predecessors t ~node =
     match Node_map.find_opt node.Plan.id t.preparation_orders with

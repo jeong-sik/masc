@@ -608,10 +608,13 @@ let execute_with_tool_use_id
       Tool_result.Proven_pre_effect
       settled
   in
-  (* The immutable graph is shared by scheduling and ready binding order.
-     Inputs, producer resources and outcomes still resolve in their own node
-     fibers; this execution-local value carries none of their authority. *)
-  let dependency_layers = Keeper_tool_plan.dependency_layers plan in
+  (* Ready's original plan identity was checked before selecting its retained
+     immutable graph. Share it with scheduling and ready binding order rather
+     than rebuilding it after preparation. Inputs, producer resources and
+     outcomes still resolve in their own node fibers, never from this value. *)
+  let dependency_layers = match ready_files with
+    | Some ready -> Keeper_prepared_inline_files.Ready.dependency_layers ready.files
+    | None -> Keeper_tool_plan.dependency_layers plan in
   (* Dynamic ready-wave runner: every node owns one fiber that starts when all
      of its dependencies have settled, instead of waiting for a static batch
      barrier. Ordinary serial and terminal nodes additionally follow the static

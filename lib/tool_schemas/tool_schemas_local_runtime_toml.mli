@@ -12,3 +12,4 @@
 
 val verify : Masc_domain.tool_schema
 val ollama_probe : Masc_domain.tool_schema
+val systemone_decide : Masc_domain.tool_schema

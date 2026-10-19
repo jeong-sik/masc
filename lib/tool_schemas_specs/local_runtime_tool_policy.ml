@@ -3,6 +3,7 @@ open Masc_domain
 type operation =
   | Verify
   | Ollama_probe
+  | Systemone_decide
 
 type t =
   { required_permission : permission
@@ -13,6 +14,7 @@ type t =
 let operation_id = function
   | Verify -> "verify"
   | Ollama_probe -> "ollama_probe"
+  | Systemone_decide -> "systemone_decide"
 ;;
 
 let execution_policy = function
@@ -28,5 +30,14 @@ let execution_policy = function
     { required_permission = CanAdmin
     ; read_only = false
     ; idempotent = false
+    }
+  | Systemone_decide ->
+    (* [/v1/systemone] answers typed questions without changing any server
+       state, so any agent that can speak on the workspace may ask one. The
+       cloud backend still spends Ollama usage credits per input token, which
+       is why this is not read_only: approval staging sees the call. *)
+    { required_permission = CanBroadcast
+    ; read_only = false
+    ; idempotent = true
     }
 ;;

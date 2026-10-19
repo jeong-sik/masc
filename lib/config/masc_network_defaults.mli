@@ -29,6 +29,10 @@ val ollama_api_ps_path : string
     probe path that exercises a model end-to-end. *)
 val ollama_api_generate_path : string
 
+(** Ollama path for structured decisions (/v1/systemone). Used by
+    {!Tool_local_runtime_systemone}; Ollama Cloud serves the same path. *)
+val ollama_systemone_path : string
+
 
 (** {1 OpenAI-compatible API paths} *)
 

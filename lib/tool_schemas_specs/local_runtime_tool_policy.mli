@@ -1,6 +1,7 @@
 type operation =
   | Verify
   | Ollama_probe
+  | Systemone_decide
 
 type t =
   { required_permission : Masc_domain.permission

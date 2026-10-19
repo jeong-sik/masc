@@ -4,6 +4,7 @@
 type operation = Local_runtime_tool_policy.operation =
   | Verify
   | Ollama_probe
+  | Systemone_decide
 [@@deriving enumerate]
 
 type definition =
@@ -24,6 +25,8 @@ let definition_for operation =
   match operation with
   | Verify -> { operation; schema = Tool_schemas_local_runtime_toml.verify }
   | Ollama_probe -> { operation; schema = Tool_schemas_local_runtime_toml.ollama_probe }
+  | Systemone_decide ->
+    { operation; schema = Tool_schemas_local_runtime_toml.systemone_decide }
 ;;
 
 let definitions : definition list = List.map definition_for all_of_operation

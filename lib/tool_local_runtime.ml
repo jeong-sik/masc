@@ -192,6 +192,34 @@ let handle_runtime_ollama_probe (ctx : Core.context) args : Core.tool_result =
            ~continue)
 ;;
 
+let handle_systemone_decide (ctx : Core.context) args : Core.tool_result =
+  let tool_name = Tool_schemas_local_runtime.tool_name Systemone_decide in
+  let start_time = Tool_timing.start () in
+  match Tool_local_runtime_systemone.args_of_yojson args with
+  | Error message ->
+      err_response ~tool_name ~start_time ~class_:Tool_result.Policy_rejection message
+  | Ok { Tool_local_runtime_systemone.backend; model; state; questions; timeout_sec } ->
+      let continue () =
+        let request =
+          { Tool_local_runtime_systemone.model =
+              (match model with
+               | Some explicit -> explicit
+               | None -> Tool_local_runtime_systemone.default_model backend)
+          ; state
+          ; questions
+          }
+        in
+        match Tool_local_runtime_systemone.decide ~timeout_sec request backend with
+        | Ok result -> ok_response ~tool_name ~start_time [ ("result", result) ]
+        | Error message ->
+            err_response ~tool_name ~start_time
+              ~class_:Tool_result.Dependency_unavailable message
+      in
+      (match ctx.authorize_external_effect with
+       | None -> continue ()
+       | Some authorize -> authorize ~operation:tool_name ~input:args ~continue)
+;;
+
 (* Resolved against the same [definitions] list registration walks, so an
    operation added to [Tool_schemas_local_runtime] is a compile error here. *)
 let find_operation name =
@@ -209,6 +237,8 @@ let dispatch ctx ~name ~args : Core.tool_result option =
       Some (handle_runtime_verify ctx args)
   | Some Tool_schemas_local_runtime.Ollama_probe ->
       Some (handle_runtime_ollama_probe ctx args)
+  | Some Tool_schemas_local_runtime.Systemone_decide ->
+      Some (handle_systemone_decide ctx args)
 
 (* ================================================================ *)
 (* Tool_spec registration                                           *)

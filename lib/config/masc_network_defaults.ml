@@ -47,6 +47,11 @@ let ollama_api_ps_path = "/api/ps"
     tool-level probe path that exercises a model end-to-end. *)
 let ollama_api_generate_path = "/api/generate"
 
+(** Ollama path for structured decisions (/v1/systemone: choice, noul and
+    score questions answered with probabilities). Ollama Cloud serves the
+    same path under https://ollama.com. *)
+let ollama_systemone_path = "/v1/systemone"
+
 (** Default URL for the local OpenAI-compatible runtime.
     Override order: AGENT_CORE_LOCAL_LLM_URL -> local runtime. *)
 let local_llm_default_url =

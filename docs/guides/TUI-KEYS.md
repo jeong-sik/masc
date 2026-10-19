@@ -50,6 +50,7 @@ The command palette is `:`.
 | `p` | open operator approvals and Keeper questions; Esc returns to Work |
 | `v` | Goals, then the two task surfaces: Task Review and Task Verdicts. Not stages of one flow |
 | `Right / Enter` | detail |
+| `H` | in Task detail, extend the observed history with its known earlier page |
 | `Left / Esc` | back |
 | `f` | cycle all / active / completed / dropped |
 | `s` | cycle phase / updated / due |
@@ -675,12 +676,21 @@ count is drawn beyond the available space.
 | `J/K` | in async runs, select an original request; otherwise select a published Skill |
 | `Enter` | in async runs, read the selected original request |
 | `t / T` | from async request detail, read its original source Task and history |
+| `H` | from original Task detail, read earlier stored history; retains the observed prefix on failure |
 | `o / O` | in async runs, edit the original submitter, request ID and target Keeper for an exact lookup |
 | `r` | refresh the open original Task body/history, original request detail, or Tools list |
 | `[ / ]` | change the effective Keeper surface |
 | `c / C` | open $EDITOR on a template for a new Skill; c starts an instruction Skill, C starts a composition Skill |
 | `e` | open the selected SKILL.md in $EDITOR, validate, CAS-save, and publish |
 | `Esc` | return from original Task to request, then request to list; otherwise back to the System surface it hangs off |
+
+Work Task detail and Tools original Task detail use source-bound history pages.
+`H` extends the captured prefix; a failed page retains the same cursor for an
+explicit retry. `r` requests a fresh latest prefix while keeping the prior
+observation visible. The page demand follows terminal height, with no total
+history cap. Exhaustion means the observed stored prefix ended; retained-away
+history and Task completion are separate facts. Tools cadence does not reset a
+paged history. A source change can refuse the cursor; use `r` to read anew.
 
 Task body and history prepare independently. Their notices distinguish waiting
 to start, arranging the text, waiting for the prepared result, and waiting for

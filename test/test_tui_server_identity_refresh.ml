@@ -4100,9 +4100,12 @@ let test_detail_histories_follow_refresh_and_workspace_owners () =
   let required = function Some request -> request | None -> Alcotest.fail "detail read did not acquire its owner" in
   let task_id = "task-original" and goal_id = "goal-original" in
   let task_rows status =
-    Tui_decode.decode_task_history (`List [`Assoc
-      ["type",`String "task_transition";"task",`String task_id;"agent",`String "original-keeper";
-       "ts",`String "2026-10-19T01:00:00Z";"from_status",`String "todo";"to_status",`String status]])
+    let request=Masc.Tui_decode_task_inspection.history_first ~task_id ~limit:1 in
+    Masc.Tui_decode_task_inspection.history_page ~request (`Assoc
+      ["schema",`String "masc.task-history.page/v1";"task_id",`String task_id;
+       "cursor",`Null;"next_cursor",`Null;"events",`List [`Assoc
+        ["type",`String "task_transition";"task",`String task_id;"agent",`String "original-keeper";
+         "ts",`String "2026-10-19T01:00:00Z";"from_status",`String "todo";"to_status",`String status]]])
     |> function Ok rows -> rows | Error detail -> Alcotest.fail detail in
   let goal_rows summary =
     Tui_decode.decode_goal_detail_timeline (`Assoc
@@ -4116,33 +4119,33 @@ let test_detail_histories_follow_refresh_and_workspace_owners () =
   let task_view () = Fetched.view_for ~equal:String.equal state.task_history ~key:task_id in
   let goal_view () = Fetched.view_for ~equal:String.equal state.goal_timeline ~key:goal_id in
   let previous = task_rows "todo" and current = task_rows "in_progress" and repaired = task_rows "done" in
-  let initial = begin_task_history_read state ~task_id |> required in
+  let initial = begin_task_history_read state ~task_id ~limit:1 |> required in
   complete_task_history_read state initial (Error "initial history source unavailable");
-  let old = begin_task_history_read state ~task_id |> required in
-  let owner = begin_task_history_read state ~task_id |> required in
+  let old = begin_task_history_read state ~task_id ~limit:1 |> required in
+  let owner = begin_task_history_read state ~task_id ~limit:1 |> required in
   complete_task_history_read state old (Ok previous);
   Alcotest.(check bool) "no-value retry retains original failure and rejects the old success" true
-    (Fetched.is_current ~equal:String.equal state.task_history owner
+    (Fetched.is_current ~equal:String.equal state.task_history owner.thr_ticket
      && Fetched.in_flight state.task_history && Fetched.value (task_view ()) = None
      && task_view () = Fetched.Failed "initial history source unavailable");
   complete_task_history_read state owner (Error "current retry failed");
   Alcotest.(check bool) "latest no-value failure replaces cause without inventing history" true
     (not (Fetched.in_flight state.task_history) && task_view () = Fetched.Failed "current retry failed");
-  let recovery = begin_task_history_read state ~task_id |> required in
+  let recovery = begin_task_history_read state ~task_id ~limit:1 |> required in
   complete_task_history_read state owner (Ok previous);
   Alcotest.(check bool) "duplicate retired completion cannot settle retry recovery" true
-    (Fetched.is_current ~equal:String.equal state.task_history recovery
+    (Fetched.is_current ~equal:String.equal state.task_history recovery.thr_ticket
      && task_view () = Fetched.Failed "current retry failed");
   complete_task_history_read state recovery (Ok current);
-  let old_refresh = begin_task_history_read state ~task_id |> required in
-  let refresh = begin_task_history_read state ~task_id |> required in
+  let old_refresh = begin_task_history_read state ~task_id ~limit:1 |> required in
+  let refresh = begin_task_history_read state ~task_id ~limit:1 |> required in
   Alcotest.(check bool) "refresh retains original observed history while pending" true
     (Fetched.in_flight state.task_history && Fetched.value (task_view ()) = Some current);
   complete_task_history_read state refresh (Error "history source unavailable");
   complete_task_history_read state old_refresh (Ok previous);
   Alcotest.(check bool) "old success cannot erase latest failure or original history" true
     (task_view () = Fetched.Stale (current,"history source unavailable"));
-  let retry = begin_task_history_read state ~task_id |> required in
+  let retry = begin_task_history_read state ~task_id ~limit:1 |> required in
   Alcotest.(check bool) "retry retains the unrepaired source failure" true
     (Fetched.in_flight state.task_history && task_view () = Fetched.Stale (current,"history source unavailable"));
   complete_task_history_read state retry (Ok repaired);
@@ -4170,7 +4173,7 @@ let test_detail_histories_follow_refresh_and_workspace_owners () =
     (Ok (Tui_decode.Goal_timeline_unavailable (Tui_decode.Approval_queue_failure "goal source unavailable")));
   Alcotest.(check bool) "goal refresh failure retains original observation" true
     (match goal_view () with Fetched.Stale (rows,_) -> rows=original_goal | _ -> false);
-  let retired_task = begin_task_history_read state ~task_id |> required in
+  let retired_task = begin_task_history_read state ~task_id ~limit:1 |> required in
   let retired_goal = begin_goal_timeline_read state ~goal_id |> required in
   withdraw_detail_histories state;
   state.server_identity <- Some (identity "/workspace/replacement");
@@ -4178,12 +4181,12 @@ let test_detail_histories_follow_refresh_and_workspace_owners () =
   complete_goal_timeline_read state retired_goal (Ok (Tui_decode.Goal_timeline_ready original_goal));
   Alcotest.(check bool) "withdrawal retires both original histories" true
     (task_view () = Fetched.Absent && goal_view () = Fetched.Absent);
-  let replacement_task = begin_task_history_read state ~task_id |> required in
+  let replacement_task = begin_task_history_read state ~task_id ~limit:1 |> required in
   let replacement_goal = begin_goal_timeline_read state ~goal_id |> required in
   complete_task_history_read state retired_task (Ok previous);
   complete_goal_timeline_read state retired_goal (Ok (Tui_decode.Goal_timeline_ready original_goal));
   Alcotest.(check bool) "same IDs in replacement workspace cannot borrow retired responses" true
-    (Fetched.is_current ~equal:String.equal state.task_history replacement_task
+    (Fetched.is_current ~equal:String.equal state.task_history replacement_task.thr_ticket
      && Fetched.is_current ~equal:String.equal state.goal_timeline replacement_goal
      && task_view () = Fetched.Loading && goal_view () = Fetched.Loading);
   let replacement = goal_rows "replacement workspace observation" in

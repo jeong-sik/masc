@@ -45,6 +45,15 @@ description: "MASC TUI의 원본 비동기 요청·Task·이력 상세와 파일
 
 ## workspace JSON 조회와 이력
 
+- Work Task 상세와 Tools 원본 Task 이력은 `/api/v1/dashboard/tasks/history/page`를 직접
+  읽는다. 원래 Task·cursor echo·schema·page 수요를 CPU worker에서 검증하고 캡처한
+  불변 prefix에만 붙인다. `H`는 알려진 이전 cursor로 이어 읽고 `r`은 새 prefix를 읽는다.
+  실패는 이전 관측과 같은 재시도 cursor를 남기며 자동으로 legacy 배열을 빌리지 않는다.
+  주기 조회는 읽던 prefix를 초기화하지 않는다. 새 workspace/read authority는 기존
+  owner를 회수하고 재확인 뒤 새 읽기를 시작한다. 이전 결과와 정리가 후속 요청을
+  끝내지 않는다. 본문과 이력은 독립 job이며 이력 demand는 terminal 높이에서 온다.
+  cursor 소진은 관측한 저장 prefix의 끝이며 전체 과거 이력·Task 완료·paint 증거가 아니다.
+
 - Goal timeline·Task history·Keeper Calls·저장된 브라우저 이력 목록은
   `launch_workspace_json_read`에서 원래 workspace identity·endpoint·authority·read epoch를
   캡처하고 공통 요청·취소 소유권을 쓴다. 시작 직전 로컬 소유권·확인 상태를 검사하며

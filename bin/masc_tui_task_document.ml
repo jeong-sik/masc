@@ -4,7 +4,7 @@ module Message_layout = Masc_tui_message_layout
 module Planning_detail = Masc_tui_planning_detail
 
 let history_rows = function
-        | [] -> [ "    (no events recorded)" ]
+        | [] -> [ "    (no events in the observed prefix)" ]
         | events ->
             List.concat_map
               (fun (event : Tui_decode.task_history_event) ->
@@ -29,14 +29,14 @@ let history_rows = function
                     | None -> []))
               events
 
-let history_status_lines ~width ~view ~in_flight =
+let history_status_lines ~width ~(view : Masc.Tui_decode_task_inspection.history Masc_tui_fetched.view) ~in_flight =
   let header = "  HISTORY" in
   let rows =
     match view with
     | Masc_tui_fetched.Ready _ -> []
     | Masc_tui_fetched.Stale (_, detail) ->
         Masc_tui_text_block.rows ~max_cells:width
-          ("    refresh failed; previous history: " ^ Terminal_text.single_line detail)
+          ("    history read failed; previous observation: " ^ Terminal_text.single_line detail)
     | Masc_tui_fetched.Failed detail -> Masc_tui_text_block.rows ~max_cells:width
         ("    load failed: " ^ Terminal_text.single_line detail)
     | Masc_tui_fetched.Absent -> [ "    history not requested" ]
@@ -45,10 +45,15 @@ let history_status_lines ~width ~view ~in_flight =
   let pending =
     if not in_flight then []
     else match view with
-      | Masc_tui_fetched.Ready _ | Masc_tui_fetched.Stale _ -> [ "    refreshing; previous history" ]
+      | Masc_tui_fetched.Ready _ | Masc_tui_fetched.Stale _ -> [ "    reading history; previous observation" ]
       | Masc_tui_fetched.Failed _ -> [ "    retrying; previous failure remains" ]
       | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading -> [] in
-  ("" :: header :: (pending @ rows))
+  let boundary=match Masc_tui_fetched.value view with
+    | None -> []
+    | Some history -> [match history.history_next_cursor with
+        | Some _ -> "    H:read earlier stored history · r:start a fresh prefix"
+        | None -> "    observed stored prefix exhausted · r:read latest history"] in
+  ("" :: header :: (pending @ rows @ boundary))
 
 let body_lines ~cols ~goal_lines (task : Masc_domain.task) =
   let width = max 1 (framed_inner_width cols - 2) in

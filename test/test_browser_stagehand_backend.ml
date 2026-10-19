@@ -143,12 +143,32 @@ let leave_during h verb =
   | Exit -> ()
 ;;
 
+let test_nonblocking_lifecycle_observation () =
+  let gate,release=Eio.Promise.create () in
+  with_backend ~configure:(fun behaviour -> behaviour.open_gate<-Some gate;behaviour.close<-Silent)
+    (fun h -> Eio.Switch.run (fun sw ->
+      let opening=Eio.Fiber.fork_promise ~sw (fun ()->Backend.execute h.backend open_) in
+      h.settle ();
+      check bool "opening is observed without waiting for the opener" true
+        (Backend.session_observation h.backend=Lane.Browser_changing);
+      Eio.Promise.resolve release ();ignore (data (Eio.Promise.await_exn opening));
+      check bool "owned browser is open" true (Backend.session_observation h.backend=Lane.Browser_open);
+      let closing=Eio.Fiber.fork_promise ~sw (fun ()->Backend.execute h.backend Lane.Session_close) in
+      h.settle ();
+      check bool "closing is observed without waiting for the runtime" true
+        (Backend.session_observation h.backend=Lane.Browser_changing);
+      ignore (data (Eio.Promise.await_exn closing));
+      check bool "released browser is closed" true (Backend.session_observation h.backend=Lane.Browser_closed)))
+;;
+
 let test_lifecycle () =
   with_backend
   @@ fun h ->
   check bool "closed at start" false (is_open h);
+  check bool "registration alone is not open" true (Backend.session_observation h.backend=Lane.Browser_closed);
   check bool "open starts a session" false (flag "reused" (data (Backend.execute h.backend open_)));
   check bool "a second open reuses it" true (flag "reused" (data (Backend.execute h.backend open_)));
+  check bool "confirmed owned session is observed" true (Backend.session_observation h.backend=Lane.Browser_open);
   let status = data (Backend.execute h.backend Lane.Session_status) in
   check int "status names the browser pid" 42 Yojson.Safe.Util.(member "pid" status |> to_int);
   (match data (Backend.execute h.backend Lane.Tabs_list) with
@@ -158,6 +178,7 @@ let test_lifecycle () =
   check string "the runtime was asked to close" "closed" (text "runtime" closed);
   check bool "the browser stopped" true (the_session h).stopped;
   check bool "closed again" false (is_open h);
+  check bool "stopped owned browser is closed" true (Backend.session_observation h.backend=Lane.Browser_closed);
   check bool "closing a closed session answers closed" true
     (flag "closed" (data (Backend.execute h.backend Lane.Session_close)))
 ;;
@@ -515,6 +536,7 @@ let () =
   run "browser_stagehand_backend" [
     "lifecycle", [
       test_case "open, reuse, list, close" `Quick test_lifecycle;
+      test_case "lifecycle observations never wait on browser I/O" `Quick test_nonblocking_lifecycle_observation;
       test_case "a page verb needs a session" `Quick test_page_verb_without_a_session;
       test_case "a failed or raising open leaves the backend usable" `Quick test_open_failures;
       test_case "an open finishes after its caller leaves" `Quick test_open_outlives_its_caller;

@@ -6,6 +6,9 @@ type remote_error = Invalid_session_id | No_such_window | No_such_alert | Unexpe
 type error = Transport of string | Protocol of string | Remote of { code : remote_error; message : string }
 type request = method_:Masc_http_client.Pool.http_method -> path:string -> body:Yojson.Safe.t option -> (Yojson.Safe.t, error) result
 type t
+val session_observation : t -> Browser_lane.session_observation
+(** Nonblocking local lifecycle observation. Registration or a driver process
+    alone does not establish an open Firefox session. *)
 val create : ?binary:string -> start_downloads:Browser_downloads.start -> request:request -> unit -> t
 (** [binary] is forwarded verbatim to moz:firefoxOptions.binary. Missing means
     geckodriver discovers its default Firefox; an invalid explicit path fails. *)

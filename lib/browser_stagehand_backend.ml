@@ -37,10 +37,20 @@ type 'session t =
   ; tabs : Executor.Tabs.t  (* for the backend's life, so an id is never reused *)
   ; verbs : Eio.Semaphore.t  (* one page verb at a time *)
   ; mutable state : 'session state
+  ; observed_session : Browser_lane.session_observation Atomic.t
   ; mutable last_end : string option  (* why the last session stopped working, until the next open *)
   }
 
 let backend_name = "chromium-stagehand"
+
+let session_observation t = Atomic.get t.observed_session
+let set_state t state =
+  t.state <- state;
+  Atomic.set t.observed_session (match state with
+    | Closed -> Browser_lane.Browser_closed
+    | Opening | Closing -> Browser_lane.Browser_changing
+    | Open opened -> match !(opened.ended) with
+      | None -> Browser_lane.Browser_open | Some _ -> Browser_lane.Browser_unknown)
 
 (* The runtime is asked to close before its browser stops. The browser stops
    either way, so its answer is waited for only this long. *)
@@ -97,7 +107,7 @@ let run_session t ~headless ~opened ~resolve_opened =
   let abandoned_answers = ref 0 and abandoned_answered = Eio.Condition.create () in
   let log event =
     note_end ended event;
-    (match !ended with Some _ -> !release_on_end () | None -> ());
+    (match !ended with Some _ -> Atomic.set t.observed_session Browser_lane.Browser_unknown; !release_on_end () | None -> ());
     (match event with
      | Session.Cancelled_call_answered _ | Session.Abandoned_call_ended _ ->
        incr abandoned_answers;
@@ -117,7 +127,7 @@ let run_session t ~headless ~opened ~resolve_opened =
   in
   let finish () =
     t.last_end <- !ended;
-    t.state <- Closed;
+    set_state t Closed;
     Eio.Promise.resolve resolve_stopped ()
   in
   (match
@@ -126,13 +136,13 @@ let run_session t ~headless ~opened ~resolve_opened =
       | Error detail ->
         (* The browser may be running; it stops as this switch ends, and
            until then the backend is closing, not opening. *)
-        t.state <- Closing;
+        set_state t Closing;
         not_opened detail
       | Ok (session, _init) ->
         let released, release = Eio.Promise.create () in
         Executor.Tabs.forget_pages t.tabs;
         t.last_end <- None;
-        t.state <- Open { session; release; stopped; ended; abandoned_answers; abandoned_answered };
+        set_state t (Open { session; release; stopped; ended; abandoned_answers; abandoned_answered });
         release_on_end := (fun () -> release_session release);
         (* An end that came between attach and now. *)
         (match !ended with Some _ -> !release_on_end () | None -> ());
@@ -159,7 +169,7 @@ let open_session t ~headless =
   | Open { ended = { contents = None }; _ } ->
     answered (`Assoc [ "opened", `Bool true; "reused", `Bool true; "backend", `String backend_name ])
   | Closed ->
-    t.state <- Opening;
+    set_state t Opening;
     let opened, resolve_opened = Eio.Promise.create () in
     Eio.Fiber.fork_daemon ~sw:t.sw (fun () -> run_session t ~headless ~opened ~resolve_opened);
     (match Eio.Promise.await opened with
@@ -172,7 +182,7 @@ let close_session t =
   | Closed -> answered (`Assoc [ "closed", `Bool true ])
   | Opening | Closing -> in_transition
   | Open opened ->
-    t.state <- Closing;
+    set_state t Closing;
     (* The browser stops whatever the runtime answers: a close that raised
        would otherwise leave the backend Closing, and every later open and
        close "ask again", until the server stops. *)
@@ -259,7 +269,7 @@ let is_sentence = function
 let retire_sentence_session t expected =
   match t.state with
   | Open current when expected == current ->
-    t.state <- Closing;
+    set_state t Closing;
     release_session current.release;
     Eio.Promise.await current.stopped
   | Closed | Opening | Closing | Open _ -> ()
@@ -337,6 +347,7 @@ let create ~sw ~clock ~open_session ~call ~pid ~log =
     ; tabs = Executor.Tabs.create ()
     ; verbs = Eio.Semaphore.make 1
     ; state = Closed
+    ; observed_session = Atomic.make Browser_lane.Browser_closed
     ; last_end = None
     }
   in

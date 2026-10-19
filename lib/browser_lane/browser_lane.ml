@@ -457,6 +457,11 @@ let active_clients () =
     Hashtbl.fold (fun _ client acc -> client.info :: acc) clients [])
   |> List.sort (fun left right -> String.compare
        (client_id_to_string left.client_id) (client_id_to_string right.client_id))
+let connected_clients () =
+  Eio.Mutex.use_ro clients_mutex (fun () ->
+    Hashtbl.fold (fun _ client found -> if connected client then client.info::found else found) clients [])
+  |> List.sort (fun left right -> String.compare
+      (client_id_to_string left.client_id) (client_id_to_string right.client_id))
 let client_interactions client = Eio.Mutex.use_ro client.mutex (fun () ->
   Hashtbl.fold (fun _ work acc -> work::acc) client.interactions [])
   |> List.sort (fun a b -> String.compare a.request_id b.request_id)
@@ -794,6 +799,17 @@ let issue_stagehand ~verb ~timeout_sec =
 (* The lanes whose browser the server owns; sessions and navigation belong
    to them, and the live browser belongs to the operator. *)
 type server_lane = Server_automation | Server_stagehand
+
+type session_observation = Browser_closed | Browser_open | Browser_changing | Browser_unknown
+let automation_session_observer : (unit -> session_observation) option Atomic.t = Atomic.make None
+let stagehand_session_observer : (unit -> session_observation) option Atomic.t = Atomic.make None
+let session_observer = function
+  | Server_automation -> automation_session_observer
+  | Server_stagehand -> stagehand_session_observer
+let install_server_session_observer lane observer = Atomic.set (session_observer lane) observer
+let server_session_observation lane = match Atomic.get (session_observer lane) with
+  | None -> Browser_unknown
+  | Some observe -> observe ()
 
 let server_lane_of_name : Lane_name.t -> server_lane option = function
   | Lane_name.Automation -> Some Server_automation

@@ -6,7 +6,7 @@ type error = Transport of string | Protocol of string | Remote of { code : remot
 type request = method_:Masc_http_client.Pool.http_method -> path:string -> body:Yojson.Safe.t option -> (Yojson.Safe.t, error) result
 type pointer_state = Released | Release_required
 type session = { mutable pointer_state : pointer_state; uploads : Browser_lane.Upload_lease.owner; id : string; mutable handles : (string * int) list; mutable download_contexts : (string * int) list; mutable downloads : (Browser_downloads.connection, string) result }
-type t = { start_downloads : Browser_downloads.start; binary : string option; request : request; mutex : Eio.Mutex.t; active : int Atomic.t; mutable session : session option; mutable next_tab : int }
+type t = { start_downloads : Browser_downloads.start; binary : string option; request : request; mutex : Eio.Mutex.t; active : int Atomic.t; mutable session : session option; mutable next_tab : int; observed_session : Browser_lane.session_observation Atomic.t }
 let ( let* ) = Result.bind
 let field key = function `Assoc fields -> List.assoc_opt key fields | _ -> None
 let string_field key json = match field key json with
@@ -46,7 +46,8 @@ let decode_response ~status body =
         | Some (`String message) -> Ok message
         | _ -> Error (Protocol "missing string field: message") in
       Error (Remote { code = remote_error_of_code code; message })
-let create ?binary ~start_downloads ~request () = { start_downloads; binary; request; mutex = Eio.Mutex.create (); active = Atomic.make 0; session = None; next_tab = 1 }
+let create ?binary ~start_downloads ~request () = { start_downloads; binary; request; mutex = Eio.Mutex.create (); active = Atomic.make 0; session = None; next_tab = 1; observed_session = Atomic.make Browser_lane.Browser_closed }
+let session_observation t = Atomic.get t.observed_session
 let path session suffix = "/session/" ^ Uri.pct_encode session.id ^ suffix
 let release_resources session =
   Result.iter (fun (d : Browser_downloads.connection) -> d.close ()) session.downloads;
@@ -54,8 +55,9 @@ let release_resources session =
 let call t session method_ suffix body =
   let result = t.request ~method_ ~path:(path session suffix) ~body in
   (match result with
-   | Error (Remote { code = Invalid_session_id; _ }) -> t.session <- None; release_resources session
-   | Ok _ | Error (Transport _) | Error (Protocol _)
+   | Error (Remote { code = Invalid_session_id; _ }) -> t.session <- None; Atomic.set t.observed_session Browser_lane.Browser_closed; release_resources session
+   | Error (Transport _ | Protocol _) -> Atomic.set t.observed_session Browser_lane.Browser_unknown
+   | Ok _ -> (match session.downloads with Ok _ -> Atomic.set t.observed_session Browser_lane.Browser_open | Error _ -> ())
    | Error (Remote { code = No_such_window | No_such_alert | Unexpected_alert_open | Other _; _ }) -> ());
   result
 (* State changes below never yield: cancellation can interrupt remote I/O but
@@ -76,11 +78,15 @@ let close_unlocked ?request t = match t.session with
   | None -> Ok ()
   | Some session ->
     let request = Option.value ~default:t.request request in
-    let result = request ~method_:`DELETE ~path:(path session "") ~body:None in
+    Atomic.set t.observed_session Browser_lane.Browser_changing;
+    let result = match request ~method_:`DELETE ~path:(path session "") ~body:None with
+      | result -> result
+      | exception exn -> Atomic.set t.observed_session Browser_lane.Browser_unknown; raise exn in
     match result with
-    | Ok _ | Error (Remote { code = Invalid_session_id; _ }) -> t.session <- None; release_resources session; Ok ()
+    | Ok _ | Error (Remote { code = Invalid_session_id; _ }) -> t.session <- None; Atomic.set t.observed_session Browser_lane.Browser_closed; release_resources session; Ok ()
     | Error ((Transport _ | Protocol _
-             | Remote { code = No_such_window | No_such_alert | Unexpected_alert_open | Other _; _ }) as error) -> Error error
+             | Remote { code = No_such_window | No_such_alert | Unexpected_alert_open | Other _; _ }) as error) ->
+      Atomic.set t.observed_session Browser_lane.Browser_unknown; Error error
 let close ?request t = with_session_lock t (fun () -> close_unlocked ?request t)
 let session t = match t.session with
   | Some session ->
@@ -231,7 +237,7 @@ let execute_action t action =
       match interaction with
       | Browser_lane.Action.Close_tab ->
         session.handles <- List.filter (fun (_,known) -> known <> id) session.handles;
-        (match result with `List [] -> t.session <- None; release_resources session | _ -> ());
+        (match result with `List [] -> t.session <- None; Atomic.set t.observed_session Browser_lane.Browser_closed; release_resources session | _ -> ());
         Ok (`Assoc ["tabId",`Int id;"closed",`Bool true])
       | Browser_lane.Action.Dismiss_dialog | Browser_lane.Action.Back | Browser_lane.Action.Forward
       | Browser_lane.Action.Reload | Browser_lane.Action.Click _ | Browser_lane.Action.Fill _
@@ -257,7 +263,10 @@ let driver_status t =
 let execute_unlocked t = function
   | Browser_lane.Session_open { headless } ->
     (match t.session with
-     | Some _ -> let* _ = session t in Ok (`Assoc ["opened", `Bool true; "reused", `Bool true])
+     | Some _ ->
+       let* _ = session t |> Result.map_error (fun error ->
+         (match t.session with None -> () | Some _ -> Atomic.set t.observed_session Browser_lane.Browser_unknown);error) in
+       Ok (`Assoc ["opened", `Bool true; "reused", `Bool true])
      | None ->
        let args = if Option.value ~default:true headless then [`String "-headless"] else [] in
        let caps = `Assoc ["capabilities", `Assoc ["alwaysMatch", `Assoc
@@ -267,7 +276,13 @@ let execute_unlocked t = function
           "moz:firefoxOptions", `Assoc (("args", `List args) ::
             (Option.map (fun path -> "binary", `String path) t.binary |> Option.to_list))]]] in
 
-       let* result = t.request ~method_:`POST ~path:"/session" ~body:(Some caps) in
+       Atomic.set t.observed_session Browser_lane.Browser_changing;
+       let* result = match t.request ~method_:`POST ~path:"/session" ~body:(Some caps) with
+         | Ok result -> Atomic.set t.observed_session Browser_lane.Browser_unknown;Ok result
+         | Error error ->
+           Atomic.set t.observed_session (match error with Remote _ -> Browser_lane.Browser_closed
+             | Transport _ | Protocol _ -> Browser_lane.Browser_unknown);Error error
+         | exception exn -> Atomic.set t.observed_session Browser_lane.Browser_unknown;raise exn in
        let* id = string_field "sessionId" result in
        let owned = { pointer_state = Released; id; handles = []; uploads = Browser_lane.Upload_lease.create_owner (); download_contexts = []; downloads = Error "BiDi setup incomplete; close this session before retrying" } in
        t.session <- Some owned;
@@ -286,6 +301,7 @@ let execute_unlocked t = function
            (t.start_downloads ~session_id:id ~websocket_url) in
          owned.downloads <- Ok downloads;
          committed := true;
+         Atomic.set t.observed_session Browser_lane.Browser_open;
          Ok (`Assoc ["opened", `Bool true; "reused", `Bool false; "backend", `String "firefox-webdriver"])))
   | Browser_lane.Session_close ->
     let* () = close_unlocked t in Ok (`Assoc ["closed", `Bool true])

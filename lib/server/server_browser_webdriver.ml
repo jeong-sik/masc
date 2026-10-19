@@ -227,12 +227,15 @@ let prepare_start ~cleanup ~sw ~env ~base_path ~configuration =
             ~start_downloads:(Browser_bidi_downloads.start ~sw ~env ~root
               ~publish:(Browser_download_artifact.publish ~base_path)) ~request:(request ~pool ~clock ~endpoint) () in
           Browser_lane.install_automation_executor (Some (Browser_webdriver.execute driver_client));
+          Browser_lane.install_server_session_observer Browser_lane.Server_automation
+            (Some (fun () -> Browser_webdriver.session_observation driver_client));
           Browser_lane.install_automation_document_observer
             (Some (Browser_webdriver.observe_document_if_idle driver_client));
           (* Registered after the driver's stop, so it runs before it: the
              session is closed while the driver can still close its browser. *)
           Eio.Switch.on_release sw (fun () ->
             Browser_lane.install_automation_executor None;
+            Browser_lane.install_server_session_observer Browser_lane.Server_automation None;
             Browser_lane.install_automation_document_observer None;
             match close_with_fresh_pool ~env ~endpoint driver_client with
             | Ok () -> ()

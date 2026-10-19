@@ -37,7 +37,7 @@ Opening a phrase or imported MIDI positions the cursor at the earliest note in
 its first nonempty track, so a bass or high-register part is visible immediately.
 Empty documents keep the C4 insertion position. Choosing an independent MIDI
 pattern positions at that pattern's own first note. Later edits and undo/redo
-retain the user's position; overlapping notes on different channels still require
+retain the user's valid position; overlapping notes on different channels still require
 an explicit channel or event selection. Opening a document does not change it.
 
 Chord recognition presents Tonal's candidate list for notes sounding at the cursor,

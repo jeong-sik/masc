@@ -170,6 +170,14 @@ Graphical notation still uses `/score` or the ordinary score-viewer entry.
 
 From `/score`, press **p** to open the piano-roll editor. It also opens directly
 with `masc-alphatex --sequence`; reopen a saved document with `--project song.json`.
+The score's **p** and **a** keys carry the current score and selected track (or
+all tracks) into MIDI editing and an arrangement respectively. The conversion
+uses alphaTab's SMF1 performance, retaining its tempo map, channels and expression
+alongside the original alphaTex and track selection. These are editable MIDI
+experiments: edits do not rewrite the original notation, and SMF1 does not retain
+all simultaneous per-note bend effects. Conversion errors remain errors instead
+of opening an empty project. MIDI source audition needs an explicit MIDI output
+or a verified VST instrument.
 Projects save under `./music-projects` by default (`--project-root` changes this).
 An existing recording remains a separate take; the editor's **r** opens the capture
 screen and returns to the same phrase. It does not yet overdub into the project.
@@ -517,6 +525,12 @@ phrase placed at beat zero. Its tempo, meter, audible MIDI and editable draft
 travel together. `q` saves that arrangement and returns to the same phrase draft,
 including its cursor and undo history. Later phrase edits create a new snapshot;
 existing backing does not change silently.
+
+The original MIDI editor also supports `:arrange`: its complete edited source,
+tempo map, expression and MIDI port bindings travel with the region. Independent
+SMF2 performances require an explicit `:pattern N`; only that performance is
+placed, while the asset retains the whole original file. Score-derived sources
+retain the original alphaTex and selected tracks through save and reopen.
 
 In an arrangement, `:phrase` opens a new phrase laboratory. `:edit-midi ASSET`
 opens a generated asset's editable phrase or an imported asset's original MIDI

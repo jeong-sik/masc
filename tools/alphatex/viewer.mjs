@@ -32,6 +32,7 @@ const { values, positionals } = parseArgs({
     midi: { type: 'string' },
     'state-dir': { type: 'string' },
     sequence: { type: 'boolean' },
+    arrange: { type: 'boolean' },
     'midi-file': { type: 'string' },
     'midi-pattern': { type: 'string' },
     project: { type: 'string' },
@@ -42,10 +43,11 @@ const { values, positionals } = parseArgs({
 
 if (values.help) {
   console.log('masc-alphatex [file.atex] [--bundle snapshot.json] [--index N]\n'
-    + '  TUI score viewer: arrows/j/k scroll, +/- zoom, t tracks, Space choose/play/pause, p sequencer, r recording, s stop, q exit.\n'
+    + '  TUI score viewer: arrows/j/k scroll, +/- zoom, t tracks, Space choose/play/pause, p sequencer, a arrangement, r recording, s stop, q exit.\n'
     + '  i chooses instrument/preset, e opens its native sound browser, l toggles repeat.\n'
     + '  --state-dir stores native selection, saved presets, renders and Lane snapshot.\n'
     + '  --sequence opens a new phrase editor; --project song.json reopens one; --project-root sets its folder.\n'
+    + '  --arrange opens MIDI/WAV region editing; --project also reopens saved arrangements.\n'
     + '  --midi-file song.mid imports a source for editing/export/MIDI audition; --midi-pattern N selects an SMF2 pattern.\n'
     + '  --output UID selects sequencer audio output; :output UID changes it in the editor.\n'
     + '  --midi-output=ID selects MIDI output; source Space plays/stops, phrase Space plays/pauses; :audio returns to audio.\n'
@@ -57,7 +59,11 @@ if (values.help) {
 }
 
 try {
-  if (values.sequence || values.project || values['midi-file']) {
+  if ([values.sequence, values.arrange, values.project, values['midi-file']].filter(Boolean).length > 1) throw new Error('Choose --sequence, --arrange, --project or --midi-file')
+  if (values.arrange) {
+    const { viewArrangement } = await import('./arrangement-tui.mjs')
+    await viewArrangement({ root: values['project-root'] })
+  } else if (values.sequence || values.project || values['midi-file']) {
     const { viewSequencer } = await import('./sequencer-tui.mjs')
     const initialDocument = values['midi-file'] ? (await import('./midi-source.mjs')).importMidiSource(readFileSync(values['midi-file']), { name: basename(values['midi-file']) }) : undefined
     await viewSequencer({ path: values.project, root: values['project-root'], soundfontPath: values.soundfont,
@@ -229,7 +235,7 @@ async function viewScores(sources, initialIndex) {
     }
     output += `\x1b[${rows};1H${fit(picker.view
       ? pickerFooter(picker.view)
-      : '↑↓/j k:scroll  [ ]:system  +/-:zoom  t:tracks  ←→:score  v:source  Space:choose/play/pause  i:instrument  l:repeat  p:sequencer  r:recording  s:stop  q:back')}`
+      : '↑↓/j k:scroll  [ ]:system  +/-:zoom  t:tracks  ←→:score  v:source  Space:choose/play/pause  i:instrument  l:repeat  p:sequencer  a:arrange  r:recording  s:stop  q:back')}`
     write(output)
   }
   function render() {
@@ -419,7 +425,7 @@ async function viewScores(sources, initialIndex) {
     }
     if (key.ctrl && key.name === 'c' || ['escape', 'q'].includes(key.name)) { finish(); return }
     switch (key.name) {
-      case 'p': case 'r': {
+      case 'p': case 'a': case 'r': {
         if (sessionTask) return
         stop()
         write(retire(tmux))
@@ -432,6 +438,9 @@ async function viewScores(sources, initialIndex) {
               if (!closed) await viewSequencer({ root: values['project-root'], sessionRoot: values['session-root'],
                 soundfontPath: values.soundfont, input: values.input, midi: values.midi, output: values.output,
                 midiOutput: values['midi-output'], embedded: true, signal: sessionAbort.signal })
+            } else if (key.name === 'a') {
+              const { viewArrangement } = await import('./arrangement-tui.mjs')
+              if (!closed) await viewArrangement({ root: values['project-root'], embedded: true, signal: sessionAbort.signal })
             } else {
               const { viewSession } = await import('./music-session.mjs')
               if (!closed) await viewSession({ root: values['session-root'], input: values.input, midi: values.midi, embedded: true, signal: sessionAbort.signal })

@@ -7,6 +7,17 @@ The endpoint must be loopback. MASC starts that Firefox only for a workspace
 whose `runtime.toml` names it (below); it does not copy a profile, change
 preferences, or obtain application tokens.
 
+## Inspecting unavailable tabs
+
+`tabs.list` retains readable tabs when another context refuses page scripts.
+A partial answer has `tabs`, `complete: false`, and `unavailableTabs`. Each
+unavailable row keeps its connection-local `id`, `index`, Firefox's error,
+and the URL from `browsingContext.getTree` when provided. That URL is an
+inventory observation, not proof that its document can be read or controlled.
+An unreadable start page does not prevent using an observed ordinary HTTP(S)
+tab or opening a fresh one on the same connection. Never replace a user's
+existing tab merely to make the listing complete.
+
 ## Attaching a connection
 
 ### Let the MASC server start both

@@ -56,7 +56,7 @@ let test_context_identity () =
   let peer=peer_of command in
   let ids () = match Peer.dispatch peer ~verb:Peer.Tabs_list (obj []) with
     | Ok (`List rows) -> List.map (fun row->Yojson.Safe.Util.(row |> member "id" |> to_int)) rows
-    | _ -> fail "tabs failed" in
+    | Ok _ | Error (Peer.Before_effect _ | Peer.Partial_failure _ | Peer.Outcome_unknown _) -> fail "tabs failed" in
   check (list int) "same URL does not merge opaque contexts" [1;2] (ids ());
   contexts:=["b"];check (list int) "remaining context keeps identity" [2] (ids ());
   contexts:=["b";"c"];check (list int) "closed context ID never reused" [2;3] (ids ())
@@ -64,7 +64,7 @@ let test_context_identity () =
 let test_unreadable_tab_does_not_hide_other_tabs () =
   let peer = peer_of (fun method_ args -> match method_ with
     | "browsingContext.getTree" ->
-      Ok (obj ["contexts", `List [obj ["context", `String "protected"];
+      Ok (obj ["contexts", `List [obj ["context", `String "protected"; "url", `String "about:home"];
                                    obj ["context", `String "work"]]])
     | "script.callFunction" ->
       (match Yojson.Safe.Util.(args |> member "target" |> member "context" |> to_string) with
@@ -85,7 +85,9 @@ let test_unreadable_tab_does_not_hide_other_tabs () =
     check (list int) "unreadable tab is not silently dropped" [1]
       (List.map (fun row -> row |> member "id" |> to_int) unavailable);
     check string "browser's refusal survives" "script.callFunction: BiDi command rejected: unsupported operation"
-      (List.hd unavailable |> member "error" |> to_string)
+      (List.hd unavailable |> member "error" |> to_string);
+    check string "context URL survives even without a script realm" "about:home"
+      (List.hd unavailable |> member "url" |> to_string)
 
 let test_active_tab_after_unreadable_tab () =
   let peer = peer_of (fun method_ args -> match method_ with

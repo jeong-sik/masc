@@ -198,6 +198,8 @@ let open_tab t url =
   | `Assoc fields -> Ok (obj (("tabId",`Int id)::("action",str "open_tab")::("created",`Bool true)::fields))
   | _ -> Error (partial "invalid new-tab summary")
 
+type tab_context = { context : string; id : int; url : string option }
+
 let tree t =
   let* result = command t "browsingContext.getTree" (obj []) in
   match field "contexts" result with
@@ -206,18 +208,22 @@ let tree t =
       | [] -> Ok (List.rev acc)
       | row::rest -> let* context = string "context" row in
         let id = remember_context t context in
-        collect ((context,id)::acc) rest in
+        let* url = match field "url" row with
+          | None -> Ok None
+          | Some (`String url) -> Ok (Some url)
+          | Some _ -> Error "invalid BiDi context URL" in
+        collect ({context;id;url}::acc) rest in
     collect [] rows
   | _ -> Error "invalid BiDi context tree"
 let resolve t args =
   let* current = tree t in
   match field "tabId" args with
-  | Some (`Int id) -> (match List.find_opt (fun (_,n) -> n=id) current with
-      | Some (context,_) -> Ok (context,id) | None -> Error "browser tab is no longer present")
+  | Some (`Int id) -> (match List.find_opt (fun tab -> tab.id=id) current with
+      | Some {context;_} -> Ok (context,id) | None -> Error "browser tab is no longer present")
   | None ->
     let rec active unavailable = function
       | [] -> Error (String.concat "; " ("no active browser context" :: List.rev unavailable))
-      | (context,id)::rest ->
+      | {context;id;url=_}::rest ->
         (match tab_metadata t context with
          | Error detail -> active (Printf.sprintf "tab %d: %s" id detail :: unavailable) rest
          | Ok p -> match field "active" p with
@@ -306,11 +312,12 @@ let dispatch ?actor ?request_id t ~verb args =
           | [] -> tabs
           | _ :: _ -> obj ["tabs",tabs;"complete",`Bool false;
               "unavailableTabs",`List (List.rev unavailable)])
-      | (context,id)::rest ->
+      | {context;id;url}::rest ->
         (match tab_metadata t context with
          | Error detail ->
            rows (index+1) acc
-             (obj ["id",`Int id;"index",`Int index;"error",str detail]::unavailable) rest
+             (obj (["id",`Int id;"index",`Int index;"error",str detail]
+               @ match url with Some url -> ["url",str url] | None -> [])::unavailable) rest
          | Ok p ->
            let* url=pre (string "url" p) in
            let* title=pre (required "title" p) in

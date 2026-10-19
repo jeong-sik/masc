@@ -395,7 +395,7 @@ component's placement with the chosen pulse's exact signed residual. Positive
 values advance audio; negative values delay it. This is one undoable edit and
 never moves MIDI. The source input UID/rate, unmonitored capture and selected
 input/output channels must match. Playback also requires the measured output
-UID, sample rate and native render quantum. To choose different channels or a
+UID, sample rate and CoreAudio hardware buffer size. To choose different channels or a
 manual value, use `:capture-offset 0` (or another manual offset) first.
 
 The portable document embeds the original measurement record, inspected

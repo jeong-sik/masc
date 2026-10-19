@@ -36,7 +36,7 @@ export function validateCalibrationProfile(profile) {
       || measured.inputChannel !== profile.input?.channel || measured.outputChannel !== profile.output?.channel
       || measured.maxLagMs !== profile.maxLagMs || measured.playback?.device?.id !== profile.output?.id
       || measured.playback?.clock?.sampleRate !== profile.output?.sampleRate
-      || measured.playback?.clock?.renderQuantum !== profile.output?.renderQuantum
+      || measured.playback?.clock?.bufferFrames !== profile.output?.bufferFrames
       || measured.playback?.clock?.anchor !== profile.clock?.anchor || measured.playback?.clock?.numer !== profile.clock?.numer
       || measured.playback?.clock?.denom !== profile.clock?.denom || measured.matches?.length !== 2
       || measured.reference?.pulseFrames?.length !== 2) throw new Error('Calibration context disagrees with its retained measurement')
@@ -47,8 +47,8 @@ export function validateCalibrationProfile(profile) {
   }
   if (Object.keys(profile.input).length !== 4 || Object.keys(profile.output).length !== 4 || Object.keys(profile.clock ?? {}).length !== 3
       || profile.input.monitoring !== 'off') throw new Error('Calibration requires an unmonitored capture and exact device context')
-  integer(profile.input.sampleRate, 1); integer(profile.output.renderQuantum, 1)
-  if (profile.output.renderQuantum > 0xffffffff) throw new Error('Calibration render quantum exceeds the native frame range')
+  integer(profile.input.sampleRate, 1); integer(profile.output.bufferFrames, 1)
+  if (profile.output.bufferFrames > 0xffffffff) throw new Error('Calibration hardware buffer size exceeds the native frame range')
   integer(profile.clock?.numer, 1); integer(profile.clock.denom, 1); host(profile.clock.anchor)
   if (!Array.isArray(profile.pulses) || profile.pulses.length !== 2) throw new Error('Calibration requires both experiment pulses')
   for (const [index, pulse] of profile.pulses.entries()) {

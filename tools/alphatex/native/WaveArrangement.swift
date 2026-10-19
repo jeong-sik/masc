@@ -88,11 +88,11 @@ struct CaptureAudioChannel: Decodable {
 struct CalibrationOutput: Decodable {
     let id: String
     let sampleRate: Double
-    let renderQuantum: AVAudioFrameCount
-    func validate(deviceUID: String, rate: Double, quantum: AVAudioFrameCount) throws {
-        guard !id.isEmpty, sampleRate.isFinite, sampleRate > 0, renderQuantum > 0,
-              id == deviceUID, sampleRate == rate, renderQuantum == quantum else {
-            throw AudioFailure("calibration output device, sample rate or render quantum changed; remeasure or choose a manual offset")
+    let bufferFrames: AVAudioFrameCount
+    func validate(deviceUID: String, rate: Double, frames: AVAudioFrameCount) throws {
+        guard !id.isEmpty, sampleRate.isFinite, sampleRate > 0, bufferFrames > 0,
+              id == deviceUID, sampleRate == rate, bufferFrames == frames else {
+            throw AudioFailure("calibration output device, sample rate or hardware buffer size changed; remeasure or choose a manual offset")
         }
     }
 }
@@ -156,7 +156,7 @@ struct Plan: Decodable {
             }
             if let calibrated = region.calibrationOutput {
                 guard region.component == .audio, region.audioChannel != nil else { throw AudioFailure("calibration requires a routed audio component") }
-                try calibrated.validate(deviceUID: calibrated.id, rate: calibrated.sampleRate, quantum: calibrated.renderQuantum)
+                try calibrated.validate(deviceUID: calibrated.id, rate: calibrated.sampleRate, frames: calibrated.bufferFrames)
             }
             let total: AVAudioFramePosition
             if let clock = region.captureClock {
@@ -378,6 +378,7 @@ final class ArrangementTransport {
     let engine = AVAudioEngine()
     let capacity: AVAudioFrameCount
     let renderQuantum: AVAudioFrameCount
+    let bufferFrames: UInt32
     let renderChannels: AVAudioChannelCount
     var voices: [Voice] = []
     var active = Set<String>()
@@ -395,6 +396,8 @@ final class ArrangementTransport {
     init(plan: Plan, output: String?) throws {
         try plan.validate(); self.plan = plan; device = try OutputDevice(output)
         try engine.outputNode.auAudioUnit.setDeviceID(device.object)
+        bufferFrames = try deviceNumber(device.object, kAudioDevicePropertyBufferFrameSize)
+        guard bufferFrames > 0 else { throw AudioFailure("output hardware buffer size is unavailable") }
         renderQuantum = engine.outputNode.auAudioUnit.maximumFramesToRender
         guard renderQuantum > 0 else { throw AudioFailure("output render quantum is unavailable") }
         let block = AVAudioFrameCount(64 * 1024 / MemoryLayout<Float>.size)
@@ -416,7 +419,7 @@ final class ArrangementTransport {
         renderChannels = destinationFormat.channelCount
         guard renderChannels > 0, Int(renderChannels) <= device.channels else { throw AudioFailure("selected audio graph output channels are unavailable") }
         for region in plan.regions {
-            try region.calibrationOutput?.validate(deviceUID: device.uid, rate: destinationFormat.sampleRate, quantum: renderQuantum)
+            try region.calibrationOutput?.validate(deviceUID: device.uid, rate: destinationFormat.sampleRate, frames: bufferFrames)
         }
         for region in plan.regions {
             guard let asset = plan.assets.first(where: { $0.id == region.asset }) else { throw AudioFailure("missing WAV source") }
@@ -461,7 +464,7 @@ final class ArrangementTransport {
         if state == .playing && !engine.isRunning { throw AudioFailure("audio engine stopped after output configuration changed") }
         for region in plan.regions {
             try region.calibrationOutput?.validate(deviceUID: device.uid, rate: engine.outputNode.outputFormat(forBus: 0).sampleRate,
-                                                  quantum: engine.outputNode.auAudioUnit.maximumFramesToRender)
+                                                  frames: try deviceNumber(device.object, kAudioDevicePropertyBufferFrameSize))
         }
     }
     func currentTime() -> Double {
@@ -476,7 +479,7 @@ final class ArrangementTransport {
             var timebase = mach_timebase_info_data_t(); mach_timebase_info(&timebase)
             var clock: [String: Any] = ["kind": "mach-host-time", "anchor": String(anchor), "position": position,
                 "numer": timebase.numer, "denom": timebase.denom,
-                "renderQuantum": renderQuantum, "sampleRate": engine.outputNode.outputFormat(forBus: 0).sampleRate,
+                "renderQuantum": renderQuantum, "bufferFrames": bufferFrames, "sampleRate": engine.outputNode.outputFormat(forBus: 0).sampleRate,
                 "presentationLatency": engine.outputNode.presentationLatency]
             if let midi { clock["midiAnchorNanoseconds"] = String(midi.anchor); clock["midiPosition"] = midi.position(at: DispatchTime.now().uptimeNanoseconds) }
             value["clock"] = clock
@@ -562,6 +565,8 @@ final class ArrangementTransport {
     func start() throws {
         try checkOutput()
         try monitor(device.object, address(kAudioDevicePropertyDeviceIsAlive))
+        try monitor(device.object, address(kAudioDevicePropertyBufferFrameSize))
+        try monitor(device.object, address(kAudioDevicePropertyNominalSampleRate))
         try monitor(device.object, address(kAudioDevicePropertyStreamConfiguration, kAudioObjectPropertyScopeOutput))
         try monitor(AudioObjectID(kAudioObjectSystemObject), address(kAudioHardwarePropertyDevices))
         configuration = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in

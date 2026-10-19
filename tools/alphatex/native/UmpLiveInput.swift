@@ -198,6 +198,10 @@ final class UmpLiveInput {
         // preserves its first input without permitting a send ahead of the ACK.
         try onEvent?(snapshot("monitoring"))
     }
+    func fail(_ error: Error) {
+        lock.lock(); if firstFailure == nil { firstFailure = error }; accepting = false; lock.unlock()
+        DispatchQueue.main.async { self.stop() }
+    }
     // `live-set`: reconcile the running owner to a new catalog and active key
     // set. Routes that stay active keep their CoreMIDI connections; only added
     // routes are opened and only removed routes are closed. A route that cannot
@@ -267,10 +271,6 @@ final class UmpLiveInput {
         for endpoint in stale.keys { sources.removeValue(forKey: endpoint) }
         lock.unlock()
         for endpoint in stale.keys { MIDIPortDisconnectSource(port, endpoint) }
-    }
-    func fail(_ error: Error) {
-        lock.lock(); if firstFailure == nil { firstFailure = error }; accepting = false; lock.unlock()
-        DispatchQueue.main.async { self.stop() }
     }
     func receive(_ list: UnsafePointer<MIDIEventList>, context: UnsafeMutableRawPointer?) {
         lock.lock()
